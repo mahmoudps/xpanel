@@ -4,14 +4,60 @@ import { HOST_PROBES, PHASE1_TOOL_PROBES, QUALIFIED_SCOPE, qualifyHostTools, typ
 import { visibleNavigation } from './navigation.ts'
 import type { VisibilityContext } from './visibility.ts'
 
+// Synthetic already-assessed input for this readiness unit boundary; not acceptance evidence.
+const acceptedTools = tools.map(tool => PHASE1_TOOL_PROBES[tool.id] !== undefined && tool.status !== 'out-of-scope'
+  ? { ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const, reason: 'Synthetic already-assessed release acceptance.' } }
+  : tool)
+
 const passed = (executor: HostQualificationReport['executor'], probes: HostQualificationReport['probes']): HostQualificationReport =>
   ({ executor, probes })
 
 describe('host qualification', () => {
+  it('never promotes incomplete acceptance even when every host probe passes', () => {
+    const declaration = tools.find(tool => tool.id === 'server-information')!
+    const report = passed('linux', Object.fromEntries(HOST_PROBES.map(probe => [probe, 'passed'])))
+    for (const status of ['researched', 'implemented', 'integrated', 'out-of-scope'] as const) {
+      const original = { ...declaration, status, delivery: { ...declaration.delivery, status, reason: `Acceptance remains ${status}.` } }
+      const [result] = qualifyHostTools([original], report, true)
+      expect(result).toEqual(original)
+      expect(result).not.toBe(original)
+      expect(result!.delivery).not.toBe(original.delivery)
+    }
+  })
+
+  it('cannot retain verified admission through absent, fake, disabled or unknown readiness', () => {
+    const accepted = acceptedTools.find(tool => tool.id === 'server-information')!
+    const report = passed('linux', Object.fromEntries(HOST_PROBES.map(probe => [probe, 'passed'])))
+    const outcomes = [
+      qualifyHostTools([accepted], null, true),
+      qualifyHostTools([accepted], passed('fake', report.probes), true),
+      qualifyHostTools([accepted], passed('unknown', report.probes), true),
+      qualifyHostTools([accepted], report, false),
+      qualifyHostTools([{ ...accepted, id: 'no-reviewed-host-prerequisites' }], report, true),
+    ]
+    for (const [result] of outcomes) {
+      expect(result?.status).toBe('researched')
+      expect(result?.delivery.status).toBe('researched')
+      expect(result?.delivery.evidence).toBe(accepted.delivery.evidence)
+      expect(result?.delivery.reason).toContain('host readiness')
+    }
+    expect(accepted.status).toBe('verified')
+    expect(accepted.delivery.status).toBe('verified')
+    expect(qualifyHostTools([accepted], report, true)[0]).toEqual(accepted)
+  })
+
+  it('cannot use a verified outer label to bypass incomplete delivery assessment', () => {
+    const accepted = acceptedTools.find(tool => tool.id === 'server-information')!
+    const input = { ...accepted, delivery: { ...accepted.delivery, status: 'implemented' as const } }
+    const report = passed('linux', Object.fromEntries(HOST_PROBES.map(probe => [probe, 'passed'])))
+    expect(qualifyHostTools([input], report, true)[0]?.status).toBe('implemented')
+  })
+
   it('leaves the production catalog unqualified', () => {
     expect(tools.filter(tool => tool.status === 'verified')).toEqual([])
     expect(qualifyHostTools(tools, null).filter(tool => tool.status === 'verified')).toEqual([])
-    expect(qualifyHostTools(tools, passed('fake', { 'control-plane': 'passed', apache: 'passed', 'linux-account': 'passed' })).filter(tool => tool.status === 'verified')).toEqual([])
+    expect(qualifyHostTools(tools, passed('linux', Object.fromEntries(HOST_PROBES.map(probe => [probe, 'passed'])))).filter(tool => tool.status === 'verified')).toEqual([])
+    expect(qualifyHostTools(acceptedTools, passed('fake', { 'control-plane': 'passed', apache: 'passed', 'linux-account': 'passed' })).filter(tool => tool.status === 'verified')).toEqual([])
   })
 
   it('verifies only implemented tools whose probes passed', () => {
@@ -23,7 +69,7 @@ describe('host qualification', () => {
       mail: 'failed',
       files: 'failed',
     })
-    const qualified = new Set(qualifyHostTools(tools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
+    const qualified = new Set(qualifyHostTools(acceptedTools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
     expect(qualified).toEqual(new Set(['list-accounts', 'modify-account', 'password-modification', 'manage-account-suspension', 'terminate-accounts', 'add-package', 'edit-package', 'delete-package', 'feature-list-crud', 'server-settings-edit', 'mysql-databases', 'mysql-users', 'ssl-tls-status', 'reseller-center',
       'panel-upgrade', 'aapanel-language-theme', 'service-ssl-certificates', 'xwhm-api-tokens', 'notification-center', 'mail-quality', 'panel-news',
       'service-config-health', 'api-shell', 'api-explorer', 'integrations-hub', 'trusted-proxies', 'backup-destinations',
@@ -39,7 +85,7 @@ describe('host qualification', () => {
 
   it('verifies certificate issuance when Apache and the ACME probe passed', () => {
     const report = passed('linux', { 'control-plane': 'passed', apache: 'passed', acme: 'passed' })
-    const qualified = new Set(qualifyHostTools(tools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
+    const qualified = new Set(qualifyHostTools(acceptedTools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
     expect(qualified.has('ssl-install')).toBe(true)
     expect(qualified.has('ssl-tls-status')).toBe(true)
     expect(qualified.has('create-account')).toBe(false)
@@ -47,7 +93,7 @@ describe('host qualification', () => {
 
   it('verifies the mailbox inbox when the mail probe passed', () => {
     const report = passed('linux', { 'control-plane': 'passed', mail: 'passed' })
-    const qualified = new Set(qualifyHostTools(tools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
+    const qualified = new Set(qualifyHostTools(acceptedTools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
     expect(qualified.has('webmail-message-list')).toBe(true)
     expect(qualified.has('webmail-message-read')).toBe(true)
     expect(qualified.has('webmail-compose')).toBe(true)
@@ -66,7 +112,7 @@ describe('host qualification', () => {
       systemd: 'passed',
       'host-info': 'passed',
     })
-    const qualified = new Set(qualifyHostTools(tools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
+    const qualified = new Set(qualifyHostTools(acceptedTools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
     for (const id of ['reseller-center', 'dns-zone-manager', 'add-dns-zone', 'delete-dns-zone', 'backup-restoration', 'restart-web', 'restart-mysql', 'restart-mta', 'restart-imap', 'restart-ftp', 'restart-dns', 'server-information', 'zone-ttl-bulk']) {
       expect(qualified.has(id), id).toBe(true)
     }
@@ -74,22 +120,22 @@ describe('host qualification', () => {
       expect(qualified.has(id), id).toBe(false)
     }
     const root = { principal: { kind: 'root' as const, id: '00000000-0000-4000-8000-000000000001', username: 'root' } }
-    const routes = visibleNavigation(root, qualifyHostTools(tools, report)).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
+    const routes = visibleNavigation(root, qualifyHostTools(acceptedTools, report)).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
     expect(routes).toContain('/whm')
     expect(routes).toContain('/whm/monitoring/server-info')
     const withoutHost = passed('linux', { 'control-plane': 'passed', pdns: 'passed', backups: 'passed', systemd: 'passed' })
-    const hidden = visibleNavigation(root, qualifyHostTools(tools, withoutHost)).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
+    const hidden = visibleNavigation(root, qualifyHostTools(acceptedTools, withoutHost)).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
     expect(hidden).not.toContain('/whm')
   })
 
   it('verifies the audit log when the log can be read', () => {
     const report = passed('linux', { 'control-plane': 'passed', audit_log: 'passed' })
-    const qualified = new Set(qualifyHostTools(tools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
+    const qualified = new Set(qualifyHostTools(acceptedTools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
     expect(qualified.has('audit-log')).toBe(true)
     const root = { principal: { kind: 'root' as const, id: '00000000-0000-4000-8000-000000000001', username: 'root' } }
-    const routes = visibleNavigation(root, qualifyHostTools(tools, report)).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
+    const routes = visibleNavigation(root, qualifyHostTools(acceptedTools, report)).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
     expect(routes).toContain('/whm/audit')
-    const hidden = visibleNavigation(root, qualifyHostTools(tools, passed('linux', { 'control-plane': 'passed' }))).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
+    const hidden = visibleNavigation(root, qualifyHostTools(acceptedTools, passed('linux', { 'control-plane': 'passed' }))).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
     expect(hidden).not.toContain('/whm/audit')
   })
 
@@ -97,7 +143,7 @@ describe('host qualification', () => {
   const owner = { principal: { kind: 'user' as const, id: 'owner', username: 'owner', accountId: 'account' }, disabledFeatures: new Set<string>() }
   const allPassed = passed('linux', Object.fromEntries(HOST_PROBES.map(probe => [probe, 'passed'])))
   const routesFor = (report: HostQualificationReport, context: VisibilityContext = root): string[] =>
-    visibleNavigation(context, qualifyHostTools(tools, report)).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
+    visibleNavigation(context, qualifyHostTools(acceptedTools, report)).flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
   const withProbe = (probe: HostProbe, result: 'failed' | undefined): HostQualificationReport => {
     const probes = { ...allPassed.probes }
     if (result === undefined) delete probes[probe]
@@ -131,7 +177,7 @@ describe('host qualification', () => {
   })
 
   it('keeps unimplemented pages and extra tools closed even when every probe passed', () => {
-    const qualified = qualifyHostTools(tools, allPassed)
+    const qualified = qualifyHostTools(acceptedTools, allPassed)
     for (const id of ['server-software-update', 'distro-packages', 'package-db-rebuild', 'aapanel-third-party-plugin-import', 'xwhm-email-routing', 'mail-troubleshooter',
       'db-root-password', 'db-ownership-map', 'aapanel-system-monitor', 'update-preferences', 'tweak-mail', 'account-repair', 'ip-blocker', 'apache-handlers', 'notification-channels', 'git-version-control', 'email-encryption', 'site-publisher']) {
       expect(qualified.find(tool => tool.id === id)?.status, id).toBe('researched')
@@ -154,15 +200,16 @@ describe('host qualification', () => {
     expect(routesFor(allPassed, owner)).toContain('/domains/dynamic-dns')
     expect(routesFor(withProbe('pdns', 'failed'), owner)).not.toContain('/domains/dynamic-dns')
     for (const id of ['restart-ssh', 'aapanel-boot-items', 'aapanel-supervisor', 'system-reboot', 'service-watchdog']) {
-      expect(qualifyHostTools(tools, allPassed).find(tool => tool.id === id)?.status, id).not.toBe('verified')
+      expect(qualifyHostTools(acceptedTools, allPassed).find(tool => tool.id === id)?.status, id).not.toBe('verified')
     }
   })
 
-  it('states the narrower qualified scope of partially delivered tools', () => {
-    const qualified = new Map(qualifyHostTools(tools, allPassed).map(tool => [tool.id, tool]))
+  it('does not replace release acceptance with a historical partial host scope', () => {
+    const qualified = new Map(qualifyHostTools(acceptedTools, allPassed).map(tool => [tool.id, tool]))
     for (const [id, scope] of Object.entries(QUALIFIED_SCOPE)) {
       expect(PHASE1_TOOL_PROBES[id], id).toBeDefined()
-      expect(qualified.get(id)?.delivery.reason, id).toContain(scope)
+      expect(scope.length, id).toBeGreaterThan(0)
+      expect(qualified.get(id)?.delivery.reason, id).toBe('Synthetic already-assessed release acceptance.')
     }
     expect(qualified.get('mail-queue-manager')?.delivery.reason).not.toContain('Qualified scope')
   })
@@ -172,7 +219,7 @@ describe('host qualification', () => {
     process.env.XPANEL_HOST_QUALIFICATION = 'off'
     try {
       const report = passed('linux', { 'control-plane': 'passed' })
-      expect(qualifyHostTools(tools, report).some(tool => tool.status === 'verified')).toBe(false)
+      expect(qualifyHostTools(acceptedTools, report).some(tool => tool.status === 'verified')).toBe(false)
     } finally {
       if (previous === undefined) delete process.env.XPANEL_HOST_QUALIFICATION
       else process.env.XPANEL_HOST_QUALIFICATION = previous

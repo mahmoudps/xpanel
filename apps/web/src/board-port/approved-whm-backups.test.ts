@@ -2,6 +2,10 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import type { Account } from '@xpanel/core'
 import { renderApprovedWhmBackups } from './approved-whm-backups.ts'
+import { parseMarkup } from '../themes/markup.ts'
+import { renderWhmSurface } from '../surfaces/xwhm.ts'
+import { translator } from '../i18n.ts'
+import { escapeHtml } from '../tokens.ts'
 
 const root = { kind: 'root' as const, id: 'private-root-id', username: 'synthetic-root' }
 const account: Account = {
@@ -10,7 +14,8 @@ const account: Account = {
   status: 'active', suspendReason: null, contactEmail: 'private-contact@example.test', ipv4: '192.0.2.44',
   shell: 'none', createdAt: '2026-10-25T09:00:00Z',
 }
-const controls = (html: string): string[] => [...html.matchAll(/<(?:input|select|textarea|button)\b[^>]*>/g)].map(match => match[0])
+const liveElements = (html: string) => parseMarkup(html).filter(node => node.namespace === 'html' && node.template === -1)
+const controls = (html: string) => liveElements(html).filter(node => ['input', 'select', 'textarea', 'button'].includes(node.tag))
 const ids = (html: string): string[] => [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]!)
 // Only style contents are excluded when checking actual native DOM hook attributes.
 // Private account/value guards still inspect the complete HTML, including every style.
@@ -35,9 +40,10 @@ describe('approved administrator backup workspace', () => {
     assert.equal((html.match(/<h1\b/g) ?? []).length, 1)
     assert.match(html, /data-backup-read-state="unread"/)
     assert.ok(controls(html).length > 40)
+    assert.ok(parseMarkup(html).some(node => node.namespace === 'html' && node.tag === 'template'), 'finite inert templates remain present')
     for (const control of controls(html)) {
-      assert.match(control, /\bdisabled\b/)
-      assert.match(control, /aria-describedby="whm-backup-layout-unavailable"/)
+      assert.equal(control.attrs.has('disabled'), true)
+      assert.equal(control.attrs.get('aria-describedby'), 'whm-backup-layout-unavailable')
     }
     assert.doesNotMatch(html, unsafeTransportMarkup)
     assert.doesNotMatch(html, /[\u0660-\u0669\u06f0-\u06f9]/)
@@ -62,7 +68,10 @@ describe('approved administrator backup workspace', () => {
     assert.match(html, /<ul class="xp-whm-backup-log" data-backup-run-log hidden><\/ul>/)
     assert.match(html, /id="backup-layout-monthly-copies" type="number" dir="ltr" value="" disabled data-backup-layout-control aria-describedby="whm-backup-layout-unavailable"/)
     assert.doesNotMatch(html, /<progress\b|aria-valuenow=|aria-current="step"|<option\b[^>]*\sselected(?:\s|=|>)/)
-    for (const control of controls(html)) assert.doesNotMatch(control, /\schecked(?:\s|=|>)|\bvalue="\d/)
+    for (const control of controls(html)) {
+      assert.equal(control.attrs.has('checked'), false)
+      assert.doesNotMatch(control.attrs.get('value') ?? '', /^\d/)
+    }
   })
 
   it('renders only authorized current account names without treating them as historical run membership', () => {
@@ -92,7 +101,7 @@ describe('approved administrator backup workspace', () => {
     const html = renderApprovedWhmBackups({ ...(principal ? { principal } : {}), accounts: [account] }, native)
     assert.doesNotMatch(html, /exampleowner|example\.test|private-account-id/)
     assert.doesNotMatch(nativeMarkup(html), nativeHookAttribute)
-    for (const control of controls(html)) assert.match(control, /\bdisabled\b/)
+    for (const control of controls(html)) assert.equal(control.attrs.has('disabled'), true)
     if (principal) {
       assert.match(html, /data-backup-read-state="denied"/)
       assert.equal(controls(html).length, 0)
@@ -109,7 +118,7 @@ describe('approved administrator backup workspace', () => {
     assert.match(html, /data-backup-native="unavailable"/)
     assert.doesNotMatch(html, /exampleowner|example\.test|private-account-id/)
     assert.doesNotMatch(nativeMarkup(html), nativeHookAttribute)
-    for (const control of controls(html)) assert.match(control, /\bdisabled\b/)
+    for (const control of controls(html)) assert.equal(control.attrs.has('disabled'), true)
   })
 
   it('preserves the native account-archive controller verbatim once, without duplicating its heading or hooks', () => {
@@ -118,7 +127,7 @@ describe('approved administrator backup workspace', () => {
     assert.equal((html.match(/<h1\b/g) ?? []).length, 1)
     for (const hook of ['data-account-backups=', 'data-backup-account=', 'data-backup-files=', 'data-backup-status=', 'data-backup-create=']) assert.equal(html.split(hook).length - 1, 1, hook)
     assert.match(html, /data-backup-native="connected"/)
-    for (const control of controls(html).filter(control => control.includes('data-backup-layout-control'))) assert.match(control, /\bdisabled\b/)
+    for (const control of controls(html).filter(control => control.attrs.has('data-backup-layout-control'))) assert.equal(control.attrs.has('disabled'), true)
     assert.equal(new Set(ids(html)).size, ids(html).length)
     for (const [, id] of html.matchAll(/\bfor="([^"]+)"/g)) assert.ok(ids(html).includes(id!))
     for (const [, refs] of html.matchAll(/\baria-(?:labelledby|describedby)="([^"]+)"/g)) for (const id of refs!.split(' ')) assert.ok(ids(html).includes(id), id)
@@ -129,5 +138,36 @@ describe('approved administrator backup workspace', () => {
     assert.match(html, /data-backup-read-state="denied"/)
     assert.doesNotMatch(html, /exampleowner/)
     assert.doesNotMatch(nativeMarkup(html), nativeHookAttribute)
+  })
+})
+
+describe('local account archive scope warning', () => {
+  it.each(['en', 'ar'] as const)('scopes the %s exclusion notice to the native local archive section on both backup routes', locale => {
+    const message = 'This local archive workflow copies home files and excludes the standard mail data and mail settings directories. It does not create database dumps or capture DNS zones. Review a component backup for those parts.'
+    for (const activeRoute of ['/whm/backups', '/whm/backups/restore']) {
+      const html = renderWhmSurface({ locale, principal: root, accounts: [account], activeRoute })
+      const nodes = parseMarkup(html)
+      const notices = nodes.filter(node => node.namespace === 'html' && node.template === -1 && node.attrs.has('data-local-archive-scope-warning'))
+      assert.equal(notices.length, 1, activeRoute)
+      const notice = notices[0]
+      assert.ok(notice)
+      assert.equal(notice.tag, 'p')
+      const ancestors: (typeof nodes)[number][] = []
+      for (let index = notice.parent; index >= 0;) {
+        const ancestor = nodes[index]
+        assert.ok(ancestor)
+        ancestors.push(ancestor)
+        index = ancestor.parent
+      }
+      assert.ok(ancestors.some(node => node.attrs.has('data-account-backups')), activeRoute)
+      assert.equal(ancestors.some(node => node.attrs.get('data-backup-section') === 'restore'), false)
+      assert.equal(nodes.filter(node => node.attrs.has('data-local-archive-scope-warning')).length, 1)
+      const paragraphs = [...html.matchAll(/<p\b[^>]*\bdata-local-archive-scope-warning(?=[\s>])[^>]*>([^<]*)<\/p>/g)]
+      assert.equal(paragraphs.length, 1)
+      assert.equal(paragraphs[0]?.[1], escapeHtml(translator(locale)(message)))
+      assert.ok(html.includes(escapeHtml(translator(locale)('The archive is stored in the local backup directory, limited to 2 GiB, and restored only into that account home.'))))
+      assert.equal(nodes.filter(node => node.namespace === 'html' && node.template === -1 && node.attrs.get('data-backup-section') === 'restore').length, 1)
+      for (const control of controls(html).filter(control => control.attrs.has('data-backup-layout-control'))) assert.equal(control.attrs.has('disabled'), true)
+    }
   })
 })

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
-import { access, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { describe, it } from 'vitest'
+import { inspectAcceptanceCoverage } from './acceptance-coverage.mjs'
 
 // ---------------------------------------------------------------------------
 // Types for Q03/Q04 Governance Artifacts
@@ -34,6 +35,8 @@ interface MappedScenario {
   readonly harnesses: readonly string[]
   readonly faultClassIds: readonly string[]
   readonly portablePrimitiveVerified: boolean
+  readonly evidenceAssessment: 'declarative_unaccepted'
+  readonly independentAcceptance: false
   readonly verificationStatus:
     | 'primitive_verified'
     | 'portable_verified'
@@ -198,7 +201,9 @@ describe('Q03 & Q04 Acceptance Mapping, Fault Matrix, Runbooks & Release Governa
     // - Any scenario requiring 'V' or 'E' (except A60) must be 'pending_live_service_proof'
     // - Scenarios requiring only subsets of {'U', 'H', 'B'} must be 'portable_verified'
     for (const scen of mapping.scenarios) {
-      assert.equal(scen.portablePrimitiveVerified, true)
+      assert.equal(scen.portablePrimitiveVerified, false, 'source mapping cannot claim execution of a primitive')
+      assert.equal(scen.evidenceAssessment, 'declarative_unaccepted')
+      assert.equal(scen.independentAcceptance, false)
       if (scen.id === 'A60') {
         assert.equal(
           scen.verificationStatus,
@@ -220,9 +225,13 @@ describe('Q03 & Q04 Acceptance Mapping, Fault Matrix, Runbooks & Release Governa
       }
     }
 
-    // Verify our owned H04 and Q03/Q04 test harnesses exist on disk
-    await access(resolve(ROOT_DIR, 'apps/api/src/use-cases/h04-account-lifecycle.test.ts'))
-    await access(resolve(ROOT_DIR, 'scripts/test-q03-q04-governance.test.ts'))
+    // All scenario and fault references need existing substantive declaration anchors.
+    // This structural result never substitutes for execution or independent acceptance.
+    const coverage = inspectAcceptanceCoverage(ROOT_DIR)
+    assert.deepEqual(coverage.issues, [])
+    assert.equal(coverage.scenarios, 60)
+    assert.equal(coverage.faults, 6)
+    assert.equal(coverage.independentlyAccepted, 0)
   })
 
   it('verifies all 10 required operational runbooks in docs/operations/runbooks.md and enforces zero embedded secrets (A59)', async () => {

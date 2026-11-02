@@ -1,3 +1,4 @@
+import { accountCronTemplates } from './data-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -31,5 +32,5 @@ export function renderAccountCronWorkspace(input: { lang: Locale; expectedAccoun
     <section class="xp-account-cron__card" data-workspace-section="cron-unit-preview" aria-labelledby="account-cron-preview"><h2 id="account-cron-preview">${t('Unit preview')}</h2><p data-cron-preview-state>${t('No job is selected.')}</p><pre class="xp-mono" dir="ltr" data-cron-preview></pre><dl class="xp-account-cron__facts"><div><dt>${t('Execution user')}</dt><dd><bdi dir="ltr" data-cron-username>${t('Not read')}</bdi></dd></div><div><dt>${t('Working directory')}</dt><dd><bdi dir="ltr" data-cron-home>${t('Not read')}</bdi></dd></div></dl>
       <div class="xp-account-cron__group" role="group" data-workspace-section="cron-next-runs" aria-labelledby="account-cron-next"><h3 id="account-cron-next">${t('Next runs (UTC)')}</h3><div class="xp-account-cron__table" tabindex="0" role="region" aria-label="${t('Next runs (UTC)')}"><table class="xp-table"><thead><tr><th scope="col">${t(msgctxt('account-cron-workspace', 'Run'))}</th><th scope="col">${t('Scheduled time')}</th></tr></thead><tbody><tr><td colspan="2">${t('Upcoming run times are not read from the host here. The next observed run of each job appears in the job list.')}</td></tr></tbody></table></div></div></section>
     <section class="xp-account-cron__card" aria-labelledby="account-cron-mail"><h2 id="account-cron-mail">${t('Output email')}</h2><div class="xp-field"><label for="account-cron-mailto">${t('Send job output to')}</label><input id="account-cron-mailto" type="email" class="xp-input xp-mono" dir="ltr" disabled></div><div class="xp-account-cron__actions"><button type="button" class="xp-btn" disabled>${t('Save address')}</button></div><p class="xp-help">${t('No output-mail transport is connected. No address or delivery result has been invented.')}</p></section>
-  </div>`
+  ${accountCronTemplates()}</div>`
 }

@@ -1,3 +1,4 @@
+import { classicSoftwareOperationTemplates } from './software-operation-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 /** Composer controls remain visible while execution requires a reviewed account-isolated runner. */
 export function renderWhmComposerWorkspace(input: { locale: Locale; canRead: boolean }): string {
@@ -24,5 +25,5 @@ export function renderWhmComposerWorkspace(input: { locale: Locale; canRead: boo
       <div class="xp-whm-detail-scroll" role="region" tabindex="0" aria-label="${t('Reviewed dependency graph')}" data-composer-review-region hidden><table class="xp-whm-detail-table xp-table"><thead><tr>${[t('Package'), t('Version'), t('Development')].map(text => `<th scope="col">${text}</th>`).join('')}</tr></thead><tbody data-composer-review-packages></tbody></table></div>
       <div class="xp-whm-composer__field"><h4>${t('Live log output')}</h4><p class="xp-whm-detail-status" aria-live="polite" data-composer-live-log>${t('No Composer job has been submitted. Live output is unavailable.')}</p></div>
     </section>
-  </div>`
+  ${classicSoftwareOperationTemplates('composer')}</div>`
 }

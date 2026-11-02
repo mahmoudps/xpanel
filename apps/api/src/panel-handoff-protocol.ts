@@ -47,6 +47,7 @@ export const impersonationForbidsRoute = (pathname: string, method: string): boo
   if (pathname.startsWith('/api/handoff/')) return true
   if (!write) return false
   return pathname === '/api/account/preferences'
+    || pathname === '/api/auth/ui-preferences'
     || /^\/api\/account\/team(?:\/|$)/.test(pathname)
     || /(?:^|\/)api-tokens(?:\/|$)/.test(pathname)
     || /^\/api\/accounts\/[^/]+$/.test(pathname)

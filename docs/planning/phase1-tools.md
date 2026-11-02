@@ -1,29 +1,29 @@
 # Phase 1 tools
 
-The live sidebars stay empty while every in-scope catalog tool is `researched`. This note records why, which tools now have a real path, and what the lab still has to install before a tool can appear.
+Every in-scope catalog tool stays `researched` in the shipped checkout. Registered documents still render read-only layouts. This note records the admission gate, which source paths exist, and which host binaries a later accepted tool would require.
 
 ## How a tool becomes visible
 
-`packages/catalog/src/data/delivery.ts` ships `deliveryEvidence = []` and `deliveryTarget = null`. `assessDelivery` therefore marks every in-scope tool `researched`. Production catalog tests keep that static result: nothing in the shipped catalog is `verified`.
+`packages/catalog/src/data/delivery.ts` ships `deliveryEvidence = []` and `deliveryTarget = null`. `assessDelivery` therefore marks every in-scope tool `researched`. Production catalog tests keep that static result: nothing in the shipped catalog is `verified`. The current checkout has 536 in-scope tools and 63 out-of-scope declarations. The out-of-scope declarations are not navigation pages.
 
-`isVisible` (`packages/catalog/src/visibility.ts`) shows a tool only when both `tool.status` and `tool.delivery.status` are `verified`, the surface matches, and root, reseller ACL, and feature-list rules pass. `visibleNavigation` then keeps a page only when **every** tool on that page is visible. The home shell renders those pages as links. Every other catalog group stays a disabled row labelled “Not yet available”.
+`isVisible` (`packages/catalog/src/visibility.ts`) admits a tool only when both `tool.status` and `tool.delivery.status` are `verified`, the surface matches, and root, reseller ACL, and feature-list rules pass. `visibleNavigation` then keeps a page when every tool on that page is visible, or when the page's reviewed core tool is visible. xPanel `/home` also opens once the session names an account. Stuffing synthetic `CapabilityEvidence` into the static catalog would mark tools verified on every install, including ones this host cannot run. That is not the gate.
 
-Stuffing synthetic `CapabilityEvidence` into the static catalog would mark tools verified on every install, including ones this host cannot run. That is not the gate.
+An admitted route that fails `visibleNavigation` renders the unverified V2 document. Mutation controls on that document stay disabled. The xPanel qualified shell lists registered owner pages and marks an unverified destination as not live. xWHM and xMail qualified shells omit pages that `visibleNavigation` rejects.
 
 ## Runtime availability checks
 
-`qualifyHostTools` copies the catalog and assigns its runtime `verified` availability label only when all of the following are true:
+`qualifyHostTools` never promotes a tool. It keeps an already verified tool only when all of the following are true, and otherwise narrows it back to `researched`:
 
 - `XPANEL_HOST_QUALIFICATION` is not `off`
-- the agent health report says `executor: "linux"` (a fake executor never qualifies)
+- the agent health report says `executor: "linux"` (a fake executor never retains acceptance)
 - the tool is in `PHASE1_TOOL_PROBES`
 - every probe that tool names is `passed`
 
-The API adds `control-plane: passed` after it can read agent `/health`. The agent reports the other probes from binaries on the host, cached for 30 seconds. The qualified catalog is cached in the API for 15 seconds. `GET /api/catalog` and the sidebar both read that copy. The unprivileged API still reaches the host only through the root agent.
+The normal API process does not load a trusted evidence bundle, so this narrowing currently has no verified tool to retain. Agent `/health` reports binary and measurement probes. It does not emit `control-plane`, while the phase-1 map requires that probe for its tools. The qualified catalog is cached in the API for 15 seconds. `GET /api/catalog` and qualified navigation both read that copy. The unprivileged API still reaches the host only through the root agent.
 
 | Probe | Passes when |
 | --- | --- |
-| `control-plane` | The API reached agent `/health` |
+| `control-plane` | Required by the phase-1 map, but agent `GET /health` does not emit it. Reaching the agent therefore does not satisfy this probe |
 | `linux-account` | `/usr/sbin/useradd` exists |
 | `apache` | `/usr/sbin/apachectl`, `/usr/sbin/apache2`, or `/usr/sbin/httpd` exists |
 | `mariadb` | `/usr/bin/mariadb` or `/usr/bin/mysql` exists |
@@ -35,11 +35,11 @@ The API adds `control-plane: passed` after it can read agent `/health`. The agen
 | `systemd` | `/usr/bin/systemctl` exists |
 | `host-info` | The agent read and parsed `/proc/loadavg` and `/proc/meminfo`. A path that exists but cannot be read fails the probe. The screen also reads `df -B1 -P /` |
 
-These probes govern runtime navigation admission. Binary presence, agent reachability and the catalog's `verified` label are not independent hosting acceptance or proof of a completed tenant operation. `test:linux` supplies bounded executor evidence when its real prerequisites are met; it does not flip the static catalog or replace current target-host service, recovery and external-observer evidence.
+These probe definitions are the retention checklist for a tool that acceptance has already verified. Binary presence and agent reachability do not accept a tool or prove a completed tenant operation. `test:linux` supplies bounded executor evidence when its real prerequisites are met; it does not flip the static catalog or replace current target-host service, recovery and external-observer evidence.
 
 ## Source paths admitted by the probes
 
-A page is hidden until every tool on it qualifies. Feature keys must not be in the plan’s disabled list (`domains` and `addondomains`, `popaccts (Email Accounts)`, `mysql`, `filemanager`, `AutoSSL`).
+Qualified navigation hides a page until the reviewed tool rule admits it. The read-only document for an admitted route still renders. Feature keys must not be in the plan’s disabled list (`domains` and `addondomains`, `popaccts (Email Accounts)`, `mysql`, `filemanager`, `AutoSSL`).
 
 | Tool | Probes | Implemented source path; native acceptance remains separate |
 | --- | --- | --- |
@@ -73,15 +73,15 @@ Terminate probes `GET /accounts/:user/purge`. Only `LinuxHostExecutor` answers `
 
 **xMail beyond the inbox.** Reply, attachments, search, junk, quota and folders stay unqualified. The inbox lists, reads and deletes messages from the signed-in mailbox, and compose sends plain text. No sample messages are stored.
 
-**The rest of the catalog.** About 593 tools remain researched until each one has an agent operation, an API route, a screen, and a probe on this allowlist.
+**The rest of the catalog.** All 536 in-scope tools remain `researched` in the shipped catalog. 113 have a phase-1 probe list, and 50 of those declare a narrower workspace scope. A probe list, an API route and a read-only screen do not accept a tool.
 
 ## Lab
 
 On a configured test server, after this build is deployed and `xpanel-agent` plus the API are restarted:
 
 1. Open xWHM as root and xPanel as `demohost`.
-2. Groups whose probes passed are links. The others stay “Not yet available”.
-3. Set `XPANEL_HOST_QUALIFICATION=off` to force the static catalog (nothing qualified).
+2. Passing probes do not turn researched tools into qualified links. xPanel home can show the active account. Other admitted documents stay read-only until a trusted acceptance bundle verifies their tools and the live health report retains that result.
+3. `XPANEL_HOST_QUALIFICATION=off` also retains nothing: readiness narrowing demotes previously verified tools when the switch is off. It does not create a second, more permissive catalog.
 
 Packages and services that change what appears:
 

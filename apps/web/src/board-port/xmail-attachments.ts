@@ -1,3 +1,4 @@
+import { classicMailClientTemplates } from './mail-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -8,7 +9,7 @@ export function renderMailAttachments(input: { lang: Locale; mailbox: string; ui
   const t = (message: string, values?: MessageValues) => translator(input.lang)(message, values)
   const uid = Number.isSafeInteger(input.uid) && input.uid! > 0 && input.uid! <= 0xffffffff ? String(input.uid) : ''
   const validity = Number.isSafeInteger(input.uidValidity) && input.uidValidity! > 0 && input.uidValidity! <= 0xffffffff ? String(input.uidValidity) : ''
-  return `<section class="xp-mail-attachments" data-mail-attachments data-mailbox="${escapeHtml(input.mailbox)}" data-uid="${uid}" data-uid-validity="${validity}" data-folder="${escapeHtml(input.folder ?? 'INBOX')}" data-attachment-can-read="${input.canRead}" lang="${input.lang}" dir="${localeDirection(input.lang)}" aria-label="${t('Message attachments')}">
+  return `<section class="xp-mail-attachments" data-mail-attachments data-mailbox="${escapeHtml(input.mailbox)}" data-uid="${uid}" data-uid-validity="${validity}" data-folder="${escapeHtml(input.folder ?? 'INBOX')}" data-attachment-can-read="${input.canRead}" lang="${input.lang}" dir="${localeDirection(input.lang)}" aria-label="${t('Message attachments')}">${classicMailClientTemplates('attachments')}
     <style>${MAIL_ATTACHMENTS_STYLE}</style>
     <h3 data-attachment-heading>${t('Attachments')}</h3>
     <p class="xp-help" data-attachment-status data-state="unread" role="status">${t('Select a message to read its attachments.')}</p>

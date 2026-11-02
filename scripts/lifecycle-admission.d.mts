@@ -15,3 +15,7 @@ export function readLifecyclePublicStatus(): Promise<Readonly<{active:boolean;re
 
 export function awaitLifecycleWriterDrain(): Promise<void>
 export function createLifecycleBackgroundResources<T>(callback: () => T): T
+
+export function withInstallFinalizationExclusiveAdmission<T>(capability:unknown,callback:()=>Promise<T>):Promise<T>
+export function assertInstallFinalizationExclusiveHeld(capability:unknown):Promise<void>
+export function verifyInstallFinalizationParticipants(capability:unknown):Promise<true>

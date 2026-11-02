@@ -381,3 +381,120 @@ export async function observeRetiredControlPlaneUnits(input, capturedBefore, exc
   await rootAuthority(exclusiveCapability, 'service.observe')
   return capture(receipt, observations, prior.paths, authority)
 }
+
+const INSTALL_PARTICIPANTS = Object.freeze(['xpanel-api.service','xpanel-agent.service'])
+/** Syntax diagnostic only. The startup capability separately proves trusted unit ownership. */
+export function parseInstallParticipantStartContract(text) {
+  check(typeof text === 'string' && Buffer.byteLength(text) <= 4096 && !/[\0\r]/.test(text), 'INSTALL_START_UNIT_CONTRACT_INVALID')
+  const rows = new Map()
+  for (const line of text.split('\n').filter(Boolean)) {
+    const at = line.indexOf('='), key = line.slice(0, at)
+    check(at > 0 && ['Type','ExecStartPost','ExecCondition'].includes(key) && !rows.has(key), 'INSTALL_START_UNIT_CONTRACT_INVALID')
+    rows.set(key, line.slice(at + 1))
+  }
+  check(rows.size === 3 && rows.get('Type') === 'simple' && rows.get('ExecStartPost') === '' && rows.get('ExecCondition') === '', 'INSTALL_START_UNIT_CONTRACT_INVALID')
+  return Object.freeze({ type: 'simple' })
+}
+function installParticipantState(observation, unit) {
+  const row = observation.units.find(row => row.Id === unit)
+  check(row && row.ControlPID === '0' && (row.Job === '' || row.Job === '0'), 'INSTALL_START_UNIT_BUSY')
+  const group = observation.cgroups.find(group => group.path === '/system.slice/' + unit)
+  if (row.ActiveState === 'active') {
+    check(row.SubState === 'running' && /^[1-9][0-9]*$/.test(row.MainPID) && group?.processes.includes(Number(row.MainPID)), 'INSTALL_START_UNIT_PROCESS_UNVERIFIED')
+    return 'active'
+  }
+  check(['inactive','failed'].includes(row.ActiveState) && row.MainPID === '0'
+    && group && !group.populated && group.processes.length === 0, 'INSTALL_START_UNIT_NOT_QUIESCENT')
+  return 'stopped'
+}
+/** Finite install-only start; existing active/upgrade/stop authority is unchanged. */
+export async function startPreparedInstallParticipant(capability, unit) {
+  check(INSTALL_PARTICIPANTS.includes(unit), 'INSTALL_START_UNIT_FORBIDDEN')
+  const native = await import('./install-finalization-native.mjs')
+  const info = await native.assertInstallFinalizationStartupScope(capability, unit)
+  const receipt = await ownership(info.receipt)
+  check(receipt.status === 'bootstrap_pending', 'INSTALL_START_PENDING_REQUIRED')
+  const entry = receipt.files.find(file => file.path === '/etc/systemd/system/' + unit)
+  check(entry?.kind === 'file', 'INSTALL_START_UNIT_SOURCE_INVALID')
+  const contract = await withTrustedFile(entry.path, { sha256: entry.sha256, maxBytes: 65536 }, file => parsePreparedInstallUnitFile(unit, receipt, file.bytes.toString('utf8')))
+  for (const path of contract.environmentFiles) await withTrustedFile(path, { maxBytes: 65536 }, file => {
+    assertPreparedInstallEnvironmentFile(path, info.serviceGid, file.info, file.bytes.toString('utf8'))
+  })
+  const paths = INSTALL_PARTICIPANTS.map(unit => '/system.slice/' + unit)
+  const before = await observe(receipt, paths)
+  if (installParticipantState(before, unit) === 'active') return Object.freeze({ started: false })
+  parseInstallParticipantStartContract(await systemctl(receipt, ['show', unit, '--property=Type,ExecStartPost,ExecCondition']))
+  await native.assertInstallFinalizationStartupScope(capability, unit)
+  await systemctl(receipt, ['start', unit])
+  await native.assertInstallFinalizationStartupScope(capability, unit)
+  const after = await observe(receipt, paths)
+  check(installParticipantState(after, unit) === 'active', 'INSTALL_START_NOT_RUNNING')
+  return Object.freeze({ started: true })
+}
+/** Drain is permitted even after request/root expiry; it grants no new service effect. */
+export async function awaitPreparedInstallServiceChildren(capability) {
+  const native = await import('./install-finalization-native.mjs')
+  native.assertInstallFinalizationStartupRetirement(capability)
+  await Promise.all([...children])
+  native.assertInstallFinalizationStartupRetirement(capability)
+  check(!uncertainChild, 'SERVICE_CHILD_REQUIRES_INSPECTION')
+}
+
+/** Exact supported clean-install service inputs; diagnostic validation grants no authority. */
+export function parsePreparedInstallUnitFile(unit, receipt, text) {
+  check(INSTALL_PARTICIPANTS.includes(unit) && typeof text === 'string' && Buffer.byteLength(text) <= 65536 && !/[\0\r\\]/.test(text), 'INSTALL_START_UNIT_SOURCE_INVALID')
+  const sections = new Set(), rows = new Map(); let section = ''
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    if (/^\[[A-Za-z]+\]$/.test(line)) {
+      section = line.slice(1,-1)
+      check(['Unit','Service','Install'].includes(section) && !sections.has(section), 'INSTALL_START_UNIT_SOURCE_INVALID')
+      sections.add(section); continue
+    }
+    const at = line.indexOf('='), key = line.slice(0,at), value = line.slice(at+1)
+    check(at > 0 && /^[A-Za-z]+$/.test(key) && section, 'INSTALL_START_UNIT_SOURCE_INVALID')
+    const name = section + '.' + key, prior = rows.get(name) ?? []
+    check(!prior.length || ['Service.Environment','Service.EnvironmentFile','Service.ExecStartPre'].includes(name), 'INSTALL_START_UNIT_SOURCE_INVALID')
+    rows.set(name,[...prior,value])
+  }
+  const role = unit === 'xpanel-agent.service' ? 'agent' : 'api'
+  const allowed = role === 'agent'
+    ? ['Type','User','Group','SupplementaryGroups','RuntimeDirectory','RuntimeDirectoryMode','RuntimeDirectoryPreserve','WorkingDirectory','Environment','EnvironmentFile','ExecStartPre','ExecStart','Restart','RestartSec','UMask']
+    : ['Type','User','Group','SupplementaryGroups','WorkingDirectory','Environment','EnvironmentFile','ExecStart','Restart','RestartSec','UMask','NoNewPrivileges','PrivateTmp','ProtectHome','ProtectSystem','ReadWritePaths','ProtectKernelTunables','ProtectKernelModules','ProtectControlGroups','CapabilityBoundingSet','AmbientCapabilities','RestrictAddressFamilies']
+  for (const name of rows.keys()) check(name.startsWith('Service.') ? allowed.includes(name.slice(8))
+    : name.startsWith('Unit.') ? ['Description','After','Wants','Requires'].includes(name.slice(5))
+    : name === 'Install.WantedBy', 'INSTALL_START_UNIT_SOURCE_INVALID')
+  const equal = (name, values) => check(JSON.stringify(rows.get(name) ?? []) === JSON.stringify(values), 'INSTALL_START_UNIT_SOURCE_INVALID')
+  const working = rows.get('Service.WorkingDirectory')?.[0]
+  check(receipt?.source?.root === '/opt/xpanel' && [receipt.source.root+'/current',receipt.source.root+'/releases/'+receipt.source.version].includes(working), 'INSTALL_START_UNIT_SOURCE_INVALID')
+  equal('Service.Type',['simple']); equal('Service.User',[role === 'agent' ? 'root':'xpanel'])
+  equal('Service.Group',[role === 'agent' ? 'xpanel-agent':'xpanel'])
+  equal('Service.SupplementaryGroups',[role === 'agent' ? 'xpanel':'xpanel-agent'])
+  equal('Service.ExecStart',[receipt.runtime.nodePath+' --max-old-space-size='+(role === 'agent'?'64':'96')+' '+working+'/apps/'+role+'/src/main.ts'])
+  equal('Service.Restart',['always']); equal('Service.RestartSec',['2']); equal('Service.UMask',['0007'])
+  const environmentFiles = role === 'agent' ? ['/etc/xpanel/runtime.env'] : ['/etc/xpanel/runtime.env','/etc/xpanel/api.env']
+  equal('Service.EnvironmentFile',environmentFiles)
+  equal('Service.Environment',role === 'agent' ? ['NODE_ENV=production','XPANEL_GENERATIONS_DIR=/var/lib/xpanel/generations','XPANEL_LOG_DIR=/var/log/xpanel','XPANEL_RUN_DIR=/run/xpanel'] : ['NODE_ENV=production'])
+  if (role === 'agent') {
+    equal('Unit.After',['network-online.target systemd-sysctl.service systemd-tmpfiles-setup.service'])
+    equal('Unit.Wants',['network-online.target']); equal('Unit.Requires',[])
+    equal('Service.RuntimeDirectory',['xpanel']);equal('Service.RuntimeDirectoryMode',['0750']);equal('Service.RuntimeDirectoryPreserve',['no'])
+    equal('Service.ExecStartPre',['/usr/bin/test -f /var/lib/xpanel/control.db','/usr/bin/install -d -o root -g root -m 0700 /run/xpanel/lifecycle-agent','/usr/bin/install -d -o xpanel -g xpanel -m 0700 /run/xpanel/lifecycle-api'])
+  } else {
+    equal('Unit.After',['network-online.target xpanel-agent.service']);equal('Unit.Requires',['xpanel-agent.service']);equal('Unit.Wants',[])
+    equal('Service.ReadWritePaths',['/var/lib/xpanel /var/log/xpanel /run/xpanel/lifecycle-api'])
+  }
+  equal('Install.WantedBy',['multi-user.target'])
+  return Object.freeze({ unit, environmentFiles: Object.freeze(environmentFiles) })
+}
+
+/** Read-only installed-file policy; matches installer API_ENV support without altering it. */
+export function assertPreparedInstallEnvironmentFile(path, serviceGid, info, text) {
+  const mode = Number(info?.mode) & 0o7777
+  check(['/etc/xpanel/runtime.env','/etc/xpanel/api.env'].includes(path)
+    && Number.isSafeInteger(serviceGid) && serviceGid > 0 && Number(info?.uid) === 0 && Number(info?.gid) === serviceGid
+    && (path === '/etc/xpanel/api.env' ? [0o600,0o640].includes(mode) : mode === 0o640), 'INSTALL_START_ENVIRONMENT_UNSAFE')
+  check(typeof text === 'string' && Buffer.byteLength(text) <= 65536 && !text.includes('\0')
+    && !/^\s*(?:NODE_OPTIONS|NODE_PATH|LD_PRELOAD|LD_LIBRARY_PATH|BASH_ENV|ENV)=/m.test(text), 'INSTALL_START_ENVIRONMENT_UNSAFE')
+}

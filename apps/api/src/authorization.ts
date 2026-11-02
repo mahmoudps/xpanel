@@ -84,6 +84,7 @@ export const isMailboxRouteAllowed = (pathname: string, method: string): boolean
   if (/^\/api\/webmail(?:\/|$)/.test(pathname)) return true
   if (/^\/api\/mail\/filters(?:\/|$)/.test(pathname)) return true
   if (method === 'GET' && pathname === '/api/auth/me') return true
+  if (pathname === '/api/auth/ui-preferences' && (method === 'GET' || method === 'PUT')) return true
   if (method === 'POST' && (pathname === '/api/auth/logout' || pathname === '/api/auth/change-password')) return true
   return false
 }
@@ -180,7 +181,7 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   }
   if (/^\/api\/ips(?:\/|$)/.test(pathname)) return { resource: 'ips', rootOnly: !read, acl: 'list-accounts' }
   if (pathname === '/api/mail/ips') return { resource: 'mail', rootOnly: true }
-  if (/^\/api\/domains\/[^/]+\/htaccess(?:\/|$)/.test(pathname)) return { resource: 'files', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['aapanel-url-rewrite'], ...(method === 'POST' && /\/htaccess$/.test(pathname) ? { scopeAccess: 'read' as const } : {}) }
+  if (/^\/api\/domains\/[^/]+\/htaccess(?:\/|$)/.test(pathname)) return { resource: 'files', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['domain-htaccess'], ...(method === 'POST' && /\/htaccess$/.test(pathname) ? { scopeAccess: 'read' as const } : {}) }
   if (/^\/api\/domains\/[^/]+\/web-directives\/(?:error-pages|indexes|mime-types|hotlink|ip-blocker|redirects)$/.test(pathname)) return { resource: 'files', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['aapanel-url-rewrite', pathname.endsWith('/hotlink') ? 'hotlink-protection' : pathname.split('/').at(-1)!] }
   if (/^\/api\/domains(?:\/|$)/.test(pathname)) return { resource: 'domains', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['domains'] }
   if (/^\/api\/databases(?:\/|$)/.test(pathname)) return { resource: 'databases', acl: read ? 'list-accounts' : 'edit-account', toolIds: ['mysql-databases'] }

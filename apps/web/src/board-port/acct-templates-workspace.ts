@@ -1,3 +1,4 @@
+import { classicAccountLifecycleTemplates } from './account-lifecycle-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -44,5 +45,5 @@ export function renderWhmAccountTemplatesWorkspace(input: { locale: Locale; canM
     <p class="xp-help" data-acct-templates-preview-note>${t('Choose Edit on a saved template to see its full zone for example.com with documentation addresses 192.0.2.10 and 2001:db8::10. Unsaved changes are checked when you save.')}</p>
     <div class="xp-whm-detail-scroll" role="region" tabindex="0" aria-label="${t('Zone preview')}"><table class="xp-whm-detail-table"><caption class="xp-sr-only">${t('Zone preview')}</caption><thead><tr>${[t('Name'), 'TTL', t('Type'), t('Priority'), t('Content')].map(label => `<th scope="col">${label}</th>`).join('')}</tr></thead><tbody data-acct-templates-preview><tr><td colspan="5">${t('No template selected')}</td></tr></tbody></table></div>
   </section>
-</div>`
+${classicAccountLifecycleTemplates('templates')}</div>`
 }

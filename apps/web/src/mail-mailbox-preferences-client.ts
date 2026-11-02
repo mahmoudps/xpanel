@@ -1,3 +1,7 @@
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -62,6 +66,7 @@ function bindMailPreferences(askDialog: (options: Record<string, unknown>) => Pr
     const density = control('density'), perPage = control('messagesPerPage'), identity = control('replyIdentityId'), dateFormat = control('dateFormat')
     const save = root.querySelector<HTMLButtonElement>('[data-preferences-save]'), discard = root.querySelector<HTMLButtonElement>('[data-preferences-discard]'), refresh = root.querySelector<HTMLButtonElement>('[data-preferences-refresh]')
     if (!status || !recordLine || !plusLine || !density || !perPage || !identity || !dateFormat || !save || !discard || !refresh) return
+    try { mailRequireTemplates(root, [['mail-preferences-technical', 'bdi']]) } catch { root.querySelectorAll<HTMLSelectElement | HTMLButtonElement>('select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
     const admitted = (): boolean => root.isConnected && root.dataset.preferencesCanManage === 'true' && root.dataset.preferencesMailbox === mailbox && !!mailbox && !root.closest(denied) && !!send
     let snapshot: MailboxPreferencesSnapshot | null = null, draft = defaults(), busy = false, lock = ''
     const baseline = (): MailboxPreferenceFields => snapshot?.preferences ? { density: snapshot.preferences.density, messagesPerPage: snapshot.preferences.messagesPerPage, replyIdentityId: snapshot.preferences.replyIdentityId, dateFormat: snapshot.preferences.dateFormat } : defaults()
@@ -84,15 +89,15 @@ function bindMailPreferences(askDialog: (options: Record<string, unknown>) => Pr
       recordLine.textContent = ''
       if (snapshot.review) recordLine.textContent = t('Saved preferences belong to an earlier mailbox with this address and need review by your provider. Saving is unavailable.')
       else if (snapshot.preferences) {
-        const updatedAt = document.createElement('bdi')
-        updatedAt.dir = 'ltr'; updatedAt.className = 'xp-mono'; updatedAt.textContent = formatMailDateTime(snapshot.preferences.updatedAt)
+        const updatedAt = mailTemplate(root, 'mail-preferences-technical', 'bdi')
+        updatedAt.textContent = formatMailDateTime(snapshot.preferences.updatedAt)
         const [before = '', after = ''] = t('Saved for this mailbox at {time}').split('{time}')
         recordLine.append(before, updatedAt, after)
       } else recordLine.textContent = t('No saved preferences. The defaults are shown and nothing is saved until you choose Save.')
       const plus = snapshot.plusAddressing, local = mailbox.slice(0, mailbox.indexOf('@')), domain = mailbox.slice(mailbox.indexOf('@') + 1)
       plusLine.dataset.state = plus.state; plusLine.textContent = ''
       if (plus.state === 'supported') {
-        const example = document.createElement('bdi'); example.dir = 'ltr'; example.textContent = local + plus.delimiter + 'news@' + domain
+        const example = mailTemplate(root, 'mail-preferences-technical', 'bdi'); example.textContent = local + plus.delimiter + 'news@' + domain
         const [before = '', after = ''] = t('Supported by the mail server configuration. Mail to an address with a tag, for example {example}, is delivered to this mailbox. This page only explains it; nothing here changes delivery.').split('{example}')
         plusLine.append(before, example, after)
       } else plusLine.textContent = plus.state === 'not-supported'
@@ -150,4 +155,4 @@ function bindMailPreferences(askDialog: (options: Record<string, unknown>) => Pr
   })
 }
 
-export const MAIL_MAILBOX_PREFERENCES_CLIENT_BINDING = `(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const preferenceFields=${preferenceFields.toString()};const readMailboxPreferences=${readMailboxPreferences.toString()};return ${bindMailPreferences.toString()};})()`
+export const MAIL_MAILBOX_PREFERENCES_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const preferenceFields=${preferenceFields.toString()};const readMailboxPreferences=${readMailboxPreferences.toString()};return ${bindMailPreferences.toString()};})()`

@@ -1,0 +1,4 @@
+/** Classic owns the complete notice DOM; the controller fills only the finite semantic slots. */
+export function classicAccountAnnouncementNoticeTemplates(): string {
+  return ['info', 'warning', 'maintenance'].map(severity => `<template data-xp-template="account-announcement-notice-${severity}"><div class="xp-account-announcement" data-account-announcement="" data-severity="" role="status"><div class="xp-account-announcement__text"><p class="xp-account-announcement__title"><span class="xp-account-announcement__severity" data-xp-slot="severity"></span><span data-xp-slot="title"></span></p><p class="xp-account-announcement__body" data-xp-slot="body"></p><p class="xp-help" data-xp-slot="expiry"><bdi dir="ltr" data-xp-slot="end"></bdi></p></div><button class="xp-btn" type="button" data-account-announcement-dismiss="" aria-label="" data-xp-slot="dismiss" disabled></button></div></template>`).join('')
+}

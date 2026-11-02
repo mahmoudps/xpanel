@@ -118,30 +118,51 @@ describe('identity: bounded native password work', () => {
   })
 
   it('enforces HTTP 503 queue bounds during a concurrent login burst while keeping /api/health responsive and RSS bounded', async () => {
-    await withIdentity(async (db) => {
+    await withIdentity(async (db, root) => {
       const store = new StateStore(join(tmpdir(), `xpanel-kdf-burst-${randomUUID()}`))
+
+
+      const capacity = auth.MAX_PASSWORD_DERIVATIONS + auth.MAX_PENDING_PASSWORD_DERIVATIONS
+      const totalBurst = capacity + 3 // 17 accepted (1 active + 16 queued) + 3 rejected with 503
+      const lookupsReady = Promise.withResolvers<void>()
+      const releaseLookups = Promise.withResolvers<void>()
+      let lookupCount = 0
+      // Forward to the untouched frozen native runner; only this fixture's completed lookup waits.
+      // Releasing all real principal reads together preserves exact simultaneous KDF admission.
+      const apiDb: Db = {
+        async query<T extends Record<string, unknown>>(sql: string, params?: readonly unknown[]): Promise<T[]> {
+          const rows = await db.query<T>(sql, params)
+          if (sql === 'SELECT * FROM principals WHERE lower(username) = $1' && params?.[0] === root.username) {
+            assert.equal(rows.length, 1)
+            assert.equal(rows[0]?.id, root.id)
+            lookupCount++
+            assert.ok(lookupCount <= totalBurst)
+            if (lookupCount === totalBurst) lookupsReady.resolve()
+            await releaseLookups.promise
+          }
+          return rows
+        },
+        exec: sql => db.exec(sql),
+        transaction: run => db.transaction(run),
+      }
       const app = createApiApp({
-        db,
+        db: apiDb,
         store,
         serverSecret: 'burst-test-server-secret-at-least-32-bytes!!',
         lockoutThreshold: 1000,
       })
-
-      const capacity = auth.MAX_PASSWORD_DERIVATIONS + auth.MAX_PENDING_PASSWORD_DERIVATIONS
-      const totalBurst = capacity + 3 // 17 accepted (1 active + 16 queued) + 3 rejected with 503
-      const baselineRss = process.memoryUsage().rss
-      let peakRss = baselineRss
-      const rssSampler = setInterval(() => {
-        const current = process.memoryUsage().rss
-        if (current > peakRss) peakRss = current
-      }, 10)
+      let gateTimeout: ReturnType<typeof setTimeout> | undefined
+      let rssSampler: ReturnType<typeof setInterval> | undefined
+      let baselineRss = 0
+      let peakRss = 0
+      let loginPromises: Array<Promise<{ status: number; durationMs: number; bodyText: string }>> = []
 
       let healthStatus = 0
       let healthLatencyMs = 0
       let observedActiveDuringHealth = 0
 
       try {
-        const loginPromises = Array.from({ length: totalBurst }, (_, i) => {
+        loginPromises = Array.from({ length: totalBurst }, (_, i) => {
           const startedAt = performance.now()
           const req = new Request('http://localhost/api/auth/login', {
             method: 'POST',
@@ -157,7 +178,23 @@ describe('identity: bounded native password work', () => {
             }))
         })
 
-        // Dispatch concurrent health probe while KDF burst is active
+        await Promise.race([
+          lookupsReady.promise,
+          new Promise<never>((_resolve, reject) => { gateTimeout = setTimeout(() => reject(new Error('real login principal lookups did not reach the KDF admission gate')), 5000) }),
+        ])
+        if (gateTimeout !== undefined) clearTimeout(gateTimeout)
+        assert.equal(lookupCount, totalBurst)
+        assert.equal(auth.getPasswordDerivationStats().active, 0)
+        assert.equal(auth.getPasswordDerivationStats().pending, 0)
+        baselineRss = process.memoryUsage().rss
+        peakRss = baselineRss
+        rssSampler = setInterval(() => {
+          const current = process.memoryUsage().rss
+          if (current > peakRss) peakRss = current
+        }, 10)
+        releaseLookups.resolve()
+
+        // Dispatch concurrent health probe only after release, while the real KDF burst is active
         await new Promise((resolve) => setTimeout(resolve, 15))
         observedActiveDuringHealth = auth.getPasswordDerivationStats().active
         const healthStart = performance.now()
@@ -197,7 +234,10 @@ describe('identity: bounded native password work', () => {
           maxPending: auth.MAX_PENDING_PASSWORD_DERIVATIONS,
         })
       } finally {
-        clearInterval(rssSampler)
+        releaseLookups.resolve()
+        if (gateTimeout !== undefined) clearTimeout(gateTimeout)
+        await Promise.allSettled(loginPromises)
+        if (rssSampler !== undefined) clearInterval(rssSampler)
       }
     })
   })

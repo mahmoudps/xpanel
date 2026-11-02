@@ -18,6 +18,7 @@ export const DEFAULT_MARIADB_ADMIN_CNF = '/etc/xpanel/mariadb-admin.cnf'
 export const DEFAULT_MARIADB_BINARY = '/usr/bin/mariadb'
 export const DEFAULT_MARIADB_DUMP_BINARY = '/usr/bin/mariadb-dump'
 export const DEFAULT_MARIADB_SOCKET = '/run/mysqld/mysqld.sock'
+export const DEFAULT_MARIADB_RHEL_SOCKET = '/var/lib/mysql/mysql.sock'
 export const DEFAULT_SQL_TIMEOUT_MS = 30_000
 export const DEFAULT_DUMP_TIMEOUT_MS = 300_000
 export const MAX_SQL_STDOUT_BYTES = 8 * 1024 * 1024
@@ -167,6 +168,13 @@ const assertCanonicalUnixPath = (what: string, p: unknown): string => {
   return p
 }
 
+/** Trusted daemon configuration only; socket selection never comes from an RPC request. */
+export const mariadbSocketForFamily = (family: 'debian' | 'rhel', configured?: string | null): string | null => {
+  if (configured === null) return null
+  if (configured !== undefined) return assertCanonicalUnixPath('MariaDB socket', configured)
+  return family === 'rhel' ? DEFAULT_MARIADB_RHEL_SOCKET : DEFAULT_MARIADB_SOCKET
+}
+
 /**
  * Ensures no password flag is ever present in process argv.
  */
@@ -201,18 +209,18 @@ const defaultAdminConfigInspector: AdminConfigInspector = async (path: string): 
     }
     throw err
   }
-  if (lst.isSymbolicLink()) {
+  if (lst.isSymbolicLink() || !lst.isFile()) {
     return {
       exists: true,
       isFile: false,
-      isSymlink: true,
+      isSymlink: lst.isSymbolicLink(),
       uid: lst.uid,
       gid: lst.gid,
       mode: lst.mode & 0o7777,
       size: lst.size,
     }
   }
-  const fh = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+  const fh = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
   try {
     const st = await fh.stat()
     const content = st.isFile() && st.size <= 16_384 ? await fh.readFile('utf8') : undefined
@@ -232,15 +240,20 @@ const defaultAdminConfigInspector: AdminConfigInspector = async (path: string): 
 }
 
 const computeFileSha256 = async (filePath: string): Promise<{ sizeBytes: number; sha256: string }> => {
-  const hash = createHash('sha256')
-  let sizeBytes = 0
-  const stream = createReadStream(filePath)
-  for await (const chunk of stream) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-    sizeBytes += buf.length
-    hash.update(buf)
+  const file = await open(filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
+  try {
+    if (!(await file.stat()).isFile()) fail('PRECONDITION_FAILED', 'logical database dump must be a regular file')
+    const hash = createHash('sha256')
+    let sizeBytes = 0
+    for await (const chunk of file.createReadStream({ autoClose: false })) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      sizeBytes += buf.length
+      hash.update(buf)
+    }
+    return { sizeBytes, sha256: hash.digest('hex') }
+  } finally {
+    await file.close()
   }
-  return { sizeBytes, sha256: hash.digest('hex') }
 }
 
 export const defaultCommandRunner: MariaDbCommandRunner = async (input: MariaDbCommandInput): Promise<MariaDbCommandResult> => {
@@ -270,6 +283,9 @@ export const defaultCommandRunner: MariaDbCommandRunner = async (input: MariaDbC
     timer.unref?.()
 
     let streamPipelinePromise: Promise<void> = Promise.resolve()
+    let streamPipelineError: unknown
+    let inputPipelinePromise: Promise<void> = Promise.resolve()
+    let inputPipelineError: unknown
 
     if (input.stdoutFilePath) {
       const outPath = input.stdoutFilePath
@@ -278,7 +294,10 @@ export const defaultCommandRunner: MariaDbCommandRunner = async (input: MariaDbC
         stdoutBytes += chunk.length
         hash?.update(chunk)
       })
-      streamPipelinePromise = pipeline(child.stdout, writeStream)
+      streamPipelinePromise = pipeline(child.stdout, writeStream).catch((error: unknown) => {
+        streamPipelineError = error
+        child.kill('SIGKILL')
+      })
     } else {
       child.stdout.on('data', (chunk: Buffer) => {
         stdoutBytes += chunk.length
@@ -309,8 +328,9 @@ export const defaultCommandRunner: MariaDbCommandRunner = async (input: MariaDbC
       readStream.on('data', (chunk: Buffer | string) => {
         stdoutBytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk)
       })
-      pipeline(readStream, child.stdin).catch(() => {
-        /* child close handles exit status */
+      inputPipelinePromise = pipeline(readStream, child.stdin).catch((error: unknown) => {
+        inputPipelineError = error
+        child.kill('SIGKILL')
       })
     } else if (input.stdinSql !== undefined) {
       child.stdin.on('error', () => undefined)
@@ -323,6 +343,9 @@ export const defaultCommandRunner: MariaDbCommandRunner = async (input: MariaDbC
       clearTimeout(timer)
       try {
         await streamPipelinePromise
+        await inputPipelinePromise
+        if (streamPipelineError !== undefined) throw streamPipelineError
+        if (inputPipelineError !== undefined) throw inputPipelineError
       } catch (err) {
         rejectPromise(err)
         return
@@ -458,7 +481,7 @@ export class MariaDbServiceAdapter {
 
   /**
    * Verifies that `/etc/xpanel/mariadb-admin.cnf` exists, is not a symlink,
-   * is owned by root:root with mode 0600 or 0640, and contains a `[client]` section.
+   * is owned by root:root without group/world access, and contains a `[client]` section.
    * Fails closed with `PRECONDITION_FAILED` (HTTP 412) when missing or insecure.
    */
   async verifyAdminConfig(): Promise<void> {
@@ -843,27 +866,21 @@ export class MariaDbServiceAdapter {
         })
       }
 
-      // When using a real filesystem stream, compute/verify file size & digest if not provided by custom runner
-      let sizeBytes = res.bytesProcessed ?? 0
-      let sha256 = res.sha256 ?? ''
-      if (!sha256 && process.platform === 'linux') {
-        const computed = await computeFileSha256(stagingPath)
-        sizeBytes = computed.sizeBytes
-        sha256 = computed.sha256
-      } else if (!sha256) {
-        sha256 = createHash('sha256').update(res.stdout).digest('hex')
-        sizeBytes = Buffer.byteLength(res.stdout, 'utf8')
+      // Runner metadata alone is not a backup. Verify the actual file on every platform before publication.
+      let observedDump: { sizeBytes: number; sha256: string }
+      try { observedDump = await computeFileSha256(stagingPath) }
+      catch { return fail('CONFIG_TEST_FAILED', 'logical database dump did not produce a readable regular staged file') }
+      const { sizeBytes, sha256 } = observedDump
+      if ((res.sha256 !== undefined && res.sha256 !== sha256) ||
+          (res.bytesProcessed !== undefined && res.bytesProcessed !== sizeBytes)) {
+        fail('CONFIG_TEST_FAILED', 'logical database dump bytes do not match the runner receipt')
       }
 
       if (sizeBytes <= 0) {
         fail('CONFIG_TEST_FAILED', `logical database dump for ${validDb} produced an empty file`)
       }
 
-      try {
-        await rename(stagingPath, input.outputPath)
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-      }
+      await rename(stagingPath, input.outputPath)
       published = true
 
       return {
@@ -952,40 +969,53 @@ export class MariaDbServiceAdapter {
     }
     await this.verifyAdminConfig()
 
-    let verifiedSha256 = input.expectedSha256?.trim().toLowerCase() ?? ''
-    if (input.expectedSha256 && process.platform === 'linux') {
-      try {
-        const computed = await computeFileSha256(input.inputPath)
-        if (computed.sha256 !== verifiedSha256) {
-          fail('PRECONDITION_FAILED', `logical dump SHA-256 mismatch before restore into ${validTargetDb}`)
-        }
-      } catch (err) {
-        if (isXpanelError(err)) throw err
-      }
+    let observedInput: { sizeBytes: number; sha256: string }
+    try {
+      observedInput = await computeFileSha256(input.inputPath)
+    } catch {
+      return fail('PRECONDITION_FAILED', 'logical database restore requires a readable regular input file', { stateChanged: false })
+    }
+    const verifiedSha256 = observedInput.sha256
+    if (observedInput.sizeBytes === 0 ||
+        (input.expectedSha256 !== undefined && verifiedSha256 !== input.expectedSha256.trim().toLowerCase())) {
+      fail('PRECONDITION_FAILED', `logical dump is empty or its SHA-256 mismatches before restore into ${validTargetDb}`, { stateChanged: false })
     }
 
     // Ensure the target database exists before streaming restore
     await this.createDatabase(validTargetDb, input.username)
 
     const argv = this.buildClientArgv(['--database', validTargetDb])
-    const res = await this.commandRunner({
-      argv,
-      stdinFilePath: input.inputPath,
-      timeoutMs: input.timeoutMs ?? this.dumpTimeoutMs,
-      maxStdoutBytes: MAX_SQL_STDOUT_BYTES,
-      maxStderrBytes: MAX_SQL_STDERR_BYTES,
-    })
+    let res: MariaDbCommandResult
+    try {
+      res = await this.commandRunner({
+        argv,
+        stdinFilePath: input.inputPath,
+        timeoutMs: input.timeoutMs ?? this.dumpTimeoutMs,
+        maxStdoutBytes: MAX_SQL_STDOUT_BYTES,
+        maxStderrBytes: MAX_SQL_STDERR_BYTES,
+      })
+    } catch {
+      return fail('SERVICE_UNAVAILABLE', 'logical database restore client or input stream failed', {
+        stateChanged: true, unknownOutcome: true, verificationRequired: true,
+      })
+    }
 
     if (!res.ok) {
       const safeErr = redactSqlSecrets(res.stderr || 'MariaDB stream restore failed').trim()
       fail('CONFIG_TEST_FAILED', `logical database restore into ${validTargetDb} failed: ${safeErr}`, {
         targetDatabase: validTargetDb,
         exitCode: res.exitCode,
+        stateChanged: true, unknownOutcome: true, verificationRequired: true,
       })
     }
 
-    if (!verifiedSha256) {
-      verifiedSha256 = res.sha256 ?? createHash('sha256').update(input.inputPath).digest('hex')
+    try {
+      const after = await computeFileSha256(input.inputPath)
+      if (after.sha256 !== verifiedSha256 || after.sizeBytes !== observedInput.sizeBytes) throw new Error('input changed')
+    } catch {
+      return fail('SERVICE_UNAVAILABLE', 'logical restore input changed or became unavailable during execution', {
+        stateChanged: true, unknownOutcome: true, verificationRequired: true,
+      })
     }
 
     const verification =

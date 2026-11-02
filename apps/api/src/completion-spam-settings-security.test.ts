@@ -49,6 +49,49 @@ const fixture = async () => {
   return { database, state, owner, other, principal, credential, otherCredential, request, spamPath, bytes, persisted, auditRows, features }
 }
 
+
+// Block only the ACTUAL mutation acquisition, after HTTP recovery/initial auth.
+// Both blocker and contender are genuine OS writer acquisitions, never fake leases.
+const queueNextMutationWriter = (store: Awaited<ReturnType<typeof fixture>>['state']['store']) => {
+  const lock = store.getWriterLock(), acquire = lock.acquire.bind(lock)
+  type Lease = Awaited<ReturnType<typeof acquire>>
+  type Arrival = { lease?: Lease; error?: unknown }
+  let notify: () => void = () => undefined, resume: () => void = () => undefined
+  const reached = new Promise<void>(resolve => { notify = resolve }), gate = new Promise<void>(resolve => { resume = resolve })
+  let blocker: Lease | undefined, phase = '', contenderAcquired = false
+  const spy = vi.spyOn(lock, 'acquire').mockImplementationOnce(async (...args) => {
+    phase = new Error('actual mail mutation writer admission').stack ?? ''
+    const held = await acquire(...args); blocker = held
+    const waiting = acquire(...args).then<Arrival, Arrival>(lease => { contenderAcquired = true; return { lease } }, error => ({ error }))
+    notify()
+    let releaseFailed = false, releaseFailure: unknown
+    try { await gate } finally { try { await held.release() } catch (error) { releaseFailed = true; releaseFailure = error } }
+    const arrival = await waiting
+    if (releaseFailed) { await arrival.lease?.release(); throw releaseFailure }
+    if (!arrival.lease) throw arrival.error
+    return arrival.lease
+  })
+  return {
+    release: () => resume(), restore: () => spy.mockRestore(),
+    wait: async (pending: Promise<unknown>) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([reached,
+          pending.then(() => { throw new Error('mail request completed before the intended mutation writer queue') }),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('mail request did not reach its mutation writer queue')), 5000) }),
+        ])
+        // The call frame must be a mail handler, not global recovery/snapshot work.
+        if (!phase.includes('extended-routes.ts') && !phase.includes('/mail/')) throw new Error('mail mutation queue phase is unqualified')
+        if (/recoverAccountContactProjection|readSnapshot|readAuthorityAtBarrier|waitForUnlocked/.test(phase)) throw new Error('queue was placed before initial mail authorization')
+        const held = blocker
+        if (!held) throw new Error('real queue blocker is missing')
+        await held.assertFencingToken()
+        if (contenderAcquired) throw new Error('the mutation writer did not queue behind its blocker')
+      } finally { if (timer) clearTimeout(timer) }
+    },
+  }
+}
+
 describe('account spam settings HTTP security acceptance', () => {
   let f: Awaited<ReturnType<typeof fixture>>
   beforeEach(async () => { f = await fixture() })
@@ -126,22 +169,21 @@ describe('account spam settings HTTP security acceptance', () => {
 
   it.each(['token', 'feature'] as const)('rechecks %s revocation after waiting for the policy writer without overwriting settings', async kind => {
     expect((await f.request({ rejectScore: 20 })).status).toBe(200)
-    const before = await f.bytes(), auditBefore = (await f.auditRows()).length, lock = f.state.store.getWriterLock(), held = await lock.acquire()
-    let owned = true, notify!: () => void
-    const queued = new Promise<void>(resolve => { notify = resolve }), acquire = lock.acquire.bind(lock)
-    vi.spyOn(lock, 'acquire').mockImplementation((...args) => { notify(); return acquire(...args) })
+    const before = await f.bytes(), auditBefore = (await f.auditRows()).length, queue = queueNextMutationWriter(f.state.store)
     const pending = f.request({ rejectScore: 99 })
     try {
-      await queued
+      await queue.wait(pending)
       if (kind === 'token') await f.database.db.query('UPDATE api_tokens SET revoked_at=$1 WHERE token_hash=$2', [new Date().toISOString(), sha256Hex(f.credential)])
       else {
         const readFeature = f.state.store.getFeatureList.bind(f.state.store)
         vi.spyOn(f.state.store, 'getFeatureList').mockImplementation(async id => { const policy = await readFeature(id); return policy && id === f.features.id ? { ...policy, disabled: [...policy.disabled, 'spam-filters'] } : policy })
       }
-      await held.release(); owned = false
+      queue.release()
       expect([401, 403]).toContain((await pending).status)
       expect(await f.bytes()).toBe(before)
       expect((await f.auditRows()).length).toBe(auditBefore)
-    } finally { if (owned) await held.release(); await pending.catch(() => undefined) }
+    } finally { queue.release(); await pending.catch(() => undefined); queue.restore() }
   })
+
+
 })

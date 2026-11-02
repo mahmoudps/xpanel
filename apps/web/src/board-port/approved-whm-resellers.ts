@@ -1,5 +1,6 @@
+import { allocated } from '../models/reseller-allocation.ts'
 import { canOpenRegisteredRoute, type CatalogTool } from '@xpanel/catalog'
-import { canSeeAccount, type Account, type Limit, type Plan, type ResellerAcl } from '@xpanel/core'
+import { canSeeAccount, type ResellerAcl } from '@xpanel/core'
 import { escapeHtml, renderLtrValue, renderStatusBadge, renderThresholdMeter } from '../tokens.ts'
 import type { WhmSurfaceProps } from '../surfaces/xwhm.ts'
 import { SOURCE_LOCALE, localeDirection, type MessageValues, translator } from '../i18n.ts'
@@ -53,20 +54,6 @@ const STYLES = `<style>
 export const resellerDetailAnchor = (id: string): string => 'whm-reseller-' + id.replace(/[^A-Za-z0-9-]/g, c => `_${c.codePointAt(0)!.toString(16)}_`)
 
 const qualified = (catalog: readonly CatalogTool[] | undefined, id: string): boolean => catalog?.some(tool => tool.id === id && tool.status === 'verified' && tool.delivery.status === 'verified') === true
-
-/** Plan allocation is desired state; it is never presented as measured resource use. */
-const allocated = (accounts: readonly Account[] | undefined, plans: readonly Plan[] | undefined, kind: 'diskMb' | 'bandwidthMbMonth'): Limit | undefined => {
-  if (accounts === undefined || plans === undefined) return undefined
-  let total = 0
-  for (const account of accounts) {
-    const value = plans.find(plan => plan.id === account.planId)?.resources[kind]
-    if (value === undefined) return undefined
-    if (value === 'unlimited') return 'unlimited'
-    total += value
-    if (!Number.isSafeInteger(total)) return undefined
-  }
-  return total
-}
 
 /* Production document authentication and route qualification precede this renderer.
  * It also checks its own role and capability boundary to remain safe as a direct helper.

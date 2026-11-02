@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { renderWhmDnsToolsWorkspace } from './whm-dns-tools-workspace.ts'
+import { parseMarkup } from '../themes/markup.ts'
 
-const controls = (html: string) => [...html.matchAll(/<(input|select|textarea|button)\b[^>]*>/g)].map(match => match[0])
+const liveElements = (html: string) => parseMarkup(html).filter(node => node.namespace === 'html' && node.template === -1)
+const controls = (html: string) => liveElements(html).filter(node => ['input', 'select', 'textarea', 'button'].includes(node.tag))
 
 describe('WHM DNS tools renderer', () => {
   it('renders the four English tools with tables, actions and the local-only scope note', () => {
@@ -16,7 +18,7 @@ describe('WHM DNS tools renderer', () => {
     expect(html).toContain('public recursion is out of scope')
     expect(html).toContain('read-only host jobs of up to 32 zones each')
     expect(html).toContain('data-dns-tools-can-manage="true"')
-    expect(html).not.toContain('<form')
+    expect(liveElements(html).some(node => node.tag === 'form')).toBe(false)
     expect(html).not.toContain('Checks and changes require root authorization.')
     expect(html).toMatch(/@media\(min-width:601px\)\{\.xp-whm-dns-tools__card\{padding:24px\}\}/)
     for (const gap of ['gap:8px', 'gap:16px', 'gap:24px', 'gap:32px']) expect(html).toContain(gap)
@@ -37,10 +39,11 @@ describe('WHM DNS tools renderer', () => {
       expect(html).toContain('data-dns-tools-can-read="false"')
       expect(html).toContain('data-dns-tools-can-manage="false"')
       expect(html).toContain('data-state="unavailable"')
-      expect(html).not.toContain('<form')
+      expect(liveElements(html).some(node => node.tag === 'form')).toBe(false)
       const found = controls(html)
       expect(found.length).toBeGreaterThan(10)
-      for (const control of found) expect(control).toMatch(/\sdisabled[\s>]/)
+      for (const control of found) expect(control.attrs.has('disabled')).toBe(true)
+      expect(parseMarkup(html).some(node => node.namespace === 'html' && node.tag === 'template')).toBe(true)
     }
     expect(renderWhmDnsToolsWorkspace({ locale: 'en', canRead: true, canManage: false })).toContain('Checks and changes require root authorization.')
   })

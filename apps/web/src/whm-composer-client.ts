@@ -1,3 +1,5 @@
+import { VIEW_RECORD_HELPERS, cloneViewRecord as canonicalCloneViewRecord } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -15,6 +17,7 @@ function bindWhmComposer(askDialog: Ask | undefined, parse: typeof readComposerW
     root.dataset.composerBound = 'true'
     const status = root.querySelector<HTMLElement>('[data-composer-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-composer-refresh]'), target = root.querySelector<HTMLSelectElement>('[data-composer-target]'), body = root.querySelector<HTMLElement>('[data-composer-packages]')
     if (!status || !refresh || !target || !body) return
+    try { cloneViewRecord(root, 'software-composer-package-row', 'tr', { name: '', requirement: '', locked: '', installed: '', development: '' }); cloneViewRecord(root, 'software-composer-package-empty', 'tr', { message: '' }); cloneViewRecord(root, 'software-composer-review-row', 'tr', { name: '', version: '', development: '' }) } catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const runAction = root.querySelector<HTMLSelectElement>('[data-composer-run-action]'), reviewButton = root.querySelector<HTMLButtonElement>('[data-composer-review]'), runButton = root.querySelector<HTMLButtonElement>('[data-composer-run]')
     const reviewRegion = root.querySelector<HTMLElement>('[data-composer-review-region]'), reviewBody = root.querySelector<HTMLElement>('[data-composer-review-packages]'), runHelp = root.querySelector<HTMLElement>('[data-composer-run-help]'), jobLink = root.querySelector<HTMLAnchorElement>('[data-composer-job-link]'), liveLog = root.querySelector<HTMLElement>('[data-composer-live-log]')
@@ -28,7 +31,7 @@ function bindWhmComposer(askDialog: Ask | undefined, parse: typeof readComposerW
     // Human status text in a value slot leaves the technical mono font.
     const text = (key: string, value: string, human = false): void => { const node = root.querySelector<HTMLElement>('[data-composer-' + key + ']'); if (!node) return; node.textContent = value; node.toggleAttribute('data-human', human) }
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
-    const empty = (message: string): void => { body.textContent = ''; const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 5; cell.textContent = message; row.append(cell); body.append(row) }
+    const empty = (message: string): void => { body.replaceChildren(cloneViewRecord(root, 'software-composer-package-empty', 'tr', { message })) }
     const clear = (): void => { for (const key of ['account', 'directory', 'php', 'manifest', 'lock', 'vendor', 'match']) text(key, t('Not read'), true); empty(t('No selected project has been read.')) }
     const paint = (value: ComposerWorkspaceView): void => {
       current = value; locked = false; clearReview()
@@ -48,9 +51,7 @@ function bindWhmComposer(askDialog: Ask | undefined, parse: typeof readComposerW
       }
       body.textContent = ''
       for (const item of selected.packages) {
-        const row = document.createElement('tr')
-        for (const [index, content] of [item.name, item.requirement ?? '—', item.locked ?? '—', item.installed ?? '—', item.development ? t('Yes') : t('No')].entries()) { const cell = document.createElement('td'), span = document.createElement(index < 4 ? 'bdi' : 'span'); if (index < 4) span.dir = 'ltr'; span.textContent = content; cell.append(span); row.append(cell) }
-        body.append(row)
+        body.append(cloneViewRecord(root, 'software-composer-package-row', 'tr', { name: item.name, requirement: item.requirement ?? '—', locked: item.locked ?? '—', installed: item.installed ?? '—', development: item.development ? t('Yes') : t('No') }))
       }
       if (!selected.packages.length) empty(t('No package dependencies were declared or recorded.'))
       note('read', t('Bounded dependency metadata read. No project scripts, plugins or install/update jobs were executed.'))
@@ -76,7 +77,7 @@ function bindWhmComposer(askDialog: Ask | undefined, parse: typeof readComposerW
         const next = parseReview(await request('POST', '/api/server/composer/jobs/preview', { action, domainId }))
         if (next.action !== action || next.domainId !== domainId || current?.selected?.selector !== domainId || !admitted()) throw new Error('wrong_review')
         review = next
-        if (reviewBody) for (const item of next.packages) { const row = document.createElement('tr'); for (const [index, content] of [item.name, item.version, item.development ? t('Yes') : t('No')].entries()) { const cell = document.createElement('td'), span = document.createElement(index < 2 ? 'bdi' : 'span'); if (index < 2) span.dir = 'ltr'; span.textContent = content; cell.append(span); row.append(cell) } reviewBody.append(row) }
+        if (reviewBody) for (const item of next.packages) reviewBody.append(cloneViewRecord(root, 'software-composer-review-row', 'tr', { name: item.name, version: item.version, development: item.development ? t('Yes') : t('No') }))
         if (reviewRegion) reviewRegion.hidden = false
         note('read', t('Review ready: {count, plural, one {# package} other {# packages}} in the resolved graph. Submit it to run the isolated job.', { count: next.packages.length }))
       } catch (error) { note('failed', code(error) === 412 ? t('The confined Composer provider is unavailable on this server. No job was submitted.') : code(error) === 409 ? t('The project changed. Read it again before reviewing.') : t('The review could not be verified. No job was submitted.')) }
@@ -110,4 +111,4 @@ function bindWhmComposer(askDialog: Ask | undefined, parse: typeof readComposerW
     refresh.addEventListener('click', () => { void load() }); target.addEventListener('change', () => { void load() }); void load()
   })
 }
-export const WHM_COMPOSER_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readComposerWorkspaceView.toString()};const parseReview=${readComposerJobReview.toString()};const bind=${bindWhmComposer.toString()};return (ask)=>bind(ask,parse,parseReview);})()`
+export const WHM_COMPOSER_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readComposerWorkspaceView.toString()};const parseReview=${readComposerJobReview.toString()};const bind=${bindWhmComposer.toString()};return (ask)=>bind(ask,parse,parseReview);})()`

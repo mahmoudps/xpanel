@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { createQuarantineIdentity } from '../../../packages/core/src/mail-quarantine.ts'
 import type { QuarantineAvailable, QuarantineMessage, QuarantineLocator, QuarantineActionResult } from '../../../packages/core/src/mail-quarantine.ts'
@@ -25,6 +29,13 @@ function bindAccountQuarantine(askDialog: ((options: Record<string, unknown>) =>
     const detail = root.querySelector<HTMLElement>('[data-quarantine-detail]')!
     const button = (name: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>('[data-quarantine-' + name + ']')!
     if (!mailbox || !status || !messages || !detail || ['refresh', 'older', 'newest', 'release', 'delete', 'expire'].some(name => !button(name))) return
+    try {
+      cloneClientTemplate(clientTemplate(root, 'account-quarantine-message'), 'li', ['title', 'sender', 'inspect'])
+      cloneClientTemplate(clientTemplate(root, 'account-quarantine-empty'), 'li', [])
+    } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return
+    }
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && manageable && !root.closest(denied)
     let page: QuarantineAvailable | null = null, selected: QuarantineMessage | null = null, busy = false, review = false, cursor: number | undefined
@@ -68,15 +79,16 @@ function bindAccountQuarantine(askDialog: ((options: Record<string, unknown>) =>
       messages.textContent = ''
       if (!page) return
       for (const message of page.messages) {
-        const item = document.createElement('li'), title = document.createElement('strong'), sender = document.createElement('bdi'), inspect = document.createElement('button')
-        item.className = 'xp-quarantine__message'; title.textContent = message.subject || t('(No subject)')
-        sender.dir = 'ltr'; sender.textContent = message.from || t('Sender not supplied')
-        inspect.type = 'button'; inspect.className = 'xp-btn'; inspect.dataset.quarantineInspect = ''; inspect.textContent = t('Review message')
+        const item = cloneClientTemplate(clientTemplate(root, 'account-quarantine-message'), 'li', ['title', 'sender', 'inspect'])
+        const title = clientTemplateSlot(item, 'title'), sender = clientTemplateSlot(item, 'sender', 'bdi'), inspect = clientTemplateSlot(item, 'inspect', 'button') as HTMLButtonElement
+        title.textContent = message.subject || t('(No subject)')
+        sender.textContent = message.from || t('Sender not supplied')
+        inspect.textContent = t('Review message')
         inspect.setAttribute('aria-label', t('Review message: {subject}', { subject: message.subject || t('(No subject)') }))
         inspect.addEventListener('click', () => { if (!busy && admitted()) { selected = message; paintDetail(); const heading = detail.querySelector<HTMLElement>('h3'); if (heading) { heading.tabIndex = -1; heading.focus() } } })
-        item.append(title, sender, inspect); messages.append(item)
+        messages.append(item)
       }
-      if (!page.messages.length) { const empty = document.createElement('li'); empty.textContent = page.totalMessages === 0 ? t('The configured source reports no held messages.') : t('No messages were returned in this UID window. Earlier windows may contain messages.'); messages.append(empty) }
+      if (!page.messages.length) { const empty = cloneClientTemplate(clientTemplate(root, 'account-quarantine-empty'), 'li', []); empty.textContent = page.totalMessages === 0 ? t('The configured source reports no held messages.') : t('No messages were returned in this UID window. Earlier windows may contain messages.'); messages.append(empty) }
     }
     const request = (method: string, path: string, body?: unknown): Promise<unknown> => {
       if (!send || !admitted()) return Promise.reject({ stateChanged: false })
@@ -210,4 +222,4 @@ function bindAccountQuarantine(askDialog: ((options: Record<string, unknown>) =>
   })
 }
 
-export const ACCOUNT_QUARANTINE_CLIENT_BINDING = `(function(askDialog){const displayQuarantineDateTime=${DISPLAY_DATETIME_BINDING};return (${bindAccountQuarantine.toString()})(askDialog, (${createQuarantineIdentity.toString()})())})`
+export const ACCOUNT_QUARANTINE_CLIENT_BINDING = `(function(askDialog){const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const displayQuarantineDateTime=${DISPLAY_DATETIME_BINDING};return (${bindAccountQuarantine.toString()})(askDialog, (${createQuarantineIdentity.toString()})())})`

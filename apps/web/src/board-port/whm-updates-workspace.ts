@@ -1,3 +1,4 @@
+import { classicSoftwareClientTemplates } from './software-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 /** System update plan, package selection and job hand-off for /whm/software/updates. Host data is filled by the client binding. */
 export function renderWhmUpdatesWorkspace(input: { locale: Locale; canRead: boolean; canApply: boolean }): string {
@@ -22,5 +23,6 @@ export function renderWhmUpdatesWorkspace(input: { locale: Locale; canRead: bool
       <h2 id="whm-updates-packages">${t('Pending packages')}</h2>
       <div class="xp-whm-detail-scroll" role="region" tabindex="0" aria-label="${t('Pending package updates')}"><table class="xp-whm-detail-table"><caption class="sr-only">${t('Pending package updates')}</caption><thead><tr>${headers.map(label => `<th scope="col">${label}</th>`).join('')}</tr></thead><tbody data-whm-updates-rows><tr><td colspan="7">${t('No update plan has been read.')}</td></tr></tbody></table></div>
     </section>
+${classicSoftwareClientTemplates('updates')}
   </div>`
 }

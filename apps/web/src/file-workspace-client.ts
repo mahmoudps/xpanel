@@ -2,6 +2,10 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
 
 export const WORKSPACE_EDIT_BYTES=1024*1024
@@ -123,34 +127,151 @@ export function workspaceTrash(value:unknown,path?:string):{id:string;originalPa
   return value as unknown as {id:string;originalPath:string;name:string;sizeBytes:number;deletedAt:string}
 }
 export function workspaceTrashList(value:unknown):unknown[]{if(!workspaceObject(value)||!Array.isArray(value.items)||value.items.length>10000)throw new Error('invalid_trash_list');const ids=new Set<string>();for(const raw of value.items){const item=workspaceTrash(raw);if(ids.has(item.id))throw new Error('duplicate_trash_id');ids.add(item.id)}return value.items}
+
+type FileViewEntry={key:string;name:string;path:string;kind:string;sizeBytes:number;mode?:number;mtime:string}
+function createFilePresentation(root:HTMLElement,copy:(text:string)=>string,size:(bytes:number)=>string,when:(value:string)=>string){
+  const must=(selector:string,tag?:string):HTMLElement=>{
+    const found=[...root.querySelectorAll<HTMLElement>(selector)]
+    if(found.length!==1||found[0]!.closest('[data-file-manager]')!==root||(tag&&found[0]!.tagName!==tag))throw new Error('invalid_file_presentation')
+    return found[0]!
+  }
+  const all=must('[data-file-select-all]','INPUT') as HTMLInputElement,filter=must('[data-file-filter]','INPUT') as HTMLInputElement
+  if(root.querySelectorAll('[data-file-manager-table] thead th').length!==7)throw new Error('invalid_file_headers')
+  const count=must('[data-file-selection-count]','OUTPUT'),clear=must('[data-file-selection-clear]','BUTTON') as HTMLButtonElement
+  if(all.type!=='checkbox'||filter.type!=='search'||clear.type!=='button')throw new Error('invalid_file_presentation')
+  const fields=new Map<string,HTMLElement>(['name','path','kind','size','mode','modified','owner'].map(key=>[key,must('[data-file-detail="'+key+'"]','SPAN')]))
+  const bits=[...root.querySelectorAll<HTMLElement>('[data-file-permission-bit]')]
+  if(bits.length!==9||new Set(bits.map(bit=>bit.dataset.filePermissionBit)).size!==9||bits.some(bit=>bit.closest('[data-file-manager]')!==root||!/^([0-2])-([0-2])$/.test(bit.dataset.filePermissionBit??'')||bit.tagName!=='SPAN'))throw new Error('invalid_file_permissions_view')
+  const noMatches=must('[data-file-filter-empty]'),localStatus=must('[data-file-selection-status]')
+  const primary=must('[data-file-detail-primary]','BUTTON') as HTMLButtonElement,secondary=must('[data-file-detail-secondary]','BUTTON') as HTMLButtonElement,copyPath=must('[data-file-copy-path]','BUTTON') as HTMLButtonElement
+  if([primary,secondary,copyPath].some(button=>button.type!=='button'))throw new Error('invalid_file_detail_action')
+  const browse=root.dataset.fileManager==='browse',username=root.dataset.accountUsername,mode=root.dataset.fileManager
+  const editorPanel=browse?must('[data-file-editor-panel]'):undefined,closed=browse?must('[data-file-editor-closed]'):undefined
+  const show=browse?must('[data-file-editor-show]','BUTTON') as HTMLButtonElement:undefined,close=browse?must('[data-file-editor-close]','BUTTON') as HTMLButtonElement:undefined
+  const uploads=browse?must('[data-file-uploads]','UL'):undefined,uploadsEmpty=browse?must('[data-file-uploads-empty]'):undefined,uploadCount=browse?must('[data-file-upload-count]','OUTPUT'):undefined
+  const uploadTemplate=browse?clientTemplate(root,'file-upload-row'):undefined
+  const cloneUpload=()=>{const row=cloneClientTemplate(uploadTemplate!,'li',['name','bytes','state','progress','dismiss']);clientTemplateSlot(row,'name','bdi');clientTemplateSlot(row,'bytes','bdi');clientTemplateSlot(row,'state','span');if(clientTemplateSlot(row,'dismiss','button').getAttribute('type')!=='button')throw new Error('invalid_file_upload_dismiss');const progress=clientTemplateSlot(row,'progress','div');if(progress.getAttribute('role')!=='progressbar'||progress.hasAttribute('aria-valuenow'))throw new Error('invalid_file_upload_progress');return row}
+  if(browse){if(show!.type!=='button'||close!.type!=='button')throw new Error('invalid_file_editor_view');cloneUpload()}
+  const selected=new Set<string>()
+  let entries:FileViewEntry[]=[],entriesByKey=new Map<string,FileViewEntry>(),observed=false,locked=true,editorClosed=true,openedPath='',editorState:WorkspaceState|undefined
+  const inScope=()=>root.isConnected&&root.dataset.accountUsername===username&&root.dataset.fileManager===mode
+  const rows=()=>[...root.querySelectorAll<HTMLElement>('[data-file-key]')].filter(row=>row.closest('[data-file-manager]')===root)
+  const current=()=>entries.filter(entry=>selected.has(entry.key))
+  const rowFor=(entry:FileViewEntry)=>rows().find(row=>row.dataset.fileKey===entry.key)
+  const fullPath=(entry:FileViewEntry)=>root.dataset.accountHome?.startsWith('/')?root.dataset.accountHome.replace(/\/+$/,'')+'/'+entry.path:entry.path
+  const forward=(secondaryAction=false)=>{
+    if(locked||!inScope())return
+    const chosen=current();if(chosen.length!==1)return
+    const action=browse?(secondaryAction?'chmod':chosen[0]!.kind==='directory'?'directory':'open'):(secondaryAction?'purge':'restore')
+    const button=rowFor(chosen[0]!)?.querySelector<HTMLButtonElement>('[data-file-workspace-action="'+action+'"]')
+    if(button&&!button.disabled)button.click()
+  }
+  const paint=()=>{
+    if(!inScope()){selected.clear();entries=[];entriesByKey.clear();observed=false;rows().forEach(row=>{row.hidden=true});uploads?.replaceChildren();if(uploadCount)uploadCount.textContent='0';if(uploadsEmpty)uploadsEmpty.hidden=false}
+    const chosen=current(),single=chosen.length===1?chosen[0]:undefined,missing=copy('Not read')
+    count.textContent=String(chosen.length)
+    for(const row of rows()){const checkbox=row.querySelector<HTMLInputElement>('[data-xp-slot="select"]');if(checkbox){checkbox.checked=selected.has(row.dataset.fileKey??'');row.toggleAttribute('data-file-selected',checkbox.checked);checkbox.disabled=locked||!observed||!inScope()}}
+    const visible=rows().filter(row=>!row.hidden),selectedVisible=visible.filter(row=>selected.has(row.dataset.fileKey??'')).length
+    all.checked=visible.length>0&&selectedVisible===visible.length;all.indeterminate=selectedVisible>0&&selectedVisible<visible.length;all.disabled=locked||!observed||!visible.length||!inScope()
+    clear.disabled=locked||!selected.size;filter.disabled=locked||!observed||!inScope()
+    const names=chosen.length>1?chosen.slice(0,3).map(entry=>entry.name).join(', ')+(chosen.length>3?'…':''):single?.name??copy('No file selected')
+    const values={name:names,path:single?fullPath(single):missing,kind:single?(single.kind==='directory'?copy(msgctxt('file-workspace-client','Folder')):single.kind==='symlink'?copy('Symbolic link'):browse?copy(msgctxt('file-workspace-client','File')):copy('Trashed item')):missing,size:single?size(single.sizeBytes):missing,mode:!single?missing:single.mode===undefined?copy('Not recorded'):single.mode.toString(8).padStart(4,'0'),modified:single?when(single.mtime):missing,owner:missing}
+    for(const [key,node] of fields)node.textContent=values[key as keyof typeof values]
+    for(const bit of bits){const [who,which]=(bit.dataset.filePermissionBit??'').split('-').map(Number);bit.textContent=single?.mode===undefined?missing:copy((single.mode&(1<<((2-who!)*3+(2-which!))))!==0?'Yes':'No')}
+    const action=browse?(single?.kind==='directory'?'directory':'open'):'restore'
+    const available=single?rowFor(single)?.querySelector<HTMLButtonElement>('[data-file-workspace-action="'+action+'"]'):undefined
+    const second=single?rowFor(single)?.querySelector<HTMLButtonElement>('[data-file-workspace-action="'+(browse?'chmod':'purge')+'"]'):undefined
+    primary.textContent=copy(browse?(single?.kind==='directory'?msgctxt('file-workspace-client','Open'):msgctxt('file-workspace-client','Edit')):'Restore')
+    secondary.textContent=copy(browse?'Permissions':'Delete for good…')
+    primary.disabled=locked||!available||available.disabled;secondary.disabled=locked||!second||second.disabled
+    copyPath.disabled=locked||!single||typeof navigator.clipboard?.writeText!=='function'
+    noMatches.hidden=!observed||!entries.length||visible.length!==0
+  }
+  const editor=()=>{
+    if(!browse||!editorState)return
+    if(!inScope()){editorPanel!.hidden=true;closed!.hidden=false;show!.disabled=true;close!.disabled=true;return}
+    if(editorState.opened?.path!==openedPath){openedPath=editorState.opened?.path??'';editorClosed=!openedPath}
+    editorPanel!.hidden=!openedPath||editorClosed;closed!.hidden=!!openedPath&&!editorClosed
+    show!.disabled=locked||!openedPath;close!.disabled=locked||!openedPath
+  }
+  all.addEventListener('change',()=>{if(locked||!inScope())return;for(const row of rows().filter(row=>!row.hidden)){const key=row.dataset.fileKey!;if(all.checked)selected.add(key);else selected.delete(key)}paint()})
+  clear.addEventListener('click',()=>{selected.clear();paint()})
+  filter.addEventListener('input',()=>{if(locked||!inScope())return;selected.clear();const term=filter.value.toLowerCase();for(const row of rows()){const entry=entriesByKey.get(row.dataset.fileKey??'');row.hidden=!!entry&&!((entry.name+' '+entry.path).toLowerCase().includes(term))}paint()})
+  primary.addEventListener('click',()=>forward());secondary.addEventListener('click',()=>forward(true))
+  copyPath.addEventListener('click',()=>{const chosen=current();if(locked||!inScope()||chosen.length!==1||typeof navigator.clipboard?.writeText!=='function')return;void navigator.clipboard.writeText(fullPath(chosen[0]!)).then(()=>{if(inScope()){localStatus.hidden=false;localStatus.textContent=copy('Path copied.')}}).catch(()=>{if(inScope()){localStatus.hidden=false;localStatus.textContent=copy('Path could not be copied.')}})})
+  show?.addEventListener('click',()=>{if(!locked&&inScope()&&openedPath){editorClosed=false;editor();root.querySelector<HTMLTextAreaElement>('#jailed-code-editor')?.focus()}})
+  close?.addEventListener('click',()=>{if(!locked){editorClosed=true;editor();show?.focus()}})
+  return{
+    reset:(records:FileViewEntry[],known:boolean)=>{entries=records;entriesByKey=new Map(records.map(entry=>[entry.key,entry]));observed=known;selected.clear();filter.value='';localStatus.hidden=true;for(const row of rows()){row.hidden=false;const input=row.querySelector<HTMLInputElement>('[data-xp-slot="select"]');input?.addEventListener('change',event=>{event.stopPropagation();const key=row.dataset.fileKey;if(!key||locked||!inScope()){paint();return}if(input.checked)selected.add(key);else selected.delete(key);paint()})}paint()},
+    sync:(value:boolean,state?:WorkspaceState)=>{locked=value;if(state)editorState=state;paint();editor()},
+    openEditor:()=>{if(inScope()&&openedPath){editorClosed=false;editor();root.querySelector<HTMLTextAreaElement>('#jailed-code-editor')?.focus()}},
+    upload:(name:string,bytes:number)=>{const row=cloneUpload();clientTemplateSlot(row,'name').textContent=name;clientTemplateSlot(row,'bytes').textContent=size(bytes);const dismiss=clientTemplateSlot(row,'dismiss','button') as HTMLButtonElement;dismiss.setAttribute('aria-label',copy('Close'));dismiss.textContent='×';dismiss.addEventListener('click',()=>{if(dismiss.disabled||!inScope())return;row.remove();uploadCount!.textContent=String(uploads!.children.length)});uploads!.append(row);uploadCount!.textContent=String(uploads!.children.length);uploadsEmpty!.hidden=true;return row},
+    uploadState:(row:HTMLElement,state:string,pending=false)=>{if(!inScope()||!uploads?.contains(row))return;clientTemplateSlot(row,'state','span').textContent=copy(state);const progress=clientTemplateSlot(row,'progress','div');progress.hidden=!pending;progress.setAttribute('aria-label',copy('Uploads'));progress.setAttribute('aria-valuetext',copy(state));const dismiss=clientTemplateSlot(row,'dismiss','button') as HTMLButtonElement;const blocked=pending||state==='Upload outcome uncertain';if(blocked)dismiss.setAttribute('data-capability-unavailable','true');else dismiss.removeAttribute('data-capability-unavailable');dismiss.disabled=blocked}
+  }
+}
+
+function fileWorkspaceTemplates(root:HTMLElement,trash:boolean){
+  const row=clientTemplate(root,trash?'trash-row':'file-row')
+  const action=clientTemplate(root,trash?'trash-action':'file-action')
+  const empty=trash?undefined:clientTemplate(root,'file-empty-row')
+  const purge=trash?clientTemplate(root,'trash-purge-action'):undefined
+  const cloneRow=()=>{
+    const element=cloneClientTemplate(row,'tr',['select','name','kind','size','mode','modified','owner','actions'])
+    if(element.children.length!==7||clientTemplateSlot(element,'select','input').getAttribute('type')!=='checkbox')throw new Error('invalid_file_row_template')
+    for(const name of ['name','size','mode'])clientTemplateSlot(element,name,'bdi')
+    clientTemplateSlot(element,'owner','span');clientTemplateSlot(element,'kind','span')
+    clientTemplateSlot(element,'modified','time');clientTemplateSlot(element,'actions','td')
+    for(const [name,index] of [['select',0],['name',1],['kind',1],['size',2],['modified',3],['mode',4],['owner',5],['actions',6]] as const)if(clientTemplateSlot(element,name).closest('td')!==element.children[index])throw new Error('invalid_file_column_template')
+    if(element.querySelector('[data-xp-slot="path"]'))clientTemplateSlot(element,'path','bdi')
+    return element
+  }
+  const cloneAction=(purging=false)=>{
+    const element=cloneClientTemplate(purging?purge!:action,'button',['label']) as HTMLButtonElement
+    if(element.getAttribute('type')!=='button')throw new Error('invalid_file_action_template')
+    return element
+  }
+  const cloneEmpty=()=>{
+    const element=cloneClientTemplate(empty!,'tr',['message'])
+    if(clientTemplateSlot(element,'message','td').getAttribute('colspan')!=='7')throw new Error('invalid_file_empty_template')
+    return element
+  }
+  cloneRow();cloneAction();if(trash)cloneAction(true);else cloneEmpty()
+  return{cloneRow,cloneAction,cloneEmpty}
+}
+
 function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
   document.querySelectorAll<HTMLElement>('[data-file-manager="browse"]').forEach(root=>{
     if(root.dataset.fileWorkspaceBound==='true')return
     root.dataset.fileWorkspaceBound='true'
     const copy=(message: string, values?: MessageValues) => xpT(message, values)
-    const denied='[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
+    const denied='[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable],[aria-disabled="true"],fieldset:disabled'
     const username=root.dataset.accountUsername??'',editor=root.querySelector<HTMLTextAreaElement>('#jailed-code-editor'),tbody=root.querySelector<HTMLTableSectionElement>('[data-file-manager-table] tbody'),status=root.querySelector<HTMLElement>('[data-file-status]')
     const transport=(window as Window&{xpanelSessionRequest?:(method:string,path:string,body:unknown)=>Promise<unknown>}).xpanelSessionRequest
     if(!editor||!tbody||!status)return
     const current=root.querySelector<HTMLElement>('[data-file-current-path]'),selected=root.querySelector<HTMLElement>('[data-file-selected-path]')
     const eligible=()=>root.isConnected&&root.dataset.fileManager==='browse'&&!root.closest(denied)&&root.dataset.accountUsername===username&&/^[a-z][a-z0-9]{0,15}$/.test(username)
     if(!eligible()||typeof transport!=='function'){root.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLTextAreaElement>('button,input,textarea').forEach(node=>{node.disabled=true});status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('File operations are unavailable.');return}
+    let templates:ReturnType<typeof fileWorkspaceTemplates>,presentation:ReturnType<typeof createFilePresentation>
+    try{templates=fileWorkspaceTemplates(root,false)}catch{root.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLTextAreaElement>('button,input,textarea').forEach(node=>{node.disabled=true});status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('File operations are unavailable.');return}
     const send:WorkspaceSend=body=>{if(!eligible())return Promise.reject(Object.assign(new Error('workspace_context_changed'),{stateChanged:false}));return transport('POST','/api/accounts/'+encodeURIComponent(username)+'/files',body)}
     let renderedEntries:WorkspaceEntry[]|null=null,renderedRead=false
-    const setTechnical=(node:HTMLElement,value:string)=>{const bdi=document.createElement('bdi');bdi.dir='ltr';bdi.className='xp-mono xp-chart-technical-value';bdi.textContent=value;node.replaceChildren(bdi)}
     const size=(bytes:number)=>{const units=['B','KiB','MiB','GiB','TiB'];let amount=bytes,index=0;while(amount>=1024&&index<units.length-1){amount/=1024;index++}return amount.toFixed(index===0?0:amount>=10?1:2)+' '+units[index]}
     const when=(value:string)=>formatDisplayDateTime(value)
-    const actionButton=(parent:HTMLElement,label:string,kind:string,path:string,action:()=>void)=>{const button=document.createElement('button');button.type='button';button.className='xp-btn';button.dataset.fileWorkspaceAction=kind;button.dataset.path=path;button.textContent=label;button.addEventListener('click',event=>{event.stopPropagation();if(button.disabled||!eligible())return;action()});parent.appendChild(button);return button}
+    try{presentation=createFilePresentation(root,copy,size,when)}catch{root.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLTextAreaElement>('button,input,textarea').forEach(node=>{node.disabled=true});status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('File operations are unavailable.');return}
+    const actionButton=(parent:HTMLElement,label:string,kind:string,path:string,action:()=>void)=>{const button=templates.cloneAction();button.dataset.fileWorkspaceAction=kind;button.dataset.path=path;clientTemplateSlot(button,'label').textContent=label;button.addEventListener('click',event=>{event.stopPropagation();if(button.disabled||!eligible())return;action()});parent.appendChild(button);return button}
     const paint=(entries:WorkspaceEntry[],observed:boolean)=>{
       tbody.textContent=''
       for(const entry of entries){
-        const row=document.createElement('tr');row.dataset.filePath=entry.path
-        const cell=(text:string,technical=false)=>{const node=document.createElement('td');if(technical)setTechnical(node,text);else node.textContent=text;row.appendChild(node);return node}
-        cell(entry.name,true);cell(entry.kind==='directory'?copy(msgctxt('file-workspace-client', 'Folder')):entry.kind==='symlink'?copy('Symbolic link'):copy(msgctxt('file-workspace-client', 'File')));cell(size(entry.sizeBytes),true);cell(entry.mode.toString(8).padStart(4,'0'),true);const modifiedCell=cell('',true),modifiedTime=document.createElement('time');modifiedTime.dateTime=entry.mtime;modifiedTime.textContent=when(entry.mtime);modifiedCell.querySelector('bdi')!.appendChild(modifiedTime)
-        const actions=document.createElement('td');actions.className='xp-file-row-actions'
+        const row=templates.cloneRow();row.dataset.filePath=entry.path;row.dataset.fileKind=entry.kind;row.dataset.fileKey=entry.path;clientTemplateSlot(row,'select','input').setAttribute('aria-label',entry.name);clientTemplateSlot(row,'owner','span').textContent=copy('Not read')
+        clientTemplateSlot(row,'name').textContent=entry.name
+        if(row.querySelector('[data-xp-slot="path"]'))clientTemplateSlot(row,'path').textContent=entry.path
+        clientTemplateSlot(row,'kind').textContent=entry.kind==='directory'?copy(msgctxt('file-workspace-client', 'Folder')):entry.kind==='symlink'?copy('Symbolic link'):copy(msgctxt('file-workspace-client', 'File'))
+        clientTemplateSlot(row,'size').textContent=size(entry.sizeBytes);clientTemplateSlot(row,'mode').textContent=entry.mode.toString(8).padStart(4,'0')
+        const modifiedTime=clientTemplateSlot(row,'modified','time') as HTMLTimeElement;modifiedTime.dateTime=entry.mtime;modifiedTime.textContent=when(entry.mtime)
+        const actions=clientTemplateSlot(row,'actions','td')
         if(entry.kind==='symlink'){actions.textContent=copy('Link actions are unavailable.')}
         else{
-          actionButton(actions,entry.kind==='directory'?copy(msgctxt('file-workspace-client', 'Open')):copy(msgctxt('file-workspace-client', 'Edit')),entry.kind==='directory'?'directory':'open',entry.path,()=>{if(controller.state.uncertain){void controller.review();return}void(entry.kind==='directory'?controller.navigate(entry.path):controller.open(entry.path))})
+          actionButton(actions,entry.kind==='directory'?copy(msgctxt('file-workspace-client', 'Open')):copy(msgctxt('file-workspace-client', 'Edit')),entry.kind==='directory'?'directory':'open',entry.path,()=>{if(controller.state.uncertain){void controller.review();return}if(entry.kind==='directory')void controller.navigate(entry.path);else void controller.open(entry.path).then(ok=>{if(ok)presentation.openEditor()})})
           if(entry.kind==='file')actionButton(actions,copy('Download'),'download',entry.path,()=>{void controller.readAction(async request=>{const bytes=workspaceBinary(await request({op:'get-bytes',path:entry.path}),entry.path),url=URL.createObjectURL(new Blob([Uint8Array.from(bytes)]));try{const link=document.createElement('a');link.href=url;link.download=entry.name;link.click()}finally{URL.revokeObjectURL(url)}})})
           actionButton(actions,copy('Permissions'),'chmod',entry.path,()=>{void (async()=>{
             if(controller.state.busy||controller.state.uncertain||!eligible())return
@@ -166,9 +287,10 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
           })()})
           actionButton(actions,copy(msgctxt('file-workspace-client', 'Move to trash')),'trash',entry.path,()=>{void controller.perform(async()=>{const ok=await askDialog?.({title:copy(msgctxt('file-workspace-client', 'Move to trash')),body:entry.path,confirm:copy(msgctxt('file-workspace-client', 'Move to trash')),danger:true});return ok===true?{op:'trash',path:entry.path}:null},async(request,body,result)=>{workspaceTrash(result,entry.path);const rows=workspaceListing(await request({op:'list',path:entry.path.split('/').slice(0,-1).join('/')}),entry.path.split('/').slice(0,-1).join('/'));if(rows.some(item=>item.path===entry.path))throw new Error('trash_not_observed')},async request=>{workspaceListing(await request({op:'list',path:entry.path.split('/').slice(0,-1).join('/')}),entry.path.split('/').slice(0,-1).join('/'))})})
         }
-        row.appendChild(actions);tbody.appendChild(row)
+        tbody.appendChild(row)
       }
-      if(!entries.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=6;cell.textContent=observed?copy('This directory is empty.'):copy('Directory contents have not been read.');row.appendChild(cell);tbody.appendChild(row)}
+      if(!entries.length){const row=templates.cloneEmpty();clientTemplateSlot(row,'message').textContent=observed?copy('This directory is empty.'):copy('Directory contents have not been read.');tbody.appendChild(row)}
+      presentation.reset(entries.map(entry=>({...entry,key:entry.path})),observed)
     }
     const render=(state:WorkspaceState)=>{
       root.setAttribute('aria-busy',String(state.busy));root.dataset.fileLoading=String(state.loading);root.dataset.fileUncertain=String(state.uncertain);root.dataset.fileRead=String(state.hasListed)
@@ -177,7 +299,8 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
       if(current)current.textContent=state.directory||'.'
       if(selected)selected.textContent=state.opened?.path??copy('No file selected')
       if(renderedEntries!==state.entries||renderedRead!==state.hasListed){renderedEntries=state.entries;renderedRead=state.hasListed;paint(state.entries,state.hasListed)}
-      root.querySelectorAll<HTMLButtonElement>('button').forEach(button=>{const action=button.dataset.action||button.dataset.fileWorkspaceAction;const review=action==='refresh-files'||action==='reload-file';button.disabled=state.busy||!eligible()||(state.uncertain&&!review&&action!=='download')||(action==='save-file'&&(!state.opened||!state.dirty))||(action==='reload-file'&&!state.opened&&!state.uncertain)||(action==='parent-directory'&&state.directory==='')})
+      root.querySelectorAll<HTMLButtonElement>('button').forEach(button=>{const action=button.dataset.action||button.dataset.fileWorkspaceAction;const review=action==='refresh-files'||action==='reload-file';button.disabled=!!button.closest(denied)||state.busy||!eligible()||(state.uncertain&&!review&&action!=='download')||(action==='save-file'&&(!state.opened||!state.dirty))||(action==='reload-file'&&!state.opened&&!state.uncertain)||(action==='parent-directory'&&state.directory==='')})
+      presentation.sync(state.busy||state.loading||state.uncertain||!eligible(),state)
       status.hidden=!state.notice;status.dataset.state=state.noticeKind;status.setAttribute('role',state.noticeKind==='failed'||state.noticeKind==='uncertain'?'alert':'status');status.textContent=state.notice
     }
     const controller=createFileWorkspace({send,confirm:askDialog,changed:render})
@@ -200,8 +323,9 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
     root.querySelector<HTMLButtonElement>('[data-action="upload-file"]')?.addEventListener('click',()=>{if(!eligible()||controller.state.busy||controller.state.uncertain||!picker)return;uploadDirectory=controller.state.directory;picker.click()})
     picker?.addEventListener('change',()=>{
       const file=picker.files?.[0],directory=uploadDirectory;picker.value='';uploadDirectory=null
-      if(!file||directory===null||!eligible())return
-      void controller.perform(async()=>{const path=workspacePath((directory?directory+'/':'')+workspaceLeaf(file.name));if(!Number.isSafeInteger(file.size)||file.size>WORKSPACE_BINARY_BYTES)throw new Error('binary_limit_exceeded');const buffer=await file.arrayBuffer();if(buffer.byteLength!==file.size)throw new Error('upload_size_changed');const bytes=new Uint8Array(buffer);let binary='';for(let offset=0;offset<bytes.length;offset+=0x8000)binary+=String.fromCharCode(...bytes.subarray(offset,offset+0x8000));return{op:'put-bytes',path,contentBase64:btoa(binary),overwrite:false,mode:0o640}},async(request,body,result)=>{const path=body.path as string,entry=workspaceEntry(result,path),bytes=workspaceBinary(await request({op:'get-bytes',path}),path);if(entry.kind!=='file'||entry.mode!==0o640||entry.sizeBytes!==file.size||bytes.length!==file.size)throw new Error('invalid_upload_ack');let binary='';for(let offset=0;offset<bytes.length;offset+=0x8000)binary+=String.fromCharCode(...bytes.subarray(offset,offset+0x8000));if(btoa(binary)!==body.contentBase64)throw new Error('upload_readback_mismatch')},async(request,body)=>{workspaceBinary(await request({op:'get-bytes',path:body.path}),body.path as string)})
+      if(!file||directory===null||!eligible()||controller.state.busy||controller.state.uncertain)return
+      const upload=presentation.upload(file.name,file.size);presentation.uploadState(upload,'Reading upload',true)
+      void controller.perform(async()=>{const path=workspacePath((directory?directory+'/':'')+workspaceLeaf(file.name));if(!Number.isSafeInteger(file.size)||file.size>WORKSPACE_BINARY_BYTES)throw new Error('binary_limit_exceeded');const buffer=await file.arrayBuffer();if(buffer.byteLength!==file.size)throw new Error('upload_size_changed');const bytes=new Uint8Array(buffer);let binary='';for(let offset=0;offset<bytes.length;offset+=0x8000)binary+=String.fromCharCode(...bytes.subarray(offset,offset+0x8000));presentation.uploadState(upload,'Sending upload',true);return{op:'put-bytes',path,contentBase64:btoa(binary),overwrite:false,mode:0o640}},async(request,body,result)=>{presentation.uploadState(upload,'Verifying upload',true);const path=body.path as string,entry=workspaceEntry(result,path),bytes=workspaceBinary(await request({op:'get-bytes',path}),path);if(entry.kind!=='file'||entry.mode!==0o640||entry.sizeBytes!==file.size||bytes.length!==file.size)throw new Error('invalid_upload_ack');let binary='';for(let offset=0;offset<bytes.length;offset+=0x8000)binary+=String.fromCharCode(...bytes.subarray(offset,offset+0x8000));if(btoa(binary)!==body.contentBase64)throw new Error('upload_readback_mismatch')},async(request,body)=>{workspaceBinary(await request({op:'get-bytes',path:body.path}),body.path as string)}).then(ok=>{presentation.uploadState(upload,ok?'Upload confirmed':controller.state.uncertain?'Upload outcome uncertain':'Upload failed')})
     })
     window.addEventListener('beforeunload',event=>{if(controller.state.dirty||controller.state.uncertain){event.preventDefault();event.returnValue=''}})
     render(controller.state);void controller.refresh()
@@ -213,7 +337,7 @@ function bindTrashWorkspace(askDialog?:WorkspaceConfirm):void{
     if(root.dataset.fileTrashBound==='true')return
     root.dataset.fileTrashBound='true'
     const copy=(message: string, values?: MessageValues) => xpT(message, values)
-    const denied='[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
+    const denied='[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable],[aria-disabled="true"],fieldset:disabled'
     const username=root.dataset.accountUsername??''
     const tbody=root.querySelector<HTMLTableSectionElement>('[data-file-manager-table] tbody'),status=root.querySelector<HTMLElement>('[data-file-status]')
     const transport=(window as Window&{xpanelSessionRequest?:(method:string,path:string,body:unknown)=>Promise<unknown>}).xpanelSessionRequest
@@ -221,29 +345,34 @@ function bindTrashWorkspace(askDialog?:WorkspaceConfirm):void{
     const eligible=()=>root.isConnected&&root.dataset.fileManager==='trash'&&!root.closest(denied)&&root.dataset.accountUsername===username&&/^[a-z][a-z0-9]{0,15}$/.test(username)
     const disable=()=>root.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLTextAreaElement>('button,input,textarea').forEach(node=>{node.disabled=true})
     if(!eligible()||typeof transport!=='function'){disable();status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('Trash operations are unavailable.');return}
+    let templates:ReturnType<typeof fileWorkspaceTemplates>,presentation:ReturnType<typeof createFilePresentation>
+    const table=tbody.closest<HTMLElement>('[data-file-table-wrap]')
+    try{if(!table||!root.contains(table))throw new Error('file_table_unavailable');templates=fileWorkspaceTemplates(root,true)}catch{disable();status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('Trash operations are unavailable.');return}
     const send:WorkspaceSend=body=>{if(!eligible())return Promise.reject(Object.assign(new Error('workspace_context_changed'),{stateChanged:false}));return transport('POST','/api/accounts/'+encodeURIComponent(username)+'/files',body)}
     const size=(bytes:number)=>{const units=['B','KiB','MiB','GiB','TiB'];let amount=bytes,index=0;while(amount>=1024&&index<units.length-1){amount/=1024;index++}return amount.toFixed(index===0?0:amount>=10?1:2)+' '+units[index]}
     const when=(value:string)=>formatDisplayDateTime(value)
+    try{presentation=createFilePresentation(root,copy,size,when)}catch{disable();status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('Trash operations are unavailable.');return}
     let busy=false,uncertain=false
     const setStatus=(text:string,kind:string)=>{status.hidden=!text;status.dataset.state=kind;status.setAttribute('role',kind==='failed'||kind==='uncertain'?'alert':'status');status.textContent=text}
-    const sync=()=>{root.setAttribute('aria-busy',String(busy));root.dataset.fileUncertain=String(uncertain);root.querySelectorAll<HTMLButtonElement>('button').forEach(button=>{const review=button.dataset.action==='refresh-files';button.disabled=busy||!eligible()||(uncertain&&!review)})}
-    const empty=root.querySelector<HTMLElement>('[data-trash-empty]'),table=tbody.closest<HTMLElement>('.xp-table-wrap')
+    const sync=()=>{root.setAttribute('aria-busy',String(busy));root.dataset.fileUncertain=String(uncertain);root.querySelectorAll<HTMLButtonElement>('button').forEach(button=>{const review=button.dataset.action==='refresh-files';button.disabled=!!button.closest(denied)||busy||!eligible()||(uncertain&&!review)});presentation.sync(busy||uncertain||!eligible())}
+    const empty=root.querySelector<HTMLElement>('[data-trash-empty]')
     const paint=(items:{id:string;originalPath:string;name:string;sizeBytes:number;deletedAt:string}[])=>{
       tbody.textContent=''
       // An observed empty read swaps the table for the approved empty-state block.
       if(empty)empty.hidden=items.length>0
       if(table)table.hidden=!items.length
       for(const item of items){
-        const row=document.createElement('tr');row.dataset.filePath=item.originalPath;row.dataset.trashId=item.id
-        const cell=(value:string,technical=false)=>{const node=document.createElement('td');if(technical){const bdi=document.createElement('bdi');bdi.dir='ltr';bdi.className='xp-mono xp-chart-technical-value';bdi.textContent=value;node.replaceChildren(bdi)}else node.textContent=value;row.appendChild(node);return node}
-        cell(item.originalPath,true);cell(copy('Trashed item'));cell(size(item.sizeBytes),true);cell(copy('Not recorded'));const deletedCell=cell('',true),deletedTime=document.createElement('time');deletedTime.dateTime=item.deletedAt;deletedTime.textContent=when(item.deletedAt);deletedCell.querySelector('bdi')!.appendChild(deletedTime)
-        const actions=document.createElement('td')
-        const restore=document.createElement('button');restore.type='button';restore.className='xp-btn';restore.dataset.fileWorkspaceAction='restore';restore.dataset.path=item.originalPath;restore.textContent=copy('Restore')
+        const row=templates.cloneRow();row.dataset.filePath=item.originalPath;row.dataset.trashId=item.id;row.dataset.fileKey=item.id;clientTemplateSlot(row,'select','input').setAttribute('aria-label',item.originalPath);clientTemplateSlot(row,'owner','span').textContent=copy('Not read')
+        clientTemplateSlot(row,'name').textContent=item.originalPath;clientTemplateSlot(row,'kind').textContent=copy('Trashed item');clientTemplateSlot(row,'size').textContent=size(item.sizeBytes);clientTemplateSlot(row,'mode').textContent=copy('Not recorded')
+        const deletedTime=clientTemplateSlot(row,'modified','time') as HTMLTimeElement;deletedTime.dateTime=item.deletedAt;deletedTime.textContent=when(item.deletedAt)
+        const actions=clientTemplateSlot(row,'actions','td')
+        const restore=templates.cloneAction();restore.dataset.fileWorkspaceAction='restore';restore.dataset.path=item.originalPath;clientTemplateSlot(restore,'label').textContent=copy('Restore')
         restore.addEventListener('click',event=>{event.stopPropagation();if(restore.disabled||!eligible())return;void restoreItem(item)})
-        const purge=document.createElement('button');purge.type='button';purge.className='xp-btn xp-btn--quiet';purge.dataset.fileWorkspaceAction='purge';purge.dataset.path=item.originalPath;purge.textContent=copy('Delete for good…');purge.setAttribute('aria-label',copy('Delete {path} for good',{path:item.originalPath}))
+        const purge=templates.cloneAction(true);purge.dataset.fileWorkspaceAction='purge';purge.dataset.path=item.originalPath;clientTemplateSlot(purge,'label').textContent=copy('Delete for good…');purge.setAttribute('aria-label',copy('Delete {path} for good',{path:item.originalPath}))
         purge.addEventListener('click',event=>{event.stopPropagation();if(purge.disabled||!eligible())return;void purgeItem(item)})
-        actions.append(restore,purge);row.appendChild(actions);tbody.appendChild(row)
+        actions.append(restore,purge);tbody.appendChild(row)
       }
+      presentation.reset(items.map(item=>({key:item.id,name:item.name,path:item.originalPath,kind:'trash',sizeBytes:item.sizeBytes,mtime:item.deletedAt})),true)
     }
     const read=async()=>{paint(workspaceTrashList(await send({op:'list-trash'})) as {id:string;originalPath:string;name:string;sizeBytes:number;deletedAt:string}[])}
     const load=async()=>{
@@ -306,4 +435,4 @@ function bindTrashWorkspace(askDialog?:WorkspaceConfirm):void{
   })
 }
 
-export const FILE_WORKSPACE_CLIENT_BINDING = `(function(askDialog) { const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WORKSPACE_EDIT_BYTES=${WORKSPACE_EDIT_BYTES};const WORKSPACE_BINARY_BYTES=${WORKSPACE_BINARY_BYTES};${workspaceObject.toString()};${workspacePath.toString()};${workspaceLeaf.toString()};${workspaceMode.toString()};${workspaceTextBytes.toString()};${workspaceTime.toString()};${workspaceEntry.toString()};${workspaceListing.toString()};${workspaceText.toString()};${workspaceBinary.toString()};${workspaceWriteUncertain.toString()};${createFileWorkspace.toString()};${workspaceTrash.toString()};${workspaceTrashList.toString()};(${bindFileWorkspace.toString()})(askDialog);(${bindTrashWorkspace.toString()})(askDialog); })`
+export const FILE_WORKSPACE_CLIENT_BINDING = `(function(askDialog) { const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WORKSPACE_EDIT_BYTES=${WORKSPACE_EDIT_BYTES};const WORKSPACE_BINARY_BYTES=${WORKSPACE_BINARY_BYTES};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${createFilePresentation.toString()};${fileWorkspaceTemplates.toString()};${workspaceObject.toString()};${workspacePath.toString()};${workspaceLeaf.toString()};${workspaceMode.toString()};${workspaceTextBytes.toString()};${workspaceTime.toString()};${workspaceEntry.toString()};${workspaceListing.toString()};${workspaceText.toString()};${workspaceBinary.toString()};${workspaceWriteUncertain.toString()};${createFileWorkspace.toString()};${workspaceTrash.toString()};${workspaceTrashList.toString()};(${bindFileWorkspace.toString()})(askDialog);(${bindTrashWorkspace.toString()})(askDialog); })`

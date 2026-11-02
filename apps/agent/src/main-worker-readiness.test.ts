@@ -73,7 +73,39 @@ vi.mock('./server.ts', () => ({
   listenAgentSocket: async () => { harness.listens++; return { close: harness.listenerClose } },
   loadAgentCredentialFile: async () => 'isolated-test-service-credential',
 }))
-vi.mock('./services/mariadb.ts', () => ({ DEFAULT_MARIADB_ADMIN_CNF: '/etc/xpanel/test.cnf', createMariaDbSqlRunner: () => async () => undefined, MariaDbServiceAdapter: class {} }))
+vi.mock('./services/mariadb.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('./services/mariadb.ts')>()
+  return {
+    DEFAULT_MARIADB_ADMIN_CNF: '/etc/xpanel/test.cnf',
+    createMariaDbSqlRunner: () => async () => undefined,
+    MariaDbServiceAdapter: class {},
+    mariadbSocketForFamily: actual.mariadbSocketForFamily,
+    defaultCommandRunner: async () => { throw new Error('isolated readiness fixture must not execute native MariaDB commands') },
+  }
+})
+// H composition policy only: resolve the declared isolated API identity without
+// reading host groups, environment credentials or loading the native peer addon.
+vi.mock('./peer-identity.ts', () => ({
+  // Callable shape only; native operations remain unavailable in this unit fixture.
+  loadNativePeerIdentityAddon: async (): Promise<import('./peer-identity.ts').NativePeerIdentityAddon> => {
+    const denyNativePeer = (..._args: unknown[]): never => {
+      throw new Error('isolated readiness fixture must not execute native peer identity methods')
+    }
+    return {
+      openListener: denyNativePeer,
+      acceptPeer: denyNativePeer,
+      verifyListenerSocket: denyNativePeer,
+      closeListener: denyNativePeer,
+      closeFd: denyNativePeer,
+      getSocketPeerCred: denyNativePeer,
+      getUnixSocketPeer: denyNativePeer,
+    }
+  },
+  resolveProvisionedPeerUids: async (policy: { gid: number; allowRootPeer: boolean }) => {
+    if (Object.keys(policy).length !== 2 || policy.gid !== 42000 || policy.allowRootPeer !== false) throw new Error('unexpected isolated readiness peer policy')
+    return new Set([42001])
+  },
+}))
 
 import { AGENT_SHUTDOWN_TIMEOUT_MS, attachAgentProcessLifecycle, startAgentDaemon } from './main.ts'
 

@@ -6,7 +6,7 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 import { Readable } from 'node:stream'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { buildReleaseArtifact, createTarGzBuffer, parseTarGzBuffer, REQUIRED_ROOT_FILES, REQUIRED_RELEASE_ENTRYPOINTS, REQUIRED_SYSTEMD_UNITS } from './package-release.mjs'
-import { RELEASE_VERIFICATION_LIMITS, serializeManifestPayload, signManifestPayload, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive, verifyAuthenticatedReleaseTree, withAuthenticatedReleaseArchive } from './release-verifier.mjs'
+import { RELEASE_VERIFICATION_LIMITS, REQUIRED_LIFECYCLE_CONTROL_FILES, serializeManifestPayload, signManifestPayload, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive, verifyAuthenticatedReleaseTree, withAuthenticatedReleaseArchive } from './release-verifier.mjs'
 
 const roots: string[] = []
 const temp = (): string => { const path = mkdtempSync(join(tmpdir(), 'xpanel-runtime-verifier-')); roots.push(path); return path }
@@ -23,6 +23,10 @@ beforeAll(async () => {
   const sourceRoot = temp(), workspace = resolve(import.meta.dirname, '..')
   const write = (path: string, bytes: string | Buffer) => { mkdirSync(dirname(join(sourceRoot, path)), { recursive: true }); writeFileSync(join(sourceRoot, path), bytes) }
   for (const path of [...REQUIRED_ROOT_FILES, ...REQUIRED_SYSTEMD_UNITS]) write(path, readFileSync(join(workspace, path)))
+  // Synthetic historical control inventory tests presence only. These stubs are never installed or run.
+  for (const path of REQUIRED_LIFECYCLE_CONTROL_FILES.filter(path => !path.startsWith('scripts/install-bootstrap.'))) {
+    if (!REQUIRED_ROOT_FILES.includes(path)) write(path, path.endsWith('.sh') || path === 'bin/xpanel-ctl' ? '#!/bin/sh\nexit 0\n' : 'export {}\n')
+  }
   for (const path of REQUIRED_RELEASE_ENTRYPOINTS) write(path, 'export {}\n')
   for (const name of ['api', 'agent', 'web']) {
     write(`apps/${name}/package.json`, JSON.stringify({ name: `@xpanel/${name}`, type: 'module', exports: { '.': './src/index.ts' } }))
@@ -47,6 +51,12 @@ const rewriteManifest = (change: (manifest: any) => void): Buffer => rewrite(ent
 })
 
 describe('strict authenticated runtime release verifier, diagnostic archives only', () => {
+  it('keeps historical lifecycle control presence valid without optional fresh-install tooling', async () => {
+    const report = await verify()
+    expect(report.lifecycleControlsPresent).toBe(true)
+    expect(report.manifest.files.some(file => file.path.startsWith('scripts/install-bootstrap.'))).toBe(false)
+    expect(report.installReady).toBe(false)
+  })
   it('authenticates existing packager bytes with a mandatory independent digest and shared HMAC representation', async () => {
     const report = await verify()
     expect(report.ok).toBe(true)

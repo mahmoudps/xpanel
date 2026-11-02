@@ -106,6 +106,7 @@ import type {
   FirewallState,
   MailRoutingState,
   MutationOptions,
+  ServiceUserDeletionOptions,
   ServerSettingsMutationOptions,
   RestoreGenerationMutationOptions,
   NewAccount,
@@ -276,6 +277,21 @@ export class StateStore {
     this.rootDir = rootDir
     this.hooks = hooks
     this.writerLock = new WriterLock(rootDir, lockOptions)
+  }
+
+  /** Register before startup/request barriers; callbacks must not reenter state operations. */
+  registerAccountContactIndexRecovery(repair: (account: Account & { suspendedAt: string | null }) => Promise<void>): void {
+    this.writerLock.registerAccountContactProjectionRecovery(async recovery => {
+      const current = validateAccountFile(await readJsonIfExists(this.path(recovery.relPath)))
+      if (current.id !== recovery.accountId || current.username !== recovery.username) return fail('CONFLICT', 'contact projection source identity changed; recovery evidence retained')
+      await repair({ ...toPublicAccount(current), suspendedAt: current.suspendedAt })
+    })
+  }
+
+  /** Bounded SQL projection reads only: retain recovery exclusion until the read settles. */
+  withRecoveredAccountProjection<T>(read: () => Promise<T>): Promise<T> {
+    this.assertNotReentrant()
+    return this.mutex.run(() => this.runOperation(() => this.writerLock.readUnderRecoveryLock(read)))
   }
 
   setHooks(hooks: StateStoreHooks): void {
@@ -2187,13 +2203,14 @@ export class StateStore {
     })
   }
 
-  deleteServiceUser(id: Id, opts?: MutationOptions): Promise<boolean> {
+  deleteServiceUser(id: Id, opts?: ServiceUserDeletionOptions): Promise<boolean> {
     return this.withMutationLock(opts, async (lease) => {
       if (!isUuid(id)) return false
       const uid = id.toLowerCase()
       const current = (await this.readAllServiceUsersUnlocked()).find((u) => u.id === uid)
       if (!current) return false
       const account = mustExist(await this.findStoredAccountById(current.accountId), 'account', current.accountId)
+      await opts?.authorize?.(toPublicAccount(account), toPublicServiceUser(current))
       return this.removeStatePath(lease, join(this.accountDir(account.username), 'users', `${current.id}.json`))
     })
   }

@@ -24,6 +24,7 @@ import type { Db } from '@xpanel/db'
 import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
 import type { StateStore, WriterLease } from '@xpanel/state'
 import { readRuntimeRegistry } from '../../agent/src/account-runtime.ts'
+import { validateQuotaFilesystem } from '../../agent/src/services/quota.ts'
 import { passwordHashFromInput } from './auth.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import { createContactToolsRoutes, createContactMetadataAccess, assertContactMutationCapacity } from './mail/contact-tools-routes.ts'
@@ -579,6 +580,9 @@ const DEFAULT_DNS_TEMPLATES: DnsTemplateDefinition[] = [
 // Extended Features Store (backed by join(store.rootDir, 'extended'))
 // ---------------------------------------------------------------------------
 
+/** Internal held StateStore lease, never a JSON field or caller-selected bypass. */
+export interface AccountTemplateWriteFence { assertFencingToken(): Promise<unknown> }
+
 export class ExtendedFeaturesStore {
   readonly baseDir: string
 
@@ -595,8 +599,15 @@ export class ExtendedFeaturesStore {
     return existing ?? fallback
   }
 
-  async write<T>(relPath: string, value: T): Promise<T> {
-    await atomicWriteJson(this.filePath(relPath), value)
+  async write<T>(relPath: string, value: T, options?: { templateWriter?: AccountTemplateWriteFence }): Promise<T> {
+    const target = this.filePath(relPath), templates = this.filePath('accounts/templates.json')
+    const template = process.platform === 'win32' ? target.toLowerCase() === templates.toLowerCase() : target === templates
+    // This source is pinned by prepared account activation. Every writer must participate in
+    // its StateStore fence; an ordinary extended-file write cannot bypass that one-path rule.
+    if (template && !options?.templateWriter) return fail('PRECONDITION_FAILED', 'account template writes require the held StateStore writer', { stateChanged: false })
+    if (template) await options!.templateWriter!.assertFencingToken()
+    await atomicWriteJson(target, value)
+    if (template) await options!.templateWriter!.assertFencingToken()
     return value
   }
 }
@@ -749,6 +760,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           initQuotas?: boolean
         }>(req)
 
+        const quotaFilesystem = validateQuotaFilesystem(body.quotaFilesystem ?? '/home')
+
         const suggested = suggestServerSettings({ cores: 4, memoryMb: 8192 })
         const existingSettings = await helpers.store.getServerSettings()
         const existingIps = await helpers.store.listServerIps()
@@ -811,19 +824,12 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
 
         await helpers.store.markSetupComplete()
 
-        const quotaFilesystem = body.quotaFilesystem ?? '/home'
-        const quotaInitialized = body.initQuotas !== false
-        if (quotaInitialized) {
-          await ext.write('quota-status.json', {
-            filesystem: quotaFilesystem,
-            status: 'enabled',
-            commands: [
-              ['/usr/sbin/quotacheck', '-cugm', quotaFilesystem],
-              ['/usr/sbin/quotaon', '-vug', quotaFilesystem],
-            ],
-            initializedAt: new Date().toISOString(),
-          })
-        }
+        const quotaInitializationRequested = body.initQuotas !== false
+        // Setup has no trusted host quota port. Preserve existing observed state and never turn intent into execution proof.
+        const quotaInitialized = false
+        const quotaInitialization = quotaInitializationRequested
+          ? { status: 'unavailable', reason: 'host_quota_initialization_not_connected' }
+          : { status: 'not_requested', reason: null }
 
         const completedAt = new Date().toISOString()
         await ext.write('setup-wizard.json', {
@@ -836,6 +842,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           primaryIpv4,
           quotaFilesystem,
           quotaInitialized,
+          quotaInitializationRequested,
+          quotaInitialization,
         })
 
         const reconcile = await helpers.triggerReconcile(caller, { force: true })
@@ -854,6 +862,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           settings,
           primaryIp,
           quotaInitialized,
+          quotaInitialization,
           reconcile: reconcile?.body ?? null,
         })
       }
@@ -923,30 +932,10 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       const caller = await helpers.requireCaller(req)
       await helpers.assertRoot(caller, 'server.quota_init')
       const body = await readJsonBody<{ filesystem?: string }>(req)
-      const filesystem = body.filesystem?.trim() || '/home'
-      if (!filesystem.startsWith('/')) {
-        return fail('VALIDATION', 'filesystem must be an absolute mount path')
-      }
-      const commands = [
-        ['/usr/sbin/quotacheck', '-cugm', filesystem],
-        ['/usr/sbin/quotaon', '-vug', filesystem],
-      ]
-      const initializedAt = new Date().toISOString()
-      const state = await ext.write('quota-status.json', {
-        filesystem,
-        status: 'enabled',
-        commands,
-        initializedAt,
+      const filesystem = validateQuotaFilesystem(body.filesystem === undefined ? '/home' : body.filesystem)
+      return fail('SERVICE_UNAVAILABLE', 'host quota initialization is not connected; no quota state was changed', {
+        filesystem, stateChanged: false, reason: 'host_quota_initialization_not_connected',
       })
-      await helpers.emitAudit({
-        actor: caller.principal.username,
-        action: 'server.quota_init',
-        target: `filesystem:${filesystem}`,
-        detail: { filesystem, commands },
-        outcome: 'ok',
-        principalId: caller.principal.id,
-      })
-      return jsonResponse({ ok: true, ...state })
     }
 
     // =========================================================================

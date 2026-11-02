@@ -1,8 +1,9 @@
 import './i18n.ts'
 import { DISPLAY_DATETIME_BINDING } from './tokens.ts'
+import { MOBILE_NAVIGATION_CLIENT_SCRIPT } from './mobile-navigation-client.ts'
 
 /** Shared JSON session transport and the interactive sign-in flow. Secrets stay in this page only. */
-export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
+export const LOGIN_CLIENT_SCRIPT = MOBILE_NAVIGATION_CLIENT_SCRIPT + /* js */ String.raw`
 (function () {
   'use strict';
   var formatDisplayDateTime = ${DISPLAY_DATETIME_BINDING};
@@ -25,6 +26,8 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
   var shell = document.querySelector('[data-auth-state]');
   var login = document.querySelector('[data-login-form]');
   var mfaDisabled = document.documentElement.getAttribute('data-mfa-mode') === 'disabled';
+  var security = document.querySelector('[data-account-security="two-factor"]');
+  var securityReadOnly = Boolean(security && security.getAttribute('data-auth-readonly') === 'true');
   var errorBox = document.querySelector('[data-auth-error]');
   var statusBox = document.querySelector('[data-auth-status]');
   var lockedUntil = 0;
@@ -38,9 +41,10 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
     if (statusBox) statusBox.textContent = error ? '' : text;
   }
   function setState(state) { if (shell) shell.setAttribute('data-auth-state', state); }
+  function factorManagementBlocked() { return mfaDisabled || securityReadOnly; }
   function busy(form, active) {
     form.setAttribute('aria-busy', String(active));
-    form.querySelectorAll('button[type="submit"]').forEach(function (button) { button.disabled = active || lockedUntil > Date.now(); });
+    form.querySelectorAll('button[type="submit"]').forEach(function (button) { button.disabled = active || lockedUntil > Date.now() || ((form === setup || form === enroll) && factorManagementBlocked()); });
   }
   function clearCredentials() {
     document.querySelectorAll('[name="password"], [name="currentPassword"], [name="newPassword"], [name="confirmPassword"], [name="totpCode"], [name="recoveryCode"], [name="code"]').forEach(function (input) { input.value = ''; });
@@ -233,8 +237,11 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
   }
 
   var setup = document.querySelector('[data-auth-setup-form]');
+  if (securityReadOnly) {
+    security.querySelectorAll('input,button,select,textarea').forEach(function (control) { control.disabled = true; });
+  }
   if (setup) setup.addEventListener('submit', async function (event) {
-    event.preventDefault(); if (setup.getAttribute('aria-busy') === 'true' || !setup.reportValidity()) return;
+    event.preventDefault(); if (factorManagementBlocked() || setup.getAttribute('aria-busy') === 'true' || !setup.reportValidity()) return;
     busy(setup, true); message(copy.pending, false);
     try {
       var data = await sessionRequest('POST', '/api/auth/2fa/setup', { password: value(setup, 'password') });
@@ -250,7 +257,7 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
 
   var enroll = document.querySelector('[data-auth-enroll-form]');
   if (enroll) enroll.addEventListener('submit', async function (event) {
-    event.preventDefault(); if (enroll.getAttribute('aria-busy') === 'true' || !enroll.reportValidity()) return;
+    event.preventDefault(); if (factorManagementBlocked() || enroll.getAttribute('aria-busy') === 'true' || !enroll.reportValidity()) return;
     busy(enroll, true); message(copy.pending, false);
     try {
       var result = await sessionRequest('POST', '/api/auth/2fa/enable', { code: value(enroll, 'code').trim() });
@@ -305,8 +312,10 @@ export const LOGIN_CLIENT_SCRIPT = /* js */ String.raw`
       var fields = document.querySelector('[data-auth-mfa-fields]');
       if (fields) selectLoginFactor(fields.getAttribute('data-factor-mode') === 'recovery' ? 'totp' : 'recovery', true);
     } else if (action === 'restart-enrollment') {
+      if (factorManagementBlocked()) return;
       clearEnrollment(); show('[data-auth-enrollment-details]', false); if (setup) setup.hidden = false; step('enrollment'); message(copy.enrollment, false);
     } else if (action === 'acknowledge-recovery') {
+      if (factorManagementBlocked()) return;
       clearEnrollment();
       if (principal) { setState('authenticated'); redirectToWorkspace(); }
       else window.location.reload();

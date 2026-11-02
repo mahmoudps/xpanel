@@ -2,6 +2,10 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 const displayDateTime = formatDisplayDateTime
 const VSCAN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const VSCAN_UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069\ufeff]/
@@ -64,13 +68,18 @@ function bindAccountVirusScan(_askDialog: unknown): void {
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'uncertain', 'refused'].includes(state) ? 'alert' : 'status') }
     const instant = (value: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = displayDateTime(value); return bdi }
     const lock = (): void => { start.disabled = !eligible() || busy || review || !view?.start.allowed; refreshButton.disabled = !eligible() || busy; root.setAttribute('aria-busy', String(busy)) }
-    const cell = (row: HTMLElement, value: string, technical = false, chip?: string): void => {
-      const td = document.createElement('td'), span = document.createElement(technical ? 'bdi' : 'span')
-      if (technical) span.setAttribute('dir', 'ltr')
-      if (chip) span.dataset.stateChip = chip
-      span.textContent = value; td.append(span); row.append(td)
+    let templates: { row: HTMLTemplateElement; detail: HTMLTemplateElement; file: HTMLTemplateElement; empty: HTMLTemplateElement }
+    try {
+      templates = { row: clientTemplate(root, 'virus-scan-row'), detail: clientTemplate(root, 'virus-scan-detail'), file: clientTemplate(root, 'virus-scan-file'), empty: clientTemplate(root, 'virus-scan-empty') }
+      cloneClientTemplate(templates.row, 'tr', ['started', 'status', 'result', 'scanned', 'infected'])
+      cloneClientTemplate(templates.detail, 'tr', ['files', 'notice'])
+      cloneClientTemplate(templates.file, 'li', ['path', 'signature'])
+      cloneClientTemplate(templates.empty, 'tr', ['message'])
+    } catch {
+      start.disabled = true; refreshButton.disabled = true
+      note('unavailable', t('The scanner has not been read.')); return
     }
-    const message = (colspan: number, value: string): void => { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = colspan; td.textContent = value; row.append(td); rows.append(row) }
+    const message = (value: string): void => { const row = cloneClientTemplate(templates.empty, 'tr', ['message']); clientTemplateSlot(row, 'message', 'td').textContent = value; rows.append(row) }
     const paint = (next: AccountVirusScanClientView): void => {
       const engine = next.engine
       facts.engine.textContent = engine.state === 'read' ? t('Available') : engine.state === 'not_installed' ? t('Not installed on this server') : t('Unavailable')
@@ -79,26 +88,34 @@ function bindAccountVirusScan(_askDialog: unknown): void {
       facts.next.textContent = reason === null ? t('Available now') : reason === 'scan_active' ? t('After the current scan finishes') : reason === 'cooldown' ? ''
         : reason === 'engine_unavailable' ? t('Unavailable: ClamAV cannot be used on this server') : t('Unavailable: background jobs are not running')
       if (reason === 'cooldown') { const [before = '', after = ''] = t('After {time}').split('{time}'); facts.next.replaceChildren(before, instant(next.start.availableAt!), after) }
+      const latest = [...next.scans].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0]
+      const finished = [...next.scans].filter(scan => scan.status === 'succeeded' || scan.status === 'failed' || scan.status === 'cancelled').sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0]
+      for (const [key, value] of [['last-scan', latest ? displayDateTime(latest.createdAt) : '—'], ['infected', finished?.infectedFiles === null || finished?.infectedFiles === undefined ? '—' : String(finished.infectedFiles)], ['signatures', engine.signatureVersion === null ? '—' : String(engine.signatureVersion)], ['next-scan', facts.next.textContent ?? '—']] as const) {
+        const node = root.querySelector<HTMLElement>(`[data-vscan-kpi="${key}"]`); if (node) node.textContent = value
+      }
       rows.textContent = ''
       const statuses: Record<string, string> = { queued: t(msgctxt('account-virus-scan-client', 'Queued')), running: t('Running'), succeeded: t('Finished'), failed: t('Failed'), cancelled: t('Cancelled') }
       const results: Record<AccountScanResult, [string, string | undefined]> = { pending: [t('Pending'), undefined], clean: [t(msgctxt('account-virus-scan-client', 'Clean')), 'ok'], infected: [t('Infected files found'), 'problem'], error: [t('Scan error'), 'unavailable'], cancelled: [t('Cancelled'), undefined], unknown: [t('Outcome unknown'), 'unavailable'] }
       for (const scan of next.scans) {
-        const row = document.createElement('tr')
-        cell(row, displayDateTime(scan.createdAt), true); cell(row, statuses[scan.status] ?? scan.status); cell(row, results[scan.result][0], false, results[scan.result][1])
-        cell(row, scan.scannedFiles === null ? '-' : String(scan.scannedFiles), true); cell(row, scan.infectedFiles === null ? '-' : String(scan.infectedFiles), true); rows.append(row)
+        const row = cloneClientTemplate(templates.row, 'tr', ['started', 'status', 'result', 'scanned', 'infected']); row.dataset.state = scan.result
+        const started = clientTemplateSlot(row, 'started', 'time'); started.setAttribute('datetime', scan.createdAt); started.textContent = displayDateTime(scan.createdAt)
+        clientTemplateSlot(row, 'status').textContent = statuses[scan.status] ?? scan.status
+        const result = clientTemplateSlot(row, 'result'); result.textContent = results[scan.result][0]
+        if (results[scan.result][1]) result.dataset.stateChip = results[scan.result][1]
+        clientTemplateSlot(row, 'scanned').textContent = scan.scannedFiles === null ? '-' : String(scan.scannedFiles)
+        clientTemplateSlot(row, 'infected').textContent = scan.infectedFiles === null ? '-' : String(scan.infectedFiles); rows.append(row)
         if (!scan.infected.length && (scan.result !== 'infected' || scan.listComplete)) continue
-        const detail = document.createElement('tr'), td = document.createElement('td'), list = document.createElement('ul')
-        td.colSpan = 5; td.setAttribute('aria-label', t('Infected files'))
+        const detail = cloneClientTemplate(templates.detail, 'tr', ['files', 'notice']), list = clientTemplateSlot(detail, 'files', 'ul')
+        list.setAttribute('aria-label', t('Infected files'))
         for (const item of scan.infected) {
-          const li = document.createElement('li'), path = document.createElement('bdi'), signature = document.createElement('bdi')
-          path.setAttribute('dir', 'ltr'); path.className = 'xp-mono'; path.textContent = item.path === '.' ? '~' : '~/' + item.path
-          signature.setAttribute('dir', 'ltr'); signature.textContent = item.signature; li.append(path, ' · ', signature); list.append(li)
+          const li = cloneClientTemplate(templates.file, 'li', ['path', 'signature'])
+          clientTemplateSlot(li, 'path').textContent = item.path === '.' ? '~' : '~/' + item.path
+          clientTemplateSlot(li, 'signature').textContent = item.signature; list.append(li)
         }
-        td.append(list)
-        if (!scan.listComplete) { const help = document.createElement('p'); help.className = 'xp-help'; help.textContent = t('This list may be incomplete.'); td.append(help) }
-        detail.append(td); rows.append(detail)
+        const notice = clientTemplateSlot(detail, 'notice'); notice.hidden = scan.listComplete; notice.textContent = scan.listComplete ? '' : t('This list may be incomplete.')
+        rows.append(detail)
       }
-      if (!next.scans.length) message(5, t('No scans have been started for this account.'))
+      if (!next.scans.length) message(t('No scans have been started for this account.'))
     }
     async function refresh(): Promise<void> {
       if (!eligible() || busy || !send) return
@@ -126,4 +143,4 @@ function bindAccountVirusScan(_askDialog: unknown): void {
   })
 }
 
-export const ACCOUNT_VIRUS_SCAN_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const VSCAN_ID=${VSCAN_ID.toString()};const VSCAN_UNSAFE=${VSCAN_UNSAFE.toString()};const vscanObject=${vscanObject.toString()};const vscanInt=${vscanInt.toString()};const vscanText=${vscanText.toString()};const vscanTime=${vscanTime.toString()};const readAccountVirusScanView=${readAccountVirusScanView.toString()};const vscanUncertain=${vscanUncertain.toString()};return ${bindAccountVirusScan.toString()};})()`
+export const ACCOUNT_VIRUS_SCAN_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const VSCAN_ID=${VSCAN_ID.toString()};const VSCAN_UNSAFE=${VSCAN_UNSAFE.toString()};const vscanObject=${vscanObject.toString()};const vscanInt=${vscanInt.toString()};const vscanText=${vscanText.toString()};const vscanTime=${vscanTime.toString()};const readAccountVirusScanView=${readAccountVirusScanView.toString()};const vscanUncertain=${vscanUncertain.toString()};return ${bindAccountVirusScan.toString()};})()`

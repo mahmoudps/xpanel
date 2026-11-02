@@ -8,6 +8,7 @@ describe('WHM announcements workspace renderer', () => {
     const html = renderWhmAnnouncementsWorkspace({ locale: 'en', canManage: true })
     expect(html).toContain('data-whm-detail-route="/whm/accounts/announcements"')
     expect(html).toContain('data-announcements-can-manage="true"')
+    expect(html.match(/data-xp-template="account-announcement-notice-/g)).toHaveLength(3)
     expect(html).toContain('<h1>Announcements</h1>')
     expect(html).toContain('Nothing is emailed.')
     expect(html).toContain('Announcements have not been read. No announcement is assumed to be shown.')

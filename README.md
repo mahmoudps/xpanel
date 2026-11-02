@@ -55,7 +55,7 @@ Resource meters distinguish supplied bounded usage, explicit unlimited limits, z
 
 The mail renderer uses a folder column, message list and reading pane, with a responsive composition workspace. An explicit Send button calls the authenticated mail handler without a native sending form. The client distinguishes accepted, refused and uncertain submission outcomes; server acceptance does not prove recipient delivery. Installed SMTP/IMAP service behavior and end-to-end delivery remain unqualified.
 
-Seven new administrative destinations separate navigation metadata only; they are not implemented screens or delivered service capabilities.
+Seven root-only administrative destinations have read-only screens and no primary action. Their summaries keep the administrative action unavailable until the matching tools are qualified, and none is a delivered service capability. See [current status](docs/STATUS.md) for the 2026-11-01 source inventory: 536 in-scope tools remain unaccepted, and 217 registered documents render without qualifying those tools.
 
 ## Account workflow boundaries
 

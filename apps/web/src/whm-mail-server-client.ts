@@ -1,3 +1,6 @@
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
+const whmClientNode = canonicalWhmClientNode
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -94,7 +97,27 @@ function bindWhmMailServer(): void {
     const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
     if (!['server', 'routing', 'outbound'].includes(page) || !status || !refresh) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.mailServerCanRead === 'true' && !root.closest(denied) && !!request
+    let templateContractIntact = true
+    const templateContracts = [
+      ['whm-mail-route-select', 'select', { 'content': 'select' }],
+    ] as const
+    const verifyWhmTemplates = (): void => {
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try { assertWhmClientTemplates(root, templateContracts) } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        throw error
+      }
+    }
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailServerCanRead === 'true' && !root.closest(denied) && !!request)
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
+      verifyWhmTemplates()
+      const reply = await request!(...args)
+      verifyWhmTemplates()
+      return reply
+    }
     const states: Record<string, string> = { match: t('Matches'), drift: t(msgctxt('whm-mail-server-client', 'Drift')), 'not-managed': t('Not managed'), unknown: t('Not verified') }
     const expectations: Record<string, string> = { 'mx-saved': t('MX saved'), 'mx-missing': t('No MX saved; senders fall back to the domain address (RFC 5321)'),
       'zone-missing': t('No saved DNS zone on this server'), 'no-mailboxes': t('No mailboxes; not a virtual mailbox domain') }
@@ -134,7 +157,7 @@ function bindWhmMailServer(): void {
       ]), 5, view.sources.master === 'read' ? t('No matching services are configured.') : t('Services were not read.'))
       // The route select is the edit control of the routing policy; it changes nothing until the policy is saved.
       const route = (domain: string, mode: string): HTMLSelectElement => {
-        const select = document.createElement('select'); select.className = 'xp-input'; select.dataset.mailRoute = domain; select.setAttribute('aria-label', t('Routing for {domain}', { domain }))
+        const select = whmClientNode(root, 'whm-mail-route-select', 'select'); select.dataset.mailRoute = domain; select.setAttribute('aria-label', t('Routing for {domain}', { domain }))
         for (const value of ['local', 'backup', 'remote']) { const option = document.createElement('option'); option.value = value; option.textContent = routeLabels[value]!; option.selected = value === mode; select.append(option) }
         select.disabled = true
         return select
@@ -219,7 +242,7 @@ function bindWhmMailServer(): void {
     }
     const loadPolicy = async (): Promise<void> => {
       if (!form || !manage()) return
-      try { const next = readMailPolicyView(await request!('GET', '/api/server/mailx/' + section), section); if (manage()) fillEditor(next) }
+      try { const next = readMailPolicyView(await checkedRequest('GET', '/api/server/mailx/' + section), section); if (manage()) fillEditor(next) }
       catch { policyView = null; formNote('failed', t('The mail policy could not be read. Values shown are from the last successful read.')); editorControls() }
     }
     const problem = (error: unknown): string => {
@@ -242,7 +265,7 @@ function bindWhmMailServer(): void {
       if (!policy || !policyView || saving || !manage()) return
       saving = true; editorControls(); formNote('reading', t('Checking the changes…'))
       try {
-        const reply = await request!('POST', '/api/server/mailx/' + section + '/preview', { policy, expectedRevision: policyView.revision }) as { changes?: unknown }
+        const reply = await checkedRequest('POST', '/api/server/mailx/' + section + '/preview', { policy, expectedRevision: policyView.revision }) as { changes?: unknown }
         const changes = Array.isArray(reply?.changes) && reply.changes.length <= 4500 ? reply.changes.map(item => {
           const row = item as Record<string, unknown>
           if (!['postfix', 'master', 'dovecot', 'routing', 'submission'].includes(String(row.target)) || typeof row.key !== 'string' || row.key.length > 300
@@ -267,7 +290,7 @@ function bindWhmMailServer(): void {
       saving = true; editorControls(); formNote('saving', t('Saving and applying…'))
       let message = '', state = 'failed'
       try {
-        const reply = await request!('PUT', '/api/server/mailx/' + section, { policy, expectedRevision: policyView.revision }) as { application?: { outcome?: string; failedCheck?: string; reconcile?: string } } | null
+        const reply = await checkedRequest('PUT', '/api/server/mailx/' + section, { policy, expectedRevision: policyView.revision }) as { application?: { outcome?: string; failedCheck?: string; reconcile?: string } } | null
         const application = reply?.application ?? {}, outcome = String(application.outcome ?? 'unknown')
         const check = application.failedCheck === 'dovecot' ? 'doveconf -n' : application.failedCheck === 'postfix' ? 'postfix check' : null
         message = (outcomes[outcome] ?? outcomes.unknown!) + (outcome === 'rolled-back' && check ? ' ' + t('The failed check was {check}.', { check }) : '')
@@ -288,7 +311,7 @@ function bindWhmMailServer(): void {
       if (busy || !admitted()) return
       busy = true; refresh.disabled = true; editorControls(); root.setAttribute('aria-busy', 'true'); note('reading', t('Reading the mail server configuration…'))
       try {
-        const view = readMailServerView(await request!('GET', '/api/server/mail-server/' + page), page)
+        const view = readMailServerView(await checkedRequest('GET', '/api/server/mail-server/' + page), page)
         if (admitted()) paint(view)
       } catch { if (admitted()) note('failed', t('The configuration could not be read. Any rows shown are from the last successful read.')) }
       finally { busy = false; refresh.disabled = !admitted(); root.setAttribute('aria-busy', 'false') }
@@ -301,4 +324,4 @@ function bindWhmMailServer(): void {
   })
 }
 
-export const WHM_MAIL_SERVER_CLIENT_BINDING = `(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailServerView=${readMailServerView.toString()};const readMailPolicyView=${readMailPolicyView.toString()};return ${bindWhmMailServer.toString()};})()`
+export const WHM_MAIL_SERVER_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailServerView=${readMailServerView.toString()};const readMailPolicyView=${readMailPolicyView.toString()};return ${bindWhmMailServer.toString()};})()`

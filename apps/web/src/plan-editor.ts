@@ -132,12 +132,97 @@ function bindPlanEditorForms(): void {
     const signature = (): string => { try { return JSON.stringify(planEditorPayload(values(), owner)) } catch { return JSON.stringify(values()) } }
     let baseline = signature()
     const note = (message: string, state: string) => { status.textContent = message; status.hidden = false; status.dataset.state = state; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
+    let draftReview: { refresh(): void; beforeSubmit(): boolean; accepted(payload: PlanEditorPayload): void } | undefined
     const refresh = () => {
       form.querySelectorAll<HTMLInputElement>('[data-plan-unlimited]').forEach(toggle => {
         const control = form.elements.namedItem(toggle.dataset.planUnlimited || '')
         if (control instanceof HTMLInputElement) { control.disabled = toggle.checked || !editable; control.required = !toggle.checked }
       })
       save.disabled = !editable || busy || reviewRequired || signature() === baseline
+      draftReview?.refresh()
+    }
+    const review = form.querySelector<HTMLElement>('[data-native-plan-review]')
+    if (review) {
+      const editor = form.querySelector<HTMLElement>('[data-plan-review-editor]')
+      const open = form.querySelector<HTMLButtonElement>('[data-plan-review-open]'), back = form.querySelector<HTMLButtonElement>('[data-plan-review-back]')
+      const openWrap = form.querySelector<HTMLElement>('[data-plan-review-open-wrap]'), backWrap = form.querySelector<HTMLElement>('[data-plan-review-back-wrap]'), saveWrap = form.querySelector<HTMLElement>('[data-plan-review-save-wrap]')
+      const reviewStatus = review.querySelector<HTMLElement>('[data-plan-review-status]'), count = review.querySelector<HTMLElement>('[data-plan-review-count]'), empty = review.querySelector<HTMLElement>('[data-plan-review-empty]'), summary = form.querySelector<HTMLElement>('[data-plan-review-summary]')
+      const keys = ['name', 'featureListId', ...PLAN_RESOURCE_FIELDS.map(field => field.key), ...PLAN_CAP_FIELDS.map(field => field.key), 'shell', 'dedicatedIp', 'enforceBandwidth', 'defaultMailboxQuotaMb']
+      let reviewing = false, reviewedSignature = '', current: PlanEditorPayload | undefined
+      const readable = review.dataset.planReviewReadable === 'true'
+      if (readable && review.dataset.planReviewSaved === 'true') { try { current = planEditorPayload(values(), owner) } catch { /* Invalid saved fields are not promoted to a verified comparison. */ } }
+      const validMarkup = (): boolean => {
+        if (!review.isConnected || !editor?.isConnected || !open || !back || !openWrap || !backWrap || !saveWrap || !reviewStatus || !count || !empty || !summary || open.type !== 'button' || back.type !== 'button') return false
+        if ([editor, open, back, openWrap, backWrap, saveWrap, reviewStatus, count, empty, summary].some(node => !node || !node.isConnected || !form.contains(node)) || !saveWrap.contains(save) || !review.contains(reviewStatus) || !review.contains(count) || !review.contains(empty)) return false
+        const rows = [...review.querySelectorAll<HTMLElement>('[data-plan-review-key]')]
+        return rows.length === keys.length && keys.every(key => {
+          const matches = rows.filter(row => row.dataset.planReviewKey === key)
+          return matches.length === 1 && matches[0]!.tagName === 'LI' && ['from', 'to'].every(slot => { const cells = matches[0]!.querySelectorAll('[data-plan-review-' + slot + ']'); return cells.length === 1 && cells[0]!.tagName === 'BDI' })
+        })
+      }
+      const flat = (payload: PlanEditorPayload): Record<string, string | number | boolean> => ({ name: payload.name, featureListId: payload.featureListId, ...payload.resources, ...payload.caps, shell: payload.shell, dedicatedIp: payload.dedicatedIp, enforceBandwidth: payload.enforceBandwidth ?? false, defaultMailboxQuotaMb: payload.defaultMailboxQuotaMb })
+      const display = (key: string, value: string | number | boolean): string => {
+        if (typeof value === 'boolean') return copy(value ? 'Yes' : 'No')
+        if (typeof value === 'number') return String(value / ([...PLAN_RESOURCE_FIELDS, ...PLAN_CAP_FIELDS, PLAN_QUOTA_FIELD].find(field => field.key === key)?.scale ?? 1))
+        if (value === 'unlimited') return copy('Unlimited')
+        if (key === 'featureListId' || key === 'shell') { const select = form.elements.namedItem(key); return select instanceof HTMLSelectElement ? [...select.options].find(option => option.value === value)?.textContent ?? copy('Unavailable') : copy('Unavailable') }
+        return value
+      }
+      const showEditor = (control?: Element | null): void => {
+        reviewing = false; reviewedSignature = ''
+        if (editor) editor.hidden = false
+        review.hidden = true
+        const panel = control?.closest<HTMLElement>('[role="tabpanel"]')
+        if (panel) form.querySelectorAll<HTMLButtonElement>('[data-presentation-tab]').forEach(tab => { if (tab.getAttribute('aria-controls') === panel.id) tab.click() })
+      }
+      const project = (): boolean => {
+        const valid = validMarkup()
+        if (!valid) { reviewing = false; reviewedSignature = ''; save.disabled = true; if (open) open.disabled = true; if (reviewStatus) reviewStatus.textContent = copy('Unavailable'); if (summary) summary.textContent = copy('Unavailable'); if (openWrap) openWrap.hidden = false; if (backWrap) backWrap.hidden = true; if (saveWrap) saveWrap.hidden = true; review.dataset.state = 'unavailable'; if (editor) editor.hidden = false; review.hidden = true; return false }
+        const now = signature(), dirty = now !== baseline
+        if (reviewing && now !== reviewedSignature) showEditor()
+        let proposed: PlanEditorPayload | undefined
+        if (readable) { try { proposed = planEditorPayload(values(), owner) } catch { /* The canonical parser owns validity. */ } }
+        const from = current && flat(current), to = proposed && flat(proposed)
+        let changes = 0
+        for (const row of review.querySelectorAll<HTMLElement>('[data-plan-review-key]')) {
+          const key = row.dataset.planReviewKey!, changed = !!to && (!from || from[key] !== to[key])
+          row.hidden = !changed
+          for (const [slot, source] of [['from', from], ['to', to]] as const) {
+            const cell = row.querySelector<HTMLElement>('[data-plan-review-' + slot + ']')!
+            const value = source?.[key]
+            cell.textContent = value === undefined ? copy(readable ? proposed ? 'Not read' : 'Unavailable' : 'Not read') : display(key, value)
+            cell.dir = typeof value === 'number' ? 'ltr' : 'auto'
+          }
+          if (changed) changes++
+        }
+        const state = !readable ? 'unread' : !proposed ? 'invalid' : reviewRequired ? 'unverified' : busy ? 'loading' : dirty ? 'draft' : current ? 'saved' : 'draft'
+        review.dataset.state = state; review.dataset.dirty = String(dirty)
+        count!.textContent = String(changes); empty!.hidden = changes !== 0
+        const message = state === 'unread' ? copy('Not read') : state === 'invalid' ? copy('Check the plan values. No changes were sent.') : state === 'unverified' ? copy('The result could not be verified. Review plans before retrying.') : state === 'loading' ? copy('Saving…') : dirty ? copy('Unsaved changes') : current ? copy('Saved') : copy('Draft')
+        reviewStatus!.textContent = message; empty!.textContent = message; summary!.textContent = message
+        editor!.hidden = reviewing; review.hidden = !reviewing
+        openWrap!.hidden = reviewing; backWrap!.hidden = !reviewing; saveWrap!.hidden = !reviewing
+        open!.disabled = !editable || busy || reviewRequired || !dirty || !proposed || !readable
+        back!.disabled = busy
+        save.disabled = !editable || busy || reviewRequired || !dirty || !reviewing || reviewedSignature !== now || !proposed || !readable
+        return !!proposed && readable
+      }
+      open?.addEventListener('click', () => {
+        if (!editable || busy || reviewRequired || signature() === baseline || !project()) return
+        if (!form.reportValidity()) return
+        reviewing = true; reviewedSignature = signature(); project(); back?.focus()
+      })
+      back?.addEventListener('click', () => { if (busy) return; showEditor(); project(); open?.focus() })
+      form.addEventListener('invalid', event => { const control = event.target; if (control instanceof HTMLElement) showEditor(control) }, true)
+      draftReview = {
+        refresh: () => { project() },
+        beforeSubmit: () => {
+          const valid = project()
+          if (!valid || !reviewing || reviewedSignature !== signature()) { showEditor(); project(); note(copy('Check the plan values. No changes were sent.'), 'failed'); return false }
+          return true
+        },
+        accepted: payload => { current = JSON.parse(JSON.stringify(payload)) as PlanEditorPayload; showEditor() },
+      }
     }
     form.addEventListener('input', refresh)
     form.addEventListener('change', refresh)
@@ -147,6 +232,7 @@ function bindPlanEditorForms(): void {
     })
     form.addEventListener('submit', event => {
       event.preventDefault()
+      if (draftReview && !draftReview.beforeSubmit()) return
       if (!editable || busy || reviewRequired || signature() === baseline || !form.reportValidity()) return
       let payload: PlanEditorPayload
       try { payload = planEditorPayload(values(), owner) } catch (error) {
@@ -163,12 +249,14 @@ function bindPlanEditorForms(): void {
       const controls = Array.from(form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')).map(control => ({ control, disabled: control.disabled }))
       busy = true; form.setAttribute('aria-busy', 'true'); controls.forEach(({ control }) => { control.disabled = true })
       note(copy('Saving…'), 'loading')
+      draftReview?.refresh()
       const operation = planEditorRequest(payload, id)
       Promise.resolve().then(() => request(operation.method, operation.path, operation.body)).then(result => {
         const receipt = result as { plan?: Plan; reconcile?: { status?: string } } | null
         const persisted = receipt?.plan
         if (!planEditorReceiptMatches(persisted, payload, id)) { reviewRequired = true; note(copy('The result could not be verified. Review plans before retrying.'), 'failed'); return }
         form.dataset.planId = persisted.id; baseline = JSON.stringify(payload)
+        draftReview?.accepted(payload)
         note((id ? copy('Plan saved. Hosting verification is not confirmed.') : copy('Plan saved as desired configuration.')), id ? 'pending' : 'saved')
       }).catch((error: { status?: number; details?: { stateChanged?: boolean; verificationRequired?: boolean } }) => {
         reviewRequired = error?.details?.stateChanged === true || error?.details?.verificationRequired === true || ![400, 401, 403, 404, 409, 412, 422].includes(error?.status ?? 0)

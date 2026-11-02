@@ -1,3 +1,4 @@
+import { mailxArchiveClientTemplates } from './mailx-collection-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 export interface MailxArchiveWorkspaceInput { locale: Locale; canManage: boolean }
 
@@ -27,5 +28,6 @@ export function renderMailxArchiveWorkspace({ locale, canManage }: MailxArchiveW
       <p class="xp-help" data-mailx-archive-form-status role="status"></p>
       <div class="xp-mailx-archive__actions"><button type="${canManage ? 'submit' : 'button'}" class="xp-btn xp-btn--primary" data-mailx-archive-save disabled>${t('Save and apply')}</button></div></${canManage ? 'form' : 'div'}>
     </section>
+    ${mailxArchiveClientTemplates()}
   </section>`
 }

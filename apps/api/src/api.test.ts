@@ -28,6 +28,7 @@ import {
 import { runCli } from './cli.ts'
 import { createApiApp, listenApiServer } from './server.ts'
 import type { ApiApp } from './server.ts'
+import { preparedAccountFixture } from './testing/provisioning-preparation-fixture.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 
 const UBUNTU_OS: OsProfile = profileFor(
@@ -59,14 +60,17 @@ interface SessionClient {
   ): Promise<Response>
 }
 
-// The injected executor proves configuration flow only, never native account readiness.
+// Prepared H protocol acceptance with explicit fake execution, not native account readiness.
 const assertConfiguredAccountCreation = async (response: Response, username: string): Promise<void> => {
   assert.equal(response.status, 201, await response.clone().text())
-  const body = await response.clone().json() as { account: { username: string }; execution: unknown }
+  const body = await response.clone().json() as { account: { id: string; username: string; uid: number; gid: number; home: string }; execution: { status: string; scope: string; targetVerified: boolean; verificationRequired: boolean; observation: { accountId: string; uid: number; gid: number; home: string } } }
   assert.equal(body.account.username, username)
-  assert.deepEqual(body.execution, {
-    status: 'configuration_applied', scope: 'global_configuration', targetVerified: false, verificationRequired: true,
-  })
+  assert.equal(body.execution.status, 'account_verified')
+  assert.equal(body.execution.scope, 'account')
+  assert.equal(body.execution.targetVerified, true)
+  assert.equal(body.execution.verificationRequired, false)
+  assert.deepEqual(Object.keys(body.execution).sort(), ['observation', 'scope', 'status', 'targetVerified', 'verificationRequired'])
+  assert.deepEqual({ accountId: body.execution.observation.accountId, uid: body.execution.observation.uid, gid: body.execution.observation.gid, home: body.execution.observation.home }, { accountId: body.account.id, uid: body.account.uid, gid: body.account.gid, home: body.account.home })
 }
 
 const createSessionClient = (app: ApiApp, setCookieHeader: string | null, csrfToken: string): SessionClient => {
@@ -153,7 +157,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
       serverSecret: TEST_SERVER_SECRET,
       db: dbHandle.db,
       store: stateHandle.store,
-      agentApp,
+      ...preparedAccountFixture({ store: stateHandle.store, reconciler, executor, agentApp, agentToken: TEST_AGENT_TOKEN }),
       os: UBUNTU_OS,
       lockoutThreshold: 3,
       lockoutDurationMs: 60_000,
@@ -294,7 +298,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     assert.equal(workspace.status, 200)
   })
 
-  it('2. Feature list + Plan creation + Account creation (alice and bob) with host reconciliation and search index', async () => {
+  it('2. Feature list + Plan creation + Account creation (alice and bob) with host reconciliation and search index', { tags: ['slow', 'journey'] }, async () => {
     const { client: root } = await loginRoot()
 
     // Save server settings first so reconciler renders edge/backend configs
@@ -379,7 +383,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     assert.ok(hits.some((h) => h.title.includes('alice')))
   })
 
-  it('3. Account scope rejects cross-tenant operations and file I/O fails closed without a confined runner', async () => {
+  it('3. Account scope rejects cross-tenant operations and file I/O fails closed without a confined runner', { tags: ['slow'] }, async () => {
     const { client: root } = await loginRoot()
     await root.request('/api/server/settings', { method: 'PUT', body: DEFAULT_SETTINGS })
 

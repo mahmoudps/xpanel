@@ -1,3 +1,6 @@
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
+const whmClientNode = canonicalWhmClientNode
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -85,11 +88,31 @@ function bindWhmSupport(): void {
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     if (!status || !bundleStatus || !refresh || !confirm || !download || !contactBox) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.supportCanRead === 'true' && !root.closest(denied) && typeof request === 'function'
+    let templateContractIntact = true
+    const templateContracts = [
+      ['whm-support-note', 'p', { 'content': 'p' }],
+    ] as const
+    const verifyWhmTemplates = (): void => {
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try { assertWhmClientTemplates(root, templateContracts) } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        throw error
+      }
+    }
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.supportCanRead === 'true' && !root.closest(denied) && typeof request === 'function')
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
+      verifyWhmTemplates()
+      const reply = await request!(...args)
+      verifyWhmTemplates()
+      return reply
+    }
     let view: SupportView | null = null, busy = false
     const notRead = t('Not read')
     const note = (target: HTMLElement, state: string, message: string): void => { target.dataset.state = state; target.textContent = message; target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
-    const ltr = (content: string, wrap = false): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = content; if (wrap) node.style.overflowWrap = 'anywhere'; return node }
+    const ltr = (content: string, wrap = false): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = content; if (wrap) node.dataset.wrap = 'anywhere'; return node }
     const fact = (key: string, content: string | Node): void => { root.querySelector('[data-whm-support-fact="' + key + '"]')?.replaceChildren(content) }
     const when = (iso: string): string => formatDisplayDateTime(iso)
     const rows = (marker: string, cells: (string | Node)[][], empty: string, span: number): void => {
@@ -138,8 +161,8 @@ function bindWhmSupport(): void {
     }
     const paintContact = (contact: SupportView['contact']): void => {
       const line = (label: string, href: string, text: string): HTMLElement => { const p = document.createElement('p'), a = document.createElement('a'); p.append(label + ' '); a.href = href; a.rel = 'noopener noreferrer'; a.append(ltr(text)); p.append(a); return p }
-      if (contact.state === 'unavailable') { const p = document.createElement('p'); p.className = 'xp-help'; p.dataset.contactState = 'unavailable'; p.textContent = t('The support contact setting could not be read. Nothing is assumed.'); contactBox.replaceChildren(p); return }
-      if (contact.state === 'not-configured') { const p = document.createElement('p'); p.className = 'xp-help'; p.dataset.contactState = 'not-configured'; p.textContent = t('No support contact is configured. A contact appears here only after the server owner saves one; none is suggested.'); contactBox.replaceChildren(p); return }
+      if (contact.state === 'unavailable') { const p = whmClientNode(root, 'whm-support-note', 'p'); p.dataset.contactState = 'unavailable'; p.textContent = t('The support contact setting could not be read. Nothing is assumed.'); contactBox.replaceChildren(p); return }
+      if (contact.state === 'not-configured') { const p = whmClientNode(root, 'whm-support-note', 'p'); p.dataset.contactState = 'not-configured'; p.textContent = t('No support contact is configured. A contact appears here only after the server owner saves one; none is suggested.'); contactBox.replaceChildren(p); return }
       contactBox.replaceChildren(...[contact.url ? line(t('Support website:'), contact.url, contact.url) : null, contact.email ? line(t('Support email:'), 'mailto:' + contact.email, contact.email) : null].filter((node): node is HTMLElement => node !== null))
       contactBox.dataset.contactState = 'configured'
     }
@@ -159,7 +182,7 @@ function bindWhmSupport(): void {
       busy = true; confirm.checked = false; lock()
       note(status, 'reading', t('Reading the support summary…'))
       try {
-        view = readSupportView(await request('GET', '/api/server/support'))
+        view = readSupportView(await checkedRequest('GET', '/api/server/support'))
         paintSummary(view.summary); paintManifest(view.manifest); paintContact(view.contact)
         note(status, view.summary ? 'read' : 'unavailable', !view.summary ? t('The host agent is not connected. Host facts and the bundle are unavailable; the manifest and contact are shown.')
           : view.summary.host === 'read' ? t('Support summary read from this server.') : t('The agent has no native host access; host facts are not verified.'))
@@ -184,7 +207,7 @@ function bindWhmSupport(): void {
       busy = true; lock()
       note(bundleStatus, 'reading', t('Generating the support bundle…'))
       try {
-        const bundle = await request('GET', '/api/server/support/bundle?manifest=' + id) as Record<string, unknown> | null
+        const bundle = await checkedRequest('GET', '/api/server/support/bundle?manifest=' + id) as Record<string, unknown> | null
         const manifest = bundle && typeof bundle === 'object' && !Array.isArray(bundle) ? bundle.manifest as Record<string, unknown> | null : null
         if (!manifest || manifest.id !== id || typeof bundle!.generatedAt !== 'string') throw new Error('invalid_bundle')
         const stamp = (bundle!.generatedAt as string).replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
@@ -201,4 +224,4 @@ function bindWhmSupport(): void {
   })
 }
 
-export const WHM_SUPPORT_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readSupportView=${readSupportView.toString()};return ${bindWhmSupport.toString()};})()`
+export const WHM_SUPPORT_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readSupportView=${readSupportView.toString()};return ${bindWhmSupport.toString()};})()`

@@ -547,7 +547,7 @@ describe('Arabic computed type', () => {
     }
   }, 60_000)
 
-  it('does not scroll sideways at 390', async () => {
+  it('does not scroll sideways at 390', { tags: ['slow'], timeout: 60_000 }, async () => {
     const browser = await chromium.launch({
       executablePath: executable as string,
       args: ['--font-render-hinting=none', '--disable-lcd-text'],
@@ -597,5 +597,5 @@ describe('Arabic computed type', () => {
     } finally {
       await browser.close()
     }
-  }, 60_000)
+  })
 })

@@ -1,5 +1,6 @@
 import { type Locale, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
+import { classicWhmDiagnosticTemplates } from './whm-diagnostic-client-templates.ts'
 
 type Copy = string
 /** Rules table rows in health-check order. A row with a unit has a threshold (bounds come from the API); the others fire on a health warning or problem. */
@@ -31,7 +32,7 @@ export function renderWhmMonitoringAlertsWorkspace(input: { locale: Locale; canM
     + `<td><label class="xp-whm-detail-choice"><input type="checkbox" data-whm-alerts-enabled aria-label="${t(row.title)}: ${t(msgctxt('whm-monitoring-alerts-workspace', 'enabled'))}"${off}><span>${t(msgctxt('whm-monitoring-alerts-workspace', 'Enabled'))}</span></label></td>`
     + `<td>${row.unit ? `<span class="xp-whm-alerts__threshold"><input type="number" inputmode="decimal" dir="ltr" data-whm-alerts-threshold aria-label="${t(row.title)}: ${t(msgid('threshold'))}"${off}><span data-whm-alerts-unit>${t(row.unit)}</span></span>` : t(msgid('No threshold. Fires when the health check reports a warning or a problem.'))}</td>`
     + `<td data-whm-alerts-range>${row.unit ? notRead : '-'}</td></tr>`).join('')
-  return `<div class="xp-whm-alerts" data-whm-monitoring-alerts-workspace data-alerts-can-manage="${on}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${STYLE}
+  return `<div class="xp-whm-alerts" data-whm-monitoring-alerts-workspace data-alerts-can-manage="${on}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${STYLE}${classicWhmDiagnosticTemplates()}
   ${card('delivery', msgid('Delivery'), `<p class="xp-help">${t(msgid('A firing alert is sent once when it starts and once when it clears, by email and to the webhook chosen on the notifications page. Failed messages are retried for about an hour.'))}</p>
     <dl class="xp-whm-detail-fields xp-whm-alerts__facts">
     ${fact('notifications', msgid('Notifications'))}

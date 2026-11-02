@@ -130,12 +130,13 @@ try {
         }
         // Native metric tiles (label + .xp-kpi__value) are measured by the kpis checks, not as approved form fields.
         const approved_fields = [...document.querySelectorAll('[data-approved-xpanel-workspace] .xp-field:not(:has(> .xp-kpi__value)), [data-approved-xpanel-workspace] .xp-panel-detail__facts > div')].map(e => {
-          const label = e.querySelector(':scope > label, :scope > dt'), value = e.querySelector(':scope > input, :scope > select, :scope > textarea, :scope > dd')
+          // A choice field is a visible label plus its labelled button group; hidden form context inputs are never the value.
+          const label = e.querySelector(':scope > label, :scope > dt, :scope > .xp-label[id]'), value = e.querySelector(':scope > input:not([type="hidden"]), :scope > select, :scope > textarea, :scope > dd, :scope > [role="group"][aria-labelledby]')
           if (!label || !value) throw new Error('Approved field lacks its label/value pair')
-          const control = ['INPUT', 'SELECT', 'TEXTAREA'].includes(value.tagName)
+          const group = value.getAttribute('role') === 'group', control = group || ['INPUT', 'SELECT', 'TEXTAREA'].includes(value.tagName)
           const component = e.closest('[data-workspace-section]')?.dataset.workspaceSection, index = [...e.parentElement.children].indexOf(e)
           if (!component || index < 0) throw new Error('Approved field lacks its component identity')
-          return { identity: component + ':' + index, component, index, label: label.textContent.trim(), id: value.id, tag: value.tagName, text: control ? value.value : value.textContent.trim(), gap: rect(value).top - rect(label).bottom, logical_edge_delta: edgeDelta(rect(value), rect(label)), glyph_edge_delta: control ? null : edgeDelta(glyph(value), glyph(label)), label_glyph: glyph(label), control: rect(value) }
+          return { identity: component + ':' + index, component, index, label: label.textContent.trim(), id: value.id, tag: value.tagName, text: control && !group ? value.value : value.textContent.trim(), gap: rect(value).top - rect(label).bottom, logical_edge_delta: edgeDelta(rect(value), rect(label)), glyph_edge_delta: control ? null : edgeDelta(glyph(value), glyph(label)), label_glyph: glyph(label), control: rect(value) }
         })
         const fields = ['mail-outbound-mode', 'mail-default-ipv4', 'mail-default-ipv6', 'mail-default-helo'].map(id => { const c = document.getElementById(id), l = document.querySelector('label[for="' + id + '"]'); return c && l ? { id, gap: rect(c).top - rect(l).bottom, logical_edge_delta: edgeDelta(rect(c), rect(l)), control: rect(c) } : null }).filter(Boolean)
         const label = document.querySelector('#whm-plans label[for="plan-addonDomains-unlimited"]')
@@ -178,7 +179,7 @@ try {
         check('approved-traffic-technical-cells-covered', g.technical_tokens.filter(token => token.source === 'approved').length === 3 && g.technical_tokens.filter(token => token.source === 'approved').every(token => token.tableKey === 'top-pages'), g.technical_tokens)
         check('table-scroll-regions-contained', g.wrappers.every(w => w.left >= -1 && w.right <= sample.width + 1 && w.left >= w.card.left - 1 && w.right <= w.card.right + 1 && w.overflow_x === 'auto' && w.role === 'region' && w.tabindex === 0), g.wrappers)
         const expectedApprovedFields = [
-          ['metrics-scope:0', 'SELECT', ['Domain', 'النطاق']], ['metrics-scope:1', 'SELECT', ['Range', 'الفترة']],
+          ['metrics-scope:0', 'DIV', ['Domain', 'النطاق']], ['metrics-scope:1', 'DIV', ['Range', 'الفترة']],
           ['visitors:0', 'INPUT', ['Unique visitors', 'الزوار الفريدون']], ['visitors:1', 'INPUT', ['Requests', 'الطلبات']],
           ['response-status:0', 'INPUT', ['2xx', '2xx']], ['response-status:1', 'INPUT', ['3xx', '3xx']],
           ['response-status:2', 'INPUT', ['4xx', '4xx']], ['response-status:3', 'INPUT', ['5xx', '5xx']],

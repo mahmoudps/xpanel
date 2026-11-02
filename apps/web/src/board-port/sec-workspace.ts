@@ -1,3 +1,4 @@
+import { classicSecClientTemplates } from './sec-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -93,6 +94,7 @@ export function renderSecWorkspace({ page, locale, canRead, canManage }: SecWork
     .xp-sec [hidden]{display:none!important}.xp-sec :focus-visible{outline:2px solid var(--xp-accent);outline-offset:2px}.xp-sec td bdi{unicode-bidi:isolate;overflow-wrap:anywhere}.xp-sec td .xp-sec__actions{gap:8px}
     @media(min-width:601px){.xp-sec__card{padding:var(--xp-space-card,24px)}}@media(max-width:900px){.xp-sec__fields--wide{grid-template-columns:minmax(0,1fr)}}@media(max-width:639px){.xp-sec__fields{grid-template-columns:minmax(0,1fr)}.xp-sec__actions>:is(button,a){flex:1 1 auto}}
     </style>
+    ${['account-waf', 'account-cloudflare', 'dns-providers', 'dns-cluster'].includes(page) ? classicSecClientTemplates() : ''}
     ${bodies[page]}
   </section>`
 }

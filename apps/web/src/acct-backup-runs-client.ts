@@ -2,6 +2,10 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
 export interface WhmBackupRunEntry { username: string; destinationId: string; file: string | null; bytes: number | null; sha256: string | null; outcome: 'verified' | 'failed' | 'unknown'; reason: string | null }
@@ -103,6 +107,19 @@ function bindWhmBackupRuns(ask: ((options: Record<string, unknown>) => Promise<u
     const status = q<HTMLElement>('[data-backup-runs-status]'), loading = q<HTMLElement>('[data-backup-runs-loading]'), read = q<HTMLButtonElement>('[data-backup-runs-read]'), start = q<HTMLButtonElement>('[data-backup-runs-start]')
     const select = q<HTMLSelectElement>('[data-backup-retention-destination]'), preview = q<HTMLButtonElement>('[data-backup-retention-preview]'), apply = q<HTMLButtonElement>('[data-backup-retention-apply]'), retentionStatus = q<HTMLElement>('[data-backup-retention-status]')
     if (!status || !loading || !read || !start || !select || !preview || !apply || !retentionStatus) return
+    const templates = new Map<string, HTMLTemplateElement>()
+    const rowSlots = { runs: ['started', 'trigger', 'state', 'copies', 'mail', 'retention'], copies: ['account', 'destination', 'archive', 'size', 'started', 'action'], recoveries: ['started', 'account', 'archive', 'state'], retention: ['archive', 'account', 'created', 'size', 'plan'] } as const
+    try {
+      for (const [kind, slots] of Object.entries(rowSlots)) {
+        const template = clientTemplate(root, 'whm-backup-' + kind + '-row')
+        const clone = cloneClientTemplate(template, 'tr', slots)
+        if (kind === 'copies') clientTemplateSlot(clone, 'action', 'button')
+        templates.set(kind, template)
+      }
+    } catch {
+      root.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button,select').forEach(control => { control.disabled = true })
+      status.dataset.state = 'failed'; status.textContent = t('Backup runs could not be read. No changes were made.'); return
+    }
     const rows = (id: string): HTMLElement => q<HTMLElement>(`[data-backup-runs-rows="${id}"]`)!, empty = (id: string): HTMLElement => q<HTMLElement>(`[data-backup-runs-empty="${id}"]`)!
     let view: WhmBackupRunsView | null = null, configRevision = '', names = new Map<string, string>(), plan: WhmBackupRetentionPlan | null = null, busy = false, review = false
     const eligible = (): boolean => root.isConnected && root.dataset.canManage === 'true' && !!send && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
@@ -119,7 +136,11 @@ function bindWhmBackupRuns(ask: ((options: Record<string, unknown>) => Promise<u
     }
     const technical = (value: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = value; return node }
     const size = (bytes: number | null): string => bytes === null ? '' : bytes < 1024 * 1024 ? (bytes / 1024).toFixed(1) + ' KiB' : bytes < 1024 ** 3 ? (bytes / 1024 / 1024).toFixed(1) + ' MiB' : (bytes / 1024 ** 3).toFixed(2) + ' GiB'
-    const row = (target: HTMLElement, cells: (string | Node)[]): HTMLTableRowElement => { const tr = document.createElement('tr'); for (const value of cells) { const td = document.createElement('td'); td.append(value); tr.append(td) } target.append(tr); return tr }
+    const row = (target: HTMLElement, kind: keyof typeof rowSlots, values: Record<string, string | Node>): HTMLTableRowElement => {
+      const tr = cloneClientTemplate(templates.get(kind)!, 'tr', rowSlots[kind]) as HTMLTableRowElement
+      for (const [name, value] of Object.entries(values)) clientTemplateSlot(tr, name).replaceChildren(value)
+      target.append(tr); return tr
+    }
     const fill = (id: string, count: number): HTMLElement => { const target = rows(id); target.replaceChildren(); empty(id).hidden = count > 0; return target }
     const stateLabel = (state: string): string => ({ running: t('Running'), succeeded: t('Succeeded'), failed: t('Failed'), unknown: t('Outcome unknown; review required'), recovered: t('Recovered'), verified: t('Verified') } as Record<string, string>)[state] ?? state
     const reasonText = (reason: string | null): string => ({
@@ -140,18 +161,19 @@ function bindWhmBackupRuns(ask: ((options: Record<string, unknown>) => Promise<u
       for (const run of next.runs) {
         // A copy counts once its local archive passed the integrity read and every remote copy was re-read.
         const verified = run.archives.filter(item => item.integrity === 'verified' && run.entries.every(entry => entry.username !== item.username || entry.outcome === 'verified')).length
-        row(runs, [formatDisplayDateTime(run.startedAt), run.trigger === 'schedule' ? t('Scheduled') : run.trigger === 'account' ? t('Selected accounts') : t('Run now'), stateLabel(run.state), t('{verified} of {total}', { verified, total: run.archives.length }), run.mailIncluded ? t(msgctxt('acct-backup-runs-client', 'Included')) : t('Not included'),
-          run.retention.length ? run.retention.map(item => t('{deleted, plural, one {# archive deleted} other {# archives deleted}} ({state})', { deleted: item.deleted, state: stateLabel(item.outcome) })).join(', ') : t('Not applied')])
+        row(runs, 'runs', { started: formatDisplayDateTime(run.startedAt), trigger: run.trigger === 'schedule' ? t('Scheduled') : run.trigger === 'account' ? t('Selected accounts') : t('Run now'), state: stateLabel(run.state), copies: t('{verified} of {total}', { verified, total: run.archives.length }), mail: run.mailIncluded ? t(msgctxt('acct-backup-runs-client', 'Included')) : t('Not included'),
+          retention: run.retention.length ? run.retention.map(item => t('{deleted, plural, one {# archive deleted} other {# archives deleted}} ({state})', { deleted: item.deleted, state: stateLabel(item.outcome) })).join(', ') : t('Not applied') })
       }
       const copies = next.runs.flatMap(run => run.entries.filter(entry => entry.outcome === 'verified' && entry.username !== '_control').map(entry => ({ run, entry })))
       const copyRows = fill('copies', copies.length)
       for (const { run, entry } of copies) {
-        const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.textContent = t('Recover to this server')
+        const copyRow = row(copyRows, 'copies', { account: technical(entry.username), destination: names.get(entry.destinationId) ?? t('Not read'), archive: technical(entry.file!), size: size(entry.bytes), started: formatDisplayDateTime(run.startedAt) })
+        const button = clientTemplateSlot(copyRow, 'action', 'button') as HTMLButtonElement
+        button.textContent = t('Recover to this server')
         Object.assign(button.dataset, { backupRecover: run.id, username: entry.username, file: entry.file!, destination: entry.destinationId })
-        row(copyRows, [technical(entry.username), names.get(entry.destinationId) ?? technical(entry.destinationId), technical(entry.file!), size(entry.bytes), formatDisplayDateTime(run.startedAt), button])
       }
       const recoveries = fill('recoveries', next.recoveries.length)
-      for (const item of next.recoveries) row(recoveries, [formatDisplayDateTime(item.startedAt), technical(item.username), technical(item.file), stateLabel(item.state) + (item.reason === 'exists' ? ' - ' + t('A local archive with this name already exists.') : item.reason === 'mismatch' ? ' - ' + t('The downloaded copy did not match the recorded SHA-256.') : item.reason === 'missing' ? ' - ' + t('The remote copy no longer exists.') : '')])
+      for (const item of next.recoveries) row(recoveries, 'recoveries', { started: formatDisplayDateTime(item.startedAt), account: technical(item.username), archive: technical(item.file), state: stateLabel(item.state) + (item.reason === 'exists' ? ' - ' + t('A local archive with this name already exists.') : item.reason === 'mismatch' ? ' - ' + t('The downloaded copy did not match the recorded SHA-256.') : item.reason === 'missing' ? ' - ' + t('The remote copy no longer exists.') : '') })
       note(status, next.available ? 'read' : 'unavailable', next.activeId ? t('A backup operation is running. Read again to follow it.') : reasonText(next.reason))
       lock()
     }
@@ -201,7 +223,7 @@ function bindWhmBackupRuns(ask: ((options: Record<string, unknown>) => Promise<u
       try {
         plan = readWhmBackupRetentionPlan(await send!('GET', '/api/backups/workspace/destinations/' + destinationId + '/retention'), destinationId)
         const target = fill('retention', plan.rows.length), reasons: Record<string, string> = { newest: t('Keep: newest archive'), protected: t('Keep: newest verified copy'), within_count: t('Keep: within retention count'), within_days: t('Keep: within retention days'), expired: t('Delete: expired') }
-        for (const item of plan.rows) row(target, [technical(item.name), technical(item.username), formatDisplayDateTime(item.createdAt), size(item.bytes), reasons[item.reason]!])
+        for (const item of plan.rows) row(target, 'retention', { archive: technical(item.name), account: technical(item.username), created: formatDisplayDateTime(item.createdAt), size: size(item.bytes), plan: reasons[item.reason]! })
         const deletions = plan.rows.filter(item => item.action === 'delete').length
         note(retentionStatus, 'read', t('{count, plural, =0 {Nothing is due for deletion.} one {# archive is due for deletion.} other {# archives are due for deletion.}}', { count: deletions }))
       } catch { plan = null; note(retentionStatus, 'failed', t('The retention plan could not be read. Nothing was deleted.')) }
@@ -236,4 +258,4 @@ function bindWhmBackupRuns(ask: ((options: Record<string, unknown>) => Promise<u
   })
 }
 export { bindWhmBackupRuns }
-export const WHM_BACKUP_RUNS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmBackupRunsView=${readWhmBackupRunsView.toString()};const readWhmBackupRetentionPlan=${readWhmBackupRetentionPlan.toString()};return ${bindWhmBackupRuns.toString()};})()`
+export const WHM_BACKUP_RUNS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const readWhmBackupRunsView=${readWhmBackupRunsView.toString()};const readWhmBackupRetentionPlan=${readWhmBackupRetentionPlan.toString()};return ${bindWhmBackupRuns.toString()};})()`

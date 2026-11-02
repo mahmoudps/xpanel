@@ -2,7 +2,7 @@
 
 This document defines requirements, not completed acceptance. Each scenario starts as `not_run` until a reviewed execution receipt establishes a result for the exact source, release artifact, environment, and independent oracle.
 
-> **Evidence warning:** The companion [scenario mapping](acceptance-scenario-mapping.json) retains legacy `portablePrimitiveVerified` and `verificationStatus` fields for schema compatibility. They do not establish acceptance. Its authoritative assessment is `evidenceAssessment: declarative_unaccepted` and `independentAcceptance: false`. Matrix/schema consistency proves neither that a mapped harness exists nor that it ran. Some declared harness paths are unresolved. A passing metadata test cannot close a scenario or release gate.
+> **Evidence warning:** The companion [scenario mapping](acceptance-scenario-mapping.json) retains legacy `portablePrimitiveVerified` and `verificationStatus` fields for schema compatibility. They do not establish acceptance. Its authoritative assessment is `evidenceAssessment: declarative_unaccepted` and `independentAcceptance: false`. Matrix/schema consistency does not prove that a harness ran. All mapped supporting paths and test declaration anchors are checked by the coverage validator; their explicit partial coverage and remaining gaps do not establish the required environment observations. A passing metadata test cannot close a scenario or release gate.
 
 See [testing](../TESTING.md), [status](../STATUS.md), [engineering standards](../STANDARDS.md), [authorization inventory](authorization-route-matrix.json), and [operational runbooks](../operations/runbooks.md). Scenario IDs are engineering traceability identifiers, not customer document numbers.
 

@@ -1,6 +1,9 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
 type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
@@ -60,6 +63,17 @@ function bindWhmIps(askDialog: Ask | undefined): void {
     const editable = (): boolean => root.isConnected && root.dataset.ipEditable === 'true' && !root.closest(denied) && typeof request === 'function'
     let busy = false, uncertain = false
     const note = (node: HTMLElement, state: string, message: string): void => { node.hidden = false; node.dataset.state = state; node.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status'); node.textContent = message }
+    const counts = root.querySelectorAll<HTMLElement>('[data-ip-pool-count-label]')
+    try {
+      if (counts.length !== 1) throw new Error('ip_count_label_unavailable')
+      const record = cloneViewRecord(root, 'whm-ip-row', 'tr', { address: '', version: '', interface: '', owner: '', ptr: '', 'remove-label': '' })
+      viewAction(record, 'role', 'span'); viewAction(record, 'primary', 'span'); viewAction(record, 'remove')
+      cloneViewRecord(root, 'whm-ip-empty', 'tr', { message: '' })
+      for (const name of ['whm-ip-role-web', 'whm-ip-role-mail', 'whm-ip-primary', 'whm-ip-secondary']) cloneViewRecord(root, name, 'span', { label: '' })
+    } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      note(formStatus, 'unavailable', t('Saving is unavailable. No changes were sent.')); return
+    }
     const sync = (): void => {
       const blocked = busy || uncertain || !editable()
       submit.disabled = blocked
@@ -73,28 +87,23 @@ function bindWhmIps(askDialog: Ask | undefined): void {
       return details.stateChanged === false || typeof value.status === 'number' && value.status >= 400 && value.status < 500 && value.status !== 408
     }
     const uncertainOutcome = (node: HTMLElement): void => { uncertain = true; note(node, 'uncertain', t('The outcome is uncertain. Reload the page and review the IP pool before retrying; no automatic retry was sent.')) }
-    const element = (tag: string, text: string, className = ''): HTMLElement => { const node = document.createElement(tag); if (className) node.className = className; node.textContent = text; return node }
-    const technical = (text: string, code: boolean): HTMLElement => { const bdi = element('bdi', text); bdi.dir = 'ltr'; if (!code) return bdi; const wrap = element('code', '', 'xp-mono'); wrap.append(bdi); return wrap }
-    const badge = (tone: string, label: string): HTMLElement => { const node = element('span', '', 'xp-badge xp-badge--' + tone); node.dataset.status = tone; node.append(element('span', label, 'xp-badge__label')); return node }
     const row = (ip: WhmIpEntry): HTMLTableRowElement => {
-      const tr = document.createElement('tr'); tr.dataset.ipRow = ip.address; tr.dataset.ipId = ip.id
-      const cell = (content: Node | string, className = ''): void => { const td = document.createElement('td'); if (className) td.className = className; td.append(content); tr.append(td) }
-      const address = technical(ip.address + '/' + String(ip.prefixLength), true); address.classList.add('xp-tabular')
-      cell(address); cell('IPv' + String(ip.version), 'xp-mono'); cell(technical(ip.interfaceName, true)); cell(badge(ip.role === 'mail' ? 'warn' : 'ok', ip.role))
-      cell(technical(ip.ownerKind + (ip.ownerId ? ' (' + t(msgctxt('xwhm', 'Owner unavailable')) + ')' : ''), false), 'xp-mono'); cell(technical(ip.ptrHostname ?? '—', false), 'xp-mono')
-      cell(badge(ip.isPrimary ? 'ok' : 'suspended', ip.isPrimary ? t('Primary') : t('Secondary')))
-      const action = document.createElement('td')
-      if (!ip.isPrimary) { const remove = element('button', t('Remove'), 'xp-btn xp-btn--danger') as HTMLButtonElement; remove.type = 'button'; remove.dataset.ipRemove = ip.id; remove.dataset.ipAddress = ip.address; remove.setAttribute('aria-label', t('Remove {name}', { name: ip.address })); action.append(remove) }
-      tr.append(action)
+      const tr = cloneViewRecord(root, 'whm-ip-row', 'tr', { address: ip.address + '/' + String(ip.prefixLength), version: 'IPv' + String(ip.version), interface: ip.interfaceName,
+        owner: ip.ownerKind + (ip.ownerId ? ' (' + t(msgctxt('xwhm', 'Owner unavailable')) + ')' : ''), ptr: ip.ptrHostname ?? '—', 'remove-label': t('Remove') }) as HTMLTableRowElement
+      tr.dataset.ipRow = ip.address; tr.dataset.ipId = ip.id
+      viewAction(tr, 'role', 'span').replaceChildren(cloneViewRecord(root, ip.role === 'mail' ? 'whm-ip-role-mail' : 'whm-ip-role-web', 'span', { label: ip.role }))
+      viewAction(tr, 'primary', 'span').replaceChildren(cloneViewRecord(root, ip.isPrimary ? 'whm-ip-primary' : 'whm-ip-secondary', 'span', { label: ip.isPrimary ? t('Primary') : t('Secondary') }))
+      const remove = viewAction(tr, 'remove')
+      if (ip.isPrimary) remove.hidden = true
+      else { remove.dataset.ipRemove = ip.id; remove.dataset.ipAddress = ip.address; remove.setAttribute('aria-label', t('Remove {name}', { name: ip.address })) }
       return tr
     }
     const paint = (pool: WhmIpEntry[]): void => {
       // shortcut: a row that is still present keeps its server-rendered owner name; edits made elsewhere appear after a reload.
       const kept = new Map([...body.querySelectorAll<HTMLTableRowElement>('tr[data-ip-id]')].map(item => [item.dataset.ipId, item]))
       body.replaceChildren(...pool.map(ip => kept.get(ip.id) ?? row(ip)))
-      if (!pool.length) { const empty = document.createElement('tr'), cell = element('td', t('No IP addresses are in the pool.')) as HTMLTableCellElement; cell.colSpan = 8; empty.append(cell); body.append(empty) }
-      const count = root.querySelector('[data-ip-pool-count] .xp-badge__label')
-      if (count) count.textContent = t('{count, plural, one {{count} address} other {{count} addresses}}', { count: pool.length })
+      if (!pool.length) body.append(cloneViewRecord(root, 'whm-ip-empty', 'tr', { message: t('No IP addresses are in the pool.') }))
+      counts[0]!.textContent = t('{count, plural, one {{count} address} other {{count} addresses}}', { count: pool.length })
     }
     const readPool = async (): Promise<WhmIpEntry[]> => readWhmIpPool(await request!('GET', '/api/ips'))
     const add = async (): Promise<void> => {
@@ -147,4 +156,4 @@ function bindWhmIps(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_IPS_CLIENT_BINDING = `(()=>{const IP_ROLES=${JSON.stringify(IP_ROLES)};const IP_OWNERS=${JSON.stringify(IP_OWNERS)};const IP_UUID=${IP_UUID.toString()};const readWhmIpEntry=${readWhmIpEntry.toString()};const readWhmIpPool=${readWhmIpPool.toString()};const whmIpDraft=${whmIpDraft.toString()};return ${bindWhmIps.toString()};})()`
+export const WHM_IPS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const IP_ROLES=${JSON.stringify(IP_ROLES)};const IP_OWNERS=${JSON.stringify(IP_OWNERS)};const IP_UUID=${IP_UUID.toString()};const readWhmIpEntry=${readWhmIpEntry.toString()};const readWhmIpPool=${readWhmIpPool.toString()};const whmIpDraft=${whmIpDraft.toString()};return ${bindWhmIps.toString()};})()`

@@ -10,6 +10,7 @@ export const LIFECYCLE_ROOT = '/var/lib/xpanel-lifecycle'
 export const LIFECYCLE_BARRIER = LIFECYCLE_ROOT + '/writer-barrier.json'
 export const LIFECYCLE_LOCK = LIFECYCLE_ROOT + '/writer.lock'
 const exclusives = new WeakMap(), exclusiveScope = new AsyncLocalStorage(), writerScope = new AsyncLocalStorage()
+const installExclusives = new WeakMap(), installExclusiveScope = new AsyncLocalStorage()
 const fail = (code, cause) => { throw Object.assign(new Error(code, cause ? { cause } : undefined), { code }) }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const SHA = /^[0-9a-f]{64}$/
@@ -86,6 +87,7 @@ async function withKernelLock(exclusive, callback) {
 }
 
 async function admittedWriter(callback) {
+  if (installExclusiveScope.getStore()?.active) fail('INSTALL_FINALIZATION_NESTED_WRITER')
   if (typeof callback !== 'function') fail('LIFECYCLE_CALLBACK_REQUIRED')
   const exclusive = exclusiveScope.getStore()
   if (exclusive) {
@@ -231,4 +233,81 @@ export async function startLifecycleWriterParticipant(role, { onFence } = {}) {
 export async function readLifecyclePublicStatus() {
   const barrier = await readLifecycleBarrier()
   return Object.freeze({ active: barrier !== null, reference: barrier?.reference ?? null, phase: barrier?.phase ?? 'normal', ...(barrier ? { kind: barrier.kind } : {}) })
+}
+
+/** A separate, native bootstrap metadata scope; ordinary upgrade authority is unchanged. */
+export async function withInstallFinalizationExclusiveAdmission(capability, callback) {
+  const native = await import('./install-finalization-native.mjs')
+  await native.assertInstallFinalizationNativeScope(capability, 'admission')
+  if (typeof callback !== 'function' || exclusiveScope.getStore() || writerScope.getStore() || installExclusiveScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
+  return withKernelLock(true, async lock => {
+    await native.assertInstallFinalizationNativeScope(capability, 'admission')
+    const state = { lock, active: true, capability }
+    installExclusives.set(capability, state)
+    try { return await installExclusiveScope.run(state, callback) }
+    finally { state.active = false; installExclusives.delete(capability) }
+  })
+}
+
+export async function assertInstallFinalizationExclusiveHeld(capability) {
+  const state = capability && typeof capability === 'object' ? installExclusives.get(capability) : undefined
+  if (!state || !state.active || installExclusiveScope.getStore() !== state) fail('INSTALL_FINALIZATION_EXCLUSIVE_REQUIRED')
+  await state.lock.verify(); await flock(state.lock.fd, true, true)
+  const native = await import('./install-finalization-native.mjs')
+  await native.assertInstallFinalizationNativeScope(capability, 'held')
+}
+
+/** Read-only nonce handshake with normal participants while genuine bootstrap EX is held. */
+export async function verifyInstallFinalizationParticipants(capability) {
+  await assertInstallFinalizationExclusiveHeld(capability)
+  const native = await import('./install-finalization-native.mjs')
+  const info = native.installFinalizationNativeInfo(capability)
+  if (await readLifecycleBarrier()) fail('INSTALL_FINALIZATION_BARRIER_CHANGED')
+  for (const role of ['api', 'agent']) {
+    const process = info.processes.find(item => item.role === role)
+    if (!process) fail('INSTALL_FINALIZATION_PROCESS_REQUIRED')
+    const directory = '/run/xpanel/lifecycle-' + role, path = directory + '/participant.sock'
+    const parent = await lstat(directory, { bigint: true })
+    if (!parent.isDirectory() || parent.isSymbolicLink() || Number(parent.uid) !== process.uid || Number(parent.mode & 0o7777n) !== 0o700) fail('LIFECYCLE_PARTICIPANT_DIRECTORY_UNSAFE')
+    const pin = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+    try {
+      const verifyParent = async () => {
+        const [opened, named] = await Promise.all([pin.stat({ bigint: true }), lstat(directory, { bigint: true })])
+        if (opened.dev !== parent.dev || opened.ino !== parent.ino || named.dev !== parent.dev || named.ino !== parent.ino || named.uid !== parent.uid || named.mode !== parent.mode) fail('LIFECYCLE_PARTICIPANT_DIRECTORY_CHANGED')
+      }
+      await verifyParent()
+      const socket = await lstat(path, { bigint: true })
+      if (!socket.isSocket() || Number(socket.uid) !== process.uid || Number(socket.mode & 0o7777n) !== 0o600) fail('LIFECYCLE_WRITER_SOCKET_UNOWNED')
+      const unix = await readFile('/proc/net/unix', 'utf8')
+      if (Buffer.byteLength(unix) > 1024 * 1024) fail('LIFECYCLE_WRITER_SOCKET_UNBOUND')
+      const row = unix.split('\n').find(line => line.trim().split(/\s+/).at(-1) === path)
+      const inode = row?.trim().split(/\s+/)[6]
+      if (!inode || !/^[0-9]+$/.test(inode)) fail('LIFECYCLE_WRITER_SOCKET_UNBOUND')
+      const descriptors = await readdir('/proc/' + process.pid + '/fd')
+      if (descriptors.length > 8192) fail('LIFECYCLE_WRITER_SOCKET_UNBOUND')
+      let owns = false
+      for (const descriptor of descriptors) {
+        if (!/^[0-9]+$/.test(descriptor)) continue
+        try { if (await readlink('/proc/' + process.pid + '/fd/' + descriptor) === 'socket:[' + inode + ']') owns = true } catch { /* A disappearing descriptor is not evidence. */ }
+      }
+      if (!owns) fail('LIFECYCLE_WRITER_SOCKET_PROCESS_MISMATCH')
+      const nonce = randomBytes(32).toString('hex')
+      const response = await new Promise((resolve, reject) => {
+        const client = connect(path); let bytes = '', parsed, failure
+        client.setTimeout(2000, () => client.destroy(new Error('LIFECYCLE_WRITER_HANDSHAKE_TIMEOUT')))
+        client.on('error', error => { failure = error })
+        client.on('connect', () => client.end(JSON.stringify({ nonce, operationId: info.probeId }) + '\n'))
+        client.on('data', chunk => { bytes += chunk; if (Buffer.byteLength(bytes) > 8192) client.destroy(new Error('LIFECYCLE_WRITER_HANDSHAKE_LIMIT')) })
+        client.on('end', () => { try { parsed = JSON.parse(bytes) } catch (error) { failure = error } })
+        client.on('close', () => { if (failure || !parsed) reject(failure ?? new Error('LIFECYCLE_WRITER_HANDSHAKE_INCOMPLETE')); else resolve(parsed) })
+      })
+      if (response.nonce !== nonce || response.operationId !== null || response.role !== role || response.pid !== process.pid || response.start !== process.start || response.activeWriters !== 0 || response.fenced !== false) fail('INSTALL_FINALIZATION_PARTICIPANT_CHANGED')
+      await verifyParent()
+      const after = await lstat(path, { bigint: true })
+      if (!after.isSocket() || socket.dev !== after.dev || socket.ino !== after.ino || socket.uid !== after.uid || socket.mode !== after.mode) fail('LIFECYCLE_WRITER_SOCKET_CHANGED')
+      await assertInstallFinalizationExclusiveHeld(capability)
+    } finally { await pin.close() }
+  }
+  if (await readLifecycleBarrier()) fail('INSTALL_FINALIZATION_BARRIER_CHANGED')
+  return true
 }

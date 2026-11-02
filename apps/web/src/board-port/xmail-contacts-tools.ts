@@ -1,3 +1,4 @@
+import { classicMailClientTemplates } from './mail-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -9,7 +10,7 @@ import { escapeHtml } from '../tokens.ts'
 export function renderMailContactsTools(input: { locale: Locale; mailbox: string; canManage: boolean }): string {
   const t = (message: string, values?: MessageValues): string => translator(input.locale)(message, values)
   const disabled = input.canManage ? '' : ' disabled'
-  return `<section class="xp-card" data-mail-contacts-tools data-contacts-tools-mailbox="${escapeHtml(input.mailbox)}" data-contacts-tools-manage="${input.canManage}" lang="${input.locale}" dir="${localeDirection(input.locale)}" aria-labelledby="mail-contacts-tools-heading">
+  return `<section class="xp-card" data-mail-contacts-tools data-contacts-tools-mailbox="${escapeHtml(input.mailbox)}" data-contacts-tools-manage="${input.canManage}" lang="${input.locale}" dir="${localeDirection(input.locale)}" aria-labelledby="mail-contacts-tools-heading">${classicMailClientTemplates('contact-tools')}
     <style>[data-mail-contacts-tools]{padding:var(--xp-space-field,16px)}[data-mail-contacts-tools]>.xp-card__header{margin-block-end:var(--xp-space-group,24px)}.xp-contacts-tools{display:grid;gap:24px;min-inline-size:0}.xp-contacts-tools__group{display:grid;gap:16px;min-inline-size:0;padding:16px;border:1px solid var(--xp-border,#e2e6ec);border-radius:8px}.xp-contacts-tools__group h3{margin:0;font-size:15px;line-height:22px}.xp-contacts-tools__fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:16px;min-inline-size:0}.xp-contacts-tools textarea{inline-size:100%;min-inline-size:0;box-sizing:border-box;min-block-size:96px}.xp-contacts-tools__actions{display:flex;flex-wrap:wrap;gap:8px}.xp-contacts-tools__shares{display:grid;gap:8px;margin:0;padding:0;list-style:none}.xp-contacts-tools__shares li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border:1px solid var(--xp-border,#e2e6ec);border-radius:8px;overflow-wrap:anywhere}@media(min-width:601px){[data-mail-contacts-tools],[data-mail-contacts-tools] .xp-contacts-tools__group{padding:var(--xp-space-card,24px)}}</style>
     <div class="xp-card__header"><div><h2 id="mail-contacts-tools-heading">${t('Import, export and sharing')}</h2><p class="xp-help">${t('These actions store contact configuration for this mailbox. Delivery, synchronisation and CardDAV are not claimed.')}</p></div></div>
     <div class="xp-contacts-tools">

@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -52,19 +56,20 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
     return details.rolledBack === true ? (typeof details.reason === 'string' ? copy('The mail server refused the change and kept the previous configuration: {reason}', { reason: details.reason }) : copy('The mail server refused the change and kept the previous configuration.'))
       : copy('The request was refused. Your input is kept.')
   }
+  const rowRoots = new WeakMap<HTMLElement, HTMLElement>()
+  const routingRow = (root: HTMLElement): HTMLTableRowElement => { const row=cloneClientTemplate(clientTemplate(root,'account-routing-row'),'tr',[]) as HTMLTableRowElement;rowRoots.set(row,root);return row }
+  const routingAction = (root: HTMLElement): HTMLTableCellElement => cloneClientTemplate(clientTemplate(root,'account-routing-action'),'td',[]) as HTMLTableCellElement
+  const routingButton = (root: HTMLElement): HTMLButtonElement => cloneClientTemplate(clientTemplate(root,'account-routing-button'),'button',[]) as HTMLButtonElement
   const cell = (row: HTMLTableRowElement, values: string[], technical: boolean) => {
-    const td = document.createElement('td')
-    values.forEach((value, index) => {
-      if (index) td.appendChild(document.createElement('br'))
-      if (!technical) { td.appendChild(document.createTextNode(value)); return }
-      const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.className = 'xp-mono xp-technical-token'; bdi.textContent = value; td.appendChild(bdi)
-    })
-    row.appendChild(td)
-    return td
+    const root=rowRoots.get(row)!, td=cloneClientTemplate(clientTemplate(root,'account-routing-cell'),'td',[])
+    values.forEach((value,index)=>{ if(index)td.append(cloneClientTemplate(clientTemplate(root,'account-routing-break'),'br',[])); const token=cloneClientTemplate(clientTemplate(root,technical?'account-routing-technical':'account-routing-text'),technical?'bdi':'span',[]);token.textContent=value;td.append(token) })
+    row.append(td);return td
   }
   /** One section: read, paint, and serialized writes that lock after an uncertain outcome. */
   const section = (root: HTMLElement, key: string, read: () => Promise<void>) => {
     const status = root.querySelector<HTMLElement>(`[data-${key}-status]`)
+    try { for(const [name,tag] of [['row','tr'],['action','td'],['button','button'],['cell','td'],['break','br'],['technical','bdi'],['text','span']] as const) cloneClientTemplate(clientTemplate(root,'account-routing-'+name),tag,[]) }
+    catch { root.querySelectorAll<HTMLInputElement|HTMLSelectElement|HTMLButtonElement>('input,select,button').forEach(control=>{control.disabled=true});if(status){status.dataset.state='unavailable';status.textContent=copy('Unavailable')}return {load:async()=>{},write:async()=>{}} }
     const state = { busy: false, review: false, read: false, manage: root.dataset[`${key}Manage`] === 'true' }
     const note = (text: string, kind: string) => { if (status) { status.textContent = text; status.dataset.state = kind; status.setAttribute('role', kind === 'uncertain' || kind === 'failed' ? 'alert' : 'status') } }
     const controls = () => {
@@ -112,14 +117,14 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
       if (!rows) return
       rows.textContent = ''
       for (const item of items) {
-        const row = document.createElement('tr')
+        const row = routingRow(root)
         cell(row, [item.sourceAddress], true)
         if (item.action === 'reject') cell(row, [copy('Rejected with an error: {message}', { message: item.rejectMessage ?? '' })], false)
         else cell(row, item.destinations, true)
         cell(row, [item.createdAt === undefined ? copy(msgctxt('account-forwarders-client', 'Not read')) : displayDateTime(item.createdAt)], true)
         cell(row, [stateText(item.application)], false).dataset.routingState = item.application.state
-        const action = document.createElement('td')
-        if (manage) { const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.dataset.forwarderDelete = item.id; button.dataset.forwarderSource = item.sourceAddress; button.textContent = copy('Delete forwarder'); action.appendChild(button) }
+        const action = routingAction(root)
+        if (manage) { const button = routingButton(root); button.dataset.forwarderDelete = item.id; button.dataset.forwarderSource = item.sourceAddress; button.textContent = copy('Delete forwarder'); action.appendChild(button) }
         else action.textContent = copy(msgctxt('account-forwarders-client', 'Read only'))
         row.appendChild(action); rows.appendChild(row)
       }
@@ -190,15 +195,15 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
         const app = readRoutingApplication(item.application)
         const start = typeof item.startDate === 'string' ? displayDateTime(item.startDate) : null
         const end = typeof item.endDate === 'string' ? displayDateTime(item.endDate) : null
-        const row = document.createElement('tr')
+        const row = routingRow(root)
         cell(row, [String(item.address)], true)
         cell(row, [String(item.subject)], false)
         cell(row, [start && end ? copy('{start} to {end}', { start, end }) : start ? copy('Since {start}, no end date', { start }) : end ? copy('Until {end}', { end }) : copy('Always, no end date'),
           copy('Once per sender every {hours, plural, one {# hour} other {# hours}}', { hours: item.replyIntervalHours as number })], false)
         cell(row, [stateText(app)], false).dataset.routingState = app.state
-        const action = document.createElement('td')
+        const action = routingAction(root)
         if (manage) for (const [kind, label] of [['edit', copy('Edit autoresponder')], ['delete', copy('Delete autoresponder')]] as const) {
-          const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'
+          const button = routingButton(root)
           button.dataset.autoresponderAction = kind; button.dataset.autoresponderAddress = String(item.address); button.textContent = label; action.appendChild(button)
         }
         row.appendChild(action); rows.appendChild(row)
@@ -295,4 +300,4 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
   })
 }
 
-export const ACCOUNT_FORWARDERS_CLIENT_BINDING = `(function(askDialog) { const displayDateTime=${DISPLAY_DATETIME_BINDING}; ${readRoutingApplication.toString()}; ${readForwarderRecords.toString()}; ${forwarderWriteUncertain.toString()}; ${utcInstant.toString()}; (${bindAccountForwarders.toString()})(askDialog); })`
+export const ACCOUNT_FORWARDERS_CLIENT_BINDING = `(function(askDialog) { const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()}; const displayDateTime=${DISPLAY_DATETIME_BINDING}; ${readRoutingApplication.toString()}; ${readForwarderRecords.toString()}; ${forwarderWriteUncertain.toString()}; ${utcInstant.toString()}; (${bindAccountForwarders.toString()})(askDialog); })`

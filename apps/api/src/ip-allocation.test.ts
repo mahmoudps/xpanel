@@ -4,7 +4,9 @@ import { join, relative } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApiToken, createResellerPrincipal, createRootPrincipal, createSession, createTestDb, createUserPrincipal, findPrincipalByUsername, listAudit, setTotpSecret } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
-import type { AgentApp } from '@xpanel/agent'
+import { FakeHostExecutor, HostReconciler, type AgentApp } from '@xpanel/agent'
+import { profileFor } from '@xpanel/os'
+import { preparedAccountFixture } from './testing/provisioning-preparation-fixture.ts'
 import type { ServerIpEntry } from '@xpanel/core'
 import { WRITER_MUTEX_FILE } from '../../../packages/state/src/writer-mutex.ts'
 import { authenticateRequest, deriveCsrfToken } from './auth.ts'
@@ -13,7 +15,7 @@ import type { EntryPoint } from './entry-points.ts'
 import { createApiApp, INGRESS_SECRET_HEADER } from './server.ts'
 
 // These are isolated router/state diagnostics. The agent below is a synthetic
-// configuration receipt, never evidence that an address is bound on a host.
+// configuration/prepared H receipt, never evidence that an address is bound on a host.
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const SECRET = 'ip-allocation-synthetic-server-secret-32-bytes'
 const INGRESS = 'ip-allocation-synthetic-ingress-secret-32-bytes'
@@ -55,9 +57,12 @@ const fixture = async () => {
     agentCalls++
     return Response.json({ status: 'applied', generation: { id: 1, createdAt: '2026-10-23T00:00:00Z', status: 'active', checksum: 'a'.repeat(64), error: null, actor: 'root', testedAt: '2026-10-23T00:00:00Z', activatedAt: '2026-10-23T00:00:00Z' }, filesCount: 2, durationMs: 1 })
   } }
-  const app = (audience: EntryPoint = 'xwhm') => createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: audience, publicOrigin: ORIGIN, allowedOrigins: [ORIGIN], ingressSecret: INGRESS, requireSecureCookies: true, requireOriginHeader: true, agentApp, agentToken: 'a'.repeat(64) })
+  const executor = new FakeHostExecutor()
+  const reconciler = new HostReconciler({ store: state.store, db: database.db, executor, os: profileFor('ID=ubuntu\nVERSION_ID=24.04\nVERSION_CODENAME=noble') })
+  const prepared = preparedAccountFixture({ store: state.store, reconciler, executor, agentApp, agentToken: 'a'.repeat(64), onProvision: () => { agentCalls++ } })
+  const app = (audience: EntryPoint = 'xwhm') => createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: audience, publicOrigin: ORIGIN, allowedOrigins: [ORIGIN], ingressSecret: INGRESS, requireSecureCookies: true, requireOriginHeader: true, ...prepared, agentToken: 'a'.repeat(64) })
   const main = app()
-  const tokenApp = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, publicOrigin: ORIGIN, allowedOrigins: [ORIGIN], ingressSecret: INGRESS, requireSecureCookies: true, requireOriginHeader: true, agentApp, agentToken: 'a'.repeat(64) })
+  const tokenApp = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, publicOrigin: ORIGIN, allowedOrigins: [ORIGIN], ingressSecret: INGRESS, requireSecureCookies: true, requireOriginHeader: true, ...prepared, agentToken: 'a'.repeat(64) })
   const request = (method: string, path: string, body?: unknown, options: { session?: typeof rootSession; csrf?: string; origin?: string; bearer?: string; audience?: EntryPoint } = {}) => {
     const auth = options.session ?? rootSession
     return (options.bearer ? tokenApp : options.audience ? app(options.audience) : main).fetch(new Request(ORIGIN + path, { method, headers: {
@@ -120,7 +125,8 @@ describe('IP API router and desired-state allocation diagnostics', () => {
     const before = await f.effects()
     const response = await f.request('POST', '/api/accounts', f.input('exhaustedip', { ipAssignment: { mode } }))
     expect(response.status).toBe(412)
-    expect((await response.json() as { details: unknown }).details).toMatchObject({ reason: mode + '_ipv4_unavailable', stateChanged: false })
+    // The prepared API publishes a bounded failure envelope; primitive IP reasons remain state-layer contracts.
+    expect((await response.json() as { details: unknown }).details).toEqual({ reason: 'account_provisioning_unverified', stateChanged: false, verificationRequired: true })
     expect(await f.effects()).toEqual(before)
   })
 

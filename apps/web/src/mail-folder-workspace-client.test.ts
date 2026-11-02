@@ -107,7 +107,8 @@ describe('reachable metadata datetime', () => {
       const date = document.querySelector<HTMLElement>('[data-mail-detail-date]')!
       expect(date.textContent).toBe('2026-10-27 12:34 UTC')
       expect(date.getAttribute('datetime')).toBe(receivedAt)
-      expect(date.dir).toBe('ltr')
+      expect(date.querySelector('bdi')?.dir).toBe('ltr')
+      expect(date.querySelector('bdi')?.textContent).toBe(date.textContent)
       expect(document.querySelector('[data-mail-detail-body]')!.textContent).toBe(rawBody)
       expect(readFolderMessage(read(folder, source), mailbox, folder, 1).receivedAt).toBe(receivedAt)
       expect(source.subject).toBe('Original source 2026-10-27T12:34:56.123456Z')

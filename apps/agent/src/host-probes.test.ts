@@ -35,10 +35,11 @@ describe('host capability probes', () => {
         if (path === '/proc/loadavg') return '0.1 0.2 0.3 1/100 1'
         if (path === '/proc/meminfo') return 'MemTotal: 2048 kB\nMemAvailable: 1024 kB\n'
         if (path.endsWith('/cgroup.subtree_control')) return 'cpu memory io pids'
-        if (path === '/proc/self/mountinfo') return '1 0 8:2 / /home rw - ext4 /dev/sda2 rw\n'
+        if (path === '/proc/self/mountinfo') return '1 0 8:1 / / rw - ext4 /dev/sda1 rw\n2 1 8:2 / /home rw - ext4 /dev/sda2 rw\n'
         return null
       }
       override async runCommand(argv: string[]) {
+        if (argv[0] === '/usr/bin/env' && argv[2] === '/usr/bin/df' && argv.includes('--all')) return { ok: true, code: 0, stdout: 'Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/sda1 100000 20000 80000 20% /\n/dev/sda2 200000 40000 160000 20% /home\n', stderr: '' }
         if (argv[0] === '/usr/sbin/repquota') return { ok: true, code: 0, stdout: 'Block limits\nalice -- 0 0 1048576 0 0 0\n', stderr: '' }
         return { ok: argv[0] === '/usr/bin/df', code: 0, stdout: 'Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/sda1 100000 20000 80000 20% /\n', stderr: '' }
       }
@@ -53,7 +54,10 @@ describe('host capability probes', () => {
         const failed = vi.spyOn(state.store, method).mockRejectedValueOnce(new Error('unread'))
         const response = await app.fetch(new Request('http://agent.local/host/info', { headers: { 'x-xpanel-agent-token': 'a'.repeat(64), 'x-xpanel-principal-id': principal.id } }))
         expect(response.status).toBe(200)
-        const body = await response.json() as { identity: hostIdentity.HostIdentity }
+        const body = await response.json() as { identity: hostIdentity.HostIdentity; disk: { mount: string }; disks: { mount: string }[]; diskCoverage: { status: string; mounts: string[] } }
+        expect(body.disk.mount).toBe('/')
+        expect(body.disks.map(disk => disk.mount)).toEqual(['/', '/home'])
+        expect(body.diskCoverage).toMatchObject({ status: 'complete', mounts: ['/', '/home'] })
         expect(body.identity.enforcedLimits).toEqual({ cpu: true, memory: true, io: true, pids: true })
         expect(body.identity.observedLimits?.status).toBe('unavailable')
         failed.mockRestore()

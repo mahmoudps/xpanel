@@ -1,6 +1,7 @@
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
+import { reverseProxyClientTemplates } from './domain-client-templates.ts'
 
 const STYLE = '<style>.xp-rp{gap:var(--xp-space-section)}.xp-rp .xp-acct-tool__card{gap:var(--xp-space-group);padding:var(--xp-space-field)}@media(min-width:601px){.xp-rp .xp-acct-tool__card{padding:var(--xp-space-card)}}.xp-rp .xp-acct-tool__card>h2{font-size:var(--xp-type-card);line-height:var(--xp-leading-card);font-weight:var(--xp-weight-semibold)}.xp-rp .xp-field,.xp-rp .xp-acct-tool__facts>div{gap:var(--xp-space-label)}.xp-rp .xp-field>label[for]{text-box-trim:trim-end;text-box-edge:text}.xp-rp .xp-acct-tool__fields,.xp-rp .xp-acct-tool__facts,.xp-rp .xp-acct-tool__actions{gap:var(--xp-space-field)}.xp-rp ol{display:grid;gap:var(--xp-space-field);margin:0;padding-inline-start:var(--xp-space-card)}.xp-rp [data-rp-warning]{padding:var(--xp-space-field);border:1px solid var(--xp-status-warn-border,var(--xp-border));border-radius:8px;background:var(--xp-status-warn-bg,var(--xp-bg-elevated))}.xp-rp [data-rp-error]{margin:0;color:var(--xp-status-critical-fg)}.xp-rp [hidden]{display:none}.xp-rp [data-rp-options]{display:grid;gap:var(--xp-space-field)}.xp-rp [data-rp-header-rows] input{inline-size:100%}.xp-rp [data-rp-websocket-label]{display:flex;gap:var(--xp-space-label);align-items:center;min-block-size:var(--xp-hit-target)}.xp-rp input[data-rp-websocket]{inline-size:20px;block-size:20px;min-block-size:20px;margin:0;padding:0;flex:none}.xp-rp .xp-acct-tool__table :is(th,td,p,span,bdi,button){overflow-wrap:normal;word-break:normal}.xp-rp .xp-acct-tool__table bdi{white-space:nowrap}.xp-rp .xp-acct-tool__table .xp-btn{white-space:nowrap;inline-size:max-content;max-inline-size:none;min-inline-size:var(--xp-hit-target);flex:none}body:has(.xp-rp) [data-xp-prompt] .xp-dialog__footer{gap:var(--xp-space-field)}</style>'
 
@@ -40,5 +41,5 @@ export function renderAccountReverseProxyWorkspace(input: { lang: Locale; accoun
       <li>${t('An alias follows the domain it points at. A domain that has aliases cannot change its mode here.')}</li>
       <li>${t('Node and Python application sites, and domains with a redirect, keep their current mode.')}</li>
       <li>${t('This page does not start your application or check that it answers.')}</li></ul></section>
-  </div>`
+  ${reverseProxyClientTemplates(t)}</div>`
 }

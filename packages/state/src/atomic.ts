@@ -1,7 +1,7 @@
 // Atomic file primitives for the desired-state tree (/var/lib/xpanel/state).
 // Every write goes to a sibling temp file, fsyncs the file descriptor, closes it,
 // renames over the target, and fsyncs the parent directory.
-import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { lstat, mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { claimStateOwnership } from './ownership.ts'
 import { basename, dirname, join } from 'node:path'
 import { fail } from '@xpanel/core'
@@ -98,16 +98,31 @@ export const atomicWriteJson = async (
   const tmpPath = join(dir, tmpName)
   const payload = `${JSON.stringify(data, null, 2)}\n`
   let fh
+  let temporaryIdentity: { dev: number; ino: number } | undefined
+  const removeOwnedTemporary = async (): Promise<void> => {
+    const identity = temporaryIdentity
+    if (!identity) return
+    try {
+      const named = await lstat(tmpPath)
+      if (named.isFile() && named.dev === identity.dev && named.ino === identity.ino) {
+        await rm(tmpPath, { force: true })
+      }
+    } catch { /* Best-effort cleanup never removes a path whose ownership is unproved. */ }
+  }
   try {
-    fh = await open(tmpPath, 'w', mode)
+    fh = await open(tmpPath, 'wx', mode)
+    const created = await fh.stat()
+    temporaryIdentity = { dev: created.dev, ino: created.ino }
+    // Creation mode is filtered by umask; enforce the requested mode on this owned FD.
+    await fh.chmod(mode)
     await fh.writeFile(payload, 'utf8')
     await fh.sync()
+    await fh.close()
   } catch (e) {
     await fh?.close().catch(() => undefined)
-    await rm(tmpPath, { force: true }).catch(() => undefined)
+    await removeOwnedTemporary()
     throw e
   }
-  await fh.close()
   try {
     if (beforeCommit) await beforeCommit()
     await claimStateOwnership(tmpPath)
@@ -124,7 +139,7 @@ export const atomicWriteJson = async (
       }
     }
   } catch (e) {
-    await rm(tmpPath, { force: true }).catch(() => undefined)
+    await removeOwnedTemporary()
     throw e
   }
   await claimStateOwnership(filePath)

@@ -1,0 +1,11 @@
+/** Classic software rows and actions are presentation owned by this theme adapter. */
+export function classicSoftwareClientTemplates(kind: 'addons' | 'containers' | 'container-engine' | 'projects' | 'updates'): string {
+  const technical = new Set(['name', 'image', 'unit', 'ports', 'version', 'installed', 'candidate', 'origin', 'runtime', 'driver', 'cgroup', 'reference', 'tags', 'size', 'registry'])
+  const row = (name: string, fields: readonly string[], controls = '') => `<template data-xp-template="${name}-row"><tr>${fields.map(key => `<td><${technical.has(key) ? 'bdi dir="ltr"' : 'span'} data-xp-slot="${key}"></${technical.has(key) ? 'bdi' : 'span'}></td>`).join('')}${controls ? `<td><div class="xp-whm-detail-actions">${controls}</div></td>` : ''}</tr></template><template data-xp-template="${name}-empty"><tr><td colspan="${fields.length + (controls ? 1 : 0)}" data-xp-slot="message"></td></tr></template>`
+  const actions = ['start', 'stop', 'restart'].map(action => `<button type="button" class="xp-btn" data-xp-action="${action}" disabled><span data-xp-slot="${action}-label"></span></button>`).join('')
+  if (kind === 'addons') return row('software-addon', ['service', 'kind', 'package', 'unit', 'state', 'boot'], actions)
+  if (kind === 'containers') return row('software-container', ['name', 'engine', 'image', 'state', 'status', 'ports'], actions)
+  if (kind === 'projects') return row('software-project-runtime', ['name', 'state', 'version'])
+  if (kind === 'updates') return `<template data-xp-template="software-update-row"><tr><td><input type="checkbox" data-xp-action="select" disabled></td>${['name', 'installed', 'candidate', 'origin', 'kind', 'state'].map(key => `<td><${technical.has(key) ? 'bdi dir="ltr"' : 'span'} data-xp-slot="${key}"></${technical.has(key) ? 'bdi' : 'span'}></td>`).join('')}</tr></template><template data-xp-template="software-update-empty"><tr><td colspan="7" data-xp-slot="message"></td></tr></template>`
+  return row('software-engine-facts', ['engine', 'runtime', 'driver', 'cgroup', 'rootless']) + row('software-engine-images', ['reference', 'tags', 'size', 'engine']) + row('software-engine-registries', ['registry', 'engine']) + row('software-engine-networks', ['name', 'driver', 'reference', 'engine']) + row('software-engine-volumes', ['name', 'driver', 'engine'])
+}

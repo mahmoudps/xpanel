@@ -1,3 +1,20 @@
+import { clientTemplate as canonicalBackupTemplate, cloneClientTemplate as canonicalBackupClone, clientTemplateSlot as canonicalBackupSlot } from './client-templates.ts'
+const clientTemplate = canonicalBackupTemplate
+const cloneClientTemplate = canonicalBackupClone
+const clientTemplateSlot = canonicalBackupSlot
+function backupNode(root: HTMLElement, name: string, tag: string, values: Readonly<Record<string, string>> = {}): HTMLElement {
+  const node = cloneClientTemplate(clientTemplate(root, 'whm-backup-' + name), tag, Object.keys(values))
+  for (const [key, value] of Object.entries(values)) clientTemplateSlot(node, key).textContent = value
+  return node
+}
+function requireBackupTemplates(root: HTMLElement): void {
+  const specs: readonly [string, string, readonly string[]][] = [
+    ['activation','span',['before','link','after']],['missing','div',['notice','clear']],['account-choice','label',['control','text']],['destination-heading','strong',['text']],['destination-choice','label',['control','text']],
+    ['destination-row','tr',['name','kind','endpoint','state','edit','remove']],['destination-empty','tr',['message']],['snapshot-row','tr',['created','kind','username','bytes','contents','integrity','state','summary','paths']],['path','li',['text']],['snapshot-empty','tr',['message']],['pager','div',['previous','label','next']],
+    ['run-row','tr',['created','trigger','accounts','bytes','duration','copies','state','restore','log']],['run-empty','tr',['message']],['log','li',[]],['technical','bdi',['text']],['name','bdi',['text']],['radio','button',['title','note']],['choices-empty','p',['message']],['difference','tr',['part','name','current','backup','action']],
+  ]
+  for (const [name,tag,slots] of specs) cloneClientTemplate(clientTemplate(root, 'whm-backup-' + name), tag, slots)
+}
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
@@ -93,6 +110,22 @@ const backupUnknown = (error: unknown): boolean => {
   return typeof error.status !== 'number' || error.status >= 500
 }
 
+/** A delegated editor is valid only while its original single inline manager remains present. */
+function backupDestinationEditorPresent(root: HTMLElement, expected: HTMLElement | null): boolean {
+  if (root.dataset.backupDestinationEditor !== 'manager' && expected === null) return true
+  const managers = root.querySelectorAll<HTMLElement>('[data-whm-backup-destinations][data-backup-inline-manager]')
+  const present = root.dataset.backupDestinationEditor === 'manager' && expected !== null &&
+    managers.length === 1 && managers[0] === expected &&
+    expected.closest('[data-approved-whm-backups]') === root &&
+    expected.dataset.canManage === root.dataset.backupManage &&
+    !!expected.querySelector('[data-destination-form]')
+  if (!present) {
+    root.dataset.backupManage = 'false'
+    root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+  }
+  return present
+}
+
 function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promise<unknown>) | undefined): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
   document.querySelectorAll<HTMLElement>('[data-approved-whm-backups]').forEach(root => {
@@ -100,20 +133,29 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
     root.dataset.backupBound = 'true'
     const status = root.querySelector<HTMLElement>('[data-backup-workspace-status]')
     if (!status) return
+    const delegatedDestinations = root.dataset.backupDestinationEditor === 'manager'
+    const destinationManager = delegatedDestinations ? root.querySelector<HTMLElement>('[data-whm-backup-destinations][data-backup-inline-manager]') : null
+    if (!backupDestinationEditorPresent(root, destinationManager)) {
+      root.dataset.backupManage = 'false'
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return
+    }
+    try { requireBackupTemplates(root) } catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
     const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const input = (key: string): HTMLInputElement => root.querySelector<HTMLInputElement>('#backup-layout-' + key)!
     const select = (key: string): HTMLSelectElement => root.querySelector<HTMLSelectElement>('#backup-layout-' + key)!
     const action = (key: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>('[data-backup-action="' + key + '"]')!
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.backupManage === 'true' && !root.closest(denied)
+    const admitted = (): boolean => root.isConnected && root.dataset.backupManage === 'true' && !root.closest(denied) && backupDestinationEditorPresent(root, destinationManager)
     const scheduleInputs = ['policy-enabled', 'policy-cron', 'daily-copies', 'weekly-copies', 'include-databases', 'include-mail', 'include-dns', 'include-control', 'start-time']
     const destinationInputs = ['destination-name', 'destination-endpoint', 'destination-prefix', 'destination-bucket', 'destination-region', 'destination-user', 'destination-retention']
-    const activationHelp = document.createElement('span'), activationLink = document.createElement('a')
-    activationHelp.className = 'xp-help'; activationHelp.id = 'backup-destination-activation-help'
-    const [activationBefore, activationAfter] = t('Saved flag only. Changes save this destination inactive. Verify and activate in {link}').split('{link}'), pageLang = document.documentElement.lang
-    activationLink.href = '/whm/backups/destinations' + (pageLang && pageLang !== 'en' ? '?lang=' + encodeURIComponent(pageLang) : ''); activationLink.textContent = t('Backup destinations'); activationHelp.append(activationBefore ?? '', activationLink, activationAfter ?? '')
-    input('destination-enabled').setAttribute('aria-describedby', activationHelp.id)
-    input('destination-enabled').closest('label')?.querySelector('span')?.append(activationHelp)
+    if (!delegatedDestinations) {
+      const activationHelp = backupNode(root, 'activation', 'span'), activationLink = clientTemplateSlot(activationHelp, 'link', 'a') as HTMLAnchorElement
+      const [activationBefore, activationAfter] = t('Saved flag only. Changes save this destination inactive. Verify and activate in {link}').split('{link}'), pageLang = document.documentElement.lang
+      activationLink.href = '/whm/backups/destinations' + (pageLang && pageLang !== 'en' ? '?lang=' + encodeURIComponent(pageLang) : ''); activationLink.textContent = t('Backup destinations'); clientTemplateSlot(activationHelp, 'before').textContent = activationBefore ?? ''; clientTemplateSlot(activationHelp, 'after').textContent = activationAfter ?? ''
+      input('destination-enabled').setAttribute('aria-describedby', activationHelp.id)
+      input('destination-enabled').closest('label')?.querySelector('span')?.append(activationHelp)
+    }
     let current: WhmBackupWorkspaceView | null = null, destinationId: string | null = null
     let busy = false, review = false, scheduleDirty = false, destinationDirty = false, allAccounts = true, confirming = false, snapshotPage = 0
     const selectedAccounts = new Set<string>(), selectedDestinations = new Set<string>()
@@ -126,14 +168,14 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
     }
     const lock = (): void => {
       const ready = !!current && admitted() && !busy && !review && !confirming
-      for (const key of [...scheduleInputs, ...destinationInputs]) setEnabled(input(key), ready)
+      for (const key of [...scheduleInputs, ...(delegatedDestinations ? [] : destinationInputs)]) setEnabled(input(key), ready)
       const monthly = root.querySelector<HTMLInputElement>('#backup-layout-monthly-copies'); if (monthly) setEnabled(monthly, ready)
-      input('destination-enabled').disabled = true
-      for (const key of ['frequency', 'policy-compress', 'destination-kind']) setEnabled(select(key), ready)
-      for (const key of ['all-accounts', 'selected-accounts', 'new-destination']) setEnabled(action(key), ready)
+      if (!delegatedDestinations) input('destination-enabled').disabled = true
+      for (const key of ['frequency', 'policy-compress', ...(delegatedDestinations ? [] : ['destination-kind'])]) setEnabled(select(key), ready)
+      for (const key of ['all-accounts', 'selected-accounts', ...(delegatedDestinations ? [] : ['new-destination'])]) setEnabled(action(key), ready)
       setEnabled(action('save-schedule'), ready && scheduleDirty)
       setEnabled(action('discard-schedule'), ready && scheduleDirty)
-      setEnabled(action('save-destination'), ready && destinationDirty)
+      if (!delegatedDestinations) setEnabled(action('save-destination'), ready && destinationDirty)
       setEnabled(action('refresh'), admitted() && !busy && !confirming)
       root.querySelectorAll<HTMLInputElement>('[data-backup-selected-account]').forEach(control => { control.disabled = !ready || allAccounts })
       root.querySelectorAll<HTMLInputElement>('[data-backup-selected-destination]').forEach(control => { control.disabled = !ready })
@@ -153,31 +195,31 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
         const known = new Set((current?.accounts ?? []).map(account => account.id))
         const missing = [...selectedAccounts].filter(selector => !known.has(selector))
         if (missing.length) {
-          const notice = document.createElement('p'), clear = document.createElement('button')
-          notice.textContent = t('Unavailable account selections: {count}', { count: missing.length })
-          clear.type = 'button'; clear.className = 'xp-btn'; clear.textContent = t('Remove unavailable selections from this draft')
+          const notice = backupNode(root, 'missing', 'div', { notice: t('Unavailable account selections: {count}', { count: missing.length }), clear: t('Remove unavailable selections from this draft') }), clear = clientTemplateSlot(notice, 'clear', 'button') as HTMLButtonElement
+          clear.disabled = busy || review || confirming
           clear.addEventListener('click', () => { if (busy || review || confirming) return; for (const selector of missing) selectedAccounts.delete(selector); scheduleDirty = true; renderChoices(); lock() })
-          accounts.append(notice, clear)
+          accounts.append(notice)
         }
         for (const account of current?.accounts ?? []) {
-          const label = document.createElement('label'), checkbox = document.createElement('input'), text = document.createElement('bdi')
-          label.className = 'xp-whm-backup-choice'; checkbox.type = 'checkbox'; checkbox.dataset.backupSelectedAccount = ''; checkbox.checked = allAccounts || selectedAccounts.has(account.id); text.dir = 'ltr'; text.textContent = account.username + ' · ' + account.primaryDomain
+          const label = backupNode(root, 'account-choice', 'label', { text: account.username + ' · ' + account.primaryDomain }), checkbox = clientTemplateSlot(label, 'control', 'input') as HTMLInputElement
+          checkbox.checked = allAccounts || selectedAccounts.has(account.id)
           checkbox.addEventListener('change', () => { checkbox.checked ? selectedAccounts.add(account.id) : selectedAccounts.delete(account.id); scheduleDirty = true; lock() })
-          label.append(checkbox, text); accounts.append(label)
+          accounts.append(label)
         }
       }
       if (destinations) {
         destinations.textContent = ''
-        const heading = document.createElement('strong'); heading.textContent = t('Destinations selected by this policy'); destinations.append(heading)
+        destinations.append(backupNode(root, 'destination-heading', 'strong', { text: t('Destinations selected by this policy') }))
         for (const destination of current?.destinations ?? []) {
-          const label = document.createElement('label'), checkbox = document.createElement('input'), text = document.createElement('span')
-          label.className = 'xp-whm-backup-choice'; checkbox.type = 'checkbox'; checkbox.dataset.backupSelectedDestination = ''; checkbox.checked = selectedDestinations.has(destination.id); text.textContent = destination.name + ' · ' + (destination.enabled ? t('Enabled configuration') : t('Disabled configuration'))
+          const label = backupNode(root, 'destination-choice', 'label', { text: destination.name + ' · ' + (destination.enabled ? t('Enabled configuration') : t('Disabled configuration')) }), checkbox = clientTemplateSlot(label, 'control', 'input') as HTMLInputElement
+          checkbox.checked = selectedDestinations.has(destination.id)
           checkbox.addEventListener('change', () => { checkbox.checked ? selectedDestinations.add(destination.id) : selectedDestinations.delete(destination.id); scheduleDirty = true; lock() })
-          label.append(checkbox, text); destinations.append(label)
+          destinations.append(label)
         }
       }
     }
     const fillDestination = (destination: WhmBackupDestination | null): void => {
+      if (delegatedDestinations) return
       destinationId = destination?.id ?? null
       input('destination-name').value = destination?.name ?? ''
       select('destination-kind').value = String(backupKinds.indexOf(destination?.kind ?? 'local') + 1)
@@ -191,17 +233,15 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       if (!body) return
       body.textContent = ''
       for (const destination of current?.destinations ?? []) {
-        const row = document.createElement('tr')
-        for (const value of [destination.name, destination.kind, destination.endpoint, destination.enabled ? t('Enabled configuration; connection unverified') : t('Disabled configuration')]) { const cell = document.createElement('td'); cell.textContent = value; row.append(cell) }
-        const cell = document.createElement('td'), edit = document.createElement('button'), remove = document.createElement('button')
-        edit.type = remove.type = 'button'; edit.className = remove.className = 'xp-btn'; edit.textContent = t('Edit configuration'); remove.textContent = t('Remove destination'); edit.dataset.backupEditDestination = ''; remove.dataset.backupDeleteDestination = ''
+        const row = backupNode(root, 'destination-row', 'tr', { name: destination.name, kind: destination.kind, endpoint: destination.endpoint, state: destination.enabled ? t('Enabled configuration; connection unverified') : t('Disabled configuration'), edit: t('Edit configuration'), remove: t('Remove destination') })
+        const edit = clientTemplateSlot(row, 'edit', 'button') as HTMLButtonElement, remove = clientTemplateSlot(row, 'remove', 'button') as HTMLButtonElement
         const inUse = current?.schedule?.destinationIds.includes(destination.id) === true
         remove.dataset.backupInUse = String(inUse); if (inUse) remove.title = t('Remove this destination from the saved schedule first.')
         edit.addEventListener('click', () => { if (edit.disabled) return; void (async () => { if (destinationDirty && !await confirm(t('Discard destination edits?'), t('Read this saved destination instead of the unsaved draft.'), true)) return; fillDestination(destination); lock() })() })
         remove.addEventListener('click', () => { if (!remove.disabled) void mutate('delete-destination', destination) })
-        cell.append(edit, remove); row.append(cell); body.append(row)
+        body.append(row)
       }
-      if (!current?.destinations.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 5; cell.textContent = t('No saved destinations.'); row.append(cell); body.append(row) }
+      if (!current?.destinations.length) body.append(backupNode(root, 'destination-empty', 'tr', { message: t('No saved destinations.') }))
     }
     const renderSnapshots = (): void => {
       const body = root.querySelector<HTMLElement>('[data-backup-snapshot-rows]')
@@ -209,16 +249,14 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       body.textContent = ''
       const snapshots = current?.snapshots ?? [], visible = snapshots.slice(snapshotPage * 25, (snapshotPage + 1) * 25)
       for (const snapshot of visible) {
-        const row = document.createElement('tr')
-        for (const value of [formatDisplayDateTime(snapshot.createdAt), t('Recorded metadata'), snapshot.username, String(snapshot.sizeBytes) + ' B', t('Not read'), t('Unverified'), t('Not a verified archive')]) { const cell = document.createElement('td'), text = document.createElement('bdi'); text.dir = 'ltr'; text.textContent = value; cell.append(text); row.append(cell) }
-        const cell = document.createElement('td'), details = document.createElement('details'), summary = document.createElement('summary'), list = document.createElement('ul')
-        summary.textContent = t('Recorded paths')
-        for (const file of snapshot.files) { const item = document.createElement('li'), text = document.createElement('bdi'); text.dir = 'ltr'; text.textContent = file.path + ' · ' + String(file.sizeBytes) + ' B'; item.append(text); list.append(item) }
-        details.append(summary, list); cell.append(details); row.append(cell); body.append(row)
+        const row = backupNode(root, 'snapshot-row', 'tr', { created: formatDisplayDateTime(snapshot.createdAt), kind: t('Recorded metadata'), username: snapshot.username, bytes: String(snapshot.sizeBytes) + ' B', contents: t('Not read'), integrity: t('Unverified'), state: t('Not a verified archive'), summary: t('Recorded paths') })
+        const list = clientTemplateSlot(row, 'paths', 'ul')
+        for (const file of snapshot.files) list.append(backupNode(root, 'path', 'li', { text: file.path + ' · ' + String(file.sizeBytes) + ' B' }))
+        body.append(row)
       }
-      if (!visible.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 8; cell.textContent = t('No snapshot metadata was returned. Account archives remain separate.'); row.append(cell); body.append(row) }
+      if (!visible.length) body.append(backupNode(root, 'snapshot-empty', 'tr', { message: t('No snapshot metadata was returned. Account archives remain separate.') }))
       const pager = root.querySelector<HTMLElement>('[data-backup-snapshot-pager]')
-      if (pager) { pager.textContent = ''; const previous = document.createElement('button'), next = document.createElement('button'), label = document.createElement('span'); previous.type = next.type = 'button'; previous.className = next.className = 'xp-btn'; previous.textContent = t('Previous metadata'); next.textContent = t('Next metadata'); previous.disabled = snapshotPage === 0; next.disabled = (snapshotPage + 1) * 25 >= snapshots.length; label.textContent = String(visible.length ? snapshotPage * 25 + 1 : 0) + '-' + String(snapshotPage * 25 + visible.length) + ' / ' + String(snapshots.length); previous.addEventListener('click', () => { if (snapshotPage > 0) { snapshotPage--; renderSnapshots() } }); next.addEventListener('click', () => { if ((snapshotPage + 1) * 25 < snapshots.length) { snapshotPage++; renderSnapshots() } }); pager.append(previous, label, next) }
+      if (pager) { const page = backupNode(root, 'pager', 'div', { previous: t('Previous metadata'), next: t('Next metadata'), label: String(visible.length ? snapshotPage * 25 + 1 : 0) + '-' + String(snapshotPage * 25 + visible.length) + ' / ' + String(snapshots.length) }), previous = clientTemplateSlot(page, 'previous', 'button') as HTMLButtonElement, next = clientTemplateSlot(page, 'next', 'button') as HTMLButtonElement; previous.disabled = snapshotPage === 0; next.disabled = (snapshotPage + 1) * 25 >= snapshots.length; previous.addEventListener('click', () => { if (snapshotPage > 0) { snapshotPage--; renderSnapshots() } }); next.addEventListener('click', () => { if ((snapshotPage + 1) * 25 < snapshots.length) { snapshotPage++; renderSnapshots() } }); pager.replaceChildren(page) }
     }
     const install = (view: WhmBackupWorkspaceView): void => {
       current = view; review = false; scheduleDirty = false; snapshotPage = 0
@@ -241,7 +279,7 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       for (const identity of schedule?.destinationIds ?? []) selectedDestinations.add(identity)
       renderChoices(); renderDestinations(); renderSnapshots(); fillDestination(view.destinations.find(destination => destination.id === destinationId) ?? null)
       const limit = root.querySelector<HTMLElement>('#whm-backup-layout-unavailable')
-      if (limit) limit.textContent = t('Saved configuration and recorded snapshot metadata were read. Server-wide jobs, restore differences, remote connection checks and native archive verification remain unavailable.')
+      if (limit) limit.textContent = delegatedDestinations ? t('Saved backup configuration read. Execution and archive verification remain unavailable.') : t('Saved configuration and recorded snapshot metadata were read. Server-wide jobs, restore differences, remote connection checks and native archive verification remain unavailable.')
       const runs = root.querySelector<HTMLElement>('[data-backup-section="runs"]>p')
       if (runs) runs.textContent = t('Recorded snapshot metadata is shown below. It is not server-wide run history or proof of a completed archive.')
       const configuration = root.querySelector<HTMLElement>('[data-backup-section="configuration"]>p')
@@ -272,13 +310,14 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       return { name: input('destination-name').value.trim(), kind, endpoint, bucket: nullable('bucket'), region: nullable('region'), pathPrefix: input('destination-prefix').value.trim(), username: nullable('user'), retentionDays: number(input('destination-retention').value), enabled: false }
     }
     async function mutate(kind: 'schedule' | 'destination' | 'delete-destination', target?: WhmBackupDestination): Promise<void> {
+      if (delegatedDestinations && kind !== 'schedule') return
       if (!current || busy || confirming || review || !admitted()) return
       let draft: Record<string, unknown>
       try { draft = kind === 'schedule' ? scheduleDraft() : kind === 'destination' ? destinationDraft() : {} }
       catch { announce('failed', t('Check the schedule, retention, destination URL and required fields. Nothing was sent.')); return }
       const expectedRevision = current.revision, selectedId = kind === 'delete-destination' ? target?.id : destinationId
       const keepSchedule = kind !== 'schedule' && scheduleDirty
-      const keepDestination = kind !== 'destination' && destinationDirty
+      const keepDestination = !delegatedDestinations && kind !== 'destination' && destinationDirty
       const remembered = new Map<string, { value: string; checked: boolean }>()
       if (keepSchedule) for (const key of [...scheduleInputs, 'frequency', 'policy-compress']) { const control = key === 'frequency' || key === 'policy-compress' ? select(key) : input(key); remembered.set(key, { value: control.value, checked: control instanceof HTMLInputElement && control.checked }) }
       if (keepDestination) for (const key of [...destinationInputs, 'destination-kind']) { const control = key === 'destination-kind' ? select(key) : input(key); remembered.set(key, { value: control.value, checked: control instanceof HTMLInputElement && control.checked }) }
@@ -345,8 +384,10 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
     action('selected-accounts').addEventListener('click', () => { if (!action('selected-accounts').disabled) { if (allAccounts) { selectedAccounts.clear(); for (const account of current?.accounts ?? []) selectedAccounts.add(account.id) } allAccounts = false; scheduleDirty = true; renderChoices(); lock() } })
     action('refresh').addEventListener('click', () => { void refresh() })
     action('save-schedule').addEventListener('click', () => { if (!action('save-schedule').disabled) void mutate('schedule') })
-    action('save-destination').addEventListener('click', () => { if (!action('save-destination').disabled) void mutate('destination') })
-    action('new-destination').addEventListener('click', () => { if (action('new-destination').disabled) return; void (async () => { if (destinationDirty && !await confirm(t('Discard destination draft?'), t('Start a new destination draft without saving this one.'), true)) return; fillDestination(null); lock() })() })
+    if (!delegatedDestinations) {
+      action('save-destination').addEventListener('click', () => { if (!action('save-destination').disabled) void mutate('destination') })
+      action('new-destination').addEventListener('click', () => { if (action('new-destination').disabled) return; void (async () => { if (destinationDirty && !await confirm(t('Discard destination draft?'), t('Start a new destination draft without saving this one.'), true)) return; fillDestination(null); lock() })() })
+    }
     action('discard-schedule').addEventListener('click', () => { void refresh() })
     window.addEventListener('beforeunload', event => { if (scheduleDirty || destinationDirty || review) { event.preventDefault(); event.returnValue = '' } })
     lock(); void refresh()
@@ -365,13 +406,15 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
     root.dataset.backupOperationsBound = 'true'
     const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"]'
-    const admitted = (): boolean => root.isConnected && root.dataset.backupManage === 'true' && !root.closest(denied)
+    const destinationManager = root.dataset.backupDestinationEditor === 'manager' ? root.querySelector<HTMLElement>('[data-whm-backup-destinations][data-backup-inline-manager]') : null
+    const admitted = (): boolean => root.isConnected && root.dataset.backupManage === 'true' && !root.closest(denied) && backupDestinationEditorPresent(root, destinationManager)
     if (!send || !admitted()) return
+    try { requireBackupTemplates(root) } catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); const status = root.querySelector<HTMLElement>('[data-backup-workspace-status]'); if (status) { status.dataset.state = 'unavailable'; status.textContent = t('Unavailable') }; return }
     const one = <T extends Element>(selector: string): T | null => root.querySelector<T>(selector)
     const buttons = (key: string): HTMLButtonElement[] => [...root.querySelectorAll<HTMLButtonElement>('[data-backup-action="' + key + '"]')]
     const field = (key: string): HTMLInputElement | null => one<HTMLInputElement>('#backup-layout-' + key)
     const size = (bytes: number | null): string => { if (bytes === null) return '-'; const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']; let value = bytes, unit = 0; while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++ } return (unit ? value.toFixed(1) : String(value)) + ' ' + units[unit] }
-    const technical = (value: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = value; return node }
+    const technical = (value: string): HTMLElement => backupNode(root, 'technical', 'bdi', { text: value })
     const stateLabel = (state: string): string => ({ running: t('Running'), succeeded: t('Succeeded'), failed: t('Failed'), unknown: t('Outcome unknown; review required'), finished: t('Finished'), verified: t('Verified') } as Record<string, string>)[state] ?? state
     let view: WhmBackupRunsView | null = null, configRevision = '', destinations: { id: string; name: string; kind: string; endpoint: string; username: string | null; pathPrefix: string; state: string; credentialRef: string | null }[] = []
     let busy = false, logRun: string | null = null, runId: string | null = null, account: string | null = null, inventory: RestoreMoreInventory | null = null, step = 1
@@ -421,20 +464,17 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
       if (!body || !view) return
       body.replaceChildren()
       for (const item of view.runs) {
-        const row = document.createElement('tr'), cell = (value: string | Node): void => { const td = document.createElement('td'); td.append(value); row.append(td) }
         const bytes = item.archives.reduce((sum, entry) => sum + (entry.bytes ?? 0), 0), seconds = item.finishedAt ? Math.round((Date.parse(item.finishedAt) - Date.parse(item.startedAt)) / 1000) : null
         const copies = item.destinationIds.length ? t('{verified} of {total}', { verified: item.entries.filter(entry => entry.outcome === 'verified').length, total: item.entries.length }) : t('This server only')
-        cell(formatDisplayDateTime(item.startedAt)); cell(item.trigger === 'schedule' ? t('Scheduled') : item.trigger === 'account' ? t('Selected accounts') : t('Run now'))
-        cell(t('{verified} of {total}', { verified: item.archives.filter(entry => entry.integrity === 'verified').length, total: item.archives.length })); cell(technical(size(bytes)))
-        cell(seconds === null ? '-' : technical(seconds >= 60 ? Math.floor(seconds / 60) + ' min ' + (seconds % 60) + ' s' : seconds + ' s')); cell(copies); cell(stateLabel(item.state))
-        const actions = document.createElement('td'), restore = document.createElement('button'), log = document.createElement('button')
-        restore.type = log.type = 'button'; restore.className = log.className = 'xp-btn'; restore.textContent = t('Restore'); log.textContent = t('Log')
+        const row = backupNode(root, 'run-row', 'tr', { created: formatDisplayDateTime(item.startedAt), trigger: item.trigger === 'schedule' ? t('Scheduled') : item.trigger === 'account' ? t('Selected accounts') : t('Run now'), accounts: t('{verified} of {total}', { verified: item.archives.filter(entry => entry.integrity === 'verified').length, total: item.archives.length }), bytes: size(bytes), duration: seconds === null ? '-' : seconds >= 60 ? Math.floor(seconds / 60) + ' min ' + (seconds % 60) + ' s' : seconds + ' s', copies, state: stateLabel(item.state), restore: t('Restore'), log: t('Log') })
+        const restore = clientTemplateSlot(row, 'restore', 'button') as HTMLButtonElement, log = clientTemplateSlot(row, 'log', 'button') as HTMLButtonElement
+        log.disabled = false
         restore.disabled = !item.archives.some(entry => entry.integrity === 'verified')
-        restore.addEventListener('click', () => { if (!restore.disabled && !busy) { selectRun(item.id); one<HTMLElement>('[data-backup-section="restore"]')?.scrollIntoView?.({ block: 'start' }) } })
+        restore.addEventListener('click', () => { if (!restore.disabled && !busy && selectRun(item.id)) one<HTMLElement>('[data-backup-section="restore"]')?.scrollIntoView?.({ block: 'start' }) })
         log.addEventListener('click', () => { logRun = item.id; paintLog() })
-        actions.append(restore, log); row.append(actions); body.append(row)
+        body.append(row)
       }
-      if (!view.runs.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 8; td.textContent = t('No backup run has been recorded yet.'); row.append(td); body.append(row) }
+      if (!view.runs.length) body.append(backupNode(root, 'run-empty', 'tr', { message: t('No backup run has been recorded yet.') }))
     }
     const paintFailure = (): void => {
       const notice = one<HTMLElement>('[data-backup-run-failure]'), text = notice?.querySelector<HTMLElement>('p')
@@ -449,26 +489,25 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
       const log = one<HTMLElement>('[data-backup-run-log]'), item = view?.runs.find(entry => entry.id === logRun) ?? view?.runs[0]
       if (!log || !item) return
       // Localized prose follows the page direction and font; only names, sizes, dates and diagnostics are isolated LTR values.
-      const named = (value: string): HTMLElement => { const node = document.createElement('bdi'); node.textContent = value; return node }
+      const named = (value: string): HTMLElement => backupNode(root, 'name', 'bdi', { text: value })
       const line = (entry: WhmBackupRunArchive): (string | Node)[] => [technical(entry.username), ': ', ...entry.integrity === 'verified'
         ? [t('verified') + ' ', technical(size(entry.bytes)), ...entry.databases.length ? [' · ' + t('{count, plural, one {# database} other {# databases}}', { count: entry.databases.length })] : [], ...entry.zones.length ? [' · ' + t('{count, plural, one {# DNS zone} other {# DNS zones}}', { count: entry.zones.length })] : []]
         : [entry.reason === 'integrity_failed' ? t('failed its integrity read') : t('was not built'), ...entry.detail ? [' - ', technical(entry.detail)] : []]]
-      const uploads = item.entries.filter(entry => entry.outcome !== 'verified').map(entry => [technical(entry.username), ' · ', named(destinations.find(target => target.id === entry.destinationId)?.name ?? entry.destinationId), ': ' + stateLabel(entry.outcome), ...entry.reason ? [' (', technical(entry.reason), ')'] : []])
+      const uploads = item.entries.filter(entry => entry.outcome !== 'verified').map(entry => [technical(entry.username), ' · ', named(destinations.find(target => target.id === entry.destinationId)?.name ?? t('Not read')), ': ' + stateLabel(entry.outcome), ...entry.reason ? [' (', technical(entry.reason), ')'] : []])
       const lines: (string | Node)[][] = [[technical(formatDisplayDateTime(item.startedAt)), ' · ' + stateLabel(item.state)], ...item.control ? [line(item.control)] : [], ...item.archives.map(line), ...uploads,
         ...item.localDeleted !== null ? [[t('{count, plural, one {# older local copy removed} other {# older local copies removed}}', { count: item.localDeleted })]] : []]
-      log.replaceChildren(...lines.map(parts => { const row = document.createElement('li'); row.append(...parts); return row }))
+      log.replaceChildren(...lines.map(parts => { const row = backupNode(root, 'log', 'li'); row.append(...parts); return row }))
       log.hidden = false
     }
     const radio = (container: HTMLElement | null, items: { key: string; title: string; note: string; checked: boolean }[], pick: (key: string) => void): void => {
       if (!container) return
       container.replaceChildren()
       for (const item of items) {
-        const button = document.createElement('button'), ring = document.createElement('span'), text = document.createElement('span'), title = document.createElement('strong'), note = document.createElement('span')
-        button.type = 'button'; button.className = 'xp-whm-backup-radio'; button.setAttribute('role', 'radio'); button.setAttribute('aria-checked', String(item.checked)); button.dataset.backupChoice = item.key
-        ring.className = 'xp-whm-backup-radio-ring'; ring.setAttribute('aria-hidden', 'true'); note.className = 'xp-help'; title.textContent = item.title; note.textContent = item.note
-        text.append(title, note); button.append(ring, text); button.addEventListener('click', () => { if (!busy) pick(item.key) }); container.append(button)
+        const button = backupNode(root, 'radio', 'button', { title: item.title, note: item.note }) as HTMLButtonElement
+        button.setAttribute('aria-checked', String(item.checked)); button.dataset.backupChoice = item.key; button.disabled = busy
+        button.addEventListener('click', () => { if (!busy) pick(item.key) }); container.append(button)
       }
-      if (!items.length) { const empty = document.createElement('p'); empty.textContent = t('Nothing to choose yet.'); container.append(empty) }
+      if (!items.length) container.append(backupNode(root, 'choices-empty', 'p', { message: t('Nothing to choose yet.') }))
     }
     const paintWizard = (): void => {
       const usable = view?.runs.filter(item => item.archives.some(entry => entry.integrity === 'verified')) ?? []
@@ -480,7 +519,23 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
         : t('This backup holds {databases, plural, =0 {no databases} one {# database} other {# databases}}, {zones, plural, =0 {no DNS zones} one {# DNS zone} other {# DNS zones}} and {mailboxes, plural, =0 {no mailboxes} one {# mailbox} other {# mailboxes}}. Home files are restored file by file on the Restore files page.', { databases: inventory.databases.databases.length, zones: inventory.dns.zones.length, mailboxes: inventory.mail.mailboxes.length })
       lock()
     }
-    function selectRun(id: string): void { runId = id; account = null; inventory = null; reviewed = false; mailReview = null; step = 2; paintWizard() }
+    const revealRestore = (): void => {
+      if (!admitted() || !run()?.archives.some(item => item.integrity === 'verified')) return
+      const owner = root.closest<HTMLElement>('[data-presentation-tabs="panels"]')
+      if (!owner) return // Existing pages without local panels retain their original behavior.
+      const workspaces = [...owner.querySelectorAll<HTMLElement>('[data-approved-whm-backups]')].filter(node => node.closest('[data-presentation-tabs]') === owner)
+      const targets = [...owner.querySelectorAll<HTMLButtonElement>('[data-presentation-tab="restore"]')].filter(node => node.closest('[data-presentation-tabs]') === owner)
+      const target = targets.length === 1 ? targets[0] : undefined
+      if (workspaces.length !== 1 || workspaces[0] !== root || !(target instanceof HTMLButtonElement) || target.type !== 'button' || target.getAttribute('role') !== 'tab'
+        || target.hasAttribute('data-action') || target.hasAttribute('data-filter-chip') || target.hasAttribute('data-api-url') || target.disabled
+        || target.closest('[hidden], [inert], [aria-disabled="true"], fieldset:disabled')) return
+      target.click()
+    }
+    function selectRun(id: string): boolean {
+      if (busy || !admitted() || !view?.runs.some(item => item.id === id && item.archives.some(entry => entry.integrity === 'verified'))) return false
+      runId = id; account = null; inventory = null; reviewed = false; mailReview = null; step = 2; paintWizard(); revealRestore()
+      return true
+    }
     async function selectAccount(username: string): Promise<void> {
       const chosen = run()?.archives.find(item => item.username === username && item.integrity === 'verified')
       if (!chosen?.file || busy) return
@@ -506,7 +561,7 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
         }
         if (rows) {
           rows.replaceChildren()
-          const row = (part: string, name: string, current: string, backup: string, action: string): void => { const tr = document.createElement('tr'); for (const value of [part, technical(name), current, backup, action]) { const td = document.createElement('td'); td.append(value); tr.append(td) } rows.append(tr) }
+          const row = (part: string, name: string, current: string, backup: string, action: string): void => { rows.append(backupNode(root, 'difference', 'tr', { part, name, current, backup, action })) }
           for (const item of inventory.databases.databases.filter(entry => selected.databases.includes(entry.name))) row(t('Databases'), item.name, t('Exists'), size(item.bytes), t('Replace with the backup copy'))
           for (const item of inventory.dns.zones.filter(entry => selected.zones.includes(entry.name))) row(t('DNS zone'), item.name, t('Exists'), size(item.bytes), t('Replace records with the backup copy'))
           if (mailReview) row(t('Mail'), mailReview.mailboxes.join(', '), t('{count, plural, one {# message present} other {# messages present}}', { count: keep }), t('{count, plural, one {# message} other {# messages}}', { count: add + keep }), t('{count, plural, one {Add # missing message} other {Add # missing messages}}', { count: add }))
@@ -582,7 +637,7 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
     for (const button of buttons('run-now')) button.addEventListener('click', () => { if (!button.disabled) void startRun() })
     for (const button of buttons('rerun-account')) button.addEventListener('click', () => { if (!button.disabled) void startRun(failedAccounts()) })
     for (const button of buttons('run-log')) button.addEventListener('click', () => { if (!button.disabled) paintLog() })
-    for (const button of buttons('restore-run')) button.addEventListener('click', () => { if (!button.disabled) one<HTMLElement>('[data-backup-section="restore"]')?.scrollIntoView?.({ block: 'start' }) })
+    for (const button of buttons('restore-run')) button.addEventListener('click', () => { if (!button.disabled && !busy && admitted() && run()) { revealRestore(); one<HTMLElement>('[data-backup-section="restore"]')?.scrollIntoView?.({ block: 'start' }) } })
     for (const button of buttons('restore-back')) button.addEventListener('click', () => { if (button.disabled) return; step = Math.max(1, step - 1); if (step < 3) { reviewed = false } if (step === 1) { account = null; inventory = null } paintWizard() })
     for (const button of buttons('restore-continue')) button.addEventListener('click', () => { if (!button.disabled) { step = Math.min(3, step + 1); paintWizard() } })
     for (const button of buttons('restore-review')) button.addEventListener('click', () => { if (!button.disabled) void review() })
@@ -594,4 +649,4 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
   })
 }
 
-export const WHM_BACKUPS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const backupKinds=${JSON.stringify(backupKinds)};const backupObject=${backupObject.toString()};const backupText=${backupText.toString()};const backupIdentity=${backupIdentity.toString()};const backupInteger=${backupInteger.toString()};const backupBoolean=${backupBoolean.toString()};const backupArray=${backupArray.toString()};const backupRevision=${backupRevision.toString()};const backupApplication=${backupApplication.toString()};const readWhmBackupDestination=${readWhmBackupDestination.toString()};const readWhmBackupSchedule=${readWhmBackupSchedule.toString()};const readWhmBackupWorkspace=${readWhmBackupWorkspace.toString()};const backupStable=${backupStable.toString()};const backupUnknown=${backupUnknown.toString()};const backupRunsView=${readWhmBackupRunsView.toString()};const backupRestoreReply=${readRestoreMoreReply.toString()};const bindWhmBackups=${bindWhmBackups.toString()};const bindWhmBackupOperations=${bindWhmBackupOperations.toString()};return ask=>{bindWhmBackups(ask);bindWhmBackupOperations(ask)};})()`
+export const WHM_BACKUPS_CLIENT_BINDING = `(()=>{const backupDestinationEditorPresent=${backupDestinationEditorPresent.toString()};const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const backupNode=${backupNode.toString()};const requireBackupTemplates=${requireBackupTemplates.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const backupKinds=${JSON.stringify(backupKinds)};const backupObject=${backupObject.toString()};const backupText=${backupText.toString()};const backupIdentity=${backupIdentity.toString()};const backupInteger=${backupInteger.toString()};const backupBoolean=${backupBoolean.toString()};const backupArray=${backupArray.toString()};const backupRevision=${backupRevision.toString()};const backupApplication=${backupApplication.toString()};const readWhmBackupDestination=${readWhmBackupDestination.toString()};const readWhmBackupSchedule=${readWhmBackupSchedule.toString()};const readWhmBackupWorkspace=${readWhmBackupWorkspace.toString()};const backupStable=${backupStable.toString()};const backupUnknown=${backupUnknown.toString()};const backupRunsView=${readWhmBackupRunsView.toString()};const backupRestoreReply=${readRestoreMoreReply.toString()};const bindWhmBackups=${bindWhmBackups.toString()};const bindWhmBackupOperations=${bindWhmBackupOperations.toString()};return ask=>{bindWhmBackups(ask);bindWhmBackupOperations(ask)};})()`

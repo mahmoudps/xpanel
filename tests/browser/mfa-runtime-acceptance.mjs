@@ -121,8 +121,11 @@ async function geometry(page) {
   return page.evaluate(() => {
     const visible = element => element.checkVisibility() && !element.closest('[hidden],[inert]')
     const controls = [...document.querySelectorAll('button,a.xp-btn,a.xp-nav-item,summary,input:not([type="hidden"]),select,textarea')].filter(visible).map(element => {
-      const rect = element.getBoundingClientRect()
-      return { tag: element.tagName, id: element.id || null, width: rect.width, height: rect.height }
+      // A compact checkbox or radio is hit through its single HTML-associated label; a full-size control is measured itself.
+      const own = element.getBoundingClientRect(), compact = own.width < 43.5 || own.height < 43.5
+      const hit = compact && ['checkbox', 'radio'].includes(element.type) && element.labels?.length === 1 ? element.labels[0] : element
+      const rect = hit.getBoundingClientRect()
+      return { tag: element.tagName, id: element.id || null, target: hit === element ? 'control' : 'associated_label', width: rect.width, height: rect.height }
     })
     const fields = [...document.querySelectorAll('[data-login-form] .xp-field,.xp-account-security .xp-field')].filter(visible).flatMap(element => {
       const label = element.querySelector('label'), control = element.querySelector('input,select,textarea')
@@ -169,7 +172,8 @@ async function recoveryCommandGeometry(page, requireCommand = true) {
   return page.evaluate(requireCommand => {
     const card = document.querySelector('[data-account-security][data-mfa-enabled="true"]')
     const heading = card?.querySelector(':scope > h2'), status = card?.querySelector(':scope > p[role="status"]'), help = card?.querySelector(':scope > p.xp-help'), command = help?.querySelector('bdi')
-    const title = card?.parentElement.querySelector(':scope > h1')
+    // The root page places the card beside its page title; the xPanel personal workspace nests it under its section heading.
+    const title = card?.parentElement.querySelector(':scope > h1') ?? card?.parentElement.closest('section[aria-labelledby]')?.querySelector(':scope > h2')
     if (!card || !heading || !status || !title || (requireCommand && (!help || !command))) return null
     const rtl = document.dir === 'rtl', edge = rect => rtl ? rect.right : rect.left
     const range = element => { const value = document.createRange(); value.selectNodeContents(element); return value.getBoundingClientRect() }
@@ -201,7 +205,7 @@ async function recoveryCommandGeometry(page, requireCommand = true) {
     return {
       root_command_present: Boolean(command), text: command?.textContent ?? null, visible: command?.checkVisibility() ?? false, direction: commandStyle?.direction ?? null, unicode_bidi: commandStyle?.unicodeBidi ?? null,
       glyph_count: glyphs.length, lexemes, all_glyphs_visible: Boolean(command) && glyphs.every(r => r.width > 0 && r.height > 0 && r.left >= innerLeft - 0.75 && r.right <= innerRight + 0.75 && r.top >= p.top - 0.75 && r.bottom <= p.bottom + 0.75),
-      page_to_card: c.top - title.getBoundingClientRect().bottom, heading_to_status: s.top - h.bottom, status_to_help: p ? p.top - s.bottom : null,
+      title_kind: title.tagName, page_to_card: c.top - title.getBoundingClientRect().bottom, heading_to_status: s.top - h.bottom, status_to_help: p ? p.top - s.bottom : null,
       heading_content_delta: Math.abs(edge(range(heading)) - innerEdge), status_content_delta: Math.abs(edge(range(status)) - innerEdge), help_content_delta: help ? Math.abs(edge(range(help)) - innerEdge) : null,
       inner_left: innerLeft, inner_right: innerRight, help_left: p?.left ?? null, help_right: p?.right ?? null,
     }
@@ -305,7 +309,7 @@ export async function runMfaRuntimeAcceptance({ output, screenshotBudget = 8, fi
         assert.equal(fonts.ready, true, 'Fonts must settle within 5 seconds.')
         assert.deepEqual(fonts.failed_faces, [])
         row.fonts = fonts
-        row.fonts.heading = await assertAppliedFont(page, state.screen === 'login' ? '.xp-login-shell h1' : '[data-security-page] > h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+        row.fonts.heading = await assertAppliedFont(page, state.screen === 'login' ? '.xp-login-shell h1' : '[data-security-page] > h1, [data-security-page] > header > h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
         if (state.screen === 'login') {
           row.fonts.wordmark = await assertAppliedFont(page, '.xp-brand__name', 'IBM Plex Mono', { role: 'login-wordmark' })
           await page.locator('#login-username').fill('root')
@@ -382,7 +386,8 @@ export async function runMfaRuntimeAcceptance({ output, screenshotBudget = 8, fi
           assert.ok(card, 'The enrolled optional user card has a real heading and status.')
           assert.equal(card.root_command_present, false)
           assert.equal(card.text, null)
-          assert.ok(Math.abs(card.page_to_card - 32) < 0.6 && Math.abs(card.heading_to_status - 24) < 0.6)
+          // Page title to section is 32px; a section heading to its grouped card is 24px.
+          assert.ok(Math.abs(card.page_to_card - (card.title_kind === 'H1' ? 32 : 24)) < 0.6 && Math.abs(card.heading_to_status - 24) < 0.6)
           assert.ok(card.heading_content_delta < 1 && card.status_content_delta < 1)
           assert.equal(metrics.fields.length, 0)
         }

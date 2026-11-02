@@ -63,6 +63,8 @@ const WORKSPACE_CORE_TOOLS: Readonly<Record<string, string>> = {
   '/whm/panel/whmcs': 'whmcs-integration',
   // The owner proxy switch is a domain workspace write; the page's other aaPanel proxy tools stay unqualified.
   '/domains/reverse-proxy': 'domains',
+  // Only the bounded Apache account file workflow; server/Nginx rewrite tooling stays unqualified.
+  '/software/htaccess': 'domain-htaccess',
   '/email/calendars-contacts': 'calendars-contacts-management',
   '/mail/later': 'webmail-search',
   '/mail/settings/spam': 'webmail-spam-box',

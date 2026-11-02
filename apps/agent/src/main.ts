@@ -1,9 +1,11 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { createNativeAccountProvisioningHttp } from './account-provisioning-http.ts'
+import { createReadonlyAccountProvisioningObserver } from './account-provisioning-observer.ts'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { timingSafeEqual } from 'node:crypto'
 import { chmod, chown, mkdir, readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { fail } from '@xpanel/core'
+import { captureMfaRuntimePolicy, fail } from '@xpanel/core'
 import type { OsProfile } from '@xpanel/core'
 import { appendAudit, createDb, initializeOperationalMetadata, migrate, pruneMetricsHistory, recordHostMetricsSample } from '@xpanel/db'
 import { detectOs, XPANEL_FPM_SOCKET_DIR } from '@xpanel/os'
@@ -17,6 +19,10 @@ import { ensureInstalledMail } from './services/local-mail.ts'
 import { enableMailWebsocketProxy } from './services/mail-websocket.ts'
 import { readOpenDkimPublished, writeOpenDkimPublished } from './services/opendkim-live.ts'
 import { HostReconciler } from './reconciler.ts'
+import { loadNativePeerIdentityAddon, resolveProvisionedPeerUids } from './peer-identity.ts'
+import { AccountProvisioningPreparationReader } from './account-provisioning-preparation.ts'
+import { provisioningAuthorizationPorts } from './account-provisioning-authorization.ts'
+import { createAccountProvisioningRuntime } from './account-provisioning-runtime.ts'
 import { HostJobRunner } from './host-jobs.ts'
 import { DATABASE_REMOTE_ACCESS_JOURNAL_DIR, pendingDatabaseRemoteAccessJournals, qualifyDatabaseRemoteAccessNative, recoverPendingDatabaseRemoteAccess } from './db-remote-provider.ts'
 import { createHostJobRun } from './host-job-exec.ts'
@@ -35,8 +41,9 @@ import { createAgentApp, listenAgentSocket, loadAgentCredentialFile } from './se
 import { createSystemdPtySpawner, DEFAULT_TERMINAL_PTY_HELPER, TerminalSessionManager, verifyTerminalPtyHelper } from './terminal-sessions.ts'
 import type { AgentApp } from './server.ts'
 import { awaitLifecycleWriterDrain, createLifecycleBackgroundResources, isLifecycleManaged, readLifecyclePublicStatus, startLifecycleWriterParticipant, withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
-import { createMariaDbSqlRunner, DEFAULT_MARIADB_ADMIN_CNF, defaultCommandRunner as mariadbCommandRunner, MariaDbServiceAdapter } from './services/mariadb.ts'
+import { createMariaDbSqlRunner, DEFAULT_MARIADB_ADMIN_CNF, defaultCommandRunner as mariadbCommandRunner, MariaDbServiceAdapter, mariadbSocketForFamily } from './services/mariadb.ts'
 import { withPostgresqlSqlRunner } from './pg-sql.ts'
+import { createNativeDnsReconcileProvider } from './services/dns-native.ts'
 
 export interface AgentDaemonOptions {
   dbPath?: string
@@ -49,6 +56,7 @@ export interface AgentDaemonOptions {
   fileHelperBinaryPath?: string
   fileWorkerIncidentDir?: string
   mariadbAdminCnfPath?: string
+  mariadbSocketPath?: string | null
   terminalPtyBinaryPath?: string
 }
 
@@ -197,7 +205,11 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         const store = new StateStore(stateDir)
         const mariadbAdminCnfPath =
           opts.mariadbAdminCnfPath ?? process.env.XPANEL_MARIADB_ADMIN_CNF ?? DEFAULT_MARIADB_ADMIN_CNF
-        const mariadbAdmin = new MariaDbServiceAdapter({ adminDefaultsFile: mariadbAdminCnfPath })
+        const mariaDbOptions = {
+          adminDefaultsFile: mariadbAdminCnfPath,
+          socketPath: mariadbSocketForFamily(os.family, opts.mariadbSocketPath !== undefined ? opts.mariadbSocketPath : process.env.XPANEL_MARIADB_SOCKET),
+        }
+        const mariadbAdmin = new MariaDbServiceAdapter(mariaDbOptions)
         const sqlRunner = withPostgresqlSqlRunner(createMariaDbSqlRunner(mariadbAdmin))
         const executor = new LinuxHostExecutor({
           trustedHostTargetMatcher: createProductionHostTargetMatcher(),
@@ -206,7 +218,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         const readBackupDestination = readSavedBackupDestination(readBackupConfigFiles(stateDir))
         const backupDestinationProvider = createBackupTransportProvider({ readDestination: readBackupDestination, archiveRoot: defaultBackupArchiveRoot() })
         // Backup dumps run at the same low priority as the archive build, with the hour-long bound of a large database.
-        const backupDumps = new MariaDbServiceAdapter({ adminDefaultsFile: mariadbAdminCnfPath, dumpTimeoutMs: 3_600_000, commandRunner: input => mariadbCommandRunner({ ...input, argv: [...BACKUP_LOW_PRIORITY, ...input.argv] }) })
+        const backupDumps = new MariaDbServiceAdapter({ ...mariaDbOptions, dumpTimeoutMs: 3_600_000, commandRunner: input => mariadbCommandRunner({ ...input, argv: [...BACKUP_LOW_PRIORITY, ...input.argv] }) })
         backupRuns = createHostBackupRunController({ executor, stateRoot: stateDir, provider: backupDestinationProvider, listAccounts: async () => (await store.listAccounts()).map(a => ({ id: a.id, username: a.username, home: a.home, uid: a.uid, status: a.status })),
           databases: {
             list: async account => (await store.listDatabases(account.id)).filter(database => database.engine === 'mariadb' && !database.trashedAt).map(database => database.name),
@@ -261,13 +273,17 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         const terminalHelperPath = opts.terminalPtyBinaryPath ?? process.env.XPANEL_TERMINAL_PTY_BINARY ?? DEFAULT_TERMINAL_PTY_HELPER
         if (await verifyTerminalPtyHelper(terminalHelperPath)) terminals = new TerminalSessionManager(createSystemdPtySpawner(terminalHelperPath))
 
-        const reconciler = new HostReconciler({
+        const dnsPublication = createNativeDnsReconcileProvider({ executor, family: os.family,
+          readOwnedPaths: async () => new Set((await reconciler.ownedChecksums()).keys()),
+        })
+        const reconciler: HostReconciler = new HostReconciler({
           store,
           db: dbHandle.db,
           executor,
           os,
           quotaFilesystem,
           ioDevices,
+          dnsPublication,
         })
         await syncRuntimePublicOrigin(executor).catch((error: unknown) => {
           process.stderr.write(`xpanel-agent public origin: ${error instanceof Error ? error.message : String(error)}\n`)
@@ -323,8 +339,25 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         if (resourcesFenced) await ioResourcePipeline.pause()
         await createLifecycleBackgroundResources(() => ioResourcePipeline!.start())
 
+        const provisioningPeerUids = await resolveProvisionedPeerUids({ gid: socketGid, allowRootPeer: false })
+        const provisioningOwnerUid = [...provisioningPeerUids][0]
+        if (provisioningPeerUids.size !== 1 || provisioningOwnerUid === undefined) {
+          return fail('PRECONDITION_FAILED', 'account preparation requires the unique provisioned API service identity')
+        }
+        const provisioningOwner = { uid: provisioningOwnerUid, gid: socketGid }
+        const nativeAccountHttp = createNativeAccountProvisioningHttp({ db: dbHandle.db, store, reconciler, executor, os,
+          addon: await loadNativePeerIdentityAddon(),
+        })
+        const accountProvisioning = createAccountProvisioningRuntime({
+          db: dbHandle.db, executor, reconciler,
+          preparations: new AccountProvisioningPreparationReader(stateDir, provisioningOwner),
+          authorization: provisioningAuthorizationPorts({ db: dbHandle.db, stateRoot: stateDir, owner: provisioningOwner }),
+          policy: captureMfaRuntimePolicy(),
+          observer: createReadonlyAccountProvisioningObserver({ executor, store, dns: dnsPublication, ...nativeAccountHttp }),
+        })
         const app = createAgentApp({
           reconciler,
+          accountProvisioning,
           store,
           db: dbHandle.db,
           executor,
@@ -411,7 +444,9 @@ export const attachAgentProcessLifecycle = (daemon: { close: () => Promise<void>
 
 const isMainModule = (): boolean => {
   try {
-    return process.argv[1] === fileURLToPath(import.meta.url)
+    const entry = fileURLToPath(import.meta.url)
+    const argv = process.argv[1]
+    return argv === entry || (typeof argv === 'string' && argv.length > 0 && realpathSync(argv) === realpathSync(entry))
   } catch {
     return false
   }

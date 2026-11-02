@@ -1,3 +1,4 @@
+import { classicSoftwareClientTemplates } from './software-client-templates.ts'
 import { type Locale, type MessageValues, SOURCE_LOCALE, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -22,5 +23,6 @@ export function renderSwAppProjectsWorkspace(input: { locale: Locale; canRead: b
     ${table(t('Go & Java projects'), [t('Project'), t('Account'), t('Runtime'), t('Port'), t('State'), t('Actions')], 'rows', t('No projects exist.'))}
     <div class="xp-whm-detail-actions"><button type="button" class="xp-btn xp-btn--primary" disabled>${t('Create project')}</button><button type="button" class="xp-btn" disabled>${t('Start')}</button><button type="button" class="xp-btn" disabled>${t('Stop')}</button></div>
   </section>
+${classicSoftwareClientTemplates('projects')}
 </div>`
 }

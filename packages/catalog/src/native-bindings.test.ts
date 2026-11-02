@@ -22,13 +22,16 @@ const allPassed: HostQualificationReport = {
 }
 const nativeDefinitions = tools.filter(tool => nativeIds.includes(tool.id))
 const qualify = (report: HostQualificationReport | null = allPassed): CatalogTool[] =>
-  qualifyHostTools(nativeDefinitions, report, true)
+  qualifyHostTools(nativeDefinitions.map(tool => ({ ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } })), report, true)
 const routesOf = (surfaces: readonly NavSurface[]): string[] =>
   surfaces.flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
 const page = (route: string) => navigation.flatMap(surface => surface.sections.flatMap(section => section.pages))
   .find(entry => entry.route === route)!
 
 describe('native workspace capability boundaries', () => {
+  it('never treats healthy host probes as release acceptance', () => {
+    expect(qualifyHostTools(nativeDefinitions, allPassed, true).some(tool => tool.status === 'verified')).toBe(false)
+  })
   it('declares only 4 narrow native capabilities with the actual API feature keys and roles', () => {
     expect(nativeDefinitions).toHaveLength(4)
     const byId = new Map(nativeDefinitions.map(tool => [tool.id, tool]))

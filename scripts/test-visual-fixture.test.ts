@@ -1,6 +1,7 @@
 import { request } from 'node:http'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createVisualFixture } from '../tests/browser/visual-fixture.mjs'
+import { parseMarkup } from '../apps/web/src/themes/markup.ts'
 
 type Fixture = Awaited<ReturnType<typeof createVisualFixture>>
 const fixtures: Fixture[] = []
@@ -137,13 +138,47 @@ describe('explicit synthetic component documents', () => {
   })
 
   it('preserves actual product-route admission when a component document is configured', async () => {
-    const plain = await openFixture()
-    const component = await openFixture({ componentDocument: { path: '/__visual-components/htaccess', render: () => componentHtml } })
-    for (const path of ['/software/htaccess', '/domains/site-settings']) {
-      const original = await read(plain, path), scoped = await read(component, path)
-      expect(scoped.status).toBe(original.status); expect(scoped.body).toBe(original.body)
-      expect(scoped.body).not.toContain('data-htaccess-workspace')
-      expect(scoped.headers['x-visual-fixture-scope']).toBeUndefined()
+    for (const qualifiedCatalog of [true, false]) {
+      const plain = await openFixture({ qualifiedCatalog })
+      const component = await openFixture({ qualifiedCatalog, componentDocument: { path: '/__visual-components/htaccess', render: () => componentHtml } })
+      for (const path of ['/software/htaccess', '/domains/site-settings']) {
+        const original = await read(plain, path), scoped = await read(component, path)
+        expect(original.status).toBe(200)
+        expect(scoped.status).toBe(original.status); expect(scoped.body).toBe(original.body)
+        const nodes = parseMarkup(scoped.body)
+        const within = (index: number, ancestor: number): boolean => {
+          for (let parent = nodes[index]!.parent; parent >= 0; parent = nodes[parent]!.parent) if (parent === ancestor) return true
+          return false
+        }
+        const workspaces = nodes.flatMap((node, index) => node.template < 0 && node.attrs.has('data-htaccess-workspace') ? [{ node, index }] : [])
+        expect(workspaces).toHaveLength(path === '/software/htaccess' && qualifiedCatalog ? 1 : 0)
+        if (path === '/software/htaccess') {
+          const approved = nodes.flatMap((node, index) => node.template < 0 && node.attrs.get('data-approved-xpanel-workspace') === path ? [{ node, index }] : [])
+          expect(approved).toHaveLength(1)
+          expect(approved[0]!.node.attrs.get('data-workspace-mode')).toBe(qualifiedCatalog ? 'connected' : 'read-only')
+          if (qualifiedCatalog) {
+            const workspace = workspaces[0]!
+            expect(within(workspace.index, approved[0]!.index)).toBe(true)
+            expect(workspace.node.attrs.get('data-htaccess-manage')).toBe('true')
+            const owned = nodes.filter((node, index) => node.template < 0 && within(index, workspace.index))
+            expect(owned.filter(node => node.tag === 'form')).toHaveLength(0)
+            const editor = owned.filter(node => node.attrs.has('data-htaccess-editor'))
+            expect(editor).toHaveLength(1); expect(editor[0]!.tag).toBe('textarea'); expect(editor[0]!.attrs.has('readonly')).toBe(true)
+            const status = owned.filter(node => node.attrs.has('data-htaccess-status'))
+            expect(status).toHaveLength(1); expect(status[0]!.attrs.get('data-state')).toBe('unread')
+            const commands = owned.filter(node => node.tag === 'button')
+            expect(commands).toHaveLength(7)
+            for (const command of commands) { expect(command.attrs.get('type')).toBe('button'); expect(command.attrs.has('disabled')).toBe(true) }
+          } else {
+            const owned = nodes.filter((node, index) => node.template < 0 && within(index, approved[0]!.index))
+            expect(owned.filter(node => node.tag === 'form')).toHaveLength(0)
+            const controls = owned.filter(node => ['input', 'select', 'textarea', 'button'].includes(node.tag))
+            expect(controls.length).toBeGreaterThan(0)
+            for (const control of controls) expect(control.attrs.has('disabled')).toBe(true)
+          }
+        }
+        expect(scoped.headers['x-visual-fixture-scope']).toBeUndefined()
+      }
     }
   })
 

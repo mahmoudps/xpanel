@@ -61,7 +61,7 @@ for (const spec of routes) {
 }
 
 const sourceMetadata = ['.node-version', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', 'docs/STANDARDS.md']
-const packageRoots = { '@xpanel/core': 'packages/core', '@xpanel/catalog': 'packages/catalog', '@xpanel/web': 'apps/web' }
+const packageRoots = { '@xpanel/core': 'packages/core', '@xpanel/catalog': 'packages/catalog', '@xpanel/render': 'packages/render', '@xpanel/web': 'apps/web' }
 
 /** Follow runtime imports/barrel exports, not unrelated agent/lifecycle trees. */
 function fingerprint() {

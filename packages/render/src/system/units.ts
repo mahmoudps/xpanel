@@ -1,3 +1,4 @@
+import { accountProbeNamespace } from './account-probe.ts'
 // systemd units for account processes. Every unit runs as the account, inside xpanel-<uid>.slice, in a
 // mount namespace where only its own home is visible and the OS is read-only.
 //
@@ -229,6 +230,7 @@ export const renderFpmUnit = (account: AccountRef, version: string, os: OsProfil
     // PHP listens on its unix socket only.
     ...NO_TCP_LISTEN,
     ...isolation(ctx, { writable: [p.socketDir, p.logDir] }),
+    ...accountProbeNamespace(account),
     '',
     '[Install]',
     'WantedBy=multi-user.target',

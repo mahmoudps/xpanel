@@ -10,21 +10,23 @@ const ROLE_GROUPS: Readonly<Record<Exclude<TeamRole, 'administrator'>, readonly 
 const ADMINISTRATOR_EXCLUDED = new Set(['user-manager', 'calendars-contacts-management', 'calendars-contacts-sharing', 'calendars-contacts-config'])
 // A team session carries the owner's account authority, so the owner's own sign-in identity (password, two-factor,
 // API tokens, contact and interface preferences, the team itself) is never delegated to any role.
-const OWNER_IDENTITY = new Set(['api-tokens', 'two-factor-auth'])
+// The bounded account rewrite workflow preserves the legacy endpoint's owner-only authority.
+const OWNER_ONLY_TOOLS = new Set(['api-tokens', 'two-factor-auth', 'domain-htaccess'])
 const OWNER_IDENTITY_GROUP = 'preferences'
 const toolById = new Map(tools.map(tool => [tool.id, tool]))
 
 /** Pure role rule: may a team member holding these roles use this xPanel catalog tool? Role-less members get no tools. */
 export function teamRolesAllowTool(roles: readonly TeamRole[], tool: { id: string; surface: string; groupId: string; rootOnly: boolean }): boolean {
-  if (tool.surface !== 'xpanel' || tool.rootOnly || tool.groupId === OWNER_IDENTITY_GROUP || OWNER_IDENTITY.has(tool.id)) return false
+  if (tool.surface !== 'xpanel' || tool.rootOnly || tool.groupId === OWNER_IDENTITY_GROUP || OWNER_ONLY_TOOLS.has(tool.id)) return false
   if (roles.includes('administrator') && !ADMINISTRATOR_EXCLUDED.has(tool.id)) return true
   return roles.some(role => role !== 'administrator' && ROLE_GROUPS[role].includes(tool.groupId))
 }
 /** Catalog tool ids a role set grants, for display and for the signed-in member's navigation. */
 export const teamToolIds = (roles: readonly TeamRole[]): string[] => tools.filter(tool => teamRolesAllowTool(roles, tool)).map(tool => tool.id).sort()
 
-// The only routes without a catalog tool that a team session may call: its own identity, sign-out and the static catalog.
-const TEAM_ROUTES_WITHOUT_TOOL = new Set(['GET /api/auth/me', 'POST /api/auth/logout', 'GET /api/catalog'])
+// These routes act only on the member's own identity/display preference, sign-out or the static catalog.
+const TEAM_ROUTES_WITHOUT_TOOL = new Set(['GET /api/auth/me', 'POST /api/auth/logout', 'GET /api/catalog',
+  'GET /api/auth/ui-preferences', 'PUT /api/auth/ui-preferences'])
 
 /**
  * Checked for every request a team session authenticates. The route's declared policy must be account-scoped and

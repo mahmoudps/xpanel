@@ -291,16 +291,27 @@ describe('approved follow-up component and native validation boundaries', () => 
         document.body.innerHTML = renderApprovedXpanelWorkspace({
             route: '/security/account', locale: 'ar', readOnly: true
         })!;
-        const scopes = [
-            ...document.querySelectorAll('[data-workspace-section="token-scopes"] label bdi')
-        ].map(node => node.textContent);
-        expect(scopes).toEqual(['files:read', 'files:write', 'databases:read', 'dns:write', 'email:write', 'backups:create', 'cron:write']);
+        const tokens = document.querySelector('[data-account-api-tokens]');
+        const scopes = [...document.querySelectorAll<HTMLInputElement>('[data-account-api-tokens] input[data-account-tokens-scope]')];
+        expect(scopes.map(input => input.value)).toEqual([
+            'files:read', 'files:write', 'databases:read', 'databases:write',
+            'dns:read', 'dns:write', 'mail:read', 'mail:write',
+            'backups:read', 'backups:write', 'cron:read', 'cron:write',
+        ]);
+        expect(scopes.every(input => input.disabled)).toBe(true);
+        expect(tokens?.getAttribute('data-auth-personal-state')).toBe('unavailable');
+        expect(tokens?.getAttribute('data-tokens-can-read')).toBe('false');
+        expect(tokens?.getAttribute('data-tokens-can-manage')).toBe('false');
         for (const section of ['account-password', 'ip-blocker', 'hotlink-protection']) {
             const group = document.querySelector(`[data-workspace-section="${section}"]`)!;
             expect(group.querySelector('input[disabled]')).not.toBeNull();
             expect(group.querySelector('button[disabled]')).not.toBeNull();
         }
-        expect(document.querySelector('[data-workspace-section="token-one-time"]')?.textContent).toContain('تم');
+        const reveal = tokens?.querySelector('[data-account-tokens-reveal]');
+        expect(reveal?.hasAttribute('hidden')).toBe(true);
+        expect(reveal?.querySelector('[data-account-tokens-secret]')?.textContent).toBe('');
+        expect(reveal?.querySelector('[data-account-tokens-done]')?.hasAttribute('disabled')).toBe(true);
+        expect(reveal?.textContent).toContain('تم');
     });
     it('keeps missing certificate targets explicitly unread and preserves picker, cancel and final-install anatomy', () => {
         document.body.innerHTML = renderApprovedXpanelWorkspace({

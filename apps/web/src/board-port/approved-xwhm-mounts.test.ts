@@ -20,7 +20,7 @@ const pages = [
   { route: '/whm/security/ssh', marker: 'data-whm-ssh-keys', cards: ['ssh-signin', 'ssh-keys', 'ssh-effective', 'ssh-failures', 'ssh-autoban', 'ssh-banned'] },
   { route: '/whm/security', marker: 'data-whm-security-evidence', cards: ['security-evidence', 'panel-access', 'panel-lockout', 'panel-ip-lockout', 'panel-tokens', 'panel-mfa', 'panel-waf', 'panel-dangerous-php', 'panel-compiler', 'panel-apply'] },
   { route: '/whm/software/php', marker: 'data-whm-php-workspace', cards: ['php-versions', 'php-install', 'php-handlers', 'php-extensions', 'php-configure', 'php-functions'] },
-  { route: '/whm/services/web', marker: 'data-whm-web-readback', cards: ['web-stack', 'web-backend', 'web-pending', 'web-generations'] },
+  { route: '/whm/services/web', marker: 'data-whm-web-readback', cards: ['web-flow', 'web-stack', 'web-comparison', 'web-backend', 'web-proxy', 'web-test-gate', 'web-pending', 'web-generations'] },
   { route: '/whm/transfers', marker: 'data-transfer-workspace', cards: ['transfer-source', 'transfer-identities', 'transfer-progress', 'transfer-import', 'transfer-plans'] },
 ]
 const documentFor = (html: string): Document => new DOMParser().parseFromString(html, 'text/html')
@@ -30,17 +30,44 @@ const preservesCards = (html: string, cards: string[]) => {
   const document = documentFor(html)
   const mountedCards = [...document.querySelectorAll('section[data-whm-detail-section]')]
   expect(mountedCards.map(card => card.getAttribute('data-whm-detail-section'))).toEqual(cards)
+  const presentation = new Set<Element>()
   if (cards.includes('php-handlers')) {
     const handlers = [...document.querySelectorAll('[data-whm-detail-section="php-handlers"] tbody > tr')]
     expect(handlers.map(row => row.querySelector('td')?.textContent?.trim())).toEqual(['PHP-FPM', 'CGI / suexec', 'suPHP', 'lsphp'])
-    expect(document.querySelectorAll('details')).toHaveLength(3)
-    for (const card of ['php-versions', 'php-configure', 'php-functions']) expect(document.querySelectorAll(`[data-whm-detail-section="${card}"] details`)).toHaveLength(1)
+    expect(document.querySelectorAll('details')).toHaveLength(2)
+    for (const card of ['php-versions', 'php-functions']) expect(document.querySelectorAll(`[data-whm-detail-section="${card}"] details`)).toHaveLength(1)
+    expect(document.querySelectorAll('[data-whm-detail-section="php-configure"] details')).toHaveLength(0)
+    const editorRoots = document.querySelectorAll('[data-whm-detail-section="php-configure"] [data-php-editor-modes][data-presentation-tabs="panels"]')
+    expect(editorRoots).toHaveLength(1)
+    const modes = editorRoots[0]!
+    expect(modes.querySelectorAll('[data-presentation-tab]')).toHaveLength(2)
+    expect(modes.querySelectorAll('[role="tabpanel"]')).toHaveLength(2)
+    for (const [id, key, panelId, selected] of [
+      ['whm-php-common-tab', 'common', 'whm-php-common-panel', true],
+      ['whm-php-file-tab', 'file', 'whm-php-file-panel', false],
+    ] as const) {
+      const tab = modes.querySelector<HTMLButtonElement>('#' + id)!
+      const panel = modes.querySelector<HTMLElement>('#' + panelId)!
+      expect(tab).not.toBeNull(); expect(panel).not.toBeNull()
+      expect(tab.tagName).toBe('BUTTON'); expect(tab.type).toBe('button'); expect(tab.disabled).toBe(false)
+      expect(tab.getAttribute('role')).toBe('tab'); expect(tab.getAttribute('data-presentation-tab')).toBe(key)
+      expect(tab.getAttribute('aria-controls')).toBe(panelId); expect(tab.getAttribute('aria-selected')).toBe(String(selected))
+      expect(tab.tabIndex).toBe(selected ? 0 : -1)
+      expect(panel.getAttribute('role')).toBe('tabpanel'); expect(panel.getAttribute('aria-labelledby')).toBe(id)
+      expect(panel.hidden).toBe(!selected)
+      expect(tab.matches('[name],[formaction],[data-php-action],[data-php-version-command],[data-php-install-pick],[data-php-exception-revoke],[data-action],[data-xp-action],[api-url],[data-api-url]')).toBe(false)
+      presentation.add(tab)
+    }
+    expect(document.querySelectorAll('[data-whm-php-refresh]')).toHaveLength(1)
+    const inventoryRead = document.querySelector<HTMLButtonElement>('[data-whm-php-workspace] [data-whm-php-refresh]')!
+    expect(inventoryRead.tagName).toBe('BUTTON'); expect(inventoryRead.type).toBe('button')
+    expect(document.querySelector('[data-whm-php-status]')?.getAttribute('data-state')).toBe('unread')
     for (const control of document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button')) {
-      if (!control.hasAttribute('data-whm-php-refresh')) expect(control.disabled).toBe(true)
+      if (control !== inventoryRead && !presentation.has(control)) expect(control.disabled, control.outerHTML).toBe(true)
     }
   }
+  return { document, presentation }
 }
-
 describe.each(pages)('saved-workspace mount $route', ({ route, marker, cards }) => {
   it('mounts once in English and Arabic while preserving all approved cards and field identities', () => {
     for (const locale of ['en', 'ar'] as const) {
@@ -71,10 +98,12 @@ describe.each(pages)('saved-workspace mount $route', ({ route, marker, cards }) 
   it('retains the complete unavailable layout while withholding private state and executable forms', () => {
     for (const locale of ['en', 'ar'] as const) {
       const html = render(route, locale, { capabilityUnavailable: true })
-      preservesCards(html, cards); expect(count(html, marker)).toBe(1)
-      expect(html).toContain('data-capability-state="unavailable"'); expect(html).not.toMatch(/<form\b/)
+      const { document, presentation } = preservesCards(html, cards); expect(count(html, marker)).toBe(1)
+      expect(html).toContain('data-capability-state="unavailable"'); expect(document.querySelectorAll('form')).toHaveLength(0)
       expect(html).not.toContain(settings.hostname); expect(html).not.toContain('value="2222"'); expect(html).not.toContain('value="2048"')
-      for (const control of html.matchAll(/<(?:input|select|textarea|button)\b[^>]*>/g)) expect(control[0]).toMatch(/\bdisabled\b/)
+      for (const control of document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button')) {
+        if (!presentation.has(control)) expect(control.disabled, control.outerHTML).toBe(true)
+      }
       if (route === '/whm/software/php') expect(html).toContain('data-php-can-read="false"')
       if (route === '/whm/services/web') expect(html).toContain('data-web-can-read="false"')
       if (route === '/whm/security/ssh') expect(html).toContain('data-whm-ssh-manage="false"')

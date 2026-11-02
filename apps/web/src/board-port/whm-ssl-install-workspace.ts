@@ -1,3 +1,4 @@
+import { sslInstallTemplates } from './data-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 /** Manual certificate installation wizard body; every control starts disabled until the client binding reads authorized data. */
 export function renderWhmSslInstallWorkspace(input: { locale: Locale; canManage: boolean }): string {
@@ -23,7 +24,7 @@ export function renderWhmSslInstallWorkspace(input: { locale: Locale; canManage:
       <div class="xp-whm-detail-actions"><button type="button" class="xp-btn xp-btn--primary" data-ssl-install-submit disabled>${t('Install certificate')}</button><button type="button" class="xp-btn" data-ssl-install-clear disabled>${t('Clear form')}</button></div>
     </fieldset>
     <section class="xp-whm-ssl-install__result" data-ssl-install-result aria-labelledby="whm-ssl-install-result-heading" hidden><h3 id="whm-ssl-install-result-heading">${t('3. Result')}</h3><dl data-ssl-install-facts></dl></section>
-  </div>`
+  ${sslInstallTemplates()}</div>`
 }
 
 /** "Your choices" summary for the page aside; values are painted by the same binding. */

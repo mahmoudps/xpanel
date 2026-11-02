@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 const PGP_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -39,19 +43,21 @@ export function bindAccountPgp(askDialog: ((options: { title: string; body: stri
       rows.querySelectorAll<HTMLAnchorElement>('a').forEach(anchor => { if (blocked || !view?.capabilities.export) { anchor.removeAttribute('href'); anchor.setAttribute('aria-disabled', 'true') } else { anchor.href = anchor.dataset.pgpHref!; anchor.removeAttribute('aria-disabled') } })
       root.setAttribute('aria-busy', String(busy))
     }
-    const text = (parent: HTMLElement, value: string, technical = false) => { const node = document.createElement(technical ? 'bdi' : 'span'); if (technical) node.dir = 'ltr'; node.textContent = value; parent.append(node); return node }
+    try { cloneClientTemplate(clientTemplate(root, 'account-pgp-row'), 'tr', ['identity','algorithm','created','expires','secret','export','remove']); cloneClientTemplate(clientTemplate(root, 'account-pgp-empty'), 'tr', ['message']) }
+    catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => {control.disabled=true}); status.dataset.state='unavailable'; status.textContent=t('Unavailable'); return }
     const paint = () => {
       if (!view) return; rows.replaceChildren()
-      if (!view.keys.length) { const row = rows.insertRow(); const cell = row.insertCell(); cell.colSpan = 5; cell.textContent = t('No keys have been saved.') }
+      if (!view.keys.length) { const row=cloneClientTemplate(clientTemplate(root,'account-pgp-empty'),'tr',['message']); clientTemplateSlot(row,'message').textContent=t('No keys have been saved.'); rows.append(row) }
       for (const key of view.keys) {
-        const row = rows.insertRow(), identity = document.createElement('div'); row.insertCell().append(identity); identity.style.display = 'grid'; identity.style.gap = '8px'
-        for (const uid of key.uids) text(identity, uid, true); text(identity, key.fingerprint, true)
-        text(row.insertCell(), key.algorithm + ' / ' + String(key.bits), true)
-        const dateCell = document.createElement('div'); row.insertCell().append(dateCell); dateCell.style.display = 'grid'; dateCell.style.gap = '8px'; text(dateCell, key.created.slice(0, 10), true); text(dateCell, key.expires?.slice(0, 10) ?? t('Does not expire'), !!key.expires)
-        text(row.insertCell(), key.hasSecret ? t('Present') : t('Public only'))
-        const actions = document.createElement('div'); row.insertCell().append(actions); actions.className = 'xp-acct-tool__actions'
-        const download = document.createElement('a'); download.className = 'xp-btn'; download.textContent = t('Export public key'); download.dataset.pgpHref = '/api/account/pgp/' + key.fingerprint + '/public'; download.download = 'openpgp-' + key.fingerprint + '.asc'; actions.append(download)
-        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'xp-btn'; remove.textContent = t('Delete'); remove.addEventListener('click', () => { selected = key.fingerprint; selectedLabel.textContent = selected; confirmation.value = ''; confirmation.focus(); lock() }); actions.append(remove)
+        const row=cloneClientTemplate(clientTemplate(root,'account-pgp-row'),'tr',['identity','algorithm','created','expires','secret','export','remove'])
+        clientTemplateSlot(row,'identity').textContent=[...key.uids,key.fingerprint].join(' · ')
+        clientTemplateSlot(row,'algorithm').textContent=key.algorithm+' / '+String(key.bits)
+        clientTemplateSlot(row,'created').textContent=key.created.slice(0,10)
+        clientTemplateSlot(row,'expires').textContent=key.expires?.slice(0,10)??t('Does not expire')
+        clientTemplateSlot(row,'secret').textContent=key.hasSecret?t('Present'):t('Public only')
+        const download=clientTemplateSlot(row,'export','a') as HTMLAnchorElement; download.textContent=t('Export public key'); download.dataset.pgpHref='/api/account/pgp/'+key.fingerprint+'/public'; download.download='openpgp-'+key.fingerprint+'.asc'
+        const remove=clientTemplateSlot(row,'remove','button') as HTMLButtonElement; remove.textContent=t('Delete'); remove.addEventListener('click',()=>{selected=key.fingerprint;selectedLabel.textContent=selected;confirmation.value='';confirmation.focus();lock()})
+        rows.append(row)
       }
       const previous = address.value; address.replaceChildren()
       for (const mailbox of view.mailboxes) { const option = document.createElement('option'); option.value = mailbox; option.textContent = mailbox; address.append(option) }
@@ -106,4 +112,4 @@ export function bindAccountPgp(askDialog: ((options: { title: string; body: stri
     void read()
   })
 }
-export const ACCOUNT_PGP_CLIENT_BINDING = `(()=>{const PGP_ID=${PGP_ID.toString()};const PGP_FP=${PGP_FP.toString()};const PGP_REV=${PGP_REV.toString()};const pgpObject=${pgpObject.toString()};const pgpExact=${pgpExact.toString()};const readPgpView=${readPgpView.toString()};return ${bindAccountPgp.toString()};})()`
+export const ACCOUNT_PGP_CLIENT_BINDING = `(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const PGP_ID=${PGP_ID.toString()};const PGP_FP=${PGP_FP.toString()};const PGP_REV=${PGP_REV.toString()};const pgpObject=${pgpObject.toString()};const pgpExact=${pgpExact.toString()};const readPgpView=${readPgpView.toString()};return ${bindAccountPgp.toString()};})()`

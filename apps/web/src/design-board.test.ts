@@ -4,6 +4,7 @@ import { designPages, designReferenceRoutesEnabled, readDesignAdapter, readPanel
 import { resolveWebDocumentRoute } from './document-routes.ts'
 import { renderPanelSurface } from './surfaces/xpanel.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
+import { parseMarkup } from './themes/markup.ts'
 
 const withDesignPages = <T>(fn: () => T): T => {
   const previous = process.env.XPANEL_DESIGN_PAGES
@@ -144,7 +145,27 @@ describe('design board routes', () => {
       expect(html).toContain(marker)
       expect(html).toContain(surface === 'xpanel' ? 'data-workspace-mode="read-only"' : 'data-capability-state="unavailable"')
       expect(html).toContain('data-nav-wiring="soon"')
-      expect(html).not.toMatch(/<form\b/)
+      const nodes = parseMarkup(html)
+      const forms = nodes.flatMap((node, index) => node.tag === 'form' ? [{ node, index }] : [])
+      const prototypes = forms.filter(({ node }) => node.template >= 0)
+      expect(prototypes.map(({ node }) => nodes[node.template]!.attrs.get('data-xp-template'))).toEqual(['prompt-dialog'])
+      expect(prototypes[0]!.node.attrs.get('method')).toBe('dialog')
+      const live = forms.filter(({ node }) => node.template < 0)
+      expect(live).toHaveLength(1)
+      const choices = nodes.flatMap((node, index) => node.template < 0 && node.attrs.has('data-ui-theme-form') ? [{ node, index }] : [])
+      expect(choices).toHaveLength(1)
+      for (const { node, index } of choices) {
+        expect(node.namespace).toBe('html')
+        expect(node.tag).toBe('form')
+        expect(node.attrs.has('data-ui-theme-form')).toBe(true)
+        expect(node.attrs.has('hidden')).toBe(true)
+        expect(node.attrs.has('action')).toBe(false)
+        const ancestors = []
+        for (let parent = nodes[index]!.parent; parent >= 0; parent = nodes[parent]!.parent) ancestors.push(nodes[parent]!)
+        expect(ancestors.some(parent => parent.attrs.has('data-user-menu'))).toBe(true)
+        expect(ancestors.some(parent => parent.attrs.has('data-ui-theme-preferences'))).toBe(true)
+        expect(ancestors.some(parent => parent.attrs.get('data-approved-xpanel-workspace') === route || parent.attrs.get('data-whm-detail-route') === route)).toBe(false)
+      }
     }
     const php = renderPanelSurface({
       locale: 'en', activeRoute: '/software/php',

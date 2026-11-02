@@ -154,7 +154,7 @@ describe('WHM repair binding', () => {
     expect(q('[data-whm-repair-removals]').hidden).toBe(false)
     expect(q('[data-whm-repair-remove-list]').textContent).toBe('php8.3-fpm')
     expect(q('[data-whm-repair-preview-remove]').textContent).toBe('1')
-    expect(q<HTMLButtonElement>('[data-whm-repair-start]').className).toContain('xp-btn--danger')
+    expect(q<HTMLButtonElement>('[data-whm-repair-start]').dataset.severity).toBe('danger')
 
     q<HTMLButtonElement>('[data-whm-repair-start]').click(); await tick()
     const options = ask.mock.calls[0]![0] as Record<string, unknown>

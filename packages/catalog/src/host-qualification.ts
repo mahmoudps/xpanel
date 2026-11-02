@@ -12,8 +12,8 @@ export interface HostQualificationReport {
 }
 
 /**
- * Implemented API and screen capabilities bound to connected-host probes.
- * A tool stays hidden until every probe it names has passed on this server.
+ * Host readiness prerequisites, independent of release acceptance.
+ * Passing these probes cannot promote a tool's delivery status.
  */
 export const PHASE1_TOOL_PROBES: Readonly<Record<string, readonly HostProbe[]>> = {
   'list-accounts': ['control-plane'],
@@ -191,23 +191,38 @@ export const QUALIFIED_SCOPE: Readonly<Record<string, string>> = {
   'account-containers': 'Podman rootless containers from docker.io, quay.io and ghcr.io as the account in its slice with plan memory, CPU and process limits; no port is published and no domain exposure is offered. Unavailable until Podman, newuidmap and subordinate IDs exist.',
 }
 
-/** Copy the catalog and mark only the implemented tools whose probes passed. */
+/**
+ * Apply host readiness to an already assessed acceptance catalog. This is strictly
+ * demotion-only: probes are never acceptance evidence. Rebuild from the trusted
+ * acceptance catalog on every refresh, rather than reusing a demoted result.
+ */
 export const qualifyHostTools = (
   catalog: readonly CatalogTool[],
   report: HostQualificationReport | null,
   enabled = process.env.XPANEL_HOST_QUALIFICATION !== 'off',
 ): CatalogTool[] => {
-  if (!enabled || report?.executor !== 'linux') return catalog.map(tool => ({ ...tool, delivery: { ...tool.delivery } }))
   return catalog.map(tool => {
+    const copy = { ...tool, delivery: { ...tool.delivery } }
+    // Preserve incomplete/unknown acceptance, including its explanation and evidence.
+    if (tool.status !== 'verified') return copy
+    if (tool.delivery.status !== 'verified') return {
+      ...copy,
+      status: tool.delivery.status,
+    }
     const needs = PHASE1_TOOL_PROBES[tool.id]
-    if (needs === undefined || tool.status === 'out-of-scope') return { ...tool, delivery: { ...tool.delivery } }
-    if (!needs.every(probe => report.probes[probe] === 'passed')) return { ...tool, delivery: { ...tool.delivery } }
+    const ready = enabled && report?.executor === 'linux' && needs !== undefined
+      && needs.every(probe => report.probes[probe] === 'passed')
+    if (ready) return copy
+    const reason = !enabled ? 'Host readiness checks are disabled.'
+      : report?.executor !== 'linux' ? 'A current real Linux host readiness report is unavailable.'
+      : needs === undefined ? 'Host readiness prerequisites have not been declared for this capability.'
+      : 'Required host readiness probes are missing or failed.'
     return {
-      ...tool,
-      status: 'verified',
+      ...copy,
+      status: 'researched',
       delivery: {
-        status: 'verified',
-        reason: 'This server’s Linux agent passed the probes this implemented tool requires.' + (QUALIFIED_SCOPE[tool.id] ? ' Qualified scope: ' + QUALIFIED_SCOPE[tool.id] : ''),
+        status: 'researched',
+        reason: `${reason} Release acceptance is retained separately and does not establish host readiness.`,
         evidence: tool.delivery.evidence,
       },
     }

@@ -9,6 +9,7 @@ import { createDb, createRootPrincipal, createSession, findPrincipalByUsername, 
 import { profileFor } from '@xpanel/os'
 import { ENTRY_POINTS, sessionCookieName, sessionTokenHash, type EntryPoint } from './entry-points.ts'
 import { resolvePanelEntrypoints, startPanelEntrypoints, type PanelEntryPointConfig } from './main.ts'
+import { setStateOwnershipDepsForTests } from '../../../packages/state/src/ownership.ts'
 import { INGRESS_SECRET_HEADER } from './server.ts'
 
 const names: EntryPoint[] = ['xpanel', 'xwhm', 'xmail']
@@ -108,7 +109,13 @@ describe('three real HTTP listeners with a fixture host agent, not public TLS qu
   it('serves independent fixed login brands, confines HTML before snapshots, binds session audience and closes once', async () => {
     const { options, subscriptions } = await fixture()
     const entryPoints = await configs()
+    const inspectInstalledParent = vi.fn(async (_path: string) => {
+      throw new Error('private startup must not inspect an installed state parent')
+    })
+    setStateOwnershipDepsForTests({ inspectPath: inspectInstalledParent })
     const server = await startPanelEntrypoints({ ...options, entryPoints })
+      .finally(() => setStateOwnershipDepsForTests(null))
+    expect(inspectInstalledParent).not.toHaveBeenCalled()
     cleanups.push(() => server.close())
     if (server.quarantined) throw new Error('The ordinary startup fixture unexpectedly entered lifecycle quarantine')
     expect(subscriptions.opened).toBe(3)

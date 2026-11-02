@@ -1,3 +1,4 @@
+import { accountProbeNginxLocation } from '../system/account-probe.ts'
 // Nginx edge on 80/443. It proxies to the loopback backend (Apache or OpenLiteSpeed) or to an
 // app upstream, caches responses (never files), and never opens anything inside a home.
 import { assertProxyOptions, validateDefaultSitePolicy, validateNginxWorkers } from '@xpanel/core'
@@ -320,6 +321,9 @@ const siteBody = (g: SiteGroup, ctx: SiteCtx, toHttps: boolean): string[] => {
   if (mode === 'suspended') return [...body, ...suspendedLocations()]
   // Only the websites stop: mail, FTP and the panels are separate services. ACME renewals keep working.
   if (ctx.account.bandwidthLimitedMonth !== undefined) return [...body, ...bandwidthLimitLocations()]
+  if (g.main.kind === 'primary' && g.main.siteType === 'php' && g.main.php.handler === 'fpm' && !g.main.redirect) {
+    body.push(...accountProbeNginxLocation(ctx.account))
+  }
   if (mode === 'redirect' && g.main.redirect) {
     return [...body, ...block('location /', [`return ${g.main.redirect.code} ${nginxQuote(g.main.redirect.to)};`])]
   }

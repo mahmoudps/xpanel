@@ -1,3 +1,6 @@
+import { VIEW_RECORD_HELPERS, cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
@@ -43,14 +46,14 @@ function bindSwDeployments(askDialog: Ask | undefined, parse: typeof readSwDeplo
     const q = <T extends HTMLElement>(key: string): T | null => root.querySelector<T>('[data-sw-dep-' + key + ']')
     const status = q<HTMLElement>('status'), refresh = q<HTMLButtonElement>('refresh'), account = q<HTMLSelectElement>('account'), repos = q<HTMLElement>('repositories'), commits = q<HTMLElement>('commits'), pull = q<HTMLButtonElement>('pull')
     if (!status || !refresh || !account || !repos || !commits || !pull) return
+    try { viewAction(cloneViewRecord(root, 'software-deployment-repository-row', 'tr', { path: '', 'inspect-label': '' }), 'inspect'); cloneViewRecord(root, 'software-deployment-repository-empty', 'tr', { message: '' }); cloneViewRecord(root, 'software-deployment-commit-row', 'tr', { hash: '', date: '', subject: '' }); cloneViewRecord(root, 'software-deployment-commit-empty', 'tr', { message: '' }) } catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
     const admitted = (): boolean => root.isConnected && root.dataset.swCanRead === 'true' && !root.closest(blocked) && typeof transport === 'function'
     let busy = false, locked = false, view: SwDeploymentsClientView | null = null
     const repository = (): NonNullable<NonNullable<SwDeploymentsClientView['selected']>['selected']> | null => view?.selected?.selected ?? null
     const deployable = (): boolean => { const r = repository(); return admitted() && root.dataset.swCanManage === 'true' && !busy && !locked && !!view?.nativeAvailable && !!r && !r.dirty && r.head !== null && r.remote !== null && typeof askDialog === 'function' }
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status') }
     const fact = (key: string, text: string, human: boolean): void => { const node = q<HTMLElement>(key); if (node) { node.textContent = text; node.toggleAttribute('data-human', human) } }
-    const empty = (body: HTMLElement, columns: number, message: string): void => { body.textContent = ''; const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = columns; cell.textContent = message; row.append(cell); body.append(row) }
-    const tech = (text: string): HTMLElement => { const value = document.createElement('bdi'); value.dir = 'ltr'; value.textContent = text; return value }
+    const empty = (body: HTMLElement, columns: number, message: string): void => { body.replaceChildren(cloneViewRecord(root, columns === 2 ? 'software-deployment-repository-empty' : 'software-deployment-commit-empty', 'tr', { message })) }
     const lock = (): void => { refresh.disabled = busy || !admitted(); account.disabled = busy || !admitted() || !view; pull.disabled = !deployable(); for (const button of repos.querySelectorAll('button')) button.disabled = busy || !admitted() || !view?.nativeAvailable }
     const paint = (): void => {
       fact('native', view ? (view.nativeAvailable ? t('Available') : t('Unavailable')) : t('Not read'), true)
@@ -62,16 +65,16 @@ function bindSwDeployments(askDialog: Ask | undefined, parse: typeof readSwDeplo
       account.value = view?.accounts.some(item => item.username === chosen && item.gitAllowed) ? chosen : ''
       repos.textContent = ''
       for (const path of view?.selected?.repositories ?? []) {
-        const row = document.createElement('tr'), cell = document.createElement('td'), actions = document.createElement('td'), button = document.createElement('button')
-        cell.append(tech(path)); button.type = 'button'; button.className = 'xp-btn'; button.textContent = t('Inspect'); button.setAttribute('aria-label', t('Inspect repository {path}', { path }))
-        button.addEventListener('click', () => { void send('inspect', { account: view!.selected!.context.username, path }) }); actions.append(button); row.append(cell, actions); repos.append(row)
+        const row = cloneViewRecord(root, 'software-deployment-repository-row', 'tr', { path, 'inspect-label': t('Inspect') }), button = viewAction<HTMLButtonElement>(row, 'inspect')
+        button.setAttribute('aria-label', t('Inspect repository {path}', { path }))
+        button.addEventListener('click', () => { void send('inspect', { account: view!.selected!.context.username, path }) }); repos.append(row)
       }
       if (!repos.childElementCount) empty(repos, 2, view?.selected ? t('This account has no registered repositories.') : t('No account has been selected.'))
       const r = repository()
       fact('path', r?.path ?? t('Not read'), !r); fact('branch', r?.branch ?? t('Not read'), !r); fact('head', r?.head ?? (r ? t('No commits') : t('Not read')), !r?.head); fact('remote', r?.remote ?? (r ? t('No HTTPS origin') : t('Not read')), !r?.remote)
       fact('tree', r ? (r.dirty ? t('{count, plural, one {# uncommitted change} other {# uncommitted changes}}', { count: r.changedFiles }) : t('Clean')) : t('Not read'), true)
       commits.textContent = ''
-      for (const commit of r?.commits ?? []) { const row = document.createElement('tr'); for (const [index, text] of [commit.hash.slice(0, 12), formatDisplayDateTime(commit.at), commit.subject].entries()) { const cell = document.createElement('td'); if (index < 2) cell.append(tech(text)); else cell.textContent = text; row.append(cell) } commits.append(row) }
+      for (const commit of r?.commits ?? []) commits.append(cloneViewRecord(root, 'software-deployment-commit-row', 'tr', { hash: commit.hash.slice(0, 12), date: formatDisplayDateTime(commit.at), subject: commit.subject }))
       if (!commits.childElementCount) empty(commits, 3, r ? t('This repository has no commits.') : t('No repository has been inspected.'))
       lock()
     }
@@ -111,4 +114,4 @@ function bindSwDeployments(askDialog: Ask | undefined, parse: typeof readSwDeplo
     void send('read')
   })
 }
-export const SW_DEPLOYMENTS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readSwDeploymentsView.toString()};const bind=${bindSwDeployments.toString()};return (ask)=>bind(ask,parse);})()`
+export const SW_DEPLOYMENTS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readSwDeploymentsView.toString()};const bind=${bindSwDeployments.toString()};return (ask)=>bind(ask,parse);})()`

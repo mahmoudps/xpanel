@@ -1,3 +1,6 @@
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
+const whmClientNode = canonicalWhmClientNode
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -113,7 +116,24 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
     const kind = root.dataset.whmMonitoring
     const status = root.querySelector<HTMLElement>('[data-whm-monitoring-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-whm-monitoring-refresh]')
     if (!status || !refresh) return
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.monitoringCanRead === 'true' && !root.closest(denied)
+    let templateContractIntact = true
+    const templateContracts = [
+      ['whm-process-actions', 'div', { 'content': 'div' }],
+      ['whm-process-term', 'button', { 'content': 'button' }],
+      ['whm-process-kill', 'button', { 'content': 'button' }],
+    ] as const
+    const verifyWhmTemplates = (): void => {
+      if (kind !== 'processes') return
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try { assertWhmClientTemplates(root, templateContracts) } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        throw error
+      }
+    }
+    const admitted = (): boolean => templateContractIntact && (typeof transport === 'function' && root.isConnected && root.dataset.monitoringCanRead === 'true' && !root.closest(denied))
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
     const note = (state: string, message: string, target: HTMLElement = status): void => { target.dataset.state = state; target.textContent = message; target.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(state) ? 'alert' : 'status') }
     const fact = (name: string, value: string): void => { const node = root.querySelector('[data-whm-monitoring-' + name + ']'); if (node) node.textContent = value }
     const cell = (row: HTMLTableRowElement, value: string, options: { technical?: boolean; numeric?: boolean; message?: boolean } = {}): void => {
@@ -129,6 +149,12 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
       td.colSpan = body.closest('table')?.querySelectorAll('thead th').length ?? 1; td.textContent = message; row.append(td); body.replaceChildren(row)
     }
     const request = (method: string, path: string, body?: unknown): Promise<unknown> => !transport || !admitted() ? Promise.reject({ details: { stateChanged: false } }) : body === undefined ? transport(method, path) : transport(method, path, body)
+    const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
+      verifyWhmTemplates()
+      const reply = await request!(...args)
+      verifyWhmTemplates()
+      return reply
+    }
     let busy = false
     const lock = (on: boolean): void => { busy = on; root.setAttribute('aria-busy', String(on)); refresh.disabled = on || !admitted() }
     if (!admitted()) {
@@ -161,9 +187,9 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
           if (item.protection) action.textContent = protections[item.protection] ?? t(msgctxt('whm-monitoring-client', 'Protected'))
           else if (!canSignal) action.textContent = t('Signals unavailable')
           else {
-            const group = document.createElement('div'); group.className = 'xp-whm-detail-actions'
+            const group = whmClientNode(root, 'whm-process-actions', 'div')
             for (const signal of termAttempted.has(identity(item)) ? ['TERM', 'KILL'] as const : ['TERM'] as const) {
-              const button = document.createElement('button'); button.type = 'button'; button.className = signal === 'KILL' ? 'xp-btn xp-btn--danger' : 'xp-btn'; button.dataset.whmMonitoringSignal = signal; button.disabled = busy
+              const button = whmClientNode(root, signal === 'KILL' ? 'whm-process-kill' : 'whm-process-term', 'button'); button.dataset.whmMonitoringSignal = signal; button.disabled = busy
               button.textContent = signal === 'KILL' ? t('Force stop (KILL)') : t('Stop (TERM)')
               button.addEventListener('click', () => { if (!button.disabled) void send(item, signal) }); group.append(button)
             }
@@ -178,7 +204,7 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
         if (busy || !admitted()) return
         lock(true); if (!keepNote) note('reading', t('Reading the process list…'))
         try {
-          const next = readProcessesView(await request('GET', '/api/server/monitoring/processes'))
+          const next = readProcessesView(await checkedRequest('GET', '/api/server/monitoring/processes'))
           view = next; fact('observed-at', formatDisplayDateTime(next.observedAt)); fact('total', String(next.total))
           if (account) {
             const previous = account.value
@@ -209,7 +235,7 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
         lock(true); paint()
         const body: MonitoringSignalBody = { pid: item.pid, uid: item.uid, comm: item.comm, startedAt: item.startedAt, signal, ...(signal === 'KILL' ? { killConfirmed: true as const } : {}) }
         try {
-          const outcome = readSignalOutcome(await request('POST', '/api/server/monitoring/processes/signal', body), body)
+          const outcome = readSignalOutcome(await checkedRequest('POST', '/api/server/monitoring/processes/signal', body), body)
           if (outcome.state === 'confirmed') { termAttempted.delete(identity(item)); note('saved', t('PID {pid} is no longer present after {signal}.', { pid: String(item.pid), signal })) }
           else if (outcome.state === 'attempted') {
             if (signal === 'TERM') termAttempted.add(identity(item))
@@ -358,4 +384,4 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
   })
 }
 
-export const WHM_MONITORING_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[monitoringObject, monitoringText, monitoringIso, monitoringCount, monitoringNumber, monitoringAccount].map(helper => helper.toString()).join(';')};const readProcessesView=${readProcessesView.toString()};const readSignalOutcome=${readSignalOutcome.toString()};const readDiskView=${readDiskView.toString()};const readLogsView=${readLogsView.toString()};const readPerformanceView=${readPerformanceView.toString()};return ${bindWhmMonitoring.toString()};})()`
+export const WHM_MONITORING_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[monitoringObject, monitoringText, monitoringIso, monitoringCount, monitoringNumber, monitoringAccount].map(helper => helper.toString()).join(';')};const readProcessesView=${readProcessesView.toString()};const readSignalOutcome=${readSignalOutcome.toString()};const readDiskView=${readDiskView.toString()};const readLogsView=${readLogsView.toString()};const readPerformanceView=${readPerformanceView.toString()};return ${bindWhmMonitoring.toString()};})()`

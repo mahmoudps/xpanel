@@ -1,4 +1,10 @@
 import { WHM_DNS_CLIENT_BINDING } from './whm-dns-client.ts'
+import { clientTemplate, clientTemplateSlot, cloneClientTemplate } from './client-templates.ts'
+import { PROMPT_CLIENT_BINDING } from './prompt-client.ts'
+import { PRESENTATION_TABS_CLIENT_BINDING } from './presentation-tabs-client.ts'
+import { ACCOUNT_DETAILS_CLIENT_BINDING } from './account-details-client.ts'
+import { ACCOUNT_CREATE_OPERATION_BINDING, ACCOUNT_CREATION_ACKNOWLEDGEMENT_BINDING } from './account-create-operation.ts'
+import { WHM_LOCAL_ARCHIVES_CLIENT_BINDING } from './whm-local-archives-client.ts'
 // Real-time RFC 6455 WebSocket state store, 5-stage reconcile pipeline banner renderer,
 // and embedded browser script for live updates and keyboard navigation shortcuts.
 
@@ -12,6 +18,7 @@ import type {
 import { localeDirection, translator, type Locale } from './i18n.ts'
 import { escapeHtml, renderLtrValue, renderStatusBadge } from './tokens.ts'
 import { SHELL_MOTION_CLIENT_SCRIPT } from './shell-motion.ts'
+import { MOBILE_NAVIGATION_CLIENT_FUNCTIONS } from './mobile-navigation-client.ts'
 import { PLAN_EDITOR_CLIENT_SCRIPT } from './plan-editor.ts'
 import { ACCOUNT_LIST_CLIENT_SCRIPT } from './account-list.ts'
 import { APPROVED_WORKSPACE_FORMS_CLIENT } from './approved-workspace-forms.ts'
@@ -20,6 +27,8 @@ import { ACCOUNT_FILTERS_CLIENT_BINDING } from './account-filters-client.ts'
 import { ACCOUNT_MAILING_LISTS_CLIENT_BINDING } from './account-mailing-lists-client.ts'
 import { ACCOUNT_SPAM_CLIENT_BINDING } from './account-spam-client.ts'
 import { ACCOUNT_SESSIONS_CLIENT_BINDING } from './account-sessions-client.ts'
+import { ACCOUNT_API_TOKENS_CLIENT_BINDING } from './account-api-tokens-client.ts'
+import { ACCOUNT_PASSWORD_CLIENT_BINDING } from './account-password-client.ts'
 import { ACCOUNT_SSL_CLIENT_BINDING } from './account-ssl-client.ts'
 import { ACCOUNT_CONTACT_CLIENT_BINDING } from './account-contact-client.ts'
 import { DOMAIN_WORKSPACE_CLIENT_BINDING } from './domain-workspace-client.ts'
@@ -31,6 +40,7 @@ import { MAIL_CONTACTS_TOOLS_CLIENT_BINDING } from './mail-contacts-tools-client
 import { MAIL_IDENTITIES_CLIENT_BINDING } from './mail-identities-client.ts'
 import { MAIL_VACATION_WORKSPACE_CLIENT_BINDING } from './mail-vacation-workspace-client.ts'
 import { FILE_WORKSPACE_CLIENT_BINDING } from './file-workspace-client.ts'
+import { HOME_TOOLS_CLIENT_BINDING } from './home-tools-client.ts'
 import { MAIL_SEND_CLIENT_BINDING } from './mail-send-client.ts'
 import { ACCOUNT_BACKUP_CLIENT_BINDING } from './account-backup-client.ts'
 import { ACCOUNT_CRON_CLIENT_BINDING } from './account-cron-client.ts'
@@ -75,6 +85,7 @@ import { WHM_SOFTWARE_CENTER_CLIENT_BINDING } from './whm-software-center-client
 import { WHM_DATABASES_CLIENT_BINDING } from './whm-databases-client.ts'
 import { WHM_DATABASE_TUNING_CLIENT_BINDING } from './whm-database-tuning-client.ts'
 import { WHM_PREFERENCES_CLIENT_BINDING } from './whm-preferences-client.ts'
+import { UI_THEME_CLIENT_BINDING } from './ui-theme-client.ts'
 import { WHM_PANEL_SETTINGS_CLIENT_BINDING } from './whm-panel-settings-client.ts'
 import { WHM_PANEL_BRANDING_CLIENT_BINDING } from './whm-panel-branding-client.ts'
 import { WHM_LANGUAGES_CLIENT_BINDING } from './whm-languages-client.ts'
@@ -752,239 +763,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     setTimeout(connectWebSocket, baseDelay + jitter);
   }
 
-  function isVisibleElement(element) {
-    if (!element || !element.isConnected || element.closest('[hidden], [inert]') || !element.getClientRects().length) return false;
-    if (typeof element.checkVisibility === 'function') {
-      if (!element.checkVisibility()) return false;
-    } else {
-      var parent = element.parentElement;
-      while (parent) {
-        var closedDetails = parent.closest('details:not([open])');
-        if (!closedDetails) break;
-        var summary = closedDetails.querySelector(':scope > summary');
-        if (!summary || !summary.contains(element)) return false;
-        parent = closedDetails.parentElement;
-      }
-    }
-    var visibility = window.getComputedStyle(element).visibility;
-    return visibility !== 'hidden' && visibility !== 'collapse';
-  }
-
-  function focusableElements(element) {
-    return Array.prototype.filter.call(element.querySelectorAll(focusableSelector), function (target) {
-      return target.tabIndex >= 0 && isVisibleElement(target);
-    });
-  }
-
-  function focusOverlay(overlay) {
-    var targets = focusableElements(overlay.element);
-    var preferred = null;
-    if (overlay.kind === 'mobile-nav') {
-      preferred = targets.find(function (target) { return target.tagName.toLowerCase() === 'a'; });
-    } else if (overlay.kind === 'cmdk') {
-      preferred = targets.find(function (target) { return target.tagName.toLowerCase() === 'input'; });
-    }
-    (preferred || targets[0] || overlay.element).focus({ preventScroll: true });
-  }
-
-  function toolbarFocusReturn(target) {
-    if (window.innerWidth >= 960 || !target || !target.closest) return target;
-    var details = target.closest('details[data-xp-toolbar-options]');
-    if (!details) return target;
-    return details.querySelector(':scope > summary') || target;
-  }
-
-  function responsiveFocusTarget() {
-    var focused = document.activeElement;
-    // CSS can blur a newly hidden control before the resize listener runs.
-    if (focused === document.body && lastFocusedElement && !isVisibleElement(lastFocusedElement)) return lastFocusedElement;
-    return focused;
-  }
-
-  function focusVisibleTarget(target) {
-    if (!target || !target.matches(focusableSelector) || !isVisibleElement(target)) return false;
-    target.focus({ preventScroll: true });
-    return document.activeElement === target;
-  }
-
-  function restoreVisibleFocus(target) {
-    if (focusVisibleTarget(toolbarFocusReturn(target))) return;
-    var toolbar = target && target.closest ? target.closest('details[data-xp-toolbar-options]') : null;
-    if (toolbar) {
-      var toolbarTargets = focusableElements(toolbar);
-      if (focusVisibleTarget(toolbarTargets[0])) return;
-    }
-    var sidebar = document.querySelector('[data-xp-sidebar]');
-    if (window.innerWidth < 960) {
-      if (focusVisibleTarget(document.querySelector('[data-action="toggle-mobile-nav"]'))) return;
-    } else if (sidebar) {
-      if (focusVisibleTarget(sidebar.querySelector('[aria-current="page"]'))) return;
-    }
-    focusVisibleTarget(document.getElementById('main-content'));
-  }
-
-  function closeToolbarOptions() {
-    if (window.innerWidth >= 960) return;
-    var toolbars = document.querySelectorAll('details[data-xp-toolbar-options]');
-    for (var i = 0; i < toolbars.length; i++) toolbars[i].open = false;
-  }
-
-  function syncResponsiveToolbar() {
-    var mobile = window.innerWidth < 960;
-    if (toolbarMobileMode === mobile) return;
-    toolbarMobileMode = mobile;
-    var toolbars = document.querySelectorAll('details[data-xp-toolbar-options]');
-    for (var i = 0; i < toolbars.length; i++) {
-      var toolbar = toolbars[i];
-      var focused = responsiveFocusTarget();
-      var summary = toolbar.querySelector(':scope > summary');
-      toolbar.open = !mobile;
-      toolbar.dataset.mobileReady = 'true';
-      if (mobile && summary && focused !== summary && toolbar.contains(focused)) focusVisibleTarget(summary);
-      else if (!mobile && focused === summary) restoreVisibleFocus(summary);
-    }
-  }
-
-  function closeFocusedToolbar(target) {
-    if (window.innerWidth >= 960 || !target || !target.closest) return false;
-    var toolbar = target.closest('details[data-xp-toolbar-options]');
-    if (!toolbar || !toolbar.open) return false;
-    toolbar.open = false;
-    var summary = toolbar.querySelector(':scope > summary');
-    if (summary) summary.focus({ preventScroll: true });
-    return true;
-  }
-
-  function setMobileNavigationState(open) {
-    var shell = document.querySelector('.xp-shell');
-    var backdrop = document.querySelector('[data-xp-nav-backdrop]');
-    var toggles = document.querySelectorAll('[data-action="toggle-mobile-nav"]');
-    if (shell) {
-      if (open) shell.dataset.mobileNav = 'open';
-      else delete shell.dataset.mobileNav;
-    }
-    if (backdrop) backdrop.hidden = !open;
-    for (var i = 0; i < toggles.length; i++) {
-      toggles[i].setAttribute('aria-expanded', open ? 'true' : 'false');
-    }
-  }
-
-  function finishOverlayClose(overlay, restoreFocus) {
-    if (activeOverlay !== overlay) return;
-    activeOverlay = null;
-    if (overlay.motion) { overlay.motion.destroy(); overlay.motion = null; }
-    if (overlay.kind === 'mobile-nav') {
-      setMobileNavigationState(false);
-      if (overlay.role === null) overlay.element.removeAttribute('role');
-      else overlay.element.setAttribute('role', overlay.role);
-      if (overlay.ariaModal === null) overlay.element.removeAttribute('aria-modal');
-      else overlay.element.setAttribute('aria-modal', overlay.ariaModal);
-    } else {
-      overlay.element.hidden = true;
-      if (overlay.kind === 'cmdk' && commandPalette) commandPalette.input.setAttribute('aria-expanded', 'false');
-    }
-    if (overlay.tabIndex === null) overlay.element.removeAttribute('tabindex');
-    for (var i = 0; i < overlay.inertElements.length; i++) {
-      var previous = overlay.inertElements[i];
-      if (previous.value === null) previous.element.removeAttribute('inert');
-      else previous.element.setAttribute('inert', previous.value);
-    }
-    document.body.style.overflow = overlay.bodyOverflow;
-    document.documentElement.style.overflow = overlay.documentOverflow;
-    if (restoreFocus) {
-      restoreVisibleFocus(overlay.returnFocus);
-      // Preserve the document after the lock and focus restoration have settled.
-      // Do not override navigation or a deliberate history/hash change.
-      if (!overlay.skipDocumentRestore && window.location.href === overlay.documentHref &&
-          (window.scrollX !== overlay.documentX || window.scrollY !== overlay.documentY)) {
-        window.scrollTo({ left: overlay.documentX, top: overlay.documentY, behavior: 'instant' });
-      }
-    }
-  }
-
-  function closeActiveOverlay(restoreFocus, immediate, skipDocumentRestore) {
-    if (!activeOverlay) return;
-    var overlay = activeOverlay;
-    if (overlay.closing) {
-      overlay.skipDocumentRestore = overlay.skipDocumentRestore || Boolean(skipDocumentRestore);
-      overlay.restoreFocusAfterClose = overlay.restoreFocusAfterClose || restoreFocus;
-      if (immediate) finishOverlayClose(overlay, overlay.restoreFocusAfterClose);
-      return;
-    }
-    overlay.skipDocumentRestore = Boolean(skipDocumentRestore);
-    if (overlay.motion && !immediate) {
-      overlay.closing = true;
-      overlay.restoreFocusAfterClose = restoreFocus;
-      overlay.motion.close(function () { finishOverlayClose(overlay, overlay.restoreFocusAfterClose); });
-    } else finishOverlayClose(overlay, restoreFocus);
-  }
-
-  function openOverlay(element, kind, trigger) {
-    if (!element) return;
-    if (activeOverlay && activeOverlay.element === element) {
-      if (activeOverlay.closing && activeOverlay.motion) {
-        activeOverlay.closing = false;
-        activeOverlay.restoreFocusAfterClose = false;
-        activeOverlay.skipDocumentRestore = false;
-        activeOverlay.motion.open();
-        focusOverlay(activeOverlay);
-      }
-      return;
-    }
-    lastKeyPrefix = null;
-    clearTimeout(lastKeyPrefixTimer);
-    var returnFocus = trigger || document.activeElement;
-    var documentOrigin = activeOverlay && activeOverlay.documentHref === window.location.href ? activeOverlay : null;
-    if (activeOverlay) {
-      if (activeOverlay.element.contains(returnFocus)) returnFocus = activeOverlay.returnFocus;
-      closeActiveOverlay(false, true);
-    }
-    returnFocus = toolbarFocusReturn(returnFocus);
-    closeToolbarOptions();
-    var overlay = {
-      element: element,
-      kind: kind,
-      returnFocus: returnFocus,
-      role: element.getAttribute('role'),
-      ariaModal: element.getAttribute('aria-modal'),
-      tabIndex: element.getAttribute('tabindex'),
-      inertElements: [],
-      bodyOverflow: document.body.style.overflow,
-      documentOverflow: document.documentElement.style.overflow,
-      documentHref: documentOrigin ? documentOrigin.documentHref : window.location.href,
-      documentX: documentOrigin ? documentOrigin.documentX : window.scrollX,
-      documentY: documentOrigin ? documentOrigin.documentY : window.scrollY,
-      skipDocumentRestore: false
-    };
-    if (kind === 'mobile-nav') {
-      setMobileNavigationState(true);
-      element.setAttribute('role', 'dialog');
-      element.setAttribute('aria-modal', 'true');
-    } else {
-      element.hidden = false;
-    }
-    if (overlay.tabIndex === null) element.setAttribute('tabindex', '-1');
-    // Inert siblings at each level keep the active sheet usable even inside the shell.
-    var current = element;
-    while (current.parentElement) {
-      var siblings = current.parentElement.children;
-      for (var i = 0; i < siblings.length; i++) {
-        var sibling = siblings[i];
-        if (sibling === current || (kind === 'mobile-nav' && sibling.hasAttribute('data-xp-nav-backdrop'))) continue;
-        overlay.inertElements.push({ element: sibling, value: sibling.getAttribute('inert') });
-        sibling.setAttribute('inert', '');
-      }
-      current = current.parentElement;
-      if (current === document.body) break;
-    }
-    document.body.style.overflow = 'hidden';
-    document.documentElement.style.overflow = 'hidden';
-    activeOverlay = overlay;
-    overlay.closing = false;
-    overlay.motion = createShellMotionController(element, kind);
-    if (overlay.motion) overlay.motion.open();
-    focusOverlay(overlay);
-  }
+  ${MOBILE_NAVIGATION_CLIENT_FUNCTIONS}
 
   function toggleCommandPalette(forceOpen, trigger) {
     var modal = document.getElementById('xp-cmdk-modal') || document.querySelector('[data-xp-cmdk]');
@@ -1007,55 +786,6 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
   }
 
   ${COMMAND_PALETTE_CLIENT_FUNCTIONS}
-
-  function toggleMobileNavigation(trigger) {
-    if (window.innerWidth >= 960) return;
-    if (activeOverlay && activeOverlay.kind === 'mobile-nav' && !activeOverlay.closing) {
-      closeActiveOverlay(true);
-      return;
-    }
-    openOverlay(document.querySelector('[data-xp-sidebar]'), 'mobile-nav', trigger);
-  }
-
-  function trapOverlayFocus(event) {
-    var overlay = activeOverlay;
-    var targets = focusableElements(overlay.element);
-    var first = targets[0];
-    var last = targets[targets.length - 1];
-    var focused = document.activeElement;
-    if (!first) {
-      event.preventDefault();
-      overlay.element.focus({ preventScroll: true });
-    } else if (event.shiftKey && (focused === first || focused === overlay.element || !overlay.element.contains(focused))) {
-      event.preventDefault();
-      last.focus({ preventScroll: true });
-    } else if (!event.shiftKey && (focused === last || !overlay.element.contains(focused))) {
-      event.preventDefault();
-      first.focus({ preventScroll: true });
-    }
-  }
-
-  function bindOverlayFocus() {
-    syncResponsiveToolbar();
-    document.addEventListener('focusin', function (event) {
-      lastFocusedElement = event.target;
-      if (activeOverlay && !activeOverlay.element.contains(event.target)) focusOverlay(activeOverlay);
-    });
-    document.addEventListener('focusout', function (event) {
-      if (!event.relatedTarget && isVisibleElement(event.target)) lastFocusedElement = null;
-    });
-    window.addEventListener('resize', function () {
-      syncResponsiveToolbar();
-      if (window.innerWidth >= 960) {
-        if (activeOverlay && activeOverlay.kind === 'mobile-nav') {
-          var focused = responsiveFocusTarget();
-          closeActiveOverlay(false, true);
-          if (!isVisibleElement(focused)) restoreVisibleFocus(focused);
-        }
-        setMobileNavigationState(false);
-      }
-    });
-  }
 
   function showToast(message, level) {
     if (typeof document === 'undefined') return;
@@ -1132,6 +862,9 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     var createAnother = creationWorkspace && creationWorkspace.querySelector('[data-approved-account-create-status] [data-account-create-another]') || form.querySelector('[data-account-create-another]');
     if (!button || !feedback || !password || !plan || !assignment || !ipFeedback || !ipAddress || !ipRefresh) return;
     var busy = false, accepted = false, dirty = false, reviewRequired = false;
+    var operationCache = null;
+    var createOperationCache = (${ACCOUNT_CREATE_OPERATION_BINDING});
+    var creationAcknowledgement = (${ACCOUNT_CREATION_ACKNOWLEDGEMENT_BINDING});
     var canCreate = !button.disabled, wantedAssignment = 'shared', availability = null;
     var previewController = null, previewTimer = null, previewSequence = 0, previewPlan = null, previewOwner;
     var localActions = Array.prototype.map.call(form.querySelectorAll('[data-account-generate-password],[data-account-toggle-password],button[type="reset"]'), function (element) { return { element: element, disabled: element.disabled }; });
@@ -1139,12 +872,12 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       return { element: control, disabled: control.disabled, readOnly: Boolean(control.readOnly) };
     });
     function copy(message, values) { return xpT(message, values); }
-    function status(message, state) {
+    function status(message, state, hostVerified) {
       feedback.textContent = message; feedback.hidden = false;
       feedback.setAttribute('data-state', state);
       feedback.setAttribute('role', state === 'failed' ? 'alert' : 'status');
       var observation = creationWorkspace && creationWorkspace.querySelector('[data-account-creation-observation]');
-      if (observation) observation.textContent = message + ' ' + copy('Individual host task completion has not been observed.');
+      if (observation) observation.textContent = hostVerified ? message : message + ' ' + copy('Individual host task completion has not been observed.');
     }
     function ipStatus(message, state) {
       ipFeedback.textContent = message;
@@ -1277,6 +1010,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     });
     form.addEventListener('reset', function (event) {
       if (busy || accepted || reviewRequired) { event.preventDefault(); return; }
+      try { if (operationCache) operationCache.discard(); }
+      catch (_storageError) { event.preventDefault(); status(copy('Your browser could not retain this request. No changes were sent.'), 'failed'); return; }
       cancelPreview();
       setTimeout(function () { if (!form.isConnected || busy || accepted || reviewRequired) return; dirty = false; wantedAssignment = 'shared'; refreshIpAvailability(); }, 0);
     });
@@ -1287,6 +1022,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         var destination = new URL(createAnother.getAttribute('data-create-route') || '', window.location.origin);
         var choices = { lang: ['en', 'ar'], theme: ['light', 'dark'], density: ['compact', 'comfortable'] };
         if (destination.origin !== window.location.origin || destination.pathname !== '/whm/accounts/new' || destination.hash || Array.from(destination.searchParams.keys()).some(function (key) { return !choices[key] || destination.searchParams.getAll(key).length !== 1 || !choices[key].includes(destination.searchParams.get(key)); })) return;
+        if (!operationCache) return;
+        operationCache.discard();
         window.location.assign(destination.pathname + destination.search);
       } catch (_error) { return; }
     });
@@ -1296,10 +1033,27 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       if (!dirty || accepted) return;
       event.preventDefault(); event.returnValue = '';
     });
+    if (canCreate) {
+      try {
+        operationCache = createOperationCache(window.sessionStorage, form.getAttribute('data-account-create-actor') || '');
+        var retainedOperation = operationCache.read();
+        if (retainedOperation && retainedOperation.phase !== 'no-effects') {
+          accepted = retainedOperation.phase === 'complete'; reviewRequired = !accepted;
+          button.disabled = true; ipRefresh.disabled = true;
+          controls.forEach(function (state) { state.element.disabled = true; });
+          localActions.forEach(function (state) { state.element.disabled = true; });
+          if (createAnother) createAnother.disabled = !accepted;
+          status(accepted ? copy('The previous account request is retained in this tab. Review accounts before starting another request.') : copy('The request could not be verified. Review accounts before retrying.'), accepted ? 'pending' : 'failed');
+        }
+      } catch (_storageError) {
+        canCreate = false; button.disabled = true;
+        status(copy('Your browser could not retain this request. No changes were sent.'), 'failed');
+      }
+    }
     refreshIpAvailability();
     form.addEventListener('submit', function (event) {
       event.preventDefault();
-      if (busy || accepted || reviewRequired || button.disabled || form.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled') || !updateIpSelection() || !form.reportValidity()) return;
+      if (!canCreate || busy || accepted || reviewRequired || button.disabled || form.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled') || !updateIpSelection() || !form.reportValidity()) return;
       if (typeof window.xpanelSessionRequest !== 'function') {
         status(copy('Account creation is unavailable. No changes were made.'), 'failed'); return;
       }
@@ -1317,6 +1071,10 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       if (contactEmail) body.contactEmail = contactEmail;
       var ipv6 = value('ipv6');
       if (ipv6) body.ipv6 = ipv6;
+      try {
+        if (!operationCache) throw new Error('account_request_unavailable');
+        body.idempotencyKey = operationCache.begin(body.username);
+      } catch (_storageError) { status(copy('Your browser could not retain this request. No changes were sent.'), 'failed'); return; }
       var submittedValues = controls.map(function (state) {
         return state.element.name === 'password' ? '' : state.element.value;
       });
@@ -1330,21 +1088,19 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       status(copy('Submitting…'), 'loading');
       var refreshAfterRefusal = false;
       Promise.resolve().then(function () { return window.xpanelSessionRequest('POST', '/api/accounts', body); }).then(function (result) {
-        var execution = result && result.execution;
-        var pendingHost = execution && execution.targetVerified === false && execution.verificationRequired === true;
-        var observedHost = execution && execution.targetVerified === true && execution.verificationRequired === false && execution.hostBinding === 'observed' && execution.observedAddress === result.account.ipv4;
-        if (!result || !result.account || result.account.username !== body.username || (Object.hasOwn(body, 'ownerId') && result.account.ownerId !== body.ownerId) || (Object.hasOwn(body, 'shell') && result.account.shell !== body.shell) || !ipv4(result.account.ipv4) || !result.reconcile || result.reconcile.status !== 'applied' || !execution || execution.status !== 'configuration_applied' || execution.scope !== 'global_configuration' || (!pendingHost && !observedHost)) {
+        var acknowledgement = creationAcknowledgement(result, body);
+        if (!acknowledgement) {
           reviewRequired = true;
           status(copy('The result could not be verified. Review accounts before retrying.'), 'failed'); return;
         }
         accepted = true; dirty = false;
+        try { operationCache.mark('complete'); } catch (_storageError) { /* Keep the original key; a reload conservatively requires review. */ }
         ipAddress.textContent = result.account.ipv4; ipAddress.parentElement.hidden = false;
-        if (observedHost) {
-          ipStatus(copy('This address is on the server.'), 'ready');
-          status(copy('Account created.'), 'pending');
+        ipStatus(copy('This address is reserved in configuration. The server has not confirmed it is listening on the host.'), 'ready');
+        if (acknowledgement === 'verified') {
+          status(copy('Account created.'), 'pending', true);
         } else {
-          ipStatus(copy('This address is reserved in configuration. The server has not confirmed it is listening on the host.'), 'ready');
-          status(copy('Account configuration created. Hosting verification is still required.'), 'pending');
+          status(copy('This request already completed. Current hosting verification is still required.'), 'pending');
         }
       }).catch(function (error) {
         var details = error && error.details || {};
@@ -1356,6 +1112,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           ? copy('The request could not be verified. Review accounts before retrying.')
           : copy('Account creation is unavailable. No changes were made.');
         if (!reviewRequired) {
+          try { operationCache.mark('no-effects'); }
+          catch (_storageError) { reviewRequired = true; message = copy('The request could not be verified. Review accounts before retrying.'); }
           if (error && error.status === 401) message = copy('Your session expired. Sign in again.');
           else if (error && error.status === 403) message = copy('You do not have permission to create accounts.');
           else if (details.reason === 'shared_ipv4_unavailable' || details.reason === 'account_ipv4_unavailable') {
@@ -1484,14 +1242,11 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         }
         accepted = true;
         var row = origin && origin.closest('[data-account-row]');
-        var label = row && row.querySelector('[data-account-status] .xp-badge__label');
-        if (label) label.textContent = copy('Verification required');
-        var badge = row && row.querySelector('[data-account-status] .xp-badge');
-        if (badge) {
-          badge.className = 'xp-badge xp-badge--warn';
-          badge.setAttribute('data-status', 'warn');
-          var icon = badge.querySelector('svg');
-          if (icon) icon.innerHTML = '<path d="M8 2.2L14.4 13.5H1.6L8 2.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.5V9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.6" r="0.85" fill="currentColor"/>';
+        var accountStatus = row && row.querySelector('[data-account-status]');
+        var pendingStatus = row && row.querySelector('template[data-account-status-pending]');
+        if (accountStatus && pendingStatus) {
+          accountStatus.replaceChildren(pendingStatus.content.cloneNode(true));
+          accountStatus.setAttribute('data-state', 'verification-required');
         }
         if (origin) origin.disabled = true;
         status(verb === 'suspend' ? copy('Account suspended. Hosting verification is still required.') : copy('Account restored. Hosting verification is still required.'), 'pending');
@@ -1623,9 +1378,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         e.preventDefault(); closeActiveOverlay(true); return;
       }
       var navigation = e.target && e.target.closest ? e.target.closest('a[href]') : null;
-      if (activeOverlay && navigation && activeOverlay.element.contains(navigation) &&
-          ((activeOverlay.kind === 'cmdk' && navigation.hasAttribute('data-cmdk-item')) ||
-           (activeOverlay.kind === 'mobile-nav' && navigation.hasAttribute('data-nav-route')))) {
+      if (activeOverlay && activeOverlay.kind === 'cmdk' && navigation &&
+          activeOverlay.element.contains(navigation) && navigation.hasAttribute('data-cmdk-item')) {
         // Navigation is never held behind a presentation animation.
         closeActiveOverlay(true, true, true); return;
       }
@@ -1664,16 +1418,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         if (activeOverlay && activeOverlay.kind === 'activity') closeActiveOverlay(true);
         return;
       }
-      if (action === 'toggle-mobile-nav') {
-        e.preventDefault();
-        toggleMobileNavigation(target);
-        return;
-      }
-      if (action === 'close-mobile-nav') {
-        e.preventDefault();
-        if (activeOverlay && activeOverlay.kind === 'mobile-nav') closeActiveOverlay(true);
-        return;
-      }
+
       var apiUrl = target.getAttribute('data-api-url');
       if (action && apiUrl) {
         e.preventDefault();
@@ -1692,13 +1437,16 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
   function bindKeyboardShortcuts() {
     if (typeof document === 'undefined') return;
     document.addEventListener('keydown', function (e) {
-      if (e.isComposing) return;
+      if (e.isComposing || e.defaultPrevented) return;
       // Cmd/Ctrl+K -> Quick-bar Command Palette
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         toggleCommandPalette();
         return;
       }
+
+      // Mobile navigation keys are owned by the shared binding.
+      if (activeOverlay && activeOverlay.kind === 'mobile-nav') return;
 
       if (activeOverlay && e.key === 'Escape') {
         e.preventDefault();
@@ -1764,81 +1512,14 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     });
   }
 
-  function ensurePromptDialog() {
-    var dialog = document.querySelector('[data-xp-prompt]');
-    if (dialog) return dialog;
-    dialog = document.createElement('dialog');
-    dialog.className = 'xp-dialog';
-    dialog.setAttribute('data-xp-prompt', '');
-    var form = document.createElement('form');
-    form.method = 'dialog';
-    form.className = 'xp-form-group';
-    form.innerHTML = '<div class="xp-dialog__header"><h2 data-xp-prompt-title></h2><p data-xp-prompt-body></p></div>' +
-      '<div class="xp-field" data-xp-prompt-field><label class="xp-label" for="xp-prompt-input" data-xp-prompt-label style="padding-inline-start: var(--xp-control-content-inset)"></label>' +
-      '<input id="xp-prompt-input" class="xp-input" data-xp-prompt-input autocomplete="off"></div>' +
-      '<div class="xp-dialog__footer">' +
-      '<button type="button" class="xp-btn" value="cancel" data-xp-prompt-cancel></button>' +
-      '<button type="submit" class="xp-btn xp-btn--primary" value="confirm" data-xp-prompt-confirm></button>' +
-      '</div>';
-    dialog.appendChild(form);
-    document.body.appendChild(dialog);
-    dialog.addEventListener('click', function (event) {
-      if (event.target === dialog) dialog.close('cancel');
-    });
-    dialog.querySelector('[data-xp-prompt-cancel]').addEventListener('click', function () {
-      dialog.close('cancel');
-    });
-    dialog.querySelector('form').addEventListener('submit', function (event) {
-      event.preventDefault();
-      var field = dialog.querySelector('[data-xp-prompt-field]');
-      var input = dialog.querySelector('[data-xp-prompt-input]');
-      var entered = input && typeof input.value === 'string' ? input.value : '';
-      if (!dialog._xpPreserveWhitespace) entered = entered.trim();
-      if (field && !field.hidden && !entered) {
-        input.focus();
-        return;
-      }
-      dialog._xpValue = !field || field.hidden ? true : entered;
-      dialog.close('confirm');
-    });
-    dialog.addEventListener('close', function () {
-      var pending = dialog._xpResolve;
-      dialog._xpResolve = null;
-      if (pending) pending(dialog.returnValue === 'confirm' ? dialog._xpValue : null);
-    });
-    return dialog;
-  }
-
-  function askDialog(options) {
-    var dialog = ensurePromptDialog();
-    dialog.querySelector('[data-xp-prompt-title]').textContent = options.title || '';
-    dialog.querySelector('[data-xp-prompt-body]').textContent = options.body || '';
-    var field = dialog.querySelector('[data-xp-prompt-field]');
-    var input = dialog.querySelector('[data-xp-prompt-input]');
-    var label = dialog.querySelector('[data-xp-prompt-label]');
-    field.hidden = !options.input;
-    label.textContent = options.label || '';
-    input.value = options.value || '';
-    dialog._xpPreserveWhitespace = options.preserveWhitespace === true;
-    input.type = options.secret ? 'password' : 'text';
-    input.required = false;
-    dialog.querySelector('[data-xp-prompt-cancel]').textContent = options.cancel || (xpT('Cancel'));
-    var confirm = dialog.querySelector('[data-xp-prompt-confirm]');
-    confirm.textContent = options.confirm || (xpT('Confirm'));
-    confirm.className = options.danger ? 'xp-btn xp-btn--danger' : 'xp-btn xp-btn--primary';
-    dialog._xpValue = null;
-    return new Promise(function (resolve) {
-      dialog._xpResolve = function (value) {
-        resolve(options.input ? (typeof value === 'string' && value ? value : null) : Boolean(value));
-      };
-      try { dialog.showModal(); }
-      catch (_err) { dialog.setAttribute('open', ''); }
-      var focusTarget = options.input ? input : confirm;
-      if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
-    });
-  }
+  ${clientTemplate.toString()}
+  ${clientTemplateSlot.toString()}
+  ${cloneClientTemplate.toString()}
+  var askDialog = (${PROMPT_CLIENT_BINDING})();
 
   function bindPhaseOneTools() {
+    (${PRESENTATION_TABS_CLIENT_BINDING})();
+    ${ACCOUNT_DETAILS_CLIENT_BINDING};
     ${PASSWORD_GENERATOR_CLIENT_BINDING}
     (${APPROVED_WHM_OPERATIONS_TABS_CLIENT})();
     (${APPROVED_WHM_TABLE_FILTERS_CLIENT})();
@@ -1850,6 +1531,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${ACCOUNT_MAILING_LISTS_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_SPAM_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_SESSIONS_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_PASSWORD_CLIENT_BINDING})();
+    (${ACCOUNT_API_TOKENS_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_SSL_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_CONTACT_CLIENT_BINDING})(askDialog, rtl);
     (${ACCOUNT_BACKUP_CLIENT_BINDING})(askDialog);
@@ -2073,7 +1756,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         window.xpanelSessionRequest('PATCH', '/api/accounts/' + form.getAttribute('data-account-id'), { contactEmail: form.querySelector('[name="contactEmail"]').value.trim() }).then(reload).catch(function (error) { note(status, failText(error)); });
       });
     });
-    document.querySelectorAll('[data-account-password-form]').forEach(function (form) {
+    document.querySelectorAll('form[data-account-password-form][data-account-id]').forEach(function (form) {
       form.addEventListener('submit', function (event) {
         event.preventDefault();
         var status = form.querySelector('[data-account-password-status]');
@@ -2186,6 +1869,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       });
     });
     (${FILE_WORKSPACE_CLIENT_BINDING})(askDialog);
+    (${HOME_TOOLS_CLIENT_BINDING})();
     ${MAIL_SEND_CLIENT_BINDING}
     document.querySelectorAll('[data-reseller-create-form]').forEach(function (form) {
       form.addEventListener('submit', function (event) {
@@ -2242,6 +1926,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${WHM_DATABASES_CLIENT_BINDING})(askDialog);
     (${WHM_DATABASE_TUNING_CLIENT_BINDING})();
     (${WHM_PREFERENCES_CLIENT_BINDING})();
+    (${UI_THEME_CLIENT_BINDING})();
     (${WHM_PANEL_SETTINGS_CLIENT_BINDING})(askDialog);
     (${WHM_PANEL_BRANDING_CLIENT_BINDING})(askDialog);
     (${WHM_LANGUAGES_CLIENT_BINDING})(askDialog);
@@ -2299,53 +1984,14 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${WHM_SERVER_INFO_CLIENT_BINDING})();
     (${WHM_IPS_CLIENT_BINDING})(askDialog);
     (${WHM_PANEL_DATA_CLIENT_BINDING})(askDialog);
-    var backupRoot = document.querySelector('[data-account-backups]');
-    if (backupRoot) {
-      var backupAccount = backupRoot.querySelector('[data-backup-account]');
-      var backupFiles = backupRoot.querySelector('[data-backup-files]');
-      var backupStatus = backupRoot.querySelector('[data-backup-status]');
-      function loadBackups() {
-        if (!backupAccount.value) { backupFiles.textContent = ''; return Promise.resolve(); }
-        return window.xpanelSessionRequest('GET', '${xwhmPageAdapters.backups.listPrefix}' + backupAccount.value).then(function (data) {
-          backupFiles.textContent = '';
-          (data.backups || []).forEach(function (item) {
-            var row = document.createElement('tr');
-            var name = document.createElement('td');
-            name.textContent = item.file;
-            var size = document.createElement('td');
-            size.textContent = String(item.bytes);
-            var action = document.createElement('td');
-            var button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'xp-btn';
-            button.textContent = xpT('Restore');
-            button.addEventListener('click', function () {
-              button.disabled = true;
-              note(backupStatus, xpT('Restoring.'));
-              window.xpanelSessionRequest('${xwhmPageAdapters.backups.create.method}', '${xwhmPageAdapters.backups.create.path}' + backupAccount.value, { op: 'restore', file: item.file }).then(function () { button.disabled = false; note(backupStatus, xpT('The backup was restored.')); }).catch(function (error) { button.disabled = false; note(backupStatus, failText(error)); });
-            });
-            action.appendChild(button);
-            row.appendChild(name);
-            row.appendChild(size);
-            row.appendChild(action);
-            backupFiles.appendChild(row);
-          });
-        }).catch(function (error) { note(backupStatus, failText(error)); });
-      }
-      backupAccount.addEventListener('change', loadBackups);
-      backupRoot.querySelector('[data-backup-create]').addEventListener('click', function () {
-        note(backupStatus, xpT('Creating the backup. This can take a while.'));
-        window.xpanelSessionRequest('${xwhmPageAdapters.backups.create.method}', '${xwhmPageAdapters.backups.create.path}' + backupAccount.value, { op: 'create' }).then(function () { note(backupStatus, xpT('The backup job started at low priority. Read the list again when it finishes.')); return loadBackups(); }).catch(function (error) { note(backupStatus, failText(error)); });
-      });
-      loadBackups();
-    }
+    (${WHM_LOCAL_ARCHIVES_CLIENT_BINDING})();
   }
 
   if (typeof window !== 'undefined') {
     window.xpanelApiCall = xpanelApiCall;
     window.xpanelShowToast = showToast;
     window.xpanelSwitchView = switchTabOrView;
-    bindOverlayFocus();
+    bindMobileNavigation();
     bindCommandPalette();
     bindKeyboardShortcuts();
     bindInteractiveClientActions();

@@ -1,3 +1,4 @@
+import { classicWhmClientTemplates } from './whm-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -23,7 +24,7 @@ export function renderWhmPanelNotificationsWorkspace(input: { locale: Locale; ca
   const container = input.canManage ? 'form' : 'div'
   const fact = (key: string, label: string, initial: string): string => `<div class="xp-whm-detail-field"><dt>${label}</dt><dd data-whm-notifications-field="${key}">${initial}</dd></div>`
   const events = Object.entries(PANEL_NOTIFICATION_EVENT_LABELS).map(([key, label]) => `<label class="xp-whm-detail-choice"><input type="checkbox" name="events" value="${key}" data-whm-notifications-event${disabled}><span><span>${t(label)}</span><bdi dir="ltr" class="xp-help">${key}</bdi></span></label>`).join('')
-  return `${styles}<section class="xp-whm-detail xp-whm-notifications" data-whm-detail-route="/whm/panel/notifications" data-whm-panel-notifications-workspace data-notifications-can-manage="${input.canManage}" data-capability-state="${input.canManage ? 'authorized' : 'unavailable'}" lang="${input.locale}" dir="${localeDirection(input.locale)}">
+  return `${styles}<section class="xp-whm-detail xp-whm-notifications" data-whm-detail-route="/whm/panel/notifications" data-whm-panel-notifications-workspace data-notifications-can-manage="${input.canManage}" data-capability-state="${input.canManage ? 'authorized' : 'unavailable'}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${classicWhmClientTemplates('notifications')}
   <header class="xp-whm-detail-heading"><h1>${t('Notifications')}</h1><p>${t('Who should hear about host events, and which events. Monitoring alerts are sent by email and to a signed webhook; the other events are not sent yet.')}</p></header>
   <div class="xp-whm-detail-column">
     <section class="xp-whm-detail-card" data-whm-detail-section="notifications-delivery" aria-labelledby="whm-notifications-delivery-heading">

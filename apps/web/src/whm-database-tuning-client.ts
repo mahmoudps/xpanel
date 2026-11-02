@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -64,6 +68,8 @@ export function bindWhmDatabaseTuning(root: HTMLElement, send: ((method: string,
   const readNode = root.querySelector<HTMLButtonElement>('[data-db-tuning-read]'), feedbackNode = root.querySelector<HTMLElement>('[data-db-tuning-status]'), planNode = root.querySelector<HTMLElement>('[data-db-tuning-plan]')
   const variableRowsNode = root.querySelector<HTMLElement>('[data-db-tuning-rows="variables"]'), statusRowsNode = root.querySelector<HTMLElement>('[data-db-tuning-rows="status"]')
   if (!readNode || !feedbackNode || !planNode || !variableRowsNode || !statusRowsNode) return
+  const rowTemplate=clientTemplate(root,'db-tuning-row'),checkTemplate=clientTemplate(root,'db-tuning-check'),evidenceTemplate=clientTemplate(root,'db-tuning-evidence')
+  cloneClientTemplate(rowTemplate,'tr',['name','value']);cloneClientTemplate(checkTemplate,'article',['title','state','description','evidence']);cloneClientTemplate(evidenceTemplate,'div',['name','value'])
   const read = readNode, feedback = feedbackNode, plan = planNode, variableRows = variableRowsNode, statusRows = statusRowsNode
   let busy = false
   const eligible = (): boolean => root.isConnected && root.dataset.canRead === 'true' && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
@@ -71,7 +77,7 @@ export function bindWhmDatabaseTuning(root: HTMLElement, send: ((method: string,
   const text = (value: number | string | null): HTMLElement => { const node = document.createElement(value === null ? 'span' : 'bdi'); if (value !== null) node.dir = 'ltr'; node.textContent = value === null ? t(msgctxt('whm-database-tuning-client', 'Not observed')) : String(value); return node }
   const fill = (body: HTMLElement, names: readonly string[], values: Record<string, number | string> | null): void => {
     body.replaceChildren()
-    for (const name of names) { const row = document.createElement('tr'), label = document.createElement('th'), value = document.createElement('td'); label.scope = 'row'; label.append(text(name)); value.append(text(values?.[name] ?? null)); row.append(label, value); body.append(row) }
+    for(const name of names){const row=cloneClientTemplate(rowTemplate,'tr',['name','value']);clientTemplateSlot(row,'name').textContent=name;clientTemplateSlot(row,'value').replaceChildren(text(values?.[name]??null));body.append(row)}
   }
   const titles: Record<string, string> = { connections: msgid('Connection capacity'), 'buffer-pool': msgid('InnoDB buffer pool'), 'temporary-tables': msgid('Temporary tables'), 'slow-log': msgid('Slow query logging'), 'table-cache': msgid('Table cache'), 'thread-cache': msgid('Thread cache') }
   const next: Record<string, string> = {
@@ -87,11 +93,10 @@ export function bindWhmDatabaseTuning(root: HTMLElement, send: ((method: string,
     for (const name of ['version', 'observedAt', 'Uptime', 'Uptime_since_flush_status']) { const node = root.querySelector<HTMLElement>('[data-db-tuning-fact="' + name + '"]'); node?.replaceChildren(text(name === 'version' ? view.version : name === 'observedAt' ? view.observedAt === null ? null : formatDisplayDateTime(view.observedAt) : view.status?.[name] ?? null)) }
     fill(variableRows, DB_TUNING_VARIABLES, view.variables); fill(statusRows, DB_TUNING_STATUS, view.status); plan.replaceChildren()
     for (const check of view.plan.checks) {
-      const group = document.createElement('article'), heading = document.createElement('div'), title = document.createElement('h3'), badge = document.createElement('span'), description = document.createElement('p'), evidence = document.createElement('dl')
-      group.className = 'xp-db-tuning__check'; group.dataset.check = check.id; heading.className = 'xp-db-tuning__check-heading'; title.textContent = t(titles[check.id]!)
-      badge.className = 'xp-badge'; badge.textContent = check.state === 'review' ? t(msgctxt('whm-database-tuning-client', 'Review')) : check.state === 'observe' ? t('Collect samples') : t('Unavailable')
-      heading.append(title, badge); description.className = 'xp-help'; description.textContent = t(next[check.next]!); group.append(heading, description)
-      if (check.evidence.length) { evidence.className = 'xp-whm-detail-fields'; for (const item of check.evidence) { const field = document.createElement('div'), label = document.createElement('dt'), value = document.createElement('dd'); field.className = 'xp-whm-detail-field'; label.append(text(item.name)); value.append(text(item.value)); field.append(label, value); evidence.append(field) }; group.append(evidence) }
+      const group=cloneClientTemplate(checkTemplate,'article',['title','state','description','evidence']);group.dataset.check=check.id;group.dataset.state=check.state
+      clientTemplateSlot(group,'title','h3').textContent=t(titles[check.id]!);clientTemplateSlot(group,'state').textContent=check.state==='review'?t(msgctxt('whm-database-tuning-client','Review')):check.state==='observe'?t('Collect samples'):t('Unavailable')
+      clientTemplateSlot(group,'description','p').textContent=t(next[check.next]!);const evidence=clientTemplateSlot(group,'evidence','dl');evidence.hidden=!check.evidence.length
+      for(const item of check.evidence){const field=cloneClientTemplate(evidenceTemplate,'div',['name','value']);clientTemplateSlot(field,'name').replaceChildren(text(item.name));clientTemplateSlot(field,'value').replaceChildren(text(item.value));evidence.append(field)}
       plan.append(group)
     }
     note(view.state, view.state === 'read' ? t('MariaDB observations and the advisory plan were read. No settings were changed.') : view.state === 'partial' ? t('Some observations are unavailable. Review only the evidence shown; no settings were changed.') : t('MariaDB observations are unavailable. No settings were changed.'))
@@ -113,4 +118,4 @@ function bindWhmDatabaseTuningPage(): void {
   const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
   document.querySelectorAll<HTMLElement>('[data-whm-database-tuning]').forEach(root => bindWhmDatabaseTuning(root, send))
 }
-export const WHM_DATABASE_TUNING_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const DB_TUNING_VARIABLES=${JSON.stringify(DB_TUNING_VARIABLES)};const DB_TUNING_STATUS=${JSON.stringify(DB_TUNING_STATUS)};const DB_TUNING_CHECKS=${JSON.stringify(DB_TUNING_CHECKS)};const DB_TUNING_NEXT=${JSON.stringify(DB_TUNING_NEXT)};const readDatabaseTuningView=${readDatabaseTuningView.toString()};const bindWhmDatabaseTuning=${bindWhmDatabaseTuning.toString()};return ${bindWhmDatabaseTuningPage.toString()};})()`
+export const WHM_DATABASE_TUNING_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const DB_TUNING_VARIABLES=${JSON.stringify(DB_TUNING_VARIABLES)};const DB_TUNING_STATUS=${JSON.stringify(DB_TUNING_STATUS)};const DB_TUNING_CHECKS=${JSON.stringify(DB_TUNING_CHECKS)};const DB_TUNING_NEXT=${JSON.stringify(DB_TUNING_NEXT)};const readDatabaseTuningView=${readDatabaseTuningView.toString()};const bindWhmDatabaseTuning=${bindWhmDatabaseTuning.toString()};return ${bindWhmDatabaseTuningPage.toString()};})()`

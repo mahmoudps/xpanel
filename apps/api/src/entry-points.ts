@@ -35,6 +35,15 @@ const administratorFamilies = /^\/api\/(?:server|setup|jobs|feature-lists|plans|
 /** Listener confinement is additional to, and never a replacement for, route RBAC and ownership checks. */
 export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: string, method: string): boolean => {
   if (method === 'GET' && pathname === '/api/health') return true
+  if (pathname === '/api/auth/ui-preferences') return method === 'GET' || method === 'PUT'
+  // Personal account credentials are confined to the owner listener; route RBAC still authorizes each call.
+  if (pathname === '/api/auth/sessions') return entryPoint === 'xpanel' && method === 'GET'
+  if (pathname === '/api/auth/sessions/revoke-others') return entryPoint === 'xpanel' && method === 'POST'
+  if (/^\/api\/auth\/sessions\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pathname)) return entryPoint === 'xpanel' && method === 'DELETE'
+  if (pathname === '/api/auth/api-tokens') return entryPoint === 'xpanel' && (method === 'GET' || method === 'POST')
+  if (pathname === '/api/auth/api-tokens/revoke') return entryPoint === 'xpanel' && method === 'POST'
+  if (/^\/api\/auth\/api-tokens\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(pathname)) return entryPoint === 'xpanel' && method === 'PATCH'
+  if (/^\/api\/auth\/api-tokens\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/revoke$/.test(pathname)) return entryPoint === 'xpanel' && method === 'POST'
   if (pathname.startsWith('/api/auth/')) return authRoutes.has(pathname.slice('/api/auth/'.length))
   // Each listener issues handoffs only toward the one panel it may open.
   if (pathname === '/api/handoff/xpanel') return entryPoint === 'xwhm' && method === 'POST'

@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -58,9 +62,8 @@ function bindMailxArchive(askDialog: Ask | undefined): void {
       refresh.disabled = busy || !admitted(); save.disabled = busy || !admitted() || !view
       body.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = busy || !admitted() || control.dataset.locked === 'true' })
     }
-    const technical = (value: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; return bdi }
-    const cell = (row: HTMLTableRowElement, content: Node | string): HTMLTableCellElement => { const td = document.createElement('td'); td.append(content); row.append(td); return td }
-    const labelled = (control: HTMLElement, label: string): HTMLElement => { control.setAttribute('aria-label', label); return control }
+    try { cloneClientTemplate(clientTemplate(root, 'mailx-archive-row'), 'tr', ['domain', 'mailbox', 'incoming', 'outgoing', 'days', 'state', 'retention']); cloneClientTemplate(clientTemplate(root, 'mailx-archive-empty'), 'tr', ['message']); const probe = cloneClientTemplate(clientTemplate(root, 'mailx-archive-row'), 'tr', ['domain', 'mailbox', 'incoming', 'outgoing', 'days', 'state', 'retention']); for (const [slot, tag] of [['domain', 'bdi'], ['mailbox', 'select'], ['incoming', 'input'], ['outgoing', 'input'], ['days', 'input'], ['retention', 'button']] as const) clientTemplateSlot(probe, slot, tag) }
+    catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); note(status, 'unavailable', t('The email archive is unavailable here. Nothing was read.')); return }
     const admissions: Record<string, string> = { eligible: t('Ready'), 'account-inactive': t('Account is not active'), 'domain-missing': t('Domain no longer exists'), 'mailbox-missing': t('Mailbox no longer exists') }
     const paint = (next: MailxArchiveView): void => {
       view = next
@@ -70,27 +73,23 @@ function bindMailxArchive(askDialog: Ask | undefined): void {
       fact('observed-at', next.observedAt === null ? t('Not read') : formatArchiveDateTime(next.observedAt))
       fact('updated', next.updatedAt === null ? t('Never') : formatArchiveDateTime(next.updatedAt))
       body.textContent = ''
-      if (!next.choices.length) { const row = document.createElement('tr'); cell(row, t('This account has no domains.')).colSpan = 7; body.append(row) }
+      if (!next.choices.length) { const row = cloneClientTemplate(clientTemplate(root, 'mailx-archive-empty'), 'tr', ['message']); clientTemplateSlot(row, 'message').textContent = t('This account has no domains.'); body.append(row) }
       for (const choice of next.choices) {
         const saved = next.policy.domains.find(item => item.domain === choice.domain), info = next.rows.find(item => item.domain === choice.domain)
-        const row = document.createElement('tr'); row.dataset.domain = choice.domain
-        const head = document.createElement('th'); head.scope = 'row'; head.append(technical(choice.domain)); row.append(head)
-        const select = document.createElement('select'); select.className = 'xp-input'; select.dataset.archiveMailbox = ''
-        const none = document.createElement('option'); none.value = ''; none.textContent = choice.mailboxes.length ? t('Choose a mailbox') : t('No mailbox on this domain'); select.append(none)
-        for (const mailbox of choice.mailboxes) { const option = document.createElement('option'); option.value = mailbox; option.textContent = mailbox; option.dir = 'ltr'; select.append(option) }
-        select.value = saved?.mailbox ?? ''
-        cell(row, labelled(select, t('Archive mailbox for {domain}', { domain: choice.domain })))
+        const row = cloneClientTemplate(clientTemplate(root, 'mailx-archive-row'), 'tr', ['domain', 'mailbox', 'incoming', 'outgoing', 'days', 'state', 'retention']); row.dataset.domain = choice.domain
+        clientTemplateSlot(row, 'domain', 'bdi').textContent = choice.domain
+        const select = clientTemplateSlot(row, 'mailbox', 'select') as HTMLSelectElement
+        select.replaceChildren(new Option(choice.mailboxes.length ? t('Choose a mailbox') : t('No mailbox on this domain'), ''), ...choice.mailboxes.map(mailbox => { const option = new Option(mailbox, mailbox); option.dir = 'ltr'; return option }))
+        select.value = saved?.mailbox ?? ''; select.setAttribute('aria-label', t('Archive mailbox for {domain}', { domain: choice.domain }))
         for (const [key, label] of [['incoming', t('Archive incoming mail for {domain}', { domain: choice.domain })], ['outgoing', t('Archive outgoing mail for {domain}', { domain: choice.domain })]] as const) {
-          const box = document.createElement('input'); box.type = 'checkbox'; box.dataset.archiveDirection = key; box.checked = saved?.[key] === true; cell(row, labelled(box, label))
+          const box = clientTemplateSlot(row, key, 'input') as HTMLInputElement; box.checked = saved?.[key] === true; box.setAttribute('aria-label', label)
         }
-        const days = document.createElement('input'); days.type = 'number'; days.className = 'xp-input'; days.min = '0'; days.max = '3650'; days.step = '1'; days.inputMode = 'numeric'; days.dir = 'ltr'; days.dataset.archiveDays = ''; days.value = String(saved?.retentionDays ?? 0)
-        cell(row, labelled(days, t('Days to keep archived mail for {domain}', { domain: choice.domain })))
+        const days = clientTemplateSlot(row, 'days', 'input') as HTMLInputElement; days.value = String(saved?.retentionDays ?? 0); days.setAttribute('aria-label', t('Days to keep archived mail for {domain}', { domain: choice.domain }))
         const conflicts = info?.conflicts.length ? t('A server copy rule already covers this domain, so part of its archive is not applied.') : ''
-        cell(row, !saved ? t('Not archived') : conflicts || (info?.admission ? admissions[info.admission]! : t('Not verified')))
-        const run = document.createElement('button'); run.type = 'button'; run.className = 'xp-btn'; run.textContent = t('Run retention now')
+        clientTemplateSlot(row, 'state').textContent = !saved ? t('Not archived') : conflicts || (info?.admission ? admissions[info.admission]! : t('Not verified'))
+        const run = clientTemplateSlot(row, 'retention', 'button') as HTMLButtonElement; run.textContent = t('Run retention now')
         run.dataset.locked = String(!saved || saved.retentionDays === 0 || !next.retentionJobs || info?.admission !== 'eligible')
         run.addEventListener('click', () => { void retention(choice.domain, saved?.mailbox ?? '', saved?.retentionDays ?? 0) })
-        cell(row, run)
         body.append(row)
       }
       if (next.host !== 'connected') note(status, 'unavailable', next.host === 'not-connected' ? t('No protected host agent is connected. The saved archive is shown without a host observation.') : t('The host observation could not be verified. The saved archive is shown without it.'))
@@ -147,4 +146,4 @@ function bindMailxArchive(askDialog: Ask | undefined): void {
   })
 }
 
-export const MAILX_ARCHIVE_CLIENT_BINDING = `(()=>{const formatArchiveDateTime=${DISPLAY_DATETIME_BINDING};const readMailxArchiveView=${readMailxArchiveView.toString()};return ${bindMailxArchive.toString()};})()`
+export const MAILX_ARCHIVE_CLIENT_BINDING = `(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatArchiveDateTime=${DISPLAY_DATETIME_BINDING};const readMailxArchiveView=${readMailxArchiveView.toString()};return ${bindMailxArchive.toString()};})()`

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createTestDb } from '@xpanel/db'
-import { createTestStateStore } from '@xpanel/state'
+import { createTestStateStore, setStateOwnershipDepsForTests } from '@xpanel/state'
 import { classifyCliInvocation } from './cli-privilege.ts'
 import { createApiApp } from './server.ts'
 import { assertStateWritable } from './state-access.ts'
@@ -41,6 +41,11 @@ describe('phase-1 write repair', () => {
     const errors: unknown[][] = []
     const spy = vi.spyOn(console, 'error').mockImplementation((...args) => { errors.push(args) })
     try {
+      // Keep this isolated logging fixture writable by the process executing it.
+      const fixtureOwner = typeof process.getuid === 'function' && typeof process.getgid === 'function'
+        ? { uid: process.getuid(), gid: process.getgid() } : null
+      setStateOwnershipDepsForTests({ lookup: name => name === 'xpanel' ? fixtureOwner : null })
+      await expect(state.store.getWriterLock().waitForUnlocked()).resolves.toBeUndefined()
       const app = createApiApp({
         serverSecret: TEST_SERVER_SECRET,
         db: database.db,
@@ -55,6 +60,7 @@ describe('phase-1 write repair', () => {
       expect(JSON.stringify(body)).not.toContain(secret)
       expect(errors.some(line => String(line[0]).includes('GET /whm/accounts') && String(line[0]).includes(secret))).toBe(true)
     } finally {
+      setStateOwnershipDepsForTests(null)
       spy.mockRestore()
       await state.close()
       await database.close()

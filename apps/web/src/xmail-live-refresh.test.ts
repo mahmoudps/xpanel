@@ -43,7 +43,7 @@ const documentFor = (locale: 'en' | 'ar', fresh = false, moved = false, empty = 
 const emit = (page: Page, kind = 'mail.changed', target = mailbox) => page.evaluate(({ kind, target }) => { (window as unknown as FixtureWindow).fixtureEmit(kind, target) }, { kind, target })
 
 describe('current xMail board live invalidation', () => {
-  it('refreshes actual rendered boards without writes and preserves current interaction state', async context => {
+  it('refreshes actual rendered boards without writes and preserves current interaction state', { tags: ['slow', 'journey'] }, async context => {
     const executablePath = [process.env.CHROME_PATH, chromium.executablePath()].find(path => path && existsSync(path))
     if (!executablePath) {
       if (process.env.XPANEL_REQUIRE_BROWSER_TESTS === '1') throw new Error('Real Chromium is required for this CI inbox contract; browser proof is unproved.')

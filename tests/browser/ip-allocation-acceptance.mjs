@@ -9,6 +9,7 @@ import { defaultPlan } from '../../packages/core/src/index.ts'
 import { renderWebApp, serveStaticAsset } from '../../apps/web/src/app.ts'
 import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/source-snapshot.mjs'
 import { assertAppliedFont } from './applied-font-contract.mjs'
+import { verifiedAccountCreateReceipt } from './account-create-receipt.mjs'
 
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const creationFieldContract = [
@@ -94,7 +95,7 @@ async function fixture() {
         if (scenario === 'malformed-ack') { res.statusCode = 201; res.end(JSON.stringify({ account: { username: body.username, ipv4: sharedAddress }, reconcile: { status: 'applied' } })); return }
         const ipv4 = body.ipAssignment.mode === 'shared' ? sharedAddress : body.ipAssignment.poolId === ids.second ? '192.0.2.22' : '192.0.2.21'
         res.statusCode = 201
-        res.end(JSON.stringify({ account: { id: '50000000-0000-4000-8000-000000000001', username: body.username, ipv4, ownerId: body.ownerId ?? null, shell: body.shell ?? plans.find(plan => plan.id === body.planId)?.shell }, reconcile: { status: 'applied' }, execution: { status: 'configuration_applied', scope: 'global_configuration', targetVerified: false, verificationRequired: true } }))
+        res.end(JSON.stringify(verifiedAccountCreateReceipt(body, { uid: 20001, gid: 20001, home: '/home/' + body.username, ownerId: body.ownerId ?? null, shell: body.shell ?? plans.find(plan => plan.id === body.planId)?.shell, ipv4 })))
         return
       }
       const locale = url.searchParams.get('lang') === 'ar' ? 'ar' : 'en', theme = url.searchParams.get('theme') === 'dark' ? 'dark' : 'light'
@@ -142,7 +143,8 @@ try {
       const selector = page.locator('#new-acc-ipv4'), submit = page.locator('[data-create-account-form] button[type="submit"]'), feedback = page.locator('[data-account-ip-status]')
       if (state.kind === 'read-only') {
         await expect(page.locator('[data-create-account-form]')).toHaveCount(0)
-        assert.equal(host.requests.slice(start).length, 0)
+        // Shell-level personal reads (interface preferences) are outside this check; no IP inventory or create request may start.
+        assert.equal(host.requests.slice(start).filter(request => request.fixtureError || ['/api/ips', '/api/accounts'].includes(request.path)).length, 0)
         result.observations.push({ createFormAbsentWithoutPermission: true, ipInventoryRequests: 0 })
       } else {
       assert.equal(await selector.evaluate(element => element.tagName), 'SELECT')

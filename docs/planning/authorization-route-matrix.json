@@ -89,6 +89,34 @@
       "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized"
     },
     {
+      "method": "GET",
+      "path": "/api/auth/ui-preferences",
+      "sample": "/api/auth/ui-preferences",
+      "surface": "api",
+      "resource": "auth",
+      "requiredScope": "auth:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "current interactive session + configured listener; team member/account/owner tuple or current sealed mailbox account/service-user/address lifetime; no request selectors or bearer credentials",
+      "allowedPrincipals": ["root", "reseller", "user", "mailbox", "team"],
+      "listeners": ["xpanel", "xwhm", "xmail"],
+      "enforcementPoint": "apps/api/src/server.ts:requireCaller + apps/api/src/ui-preferences.ts:handleUiPreferencesRoute"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/auth/ui-preferences",
+      "sample": "/api/auth/ui-preferences",
+      "surface": "api",
+      "resource": "auth",
+      "requiredScope": "auth:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "fresh current interactive identity + configured listener, sealed mailbox lifetime or actual team member; CSRF/Origin + revision + writer fence/readback; handed-off writes denied",
+      "allowedPrincipals": ["root", "reseller", "user", "mailbox", "team"],
+      "listeners": ["xpanel", "xwhm", "xmail"],
+      "enforcementPoint": "apps/api/src/server.ts:requireCaller + apps/api/src/ui-preferences.ts:handleUiPreferencesRoute"
+    },
+    {
       "method": "POST",
       "path": "/api/auth/change-password",
       "surface": "api",

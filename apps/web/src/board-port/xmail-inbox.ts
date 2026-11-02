@@ -1,3 +1,4 @@
+import { classicMailClientTemplates, CLASSIC_MAIL_FOLDER_STATE_CSS } from './mail-client-templates.ts'
 import { LOCALES, localeDirection, translator, type Locale } from '../i18n.ts'
 import { DISPLAY_DATETIME_BINDING, escapeHtml, renderAsyncActionState, type AsyncActionBannerProps } from '../tokens.ts'
 import { renderLiveUpdatesIndicator, renderPageSearchButton, renderMobileNavToggle, renderMobileNavClose, renderMobileNavBackdrop } from '../shell.ts'
@@ -153,7 +154,7 @@ const fullDate = (datetime: string): string => formatMailStamp(datetime).full
 
 const ATTACHMENTS = msgid('{count, plural, one {{count} attachment} other {{count} attachments}}')
 
-const messageRow = (card: MailCard, selected: boolean, locale: Locale): string => {
+const messageRow = (card: MailCard, selected: boolean, locale: Locale, includeAttachmentIcon = false): string => {
   const rtl = localeDirection(locale) === 'rtl'
   const unread = card.unread
   const weight = unread ? '600' : '400'
@@ -166,7 +167,7 @@ const messageRow = (card: MailCard, selected: boolean, locale: Locale): string =
   const attachLabel = translator(locale)(ATTACHMENTS, { count: attach })
   const aria = `${unread ? unreadLabel + ' ' : ''}${card.fromName}. ${card.subject}. ${card.time}${attach ? `. ${attachLabel}` : ''}`
   const uid = card.uid !== undefined ? ` data-mail-uid="${card.uid}"` : ''
-  const icon = attach ? ICONS.attach : ''
+  const icon = attach || includeAttachmentIcon ? ICONS.attach : ''
   return `<li style="border-bottom: 1px solid light-dark(#EEF0F3,var(--xp-border))"><button type="button" data-mail-open="${escapeHtml(card.id)}" data-unread="${unread ? 'true' : 'false'}" data-attach="${attach > 0 ? '1' : '0'}" data-search="${escapeHtml(`${card.fromName} ${card.fromAddr} ${card.subject} ${card.snippet}`)}"${uid} aria-current="${selected ? 'true' : 'false'}" aria-label="${escapeHtml(aria)}" style="width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; display: flex; gap: 10px; padding: 12px 16px; border: none; background: ${bg}; box-shadow: ${bar}; text-align: start; font-family: inherit; color: light-dark(#101828,var(--xp-text-primary)); cursor: pointer"><span aria-hidden="true" data-mail-dot="true" style="flex: none; width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: ${dot}"></span><span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0"><span data-mail-name="true" style="min-width: 0; font-size: 14px; font-weight: ${weight}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">${tech(card.fromName, rtl)}</span><span data-mail-time="true" style="flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: ${weight}; color: ${timeColor}; font-variant-numeric: tabular-nums">${icon}<time datetime="${escapeHtml(card.datetime)}">${tech(card.time, rtl)}</time></span></span><span data-mail-subject="true" style="min-width: 0; font-size: 14px; font-weight: ${weight}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis"><bdi dir="auto">${escapeHtml(card.subject)}</bdi></span><span data-mail-preview style="min-width: 0; font-size: 13px; color: light-dark(#475467,var(--xp-text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis"><bdi dir="auto">${escapeHtml(card.snippet)}</bdi></span></span></button></li>`
 }
 
@@ -875,14 +876,14 @@ export const renderInbox = (model: InboxModel): string => {
   const unreadTail = / · (\d+) [^·]+$/.exec(model.countText)
   const countTail = unreadTail && [`${unreadTail[1]} unread`, translator(model.locale)('{count} unread', { count: Number(unreadTail[1]) })].some(tail => unreadTail[0] === ' · ' + tail) ? unreadTail[0] : ''
   const templateCard: MailCard = { id: 'folder-current', uid: 1, fromName: '', fromAddr: '', to: '', cc: ' ', subject: '', snippet: '', time: '', datetime: '', unread: false, auth: '', attachments: [{ name: '', ext: '', size: '' }], blocks: [block('')] }
-  const workspaceTemplates = model.folderWorkspace ? `<template data-mail-folder-row-template>${messageRow(templateCard, false, model.locale)}</template><template data-mail-folder-reading-template>${readingInner(templateCard, model)}</template>` : ''
+  const workspaceTemplates = model.folderWorkspace ? `${classicMailClientTemplates('folder-workspace')}<template data-mail-folder-row-template data-xp-template="mail-folder-message-row">${messageRow(templateCard, false, model.locale, true)}</template><template data-mail-folder-reading-template data-xp-template="mail-folder-message-reading"><div class="xp-mail-reading-fragment">${readingInner(templateCard, model)}</div></template>` : ''
   const listNote = model.listState === 'failed'
     ? (translator(model.locale)('The mail server could not be read.'))
     : model.listState === 'unread'
       ? (translator(model.locale)('The inbox has not been read from the mail server.'))
       : ''
   return `<div class="xp-board-port xp-shell" data-board-port="xmail-inbox" data-surface="xmail" data-mail-layout="reference" data-product="${model.product ? 'true' : 'false'}"${model.folderWorkspace ? ' data-mail-folder-workspace="true"' : ''} data-mail-folder="${escapeHtml(model.activeFolder)}" data-pager-range="${escapeHtml(translator(model.locale)('1\u2013{shown} of {total}'))}" data-pager-latest="${escapeHtml(translator(model.locale)('{shown} of the latest {loaded}'))}" data-mailbox="${escapeHtml(model.mailbox)}" data-locale="${model.locale}" data-list-state="${model.listState}" data-body-failed="${escapeHtml(translator(model.locale)('The message body could not be read.'))}" data-move-targets="${escapeHtml(JSON.stringify(model.moveTargets))}" data-move-label="${escapeHtml(copy.moveLabel)}" data-empty-title="${escapeHtml(copy.emptyTitle)}" data-empty-body="${escapeHtml(copy.emptyBody)}" data-empty-clear="${escapeHtml(copy.emptyClear)}" data-undo-label="${escapeHtml(copy.undo)}" data-moved-message="${escapeHtml(copy.moved)}" data-trash-label="${escapeHtml(translator(model.locale)(msgctxt('xmail-inbox', 'Trash')))}" data-trash-confirm="${escapeHtml(translator(model.locale)('Delete this message permanently?'))}" data-deleted-label="${escapeHtml(translator(model.locale)(msgctxt('xmail-inbox', 'Deleted')))}" data-move-failed="${escapeHtml(translator(model.locale)('The message could not be moved.'))}"${rtl ? ' dir="rtl"' : ''} style="min-height: 100vh; display: flex; flex-direction: column; background: light-dark(#F5F6F8,var(--xp-bg-canvas)); font-family: ${font}; color: light-dark(#101828,var(--xp-text-primary))">
-<style>${PORT_CSS}</style>
+<style>${PORT_CSS}${CLASSIC_MAIL_FOLDER_STATE_CSS}</style>
 <a class="xp-skip-link" href="#main-content">${translator(model.locale)('Skip to content')}</a>
 <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 12px 24px; background: light-dark(#FFFFFF,var(--xp-bg-surface)); border-bottom: 1px solid light-dark(#E2E6EC,var(--xp-border))">${renderMobileNavToggle(model.locale)}
   <a href="${escapeHtml(model.inboxHref)}" style="display: flex; align-items: center; gap: 10px; min-height: 44px; text-decoration: none"><span aria-hidden="true" style="width: 36px; height: 36px; border-radius: 8px; background: light-dark(#0E7A4E,var(--xp-status-ok-fg)); color: light-dark(#FFFFFF,var(--xp-text-on-accent)); display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 18px; font-weight: 600">x</span><span style="font-family: ${MONO}; font-size: 17px; font-weight: 500; color: light-dark(#0E7A4E,var(--xp-status-ok-fg))">${rtl ? `<bdi dir="ltr">xMail</bdi>` : 'xMail'}</span></a>

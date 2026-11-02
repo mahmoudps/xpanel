@@ -1,3 +1,5 @@
+import { classicSoftwareCenterTemplates } from './board-port/software-center-client-templates.ts'
+import { v2SoftwareCenterTemplates } from './themes/v2/pages/xwhm/software/software-center-client-templates.ts'
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmModuleInstallers, renderWhmRuntimes, renderWhmSoftwareCatalog } from './board-port/whm-software-center-workspace.ts'
@@ -212,5 +214,27 @@ describe('software center client binding', () => {
     expect($('tr[data-sc-component="memcached"]').textContent).not.toMatch(/[٠-٩۰-۹]/)
     expect(WHM_SOFTWARE_CENTER_CLIENT_BINDING).not.toContain('innerHTML')
     expect(WHM_SOFTWARE_CENTER_CLIENT_BINDING).not.toContain('fetch(')
+  })
+})
+
+
+describe.each(['classic', 'v2'] as const)('selected software-center %s template contract', theme => {
+  const html = () => renderWhmSoftwareCatalog({ locale: 'en', canRead: true, canManage: false }).replace(classicSoftwareCenterTemplates(), theme === 'v2' ? v2SoftwareCenterTemplates() : classicSoftwareCenterTemplates())
+  it('runs the actual serialized controller against selected rows without allowing host changes', async () => {
+    const send = vi.fn(async () => await view('catalog', false))
+    mount(html(), send)
+    await tick()
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(document.querySelectorAll('[data-sc-component]').length).toBeGreaterThan(0)
+    expect(document.querySelector('[data-sc-component] [data-xp-slot="name"]')?.textContent).toBeTruthy()
+    for (const button of document.querySelectorAll<HTMLButtonElement>('[data-sc-action]')) expect(button.disabled).toBe(true)
+    expect(WHM_SOFTWARE_CENTER_CLIENT_BINDING).not.toContain('xp-whm-software__item')
+  })
+  it('fails closed before a read when required selected markup is missing', async () => {
+    const send = vi.fn()
+    mount(html().replace('data-xp-slot="candidate"', 'data-missing-candidate'), send)
+    await tick()
+    expect(send).not.toHaveBeenCalled()
+    expect(document.querySelector('[data-sc-status]')?.getAttribute('data-state')).toBe('unavailable')
   })
 })

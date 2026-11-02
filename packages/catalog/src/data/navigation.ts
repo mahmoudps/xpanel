@@ -1489,6 +1489,7 @@ export const navigation: NavSurface[] = [
               "owner"
             ],
             "tools": [
+              "domain-htaccess",
               "aapanel-url-rewrite"
             ],
             "keywords": [

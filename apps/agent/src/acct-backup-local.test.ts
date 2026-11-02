@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -12,7 +12,7 @@ import type { BackupCredentialStore } from './acct-backup-credentials.ts'
 import type { StoredCredential } from './acct-backup-s3.ts'
 import type { BackupCommand } from './backup-low-priority.ts'
 
-// Real temporary directories stand in for a separate disk; the device check is the one thing a single test filesystem cannot show.
+// The Linux-root lab case requires a real admitted separate filesystem, never a forbidden-tree alias.
 const ID = '11111111-1111-4111-8111-111111111111'
 const target = (pathPrefix: string): BackupDestinationTarget => ({ id: ID, name: 'Second disk', kind: 'local', endpoint: pathPrefix, bucket: null, region: null, pathPrefix, username: null, retentionDays: 30, createdAt: '2026-10-01T00:00:00.000Z', credentialRef: 'local-disk' })
 const roots: string[] = []
@@ -22,7 +22,7 @@ const temp = async (): Promise<string> => { const root = await mkdtemp(join(tmpd
 describe('separate local disk destination', () => {
   it('accepts only an absolute directory outside system and panel trees', () => {
     expect(localDiskDirectory(target('/mnt/backup/xpanel'))).toBe('/mnt/backup/xpanel')
-    for (const path of ['backup', '/', '/etc/xpanel', '/home/alice', '/var/lib/xpanel/backups', '/mnt/../etc', '/mnt/b c', '/proc/1']) expect(() => localDiskDirectory(target(path))).toThrow()
+    for (const path of ['backup', '/', '/etc/xpanel', '/home/alice', '/var/lib/xpanel/backups', '/mnt/../etc', '/mnt/b c', '/proc/1', '/dev/shm/xpanel-test']) expect(() => localDiskDirectory(target(path))).toThrow()
     expect(() => localDiskDirectory({ ...target('/mnt/backup'), credentialRef: 'vault' })).toThrow()
   })
   it('refuses a directory on the same filesystem as the archive store', async () => {
@@ -33,12 +33,18 @@ describe('separate local disk destination', () => {
     // Windows temp paths are not absolute POSIX paths, so the saved-directory check refuses before the device check on that platform.
     await expect(provider.open(binding, AbortSignal.timeout(1000))).rejects.toThrow()
   })
-  it.runIf(process.platform === 'linux')('passes the probe and moves archives on a directory of another filesystem (lab host with /dev/shm)', async () => {
-    const disk = join('/dev/shm', 'xpanel-local-disk-test-' + process.pid), store = await temp()
-    await mkdir(disk, { recursive: true })
+  it.runIf(process.platform === 'linux' && process.getuid?.() === 0)('passes the probe and moves archives on a directory of another filesystem (lab host with /dev/shm)', async () => {
+    const fixtureRoot = process.env.XPANEL_TEST_LOCAL_DISK_ROOT
+    if (!fixtureRoot) throw new Error('XPANEL_TEST_LOCAL_DISK_ROOT must name an admitted root-owned separate filesystem for this lab case')
+    expect(localDiskDirectory(target(fixtureRoot))).toBe(fixtureRoot)
+    expect(await realpath(fixtureRoot)).toBe(fixtureRoot)
+    const fixture = await lstat(fixtureRoot), store = await temp()
+    expect(fixture.isDirectory() && !fixture.isSymbolicLink()).toBe(true)
+    expect(fixture.uid).toBe(0)
+    expect(fixture.dev).not.toBe((await stat(store)).dev)
+    const disk = await mkdtemp(join(fixtureRoot, 'xpanel-local-disk-test-'))
     try {
-      const destination = { ...target('/mnt/x'), pathPrefix: disk }
-      if ((await stat(disk)).dev === (await stat(store)).dev || process.getuid?.() !== 0) return
+      const destination = target(disk)
       const provider = createLocalDiskBackupProvider({ readDestination: async () => destination, archiveRoot: store })
       expect(await probeBackupDestination(destination, provider, async () => undefined)).toMatchObject({ outcome: 'verified', cleanupVerified: true })
       const session = await provider.open({ destinationId: ID, targetDigest: backupDestinationTargetDigest(destination), credentialRef: 'local-disk', credentialRevision: LOCAL_DISK_PROFILE.revision }, AbortSignal.timeout(1000))

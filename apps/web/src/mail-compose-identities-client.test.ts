@@ -145,12 +145,22 @@ describe('compose saved sender identities and managed signatures', () => {
     ready = true; root().dispatchEvent(new CustomEvent('xpanel:compose-attachments-state')); expect(send().disabled).toBe(false)
   })
   it('renders real file controls only under explicit composition capabilities', () => {
-    document.body.innerHTML = renderCompose(xmailComposeFromProps({ mailbox, canSend: true, canSaveDraft: true }))
+    document.body.innerHTML = renderCompose(xmailComposeFromProps({ mailbox, canSend: true, canSaveDraft: true, canUseAttachments: true }))
     expect(root().dataset.composeSendEnabled).toBe('true'); expect(root().dataset.composeDraftEnabled).toBe('true')
     expect(root().querySelector<HTMLElement>('[data-compose-attachments]')!.dataset.composeAttachmentEnabled).toBe('true')
     expect(root().querySelector('input[type="file"][multiple][data-compose-attachment-input]')).not.toBeNull(); expect(root().querySelector('[data-compose-attachment-list]')!.children).toHaveLength(0)
     document.body.innerHTML = renderCompose(xmailComposeFromProps({ mailbox }))
     expect(root().dataset.composeSendEnabled).toBe('false'); expect(root().dataset.composeDraftEnabled).toBe('false'); expect(root().querySelector<HTMLElement>('[data-compose-attachments]')!.dataset.composeAttachmentEnabled).toBe('false')
+  })
+  it.each([
+    { canSend: true, canSaveDraft: false },
+    { canSend: false, canSaveDraft: true },
+    { canSend: true, canSaveDraft: true },
+  ])('keeps attachments independently denied for composition capabilities %j', capabilities => {
+    document.body.innerHTML = renderCompose(xmailComposeFromProps({ mailbox, ...capabilities }))
+    expect(root().dataset.composeSendEnabled).toBe(String(capabilities.canSend))
+    expect(root().dataset.composeDraftEnabled).toBe(String(capabilities.canSaveDraft))
+    expect(root().querySelector<HTMLElement>('[data-compose-attachments]')!.dataset.composeAttachmentEnabled).toBe('false')
   })
   it('cannot unlock an uncertain SMTP send by refreshing or choosing another identity', async () => {
     const transport = vi.fn<Transport>().mockResolvedValue({ identities: [identity()] }); boot(transport); await tick()

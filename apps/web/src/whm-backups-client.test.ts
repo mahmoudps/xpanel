@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderApprovedWhmBackups } from './board-port/approved-whm-backups.ts'
+import { renderV2BackupsPage } from './themes/v2/pages/xwhm/lifecycle/backups.ts'
+import { bindWhmBackupDestinations } from './whm-backup-destinations-client.ts'
 import { readWhmBackupWorkspace, WHM_BACKUPS_CLIENT_BINDING } from './whm-backups-client.ts'
 
 const id = (n: number) => 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(n).padStart(12, '0')
@@ -45,7 +47,7 @@ const model = () => {
     current.destinations = [...current.destinations.filter(item => item.id !== destination.id), destination]
     return { destination: clone(mode === 'wrong-ack' ? { ...destination, name: 'Wrong acknowledged destination' } : destination), revision: current.revision, application }
   })
-  const boot = () => { (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send; new Function('return ' + WHM_BACKUPS_CLIENT_BINDING)()(ask) }
+  const boot = (transport: (method: string, path: string, body?: unknown) => Promise<unknown> = send) => { (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = transport; new Function('return ' + WHM_BACKUPS_CLIENT_BINDING)()(ask) }
   return { send, ask, boot, writes: () => send.mock.calls.filter(call => call[0] !== 'GET'), setMode: (value: string) => { mode = value }, getCurrent: () => current }
 }
 
@@ -165,5 +167,67 @@ describe('readable date closure snapshot metadata', () => {
     expect(JSON.stringify(source)).toBe(before); expect(readWhmBackupWorkspace(source).snapshots[0]!.createdAt).toBe('2026-10-27T09:01:02.123Z')
     expect(readWhmBackupWorkspace(source).schedule!.updatedAt).toBe('2026-10-26T00:00:00.000Z')
     expect(send.mock.calls[0]).toEqual(['GET', '/api/backups/workspace']); expect(send.mock.calls.every(call => (call as unknown[])[0] === 'GET')).toBe(true); expect(document.body.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+  })
+})
+
+describe('inline destination ownership for V2 backup schedules', () => {
+  it('keeps schedule reads and confirmed CAS saves working without a second destination writer', async () => {
+    document.body.innerHTML = renderV2BackupsPage({ locale: 'en', canRead: true, canManage: true })
+    const f = model()
+    const shared = vi.fn(async (method: string, path: string, body?: unknown) => path === '/api/backups/workspace/destination-lifecycle'
+      ? { revision: f.getCurrent().revision, destinations: [], capabilities: { canTest: false, profiles: [] }, application: { nativeApplied: false, schedulerVerified: false } }
+      : f.send(method, path, body))
+    f.boot(shared); bindWhmBackupDestinations(f.ask); await tick()
+    expect(document.querySelectorAll('[data-whm-backup-destinations][data-backup-inline-manager]')).toHaveLength(1)
+    expect(document.querySelector('#backup-layout-destination-enabled')).toBeNull()
+    expect(status().dataset.state).toBe('read')
+    const endpoint = document.querySelector<HTMLInputElement>('[data-destination-field="endpoint"]')!
+    expect(endpoint.disabled).toBe(false)
+    endpoint.value = 'sftp://draft.example.test'; endpoint.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(action('save-schedule').disabled).toBe(true)
+    edit('policy-cron', '15 3 * * *'); action('save-schedule').click(); await tick(); await tick()
+    expect(f.writes()).toHaveLength(1)
+    expect(f.writes()[0]![0]).toBe('PUT'); expect(f.writes()[0]![1]).toBe('/api/backups/workspace/schedule')
+    expect(f.writes()[0]![2]).toMatchObject({ expectedRevision: '1'.padStart(64, '0'), cron: '15 3 * * *' })
+    expect(endpoint.value).toBe('sftp://draft.example.test')
+  })
+  it('locks schedule controls and sends nothing after the inline owner is removed', async () => {
+    document.body.innerHTML = renderV2BackupsPage({ locale: 'en', canRead: true, canManage: true })
+    const f = model(); f.boot(); await tick()
+    const before = f.send.mock.calls.length
+    document.querySelector('[data-backup-inline-manager]')!.remove()
+    edit('policy-cron', '15 3 * * *'); action('save-schedule').click(); await tick()
+    expect(f.send.mock.calls).toHaveLength(before); expect(f.writes()).toHaveLength(0)
+    expect(action('save-schedule').disabled).toBe(true)
+  })
+  it('keeps both real binders closed when duplicate inline managers are present', async () => {
+    document.body.innerHTML = renderV2BackupsPage({ locale: 'en', canRead: true, canManage: true })
+    const manager = document.querySelector('[data-backup-inline-manager]')!; manager.after(manager.cloneNode(true))
+    const f = model(); f.boot(); bindWhmBackupDestinations(f.ask); await tick()
+    expect(f.send).not.toHaveBeenCalled()
+    expect(document.querySelector<HTMLElement>('[data-approved-whm-backups]')!.dataset.backupManage).toBe('false')
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('[data-approved-whm-backups] input,[data-approved-whm-backups] select,[data-approved-whm-backups] button')].every(node => node.disabled)).toBe(true)
+  })
+  it('locks both owners after the bound inline manager is replaced', async () => {
+    document.body.innerHTML = renderV2BackupsPage({ locale: 'en', canRead: true, canManage: true })
+    const f = model()
+    const shared = vi.fn(async (method: string, path: string, body?: unknown) => path === '/api/backups/workspace/destination-lifecycle'
+      ? { revision: f.getCurrent().revision, destinations: [], capabilities: { canTest: false, profiles: [] }, application: { nativeApplied: false, schedulerVerified: false } }
+      : f.send(method, path, body))
+    f.boot(shared); bindWhmBackupDestinations(f.ask); await tick()
+    const before = shared.mock.calls.length
+    const manager = document.querySelector('[data-backup-inline-manager]')!; manager.replaceWith(manager.cloneNode(true))
+    edit('policy-cron', '15 3 * * *'); action('save-schedule').click(); bindWhmBackupDestinations(f.ask); await tick()
+    expect(shared.mock.calls).toHaveLength(before); expect(f.writes()).toHaveLength(0)
+    expect(document.querySelector<HTMLElement>('[data-approved-whm-backups]')!.dataset.backupManage).toBe('false')
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('[data-approved-whm-backups] input,[data-approved-whm-backups] select,[data-approved-whm-backups] button')].every(node => node.disabled)).toBe(true)
+  })
+  it('fails closed before transport when delegated destination markup is absent', async () => {
+    document.body.innerHTML = renderV2BackupsPage({ locale: 'en', canRead: true, canManage: true })
+    document.querySelector('[data-backup-inline-manager]')!.remove()
+    const f = model(); f.boot(); await tick()
+    expect(f.send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable')
+    expect(document.querySelector<HTMLElement>('[data-approved-whm-backups]')!.dataset.backupManage).toBe('false')
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('[data-approved-whm-backups] input,[data-approved-whm-backups] select,[data-approved-whm-backups] button')].every(node => node.disabled)).toBe(true)
   })
 })

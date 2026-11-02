@@ -144,10 +144,12 @@ ${tls}
 `).join('\n')
 }
 
-export function renderRenewalUnits(nodePath) {
+export function renderRenewalUnits(nodePath, layout = 'flat') {
   if (!/^\/[A-Za-z0-9_./-]+$/.test(nodePath)) fail('NODE_PATH_INVALID')
+  if (!['flat', 'current'].includes(layout)) fail('PROGRAM_LAYOUT_INVALID')
+  const programRoot = layout === 'current' ? '/opt/xpanel/current' : '/opt/xpanel'
   return {
-    service: MARKER + `[Unit]\nDescription=xPanel management TLS renewal and served-certificate verification\nAfter=network-online.target nginx.service\nWants=network-online.target\n\n[Service]\nType=oneshot\nUser=root\nGroup=root\nUMask=0077\nExecStart=${nodePath} /opt/xpanel/scripts/management-tls.mjs renew\nSuccessExitStatus=75\nTimeoutStartSec=720\nTimeoutStopSec=10\nKillMode=control-group\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\n\n`,
+    service: MARKER + `[Unit]\nDescription=xPanel management TLS renewal and served-certificate verification\nAfter=network-online.target nginx.service\nWants=network-online.target\n\n[Service]\nType=oneshot\nUser=root\nGroup=root\nUMask=0077\nExecStart=${nodePath} ${programRoot}/scripts/management-tls.mjs renew\nSuccessExitStatus=75\nTimeoutStartSec=720\nTimeoutStopSec=10\nKillMode=control-group\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\n\n`,
     timer: MARKER + '[Unit]\nDescription=xPanel management TLS renewal schedule\n\n[Timer]\nOnCalendar=*-*-* 00,12:00:00\nRandomizedDelaySec=1h\nPersistent=true\nUnit=xpanel-management-tls.service\n\n[Install]\nWantedBy=timers.target\n',
   }
 }
@@ -550,7 +552,7 @@ async function servedReady(config, certificate, verifyApplication) {
   })
 }
 
-async function lifecycle(config, phase, configReference) {
+async function lifecycle(config, phase, configReference, layout = 'flat') {
   const transaction = new OwnedTransaction()
   let configChanged = false
   let initialNginx, startedNginx, initialConfiguration, listenerInventorySha256
@@ -645,7 +647,7 @@ async function lifecycle(config, phase, configReference) {
     if (phase === 'prepare') {
       const beforeUnitWrite = await renewalTimerState()
       assertTimerSnapshot(initialTimer, beforeUnitWrite, initialTimer.references)
-      const units = renderRenewalUnits(process.execPath)
+      const units = renderRenewalUnits(process.execPath, layout)
       await transaction.write(PATHS.service, units.service, 0o644, 0, false, managedReferences.get(PATHS.service))
       await transaction.write(PATHS.timer, units.timer, 0o644, 0, false, managedReferences.get(PATHS.timer))
     }
@@ -701,6 +703,14 @@ async function lifecycle(config, phase, configReference) {
   }
 }
 
+const programLayout = () => {
+  const sourceRoot = dirname(dirname(realpathSync(fileURLToPath(import.meta.url))))
+  if (sourceRoot === '/opt/xpanel') return 'flat'
+  if (!/^\/opt\/xpanel\/releases\/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(sourceRoot)
+    || realpathSync('/opt/xpanel/current') !== sourceRoot) fail('PROGRAM_LAYOUT_INVALID')
+  return 'current'
+}
+
 async function main(args) {
   const [phase, ...options] = args
   if (phase === 'plan') { const config = parseConfigArguments(options); process.stdout.write(JSON.stringify({ config, origins: requiredEnvironment(config), applicationBootstrap: 'pending' }, null, 2) + '\n'); return }
@@ -710,7 +720,9 @@ async function main(args) {
   process.umask(0o077)
   readRootFile(fileURLToPath(import.meta.url))
   trustedExecutable(process.execPath)
-  if (readRootFile('/opt/xpanel/.node-version', 32).bytes.toString('utf8').trim() !== process.versions.node) fail('PINNED_NODE_VERSION_REQUIRED')
+  const sourceRoot = dirname(dirname(realpathSync(fileURLToPath(import.meta.url))))
+  const layout = programLayout()
+  if (readRootFile(`${sourceRoot}/.node-version`, 32).bytes.toString('utf8').trim() !== process.versions.node) fail('PINNED_NODE_VERSION_REQUIRED')
   trustedDirectory('/etc/xpanel')
   if (phase === 'configure') rootDirectory(PATHS.state, 0o755)
   else trustedDirectory(PATHS.state)
@@ -737,11 +749,63 @@ async function main(args) {
     const cli = `${PATHS.acme}/cli.ini`
     if (!existsSync(cli) && phase !== 'verify') replaceFile(cli, '# Dedicated management ACME scope.\n', 0o600)
     else if (readRootFile(cli, 256, true).bytes.toString('utf8') !== '# Dedicated management ACME scope.\n') fail('ACME_CONFIG_DRIFT')
-    await lifecycle(config, phase, configReference)
+    await lifecycle(config, phase, configReference, layout)
     process.stdout.write(phase === 'verify' ? 'Management ingress observed ready; identity and service qualification remain separate.\n' : 'Management TLS ready; application bootstrap pending.\n')
   } finally { closeSync(lock) }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).catch(error => { process.stderr.write(`Management TLS failed: ${error.code ?? 'LIFECYCLE_FAILED'}. Inspect the protected lifecycle status.\n`); process.exitCode = error.code === 'LIFECYCLE_ALREADY_ACTIVE' ? 75 : 1 })
+}
+
+/** Root-only read observation used by fresh-install finalization; no lifecycle CLI, writes or service operations. */
+export function readManagementTlsReadiness() {
+  if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.geteuid?.() !== 0) fail('LINUX_ROOT_REQUIRED')
+  const references = []
+  const read = (path, maxBytes, privateFile = false) => {
+    trustedDirectory(dirname(path))
+    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    try {
+      const before = fstatSync(fd, { bigint: true })
+      if (!before.isFile() || before.uid !== 0n || before.nlink !== 1n || (before.mode & 0o6022n) !== 0n
+        || before.size < 0n || before.size > BigInt(maxBytes) || privateFile && (before.mode & 0o077n) !== 0n) fail('INSTALL_READINESS_TLS_FILE_UNSAFE')
+      const bytes = readFileSync(fd), after = fstatSync(fd, { bigint: true }), named = lstatSync(path, { bigint: true })
+      if (bytes.length > maxBytes || named.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino
+        || before.dev !== named.dev || before.ino !== named.ino || before.uid !== after.uid || before.gid !== after.gid
+        || before.mode !== after.mode || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) fail('INSTALL_READINESS_TLS_FILE_CHANGED')
+      references.push({ path, device: String(before.dev), inode: String(before.ino), uid: Number(before.uid), gid: Number(before.gid),
+        mode: Number(before.mode & 0o7777n), size: String(before.size), mtime: String(before.mtimeNs), ctime: String(before.ctimeNs), sha256: sha(bytes) })
+      return bytes
+    } finally { closeSync(fd) }
+  }
+  const configBytes = read(PATHS.config, 16 * 1024, true), config = validateConfig(JSON.parse(configBytes.toString('utf8')))
+  const group = read('/etc/group', 1024 * 1024).toString('utf8').split('\n').filter(line => line.startsWith('xpanel:'))
+  const gid = group.length === 1 && /^[1-9][0-9]*$/.test(group[0].split(':')[2]) ? Number(group[0].split(':')[2]) : null
+  if (gid === null || !Number.isSafeInteger(gid)) fail('API_READER_GROUP_INVALID')
+  const secret = read(PATHS.secret, 65), secretReference = references.at(-1)
+  const api = read(PATHS.apiEnv, 1024 * 1024), apiReference = references.at(-1)
+  if (secretReference.mode !== 0o640 || secretReference.gid !== gid || ![0o600, 0o640].includes(apiReference.mode) || apiReference.gid !== gid) fail('INSTALL_READINESS_TLS_READER_INVALID')
+  if (!/^[a-f0-9]{64}\n?$/.test(secret.toString('utf8')) || mergeApiEnvironment(api.toString('utf8'), config) !== api.toString('utf8')) fail('INSTALL_READINESS_TLS_ENV_INVALID')
+  const ingress = read(PATHS.ingress, 1024 * 1024), certificate = readCertificate(config), installed = installedCertificate(config)
+  if (!installed || installed.generation !== certificate.generation || ingress.toString('utf8') !== renderIngress(config, certificate.generation)) fail('INSTALL_READINESS_TLS_INGRESS_CHANGED')
+  const include = read(PATHS.include, 16 * 1024, true)
+  if (!include.toString('utf8').startsWith(MARKER) || !include.toString('utf8').includes(secret.toString('utf8').trim())) fail('INSTALL_READINESS_TLS_INCLUDE_INVALID')
+  read(PATHS.certs + '/' + certificate.generation + '/fullchain.pem', 128 * 1024, true)
+  for (const name of ['fullchain.pem', 'privkey.pem']) {
+    const path = realpathSync(PATHS.acme + '/live/xpanel-management/' + name)
+    if (!path.startsWith(PATHS.acme + '/archive/xpanel-management/')) fail('CERTBOT_LINEAGE_OUTSIDE_MANAGED_SCOPE')
+    read(path, name === 'privkey.pem' ? 32 * 1024 : 128 * 1024, name === 'privkey.pem')
+  }
+  return Object.freeze({ configSha256: sha(configBytes), certificateSha256: certificate.generation,
+    audiences: Object.freeze(['xwhm', 'xpanel', 'xmail']), references: Object.freeze(references) })
+}
+
+/** All configured HTTPS/login/health audiences are observed before the caller leaves SH. */
+export async function captureManagementTlsReadiness() {
+  const before = readManagementTlsReadiness()
+  const config = validateConfig(JSON.parse(readRootFile(PATHS.config, 16 * 1024, true).bytes.toString('utf8')))
+  await servedReady(config, { generation: before.certificateSha256 }, true)
+  const after = readManagementTlsReadiness()
+  if (JSON.stringify(before) !== JSON.stringify(after)) fail('INSTALL_READINESS_TLS_CHANGED')
+  return after
 }

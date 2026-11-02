@@ -1,5 +1,6 @@
 import { type Locale, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
+import { classicWhmDiagnosticTemplates } from './whm-diagnostic-client-templates.ts'
 
 export interface WhmServerHealthPageInput { locale: Locale; canRead: boolean }
 type Copy = string
@@ -9,7 +10,7 @@ const STYLE = `<style>.xp-whm-server-health{display:flex;flex-direction:column;g
 const helpers = (input: WhmServerHealthPageInput) => {
   const on = input.canRead
   const t = (copy: Copy): string => escapeHtml(translator(input.locale)(copy))
-  const page = (kind: 'health' | 'limits', body: string): string => `<div class="xp-whm-server-health" data-whm-server-health="${kind}" data-server-health-can-read="${on}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${STYLE}${body}</div>`
+  const page = (kind: 'health' | 'limits', body: string): string => `<div class="xp-whm-server-health" data-whm-server-health="${kind}" data-server-health-can-read="${on}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${STYLE}${classicWhmDiagnosticTemplates()}${body}</div>`
   const card = (key: string, title: Copy, body: string): string => `<section class="xp-whm-detail-card" data-whm-server-health-section="${key}" aria-labelledby="whm-server-health-${key}"><h2 id="whm-server-health-${key}">${t(title)}</h2>${body}</section>`
   const status = (copy: Copy): string => `<p class="xp-whm-detail-status" data-whm-server-health-status data-state="${on ? 'unread' : 'unavailable'}" role="status">${t(copy)}</p>`
   const button = (copy: Copy, primary = false): string => `<button type="button" class="xp-btn${primary ? ' xp-btn--primary' : ''}" data-whm-server-health-refresh${on ? '' : ' disabled'}>${t(copy)}</button>`

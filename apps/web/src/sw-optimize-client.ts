@@ -1,3 +1,5 @@
+import { VIEW_RECORD_HELPERS, cloneViewRecord as canonicalCloneViewRecord } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
@@ -13,6 +15,7 @@ function bindSwOptimize(parse: typeof readSwOptimizeView): void {
     root.dataset.swBound = 'true'
     const status = root.querySelector<HTMLElement>('[data-sw-optimize-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-sw-optimize-refresh]'), domains = root.querySelector<HTMLElement>('[data-sw-optimize-domains]'), types = root.querySelector<HTMLElement>('[data-sw-optimize-types]')
     if (!status || !refresh || !domains || !types) return
+    try { cloneViewRecord(root, 'software-optimize-domain-row', 'tr', { name: '', compression: '', cache: '' }); cloneViewRecord(root, 'software-optimize-domain-empty', 'tr', { message: '' }); cloneViewRecord(root, 'software-optimize-type', 'bdi', { value: '' }) } catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
     const admitted = (): boolean => root.isConnected && root.dataset.swCanRead === 'true' && !root.closest(blocked) && typeof transport === 'function'
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const fact = (key: string, text: string, human: boolean): void => { const node = root.querySelector<HTMLElement>('[data-sw-optimize-' + key + ']'); if (node) { node.textContent = text; node.toggleAttribute('data-human', human) } }
@@ -24,17 +27,13 @@ function bindSwOptimize(parse: typeof readSwOptimizeView): void {
       fact('proxied', p ? (p.proxied.includes('off') ? t('No') : p.proxied.join(' ')) : t('Not read'), !p || p.proxied.includes('off'))
       fact('cache', p ? (p.cache.configured ? (p.cache.maxSize ? t('On, up to {size}', { size: p.cache.maxSize }) : t('On')) : t('Off')) : t('Not read'), true)
       types.textContent = ''
-      if (p) for (const [index, type] of p.types.entries()) { if (index) types.append(', '); const value = document.createElement('bdi'); value.dir = 'ltr'; value.textContent = type; types.append(value) }
+      if (p) for (const [index, type] of p.types.entries()) { if (index) types.append(', '); types.append(cloneViewRecord(root, 'software-optimize-type', 'bdi', { value: type })) }
       else types.textContent = t('Not read')
       domains.textContent = ''
       for (const domain of view?.domains ?? []) {
-        const row = document.createElement('tr'), name = document.createElement('td'), compression = document.createElement('td'), cache = document.createElement('td'), value = document.createElement('bdi')
-        value.dir = 'ltr'; value.textContent = domain.name; name.append(value)
-        compression.textContent = !p ? t('Not read') : p.compression === 'on' ? t('Server policy: on') : t('Server policy: off')
-        cache.textContent = !p ? t('Not read') : domain.suspended ? t('Not cached: suspended') : domain.redirect ? t('Not cached: redirect') : p.cache.configured ? t('Cached when eligible') : t('Off')
-        row.append(name, compression, cache); domains.append(row)
+        domains.append(cloneViewRecord(root, 'software-optimize-domain-row', 'tr', { name: domain.name, compression: !p ? t('Not read') : p.compression === 'on' ? t('Server policy: on') : t('Server policy: off'), cache: !p ? t('Not read') : domain.suspended ? t('Not cached: suspended') : domain.redirect ? t('Not cached: redirect') : p.cache.configured ? t('Cached when eligible') : t('Off') }))
       }
-      if (!domains.childElementCount) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 3; cell.textContent = view ? t('This account has no domains.') : t('Not read.'); row.append(cell); domains.append(row) }
+      if (!domains.childElementCount) domains.append(cloneViewRecord(root, 'software-optimize-domain-empty', 'tr', { message: view ? t('This account has no domains.') : t('Not read.') }))
     }
     const load = async (): Promise<void> => {
       if (busy || !admitted()) return
@@ -53,4 +52,4 @@ function bindSwOptimize(parse: typeof readSwOptimizeView): void {
     void load()
   })
 }
-export const SW_OPTIMIZE_CLIENT_BINDING = `(()=>{const parse=${readSwOptimizeView.toString()};const bind=${bindSwOptimize.toString()};return ()=>bind(parse);})()`
+export const SW_OPTIMIZE_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const parse=${readSwOptimizeView.toString()};const bind=${bindSwOptimize.toString()};return ()=>bind(parse);})()`

@@ -1,3 +1,4 @@
+import { networkDiagnosticClientTemplates } from './account-diagnostic-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
@@ -20,5 +21,5 @@ export function renderAccountNetworkToolsWorkspace(input: { lang: Locale; accoun
       <p class="xp-help" data-nettools-summary>${t('No diagnostic has run.')}</p>
       <div class="xp-acct-tool__table" tabindex="0" role="region" aria-label="${t('Result details')}"><table class="xp-table"><thead data-nettools-head><tr><th scope="col">${t('Details')}</th></tr></thead><tbody data-nettools-rows><tr><td>${t('No diagnostic has run.')}</td></tr></tbody></table></div>
       <p data-nettools-status role="status" data-state="unread">${input.canManage ? t('Choose a tool, enter a target and run it.') : t('Network tools are unavailable here. Nothing was run.')}</p></section>
-  </div>`
+  ${networkDiagnosticClientTemplates()}</div>`
 }

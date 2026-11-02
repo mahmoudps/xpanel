@@ -1,5 +1,9 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 const SSH_ACCOUNT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SSH_FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/
@@ -82,7 +86,16 @@ function bindAccountSsh(askDialog: ((options: Record<string, unknown>) => Promis
       duplicate: t('This key is already authorized.'),
       required: t('Paste a public key first.'),
     } as Record<string, string>)[code] ?? t('The key was refused. Nothing was changed.')
-    const cell = (row: HTMLTableRowElement, text: string, technical: boolean): void => { const td = document.createElement('td'), content = document.createElement(technical ? 'bdi' : 'span'); content.dir = technical ? 'ltr' : 'auto'; content.textContent = text; td.append(content); row.append(td) }
+    let templates: { row: HTMLTemplateElement; action: HTMLTemplateElement; empty: HTMLTemplateElement }
+    try {
+      templates = { row: clientTemplate(root, 'ssh-key-row'), action: clientTemplate(root, 'ssh-key-action'), empty: clientTemplate(root, 'ssh-key-empty') }
+      cloneClientTemplate(templates.row, 'tr', ['type', 'fingerprint', 'comment', 'notes', 'actions'])
+      cloneClientTemplate(templates.action, 'button', ['label'])
+      cloneClientTemplate(templates.empty, 'tr', ['message'])
+    } catch {
+      for (const control of root.querySelectorAll<HTMLButtonElement | HTMLTextAreaElement>('button,textarea')) control.disabled = true
+      note('unavailable', t('SSH key management is unavailable here. Nothing was read or changed.')); return
+    }
     const paint = (next: AccountSshClientView): void => {
       view = next; review = false; rows.textContent = ''
       find('login').textContent = next.login.enabled ? t('Enabled for this account') : t('Disabled: the account or its plan does not allow shell access')
@@ -93,14 +106,16 @@ function bindAccountSsh(askDialog: ((options: Record<string, unknown>) => Promis
         next.capabilities.reason === 'capacity' ? t('The key limit has been reached.') : '']
       find('file').textContent = notes.filter(Boolean).join(' ')
       for (const key of next.keys) {
-        const row = document.createElement('tr')
-        cell(row, key.type + (key.bits === null ? '' : ' · ' + String(key.bits)), true); cell(row, key.fingerprint, true); cell(row, key.comment || t('No comment'), false)
-        cell(row, [key.hasOptions ? t('Has options') : '', key.allowed ? '' : t('Below the current key policy')].filter(Boolean).join(' · ') || '-', false)
-        const td = document.createElement('td'), button = document.createElement('button')
-        button.type = 'button'; button.className = 'xp-btn'; button.textContent = t('Remove'); button.setAttribute('aria-label', t('Remove: {fingerprint}', { fingerprint: key.fingerprint }))
-        button.addEventListener('click', () => { if (!button.disabled) void remove(key) }); td.append(button); row.append(td); rows.append(row)
+        const row = cloneClientTemplate(templates.row, 'tr', ['type', 'fingerprint', 'comment', 'notes', 'actions'])
+        clientTemplateSlot(row, 'type').textContent = key.type + (key.bits === null ? '' : ' · ' + String(key.bits))
+        clientTemplateSlot(row, 'fingerprint').textContent = key.fingerprint
+        clientTemplateSlot(row, 'comment').textContent = key.comment || t('No comment')
+        clientTemplateSlot(row, 'notes').textContent = [key.hasOptions ? t('Has options') : '', key.allowed ? '' : t('Below the current key policy')].filter(Boolean).join(' · ') || '-'
+        const button = cloneClientTemplate(templates.action, 'button', ['label']) as HTMLButtonElement
+        clientTemplateSlot(button, 'label').textContent = t('Remove'); button.setAttribute('aria-label', t('Remove: {fingerprint}', { fingerprint: key.fingerprint }))
+        button.addEventListener('click', () => { if (!button.disabled) void remove(key) }); clientTemplateSlot(row, 'actions', 'td').append(button); rows.append(row)
       }
-      if (!next.keys.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 5; td.textContent = t('No keys are authorized.'); row.append(td); rows.append(row) }
+      if (!next.keys.length) { const row = cloneClientTemplate(templates.empty, 'tr', ['message']); clientTemplateSlot(row, 'message', 'td').textContent = t('No keys are authorized.'); rows.append(row) }
     }
     const failed = (error: unknown): void => {
       const code = accountSshFieldCode(error)
@@ -151,4 +166,4 @@ function bindAccountSsh(askDialog: ((options: Record<string, unknown>) => Promis
   })
 }
 
-export const ACCOUNT_SSH_CLIENT_BINDING = `(()=>{const SSH_ACCOUNT_ID=${SSH_ACCOUNT_ID.toString()};const SSH_FINGERPRINT=${SSH_FINGERPRINT.toString()};const SSH_KEY_TYPES=${JSON.stringify(SSH_KEY_TYPES)};const sshObject=${sshObject.toString()};const sshInt=${sshInt.toString()};const readAccountSshView=${readAccountSshView.toString()};const accountSshUncertain=${accountSshUncertain.toString()};const accountSshFieldCode=${accountSshFieldCode.toString()};return ${bindAccountSsh.toString()};})()`
+export const ACCOUNT_SSH_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const SSH_ACCOUNT_ID=${SSH_ACCOUNT_ID.toString()};const SSH_FINGERPRINT=${SSH_FINGERPRINT.toString()};const SSH_KEY_TYPES=${JSON.stringify(SSH_KEY_TYPES)};const sshObject=${sshObject.toString()};const sshInt=${sshInt.toString()};const readAccountSshView=${readAccountSshView.toString()};const accountSshUncertain=${accountSshUncertain.toString()};const accountSshFieldCode=${accountSshFieldCode.toString()};return ${bindAccountSsh.toString()};})()`

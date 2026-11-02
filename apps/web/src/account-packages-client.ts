@@ -1,5 +1,20 @@
 import type { MessageValues } from './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 /// <reference lib="dom" />
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
+
+function packageClientTemplates(root: HTMLElement) {
+  const locate = (name: string, slots: readonly string[]) => {
+    const template = clientTemplate(root, name)
+    cloneClientTemplate(template, 'tr', slots)
+    return () => cloneClientTemplate(template, 'tr', slots)
+  }
+  return { installed: locate('packages-installed-row', ['name', 'version', 'requires', 'action']),
+    available: locate('packages-available-row', ['name', 'version', 'summary', 'requires', 'action']),
+    installedEmpty: locate('packages-installed-empty', ['message']), availableEmpty: locate('packages-available-empty', ['message']) }
+}
 interface PackageItem { name: string; version: string; requires: { name: string; version: string }[] }
 export interface AccountPackagesClientView { revision: string; catalogRevision: string | null; inventory: 'verified' | 'recovery-required'; packages: PackageItem[]; available: (PackageItem & { summary: string })[]; recovery: string; capabilities: { install: boolean; remove: boolean; recover: boolean } }
 function packageObject(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value) }
@@ -34,6 +49,11 @@ function bindAccountPackages(askDialog: ((input: Record<string, unknown>) => Pro
     const get = <T extends HTMLElement>(name: string): T => root.querySelector<T>('[data-packages-' + name + ']')!
     const status = get('status'), installed = get('installed'), available = get('available'), search = get<HTMLInputElement>('search'), refresh = get<HTMLButtonElement>('refresh'), recover = get<HTMLButtonElement>('recover')
     if (!status || !installed || !available || !search || !refresh || !recover) return
+    let templates: ReturnType<typeof packageClientTemplates>
+    try { templates = packageClientTemplates(root) } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'unavailable'; status.textContent = t('Private packages are unavailable here. Nothing was read or changed.'); return
+    }
     let view: AccountPackagesClientView | null = null, busy = false, uncertain = false
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const lock = (): void => {
@@ -42,17 +62,17 @@ function bindAccountPackages(askDialog: ((input: Record<string, unknown>) => Pro
         button.disabled = busy || !eligible() || uncertain || !view || (op === 'install' ? !view.capabilities.install || view.packages.some(item => item.name === name) || !item || item.requires.some(dependency => !view!.packages.some(value => value.name === dependency.name && value.version === dependency.version)) : !view.capabilities.remove || view.packages.some(item => item.requires.some(dependency => dependency.name === name)))
       }
     }
-    const cell = (value: string, technical = false): HTMLTableCellElement => { const td = document.createElement('td'), span = document.createElement(technical ? 'bdi' : 'span'); if (technical) span.dir = 'ltr'; span.textContent = packageAscii(value); td.append(span); return td }
-    const empty = (target: HTMLElement, columns: number, message: string): void => { const row = document.createElement('tr'), td = cell(message); td.colSpan = columns; row.append(td); target.append(row) }
+    const fillRow = (make: () => HTMLElement, values: Record<string, string>): HTMLElement => { const row = make(); for (const [slot, value] of Object.entries(values)) clientTemplateSlot(row, slot).textContent = packageAscii(value); return row }
+    const empty = (target: HTMLElement, make: () => HTMLElement, message: string): void => { target.append(fillRow(make, { message })) }
     const paint = (): void => {
       if (!view) return
       get('inventory').textContent = view.inventory === 'verified' ? t('Verified from library files') : t('Recovery required')
       installed.textContent = ''; available.textContent = ''
-      for (const item of view.packages) { const row = document.createElement('tr'), action = document.createElement('td'), button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn xp-btn--danger'; button.dataset.packageOp = 'remove'; button.dataset.packageName = item.name; button.textContent = t('Remove'); action.append(button); row.append(cell(item.name, true), cell(item.version, true), cell(item.requires.map(value => value.name + ' ' + value.version).join(', ') || '-', true), action); installed.append(row) }
-      if (!view.packages.length) empty(installed, 4, view.inventory === 'verified' ? t('No packages are managed in this private library.') : t('Restore the pending operation before reading the installed inventory.'))
+      for (const item of view.packages) { const row = fillRow(templates.installed, { name: item.name, version: item.version, requires: item.requires.map(value => value.name + ' ' + value.version).join(', ') || '-' }), button = clientTemplateSlot(row, 'action', 'button') as HTMLButtonElement; button.dataset.packageOp = 'remove'; button.dataset.packageName = item.name; button.textContent = t('Remove'); installed.append(row) }
+      if (!view.packages.length) empty(installed, templates.installedEmpty, view.inventory === 'verified' ? t('No packages are managed in this private library.') : t('Restore the pending operation before reading the installed inventory.'))
       const query = search.value.slice(0, 100).trim().toLowerCase(), filtered = view.available.filter(item => (item.name + ' ' + item.summary).toLowerCase().includes(query))
-      for (const item of filtered) { const row = document.createElement('tr'), action = document.createElement('td'), button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.dataset.packageOp = 'install'; button.dataset.packageName = item.name; button.textContent = t('Install'); action.append(button); row.append(cell(item.name, true), cell(item.version, true), cell(item.summary), cell(item.requires.map(value => value.name + ' ' + value.version).join(', ') || '-', true), action); available.append(row) }
-      if (!filtered.length) empty(available, 5, view.catalogRevision === null ? t('A pinned reviewed package catalog is unavailable.') : t('No reviewed package matches this filter.'))
+      for (const item of filtered) { const row = fillRow(templates.available, { name: item.name, version: item.version, summary: item.summary, requires: item.requires.map(value => value.name + ' ' + value.version).join(', ') || '-' }), button = clientTemplateSlot(row, 'action', 'button') as HTMLButtonElement; button.dataset.packageOp = 'install'; button.dataset.packageName = item.name; button.textContent = t('Install'); available.append(row) }
+      if (!filtered.length) empty(available, templates.availableEmpty, view.catalogRevision === null ? t('A pinned reviewed package catalog is unavailable.') : t('No reviewed package matches this filter.'))
       get('capability').textContent = view.capabilities.install ? t('Install exact reviewed versions. Required packages must already be installed.') : t('Installation is unavailable until a pinned catalog and account-confined provider are qualified.')
       lock()
     }
@@ -78,4 +98,4 @@ function bindAccountPackages(askDialog: ((input: Record<string, unknown>) => Pro
     lock(); void perform('read')
   })
 }
-export const ACCOUNT_PACKAGES_CLIENT_BINDING = `(()=>{const packageObject=${packageObject.toString()};const packageName=${packageName.toString()};const packageVersion=${packageVersion.toString()};const packageAscii=${packageAscii.toString()};const readAccountPackagesView=${readAccountPackagesView.toString()};return ${bindAccountPackages.toString()};})()`
+export const ACCOUNT_PACKAGES_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${packageClientTemplates.toString()};const packageObject=${packageObject.toString()};const packageName=${packageName.toString()};const packageVersion=${packageVersion.toString()};const packageAscii=${packageAscii.toString()};const readAccountPackagesView=${readAccountPackagesView.toString()};return ${bindAccountPackages.toString()};})()`

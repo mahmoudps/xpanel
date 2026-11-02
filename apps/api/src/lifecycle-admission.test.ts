@@ -1,6 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createServer, type IncomingMessage } from 'node:http'
 import { connect } from 'node:net'
+import { chmodSync, mkdtempSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
 import type { Db } from '@xpanel/db'
 import { StateStore } from '@xpanel/state'
 import { createApiApp } from './server.ts'
@@ -18,7 +22,10 @@ vi.mock('../../../scripts/lifecycle-admission.mjs', async original => {
 vi.mock('node:fs/promises', async original => {
   const actual = await original<typeof import('node:fs/promises')>()
   return { ...actual, lstat: async (...args: Parameters<typeof actual.lstat>) => {
-    if (args[0] === '/var/lib/xpanel-lifecycle/writer.lock' && model.lockFailure) throw Object.assign(new Error('lock unread'), { code: 'EIO' })
+    if (args[0] === '/var/lib/xpanel-lifecycle/writer.lock') {
+      if (model.lockFailure) throw Object.assign(new Error('lock unread'), { code: 'EIO' })
+      throw Object.assign(new Error('absent'), { code: 'ENOENT' })
+    }
     if (args[0] === '/var/lib/xpanel-lifecycle') {
       model.rootReads++
       if (model.fenceAfterPrecheck && model.rootReads === 2) { model.namespace = true; model.bytes = Buffer.from(JSON.stringify(pending)) }
@@ -37,10 +44,24 @@ vi.mock('../../../scripts/lifecycle-ownership.mjs', () => ({
   },
 }))
 const pending = { schemaVersion: 1, operationId: '12345678-1234-4234-8234-123456789abc', reference: null, kind: 'upgrade', phase: 'pending', requestFingerprint: 'a'.repeat(64), sequence: 1, createdAt: '2026-10-24T12:00:00.000Z' }
+const fixturePrefix = '.xpanel-lifecycle-route-test-'
+const fixtureRoots = new Set<string>()
+afterEach(async () => {
+  for (const root of fixtureRoots) {
+    if (dirname(resolve(root)) !== resolve(homedir()) || !basename(root).startsWith(fixturePrefix)) {
+      throw new Error('refusing to remove an unowned lifecycle fixture path')
+    }
+    await rm(root, { recursive: true, force: true })
+    fixtureRoots.delete(root)
+  }
+})
 const fixture = () => {
   const query = vi.fn(() => { throw new Error('No database access is permitted by this fixture') })
   const db = { query, transaction: vi.fn(() => { throw new Error('No transaction is permitted') }) } as unknown as Db
-  const store = new StateStore('/unused-lifecycle-route-fixture')
+  const root = mkdtempSync(join(homedir(), fixturePrefix))
+  fixtureRoots.add(root)
+  chmodSync(root, 0o700)
+  const store = new StateStore(join(root, 'state'))
   const api = createApiApp({ db, store, serverSecret: 'lifecycle-fixture-secret-at-least-32-bytes' })
   const agent = createAgentApp({ db, store, agentToken: 'a'.repeat(64), reconciler: { subscribe: () => () => {} } } as unknown as AgentServerDeps)
   return { api, agent, query, db }

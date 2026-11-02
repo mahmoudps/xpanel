@@ -1,3 +1,4 @@
+import { classicSoftwareCenterTemplates } from './software-center-client-templates.ts'
 import { type Locale, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -39,7 +40,7 @@ function renderPage(page: Page, input: SoftwareCenterInput): string {
   const id = 'whm-sc-' + page
   const options = categories[page].map(([value, label]) => `<option value="${value}">${t(label)}</option>`).join('')
   const columns: Copy[] = [msgid('Component'), msgid('State'), msgid('Installed version'), msgid('Repository version'), msgid('Estimate'), msgid('Relations'), msgid('Action')]
-  return `<div class="xp-whm-software" data-whm-software-center data-sc-page="${page}" data-sc-can-read="${input.canRead}" data-sc-can-manage="${input.canRead && input.canManage}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${css}
+  return `<div class="xp-whm-software" data-whm-software-center data-sc-page="${page}" data-sc-can-read="${input.canRead}" data-sc-can-manage="${input.canRead && input.canManage}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${css}${classicSoftwareCenterTemplates()}
     <p class="xp-help">${t(intro[page])}</p>
     <section class="xp-whm-software__panel" aria-labelledby="${id}-sources"><h3 id="${id}-sources">${t(msgctxt('whm-software-center-workspace', 'Catalog sources'))}</h3>
       <ul><li class="xp-whm-software__source" data-sc-source="shipped"><span class="xp-badge xp-badge--ok">${t(msgid('Trusted'))}</span><span>${t(msgid('Shipped reviewed catalog: part of this xPanel release. Packages come only from the distribution repositories already configured on this server.'))}</span></li>

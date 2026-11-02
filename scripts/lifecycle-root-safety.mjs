@@ -20,10 +20,25 @@ const COORDINATORS = new Set(['xpanel-upgrade.service', 'xpanel-lifecycle.servic
 const SHA = /^[a-f0-9]{64}$/
 const scopeStorage = new AsyncLocalStorage()
 const capabilities = new WeakMap()
+const retiredObservationScopes = new WeakSet()
 const factories = new WeakMap()
 const fail = (code, cause) => { throw Object.assign(new Error(code, cause ? { cause } : undefined), { code }) }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const same = (a, b) => a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs
+
+/** Actual pinned-runtime ABI probe; Argon2id is provided by Node, not an npm dependency. */
+export const NATIVE_RUNTIME_ABI_PROBE = `
+import { argon2 } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
+const tag = await new Promise((resolve, reject) => argon2('argon2id', {
+  message: 'lifecycle-native-abi-probe', nonce: Buffer.alloc(16, 1),
+  memory: 65536, passes: 3, parallelism: 4, tagLength: 32,
+}, (error, value) => error ? reject(error) : resolve(value)));
+if (!Buffer.isBuffer(tag) || tag.length !== 32) throw new Error('native Argon2id ABI failed');
+const database = new DatabaseSync(':memory:');
+try { if (database.prepare('SELECT 1 AS value').get().value !== 1) throw new Error('native SQLite ABI failed'); }
+finally { database.close(); }
+`
 
 /** Parsing does not confer authority. Only the native factory below can mint a live scope. */
 export function parseCoordinatorCgroup(text) {
@@ -155,6 +170,24 @@ export async function assertCurrentLifecycleEffect(effect) {
   await assertLifecycleRootSafetyHeld(scope.capability, { effect })
 }
 
+/** Read-only facade of THIS actual native scope. Data, a caller callback or a receipt cannot mint it. */
+export async function captureCurrentLifecycleObservationScope() {
+  const scope = scopeStorage.getStore()
+  await assertLifecycleRootSafetyHeld(scope?.capability, { effect: 'service.observe' })
+  if (!scope || scopeStorage.getStore() !== scope || scope.phase !== 'held' || retiredObservationScopes.has(scope)) fail('LIFECYCLE_NATIVE_SCOPE_REQUIRED')
+  const controller = new AbortController()
+  scope.observations.add(controller)
+  let released = false
+  const assertAuthority = async () => {
+    if (released || controller.signal.aborted || scopeStorage.getStore() !== scope || scope.phase !== 'held' || retiredObservationScopes.has(scope)) fail('LIFECYCLE_OBSERVATION_SCOPE_EXPIRED')
+    await assertLifecycleRootSafetyHeld(scope.capability, { effect: 'service.observe' })
+    if (released || controller.signal.aborted || scopeStorage.getStore() !== scope || scope.phase !== 'held' || retiredObservationScopes.has(scope)) fail('LIFECYCLE_OBSERVATION_SCOPE_EXPIRED')
+  }
+  return Object.freeze({ operationId: scope.job.id, kind: scope.operation, readOnly: true, signal: controller.signal, assertAuthority,
+    release() { if (!released) { released = true; scope.observations.delete(controller); controller.abort() } },
+  })
+}
+
 export async function verifyCurrentLifecycleWriterReadiness() {
   const scope = scopeStorage.getStore()
   await assertScope(scope)
@@ -222,8 +255,7 @@ async function runtimeDependencies(scope, root, report) {
     }
   }
   await walk(moduleRoot)
-  const probe = "import {createRequire} from 'node:module';import{DatabaseSync}from'node:sqlite';const require=createRequire(process.cwd()+'/package.json');const a=require('argon2');const h=await a.hash('lifecycle-native-abi-probe');if(!await a.verify(h,'lifecycle-native-abi-probe'))process.exit(1);const d=new DatabaseSync(':memory:');if(d.prepare('select 1 as v').get().v!==1)process.exit(1);d.close();"
-  const native = await nativeCommand(scope.receipt.runtime.nodePath, ['--input-type=module', '-e', probe], { cwd: root, sha256: scope.receipt.runtime.nodeSha256 })
+  const native = await nativeCommand(scope.receipt.runtime.nodePath, ['--input-type=module', '-e', NATIVE_RUNTIME_ABI_PROBE], { cwd: root, sha256: scope.receipt.runtime.nodeSha256 })
   if (native.code !== 0) fail('LIFECYCLE_NATIVE_ABI_FAILED')
   scope.dependencies = { root, lockHash: sha(lock), verifiedAt: new Date().toISOString() }
 }
@@ -275,7 +307,7 @@ export async function createNativeUpgradeSafety(options) {
         const job = await createJob(db, { id, kind: intentBinding.action, actor: principal.username, detail: { lifecycleIntent: intentBinding } })
         const authority = await createRootOperationAuditAuthority(db)
         const intentReceipt = await authority.appendLifecycleIntent(intentBinding)
-        const scope = { ...configured, phase: 'held', guard, job, intentBinding, intentReceipt, pins: [parent.verify, tool.verify, node.verify], previousHead: head, capability: Object.freeze({}), capture: null, staged: null, dependencies: null, backup: null }
+        const scope = { ...configured, phase: 'held', guard, job, intentBinding, intentReceipt, pins: [parent.verify, tool.verify, node.verify], previousHead: head, capability: Object.freeze({}), observations: new Set(), capture: null, staged: null, dependencies: null, backup: null }
         capabilities.set(scope.capability, scope); activeScope = scope
         return scopeStorage.run(scope, async () => {
           try {
@@ -289,6 +321,9 @@ export async function createNativeUpgradeSafety(options) {
               return await settleNative(scope, result)
             })
           } finally {
+            retiredObservationScopes.add(scope)
+            for (const controller of scope.observations) controller.abort()
+            scope.observations.clear()
             try { await awaitOwnedServiceChildren(scope.capability) } finally { scope.phase = 'closed'; activeScope = null }
           }
         })

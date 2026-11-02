@@ -56,6 +56,15 @@ beforeEach(() => { document.head.querySelectorAll('[data-terminal-emulator]').fo
 afterEach(() => { vi.unstubAllGlobals(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; delete (window as Window & { xpanelTerminalEmulator?: unknown }).xpanelTerminalEmulator })
 
 describe('vendored terminal emulator', () => {
+  it('takes terminal paint from the selected screen instead of a fixed theme palette', async () => {
+    const send = server()
+    await boot(accountPage(), send)
+    const screen = $('[data-terminal-screen]')
+    screen.style.backgroundColor = 'rgb(7, 14, 26)'; screen.style.color = 'rgb(213, 222, 235)'
+    $('[data-terminal-open]').click(); await tick()
+    expect((term().options as { theme?: unknown }).theme).toEqual({ background: 'rgb(7, 14, 26)', foreground: 'rgb(213, 222, 235)' })
+    expect(send).toHaveBeenCalledWith('POST', '/api/account/terminal', {})
+  })
   it('serves the pinned files from this origin', () => {
     expect(Object.keys(TERMINAL_EMULATOR_ASSETS).sort()).toEqual(Object.values(TERMINAL_EMULATOR_PATHS).sort())
     expect(TERMINAL_EMULATOR_ASSETS[TERMINAL_EMULATOR_PATHS.script]!.body).toContain('xterm')

@@ -1,8 +1,10 @@
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate, WHM_CLIENT_TEMPLATE_BINDING } from './whm-client-templates.ts'
 import './i18n.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 type FtpLogKindView = 'connect' | 'login' | 'login-failed' | 'upload' | 'download' | 'delete' | 'logout' | 'timeout'
 export type FtpLogEventView = { at: string; kind: FtpLogKindView; client: string; user: string | null; account: string | null; path: string | null; pathBase: 'home' | 'host' | null; bytes: number | null }
 export type FtpLogSummaryView = {
@@ -111,7 +113,8 @@ function bindWhmFtpLog(): void {
     root.dataset.ftpLogBound = 'true'
     const form = root.querySelector<HTMLFormElement>('[data-ftp-log-form]'), status = root.querySelector<HTMLElement>('[data-ftp-log-status]'), range = root.querySelector<HTMLSelectElement>('[data-ftp-log-range]')
     if (!form || !status || !range || !root.querySelector('[data-ftp-log-submit]')) return
-    const admitted = (): boolean => root.isConnected && root.dataset.ftpLogCanRead === 'true' && !root.closest(denied) && !!send
+    let templateContractIntact = true
+    const admitted = (): boolean => templateContractIntact && root.isConnected && root.dataset.ftpLogCanRead === 'true' && !root.closest(denied) && !!send
     const fact = (key: string, value: string): void => { const node = root.querySelector<HTMLElement>('[data-ftp-log-fact="' + key + '"]'); if (node) node.textContent = value }
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const controls = form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
@@ -124,6 +127,23 @@ function bindWhmFtpLog(): void {
       custom.forEach(item => { item.disabled = blocked || range.value !== 'custom' })
       root.querySelectorAll<HTMLButtonElement>('[data-ftp-log-pick]').forEach(button => { button.disabled = blocked })
       root.setAttribute('aria-busy', String(busy))
+    }
+    const verifyTemplates = (): boolean => {
+      const unavailable = (): false => { sync(); root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(node => { node.disabled = true }); note('unavailable', t('Unavailable')); return false }
+      if (!admitted()) return unavailable()
+      try {
+        const submit = root.querySelector<HTMLButtonElement>('[data-ftp-log-submit]')
+        for (const [selector, tag, expected] of [['[data-ftp-log-form]', 'FORM', form], ['[data-ftp-log-status]', 'P', status], ['[data-ftp-log-range]', 'SELECT', range], ['[data-ftp-log-submit]', 'BUTTON', submit]] as const) {
+          const nodes = [...root.querySelectorAll<HTMLElement>(selector)].filter(node => node.closest('[data-whm-ftp-log]') === root)
+          if (nodes.length !== 1 || nodes[0] !== expected || expected?.tagName !== tag) throw new Error('invalid_ftp_log_workspace')
+        }
+        if (!(form instanceof HTMLFormElement) || submit?.type !== 'submit') throw new Error('invalid_ftp_log_workspace')
+        assertWhmClientTemplates(root, [['whm-ftp-log-pick', 'button', { content: 'span' }]])
+        const template = clientTemplate(root, 'whm-ftp-log-pick'), button = cloneClientTemplate(template, 'button', ['content']) as HTMLButtonElement, content = clientTemplateSlot(button, 'content', 'span')
+        if (template.closest('[data-whm-ftp-log]') !== root || button.type !== 'button' || !button.disabled || button.children.length !== 1 || content.parentElement !== button || content.children.length || button.hasAttribute('role') && button.getAttribute('role') !== 'button') throw new Error('invalid_ftp_log_pick')
+        for (const node of [button, content]) if ([...node.attributes].some(attr => /^on/i.test(attr.name) || ['id', 'api-url', 'data-api-url', 'data-action', 'data-xp-action', 'href', 'formaction', 'contenteditable'].includes(attr.name))) throw new Error('invalid_ftp_log_pick')
+        return true
+      } catch { templateContractIntact = false; return unavailable() }
     }
     const windowQuery = (): { since: string; until: string } | null => {
       if (range.value === 'custom') {
@@ -141,8 +161,9 @@ function bindWhmFtpLog(): void {
       if (!rows.length) empty(body, columns, none)
     }
     const pick = (label: string, apply: () => void): HTMLButtonElement => {
-      const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.dataset.ftpLogPick = 'true'; button.textContent = label
-      button.addEventListener('click', () => { if (busy || !admitted()) return; for (const name of ['user', 'client', 'kind', 'text']) { const control = input(name); if (control) control.value = '' } apply(); void load() })
+      const button = cloneClientTemplate(clientTemplate(root, 'whm-ftp-log-pick'), 'button', ['content']) as HTMLButtonElement
+      button.dataset.ftpLogPick = 'true'; clientTemplateSlot(button, 'content', 'span').textContent = label
+      button.addEventListener('click', () => { if (busy || button.disabled || !button.isConnected || button.closest('[data-whm-ftp-log]') !== root || !verifyTemplates()) return; for (const name of ['user', 'client', 'kind', 'text']) { const control = input(name); if (control) control.value = '' } apply(); void load() })
       return button
     }
     const detail = root.querySelector<HTMLElement>('[data-ftp-log-detail]')
@@ -187,7 +208,7 @@ function bindWhmFtpLog(): void {
       fill('bursts', (summary?.failureBursts ?? []).map(item => [[item.client, true], [String(item.failures), true], [String(item.users), true], [formatDisplayDateTime(item.firstAt), true], [formatDisplayDateTime(item.lastAt), true]] as const), 5, summary ? t('No failed sign-in bursts in this window.') : none)
     }
     const load = async (): Promise<void> => {
-      if (busy || !admitted() || !send) return
+      if (busy || !send || !verifyTemplates()) return
       const selected = windowQuery()
       if (!selected) { note('failed', t('Enter a UTC start and end as YYYY-MM-DD HH:MM, at most 7 days apart. Nothing was read.')); return }
       const params = new URLSearchParams(selected)
@@ -196,7 +217,7 @@ function bindWhmFtpLog(): void {
       busy = true; sync(); note('reading', t('Reading pure-ftpd activity from the journal…'))
       try {
         const raw = await send('GET', '/api/server/ftp-log/activity?' + params)
-        if (token !== generation || !admitted()) return
+        if (token !== generation || !verifyTemplates()) return
         const view = readFtpLogView(raw)
         fact('observed', formatDisplayDateTime(view.observedAt)); fact('window', formatDisplayDateTime(view.window.since) + ' – ' + formatDisplayDateTime(view.window.until)); fact('records', String(view.counts.records)); fact('matched', String(view.matched))
         const integrity = root.querySelector<HTMLElement>('[data-ftp-log-integrity]'), limit = root.querySelector<HTMLElement>('[data-ftp-log-limit]'), omitted = root.querySelector<HTMLElement>('[data-ftp-log-omitted]')
@@ -207,19 +228,20 @@ function bindWhmFtpLog(): void {
         if (view.state === 'unavailable') note('unavailable', view.reason === 'output_limit' ? t('The journal window produced more output than the bounded read allows. Narrow the time range; nothing is shown.') : t('The pure-ftpd journal is unavailable on this host. Nothing is shown and nothing was changed.'))
         else note('read', t('FTP activity read from the journal window. Events are newest first.'))
       } catch (error) {
-        if (token !== generation) return
+        if (token !== generation || !verifyTemplates()) return
         events = []; paintSummary(null); paintDetail(null); paintRows()
         const code = ftpLogObject(error) ? error.status : undefined
         note('failed', code === 422 ? t('The filters were refused. Check the values; nothing was read.') : code === 403 ? t('Root authorization is required to read FTP logs.') : t('FTP activity could not be read or verified. Nothing is shown.'))
-      } finally { if (token === generation) { busy = false; sync(); paintRows() } }
+      } finally { if (token === generation) { busy = false; sync(); if (admitted()) paintRows() } }
     }
     if (!admitted()) { sync(); note('unavailable', t('FTP log analysis is unavailable here. Nothing was read.')); return }
+    if (!verifyTemplates()) return
     form.addEventListener('submit', event => { event.preventDefault(); void load() })
-    range.addEventListener('change', sync)
-    root.querySelector<HTMLButtonElement>('[data-ftp-log-clear]')?.addEventListener('click', () => { if (busy) return; form.reset(); range.value = '24'; sync(); void load() })
-    root.querySelectorAll<HTMLButtonElement>('[data-ftp-log-page]').forEach(button => button.addEventListener('click', () => { page += button.dataset.ftpLogPage === 'newer' ? -1 : 1; paintRows() }))
+    range.addEventListener('change', () => { if (verifyTemplates()) sync() })
+    root.querySelector<HTMLButtonElement>('[data-ftp-log-clear]')?.addEventListener('click', () => { if (busy || !verifyTemplates()) return; form.reset(); range.value = '24'; sync(); void load() })
+    root.querySelectorAll<HTMLButtonElement>('[data-ftp-log-page]').forEach(button => button.addEventListener('click', () => { if (button.disabled || !verifyTemplates()) return; page += button.dataset.ftpLogPage === 'newer' ? -1 : 1; paintRows() }))
     sync(); void load()
   })
 }
 
-export const WHM_FTP_LOG_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const ftpLogObject=${ftpLogObject.toString()};const ftpLogText=${ftpLogText.toString()};const ftpLogNullable=${ftpLogNullable.toString()};const ftpLogAccount=${ftpLogAccount.toString()};const ftpLogInstant=${ftpLogInstant.toString()};const ftpLogCount=${ftpLogCount.toString()};const ftpLogClient=${ftpLogClient.toString()};const readFtpLogEvent=${readFtpLogEvent.toString()};const readFtpLogSummary=${readFtpLogSummary.toString()};const readFtpLogView=${readFtpLogView.toString()};return ${bindWhmFtpLog.toString()};})()`
+export const WHM_FTP_LOG_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const ftpLogObject=${ftpLogObject.toString()};const ftpLogText=${ftpLogText.toString()};const ftpLogNullable=${ftpLogNullable.toString()};const ftpLogAccount=${ftpLogAccount.toString()};const ftpLogInstant=${ftpLogInstant.toString()};const ftpLogCount=${ftpLogCount.toString()};const ftpLogClient=${ftpLogClient.toString()};const readFtpLogEvent=${readFtpLogEvent.toString()};const readFtpLogSummary=${readFtpLogSummary.toString()};const readFtpLogView=${readFtpLogView.toString()};return ${bindWhmFtpLog.toString()};})()`

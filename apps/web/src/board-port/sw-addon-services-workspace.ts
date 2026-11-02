@@ -1,3 +1,4 @@
+import { classicSoftwareClientTemplates } from './software-client-templates.ts'
 import { type Locale, type MessageValues, SOURCE_LOCALE, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -20,5 +21,6 @@ export function renderSwAddonServicesWorkspace(input: { locale: Locale; canRead:
     <p class="xp-whm-detail-status" role="status">${t('Memory limits, listeners and users are not edited here: a reviewed configuration writer with a restart check is not connected. Nothing is changed.')}</p>
     <div class="xp-whm-detail-actions"><button type="button" class="xp-btn" disabled>${t('Edit configuration')}</button></div>
   </section>
+${classicSoftwareClientTemplates('addons')}
 </div>`
 }

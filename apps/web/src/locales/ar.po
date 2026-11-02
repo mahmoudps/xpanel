@@ -969,9 +969,9 @@ msgstr "خدمة نسخ الحساب غير متاحة هنا. لم يُقرأ �
 msgid "Account backups"
 msgstr "نسخ الحسابات"
 
-#: apps/web/src/ws-client.ts
-msgid "Account configuration created. Hosting verification is still required."
-msgstr "أُنشئ إعداد الحساب. ما زال يلزم التحقق من الاستضافة."
+#~ #: apps/web/src/ws-client.ts
+#~ msgid "Account configuration created. Hosting verification is still required."
+#~ msgstr "أُنشئ إعداد الحساب. ما زال يلزم التحقق من الاستضافة."
 
 #: apps/web/src/board-canvas.ts
 msgid "Account contact"
@@ -4366,9 +4366,9 @@ msgstr "CGI مع suexec"
 msgid "CLI binary read without php.ini: {version}. This is not FPM extension enablement or application request verification."
 msgstr "قُرئ ملف CLI التنفيذي دون php.ini: {version}. لا يثبت هذا تفعيل امتدادات FPM أو التحقق من طلب للتطبيق."
 
-#: apps/web/src/whm-php-client.ts
-msgid "CLI without INI only"
-msgstr "CLI دون INI فقط"
+#~ #: apps/web/src/whm-php-client.ts
+#~ msgid "CLI without INI only"
+#~ msgstr "CLI دون INI فقط"
 
 #: apps/web/src/whm-composer-client.ts
 msgid "COMPOSER_JSON_MISSING: this site has no composer.json. No command was run in the project."
@@ -18022,9 +18022,9 @@ msgstr "الذاكرة %"
 msgid "Memory (MiB)"
 msgstr "الذاكرة (MiB)"
 
-#: apps/web/src/surfaces/xwhm.ts
-msgid "Memory (RSS)"
-msgstr "الذاكرة (RSS)"
+#~ #: apps/web/src/surfaces/xwhm.ts
+#~ msgid "Memory (RSS)"
+#~ msgstr "الذاكرة (RSS)"
 
 #: apps/web/src/sw-addon-services-client.ts
 msgid "Memory cache"
@@ -18682,9 +18682,9 @@ msgstr "لم يُجب عن NS"
 msgid "Name"
 msgstr "الاسم"
 
-#: apps/web/src/surfaces/xpanel.ts
-msgid "Name / Path"
-msgstr "الاسم والمسار"
+#~ #: apps/web/src/surfaces/xpanel.ts
+#~ msgid "Name / Path"
+#~ msgstr "الاسم والمسار"
 
 #: apps/web/src/board-port/approved-xpanel-pages.ts
 msgid "Name coverage"
@@ -20086,9 +20086,9 @@ msgstr "لا يشغّل أي نطاق لهذا الحساب PHP."
 msgid "No domain overrides are configured."
 msgstr "لا توجد إعدادات خاصة بالنطاقات."
 
-#: apps/web/src/whm-php-client.ts
-msgid "No domains"
-msgstr "لا نطاقات"
+#~ #: apps/web/src/whm-php-client.ts
+#~ msgid "No domains"
+#~ msgstr "لا نطاقات"
 
 msgid "No domains are linked."
 msgstr "لا توجد نطاقات مرتبطة."
@@ -21417,9 +21417,9 @@ msgstr "لم تُقرأ إعدادات دور الخادم. تغييرات ال�
 msgid "No server-wide run history has been loaded. An account archive is not a completed server-wide run."
 msgstr "لم يُحمّل سجل عمليات على مستوى الخادم. أرشيف حساب واحد لا يعني اكتمال عملية نسخ للخادم كله."
 
-#: apps/web/src/board-port/approved-whm-operations-components.ts
-msgid "No service is selected in this confirmation preview. Use its Restart action in the managed-services table to open the real confirmation."
-msgstr "لم تُحدد خدمة في معاينة التأكيد هذه. استخدم إجراء إعادة التشغيل الخاص بها في جدول الخدمات المُدارة لفتح التأكيد الحقيقي."
+#~ #: apps/web/src/board-port/approved-whm-operations-components.ts
+#~ msgid "No service is selected in this confirmation preview. Use its Restart action in the managed-services table to open the real confirmation."
+#~ msgstr "لم تُحدد خدمة في معاينة التأكيد هذه. استخدم إجراء إعادة التشغيل الخاص بها في جدول الخدمات المُدارة لفتح التأكيد الحقيقي."
 
 #: apps/web/src/design-board.ts
 msgid "No service report yet"
@@ -24589,9 +24589,9 @@ msgstr "POP3"
 msgid "Package"
 msgstr "الحزمة"
 
-#: apps/web/src/whm-php-client.ts
-msgid "Package + CLI binary; FPM unverified"
-msgstr "الحزمة وملف CLI؛ لم يُتحقق من FPM"
+#~ #: apps/web/src/whm-php-client.ts
+#~ msgid "Package + CLI binary; FPM unverified"
+#~ msgstr "الحزمة وملف CLI؛ لم يُتحقق من FPM"
 
 #: apps/agent/src/repair-center.ts
 msgid "Package configuration was interrupted. Some packages are unpacked or only partly configured, and other package operations are blocked until configuration completes."
@@ -24613,9 +24613,9 @@ msgstr "مشكلات قاعدة بيانات الحزم"
 msgid "Package family"
 msgstr "عائلة الحزم"
 
-#: apps/web/src/whm-php-client.ts
-msgid "Package installed; binary unverified"
-msgstr "الحزمة مثبتة؛ لم يُتحقق من الملف التنفيذي"
+#~ #: apps/web/src/whm-php-client.ts
+#~ msgid "Package installed; binary unverified"
+#~ msgstr "الحزمة مثبتة؛ لم يُتحقق من الملف التنفيذي"
 
 #: apps/web/src/whm-php-client.ts
 msgid "Package installed; enablement not read"
@@ -27662,9 +27662,9 @@ msgstr "جارٍ قراءة عزل الحساب…"
 msgid "Reading accounts…"
 msgstr "جارٍ قراءة الحسابات…"
 
-#: apps/web/src/board-port/approved-xpanel-bindings.ts
-msgid "Reading active sessions…"
-msgstr "جارٍ قراءة الجلسات النشطة…"
+#~ #: apps/web/src/board-port/approved-xpanel-bindings.ts
+#~ msgid "Reading active sessions…"
+#~ msgstr "جارٍ قراءة الجلسات النشطة…"
 
 #: apps/web/src/account-backup-client.ts
 msgid "Reading actual account archives…"
@@ -28019,9 +28019,9 @@ msgstr "جارٍ قراءة صحة الخادم…"
 msgid "Reading server information…"
 msgstr "جارٍ قراءة معلومات الخادم…"
 
-#: apps/web/src/surfaces/xwhm.ts
-msgid "Reading service status."
-msgstr "جار قراءة حالة الخدمات."
+#~ #: apps/web/src/surfaces/xwhm.ts
+#~ msgid "Reading service status."
+#~ msgstr "جار قراءة حالة الخدمات."
 
 #: apps/web/src/ops-file-sharing-client.ts
 msgid "Reading shares…"
@@ -29033,9 +29033,9 @@ msgstr "إعادة تحميل النطاقات"
 msgid "Reload file"
 msgstr "إعادة قراءة الملف"
 
-#: apps/web/src/board-port/approved-whm-operations-components.ts
-msgid "Reload instead"
-msgstr "إعادة تحميل الإعدادات بدلًا من إعادة التشغيل"
+#~ #: apps/web/src/board-port/approved-whm-operations-components.ts
+#~ msgid "Reload instead"
+#~ msgstr "إعادة تحميل الإعدادات بدلًا من إعادة التشغيل"
 
 #: apps/web/src/approved-workspace-forms.ts
 msgid "Reload page"
@@ -30319,13 +30319,13 @@ msgstr "إعادة تشغيل القوائم البريدية"
 msgid "Restart pure-ftpd"
 msgstr "إعادة تشغيل pure-ftpd"
 
-#: apps/web/src/board-port/approved-whm-operations-components.ts
-msgid "Restart selected service"
-msgstr "إعادة تشغيل الخدمة المحددة"
+#~ #: apps/web/src/board-port/approved-whm-operations-components.ts
+#~ msgid "Restart selected service"
+#~ msgstr "إعادة تشغيل الخدمة المحددة"
 
-#: apps/web/src/board-port/approved-whm-operations-components.ts
-msgid "Restart selected service?"
-msgstr "إعادة تشغيل الخدمة المحددة؟"
+#~ #: apps/web/src/board-port/approved-whm-operations-components.ts
+#~ msgid "Restart selected service?"
+#~ msgstr "إعادة تشغيل الخدمة المحددة؟"
 
 #: apps/agent/src/service-manager.ts apps/web/src/approved-host-services-client.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/whm-service-detail-client.ts apps/web/src/whm-service-manager-client.ts
 msgid "Restart service"
@@ -30626,9 +30626,9 @@ msgstr "جارٍ استعادة البريد…"
 msgid "Restoring requires the edit-account privilege."
 msgstr "تتطلب الاستعادة صلاحية تعديل الحساب."
 
-#: apps/web/src/ws-client.ts
-msgid "Restoring."
-msgstr "جار الاستعادة."
+#~ #: apps/web/src/ws-client.ts
+#~ msgid "Restoring."
+#~ msgstr "جار الاستعادة."
 
 #: apps/web/src/board-port/approved-xwhm.ts
 msgid "Restrict compiler access"
@@ -34415,8 +34415,8 @@ msgstr "عنوان IP الافتراضي للخادم"
 msgid "Server NFS exports held as configuration and verified against the kernel export table."
 msgstr "تصديرات NFS للخادم محفوظة كإعدادات ومُتحقَّق منها مقابل جدول تصدير النواة."
 
-msgid "Server account backups contain the account home directory only. Database dumps and DNS zones are not included in them."
-msgstr "تحتوي النسخ الاحتياطية للحسابات على الخادم على المجلد الرئيسي للحساب فقط، ولا تتضمن تفريغات قواعد البيانات ولا مناطق DNS."
+#~ msgid "Server account backups contain the account home directory only. Database dumps and DNS zones are not included in them."
+#~ msgstr "تحتوي النسخ الاحتياطية للحسابات على الخادم على المجلد الرئيسي للحساب فقط، ولا تتضمن تفريغات قواعد البيانات ولا مناطق DNS."
 
 #: apps/web/src/board-port/whm-panel-tokens-workspace.ts
 msgid "Server administration"
@@ -37698,9 +37698,9 @@ msgstr "بدأت عملية النسخ الاحتياطي. أعِد القراء
 msgid "The backup started. Read again to follow it."
 msgstr "بدأ النسخ الاحتياطي. اقرأ مجددًا لمتابعته."
 
-#: apps/web/src/ws-client.ts
-msgid "The backup was restored."
-msgstr "استُعيدت النسخة."
+#~ #: apps/web/src/ws-client.ts
+#~ msgid "The backup was restored."
+#~ msgstr "استُعيدت النسخة."
 
 #: apps/web/src/board-port/whm-ftp-log-workspace.ts
 msgid "The bounded read reached its line limit, so the oldest part of this window may be missing. Narrow the time range."
@@ -41983,9 +41983,9 @@ msgstr "يتجاوز دفتر العناوين حد القراءة لمحرر ا
 msgid "This address does not belong to this panel. Check the address and try again."
 msgstr "هذا العنوان لا يتبع هذه اللوحة. تحقّق من العنوان وحاول مرة أخرى."
 
-#: apps/web/src/ws-client.ts
-msgid "This address is on the server."
-msgstr "هذا العنوان موجود على الخادم."
+#~ #: apps/web/src/ws-client.ts
+#~ msgid "This address is on the server."
+#~ msgstr "هذا العنوان موجود على الخادم."
 
 #: apps/web/src/ws-client.ts
 msgid "This address is reserved in configuration. The server has not confirmed it is listening on the host."
@@ -43532,9 +43532,9 @@ msgstr "غير متاح مع هذا المرشح"
 msgid "Unavailable: ClamAV cannot be used on this server"
 msgstr "غير متاح: لا يمكن استخدام ClamAV على هذا الخادم"
 
-#: apps/web/src/acct-restore-client.ts
-msgid "Unavailable: DNS zones are rendered from saved configuration. Review the zone in DNS zones."
-msgstr "غير متاح: تُنشأ مناطق DNS من الإعدادات المحفوظة. راجع المنطقة في مناطق DNS."
+#~ #: apps/web/src/acct-restore-client.ts
+#~ msgid "Unavailable: DNS zones are rendered from saved configuration. Review the zone in DNS zones."
+#~ msgstr "غير متاح: تُنشأ مناطق DNS من الإعدادات المحفوظة. راجع المنطقة في مناطق DNS."
 
 #: apps/web/src/account-virus-scan-client.ts
 msgid "Unavailable: background jobs are not running"
@@ -43560,9 +43560,9 @@ msgstr "غير متاح: لا توجد معرّفات فرعية لهذا الح
 msgid "Unavailable: python3-venv is not installed"
 msgstr "غير متاح: python3-venv غير مثبّت"
 
-#: apps/web/src/acct-restore-client.ts
-msgid "Unavailable: server account backups contain no database dumps. Restore a database from its own export in Databases."
-msgstr "غير متاح: لا تحتوي النسخ الاحتياطية للحسابات على الخادم على تفريغات قواعد البيانات. استعد قاعدة البيانات من ملف تصديرها في قواعد البيانات."
+#~ #: apps/web/src/acct-restore-client.ts
+#~ msgid "Unavailable: server account backups contain no database dumps. Restore a database from its own export in Databases."
+#~ msgstr "غير متاح: لا تحتوي النسخ الاحتياطية للحسابات على الخادم على تفريغات قواعد البيانات. استعد قاعدة البيانات من ملف تصديرها في قواعد البيانات."
 
 #: apps/web/src/account-runtime-client.ts
 msgid "Unavailable: systemd socket proxy missing"
@@ -44710,9 +44710,9 @@ msgstr "قائمة المستخدم"
 msgid "User menu for {username}"
 msgstr "قائمة المستخدم {username}"
 
-#: apps/web/src/board-port/xpanel-home.ts
-msgid "User menu, {username}"
-msgstr "قائمة المستخدم، {username}"
+#~ #: apps/web/src/board-port/xpanel-home.ts
+#~ msgid "User menu, {username}"
+#~ msgstr "قائمة المستخدم، {username}"
 
 #: apps/web/src/board-port/db-engines-workspace.ts apps/web/src/surfaces/xpanel.ts
 msgid "User name"
@@ -46714,9 +46714,9 @@ msgstr "suPHP"
 msgid "suspended"
 msgstr "معلّق"
 
-#: apps/web/src/surfaces/xwhm.ts
-msgid "systemd Unit"
-msgstr "وحدة systemd"
+#~ #: apps/web/src/surfaces/xwhm.ts
+#~ msgid "systemd Unit"
+#~ msgstr "وحدة systemd"
 
 #: apps/web/src/sw-addon-services-client.ts
 msgid "systemd restarts {unit}. Applications that use it briefly lose their connection."
@@ -47714,3 +47714,671 @@ msgstr "ألغى «WHMCS» الإيقاف المؤقت لحساب"
 #: apps/web/src/board-port/xmail-compose.ts
 msgid "· check address"
 msgstr "· راجع العنوان"
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Changing the interface choice is unavailable for this session."
+msgstr "تغيير ثيم الواجهة غير متاح لهذه الجلسة."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Interface choice saved and read back. Reload this page to apply it."
+msgstr "حُفظ اختيار ثيم الواجهة وتم التحقق منه بقراءة جديدة. أعد تحميل الصفحة لتطبيقه."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Interface choice saved and read back. Reloading this page…"
+msgstr "حُفظ اختيار ثيم الواجهة وتم التحقق منه بقراءة جديدة. جارٍ إعادة تحميل الصفحة…"
+
+#: apps/web/src/chrome.ts
+msgid "Interface theme"
+msgstr "ثيم الواجهة"
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Reading your interface choice…"
+msgstr "جارٍ قراءة اختيار ثيم الواجهة…"
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Saving your interface choice…"
+msgstr "جارٍ حفظ اختيار ثيم الواجهة…"
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Sign in again to change your interface choice."
+msgstr "سجّل الدخول مجددًا لتغيير اختيار ثيم الواجهة."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "The interface choice changed since it was read. Reload it before saving again."
+msgstr "تغيّر اختيار ثيم الواجهة منذ قراءته. أعد تحميله قبل الحفظ مجددًا."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "The interface choice save could not be verified. Reload the choice before saving again."
+msgstr "تعذّر التحقق من حفظ اختيار ثيم الواجهة. أعد تحميل الاختيار قبل الحفظ مجددًا."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "The interface choices could not be read. Nothing was changed."
+msgstr "تعذّرت قراءة خيارات ثيم الواجهة. لم يتغير شيء."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "The saved interface choice could not be verified. Ask an administrator to review it before changing it."
+msgstr "تعذّر التحقق من اختيار ثيم الواجهة المحفوظ. اطلب من مسؤول مراجعته قبل تغييره."
+
+#: apps/web/src/ui-theme-client.ts
+msgid "Your personal interface choice cannot be changed from a handed-off session."
+msgstr "لا يمكن تغيير اختيارك الشخصي لثيم الواجهة من جلسة مفتوحة نيابةً عن الحساب."
+
+#: apps/web/src/surfaces/account-security.ts apps/web/src/themes/v2/surfaces/slots.ts
+msgctxt "account-security"
+msgid "Two-factor settings cannot be changed from a handed-off session."
+msgstr "لا يمكن تغيير إعدادات التحقق بخطوتين من جلسة مفتوحة نيابةً عن الحساب."
+
+#: apps/web/src/surfaces/account-security.ts apps/web/src/themes/v2/surfaces/slots.ts
+msgctxt "account-security"
+msgid "Password sign-in is active."
+msgstr "تسجيل الدخول بكلمة المرور مفعّل."
+
+msgctxt "resources-board"
+msgid "A process count is not a process list. No process rows have been read."
+msgstr "عدد العمليات ليس قائمة بها. لم تُقرأ أي صفوف للعمليات."
+
+msgctxt "resources-board"
+msgid "Account isolation slice"
+msgstr "شريحة عزل الحساب"
+
+msgctxt "resources-board"
+msgid "Account web worker"
+msgstr "عامل الويب للحساب"
+
+msgctxt "resources-board"
+msgid "Applied limit"
+msgstr "الحد المطبق"
+
+msgctxt "resources-board"
+msgid "Applied values need host readback. A saved plan does not establish active host limits."
+msgstr "تتطلب القيم المطبقة قراءة فعلية من المضيف. الباقة المحفوظة لا تثبت تفعيل الحدود على المضيف."
+
+msgctxt "resources-board"
+msgid "Average"
+msgstr "المتوسط"
+
+msgctxt "resources-board"
+msgid "Bandwidth limit events"
+msgstr "أحداث حد نقل البيانات"
+
+msgctxt "resources-board"
+msgid "CPU usage"
+msgstr "استخدام المعالج"
+
+msgctxt "resources-board"
+msgid "Command and unit"
+msgstr "الأمر والوحدة"
+
+msgctxt "resources-board"
+msgid "Configured isolation slice"
+msgstr "شريحة العزل المضبوطة"
+
+msgctxt "resources-board"
+msgid "Configured read cap"
+msgstr "حد القراءة المضبوط"
+
+msgctxt "resources-board"
+msgid "Configured write cap"
+msgstr "حد الكتابة المضبوط"
+
+msgctxt "resources-board"
+msgid "Copy unit file"
+msgstr "نسخ ملف الوحدة"
+
+msgctxt "resources-board"
+msgid "Database access"
+msgstr "الوصول إلى قواعد البيانات"
+
+msgctxt "resources-board"
+msgid "Disk IO history"
+msgstr "سجل إدخال وإخراج القرص"
+
+msgctxt "resources-board"
+msgid "Disk usage by folder"
+msgstr "استخدام القرص حسب المجلد"
+
+msgctxt "resources-board"
+msgid "Event counters and their observation times have not been read."
+msgstr "لم تُقرأ عدادات الأحداث وأوقات رصدها."
+
+msgctxt "resources-board"
+msgid "Folder sizes have not been read. A file listing is not a recursive quota measurement."
+msgstr "لم تُقرأ أحجام المجلدات. قائمة الملفات ليست قياسًا تكراريًا للحصة."
+
+msgctxt "resources-board"
+msgid "History has not been read."
+msgstr "لم يُقرأ السجل."
+
+msgctxt "resources-board"
+msgid "Home permissions"
+msgstr "أذونات المجلد الرئيسي"
+
+msgctxt "resources-board"
+msgid "IO direction"
+msgstr "اتجاه الإدخال والإخراج"
+
+msgctxt "resources-board"
+msgid "IO throttling"
+msgstr "تقييد عمليات الإدخال والإخراج"
+
+msgctxt "resources-board"
+msgid "Last observed"
+msgstr "آخر رصد"
+
+msgctxt "resources-board"
+msgid "Limit events"
+msgstr "أحداث الحدود"
+
+msgctxt "resources-board"
+msgid "Live service units and the request path have not been read."
+msgstr "لم تُقرأ وحدات الخدمة الفعلية ومسار الطلب."
+
+msgctxt "resources-board"
+msgid "Memory events"
+msgstr "أحداث الذاكرة"
+
+msgctxt "resources-board"
+msgid "Memory usage"
+msgstr "استخدام الذاكرة"
+
+msgctxt "resources-board"
+msgid "Observed unit state"
+msgstr "حالة الوحدة المرصودة"
+
+msgctxt "resources-board"
+msgid "PHP worker"
+msgstr "عامل PHP"
+
+msgctxt "resources-board"
+msgid "Peak"
+msgstr "الذروة"
+
+msgctxt "resources-board"
+msgid "Plan, applied limit and usage"
+msgstr "الباقة والحد المطبق والاستخدام"
+
+msgctxt "resources-board"
+msgid "Private temporary directory"
+msgstr "المجلد المؤقت الخاص"
+
+msgctxt "resources-board"
+msgid "Process limit events"
+msgstr "أحداث حد العمليات"
+
+msgctxt "resources-board"
+msgid "Processes in your slice"
+msgstr "العمليات ضمن شريحتك"
+
+msgctxt "resources-board"
+msgid "Read IOPS"
+msgstr "عمليات القراءة في الثانية"
+
+msgctxt "resources-board"
+msgid "Request path"
+msgstr "مسار الطلب"
+
+msgctxt "resources-board"
+msgid "Runtime identity"
+msgstr "هوية التشغيل"
+
+msgctxt "resources-board"
+msgid "Service unit details"
+msgstr "تفاصيل وحدة الخدمة"
+
+msgctxt "resources-board"
+msgid "Site service configuration"
+msgstr "إعدادات خدمات الموقع"
+
+msgctxt "resources-board"
+msgid "Stored configuration is not a running-unit or applied-limit observation."
+msgstr "الإعدادات المحفوظة لا تثبت تشغيل الوحدة أو تطبيق الحدود."
+
+msgctxt "resources-board"
+msgid "Time range"
+msgstr "النطاق الزمني"
+
+msgctxt "resources-board"
+msgid "Unit file has not been read."
+msgstr "لم يُقرأ ملف الوحدة."
+
+msgctxt "resources-board"
+msgid "Use the authorized workspace navigation to open the file manager."
+msgstr "استخدم التنقل المصرح به في مساحة العمل لفتح مدير الملفات."
+
+msgctxt "resources-board"
+msgid "Virtual host"
+msgstr "المضيف الافتراضي"
+
+msgctxt "resources-board"
+msgid "Virtual-host configuration has not been read."
+msgstr "لم تُقرأ إعدادات المضيف الافتراضي."
+
+msgctxt "resources-board"
+msgid "Web proxy"
+msgstr "وكيل الويب"
+
+msgctxt "resources-board"
+msgid "Write IOPS"
+msgstr "عمليات الكتابة في الثانية"
+
+msgid "Selection details"
+msgstr "تفاصيل التحديد"
+
+msgid "No file open"
+msgstr "لا يوجد ملف مفتوح"
+
+msgid "Close editor"
+msgstr "إغلاق المحرر"
+
+msgid "Open editor"
+msgstr "فتح المحرر"
+
+msgid "Filter files"
+msgstr "تصفية الملفات"
+
+msgid "Reading upload"
+msgstr "جار قراءة الملف"
+
+msgid "Sending upload"
+msgstr "جار رفع الملف"
+
+msgid "Verifying upload"
+msgstr "جار التحقق من الرفع"
+
+msgid "Upload confirmed"
+msgstr "تم تأكيد الرفع"
+
+msgid "Upload failed"
+msgstr "فشل الرفع"
+
+msgid "Upload outcome uncertain"
+msgstr "نتيجة الرفع غير مؤكدة"
+
+msgid "No uploads in this session."
+msgstr "لا توجد عمليات رفع في هذه الجلسة."
+
+msgid "Path copied."
+msgstr "تم نسخ المسار."
+
+msgid "Path could not be copied."
+msgstr "تعذر نسخ المسار."
+
+msgid "Group"
+msgstr "المجموعة"
+
+msgid "Other"
+msgstr "الآخرون"
+
+msgid "Execute"
+msgstr "تنفيذ"
+
+msgid "No files match the filter."
+msgstr "لا توجد ملفات تطابق عامل التصفية."
+
+msgid "Your browser could not retain this request. No changes were sent."
+msgstr "تعذر على المتصفح الاحتفاظ بهذا الطلب. لم يتم إرسال أي تغييرات."
+
+msgid "The previous account request is retained in this tab. Review accounts before starting another request."
+msgstr "تم الاحتفاظ بطلب الحساب السابق في علامة التبويب هذه. راجع الحسابات قبل بدء طلب آخر."
+
+msgid "This request already completed. Current hosting verification is still required."
+msgstr "اكتمل هذا الطلب سابقا. ما زال التحقق من حالة الاستضافة الحالية مطلوبا."
+
+msgid "The announcement was dismissed, but this page could not refresh. Reload the page."
+msgstr "أُخفي الإعلان، لكن تعذّر تحديث هذه الصفحة. أعد تحميلها."
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Binary"
+msgstr "الملف التنفيذي"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Used by"
+msgstr "الاستخدام"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Packages"
+msgstr "الحزم"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Lifecycle"
+msgstr "دورة الدعم"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Binary and FPM"
+msgstr "الملف التنفيذي وFPM"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Runs as"
+msgstr "هوية التشغيل"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Where it runs"
+msgstr "بيئة التشغيل"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Offered to accounts"
+msgstr "الإتاحة للحسابات"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Editor mode"
+msgstr "وضع المحرر"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "FPM package installed"
+msgstr "حزمة FPM مثبتة"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Support dates"
+msgstr "تواريخ الدعم"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Purpose"
+msgstr "الغرض"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Global php.ini"
+msgstr "ملف php.ini العام"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Allowed"
+msgstr "المسموح"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Granted (UTC)"
+msgstr "وقت المنح (UTC)"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Preview of php.ini"
+msgstr "معاينة ملف php.ini"
+
+#: apps/web/src/whm-php-client.ts apps/web/src/board-port/whm-php-workspace.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/host/php.ts
+msgid "Copy php.ini"
+msgstr "نسخ ملف php.ini"
+
+msgid "Runtime not observed"
+msgstr "لم تُرصد حالة التشغيل"
+
+msgid "Edge and reverse proxy"
+msgstr "واجهة الاتصال والوكيل العكسي"
+
+msgid "The intended edge forwards site requests to the loopback backend. Public listeners and generated configuration have not been observed here."
+msgstr "توجّه واجهة الاتصال طلبات المواقع إلى الخدمة الخلفية على عنوان الحلقة المحلية وفق البنية المقصودة. لم تُرصد هنا المنافذ العامة المستمعة أو الإعدادات المولَّدة."
+
+msgid "Saved backend engine"
+msgstr "محرك الخدمة الخلفية المحفوظ"
+
+msgid "Saved Apache MPM: {mpm}. The saved choice does not verify the identity of a serving process."
+msgstr "وحدة Apache MPM المحفوظة: {mpm}. لا يثبت الاختيار المحفوظ هوية العملية التي تخدم الطلبات."
+
+msgid "OpenLiteSpeed is the saved engine. Its listener and per-site execution identity have not been observed."
+msgstr "المحرك المحفوظ هو OpenLiteSpeed. لم تُرصد منافذه المستمعة أو هوية تنفيذ كل موقع."
+
+msgid "Site application"
+msgstr "تطبيق الموقع"
+
+msgid "Per-site handler"
+msgstr "معالج كل موقع"
+
+msgid "Account execution boundary"
+msgstr "حدود تنفيذ الحساب"
+
+msgid "The domain handler, PHP pool or application process, account UID and served response require separate runtime evidence."
+msgstr "يلزم دليل منفصل من التشغيل الفعلي للتحقق من معالج النطاق، أو مجموعة عمليات PHP أو عملية التطبيق، ومعرّف مستخدم الحساب UID، والاستجابة المقدَّمة."
+
+msgid "Saved configuration when this page opened. Reload after changes to refresh this reference."
+msgstr "الإعداد المحفوظ عند فتح هذه الصفحة. أعد تحميل الصفحة بعد التغييرات لتحديث هذا المرجع."
+
+msgid "Request path"
+msgstr "مسار الطلب"
+
+msgid "Illustrative proxy block using the page-load saved HTTP port. This is not a read of a generated file or a verified listener."
+msgstr "كتلة توضيحية للوكيل تستخدم منفذ HTTP المحفوظ عند فتح الصفحة. هذا ليس محتوى ملف مولَّد تمت قراءته ولا دليلًا على وجود منفذ مستمع."
+
+msgid "Forwarded client headers are overwritten at the edge. The complete generated configuration includes additional guarded directives."
+msgstr "تُستبدل ترويسات العميل المُمرَّرة عند واجهة الاتصال. تتضمن الإعدادات المولَّدة الكاملة توجيهات حماية إضافية."
+
+msgid "A host-specific default baseline has not been supplied. Saved values are not proof of active configuration; draft differences appear in Pending change."
+msgstr "لم تُوفَّر قيم افتراضية مرجعية خاصة بهذا الخادم. لا تثبت القيم المحفوظة أنها الإعدادات النشطة؛ وتظهر اختلافات المسودة في قسم «التغيير المعلَّق»."
+
+msgid "Saved configuration comparison"
+msgstr "مقارنة الإعدادات المحفوظة"
+
+msgid "Default baseline"
+msgstr "القيم الافتراضية المرجعية"
+
+msgid "Not reviewed"
+msgstr "لم يُراجع"
+
+msgid "Review pending change"
+msgstr "مراجعة التغيير المعلَّق"
+
+msgid "Required change workflow. No step is marked passed by this explanatory reference."
+msgstr "مسار العمل المطلوب لإجراء التغيير. لا يُعلن هذا المرجع التوضيحي نجاح أي خطوة."
+
+msgid "Read the complete saved settings and review the draft difference."
+msgstr "اقرأ الإعدادات المحفوظة كاملة وراجع اختلافات المسودة."
+
+msgid "Validate the candidate and test syntax before applying."
+msgstr "تحقّق من الإعدادات المقترحة واختبر صياغتها قبل التطبيق."
+
+msgid "Read the actual reconcile result and resulting generation."
+msgstr "اقرأ النتيجة الفعلية لتطبيق الإعدادات والجيل الناتج."
+
+msgid "Request flow"
+msgstr "مسار الطلب"
+
+msgid "Changes from defaults"
+msgstr "الاختلافات عن القيم الافتراضية"
+
+msgid "Proxy configuration reference"
+msgstr "مرجع إعداد الوكيل"
+
+msgid "Test gate"
+msgstr "التحقق قبل التطبيق"
+
+msgid "Dependencies"
+msgstr "الاعتماديات"
+
+msgid "No service is selected."
+msgstr "لم تُحدَّد أي خدمة."
+
+msgid "DNS and access"
+msgstr "DNS والوصول"
+
+msgid "Not issued"
+msgstr "لم يُصدَر"
+
+msgid "Select all accounts"
+msgstr "تحديد جميع الحسابات"
+
+msgid "This local archive workflow copies home files and excludes the standard mail data and mail settings directories. It does not create database dumps or capture DNS zones. Review a component backup for those parts."
+msgstr "ينسخ مسار الأرشفة المحلية هذا ملفات مجلد المنزل، ويستبعد المجلدات المعتادة لبيانات البريد وإعداداته. لا يُنشئ نسخًا لقواعد البيانات ولا يحفظ مناطق DNS. راجع نسخة احتياطية للمكوّن المطلوب لتلك الأجزاء."
+
+
+#: apps/web/src/whm-backup-destinations-client.ts
+msgid "Enter a valid SFTP host."
+msgstr "أدخل اسم مضيف SFTP صالحًا."
+
+#: apps/web/src/whm-backup-destinations-client.ts
+msgid "Check the SFTP host and port. No changes were made."
+msgstr "تحقّق من مضيف SFTP والمنفذ. لم تُجرَ أي تغييرات."
+
+#: apps/web/src/whm-firewall-client.ts
+msgid "The firewall rules changed after the preview. Preview the import again; this import was not applied."
+msgstr "تغيّرت قواعد جدار الحماية بعد المعاينة. أعد معاينة الاستيراد؛ لم يُطبَّق هذا الاستيراد."
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "1 year"
+msgstr "سنة واحدة"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "180 days"
+msgstr "180 يومًا"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "Account name check"
+msgstr "التحقّق من اسم الحساب"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "At least {minimum} characters"
+msgstr "{minimum} أحرف على الأقل"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "Breach check"
+msgstr "التحقّق من التسريبات"
+
+#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "Browser"
+msgstr "المتصفح"
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "Check the token name, scopes, expiry and allowed addresses."
+msgstr "تحقّق من اسم الرمز وصلاحياته ومدة صلاحيته والعناوين المسموح بها."
+
+#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "Copy the token now. It is shown once; store it securely before leaving this page."
+msgstr "انسخ الرمز الآن. يُعرض مرة واحدة؛ احفظه بأمان قبل مغادرة هذه الصفحة."
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "Copy this token now. It is shown once and cannot be recovered from the token list."
+msgstr "انسخ هذا الرمز الآن. يُعرض مرة واحدة ولا يمكن استعادته من قائمة الرموز."
+
+#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "Does not contain your username"
+msgstr "لا يحتوي على اسم المستخدم"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "For scripts and CI. Tokens are scoped, always expire and are stored only as hashes."
+msgstr "للبرامج النصية والتكامل المستمر. للرموز صلاحيات محددة، وتنتهي صلاحيتها دائمًا، ولا تُخزّن إلا قيم تجزئتها."
+
+#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "IP address and location"
+msgstr "عنوان IP والموقع"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "IPv4 or IPv6 addresses or CIDR ranges, comma-separated. Empty allows any address."
+msgstr "عناوين IPv4 أو IPv6 أو نطاقات CIDR، مفصولة بفواصل. اترك الحقل فارغًا للسماح بأي عنوان."
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "Last changed"
+msgstr "آخر تغيير"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "Letters, digits, dashes and underscores."
+msgstr "أحرف وأرقام وشرطات وشرطات سفلية."
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "Loading…"
+msgstr "جارٍ التحميل…"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "Mailbox and FTP passwords are set in Email & users."
+msgstr "تُضبط كلمات مرور البريد وFTP في البريد والمستخدمين."
+
+#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "Not in known password breaches"
+msgstr "غير موجود في تسريبات كلمات المرور المعروفة"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "Only the selected actions are allowed."
+msgstr "لا يُسمح إلا بالإجراءات المحددة."
+
+#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "Password requirements"
+msgstr "متطلبات كلمة المرور"
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "Rename token"
+msgstr "تغيير اسم الرمز"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "Revoke selected"
+msgstr "إلغاء المحدد"
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "Revoke selected tokens?"
+msgstr "هل تريد إلغاء الرموز المحددة؟"
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "Scripts using these tokens stop working at once. This cannot be undone."
+msgstr "ستتوقف البرامج النصية التي تستخدم هذه الرموز عن العمل فورًا. لا يمكن التراجع عن هذا الإجراء."
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "Select at most 50 tokens per operation."
+msgstr "حدّد 50 رمزًا كحد أقصى لكل عملية."
+
+#: apps/web/src/themes/v2/pages/xpanel/security/account.ts apps/web/src/account-api-tokens-client.ts
+msgid "Select token"
+msgstr "تحديد الرمز"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "Select up to 50 tokens"
+msgstr "تحديد ما يصل إلى 50 رمزًا"
+
+#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "Sessions"
+msgstr "الجلسات"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "Sign in again after changing your password."
+msgstr "سجّل الدخول مجددًا بعد تغيير كلمة المرور."
+
+#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "Sign in again after your password changes."
+msgstr "سجّل الدخول مجددًا بعد تغيير كلمة مرورك."
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "The change may be saved. Refresh and verify the token list before trying again."
+msgstr "قد يكون التغيير محفوظًا. حدّث قائمة الرموز وتحقّق منها قبل المحاولة مجددًا."
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "The first 50 tokens are selected."
+msgstr "تم تحديد أول 50 رمزًا."
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "The token change could not be completed."
+msgstr "تعذّر إكمال تغيير الرمز."
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "The token could not be copied."
+msgstr "تعذّر نسخ الرمز."
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "Token created."
+msgstr "تم إنشاء الرمز."
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "Token renamed."
+msgstr "تم تغيير اسم الرمز."
+
+#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "Token secrets are shown only once and are never returned by the token list."
+msgstr "تُعرض أسرار الرموز مرة واحدة فقط، ولا تُعاد مطلقًا ضمن قائمة الرموز."
+
+#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "Token steps"
+msgstr "خطوات الرمز"
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "Tokens read."
+msgstr "تمت قراءة الرموز."
+
+#: apps/web/src/account-api-tokens-client.ts
+msgid "Tokens revoked."
+msgstr "تم إلغاء الرموز."
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "Two-factor sign-in"
+msgstr "تسجيل الدخول بعاملين"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "Your xPanel sign-in."
+msgstr "تسجيل دخولك إلى xPanel."
+
+#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "Your xPanel sign-in. Mailbox and FTP passwords are managed separately."
+msgstr "تسجيل دخولك إلى xPanel. تُدار كلمات مرور صناديق البريد وFTP بشكل منفصل."
+
+#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
+msgid "{days} days"
+msgstr "{days} يومًا"

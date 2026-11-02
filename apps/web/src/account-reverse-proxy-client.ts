@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { domainCanonicalName, domainObject, domainPhpSettings, domainRoot, domainSafeText, domainStable, domainWriteUncertain, readDomainWorkspace } from './domain-workspace-client.ts'
 import type { DomainWorkspaceRow, DomainWorkspaceView } from './domain-workspace-client.ts'
@@ -74,6 +78,9 @@ function bindAccountReverseProxy(askDialog: ((options: Record<string, unknown>) 
     const optionsBox = find('options'), websocket = find<HTMLInputElement>('websocket'), hostHeader = find<HTMLSelectElement>('host'), headerRows = find('header-rows'), addHeader = find<HTMLButtonElement>('add-header'), headersError = find('headers-error')
     if (!status || !rows || !application || !refreshButton || !mode || !upstream || !upstreamField || !error || !save || !cancel || !selectedName || !current || !docRoot
       || !optionsBox || !websocket || !hostHeader || !headerRows || !addHeader || !headersError) return
+    const rowSlots = ['name', 'kind', 'mode', 'upstream', 'configure', 'reason'] as const
+    const rowTemplate = clientTemplate(root, 'proxy-row'), headerTemplate = clientTemplate(root, 'proxy-header'), emptyTemplate = clientTemplate(root, 'proxy-empty')
+    cloneClientTemplate(rowTemplate, 'tr', rowSlots); cloneClientTemplate(headerTemplate, 'tr', ['name', 'value', 'remove']); cloneClientTemplate(emptyTemplate, 'tr', ['message'])
     let view: DomainWorkspaceView | null = null, selected: string | null = null, busy = false, confirming = false, review = false
     const MODES: Record<string, string> = { php: t('PHP files'), static: t('Static files'), proxy: t(msgctxt('account-reverse-proxy-client', 'Reverse proxy')), node: t('Node application'), python: t('Python application') }
     const KINDS: Record<string, string> = { primary: t('Primary'), addon: t('Addon'), subdomain: t(msgctxt('account-reverse-proxy-client', 'Subdomain')), alias: t('Alias') }
@@ -94,7 +101,6 @@ function bindAccountReverseProxy(askDialog: ((options: Record<string, unknown>) 
     }
     const request = (method: string, path: string, body?: unknown): Promise<unknown> => !send || !eligible() ? Promise.reject({ details: { stateChanged: false } }) : body === undefined ? send(method, path) : send(method, path, body)
     const read = async (): Promise<DomainWorkspaceView> => rpReadWorkspace(await request('GET', '/api/domains'), { accountId, home })
-    const cell = (tr: HTMLTableRowElement, text: string, technical: boolean): HTMLTableCellElement => { const td = document.createElement('td'), content = document.createElement(technical ? 'bdi' : 'span'); if (technical) content.className = 'xp-technical-token'; content.dir = technical ? 'ltr' : 'auto'; content.textContent = text; td.append(content); tr.append(td); return td }
     const fill = (): void => {
       const target = row()
       selectedName.textContent = target ? target.name : t('None selected')
@@ -113,17 +119,10 @@ function bindAccountReverseProxy(askDialog: ((options: Record<string, unknown>) 
       headerRows.querySelector<HTMLElement>('[data-rp-header-empty]')?.toggleAttribute('hidden', !!headerRows.querySelector('[data-rp-header]'))
     }
     function headerRow(name: string, value: string): void {
-      const tr = document.createElement('tr'); tr.dataset.rpHeader = ''
-      const input = (kind: string, text: string, label: string): HTMLTableCellElement => {
-        const td = document.createElement('td'), field = document.createElement('input')
-        field.type = 'text'; field.className = 'xp-input xp-mono'; field.dir = 'ltr'; field.maxLength = kind === 'name' ? 64 : 256; field.spellcheck = false; field.autocomplete = 'off'
-        field.value = text; field.dataset.rpHeaderField = kind; field.setAttribute('aria-label', label); td.append(field); return td
-      }
-      const remove = document.createElement('button'), action = document.createElement('td')
-      remove.type = 'button'; remove.className = 'xp-btn'; remove.textContent = t('Remove')
+      const tr = cloneClientTemplate(headerTemplate, 'tr', ['name', 'value', 'remove'])
+      for (const [slot, text] of [['name', name], ['value', value]] as const) (clientTemplateSlot(tr, slot, 'input') as HTMLInputElement).value = text
+      const remove = clientTemplateSlot(tr, 'remove', 'button') as HTMLButtonElement
       remove.addEventListener('click', () => { if (!remove.disabled) { tr.remove(); headersNote(''); lock() } })
-      action.append(remove)
-      tr.append(input('name', name, t('Header name')), input('value', value, t('Header value')), action)
       headerRows.append(tr); headersNote('')
     }
     const headersOf = (): { name: string; value: string }[] => [...headerRows.querySelectorAll<HTMLElement>('[data-rp-header]')].map(tr => ({
@@ -132,17 +131,16 @@ function bindAccountReverseProxy(askDialog: ((options: Record<string, unknown>) 
       view = next; review = false; rows.textContent = ''
       if (selected && !next.domains.some(entry => entry.id === selected)) selected = null
       for (const domain of next.domains) {
-        const tr = document.createElement('tr'), block = reverseProxyBlocked(domain, next.domains)
-        cell(tr, domain.name, true); cell(tr, KINDS[domain.kind] ?? domain.kind, false); cell(tr, MODES[domain.siteType] ?? domain.siteType, false); cell(tr, domain.upstream ?? '-', domain.upstream !== null)
-        const td = document.createElement('td'), button = document.createElement('button')
-        button.type = 'button'; button.className = 'xp-btn'; button.textContent = t('Configure'); button.setAttribute('aria-label', t('Configure: {domain}', { domain: domain.name }))
+        const tr = cloneClientTemplate(rowTemplate, 'tr', rowSlots), block = reverseProxyBlocked(domain, next.domains)
+        for (const [slot, text] of [['name', domain.name], ['kind', KINDS[domain.kind] ?? domain.kind], ['mode', MODES[domain.siteType] ?? domain.siteType], ['upstream', domain.upstream ?? '-']] as const) clientTemplateSlot(tr, slot).textContent = text
+        const button = clientTemplateSlot(tr, 'configure', 'button') as HTMLButtonElement
+        button.setAttribute('aria-label', t('Configure: {domain}', { domain: domain.name }))
         button.dataset.rpBlocked = String(block !== null)
         button.addEventListener('click', () => { if (button.disabled) return; selected = domain.id; fill(); lock(); mode.focus() })
-        td.append(button)
-        if (block) { const reason = document.createElement('p'); reason.className = 'xp-help'; reason.textContent = BLOCKS[block]!; td.append(reason) }
-        tr.append(td); rows.append(tr)
+        const reason = clientTemplateSlot(tr, 'reason'); reason.hidden = !block; reason.textContent = block ? BLOCKS[block]! : ''
+        rows.append(tr)
       }
-      if (!next.domains.length) { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 5; td.textContent = t('This account has no domains.'); tr.append(td); rows.append(tr) }
+      if (!next.domains.length) { const tr = cloneClientTemplate(emptyTemplate, 'tr', ['message']); clientTemplateSlot(tr, 'message', 'td').textContent = t('This account has no domains.'); rows.append(tr) }
       fill()
     }
     const fieldMessage = (code: string): string => ({
@@ -232,4 +230,4 @@ function bindAccountReverseProxy(askDialog: ((options: Record<string, unknown>) 
   })
 }
 
-export const ACCOUNT_REVERSE_PROXY_CLIENT_BINDING = `(()=>{const domainObject=${domainObject.toString()};const domainSafeText=${domainSafeText.toString()};const domainCanonicalName=${domainCanonicalName.toString()};const domainRoot=${domainRoot.toString()};const domainStable=${domainStable.toString()};const domainWriteUncertain=${domainWriteUncertain.toString()};const domainPhpSettings=${domainPhpSettings.toString()};const readDomainWorkspace=${readDomainWorkspace.toString()};const rpObject=domainObject;const rpStable=domainStable;const rpUncertain=domainWriteUncertain;const rpReadWorkspace=readDomainWorkspace;const RP_ACCOUNT_ID=${RP_ACCOUNT_ID.toString()};const RP_UPSTREAM=${RP_UPSTREAM.toString()};const RP_HEADER_NAME=${RP_HEADER_NAME.toString()};const RP_RESERVED_HEADERS=${JSON.stringify(RP_RESERVED_HEADERS)};const reverseProxyUpstreamDraft=${reverseProxyUpstreamDraft.toString()};const reverseProxyOptionsOf=${reverseProxyOptionsOf.toString()};const reverseProxyHeadersProblem=${reverseProxyHeadersProblem.toString()};const reverseProxyBlocked=${reverseProxyBlocked.toString()};const reverseProxyAcknowledged=${reverseProxyAcknowledged.toString()};return ${bindAccountReverseProxy.toString()};})()`
+export const ACCOUNT_REVERSE_PROXY_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const domainObject=${domainObject.toString()};const domainSafeText=${domainSafeText.toString()};const domainCanonicalName=${domainCanonicalName.toString()};const domainRoot=${domainRoot.toString()};const domainStable=${domainStable.toString()};const domainWriteUncertain=${domainWriteUncertain.toString()};const domainPhpSettings=${domainPhpSettings.toString()};const readDomainWorkspace=${readDomainWorkspace.toString()};const rpObject=domainObject;const rpStable=domainStable;const rpUncertain=domainWriteUncertain;const rpReadWorkspace=readDomainWorkspace;const RP_ACCOUNT_ID=${RP_ACCOUNT_ID.toString()};const RP_UPSTREAM=${RP_UPSTREAM.toString()};const RP_HEADER_NAME=${RP_HEADER_NAME.toString()};const RP_RESERVED_HEADERS=${JSON.stringify(RP_RESERVED_HEADERS)};const reverseProxyUpstreamDraft=${reverseProxyUpstreamDraft.toString()};const reverseProxyOptionsOf=${reverseProxyOptionsOf.toString()};const reverseProxyHeadersProblem=${reverseProxyHeadersProblem.toString()};const reverseProxyBlocked=${reverseProxyBlocked.toString()};const reverseProxyAcknowledged=${reverseProxyAcknowledged.toString()};return ${bindAccountReverseProxy.toString()};})()`

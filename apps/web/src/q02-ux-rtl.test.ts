@@ -178,7 +178,8 @@ describe('H03 & Q02 — Bilingual UX/UI, RTL <bdi dir="ltr"> isolation, ASCII di
     const pendingBannerAr = renderAsyncActionState({
       state: 'pending',
       locale: 'ar',
-      jobId: 'JOB-000001',
+      jobId: '00000000-0000-4000-8000-000000000001',
+      jobReferenceCode: 'JOB-000001',
       generationId: 142,
       httpStatus: 202,
     })
@@ -191,8 +192,8 @@ describe('H03 & Q02 — Bilingual UX/UI, RTL <bdi dir="ltr"> isolation, ASCII di
     assert.equal(EASTERN_ARABIC_DIGIT_RE.test(pendingBannerAr), false)
 
     for (const state of ['loading', 'pending', 'succeeded', 'denied', 'failed', 'unavailable', 'conflict'] as const) {
-      const enHtml = renderAsyncActionState({ state, locale: 'en', jobId: 'JOB-000009' })
-      const arHtml = renderAsyncActionState({ state, locale: 'ar', jobId: 'JOB-000009' })
+      const enHtml = renderAsyncActionState({ state, locale: 'en', jobId: '00000000-0000-4000-8000-000000000009', jobReferenceCode: 'JOB-000009' })
+      const arHtml = renderAsyncActionState({ state, locale: 'ar', jobId: '00000000-0000-4000-8000-000000000009', jobReferenceCode: 'JOB-000009' })
       assert.match(enHtml, new RegExp(`data-action-state="${state}"`))
       assert.match(arHtml, new RegExp(`data-action-state="${state}"`))
       assert.equal(EASTERN_ARABIC_DIGIT_RE.test(enHtml), false)
@@ -207,7 +208,8 @@ describe('H03 & Q02 — Bilingual UX/UI, RTL <bdi dir="ltr"> isolation, ASCII di
         state: 'conflict',
         httpStatus: 409,
         errorCode: 'CONFLICT',
-        jobId: 'JOB-000077',
+        jobId: '00000000-0000-4000-8000-000000000077',
+        jobReferenceCode: 'JOB-000077',
       },
     })
     assert.match(panelWithConflict, /data-action-state="conflict"/)

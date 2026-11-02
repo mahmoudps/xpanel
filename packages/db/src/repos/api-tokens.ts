@@ -101,6 +101,25 @@ export const createApiToken = (
     return fromRow(mustExist(rows[0], 'api token', id))
   })
 
+/** Rename only a token belonging to this principal. Call with the admitted transaction runner. */
+export const renameApiToken = (db: Db, id: Id, principalId: Id, name: string): Promise<ApiTokenRecord> =>
+  withSqliteErrors(async () => {
+    const tid = assertId(id, 'id'), pid = assertId(principalId, 'principalId')
+    const cleanName = assertLine(name, 128, 'name', { allowEmpty: false })
+    // One conditional statement has no awaited pre-read between an admission clock check and the UPDATE.
+    const rows = await db.query<ApiTokenRow>(
+      `UPDATE api_tokens SET name = $3 WHERE id = $1 AND principal_id = $2
+       AND NOT EXISTS (SELECT 1 FROM api_tokens AS other WHERE other.principal_id = $2 AND other.id <> $1 AND lower(other.name) = lower($3))
+       RETURNING *`, [tid, pid, cleanName])
+    if (!rows[0]) {
+      // Only an owned lookup distinguishes duplicate name from the same NOT_FOUND used for a foreign id.
+      const owned = await db.query<{ id: string }>('SELECT id FROM api_tokens WHERE id = $1 AND principal_id = $2', [tid, pid])
+      mustExist(owned[0], 'api token', id)
+      return fail('CONFLICT', 'this token name is already in use')
+    }
+    return fromRow(rows[0])
+  })
+
 export const findActiveApiTokenByHash = async (
   db: Db,
   tokenHash: string,

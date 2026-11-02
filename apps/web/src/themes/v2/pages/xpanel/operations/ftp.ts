@@ -1,0 +1,32 @@
+import type { PanelSurfaceProps } from '../../../../contract.ts'
+import { statusPill } from '../../../components/index.ts'
+import { escapeHtml } from '../../../html.ts'
+import { deniedOperationAuthority, operationButton, operationCard, operationContext, operationField, operationPage, operationTable, technical, unreadRow, type PanelOperationAuthority } from './common.ts'
+
+function serviceDialogs(t: ReturnType<typeof operationContext>['t']): string {
+  const footer = `<div class="v2-panel-operation-actions"><button type="button" class="v2-btn" data-dialog-cancel>${escapeHtml(t(msgid('Cancel')))}</button><button type="submit" class="v2-btn v2-btn--primary">${escapeHtml(t(msgid('Save')))}</button></div>`
+  return `<dialog class="v2-panel-operation-dialog" data-mailbox-password-dialog aria-labelledby="v2-ftp-password-heading"><form method="dialog"><h2 id="v2-ftp-password-heading">${escapeHtml(t(msgctxt('theme:v2', 'Service user password')))}</h2><p>${escapeHtml(t(msgid('The new password is saved after you confirm.')))}</p>${operationField('v2-ftp-password-next', t(msgid('New password')), '<input id="v2-ftp-password-next" name="password" type="password" dir="ltr" minlength="8" required autocomplete="new-password">')}<p data-dialog-status role="status" hidden></p>${footer}</form></dialog>
+<dialog class="v2-panel-operation-dialog" data-mailbox-quota-dialog aria-labelledby="v2-ftp-mail-quota-heading"><form method="dialog"><h2 id="v2-ftp-mail-quota-heading">${escapeHtml(t(msgid('Mailbox quota')))}</h2><p>${escapeHtml(t(msgctxt('theme:v2', 'This changes mailbox storage only. It is not an FTP disk quota.')))}</p>${operationField('v2-ftp-mail-quota-next', t(msgctxt('theme:v2', 'Quota (MiB)')), '<input id="v2-ftp-mail-quota-next" name="mailboxQuotaMb" type="number" dir="ltr" min="1" required>')}<p data-dialog-status role="status" hidden></p>${footer}</form></dialog>`
+}
+
+/** Existing service-user password controls work; unsupported FTP operations stay explicit. */
+export function renderV2AccountFtpPage(props: PanelSurfaceProps, authority: PanelOperationAuthority = deniedOperationAuthority): string {
+  const { t, canReadFacts, canManage, account } = operationContext(props, authority, '/files/ftp')
+  props = { ...props, account }
+  const read = canReadFacts(['ftp-accounts']) && !!account && props.serviceUsers !== undefined
+  const users = read ? props.serviceUsers!.filter(user => user.accountId === props.account!.id && user.services.ftp) : []
+  const rows = users.map(user => {
+    const quota = user.mailboxQuotaMb === 'unlimited' ? escapeHtml(t(msgid('unlimited'))) : technical(`${user.mailboxQuotaMb} MiB`)
+    return `<tr data-service-user="${escapeHtml(user.login)}"><td>${technical(user.login)}</td><td>${technical(user.ftpDir ?? '—')}</td><td>${statusPill({ label: 'FTP', tone: 'neutral' })}${user.services.email ? statusPill({ label: t(msgid('Email')), tone: 'neutral' }) : ''}</td><td>${user.services.email ? quota : escapeHtml(t(msgid('Not applicable')))}</td><td><div class="v2-panel-operation-actions">${operationButton(t(msgid('Password')), { 'data-mailbox-password': user.id }, !canManage)}${user.services.email ? operationButton(t(msgid('Mailbox quota')), { 'data-mailbox-quota': user.id, 'data-mailbox-quota-value': user.mailboxQuotaMb }, !canManage) : ''}${operationButton(t(msgid('Delete')))}</div></td></tr>`
+  }).join('')
+  const accounts = operationCard('v2-ftp-accounts', t(msgid('FTP accounts')),
+    `${operationTable('v2-ftp-table', t(msgid('FTP accounts')), [t(msgid('Login')), t(msgid('Directory')), t(msgid('Services')), t(msgid('Mailbox quota')), t(msgid('Actions'))], { 'data-ftp-users': true }, rows || unreadRow(5, read ? t(msgctxt('theme:v2', 'No FTP service users were returned.')) : t(msgctxt('theme:v2', 'FTP service users have not been read.'))))}<p>${escapeHtml(t(msgctxt('theme:v2', 'FTP deletion is unavailable until its service-user confirmation is connected. No mailbox deletion action is reused here.')))}</p>`)
+  const create = operationCard('v2-ftp-create', t(msgctxt('theme:v2', 'Create an FTP login')),
+    `<div data-ftp-create class="v2-panel-operation-fields">${operationField('v2-ftp-login', t(msgid('Login')), '<input id="v2-ftp-login" name="login" type="text" dir="ltr" autocomplete="off" disabled>')}${operationField('v2-ftp-password', t(msgid('Password')), '<input id="v2-ftp-password" name="password" type="password" dir="ltr" autocomplete="new-password" minlength="8" disabled>')}${operationField('v2-ftp-directory', t(msgid('Directory')), '<input id="v2-ftp-directory" name="ftpDir" type="text" dir="ltr" autocomplete="off" spellcheck="false" disabled>')}</div><div class="v2-panel-operation-actions">${operationButton(t(msgctxt('theme:v2', 'Create FTP login')))}</div><p role="status">${escapeHtml(t(msgctxt('theme:v2', 'FTP creation needs its own verified client operation. The mailbox creation form is not an FTP action.')))}</p>`)
+  const sessions = operationCard('v2-ftp-sessions', t(msgctxt('theme:v2', 'Current FTP connections')),
+    `${operationTable('v2-ftp-sessions-table', t(msgctxt('theme:v2', 'Current FTP connections')), [t(msgid('Login')), t(msgid('Address')), t(msgid('Started (UTC)')), t(msgid('Actions'))], { 'data-ftp-sessions': true }, unreadRow(4, t(msgctxt('theme:v2', 'Active FTP sessions have not been read.'))))}<div class="v2-panel-operation-actions">${operationButton(t(msgid('Refresh')))}${operationButton(t(msgctxt('theme:v2', 'Disconnect session')))}</div>`)
+  const anonymous = operationCard('v2-ftp-anonymous', t(msgctxt('theme:v2', 'Anonymous FTP')),
+    `<p>${escapeHtml(t(msgctxt('theme:v2', 'Anonymous access and its server policy have not been read. These controls do not enable access.')))}</p><label class="v2-panel-operation-check"><input type="checkbox" disabled><span>${escapeHtml(t(msgctxt('theme:v2', 'Allow anonymous access')))}</span></label>${operationButton(t(msgid('Save')))}`)
+  return operationPage(props, '/files/ftp', t(msgid('FTP accounts')), t(msgctxt('theme:v2', 'Read the account’s stored FTP service users and manage only supported service-user operations.')),
+    `<div class="v2-panel-operation-columns"><div class="v2-panel-operation-stack">${accounts}${create}${sessions}</div><aside class="v2-panel-operation-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'FTP information')))}">${anonymous}</aside></div>${serviceDialogs(t)}`, undefined, authority)
+}

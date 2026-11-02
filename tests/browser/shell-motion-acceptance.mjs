@@ -58,7 +58,8 @@ try {
   for (const state of selected) {
     const result = { ...state, status:'running', checks:[], observations:{}, page_errors:[], console_errors:[], mutations:[] }, check = (name, value, observation) => result.checks.push({name,passed:Boolean(value),observation})
     const context = await browser.newContext({viewport:{width:state.width,height:state.width<960?600:900},reducedMotion:state.motion,colorScheme:state.theme}), page = await context.newPage()
-    page.on('pageerror',e=>result.page_errors.push(e.message)); page.on('console',m=>{if(m.type()==='error')result.console_errors.push(m.text())})
+    // The visual fixture has no session: a session read first asks /api/auth/me, which the fixture refuses. Any other console error fails.
+    page.on('pageerror',e=>result.page_errors.push(e.message)); page.on('console',m=>{if(m.type()==='error'&&!/\/api\/auth\/me(?:\?|$)/.test(m.location().url))result.console_errors.push(m.text())})
     await context.route('**/*',route=>{if(!['GET','HEAD'].includes(route.request().method())){result.mutations.push(route.request().method());return route.abort()}return route.continue()})
     try {
       assert.equal((await page.goto(fixture.baseUrl+'/whm/accounts/new?lang='+state.locale+'&theme='+state.theme+'&density=compact&accountId=visual-account',{waitUntil:'networkidle'})).status(),200)

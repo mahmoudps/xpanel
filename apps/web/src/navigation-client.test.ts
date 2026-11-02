@@ -1,12 +1,13 @@
 /// <reference lib="dom" />
-// @vitest-environment jsdom
-// @vitest-environment-options {"url":"https://panel.example.test/panel?lang=ar&theme=light&accountId=account-test"}
+// @vitest-environment node
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
 import { tools, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { renderWebApp } from './app.ts'
 import { getSurfaceNavigationLabel } from './shell.ts'
+import { isLocale, translator } from './i18n.ts'
 
 const fixture = `
   <div class="xp-shell">
@@ -44,6 +45,7 @@ let originalWidth: PropertyDescriptor | undefined
 let originalScrollX: PropertyDescriptor | undefined
 let originalScrollY: PropertyDescriptor | undefined
 let socket: ReturnType<typeof vi.fn>
+let testDom: EnvironmentReturn | undefined
 
 function element<T extends HTMLElement = HTMLElement>(selector: string): T {
   const target = document.querySelector<T>(selector)
@@ -102,7 +104,12 @@ function selectedCommand(): HTMLElement | null {
   return document.querySelector('[data-cmdk-item][aria-selected="true"]')
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  testDom = await builtinEnvironments.jsdom.setup(globalThis, { jsdom: { url: 'https://panel.example.test/panel?lang=ar&theme=light&accountId=account-test', runScripts: 'outside-only' } })
+  vi.stubGlobal('xpT', (message: string, values?: Readonly<Record<string, string | number>>) => {
+    const lang = document.documentElement.lang
+    return translator(isLocale(lang) ? lang : undefined)(message, values)
+  })
   document.body.innerHTML = fixture
   document.body.style.overflow = 'clip'
   document.documentElement.style.overflow = 'scroll'
@@ -145,18 +152,23 @@ beforeEach(() => {
   })
 })
 
-afterEach(() => {
-  for (const [type, listener, options] of documentListeners) document.removeEventListener(type, listener, options)
-  for (const [type, listener, options] of windowListeners) window.removeEventListener(type, listener, options)
-  vi.restoreAllMocks()
-  vi.unstubAllGlobals()
-  if (originalWidth) Object.defineProperty(window, 'innerWidth', originalWidth)
-  if (originalScrollX) Object.defineProperty(window, 'scrollX', originalScrollX)
-  if (originalScrollY) Object.defineProperty(window, 'scrollY', originalScrollY)
-  document.body.innerHTML = ''
-  document.body.style.overflow = ''
-  document.documentElement.style.overflow = ''
-  delete document.documentElement.dataset.realtimeEnabled
+afterEach(async () => {
+  try {
+    for (const [type, listener, options] of documentListeners) document.removeEventListener(type, listener, options)
+    for (const [type, listener, options] of windowListeners) window.removeEventListener(type, listener, options)
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    if (originalWidth) Object.defineProperty(window, 'innerWidth', originalWidth)
+    if (originalScrollX) Object.defineProperty(window, 'scrollX', originalScrollX)
+    if (originalScrollY) Object.defineProperty(window, 'scrollY', originalScrollY)
+    document.body.innerHTML = ''
+    document.body.style.overflow = ''
+    document.documentElement.style.overflow = ''
+    delete document.documentElement.dataset.realtimeEnabled
+  } finally {
+    await testDom?.teardown(globalThis)
+    testDom = undefined
+  }
 })
 
 describe('overlay document position restoration', () => {

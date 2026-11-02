@@ -17,7 +17,7 @@ afterEach(async () => { for (const dir of cleanup.splice(0)) await rm(dir, { rec
 const sha = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex')
 const account = (username = 'alice'): Account => ({ id: randomUUID(), username, uid: 20001, gid: 20001, home: '/home/' + username, primaryDomain: username + '.example.test', planId: randomUUID(), ownerId: null, status: 'active', suspendReason: null, contactEmail: 'a@example.test', ipv4: '192.0.2.10', shell: 'jailed', createdAt: '2026-10-29T00:00:00.000Z' })
 
-const setup = async (overrides: Partial<TransferTaskDeps> & { compare?: string; failOn?: string } = {}) => {
+const setup = async (overrides: Partial<TransferTaskDeps> & { compare?: string; failOn?: string } = {}, initialTasks?: TransferTask[]) => {
   const dir = await mkdtemp(join(tmpdir(), 'xp-transfer-')); cleanup.push(dir)
   const commands: TransferCommand[] = [], installed: string[] = []
   const alice = account(), certPath = join(dir, 'cert.pem'), keyPath = join(dir, 'key.pem')
@@ -40,6 +40,10 @@ const setup = async (overrides: Partial<TransferTaskDeps> & { compare?: string; 
     mariadb: { adminDefaultsFile: '/etc/xpanel/mariadb-admin.cnf', mariadbBinary: '/usr/bin/mariadb', mariadbDumpBinary: '/usr/bin/mariadb-dump', verifyAdminConfig: async () => undefined, verifyDatabaseObjects: async () => ({ tables: [1, 2] }) },
     installCertificate: async (target, domain, fullchain, key) => { installed.push(target.username + ':' + domain + ':' + fullchain + ':' + key); return { certificate: { id: randomUUID(), names: [domain], certPath: '/x/cert', keyPath: '/x/key', notAfter: '2027-06-01T00:00:00.000Z' } } },
     ...overrides,
+  }
+  if (initialTasks) {
+    await mkdir(deps.root!, { recursive: true })
+    await writeFile(join(deps.root!, 'tasks.json'), JSON.stringify(initialTasks))
   }
   const controller = createTransferTaskController(deps)
   const settled = async (task: TransferTask): Promise<TransferTask> => {
@@ -101,17 +105,52 @@ describe('transfer host tasks', () => {
     expect(() => assertTarMembers('./ok\n../../etc/passwd\n')).toThrow(/outside the account home/)
     await expect(t.controller.start({ kind: 'restore', username: 'bob', fetch: fetched.id, databases: [{ artifact: 'db-alice_wp.sql', target: 'bob wp' }], certificates: [] })).rejects.toThrow(/database mapping/)
   })
-  it('reads a task that was running when the agent stopped as interrupted, and keeps one task at a time', async () => {
-    const t = await setup({ failOn: 'mariadb-dump' })
-    const first = await t.controller.start({ kind: 'package', username: 'alice' }), second = await t.controller.start({ kind: 'package', username: 'alice' })
-    expect([first.state, second.state]).toEqual(['queued', 'queued'])
-    expect(await t.settled(first)).toMatchObject({ state: 'failed', error: expect.stringMatching(/dump of alice_wp failed: synthetic failure/) })
-    await t.settled(second)
-    const ledger = JSON.parse(await readFile(join(t.deps.root!, 'tasks.json'), 'utf8')) as TransferTask[]
-    ledger.push({ ...ledger[0]!, id: randomUUID(), state: 'running', error: null })
-    await writeFile(join(t.deps.root!, 'tasks.json'), JSON.stringify(ledger))
-    const restarted = createTransferTaskController(t.deps)
-    expect(await restarted.get(ledger.at(-1)!.id)).toMatchObject({ state: 'interrupted', error: expect.stringMatching(/restarted/) })
+  it('keeps a second task queued until the first task finishes', async () => {
+    let enterFirstHome!: () => void, releaseFirstHome!: () => void
+    const firstHomeEntered = new Promise<void>(resolve => { enterFirstHome = resolve })
+    const firstHomeReleased = new Promise<void>(resolve => { releaseFirstHome = resolve })
+    const commands: TransferCommand[] = []
+    const t = await setup({ run: async command => {
+      commands.push(command)
+      if (command.argv[0] === '/usr/bin/tar') {
+        if (commands.length === 1) { enterFirstHome(); await firstHomeReleased }
+        await writeFile(command.stdoutFile!, 'HOME-ARCHIVE')
+        return { code: 0, stdout: '', stderr: '' }
+      }
+      if (command.argv[0] === '/usr/bin/mariadb-dump') return { code: 2, stdout: '', stderr: 'synthetic failure' }
+      throw new Error('unexpected package command')
+    } })
+    const first = await t.controller.start({ kind: 'package', username: 'alice' })
+    await firstHomeEntered
+    let second: TransferTask | undefined
+    let settledSecond!: TransferTask
+    try {
+      second = await t.controller.start({ kind: 'package', username: 'alice' })
+      expect([first.state, second.state]).toEqual(['queued', 'queued'])
+      expect(await t.controller.get(first.id)).toMatchObject({ state: 'running' })
+      expect(await t.controller.get(second.id)).toMatchObject({ state: 'queued' })
+      expect(commands).toHaveLength(1)
+      expect(commands[0]!.stdoutFile).toContain(first.id)
+    } finally {
+      releaseFirstHome()
+      settledSecond = await t.settled(second ?? first)
+    }
+    expect(await t.controller.get(first.id)).toMatchObject({ state: 'failed', error: expect.stringMatching(/dump of alice_wp failed: synthetic failure/) })
+    expect(settledSecond).toMatchObject({ state: 'failed', error: expect.stringMatching(/dump of alice_wp failed: synthetic failure/) })
+    expect(commands.map(command => command.argv[0])).toEqual(['/usr/bin/tar', '/usr/bin/mariadb-dump', '/usr/bin/tar', '/usr/bin/mariadb-dump'])
+    expect(commands[2]!.stdoutFile).toContain(second!.id)
+  })
+  it('recovers saved running and queued tasks as interrupted without changing completed tasks', async () => {
+    const createdAt = '2026-10-29T00:00:00.000Z', restartedAt = '2026-10-29T01:00:00.000Z'
+    const completed: TransferTask = { id: randomUUID(), kind: 'package', username: 'alice', state: 'succeeded', createdAt, updatedAt: createdAt, owner: randomUUID(), result: { artifacts: [] }, error: null }
+    const running: TransferTask = { ...completed, id: randomUUID(), state: 'running', result: null }
+    const queued: TransferTask = { ...running, id: randomUUID(), state: 'queued' }
+    const t = await setup({ now: () => new Date(restartedAt) }, [running, queued, completed])
+    const interrupted = { state: 'interrupted', error: 'the agent restarted during this task; nothing more ran', updatedAt: restartedAt }
+    expect(await t.controller.get(running.id)).toEqual({ ...running, ...interrupted })
+    expect(await t.controller.get(queued.id)).toEqual({ ...queued, ...interrupted })
+    expect(await t.controller.get(completed.id)).toEqual(completed)
+    expect(t.commands).toEqual([])
   })
   it('inspects an uploaded cPanel archive into a review plan without staging references', async () => {
     const t = await setup({ now: () => new Date('2027-01-01T00:00:00Z') })

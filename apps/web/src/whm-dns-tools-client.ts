@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -128,12 +132,14 @@ function bindWhmDnsTools(askDialog: Ask | undefined): void {
     const lines = (values: string[]): HTMLElement => { const box = document.createElement('div'); for (const value of values) { const line = document.createElement('div'); line.append(technical(value)); box.append(line) } return box }
     const fact = (key: string, value: string | null): void => { const cell = q('[data-whm-dns-tools-fact="' + key + '"]'); if (cell) cell.textContent = value ?? t('Not read') }
     const utc = (value: string | null): string => value === null ? t('Not yet') : displayDateTime(value)
-    const fill = (key: string, rows: (string | Node)[][], empty: string, columns: number): void => {
-      const body = q('[data-whm-dns-tools-rows="' + key + '"]')
-      if (!body) return
-      body.textContent = ''
-      for (const cells of rows) { const row = document.createElement('tr'); for (const content of cells) { const td = document.createElement('td'); td.append(content); row.append(td) } body.append(row) }
-      if (!rows.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = columns; td.textContent = empty; row.append(td); body.append(row) }
+    const tableSlots:Readonly<Record<string,readonly string[]>>={zones:['select','zone','records','ttl'],jobs:['summary','zones','status','created','finished','actions'],results:['zone','state','records','errors','warnings','messages'],compare:['zone','saved','file','published','saved-ns','published-ns','drift'],nameservers:['zone','soa','host','addresses','result'],preview:['zone','records','changes','ttl','state'],applied:['zone','changes','state']}
+    const templates=new Map([...root.querySelectorAll<HTMLElement>('[data-whm-dns-tools-rows]')].map(body=>{const key=body.dataset.whmDnsToolsRows!,slots=tableSlots[key];if(!slots)throw new Error('unknown_dns_tools_table');const row=clientTemplate(root,'dns-tools-'+key+'-row'),empty=clientTemplate(root,'dns-tools-'+key+'-empty');cloneClientTemplate(row,'tr',slots);cloneClientTemplate(empty,'tr',['message']);return[key,{body,slots,row,empty}] as const}))
+    const jobTemplate=clientTemplate(root,'dns-tools-job-action'),pickTemplate=clientTemplate(root,'dns-tools-zone-select');cloneClientTemplate(jobTemplate,'button',['label']);cloneClientTemplate(pickTemplate,'input',['checkbox'])
+    const fill=(key:string,rows:(string|Node)[][],empty:string,_columns:number):void=>{
+      const contract=templates.get(key);if(!contract)return
+      contract.body.textContent=''
+      for(const cells of rows){const row=cloneClientTemplate(contract.row,'tr',contract.slots);contract.slots.forEach((slot,index)=>clientTemplateSlot(row,slot).replaceChildren(cells[index]!));contract.body.append(row)}
+      if(!rows.length){const row=cloneClientTemplate(contract.empty,'tr',['message']);clientTemplateSlot(row,'message','td').textContent=empty;contract.body.append(row)}
     }
     const outcome = (error: unknown): string => {
       if (error instanceof Error && error.message.startsWith('invalid_dns_tools_')) return 'unverified'
@@ -177,7 +183,7 @@ function bindWhmDnsTools(askDialog: Ask | undefined): void {
       const needle = (search?.value ?? '').trim().toLowerCase(), matches = (overview?.zones ?? []).filter(item => !needle || item.zone.includes(needle))
       const limited = q('[data-whm-dns-tools-limited]'); if (limited) limited.hidden = matches.length <= SHOWN_MAX
       fill('zones', matches.slice(0, SHOWN_MAX).map(item => {
-        const box = document.createElement('input'); box.type = 'checkbox'; box.checked = selected.has(item.zone); box.dataset.whmDnsToolsPick = item.zone; box.setAttribute('aria-label', t('Select {name}', { name: item.zone }))
+        const box=cloneClientTemplate(pickTemplate,'input',['checkbox']) as HTMLInputElement;box.checked=selected.has(item.zone);box.dataset.whmDnsToolsPick=item.zone;box.setAttribute('aria-label',t('Select {name}',{name:item.zone}))
         return [box, technical(item.zone), technical(String(item.records)), range(item.minTtl, item.maxTtl)]
       }), !overview ? t('No zones have been read.') : overview.zones.length ? t('No zones match.') : t('No saved DNS zones exist.'), 4)
       controls()
@@ -195,7 +201,7 @@ function bindWhmDnsTools(askDialog: Ask | undefined): void {
     })
     const statusText: Record<string, string> = { queued: t(msgctxt('whm-dns-tools-client', 'Queued')), running: t('Running'), succeeded: t('Every zone ran'), failed: t('Stopped early'), cancelled: t(msgctxt('whm-dns-tools-client', 'Cancelled')) }
     const paintJobs = (jobs: DnsCheckJobItem[]): void => fill('jobs', jobs.map(job => {
-      const open = document.createElement('button'); open.type = 'button'; open.className = 'xp-btn'; open.textContent = t('Show results'); open.dataset.whmDnsToolsJob = job.id; open.setAttribute('aria-label', t('Show results of {summary}', { summary: job.summary }))
+      const open=cloneClientTemplate(jobTemplate,'button',['label']) as HTMLButtonElement;clientTemplateSlot(open,'label').textContent=t('Show results');open.dataset.whmDnsToolsJob=job.id;open.setAttribute('aria-label',t('Show results of {summary}',{summary:job.summary}))
       return [technical(job.summary), technical(String(job.zones)), statusText[job.status] ?? job.status, technical(utc(job.createdAt)), technical(utc(job.finishedAt)), open]
     }), t('No DNS check jobs exist yet.'), 6)
     const loadJobs = (): Promise<void> => guarded(async () => {
@@ -336,4 +342,4 @@ function bindWhmDnsTools(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_DNS_TOOLS_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const readDnsToolsView=${readDnsToolsView.toString()};return ${bindWhmDnsTools.toString()};})()`
+export const WHM_DNS_TOOLS_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readDnsToolsView=${readDnsToolsView.toString()};return ${bindWhmDnsTools.toString()};})()`

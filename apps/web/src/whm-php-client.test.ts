@@ -2,12 +2,210 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmPhpReadback } from './board-port/whm-php-workspace.ts'
 import { readPhpInventoryView, readPhpManageView, readPhpUsageView, WHM_PHP_CLIENT_BINDING } from './whm-php-client.ts'
+import { tools } from '@xpanel/catalog'
+import { renderWhmDetailPage } from './board-port/approved-xwhm.ts'
+import { renderV2WhmPhp } from './themes/v2/pages/xwhm/host/php.ts'
+import { PRESENTATION_TABS_CLIENT_BINDING } from './presentation-tabs-client.ts'
 const tick = async () => { await new Promise(resolve => setTimeout(resolve, 0)); await new Promise(resolve => setTimeout(resolve, 0)) }
 const inventory = () => ({ state: 'read', source: 'dpkg', observedAt: '2026-10-26T12:00:00.000Z', versions: [{ version: '8.3', supported: true, packages: [{ name: 'php8.3-cli', version: '8.3.12-1', component: 'cli' }, { name: 'php8.3-curl', version: '8.3.12-1', component: 'curl' }], binary: { state: 'read', scope: 'cli-without-ini', version: '8.3.12', sapi: 'cli', builtInExtensions: ['Core', 'json'] }, extensionEnablement: 'not-read', fpmRequest: 'not-read' }] })
 const usage = () => ({ scope: 'saved-domain-configuration', observedRuntime: false, usage: [{ version: '8.3', domainCount: 1, domains: [{ name: 'site.example.test', account: 'alpha', handler: 'fpm' }] }] })
 beforeEach(() => {
   document.body.innerHTML = `<section data-whm-detail-route="/whm/software/php" data-capability-state="authorized"><section data-whm-detail-section="php-versions">${renderWhmPhpReadback({ locale: 'en', canRead: true })}<table><tbody><tr><td>Not read</td></tr></tbody></table><select name="php-selected-version" disabled></select><button data-native-write disabled>Set default</button></section><section data-whm-detail-section="php-extensions"><select name="php-extension-version" disabled></select><table><tbody></tbody></table><input type="checkbox" disabled></section><section data-whm-detail-section="php-configure"><select name="php-version" disabled></select><textarea name="php-ini" disabled></textarea></section></section>`
   delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
+})
+
+type PhpTheme = 'classic' | 'v2'
+const phpPrincipal = { kind: 'root' as const, id: 'php-fixture-root', username: 'operator' }
+const phpCatalog = tools.map(tool => ({ ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } }))
+const mountPhp = (theme: PhpTheme, locale: 'en' | 'ar' = 'en', unavailable = false): HTMLElement => {
+  document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
+  const props = { activeRoute: '/whm/software/php', locale, principal: phpPrincipal, catalog: phpCatalog, capabilityUnavailable: unavailable }
+  document.body.innerHTML = theme === 'classic' ? renderWhmDetailPage(props)! : renderV2WhmPhp(props)
+  new Function('return ' + PRESENTATION_TABS_CLIENT_BINDING)()()
+  return document.querySelector<HTMLElement>('[data-whm-detail-route="/whm/software/php"]')!
+}
+const startPhp = (send: (method: string, path: string, body?: unknown) => Promise<unknown>, ask = vi.fn(async () => true)) => {
+  ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
+  new Function('return ' + WHM_PHP_CLIENT_BINDING)()(ask); return ask
+}
+const phpTemplate = (page: HTMLElement, name: string) => page.querySelector<HTMLTemplateElement>(`template[data-xp-template="${name}"]`)!
+const pairedPhp = () => {
+  const observed = inventory(), managed = manageView(), saved = usage()
+  return {
+    inventory: { ...observed, versions: [...observed.versions, { ...observed.versions[0]!, version: '8.2', supported: false, binary: { ...observed.versions[0]!.binary, version: '8.2.28' }, packages: [{ name: 'php8.2-cli', version: '8.2.28-1', component: 'cli' }] }] },
+    usage: { ...saved, usage: [...saved.usage, { version: '8.2', domainCount: 0, domains: [] }] },
+    manage: { ...managed, versions: [...managed.versions, { ...managed.versions[0]!, version: '8.2', lifecycle: { state: 'active' }, domainCount: 0, accountCount: 0, ini: { memory_limit: '128M' }, extensions: [] }] },
+  }
+}
+const phpResponse = (path: string, fixtures = pairedPhp()): unknown => path.endsWith('/inventory') ? fixtures.inventory : path.endsWith('/usage') ? fixtures.usage : fixtures.manage
+const phpState = () => document.querySelector<HTMLElement>('[data-whm-php-status]')!
+const phpPrototypeNames = ['whm-php-version-entry', 'whm-php-versions-empty', 'whm-php-status', 'whm-php-revoke', 'whm-php-extension-switch', 'whm-php-version-action', 'whm-php-version-remove', 'whm-php-version-tab'] as const
+const phpCorruptions: readonly (readonly [string, (template: HTMLTemplateElement, page: HTMLElement) => void])[] = [
+  ['missing', template => template.remove()],
+  ['duplicate', (template, page) => page.querySelector('[data-whm-php-workspace]')!.append(template.cloneNode(true))],
+  ['wrong root', template => template.content.replaceChildren(document.createElement('section'))],
+  ['missing slot', template => template.content.querySelector('[data-xp-slot]')!.remove()],
+  ['mistyped slot', template => { const old = template.content.querySelector<HTMLElement>('[data-xp-slot]')!, wrong = document.createElement('code'); wrong.dataset.xpSlot = old.dataset.xpSlot; old.replaceWith(wrong) }],
+  ['unexpected slot', template => { const extra = document.createElement('span'); extra.dataset.xpSlot = 'unexpected'; template.content.firstElementChild!.append(extra) }],
+  ['native routing metadata', template => template.content.firstElementChild!.setAttribute('data-api-url', '/api/server/php/manage/apply')],
+  ['borrowed prototype', (template, page) => { const nested = document.createElement('div'); nested.dataset.whmPhpWorkspace = ''; nested.dataset.phpBound = 'true'; nested.append(template); page.querySelector('[data-whm-php-workspace]')!.append(nested) }],
+]
+
+describe('PHP selected-theme fidelity and finite native admission', () => {
+  it.each(['classic', 'v2'] as const)('paints real %s inventory shapes, source-separated facts and typed native controls in both locales', async theme => {
+    for (const locale of ['en', 'ar'] as const) {
+      const page = mountPhp(theme, locale), fixtures = pairedPhp(), send = vi.fn(async (_method: string, path: string) => phpResponse(path, fixtures))
+      startPhp(send); await vi.waitFor(() => expect(phpState().dataset.state).toBe('read'))
+      const entries = [...page.querySelectorAll<HTMLElement>('[data-php-version-entry]')]
+      expect(entries).toHaveLength(2); expect(entries.every(node => node.tagName === (theme === 'classic' ? 'ARTICLE' : 'TR'))).toBe(true)
+      if (theme === 'v2') for (const entry of entries) expect(entry.children).toHaveLength(6)
+      expect(entries[0]!.querySelector('[data-xp-slot="version"]')!.textContent).toBe('PHP 8.3')
+      expect(entries[0]!.querySelector<HTMLElement>('[data-xp-slot="default-holder"]')!.hidden).toBe(false)
+      expect(entries[0]!.querySelector('[data-xp-slot="binary"]')!.textContent).toBe('8.3.12')
+      expect(entries[0]!.querySelector('[data-xp-slot="packages"]')!.textContent).toContain('php8.3-curl 8.3.12-1')
+      expect(entries[0]!.querySelector('[data-xp-slot="usage"]')!.textContent).toContain('1')
+      expect(page.querySelector<HTMLTextAreaElement>('[name="php-ini"]')!.disabled).toBe(true)
+      expect(page.querySelector<HTMLInputElement>('[data-php-display-errors]')!.disabled).toBe(true)
+      expect(page.querySelector('[data-php-exception-revoke="omar"]')!.classList.contains(theme === 'classic' ? 'xp-btn' : 'v2-btn')).toBe(true)
+      const exception = page.querySelector('[data-php-exception-revoke="omar"]')!.closest<HTMLTableRowElement>('tr')!
+      expect(exception.cells).toHaveLength(5); expect(exception.cells[3]!.textContent).toBe('2026-08-02 00:00 UTC')
+      expect(page.querySelector('[data-php-extension="opcache"]')!.getAttribute('role')).toBe('switch')
+      const matrix = page.querySelector<HTMLTableSectionElement>('[data-whm-php-handler-rows]')!
+      expect(matrix.closest('table')!.tHead!.rows[0]!.cells).toHaveLength(7)
+      expect([...matrix.rows].every(row => row.cells.length === 7)).toBe(true)
+      expect([...matrix.querySelectorAll<HTMLButtonElement>('button')].every(button => button.disabled)).toBe(true)
+      for (const name of ['php-selected-version', 'php-extension-version', 'php-version', 'memory_limit', 'php-ini']) expect(page.querySelectorAll('[name="' + name + '"]')).toHaveLength(1)
+      expect(send.mock.calls).toEqual([['GET', '/api/server/php/inventory'], ['GET', '/api/server/php/usage'], ['GET', '/api/server/php/manage']])
+      expect(page.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+      expect(page.textContent).not.toContain('/usr/bin/php8.3')
+    }
+    expect(WHM_PHP_CLIENT_BINDING).not.toContain('xp-btn'); expect(WHM_PHP_CLIENT_BINDING).not.toContain('xp-whm-detail-status')
+    expect(WHM_PHP_CLIENT_BINDING).not.toContain('innerHTML'); expect(WHM_PHP_CLIENT_BINDING).not.toContain('fetch(')
+  })
+
+  it.each(['classic', 'v2'] as const)('keeps %s lifecycle and FPM unknown when only package/CLI observations are available', async theme => {
+    const page = mountPhp(theme), fixtures = pairedPhp()
+    startPhp(vi.fn(async (_method: string, path: string) => path.endsWith('/manage') ? { state: 'unavailable' } : phpResponse(path, fixtures)))
+    await vi.waitFor(() => expect(phpState().dataset.state).toBe('read'))
+    for (const entry of page.querySelectorAll('[data-php-version-entry]')) {
+      expect(entry.querySelector('[data-xp-slot="lifecycle"]')!.textContent).toBe('Not read')
+      expect(entry.querySelector('[data-xp-slot="fpm"]')!.textContent).toBe('Not read')
+      expect(entry.querySelector<HTMLElement>('[data-xp-slot="default-holder"]')!.hidden).toBe(true)
+      expect([...entry.querySelectorAll<HTMLButtonElement>('button')].every(button => button.disabled)).toBe(true)
+    }
+    expect(page.querySelector('[data-php-version-entry="8.2"]')!.textContent).toContain('outside supported provisioning')
+    expect(page.querySelector('[data-php-version-entry="8.2"]')!.textContent).not.toContain('End of life')
+  })
+
+  it.each(['classic', 'v2'] as const)('uses finite %s version tabs without IO, supports RTL/Home/End, and retains same-revision INI drafts', async theme => {
+    for (const locale of ['en', 'ar'] as const) {
+      const page = mountPhp(theme, locale), fixtures = pairedPhp(), send = vi.fn(async (_method: string, path: string) => phpResponse(path, fixtures)), ask = startPhp(send)
+      await vi.waitFor(() => expect(phpState().dataset.state).toBe('read'))
+      const tabs = [...page.querySelectorAll<HTMLButtonElement>('[data-php-version-pick]')], memory = page.querySelector<HTMLInputElement>('[name="memory_limit"]')!
+      expect(tabs).toHaveLength(2); memory.value = '512M'; tabs[0]!.focus()
+      tabs[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: locale === 'ar' ? 'ArrowLeft' : 'ArrowRight', bubbles: true, cancelable: true }))
+      expect(document.activeElement).toBe(tabs[1]); expect(tabs[1]!.getAttribute('aria-selected')).toBe('true'); expect(memory.value).toBe('128M')
+      expect(page.querySelector<HTMLSelectElement>('[name="php-extension-version"]')!.value).toBe('8.2')
+      expect(page.querySelector<HTMLSelectElement>('[name="php-version"]')!.value).toBe('8.2')
+      tabs[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true })); expect(memory.value).toBe('512M')
+      page.querySelector<HTMLButtonElement>('[data-php-action="discard-ini"]')!.click(); expect(memory.value).toBe('256M')
+      tabs[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })); expect(document.activeElement).toBe(tabs[1])
+      const fileTab = page.querySelector<HTMLButtonElement>('[data-presentation-tab="file"]')!; fileTab.click()
+      expect(page.querySelector<HTMLTextAreaElement>('[name="php-ini"]')!.closest<HTMLElement>('[role="tabpanel"]')!.hidden).toBe(false)
+      expect(page.querySelector<HTMLTextAreaElement>('[name="php-ini"]')!.disabled).toBe(true)
+      page.querySelector<HTMLButtonElement>('[data-php-action="apply-ini"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      expect(send).toHaveBeenCalledTimes(3); expect(ask).not.toHaveBeenCalled()
+    }
+  })
+
+  it.each(['classic', 'v2'] as const)('routes one %s version shortcut through the existing default action and preserves focus after readback', async theme => {
+    const page = mountPhp(theme), fixtures = pairedPhp()
+    const send = vi.fn(async (method: string, path: string, _body?: unknown) => {
+      if (method === 'PUT') { fixtures.manage.defaultVersion = '8.2'; fixtures.manage.revision = 'd'.repeat(64); return {} }
+      return phpResponse(path, fixtures)
+    })
+    startPhp(send); await vi.waitFor(() => expect(phpState().dataset.state).toBe('read'))
+    const action = page.querySelector<HTMLButtonElement>('[data-php-version-entry="8.2"] [data-php-version-command="set-default"]')!; action.focus(); action.click(); action.click()
+    await vi.waitFor(() => expect(page.querySelector<HTMLElement>('[data-php-version-entry="8.2"] [data-xp-slot="default-holder"]')!.hidden).toBe(false))
+    expect(send.mock.calls.filter(call => call[0] === 'PUT')).toEqual([['PUT', '/api/server/php/default', { version: '8.2', expectedRevision: 'c'.repeat(64) }]])
+    expect((document.activeElement as HTMLElement).dataset.phpVersionEntry).toBe('8.2')
+    if (theme === 'v2') expect(page.querySelector('[data-whm-php-default]')!.textContent).toBe('8.2')
+  })
+
+  it.each(['classic', 'v2'] as const)('rejects every malformed finite %s prototype before any of the 3 startup reads', theme => {
+    for (const name of phpPrototypeNames) for (const [reason, corrupt] of phpCorruptions) {
+      const page = mountPhp(theme); corrupt(phpTemplate(page, name), page)
+      const send = vi.fn(); startPhp(send)
+      expect(send, `${name}: ${reason}`).not.toHaveBeenCalled(); expect(phpState().dataset.state, `${name}: ${reason}`).toBe('unavailable')
+      expect([...page.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input,textarea,select')].every(control => control.disabled)).toBe(true)
+      expect(page.querySelector<HTMLButtonElement>('[data-presentation-tab="file"]')!.disabled).toBe(false)
+    }
+  })
+
+  it.each(['classic', 'v2'] as const)('revalidates %s after a fulfilled or rejected GET without painting stale responses or reopening controls', async theme => {
+    for (const rejected of [false, true]) {
+      const page = mountPhp(theme), pending: { path: string; resolve: (value: unknown) => void; reject: (reason: unknown) => void }[] = []
+      const send = vi.fn((_method: string, path: string) => new Promise<unknown>((resolve, reject) => pending.push({ path, resolve, reject }))); startPhp(send)
+      expect(send).toHaveBeenCalledTimes(3); phpTemplate(page, 'whm-php-status').remove()
+      for (const request of pending) if (rejected) request.reject(new Error('unavailable')); else request.resolve(phpResponse(request.path))
+      await vi.waitFor(() => expect(phpState().dataset.state).toBe('unavailable'))
+      expect(page.querySelectorAll('[data-php-version-entry]')).toHaveLength(0)
+      expect([...page.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input,textarea,select')].every(control => control.disabled)).toBe(true)
+      expect(send).toHaveBeenCalledTimes(3)
+    }
+  })
+
+  it.each(['classic', 'v2'] as const)('refuses malformed %s control types and presentation-marker spoofing before startup', theme => {
+    for (const name of ['whm-php-revoke', 'whm-php-version-action', 'whm-php-version-remove', 'whm-php-version-tab']) for (const field of ['type', 'disabled', 'role', 'presentation']) {
+      const page = mountPhp(theme), button = phpTemplate(page, name).content.querySelector('button')!
+      if (field === 'type') button.type = 'submit'
+      if (field === 'disabled') button.disabled = false
+      if (field === 'role') button.setAttribute('role', 'link')
+      if (field === 'presentation') button.setAttribute('data-presentation-tab', 'file')
+      const send = vi.fn(); startPhp(send); expect(send, `${name}: ${field}`).not.toHaveBeenCalled(); expect(phpState().dataset.state).toBe('unavailable')
+    }
+    for (const field of ['type', 'disabled', 'role']) {
+      const page = mountPhp(theme), input = phpTemplate(page, 'whm-php-extension-switch').content.querySelector('input')!
+      if (field === 'type') input.type = 'text'
+      if (field === 'disabled') input.disabled = false
+      if (field === 'role') input.setAttribute('role', 'textbox')
+      const send = vi.fn(); startPhp(send); expect(send, field).not.toHaveBeenCalled()
+    }
+  })
+
+  it.each(['classic', 'v2'] as const)('does not apply a %s preview when its contract or admission changes during confirmation', async theme => {
+    for (const revoked of [false, true]) {
+      const page = mountPhp(theme); let confirm!: (value: boolean) => void
+      const ask = vi.fn(() => new Promise<boolean>(resolve => { confirm = resolve })), send = vi.fn(async (method: string, path: string) => method === 'GET' ? phpResponse(path) : { preview: { state: 'ready' } })
+      startPhp(send, ask); await vi.waitFor(() => expect(phpState().dataset.state).toBe('read'))
+      page.querySelector<HTMLButtonElement>('[data-php-action="apply-ini"]')!.click(); await vi.waitFor(() => expect(ask).toHaveBeenCalledOnce())
+      if (revoked) page.dataset.readonly = 'true'; else phpTemplate(page, 'whm-php-revoke').remove()
+      confirm(true); await vi.waitFor(() => expect(phpState().dataset.state).toBe('unavailable'))
+      expect(send.mock.calls.filter(call => call[0] !== 'GET').map(call => call[1])).toEqual(['/api/server/php/manage/preview'])
+      expect(page.querySelector<HTMLButtonElement>('[data-php-action="apply-ini"]')!.disabled).toBe(true)
+      expect(page.querySelector<HTMLButtonElement>('[data-presentation-tab="file"]')!.disabled).toBe(false)
+    }
+  })
+
+  it.each(['classic', 'v2'] as const)('does not claim %s job success or retry when a sent apply loses its contract before acknowledgement', async theme => {
+    const page = mountPhp(theme); let finish!: (value: unknown) => void
+    const send = vi.fn((method: string, path: string) => method === 'GET' ? Promise.resolve(phpResponse(path)) : path.endsWith('/preview') ? Promise.resolve({ preview: { state: 'ready' } }) : new Promise<unknown>(resolve => { finish = resolve }))
+    startPhp(send); await vi.waitFor(() => expect(phpState().dataset.state).toBe('read'))
+    page.querySelector<HTMLButtonElement>('[data-php-action="apply-ini"]')!.click()
+    await vi.waitFor(() => expect(send.mock.calls.some(call => call[1] === '/api/server/php/manage/apply')).toBe(true))
+    phpTemplate(page, 'whm-php-status').remove(); finish({ job: { referenceCode: 'J-9100' } })
+    await vi.waitFor(() => expect(phpState().dataset.state).toBe('unavailable'))
+    expect(page.textContent).not.toContain('J-9100')
+    expect(send.mock.calls.filter(call => call[0] === 'GET')).toHaveLength(3)
+    expect(send.mock.calls.filter(call => call[1] === '/api/server/php/manage/apply')).toHaveLength(1)
+    expect(page.querySelector<HTMLButtonElement>('[data-php-action="apply-ini"]')!.disabled).toBe(true)
+  })
+
+  it('refuses duplicate version identities, negative usage facts and unbounded install choices', () => {
+    expect(() => readPhpManageView({ ...manageView(), versions: [...manageView().versions, ...manageView().versions] })).toThrow()
+    expect(() => readPhpManageView({ ...manageView(), versions: [{ ...manageView().versions[0]!, domainCount: -1 }] })).toThrow()
+    expect(() => readPhpManageView({ ...manageView(), installable: Array(33).fill('8.2') })).toThrow()
+  })
 })
 const boot = (request?: (method: string, path: string) => Promise<unknown>) => { if (request) (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = request; new Function('return ' + WHM_PHP_CLIENT_BINDING)()() }
 describe('WHM PHP inventory reader', () => {
@@ -87,13 +285,22 @@ describe('WHM PHP management writes', () => {
     new Function('return ' + WHM_PHP_CLIENT_BINDING)()(ask); return ask
   }
   const reads = (path: string) => path.endsWith('/inventory') ? inventory() : path.endsWith('/usage') ? usage() : manageView()
+  it('hides only the semantic draft extension choices after a host read, independent of theme class names', async () => {
+    bootWith(vi.fn(async (_method: string, path: string) => reads(path)))
+    const section = document.querySelector('[data-whm-detail-section="php-extensions"]')!
+    const draft = document.createElement('div'); draft.dataset.phpExtensionDraftGrid = ''; draft.className = 'v2-host__choices'; draft.textContent = 'Draft only'
+    const independent = document.createElement('div'); independent.className = 'xp-whm-detail-choice-grid'; independent.textContent = 'Independent controls'
+    section.append(draft, independent); await tick()
+    expect(draft.hidden).toBe(true); expect(independent.hidden).toBe(false)
+    expect(section.querySelector('[data-php-extension="opcache"]')).not.toBeNull()
+  })
   it('enables the reviewed controls and paints extension switches from the host observation', async () => {
     bootWith(vi.fn(async (_method: string, path: string) => reads(path))); await tick()
     expect(document.querySelector<HTMLButtonElement>('[data-php-action="set-default"]')!.disabled).toBe(false)
     expect(document.querySelector<HTMLInputElement>('[name="memory_limit"]')!.value).toBe('256M')
     const boxes = document.querySelectorAll<HTMLInputElement>('[data-php-extension]')
     expect([...boxes].map(box => [box.dataset.phpExtension, box.checked, box.disabled])).toEqual([['opcache', true, false], ['redis', false, false]])
-    expect(document.querySelector('[data-whm-detail-section="php-versions"] tbody:not([data-whm-php-usage])')!.textContent).toContain('Default')
+    expect(document.querySelector('[data-whm-php-version-entries]')!.textContent).toContain('Default')
   })
   it('previews, confirms and submits an ini change bound to the observed revision', async () => {
     const send = vi.fn(async (method: string, path: string, _body?: unknown) => method === 'GET' ? reads(path) : path.endsWith('/preview') ? { preview: { state: 'ready', reason: null } } : { job: { id: 'job-1', referenceCode: 'J-1001' } })
@@ -104,6 +311,26 @@ describe('WHM PHP management writes', () => {
     expect(send.mock.calls.filter(call => call[0] === 'POST')).toEqual([['POST', '/api/server/php/manage/preview', body], ['POST', '/api/server/php/manage/apply', body]])
     expect(ask).toHaveBeenCalledOnce()
     expect(document.querySelector('[data-whm-detail-section="php-configure"] [data-php-manage-status]')!.textContent).toContain('J-1001')
+  })
+  it.each([
+    { referenceCode: null, locale: 'en', expected: 'Unnumbered' },
+    { referenceCode: undefined, locale: 'en', expected: 'Unnumbered' },
+    { referenceCode: '', locale: 'en', expected: 'Unnumbered' },
+    { referenceCode: '  ', locale: 'en', expected: 'Unnumbered' },
+    { referenceCode: 123, locale: 'en', expected: 'Unnumbered' },
+    { referenceCode: null, locale: 'ar', expected: 'غير مرقمة' },
+  ])('shows a localized unnumbered job without exposing its storage id ($locale, $referenceCode)', async ({ referenceCode, locale, expected }) => {
+    const internalId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+    const send = vi.fn(async (method: string, path: string) => method === 'GET' ? reads(path) : path.endsWith('/preview') ? { preview: { state: 'ready', reason: null } } : { job: { id: internalId, referenceCode } })
+    document.documentElement.lang = locale
+    try {
+      bootWith(send); await tick()
+      document.querySelector<HTMLButtonElement>('[data-php-action="apply-ini"]')!.click(); await tick(); await tick()
+      const message = document.querySelector('[data-whm-detail-section="php-configure"] [data-php-manage-status]')!.textContent
+      expect(message).toContain(expected)
+      expect(message).not.toContain(internalId)
+      expect(send.mock.calls.filter(call => call[0] === 'POST').map(call => call[1])).toEqual(['/api/server/php/manage/preview', '/api/server/php/manage/apply'])
+    } finally { document.documentElement.lang = 'en' }
   })
   it('sends nothing when the host refuses the preview or the user cancels', async () => {
     const send = vi.fn(async (method: string, path: string) => method === 'GET' ? reads(path) : { preview: { state: 'blocked', reason: 'nothing-to-do' } })

@@ -1,5 +1,6 @@
 {
   "name": "xpanel",
+  "version": "0.1.0",
   "private": true,
   "description": "Open-source web hosting control panel with per-account isolation, configuration files as the source of truth and a small footprint.",
   "license": "AGPL-3.0-only",
@@ -27,7 +28,11 @@
     "test:linux": "node scripts/test-suite.mjs linux",
     "test:browser": "node scripts/test-suite.mjs browser",
     "test:all": "node scripts/test-suite.mjs all",
-    "typecheck": "pnpm -r --parallel typecheck"
+    "typecheck": "pnpm -r --parallel typecheck",
+    "test:fast": "node scripts/test-lane.mjs fast",
+    "test:full": "node scripts/test-lane.mjs full",
+    "test:release": "node scripts/test-lane.mjs release",
+    "test:census": "node scripts/test-lane.mjs census"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

@@ -1,3 +1,4 @@
+import { siteHealthClientTemplates } from './account-diagnostic-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
@@ -19,5 +20,5 @@ export function renderSiteHealthWorkspace(input: { lang: Locale; accountId: stri
       <li>${t('Website: the home page through the local web server, not from the internet. Only the status code is read.')}</li>
       <li>${t('Certificate: the expiry of the saved certificate that covers the name. The certificate the server presents is not fetched.')}</li>
       <li>${t('PHP: the saved PHP version against the versions this server supports. At most 20 domains are checked at a time.')}</li></ul></section>
-  </div>`
+  ${siteHealthClientTemplates()}</div>`
 }

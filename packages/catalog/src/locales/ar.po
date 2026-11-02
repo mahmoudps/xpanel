@@ -3296,3 +3296,7 @@ msgstr "العربية, اللغة"
 msgctxt "nav.page.xwhm.file-sharing.keywords"
 msgid "keywords"
 msgstr "مشاركة الملفات"
+
+msgctxt "catalog.tool.domain-htaccess.summary"
+msgid "Read, validate, save and restore the .htaccess file of an owned Apache site through confined account file I/O and protected candidate validation."
+msgstr "قراءة ملف .htaccess لموقع Apache مملوك والتحقق منه وحفظه واستعادة إصداراته، عبر عمليات ملفات محصورة بهوية الحساب والتحقق المحمي من النسخة المقترحة."

@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -61,24 +65,26 @@ function bindAccountDatabaseInsights(_askDialog: unknown): void {
     const dbRows = find('[data-insights-databases]'), tableRows = find('[data-insights-tables]'), userRows = find('[data-insights-users]')
     const fact = (key: string): HTMLElement => find('[data-insights-fact="' + key + '"]')
     if (!read || !picker || !status || !dbRows || !tableRows || !userRows || !fact('databases') || !fact('size') || !fact('tables') || !fact('users') || !fact('at')) return
+    const contracts = [
+      { body: dbRows, name: 'insights-database', slots: ['name', 'server', 'tables', 'data', 'indexes', 'free', 'collation'] },
+      { body: tableRows, name: 'insights-table', slots: ['name', 'engine', 'rows', 'data', 'indexes', 'free'] },
+      { body: userRows, name: 'insights-user', slots: ['name', 'server', 'hosts'] },
+    ].map(item => { const template = clientTemplate(root, item.name + '-row'), empty = clientTemplate(root, item.name + '-empty'); cloneClientTemplate(template, 'tr', item.slots); cloneClientTemplate(empty, 'tr', ['message']); return { ...item, template, empty } })
+    const stateTemplate=clientTemplate(root,'insights-state');cloneClientTemplate(stateTemplate,'span',['label'])
     let view: DatabaseInsightsClientView | null = null, busy = false
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const lock = (): void => { read.disabled = !eligible() || busy; picker.disabled = !eligible() || busy || !picker.options.length; root.setAttribute('aria-busy', String(busy)) }
     const server = (state: 'present' | 'absent' | null): HTMLElement => {
-      const chip = document.createElement('span')
+      const chip=cloneClientTemplate(stateTemplate,'span',['label'])
       chip.dataset.stateChip = state === 'present' ? 'ok' : state === 'absent' ? 'problem' : 'unavailable'
-      chip.textContent = state === 'present' ? t(msgctxt('account-database-insights-client', 'Present')) : state === 'absent' ? t(msgctxt('account-database-insights-client', 'Missing')) : t(msgctxt('account-database-insights-client', 'Not observed'))
+      clientTemplateSlot(chip,'label').textContent = state === 'present' ? t(msgctxt('account-database-insights-client', 'Present')) : state === 'absent' ? t(msgctxt('account-database-insights-client', 'Missing')) : t(msgctxt('account-database-insights-client', 'Not observed'))
       return chip
     }
-    const cell = (content: string | HTMLElement): HTMLTableCellElement => {
-      const td = document.createElement('td')
-      if (typeof content === 'string') { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = content; td.append(bdi) } else td.append(content)
-      return td
-    }
-    const fill = (body: HTMLElement, rows: (string | HTMLElement)[][], columns: number, empty: string): void => {
+    const fill = (body: HTMLElement, rows: (string | HTMLElement)[][], _columns: number, empty: string): void => {
+      const contract = contracts.find(item => item.body === body)!
       body.textContent = ''
-      for (const row of rows) { const tr = document.createElement('tr'); for (const content of row) tr.append(cell(content)); body.append(tr) }
-      if (!rows.length) { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = columns; td.textContent = empty; tr.append(td); body.append(tr) }
+      for (const values of rows) { const tr = cloneClientTemplate(contract.template, 'tr', contract.slots); contract.slots.forEach((slot, index) => clientTemplateSlot(tr, slot).replaceChildren(values[index]!)); body.append(tr) }
+      if (!rows.length) { const tr = cloneClientTemplate(contract.empty, 'tr', ['message']); clientTemplateSlot(tr, 'message', 'td').textContent = empty; body.append(tr) }
     }
     const count = (value: number | null): string => value === null ? '-' : String(value)
     const paintTables = (): void => {
@@ -124,4 +130,4 @@ function bindAccountDatabaseInsights(_askDialog: unknown): void {
   })
 }
 
-export const ACCOUNT_DATABASE_INSIGHTS_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const INSIGHTS_ID=${INSIGHTS_ID.toString()};const INSIGHTS_SERVER=${JSON.stringify(INSIGHTS_SERVER)};const insightsObject=${insightsObject.toString()};const insightsSize=${insightsSize.toString()};const insightsText=${insightsText.toString()};const readDatabaseInsightsView=${readDatabaseInsightsView.toString()};const insightsBytes=${insightsBytes.toString()};return ${bindAccountDatabaseInsights.toString()};})()`
+export const ACCOUNT_DATABASE_INSIGHTS_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const INSIGHTS_ID=${INSIGHTS_ID.toString()};const INSIGHTS_SERVER=${JSON.stringify(INSIGHTS_SERVER)};const insightsObject=${insightsObject.toString()};const insightsSize=${insightsSize.toString()};const insightsText=${insightsText.toString()};const readDatabaseInsightsView=${readDatabaseInsightsView.toString()};const insightsBytes=${insightsBytes.toString()};return ${bindAccountDatabaseInsights.toString()};})()`

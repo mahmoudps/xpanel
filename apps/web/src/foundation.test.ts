@@ -115,3 +115,27 @@ describe('user menu visible identity and accessible name', () => {
     expect(security.searchParams.get('accountId')).toBe(root ? null : principal.accountId)
   })
 })
+
+
+describe('user menu instance identifiers', () => {
+  afterEach(() => document.body.replaceChildren())
+
+  it('gives two renderer-owned menu instances unique controls and matching labels', { tags: ['unit'] }, () => {
+    document.body.innerHTML = ['xp-home-desktop', 'xp-home-phone'].map(instanceId => renderUserMenu({ ...operator, instanceId })).join('')
+    const controls = Array.from(document.querySelectorAll<HTMLSelectElement>('select[data-ui-theme-choice]'))
+    expect(controls).toHaveLength(2)
+    expect(new Set(controls.map(control => control.id)).size).toBe(2)
+    expect(document.getElementById('xp-ui-theme-choice')).toBeNull()
+    for (const control of controls) {
+      expect(control.labels).toHaveLength(1)
+      expect(control.labels?.[0]?.htmlFor).toBe(control.id)
+      expect(control.closest('form[data-ui-theme-form]')).not.toBeNull()
+    }
+  })
+
+  it('refuses a nonstatic or malformed instance namespace without changing the default identifier', { tags: ['unit'] }, () => {
+    for (const instanceId of ['', 'home space', '<unsafe>', 'a'.repeat(65)]) expect(() => renderUserMenu({ ...operator, instanceId })).toThrow('Invalid user menu instance identifier')
+    expect(renderUserMenu(operator)).toContain('for="xp-ui-theme-choice"')
+    expect(renderUserMenu(operator)).toContain('id="xp-ui-theme-choice"')
+  })
+})

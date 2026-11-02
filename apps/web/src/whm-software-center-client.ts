@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -78,6 +82,12 @@ function bindWhmSoftwareCenter(askDialog: ((options: Record<string, unknown>) =>
     const panel = q<HTMLElement>('[data-sc-preview]'), confirm = q<HTMLButtonElement>('[data-sc-confirm]'), cancel = q<HTMLButtonElement>('[data-sc-cancel]'), accept = q<HTMLInputElement>('[data-sc-accept-extra]')
     const jobNote = q<HTMLElement>('[data-sc-job]'), jobLink = q<HTMLAnchorElement>('[data-sc-job-link]')
     if (!['catalog', 'module', 'runtime'].includes(page) || !status || !refresh || !groups || !category || !search || !panel || !confirm || !cancel || !accept || !jobNote || !jobLink) return
+    const clone = (name: string, tag: string, slots: readonly string[]): HTMLElement => cloneClientTemplate(clientTemplate(root, name), tag, slots)
+    try {
+      clone('software-center-row', 'tr', ['name','description','packages','state','installed','candidate','estimate','relations','install','remove'])
+      clone('software-center-group', 'section', ['title','scroll','head','body'])
+      clone('software-center-empty', 'p', ['message'])
+    } catch { root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button,input,select').forEach(control => { control.disabled = true }); status.textContent = t('The software center is unavailable here. Nothing was read or changed.'); status.dataset.state = 'unavailable'; return }
     const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.scCanRead === 'true' && !root.closest(denied)
@@ -100,11 +110,10 @@ function bindWhmSoftwareCenter(askDialog: ((options: Record<string, unknown>) =>
     const mixed = (parts: [string, boolean][]): HTMLTableCellElement => { const td = el('td'); for (const [value, technical] of parts) td.append(technical ? el('bdi', value) : document.createTextNode(value)); td.querySelectorAll('bdi').forEach(node => { node.dir = 'ltr' }); return td }
     // One whole message split at its {placeholders}; placeholder parts are technical values.
     const filled = (message: string, values: Record<string, string>): [string, boolean][] => message.split(/(\{\w+\})/).filter(Boolean).map((part): [string, boolean] => part in values ? [values[part]!, true] : [part, false])
-    const stateBadge = (item: any): HTMLElement => {
-      const badge = el('span'), map: Record<string, [string, string]> = { installed: ['ok', t(msgctxt('whm-software-center-client', 'Installed'))], partial: ['warn', t('Partly installed')], absent: ['suspended', t(msgctxt('whm-software-center-client', 'Not installed'))], unavailable: ['suspended', t('Not available on this operating system')] }
+    const stateBadge = (item: any): string => {
+      const map: Record<string, [string, string]> = { installed: ['ok', t(msgctxt('whm-software-center-client', 'Installed'))], partial: ['warn', t('Partly installed')], absent: ['suspended', t(msgctxt('whm-software-center-client', 'Not installed'))], unavailable: ['suspended', t('Not available on this operating system')] }
       const [tone, label] = map[item.state]!
-      badge.className = 'xp-badge xp-badge--' + (item.needsReview ? 'critical' : tone); badge.textContent = item.needsReview ? t('Needs review: inconsistent package state') : label
-      return badge
+      return item.needsReview ? t('Needs review: inconsistent package state') : label
     }
     const relations = (item: any): string => {
       const parts: string[] = []
@@ -115,26 +124,22 @@ function bindWhmSoftwareCenter(askDialog: ((options: Record<string, unknown>) =>
       return parts.length ? parts.join(' · ') : t('None')
     }
     const row = (item: any): HTMLTableRowElement => {
-      const tr = el('tr'); tr.dataset.scComponent = item.id; tr.dataset.scRowCategory = item.category
+      const tr = clone('software-center-row', 'tr', ['name','description','packages','state','installed','candidate','estimate','relations','install','remove']) as HTMLTableRowElement
+      tr.dataset.scComponent = item.id; tr.dataset.scRowCategory = item.category
       tr.dataset.scRowSearch = [item.id, item.name, t(item.description), ...item.packages].join(' ').toLowerCase()
-      const main = el('td'), wrap = el('div'); wrap.className = 'xp-whm-software__item'
-      wrap.append(el('strong', item.name), el('p', t(item.description)))
-      if (item.packages.length) wrap.append(el('span', item.packages.join(' '), true))
-      main.append(wrap); tr.append(main)
-      const state = el('td'); state.append(stateBadge(item)); tr.append(state)
-      tr.append(item.installed.length ? el('td', item.installed.map((entry: any) => entry.name + ' ' + entry.versions.join(', ')).join(' · '), true) : el('td', t(msgctxt('whm-software-center-client', 'Not installed'))))
-      tr.append(view.candidates === 'read' && item.candidates ? mixed(item.candidates.flatMap((entry: any, index: number): [string, boolean][] => [...(index ? [[' · ', false] as [string, boolean]] : []), ...(entry.version === null ? filled(t('{name} not in repositories'), { '{name}': entry.name }) : [[entry.name + ' ' + entry.version, true] as [string, boolean]])]))
-        : el('td', view.candidates === 'not-read' ? t('Read by the change preview') : t('Repository versions are unavailable')))
-      tr.append(mixed(filled(t('Estimate: memory {memory} · disk {disk}'), { '{memory}': item.estimate.memoryMb + ' MB', '{disk}': item.estimate.diskMb + ' MB' })))
-      tr.append(el('td', relations(item)))
-      const actions = el('td'), box = el('div'); box.className = 'xp-whm-detail-actions'
+      const set = (slot: string, text: string) => { clientTemplateSlot(tr, slot).textContent = text }
+      set('name', item.name); set('description', t(item.description)); set('packages', item.packages.join(' '))
+      const badge = stateBadge(item), state = clientTemplateSlot(tr, 'state'); state.textContent = badge; state.dataset.state = item.needsReview ? 'critical' : item.state
+      set('installed', item.installed.length ? item.installed.map((entry: any) => entry.name + ' ' + entry.versions.join(', ')).join(' · ') : t(msgctxt('whm-software-center-client', 'Not installed')))
+      clientTemplateSlot(tr, 'candidate').replaceChildren(...(view.candidates === 'read' && item.candidates ? mixed(item.candidates.flatMap((entry: any, index: number): [string, boolean][] => [...(index ? [[' · ', false] as [string, boolean]] : []), ...(entry.version === null ? filled(t('{name} not in repositories'), { '{name}': entry.name }) : [[entry.name + ' ' + entry.version, true] as [string, boolean]])])) : el('td', view.candidates === 'not-read' ? t('Read by the change preview') : t('Repository versions are unavailable'))).childNodes)
+      clientTemplateSlot(tr, 'estimate').replaceChildren(...mixed(filled(t('Estimate: memory {memory} · disk {disk}'), { '{memory}': item.estimate.memoryMb + ' MB', '{disk}': item.estimate.diskMb + ' MB' })).childNodes)
+      set('relations', relations(item))
       for (const action of ['install', 'remove'] as const) {
-        const button = el('button', action === 'install' ? t('Install') : t('Remove')); button.type = 'button'; button.className = 'xp-btn' + (action === 'remove' ? ' xp-btn--danger' : '')
-        button.dataset.scAction = action; button.dataset.scAllowed = String(action === 'install' ? ['absent', 'partial'].includes(item.state) : ['installed', 'partial'].includes(item.state))
+        const button = clientTemplateSlot(tr, action, 'button') as HTMLButtonElement
+        button.textContent = action === 'install' ? t('Install') : t('Remove'); button.dataset.scAction = action
+        button.dataset.scAllowed = String(action === 'install' ? ['absent', 'partial'].includes(item.state) : ['installed', 'partial'].includes(item.state))
         button.addEventListener('click', () => { if (!button.disabled) void runPreview(action, item.id) })
-        box.append(button)
       }
-      actions.append(box); tr.append(actions)
       return tr
     }
     const applyFilters = (): void => {
@@ -159,19 +164,14 @@ function bindWhmSoftwareCenter(askDialog: ((options: Record<string, unknown>) =>
         buckets.set(key, [...(buckets.get(key) ?? []), item])
       }
       for (const [key, items] of buckets) {
-        const section = el('section'); section.className = 'xp-whm-software__group'; section.dataset.scGroup = key
+        const section = clone('software-center-group', 'section', ['title','scroll','head','body']); section.dataset.scGroup = key
         const title = key.startsWith('php-') ? 'PHP ' + key.slice(4) : categoryLabel(key)
-        section.append(el('h3', title))
-        const scroll = el('div'); scroll.className = 'xp-whm-detail-scroll'; scroll.setAttribute('role', 'region'); scroll.tabIndex = 0; scroll.setAttribute('aria-label', title)
-        const table = el('table'); table.className = 'xp-whm-detail-table xp-table'
-        const head = el('thead'), headRow = el('tr')
-        for (const label of columns) { const th = el('th', label); th.scope = 'col'; headRow.append(th) }
-        head.append(headRow); const body = el('tbody')
-        for (const item of items) body.append(row(item))
-        table.append(head, body); scroll.append(table); section.append(scroll); groups.append(section)
+        clientTemplateSlot(section, 'title').textContent = title; clientTemplateSlot(section, 'scroll').setAttribute('aria-label', title)
+        for (const label of columns) { const th = el('th', label); th.scope = 'col'; clientTemplateSlot(section, 'head').append(th) }
+        for (const item of items) clientTemplateSlot(section, 'body').append(row(item))
+        groups.append(section)
       }
-      const none = el('p', view.components.length ? t('No components match the filters.') : view.state === 'read' ? t('No components apply to this host.') : t('No components are shown because installed packages could not be read.'))
-      none.className = 'xp-help'; none.dataset.scNoMatch = ''; groups.append(none)
+      const none = clone('software-center-empty', 'p', ['message']); clientTemplateSlot(none, 'message').textContent = view.components.length ? t('No components match the filters.') : view.state === 'read' ? t('No components apply to this host.') : t('No components are shown because installed packages could not be read.'); groups.append(none)
       applyFilters(); lock()
     }
     const clearPreview = (): void => { preview = null; panel.hidden = true; accept.checked = false; lock() }
@@ -275,4 +275,4 @@ function bindWhmSoftwareCenter(askDialog: ((options: Record<string, unknown>) =>
   })
 }
 
-export const WHM_SOFTWARE_CENTER_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseSoftwareCenterResponse=${parseSoftwareCenterResponse.toString()};return ${bindWhmSoftwareCenter.toString()};})()`
+export const WHM_SOFTWARE_CENTER_CLIENT_BINDING = `(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseSoftwareCenterResponse=${parseSoftwareCenterResponse.toString()};return ${bindWhmSoftwareCenter.toString()};})()`

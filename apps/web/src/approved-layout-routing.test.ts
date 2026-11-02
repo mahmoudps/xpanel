@@ -1,5 +1,8 @@
+/// <reference lib="dom" />
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWebApp } from './app.ts'
+import { parseMarkup } from './html.ts'
 
 const renderers = vi.hoisted(() => ({
   panel: vi.fn(() => '<section data-approved-test="panel"></section>'),
@@ -9,6 +12,36 @@ vi.mock('./board-port/approved-xpanel-workspaces.ts', () => ({ renderApprovedXpa
 vi.mock('./board-port/approved-xwhm.ts', () => ({ renderWhmDetailPage: renderers.whm }))
 
 beforeEach(() => { renderers.panel.mockClear(); renderers.whm.mockClear() })
+
+// Only the admitted session menu may display this supplied mailbox identity.
+// Keep the original whole-document payload exclusion after removing that one menu.
+const expectMailboxOnlyInChrome = (html: string, mailbox: string, marker: string): void => {
+  const document = new DOMParser().parseFromString(html, 'text/html')
+  const menus = document.querySelectorAll('details[data-user-menu]')
+  expect(menus).toHaveLength(1)
+  const menu = menus.item(0)
+  expect(menu?.closest('header')).not.toBeNull()
+  expect(menu?.closest('[data-tool-availability="unverified"]')).toBeNull()
+  expect(menu?.textContent).toContain(mailbox)
+  menu?.remove()
+  expect(document.documentElement.outerHTML).not.toContain(marker)
+}
+const expectReadOnlyMailWorkspace = (html: string): void => {
+  const nodes = parseMarkup(html)
+  const roots = nodes.flatMap((node, index) => node.attrs.get('data-tool-availability') === 'unverified' ? [index] : [])
+  expect(roots).toHaveLength(1)
+  const root = roots[0]!
+  const workspace = nodes.filter((_node, index) => {
+    for (let current = index; current >= 0; current = nodes[current]!.parent) if (current === root) return true
+    return false
+  })
+  expect(workspace.some(node => node.attrs.get('data-mail-read-only') === 'true')).toBe(true)
+  for (const node of workspace) {
+    expect(node.tag).not.toBe('form')
+    expect(node.attrs.get('contenteditable')?.toLowerCase()).not.toBe('true')
+    for (const attribute of ['data-mail-send', 'data-mail-action', 'data-mail-uid']) expect(node.attrs.has(attribute)).toBe(false)
+  }
+}
 
 describe('approved layout admission boundary', () => {
   it('retains a known owner layout without forwarding unqualified provider data', () => {
@@ -62,9 +95,28 @@ describe('unqualified approved mail layout', () => {
     expect(html).toContain('data-mail-read-only="true"')
     expect(html).toContain('data-mail-layout="reference"')
     expect(html).toContain('data-quota-ratio="unknown"')
-    // CSS selectors and the shared client script mention action attributes; only actual elements are actionable.
-    expect(html).not.toMatch(/<form\b|<[a-z][^>]*\b(?:contenteditable="true"|data-mail-send=|data-mail-action=|data-mail-uid=)/i)
-    for (const value of ['private-mailbox-marker', 'private-recipient-marker', 'private-subject-marker', 'private-body-marker']) expect(html).not.toContain(value)
+    // Personal preferences remain outside this unqualified native workspace.
+    expectReadOnlyMailWorkspace(html)
+    expectMailboxOnlyInChrome(html, 'private-mailbox-marker@example.test', 'private-mailbox-marker')
+    for (const value of ['private-recipient-marker', 'private-subject-marker', 'private-body-marker']) expect(html).not.toContain(value)
+  })
+
+  it.each([
+    ['form', '<form><input type="password" disabled></form>'],
+    ['editable', '<div contenteditable="true"></div>'],
+    ['send', '<button data-mail-send disabled></button>'],
+    ['action', '<template><button data-mail-action="archive" disabled></button></template>'],
+    ['uid', '<div data-mail-uid="1"></div>'],
+  ])('rejects actual %s controls inside the unqualified workspace', (_kind, controls) => {
+    const html = '<section data-tool-availability="unverified"><section data-mail-read-only="true">' + controls + '</section></section>'
+    expect(() => expectReadOnlyMailWorkspace(html)).toThrow()
+  })
+
+  it('keeps the independent chooser outside the workspace and rejects native sibling forms within it', () => {
+    const mail = '<section data-mail-read-only="true"><p>Not read</p></section>'
+    const chooser = '<form data-ui-theme-form><select data-ui-theme-choice disabled></select></form>'
+    expectReadOnlyMailWorkspace(chooser + '<section data-tool-availability="unverified">' + mail + '</section>')
+    expect(() => expectReadOnlyMailWorkspace('<section data-tool-availability="unverified">' + mail + '<form><button disabled>Send</button></form></section>')).toThrow()
   })
 
   it('does not expose a mail workspace without an admitted identity', () => {

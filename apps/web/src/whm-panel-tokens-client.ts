@@ -1,3 +1,6 @@
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
+const whmClientNode = canonicalWhmClientNode, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -61,15 +64,40 @@ function bindWhmPanelTokens(askDialog: ((options: Record<string, unknown>) => Pr
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     if (!status || !rows || !refresh || !revokeStatus || !reveal || !revealText || !secretView || !copy || !done || !copyStatus || !form || !name || !expiry || !ips || !all || !submit || !clear || !createStatus || !scopeBoxes.length) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.tokensCanManage === 'true' && !root.closest(denied) && form.tagName === 'FORM' && typeof request === 'function'
+    let templateContractIntact = true
+    const templateContracts = [
+      ['whm-token-row', 'tr', { 'name': 'td', 'scopes': 'td', 'addresses': 'td', 'created': 'td', 'expires': 'td', 'used': 'td', 'state': 'td', 'actions': 'td' }],
+      ['whm-token-list', 'ul', { 'content': 'ul' }],
+      ['whm-token-revoke', 'button', { 'content': 'button' }],
+      ['whm-token-state-active', 'span', { 'content': 'span' }],
+      ['whm-token-state-expired', 'span', { 'content': 'span' }],
+      ['whm-token-state-revoked', 'span', { 'content': 'span' }],
+    ] as const
+    const verifyWhmTemplates = (): void => {
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try { assertWhmClientTemplates(root, templateContracts) } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        throw error
+      }
+    }
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.tokensCanManage === 'true' && !root.closest(denied) && form.tagName === 'FORM' && typeof request === 'function')
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
+      verifyWhmTemplates()
+      const reply = await request!(...args)
+      verifyWhmTemplates()
+      return reply
+    }
     const controls = [refresh, name, expiry, ips, all, submit, clear, ...scopeBoxes]
     let tokens: PanelTokenView[] = [], usageRecorded = false, listBusy = false, creating = false, revoking = ''
     const note = (target: HTMLElement, state: string, message: string): void => { target.hidden = false; target.dataset.state = state; target.textContent = message; target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const ltr = (value: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = value; return node }
     const cell = (row: HTMLTableRowElement, content: Node | string): void => { const td = document.createElement('td'); td.append(content); row.append(td) }
-    const list = (values: string[]): HTMLElement => { const ul = document.createElement('ul'); ul.className = 'xp-whm-tokens__list'; for (const value of values) { const li = document.createElement('li'); li.append(ltr(value)); ul.append(li) } return ul }
+    const list = (values: string[]): HTMLElement => { const ul = whmClientNode(root, 'whm-token-list', 'ul'); for (const value of values) { const li = document.createElement('li'); li.append(ltr(value)); ul.append(li) } return ul }
     const stateLabel = (state: PanelTokenStateView): string => ({ active: t('Active'), expired: t(msgctxt('whm-panel-tokens-client', 'Expired')), revoked: t('Revoked') })[state]
-    const badge = (state: PanelTokenStateView): HTMLElement => { const node = document.createElement('span'); node.className = 'xp-badge xp-badge--' + (state === 'active' ? 'ok' : state === 'revoked' ? 'critical' : 'suspended'); node.dataset.status = state; node.textContent = stateLabel(state); return node }
+    const badge = (state: PanelTokenStateView): HTMLElement => { const node = whmClientNode(root, 'whm-token-state-' + state, 'span', stateLabel(state)); node.dataset.status = state; return node }
     const failText = (error: unknown, fallback: string): string => {
       const failed = error as { status?: number; details?: { verificationRequired?: boolean; stateChanged?: boolean } }
       return failed?.details?.verificationRequired || failed?.details?.stateChanged ? t('The result could not be verified. Refresh the token list before acting again.')
@@ -79,20 +107,19 @@ function bindWhmPanelTokens(askDialog: ((options: Record<string, unknown>) => Pr
     const paintRows = (): void => {
       rows.textContent = ''
       for (const token of tokens) {
-        const row = document.createElement('tr')
+        const row = cloneClientTemplate(clientTemplate(root, 'whm-token-row'), 'tr', ['name', 'scopes', 'addresses', 'created', 'expires', 'used', 'state', 'actions'])
         row.dataset.tokenState = token.state
-        cell(row, ltr(token.name)); cell(row, list(token.scopes)); cell(row, token.allowedIps.length ? list(token.allowedIps) : t('Any address'))
-        cell(row, ltr(formatDisplayDateTime(token.createdAt))); cell(row, ltr(formatDisplayDateTime(token.expiresAt)))
-        cell(row, token.lastUsedAt ? ltr(formatDisplayDateTime(token.lastUsedAt)) : usageRecorded ? t('Never') : t(msgctxt('whm-panel-tokens-client', 'Not recorded')))
-        cell(row, badge(token.state))
+        const put = (slot: string, value: Node | string): void => clientTemplateSlot(row, slot).replaceChildren(value)
+        put('name', ltr(token.name)); put('scopes', list(token.scopes)); put('addresses', token.allowedIps.length ? list(token.allowedIps) : t('Any address'))
+        put('created', ltr(formatDisplayDateTime(token.createdAt))); put('expires', ltr(formatDisplayDateTime(token.expiresAt)))
+        put('used', token.lastUsedAt ? ltr(formatDisplayDateTime(token.lastUsedAt)) : usageRecorded ? t('Never') : t(msgctxt('whm-panel-tokens-client', 'Not recorded')))
+        put('state', badge(token.state))
         if (token.state === 'active') {
-          const button = document.createElement('button')
-          button.type = 'button'; button.className = 'xp-btn xp-btn--danger'; button.textContent = t(msgctxt('whm-panel-tokens-client', 'Revoke')); button.dataset.whmTokensRevoke = token.id
-          button.setAttribute('aria-label', t('Revoke token {name}', { name: token.name }))
+          const button = whmClientNode(root, 'whm-token-revoke', 'button', t(msgctxt('whm-panel-tokens-client', 'Revoke')))
+          button.dataset.whmTokensRevoke = token.id; button.setAttribute('aria-label', t('Revoke token {name}', { name: token.name }))
           button.disabled = !!revoking || !admitted() || typeof askDialog !== 'function'
-          button.addEventListener('click', () => { void revoke(token) })
-          cell(row, button)
-        } else cell(row, t('No action'))
+          button.addEventListener('click', () => { void revoke(token) }); put('actions', button)
+        } else put('actions', t('No action'))
         rows.append(row)
       }
       if (!tokens.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 8; td.textContent = t('No tokens were returned.'); row.append(td); rows.append(row) }
@@ -103,7 +130,7 @@ function bindWhmPanelTokens(askDialog: ((options: Record<string, unknown>) => Pr
       listBusy = true; refresh.disabled = true; root.setAttribute('aria-busy', 'true'); if (loading && !tokens.length) loading.hidden = false
       note(status, 'reading', t('Reading your API tokens…'))
       try {
-        const listed = readPanelTokenListView(await request('GET', '/api/server/panel/api-tokens'))
+        const listed = readPanelTokenListView(await checkedRequest('GET', '/api/server/panel/api-tokens'))
         tokens = listed.tokens; usageRecorded = listed.usageRecorded; paintRows()
         const active = tokens.filter(token => token.state === 'active').length
         note(status, 'read', tokens.length ? t('Tokens read. Active tokens: {count}.', { count: active }) : t('Tokens read. You have no API tokens.'))
@@ -124,7 +151,7 @@ function bindWhmPanelTokens(askDialog: ((options: Record<string, unknown>) => Pr
       if (!confirmed) { revoking = ''; paintRows(); return }
       note(revokeStatus, 'reading', t('Revoking the token…'))
       try {
-        const updated = readPanelTokenView((await request('POST', '/api/server/panel/api-tokens/' + token.id + '/revoke') as { token?: unknown })?.token)
+        const updated = readPanelTokenView((await checkedRequest('POST', '/api/server/panel/api-tokens/' + token.id + '/revoke') as { token?: unknown })?.token)
         if (updated.id !== token.id || updated.state !== 'revoked') throw Object.assign(new Error('unverified'), { details: { verificationRequired: true } })
         note(revokeStatus, 'read', t('Token revoked: {name}.', { name: token.name }))
       } catch (error) {
@@ -170,7 +197,7 @@ function bindWhmPanelTokens(askDialog: ((options: Record<string, unknown>) => Pr
           if (!confirmed) { createStatus.hidden = true; return }
         }
         note(createStatus, 'reading', t('Creating the token…'))
-        const created = readPanelTokenCreatedView(await request('POST', '/api/server/panel/api-tokens', { name: tokenName, scopes, expiresInDays: days, ...(addresses.length ? { allowedIps: addresses } : {}) }))
+        const created = readPanelTokenCreatedView(await checkedRequest('POST', '/api/server/panel/api-tokens', { name: tokenName, scopes, expiresInDays: days, ...(addresses.length ? { allowedIps: addresses } : {}) }))
         if (created.token.name !== tokenName) throw Object.assign(new Error('unverified'), { details: { verificationRequired: true } })
         secretView.textContent = created.secret
         revealText.textContent = t('Copy the token for {name} now. It is shown once; after you leave this page only its hash remains.', { name: created.token.name })
@@ -189,4 +216,4 @@ function bindWhmPanelTokens(askDialog: ((options: Record<string, unknown>) => Pr
   })
 }
 
-export const WHM_PANEL_TOKENS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readPanelTokenView=${readPanelTokenView.toString()};const readPanelTokenListView=${readPanelTokenListView.toString()};const readPanelTokenCreatedView=${readPanelTokenCreatedView.toString()};return ${bindWhmPanelTokens.toString()};})()`
+export const WHM_PANEL_TOKENS_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readPanelTokenView=${readPanelTokenView.toString()};const readPanelTokenListView=${readPanelTokenListView.toString()};const readPanelTokenCreatedView=${readPanelTokenCreatedView.toString()};return ${bindWhmPanelTokens.toString()};})()`

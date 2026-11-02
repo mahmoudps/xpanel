@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import { sslObject, sslWriteUncertain } from './whm-ssl-client.ts'
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
@@ -121,7 +125,8 @@ function bindWhmSslInstall(askDialog: ((options: Record<string, unknown>) => Pro
     const selected = () => { const item = workspace?.domains.find(row => row.id === domain.value), owner = item && workspace?.accounts.find(row => row.id === item.accountId); return item && owner ? { domain: item, account: owner } : null }
     const chosenNames = (): string[] => Array.from(names.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked')).map(input => input.value)
     const structure = () => sslInstallStructure(certificate.value, chain.value, key.value)
-    const isolated = (text: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.style.overflowWrap = 'anywhere'; node.textContent = text; return node }
+    const nameTemplate=clientTemplate(root,'ssl-install-name');cloneClientTemplate(nameTemplate,'label',['checkbox','name'])
+    const isolated = (text: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = text; return node }
     const step = (current: number): void => root.querySelectorAll<HTMLElement>('[data-ssl-install-step]').forEach(item => { if (item.dataset.sslInstallStep === String(current)) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current') })
     const paintChoices = (): void => {
       if (!choices) return
@@ -154,9 +159,8 @@ function bindWhmSslInstall(askDialog: ((options: Record<string, unknown>) => Pro
       const candidates = !target ? [] : [...new Set([...target.domain.name.startsWith('www.') ? [] : ['www.' + target.domain.name],
         ...workspace!.domains.filter(row => row.accountId === target.account.id && row.id !== target.domain.id).map(row => row.name)])].slice(0, 20)
       for (const name of candidates) {
-        const label = document.createElement('label'), input = document.createElement('input')
-        input.type = 'checkbox'; input.value = name; input.checked = previous.has(name); input.addEventListener('change', () => { paintChoices(); lock() })
-        label.append(input, isolated(name)); names.append(label)
+        const label=cloneClientTemplate(nameTemplate,'label',['checkbox','name']),input=clientTemplateSlot(label,'checkbox','input') as HTMLInputElement
+        input.value=name;input.checked=previous.has(name);input.addEventListener('change',()=>{paintChoices();lock()});clientTemplateSlot(label,'name').textContent=name;names.append(label)
       }
       if (empty) { empty.hidden = candidates.length > 0; empty.textContent = target ? t('This account has no other names to require.') : t('Choose a domain to list its www name and the other domains of its account.') }
     }
@@ -236,4 +240,4 @@ function bindWhmSslInstall(askDialog: ((options: Record<string, unknown>) => Pro
   })
 }
 
-export const WHM_SSL_INSTALL_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const SSL_INSTALL_MESSAGES=${JSON.stringify(SSL_INSTALL_MESSAGES)};const sslObject=${sslObject.toString()};const sslInstallObject=sslObject;const sslInstallUncertain=${sslWriteUncertain.toString()};const sslInstallId=${sslInstallId.toString()};const sslInstallNames=${sslInstallNames.toString()};const sslInstallCovers=${sslInstallCovers.toString()};const readSslInstallWorkspace=${readSslInstallWorkspace.toString()};const readSslInstallResult=${readSslInstallResult.toString()};const sslInstallStructure=${sslInstallStructure.toString()};return ${bindWhmSslInstall.toString()};})()`
+export const WHM_SSL_INSTALL_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const SSL_INSTALL_MESSAGES=${JSON.stringify(SSL_INSTALL_MESSAGES)};const sslObject=${sslObject.toString()};const sslInstallObject=sslObject;const sslInstallUncertain=${sslWriteUncertain.toString()};const sslInstallId=${sslInstallId.toString()};const sslInstallNames=${sslInstallNames.toString()};const sslInstallCovers=${sslInstallCovers.toString()};const readSslInstallWorkspace=${readSslInstallWorkspace.toString()};const readSslInstallResult=${readSslInstallResult.toString()};const sslInstallStructure=${sslInstallStructure.toString()};return ${bindWhmSslInstall.toString()};})()`

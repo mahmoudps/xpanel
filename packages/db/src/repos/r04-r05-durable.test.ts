@@ -652,4 +652,50 @@ describe('R05 (A24) — Durable file-first fsync hash-chained JSONL audit trail,
     expect(pruned.auditDeleted).toBe(0)
     expect(await listAudit(h.db)).toHaveLength(1)
   })
+
+  it('rejects renewal when lock admission happens after the current lease expires', async () => {
+    const h = await freshDb()
+    const started = new Date()
+    const durationMs = 800
+    const job = await enqueueDurableJob(h.db, {
+      kind: 'transfer.account',
+      actor: 'root',
+      summary: 'Queued lease expiry',
+      idempotencyKey: 'idem-queued-lease-expiry',
+    })
+    const lease = await acquireJobLease(h.db, {
+      jobId: job.id,
+      workerId: 'worker-1',
+      leaseDurationMs: durationMs,
+      now: started,
+    })
+    expect(lease?.leaseExpiresAt).toBe(new Date(started.getTime() + durationMs).toISOString())
+    let releaseHold = (): void => {}
+    let markEntered = (): void => {}
+    const entered = new Promise<void>((resolve) => {
+      markEntered = resolve
+    })
+    const holder = h.db.transaction(async () => {
+      markEntered()
+      await new Promise<void>((resolve) => {
+        releaseHold = resolve
+      })
+    })
+    await entered
+    const beforeQueue = Date.now()
+    expect(beforeQueue).toBeLessThan(started.getTime() + durationMs)
+    const renewal = renewJobLease(h.db, {
+      jobId: job.id,
+      workerId: 'worker-1',
+      fencingToken: lease!.fencingToken,
+      leaseDurationMs: durationMs,
+    })
+    while (Date.now() < started.getTime() + durationMs) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    releaseHold()
+    await holder
+    await expect(renewal).rejects.toSatisfy((err: unknown) => isXpanelError(err) && err.code === 'CONFLICT')
+    expect((await getDurableJob(h.db, job.id))?.leaseExpiresAt).toBe(lease?.leaseExpiresAt)
+  })
 })

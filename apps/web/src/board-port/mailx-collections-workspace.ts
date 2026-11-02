@@ -1,3 +1,4 @@
+import { mailxCollectionsClientTemplates } from './mailx-collection-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { MAILX_STYLE } from './mailx-whm-workspace.ts'
 export interface MailxCollectionsWorkspaceInput { locale: Locale; canManage: boolean }
@@ -43,5 +44,6 @@ export function renderMailxCollectionsWorkspace({ locale, canManage }: MailxColl
       <dl class="xp-mailx__facts"><div><dt>${t('CalDAV server address')}</dt><dd>${notAvailable}</dd></div><div><dt>${t('CardDAV server address')}</dt><dd>${notAvailable}</dd></div>
       <div><dt>${t('Sign-in')}</dt><dd>${t('Full mailbox address and its password, once a DAV server is connected')}</dd></div><div><dt>${t('Sync state')}</dt><dd>${t('Unavailable')}</dd></div></dl>
       <p class="xp-help">${t('Missing native step: install a CalDAV/CardDAV server (for example Radicale), make it authenticate mailboxes through Dovecot and serve these saved calendars, contacts, address books and task lists, then qualify it on this server.')}</p>`)}
+    ${mailxCollectionsClientTemplates()}
   </section>`
 }

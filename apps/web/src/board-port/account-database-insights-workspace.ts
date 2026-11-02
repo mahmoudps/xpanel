@@ -1,3 +1,4 @@
+import { databaseInsightsTemplates } from './data-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
@@ -22,5 +23,5 @@ export function renderAccountDatabaseInsightsWorkspace(input: { lang: Locale; ac
     <section class="xp-acct-tool__card" aria-labelledby="account-insights-users"><h2 id="account-insights-users">${t('Database users')}</h2>
       ${table('users', t('Database users'), [t('User'), t('On server'), t('Host entries')])}</section>
     <p data-insights-status role="status" data-state="unread">${input.canManage ? t('Reading database insights is ready.') : t('Database insights are unavailable here. Nothing was read.')}</p>
-  </div>`
+  ${databaseInsightsTemplates()}</div>`
 }

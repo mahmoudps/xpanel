@@ -1,5 +1,6 @@
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
+import { classicTransferClientTemplates } from './transfer-client-templates.ts'
 
 export interface TransferCredentialOption { id: string; label: string; kind: 'ssh-key' | 'api-token' }
 
@@ -33,5 +34,6 @@ export function renderWhmTransferWorkspace(input: { lang: Locale; canManage: boo
     <h3>${t('Or fetch it from the cPanel server over SSH')}</h3><div class="xp-transfer-workspace__fields">${text('transfer-cpanel-host', t('cPanel host'), 'text', 'maxlength="253"')}${text('transfer-cpanel-port', t('SSH port'), 'number', 'min="1" max="65535" value="22"')}${text('transfer-cpanel-user', t('cPanel username'), 'text', 'maxlength="16"')}${text('transfer-cpanel-fingerprint', t('Pinned host key'), 'text', 'maxlength="128" placeholder="SHA256:…"')}</div><p class="xp-help">${t('The cPanel server runs pkgacct as root with this server\'s transfer key; add its public key there first.')} <bdi dir="ltr" data-transfer-ssh-key-value></bdi></p><div class="xp-transfer-workspace__actions">${button('ssh-key', t('Show transfer key'))}${button('fetch', t('Fetch over SSH'))}</div>
     <div class="xp-transfer-workspace__fields">${field('transfer-import', t('Archive'), '<select id="transfer-import" class="xp-select" data-transfer-import disabled></select>')}${field('transfer-import-plan', t('Plan here'), '<select id="transfer-import-plan" class="xp-select" data-transfer-import-plan disabled></select>')}</div><div data-transfer-archive-review></div><div class="xp-transfer-workspace__actions">${button('import-discard', t('Discard archive'))}${button('import-run', t('Import account'))}</div><p class="xp-help">${t('The import builds a new UID, slice and vhost, then restores files, SQL, zones and mail into them. Zones get this server\'s name servers. It runs as its own job.')}</p></div>
     <p class="xp-help" data-transfer-status data-state="unread" role="status">${t('Saved transfer state has not been read.')}</p>
+    ${classicTransferClientTemplates(input.lang)}
   </section>`
 }

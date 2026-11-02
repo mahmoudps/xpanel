@@ -2,6 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmAccountEnhancementsWorkspace } from './board-port/acct-enhancements-workspace.ts'
 import { readWhmEnhancementsView, WHM_ENHANCEMENTS_CLIENT_BINDING } from './acct-enhancements-client.ts'
+import { renderV2WhmEnhancements } from './themes/v2/pages/xwhm/plans/enhancements.ts'
+import { translator } from './i18n.ts'
+import { tools } from '@xpanel/catalog'
 
 const R1 = 'a'.repeat(64), R2 = 'b'.repeat(64)
 const PLAN = '33333333-3333-4333-8333-333333333333', RESELLER = '22222222-2222-4222-8222-222222222222', A = '55555555-5555-4555-8555-555555555551'
@@ -11,9 +14,11 @@ const directory = { plans: [{ id: PLAN, name: 'Starter' }], accounts: [{ id: A, 
 const view = (overrides: Record<string, unknown> = {}) => ({ state: 'saved', revision: R1, document: document_(), directory, application: { enforced: false, resellerAssignment: false }, ...overrides })
 type Send = (method: string, path: string, body?: unknown) => Promise<unknown>
 const flush = async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
-const boot = (send?: Send, locale: 'en' | 'ar' = 'en', canManage = true, ask?: (options: Record<string, unknown>) => Promise<unknown>) => {
+const boot = (send?: Send, locale: 'en' | 'ar' = 'en', canManage = true, ask?: (options: Record<string, unknown>) => Promise<unknown>, theme: 'classic' | 'v2' = 'classic') => {
   document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
-  document.body.innerHTML = renderWhmAccountEnhancementsWorkspace({ locale, canManage })
+  document.body.innerHTML = theme === 'classic' ? renderWhmAccountEnhancementsWorkspace({ locale, canManage }) : renderV2WhmEnhancements(translator(locale), {
+    locale, principal: { kind: 'root', id: 'operator', username: 'operator' }, catalog: tools.map(tool => ({ ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } })),
+  }, { canRead: true, canManage, allowUnlimited: true, ownerId: null })
   if (send) (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
   new Function('return ' + WHM_ENHANCEMENTS_CLIENT_BINDING)()(ask)
 }
@@ -33,6 +38,30 @@ describe('account enhancements parser', () => {
 })
 
 describe('account enhancements client', () => {
+  it.each(['classic', 'v2'] as const)('keeps dynamic enhancement rows and actions in the selected %s markup without opaque reference fallbacks', async theme => {
+    const send = vi.fn(async () => view({ directory: { plans: [], accounts: [], resellers: [] } }))
+    boot(send, 'en', true, undefined, theme); await flush()
+    const assignments = $('[data-acct-enh-rows="assignments"]'), limits = $('[data-acct-enh-rows="limits"]')
+    expect(assignments.textContent).toContain('Plan: Not available')
+    expect(assignments.textContent).toContain('Account: Not available')
+    expect(assignments.textContent).not.toContain(PLAN); expect(assignments.textContent).not.toContain(A)
+    expect(limits.textContent).not.toContain(RESELLER)
+    const action = $<HTMLButtonElement>('[data-acct-enh-rows="definitions"] [data-xp-slot="delete"]')
+    expect(action.classList.contains(theme === 'v2' ? 'v2-btn' : 'xp-btn')).toBe(true)
+    expect(action.classList.contains(theme === 'v2' ? 'xp-btn' : 'v2-btn')).toBe(false)
+    expect(action.disabled).toBe(false)
+    expect($('[data-acct-enh-rows="definitions"] [data-xp-slot="id"]').textContent).toBe('priority-support')
+    expect($('[data-acct-enh-rows="definitions"] [data-xp-slot="id"]').getAttribute('dir')).toBe('ltr')
+  })
+  it('refuses missing enhancement templates before reading or mutating', async () => {
+    const send = vi.fn(async () => view())
+    document.body.innerHTML = renderWhmAccountEnhancementsWorkspace({ locale: 'en', canManage: true })
+    document.querySelector('template[data-xp-template="enhancement-definition-row"]')!.remove()
+    ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
+    new Function('return ' + WHM_ENHANCEMENTS_CLIENT_BINDING)()(undefined); await flush()
+    expect(send).not.toHaveBeenCalled()
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input,button')].every(control => control.disabled)).toBe(true)
+  })
   it('paints definitions, assignments and reseller usage', async () => {
     boot(vi.fn(async () => view()))
     await flush()

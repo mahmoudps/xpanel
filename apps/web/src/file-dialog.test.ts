@@ -5,6 +5,7 @@ import { defaultPlan, type Account } from '@xpanel/core'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
 import { renderPanelSurface } from './surfaces/xpanel.ts'
 import { FILE_WORKSPACE_CLIENT_BINDING, workspaceEntry, workspaceTrash } from './file-workspace-client.ts'
+import { CLASSIC_PROMPT_TEMPLATE } from './themes/classic/prompt.ts'
 
 const plan = { ...defaultPlan({ id: 'file-plan', name: 'Synthetic plan', featureListId: 'file-features' }), shell: 'jailed' as const }
 const account: Account = {
@@ -35,7 +36,7 @@ describe('file manager confirmation dialog', () => {
     const prompt = vi.spyOn(window, 'prompt').mockReturnValue('should-not-run')
     // The file workspace verifies every write against a re-read, so the fixture keeps server-side state.
     const files = new Map([['note.txt', { name: 'note.txt', path: 'note.txt', kind: 'file', sizeBytes: 2048, mode: 0o640, mtime: '2026-10-22T14:05:09.000Z' }]])
-    const request = vi.fn(async (_method: string, _path: string, body: { op?: string; path?: string }) => {
+    const request = vi.fn(async (_method: string, _path: string, body?: { op?: string; path?: string }) => {
       if (body?.op === 'list') return { entries: [...files.values()] }
       if (body?.op === 'trash') {
         const item = files.get(body.path!)!
@@ -53,7 +54,7 @@ describe('file manager confirmation dialog', () => {
     ;(window as unknown as { xpanelSessionRequest: typeof request }).xpanelSessionRequest = request
     document.documentElement.lang = 'en'
     document.documentElement.dataset.realtimeEnabled = 'false'
-    document.body.innerHTML = renderPanelSurface({ account, plan, activeRoute: '/files/manager', files: [], locale: 'en' })
+    document.body.innerHTML = renderPanelSurface({ account, plan, activeRoute: '/files/manager', files: [], locale: 'en' }) + CLASSIC_PROMPT_TEMPLATE
     new Function('window', 'document', BROWSER_REALTIME_SCRIPT)(window, document)
     await tick()
     // The file workspace controller reports 1024-based sizes with IEC units.
@@ -61,19 +62,27 @@ describe('file manager confirmation dialog', () => {
     expect(document.body.textContent).toContain('2026-10-22 14:05 UTC')
     expect(prompt).not.toHaveBeenCalled()
 
-    const trashCalls = () => request.mock.calls.filter(call => (call[2] as { op?: string }).op === 'trash')
-    const writeCalls = () => request.mock.calls.filter(call => (call[2] as { op?: string }).op === 'write')
+    const filesEndpoint = '/api/accounts/alice/files'
+    const fileCalls = () => request.mock.calls.filter(call => /^\/api\/accounts\/[^/]+\/files(?:[/?#]|$)/.test(call[1]))
+    const trashCalls = () => fileCalls().filter(call => call[0] === 'POST' && call[1] === filesEndpoint && call[2]?.op === 'trash')
+    const writeCalls = () => fileCalls().filter(call => call[0] === 'POST' && call[1] === filesEndpoint && call[2]?.op === 'write')
+    // Only expected account-file reads are exempt. Unknown operations, paths, methods and missing bodies remain observable.
+    const mutations = () => fileCalls().filter(call => call[0] !== 'POST' || call[1] !== filesEndpoint || !['list', 'list-trash', 'read'].includes(call[2]?.op ?? ''))
+    const mutationOperations = () => mutations().map(call => ({ method: call[0], path: call[1], op: call[2]?.op }))
     document.querySelector<HTMLButtonElement>('[data-file-manager-table] tbody .xp-btn:last-child')?.click()
     const dialog = document.querySelector<HTMLDialogElement>('[data-xp-prompt]')
     expect(dialog?.hasAttribute('open')).toBe(true)
     dialog?.querySelector<HTMLButtonElement>('[data-xp-prompt-cancel]')?.click()
     await tick()
     expect(trashCalls()).toHaveLength(0)
+    expect(mutationOperations()).toEqual([])
 
     document.querySelector<HTMLButtonElement>('[data-file-manager-table] tbody .xp-btn:last-child')?.click()
     dialog?.querySelector<HTMLFormElement>('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await tick()
     expect(trashCalls()).toHaveLength(1)
+    expect(trashCalls()[0]).toEqual(['POST', filesEndpoint, { op: 'trash', path: 'note.txt' }])
+    expect(mutationOperations()).toEqual([{ method: 'POST', path: filesEndpoint, op: 'trash' }])
 
     document.querySelector<HTMLButtonElement>('[data-action="new-file"]')?.click()
     const input = document.querySelector<HTMLInputElement>('[data-xp-prompt-input]')
@@ -82,10 +91,16 @@ describe('file manager confirmation dialog', () => {
     dialog?.querySelector<HTMLFormElement>('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await tick()
     expect(writeCalls()).toHaveLength(0)
+    expect(mutationOperations()).toEqual([{ method: 'POST', path: filesEndpoint, op: 'trash' }])
     input!.value = 'notes.txt'
     dialog?.querySelector<HTMLFormElement>('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await tick()
+    expect(writeCalls()).toHaveLength(1)
     expect(writeCalls()[0]?.[2]).toMatchObject({ op: 'write', path: 'notes.txt', content: '' })
+    expect(mutationOperations()).toEqual([
+      { method: 'POST', path: filesEndpoint, op: 'trash' },
+      { method: 'POST', path: filesEndpoint, op: 'write' },
+    ])
     expect(prompt).not.toHaveBeenCalled()
   })
 })
@@ -114,7 +129,8 @@ describe('readable file workspace metadata', () => {
       const confirm = vi.fn(async () => false)
       new Function('return ' + FILE_WORKSPACE_CLIENT_BINDING)()(confirm)
       await vi.waitFor(() => expect(document.querySelector<HTMLElement>('[data-file-status]')!.dataset.state).toBe('read'))
-      const row = document.querySelector<HTMLElement>('[data-file-manager-table] tbody tr')!, date = row.querySelector<HTMLTimeElement>('td:nth-child(5) time')
+      const row = document.querySelector<HTMLElement>('[data-file-manager-table] tbody tr')!, date = row.querySelector<HTMLTimeElement>('time')
+      expect(row.querySelectorAll('time')).toHaveLength(1)
       expect(row.dataset.filePath).toBe(mode === 'browse' ? file.path : trash.originalPath)
       if (mode === 'trash') {
         expect(row.dataset.trashId).toBe(trash.id)
@@ -123,8 +139,9 @@ describe('readable file workspace metadata', () => {
         expect(document.querySelectorAll('[data-file-status]')).toHaveLength(1)
       }
       expect(date).not.toBeNull(); expect(date!.textContent).toBe(expected); expect(date!.dateTime).toBe(rawTime)
-      expect(date!.closest('bdi')!.dir).toBe('ltr'); expect(date!.closest('bdi')!.classList.contains('xp-mono')).toBe(true)
-      expect(row.querySelector('td:nth-child(5)')!.textContent).not.toContain(rawTime)
+      // Explicit direction on TIME supplies HTML's isolation boundary without requiring a BDI ancestor.
+      expect(date!.dir).toBe('ltr'); expect(date!.classList.contains('xp-mono')).toBe(true)
+      expect(date!.closest('td')!.textContent).not.toContain(rawTime)
       expect(request).toHaveBeenCalledTimes(1); expect(confirm).not.toHaveBeenCalled()
       expect(JSON.stringify({ file, trash })).toBe(original)
     } finally { for (const listener of listeners) window.removeEventListener('beforeunload', listener); spy.mockRestore(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; document.documentElement.lang = oldLang; document.documentElement.dir = oldDir; document.body.replaceChildren() }

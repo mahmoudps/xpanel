@@ -125,6 +125,7 @@ describe('server health client binding', () => {
     document.querySelector<HTMLButtonElement>('[data-whm-server-health-refresh]')!.click(); await tick()
     expect(send.mock.calls.map(call => call[1])).toEqual(['/api/server/server-limits', '/api/server/server-limits?username=carol'])
     expect(visible()).toEqual(['alice', 'bob', 'carol'])
+    expect(document.querySelector('[data-whm-server-health-account="alice"] summary')?.firstElementChild?.tagName).toBe('DIV')
     expect(status().dataset.state).toBe('problem')
     expect(fact('count-high')).toBe('1')
     expect(fact('count-drift')).toBe('1')

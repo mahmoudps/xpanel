@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { MONITORING_ALERT_ROWS, renderWhmMonitoringAlertsWorkspace } from './whm-monitoring-alerts-workspace.ts'
+import { parseMarkup } from '../themes/markup.ts'
+
+const liveElements = (html: string) => parseMarkup(html).filter(node => node.namespace === 'html' && node.template === -1)
+const controls = (html: string) => liveElements(html).filter(node => ['button', 'input', 'select', 'fieldset'].includes(node.tag))
+
 
 describe('WHM monitoring alerts renderer', () => {
   it.each(['en', 'ar'] as const)('renders %s with logical direction, ASCII digits and every rule row', locale => {
@@ -9,8 +14,10 @@ describe('WHM monitoring alerts renderer', () => {
     expect(html).not.toMatch(/[٠-٩۰-۹]/)
     expect(html).not.toMatch(/\b(?:margin|padding)-(?:left|right)\b|\b(?:left|right):/)
     expect(html).toContain('data-alerts-can-manage="true"')
-    expect(html).toContain('<form')
-    expect(html).not.toContain(' disabled')
+    expect(liveElements(html).some(node => node.tag === 'form')).toBe(true)
+    expect(controls(html).length).toBeGreaterThan(9)
+    expect(controls(html).every(node => !node.attrs.has('disabled'))).toBe(true)
+    expect(parseMarkup(html).some(node => node.namespace === 'html' && node.tag === 'template')).toBe(true)
     for (const row of MONITORING_ALERT_ROWS) expect(html).toContain(`data-whm-alerts-rule="${row.id}"`)
     expect(html.match(/data-whm-alerts-threshold/g)).toHaveLength(MONITORING_ALERT_ROWS.filter(row => row.unit).length)
     expect(html).toContain('<input id="whm-alerts-quiet-start" type="time" dir="ltr"')
@@ -28,12 +35,12 @@ describe('WHM monitoring alerts renderer', () => {
 
   it('keeps the full layout in unavailable mode with no form and every control disabled', () => {
     const html = renderWhmMonitoringAlertsWorkspace({ locale: 'en', canManage: false })
-    expect(html).not.toContain('<form')
+    expect(liveElements(html).some(node => node.tag === 'form')).toBe(false)
     expect(html).toContain('data-alerts-can-manage="false"')
     expect(html.match(/data-state="unavailable"/g)).toHaveLength(2)
     expect(html.match(/data-whm-alerts-rule=/g)).toHaveLength(10)
-    const controls = html.match(/<(?:button|input|select|fieldset)\b[^>]*>/g) ?? []
-    expect(controls.length).toBeGreaterThan(9)
-    for (const control of controls) expect(control).toContain(' disabled')
+    const found = controls(html)
+    expect(found.length).toBeGreaterThan(9)
+    for (const control of found) expect(control.attrs.has('disabled')).toBe(true)
   })
 })

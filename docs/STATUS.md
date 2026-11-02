@@ -1,6 +1,6 @@
 # Project status
 
-Status as of 2026-10-23: **prelaunch; NO-GO for production**. No accepted completion percentage is asserted. Passing tests, available renderers and capability definitions measure different things and must not be added together as product completion.
+Status as of 2026-11-01: **prelaunch; NO-GO for production**. No accepted completion percentage is asserted. Passing tests, available renderers and capability definitions measure different things and must not be added together as product completion. The 2026-10-23 foundations below remain; the source inventory corrects the delivery and navigation statements that no longer match the code.
 
 ## Implemented foundations
 
@@ -17,7 +17,33 @@ Status as of 2026-10-23: **prelaunch; NO-GO for production**. No accepted comple
 - Account-action UI and API guards with current-target authorization, revision checks, linked-principal credential revocation and verification-required outcomes. Contact-email changes synchronize the account/index with compensating rollback. Deletion requires an advertised target-bound purge contract and otherwise refuses before changes. A dialog, acknowledged configuration or source contract does not qualify target-bound native hosting completion.
 - Deterministic source-release packaging with manifests, integrity checks, runtime import closure and explicit separation of reference material from runtime inputs.
 
-These foundations do not imply that every hosting workflow is connected, exposed or qualified. The catalog currently has **0 verified capabilities**. Unqualified capabilities remain unavailable in production navigation.
+These foundations do not imply that every hosting workflow is connected, exposed or qualified. The shipped catalog has **0 verified capabilities**. A registered document can still render; rendering does not qualify its tools.
+
+## Source inventory, 2026-11-01
+
+Counted from this checkout, without treating a renderer, route or probe as acceptance:
+
+| Source | Count | Admission consequence |
+|---|---:|---|
+| Catalog declarations in `packages/catalog/src/data/tools.ts` | 554 | 491 `researched`, 63 `out-of-scope` |
+| Native declarations in `packages/catalog/src/data/native.ts` | 45 | No id overlap with the 554; all enter the same delivery assessment |
+| In-scope tools | 536 | Each is placed on exactly one navigation page |
+| Out-of-scope tools | 63 | None is placed on a navigation page |
+| Navigation pages | 203 | 68 xPanel, 116 xWHM, 19 xMail |
+| Registered document aliases | 14 | 7 account store aliases, 3 xWHM store aliases, 4 mailbox aliases |
+| Registered documents | 217 | 203 pages plus 14 aliases; route hooks and V2 stylesheets cover this same set |
+| Phase-1 host-probe entries | 113 | Prerequisites only; they do not accept a tool |
+| Reduced qualified-scope notes | 50 | A later accepted workspace would still leave the named remainder unavailable |
+| Production TypeScript files under `apps/` and `packages/` | 1286 | Excludes `*.test.ts` |
+| Test TypeScript files under `apps/` and `packages/` | 961 | Fixture coverage, not a delivery receipt |
+
+`packages/catalog/src/data/delivery.ts` ships `deliveryEvidence = []` and `deliveryTarget = null`. `assessDelivery` therefore leaves every in-scope tool `researched`. `apps/api/src/main.ts` starts with `startPanelEntrypoints()` and does not pass a trusted evidence bundle. `qualifyHostTools` is demotion-only: a passing Linux probe report cannot move `researched`, `implemented` or `integrated` to `verified`. The live agent `GET /health` classification does not emit the `control-plane` probe that the phase-1 map requires. Under the default qualification switch, a future accepted tool that depends on that probe would be narrowed back to `researched` by the live health payload.
+
+Qualified navigation therefore stays closed for ordinary tools. `visibleNavigation` opens xPanel `/home` once the session names an account; the page body still waits until the active account record matches that session. The web renderer also admits `/whm/preferences` for a root or reseller session even though the catalog does not qualify it. Every other role-admitted document uses the unverified V2 layout. Its mutation controls stay disabled, and stored facts appear only inside the existing account, plan and mailbox boundary. xPanel's qualified shell lists registered owner pages; an unverified link is marked not live. xWHM and xMail qualified shells list a page only when `visibleNavigation` admits it.
+
+The Linux executor implements group and user creation, user deletion, quota application, confined file writes, systemd reload and property changes, and a reviewed command allowlist. The reconciler renders edge, PHP-FPM, mail, MariaDB, FTP, DNS, TLS, cron, account slices and nftables configuration. `AccountLifecycleCoordinator` is constructed for prepared provisioning. A fresh observed host effect can be reported as account-scoped and target-verified; a replay stays `targetVerified: false`. Ordinary configuration acknowledgement stays `targetVerified: false` and `verificationRequired: true`. Purge is implemented only for `LinuxHostExecutor`: GET advertises `target-bound-userdel`, and POST runs `userdel -r` only when the username, terminating status, uid from 20000 through 60000 and `/home/<user>` agree. Any other executor makes DELETE return HTTP 412 `target_bound_purge_unavailable` before changes. None of these paths is a qualified production lifecycle.
+
+Production API sources name 314 distinct `/api/` path literals, and the agent names 81 exact path checks. Those counts are source surface area. They do not mean each path mutates a live service or has acceptance evidence.
 
 ## Verification layers and current publication status
 
@@ -33,7 +59,7 @@ These foundations do not imply that every hosting workflow is connected, exposed
 | Accounts interaction matrix | 24 states defined | Account list/action dialog and creation form, EN/AR, light/dark, 360/768/1440px, actual applied fonts, 8px field gaps, keyboard/focus and synthetic JSON outcomes; no native lifecycle proof |
 | Development MFA presentation | 8 states defined | EN/AR sign-in and disabled-factor security pages at 360/1440px; synthetic password-only submission, actual input selection, fonts and geometry; runtime authority is tested separately over HTTP |
 | Optional enrolled security presentation | 8 states defined | Root and user cards in EN/AR at 320/1440px; root-only confirmed recovery guidance, actual visible command glyphs, LTR isolation and shared content edges; synthetic presentation only, with runtime recovery authority tested separately |
-| Registered composed destinations | 472 states defined | 118 routes in EN/AR at 360/1440px, including the correctly role-qualified disabled reverse-proxy fallback; synthetic data and strict geometry, not hosting qualification |
+| Registered V2 documents | 217 documents in source | 203 pages plus 14 aliases; English and Arabic read-only layouts for missing and supplied stored records, with mutation controls disabled. This replaces the former 118-route / 472-state description. Synthetic layout is not hosting qualification |
 | Native management workflows | 12 states defined | Plans, scoped account filters and outbound settings in EN/AR at 360/1440px with synthetic API outcomes; no host or mail-delivery execution |
 | Account, mail and application extensions | 112 states defined | 28 views in EN/AR at 360/1440px; unread data, catalog admission, typography, real field edges, accessibility and disabled operations remain explicit |
 
@@ -49,7 +75,7 @@ Native Linux tests are separate from portable checks. Their implementations and 
 
 ## Work remaining before launch
 
-1. **Production wiring and truthful delivery:** implement a durable target-bound account lifecycle/purge contract with restart/recovery receipts before enabling deletion or claiming account completion. The lifecycle coordinator is not connected as a qualified production executor and is not a drop-in replacement. Complete runner and lifecycle-port wiring, connect every supported operation to actual execution, and replace fixture or metadata-only behavior with independently observed outcomes. Seven owner pages separate administrative actions into root-only metadata destinations. Three bounded owner contracts for site configuration, reverse proxy and rewrite controls remain unavailable. Registered navigation destinations are metadata, not receipts for implemented or qualified hosting capabilities.
+1. **Production wiring and truthful delivery:** supply a pinned acceptance bundle only after real observations exist, then prove the live health report can retain those accepted tools. The purge route and provisioning coordinator exist in source and still lack restart, recovery and target-host qualification. Seven root-only destinations (`/whm/email/bcc`, `/whm/email/marketing`, `/whm/services/ftp-log-analysis`, `/whm/software/deployments`, `/whm/software/application-projects`, `/whm/software/composer`, `/whm/services/default-index`) have read-only documents and no artboard or primary action; their summaries keep the administrative action unavailable until qualified. Owner site settings and `.htaccess` stay out of qualified navigation until their own tools are verified. Reverse proxy enters qualified navigation only with a verified `domains` tool. The owner reverse-proxy and `.htaccess` API contracts are source implementations, not delivery receipts. A registered document remains a navigation destination, not evidence that its hosting operation works.
 2. **Hosting services:** qualify account creation/removal, Apache/PHP workload identity, cgroup and quota enforcement, MariaDB, DNS, certificates, SMTP/IMAP, FTP and cron with real daemons, positive controls and cross-account negative tests. A configuration renderer or successful primitive is insufficient.
 3. **Security:** finish target-host ingress/TLS policy, privileged boundary coverage, durable audit and process-failure acceptance. xMail opens a sealed canonical mailbox session after mailbox credential verification, and HTTP/WebSocket authorization rechecks current account and service policy. These source contracts and loopback regressions do not qualify an installed IMAP/SMTP service or public exposure. Revalidate the three profiles under replay, ownership changes, revocation and HTTP/WebSocket denial. Development disables runtime MFA through captured startup policy; production enrollment remains optional, with enrolled factors enforced.
 4. **Recovery:** prove consistent identity/key/configuration backup, granular and whole-server restore, large archive safety, real cPanel import, resumable transfers and upgrade rollback against actual data and services. Include interrupted and repeated attempts.

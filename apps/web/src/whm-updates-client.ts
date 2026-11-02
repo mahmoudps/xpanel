@@ -2,6 +2,9 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
 
 export type UpdatePackageView = { name: string; current: string | null; candidate: string; origin: string; security: boolean; kernel: boolean; held: boolean; newInstall: boolean }
@@ -78,8 +81,7 @@ function bindWhmUpdates(askDialog: ((options: Record<string, unknown>) => Promis
       rows.querySelectorAll<HTMLInputElement>('input[data-whm-updates-select]').forEach(input => { input.disabled = input.dataset.selectable !== 'true' || !ready })
       root.setAttribute('aria-busy', String(busy))
     }
-    const cell = (row: HTMLTableRowElement, value: string, technical = false): void => { const td = document.createElement('td'), content = document.createElement(technical ? 'bdi' : 'span'); if (technical) content.dir = 'ltr'; content.textContent = value; td.append(content); row.append(td) }
-    const placeholder = (message: string): void => { rows.textContent = ''; const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 7; td.textContent = message; row.append(td); rows.append(row) }
+    const placeholder = (message: string): void => { rows.replaceChildren(cloneViewRecord(root, 'software-update-empty', 'tr', { message })) }
     const fact = (key: string, value: string): void => { const target = root.querySelector<HTMLElement>('[data-whm-updates-fact="' + key + '"]'); if (target) target.textContent = value }
     const notRead = t('Not read')
     const paint = (value: ReturnType<typeof readUpdatePlanView>): void => {
@@ -102,10 +104,11 @@ function bindWhmUpdates(askDialog: ((options: Record<string, unknown>) => Promis
       if (repairLink) repairLink.hidden = guard.state !== 'read' || guard.database === 'clean'
       rows.textContent = ''
       const add = (name: string, installed: string, candidate: string, origin: string, type: string, state: string, selectableRow: boolean): void => {
-        const row = document.createElement('tr'), td = document.createElement('td'), input = document.createElement('input')
-        input.type = 'checkbox'; input.value = name; input.dataset.whmUpdatesSelect = ''; input.dataset.selectable = String(selectableRow)
+        const row = cloneViewRecord(root, 'software-update-row', 'tr', { name, installed, candidate, origin, kind: type, state })
+        const input = viewAction<HTMLInputElement>(row, 'select', 'input')
+        input.value = name; input.dataset.whmUpdatesSelect = ''; input.dataset.selectable = String(selectableRow)
         input.setAttribute('aria-label', t('Select {name}', { name })); input.addEventListener('change', lock)
-        td.append(input); row.append(td); cell(row, name, true); cell(row, installed, installed !== notRead); cell(row, candidate, candidate !== notRead); cell(row, origin, true); cell(row, type); cell(row, state); rows.append(row)
+        rows.append(row)
       }
       for (const entry of value.packages) {
         const type = [entry.security ? t(msgctxt('whm-updates-client', 'Security')) : '', entry.kernel ? t(msgctxt('whm-updates-client', 'Kernel')) : ''].filter(Boolean).join(' · ') || t('Regular')
@@ -179,4 +182,4 @@ function bindWhmUpdates(askDialog: ((options: Record<string, unknown>) => Promis
   })
 }
 
-export const WHM_UPDATES_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readUpdatePlanView=${readUpdatePlanView.toString()};const readUpdateJobView=${readUpdateJobView.toString()};return ${bindWhmUpdates.toString()};})()`
+export const WHM_UPDATES_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readUpdatePlanView=${readUpdatePlanView.toString()};const readUpdateJobView=${readUpdateJobView.toString()};return ${bindWhmUpdates.toString()};})()`

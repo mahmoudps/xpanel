@@ -144,16 +144,22 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
     status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status')
   }
   const unavailable = (element: Element): boolean => Boolean(element.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[aria-disabled="true"],[data-capability-unavailable="true"],fieldset:disabled'))
+  // Matrix controls can live in table cells and belong to a form through its id.
+  const formControls = (form: HTMLFormElement): (HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement)[] => Array.from(form.elements)
+    .filter((control): control is HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement =>
+      (control instanceof HTMLInputElement || control instanceof HTMLButtonElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement) && control.form === form)
+  const namedInputs = (form: HTMLFormElement, name: string): HTMLInputElement[] => formControls(form)
+    .filter((control): control is HTMLInputElement => control instanceof HTMLInputElement && control.name === name)
   const enabledValues = (form: HTMLFormElement): FormValues => {
     const values: FormValues = {}
-    form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input[name],select[name],textarea[name]').forEach(control => {
-      if (control.matches(':disabled') || !control.name) return
+    formControls(form).forEach(control => {
+      if (control instanceof HTMLButtonElement || control.matches(':disabled') || !control.name) return
       if (control instanceof HTMLInputElement && control.type === 'radio' && !control.checked) return
       values[control.name] = control instanceof HTMLInputElement && control.type === 'checkbox' ? control.checked : control.value
     })
     return values
   }
-  const selectedFeatures = (form: HTMLFormElement): string[] => Array.from(form.querySelectorAll<HTMLInputElement>('input[name="disabled"]')).filter(input => input.checked && !input.matches(':disabled')).map(input => input.value)
+  const selectedFeatures = (form: HTMLFormElement): string[] => namedInputs(form, 'disabled').filter(input => input.checked && !input.matches(':disabled')).map(input => input.value)
   const definiteRefusal = (error: unknown): boolean => {
     if (!workspaceRecord(error)) return false
     if (error.stateChanged === true || error.verificationRequired === true || error.unknownOutcome === true || error.needsAttention === true) return false
@@ -218,10 +224,10 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
       if (typeof send !== 'function') { note(status, copy('Saving is unavailable. No changes were sent.'), 'failed'); return }
       const values = enabledValues(form)
       const disabledFeatures = selectedFeatures(form)
-      const editableFeatures = Array.from(form.querySelectorAll<HTMLInputElement>('input[name="disabled"]')).filter(input => !input.matches(':disabled')).map(input => input.value)
-      const editableAcl = Array.from(form.querySelectorAll<HTMLInputElement>('input[name="acl"]')).filter(input => !input.matches(':disabled')).map(input => input.value)
-      const selectedAcl = Array.from(form.querySelectorAll<HTMLInputElement>('input[name="acl"]')).filter(input => input.checked && !input.matches(':disabled')).map(input => input.value)
-      const controls = Array.from(form.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input,button,select,textarea')).map(control => ({ control, disabled: control.disabled }))
+      const editableFeatures = namedInputs(form, 'disabled').filter(input => !input.matches(':disabled')).map(input => input.value)
+      const editableAcl = namedInputs(form, 'acl').filter(input => !input.matches(':disabled')).map(input => input.value)
+      const selectedAcl = namedInputs(form, 'acl').filter(input => input.checked && !input.matches(':disabled')).map(input => input.value)
+      const controls = formControls(form).map(control => ({ control, disabled: control.disabled }))
       let mutationStarted = false
       let verificationPending = false
       busy = true; form.setAttribute('aria-busy', 'true'); controls.forEach(({ control }) => { control.disabled = true })

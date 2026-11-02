@@ -20,17 +20,22 @@ export const HELP = `Usage: xpanel-ctl <command> [options]
 Commands:
   help, version              Show usage or runtime versions
   status, doctor             Read lifecycle state and prerequisites
-  install, adopt             Plan or apply a verified installation/adoption
+  install                    Plan installation or finalize an already prepared install
+  adopt                      Plan adoption (native apply unavailable)
   update                     Check or update within the current major version
   upgrade                    Plan or apply an explicit major-version upgrade
-  rollback-release           Plan or recover an owned release (--release X.Y.Z)
+  rollback-release           Plan release recovery; native apply unavailable
   recover                    Plan or recover an interrupted operation
-  uninstall                  Remove owned program files while preserving data
+  uninstall                  Plan removal preserving data (native apply unavailable)
   verify-install-source      Diagnose authenticated source and installed bytes
   verify-install-ready       Diagnose actual runtime readiness
 
 Changes default to --plan. Applying requires --apply --yes and genuine native
-prerequisites. Only update supports --check. No purge or OS-upgrade command exists.
+prerequisites. Install apply only finalizes an authenticated prepared installation;
+it does not provision a host or start services. Native update, upgrade and recover
+keep their existing admission. Other change commands refuse before effects.
+Only update supports --check.
+No purge or OS-upgrade command exists.
 
 Authenticated artifact input (all required together):
   --artifact FILE --sha256 HEX --signing-key FILE --key-id ID
@@ -114,7 +119,7 @@ const OUTCOMES = new Map([[0, new Set(['read', 'planned', 'committed'])], [2, ne
 const MESSAGES = new Map([[0, 'Lifecycle command completed.'], [2, 'Invalid lifecycle command arguments.'], [3, 'Lifecycle prerequisites are not satisfied.'], [4, 'Another lifecycle operation holds the lock.'], [5, 'The previous operation has a verified failure.'], [6, 'Lifecycle state requires attention before another operation.'], [7, 'Source preparation completed; application bootstrap remains pending.']])
 const STATES = new Set(['idle', 'ready', 'planned', 'committed', 'blocked', 'attention', 'retirement_pending', 'bootstrap-pending', 'not-installed', 'installed', 'in-progress', 'failed', 'rolled-back', 'rollback-pending', 'prepared', 'preflight', 'verify', 'stage', 'backup', 'activate', 'commit', 'rollback', 'recover', 'uninstall', 'adopt', 'dependency-verification', 'source-verification', 'unavailable'])
 const VERSION_KEYS = new Set(['currentVersion', 'targetVersion', 'version', 'nodeVersion', 'requiredNodeVersion'])
-const BOOLEAN_KEYS = new Set(['sourceVerified', 'dependenciesVerified', 'installReady', 'compatible', 'qualified', 'bootstrapPending', 'changed', 'preservedData'])
+const BOOLEAN_KEYS = new Set(['sourceVerified', 'dependenciesVerified', 'installReady', 'compatible', 'qualified', 'bootstrapPending', 'changed', 'preservedData', 'installationActive', 'nativeQualified'])
 const HASH_KEYS = new Set(['archiveSha256', 'artifactSha256'])
 const invalidResult = code => ({ exitCode: 6, code, outcome: 'attention', message: MESSAGES.get(6) })
 

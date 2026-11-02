@@ -1,3 +1,4 @@
+import { dbEngineTemplates } from './data-client-templates.ts'
 import { localeDirection, translator, type Locale } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
@@ -31,7 +32,7 @@ export function renderWhmDbEngineWorkspace(input: { page: WhmDbEnginePage; local
     <div class="xp-whm-detail-actions"><button type="button" class="xp-btn" data-db-action="refresh"${off}>${t('Read again')}</button></div>
     <p class="xp-whm-detail-status" data-db-status data-state="unread" role="status">${t('Server information has not been read yet.')}</p>
     ${body}
-  </div>`
+  ${dbEngineTemplates()}</div>`
 }
 
 export function renderAccountDbEngineWorkspace(input: { page: AccountDbEnginePage; lang: Locale; accountId: string; username: string; canManage: boolean }): string {
@@ -53,5 +54,5 @@ export function renderAccountDbEngineWorkspace(input: { page: AccountDbEnginePag
         + card('user', msgid('Create a PostgreSQL user'), `<${form} data-db-pg-form="user"${input.canManage ? ' novalidate' : ''}><div class="xp-acct-tool__fields"><div class="xp-field"><label for="db-pg-user">${t('User name')}</label><input class="xp-input" id="db-pg-user" name="name" dir="ltr" disabled placeholder="${prefix}app" maxlength="32" autocomplete="off" spellcheck="false"></div><div class="xp-field"><label for="db-pg-password">${t('Password')}</label><input class="xp-input" id="db-pg-password" name="password" type="password" dir="ltr" disabled minlength="8" maxlength="256" autocomplete="new-password"></div></div><div class="xp-acct-tool__actions"><button type="submit" class="xp-btn xp-btn--primary" disabled>${t('Create user')}</button></div></${form}>${passwordHelp}`)
         + card('password', msgid('Change a PostgreSQL user password'), `<${form} data-db-pg-form="password"${input.canManage ? ' novalidate' : ''}><div class="xp-acct-tool__fields"><div class="xp-field"><label for="db-pg-password-user">${t('User')}</label><select class="xp-select" id="db-pg-password-user" name="user" dir="ltr" disabled></select></div><div class="xp-field"><label for="db-pg-password-new">${t('New password')}</label><input class="xp-input" id="db-pg-password-new" name="password" type="password" dir="ltr" disabled minlength="8" maxlength="256" autocomplete="new-password"></div></div><div class="xp-acct-tool__actions"><button type="submit" class="xp-btn xp-btn--primary" disabled>${t('Change password')}</button></div></${form}>${passwordHelp}`)
       : card('launch', 'phpPgAdmin', `${status}${facts([['account', msgid('Account')], ['installed', msgid('phpPgAdmin package')], ['postgresql', msgid('PostgreSQL server')], ['signon', msgid('Single sign-on')]])}<div class="xp-acct-tool__actions"><button type="button" class="xp-btn xp-btn--primary" disabled>${t('Open phpPgAdmin')}</button>${refresh}</div><p class="xp-help">${t('phpPgAdmin has no documented single sign-on method, so xPanel does not open it or place a database password in the browser.')}</p>`)
-  return `<div class="xp-acct-tool" data-db-engine="account-${page}" data-account="${escapeHtml(input.accountId)}" data-username="${escapeHtml(input.username)}" data-db-can-read="${input.canManage}" data-db-can-manage="${input.canManage}" lang="${input.lang}" dir="${localeDirection(input.lang)}">${ACCOUNT_TOOL_STYLE}${STYLE}${body}</div>`
+  return `<div class="xp-acct-tool" data-db-engine="account-${page}" data-account="${escapeHtml(input.accountId)}" data-username="${escapeHtml(input.username)}" data-db-can-read="${input.canManage}" data-db-can-manage="${input.canManage}" lang="${input.lang}" dir="${localeDirection(input.lang)}">${ACCOUNT_TOOL_STYLE}${STYLE}${body}${dbEngineTemplates()}</div>`
 }

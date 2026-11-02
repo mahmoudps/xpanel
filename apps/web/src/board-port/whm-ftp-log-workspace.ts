@@ -58,5 +58,6 @@ export function renderWhmFtpLog(input: { locale: Locale; canRead: boolean }): st
       </div>
     </section>
   </aside>
+<template data-xp-template="whm-ftp-log-pick"><button type="button" class="xp-btn" disabled><span data-xp-slot="content"></span></button></template>
 </div>`
 }

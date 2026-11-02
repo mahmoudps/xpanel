@@ -3,6 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
 import { renderWhmAnnouncementsWorkspace } from './board-port/whm-announcements-workspace.ts'
 import { readWhmAnnouncementsView, WHM_ANNOUNCEMENTS_CLIENT_BINDING } from './whm-announcements-client.ts'
+import { renderV2WhmAccountAnnouncementsPage } from './themes/v2/pages/xwhm/account-tools/pages.ts'
+
+vi.mock('./themes/v2/messages.ts', async () => {
+  const { createThemeMessages } = await import('./theme-messages.ts')
+  const { readFileSync } = await import('node:fs')
+  const { URL: NodeURL, fileURLToPath } = await import('node:url')
+  const read = (locale: string) => readFileSync(fileURLToPath(new NodeURL(`./themes/v2/locales/${locale}.po`, import.meta.url)), 'utf8')
+  return { v2Messages: createThemeMessages('v2', read('en'), { ar: read('ar') }) }
+})
 
 const R1 = 'a'.repeat(64), R2 = 'b'.repeat(64), R3 = 'c'.repeat(64)
 const A = '77777777-7777-4777-8777-000000000001', B = '77777777-7777-4777-8777-000000000002'
@@ -16,9 +25,10 @@ const view = (overrides: Record<string, unknown> = {}) => ({ state: 'saved', rev
 type Send = (method: string, path: string, body?: unknown) => Promise<unknown>
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
 const flush = async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
-const boot = (send?: Send, locale: 'en' | 'ar' = 'en', canManage = true, ask?: Ask) => {
+const boot = (send?: Send, locale: 'en' | 'ar' = 'en', canManage = true, ask?: Ask, theme: 'classic' | 'v2' = 'classic', prepare?: (root: HTMLElement) => void) => {
   document.documentElement.lang = locale; document.documentElement.dir = locale === 'ar' ? 'rtl' : 'ltr'
-  document.body.innerHTML = renderWhmAnnouncementsWorkspace({ locale, canManage })
+  document.body.innerHTML = theme === 'v2' ? renderV2WhmAccountAnnouncementsPage({ activeRoute: '/whm/accounts/announcements', locale }, { canRead: true, canManage }) : renderWhmAnnouncementsWorkspace({ locale, canManage })
+  prepare?.(document.querySelector<HTMLElement>('[data-whm-announcements-workspace]')!)
   if (send) (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
   new Function('return ' + WHM_ANNOUNCEMENTS_CLIENT_BINDING)()(ask)
 }
@@ -49,6 +59,45 @@ describe('WHM announcements client parser', () => {
 })
 
 describe('WHM announcements client binding', () => {
+  it.each((['classic', 'v2'] as const).flatMap(theme => (['en', 'ar'] as const).map(locale => [theme, locale] as const)))('uses the actual %s owner templates for independently directed bilingual previews in %s', async (theme, locale) => {
+    const send = vi.fn<Send>(async () => view())
+    boot(send, locale, true, undefined, theme); await flush()
+    fill(); set('body-en', '<img src=x onerror=alert(1)>')
+    for (const language of ['en', 'ar']) {
+      const preview = $('[data-whm-announcements-preview="' + language + '"]'), notice = preview.querySelector<HTMLElement>('[data-account-announcement]')!
+      expect(preview.lang).toBe(language)
+      expect(preview.dir).toBe(language === 'ar' ? 'rtl' : 'ltr')
+      expect(notice.hasAttribute('role')).toBe(false)
+      expect(notice.querySelector('img')).toBeNull()
+      expect(notice.querySelector<HTMLButtonElement>('button')!.disabled).toBe(true)
+      expect(notice.textContent).toContain(language === 'ar' ? 'إعادة تشغيل البريد' : 'Mail restart')
+      if (theme === 'v2') { expect(notice.classList.contains('v2-account-announcement')).toBe(true); expect(notice.querySelector('[class*="xp-"]')).toBeNull() }
+    }
+    expect(send.mock.calls).toEqual([['GET', '/api/server/announcements']])
+  })
+
+  it.each((['classic', 'v2'] as const).flatMap(theme => ['missing-notice', 'duplicate-notice', 'wrong-body', 'wrong-end', 'wrong-dismiss', 'missing-row', 'wrong-button', 'invalid-labels', 'wrong-direction'].map(kind => [theme, kind] as const)))('closes the actual %s workspace before GET or preview edits for %s', async (theme, kind) => {
+    const send = vi.fn<Send>(async () => view())
+    boot(send, 'en', true, undefined, theme, root => {
+      const notice = root.querySelector<HTMLTemplateElement>('template[data-xp-template="account-announcement-notice-maintenance"]')!
+      if (kind === 'missing-notice') notice.remove()
+      else if (kind === 'duplicate-notice') root.append(notice.cloneNode(true))
+      else if (kind === 'missing-row') root.querySelector('template[data-xp-template="whm-announcement-row"]')!.remove()
+      else if (kind === 'wrong-button') root.querySelector<HTMLTemplateElement>('template[data-xp-template="whm-announcement-button"]')!.content.querySelector<HTMLButtonElement>('button')!.type = 'submit'
+      else if (kind === 'invalid-labels') root.querySelector<HTMLElement>('[data-whm-announcements-preview="ar"]')!.dataset.whmAnnouncementsLabels = JSON.stringify({ info: 'x' })
+      else if (kind === 'wrong-direction') root.querySelector('[data-whm-announcements-preview="ar"]')!.setAttribute('dir', 'ltr')
+      else {
+        const name = kind.slice(6), original = notice.content.querySelector('[data-xp-slot="' + name + '"]')!, wrong = document.createElement('div')
+        for (const attribute of original.attributes) wrong.setAttribute(attribute.name, attribute.value)
+        wrong.append(...original.childNodes); original.replaceWith(wrong)
+      }
+    })
+    fill(); await Promise.resolve()
+    expect(send).not.toHaveBeenCalled()
+    expect($('[data-whm-announcements-status]').dataset.state).toBe('unavailable')
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input,button,select,textarea')].every(control => control.disabled)).toBe(true)
+  })
+
   it('sends nothing without transport or admission', async () => {
     const send = vi.fn<Send>()
     boot(send, 'en', false)

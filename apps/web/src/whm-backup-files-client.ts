@@ -1,3 +1,6 @@
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -86,6 +89,32 @@ function bindWhmBackupFiles(): void {
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.backupFilesCanRead === 'true' && !root.closest(denied)
     if (!admitted()) return
+    const record = (name: string, tag: string, values: Readonly<Record<string, string | number>>): HTMLElement => {
+      const row = cloneViewRecord(root, name, tag, values)
+      for (const key of Object.keys(values)) {
+        const selector = '[data-xp-slot="' + key + '"]'
+        if ([...(row.matches(selector) ? [row] : []), ...row.querySelectorAll(selector)].length !== 1) throw new Error('backup_files_slot_unavailable')
+      }
+      return row
+    }
+    try {
+      record('backup-files-value', 'bdi', { value: '' })
+      record('backup-files-option', 'option', { label: '' })
+      for (const columns of [4, 5]) record('backup-files-empty' + columns, 'tr', { message: '' })
+      const archive = record('backup-files-archive', 'tr', { created: '', file: '', size: '', state: '', label: '' })
+      viewAction(archive, 'open')
+      for (const name of ['entry', 'folder']) {
+        const row = record('backup-files-' + name, 'tr', { name: '', type: '', size: '' })
+        viewAction(row, 'select', 'input')
+        if (name === 'folder') viewAction(row, 'open')
+      }
+      record('backup-files-review', 'tr', { path: '', destination: '', size: '', action: '' })
+      record('backup-files-result', 'tr', { path: '', destination: '', result: '', reason: '' })
+    } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'unavailable'; status.textContent = t('Not available')
+      return
+    }
     const canRestore = root.dataset.backupFilesCanRestore === 'true', MAX_SELECTION = 500, SHOWN = 1000
     const selected = new Set<string>()
     let busy = false, username = '', opened: BackupFilesBrowseView | null = null, directory = '', pending = 0
@@ -116,13 +145,10 @@ function bindWhmBackupFiles(): void {
       const copy = known[String(problem.code)], detail = typeof problem.message === 'string' ? ' ' + problem.message : ''
       return (copy ? t(copy) : t('The request failed.')) + detail
     }
-    const element = <K extends keyof HTMLElementTagNameMap>(tag: K, value?: string): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (value !== undefined) node.textContent = value; return node }
-    const technical = (value: string): HTMLElement => { const node = element('bdi', value); node.dir = 'ltr'; return node }
+    const technical = (value: string): HTMLElement => record('backup-files-value', 'bdi', { value })
     const size = (bytes: number): string => bytes < 1024 ? bytes + ' B' : bytes < 1048576 ? (bytes / 1024).toFixed(1) + ' KiB' : bytes < 1073741824 ? (bytes / 1048576).toFixed(1) + ' MiB' : (bytes / 1073741824).toFixed(2) + ' GiB'
-    const cell = (...nodes: (Node | string)[]): HTMLTableCellElement => { const td = element('td'); td.append(...nodes); return td }
-    const fill = (body: HTMLElement, rows: HTMLTableRowElement[], empty: string, columns: number): void => {
-      if (rows.length) { body.replaceChildren(...rows); return }
-      const row = element('tr'), td = cell(empty); td.colSpan = columns; row.append(td); body.replaceChildren(row)
+    const fill = (body: HTMLElement, rows: HTMLElement[], empty: string, columns: number): void => {
+      body.replaceChildren(...(rows.length ? rows : [record('backup-files-empty' + columns, 'tr', { message: empty })]))
     }
     const fact = (name: string, value: Node | string): void => { find(name)?.replaceChildren(value) }
     const step = (name: string): void => steps.querySelectorAll<HTMLElement>('li').forEach(item => { if (item.dataset.step === name) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current') })
@@ -161,11 +187,11 @@ function bindWhmBackupFiles(): void {
       finally { busy = false; sync() }
     }
     const renderArchives = (list: BackupFilesArchiveView[]): void => fill(archives, list.map(item => {
-      const row = element('tr'), open = element('button', t(msgctxt('whm-backup-files-client', 'Open')))
-      open.type = 'button'; open.className = 'xp-btn'; open.dataset.file = item.file; open.dataset.rejected = String(item.integrity === 'rejected')
+      const row = record('backup-files-archive', 'tr', { created: displayDateTime(item.createdAt), file: item.file, size: size(item.bytes),
+        state: item.integrity === 'rejected' ? t('Rejected: {reason}', { reason: reason(item.reason) }) : t('Not yet inspected; opening inspects every member'), label: t(msgctxt('whm-backup-files-client', 'Open')) })
+      const open = viewAction<HTMLButtonElement>(row, 'open')
+      open.dataset.file = item.file; open.dataset.rejected = String(item.integrity === 'rejected')
       open.setAttribute('aria-label', t('Open backup {file}', { file: item.file }))
-      row.append(cell(technical(displayDateTime(item.createdAt))), cell(technical(item.file)), cell(technical(size(item.bytes))),
-        cell(item.integrity === 'rejected' ? t('Rejected: {reason}', { reason: reason(item.reason) }) : t('Not yet inspected; opening inspects every member')), cell(open))
       return row
     }), username ? t('This account has no backups in the server backup store.') : t('No account is selected.'), 5)
     const renderEntries = (): void => {
@@ -180,23 +206,21 @@ function bindWhmBackupFiles(): void {
       }
       const sorted = [...items.values()].sort((a, b) => a.folder !== b.folder ? (a.folder ? -1 : 1) : a.name.localeCompare(b.name))
       const rows = sorted.slice(0, SHOWN).map(item => {
-        const row = element('tr'), box = element('input')
-        box.type = 'checkbox'; box.value = item.path; box.setAttribute('aria-label', t('Select {name}', { name: item.path }))
-        let name: HTMLElement = technical(item.name)
-        if (item.folder) { const open = element('button'); open.type = 'button'; open.className = 'xp-whm-backup-files__open'; open.dataset.open = item.path; open.append(technical(item.name + '/')); name = open }
-        row.append(cell(box), cell(name), cell(item.folder ? t('Folder, {count} files', { count: item.files }) : t(msgctxt('whm-backup-files-client', 'File'))), cell(technical(size(item.bytes))))
+        const row = record(item.folder ? 'backup-files-folder' : 'backup-files-entry', 'tr', {
+          name: item.name + (item.folder ? '/' : ''), type: item.folder ? t('Folder, {count} files', { count: item.files }) : t(msgctxt('whm-backup-files-client', 'File')), size: size(item.bytes) })
+        const box = viewAction<HTMLInputElement>(row, 'select', 'input')
+        box.value = item.path; box.setAttribute('aria-label', t('Select {name}', { name: item.path }))
+        if (item.folder) viewAction<HTMLButtonElement>(row, 'open').dataset.open = item.path
         return row
       })
-      if (sorted.length > SHOWN) { const row = element('tr'), td = cell(t('Only the first 1000 entries are shown. Select this folder from its parent to include all of them.')); td.colSpan = 4; row.append(td); rows.push(row) }
+      if (sorted.length > SHOWN) rows.push(record('backup-files-empty4', 'tr', { message: t('Only the first 1000 entries are shown. Select this folder from its parent to include all of them.') }))
       fill(entries, rows, t('This folder is empty in the archive.'), 4)
       sync()
     }
     const renderReview = (view: BackupFilesPreviewView): void => {
       fill(review, view.rows.map(row => {
-        const line = element('tr')
         const action = row.action === 'refuse' ? t('Not restored: {reason}', { reason: reason(row.reason) }) : row.exists === 'yes' ? t('Skip, already present') : row.exists === 'no' ? t('Restore') : t('Restore if still absent')
-        line.append(cell(technical(row.path)), cell(technical(row.destination)), cell(technical(size(row.bytes))), cell(action))
-        return line
+        return record('backup-files-review', 'tr', { path: row.path, destination: row.destination, size: size(row.bytes), action })
       }), t('No file was selected.'), 4)
       fact('count-restore', String(view.counts.restore)); fact('count-present', String(view.counts.present)); fact('count-refused', String(view.counts.refused)); fact('planned', technical(size(view.quota.plannedBytes)))
       fact('quota', view.quota.limitMb === 'unlimited' ? t(msgctxt('whm-backup-files-client', 'Unlimited')) : (view.quota.fits ? t('Fits within {limit} MiB', { limit: view.quota.limitMb }) : t('Exceeds {limit} MiB', { limit: view.quota.limitMb })))
@@ -205,9 +229,8 @@ function bindWhmBackupFiles(): void {
     const renderResults = (view: BackupFilesRestoreView): void => {
       const label: Record<BackupFilesResult, string> = { restored: msgid('Restored and verified'), 'skipped-exists': msgctxt('whm-backup-files-client', 'Skipped, already present'), failed: msgid('Failed'), 'not-attempted': msgctxt('whm-backup-files-client', 'Not attempted yet') }
       fill(results, view.results.map(row => {
-        const line = element('tr')
+        const line = record('backup-files-result', 'tr', { path: row.path, destination: row.destination, result: t(label[row.result]), reason: reason(row.reason) + (row.verificationRequired ? ' ' + t('Verification required.') : '') })
         line.dataset.result = row.result
-        line.append(cell(technical(row.path)), cell(technical(row.destination)), cell(t(label[row.result])), cell(reason(row.reason) + (row.verificationRequired ? ' ' + t('Verification required.') : '')))
         return line
       }), t('No file was processed.'), 4)
       fact('count-restored', String(view.counts.restored)); fact('count-skipped', String(view.counts['skipped-exists'])); fact('count-failed', String(view.counts.failed)); fact('count-pending', String(view.counts['not-attempted']))
@@ -288,12 +311,12 @@ function bindWhmBackupFiles(): void {
 
     void run(t('Reading accounts…'), async () => {
       const list = readBackupFilesReply('accounts', await transport!('GET', '/api/backups/files'))
-      const placeholder = element('option', list.length ? t('Choose an account') : t('No active accounts are visible'))
+      const placeholder = record('backup-files-option', 'option', { label: list.length ? t('Choose an account') : t('No active accounts are visible') }) as HTMLOptionElement
       placeholder.value = ''
-      account.replaceChildren(placeholder, ...list.map(item => { const option = element('option', item.username + ' · ' + item.primaryDomain); option.value = item.username; return option }))
+      account.replaceChildren(placeholder, ...list.map(item => { const option = record('backup-files-option', 'option', { label: item.username + ' · ' + item.primaryDomain }) as HTMLOptionElement; option.value = item.username; return option }))
       note('read', list.length ? t('Choose an account to list its backups.') : t('No active accounts are visible to you.'))
     })
   })
 }
 
-export const WHM_BACKUP_FILES_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const readBackupFilesReply=${readBackupFilesReply.toString()};return ${bindWhmBackupFiles.toString()};})()`
+export const WHM_BACKUP_FILES_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const displayDateTime=${DISPLAY_DATETIME_BINDING};const readBackupFilesReply=${readBackupFilesReply.toString()};return ${bindWhmBackupFiles.toString()};})()`

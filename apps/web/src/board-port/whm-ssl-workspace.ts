@@ -1,3 +1,4 @@
+import { whmSslTemplates, sslObservationTemplates } from './data-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 /** Contents of the certificate card; queue and policy panels are rendered by its parent. */
 export function renderWhmSslWorkspace(input: { locale: Locale; canManage: boolean }): string {
@@ -20,5 +21,5 @@ export function renderWhmSslWorkspace(input: { locale: Locale; canManage: boolea
     <section class="xp-whm-ssl__group" data-ssl-detail hidden aria-labelledby="whm-ssl-detail-heading"><h3 id="whm-ssl-detail-heading">${t('Stored certificate details')}</h3><dl data-ssl-facts></dl></section>
     <section class="xp-whm-ssl__group" aria-labelledby="whm-ssl-request-heading"><h3 id="whm-ssl-request-heading">${t('Issue or renew for a hosted domain')}</h3><div class="xp-whm-ssl__fields">${field('account', t('Account'), select('account'))}${field('domain', t('Hosted domain'), select('domain'))}${field('renewal', t('Certificate to renew'), select('renewal'))}</div><div class="xp-whm-ssl__actions"><button type="button" class="xp-btn xp-btn--primary" data-ssl-issue disabled>${t('Request certificate')}</button></div><p class="xp-help">${t('The certificate authority must issue a usable certificate. Saved readback is checked separately from external TLS service.')}</p></section>
     <section class="xp-whm-ssl__group" aria-labelledby="whm-ssl-install-heading"><h3 id="whm-ssl-install-heading">${t('Install a certificate for the selected domain')}</h3><p class="xp-help" data-ssl-install-limit>${t('Manual installation requires the host certificate adapter. Keys are sent only to the authorized host and are never included in read responses.')}</p><div class="xp-whm-ssl__fields">${field('chain', t('Certificate chain (PEM)'), '<textarea id="whm-ssl-chain" class="xp-textarea xp-mono" dir="ltr" data-ssl-chain spellcheck="false" autocomplete="off" disabled></textarea>')}${field('key', t('Private key (PEM)'), '<textarea id="whm-ssl-key" class="xp-textarea xp-mono" dir="ltr" data-ssl-key spellcheck="false" autocomplete="off" disabled></textarea>')}</div><div class="xp-whm-ssl__actions"><button type="button" class="xp-btn" data-ssl-install disabled>${t('Install certificate')}</button></div></section>
-  </section>`
+  ${whmSslTemplates()}${sslObservationTemplates()}</section>`
 }

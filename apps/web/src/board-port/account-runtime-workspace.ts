@@ -6,7 +6,15 @@ const STYLE = '<style>[data-runtime-workspace] pre{margin:0;max-block-size:320px
 
 /** Shared frame of the account runtime pages; account-runtime-client.ts binds every control inside it. */
 function frame(kind: Kind, lang: Locale, canManage: boolean, body: string): string {
-  return `<div class="xp-acct-tool" data-runtime-workspace="${kind}" data-runtime-can-manage="${canManage}" lang="${lang}" dir="${localeDirection(lang)}">${ACCOUNT_TOOL_STYLE}${STYLE}${body}</div>`
+  return `<div class="xp-acct-tool" data-runtime-workspace="${kind}" data-runtime-can-manage="${canManage}" lang="${lang}" dir="${localeDirection(lang)}">${ACCOUNT_TOOL_STYLE}${STYLE}${body}${runtimeTemplates(kind)}</div>`
+}
+function runtimeTemplates(kind: Kind): string {
+  const technical = (slot: string): string => `<td><bdi dir="ltr" data-xp-slot="${slot}"></bdi></td>`
+  const plain = (slot: string): string => `<td data-xp-slot="${slot}"></td>`
+  const slots = kind === 'apps' ? `${technical('name')}${plain('runtime')}${technical('address')}${plain('state')}${plain('health')}`
+    : kind === 'containers' ? `${technical('name')}${technical('image')}${plain('state')}${plain('since')}${plain('ports')}`
+      : `${plain('name')}${plain('state')}${plain('version')}${technical('socket')}${plain('memory')}`
+  return `<template data-xp-template="runtime-${kind}-row"><tr>${slots}${plain('actions')}</tr></template><template data-xp-template="runtime-empty-row"><tr><td colspan="6" data-xp-slot="message"></td></tr></template><template data-xp-template="runtime-actions"><div class="xp-acct-tool__actions"></div></template><template data-xp-template="runtime-action"><button type="button" class="xp-btn xp-btn--ghost" data-xp-slot="label" disabled></button></template><template data-xp-template="runtime-chip"><span data-state-chip="unavailable" data-xp-slot="label"></span></template><template data-xp-template="runtime-env-row"><tr><td><input class="xp-input" dir="ltr" maxlength="64" data-xp-slot="name"></td><td><input class="xp-input" dir="ltr" maxlength="1024" data-xp-slot="value"></td><td><button type="button" class="xp-btn xp-btn--ghost" data-xp-slot="remove"></button></td></tr></template><template data-xp-template="runtime-env-empty"><tr><td colspan="3" data-xp-slot="message"></td></tr></template>`
 }
 const status = (text: string): string => `<p data-runtime-status role="status" data-state="unread">${text}</p>`
 const table = (heads: string[], key: string, empty: string): string => `<div class="xp-acct-tool__table"><table><thead><tr>${heads.map(h => `<th scope="col">${h}</th>`).join('')}</tr></thead><tbody data-runtime-${key}><tr><td colspan="${heads.length}">${empty}</td></tr></tbody></table></div>`

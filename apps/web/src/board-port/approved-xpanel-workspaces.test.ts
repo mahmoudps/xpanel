@@ -44,7 +44,54 @@ describe('account workspace structures and native binding boundaries', () => {
             })!;
             assert.match(html, /data-approved-xpanel-workspace=/);
             assert.match(html, /data-workspace-section=/);
-            assert.doesNotMatch(html, /<form\b|data-domain-php-form|data-dns-editor/);
+            assert.doesNotMatch(html, /data-domain-php-form|data-dns-editor/);
+            const document = new DOMParser().parseFromString(html, 'text/html');
+            const forms = [...document.querySelectorAll<HTMLFormElement>('form')];
+            if (route !== '/security/account') {
+                assert.equal(forms.length, 0, route);
+            } else {
+                // Keep complete personal components closed without granting self or native operations.
+                assert.equal(document.querySelectorAll('[data-auth-personal-security]').length, 1);
+                assert.equal(forms.length, 2);
+                const roots = [
+                    { selector: '[data-account-password]', flags: ['data-account-password-can-change'] },
+                    { selector: '[data-account-sessions]', flags: ['data-sessions-can-read', 'data-sessions-can-revoke'] },
+                    { selector: '[data-account-api-tokens]', flags: ['data-tokens-can-read', 'data-tokens-can-manage'] },
+                ];
+                for (const specification of roots) {
+                    const found = document.querySelectorAll<HTMLElement>(specification.selector);
+                    assert.equal(found.length, 1, specification.selector);
+                    const root = found.item(0);
+                    if (!root) throw new Error('Missing closed personal component');
+                    assert.equal(root.getAttribute('data-auth-personal-state'), 'unavailable');
+                    for (const flag of specification.flags) assert.equal(root.getAttribute(flag), 'false', flag);
+                }
+                const ownedForms = [
+                    { hook: 'data-account-password-form', owner: '[data-account-password]', action: '/api/auth/change-password' },
+                    { hook: 'data-account-tokens-create', owner: '[data-account-api-tokens]', action: '/api/auth/api-tokens' },
+                ];
+                for (const form of forms) assert.equal(ownedForms.filter(specification => form.hasAttribute(specification.hook)).length, 1);
+                for (const specification of ownedForms) {
+                    const found = forms.filter(form => form.hasAttribute(specification.hook));
+                    assert.equal(found.length, 1, specification.hook);
+                    const form = found[0];
+                    if (!form) throw new Error('Missing closed personal form');
+                    assert.ok(form.closest(specification.owner));
+                    assert.equal(form.closest('[data-classic-native-security]'), null);
+                    assert.equal(form.getAttribute('method'), 'post');
+                    assert.equal(form.getAttribute('action'), specification.action);
+                }
+                const native = document.querySelectorAll<HTMLElement>('[data-classic-native-security]');
+                assert.ok(native.length > 0);
+                for (const section of native) {
+                    assert.equal(section.getAttribute('data-workspace-mode'), 'read-only');
+                    assert.equal(section.getAttribute('aria-disabled'), 'true');
+                    assert.equal(section.querySelectorAll('form').length, 0);
+                }
+                for (const control of document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button')) {
+                    assert.equal(control.disabled, true);
+                }
+            }
             assert.equal((html.match(/<h1\b/g) ?? []).length, 1, route);
             assert.doesNotMatch(html, /\{\{|alice-shop|20014|1\.4\.2/);
         }
@@ -155,9 +202,19 @@ describe('account workspace structures and native binding boundaries', () => {
         const security = renderApprovedXpanelWorkspace({
             route: '/security/account', locale: 'en', readOnly: true
         })!;
-        assert.match(security, /data-workspace-section="token-one-time"/);
-        assert.match(security, /No token was issued/);
-        assert.match(security, /disabled data-wiring="soon">Copy token/);
+        const securityDocument = new DOMParser().parseFromString(security, 'text/html');
+        const tokenRoots = securityDocument.querySelectorAll<HTMLElement>('[data-account-api-tokens]');
+        assert.equal(tokenRoots.length, 1);
+        const tokenRoot = tokenRoots[0]!;
+        assert.equal(tokenRoot.dataset.authPersonalState, 'unavailable');
+        assert.equal(tokenRoot.dataset.tokensCanRead, 'false');
+        assert.equal(tokenRoot.dataset.tokensCanManage, 'false');
+        assert.equal(tokenRoot.querySelector<HTMLElement>('[data-account-tokens-reveal]')?.hidden, true);
+        assert.equal(tokenRoot.querySelector('[data-account-tokens-secret]')?.textContent, '');
+        assert.equal(tokenRoot.querySelector<HTMLButtonElement>('[data-account-tokens-copy]')?.disabled, true);
+        assert.equal(tokenRoot.querySelector('[data-account-tokens-rows]')?.children.length, 0);
+        for (const control of tokenRoot.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select')) assert.equal(control.disabled, true);
+        assert.doesNotMatch(security, /tokenHash|token_hash/);
         const mail = renderApprovedXpanelWorkspace({
             route: '/email/accounts', locale: 'en', readOnly: true
         })!;
@@ -265,15 +322,39 @@ describe('account workspace structures and native binding boundaries', () => {
         assert.equal(emptyDocument.forms.length, 0);
     });
 
-    it('renders the trusted-self session section only for the active owner account-security page', () => {
+    it('renders self sessions from explicit personal authority independently of native qualification', () => {
         const base = { route: '/security/account', locale: 'en' as const, readOnly: false, account, domains: [domain], visibility: owner };
-        const html = renderApprovedXpanelWorkspace(base)!;
-        assert.match(html, /data-account-sessions/);
-        assert.match(html, /data-sessions-rows/);
-        assert.match(html, /data-sessions-revoke-others/);
-        assert.doesNotMatch(html, /tokenHash|token_hash/);
-        assert.equal(renderApprovedXpanelWorkspace({ ...base, readOnly: true }), renderApprovedXpanelWorkspace({ ...base, readOnly: true })!.replace(/<section[^>]*data-account-sessions[\s\S]*?<\/section>/, ''), 'read-only workspace omits session controls');
-        const readOnlyHtml = renderApprovedXpanelWorkspace({ ...base, readOnly: true })!;
-        assert.doesNotMatch(readOnlyHtml, /data-account-sessions/);
+        const authPersonal = { state: 'ready' as const, canChangePassword: false, canReadSessions: true, canRevokeSessions: true, canReadApiTokens: false, canManageApiTokens: false };
+        for (const readOnly of [false, true]) {
+            const html = renderApprovedXpanelWorkspace({ ...base, readOnly, authPersonal })!;
+            const page = new DOMParser().parseFromString(html, 'text/html');
+            const roots = page.querySelectorAll<HTMLElement>('[data-account-sessions]');
+            assert.equal(roots.length, 1);
+            const root = roots[0]!;
+            assert.equal(root.dataset.authPersonalState, 'ready');
+            assert.equal(root.dataset.sessionsCanRead, 'true');
+            assert.equal(root.dataset.sessionsCanRevoke, 'true');
+            assert.equal(root.closest('[data-classic-native-security],[data-tool-availability="unverified"],[inert],fieldset[disabled],[aria-disabled="true"]'), null);
+            assert.equal(root.querySelector('[data-sessions-rows]')?.children.length, 0);
+            assert.equal(root.querySelector<HTMLButtonElement>('[data-sessions-revoke-others]')?.disabled, true);
+            const nativeRoots = page.querySelectorAll('[data-classic-native-security]');
+            assert.ok(nativeRoots.length > 0);
+            for (const native of nativeRoots) {
+                assert.equal(native.querySelectorAll('form').length, 0);
+                for (const control of native.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input,button,select,textarea')) assert.equal(control.disabled, true);
+            }
+            assert.doesNotMatch(html, /tokenHash|token_hash/);
+        }
+        for (const supplied of [undefined, { ...authPersonal, state: 'denied' as const }, { ...authPersonal, state: 'unavailable' as const }]) {
+            const html = renderApprovedXpanelWorkspace({ ...base, authPersonal: supplied })!;
+            const page = new DOMParser().parseFromString(html, 'text/html');
+            const roots = page.querySelectorAll<HTMLElement>('[data-account-sessions]');
+            assert.equal(roots.length, 1);
+            const root = roots[0]!;
+            assert.equal(root.dataset.sessionsCanRead, 'false');
+            assert.equal(root.dataset.sessionsCanRevoke, 'false');
+            for (const control of root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select')) assert.equal(control.disabled, true);
+            assert.doesNotMatch(html, /tokenHash|token_hash/);
+        }
     });
 });

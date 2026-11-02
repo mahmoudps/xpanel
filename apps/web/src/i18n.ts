@@ -5,6 +5,7 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { ThemeCatalogOverlay } from './theme-messages.ts'
 import { CATALOG_LOCALE_DIR } from '@xpanel/catalog'
 import {
   LOCALES,
@@ -317,8 +318,17 @@ const CLIENT_RUNTIME = `const parseMessage=${parseMessage.toString()};const comp
 const scriptJson = (value: unknown): string => JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 
 /** Inline script that installs the client translator with the messages the given keys need. */
-export function renderClientI18nScript(locale: Locale, keys: Iterable<string>): string {
-  return `<script id="xpanel-i18n">(()=>{${CLIENT_RUNTIME}(${scriptJson(pickMessages(catalogFor(locale), keys))},${scriptJson(locale)})})()</script>`
+export function renderClientI18nScript(locale: Locale, keys: Iterable<string>, overlay?: ThemeCatalogOverlay): string {
+  const messages = pickMessages(catalogFor(locale), keys)
+  if (overlay) {
+    if (overlay.locale !== locale || !/^[a-z][a-z0-9-]*$/.test(overlay.themeId)) throw new Error('theme_message_scope')
+    const prefix = 'theme:' + overlay.themeId + '\u0004'
+    for (const [key, value] of overlay.messages) {
+      if (!key.startsWith(prefix) || typeof value !== 'string') throw new Error('theme_message_scope')
+      messages[key] = value
+    }
+  }
+  return `<script id="xpanel-i18n">(()=>{${CLIENT_RUNTIME}(${scriptJson(messages)},${scriptJson(locale)})})()</script>`
 }
 
 /**

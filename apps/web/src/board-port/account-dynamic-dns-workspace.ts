@@ -1,6 +1,7 @@
 import { localeDirection, translator, type Locale, type MessageValues } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
+import { dynamicDnsClientTemplates } from './domain-client-templates.ts'
 
 export function renderAccountDynamicDnsWorkspace(input: { lang: Locale; accountId: string; canManage: boolean }): string {
   const t = (message: string, values?: MessageValues) => translator(input.lang)(message, values), off = input.canManage ? '' : ' disabled'
@@ -39,5 +40,5 @@ export function renderAccountDynamicDnsWorkspace(input: { lang: Locale; accountI
       <li>${t('Allow at least 60 seconds between changed addresses. A good or nochg reply confirms the accepted address. A 911 reply means publication needs retry or review; do not treat it as success.')}</li></ol>
       <p class="xp-help">${t('Credentials stop working when removed, rotated, the owner is disabled, the account is suspended, the plan disables this feature, or the DNS zone is no longer owned by this account.')}</p>
     </section>
-  </div>`
+  ${dynamicDnsClientTemplates(t)}</div>`
 }

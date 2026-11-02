@@ -30,7 +30,8 @@ async function fixture(owned = false) {
   const domain = { id: randomUUID(), accountId: owned ? account.id : other.id, kind: 'primary', name: owned ? 'alice.example.test' : 'bob.example.test', docRoot: owned ? '/home/alice/public_html' : '/home/bob/public_html', suspended: false, siteType: 'static' } as Domain
   const root = await createRootPrincipal(handle.db, { username: 'root', passwordHash: TEST_HASH })
   const user = await createUserPrincipal(handle.db, { username: 'bob', accountId: other.id, passwordHash: TEST_HASH })
-  const disabled: string[] = []
+  const owner = await createUserPrincipal(handle.db, { username: account.username, accountId: account.id, passwordHash: TEST_HASH })
+  const disabled: string[] = []; let featurePolicyAvailable = true
   let tick = 0, file: FileText = { path: 'public_html/.htaccess', content: 'RewriteEngine Off\n', sizeBytes: 18, mtime: '2026-10-26T12:00:00.000Z' }
   const runner = { run: vi.fn(async (_context: unknown, request: Readonly<AccountFileRequest>) => {
     if (!owned || !('path' in request) || request.path !== file.path) throw new Error('must not reach an unowned file target')
@@ -46,14 +47,14 @@ async function fixture(owned = false) {
   const store = { getAccount: async (id: string) => id === account.id ? account : id === other.id ? other : null,
     getAccountByUsername: async (username: string) => username === account.username ? account : null,
     withAccountLifecycleLease: lease, getPlan: async () => ({ id: account.planId, featureListId: 'features', resources: { diskMb: 512 } }),
-    getFeatureList: async () => ({ disabled }), getDomain: async (id: string) => id === domain.id ? domain : null,
+    getFeatureList: async () => featurePolicyAvailable ? { disabled } : null, getDomain: async (id: string) => id === domain.id ? domain : null,
     getServerSettings: async () => ({ engine: 'apache', backendPort: 8080 }) } as unknown as StateStore
   const executor = new FakeHostExecutor(); executor.readFile = async path => path === '/etc/os-release' ? 'ID=ubuntu\nVERSION_ID="24.04"\n' : null
   const app = createAgentApp({ store, db: handle.db, executor, accountFileRunner: runner,
     reconciler: {} as HostReconciler, os: { id: 'ubuntu', versionId: '24.04', family: 'debian' }, agentToken: TOKEN })
   const send = (principalId = root.id, body: unknown = { op: 'read' }) => app.fetch(new Request('http://agent.local/accounts/alice/htaccess/' + domain.id,
     { method: 'POST', headers: { ...agentCallerHeaders({ principalId, token: TOKEN }), 'content-type': 'application/json' }, body: JSON.stringify(body) }))
-  return { handle, root, user, domain, runner, disabled, lease, send, revokeOnLease: () => { onLease = () => setPrincipalDisabled(handle.db, root.id, true) } }
+  return { handle, root, user, owner, domain, runner, disabled, lease, send, removeFeaturePolicy: () => { featurePolicyAvailable = false }, disableOnLease: (id: string) => { onLease = async () => { disabled.push(id) } }, revokeOnLease: () => { onLease = () => setPrincipalDisabled(handle.db, root.id, true) } }
 }
 describe('authenticated .htaccess agent dispatch', () => {
   it('reads the authorized file, saves exact content and restores the kept version across requests', async () => {
@@ -81,4 +82,44 @@ describe('authenticated .htaccess agent dispatch', () => {
     const f = await fixture(); f.disabled.push('aapanel-url-rewrite'); expect((await f.send()).status).toBe(403)
     f.disabled.splice(0); f.revokeOnLease(); expect((await f.send()).status).toBe(403); expect(f.runner.run).not.toHaveBeenCalled()
   })
+})
+
+
+describe('bounded owner rewrite current authority', () => {
+  it('uses the existing owner port for read/validate/save/restore and does not invent PHP migration or native qualification', async () => {
+    const f = await fixture(true)
+    const read = await f.send(f.owner.id); expect(read.status).toBe(200)
+    const before = await read.json() as { context: { accountId: string; domainId: string }; document: { content: string; revision: string } }
+    expect(before.context.domainId).toBe(f.domain.id)
+    const checked = await f.send(f.owner.id, { op: 'validate', content: 'RewriteEngine On\n', expectedRevision: before.document.revision })
+    expect(checked.status).toBe(200)
+    expect(await checked.json()).toMatchObject({ document: { content: before.document.content }, capabilities: { canMigrate: false }, application: { nativeQualified: false }, validation: { valid: true } })
+    expect(f.runner.run.mock.calls.filter(call => call[1].op === 'write-checked')).toHaveLength(0)
+    const saved = await f.send(f.owner.id, { op: 'save', content: 'RewriteEngine On\n', expectedRevision: before.document.revision }); expect(saved.status).toBe(200)
+    const observed = await saved.json() as { document: { revision: string }; versions: { id: string; state: string }[] }
+    const kept = observed.versions.find(version => version.state === 'kept')!
+    const restored = await f.send(f.owner.id, { op: 'restore', versionId: kept.id, expectedRevision: observed.document.revision }); expect(restored.status).toBe(200)
+    expect(await restored.json()).toMatchObject({ document: { content: before.document.content }, capabilities: { canMigrate: false }, application: { nativeQualified: false } })
+    expect(f.runner.run.mock.calls.filter(call => call[1].op === 'write-checked')).toHaveLength(2)
+  })
+  it.each(['domain-htaccess', 'aapanel-url-rewrite'])('checks a fresh %s deny inside the lifecycle lease before file I/O', async id => {
+    const f = await fixture(true); f.disableOnLease(id)
+    expect((await f.send(f.owner.id)).status).toBe(403)
+    expect(f.lease).toHaveBeenCalledTimes(1); expect(f.runner.run).not.toHaveBeenCalled()
+  })
+  it('refuses missing current feature authority before any file I/O', async () => {
+    const f = await fixture(true); f.removeFeaturePolicy()
+    expect((await f.send(f.owner.id)).status).toBe(403); expect(f.runner.run).not.toHaveBeenCalled()
+  })
+})
+
+
+it('keeps the absent guarded PHP migration port unavailable without a checked file write', async () => {
+  const f = await fixture(true), initial = await f.send(f.owner.id)
+  expect(initial.status).toBe(200)
+  const before = await initial.json() as { document: { revision: string }; capabilities: { canMigrate: boolean } }
+  expect(before.capabilities.canMigrate).toBe(false)
+  const reply = await f.send(f.owner.id, { op: 'migrate-php', content: 'php_value memory_limit 128M\n', expectedRevision: before.document.revision, expectedPhpRevision: 'a'.repeat(64) })
+  expect(reply.status).toBe(412)
+  expect(f.runner.run.mock.calls.filter(call => call[1].op === 'write-checked')).toHaveLength(0)
 })

@@ -8,9 +8,10 @@ import type { CatalogTool } from '@xpanel/catalog'
 import { createTestDb, createRootPrincipal, createUserPrincipal, createResellerPrincipal, createSession, revokeSession, setTotpSecret } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
 import { createDefaultWebRenderer } from './main.ts'
-import { mailboxPrincipalUsername } from './mail/inbox.ts'
+import { establishMailboxSession, mailboxPrincipalUsername, type MailboxTransport } from './mail/inbox.ts'
 import { createApiApp, INGRESS_SECRET_HEADER, listenApiServer } from './server.ts'
 import { sessionCookieName, sessionTokenHash, type EntryPoint } from './entry-points.ts'
+import { parseMarkup } from '../../web/src/html.ts'
 
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const SECRET = 'synthetic-scoped-renderer-' + 'fixture-value-at-least-32-bytes'
@@ -50,10 +51,26 @@ const fixture = async () => {
     const record = await createSession(database.db, { principalId, tokenHash: sessionTokenHash(token, profile), mfaVerified: true, expiresAt: new Date(Date.now() + 60_000).toISOString() })
     return { cookie: sessionCookieName(profile, true) + '=' + token, id: record.id }
   }
+  const mailboxPassword = randomUUID()
+  const mailboxTransport: MailboxTransport = {
+    async verify(login, password) {
+      expect(login).toBe(inbox.login)
+      expect(password).toBe(mailboxPassword)
+    },
+    async list() { return [] },
+    async read() { throw new Error('Unexpected message read in workspace fixture') },
+    async remove() { throw new Error('Unexpected message mutation in workspace fixture') },
+    async send() { throw new Error('Unexpected message send in workspace fixture') },
+  }
   for (const profile of profiles) {
-    sessions.set(profile, await session(profile, profile === 'xwhm' ? root.id : profile === 'xmail' ? mailbox.id : owner.id))
+    if (profile === 'xmail') {
+      const issued = await establishMailboxSession({ db: database.db, store: state.store, serverSecret: SECRET, transport: mailboxTransport,
+        entryPoint: profile, mailbox: inbox.login, password: mailboxPassword, ip: '192.0.2.20', userAgent: '' })
+      expect(issued.principal.id).toBe(mailbox.id)
+      sessions.set(profile, { cookie: sessionCookieName(profile, true) + '=' + issued.rawToken, id: issued.session.id })
+    } else sessions.set(profile, await session(profile, profile === 'xwhm' ? root.id : owner.id))
     const renderer = await createDefaultWebRenderer({ store: state.store, db: database.db, serverSecret: SECRET, entryPoint: profile })
-    const app = createApiApp({ db: database.db, store: state.store, webRenderer: renderer, serverSecret: SECRET, entryPoint: profile, publicOrigin: origins[profile], allowedOrigins: [origins[profile]], ingressSecret: INGRESS, requireSecureCookies: true, requireOriginHeader: true })
+    const app = createApiApp({ db: database.db, store: state.store, webRenderer: renderer, ...(profile === 'xmail' ? { mailboxTransport } : {}), serverSecret: SECRET, entryPoint: profile, publicOrigin: origins[profile], allowedOrigins: [origins[profile]], ingressSecret: INGRESS, requireSecureCookies: true, requireOriginHeader: true })
     const server = await listenApiServer(app, { host: '127.0.0.1', port: 0 })
     servers.set(profile, server)
     cleanup.push(() => { server.server.closeAllConnections(); return server.close() })
@@ -73,6 +90,70 @@ const fixture = async () => {
   return { database, state, feature, plan, account, other, owner, root, reseller, resellerPrincipal, sessions, session, request }
 }
 
+// An owned account ID is legitimate only in local context links, including the owned home drawer.
+// Raw occurrence accounting still rejects text, scripts, unrelated attributes and unowned templates.
+const expectOwnedAccountContextLinks = (html: string, accountId: string): void => {
+  // Every raw ID must belong to one validated href, including the owned mobile drawer's dormant navigation.
+  expect(accountId).toMatch(/^[A-Za-z0-9-]+$/)
+  const nodes = parseMarkup(html)
+  const drawers = nodes.filter(node => node.namespace === 'html' && node.tag === 'template' && node.attrs.get('id') === 'xpanel-home-drawer')
+  let contextLinks = 0
+  for (const node of nodes) {
+    for (const [attribute, value] of node.attrs) {
+      if (!value.includes(accountId)) continue
+      expect(node.namespace).toBe('html')
+      if (node.template >= 0) {
+        const template = nodes[node.template]
+        if (!template) throw new Error('Missing account-link drawer template')
+        expect(drawers).toHaveLength(1)
+        expect(template).toBe(drawers[0])
+        expect(template.template).toBe(-1)
+        const parent = nodes[template.parent]
+        expect(parent?.namespace).toBe('html')
+        expect(parent?.tag).toBe('div')
+        expect(parent?.template).toBe(-1)
+        expect(parent?.attrs.get('data-home-phone')).toBe('true')
+        const hosts = nodes.filter(candidate => candidate.parent === template.parent && candidate.namespace === 'html' && candidate.tag === 'div' && candidate.attrs.get('id') === 'xpanel-home-drawer-host')
+        expect(hosts).toHaveLength(1)
+        expect(hosts[0]?.template).toBe(-1)
+        expect(hosts[0]?.attrs.has('hidden')).toBe(true)
+        let navigation = false, dialog = false, ancestorIndex = node.parent
+        while (ancestorIndex >= 0 && ancestorIndex !== node.template) {
+          const ancestor = nodes[ancestorIndex]
+          if (!ancestor) throw new Error('Missing account-link drawer ancestor')
+          if (ancestor.namespace === 'html' && ancestor.tag === 'nav' && ancestor.attrs.has('data-xp-sidebar')) navigation = true
+          if (ancestor.namespace === 'html' && ancestor.tag === 'div' && ancestor.attrs.get('id') === 'm-drawer' && ancestor.attrs.get('role') === 'dialog' && ancestor.attrs.get('aria-modal') === 'true') dialog = true
+          ancestorIndex = ancestor.parent
+        }
+        expect(navigation).toBe(true)
+        expect(dialog).toBe(true)
+      } else {
+        expect(node.template).toBe(-1)
+      }
+      expect(node.tag).toBe('a')
+      expect(attribute).toBe('href')
+      expect(value.startsWith('/') && !value.startsWith('//')).toBe(true)
+      expect(value.split(accountId)).toHaveLength(2)
+      const url = new URL(value, 'https://xpanel.invalid')
+      expect(url.origin).toBe('https://xpanel.invalid')
+      expect(url.searchParams.getAll('accountId')).toEqual([accountId])
+      expect(url.pathname).not.toContain(accountId)
+      expect(url.hash).not.toContain(accountId)
+      for (const [key, parameter] of url.searchParams) {
+        if (parameter.includes(accountId)) {
+          expect(key).toBe('accountId')
+          expect(parameter).toBe(accountId)
+        }
+      }
+      url.searchParams.delete('accountId')
+      expect(url.href).not.toContain(accountId)
+      contextLinks++
+    }
+  }
+  expect(contextLinks).toBeGreaterThan(0)
+  expect(html.split(accountId).length - 1).toBe(contextLinks)
+}
+
 describe('authenticated bounded workspace HTTP reads', () => {
   let f: Awaited<ReturnType<typeof fixture>>
   beforeEach(async () => { f = await fixture() })
@@ -83,7 +164,8 @@ describe('authenticated bounded workspace HTTP reads', () => {
     expect(panel.status).toBe(200)
     const html = await panel.text()
     for (const value of [f.account.username, f.account.primaryDomain, f.plan.name, f.account.home, f.account.ipv4]) expect(html).toContain(value)
-    for (const value of [f.account.id, f.other.primaryDomain, f.account.contactEmail, HASH]) expect(html).not.toContain(value)
+    expect(html).not.toContain(f.account.id)
+    for (const value of [f.other.id, f.owner.id, f.plan.id, f.feature.id, f.other.primaryDomain, f.account.contactEmail, HASH]) expect(html).not.toContain(value)
     expect(html).toContain('data-board-port="xpanel-home"')
     expect(html).toContain('data-action="logout"')
     expect(html).not.toContain('data-tool-availability="unverified"')
@@ -120,7 +202,9 @@ describe('authenticated bounded workspace HTTP reads', () => {
     expect((await f.request('xpanel', '/panel?accountId=' + f.other.id + '&username=' + f.other.username)).status).toBe(404)
     expect((await f.request('xpanel', '/panel?accountId=' + randomUUID())).status).toBe(404)
     expect((await f.request('xpanel', '/panel?username=../../outside')).status).toBe(200)
-    expect((await f.request('xpanel', '/panel?accountId=' + f.account.id)).status).toBe(200)
+    const selected = await f.request('xpanel', '/panel?accountId=' + f.account.id)
+    expect(selected.status).toBe(200)
+    expectOwnedAccountContextLinks(await selected.text(), f.account.id)
     const misleading = await createUserPrincipal(f.database.db, { username: 'different7', accountId: f.other.id, passwordHash: HASH })
     const session = await f.session('xpanel', misleading.id)
     const response = await f.request('xpanel', '/panel', session.cookie)

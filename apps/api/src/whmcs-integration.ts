@@ -8,6 +8,8 @@ import type { StateStore } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
 import { renderWhmcsModule, WHMCS_MODULE_FILENAME, WHMCS_PROVISION_PATH } from './whmcs-module.ts'
+import { canonicalProvisioningIdentity } from './use-cases/account-provisioning-port.ts'
+import type { ProvisioningAuthorizationReference } from './use-cases/account-provisioning-prepared.ts'
 
 export const WHMCS_ACTIONS = ['test', 'create', 'suspend', 'unsuspend', 'terminate', 'change_package'] as const
 export type WhmcsAction = typeof WHMCS_ACTIONS[number]
@@ -33,7 +35,11 @@ export interface WhmcsActivityEntry {
 }
 /** Each port runs the same validation, audit and reconcile as the matching HTTP account route, as root principal `actor`. */
 export interface WhmcsProvisionPorts {
-  createAccount(input: { actor: string; username: string; primaryDomain: string; planId: string; password: string; contactEmail: string | null }): Promise<void>
+  createAccount(input: { actor: string; username: string; primaryDomain: string; planId: string; password: string; contactEmail: string | null }, authority: {
+    /** Trusted route capture after token/IP/package admission; never parsed from the JSON body. */
+    readonly reference: Extract<ProvisioningAuthorizationReference, { kind: 'whmcs' }>
+    readonly assertCurrent: () => Promise<void>
+  }): Promise<void>
   suspendAccount(input: { actor: string; username: string; reason: string }): Promise<void>
   unsuspendAccount(input: { actor: string; username: string }): Promise<void>
   terminateAccount(input: { actor: string; username: string }): Promise<void>
@@ -269,7 +275,30 @@ async function provision(request: Request, method: string, helpers: WhmcsRouteHe
   if (input.package !== null && !mapped) return refused('package_not_mapped', 'PRECONDITION_FAILED', `the WHMCS package "${input.package}" is not mapped to an xPanel plan`)
   if (username && action !== 'create' && !await helpers.store.getAccountByUsername(username)) return refused('account_not_found', 'NOT_FOUND', `account "${username}" was not found`)
   try {
-    if (action === 'create') await helpers.ports.createAccount({ actor, username: username!, primaryDomain: input.domain!, planId: mapped!.planId, password: input.password!, contactEmail: input.contactEmail })
+    if (action === 'create') {
+      const reference: Extract<ProvisioningAuthorizationReference, { kind: 'whmcs' }> = Object.freeze({
+        kind: 'whmcs', principalId: actor, apiIdentifier: record.apiIdentifier, tokenSha256: record.token.sha256,
+        recordIdentity: canonicalProvisioningIdentity(record), clientIp: ip!, package: input.package!, planId: mapped!.planId,
+      })
+      const assertCurrent = async (): Promise<void> => {
+        let current: WhmcsRecord | null = null
+        try { current = readSavedWhmcs(await readJsonIfExists<unknown>(configPath(helpers.store.rootDir))) } catch { /* unreadable authority denies execution */ }
+        if (!current?.enabled || !current.autoCreate || !current.token
+          || canonicalProvisioningIdentity(current) !== reference.recordIdentity
+          || current.token.issuedBy !== actor || current.token.sha256 !== reference.tokenSha256
+          || request.headers.get('x-xpanel-whmcs-id') !== current.apiIdentifier
+          || !tokenMatches(request.headers.get('authorization'), current.token.sha256)
+          || helpers.clientIp(request) !== reference.clientIp
+          || !current.allowedAddresses.some(entry => { const range = parseCidr(entry); return !!range && cidrContains(range, peer) })
+          || !current.planMap.some(row => row.package === reference.package && row.planId === reference.planId)) {
+          fail('FORBIDDEN', 'the WHMCS provisioning authority changed', { stateChanged: false, reason: 'provisioning_authority_changed' })
+        }
+      }
+      await assertCurrent()
+      await helpers.ports.createAccount({ actor, username: username!, primaryDomain: input.domain!, planId: mapped!.planId, password: input.password!, contactEmail: input.contactEmail }, { reference, assertCurrent })
+      try { await assertCurrent() }
+      catch { fail('FORBIDDEN', 'the WHMCS provisioning authority changed before acknowledgment', { stateChanged: true, verificationRequired: true, reason: 'provisioning_authority_changed' }) }
+    }
     else if (action === 'suspend') await helpers.ports.suspendAccount({ actor, username: username!, reason: input.reason ?? 'Suspended by WHMCS' })
     else if (action === 'unsuspend') await helpers.ports.unsuspendAccount({ actor, username: username! })
     else if (action === 'terminate') await helpers.ports.terminateAccount({ actor, username: username! })

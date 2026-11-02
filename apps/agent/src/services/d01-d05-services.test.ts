@@ -1,4 +1,7 @@
 import { createHash, generateKeyPairSync, randomBytes, sign, X509Certificate } from 'node:crypto'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { isXpanelError } from '@xpanel/core'
 import type { Account, Domain, Plan } from '@xpanel/core'
@@ -23,6 +26,7 @@ import {
   parseNamedZonesConfig,
   renderNamedZonesConfig,
 } from './dns.ts'
+import type { AuthoritativeDnsProber } from './dns.ts'
 import {
   computeEffectiveFtpQuotaMb,
   parsePasswdLogins,
@@ -47,6 +51,12 @@ const UBUNTU_OS = aptProfile({
   platformId: '',
   fields: {},
 })
+
+// Explicit simulated observations for portable adapter contracts; never native evidence.
+const fakeAuthoritativeDnsProber: AuthoritativeDnsProber = async ({ expectedSerial, deleted }) => {
+  const observation = { aaFlag: !deleted, raFlag: false, rcode: deleted ? 'REFUSED' : 'NOERROR', observedSerial: expectedSerial, answers: [] }
+  return { udp: { ...observation, protocol: 'udp' }, tcp: { ...observation, protocol: 'tcp' } }
+}
 
 const makeAccount = (overrides: Partial<Account> = {}): Account => ({
   id: '11111111-1111-4111-8111-111111111111',
@@ -423,6 +433,9 @@ describe('D01 — MariaDbServiceAdapter & SqlRunner (A36, A37)', () => {
   })
 
   it('streams logical dump and restore with routines, triggers, events, and pre-cutover verification (A37)', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'xpanel-mariadb-adapter-'))
+    const dumpPath = join(directory, 'alice_prod.sql')
+    try {
     const dumpCommands: MariaDbCommandInput[] = []
     const dumpPayload = '-- MariaDB dump\nCREATE TABLE `items` (`id` int);\n-- Dump completed\n'
     const expectedSha = createHash('sha256').update(dumpPayload, 'utf8').digest('hex')
@@ -436,6 +449,7 @@ describe('D01 — MariaDbServiceAdapter & SqlRunner (A36, A37)', () => {
           expect(input.argv).toContain('--routines')
           expect(input.argv).toContain('--triggers')
           expect(input.argv).toContain('--events')
+          await writeFile(input.stdoutFilePath!, dumpPayload, { flag: 'wx', mode: 0o600 })
           return {
             ok: true,
             exitCode: 0,
@@ -480,11 +494,11 @@ describe('D01 — MariaDbServiceAdapter & SqlRunner (A36, A37)', () => {
     const dumpResult = await adapter.streamLogicalDump({
       database: 'alice_prod',
       username: 'alice',
-      outputPath: '/var/backups/xpanel/alice_prod.sql',
+      outputPath: dumpPath,
     })
     expect(dumpResult).toEqual({
       database: 'alice_prod',
-      outputPath: '/var/backups/xpanel/alice_prod.sql',
+      outputPath: dumpPath,
       sizeBytes: Buffer.byteLength(dumpPayload, 'utf8'),
       sha256: expectedSha,
       routinesIncluded: true,
@@ -496,7 +510,7 @@ describe('D01 — MariaDbServiceAdapter & SqlRunner (A36, A37)', () => {
     const restoreResult = await adapter.streamLogicalRestore({
       targetDatabase: 'alice_restored',
       username: 'alice',
-      inputPath: '/var/backups/xpanel/alice_prod.sql',
+      inputPath: dumpPath,
       expectedSha256: expectedSha,
       verifyBeforeCutover: true,
     })
@@ -525,6 +539,9 @@ describe('D01 — MariaDbServiceAdapter & SqlRunner (A36, A37)', () => {
       status: 412,
     })
     await expect(sqlRunner('mariadb', ['CREATE DATABASE IF NOT EXISTS `alice_prod`'])).resolves.toBeUndefined()
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 })
 
@@ -546,7 +563,7 @@ describe('D02 — AuthoritativeDnsServiceAdapter (A38)', () => {
 
   it('allocates monotonic YYYYMMDDnn SOA serials under per-zone concurrency locks and updates named.conf.xpanel-zones', async () => {
     const executor = new FakeHostExecutor()
-    const adapter = new AuthoritativeDnsServiceAdapter({ executor })
+    const adapter = new AuthoritativeDnsServiceAdapter({ executor, prober: fakeAuthoritativeDnsProber })
 
     // Concurrent publishes on the same zone serialize and produce strictly increasing SOA serials
     const [res1, res2] = await Promise.all([
@@ -577,9 +594,9 @@ describe('D02 — AuthoritativeDnsServiceAdapter (A38)', () => {
     ).rejects.toMatchObject({ code: 'CONFLICT', status: 409 })
   })
 
-  it('rejects candidate zone failing pdnsutil check-zone before touching live zone or named.conf.xpanel-zones', async () => {
+  it('rejects candidate zone failing named-checkzone before touching live zone or named.conf.xpanel-zones', async () => {
     const executor = new FakeHostExecutor()
-    const adapter = new AuthoritativeDnsServiceAdapter({ executor })
+    const adapter = new AuthoritativeDnsServiceAdapter({ executor, prober: fakeAuthoritativeDnsProber })
 
     await adapter.publishZone({
       zone: 'example.com',
@@ -619,6 +636,7 @@ describe('D02 — AuthoritativeDnsServiceAdapter (A38)', () => {
           }
         }
         if (failProbe) {
+          failProbe = false
           return {
             udp: { protocol: 'udp', aaFlag: false, raFlag: false, rcode: 'SERVFAIL', observedSerial: null, answers: [] },
             tcp: { protocol: 'tcp', aaFlag: true, raFlag: false, rcode: 'NOERROR', observedSerial: expectedSerial, answers: [] },
@@ -671,7 +689,7 @@ describe('D02 — AuthoritativeDnsServiceAdapter (A38)', () => {
 
   it('removes obsolete zone file and named.conf entry when a domain is deleted and parses real dig output', async () => {
     const executor = new FakeHostExecutor()
-    const adapter = new AuthoritativeDnsServiceAdapter({ executor })
+    const adapter = new AuthoritativeDnsServiceAdapter({ executor, prober: fakeAuthoritativeDnsProber })
 
     await adapter.publishZone({
       zone: 'example.com',
@@ -854,7 +872,7 @@ describe('D03 — AcmeCertificateServiceAdapter (A39)', () => {
 
   it('publishes DNS-01 apex + wildcard TXT records via AuthoritativeDnsServiceAdapter and cleans them up in finally even when CA fails', async () => {
     const executor = new FakeHostExecutor()
-    const dnsAdapter = new AuthoritativeDnsServiceAdapter({ executor })
+    const dnsAdapter = new AuthoritativeDnsServiceAdapter({ executor, prober: fakeAuthoritativeDnsProber })
 
     await dnsAdapter.publishZone({
       zone: 'example.com',

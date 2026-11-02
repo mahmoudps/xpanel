@@ -34,6 +34,17 @@ const centos9 = profileFor(CENTOS_STREAM_9)
 const centos10 = profileFor(CENTOS_STREAM_10)
 
 describe('apt profile (Ubuntu)', () => {
+  it('selects BIND backend validation and query tools on all 5 declared v1 distro profiles', () => {
+    for (const fixture of [UBUNTU_2204, UBUNTU_2404, ALMA_9, ROCKY_9, CENTOS_STREAM_9]) {
+      const profile = profileFor(fixture), packages = profile.packages.powerdns
+      const ubuntu = profile.id === 'ubuntu'
+      expect(packages).toEqual(ubuntu ? ['pdns-server', 'pdns-backend-bind', 'bind9-utils', 'dnsutils'] : ['pdns', 'bind-utils'])
+      expect(packages).not.toContain('pdns-backend-pgsql')
+      expect(packages).not.toContain('pdns-backend-postgresql')
+      expect(packages).not.toContain('bind')
+    }
+  })
+
   it('names Debian services and packages', () => {
     expect(ubuntu24.services.apache).toBe('apache2')
     expect(ubuntu24.services.sshd).toBe('ssh')
@@ -43,7 +54,7 @@ describe('apt profile (Ubuntu)', () => {
     expect(ubuntu24.packages['apache-itk']).toEqual(['libapache2-mpm-itk'])
     expect(ubuntu24.packages['apache-suexec']).toEqual(['apache2-suexec-custom'])
     expect(ubuntu24.packages['apache-fcgi']).toEqual(['libapache2-mod-fcgid'])
-    expect(ubuntu24.packages.powerdns).toEqual(['pdns-server', 'pdns-backend-pgsql'])
+    expect(ubuntu24.packages.powerdns).toEqual(['pdns-server', 'pdns-backend-bind', 'bind9-utils', 'dnsutils'])
     expect(ubuntu24.packages.dovecot).toEqual(expect.arrayContaining(['dovecot-imapd', 'dovecot-pop3d', 'dovecot-lmtpd']))
     expect(ubuntu24.packages.acme).toEqual(['certbot'])
     expect(ubuntu24.packages.modsecurity).toContain('libapache2-mod-security2')
@@ -120,7 +131,7 @@ describe('dnf profile (CentOS Stream / Alma / Rocky)', () => {
     expect(centos9.services.redis).toBe('redis')
     expect(centos9.packages.apache).toContain('httpd')
     expect(centos9.packages.postgresql).toEqual(['postgresql-server'])
-    expect(centos9.packages.powerdns).toEqual(['pdns', 'pdns-backend-postgresql'])
+    expect(centos9.packages.powerdns).toEqual(['pdns', 'bind-utils'])
     expect(centos9.packages['apache-fcgi']).toEqual(['mod_fcgid'])
     expect(centos9.packages.modsecurity).toContain('mod_security')
   })

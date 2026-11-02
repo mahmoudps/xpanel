@@ -3,13 +3,19 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { qualifyHostTools, tools } from '@xpanel/catalog'
 import type { FirewallRule } from '@xpanel/core'
-import { APPROVED_WHM_OPERATIONS_TABS_CLIENT, renderApprovedWhmOperationsSupplement } from './approved-whm-operations-components.ts'
+import { APPROVED_WHM_OPERATIONS_TABS_CLIENT, renderApprovedWhmOperationsSupplement, renderApprovedWhmServicesContent } from './approved-whm-operations-components.ts'
 
 const root = { kind: 'root' as const, id: 'private-root-id', username: 'operator' }
 const portCatalog = tools.map(tool => tool.id === 'aapanel-port-rules' ? { ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } } : tool)
 const serviceCatalog = qualifyHostTools(tools, { executor: 'linux', probes: { 'control-plane': 'passed', systemd: 'passed' } })
 const rule: FirewallRule = { id: 'private-rule-id', kind: 'port', action: 'drop', protocol: 'tcp', port: '8448', source: '192.0.2.32/28', forwardTo: null, list: null, comment: 'synthetic saved rule', enabled: true }
-const inputs = (html: string): string[] => [...html.matchAll(/<(?:input|select|textarea)\b[^>]*>/g)].map(match => match[0])
+const activeMarkup = (html: string): HTMLDivElement => { const root = document.createElement('div'); root.innerHTML = html; return root }
+const inputs = (html: string): string[] => [...activeMarkup(html).querySelectorAll('input,select,textarea')].map(input => input.outerHTML.slice(0, input.outerHTML.indexOf('>') + 1))
+const assertNoActiveMutators = (html: string): void => {
+  const root = activeMarkup(html)
+  assert.equal(root.querySelectorAll('form').length, 0)
+  for (const control of root.querySelectorAll('input,select,textarea,button[type="submit"],button[data-firewall-action]')) assert.ok(control.hasAttribute('disabled'), control.outerHTML)
+}
 
 describe('approved native operations component supplement', () => {
   it('does not replace other routes or add a second page heading', () => {
@@ -34,7 +40,8 @@ describe('approved native operations component supplement', () => {
     for (const locale of ['en', 'ar'] as const) {
       const html = renderApprovedWhmOperationsSupplement({ activeRoute, locale, principal: root, catalog: portCatalog, capabilityUnavailable: true, firewallRules: [rule], hostname: 'private-host-marker' })
       assert.match(html, /data-operation-state="unavailable"/)
-      assert.doesNotMatch(html, /<form\b|synthetic saved rule|192\.0\.2\.32|private-rule-id|private-host-marker|value="8448"/)
+      assert.doesNotMatch(html, /synthetic saved rule|192\.0\.2\.32|private-rule-id|private-host-marker|value="8448"/)
+      assertNoActiveMutators(html)
       for (const input of inputs(html)) assert.match(input, /\bdisabled\b/, input)
       assert.doesNotMatch(html, /[\u0660-\u0669\u06f0-\u06f9]/)
     }
@@ -44,14 +51,19 @@ describe('approved native operations component supplement', () => {
     const deliveryUnverified = portCatalog.map(tool => tool.id === 'aapanel-port-rules' ? { ...tool, delivery: { ...tool.delivery, status: 'researched' as const } } : tool)
     for (const catalog of [undefined, tools, deliveryUnverified]) {
       const html = renderApprovedWhmOperationsSupplement({ activeRoute: '/whm/security/firewall', principal: root, catalog, firewallRules: [rule] })
-      assert.doesNotMatch(html, /<form\b|synthetic saved rule|value="8448"/)
+      assert.doesNotMatch(html, /synthetic saved rule|value="8448"/)
+      assertNoActiveMutators(html)
       for (const input of inputs(html)) assert.match(input, /\bdisabled\b/)
     }
   })
 
   it('connects only root-qualified port creation to its exact client contract', () => {
     const html = renderApprovedWhmOperationsSupplement({ activeRoute: '/whm/security/firewall', principal: root, catalog: portCatalog, firewallRules: [rule] })
-    assert.equal([...html.matchAll(/<form\b/g)].length, 1)
+    const active = activeMarkup(html)
+    assert.equal(active.querySelectorAll('form').length, 1)
+    assert.equal(active.querySelectorAll('form[data-firewall-port-rule-form]').length, 1)
+    const editor = active.querySelector<HTMLTemplateElement>('template[data-xp-template="firewall-editor"]')
+    assert.ok(editor); assert.equal(editor.content.querySelectorAll('form[data-xp-action="form"]').length, 1)
     assert.match(html, /<form[^>]*data-firewall-port-rule-form/)
     assert.match(html, /data-firewall-port-rule-status role="status"/)
     for (const name of ['protocol', 'port', 'source', 'comment']) {
@@ -68,6 +80,23 @@ describe('approved native operations component supplement', () => {
     assert.doesNotMatch(html, /data-endpoint|\/api\/|sessionIp|value="203\.0\.113\.7"/)
     assert.match(html, /do not establish that the live firewall accepted or enforced/)
     assert.doesNotMatch(html, /private-rule-id/)
+  })
+
+  it('keeps the port and editor prototype contracts inert while unavailable', () => {
+    const html = renderApprovedWhmOperationsSupplement({ activeRoute: '/whm/security/firewall', locale: 'en', principal: root, catalog: portCatalog, capabilityUnavailable: true })
+    const active = activeMarkup(html)
+    assertNoActiveMutators(html)
+    const port = active.querySelector<HTMLTemplateElement>('template[data-xp-template="firewall-port-row"]')
+    const editor = active.querySelector<HTMLTemplateElement>('template[data-xp-template="firewall-editor"]')
+    const input = active.querySelector<HTMLTemplateElement>('template[data-xp-template="firewall-edit-input"]')
+    const select = active.querySelector<HTMLTemplateElement>('template[data-xp-template="firewall-edit-select"]')
+    assert.ok(port); assert.ok(editor); assert.ok(input); assert.ok(select)
+    assert.equal(port.content.firstElementChild?.tagName, 'TR'); assert.equal(port.content.firstElementChild?.children.length, 9)
+    for (const slot of ['purpose', 'origin']) assert.equal(port.content.querySelector('[data-xp-slot="' + slot + '"]')?.tagName, 'TD')
+    const editForm = editor.content.querySelector('form[data-xp-action="form"]'), editInput = input.content.querySelector('input'), editSelect = select.content.querySelector('select')
+    assert.ok(editForm); assert.ok(editInput); assert.ok(editSelect)
+    assert.equal(active.contains(editForm), false); assert.equal(active.contains(editInput), false); assert.equal(active.contains(editSelect), false)
+    assert.equal(active.querySelectorAll('form').length, 0)
   })
 
   it('renders all six rule categories with honest observed values and unread unsupported metadata', () => {
@@ -100,7 +129,11 @@ describe('approved native operations component supplement', () => {
 
   it('keeps optional service installation honest while pointing to real settings routes', () => {
     const html = renderApprovedWhmOperationsSupplement({ activeRoute: '/whm/services', principal: root, catalog: serviceCatalog, services: [{ name: 'synthetic-service', unit: 'private-unit', version: 'private-version', active: true, enabled: true, rssMb: 9, role: 'private-role' }] })
-    for (const title of ['Restart confirmation', 'Cancel', 'Optional services', 'OpenLiteSpeed', 'ModSecurity with OWASP CRS', 'Install OpenLiteSpeed', 'Install ModSecurity', 'Installation state', 'Not read']) assert.ok(html.includes(title), title)
+    // Restart review belongs to the real workspace; cancellation is exercised by the native controller's no-POST regression.
+    const workspace = renderApprovedWhmServicesContent({ activeRoute: '/whm/services', principal: root, catalog: serviceCatalog })
+    assert.match(workspace, /Restart confirmation/)
+    assert.equal([...workspace.matchAll(/data-host-service-rows/g)].length, 1)
+    for (const title of ['Optional services', 'OpenLiteSpeed', 'ModSecurity with OWASP CRS', 'Install OpenLiteSpeed', 'Install ModSecurity', 'Installation state', 'Not read']) assert.ok(html.includes(title), title)
     assert.match(html, /href="\/whm\/services\/web\?lang=en&amp;theme=dark&amp;density=comfortable"/)
     assert.match(html, /href="\/whm\/security\?lang=en&amp;theme=dark&amp;density=comfortable"/)
     assert.doesNotMatch(html, /<form\b|data-service-restart|synthetic-service|private-unit|private-version|>Installing<|>Not installed<|>Queued<|4\.1 GB|12 of 12/)

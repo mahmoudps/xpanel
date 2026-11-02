@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
-import { fail } from '@xpanel/core'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { assertPrincipalUsername, fail } from '@xpanel/core'
+import { createTestStateStore } from '@xpanel/state'
+import { ExtendedFeaturesStore } from './extended-routes.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import { sha256Hex } from './auth.ts'
 import { accountTemplateZoneRecords, formatZoneTemplate, handleAccountTemplatesRoute, templateForNewAccount, parseTemplateInput, parseZoneTemplate, previewTemplateZone, readSavedTemplates, renderTemplateRecords, templateForPlan, TEMPLATE_SAMPLE } from './acct-templates-workspace.ts'
@@ -11,12 +13,15 @@ const reseller = { principal: { kind: 'reseller', id: '22222222-2222-4222-8222-2
 const EMPTY = sha256Hex('null'), NOW = new Date('2026-10-28T12:00:00.000Z')
 const page = { title: 'Welcome', body: 'This site is being set up.' }
 const input = (overrides: Record<string, unknown> = {}) => ({ name: 'Shared', zone: 'shop 3600 CNAME www.%domain%.\n@ 3600 TXT "google-site-verification=abc"\n', defaultPage: page, suspendedPage: { title: 'Suspended', body: 'Contact %domain% support.' }, planIds: [PLAN], expectedRevision: EMPTY, ...overrides })
+const closeQueue: (() => Promise<unknown>)[] = []
+afterEach(async () => { for (const close of closeQueue.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 
 const helpers = (initial: unknown = null, callers: AuthenticatedCaller[] = [root]) => {
   let saved: unknown = initial, calls = 0
   const audits: Record<string, unknown>[] = []
   const h = {
-    store: { listPlans: vi.fn(async () => [{ id: PLAN, name: 'Starter' }, { id: PRO, name: 'Pro' }]) },
+    store: { listPlans: vi.fn(async () => [{ id: PLAN, name: 'Starter' }, { id: PRO, name: 'Pro' }]),
+      getWriterLock: () => ({ acquire: async () => ({ assertFencingToken: async () => ({ revision: 0 }), release: async () => undefined }) }) },
     requireCaller: vi.fn(async () => callers[Math.min(calls++, callers.length - 1)]!),
     assertRoot: vi.fn(async (who: AuthenticatedCaller) => { if (who.principal.kind !== 'root') fail('FORBIDDEN', 'root role is required for this operation') }),
     emitAudit: vi.fn(async (entry: Record<string, unknown>) => { audits.push(entry) }),
@@ -74,6 +79,129 @@ describe('saved templates', () => {
     expect(readSavedTemplates([template(), template({ id: '77777777-7777-4777-8777-000000000002', name: 'Other' })])).toBeNull()
     expect(readSavedTemplates([{ ...template(), records: [{ name: 'www', ttl: 1, type: 'CNAME', priority: null, content: 'shop.example.com.' }] }])).toBeNull()
     expect(readSavedTemplates([{ ...template(), secret: 1 }])).toBeNull()
+  })
+})
+
+describe('account template shared StateStore writer fence', { tags: ['feature'] }, () => {
+  const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
+  const persistent = async () => {
+    const state = await createTestStateStore(); closeQueue.push(() => state.close())
+    const ext = new ExtendedFeaturesStore(state.rootDir), f = helpers()
+    f.h.store.getWriterLock = () => state.store.getWriterLock()
+    f.h.readSaved = vi.fn(() => ext.readOrDefault<unknown>('accounts/templates.json', null))
+    f.h.writeSaved = vi.fn((value, writer) => ext.write('accounts/templates.json', value, { templateWriter: writer }))
+    return { ...f, state, ext }
+  }
+
+  it.each(['POST', 'PUT', 'DELETE'] as const)('queues %s behind the account writer and checks CAS after admission', async method => {
+    const f = await persistent()
+    let path = '/api/server/account-templates', revision = EMPTY
+    if (method !== 'POST') {
+      const created = await (await call('POST', f.h, path, input()))!.json() as { changed: string; revision: string }
+      path += '/' + created.changed; revision = created.revision
+    }
+    vi.mocked(f.h.readSaved).mockClear(); vi.mocked(f.h.writeSaved).mockClear()
+    const writer = f.state.store.getWriterLock(), held = await writer.acquire(), requested = deferred()
+    let released = false
+    const release = async () => { if (!released) { released = true; await held.release() } }
+    const acquire = writer.acquire.bind(writer)
+    vi.spyOn(writer, 'acquire').mockImplementation(() => { requested.resolve(); return acquire() })
+    const pending = call(method, f.h, path, method === 'DELETE' ? { expectedRevision: revision } : input({ expectedRevision: revision }))
+      .then(response => ({ response }), error => ({ error }))
+    closeQueue.push(async () => { await pending }); closeQueue.push(release)
+    await requested.promise
+    expect(f.h.readSaved).not.toHaveBeenCalled()
+    expect(f.h.writeSaved).not.toHaveBeenCalled()
+    // The currently admitted operation can change this same source before the queued request obtains it.
+    await f.ext.write('accounts/templates.json', [], { templateWriter: held })
+    await release()
+    expect(await pending).toMatchObject({ error: { code: 'CONFLICT', detail: { stateChanged: false } } })
+    expect(f.h.writeSaved).not.toHaveBeenCalled()
+    expect(await f.ext.readOrDefault('accounts/templates.json', null)).toEqual([])
+  })
+
+  it('rechecks the original root credential after waiting for the writer', async () => {
+    const f = await persistent(), writer = f.state.store.getWriterLock(), held = await writer.acquire(), requested = deferred()
+    let released = false
+    const release = async () => { if (!released) { released = true; await held.release() } }
+    const acquire = writer.acquire.bind(writer)
+    vi.spyOn(writer, 'acquire').mockImplementation(() => { requested.resolve(); return acquire() })
+    vi.mocked(f.h.requireCaller).mockResolvedValueOnce(root).mockResolvedValueOnce(reseller)
+    const pending = call('POST', f.h, '/api/server/account-templates', input()).then(response => ({ response }), error => ({ error }))
+    closeQueue.push(async () => { await pending }); closeQueue.push(release)
+    await requested.promise
+    expect(f.h.writeSaved).not.toHaveBeenCalled()
+    await release()
+    expect(await pending).toMatchObject({ error: { code: 'FORBIDDEN' } })
+    expect(f.h.writeSaved).not.toHaveBeenCalled()
+  })
+
+  it.each(['POST', 'PUT', 'DELETE'] as const)('releases the actual writer before snapshot-reading audit for %s', async method => {
+    const f = await persistent()
+    const actor: AuthenticatedCaller = { ...root, principal: { kind: 'root', id: root.principal.id, username: assertPrincipalUsername('mbxdeadbeef') } }
+    vi.mocked(f.h.requireCaller).mockResolvedValue(actor)
+    let path = '/api/server/account-templates', revision = EMPTY
+    if (method !== 'POST') {
+      const created = await (await call('POST', f.h, path, input()))!.json() as { changed: string; revision: string }
+      path += '/' + created.changed; revision = created.revision
+    }
+    const writer = f.state.store.getWriterLock(), acquire = writer.acquire.bind(writer)
+    let released = false
+    vi.spyOn(writer, 'acquire').mockImplementation(async () => {
+      const held = await acquire()
+      return { ...held, release: async () => { await held.release(); released = true } }
+    })
+    const recordAudit = vi.mocked(f.h.emitAudit).getMockImplementation()!
+    const snapshot = vi.spyOn(f.state.store, 'readSnapshot')
+    vi.mocked(f.h.emitAudit).mockImplementation(async entry => {
+      // Fail before entering a barrier if a regression still holds its writer; no timeout wait.
+      expect(released).toBe(true)
+      await f.state.store.readSnapshot()
+      return recordAudit(entry)
+    })
+    const response = await call(method, f.h, path, method === 'DELETE' ? { expectedRevision: revision } : input({ expectedRevision: revision }))
+    expect(response!.status).toBe(method === 'POST' ? 201 : 200)
+    const result = await response!.json() as { revision: string; changed: string }
+    const saved = await f.ext.readOrDefault<unknown>('accounts/templates.json', null)
+    expect(snapshot).toHaveBeenCalledOnce()
+    expect(result.revision).toBe(sha256Hex(JSON.stringify(saved)))
+    expect(f.audits.at(-1)).toMatchObject({ actor: 'mbxdeadbeef', principalId: root.principal.id, target: 'account-template:' + result.changed, detail: { revision: result.revision } })
+  })
+
+  it('reports a verified saved template when snapshot-reading audit fails after writer release', async () => {
+    const f = await persistent(), writer = f.state.store.getWriterLock(), acquire = writer.acquire.bind(writer)
+    let released = false, releasedAtAudit = false
+    vi.spyOn(writer, 'acquire').mockImplementation(async () => {
+      const held = await acquire()
+      return { ...held, release: async () => { await held.release(); released = true } }
+    })
+    vi.mocked(f.h.emitAudit).mockImplementation(async () => {
+      releasedAtAudit = released
+      if (!releasedAtAudit) throw new Error('audit entered a held writer')
+      await f.state.store.readSnapshot()
+      throw new Error('audit destination unavailable')
+    })
+    await expect(call('POST', f.h, '/api/server/account-templates', input())).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE', detail: { stateChanged: true, verificationRequired: true },
+    })
+    const saved = await f.ext.readOrDefault<unknown>('accounts/templates.json', null)
+    expect(readSavedTemplates(saved)).toEqual([expect.objectContaining({ name: 'Shared', updatedBy: 'root' })])
+    expect(releasedAtAudit).toBe(true)
+    expect(f.h.writeSaved).toHaveBeenCalledOnce()
+    expect(f.h.emitAudit).toHaveBeenCalledOnce()
+    const held = await f.state.store.getWriterLock().acquire()
+    try { await held.assertFencingToken() } finally { await held.release() }
+  })
+  it('guards only the canonical account-template target, including normalized aliases', async () => {
+    const f = await persistent()
+    for (const path of ['accounts/templates.json', 'accounts/../accounts/templates.json']) {
+      await expect(f.ext.write(path, [])).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false } })
+    }
+    expect(await f.ext.readOrDefault('accounts/templates.json', null)).toBeNull()
+    await expect(f.ext.write('unrelated/fixture.json', { value: 1 })).resolves.toEqual({ value: 1 })
+    const held = await f.state.store.getWriterLock().acquire()
+    try { await expect(f.ext.write('accounts/templates.json', [], { templateWriter: held })).resolves.toEqual([]) }
+    finally { await held.release() }
   })
 })
 

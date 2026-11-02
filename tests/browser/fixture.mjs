@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
@@ -12,7 +12,18 @@ import { defaultPlan } from '../../packages/core/src/index.ts'
 import { StateStore } from '../../packages/state/src/index.ts'
 
 /** Disposable application fixture. Host services are fake; the browser and HTTP server are real. */
-export async function createBrowserFixture() {
+export async function createBrowserFixture(options = {}) {
+  if (options === null || typeof options !== 'object' || Array.isArray(options)
+    || Object.keys(options).some(key => key !== 'credentialNonce')) {
+    throw new TypeError('invalid_browser_fixture_options')
+  }
+  const { credentialNonce } = options
+  if (credentialNonce !== undefined && (typeof credentialNonce !== 'string' || !/^[a-f0-9]{64}$/.test(credentialNonce))) {
+    throw new TypeError('invalid_browser_fixture_credential_nonce')
+  }
+  // Optional synthetic test data only. Real API login, root bootstrap and MFA remain unchanged.
+  const deriveFixtureCredential = (label, prefix) => `${prefix}!${createHash('sha256')
+    .update(`xpanel-browser-fixture-credential-v1:${label}:${credentialNonce}`, 'utf8').digest('hex')}`
   const directory = await mkdtemp(join(tmpdir(), 'xpanel-browser-'))
   const db = createDb(join(directory, 'control.db'))
   let server
@@ -30,9 +41,12 @@ export async function createBrowserFixture() {
     const stateDir = join(directory, 'state')
     await mkdir(stateDir, { recursive: true })
     const store = new StateStore(stateDir)
-    const rootPassword = `R!${randomBytes(18).toString('base64url')}`
-    const replacementPassword = `N!${randomBytes(18).toString('base64url')}`
-    const ownerPassword = `U!${randomBytes(18).toString('base64url')}`
+    const rootPassword = credentialNonce === undefined
+      ? `R!${randomBytes(18).toString('base64url')}` : deriveFixtureCredential('root', 'R')
+    const replacementPassword = credentialNonce === undefined
+      ? `N!${randomBytes(18).toString('base64url')}` : deriveFixtureCredential('root-replacement', 'N')
+    const ownerPassword = credentialNonce === undefined
+      ? `U!${randomBytes(18).toString('base64url')}` : deriveFixtureCredential('owner', 'U')
     const features = await store.createFeatureList({ name: 'Browser fixture', ownerId: null, disabled: [] })
     const { id: fixturePlanId, ...planInput } = defaultPlan({ name: 'Browser fixture', featureListId: features.id })
     const plan = await store.createPlan(planInput)

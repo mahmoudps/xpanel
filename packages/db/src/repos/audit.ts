@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, open, readFile, rename, stat, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { lstat, mkdir, open, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
+import { acquireWriterMutex } from '@xpanel/state'
 import {
   assertIdOrNull,
   assertIp,
@@ -13,6 +14,7 @@ import {
 import type { AuditEntry, Id } from '@xpanel/core'
 import type { Db } from '../client.ts'
 import { withSqliteErrors } from '../sqlite-errors.ts'
+import { assertNoActiveDatabaseTransaction } from '../sql-runner.ts'
 import { clampLimit, nowIso } from './util.ts'
 
 /** What core's auditEntry builds, minus its id and time: the database assigns both. */
@@ -183,6 +185,30 @@ export const computeAuditEntryHash = (record: {
 const anchorPathFor = (auditLogFilePath: string): string => `${auditLogFilePath}.anchor.json`
 const quarantinePathFor = (auditLogFilePath: string): string => `${auditLogFilePath}.quarantine`
 
+const assertRegularAuditFile = async (file: string): Promise<void> => {
+  const info = await lstat(file).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+  if (info && (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1)) fail('PRECONDITION_FAILED', 'audit files must be regular files without link aliases')
+}
+
+/** All cooperating append/verify/rotate/replay callers use one permanent physical guard. */
+const withAuditFileGuard = async <T>(file: string, operation: (canonical: string) => Promise<T>): Promise<T> => {
+  assertNoActiveDatabaseTransaction()
+  if (typeof file !== 'string' || !file.trim() || file.includes('\0')) fail('VALIDATION', 'audit file path is required')
+  const absolute = resolve(file)
+  await mkdir(dirname(absolute), { recursive: true })
+  const parent = await realpath(dirname(absolute))
+  const canonical = join(parent, basename(absolute))
+  const name = process.platform === 'win32' ? basename(absolute).toLowerCase() : basename(absolute)
+  const mutexName = '.audit-' + createHash('sha256').update(name).digest('hex') + '.mutex.sqlite'
+  const guard = await acquireWriterMutex(join(parent, mutexName), 15_000, 5)
+  try {
+    for (const path of [canonical, anchorPathFor(canonical), quarantinePathFor(canonical)]) await assertRegularAuditFile(path)
+    const result = await operation(canonical)
+    await guard.assertStable()
+    return result
+  } finally { await guard.release() }
+}
+
 const readAnchorIfExists = async (auditLogFilePath: string): Promise<AuditChainAnchor | null> => {
   try {
     const raw = await readFile(anchorPathFor(auditLogFilePath), 'utf8')
@@ -274,7 +300,7 @@ const fsyncWriteFullFile = async (filePath: string, content: string): Promise<vo
  * executes BEFORE the SQLite index insert. Under the default fail-closed policy, any disk write error
  * (`ENOSPC`, `EIO`, `EACCES`) throws `SERVICE_UNAVAILABLE` before acknowledging the operation.
  */
-export const appendAudit = (
+const appendAuditUnlocked = (
   db: Db,
   e: NewAuditEntry,
   opts: AuditWriteOptions = {},
@@ -348,8 +374,13 @@ export const appendAudit = (
         if (serializedLine.includes('\n') || serializedLine.includes('\r')) {
           fail('VALIDATION', 'serialized audit line must not contain raw newline characters')
         }
+        // Validate the index representation before publishing an irreversible
+        // durable line, including the chain metadata added by this append.
+        const indexedDetail = JSON.stringify({ ...detail, _auditEventUid: eventUid, _auditSeq: seq, _auditPrevHash: prevHash, _auditEntryHash: entryHash })
+        if (Buffer.byteLength(indexedDetail, 'utf8') > MAX_DETAIL_BYTES) fail('VALIDATION', 'audit detail too large')
         await fsyncWriteLine(opts.auditLogFilePath!, `${serializedLine}\n`)
       } catch (sinkErr) {
+        if (isXpanelError(sinkErr) && sinkErr.code === 'VALIDATION') throw sinkErr
         if (failClosed) {
           if (isXpanelError(sinkErr)) throw sinkErr
           const errCode = (sinkErr as NodeJS.ErrnoException)?.code ?? 'AUDIT_SINK_ERROR'
@@ -359,6 +390,9 @@ export const appendAudit = (
             { errno: errCode },
           )
         }
+        // A failed optional sink is not evidence that these chain coordinates
+        // were persisted. The DB-only row must not claim a confirmed append.
+        seq = undefined; prevHash = undefined; entryHash = undefined
       }
     }
 
@@ -405,6 +439,11 @@ export const appendAudit = (
     }
   })
 
+export const appendAudit = (db: Db, entry: NewAuditEntry, opts: AuditWriteOptions = {}): Promise<DurableAuditEntry> =>
+  opts.auditLogFilePath
+    ? withAuditFileGuard(opts.auditLogFilePath, canonical => appendAuditUnlocked(db, entry, { ...opts, auditLogFilePath: canonical }))
+    : appendAuditUnlocked(db, entry, opts)
+
 /**
  * Verifies the SHA-256 hash chain (`prevHash` -> `entryHash`) and contiguous sequence numbers
  * across optional rotated archive segments and the active JSONL audit log.
@@ -413,7 +452,7 @@ export const appendAudit = (
  * crash/power loss before `\n`) is quarantined into `<auditLogFilePath>.quarantine`, while any
  * corruption or tampering in complete lines is reported as `valid: false`.
  */
-export const verifyAuditChain = async (
+const verifyAuditChainUnlocked = async (
   auditLogFilePath: string,
   opts: { archivePaths?: string[]; quarantineTruncatedTail?: boolean } = {},
 ): Promise<AuditChainVerificationResult> => {
@@ -434,6 +473,7 @@ export const verifyAuditChain = async (
   const allFiles = [...archivePaths, auditLogFilePath]
   for (let fileIdx = 0; fileIdx < allFiles.length; fileIdx++) {
     const filePath = allFiles[fileIdx]!
+    await assertRegularAuditFile(filePath)
     const isActiveFile = fileIdx === allFiles.length - 1
     let raw = ''
     try {
@@ -552,15 +592,21 @@ export const verifyAuditChain = async (
   }
 }
 
+export const verifyAuditChain = (
+  auditLogFilePath: string,
+  opts: { archivePaths?: string[]; quarantineTruncatedTail?: boolean } = {},
+): Promise<AuditChainVerificationResult> =>
+  withAuditFileGuard(auditLogFilePath, canonical => verifyAuditChainUnlocked(canonical, opts))
+
 /**
  * Rotates the active JSONL audit log into an archive file while preserving unbroken
  * SHA-256 hash-chain continuity (`lastSeq` and `lastEntryHash`) via a durable sidecar anchor.
  */
-export const rotateAuditLog = async (
+const rotateAuditLogUnlocked = async (
   auditLogFilePath: string,
   opts: { archivePath?: string; archivePaths?: string[]; now?: Date } = {},
 ): Promise<AuditRotationResult> => {
-  const verification = await verifyAuditChain(auditLogFilePath, {
+  const verification = await verifyAuditChainUnlocked(auditLogFilePath, {
     ...(opts.archivePaths && { archivePaths: opts.archivePaths }),
   })
   if (!verification.valid) {
@@ -573,6 +619,9 @@ export const rotateAuditLog = async (
   const safeTs = now.replace(/[:.]/g, '-')
   const archivePath = opts.archivePath ?? `${auditLogFilePath}.${verification.lastSeq}.${safeTs}.jsonl`
   const anchorPath = anchorPathFor(auditLogFilePath)
+
+  if (resolve(archivePath) === resolve(auditLogFilePath) || resolve(archivePath) === resolve(anchorPath)) fail('VALIDATION', 'audit archive must not replace the active log or anchor')
+  if (await lstat(archivePath).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })) fail('CONFLICT', 'audit archive already exists')
 
   await mkdir(dirname(archivePath), { recursive: true })
   try {
@@ -605,11 +654,17 @@ export const rotateAuditLog = async (
   }
 }
 
+export const rotateAuditLog = (
+  auditLogFilePath: string,
+  opts: { archivePath?: string; archivePaths?: string[]; now?: Date } = {},
+): Promise<AuditRotationResult> =>
+  withAuditFileGuard(auditLogFilePath, canonical => rotateAuditLogUnlocked(canonical, opts))
+
 /**
  * Replays verified JSONL audit log entries into the SQLite `audit_log` index idempotently.
  * Re-running replay multiple times never duplicates entries already present in `audit_log`.
  */
-export const replayAuditLogToIndex = async (
+const replayAuditLogToIndexUnlocked = async (
   db: Db,
   opts: {
     auditLogFilePath: string
@@ -617,7 +672,7 @@ export const replayAuditLogToIndex = async (
     quarantineTruncatedTail?: boolean
   },
 ): Promise<{ indexed: number; skipped: number; quarantinedTail: string | null }> => {
-  const verification = await verifyAuditChain(opts.auditLogFilePath, {
+  const verification = await verifyAuditChainUnlocked(opts.auditLogFilePath, {
     ...(opts.archivePaths && { archivePaths: opts.archivePaths }),
     ...(opts.quarantineTruncatedTail !== undefined && {
       quarantineTruncatedTail: opts.quarantineTruncatedTail,
@@ -694,6 +749,12 @@ export const replayAuditLogToIndex = async (
 
   return { indexed, skipped, quarantinedTail: verification.quarantinedTail }
 }
+
+export const replayAuditLogToIndex = (
+  db: Db,
+  opts: { auditLogFilePath: string; archivePaths?: string[]; quarantineTruncatedTail?: boolean },
+): Promise<{ indexed: number; skipped: number; quarantinedTail: string | null }> =>
+  withAuditFileGuard(opts.auditLogFilePath, canonical => replayAuditLogToIndexUnlocked(db, { ...opts, auditLogFilePath: canonical }))
 
 /**
  * Prunes expired operational records (`metrics_history`, `login_attempts`, and old terminal `jobs`

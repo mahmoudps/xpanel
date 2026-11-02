@@ -1,3 +1,4 @@
+import { accountPgpClientTemplates } from './account-routing-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
@@ -21,5 +22,5 @@ export function renderAccountPgpWorkspace(input: { lang: Locale; accountId: stri
       <div class="xp-acct-tool__actions"><button type="button" class="xp-btn xp-btn--primary" data-pgp-generate disabled>${t('Generate key pair')}</button></div></section>
     <section class="xp-acct-tool__card" aria-labelledby="pgp-import-heading"><h2 id="pgp-import-heading">${t('Import key')}</h2><div class="xp-field"><label for="pgp-file">${t('Armored key file (.asc)')}</label><input id="pgp-file" class="xp-input" data-pgp-file type="file" accept=".asc,application/pgp-keys,text/plain"${off}><p class="xp-help">${t('Import one public or private key, up to 256 KiB. Every identity must use one of your current mailbox addresses. File contents are not displayed.')}</p></div><div class="xp-acct-tool__actions"><button type="button" class="xp-btn" data-pgp-import disabled>${t(msgctxt('account-pgp-workspace', 'Import key'))}</button></div></section>
     <section class="xp-acct-tool__card" aria-labelledby="pgp-delete-heading"><h2 id="pgp-delete-heading">${t('Delete a key pair')}</h2><p>${t('Select Delete on a key above, then type its complete fingerprint. Deletion removes the public and private key from this account. Keep your own backup before deleting.')}</p><div class="xp-field"><label for="pgp-confirm">${t('Fingerprint to delete')}</label><input id="pgp-confirm" class="xp-input xp-mono" data-pgp-confirm dir="ltr" autocomplete="off" spellcheck="false" maxlength="64"${off}></div><p><bdi dir="ltr" style="overflow-wrap: anywhere" data-pgp-selected>—</bdi></p><div class="xp-acct-tool__actions"><button type="button" class="xp-btn" data-pgp-delete disabled>${t('Delete selected key pair')}</button></div></section>
-  </div>`
+  ${accountPgpClientTemplates()}</div>`
 }

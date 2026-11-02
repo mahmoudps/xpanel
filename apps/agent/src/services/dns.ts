@@ -41,7 +41,7 @@ export interface AuthoritativeDnsAdapterOptions {
   zoneDir?: string
   stagingDir?: string
   zonesConfigPath?: string
-  /** Syntax checker tool: `'pdnsutil'` (`pdnsutil check-zone`) or `'named-checkzone'`. */
+  /** Staged BIND files require named-checkzone; pdnsutil only checks the already configured zone. */
   syntaxTool?: 'pdnsutil' | 'named-checkzone'
   pdnsutilBinary?: string
   namedCheckzoneBinary?: string
@@ -143,7 +143,7 @@ export const renderNamedZonesConfig = (zones: readonly string[], zoneDir = DEFAU
 export const parseNamedZonesConfig = (content: string | null): string[] => {
   if (!content) return []
   const zones: string[] = []
-  const re = /^\s*zone\s+"([^"]+)"\s+IN\s*\{/gm
+  const re = /^\s*zone\s+"([^"]+)"\s+(?:IN\s*)?\{/gm
   for (const match of content.matchAll(re)) {
     const raw = match[1]
     if (raw) {
@@ -232,7 +232,10 @@ export class AuthoritativeDnsServiceAdapter {
     this.zoneDir = assertSafeUnixPath('zoneDir', opts.zoneDir ?? DEFAULT_DNS_ZONE_DIR)
     this.stagingDir = assertSafeUnixPath('stagingDir', opts.stagingDir ?? DEFAULT_DNS_STAGING_DIR)
     this.zonesConfigPath = assertSafeUnixPath('zonesConfigPath', opts.zonesConfigPath ?? DEFAULT_NAMED_ZONES_CONF)
-    this.syntaxTool = opts.syntaxTool ?? 'pdnsutil'
+    if (opts.syntaxTool === 'pdnsutil') {
+      fail('PRECONDITION_FAILED', 'staged BIND zone validation requires named-checkzone; pdnsutil does not validate a candidate file')
+    }
+    this.syntaxTool = 'named-checkzone'
     this.pdnsutilBinary = assertSafeUnixPath('pdnsutilBinary', opts.pdnsutilBinary ?? DEFAULT_PDNSUTIL_BINARY)
     this.namedCheckzoneBinary = assertSafeUnixPath(
       'namedCheckzoneBinary',
@@ -294,20 +297,20 @@ export class AuthoritativeDnsServiceAdapter {
   }
 
   private syntaxTestForStagedZone(zone: string, stagedPath: string): ConfigTest {
-    if (this.syntaxTool === 'named-checkzone') {
-      return {
-        name: `dns-zone:${zone}`,
-        argv: [this.namedCheckzoneBinary, zone, stagedPath],
-      }
-    }
     return {
       name: `dns-zone:${zone}`,
-      argv: [this.pdnsutilBinary, 'check-zone', zone, stagedPath],
+      argv: [this.namedCheckzoneBinary, zone, stagedPath],
     }
   }
 
-  private async reloadPowerDns(): Promise<void> {
-    const res = await this.executor.runCommand([this.pdnsControlBinary, 'bind-reload-now'])
+  private async reloadPowerDns(zone?: string): Promise<void> {
+    // Zone additions and removals require rediscovery of the BIND configuration.
+    const discovered = await this.executor.runCommand([this.pdnsControlBinary, 'rediscover'])
+    if (!discovered.ok) {
+      fail('CONFIG_TEST_FAILED', 'PowerDNS could not rediscover the managed zone configuration', { exitCode: discovered.code })
+    }
+    if (zone === undefined) return
+    const res = await this.executor.runCommand([this.pdnsControlBinary, 'bind-reload-now', zone])
     if (!res.ok) {
       fail('CONFIG_TEST_FAILED', `pdns_control bind-reload-now failed: ${res.stderr || res.stdout}`, {
         exitCode: res.code,
@@ -345,27 +348,6 @@ export class AuthoritativeDnsServiceAdapter {
           rcode: 'SERVFAIL',
           observedSerial: null,
           answers: [],
-        }
-      }
-      // If dig command succeeded on FakeHostExecutor without real dig output, synthesize realistic observation
-      if (res.stdout.startsWith('[jailshell]')) {
-        if (input.deleted) {
-          return {
-            protocol,
-            aaFlag: false,
-            raFlag: false,
-            rcode: 'REFUSED',
-            observedSerial: null,
-            answers: [],
-          }
-        }
-        return {
-          protocol,
-          aaFlag: true,
-          raFlag: false,
-          rcode: 'NOERROR',
-          observedSerial: input.expectedSerial,
-          answers: [`${input.zone}. 14400 IN SOA ns1.${input.zone}. admin.${input.zone}. ${input.expectedSerial ?? 0} 3600 1800 1209600 3600`],
         }
       }
       return parseDigSoaOutput(res.stdout, protocol)
@@ -411,6 +393,20 @@ export class AuthoritativeDnsServiceAdapter {
     }
   }
 
+  private assertDeletedProbePassed(
+    zone: string,
+    probe: { udp: AuthoritativeDnsProbeObservation; tcp: AuthoritativeDnsProbeObservation },
+  ): void {
+    for (const [protocol, obs] of [['udp', probe.udp], ['tcp', probe.tcp]] as const) {
+      if (obs.protocol !== protocol || obs.aaFlag || obs.raFlag || obs.observedSerial !== null || obs.answers.length !== 0 ||
+          !['REFUSED', 'NOTAUTH', 'NXDOMAIN'].includes(obs.rcode)) {
+        fail('CONFIG_TEST_FAILED', `deletion of zone ${zone} is not confirmed over ${protocol.toUpperCase()}`, {
+          zone, protocol, rcode: obs.rcode,
+        })
+      }
+    }
+  }
+
   /**
    * Reads the live zone file for `zone` and returns its parsed records and current SOA serial,
    * or `null` if the zone file does not exist.
@@ -425,10 +421,52 @@ export class AuthoritativeDnsServiceAdapter {
     return { records: parsed.records, serial, rawContent: content }
   }
 
+  /** Validate exact generation bytes in an isolated candidate file; never publish or allocate a serial. */
+  async validateCandidateZone(zoneInput: string, content: string): Promise<void> {
+    const zone = services.normalizeZone(zoneInput)
+    const parsed = services.parseBindZone(content, { origin: zone })
+    if (parsed.skipped.length > 0) fail('VALIDATION', 'candidate DNS zone contains unrecognized records', { stateChanged: false })
+    extractSoaSerial(parsed.records)
+    services.validateZone(parsed.records, { requireSoa: true })
+    await this.withZoneLock(zone, async () => {
+      await this.executor.runAction({ kind: 'ensure-dir', path: this.stagingDir, mode: 0o750, owner: 'root', group: 'root' })
+      const stagedPath = `${this.stagingDir}/${zone}.zone.${randomUUID()}.stage`
+      await this.executor.writeFile({ path: stagedPath, content, mode: 0o644, owner: 'root', group: 'root' })
+      try {
+        const result = await this.executor.runTest(this.syntaxTestForStagedZone(zone, stagedPath))
+        if (!result.ok) fail('CONFIG_TEST_FAILED', 'the rendered DNS candidate failed named-checkzone', { zone, stateChanged: false })
+      } finally { await this.executor.removePath(stagedPath) }
+    })
+  }
+
+  /** Observe the generation already activated by the reconciler without changing its bytes or serial. */
+  async observeCandidateZone(zoneInput: string, content: string): Promise<void> {
+    const zone = services.normalizeZone(zoneInput)
+    const parsed = services.parseBindZone(content, { origin: zone })
+    if (parsed.skipped.length > 0) fail('PRECONDITION_FAILED', 'candidate DNS records cannot be observed', { zone })
+    const expectedSerial = extractSoaSerial(parsed.records)
+    if (await this.executor.readFile(this.zoneFilePath(zone)) !== content) {
+      fail('CONFIG_TEST_FAILED', 'active DNS zone bytes differ from the selected generation', { zone })
+    }
+    const probe = await this.prober({ zone, serverIp: this.serverIp, expectedSerial, expectedRecords: parsed.records })
+    this.assertProbePassed(zone, expectedSerial, probe)
+    if (await this.executor.readFile(this.zoneFilePath(zone)) !== content) {
+      fail('CONFIG_TEST_FAILED', 'active DNS zone changed during observation', { zone })
+    }
+  }
+
+  /** Absence must be observed over both protocols; a failed lookup is not proof of deletion. */
+  async observeDeletedZone(zoneInput: string): Promise<void> {
+    const zone = services.normalizeZone(zoneInput)
+    if (await this.executor.readFile(this.zoneFilePath(zone)) !== null) fail('CONFIG_TEST_FAILED', 'removed DNS zone file is still present', { zone })
+    const probe = await this.prober({ zone, serverIp: this.serverIp, expectedSerial: null, expectedRecords: [], deleted: true })
+    this.assertDeletedProbePassed(zone, probe)
+  }
+
   /**
    * Publishes a zone authoritatively under a per-domain lock:
    * 1. Validates all records and allocates a strictly monotonic `YYYYMMDDnn` SOA serial.
-   * 2. Stages the rendered BIND zone file and runs `pdnsutil check-zone` / `named-checkzone`.
+   * 2. Stages the rendered BIND zone file and runs `named-checkzone` against that candidate.
    * 3. Atomically moves the validated zone into `<zoneDir>/<zone>.zone` and updates `named.conf.xpanel-zones`.
    * 4. Runs `pdns_control bind-reload-now` and performs UDP + TCP authoritative probes (checking AA flag, SOA serial, no open recursion).
    * 5. If reload or probe fails, automatically rolls back to the previous zone file with a bumped recovery SOA serial (`bumpSerial(failedSerial, now)`) so secondaries and caches converge on the rollback!
@@ -543,7 +581,7 @@ export class AuthoritativeDnsServiceAdapter {
           })
           this.lastAllocatedSerials.set(zone, nextSerial)
 
-          await this.reloadPowerDns()
+          await this.reloadPowerDns(zone)
 
           const probe = await this.prober({
             zone,
@@ -565,6 +603,8 @@ export class AuthoritativeDnsServiceAdapter {
         } catch (activationErr) {
           // Rollback to previous zone file with a bumped recovery serial (> nextSerial) so secondaries/caches accept the rollback
           let recoverySerial: number | null = null
+          let restoredPreviousZone = false
+          let rolledBack = false
           try {
             if (liveZone) {
               recoverySerial = services.bumpSerial(nextSerial, now)
@@ -580,6 +620,7 @@ export class AuthoritativeDnsServiceAdapter {
                 group: 'root',
               })
               this.lastAllocatedSerials.set(zone, recoverySerial)
+              restoredPreviousZone = true
             } else {
               await this.executor.removePath(liveZonePath)
               this.lastAllocatedSerials.delete(zone)
@@ -597,7 +638,14 @@ export class AuthoritativeDnsServiceAdapter {
               await this.executor.removePath(this.zonesConfigPath)
             }
 
-            await this.reloadPowerDns().catch(() => undefined)
+            await this.reloadPowerDns(liveZone ? zone : undefined)
+            const recoveryProbe = await this.prober({
+              zone, serverIp: this.serverIp, expectedSerial: recoverySerial,
+              expectedRecords: liveZone?.records ?? [], ...(liveZone ? {} : { deleted: true }),
+            })
+            if (liveZone && recoverySerial !== null) this.assertProbePassed(zone, recoverySerial, recoveryProbe)
+            else this.assertDeletedProbePassed(zone, recoveryProbe)
+            rolledBack = true
           } catch {
             /* preserve primary failure details */
           }
@@ -612,15 +660,15 @@ export class AuthoritativeDnsServiceAdapter {
             zone,
             failedSerial: nextSerial,
             recoverySerial,
-            restoredPreviousZone: liveZone !== null,
+            restoredPreviousZone,
             reason,
           }
 
           return fail(
             'CONFIG_TEST_FAILED',
-            `authoritative DNS publish for ${zone} failed and rolled back: ${reason}`,
+            `authoritative DNS publish for ${zone} failed; ${rolledBack ? 'rollback verified' : 'outcome requires review'}: ${reason}`,
             {
-              rolledBack: true,
+              rolledBack, stateChanged: !rolledBack, unknownOutcome: !rolledBack, verificationRequired: !rolledBack,
               ...rollbackDetail,
             },
           )
@@ -643,42 +691,41 @@ export class AuthoritativeDnsServiceAdapter {
         const remainingZones = parseNamedZonesConfig(prevZonesConfContent).filter((z) => z !== zone)
         const nextZonesConfContent = renderNamedZonesConfig(remainingZones, this.zoneDir)
 
-        await this.executor.removePath(liveZonePath)
-        await this.executor.writeFile({
-          path: this.zonesConfigPath,
-          content: nextZonesConfContent,
-          mode: 0o644,
-          owner: 'root',
-          group: 'root',
-        })
-        this.lastAllocatedSerials.delete(zone)
+        try {
+          await this.executor.removePath(liveZonePath)
+          await this.executor.writeFile({
+            path: this.zonesConfigPath,
+            content: nextZonesConfContent,
+            mode: 0o644,
+            owner: 'root',
+            group: 'root',
+          })
+          this.lastAllocatedSerials.delete(zone)
 
-        await this.reloadPowerDns()
+          await this.reloadPowerDns()
 
-        const probe = await this.prober({
-          zone,
-          serverIp: this.serverIp,
-          expectedSerial: null,
-          expectedRecords: [],
-          deleted: true,
-        })
+          const probe = await this.prober({
+            zone,
+            serverIp: this.serverIp,
+            expectedSerial: null,
+            expectedRecords: [],
+            deleted: true,
+          })
 
-        for (const obs of [probe.udp, probe.tcp]) {
-          if (obs.aaFlag && obs.rcode === 'NOERROR') {
-            fail(
-              'CONFIG_TEST_FAILED',
-              `deleted zone ${zone} is still answered authoritatively over ${obs.protocol.toUpperCase()}`,
-              { zone, protocol: obs.protocol },
-            )
+          this.assertDeletedProbePassed(zone, probe)
+
+          return {
+            zone,
+            existed: existingContent !== null,
+            removedZoneFilePath: liveZonePath,
+            zonesConfigPath: this.zonesConfigPath,
+            probe,
           }
-        }
-
-        return {
-          zone,
-          existed: existingContent !== null,
-          removedZoneFilePath: liveZonePath,
-          zonesConfigPath: this.zonesConfigPath,
-          probe,
+        } catch (error) {
+          return fail('SERVICE_UNAVAILABLE', `authoritative DNS deletion for ${zone} requires verification`, {
+            zone, stateChanged: true, unknownOutcome: true, verificationRequired: true, rolledBack: false,
+            reason: isXpanelError(error) ? error.code : 'dns_delete_failed',
+          })
         }
       })
     })

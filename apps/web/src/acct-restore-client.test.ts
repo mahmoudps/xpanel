@@ -43,11 +43,29 @@ describe('restore-more reply parser', () => {
 })
 
 describe('restore-more client', () => {
+  it('keeps the selected theme mailbox order and archive control markup', async () => {
+    const boxes = q<HTMLTemplateElement>('template[data-xp-template="restore-more-mailboxes"]').content.querySelector('tr')!
+    boxes.insertBefore(boxes.children[1]!, boxes.firstChild)
+    q<HTMLTemplateElement>('template[data-xp-template="restore-more-archives"]').content.querySelector('button')!.className = 'alternate-archive-control'
+    await open(server())
+    const first = q<HTMLTableSectionElement>('[data-restore-more-mailboxes]').rows[0]!
+    expect(first.cells[0]!.textContent).toBe(BOX)
+    expect(first.cells[1]!.querySelector('input')!.value).toBe(BOX)
+    expect(q(`button[data-file="${FILE}"]`).className).toBe('alternate-archive-control')
+    expect(q<HTMLButtonElement>('[data-restore-more-restore]').disabled).toBe(true)
+  })
+  it('refuses a missing archive action slot before any authenticated read', async () => {
+    q<HTMLTemplateElement>('template[data-xp-template="restore-more-archives"]').content.querySelector('[data-xp-slot="open"]')!.remove()
+    const request = server(); await boot(request)
+    expect(request).not.toHaveBeenCalled()
+    expect(q('[data-restore-more-status]').getAttribute('data-state')).toBe('failed')
+    expect(q<HTMLButtonElement>('[data-restore-more-restore]').disabled).toBe(true)
+  })
   it('shows every component truthfully and allows only existing mailboxes', async () => {
     await open(server())
     const rows = [...document.querySelectorAll('[data-restore-more-components] tr')].map(row => row.textContent)
     expect(rows).toHaveLength(5)
-    expect(rows[3]).toContain('no database dumps')
+    expect(rows[3]).toContain('Not in this backup')
     expect(rows[4]).toContain('Not in this backup')
     expect(q<HTMLInputElement>('[data-restore-more-mailboxes] input[value="gone@alice.example.test"]').disabled).toBe(true)
     expect(q<HTMLButtonElement>('[data-restore-more-preview]').disabled).toBe(true)
@@ -96,6 +114,23 @@ describe('restore-more client', () => {
 })
 
 describe('database restore replies', () => {
+  it.each(['available', 'unavailable', 'not-in-archive'] as const)('paints actual %s database and DNS components without inventing a restore result', async state => {
+    const entries = state === 'not-in-archive' ? [] : [{ name: 'alice_wp', bytes: 10, current: 'exists' }]
+    const zones = state === 'not-in-archive' ? [] : [{ name: 'alice.example.test', bytes: 50, current: 'exists' }]
+    const request = server({ inventory: () => ({ context, archive, components: { ...components(), databases: { state, databases: entries }, dns: { state, zones } } }) })
+    await open(request)
+    const rows = q<HTMLTableSectionElement>('[data-restore-more-components]').rows
+    if (state === 'available') {
+      expect(rows[3]!.textContent).toContain('alice_wp'); expect(rows[4]!.textContent).toContain('alice.example.test')
+      expect(rows[3]!.querySelector('a')?.getAttribute('href')).toBe('/whm/backups/restore?lang=en')
+      expect(rows[4]!.querySelector('a')?.getAttribute('href')).toBe('/whm/backups/restore?lang=en')
+      expect(rows[3]!.textContent).not.toContain('Not in this backup')
+    } else {
+      expect(rows[3]!.querySelector('a')).toBeNull(); expect(rows[4]!.querySelector('a')).toBeNull()
+      expect(rows[3]!.textContent).toContain(state === 'unavailable' ? 'Unavailable' : 'Not in this backup')
+    }
+    expect(vi.mocked(request).mock.calls.some(call => call[1].endsWith('/parts') || call[1].endsWith('/restore'))).toBe(false)
+  })
   it('reads archived dumps and binds an accepted restore to the reviewed archive and databases', () => {
     const dumps = { state: 'available', databases: [{ name: 'alice_wp', bytes: 10, current: 'exists' }], restores: [] }
     expect(readRestoreMoreReply('inventory', { context, archive, components: { ...components(), databases: dumps } }, { username: 'alice', file: FILE }).databases).toEqual({ state: 'available', databases: [{ name: 'alice_wp', bytes: 10, current: 'exists' }] })

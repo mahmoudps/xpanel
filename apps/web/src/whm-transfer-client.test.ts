@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmTransferWorkspace } from './board-port/whm-transfer-workspace.ts'
 import { WHM_TRANSFER_CLIENT_BINDING } from './whm-transfer-client.ts'
+import { ASCII_BYTES_BINDING, formatAsciiBytes } from './display-format.ts'
 
 const id = (value: number) => 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(value).padStart(12, '0')
 const entry = (state = 'created', inventory: unknown = null, review: { accounts: { source: string; target: string; plan: string; domains: string[]; mailboxes: number }[] } | null = null, digest: string | null = null) => ({ session: { id: id(1), actor: 'synthetic-root', createdAt: '2026-10-26T12:00:00.000Z', updatedAt: '2026-10-26T12:00:00.000Z', state,
@@ -21,6 +22,12 @@ beforeEach(() => {
   delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
 })
 afterEach(() => { for (const listener of listeners) window.removeEventListener('beforeunload', listener); document.body.replaceChildren(); vi.restoreAllMocks(); document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr' })
+/** Approved detail sections share the actual routed page owner with the workspace. */
+const appendApprovedSections = (html: string): void => {
+  const page = document.createElement('main'); page.dataset.whmDetailRoute = '/whm/transfers'
+  page.append(...document.body.childNodes); document.body.append(page)
+  page.insertAdjacentHTML('beforeend', html)
+}
 const model = (initial = entry(), execute = false) => {
   let current = clone(initial), mode = 'normal'
   const imports: Record<string, unknown>[] = []
@@ -44,6 +51,20 @@ const model = (initial = entry(), execute = false) => {
 }
 
 describe('persisted transfer review browser contract', () => {
+  it.each([[0, '0 B'], [64, '64 B'], [1500, '1.50 KB'], [2_100_000_000, '2.10 GB']] as const)('ships the canonical standalone byte formatter for observed %s bytes', (bytes, expected) => {
+    document.documentElement.lang = 'ar'
+    const standalone = new Function('return ' + ASCII_BYTES_BINDING)() as (bytes: number) => string
+    expect(standalone(bytes)).toBe(expected); expect(standalone(bytes)).toBe(formatAsciiBytes(bytes))
+    expect(standalone(bytes)).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
+  })
+
+  it.each(['transfer-host', 'transfer-archive', 'transfer-cpanel-port'])('refuses a mistyped %s native input before reading saved sessions', async name => {
+    field(name).type = name === 'transfer-host' ? 'checkbox' : 'text'
+    const m = model(); m.boot(); await tick()
+    expect(m.send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable')
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')].every(control => control.disabled)).toBe(true)
+  })
+
   it('constructs a self-contained binding and exposes actual available actions', () => {
     expect(() => new Function('return ' + WHM_TRANSFER_CLIENT_BINDING)()).not.toThrow()
     expect(WHM_TRANSFER_CLIENT_BINDING).not.toContain('innerHTML')
@@ -77,7 +98,7 @@ describe('persisted transfer review browser contract', () => {
     expect(button('review').querySelector('table,p')).toBeNull()
     expect(button('run').disabled).toBe(true)
     f.setCurrent(entry()); button('refresh').click(); await tick(); await tick()
-    expect(result.querySelector('table')).toBeNull()
+    expect(result.querySelector('tbody')?.textContent).not.toContain('alice_restored')
     expect(result.textContent).toContain('No reviewed records were returned.')
     expect(button('review').textContent).toBe('Build current review')
   })
@@ -116,7 +137,9 @@ describe('persisted transfer review browser contract', () => {
     button('inspect').click(); await tick(); expect(f.writes()).toHaveLength(0)
   })
   it('updates approved observed-data panels and clears facts when another session has none', async () => {
-    document.body.insertAdjacentHTML('beforeend', '<section data-whm-detail-section="transfer-identities"><p class="xp-whm-detail-status">Not read</p><table><thead><tr><th>Account</th></tr></thead><tbody></tbody></table></section><section data-whm-detail-section="transfer-progress"><div data-transfer-progress-state="not-read">Not read</div><table><thead><tr><th>Progress</th></tr></thead><tbody></tbody></table></section>')
+    const page = document.createElement('main'); page.dataset.whmDetailRoute = '/whm/transfers'
+    page.append(...document.body.childNodes); document.body.append(page)
+    page.insertAdjacentHTML('beforeend', '<section data-whm-detail-section="transfer-identities"><p data-transfer-identities-observation>Not read</p><table><thead><tr><th>Selected</th><th>Account</th><th>Domain</th><th>Plan</th><th>Disk</th><th>Databases</th><th>Mailboxes</th><th>Conflict</th><th>Resolution</th></tr></thead><tbody data-transfer-inventory-rows></tbody></table></section><section data-whm-detail-section="transfer-progress"><div data-transfer-progress-state="not-read">Not read</div><table><thead><tr><th>Account</th><th>Home</th><th>Databases</th><th>Mail</th><th>DNS</th><th>State</th></tr></thead><tbody data-transfer-progress-rows></tbody></table></section>')
     const initial = entry('applying', { accounts: [{ username: 'alice', primaryDomain: 'alice.example.test', plan: 'gold', diskBytes: 64, databases: [], mailboxes: 0 }], plans: [{ name: 'gold' }] })
     initial.session.selection.accounts = ['alice']; initial.session.progress = { alice: { phase: 'copying', bytes: 32, totalBytes: 64 } }
     const f = model(initial); f.boot(); await tick()
@@ -158,7 +181,7 @@ describe('persisted transfer review browser contract', () => {
   })
   it('fills actual parsed archive details, lists what is not imported and clears stale rows', async () => {
     const grid = '<table><thead><tr><th>Item</th><th>Source</th><th>Destination</th><th>Action</th></tr></thead><tbody></tbody></table>'
-    document.body.insertAdjacentHTML('beforeend', '<section data-whm-detail-section="transfer-import"><p class="xp-whm-detail-status">Not read</p>' + Array.from({ length: 5 }, () => '<details>' + grid + '</details>').join('') + grid + '</section>')
+    appendApprovedSections('<section data-whm-detail-section="transfer-import"><p data-transfer-import-observation>Not read</p>' + ['domains', 'home', 'databases', 'mail', 'dns'].map(part => '<details data-transfer-import-part="' + part + '">' + grid + '</details>').join('') + grid.replace('<tbody>', '<tbody data-transfer-import-warnings>') + '</section>')
     const f = model()
     f.setImports([{ id: id(4), filename: 'cpmove-bob.tar.gz', state: 'review', revision: '4'.repeat(64), unmapped: [{ tag: 'paused', message: 'Review \u0662 source entries', path: 'homedir/example' }], plan: { account: { username: 'bob', primaryDomain: 'bob.example.test' }, domains: [{ name: 'bob.example.test', docRoot: 'public_html' }], home: { files: 2, bytes: 32 }, databases: [{ sourceName: 'bob_blog', name: 'target_blog' }], dbUsers: [{ sourceName: 'bob_writer', name: 'target_writer' }], mailboxes: [{ address: 'support@bob.example.test', maildir: 'mail/bob.example.test/support', hasMaildir: true }], dnsZones: [{ zone: 'bob.example.test', records: [{ name: 'www', type: 'A', content: '192.0.2.10' }] }], warnings: [] }, conflicts: [{ kind: 'username', value: 'bob' }] }])
     f.boot(); await tick()
@@ -170,8 +193,15 @@ describe('persisted transfer review browser contract', () => {
     expect(section.textContent).not.toContain('target_blog'); expect(section.textContent).not.toContain('192.0.2.10')
     expect(section.textContent).toContain('No parsed archive review was returned')
   })
+  it('does not paint observed source facts into a section outside the routed workspace owner', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<section data-whm-detail-section="transfer-plans"><p data-transfer-plan-observation>Not read</p><table><tbody data-transfer-plan-rows></tbody></table></section>')
+    const f = model(entry('inventoried', { accounts: [], plans: [{ name: 'source-gold' }] })); f.boot(); await tick()
+    const section = document.querySelector('[data-whm-detail-section="transfer-plans"]')!
+    expect(section.textContent).toBe('Not read'); expect(section.querySelector('tbody')!.childElementCount).toBe(0)
+    expect(status().dataset.state).toBe('read'); expect(f.writes()).toHaveLength(0)
+  })
   it('fills source plans from observed inventory and clears them on a session without inventory', async () => {
-    document.body.insertAdjacentHTML('beforeend', '<section data-whm-detail-section="transfer-plans"><p class="xp-whm-detail-status">Not read</p><table><thead><tr><th>Plan</th><th>Destination</th><th>Owner</th><th>Conflict</th></tr></thead><tbody></tbody></table></section>')
+    appendApprovedSections('<section data-whm-detail-section="transfer-plans"><p data-transfer-plan-observation>Not read</p><table><thead><tr><th>Plan</th><th>Destination</th><th>Owner</th><th>Conflict</th></tr></thead><tbody data-transfer-plan-rows></tbody></table></section>')
     const f = model(entry('inventoried', { accounts: [], plans: [{ name: 'source-gold' }] })); f.boot(); await tick()
     const section = document.querySelector('[data-whm-detail-section="transfer-plans"]')!
     expect(section.textContent).toContain('source-gold'); expect(section.textContent).toContain('ownership has not been read')

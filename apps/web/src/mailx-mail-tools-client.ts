@@ -1,4 +1,8 @@
 /// <reference lib="dom" />
+import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+const mailTemplate = canonicalMailTemplate
+const mailSlot = canonicalMailSlot
+const mailRequireTemplates = canonicalMailRequireTemplates
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
@@ -81,6 +85,7 @@ function bindMailxMailTools(askDialog: Ask | undefined): void {
     const status = root.querySelector<HTMLElement>('[data-mailx-lists-status]'), rows = root.querySelector<HTMLElement>('[data-mailx-lists-rows]'), refresh = root.querySelector<HTMLButtonElement>('[data-mailx-lists-refresh]')
     const apply = root.querySelector<HTMLButtonElement>('[data-mailx-lists-apply]'), action = root.querySelector<HTMLElement>('[data-mailx-lists-action-status]')
     if (!status || !rows || !refresh || !apply || !action) return
+    try { mailRequireTemplates(root, [['mail-tools-list-row', 'tr', ['address', 'members', 'state']], ['mail-tools-list-empty', 'tr', ['message']]]); const sample = mailTemplate(root, 'mail-tools-list-row', 'tr'); mailSlot(sample, 'address', 'bdi'); mailSlot(sample, 'members', 'bdi') } catch { root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select,textarea').forEach(control => { control.disabled = true }); note(status, 'unavailable', t('Unavailable')); return }
     const admitted = (): boolean => root.isConnected && root.dataset.mailxCanManage === 'true' && !root.closest(denied) && !!request
     let view: MailxListDeliveryView | null = null, busy = false
     const fact = (key: string, value: string): void => { const cell = root.querySelector<HTMLElement>('[data-mailx-tools-fact="' + key + '"]'); if (cell) cell.textContent = value }
@@ -93,11 +98,12 @@ function bindMailxMailTools(askDialog: Ask | undefined): void {
       fact('delivery', next.host !== 'connected' ? t('Not read') : t('{total, plural, one {{delivering} of # list delivers} other {{delivering} of # lists deliver}}', { total: next.lists.length, delivering: next.lists.filter(item => item.state === 'delivering').length }))
       fact('observed-at', next.observedAt === null ? t('Not read') : formatToolsDateTime(next.observedAt))
       rows.textContent = ''
-      if (!next.lists.length) { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 3; td.textContent = next.host === 'connected' ? t('This account has no mailing lists.') : t('Nothing has been read.'); tr.append(td); rows.append(tr) }
+      if (!next.lists.length) { const row = mailTemplate(root, 'mail-tools-list-empty', 'tr', ['message']); mailSlot(row, 'message').textContent = next.host === 'connected' ? t('This account has no mailing lists.') : t('Nothing has been read.'); rows.append(row) }
       for (const item of next.lists) {
-        const tr = document.createElement('tr'), head = document.createElement('th'), bdi = document.createElement('bdi')
-        head.scope = 'row'; bdi.dir = 'ltr'; bdi.textContent = item.address; head.append(bdi); tr.append(head)
-        for (const text of [String(item.members), labels[item.state]]) { const td = document.createElement('td'); td.textContent = text; tr.append(td) }
+        const tr = mailTemplate(root, 'mail-tools-list-row', 'tr', ['address', 'members', 'state'])
+        mailSlot(tr, 'address', 'bdi').textContent = item.address
+        mailSlot(tr, 'members', 'bdi').textContent = String(item.members)
+        mailSlot(tr, 'state').textContent = labels[item.state]
         tr.dataset.state = item.state; rows.append(tr)
       }
       if (next.host !== 'connected') note(status, 'unavailable', next.host === 'not-connected' ? t('No protected host agent is connected. List delivery cannot be read.') : t('List delivery could not be verified.'))
@@ -135,6 +141,7 @@ function bindMailxMailTools(askDialog: Ask | undefined): void {
     const status = root.querySelector<HTMLElement>('[data-mailx-tools-status]'), rows = root.querySelector<HTMLElement>('[data-mailx-tools-rows]'), refresh = root.querySelector<HTMLButtonElement>('[data-mailx-tools-refresh]')
     const apply = root.querySelector<HTMLButtonElement>('[data-mailx-tools-apply]'), action = root.querySelector<HTMLElement>('[data-mailx-tools-action-status]')
     if (!status || !rows || !refresh || !apply || !action) return
+    try { mailRequireTemplates(root, [['mail-tools-spam-row', 'tr', ['mailbox', 'preference', 'native', 'effects', 'learn-spam', 'learn-ham']], ['mail-tools-spam-empty', 'tr', ['message']]]); const sample = mailTemplate(root, 'mail-tools-spam-row', 'tr'); mailSlot(sample, 'mailbox', 'bdi'); mailSlot(sample, 'learn-spam', 'button'); mailSlot(sample, 'learn-ham', 'button') } catch { root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select,textarea').forEach(control => { control.disabled = true }); note(status, 'unavailable', t('Unavailable')); return }
     const admitted = (): boolean => root.isConnected && root.dataset.mailxCanManage === 'true' && !root.closest(denied) && !!request
     let view: MailxMailToolsView | null = null, busy = false
     const fact = (key: string, value: string): void => { const cell = root.querySelector<HTMLElement>('[data-mailx-tools-fact="' + key + '"]'); if (cell) cell.textContent = value }
@@ -151,20 +158,19 @@ function bindMailxMailTools(askDialog: Ask | undefined): void {
       const native: Record<string, string> = { 'not-saved': t('Nothing to apply'), applied: t('Applied'), pending: t('Not applied yet'), unavailable: t('Unavailable with this filter') }
       const labels: Record<string, string> = { allowlist: t('Allowed senders'), filtering: t('Filtering turned off'), score: t('Own spam score'), blocklist: t('Blocked senders to Junk'), spamBox: t('Spam to Junk') }
       rows.textContent = ''
-      if (!next.mailboxes.length) { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 5; td.textContent = t('This account has no mailboxes.'); tr.append(td); rows.append(tr) }
+      if (!next.mailboxes.length) { const row = mailTemplate(root, 'mail-tools-spam-empty', 'tr', ['message']); mailSlot(row, 'message').textContent = t('This account has no mailboxes.'); rows.append(row) }
       for (const item of next.mailboxes) {
-        const tr = document.createElement('tr')
-        const head = document.createElement('th'); head.scope = 'row'; const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = item.mailbox; head.append(bdi); tr.append(head)
-        const cell = (content: string | Node): void => { const td = document.createElement('td'); td.append(content); tr.append(td) }
-        cell(preference[item.preference]!); cell(native[item.native]!)
+        const tr = mailTemplate(root, 'mail-tools-spam-row', 'tr', ['mailbox', 'preference', 'native', 'effects', 'learn-spam', 'learn-ham'])
+        mailSlot(tr, 'mailbox', 'bdi').textContent = item.mailbox
+        mailSlot(tr, 'preference').textContent = preference[item.preference]!
+        mailSlot(tr, 'native').textContent = native[item.native]!
         const effects = item.effects ? Object.entries(labels).filter(([key]) => item.effects![key as 'allowlist']).map(([, label]) => label) : []
-        cell(effects.length ? effects.join(', ') : t('No native effect'))
-        const buttons = document.createElement('div'); buttons.className = 'xp-mailx__actions'
+        mailSlot(tr, 'effects').textContent = effects.length ? effects.join(', ') : t('No native effect')
         for (const [direction, label] of [['spam', t('Learn spam from Junk')], ['ham', t('Learn not spam from Inbox')]] as const) {
-          const button = document.createElement('button'); button.type = 'button'; button.className = 'xp-btn'; button.textContent = label; button.dataset.direction = direction
-          button.addEventListener('click', () => { void learn(item.mailbox, direction) }); buttons.append(button)
+          const button = mailSlot<HTMLButtonElement>(tr, 'learn-' + direction, 'button'); button.textContent = label
+          button.addEventListener('click', () => { void learn(item.mailbox, direction) })
         }
-        cell(buttons); rows.append(tr)
+        rows.append(tr)
       }
       if (next.host !== 'connected') note(status, 'unavailable', next.host === 'not-connected' ? t('No protected host agent is connected. Saved preferences are shown without a host observation.') : t('The host observation could not be verified. Saved preferences are shown without it.'))
       else if (!next.engine?.engine) note(status, 'partial', t('No supported spam filter is running, so preferences cannot take effect and training is unavailable.'))
@@ -205,4 +211,4 @@ function bindMailxMailTools(askDialog: Ask | undefined): void {
   })
 }
 
-export const MAILX_MAIL_TOOLS_CLIENT_BINDING = `(()=>{const formatToolsDateTime=${DISPLAY_DATETIME_BINDING};const readMailxMailTools=${readMailxMailTools.toString()};const readMailxListDelivery=${readMailxListDelivery.toString()};return ${bindMailxMailTools.toString()};})()`
+export const MAILX_MAIL_TOOLS_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatToolsDateTime=${DISPLAY_DATETIME_BINDING};const readMailxMailTools=${readMailxMailTools.toString()};const readMailxListDelivery=${readMailxListDelivery.toString()};return ${bindMailxMailTools.toString()};})()`

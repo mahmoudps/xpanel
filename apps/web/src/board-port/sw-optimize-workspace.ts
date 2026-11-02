@@ -1,3 +1,4 @@
+import { classicSoftwareOperationTemplates } from './software-operation-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
 
@@ -21,5 +22,5 @@ export function renderSwOptimizeWorkspace(input: { lang: Locale; canRead: boolea
     <p>${t('Per-site compression choices, cache rules and purging cached pages are unavailable: no reviewed per-site edge setting or confined purge operation is connected. Nothing is changed here.')}</p>
     <div class="xp-acct-tool__actions"><button type="button" class="xp-btn xp-btn--primary" disabled>${t('Review & apply')}</button><button type="button" class="xp-btn" disabled>${t('Purge cache')}</button></div>
   </section>
-</div>`
+${classicSoftwareOperationTemplates('optimize')}</div>`
 }

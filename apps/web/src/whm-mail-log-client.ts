@@ -1,3 +1,6 @@
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
+const whmClientNode = canonicalWhmClientNode
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
@@ -114,7 +117,27 @@ function bindWhmMailLog(): void {
     const delivery = root.dataset.whmMailLog === 'delivery'
     const form = root.querySelector<HTMLFormElement>('[data-mail-log-form]'), status = root.querySelector<HTMLElement>('[data-mail-log-status]'), range = root.querySelector<HTMLSelectElement>('[data-mail-log-range]'), submit = root.querySelector<HTMLButtonElement>('[data-mail-log-submit]')
     if (!form || !status || !range || !submit) return
-    const admitted = (): boolean => root.isConnected && root.dataset.mailLogCanRead === 'true' && !root.closest(denied) && !!send
+    let templateContractIntact = true
+    const templateContracts = [
+      ['whm-mail-timeline-button', 'button', { 'content': 'button' }],
+    ] as const
+    const verifyWhmTemplates = (): void => {
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try { assertWhmClientTemplates(root, templateContracts) } catch (error) {
+        templateContractIntact = false
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        status.dataset.state = 'unavailable'; status.textContent = t('Unavailable')
+        throw error
+      }
+    }
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailLogCanRead === 'true' && !root.closest(denied) && !!send)
+    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    const checkedRequest: NonNullable<typeof send> = async (...args: Parameters<NonNullable<typeof send>>) => {
+      verifyWhmTemplates()
+      const reply = await send!(...args)
+      verifyWhmTemplates()
+      return reply
+    }
     const fact = (key: string, value: string): void => { const node = root.querySelector<HTMLElement>('[data-mail-log-fact="' + key + '"]'); if (node) node.textContent = value }
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const controls = form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
@@ -172,12 +195,12 @@ function bindWhmMailLog(): void {
       if (!body) return
       page = Math.min(page, pages - 1); body.textContent = ''
       for (const message of messages.slice(page * 50, page * 50 + 50)) {
-        const row = document.createElement('tr'), list = document.createElement('span'), view = document.createElement('button')
+        const row = document.createElement('tr'), list = document.createElement('span'), view = whmClientNode(root, 'whm-mail-timeline-button', 'button')
         message.recipients.slice(0, 3).forEach((item, index) => { if (index) list.append(', '); list.append(bdi(item.address)) })
         const more = message.recipients.length - 3 + message.recipientsOmitted
         if (more > 0) list.append(' ', t('and {n} more', { n: more }))
         if (!message.recipients.length) list.append(t('None logged'))
-        view.type = 'button'; view.className = 'xp-btn'; view.textContent = t('View timeline'); view.addEventListener('click', () => showDetail(message))
+        view.type = 'button'; view.disabled = !admitted(); view.textContent = t('View timeline'); view.addEventListener('click', () => showDetail(message))
         cell(row, time(message.lastSeen), true); cell(row, message.queueId ?? t('Not queued'), !!message.queueId); cell(row, message.sender === null ? t('Not logged') : message.sender || '<>', true); cell(row, list); cell(row, statusLabel[message.status]!); cell(row, message.dsn ?? '-', true); cell(row, view)
         body.append(row)
       }
@@ -209,7 +232,7 @@ function bindWhmMailLog(): void {
       const token = ++generation
       busy = true; sync(); note('reading', t('Reading Postfix delivery events from the journal…'))
       try {
-        const raw = await send('GET', '/api/server/mail-log/' + (delivery ? 'delivery' : 'monitor') + '?' + params)
+        const raw = await checkedRequest('GET', '/api/server/mail-log/' + (delivery ? 'delivery' : 'monitor') + '?' + params)
         if (token !== generation || !admitted()) return
         const view = delivery ? readMailDeliveryView(raw) : readMailMonitorView(raw)
         fact('observed', time(view.observedAt)); fact('window', time(view.window.since) + ' – ' + time(view.window.until))
@@ -238,4 +261,4 @@ function bindWhmMailLog(): void {
   })
 }
 
-export const WHM_MAIL_LOG_CLIENT_BINDING = `(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const mailLogObject=${mailLogObject.toString()};const mailLogText=${mailLogText.toString()};const mailLogNullable=${mailLogNullable.toString()};const mailLogInstant=${mailLogInstant.toString()};const mailLogCount=${mailLogCount.toString()};const mailLogDsn=${mailLogDsn.toString()};const mailLogBase=${mailLogBase.toString()};const mailLogCounts=${mailLogCounts.toString()};const readMailLogMessage=${readMailLogMessage.toString()};const readMailDeliveryView=${readMailDeliveryView.toString()};const readMailMonitorView=${readMailMonitorView.toString()};return ${bindWhmMailLog.toString()};})()`
+export const WHM_MAIL_LOG_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const mailLogObject=${mailLogObject.toString()};const mailLogText=${mailLogText.toString()};const mailLogNullable=${mailLogNullable.toString()};const mailLogInstant=${mailLogInstant.toString()};const mailLogCount=${mailLogCount.toString()};const mailLogDsn=${mailLogDsn.toString()};const mailLogBase=${mailLogBase.toString()};const mailLogCounts=${mailLogCounts.toString()};const readMailLogMessage=${readMailLogMessage.toString()};const readMailDeliveryView=${readMailDeliveryView.toString()};const readMailMonitorView=${readMailMonitorView.toString()};return ${bindWhmMailLog.toString()};})()`

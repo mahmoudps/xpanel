@@ -1,12 +1,15 @@
 import { randomBytes } from 'node:crypto'
 import { fail, formatCidr, parseCidr } from '@xpanel/core'
 import { createApiToken, listApiTokensForPrincipal, revokeApiToken } from '@xpanel/db'
-import type { ApiTokenRecord } from '@xpanel/db'
+import type { ApiTokenRecord, Db } from '@xpanel/db'
 import { sha256Hex } from './auth.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
 
-export type PanelTokensWorkspaceHelpers = Pick<ExtendedRouteHelpers, 'db' | 'requireCaller' | 'assertRoot' | 'emitAudit'>
+export type PanelTokensWorkspaceHelpers = Pick<ExtendedRouteHelpers, 'db' | 'requireCaller' | 'assertRoot' | 'emitAudit'> & {
+  /** Trusted construction only: revalidate the original session and MFA with this admitted DB runner. */
+  authorizeIssuance(tx: Db, caller: AuthenticatedCaller): Promise<void>
+}
 
 /** Every resource policyForRequest (authorization.ts) assigns, plus the direct events/tls scope checks. A token grants `<resource>:read|write`. */
 export const API_TOKEN_SCOPE_RESOURCES = [
@@ -88,15 +91,22 @@ export async function handlePanelTokensWorkspaceRoute(request: Request, url: URL
   }
   if (method === 'GET') {
     const tokens = await list(), now = Date.now()
-    // recordApiTokenUse exists in the repository but no request path calls it, so last use is not recorded.
+    // Successful API authentication persists coalesced use data; listing itself never updates last use.
     return json(200, { tokens: tokens.map(token => view(token, now)), usageRecorded: false })
   }
   if (id === undefined) {
     const input = parseApiTokenCreate(await readBody(request, true))
     const actor = await fresh()
-    if ((await list()).filter(token => stateOf(token, Date.now()) === 'active').length >= API_TOKEN_MAX_ACTIVE) return fail('CONFLICT', `at most ${API_TOKEN_MAX_ACTIVE} active tokens are allowed; revoke one first`, { stateChanged: false })
-    const secret = 'xp_' + randomBytes(32).toString('base64url'), tokenHash = sha256Hex(secret)
-    const created = await createApiToken(helpers.db, { principalId, name: input.name, tokenHash, scopes: input.scopes, allowedIps: input.allowedIps, expiresAt: new Date(Date.now() + input.expiresInDays * DAY_MS).toISOString() })
+    const { created, secret, tokenHash } = await helpers.db.transaction(async tx => {
+      // The original credential must still authorize at actual writer admission, after any queue.
+      await helpers.authorizeIssuance(tx, actor)
+      if ((await listApiTokensForPrincipal(tx, principalId)).filter(token => stateOf(token, Date.now()) === 'active').length >= API_TOKEN_MAX_ACTIVE) return fail('CONFLICT', `at most ${API_TOKEN_MAX_ACTIVE} active tokens are allowed; revoke one first`, { stateChanged: false })
+      const secret = 'xp_' + randomBytes(32).toString('base64url'), tokenHash = sha256Hex(secret)
+      const created = await createApiToken(tx, { principalId, name: input.name, tokenHash, scopes: input.scopes, allowedIps: input.allowedIps, expiresAt: new Date(Date.now() + input.expiresInDays * DAY_MS).toISOString() })
+      // Sample expiry again after awaited work so an expired credential cannot commit this INSERT.
+      await helpers.authorizeIssuance(tx, actor)
+      return { created, secret, tokenHash }
+    })
     const now = Date.now(), stored = (await list()).find(token => token.id === created.id)
     if (!stored || stored.tokenHash !== tokenHash || stateOf(stored, now) !== 'active') return fail('SERVICE_UNAVAILABLE', 'the new token could not be verified; review the token list', { stateChanged: true, verificationRequired: true })
     try {

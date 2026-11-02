@@ -12,8 +12,8 @@ const account = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', username: 'alice',
 const domain = { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', accountId: account.id, name: account.primaryDomain } as Domain
 const props = (route: string, patch: Partial<ApprovedXpanelWorkspaceProps> = {}): ApprovedXpanelWorkspaceProps => ({
   route, locale: 'en', readOnly: false, account, domains: [domain], activeDomain: domain.name,
-  visibility: { principal: { kind: 'user', id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', username: account.username, accountId: account.id } },
-  catalog: tools.map(tool => ['backup', 'backup-restoration', 'cron-jobs', 'aapanel-url-rewrite'].includes(tool.id) ? { ...tool, status: 'verified' as const } : tool), ...patch,
+  visibility: { principal: { kind: 'user', id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', username: account.username, accountId: account.id }, disabledFeatures: new Set() },
+  catalog: tools.map(tool => ['backup', 'backup-restoration', 'cron-jobs', 'domain-htaccess'].includes(tool.id) ? { ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } } : tool), ...patch,
 })
 const render = (input: ApprovedXpanelWorkspaceProps): HTMLElement => { document.body.innerHTML = renderApprovedXpanelWorkspace(input) ?? ''; return document.body }
 afterEach(() => { document.body.textContent = ''; delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; vi.restoreAllMocks() })

@@ -1,4 +1,7 @@
 /// <reference lib="dom" />
+import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, WHM_CLIENT_TEMPLATE_BINDING, whmClientNode as canonicalWhmClientNode } from './whm-client-templates.ts'
+const assertWhmClientTemplates = canonicalAssertWhmClientTemplates
+const whmClientNode = canonicalWhmClientNode
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
@@ -73,10 +76,35 @@ function bindWhmWhmcs(askDialog: ((options: Record<string, unknown>) => Promise<
     if (!form || !status || !save || !reload || !saveStatus || !enabled || !url || !addresses || !sso || !autoCreate || !identifier || !updated || !planRows || !planAdd || !download || !downloadStatus
       || !tokenView || !tokenCreated || !rotate || !tokenStatus || !reveal || !secretView || !copy || !done || !copyStatus || !logRows || !logRefresh || !logStatus) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.whmcsCanManage === 'true' && form.tagName === 'FORM' && !root.closest(denied) && typeof request === 'function'
+    let templateContractIntact = true
+    const admitted = (): boolean => templateContractIntact && root.isConnected && root.dataset.whmcsCanManage === 'true' && form.tagName === 'FORM' && !root.closest(denied) && typeof request === 'function'
     const ROUTE = '/api/server/panel/whmcs'
     let view: WhmcsView | null = null, revision = '', busy = false
     const note = (target: HTMLElement, state: string, message: string): void => { target.hidden = false; target.dataset.state = state; target.textContent = message; target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
+    const verifyWhmTemplates = (): void => {
+      if (!templateContractIntact) throw new Error('client_template_contract_unavailable')
+      try {
+        if (!admitted()) throw new Error('client_template_contract_unavailable')
+        assertWhmClientTemplates(root, [
+          ['whm-whmcs-remove', 'button', { content: 'button' }],
+          ['whm-whmcs-result-ok', 'span', { content: 'span' }],
+          ['whm-whmcs-result-refused', 'span', { content: 'span' }],
+          ['whm-whmcs-result-failed', 'span', { content: 'span' }],
+        ])
+        const prototype = whmClientNode(root, 'whm-whmcs-remove', 'button')
+        if (prototype.type !== 'button' || !prototype.disabled) throw new Error('client_template_contract_unavailable')
+      } catch (error) {
+        templateContractIntact = false
+        secretView.textContent = ''; copyStatus.hidden = true; reveal.hidden = true
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
+        note(status, 'unavailable', t('Unavailable'))
+        throw error
+      }
+    }
+    const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
+      verifyWhmTemplates()
+      try { return await request!(...args) } finally { verifyWhmTemplates() }
+    }
     const ltr = (value: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = value; return node }
     const message = (row: HTMLElement, colSpan: number, text: string): void => { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = colSpan; td.textContent = text; tr.append(td); row.replaceChildren(tr) }
     const editable = (): boolean => !busy && !!revision && !!view?.settings && admitted()
@@ -88,6 +116,7 @@ function bindWhmWhmcs(askDialog: ((options: Record<string, unknown>) => Promise<
       download.disabled = !admitted(); logRefresh.disabled = !admitted(); root.setAttribute('aria-busy', String(busy))
     }
     const failure = (error: unknown, fallback: string): string => {
+      if (!templateContractIntact) return t('The result could not be verified. Reload the WHMCS integration before changing it again.')
       const item = error as { status?: number; details?: { verificationRequired?: boolean; stateChanged?: boolean; unknownOutcome?: boolean } }
       if (item?.details?.verificationRequired || item?.details?.stateChanged || item?.details?.unknownOutcome) return t('The result could not be verified. Reload the WHMCS integration before changing it again.')
       if (item?.status === 409) return t('The WHMCS integration changed since it was read. Reload before saving again.')
@@ -104,6 +133,7 @@ function bindWhmWhmcs(askDialog: ((options: Record<string, unknown>) => Promise<
       select.value = selected
     }
     const addPlanRow = (mapping: { package: string; planId: string }): void => {
+      verifyWhmTemplates()
       if (planRows.querySelector('[data-whm-whmcs-plan-empty]')) planRows.replaceChildren()
       const row = document.createElement('tr'), index = planRows.children.length + 1
       const name = document.createElement('input'); name.type = 'text'; name.dir = 'auto'; name.maxLength = 64; name.value = mapping.package; name.dataset.whmWhmcsPlanPackage = ''; name.setAttribute('aria-label', t('WHMCS package, row {index}', { index }))
@@ -111,14 +141,15 @@ function bindWhmWhmcs(askDialog: ((options: Record<string, unknown>) => Promise<
       const count = document.createElement('td'); count.dataset.whmWhmcsPlanAccounts = ''
       const showCount = (): void => { const found = view?.plans.find(item => item.id === plan.value); count.textContent = found ? String(found.accounts) : '—' }
       plan.addEventListener('change', showCount); showCount()
-      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'xp-btn'; remove.textContent = t('Remove'); remove.setAttribute('aria-label', t('Remove mapping, row {index}', { index }))
-      remove.addEventListener('click', () => { row.remove(); if (!planRows.children.length) emptyPlans() })
+      const remove = whmClientNode(root, 'whm-whmcs-remove', 'button', t('Remove')); remove.setAttribute('aria-label', t('Remove mapping, row {index}', { index }))
+      remove.addEventListener('click', () => { if (!editable()) return; try { verifyWhmTemplates() } catch { return }; row.remove(); if (!planRows.children.length) emptyPlans() })
       for (const content of [name, plan]) { const td = document.createElement('td'); td.append(content); row.append(td) }
       row.append(count); const action = document.createElement('td'); action.append(remove); row.append(action)
       planRows.append(row)
     }
     const emptyPlans = (): void => { message(planRows, 4, t('No package is mapped. Every call that names a package is refused.')); planRows.querySelector('tr')!.dataset.whmWhmcsPlanEmpty = '' }
     const paint = (next: WhmcsView): void => {
+      verifyWhmTemplates()
       view = next; revision = next.state === 'invalid' ? '' : next.revision
       const settings = next.settings
       if (settings) {
@@ -153,24 +184,24 @@ function bindWhmWhmcs(askDialog: ((options: Record<string, unknown>) => Promise<
       if (busy || !admitted() || !request) return
       busy = true; revision = ''; lock(); if (loading) loading.hidden = false
       note(status, 'reading', t('Reading the WHMCS integration…'))
-      try { paint(readWhmcsView(await request('GET', ROUTE))) }
-      catch (error) { view = null; note(status, 'failed', failure(error, t('The WHMCS integration could not be read. Nothing was changed.'))) }
+      try { paint(readWhmcsView(await checkedRequest('GET', ROUTE))) }
+      catch (error) { view = null; if (templateContractIntact) note(status, 'failed', failure(error, t('The WHMCS integration could not be read. Nothing was changed.'))) }
       finally { busy = false; lock(); if (loading) loading.hidden = true }
     }
     const loadLog = async (): Promise<void> => {
       if (!admitted() || !request) return
       logRefresh.disabled = true; note(logStatus, 'reading', t('Reading the activity log…'))
       try {
-        const entries = readWhmcsActivity(await request('GET', ROUTE + '/activity'))
+        const entries = readWhmcsActivity(await checkedRequest('GET', ROUTE + '/activity'))
         const labels: Record<string, string> = { test: t('Test connection'), create: t('Create'), suspend: t('Suspend'), unsuspend: t('Unsuspend'), terminate: t('Terminate'), change_package: t('Change package') }
-        const results: Record<string, [string, string]> = { ok: [t('Completed'), 'ok'], refused: [t('Refused'), 'warn'], failed: [t('Failed'), 'critical'] }
+        const results: Record<WhmcsActivityView['result'], string> = { ok: t('Completed'), refused: t('Refused'), failed: t('Failed') }
         logRows.replaceChildren()
         for (const entry of entries) {
           const row = document.createElement('tr'), cell = (content: Node | string): void => { const td = document.createElement('td'); td.append(content); row.append(td) }
           cell(ltr(formatDisplayDateTime(entry.at))); cell(entry.action ? labels[entry.action] ?? ltr(entry.action) : t('Unknown'))
           cell(entry.username ? ltr(entry.username) : '—')
-          const [label, tone] = results[entry.result]!, badge = document.createElement('span'), result = document.createElement('span')
-          badge.className = 'xp-badge xp-badge--' + tone; badge.textContent = label; result.append(badge, ' ', ltr(entry.reason)); cell(result)
+          const badge = whmClientNode(root, 'whm-whmcs-result-' + entry.result, 'span', results[entry.result]), result = document.createElement('span')
+          result.append(badge, ' ', ltr(entry.reason)); cell(result)
           cell(entry.ip ? ltr(entry.ip) : t('Unknown'))
           logRows.append(row)
         }
@@ -181,19 +212,21 @@ function bindWhmWhmcs(askDialog: ((options: Record<string, unknown>) => Promise<
     }
     const hideSecret = (): void => { secretView.textContent = ''; copyStatus.hidden = true; reveal.hidden = true }
     if (!admitted()) { lock(); note(status, 'unavailable', t('The WHMCS integration is unavailable here. Nothing was read or changed.')); return }
+    try { verifyWhmTemplates() } catch { return }
     reload.addEventListener('click', () => { saveStatus.hidden = true; void load() })
     logRefresh.addEventListener('click', () => { void loadLog() })
-    planAdd.addEventListener('click', () => { if (editable()) { addPlanRow({ package: '', planId: '' }); lock(); planRows.querySelector<HTMLInputElement>('tr:last-child [data-whm-whmcs-plan-package]')?.focus() } })
+    planAdd.addEventListener('click', () => { if (editable()) { try { verifyWhmTemplates() } catch { return }; addPlanRow({ package: '', planId: '' }); lock(); planRows.querySelector<HTMLInputElement>('tr:last-child [data-whm-whmcs-plan-package]')?.focus() } })
     form.addEventListener('submit', async event => {
       event.preventDefault()
       if (!editable() || !request) return
+      try { verifyWhmTemplates() } catch { return }
       const values = desired(), refused = problem(values)
       if (refused) { note(saveStatus, 'failed', refused); return }
       busy = true; lock(); note(saveStatus, 'reading', t('Saving the WHMCS integration…'))
       try {
-        const ack = readWhmcsView(await request('PUT', ROUTE, { ...values, expectedRevision: revision }))
+        const ack = readWhmcsView(await checkedRequest('PUT', ROUTE, { ...values, expectedRevision: revision }))
         if (ack.state !== 'saved' || !same(ack.settings, values)) throw Object.assign(new Error('unverified'), { details: { verificationRequired: true } })
-        const verified = readWhmcsView(await request('GET', ROUTE))
+        const verified = readWhmcsView(await checkedRequest('GET', ROUTE))
         if (verified.revision !== ack.revision || !same(verified.settings, ack.settings)) throw Object.assign(new Error('unverified'), { details: { verificationRequired: true } })
         paint(verified); note(saveStatus, 'read', t('Settings saved and read back.'))
       } catch (error) {
@@ -204,22 +237,24 @@ function bindWhmWhmcs(askDialog: ((options: Record<string, unknown>) => Promise<
     })
     rotate.addEventListener('click', async () => {
       if (busy || !revision || !admitted() || !request || typeof askDialog !== 'function') return
+      try { verifyWhmTemplates() } catch { return }
       const replacing = !!view?.token
       let confirmed = false
       try {
         confirmed = await askDialog({ title: replacing ? t('Replace the API token?') : t('Create an API token?'), danger: replacing, confirm: replacing ? t('Replace token') : t('Create token'), cancel: t('Cancel'),
           body: replacing ? t('The current token stops working at once. WHMCS calls fail until you enter the new token as the server Access Hash.') : t('The token is shown once. Enter it as the server Access Hash in WHMCS.') }) === true
       } catch { confirmed = false }
-      if (!confirmed) return
+      try { verifyWhmTemplates() } catch { return }
+      if (!confirmed || !admitted()) { lock(); return }
       busy = true; lock(); hideSecret(); note(tokenStatus, 'reading', t('Creating the token…'))
       try {
-        const issued = await request('POST', ROUTE + '/token', { expectedRevision: revision }) as Record<string, unknown> | null
+        const issued = await checkedRequest('POST', ROUTE + '/token', { expectedRevision: revision }) as Record<string, unknown> | null
         const secret = issued && typeof issued.secret === 'string' && /^xpw_[A-Za-z0-9_-]{43}$/.test(issued.secret) ? issued.secret : ''
         const { secret: _secret, ...rest } = issued ?? {}
         const ack = readWhmcsView(rest)
         if (!secret || ack.token?.hint !== secret.slice(-4)) throw Object.assign(new Error('unverified'), { details: { verificationRequired: true } })
         secretView.textContent = secret; copyStatus.hidden = true; reveal.hidden = false
-        const verified = readWhmcsView(await request('GET', ROUTE))
+        const verified = readWhmcsView(await checkedRequest('GET', ROUTE))
         if (verified.revision !== ack.revision || verified.token?.hint !== ack.token?.hint) throw Object.assign(new Error('unverified'), { details: { verificationRequired: true } })
         paint(verified); note(tokenStatus, 'read', t('Token created. The previous token, if any, no longer works.'))
       } catch (error) {
@@ -229,20 +264,26 @@ function bindWhmWhmcs(askDialog: ((options: Record<string, unknown>) => Promise<
     })
     done.addEventListener('click', hideSecret)
     copy.addEventListener('click', () => {
+      try { verifyWhmTemplates() } catch { return }
       const secret = secretView.textContent ?? '', clipboard = navigator.clipboard
       if (!secret) return
       if (!clipboard?.writeText) { note(copyStatus, 'failed', t('Copying is not available in this browser. Select the token and copy it.')); return }
-      clipboard.writeText(secret).then(() => note(copyStatus, 'read', t('Copied.')), () => note(copyStatus, 'failed', t('The token could not be copied. Select it and copy it.')))
+      clipboard.writeText(secret).then(() => { try { verifyWhmTemplates() } catch { return }; note(copyStatus, 'read', t('Copied.')) }, () => { try { verifyWhmTemplates() } catch { return }; note(copyStatus, 'failed', t('The token could not be copied. Select it and copy it.')) })
     })
     download.addEventListener('click', async () => {
       if (!admitted()) return
+      try { verifyWhmTemplates() } catch { return }
       if (typeof URL.createObjectURL !== 'function') { note(downloadStatus, 'failed', t('File downloads are unavailable in this browser.')); return }
       download.disabled = true; note(downloadStatus, 'reading', t('Preparing the module…'))
       try {
-        const response = await fetch(ROUTE + '/module', { credentials: 'same-origin', cache: 'no-store' })
+        let response: Response
+        try { response = await fetch(ROUTE + '/module', { credentials: 'same-origin', cache: 'no-store' }) } finally { verifyWhmTemplates() }
         if (!response.ok || !/attachment/.test(response.headers.get('content-disposition') ?? '')) throw Object.assign(new Error('download'), { status: response.status })
-        const blobUrl = URL.createObjectURL(await response.blob()), link = document.createElement('a')
+        let blob: Blob
+        try { blob = await response.blob() } finally { verifyWhmTemplates() }
+        const blobUrl = URL.createObjectURL(blob), link = document.createElement('a')
         try { link.href = blobUrl; link.download = 'xpanel.php'; link.click() } finally { URL.revokeObjectURL(blobUrl) }
+        verifyWhmTemplates()
         note(downloadStatus, 'read', t('Module downloaded as xpanel.php.'))
       } catch (error) { note(downloadStatus, 'failed', failure(error, t('The module could not be downloaded.'))) }
       finally { download.disabled = !admitted() }
@@ -252,4 +293,4 @@ function bindWhmWhmcs(askDialog: ((options: Record<string, unknown>) => Promise<
   })
 }
 
-export const WHM_WHMCS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmcsView=${readWhmcsView.toString()};const readWhmcsActivity=${readWhmcsActivity.toString()};return ${bindWhmWhmcs.toString()};})()`
+export const WHM_WHMCS_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmcsView=${readWhmcsView.toString()};const readWhmcsActivity=${readWhmcsActivity.toString()};return ${bindWhmWhmcs.toString()};})()`

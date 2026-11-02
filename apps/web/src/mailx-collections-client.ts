@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
@@ -49,6 +53,8 @@ function bindMailxCollections(askDialog: Ask | undefined): void {
     const save = get<HTMLButtonElement>('collections-save'), refresh = get<HTMLButtonElement>('collections-refresh'), status = get<HTMLElement>('collections-status')
     const bodies = { 'address-books': get<HTMLElement>('address-books'), 'task-lists': get<HTMLElement>('task-lists') }
     if (![calMailbox, calTarget, calName, calColor, calZone, calSave, calDelete, calStatus, form, boxSelect, defaultSelect, descriptions, save, refresh, status, bodies['address-books'], bodies['task-lists']].every(Boolean)) return
+    try { cloneClientTemplate(clientTemplate(root, 'mailx-collection-row'), 'tr', ['name', 'description', 'default', 'remove']); cloneClientTemplate(clientTemplate(root, 'mailx-collection-empty'), 'tr', ['message']); cloneClientTemplate(clientTemplate(root, 'mailx-calendar-description'), 'div', ['label', 'description']); cloneClientTemplate(clientTemplate(root, 'mailx-calendar-empty'), 'p', ['message']); const probe = cloneClientTemplate(clientTemplate(root, 'mailx-collection-row'), 'tr', ['name', 'description', 'default', 'remove']); for (const slot of ['name', 'description', 'default']) clientTemplateSlot(probe, slot, 'input'); clientTemplateSlot(probe, 'remove', 'button'); const descriptionProbe = cloneClientTemplate(clientTemplate(root, 'mailx-calendar-description'), 'div', ['label', 'description']); clientTemplateSlot(descriptionProbe, 'label', 'label'); clientTemplateSlot(descriptionProbe, 'description', 'textarea') }
+    catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement | HTMLTextAreaElement>('input,select,button,textarea').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Collection settings are unavailable here. Nothing was read.'); return }
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.mailxCanManage === 'true' && !root.closest(denied) && !!request
     let collections: MailxCollectionsView | null = null, calendars: MailxCalendarsView | null = null, busy = false
@@ -81,26 +87,25 @@ function bindMailxCollections(askDialog: Ask | undefined): void {
       controls()
     }
     const row = (kind: 'address-books' | 'task-lists', item: MailxCollectionItemView): HTMLTableRowElement => {
-      const tr = document.createElement('tr'); tr.dataset.itemId = item.id ?? ''
-      const cell = (content: HTMLElement): void => { const td = document.createElement('td'); td.append(content); tr.append(td) }
-      const name = document.createElement('input'); name.type = 'text'; name.className = 'xp-input'; name.maxLength = 200; name.value = item.name; name.dataset.itemName = ''; name.setAttribute('aria-label', t('Name'))
-      const description = document.createElement('input'); description.type = 'text'; description.className = 'xp-input'; description.maxLength = 500; description.value = item.description; description.dataset.itemDescription = ''; description.setAttribute('aria-label', t('Description'))
-      const fallback = document.createElement('input'); fallback.type = 'radio'; fallback.name = 'mailx-default-' + kind; fallback.checked = item.isDefault; fallback.dataset.itemDefault = ''; fallback.setAttribute('aria-label', t('Default'))
-      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'xp-btn'; remove.textContent = t('Remove')
+      const tr = cloneClientTemplate(clientTemplate(root, 'mailx-collection-row'), 'tr', ['name', 'description', 'default', 'remove']) as HTMLTableRowElement; tr.dataset.itemId = item.id ?? ''
+      const name = clientTemplateSlot(tr, 'name', 'input') as HTMLInputElement; name.value = item.name; name.setAttribute('aria-label', t('Name'))
+      const description = clientTemplateSlot(tr, 'description', 'input') as HTMLInputElement; description.value = item.description; description.setAttribute('aria-label', t('Description'))
+      const fallback = clientTemplateSlot(tr, 'default', 'input') as HTMLInputElement; fallback.name = 'mailx-default-' + kind; fallback.checked = item.isDefault; fallback.setAttribute('aria-label', t('Default'))
+      const remove = clientTemplateSlot(tr, 'remove', 'button') as HTMLButtonElement; remove.textContent = t('Remove')
       remove.addEventListener('click', () => { tr.remove(); if (!bodies[kind].querySelector('tr[data-item-id]')) empty(kind) })
-      cell(name); cell(description); cell(fallback); cell(remove)
       return tr
     }
-    const empty = (kind: 'address-books' | 'task-lists'): void => { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 4; td.textContent = kind === 'address-books' ? t('No address books are saved.') : t('No task lists are saved.'); tr.append(td); bodies[kind].replaceChildren(tr) }
+    const empty = (kind: 'address-books' | 'task-lists'): void => { const tr = cloneClientTemplate(clientTemplate(root, 'mailx-collection-empty'), 'tr', ['message']); clientTemplateSlot(tr, 'message').textContent = kind === 'address-books' ? t('No address books are saved.') : t('No task lists are saved.'); bodies[kind].replaceChildren(tr) }
     const paintSettings = (): void => {
       const box = collections?.mailboxes.find(item => item.mailbox === boxSelect.value)
       options(defaultSelect, [{ value: '', label: t('No default calendar') }, ...(box?.calendars ?? []).map(item => ({ value: item.id, label: item.name }))], box?.defaultCalendar ?? '')
       descriptions.replaceChildren(...(box?.calendars ?? []).map(item => {
-        const wrap = document.createElement('div'); wrap.className = 'xp-mailx__field'
-        const label = document.createElement('label'), area = document.createElement('textarea'); area.className = 'xp-input'; area.rows = 2; area.maxLength = 500; area.id = 'mailx-description-' + item.id; area.dataset.calendarId = item.id; area.value = item.description
-        label.htmlFor = area.id; label.textContent = t('Description of {calendar}', { calendar: item.name }); wrap.append(label, area); return wrap
+        const wrap = cloneClientTemplate(clientTemplate(root, 'mailx-calendar-description'), 'div', ['label', 'description'])
+        const label = clientTemplateSlot(wrap, 'label', 'label') as HTMLLabelElement, area = clientTemplateSlot(wrap, 'description', 'textarea') as HTMLTextAreaElement
+        area.id = 'mailx-description-' + item.id; area.dataset.calendarId = item.id; area.value = item.description
+        label.htmlFor = area.id; label.textContent = t('Description of {calendar}', { calendar: item.name }); return wrap
       }))
-      if (!box?.calendars.length) { const p = document.createElement('p'); p.className = 'xp-help'; p.textContent = t('This mailbox has no calendars.'); descriptions.append(p) }
+      if (!box?.calendars.length) { const p = cloneClientTemplate(clientTemplate(root, 'mailx-calendar-empty'), 'p', ['message']); clientTemplateSlot(p, 'message').textContent = t('This mailbox has no calendars.'); descriptions.append(p) }
       for (const kind of ['address-books', 'task-lists'] as const) {
         const items = (kind === 'address-books' ? box?.addressBooks : box?.taskLists) ?? []
         if (items.length) bodies[kind].replaceChildren(...items.map(item => row(kind, item))); else empty(kind)
@@ -178,4 +183,4 @@ function bindMailxCollections(askDialog: Ask | undefined): void {
   })
 }
 
-export const MAILX_COLLECTIONS_CLIENT_BINDING = `(()=>{const readMailxCollections=${readMailxCollections.toString()};return ${bindMailxCollections.toString()};})()`
+export const MAILX_COLLECTIONS_CLIENT_BINDING = `(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const readMailxCollections=${readMailxCollections.toString()};return ${bindMailxCollections.toString()};})()`

@@ -4,8 +4,27 @@ import './i18n.ts'
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import { readAccountRuntimeView } from '../../../packages/os/src/account-runtime-command.ts'
 import type { AccountRuntimeClientView } from '../../../packages/os/src/account-runtime-command.ts'
+import { clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 export { readAccountRuntimeView }
 const formatDisplayDateTime = sharedFormatDisplayDateTime
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
+
+function runtimeClientTemplates(root: HTMLElement, kind: string) {
+  const locate = (name: string, tag: string, slots: readonly string[]) => {
+    const matches = [...root.querySelectorAll<HTMLTemplateElement>(`template[data-xp-template="${name}"]`)]
+      .filter(template => template.closest('[data-runtime-workspace]') === root)
+    if (matches.length !== 1 || !matches[0]?.content) throw new Error('runtime_client_template_unavailable')
+    const template = matches[0]
+    cloneClientTemplate(template, tag, slots)
+    return () => cloneClientTemplate(template, tag, slots)
+  }
+  const slots = kind === 'apps' ? ['name', 'runtime', 'address', 'state', 'health', 'actions']
+    : kind === 'containers' ? ['name', 'image', 'state', 'since', 'ports', 'actions'] : ['name', 'state', 'version', 'socket', 'memory', 'actions']
+  return { row: locate(`runtime-${kind}-row`, 'tr', slots), empty: locate('runtime-empty-row', 'tr', ['message']),
+    actions: locate('runtime-actions', 'div', []), action: locate('runtime-action', 'button', ['label']), chip: locate('runtime-chip', 'span', ['label']),
+    env: locate('runtime-env-row', 'tr', ['name', 'value', 'remove']), envEmpty: locate('runtime-env-empty', 'tr', ['message']) }
+}
 
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
 /** Apps, containers and caches of the signed-in account; every change is revision-checked and read back from the server. */
@@ -20,33 +39,38 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
     const q = <T extends HTMLElement>(selector: string): T | null => root.querySelector<T>(selector)
     const status = q<HTMLElement>('[data-runtime-status]'), refresh = q<HTMLButtonElement>('[data-runtime-refresh]'), log = q<HTMLElement>('[data-runtime-log]')
     if (!status || !refresh || !log || !['apps', 'containers', 'cache'].includes(kind ?? '')) return
+    let templates: ReturnType<typeof runtimeClientTemplates>
+    try { templates = runtimeClientTemplates(root, kind!) } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'unavailable'; status.textContent = t('These services are unavailable here. Nothing was read or changed.'); return
+    }
     const field = <T extends HTMLInputElement | HTMLSelectElement>(key: string): T => root.querySelector<T>('[data-runtime-input="' + key + '"]')!
     const action = (key: string): HTMLButtonElement | null => q<HTMLButtonElement>('[data-runtime-action="' + key + '"]')
     const admitted = (): boolean => root.isConnected && root.dataset.runtimeCanManage === 'true' && !root.closest(blocked) && typeof transport === 'function'
     let view: AccountRuntimeClientView | null = null, busy = false, editing: string | null = null
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status') }
     const make = (tag: string, text = '', attrs: Record<string, string> = {}): HTMLElement => { const node = document.createElement(tag); node.textContent = text; for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v); return node }
-    const ltr = (text: string): HTMLElement => make('bdi', text, { dir: 'ltr' })
     const stateLabel = (state: string): string => state === 'running' ? t('Running') : state === 'starting' ? t('Starting') : state === 'stopped' ? t('Stopped') : state === 'failed' ? t('Failed') : t('Unknown')
-    const chip = (text: string, tone: string): HTMLElement => make('span', text, { 'data-state-chip': tone })
+    const chip = (text: string, tone: string): HTMLElement => { const node = templates.chip(); clientTemplateSlot(node, 'label').textContent = text; node.dataset.stateChip = tone; return node }
     const stateChip = (state: string): HTMLElement => chip(stateLabel(state), state === 'running' ? 'ok' : state === 'failed' ? 'problem' : 'unavailable')
     const megabytes = (bytes: number | null): string => bytes === null ? t('Not read') : t('{value} MB', { value: (bytes / 1048576).toFixed(1) })
-    const row = (cells: (string | HTMLElement)[]): HTMLTableRowElement => { const tr = document.createElement('tr'); for (const cell of cells) { const td = document.createElement('td'); td.append(cell); tr.append(td) } return tr }
-    const empty = (body: HTMLElement, colspan: number, text: string): void => { body.replaceChildren(row([text])); body.querySelector('td')!.colSpan = colspan }
-    const rowButton = (label: string, op: string, name: string, enabled: boolean): HTMLButtonElement => { const b = make('button', label, { type: 'button', class: 'xp-btn xp-btn--ghost' }) as HTMLButtonElement; b.dataset.runtimeRow = op; b.dataset.runtimeName = name; b.dataset.runtimeBlocked = String(!enabled); b.disabled = true; return b }
-    const actions = (...buttons: HTMLButtonElement[]): HTMLElement => { const wrap = make('div', '', { class: 'xp-acct-tool__actions' }); wrap.append(...buttons); return wrap }
+    const row = (cells: Record<string, string | HTMLElement>): HTMLElement => { const tr = templates.row(); for (const [name, value] of Object.entries(cells)) clientTemplateSlot(tr, name).replaceChildren(value); return tr }
+    const empty = (body: HTMLElement, text: string, environment = false): void => { const tr = environment ? templates.envEmpty() : templates.empty(); clientTemplateSlot(tr, 'message').textContent = text; body.replaceChildren(tr) }
+    const rowButton = (label: string, op: string, name: string, enabled: boolean): HTMLButtonElement => { const b = templates.action() as HTMLButtonElement; clientTemplateSlot(b, 'label').textContent = label; b.dataset.runtimeRow = op; b.dataset.runtimeName = name; b.dataset.runtimeBlocked = String(!enabled); b.disabled = true; return b }
+    const actions = (...buttons: HTMLButtonElement[]): HTMLElement => { const wrap = templates.actions(); wrap.append(...buttons); return wrap }
     const envBody = q<HTMLElement>('[data-runtime-env]')
     const envRow = (name = '', value = ''): void => {
       if (!envBody) return
       if (!envBody.querySelector('input')) envBody.replaceChildren()
-      const n = make('input', '', { class: 'xp-input', dir: 'ltr', maxlength: '64', 'aria-label': t('Name') }) as HTMLInputElement, v = make('input', '', { class: 'xp-input', dir: 'ltr', maxlength: '1024', 'aria-label': t('Value') }) as HTMLInputElement
+      const tr = templates.env(), n = clientTemplateSlot(tr, 'name', 'input') as HTMLInputElement, v = clientTemplateSlot(tr, 'value', 'input') as HTMLInputElement
+      n.setAttribute('aria-label', t('Name')); v.setAttribute('aria-label', t('Value'))
       n.value = name; v.value = value
-      const remove = make('button', t('Remove'), { type: 'button', class: 'xp-btn xp-btn--ghost' }) as HTMLButtonElement
-      const tr = row([n, v, remove]); remove.addEventListener('click', () => { tr.remove(); if (!envBody.querySelector('input')) empty(envBody, 3, t('No variables.')) })
+      const remove = clientTemplateSlot(tr, 'remove', 'button') as HTMLButtonElement; remove.textContent = t('Remove')
+      remove.addEventListener('click', () => { if (busy || !admitted()) return; tr.remove(); if (!envBody.querySelector('input')) empty(envBody, t('No variables.'), true) })
       envBody.append(tr)
     }
-    const envValue = (): Record<string, string> => { const out: Record<string, string> = {}; for (const tr of envBody?.querySelectorAll('tr') ?? []) { const [n, v] = [...tr.querySelectorAll('input')]; if (n && v && n.value.trim()) out[n.value.trim()] = v.value } return out }
-    const fillEnv = (entries: { name: string; value: string }[]): void => { if (!envBody) return; empty(envBody, 3, t('No variables.')); for (const e of entries) envRow(e.name, e.value) }
+    const envValue = (): Record<string, string> => { const out: Record<string, string> = {}; for (const tr of envBody?.querySelectorAll<HTMLElement>('tr') ?? []) { if (!tr.querySelector('input')) continue; const n = clientTemplateSlot(tr, 'name', 'input') as HTMLInputElement, v = clientTemplateSlot(tr, 'value', 'input') as HTMLInputElement; if (n.value.trim()) out[n.value.trim()] = v.value } return out }
+    const fillEnv = (entries: { name: string; value: string }[]): void => { if (!envBody) return; empty(envBody, t('No variables.'), true); for (const e of entries) envRow(e.name, e.value) }
     const failure = (error: unknown): void => {
       const detail = error && typeof error === 'object' ? (error as Record<string, any>).details ?? (error as Record<string, any>).detail : null
       const code = error && typeof error === 'object' ? Number((error as Record<string, any>).status) : NaN
@@ -57,11 +81,11 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
     const paintApps = (v: AccountRuntimeClientView): void => {
       for (const r of v.host.runtimes) { const node = q<HTMLElement>('[data-runtime-version="' + r.kind + '"]'); if (node) node.textContent = r.available ? t('Version {version}', { version: r.version ?? '' }) : r.reason === 'bundler-missing' ? t('Bundler is not installed') : r.reason === 'proxy-unavailable' ? t('Unavailable: systemd socket proxy missing') : r.reason === 'venv-missing' ? t('Unavailable: python3-venv is not installed') : t('Not installed') }
       const body = q<HTMLElement>('[data-runtime-apps]')!, domains = new Map(v.domains.map(d => [d.id, d.name]))
-      if (!v.apps.length) empty(body, 6, v.plan.apps ? t('No application yet.') : t('Your plan does not include applications.'))
-      else body.replaceChildren(...v.apps.map(a => row([ltr(a.name), a.runtime === 'node' ? 'Node.js' : a.runtime === 'python' ? 'Python' : 'Ruby', ltr((domains.get(a.domainId) ?? t('Domain removed')) + (a.path === '/' ? '' : a.path)),
-        a.preflight?.length && !a.enabled ? chip(t('Needs setup'), 'problem') : stateChip(a.state),
-        a.health === null ? t('Not checked') : chip(String(a.health), a.health < 500 ? 'ok' : 'problem'),
-        actions(rowButton(t('Edit'), 'edit', a.name, true), rowButton(a.enabled ? t('Stop') : t('Start'), a.enabled ? 'app.stop' : 'app.start', a.name, a.enabled || !a.preflight?.length), rowButton(t('Restart'), 'app.restart', a.name, a.enabled), rowButton(t('Remove'), 'app.remove', a.name, true))])))
+      if (!v.apps.length) empty(body, v.plan.apps ? t('No application yet.') : t('Your plan does not include applications.'))
+      else body.replaceChildren(...v.apps.map(a => row({ name: a.name, runtime: a.runtime === 'node' ? 'Node.js' : a.runtime === 'python' ? 'Python' : 'Ruby', address: (domains.get(a.domainId) ?? t('Domain removed')) + (a.path === '/' ? '' : a.path),
+        state: a.preflight?.length && !a.enabled ? chip(t('Needs setup'), 'problem') : stateChip(a.state),
+        health: a.health === null ? t('Not checked') : chip(String(a.health), a.health < 500 ? 'ok' : 'problem'),
+        actions: actions(rowButton(t('Edit'), 'edit', a.name, true), rowButton(a.enabled ? t('Stop') : t('Start'), a.enabled ? 'app.stop' : 'app.start', a.name, a.enabled || !a.preflight?.length), rowButton(t('Restart'), 'app.restart', a.name, a.enabled), rowButton(t('Remove'), 'app.remove', a.name, true)) })))
       const domain = field<HTMLSelectElement>('domain'), keep = domain.value
       domain.replaceChildren(...v.domains.map(d => { const o = make('option', d.name) as HTMLOptionElement; o.value = d.id; return o }))
       if (v.domains.some(d => d.id === keep)) domain.value = keep
@@ -86,9 +110,9 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
       stat('memory', megabytes(v.containers.reduce<number | null>((sum, c) => c.memoryBytes === null ? sum : (sum ?? 0) + c.memoryBytes, null)))
       stat('limits', t('Memory {memory} · CPU {cpu} · Processes {processes}', { memory: v.plan.memoryMb === null ? t('Unlimited') : v.plan.memoryMb + ' MB', cpu: v.plan.cpuPercent === null ? t('Unlimited') : v.plan.cpuPercent + '%', processes: v.plan.maxProcesses ?? t('Unlimited') }))
       const body = q<HTMLElement>('[data-runtime-containers]')!
-      if (!v.containers.length) empty(body, 6, v.plan.containers ? t('No container yet.') : t('Your plan does not include containers.'))
-      else body.replaceChildren(...v.containers.map(c => row([ltr(c.name), ltr(c.image), stateChip(c.state), c.since ? formatDisplayDateTime(c.since) : '—', t('None published'),
-        actions(rowButton(c.enabled ? t('Stop') : t('Start'), c.enabled ? 'container.stop' : 'container.start', c.name, true), rowButton(t('Restart'), 'container.restart', c.name, c.enabled), rowButton(t('Log'), 'log:ctr', c.name, true), rowButton(t('Remove'), 'container.remove', c.name, true))])))
+      if (!v.containers.length) empty(body, v.plan.containers ? t('No container yet.') : t('Your plan does not include containers.'))
+      else body.replaceChildren(...v.containers.map(c => row({ name: c.name, image: c.image, state: stateChip(c.state), since: c.since ? formatDisplayDateTime(c.since) : '—', ports: t('None published'),
+        actions: actions(rowButton(c.enabled ? t('Stop') : t('Start'), c.enabled ? 'container.stop' : 'container.start', c.name, true), rowButton(t('Restart'), 'container.restart', c.name, c.enabled), rowButton(t('Log'), 'log:ctr', c.name, true), rowButton(t('Remove'), 'container.remove', c.name, true)) })))
     }
     const paintCache = (v: AccountRuntimeClientView): void => {
       const stat = (key: string, text: string): void => { const node = q<HTMLElement>('[data-runtime-stat="' + key + '"]'); if (node) node.textContent = text }
@@ -98,9 +122,9 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
       const body = q<HTMLElement>('[data-runtime-cache]')!
       body.replaceChildren(...v.cache.map(c => {
         const host = v.host.cache.find(h => h.service === c.service)!
-        return row([c.service === 'redis' ? 'Redis' : 'Memcached', host.available || c.enabled ? stateChip(c.enabled ? c.state : 'stopped') : chip(t('Not installed'), 'unavailable'), host.version ?? t('Not read'), ltr(c.socket),
-          c.memoryMb === null ? t('Not set') : t('{value} MB', { value: String(c.memoryMb) }),
-          actions(rowButton(c.enabled ? t('Disable') : t('Enable'), c.enabled ? 'cache.disable' : 'cache.enable', c.service, v.plan.cache && (c.enabled || host.available)), rowButton(t('Log'), 'log:cache', c.service, true))])
+        return row({ name: c.service === 'redis' ? 'Redis' : 'Memcached', state: host.available || c.enabled ? stateChip(c.enabled ? c.state : 'stopped') : chip(t('Not installed'), 'unavailable'), version: host.version ?? t('Not read'), socket: c.socket,
+          memory: c.memoryMb === null ? t('Not set') : t('{value} MB', { value: String(c.memoryMb) }),
+          actions: actions(rowButton(c.enabled ? t('Disable') : t('Enable'), c.enabled ? 'cache.disable' : 'cache.enable', c.service, v.plan.cache && (c.enabled || host.available)), rowButton(t('Log'), 'log:cache', c.service, true)) })
       }))
       const chosen = v.cache.find(c => c.service === field<HTMLSelectElement>('service').value) ?? v.cache[0]!
       field<HTMLInputElement>('socket').value = chosen.socket
@@ -119,6 +143,7 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
       can('cache-save', !!view?.plan.cache); can('cache-flush', !!cache?.enabled)
       if (kind === 'apps' && editing !== null) field<HTMLInputElement>('name').disabled = true
       for (const b of root.querySelectorAll<HTMLButtonElement>('[data-runtime-row]')) b.disabled = !on || b.dataset.runtimeBlocked === 'true'
+      for (const control of envBody?.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input,button') ?? []) control.disabled = !on
     }
     const load = async (message?: string): Promise<void> => {
       if (busy || !admitted()) return
@@ -178,10 +203,36 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
       const removing = op.endsWith('.remove'), stopping = op.endsWith('.stop')
       void send({ op, name }, removing ? t('Removed.') : stopping ? t('Stopped.') : t('Done. The state below is read from the server.'), removing ? { title: t('Remove {name}?', { name }), body: t('Its service stops and its saved settings are deleted. Files in your home directory stay.') } : stopping ? { title: t('Stop {name}?', { name }), body: t('It stays stopped until you start it again.') } : undefined)
     })
-    for (const tab of root.querySelectorAll<HTMLButtonElement>('[data-runtime-tab]')) tab.addEventListener('click', () => {
-      for (const other of root.querySelectorAll<HTMLButtonElement>('[data-runtime-tab]')) other.setAttribute('aria-selected', String(other === tab))
-      for (const panel of root.querySelectorAll<HTMLElement>('[data-runtime-panel]')) panel.hidden = panel.dataset.runtimePanel !== tab.dataset.runtimeTab
-    })
+    const tabs = [...root.querySelectorAll<HTMLButtonElement>('[data-runtime-tab]')]
+      .filter(tab => tab.closest('[data-runtime-workspace]') === root)
+    const panels = [...root.querySelectorAll<HTMLElement>('[data-runtime-panel]')]
+      .filter(panel => panel.closest('[data-runtime-workspace]') === root)
+    const usableTabs = (): HTMLButtonElement[] => tabs.filter(tab => !tab.disabled && !tab.hidden
+      && tab.getAttribute('aria-disabled') !== 'true' && !tab.closest('fieldset:disabled')
+      && panels.filter(panel => panel.dataset.runtimePanel === tab.dataset.runtimeTab).length === 1)
+    const selectTab = (selected: HTMLButtonElement, focus = false): void => {
+      if (!usableTabs().includes(selected)) return
+      for (const tab of tabs) { tab.setAttribute('aria-selected', String(tab === selected)); tab.tabIndex = tab === selected ? 0 : -1 }
+      for (const panel of panels) panel.hidden = panel.dataset.runtimePanel !== selected.dataset.runtimeTab
+      if (focus) selected.focus()
+    }
+    const initialTab = usableTabs().find(tab => tab.getAttribute('aria-selected') === 'true') ?? usableTabs()[0]
+    if (initialTab) selectTab(initialTab)
+    for (const tab of tabs) {
+      tab.addEventListener('click', () => selectTab(tab))
+      tab.addEventListener('keydown', event => {
+        if (event.altKey || event.ctrlKey || event.metaKey) return
+        const available = usableTabs(), index = available.indexOf(tab)
+        if (index < 0) return
+        const direction = getComputedStyle(tab).direction
+        const rtl = direction === 'rtl' || direction !== 'ltr' && tab.closest('[dir]')?.getAttribute('dir') === 'rtl'
+        const step = event.key === 'ArrowRight' ? rtl ? -1 : 1 : event.key === 'ArrowLeft' ? rtl ? 1 : -1 : 0
+        const next = event.key === 'Home' ? available[0] : event.key === 'End' ? available.at(-1)
+          : step ? available[(index + step + available.length) % available.length] : undefined
+        if (!next) return
+        event.preventDefault(); selectTab(next, true)
+      })
+    }
     action('env-add')?.addEventListener('click', () => envRow())
     action('app-new')?.addEventListener('click', () => {
       editing = null
@@ -218,4 +269,4 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
     void load()
   })
 }
-export const ACCOUNT_RUNTIME_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readAccountRuntimeView.toString()};const bind=${bindAccountRuntime.toString()};return (ask)=>bind(ask,parse);})()`
+export const ACCOUNT_RUNTIME_CLIENT_BINDING = `(()=>{${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${runtimeClientTemplates.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readAccountRuntimeView.toString()};const bind=${bindAccountRuntime.toString()};return (ask)=>bind(ask,parse);})()`

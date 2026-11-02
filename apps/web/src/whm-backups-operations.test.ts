@@ -2,6 +2,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderApprovedWhmBackups } from './board-port/approved-whm-backups.ts'
 import { WHM_BACKUPS_CLIENT_BINDING } from './whm-backups-client.ts'
+import { PRESENTATION_TABS_CLIENT_BINDING } from './presentation-tabs-client.ts'
+import { renderV2BackupsPage } from './themes/v2/pages/xwhm/lifecycle/backups.ts'
+
+// The real PO parser receives Node file URLs even in the browser test realm.
+vi.mock('./themes/v2/messages.ts', async () => {
+  const { createThemeMessages } = await import('./theme-messages.ts')
+  const { readFileSync } = await import('node:fs')
+  const { URL: NodeURL, fileURLToPath } = await import('node:url')
+  const read = (locale: string) => readFileSync(fileURLToPath(new NodeURL(`./themes/v2/locales/${locale}.po`, import.meta.url)), 'utf8')
+  return { v2Messages: createThemeMessages('v2', read('en'), { ar: read('ar') }) }
+})
 const ID = '11111111-1111-4111-8111-111111111111', RUN = '33333333-3333-4333-8333-333333333333', FILE = 'xpanel-backup-alice-20261028T020000Z.tar.gz', SHA = 'a'.repeat(64), REV = 'c'.repeat(64)
 const application = { status: 'configuration_only', nativeApplied: false, remoteConnectionVerified: false, schedulerVerified: false }
 const workspace = { revision: REV, application, accounts: [], destinations: [], schedule: null, snapshots: [] }
@@ -15,8 +26,8 @@ const inventory = { context: { accountId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     databases: { state: 'available', databases: [{ name: 'alice_wp', bytes: 10, current: 'exists' }], restores: [] }, dns: { state: 'available', zones: [{ name: 'alice.example.test', bytes: 50, current: 'exists' }] } } }
 const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 afterEach(() => { document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
-const boot = async () => {
-  document.body.innerHTML = renderApprovedWhmBackups({ principal: { kind: 'root', id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000009', username: 'root' }, accounts: [] } as never)
+const boot = async (html?: string) => {
+  document.body.innerHTML = html ?? renderApprovedWhmBackups({ principal: { kind: 'root', id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000009', username: 'root' }, accounts: [] } as never)
   const send = vi.fn(async (method: string, path: string, _body?: unknown): Promise<unknown> => {
     if (path === '/api/backups/workspace') return structuredClone(workspace)
     if (path === '/api/backups/workspace/destination-lifecycle') return structuredClone(lifecycle)
@@ -30,6 +41,7 @@ const boot = async () => {
   })
   const ask = vi.fn(async () => true)
   ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
+  new Function('return ' + PRESENTATION_TABS_CLIENT_BINDING)()()
   ;(new Function('return ' + WHM_BACKUPS_CLIENT_BINDING)() as (ask: unknown) => void)(ask)
   await settle()
   return { send, ask }
@@ -93,5 +105,61 @@ describe('monthly copies', () => {
     const monthly = document.querySelector<HTMLInputElement>('#backup-layout-monthly-copies')!
     expect(monthly.disabled).toBe(false)
     expect(send).toHaveBeenCalledWith('GET', '/api/backups/workspace')
+  })
+})
+
+describe('backup local panels with the real serialized native controller', () => {
+  const page = () => renderV2BackupsPage({ locale: 'en', canRead: true, canManage: true })
+  const tab = (key: string) => document.querySelector<HTMLButtonElement>('[data-presentation-tab="' + key + '"]')!
+  const restoreRow = () => document.querySelector<HTMLButtonElement>('[data-backup-snapshot-rows] [data-xp-slot="restore"]')!
+  it('reveals its owned Restore panel after selecting an authorized verified run without a native write', async () => {
+    const { send } = await boot(page())
+    tab('runs').click()
+    expect(document.querySelector<HTMLElement>('#v2-backup-panel-restore')!.hidden).toBe(true)
+    restoreRow().click()
+    expect(tab('restore').getAttribute('aria-selected')).toBe('true')
+    expect(document.querySelector<HTMLElement>('#v2-backup-panel-restore')!.hidden).toBe(false)
+    expect(action('restore-apply').disabled).toBe(true)
+    expect(send.mock.calls.filter(call => call[0] !== 'GET')).toHaveLength(0)
+  })
+  it('keeps presentation navigation usable when missing native templates close every native control', async () => {
+    const { send } = await boot(page().replace(/<template\b[\s\S]*?<\/template>/, ''))
+    expect(send).not.toHaveBeenCalled()
+    expect(tab('restore').disabled).toBe(false)
+    tab('restore').click()
+    expect(document.querySelector<HTMLElement>('#v2-backup-panel-restore')!.hidden).toBe(false)
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('[data-approved-whm-backups] input,[data-approved-whm-backups] select,[data-approved-whm-backups] button')].filter(node => !node.closest('template')).every(node => node.disabled)).toBe(true)
+  })
+  it('does not reveal a malformed target or write when the finite tab contract changes', async () => {
+    const { send } = await boot(page())
+    tab('runs').click()
+    tab('restore').setAttribute('aria-controls', 'foreign-panel')
+    restoreRow().click()
+    expect(tab('runs').getAttribute('aria-selected')).toBe('true')
+    expect(document.querySelector<HTMLElement>('#v2-backup-panel-restore')!.hidden).toBe(true)
+    expect(action('restore-apply').disabled).toBe(true)
+    expect(send.mock.calls.filter(call => call[0] !== 'GET')).toHaveLength(0)
+  })
+  it.each(['action', 'nonbutton'])('does not dispatch a synthetic native event through a malformed %s tab', async kind => {
+    const { send } = await boot(page())
+    tab('runs').click()
+    if (kind === 'nonbutton') tab('restore').outerHTML = '<a role="tab" data-presentation-tab="restore" href="#foreign">Foreign</a>'
+    const target = document.querySelector<HTMLElement>('[data-presentation-tab="restore"]')!
+    target.setAttribute('data-action', 'foreign-native-operation')
+    const clicked = vi.fn()
+    target.addEventListener('click', clicked)
+    restoreRow().click()
+    expect(clicked).not.toHaveBeenCalled()
+    expect(tab('runs').getAttribute('aria-selected')).toBe('true')
+    expect(send.mock.calls.filter(call => call[0] !== 'GET')).toHaveLength(0)
+  })
+  it('rechecks authorization before accepting a previously enabled run selection', async () => {
+    const { send } = await boot(page())
+    tab('runs').click()
+    document.querySelector<HTMLElement>('[data-approved-whm-backups]')!.dataset.backupManage = 'false'
+    restoreRow().click()
+    expect(tab('runs').getAttribute('aria-selected')).toBe('true')
+    expect(document.querySelector<HTMLElement>('#v2-backup-panel-restore')!.hidden).toBe(true)
+    expect(send.mock.calls.filter(call => call[0] !== 'GET')).toHaveLength(0)
   })
 })

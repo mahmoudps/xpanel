@@ -1,7 +1,9 @@
+import { classicMailClientTemplates } from './mail-client-templates.ts'
 import { LOCALES, localeDirection, translator, type Locale, type MessageValues } from '../i18n.ts'
 import { escapeHtml, renderAsyncActionState, type AsyncActionBannerProps } from '../tokens.ts'
 import { renderLiveUpdatesIndicator, renderPageSearchButton, renderMobileNavToggle, renderMobileNavClose, renderMobileNavBackdrop } from '../shell.ts'
 import { formatMailboxQuota } from './mail-truth.ts'
+import { addressList, chipOf } from '../models/mail.ts'
 import {renderMailVacationWorkspace} from './xmail-vacation.ts'
 
 export const MONO = "'IBM Plex Mono', monospace"
@@ -85,6 +87,7 @@ export interface ComposeModel {
   product: boolean
   canSend?: boolean
   canSaveDraft?: boolean
+  canUseAttachments?: boolean
   mailbox: string
   quotaText: string
   quotaPct: number
@@ -540,7 +543,7 @@ export const renderCompose = (model: ComposeModel): string => {
       </div>
       <div role="toolbar" aria-label="${t('Formatting')}" aria-controls="compose-body" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 16px 24px 0; padding: 4px; border-radius: 10px; border: 1px solid light-dark(#E2E6EC,var(--xp-border)); background: light-dark(#F8F9FB,var(--xp-bg-elevated))">${toolbarHtml(model.locale, model.numbersOn)}</div>
       <div style="padding: 12px 24px 0"><label id="compose-body-label" for="compose-body" style="display: block; margin-bottom: 8px; padding-inline: 13px; font-size: 13px; font-weight: 600; color: light-dark(#344054,var(--xp-text-secondary))">${t('Message body')}</label><div id="compose-body" role="textbox" dir="auto" aria-labelledby="compose-body-label" aria-multiline="true" aria-label="${t('Message body')}" contenteditable="true" spellcheck="true" style="min-height: 300px; padding: 16px 12px; text-align: ${rtl ? 'right' : 'left'}; border-radius: 10px; border: 1px solid var(--xp-control-edge, #808b9c); background: light-dark(#FFFFFF,var(--xp-bg-surface)); font-size: 14px; line-height: 1.6; color: light-dark(#101828,var(--xp-text-primary)); display: flex; flex-direction: column; gap: 12px">${model.bodyHtml}</div></div>
-      <section aria-labelledby="att-title"${model.product ? ` data-compose-attachments data-compose-attachment-enabled="${model.canSend === true || model.canSaveDraft === true}"` : ''} style="display: flex; flex-direction: column; gap: ${model.product ? 'var(--xp-space-group,24px)' : '10px'}; padding: ${model.product ? '24px' : '20px'} 24px 0">
+      <section aria-labelledby="att-title"${model.product ? ` data-compose-attachments data-compose-attachment-enabled="${model.canUseAttachments === true}"` : ''} style="display: flex; flex-direction: column; gap: ${model.product ? 'var(--xp-space-group,24px)' : '10px'}; padding: ${model.product ? '24px' : '20px'} 24px 0">${classicMailClientTemplates('compose-attachments')}
         <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px"><h2 id="att-title" style="margin: 0; font-size: 14px; font-weight: 600">${t('Attachments')} <span${model.product ? ' data-compose-attachment-summary' : ''} style="font-weight: 400; color: light-dark(#475467,var(--xp-text-secondary)); font-variant-numeric: tabular-nums">· ${escapeHtml(model.attachSummary)}</span></h2><span style="display: inline-flex; align-items: center; gap: 8px"><button type="button"${model.product ? ' data-compose-attachment-open disabled aria-controls="compose-file-input" aria-describedby="compose-attachment-status"' : ''} style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#101828,var(--xp-text-primary)); font-family: inherit; font-size: 14px; font-weight: 600">${ICONS.attach}${t('Attach files')}</button>${model.product ? '' : unwired}</span></div>
         ${model.product ? '<input id="compose-file-input" data-compose-attachment-input type="file" multiple hidden disabled>' : ''}
         <ul${model.product ? ' data-compose-attachment-list' : ''} style="list-style: none; margin: 0; padding: 0;${model.product ? '' : ' display: flex; flex-direction: column; gap: 8px'}">${model.product ? '' : model.attachments.map(attachmentHtml).join('')}</ul>
@@ -608,6 +611,7 @@ export interface XmailComposeProps {
   mailbox: string
   canSend?: boolean
   canSaveDraft?: boolean
+  canUseAttachments?: boolean
   quotaUsedMb?: number
   quotaUsedBytes?: number
   quotaLimitMb?: number | 'unlimited'
@@ -628,34 +632,6 @@ const FILES = msgid('{count, plural, one {{count} file} other {{count} files}}')
 
 /** Arabic attachment counts (zero, one, two, few and many forms come from the catalog). Kept for live-truth.test.ts. */
 export const arabicFileCount = (count: number): string => translator('ar')(FILES, { count })
-
-const addressList = (value: string | undefined): string[] => {
-  const parts: string[] = []
-  let current = ''
-  let quoted = false
-  let angle = false
-  for (const ch of value ?? '') {
-    if (ch === '"') quoted = !quoted
-    else if (!quoted && ch === '<') angle = true
-    else if (!quoted && ch === '>') angle = false
-    if ((ch === ',' || ch === ';') && !quoted && !angle) {
-      if (current.trim()) parts.push(current.trim())
-      current = ''
-      continue
-    }
-    current += ch
-  }
-  if (current.trim()) parts.push(current.trim())
-  return parts.filter(part => part.includes('@'))
-}
-
-const chipOf = (field: 'to' | 'cc', raw: string): { field: 'to' | 'cc'; name: string; addr: string; invalid: boolean } => {
-  const angle = /<([^>]+)>/.exec(raw)
-  if (!angle?.[1]) return { field, name: raw, addr: raw, invalid: false }
-  const addr = angle[1].trim()
-  const name = raw.slice(0, angle.index).replace(/^"(.*)"$/, '$1').trim() || addr
-  return { field, name, addr, invalid: false }
-}
 
 export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel => {
   const locale = props.locale ?? 'en'
@@ -693,6 +669,7 @@ export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel =>
     product: true,
     canSend: props.canSend === true,
     canSaveDraft: props.canSaveDraft === true,
+    canUseAttachments: props.canUseAttachments === true,
     mailbox: props.mailbox,
     quotaText: quota.text,
     quotaPct: quota.percent ?? 0,

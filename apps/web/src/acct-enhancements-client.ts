@@ -1,6 +1,22 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 import './i18n.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
+
+function enhancementClientTemplates(root: HTMLElement) {
+  const locate = (name: string, tag: string, slots: readonly string[]) => {
+    const template = clientTemplate(root, name)
+    cloneClientTemplate(template, tag, slots)
+    return () => cloneClientTemplate(template, tag, slots)
+  }
+  return { definition: locate('enhancement-definition-row', 'tr', ['id', 'label', 'kind', 'range', 'edit', 'delete']),
+    assignment: locate('enhancement-assignment-row', 'tr', ['target', 'label', 'value', 'actions']),
+    limit: locate('enhancement-limit-row', 'tr', ['reseller', 'label', 'limit', 'used', 'actions']),
+    remove: locate('enhancement-remove', 'button', ['label']), emptyFive: locate('enhancement-empty-five', 'tr', ['message']), emptyFour: locate('enhancement-empty-four', 'tr', ['message']) }
+}
 
 export type WhmEnhancementDefinition = { id: string; label: string; kind: 'flag' | 'limit'; min: number | null; max: number | null }
 export type WhmEnhancementValues = Record<string, true | number>
@@ -56,6 +72,11 @@ function bindWhmEnhancements(askDialog: ((options: Record<string, unknown>) => P
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const names = ['id', 'label', 'kind', 'min', 'max', 'assign-scope', 'assign-target', 'assign-enhancement', 'assign-value', 'limit-reseller', 'limit-enhancement', 'limit-value']
     if (!status || !loading || !refresh || !saveStatus || !empty || !valueField || Object.values(rows).some(node => !node) || Object.values(forms).some(node => !node) || !names.every(name => inputs[name])) return
+    let templates: ReturnType<typeof enhancementClientTemplates>
+    try { templates = enhancementClientTemplates(root) } catch {
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+      status.dataset.state = 'unavailable'; status.textContent = t('Account enhancements are available to the root administrator only.'); return
+    }
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.enhCanManage === 'true' && !root.closest(denied) && Object.values(forms).every(form => form!.tagName === 'FORM') && typeof request === 'function'
     let view: WhmEnhancementsView | null = null, busy = false
@@ -92,44 +113,43 @@ function bindWhmEnhancements(askDialog: ((options: Record<string, unknown>) => P
       valueField.hidden = view?.document.definitions.find(item => item.id === inputs['assign-enhancement']!.value)?.kind !== 'limit'
     }
     const removeButton = (accessible: string, change: (document: WhmEnhancementsDocument) => void): HTMLButtonElement => {
-      const button = element('button', t('Remove')); button.type = 'button'; button.className = 'xp-btn'; button.setAttribute('aria-label', accessible)
+      const button = templates.remove() as HTMLButtonElement; clientTemplateSlot(button, 'label').textContent = t('Remove'); button.setAttribute('aria-label', accessible)
       button.addEventListener('click', () => { if (!busy && view) void save(change, t('Removed.')) }); return button
     }
-    const row = (cells: (Node | string)[]): HTMLTableRowElement => { const tr = element('tr'); for (const content of cells) { const td = element('td'); td.append(content); tr.append(td) }; return tr }
-    const emptyRow = (body: HTMLElement, columns: number, message: string): void => { const tr = element('tr'), td = element('td', message); td.colSpan = columns; tr.append(td); body.replaceChildren(tr) }
+    const fillRow = (make: () => HTMLElement, cells: Record<string, Node | string>): HTMLElement => { const tr = make(); for (const [key, value] of Object.entries(cells)) clientTemplateSlot(tr, key).replaceChildren(value); return tr }
+    const emptyRow = (body: HTMLElement, columns: number, message: string): void => { body.replaceChildren(fillRow(columns === 4 ? templates.emptyFour : templates.emptyFive, { message })) }
     const paint = (next: WhmEnhancementsView): void => {
       view = next
-      const doc = next.document, plan = (id: string): string => next.directory.plans.find(item => item.id === id)?.name ?? id, account = (id: string): string => next.directory.accounts.find(item => item.id === id)?.username ?? id
+      const doc = next.document, plan = (id: string): string => next.directory.plans.find(item => item.id === id)?.name || t('Not available'), account = (id: string): string => next.directory.accounts.find(item => item.id === id)?.username ?? t('Not available')
       rows.definitions!.replaceChildren(...doc.definitions.map(item => {
-        const actions = element('div'); actions.className = 'xp-whm-detail-actions'
-        const edit = element('button', t('Edit')); edit.type = 'button'; edit.className = 'xp-btn'; edit.setAttribute('aria-label', t('Edit {name}', { name: item.label }))
+        const tr = fillRow(templates.definition, { id: item.id, label: item.label, kind: item.kind === 'flag' ? t('On or off') : t('Number'), range: item.kind === 'flag' ? '-' : `${item.min} - ${item.max}` })
+        const edit = clientTemplateSlot(tr, 'edit', 'button') as HTMLButtonElement; edit.textContent = t('Edit'); edit.setAttribute('aria-label', t('Edit {name}', { name: item.label }))
         edit.addEventListener('click', () => { inputs.id!.value = item.id; inputs.label!.value = item.label; inputs.kind!.value = item.kind; inputs.min!.value = item.min === null ? '' : String(item.min); inputs.max!.value = item.max === null ? '' : String(item.max); inputs.label!.focus() })
-        const remove = element('button', t('Delete')); remove.type = 'button'; remove.className = 'xp-btn xp-btn--danger'; remove.setAttribute('aria-label', t('Delete {name}', { name: item.label }))
+        const remove = clientTemplateSlot(tr, 'delete', 'button') as HTMLButtonElement; remove.textContent = t('Delete'); remove.setAttribute('aria-label', t('Delete {name}', { name: item.label }))
         remove.addEventListener('click', () => void deleteDefinition(item))
-        actions.append(edit, remove)
-        return row([element('bdi', item.id, true), element('bdi', item.label), item.kind === 'flag' ? t('On or off') : t('Number'), item.kind === 'flag' ? '-' : element('bdi', `${item.min} - ${item.max}`, true), actions])
+        return tr
       }))
       if (!doc.definitions.length) emptyRow(rows.definitions!, 5, next.state === 'invalid' ? t('The saved enhancements file cannot be read. It cannot be changed here.') : t('No enhancements'))
       empty.hidden = next.state === 'invalid' || doc.definitions.length > 0
       const assignments = [...Object.entries(doc.planAssignments).map(([id, values]) => ['plan', id, values] as const), ...Object.entries(doc.accountAssignments).map(([id, values]) => ['account', id, values] as const)]
         .flatMap(([scope, id, values]) => Object.entries(values).map(([enhancement, value]) => {
           const target = scope === 'plan' ? t('Plan: {name}', { name: plan(id) }) : t('Account: {name}', { name: account(id) })
-          return row([target, element('bdi', label(enhancement)), value === true ? t('On') : element('bdi', String(value), true), removeButton(t('Remove {name} from {target}', { name: label(enhancement), target }), document => {
+          return fillRow(templates.assignment, { target, label: label(enhancement), value: value === true ? t('On') : String(value), actions: removeButton(t('Remove {name} from {target}', { name: label(enhancement), target }), document => {
             const map = scope === 'plan' ? document.planAssignments : document.accountAssignments, kept = { ...map[id] }
             delete kept[enhancement]
             if (Object.keys(kept).length) map[id] = kept; else delete map[id]
-          })])
+          }) })
         }))
       rows.assignments!.replaceChildren(...assignments)
       if (!assignments.length) emptyRow(rows.assignments!, 4, t('No assignments'))
       const limits = Object.entries(doc.resellerLimits).flatMap(([resellerId, values]) => Object.entries(values).map(([enhancement, limit]) => {
-        const reseller = next.directory.resellers.find(item => item.id === resellerId)?.username ?? resellerId
+        const reseller = next.directory.resellers.find(item => item.id === resellerId)?.username ?? t('Not available')
         const used = next.directory.accounts.filter(item => item.ownerId === resellerId && doc.accountAssignments[item.id]?.[enhancement] !== undefined).length
-        return row([element('bdi', reseller, true), element('bdi', label(enhancement)), limit === null ? t('Unlimited') : element('bdi', String(limit), true), element('bdi', String(used), true), removeButton(t('Remove the {name} limit for {reseller}', { name: label(enhancement), reseller }), document => {
+        return fillRow(templates.limit, { reseller, label: label(enhancement), limit: limit === null ? t('Unlimited') : String(limit), used: String(used), actions: removeButton(t('Remove the {name} limit for {reseller}', { name: label(enhancement), reseller }), document => {
           const kept = { ...document.resellerLimits[resellerId] }
           delete kept[enhancement]
           if (Object.keys(kept).length) document.resellerLimits[resellerId] = kept; else delete document.resellerLimits[resellerId]
-        })])
+        }) })
       }))
       rows.limits!.replaceChildren(...limits)
       if (!limits.length) emptyRow(rows.limits!, 5, t('No reseller limits'))
@@ -196,4 +216,4 @@ function bindWhmEnhancements(askDialog: ((options: Record<string, unknown>) => P
   })
 }
 
-export const WHM_ENHANCEMENTS_CLIENT_BINDING = `(()=>{const readWhmEnhancementsView=${readWhmEnhancementsView.toString()};return ${bindWhmEnhancements.toString()};})()`
+export const WHM_ENHANCEMENTS_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${enhancementClientTemplates.toString()};const readWhmEnhancementsView=${readWhmEnhancementsView.toString()};return ${bindWhmEnhancements.toString()};})()`

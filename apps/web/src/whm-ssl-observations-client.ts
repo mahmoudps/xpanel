@@ -1,3 +1,7 @@
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import type { SslWorkspaceView } from './whm-ssl-client.ts'
@@ -55,18 +59,21 @@ function bindWhmSslObservations(readWorkspace: (value: unknown) => SslWorkspaceV
   document.querySelectorAll<HTMLElement>('[data-whm-ssl]').forEach(root => {
     const route = root.closest<HTMLElement>('[data-whm-detail-route="/whm/ssl"]'), button = route?.querySelector<HTMLButtonElement>('[data-ssl-observations-refresh]')
     if (!route || !button || button.dataset.sslBound === 'true') return
+    const queueSlots=['names','next','reason','attempts','state','actions'] as const,logSlots=['when','names','challenge','result','message'] as const
+    const templates={queue:clientTemplate(route,'ssl-observation-queue-row'),log:clientTemplate(route,'ssl-observation-log-row'),queueEmpty:clientTemplate(route,'ssl-observation-queue-empty'),logEmpty:clientTemplate(route,'ssl-observation-log-empty'),action:clientTemplate(route,'ssl-observation-action')}
+    cloneClientTemplate(templates.queue,'tr',queueSlots);cloneClientTemplate(templates.log,'tr',logSlots);cloneClientTemplate(templates.queueEmpty,'tr',['message']);cloneClientTemplate(templates.logEmpty,'tr',['message']);cloneClientTemplate(templates.action,'button',['label'])
     button.dataset.sslBound = 'true'
     const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
     const admitted = (): boolean => root.isConnected && root.dataset.sslCanManage === 'true' && !root.closest('[data-wiring="unavailable"],[data-wiring="soon"],[aria-disabled="true"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],fieldset:disabled')
     button.disabled = !transport || !admitted()
     const instant = (value: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = displayDateTime(value); return node }
     const message = (selector: string, text: string | (string | Node)[]): void => { const target = route.querySelector<HTMLElement>(selector); if (target) { if (typeof text === 'string') target.textContent = text; else target.replaceChildren(...text) } }
-    const row = (target: Element | null, values: string[]): HTMLTableRowElement | null => {
-      if (!target) return null
-      const item = document.createElement('tr')
-      for (const text of values) { const cell = document.createElement('td'), value = document.createElement('bdi'); value.dir = 'auto'; value.textContent = text; cell.append(value); item.append(cell) }
-      target.append(item); return item
+    const row=(target:Element|null,values:string[]):HTMLElement|null=>{
+      if(!target)return null
+      const queue=target.hasAttribute('data-ssl-queue-rows'),slots=queue?queueSlots.slice(0,-1):logSlots,item=cloneClientTemplate(queue?templates.queue:templates.log,'tr',queue?queueSlots:logSlots)
+      slots.forEach((slot,index)=>{clientTemplateSlot(item,slot).textContent=values[index]!});target.append(item);return item
     }
+    const empty=(target:Element|null,queue:boolean,message:string):void=>{if(!target||target.children.length)return;const item=cloneClientTemplate(queue?templates.queueEmpty:templates.logEmpty,'tr',['message']);clientTemplateSlot(item,'message','td').textContent=message;target.append(item)}
     const phase = (value: string): string => (({ planned: t('Planned checkpoint'), challenged: t('Challenge checkpoint'), issued: t('Issued; installation unverified'), installed: t('Installed checkpoint'), failed: t('Provider recorded failure') } as Record<string, string>)[value] ?? t('Not read'))
     let busy = false
     button.addEventListener('click', () => { void (async () => {
@@ -84,7 +91,7 @@ function bindWhmSslObservations(readWorkspace: (value: unknown) => SslWorkspaceV
           if (order.phase !== 'installed') {
             const entry = row(queue, [order.names.join(', '), order.nextRetryAt === null ? t('Not recorded') : displayDateTime(order.nextRetryAt), order.failureRecorded ? t('Failure recorded') : t('Saved checkpoint'), String(order.attempts), phase(order.phase)])
             if (entry) {
-              const cell = document.createElement('td'), review = document.createElement('button'); review.type = 'button'; review.className = 'xp-btn'; review.textContent = t('Review renewal')
+              const review=cloneClientTemplate(templates.action,'button',['label']) as HTMLButtonElement;clientTemplateSlot(review,'label').textContent=t('Review renewal')
               const certificate = after.certificates.find(certificate => certificate.id === order.certificateId)!
               review.disabled = certificate.challenge !== 'http-01' || !certificate.username || !certificate.assignedDomains.length || !after.capabilities.renew
               review.addEventListener('click', () => {
@@ -95,13 +102,13 @@ function bindWhmSslObservations(readWorkspace: (value: unknown) => SslWorkspaceV
                 domain.value = certificate.assignedDomains[0]!; domain.dispatchEvent(new Event('change', { bubbles: true })); renewal.value = certificate.id; renewal.dispatchEvent(new Event('change', { bubbles: true }))
                 root.querySelector<HTMLButtonElement>('[data-ssl-issue]')?.focus()
               })
-              cell.append(review); entry.append(cell)
+              clientTemplateSlot(entry,'actions','td').append(review)
             }
           }
           row(log, [displayDateTime(order.updatedAt), order.names.join(', '), order.challenge, phase(order.phase), t('Latest saved order checkpoint; full history has not been read.')])
         }
-        if (!queue?.children.length) { const item = row(queue, [t('No pending checkpoint was read in this limited scope.')]); if (item) item.cells[0]!.colSpan = 6 }
-        if (!log?.children.length) { const item = row(log, [t('No saved order checkpoint was read in this limited scope.')]); if (item) item.cells[0]!.colSpan = 5 }
+        empty(queue,true,t('No pending checkpoint was read in this limited scope.'))
+        empty(log,false,t('No saved order checkpoint was read in this limited scope.'))
         message('[data-ssl-queue-status]', t('Partial inventory of saved certificate assignments. Site scheduling is not connected. Missing records: {missing}; invalid or unavailable records: {invalid}; unavailable account sources: {accounts}', { missing: observed.missing, invalid: observed.invalid + observed.unavailable, accounts: observed.unavailableAccounts }))
         message('[data-ssl-order-log-status]', t('Latest saved order checkpoints only; this is not a complete renewal history.'))
         const saved = observed.management.status, timer = observed.management.timer
@@ -120,4 +127,4 @@ function bindWhmSslObservations(readWorkspace: (value: unknown) => SslWorkspaceV
   })
 }
 
-export const WHM_SSL_OBSERVATIONS_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const readSslObservationView=${readSslObservationView.toString()};return ${bindWhmSslObservations.toString()};})()`
+export const WHM_SSL_OBSERVATIONS_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readSslObservationView=${readSslObservationView.toString()};return ${bindWhmSslObservations.toString()};})()`

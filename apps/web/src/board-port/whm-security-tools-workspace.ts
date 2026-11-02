@@ -58,6 +58,6 @@ export function renderWhmSecurityToolsWorkspace({ page, locale, canRead, canMana
     .xp-whm-security-tools__actions{display:flex;flex-wrap:wrap;align-items:center;gap:16px}.xp-whm-security-tools :is(button,.xp-btn){min-block-size:44px}.xp-whm-security-tools [hidden]{display:none}.xp-whm-security-tools :focus-visible{outline:2px solid var(--xp-accent);outline-offset:2px}.xp-whm-security-tools td bdi{unicode-bidi:isolate;overflow-wrap:anywhere}
     @media(min-width:601px){.xp-whm-security-tools__card{padding:var(--xp-space-card)}}@media(max-width:639px){.xp-whm-security-tools__fields{grid-template-columns:minmax(0,1fr)}.xp-whm-security-tools__actions>:is(button,a){flex:1 1 auto}}
     </style>
-    ${bodies[page]}
+    ${bodies[page]}${page === 'intrusion' ? `<template data-xp-template="whm-security-unban"><button type="button" class="xp-btn" data-xp-slot="content" disabled>${t('Unban')}</button></template>` : ''}
   </section>`
 }

@@ -58,7 +58,8 @@ describe('xMail folders workspace', () => {
     const rows = [...document.querySelectorAll('[data-mail-folders-rows] tr')]
     expect(rows).toHaveLength(4)
     expect(rows[0]!.textContent).toContain('Protected'); expect(rows[3]!.textContent).toContain('Sent')
-    expect(rows[2]!.querySelector<HTMLElement>('.xp-mail-folders__name')!.style.paddingInlineStart).toBe('16px')
+    expect(rows[2]!.querySelector<HTMLElement>('.xp-mail-folders__name')!.style.getPropertyValue('--mail-folder-depth')).toBe('1')
+    expect(document.querySelector('style')!.textContent).toContain('padding-inline-start:calc(var(--mail-folder-depth,0)*16px)')
     expect(rows[2]!.textContent).toContain('مشاريع')
     expect(rows[1]!.querySelectorAll('button')).toHaveLength(2)
     expect([...document.querySelectorAll<HTMLOptionElement>('[name="parent"] option')].map(option => option.value)).toEqual(['', 'INBOX', 'Projects', 'Projects.&BkUGNAYnBjEGSgY5-', 'Sent'])
@@ -135,4 +136,14 @@ describe('mailbox folder timestamp precision', () => {
     expect(send).toHaveBeenCalledTimes(1)
     expect(send).toHaveBeenCalledWith('GET', '/api/webmail/folders')
   })
+})
+
+it('keeps an unknown individual subscription disabled after busy retirement', async () => {
+  const send = vi.fn(async () => list({ folders: [folder(), folder({ folder: 'Unknown', name: 'Unknown', leaf: 'Unknown', subscribed: null })] }))
+  boot(renderMailFolders({ locale: 'en', mailbox: MAILBOX, canManage: true }), send); await tick()
+  const boxes = [...document.querySelectorAll<HTMLInputElement>('[data-mail-folders-subscribe]')]
+  expect(boxes).toHaveLength(2)
+  expect(boxes[0]!.disabled).toBe(false)
+  expect(boxes[1]!.hidden).toBe(true); expect(boxes[1]!.disabled).toBe(true)
+  expect(send).toHaveBeenCalledTimes(1)
 })

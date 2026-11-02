@@ -166,7 +166,7 @@ export interface ProductionUpgradeDependencies {
   /** Independently verifies native control-plane service/process and private IPC readiness; not user login or MFA. */
   probeQualifiedControlPlane: () => Promise<boolean>
   /** Performs an HTTP canary request and verifies the serving worker UID, cgroup slice, and active unit. */
-  probeCanaryHttp: (canaryUsername: string) => Promise<CanaryHttpProbeResult>
+  probeCanaryHttp: (capturedAccount: Readonly<AccountIdentity>) => Promise<CanaryHttpProbeResult>
   /** Legacy composition field. Native safety independently owns consistent control-plane backup. */
   snapshotControlPlaneDb?: (snapshotPath: string) => Promise<void>
   /** Legacy composition field. Automatic authority rewind is never invoked by the upgrade engine. */
@@ -181,6 +181,24 @@ export interface ProductionUpgradeDependencies {
 export const createProductionUpgradePorts = (deps: ProductionUpgradeDependencies): UpgradePorts => {
   if (!deps.db || !deps.fs || !deps.host || !deps.clock || !deps.reconciler) {
     fail('PRECONDITION_FAILED', 'missing required production upgrade ports')
+  }
+
+  // Keep the actual captured objects: native composition additionally requires its opaque lifetime capability.
+  const canaryTargets = new Map<string, AccountIdentity>()
+  const reconciler: ReconcilerPort = {
+    currentGeneration: () => deps.reconciler.currentGeneration(),
+    reconcile: reason => deps.reconciler.reconcile(reason),
+    activate: generationId => deps.reconciler.activate(generationId),
+    status: () => deps.reconciler.status(),
+    async identities() {
+      const values = await deps.reconciler.identities()
+      canaryTargets.clear()
+      for (const value of values) {
+        if (canaryTargets.has(value.username)) return fail('PRECONDITION_FAILED', 'ambiguous lifecycle account identity')
+        canaryTargets.set(value.username, value)
+      }
+      return values
+    },
   }
 
   const history: UpgradeHistoryPort = {
@@ -233,7 +251,9 @@ export const createProductionUpgradePorts = (deps: ProductionUpgradeDependencies
 
   const health: HealthPort = {
     async servedUid(username) {
-      const probe = await deps.probeCanaryHttp(username)
+      const target = canaryTargets.get(username)
+      if (!target) return fail('PRECONDITION_FAILED', 'a captured lifecycle account identity is required for HTTP observation')
+      const probe = await deps.probeCanaryHttp(target)
       if (!probe.serviceActive || probe.httpStatus < 200 || probe.httpStatus >= 400) {
         throw new Error(`canary HTTP probe for ${username} returned status ${probe.httpStatus} (serviceActive=${String(probe.serviceActive)})`)
       }
@@ -288,7 +308,7 @@ export const createProductionUpgradePorts = (deps: ProductionUpgradeDependencies
     safety,
     host: deps.host,
     fs: deps.fs,
-    reconciler: deps.reconciler,
+    reconciler,
     migrator,
     health,
     system,

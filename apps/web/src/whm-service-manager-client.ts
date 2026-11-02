@@ -1,7 +1,12 @@
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
+import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+const cloneViewRecord = canonicalCloneViewRecord
+const viewAction = canonicalViewAction
 import './i18n.ts'
+import { serviceArea as canonicalServiceArea } from './service-area.ts'
+const serviceArea = canonicalServiceArea
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 export interface ServiceManagerClientRow { unit: string; load: string | null; active: string | null; sub: string | null; boot: string | null; restart: boolean; bootEditable: boolean }
 export interface ServiceManagerClientView { state: 'read' | 'unavailable'; observedAt: string; revision: string | null; bootTime: number | null; units: ServiceManagerClientRow[]; manage: boolean }
@@ -47,46 +52,65 @@ function bindWhmServiceManager(askDialog: ((options: Record<string, unknown>) =>
     if (!status || !result || !refresh || !rows || !search || !filter || !confirmation || !reboot || !jobNote || !jobLink) return
     const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => typeof request === 'function' && root.isConnected && root.dataset.smCanRead === 'true' && !root.closest(denied)
-    let view: ServiceManagerClientView | null = null, busy = false, review = false, rebootBefore: number | null = null
+    const admitted = (): boolean => !quarantined && typeof request === 'function' && root.isConnected && root.dataset.smCanRead === 'true' && !root.closest(denied)
+    let view: ServiceManagerClientView | null = null, busy = false, review = false, rebootBefore: number | null = null, quarantined = false, selectedUnit: string | null = null, area = ''
     const manageable = (): boolean => admitted() && root.dataset.smCanManage === 'true' && view?.state === 'read' && view.manage && typeof askDialog === 'function' && !review
     const note = (state: string, text: string): void => { status.dataset.state = state; status.textContent = text }
     const outcome = (state: string, text: string): void => { result.dataset.state = state; result.textContent = text; result.hidden = false }
-    const technical = (text: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = text; return bdi }
+    const preflight = (): boolean => {
+      if (quarantined) return false
+      try {
+        const example = cloneViewRecord(root, 'service-manager-row', 'tr', { unit: '', load: '', active: '', sub: '', boot: '', 'restart-label': '', 'boot-label': '', 'protected-label': '' })
+        viewAction(example, 'restart'); viewAction(example, 'boot'); viewAction(example, 'protected', 'span'); viewAction(example, 'select')
+        cloneViewRecord(root, 'service-manager-empty', 'tr', { message: '' }); return true
+      } catch {
+        quarantined = true
+        root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
+        note('unavailable', t('Unavailable')); return false
+      }
+    }
+    if (!preflight()) return
+    const detail = (): void => {
+      const selected = view?.state === 'read' ? view.units.find(row => row.unit === selectedUnit) : undefined
+      const values: Record<string,string> = { unit: selected?.unit ?? t('No service is selected.'), load: selected?.load ?? t('Not read'), active: selected?.active ?? t('Not read'), sub: selected?.sub ?? t('Not read'), boot: selected?.boot ?? t('Not read'), observed: view ? formatDisplayDateTime(view.observedAt) : t('Not read') }
+      root.querySelectorAll<HTMLElement>('[data-sm-detail]').forEach(node => { node.textContent = values[node.dataset.smDetail ?? ''] ?? t('Not read') })
+      rows.querySelectorAll<HTMLButtonElement>('[data-sm-select]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.smSelect === selected?.unit)))
+    }
     const date = (seconds: number | null): string => seconds === null ? t('Unavailable') : formatDisplayDateTime(new Date(seconds * 1000))
     const controls = (): void => {
       refresh.disabled = busy || !admitted()
       search.disabled = busy || !admitted() || view?.state !== 'read'; filter.disabled = search.disabled
       confirmation.disabled = busy || !manageable() || view?.bootTime == null; reboot.disabled = confirmation.disabled || confirmation.value !== 'REBOOT SERVER'
-      rows.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = busy || !manageable() })
+      rows.querySelectorAll<HTMLButtonElement>('[data-sm-action]').forEach(button => { button.disabled = busy || !manageable() })
     }
     const paint = (): void => {
+      if (!preflight()) return
       const fact = (key: string, value: string) => { const node = q<HTMLElement>('[data-sm-fact="' + key + '"]'); if (node) node.textContent = value }
       fact('services', view?.state === 'read' ? String(view.units.length) : t('Unavailable'))
       fact('active', view?.state === 'read' ? String(view.units.filter(row => row.active === 'active').length) : t('Unavailable'))
       fact('boot-time', date(view?.bootTime ?? null)); fact('observed-at', view ? formatDisplayDateTime(view.observedAt) : t('Unavailable'))
       rows.replaceChildren()
       const query = search.value.trim().toLowerCase()
-      const visible = (view?.units ?? []).filter(row => row.unit.toLowerCase().includes(query) && (filter.value === 'active' ? row.active === 'active' : filter.value === 'attention' ? row.active === 'failed' || row.load !== 'loaded' : filter.value === 'editable' ? row.bootEditable : true))
+      const visible = (view?.units ?? []).filter(row => (!area || serviceArea(null, row.unit) === area) && row.unit.toLowerCase().includes(query) && (filter.value === 'active' ? row.active === 'active' : filter.value === 'attention' ? row.active === 'failed' || row.load !== 'loaded' : filter.value === 'editable' ? row.bootEditable : true))
       for (const row of visible) {
-        const tr = document.createElement('tr')
-        for (const value of [row.unit, row.load, row.active, row.sub, row.boot]) { const td = document.createElement('td'); td.append(value === null ? document.createTextNode(t('Not observed')) : technical(value)); tr.append(td) }
-        const actions = document.createElement('td'), group = document.createElement('div'); group.className = 'xp-whm-service-manager__actions'
-        const button = (action: string, label: string) => { const control = document.createElement('button'); control.type = 'button'; control.className = 'xp-btn'; control.dataset.smAction = action; control.dataset.smUnit = row.unit; control.textContent = label; control.disabled = true; group.append(control) }
-        if (row.restart) button('restart', t(msgctxt('whm-service-manager-client', 'Restart')))
-        if (row.bootEditable) button(row.boot === 'enabled' ? 'disable' : 'enable', row.boot === 'enabled' ? t('Disable at boot') : t('Enable at boot'))
-        if (!row.restart && !row.bootEditable) group.textContent = t('Protected or not reviewed')
-        actions.append(group); tr.append(actions); rows.append(tr)
+        const tr = cloneViewRecord(root, 'service-manager-row', 'tr', { unit: row.unit, load: row.load ?? t('Not observed'), active: row.active ?? t('Not observed'), sub: row.sub ?? t('Not observed'), boot: row.boot ?? t('Not observed'),
+          'restart-label': t(msgctxt('whm-service-manager-client', 'Restart')), 'boot-label': row.boot === 'enabled' ? t('Disable at boot') : t('Enable at boot'), 'protected-label': !row.restart && !row.bootEditable ? t('Protected or not reviewed') : '' })
+        const select = viewAction(tr, 'select'); select.dataset.smSelect = row.unit; const panel = q<HTMLElement>('[data-sm-details]'); if (panel?.id) select.setAttribute('aria-controls', panel.id)
+        const restart = viewAction(tr, 'restart'), boot = viewAction(tr, 'boot')
+        if (row.restart) { restart.dataset.smAction = 'restart'; restart.dataset.smUnit = row.unit } else restart.remove()
+        if (row.bootEditable) { boot.dataset.smAction = row.boot === 'enabled' ? 'disable' : 'enable'; boot.dataset.smUnit = row.unit } else boot.remove()
+        rows.append(tr)
       }
-      if (!visible.length) { const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 6; td.textContent = view?.state === 'read' ? t('No services match these filters.') : t('No service state is available.'); tr.append(td); rows.append(tr) }
-      controls()
+      if (!visible.length) rows.append(cloneViewRecord(root, 'service-manager-empty', 'tr', { message: view?.state === 'read' ? t('No services match these filters.') : t('No service state is available.') }))
+      root.querySelectorAll<HTMLElement>('[data-sm-area-count]').forEach(node => { const key = node.dataset.smAreaCount ?? ''; node.textContent = view?.state === 'read' ? String(view.units.filter(row => !key || serviceArea(null, row.unit) === key).length) : t('Not read') })
+      detail(); controls()
     }
     const load = async (): Promise<void> => {
-      if (busy || !admitted()) return
+      if (busy || !admitted() || !preflight()) return
       busy = true; controls(); note('reading', t('Reading system service state…'))
       try {
         const next = readServiceManagerView(await request!('GET', '/api/server/service-manager'))
-        if (!admitted()) { view = null; return }
+        if (!admitted() || !preflight()) { view = null; return }
         view = next; review = false; result.hidden = true; jobNote.hidden = true; confirmation.value = ''
         note(next.state, next.state === 'read' ? t('Service state read from this host.') + (next.manage ? '' : ' ' + t('Host changes are unavailable.')) : t('System service state could not be verified. Actions are unavailable.'))
         if (rebootBefore !== null && next.bootTime !== null) {
@@ -97,7 +121,7 @@ function bindWhmServiceManager(askDialog: ((options: Record<string, unknown>) =>
       finally { busy = false; paint() }
     }
     const submit = async (action: 'restart' | 'enable' | 'disable' | 'reboot', unit: string | null): Promise<void> => {
-      if (busy || !manageable() || !view?.revision || action === 'reboot' && (view.bootTime === null || confirmation.value !== 'REBOOT SERVER')) return
+      if (busy || !manageable() || !preflight() || !view?.revision || action === 'reboot' && (view.bootTime === null || confirmation.value !== 'REBOOT SERVER')) return
       const snapshot = view, selected = unit === null ? null : view.units.find(row => row.unit === unit)
       if (action !== 'reboot' && (!selected || (action === 'restart' ? !selected.restart : !selected.bootEditable || action !== (selected.boot === 'enabled' ? 'disable' : 'enable')))) return
       busy = true; controls()
@@ -105,11 +129,12 @@ function bindWhmServiceManager(askDialog: ((options: Record<string, unknown>) =>
       const detail = action === 'reboot' ? t('Active sessions disconnect and services stop temporarily. Confirm the changed boot time after reconnecting.') : action === 'restart' && /^sshd?\.service$/.test(unit!) ? t('A failed SSH restart can prevent new logins. Configuration is tested first. Keep an alternate recovery connection available.') : action === 'restart' ? t('Configuration is tested first. The job confirms the service is active after restarting.') : t('This changes future boot behavior without starting or stopping the service now.')
       let approved = false
       try { approved = await askDialog!({ title, body: (unit ? unit + '\n' : '') + detail, confirm: t('Submit host job'), danger: action !== 'enable' }) === true } catch { approved = false }
-      if (!approved || !manageable() || snapshot !== view || action === 'reboot' && confirmation.value !== 'REBOOT SERVER') { busy = false; controls(); return }
+      if (!approved || !manageable() || !preflight() || snapshot !== view || action === 'reboot' && confirmation.value !== 'REBOOT SERVER') { busy = false; controls(); return }
       note('submitting', t('Submitting the reviewed host action…'))
       try {
         const body = action === 'reboot' ? { action, confirmation: 'REBOOT SERVER', expectedRevision: snapshot.revision } : { action, unit, expectedRevision: snapshot.revision }
         const accepted = readServiceManagerSubmission(await request!('POST', '/api/server/service-manager/action', body), action, unit)
+        if (!admitted() || !preflight()) { review = true; return }
         review = true; if (action === 'reboot') rebootBefore = snapshot.bootTime
         jobLink.href = '/whm/jobs?job=' + encodeURIComponent(accepted.job.id); jobNote.hidden = false
         outcome(accepted.outcome, action === 'reboot' ? t('Reboot attempt submitted. Reconnect and read the server boot time; completion is not yet verified.') : t('Host job submitted. Review the job result and refresh service state before another action.'))
@@ -123,11 +148,12 @@ function bindWhmServiceManager(askDialog: ((options: Record<string, unknown>) =>
         outcome(refused ? 'refused' : 'unknown', refused ? raw?.status === 409 ? t('Service state changed. Refresh and review it before trying again.') : t('The host action was refused. Nothing was changed.') : t('The submission outcome is unknown. Review host jobs before retrying; actions stay locked until a fresh read.'))
       } finally { busy = false; controls() }
     }
-    rows.addEventListener('click', event => { const button = (event.target as Element | null)?.closest<HTMLButtonElement>('[data-sm-action]'); if (button && !button.disabled && rows.contains(button) && ['restart', 'enable', 'disable'].includes(button.dataset.smAction ?? '')) void submit(button.dataset.smAction as 'restart' | 'enable' | 'disable', button.dataset.smUnit ?? '') })
+    rows.addEventListener('click', event => { const selected = (event.target as Element | null)?.closest<HTMLButtonElement>('[data-sm-select]'); if (selected && rows.contains(selected)) { selectedUnit = selected.dataset.smSelect ?? null; detail(); return } const button = (event.target as Element | null)?.closest<HTMLButtonElement>('[data-sm-action]'); if (button && !button.disabled && rows.contains(button) && ['restart', 'enable', 'disable'].includes(button.dataset.smAction ?? '')) void submit(button.dataset.smAction as 'restart' | 'enable' | 'disable', button.dataset.smUnit ?? '') })
+    root.querySelectorAll<HTMLButtonElement>('[data-sm-area]').forEach(button => button.addEventListener('click', () => { area = button.dataset.smArea ?? ''; root.querySelectorAll<HTMLButtonElement>('[data-sm-area]').forEach(item => item.setAttribute('aria-pressed', String(item === button))); paint() }))
     search.addEventListener('input', paint); filter.addEventListener('change', paint); confirmation.addEventListener('input', controls); refresh.addEventListener('click', () => { void load() }); reboot.addEventListener('click', () => { void submit('reboot', null) })
     if (!admitted()) { controls(); note('unavailable', t('The service manager is unavailable here. Nothing was read or changed.')); return }
     void load()
   })
 }
 
-export const WHM_SERVICE_MANAGER_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readServiceManagerView=${readServiceManagerView.toString()};const readServiceManagerSubmission=${readServiceManagerSubmission.toString()};return ${bindWhmServiceManager.toString()};})()`
+export const WHM_SERVICE_MANAGER_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const serviceArea=${serviceArea.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readServiceManagerView=${readServiceManagerView.toString()};const readServiceManagerSubmission=${readServiceManagerSubmission.toString()};return ${bindWhmServiceManager.toString()};})()`

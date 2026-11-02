@@ -1,3 +1,4 @@
+import { classicWhmClientTemplates } from './whm-client-templates.ts'
 import { localeDirection, translator, type Locale } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { MONITORING_LOG_DEFAULT_LINES, MONITORING_LOG_MAX_LINES, MONITORING_LOG_UNITS } from '../../../../packages/os/src/monitoring-command.ts'
@@ -9,7 +10,7 @@ const STYLE = `<style>.xp-whm-monitoring{display:flex;flex-direction:column;gap:
 
 const page = (kind: string, input: WhmMonitoringPageInput, body: string, extra = ''): string => {
 
-  return `<div class="xp-whm-monitoring" data-whm-monitoring="${kind}" data-monitoring-can-read="${input.canRead}"${extra} lang="${input.locale}" dir="${localeDirection(input.locale)}">${STYLE}${body}</div>`
+  return `<div class="xp-whm-monitoring" data-whm-monitoring="${kind}" data-monitoring-can-read="${input.canRead}"${extra} lang="${input.locale}" dir="${localeDirection(input.locale)}">${STYLE}${kind === 'processes' ? classicWhmClientTemplates('processes') : ''}${body}</div>`
 }
 const helpers = (locale: Locale) => {
   const rtl = localeDirection(locale) === 'rtl'

@@ -1,6 +1,10 @@
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 const displayDateTime = formatDisplayDateTime
 
 /**
@@ -68,6 +72,12 @@ function bindAccountSessions(askDialog: ((options: Record<string, unknown>) => P
     if (!rows || !status || !revokeOthersButton) return
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const eligible = (): boolean => root.isConnected && !root.closest(denied)
+    const personal = (): boolean => root.hasAttribute('data-sessions-can-read') || root.hasAttribute('data-sessions-can-revoke')
+    const completePair = (): boolean => !personal() || ['true', 'false'].includes(root.dataset.sessionsCanRead ?? '')
+      && ['true', 'false'].includes(root.dataset.sessionsCanRevoke ?? '')
+    const readable = (): boolean => eligible() && completePair() && (!personal() || root.dataset.sessionsCanRead === 'true')
+      && typeof transport === 'function' && (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest === transport
+    const writable = (): boolean => readable() && (!personal() || root.dataset.sessionsCanRevoke === 'true')
     let sessions: SessionView[] = []
     let busy = false, uncertain = false
     const controls = (): HTMLButtonElement[] => [...root.querySelectorAll<HTMLButtonElement>('button')]
@@ -77,87 +87,121 @@ function bindAccountSessions(askDialog: ((options: Record<string, unknown>) => P
       status.setAttribute('role', kind === 'failed' || kind === 'uncertain' ? 'alert' : 'status')
       status.textContent = message
     }
-    const lock = (): void => { const blocked = busy || uncertain || !eligible(); controls().forEach(control => { control.disabled = blocked }) }
+    const lock = (): void => { const blocked = busy || uncertain || !writable(); controls().forEach(control => { control.disabled = blocked }) }
     const request = (method: string, path: string, body?: unknown): Promise<unknown> => {
-      if (!transport) return Promise.reject(Object.assign(new Error('transport_unavailable'), { stateChanged: false }))
+      if (!transport || (method === 'GET' ? !readable() : !writable())) return Promise.reject(Object.assign(new Error('session_authority_unavailable'), { stateChanged: false }))
       return transport(method, path, body)
     }
     const describeAgent = (session: SessionView): string => {
       if (!session.userAgent) return copy('Unknown client')
       return session.userAgent.length > 96 ? session.userAgent.slice(0, 93) + '…' : session.userAgent
     }
+    let templates: { row: HTMLTemplateElement; action: HTMLTemplateElement; empty: HTMLTemplateElement }
+    const table = root.dataset.sessionsLayout === 'table'
+    const rowTag = table ? 'tr' : 'article', emptyTag = table ? 'tr' : 'p'
+    const rowSlots = ['title', 'verification', 'network-label', 'network', 'client-label', 'client', 'last-active-label', 'last-active', 'expires-label', 'expires', 'actions', ...(table ? ['created-label', 'created'] : [])]
+
+    try {
+      templates = { row: clientTemplate(root, 'account-session-row'), action: clientTemplate(root, 'account-session-action'), empty: clientTemplate(root, 'account-session-empty') }
+      const row = cloneClientTemplate(templates.row, rowTag, rowSlots)
+      cloneClientTemplate(templates.action, 'button', ['label'])
+      const empty = cloneClientTemplate(templates.empty, emptyTag, ['message'])
+      if (table && (rows.tagName !== 'TBODY' || !root.contains(rows.closest('table'))
+        || row.children.length !== 6 || [...row.children].some(cell => cell.tagName !== 'TD')
+        || empty.children.length !== 1 || empty.firstElementChild?.tagName !== 'TD' || empty.firstElementChild.getAttribute('colspan') !== '6')) throw new Error('invalid_session_table')
+
+    } catch {
+      controls().forEach(control => { control.disabled = true })
+      setStatus(copy('Session management is unavailable here. No sessions were read or changed.'), 'unavailable'); return
+    }
     const paint = (): void => {
       rows.textContent = ''
+      const count = root.querySelector<HTMLElement>('[data-sessions-count]')
+      if (count) count.textContent = String(sessions.length)
       if (!sessions.length) {
-        const empty = document.createElement('p'); empty.className = 'xp-help'
-        empty.textContent = copy('No active sessions were returned.')
+        const empty = cloneClientTemplate(templates.empty, emptyTag, ['message'])
+        clientTemplateSlot(empty, 'message').textContent = copy('No active sessions were returned.')
         rows.appendChild(empty); lock(); return
       }
       for (const session of sessions) {
-        const card = document.createElement('article'); card.className = 'xp-panel-detail__native'; card.dataset.sessionId = session.id
-        const header = document.createElement('header')
-        const title = document.createElement('strong'); title.textContent = session.current ? copy('This device') : copy('Another device')
-        const badge = document.createElement('span'); badge.className = 'xp-help'
-        badge.textContent = session.mfaVerified ? copy('Two-factor verified') : copy('Password only')
-        header.append(title, badge); card.appendChild(header)
-        const list = document.createElement('dl'); list.className = 'xp-panel-detail__facts'
-        const entry = (label: string, value: string) => { const dt = document.createElement('dt'); dt.textContent = label; const dd = document.createElement('dd'); const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; dd.appendChild(bdi); const pair = document.createElement('div'); pair.append(dt, dd); list.append(pair) }
-        entry(copy('Network'), session.ip ?? copy('Not recorded'))
-        entry(copy('Client'), describeAgent(session))
-        entry(copy('Last active'), displayDateTime(session.lastSeenAt))
-        entry(copy('Expires'), displayDateTime(session.expiresAt))
-        card.appendChild(list)
-        const actions = document.createElement('div'); actions.className = 'xp-panel-detail__actions'
-        if (!session.current) {
-          const signOut = document.createElement('button'); signOut.type = 'button'; signOut.className = 'xp-btn'; signOut.dataset.sessionAction = 'revoke'
-          signOut.textContent = copy('Sign out this session')
-          signOut.addEventListener('click', () => { if (!signOut.disabled && eligible()) void revoke(session) })
+        const card = cloneClientTemplate(templates.row, rowTag, rowSlots); card.dataset.sessionId = session.id
+        clientTemplateSlot(card, 'title').textContent = session.current ? copy('This device') : copy('Another device')
+        clientTemplateSlot(card, 'verification').textContent = session.mfaVerified ? copy('Two-factor verified') : copy('Password only')
+        for (const [name, label, value] of [['network', copy('Network'), session.ip ?? copy('Not recorded')], ['client', copy('Client'), describeAgent(session)], ['last-active', copy('Last active'), displayDateTime(session.lastSeenAt)], ['expires', copy('Expires'), displayDateTime(session.expiresAt)]] as const) {
+          clientTemplateSlot(card, name + '-label').textContent = label
+          clientTemplateSlot(card, name).textContent = value
+        }
+        clientTemplateSlot(card, 'last-active', 'time').setAttribute('datetime', session.lastSeenAt)
+        clientTemplateSlot(card, 'expires', 'time').setAttribute('datetime', session.expiresAt)
+        if (table) {
+          clientTemplateSlot(card, 'created-label').textContent = copy('Signed in')
+          clientTemplateSlot(card, 'created', 'time').textContent = displayDateTime(session.createdAt)
+          clientTemplateSlot(card, 'created', 'time').setAttribute('datetime', session.createdAt)
+        }
+        const actions = clientTemplateSlot(card, 'actions')
+        if (!session.current && writable()) {
+          const signOut = cloneClientTemplate(templates.action, 'button', ['label']) as HTMLButtonElement
+          clientTemplateSlot(signOut, 'label').textContent = copy('Sign out this session')
+          signOut.addEventListener('click', () => { if (!signOut.disabled && writable()) void revoke(session) })
           actions.appendChild(signOut)
         }
-        card.appendChild(actions); rows.appendChild(card)
+        rows.appendChild(card)
       }
       lock()
     }
     const load = async (): Promise<void> => {
-      sessions = readSessions(await request('GET', '/api/auth/sessions'))
-      paint()
+      const next = readSessions(await request('GET', '/api/auth/sessions'))
+      if (!readable()) {
+        rows.textContent = ''; sessions = []
+        const count = root.querySelector<HTMLElement>('[data-sessions-count]')
+        if (count) count.textContent = copy('Not read')
+        lock(); throw Object.assign(new Error('session_authority_changed'), { stateChanged: false })
+      }
+      sessions = next; paint()
     }
     const revoke = async (session: SessionView): Promise<void> => {
+      if (!writable() || busy || uncertain) return
       if (!askDialog) { setStatus(copy('Ending a session needs confirmation; nothing was sent.'), 'failed'); return }
-      const confirmed = await askDialog({ title: copy('Sign out session'), body: session.userAgent ?? session.ip ?? session.id, confirm: copy('Sign out'), danger: true })
+      const confirmed = await askDialog({ title: copy('Sign out session'), body: session.userAgent ?? session.ip ?? copy('Unknown client'), confirm: copy('Sign out'), danger: true })
       if (confirmed !== true) { setStatus(copy('Cancelled. Nothing was sent.'), 'cancelled'); return }
+      if (!writable() || busy || uncertain) { lock(); return }
       busy = true; lock()
+      let accepted = false
       try {
         const reply = await request('DELETE', '/api/auth/sessions/' + encodeURIComponent(session.id))
         if (!sessionObject(reply) || reply.ok !== true || typeof reply.currentSessionRevoked !== 'boolean') throw new Error('invalid_session_ack')
+        accepted = true
         await load()
         if (sessions.some(item => item.id === session.id)) throw new Error('session_not_removed')
         setStatus(copy('The session was ended and verified absent. Its next request will require signing in again.'), 'saved')
       } catch (error) {
-        const certain = sessionObject(error) && (error.stateChanged === false || (sessionObject(error.details) && (error.details as Record<string, unknown>).stateChanged === false))
+        const certain = !accepted && sessionObject(error) && (error.stateChanged === false || (sessionObject(error.details) && (error.details as Record<string, unknown>).stateChanged === false))
         if (certain) setStatus(copy('The session revocation was refused. Nothing was retried.'), 'failed')
         else { uncertain = true; setStatus(copy('The outcome is uncertain. Reload the page and inspect active sessions; no automatic retry was sent.'), 'uncertain') }
       } finally { busy = false; lock() }
     }
     const revokeOthers = async (): Promise<void> => {
-      if (!eligible() || busy || uncertain) return
+      if (!writable() || busy || uncertain) return
       if (!askDialog) { setStatus(copy('Signing out other sessions needs confirmation; nothing was sent.'), 'failed'); return }
       const confirmed = await askDialog({ title: copy('Sign out other sessions'), body: copy('Every other active session will be ended. This device stays signed in.'), confirm: copy('Sign out other sessions'), danger: true })
       if (confirmed !== true) { setStatus(copy('Cancelled. Nothing was sent.'), 'cancelled'); return }
+      if (!writable() || busy || uncertain) { lock(); return }
       busy = true; lock()
+      let accepted = false
       try {
         const reply = await request('POST', '/api/auth/sessions/revoke-others')
         if (!sessionObject(reply) || reply.ok !== true || typeof reply.revokedCount !== 'number' || reply.revokedCount < 0) throw new Error('invalid_sessions_ack')
+        accepted = true
         await load()
         if (sessions.some(session => !session.current)) throw new Error('other_sessions_not_removed')
         setStatus(copy('Other sessions were ended and the remaining session list was read back.'), 'saved')
       } catch (error) {
-        const certain = sessionObject(error) && (error.stateChanged === false || (sessionObject(error.details) && (sessionObject(error.details) && (error.details as Record<string, unknown>).stateChanged === false)))
+        const certain = !accepted && sessionObject(error) && (error.stateChanged === false || (sessionObject(error.details) && (sessionObject(error.details) && (error.details as Record<string, unknown>).stateChanged === false)))
         if (certain) setStatus(copy('The request was refused. Nothing was retried.'), 'failed')
         else { uncertain = true; setStatus(copy('The outcome is uncertain. Reload the page and inspect active sessions; no automatic retry was sent.'), 'uncertain') }
       } finally { busy = false; lock() }
     }
-    if (!transport || !eligible()) {
+    if (!readable()) {
       controls().forEach(control => { control.disabled = true })
       setStatus(copy('Session management is unavailable here. No sessions were read or changed.'), 'unavailable')
       return
@@ -167,4 +211,4 @@ function bindAccountSessions(askDialog: ((options: Record<string, unknown>) => P
   })
 }
 
-export const ACCOUNT_SESSIONS_CLIENT_BINDING = `(function(askDialog){const displayDateTime=${DISPLAY_DATETIME_BINDING};const SESSION_UUID=${SESSION_UUID.toString()};const sessionObject=${sessionObject.toString()};const sessionDate=${sessionDate.toString()};const readSession=${readSession.toString()};const readSessions=${readSessions.toString()};(${bindAccountSessions.toString()})(askDialog);})`
+export const ACCOUNT_SESSIONS_CLIENT_BINDING = `(function(askDialog){${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const SESSION_UUID=${SESSION_UUID.toString()};const sessionObject=${sessionObject.toString()};const sessionDate=${sessionDate.toString()};const readSession=${readSession.toString()};const readSessions=${readSessions.toString()};(${bindAccountSessions.toString()})(askDialog);})`

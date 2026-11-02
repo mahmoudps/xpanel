@@ -59,6 +59,23 @@ const NATIVE: NativeTool[] = [
   },
   {
     tool: {
+      ...panel('domain-htaccess', 'software', '.htaccess editor', 'domain-file',
+        'Read, validate, save and restore the .htaccess file of an owned Apache site through confined account file I/O and protected candidate validation.'),
+      // Preserve feature-list denials written before this bounded owner contract was split.
+      featureKey: 'aapanel-url-rewrite',
+    },
+    behaviors: [
+      'An active hosting-account owner reads an owned domain file, validates a bounded draft, saves against its current revision and restores a kept version through the existing domain .htaccess REST route',
+      'The public verb selects read, validate, save or restore; client account, filesystem path, Host and probe selectors are not accepted',
+      'The current plan denies this contract when either domain-htaccess or the legacy aapanel-url-rewrite feature is disabled; missing feature policy fails closed',
+      'Current account, domain, principal and lifecycle leases are checked by existing API and Agent ports before confined file operations; scoped files read/write permissions remain required',
+      'The hosting owner contract does not grant a team role new authority; aaPanel Nginx/server rewrite tooling remains a separate root-only unqualified capability',
+      'This contract does not supply the optional guarded PHP migration port, modify Nginx includes or assert native delivery qualification from a saved file or mocked validation',
+    ],
+    acceptance: 'For an owned active Apache site, independently observe the actual file read, validate a bounded draft without replacement, save only with the current revision and restore the exact kept content; invalid validation preserves the prior file and a failed site check restores only the still-matching candidate or reports an explicit unknown outcome. Foreign targets, missing policy, either disabled feature key, a disallowed team role, stale revisions and unauthorized file-write scopes are refused before effects. Real serving rewrite behavior, tenant UID/confinement, recovery and all declared profiles still require their independent A35 evidence.',
+  },
+  {
+    tool: {
       ...panel('dns-zone-records', 'domains', 'DNS zone records', 'dns-zone',
         'Read and replace supported DNS records for an accessible zone through the existing zone editor.'),
       featureKey: 'zone-editor',

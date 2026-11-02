@@ -139,7 +139,8 @@ async function geometry(page) {
       if(node.tagName==='BUTTON'){const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);let text;while((text=walker.nextNode()))for(const match of text.textContent.matchAll(/\S+/gu)){const range=document.createRange();range.setStart(text,match.index);range.setEnd(text,match.index+match[0].length);const tops=[...range.getClientRects()].map(r=>r.top).sort((a,b)=>a-b),threshold=Math.max(8,(parseFloat(getComputedStyle(node).lineHeight)||22)/2);let lines=0,last=-Infinity;for(const top of tops)if(top-last>threshold){lines++;last=top}words.push({text:match[0],lines})}}
       return {box:rect(node),words}
     })
-    const saved=root.querySelector('[data-contact-saved]'),savedTechnical=saved?{direction:getComputedStyle(saved).direction,isolation:getComputedStyle(saved).unicodeBidi}:null
+    // The container keeps the locale label edge; only the saved email itself is an isolated LTR technical value.
+    const saved=root.querySelector('[data-contact-saved] > bdi'),savedTechnical=saved?{direction:getComputedStyle(saved).direction,isolation:getComputedStyle(saved).unicodeBidi}:null
     return {width:innerWidth,scrollWidth:document.documentElement.scrollWidth,direction:getComputedStyle(root).direction,field:{gap:bounds.top-text.bottom,alignment:Math.abs((rtl?text.right:text.left)-edge),height:bounds.height,direction:style.direction,textAlign:style.textAlign,resolvedAnchor:anchor,fontFamily:style.fontFamily},padding,groups,formGroups,sections,fieldSiblings:[],targets,savedTechnical,fonts:{status:document.fonts.status,faces:[...document.fonts].map(face=>({family:face.family,status:face.status}))}}
   })
 }

@@ -13,6 +13,19 @@ const qualified: CatalogTool[] = tools.map(tool => tool.status === 'out-of-scope
 const routes = ['/mail/search', '/mail/settings/calendars', '/mail/compose']
 const features = ['webmail-message-read', 'webmail-attachments', 'webmail-search', 'webmail-compose', 'webmail-dav-collections', 'webmail-dav-sharing', 'webmail-dav-config']
 const unqualified: CatalogTool[] = qualified.map(tool => features.includes(tool.id) ? { ...tool, status: 'implemented', delivery: { status: 'implemented', reason: 'Deliberately unqualified test capability.', evidence: [] } } : tool)
+// Only the admitted session menu may display this supplied mailbox identity.
+// Keep the original whole-document payload exclusion after removing that one menu.
+const expectMailboxOnlyInChrome = (html: string, mailbox: string, marker: string): void => {
+  const document = new DOMParser().parseFromString(html, 'text/html')
+  const menus = document.querySelectorAll('details[data-user-menu]')
+  expect(menus).toHaveLength(1)
+  const menu = menus.item(0)
+  expect(menu?.closest('header')).not.toBeNull()
+  expect(menu?.closest('[data-tool-availability="unverified"]')).toBeNull()
+  expect(menu?.textContent).toContain(mailbox)
+  menu?.remove()
+  expect(document.documentElement.outerHTML).not.toContain(marker)
+}
 const page = (route: string, locale: 'en' | 'ar', extra: Partial<MailSurfaceProps> = {}) => new DOMParser().parseFromString(renderMailSurface({ activeRoute: route, locale, mailbox, catalog: qualified, visibility, ...extra }), 'text/html')
 const shell = (document: Document) => {
   expect(document.querySelectorAll('main')).toHaveLength(1); expect(document.querySelectorAll('h1')).toHaveLength(1)
@@ -183,7 +196,7 @@ describe('registered mail app documents and qualified attachment reads', () => {
     expect(readDenied.response.status).toBe(200)
     expect(readDenied.document.querySelector('[data-mail-unavailable="search"]')).not.toBeNull()
     expect(readDenied.document.querySelector<HTMLElement>('[data-mail-search-workspace]')!.dataset.searchMailbox).toBe('')
-    expect(readDenied.document.body.textContent).not.toContain('private-app-mailbox-marker')
+    expectMailboxOnlyInChrome(readDenied.document.documentElement.outerHTML, 'private-app-mailbox-marker@example.test', 'private-app-mailbox-marker')
     const attachmentDenied = await parseResponse('/mail/search', locale, { visibility: { ...visibility, disabledFeatures: new Set(['webmail-attachments']) } })
     expect(attachmentDenied.document.querySelector<HTMLElement>('[data-mail-search-workspace]')!.dataset.searchEnabled).toBe('true')
     expect(attachmentDenied.document.querySelector<HTMLElement>('[data-mail-attachments]')!.dataset.attachmentCanRead).toBe('false')
@@ -204,7 +217,7 @@ describe('registered mail app documents and qualified attachment reads', () => {
     expect(document.querySelector('[data-tool-availability="unverified"]')).not.toBeNull()
     expect(document.querySelector('[data-mail-unavailable="search"]')).not.toBeNull()
     expect(document.querySelector<HTMLElement>('[data-mail-search-workspace]')!.dataset.searchEnabled).toBe('false')
-    expect(document.body.textContent).not.toContain('private-unqualified-mailbox-marker')
+    expectMailboxOnlyInChrome(document.documentElement.outerHTML, 'private-unqualified-mailbox-marker@example.test', 'private-unqualified-mailbox-marker')
     for (const tag of document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select')) if (tag.closest('[data-mail-unavailable="search"]')) expect(tag.disabled).toBe(true)
   })
 

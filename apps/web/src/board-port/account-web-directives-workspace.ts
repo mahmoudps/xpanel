@@ -1,3 +1,5 @@
+import { webDirectiveClientTemplates } from './account-directive-client-templates.ts'
+import { redirectClientTemplates } from './domain-client-templates.ts'
 import type { Domain } from '@xpanel/core'
 import { type Locale, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
@@ -76,7 +78,7 @@ function render(page: AccountWebDirectivePage, input: AccountWebDirectivesInput)
     <section class="xp-wd__card" aria-labelledby="${id}-save"><h2 id="${id}-save">${t(msgid('Save changes'))}</h2><ol><li>${t(msgid('Re-reads the current file and its revision.'))}</li><li>${t(msgid('Replaces only the xPanel block for this page; other lines stay byte-for-byte.'))}</li><li>${t(msgid('Keeps the previous file, validates with the protected Apache parser and checks the site locally. A failed check restores the kept file.'))}</li></ol>
       <div class="xp-wd__actions"><button type="button" class="xp-btn" data-wd-refresh disabled>${t(msgid('Read saved rules'))}</button><button type="button" class="xp-btn" data-wd-discard disabled>${t(msgid('Discard draft'))}</button><button type="button" class="xp-btn xp-btn--primary" data-wd-save disabled>${t(msgid('Save and check site'))}</button></div>
       <ul data-wd-issues><li>${t(msgid('Diagnostics have not been read.'))}</li></ul></section>
-    ${notes}</section>`
+    ${notes}${webDirectiveClientTemplates()}${page === 'redirects' ? redirectClientTemplates() : ''}</section>`
 }
 
 export const renderAccountErrorPagesWorkspace = (input: AccountWebDirectivesInput): string => render('error-pages', input)

@@ -51,6 +51,8 @@ export interface NativePeerIdentityAddon {
   closeListener(listener: unknown): void
   closeFd(fd: number): void
   getSocketPeerCred(fd: number): KernelPeerCredentials
+  /** Absent in older prebuilts; consumers must refuse this feature when unavailable. */
+  getUnixSocketPeer?(fd: number): unknown
 }
 
 const verifiedRequestPeers = new WeakMap<Request, VerifiedRequestPeerContext>()
@@ -272,6 +274,14 @@ export const PEER_IDENTITY_C_SOURCE = /* c */ `
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <limits.h>
+#include <poll.h>
+#include <time.h>
+#include <netinet/tcp.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#include <linux/sock_diag.h>
+#include <linux/unix_diag.h>
 
 typedef struct napi_env__* napi_env;
 typedef struct napi_value__* napi_value;
@@ -330,6 +340,7 @@ extern napi_status napi_create_object(napi_env env, napi_value* result);
 extern napi_status napi_create_int32(napi_env env, int32_t value, napi_value* result);
 extern napi_status napi_create_uint32(napi_env env, uint32_t value, napi_value* result);
 extern napi_status napi_get_value_int32(napi_env env, napi_value value, int32_t* result);
+extern napi_status napi_get_value_double(napi_env env, napi_value value, double* result);
 extern napi_status napi_get_value_uint32(napi_env env, napi_value value, uint32_t* result);
 extern napi_status napi_get_value_string_utf8(napi_env env, napi_value value, char* buf, size_t bufsize, size_t* result);
 extern napi_status napi_set_named_property(napi_env env, napi_value object, const char* utf8name, napi_value value);
@@ -741,6 +752,144 @@ static napi_value napi_get_socket_peer_cred(napi_env env, napi_callback_info inf
   return obj;
 }
 
+/* Read-only exact AF_UNIX diagnostic query for a caller-held connected FD. */
+static int64_t peer_monotonic_ms(void) {
+  struct timespec now;
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return -1;
+  return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+static napi_value napi_get_unix_socket_peer(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1];
+  double supplied_fd = -1;
+  int held_fd = -1, diagnostic_fd = -1;
+  uint32_t peer_inode = 0;
+  uint64_t cookie = 0, final_cookie = 0;
+  struct stat initial, final;
+  if (getuid() != 0 || geteuid() != 0 ||
+      napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_value_double(env, argv[0], &supplied_fd) != napi_ok ||
+      supplied_fd != supplied_fd || supplied_fd < 0 || supplied_fd > INT_MAX) {
+    napi_throw_error(env, "PRECONDITION_FAILED", "a root-owned connected Unix socket FD is required");
+    return NULL;
+  }
+  int original_fd = (int)supplied_fd;
+  if (supplied_fd != (double)original_fd) goto unavailable;
+  held_fd = fcntl(original_fd, F_DUPFD_CLOEXEC, 3);
+  if (held_fd < 0 || fstat(held_fd, &initial) != 0 || !S_ISSOCK(initial.st_mode) ||
+      initial.st_ino == 0 || (uint64_t)initial.st_ino > UINT32_MAX) goto unavailable;
+  int socket_type = 0;
+  socklen_t size = sizeof(socket_type);
+  struct sockaddr_storage address;
+  socklen_t address_size = sizeof(address);
+  memset(&address, 0, sizeof(address));
+  if (getsockopt(held_fd, SOL_SOCKET, SO_TYPE, &socket_type, &size) != 0 ||
+      size != sizeof(socket_type) || socket_type != SOCK_STREAM ||
+      getsockname(held_fd, (struct sockaddr*)&address, &address_size) != 0 || address.ss_family != AF_UNIX) goto unavailable;
+  address_size = sizeof(address);
+  if (getpeername(held_fd, (struct sockaddr*)&address, &address_size) != 0 || address.ss_family != AF_UNIX) goto unavailable;
+  size = sizeof(cookie);
+  if (getsockopt(held_fd, SOL_SOCKET, SO_COOKIE, &cookie, &size) != 0 || size != sizeof(cookie) || cookie == 0 || cookie == UINT64_MAX) goto unavailable;
+
+  diagnostic_fd = socket(AF_NETLINK, SOCK_RAW | SOCK_NONBLOCK | SOCK_CLOEXEC, NETLINK_SOCK_DIAG);
+  if (diagnostic_fd < 0) goto unavailable;
+  struct sockaddr_nl local, kernel;
+  memset(&local, 0, sizeof(local)); memset(&kernel, 0, sizeof(kernel));
+  local.nl_family = AF_NETLINK; kernel.nl_family = AF_NETLINK;
+  if (bind(diagnostic_fd, (struct sockaddr*)&local, sizeof(local)) != 0) goto unavailable;
+  struct { struct nlmsghdr header; struct unix_diag_req request; } query;
+  memset(&query, 0, sizeof(query));
+  query.header.nlmsg_len = NLMSG_LENGTH(sizeof(query.request));
+  query.header.nlmsg_type = SOCK_DIAG_BY_FAMILY;
+  query.header.nlmsg_flags = NLM_F_REQUEST;
+  query.header.nlmsg_seq = 1;
+  query.request.sdiag_family = AF_UNIX;
+  query.request.udiag_states = UINT32_MAX;
+  query.request.udiag_ino = (uint32_t)initial.st_ino;
+  query.request.udiag_show = UDIAG_SHOW_PEER;
+  query.request.udiag_cookie[0] = (uint32_t)cookie;
+  query.request.udiag_cookie[1] = (uint32_t)(cookie >> 32);
+  if (sendto(diagnostic_fd, &query, query.header.nlmsg_len, MSG_DONTWAIT,
+      (struct sockaddr*)&kernel, sizeof(kernel)) != (ssize_t)query.header.nlmsg_len) goto unavailable;
+  int64_t started = peer_monotonic_ms();
+  if (started < 0) goto unavailable;
+  const int64_t deadline = started + 250;
+  bool found = false;
+  for (unsigned attempts = 0; attempts < 8 && !found; attempts++) {
+    int64_t now = peer_monotonic_ms();
+    if (now < 0 || now >= deadline) goto unavailable;
+    struct pollfd ready = { diagnostic_fd, POLLIN, 0 };
+    int polled = poll(&ready, 1, (int)(deadline - now));
+    if (polled < 0 && errno == EINTR) continue;
+    if (polled != 1 || !(ready.revents & POLLIN) || (ready.revents & (POLLERR | POLLHUP | POLLNVAL))) goto unavailable;
+    union { struct nlmsghdr alignment; unsigned char bytes[8192]; } response;
+    struct sockaddr_nl sender;
+    struct iovec vector = { response.bytes, sizeof(response.bytes) };
+    struct msghdr message;
+    memset(&sender, 0, sizeof(sender)); memset(&message, 0, sizeof(message));
+    message.msg_name = &sender; message.msg_namelen = sizeof(sender);
+    message.msg_iov = &vector; message.msg_iovlen = 1;
+    ssize_t received = recvmsg(diagnostic_fd, &message, MSG_DONTWAIT);
+    if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) continue;
+    if (received <= 0 || received > (ssize_t)sizeof(response.bytes) || (message.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) ||
+        message.msg_namelen != sizeof(sender) || sender.nl_family != AF_NETLINK || sender.nl_pid != 0) goto unavailable;
+    int remaining = (int)received;
+    struct nlmsghdr* header = (struct nlmsghdr*)response.bytes;
+    for (; NLMSG_OK(header, remaining); header = NLMSG_NEXT(header, remaining)) {
+      if (found || header->nlmsg_seq != query.header.nlmsg_seq || header->nlmsg_type != SOCK_DIAG_BY_FAMILY ||
+          header->nlmsg_len < NLMSG_LENGTH(sizeof(struct unix_diag_msg))) goto unavailable;
+      struct unix_diag_msg* record = (struct unix_diag_msg*)NLMSG_DATA(header);
+      if (record->udiag_family != AF_UNIX || record->udiag_type != SOCK_STREAM || record->udiag_state != TCP_ESTABLISHED ||
+          record->udiag_ino != (uint32_t)initial.st_ino || record->udiag_cookie[0] != (uint32_t)cookie ||
+          record->udiag_cookie[1] != (uint32_t)(cookie >> 32)) goto unavailable;
+      int attributes = (int)(header->nlmsg_len - NLMSG_LENGTH(sizeof(*record)));
+      struct rtattr* attribute = (struct rtattr*)((unsigned char*)record + NLMSG_ALIGN(sizeof(*record)));
+      bool has_peer = false;
+      for (; RTA_OK(attribute, attributes); attribute = RTA_NEXT(attribute, attributes)) {
+        if (attribute->rta_type == UNIX_DIAG_PEER) {
+          if (has_peer || RTA_PAYLOAD(attribute) != sizeof(peer_inode)) goto unavailable;
+          memcpy(&peer_inode, RTA_DATA(attribute), sizeof(peer_inode)); has_peer = true;
+        } else if (attribute->rta_type == UNIX_DIAG_SHUTDOWN) {
+          unsigned char shutdown_state = 0;
+          if (RTA_PAYLOAD(attribute) != sizeof(shutdown_state)) goto unavailable;
+          memcpy(&shutdown_state, RTA_DATA(attribute), sizeof(shutdown_state));
+          if (shutdown_state != 0) goto unavailable;
+        }
+      }
+      if (attributes != 0 || !has_peer || peer_inode == 0 || peer_inode == (uint32_t)initial.st_ino) goto unavailable;
+      found = true;
+    }
+    if (remaining != 0) goto unavailable;
+  }
+  if (!found || fstat(held_fd, &final) != 0 || final.st_dev != initial.st_dev || final.st_ino != initial.st_ino) goto unavailable;
+  size = sizeof(final_cookie);
+  if (getsockopt(held_fd, SOL_SOCKET, SO_COOKIE, &final_cookie, &size) != 0 || size != sizeof(final_cookie) || final_cookie != cookie) goto unavailable;
+  int64_t finished = peer_monotonic_ms();
+  if (finished < 0 || finished >= deadline) goto unavailable;
+  unsigned char peek;
+  ssize_t available = recv(held_fd, &peek, 1, MSG_PEEK | MSG_DONTWAIT);
+  if (available == 0 || (available < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) goto unavailable;
+  close(diagnostic_fd); diagnostic_fd = -1; close(held_fd); held_fd = -1;
+  napi_value output, local_value, peer_value, low_value, high_value;
+  if (napi_create_object(env, &output) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)initial.st_ino, &local_value) != napi_ok ||
+      napi_create_uint32(env, peer_inode, &peer_value) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)cookie, &low_value) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)(cookie >> 32), &high_value) != napi_ok ||
+      napi_set_named_property(env, output, "socketInode", local_value) != napi_ok ||
+      napi_set_named_property(env, output, "peerInode", peer_value) != napi_ok ||
+      napi_set_named_property(env, output, "cookieLo", low_value) != napi_ok ||
+      napi_set_named_property(env, output, "cookieHi", high_value) != napi_ok) goto unavailable;
+  return output;
+
+unavailable:
+  if (diagnostic_fd >= 0) close(diagnostic_fd);
+  if (held_fd >= 0) close(held_fd);
+  napi_throw_error(env, "UNIX_SOCKET_RELATION_UNAVAILABLE", "the held Unix socket has no verified live kernel peer relation");
+  return NULL;
+}
+
 static napi_value init_peer_identity(napi_env env, napi_value exports) {
   napi_property_descriptor descriptors[] = {
     { "openListener", NULL, napi_open_listener, NULL, NULL, NULL, napi_default, NULL },
@@ -749,6 +898,7 @@ static napi_value init_peer_identity(napi_env env, napi_value exports) {
     { "closeListener", NULL, napi_close_listener, NULL, NULL, NULL, napi_default, NULL },
     { "closeFd", NULL, napi_close_fd, NULL, NULL, NULL, napi_default, NULL },
     { "getSocketPeerCred", NULL, napi_get_socket_peer_cred, NULL, NULL, NULL, napi_default, NULL },
+    { "getUnixSocketPeer", NULL, napi_get_unix_socket_peer, NULL, NULL, NULL, napi_default, NULL },
   };
   napi_define_properties(env, exports, sizeof(descriptors) / sizeof(descriptors[0]), descriptors);
   return exports;

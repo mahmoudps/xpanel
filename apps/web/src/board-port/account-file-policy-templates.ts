@@ -1,0 +1,8 @@
+export function filePolicyClientTemplates(kind: string): string {
+ const t = (n: string, h: string) => `<template data-xp-template="${n}">${h}</template>`
+ const v = (n: string) => `<bdi dir="ltr" class="xp-mono" data-xp-slot="${n}"></bdi>`
+ if (kind === 'htaccess') return t('htaccess-php-row', `<tr><td>${v('directive')}</td><td>${v('value')}</td><td data-xp-slot="status"></td></tr>`) + t('htaccess-php-empty', '<tr><td colspan="3" data-xp-slot="message"></td></tr>') + t('htaccess-issue', '<li data-xp-slot="message"></li>') + t('htaccess-version-row', `<tr><td><bdi dir="ltr" class="xp-mono"><time data-xp-slot="when"></time></bdi></td><td data-xp-slot="actor"></td><td>${v('bytes')}</td><td data-xp-slot="state"></td><td><button type="button" class="xp-btn" data-xp-slot="restore" disabled></button></td></tr>`) + t('htaccess-version-empty', '<tr><td colspan="5" data-xp-slot="message"></td></tr>')
+ const ns = kind === 'error-pages' ? ['code','path','state'] : kind === 'mime-types' ? ['mime','extensions'] : ['address']
+ const rows = ['redirects','hotlink','indexes'].includes(kind) ? '' : t(`wd-${kind}-row`, `<tr>${ns.map(n => `<td>${v(n)}</td>`).join('')}<td data-xp-slot="actions"></td></tr>`) + t(`wd-${kind}-empty`, `<tr><td colspan="${ns.length+1}" data-xp-slot="message"></td></tr>`) + t(`wd-${kind}-error`, `<tr><td colspan="${ns.length+1}" data-xp-slot="message"></td></tr>`)
+ return rows + t('wd-policy-action','<button type="button" class="xp-btn" data-xp-slot="label" disabled></button>') + t('wd-policy-summary',`<tr><td data-xp-slot="label"></td><td>${v('value')}</td></tr>`) + t('wd-policy-notice','<p data-xp-slot="message"></p>') + t('wd-policy-issue','<li data-xp-slot="message"></li>')
+}

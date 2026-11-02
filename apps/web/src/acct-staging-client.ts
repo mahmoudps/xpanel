@@ -2,6 +2,10 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+const clientTemplate = canonicalClientTemplate
+const clientTemplateSlot = canonicalClientTemplateSlot
+const cloneClientTemplate = canonicalCloneClientTemplate
 const displayDateTime = formatDisplayDateTime
 export type StagingRecordView = { domainId: string; domain: string; state: 'ready' | 'incomplete' | 'unknown'; files: number; createdAt: string; createdBy: string; promotedAt: string | null }
 export type StagingListView = { domains: { id: string; name: string; kind: string }[]; records: StagingRecordView[]; revision: string; agent: boolean }
@@ -49,6 +53,15 @@ function bindAccountStaging(askDialog: ((options: Record<string, unknown>) => Pr
     const find = <T extends HTMLElement>(name: string): T | null => root.querySelector<T>('[data-staging-' + name + ']')
     const status = find('status'), rowsBody = find('rows'), refresh = find<HTMLButtonElement>('refresh'), reviewBody = find('review'), ack = find<HTMLInputElement>('ack'), promote = find<HTMLButtonElement>('promote'), resultsBody = find('results')
     if (!status || !rowsBody || !refresh || !reviewBody || !ack || !promote || !resultsBody) return
+    const templates = {
+      row: clientTemplate(root, 'staging-row'), action: clientTemplate(root, 'staging-action'),
+      review: clientTemplate(root, 'staging-review'), result: clientTemplate(root, 'staging-result'),
+      emptyList: clientTemplate(root, 'staging-empty-list'), emptyDetail: clientTemplate(root, 'staging-empty-detail'),
+    }
+    const rowSlots = ['name', 'path', 'state', 'files', 'created', 'promoted', 'actions'] as const
+    cloneClientTemplate(templates.row, 'tr', rowSlots); cloneClientTemplate(templates.action, 'button', ['label'])
+    cloneClientTemplate(templates.review, 'tr', ['path', 'change', 'size']); cloneClientTemplate(templates.result, 'tr', ['path', 'change', 'result'])
+    cloneClientTemplate(templates.emptyList, 'tr', ['message']); cloneClientTemplate(templates.emptyDetail, 'tr', ['message'])
     const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const accountId = root.dataset.account ?? ''
@@ -71,10 +84,9 @@ function bindAccountStaging(askDialog: ((options: Record<string, unknown>) => Pr
     const element = <K extends keyof HTMLElementTagNameMap>(tag: K, value?: string): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (value !== undefined) node.textContent = value; return node }
     const technical = (value: string): HTMLElement => { const node = element('bdi', value); node.dir = 'ltr'; return node }
     const size = (bytes: number): string => bytes < 1024 ? bytes + ' B' : bytes < 1048576 ? (bytes / 1024).toFixed(1) + ' KiB' : (bytes / 1048576).toFixed(1) + ' MiB'
-    const cell = (...nodes: (Node | string)[]): HTMLTableCellElement => { const td = element('td'); td.append(...nodes); return td }
-    const fill = (body: HTMLElement, rows: HTMLTableRowElement[], empty: string, columns: number): void => { if (rows.length) { body.replaceChildren(...rows); return }; const row = element('tr'), td = cell(empty); td.colSpan = columns; row.append(td); body.replaceChildren(row) }
+    const fill = (body: HTMLElement, rows: HTMLElement[], empty: string, _columns: number): void => { if (rows.length) { body.replaceChildren(...rows); return }; const row = cloneClientTemplate(body === rowsBody ? templates.emptyList : templates.emptyDetail, 'tr', ['message']); clientTemplateSlot(row, 'message', 'td').textContent = empty; body.replaceChildren(row) }
     const fact = (name: string, value: Node | string): void => { find(name)?.replaceChildren(value) }
-    const button = (label: string, action: string, domainId: string, name: string): HTMLButtonElement => { const node = element('button', label); node.type = 'button'; node.className = 'xp-btn'; node.dataset.action = action; node.dataset.domain = domainId; node.setAttribute('aria-label', label + ' ' + name); return node }
+    const button = (label: string, action: string, domainId: string, name: string): HTMLButtonElement => { const node = cloneClientTemplate(templates.action, 'button', ['label']) as HTMLButtonElement; clientTemplateSlot(node, 'label').textContent = label; node.dataset.action = action; node.dataset.domain = domainId; node.setAttribute('aria-label', label + ' ' + name); return node }
     const sync = (): void => {
       refresh.disabled = busy
       rowsBody.querySelectorAll<HTMLButtonElement>('button[data-action]').forEach(node => { node.disabled = busy || !list?.agent || (node.dataset.action === 'discard' && typeof askDialog !== 'function') })
@@ -86,12 +98,11 @@ function bindAccountStaging(askDialog: ((options: Record<string, unknown>) => Pr
     const paint = (view: StagingListView): void => {
       list = view
       fill(rowsBody, view.domains.map(domain => {
-        const record = view.records.find(item => item.domainId === domain.id), row = element('tr'), actions = element('div')
-        actions.className = 'xp-account-staging__actions'
+        const record = view.records.find(item => item.domainId === domain.id), row = cloneClientTemplate(templates.row, 'tr', rowSlots), actions = clientTemplateSlot(row, 'actions')
         if (!record) actions.append(button(t('Create staging copy'), 'copy', domain.id, domain.name))
         else { if (record.state === 'ready') actions.append(button(t('Review changes'), 'review', domain.id, domain.name)); actions.append(button(t('Discard'), 'discard', domain.id, domain.name)) }
-        row.append(cell(technical(domain.name)), cell(record ? technical('staging/' + domain.name) : t('None')), cell(record ? t(STATES[record.state]!) : t('No staging copy')), cell(record ? technical(String(record.files)) : ''),
-          cell(record ? technical(displayDateTime(record.createdAt)) : ''), cell(record?.promotedAt ? technical(displayDateTime(record.promotedAt)) : record ? t('Never') : ''), cell(actions))
+        for (const [slot, text] of [['name', domain.name], ['path', record ? 'staging/' + domain.name : t('None')], ['state', record ? t(STATES[record.state]!) : t('No staging copy')], ['files', record ? String(record.files) : '']] as const) clientTemplateSlot(row, slot).textContent = text
+        for (const [slot, stamp] of [['created', record?.createdAt], ['promoted', record?.promotedAt]] as const) { const time = clientTemplateSlot(row, slot, 'time') as HTMLTimeElement; if (stamp) time.dateTime = stamp; else time.removeAttribute('datetime'); time.textContent = stamp ? displayDateTime(stamp) : slot === 'promoted' && record ? t('Never') : '' }
         return row
       }), t('This account has no site that can be staged.'), 7)
       sync()
@@ -121,7 +132,7 @@ function bindAccountStaging(askDialog: ((options: Record<string, unknown>) => Pr
       if (node.dataset.action === 'review') void run(t('Comparing the live site with the staging copy…'), async () => {
         const view = readStagingReply('review', await transport!('POST', base + '/review', {}), { accountId, domainId })
         reviewed = { ...view, domainId }; ack.checked = false
-        fill(reviewBody, view.rows.map(row => { const line = element('tr'); line.append(cell(technical(row.path)), cell(t(CHANGES[row.change]!)), cell(technical(size(row.bytes)))); return line }), t('The staging copy matches the live site.'), 3)
+        fill(reviewBody, view.rows.map(row => { const line = cloneClientTemplate(templates.review, 'tr', ['path', 'change', 'size']); for (const [slot, text] of [['path', row.path], ['change', t(CHANGES[row.change]!)], ['size', size(row.bytes)]] as const) clientTemplateSlot(line, slot).textContent = text; return line }), t('The staging copy matches the live site.'), 3)
         fact('domain', technical(name)); fact('live', technical(String(view.liveFiles))); fact('staging', technical(String(view.stagingFiles))); fact('changes', technical(String(view.rows.length)))
         note('read', view.links ? t('The staging copy contains links; remove them before promoting.') : view.rows.length ? t('Review the changes, confirm them, then promote.') : t('The staging copy matches the live site.'))
       })
@@ -142,7 +153,7 @@ function bindAccountStaging(askDialog: ((options: Record<string, unknown>) => Pr
       if (promote.disabled || !current || !list) return
       void run(t('Promoting the changes to the live site…'), async () => {
         const view = readStagingReply('promote', await transport!('POST', '/api/account/staging/' + current.domainId + '/promote', { expectedRevision: current.revision, expectedRecordsRevision: list!.revision }), { accountId, domainId: current.domainId, revision: current.revision })
-        fill(resultsBody, view.results.map(row => { const line = element('tr'); line.dataset.result = row.result; line.append(cell(technical(row.path)), cell(t(CHANGES[row.change] ?? row.change)), cell(t(RESULTS[row.result]!) + (row.verificationRequired ? ' ' + t('Verification required.') : ''))); return line }), t('No change has run.'), 3)
+        fill(resultsBody, view.results.map(row => { const line = cloneClientTemplate(templates.result, 'tr', ['path', 'change', 'result']); line.dataset.result = row.result; for (const [slot, text] of [['path', row.path], ['change', t(CHANGES[row.change] ?? row.change)], ['result', t(RESULTS[row.result]!) + (row.verificationRequired ? ' ' + t('Verification required.') : '')]] as const) clientTemplateSlot(line, slot).textContent = text; return line }), t('No change has run.'), 3)
         invalidate()
         changed(view, view.outcome === 'promoted' ? t('The changes are live. Replaced and removed files are in the trash.') : t('Some changes were not applied. Review the changes again.'))
       })
@@ -152,4 +163,4 @@ function bindAccountStaging(askDialog: ((options: Record<string, unknown>) => Pr
   })
 }
 
-export const ACCT_STAGING_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const readStagingReply=${readStagingReply.toString()};return ${bindAccountStaging.toString()};})()`
+export const ACCT_STAGING_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readStagingReply=${readStagingReply.toString()};return ${bindAccountStaging.toString()};})()`

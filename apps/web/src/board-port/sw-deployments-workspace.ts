@@ -1,3 +1,4 @@
+import { classicSoftwareOperationTemplates } from './software-operation-client-templates.ts'
 import { type Locale, type MessageValues, SOURCE_LOCALE, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -23,5 +24,5 @@ export function renderSwDeploymentsWorkspace(input: { locale: Locale; canRead: b
     <p class="xp-help">${t('Deploying refuses uncommitted changes, a moved commit or a changed repository list, and reports success only after Git confirms the new commit.')}</p>
     <div class="xp-whm-detail-actions"><button type="button" class="xp-btn xp-btn--primary" data-sw-dep-pull disabled>${t('Deploy latest from origin')}</button><a class="xp-btn" href="/whm/audit${lang}">${t('Audit log')}</a></div>
   </section>
-</div>`
+${classicSoftwareOperationTemplates('deployments')}</div>`
 }
