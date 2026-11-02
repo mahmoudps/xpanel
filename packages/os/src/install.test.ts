@@ -182,16 +182,13 @@ describe('Ubuntu install plan', () => {
 })
 
 describe('RHEL install plan', () => {
-  it('rejects the itk engine with ENGINE_UNAVAILABLE on every EL release', () => {
+  it('plans itk on every EL release from the source build inputs and loads it on prefork', () => {
     for (const p of EL) {
-      const e = error(() => installPlan(p, full))
-      expect(e.code).toBe('ENGINE_UNAVAILABLE')
-      expect(e.status).toBe(409)
-      expect(e.detail.apacheMpm).toBe('itk')
-      expect(error(() => installPlan(p, { ...full, apacheMpm: 'itk' })).code).toBe('ENGINE_UNAVAILABLE')
-      expect(error(() => apacheMpmActions(p, 'itk')).code).toBe('ENGINE_UNAVAILABLE')
-      expect(error(() => apacheMpmFiles(p, 'itk')).code).toBe('ENGINE_UNAVAILABLE')
-      expect(error(() => installFiles(p, full)).code).toBe('ENGINE_UNAVAILABLE')
+      expect(installed(installPlan(p, full))).toEqual(expect.arrayContaining(['httpd', 'httpd-devel', 'libcap-devel', 'redhat-rpm-config', 'make']))
+      expect(apacheMpmActions(p, 'itk')).toEqual([])
+      const [file] = apacheMpmFiles(p, 'itk')
+      expect(file!.content.split('\n').filter(line => line.startsWith('LoadModule'))).toEqual([
+        'LoadModule mpm_prefork_module modules/mod_mpm_prefork.so', 'LoadModule mpm_itk_module modules/mpm_itk.so'])
     }
   })
 
@@ -673,11 +670,11 @@ describe('H02 unified preflight, opt-in services & durable install phase journal
       error(() => verifyInstallPreflight(cleanProbe({ osReleaseText: UBUNTU_2404, detectedProfile: ubuntu22 }))).code,
     ).toBe('UNSUPPORTED_OS')
 
-    // Missing mpm_itk on AlmaLinux 9 / Rocky Linux 9 / CentOS Stream 9
+    // AlmaLinux 9 / Rocky Linux 9 / CentOS Stream 9 still refuse the shared-identity prefork fallback
     for (const elText of [ALMA_9, ROCKY_9, CENTOS_STREAM_9]) {
-      const e = error(() => verifyInstallPreflight(cleanProbe({ osReleaseText: elText, detectedProfile: undefined })))
+      const e = error(() => verifyInstallPreflight(cleanProbe({ osReleaseText: elText, detectedProfile: undefined }), { apacheMpm: 'prefork' }))
       expect(e.code).toBe('ENGINE_UNAVAILABLE')
-      expect(e.message).toContain('refusing shared-identity fallback')
+      expect(e.message).toContain('shared-identity prefork fallback is refused')
     }
 
     // Attempted prefork fallback on Ubuntu

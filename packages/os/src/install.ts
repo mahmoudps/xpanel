@@ -251,8 +251,8 @@ const distroFpmOff = (p: XpanelOsProfile, versions: readonly PhpVersion[]): Inst
 
 /**
  * MPM selection for a fresh install. Debian switches with a2dismod/a2enmod (mpm_itk sits on prefork);
- * EL selects the MPM through the 00-mpm.conf file from apacheMpmFiles(). itk where it is not packaged
- * throws ENGINE_UNAVAILABLE instead of falling back to the shared apache identity.
+ * EL selects the MPM through the 00-mpm.conf file from apacheMpmFiles(); install.sh builds its itk module.
+ * itk where it cannot be provided throws ENGINE_UNAVAILABLE instead of falling back to the shared apache identity.
  */
 export const apacheMpmActions = (profile: XpanelOsProfile, mpm: ApacheMpm): InstallAction[] => {
   assertProfile(profile)
@@ -273,7 +273,9 @@ export const apacheMpmFiles = (profile: XpanelOsProfile, mpm: ApacheMpm): Render
   if (profile.family === 'debian') return []
   return [{
     path: assertAbsolutePath(`${profile.paths.apacheModulesConf}/00-mpm.conf`),
-    content: '# Managed by xPanel: Apache MPM selection.\nLoadModule mpm_prefork_module modules/mod_mpm_prefork.so\n',
+    // install.sh builds mpm_itk.so on EL; itk runs on top of prefork.
+    content: '# Managed by xPanel: Apache MPM selection.\nLoadModule mpm_prefork_module modules/mod_mpm_prefork.so\n'
+      + (mpm === 'itk' ? 'LoadModule mpm_itk_module modules/mpm_itk.so\n' : ''),
     mode: 0o644,
     owner: 'root',
     group: 'root',

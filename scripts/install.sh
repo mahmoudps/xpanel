@@ -272,7 +272,8 @@ fi
 [[ "$PHP_VERSION" == "7.4" ]] && PACKAGES+=("$PHP_JSON_PACKAGE")
 
 if [[ "$OS_FAMILY" == "rhel" && "$APACHE_MPM" == "itk" ]]; then
-  PACKAGES+=(httpd-itk)
+  # EL and EPEL ship no mpm-itk; install_el_mpm_itk builds it with apxs from these inputs.
+  PACKAGES+=(httpd-devel libcap-devel redhat-rpm-config make)
 fi
 
 XPANEL_DIRS=(
@@ -699,6 +700,36 @@ EOF
 
 # Build a native helper from the release source (helpers/<name>/build.mjs), install it root:root 0755 and record its
 # SHA-256 beside it as <target>.sha256 (root:root 0644). The agent uses a helper only while it still matches that digest.
+# Upstream mpm-itk 2.4.7-04 as archived by Debian (orig tarball); the pin is the SHA-256 in Debian's signed source metadata.
+EL_MPM_ITK_URL="https://deb.debian.org/debian/pool/main/m/mpm-itk/mpm-itk_2.4.7-04.orig.tar.gz"
+EL_MPM_ITK_SHA256="609f83e8995416c5491348e07139f26046a579db20cf8488ebf75d314668efcf"
+EL_MPM_ITK_MODULE="/usr/lib64/httpd/modules/mpm_itk.so"
+
+render_el_mpm_conf() {
+  cat <<'EOF'
+# Managed by xPanel: Apache prefork with mpm-itk for per-account process identity.
+LoadModule mpm_prefork_module modules/mod_mpm_prefork.so
+LoadModule mpm_itk_module modules/mpm_itk.so
+EOF
+}
+
+install_el_mpm_itk() {
+  local build
+  build="$(mktemp -d)"
+  if ! curl -fsS --proto =https --max-time 120 -o "$build/mpm-itk.tar.gz" "$EL_MPM_ITK_URL" \
+    || ! printf '%s  %s\n' "$EL_MPM_ITK_SHA256" "$build/mpm-itk.tar.gz" | sha256sum -c --quiet \
+    || ! tar -xzf "$build/mpm-itk.tar.gz" -C "$build" --no-same-owner \
+    || ! (cd "$build"/mpm-itk-2.4.7-04 && ./configure --with-apxs=/usr/bin/apxs > /dev/null && make > /dev/null); then
+    rm -rf -- "$build"
+    die "Apache mpm-itk could not be fetched, verified or built."
+  fi
+  install -o root -g root -m 0755 -- "$build"/mpm-itk-2.4.7-04/.libs/mpm_itk.so "$EL_MPM_ITK_MODULE"
+  rm -rf -- "$build"
+  write_config /etc/httpd/conf.modules.d/00-mpm.conf render_el_mpm_conf 0644
+  httpd -t > /dev/null 2>&1 || die "Apache rejected the prefork and mpm-itk configuration."
+  httpd -M 2>/dev/null | grep -q ' mpm_itk_module ' || die "Apache did not load mpm-itk."
+}
+
 install_native_helper() {
   local name="$1" target="$2" build digest
   build="$(mktemp -d)"
@@ -1022,6 +1053,11 @@ else
   dnf install -y "${EPEL_PACKAGES[@]}"
   dnf install -y "$REMI_RELEASE_PACKAGE"
   dnf install -y --setopt=install_weak_deps=False "${PACKAGES[@]}"
+fi
+
+if [[ "$OS_FAMILY" == "rhel" && "$APACHE_MPM" == "itk" ]]; then
+  echo "[2a/6] Building Apache mpm-itk from its pinned upstream release..."
+  install_el_mpm_itk
 fi
 
 echo "[2b/6] Opening /var/lib/xpanel so nginx can serve ACME HTTP-01 challenges..."

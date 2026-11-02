@@ -39,8 +39,8 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
       ftp: ['pure-ftpd'],
       sshd: ['openssh-server'],
       nftables: ['nftables'],
-      // no maintained mpm-itk build exists in EL9/EL10 base or EPEL; see itkAvailable()
-      'apache-itk': [],
+      // EL and EPEL ship no mpm-itk: install.sh builds the pinned upstream release with apxs from these inputs.
+      'apache-itk': ['httpd-devel', 'libcap-devel', 'redhat-rpm-config', 'make'],
       // suexec ships inside httpd itself
       'apache-suexec': ['httpd'],
       'apache-fcgi': ['mod_fcgid'],
