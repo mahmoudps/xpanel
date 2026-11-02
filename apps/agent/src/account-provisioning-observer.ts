@@ -186,7 +186,9 @@ export function createReadonlyAccountProvisioningObserver(options: ReadonlyAccou
       await context.assertAuthority()
       if (context.signal.aborted || now() >= end) observationFailed('observation_authority_or_deadline')
     }
-    const checked = async <T>(work: () => Promise<T>): Promise<T> => { await guard(); const value = await work(); await guard(); return value }
+    // Observation reads have no effects: authority is checked once after each read, which also rejects a late result.
+    // Each check re-reads the whole operation authority, so checking before every read too spent the held request's deadline.
+    const checked = async <T>(work: () => Promise<T>): Promise<T> => { const value = await work(); await guard(); return value }
     return { guard, checked }
   }
   const bound = (input: AvailableInput): void => {
@@ -209,14 +211,16 @@ export function createReadonlyAccountProvisioningObserver(options: ReadonlyAccou
   }
   return {
     async assertAvailable(input, context) {
-      const http = producer(), { checked } = operation(context)
+      const http = producer(), { checked, guard } = operation(context)
       bound(input)
+      await guard()
       await checked(() => primary(input))
       await checked(() => http.available(input, context))
     },
     async observe(input: ObservationInput, context) {
       const http = producer(), { checked, guard } = operation(context)
       bound(input)
+      await guard()
       const domain = await checked(() => primary(input)), unit = system.fpmUnitName(input.account.username, domain.php.version)
       await checked(() => http.available(input, context))
       const generation = input.reconciliation.generation
@@ -290,8 +294,7 @@ export function createReadonlyAccountProvisioningObserver(options: ReadonlyAccou
         await checked(() => heldResponse.assertCurrent())
         const heldProcess = await acquire(() => (options.openProcessFiles ?? openNativeProvisioningProcess)(heldResponse.pid), acquired => { processFiles = acquired })
         const snapshot = async () => {
-          const stat = await checked(() => heldProcess.read('stat')), status = await checked(() => heldProcess.read('status')),
-            cgroup = await checked(() => heldProcess.read('cgroup'))
+          const [stat, status, cgroup] = await checked(() => Promise.all([heldProcess.read('stat'), heldProcess.read('status'), heldProcess.read('cgroup')]))
           await checked(() => heldProcess.assertCurrent())
           return parseProvisioningProcessFiles(heldResponse.pid, { stat, status, cgroup })
         }
