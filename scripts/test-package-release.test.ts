@@ -157,22 +157,8 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
     }
   })
 
-  it('builds a deterministic, signed release bundle with verified entrypoints, systemd units, migrations, and SBOM', { tags: ['slow'] }, async () => {
-    const outDir = makeTempDir()
-    const signingKey = 'xpanel-release-signing-key-2026-10-22'
-    const built = await buildReleaseArtifact({
-      outputDir: outDir,
-      version: '0.1.0',
-      signingKey,
-      keyId: 'release-key-1',
-    })
-
-    expect(built.version).toBe('0.1.0')
-    expect(built.schemaVersion).toBeGreaterThan(0)
-    expect(existsSync(built.stagingDir)).toBe(true)
-    expect(built.archivePath && existsSync(built.archivePath)).toBe(true)
-    expect(built.archiveSha256).toMatch(/^[a-f0-9]{64}$/)
-
+  it('stages the pinned runtime contract and the systemd identity contract from the real root files and units', () => {
+    const built = signedReleaseFixture!
     // Verify pinned runtime contract in manifest
     expect(built.manifest.runtime).toEqual({
       nodeVersion: '26.12.1',
@@ -180,18 +166,6 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
       typescriptVersion: '7.0.2',
       executionMode: 'node-strip-types-source',
     })
-
-    // Verify all required entrypoints and systemd units are present in manifest and staging
-    const filePaths = new Set(built.manifest.files.map((f: { path: string }) => f.path))
-    for (const ep of REQUIRED_RELEASE_ENTRYPOINTS) {
-      expect(filePaths.has(ep)).toBe(true)
-      expect(existsSync(join(built.stagingDir, ep))).toBe(true)
-    }
-    for (const unit of REQUIRED_SYSTEMD_UNITS) {
-      expect(filePaths.has(unit)).toBe(true)
-      expect(existsSync(join(built.stagingDir, unit))).toBe(true)
-    }
-
     // Verify systemd units match the S03/H01 identity & permission contract and never reference dist/index.js
     const agentUnit = built.manifest.systemdUnits.find((u: { name: string }) => u.name === 'xpanel-agent.service')
     const apiUnit = built.manifest.systemdUnits.find((u: { name: string }) => u.name === 'xpanel-api.service')
@@ -215,6 +189,35 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
       noNewPrivileges: 'yes',
       execStart: '/usr/bin/node --max-old-space-size=96 /opt/xpanel/apps/api/src/main.ts',
     })
+  })
+
+  // One journey over the real tree: what only the real sources prove (closure, SBOM, exclusions, real-file verification).
+  it('builds a deterministic, signed release bundle with verified entrypoints, systemd units, migrations, and SBOM', { tags: ['slow'], timeout: 120_000 }, async () => {
+    const outDir = makeTempDir()
+    const signingKey = 'xpanel-release-signing-key-2026-10-22'
+    const built = await buildReleaseArtifact({
+      outputDir: outDir,
+      version: '0.1.0',
+      signingKey,
+      keyId: 'release-key-1',
+    })
+
+    expect(built.version).toBe('0.1.0')
+    expect(built.schemaVersion).toBeGreaterThan(0)
+    expect(existsSync(built.stagingDir)).toBe(true)
+    expect(built.archivePath && existsSync(built.archivePath)).toBe(true)
+    expect(built.archiveSha256).toMatch(/^[a-f0-9]{64}$/)
+
+    // Verify all required entrypoints and systemd units are present in manifest and staging
+    const filePaths = new Set(built.manifest.files.map((f: { path: string }) => f.path))
+    for (const ep of REQUIRED_RELEASE_ENTRYPOINTS) {
+      expect(filePaths.has(ep)).toBe(true)
+      expect(existsSync(join(built.stagingDir, ep))).toBe(true)
+    }
+    for (const unit of REQUIRED_SYSTEMD_UNITS) {
+      expect(filePaths.has(unit)).toBe(true)
+      expect(existsSync(join(built.stagingDir, unit))).toBe(true)
+    }
 
     // Verify SBOM excludes dev-only packages and non-permissive dependencies
     const prodNames = built.sbom.productionDependencies.map((d: { name: string }) => d.name)
