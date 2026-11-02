@@ -55,12 +55,15 @@ export const certFiles = (certId: string): CertPaths => {
   return { dir, fullchain: p.cert, privkey: p.key }
 }
 
-const PEM_CERT_RE = /^(?:-----BEGIN CERTIFICATE-----\r?\n(?:[A-Za-z0-9+/=]{1,76}\r?\n)+-----END CERTIFICATE-----\r?\n?)+$/
+const PEM_CERT_BLOCK_RE = /-----BEGIN CERTIFICATE-----\r?\n(?:[A-Za-z0-9+/=]{1,76}\r?\n)+-----END CERTIFICATE-----/g
 const PEM_KEY_RE = /^-----BEGIN (RSA |EC )?PRIVATE KEY-----\r?\n(?:[A-Za-z0-9+/=]{1,76}\r?\n)+-----END \1PRIVATE KEY-----\r?\n?$/
 
 export const assertFullchainPem = (pem: unknown): string => {
   const s = assertString('certificate chain', pem, 256 * 1024).trim()
-  return PEM_CERT_RE.test(`${s}\n`) ? `${s}\n` : invalid('certificate chain', '', 'must be one or more PEM CERTIFICATE blocks and nothing else')
+  // RFC 7468 allows whitespace between blocks; ACME servers send a blank line between chain certificates.
+  const blocks = s.match(PEM_CERT_BLOCK_RE) ?? []
+  if (!blocks.length || s.replace(PEM_CERT_BLOCK_RE, '').trim()) return invalid('certificate chain', '', 'must be one or more PEM CERTIFICATE blocks and nothing else')
+  return blocks.map(block => block.replace(/\r\n/g, '\n')).join('\n') + '\n'
 }
 
 export const assertPrivateKeyPem = (pem: unknown): string => {
