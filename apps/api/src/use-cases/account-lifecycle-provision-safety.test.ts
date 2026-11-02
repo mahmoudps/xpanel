@@ -57,6 +57,16 @@ describe('provisioning identity and uncertain host effects', () => {
     expect(h.reconcile).not.toHaveBeenCalled()
     expect(dbPort.complete).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ failureClass: 'unknown_outcome', needsAttention: true, requeueOnRetryable: false }))
   })
+  it('reruns the host step once an operator attested recovery of the interrupted attempt', async () => {
+    const h = harness()
+    dbPort.lease.mockResolvedValue(job({ attempt: 2, leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      checkpointData: { ...checkpoint(), hostAttempt: 1, hostNoEffectAttempt: null, hostRecoveredAttempt: 1 }, completedSteps: ['reserve_and_create_state', 'reconcile_host_intent'] }))
+    await h.coordinator.provisionAccount(input())
+    expect(h.reconcile).toHaveBeenCalledTimes(1)
+    expect(dbPort.checkpoint).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ step: 'reconcile_host_intent',
+      data: expect.objectContaining({ hostNoEffectAttempt: null, hostRecoveredAttempt: null }) }))
+    expect(dbPort.complete).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ status: 'succeeded' }))
+  })
   it('does not acknowledge host success after losing the database lease', async () => {
     const h = harness()
     dbPort.renew.mockImplementation(async (_db: Db, authority: { workerId: string }) => {

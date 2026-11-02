@@ -1159,7 +1159,7 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
   }
 }
 
-const CLI_VERBS = new Set(['status', 'reconcile', 'rollback', 'reindex', 'init-root', 'reset-password', 'disable-2fa', 'repair-state-ownership', 'help', '--help', '-h'])
+const CLI_VERBS = new Set(['status', 'reconcile', 'rollback', 'reindex', 'init-root', 'reset-password', 'disable-2fa', 'recover-provisioning', 'repair-state-ownership', 'help', '--help', '-h'])
 
 const readPasswordInput = async (): Promise<string> => {
   if (process.stdin.isTTY) {
