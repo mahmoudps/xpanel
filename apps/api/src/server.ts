@@ -316,6 +316,12 @@ interface InternalTransportMeta {
 }
 
 const transportPeers = new WeakMap<Request, InternalTransportMeta>()
+/** A request derived from another keeps its transport facts, so a re-check on it sees the same peer. */
+const withTransportOf = (req: Request, derived: Request = req.clone()): Request => {
+  const meta = transportPeers.get(req)
+  if (meta) transportPeers.set(derived, meta)
+  return derived
+}
 const trustedIngressRequests = new WeakSet<IncomingMessage>()
 
 const defaultPhp = (version: PhpSettings['version'] = '8.3'): PhpSettings => ({
@@ -800,6 +806,11 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   const readTeamFile = teamFileReader(deps.store.rootDir)
   const teamMember = teamMemberResolver(readTeamFile)
   const handoffAuthority = createHandoffSessionCheck({ db: deps.db, store: deps.store, teamMember })
+  /** A command-line request is named by its kernel peer; every other request by its own credentials. */
+  const authenticateTransport = (db: Db, req: Request, options: Parameters<typeof authenticateRequest>[2]): Promise<AuthenticatedCaller | null> => {
+    const cliPeer = transportPeers.get(req)?.cliPeer
+    return cliPeer ? authenticateCliPeer({ db, store: deps.store }, entryPoint, cliPeer) : authenticateRequest(db, req, options)
+  }
   const requireCaller = async (req: Request, opts?: {
     allowUnverifiedMfa?: boolean
     allowInvalidCsrf?: boolean
@@ -810,10 +821,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (opts?.deferDeniedAudit) opts.deferDeniedAudit(input)
       else await emitAudit(input)
     }
-    const cliPeer = transportPeers.get(req)?.cliPeer
-    const caller = cliPeer
-      ? await authenticateCliPeer({ db: deps.db, store: deps.store }, entryPoint, cliPeer)
-      : await authenticateRequest(deps.db, req, { serverSecret, clientIp, entryPoint, mfaRuntimePolicy, teamMember, handoffAuthority })
+    const caller = await authenticateTransport(deps.db, req, { serverSecret, clientIp, entryPoint, mfaRuntimePolicy, teamMember, handoffAuthority })
     if (!caller) {
       return fail('UNAUTHENTICATED', 'authentication required')
     }
@@ -2958,7 +2966,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const account = await deps.store.getAccountByUsername(username)
         if (!account) return fail('NOT_FOUND', `account "${username}" not found`)
         await assertCanAccessAccount(caller, account, 'files')
-        const recheckRequest = req.clone()
+        const recheckRequest = withTransportOf(req)
         const body = validateFileWorkspaceRequest(await readJsonBody(req))
         const currentCaller = await requireCaller(recheckRequest)
         const currentAccount = await deps.store.getAccountByUsername(username)
@@ -4216,13 +4224,13 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         // Insert after suId, before the existing state lookup/404. This permits an
         // explicitly authenticated retry of the SAME durable retirement intent.
         if (method === 'DELETE') {
-          const credentialRequest = new Request(req.url, { method: req.method, headers: new Headers(req.headers) })
+          const credentialRequest = withTransportOf(req, new Request(req.url, { method: req.method, headers: new Headers(req.headers) }))
           const clientIp = extractClientIp(req)
           try {
             await retireMailboxServiceUser({
               db: deps.db, store: deps.store, serviceUserId: suId, actor: caller.principal,
               authorize: async (tx, source) => {
-                const current = await authenticateRequest(tx, credentialRequest, {
+                const current = await authenticateTransport(tx, credentialRequest, {
                   serverSecret, clientIp, entryPoint, mfaRuntimePolicy, touchSession: false, teamMember,
                   handoffAuthority: createHandoffSessionCheck({ db: tx, store: deps.store, teamMember }),
                 })
@@ -4260,6 +4268,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
                   // API token expiry is required by its current persisted contract.
                   // Missing/invalid expiry must never become an unlimited credential.
                   deadline = Date.parse(token.expiresAt)
+                } else if (transportPeers.get(credentialRequest)?.cliPeer) {
+                  // A kernel peer holds no expiring credential; its identity was read again above, in this transaction.
+                  deadline = Number.MAX_SAFE_INTEGER
                 } else {
                   if (current.sessionToken === null || current.sessionId === null) return fail('UNAUTHENTICATED', 'the original retirement session is unavailable', { stateChanged: false })
                   const tokenHash = sessionTokenHash(current.sessionToken, entryPoint)
@@ -4303,7 +4314,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             if (isXpanelError(error) && (error.code === 'UNAUTHENTICATED' || error.code === 'FORBIDDEN')) {
               // Rejection rolls back the admitted transaction. Preserve the normal
               // authenticator's session/team revocation outside that transaction.
-              try { await authenticateRequest(deps.db, credentialRequest, { serverSecret, clientIp, entryPoint,
+              try { await authenticateTransport(deps.db, credentialRequest, { serverSecret, clientIp, entryPoint,
                 mfaRuntimePolicy, touchSession: false, teamMember, handoffAuthority }) }
               catch { return fail('SERVICE_UNAVAILABLE', 'retirement credential rejection requires review', {
                 stateChanged: true, verificationRequired: true, unknownOutcome: true,
