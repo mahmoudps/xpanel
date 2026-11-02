@@ -43,6 +43,14 @@ describe('mail websocket proxy', () => {
     expect([...executor.files.keys()].some(key => key.startsWith(`${path}.bak.`))).toBe(true)
 
     executor.files.set(path, { path, content: mail, mode: 0o644, owner: 'root', group: 'root' })
+    const module = '/etc/nginx/modules-enabled/50-mod-http-geoip2.conf'
+    executor.failCommand('-T', 0, '', `# configuration file ${module}:\nload_module modules/ngx_http_geoip2_module.so;\n\n${dump}`)
+    const read = executor.readFile.bind(executor)
+    executor.readFile = async (target: string) => target === module ? Promise.reject(Object.assign(new Error('ELOOP'), { code: 'ELOOP' })) : read(target)
+    expect(await enableMailWebsocketProxy(executor)).toBe(true)
+    expect(executor.files.get(path)?.content).toContain('Upgrade $http_upgrade')
+
+    executor.files.set(path, { path, content: mail, mode: 0o644, owner: 'root', group: 'root' })
     executor.failCommand('-t', 1, 'emerg', '')
     expect(await enableMailWebsocketProxy(executor)).toBe(false)
     expect(executor.files.get(path)?.content).toBe(mail)

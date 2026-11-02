@@ -104,6 +104,9 @@ export const enableMailWebsocketProxy = async (executor: AgentExecutor): Promise
   let changed = false
   for (const file of nginxConfigFiles(dump)) {
     if (!file.path.startsWith('/etc/nginx/')) continue
+    // Only files the dump shows need the rewrite are opened: distribution links such as Debian's
+    // modules-enabled/*.conf would refuse the agent's no-follow read and stop every later file.
+    if (rewriteMailWebsocketConfig(file.body, hasMap) === null) continue
     const existing = await executor.readFile(file.path)
     const source = existing ?? file.body
     const rewritten = rewriteMailWebsocketConfig(source, hasMap)
