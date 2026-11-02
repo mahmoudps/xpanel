@@ -23,7 +23,7 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
     codename: '',
     packageManager: 'dnf',
     // semanage sets the SELinux port types and file contexts xPanel needs while SELinux stays enforcing
-    bootstrapPackages: ['dnf-plugins-core', 'acl', 'policycoreutils-python-utils'],
+    bootstrapPackages: ['dnf-plugins-core', 'acl', 'policycoreutils-python-utils', 'openssl'],
     // the nginx and httpd packages create their own users
     extraSystemUsers: [],
     packages: {

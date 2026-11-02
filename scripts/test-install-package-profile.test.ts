@@ -54,6 +54,30 @@ const cases = SUPPORTED_OS.flatMap(os => os.versions.flatMap(versionId => ['8.3'
   [false, true].map(withServices => ({ id: os.id, name: os.name, versionId, php, withServices })),
 )))
 
+describe('default certificate of the installer', () => {
+  it('creates the self-signed pair the default site names once and keeps an existing pair', () => {
+    const root = mkdtempSync(join(tempParent, tempPrefix))
+    tempRoots.push(root)
+    const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
+    const start = source.indexOf('DEFAULT_TLS_DIR=/etc/xpanel/ssl/default')
+    const functions = source.slice(start, source.indexOf('\n}\n', start) + 3)
+      .replace('DEFAULT_TLS_DIR=/etc/xpanel/ssl/default', `DEFAULT_TLS_DIR=${root.replaceAll('\\', '/')}/default`)
+    const stubs = 'die() { echo "DIE $*"; exit 1; }\ninstall() { mkdir -p "${@: -1}"; }\n'
+    // MSYS_NO_PATHCONV keeps Git Bash on Windows from rewriting the /CN= subject into a path; a developer's
+    // OPENSSL_CONF may name a configuration that does not exist, while installs run with the packaged one.
+    const env: NodeJS.ProcessEnv = { ...process.env, MSYS_NO_PATHCONV: '1' }
+    delete env.OPENSSL_CONF
+    const run = () => spawnSync(bash, ['-euo', 'pipefail', '-c', `${stubs}${functions}\nensure_default_certificate\n`], { encoding: 'utf8', timeout: 30_000, env })
+    const first = run()
+    expect(first.status, first.stdout + first.stderr).toBe(0)
+    const cert = readFileSync(join(root, 'default', 'fullchain.pem'), 'utf8')
+    expect(cert).toContain('BEGIN CERTIFICATE')
+    expect(readFileSync(join(root, 'default', 'privkey.pem'), 'utf8')).toContain('PRIVATE KEY')
+    expect(run().status).toBe(0)
+    expect(readFileSync(join(root, 'default', 'fullchain.pem'), 'utf8')).toBe(cert)
+  })
+})
+
 describe('local mail directories of the installer', () => {
   it('leaves the Postfix private directory in Postfix layout, so its daemons can bind there', () => {
     const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')

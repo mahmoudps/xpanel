@@ -173,7 +173,7 @@ esac
 
 PHP_COMPACT="${PHP_VERSION//./}"
 if [[ "$OS_FAMILY" == "debian" ]]; then
-  BOOTSTRAP_PACKAGES=(software-properties-common ca-certificates curl gnupg adduser acl)
+  BOOTSTRAP_PACKAGES=(software-properties-common ca-certificates curl gnupg adduser acl openssl)
   REPOSITORY_SOURCES=(universe ppa:ondrej/php)
   REPOSITORY_PACKAGES=()
   PHP_JSON_PACKAGE="php7.4-json"
@@ -216,7 +216,7 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
   [[ "$WITH_FTP" -eq 1 ]] && PACKAGES+=(pure-ftpd)
   [[ "$WITH_MODSECURITY" -eq 1 ]] && PACKAGES+=(libapache2-mod-security2 modsecurity-crs)
 else
-  BOOTSTRAP_PACKAGES=(dnf-plugins-core acl policycoreutils-python-utils)
+  BOOTSTRAP_PACKAGES=(dnf-plugins-core acl policycoreutils-python-utils openssl)
   REPOSITORY_SOURCES=(crb)
   EPEL_PACKAGES=(epel-release)
   if [[ "$OS_ID" == "centos" ]]; then
@@ -755,6 +755,19 @@ render_opendkim_selinux_module() {
     '(allow dkim_milter_t postfix_spool_t (dir (search getattr)))'
 }
 
+# The default site answers TLS for names no account has bound (packages/render DEFAULT_TLS). An existing pair is
+# kept; a new one is a ten-year self-signed P-256 certificate that no client is expected to trust.
+DEFAULT_TLS_DIR=/etc/xpanel/ssl/default
+ensure_default_certificate() {
+  [[ -s "$DEFAULT_TLS_DIR/fullchain.pem" && -s "$DEFAULT_TLS_DIR/privkey.pem" ]] && return 0
+  install -d -o root -g root -m 0755 /etc/xpanel/ssl "$DEFAULT_TLS_DIR"
+  (umask 077; openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
+    -subj "/CN=xpanel-default" -keyout "$DEFAULT_TLS_DIR/privkey.pem" -out "$DEFAULT_TLS_DIR/fullchain.pem" > /dev/null 2>&1) \
+    || die "The self-signed default certificate could not be created."
+  chmod 0600 "$DEFAULT_TLS_DIR/privkey.pem"
+  chmod 0644 "$DEFAULT_TLS_DIR/fullchain.pem"
+}
+
 OS_FILE_SOURCE=""
 render_os_file() { cat -- "$OS_FILE_SOURCE"; }
 
@@ -1200,6 +1213,8 @@ if [[ "$WITH_MARIADB" -eq 1 ]]; then
   provision_mariadb_admin
 fi
 
+echo "[2f/6] Creating the self-signed default certificate nginx serves for names no account binds..."
+ensure_default_certificate
 echo "[3/6] Installing xpanel-jailshell at ${JAILSHELL_BIN}..."
 write_config "$JAILSHELL_BIN" render_jailshell 0755
 backup_config "$JAILSHELL_LINK"
