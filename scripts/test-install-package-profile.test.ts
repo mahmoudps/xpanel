@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { installConfiguration, installPlan, profileFor, SUPPORTED_OS } from '../packages/os/src/index.ts'
 import type { InstallAction } from '../packages/os/src/index.ts'
+import { renderNamedZonesConfig } from '../apps/agent/src/services/dns.ts'
 
 const rootDir = resolve(import.meta.dirname, '..')
 const tempParent = resolve(tmpdir())
@@ -53,6 +54,16 @@ const bootstrapExtras = (family: 'debian' | 'rhel', php: string): string[] => fa
 const cases = SUPPORTED_OS.flatMap(os => os.versions.flatMap(versionId => ['8.3', '7.4'].flatMap(php =>
   [false, true].map(withServices => ({ id: os.id, name: os.name, versionId, php, withServices })),
 )))
+
+describe('empty DNS catalog of the installer', () => {
+  it('writes the exact empty catalog the agent accepts as its reviewed bootstrap', () => {
+    const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
+    const start = source.indexOf('render_empty_named_catalog() {')
+    const run = spawnSync(bash, ['-euo', 'pipefail', '-c', `${source.slice(start, source.indexOf('\n}\n', start) + 3)}\nrender_empty_named_catalog\n`], { encoding: 'utf8', timeout: 10_000 })
+    expect(run.status, run.stderr).toBe(0)
+    expect(run.stdout).toBe(renderNamedZonesConfig([]))
+  })
+})
 
 describe('default certificate of the installer', () => {
   it('creates the self-signed pair the default site names once and keeps an existing pair', () => {
