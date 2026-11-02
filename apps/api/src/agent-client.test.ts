@@ -141,6 +141,14 @@ if (process.platform === 'win32') describe('agent client over a Windows local na
       error => isXpanelError(error) && error.code === 'SERVICE_UNAVAILABLE')
   })
 
+  it('keeps a request-bound host effect connected past the default idle timeout', async () => {
+    const ipc = await listen((_req, res) => { setTimeout(() => res.end('{"ok":true}'), 150) }, 50)
+    const provisioned = await ipc.fetch(new Request('http://agent.local/host/account-provisioning', { method: 'POST', body: '{}' }))
+    assert.equal(provisioned.status, 200)
+    await assert.rejects(() => ipc.fetch(new Request('http://agent.local/state/apply', { method: 'POST', body: '{}' })),
+      error => isXpanelError(error) && error.code === 'SERVICE_UNAVAILABLE')
+  })
+
   it('streams a terminal session output beyond the request timeout and closes it on cancel', async () => {
     let closed!: () => void
     const serverClosed = new Promise<void>(resolve => { closed = resolve })

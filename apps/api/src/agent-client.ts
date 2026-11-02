@@ -16,6 +16,9 @@ export interface AgentClientOptions {
 
 const unavailable = () => new XpanelError('SERVICE_UNAVAILABLE', 'privileged host agent is unavailable')
 
+/** Host effects bound to the caller's request; an idle cut at the default timeout would cancel them mid-effect. */
+export const AGENT_ROUTE_TIMEOUT_MS: ReadonlyMap<string, number> = new Map([['/host/account-provisioning', 180_000]])
+
 const boundedBody = async (body: ReadableStream<Uint8Array> | null): Promise<Buffer> => {
   const reader = body?.getReader()
   if (!reader) return Buffer.alloc(0)
@@ -195,7 +198,7 @@ export const createAgentClient = (options: AgentClientOptions): AgentApp & { clo
     return new Promise<Response>((resolveResponse, rejectResponse) => {
       const outgoing = request({
         socketPath: options.socketPath, path: `${url.pathname}${url.search}`,
-        method: req.method, headers, timeout, signal: req.signal,
+        method: req.method, headers, timeout: Math.max(timeout, AGENT_ROUTE_TIMEOUT_MS.get(url.pathname) ?? 0), signal: req.signal,
       }, response => {
         if (terminalOutput && response.statusCode === 200 && response.headers['content-type'] === 'application/x-ndjson') {
           resolveResponse(terminalOutputResponse(response, outgoing))
