@@ -3384,6 +3384,10 @@ msgstr "في النهاية"
 msgid "At the top"
 msgstr "في البداية"
 
+#: apps/web/src/audit-labels.ts
+msgid "Attested recovery of an interrupted account provisioning"
+msgstr "أكّد استرداد تجهيز حساب متوقف"
+
 #: apps/web/src/board-port/xmail-compose.ts
 msgid "Attach files"
 msgstr "إرفاق ملفات"

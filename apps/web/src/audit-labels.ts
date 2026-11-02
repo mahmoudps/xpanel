@@ -60,6 +60,7 @@ export const AUDIT_LABELS: Readonly<Record<string, string>> = {
   'account.bandwidth_limit_lifted': msgid('Lifted the bandwidth limit page for an account'),
   'account.bandwidth_limited': msgid('Served the bandwidth limit page for an account over its monthly limit'),
   'account.plan_changed': msgid('Changed an account plan'),
+  'account.provision.host_recovery_attested': msgid('Attested recovery of an interrupted account provisioning'),
   'account.provisioned': msgid('Provisioned an account'),
   'account.suspended': msgid('Suspended an account'),
   'account.suspend.configuration_failed': msgid('Account suspension failed on the host'),
