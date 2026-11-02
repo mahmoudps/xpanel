@@ -29,7 +29,9 @@ function scene() {
     { path: DEFAULT_NAMED_ZONES_CONF, content: 'zone "tenant.example.test" { type master; file "' + DEFAULT_DNS_ZONE_DIR + '/tenant.example.test.zone"; };\n' }]
   const executor = new FakeHostExecutor()
   for (const file of entries) executor.files.set(file.path, { ...file, mode: 0o640, owner: 'root', group: 'pdns' })
+  const validated = executor.runCommand.bind(executor)
   const run = vi.spyOn(executor, 'runCommand').mockImplementation(async argv => {
+    await validated(argv) // the executor's own argv admission, as on a real host
     let stdout = ''
     if (argv[0] === '/usr/bin/findmnt') stdout = (argv[4] === 'TARGET' ? '/home' : argv[4] === 'SOURCE' ? '/dev/vda1' : 'ext4') + '\n'
     else if (argv[0] === '/usr/sbin/quotaon') return { ok: false, code: 1, stdout: 'user quota on /home (/dev/vda1) is on\n', stderr: '' }

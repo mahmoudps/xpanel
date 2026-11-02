@@ -8,7 +8,7 @@ import { latestActive, type Db } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
 import { edge, system } from '@xpanel/render'
 import { ACCOUNT_PROBE_ASSET, ACCOUNT_PROBE_PHP, accountProbeNamespace, accountProbePaths, assertAccountProbeIngress } from '../../../packages/render/src/system/account-probe.ts'
-import { openNativeProvisioningProcess, parseProvisioningProcessFiles, type ProvisioningProcessIdentity } from './account-provisioning-observer.ts'
+import { openNativeProvisioningProcess, parseProvisioningProcessFiles, unitIdentityShowArgv, type ProvisioningProcessIdentity } from './account-provisioning-observer.ts'
 import { createRuntimeHost, readUnitStates } from './account-runtime.ts'
 import type { AgentExecutor } from './executor.ts'
 import type { HostEffectAuthority } from './host-effect-authority.ts'
@@ -246,7 +246,7 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
     const unitIdentity = async (name: string): Promise<{ mainPid: number; cgroup: string }> => {
       const states = await readUnitStates(createRuntimeHost(options.executor), [name]); await guard()
       if (states.get(name)?.load !== 'loaded' || states.get(name)?.active !== 'active') return refused('canary_unit_inactive')
-      const result = await options.executor.runCommand(['/usr/bin/systemctl', 'show', '--no-pager', '--property=Id,User,Group,MainPID,ControlGroup,ActiveState', '--', name]); await guard()
+      const result = await options.executor.runCommand(unitIdentityShowArgv(name)); await guard()
       const values = new Map<string, string>()
       for (const line of result.stdout.trim().split('\n')) {
         const at = line.indexOf('=')

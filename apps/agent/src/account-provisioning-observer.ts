@@ -106,6 +106,10 @@ const requireNativeRoot = (): void => {
   if (process.platform !== 'linux' || process.getuid?.() !== 0) observationFailed('native_root_process_reader_required')
 }
 
+/** One --property flag per field: the generic argv rule admits no comma-separated list. */
+export const unitIdentityShowArgv = (unit: string): string[] => ['/usr/bin/systemctl', 'show', '--no-pager',
+  ...['Id', 'User', 'Group', 'MainPID', 'ControlGroup', 'ActiveState'].map(name => '--property=' + name), '--', unit]
+
 /** Pin the proc directory: a later PID reuse cannot turn this handle into another task. */
 export async function openNativeProvisioningProcess(pid: number): Promise<ProcessFiles> {
   requireNativeRoot()
@@ -225,7 +229,7 @@ export function createReadonlyAccountProvisioningObserver(options: ReadonlyAccou
       const readUnit = async (): Promise<number> => {
         const states = await checked(() => readUnitStates(createRuntimeHost(options.executor), [unit]))
         if (states.get(unit)?.load !== 'loaded' || states.get(unit)?.active !== 'active') return observationFailed('account_service_inactive')
-        const result = await run(['/usr/bin/systemctl', 'show', '--no-pager', '--property=Id,User,Group,MainPID,ControlGroup,ActiveState', '--', unit])
+        const result = await run(unitIdentityShowArgv(unit))
         const fields = new Map<string, string>()
         for (const line of result.stdout.trim().split('\n')) {
           const index = line.indexOf('=')
