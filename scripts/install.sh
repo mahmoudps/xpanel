@@ -216,7 +216,7 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
   [[ "$WITH_FTP" -eq 1 ]] && PACKAGES+=(pure-ftpd)
   [[ "$WITH_MODSECURITY" -eq 1 ]] && PACKAGES+=(libapache2-mod-security2 modsecurity-crs)
 else
-  BOOTSTRAP_PACKAGES=(dnf-plugins-core acl)
+  BOOTSTRAP_PACKAGES=(dnf-plugins-core acl policycoreutils-python-utils)
   REPOSITORY_SOURCES=(crb)
   EPEL_PACKAGES=(epel-release)
   if [[ "$OS_ID" == "centos" ]]; then
@@ -718,6 +718,26 @@ install_el_mpm_itk() {
   rm -rf -- "$build"
 }
 
+# SELinux stays enforcing on EL. These are the settings xPanel's own services need beyond the distribution
+# policy: nginx binds the management ports and proxies to local backends, and OpenDKIM keeps its milter
+# socket inside the Postfix spool, created here so it carries the milter type from the start.
+selinux_http_port() {
+  semanage port -a -t http_port_t -p tcp "$1" 2> /dev/null || semanage port -m -t http_port_t -p tcp "$1" \
+    || die "SELinux refused to label TCP port $1 for the management ingress."
+}
+
+configure_selinux() {
+  local port
+  for port in 2083 2087 2096; do selinux_http_port "$port"; done
+  setsebool -P httpd_can_network_connect 1 || die "SELinux refused httpd_can_network_connect."
+  if [[ "$WITH_MAIL" -eq 1 ]]; then
+    semanage fcontext -a -t dkim_milter_data_t '/var/spool/postfix/opendkim(/.*)?' 2> /dev/null \
+      || semanage fcontext -m -t dkim_milter_data_t '/var/spool/postfix/opendkim(/.*)?' || die "SELinux refused the OpenDKIM socket context."
+    install -d -o opendkim -g postfix -m 0750 /var/spool/postfix/opendkim
+    restorecon -R /var/spool/postfix/opendkim
+  fi
+}
+
 OS_FILE_SOURCE=""
 render_os_file() { cat -- "$OS_FILE_SOURCE"; }
 
@@ -1133,6 +1153,10 @@ echo "[2/6] Ensuring every bootable kernel carries the quota format modules..."
 ensure_kernel_quota_format
 echo "[2/6] Applying the web server and service configuration of the OS profile..."
 apply_os_configuration
+if selinuxenabled 2> /dev/null; then
+  echo "[2/6] Setting the SELinux policy xPanel needs while SELinux stays enforcing..."
+  configure_selinux
+fi
 
 echo "[2b/6] Opening /var/lib/xpanel so nginx can serve ACME HTTP-01 challenges..."
 if ! id nginx >/dev/null 2>&1; then

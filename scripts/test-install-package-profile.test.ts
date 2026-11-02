@@ -54,6 +54,28 @@ const cases = SUPPORTED_OS.flatMap(os => os.versions.flatMap(versionId => ['8.3'
   [false, true].map(withServices => ({ id: os.id, name: os.name, versionId, php, withServices })),
 )))
 
+describe('SELinux settings of the EL installer', () => {
+  it('labels the management ports even when the base policy already names one, and types the OpenDKIM socket directory', () => {
+    const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
+    const functions = source.slice(source.indexOf('selinux_http_port() {'), source.indexOf('OS_FILE_SOURCE=""'))
+    // Stubs record every call; port 2083 is already radsec_port_t in the EL base policy, so its -a fails.
+    const stubs = [
+      'die() { echo "DIE $*"; exit 1; }',
+      'semanage() { echo "semanage $*"; if [[ "$1 $2" == "port -a" && "$*" == *" 2083" ]]; then return 1; fi; if [[ "$1 $2" == "fcontext -a" ]]; then return 1; fi; }',
+      'setsebool() { echo "setsebool $*"; }', 'install() { echo "install $*"; }', 'restorecon() { echo "restorecon $*"; }',
+      'WITH_MAIL=1',
+    ].join('\n')
+    const run = spawnSync(bash, ['-euo', 'pipefail', '-c', `${stubs}\n${functions}\nconfigure_selinux\n`], { encoding: 'utf8', timeout: 10_000 })
+    expect(run.status, run.stdout + run.stderr).toBe(0)
+    const calls = run.stdout.trim().split('\n')
+    expect(calls).toContain('semanage port -m -t http_port_t -p tcp 2083')
+    for (const port of ['2087', '2096']) expect(calls).toContain(`semanage port -a -t http_port_t -p tcp ${port}`)
+    expect(calls).toContain('setsebool -P httpd_can_network_connect 1')
+    expect(calls).toContain("semanage fcontext -m -t dkim_milter_data_t /var/spool/postfix/opendkim(/.*)?")
+    expect(calls.indexOf('install -d -o opendkim -g postfix -m 0750 /var/spool/postfix/opendkim')).toBeLessThan(calls.indexOf('restorecon -R /var/spool/postfix/opendkim'))
+  })
+})
+
 describe('OS profile configuration hand-over to the installer', () => {
   it.each(['ubuntu 22.04', 'almalinux 9.6'])('%s: lists files, exec argv and systemd steps of installConfiguration in plan order', release => {
     const [id, versionId] = release.split(' ')
