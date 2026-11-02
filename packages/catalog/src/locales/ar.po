@@ -430,6 +430,10 @@ msgstr "Cloudflare ومزوّدو DNS"
 msgid "Clusters"
 msgstr "العناقيد"
 
+#. catalog.tool.command-line-api.name
+msgid "Command-line API"
+msgstr "واجهة API لسطر الأوامر"
+
 #. catalog.tool.aapanel-business-ssl.name
 msgid "Commercial Certificates"
 msgstr "الشهادات التجارية"

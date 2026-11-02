@@ -461,7 +461,7 @@ export function parsePreparedInstallUnitFile(unit, receipt, text) {
   const role = unit === 'xpanel-agent.service' ? 'agent' : 'api'
   const allowed = role === 'agent'
     ? ['Type','User','Group','SupplementaryGroups','RuntimeDirectory','RuntimeDirectoryMode','RuntimeDirectoryPreserve','WorkingDirectory','Environment','EnvironmentFile','ExecStartPre','ExecStart','Restart','RestartSec','UMask']
-    : ['Type','User','Group','SupplementaryGroups','WorkingDirectory','Environment','EnvironmentFile','ExecStart','Restart','RestartSec','UMask','NoNewPrivileges','PrivateTmp','ProtectHome','ProtectSystem','ReadWritePaths','ProtectKernelTunables','ProtectKernelModules','ProtectControlGroups','CapabilityBoundingSet','AmbientCapabilities','RestrictAddressFamilies']
+    : ['Type','User','Group','SupplementaryGroups','RuntimeDirectory','RuntimeDirectoryMode','WorkingDirectory','Environment','EnvironmentFile','ExecStart','Restart','RestartSec','UMask','NoNewPrivileges','PrivateTmp','ProtectHome','ProtectSystem','ReadWritePaths','ProtectKernelTunables','ProtectKernelModules','ProtectControlGroups','CapabilityBoundingSet','AmbientCapabilities','RestrictAddressFamilies']
   for (const name of rows.keys()) check(name.startsWith('Service.') ? allowed.includes(name.slice(8))
     : name.startsWith('Unit.') ? ['Description','After','Wants','Requires'].includes(name.slice(5))
     : name === 'Install.WantedBy', 'INSTALL_START_UNIT_SOURCE_INVALID')
@@ -484,6 +484,8 @@ export function parsePreparedInstallUnitFile(unit, receipt, text) {
   } else {
     equal('Unit.After',['network-online.target xpanel-agent.service']);equal('Unit.Requires',['xpanel-agent.service']);equal('Unit.Wants',[])
     equal('Service.ReadWritePaths',['/var/lib/xpanel /var/log/xpanel /run/xpanel/lifecycle-api'])
+    // Local xuapi / xwhmapi sockets: any user may traverse, the kernel peer UID names the caller.
+    equal('Service.RuntimeDirectory',['xpanel-api']);equal('Service.RuntimeDirectoryMode',['0755'])
   }
   equal('Install.WantedBy',['multi-user.target'])
   return Object.freeze({ unit, environmentFiles: Object.freeze(environmentFiles) })

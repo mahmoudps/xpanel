@@ -63,6 +63,10 @@ export const REQUIRED_ROOT_FILES = Object.freeze([
   'helpers/account-files/xpanel-account-files.c',
   'helpers/terminal-pty/build.mjs',
   'helpers/terminal-pty/xpanel-terminal-pty.c',
+  'helpers/peer-identity/build.mjs',
+  'apps/agent/src/peer-identity-source.ts',
+  'bin/xuapi',
+  'bin/xwhmapi',
   'apps/web/src/vendor/xterm/LICENSE',
   'apps/web/src/vendor/xterm/LICENSE-addon-fit',
 ])
@@ -825,7 +829,7 @@ export const buildReleaseArtifact = async (options) => {
         failRelease('SECRET_LEAK_DETECTED', `Web source file contains forbidden credential pattern: ${relPath}`, { path: relPath })
       }
     }
-    const mode = relPath.endsWith('.sh') || relPath === 'bin/xpanel-ctl' ? 0o755 : 0o644
+    const mode = relPath.endsWith('.sh') || ['bin/xpanel-ctl', 'bin/xuapi', 'bin/xwhmapi'].includes(relPath) ? 0o755 : 0o644
     stagedFiles.set(relPath, {
       bytes: normalized,
       sha256: sha256Hex(normalized),
