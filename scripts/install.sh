@@ -436,6 +436,8 @@ provision_fresh_dns() {
   [[ "$(id -u pdns)" != 0 ]] || die "PowerDNS requires its own unprivileged daemon identity."
   verify_fresh_pdns_vendor "$config"
   install -d -o root -g root -m 0755 /etc/powerdns /var/lib/powerdns /var/lib/powerdns/zones
+  # configure_selinux made /var/lib/powerdns equivalent to EL's /var/lib/pdns; zone files the agent adds inherit it.
+  if selinuxenabled 2> /dev/null; then restorecon -R /var/lib/powerdns; fi
   write_config "$config" render_fresh_pdns 0644 root
   [[ ! -e /etc/powerdns/named.conf.xpanel-zones && ! -L /etc/powerdns/named.conf.xpanel-zones ]] || die "An unexpected DNS catalog appeared; preserved for review."
   write_config /etc/powerdns/named.conf.xpanel-zones render_empty_named_catalog 0644 root
@@ -742,6 +744,11 @@ configure_selinux() {
   semanage fcontext -a -t httpd_log_t '/var/log/xpanel(/.*)?' 2> /dev/null \
     || semanage fcontext -m -t httpd_log_t '/var/log/xpanel(/.*)?' || die "SELinux refused the xPanel log context."
   restorecon -R /var/log/xpanel
+  if [[ "$WITH_DNS" -eq 1 ]]; then
+    # xPanel keeps zones in Debian's /var/lib/powerdns; EL's policy types only /var/lib/pdns for the daemon.
+    semanage fcontext -a -e /var/lib/pdns /var/lib/powerdns 2> /dev/null \
+      || semanage fcontext -m -e /var/lib/pdns /var/lib/powerdns || die "SELinux refused the PowerDNS zone directory equivalence."
+  fi
   if [[ "$WITH_MAIL" -eq 1 ]]; then
     semanage fcontext -a -t dkim_milter_data_t '/var/spool/postfix/opendkim(/.*)?' 2> /dev/null \
       || semanage fcontext -m -t dkim_milter_data_t '/var/spool/postfix/opendkim(/.*)?' || die "SELinux refused the OpenDKIM socket context."
