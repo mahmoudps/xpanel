@@ -133,5 +133,5 @@ export async function assertOwnedFile(entry) {
 /** A finite preservation plan, not uninstall authorization or TLS handoff proof. */
 export function preservingUninstallPlan(receipt) {
   const parsed = parseInstallationReceipt(receipt); safe(parsed.status !== 'uninstalled', 'ALREADY_UNINSTALLED')
-  return freeze({ kind: 'uninstall', removal: parsed.files.map(entry => entry.path), stopUnits: [...OWNED_PANEL_UNITS], retain: ['/opt/xpanel', '/etc/xpanel', '/var/lib/xpanel', '/var/lib/xpanel-agent', '/var/lib/xpanel-lifecycle', '/var/lib/xpanel-management-tls', '/var/log/xpanel', '/var/log/xpanel-management-tls', '/etc/letsencrypt', '/home', '/var/mail', '/var/vmail', '/var/lib/mysql', '/var/lib/mariadb'], purge: false, restoreHistoricalAuthority: false })
+  return freeze({ kind: 'uninstall', removal: parsed.files.map(entry => entry.path), stopUnits: [...OWNED_PANEL_UNITS], retain: ['/opt/xpanel', '/etc/xpanel', '/var/lib/xpanel', '/var/lib/xpanel-agent', '/var/lib/xpanel-lifecycle', '/var/lib/xpanel-management-tls', '/var/log/xpanel', '/etc/letsencrypt', '/home', '/var/mail', '/var/vmail', '/var/lib/mysql', '/var/lib/mariadb'], purge: false, restoreHistoricalAuthority: false })
 }

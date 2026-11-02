@@ -150,6 +150,10 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
     expect(rendered.match(/proxy_pass http:\/\/127\.0\.0\.1:120(83|87|96);/g)).toHaveLength(3)
     expect(rendered.match(/^ {8}proxy_read_timeout 300s;$/gm)).toHaveLength(3)
   })
+  it('keeps every managed directory under root-only ancestors, never the group-writable /var/log', () => {
+    for (const path of [PATHS.webroot, PATHS.acme, PATHS.logs, PATHS.certs]) expect(path.startsWith('/var/log/')).toBe(false)
+    expect(PATHS.logs.startsWith(PATHS.state + '/')).toBe(true)
+  })
   it('uses only the delegated management name and its two children, never its parent or a wildcard', () => {
     const value = config(), args = certbotArguments(value)
     expect(args.filter((_, index) => args[index - 1] === '-d')).toEqual(['panel.example.org', 'whm.panel.example.org', 'mail.panel.example.org'])

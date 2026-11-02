@@ -16,7 +16,8 @@ export const MARKER = '# Managed by xPanel management TLS lifecycle v1.\n'
 export const PATHS = Object.freeze({
   config: '/etc/xpanel/management-tls.json', apiEnv: '/etc/xpanel/api.env', secret: '/etc/xpanel/ingress.secret',
   state: '/var/lib/xpanel-management-tls', webroot: '/var/lib/xpanel-management-tls/challenge',
-  acme: '/etc/xpanel/management-acme', logs: '/var/log/xpanel-management-tls',
+  // Logs stay under the root-only state directory: Ubuntu's /var/log is root:syslog 0775, which no trusted ancestor walk admits.
+  acme: '/etc/xpanel/management-acme', logs: '/var/lib/xpanel-management-tls/logs',
   challenge: '/etc/nginx/conf.d/xpanel-management-challenge.conf', ingress: '/etc/nginx/conf.d/xpanel-management.conf',
   include: '/etc/nginx/xpanel-management/ingress-secret.conf', certs: '/etc/xpanel/management-certificates',
   service: '/etc/systemd/system/xpanel-management-tls.service', timer: '/etc/systemd/system/xpanel-management-tls.timer',
