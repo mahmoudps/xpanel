@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { applyObservedUserQuota, enableExistingUserQuota, fstabWithUserQuota, initializeUserQuota, observeUserQuota, parseUserQuotaState, resolveHomeQuotaFilesystem, validateQuotaFilesystem } from './quota.ts'
 import type { QuotaCommandRunner } from './quota.ts'
+import { installQuotaSetup } from '../quota-setup.ts'
 
 const ok = (stdout = '') => ({ ok: true, code: 0, stdout, stderr: '' })
 const fixture = (initial: 'on' | 'off' = 'on') => {
@@ -159,5 +160,38 @@ describe('user quota setup', () => {
     await expect(initializeUserQuota(xfs.ports, '/home', STAMP)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
     expect([...xfs.files.keys()]).toEqual(['/etc/fstab'])
     expect(xfs.commands.some(argv => argv[0] === '/usr/bin/mount')).toBe(false)
+  })
+})
+
+describe('installer quota step', () => {
+  const FSTAB = '/dev/disk/by-uuid/5e6f / ext4 defaults 0 1\n'
+  const ports = (fstype: string, quotaOn = false) => {
+    let state: 'none' | 'off' | 'on' = quotaOn ? 'on' : 'none'
+    const files = new Map([['/etc/fstab', FSTAB]])
+    const run: QuotaCommandRunner = async argv => {
+      if (argv[0] === '/usr/bin/findmnt') return ok(({ TARGET: '/', SOURCE: '/dev/sda1', FSTYPE: fstype } as Record<string, string>)[argv[4]!]!)
+      if (argv.includes('--print-state')) return state === 'none' ? { ok: true, code: 0, stdout: '', stderr: 'quotaon: no quota\n' }
+        : { ok: state === 'off', code: state === 'on' ? 1 : 0, stdout: `user quota on / (/dev/sda1) is ${state === 'on' && fstype === 'xfs' ? 'on (enforced)' : state}\n`, stderr: '' }
+      if (argv[0] === '/usr/bin/mount') state = 'off'
+      if (argv[0] === '/usr/sbin/quotaon') state = 'on'
+      return ok()
+    }
+    return { run, scan: async () => ok(), readFile: async (path: string) => files.get(path) ?? null, writeFile: async (file: { path: string; content: string }) => { files.set(file.path, file.content) } }
+  }
+  const now = new Date('2026-11-02T18:00:00.000Z')
+
+  it('enforces ext4 quota and reports the backup it made', async () => {
+    expect(await installQuotaSetup(ports('ext4'), '/home', now)).toEqual({ exitCode: 0,
+      report: { status: 'enabled', filesystem: '/', filesystemType: 'ext4', fstabBackup: '/etc/fstab.bak.20261102T180000Z' } })
+  })
+
+  it('reports XFS without uquota as pending instead of claiming enforcement', async () => {
+    expect(await installQuotaSetup(ports('xfs'), '/home', now)).toMatchObject({ exitCode: 2, report: { status: 'pending', filesystemType: 'xfs' } })
+    expect(await installQuotaSetup(ports('xfs', true), '/home', now)).toMatchObject({ exitCode: 0, report: { status: 'already_enforced' } })
+  })
+
+  it('stops the installer when setup ends part-way', async () => {
+    const broken = { ...ports('ext4'), scan: async () => ({ ok: false, code: 1, stdout: '', stderr: 'timed out' }) }
+    expect(await installQuotaSetup(broken, '/home', now)).toMatchObject({ exitCode: 1, report: { status: 'unverified', step: 'quotacheck' } })
   })
 })

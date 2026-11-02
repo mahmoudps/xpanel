@@ -884,6 +884,9 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   render_agent_service
   echo ""
   render_api_service
+  echo "--- User Disk Quota ---"
+  echo "ext4 holding /home: back up /etc/fstab, add usrjquota=aquota.user,jqfmt=vfsv1, remount, quotacheck, quotaon, verify"
+  echo "XFS: requires the uquota mount option at boot; recorded as pending, never reported as enforced"
   echo "--- ACME HTTP-01 ---"
   echo "install -d -m 0755 root:root /var/lib/xpanel/acme"
   echo "setfacl -m u:nginx:x /var/lib/xpanel"
@@ -1098,6 +1101,24 @@ if [[ ! -e /usr/local/bin/xpanel-ctl && ! -L /usr/local/bin/xpanel-ctl ]]; then
 else
   [[ -L /usr/local/bin/xpanel-ctl && "$(readlink /usr/local/bin/xpanel-ctl)" == /opt/xpanel/bin/xpanel-ctl ]] || die "Existing CLI entrypoint was preserved for review."
 fi
+
+echo "[5b/6] Enforcing user disk quota on the filesystem that holds /home..."
+# Account provisioning refuses until user quota is enforced there; ext4 is set up here (fstab backup,
+# journaled quota, remount, quotacheck, quotaon), XFS needs the uquota mount option at boot.
+quota_status=0
+quota_report="$("$NODE_BIN" "$PROGRAM_ROOT/apps/agent/src/quota-setup.ts" /home)" || quota_status=$?
+case "$quota_status" in
+  0) record_install_phase quota completed "$quota_report" ;;
+  2)
+    record_install_phase quota pending "$quota_report"
+    echo "WARNING: user disk quota is not enforced: $quota_report" >&2
+    echo "Account creation refuses until it is. On XFS add the uquota mount option (rootflags=uquota for /) and reboot, then run: xpanel init-quotas" >&2
+    ;;
+  *)
+    record_install_phase quota failed "$quota_report"
+    die "User disk quota setup stopped part-way ($quota_report); verify /etc/fstab and the mount before continuing."
+    ;;
+esac
 
 echo "[6/6] Reloading systemd daemon and enabling services..."
 if ((${#MANAGEMENT_TLS_ARGS[@]})); then
