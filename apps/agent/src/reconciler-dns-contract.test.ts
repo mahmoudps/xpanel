@@ -25,7 +25,8 @@ const compiled = (files: RenderedFile[] = []): CompiledGeneration => ({
   localMail: false, localMailOptions: {},
 })
 
-const rollbackFixture = (observationFails = false) => {
+const introducedUnit = 'xpanel-php-fpm-new-8.3.service', introducedPath = '/etc/systemd/system/' + introducedUnit
+const rollbackFixture = (observationFails = false, introduced = false) => {
   const events: string[] = []
   const files = new Map([[catalogPath, file(catalogPath, 'candidate bytes\n')]])
   const unexpected = async (): Promise<never> => { throw new Error('unexpected executor port') }
@@ -39,6 +40,10 @@ const rollbackFixture = (observationFails = false) => {
         events.push(`dns:${action.argv[1]}`)
       } else if (action.kind === 'systemd' && action.unit === 'nginx.service' && action.verb === 'reload') {
         events.push('nginx:reload')
+      } else if (action.kind === 'systemd-daemon-reload') {
+        events.push('systemd:daemon-reload')
+      } else if (introduced && action.kind === 'systemd' && action.unit === introducedUnit && action.verb === 'stop') {
+        events.push('stop:' + introducedUnit)
       } else throw new Error('unexpected rollback action')
     },
   }
@@ -62,9 +67,10 @@ const rollbackFixture = (observationFails = false) => {
     actor: 'root', stateChecksum: 'state', filesChecksum: 'files', phase: 'verify', startedAt: '', updatedAt: '',
     candidateManifest: manifest, previousManifest: null,
     diff: { added: [], updated: [], unchanged: [], removed: [], removedUnits: [], affectedServices: [] },
-    previousFilesBackup: [{ path: catalogPath, content: '// previous empty catalog\n', sha256: sha256Text('// previous empty catalog\n'), existed: true, mode: 0o644, owner: 'root', group: 'root' }],
+    previousFilesBackup: [{ path: catalogPath, content: '// previous empty catalog\n', sha256: sha256Text('// previous empty catalog\n'), existed: true, mode: 0o644, owner: 'root', group: 'root' },
+      ...(introduced ? [{ path: introducedPath, content: null, sha256: null, existed: false, mode: 0o644, owner: 'root', group: 'root' }] : [])],
     completedPreActions: 0, preActionsNeedVerification: false, switchedFilePaths: [catalogPath], removedFilePaths: [],
-    stoppedObsoleteUnits: [], completedPostActions: 0, reloadedUnits: ['nginx.service'], verifiedUnits: [], error: null,
+    stoppedObsoleteUnits: [], completedPostActions: 0, reloadedUnits: ['nginx.service', ...(introduced ? [introducedUnit] : [])], verifiedUnits: [], error: null,
   }
   const rollback = () => (reconciler as unknown as { rollbackLiveHostAndRecord(record: ReconcileJournalRecord, unit: string, error: string,
     scope: { accountId: null }): Promise<{ verificationRequired: boolean }> }).rollbackLiveHostAndRecord(journal, 'pdns', 'candidate reload failed', { accountId: null })
@@ -162,11 +168,21 @@ describe('generation-owned DNS publication boundary', { tags: ['unit'] }, () => 
     await expect(runGenerationDnsHook({ phase: 'verify', native: true, provider, files: [file(zonePath)], removedPaths: [] })).rejects.toThrow('served serial differs')
   })
 
+  it('stops a unit the failed generation introduced instead of restarting it from removed files', async () => {
+    const fixture = rollbackFixture(false, true)
+    await expect(fixture.rollback()).resolves.toMatchObject({ verificationRequired: false })
+    expect(fixture.events).toContain(`remove:${introducedPath}`)
+    expect(fixture.events.indexOf('systemd:daemon-reload')).toBeLessThan(fixture.events.indexOf('stop:' + introducedUnit))
+    expect(fixture.events).toContain('nginx:reload')
+  })
+
   it('restores captured DNS bytes before requiring the failed daemon and rediscovers DNS despite unrelated reload bookkeeping', async () => {
     const fixture = rollbackFixture()
     await expect(fixture.rollback()).resolves.toMatchObject({ verificationRequired: false })
     expect(fixture.provider.validate).not.toHaveBeenCalled()
     expect(fixture.events.indexOf(`restore:${catalogPath}`)).toBeLessThan(fixture.events.indexOf('dns:rediscover'))
+    expect(fixture.events.indexOf(`restore:${catalogPath}`)).toBeLessThan(fixture.events.indexOf('systemd:daemon-reload'))
+    expect(fixture.events.indexOf('systemd:daemon-reload')).toBeLessThan(fixture.events.indexOf('dns:rediscover'))
     expect(fixture.events.indexOf('dns:rediscover')).toBeLessThan(fixture.events.indexOf('dns:reload'))
     expect(fixture.events.indexOf('dns:reload')).toBeLessThan(fixture.events.indexOf('dns:verify'))
     expect(dbPorts.rollback).toHaveBeenCalledTimes(1)

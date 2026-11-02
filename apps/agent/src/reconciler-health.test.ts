@@ -32,6 +32,12 @@ describe('native unit health', () => {
     expect(hidden.calls).toHaveLength(1)
   })
 
+  it('probes a bare service name as its systemd .service unit', async () => {
+    const postfix = probe('Id=postfix.service\nActiveState=active\n')
+    await expect(postfix.health('postfix')).resolves.toEqual({ ok: true })
+    expect(postfix.calls[0]!.at(-1)).toBe('postfix.service')
+  })
+
   it('keeps an injected probe authoritative', async () => {
     const executor = { async runCommand() { throw new Error('native probe must not run') } } as unknown as AgentExecutor
     const reconciler = new HostReconciler({ executor, store: { rootDir: 'C:/tmp/xpanel-health-probe' }, healthProbe: async () => ({ ok: false, error: 'injected' }) } as unknown as ConstructorParameters<typeof HostReconciler>[0])
