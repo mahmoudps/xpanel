@@ -240,6 +240,8 @@ describe('Real LinuxHostExecutor on an explicitly acknowledged disposable VM', (
     const result = await executor.runCommand(['/usr/bin/false'])
     expect(result.ok).toBe(false)
     expect(result.code).toBe(1)
+    // The process's own (empty) stderr, not execFile's "Command failed" text: quotaon -p exits 1 while quota is on.
+    expect(result.stderr).toBe('')
   })
 
   it('fails closed when the requested binary does not exist', async () => {

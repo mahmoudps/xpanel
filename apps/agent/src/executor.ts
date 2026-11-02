@@ -507,11 +507,14 @@ const execArgv = (
           return
         }
         const code = typeof err.code === 'number' ? err.code : 1
+        // A process that ran and exited keeps its own stderr: some tools exit non-zero by design
+        // (quotaon --print-state exits 1 while quota is on). Only spawn failures and kills report execFile's message.
+        const exited = typeof err.code === 'number' && !err.killed && !err.signal
         resolve({
           ok: false,
           code,
           stdout: String(stdout ?? ''),
-          stderr: String(stderr || err.message),
+          stderr: String(exited ? stderr ?? '' : stderr || err.message),
         })
       },
     )
