@@ -22,8 +22,9 @@ const manualPem = (() => {
 const fixture = (hostAvailable = true) => {
   const account = { id: id(1), username: 'alice', ownerId: null, status: 'active' } as Account
   const domain = { id: id(2), accountId: account.id, name: 'example.test', certificateId: id(3) } as Domain
+  // Inside the 30-day renewal window, so renewal and reissue reach the agent.
   const certificate: StoredCertificate = { id: id(3), accountId: account.id, names: ['example.test', 'www.example.test'], source: 'acme', challenge: 'http-01',
-    notBefore: null, notAfter: '2028-01-01T00:00:00.000Z', autoRenew: true, certPath: services.certFiles(id(3)).fullchain, keyPath: services.certFiles(id(3)).privkey,
+    notBefore: null, notAfter: new Date(Date.now() + 10 * 86_400_000).toISOString(), autoRenew: true, certPath: services.certFiles(id(3)).fullchain, keyPath: services.certFiles(id(3)).privkey,
     chainPath: null, fingerprintSha256: 'a'.repeat(64), lastError: null, renewedAt: null }
   const snapshot = { revision: 7, accounts: [account], domains: [domain], certificates: [certificate] }
   const principal = { id: id(9), kind: 'root' as const, username: 'root' }

@@ -13,6 +13,7 @@ import type { PhpSettings } from '@xpanel/core'
 import { createRootPrincipal, createTestDb, createUserPrincipal } from '@xpanel/db'
 import type { TestDbHandle } from '@xpanel/db'
 import { profileFor } from '@xpanel/os'
+import { services } from '@xpanel/render'
 import { createTestStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
 import { CSRF_HEADER_NAME, hashPasswordArgon2id, HOST_SESSION_COOKIE_NAME, parseCookies, SESSION_COOKIE_NAME } from './auth.ts'
@@ -172,5 +173,32 @@ describe('account certificate issuance', () => {
     const problem = await failed.json() as { detail: string }
     expect(problem.detail).toMatch(/certificate authority could not be reached/)
     expect(await state.store.listCertificates()).toEqual([])
+  })
+
+  it('spends no CA issuance while a current certificate covers the domain and renews only inside the window', async () => {
+    const root = await session('root')
+    const [domain] = await state.store.listDomains({ accountId: (await state.store.getAccountByUsername('alice'))!.id })
+    const bind = async (id: string, daysLeft: number, source: 'acme' | 'upload') => {
+      const files = services.certFiles(id)
+      await state.store.saveCertificateBinding({ id, names: ['alice.example.test'], notBefore: new Date(Date.now() - 86_400_000).toISOString(),
+        notAfter: new Date(Date.now() + daysLeft * 86_400_000).toISOString(), certPath: files.fullchain, keyPath: files.privkey,
+        fingerprintSha256: 'a'.repeat(64), accountId: domain!.accountId, source, challenge: source === 'acme' ? 'http-01' : null, autoRenew: source === 'acme' }, domain!.id)
+    }
+    // The unreachable directory proves whether a request reached the CA: a guarded request never gets that far.
+    const issue = (body: Record<string, unknown> = {}) => root('/api/accounts/alice/certificates', { domain: 'alice.example.test', directoryUrl: 'http://127.0.0.1:1/directory', ...body })
+    const current = 'aaaaaaaa-aaaa-4aaa-8aaa-000000000011'
+    await bind(current, 80, 'acme')
+    const duplicate = await issue()
+    expect(duplicate.status).toBe(409)
+    expect(await duplicate.json()).toMatchObject({ details: { stateChanged: false, certificateId: current } })
+    expect((await issue({ certificateId: current })).status).toBe(409)
+
+    await bind(current, 20, 'acme')
+    expect(((await (await issue({ certificateId: current })).json()) as { detail: string }).detail).toMatch(/certificate authority could not be reached/)
+    expect(((await (await issue()).json()) as { detail: string }).detail).toMatch(/certificate authority could not be reached/)
+
+    // An uploaded certificate may be replaced by an ACME one at any time.
+    await bind('aaaaaaaa-aaaa-4aaa-8aaa-000000000012', 80, 'upload')
+    expect(((await (await issue()).json()) as { detail: string }).detail).toMatch(/certificate authority could not be reached/)
   })
 })
