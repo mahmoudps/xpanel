@@ -3,7 +3,7 @@ import { lstat, open } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { request as httpRequest, type ClientRequest, type IncomingMessage } from 'node:http'
 import { createConnection, Socket } from 'node:net'
-import { fail, type Account } from '@xpanel/core'
+import { fail, isXpanelError, type Account } from '@xpanel/core'
 import { ACCOUNT_PROBE_ROUTE, accountProbePaths } from '../../../packages/render/src/system/account-probe.ts'
 import { canonicalProvisioningIdentity, parseProvisioningReconcileRequest } from '../../../packages/core/src/account-provisioning-contract.ts'
 import { assertProvisioningProcessBinding, openNativeProvisioningProcess, parseProvisioningProcessFiles, type HeldProvisioningHttpRequest, type ProvisioningProcessIdentity, type ReadonlyAccountObservationOptions } from './account-provisioning-observer.ts'
@@ -336,6 +336,11 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
         }
       } catch (error) {
         failOperation(error); quarantined.add(account.uid)
+        // The refusal is generic; the operator needs the first failure to find the host prerequisite.
+        const first = failure
+        console.error('xpanel-agent account HTTP correlation failed:', isXpanelError(first)
+          ? `${first.code}: ${first.message}${typeof first.detail.reason === 'string' ? ` (${first.detail.reason})` : ''}`
+          : first instanceof Error ? first.message.split('\n')[0]!.slice(0, 200) : 'unexpected failure')
         try { await cleanup() } catch { /* Preserve the primary failed observation; the UID remains quarantined. */ }
         return refused('held_http_correlation_not_verified')
       }
