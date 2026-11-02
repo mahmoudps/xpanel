@@ -127,6 +127,24 @@ describe('status document mobile navigation', () => {
     expect(document.activeElement).toBe(element('#nav-toggle'))
   })
 
+  it('keeps the locked document where the overlay found it when a reflow or resize moves it', () => {
+    let y = 120
+    Object.defineProperty(window, 'scrollY', { configurable: true, get: () => y })
+    const scrollTo = vi.fn((options: ScrollToOptions) => { y = options.top ?? y })
+    vi.stubGlobal('scrollTo', scrollTo)
+    boot()
+    element('#nav-toggle').click()
+    y = 131
+    window.dispatchEvent(new Event('scroll'))
+    expect(scrollTo).toHaveBeenLastCalledWith({ left: 0, top: 120, behavior: 'instant' })
+    expect(y).toBe(120)
+    element('[data-xp-sidebar] [data-action="close-mobile-nav"]').click()
+    scrollTo.mockClear()
+    y = 300
+    window.dispatchEvent(new Event('scroll'))
+    expect(scrollTo).not.toHaveBeenCalled()
+  })
+
   it('traps Tab at both edges and prevents focus from leaving the active navigation', () => {
     boot()
     element('#nav-toggle').click()

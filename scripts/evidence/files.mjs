@@ -12,6 +12,8 @@ export function assertRegularPath(path, root) {
   while (true) {
     const stat = lstatSync(current)
     if (stat.isSymbolicLink()) throw new Error('Evidence paths may not contain symbolic links')
+    // The boundary is a resolved real path, so its own ancestors hold no link; stop there instead of at the drive root.
+    if (current === boundary) break
     const parent = resolve(current, '..')
     if (parent === current) break
     current = parent

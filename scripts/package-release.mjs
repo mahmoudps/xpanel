@@ -389,7 +389,8 @@ const collectSourceFiles = (sourceRoot) => {
       const absPath = join(absDir, entry.name)
       const relPath = toPosix(relative(sourceRoot, absPath))
       if (isDesignReference(relPath)) continue
-      const lstat = lstatSync(absPath)
+      // readdir already reports the entry type; lstat only where the filesystem leaves it unknown.
+      const lstat = entry.isFile() || entry.isDirectory() || entry.isSymbolicLink() ? entry : lstatSync(absPath)
       if (lstat.isSymbolicLink()) {
         failRelease('UNPORTABLE_SYMLINK', `Refusing symbolic link in release source tree: ${relPath}`, { path: relPath })
       }
@@ -984,9 +985,10 @@ export const buildReleaseArtifact = async (options) => {
   }
   if (!options.publisher) mkdirSync(stagingDir, { recursive: true })
 
+  const stagedDirs = new Set()
   for (const [relPath, info] of stagedFiles.entries()) {
-    const dest = join(stagingDir, relPath)
-    mkdirSync(dirname(dest), { recursive: true })
+    const dest = join(stagingDir, relPath), dir = dirname(dest)
+    if (!stagedDirs.has(dir)) { mkdirSync(dir, { recursive: true }); stagedDirs.add(dir) }
     writeFileSync(dest, info.bytes, { mode: info.mode })
   }
 

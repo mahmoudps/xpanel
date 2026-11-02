@@ -10,6 +10,9 @@ import { assertApiScope, isMailboxPrincipal } from './authorization.ts'
 import { createCertificateWorkspaceRouter, certificateWorkspaceRevision, projectWorkspaceCertificate } from './certificate-workspace.ts'
 import type { CertificateRouteScope, CertificateWorkspaceInstall } from './certificate-workspace.ts'
 
+/** The AutoSSL renewal window of certsForAutoRenew; an unparsable notAfter counts as due. */
+const CERTIFICATE_RENEWAL_WINDOW_MS = 30 * 86_400_000
+
 export interface CertificateRuntimeHelpers {
   store: StateStore
   hostAvailable: boolean
@@ -230,6 +233,14 @@ export function createCertificateRuntimeRouter(helpers: CertificateRuntimeHelper
           certificate: snapshot.certificates.find(row => row.id === String(body.certificateId).toLowerCase()) ?? null,
           accountId: fresh.account.id, domain, domains: snapshot.domains }) : null
         if (renewal && snapshot.certificates.find(certificate => certificate.id === renewal.certificateId)?.challenge !== 'http-01') return fail('PRECONDITION_FAILED', 'DNS certificate renewal is not connected to this endpoint', { stateChanged: false })
+        // The CA limits duplicate certificates per name each week; a request that cannot improve the served
+        // certificate must not spend one. Renew inside the last 30 days; never reissue over a current ACME certificate.
+        const current = renewal ? snapshot.certificates.find(certificate => certificate.id === renewal.certificateId)
+          : snapshot.certificates.find(certificate => certificate.id === domain.certificateId && certificate.source === 'acme')
+        if (current && Date.parse(current.notAfter) - Date.now() > CERTIFICATE_RENEWAL_WINDOW_MS) {
+          return fail('CONFLICT', renewal ? 'the certificate is not due for renewal yet' : 'a current certificate already covers this domain; renew it when it is due',
+            { stateChanged: false, certificateId: current.id, notAfter: current.notAfter })
+        }
         requireAccountHostAgent()
         const directoryUrl = fresh.caller.principal.kind === 'root' && typeof body.directoryUrl === 'string' && body.directoryUrl.startsWith('http://127.0.0.1:') ? body.directoryUrl : undefined
         const material = await requestCertificateMaterial(fresh.caller, username, { domain: domain.name, expectedRevision,
