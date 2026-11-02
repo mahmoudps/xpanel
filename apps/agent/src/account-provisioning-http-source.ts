@@ -204,7 +204,9 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
     await context.assertAuthority()
     if (context.signal.aborted || Date.now() >= domainDeadline) refused('native_read_authority_or_domain_deadline')
   }
-  const retain = async <T extends Pin>(work: Promise<T>): Promise<T> => { const held = await work; pins.push(held); await guard(); return held }
+  // Every read below is an observation without effects. Authority is checked at the boundaries of each
+  // observation unit, not after every read: each check re-reads the whole operation authority.
+  const retain = async <T extends Pin>(work: Promise<T>): Promise<T> => { const held = await work; pins.push(held); return held }
   await guard()
   if (![input.sourceChecksum, input.binding, input.challenge].every(value => /^[a-f0-9]{64}$/.test(value))
     || account.status !== 'active' || account.bandwidthLimitedMonth !== undefined
@@ -244,9 +246,9 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
     if (workers.length !== 1 || !Number.isSafeInteger(nginxUid) || nginxUid < 1 || !Number.isSafeInteger(nginxGid) || nginxGid < 1) refused('nginx_worker_identity_unavailable')
     const nginxUnit = options.os.services.nginx.endsWith('.service') ? options.os.services.nginx : options.os.services.nginx + '.service'
     const unitIdentity = async (name: string): Promise<{ mainPid: number; cgroup: string }> => {
-      const states = await readUnitStates(createRuntimeHost(options.executor), [name]); await guard()
+      const states = await readUnitStates(createRuntimeHost(options.executor), [name])
       if (states.get(name)?.load !== 'loaded' || states.get(name)?.active !== 'active') return refused('canary_unit_inactive')
-      const result = await options.executor.runCommand(unitIdentityShowArgv(name)); await guard()
+      const result = await options.executor.runCommand(unitIdentityShowArgv(name))
       const values = new Map<string, string>()
       for (const line of result.stdout.trim().split('\n')) {
         const at = line.indexOf('=')
@@ -290,13 +292,12 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
         const mounts = info.split('\n').map(line => line.split(' ')).filter(parts => parts[4] === target)
         if (mounts.length !== 1 || !mounts[0]?.[5]?.split(',').includes('ro')) refused('canary_namespace_not_read_only')
       }
-      await guard()
     }
     const assertCurrent = async (): Promise<void> => {
       await guard()
-      const current = await latestActive(options.db); await guard()
+      const current = await latestActive(options.db)
       if (current?.id !== activeId || current.checksum !== generationChecksum) refused('active_generation_changed')
-      for (const pin of pins) { await pin.assertCurrent(); await guard() }
+      for (const pin of pins) await pin.assertCurrent()
       const currentFpm = await unitIdentity(unit), currentNginx = await unitIdentity(nginxUnit)
       if (currentFpm.mainPid !== fpm.mainPid || currentFpm.cgroup !== fpm.cgroup || currentNginx.mainPid !== nginx.mainPid || currentNginx.cgroup !== nginx.cgroup
         || !sameProvisioningProcess(master, await readIdentity(fpm.mainPid, mainFiles)) || startToken(await nginxMain.read('stat'), nginx.mainPid) !== nginxStart) refused('canary_service_process_changed')
