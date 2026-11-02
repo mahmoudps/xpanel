@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readdir, readFile as fsReadFile, rm, stat } from 'node:fs/promises'
 import { connect } from 'node:net'
+import { uptime } from 'node:os'
 import { join } from 'node:path'
 import { fail, isXpanelError } from '@xpanel/core'
 import type { Account, Domain, FeatureList, HostAction, Limit, OsProfile, Plan, RenderedFile } from '@xpanel/core'
@@ -231,19 +232,21 @@ export async function readRuntimeHostFacts(host: RuntimeHost | null, account: Pi
   return { runtimes, cache, containers }
 }
 
-const STATE_PROPERTIES = ['Id', 'LoadState', 'ActiveState', 'SubState', 'ActiveEnterTimestamp', 'MemoryCurrent', 'CPUUsageNSec', 'NRestarts']
+// systemd 249 (Ubuntu 22.04) has no --timestamp=unix; the monotonic entry stamp is converted against the uptime.
+const STATE_PROPERTIES = ['Id', 'LoadState', 'ActiveState', 'SubState', 'ActiveEnterTimestampMonotonic', 'MemoryCurrent', 'CPUUsageNSec', 'NRestarts']
 const numeric = (v: string | undefined): number | null => v !== undefined && /^\d{1,20}$/.test(v) && Number.isSafeInteger(Number(v)) ? Number(v) : null
 
-export async function readUnitStates(host: RuntimeHost | null, units: readonly string[]): Promise<Map<string, UnitState>> {
+export async function readUnitStates(host: RuntimeHost | null, units: readonly string[], clock = { now: Date.now, uptimeSeconds: uptime }): Promise<Map<string, UnitState>> {
   const out = new Map<string, UnitState>()
   if (!host || units.length === 0) return out
-  const r = await host.run(['/usr/bin/systemctl', 'show', '--timestamp=unix', ...STATE_PROPERTIES.flatMap(p => ['-p', p]), '--', ...units]).catch(() => null)
+  const r = await host.run(['/usr/bin/systemctl', 'show', ...STATE_PROPERTIES.flatMap(p => ['-p', p]), '--', ...units]).catch(() => null)
   if (!r?.ok) return out
   for (const block of r.stdout.split(/\n\s*\n/)) {
     const v = Object.fromEntries(block.split('\n').map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]))
     if (!units.includes(v.Id ?? '')) continue
-    const since = /^@(\d{1,12})$/.exec(v.ActiveEnterTimestamp ?? '')?.[1]
-    out.set(v.Id!, { load: v.LoadState ?? 'unknown', active: v.ActiveState ?? 'unknown', sub: v.SubState ?? 'unknown', since: since && since !== '0' ? new Date(Number(since) * 1000).toISOString() : null,
+    const enteredUs = numeric(v.ActiveEnterTimestampMonotonic)
+    const since = enteredUs ? new Date(Math.round(clock.now() - (clock.uptimeSeconds() * 1000 - enteredUs / 1000))).toISOString() : null
+    out.set(v.Id!, { load: v.LoadState ?? 'unknown', active: v.ActiveState ?? 'unknown', sub: v.SubState ?? 'unknown', since,
       memoryBytes: numeric(v.MemoryCurrent), cpuNs: numeric(v.CPUUsageNSec), restarts: numeric(v.NRestarts) })
   }
   return out

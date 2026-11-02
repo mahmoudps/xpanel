@@ -35,7 +35,7 @@ function scene() {
     let stdout = ''
     if (argv[0] === '/usr/bin/findmnt') stdout = (argv[4] === 'TARGET' ? '/home' : argv[4] === 'SOURCE' ? '/dev/vda1' : 'ext4') + '\n'
     else if (argv[0] === '/usr/sbin/quotaon') return { ok: false, code: 1, stdout: 'user quota on /home (/dev/vda1) is on\n', stderr: '' }
-    else if (argv[0] === '/usr/bin/systemctl') stdout = argv.includes('--timestamp=unix')
+    else if (argv[0] === '/usr/bin/systemctl') stdout = argv.includes('ActiveEnterTimestampMonotonic')
       ? 'Id=' + unit + '\nLoadState=loaded\nActiveState=active\nSubState=running\n'
       : 'Id=' + unit + '\nUser=alice\nGroup=alice\nMainPID=700\nControlGroup=' + group + '\nActiveState=active\n'
     else throw new Error('unexpected command')
@@ -132,8 +132,8 @@ describe('readonly observation failure composition (isolated fixtures)', () => {
     s.run.mockImplementation(async argv => {
       if (kind === 'quota' && argv[0] === '/usr/sbin/quotaon') return { ok: true, code: 0, stdout: 'user quota on /home (/dev/vda1) is off\n', stderr: '' }
       const result = await original(argv)
-      if (kind === 'service' && argv.includes('--timestamp=unix')) return { ...result, stdout: result.stdout.replace('ActiveState=active', 'ActiveState=inactive') }
-      if (kind === 'unit' && argv[0] === '/usr/bin/systemctl' && !argv.includes('--timestamp=unix')) return { ...result, stdout: result.stdout.replace('User=alice', 'User=other') }
+      if (kind === 'service' && argv.includes('ActiveEnterTimestampMonotonic')) return { ...result, stdout: result.stdout.replace('ActiveState=active', 'ActiveState=inactive') }
+      if (kind === 'unit' && argv[0] === '/usr/bin/systemctl' && !argv.includes('ActiveEnterTimestampMonotonic')) return { ...result, stdout: result.stdout.replace('User=alice', 'User=other') }
       return result
     })
     await expect(createReadonlyAccountProvisioningObserver(s.options).observe(s.input, s.context)).rejects.toThrow()
