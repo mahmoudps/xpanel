@@ -462,6 +462,21 @@ describe('R04 (A23, A21) — Durable jobs with leases, fencing tokens, idempoten
     const next = await acquireJobLease(h.db, { jobId: job.id, workerId: 'worker-2' })
     expect(next).toMatchObject({ attempt: 2, fencingToken: leased.fencingToken + 1, status: 'running' })
   })
+
+  it('grants an exhausted needs_attention job exactly one reviewed attempt', async () => {
+    const h = await freshDb()
+    const job = await enqueueDurableJob(h.db, { kind: 'account.provision', actor: 'root', maxAttempts: 1 })
+    const leased = (await acquireJobLease(h.db, { jobId: job.id, workerId: 'worker-1' }))!
+    await completeJobWithLease(h.db, { jobId: job.id, workerId: 'worker-1', fencingToken: leased.fencingToken, status: 'failed',
+      error: 'host outcome unknown', failureClass: 'unknown_outcome', needsAttention: true })
+    const reopened = await reopenAttentionJob(h.db, { jobId: job.id }, async () => ({}))
+    expect(reopened).toMatchObject({ status: 'queued', attempt: 1, maxAttempts: 2 })
+    const retry = (await acquireJobLease(h.db, { jobId: job.id, workerId: 'worker-2' }))!
+    expect(retry).toMatchObject({ attempt: 2, maxAttempts: 2 })
+    await completeJobWithLease(h.db, { jobId: job.id, workerId: 'worker-2', fencingToken: retry.fencingToken, status: 'failed',
+      error: 'host outcome unknown', failureClass: 'retryable', requeueOnRetryable: true })
+    expect((await getDurableJob(h.db, job.id))?.status).toBe('failed')
+  })
 })
 
 describe('R05 (A24) — Durable file-first fsync hash-chained JSONL audit trail, fail-closed sink policy, rotation & replay', () => {

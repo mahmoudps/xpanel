@@ -842,6 +842,7 @@ export type ReopenAttentionJobAdmission = (tx: Db, current: Readonly<DurableJobR
 /**
  * Operator recovery: queues a failed `needs_attention` job for its next attempt once the operator has
  * reviewed its unknown outcome. Completed steps are kept and the next lease raises the fencing token.
+ * The attempt limit stops automatic retries, not a reviewed one: an exhausted job gets exactly one more attempt.
  */
 export const reopenAttentionJob = (
   db: Db,
@@ -859,9 +860,8 @@ export const reopenAttentionJob = (
         fail('PRECONDITION_FAILED', 'only a failed job flagged needs_attention can be reopened', { id: jobId, status: current.status })
       }
       if (current.cancelRequested) fail('PRECONDITION_FAILED', 'a cancelled job cannot be reopened', { id: jobId })
-      if (current.attempt >= current.maxAttempts) {
-        fail('PRECONDITION_FAILED', 'job has no attempts left', { id: jobId, attempt: current.attempt, maxAttempts: current.maxAttempts })
-      }
+      if (current.attempt >= 100) fail('PRECONDITION_FAILED', 'job reached the attempt ceiling', { id: jobId, attempt: current.attempt })
+      const maxAttempts = Math.max(current.maxAttempts, current.attempt + 1)
       const data = admit ? redactSecrets({ ...current.checkpointData, ...await admit(tx, current) }) : current.checkpointData
       await tx.query(
         `UPDATE jobs SET status = 'queued', error = NULL, finished_at = NULL, updated_at = $1 WHERE id = $2`,
@@ -870,9 +870,9 @@ export const reopenAttentionJob = (
       await tx.query(
         `UPDATE job_runtime_leases
          SET needs_attention = 0, failure_class = NULL, lease_owner = NULL, lease_expires_at = NULL,
-             checkpoint_json = $1, updated_at = $2
-         WHERE job_id = $3`,
-        [JSON.stringify(data), now, jobId],
+             checkpoint_json = $1, max_attempts = $2, updated_at = $3
+         WHERE job_id = $4`,
+        [JSON.stringify(data), maxAttempts, now, jobId],
       )
       return mustExist(await queryDurableJobTx(tx, jobId), 'job', jobId)
     })
