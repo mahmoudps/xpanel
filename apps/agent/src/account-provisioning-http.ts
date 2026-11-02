@@ -201,7 +201,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
             const [stat, status, cgroup] = await Promise.all([files.read('stat'), files.read('status'), files.read('cgroup')])
             observed = parseProvisioningProcessFiles(peer.pid, { stat, status, cgroup })
             assertProvisioningProcessBinding(observed, account, heldSource.unit, heldSource.mainPid)
-            await heldSource.assertWorkerNamespace(observed)
+            await heldSource.assertWorkerNamespace(observed); await heldSource.assertCurrent()
             await assertUnixSocketPeerHeldByProcess(options.addon, socketFd(heldBackend), pin, observed, nativeContext)
             await files.assertCurrent(); await guard()
           } finally { await files.close() }
@@ -215,7 +215,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
       const relay = async (peer: KernelPeerCredentials, live: Socket): Promise<void> => {
         const heldSource = source
         if (!heldSource) return refused('source_not_captured')
-        await heldSource.assertIngressPeer(peer, heldHttpConnection()); await guard()
+        await heldSource.assertIngressPeer(peer, heldHttpConnection()); await heldSource.assertCurrent(); await guard()
         const decoder = new FastCgiDecoder(), parameters: Buffer[] = []
         let requestId: number | undefined, begun = false, paramsEnded = false, running = false
         for await (const chunk of live) {
@@ -317,6 +317,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
             if (!options.addon.verifyListenerSocket(ingressListener) || !options.addon.verifyListenerSocket(callbackListener)) refused('held_listener_changed')
             await source.assertWorkerNamespace(observed)
             await source.assertIngressPeer(ingressPeer, heldHttpConnection())
+            await source.assertCurrent()
             await assertUnixSocketPeerHeldByProcess(options.addon, socketFd(backend), backendPin, observed, nativeContext)
             await guard()
           } catch (error) {

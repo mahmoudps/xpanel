@@ -189,6 +189,7 @@ export interface HeldCanarySource extends Pin {
   readonly nginxUid: number
   readonly nginxGid: number
   readonly backendSocket: string
+  /** Peer and namespace checks only; callers follow them with one assertCurrent of the whole source. */
   assertIngressPeer(peer: KernelPeerCredentials, connection: HeldHttpConnection): Promise<void>
   assertBackendPeer(peer: KernelPeerCredentials): Promise<void>
   assertWorkerNamespace(worker: ProvisioningProcessIdentity): Promise<void>
@@ -316,11 +317,11 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
           await assertExecutable(peer.pid, nginxBinary)
           await assertHttpPeerOwnedByNginx(peer.pid, connection, guard)
           if (!sameProvisioningProcess(identity, await readIdentity(peer.pid, files))) refused('http_ingress_process_changed')
-          await files.assertCurrent(); await assertCurrent()
+          await files.assertCurrent()
         } finally { await files.close() }
       },
       async assertBackendPeer(peer) { if (peer.pid !== fpm.mainPid || peer.uid !== account.uid || peer.gid !== account.gid) refused('backend_socket_is_not_fpm_master'); await assertCurrent() },
-      async assertWorkerNamespace(worker) { await assertExecutable(worker.pid, binary); await assertNamespace(worker.pid); await assertCurrent() },
+      async assertWorkerNamespace(worker) { await assertExecutable(worker.pid, binary); await assertNamespace(worker.pid) },
       async close() { const results = await Promise.allSettled(pins.map(pin => Promise.resolve().then(() => pin.close()))); if (results.some(result => result.status === 'rejected')) refused('canary_source_release_failed') },
     }
   } catch (error) { await Promise.allSettled(pins.map(pin => Promise.resolve().then(() => pin.close()))); throw error }
