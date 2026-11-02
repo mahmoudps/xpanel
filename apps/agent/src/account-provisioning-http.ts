@@ -337,10 +337,14 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
                 await assertCurrent()
                 const live = callback
                 if (!live) refused('callback_not_live')
-                releasing = true; await write(live, 'release\n')
+                releasing = true; mark('release'); await write(live, 'release\n')
                 await Promise.all([httpDone.promise, fastCgiDone.promise, ingressDone.promise, callbackDone.promise])
                 await source?.assertCurrent(); await guard()
-              } catch (error) { rejected = true; failOperation(error); quarantined.add(account.uid); return refused('held_http_release_not_verified') }
+              } catch (error) {
+                rejected = true; failOperation(error); quarantined.add(account.uid)
+                console.error('xpanel-agent held account HTTP release failed:', describeFailure(failure), stages())
+                return refused('held_http_release_not_verified')
+              }
               finally { try { await cleanup() } catch (error) { if (!rejected) throw error } }
             })()
             return closePromise
