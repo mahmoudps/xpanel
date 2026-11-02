@@ -804,12 +804,13 @@ apply_os_configuration() {
     esac
   done < "$handover/steps"
   rm -rf -- "$handover"
-  if [[ "$OS_FAMILY" == "rhel" ]]; then
-    httpd -t > /dev/null 2>&1 || die "Apache rejected its managed base configuration."
-    if [[ "$APACHE_MPM" == "itk" ]]; then httpd -M 2>/dev/null | grep -q ' mpm_itk_module ' || die "Apache did not load mpm-itk."; fi
-  else
-    apache2ctl -t > /dev/null 2>&1 || die "Apache rejected its managed base configuration."
-    if [[ "$APACHE_MPM" == "itk" ]]; then apache2ctl -M 2>/dev/null | grep -q ' mpm_itk_module ' || die "Apache did not load mpm-itk."; fi
+  local apachectl=apache2ctl modules
+  [[ "$OS_FAMILY" == "rhel" ]] && apachectl=httpd
+  "$apachectl" -t > /dev/null 2>&1 || die "Apache rejected its managed base configuration."
+  if [[ "$APACHE_MPM" == "itk" ]]; then
+    # Read the whole module list first: grep -q in a pipe can close it early and fail the pipeline (pipefail).
+    modules="$("$apachectl" -M 2> /dev/null)" || die "Apache could not list its modules."
+    [[ "$modules" == *" mpm_itk_module "* ]] || die "Apache did not load mpm-itk."
   fi
 }
 
@@ -1022,7 +1023,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   done
   echo "root:xpanel-agent 0750 /run/xpanel"
   echo "xpanel:xpanel 2770 /var/lib/xpanel; shared control.db mode 0660 for API and agent only"
-  echo "root:xpanel 0750 /etc/xpanel; preserve-or-create agent.token, server.secret and ingress.secret at 0640 (values never printed)"
+  echo "root:xpanel 0751 /etc/xpanel; preserve-or-create agent.token, server.secret and ingress.secret at 0640 (values never printed)"
   echo "--- Runtime Environment ($RUNTIME_ENV) ---"
   render_runtime_env
   echo "--- API Environment ($API_ENV; existing operator settings preserved) ---"
@@ -1154,7 +1155,9 @@ install -d -o xpanel -g xpanel -m 2770 /var/lib/xpanel
 install -d -o xpanel -g xpanel -m 2750 /var/lib/xpanel/state /var/lib/xpanel/generations
 # Traverse-only for others: each account's PHP-FPM master opens its own log under php-fpm/<user>.
 install -d -o xpanel -g xpanel -m 2751 /var/log/xpanel
-install -d -o root -g xpanel -m 0750 /etc/xpanel
+# Traverse-only for others: an account's PHP-FPM master reads its pool file in php-fpm/<version>, and the account
+# probe lives in account-probe; only public material inside is world-readable, secrets carry their own modes.
+install -d -o root -g xpanel -m 0751 /etc/xpanel
 install -d -o root -g root -m 0750 /etc/xpanel/userdata
 install -d -o root -g xpanel-agent -m 0750 /run/xpanel
 install -d -o root -g root -m 0755 /opt/xpanel/bin

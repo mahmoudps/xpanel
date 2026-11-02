@@ -55,6 +55,21 @@ const cases = SUPPORTED_OS.flatMap(os => os.versions.flatMap(versionId => ['8.3'
   [false, true].map(withServices => ({ id: os.id, name: os.name, versionId, php, withServices })),
 )))
 
+describe('Apache module check of the installer', () => {
+  it('finds mpm-itk in a long module list under pipefail, and refuses a list without it', () => {
+    const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
+    const start = source.indexOf('  local apachectl=apache2ctl modules')
+    const block = source.slice(start, source.indexOf('\n}\n', start))
+    // The match comes first and a long list follows: an early-exiting reader would break the writer's pipe.
+    const httpd = (withItk: boolean) => `httpd() { [[ "$1" == -t ]] && return 0; ${withItk ? "echo ' mpm_itk_module (shared)'" : ':'}; for _ in $(seq 1 12000); do echo ' status_module (shared)'; done; }`
+    const script = (withItk: boolean) => `die() { echo "DIE $*"; exit 1; }\n${httpd(withItk)}\ncheck() {\n${block}\n}\nOS_FAMILY=rhel APACHE_MPM=itk check && echo PASS\n`
+    const ok = spawnSync(bash, ['-euo', 'pipefail', '-c', script(true)], { encoding: 'utf8', timeout: 10_000 })
+    expect(ok.stdout.trim(), ok.stderr).toBe('PASS')
+    const missing = spawnSync(bash, ['-euo', 'pipefail', '-c', script(false)], { encoding: 'utf8', timeout: 10_000 })
+    expect(missing.stdout.trim()).toBe('DIE Apache did not load mpm-itk.')
+  })
+})
+
 describe('log directory of the installer', () => {
   it('lets each account traverse /var/log/xpanel to its own PHP-FPM log directory without listing it', () => {
     const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
