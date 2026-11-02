@@ -399,3 +399,15 @@ describe('CLI: provisioning host recovery attestation', () => {
     })
   })
 })
+
+describe('CLI: quota setup', () => {
+  it('refuses malformed arguments before contacting the agent', async () => {
+    await withCli(async (db, store) => {
+      for (const argv of [['init-quotas', '--path'], ['init-quotas', 'home'], ['init-quotas', '--path', 'home'], ['init-quotas', '--force']]) {
+        const result = await runCli(argv, { db, store })
+        assert.equal(result.code, 1)
+        assert.match(result.stderr, /usage: xpanel init-quotas/)
+      }
+    })
+  })
+})

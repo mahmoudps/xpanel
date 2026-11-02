@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyObservedUserQuota, enableExistingUserQuota, observeUserQuota, parseUserQuotaState, validateQuotaFilesystem } from './quota.ts'
+import { applyObservedUserQuota, enableExistingUserQuota, fstabWithUserQuota, initializeUserQuota, observeUserQuota, parseUserQuotaState, validateQuotaFilesystem } from './quota.ts'
 import type { QuotaCommandRunner } from './quota.ts'
 
 const ok = (stdout = '') => ({ ok: true, code: 0, stdout, stderr: '' })
@@ -85,5 +85,74 @@ describe('observed user quota enforcement', () => {
     const host = fixture('off')
     await expect(enableExistingUserQuota(async argv => argv[0] === '/usr/sbin/quotaon' && !argv.includes('--print-state') ? ok() : host.run(argv), '/home'))
       .rejects.toMatchObject({ detail: { unknownOutcome: true, verificationRequired: true } })
+  })
+})
+
+describe('user quota setup', () => {
+  const FSTAB = '# /etc/fstab\n/dev/disk/by-uuid/5e6f / ext4 defaults 0 1\n/dev/disk/by-uuid/3ED7 /boot/efi vfat defaults 0 1\n'
+  const STAMP = '20261102T140000Z'
+  const host = (options: { fstype?: string; enforced?: boolean; remount?: boolean; scan?: boolean } = {}) => {
+    const commands: string[][] = [], files = new Map([['/etc/fstab', FSTAB]])
+    let state: 'none' | 'off' | 'on' = options.enforced ? 'on' : 'none'
+    const run: QuotaCommandRunner = async argv => {
+      commands.push(argv)
+      if (argv[0] === '/usr/bin/findmnt') return ok(({ TARGET: '/', SOURCE: '/dev/sda1', FSTYPE: options.fstype ?? 'ext4' } as Record<string, string>)[argv[4]!]!)
+      if (argv.includes('--print-state')) return state === 'none'
+        ? { ok: true, code: 0, stdout: '', stderr: 'quotaon: Mountpoint (or device) / not found or has no quota enabled.\n' }
+        : { ok: state === 'off', code: state === 'on' ? 1 : 0, stdout: `user quota on / (/dev/sda1) is ${state}\n`, stderr: '' }
+      if (argv[0] === '/usr/bin/mount') {
+        if (options.remount === false) return { ok: false, code: 32, stdout: '', stderr: 'mount: /: mount point not mounted or bad option.' }
+        state = 'off'
+      }
+      if (argv[0] === '/usr/sbin/quotaon') state = 'on'
+      return ok()
+    }
+    const scan: QuotaCommandRunner = async argv => { commands.push(argv); return options.scan === false ? { ok: false, code: 1, stdout: '', stderr: 'timed out' } : ok() }
+    const ports = { run, scan, readFile: async (path: string) => files.get(path) ?? null,
+      writeFile: async (file: { path: string; content: string }) => { files.set(file.path, file.content) } }
+    return { ports, commands, files }
+  }
+
+  it('adds journaled user quota to the one matching fstab entry and keeps the rest of the table', () => {
+    expect(fstabWithUserQuota(FSTAB, '/')).toBe(FSTAB.replace('/ ext4 defaults 0 1', '/ ext4 defaults,usrjquota=aquota.user,jqfmt=vfsv1 0 1'))
+    expect(fstabWithUserQuota(FSTAB.replace('defaults 0 1\n/dev', 'defaults,usrquota 0 1\n/dev'), '/')).toBeNull()
+    expect(() => fstabWithUserQuota('#/dev/sda1 / ext4 defaults 0 1\n', '/')).toThrow('exactly one /etc/fstab entry')
+    expect(() => fstabWithUserQuota(FSTAB + '/dev/sdb1 / ext4 defaults 0 1\n', '/')).toThrow('exactly one /etc/fstab entry')
+  })
+
+  it('backs up fstab, remounts, builds accounting and verifies enforcement on the mount of the homes', async () => {
+    const h = host()
+    const result = await initializeUserQuota(h.ports, '/home', STAMP)
+    expect(result).toMatchObject({ filesystem: '/', source: '/dev/sda1', status: 'enabled', changed: true, fstabBackup: '/etc/fstab.bak.' + STAMP })
+    expect(h.files.get('/etc/fstab.bak.' + STAMP)).toBe(FSTAB)
+    expect(h.files.get('/etc/fstab')).toContain('/ ext4 defaults,usrjquota=aquota.user,jqfmt=vfsv1 0 1')
+    expect(h.commands.filter(argv => !argv.includes('--print-state') && argv[0] !== '/usr/bin/findmnt')).toEqual([
+      ['/usr/bin/mount', '-o', 'remount', '/'],
+      ['/usr/sbin/quotacheck', '--create-files', '--user', '--no-remount', '--format=vfsv1', '/'],
+      ['/usr/sbin/quotaon', '--user', '/'],
+    ])
+  })
+
+  it('restores fstab when the kernel refuses the quota options and builds no accounting', async () => {
+    const h = host({ remount: false })
+    await expect(initializeUserQuota(h.ports, '/home', STAMP)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: expect.stringContaining('restored') })
+    expect(h.files.get('/etc/fstab')).toBe(FSTAB)
+    expect(h.commands.some(argv => argv[0] === '/usr/sbin/quotacheck')).toBe(false)
+  })
+
+  it('reports an interrupted accounting scan as unverified and does not switch enforcement on', async () => {
+    const h = host({ scan: false })
+    await expect(initializeUserQuota(h.ports, '/home', STAMP)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', detail: { verificationRequired: true, step: 'quotacheck' } })
+    expect(h.commands.some(argv => argv[0] === '/usr/sbin/quotaon' && !argv.includes('--print-state'))).toBe(false)
+  })
+
+  it('changes nothing on an enforcing filesystem and refuses an unsupported one before any write', async () => {
+    const enforced = host({ enforced: true })
+    expect(await initializeUserQuota(enforced.ports, '/home', STAMP)).toMatchObject({ status: 'enabled', changed: false, fstabBackup: null })
+    expect([...enforced.files.keys()]).toEqual(['/etc/fstab'])
+    const xfs = host({ fstype: 'xfs' })
+    await expect(initializeUserQuota(xfs.ports, '/home', STAMP)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    expect([...xfs.files.keys()]).toEqual(['/etc/fstab'])
+    expect(xfs.commands.some(argv => argv[0] === '/usr/bin/mount')).toBe(false)
   })
 })

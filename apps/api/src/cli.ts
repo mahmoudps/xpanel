@@ -49,7 +49,7 @@ const readPlaintextPassword = async (readPassword: () => Promise<string>): Promi
 
 /**
  * Executes an `xpanel` administrative CLI command (`status`, `reconcile`, `rollback`,
- * `reindex`, `init-root`, `reset-password`, `disable-2fa`, `recover-provisioning`).
+ * `reindex`, `init-root`, `reset-password`, `disable-2fa`, `recover-provisioning`, `init-quotas`).
  * `reconcile --resolve-failed <generation-id>` clears a journal stuck in needs_attention.
  */
 export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<CliResult> => {
@@ -93,6 +93,7 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
           '  reset-password <username> --password-stdin  Read one password from standard input',
           '  disable-2fa <username> [--confirm]   Recover an enrolled factor with explicit confirmation',
           '  recover-provisioning <job-id> --attest-host-recovered  Requeue an account whose host step was interrupted, after reconcile',
+          '  init-quotas [--path <dir>]           Enable enforced user disk quota on the filesystem of account homes (default /home)',
           '  repair-state-ownership               Root-only: give the xpanel user the state tree',
         ].join('\n'),
       )
@@ -290,6 +291,22 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
           stderr: errLines.join('\n'),
           data: { username: principal.username, totpEnabled: false },
         }
+      }
+
+      case 'init-quotas': {
+        if (!(rest.length === 0 || (rest.length === 2 && rest[0] === '--path' && rest[1]?.startsWith('/')))) {
+          return fail('VALIDATION', 'usage: xpanel init-quotas [--path <dir>]')
+        }
+        const res = await callAgent('/host/quota/initialize', rest.length ? { path: rest[1] } : {})
+        const body = (await res.json()) as Record<string, unknown>
+        if (!res.ok) {
+          writeErr(`Quota setup refused: ${JSON.stringify(body)}`)
+          return { code: 1, stdout: outLines.join('\n'), stderr: errLines.join('\n'), data: body }
+        }
+        writeOut(body.changed === true
+          ? `User quota is now enforced on ${String(body.filesystem)} (${String(body.filesystemType)}). /etc/fstab backup: ${String(body.fstabBackup ?? 'not needed')}. Run xpanel reconcile --force to apply account limits.`
+          : `User quota is already enforced on ${String(body.filesystem)}; nothing changed.`)
+        return { code: 0, stdout: outLines.join('\n'), stderr: errLines.join('\n'), data: body }
       }
 
       case 'recover-provisioning': {

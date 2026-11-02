@@ -1159,7 +1159,7 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
   }
 }
 
-const CLI_VERBS = new Set(['status', 'reconcile', 'rollback', 'reindex', 'init-root', 'reset-password', 'disable-2fa', 'recover-provisioning', 'repair-state-ownership', 'help', '--help', '-h'])
+const CLI_VERBS = new Set(['status', 'reconcile', 'rollback', 'reindex', 'init-root', 'reset-password', 'disable-2fa', 'recover-provisioning', 'init-quotas', 'repair-state-ownership', 'help', '--help', '-h'])
 
 const readPasswordInput = async (): Promise<string> => {
   if (process.stdin.isTTY) {
@@ -1284,7 +1284,7 @@ if (isMainModule()) {
           store.registerAccountContactIndexRecovery(account => syncAccountContactIndex(dbHandle.db, account))
           assertNoActiveDatabaseTransaction()
           await store.getWriterLock().waitForUnlocked()
-          const requiresAgent = firstArg === 'reconcile' || firstArg === 'rollback'
+          const requiresAgent = firstArg === 'reconcile' || firstArg === 'rollback' || firstArg === 'init-quotas'
           const agentToken = requiresAgent ? await loadAgentCredentialFile(process.env.XPANEL_AGENT_TOKEN_FILE ?? '/etc/xpanel/agent.token') : undefined
           if (agentToken) client = createAgentClient({ socketPath: process.env.XPANEL_AGENT_SOCKET ?? '/run/xpanel/agent.sock', token: agentToken })
           return (await runCli(args, {
