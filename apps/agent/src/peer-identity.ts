@@ -9,6 +9,12 @@ export const DEFAULT_AGENT_SOCKET_BACKLOG = 32
 export const MAX_AGENT_SOCKET_CONNECTIONS = 64
 export const MAX_AGENT_INFLIGHT_REQUESTS = 32
 export const DEFAULT_AGENT_SOCKET_IDLE_TIMEOUT_MS = 35_000
+/** Request-bound host effects that stay silent longer than the idle timeout; the API client and this server both allow them this long. */
+export const AGENT_ROUTE_TIMEOUT_MS: ReadonlyMap<string, number> = new Map([
+  ['/host/account-provisioning', 180_000],
+  // The agent bounds the quota accounting scan at 240 s; this leaves room for remount and verification.
+  ['/host/quota/initialize', 300_000],
+])
 
 export interface KernelPeerCredentials {
   readonly uid: number

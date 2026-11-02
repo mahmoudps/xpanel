@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { Server, RequestListener } from 'node:http'
 import { afterEach, describe, it, vi } from 'vitest'
-import { MAX_AGENT_MESSAGE_BYTES } from '@xpanel/agent'
+import { AGENT_ROUTE_TIMEOUT_MS, DEFAULT_AGENT_SOCKET_IDLE_TIMEOUT_MS, MAX_AGENT_MESSAGE_BYTES } from '@xpanel/agent'
 import { isXpanelError, XpanelError } from '@xpanel/core'
 import type { LiveEvent } from '@xpanel/core'
 import { createApiToken, createRootPrincipal, createTestDb, setTotpSecret } from '@xpanel/db'
@@ -18,6 +18,11 @@ describe('agent IPC client configuration', () => {
   it('rejects missing credentials and invalid timeouts before opening a connection', () => {
     assert.throws(() => createAgentClient({ socketPath: '/run/xpanel/agent.sock', token: '' }))
     assert.throws(() => createAgentClient({ socketPath: '/run/xpanel/agent.sock', token: TOKEN, timeoutMs: 0 }))
+  })
+
+  it('keeps request-bound host effects open past the agent socket idle timeout, within the client cap', () => {
+    assert.ok(AGENT_ROUTE_TIMEOUT_MS.size > 0)
+    for (const budget of AGENT_ROUTE_TIMEOUT_MS.values()) assert.ok(budget > DEFAULT_AGENT_SOCKET_IDLE_TIMEOUT_MS && budget <= 300_000)
   })
 
   it('reports a missing local transport as SERVICE_UNAVAILABLE with HTTP 503, without exposing the socket path', async () => {
@@ -138,6 +143,14 @@ if (process.platform === 'win32') describe('agent client over a Windows local na
     assert.equal(missingHelper.status, 412)
     assert.deepEqual(await missingHelper.json(), { code: 'PRECONDITION_FAILED' })
     await assert.rejects(() => ipc.fetch(new Request('http://agent.local/hang')),
+      error => isXpanelError(error) && error.code === 'SERVICE_UNAVAILABLE')
+  })
+
+  it('keeps a request-bound host effect connected past the default idle timeout', async () => {
+    const ipc = await listen((_req, res) => { setTimeout(() => res.end('{"ok":true}'), 150) }, 50)
+    const provisioned = await ipc.fetch(new Request('http://agent.local/host/account-provisioning', { method: 'POST', body: '{}' }))
+    assert.equal(provisioned.status, 200)
+    await assert.rejects(() => ipc.fetch(new Request('http://agent.local/state/apply', { method: 'POST', body: '{}' })),
       error => isXpanelError(error) && error.code === 'SERVICE_UNAVAILABLE')
   })
 

@@ -3,15 +3,15 @@ import { lstat, open } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { request as httpRequest, type ClientRequest, type IncomingMessage } from 'node:http'
 import { createConnection, Socket } from 'node:net'
-import { fail, type Account } from '@xpanel/core'
-import { ACCOUNT_PROBE_ROUTE, accountProbePaths } from '../../../packages/render/src/system/account-probe.ts'
+import { fail, isXpanelError, type Account } from '@xpanel/core'
+import { ACCOUNT_PROBE_HOLD_SECONDS, ACCOUNT_PROBE_ROUTE, accountProbePaths } from '../../../packages/render/src/system/account-probe.ts'
 import { canonicalProvisioningIdentity, parseProvisioningReconcileRequest } from '../../../packages/core/src/account-provisioning-contract.ts'
 import { assertProvisioningProcessBinding, openNativeProvisioningProcess, parseProvisioningProcessFiles, type HeldProvisioningHttpRequest, type ProvisioningProcessIdentity, type ReadonlyAccountObservationOptions } from './account-provisioning-observer.ts'
 import { captureCanarySource, type HeldCanarySource, type HeldHttpConnection, type NativeAccountHttpSubject, type NativeProvisioningHttpOptions } from './account-provisioning-http-source.ts'
 import type { HostEffectAuthority } from './host-effect-authority.ts'
 import type { NativePeerIdentityAddon, KernelPeerCredentials } from './peer-identity.ts'
 import { assertUnixSocketPeerHeldByProcess, inspectHeldUnixSocketPeer, type UnixSocketPeerPin } from './unix-socket-peer.ts'
-import { FASTCGI, FastCgiDecoder, assertCanaryIngress, fastCgiCanaryRequest, fastCgiRecord, matchesCanaryAdmission, matchesCanaryCallback, parseFastCgiParams } from './provisioning-fastcgi.ts'
+import { FASTCGI, FastCgiDecoder, assertCanaryIngress, fastCgiCanaryRequest, fastCgiRecord, isCompletedFastCgiEnd, matchesCanaryAdmission, matchesCanaryCallback, parseFastCgiParams } from './provisioning-fastcgi.ts'
 
 type HttpInput = Parameters<NonNullable<ReadonlyAccountObservationOptions['openCorrelatedHttpRequest']>>[0]
 type NativeHttpPort = Required<Pick<ReadonlyAccountObservationOptions, 'assertHttpAvailable' | 'openCorrelatedHttpRequest'>>
@@ -22,6 +22,10 @@ export interface HeldNativeAccountHttpRequest extends HeldProvisioningHttpReques
   readonly mainPid: number
 }
 const refused: (reason: string) => never = reason => fail('PRECONDITION_FAILED', 'the held account HTTP request did not verify', { verificationRequired: true, reason })
+/** Code, message and reason identifier, or the first line of a system error; never request bytes. */
+const describeFailure = (error: unknown): string => isXpanelError(error)
+  ? `${error.code}: ${error.message}${typeof error.detail.reason === 'string' ? ` (${error.detail.reason})` : ''}`
+  : error instanceof Error ? error.message.split('\n')[0]!.slice(0, 200) : 'unexpected failure'
 const socketFd = (socket: Socket): number => {
   const handle: unknown = Reflect.get(socket, '_handle')
   if (handle === null || typeof handle !== 'object') return refused('held_socket_unavailable')
@@ -114,7 +118,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
       const account = input.account
       if (!/^[a-f0-9]{64}$/.test(input.challenge) || busy.has(account.uid) || quarantined.has(account.uid)) refused('account_probe_busy_or_quarantined')
       busy.add(account.uid)
-      const admission = randomBytes(32).toString('hex'), deadline = performance.now() + 12000, paths = accountProbePaths(account)
+      const admission = randomBytes(32).toString('hex'), deadline = performance.now() + ACCOUNT_PROBE_HOLD_SECONDS * 1000, paths = accountProbePaths(account)
       const sockets = new Set<Socket>(), tasks = new Set<Promise<void>>()
       const httpReady = deferred<void>(), httpDone = deferred<void>(), workerReady = deferred<ProvisioningProcessIdentity>()
       const fastCgiDone = deferred<void>(), ingressDone = deferred<void>(), callbackDone = deferred<void>()
@@ -138,7 +142,11 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
         if (performance.now() >= deadline || context.signal.aborted) return refused('account_probe_authority_or_deadline')
       }
       const nativeContext: HostEffectAuthority = { readOnly: true, signal: context.signal, assertAuthority: guard }
-      const timer = setTimeout(() => failOperation(new Error('held account HTTP deadline')), 12000)
+      // Which hops completed tells the operator where the exchange stalled.
+      const started = performance.now(), marks: string[] = []
+      const mark = (name: string): void => { marks.push(`${name}@${Math.round(performance.now() - started)}ms`) }
+      const stages = (): string => `ingress=${ingress ? 'admitted' : 'none'} backend=${backend ? 'connected' : 'none'} callback=${callback ? 'received' : 'none'} response=${response?.statusCode ?? 'none'} ${marks.join(' ')} now@${Math.round(performance.now() - started)}ms`
+      const timer = setTimeout(() => failOperation(new Error(`held account HTTP deadline (${stages()})`)), ACCOUNT_PROBE_HOLD_SECONDS * 1000)
       const abort = () => failOperation(new Error('held account HTTP cancelled'))
       context.signal.addEventListener('abort', abort, { once: true })
       const ownSocket = (socket: Socket): Socket => {
@@ -181,7 +189,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
           if (at < 0) continue
           if (at !== bytes.length - 1 || callback !== undefined) refused('callback_replay_or_extra_frame')
           if (!matchesCanaryCallback(bytes, input.challenge, input.binding)) { live.destroy(); return }
-          callback = live
+          callback = live; mark('callback')
           await guard()
           const heldSource = source, heldBackend = backend
           if (!heldSource || !heldBackend || peer.uid !== account.uid || peer.gid !== account.gid) refused('callback_not_bound_to_fpm')
@@ -193,11 +201,11 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
             const [stat, status, cgroup] = await Promise.all([files.read('stat'), files.read('status'), files.read('cgroup')])
             observed = parseProvisioningProcessFiles(peer.pid, { stat, status, cgroup })
             assertProvisioningProcessBinding(observed, account, heldSource.unit, heldSource.mainPid)
-            await heldSource.assertWorkerNamespace(observed)
+            await heldSource.assertWorkerNamespace(observed); await heldSource.assertCurrent()
             await assertUnixSocketPeerHeldByProcess(options.addon, socketFd(heldBackend), pin, observed, nativeContext)
             await files.assertCurrent(); await guard()
           } finally { await files.close() }
-          workerReady.resolve(observed)
+          mark('worker-verified'); workerReady.resolve(observed)
           // Keep the actual callback/request alive. Any further callback bytes invalidate the one-shot frame.
           for await (const extra of live) { if (Buffer.byteLength(extra) !== 0) refused('callback_replayed') }
           if (!releasing) refused('callback_closed_before_release')
@@ -207,7 +215,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
       const relay = async (peer: KernelPeerCredentials, live: Socket): Promise<void> => {
         const heldSource = source
         if (!heldSource) return refused('source_not_captured')
-        await heldSource.assertIngressPeer(peer, heldHttpConnection()); await guard()
+        await heldSource.assertIngressPeer(peer, heldHttpConnection()); await heldSource.assertCurrent(); await guard()
         const decoder = new FastCgiDecoder(), parameters: Buffer[] = []
         let requestId: number | undefined, begun = false, paramsEnded = false, running = false
         for await (const chunk of live) {
@@ -225,12 +233,12 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
             if (!matchesCanaryAdmission(values.get('HTTP_X_XPANEL_PROBE_ADMISSION'), admission)) { live.destroy(); return }
             if (claimed) refused('admission_nonce_already_consumed')
             assertCanaryIngress(values, account.primaryDomain)
-            claimed = true; running = true; ingress = live; ingressPeer = peer
+            claimed = true; running = true; ingress = live; ingressPeer = peer; mark('ingress')
             await heldSource.assertCurrent(); await guard()
             const stream = ownSocket(createConnection(heldSource.backendSocket))
             backend = stream
             await waitForNativeSocketConnect(stream, AbortSignal.any([context.signal, connectCancellation.signal]), deadline); await guard()
-            await heldSource.assertBackendPeer(options.addon.getSocketPeerCred(socketFd(stream)))
+            await heldSource.assertBackendPeer(options.addon.getSocketPeerCred(socketFd(stream))); mark('backend')
             await guard()
             const outgoing = new FastCgiDecoder(), targetId = record.requestId
             track((async () => {
@@ -240,7 +248,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
                 if (item.type === FASTCGI.stderr && item.content.length) refused('backend_canary_error')
                 if (item.type === FASTCGI.stdout) { if (stdoutClosed) refused('backend_stdout_reopened'); if (!item.content.length) stdoutClosed = true }
                 if (item.type === FASTCGI.end) {
-                  if (!releasing || !stdoutClosed || item.content.length !== 8 || item.content.readUInt32BE(0) !== 0 || item.content.subarray(4).some(byte => byte !== 0)) refused('backend_ended_before_proof')
+                  if (!releasing || !isCompletedFastCgiEnd(item)) refused('backend_ended_before_proof')
                   complete = true
                 }
                 await write(live, fastCgiRecord(item.type, targetId, item.content))
@@ -274,14 +282,14 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
         return listener
       }
       try {
-        const heldSource = await captureCanarySource(options, input, nativeContext); source = heldSource; await guard()
+        const heldSource = await captureCanarySource(options, input, nativeContext); source = heldSource; await guard(); mark('source')
         callbackListener = listen(paths.callback, account.gid, 0o660, true)
         ingressListener = listen(paths.ingress, heldSource.nginxGid, 0o660, false)
         await guard()
         let received: Buffer = Buffer.alloc(0)
         http = httpRequest({ host: account.ipv4, family: 4, port: 80, path: ACCOUNT_PROBE_ROUTE, method: 'GET', agent: false,
-          headers: { Host: account.primaryDomain, 'X-XPanel-Probe-Admission': admission, Connection: 'close' }, timeout: 11000 }, actual => {
-          response = actual
+          headers: { Host: account.primaryDomain, 'X-XPanel-Probe-Admission': admission, Connection: 'close' }, timeout: ACCOUNT_PROBE_HOLD_SECONDS * 1000 - 1000 }, actual => {
+          response = actual; mark('response')
           try {
             const challengeHeaders = actual.rawHeaders.filter((_, index) => index % 2 === 0 && actual.rawHeaders[index]?.toLowerCase() === 'x-xpanel-probe-challenge')
             if (actual.statusCode !== 200 || actual.rawHeaders.length > 64 || challengeHeaders.length !== 1 || actual.headers['x-xpanel-probe-challenge'] !== input.challenge
@@ -301,7 +309,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
         })
         http.once('socket', socket => { httpSocket = ownSocket(socket) })
         http.once('timeout', () => failOperation(new Error('actual HTTP request deadline'))); http.once('error', failOperation); http.end()
-        const [observed] = await Promise.all([workerReady.promise, httpReady.promise]); await guard()
+        const [observed] = await Promise.all([workerReady.promise, httpReady.promise]); await guard(); mark('ready')
         const assertCurrent = async (): Promise<void> => {
           try {
             await guard()
@@ -309,9 +317,13 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
             if (!options.addon.verifyListenerSocket(ingressListener) || !options.addon.verifyListenerSocket(callbackListener)) refused('held_listener_changed')
             await source.assertWorkerNamespace(observed)
             await source.assertIngressPeer(ingressPeer, heldHttpConnection())
+            await source.assertCurrent()
             await assertUnixSocketPeerHeldByProcess(options.addon, socketFd(backend), backendPin, observed, nativeContext)
             await guard()
-          } catch { return refused('held_http_request_changed') }
+          } catch (error) {
+            console.error('xpanel-agent held account HTTP request changed:', describeFailure(error), stages())
+            return refused('held_http_request_changed')
+          }
         }
         await assertCurrent()
         return {
@@ -325,10 +337,14 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
                 await assertCurrent()
                 const live = callback
                 if (!live) refused('callback_not_live')
-                releasing = true; await write(live, 'release\n')
+                releasing = true; mark('release'); await write(live, 'release\n')
                 await Promise.all([httpDone.promise, fastCgiDone.promise, ingressDone.promise, callbackDone.promise])
                 await source?.assertCurrent(); await guard()
-              } catch (error) { rejected = true; failOperation(error); quarantined.add(account.uid); return refused('held_http_release_not_verified') }
+              } catch (error) {
+                rejected = true; failOperation(error); quarantined.add(account.uid)
+                console.error('xpanel-agent held account HTTP release failed:', describeFailure(failure), stages())
+                return refused('held_http_release_not_verified')
+              }
               finally { try { await cleanup() } catch (error) { if (!rejected) throw error } }
             })()
             return closePromise
@@ -336,6 +352,8 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
         }
       } catch (error) {
         failOperation(error); quarantined.add(account.uid)
+        // The refusal is generic; the operator needs the first failure to find the host prerequisite.
+        console.error('xpanel-agent account HTTP correlation failed:', describeFailure(failure), stages())
         try { await cleanup() } catch { /* Preserve the primary failed observation; the UID remains quarantined. */ }
         return refused('held_http_correlation_not_verified')
       }

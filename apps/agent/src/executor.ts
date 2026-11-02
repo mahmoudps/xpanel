@@ -423,6 +423,8 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
     if (/^\/etc\/xpanel\/management-certificates\/[a-f0-9]{64}\/fullchain\.pem$/.test(path)) return operation === 'read'
     if (path === '/home') return operation === 'ensure-directory'
     if (path === '/var/spool/postfix/opendkim') return operation === 'ensure-directory'
+    // Root-operator quota setup only: the exact table and its timestamped backup.
+    if (path === '/etc/fstab' || /^\/etc\/fstab\.bak\.[0-9]{8}T[0-9]{6}Z$/.test(path)) return operation === 'read' || operation === 'write'
     if (path === '/etc/opendkim.conf' || path.startsWith('/etc/opendkim.conf.bak.')) {
       return operation === 'read' || operation === 'write'
     }
@@ -505,11 +507,14 @@ const execArgv = (
           return
         }
         const code = typeof err.code === 'number' ? err.code : 1
+        // A process that ran and exited keeps its own stderr: some tools exit non-zero by design
+        // (quotaon --print-state exits 1 while quota is on). Only spawn failures and kills report execFile's message.
+        const exited = typeof err.code === 'number' && !err.killed && !err.signal
         resolve({
           ok: false,
           code,
           stdout: String(stdout ?? ''),
-          stderr: String(stderr || err.message),
+          stderr: String(exited ? stderr ?? '' : stderr || err.message),
         })
       },
     )

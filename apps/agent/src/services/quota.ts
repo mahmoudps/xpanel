@@ -1,9 +1,9 @@
 import { posix } from 'node:path'
 import { fail } from '@xpanel/core'
-import type { HostAction } from '@xpanel/core'
+import type { HostAction, RenderedFile } from '@xpanel/core'
 import type { ConfigTestResult } from '../executor.ts'
 
-/** The runner must use a fixed C locale. No shell, remount or quota-file rebuilding is performed here. */
+/** The runner must use a fixed C locale. No shell. Only initializeUserQuota remounts or rebuilds quota files. */
 export type QuotaCommandRunner = (argv: string[]) => Promise<ConfigTestResult>
 export interface UserQuotaObservation {
   filesystem: string
@@ -73,6 +73,93 @@ export const enableExistingUserQuota = async (run: QuotaCommandRunner, filesyste
     })
   }
   return after
+}
+
+/** User quota applies to a whole mount: the one holding account homes, which is `/` when /home is not its own filesystem. */
+export const resolveHomeQuotaFilesystem = async (run: QuotaCommandRunner, homeBase = '/home'): Promise<string> => {
+  const mount = await run(['/usr/bin/findmnt', '--noheadings', '--raw', '--output', 'TARGET', '--target', validateQuotaFilesystem(homeBase)])
+  if (!mount.ok || !mount.stdout.trim() || /[\r\n]/.test(mount.stdout.trim())) {
+    return fail('PRECONDITION_FAILED', 'the filesystem holding account homes could not be observed', { stateChanged: false })
+  }
+  return validateQuotaFilesystem(mount.stdout.trim())
+}
+
+export const QUOTA_FSTAB_PATH = '/etc/fstab'
+/** ext4 journaled user quota: accounting stays consistent after a crash without a new quotacheck. */
+const JOURNALED_USER_QUOTA = ['usrjquota=aquota.user', 'jqfmt=vfsv1']
+
+/** Adds journaled user quota to the single fstab entry of `mountpoint`; null when user quota is already configured. */
+export const fstabWithUserQuota = (fstab: string, mountpoint: string): string | null => {
+  const lines = fstab.split('\n')
+  const entries = lines.flatMap((line, index) => {
+    const fields = line.trim().split(/\s+/)
+    return !line.trim().startsWith('#') && fields.length >= 4 && fields[1] === mountpoint ? [index] : []
+  })
+  if (entries.length !== 1) {
+    return fail('PRECONDITION_FAILED', 'quota setup requires exactly one /etc/fstab entry for the filesystem', { stateChanged: false, entries: entries.length })
+  }
+  const index = entries[0]!
+  const [, head, options, tail] = /^(\s*\S+\s+\S+\s+\S+\s+)(\S+)(.*)$/.exec(lines[index]!)!
+  const current = options!.split(',')
+  if (current.some(option => option === 'usrquota' || option === 'quota' || option.startsWith('usrjquota='))) return null
+  lines[index] = head + [...current, ...JOURNALED_USER_QUOTA].join(',') + tail
+  return lines.join('\n')
+}
+
+export interface QuotaInitializationPorts {
+  readonly run: QuotaCommandRunner
+  /** The accounting scan reads the whole filesystem; it runs under its own longer deadline. */
+  readonly scan: QuotaCommandRunner
+  readFile(path: string): Promise<string | null>
+  writeFile(file: RenderedFile): Promise<void>
+}
+
+export interface UserQuotaInitialization extends UserQuotaObservation {
+  readonly changed: boolean
+  readonly fstabBackup: string | null
+}
+
+/**
+ * Turns on enforced user quota for the ext4 filesystem holding `path`, as cPanel's initquotas does:
+ * fstab gains journaled quota options after a backup, the mount is remounted, accounting is built
+ * and enforcement is switched on and observed. An already enforcing filesystem is left untouched.
+ */
+export const initializeUserQuota = async (ports: QuotaInitializationPorts, path: string, stamp: string): Promise<UserQuotaInitialization> => {
+  if (!/^[0-9]{8}T[0-9]{6}Z$/.test(stamp)) fail('VALIDATION', 'quota setup backup stamp must be YYYYMMDDTHHMMSSZ')
+  const mountpoint = await resolveHomeQuotaFilesystem(ports.run, path)
+  const before = await observeUserQuota(ports.run, mountpoint)
+  if (before.status === 'enabled') return { ...before, changed: false, fstabBackup: null }
+  if (before.filesystemType !== 'ext4') {
+    return fail('PRECONDITION_FAILED', 'automatic quota setup supports ext4; XFS user quota is the uquota mount option set at boot', {
+      stateChanged: false, filesystemType: before.filesystemType,
+    })
+  }
+  const fstab = await ports.readFile(QUOTA_FSTAB_PATH) ?? fail('PRECONDITION_FAILED', '/etc/fstab is missing', { stateChanged: false })
+  const updated = fstabWithUserQuota(fstab, mountpoint)
+  const file = (target: string, content: string): RenderedFile => ({ path: target, content, mode: 0o644, owner: 'root', group: 'root' })
+  const fstabBackup = updated === null ? null : `${QUOTA_FSTAB_PATH}.bak.${stamp}`
+  if (updated !== null) {
+    await ports.writeFile(file(fstabBackup!, fstab))
+    await ports.writeFile(file(QUOTA_FSTAB_PATH, updated))
+  }
+  const remount = await ports.run(['/usr/bin/mount', '-o', 'remount', mountpoint])
+  if (!remount.ok) {
+    // Options the kernel refused must not reach the next boot.
+    if (updated !== null) await ports.writeFile(file(QUOTA_FSTAB_PATH, fstab))
+    return fail('PRECONDITION_FAILED', 'the kernel refused the quota mount options; /etc/fstab was restored', {
+      stateChanged: false, fstabBackup, detail: remount.stderr.trim().slice(0, 200),
+    })
+  }
+  const unverified = (step: string): never => fail('SERVICE_UNAVAILABLE', `quota setup stopped at ${step}; the host requires verification`, {
+    stateChanged: true, verificationRequired: true, step, fstabBackup,
+  })
+  const accounting = await ports.scan(['/usr/sbin/quotacheck', '--create-files', '--user', '--no-remount', '--format=vfsv1', mountpoint])
+  if (!accounting.ok) return unverified('quotacheck')
+  const enforcement = await ports.run(['/usr/sbin/quotaon', '--user', mountpoint])
+  if (!enforcement.ok) return unverified('quotaon')
+  const after = await observeUserQuota(ports.run, mountpoint)
+  if (after.status !== 'enabled' || !sameMount(before, after)) return unverified('verification')
+  return { ...after, changed: true, fstabBackup }
 }
 
 /** Setting an account limit must not succeed on a filesystem with disabled or unobserved enforcement. */

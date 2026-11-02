@@ -6,7 +6,7 @@ import { canonicalProvisioningIdentity } from '../../../packages/core/src/accoun
 import type { AccountProvisioningObservationProvider } from './account-provisioning-runtime.ts'
 import { FakeHostExecutor } from './executor.ts'
 import { DEFAULT_DNS_ZONE_DIR, DEFAULT_NAMED_ZONES_CONF } from './services/dns.ts'
-import { createReadonlyAccountProvisioningObserver, parseProvisioningProcessFiles, type ReadonlyAccountObservationOptions } from './account-provisioning-observer.ts'
+import { ACCOUNT_OBSERVATION_DEADLINE_MS, createReadonlyAccountProvisioningObserver, parseProvisioningProcessFiles, type ReadonlyAccountObservationOptions } from './account-provisioning-observer.ts'
 
 const unit = 'xpanel-php-fpm-alice-8.3.service'
 const group = '/xpanel.slice/xpanel-20001.slice/' + unit
@@ -29,7 +29,9 @@ function scene() {
     { path: DEFAULT_NAMED_ZONES_CONF, content: 'zone "tenant.example.test" { type master; file "' + DEFAULT_DNS_ZONE_DIR + '/tenant.example.test.zone"; };\n' }]
   const executor = new FakeHostExecutor()
   for (const file of entries) executor.files.set(file.path, { ...file, mode: 0o640, owner: 'root', group: 'pdns' })
+  const validated = executor.runCommand.bind(executor)
   const run = vi.spyOn(executor, 'runCommand').mockImplementation(async argv => {
+    await validated(argv) // the executor's own argv admission, as on a real host
     let stdout = ''
     if (argv[0] === '/usr/bin/findmnt') stdout = (argv[4] === 'TARGET' ? '/home' : argv[4] === 'SOURCE' ? '/dev/vda1' : 'ext4') + '\n'
     else if (argv[0] === '/usr/sbin/quotaon') return { ok: false, code: 1, stdout: 'user quota on /home (/dev/vda1) is on\n', stderr: '' }
@@ -81,6 +83,7 @@ describe('readonly provisioning observation (isolated raw-file and transport fix
     expect(result).toMatchObject({ accountId: s.input.account.id, uid: 20001, gid: 20001, cgroup: group, services: [unit],
       quota: { enforced: true, filesystem: '/home' }, dns: { zone: 'tenant.example.test', serial: 2026103001, authoritative: true }, php: { status: 200, uid: 20001, cgroup: group } })
     expect(s.options.dns.verify).toHaveBeenCalledTimes(1)
+    expect(s.options.dns.verify).toHaveBeenCalledWith(expect.any(Array), [], 'zones')
     expect(s.processHandle.close).toHaveBeenCalledTimes(1); expect(s.response.close).toHaveBeenCalledTimes(1); expect(s.home.close).toHaveBeenCalledTimes(1)
     expect(s.options.executor).toMatchObject({ executedActions: [], executedTests: [] })
   })
@@ -153,7 +156,7 @@ describe('readonly observation failure composition (isolated fixtures)', () => {
   it('samples its deadline after the awaited availability check', async () => {
     const s = scene(); let now = 0
     const observer = createReadonlyAccountProvisioningObserver({ ...s.options, now: () => now,
-      assertHttpAvailable: async () => { now = 15001 } })
+      assertHttpAvailable: async () => { now = ACCOUNT_OBSERVATION_DEADLINE_MS + 1 } })
     await expect(observer.assertAvailable(s.input, s.context)).rejects.toThrow()
     expect(s.run).not.toHaveBeenCalled()
   })
@@ -188,7 +191,7 @@ describe('acquisition ownership under cancellation (isolated resources)', () => 
     const after = (acquired: typeof stage) => {
       if (stage !== acquired) return
       if (failure === 'revocation') s.abort.abort()
-      else now = 15001
+      else now = ACCOUNT_OBSERVATION_DEADLINE_MS + 1
     }
     const observer = createReadonlyAccountProvisioningObserver({ ...s.options, now: () => now,
       openHome: async account => { const handle = await openHome(account); after('home'); return handle },

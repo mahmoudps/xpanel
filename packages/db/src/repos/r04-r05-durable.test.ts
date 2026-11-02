@@ -18,6 +18,7 @@ import {
    recordLoginAttempt,
   recordMetricsSample,
   renewJobLease,
+  reopenAttentionJob,
   replayAuditLogToIndex,
   requestJobCancellation,
   rotateAuditLog,
@@ -441,6 +442,40 @@ describe('R04 (A23, A21) — Durable jobs with leases, fencing tokens, idempoten
     expect(afterExhaustion?.status).toBe('failed')
     expect(afterExhaustion?.needsAttention).toBe(true)
     expect(afterExhaustion?.failureClass).toBe('unknown_outcome')
+  })
+
+  it('reopens a needs_attention job only through an operator admission that records its attestation', async () => {
+    const h = await freshDb()
+    const job = await enqueueDurableJob(h.db, { kind: 'account.provision', actor: 'root', maxAttempts: 3 })
+    await expect(reopenAttentionJob(h.db, { jobId: job.id })).rejects.toSatisfy((err: unknown) => isXpanelError(err) && err.code === 'PRECONDITION_FAILED')
+    const leased = (await acquireJobLease(h.db, { jobId: job.id, workerId: 'worker-1' }))!
+    await saveJobCheckpoint(h.db, { jobId: job.id, workerId: 'worker-1', fencingToken: leased.fencingToken, step: 'host_intent', data: { hostAttempt: 1 } })
+    await completeJobWithLease(h.db, { jobId: job.id, workerId: 'worker-1', fencingToken: leased.fencingToken, status: 'failed',
+      error: 'host outcome unknown', failureClass: 'unknown_outcome', needsAttention: true })
+
+    await expect(reopenAttentionJob(h.db, { jobId: job.id }, async () => { throw new Error('not reviewed') })).rejects.toThrow('not reviewed')
+    expect((await getDurableJob(h.db, job.id))?.needsAttention).toBe(true)
+
+    const reopened = await reopenAttentionJob(h.db, { jobId: job.id }, async (_tx, current) => ({ hostRecoveredAttempt: current.checkpointData.hostAttempt }))
+    expect(reopened).toMatchObject({ status: 'queued', needsAttention: false, failureClass: null, error: null,
+      completedSteps: ['host_intent'], checkpointData: { hostAttempt: 1, hostRecoveredAttempt: 1 } })
+    const next = await acquireJobLease(h.db, { jobId: job.id, workerId: 'worker-2' })
+    expect(next).toMatchObject({ attempt: 2, fencingToken: leased.fencingToken + 1, status: 'running' })
+  })
+
+  it('grants an exhausted needs_attention job exactly one reviewed attempt', async () => {
+    const h = await freshDb()
+    const job = await enqueueDurableJob(h.db, { kind: 'account.provision', actor: 'root', maxAttempts: 1 })
+    const leased = (await acquireJobLease(h.db, { jobId: job.id, workerId: 'worker-1' }))!
+    await completeJobWithLease(h.db, { jobId: job.id, workerId: 'worker-1', fencingToken: leased.fencingToken, status: 'failed',
+      error: 'host outcome unknown', failureClass: 'unknown_outcome', needsAttention: true })
+    const reopened = await reopenAttentionJob(h.db, { jobId: job.id }, async () => ({}))
+    expect(reopened).toMatchObject({ status: 'queued', attempt: 1, maxAttempts: 2 })
+    const retry = (await acquireJobLease(h.db, { jobId: job.id, workerId: 'worker-2' }))!
+    expect(retry).toMatchObject({ attempt: 2, maxAttempts: 2 })
+    await completeJobWithLease(h.db, { jobId: job.id, workerId: 'worker-2', fencingToken: retry.fencingToken, status: 'failed',
+      error: 'host outcome unknown', failureClass: 'retryable', requeueOnRetryable: true })
+    expect((await getDurableJob(h.db, job.id))?.status).toBe('failed')
   })
 })
 

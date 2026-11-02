@@ -61,6 +61,17 @@ describe('production DNS reconciliation provider', () => {
     expect(host.commands.some(command => command.argv.some(arg => ['rediscover', 'reload', 'bind-reload-now'].includes(arg)))).toBe(false)
     expect(host.commands.every(command => command.timeout > 0 && command.timeout <= 60_000)).toBe(true)
   })
+  it('observes one account zone against a catalog that lists other zones only in zones scope', async () => {
+    const host = await fixture()
+    const catalog = file(renderNamedZonesConfig([zone, 'other.example']), DEFAULT_NAMED_ZONES_CONF)
+    await host.executor.writeFile(catalog)
+    const files = [host.files[0]!, catalog]
+    await host.provider.verify(files, [], 'zones')
+    await expect(host.provider.verify(files, [])).rejects.toMatchObject({ message: expect.stringContaining('catalog differs') })
+    const unlisted = file(renderNamedZonesConfig(['other.example']), DEFAULT_NAMED_ZONES_CONF)
+    await expect(host.provider.verify([host.files[0]!, unlisted], [], 'zones')).rejects.toMatchObject({ message: expect.stringContaining('catalog differs') })
+  })
+
   it('keeps ordinary hosts without DNS candidates independent of missing DNS binaries', async () => {
     const executor = new FakeHostExecutor()
     let inspected = 0

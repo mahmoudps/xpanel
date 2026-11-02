@@ -2,6 +2,7 @@ import { X509Certificate } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import tls from 'node:tls'
+import { readOsRelease } from './os-release.ts'
 import type { HostLimitObservation } from '@xpanel/core'
 import { fileURLToPath } from 'node:url'
 import {
@@ -267,7 +268,7 @@ export const readAgentPackageVersion = async (): Promise<string | null> => {
  */
 export const readHostIdentity = async (reader: HostIdentityReader): Promise<HostIdentity> => {
   const identity: HostIdentity = {}
-  const release = (await readText(reader, '/etc/os-release')) ?? (await readText(reader, '/usr/lib/os-release'))
+  const release = await readOsRelease(reader).catch(() => null)
   const system = release ? parseOsRelease(release) : null
   if (system) identity.system = system
   const uptimeText = await readText(reader, '/proc/uptime')

@@ -232,7 +232,9 @@ const inferFileServiceAndOwner = (
     return { service: 'cron', logicalOwner: `cron:${unit}`, dependentUnits: [unit] }
   }
   if (path.includes('/systemd/')) {
-    const unitName = path.split('/').pop() ?? path
+    // A drop-in (<unit>.d/<name>.conf) belongs to its unit; the file name is not a unit.
+    const dropIn = /\/([^/]+)\.d\/[^/]+\.conf$/.exec(path)
+    const unitName = dropIn?.[1] ?? path.split('/').pop() ?? path
     return { service: 'systemd', logicalOwner: `systemd:${unitName}`, dependentUnits: [unitName] }
   }
   if (path.includes('/userdata/') || path.endsWith('/.user.ini')) {

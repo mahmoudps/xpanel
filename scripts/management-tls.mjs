@@ -139,6 +139,8 @@ ${tls}
         proxy_set_header X-Forwarded-Host "";
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $xpanel_management_connection_upgrade;
+        # Account provisioning answers synchronously within its 180 s host deadline; nginx's 60 s default cut it off.
+        proxy_read_timeout 300s;
     }
 }
 `).join('\n')

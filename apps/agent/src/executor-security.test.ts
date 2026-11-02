@@ -122,6 +122,18 @@ describe('generated host file target authorization', () => {
     }
   })
 
+  it('admits only the exact fstab and its timestamped backup for quota setup, never removal', () => {
+    const permits = createProductionHostTargetMatcher()
+    for (const path of ['/etc/fstab', '/etc/fstab.bak.20261102T140000Z']) {
+      assert.equal(permits(path, 'read'), true)
+      assert.equal(permits(path, 'write'), true)
+      assert.equal(permits(path, 'remove'), false)
+    }
+    for (const path of ['/etc/fstab.bak.latest', '/etc/fstab.d/extra', '/etc/crypttab', '/etc/fstab.bak.20261102T140000Z/x']) {
+      assert.equal(permits(path, 'write'), false)
+    }
+  })
+
   for (const [directory, filename] of [['public_html', '.user.ini'], ['cgi-bin', 'php.cgi']] as const) {
     it.each(['read', 'write', 'remove'] as const)(`refuses %s through a substituted ${directory} ancestor of ${filename}`, async (operation) => {
       const accountRoot = join(fixture, 'account')

@@ -129,6 +129,12 @@ describe('placement', () => {
     '',
   ].join('\n')
 
+  it('accepts the blank line ACME servers put between chain certificates and normalizes it', () => {
+    const out = certInstall('c1', { fullchain: PEM + '\n' + PEM2 + '\n', privkey: KEY })
+    expect(out.files[0]!.content).toBe(PEM + PEM2)
+    expect(() => certInstall('c1', { fullchain: PEM + 'not pem\n' + PEM2, privkey: KEY })).toThrow('PEM CERTIFICATE blocks')
+  })
+
   it('installs the key 0600 root in a 0700 root directory', () => {
     const out = certInstall('c1', { fullchain: PEM + PEM2, privkey: KEY })
     expect(out.actions).toEqual([

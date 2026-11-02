@@ -8,7 +8,7 @@ import { latestActive, type Db } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
 import { edge, system } from '@xpanel/render'
 import { ACCOUNT_PROBE_ASSET, ACCOUNT_PROBE_PHP, accountProbeNamespace, accountProbePaths, assertAccountProbeIngress } from '../../../packages/render/src/system/account-probe.ts'
-import { openNativeProvisioningProcess, parseProvisioningProcessFiles, type ProvisioningProcessIdentity } from './account-provisioning-observer.ts'
+import { openNativeProvisioningProcess, parseProvisioningProcessFiles, unitIdentityShowArgv, type ProvisioningProcessIdentity } from './account-provisioning-observer.ts'
 import { createRuntimeHost, readUnitStates } from './account-runtime.ts'
 import type { AgentExecutor } from './executor.ts'
 import type { HostEffectAuthority } from './host-effect-authority.ts'
@@ -189,6 +189,7 @@ export interface HeldCanarySource extends Pin {
   readonly nginxUid: number
   readonly nginxGid: number
   readonly backendSocket: string
+  /** Peer and namespace checks only; callers follow them with one assertCurrent of the whole source. */
   assertIngressPeer(peer: KernelPeerCredentials, connection: HeldHttpConnection): Promise<void>
   assertBackendPeer(peer: KernelPeerCredentials): Promise<void>
   assertWorkerNamespace(worker: ProvisioningProcessIdentity): Promise<void>
@@ -204,7 +205,9 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
     await context.assertAuthority()
     if (context.signal.aborted || Date.now() >= domainDeadline) refused('native_read_authority_or_domain_deadline')
   }
-  const retain = async <T extends Pin>(work: Promise<T>): Promise<T> => { const held = await work; pins.push(held); await guard(); return held }
+  // Every read below is an observation without effects. Authority is checked at the boundaries of each
+  // observation unit, not after every read: each check re-reads the whole operation authority.
+  const retain = async <T extends Pin>(work: Promise<T>): Promise<T> => { const held = await work; pins.push(held); return held }
   await guard()
   if (![input.sourceChecksum, input.binding, input.challenge].every(value => /^[a-f0-9]{64}$/.test(value))
     || account.status !== 'active' || account.bandwidthLimitedMonth !== undefined
@@ -244,9 +247,9 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
     if (workers.length !== 1 || !Number.isSafeInteger(nginxUid) || nginxUid < 1 || !Number.isSafeInteger(nginxGid) || nginxGid < 1) refused('nginx_worker_identity_unavailable')
     const nginxUnit = options.os.services.nginx.endsWith('.service') ? options.os.services.nginx : options.os.services.nginx + '.service'
     const unitIdentity = async (name: string): Promise<{ mainPid: number; cgroup: string }> => {
-      const states = await readUnitStates(createRuntimeHost(options.executor), [name]); await guard()
+      const states = await readUnitStates(createRuntimeHost(options.executor), [name])
       if (states.get(name)?.load !== 'loaded' || states.get(name)?.active !== 'active') return refused('canary_unit_inactive')
-      const result = await options.executor.runCommand(['/usr/bin/systemctl', 'show', '--no-pager', '--property=Id,User,Group,MainPID,ControlGroup,ActiveState', '--', name]); await guard()
+      const result = await options.executor.runCommand(unitIdentityShowArgv(name))
       const values = new Map<string, string>()
       for (const line of result.stdout.trim().split('\n')) {
         const at = line.indexOf('=')
@@ -290,13 +293,12 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
         const mounts = info.split('\n').map(line => line.split(' ')).filter(parts => parts[4] === target)
         if (mounts.length !== 1 || !mounts[0]?.[5]?.split(',').includes('ro')) refused('canary_namespace_not_read_only')
       }
-      await guard()
     }
     const assertCurrent = async (): Promise<void> => {
       await guard()
-      const current = await latestActive(options.db); await guard()
+      const current = await latestActive(options.db)
       if (current?.id !== activeId || current.checksum !== generationChecksum) refused('active_generation_changed')
-      for (const pin of pins) { await pin.assertCurrent(); await guard() }
+      for (const pin of pins) await pin.assertCurrent()
       const currentFpm = await unitIdentity(unit), currentNginx = await unitIdentity(nginxUnit)
       if (currentFpm.mainPid !== fpm.mainPid || currentFpm.cgroup !== fpm.cgroup || currentNginx.mainPid !== nginx.mainPid || currentNginx.cgroup !== nginx.cgroup
         || !sameProvisioningProcess(master, await readIdentity(fpm.mainPid, mainFiles)) || startToken(await nginxMain.read('stat'), nginx.mainPid) !== nginxStart) refused('canary_service_process_changed')
@@ -315,11 +317,11 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
           await assertExecutable(peer.pid, nginxBinary)
           await assertHttpPeerOwnedByNginx(peer.pid, connection, guard)
           if (!sameProvisioningProcess(identity, await readIdentity(peer.pid, files))) refused('http_ingress_process_changed')
-          await files.assertCurrent(); await assertCurrent()
+          await files.assertCurrent()
         } finally { await files.close() }
       },
       async assertBackendPeer(peer) { if (peer.pid !== fpm.mainPid || peer.uid !== account.uid || peer.gid !== account.gid) refused('backend_socket_is_not_fpm_master'); await assertCurrent() },
-      async assertWorkerNamespace(worker) { await assertExecutable(worker.pid, binary); await assertNamespace(worker.pid); await assertCurrent() },
+      async assertWorkerNamespace(worker) { await assertExecutable(worker.pid, binary); await assertNamespace(worker.pid) },
       async close() { const results = await Promise.allSettled(pins.map(pin => Promise.resolve().then(() => pin.close()))); if (results.some(result => result.status === 'rejected')) refused('canary_source_release_failed') },
     }
   } catch (error) { await Promise.allSettled(pins.map(pin => Promise.resolve().then(() => pin.close()))); throw error }

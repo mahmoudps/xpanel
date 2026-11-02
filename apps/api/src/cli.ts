@@ -1,12 +1,14 @@
 import { agentCallerHeaders } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
-import { fail, isXpanelError } from '@xpanel/core'
+import { fail, isUuid, isXpanelError } from '@xpanel/core'
 import {
   appendAudit,
   createRootPrincipal,
   findPrincipalByUsername,
+  isJobStepCompleted,
   latestActive,
   reindexFromState,
+  reopenAttentionJob,
   setPasswordHash,
   setTotpSecret,
 } from '@xpanel/db'
@@ -47,7 +49,7 @@ const readPlaintextPassword = async (readPassword: () => Promise<string>): Promi
 
 /**
  * Executes an `xpanel` administrative CLI command (`status`, `reconcile`, `rollback`,
- * `reindex`, `init-root`, `reset-password`, `disable-2fa`).
+ * `reindex`, `init-root`, `reset-password`, `disable-2fa`, `recover-provisioning`, `init-quotas`).
  * `reconcile --resolve-failed <generation-id>` clears a journal stuck in needs_attention.
  */
 export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<CliResult> => {
@@ -90,6 +92,8 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
           '  init-root --password-stdin           Provision root once from standard input; requires a password change',
           '  reset-password <username> --password-stdin  Read one password from standard input',
           '  disable-2fa <username> [--confirm]   Recover an enrolled factor with explicit confirmation',
+          '  recover-provisioning <job-id> --attest-host-recovered  Requeue an account whose host step was interrupted, after reconcile',
+          '  init-quotas [--path <dir>]           Enable enforced user disk quota on the filesystem of account homes (default /home)',
           '  repair-state-ownership               Root-only: give the xpanel user the state tree',
         ].join('\n'),
       )
@@ -287,6 +291,48 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
           stderr: errLines.join('\n'),
           data: { username: principal.username, totpEnabled: false },
         }
+      }
+
+      case 'init-quotas': {
+        if (!(rest.length === 0 || (rest.length === 2 && rest[0] === '--path' && rest[1]?.startsWith('/')))) {
+          return fail('VALIDATION', 'usage: xpanel init-quotas [--path <dir>]')
+        }
+        const res = await callAgent('/host/quota/initialize', rest.length ? { path: rest[1] } : {})
+        const body = (await res.json()) as Record<string, unknown>
+        if (!res.ok) {
+          writeErr(`Quota setup refused: ${JSON.stringify(body)}`)
+          return { code: 1, stdout: outLines.join('\n'), stderr: errLines.join('\n'), data: body }
+        }
+        writeOut(body.changed === true
+          ? `User quota is now enforced on ${String(body.filesystem)} (${String(body.filesystemType)}). /etc/fstab backup: ${String(body.fstabBackup ?? 'not needed')}. Run xpanel reconcile --force to apply account limits.`
+          : `User quota is already enforced on ${String(body.filesystem)}; nothing changed.`)
+        return { code: 0, stdout: outLines.join('\n'), stderr: errLines.join('\n'), data: body }
+      }
+
+      case 'recover-provisioning': {
+        const jobId = rest[0]
+        if (rest.length !== 2 || rest[1] !== '--attest-host-recovered' || !jobId || !isUuid(jobId)) {
+          return fail('VALIDATION', 'usage: xpanel recover-provisioning <job-id> --attest-host-recovered')
+        }
+        // The attestation is the operator's audited review of the interrupted host attempt. It replays nothing:
+        // the next request for the same account reruns the host step and its independent observation.
+        const reopened = await reopenAttentionJob(deps.db, { jobId }, async (tx, job) => {
+          const hostAttempt = job.checkpointData.hostAttempt
+          if (job.kind !== 'account.provision' || !isJobStepCompleted(job, 'reconcile_host_intent') || isJobStepCompleted(job, 'reconcile_host')
+            || typeof hostAttempt !== 'number') {
+            return fail('PRECONDITION_FAILED', 'the job is not an account provisioning job interrupted in its host step')
+          }
+          await appendAudit(tx, {
+            actor: 'cli:root',
+            action: 'account.provision.host_recovery_attested',
+            target: `job:${job.id}`,
+            detail: { via: 'cli', jobId: job.id, hostAttempt, username: job.detail.username ?? null },
+            outcome: 'ok',
+          })
+          return { hostRecoveredAttempt: hostAttempt }
+        })
+        writeOut(`Provisioning job ${reopened.id} is queued again. Repeat the account request to rerun and verify its host step.`)
+        return { code: 0, stdout: outLines.join('\n'), stderr: errLines.join('\n'), data: { jobId: reopened.id, status: reopened.status } }
       }
 
       default:

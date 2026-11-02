@@ -145,6 +145,11 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
     expect(source).not.toMatch(/--(?:insecure|staging|test-cert|force-renewal)/)
     expect(source).toContain('applicationBootstrap: \'pending\'')
   })
+  it('lets a synchronous account provisioning answer through every management entry point', () => {
+    const rendered = renderIngress(config(), 'a'.repeat(64))
+    expect(rendered.match(/proxy_pass http:\/\/127\.0\.0\.1:120(83|87|96);/g)).toHaveLength(3)
+    expect(rendered.match(/^ {8}proxy_read_timeout 300s;$/gm)).toHaveLength(3)
+  })
   it('uses only the delegated management name and its two children, never its parent or a wildcard', () => {
     const value = config(), args = certbotArguments(value)
     expect(args.filter((_, index) => args[index - 1] === '-d')).toEqual(['panel.example.org', 'whm.panel.example.org', 'mail.panel.example.org'])

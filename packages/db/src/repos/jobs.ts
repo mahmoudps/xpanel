@@ -828,6 +828,56 @@ export const requestJobCancellation = (
     })
   })
 
+export interface ReopenAttentionJobInput {
+  jobId: Id
+  now?: Date
+}
+
+/**
+ * Trusted in-process validation and audit under the reopening transaction; no external effects or nested transaction.
+ * Returned data is merged into the checkpoint so the next attempt can see what the operator attested.
+ */
+export type ReopenAttentionJobAdmission = (tx: Db, current: Readonly<DurableJobRecord>) => Promise<Record<string, unknown>>
+
+/**
+ * Operator recovery: queues a failed `needs_attention` job for its next attempt once the operator has
+ * reviewed its unknown outcome. Completed steps are kept and the next lease raises the fencing token.
+ * The attempt limit stops automatic retries, not a reviewed one: an exhausted job gets exactly one more attempt.
+ */
+export const reopenAttentionJob = (
+  db: Db,
+  input: ReopenAttentionJobInput,
+  admit?: ReopenAttentionJobAdmission,
+): Promise<DurableJobRecord> =>
+  withSqliteErrors(async () => {
+    await requireOperationalIdentity(db)
+    const jobId = assertId(input.jobId, 'jobId')
+
+    return db.transaction(async (tx) => {
+      const now = admittedLeaseClock(input.now).now
+      const current = mustExist(await queryDurableJobTx(tx, jobId), 'job', jobId)
+      if (current.status !== 'failed' || !current.needsAttention) {
+        fail('PRECONDITION_FAILED', 'only a failed job flagged needs_attention can be reopened', { id: jobId, status: current.status })
+      }
+      if (current.cancelRequested) fail('PRECONDITION_FAILED', 'a cancelled job cannot be reopened', { id: jobId })
+      if (current.attempt >= 100) fail('PRECONDITION_FAILED', 'job reached the attempt ceiling', { id: jobId, attempt: current.attempt })
+      const maxAttempts = Math.max(current.maxAttempts, current.attempt + 1)
+      const data = admit ? redactSecrets({ ...current.checkpointData, ...await admit(tx, current) }) : current.checkpointData
+      await tx.query(
+        `UPDATE jobs SET status = 'queued', error = NULL, finished_at = NULL, updated_at = $1 WHERE id = $2`,
+        [now, jobId],
+      )
+      await tx.query(
+        `UPDATE job_runtime_leases
+         SET needs_attention = 0, failure_class = NULL, lease_owner = NULL, lease_expires_at = NULL,
+             checkpoint_json = $1, max_attempts = $2, updated_at = $3
+         WHERE job_id = $4`,
+        [JSON.stringify(data), maxAttempts, now, jobId],
+      )
+      return mustExist(await queryDurableJobTx(tx, jobId), 'job', jobId)
+    })
+  })
+
 export interface CompleteJobWithLeaseInput {
   jobId: Id
   workerId: string

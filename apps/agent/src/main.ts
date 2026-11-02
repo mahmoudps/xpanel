@@ -18,6 +18,7 @@ import { syncRuntimePublicOrigin } from './agent-origin.ts'
 import { ensureInstalledMail } from './services/local-mail.ts'
 import { enableMailWebsocketProxy } from './services/mail-websocket.ts'
 import { readOpenDkimPublished, writeOpenDkimPublished } from './services/opendkim-live.ts'
+import { resolveHomeQuotaFilesystem } from './services/quota.ts'
 import { HostReconciler } from './reconciler.ts'
 import { loadNativePeerIdentityAddon, resolveProvisionedPeerUids, resolveServicePrimaryGid } from './peer-identity.ts'
 import { AccountProvisioningPreparationReader } from './account-provisioning-preparation.ts'
@@ -92,8 +93,9 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
   if (!Number.isSafeInteger(socketGid) || socketGid <= 0) {
     fail('PRECONDITION_FAILED', 'XPANEL_AGENT_GID must identify the dedicated API service group')
   }
-  const rawQuotaFs = opts.quotaFilesystem !== undefined ? opts.quotaFilesystem : (process.env.XPANEL_QUOTA_FS ?? '/home')
-  const quotaFilesystem = rawQuotaFs === 'none' || rawQuotaFs === '' ? null : rawQuotaFs
+  // Unset means the mount that holds /home, observed on the host below; 'none' disables account disk limits.
+  const rawQuotaFs = opts.quotaFilesystem !== undefined ? opts.quotaFilesystem : process.env.XPANEL_QUOTA_FS
+  const configuredQuotaFilesystem = rawQuotaFs === 'none' || rawQuotaFs === '' ? null : rawQuotaFs
   const ioDevices =
     opts.ioDevices ??
     (process.env.XPANEL_IO_DEVICES !== undefined
@@ -215,6 +217,11 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           trustedHostTargetMatcher: createProductionHostTargetMatcher(),
           sqlRunner,
         })
+        const quotaFilesystem = configuredQuotaFilesystem !== undefined ? configuredQuotaFilesystem
+          : await resolveHomeQuotaFilesystem(argv => executor.runCommand(argv)).catch(() => {
+            process.stderr.write('xpanel-agent quota: the mount holding /home could not be observed; using /home\n')
+            return '/home'
+          })
         const readBackupDestination = readSavedBackupDestination(readBackupConfigFiles(stateDir))
         const backupDestinationProvider = createBackupTransportProvider({ readDestination: readBackupDestination, archiveRoot: defaultBackupArchiveRoot() })
         // Backup dumps run at the same low priority as the archive build, with the hour-long bound of a large database.

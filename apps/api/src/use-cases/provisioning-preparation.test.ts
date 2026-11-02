@@ -151,6 +151,18 @@ describe.skipIf(!posix)('POSIX private provisioning authority persistence', { ta
     expect(await h.store.load(saved.reference, first.actorKey)).toEqual(saved)
   })
 
+  it('records the credential of each verified request beside the unchanged preparation', async () => {
+    const h = await harness(), first = request()
+    const saved = await h.store.prepare({ ...first, currentAuthorization: { session: 'first' } })
+    expect(saved.currentAuthorization).toEqual({ session: 'first' })
+    await expect(h.store.prepare({ ...request(), credentialIntent: 'a different password', currentAuthorization: { session: 'forged' } })).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect((await h.store.load(saved.reference, first.actorKey)).currentAuthorization).toEqual({ session: 'first' })
+    const retried = await h.store.prepare({ ...request(), currentAuthorization: { session: 'retry' } })
+    expect(retried).toEqual({ ...saved, currentAuthorization: { session: 'retry' } })
+    expect((await h.store.load(saved.reference, first.actorKey)).currentAuthorization).toEqual({ session: 'retry' })
+    expect((await lstat(join(h.directory, saved.reference + '.authorization.json'))).mode & 0o777).toBe(0o600)
+  })
+
   it('refuses an unacknowledged credential hashing outcome rather than silently rehashing it', async () => {
     const h = await harness(), first = request()
     first.preparePasswordHash.mockRejectedValue(new Error('sensitive-credential-must-not-appear'))

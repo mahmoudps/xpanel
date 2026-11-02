@@ -91,6 +91,8 @@ export interface ProvisionJobCheckpointState {
   readonly home?: string
   readonly hostAttempt?: number
   readonly hostNoEffectAttempt?: number | null
+  /** The interrupted host attempt an operator reviewed and recovered; the next attempt reruns and re-observes it. */
+  readonly hostRecoveredAttempt?: number | null
   readonly observedContext?: ProvisioningCheckpointObservation
   readonly principalActivated?: boolean
 }
@@ -531,7 +533,8 @@ export class AccountLifecycleCoordinator {
     try {
       await assertAuthority()
       if (isJobStepCompleted(leased, 'reconcile_host_intent') && !isJobStepCompleted(leased, 'reconcile_host')
-        && (checkpointState?.hostAttempt === undefined || checkpointState.hostAttempt !== checkpointState.hostNoEffectAttempt)) {
+        && (checkpointState?.hostAttempt === undefined || (checkpointState.hostAttempt !== checkpointState.hostNoEffectAttempt
+          && checkpointState.hostAttempt !== checkpointState.hostRecoveredAttempt))) {
         unknownOutcome = true
         fail('PRECONDITION_FAILED', 'a prior host execution has no acknowledged outcome; operator recovery is required', { verificationRequired: true })
       }
@@ -749,7 +752,7 @@ export class AccountLifecycleCoordinator {
       if (!isJobStepCompleted(leased, 'reconcile_host')) {
         if ((prepared ? this.provisioningPort : this.reconciler) && input.reconcile !== false) {
           await assertAuthority()
-          checkpointState = { ...checkpointState, hostAttempt: leased.attempt, hostNoEffectAttempt: null }
+          checkpointState = { ...checkpointState, hostAttempt: leased.attempt, hostNoEffectAttempt: null, hostRecoveredAttempt: null }
           leased = await saveJobCheckpoint(this.db, { jobId: leased.id, workerId: this.workerId,
             fencingToken: leased.fencingToken, step: 'reconcile_host_intent', progress: 60,
             data: checkpointState as unknown as Record<string, unknown> })

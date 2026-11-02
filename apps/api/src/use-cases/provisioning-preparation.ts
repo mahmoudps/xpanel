@@ -18,6 +18,8 @@ export interface PreparedProvisioning<T> {
   readonly passwordHash: string
   readonly desiredState: T
   readonly requestIdentity: string
+  /** The credential of the latest verified request for this preparation, when one was recorded. */
+  readonly currentAuthorization?: unknown
 }
 
 export interface PrepareProvisioningInput<T> {
@@ -31,6 +33,11 @@ export interface PrepareProvisioningInput<T> {
   readonly verifyCredentialIntent: (intent: string, passwordHash: string) => Promise<boolean>
   /** Runs under withLock only for a first request; replay uses its persisted exact value. */
   readonly prepareDesiredState: () => Promise<T>
+  /**
+   * Credential reference of this request. After its credential intent is verified it replaces the recorded
+   * authorization beside the immutable record, so a retry is authorized by its own live credential.
+   */
+  readonly currentAuthorization?: unknown
 }
 
 /** Injected into the lifecycle coordinator; it conveys no host-execution capability. */
@@ -264,6 +271,22 @@ export class FileProvisioningPreparationStore implements ProvisioningPreparation
     return value as unknown as PreparationRecord<T>
   }
 
+  private async readAuthorization(reference: string, actorKey: string): Promise<unknown> {
+    let value: Record<string, unknown>
+    try { value = await this.readJson(join(this.directory, `${reference}.authorization.json`)) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
+    if (Object.keys(value).sort().join(',') !== 'actorKey,authorization,reference,schemaVersion' || value.schemaVersion !== 1
+      || value.reference !== reference || value.actorKey !== actorKey) return refused('private_authorization_invalid')
+    return value.authorization
+  }
+
+  private async writeAuthorization(reference: string, actorKey: string, authorization: unknown): Promise<void> {
+    const staged = join(this.directory, `.authorization-${randomUUID()}.json`)
+    await this.writeExclusive(staged, jsonBytes({ schemaVersion: 1, reference, actorKey, authorization }))
+    await rename(staged, join(this.directory, `${reference}.authorization.json`))
+    await this.syncDirectory(this.directory)
+  }
+
   private async acknowledge(index: PreparationIndex, indexName: string): Promise<void> {
     if (index.phase === 'complete') return
     const temp = join(this.directory, `.ack-${randomUUID()}.json`)
@@ -299,7 +322,9 @@ export class FileProvisioningPreparationStore implements ProvisioningPreparation
         catch { return refused('credential_verification_unavailable') }
         if (!matches) return conflict()
         await this.acknowledge(index, indexName)
-        return { reference: record.reference, passwordHash: record.passwordHash, desiredState: record.desiredState, requestIdentity: record.requestIdentity }
+        if (input.currentAuthorization !== undefined) await this.writeAuthorization(record.reference, input.actorKey, input.currentAuthorization)
+        return { reference: record.reference, passwordHash: record.passwordHash, desiredState: record.desiredState, requestIdentity: record.requestIdentity,
+          currentAuthorization: input.currentAuthorization ?? await this.readAuthorization(record.reference, input.actorKey) }
       }
       let desiredState: T
       try { desiredState = JSON.parse(jsonBytes(await input.prepareDesiredState())) as T }
@@ -325,7 +350,9 @@ export class FileProvisioningPreparationStore implements ProvisioningPreparation
       await rename(staged, target)
       await this.syncDirectory(this.directory)
       await this.acknowledge(index, indexName)
-      return { reference: record.reference, passwordHash: record.passwordHash, desiredState: record.desiredState, requestIdentity: record.requestIdentity }
+      if (input.currentAuthorization !== undefined) await this.writeAuthorization(record.reference, input.actorKey, input.currentAuthorization)
+      return { reference: record.reference, passwordHash: record.passwordHash, desiredState: record.desiredState, requestIdentity: record.requestIdentity,
+        ...(input.currentAuthorization !== undefined && { currentAuthorization: input.currentAuthorization }) }
     })
   }
 
@@ -342,7 +369,8 @@ export class FileProvisioningPreparationStore implements ProvisioningPreparation
       if (index.reference !== reference || index.actorKey !== actorKey) return refused('private_preparation_binding_invalid')
       const record = await this.record<T>(index, raw.indexName)
       await this.acknowledge(index, raw.indexName)
-      return { reference, passwordHash: record.passwordHash, desiredState: record.desiredState, requestIdentity: record.requestIdentity }
+      return { reference, passwordHash: record.passwordHash, desiredState: record.desiredState, requestIdentity: record.requestIdentity,
+        currentAuthorization: await this.readAuthorization(reference, actorKey) }
     })
   }
 }

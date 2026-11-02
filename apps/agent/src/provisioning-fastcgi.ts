@@ -31,6 +31,13 @@ export class FastCgiDecoder {
   finish(): void { if (this.pending.length !== 0) invalid() }
 }
 
+/**
+ * A completed request: app status 0 and FCGI_REQUEST_COMPLETE. PHP-FPM sends END_REQUEST right after its last stdout
+ * data with no empty FCGI_STDOUT record (php-src main/fastcgi.c skips zero-length writes), so END also closes stdout.
+ */
+export const isCompletedFastCgiEnd = (record: FastCgiRecord): boolean => record.type === FASTCGI.end && record.content.length === 8
+  && record.content.readUInt32BE(0) === 0 && record.content.subarray(4).every(byte => byte === 0)
+
 export function fastCgiRecord(type: number, requestId: number, content: Uint8Array = Buffer.alloc(0)): Buffer {
   if (!Number.isSafeInteger(type) || type < 1 || type > 255 || !Number.isSafeInteger(requestId) || requestId < 1 || requestId > 65535 || content.byteLength > 16384) return invalid()
   const header = Buffer.alloc(8)

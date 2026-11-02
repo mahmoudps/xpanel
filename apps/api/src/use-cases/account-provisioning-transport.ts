@@ -1,5 +1,5 @@
 import { fail, isUuid } from '@xpanel/core'
-import type { AgentApp } from '@xpanel/agent'
+import { AGENT_ROUTE_TIMEOUT_MS, type AgentApp } from '@xpanel/agent'
 import { assertProvisioningReply, canonicalProvisioningIdentity, type ProvisioningReconcilePort, type ProvisioningReconcileReply } from './account-provisioning-port.ts'
 
 /**
@@ -16,7 +16,7 @@ export function createAuthenticatedProvisioningPort(source: { fetch: AgentApp['f
       const principalId = request.authority.actor?.id
       if (!isUuid(principalId)) fail('UNAUTHENTICATED', 'an authenticated principal is required', { stateChanged: false })
       await context.assertAuthority()
-      const timeout = AbortSignal.timeout(180_000)
+      const timeout = AbortSignal.timeout(AGENT_ROUTE_TIMEOUT_MS.get('/host/account-provisioning')!)
       let reply: ProvisioningReconcileReply
       try {
         const response = await source.fetch(new Request('http://agent.local/host/account-provisioning', {

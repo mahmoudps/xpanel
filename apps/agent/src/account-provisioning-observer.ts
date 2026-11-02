@@ -5,6 +5,7 @@ import { randomBytes, createHash } from 'node:crypto'
 import { fail, type Account, type RenderedFile } from '@xpanel/core'
 import type { StateStore } from '@xpanel/state'
 import { services, system } from '@xpanel/render'
+import { ACCOUNT_PROBE_HOLD_SECONDS } from '../../../packages/render/src/system/account-probe.ts'
 import { assertProvisioningReply, canonicalProvisioningIdentity, parseProvisioningReconcileRequest, type AccountExecutionObservation } from '../../../packages/core/src/account-provisioning-contract.ts'
 import type { AccountProvisioningObservationProvider } from './account-provisioning-runtime.ts'
 import type { AgentExecutor } from './executor.ts'
@@ -106,6 +107,13 @@ const requireNativeRoot = (): void => {
   if (process.platform !== 'linux' || process.getuid?.() !== 0) observationFailed('native_root_process_reader_required')
 }
 
+/** One --property flag per field: the generic argv rule admits no comma-separated list. */
+export const unitIdentityShowArgv = (unit: string): string[] => ['/usr/bin/systemctl', 'show', '--no-pager',
+  ...['Id', 'User', 'Group', 'MainPID', 'ControlGroup', 'ActiveState'].map(name => '--property=' + name), '--', unit]
+
+/** The whole observation: DNS and unit reads, then the held canary exchange, which may last its full hold window. */
+export const ACCOUNT_OBSERVATION_DEADLINE_MS = ACCOUNT_PROBE_HOLD_SECONDS * 1000 + 15_000
+
 /** Pin the proc directory: a later PID reuse cannot turn this handle into another task. */
 export async function openNativeProvisioningProcess(pid: number): Promise<ProcessFiles> {
   requireNativeRoot()
@@ -176,13 +184,15 @@ export function createReadonlyAccountProvisioningObserver(options: ReadonlyAccou
     return { available, openHttp }
   }
   const operation = (context: HostEffectAuthority) => {
-    const end = now() + 15000
+    const end = now() + ACCOUNT_OBSERVATION_DEADLINE_MS
     const guard = async (): Promise<void> => {
       if (context.readOnly !== true || context.signal.aborted || now() >= end) observationFailed('observation_authority_or_deadline')
       await context.assertAuthority()
       if (context.signal.aborted || now() >= end) observationFailed('observation_authority_or_deadline')
     }
-    const checked = async <T>(work: () => Promise<T>): Promise<T> => { await guard(); const value = await work(); await guard(); return value }
+    // Observation reads have no effects: authority is checked once after each read, which also rejects a late result.
+    // Each check re-reads the whole operation authority, so checking before every read too spent the held request's deadline.
+    const checked = async <T>(work: () => Promise<T>): Promise<T> => { const value = await work(); await guard(); return value }
     return { guard, checked }
   }
   const bound = (input: AvailableInput): void => {
@@ -205,14 +215,16 @@ export function createReadonlyAccountProvisioningObserver(options: ReadonlyAccou
   }
   return {
     async assertAvailable(input, context) {
-      const http = producer(), { checked } = operation(context)
+      const http = producer(), { checked, guard } = operation(context)
       bound(input)
+      await guard()
       await checked(() => primary(input))
       await checked(() => http.available(input, context))
     },
     async observe(input: ObservationInput, context) {
       const http = producer(), { checked, guard } = operation(context)
       bound(input)
+      await guard()
       const domain = await checked(() => primary(input)), unit = system.fpmUnitName(input.account.username, domain.php.version)
       await checked(() => http.available(input, context))
       const generation = input.reconciliation.generation
@@ -225,7 +237,7 @@ export function createReadonlyAccountProvisioningObserver(options: ReadonlyAccou
       const readUnit = async (): Promise<number> => {
         const states = await checked(() => readUnitStates(createRuntimeHost(options.executor), [unit]))
         if (states.get(unit)?.load !== 'loaded' || states.get(unit)?.active !== 'active') return observationFailed('account_service_inactive')
-        const result = await run(['/usr/bin/systemctl', 'show', '--no-pager', '--property=Id,User,Group,MainPID,ControlGroup,ActiveState', '--', unit])
+        const result = await run(unitIdentityShowArgv(unit))
         const fields = new Map<string, string>()
         for (const line of result.stdout.trim().split('\n')) {
           const index = line.indexOf('=')
@@ -262,7 +274,8 @@ export function createReadonlyAccountProvisioningObserver(options: ReadonlyAccou
       if (parsed.skipped.length) return observationFailed('account_dns_unparsed_records')
       const serial = extractSoaSerial(services.validateZone(parsed.records, { requireSoa: true }))
       if (serial < 1) return observationFailed('account_dns_serial_unavailable')
-      await checked(() => options.dns.verify(files, []))
+      // One account's zone against the whole active catalog, not the complete generation.
+      await checked(() => options.dns.verify(files, [], 'zones'))
       let home: HomeHandle | undefined, response: HeldProvisioningHttpRequest | undefined, processFiles: ProcessFiles | undefined
       let value: AccountExecutionObservation | undefined, rejected = false, failure: unknown
       // Capture ownership before the post-acquisition guard can reject.
@@ -285,8 +298,7 @@ export function createReadonlyAccountProvisioningObserver(options: ReadonlyAccou
         await checked(() => heldResponse.assertCurrent())
         const heldProcess = await acquire(() => (options.openProcessFiles ?? openNativeProvisioningProcess)(heldResponse.pid), acquired => { processFiles = acquired })
         const snapshot = async () => {
-          const stat = await checked(() => heldProcess.read('stat')), status = await checked(() => heldProcess.read('status')),
-            cgroup = await checked(() => heldProcess.read('cgroup'))
+          const [stat, status, cgroup] = await checked(() => Promise.all([heldProcess.read('stat'), heldProcess.read('status'), heldProcess.read('cgroup')]))
           await checked(() => heldProcess.assertCurrent())
           return parseProvisioningProcessFiles(heldResponse.pid, { stat, status, cgroup })
         }

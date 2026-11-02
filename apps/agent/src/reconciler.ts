@@ -1126,6 +1126,8 @@ export class HostReconciler {
 
       for (const unit of unitsToReload) {
         if (reloadedUnits.includes(unit) || stoppedNewUnits.includes(unit)) continue
+        // A slice has no reload job and no service health; the daemon reload above applied its restored drop-in.
+        if (unit.endsWith('.slice')) continue
         if (introducedUnits.has(unit)) {
           await this.deps.executor.runAction({ kind: 'systemd', verb: 'stop', unit })
           stoppedNewUnits.push(unit)

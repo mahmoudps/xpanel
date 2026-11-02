@@ -2,6 +2,11 @@ import { fail, type Account, type HostAction, type RenderedFile } from '@xpanel/
 import { assertAccountId, assertAccountHome, assertHomeBase, assertUsername } from './validate.ts'
 
 export const ACCOUNT_PROBE_ROUTE = '/.well-known/xpanel-provisioning'
+/**
+ * How long the canary holds its request waiting for release. The agent verifies the held request with many
+ * full authority and host checks, which take seconds on a small host; the agent and nginx budgets derive from this.
+ */
+export const ACCOUNT_PROBE_HOLD_SECONDS = 45
 export const ACCOUNT_PROBE_ASSET_DIR = '/etc/xpanel/account-probe'
 export const ACCOUNT_PROBE_ASSET = ACCOUNT_PROBE_ASSET_DIR + '/probe.php'
 export const ACCOUNT_PROBE_RUNTIME = '/run/xpanel-account-probe'
@@ -27,7 +32,7 @@ if ((string)ini_get('auto_prepend_file') !== '' || (string)ini_get('auto_append_
 $stream = @stream_socket_client('unix://' . __DIR__ . '/runtime/callback.sock', $errno, $error, 2.0, STREAM_CLIENT_CONNECT);
 if (!is_resource($stream)) unverified();
 try {
-    stream_set_timeout($stream, 8);
+    stream_set_timeout($stream, ${ACCOUNT_PROBE_HOLD_SECONDS});
     $line = json_encode(['schemaVersion' => 1, 'challenge' => $challenge, 'binding' => $binding], JSON_UNESCAPED_SLASHES);
     if (!is_string($line) || strlen($line) > 256) unverified();
     $line .= "\n"; $offset = 0;
@@ -58,10 +63,12 @@ export const accountProbeNamespace = (account: Pick<Account, 'username' | 'uid' 
   const paths = accountProbePaths(account)
   return [`BindReadOnlyPaths=${ACCOUNT_PROBE_ASSET_DIR}:${paths.target}`, `BindReadOnlyPaths=${paths.runtime}:${paths.target}/runtime`]
 }
+// The agent admits exactly the seven fastcgi_param values below; nginx would otherwise add every request header as HTTP_*.
 export const accountProbeNginxLocation = (account: Pick<Account, 'username' | 'uid' | 'home'>): string[] => [
   `location = ${ACCOUNT_PROBE_ROUTE} {`,
   '    access_log off;', '    gzip off;', '    fastcgi_buffering off;', '    fastcgi_request_buffering off;', '    fastcgi_keep_conn off;',
-  '    fastcgi_connect_timeout 2s;', '    fastcgi_read_timeout 15s;', '    fastcgi_send_timeout 5s;',
+  '    fastcgi_pass_request_headers off;',
+  '    fastcgi_connect_timeout 2s;', `    fastcgi_read_timeout ${ACCOUNT_PROBE_HOLD_SECONDS + 5}s;`, '    fastcgi_send_timeout 5s;',
   '    fastcgi_param REQUEST_METHOD $request_method;', '    fastcgi_param SCRIPT_NAME $uri;',
   '    fastcgi_param REQUEST_URI $request_uri;', '    fastcgi_param SERVER_NAME $server_name;', '    fastcgi_param HTTP_HOST $host;',
   '    fastcgi_param CONTENT_LENGTH $content_length;',

@@ -9,7 +9,7 @@ import type { Server } from 'node:http'
 import { Socket } from 'node:net'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { fail, isUuid, isXpanelError, validateDomainName } from '@xpanel/core'
-import { profileFor } from '@xpanel/os'
+import { assertSafeArgv, profileFor } from '@xpanel/os'
 import { edge } from '@xpanel/render'
 import type { Account, ErrorCode, Id, LiveEvent, Principal } from '@xpanel/core'
 import { appendAudit, getDurableJob, getPrincipal, latestActive } from '@xpanel/db'
@@ -57,7 +57,9 @@ import { handleRepairCenterRoute } from './repair-center-routes.ts'
 import type { RhelCacheRecovery } from './repair-center.ts'
 import { handleConfigurationHealthRoute } from './configuration-health.ts'
 import { handleAccountHealthRoute, nativeAccountHealthHost } from './account-health.ts'
+import { createHostJobRun } from './host-job-exec.ts'
 import { handleHostJobsRoute } from './host-jobs-routes.ts'
+import { initializeUserQuota, validateQuotaFilesystem } from './services/quota.ts'
 import { handleAccountProvisioning, type AgentAccountProvisioningRuntime } from './account-provisioning-handler.ts'
 import type { HostJobRunner } from './host-jobs.ts'
 import { handleSoftwareCenterRoute } from './software-center-routes.ts'
@@ -151,6 +153,7 @@ import {
   assertValidKernelPeerCredentials,
   bindVerifiedRequestPeer,
   DEFAULT_AGENT_SOCKET_BACKLOG,
+  AGENT_ROUTE_TIMEOUT_MS,
   DEFAULT_AGENT_SOCKET_IDLE_TIMEOUT_MS,
   getVerifiedRequestPeer,
   loadNativePeerIdentityAddon,
@@ -167,6 +170,7 @@ import type {
   PeerIdentityDecisionEvent,
 } from './peer-identity.ts'
 import type { HostReconciler } from './reconciler.ts'
+import { readOsRelease } from './os-release.ts'
 
 export * from './peer-identity.ts'
 
@@ -274,6 +278,8 @@ const jsonResponse = (body: unknown, status = 200): Response =>
  * Non-`XpanelError` 500 internal errors NEVER expose `err.message` to callers.
  */
 const problemResponse = (err: unknown, instance: string): Response => {
+  // Callers get a generic 500; operators need the actual failure in the agent journal.
+  if (!isXpanelError(err)) console.error('xpanel-agent internal error at', instance + ':', err instanceof Error ? (err.stack ?? err.message).split('\n').slice(0, 6).join(' | ') : String(err))
   if (isXpanelError(err)) {
     const status = STATUS_BY_CODE[err.code] ?? 400
     return new Response(
@@ -427,7 +433,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
     if (!securityObservation) securityObservation = (async () => {
       let profile: ReturnType<typeof profileFor>
       try {
-        const release = await securityExecutor.readFile('/etc/os-release')
+        const release = await readOsRelease(securityExecutor)
         if (!release) return fail('PRECONDITION_FAILED', 'SSH observations require a trusted supported host profile', { stateChanged: false })
         profile = profileFor(release)
         if (profile.family !== deps.os.family || !['debian', 'rhel'].includes(profile.family)) return fail('PRECONDITION_FAILED', 'SSH observations require a trusted supported host profile', { stateChanged: false })
@@ -439,7 +445,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
   let htaccessValidator: Promise<ReturnType<typeof createNativeHtaccessValidator> | undefined> | undefined
   const protectedHtaccessValidator = () => htaccessValidator ??= (async () => {
     try {
-      const release = await (deps.executor ?? new LinuxHostExecutor()).readFile('/etc/os-release')
+      const release = await readOsRelease(deps.executor ?? new LinuxHostExecutor())
       if (!release) return undefined
       const profile = profileFor(release)
       if (profile.family !== deps.os.family || !['debian', 'rhel'].includes(profile.family)) return undefined
@@ -799,7 +805,9 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             getReseller: id => deps.store.getReseller(id),
           },
         }).catch((error: unknown) => {
-          console.error('xpanel-agent account provisioning refused:', isXpanelError(error) ? `${error.code}: ${error.message}` : 'unexpected provisioning error')
+          // A reason is a fixed identifier (e.g. account_quota_not_enforced); the operator needs it to act on the refusal.
+          const reason = isXpanelError(error) && typeof error.detail.reason === 'string' && /^[a-z0-9_]{1,64}$/.test(error.detail.reason) ? ` (${error.detail.reason})` : ''
+          console.error('xpanel-agent account provisioning refused:', isXpanelError(error) ? `${error.code}: ${error.message}${reason}` : 'unexpected provisioning error')
           throw error
         })
       }
@@ -932,6 +940,28 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         const presence = await deps.executor.probeRemovalTarget(account.home)
         if (presence !== 'absent') return jsonResponse({ purged: false, reason: presence === 'present' ? 'home_still_present' : 'home_presence_unknown' }, 409)
         return jsonResponse({ purged: true })
+      }
+
+      if (method === 'POST' && pathname === '/host/quota/initialize') {
+        await assertRootCaller(caller, 'host.quota.initialize')
+        if (!(deps.executor instanceof LinuxHostExecutor)) return fail('PRECONDITION_FAILED', 'quota setup requires the native Linux host executor', { stateChanged: false })
+        const body: unknown = await req.json().catch(() => ({}))
+        if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'path')) {
+          return fail('VALIDATION', 'quota setup accepts only a path', { stateChanged: false })
+        }
+        const executor = deps.executor, scanRun = createHostJobRun()
+        const result = await initializeUserQuota({
+          run: argv => executor.runCommand(argv),
+          // shortcut: a filesystem whose scan exceeds 4 minutes fails here as unverified; move the scan to a host job when such hosts appear.
+          scan: async argv => {
+            assertSafeArgv(argv)
+            const scanned = await scanRun(argv, { timeoutMs: 240_000, env: { LC_ALL: 'C' } })
+            return { ok: scanned.ok, code: scanned.code ?? 1, stdout: scanned.stdout, stderr: scanned.stderr }
+          },
+          readFile: path => executor.readFile(path),
+          writeFile: file => executor.writeFile(file),
+        }, validateQuotaFilesystem((body as { path?: unknown }).path ?? '/home'), new Date().toISOString().replace(/[-:]|\.\d{3}/g, ''))
+        return jsonResponse(result)
       }
 
       if (method === 'GET' && pathname === '/host/addresses') {
@@ -1402,7 +1432,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (url.search) return fail('VALIDATION', 'PHP inventory does not accept request selectors')
         if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
         const executor = deps.executor
-        const release = await executor.readFile('/etc/os-release')
+        const release = await readOsRelease(executor)
         if (!release) return fail('PRECONDITION_FAILED', 'the host operating system could not be read')
         const profile = profileFor(release)
         const source = profile.family === 'debian' ? 'dpkg' : 'rpm'
@@ -1986,7 +2016,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             detail: { certificateId: result.certificate.id, names: result.certificate.names, notAfter: result.certificate.notAfter, nativeApplied: false, servedTlsVerified: false }, outcome: 'ok' })
           return jsonResponse(result)
         }
-        const release = await executor.readFile('/etc/os-release')
+        const release = await readOsRelease(executor)
         if (!release) return fail('PRECONDITION_FAILED', 'the host operating system could not be read', { stateChanged: false })
         const directoryUrl = freshCaller.role === 'root' && typeof body.directoryUrl === 'string' && body.directoryUrl.startsWith('http://127.0.0.1:')
           ? body.directoryUrl
@@ -2146,8 +2176,12 @@ export const listenAgentSocket = async (
         if (!isEventsStream && inFlightRequests > maxInFlightRequests) {
           return fail('SERVICE_UNAVAILABLE', 'agent concurrent request limit exceeded')
         }
+        // A request-bound host effect may stay silent until it finishes; the idle timeout must not cut it mid-effect.
+        const routeBudget = AGENT_ROUTE_TIMEOUT_MS.get((req.url ?? '').split('?')[0]!)
         if (isEventsStream) {
           req.socket.setTimeout(0)
+        } else if (routeBudget !== undefined) {
+          req.socket.setTimeout(routeBudget)
         }
         const chunks: Buffer[] = []
         let length = 0

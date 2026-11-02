@@ -4,15 +4,20 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'vitest'
 import {
+  acquireJobLease,
+  completeJobWithLease,
   createApiToken,
   createResellerPrincipal,
   createRootPrincipal,
   createSession,
   createTestDb,
+  enqueueDurableJob,
   findActiveApiTokenByHash,
   findActiveSessionByTokenHash,
   findPrincipalByUsername,
+  getDurableJob,
   listAudit,
+  saveJobCheckpoint,
   setTotpSecret,
 } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
@@ -352,6 +357,57 @@ describe('CLI: explicit one-time root provisioning', () => {
       assert.equal(principal?.totpEnabled, false)
       assert.equal(principal?.forcePasswordChange, false)
       assert.doesNotMatch(unenrolled.stderr, /must.*enroll|enrollment.*required|mandatory/i)
+    })
+  })
+})
+
+describe('CLI: provisioning host recovery attestation', () => {
+  const interruptedJob = async (db: Db, steps: readonly string[]) => {
+    const job = await enqueueDurableJob(db, { kind: 'account.provision', actor: 'root', detail: { username: 'tenant' }, maxAttempts: 5 })
+    const leased = (await acquireJobLease(db, { jobId: job.id, workerId: 'api-worker' }))!
+    for (const step of steps) await saveJobCheckpoint(db, { jobId: job.id, workerId: 'api-worker', fencingToken: leased.fencingToken, step, data: { hostAttempt: 1, hostNoEffectAttempt: null } })
+    await completeJobWithLease(db, { jobId: job.id, workerId: 'api-worker', fencingToken: leased.fencingToken, status: 'failed',
+      error: 'host operation authority is no longer current', failureClass: 'unknown_outcome', needsAttention: true })
+    return job.id
+  }
+
+  it('requeues an interrupted host step only with explicit attestation and records it in the audit chain', async () => {
+    await withCli(async (db, store) => {
+      const jobId = await interruptedJob(db, ['reserve_and_create_state', 'reconcile_host_intent'])
+      const unattested = await runCli(['recover-provisioning', jobId], { db, store })
+      assert.equal(unattested.code, 1)
+      assert.match(unattested.stderr, /VALIDATION/)
+      const result = await runCli(['recover-provisioning', jobId, '--attest-host-recovered'], { db, store })
+      assert.equal(result.code, 0)
+      const job = await getDurableJob(db, jobId)
+      assert.equal(job?.status, 'queued')
+      assert.equal(job?.needsAttention, false)
+      assert.equal(job?.checkpointData.hostRecoveredAttempt, 1)
+      const rows = (await listAudit(db)).filter(entry => entry.action === 'account.provision.host_recovery_attested')
+      assert.deepEqual(rows.map(row => row.detail), [{ via: 'cli', jobId, hostAttempt: 1, username: 'tenant' }])
+    })
+  })
+
+  it('refuses a job whose unknown outcome is not an interrupted host step', async () => {
+    await withCli(async (db, store) => {
+      const jobId = await interruptedJob(db, ['reserve_and_create_state', 'reconcile_host_intent', 'reconcile_host'])
+      const result = await runCli(['recover-provisioning', jobId, '--attest-host-recovered'], { db, store })
+      assert.equal(result.code, 1)
+      assert.match(result.stderr, /PRECONDITION_FAILED/)
+      assert.equal((await getDurableJob(db, jobId))?.needsAttention, true)
+      assert.equal((await listAudit(db)).some(entry => entry.action === 'account.provision.host_recovery_attested'), false)
+    })
+  })
+})
+
+describe('CLI: quota setup', () => {
+  it('refuses malformed arguments before contacting the agent', async () => {
+    await withCli(async (db, store) => {
+      for (const argv of [['init-quotas', '--path'], ['init-quotas', 'home'], ['init-quotas', '--path', 'home'], ['init-quotas', '--force']]) {
+        const result = await runCli(argv, { db, store })
+        assert.equal(result.code, 1)
+        assert.match(result.stderr, /usage: xpanel init-quotas/)
+      }
     })
   })
 })
