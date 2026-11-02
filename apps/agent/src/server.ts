@@ -59,7 +59,7 @@ import { handleConfigurationHealthRoute } from './configuration-health.ts'
 import { handleAccountHealthRoute, nativeAccountHealthHost } from './account-health.ts'
 import { createHostJobRun } from './host-job-exec.ts'
 import { handleHostJobsRoute } from './host-jobs-routes.ts'
-import { initializeUserQuota, validateQuotaFilesystem } from './services/quota.ts'
+import { initializeUserQuota, readBootableKernels, validateQuotaFilesystem } from './services/quota.ts'
 import { handleAccountProvisioning, type AgentAccountProvisioningRuntime } from './account-provisioning-handler.ts'
 import type { HostJobRunner } from './host-jobs.ts'
 import { handleSoftwareCenterRoute } from './software-center-routes.ts'
@@ -958,6 +958,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             const scanned = await scanRun(argv, { timeoutMs: 240_000, env: { LC_ALL: 'C' } })
             return { ok: scanned.ok, code: scanned.code ?? 1, stdout: scanned.stdout, stderr: scanned.stderr }
           },
+          bootableKernels: readBootableKernels,
           readFile: path => executor.readFile(path),
           writeFile: file => executor.writeFile(file),
         }, validateQuotaFilesystem((body as { path?: unknown }).path ?? '/home'), new Date().toISOString().replace(/[-:]|\.\d{3}/g, ''))

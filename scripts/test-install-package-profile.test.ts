@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -53,6 +53,32 @@ const bootstrapExtras = (family: 'debian' | 'rhel', php: string): string[] => fa
 const cases = SUPPORTED_OS.flatMap(os => os.versions.flatMap(versionId => ['8.3', '7.4'].flatMap(php =>
   [false, true].map(withServices => ({ id: os.id, name: os.name, versionId, php, withServices })),
 )))
+
+describe('kernel quota format detection in the installer', () => {
+  it('lists bootable kernels with a module tree and finds quota_v2/quota_tree built in or as modules', () => {
+    const root = mkdtempSync(join(tempParent, tempPrefix))
+    tempRoots.push(root)
+    const kernels: Record<string, Record<string, string>> = {
+      'modular': { 'modules.dep': 'kernel/fs/quota/quota_v2.ko.zst: kernel/fs/quota/quota_tree.ko.zst\nkernel/fs/quota/quota_tree.ko.zst:\n' },
+      'builtin': { 'modules.dep': '', 'modules.builtin': 'kernel/fs/quota/quota_v2.ko\nkernel/fs/quota/quota_tree.ko\n' },
+      'virtual': { 'modules.dep': 'kernel/fs/ext4/ext4.ko.zst:\nkernel/fs/quota/quota_tree.ko.zst:\n' },
+    }
+    mkdirSync(join(root, 'boot'))
+    for (const name of [...Object.keys(kernels), '0-rescue-abc']) writeFileSync(join(root, 'boot', `vmlinuz-${name}`), '')
+    for (const [release, files] of Object.entries(kernels)) {
+      mkdirSync(join(root, 'modules', release), { recursive: true })
+      for (const [name, content] of Object.entries(files)) writeFileSync(join(root, 'modules', release, name), content)
+    }
+    const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
+    const functions = source.slice(source.indexOf('kernel_lacks_quota_format() {'), source.indexOf('# Every bootable kernel gets the modules'))
+    const fixture = root.replaceAll('\\', '/')
+    const script = functions.replaceAll('/lib/modules/', `${fixture}/modules/`).replaceAll('/boot/vmlinuz-', `${fixture}/boot/vmlinuz-`)
+      + 'while read -r release; do if kernel_lacks_quota_format "$release"; then echo "lacks $release"; else echo "has $release"; fi; done < <(bootable_kernel_releases)\n'
+    const run = spawnSync(bash, ['-euo', 'pipefail', '-c', script], { encoding: 'utf8', timeout: 10_000 })
+    expect(run.status, run.stderr).toBe(0)
+    expect(run.stdout.trim().split('\n').sort()).toEqual(['has builtin', 'has modular', 'lacks virtual'])
+  })
+})
 
 describe('bootstrap package and repository parity with the declared OS profiles', () => {
   it.each(cases)('$id $versionId PHP $php optional services=$withServices', ({ id, name, versionId, php, withServices }) => {

@@ -1,3 +1,4 @@
+import { readdir, readFile } from 'node:fs/promises'
 import { posix } from 'node:path'
 import { fail } from '@xpanel/core'
 import type { HostAction, RenderedFile } from '@xpanel/core'
@@ -106,8 +107,36 @@ export const fstabWithUserQuota = (fstab: string, mountpoint: string): string | 
   return lines.join('\n')
 }
 
+/** A kernel the host can boot, with its module index (modules.builtin and modules.dep contents). */
+export interface BootableKernel {
+  readonly release: string
+  readonly moduleIndex: string
+}
+
+/** Journaled vfsv1 quota needs quota_v2 and quota_tree, built in or as modules, when the filesystem mounts. */
+export const lacksQuotaFormat = (moduleIndex: string): boolean =>
+  ['quota_v2', 'quota_tree'].some(module => !new RegExp(`(^|/)${module}\\.ko(\\.[a-z]+)?(:|$)`, 'm').test(moduleIndex))
+
+/** Native reader for {@link QuotaInitializationPorts.bootableKernels}. */
+export const readBootableKernels = async (): Promise<BootableKernel[]> => {
+  const read = (path: string): Promise<string | null> => readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return null
+    throw error
+  })
+  const kernels: BootableKernel[] = []
+  for (const name of (await readdir('/boot')).sort()) {
+    if (!name.startsWith('vmlinuz-')) continue
+    const release = name.slice('vmlinuz-'.length)
+    const dependencies = await read(`/lib/modules/${release}/modules.dep`)
+    if (dependencies !== null) kernels.push({ release, moduleIndex: `${await read(`/lib/modules/${release}/modules.builtin`) ?? ''}\n${dependencies}` })
+  }
+  return kernels
+}
+
 export interface QuotaInitializationPorts {
   readonly run: QuotaCommandRunner
+  /** Kernels in /boot that have a module tree; images without one (EL rescue) are left out. */
+  bootableKernels(): Promise<readonly BootableKernel[]>
   /** The accounting scan reads the whole filesystem; it runs under its own longer deadline. */
   readonly scan: QuotaCommandRunner
   readFile(path: string): Promise<string | null>
@@ -132,6 +161,13 @@ export const initializeUserQuota = async (ports: QuotaInitializationPorts, path:
   if (before.filesystemType !== 'ext4') {
     return fail('PRECONDITION_FAILED', 'automatic quota setup supports ext4; XFS user quota is the uquota mount option set at boot', {
       stateChanged: false, filesystemType: before.filesystemType,
+    })
+  }
+  // A kernel without the format modules cannot mount the filesystem with quota options, so its next boot would stop.
+  const unbootable = (await ports.bootableKernels()).filter(kernel => lacksQuotaFormat(kernel.moduleIndex)).map(kernel => kernel.release)
+  if (unbootable.length > 0) {
+    return fail('PRECONDITION_FAILED', 'every bootable kernel needs quota_v2 and quota_tree before quota options reach /etc/fstab', {
+      stateChanged: false, kernels: unbootable,
     })
   }
   const fstab = await ports.readFile(QUOTA_FSTAB_PATH) ?? fail('PRECONDITION_FAILED', '/etc/fstab is missing', { stateChanged: false })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyObservedUserQuota, enableExistingUserQuota, fstabWithUserQuota, initializeUserQuota, observeUserQuota, parseUserQuotaState, resolveHomeQuotaFilesystem, validateQuotaFilesystem } from './quota.ts'
+import { applyObservedUserQuota, enableExistingUserQuota, fstabWithUserQuota, initializeUserQuota, lacksQuotaFormat, observeUserQuota, parseUserQuotaState, resolveHomeQuotaFilesystem, validateQuotaFilesystem } from './quota.ts'
 import type { QuotaCommandRunner } from './quota.ts'
 
 const ok = (stdout = '') => ({ ok: true, code: 0, stdout, stderr: '' })
@@ -91,7 +91,8 @@ describe('observed user quota enforcement', () => {
 describe('user quota setup', () => {
   const FSTAB = '# /etc/fstab\n/dev/disk/by-uuid/5e6f / ext4 defaults 0 1\n/dev/disk/by-uuid/3ED7 /boot/efi vfat defaults 0 1\n'
   const STAMP = '20261102T140000Z'
-  const host = (options: { fstype?: string; enforced?: boolean; remount?: boolean; scan?: boolean } = {}) => {
+  const MODULES = 'kernel/fs/quota/quota_v2.ko.zst: kernel/fs/quota/quota_tree.ko.zst\nkernel/fs/quota/quota_tree.ko.zst:\n'
+  const host = (options: { fstype?: string; enforced?: boolean; remount?: boolean; scan?: boolean; kernels?: { release: string; moduleIndex: string }[] } = {}) => {
     const commands: string[][] = [], files = new Map([['/etc/fstab', FSTAB]])
     let state: 'none' | 'off' | 'on' = options.enforced ? 'on' : 'none'
     const run: QuotaCommandRunner = async argv => {
@@ -108,7 +109,8 @@ describe('user quota setup', () => {
       return ok()
     }
     const scan: QuotaCommandRunner = async argv => { commands.push(argv); return options.scan === false ? { ok: false, code: 1, stdout: '', stderr: 'timed out' } : ok() }
-    const ports = { run, scan, readFile: async (path: string) => files.get(path) ?? null,
+    const ports = { run, scan, bootableKernels: async () => options.kernels ?? [{ release: '6.8.0-147-generic', moduleIndex: MODULES }],
+      readFile: async (path: string) => files.get(path) ?? null,
       writeFile: async (file: { path: string; content: string }) => { files.set(file.path, file.content) } }
     return { ports, commands, files }
   }
@@ -136,6 +138,21 @@ describe('user quota setup', () => {
       ['/usr/sbin/quotacheck', '--create-files', '--user', '--no-remount', '--format=vfsv1', '/'],
       ['/usr/sbin/quotaon', '--user', '/'],
     ])
+  })
+
+  it('finds the quota format modules built in or as compressed modules, and misses either one', () => {
+    expect(lacksQuotaFormat(MODULES)).toBe(false)
+    expect(lacksQuotaFormat('kernel/fs/quota/quota_v2.ko\nkernel/fs/quota/quota_tree.ko\n')).toBe(false)
+    expect(lacksQuotaFormat('kernel/fs/quota/quota_v2.ko.zst:\n')).toBe(true)
+    expect(lacksQuotaFormat('kernel/fs/ext4/ext4.ko.zst: kernel/fs/jbd2/jbd2.ko.zst\nkernel/fs/quota/quota_v20.ko:\nkernel/fs/quota/quota_tree.ko:\n')).toBe(true)
+    expect(lacksQuotaFormat('kernel/fs/quota/quota_v2xko:\nkernel/fs/quota/quota_tree.ko:\n')).toBe(true)
+  })
+
+  it('refuses before any write while a bootable kernel lacks the quota format, so that boot can still mount it', async () => {
+    const h = host({ kernels: [{ release: '5.15.0-198-generic', moduleIndex: MODULES }, { release: '5.15.0-202-generic', moduleIndex: 'kernel/fs/ext4/ext4.ko:\n' }] })
+    await expect(initializeUserQuota(h.ports, '/home', STAMP)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false, kernels: ['5.15.0-202-generic'] } })
+    expect([...h.files.keys()]).toEqual(['/etc/fstab'])
+    expect(h.commands.some(argv => argv[0] === '/usr/bin/mount')).toBe(false)
   })
 
   it('restores fstab when the kernel refuses the quota options and builds no accounting', async () => {

@@ -698,8 +698,6 @@ kernel.kptr_restrict = 2
 EOF
 }
 
-# Build a native helper from the release source (helpers/<name>/build.mjs), install it root:root 0755 and record its
-# SHA-256 beside it as <target>.sha256 (root:root 0644). The agent uses a helper only while it still matches that digest.
 # Upstream mpm-itk 2.4.7-04 as archived by Debian (orig tarball); the pin is the SHA-256 in Debian's signed source metadata.
 EL_MPM_ITK_URL="https://deb.debian.org/debian/pool/main/m/mpm-itk/mpm-itk_2.4.7-04.orig.tar.gz"
 EL_MPM_ITK_SHA256="609f83e8995416c5491348e07139f26046a579db20cf8488ebf75d314668efcf"
@@ -730,6 +728,46 @@ install_el_mpm_itk() {
   httpd -M 2>/dev/null | grep -q ' mpm_itk_module ' || die "Apache did not load mpm-itk."
 }
 
+# Journaled user quota (vfsv1) needs quota_v2 and quota_tree when /home is mounted. Ubuntu's virtual kernel
+# flavour ships them only in linux-modules-extra, so a kernel without them cannot mount a quota-enabled /home
+# at boot. Kernels without a module tree (EL rescue images) are not checked.
+kernel_lacks_quota_format() {
+  local index module
+  index="$(cat "/lib/modules/$1/modules.builtin" "/lib/modules/$1/modules.dep" 2>/dev/null || true)"
+  for module in quota_v2 quota_tree; do
+    grep -qE "(^|/)${module}\.ko(\.[a-z]+)?(:|$)" <<< "$index" || return 0
+  done
+  return 1
+}
+
+bootable_kernel_releases() {
+  local vmlinuz release
+  for vmlinuz in /boot/vmlinuz-*; do
+    release="${vmlinuz#/boot/vmlinuz-}"
+    if [[ -f "/lib/modules/$release/modules.dep" ]]; then printf '%s\n' "$release"; fi
+  done
+}
+
+# Every bootable kernel gets the modules, and an installed linux-image-virtual* meta package gains its
+# linux-image-extra-virtual* counterpart so later kernel upgrades bring them too.
+ensure_kernel_quota_format() {
+  local packages=() release meta
+  if [[ "$OS_FAMILY" == "debian" ]]; then
+    while read -r release; do
+      if kernel_lacks_quota_format "$release"; then packages+=("linux-modules-extra-$release"); fi
+    done < <(bootable_kernel_releases)
+    while read -r meta; do
+      packages+=("${meta/linux-image-virtual/linux-image-extra-virtual}")
+    done < <(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'linux-image-virtual*' 2>/dev/null | awk '$1 == "ii" { print $2 }')
+    if ((${#packages[@]})); then apt-get install -y --no-install-recommends "${packages[@]}"; fi
+  fi
+  while read -r release; do
+    if kernel_lacks_quota_format "$release"; then die "Kernel $release has no quota_v2/quota_tree; a quota-enabled /home would not mount when it boots."; fi
+  done < <(bootable_kernel_releases)
+}
+
+# Build a native helper from the release source (helpers/<name>/build.mjs), install it root:root 0755 and record its
+# SHA-256 beside it as <target>.sha256 (root:root 0644). The agent uses a helper only while it still matches that digest.
 install_native_helper() {
   local name="$1" target="$2" build digest
   build="$(mktemp -d)"
@@ -888,6 +926,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "Repository Sources: ${REPOSITORY_SOURCES[*]}"
   echo "Repository Packages: ${REPOSITORY_PACKAGES[*]}"
   echo "Package List      : ${PACKAGES[*]}"
+  echo "Kernel quota      : quota_v2 and quota_tree in every bootable kernel (Ubuntu adds linux-modules-extra as needed)"
   echo ""
   echo "--- Directory Layout ---"
   echo "chmod 0711 root:root /home"
@@ -1059,6 +1098,8 @@ if [[ "$OS_FAMILY" == "rhel" && "$APACHE_MPM" == "itk" ]]; then
   echo "[2a/6] Building Apache mpm-itk from its pinned upstream release..."
   install_el_mpm_itk
 fi
+echo "[2/6] Ensuring every bootable kernel carries the quota format modules..."
+ensure_kernel_quota_format
 
 echo "[2b/6] Opening /var/lib/xpanel so nginx can serve ACME HTTP-01 challenges..."
 if ! id nginx >/dev/null 2>&1; then
