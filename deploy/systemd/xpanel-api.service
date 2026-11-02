@@ -13,6 +13,8 @@ Environment=NODE_ENV=production
 EnvironmentFile=/etc/xpanel/runtime.env
 EnvironmentFile=/etc/xpanel/api.env
 ExecStart=/usr/bin/node --max-old-space-size=96 /opt/xpanel/apps/api/src/main.ts
+RuntimeDirectory=xpanel-api
+RuntimeDirectoryMode=0755
 Restart=always
 RestartSec=2
 UMask=0007

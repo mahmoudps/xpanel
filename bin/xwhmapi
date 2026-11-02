@@ -1,0 +1,12 @@
+#!/bin/sh
+# xPanel command-line API (xwhmapi). Any local user may run it; the API service names the caller from the kernel.
+set -eu
+unset NODE_OPTIONS NODE_PATH
+SELF="$(readlink -f -- "$0")"
+ROOT="$(cd -- "$(dirname -- "$SELF")/.." && pwd -P)"
+NODE=node
+if [ "$ROOT" = /opt/xpanel ] && [ -L /opt/xpanel/current ]; then
+  ROOT="$(readlink -f -- /opt/xpanel/current)"
+  NODE=/opt/xpanel/bin/node
+fi
+exec "$NODE" "$ROOT/apps/api/src/cli-api/client.ts" xwhmapi "$@"

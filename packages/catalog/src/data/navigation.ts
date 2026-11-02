@@ -1728,11 +1728,14 @@ export const navigation: NavSurface[] = [
               "owner"
             ],
             "tools": [
-              "api-shell"
+              "api-shell",
+              "command-line-api"
             ],
             "keywords": [
               "API Shell",
               "UAPI",
+              "xuapi",
+              "Command-line API",
               "API console",
               "Developer console",
               "API explorer"

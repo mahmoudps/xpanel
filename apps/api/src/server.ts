@@ -282,6 +282,7 @@ import { renderWebApp } from '../../web/src/app.ts'
 import { requestLocale } from '../../web/src/i18n.ts'
 import { requestPrefersHtml } from '../../web/src/status-page.ts'
 import { ENTRY_POINTS, entryPointAdmitsPrincipal, entryPointAllowsApiRoute, isMailboxPrincipalUsername, sessionTokenHash } from './entry-points.ts'
+import { authenticateCliPeer, cliApiAllowsRoute, type CliPeer } from './cli-api/identity.ts'
 import type { EntryPoint } from './entry-points.ts'
 import { loadQualifiedCatalog, type HostCatalogSource, type QualifiedCatalogProvider } from './host-catalog.ts'
 import { renderTotpQrSvg } from './totp-qr.ts'
@@ -302,6 +303,8 @@ export interface TransportContext {
   socketRemoteAddress?: string | null
   trustedIngress?: boolean
   tls?: boolean
+  /** Kernel peer of the local command-line API socket (cli-api/socket.ts); no network transport sets it. */
+  cliPeer?: CliPeer
 }
 
 interface InternalTransportMeta {
@@ -309,6 +312,7 @@ interface InternalTransportMeta {
   socketRemoteAddress?: string | null
   trustedIngress: boolean
   tls: boolean
+  cliPeer?: CliPeer
 }
 
 const transportPeers = new WeakMap<Request, InternalTransportMeta>()
@@ -622,7 +626,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
   const isVerifiedHttps = (req: Request): boolean => {
     const meta = transportPeers.get(req)
-    if (meta?.tls) return true
+    // A local socket never crosses the network.
+    if (meta?.tls || meta?.cliPeer) return true
     if (!isTrustedProxySource(req)) return false
     return req.headers.get('x-forwarded-proto')?.trim().toLowerCase() === 'https'
   }
@@ -805,7 +810,10 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (opts?.deferDeniedAudit) opts.deferDeniedAudit(input)
       else await emitAudit(input)
     }
-    const caller = await authenticateRequest(deps.db, req, { serverSecret, clientIp, entryPoint, mfaRuntimePolicy, teamMember, handoffAuthority })
+    const cliPeer = transportPeers.get(req)?.cliPeer
+    const caller = cliPeer
+      ? await authenticateCliPeer({ db: deps.db, store: deps.store }, entryPoint, cliPeer)
+      : await authenticateRequest(deps.db, req, { serverSecret, clientIp, entryPoint, mfaRuntimePolicy, teamMember, handoffAuthority })
     if (!caller) {
       return fail('UNAUTHENTICATED', 'authentication required')
     }
@@ -1787,6 +1795,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         socketRemoteAddress: context.socketRemoteAddress === undefined ? peer : context.socketRemoteAddress === null ? null : normalizedIp(context.socketRemoteAddress),
         trustedIngress: Boolean(context.trustedIngress),
         tls: Boolean(context.tls),
+        ...(context.cliPeer ? { cliPeer: Object.freeze({ ...context.cliPeer }) } : {}),
       })
     }
     const url = new URL(req.url, 'http://localhost')
@@ -1801,10 +1810,13 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         if (prefersDocumentHtml(req, pathname, method)) return renderTransportStatus(req, 421)
         return transportProblem(421, 'MISDIRECTED_REQUEST', 'request host does not match this entry point', pathname)
       }
+      const cliPeer = transportPeers.get(req)?.cliPeer
+      if (cliPeer && !cliApiAllowsRoute(pathname, method)) return transportProblem(404, 'NOT_FOUND', 'route is unavailable to the command-line API', pathname)
       if (entryPoint && pathname.startsWith('/api/') && !entryPointAllowsApiRoute(entryPoint, pathname, method)) return transportProblem(404, 'NOT_FOUND', 'route is unavailable on this entry point', pathname)
       if (entryPoint && pathname !== '/api/health' && deps.requireSecureCookies && !isVerifiedHttps(req)) return transportProblem(403, 'FORBIDDEN', 'verified HTTPS ingress is required for this entry point', pathname)
       // sec: saved panel-access allowlist for this entry point, checked before sign-in on the socket or trusted-ingress address.
-      if (entryPoint && pathname !== '/api/health' && !await secPanelAccessGate(deps.store.rootDir, entryPoint, () => extractClientIp(req))) {
+      // It filters network clients; the local command-line socket has no network peer.
+      if (entryPoint && pathname !== '/api/health' && !cliPeer && !await secPanelAccessGate(deps.store.rootDir, entryPoint, () => extractClientIp(req))) {
         if (prefersDocumentHtml(req, pathname, method)) return renderTransportStatus(req, 403)
         return transportProblem(403, 'FORBIDDEN', 'this address is not allowed on this entry point', pathname)
       }

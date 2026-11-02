@@ -1,10 +1,10 @@
 import { execFile, spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
-import { agentCallerHeaders, loadAgentCredentialFile } from '@xpanel/agent'
+import { agentCallerHeaders, loadAgentCredentialFile, loadInstalledPeerIdentityAddon } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
 import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, fail, hasAcl, isXpanelError, validateDomainName, type AuditEntry, type Domain, type MfaRuntimePolicy, type OsProfile, type WebsiteAnalyticsSnapshot } from '@xpanel/core'
 import { canOpenRegisteredRoute, canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
@@ -18,6 +18,8 @@ import { detectOs } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { protectInstalledStateParent } from '../../../packages/state/src/ownership.ts'
 import { runCli } from './cli.ts'
+import { CLI_COMMAND } from './cli-api/identity.ts'
+import { listenCliApiSocket } from './cli-api/socket.ts'
 import { createQualifiedCatalogProvider, loadQualifiedCatalog, type HostCatalogSource, type QualifiedCatalogProvider, type TrustedAcceptanceOptions } from './host-catalog.ts'
 import { loadTrustedAcceptanceConfig } from '../../../scripts/evidence/runtime.mjs'
 import { parseAuditFilters } from './audit-filters.ts'
@@ -980,6 +982,22 @@ export interface PanelEntrypointsOptions extends Omit<PanelServerOptions, 'port'
   entryPoints?: Readonly<Record<EntryPoint, PanelEntryPointConfig>>
   ingressSecret?: string
   ingressSecretFile?: string
+  /** xuapi / xwhmapi sockets; production uses /run/xpanel-api and the installed SO_PEERCRED addon. */
+  cliApi?: CliApiSockets
+}
+
+interface CliApiSockets { socketDir: string; peerUid: (socket: Socket) => number }
+
+/** Missing or unverified kernel peer credentials leave the command-line API closed, never the panel. */
+const installedCliApiSockets = async (): Promise<CliApiSockets | undefined> => {
+  try {
+    const addon = await loadInstalledPeerIdentityAddon()
+    // SO_PEERCRED reads the descriptor that Node keeps on the accepted socket handle.
+    return { socketDir: '/run/xpanel-api', peerUid: socket => addon.getSocketPeerCred((socket as unknown as { _handle?: { fd?: number } })._handle?.fd ?? -1).uid }
+  } catch (error) {
+    process.stderr.write(`xpanel-api: command-line API sockets are closed: ${error instanceof Error ? error.message : String(error)}\n`)
+    return undefined
+  }
 }
 
 const ENTRY_POINT_ORDER: readonly EntryPoint[] = ['xpanel', 'xwhm', 'xmail']
@@ -1054,6 +1072,7 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
   let client: ReturnType<typeof createAgentClient> | undefined
   let alerts: ReturnType<typeof startAlertScheduler> | undefined
   const listeners: Awaited<ReturnType<typeof listenApiServer>>[] = []
+  const cliSockets: Awaited<ReturnType<typeof listenCliApiSocket>>[] = []
   const agentSubscriptions: (() => void)[] = []
   const sockets = new Set<Socket>()
   const apps = {} as Record<EntryPoint, ReturnType<typeof createApiApp>>
@@ -1063,7 +1082,7 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
       // HTTP closeAllConnections does not include upgraded WebSocket connections.
       for (const socket of sockets) socket.destroy()
       const alertResults = await Promise.allSettled([Promise.resolve().then(() => alerts?.stop())])
-      const listenerResults = await Promise.allSettled(listeners.map(listener => listener.close()))
+      const listenerResults = await Promise.allSettled([...listeners, ...cliSockets].map(listener => listener.close()))
       const subscriptionResults = await Promise.allSettled(agentSubscriptions.map(async unsubscribe => unsubscribe()))
       const clientResults = await Promise.allSettled([Promise.resolve().then(() => client?.close())])
       const errors: unknown[] = [...alertResults, ...listenerResults, ...subscriptionResults, ...clientResults].flatMap(result => result.status === 'rejected' ? [result.reason] : [])
@@ -1144,6 +1163,15 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
         socket.once('close', () => sockets.delete(socket))
       })
       listeners.push(listener)
+    }
+    const cliApi = opts.cliApi ?? (opts.agentApp ? undefined : await installedCliApiSockets())
+    for (const entryPoint of cliApi ? (['xpanel', 'xwhm'] as const) : []) {
+      const socketPath = join(cliApi!.socketDir, `${CLI_COMMAND[entryPoint]}.sock`)
+      try {
+        cliSockets.push(await createLifecycleBackgroundResources(() => listenCliApiSocket(apps[entryPoint], { socketPath, origin: entryPoints[entryPoint].publicOrigin, peerUid: cliApi!.peerUid })))
+      } catch (error) {
+        process.stderr.write(`xpanel-api: ${socketPath} is closed: ${error instanceof Error ? error.message : String(error)}\n`)
+      }
     }
     alerts = createLifecycleBackgroundResources(() => startAlertScheduler({ db: handle.db, store, agentApp, agentToken, admit: withLifecycleWriterAdmission,
       onError: () => process.stderr.write('xpanel-api: a scheduled alert check did not complete\n') }))
