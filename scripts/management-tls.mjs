@@ -158,7 +158,7 @@ export function renderRenewalUnits(nodePath, layout = 'flat') {
 }
 
 export function certbotArguments(config) {
-  return ['certonly', '--config', `${PATHS.acme}/cli.ini`, '--config-dir', PATHS.acme, '--work-dir', `${PATHS.state}/acme-work`, '--logs-dir', PATHS.logs,
+  return ['certonly', '--config', `${PATHS.acme}/cli.ini`, '--config-dir', PATHS.acme, '--work-dir', `${PATHS.state}/acme-work`, '--logs-dir', PATHS.logs, '--max-log-backups', '10',
     '--server', ACME_DIRECTORY, '--non-interactive', '--agree-tos', '--email', config.acmeEmail, '--no-directory-hooks',
     '--webroot', '--webroot-path', PATHS.webroot, '--preferred-challenges', 'http-01', '--cert-name', 'xpanel-management', '--keep-until-expiring',
     ...profiles(config).flatMap(point => ['-d', point.host])]
@@ -427,7 +427,9 @@ async function nginxConfigurationDigest() {
 }
 
 async function preflightUnusedListeners(config) {
-  const inventory = await command('read-ingress-listeners', '/usr/bin/ss', ['--listening', '--tcp', '--numeric', '--no-header', '--processes'])
+  // iproute2 installs ss in /usr/bin on Debian and Ubuntu and in /usr/sbin on EL.
+  const ss = existsSync('/usr/bin/ss') ? '/usr/bin/ss' : '/usr/sbin/ss'
+  const inventory = await command('read-ingress-listeners', ss, ['--listening', '--tcp', '--numeric', '--no-header', '--processes'])
   const inventorySha256 = sha(inventory.stdout)
   // An exclusive real bind refuses Apache, legacy APIs and wildcard listeners.
   // No other service is stopped and no firewall/default vhost is rewritten.
@@ -521,8 +523,12 @@ function assertNoCertbotHooks() {
   if (renewal && /^\s*(?:pre_hook|post_hook|renew_hook|deploy_hook)\s*=\s*\S/m.test(renewal.bytes.toString('utf8'))) fail('ACME_UNREVIEWED_HOOK_REFUSED')
 }
 
+// The Debian, Ubuntu and EL certbot packages ship exactly these two settings: log rotation is left to logrotate
+// (certbotArguments sets its own bound) and renewal is announced as preconfigured. Neither changes issuance.
+const PACKAGED_CERTBOT_DEFAULTS = new Set(['max-log-backups = 0', 'preconfigured-renewal = True'])
+
 export function assertIsolatedDefaultConfig(text) {
-  if (text.split(/\r?\n/).some(line => { const value = line.trim(); return value && !value.startsWith('#') && !value.startsWith(';') })) fail('ACME_GLOBAL_CONFIGURATION_REVIEW_REQUIRED')
+  if (text.split(/\r?\n/).some(line => { const value = line.trim(); return value && !value.startsWith('#') && !value.startsWith(';') && !PACKAGED_CERTBOT_DEFAULTS.has(value) })) fail('ACME_GLOBAL_CONFIGURATION_REVIEW_REQUIRED')
 }
 
 export function renewalObservation(previousFingerprint, currentFingerprint, priorWasObserved = true) {

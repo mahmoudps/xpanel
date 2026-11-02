@@ -226,6 +226,12 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
     expect(() => assertIsolatedDefaultConfig('# Defaults\n\n; Comment\n')).not.toThrow()
     expect(() => assertIsolatedDefaultConfig('')).not.toThrow()
   })
+  it('permits the packaged Debian, Ubuntu and EL cli.ini and bounds its own logs', () => {
+    expect(() => assertIsolatedDefaultConfig('# Because we are using logrotate for greater flexibility, disable the\n# internal certbot logrotation.\nmax-log-backups = 0\n# Adjust interactive output regarding automated renewal\npreconfigured-renewal = True\n')).not.toThrow()
+    expect(() => assertIsolatedDefaultConfig('max-log-backups = 0\nrenew-hook = /operator\n')).toThrow('ACME_GLOBAL_CONFIGURATION_REVIEW_REQUIRED')
+    const args = certbotArguments(config())
+    expect(args[args.indexOf('--max-log-backups') + 1]).toBe('10')
+  })
   it('renders scoped HTTP-01 without redirecting challenge tokens or opening unrelated names', () => {
     const text = renderChallenge(config())
     expect(text.match(/listen 192\.0\.2\.10:80;/g)).toHaveLength(3)
