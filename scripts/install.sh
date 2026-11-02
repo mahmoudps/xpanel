@@ -738,7 +738,16 @@ configure_selinux() {
       || semanage fcontext -m -t dkim_milter_data_t '/var/spool/postfix/opendkim(/.*)?' || die "SELinux refused the OpenDKIM socket context."
     install -d -o opendkim -g postfix -m 0750 /var/spool/postfix/opendkim
     restorecon -R /var/spool/postfix/opendkim
+    # No boolean lets the milter reach a directory inside the Postfix spool: one reviewed rule allows only
+    # the path lookup (search) through /var/spool/postfix itself.
+    write_config /etc/xpanel/xpanel_opendkim.cil render_opendkim_selinux_module 0644
+    semodule -i /etc/xpanel/xpanel_opendkim.cil || die "SELinux refused the OpenDKIM spool lookup rule."
   fi
+}
+
+render_opendkim_selinux_module() {
+  printf '%s\n' '; Managed by xPanel: OpenDKIM reaches its milter socket in /var/spool/postfix/opendkim.' \
+    '(allow dkim_milter_t postfix_spool_t (dir (search getattr)))'
 }
 
 OS_FILE_SOURCE=""
