@@ -197,6 +197,17 @@ describe('generation-owned DNS publication boundary', { tags: ['unit'] }, () => 
     expect(dbPorts.rollback).not.toHaveBeenCalled()
   })
 
+  it('treats a slice drop-in as its slice and never reloads the drop-in file name as a unit', async () => {
+    const dropIn = '/etc/systemd/system/user-20009.slice.d/50-xpanel.conf'
+    const fixture = rollbackFixture()
+    fixture.journal.reloadedUnits = []
+    fixture.journal.previousManifest = buildGenerationManifest({ generationId: 1, stateChecksum: 'state', filesChecksum: 'files', actor: 'root',
+      files: [file(catalogPath), file(dropIn)], postActions: [], os: profileFor('ID=ubuntu\nVERSION_ID="24.04"\n') })
+    expect(fixture.journal.previousManifest.files.find(entry => entry.path === dropIn)?.dependentUnits).toEqual(['user-20009.slice'])
+    await expect(fixture.rollback()).resolves.toMatchObject({ verificationRequired: false })
+    expect(fixture.events).toContain('systemd:daemon-reload')
+  })
+
   it('refuses a corrupt captured DNS backup without overwriting live bytes or claiming recovery', async () => {
     const fixture = rollbackFixture()
     fixture.journal.previousFilesBackup[0]!.sha256 = '0'.repeat(64)
