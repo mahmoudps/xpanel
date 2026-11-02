@@ -362,6 +362,26 @@ describe('management TLS retained-failure control-flow diagnostics (modeled kern
     expect(observed.FragmentPath).toBe(PATHS.timer)
     expect(observed.references.size).toBe(2)
   })
+  it('admits a fresh load of its own unit files before daemon-reload, since systemd loads a not-found unit on its next query', () => {
+    const fs = modelFilesystem()
+    fs.put(PATHS.timer, '# Managed by xPanel management TLS lifecycle v1.\ntimer\n', 0o644)
+    const expected = new Map([[PATHS.timer, fs.get(PATHS.timer)]])
+    const { assertTimerSnapshot } = loadDeclarations(['assertTimerSnapshot'], { assertOriginalReferences: () => {}, sameFileVersion, fail: codedFailure })
+    const state = (values: Record<string, string>) => ({ LoadState: 'loaded', ActiveState: 'inactive', SubState: 'dead', UnitFileState: 'disabled', InvocationID: '', FragmentPath: PATHS.timer, DropInPaths: '', ...values, references: new Map([[PATHS.timer, fs.get(PATHS.timer)]]) })
+    const notFound = state({ LoadState: 'not-found', UnitFileState: '', FragmentPath: '' })
+    expect(() => assertTimerSnapshot(notFound, notFound, expected)).not.toThrow()
+    expect(() => assertTimerSnapshot(notFound, state({}), expected)).not.toThrow()
+    expect(() => assertTimerSnapshot(notFound, state({ ActiveState: 'active', SubState: 'waiting', InvocationID: 'a'.repeat(32) }), expected)).toThrow('RENEWAL_TIMER_CONCURRENT_DRIFT')
+    expect(() => assertTimerSnapshot(notFound, state({ UnitFileState: 'enabled' }), expected)).toThrow('RENEWAL_TIMER_CONCURRENT_DRIFT')
+  })
+  it('verifies and runs the resolved file of a tool shipped as a symbolic link', async () => {
+    const verified: string[] = [], spawned: string[] = []
+    const { command } = loadDeclarations(['command'], { PATHS, constants, realpathSync: (path: string) => path === '/usr/bin/certbot' ? '/usr/bin/certbot-3' : path,
+      trustedExecutable: (path: string) => { verified.push(path); codedFailure('STOP_AFTER_VERIFY') }, spawn: (path: string) => { spawned.push(path) }, fail: codedFailure })
+    await expect(command('read-version', '/usr/bin/certbot', ['--version'])).rejects.toThrow('STOP_AFTER_VERIFY')
+    expect(verified).toEqual(['/usr/bin/certbot-3'])
+    expect(spawned).toEqual([])
+  })
   const commandModel = (neverClose = false, initialGroupPresent = true, knownBirth = true) => {
     const fs = modelFilesystem(), signals: unknown[] = []
     let groupPresent = initialGroupPresent
@@ -369,7 +389,7 @@ describe('management TLS retained-failure control-flow diagnostics (modeled kern
     const spawn = () => { queueMicrotask(() => { child.emit('spawn'); if (!neverClose) child.emit('close', 0, null) }); return child }
     const processModel = { kill: (_pid: number, signal: unknown) => { if (signal !== 0) { signals.push(signal); groupPresent = false } else if (!groupPresent) codedFailure('ESRCH') } }
     const fields = Array(20).fill('0'); fields[0] = 'S'; fields[2] = '4200'; fields[3] = '4200'; fields[19] = '123'
-    const { command } = loadDeclarations(['command'], { ...fs, PATHS, constants, spawn, process: processModel, performance, delay: async () => {}, trustedExecutable: () => {},
+    const { command } = loadDeclarations(['command'], { ...fs, PATHS, constants, spawn, process: processModel, performance, delay: async () => {}, trustedExecutable: () => {}, realpathSync: (path: string) => path,
       readRootFile: (path: string) => path.startsWith('/usr/') ? { bytes: Buffer.from('tool'), st: {} } : fs.readRootFile(path),
       readFileSync: () => `4200 (diagnostic) ${fields.join(' ')}`, observeChildBirth: () => knownBirth ? ({ pid: 4200, kernelStartTime: '123', processGroupId: 4200, sessionId: 4200 }) : null, fail: codedFailure, setTimeout, clearTimeout,
     })

@@ -230,7 +230,9 @@ function observeChildBirth(pid) {
 }
 
 /** Fixed argv-only root tools. Uncertain effects are retained, never signalled by a recycled PGID. */
-async function command(operation, executable, args, timeoutMs = 30_000, extraFd, acceptedExitCodes = [0]) {
+async function command(operation, requestedExecutable, args, timeoutMs = 30_000, extraFd, acceptedExitCodes = [0]) {
+  // Distributions ship some tools as symbolic links (EL: /usr/bin/certbot -> certbot-3); the resolved file is verified and run.
+  const executable = realpathSync(requestedExecutable)
   trustedExecutable(executable)
   const activePath = `${PATHS.state}/active-command.json`
   // The lock operation itself must not modify another holder's command receipt.
@@ -413,7 +415,9 @@ async function renewalTimerState(expectedFiles = new Map()) {
 function assertTimerSnapshot(original, current, expectedFiles, afterOwnReload = false) {
   assertOriginalReferences(expectedFiles)
   for (const [path, expected] of expectedFiles) if (!sameFileVersion(current.references.get(path), expected)) fail('RENEWAL_TIMER_CONCURRENT_DRIFT')
-  if (original.LoadState === 'not-found' && afterOwnReload) {
+  // systemd loads a not-found unit from disk on its next query, without daemon-reload; the file versions checked above
+  // show the loaded files are ours, so before the reload a fresh, never-started load of them is as valid as not-found.
+  if (original.LoadState === 'not-found' && (afterOwnReload || current.LoadState !== 'not-found')) {
     if (current.LoadState !== 'loaded' || current.ActiveState !== 'inactive' || current.SubState !== 'dead' || current.UnitFileState !== 'disabled' || current.InvocationID !== '') fail('RENEWAL_TIMER_CONCURRENT_DRIFT')
   } else for (const key of ['LoadState', 'ActiveState', 'SubState', 'UnitFileState', 'InvocationID', 'FragmentPath', 'DropInPaths']) if (original[key] !== current[key]) fail('RENEWAL_TIMER_CONCURRENT_DRIFT')
 }
