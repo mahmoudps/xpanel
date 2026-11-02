@@ -19,6 +19,7 @@ import { StateStore } from '@xpanel/state'
 import { protectInstalledStateParent } from '../../../packages/state/src/ownership.ts'
 import { runCli } from './cli.ts'
 import { createQualifiedCatalogProvider, loadQualifiedCatalog, type HostCatalogSource, type QualifiedCatalogProvider, type TrustedAcceptanceOptions } from './host-catalog.ts'
+import { loadTrustedAcceptanceConfig } from '../../../scripts/evidence/runtime.mjs'
 import { parseAuditFilters } from './audit-filters.ts'
 import { loadMailDocument, messageSizeLimitBytes, messageSizeLimitFromPostconf, type MailDocument } from './mail/document.ts'
 import { auditActorQuery, auditTargetQuery, authorizeMailboxSessionBinding, createLocalMailboxTransport, mailFolderName, mailboxAddressIndex, rewriteMailboxIds } from './mail/inbox.ts'
@@ -1308,7 +1309,8 @@ if (isMainModule()) {
         process.exitCode = 1
       })
   } else {
-    startPanelEntrypoints()
+    // Operator-reviewed capability evidence; without the file no tool is accepted, and an untrusted or invalid one stops startup.
+    Promise.resolve().then(() => { const acceptance = loadTrustedAcceptanceConfig(); return startPanelEntrypoints(acceptance ? { acceptance } : {}) })
       .then((srv) => {
         for (const entryPoint of ENTRY_POINT_ORDER) {
           const listener = srv.listeners[entryPoint]

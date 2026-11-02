@@ -40,3 +40,14 @@ export function assertTrustedMetadata(entries: readonly {
   mode: number
   symlink: boolean
 }[]): void
+
+export interface TrustedAcceptanceConfiguration {
+  path: string
+  expectedSha256: string
+  expectedTarget: VerificationTarget
+  expectedRequirements: readonly CapabilityRequirement[]
+}
+
+export const CAPABILITY_ACCEPTANCE_CONFIG: string
+export function parseAcceptanceConfig(value: unknown): TrustedAcceptanceConfiguration
+export function loadTrustedAcceptanceConfig(path?: string): TrustedAcceptanceConfiguration | undefined

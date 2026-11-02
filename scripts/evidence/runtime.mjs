@@ -1,5 +1,5 @@
 import { constants, closeSync, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { posix, resolve } from 'node:path'
 import { assertCompleteEvidence, isHash, requireValue, receiptKey, safeEvidenceRelativePath, validateReceipt, validateRequirements, validateTarget, validateTargetDocument } from './contracts.mjs'
 import { readBoundedFile } from './files.mjs'
 import { sha256 } from './shared.mjs'
@@ -46,11 +46,8 @@ export function assertTrustedMetadata(entries) {
   requireValue(entries.length > 0 && entries.every(entry => entry.uid === 0 && Number.isSafeInteger(entry.mode) && (entry.mode & 0o022) === 0 && entry.symlink === false), 'Evidence bundle and its ancestors must be root-owned and not writable by group/other')
 }
 
-/** Production reader: the digest pin must come from separate trusted operator configuration. */
-export function loadTrustedEvidenceBundle({ path, expectedSha256, expectedTarget, expectedRequirements }) {
-  requireValue(process.platform === 'linux', 'Trusted capability bundles require a Linux ownership check')
-  requireValue(isHash(expectedSha256), 'An external trusted SHA-256 pin is required')
-  validateRequirements(expectedRequirements)
+/** Root-owned and not group/other-writable from the file up to /, no symbolic link, bounded, unchanged while read. */
+function readTrustedFile(path, label, maxBytes) {
   const absolute = resolve(path), metadata = []
   let current = absolute
   while (true) {
@@ -64,10 +61,41 @@ export function loadTrustedEvidenceBundle({ path, expectedSha256, expectedTarget
   const fd = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
     const before = fstatSync(fd)
-    requireValue(before.isFile() && before.size > 0 && before.size <= 8 * 1024 * 1024, 'Trusted evidence bundle size/type is invalid')
+    requireValue(before.isFile() && before.size > 0 && before.size <= maxBytes, `${label} size/type is invalid`)
     assertTrustedMetadata([{ uid: before.uid, mode: before.mode, symlink: false }])
     const bytes = readFileSync(fd), after = fstatSync(fd)
-    requireValue(['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].every(key => before[key] === after[key]) && bytes.length === before.size && sha256(bytes) === expectedSha256, 'Trusted evidence bundle changed or its digest pin did not match')
-    return verifyEvidenceBundle(JSON.parse(bytes.toString('utf8')), { expectedTarget, expectedRequirements })
+    requireValue(['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].every(key => before[key] === after[key]) && bytes.length === before.size, `${label} changed while it was read`)
+    return bytes
   } finally { closeSync(fd) }
+}
+
+/** Production reader: the digest pin must come from separate trusted operator configuration. */
+export function loadTrustedEvidenceBundle({ path, expectedSha256, expectedTarget, expectedRequirements }) {
+  requireValue(process.platform === 'linux', 'Trusted capability bundles require a Linux ownership check')
+  requireValue(isHash(expectedSha256), 'An external trusted SHA-256 pin is required')
+  validateRequirements(expectedRequirements)
+  const bytes = readTrustedFile(path, 'Trusted evidence bundle', 8 * 1024 * 1024)
+  requireValue(sha256(bytes) === expectedSha256, 'Trusted evidence bundle changed or its digest pin did not match')
+  return verifyEvidenceBundle(JSON.parse(bytes.toString('utf8')), { expectedTarget, expectedRequirements })
+}
+
+/** Operator acceptance configuration, a protected startup file like runtime.env. */
+export const CAPABILITY_ACCEPTANCE_CONFIG = '/etc/xpanel/capability-acceptance.json'
+
+/** Exact shape of the acceptance configuration: the bundle location, its reviewed pin, the deployed target and the reviewed requirements. */
+export function parseAcceptanceConfig(value) {
+  requireValue(value !== null && typeof value === 'object' && !Array.isArray(value) && value.schemaVersion === 1
+    && Object.keys(value).sort().join(',') === 'bundlePath,bundleSha256,requirements,schemaVersion,target', 'Unsupported capability acceptance configuration')
+  requireValue(typeof value.bundlePath === 'string' && value.bundlePath.startsWith('/') && posix.normalize(value.bundlePath) === value.bundlePath, 'The capability bundle path must be absolute and canonical')
+  requireValue(isHash(value.bundleSha256), 'The capability bundle needs a reviewed SHA-256 pin')
+  validateTarget(value.target)
+  validateRequirements(value.requirements)
+  return { path: value.bundlePath, expectedSha256: value.bundleSha256, expectedTarget: value.target, expectedRequirements: value.requirements }
+}
+
+/** Startup reader. An absent file means no tool is accepted; a present file must be trusted and valid, or startup fails. */
+export function loadTrustedAcceptanceConfig(path = CAPABILITY_ACCEPTANCE_CONFIG) {
+  try { lstatSync(path) } catch (error) { if (error?.code === 'ENOENT') return undefined; throw error }
+  requireValue(process.platform === 'linux', 'Capability acceptance configuration requires a Linux ownership check')
+  return parseAcceptanceConfig(JSON.parse(readTrustedFile(path, 'Capability acceptance configuration', 1024 * 1024).toString('utf8')))
 }
