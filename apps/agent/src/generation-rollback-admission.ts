@@ -6,6 +6,7 @@ import { profileFor } from '@xpanel/os'
 import { buildGenerationRollbackAdmission, generationSourceIsLinked, readGenerationReconciliationLeaseAvailable } from '@xpanel/state'
 import type { GenerationRollbackAdmission, StateStore } from '@xpanel/state'
 import { LinuxHostExecutor } from './executor.ts'
+import { readOsRelease } from './os-release.ts'
 import type { AgentExecutor } from './executor.ts'
 import type { ReconcilerJournal } from './reconciler-journal.ts'
 
@@ -17,7 +18,7 @@ export async function readGenerationRollbackAdmission(input: {
   const unavailable = () => buildGenerationRollbackAdmission({ executor, supportedProfile: false, mutexAvailable: false, sourceAvailable: false, activeGeneration: null, sourceRevision: null, eligibleTargets: [] })
   if (executor !== 'linux' || !input.executor) return unavailable()
   try {
-    const release = await input.executor.readFile('/etc/os-release')
+    const release = await readOsRelease(input.executor)
     if (!release) return unavailable()
     profileFor(release)
     if (!await readGenerationReconciliationLeaseAvailable(input.store.rootDir)) return unavailable()

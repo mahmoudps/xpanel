@@ -15,6 +15,7 @@ import type { RepairDriftObservation } from './repair-center.ts'
 import { createSupportRedactor, redactSupportValue, SUPPORT_HASH_RULE, SUPPORT_REDACTION_RULES } from './support-bundle-redaction.ts'
 import type { SupportRedactor } from './support-bundle-redaction.ts'
 import type { UpgradeHostFs } from './upgrade-observation.ts'
+import { readOsRelease } from './os-release.ts'
 
 export const SUPPORT_JOURNAL_UNITS = ['xpanel-agent.service', 'xpanel-api.service'] as const
 export const SUPPORT_LIMITS = Object.freeze({
@@ -113,8 +114,7 @@ export async function readPanelRelease(fs: UpgradeHostFs): Promise<SupportReleas
 async function readOs(ctx: SupportRouteContext): Promise<SupportOs> {
   const profile = { id: ctx.os.id, versionId: ctx.os.versionId, family: ctx.os.family }
   const host = ctx.host
-  // os-release(5): /usr/lib/os-release is read only when /etc/os-release is absent.
-  const text = host ? await attempt(async () => (await host.readFile('/etc/os-release')) ?? await host.readFile('/usr/lib/os-release')) : null
+  const text = host ? await attempt(async () => readOsRelease(host)) : null
   const release = text ? await attempt(async () => parseOsRelease(text)) : null
   return { profile, release: release ? { state: 'read', id: release.id, versionId: release.versionId, prettyName: release.prettyName } : { state: 'unavailable', id: null, versionId: null, prettyName: null } }
 }

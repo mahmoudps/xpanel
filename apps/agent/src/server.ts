@@ -167,6 +167,7 @@ import type {
   PeerIdentityDecisionEvent,
 } from './peer-identity.ts'
 import type { HostReconciler } from './reconciler.ts'
+import { readOsRelease } from './os-release.ts'
 
 export * from './peer-identity.ts'
 
@@ -429,7 +430,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
     if (!securityObservation) securityObservation = (async () => {
       let profile: ReturnType<typeof profileFor>
       try {
-        const release = await securityExecutor.readFile('/etc/os-release')
+        const release = await readOsRelease(securityExecutor)
         if (!release) return fail('PRECONDITION_FAILED', 'SSH observations require a trusted supported host profile', { stateChanged: false })
         profile = profileFor(release)
         if (profile.family !== deps.os.family || !['debian', 'rhel'].includes(profile.family)) return fail('PRECONDITION_FAILED', 'SSH observations require a trusted supported host profile', { stateChanged: false })
@@ -441,7 +442,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
   let htaccessValidator: Promise<ReturnType<typeof createNativeHtaccessValidator> | undefined> | undefined
   const protectedHtaccessValidator = () => htaccessValidator ??= (async () => {
     try {
-      const release = await (deps.executor ?? new LinuxHostExecutor()).readFile('/etc/os-release')
+      const release = await readOsRelease(deps.executor ?? new LinuxHostExecutor())
       if (!release) return undefined
       const profile = profileFor(release)
       if (profile.family !== deps.os.family || !['debian', 'rhel'].includes(profile.family)) return undefined
@@ -1404,7 +1405,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (url.search) return fail('VALIDATION', 'PHP inventory does not accept request selectors')
         if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
         const executor = deps.executor
-        const release = await executor.readFile('/etc/os-release')
+        const release = await readOsRelease(executor)
         if (!release) return fail('PRECONDITION_FAILED', 'the host operating system could not be read')
         const profile = profileFor(release)
         const source = profile.family === 'debian' ? 'dpkg' : 'rpm'
@@ -1988,7 +1989,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             detail: { certificateId: result.certificate.id, names: result.certificate.names, notAfter: result.certificate.notAfter, nativeApplied: false, servedTlsVerified: false }, outcome: 'ok' })
           return jsonResponse(result)
         }
-        const release = await executor.readFile('/etc/os-release')
+        const release = await readOsRelease(executor)
         if (!release) return fail('PRECONDITION_FAILED', 'the host operating system could not be read', { stateChanged: false })
         const directoryUrl = freshCaller.role === 'root' && typeof body.directoryUrl === 'string' && body.directoryUrl.startsWith('http://127.0.0.1:')
           ? body.directoryUrl
