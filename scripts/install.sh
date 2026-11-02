@@ -290,6 +290,8 @@ JAILSHELL_BIN="/opt/xpanel/bin/jailshell"
 JAILSHELL_LINK="/usr/local/bin/xpanel-jailshell"
 TERMINAL_PTY_BIN="/opt/xpanel/bin/xpanel-terminal-pty"
 ACCOUNT_FILES_BIN="/opt/xpanel/bin/xpanel-account-files"
+PEER_IDENTITY_ADDON="/opt/xpanel/bin/xpanel-peer-identity.node"
+CLI_API_COMMANDS=(xuapi xwhmapi)
 SLICE_UNIT="/etc/systemd/system/xpanel.slice"
 AGENT_UNIT="/etc/systemd/system/xpanel-agent.service"
 API_UNIT="/etc/systemd/system/xpanel-api.service"
@@ -819,6 +821,8 @@ Environment=NODE_ENV=production
 EnvironmentFile=/etc/xpanel/runtime.env
 EnvironmentFile=/etc/xpanel/api.env
 ExecStart=$NODE_BIN --max-old-space-size=96 $PROGRAM_ROOT/apps/api/src/main.ts
+RuntimeDirectory=xpanel-api
+RuntimeDirectoryMode=0755
 Restart=always
 RestartSec=2
 UMask=0007
@@ -876,6 +880,10 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   echo ""
   echo "--- Jailed Shell Wrapper ($JAILSHELL_BIN -> $JAILSHELL_LINK) ---"
   echo "install -m 0755 root:root $JAILSHELL_BIN"
+  echo ""
+  echo "--- Command-line API (/usr/local/bin/xuapi and xwhmapi -> /opt/xpanel/bin) ---"
+  echo "install -m 0755 root:root /opt/xpanel/bin/xuapi /opt/xpanel/bin/xwhmapi; sockets /run/xpanel-api/{xuapi,xwhmapi}.sock"
+  echo "build $PEER_IDENTITY_ADDON (SO_PEERCRED) with its .sha256"
   echo ""
   echo "--- Systemd cgroup v2 Slice Hierarchy ($SLICE_UNIT & xpanel-<uid>.slice) ---"
   render_xpanel_slice
@@ -1057,9 +1065,10 @@ if ! grep -qxF "$JAILSHELL_BIN" /etc/shells 2>/dev/null; then
   echo "$JAILSHELL_BIN" >> /etc/shells
 fi
 
-echo "[3b/6] Building the native account-file and terminal PTY helpers in /opt/xpanel/bin..."
+echo "[3b/6] Building the native account-file, terminal PTY and peer identity helpers in /opt/xpanel/bin..."
 install_native_helper account-files "$ACCOUNT_FILES_BIN"
 install_native_helper terminal-pty "$TERMINAL_PTY_BIN"
+install_native_helper peer-identity "$PEER_IDENTITY_ADDON"
 
 echo "[4/6] Applying kernel symlink & hardlink protection (${SYSCTL_CONF})..."
 write_config "$SYSCTL_CONF" render_sysctl_conf
@@ -1098,6 +1107,12 @@ if [[ ! -e /usr/local/bin/xpanel-ctl && ! -L /usr/local/bin/xpanel-ctl ]]; then
 else
   [[ -L /usr/local/bin/xpanel-ctl && "$(readlink /usr/local/bin/xpanel-ctl)" == /opt/xpanel/bin/xpanel-ctl ]] || die "Existing CLI entrypoint was preserved for review."
 fi
+# xuapi / xwhmapi resolve the current release themselves, like xpanel-ctl; the API service authorizes every call.
+assert_root_owned_path /usr/local/bin
+for cli in "${CLI_API_COMMANDS[@]}"; do
+  install -o root -g root -m 0755 "$INSTALL_SOURCE_ROOT/bin/$cli" "/opt/xpanel/bin/$cli"
+  ln -sfnT "/opt/xpanel/bin/$cli" "/usr/local/bin/$cli"
+done
 
 echo "[6/6] Reloading systemd daemon and enabling services..."
 if ((${#MANAGEMENT_TLS_ARGS[@]})); then

@@ -48,6 +48,9 @@ describe('S03 installer service boundary (rendering only, no host proof)', () =>
     expect(agent).toContain('RuntimeDirectoryPreserve=no')
     expect(agent).not.toMatch(/^ExecStartPre=.*\bchown\b/m)
     expect(api).not.toContain('User=root')
+    // xuapi / xwhmapi sockets: any user may traverse; the kernel peer UID names the caller.
+    expect(api).toMatch(/^RuntimeDirectory=xpanel-api$/m)
+    expect(api).toMatch(/^RuntimeDirectoryMode=0755$/m)
   })
 
   it('uses the pinned Node runtime and entrypoints that are actually present', async () => {

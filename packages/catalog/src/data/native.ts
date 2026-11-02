@@ -578,6 +578,17 @@ const NATIVE: NativeTool[] = [
     ],
     acceptance: 'A readable audit log lists the stored rows, a filter keeps only the matching action, and the older-page link returns the next page of rows.',
   },
+  {
+    tool: panel('command-line-api', 'advanced', 'Command-line API', 'api-call',
+      'Run account API functions from the shell, cron or scripts with xuapi, as the account and with its permissions.'),
+    behaviors: [
+      'xuapi on the server calls the account API through a local socket; the kernel names the calling account',
+      'Each call goes through the same authorization as the panel: plan features, account status and ownership',
+      'Root may act as one account with --user; the audit log names both root and the account',
+      'Disabling this feature in the plan refuses every xuapi call for the account',
+    ],
+    acceptance: 'An account runs xuapi cron list and gets its own cron jobs; asking for another account with --user is refused 403, and with the feature disabled in its plan every call is refused 403.',
+  },
 ]
 
 export const nativeTools: ToolDefinition[] = NATIVE.map(n => ({ ...n.tool, status: 'researched' }))
