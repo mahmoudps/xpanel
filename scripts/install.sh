@@ -602,7 +602,10 @@ NODE
 }
 
 install_local_mail() {
-  install -d -o root -g root -m 0755 /etc/dovecot/conf.d /etc/dovecot/xpanel /etc/postfix/xpanel /var/spool/postfix/private
+  install -d -o root -g root -m 0755 /etc/dovecot/conf.d /etc/dovecot/xpanel /etc/postfix/xpanel
+  # Postfix's own layout (postfix-files): its daemons bind sockets here as the postfix user. Dovecot adds its
+  # auth and LMTP listeners, so on EL, where Postfix has not started yet, the directory is created here.
+  install -d -o postfix -g root -m 0700 /var/spool/postfix/private
   install -d -o root -g dovecot -m 0750 /etc/dovecot/xpanel/domains
   write_config /etc/dovecot/conf.d/10-auth.conf render_dovecot_auth 0644 root
   write_config /etc/dovecot/conf.d/11-xpanel-mailboxes.conf render_dovecot_mailboxes 0644 root

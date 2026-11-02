@@ -54,6 +54,15 @@ const cases = SUPPORTED_OS.flatMap(os => os.versions.flatMap(versionId => ['8.3'
   [false, true].map(withServices => ({ id: os.id, name: os.name, versionId, php, withServices })),
 )))
 
+describe('local mail directories of the installer', () => {
+  it('leaves the Postfix private directory in Postfix layout, so its daemons can bind there', () => {
+    const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
+    const body = source.slice(source.indexOf('install_local_mail() {'), source.indexOf('\n}\n', source.indexOf('install_local_mail() {')))
+    const lines = body.split('\n').filter(line => line.includes('/var/spool/postfix/private') && line.trim().startsWith('install '))
+    expect(lines.map(line => line.trim())).toEqual(['install -d -o postfix -g root -m 0700 /var/spool/postfix/private'])
+  })
+})
+
 describe('SELinux settings of the EL installer', () => {
   it('labels the management ports even when the base policy already names one, and types the OpenDKIM socket directory', () => {
     const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
