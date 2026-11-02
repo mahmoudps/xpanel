@@ -75,6 +75,15 @@ export const enableExistingUserQuota = async (run: QuotaCommandRunner, filesyste
   return after
 }
 
+/** User quota applies to a whole mount: the one holding account homes, which is `/` when /home is not its own filesystem. */
+export const resolveHomeQuotaFilesystem = async (run: QuotaCommandRunner, homeBase = '/home'): Promise<string> => {
+  const mount = await run(['/usr/bin/findmnt', '--noheadings', '--raw', '--output', 'TARGET', '--target', validateQuotaFilesystem(homeBase)])
+  if (!mount.ok || !mount.stdout.trim() || /[\r\n]/.test(mount.stdout.trim())) {
+    return fail('PRECONDITION_FAILED', 'the filesystem holding account homes could not be observed', { stateChanged: false })
+  }
+  return validateQuotaFilesystem(mount.stdout.trim())
+}
+
 export const QUOTA_FSTAB_PATH = '/etc/fstab'
 /** ext4 journaled user quota: accounting stays consistent after a crash without a new quotacheck. */
 const JOURNALED_USER_QUOTA = ['usrjquota=aquota.user', 'jqfmt=vfsv1']
@@ -117,11 +126,7 @@ export interface UserQuotaInitialization extends UserQuotaObservation {
  */
 export const initializeUserQuota = async (ports: QuotaInitializationPorts, path: string, stamp: string): Promise<UserQuotaInitialization> => {
   if (!/^[0-9]{8}T[0-9]{6}Z$/.test(stamp)) fail('VALIDATION', 'quota setup backup stamp must be YYYYMMDDTHHMMSSZ')
-  const mount = await ports.run(['/usr/bin/findmnt', '--noheadings', '--raw', '--output', 'TARGET', '--target', validateQuotaFilesystem(path)])
-  if (!mount.ok || !mount.stdout.trim() || /[\r\n]/.test(mount.stdout.trim())) {
-    return fail('PRECONDITION_FAILED', 'the filesystem holding account homes could not be observed', { stateChanged: false })
-  }
-  const mountpoint = validateQuotaFilesystem(mount.stdout.trim())
+  const mountpoint = await resolveHomeQuotaFilesystem(ports.run, path)
   const before = await observeUserQuota(ports.run, mountpoint)
   if (before.status === 'enabled') return { ...before, changed: false, fstabBackup: null }
   if (before.filesystemType !== 'ext4') {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyObservedUserQuota, enableExistingUserQuota, fstabWithUserQuota, initializeUserQuota, observeUserQuota, parseUserQuotaState, validateQuotaFilesystem } from './quota.ts'
+import { applyObservedUserQuota, enableExistingUserQuota, fstabWithUserQuota, initializeUserQuota, observeUserQuota, parseUserQuotaState, resolveHomeQuotaFilesystem, validateQuotaFilesystem } from './quota.ts'
 import type { QuotaCommandRunner } from './quota.ts'
 
 const ok = (stdout = '') => ({ ok: true, code: 0, stdout, stderr: '' })
@@ -112,6 +112,11 @@ describe('user quota setup', () => {
       writeFile: async (file: { path: string; content: string }) => { files.set(file.path, file.content) } }
     return { ports, commands, files }
   }
+
+  it('sets quota on the mount that holds /home, which is / when /home is not its own filesystem', async () => {
+    expect(await resolveHomeQuotaFilesystem(host().ports.run)).toBe('/')
+    await expect(resolveHomeQuotaFilesystem(async () => ({ ok: false, code: 1, stdout: '', stderr: '' }))).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+  })
 
   it('adds journaled user quota to the one matching fstab entry and keeps the rest of the table', () => {
     expect(fstabWithUserQuota(FSTAB, '/')).toBe(FSTAB.replace('/ ext4 defaults 0 1', '/ ext4 defaults,usrjquota=aquota.user,jqfmt=vfsv1 0 1'))

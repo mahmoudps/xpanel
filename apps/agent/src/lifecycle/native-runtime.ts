@@ -11,6 +11,7 @@ import { detectOs, parseOsRelease } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from '../executor.ts'
 import type { AgentExecutor } from '../executor.ts'
+import { resolveHomeQuotaFilesystem } from '../services/quota.ts'
 import { observeHostLimits } from '../limit-gaps.ts'
 import { HostReconciler } from '../reconciler.ts'
 import { loadNativePeerIdentityAddon } from '../peer-identity.ts'
@@ -149,9 +150,12 @@ const composition = async (db: ReturnType<typeof createDb>['db'], actor: Princip
   const os = detectOs(path => readFileSync(path, 'utf8'))
   const store = new StateStore(STATE)
   await store.getAuthorityMetadata()
-  const executor = guardedExecutor(new LinuxHostExecutor({ trustedHostTargetMatcher: createProductionHostTargetMatcher(), trustedHostTargets: [{ path: BACKUPS, operations: ['ensure-directory'] }] }))
+  const native = new LinuxHostExecutor({ trustedHostTargetMatcher: createProductionHostTargetMatcher(), trustedHostTargets: [{ path: BACKUPS, operations: ['ensure-directory'] }] })
+  const executor = guardedExecutor(native)
   const resolvedOs = await os
-  const reconciler = new HostReconciler({ store, db, executor, os: resolvedOs, quotaFilesystem: '/home', healthProbe: async unit => { const result = await executor.runCommand(['/usr/bin/systemctl', 'is-active', '--quiet', unit]); return { ok: result.code === 0, ...(result.code !== 0 ? { error: 'Native service was not active' } : {}) } } })
+  // A read-only mount observation, outside lifecycle effects.
+  const quotaFilesystem = await resolveHomeQuotaFilesystem(argv => native.runCommand(argv)).catch(() => '/home')
+  const reconciler = new HostReconciler({ store, db, executor, os: resolvedOs, quotaFilesystem, healthProbe: async unit => { const result = await executor.runCommand(['/usr/bin/systemctl', 'is-active', '--quiet', unit]); return { ok: result.code === 0, ...(result.code !== 0 ? { error: 'Native service was not active' } : {}) } } })
   const canaries = createNativeLifecycleCanary({ db, store, executor, reconciler, os: resolvedOs, addon: await loadNativePeerIdentityAddon() })
   const host: HostPort = { async apply(action: HostAction) {
     const kind = action.kind === 'systemd' && action.verb === 'stop' ? 'service.stop' : action.kind === 'systemd' ? 'service.start' : 'filesystem.write'
