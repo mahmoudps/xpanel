@@ -1580,6 +1580,12 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     fetch: request => deps.agentApp!.fetch(request), token: deps.agentToken,
   }) : undefined
   const readAccountTemplates = () => new ExtendedFeaturesStore(deps.store.rootDir).readOrDefault<unknown>('accounts/templates.json', null)
+  // One account provisioning at a time: another creation writes state, which changes the revision an in-flight
+  // provisioning is bound to and aborts its host step. shortcut: in-process only; one API process provisions accounts.
+  let provisioningQueue: Promise<unknown> = Promise.resolve()
+  const serialProvisioning = <T>(task: () => Promise<T>): Promise<T> => {
+    const run = provisioningQueue.then(task, task); provisioningQueue = run.catch(() => undefined); return run
+  }
   const createAccountAs = async (caller: AuthenticatedCaller, body: CreateAccountBody, authority: {
     reference: ProvisioningAuthorizationReference; reauthenticate: () => Promise<AuthenticatedCaller>; idempotencyKey?: unknown
   }) => {
@@ -1654,7 +1660,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           whmcs: async () => readSavedWhmcs(await new ExtendedFeaturesStore(deps.store.rootDir).readOrDefault<unknown>('integrations/whmcs.json', null)) },
       }),
     })
-    const result = await lifecycle.provisionPreparedAccount({ actor: caller.principal, idempotencyKey, preparationReference: prepared.preparationReference }).catch(error => {
+    const result = await serialProvisioning(() => lifecycle.provisionPreparedAccount({ actor: caller.principal, idempotencyKey, preparationReference: prepared.preparationReference })).catch(error => {
       // Agent diagnostics and internal operation IDs are not a public failure contract. A lost
       // acknowledgment never becomes a rollback claim or permission to repeat privileged work.
       return fail(isXpanelError(error) ? error.code : 'SERVICE_UNAVAILABLE', 'account provisioning did not acknowledge a verified outcome', {

@@ -424,6 +424,20 @@ describe('account mutation outcomes and race boundaries', () => {
     expect(audit.filter(entry => entry.action === 'account.provisioned')).toHaveLength(1)
   })
 
+  it('starts a second account creation only after the in-flight provisioning finishes', async () => {
+    const held = f.holdNextApply(), first = f.perform('create')
+    await held.entered
+    const second = f.request('POST', '/api/accounts', { ...f.accountInput, username: 'newowner8', primaryDomain: 'newowner8.example.test', ownerId: null })
+    await new Promise(resolve => setTimeout(resolve, 300))
+    // The waiting creation has written no state that would change the revision the first one is bound to.
+    expect(await f.state.store.getAccountByUsername('newowner8')).toBeNull()
+    expect(f.hostPaths).toEqual(['/host/account-provisioning'])
+    held.release()
+    expect((await first).status).toBe(201)
+    expect((await second).status).toBe(201)
+    expect(f.hostPaths).toEqual(['/host/account-provisioning', '/host/account-provisioning'])
+  })
+
   it('replays the saved completed operation without a new host effect, credential, principal or false fresh observation', async () => {
     const first = await f.perform('create')
     expect(first.status).toBe(201)
