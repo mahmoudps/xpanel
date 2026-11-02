@@ -918,20 +918,22 @@ export class HostReconciler {
     }
   }
 
-  private async verifyUnitHealth(unit: string, generationId: number): Promise<{ ok: boolean; error?: string }> {
+  private async verifyUnitHealth(rawUnit: string, generationId: number): Promise<{ ok: boolean; error?: string }> {
     if (this.deps.healthProbe) {
-      return this.deps.healthProbe(unit, generationId)
+      return this.deps.healthProbe(rawUnit, generationId)
     }
     const fakeUnits = (this.deps.executor as unknown as {
       units?: Map<string, { enabled: boolean; active: boolean; properties: Record<string, string> }>
     }).units
     if (fakeUnits instanceof Map) {
-      const state = fakeUnits.get(unit)
+      const state = fakeUnits.get(rawUnit)
       if (state && !state.active) {
-        return { ok: false, error: `service unit ${unit} is not active after reload` }
+        return { ok: false, error: `service unit ${rawUnit} is not active after reload` }
       }
       return { ok: true }
     }
+    // systemd resolves a bare name (os.services.postfix = 'postfix') to its .service unit.
+    const unit = /^[A-Za-z0-9][A-Za-z0-9_:@-]*$/.test(rawUnit) ? `${rawUnit}.service` : rawUnit
     if (!/^[A-Za-z0-9](?:[A-Za-z0-9_.:@-]|\\x[0-9a-fA-F]{2})*\.service$/.test(unit) || unit.length > 200) {
       return { ok: false, error: `service unit ${unit} cannot be probed` }
     }
@@ -1078,6 +1080,7 @@ export class HostReconciler {
   }> {
     const restoredFiles: string[] = []
     const reloadedUnits: string[] = []
+    const stoppedNewUnits: string[] = []
     const previousFiles: RenderedFile[] = journalRecord.previousFilesBackup
       .filter((backup): backup is PreviousFileBackup & { content: string } => backup.existed && backup.content !== null)
       .map(({ path, content, mode, owner, group }) => ({ path, content, mode, owner, group }))
@@ -1109,14 +1112,25 @@ export class HostReconciler {
         reloadedUnits.push(unit)
       }
 
+      // Unit files the failed generation created have no restored definition to restart from.
+      const introducedUnits = new Set(journalRecord.previousFilesBackup
+        .filter(backup => !backup.existed && /\/systemd\/system\/[^/]+\.service$/.test(backup.path))
+        .map(backup => backup.path.slice(backup.path.lastIndexOf('/') + 1)))
       const unitsToReload =
         journalRecord.reloadedUnits.length > 0
           ? [...journalRecord.reloadedUnits].reverse()
           : [...new Set(journalRecord.previousManifest?.files.flatMap((f) => f.dependentUnits) ?? [])].reverse()
       if (dnsWasTouched && !unitsToReload.includes('pdns.service')) unitsToReload.push('pdns.service')
+      // Restored or removed unit files change systemd's view before any unit is touched.
+      await this.deps.executor.runAction({ kind: 'systemd-daemon-reload' })
 
       for (const unit of unitsToReload) {
-        if (reloadedUnits.includes(unit)) continue
+        if (reloadedUnits.includes(unit) || stoppedNewUnits.includes(unit)) continue
+        if (introducedUnits.has(unit)) {
+          await this.deps.executor.runAction({ kind: 'systemd', verb: 'stop', unit })
+          stoppedNewUnits.push(unit)
+          continue
+        }
         if (unit === 'pdns.service' && dnsWasTouched) {
           await this.deps.executor.runAction({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] })
           await this.deps.executor.runAction({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] })
