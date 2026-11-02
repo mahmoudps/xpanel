@@ -267,6 +267,14 @@ export const MOBILE_NAVIGATION_CLIENT_FUNCTIONS = /* js */ String.raw`
 
   function bindOverlayFocus() {
     syncResponsiveToolbar();
+    // overflow: hidden stops user scrolling, not scroll anchoring after a reflow or viewport resize
+    // (a late font, a resized window). The locked document stays where the overlay found it.
+    window.addEventListener('scroll', function () {
+      var overlay = activeOverlay;
+      if (overlay && (window.scrollX !== overlay.documentX || window.scrollY !== overlay.documentY)) {
+        window.scrollTo({ left: overlay.documentX, top: overlay.documentY, behavior: 'instant' });
+      }
+    });
     document.addEventListener('focusin', function (event) {
       lastFocusedElement = event.target;
       if (activeOverlay && !activeOverlay.element.contains(event.target)) focusOverlay(activeOverlay);
