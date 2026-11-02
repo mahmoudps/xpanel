@@ -22,6 +22,10 @@ export interface HeldNativeAccountHttpRequest extends HeldProvisioningHttpReques
   readonly mainPid: number
 }
 const refused: (reason: string) => never = reason => fail('PRECONDITION_FAILED', 'the held account HTTP request did not verify', { verificationRequired: true, reason })
+/** Code, message and reason identifier, or the first line of a system error; never request bytes. */
+const describeFailure = (error: unknown): string => isXpanelError(error)
+  ? `${error.code}: ${error.message}${typeof error.detail.reason === 'string' ? ` (${error.detail.reason})` : ''}`
+  : error instanceof Error ? error.message.split('\n')[0]!.slice(0, 200) : 'unexpected failure'
 const socketFd = (socket: Socket): number => {
   const handle: unknown = Reflect.get(socket, '_handle')
   if (handle === null || typeof handle !== 'object') return refused('held_socket_unavailable')
@@ -313,7 +317,10 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
             await source.assertIngressPeer(ingressPeer, heldHttpConnection())
             await assertUnixSocketPeerHeldByProcess(options.addon, socketFd(backend), backendPin, observed, nativeContext)
             await guard()
-          } catch { return refused('held_http_request_changed') }
+          } catch (error) {
+            console.error('xpanel-agent held account HTTP request changed:', describeFailure(error))
+            return refused('held_http_request_changed')
+          }
         }
         await assertCurrent()
         return {
@@ -339,10 +346,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
       } catch (error) {
         failOperation(error); quarantined.add(account.uid)
         // The refusal is generic; the operator needs the first failure to find the host prerequisite.
-        const first = failure
-        console.error('xpanel-agent account HTTP correlation failed:', isXpanelError(first)
-          ? `${first.code}: ${first.message}${typeof first.detail.reason === 'string' ? ` (${first.detail.reason})` : ''}`
-          : first instanceof Error ? first.message.split('\n')[0]!.slice(0, 200) : 'unexpected failure')
+        console.error('xpanel-agent account HTTP correlation failed:', describeFailure(failure))
         try { await cleanup() } catch { /* Preserve the primary failed observation; the UID remains quarantined. */ }
         return refused('held_http_correlation_not_verified')
       }
