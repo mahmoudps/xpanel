@@ -11,7 +11,7 @@ import { captureCanarySource, type HeldCanarySource, type HeldHttpConnection, ty
 import type { HostEffectAuthority } from './host-effect-authority.ts'
 import type { NativePeerIdentityAddon, KernelPeerCredentials } from './peer-identity.ts'
 import { assertUnixSocketPeerHeldByProcess, inspectHeldUnixSocketPeer, type UnixSocketPeerPin } from './unix-socket-peer.ts'
-import { FASTCGI, FastCgiDecoder, assertCanaryIngress, fastCgiCanaryRequest, fastCgiRecord, matchesCanaryAdmission, matchesCanaryCallback, parseFastCgiParams } from './provisioning-fastcgi.ts'
+import { FASTCGI, FastCgiDecoder, assertCanaryIngress, fastCgiCanaryRequest, fastCgiRecord, isCompletedFastCgiEnd, matchesCanaryAdmission, matchesCanaryCallback, parseFastCgiParams } from './provisioning-fastcgi.ts'
 
 type HttpInput = Parameters<NonNullable<ReadonlyAccountObservationOptions['openCorrelatedHttpRequest']>>[0]
 type NativeHttpPort = Required<Pick<ReadonlyAccountObservationOptions, 'assertHttpAvailable' | 'openCorrelatedHttpRequest'>>
@@ -248,7 +248,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
                 if (item.type === FASTCGI.stderr && item.content.length) refused('backend_canary_error')
                 if (item.type === FASTCGI.stdout) { if (stdoutClosed) refused('backend_stdout_reopened'); if (!item.content.length) stdoutClosed = true }
                 if (item.type === FASTCGI.end) {
-                  if (!releasing || !stdoutClosed || item.content.length !== 8 || item.content.readUInt32BE(0) !== 0 || item.content.subarray(4).some(byte => byte !== 0)) refused('backend_ended_before_proof')
+                  if (!releasing || !isCompletedFastCgiEnd(item)) refused('backend_ended_before_proof')
                   complete = true
                 }
                 await write(live, fastCgiRecord(item.type, targetId, item.content))

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FASTCGI, CANARY_PHP_ADMIN_VALUE, FastCgiDecoder, assertCanaryIngress, fastCgiCanaryRequest, fastCgiParams, fastCgiRecord, matchesCanaryAdmission, matchesCanaryCallback, parseFastCgiParams } from './provisioning-fastcgi.ts'
+import { FASTCGI, CANARY_PHP_ADMIN_VALUE, FastCgiDecoder, assertCanaryIngress, fastCgiCanaryRequest, fastCgiParams, fastCgiRecord, isCompletedFastCgiEnd, matchesCanaryAdmission, matchesCanaryCallback, parseFastCgiParams } from './provisioning-fastcgi.ts'
 import { canaryHttpPeerInode, type HeldHttpConnection } from './account-provisioning-http-source.ts'
 import { Socket } from 'node:net'
 import { waitForNativeSocketConnect } from './account-provisioning-http.ts'
@@ -8,6 +8,17 @@ const challenge = 'a'.repeat(64), binding = 'b'.repeat(64), admission = 'c'.repe
 const ingress = () => new Map(Object.entries({ REQUEST_METHOD: 'GET', SCRIPT_NAME: '/.well-known/xpanel-provisioning', REQUEST_URI: '/.well-known/xpanel-provisioning',
   SERVER_NAME: 'example.test', HTTP_HOST: 'example.test', CONTENT_LENGTH: '0', HTTP_X_XPANEL_PROBE_ADMISSION: admission }))
 describe('bounded private canary protocol', { tags: ['unit'] }, () => {
+  it('accepts the PHP-FPM end of request, which follows stdout data with no empty stdout record', () => {
+    const decoder = new FastCgiDecoder()
+    const records = decoder.push(Buffer.concat([fastCgiRecord(FASTCGI.stdout, 1, Buffer.from('done\n')), fastCgiRecord(FASTCGI.end, 1, Buffer.alloc(8))]))
+    expect(records.map(record => record.type)).toEqual([FASTCGI.stdout, FASTCGI.end])
+    expect(isCompletedFastCgiEnd(records[1]!)).toBe(true)
+    const status = (appStatus: number, protocolStatus: number) => { const body = Buffer.alloc(8); body.writeUInt32BE(appStatus, 0); body[4] = protocolStatus; return body }
+    expect(isCompletedFastCgiEnd({ type: FASTCGI.end, requestId: 1, content: status(255, 0) })).toBe(false)
+    expect(isCompletedFastCgiEnd({ type: FASTCGI.end, requestId: 1, content: status(0, 3) })).toBe(false)
+    expect(isCompletedFastCgiEnd({ type: FASTCGI.end, requestId: 1, content: Buffer.alloc(7) })).toBe(false)
+    expect(isCompletedFastCgiEnd({ type: FASTCGI.stdout, requestId: 1, content: Buffer.alloc(8) })).toBe(false)
+  })
   it('retains a fragmented binary frame until its complete record arrives', () => {
     const bytes = fastCgiRecord(FASTCGI.stdout, 7, Buffer.from('value')), decoder = new FastCgiDecoder()
     expect(decoder.push(bytes.subarray(0, 5))).toEqual([])
