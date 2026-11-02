@@ -82,7 +82,8 @@ export class AccountProvisioningPreparationReader {
     const verify = async (): Promise<void> => {
       for (const pin of pins) {
         const opened = await pin.handle.stat(), named = await lstat(pin.path)
-        const trustedStateRoot = pin.path === this.stateRoot && named.uid === this.owner.uid && named.gid === this.owner.gid && (named.mode & 0o7777) === 0o2770
+        // Only the installed data root (/var/lib/xpanel, setgid for the private service group) may be 02770.
+        const trustedStateRoot = pin.path === posix.dirname(this.stateRoot) && named.uid === this.owner.uid && named.gid === this.owner.gid && (named.mode & 0o7777) === 0o2770
         if (!opened.isDirectory() || !named.isDirectory() || named.isSymbolicLink()
           || opened.dev !== pin.dev || opened.ino !== pin.ino || named.dev !== pin.dev || named.ino !== pin.ino
           || (!trustedStateRoot && ((named.uid !== 0 && named.uid !== this.owner.uid) || (named.mode & 0o022)))) return refuse()

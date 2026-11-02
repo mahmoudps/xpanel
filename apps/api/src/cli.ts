@@ -84,7 +84,7 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
           'Commands:',
           '  status                               Show panel, server, and generation status',
           '  reconcile [--force]                  Compile desired state and reconcile host',
-          '  reconcile --resolve-failed <id>      Verify disk, clear a stuck failed generation, then reconcile',
+          '  reconcile --resolve-failed <id> [--attest-pre-actions]  Verify disk, clear a stuck failed generation, then reconcile',
           '  rollback <generation-id>             Restore and reconcile a previous generation',
           '  reindex                              Rebuild SQLite search/cache index from state',
           '  init-root --password-stdin           Provision root once from standard input; requires a password change',
@@ -123,15 +123,17 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
       case 'reconcile': {
         const resolveAt = rest.indexOf('--resolve-failed')
         if (resolveAt !== -1) {
-          if (rest.includes('--force') || rest.includes('-f') || rest.length !== 2) {
-            return fail('VALIDATION', 'usage: xpanel reconcile --resolve-failed <generation-id>')
+          const attest = rest.includes('--attest-pre-actions')
+          if (rest.includes('--force') || rest.includes('-f') || rest.length !== (attest ? 3 : 2) || rest[resolveAt + 1] === '--attest-pre-actions') {
+            return fail('VALIDATION', 'usage: xpanel reconcile --resolve-failed <generation-id> [--attest-pre-actions]')
           }
           const rawGen = rest[resolveAt + 1]
           if (!rawGen || !/^[1-9][0-9]*$/.test(rawGen)) {
             return fail('VALIDATION', 'resolve-failed requires a positive integer generation id')
           }
           const genId = Number(rawGen)
-          const res = await callAgent(`/generations/${genId}/resolve-failed`, {})
+          // Attestation is the operator's explicit, audited statement that host prerequisite effects were checked.
+          const res = await callAgent(`/generations/${genId}/resolve-failed`, attest ? { attestPreActions: true } : {})
           const body = (await res.json()) as Record<string, unknown>
           if (!res.ok) {
             writeErr(`Resolve failed generation ${genId} refused: ${JSON.stringify(body)}`)

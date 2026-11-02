@@ -57,7 +57,7 @@ describe('independent completed preparation inspection', () => {
 })
 
 // This is an owned temporary fixture only. It never opens or repairs canonical /var/lib/xpanel.
-it.skipIf(process.platform !== 'linux' || process.getuid?.() !== 0)('reads the installed layout, denies parent mode 2770, then accepts a fixture correction to 2750', async () => {
+it.skipIf(process.platform !== 'linux' || process.getuid?.() !== 0)('accepts the installed 2770 data root and refuses a group-writable state directory', async () => {
   if (process.env.XPANEL_TEST_DISPOSABLE_VM !== disposableVmAcknowledgement) {
     throw new Error('BLOCKED: explicit root disposable Linux VM acknowledgement required')
   }
@@ -92,13 +92,12 @@ it.skipIf(process.platform !== 'linux' || process.getuid?.() !== 0)('reads the i
     await writeOwned(join(directory, value.record.indexName), JSON.stringify(value.index))
     const read = () => new AccountProvisioningPreparationReader(stateRoot, owner).read(value.input)
     expect((await read()).metadata.operationKey).toBe(value.input.operationKey)
+    // The installer creates /var/lib/xpanel as setgid 02770 for its private service group.
     await chmod(parent, 0o2770)
-    const before = await lstat(parent)
+    expect((await read()).metadata.operationKey).toBe(value.input.operationKey)
+    await chmod(stateRoot, 0o2770)
     await expect(read()).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
-    // Only this private fixture is changed; relay's fixed-target normalizer is tested separately.
-    await chmod(parent, 0o2750)
-    const after = await lstat(parent)
-    expect([after.dev, after.ino]).toEqual([before.dev, before.ino])
+    await chmod(stateRoot, 0o2750)
     expect((await read()).metadata.operationKey).toBe(value.input.operationKey)
   } finally {
 

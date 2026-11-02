@@ -19,7 +19,7 @@ import { ensureInstalledMail } from './services/local-mail.ts'
 import { enableMailWebsocketProxy } from './services/mail-websocket.ts'
 import { readOpenDkimPublished, writeOpenDkimPublished } from './services/opendkim-live.ts'
 import { HostReconciler } from './reconciler.ts'
-import { loadNativePeerIdentityAddon, resolveProvisionedPeerUids } from './peer-identity.ts'
+import { loadNativePeerIdentityAddon, resolveProvisionedPeerUids, resolveServicePrimaryGid } from './peer-identity.ts'
 import { AccountProvisioningPreparationReader } from './account-provisioning-preparation.ts'
 import { provisioningAuthorizationPorts } from './account-provisioning-authorization.ts'
 import { createAccountProvisioningRuntime } from './account-provisioning-runtime.ts'
@@ -344,7 +344,8 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         if (provisioningPeerUids.size !== 1 || provisioningOwnerUid === undefined) {
           return fail('PRECONDITION_FAILED', 'account preparation requires the unique provisioned API service identity')
         }
-        const provisioningOwner = { uid: provisioningOwnerUid, gid: socketGid }
+        // Preparation files are API-owned: trust the API's own primary group, not the agent socket group.
+        const provisioningOwner = { uid: provisioningOwnerUid, gid: await resolveServicePrimaryGid(provisioningOwnerUid) }
         const nativeAccountHttp = createNativeAccountProvisioningHttp({ db: dbHandle.db, store, reconciler, executor, os,
           addon: await loadNativePeerIdentityAddon(),
         })

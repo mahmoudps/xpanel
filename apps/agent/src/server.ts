@@ -783,6 +783,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (!trustedPrincipalId || trustedPrincipalId !== caller.principalId) {
           return fail('UNAUTHENTICATED', 'an authenticated principal is required', { stateChanged: false })
         }
+        // The API keeps its public failure generic, so the refusal reason is recorded here for operators.
         return await handleAccountProvisioning({
           principalId: trustedPrincipalId,
           request: req,
@@ -797,6 +798,9 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             getPlan: id => deps.store.getPlan(id),
             getReseller: id => deps.store.getReseller(id),
           },
+        }).catch((error: unknown) => {
+          console.error('xpanel-agent account provisioning refused:', isXpanelError(error) ? `${error.code}: ${error.message}` : 'unexpected provisioning error')
+          throw error
         })
       }
 
@@ -1578,7 +1582,10 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (method === 'POST' && resolveFailedMatch) {
         await assertRootCaller(caller, `generation:${resolveFailedMatch[1]}:resolve-failed`)
         const genId = Number(resolveFailedMatch[1])
-        const result = await deps.reconciler.resolveFailedGeneration(genId, caller.actor)
+        const body: unknown = await req.json().catch(() => ({}))
+        const attest = body && typeof body === 'object' && !Array.isArray(body) ? (body as { attestPreActions?: unknown }).attestPreActions : undefined
+        if (attest !== undefined && typeof attest !== 'boolean') return fail('VALIDATION', 'attestPreActions must be a boolean', { stateChanged: false })
+        const result = await deps.reconciler.resolveFailedGeneration(genId, caller.actor, { attestPreActions: attest === true })
         return jsonResponse(result)
       }
 
