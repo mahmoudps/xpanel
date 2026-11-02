@@ -81,6 +81,8 @@ describe('SELinux settings of the EL installer', () => {
     expect(calls).toContain('semanage port -m -t http_port_t -p tcp 2083')
     for (const port of ['2087', '2096']) expect(calls).toContain(`semanage port -a -t http_port_t -p tcp ${port}`)
     expect(calls).toContain('setsebool -P httpd_can_network_connect 1')
+    expect(calls).toContain("semanage fcontext -m -t httpd_log_t /var/log/xpanel(/.*)?")
+    expect(calls).toContain('restorecon -R /var/log/xpanel')
     expect(calls).toContain("semanage fcontext -m -t dkim_milter_data_t /var/spool/postfix/opendkim(/.*)?")
     expect(calls.indexOf('install -d -o opendkim -g postfix -m 0750 /var/spool/postfix/opendkim')).toBeLessThan(calls.indexOf('restorecon -R /var/spool/postfix/opendkim'))
     expect(calls).toContain('  (allow dkim_milter_t postfix_spool_t (dir (search getattr)))')

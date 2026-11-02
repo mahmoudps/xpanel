@@ -733,6 +733,11 @@ configure_selinux() {
   local port
   for port in 2083 2087 2096; do selinux_http_port "$port"; done
   setsebool -P httpd_can_network_connect 1 || die "SELinux refused httpd_can_network_connect."
+  # Apache, nginx and PHP-FPM write the per-domain logs under /var/log/xpanel; directories created there later
+  # inherit the type, so the tree is typed once here.
+  semanage fcontext -a -t httpd_log_t '/var/log/xpanel(/.*)?' 2> /dev/null \
+    || semanage fcontext -m -t httpd_log_t '/var/log/xpanel(/.*)?' || die "SELinux refused the xPanel log context."
+  restorecon -R /var/log/xpanel
   if [[ "$WITH_MAIL" -eq 1 ]]; then
     semanage fcontext -a -t dkim_milter_data_t '/var/spool/postfix/opendkim(/.*)?' 2> /dev/null \
       || semanage fcontext -m -t dkim_milter_data_t '/var/spool/postfix/opendkim(/.*)?' || die "SELinux refused the OpenDKIM socket context."
