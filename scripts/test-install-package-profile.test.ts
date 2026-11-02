@@ -55,6 +55,14 @@ const cases = SUPPORTED_OS.flatMap(os => os.versions.flatMap(versionId => ['8.3'
   [false, true].map(withServices => ({ id: os.id, name: os.name, versionId, php, withServices })),
 )))
 
+describe('log directory of the installer', () => {
+  it('lets each account traverse /var/log/xpanel to its own PHP-FPM log directory without listing it', () => {
+    const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
+    const lines = source.split('\n').filter(line => /^install -d .*\/var\/log\/xpanel(\s|$)/.test(line))
+    expect(lines).toEqual(['install -d -o xpanel -g xpanel -m 2751 /var/log/xpanel'])
+  })
+})
+
 describe('empty DNS catalog of the installer', () => {
   it('writes the exact empty catalog the agent accepts as its reviewed bootstrap', () => {
     const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')

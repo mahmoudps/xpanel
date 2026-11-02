@@ -1143,7 +1143,9 @@ chown root:root /home
 chmod 0711 /home
 
 install -d -o xpanel -g xpanel -m 2770 /var/lib/xpanel
-install -d -o xpanel -g xpanel -m 2750 /var/lib/xpanel/state /var/lib/xpanel/generations /var/log/xpanel
+install -d -o xpanel -g xpanel -m 2750 /var/lib/xpanel/state /var/lib/xpanel/generations
+# Traverse-only for others: each account's PHP-FPM master opens its own log under php-fpm/<user>.
+install -d -o xpanel -g xpanel -m 2751 /var/log/xpanel
 install -d -o root -g xpanel -m 0750 /etc/xpanel
 install -d -o root -g root -m 0750 /etc/xpanel/userdata
 install -d -o root -g xpanel-agent -m 0750 /run/xpanel
