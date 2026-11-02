@@ -9,7 +9,7 @@ import type { Server } from 'node:http'
 import { Socket } from 'node:net'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { fail, isUuid, isXpanelError, validateDomainName } from '@xpanel/core'
-import { assertSafeArgv, profileFor } from '@xpanel/os'
+import { profileFor } from '@xpanel/os'
 import { edge } from '@xpanel/render'
 import type { Account, ErrorCode, Id, LiveEvent, Principal } from '@xpanel/core'
 import { appendAudit, getDurableJob, getPrincipal, latestActive } from '@xpanel/db'
@@ -57,7 +57,7 @@ import { handleRepairCenterRoute } from './repair-center-routes.ts'
 import type { RhelCacheRecovery } from './repair-center.ts'
 import { handleConfigurationHealthRoute } from './configuration-health.ts'
 import { handleAccountHealthRoute, nativeAccountHealthHost } from './account-health.ts'
-import { createHostJobRun } from './host-job-exec.ts'
+import { nativeQuotaSetupPorts, quotaSetupStamp } from './quota-setup.ts'
 import { handleHostJobsRoute } from './host-jobs-routes.ts'
 import { initializeUserQuota, validateQuotaFilesystem } from './services/quota.ts'
 import { handleAccountProvisioning, type AgentAccountProvisioningRuntime } from './account-provisioning-handler.ts'
@@ -949,18 +949,8 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'path')) {
           return fail('VALIDATION', 'quota setup accepts only a path', { stateChanged: false })
         }
-        const executor = deps.executor, scanRun = createHostJobRun()
-        const result = await initializeUserQuota({
-          run: argv => executor.runCommand(argv),
-          // shortcut: a filesystem whose scan exceeds 4 minutes fails here as unverified; move the scan to a host job when such hosts appear.
-          scan: async argv => {
-            assertSafeArgv(argv)
-            const scanned = await scanRun(argv, { timeoutMs: 240_000, env: { LC_ALL: 'C' } })
-            return { ok: scanned.ok, code: scanned.code ?? 1, stdout: scanned.stdout, stderr: scanned.stderr }
-          },
-          readFile: path => executor.readFile(path),
-          writeFile: file => executor.writeFile(file),
-        }, validateQuotaFilesystem((body as { path?: unknown }).path ?? '/home'), new Date().toISOString().replace(/[-:]|\.\d{3}/g, ''))
+        const result = await initializeUserQuota(nativeQuotaSetupPorts(deps.executor),
+          validateQuotaFilesystem((body as { path?: unknown }).path ?? '/home'), quotaSetupStamp(new Date()))
         return jsonResponse(result)
       }
 

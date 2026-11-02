@@ -74,11 +74,12 @@ const gitIdentity = root => {
   return { commit, tree, dirty: changes.length > 0 }
 }
 
-const sourceBytes = (root, path) => {
+/** `rootReal` is the root's native realpath, resolved once per capture pass; one OS call per file, not one lstat per path component. */
+const sourceBytes = (root, rootReal, path) => {
   releaseInputFingerprint([{ path, sha256: '0'.repeat(64), bytes: 0 }])
-  const file = resolve(root, path), inside = relative(realpathSync(root), realpathSync(file))
+  const file = resolve(root, path), inside = relative(rootReal, realpathSync.native(file)), info = lstatSync(file)
   if (isAbsolute(inside) || inside === '..' || inside.startsWith('../') || inside.startsWith('..\\')
-    || !lstatSync(file).isFile() || lstatSync(file).isSymbolicLink()) refuse('SOURCE_INPUTS_INVALID')
+    || !info.isFile() || info.isSymbolicLink()) refuse('SOURCE_INPUTS_INVALID')
   return readFileSync(file)
 }
 
@@ -86,9 +87,9 @@ const sourceBytes = (root, path) => {
 export function captureReleaseSource(root, paths, { requireClean = false } = {}) {
   const identity = gitIdentity(root)
   if (requireClean && (identity.commit === null || identity.dirty !== false)) refuse('PUBLISHER_CLEAN_SOURCE_REQUIRED')
-  const inputs = new Map()
+  const inputs = new Map(), rootReal = realpathSync.native(root)
   const entries = paths.map(path => {
-    const bytes = sourceBytes(root, path)
+    const bytes = sourceBytes(root, rootReal, path)
     inputs.set(path, bytes)
     return { path, sha256: hash(bytes), bytes: bytes.length }
   })
@@ -105,7 +106,8 @@ export function captureReleaseSource(root, paths, { requireClean = false } = {})
   }, assertUnchanged() {
     const after = gitIdentity(root)
     if (JSON.stringify(after) !== JSON.stringify(identity)) refuse('SOURCE_CHANGED_DURING_BUILD')
-    const current = paths.map(path => { const bytes = sourceBytes(root, path); return { path, sha256: hash(bytes), bytes: bytes.length } })
+    const currentRoot = realpathSync.native(root)
+    const current = paths.map(path => { const bytes = sourceBytes(root, currentRoot, path); return { path, sha256: hash(bytes), bytes: bytes.length } })
     if (releaseInputFingerprint(current) !== source.inputFingerprint) refuse('SOURCE_CHANGED_DURING_BUILD')
   } }
 }
