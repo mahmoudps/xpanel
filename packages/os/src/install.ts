@@ -324,26 +324,29 @@ const debianPlan = (p: XpanelOsProfile, o: ExtendedResolvedInstallOptions): Inst
     systemd('stop', p.services.apache),
     ...apt.install(rest),
     ...optionalRoles(o).map(r => systemd('stop', p.services[r])),
-    ...apacheMpmActions(p, o.apacheMpm),
-    ...apacheModuleActions(p),
-    ...distroFpmOff(p, o.phpVersions),
-    ...serviceActions(p, o),
+    ...configurationActions(p, o),
   ]
 }
+
+/** Everything after the packages are on the host: web server modules, distro FPM off, service enablement. */
+const configurationActions = (p: XpanelOsProfile, o: ExtendedResolvedInstallOptions): InstallAction[] => p.family === 'debian'
+  ? [...apacheMpmActions(p, o.apacheMpm), ...apacheModuleActions(p), ...distroFpmOff(p, o.phpVersions), ...serviceActions(p, o)]
+  : [
+      exec([requireBin(p.bin.postgresqlSetup, 'postgresql-setup'), '--initdb'], `${p.paths.postgresqlDataDir}/PG_VERSION`),
+      ...distroFpmOff(p, o.phpVersions),
+      ...serviceActions(p, o),
+    ]
 
 const rhelPlan = (p: XpanelOsProfile, o: ExtendedResolvedInstallOptions): InstallAction[] => {
   const all = unique([
     ...rolePackages(p, ['nginx', ...engineRoles(o), ...baseRoles(o), ...optionalRoles(o)]),
     ...phpPackages(p, o.phpVersions),
   ])
-  const initdb = exec([requireBin(p.bin.postgresqlSetup, 'postgresql-setup'), '--initdb'], `${p.paths.postgresqlDataDir}/PG_VERSION`)
   return [
     ...rhelRepos(p, o.phpVersions.length > 0),
     ...systemUserActions(p),
     ...dnf(p).install(all),
-    initdb,
-    ...distroFpmOff(p, o.phpVersions),
-    ...serviceActions(p, o),
+    ...configurationActions(p, o),
   ]
 }
 
@@ -494,6 +497,15 @@ export const installWarnings = (profile: XpanelOsProfile, options: ExtendedInsta
   }
   return w
 }
+
+/**
+ * The part of the install bundle that follows package installation, in plan order: what install.sh applies
+ * once its own package step is done (scripts/install-os-configuration.mjs hands it over).
+ */
+export const installConfiguration = (profile: XpanelOsProfile, options: ExtendedInstallOptions): { actions: InstallAction[]; files: RenderedFile[] } => ({
+  actions: configurationActions(profile, prepare(profile, options)),
+  files: installFiles(profile, options),
+})
 
 export const installBundle = (profile: XpanelOsProfile, options: ExtendedInstallOptions): InstallBundle => ({
   actions: installPlan(profile, options),

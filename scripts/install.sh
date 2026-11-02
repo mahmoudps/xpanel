@@ -703,14 +703,7 @@ EL_MPM_ITK_URL="https://deb.debian.org/debian/pool/main/m/mpm-itk/mpm-itk_2.4.7-
 EL_MPM_ITK_SHA256="609f83e8995416c5491348e07139f26046a579db20cf8488ebf75d314668efcf"
 EL_MPM_ITK_MODULE="/usr/lib64/httpd/modules/mpm_itk.so"
 
-render_el_mpm_conf() {
-  cat <<'EOF'
-# Managed by xPanel: Apache prefork with mpm-itk for per-account process identity.
-LoadModule mpm_prefork_module modules/mod_mpm_prefork.so
-LoadModule mpm_itk_module modules/mpm_itk.so
-EOF
-}
-
+# 00-mpm.conf, which loads the module on prefork, comes from the OS profile configuration (apply_os_configuration).
 install_el_mpm_itk() {
   local build
   build="$(mktemp -d)"
@@ -723,9 +716,47 @@ install_el_mpm_itk() {
   fi
   install -o root -g root -m 0755 -- "$build"/mpm-itk-2.4.7-04/.libs/mpm_itk.so "$EL_MPM_ITK_MODULE"
   rm -rf -- "$build"
-  write_config /etc/httpd/conf.modules.d/00-mpm.conf render_el_mpm_conf 0644
-  httpd -t > /dev/null 2>&1 || die "Apache rejected the prefork and mpm-itk configuration."
-  httpd -M 2>/dev/null | grep -q ' mpm_itk_module ' || die "Apache did not load mpm-itk."
+}
+
+OS_FILE_SOURCE=""
+render_os_file() { cat -- "$OS_FILE_SOURCE"; }
+
+# The post-package part of the packages/os install bundle, in plan order: web server base files without the
+# distribution's Listen 80/443, Apache MPM and modules, the distribution FPM master off, service enablement,
+# and PostgreSQL initdb on EL.
+apply_os_configuration() {
+  local handover kind first second third fourth
+  local -a argv
+  handover="$(mktemp -d)"
+  mkdir -- "$handover/files"
+  if ! "$NODE_BIN" "$INSTALL_SOURCE_ROOT/scripts/install-os-configuration.mjs" "$handover/files" /etc/os-release "$APACHE_MPM" "$PHP_VERSION" \
+      "$WITH_MAIL" "$WITH_DNS" "$WITH_FTP" "$WITH_MARIADB" "$WITH_MODSECURITY" > "$handover/steps"; then
+    rm -rf -- "$handover"
+    die "The OS profile configuration could not be rendered."
+  fi
+  while IFS=$'\t' read -r kind first second third fourth; do
+    case "$kind" in
+      file)
+        OS_FILE_SOURCE="$handover/files/file-$first"
+        write_config "$second" render_os_file "$third" "$fourth"
+        ;;
+      exec)
+        if [[ "$second" != "-" && -e "$second" ]]; then continue; fi
+        mapfile -d '' -t argv < "$handover/files/exec-$first"
+        "${argv[@]}" || die "OS profile step failed: ${argv[*]}"
+        ;;
+      systemd) systemctl "$first" "$second" ;;
+      *) die "Unknown OS profile step: $kind" ;;
+    esac
+  done < "$handover/steps"
+  rm -rf -- "$handover"
+  if [[ "$OS_FAMILY" == "rhel" ]]; then
+    httpd -t > /dev/null 2>&1 || die "Apache rejected its managed base configuration."
+    if [[ "$APACHE_MPM" == "itk" ]]; then httpd -M 2>/dev/null | grep -q ' mpm_itk_module ' || die "Apache did not load mpm-itk."; fi
+  else
+    apache2ctl -t > /dev/null 2>&1 || die "Apache rejected its managed base configuration."
+    if [[ "$APACHE_MPM" == "itk" ]]; then apache2ctl -M 2>/dev/null | grep -q ' mpm_itk_module ' || die "Apache did not load mpm-itk."; fi
+  fi
 }
 
 # Journaled user quota (vfsv1) needs quota_v2 and quota_tree when /home is mounted. Ubuntu's virtual kernel
@@ -1100,6 +1131,8 @@ if [[ "$OS_FAMILY" == "rhel" && "$APACHE_MPM" == "itk" ]]; then
 fi
 echo "[2/6] Ensuring every bootable kernel carries the quota format modules..."
 ensure_kernel_quota_format
+echo "[2/6] Applying the web server and service configuration of the OS profile..."
+apply_os_configuration
 
 echo "[2b/6] Opening /var/lib/xpanel so nginx can serve ACME HTTP-01 challenges..."
 if ! id nginx >/dev/null 2>&1; then

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { installPlan, profileFor, SUPPORTED_OS } from '../packages/os/src/index.ts'
+import { installConfiguration, installPlan, profileFor, SUPPORTED_OS } from '../packages/os/src/index.ts'
 import type { InstallAction } from '../packages/os/src/index.ts'
 
 const rootDir = resolve(import.meta.dirname, '..')
@@ -53,6 +53,32 @@ const bootstrapExtras = (family: 'debian' | 'rhel', php: string): string[] => fa
 const cases = SUPPORTED_OS.flatMap(os => os.versions.flatMap(versionId => ['8.3', '7.4'].flatMap(php =>
   [false, true].map(withServices => ({ id: os.id, name: os.name, versionId, php, withServices })),
 )))
+
+describe('OS profile configuration hand-over to the installer', () => {
+  it.each(['ubuntu 22.04', 'almalinux 9.6'])('%s: lists files, exec argv and systemd steps of installConfiguration in plan order', release => {
+    const [id, versionId] = release.split(' ')
+    const root = mkdtempSync(join(tempParent, tempPrefix))
+    tempRoots.push(root)
+    const osRelease = `ID=${id}\nVERSION_ID="${versionId}"\nNAME="${id}"\n`
+    writeFileSync(join(root, 'os-release'), osRelease)
+    mkdirSync(join(root, 'out'))
+    const run = spawnSync(process.execPath, [join(rootDir, 'scripts/install-os-configuration.mjs'), join(root, 'out'), join(root, 'os-release'), 'itk', '8.3', '1', '1', '1', '1', '0'], { encoding: 'utf8', timeout: 20_000 })
+    expect(run.status, run.stderr).toBe(0)
+    const options = { engine: 'apache' as const, apacheMpm: 'itk' as const, phpVersions: ['8.3'], withMail: true, withDns: true, withFtp: true, withMariaDb: true, withModSecurity: false }
+    const profile = profileFor(osRelease)
+    const { actions, files } = installConfiguration(profile, options)
+    expect(installPlan(profile, options).slice(-actions.length)).toEqual(actions)
+    const steps = run.stdout.trimEnd().split('\n').map(line => line.split('\t'))
+    expect(steps).toEqual([
+      ...files.map((file, n) => ['file', String(n), file.path, file.mode.toString(8).padStart(4, '0'), file.group]),
+      ...actions.map((action, n) => action.kind === 'exec' ? ['exec', String(n), action.creates ?? '-'] : ['systemd', action.verb, action.unit]),
+    ])
+    files.forEach((file, n) => expect(readFileSync(join(root, 'out', `file-${n}`), 'utf8')).toBe(file.content))
+    actions.forEach((action, n) => {
+      if (action.kind === 'exec') expect(readFileSync(join(root, 'out', `exec-${n}`), 'utf8')).toBe(action.argv.map(arg => `${arg}\0`).join(''))
+    })
+  })
+})
 
 describe('kernel quota format detection in the installer', () => {
   it('lists bootable kernels with a module tree and finds quota_v2/quota_tree built in or as modules', () => {
