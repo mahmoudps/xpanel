@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { constants } from 'node:fs'
-import { open, lstat, stat, statfs, mkdir, opendir, readlink } from 'node:fs/promises'
+import { chmod, open, lstat, stat, statfs, mkdir, opendir, readdir, readlink } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Readable, Transform } from 'node:stream'
@@ -35,6 +35,28 @@ export const DESIGN_REFERENCE_INPUTS = Object.freeze({ directories: Object.freez
  * Node, so pnpm is told the release's pinned runtime to check package engines against.
  */
 export const offlineDependencyInstallArguments = manifest => ['install', '--offline', '--frozen-lockfile', '--prod', '--ignore-scripts', '--verify-store-integrity', `--config.node-version=${manifest.runtime.nodeVersion}`]
+
+/**
+ * pnpm 12 now and then leaves a dependency directory 0777 (seen on different packages from run to run). The install
+ * runs in a root-only staging tree, so group and world write is cleared on the installed node_modules trees before
+ * they are observed; symbolic links are not followed.
+ */
+export const clearDependencyGroupWorldWrite = async root => {
+  const visit = async path => {
+    const info = await lstat(path)
+    if (info.isSymbolicLink()) return
+    if ((info.mode & 0o022) !== 0 && (info.isDirectory() || info.isFile())) await chmod(path, info.mode & 0o7755)
+    if (info.isDirectory()) for (const name of await readdir(path)) await visit(join(path, name))
+  }
+  const trees = [join(root, 'node_modules')]
+  for (const parent of ['apps', 'packages']) {
+    for (const name of await readdir(join(root, parent)).catch(() => [])) trees.push(join(root, parent, name, 'node_modules'))
+  }
+  for (const tree of trees) {
+    const present = await lstat(tree).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error })
+    if (present) await visit(tree)
+  }
+}
 
 /** Existing signed wire representation: insertion-order JSON, without key sorting. */
 export const serializeManifestPayload = manifestCore => JSON.stringify(manifestCore)
