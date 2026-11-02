@@ -152,6 +152,8 @@ export interface CompileOptions {
   trustedProxyAuthority?: TrustedProxyRenderAuthority
   /** Saved runtime apps, caches and containers per account id (account-runtime.ts). Absent renders none. */
   runtime?: ReadonlyMap<string, RuntimeRegistry>
+  /** Hosts the management TLS ingress serves on the shared 80/443 sockets (agent-origin.ts readManagementHosts). */
+  managementHosts?: readonly string[]
 }
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -207,7 +209,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     const secEdgeSettings = opts.secEdge ? { ...settings, edge: opts.secEdge.edge } as ServerSettings : settings
     files.push(edge.renderNginxMain(secEdgeSettings, os, opts.trustedProxyAuthority))
     if (opts.secEdge?.edge.modsecurity) files.push(edge.renderModsecurityMain(opts.secEdge.edge.modsecurity))
-    files.push(edge.defaultSiteFile(os, { settings }))
+    files.push(edge.defaultSiteFile(os, { settings, ...(opts.managementHosts ? { excludedNames: opts.managementHosts } : {}) }))
     addTest(edge.nginxConfigTest(os))
 
     if (settings.engine === 'apache') {
@@ -812,6 +814,8 @@ export interface ReconcilerDeps {
   quotaFilesystem?: string | null
   ioDevices?: string[]
   zoneDir?: string
+  /** Hosts of the management TLS ingress, read once at agent start: nothing touches the host before preflight. */
+  managementHosts?: readonly string[]
   onEvent?: (event: LiveEvent) => void
   /** Optional health verification probe run against each service unit after reload and after rollback. */
   healthProbe?: (unit: string, generationId: number) => Promise<{ ok: boolean; error?: string }>
@@ -1524,6 +1528,7 @@ export class HostReconciler {
     const compileMail = (mailAuth: OpenDkimSigning | null, previousZones?: ReadonlyMap<string, string>) => {
       const next = compileDesiredGeneration(snapshot, {
         os: this.deps.os,
+        ...(this.deps.managementHosts ? { managementHosts: this.deps.managementHosts } : {}),
         quotaFilesystem: this.deps.quotaFilesystem ?? null,
         ...(this.deps.ioDevices && { ioDevices: this.deps.ioDevices }),
         ...(accountIoDevices ? { ioDevicesByAccount: accountIoDevices } : {}),

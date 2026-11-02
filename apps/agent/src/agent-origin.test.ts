@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { FakeHostExecutor } from './executor.ts'
-import { mergeOriginIntoRuntime, parseEnvAssignments, syncRuntimePublicOrigin } from './agent-origin.ts'
+import { mergeOriginIntoRuntime, parseEnvAssignments, readManagementHosts, syncRuntimePublicOrigin } from './agent-origin.ts'
+
+describe('management hosts', () => {
+  it('reads the hosts of the public management origins and ignores anything that is not a URL', async () => {
+    const executor = new FakeHostExecutor()
+    const file = { path: '/etc/xpanel/api.env', mode: 0o640, owner: 'root', group: 'xpanel' }
+    expect(await readManagementHosts(executor)).toEqual([])
+    executor.files.set(file.path, { ...file, content: 'XPANEL_WHM_PUBLIC_ORIGIN=https://WHM.Panel.example.test:2087\nXPANEL_PANEL_PUBLIC_ORIGIN=https://panel.example.test:2083\nXPANEL_MAIL_PUBLIC_ORIGIN=not a url\n' })
+    expect(await readManagementHosts(executor)).toEqual(['whm.panel.example.test', 'panel.example.test'])
+  })
+})
 
 describe('runtime public origin', () => {
   it('copies origin keys from api.env and leaves the rest of runtime.env', async () => {

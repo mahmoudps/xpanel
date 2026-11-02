@@ -529,6 +529,12 @@ describe('renderDefaultSite', () => {
     expect(c).not.toContain('proxy_pass')
   })
 
+  it('leaves the hostname to the management ingress that already serves it on the shared sockets', () => {
+    const settings = edge({})
+    expect(renderDefaultSite({ settings })).toContain(`server_name _ ${settings.hostname};`)
+    expect(renderDefaultSite({ settings, excludedNames: [settings.hostname.toUpperCase(), `whm.${settings.hostname}`] })).toContain('server_name _;')
+  })
+
   it('can reject TLS handshakes for unknown names and answer for the hostname', () => {
     const c = renderDefaultSite({ settings: edge({ sslRejectHandshake: true }) })
     expect(c).toContain('ssl_reject_handshake on;')

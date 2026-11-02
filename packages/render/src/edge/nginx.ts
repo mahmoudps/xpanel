@@ -452,13 +452,17 @@ export interface DefaultSiteOptions {
   settings?: ServerSettings
   /** serve this certificate (e.g. the hostname's) instead of the self-signed fallback */
   cert?: Certificate | null
+  /** names another managed server answers on the shared 80/443 sockets (the management TLS ingress); never claimed here */
+  excludedNames?: readonly string[]
 }
 
 /** Catch-all for names no account has bound: a static notice, 404, and ACME for the hostname. */
 export const renderDefaultSite = (opts: DefaultSiteOptions = {}): string => {
   const e = opts.settings ? extras(opts.settings) : {}
   const policy = opts.settings?.defaultSite === undefined ? undefined : validateDefaultSitePolicy(opts.settings.defaultSite)
-  const hostname = opts.settings ? assertDomainName(opts.settings.hostname, 'hostname') : null
+  const named = opts.settings ? assertDomainName(opts.settings.hostname, 'hostname') : null
+  // A name served twice on one socket is a conflict nginx resolves by ignoring the later server.
+  const hostname = named && !opts.excludedNames?.some(name => name.toLowerCase() === named.toLowerCase()) ? named : null
   const tls = (policy?.refuseHttps ?? e.sslRejectHandshake) && !opts.cert
     ? ['ssl_reject_handshake on;']
     : (() => {
