@@ -5,6 +5,7 @@ import { assertProxyOptions, validateDefaultSitePolicy, validateNginxWorkers } f
 import { readAdmittedTrustedProxyPolicy, renderTrustedProxyRealIp } from '../../../core/src/trusted-proxies.ts'
 import type { TrustedProxyRenderAuthority } from '../../../core/src/trusted-proxies.ts'
 import type { Account, Certificate, ConfigTest, Domain, HostAction, Limit, OsProfile, ProxyOptions, RenderedFile, ServerSettings } from '@xpanel/core'
+import { posix } from 'node:path'
 import { certPaths, DEFAULT_TLS, nginxAccessLog, nginxBinary, nginxErrorLog, nginxModuleIncludes, XP_PATHS } from './paths.ts'
 import { nginxQuote } from './quote.ts'
 import { asCertList, certForName, groupSites, siteMode, siteUpstream, type RenderTime, type SiteGroup, type UpstreamPolicy } from './sites.ts'
@@ -157,10 +158,14 @@ export const renderNginxMain = (settings: ServerSettings, os: OsProfile, trusted
 /** Directories the edge needs; the cache belongs to the nginx worker user, nothing to an account. */
 export const nginxEdgeDirs = (os: OsProfile): HostAction[] => {
   const user = assertSystemUser(os.paths.nginxUser, 'nginx user')
+  // Parents first: ensure-dir creates one level. The cache parent is traverse-only so the nginx workers reach
+  // their cache while the agent's root-only native cache beside it stays unlisted.
   return [
+    { kind: 'ensure-dir', path: posix.dirname(XP_PATHS.nginxCacheDir), mode: 0o711, owner: 'root', group: 'root' },
     { kind: 'ensure-dir', path: XP_PATHS.nginxCacheDir, mode: 0o700, owner: user, group: user },
     { kind: 'ensure-dir', path: XP_PATHS.nginxLogDir, mode: 0o750, owner: 'root', group: user },
     { kind: 'ensure-dir', path: XP_PATHS.acmeDir, mode: 0o755, owner: 'root', group: 'root' },
+    { kind: 'ensure-dir', path: posix.dirname(XP_PATHS.suspendedDir), mode: 0o755, owner: 'root', group: 'root' },
     { kind: 'ensure-dir', path: XP_PATHS.suspendedDir, mode: 0o755, owner: 'root', group: 'root' },
     { kind: 'ensure-dir', path: XP_PATHS.defaultSiteDir, mode: 0o755, owner: 'root', group: 'root' },
   ]
