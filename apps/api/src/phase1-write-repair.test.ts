@@ -14,6 +14,8 @@ describe('phase-1 write repair', () => {
     expect(classifyCliInvocation({ platform: 'linux', uid: 0, command: 'reindex', serviceUid: 50 })).toBe('drop-to-xpanel')
     expect(classifyCliInvocation({ platform: 'linux', uid: 0, command: 'init-root', serviceUid: 50 })).toBe('drop-to-xpanel')
     expect(classifyCliInvocation({ platform: 'linux', uid: 0, command: 'status', serviceUid: 50 })).toBe('drop-to-xpanel')
+    expect(classifyCliInvocation({ platform: 'linux', uid: 0, command: 'recover-provisioning', serviceUid: 50 })).toBe('drop-to-xpanel')
+    expect(classifyCliInvocation({ platform: 'linux', uid: 0, command: 'init-quotas', serviceUid: 50 })).toBe('drop-to-xpanel')
     expect(classifyCliInvocation({ platform: 'linux', uid: 50, command: 'reset-password', serviceUid: 50 })).toBe('run')
     expect(classifyCliInvocation({ platform: 'linux', uid: 1000, command: 'reindex', serviceUid: 50 })).toBe('refuse')
     expect(classifyCliInvocation({ platform: 'linux', uid: 0, command: 'repair-state-ownership', serviceUid: 50 })).toBe('repair-as-root')
