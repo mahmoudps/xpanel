@@ -141,6 +141,8 @@ export interface StagedAuthenticatedRelease extends AuthenticatedReleaseTree {
   readonly runtimeDependenciesVerified: false
 }
 
+/** pnpm arguments for the offline production install of an authenticated release, checked against its pinned Node. */
+export function offlineDependencyInstallArguments(manifest: Pick<ReleaseManifestCore, 'runtime'>): string[]
 /** Insertion-order JSON serialization; undefined input can return undefined. */
 export function serializeManifestPayload(manifestCore: unknown): string | undefined
 export function signManifestPayload(canonicalJson: string, signingKey: Parameters<typeof createHmac>[1]): string

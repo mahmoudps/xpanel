@@ -6,7 +6,7 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 import { Readable } from 'node:stream'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { buildReleaseArtifact, createTarGzBuffer, parseTarGzBuffer, REQUIRED_ROOT_FILES, REQUIRED_RELEASE_ENTRYPOINTS, REQUIRED_SYSTEMD_UNITS } from './package-release.mjs'
-import { RELEASE_VERIFICATION_LIMITS, REQUIRED_LIFECYCLE_CONTROL_FILES, serializeManifestPayload, signManifestPayload, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive, verifyAuthenticatedReleaseTree, withAuthenticatedReleaseArchive } from './release-verifier.mjs'
+import { offlineDependencyInstallArguments, RELEASE_VERIFICATION_LIMITS, REQUIRED_LIFECYCLE_CONTROL_FILES, serializeManifestPayload, signManifestPayload, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive, verifyAuthenticatedReleaseTree, withAuthenticatedReleaseArchive } from './release-verifier.mjs'
 
 const roots: string[] = []
 const temp = (): string => { const path = mkdtempSync(join(tmpdir(), 'xpanel-runtime-verifier-')); roots.push(path); return path }
@@ -51,6 +51,11 @@ const rewriteManifest = (change: (manifest: any) => void): Buffer => rewrite(ent
 })
 
 describe('strict authenticated runtime release verifier, diagnostic archives only', () => {
+  it('installs offline dependencies against the release-pinned Node, not whatever PATH holds', async () => {
+    const report = await verify()
+    expect(offlineDependencyInstallArguments(report.manifest)).toEqual(['install', '--offline', '--frozen-lockfile', '--prod', '--ignore-scripts', '--verify-store-integrity', `--config.node-version=${report.manifest.runtime.nodeVersion}`])
+    expect(report.manifest.runtime.nodeVersion).toMatch(/^\d+\.\d+\.\d+$/)
+  })
   it('keeps historical lifecycle control presence valid without optional fresh-install tooling', async () => {
     const report = await verify()
     expect(report.lifecycleControlsPresent).toBe(true)

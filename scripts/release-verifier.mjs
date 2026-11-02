@@ -30,6 +30,12 @@ export const REQUIRED_ROOT_FILES = Object.freeze(['.node-version', 'package.json
 export const REQUIRED_LIFECYCLE_CONTROL_FILES = Object.freeze(['scripts/xpanel-ctl.mjs', 'bin/xpanel-ctl', 'scripts/update.sh', 'scripts/upgrade.sh', 'scripts/uninstall.sh', 'scripts/lifecycle-runtime.mjs', 'scripts/lifecycle-ownership.mjs', 'scripts/lifecycle-admission.mjs', 'scripts/lifecycle-admission.d.mts', 'scripts/lifecycle-services.mjs', 'scripts/lifecycle-root-safety.mjs', 'scripts/lifecycle-root-safety.d.mts', 'scripts/release-verifier.mjs'])
 export const DESIGN_REFERENCE_INPUTS = Object.freeze({ directories: Object.freeze(['apps/web/src/design-boards/']), files: Object.freeze(['apps/web/src/live-boards.ts']) })
 
+/**
+ * The offline production dependency install for an authenticated release. The host PATH has no
+ * Node, so pnpm is told the release's pinned runtime to check package engines against.
+ */
+export const offlineDependencyInstallArguments = manifest => ['install', '--offline', '--frozen-lockfile', '--prod', '--ignore-scripts', '--verify-store-integrity', `--config.node-version=${manifest.runtime.nodeVersion}`]
+
 /** Existing signed wire representation: insertion-order JSON, without key sorting. */
 export const serializeManifestPayload = manifestCore => JSON.stringify(manifestCore)
 /** Existing HMAC bytes. Trust-key selection/loading belongs to the caller. */
