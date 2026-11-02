@@ -58,9 +58,11 @@ export const accountProbeNamespace = (account: Pick<Account, 'username' | 'uid' 
   const paths = accountProbePaths(account)
   return [`BindReadOnlyPaths=${ACCOUNT_PROBE_ASSET_DIR}:${paths.target}`, `BindReadOnlyPaths=${paths.runtime}:${paths.target}/runtime`]
 }
+// The agent admits exactly the seven fastcgi_param values below; nginx would otherwise add every request header as HTTP_*.
 export const accountProbeNginxLocation = (account: Pick<Account, 'username' | 'uid' | 'home'>): string[] => [
   `location = ${ACCOUNT_PROBE_ROUTE} {`,
   '    access_log off;', '    gzip off;', '    fastcgi_buffering off;', '    fastcgi_request_buffering off;', '    fastcgi_keep_conn off;',
+  '    fastcgi_pass_request_headers off;',
   '    fastcgi_connect_timeout 2s;', '    fastcgi_read_timeout 15s;', '    fastcgi_send_timeout 5s;',
   '    fastcgi_param REQUEST_METHOD $request_method;', '    fastcgi_param SCRIPT_NAME $uri;',
   '    fastcgi_param REQUEST_URI $request_uri;', '    fastcgi_param SERVER_NAME $server_name;', '    fastcgi_param HTTP_HOST $host;',

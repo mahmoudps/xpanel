@@ -40,6 +40,9 @@ describe('immutable account probe renderer', { tags: ['unit'] }, () => {
     expect(content).toContain('location = ' + ACCOUNT_PROBE_ROUTE + ' {')
     expect(content).toContain('fastcgi_pass unix:/run/xpanel-account-probe/1000/ingress.sock;')
     expect(content).toContain('access_log off;')
+    // The agent's ingress admits exactly seven parameters; no request header may add an eighth.
+    expect(content).toContain('fastcgi_pass_request_headers off;')
+    expect(accountProbeNginxLocation(account).filter(line => line.trim().startsWith('fastcgi_param '))).toHaveLength(7)
     expect(content).not.toMatch(/SCRIPT_FILENAME|PHP_VALUE|PHP_ADMIN_VALUE|proxy_pass|127[.]0[.]0[.]1:[0-9]+/)
   })
   it('assembles the actual FPM vhost while preserving suspended and bandwidth denial', () => {
