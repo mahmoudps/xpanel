@@ -6,7 +6,7 @@ import { canonicalProvisioningIdentity } from '../../../packages/core/src/accoun
 import type { AccountProvisioningObservationProvider } from './account-provisioning-runtime.ts'
 import { FakeHostExecutor } from './executor.ts'
 import { DEFAULT_DNS_ZONE_DIR, DEFAULT_NAMED_ZONES_CONF } from './services/dns.ts'
-import { createReadonlyAccountProvisioningObserver, parseProvisioningProcessFiles, type ReadonlyAccountObservationOptions } from './account-provisioning-observer.ts'
+import { ACCOUNT_OBSERVATION_DEADLINE_MS, createReadonlyAccountProvisioningObserver, parseProvisioningProcessFiles, type ReadonlyAccountObservationOptions } from './account-provisioning-observer.ts'
 
 const unit = 'xpanel-php-fpm-alice-8.3.service'
 const group = '/xpanel.slice/xpanel-20001.slice/' + unit
@@ -156,7 +156,7 @@ describe('readonly observation failure composition (isolated fixtures)', () => {
   it('samples its deadline after the awaited availability check', async () => {
     const s = scene(); let now = 0
     const observer = createReadonlyAccountProvisioningObserver({ ...s.options, now: () => now,
-      assertHttpAvailable: async () => { now = 15001 } })
+      assertHttpAvailable: async () => { now = ACCOUNT_OBSERVATION_DEADLINE_MS + 1 } })
     await expect(observer.assertAvailable(s.input, s.context)).rejects.toThrow()
     expect(s.run).not.toHaveBeenCalled()
   })
@@ -191,7 +191,7 @@ describe('acquisition ownership under cancellation (isolated resources)', () => 
     const after = (acquired: typeof stage) => {
       if (stage !== acquired) return
       if (failure === 'revocation') s.abort.abort()
-      else now = 15001
+      else now = ACCOUNT_OBSERVATION_DEADLINE_MS + 1
     }
     const observer = createReadonlyAccountProvisioningObserver({ ...s.options, now: () => now,
       openHome: async account => { const handle = await openHome(account); after('home'); return handle },

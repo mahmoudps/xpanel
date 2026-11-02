@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Domain } from '@xpanel/core'
-import { ACCOUNT_PROBE_ASSET, ACCOUNT_PROBE_PHP, ACCOUNT_PROBE_ROUTE, accountProbeDirectories, accountProbeNamespace, accountProbeNginxLocation, accountProbePaths, assertAccountProbeIngress, renderAccountProbeAsset } from './account-probe.ts'
+import { ACCOUNT_PROBE_ASSET, ACCOUNT_PROBE_HOLD_SECONDS, ACCOUNT_PROBE_PHP, ACCOUNT_PROBE_ROUTE, accountProbeDirectories, accountProbeNamespace, accountProbeNginxLocation, accountProbePaths, assertAccountProbeIngress, renderAccountProbeAsset } from './account-probe.ts'
 import { renderFpmUnit } from './units.ts'
 import { debianOs, makeAccount } from './testkit.ts'
 import { renderNginxSite } from '../edge/nginx.ts'
@@ -11,6 +11,9 @@ describe('immutable account probe renderer', { tags: ['unit'] }, () => {
     expect(renderAccountProbeAsset()).toEqual({ path: ACCOUNT_PROBE_ASSET, content: ACCOUNT_PROBE_PHP, mode: 0o444, owner: 'root', group: 'root' })
     expect(ACCOUNT_PROBE_PHP).not.toMatch(/getmypid|posix_getuid|posix_getgid|shell_exec|fastcgi_finish_request/)
     expect(ACCOUNT_PROBE_PHP).toContain("$release !== \"release\\n\"")
+    // The agent's held-request budgets derive from this window; nginx must outlast it.
+    expect(ACCOUNT_PROBE_PHP).toContain(`stream_set_timeout($stream, ${ACCOUNT_PROBE_HOLD_SECONDS});`)
+    expect(accountProbeNginxLocation(account)).toContain(`    fastcgi_read_timeout ${ACCOUNT_PROBE_HOLD_SECONDS + 5}s;`)
   })
   it('keeps the canary inside the existing admitted home and tmp confinement', () => {
     expect(accountProbeNamespace(account)).toEqual(['BindReadOnlyPaths=/etc/xpanel/account-probe:/home/alice/.xpanel-probe', 'BindReadOnlyPaths=/run/xpanel-account-probe/1000:/home/alice/.xpanel-probe/runtime'])

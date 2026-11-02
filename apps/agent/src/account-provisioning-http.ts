@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { request as httpRequest, type ClientRequest, type IncomingMessage } from 'node:http'
 import { createConnection, Socket } from 'node:net'
 import { fail, isXpanelError, type Account } from '@xpanel/core'
-import { ACCOUNT_PROBE_ROUTE, accountProbePaths } from '../../../packages/render/src/system/account-probe.ts'
+import { ACCOUNT_PROBE_HOLD_SECONDS, ACCOUNT_PROBE_ROUTE, accountProbePaths } from '../../../packages/render/src/system/account-probe.ts'
 import { canonicalProvisioningIdentity, parseProvisioningReconcileRequest } from '../../../packages/core/src/account-provisioning-contract.ts'
 import { assertProvisioningProcessBinding, openNativeProvisioningProcess, parseProvisioningProcessFiles, type HeldProvisioningHttpRequest, type ProvisioningProcessIdentity, type ReadonlyAccountObservationOptions } from './account-provisioning-observer.ts'
 import { captureCanarySource, type HeldCanarySource, type HeldHttpConnection, type NativeAccountHttpSubject, type NativeProvisioningHttpOptions } from './account-provisioning-http-source.ts'
@@ -118,7 +118,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
       const account = input.account
       if (!/^[a-f0-9]{64}$/.test(input.challenge) || busy.has(account.uid) || quarantined.has(account.uid)) refused('account_probe_busy_or_quarantined')
       busy.add(account.uid)
-      const admission = randomBytes(32).toString('hex'), deadline = performance.now() + 12000, paths = accountProbePaths(account)
+      const admission = randomBytes(32).toString('hex'), deadline = performance.now() + ACCOUNT_PROBE_HOLD_SECONDS * 1000, paths = accountProbePaths(account)
       const sockets = new Set<Socket>(), tasks = new Set<Promise<void>>()
       const httpReady = deferred<void>(), httpDone = deferred<void>(), workerReady = deferred<ProvisioningProcessIdentity>()
       const fastCgiDone = deferred<void>(), ingressDone = deferred<void>(), callbackDone = deferred<void>()
@@ -146,7 +146,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
       const started = performance.now(), marks: string[] = []
       const mark = (name: string): void => { marks.push(`${name}@${Math.round(performance.now() - started)}ms`) }
       const stages = (): string => `ingress=${ingress ? 'admitted' : 'none'} backend=${backend ? 'connected' : 'none'} callback=${callback ? 'received' : 'none'} response=${response?.statusCode ?? 'none'} ${marks.join(' ')} now@${Math.round(performance.now() - started)}ms`
-      const timer = setTimeout(() => failOperation(new Error(`held account HTTP deadline (${stages()})`)), 12000)
+      const timer = setTimeout(() => failOperation(new Error(`held account HTTP deadline (${stages()})`)), ACCOUNT_PROBE_HOLD_SECONDS * 1000)
       const abort = () => failOperation(new Error('held account HTTP cancelled'))
       context.signal.addEventListener('abort', abort, { once: true })
       const ownSocket = (socket: Socket): Socket => {
@@ -288,7 +288,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
         await guard()
         let received: Buffer = Buffer.alloc(0)
         http = httpRequest({ host: account.ipv4, family: 4, port: 80, path: ACCOUNT_PROBE_ROUTE, method: 'GET', agent: false,
-          headers: { Host: account.primaryDomain, 'X-XPanel-Probe-Admission': admission, Connection: 'close' }, timeout: 11000 }, actual => {
+          headers: { Host: account.primaryDomain, 'X-XPanel-Probe-Admission': admission, Connection: 'close' }, timeout: ACCOUNT_PROBE_HOLD_SECONDS * 1000 - 1000 }, actual => {
           response = actual; mark('response')
           try {
             const challengeHeaders = actual.rawHeaders.filter((_, index) => index % 2 === 0 && actual.rawHeaders[index]?.toLowerCase() === 'x-xpanel-probe-challenge')

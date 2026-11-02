@@ -5,6 +5,7 @@ import { randomBytes, createHash } from 'node:crypto'
 import { fail, type Account, type RenderedFile } from '@xpanel/core'
 import type { StateStore } from '@xpanel/state'
 import { services, system } from '@xpanel/render'
+import { ACCOUNT_PROBE_HOLD_SECONDS } from '../../../packages/render/src/system/account-probe.ts'
 import { assertProvisioningReply, canonicalProvisioningIdentity, parseProvisioningReconcileRequest, type AccountExecutionObservation } from '../../../packages/core/src/account-provisioning-contract.ts'
 import type { AccountProvisioningObservationProvider } from './account-provisioning-runtime.ts'
 import type { AgentExecutor } from './executor.ts'
@@ -110,6 +111,9 @@ const requireNativeRoot = (): void => {
 export const unitIdentityShowArgv = (unit: string): string[] => ['/usr/bin/systemctl', 'show', '--no-pager',
   ...['Id', 'User', 'Group', 'MainPID', 'ControlGroup', 'ActiveState'].map(name => '--property=' + name), '--', unit]
 
+/** The whole observation: DNS and unit reads, then the held canary exchange, which may last its full hold window. */
+export const ACCOUNT_OBSERVATION_DEADLINE_MS = ACCOUNT_PROBE_HOLD_SECONDS * 1000 + 15_000
+
 /** Pin the proc directory: a later PID reuse cannot turn this handle into another task. */
 export async function openNativeProvisioningProcess(pid: number): Promise<ProcessFiles> {
   requireNativeRoot()
@@ -180,7 +184,7 @@ export function createReadonlyAccountProvisioningObserver(options: ReadonlyAccou
     return { available, openHttp }
   }
   const operation = (context: HostEffectAuthority) => {
-    const end = now() + 15000
+    const end = now() + ACCOUNT_OBSERVATION_DEADLINE_MS
     const guard = async (): Promise<void> => {
       if (context.readOnly !== true || context.signal.aborted || now() >= end) observationFailed('observation_authority_or_deadline')
       await context.assertAuthority()
