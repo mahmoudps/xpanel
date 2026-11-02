@@ -138,7 +138,9 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
         if (performance.now() >= deadline || context.signal.aborted) return refused('account_probe_authority_or_deadline')
       }
       const nativeContext: HostEffectAuthority = { readOnly: true, signal: context.signal, assertAuthority: guard }
-      const timer = setTimeout(() => failOperation(new Error('held account HTTP deadline')), 12000)
+      // Which hops completed tells the operator where the exchange stalled.
+      const stages = (): string => `ingress=${ingress ? 'admitted' : 'none'} backend=${backend ? 'connected' : 'none'} callback=${callback ? 'received' : 'none'} response=${response?.statusCode ?? 'none'}`
+      const timer = setTimeout(() => failOperation(new Error(`held account HTTP deadline (${stages()})`)), 12000)
       const abort = () => failOperation(new Error('held account HTTP cancelled'))
       context.signal.addEventListener('abort', abort, { once: true })
       const ownSocket = (socket: Socket): Socket => {
