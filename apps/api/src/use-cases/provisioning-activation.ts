@@ -67,7 +67,7 @@ export async function activatePreparedProvisioningPrincipal(input: {
         || canonicalProvisioningIdentity(recorded.request.authority) !== canonicalProvisioningIdentity(input.recordedAuthority)
         || canonicalProvisioningIdentity(recorded.execution) !== canonicalProvisioningIdentity(input.recordedExecution)) return refused()
 
-      await input.authorizeCredential(tx, { actor: input.actor, planId: account.planId, reference: input.prepared.desiredState.authorizationRef })
+      await input.authorizeCredential(tx, { actor: input.actor, planId: account.planId, reference: input.prepared.currentAuthorization ?? input.prepared.desiredState.authorizationRef })
       const principal = await findPrincipalByAccountId(tx, account.id)
       if (!principal || principal.id !== input.principalId || principal.kind !== 'user' || principal.username !== account.username
         || principal.accountId !== account.id || principal.passwordHash !== input.prepared.passwordHash
@@ -83,7 +83,7 @@ export async function activatePreparedProvisioningPrincipal(input: {
         if (changed.length !== 1 || changed[0]!.id !== principal.id) return refused()
       }
       await assertSourceEpoch()
-      await input.authorizeCredential(tx, { actor: input.actor, planId: account.planId, reference: input.prepared.desiredState.authorizationRef })
+      await input.authorizeCredential(tx, { actor: input.actor, planId: account.planId, reference: input.prepared.currentAuthorization ?? input.prepared.desiredState.authorizationRef })
       assertCurrentLease()
     })
   } finally { await stateLease.release() }

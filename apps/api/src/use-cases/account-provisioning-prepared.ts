@@ -25,6 +25,8 @@ export interface PreparedAccountRecord {
   readonly requestIdentity: string
   readonly passwordHash: string
   readonly desiredState: PreparedAccountState
+  /** The live credential of the latest verified request; authorizes retries after the original session ended. */
+  readonly currentAuthorization?: unknown
 }
 export const provisionActorKey = (actor: Principal): string => `${actor.kind}:${actor.id}`
 export const provisioningRequestKey = (actor: Principal, key: string): string => {
@@ -57,6 +59,7 @@ export async function prepareAccountProvisioning(deps: {
     actorKey: provisionActorKey(input.actor), idempotencyKey: operationKey,
     requestIdentity, credentialIntent: input.credentialIntent, preparePasswordHash: input.preparePasswordHash,
     verifyCredentialIntent: input.verifyCredentialIntent,
+    ...(input.authorizationRef && { currentAuthorization: input.authorizationRef }),
     prepareDesiredState: async () => {
       await deps.authorizeFresh({ actor: input.actor, accountId: null, ownerId: input.account.ownerId })
       await deps.assertIdentityAvailable?.(input.account)

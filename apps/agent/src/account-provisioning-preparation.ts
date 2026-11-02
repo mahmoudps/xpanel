@@ -31,7 +31,7 @@ export interface VerifiedProvisioningPreparation {
 /** Pure validation of the existing API-owned serialized authority; not native acceptance. */
 export function inspectProvisioningPreparation(
   input: ProvisioningPreparationIdentity,
-  material: { readonly key: Uint8Array; readonly record: unknown; readonly index: unknown },
+  material: { readonly key: Uint8Array; readonly record: unknown; readonly index: unknown; readonly authorization?: unknown },
 ): VerifiedProvisioningPreparation {
   if (!isUuid(input.reference) || !/^(root|reseller):[0-9a-f-]{36}$/i.test(input.actorKey)
     || !/^account\.provision:v3:[0-9a-f]{64}$/.test(input.operationKey) || material.key.byteLength !== 32) return refuse()
@@ -48,7 +48,15 @@ export function inspectProvisioningPreparation(
     || index.actorKey !== input.actorKey || index.requestIdentity !== source.requestIdentity) return refuse()
   if (typeof source.passwordHash !== 'string') return refuse()
   try { assertArgon2Hash(source.passwordHash) } catch { return refuse() }
-  const authorizationRef = parseProvisioningAuthorizationReference(desired.authorizationRef)
+  const original = parseProvisioningAuthorizationReference(desired.authorizationRef)
+  // A verified retry records its own live credential; it may only be another credential of the same principal.
+  let authorizationRef = original
+  if (material.authorization !== undefined) {
+    const current = exact(material.authorization, ['schemaVersion', 'reference', 'actorKey', 'authorization'])
+    if (current.schemaVersion !== 1 || current.reference !== input.reference || current.actorKey !== input.actorKey) return refuse()
+    authorizationRef = parseProvisioningAuthorizationReference(current.authorization)
+    if (authorizationRef.principalId !== original.principalId) return refuse()
+  }
   return {
     metadata: {
       reference: input.reference, actorKey: input.actorKey, operationKey: input.operationKey,
@@ -123,7 +131,10 @@ export class AccountProvisioningPreparationReader {
         const indexName = 'request-' + createHmac('sha256', key).update(JSON.stringify([input.actorKey, input.operationKey])).digest('hex') + '.json'
         const source = JSON.parse((await readPrivate(input.reference + '.json')).toString('utf8')) as unknown
         const index = JSON.parse((await readPrivate(indexName)).toString('utf8')) as unknown
-        const result = inspectProvisioningPreparation(input, { key, record: source, index })
+        let authorization: unknown
+        try { authorization = JSON.parse((await readPrivate(input.reference + '.authorization.json')).toString('utf8')) as unknown }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+        const result = inspectProvisioningPreparation(input, { key, record: source, index, ...(authorization !== undefined && { authorization }) })
         await verify()
         return result
       } finally { key.fill(0) }

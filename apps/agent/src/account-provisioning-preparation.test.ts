@@ -29,6 +29,19 @@ describe('independent completed preparation inspection', () => {
     expect(JSON.stringify(result)).not.toContain(value.record.passwordHash)
   })
 
+  it('authorizes with the latest verified credential of the same principal and nothing else', () => {
+    const value = fixture()
+    const session = { kind: 'session', principalId: value.input.actorKey.slice(5), sessionId: '60000000-0000-4000-8000-000000000006', tokenHash: 'd'.repeat(64), entryPoint: 'xwhm' }
+    const current = (authorization: unknown, extra: Record<string, unknown> = {}) => ({ schemaVersion: 1, reference: value.input.reference, actorKey: value.input.actorKey, authorization, ...extra })
+    expect(inspectProvisioningPreparation(value.input, value).authorizationRef).toEqual(value.record.desiredState.authorizationRef)
+    const result = inspectProvisioningPreparation(value.input, { ...value, authorization: current(session) })
+    expect(result.authorizationRef).toEqual(session)
+    expect(result.metadata.preparationIdentity).toBe(canonicalProvisioningIdentity(value.record.desiredState))
+    expect(() => inspectProvisioningPreparation(value.input, { ...value, authorization: current({ ...session, principalId: '70000000-0000-4000-8000-000000000007' }) })).toThrow()
+    expect(() => inspectProvisioningPreparation(value.input, { ...value, authorization: current(session, { reference: '50000000-0000-4000-8000-000000000005' }) })).toThrow()
+    expect(() => inspectProvisioningPreparation(value.input, { ...value, authorization: current(session, { extra: true }) })).toThrow()
+  })
+
   it('rejects a reserved or mismatched index rather than inventing completion', () => {
     const value = fixture()
     expect(() => inspectProvisioningPreparation(value.input, { ...value, index: { ...value.index, phase: 'reserved' } })).toThrow()
