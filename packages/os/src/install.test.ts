@@ -156,7 +156,7 @@ describe('Ubuntu install plan', () => {
   it('keeps the distro FPM master off and enables the stack', () => {
     expect(unitsFor(plan, 'stop')).toContain('php8.3-fpm')
     expect(unitsFor(plan, 'disable')).toContain('php8.3-fpm')
-    expect(unitsFor(plan, 'enable')).toEqual(['nginx', 'apache2', 'mariadb', 'postgresql', 'redis-server', 'nftables', 'postfix', 'dovecot', 'pdns', 'pure-ftpd'])
+    expect(unitsFor(plan, 'enable')).toEqual(['nginx', 'apache2', 'mariadb', 'postgresql', 'redis-server', 'nftables', 'postfix', 'opendkim', 'dovecot', 'pdns', 'pure-ftpd'])
     expect(unitsFor(plan, 'start')).toEqual(['mariadb', 'postgresql', 'redis-server'])
   })
 
@@ -238,7 +238,7 @@ describe('RHEL install plan', () => {
 
   it('enables RHEL unit names', () => {
     expect(unitsFor(installPlan(centos9, { ...full, apacheMpm: 'prefork' }), 'enable')).toEqual(
-      ['nginx', 'httpd', 'mariadb', 'postgresql', 'redis', 'nftables', 'postfix', 'dovecot', 'pdns', 'pure-ftpd'],
+      ['nginx', 'httpd', 'mariadb', 'postgresql', 'redis', 'nftables', 'postfix', 'opendkim', 'dovecot', 'pdns', 'pure-ftpd'],
     )
     expect(unitsFor(installPlan(centos10, { ...full, apacheMpm: 'prefork' }), 'start')).toEqual(['mariadb', 'postgresql', 'valkey'])
   })
@@ -476,7 +476,7 @@ describe('install files and warnings', () => {
     )
     expect(installWarnings(ubuntu22, { ...full, apacheMpm: 'prefork' }).find(w => w.code === 'APACHE_SHARED_IDENTITY')!.message).toContain('www-data')
     expect(installWarnings(centos9, { ...full, apacheMpm: 'prefork' }).find(w => w.code === 'SERVICES_NOT_STARTED')!.message)
-      .toContain('postfix, dovecot, pdns, pure-ftpd')
+      .toContain('postfix, opendkim, dovecot, pdns, pure-ftpd')
   })
 
   it('bundles actions, files and warnings consistently', () => {

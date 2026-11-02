@@ -211,7 +211,7 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
     "php${PHP_VERSION}-sqlite3"
   )
   [[ "$WITH_MARIADB" -eq 1 ]] && PACKAGES+=(mariadb-server)
-  [[ "$WITH_MAIL" -eq 1 ]] && PACKAGES+=(postfix dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sieve dovecot-managesieved)
+  [[ "$WITH_MAIL" -eq 1 ]] && PACKAGES+=(postfix opendkim dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sieve dovecot-managesieved)
   [[ "$WITH_DNS" -eq 1 ]] && PACKAGES+=(pdns-server pdns-backend-bind bind9-utils dnsutils)
   [[ "$WITH_FTP" -eq 1 ]] && PACKAGES+=(pure-ftpd)
   [[ "$WITH_MODSECURITY" -eq 1 ]] && PACKAGES+=(libapache2-mod-security2 modsecurity-crs)
@@ -262,7 +262,7 @@ else
     glibc-devel
   )
   [[ "$WITH_MARIADB" -eq 1 ]] && PACKAGES+=(mariadb-server)
-  [[ "$WITH_MAIL" -eq 1 ]] && PACKAGES+=(postfix dovecot dovecot-pigeonhole)
+  [[ "$WITH_MAIL" -eq 1 ]] && PACKAGES+=(postfix opendkim dovecot dovecot-pigeonhole)
   # EPEL pdns contains the BIND backend; no separate pdns-backend-bind RPM exists.
   [[ "$WITH_DNS" -eq 1 ]] && PACKAGES+=(pdns bind-utils)
   [[ "$WITH_FTP" -eq 1 ]] && PACKAGES+=(pure-ftpd)

@@ -9,6 +9,7 @@ const services: Record<ServiceRole, string> = {
   postgresql: 'postgresql',
   postfix: 'postfix',
   dovecot: 'dovecot',
+  opendkim: 'opendkim',
   powerdns: 'pdns',
   redis: 'redis-server',
   ftp: 'pure-ftpd',
@@ -17,7 +18,7 @@ const services: Record<ServiceRole, string> = {
 }
 
 const packages = Object.fromEntries(
-  ['nginx', 'apache', 'openlitespeed', 'mariadb', 'postgresql', 'postfix', 'dovecot', 'powerdns', 'redis', 'ftp', 'sshd',
+  ['nginx', 'apache', 'openlitespeed', 'mariadb', 'postgresql', 'postfix', 'dovecot', 'opendkim', 'powerdns', 'redis', 'ftp', 'sshd',
     'nftables', 'apache-itk', 'apache-suexec', 'apache-fcgi', 'quota', 'acme', 'modsecurity'].map((r) => [r, [r]]),
 ) as Record<PackageRole, string[]>
 

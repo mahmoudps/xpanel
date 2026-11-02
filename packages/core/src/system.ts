@@ -10,6 +10,7 @@ export type ServiceRole =
   | 'postgresql'
   | 'postfix'
   | 'dovecot'
+  | 'opendkim'
   | 'powerdns'
   | 'redis'
   | 'ftp'

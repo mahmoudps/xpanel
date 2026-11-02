@@ -32,6 +32,8 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
       mariadb: ['mariadb-server'],
       postgresql: ['postgresql-server'],
       postfix: ['postfix'],
+      // EPEL; the agent signs outgoing mail through the OpenDKIM milter and renders its configuration
+      opendkim: ['opendkim'],
       dovecot: ['dovecot', 'dovecot-pigeonhole'],
       // EPEL pdns includes libbindbackend.so; named-checkzone/dig are in these BIND tools.
       powerdns: ['pdns', 'bind-utils'],
@@ -56,6 +58,7 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
       postgresql: 'postgresql',
       postfix: 'postfix',
       dovecot: 'dovecot',
+      opendkim: 'opendkim',
       powerdns: 'pdns',
       redis,
       ftp: 'pure-ftpd',

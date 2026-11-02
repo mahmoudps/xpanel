@@ -224,7 +224,7 @@ const engineRoles = (o: ResolvedInstallOptions): PackageRole[] => {
 
 const optionalRoles = (o: ResolvedInstallOptions): ServiceRole[] => {
   const roles: ServiceRole[] = []
-  if (o.withMail) roles.push('postfix', 'dovecot')
+  if (o.withMail) roles.push('postfix', 'opendkim', 'dovecot')
   if (o.withDns) roles.push('powerdns')
   if (o.withFtp) roles.push('ftp')
   return roles

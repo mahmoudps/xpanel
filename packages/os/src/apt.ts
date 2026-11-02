@@ -37,6 +37,8 @@ export const aptProfile = (release: OsRelease): XpanelOsProfile => {
       mariadb: ['mariadb-server'],
       postgresql: ['postgresql'],
       postfix: ['postfix'],
+      // The agent signs outgoing mail through the OpenDKIM milter and renders its configuration
+      opendkim: ['opendkim'],
       dovecot: ['dovecot-core', 'dovecot-imapd', 'dovecot-pop3d', 'dovecot-lmtpd', 'dovecot-sieve', 'dovecot-managesieved'],
       // The reconciler publishes BIND zone files; include its candidate validator and observer.
       powerdns: ['pdns-server', 'pdns-backend-bind', 'bind9-utils', 'dnsutils'],
@@ -60,6 +62,7 @@ export const aptProfile = (release: OsRelease): XpanelOsProfile => {
       postgresql: 'postgresql',
       postfix: 'postfix',
       dovecot: 'dovecot',
+      opendkim: 'opendkim',
       powerdns: 'pdns',
       redis: 'redis-server',
       ftp: 'pure-ftpd',
