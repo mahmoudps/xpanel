@@ -83,6 +83,7 @@ describe('readonly provisioning observation (isolated raw-file and transport fix
     expect(result).toMatchObject({ accountId: s.input.account.id, uid: 20001, gid: 20001, cgroup: group, services: [unit],
       quota: { enforced: true, filesystem: '/home' }, dns: { zone: 'tenant.example.test', serial: 2026103001, authoritative: true }, php: { status: 200, uid: 20001, cgroup: group } })
     expect(s.options.dns.verify).toHaveBeenCalledTimes(1)
+    expect(s.options.dns.verify).toHaveBeenCalledWith(expect.any(Array), [], 'zones')
     expect(s.processHandle.close).toHaveBeenCalledTimes(1); expect(s.response.close).toHaveBeenCalledTimes(1); expect(s.home.close).toHaveBeenCalledTimes(1)
     expect(s.options.executor).toMatchObject({ executedActions: [], executedTests: [] })
   })

@@ -13,7 +13,8 @@ import {
 /** Generation reconciliation remains the only publication authority. This port only validates and observes. */
 export interface DnsReconcileProvider {
   validate(files: readonly RenderedFile[], removedPaths: readonly string[]): Promise<void>
-  verify(files: readonly RenderedFile[], removedPaths: readonly string[]): Promise<void>
+  /** `zones` observes only the given zone files and requires the active catalog to list them; default is the complete generation. */
+  verify(files: readonly RenderedFile[], removedPaths: readonly string[], scope?: 'generation' | 'zones'): Promise<void>
 }
 
 export interface NativeDnsOptions {
@@ -104,7 +105,7 @@ const managedCatalogNames = (content: string): string[] => {
   return names.sort((a, b) => a.localeCompare(b))
 }
 
-const zoneCandidates = (files: readonly RenderedFile[]) => {
+const zoneCandidates = (files: readonly RenderedFile[], scope: 'generation' | 'zones' = 'generation') => {
   const zones = files.flatMap(file => {
     const name = zoneFromPath(file.path)
     if (name === null) return []
@@ -119,7 +120,9 @@ const zoneCandidates = (files: readonly RenderedFile[]) => {
   if (files.filter(file => file.path === DEFAULT_NAMED_ZONES_CONF).length > 1 || zones.length > 0 && config === undefined) {
     fail('VALIDATION', 'DNS generation must contain one managed catalog for its zone files', { stateChanged: false })
   }
-  if (config && JSON.stringify(managedCatalogNames(config.content)) !== JSON.stringify(zones.map(zone => zone.name).sort((a, b) => a.localeCompare(b)))) {
+  const catalog = config ? managedCatalogNames(config.content) : []
+  if (config && (scope === 'zones' ? zones.some(zone => !catalog.includes(zone.name))
+    : JSON.stringify(catalog) !== JSON.stringify(zones.map(zone => zone.name).sort((a, b) => a.localeCompare(b))))) {
     fail('VALIDATION', 'DNS generation catalog differs from its managed zone files', { stateChanged: false })
   }
   if (zones.some(zone => zone.records.length > MAX_DNS_OBSERVATION_RECORDS)) {
@@ -233,11 +236,11 @@ export const createNativeDnsReconcileProvider = (options: NativeDnsOptions): Dns
       for (const zone of candidates) await adapter.validateCandidateZone(zone.name, zone.file.content)
       if (clock() > deadline) fail('SERVICE_UNAVAILABLE', 'native DNS validation exceeded its total deadline')
     },
-    async verify(files, removedPaths) {
+    async verify(files, removedPaths, scope = 'generation') {
       try {
       if (!relevant(files, removedPaths)) return
       const deadline = clock() + OBSERVATION_BUDGET_MS
-      const candidates = zoneCandidates(files)
+      const candidates = zoneCandidates(files, scope)
       const scoped = boundedExecutor(deadline)
       const adapter = await ready(scoped)
       const assertCatalog = async () => {

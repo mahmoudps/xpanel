@@ -266,7 +266,8 @@ export function createReadonlyAccountProvisioningObserver(options: ReadonlyAccou
       if (parsed.skipped.length) return observationFailed('account_dns_unparsed_records')
       const serial = extractSoaSerial(services.validateZone(parsed.records, { requireSoa: true }))
       if (serial < 1) return observationFailed('account_dns_serial_unavailable')
-      await checked(() => options.dns.verify(files, []))
+      // One account's zone against the whole active catalog, not the complete generation.
+      await checked(() => options.dns.verify(files, [], 'zones'))
       let home: HomeHandle | undefined, response: HeldProvisioningHttpRequest | undefined, processFiles: ProcessFiles | undefined
       let value: AccountExecutionObservation | undefined, rejected = false, failure: unknown
       // Capture ownership before the post-acquisition guard can reject.
