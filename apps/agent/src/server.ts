@@ -802,7 +802,9 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             getReseller: id => deps.store.getReseller(id),
           },
         }).catch((error: unknown) => {
-          console.error('xpanel-agent account provisioning refused:', isXpanelError(error) ? `${error.code}: ${error.message}` : 'unexpected provisioning error')
+          // A reason is a fixed identifier (e.g. account_quota_not_enforced); the operator needs it to act on the refusal.
+          const reason = isXpanelError(error) && typeof error.detail.reason === 'string' && /^[a-z0-9_]{1,64}$/.test(error.detail.reason) ? ` (${error.detail.reason})` : ''
+          console.error('xpanel-agent account provisioning refused:', isXpanelError(error) ? `${error.code}: ${error.message}${reason}` : 'unexpected provisioning error')
           throw error
         })
       }
