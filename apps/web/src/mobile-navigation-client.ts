@@ -107,7 +107,8 @@ export const MOBILE_NAVIGATION_CLIENT_FUNCTIONS = /* js */ String.raw`
 
   function setMobileNavigationState(open) {
     var sidebar = document.querySelector('[data-xp-sidebar]');
-    var shell = sidebar && sidebar.parentElement;
+    // xMail nests the sidebar inside the shell content; the open-state styles key off the shell itself.
+    var shell = sidebar && (sidebar.closest('.xp-shell') || sidebar.parentElement);
     var backdrop = document.querySelector('[data-xp-nav-backdrop]');
     var toggles = document.querySelectorAll('[data-action="toggle-mobile-nav"]');
     if (shell) {

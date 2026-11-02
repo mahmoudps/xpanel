@@ -4,6 +4,9 @@ import { escapeHtml } from '../tokens.ts'
 const CLASSIC_FILE_VIEW_CSS = `#xpanel-file-manager [data-file-manager-table] tr[data-file-selected]{outline:2px solid currentColor;outline-offset:-2px}
 #xpanel-file-manager .xp-file-view-controls,#xpanel-file-manager .xp-file-view-details,#xpanel-file-manager .xp-file-view-uploads,#xpanel-file-manager .xp-file-view-side{display:flex;flex-direction:column;gap:var(--xp-space-group);min-inline-size:0}
 #xpanel-file-manager .xp-file-view-controls>label{display:flex;flex-direction:column;gap:var(--xp-space-label)}
+#xpanel-file-manager .xp-file-view-controls input[type=search]{box-sizing:border-box;min-block-size:44px}
+#xpanel-file-manager [data-file-manager-table] td>label:has(>input[type=checkbox]){display:inline-flex;align-items:center;justify-content:center;min-inline-size:44px;min-block-size:44px}
+#xpanel-file-manager [data-file-manager-table] td>label>input[type=checkbox]{inline-size:18px;block-size:18px;margin:0;flex:none}
 #xpanel-file-manager .xp-file-view-controls>div,#xpanel-file-manager .xp-file-view-details>div{display:flex;align-items:center;flex-wrap:wrap;gap:var(--xp-space-field)}
 #xpanel-file-manager .xp-file-view-details,#xpanel-file-manager .xp-file-view-uploads,#xpanel-file-manager .xp-file-view-closed{padding:var(--xp-space-group);border:1px solid var(--xp-border);border-radius:12px;background:inherit}
 #xpanel-file-manager .xp-file-view-details :is(h2,dl,dd),#xpanel-file-manager .xp-file-view-uploads h2,#xpanel-file-manager .xp-file-view-closed h2{margin:0}

@@ -125,7 +125,9 @@ async function geometry(page){
     const targets=[...root.querySelectorAll('button,input:not([type=file]),textarea')].filter(visible).map(node=>{
       const words=[]
       if(node.tagName==='BUTTON'){const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);let text;while((text=walker.nextNode()))for(const match of text.textContent.matchAll(/\S+/gu)){const range=document.createRange();range.setStart(text,match.index);range.setEnd(text,match.index+match[0].length);const tops=[...range.getClientRects()].map(r=>r.top).sort((a,b)=>a-b),threshold=Math.max(8,(parseFloat(getComputedStyle(node).lineHeight)||22)/2);let lines=0,last=-Infinity;for(const top of tops)if(top-last>threshold){lines++;last=top}words.push({text:match[0],lines})}}
-      return {type:node.type,box:rect(node),words}
+      // A row checkbox's hit target is its wrapping label; the visible check box itself stays compact.
+      const hit=node.type==='checkbox'&&node.parentElement?.tagName==='LABEL'?node.parentElement:node
+      return {type:node.type,box:rect(hit),words}
     })
     const paths=[...root.querySelectorAll('[data-file-current-path],[data-file-selected-path]')].map(node=>({direction:getComputedStyle(node).direction,isolation:getComputedStyle(node).unicodeBidi}))
     const prefix=[...root.querySelectorAll('.xp-breadcrumb bdi')].find(node=>node.textContent===root.dataset.accountHome),relative=root.querySelector('[data-file-current-path]')

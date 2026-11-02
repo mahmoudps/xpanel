@@ -214,3 +214,17 @@ describe('status document mobile navigation', () => {
     expect(windowListeners).toHaveLength(0)
   })
 })
+
+describe('nested shell content navigation', () => {
+  it('marks the classic shell open when the sidebar sits inside the shell content', () => {
+    document.body.innerHTML = `<div class="xp-shell"><div data-xp-shell-content>
+  <nav id="xp-sidebar" data-xp-sidebar tabindex="-1" aria-label="Navigation"><a href="/mail/inbox" data-nav-route="/mail/inbox">Inbox</a></nav>
+  <button data-xp-nav-backdrop data-action="close-mobile-nav" hidden tabindex="-1">Close navigation</button>
+  <main><button id="nav-toggle" data-action="toggle-mobile-nav" aria-controls="xp-sidebar" aria-expanded="false">Navigation</button></main>
+</div></div>`
+    boot()
+    element<HTMLButtonElement>('#nav-toggle').click()
+    expect(element('.xp-shell').dataset.mobileNav).toBe('open')
+    expect(element('[data-xp-shell-content]').dataset.mobileNav).toBeUndefined()
+  })
+})

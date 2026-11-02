@@ -9,6 +9,7 @@ import { defaultPlan } from '../../packages/core/src/index.ts'
 import { renderWebApp, serveStaticAsset } from '../../apps/web/src/app.ts'
 import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/source-snapshot.mjs'
 import { assertAppliedFont } from './applied-font-contract.mjs'
+import { verifiedAccountCreateReceipt } from './account-create-receipt.mjs'
 
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const creationFieldContract = [
@@ -25,8 +26,8 @@ const nativeAccountHeaderContract = {
   ar: ['الحساب', 'النطاق الأساسي', 'الخطة', 'الحالة', 'الإجراءات'],
 }
 const accountHeaderContract = {
-  en: ['Select', ...nativeAccountHeaderContract.en.slice(0, 3), 'Owner', 'IP', 'Disk', 'Bandwidth', ...nativeAccountHeaderContract.en.slice(3)],
-  ar: ['اختيار', ...nativeAccountHeaderContract.ar.slice(0, 3), 'المالك', 'IP', 'القرص', 'نقل البيانات', ...nativeAccountHeaderContract.ar.slice(3)],
+  en: ['Select', ...nativeAccountHeaderContract.en.slice(0, 3), 'Owner', 'IP', 'Disk', 'Bandwidth', 'IO write cap', ...nativeAccountHeaderContract.en.slice(3)],
+  ar: ['اختيار', ...nativeAccountHeaderContract.ar.slice(0, 3), 'المالك', 'IP', 'القرص', 'نقل البيانات', 'سقف الكتابة على القرص', ...nativeAccountHeaderContract.ar.slice(3)],
 }
 const states = ['en', 'ar'].flatMap(locale => ['light', 'dark'].flatMap(theme => [360, 768, 1440].flatMap(width => ['accounts', 'create'].map(screen => ({ id: screen + '-' + locale + '-' + theme + '-' + width, locale, theme, width, screen })))))
 const plan = defaultPlan({ id: 'fixture-plan', name: 'Standard', featureListId: 'fixture-features' })
@@ -56,6 +57,8 @@ async function fixture() {
     if (url.pathname.startsWith('/api/')) {
       res.setHeader('content-type', 'application/json')
       if (url.pathname === '/api/auth/me') { res.end(JSON.stringify({ csrfToken: 'synthetic-ui-fixture-csrf' })); return }
+      // The shell's personal interface-preference read is not part of the account request ledger.
+      if (url.pathname === '/api/auth/ui-preferences') { res.statusCode = 404; res.end(JSON.stringify({ code: 'NOT_FOUND' })); return }
       if (url.pathname === '/api/ips' && req.method === 'GET') {
         assert.equal(url.searchParams.get('view'), 'allocation')
         assert.equal(url.searchParams.get('planId'), plan.id)
@@ -77,7 +80,7 @@ async function fixture() {
         res.end(JSON.stringify({ code: 'PRECONDITION_FAILED', detail: 'untrusted-private-host-message', details: { verificationRequired: true, stateChanged: false } }))
       } else if (url.pathname === '/api/accounts' && req.method === 'POST' && body.username !== 'newblocked') {
         res.statusCode = 201
-        res.end(JSON.stringify({ account: { ...alpha, username: body.username }, reconcile: { status: 'applied' }, execution: { status: 'configuration_applied', scope: 'global_configuration', targetVerified: false, verificationRequired: true } }))
+        res.end(JSON.stringify(verifiedAccountCreateReceipt(body, alpha)))
       } else if (req.method === 'DELETE' || url.pathname === '/api/accounts') {
         res.statusCode = 412
         res.end(JSON.stringify({ code: 'PRECONDITION_FAILED', detail: 'untrusted-private-host-message', details: { verificationRequired: false, stateChanged: false } }))
@@ -211,8 +214,14 @@ async function createAccountGate(page, host, state, result, destination, expect)
   assert.equal(result.requests.every(request => request.path === '/api/accounts' && request.method === 'POST' && request.csrf === 'synthetic-ui-fixture-csrf'), true)
   assert.equal(result.requests.every(request => request.body.ipAssignment?.mode === 'shared' && request.body.ipv4 === undefined && request.body.ipv6 === undefined), true)
   await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-pending.png'), fullPage: true })
+  // A completed request stays retained in this tab: reloading cannot resubmit it; only the explicit create-another control starts a new request.
   await page.reload()
+  await expect(form.locator('[name="username"]')).toBeDisabled()
+  await expect(form.locator('[data-account-create-status]')).toHaveAttribute('data-state', 'pending')
+  result.completed_request_retained_after_reload = true
+  await Promise.all([page.waitForEvent('framenavigated'), page.locator('[data-account-create-another]').first().click()])
   const conflictForm = page.locator('[data-create-account-form]')
+  await expect(conflictForm.locator('[name="username"]')).toBeEnabled()
   await conflictForm.locator('[name="username"]').fill('stateconflict')
   await conflictForm.locator('[name="primaryDomain"]').fill('stateconflict.example.test')
   await conflictForm.locator('[name="password"]').fill('synthetic-' + 'z'.repeat(16))
@@ -231,7 +240,15 @@ async function createAccountGate(page, host, state, result, destination, expect)
   result.unknown_outcome_requires_review = true
 
   // A 412 is not a definite refusal when verificationRequired overrides stateChanged:false.
+  // An unverified request stays retained in this tab after reload; the next scenario starts in a fresh tab with its own session storage.
   await page.reload()
+  await expect(page.locator('[data-create-account-form] [name="username"]')).toBeDisabled()
+  await expect(page.locator('[data-create-account-form] [data-account-create-status]')).toHaveAttribute('data-state', 'failed')
+  result.unverified_request_retained_after_reload = true
+  page = await page.context().newPage()
+  page.setDefaultTimeout(8000)
+  page.on('pageerror', error => result.page_errors.push(error.message))
+  await page.goto(host.baseUrl + '/whm/accounts/new?lang=' + state.locale + '&theme=' + state.theme)
   const pendingForm = page.locator('[data-create-account-form]')
   await pendingForm.locator('[name="username"]').fill('verifywait')
   await pendingForm.locator('[name="primaryDomain"]').fill('verifywait.example.test')
@@ -290,7 +307,7 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
         const headers = await page.locator('.xp-accounts__table thead th').allTextContents()
         const names = headers.map(text => text.trim())
         assert.deepEqual(names, accountHeaderContract[state.locale])
-        assert.deepEqual([names[1], names[2], names[3], names[8], names[9]], nativeAccountHeaderContract[state.locale])
+        assert.deepEqual([names[1], names[2], names[3], names[9], names[10]], nativeAccountHeaderContract[state.locale])
         assert.equal(await page.locator('[data-account-row]').count(), 2)
         await expect(page.locator('[data-account-dialog]')).not.toBeVisible()
         result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
