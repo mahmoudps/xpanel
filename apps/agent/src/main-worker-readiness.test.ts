@@ -105,6 +105,10 @@ vi.mock('./peer-identity.ts', () => ({
     if (Object.keys(policy).length !== 2 || policy.gid !== 42000 || policy.allowRootPeer !== false) throw new Error('unexpected isolated readiness peer policy')
     return new Set([42001])
   },
+  resolveServicePrimaryGid: async (uid: number) => {
+    if (uid !== 42001) throw new Error('unexpected isolated readiness service uid')
+    return 42002
+  },
 }))
 
 import { AGENT_SHUTDOWN_TIMEOUT_MS, attachAgentProcessLifecycle, startAgentDaemon } from './main.ts'

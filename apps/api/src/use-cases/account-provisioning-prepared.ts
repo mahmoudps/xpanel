@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { dirname } from 'node:path'
 import { fail, type Account, type DnsRecord, type Plan, type Principal, type ProvisioningAuthorizationReference } from '@xpanel/core'
 import { validateDnsZoneFile, type DnsZoneState, type NewAccount, type StateStore } from '@xpanel/state'
 import { services } from '@xpanel/render'
@@ -80,7 +81,8 @@ export async function prepareAccountProvisioning(deps: {
 export function createProvisioningPreparationAuthority(input: { store: StateStore; directory: string }): ProvisioningPreparationStore {
   return new FileProvisioningPreparationStore({ directory: input.directory,
     ...(process.platform === 'linux' && process.getuid && process.getgid ? { trustedStateRoot: {
-      directory: input.store.rootDir, uid: process.getuid(), gid: process.getgid(),
+      // The installed data root above the state directory is the one setgid 02770 directory.
+      directory: dirname(input.store.rootDir), uid: process.getuid(), gid: process.getgid(),
     } } : {}), withLock: async work => {
     const lease = await input.store.getWriterLock().acquire()
     try {

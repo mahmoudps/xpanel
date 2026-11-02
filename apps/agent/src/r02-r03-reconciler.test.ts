@@ -837,4 +837,75 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     const continued = await reconciler.reconcile({ actor: 'root' })
     assert.equal(continued.status, 'noop')
   })
+
+  it('resolve-failed clears unverified prerequisites only with an explicit audited attestation', async () => {
+    await seedEnvironment()
+    const reconciler = new HostReconciler({
+      store: stateHandle.store,
+      db: dbHandle.db,
+      executor,
+      os,
+    })
+    const applied = await reconciler.reconcile({ actor: 'root' })
+    assert.equal(applied.status, 'applied')
+    const manifest = await reconciler.journal.readManifest(1)
+    assert.ok(manifest)
+    const stuck = await createGeneration(dbHandle.db, { checksum: manifest.filesChecksum, actor: 'root' })
+    const backups = [...executor.files.entries()].map(([path, file]) => ({
+      path,
+      existed: true,
+      content: file.content,
+      sha256: sha256Text(file.content),
+      mode: file.mode,
+      owner: file.owner ?? 'root',
+      group: file.group ?? 'root',
+    }))
+    const now = new Date().toISOString()
+    await reconciler.journal.saveJournal({
+      schemaVersion: 1,
+      journalId: randomUUID(),
+      generationId: stuck.id,
+      previousActiveGenerationId: 1,
+      actor: 'root',
+      stateChecksum: manifest.stateChecksum,
+      filesChecksum: manifest.filesChecksum,
+      phase: 'needs_attention',
+      startedAt: now,
+      updatedAt: now,
+      candidateManifest: { ...manifest, generationId: stuck.id },
+      previousManifest: manifest,
+      diff: {
+        added: [],
+        updated: [],
+        unchanged: manifest.files,
+        removed: [],
+        removedUnits: [],
+        affectedServices: [],
+      },
+      previousFilesBackup: backups,
+      completedPreActions: 3,
+      preActionsNeedVerification: true,
+      switchedFilePaths: [],
+      removedFilePaths: [],
+      stoppedObsoleteUnits: [],
+      completedPostActions: 0,
+      reloadedUnits: [],
+      verifiedUnits: [],
+      error: "ENOENT: no such file or directory, open '/etc/systemd/system/user-20003.slice.d/.missing.tmp'",
+    })
+
+    await assert.rejects(
+      () => reconciler.resolveFailedGeneration(stuck.id, 'root'),
+      (err: unknown) => isXpanelError(err) && err.code === 'PRECONDITION_FAILED',
+    )
+    assert.equal((await reconciler.journal.readActiveJournal())?.phase, 'needs_attention')
+    const resolved = await reconciler.resolveFailedGeneration(stuck.id, 'root', { attestPreActions: true })
+    assert.equal(resolved.generationId, stuck.id)
+    assert.equal(await reconciler.journal.readActiveJournal(), null)
+    const audits = await dbHandle.db.query<{ detail: string }>(
+      `SELECT detail FROM audit_log WHERE action = $1`,
+      ['reconcile.attention_resolved'],
+    )
+    assert.equal(JSON.parse(audits.at(-1)!.detail).preActionsAttestedByOperator, true)
+  })
 })

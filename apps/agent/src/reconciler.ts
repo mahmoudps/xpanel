@@ -33,7 +33,7 @@ import type { StateSnapshot, StateStore } from '@xpanel/state'
 import { assertGenerationRollbackPreconditions, generationSourceIsLinked, isStateDirectoryDurabilityError, parseGenerationRollbackRequest, withGenerationReconciliationLease } from '@xpanel/state'
 import type { GenerationRollbackRequest } from '@xpanel/state'
 import type { AgentExecutor } from './executor.ts'
-import { assertHostEffectAuthority, withHostEffectAuthority, type HostEffectAuthority } from './host-effect-authority.ts'
+import { assertHostEffectAuthority, withHostEffectAuthority, withoutHostEffectAuthority, type HostEffectAuthority } from './host-effect-authority.ts'
 import { applyPostfixLocalDelivery, localMailNeedsUpdate, retirePostfixLocalDelivery } from './services/local-mail.ts'
 import { ensureOpenDkimSigning, mailAuthZoneAdditions, type OpenDkimSigning } from './services/opendkim-live.ts'
 import { removedMaildirPaths } from './services/mail.ts'
@@ -1316,13 +1316,14 @@ export class HostReconciler {
    * Verifies live owned files against the journal backup or the failed candidate, marks
    * that generation failed, and drops the active journal so reconcile can run again.
    */
-  async resolveFailedGeneration(generationId: number, actor = 'root'): Promise<{ generationId: number; previousGenerationId: number | null; checkedFiles: number }> {
-    return withLifecycleWriterAdmission(() => withGenerationReconciliationLease(this.deps.store.rootDir, () => this.resolveFailedGenerationAdmitted(generationId, actor)))
+  async resolveFailedGeneration(generationId: number, actor = 'root', options: { attestPreActions?: boolean } = {}): Promise<{ generationId: number; previousGenerationId: number | null; checkedFiles: number }> {
+    return withLifecycleWriterAdmission(() => withGenerationReconciliationLease(this.deps.store.rootDir, () => this.resolveFailedGenerationAdmitted(generationId, actor, options.attestPreActions === true)))
   }
 
   private async resolveFailedGenerationAdmitted(
     generationId: number,
     actor = 'root',
+    attestPreActions = false,
   ): Promise<{ generationId: number; previousGenerationId: number | null; checkedFiles: number }> {
     await this.journal.assertNoUnresolvedPreparation()
     if (!Number.isSafeInteger(generationId) || generationId < 1) {
@@ -1348,8 +1349,10 @@ export class HostReconciler {
       })
     }
 
+    const preActionsAttested = hasUnverifiedPreActions(journal) && attestPreActions
     if (hasUnverifiedPreActions(journal)) {
-      const probe = await this.deps.preActionRecoveryProbe?.(journal)
+      // Without an automatic probe, an explicit audited operator attestation is the verification.
+      const probe = attestPreActions ? { ok: true } : await this.deps.preActionRecoveryProbe?.(journal)
       if (!probe?.ok) {
         return fail('PRECONDITION_FAILED', 'host prerequisite effects require independent verification before clearing the generation', {
           generationId, stateChanged: true, verificationRequired: true,
@@ -1404,6 +1407,7 @@ export class HostReconciler {
         generationId,
         previousGenerationId: journal.previousActiveGenerationId,
         checkedFiles: journal.previousFilesBackup.length,
+        ...(preActionsAttested ? { preActionsAttestedByOperator: true } : {}),
       },
       outcome: 'ok',
     })
@@ -1935,7 +1939,8 @@ export class HostReconciler {
         const errorMsg = (stageErr as Error).message.slice(0, 2000)
         this.emitStage(pendingGen.id, currentStageLabel, 'failed', scope, errorMsg)
 
-        const rb = await this.rollbackLiveHostAndRecord(journalRecord, failedUnit, errorMsg, scope)
+        // Restoring captured files must not depend on a request authority that may have just lapsed.
+        const rb = await withoutHostEffectAuthority(() => this.rollbackLiveHostAndRecord(journalRecord, failedUnit, errorMsg, scope))
         return {
           status: 'failed',
           rolledBack: !rb.verificationRequired,

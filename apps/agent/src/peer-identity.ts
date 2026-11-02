@@ -174,6 +174,16 @@ const readRootProtectedSystemFile = async (path: string): Promise<string> => {
  *   `gid` socket group in `/etc/group` + `/etc/passwd`. Fails closed if zero or
  *   multiple non-root identities belong to the socket group.
  */
+/** The API service's primary group from the protected passwd table; the socket group is a different identity. */
+export const resolveServicePrimaryGid = async (uid: number, etcPasswdContent?: string): Promise<number> => {
+  if (!Number.isSafeInteger(uid) || uid <= 0) fail('PRECONDITION_FAILED', 'a positive service uid is required')
+  const passwd = etcPasswdContent ?? await readRootProtectedSystemFile('/etc/passwd')
+  const gids = passwd.split(/\r?\n/).map(line => line.trim().split(':'))
+    .filter(parts => parts.length >= 4 && Number(parts[2]) === uid).map(parts => Number(parts[3]))
+  if (gids.length !== 1 || !Number.isSafeInteger(gids[0]) || gids[0]! <= 0) fail('PRECONDITION_FAILED', 'the service uid must have exactly one positive primary group')
+  return gids[0]!
+}
+
 export const resolveProvisionedPeerUids = async (
   opts: ResolveProvisionedPeerUidsOptions,
 ): Promise<ReadonlySet<number>> => {

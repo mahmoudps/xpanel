@@ -52,6 +52,14 @@ export async function withHostEffectAuthority<T>(
   })
 }
 
+/**
+ * Restores captured host state after an admitted change failed. Restoration must not
+ * depend on the caller's authority: once that authority lapses, a half-applied host is worse.
+ */
+export function withoutHostEffectAuthority<T>(work: () => Promise<T>): Promise<T> {
+  return admitted.exit(work)
+}
+
 /** Call under the existing generation/writer admission and immediately before an effect. */
 export async function assertHostEffectAuthority(executor: AgentExecutor): Promise<void> {
   const current = admitted.getStore()
@@ -62,6 +70,8 @@ export async function assertHostEffectAuthority(executor: AgentExecutor): Promis
     await current.authority.assertAuthority()
     if (current.retired || current.authority.signal.aborted) return fail('PRECONDITION_FAILED', 'account provisioning was cancelled or retired', { stateChanged: current.changed, ...(current.changed ? { verificationRequired: true } : {}) })
   } catch (error) {
+    // The public failure is generic; operators still need the actual lapsed check in the journal.
+    console.error('xpanel-agent host operation authority lapsed:', isXpanelError(error) ? `${error.code}: ${error.message}` : 'unexpected authority error')
     try {
       return fail(isXpanelError(error) ? error.code : 'PRECONDITION_FAILED', 'host operation authority is no longer current', {
         stateChanged: current.changed,

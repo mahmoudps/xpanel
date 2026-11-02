@@ -17,7 +17,7 @@ async function readWhmcsAuthority(stateRoot: string, owner: ProvisioningPreparat
   const verify = async (): Promise<void> => {
     for (const pin of pins) {
       const opened = await pin.handle.stat(), named = await lstat(pin.path)
-      const state = pin.path === stateRoot && named.uid === owner.uid && named.gid === owner.gid && (named.mode & 0o7777) === 0o2770
+      const state = pin.path === posix.dirname(stateRoot) && named.uid === owner.uid && named.gid === owner.gid && (named.mode & 0o7777) === 0o2770
       if (!named.isDirectory() || named.isSymbolicLink() || opened.dev !== pin.dev || opened.ino !== pin.ino || named.dev !== pin.dev || named.ino !== pin.ino
         || !state && ((named.uid !== 0 && named.uid !== owner.uid) || (named.mode & 0o022))) return denied()
     }

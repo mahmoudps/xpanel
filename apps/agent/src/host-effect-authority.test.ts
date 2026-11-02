@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fail } from '@xpanel/core'
 import { FakeHostExecutor } from './executor.ts'
-import { authorizedHostEffect, withHostEffectAuthority } from './host-effect-authority.ts'
+import { authorizedHostEffect, withHostEffectAuthority, withoutHostEffectAuthority } from './host-effect-authority.ts'
 
 const deferred = () => {
   let resolve!: () => void
@@ -13,6 +13,20 @@ const guard = (allowed: () => boolean) => ({ signal: new AbortController().signa
 })
 
 describe('operation-scoped native effect authority', () => {
+  it('lets restoration run after the operation authority lapsed', async () => {
+    const executor = new FakeHostExecutor()
+    let allowed = true, changes = 0, restored = 0
+    await expect(withHostEffectAuthority(executor, guard(() => allowed), async () => {
+      await authorizedHostEffect(executor, async () => { changes++ })
+      allowed = false
+      await authorizedHostEffect(executor, async () => { changes++ }).catch(async error => {
+        await withoutHostEffectAuthority(() => authorizedHostEffect(executor, async () => { restored++ }))
+        throw error
+      })
+    })).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect([changes, restored]).toEqual([1, 1])
+  })
+
   it('refuses a revoked operation before its first effect and preserves normal work', async () => {
     const executor = new FakeHostExecutor()
     let writes = 0

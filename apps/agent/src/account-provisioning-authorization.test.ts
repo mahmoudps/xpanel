@@ -88,7 +88,7 @@ describe('protected original provisioning credential', () => {
 })
 
 // This is an owned temporary fixture only. It never opens or repairs canonical /var/lib/xpanel.
-it.skipIf(process.platform !== 'linux' || process.getuid?.() !== 0)('reads the installed layout, denies parent mode 2770, then accepts a fixture correction to 2750', async () => {
+it.skipIf(process.platform !== 'linux' || process.getuid?.() !== 0)('accepts the installed 2770 data root and refuses a group-writable state directory', async () => {
   if (process.env.XPANEL_TEST_DISPOSABLE_VM !== disposableVmAcknowledgement) {
     throw new Error('BLOCKED: explicit root disposable Linux VM acknowledgement required')
   }
@@ -123,13 +123,12 @@ it.skipIf(process.platform !== 'linux' || process.getuid?.() !== 0)('reads the i
     const ports = provisioningAuthorizationPorts({ db: database.db, stateRoot, owner })
     const read = () => ports.whmcs()
     await expect(read()).resolves.toEqual(value.saved)
+    // The installer creates /var/lib/xpanel as setgid 02770 for its private service group.
     await chmod(parent, 0o2770)
-    const before = await lstat(parent)
+    await expect(read()).resolves.toEqual(value.saved)
+    await chmod(stateRoot, 0o2770)
     await expect(read()).rejects.toMatchObject({ code: 'FORBIDDEN' })
-    // Only this private fixture is changed; relay's fixed-target normalizer is tested separately.
-    await chmod(parent, 0o2750)
-    const after = await lstat(parent)
-    expect([after.dev, after.ino]).toEqual([before.dev, before.ino])
+    await chmod(stateRoot, 0o2750)
     await expect(read()).resolves.toEqual(value.saved)
   } finally {
     try { await database?.close() }
