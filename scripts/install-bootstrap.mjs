@@ -294,7 +294,9 @@ async function resumeNginxIdentity(serviceUid, serviceGid) {
       && (name !== 'xpanel' || Number(service[2]) === serviceGid), 'INSTALL_RESUME_NGINX_IDENTITY_INVALID')
   }
   const memberships = (await lookup('initgroups', 'nginx')).split(/[ \t]+/)
-  check(memberships.length >= 2 && memberships[0] === 'nginx' && memberships.slice(1).every(id => id === gid),
+  // getent initgroups can report only the username when no supplementary
+  // group is present. The primary GID was independently pinned above.
+  check(memberships.length >= 1 && memberships[0] === 'nginx' && memberships.slice(1).every(id => id === gid),
     'INSTALL_RESUME_NGINX_IDENTITY_INVALID')
   return { uid, user, group }
 }
