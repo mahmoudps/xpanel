@@ -347,7 +347,12 @@ const parseTar = async (stream, trust, destination) => {
           offset += result.bytesWritten
         }
       })
-      if (output) await output.sync()
+      if (output) {
+        // Creation is filtered by the caller's umask. Restore the authenticated mode on
+        // the held descriptor inside the private stage before making the file durable.
+        await output.chmod(mode)
+        await output.sync()
+      }
     } finally { if (output) await closeOwned(output) }
     await reader.consume((512 - size % 512) % 512, part => { if (part.some(byte => byte !== 0)) refuse('CORRUPT_ARCHIVE', 'Nonzero tar member padding') })
     if (metadataPaths.has(path)) metadata.set(path, Buffer.concat(parts, size))

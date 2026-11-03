@@ -177,7 +177,14 @@ export async function acquireLifecycleRelease(input) {
               bootstrap.verifyBootstrapPublisher(JSON.parse(publisherPin.bytes.toString('utf8')), report, bootstrap.parseBootstrapKeys(JSON.parse(keysPin.bytes.toString('utf8'))))
               check(report.manifest.files.some(entry => entry.path === 'scripts/prepared-release.mjs'), 'PREPARED_ACQUISITION_CONTROLS_REQUIRED')
               effectsStarted = true
-              const staged = await verifier.stageAuthenticatedReleaseArchive('/opt/xpanel/staging', { signingKey: keyPin.bytes, keyId: trust.keyId, authenticatedArchive: report })
+              // Older installed verifiers apply file modes only at creation. This dedicated
+              // acquisition process extracts public source inside a private 0700 stage;
+              // restore its private mask before any new module or product operation runs.
+              const previousMask = process.umask(0o022)
+              let staged
+              try {
+                staged = await verifier.stageAuthenticatedReleaseArchive('/opt/xpanel/staging', { signingKey: keyPin.bytes, keyId: trust.keyId, authenticatedArchive: report })
+              } finally { process.umask(previousMask) }
               await sourcePin.verify(); await trustPin.verify(); await keyPin.verify(); await keysPin.verify(); await publisherPin.verify()
               // The existing authenticated extractor has now verified every new source file before this import.
               const prepared = await withAuthenticatedWorkspaceResolution(staged.stagedAt, report.manifest, async () => {
