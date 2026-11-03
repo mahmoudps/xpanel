@@ -1164,6 +1164,12 @@ export const createRootOperationAuditAuthority = async (
       const issuedScope = issuedLeaseScope.getStore()
       if (issuedScope && !equalBinding(issuedScope.binding, binding)) return unavailable('issued_lease_binding_mismatch')
       if (binding.purpose !== expectedPurpose) return invalid('method_purpose_mismatch')
+      // Upgrade/recovery may append only while the issued path retains the same
+      // physical mutex and durable plan. Refuse generic append/recovery before
+      // SQL access or prepare can create a pending event that requires repair.
+      // Installation finalization uses lifecycle.adopt and keeps its own gate.
+      if (binding.purpose === 'host.lifecycle.intent' && ['lifecycle.upgrade', 'lifecycle.recover'].includes(binding.action)
+        && (!issuedScope || !append || typeof issuePlan !== 'function')) return unavailable('issued_lifecycle_scope_required')
       if (!equalOrigin(origin, await strictOrigin())) return unavailable('database_origin_changed')
       requireRoot()
       assertProvider()

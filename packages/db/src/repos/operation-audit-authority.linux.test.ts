@@ -59,6 +59,15 @@ const verified = (f: Awaited<ReturnType<typeof fixture>>, receipt: unknown, bind
 const records = async (path: string): Promise<AuditFileRecord[]> =>
   (await readFile(path, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as AuditFileRecord)
 const indexed = async (handle: DbHandle): Promise<number> => Number((await handle.db.query<{ count: number }>('SELECT COUNT(*) AS count FROM audit_log'))[0]!.count)
+const sinkSnapshot = async (directory: string) => {
+  const entries = []
+  for (const name of ['', ...(await readdir(directory)).sort()]) {
+    const path = name ? join(directory, name) : directory, info = await lstat(path, { bigint: true })
+    entries.push({ name, dev: info.dev, ino: info.ino, mode: info.mode, uid: info.uid, gid: info.gid, nlink: info.nlink,
+      size: info.size, mtime: info.mtimeNs, ctime: info.ctimeNs, bytes: info.isFile() ? await readFile(path) : null })
+  }
+  return entries
+}
 const launch = (script: string, args: string[], gid?: number) => {
   const child = spawn(process.execPath, ['--input-type=module', '-e', script, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env }, ...(gid === undefined ? {} : { gid }) })
   children.add(child)
@@ -71,7 +80,7 @@ const launch = (script: string, args: string[], gid?: number) => {
   })
   return { child, done, output: () => stdout }
 }
-const childProgram = "\nimport fs from 'node:fs/promises'\nimport { syncBuiltinESMExports } from 'node:module'\nconst [moduleUrl,clientUrl,directory,dbPath,bindingJson,mode]=process.argv.slice(1)\nconst binding=JSON.parse(bindingJson),log=directory+'/operation-intents.jsonl'\nconst originalOpen=fs.open.bind(fs)\nlet signalled=false\nconst hold=async()=>{process.stdout.write('AUDIT_BOUNDARY_READY\\n');await new Promise(()=>{})}\nif(mode!=='normal'){\n fs.open=async(...args)=>{\n  const handle=await originalOpen(...args)\n  if(String(args[0])===(mode.startsWith('anchor-')?directory+'/operation-audit-authority.json.candidate':log)){\n   const originalWrite=handle.writeFile.bind(handle),originalSync=handle.sync.bind(handle)\n   handle.writeFile=async(data,...rest)=>{\n    if((mode==='partial'||mode==='anchor-partial')&&!signalled&&Buffer.isBuffer(data)&&data.length>1){signalled=true;await originalWrite(data.subarray(0,Math.floor(data.length/2)));await hold();return}\n    return originalWrite(data,...rest)\n   }\n   handle.sync=async()=>{\n    await originalSync()\n    if(!signalled&&(await handle.stat()).size>0&&(mode==='complete'||mode==='eio'||mode==='anchor-complete')){\n     signalled=true\n     if(mode==='eio')throw Object.assign(new Error('controlled post-sync uncertainty'),{code:'EIO'})\n     await hold()\n    }\n   }\n  }\n  return handle\n }\n syncBuiltinESMExports()\n}\nconst{createDb}=await import(clientUrl)\nconst{createRootOperationAuditAuthority,assertOperationIntentReceipt}=await import(moduleUrl)\nconst handle=createDb(dbPath,{durability:'strict'})\ntry{\n const authority=await createRootOperationAuditAuthority(handle.db,{directory})\n if(mode==='contender')process.stdout.write('AUDIT_ATTEMPT_STARTED\\n')\n const receipt=await authority.appendReconcileIntent(binding)\n process.stdout.write(JSON.stringify({receipt:await handle.db.transaction(async tx=>assertOperationIntentReceipt(receipt,binding,tx))})+'\\n')\n}catch(error){process.stdout.write(JSON.stringify({rejected:true,code:error.code??null})+'\\n');process.exitCode=2}\nfinally{await handle.close()}\n"
+const childProgram = "\nimport fs from 'node:fs/promises'\nimport { syncBuiltinESMExports } from 'node:module'\nconst [moduleUrl,clientUrl,directory,dbPath,bindingJson,mode]=process.argv.slice(1)\nconst binding=JSON.parse(bindingJson),log=directory+'/operation-intents.jsonl'\nconst originalOpen=fs.open.bind(fs)\nlet signalled=false\nconst hold=async()=>{const keepAlive=setInterval(()=>{},1000);try{process.stdout.write('AUDIT_BOUNDARY_READY\\n');await new Promise(()=>{})}finally{clearInterval(keepAlive)}}\nif(mode!=='normal'){\n fs.open=async(...args)=>{\n  const handle=await originalOpen(...args)\n  if(String(args[0])===(mode.startsWith('anchor-')?directory+'/operation-audit-authority.json.candidate':log)){\n   const originalWrite=handle.writeFile.bind(handle),originalSync=handle.sync.bind(handle)\n   handle.writeFile=async(data,...rest)=>{\n    if((mode==='partial'||mode==='anchor-partial')&&!signalled&&Buffer.isBuffer(data)&&data.length>1){signalled=true;await originalWrite(data.subarray(0,Math.floor(data.length/2)));await hold();return}\n    return originalWrite(data,...rest)\n   }\n   handle.sync=async()=>{\n    await originalSync()\n    if(!signalled&&(await handle.stat()).size>0&&(mode==='complete'||mode==='eio'||mode==='anchor-complete')){\n     signalled=true\n     if(mode==='eio')throw Object.assign(new Error('controlled post-sync uncertainty'),{code:'EIO'})\n     await hold()\n    }\n   }\n  }\n  return handle\n }\n syncBuiltinESMExports()\n}\nconst{createDb}=await import(clientUrl)\nconst{createRootOperationAuditAuthority,assertOperationIntentReceipt}=await import(moduleUrl)\nconst handle=createDb(dbPath,{durability:'strict'})\ntry{\n const authority=await createRootOperationAuditAuthority(handle.db,{directory})\n if(mode==='contender')process.stdout.write('AUDIT_ATTEMPT_STARTED\\n')\n const receipt=await authority.appendReconcileIntent(binding)\n process.stdout.write(JSON.stringify({receipt:await handle.db.transaction(async tx=>assertOperationIntentReceipt(receipt,binding,tx))})+'\\n')\n}catch(error){process.stdout.write(JSON.stringify({rejected:true,code:error.code??null})+'\\n');process.exitCode=2}\nfinally{await handle.close()}\n"
 const childArgs = (f: Awaited<ReturnType<typeof fixture>>, binding: OperationIntentBinding, mode = 'normal') => [
   pathToFileURL(join(import.meta.dirname, 'operation-audit-authority.ts')).href,
   pathToFileURL(join(import.meta.dirname, '../client.ts')).href,
@@ -85,13 +94,15 @@ const killAtBoundary = async (f: Awaited<ReturnType<typeof fixture>>, mode: 'par
     if (Date.now() >= deadline) throw new Error('Actual audit boundary timed out')
     await new Promise(resolve => setTimeout(resolve, 10))
   }
-  worker.child.kill('SIGKILL')
+  expect(worker.child.exitCode).toBeNull()
+  expect(worker.child.signalCode).toBeNull()
+  expect(worker.child.kill('SIGKILL')).toBe(true)
   expect((await worker.done).signal).toBe('SIGKILL')
 }
 describe('actual native root operation audit authority', () => {
-  it('issues and recovers a distinct lifecycle intent only for its persisted root job and rejects cross-purpose receipts', async () => {
+  it('issues and recovers an installation adoption intent only for its persisted root job and rejects cross-purpose receipts', async () => {
     const f = await fixture()
-    const binding: OperationIntentBinding = { ...f.binding, purpose: 'host.lifecycle.intent', action: 'lifecycle.upgrade' }
+    const binding: OperationIntentBinding = { ...f.binding, purpose: 'host.lifecycle.intent', action: 'lifecycle.adopt' }
     await expect(f.authority.appendLifecycleIntent(binding)).rejects.toThrow()
     await createJob(f.handle.db, { id: binding.jobId, kind: binding.action, actor: f.principal.username, detail: { lifecycleIntent: binding } })
     const receipt = await f.authority.appendLifecycleIntent(binding)
@@ -104,6 +115,23 @@ describe('actual native root operation audit authority', () => {
     await expect(f.authority.appendLifecycleIntent(f.binding)).rejects.toThrow()
     await expect(f.authority.appendLifecycleIntent({ ...binding, requestFingerprint: 'b'.repeat(64) })).rejects.toThrow()
     expect(await records(f.log)).toHaveLength(1)
+  })
+  it.each([
+    ['lifecycle.upgrade', false], ['lifecycle.upgrade', true],
+    ['lifecycle.recover', false], ['lifecycle.recover', true],
+  ] as const)('refuses unscoped %s before audit or epoch mutation with existing sink=%s', async (action, existing) => {
+    const f = await fixture()
+    const binding: OperationIntentBinding = { ...f.binding, purpose: 'host.lifecycle.intent', action }
+    await createJob(f.handle.db, { id: binding.jobId, kind: binding.action, actor: f.principal.username, detail: { lifecycleIntent: binding } })
+    if (existing) await f.authority.appendReconcileIntent({ ...f.binding, jobId: randomUUID() })
+    const before = await sinkSnapshot(f.directory), rows = await f.handle.db.query('SELECT * FROM audit_log')
+    for (const method of ['appendLifecycleIntent', 'recoverLifecycleIntent'] as const) {
+      await expect(f.authority[method](binding)).rejects.toMatchObject({
+        code: 'PRECONDITION_FAILED', detail: { reason: 'issued_lifecycle_scope_required' },
+      })
+      expect(await sinkSnapshot(f.directory)).toEqual(before)
+      expect(await f.handle.db.query('SELECT * FROM audit_log')).toEqual(rows)
+    }
   })
   it('syncs a real chain/index and remints the same event after reopening without accepting copies', async () => {
     const f = await fixture(), receipt = await f.authority.appendReconcileIntent(f.binding)
@@ -238,7 +266,7 @@ describe('actual native root operation audit authority', () => {
     expect((await readFile(f.log)).equals(heldBytes)).toBe(true)
     expect((await readFile(f.pending)).equals(heldPending)).toBe(true)
     expect(await indexed(f.handle)).toBe(0)
-    holder.child.kill('SIGKILL')
+    expect(holder.child.kill('SIGKILL')).toBe(true)
     expect((await holder.done).signal).toBe('SIGKILL')
     const completed = await contender.done
     expect(completed.code, completed.stderr).toBe(0)

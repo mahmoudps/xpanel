@@ -55,7 +55,8 @@ const fixture = async () => {
   await migrate(handle.db); await initializeOperationalMetadata(handle.db)
   for (const path of [dbPath, dbPath + '-wal', dbPath + '-shm']) await chmod(path, 0o600)
   const principal = await createRootPrincipal(handle.db, { username: 'readonlyauditor', passwordHash: ARGON2, forcePasswordChange: false })
-  const binding: OperationIntentBinding = { purpose: 'host.lifecycle.intent', jobId: randomUUID(), requestFingerprint: 'a'.repeat(64), action: 'lifecycle.upgrade', principalId: principal.id }
+  // Finalization provides the ordinary completed baseline; upgrade/recovery use the issued path below.
+  const binding: OperationIntentBinding = { purpose: 'host.lifecycle.intent', jobId: randomUUID(), requestFingerprint: 'a'.repeat(64), action: 'lifecycle.adopt', principalId: principal.id }
   await createJob(handle.db, { id: binding.jobId, kind: binding.action, actor: principal.username, detail: { lifecycleIntent: binding } })
   const authority = await createRootOperationAuditAuthority(handle.db, { directory })
   const receipt = await authority.appendLifecycleIntent(binding)
@@ -96,7 +97,7 @@ const prefix = <T>(f: Awaited<ReturnType<typeof issuedFixture>>, work: Parameter
 
 describe('exact issued lifecycle append recovery algorithm; native admission is a separate gate', () => {
   it('issues one immutable event under the original mutex and keeps its lease through index and finish', async () => {
-    const f = await fixture(), binding = { ...f.binding, jobId: randomUUID(), requestFingerprint: 'c'.repeat(64) }
+    const f = await fixture(), binding = { ...f.binding, action: 'lifecycle.upgrade', jobId: randomUUID(), requestFingerprint: 'c'.repeat(64) }
     await createJob(f.handle.db, { id: binding.jobId, kind: binding.action, actor: 'readonlyauditor', detail: { lifecycleIntent: binding } })
     let plan: Readonly<IssuedLifecycleAppendPlan> | undefined
     const receipt = await f.authority.appendIssuedLifecycleIntent(binding, async value => {
