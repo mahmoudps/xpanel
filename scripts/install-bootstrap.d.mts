@@ -3,7 +3,7 @@ export const BOOTSTRAP_PATH: '/var/lib/xpanel-lifecycle/bootstrap.json'
 export const DEPENDENCY_RECEIPT: '/var/lib/xpanel-lifecycle/install-dependencies.json'
 
 export interface NewInstallInputs {
-  phase?: 'plan' | 'prepare'
+  phase?: 'plan' | 'verify' | 'prepare' | 'resume'
   artifactPath: string
   artifactSha256: string
   trustPath: string
@@ -34,6 +34,8 @@ export function parseBootstrapKeys(value: unknown): Readonly<BootstrapKeys>
 export function verifyBootstrapPublisher(value: unknown, report: { manifest: { version: string; controlDbSchemaVersion: number }; archiveSha256: string; totalUnpackedBytes: number }, keys: unknown): Readonly<PublisherManifest>
 /** Pure prerequisite validation; legacy archive verification is not changed or replaced. */
 export function assertFreshInstallReleaseControls(report: unknown): void
+export function verifyNewInstallation(inputs: Omit<NewInstallInputs, 'phase'> & { phase?: 'verify' }): Promise<Readonly<{ status: 'verified'; version: string; active: false }>>
+export function resumePreparedInstallation(inputs: Omit<NewInstallInputs, 'phase'> & { phase?: 'resume' }): Promise<Readonly<{ status: 'prepared'; version: string; releaseRoot: string; currentLink: string; dependencyReceiptSha256: string; installationReceipt: 'pending'; resumed: true }>>
 export function prepareNewInstallation(inputs: Omit<NewInstallInputs, 'phase'> & { phase?: 'prepare' }): Promise<Readonly<{ status: 'prepared'; version: string; releaseRoot: string; currentLink: string; dependencyReceiptSha256: string; installationReceipt: 'pending' }>>
 export function establishInstallAdmission(): Promise<Readonly<{ status: 'admission_ready'; version: string; releaseRoot: string; installationReceipt: 'pending' }>>
 export function captureInstallOwnership(): Promise<Readonly<{ status: 'bootstrap_pending'; version: string; releaseRoot: string; installationReceipt: 'captured'; active: false }>>

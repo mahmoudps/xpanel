@@ -23,6 +23,9 @@ INSTALL_ROOT="/opt/xpanel"
 INSTALL_SOURCE_ROOT="$INSTALL_ROOT"
 PROGRAM_ROOT="$INSTALL_ROOT"
 NEW_INSTALL=0
+RESUME_PREPARED=0
+RESUME_DNS_BINDING=""
+KERNEL_SNAPSHOT=""
 NEW_INSTALL_ARGS=()
 DNS_ADDRESS=""
 FRESH_DNS=0
@@ -41,8 +44,20 @@ for arg in "$@"; do
       DRY_RUN=1
       ;;
     --new-install)
+      [[ "$NEW_INSTALL" -eq 0 ]] || { echo "ERROR: Select exactly one installation mode." >&2; exit 1; }
       NEW_INSTALL=1
       PROGRAM_ROOT=/opt/xpanel/current
+      ;;
+    --resume-prepared)
+      [[ "$NEW_INSTALL" -eq 0 ]] || { echo "ERROR: Select exactly one installation mode." >&2; exit 1; }
+      NEW_INSTALL=1
+      RESUME_PREPARED=1
+      PROGRAM_ROOT=/opt/xpanel/current
+      ;;
+    --kernel-snapshot=*)
+      [[ -z "$KERNEL_SNAPSHOT" ]] || { echo "ERROR: Duplicate kernel snapshot." >&2; exit 1; }
+      KERNEL_SNAPSHOT="${arg#*=}"
+      [[ "$KERNEL_SNAPSHOT" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || { echo "ERROR: Kernel snapshot must be a UTC timestamp." >&2; exit 1; }
       ;;
     --artifact=*|--artifact-sha256=*|--release-trust-file=*|--release-keys-file=*)
       NEW_INSTALL_ARGS+=("$arg")
@@ -93,7 +108,8 @@ for arg in "$@"; do
       MANAGEMENT_TLS_ARGS+=("$arg")
       ;;
     --help|-h)
-      echo "Usage: $0 [--dry-run] [--new-install --artifact=FILE --artifact-sha256=HEX --release-trust-file=FILE --release-keys-file=FILE] [--os-release=/etc/os-release] [--engine=apache|openlitespeed] [--php=8.3] [--apache-mpm=itk|prefork] [--with-mail] [--with-dns --dns-address=IP] [--with-ftp] [--with-mariadb] [--with-modsecurity] [--management-hostname=NAME --management-address=IP --acme-email=EMAIL --accept-acme-terms]"
+      echo "Usage: $0 [--dry-run] [--new-install|--resume-prepared --artifact=FILE --artifact-sha256=HEX --release-trust-file=FILE --release-keys-file=FILE] [--kernel-snapshot=YYYYMMDDTHHMMSSZ] [--os-release=/etc/os-release] [--engine=apache|openlitespeed] [--php=8.3] [--apache-mpm=itk|prefork] [--with-mail] [--with-dns --dns-address=IP] [--with-ftp] [--with-mariadb] [--with-modsecurity] [--management-hostname=NAME --management-address=IP --acme-email=EMAIL --accept-acme-terms]"
+      echo "Prepared recovery with DNS requires an empty Ubuntu 24.04 amd64 vendor BIND package, inactive or awaiting a verified failed restart."
       exit 0
       ;;
     *)
@@ -103,7 +119,7 @@ for arg in "$@"; do
   esac
 done
 
-if [[ "$NEW_INSTALL" -eq 0 && ( ${#NEW_INSTALL_ARGS[@]} -gt 0 || -n "$DNS_ADDRESS" ) ]]; then
+if [[ "$NEW_INSTALL" -eq 0 && ( ${#NEW_INSTALL_ARGS[@]} -gt 0 || -n "$DNS_ADDRESS" || -n "$KERNEL_SNAPSHOT" ) ]]; then
   echo "ERROR: Explicit release trust and DNS address options require --new-install." >&2
   exit 1
 fi
@@ -172,6 +188,11 @@ case "$OS_ID" in
     exit 1
     ;;
 esac
+
+if [[ -n "$KERNEL_SNAPSHOT" && "$OS_ID" != ubuntu ]]; then
+  echo "ERROR: Historical kernel snapshots are supported only for Ubuntu." >&2
+  exit 1
+fi
 
 PHP_COMPACT="${PHP_VERSION//./}"
 if [[ "$OS_FAMILY" == "debian" ]]; then
@@ -430,12 +451,34 @@ verify_fresh_pdns_vendor() {
   record_install_phase dns-vendor completed "$(sha256sum -- "$config" | cut -d' ' -f1)"
 }
 
+# Only the newer authenticated installer contains this verifier when resuming an older prepared payload.
+verify_resumed_dns() {
+  local step="$1" helper="$SCRIPT_DIR/install-dns-resume.mjs" proof
+  assert_root_file "$helper"
+  assert_root_file "$SCRIPT_DIR/lifecycle-ownership.mjs"
+  case "$step" in
+    inspect)
+      [[ -z "$RESUME_DNS_BINDING" ]] || die "Prepared DNS admission already exists."
+      proof="$("$NODE_BIN" "$helper" inspect)" || die "The existing DNS package state requires reviewed migration."
+      [[ "$proof" =~ ^xpanel-pdns-vendor-inspected-v2\ ([a-f0-9]{64})$ ]] || die "The prepared DNS source binding is invalid."
+      RESUME_DNS_BINDING="${BASH_REMATCH[1]}"
+      ;;
+    quiesce)
+      [[ "$RESUME_DNS_BINDING" =~ ^[a-f0-9]{64}$ ]] || die "The prepared DNS source was not inspected."
+      proof="$("$NODE_BIN" "$helper" quiesce "$RESUME_DNS_BINDING")" || die "The DNS service requires reviewed recovery."
+      [[ "$proof" == xpanel-pdns-vendor-pristine-v1 ]] || die "The prepared DNS service is not quiescent."
+      ;;
+    *) die "Unknown prepared DNS admission step." ;;
+  esac
+}
+
 provision_fresh_dns() {
   [[ "$FRESH_DNS" -eq 1 ]] || die "DNS backend migration is not admitted by this fresh installer."
   local directory=/etc/powerdns config=/etc/powerdns/pdns.conf
   if [[ "$OS_FAMILY" == rhel ]]; then directory=/etc/pdns; config=/etc/pdns/pdns.conf; fi
   assert_root_owned_path "$directory"
   [[ "$(id -u pdns)" != 0 ]] || die "PowerDNS requires its own unprivileged daemon identity."
+  if [[ "$RESUME_PREPARED" -eq 1 ]]; then verify_resumed_dns quiesce; fi
   verify_fresh_pdns_vendor "$config"
   install -d -o root -g root -m 0755 /etc/powerdns /var/lib/powerdns /var/lib/powerdns/zones
   # configure_selinux made /var/lib/powerdns equivalent to EL's /var/lib/pdns; zone files the agent adds inherit it.
@@ -846,7 +889,7 @@ apply_os_configuration() {
 
 # Journaled user quota (vfsv1) needs quota_v2 and quota_tree when /home is mounted. Ubuntu's virtual kernel
 # flavour ships them only in linux-modules-extra, so a kernel without them cannot mount a quota-enabled /home
-# at boot. Kernels without a module tree (EL rescue images) are not checked.
+# at boot. Only explicitly named EL rescue images may lack a module tree.
 kernel_lacks_quota_format() {
   local index module
   index="$(cat "/lib/modules/$1/modules.builtin" "/lib/modules/$1/modules.dep" 2>/dev/null || true)"
@@ -857,29 +900,57 @@ kernel_lacks_quota_format() {
 }
 
 bootable_kernel_releases() {
-  local vmlinuz release
+  local vmlinuz release module_index count=0
   for vmlinuz in /boot/vmlinuz-*; do
+    [[ -e "$vmlinuz" || -L "$vmlinuz" ]] || continue
     release="${vmlinuz#/boot/vmlinuz-}"
-    if [[ -f "/lib/modules/$release/modules.dep" ]]; then printf '%s\n' "$release"; fi
+    if [[ "$OS_FAMILY" == rhel && "$release" == 0-rescue-* ]]; then continue; fi
+    [[ -f "$vmlinuz" && ! -L "$vmlinuz" && -d "/lib/modules/$release" && ! -L "/lib/modules/$release"
+      && -f "/lib/modules/$release/modules.dep" && ! -L "/lib/modules/$release/modules.dep" ]] \
+      || { die "A bootable kernel has no observable regular module index; preserve it for explicit recovery."; return 1; }
+    assert_root_file "$vmlinuz" || return 1
+    module_index="$(realpath -e -- "/lib/modules/$release/modules.dep")" || return 1
+    # /lib is a distribution-owned alias to /usr/lib on merged-usr hosts.
+    assert_root_file "$module_index" || return 1
+    printf '%s\n' "$release"
+    count=$((count + 1))
   done
+  [[ "$count" -gt 0 ]] || { die "No supported bootable kernel was observed; quota safety cannot be established."; return 1; }
 }
 
 # Every bootable kernel gets the modules, and an installed linux-image-virtual* meta package gains its
 # linux-image-extra-virtual* counterpart so later kernel upgrades bring them too.
 ensure_kernel_quota_format() {
-  local packages=() release meta
+  local packages=() release meta candidate inventory
+  inventory="$(bootable_kernel_releases)" || return 1
   if [[ "$OS_FAMILY" == "debian" ]]; then
     while read -r release; do
-      if kernel_lacks_quota_format "$release"; then packages+=("linux-modules-extra-$release"); fi
-    done < <(bootable_kernel_releases)
+      if kernel_lacks_quota_format "$release"; then
+        candidate="$(LC_ALL=C apt-cache policy "linux-modules-extra-$release" | awk '/^[[:space:]]*Candidate:/ { print $2 }')"
+        if [[ -n "$candidate" && "$candidate" != '(none)' ]]; then
+          packages+=("linux-modules-extra-$release")
+        else
+          [[ -n "$KERNEL_SNAPSHOT" ]] || die "Kernel $release has no matching modules in current APT indexes. Select an authenticated Ubuntu kernel snapshot or prepare a supported kernel before installing xPanel."
+          assert_root_file "$SCRIPT_DIR/install-kernel-quotas.sh"
+          source "$SCRIPT_DIR/install-kernel-quotas.sh"
+          install_kernel_quota_snapshot_package "$release"
+        fi
+      fi
+    done <<< "$inventory"
     while read -r meta; do
       packages+=("${meta/linux-image-virtual/linux-image-extra-virtual}")
     done < <(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'linux-image-virtual*' 2>/dev/null | awk '$1 == "ii" { print $2 }')
     if ((${#packages[@]})); then apt-get install -y --no-install-recommends "${packages[@]}"; fi
   fi
+  assert_bootable_kernel_quota_format
+}
+
+assert_bootable_kernel_quota_format() {
+  local release inventory
+  inventory="$(bootable_kernel_releases)" || return 1
   while read -r release; do
     if kernel_lacks_quota_format "$release"; then die "Kernel $release has no quota_v2/quota_tree; a quota-enabled /home would not mount when it boots."; fi
-  done < <(bootable_kernel_releases)
+  done <<< "$inventory"
 }
 
 # Build a native helper from the release source (helpers/<name>/build.mjs), install it root:root 0755 and record its
@@ -1051,6 +1122,17 @@ command -v runuser > /dev/null || die "runuser is required for unprivileged sche
 command -v systemctl > /dev/null || die "systemd is required for service provisioning."
 [[ -d /run/systemd/system ]] || die "A running systemd instance is required for provisioning."
 assert_cgroup_and_quota_preflight
+assert_root_file "$NODE_BIN"
+[[ -x "$NODE_BIN" && "$("$NODE_BIN" --version)" == "v$PINNED_NODE_VERSION" ]] || die "A trusted pinned Node executable is required before staging."
+command -v flock > /dev/null || die "flock is required to serialize native installation."
+INSTALL_LOCK=/run/xpanel-installer.lock
+if [[ ! -e "$INSTALL_LOCK" && ! -L "$INSTALL_LOCK" ]]; then
+  (umask 077; set -o noclobber; : > "$INSTALL_LOCK") || die "Another installer created its lock; preserve its execution."
+fi
+assert_root_file "$INSTALL_LOCK"
+[[ "$(stat -c '%U:%G:%a:%h:%s' -- "$INSTALL_LOCK")" == root:root:600:1:0 ]] || die "The installer lock has unexpected ownership or contents."
+exec {INSTALL_LOCK_FD}<> "$INSTALL_LOCK"
+flock -n "$INSTALL_LOCK_FD" || die "Another native installer is still running."
 if systemctl is-active --quiet xpanel-api.service || systemctl is-active --quiet xpanel-agent.service; then
   die "Stop the existing xPanel services before changing provisioning; no live reconfiguration is attempted."
 fi
@@ -1058,10 +1140,21 @@ if [[ -e /var/lib/xpanel/control.db || -L /var/lib/xpanel/control.db ]]; then
   [[ -f /var/lib/xpanel/control.db && ! -L /var/lib/xpanel/control.db ]] || die "control.db must be a regular file."
   [[ "$(stat -c %U:%G:%a /var/lib/xpanel/control.db)" == "xpanel:xpanel:660" ]] || die "Existing control.db ownership/mode requires an explicit reviewed repair."
 fi
+prepared_release=""
+if [[ "$RESUME_PREPARED" -eq 1 ]]; then
+  prepared_release="$("$NODE_BIN" "$SCRIPT_DIR/install-bootstrap.mjs" resume "${NEW_INSTALL_ARGS[@]}")"
+else
+  "$NODE_BIN" "$SCRIPT_DIR/install-bootstrap.mjs" verify "${NEW_INSTALL_ARGS[@]}" > /dev/null
+fi
 if [[ "$WITH_DNS" -eq 1 ]]; then
   [[ -n "$DNS_ADDRESS" ]] || die "Fresh authoritative DNS requires --dns-address with an assigned host address."
+  if [[ "$RESUME_PREPARED" -eq 1 ]]; then verify_resumed_dns inspect; fi
   for existing_dns in /etc/powerdns/pdns.conf /etc/pdns/pdns.conf /etc/powerdns/named.conf.xpanel-zones; do
-    [[ ! -e "$existing_dns" && ! -L "$existing_dns" ]] || die "An existing DNS configuration requires a reviewed backend migration; it was preserved."
+    if [[ -e "$existing_dns" || -L "$existing_dns" ]]; then
+      local_vendor_dns=/etc/powerdns/pdns.conf
+      [[ "$OS_FAMILY" != rhel ]] || local_vendor_dns=/etc/pdns/pdns.conf
+      [[ "$RESUME_PREPARED" -eq 1 && "$existing_dns" == "$local_vendor_dns" ]] || die "An existing DNS configuration requires a reviewed backend migration; it was preserved."
+    fi
   done
   for dns_directory in /etc/powerdns /etc/pdns /var/lib/powerdns /var/lib/powerdns/zones; do
     [[ ! -L "$dns_directory" ]] || die "An existing DNS directory is symbolic; preserved for review."
@@ -1079,12 +1172,22 @@ if [[ "$WITH_MARIADB" -eq 1 ]]; then
     if [[ -d "$database_directory" && -n "$(find "$database_directory" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then FRESH_MARIADB=0; fi
   done
 fi
-assert_root_file "$NODE_BIN"
-[[ -x "$NODE_BIN" && "$("$NODE_BIN" --version)" == "v$PINNED_NODE_VERSION" ]] || die "A trusted pinned Node executable is required before staging."
 if [[ "$WITH_DNS" -eq 1 ]]; then
   "$NODE_BIN" --input-type=module -e 'import{isIP}from"node:net";import{networkInterfaces}from"node:os";const ip=process.argv[1];if(!isIP(ip)||ip.includes("%")||!Object.values(networkInterfaces()).flat().some(x=>x&&!x.internal&&x.address===ip))process.exit(1)' "$DNS_ADDRESS" || die "DNS address must be an actual assigned non-loopback host address."
 fi
-prepared_release="$("$NODE_BIN" "$SCRIPT_DIR/install-bootstrap.mjs" prepare "${NEW_INSTALL_ARGS[@]}")"
+echo "[0/6] Preparing quota modules before publishing new installation state..."
+if [[ "$OS_FAMILY" == debian ]]; then
+  export DEBIAN_FRONTEND=noninteractive
+  export NEEDRESTART_MODE=l
+  apt-get update -y
+fi
+ensure_kernel_quota_format
+if [[ "$RESUME_PREPARED" -eq 0 ]]; then
+  prepared_release="$("$NODE_BIN" "$SCRIPT_DIR/install-bootstrap.mjs" prepare "${NEW_INSTALL_ARGS[@]}")"
+else
+  resumed_release="$("$NODE_BIN" "$SCRIPT_DIR/install-bootstrap.mjs" resume "${NEW_INSTALL_ARGS[@]}")"
+  [[ "$resumed_release" == "$prepared_release" ]] || die "Prepared installation identity changed during OS prerequisite preparation."
+fi
 INSTALL_SOURCE_ROOT="$(printf '%s' "$prepared_release" | "$NODE_BIN" --input-type=module -e 'let s="";for await(const c of process.stdin)s+=c;const v=JSON.parse(s);if(v.status!=="prepared"||!/^\/opt\/xpanel\/releases\/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(v.releaseRoot))process.exit(1);process.stdout.write(v.releaseRoot)')"
 PROGRAM_ROOT="$INSTALL_SOURCE_ROOT"
 assert_pinned_runtime
@@ -1163,7 +1266,7 @@ if [[ "$OS_FAMILY" == "rhel" && "$APACHE_MPM" == "itk" ]]; then
   install_el_mpm_itk
 fi
 echo "[2/6] Ensuring every bootable kernel carries the quota format modules..."
-ensure_kernel_quota_format
+assert_bootable_kernel_quota_format
 echo "[2/6] Applying the web server and service configuration of the OS profile..."
 apply_os_configuration
 if selinuxenabled 2> /dev/null; then
