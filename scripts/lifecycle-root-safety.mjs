@@ -7,7 +7,7 @@ import { lstat, open, readFile, readlink, realpath, rename, unlink, readdir } fr
 import { basename, dirname, join, posix } from 'node:path'
 import { withHostOperationGuard, assertHostOperationGuardHeld, assertHostOperationGuardActive, getStrictOperationDatabaseOrigin, createRootOperationAuditAuthority, assertOperationIntentReceipt, getPrincipal, createJob, finishJob, finishUpgrade, currentSchemaVersion, latestUpgrade, reindexFromState } from '../packages/db/src/index.ts'
 import { StateStore } from '../packages/state/src/index.ts'
-import { withAuthenticatedReleaseArchive, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive } from './release-verifier.mjs'
+import { clearDependencyGroupWorldWrite, offlineDependencyInstallArguments, withAuthenticatedReleaseArchive, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive } from './release-verifier.mjs'
 import { readInstallationReceipt, assertOwnedFile, withTrustedFile, withTrustedDirectory, requireLinuxRoot } from './lifecycle-ownership.mjs'
 import { observeOwnedControlPlaneUnits, assertOwnedControlPlaneQuiescent, awaitOwnedServiceChildren, projectOwnedControlPlaneObservation } from './lifecycle-services.mjs'
 
@@ -238,8 +238,9 @@ async function runtimeDependencies(scope, root, report) {
   const manager = scope.trust.packageManagerPath
   const checked = await nativeCommand(manager, ['--version'], { sha256: scope.trust.packageManagerSha256 })
   if (checked.code !== 0 || checked.output.trim() !== report.manifest.runtime.packageManager.split('@').at(-1)) fail('LIFECYCLE_PACKAGE_MANAGER_MISMATCH')
-  const installed = await nativeCommand(manager, ['install', '--offline', '--frozen-lockfile', '--prod', '--ignore-scripts', '--verify-store-integrity'], { cwd: root, sha256: scope.trust.packageManagerSha256, timeoutMs: 120_000 })
+  const installed = await nativeCommand(manager, offlineDependencyInstallArguments(report.manifest), { cwd: root, sha256: scope.trust.packageManagerSha256, timeoutMs: 120_000 })
   if (installed.code !== 0) fail('LIFECYCLE_DEPENDENCY_INSTALL_FAILED')
+  await clearDependencyGroupWorldWrite(root)
   const lock = await readFile(join(root, 'pnpm-lock.yaml'))
   if (sha(lock) !== report.manifest.lockfileSha256) fail('LIFECYCLE_LOCKFILE_CHANGED')
   const moduleRoot = join(root, 'node_modules'), actualRoot = await realpath(root)

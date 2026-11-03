@@ -136,10 +136,10 @@ describe('dnf profile (CentOS Stream / Alma / Rocky)', () => {
     expect(centos9.packages.modsecurity).toContain('mod_security')
   })
 
-  it('models missing mpm_itk as an empty package list', () => {
+  it('provides mpm_itk on EL through its pinned source build inputs', () => {
     for (const p of [centos9, centos10, profileFor(ALMA_9), profileFor(ROCKY_9)]) {
-      expect(p.packages['apache-itk']).toEqual([])
-      expect(itkAvailable(p)).toBe(false)
+      expect(p.packages['apache-itk']).toEqual(['httpd-devel', 'libcap-devel', 'redhat-rpm-config', 'make'])
+      expect(itkAvailable(p)).toBe(true)
     }
   })
 

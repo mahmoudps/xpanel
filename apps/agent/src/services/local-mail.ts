@@ -153,7 +153,11 @@ export const ensureInstalledMail = async (
   const mailbox = services.renderDovecotMailboxConf(os, { postmaster })
   if (mayWrite(mailbox.path, mailbox.content, existingMailbox, owned)) await writeFileIfChanged(executor, mailbox)
   await applyPostfixLocalDelivery(executor, os, owned)
-  await executor.runAction({ kind: 'systemd', verb: 'reload', unit: os.services.dovecot })
-  await executor.runAction({ kind: 'systemd', verb: 'reload', unit: os.services.postfix })
+  // The installer enables the mail daemons, and EL leaves them stopped until this configuration exists:
+  // start is a no-op on a running unit, and the reload then applies the configuration.
+  for (const unit of [os.services.dovecot, os.services.postfix]) {
+    await executor.runAction({ kind: 'systemd', verb: 'start', unit })
+    await executor.runAction({ kind: 'systemd', verb: 'reload', unit })
+  }
   return signing
 }

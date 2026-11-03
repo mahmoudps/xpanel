@@ -5,6 +5,7 @@ import { assertProxyOptions, validateDefaultSitePolicy, validateNginxWorkers } f
 import { readAdmittedTrustedProxyPolicy, renderTrustedProxyRealIp } from '../../../core/src/trusted-proxies.ts'
 import type { TrustedProxyRenderAuthority } from '../../../core/src/trusted-proxies.ts'
 import type { Account, Certificate, ConfigTest, Domain, HostAction, Limit, OsProfile, ProxyOptions, RenderedFile, ServerSettings } from '@xpanel/core'
+import { posix } from 'node:path'
 import { certPaths, DEFAULT_TLS, nginxAccessLog, nginxBinary, nginxErrorLog, nginxModuleIncludes, XP_PATHS } from './paths.ts'
 import { nginxQuote } from './quote.ts'
 import { asCertList, certForName, groupSites, siteMode, siteUpstream, type RenderTime, type SiteGroup, type UpstreamPolicy } from './sites.ts'
@@ -157,10 +158,14 @@ export const renderNginxMain = (settings: ServerSettings, os: OsProfile, trusted
 /** Directories the edge needs; the cache belongs to the nginx worker user, nothing to an account. */
 export const nginxEdgeDirs = (os: OsProfile): HostAction[] => {
   const user = assertSystemUser(os.paths.nginxUser, 'nginx user')
+  // Parents first: ensure-dir creates one level. The cache parent is traverse-only so the nginx workers reach
+  // their cache while the agent's root-only native cache beside it stays unlisted.
   return [
+    { kind: 'ensure-dir', path: posix.dirname(XP_PATHS.nginxCacheDir), mode: 0o711, owner: 'root', group: 'root' },
     { kind: 'ensure-dir', path: XP_PATHS.nginxCacheDir, mode: 0o700, owner: user, group: user },
     { kind: 'ensure-dir', path: XP_PATHS.nginxLogDir, mode: 0o750, owner: 'root', group: user },
     { kind: 'ensure-dir', path: XP_PATHS.acmeDir, mode: 0o755, owner: 'root', group: 'root' },
+    { kind: 'ensure-dir', path: posix.dirname(XP_PATHS.suspendedDir), mode: 0o755, owner: 'root', group: 'root' },
     { kind: 'ensure-dir', path: XP_PATHS.suspendedDir, mode: 0o755, owner: 'root', group: 'root' },
     { kind: 'ensure-dir', path: XP_PATHS.defaultSiteDir, mode: 0o755, owner: 'root', group: 'root' },
   ]
@@ -447,13 +452,17 @@ export interface DefaultSiteOptions {
   settings?: ServerSettings
   /** serve this certificate (e.g. the hostname's) instead of the self-signed fallback */
   cert?: Certificate | null
+  /** names another managed server answers on the shared 80/443 sockets (the management TLS ingress); never claimed here */
+  excludedNames?: readonly string[]
 }
 
 /** Catch-all for names no account has bound: a static notice, 404, and ACME for the hostname. */
 export const renderDefaultSite = (opts: DefaultSiteOptions = {}): string => {
   const e = opts.settings ? extras(opts.settings) : {}
   const policy = opts.settings?.defaultSite === undefined ? undefined : validateDefaultSitePolicy(opts.settings.defaultSite)
-  const hostname = opts.settings ? assertDomainName(opts.settings.hostname, 'hostname') : null
+  const named = opts.settings ? assertDomainName(opts.settings.hostname, 'hostname') : null
+  // A name served twice on one socket is a conflict nginx resolves by ignoring the later server.
+  const hostname = named && !opts.excludedNames?.some(name => name.toLowerCase() === named.toLowerCase()) ? named : null
   const tls = (policy?.refuseHttps ?? e.sslRejectHandshake) && !opts.cert
     ? ['ssl_reject_handshake on;']
     : (() => {

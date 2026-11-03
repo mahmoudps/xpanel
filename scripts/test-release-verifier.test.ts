@@ -1,12 +1,12 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync, statSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname, basename } from 'node:path'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import { Readable } from 'node:stream'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { buildReleaseArtifact, createTarGzBuffer, parseTarGzBuffer, REQUIRED_ROOT_FILES, REQUIRED_RELEASE_ENTRYPOINTS, REQUIRED_SYSTEMD_UNITS } from './package-release.mjs'
-import { RELEASE_VERIFICATION_LIMITS, REQUIRED_LIFECYCLE_CONTROL_FILES, serializeManifestPayload, signManifestPayload, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive, verifyAuthenticatedReleaseTree, withAuthenticatedReleaseArchive } from './release-verifier.mjs'
+import { clearDependencyGroupWorldWrite, offlineDependencyInstallArguments, RELEASE_VERIFICATION_LIMITS, REQUIRED_LIFECYCLE_CONTROL_FILES, serializeManifestPayload, signManifestPayload, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive, verifyAuthenticatedReleaseTree, withAuthenticatedReleaseArchive } from './release-verifier.mjs'
 
 const roots: string[] = []
 const temp = (): string => { const path = mkdtempSync(join(tmpdir(), 'xpanel-runtime-verifier-')); roots.push(path); return path }
@@ -51,6 +51,28 @@ const rewriteManifest = (change: (manifest: any) => void): Buffer => rewrite(ent
 })
 
 describe('strict authenticated runtime release verifier, diagnostic archives only', () => {
+  it('installs offline dependencies against the release-pinned Node, not whatever PATH holds', async () => {
+    const report = await verify()
+    expect(offlineDependencyInstallArguments(report.manifest)).toEqual(['install', '--offline', '--frozen-lockfile', '--prod', '--ignore-scripts', '--verify-store-integrity', `--config.node-version=${report.manifest.runtime.nodeVersion}`])
+    expect(report.manifest.runtime.nodeVersion).toMatch(/^\d+\.\d+\.\d+$/)
+  })
+  it.skipIf(process.platform === 'win32')('clears group and world write on installed dependency trees only, without following links', async () => {
+    const root = temp(), outside = temp()
+    for (const dir of ['node_modules/.pnpm/fast-fifo@1.3.2/node_modules/fast-fifo', 'packages/os/node_modules/@xpanel', 'apps/api/src']) mkdirSync(join(root, dir), { recursive: true })
+    writeFileSync(join(root, 'node_modules/.pnpm/fast-fifo@1.3.2/node_modules/fast-fifo/index.js'), '')
+    writeFileSync(join(root, 'apps/api/src/main.ts'), '')
+    symlinkSync(outside, join(root, 'packages/os/node_modules/@xpanel/core'))
+    for (const path of ['node_modules/.pnpm/fast-fifo@1.3.2/node_modules/fast-fifo', 'packages/os/node_modules/@xpanel', 'apps/api/src']) chmodSync(join(root, path), 0o777)
+    chmodSync(join(root, 'node_modules/.pnpm/fast-fifo@1.3.2/node_modules/fast-fifo/index.js'), 0o666)
+    chmodSync(outside, 0o777)
+    await clearDependencyGroupWorldWrite(root)
+    const mode = (path: string) => statSync(path).mode & 0o777
+    expect(mode(join(root, 'node_modules/.pnpm/fast-fifo@1.3.2/node_modules/fast-fifo'))).toBe(0o755)
+    expect(mode(join(root, 'node_modules/.pnpm/fast-fifo@1.3.2/node_modules/fast-fifo/index.js'))).toBe(0o644)
+    expect(mode(join(root, 'packages/os/node_modules/@xpanel'))).toBe(0o755)
+    expect(mode(join(root, 'apps/api/src'))).toBe(0o777)
+    expect(mode(outside)).toBe(0o777)
+  })
   it('keeps historical lifecycle control presence valid without optional fresh-install tooling', async () => {
     const report = await verify()
     expect(report.lifecycleControlsPresent).toBe(true)

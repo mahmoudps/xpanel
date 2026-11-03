@@ -4,7 +4,7 @@ import { constants } from 'node:fs'
 import { chmod, lstat, mkdir, open, readdir, readFile, readlink, realpath, rename, symlink } from 'node:fs/promises'
 import { dirname, join, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { withAuthenticatedReleaseArchive, stageAuthenticatedReleaseArchive } from './release-verifier.mjs'
+import { clearDependencyGroupWorldWrite, offlineDependencyInstallArguments, withAuthenticatedReleaseArchive, stageAuthenticatedReleaseArchive } from './release-verifier.mjs'
 import { assertOwnedFile, assertTrustedDirectory, OWNED_PANEL_UNITS, parseInstallationReceipt, readTrustedFile, requireLinuxRoot, withTrustedDirectory, withTrustedFile } from './lifecycle-ownership.mjs'
 
 export const INSTALL_ROOT = '/opt/xpanel'
@@ -201,9 +201,10 @@ const sbom=JSON.parse(readFileSync('sbom-provenance.json','utf8'));const workspa
 async function verifyDependencies(root, report, trust, runtime) {
   const manager = await command(trust.packageManagerPath, ['--version'], { sha256: trust.packageManagerSha256 })
   check(manager.text.trim() === report.manifest.runtime.packageManager.split('@').at(-1), 'INSTALL_PACKAGE_MANAGER_MISMATCH')
-  const install = await command(trust.packageManagerPath, ['install', '--offline', '--frozen-lockfile', '--prod', '--ignore-scripts', '--verify-store-integrity'], { cwd: root, sha256: trust.packageManagerSha256 })
+  const install = await command(trust.packageManagerPath, offlineDependencyInstallArguments(report.manifest), { cwd: root, sha256: trust.packageManagerSha256 })
   check(digest(await readFile(join(root, 'pnpm-lock.yaml'))) === report.manifest.lockfileSha256, 'INSTALL_LOCKFILE_CHANGED')
   check(await exists(join(root, 'node_modules')), 'INSTALL_DEPENDENCIES_MISSING')
+  await clearDependencyGroupWorldWrite(root)
   const sourcePaths = await verifySourceInventory(root, report)
   const tree = await observeSecureTree(root, sourcePaths)
   const abi = await command(runtime.nodePath, ['--input-type=module', '-e', ABI_PROBE], { cwd: root, sha256: runtime.nodeSha256 })

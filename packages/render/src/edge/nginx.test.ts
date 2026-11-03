@@ -52,6 +52,16 @@ describe('renderNginxMain', () => {
     expect(dirs.some((d) => d.kind === 'ensure-dir' && d.path === '/var/lib/xpanel/acme')).toBe(true)
   })
 
+  it('ensures every parent before its children, since ensure-dir creates a single level', () => {
+    const paths = nginxEdgeDirs(rhelOs).flatMap((d) => (d.kind === 'ensure-dir' ? [d.path] : []))
+    for (const [index, path] of paths.entries()) {
+      const parent = path.slice(0, path.lastIndexOf('/'))
+      if (['/var/cache/xpanel', '/usr/share/xpanel'].includes(parent)) expect(paths.indexOf(parent), path).toBeGreaterThanOrEqual(0)
+      if (paths.includes(parent)) expect(paths.indexOf(parent), path).toBeLessThan(index)
+    }
+    expect(nginxEdgeDirs(rhelOs)).toContainEqual({ kind: 'ensure-dir', path: '/var/cache/xpanel', mode: 0o711, owner: 'root', group: 'root' })
+  })
+
   it('sizes the server-name hash for the longest legal domain', () => {
     const c = renderNginxMain(settings(), debianOs).content
     const bucket = Number(/server_names_hash_bucket_size (\d+);/.exec(c)?.[1])
@@ -517,6 +527,12 @@ describe('renderDefaultSite', () => {
     expect(c).toContain('/.well-known/acme-challenge/')
     expect(c).not.toContain('/home')
     expect(c).not.toContain('proxy_pass')
+  })
+
+  it('leaves the hostname to the management ingress that already serves it on the shared sockets', () => {
+    const settings = edge({})
+    expect(renderDefaultSite({ settings })).toContain(`server_name _ ${settings.hostname};`)
+    expect(renderDefaultSite({ settings, excludedNames: [settings.hostname.toUpperCase(), `whm.${settings.hostname}`] })).toContain('server_name _;')
   })
 
   it('can reject TLS handshakes for unknown names and answer for the hostname', () => {

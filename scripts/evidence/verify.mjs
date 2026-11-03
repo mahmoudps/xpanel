@@ -1,6 +1,6 @@
 import { verifyEvidenceBundle } from './runtime.mjs'
 import { isMain, parseArguments, readJson, runCli } from './cli.mjs'
-export { assertTrustedMetadata, loadTrustedEvidenceBundle, verifyEvidenceBundle } from './runtime.mjs'
+export { assertTrustedMetadata, CAPABILITY_ACCEPTANCE_CONFIG, loadTrustedAcceptanceConfig, loadTrustedEvidenceBundle, parseAcceptanceConfig, verifyEvidenceBundle } from './runtime.mjs'
 
 if (isMain(import.meta.url)) await runCli(() => {
   const args = parseArguments(process.argv.slice(2), ['bundle', 'target', 'requirements', 'evidence-root'], ['bundle', 'target', 'requirements', 'evidence-root'])

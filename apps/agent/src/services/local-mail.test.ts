@@ -112,9 +112,20 @@ describe('live mail writer', () => {
     const mailbox = '/etc/dovecot/conf.d/11-xpanel-mailboxes.conf'
     seed(executor, mailbox, 'protocol lmtp {\n  postmaster_address = postmaster@mail.example.test\n}\n')
 
+    const verbs: string[] = []
+    const run = executor.runAction.bind(executor)
+    executor.runAction = async action => {
+      if (action.kind === 'systemd') verbs.push(`${action.verb} ${action.unit}`)
+      await run(action)
+    }
     await ensureInstalledMail(executor, os)
     expect(executor.files.get(mailbox)?.content).toContain('postmaster_address = postmaster@mail.example.test')
     expect(executor.files.get('/etc/postfix/main.cf')?.content).toContain('smtpd_milters = local:opendkim/opendkim.sock')
+    // A stopped (enabled) daemon is started before the reload, so the reload cannot fail on an inactive unit.
+    for (const unit of [os.services.dovecot, os.services.postfix]) {
+      expect(verbs.indexOf(`start ${unit}`)).toBeGreaterThanOrEqual(0)
+      expect(verbs.indexOf(`start ${unit}`)).toBeLessThan(verbs.indexOf(`reload ${unit}`))
+    }
 
     const before = backups(executor, '/etc/postfix/main.cf').length
     await ensureInstalledMail(executor, os, 'localhost')

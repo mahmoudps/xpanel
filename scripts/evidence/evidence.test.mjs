@@ -7,7 +7,7 @@ import { computeSourceDigest } from '../vm/source-snapshot.mjs'
 import { assertDetachedOutput, assertSameSource, REQUIRED_PROFILES, sha256, SOURCE_ALGORITHM } from './identity.mjs'
 import { assertCompleteEvidence, profileFromOsRelease, STAGE_ENVIRONMENTS, validateArtifactProvenance, validateReceipt, validateTargetDocument } from './contracts.mjs'
 import { validateSemanticReport } from './reports.mjs'
-import { assertTrustedMetadata, loadTrustedEvidenceBundle, verifyEvidenceBundle } from './verify.mjs'
+import { assertTrustedMetadata, loadTrustedAcceptanceConfig, loadTrustedEvidenceBundle, parseAcceptanceConfig, verifyEvidenceBundle } from './verify.mjs'
 import { isMain, parseArguments, writeDetachedJson } from './cli.mjs'
 
 const requirements = [{ toolId: 'server-information', acceptance: 'Observed server metrics match independent operating system observations.', checks: Object.fromEntries(['unit', 'http', 'browser', 'linux', 'external'].map(environment => [environment, [`${environment}:metrics`]])) }]
@@ -178,6 +178,25 @@ test('root ownership policy rejects service-owned, writable or symbolic-link inp
   for (const value of [{ uid: 999, mode: 0o100644, symlink: false }, { uid: 0, mode: 0o100664, symlink: false }, { uid: 0, mode: 0o40777, symlink: false }, { uid: 0, mode: 0o100644, symlink: true }]) assert.throws(() => assertTrustedMetadata([value]), /root-owned/)
   assert.throws(() => assertTrustedMetadata([]))
   if (process.platform !== 'linux') assert.throws(() => loadTrustedEvidenceBundle({ path: 'unused' }), /Linux ownership/)
+})
+
+test('acceptance configuration names one pinned bundle with the deployed target and reviewed requirements', () => {
+  const target = fixture().document.target
+  const value = { schemaVersion: 1, bundlePath: '/etc/xpanel/capability-evidence.json', bundleSha256: sha256('bundle'), target, requirements: structuredClone(requirements) }
+  assert.deepEqual(parseAcceptanceConfig(value), { path: value.bundlePath, expectedSha256: value.bundleSha256, expectedTarget: target, expectedRequirements: value.requirements })
+  for (const bad of [{ ...value, schemaVersion: 2 }, { ...value, extra: true }, { ...value, bundlePath: 'relative.json' }, { ...value, bundlePath: '/etc/xpanel/../tmp/b.json' },
+    { ...value, bundleSha256: 'pin' }, { ...value, target: { ...target, supportedProfiles: ['windows'] } }, { ...value, requirements: [] }, null, []]) {
+    assert.throws(() => parseAcceptanceConfig(bad))
+  }
+  const missing = join(tmpdir(), 'xpanel-evidence-test-absent-' + process.pid + '.json')
+  assert.equal(loadTrustedAcceptanceConfig(missing), undefined)
+  if (process.platform !== 'linux') {
+    const directory = mkdtempSync(join(tmpdir(), 'xpanel-evidence-test-'))
+    try {
+      writeFileSync(join(directory, 'acceptance.json'), JSON.stringify(value))
+      assert.throws(() => loadTrustedAcceptanceConfig(join(directory, 'acceptance.json')), /Linux ownership/)
+    } finally { rmSync(directory, { recursive: true, force: true }) }
+  }
 })
 
 test('detached output excludes source inputs, and command writes cannot overwrite evidence', () => {

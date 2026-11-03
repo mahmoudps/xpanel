@@ -14,7 +14,7 @@ import { createProductionAccountFileRunner, DEFAULT_FILE_WORKER_INCIDENT_DIR } f
 import { CanonicalIoResourcePipeline, IoAnalyticsEngine, WebsiteAnalyticsEngine } from './analytics.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
 import { ensureAcmeWebRoot } from './host-access.ts'
-import { syncRuntimePublicOrigin } from './agent-origin.ts'
+import { readManagementHosts, syncRuntimePublicOrigin } from './agent-origin.ts'
 import { ensureInstalledMail } from './services/local-mail.ts'
 import { enableMailWebsocketProxy } from './services/mail-websocket.ts'
 import { readOpenDkimPublished, writeOpenDkimPublished } from './services/opendkim-live.ts'
@@ -291,6 +291,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           quotaFilesystem,
           ioDevices,
           dnsPublication,
+          managementHosts: await readManagementHosts(executor),
         })
         await syncRuntimePublicOrigin(executor).catch((error: unknown) => {
           process.stderr.write(`xpanel-agent public origin: ${error instanceof Error ? error.message : String(error)}\n`)

@@ -83,6 +83,12 @@ export interface CompiledGeneration {
 const DNS_CATALOG_PATH = '/etc/powerdns/named.conf.xpanel-zones'
 const DEFAULT_DNS_ZONE_DIR = '/var/lib/powerdns/zones'
 
+/**
+ * The installer enables the web and mail daemons but leaves them stopped until the first generation that
+ * configures them: start is a no-op on a running unit, and the reload then applies the new configuration.
+ */
+const startAndReload = (unit: string): HostAction[] => [{ kind: 'systemd', verb: 'start', unit }, { kind: 'systemd', verb: 'reload', unit }]
+
 const isManagedDnsPath = (path: string, zoneDir: string): boolean =>
   path === DNS_CATALOG_PATH || (path.startsWith(`${zoneDir}/`) && path.endsWith('.zone'))
 
@@ -146,6 +152,8 @@ export interface CompileOptions {
   trustedProxyAuthority?: TrustedProxyRenderAuthority
   /** Saved runtime apps, caches and containers per account id (account-runtime.ts). Absent renders none. */
   runtime?: ReadonlyMap<string, RuntimeRegistry>
+  /** Hosts the management TLS ingress serves on the shared 80/443 sockets (agent-origin.ts readManagementHosts). */
+  managementHosts?: readonly string[]
 }
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -201,7 +209,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     const secEdgeSettings = opts.secEdge ? { ...settings, edge: opts.secEdge.edge } as ServerSettings : settings
     files.push(edge.renderNginxMain(secEdgeSettings, os, opts.trustedProxyAuthority))
     if (opts.secEdge?.edge.modsecurity) files.push(edge.renderModsecurityMain(opts.secEdge.edge.modsecurity))
-    files.push(edge.defaultSiteFile(os, { settings }))
+    files.push(edge.defaultSiteFile(os, { settings, ...(opts.managementHosts ? { excludedNames: opts.managementHosts } : {}) }))
     addTest(edge.nginxConfigTest(os))
 
     if (settings.engine === 'apache') {
@@ -595,7 +603,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     files.push(services.renderDovecotSieveConf(os), ...sieve.files)
     preActions.push(...sieve.preActions)
     postActions.push(...sieve.postActions)
-    postActions.push({ kind: 'systemd', verb: 'reload', unit: os.services.dovecot })
+    postActions.push(...startAndReload(os.services.dovecot))
     localMail = true
   }
 
@@ -651,7 +659,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       preActions.push({ kind: 'ensure-dir', path: `${os.paths.postfixDir}/xpanel`, mode: 0o750, owner: 'root', group: 'postfix' })
     }
     if (!postActions.some(action => action.kind === 'systemd' && action.unit === os.services.postfix)) {
-      postActions.push({ kind: 'systemd', verb: 'reload', unit: os.services.postfix })
+      postActions.push(...startAndReload(os.services.postfix))
     }
   }
 
@@ -719,10 +727,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   if (snapshot.server) {
     const settings = snapshot.server.settings
     const backendUnit = settings.engine === 'apache' ? os.services.apache : os.services.openlitespeed
-    postActions.push(
-      { kind: 'systemd', verb: 'reload', unit: backendUnit },
-      { kind: 'systemd', verb: 'reload', unit: os.services.nginx },
-    )
+    postActions.push(...startAndReload(backendUnit), ...startAndReload(os.services.nginx))
   }
 
   if (sqlStatements.length > 0) {
@@ -809,6 +814,8 @@ export interface ReconcilerDeps {
   quotaFilesystem?: string | null
   ioDevices?: string[]
   zoneDir?: string
+  /** Hosts of the management TLS ingress, read once at agent start: nothing touches the host before preflight. */
+  managementHosts?: readonly string[]
   onEvent?: (event: LiveEvent) => void
   /** Optional health verification probe run against each service unit after reload and after rollback. */
   healthProbe?: (unit: string, generationId: number) => Promise<{ ok: boolean; error?: string }>
@@ -1521,6 +1528,7 @@ export class HostReconciler {
     const compileMail = (mailAuth: OpenDkimSigning | null, previousZones?: ReadonlyMap<string, string>) => {
       const next = compileDesiredGeneration(snapshot, {
         os: this.deps.os,
+        ...(this.deps.managementHosts ? { managementHosts: this.deps.managementHosts } : {}),
         quotaFilesystem: this.deps.quotaFilesystem ?? null,
         ...(this.deps.ioDevices && { ioDevices: this.deps.ioDevices }),
         ...(accountIoDevices ? { ioDevicesByAccount: accountIoDevices } : {}),
@@ -1915,7 +1923,8 @@ export class HostReconciler {
           journalRecord.completedPostActions++
           if (
             action.kind === 'systemd' &&
-            (action.verb === 'reload' || action.verb === 'restart' || action.verb === 'start')
+            (action.verb === 'reload' || action.verb === 'restart' || action.verb === 'start') &&
+            !journalRecord.reloadedUnits.includes(action.unit)
           ) {
             journalRecord.reloadedUnits.push(action.unit)
           }

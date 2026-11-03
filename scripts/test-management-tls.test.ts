@@ -150,6 +150,10 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
     expect(rendered.match(/proxy_pass http:\/\/127\.0\.0\.1:120(83|87|96);/g)).toHaveLength(3)
     expect(rendered.match(/^ {8}proxy_read_timeout 300s;$/gm)).toHaveLength(3)
   })
+  it('keeps every managed directory under root-only ancestors, never the group-writable /var/log', () => {
+    for (const path of [PATHS.webroot, PATHS.acme, PATHS.logs, PATHS.certs]) expect(path.startsWith('/var/log/')).toBe(false)
+    expect(PATHS.logs.startsWith(PATHS.state + '/')).toBe(true)
+  })
   it('uses only the delegated management name and its two children, never its parent or a wildcard', () => {
     const value = config(), args = certbotArguments(value)
     expect(args.filter((_, index) => args[index - 1] === '-d')).toEqual(['panel.example.org', 'whm.panel.example.org', 'mail.panel.example.org'])
@@ -222,9 +226,16 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
     expect(() => assertIsolatedDefaultConfig('# Defaults\n\n; Comment\n')).not.toThrow()
     expect(() => assertIsolatedDefaultConfig('')).not.toThrow()
   })
+  it('permits the packaged Debian, Ubuntu and EL cli.ini and bounds its own logs', () => {
+    expect(() => assertIsolatedDefaultConfig('# Because we are using logrotate for greater flexibility, disable the\n# internal certbot logrotation.\nmax-log-backups = 0\n# Adjust interactive output regarding automated renewal\npreconfigured-renewal = True\n')).not.toThrow()
+    expect(() => assertIsolatedDefaultConfig('max-log-backups = 0\nrenew-hook = /operator\n')).toThrow('ACME_GLOBAL_CONFIGURATION_REVIEW_REQUIRED')
+    const args = certbotArguments(config())
+    expect(args[args.indexOf('--max-log-backups') + 1]).toBe('10')
+  })
   it('renders scoped HTTP-01 without redirecting challenge tokens or opening unrelated names', () => {
     const text = renderChallenge(config())
-    expect(text.match(/listen 192\.0\.2\.10:80;/g)).toHaveLength(3)
+    expect(text.match(/^ {4}listen 80;$/gm)).toHaveLength(3)
+    expect(text).not.toContain('192.0.2.10:80')
     expect(text.match(/server_name /g)).toHaveLength(3)
     expect(text).toContain('location ~ "^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}$"')
     expect(text).toContain(`root ${PATHS.webroot};`)
@@ -237,7 +248,9 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
       expect(text).toContain(`listen 192.0.2.10:${port} ssl;`)
       expect(text).toContain(`proxy_pass http://127.0.0.1:${backend};`)
     }
-    expect(text.match(/listen 192\.0\.2\.10:443 ssl;/g)).toHaveLength(3)
+    // Shared with the account edge: an address-specific 443 would capture every account site on the address.
+    expect(text.match(/^ {4}listen 443 ssl;$/gm)).toHaveLength(3)
+    expect(text).not.toContain('192.0.2.10:443')
     expect(text.match(/include \/etc\/nginx\/xpanel-management\/ingress-secret.conf;/g)).toHaveLength(3)
     expect(text.match(/proxy_set_header Upgrade \$http_upgrade;/g)).toHaveLength(3)
     expect(text.match(/proxy_set_header Connection \$xpanel_management_connection_upgrade;/g)).toHaveLength(3)
@@ -250,7 +263,8 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
   })
   it('renders IPv6 exact binds and gives renewal the same reviewed lifecycle', () => {
     const value = validateConfig({ ...input(), addresses: ['192.0.2.10', '2001:db8::10'] })
-    expect(renderChallenge(value)).toContain('listen [2001:db8::10]:80;')
+    expect(renderChallenge(value)).toContain('listen [::]:80;')
+    expect(renderChallenge(config())).not.toContain('[::]')
     expect(renderIngress(value, 'b'.repeat(64))).toContain('listen [2001:db8::10]:2087 ssl;')
     const units = renderRenewalUnits('/opt/xpanel-runtime/bin/node')
     expect(units.service).toContain('ExecStart=/opt/xpanel-runtime/bin/node /opt/xpanel/scripts/management-tls.mjs renew')
@@ -352,6 +366,26 @@ describe('management TLS retained-failure control-flow diagnostics (modeled kern
     expect(observed.FragmentPath).toBe(PATHS.timer)
     expect(observed.references.size).toBe(2)
   })
+  it('admits a fresh load of its own unit files before daemon-reload, since systemd loads a not-found unit on its next query', () => {
+    const fs = modelFilesystem()
+    fs.put(PATHS.timer, '# Managed by xPanel management TLS lifecycle v1.\ntimer\n', 0o644)
+    const expected = new Map([[PATHS.timer, fs.get(PATHS.timer)]])
+    const { assertTimerSnapshot } = loadDeclarations(['assertTimerSnapshot'], { assertOriginalReferences: () => {}, sameFileVersion, fail: codedFailure })
+    const state = (values: Record<string, string>) => ({ LoadState: 'loaded', ActiveState: 'inactive', SubState: 'dead', UnitFileState: 'disabled', InvocationID: '', FragmentPath: PATHS.timer, DropInPaths: '', ...values, references: new Map([[PATHS.timer, fs.get(PATHS.timer)]]) })
+    const notFound = state({ LoadState: 'not-found', UnitFileState: '', FragmentPath: '' })
+    expect(() => assertTimerSnapshot(notFound, notFound, expected)).not.toThrow()
+    expect(() => assertTimerSnapshot(notFound, state({}), expected)).not.toThrow()
+    expect(() => assertTimerSnapshot(notFound, state({ ActiveState: 'active', SubState: 'waiting', InvocationID: 'a'.repeat(32) }), expected)).toThrow('RENEWAL_TIMER_CONCURRENT_DRIFT')
+    expect(() => assertTimerSnapshot(notFound, state({ UnitFileState: 'enabled' }), expected)).toThrow('RENEWAL_TIMER_CONCURRENT_DRIFT')
+  })
+  it('verifies and runs the resolved file of a tool shipped as a symbolic link', async () => {
+    const verified: string[] = [], spawned: string[] = []
+    const { command } = loadDeclarations(['command'], { PATHS, constants, realpathSync: (path: string) => path === '/usr/bin/certbot' ? '/usr/bin/certbot-3' : path,
+      trustedExecutable: (path: string) => { verified.push(path); codedFailure('STOP_AFTER_VERIFY') }, spawn: (path: string) => { spawned.push(path) }, fail: codedFailure })
+    await expect(command('read-version', '/usr/bin/certbot', ['--version'])).rejects.toThrow('STOP_AFTER_VERIFY')
+    expect(verified).toEqual(['/usr/bin/certbot-3'])
+    expect(spawned).toEqual([])
+  })
   const commandModel = (neverClose = false, initialGroupPresent = true, knownBirth = true) => {
     const fs = modelFilesystem(), signals: unknown[] = []
     let groupPresent = initialGroupPresent
@@ -359,7 +393,7 @@ describe('management TLS retained-failure control-flow diagnostics (modeled kern
     const spawn = () => { queueMicrotask(() => { child.emit('spawn'); if (!neverClose) child.emit('close', 0, null) }); return child }
     const processModel = { kill: (_pid: number, signal: unknown) => { if (signal !== 0) { signals.push(signal); groupPresent = false } else if (!groupPresent) codedFailure('ESRCH') } }
     const fields = Array(20).fill('0'); fields[0] = 'S'; fields[2] = '4200'; fields[3] = '4200'; fields[19] = '123'
-    const { command } = loadDeclarations(['command'], { ...fs, PATHS, constants, spawn, process: processModel, performance, delay: async () => {}, trustedExecutable: () => {},
+    const { command } = loadDeclarations(['command'], { ...fs, PATHS, constants, spawn, process: processModel, performance, delay: async () => {}, trustedExecutable: () => {}, realpathSync: (path: string) => path,
       readRootFile: (path: string) => path.startsWith('/usr/') ? { bytes: Buffer.from('tool'), st: {} } : fs.readRootFile(path),
       readFileSync: () => `4200 (diagnostic) ${fields.join(' ')}`, observeChildBirth: () => knownBirth ? ({ pid: 4200, kernelStartTime: '123', processGroupId: 4200, sessionId: 4200 }) : null, fail: codedFailure, setTimeout, clearTimeout,
     })

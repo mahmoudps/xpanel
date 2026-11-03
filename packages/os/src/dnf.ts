@@ -22,7 +22,8 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
     major: os.major,
     codename: '',
     packageManager: 'dnf',
-    bootstrapPackages: ['dnf-plugins-core', 'acl'],
+    // semanage sets the SELinux port types and file contexts xPanel needs while SELinux stays enforcing
+    bootstrapPackages: ['dnf-plugins-core', 'acl', 'policycoreutils-python-utils', 'openssl'],
     // the nginx and httpd packages create their own users
     extraSystemUsers: [],
     packages: {
@@ -32,6 +33,8 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
       mariadb: ['mariadb-server'],
       postgresql: ['postgresql-server'],
       postfix: ['postfix'],
+      // EPEL; the agent signs outgoing mail through the OpenDKIM milter and renders its configuration
+      opendkim: ['opendkim'],
       dovecot: ['dovecot', 'dovecot-pigeonhole'],
       // EPEL pdns includes libbindbackend.so; named-checkzone/dig are in these BIND tools.
       powerdns: ['pdns', 'bind-utils'],
@@ -39,8 +42,8 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
       ftp: ['pure-ftpd'],
       sshd: ['openssh-server'],
       nftables: ['nftables'],
-      // no maintained mpm-itk build exists in EL9/EL10 base or EPEL; see itkAvailable()
-      'apache-itk': [],
+      // EL and EPEL ship no mpm-itk: install.sh builds the pinned upstream release with apxs from these inputs.
+      'apache-itk': ['httpd-devel', 'libcap-devel', 'redhat-rpm-config', 'make'],
       // suexec ships inside httpd itself
       'apache-suexec': ['httpd'],
       'apache-fcgi': ['mod_fcgid'],
@@ -56,6 +59,7 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
       postgresql: 'postgresql',
       postfix: 'postfix',
       dovecot: 'dovecot',
+      opendkim: 'opendkim',
       powerdns: 'pdns',
       redis,
       ftp: 'pure-ftpd',
