@@ -1,5 +1,4 @@
 import { generateKeyPairSync } from 'node:crypto'
-import { EventEmitter } from 'node:events'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { signRootOperatorResponse } from './ops-upgrade-operator-protocol.ts'
 const seams = vi.hoisted(() => ({ kind: 'recover' as 'upgrade'|'recover', phases: [] as string[], failApply: false, textReply: false }))
@@ -21,7 +20,9 @@ vi.mock('./ops-upgrade-native-observation.ts', () => ({
     '--archive-sha256=' + archiveSha, '--operation-id=' + operationId,
   ] }),
 }))
-vi.mock('node:net', () => ({ createServer: vi.fn(), createConnection: () => {
+vi.mock('node:net', async () => {
+  const { EventEmitter } = await import('node:events')
+  return { createServer: vi.fn(), createConnection: () => {
   class FixtureSocket extends EventEmitter {
     destroyed = false
     destroy() { this.destroyed = true; this.emit('close'); return this }
@@ -43,7 +44,8 @@ vi.mock('node:net', () => ({ createServer: vi.fn(), createConnection: () => {
   }
   const socket = new FixtureSocket()
   queueMicrotask(() => socket.emit('connect')); return socket
-} }))
+  } }
+})
 import { dispatchPreparedRootOperation } from './ops-upgrade-operator.ts'
 
 beforeEach(() => { seams.kind = 'recover'; seams.phases = []; seams.failApply = false; seams.textReply = false })
