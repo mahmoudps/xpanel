@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { WriterLock, acquireExistingWriterMutex } from '@xpanel/state'
@@ -24,14 +24,21 @@ import { classifyIssuedLifecycleAppend, normalizeIssuedLifecycleAppendPlan, with
 // Explicit authority seam for algorithm/crash fixtures only. These cases prove
 // no native root-dispatch, stop, EX or closed-reader admission. Native acceptance
 // must exercise the real producer separately on the qualification profiles.
-const issuedRepairFixture = vi.hoisted(() => ({ plans: new WeakMap<object, unknown>(), unretired: false, afterGate: null as null | (() => Promise<void>) }))
+const issuedRepairFixture = vi.hoisted(() => ({
+  plans: new WeakMap<object, unknown>(), unretired: false, gateCalls: 0, afterGate: null as null | (() => Promise<void>),
+  issuanceStopCode: 'FIXTURE_ISSUED_APPEND_STOP', gateStopCode: 'FIXTURE_ISSUED_JOURNAL_PENDING',
+}))
 vi.mock('../../../../scripts/lifecycle-root-safety.mjs', () => ({
   assertLifecycleIssuedAuditRepairHeld: async (cap: object) => { if (!issuedRepairFixture.plans.has(cap)) throw new Error('unissued fixture repair') },
   getLifecycleIssuedAuditRepairInfo: (cap: object) => ({ purpose: 'issued-lifecycle-audit-repair', plan: issuedRepairFixture.plans.get(cap) }),
 }))
 
 vi.mock('../../../../scripts/lifecycle-issued-audit.mjs', () => ({
-  assertNoUnretiredIssuedLifecycleAudit: async () => { if (issuedRepairFixture.unretired) throw new Error('unretired issued native journal'); const hook = issuedRepairFixture.afterGate; issuedRepairFixture.afterGate = null; if (hook) await hook() },
+  assertNoUnretiredIssuedLifecycleAudit: async () => {
+    issuedRepairFixture.gateCalls++
+    if (issuedRepairFixture.unretired) throw Object.assign(new Error('controlled unretired issued journal'), { code: issuedRepairFixture.gateStopCode })
+    const hook = issuedRepairFixture.afterGate; issuedRepairFixture.afterGate = null; if (hook) await hook()
+  },
 }))
 
 // This lane requires actual Linux root and uses only fresh /root fixtures. No installed paths.
@@ -40,7 +47,7 @@ beforeAll(() => {
   if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.geteuid?.() !== 0) throw new Error('BLOCKED: actual native Linux root is required for read-only audit evidence')
 })
 afterEach(async () => {
-  issuedRepairFixture.unretired = false; issuedRepairFixture.afterGate = null
+  issuedRepairFixture.unretired = false; issuedRepairFixture.gateCalls = 0; issuedRepairFixture.afterGate = null
   for (const handle of handles.splice(0)) await handle.close()
   for (const root of roots.splice(0)) {
     const target = resolve(root)
@@ -64,6 +71,41 @@ const fixture = async () => {
     log: join(directory, OPERATION_AUDIT_LOG_NAME), anchor: join(directory, OPERATION_AUDIT_ANCHOR_NAME), pending: join(directory, OPERATION_AUDIT_PENDING_NAME) }
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>
+// Corrupt only this test's newly created private database, never an installed DB.
+// Save/recreate the exact trigger inside one transaction so no unprotected schema
+// escapes even if corruption setup fails. Production code never removes it.
+const removeFixtureAuditIndex = async (f: Fixture) => {
+  if (!roots.includes(f.root) || resolve(f.root) !== f.root || dirname(f.root) !== '/root'
+    || !/^\/root\/xpanel-readonly-audit-[A-Za-z0-9]+$/.test(f.root) || f.dbPath !== join(f.root, 'control.sqlite')
+    || await realpath(f.root) !== f.root || await realpath(f.dbPath) !== f.dbPath) throw new Error('Unsafe audit-index corruption fixture path')
+  const directory = await lstat(f.root), database = await lstat(f.dbPath)
+  if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== 0 || (directory.mode & 0o7777) !== 0o700
+    || !database.isFile() || database.isSymbolicLink() || database.uid !== 0 || database.nlink !== 1 || (database.mode & 0o7777) !== 0o600) throw new Error('Unsafe audit-index corruption fixture metadata')
+  const target = 'operation:' + f.binding.jobId
+  const select = 'SELECT * FROM audit_log WHERE action=$1 AND target=$2', params = ['host.lifecycle.intent', target]
+  const rows = await f.handle.db.query(select, params)
+  expect(rows).toHaveLength(1)
+  await expect(f.handle.db.query('DELETE FROM audit_log WHERE action=$1 AND target=$2', params)).rejects.toThrow('audit_log is append-only')
+  expect(await f.handle.db.query(select, params)).toEqual(rows)
+  const triggerQuery = "SELECT name,tbl_name,sql FROM sqlite_schema WHERE type='trigger' AND name='audit_log_no_delete'"
+  const triggers = await f.handle.db.query<{ name: string; tbl_name: string; sql: string }>(triggerQuery)
+  expect(triggers).toHaveLength(1)
+  const trigger = triggers[0]!
+  expect(trigger.name).toBe('audit_log_no_delete'); expect(trigger.tbl_name).toBe('audit_log')
+  expect(trigger.sql.replace(/\s+/g, ' ').trim().replace(/;$/, '')).toBe("CREATE TRIGGER audit_log_no_delete BEFORE DELETE ON audit_log BEGIN SELECT RAISE(ABORT, 'FORBIDDEN: audit_log is append-only'); END")
+  await f.handle.db.transaction(async tx => {
+    const origin = getStrictOperationDatabaseOrigin(tx)
+    expect(origin.file).toBe(f.dbPath); expect(origin.device).toBe(String(database.dev)); expect(origin.inode).toBe(String(database.ino))
+    expect(await tx.query(triggerQuery)).toEqual(triggers)
+    await tx.exec('DROP TRIGGER audit_log_no_delete')
+    await tx.query('DELETE FROM audit_log WHERE action=$1 AND target=$2', params)
+    await tx.exec(trigger.sql)
+    expect(await tx.query(triggerQuery)).toEqual(triggers)
+    expect(await tx.query(select, params)).toEqual([])
+  })
+  expect(await f.handle.db.query(triggerQuery)).toEqual(triggers)
+  expect(await f.handle.db.query(select, params)).toEqual([])
+}
 const verified = (f: Fixture, receipt: unknown) => f.handle.db.transaction(async tx => assertOperationIntentReceipt(receipt, f.binding, tx))
 const observe = <T>(f: Fixture, work: (value: ReadonlyLifecycleIntentObservation) => Promise<T>) =>
   withReadonlyOperationDatabase(f.dbPath, reader => withReadonlyLifecycleIntentObservation(reader, f.binding, work, { directory: f.directory }))
@@ -80,9 +122,22 @@ const disk = async (directory: string): Promise<unknown> => {
 const issuedFixture = async () => {
   const f = await fixture(), binding: OperationIntentBinding = { ...f.binding, jobId: randomUUID(), action: 'lifecycle.recover', requestFingerprint: 'b'.repeat(64) }
   await createJob(f.handle.db, { id: binding.jobId, kind: binding.action, actor: 'readonlyauditor', detail: { lifecycleIntent: binding } })
-  let plan: Readonly<IssuedLifecycleAppendPlan> | undefined
-  await expect(f.authority.appendIssuedLifecycleIntent(binding, async value => { plan = value; throw new Error('fixture stops after durable issuance point') })).rejects.toThrow('fixture stops')
-  expect(plan).toBeDefined()
+  const beforeLog = await readFile(f.log), beforeAnchor = await readFile(f.anchor)
+  const beforeRows = await f.handle.db.query('SELECT * FROM audit_log')
+  let plan: Readonly<IssuedLifecycleAppendPlan> | undefined, issuanceCalls = 0
+  await expect(f.authority.appendIssuedLifecycleIntent(binding, async value => {
+    issuanceCalls++; plan = value
+    expect(value.binding).toEqual(binding)
+    expect(await readFile(join(f.directory, '.lock', 'owner.json'), 'utf8')).toBe(value.writer.ownerRaw)
+    expect(await readFile(join(f.directory, 'authority.json'), 'utf8')).toBe(value.writer.authorityRaw)
+    throw Object.assign(new Error('controlled stop at durable issuance boundary'), { code: issuedRepairFixture.issuanceStopCode })
+  })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: 'operation audit file proof failed', detail: { reason: issuedRepairFixture.issuanceStopCode } })
+  expect(issuanceCalls).toBe(1); expect(plan).toBeDefined()
+  expect(normalizeIssuedLifecycleAppendPlan(plan).binding).toEqual(binding)
+  expect(await readFile(f.log)).toEqual(beforeLog); expect(await readFile(f.anchor)).toEqual(beforeAnchor)
+  expect(await f.handle.db.query('SELECT * FROM audit_log')).toEqual(beforeRows)
+  await expect(lstat(f.pending)).rejects.toMatchObject({ code: 'ENOENT' })
+  await expect(lstat(join(f.directory, '.lock'))).rejects.toMatchObject({ code: 'ENOENT' })
   return { ...f, issuedBinding: binding, plan: plan! }
 }
 const issuedBytes = (plan: IssuedLifecycleAppendPlan) => {
@@ -146,7 +201,7 @@ describe('exact issued lifecycle append recovery algorithm; native admission is 
     if (kind === 'extra-log') await writeFile(f.log, Buffer.concat([prior, bytes.line, bytes.line]))
     if (kind === 'candidate-without-pending') await writeFile(f.anchor + '.candidate', bytes.next, { mode: 0o600 })
     if (kind === 'unknown-owner') { const path = join(f.directory, '.lock'); await mkdir(path); await chmod(path, 0o2770); await writeFile(join(path, 'owner.json'), '{}', { mode: 0o640 }) }
-    if (kind === 'missing-prior-index') await f.handle.db.query('DELETE FROM audit_log WHERE target=$1', ['operation:' + f.binding.jobId])
+    if (kind === 'missing-prior-index') await removeFixtureAuditIndex(f)
     const before = await disk(f.directory), rows = await f.handle.db.query('SELECT * FROM audit_log')
     const cap = {}; issuedRepairFixture.plans.set(cap, f.plan)
     await expect(f.authority.repairIssuedLifecycleIntent(cap)).rejects.toThrow()
@@ -199,7 +254,9 @@ describe('exact issued lifecycle append recovery algorithm; native admission is 
     const before = await readFile(join(f.directory, 'authority.json')), ownerBefore = await readFile(join(owner, 'owner.json'))
     issuedRepairFixture.unretired = true
     for (const run of [() => f.authority.recoverLifecycleIntent(f.binding), () => f.authority.appendReconcileIntent({ ...f.binding, purpose: 'host.reconcile.intent', action: 'host.reconcile', jobId: randomUUID() })]) {
-      await expect(run()).rejects.toThrow('unretired issued native journal')
+      const beforeGateCalls = issuedRepairFixture.gateCalls
+      await expect(run()).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: 'operation audit file proof failed', detail: { reason: issuedRepairFixture.gateStopCode } })
+      expect(issuedRepairFixture.gateCalls - beforeGateCalls).toBe(1)
       expect(await readFile(join(owner, 'owner.json'))).toEqual(ownerBefore)
       expect(await readFile(join(f.directory, 'authority.json'))).toEqual(before)
     }
@@ -233,10 +290,13 @@ describe('exact issued lifecycle append recovery algorithm; native admission is 
     const authority = await createRootOperationAuditAuthority(f.handle.db, { directory })
     expect(await readdir(directory)).toEqual([])
     let ownerBefore = Buffer.alloc(0), intentBefore = Buffer.alloc(0), authorityBefore = Buffer.alloc(0)
+    const beforeGateCalls = issuedRepairFixture.gateCalls
+    let interleavings = 0
     // Interleave after the allowed early gate while the sink had no mutex.
     // A separate producer leaves an exact owner before this caller acquires it.
     // This is a gate algorithm seam, not native journal/old-binary acceptance.
     issuedRepairFixture.afterGate = async () => {
+      interleavings++
       const lease = await new WriterLock(directory).acquire()
       await lease.recordIntent({ op: 'fixtureIssuedOwner', createdRelPaths: [], backups: [] })
       await lease.release() // retains its uncommitted marker but releases the OS mutex
@@ -246,7 +306,9 @@ describe('exact issued lifecycle append recovery algorithm; native admission is 
       issuedRepairFixture.unretired = true
     }
     await expect(authority.appendReconcileIntent({ ...f.binding, purpose: 'host.reconcile.intent', action: 'host.reconcile', jobId: randomUUID() }))
-      .rejects.toThrow('unretired issued native journal')
+      .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: 'operation audit file proof failed', detail: { reason: issuedRepairFixture.gateStopCode } })
+    expect(interleavings).toBe(1); expect(issuedRepairFixture.gateCalls - beforeGateCalls).toBe(2)
+    expect(ownerBefore.length).toBeGreaterThan(0); expect(intentBefore.length).toBeGreaterThan(0); expect(authorityBefore.length).toBeGreaterThan(0)
     expect(await readFile(join(directory, '.lock', 'owner.json'))).toEqual(ownerBefore)
     expect(await readFile(join(directory, '.lock', 'intent.json'))).toEqual(intentBefore)
     expect(await readFile(join(directory, 'authority.json'))).toEqual(authorityBefore)
@@ -436,7 +498,7 @@ describe('actual native nonmutating lifecycle audit observation', () => {
     await f.handle.db.query('UPDATE jobs SET detail=$1 WHERE id=$2', ['{}', f.binding.jobId])
     await expect(observe(f, async value => value.receipt)).rejects.toThrow()
     await f.handle.db.query('UPDATE jobs SET detail=$1 WHERE id=$2', [JSON.stringify({ lifecycleIntent: f.binding }), f.binding.jobId])
-    await f.handle.db.query('DELETE FROM audit_log WHERE action=$1', ['host.lifecycle.intent'])
+    await removeFixtureAuditIndex(f)
     await expect(observe(f, async value => value.receipt)).rejects.toThrow()
     expect(await f.handle.db.query('SELECT COUNT(*) AS n FROM audit_log')).toEqual([{ n: 0 }])
     expect(await disk(f.directory)).toEqual(before)
