@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { StateSnapshot } from '@xpanel/state'
 import { defaultPlan, type Account } from '@xpanel/core'
 import { FakeHostExecutor, type AccountSliceMetrics } from './executor.ts'
+import { HOST_DISK_DF_ARGV } from './host-info-disks.ts'
 import { bandwidthCheck, evaluateServerHealth, handleServerHealthRoute, SERVER_HEALTH_THRESHOLDS } from './server-health.ts'
 import type { BandwidthReport } from './metering.ts'
 import type { ServerHealthReport, ServerHealthRouteContext, ServerHealthSaved } from './server-health.ts'
@@ -9,11 +10,11 @@ import type { ServerHealthReport, ServerHealthRouteContext, ServerHealthSaved } 
 const at = '2026-10-27T10:00:00.000Z'
 const now = () => new Date(at)
 const day = 86_400_000
-const DF = `Filesystem Type 1B-blocks Used Available Capacity Mounted on
-/dev/sda1 ext4 1000 960 40 96% /
-tmpfs tmpfs 100 100 0 100% /run
-/dev/loop0 squashfs 50 50 0 100% /snap/core/1
-/dev/sdb1 xfs 1000 100 900 10% /home
+const DF = `Filesystem 1B-blocks Used Available Capacity Mounted on
+/dev/sda1 1000 960 40 96% /
+tmpfs 100 100 0 100% /run
+/dev/loop0 50 50 0 100% /snap/core/1
+/dev/sdb1 1000 100 900 10% /home
 `
 const DF_INODES = `Filesystem Inodes IUsed IFree IUse% Mounted on
 /dev/sda1 100 90 10 90% /
@@ -22,6 +23,7 @@ tmpfs 10 1 9 10% /run
 /dev/sdb1 0 0 0 - /home
 `
 const FILES: Record<string, string> = {
+  '/proc/self/mountinfo': '20 1 8:1 / / rw - ext4 /dev/sda1 rw\n21 20 0:2 / /run rw - tmpfs tmpfs rw\n22 20 7:0 / /snap/core/1 ro - squashfs /dev/loop0 ro\n23 20 8:17 / /home rw - xfs /dev/sdb1 rw\n',
   '/proc/loadavg': '1.00 3.00 0.50 1/100 1234\n',
   '/proc/cpuinfo': 'processor\t: 0\nmodel name\t: Test CPU\n\nprocessor\t: 1\nmodel name\t: Test CPU\n',
   '/proc/meminfo': 'MemTotal:        1000000 kB\nMemFree:          50000 kB\nMemAvailable:     100000 kB\nSwapTotal:          1000 kB\nSwapFree:            100 kB\n',
@@ -35,7 +37,8 @@ class Host extends FakeHostExecutor {
   override async runCommand(argv: string[]) {
     this.commands.push(argv)
     if (this.failing) return { ok: false, code: 1, stdout: '', stderr: 'denied' }
-    if (argv[0] === '/usr/bin/df') return { ok: true, code: 0, stdout: argv.includes('-i') ? DF_INODES : DF, stderr: '' }
+    if (argv.join(' ') === HOST_DISK_DF_ARGV.join(' ')) return { ok: true, code: 0, stdout: DF, stderr: '' }
+    if (argv.join(' ') === '/usr/bin/df -i -P') return { ok: true, code: 0, stdout: DF_INODES, stderr: '' }
     if (argv[0] === '/usr/bin/systemctl') return { ok: true, code: 0, stdout: argv.at(-1) === 'nginx.service' ? 'loaded\nfailed\n' : 'loaded\nactive\n', stderr: '' }
     return { ok: false, code: 1, stdout: '', stderr: 'unexpected' }
   }
@@ -70,7 +73,15 @@ describe('server health checks', () => {
     expect(checks.certificates!.items!.map(entry => [entry.name, entry.reason])).toEqual([['old.example.test', 'cert_expired'], ['soon.example.test', 'cert_expiring']])
     expect(checks.reboot).toMatchObject({ state: 'warning', reason: 'reboot_required' })
     expect(report.counts).toEqual({ ok: 0, warning: 4, problem: 5, unavailable: 1 })
-    expect(host.commands.every(argv => argv[0] === '/usr/bin/df' || argv[0] === '/usr/bin/systemctl' && argv[1] === 'show')).toBe(true)
+    expect(host.commands.every(argv => argv.join(' ') === HOST_DISK_DF_ARGV.join(' ') || argv.join(' ') === '/usr/bin/df -i -P' || argv[0] === '/usr/bin/systemctl' && argv[1] === 'show')).toBe(true)
+  })
+
+  it('keeps disk health unavailable when the mount namespace cannot be read', async () => {
+    const host = new Host()
+    delete host.files_['/proc/self/mountinfo']
+    const checks = byId(await evaluateServerHealth({ executor: host, family: 'debian', readDrift: drift, saved: saved(), now }))
+    for (const id of ['disk-space', 'disk-inodes']) expect(checks[id]).toMatchObject({ state: 'unavailable', reason: 'filesystems_unread' })
+    expect(host.commands.every(argv => argv[0] === '/usr/bin/systemctl')).toBe(true)
   })
 
   it('applies threshold boundaries exactly and reports healthy values as ok', async () => {

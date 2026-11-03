@@ -75,6 +75,18 @@ async function scene() {
     filesChecksum: fixture.generation.checksum, createdAt: '2026-10-31T00:00:00Z', actor: 'root', files: [], managedUnits: [], testResults: [] }))
   const options: NativeLifecycleCanaryOptions = { db: database.db, executor: new FakeHostExecutor(), os: debianOs, reconciler: { journal },
     store: { readSnapshot: async () => structuredClone(snapshot), getAuthorityMetadata: async () => ({ ...meta }), listDomains: async () => snapshot.domains,
+      // Portable state-observation seam only; production pins real state files.
+      withReadonlyObservation: async work => {
+        const baseline = JSON.stringify({ snapshot, meta })
+        let live = true
+        const assertCurrent = async () => {
+          if (!live || JSON.stringify({ snapshot, meta }) !== baseline) throw new Error('fixture observation changed or retired')
+        }
+        try {
+          const result = await work({ snapshot: structuredClone(snapshot), authority: Object.freeze({ ...meta }), assertCurrent })
+          await assertCurrent(); return result
+        } finally { live = false }
+      },
       getAccount: async id => snapshot.accounts.find(value => value.id === id) ?? null },
     addon: { openListener() { throw new Error('native unavailable in this fixture') }, acceptPeer: () => null, verifyListenerSocket: () => false,
       closeListener() {}, closeFd() {}, getSocketPeerCred() { throw new Error('native unavailable in this fixture') } },

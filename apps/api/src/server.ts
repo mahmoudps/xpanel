@@ -1434,6 +1434,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     db: deps.db,
     store: deps.store,
     serverSecret,
+    ...(deps.agentApp && deps.agentToken ? { readQuotaState: (caller: AuthenticatedCaller, path: string) =>
+      readNativeWorkspace(caller, '/host/quota?path=' + encodeURIComponent(path), undefined, false, 'GET') } : {}),
     backupDestinationHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined),
     ...(deps.agentApp && deps.agentToken ? { transferPorts: (() => {
       const agent = (caller: AuthenticatedCaller, path: string, init: { method?: string; body?: unknown } = {}) => callAgent(path, { caller, ...init })

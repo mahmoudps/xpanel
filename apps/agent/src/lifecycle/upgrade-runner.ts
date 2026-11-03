@@ -215,6 +215,7 @@ export const createProductionUpgradePorts = (deps: ProductionUpgradeDependencies
     },
     async create(input) {
       const rec = await createUpgrade(deps.db, {
+        id: input.id,
         fromVersion: input.fromVersion,
         toVersion: input.toVersion,
         actor: input.actor,
@@ -301,7 +302,7 @@ export const createProductionUpgradePorts = (deps: ProductionUpgradeDependencies
     withExclusive: denied, assertOwnedExecution: denied, assertWritersQuiescent: denied,
     assertWriteBarrier: denied, verifyRelease: denied, unpackVerifiedRelease: denied,
     verifyStagedRelease: denied, assertCompatibility: denied, snapshotControlPlane: denied,
-    restoreControlPlane: denied, syncPath: denied,
+    restoreControlPlane: denied, syncPath: denied, controlPlane: denied, acceptPreparedRelease: denied, prepareInstallationSource: denied, selectInstallationSource: denied, recoveryPlan: denied, upgradeRecordId: denied,
   }
 
   return {

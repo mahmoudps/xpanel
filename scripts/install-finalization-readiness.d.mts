@@ -6,3 +6,7 @@ export function captureInstallFinalizationReadiness(context: InstallFinalization
 export function assertInstallFinalizationReadinessCurrent(context: InstallFinalizationContext, observation: InstallFinalizationObservation): Promise<void>
 /** Retires only private capture-cache metadata; never changes a service, file, session or key. */
 export function releaseInstallFinalizationReadiness(observation: InstallFinalizationObservation): void
+
+export function captureInstallAdoptionReadiness(capability:unknown,context:import('./install-finalization.mjs').InstallAdoptionContext,subjectDigest:string):Promise<InstallFinalizationObservation>
+export function assertInstallAdoptionReadinessCurrent(capability:unknown,context:import('./install-finalization.mjs').InstallAdoptionContext,observation:InstallFinalizationObservation):Promise<void>
+export function releaseInstallAdoptionReadiness(observation:InstallFinalizationObservation):void

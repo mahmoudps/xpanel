@@ -158,9 +158,11 @@ import {
   validateUidAllocator,
 } from './validate-state.ts'
 import { WriterLock, type WriterLease, type WriterLockOptions } from './writer-lock.ts'
+import { withReadonlyStateObservation, type ReadonlyStateObservation } from './readonly-observation.ts'
 import { toPublicPostgresqlUser, validatePostgresqlDatabaseFile, validatePostgresqlUserFile, type PostgresqlUser, type StoredPostgresqlUser } from './pg-state.ts'
 
 export * from './writer-lock.ts'
+export type { ReadonlyStateObservation } from './readonly-observation.ts'
 
 const SHELLS: readonly ShellAccess[] = ['none', 'jailed']
 const STATUSES: readonly AccountStatus[] = ['active', 'suspended', 'terminating']
@@ -672,6 +674,15 @@ export class StateStore {
         finally { await lease.release() }
       })
     })
+  }
+
+  /** Pre-admission observation only: rejects a live or orphan writer instead of recovering it.
+   * Does not acquire a writer lease, initialize a mutex, allocate an epoch or mutate state.
+   * The callback must revalidate around async work; this is not a mutation authority. */
+  async withReadonlyObservation<T>(callback: (observation: ReadonlyStateObservation) => Promise<T>): Promise<T> {
+    this.assertNotReentrant()
+    return this.runOperation(() => withReadonlyStateObservation(this.rootDir,
+      revision => this.readSnapshotUnlocked(revision), callback))
   }
 
   /**

@@ -82,10 +82,19 @@ const writeSourceFile = (root: string, path: string, content: string | Buffer): 
   writeFileSync(join(root, path), content)
 }
 
+// Tiny package fixtures model native-control imports separately; they never execute
+// host lifecycle code or claim native readiness. Keep runtime/unit inputs real.
+const isolatedNativeControlFixtures = new Set([
+  'scripts/coordinator-ownership.mjs', 'scripts/coordinator-install.mjs', 'scripts/coordinator-install-entry.mjs',
+  'scripts/coordinator-rotation.mjs', 'scripts/coordinator-rotate-entry.mjs', 'scripts/root-operator.mjs',
+  'scripts/root-operator-entry.mjs', 'scripts/lifecycle-managed-files.mjs', 'scripts/installation-transition.mjs',
+  'scripts/install-transition-observation.mjs', 'scripts/prepared-release.mjs', 'scripts/acquire-lifecycle-release.mjs',
+])
+
 const makeSourceFixture = (root = makeTempDir()): string => {
   const workspace = resolve(import.meta.dirname, '..')
-  for (const path of [...REQUIRED_ROOT_FILES, ...REQUIRED_SYSTEMD_UNITS]) {
-    writeSourceFile(root, path, readFileSync(join(workspace, path)))
+  for (const path of [...REQUIRED_ROOT_FILES, ...REQUIRED_SYSTEMD_UNITS, 'scripts/management-tls-activation.mjs']) {
+    writeSourceFile(root, path, isolatedNativeControlFixtures.has(path) ? 'export {}\n' : readFileSync(join(workspace, path)))
   }
   for (const path of REQUIRED_RELEASE_ENTRYPOINTS) writeSourceFile(root, path, 'export {}\n')
   for (const name of ['api', 'agent', 'web']) {
@@ -738,9 +747,17 @@ describe('authenticated source staging diagnostics (no native-root qualification
     const paths = new Set(built.manifest.files.map((file: { path: string }) => file.path))
     for (const path of ['LICENSE', 'README.md', 'SECURITY.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'CLA.md', 'scripts/management-tls.mjs', 'scripts/release-verifier.mjs', 'scripts/release-verifier.d.mts', 'scripts/lifecycle-root-safety.mjs', 'scripts/lifecycle-root-safety.d.mts']) expect(paths.has(path)).toBe(true)
     expect(readFileSync(join(built.stagingDir, 'LICENSE'), 'utf8')).toBe(readFileSync(join(sourceRoot, 'LICENSE'), 'utf8'))
+    expect(paths.has('scripts/management-tls-activation.mjs')).toBe(true)
+    expect(readFileSync(join(built.stagingDir, 'scripts/management-tls-activation.mjs'), 'utf8')).toBe(readFileSync(join(sourceRoot, 'scripts/management-tls-activation.mjs'), 'utf8'))
     expect(built.sbom.excludedDevPackages).toContain('es-module-lexer')
     expect(built.manifest.files.find((file: { path: string }) => file.path === 'bin/xpanel-ctl')?.mode).toBe(0o755)
     expect(paths.has('scripts/package-release.mjs')).toBe(false)
+  })
+
+  it('rejects a release whose real management lifecycle import loses its activation helper', async () => {
+    const sourceRoot = makeSourceFixture()
+    unlinkSync(join(sourceRoot, 'scripts/management-tls-activation.mjs'))
+    await expectReleaseError(() => buildReleaseArtifact({ sourceRoot, outputDir: makeTempDir(), createTarball: false }), 'RELEASE_DEPENDENCY_MISSING')
   })
 
   it('refuses caller-supplied authority and retains the actual Linux/root boundary', async () => {
@@ -863,6 +880,78 @@ describe('fresh-install package source closure', () => {
     writeSourceFile(sourceRoot, 'scripts/install-startup.mjs', "import './install-unreviewed.mjs'\n")
     const error = await expectReleaseError(() => buildReleaseArtifact({ sourceRoot, outputDir }), 'RELEASE_DEPENDENCY_MISSING')
     expect(error.detail).toMatchObject({ path: 'scripts/install-startup.mjs', dependency: './install-unreviewed.mjs', target: 'scripts/install-unreviewed.mjs' })
+    expect(readdirSync(outputDir)).toEqual([])
+  })
+})
+
+
+describe('authenticated acquisition package source closure', () => {
+  const acquisitionPath = 'scripts/acquire-lifecycle-release.mjs'
+  const makeAcquisitionSource = () => {
+    const root = makeSourceFixture(), workspace = resolve(import.meta.dirname, '..')
+    // Exercise the real acquisition source and its exact computed-import census.
+    writeSourceFile(root, acquisitionPath, readFileSync(join(workspace, acquisitionPath)))
+    for (const path of ['scripts/lifecycle-ownership.mjs', 'scripts/install-bootstrap.mjs']) writeSourceFile(root, path, 'export {}\n')
+    return root
+  }
+  it('collects and authenticates both operator entrypoints and their finite old/new helper targets', async () => {
+    const sourceRoot = makeAcquisitionSource(), outputDir = makeTempDir()
+    const built = await buildReleaseArtifact({ sourceRoot, outputDir, createTarball: false })
+    const paths = new Set(built.manifest.files.map(file => file.path))
+    for (const path of [acquisitionPath, 'scripts/prepare-lifecycle-release.mjs', 'scripts/lifecycle-ownership.mjs',
+      'scripts/install-bootstrap.mjs', 'scripts/prepared-release.mjs', 'scripts/release-verifier.mjs']) {
+      expect(paths.has(path), path).toBe(true)
+      expect(readFileSync(join(built.stagingDir, path))).toEqual(readFileSync(join(sourceRoot, path)))
+    }
+  })
+  it.each(['scripts/acquire-lifecycle-release.mjs', 'scripts/prepare-lifecycle-release.mjs'])('refuses absent required entrypoint %s before destination writes', async path => {
+    const sourceRoot = makeAcquisitionSource(), outputDir = makeTempDir()
+    unlinkSync(join(sourceRoot, path))
+    const error = await expectReleaseError(() => buildReleaseArtifact({ sourceRoot, outputDir, createTarball: false }), 'MISSING_ENTRYPOINT')
+    expect(error.detail.path).toBe(path); expect(readdirSync(outputDir)).toEqual([])
+  })
+  it('requires the computed loader target even without a static import edge', async () => {
+    const sourceRoot = makeAcquisitionSource(), outputDir = makeTempDir()
+    unlinkSync(join(sourceRoot, 'scripts/install-bootstrap.mjs'))
+    const error = await expectReleaseError(() => buildReleaseArtifact({ sourceRoot, outputDir, createTarball: false }), 'RELEASE_DEPENDENCY_MISSING')
+    expect(error.detail).toMatchObject({ path: acquisitionPath, target: 'scripts/install-bootstrap.mjs' })
+    expect(readdirSync(outputDir)).toEqual([])
+  })
+  it.each(['changed-expression', 'extra-import', 'duplicate-expression', 'changed-retained-target', 'unrelated-importer'])('rejects %s instead of generalizing computed import admission', async mode => {
+    const sourceRoot = makeAcquisitionSource(), outputDir = makeTempDir(), path = join(sourceRoot, acquisitionPath)
+    const original = readFileSync(path, 'utf8')
+    if (mode === 'changed-expression') writeFileSync(path, original.replace("pathToFileURL(staged.stagedAt + '/scripts/prepared-release.mjs').href", "pathToFileURL(staged.stagedAt + '/scripts/foreign.mjs').href"))
+    else if (mode === 'extra-import') writeFileSync(path, original + "\nexport const extra = name => import(name)\n")
+    else if (mode === 'duplicate-expression') writeFileSync(path, original.replace("pathToFileURL(staged.stagedAt + '/scripts/prepared-release.mjs').href", "pathToFileURL(staged.stagedAt + '/scripts/install-bootstrap.mjs').href"))
+    else if (mode === 'changed-retained-target') writeFileSync(path, original.replace("retained = new Set(['scripts/lifecycle-ownership.mjs'", "retained = new Set(['scripts/foreign.mjs'"))
+    else writeSourceFile(sourceRoot, 'apps/agent/src/index.ts', "export const extra = root => import(root + '/foreign.mjs')\n")
+    await expectReleaseError(() => buildReleaseArtifact({ sourceRoot, outputDir, createTarball: false }), 'UNRESOLVED_RELEASE_IMPORT')
+    expect(readdirSync(outputDir)).toEqual([])
+  })
+})
+
+describe('issued audit helper package source closure', () => {
+  const makeIssuedSource = () => {
+    const root = makeSourceFixture()
+    writeSourceFile(root, 'packages/db/src/index.ts', 'export {}\n')
+    writeSourceFile(root, 'packages/db/src/repos/operation-audit-authority.ts', "export const gate = () => import('../../../../scripts/lifecycle-issued-audit.mjs')\n")
+    // Isolated graph fixture: exercises real packaging decisions without executing native authority.
+    writeSourceFile(root, 'scripts/lifecycle-issued-audit.mjs', 'export {}\n')
+    writeSourceFile(root, 'scripts/lifecycle-issued-audit.d.mts', 'export {}\n')
+    return root
+  }
+  it('ships the exact optional control and declaration through the fixed runtime graph', async () => {
+    const sourceRoot = makeIssuedSource(), built = await buildReleaseArtifact({ sourceRoot, outputDir: makeTempDir(), createTarball: false })
+    for (const path of ['scripts/lifecycle-issued-audit.mjs', 'scripts/lifecycle-issued-audit.d.mts']) {
+      expect(built.manifest.files.some(file => file.path === path)).toBe(true)
+      expect(readFileSync(join(built.stagingDir, path))).toEqual(readFileSync(join(sourceRoot, path)))
+    }
+  })
+  it('refuses a missing audit gate before destination writes without extending the legacy control requirement', async () => {
+    const sourceRoot = makeIssuedSource(), outputDir = makeTempDir()
+    unlinkSync(join(sourceRoot, 'scripts/lifecycle-issued-audit.mjs'))
+    const error = await expectReleaseError(() => buildReleaseArtifact({ sourceRoot, outputDir, createTarball: false }), 'RELEASE_DEPENDENCY_MISSING')
+    expect(error.detail).toMatchObject({ path: 'packages/db/src/repos/operation-audit-authority.ts', target: 'scripts/lifecycle-issued-audit.mjs' })
     expect(readdirSync(outputDir)).toEqual([])
   })
 })

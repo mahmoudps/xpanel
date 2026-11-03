@@ -85,6 +85,10 @@ export const resolveHomeQuotaFilesystem = async (run: QuotaCommandRunner, homeBa
   return validateQuotaFilesystem(mount.stdout.trim())
 }
 
+/** Read enforcement on the mount containing account homes, without remounting or initializing quotas. */
+export const observeHomeUserQuota = async (run: QuotaCommandRunner, path = '/home'): Promise<UserQuotaObservation> =>
+  observeUserQuota(run, await resolveHomeQuotaFilesystem(run, path))
+
 export const QUOTA_FSTAB_PATH = '/etc/fstab'
 /** ext4 journaled user quota: accounting stays consistent after a crash without a new quotacheck. */
 const JOURNALED_USER_QUOTA = ['usrjquota=aquota.user', 'jqfmt=vfsv1']

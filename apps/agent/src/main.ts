@@ -1,4 +1,6 @@
 import { createNativeAccountProvisioningHttp } from './account-provisioning-http.ts'
+import { DurableUpgradeCoordinator } from './upgrade-coordinator.ts'
+import { createUpgradeLauncherProvider, nativeUpgradeLauncherPorts } from './ops-upgrade-launcher.ts'
 import { createReadonlyAccountProvisioningObserver } from './account-provisioning-observer.ts'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { timingSafeEqual } from 'node:crypto'
@@ -367,6 +369,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         const app = createAgentApp({
           reconciler,
           accountProvisioning,
+          upgradeCoordinator: new DurableUpgradeCoordinator({ db: dbHandle.db, provider: createUpgradeLauncherProvider(nativeUpgradeLauncherPorts()) }),
           store,
           db: dbHandle.db,
           executor,

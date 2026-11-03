@@ -60,7 +60,9 @@ describe('upgrade launcher provider', () => {
     await expect(createUpgradeLauncherProvider(ports({ launch })).launch({ ...binding, workerId: 'nope' })).rejects.toBeDefined()
     expect(launch).not.toHaveBeenCalled()
   })
-  it('is null on this host, so the coordinator stays truthfully unqualified', () => {
-    expect(nativeUpgradeLauncherPorts()).toBeNull()
+  it('constructs native ports only for Linux root without claiming readiness', () => {
+    const native = nativeUpgradeLauncherPorts()
+    if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.geteuid?.() !== 0) expect(native).toBeNull()
+    else expect(native).toMatchObject({ launcherUnitActive: expect.any(Function), hostedUidQualified: expect.any(Function), launch: expect.any(Function) })
   })
 })

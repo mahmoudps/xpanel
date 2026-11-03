@@ -10,6 +10,8 @@ import { createServer, isIP } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
+import { renderManagedUnits, renderManagedUnitPlan } from './managed-units.mjs'
+import { ACTIVATION_KIND, ACTIVATION_PATH, activationCommandEvidence, observeManagementActivation, completeManagementActivation } from './management-tls-activation.mjs'
 
 export const ACME_DIRECTORY = 'https://acme-v02.api.letsencrypt.org/directory'
 export const MARKER = '# Managed by xPanel management TLS lifecycle v1.\n'
@@ -152,13 +154,12 @@ ${tls}
 }
 
 export function renderRenewalUnits(nodePath, layout = 'flat') {
-  if (!/^\/[A-Za-z0-9_./-]+$/.test(nodePath)) fail('NODE_PATH_INVALID')
-  if (!['flat', 'current'].includes(layout)) fail('PROGRAM_LAYOUT_INVALID')
-  const programRoot = layout === 'current' ? '/opt/xpanel/current' : '/opt/xpanel'
-  return {
-    service: MARKER + `[Unit]\nDescription=xPanel management TLS renewal and served-certificate verification\nAfter=network-online.target nginx.service\nWants=network-online.target\n\n[Service]\nType=oneshot\nUser=root\nGroup=root\nUMask=0077\nExecStart=${nodePath} ${programRoot}/scripts/management-tls.mjs renew\nSuccessExitStatus=75\nTimeoutStartSec=720\nTimeoutStopSec=10\nKillMode=control-group\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\n\n`,
-    timer: MARKER + '[Unit]\nDescription=xPanel management TLS renewal schedule\n\n[Timer]\nOnCalendar=*-*-* 00,12:00:00\nRandomizedDelaySec=1h\nPersistent=true\nUnit=xpanel-management-tls.service\n\n[Install]\nWantedBy=timers.target\n',
-  }
+  const programRoot = layout === 'flat' ? '/opt/xpanel' : layout === 'current' ? '/opt/xpanel/current' : layout
+  const options = { nodePath, programRoot, lifecycleParticipants: true }
+  // Preserve the diagnostic current-layout API; native programLayout resolves
+  // the authenticated release directory and never returns this preview alias.
+  const units = layout === 'current' ? renderManagedUnitPlan(options) : renderManagedUnits(options)
+  return { service: units['xpanel-management-tls.service'], timer: units['xpanel-management-tls.timer'] }
 }
 
 export function certbotArguments(config) {
@@ -248,6 +249,7 @@ async function command(operation, requestedExecutable, args, timeoutMs = 30_000,
     syncParent(activePath)
   }
   return new Promise((resolveCommand, reject) => {
+    const startedAt = new Date().toISOString()
     const acmeEnvironment = operation === 'certbot-management-issuance-or-renewal' ? { HOME: PATHS.state, XDG_CONFIG_HOME: `${PATHS.acme}/xdg` } : { HOME: '/root' }
     const child = spawn(executable, args, { detached: true, env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin', LANG: 'C', ...acmeEnvironment }, stdio: ['ignore', 'pipe', 'pipe', ...(extraFd === undefined ? [] : [extraFd])] })
     let length = 0, timer, settled = false, birth = observeChildBirth(child.pid)
@@ -287,7 +289,7 @@ async function command(operation, requestedExecutable, args, timeoutMs = 30_000,
       // Signal0 is observation only. A remaining/reused numeric group is never
       // TERM/KILLed after reap. PID1 unit lifetime qualification remains separate.
       try { process.kill(-child.pid, 0); attention('UNEXPECTED_DESCENDANTS_ATTENTION'); return } catch (error) { if (error.code !== 'ESRCH') { attention('CHILD_GROUP_UNOBSERVED_ATTENTION'); return } }
-      const result = { operation, exitCode: code, signal, outputBytes: length, remainingProcessGroup: false, birth }
+      const result = { operation, executable, startedAt, finishedAt: new Date().toISOString(), exitCode: code, signal, outputBytes: length, remainingProcessGroup: false, birth }
       settled = true
       try {
         if (tracked) {
@@ -295,6 +297,7 @@ async function command(operation, requestedExecutable, args, timeoutMs = 30_000,
           unlinkSync(activePath); syncParent(activePath)
         }
       } catch { reject(Object.assign(new Error('COMMAND_RECEIPT_DRIFT'), { code: 'COMMAND_RECEIPT_DRIFT', details: { operation, remainingProcessGroup: true } })); return }
+      result.retiredAt = new Date().toISOString()
       if (!acceptedExitCodes.includes(code) || signal) return reject(Object.assign(new Error('COMMAND_FAILED'), { code: 'COMMAND_FAILED', details: result }))
       resolveCommand({ ...result, stdout: Buffer.concat(chunks[0]).toString('utf8'), stderr: Buffer.concat(chunks[1]).toString('utf8') })
     })
@@ -379,7 +382,8 @@ function assertOriginalReferences(references) {
 async function nginxReload() {
   const result = await command('nginx-config-test', '/usr/sbin/nginx', ['-t'])
   if (/conflicting server name|duplicate listen|emerg|warn/i.test(result.stderr)) fail('NGINX_CONFIG_CONFLICT')
-  await command('nginx-reload', '/usr/bin/systemctl', ['reload', 'nginx.service'])
+  const reloaded = await command('nginx-reload', '/usr/bin/systemctl', ['reload', 'nginx.service'])
+  return { ...reloaded, configurationTest: activationCommandEvidence(result) }
 }
 
 async function assertNginxInvocation(expected) {
@@ -579,6 +583,7 @@ async function lifecycle(config, phase, configReference, layout = 'flat') {
   const managedReferences = new Map()
   let originalReferences = []
   let priorObservation = { state: 'not-serving', installedFingerprint: null, observedFingerprint: null }
+  let activationOriginal
   try {
     if (!configReference || JSON.stringify(validateConfig(JSON.parse(configReference.bytes.toString('utf8')))) !== JSON.stringify(config)) fail('MANAGEMENT_CONFIG_REFERENCE_REQUIRED')
     assertOriginalReferences([[PATHS.config, configReference]])
@@ -602,7 +607,9 @@ async function lifecycle(config, phase, configReference, layout = 'flat') {
     const api = readRootFile(PATHS.apiEnv)
     if (![0o600, 0o640].includes(api.st.mode & 0o777) || api.st.gid !== secret.st.gid) fail('API_ENV_READER_INVALID')
     const merged = mergeApiEnvironment(api.bytes.toString('utf8'), config)
-    originalReferences = [[PATHS.config, configReference], [PATHS.secret, secret], [PATHS.apiEnv, api]]
+    activationOriginal = existing(ACTIVATION_PATH)
+    if (activationOriginal && ((activationOriginal.st.mode & 0o7777) !== 0o600 || JSON.parse(activationOriginal.bytes.toString('utf8')).kind !== ACTIVATION_KIND)) fail('ACTIVATION_RECORD_UNMANAGED')
+    originalReferences = [[PATHS.config, configReference], [PATHS.secret, secret], [PATHS.apiEnv, api], [ACTIVATION_PATH, activationOriginal]]
     if (phase === 'renew' && merged !== api.bytes.toString('utf8')) fail('API_ENV_NOT_PREPARED')
     if (phase === 'verify') {
       if (merged !== api.bytes.toString('utf8')) fail('API_ENV_NOT_PREPARED')
@@ -670,8 +677,19 @@ async function lifecycle(config, phase, configReference, layout = 'flat') {
       await transaction.write(PATHS.timer, units.timer, 0o644, 0, false, managedReferences.get(PATHS.timer))
     }
     await assertNginxInvocation(startedNginx ?? initialNginx)
-    await nginxReload()
+    const activationBefore = observeManagementActivation(await nginxState(), PATHS, certificate.generation, config)
+    activationBefore.files.nginxConfigurationSha256 = await nginxConfigurationDigest()
+    const activationCommand = await nginxReload()
     const result = await servedReady(config, certificate, false)
+    const finishActivation = async () => {
+      await assertNginxInvocation(startedNginx ?? initialNginx)
+      const after = observeManagementActivation(await nginxState(), PATHS, certificate.generation, config)
+      after.files.nginxConfigurationSha256 = await nginxConfigurationDigest()
+      return completeManagementActivation({ before: activationBefore, after, command: activationCommand, phase, activatedAt: new Date().toISOString() })
+    }
+    // A successful systemctl reload may precede replacement workers. Only a new
+    // accepting generation, stable source/config and served certificate can settle.
+    await awaitReadiness(finishActivation)
     if (phase === 'prepare') {
       const expectedUnits = new Map([...initialTimer.references].map(([path, original]) => [path, transaction.expectedVersion(path, original)]))
       const beforeReload = await renewalTimerState(expectedUnits)
@@ -691,7 +709,10 @@ async function lifecycle(config, phase, configReference, layout = 'flat') {
     await command('verify-renewal-enabled', '/usr/bin/systemctl', ['is-enabled', '--quiet', 'xpanel-management-tls.timer'])
     await command('verify-renewal-active', '/usr/bin/systemctl', ['is-active', '--quiet', 'xpanel-management-tls.timer'])
     assertOriginalReferences([...originalReferences.map(([path, original]) => [path, transaction.expectedVersion(path, original)]), ...[...managedReferences].map(([path, original]) => [path, transaction.expectedVersion(path, original)])])
-    saveStatus({ phase, status: 'tls-ready', fingerprint: certificate.generation, previousInstalledFingerprint: priorObservation.installedFingerprint, previousServedFingerprint: priorObservation.observedFingerprint, priorReadiness: priorObservation.state, certificateObservation: renewalObservation(priorObservation.installedFingerprint, certificate.generation, priorObservation.state === 'trusted-observed'), expiresAt: certificate.expiresAt, applicationBootstrap: 'pending', renewal: 'timer-active-not-renewal-qualified', attempts: result.attempts, ingressStartedByTransaction: Boolean(startedNginx), listenerInventorySha256: listenerInventorySha256 ?? null })
+    const activation = await finishActivation()
+    const activationBytes = JSON.stringify(activation, null, 2) + '\n'
+    await transaction.write(ACTIVATION_PATH, activationBytes, 0o600, 0, true, activationOriginal)
+    saveStatus({ phase, status: 'tls-ready', fingerprint: certificate.generation, previousInstalledFingerprint: priorObservation.installedFingerprint, previousServedFingerprint: priorObservation.observedFingerprint, priorReadiness: priorObservation.state, certificateObservation: renewalObservation(priorObservation.installedFingerprint, certificate.generation, priorObservation.state === 'trusted-observed'), expiresAt: certificate.expiresAt, applicationBootstrap: 'pending', renewal: 'timer-active-not-renewal-qualified', attempts: result.attempts, ingressStartedByTransaction: Boolean(startedNginx), listenerInventorySha256: listenerInventorySha256 ?? null, activationRecordSha256: sha(activationBytes) })
     transaction.retire()
   } catch (error) {
     let rollback = 'not-needed'
@@ -726,7 +747,7 @@ const programLayout = () => {
   if (sourceRoot === '/opt/xpanel') return 'flat'
   if (!/^\/opt\/xpanel\/releases\/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(sourceRoot)
     || realpathSync('/opt/xpanel/current') !== sourceRoot) fail('PROGRAM_LAYOUT_INVALID')
-  return 'current'
+  return sourceRoot
 }
 
 async function main(args) {

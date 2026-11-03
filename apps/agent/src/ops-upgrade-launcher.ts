@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { createNativeUpgradeIpcPorts } from './ops-upgrade-native.ts'
 import { fail } from '@xpanel/core'
 import { parseUpgradeProcessBinding } from './upgrade-coordinator-contract.ts'
 import type { UpgradeProcessBinding } from './upgrade-coordinator-contract.ts'
@@ -72,6 +73,5 @@ export function createUpgradeLauncherProvider(ports: UpgradeLauncherPorts | null
   }
 }
 
-/** Native host ports are not wired in this build: systemd launcher, local IPC, SO_PEERCRED and the hosted UID producer
- * all require a real Linux host, so production composition passes null until they are qualified. */
-export const nativeUpgradeLauncherPorts = (): UpgradeLauncherPorts | null => null
+/** Construction grants no readiness: each use proves installed ownership, kernel identity and actual hosted UID. */
+export const nativeUpgradeLauncherPorts = (): UpgradeLauncherPorts | null => createNativeUpgradeIpcPorts()

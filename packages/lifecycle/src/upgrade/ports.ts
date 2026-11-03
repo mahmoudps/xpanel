@@ -75,7 +75,7 @@ export interface UpgradeRow {
 /** Same operations as the db upgrades repository (create, setPhase, finish, latest). */
 export interface UpgradeHistoryPort {
   latest(): Promise<UpgradeRow | null>
-  create(input: { fromVersion: string; toVersion: string; actor: string; fromSchemaVersion: number }): Promise<{ id: string }>
+  create(input: { id: string; fromVersion: string; toVersion: string; actor: string; fromSchemaVersion: number }): Promise<{ id: string }>
   setPhase(id: string, phase: UpgradePhase, extra?: { snapshotPath?: string }): Promise<void>
   finish(
     id: string,
@@ -96,6 +96,15 @@ export interface UpgradeSafetyPort {
   assertOwnedExecution(panelUnits: readonly string[]): Promise<void>
   assertWritersQuiescent(panelUnits: readonly string[]): Promise<void>
   assertWriteBarrier(): Promise<void>
+  /** Native implementation controls the exact owned 4-unit surface, including the TLS activator. */
+  controlPlane(verb: 'stop' | 'start' | 'restart'): Promise<void>
+  /** True only for a branded, reverified pre-staged target. Foreign existing directories remain conflicts. */
+  acceptPreparedRelease(path: string): Promise<boolean>
+  prepareInstallationSource(recordId: string): Promise<void>
+  upgradeRecordId(): Promise<string>
+  /** Journal fixed unit bindings/current together; restore recaptures real inode ownership. */
+  selectInstallationSource(input: { target: string; recordId: string; direction: 'forward'|'rollback' }): Promise<void>
+  recoveryPlan(): Promise<{ recordId: string | null; mode: 'abort-before-transition' | 'rollback' | 'finish-publication'; hostOutcome: 'succeeded' | 'rolled_back' }>
   verifyRelease(release: { version: string; schemaVersion: number; archivePath: string; sha256: string; bytes: number }): Promise<void>
   /** Extract only from the authenticated retained FD; return after source revalidation and FD close. */
   unpackVerifiedRelease(path: string, release: { version: string; schemaVersion: number; archivePath: string; sha256: string; bytes: number }): Promise<void>

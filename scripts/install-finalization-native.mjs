@@ -5,8 +5,8 @@ import { open, readFile, readlink, realpath, lstat, rename } from 'node:fs/promi
 import { posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { requireLinuxRoot, withTrustedDirectory, withTrustedFile, readTrustedFile, readInstallationReceipt, assertOwnedFile } from './lifecycle-ownership.mjs'
-import { withLifecycleWriterAdmission, withInstallFinalizationExclusiveAdmission, assertInstallFinalizationExclusiveHeld, verifyInstallFinalizationParticipants } from './lifecycle-admission.mjs'
-import { runPreparedInstallFinalization, inspectInstallFinalizationRecovery, installFinalizationSubjectDigest, INSTALL_FINALIZATION_PATHS as PATHS } from './install-finalization.mjs'
+import { withLifecycleWriterAdmission, assertLifecycleWriterAdmissionHeld, withInstallFinalizationExclusiveAdmission, assertInstallFinalizationExclusivePhysicalHeld, assertInstallFinalizationExclusiveHeld, verifyInstallFinalizationParticipants } from './lifecycle-admission.mjs'
+import { runPreparedInstallFinalization, runPreparedInstallAdoption, installAdoptionAccountLifetimeDigest, assertInstallAdoptionState, installAdoptionSubjectDigest, inspectInstallFinalizationRecovery, installFinalizationSubjectDigest, INSTALL_FINALIZATION_PATHS as PATHS } from './install-finalization.mjs'
 
 import { ensurePreparedInstallParticipants, settlePreparedInstallReadiness, verifyPreparedInstallStartupSources } from './install-startup.mjs'
 
@@ -21,15 +21,22 @@ const record = (value, keys) => check(value && typeof value === 'object' && [Obj
   && Reflect.ownKeys(value).length === keys.length && Reflect.ownKeys(value).every(key => typeof key === 'string' && keys.includes(key) && Object.hasOwn(Object.getOwnPropertyDescriptor(value, key) ?? {}, 'value')), 'INSTALL_FINALIZATION_REQUEST_INVALID')
 const canonicalPath = path => typeof path === 'string' && path.length <= 4096 && posix.isAbsolute(path) && posix.normalize(path) === path && !/[\\\x00-\x20\x7f]/.test(path)
 
-export function parseNativeInstallFinalizationRequest(value) {
+export function parseNativeInstallFinalizationRequest(value) { return parseFinalizationRequest(value, 'install') }
+export function parseNativePreparedAdoptionRequest(value) { return parseFinalizationRequest(value, 'adopt') }
+function parseFinalizationRequest(value, command) {
   record(value, ['schemaVersion', 'command', 'mode', 'json', 'assumeYes', 'artifact'])
-  check(value.schemaVersion === 1 && value.command === 'install' && value.mode === 'apply' && value.assumeYes === true && typeof value.json === 'boolean', 'INSTALL_FINALIZATION_REQUEST_INVALID')
+  check(value.schemaVersion === 1 && value.command === command && value.mode === 'apply' && value.assumeYes === true && typeof value.json === 'boolean', 'INSTALL_FINALIZATION_REQUEST_INVALID')
   record(value.artifact, ['path', 'expectedArchiveSha256', 'keyId', 'signingKeyPath'])
   check(canonicalPath(value.artifact.path) && value.artifact.path.endsWith('.tar.gz') && !/^\/(?:home(?:[0-9]+)?|tmp|var\/tmp)(?:\/|$)/.test(value.artifact.path)
     && SHA.test(value.artifact.expectedArchiveSha256) && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value.artifact.keyId)
     && canonicalPath(value.artifact.signingKeyPath), 'INSTALL_FINALIZATION_ARTIFACT_INVALID')
   // Common CLI grammar only: this path is never read as authority. Installed trust is fixed below.
   return Object.freeze({ ...value, artifact: Object.freeze({ ...value.artifact }) })
+}
+
+export function installOwnershipCompletionSummary(kind) {
+  check(kind === 'install' || kind === 'adopt', 'INSTALL_FINALIZATION_KIND_INVALID')
+  return kind === 'adopt' ? 'Observed populated-installation adoption finalized' : 'Observed fresh-install ownership finalized'
 }
 
 export function installFinalizationMetadataTarget(path, jobId) {
@@ -65,9 +72,12 @@ export async function withInstallFinalizationStateDirectories(uid, gid, run) {
     }
     try {
       await ancestor.verify()
-      for (const [path, mode] of [['/var/lib/xpanel', 0o2770], [STATE, 0o2750]]) {
+      for (const [path, modes] of [['/var/lib/xpanel', [0o2770, 0o2750]], [STATE, [0o2750]]]) {
         const named = await lstat(path, { bigint: true })
-        check(safe(named, mode) && await realpath(path) === path, 'INSTALL_STATE_DIRECTORY_UNSAFE')
+        // Startup narrows the legacy parent to 02750. Accept either exact installed
+        // image initially; pin the observed mode, so even that narrowing is drift here.
+        const mode = Number(named.mode & 0o7777n)
+        check(modes.includes(mode) && safe(named, mode) && await realpath(path) === path, 'INSTALL_STATE_DIRECTORY_UNSAFE')
         const handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
         const pin = { path, mode, handle, device: named.dev, inode: named.ino }
         pins.push(pin)
@@ -98,6 +108,7 @@ async function assertBase(scope) {
   check(scope.live && active.getStore() === scope, 'INSTALL_FINALIZATION_NATIVE_SCOPE_REQUIRED')
   check(canonical(await processIdentity()) === canonical(scope.identity), 'INSTALL_FINALIZATION_PROCESS_CHANGED')
   for (const verify of scope.pins) await verify()
+  if (scope.helperCapability) await scope.bootstrapApi.assertPreparedReleaseCurrent(scope.helperCapability)
   if (scope.databasePin) {
     const [opened, named] = await Promise.all([scope.databasePin.stat({ bigint: true }), lstat(DATABASE, { bigint: true })])
     const expected = scope.databaseInfo
@@ -111,9 +122,20 @@ async function assertBase(scope) {
 export async function assertInstallFinalizationNativeScope(capability, phase) {
   const scope = capability && typeof capability === 'object' ? scopes.get(capability) : undefined
   check(scope && active.getStore() === scope && scope.live, 'INSTALL_FINALIZATION_NATIVE_SCOPE_REQUIRED')
-  check(phase === 'admission' && scope.phase === 'admitting' || phase === 'held' && scope.phase === 'held' && scope.guard, 'INSTALL_FINALIZATION_NATIVE_PHASE_INVALID')
+  check(phase === 'admission' && scope.phase === 'admitting' && !scope.db && !scope.databaseAccess || phase === 'held' && scope.phase === 'held' && scope.guard, 'INSTALL_FINALIZATION_NATIVE_PHASE_INVALID')
   await assertBase(scope)
   if (phase === 'held') await scope.dbApi.assertHostOperationGuardHeld(scope.guard, scope.originBinding)
+}
+
+/** Only the fixed adoption factory can bind a populated readiness observation to this live scope. */
+export async function assertInstallAdoptionReadinessScope(capability, context, phase) {
+  const scope = capability && typeof capability === 'object' ? scopes.get(capability) : undefined
+  check(scope && scope.kind === 'adopt' && scope.helperCapability && scope.live && active.getStore() === scope
+    && scope.phase === phase && ['capturing', 'held'].includes(phase)
+    && canonical(context) === canonical(scope.context), 'INSTALL_ADOPTION_NATIVE_SCOPE_REQUIRED')
+  await assertBase(scope)
+  await assertCapturedInstallSource(scope)
+  if (phase === 'held') await assertInstallFinalizationExclusiveHeld(capability)
 }
 
 export function installFinalizationNativeInfo(capability) {
@@ -128,9 +150,74 @@ const bindingFor = origin => ({ databaseFile: origin.file, databaseDevice: origi
 function assertTime(scope) { check(scope.observation && Date.now() < Date.parse(scope.observation.expiresAt), 'INSTALL_FINALIZATION_OBSERVATION_EXPIRED') }
 function lifecycleBinding(scope, job) { return { purpose: 'host.lifecycle.intent', jobId: job.id, requestFingerprint: scope.subject, action: 'lifecycle.adopt', principalId: scope.context.rootPrincipalId } }
 
+// Connections are local to one actual admission phase. No SQL handle crosses SH -> EX.
+async function assertDatabasePhase(scope) {
+  await assertBase(scope)
+  if (scope.phase === 'capturing') await assertLifecycleWriterAdmissionHeld()
+  else {
+    check(['admitting', 'held', 'retiring'].includes(scope.phase), 'INSTALL_FINALIZATION_DATABASE_PHASE_INVALID')
+    await assertInstallFinalizationExclusivePhysicalHeld(scope.capability)
+  }
+}
+async function bindDatabase(scope, db, access) {
+  check(!scope.db && !scope.databaseAccess, 'INSTALL_FINALIZATION_DATABASE_SCOPE_CONFLICT')
+  scope.db = db; scope.databaseAccess = access
+  const origin = access === 'readonly' ? scope.dbApi.getReadonlyOperationDatabaseOrigin(db)
+    : await db.transaction(tx => scope.dbApi.getStrictOperationDatabaseOrigin(tx))
+  check(origin.file === DATABASE && origin.device === String(scope.databaseInfo.dev)
+    && origin.inode === String(scope.databaseInfo.ino), 'INSTALL_DATABASE_CHANGED')
+  if (scope.originBinding) check(canonical(bindingFor(origin)) === canonical(scope.originBinding), 'INSTALL_FINALIZATION_DATABASE_CHANGED')
+  const principal = await db.transaction(async tx => {
+    const roots = await tx.query("SELECT id FROM principals WHERE kind='root' AND disabled=0 ORDER BY created_at,id LIMIT 2")
+    check(roots.length === 1, 'INSTALL_FINALIZATION_ROOT_REQUIRED')
+    const root = await scope.dbApi.getPrincipal(tx, roots[0].id)
+    check(root?.kind === 'root' && root.disabled === false && root.forcePasswordChange === false, 'INSTALL_FINALIZATION_ROOT_REQUIRED')
+    return root
+  })
+  if (scope.root) check(principal.id === scope.root.id && principal.username === scope.root.username, 'INSTALL_FINALIZATION_ROOT_CHANGED')
+  scope.origin = origin; scope.originBinding = bindingFor(origin); scope.root = principal
+}
+function unbindDatabase(scope) { scope.db = null; scope.databaseAccess = null; scope.audit = null }
+async function withFinalizationReadonlyDatabase(scope, run) {
+  await assertDatabasePhase(scope)
+  check(scope.phase === 'capturing' && !scope.db, 'INSTALL_FINALIZATION_DATABASE_SCOPE_CONFLICT')
+  return scope.dbApi.withReadonlyOperationDatabase(DATABASE, async db => {
+    try {
+      await bindDatabase(scope, db, 'readonly')
+      await assertDatabasePhase(scope)
+      const result = await run()
+      await scope.dbApi.assertReadonlyOperationDatabaseCurrent(db)
+      await assertDatabasePhase(scope)
+      return result
+    } finally { unbindDatabase(scope) }
+  })
+}
+async function withFinalizationWriterDatabase(scope, run) {
+  await assertDatabasePhase(scope)
+  check(!scope.db && !scope.databaseAccess, 'INSTALL_FINALIZATION_DATABASE_SCOPE_CONFLICT')
+  if (scope.phase === 'capturing') {
+    // Existing fresh-startup SH is the sole write exception before readiness.
+    // The readonly state gate precedes even SQLite connection initialization.
+    check(scope.kind === 'install' && scope.startupDeadline && Date.now() < scope.startupDeadline, 'INSTALL_STARTUP_SCOPE_REQUIRED')
+    check((await readScopeSnapshot(scope)).accounts.length === 0, 'INSTALL_FINALIZATION_STATE_CHANGED')
+  } else check(scope.phase === 'admitting', 'INSTALL_FINALIZATION_DATABASE_PHASE_INVALID')
+  await assertDatabasePhase(scope)
+  scope.changed = true // SQLite setup may persist WAL state even if a later check fails.
+  const handle = scope.dbApi.createDb(DATABASE, { durability: 'strict' })
+  try {
+    await bindDatabase(scope, handle.db, 'writer')
+    await assertDatabasePhase(scope)
+    return await run()
+  } finally {
+    // Retire audit objects tied to this runner together with the connection.
+    // Receipts remain bound to the same persistent origin and are rechecked in EX.
+    try { await handle.close() } finally { unbindDatabase(scope) }
+  }
+}
+
 async function rootInTransaction(scope, tx) {
   if (scope.guard) scope.dbApi.assertHostOperationGuardActive(scope.guard, scope.originBinding)
-  const origin = await scope.dbApi.getStrictOperationDatabaseOrigin(tx)
+  const origin = scope.databaseAccess === 'readonly' ? scope.dbApi.getReadonlyOperationDatabaseOrigin(tx) : await scope.dbApi.getStrictOperationDatabaseOrigin(tx)
   check(canonical(bindingFor(origin)) === canonical(scope.originBinding), 'INSTALL_FINALIZATION_DATABASE_CHANGED')
   const rows = await tx.query("SELECT id FROM principals WHERE kind='root' AND disabled=0 ORDER BY created_at,id LIMIT 2")
   check(rows.length === 1 && rows[0].id === scope.root.id, 'INSTALL_FINALIZATION_ROOT_CHANGED')
@@ -147,16 +234,23 @@ function assertCompletionScope(scope) {
   assertTime(scope)
 }
 
-function checkCompletionProof(scope, job) {
+/** Pure persisted-proof check; does not grant authority or establish native readiness. */
+export function assertInstallOwnershipCompletionProof(kind, subject, intent, job) {
+  check(kind === 'install' || kind === 'adopt', 'INSTALL_FINALIZATION_KIND_INVALID')
+  const subjectDigest = kind === 'adopt' ? installAdoptionSubjectDigest : installFinalizationSubjectDigest
   const proof = job.detail?.installFinalization, recorded = job.checkpointData?.installFinalization
   const evidence = job.checkpointData?.installFinalizationEvidence
-  check(scope.intent && proof && recorded && evidence && SHA.test(proof.observationDigest ?? '')
-    && proof.receiptSha256 === scope.intent.expectedActiveSha256
-    && recorded.subjectDigest === scope.subject && recorded.receiptSha256 === proof.receiptSha256
+  check(intent && proof && recorded && evidence && SHA.test(proof.observationDigest ?? '')
+    && proof.receiptSha256 === intent.expectedActiveSha256
+    && recorded.subjectDigest === subject && recorded.receiptSha256 === proof.receiptSha256
     && recorded.observationDigest === proof.observationDigest
-    && evidence.observation?.subjectDigest === scope.subject
-    && installFinalizationSubjectDigest(evidence.context, scope.intent.previousReceiptSha256) === scope.subject
+    && evidence.observation?.subjectDigest === subject
+    && subjectDigest(evidence.context, intent.previousReceiptSha256) === subject
     && digest(canonical(evidence.observation)) === proof.observationDigest, 'INSTALL_FINALIZATION_JOB_PROOF_CHANGED')
+}
+
+function checkCompletionProof(scope, job) {
+  assertInstallOwnershipCompletionProof(scope.kind, scope.subject, scope.intent, job)
 }
 
 function checkJob(scope, job) {
@@ -196,13 +290,26 @@ function assertInstallOperationWindow(scope) {
   if (scope.observation) return assertTime(scope)
   check(scope.startupActive && scope.guard && Date.now() < scope.startupDeadline, 'INSTALL_STARTUP_AUTHORITY_EXPIRED')
 }
+const lifetimeOf = account => Object.fromEntries(['id', 'username', 'uid', 'gid', 'home', 'createdAt', 'primaryDomain', 'ownerId', 'planId'].map(key => [key, account[key]]))
+const adoptionState = snapshot => ({ revision: snapshot.revision, checksum: snapshot.checksum, accounts: snapshot.accounts.map(lifetimeOf) })
+async function readScopeSnapshot(scope) {
+  await assertDatabasePhase(scope)
+  return scope.store.withReadonlyObservation(async observation => {
+    await observation.assertCurrent()
+    const snapshot = structuredClone(observation.snapshot)
+    await observation.assertCurrent()
+    return snapshot
+  })
+}
+
 async function assertCapturedInstallSource(scope) {
   for (const [path, expected] of scope.expected) check((await metadata(path)).sha256 === expected, 'INSTALL_FINALIZATION_METADATA_CHANGED')
   for (const owned of scope.receipt.files) await assertOwnedFile(owned)
   await scope.stateDirectories.verify()
-  const snapshot = await scope.store.readSnapshot()
+  const snapshot = await readScopeSnapshot(scope)
   await scope.stateDirectories.verify()
-  check(snapshot.revision === scope.context.state.revision && snapshot.checksum === scope.context.state.checksum && snapshot.accounts.length === 0, 'INSTALL_FINALIZATION_STATE_CHANGED')
+  if (scope.kind === 'adopt') assertInstallAdoptionState(scope.context, adoptionState(snapshot))
+  else check(snapshot.revision === scope.context.state.revision && snapshot.checksum === scope.context.state.checksum && snapshot.accounts.length === 0, 'INSTALL_FINALIZATION_STATE_CHANGED')
 }
 async function assertInstallCaptureCurrent(scope, requireStartupGuard = false) {
   check(scope.phase === 'capturing' && scope.context && scope.live, 'INSTALL_STARTUP_SCOPE_REQUIRED')
@@ -213,9 +320,16 @@ async function assertInstallCaptureCurrent(scope, requireStartupGuard = false) {
   await scope.db.transaction(async tx => {
     await rootInTransaction(scope, tx)
     if (scope.job) checkJob(scope, await scope.dbApi.getDurableJob(tx, scope.job.id))
-    if (scope.intentReceipt) scope.dbApi.assertOperationIntentReceipt(scope.intentReceipt, scope.operationBinding, tx)
+    if (scope.intentReceipt && scope.databaseAccess === 'writer') scope.dbApi.assertOperationIntentReceipt(scope.intentReceipt, scope.operationBinding, tx)
     if (scope.startupActive) assertInstallOperationWindow(scope)
   })
+  if (scope.intentReceipt && scope.databaseAccess === 'readonly') {
+    // Readonly evidence cannot be checked by a strict-write transaction assertion.
+    // The native observer rejects pending root-audit repair instead of performing it.
+    await scope.dbApi.withReadonlyLifecycleIntentObservation(scope.db, scope.operationBinding, async observation => {
+      await observation.assertCurrent()
+    })
+  }
 }
 export async function assertInstallFinalizationStartupScope(capability, unit) {
   const scope = capability && typeof capability === 'object' ? scopes.get(capability) : undefined
@@ -246,7 +360,7 @@ async function startPreparedInstallScope(scope) {
     scope.phase = 'capturing'; scope.startupDeadline = Date.now() + 90_000
     try {
       // This SH scope contains service effects and unit-state observation only, never health.
-      await withLifecycleWriterAdmission(async () => {
+      await withLifecycleWriterAdmission(() => withFinalizationWriterDatabase(scope, async () => {
         await ports(scope).capturePrepared()
         if (scope.receipt.status !== 'bootstrap_pending' || scope.preparedBootstrap.status !== 'bootstrap_pending') return
         const result = await ensurePreparedInstallParticipants({
@@ -279,7 +393,7 @@ async function startPreparedInstallScope(scope) {
           recordObserved: (unit, observation) => recordInstallStartup(scope, unit, 'observed-running', observation),
         })
         scope.startupRequested = result.requiresSettling
-      })
+      }))
     } finally {
       // The startup SH, physical guard and every service child are retired before normal
       // runPreparedInstallFinalization is allowed to obtain its own fresh readiness SH.
@@ -293,7 +407,7 @@ async function allocateInstallJob(scope) {
   scope.changed = true
   const job = await scope.dbApi.enqueueDurableJob(scope.db, { id, kind: 'lifecycle.adopt', actor: scope.root.username,
     idempotencyKey: 'install-finalization:' + scope.subject, requestFingerprint: scope.subject, targetRevision: scope.context.state.revision,
-    summary: 'Finalize observed fresh-install ownership', detail: { lifecycleIntent: binding, installFinalization: { subjectDigest: scope.subject, rootPrincipalId: scope.root.id } } },
+    summary: scope.kind === 'adopt' ? 'Finalize observed populated-installation adoption' : 'Finalize observed fresh-install ownership', detail: { lifecycleIntent: binding, installFinalization: { subjectDigest: scope.subject, rootPrincipalId: scope.root.id } } },
     async (tx, row) => { await rootInTransaction(scope, tx); check(row.requestFingerprint === scope.subject && canonical(row.detail.lifecycleIntent) === canonical(lifecycleBinding(scope, row)), 'INSTALL_FINALIZATION_JOB_CHANGED'); assertInstallOperationWindow(scope) })
   check(job.status !== 'succeeded', 'INSTALL_FINALIZATION_JOB_REQUIRES_REVIEW')
   await claim(scope, job)
@@ -381,15 +495,15 @@ function ports(scope) {
       check(scope.phase === 'new', 'INSTALL_FINALIZATION_NATIVE_PHASE_INVALID')
       return active.run(scope, async () => {
         scope.phase = 'capturing'
-        try { return await withLifecycleWriterAdmission(callback) } finally { scope.phase = 'prepared' }
+        try { return await withLifecycleWriterAdmission(() => withFinalizationReadonlyDatabase(scope, callback)) } finally { scope.phase = 'prepared' }
       })
     },
     async withExclusiveAdmission(callback) {
-      check(scope.phase === 'prepared' && scope.context && scope.observation, 'INSTALL_FINALIZATION_NATIVE_PHASE_INVALID')
+      check(scope.phase === 'prepared' && scope.context && scope.observation && !scope.db && !scope.databaseAccess, 'INSTALL_FINALIZATION_NATIVE_PHASE_INVALID')
       return active.run(scope, async () => {
         scope.phase = 'admitting'
         try {
-          return await withInstallFinalizationExclusiveAdmission(scope.capability, () => scope.dbApi.withHostOperationGuard(scope.db,
+          return await withInstallFinalizationExclusiveAdmission(scope.capability, () => withFinalizationWriterDatabase(scope, () => scope.dbApi.withHostOperationGuard(scope.db,
             { acquireTimeoutMs: 1, retryIntervalMs: 1 }, async guard => {
               scope.guard = guard; scope.phase = 'held'
               try {
@@ -404,9 +518,16 @@ function ports(scope) {
                 const pending = await Promise.allSettled([...scope.flights]); const failed = pending.filter(item => item.status === 'rejected')
                 if (failed.length) throw new AggregateError(failed.map(item => item.reason), 'install finalization primitive retirement requires inspection')
               }
-            }))
+            })))
         } finally { scope.phase = 'retired'; scope.guard = null }
       })
+    },
+    async readAdoptionState() {
+      check(scope.kind === 'adopt', 'INSTALL_ADOPTION_NATIVE_SCOPE_REQUIRED')
+      await assertBase(scope); await scope.stateDirectories.verify()
+      const snapshot = await readScopeSnapshot(scope)
+      await scope.stateDirectories.verify(); await assertBase(scope)
+      return adoptionState(snapshot)
     },
     async capturePrepared() {
       await assertBase(scope)
@@ -420,15 +541,18 @@ function ports(scope) {
       const previousSubject = scope.subject
       scope.seedIntent = bootstrap.finalization ? inspectInstallFinalizationRecovery(raw).intent : null
       await scope.stateDirectories.verify()
-      const snapshot = await scope.store.readSnapshot()
+      const snapshot = await readScopeSnapshot(scope)
       await scope.stateDirectories.verify()
-      const context = { source: installation.receipt.source, runtime: installation.receipt.runtime, database: {
+      const helper = scope.kind === 'adopt' ? scope.bootstrapApi.preparedReleaseInfo(scope.helperCapability) : null
+      const context = { source: installation.receipt.source, runtime: installation.receipt.runtime,
+        ...(helper ? { helperIdentity: Object.fromEntries(['version', 'archiveSha256', 'manifestSha256', 'dependencyReceiptSha256', 'sourceFilesDigest'].map(key => [key, helper[key]])) } : {}), database: {
         file: scope.origin.file, device: scope.origin.device, inode: scope.origin.inode, issuerId: scope.origin.issuerId }, rootPrincipalId: scope.root.id,
-        state: { revision: snapshot.revision, checksum: snapshot.checksum, accountCount: snapshot.accounts.length },
+        state: { revision: snapshot.revision, checksum: snapshot.checksum, accountCount: snapshot.accounts.length,
+          ...(scope.kind === 'adopt' ? { accountLifetimeDigest: installAdoptionAccountLifetimeDigest(snapshot.accounts.map(lifetimeOf)) } : {}) },
         admissionFingerprint: digest(JSON.stringify({ source: prepared.bootstrap.archiveSha256, manifest: prepared.bootstrap.manifestSha256, origin: scope.origin })) }
-      check(prepared.bootstrap.archiveSha256 === scope.request.artifact.expectedArchiveSha256 && prepared.runtime.nodeSha256 === context.runtime.nodeSha256, 'INSTALL_FINALIZATION_SOURCE_CHANGED')
+      check((scope.kind === 'adopt' ? prepared.helper.archiveSha256 : prepared.bootstrap.archiveSha256) === scope.request.artifact.expectedArchiveSha256 && prepared.runtime.nodeSha256 === context.runtime.nodeSha256, 'INSTALL_FINALIZATION_SOURCE_CHANGED')
       scope.context = context
-      scope.subject = installFinalizationSubjectDigest(context, scope.seedIntent?.previousReceiptSha256 ?? values[1].sha256)
+      scope.subject = (scope.kind === 'adopt' ? installAdoptionSubjectDigest : installFinalizationSubjectDigest)(context, scope.seedIntent?.previousReceiptSha256 ?? values[1].sha256)
       if (scope.job) check(previousSubject === scope.subject, 'INSTALL_STARTUP_SOURCE_CHANGED')
       if (scope.seedIntent) check(scope.seedIntent.subjectDigest === scope.subject, 'INSTALL_FINALIZATION_INTENT_CHANGED')
       await scope.db.transaction(tx => rootInTransaction(scope, tx))
@@ -475,7 +599,7 @@ function ports(scope) {
             installFinalizationEvidence: { context: scope.context, observation: scope.observation } } })
         await assertCurrent(scope, scope.context, scope.observation, intent)
         scope.job = await scope.dbApi.completeJobWithLease(scope.db, { jobId: scope.job.id, workerId: scope.workerId, fencingToken: scope.leaseFence, status: 'succeeded',
-          summary: 'Observed fresh-install ownership finalized', detail: { ...scope.job.detail, installFinalization: { subjectDigest: scope.subject, rootPrincipalId: scope.root.id, ...proof } } },
+          summary: installOwnershipCompletionSummary(scope.kind), detail: { ...scope.job.detail, installFinalization: { subjectDigest: scope.subject, rootPrincipalId: scope.root.id, ...proof } } },
           async (tx, current, phase) => {
             assertCompletionScope(scope)
             await rootInTransaction(scope, tx)
@@ -495,12 +619,31 @@ function ports(scope) {
   }
 }
 
-export async function runNativeInstallFinalization(input) {
-  let scope, handle, databasePin, output
+export async function runNativeInstallFinalization(input) { return runNativeFinalization(input, null) }
+
+/** Opens an authenticated new helper while finalizing the separately observed old installation. */
+export async function runNativePreparedAdoption(input) {
   try {
-    const request = parseNativeInstallFinalizationRequest(input), identity = await processIdentity()
-    const bootstrapApi = await import('./install-bootstrap.mjs'), prepared = await bootstrapApi.observePreparedInstallFinalization()
-    check(identity.executable === prepared.runtime.nodePath && await realpath(fileURLToPath(import.meta.url)) === prepared.bootstrap.releaseRoot + '/scripts/install-finalization-native.mjs', 'INSTALL_HELPER_SOURCE_MISMATCH')
+    const request = parseNativePreparedAdoptionRequest(input), bootstrap = await import('./install-bootstrap.mjs')
+    return await bootstrap.withExistingPreparedRelease({ artifactPath: request.artifact.path, expectedArchiveSha256: request.artifact.expectedArchiveSha256 },
+      capability => runNativeFinalization(request, capability))
+  } catch (error) {
+    const code = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,95}$/.test(error.code) ? error.code : 'INSTALL_ADOPTION_NATIVE_UNVERIFIED'
+    return { exitCode: 6, code, outcome: 'attention', details: { status: 'attention', qualified: false, nativeQualified: false, installReady: false, reason: code } }
+  }
+}
+
+async function runNativeFinalization(input, helperCapability) {
+  let scope, databasePin, output
+  try {
+    const request = (helperCapability ? parseNativePreparedAdoptionRequest : parseNativeInstallFinalizationRequest)(input), identity = await processIdentity()
+    const bootstrapModule = await import('./install-bootstrap.mjs')
+    const bootstrapApi = helperCapability ? { ...bootstrapModule, observePreparedInstallFinalization: () => bootstrapModule.observePreparedAdoptionSource(helperCapability) } : bootstrapModule
+    const prepared = await withLifecycleWriterAdmission(async () => {
+      await assertLifecycleWriterAdmissionHeld()
+      return bootstrapApi.observePreparedInstallFinalization()
+    }), helperRoot = helperCapability ? prepared.helper.releaseRoot : prepared.bootstrap.releaseRoot
+    check(identity.executable === prepared.runtime.nodePath && await realpath(fileURLToPath(import.meta.url)) === helperRoot + '/scripts/install-finalization-native.mjs', 'INSTALL_HELPER_SOURCE_MISMATCH')
     output = await withTrustedDirectory(ROOT, async rootPin => withTrustedFile(identity.executable, { sha256: prepared.runtime.nodeSha256, maxBytes: 256 * 1024 * 1024 }, async nodePin =>
       withTrustedFile('/etc/xpanel/release-trust.json', { exactMode: 0o600, maxBytes: 8192 }, async trustPin => {
         const trust = bootstrapApi.parseBootstrapTrust(JSON.parse(trustPin.bytes.toString('utf8')))
@@ -512,9 +655,9 @@ export async function runNativeInstallFinalization(input) {
             const sidecar = request.artifact.path.slice(0, -'.tar.gz'.length) + '.manifest.json'
             return withTrustedFile(sidecar, { maxBytes: 4096 }, async publisher => {
               bootstrapApi.verifyBootstrapPublisher(JSON.parse(publisher.bytes.toString('utf8')), report, bootstrapApi.parseBootstrapKeys(JSON.parse(keysPin.bytes.toString('utf8'))))
-              check(report.archiveSha256 === prepared.bootstrap.archiveSha256 && report.manifestSha256 === prepared.bootstrap.manifestSha256, 'INSTALL_FINALIZATION_SOURCE_CHANGED')
+              check(report.archiveSha256 === (helperCapability ? prepared.helper.archiveSha256 : prepared.bootstrap.archiveSha256) && report.manifestSha256 === (helperCapability ? prepared.helper.manifestSha256 : prepared.bootstrap.manifestSha256), 'INSTALL_FINALIZATION_SOURCE_CHANGED')
               await verifyPreparedInstallStartupSources(report, async (required, sha256) => {
-                await readTrustedFile(prepared.bootstrap.releaseRoot + '/' + required, { sha256, maxBytes: 256 * 1024 })
+                await readTrustedFile(helperRoot + '/' + required, { sha256, maxBytes: 256 * 1024 })
               })
               const dbApi = await import('../packages/db/src/index.ts'), stateApi = await import('../packages/state/src/index.ts'), readiness = await import('./install-finalization-readiness.mjs')
               const passwd = (await readTrustedFile('/etc/passwd', { maxBytes: 1024 * 1024 })).bytes.toString('utf8').split('\n').map(line => line.split(':')).filter(fields => fields[0] === 'xpanel')
@@ -524,20 +667,17 @@ export async function runNativeInstallFinalization(input) {
               const before = await databasePin.stat({ bigint: true })
               check(before.isFile() && before.nlink === 1n && before.uid === BigInt(passwd[0][2]) && before.gid === BigInt(passwd[0][3])
                 && Number(before.mode & 0o7777n) === 0o660, 'INSTALL_DATABASE_UNSAFE')
-              handle = dbApi.createDb(DATABASE, { durability: 'strict' })
-              const origin = await handle.db.transaction(tx => dbApi.getStrictOperationDatabaseOrigin(tx))
-              check(origin.file === DATABASE && origin.device === String(before.dev) && origin.inode === String(before.ino), 'INSTALL_DATABASE_CHANGED')
-              const roots = await handle.db.query("SELECT id FROM principals WHERE kind='root' AND disabled=0 ORDER BY created_at,id LIMIT 2")
-              check(roots.length === 1, 'INSTALL_FINALIZATION_ROOT_REQUIRED')
-              const principal = await dbApi.getPrincipal(handle.db, roots[0].id)
-              check(principal?.kind === 'root' && !principal.disabled && !principal.forcePasswordChange, 'INSTALL_FINALIZATION_ROOT_REQUIRED')
               const capability = Object.freeze(Object.create(null))
-              scope = { capability, request, identity, bootstrapApi, readiness, dbApi, db: handle.db, origin, originBinding: bindingFor(origin), root: principal,
+              scope = { capability, kind: helperCapability ? 'adopt' : 'install', helperCapability, request, identity, bootstrapApi, readiness: helperCapability ? {
+                captureInstallFinalizationReadiness: (context, subject) => readiness.captureInstallAdoptionReadiness(capability, context, subject),
+                assertInstallFinalizationReadinessCurrent: (context, observation) => readiness.assertInstallAdoptionReadinessCurrent(capability, context, observation),
+                releaseInstallFinalizationReadiness: observation => readiness.releaseInstallAdoptionReadiness(observation),
+              } : readiness, dbApi, db: null, databaseAccess: null, origin: null, originBinding: null, root: null,
                 store: new stateApi.StateStore(STATE), stateDirectories, databasePin, databaseInfo: before, pins: [stateDirectories.verify, rootPin.verify, nodePin.verify, trustPin.verify, keyPin.verify, keysPin.verify, publisher.verify],
                 live: true, phase: 'new', expected: new Map(), flights: new Set(), workerId: 'install-finalize:' + randomUUID(), probeId: randomUUID(), changed: false }
               scopes.set(capability, scope)
-              if (prepared.bootstrap.status === 'bootstrap_pending') await startPreparedInstallScope(scope)
-              return runPreparedInstallFinalization(ports(scope))
+              if (!helperCapability && prepared.bootstrap.status === 'bootstrap_pending') await startPreparedInstallScope(scope)
+              return (helperCapability ? runPreparedInstallAdoption : runPreparedInstallFinalization)(ports(scope))
               })
             })
           })
@@ -554,7 +694,6 @@ export async function runNativeInstallFinalization(input) {
       if (scope.pendingStartupObservation) try { await scope.readiness.releaseInstallFinalizationReadiness?.(scope.pendingStartupObservation) } catch (error) { errors.push(error) }
       if (scope.observation) try { await scope.readiness.releaseInstallFinalizationReadiness?.(scope.observation) } catch (error) { errors.push(error) }
     }
-    try { if (handle) await handle.close() } catch (error) { errors.push(error) }
     try { if (databasePin) await databasePin.close() } catch (error) { errors.push(error) }
     if (errors.length) output = { exitCode: 6, code: 'INSTALL_FINALIZATION_RETIREMENT_ATTENTION', outcome: 'attention', details: { status: 'attention', changed: scope?.changed === true, qualified: false, nativeQualified: false, installReady: false } }
   }

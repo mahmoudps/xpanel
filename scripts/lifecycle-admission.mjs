@@ -11,6 +11,8 @@ export const LIFECYCLE_BARRIER = LIFECYCLE_ROOT + '/writer-barrier.json'
 export const LIFECYCLE_LOCK = LIFECYCLE_ROOT + '/writer.lock'
 const exclusives = new WeakMap(), exclusiveScope = new AsyncLocalStorage(), writerScope = new AsyncLocalStorage()
 const installExclusives = new WeakMap(), installExclusiveScope = new AsyncLocalStorage()
+const recoveryObservationScope = new AsyncLocalStorage()
+const bootstrapExclusives = new WeakMap(), bootstrapExclusiveScope = new AsyncLocalStorage()
 const fail = (code, cause) => { throw Object.assign(new Error(code, cause ? { cause } : undefined), { code }) }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const SHA = /^[0-9a-f]{64}$/
@@ -87,6 +89,7 @@ async function withKernelLock(exclusive, callback) {
 }
 
 async function admittedWriter(callback) {
+  if (recoveryObservationScope.getStore()?.active) fail('LIFECYCLE_RECOVERY_OBSERVATION_READONLY')
   if (installExclusiveScope.getStore()?.active) fail('INSTALL_FINALIZATION_NESTED_WRITER')
   if (typeof callback !== 'function') fail('LIFECYCLE_CALLBACK_REQUIRED')
   const exclusive = exclusiveScope.getStore()
@@ -124,6 +127,40 @@ export function withLifecycleWriterAdmission(callback) {
   writerFlights.add(flight)
   return flight.then(value => { writerFlights.delete(flight); return value }, error => { writerFlights.delete(flight); throw error })
 }
+/** Observation assertion only; legacy fallback, copied objects and retired callbacks never establish native SH. */
+export async function assertLifecycleWriterAdmissionHeld() {
+  const state = writerScope.getStore()
+  if (!state?.active || exclusiveScope.getStore() || installExclusiveScope.getStore()) fail('LIFECYCLE_SHARED_ADMISSION_REQUIRED')
+  await state.verify()
+  await flock(state.fd, false, true)
+  await assertLifecycleWritesAllowed()
+  if (!state.active || writerScope.getStore() !== state) fail('LIFECYCLE_SHARED_ADMISSION_REQUIRED')
+}
+/** Recovery observation alone: a branded native retained-journal scope, never a writer/effect capability. */
+export async function withLifecycleRecoveryObservationAdmission(capability, callback) {
+  if (typeof callback !== 'function' || recoveryObservationScope.getStore() || writerScope.getStore() || exclusiveScope.getStore() || installExclusiveScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
+  const native = await import('./lifecycle-root-safety.mjs')
+  await native.assertLifecycleRecoveryObservationHeld(capability)
+  return withKernelLock(false, async lock => {
+    const state = { capability, lock, active: true }
+    try {
+      return await recoveryObservationScope.run(state, async () => {
+        await assertLifecycleRecoveryObservationAdmissionHeld(capability)
+        const value = await callback()
+        await assertLifecycleRecoveryObservationAdmissionHeld(capability)
+        return value
+      })
+    } finally { state.active = false }
+  })
+}
+export async function assertLifecycleRecoveryObservationAdmissionHeld(capability) {
+  const state = recoveryObservationScope.getStore()
+  if (!state?.active || state.capability !== capability) fail('LIFECYCLE_RECOVERY_OBSERVATION_REQUIRED')
+  await state.lock.verify(); await flock(state.lock.fd, false, true)
+  const native = await import('./lifecycle-root-safety.mjs')
+  await native.assertLifecycleRecoveryObservationHeld(capability)
+  if (!state.active || recoveryObservationScope.getStore() !== state) fail('LIFECYCLE_RECOVERY_OBSERVATION_REQUIRED')
+}
 export async function awaitLifecycleWriterDrain() { while (writerFlights.size) await Promise.allSettled([...writerFlights]) }
 /** Long-lived listeners/timers must create a fresh admission on each bounded callback. */
 export function createLifecycleBackgroundResources(callback) { return writerScope.exit(callback) }
@@ -132,13 +169,74 @@ export function createLifecycleBackgroundResources(callback) { return writerScop
 export async function withLifecycleExclusiveAdmission(capability, callback) {
   const native = await import('./lifecycle-root-safety.mjs')
   await native.assertLifecycleRootSafetyHeld(capability, { effect: 'filesystem.write' })
-  if (exclusiveScope.getStore() || writerScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
+  if (exclusiveScope.getStore() || writerScope.getStore() || recoveryObservationScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
   return withKernelLock(true, async lock => {
     const state = { lock, active: true, capability }
     exclusives.set(capability, state)
     try { return await exclusiveScope.run(state, callback) }
     finally { state.active = false; exclusives.delete(capability) }
   })
+}
+
+/** Initial native admission owns EX before SQLite can be opened for writing. Only the native producer can mint it. */
+export async function withLifecycleBootstrapExclusiveAdmission(capability, callback) {
+  const native = await import('./lifecycle-root-safety.mjs')
+  await native.assertLifecycleBootstrapHeld(capability)
+  if (typeof callback !== 'function' || bootstrapExclusiveScope.getStore() || exclusiveScope.getStore() || writerScope.getStore()
+    || recoveryObservationScope.getStore() || installExclusiveScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
+  return withKernelLock(true, async lock => {
+    const state = { capability, lock, active: true, promoted: false }
+    bootstrapExclusives.set(capability, state)
+    try { return await bootstrapExclusiveScope.run(state, async () => {
+      await native.assertLifecycleBootstrapHeld(capability)
+      await assertLifecycleBootstrapExclusivePhysicalHeld(capability)
+      return callback()
+    }) } finally { state.active = false; bootstrapExclusives.delete(capability) }
+  })
+}
+
+export async function assertLifecycleBootstrapExclusivePhysicalHeld(capability) {
+  const state = capability && typeof capability === 'object' ? bootstrapExclusives.get(capability) : undefined
+  if (!state?.active || bootstrapExclusiveScope.getStore() !== state) fail('LIFECYCLE_BOOTSTRAP_EXCLUSIVE_REQUIRED')
+  await state.lock.verify(); await flock(state.lock.fd, true, true)
+}
+
+/** Transfer the same retained descriptor, never release/reacquire EX between observation and fresh authority. */
+export async function withLifecyclePromotedExclusiveAdmission(bootstrap, capability, callback) {
+  await assertLifecycleBootstrapExclusivePhysicalHeld(bootstrap)
+  const native = await import('./lifecycle-root-safety.mjs')
+  await native.assertLifecycleBootstrapPromotion(bootstrap, capability)
+  const parent = bootstrapExclusives.get(bootstrap)
+  if (parent.promoted || exclusiveScope.getStore() || writerScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
+  parent.promoted = true
+  const state = { capability, lock: parent.lock, active: true }
+  exclusives.set(capability, state)
+  try { return await exclusiveScope.run(state, callback) }
+  finally { state.active = false; exclusives.delete(capability) }
+}
+
+/** Closed reader authority is separate from normal writing and comes only from real drained recovery. */
+export async function assertLifecycleClosedDatabaseObservationHeld(capability) {
+  const native = await import('./lifecycle-root-safety.mjs')
+  await native.assertNativeClosedDatabaseObservationHeld(capability)
+  await assertLifecycleBootstrapExclusivePhysicalHeld(capability)
+}
+export function getLifecycleClosedDatabaseObservationInfo(capability) {
+  // Synchronous brand/current-scope checks cannot import or trust caller-supplied methods.
+  const state = capability && typeof capability === 'object' ? bootstrapExclusives.get(capability) : undefined
+  if (!state?.active || bootstrapExclusiveScope.getStore() !== state || !state.closedInfo) fail('LIFECYCLE_CLOSED_DATABASE_CAPABILITY_REQUIRED')
+  return state.closedInfo
+}
+export async function bindLifecycleClosedDatabaseObservation(capability) {
+  await assertLifecycleBootstrapExclusivePhysicalHeld(capability)
+  const native = await import('./lifecycle-root-safety.mjs')
+  await native.assertNativeClosedDatabaseObservationHeld(capability)
+  const info = native.getNativeClosedDatabaseObservationInfo(capability)
+  bootstrapExclusives.get(capability).closedInfo = info
+}
+export async function retireLifecycleClosedDatabaseObservation(capability) {
+  await assertLifecycleBootstrapExclusivePhysicalHeld(capability)
+  bootstrapExclusives.get(capability).closedInfo = null
 }
 
 export async function assertLifecycleExclusivePhysicalHeld(capability) {
@@ -239,7 +337,7 @@ export async function readLifecyclePublicStatus() {
 export async function withInstallFinalizationExclusiveAdmission(capability, callback) {
   const native = await import('./install-finalization-native.mjs')
   await native.assertInstallFinalizationNativeScope(capability, 'admission')
-  if (typeof callback !== 'function' || exclusiveScope.getStore() || writerScope.getStore() || installExclusiveScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
+  if (typeof callback !== 'function' || exclusiveScope.getStore() || writerScope.getStore() || installExclusiveScope.getStore() || recoveryObservationScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
   return withKernelLock(true, async lock => {
     await native.assertInstallFinalizationNativeScope(capability, 'admission')
     const state = { lock, active: true, capability }
@@ -249,10 +347,14 @@ export async function withInstallFinalizationExclusiveAdmission(capability, call
   })
 }
 
-export async function assertInstallFinalizationExclusiveHeld(capability) {
+export async function assertInstallFinalizationExclusivePhysicalHeld(capability) {
   const state = capability && typeof capability === 'object' ? installExclusives.get(capability) : undefined
   if (!state || !state.active || installExclusiveScope.getStore() !== state) fail('INSTALL_FINALIZATION_EXCLUSIVE_REQUIRED')
   await state.lock.verify(); await flock(state.lock.fd, true, true)
+  if (!state.active || installExclusiveScope.getStore() !== state) fail('INSTALL_FINALIZATION_EXCLUSIVE_REQUIRED')
+}
+export async function assertInstallFinalizationExclusiveHeld(capability) {
+  await assertInstallFinalizationExclusivePhysicalHeld(capability)
   const native = await import('./install-finalization-native.mjs')
   await native.assertInstallFinalizationNativeScope(capability, 'held')
 }

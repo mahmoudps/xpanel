@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { isXpanelError } from '@xpanel/core'
 import { MONITORING_PS_ARGV } from '../../../packages/os/src/monitoring-command.ts'
+import { HOST_DISK_DF_ARGV } from './host-info-disks.ts'
 import {
   parseDfInodeTable, parseDfSpace, parseJournalJson, parsePsOutput, parseRepquotaUsage, processProtection,
   readDisk, readLogs, readProcesses, signalProcess,
@@ -114,12 +115,14 @@ describe('identity-bound process signal', () => {
 describe('disk observation', () => {
   const SPACE = 'Filesystem     Type     1-blocks        Used   Available Capacity Mounted on\n/dev/vda1      ext4  52521566208 20971520000 29393936384      42% /\ntmpfs          tmpfs   104857600       12288   104845312       1% /run\n/dev/vdb1      xfs  107374182400  1073741824 106300440576       1% /srv/My Data\n'
   const INODES = 'Filesystem      Inodes  IUsed   IFree IUse% Mounted on\n/dev/vda1      3276800 250000 3026800    8% /\ntmpfs           256000    900  255100    1% /run\n/dev/vdb1            0      0       0     - /srv/My Data\n'
-  const MOUNTINFO = '29 1 252:1 / / rw,relatime shared:1 - ext4 /dev/vda1 rw\n'
+  const ALL_SPACE = 'Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/vda1 52521566208 20971520000 29393936384 42% /\ntmpfs 104857600 12288 104845312 1% /run\n/dev/vdb1 107374182400 1073741824 106300440576 1% /srv/My Data\n'
+  const MOUNTINFO = '29 1 252:1 / / rw,relatime shared:1 - ext4 /dev/vda1 rw\n30 29 0:5 / /run rw - tmpfs tmpfs rw\n31 29 252:2 / /srv/My\\040Data rw - xfs /dev/vdb1 rw\n'
+  const allSpaceKey = HOST_DISK_DF_ARGV.join(' ')
   const REPQUOTA = '*** Report for user quotas on device /dev/vda1\nBlock grace time: 7days; Inode grace time: 7days\n                        Block limits                File limits\nUser            used    soft    hard  grace    used  soft  hard  grace\n----------------------------------------------------------------------\nroot      --  1234567       0       0          12345     0     0\nalice     +-   204800  102400  102400  6days     10     0     0\n'
   it('parses POSIX df with spaced mount points and joins inode counts', async () => {
     expect(parseDfSpace(SPACE)[2]).toEqual({ filesystem: '/dev/vdb1', type: 'xfs', mount: '/srv/My Data', totalBytes: 107374182400, usedBytes: 1073741824, availableBytes: 106300440576 })
     expect(parseDfInodeTable(INODES).get('/')).toEqual({ total: 3276800, used: 250000, free: 3026800 })
-    const run = runner({ '/usr/bin/df -B1 -P -T': { ok: true, stdout: SPACE }, '/usr/bin/df -i -P': { ok: true, stdout: INODES }, '/usr/sbin/repquota -u /': { ok: true, stdout: REPQUOTA } })
+    const run = runner({ [allSpaceKey]: { ok: true, stdout: ALL_SPACE }, '/usr/bin/df -i -P': { ok: true, stdout: INODES }, '/usr/sbin/repquota -u /': { ok: true, stdout: REPQUOTA } })
     const disk = await readDisk(run, async () => MOUNTINFO, accounts, now)
     expect(disk.filesystems.state).toBe('read')
     expect(disk.filesystems.items.map(item => item.inodes)).toEqual([{ total: 3276800, used: 250000, free: 3026800 }, { total: 256000, used: 900, free: 255100 }, null])
@@ -130,13 +133,62 @@ describe('disk observation', () => {
     for (const bad of ['', 'Filesystem only\n', SPACE + '/dev/x ext4 12 abc 1 1% /x\n', SPACE + '/dev/vda1 ext4 1 1 1 1% /\n', SPACE.replace('/srv/My Data', 'relative')]) expect(() => parseDfSpace(bad)).toThrow()
     expect(() => parseDfInodeTable(INODES + '/dev/x 10 11 0 100% /x\n')).toThrow()
     for (const bad of ['', 'no header\nalice -- 1 2 3\n', REPQUOTA.replace('Block limits', 'Block limits (MB)'), REPQUOTA + 'alice -- 1 1 1\n']) expect(() => parseRepquotaUsage(bad)).toThrow()
-    const run = runner({ '/usr/bin/df -B1 -P -T': { ok: true, stdout: SPACE }, '/usr/bin/df -i -P': { ok: true, stdout: 'broken' } })
+    const run = runner({ [allSpaceKey]: { ok: true, stdout: ALL_SPACE }, '/usr/bin/df -i -P': { ok: true, stdout: 'broken' } })
     const partial = await readDisk(run, async () => MOUNTINFO, accounts, now)
     expect([partial.filesystems.state, partial.filesystems.inodes, partial.filesystems.items[0]!.inodes]).toEqual(['read', 'unavailable', null])
     expect(partial.accounts).toMatchObject({ state: 'unavailable', mount: '/', reason: 'quota-report-unavailable', items: [] })
     expect((await readDisk(runner({}), async () => null, accounts, now))).toMatchObject({ filesystems: { state: 'unavailable', reason: 'filesystems-unavailable' }, accounts: { state: 'unavailable', reason: 'quota-mount-unavailable' } })
-    const invalid = await readDisk(runner({ '/usr/bin/df -B1 -P -T': { ok: true, stdout: 'x\ny\n' } }), async () => MOUNTINFO, accounts, now)
+    const invalid = await readDisk(runner({ [allSpaceKey]: { ok: true, stdout: 'x\ny\n' } }), async () => MOUNTINFO, accounts, now)
     expect(invalid.filesystems).toEqual({ state: 'unavailable', items: [], inodes: 'unavailable', reason: 'invalid-filesystems' })
+  })
+  const COMPLETE_MOUNTS = MOUNTINFO + '32 29 0:6 / /proc rw - proc proc rw\n33 29 252:1 / /srv/root-bind rw - ext4 /dev/vda1 rw\n34 29 252:1 /etc/hosts /etc/hosts rw - ext4 /dev/vda1 rw\n'
+  const COMPLETE_SPACE = ALL_SPACE + 'proc 0 0 0 - /proc\n/dev/vda1 52521566208 20971520000 29393936384 42% /srv/root-bind\n/dev/vda1 52521566208 20971520000 29393936384 42% /etc/hosts\n'
+  const completeRunner = (stdout = COMPLETE_SPACE, ok = true) => runner({
+    // The old observer succeeds but omits 3 mounts. It must not be used as a complete inventory.
+    '/usr/bin/df -B1 -P -T': { ok: true, stdout: SPACE },
+    [allSpaceKey]: { ok, stdout }, '/usr/bin/df -i -P': { ok: true, stdout: INODES },
+  })
+  it('reads pseudo, directory-bind and file-bind mounts absent from the old df summary', async () => {
+    const run = completeRunner()
+    const disk = await readDisk(run, async () => COMPLETE_MOUNTS, accounts, now)
+    expect(disk.filesystems.state).toBe('read')
+    expect(disk.filesystems.items.map(item => item.mount).sort()).toEqual(['/', '/etc/hosts', '/proc', '/run', '/srv/My Data', '/srv/root-bind'])
+    expect(disk.filesystems.items.find(item => item.mount === '/proc')).toEqual({ filesystem: 'proc', type: 'proc', mount: '/proc', totalBytes: 0, usedBytes: 0, availableBytes: 0, inodes: null })
+    for (const mount of ['/etc/hosts', '/srv/root-bind']) expect(disk.filesystems.items.find(item => item.mount === mount)).toMatchObject({ type: 'ext4', totalBytes: 52521566208, usedBytes: 20971520000, availableBytes: 29393936384 })
+    expect(run.calls.filter(argv => argv.includes('/usr/bin/df') && !argv.includes('-i'))).toEqual([[...HOST_DISK_DF_ARGV]])
+  })
+  it.each(['/proc', '/srv/root-bind', '/etc/hosts'])('does not claim a complete read when successful df omits %s', async mount => {
+    const partial = COMPLETE_SPACE.split('\n').filter(line => !line.endsWith(' ' + mount)).join('\n')
+    expect((await readDisk(completeRunner(partial), async () => COMPLETE_MOUNTS, accounts, now)).filesystems)
+      .toEqual({ state: 'unavailable', items: [], inodes: 'unavailable', reason: 'invalid-filesystems' })
+  })
+  it.each([2, 3])('refuses an unchanged path set whose mount identity changes at inventory read %s', async changedAt => {
+    let reads = 0
+    const readFile = async () => ++reads < changedAt ? COMPLETE_MOUNTS : COMPLETE_MOUNTS.replace('252:1', '252:9')
+    expect((await readDisk(completeRunner(), readFile, accounts, now)).filesystems)
+      .toEqual({ state: 'unavailable', items: [], inodes: 'unavailable', reason: 'invalid-filesystems' })
+  })
+  it('keeps bytes unavailable when the topology cannot be re-read after the inode command', async () => {
+    let reads = 0
+    const readFile = async () => { if (++reads === 3) throw new Error('mountinfo unavailable'); return COMPLETE_MOUNTS }
+    expect((await readDisk(completeRunner(), readFile, accounts, now)).filesystems)
+      .toEqual({ state: 'unavailable', items: [], inodes: 'unavailable', reason: 'invalid-filesystems' })
+  })
+  it('does not present failed, unexpected or ambiguous measurements as complete', async () => {
+    const cases = [
+      completeRunner(COMPLETE_SPACE, false),
+      completeRunner(COMPLETE_SPACE + '/dev/new 100 10 90 10% /unexpected\n'),
+      completeRunner(COMPLETE_SPACE + '/dev/wrong 100 10 90 10% /proc\n'),
+    ]
+    for (const run of cases) expect((await readDisk(run, async () => COMPLETE_MOUNTS, accounts, now)).filesystems)
+      .toMatchObject({ state: 'unavailable', items: [], inodes: 'unavailable' })
+    const overmounted = COMPLETE_MOUNTS + '35 29 252:3 / /srv/root-bind rw - xfs /dev/vdc1 rw\n'
+    expect((await readDisk(completeRunner(), async () => overmounted, accounts, now)).filesystems.state).toBe('unavailable')
+  })
+  it('keeps the existing payload unavailable when available bytes cannot be represented by its contract', async () => {
+    const exhausted = COMPLETE_SPACE.replace('29393936384 42% /\n', '-1 100% /\n')
+    expect((await readDisk(completeRunner(exhausted), async () => COMPLETE_MOUNTS, accounts, now)).filesystems)
+      .toMatchObject({ state: 'unavailable', items: [], inodes: 'unavailable' })
   })
 })
 

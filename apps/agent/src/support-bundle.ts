@@ -7,7 +7,7 @@ import { parseOsRelease } from '@xpanel/os'
 import { MONITORING_LOG_MAX_LINES } from '../../../packages/os/src/monitoring-command.ts'
 import type { HostJobView } from './host-job-contract.ts'
 import { parseMeminfo, parseProcUptime } from './host-info.ts'
-import { readDisk, readLogs } from './host-monitoring.ts'
+import { readFilesystems, readLogs } from './host-monitoring.ts'
 import type { MonitoringRun } from './host-monitoring.ts'
 import { readHostServices } from './host-services.ts'
 import type { HostServiceStatus } from './host-services.ts'
@@ -167,9 +167,8 @@ const meminfoBytes = (text: string, key: string): number | null => { const match
 async function readResources(host: NonNullable<SupportRouteContext['host']>): Promise<SupportResources> {
   const text = await attempt(() => host.readFile('/proc/meminfo'))
   const memory = text ? await attempt(async () => parseMeminfo(text)) : null
-  // Accounts are not passed, so readDisk runs no quota report and reads no account data.
-  const disk = await attempt(() => readDisk(host.run, undefined, []))
-  const filesystems = disk?.filesystems.state === 'read' ? disk.filesystems.items : null
+  const disk = await attempt(() => readFilesystems(host.run, path => host.readFile(path)))
+  const filesystems = disk?.state === 'read' ? disk.items : null
   return {
     memory: memory ? { state: 'read', totalBytes: memory.totalBytes, availableBytes: memory.availableBytes, swapTotalBytes: meminfoBytes(text!, 'SwapTotal'), swapFreeBytes: meminfoBytes(text!, 'SwapFree') }
       : { state: 'unavailable', totalBytes: null, availableBytes: null, swapTotalBytes: null, swapFreeBytes: null },

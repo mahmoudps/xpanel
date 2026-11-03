@@ -59,7 +59,7 @@ import { handleConfigurationHealthRoute } from './configuration-health.ts'
 import { handleAccountHealthRoute, nativeAccountHealthHost } from './account-health.ts'
 import { nativeQuotaSetupPorts, quotaSetupStamp } from './quota-setup.ts'
 import { handleHostJobsRoute } from './host-jobs-routes.ts'
-import { initializeUserQuota, validateQuotaFilesystem } from './services/quota.ts'
+import { initializeUserQuota, observeHomeUserQuota, validateQuotaFilesystem } from './services/quota.ts'
 import { handleAccountProvisioning, type AgentAccountProvisioningRuntime } from './account-provisioning-handler.ts'
 import type { HostJobRunner } from './host-jobs.ts'
 import { handleSoftwareCenterRoute } from './software-center-routes.ts'
@@ -940,6 +940,14 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         const presence = await deps.executor.probeRemovalTarget(account.home)
         if (presence !== 'absent') return jsonResponse({ purged: false, reason: presence === 'present' ? 'home_still_present' : 'home_presence_unknown' }, 409)
         return jsonResponse({ purged: true })
+      }
+
+      if (method === 'GET' && pathname === '/host/quota') {
+        await assertRootCaller(caller, 'host.quota.read')
+        if (!(deps.executor instanceof LinuxHostExecutor)) return fail('PRECONDITION_FAILED', 'quota observation requires the native Linux host executor', { stateChanged: false })
+        if ([...url.searchParams.keys()].some(key => key !== 'path') || url.searchParams.getAll('path').length > 1) return fail('VALIDATION', 'quota observation accepts only one path', { stateChanged: false })
+        const path = validateQuotaFilesystem(url.searchParams.get('path') ?? '/home')
+        return jsonResponse(await observeHomeUserQuota(argv => deps.executor!.runCommand(argv), path))
       }
 
       if (method === 'POST' && pathname === '/host/quota/initialize') {

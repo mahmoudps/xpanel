@@ -509,6 +509,8 @@ const execArgv = (
         timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxBuffer: opts.maxBuffer ?? DEFAULT_MAX_OUTPUT_BYTES,
         windowsHide: true,
+        // Only the finite quota observation grammar has an English-output parser. Do not change other commands or daemon state.
+        ...(isReadonlyQuotaObservation(argv) ? { env: { ...process.env, LANG: 'C', LC_ALL: 'C' } } : {}),
       },
       (err, stdout, stderr) => {
         if (!err) {

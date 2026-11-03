@@ -148,7 +148,11 @@ describe('native R04 database integration with genuine root authorities', () => 
       const settled = await settleReconcileOperation(f.handle.db, claimed.lease, { status: 'failed', reason: 'host_execution_failed' })
       expect(settled.state).toMatchObject({ status: 'failed', receipt: null, reference: operation.state.reference })
     })
-    await expect(renewReconcileLease(f.handle.db, escaped!)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    const settledBeforeExpiredUse = await getReconcileOperation(f.handle.db, operation.jobId)
+    await expect(renewReconcileLease(f.handle.db, escaped!)).rejects.toMatchObject({
+      code: 'CONFLICT', message: 'the host operation guard is outside its active callback scope',
+    })
+    expect(await getReconcileOperation(f.handle.db, operation.jobId)).toEqual(settledBeforeExpiredUse)
     expect((await getDurableJob(f.handle.db, operation.jobId))?.status).toBe('failed')
   })
 

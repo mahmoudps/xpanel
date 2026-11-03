@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
 // Source diagnostics only. These tests do not issue a certificate or emulate a trusted CA.
 import { ACME_DIRECTORY, PATHS, assertIsolatedDefaultConfig, awaitReadiness, certbotArguments, mergeApiEnvironment, parseConfigArguments, renderChallenge, renderIngress, renderRenewalUnits, renewalObservation, requiredEnvironment, sameFileVersion, validateConfig } from './management-tls.mjs'
+import { ACTIVATION_KIND, ACTIVATION_PATH } from './management-tls-activation.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const input = () => ({ schemaVersion: 1, hostname: 'panel.example.org', addresses: ['192.0.2.10'], acmeEmail: 'admin@example.org', acceptAcmeTerms: true })
@@ -63,7 +64,7 @@ const modelFilesystem = () => {
 }
 const transactionBindings = (fs: ReturnType<typeof modelFilesystem>) => ({ ...fs, constants, PATHS, sha: digest, fail: codedFailure, sameFileVersion, stamp: () => String(Math.random()).slice(2), command: async (_operation: string, _executable: string, args: string[]) => { const original = fs.get(args[2])!; fs.put(args[3], original.bytes, original.st.mode & 0o777, original.st.gid) } })
 
-const lifecycleModel = (options: { expired?: boolean; rejectCandidate?: boolean; mutate?: 'api' | 'secret' | 'config' | 'timer' } = {}) => {
+const lifecycleModel = (options: { expired?: boolean; rejectCandidate?: boolean; rejectActivation?: boolean; rejectStatus?: boolean; mutate?: 'api' | 'secret' | 'config' | 'timer' } = {}) => {
   const fs = modelFilesystem(), value = config(), operations: string[] = [], statuses: any[] = []
   const oldFingerprint = 'a'.repeat(64), newFingerprint = 'b'.repeat(64)
   fs.put(PATHS.config, JSON.stringify(value), 0o600)
@@ -95,12 +96,15 @@ const lifecycleModel = (options: { expired?: boolean; rejectCandidate?: boolean;
     servedReady: async (_config: unknown, certificate: { generation: string }) => { if (options.expired && certificate.generation === oldFingerprint) codedFailure('CERT_HAS_EXPIRED'); if (options.rejectCandidate && certificate.generation === newFingerprint) codedFailure('CANDIDATE_NOT_TRUSTED'); return { attempts: 1 } },
     readCertificate: () => ({ generation: newFingerprint, fullchain: 'diagnostic bytes', key: 'diagnostic bytes', expiresAt: '2030-01-01T00:00:00.000Z' }),
     rootDirectory: () => {}, renderChallenge, renderIngress, renderRenewalUnits: () => ({ service: '# Managed by xPanel management TLS lifecycle v1.\nservice\n', timer: '# Managed by xPanel management TLS lifecycle v1.\ntimer\n' }),
-    randomBytes, awaitReadiness, request: async (_address: string, _point: unknown, path: string) => ({ status: 200, body: fs.get(PATHS.webroot + path)!.bytes.toString() }),
+    randomBytes, awaitReadiness: options.rejectActivation ? async (probe: () => Promise<unknown>) => { try { return { attempts: 1, result: await probe() } } catch { return codedFailure('SERVED_READINESS_FAILED') } } : awaitReadiness,
+    request: async (_address: string, _point: unknown, path: string) => ({ status: 200, body: fs.get(PATHS.webroot + path)!.bytes.toString() }),
     profiles: (selected: any) => [{ host: selected.hostname }, { host: `whm.${selected.hostname}` }, { host: `mail.${selected.hostname}` }],
-    renewalObservation, saveStatus: (status: unknown) => statuses.push(status),
+    renewalObservation, saveStatus: (status: any) => { if (options.rejectStatus && status.status === 'tls-ready') codedFailure('STATUS_WRITE_FAILED'); statuses.push(status) }, ACTIVATION_KIND, ACTIVATION_PATH,
+    observeManagementActivation: () => ({ files: {} }),
+    completeManagementActivation: () => { if (options.rejectActivation) codedFailure('ACTIVATION_NEW_WORKERS_UNOBSERVED'); return { kind: ACTIVATION_KIND, diagnosticModelOnly: true } },
   }
   const loaded = loadDeclarations(['OwnedTransaction', 'assertOriginalReferences', 'assertTimerSnapshot', 'lifecycle'], bindings)
-  return { fs, value, statuses, operations, invoke: () => loaded.lifecycle(value, 'prepare', fs.get(PATHS.config)), oldFingerprint }
+  return { fs, value, statuses, operations, invoke: (phase = 'prepare') => loaded.lifecycle(value, phase, fs.get(PATHS.config)), oldFingerprint }
 }
 
 describe('management TLS source diagnostics (not public CA or installed-host qualification)', () => {
@@ -308,6 +312,37 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
 })
 
 describe('management TLS retained-failure control-flow diagnostics (modeled kernel/services, no native or CA proof)', () => {
+  it('publishes the activation record through the same owned transaction only after actual activation ports settle', async () => {
+    const model = lifecycleModel()
+    await model.invoke()
+    const record = model.fs.get(ACTIVATION_PATH)!
+    expect(record.st.mode & 0o777).toBe(0o600)
+    expect(JSON.parse(record.bytes.toString())).toMatchObject({ kind: ACTIVATION_KIND, diagnosticModelOnly: true })
+    expect(model.statuses.at(-1).activationRecordSha256).toBe(digest(record.bytes))
+  })
+  it('does not create an activation record when the actual observation port never sees replacement workers', async () => {
+    const model = lifecycleModel({ rejectActivation: true })
+    await expect(model.invoke()).rejects.toMatchObject({ code: 'SERVED_READINESS_FAILED' })
+    expect(model.fs.get(ACTIVATION_PATH)).toBeNull()
+    expect(model.statuses.at(-1).status).toBe('failed')
+  })
+  it.each([false, true])('restores the original activation state after post-publication failure (prior record: %s)', async present => {
+    const model = lifecycleModel({ rejectStatus: true })
+    const original = JSON.stringify({ kind: ACTIVATION_KIND, previousDiagnosticRecord: true }) + '\n'
+    if (present) model.fs.put(ACTIVATION_PATH, original, 0o600)
+    await expect(model.invoke()).rejects.toMatchObject({ code: 'STATUS_WRITE_FAILED' })
+    expect(model.fs.get(ACTIVATION_PATH)?.bytes.toString() ?? null).toBe(present ? original : null)
+    expect(model.statuses.at(-1).status).toBe('failed')
+  })
+  it('preserves an existing activation record byte-for-byte during read-only verification', async () => {
+    const model = lifecycleModel()
+    const original = JSON.stringify({ kind: ACTIVATION_KIND, previousDiagnosticRecord: true }) + '\n'
+    model.fs.put(ACTIVATION_PATH, original, 0o600)
+    await model.invoke('verify')
+    expect(model.fs.get(ACTIVATION_PATH)!.bytes.toString()).toBe(original)
+    expect(model.statuses.at(-1).status).toBe('ingress-observed-ready')
+    expect(model.statuses.at(-1)).not.toHaveProperty('activationRecordSha256')
+  })
   it('permits an expired installed baseline to reach repair and never labels it previously observed', async () => {
     const model = lifecycleModel({ expired: true })
     await expect(model.invoke()).resolves.toBeUndefined()
@@ -407,7 +442,10 @@ describe('management TLS retained-failure control-flow diagnostics (modeled kern
   })
   it('retires a normal observed child only after its real modeled group has ended', async () => {
     const model = commandModel(false, false)
-    await expect(model.run()).resolves.toMatchObject({ exitCode: 0, remainingProcessGroup: false })
+    const result = await model.run()
+    expect(result).toMatchObject({ exitCode: 0, remainingProcessGroup: false, executable: '/usr/bin/diagnostic-tool', birth: { pid: 4200, kernelStartTime: '123' } })
+    expect(Date.parse(result.startedAt)).toBeLessThanOrEqual(Date.parse(result.finishedAt))
+    expect(Date.parse(result.finishedAt)).toBeLessThanOrEqual(Date.parse(result.retiredAt))
     expect(model.signals).toEqual([])
     expect(model.fs.files.has(`${PATHS.state}/active-command.json`)).toBe(false)
   })

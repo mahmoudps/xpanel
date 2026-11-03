@@ -11,7 +11,7 @@ import { assertProvisioningProcessBinding } from '../account-provisioning-observ
 import type { CanaryHttpProbeResult } from './upgrade-runner.ts'
 
 export interface NativeLifecycleCanaryOptions extends Omit<NativeAccountHttpOptions, 'store'> {
-  readonly store: Pick<StateStore, 'listDomains' | 'getAccount' | 'getAuthorityMetadata' | 'readSnapshot'>
+  readonly store: Pick<StateStore, 'listDomains' | 'getAccount' | 'getAuthorityMetadata' | 'readSnapshot' | 'withReadonlyObservation'>
 }
 const targetBrand = Symbol('native lifecycle canary target')
 export interface LifecycleCanaryTarget extends AccountIdentity { readonly [targetBrand]: true }
@@ -55,14 +55,18 @@ export function createNativeLifecycleCanary(options: NativeLifecycleCanaryOption
   return {
     /** Selection is metadata only. The actual safety scope must revalidate this opaque object before any flow effects. */
     async select(): Promise<NativeCanarySelection> {
-      const snapshot = await options.store.readSnapshot()
-      const candidates = snapshot.accounts.filter(account => eligible(account, snapshot.domains)).sort((a, b) => a.id.localeCompare(b.id))
-      const account = candidates[0]
-      if (snapshot.accounts.length && !account) return refused('active_primary_fpm_canary_required')
-      const selection = Object.freeze({ username: account?.username ?? null })
-      selections.set(selection, account ? { accountId: account.id, username: account.username, lifetime: lifetime(account) }
-        : { accountId: null, username: null, lifetime: null })
-      return selection
+      return options.store.withReadonlyObservation(async observation => {
+        await observation.assertCurrent()
+        const snapshot = observation.snapshot
+        const candidates = snapshot.accounts.filter(account => eligible(account, snapshot.domains)).sort((a, b) => a.id.localeCompare(b.id))
+        const account = candidates[0]
+        if (snapshot.accounts.length && !account) return refused('active_primary_fpm_canary_required')
+        const selection = Object.freeze({ username: account?.username ?? null })
+        selections.set(selection, account ? { accountId: account.id, username: account.username, lifetime: lifetime(account) }
+          : { accountId: null, username: null, lifetime: null })
+        await observation.assertCurrent()
+        return selection
+      })
     },
     async assertSelectionCurrent(selection: NativeCanarySelection): Promise<void> {
       const authority = await scope()

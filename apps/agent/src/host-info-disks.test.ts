@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { HOST_DISK_DF_ARGV, MAX_HOST_DISK_INPUT_BYTES, readHostDiskInventory, visibleMountpoints } from './host-info-disks.ts'
+import { HOST_DISK_DF_ARGV, MAX_HOST_DISK_INPUT_BYTES, readHostDiskInventory, visibleMountInventory, visibleMountpoints } from './host-info-disks.ts'
 
 const inventory = [
   '1 0 8:1 / / rw - ext4 /dev/sda1 rw',
@@ -73,6 +73,16 @@ describe('complete per-mount host disk observations', () => {
   })
   it('deduplicates namespace paths without silently excluding bind mounts', () => {
     expect(visibleMountpoints(inventory + '6 1 8:2 / /home rw - ext4 /dev/sda2 rw\n')).toEqual(['/', '/data with spaces', '/etc/hosts', '/home', '/proc'])
+  })
+  it('projects filesystem types through the same validated mount inventory without guessing overmounts', () => {
+    expect(visibleMountInventory(inventory)).toEqual([
+      { mount: '/', type: 'ext4' }, { mount: '/data with spaces', type: 'ext4' },
+      { mount: '/etc/hosts', type: 'ext4' }, { mount: '/home', type: 'ext4' }, { mount: '/proc', type: 'proc' },
+    ])
+    const overmounted = inventory + '6 1 8:4 / /home rw - xfs /dev/sda4 rw\n'
+    expect(visibleMountInventory(overmounted).find(item => item.mount === '/home')?.type).toBeNull()
+    expect(visibleMountpoints(overmounted)).toEqual(visibleMountpoints(inventory))
+    expect(() => visibleMountInventory(inventory.replace('- proc proc', '- bad\ttype proc'))).toThrow('mount_inventory_invalid')
   })
   it('rejects malformed mount inventory before any measurement command', async () => {
     let commands = 0

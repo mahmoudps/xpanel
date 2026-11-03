@@ -3,7 +3,7 @@ import type { Account, Certificate, Plan } from '@xpanel/core'
 import type { CanonicalIoAnalyticsRead } from './analytics.ts'
 import type { BandwidthReport } from './metering.ts'
 import { parseCpuinfo, parseLoadavg, parseMeminfo } from './host-info.ts'
-import { readDisk } from './host-monitoring.ts'
+import { readFilesystems } from './host-monitoring.ts'
 import type { FilesystemView } from './host-monitoring.ts'
 import { readHostServices } from './host-services.ts'
 import { REBOOT_REQUIRED_PATH } from './package-manager.ts'
@@ -113,9 +113,8 @@ async function memoryChecks(executor: ServerLimitsExecutor): Promise<ServerHealt
 }
 
 async function diskChecks(executor: ServerLimitsExecutor): Promise<ServerHealthCheck[]> {
-  // Accounts are not passed, so readDisk runs no quota report here.
-  const { filesystems } = await readDisk(argv => executor.runCommand(argv), undefined, [])
-  if (filesystems.state !== 'read') return [check('disk-space', 'unavailable', 'filesystems_unread', 'df -B1 -P -T: ' + (filesystems.reason ?? 'unavailable')), check('disk-inodes', 'unavailable', 'filesystems_unread', 'df -B1 -P -T: ' + (filesystems.reason ?? 'unavailable'))]
+  const filesystems = await readFilesystems(argv => executor.runCommand(argv), path => executor.readFile(path))
+  if (filesystems.state !== 'read') return [check('disk-space', 'unavailable', 'filesystems_unread', 'mount inventory and df: ' + (filesystems.reason ?? 'unavailable')), check('disk-inodes', 'unavailable', 'filesystems_unread', 'mount inventory and df: ' + (filesystems.reason ?? 'unavailable'))]
   const graded = filesystems.items.filter(fs => !UNGRADED_FILESYSTEMS.has(fs.type) && fs.usedBytes + fs.availableBytes > 0)
   const skipped = filesystems.items.length - graded.length
   const space = graded.map(fs => {

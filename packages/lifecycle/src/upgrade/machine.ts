@@ -96,6 +96,8 @@ export interface RewindJournal {
   problems: string[]
   startedAt: string
   updatedAt: string
+  /** Only a failed owned-unit start after all data/source steps were confirmed may be retried. */
+  retryAdmission?: 'restart-owned-control-plane'
 }
 
 /** Written once (O_EXCL) right after the snapshot; the rewind restores only what it names. */
@@ -216,8 +218,8 @@ export const normalizeUpgradePlan = (p: UpgradePlan): NormalizedPlan => {
   assertSemver(r?.version, 'release version')
   if (!isNonNegInt(r.schemaVersion)) fail('VALIDATION', 'invalid release schemaVersion')
   assertSafeAbsPath(r.archivePath, 'release archive path')
-  // root unpacks it: only a root-only directory keeps it from being swapped after the checksum
-  if (posix.dirname(r.archivePath) !== layout.downloadsDir) fail('VALIDATION', `release archive must be inside ${layout.downloadsDir}`)
+  // Native admission retains authenticated archive descriptors and protected ancestry. Location syntax alone is not that proof.
+  if (isCustomerDataPath(r.archivePath) || /^\/(?:tmp|var\/tmp)(?:\/|$)/.test(r.archivePath) || !r.archivePath.endsWith('.tar.gz')) fail('VALIDATION', 'release archive must use a durable non-customer path')
   if (!isSha256(r.sha256)) fail('VALIDATION', 'release sha256 must be 64 lowercase hex characters')
   if (!isNonNegInt(r.bytes) || r.bytes === 0) fail('VALIDATION', 'release bytes must be a positive integer')
   const panelUser = p.panelUser ?? 'xpanel'
@@ -372,16 +374,14 @@ const applyUnits = async (c: Ctx, step: string, units: UnitChange[]): Promise<vo
 }
 
 const panelUnits = async (c: Ctx, step: string, verb: 'restart' | 'stop' | 'start'): Promise<void> => {
-  for (const unit of c.plan.panelUnits) await run(c, step, { kind: 'systemd', verb, unit })
+  await c.ports.safety.controlPlane(verb)
+  log(c, step, true, 'owned control-plane ' + verb)
 }
 
 const pointCurrentAt = async (c: Ctx, target: string, suffix: string): Promise<void> => {
   const l = c.plan.layout
-  const tmp = posix.join(posix.dirname(l.currentLink), `.current-${c.stamp}${suffix}`)
-  if ((await c.fs.readlink(tmp)) !== null || (await c.fs.exists(tmp))) await c.fs.remove(tmp)
-  await c.fs.symlink(target, tmp)
-  await c.fs.rename(tmp, l.currentLink)
-  await c.ports.safety.syncPath(posix.dirname(l.currentLink))
+  if (!c.recordId) throw new Error('installation source transition requires the current upgrade record')
+  await c.ports.safety.selectInstallationSource({ target, recordId: c.recordId, direction: suffix ? 'rollback' : 'forward' })
   const now = await c.fs.readlink(l.currentLink)
   if (now !== target) throw new Error(`current link points to ${String(now)}, expected ${target}`)
 }
@@ -552,11 +552,19 @@ export const parseRewindJournal = (raw: string | null): RewindJournal | null => 
   if (!isObject(v) || v.schemaVersion !== 1 || typeof v.recordId !== 'string' || !RECORD_ID.test(v.recordId)
     || !['rewind-started', 'rewind-verified', 'rewind-failed', 'rewind-unknown'].includes(String(v.state))
     || !Array.isArray(v.done) || !v.done.every(s => REWIND_STEPS.includes(s as RewindStep))
+    || new Set(v.done).size !== v.done.length
     || !(v.generation === null || Number.isSafeInteger(v.generation))
     || !Array.isArray(v.problems) || !v.problems.every(p => typeof p === 'string')
+    || v.retryAdmission !== undefined && v.retryAdmission !== 'restart-owned-control-plane'
     || typeof v.startedAt !== 'string' || typeof v.updatedAt !== 'string') return null
-  return { schemaVersion: 1, recordId: v.recordId, state: v.state as RewindState, done: [...v.done] as RewindStep[], generation: v.generation as GenerationId | null, problems: [...v.problems] as string[], startedAt: v.startedAt, updatedAt: v.updatedAt }
+  return { schemaVersion: 1, recordId: v.recordId, state: v.state as RewindState, done: [...v.done] as RewindStep[], generation: v.generation as GenerationId | null, problems: [...v.problems] as string[], startedAt: v.startedAt, updatedAt: v.updatedAt,
+    ...(v.retryAdmission === 'restart-owned-control-plane' ? { retryAdmission: v.retryAdmission } : {}) }
 }
+
+/** Diagnostic classification only. Native admission must still prove source/state/intent and fresh quiescence. */
+export const isRetryableRewindJournal = (journal: RewindJournal): boolean => journal.state === 'rewind-failed'
+  && journal.retryAdmission === 'restart-owned-control-plane' && Number.isSafeInteger(journal.generation) && journal.generation! > 0
+  && JSON.stringify(journal.done) === JSON.stringify(REWIND_STEPS.filter(step => step !== 'start-panel'))
 
 const parseReceipt = (raw: string | null): SnapshotReceipt | null => {
   const v = parseJson(raw)
@@ -622,7 +630,7 @@ const rewindStep = async (c: Ctx, r: SnapshotReceipt, step: RewindStep): Promise
   const live = posix.join(l.stateDir, 'state')
   const aside = posix.join(l.stateDir, `.pre-rewind-${r.recordId}`)
   if (step === 'release') {
-    if ((await c.fs.readlink(l.currentLink)) !== r.previousTarget) await pointCurrentAt(c, r.previousTarget, '-rewind')
+    await pointCurrentAt(c, r.previousTarget, '-rewind')
   } else if (step === 'state-extract') {
     // Re-extracting the same archive over a partial attempt converges; no removal is needed.
     await c.fs.mkdirp(scratch, 0o700)
@@ -685,6 +693,7 @@ const endRewind = async (c: Ctx, j: RewindJournal, state: Exclude<RewindState, '
 const rewind = async (c: Ctx, resumed: RewindJournal | null): Promise<RewindJournal> => {
   const at = nowIso(c)
   const j: RewindJournal = resumed ?? { schemaVersion: 1, recordId: c.recordId as string, state: 'rewind-started', done: [], generation: null, problems: [], startedAt: at, updatedAt: at }
+  delete j.retryAdmission
   c.rewind = j
   if (resumed) c.newGeneration = j.generation
   try {
@@ -718,9 +727,13 @@ const rewind = async (c: Ctx, resumed: RewindJournal | null): Promise<RewindJour
     try {
       await rewindStep(c, receipt, step)
     } catch (e) {
+      if (step === 'start-panel' && JSON.stringify(j.done) === JSON.stringify(REWIND_STEPS.filter(value => value !== 'start-panel'))
+        && Number.isSafeInteger(j.generation) && j.generation! > 0) j.retryAdmission = 'restart-owned-control-plane'
       return endRewind(c, j, 'rewind-failed', [`rewind:${step}: ${errorMessage(e)}`, `restored only: ${j.done.join(', ') || 'nothing'}`])
     }
-    j.done.push(step)
+    // Checkpoints describe completed steps, while host/filesystem actions retain their execution trace.
+    // A reselected release must not make a later start-only retry lose its exact completion proof.
+    j.done = REWIND_STEPS.filter(completed => completed === step || j.done.includes(completed))
     j.generation = c.newGeneration
     log(c, `rewind:${step}`, true, 'done')
     try {
@@ -796,11 +809,13 @@ const snapshotStep = async (c: Ctx): Promise<void> => {
   await c.ports.safety.syncPath(receiptPath(l, id))
   await c.ports.safety.syncPath(l.snapshotsDir)
   log(c, 'snapshot:receipt', true, receiptPath(l, id))
+  await c.ports.safety.prepareInstallationSource(id)
 }
 
 const stageStep = async (c: Ctx, releaseDir: string): Promise<void> => {
   const { version, archivePath } = c.plan.release
   await enterPhase(c, 'stage')
+  if (await c.ports.safety.acceptPreparedRelease(releaseDir)) { log(c, 'release', true, 'authenticated prepared target reused: ' + releaseDir); return }
   const staging = posix.join(c.plan.layout.stagingDir, `${version}-${c.stamp}`)
   await c.fs.mkdirp(staging, 0o755)
   c.staging = staging
@@ -884,7 +899,7 @@ const precheck = async (c: Ctx): Promise<UpgradeResult | null> => {
   c.checks = pre.checks
   if (!pre.ok) return refuse(c, 'PRECONDITION_FAILED', pre.checks.filter((x) => !x.ok).map((x) => x.message).join('; '))
   const releaseDir = posix.join(l.releasesDir, c.plan.release.version)
-  if (await c.fs.exists(releaseDir)) return refuse(c, 'CONFLICT', `${releaseDir} already exists; remove it after inspection`)
+  if (await c.fs.exists(releaseDir) && !await c.ports.safety.acceptPreparedRelease(releaseDir)) return refuse(c, 'CONFLICT', `${releaseDir} already exists; remove it after inspection`)
   if ((await c.fs.sha256(c.plan.release.archivePath)) !== c.plan.release.sha256) return refuse(c, 'VALIDATION', 'release archive checksum mismatch')
   c.identitiesBefore = await reconciler.identities()
   if (c.plan.canary && !c.identitiesBefore.some((i) => i.username === c.plan.canary)) {
@@ -897,6 +912,7 @@ const execute = async (c: Ctx): Promise<UpgradeResult> => {
   const l = c.plan.layout
   const releaseDir = posix.join(l.releasesDir, c.plan.release.version)
   const row = await c.ports.history.create({
+    id: await c.ports.safety.upgradeRecordId(),
     fromVersion: c.from as string,
     toVersion: c.plan.release.version,
     actor: c.plan.actor.username,
@@ -925,8 +941,9 @@ const execute = async (c: Ctx): Promise<UpgradeResult> => {
     await pointCurrentAt(c, releaseDir, '')
     log(c, 'switch', true, `${c.previousTarget} -> ${releaseDir}`)
   } catch (e) {
-    const now = await c.fs.readlink(l.currentLink).catch(() => null)
-    return now === releaseDir ? rollback(c, e, releaseDir) : abortBeforeSwitch(c, e, releaseDir)
+    // Unit files may already have changed before current moves. Always restore the
+    // recorded installation transition after a switch-phase failure.
+    return rollback(c, e, releaseDir)
   }
   try {
     await activateStep(c)
@@ -1035,7 +1052,9 @@ export interface RecoverInput {
 }
 
 export interface RecoverResult {
-  status: 'retirement_pending'
+  outcome: 'retirement_pending' | 'succeeded' | 'rolled_back'
+  hostOutcome: 'succeeded' | 'rolled_back'
+  status: 'retirement_pending' | 'recovered'
   version: string
   recordId: string | null
   closedRecordId: string | null
@@ -1049,15 +1068,13 @@ export interface RecoverResult {
 const resumeRewind = async (ports: UpgradePorts, actor: Principal, os: Pick<OsProfile, 'family'>, layout: UpgradeLayout, recordId: string | null): Promise<RewindJournal | null> => {
   if (recordId === null || !RECORD_ID.test(recordId)) return null
   const fs = guardFs(ports.fs, layout)
-  const journal = parseRewindJournal(await fs.readFile(rewindJournalPath(layout, recordId)))
-  if (journal?.state !== 'rewind-started' || journal.recordId !== recordId) return null
+  const rawJournal = await fs.readFile(rewindJournalPath(layout, recordId))
+  const journal = parseRewindJournal(rawJournal)
+  if (rawJournal !== null && journal === null) return fail('PRECONDITION_FAILED', 'rewind journal is malformed; evidence is preserved')
+  if (journal && (journal.recordId !== recordId || !['rewind-started', 'rewind-verified'].includes(journal.state) && !isRetryableRewindJournal(journal))) return fail('PRECONDITION_FAILED', 'rewind has an unresolved outcome')
   const r = parseReceipt(await fs.readFile(receiptPath(layout, recordId)))
   if (!r || r.recordId !== recordId) {
-    journal.state = 'rewind-failed'
-    journal.problems = ['snapshot receipt is missing or malformed']
-    journal.updatedAt = ports.clock.now().toISOString()
-    await saveJournal(ports, fs, layout, journal)
-    return journal
+    return fail('PRECONDITION_FAILED', 'snapshot receipt is missing or malformed')
   }
   const c = newCtx(ports, {
     actor,
@@ -1073,7 +1090,9 @@ const resumeRewind = async (ports: UpgradePorts, actor: Principal, os: Pick<OsPr
     stamp: r.stamp, phase: 'rollback', recordId, from: r.from, fromSchema: r.fromSchema, previousTarget: r.previousTarget,
     snapshot: r.snapshot.path, previousGeneration: r.previousGeneration, identitiesBefore: r.identitiesBefore, effectsStarted: true,
   })
-  return rewind(c, journal)
+  // Native admission pins exact source/unit/metadata images; reselect release even when current already matches.
+  const resumed = journal ? { ...journal, state: 'rewind-started' as const, done: journal.done.filter(step => step !== 'release' && step !== 'start-panel') } : null
+  return rewind(c, resumed)
 }
 
 /**
@@ -1084,7 +1103,7 @@ const resumeRewind = async (ports: UpgradePorts, actor: Principal, os: Pick<OsPr
 const recoverWithinGuard = async (ports: UpgradePorts, input: RecoverInput): Promise<RecoverResult> => {
   const actor = assertRoot(input?.actor, 'recover an upgrade')
   const note = assertText(input.note, 'recovery note', 1000)
-  const tools = lifecycleTools(input.os)
+  lifecycleTools(input.os)
   const canary = input.canary === null ? null : assertUsername(input.canary, 'canary account')
   const layout = normalizeLayout(input.layout)
   const fs = guardFs(ports.fs, layout)
@@ -1093,11 +1112,11 @@ const recoverWithinGuard = async (ports: UpgradePorts, input: RecoverInput): Pro
   const lock = await readLock(fs, layout.lockFile)
   const lockPresent = lock !== null || (await fs.exists(layout.lockFile))
   const last = await ports.history.latest()
-  if (!lockPresent && !isInFlight(last)) return fail('PRECONDITION_FAILED', 'nothing to recover: no upgrade lock and no upgrade in flight')
-  const active = await ports.host.apply({ kind: 'exec', argv: [tools.systemctl, 'is-active', '--quiet', UPGRADE_UNIT] })
-  if (active.code === 0) return fail('CONFLICT', `${UPGRADE_UNIT} is still running`)
-  if (active.code !== 3) return fail('PRECONDITION_FAILED', 'upgrade unit state is unknown; recovery cannot clear admission')
-  const rewound = await resumeRewind(ports, actor, input.os, layout, lock?.recordId ?? (last && isInFlight(last) ? last.id : null))
+  const nativePlan = await ports.safety.recoveryPlan()
+  if (!lockPresent && !isInFlight(last) && nativePlan.mode === 'rollback') return fail('PRECONDITION_FAILED', 'nothing to recover: no upgrade lock and no upgrade in flight')
+  if (nativePlan.recordId !== null && nativePlan.recordId !== (lock?.recordId ?? last?.id)) return fail('PRECONDITION_FAILED', 'recovery record changed')
+  const rewound = nativePlan.mode === 'rollback' ? await resumeRewind(ports, actor, input.os, layout, nativePlan.recordId) : null
+  if (nativePlan.mode !== 'rollback') await ports.safety.controlPlane('start')
   if (rewound && rewound.state !== 'rewind-verified') {
     return fail('PRECONDITION_FAILED', `rewind unverified; operator action required: ${rewound.problems.join('; ')}`, { rewind: rewound })
   }
@@ -1108,7 +1127,8 @@ const recoverWithinGuard = async (ports: UpgradePorts, input: RecoverInput): Pro
   await retainRetirementAttention(ports, fs, layout, { recoveryObserved: true, version, recordId: last?.id ?? null, observedAt: ports.clock.now().toISOString() })
   const recordId = last && isInFlight(last) ? last.id : null
   await ports.audit.record(auditEntry(actor, 'upgrade.recovery_observed', 'xpanel', { note, version, lock, recordId, closedRecordId: null, rewind: rewound?.state ?? null, retirementPending: true }, 'failed', { now: ports.clock.now() }))
-  return { status: 'retirement_pending', version, recordId, closedRecordId: null, problems: [RETIREMENT_REQUIRED] }
+  return { outcome: 'retirement_pending', hostOutcome: nativePlan.mode === 'rollback' ? 'rolled_back' : nativePlan.hostOutcome,
+    status: 'retirement_pending', version, recordId: nativePlan.recordId, closedRecordId: null, problems: [RETIREMENT_REQUIRED] }
 }
 
 export const recoverUpgrade = async (ports: UpgradePorts, input: RecoverInput): Promise<RecoverResult> => {

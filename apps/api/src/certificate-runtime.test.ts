@@ -1,6 +1,10 @@
 import { X509Certificate, createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import { fail } from '@xpanel/core'
+import { fail, isXpanelError } from '@xpanel/core'
+import { profileFor } from '@xpanel/os'
+import { FakeHostExecutor } from '../../agent/src/executor.ts'
+import { AcmeCertificateServiceAdapter } from '../../agent/src/services/acme.ts'
+import { createHttp01AcmeClient } from '../../agent/src/services/acme-client.ts'
 import type { Account, AuditEntry, Domain } from '@xpanel/core'
 import { services } from '@xpanel/render'
 import type { CertificateMutationOptions, NewCertificate, StateStore, StoredCertificate } from '@xpanel/state'
@@ -119,5 +123,52 @@ describe('certificate runtime trusted-port contract', () => {
     expect(await response!.json()).toMatchObject({ scope: 'authorized_saved_certificate_ids', inventoryComplete: false, inspectedAccounts: 1, scheduler: { state: 'unavailable', nextRunAt: null } })
     expect(f.agent.mock.calls.map(call => call[0])).toEqual(['/accounts/alice/certificates?limit=1', '/host/management-tls-observation'])
     expect(f.save).not.toHaveBeenCalled(); expect(f.remove).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('certificate runtime CA failure outcomes', () => {
+  it.each(['certificate_authority_rejected', 'certificate_authority_unreachable'] as const)('preserves a real client %s outcome through adapter settlement and the API without saving certificate metadata', async cause => {
+    const f = fixture(), reason = cause === 'certificate_authority_rejected' ? 'While processing CAA for example.test: SERVFAIL looking up CAA for example.test' : 'the certificate authority could not be reached'
+    const executor = new FakeHostExecutor(), adapter = new AcmeCertificateServiceAdapter({ executor,
+      os: profileFor('ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n'),
+      caClient: createHttp01AcmeClient({ directoryUrl: 'https://ca.example/directory', fetch: async () => {
+        if (cause === 'certificate_authority_unreachable') throw new Error('synthetic authority connection failure')
+        return new Response(JSON.stringify({ detail: reason }), { status: 400 })
+      } }),
+    })
+    f.agent.mockImplementationOnce(async () => {
+      try {
+        await adapter.issueOrRenewCertificate({ certId: f.certificate.id, accountId: f.account.id, callerRole: 'root', names: [f.domain.name],
+          challenge: 'http-01', domains: [f.domain], prepareOnly: true })
+        throw new Error('the portable CA should refuse issuance')
+      } catch (error) {
+        if (!isXpanelError(error)) throw error
+        return new Response(JSON.stringify({ code: error.code, detail: error.message, details: error.detail }), { status: error.status })
+      }
+    })
+    await expect(f.request('/api/accounts/alice/certificates', 'POST', { domain: 'example.test', expectedRevision: 7 })).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED', message: reason,
+      detail: { reason: cause, stateChanged: true, certificateMaterialChanged: false, verificationRequired: false, unknownOutcome: false } })
+    expect(f.save).not.toHaveBeenCalled(); expect(f.snapshot.revision).toBe(7); expect(f.domain.certificateId).toBe(f.certificate.id)
+    expect((await adapter.readOrderState(f.certificate.id))?.phase).toBe('failed')
+  })
+  it.each(['transport', 'unclassified', 'legacy-unreachable-text', 'unsettled-unreachable', 'wrong-global-state', 'cleanup-uncertain', 'material-written', 'malformed'] as const)('retains verification-required semantics for %s', async kind => {
+    const f = fixture(), details = { reason: 'certificate_authority_rejected', stateChanged: true, certificateMaterialChanged: false, verificationRequired: false, unknownOutcome: false }
+    if (kind === 'transport') f.agent.mockRejectedValueOnce(new Error('synthetic agent connection loss'))
+    else f.agent.mockResolvedValueOnce(kind === 'malformed' ? new Response('not-json', { status: 500 }) : new Response(JSON.stringify({ code: 'CONFIG_TEST_FAILED', detail: kind === 'legacy-unreachable-text' || kind === 'unsettled-unreachable' ? 'the certificate authority could not be reached' : 'untrusted raw host diagnostic',
+      details: kind === 'unclassified' || kind === 'legacy-unreachable-text' ? {} : kind === 'unsettled-unreachable' ? { reason: 'certificate_authority_unreachable' }
+        : { ...details, ...(kind === 'cleanup-uncertain' ? { verificationRequired: true, unknownOutcome: true } : kind === 'wrong-global-state' ? { stateChanged: false } : { certificateMaterialChanged: true }) } }), { status: 500 }))
+    await expect(f.request('/api/accounts/alice/certificates', 'POST', { domain: 'example.test', expectedRevision: 7 })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE',
+      message: 'certificate host request requires verification', detail: { stateChanged: true, verificationRequired: true, unknownOutcome: true } })
+    expect(f.save).not.toHaveBeenCalled(); expect(f.snapshot.revision).toBe(7)
+  })
+  it('projects only bounded sanitized CA detail, never arbitrary host fields', async () => {
+    const f = fixture(), hidden = 's'.repeat(40)
+    f.agent.mockResolvedValueOnce(new Response(JSON.stringify({ code: 'CONFIG_TEST_FAILED', detail: 'CAA refused token=' + hidden + '\n' + 'x'.repeat(5000),
+      details: { reason: 'certificate_authority_rejected', stateChanged: true, certificateMaterialChanged: false, verificationRequired: false, unknownOutcome: false, stderr: hidden } }), { status: 500 }))
+    const error = await f.request('/api/accounts/alice/certificates', 'POST', { domain: 'example.test', expectedRevision: 7 }).catch(error => error)
+    expect(error.message).toContain('CAA refused token=[REDACTED]'); expect(error.message.length).toBeLessThanOrEqual(526)
+    expect(error.message).not.toContain('\n'); expect(JSON.stringify(error)).not.toContain(hidden); expect(error.detail.stderr).toBeUndefined()
+    expect(f.save).not.toHaveBeenCalled()
   })
 })
