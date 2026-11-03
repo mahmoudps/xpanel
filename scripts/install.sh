@@ -930,21 +930,35 @@ bootable_kernel_releases() {
 # Every bootable kernel gets the modules, and an installed linux-image-virtual* meta package gains its
 # linux-image-extra-virtual* counterpart so later kernel upgrades bring them too.
 ensure_kernel_quota_format() {
-  local packages=() release meta candidate inventory
+  local packages=() release meta candidate inventory status
   inventory="$(bootable_kernel_releases)" || return 1
   if [[ "$OS_FAMILY" == "debian" ]]; then
     while read -r release; do
-      if kernel_lacks_quota_format "$release"; then
+      status=''
+      if [[ "$OS_ID" == ubuntu ]]; then
+        if status="$(dpkg-query -W -f='${db:Status-Abbrev}' "linux-modules-extra-$release" 2>/dev/null)"; then
+          [[ "$status" =~ ^[uihrp][ncHUFWti][[:space:]R]$ ]] || die "Invalid kernel module package state."
+        else
+          [[ $? -eq 1 && -z "$status" ]] || die "The existing kernel module package state could not be observed."
+        fi
+      fi
+      # Unpacking can create the module files and a status-only APT candidate before configuration succeeds.
+      case "$status" in
+        'iU ') [[ "$RESUME_PREPARED" -eq 1 && -n "$KERNEL_SNAPSHOT" ]] || die "An unpacked kernel module package requires explicitly resumed snapshot preparation." ;;
+        ?H?|?U?|?F?|?W?|?t?|??R) die "The existing kernel module package state requires separate recovery." ;;
+      esac
+      if [[ "$status" != 'iU ' ]]; then
+        if ! kernel_lacks_quota_format "$release"; then continue; fi
         candidate="$(LC_ALL=C apt-cache policy "linux-modules-extra-$release" | awk '/^[[:space:]]*Candidate:/ { print $2 }')"
         if [[ -n "$candidate" && "$candidate" != '(none)' ]]; then
           packages+=("linux-modules-extra-$release")
-        else
-          [[ -n "$KERNEL_SNAPSHOT" ]] || die "Kernel $release has no matching modules in current APT indexes. Select an authenticated Ubuntu kernel snapshot or prepare a supported kernel before installing xPanel."
-          assert_root_file "$SCRIPT_DIR/install-kernel-quotas.sh"
-          source "$SCRIPT_DIR/install-kernel-quotas.sh"
-          install_kernel_quota_snapshot_package "$release"
+          continue
         fi
       fi
+      [[ -n "$KERNEL_SNAPSHOT" ]] || die "Kernel $release has no matching modules in current APT indexes. Select an authenticated Ubuntu kernel snapshot or prepare a supported kernel before installing xPanel."
+      assert_root_file "$SCRIPT_DIR/install-kernel-quotas.sh"
+      source "$SCRIPT_DIR/install-kernel-quotas.sh"
+      install_kernel_quota_snapshot_package "$release"
     done <<< "$inventory"
     while read -r meta; do
       packages+=("${meta/linux-image-virtual/linux-image-extra-virtual}")

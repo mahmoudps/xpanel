@@ -1,14 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, open, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fail } from '@xpanel/core'
 import type { Account } from '@xpanel/core'
 import { buildTar } from '../../../packages/lifecycle/src/testing/tar.ts'
 import { cpmoveEntries } from '../../../packages/lifecycle/src/testing/cpanel-fixture.ts'
-import { StagingSink, assertTarMembers, createTransferTaskController, handleTransferTaskRoute, lowPriorityArgv, tarCompareProblems } from './lifecycle-transfer-tasks.ts'
+import { StagingSink, assertTarMembers, createTransferTaskController, handleTransferTaskRoute, lowPriorityArgv, spawnTransferCommand, tarCompareProblems } from './lifecycle-transfer-tasks.ts'
 import type { TransferCommand, TransferTask, TransferTaskDeps } from './lifecycle-transfer-tasks.ts'
+
+vi.mock('node:fs/promises', async original => {
+  const fs = await original<typeof import('node:fs/promises')>()
+  return { ...fs, open: vi.fn(fs.open) }
+})
 
 // Agent unit layer: real files in a temporary directory, fake command runner, MariaDB, download and certificate ports.
 const cleanup: string[] = []
@@ -54,6 +60,58 @@ const setup = async (overrides: Partial<TransferTaskDeps> & { compare?: string; 
 }
 
 describe('transfer host tasks', () => {
+  it('closes the real output descriptor when opening command input fails', async () => {
+    const { dir } = await setup()
+    const output = join(dir, 'command-output')
+    const tracked = vi.mocked(open)
+    tracked.mockClear()
+    await expect(spawnTransferCommand()({ argv: ['/usr/bin/tar'], stdoutFile: output, stdinFile: join(dir, 'absent-input') }))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+    const index = tracked.mock.calls.findIndex(([path]) => path === output)
+    expect(index).toBeGreaterThanOrEqual(0)
+    const handle: FileHandle = await tracked.mock.results[index]!.value
+    try { await expect(handle.stat()).rejects.toMatchObject({ code: 'EBADF' }) }
+    finally { await handle.close() }
+  })
+
+  it('closes the checked artifact descriptor on EOF, cancellation and setup or read failure', async () => {
+    const t = await setup()
+    const task = await t.settled(await t.controller.start({ kind: 'package', username: 'alice' }))
+    const file = await t.controller.openArtifact(task.id, 'home.tar.gz')
+    const url = new URL('https://agent.test/transfers/packages/' + task.id + '/home.tar.gz')
+    const get = () => handleTransferTaskRoute(new Request(url), url, 'GET', { controller: t.controller, authorize: async () => {} })
+    const fs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    for (const outcome of ['EOF', 'cancel', 'stat', 'read', 'size'] as const) {
+      const observed: FileHandle[] = []
+      vi.mocked(open).mockImplementation(async (...args) => {
+        const handle = await fs.open(...args)
+        if (args[0] === file.path) {
+          observed.push(handle)
+          if (outcome === 'stat') vi.spyOn(handle, 'stat').mockRejectedValueOnce(new Error('artifact stat failed'))
+          if (outcome === 'read') vi.spyOn(handle, 'read').mockRejectedValueOnce(new Error('artifact read failed'))
+        }
+        return handle
+      })
+      try {
+        if (outcome === 'size') await writeFile(file.path, 'changed')
+        if (outcome === 'stat') await expect(get()).rejects.toThrow('artifact stat failed')
+        else if (outcome === 'size') await expect(get()).rejects.toThrow('the packaged artifact changed')
+        else {
+          const response = (await get())!
+          if (outcome === 'EOF') expect(await response.text()).toBe('HOME-ARCHIVE')
+          else if (outcome === 'cancel') await response.body!.cancel()
+          else await expect(response.text()).rejects.toThrow('artifact read failed')
+        }
+        expect(observed).toHaveLength(1)
+        await vi.waitFor(() => expect(observed[0]!.fd).toBe(-1))
+        await expect(observed[0]!.stat()).rejects.toMatchObject({ code: 'EBADF' })
+      } finally {
+        vi.mocked(open).mockImplementation(fs.open)
+        await Promise.all(observed.map(handle => handle.close()))
+      }
+    }
+  })
+
   it('packages the home as the account user, each live database and each certificate with digests', async () => {
     const t = await setup()
     const task = await t.settled(await t.controller.start({ kind: 'package', username: 'alice' }))
