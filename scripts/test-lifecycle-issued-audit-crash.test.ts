@@ -26,10 +26,17 @@ const managedText = source('./lifecycle-managed-files.mjs'), nativeText = source
 const oldText = source('./fixtures/lifecycle-admission-legacy.txt'), issuedText = source('./lifecycle-issued-audit.mjs')
 const managedNames = ['syncManagedDirectory', 'captureManagedFile', 'managedPathAbsent', 'replaceManagedFile']
 const managedBodies = declarations(managedText, managedNames)
-const denialBody = declarations(nativeText, ['persistInitialInstallationBeforeAudit'])
-  .replace("await import('./lifecycle-admission.mjs')", 'admission')
-const issueBody = declarations(issuedText, ['writeIssuedLifecycleAuditJournal'])
-  .replace("await import('./lifecycle-root-safety.mjs')", 'native')
+// Inject module seams under distinct outer names: the actual function bodies
+// declare local `admission`/`native` bindings, so reusing those names creates a TDZ.
+const moduleSeam = (body: string, modulePath: string, dependency: string) => {
+  const expression = "await import('" + modulePath + "')"
+  if (body.split(expression).length !== 2) throw new Error('Missing or ambiguous actual module import ' + modulePath)
+  return body.replace(expression, dependency)
+}
+const denialBody = moduleSeam(declarations(nativeText, ['persistInitialInstallationBeforeAudit']),
+  './lifecycle-admission.mjs', 'fixtureAdmissionModule')
+const issueBody = moduleSeam(declarations(issuedText, ['writeIssuedLifecycleAuditJournal']),
+  './lifecycle-root-safety.mjs', 'fixtureNativeModule')
 const oldNames = ['parseLifecycleBarrier', 'readLifecycleBarrier', 'assertLifecycleWritesAllowed', 'admittedWriter']
 const oldBodies = declarations(oldText, oldNames)
 const sha = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex')
@@ -88,13 +95,13 @@ async function attempt(crashAt: number, renameSurvives: boolean) {
     issuedFence?:{bytes:Buffer;entry:{sha256:string}};plannedInstallation?:{entry:{sha256:string}} } =
     { phase: 'writable', capability: {}, dbHandle: { db: {} }, dbProof: { principal: { username: 'root' } }, origin }
   const denial = bind(denialBody, ['persistInitialInstallationBeforeAudit'], { ROOT, sha, Buffer, fail,
-    assertLifecycleBootstrapHeld: async () => {}, admission: { assertLifecycleBootstrapExclusivePhysicalHeld: async () => {} },
+    assertLifecycleBootstrapHeld: async () => {}, fixtureAdmissionModule: { assertLifecycleBootstrapExclusivePhysicalHeld: async () => {} },
     assertHostOperationGuardHeld: async () => {}, bindingFor: () => ({}), getDurableJob: async () => job,
     initialInstallationValue: async () => ({ operationId: id, kind: 'xpanel-initial-upgrade-admission' }),
     replaceManagedFile: managed.replaceManagedFile, assertOwnedFile })
   let context: Record<string, unknown>
   const issuance = bind(issueBody, ['writeIssuedLifecycleAuditJournal'], { ROOT: ROOT + '/issued-audit', Buffer, requireLinuxRoot: () => {},
-    native: { assertLifecycleAuditIssuanceHeld: async () => {}, getLifecycleAuditIssuanceInfo: () => context! }, parseIssuedLifecycleAuditJournal,
+    fixtureNativeModule: { assertLifecycleAuditIssuanceHeld: async () => {}, getLifecycleAuditIssuanceInfo: () => context! }, parseIssuedLifecycleAuditJournal,
     ensureManagedPrivateDirectory: async (path: string) => { named.set(path, { bytes: Buffer.alloc(0), mode: 0o700, inode: inode++, directory: true }) },
     replaceManagedFile: managed.replaceManagedFile, managedPathAbsent: managed.managedPathAbsent, captureManagedFile: managed.captureManagedFile,
     parseSelector: () => { throw new Error('fixture begins without prior selector') } })
