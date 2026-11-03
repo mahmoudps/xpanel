@@ -32,3 +32,7 @@ export function verifyInstallFinalizationParticipants(capability:unknown):Promis
 
 /** Same actual EX flock, before a writable DB or host guard is opened. No effect authority alone. */
 export function assertInstallFinalizationExclusivePhysicalHeld(capability:unknown):Promise<void>
+/** Observation alone never grants effect authority. */
+export function observeNormalLifecycleParticipants(processes: readonly {role:'api'|'agent';pid:number;uid:number;start:string}[],probeId:string):Promise<true>
+export function withAgentPrivateStateMigrationExclusiveAdmission<T>(capability:unknown,callback:()=>Promise<T>):Promise<T>
+export function assertAgentPrivateStateMigrationExclusivePhysicalHeld(capability:unknown):Promise<void>

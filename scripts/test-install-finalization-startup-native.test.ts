@@ -12,7 +12,9 @@ describe('fixed native install startup boundary, no native commands',()=>{
  it('does not permit a forged retirement scope to drain or authorize service activity',async()=>{await expect(awaitPreparedInstallServiceChildren({})).rejects.toThrow('INSTALL_STARTUP_SCOPE_REQUIRED')})
  it('wires startup admission before the separate unchanged protocol entry and resets it before readiness',async()=>{
    const source=await readFile(new URL('./install-finalization-native.mjs',import.meta.url),'utf8')
-   expect(source.indexOf("await startPreparedInstallScope(scope)")).toBeLessThan(source.lastIndexOf('return (helperCapability ? runPreparedInstallAdoption : runPreparedInstallFinalization)(ports(scope))'))
+   const entry = source.lastIndexOf('return (helperCapability && !preparedFresh ? runPreparedInstallAdoption : runPreparedInstallFinalization)(ports(scope))')
+   expect(entry).toBeGreaterThan(0)
+   expect(source.indexOf("await startPreparedInstallScope(scope)")).toBeLessThan(entry)
    expect(source).toContain("scope.phase = 'new'; scope.startupActive = false; scope.guard = null; scope.startupDeadline = null")
    expect(source).toContain('settlePreparedInstallReadiness')
    const startup=source.slice(source.indexOf('async function startPreparedInstallScope('),source.indexOf('async function allocateInstallJob('))

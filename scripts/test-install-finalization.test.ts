@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { describe, it } from 'vitest'
 import { runPreparedInstallFinalization, inspectInstallFinalizationRecovery, INSTALL_FINALIZATION_PATHS as paths } from './install-finalization.mjs'
 import type { InstallFinalizationContext, InstallFinalizationIntent, InstallFinalizationObservation, InstallFinalizationPorts } from './install-finalization.mjs'
+import { assertInstallOwnershipCompletionProof } from './install-finalization-native.mjs'
 
 // Isolated in-memory FsPort/ClockPort contracts only. No Linux, services, keys, real paths or authority.
 const id = (digit: string) => `${digit.repeat(8)}-${digit.repeat(4)}-4${digit.repeat(3)}-8${digit.repeat(3)}-${digit.repeat(12)}`
@@ -116,6 +118,32 @@ function fixture() {
 }
 
 describe('fresh-install finalization protocol; isolated ports are not native authority', () => {
+  it('keeps new helper execution evidence outside the unchanged old target context and completion format', async () => {
+    const f = fixture(), source = await readFile(new URL('./install-finalization-native.mjs', import.meta.url), 'utf8')
+    const begin = source.indexOf('function installFinalizationEvidence('), end = source.indexOf('\nfunction checkJob(', begin)
+    assert(begin >= 0 && end > begin)
+    const buildEvidence = new Function(source.slice(begin, end) + '\nreturn installFinalizationEvidence')()
+    const executionHelper = { version: '0.1.8', archiveSha256: '9'.repeat(64), manifestSha256: '8'.repeat(64),
+      dependencyReceiptSha256: '7'.repeat(64), sourceFilesDigest: '6'.repeat(64) }
+    let persisted: any
+    const complete = f.ports.jobs.complete
+    f.ports.jobs.complete = async (intent, proof) => {
+      await complete(intent, proof)
+      persisted = { detail: { installFinalization: proof }, checkpointData: {
+        installFinalization: { subjectDigest: intent.subjectDigest, ...proof },
+        installFinalizationEvidence: buildEvidence({ context: f.context, observation: f.observation(intent.subjectDigest), executionHelper }),
+      } }
+    }
+    assert.equal((await f.run()).exitCode, 0)
+    const observed = inspectInstallFinalizationRecovery({ bootstrapBytes: f.read(paths.bootstrap), receiptBytes: f.read(paths.receipt), headBytes: f.read(paths.head) })
+    assert.equal(observed.intent.phase, 'complete')
+    assert.deepEqual(Object.keys(persisted.checkpointData.installFinalizationEvidence.context).sort(),
+      ['source', 'runtime', 'database', 'rootPrincipalId', 'state', 'admissionFingerprint'].sort())
+    assert.equal(persisted.checkpointData.installFinalizationEvidence.executionHelper.version, '0.1.8')
+    assert.equal(observed.receipt.source.version, '0.1.0')
+    assert.doesNotThrow(() => assertInstallOwnershipCompletionProof('install', f.intent().subjectDigest, f.intent(), persisted))
+    // This reader proves target completion only; helper qualification also needs the actual sealed execution/terminal binding.
+  })
   it('retires SH and HTTP before EX, records intent before publication and acknowledges only exact readback', async () => {
     const f = fixture(), outcome = await f.run()
     assert.equal(outcome.exitCode, 0); assert.equal(outcome.outcome, 'committed'); assert.equal(outcome.details.qualified, false)

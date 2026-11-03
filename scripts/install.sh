@@ -349,6 +349,19 @@ assert_root_file() {
   assert_root_owned_path "$(dirname -- "$path")"
 }
 
+prepare_agent_state_directories() {
+  local directory
+  for directory in /var/lib/xpanel-agent /var/lib/xpanel-agent/host-operations /var/lib/xpanel-agent/operation-audit /var/lib/xpanel-agent/file-worker-incidents; do
+    assert_root_owned_path "$(dirname -- "$directory")"
+    if [[ -e "$directory" || -L "$directory" ]]; then
+      assert_root_owned_path "$directory"
+      [[ "$(stat -c %g -- "$directory")" == 0 ]] || die "Agent state directory has an unexpected group: $directory"
+    fi
+    # install -d assigns 0755 to implicit parents; every private level is explicit.
+    install -d -o root -g root -m 0700 "$directory"
+  done
+}
+
 assert_pinned_runtime() {
   [[ "$NODE_BIN" =~ ^/[A-Za-z0-9_./-]+$ ]] || die "XPANEL_NODE_BIN must be an absolute executable path safe for systemd."
   assert_root_file "$NODE_BIN"
@@ -1353,7 +1366,8 @@ systemctl daemon-reload
 (umask 0007; runuser -u xpanel -- env XPANEL_DB_PATH=/var/lib/xpanel/control.db XPANEL_STATE_DIR=/var/lib/xpanel/state "$NODE_BIN" "$PROGRAM_ROOT/apps/api/src/main.ts" status > /dev/null)
 chmod 0660 /var/lib/xpanel/control.db
 install -d -o root -g root -m 0755 /var/lib/xpanel-lifecycle
-install -d -o root -g root -m 0700 /var/lib/xpanel-agent/file-worker-incidents /var/lib/xpanel-lifecycle/backups
+prepare_agent_state_directories
+install -d -o root -g root -m 0700 /var/lib/xpanel-lifecycle/backups
 install -d -o root -g root -m 0700 /run/xpanel/lifecycle-agent
 install -d -o xpanel -g xpanel -m 0700 /run/xpanel/lifecycle-api
 "$NODE_BIN" "$INSTALL_SOURCE_ROOT/scripts/install-bootstrap.mjs" admission > /dev/null

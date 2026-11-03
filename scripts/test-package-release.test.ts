@@ -855,6 +855,41 @@ describe('fresh-install package source closure', () => {
     return root
   }
 
+  const preparedEntries = ['scripts/agent-private-state-migration.mjs', 'scripts/agent-private-state-migration.d.mts',
+    'scripts/agent-private-state-migration-entry.mjs', 'scripts/install-finalize-prepared-entry.mjs']
+  const makePreparedSource = (): string => {
+    const root = makeInstallSource(), workspace = resolve(import.meta.dirname, '..')
+    // Real new entry/control sources, with existing dependencies isolated as graph inputs only.
+    for (const path of preparedEntries) writeSourceFile(root, path, readFileSync(join(workspace, path)))
+    for (const path of ['scripts/lifecycle-ownership.mjs', 'scripts/lifecycle-services.mjs', 'packages/db/src/index.ts', 'packages/state/src/index.ts'])
+      writeSourceFile(root, path, 'export {}\n')
+    writeSourceFile(root, 'scripts/lifecycle-admission.mjs', "export const migration = () => import('./agent-private-state-migration.mjs')\n")
+    return root
+  }
+
+  it('ships the actual prepared-maintenance entries and their finite runtime graph', { tags: ['feature'] }, async () => {
+    const sourceRoot = makePreparedSource(), outputDir = makeTempDir()
+    const built = await buildReleaseArtifact({ sourceRoot, outputDir, version: '0.1.8' })
+    const verified = await verifyReleaseArtifact({ artifactDir: built.stagingDir, archivePath: built.archivePath!,
+      expectedArchiveSha256: built.archiveSha256!, pinnedNodeVersion: '26.12.1', requireSignature: false })
+    expect(verified.ok).toBe(true)
+    const files = new Set(built.manifest.files.map(file => file.path))
+    for (const path of preparedEntries) {
+      expect(files.has(path), path).toBe(true)
+      expect(readFileSync(join(built.stagingDir, path))).toEqual(readFileSync(join(sourceRoot, path)))
+    }
+    // Optional additions keep the earlier signed archive's required-root contract unchanged.
+    expect(REQUIRED_ROOT_FILES).not.toContain('scripts/install-finalize-prepared-entry.mjs')
+  })
+
+  it('refuses a missing private-state runtime dependency before destination writes', { tags: ['feature'] }, async () => {
+    const sourceRoot = makePreparedSource(), outputDir = makeTempDir()
+    unlinkSync(join(sourceRoot, 'scripts/agent-private-state-migration.mjs'))
+    const error = await expectReleaseError(() => buildReleaseArtifact({ sourceRoot, outputDir }), 'RELEASE_DEPENDENCY_MISSING')
+    expect(error.detail.target).toBe('scripts/agent-private-state-migration.mjs')
+    expect(readdirSync(outputDir)).toEqual([])
+  })
+
   it('ships the fixed install source graph in a verified unsigned archive without private or diagnostic inputs', { tags: ['feature'] }, async () => {
     const sourceRoot = makeInstallSource()
     const excluded = [

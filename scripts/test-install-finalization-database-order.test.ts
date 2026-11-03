@@ -70,10 +70,12 @@ function harness() {
     + section('async function readScopeSnapshot(', 'async function assertCapturedInstallSource(')
     + section('function ports(scope)', 'export async function runNativeInstallFinalization(')
   const api = new Function('check', 'assertBase', 'assertLifecycleWriterAdmissionHeld', 'assertInstallFinalizationExclusivePhysicalHeld',
-    'DATABASE', 'canonical', 'bindingFor', 'active', 'withLifecycleWriterAdmission', 'withInstallFinalizationExclusiveAdmission', 'nativeFilesystem',
+    'DATABASE', 'canonical', 'bindingFor', 'active', 'withLifecycleWriterAdmission', 'withInstallFinalizationExclusiveAdmission', 'nativeFilesystem', 'initializeDefaultRootOperationAuditDirectory',
     implementation + '\nreturn { ports, withFinalizationReadonlyDatabase, withFinalizationWriterDatabase, readScopeSnapshot, rootInTransaction }')(
       check, async (s: unknown) => check(s === scope && scope.live, 'native scope missing'), assertSH, assertEX,
-      origin.file, JSON.stringify, bindingFor, active, withSH, withEX, () => ({}))
+      origin.file, JSON.stringify, bindingFor, active, withSH, withEX, () => ({}), async () => {
+        check(held === 'EX' && writerLive && !!scope.guard, 'audit initialization requires genuine model EX and host guard')
+      })
   return { api, scope, events, withSH, withEX, setOrigin: (value: typeof origin) => { currentOrigin = value }, origin,
     setPrincipal: (value: typeof principal) => { principal = value }, principal }
 }
