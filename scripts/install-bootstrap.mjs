@@ -264,27 +264,73 @@ function nativeBootstrapInput(input, phase) {
   return parseBootstrapArgs([phase, `--artifact=${input.artifactPath}`, `--artifact-sha256=${input.artifactSha256}`, `--release-trust-file=${input.trustPath}`, `--release-keys-file=${input.keysPath}`])
 }
 
-async function emptyResumeDirectory(path, uid, gid, mode, allowed = []) {
+const resumeDirectoryImage = info => [info.dev, info.ino, info.uid, info.gid, info.mode, info.mtimeNs, info.ctimeNs].join(':')
+const resumePermissions = bits => (bits & 4 ? 'r' : '-') + (bits & 2 ? 'w' : '-') + (bits & 1 ? 'x' : '-')
+
+async function resumeNginxIdentity(serviceUid, serviceGid) {
+  const lookup = async (database, key) => {
+    const line = (await command('/usr/bin/getent', [database, key])).text.trimEnd()
+    check(line && !/[\r\n]/.test(line), 'INSTALL_RESUME_NGINX_IDENTITY_INVALID')
+    return line
+  }
+  const user = await lookup('passwd', 'nginx')
+  const fields = user.split(':')
+  const safeId = value => /^[1-9][0-9]*$/.test(value) && Number(value) < 0xffffffff && Number(value) !== 65534
+  check(fields.length === 7 && fields[0] === 'nginx' && safeId(fields[2]) && safeId(fields[3])
+    && Number(fields[2]) !== serviceUid && Number(fields[3]) !== serviceGid
+    && ['/sbin/nologin', '/usr/sbin/nologin'].includes(fields[6]), 'INSTALL_RESUME_NGINX_IDENTITY_INVALID')
+  const [uid, gid] = fields.slice(2, 4)
+  const group = await lookup('group', 'nginx')
+  const parts = group.split(':')
+  check(parts.length === 4 && parts[0] === 'nginx' && parts[2] === gid
+    && await lookup('passwd', uid) === user && await lookup('group', gid) === group, 'INSTALL_RESUME_NGINX_IDENTITY_INVALID')
+  const nobody = (await lookup('passwd', 'nobody')).split(':')
+  check(nobody.length === 7 && nobody[0] === 'nobody' && /^[0-9]+$/.test(nobody[2]) && /^[0-9]+$/.test(nobody[3])
+    && Number(nobody[2]) !== Number(uid) && Number(nobody[3]) !== Number(gid), 'INSTALL_RESUME_NGINX_IDENTITY_INVALID')
+  // NSS can have two group names for one GID even when the reverse lookup returns nginx.
+  for (const name of ['xpanel', 'xpanel-agent']) {
+    const service = (await lookup('group', name)).split(':')
+    check(service.length === 4 && service[0] === name && safeId(service[2]) && service[2] !== gid && !service[3].split(',').includes('nginx')
+      && (name !== 'xpanel' || Number(service[2]) === serviceGid), 'INSTALL_RESUME_NGINX_IDENTITY_INVALID')
+  }
+  const memberships = (await lookup('initgroups', 'nginx')).split(/[ \t]+/)
+  check(memberships.length >= 2 && memberships[0] === 'nginx' && memberships.slice(1).every(id => id === gid),
+    'INSTALL_RESUME_NGINX_IDENTITY_INVALID')
+  return { uid, user, group }
+}
+
+async function emptyResumeDirectory(path, uid, gid, mode, inspectChildren) {
   const before = await lstat(path, { bigint: true })
   check(before.isDirectory() && before.uid === BigInt(uid) && before.gid === BigInt(gid)
     && Number(before.mode & 0o7777n) === mode, 'INSTALL_RESUME_DIRECTORY_UNSAFE')
   const handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
   try {
+    const image = resumeDirectoryImage(before)
     const opened = await handle.stat({ bigint: true })
-    check(opened.dev === before.dev && opened.ino === before.ino, 'INSTALL_RESUME_DIRECTORY_CHANGED')
+    check(resumeDirectoryImage(opened) === image, 'INSTALL_RESUME_DIRECTORY_CHANGED')
+    const directory = '/proc/self/fd/' + handle.fd
+    const names = await readdir(directory)
+    if (!inspectChildren) check(names.length === 0, 'INSTALL_RESUME_STATE_PRESENT')
+    const nginxUid = await inspectChildren?.(directory, names)
     const acl = await command('/usr/bin/getfacl', ['--omit-header', '--absolute-names', '--numeric', '--no-effective',
       '/proc/' + process.pid + '/fd/' + handle.fd])
-    const expectedAcl = ['user::rwx', (mode & 0o070) === 0o070 ? 'group::rwx' : 'group::r-x', 'other::---']
-    const aclLines = acl.text.trim().split('\n').filter(Boolean)
-    check(aclLines.length === expectedAcl.length && aclLines.every((line, index) => line === expectedAcl[index]), 'INSTALL_RESUME_DIRECTORY_ACL_UNSAFE')
-    check((await readdir('/proc/self/fd/' + handle.fd)).every(name => allowed.includes(name)), 'INSTALL_RESUME_STATE_PRESENT')
+    const expectedAcl = ['user::' + resumePermissions(mode >> 6)]
+    if (nginxUid) expectedAcl.push('user:' + nginxUid + ':--x')
+    expectedAcl.push('group::' + resumePermissions(mode >> 3))
+    if (nginxUid) expectedAcl.push('mask::' + resumePermissions(mode >> 3))
+    expectedAcl.push('other::' + resumePermissions(mode))
+    check(acl.text.trimEnd() === expectedAcl.join('\n'), 'INSTALL_RESUME_DIRECTORY_ACL_UNSAFE')
     const named = await lstat(path, { bigint: true }), after = await handle.stat({ bigint: true })
-    check([named, after].every(info => ['dev', 'ino', 'uid', 'gid', 'mode', 'mtimeNs', 'ctimeNs'].every(key => info[key] === before[key])), 'INSTALL_RESUME_DIRECTORY_CHANGED')
+    check([named, after].every(info => resumeDirectoryImage(info) === image), 'INSTALL_RESUME_DIRECTORY_CHANGED')
+    return image
   } finally { await handle.close() }
 }
 
 async function emptyResumeData() {
-  if (await exists('/var/lib/xpanel')) {
+  const data = '/var/lib/xpanel'
+  const images = new Map()
+  let verifyLateData
+  if (await exists(data)) {
     const principal = await command('/usr/bin/getent', ['passwd', 'xpanel'])
     const fields = principal.text.trim().split(':')
     check(fields.length === 7 && fields[0] === 'xpanel' && /^[1-9][0-9]*$/.test(fields[2]) && /^[1-9][0-9]*$/.test(fields[3])
@@ -292,16 +338,40 @@ async function emptyResumeData() {
     const uid = Number(fields[2]), gid = Number(fields[3])
     check(Number.isSafeInteger(uid) && Number.isSafeInteger(gid), 'INSTALL_RESUME_SERVICE_IDENTITY_INVALID')
     await assertResumeServiceQuiescent(uid, gid)
-    await emptyResumeDirectory('/var/lib/xpanel', uid, gid, 0o2770, ['state', 'generations'])
-    for (const path of ['/var/lib/xpanel/state', '/var/lib/xpanel/generations']) {
-      if (await exists(path)) await emptyResumeDirectory(path, uid, gid, 0o2750)
-    }
+    const rootImage = await emptyResumeDirectory(data, uid, gid, 0o2770, async (directory, names) => {
+      const late = names.includes('acme')
+      check(names.every(name => ['state', 'generations', 'acme'].includes(name))
+        && (!late || names.includes('state') && names.includes('generations')), 'INSTALL_RESUME_STATE_PRESENT')
+      const nginx = late ? await resumeNginxIdentity(uid, gid) : undefined
+      if (nginx) {
+        verifyLateData = async () => {
+          const current = await resumeNginxIdentity(uid, gid)
+          check(current.user === nginx.user && current.group === nginx.group, 'INSTALL_RESUME_NGINX_IDENTITY_INVALID')
+          await assertResumeServiceQuiescent(uid, gid)
+        }
+      }
+      for (const name of names) {
+        const acme = name === 'acme'
+        const image = await emptyResumeDirectory(directory + '/' + name, acme ? 0 : uid, acme ? 0 : gid, acme ? 0o2755 : 0o2750)
+        images.set(data + '/' + name, image)
+      }
+      return nginx?.uid
+    })
+    images.set(data, rootImage)
     await assertResumeServiceQuiescent(uid, gid)
   }
   for (const path of ['/var/lib/xpanel-agent', '/run/xpanel']) {
     if (await exists(path)) {
       await assertTrustedDirectory(path)
       check((await readdir(path)).length === 0, 'INSTALL_RESUME_STATE_PRESENT')
+    }
+  }
+  // Bind the accepted directory lifetimes across the asynchronous prepared release and unit checks.
+  return async () => {
+    if (!images.has(data)) check(!await exists(data), 'INSTALL_RESUME_DIRECTORY_CHANGED')
+    if (verifyLateData) await verifyLateData()
+    for (const [path, image] of images) {
+      check(resumeDirectoryImage(await lstat(path, { bigint: true })) === image, 'INSTALL_RESUME_DIRECTORY_CHANGED')
     }
   }
 }
@@ -386,7 +456,7 @@ export async function resumePreparedInstallation(input) {
       '/etc/xpanel/mariadb-admin.cnf', ...OWNED_PATHS]) check(!await exists(path), 'INSTALL_RESUME_EFFECTS_PRESENT')
     await assertTrustedDirectory(LIFECYCLE)
     check((await readdir(LIFECYCLE)).every(name => ['bootstrap.json', 'install-dependencies.json', 'prepared'].includes(name)), 'INSTALL_RESUME_LIFECYCLE_EFFECTS_PRESENT')
-    await emptyResumeData()
+    const verifyResumeData = await emptyResumeData()
     for (const unit of [...OWNED_PANEL_UNITS, 'xpanel-lifecycle.service']) {
       const result = await command('/usr/bin/systemctl', ['show', unit, '--property=LoadState,ActiveState,MainPID,ControlPID'])
       const fields = Object.fromEntries(result.text.trim().split('\n').map(line => line.split('=')))
@@ -396,7 +466,7 @@ export async function resumePreparedInstallation(input) {
       check(fields.LoadState === 'not-found' && fields.ActiveState === 'inactive' && noProcesses, 'INSTALL_RESUME_UNIT_PRESENT')
     }
     await verifyPreparedBootstrapSource(runtime, bootstrap)
-    return withVerifiedBootstrapArchive(options, async ({ report, trust, keyPin, keysPin }) => {
+    const prepared = await withVerifiedBootstrapArchive(options, async ({ report, trust, keyPin, keysPin }) => {
       check(report.manifest.version === bootstrap.version && report.manifestSha256 === bootstrap.manifestSha256
         && report.manifest.controlDbSchemaVersion === bootstrap.controlDbSchemaVersion, 'INSTALL_RESUME_ARCHIVE_MISMATCH')
       const installedTrust = parseBootstrapTrust(parseJson((await readTrustedFile('/etc/xpanel/release-trust.json', { exactMode: 0o600, maxBytes: 8192 })).bytes))
@@ -412,6 +482,8 @@ export async function resumePreparedInstallation(input) {
       return freeze({ status: 'prepared', version: bootstrap.version, releaseRoot: bootstrap.releaseRoot, currentLink: CURRENT,
         dependencyReceiptSha256: bootstrap.dependencyReceiptSha256, installationReceipt: 'pending', resumed: true })
     })
+    await verifyResumeData()
+    return prepared
   })
 }
 
