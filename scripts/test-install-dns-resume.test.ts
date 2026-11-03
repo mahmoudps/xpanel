@@ -227,6 +227,71 @@ describe('listed DNS jobs at the installed capture and stop boundaries', () => {
     }
   })
 
+  // Count all three independent frame reads. A further read is always possible
+  // in the fixture, so a case cannot pass merely by exhausting its arrays.
+  function counted(services:Service[], lists:string[], groups:Window[]) {
+    const ports = sample([...services,...Array<Service>(3).fill(dead)],
+      [...lists,...Array<string>(3).fill('')], [...groups,...Array<Window>(3).fill(empty)])
+    const counts = {service:0,jobs:0,cgroup:0}
+    return {counts,ports:{
+      service:async () => { counts.service++; return ports.service() },
+      jobs:async () => { counts.jobs++; return ports.jobs() },
+      cgroup:async () => { counts.cgroup++; return ports.cgroup() },
+      pause:ports.pause,
+    }}
+  }
+
+  it('waits for listed queued frames, then witnesses the full next start and exit',async () => {
+    const successor = retry(6).service
+    const row = '833 pdns.service start running\n'
+    const queued = {...next,SubState:'auto-restart-queued',NRestarts:'6',Job:'833'}
+    const live = {...successor,SubState:'start',MainPID:successor.ExecMainPID,ControlGroup:start.ControlGroup,Job:'833',Result:'success',ExecMainCode:'0',ExecMainStatus:'0'}
+    const fixture = counted([start,next,queued,queued,live,successor],
+      [listed,'',row,row,row,''],[hit,empty,empty,empty,{populated:true,pid:live.MainPID},empty])
+    await expect(observeDnsServiceJobs(performance.now()+10000,unit,true,fixture.ports)).resolves.toEqual({service:successor,drained:true})
+    expect(fixture.counts).toEqual({service:6,jobs:6,cgroup:6})
+  })
+
+  it('rejects queued contradictions at the offending frame with the specific refusal and no stop',async () => {
+    const successor = retry(6).service
+    const row = '833 pdns.service start running\n'
+    const queued = {...next,SubState:'auto-restart-queued',NRestarts:'6',Job:'833'}
+    const live = {...successor,SubState:'start',MainPID:successor.ExecMainPID,ControlGroup:start.ControlGroup,Job:'833',Result:'success',ExecMainCode:'0',ExecMainStatus:'0'}
+    const bad: [Service,string][] = [
+      [{...queued,ActiveState:'failed'},'SERVICE_HISTORY'], [{...queued,SubState:'start-pre'},'SERVICE_STATE'],
+      [{...queued,Job:'834'},'SERVICE_HISTORY'], [{...queued,Job:''},'SERVICE_HISTORY'],
+      [{...queued,MainPID:'777'},'SERVICE_HISTORY'], [{...queued,NRestarts:'7'},'SERVICE_HISTORY'],
+      [{...queued,NRestarts:'6e0'},'SERVICE_HISTORY'], [{...queued,NRestarts:'06'},'SERVICE_HISTORY'],
+      [{...queued,NRestarts:' 6'},'SERVICE_HISTORY'], [{...queued,NRestarts:'9007199254740992'},'SERVICE_HISTORY'],
+      [{...queued,ExecMainPID:'777'},'SERVICE_HISTORY'], [{...queued,ExecMainStartTimestampMonotonic:'5001'},'SERVICE_HISTORY'],
+      [{...queued,ExecMainExitTimestampMonotonic:'5002'},'SERVICE_HISTORY'], [{...queued,ExecMainStatus:'9'},'SERVICE_HISTORY'],
+      [{...queued,Restart:'always'},'SERVICE_STATE'], [{...queued,FragmentPath:'/tmp/foreign.service'},'SERVICE_STATE'],
+    ]
+    const cases = [
+      ...bad.map(([value,code]) => ({fixture:counted([start,next,value],[listed,'',row],[hit,empty,empty]),code,frames:3})),
+      {fixture:counted([start,next,queued],[listed,'',row],[hit,empty,{populated:true,pid:'777'}]),code:'SERVICE_HISTORY',frames:3},
+      {fixture:counted([start,next,queued],[listed,'',row],[hit,empty,{populated:true,pid:next.ExecMainPID}]),code:'SERVICE_ATTEMPT',frames:3},
+      {fixture:counted([start,next,queued],[listed,'','834 pdns.service start running\n'],[hit,empty,empty]),code:'SERVICE_HISTORY',frames:3},
+      {fixture:counted([start,next,queued],[listed,'','833 pdns.service stop running\n'],[hit,empty,empty]),code:'SERVICE_JOB',frames:3},
+      {fixture:counted([start,next,queued,successor],[listed,'',row,''],[hit,empty,empty,empty]),code:'SERVICE_HISTORY',frames:4},
+      {fixture:counted([queued],[row],[empty]),code:'SERVICE_STATE',frames:1},
+      {fixture:counted([start,next,queued,live,queued],[listed,'',row,row,row],[hit,empty,empty,{populated:true,pid:live.MainPID},empty]),code:'SERVICE_HISTORY',frames:5},
+      {fixture:counted([start,next,...Array<Service>(41).fill(queued)],
+        [listed,'',...Array<string>(41).fill(row)],[hit,empty,...Array<Window>(41).fill(empty)]),code:'SERVICE_ATTEMPT',frames:43},
+    ]
+    const inputs = await inspect(retry(5))
+    for (const {fixture,code,frames} of cases) {
+      let stops = 0
+      await expect(verifyVendorDnsPhase('quiesce',inputs,{
+        capture:async () => { await observeDnsServiceJobs(performance.now()+10000,unit,true,fixture.ports); return retry(5) },
+        service:async () => retry(5).service,
+        stop:async () => { stops++ },
+      })).rejects.toMatchObject({code})
+      expect(fixture.counts).toEqual({service:frames,jobs:frames,cgroup:frames})
+      expect(stops).toBe(0)
+    }
+  })
+
   it('requires the same listed job, cgroup PID and completed attempt; missed or reused transitions remain held',async () => {
     const cases = [
       sample([start,next,retry(6).service],[listed,'',''],[hit,empty,empty]), // Uncredited partial cycle, next cycle skipped.

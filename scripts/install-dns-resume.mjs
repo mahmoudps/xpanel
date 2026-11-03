@@ -473,6 +473,17 @@ async function finishListedAttempt(first,prior,read,ports,deadline) {
       } else requireFact(s.FragmentPath === start.FragmentPath && s.MainPID === start.MainPID && s.NRestarts === start.NRestarts
         && s.ExecMainStartTimestampMonotonic === start.ExecMainStartTimestampMonotonic,'SERVICE_HISTORY')
       if (frame.id === id && group.populated && group.pid === s.MainPID) witnessed = true
+    } else if (s.SubState === 'auto-restart-queued') {
+      // systemd can queue the next listed retry before replacing its previous
+      // execution record. This is only a waiting frame, never a witnessed start.
+      assertRestartPolicy(s)
+      requireFact(prior && !start && !member && frame.id === id && s.Job === id
+        && s.ActiveState === 'activating' && s.MainPID === '0' && !group.populated
+        && s.FragmentPath === prior.FragmentPath && positive(s.NRestarts) && Number(s.NRestarts) === Number(prior.NRestarts)+1
+        && s.ExecMainPID === prior.ExecMainPID
+        && s.ExecMainStartTimestampMonotonic === prior.ExecMainStartTimestampMonotonic
+        && s.ExecMainExitTimestampMonotonic === prior.ExecMainExitTimestampMonotonic
+        && s.Result === prior.Result && s.ExecMainCode === prior.ExecMainCode && s.ExecMainStatus === prior.ExecMainStatus,'SERVICE_HISTORY')
     } else {
       assertDeadRetry(s)
       if (start) {
