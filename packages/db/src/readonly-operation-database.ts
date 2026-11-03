@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash } from 'node:crypto'
-import { constants, fstatSync, lstatSync, realpathSync, type BigIntStats } from 'node:fs'
+import { constants, fstatSync, lstatSync, readSync, realpathSync, type BigIntStats } from 'node:fs'
 import { open, realpath, type FileHandle } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -78,6 +78,7 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
   assertNoActiveDatabaseTransaction()
   if (closed) await closed.assertCurrent()
   if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.geteuid?.() !== 0) return refused('linux_root_required')
+  if (!closed && process.version !== 'v26.12.1') return refused('pinned_wal_initialization_runtime_required')
   if (!isAbsolute(path) || resolve(path) !== path || await realpath(path) !== path || typeof callback !== 'function') return refused('canonical_existing_path_required')
   const pins: Pin[] = [], sidecars: Pin[] = [], file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
   let database: DatabaseSync | undefined, scope: Scope | undefined, verifyClosedRetirement: (() => Promise<void>) | undefined
@@ -128,6 +129,50 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
       if (closed) absentSidecars()
     }
     physical()
+    const wal = sidecars.find(pin => pin.path === path + '-wal')
+    const hashWal = (expected: BigIntStats): string => {
+      if (!wal || expected.size < 0n || expected.size > 2n * 1024n * 1024n * 1024n) return refused('database_wal_initialization_size_limit')
+      const assertPinned = (): void => {
+        const held = fstatSync(wal.handle.fd, { bigint: true }), named = lstatSync(wal.path, { bigint: true })
+        if (!held.isFile() || !named.isFile() || named.isSymbolicLink() || !equal(expected, held, true) || !equal(expected, named, true))
+          return refused('database_wal_initialization_changed')
+      }
+      assertPinned()
+      const hash = createHash('sha256'), block = Buffer.alloc(1024 * 1024)
+      let offset = 0
+      while (offset < Number(expected.size)) {
+        const bytes = readSync(wal.handle.fd, block, 0, Math.min(block.length, Number(expected.size) - offset), offset)
+        if (!bytes) return refused('database_wal_initialization_short_read')
+        hash.update(block.subarray(0, bytes)); offset += bytes
+      }
+      assertPinned(); return hash.digest('hex')
+    }
+    const walBeforeOpenSha256 = wal ? hashWal(wal.initial) : undefined
+    physical()
+    const initializationDirectories = (): void => {
+      for (const pin of pins) {
+        const held = fstatSync(pin.handle.fd, { bigint: true }), named = lstatSync(pin.path, { bigint: true })
+        if (!held.isDirectory() || !named.isDirectory() || named.isSymbolicLink()
+          || !equal(pin.initial, held, true) || !equal(pin.initial, named, true)) return refused('database_initialization_ancestor_changed')
+      }
+    }
+    if (wal) initializationDirectories()
+    const finishWalInitialization = (): void => {
+      if (!wal) return
+      // SQLite's Unix VFS fchown()s the WAL on its first root read, even when
+      // UID/GID already match. After discarding all initialization reads, bind
+      // fresh proof to the unchanged inode, protection, length, mtime and bytes.
+      // Directory timestamps reject a temporary replacement at the same name;
+      // hashes alone cannot prove that no transient byte mutation took place.
+      initializationDirectories()
+      const initialized = fstatSync(wal.handle.fd, { bigint: true })
+      if (!equal(wal.initial, initialized) || initialized.size !== wal.initial.size
+        || initialized.mtimeNs !== wal.initial.mtimeNs || initialized.ctimeNs < wal.initial.ctimeNs
+        || hashWal(initialized) !== walBeforeOpenSha256) return refused('database_wal_initialization_changed')
+      initializationDirectories()
+      wal.initial = initialized
+      physical()
+    }
     const hashClosedFile = async (): Promise<string> => {
       physical()
       if (initial.size < 100n || initial.size > 2n * 1024n * 1024n * 1024n) return refused('closed_database_observation_size_limit')
@@ -182,6 +227,15 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
       const value = queryNative('PRAGMA main.data_version')[0]?.data_version
       if (!Number.isSafeInteger(value) || Number(value) < 1) return refused('database_data_version_unavailable')
       return Number(value)
+    }
+    if (!closed) {
+      // Complete the initial read transaction, discard its scalar and purge
+      // unpinned pages before the final WAL reconciliation. data_version has
+      // no NeedSchema flag; no pre-proof page/header value becomes authority.
+      // The next strict read reloads page1 from the verified stable WAL bytes.
+      dataVersion()
+      queryNative('PRAGMA shrink_memory')
+      finishWalInitialization()
     }
     const version = closed ? undefined : dataVersion(), origin = readOrigin()
     if (!closed && dataVersion() !== version) return refused('database_changed_during_capture')
