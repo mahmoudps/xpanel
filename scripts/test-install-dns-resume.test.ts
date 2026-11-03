@@ -2,7 +2,7 @@ import { mkdtemp, open, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { captureDnsInventory, coherentDnsService, dnsRefusalMessage, dnsServicePorts, observeDnsServiceJobs, readDnsCgroupWindow, readDnsIdleBoundary, minimalDnsAcl, readPinnedDnsAcl, assertDnsHostProcesses, assertDnsResumeEntry, assertVendorPowerDnsShape, readAtMost, verifyVendorDnsPhase } from './install-dns-resume.mjs'
+import { captureDnsInventory, coherentDnsService, dnsRefusalMessage, dnsServicePorts, observeDnsServiceJobs, readDnsDecisionBoundary, readDnsCgroupWindow, readDnsIdleBoundary, minimalDnsAcl, readPinnedDnsAcl, assertDnsHostProcesses, assertDnsResumeEntry, assertVendorPowerDnsShape, readAtMost, verifyVendorDnsPhase } from './install-dns-resume.mjs'
 
 const server = 'pdns-server'
 const bind = 'pdns-backend-bind'
@@ -191,6 +191,42 @@ describe('listed DNS jobs at the installed capture and stop boundaries', () => {
     expect(result).toEqual({service:successor,drained:true})
   })
 
+  it('ignores an unlisted mixed start frame and still requires the next fully listed cycle',async () => {
+    const successor = retry(6).service
+    const live = {...successor,SubState:'start',MainPID:successor.ExecMainPID,ControlGroup:start.ControlGroup,Job:'833',Result:'success',ExecMainCode:'0',ExecMainStatus:'0'}
+    const result = await observeDnsServiceJobs(Infinity,unit,true,sample(
+      [start,next,live,live,successor],
+      [listed,'','','833 pdns.service start running\n',''],
+      [hit,empty,{populated:true,pid:live.MainPID},{populated:true,pid:live.MainPID},empty],
+    ))
+    expect(result).toEqual({service:successor,drained:true})
+  })
+
+  it('never stops for a persistent mixed start or foreign mixed identity',async () => {
+    const successor = retry(6).service
+    const live = {...successor,SubState:'start',MainPID:successor.ExecMainPID,ControlGroup:start.ControlGroup,Job:'833',Result:'success',ExecMainCode:'0',ExecMainStatus:'0'}
+    const wrong = [
+      {...live,User:'other'}, {...live,FragmentPath:'/tmp/foreign.service'},
+      {...live,NRestarts:'9'}, {...live,NRestarts:'6e0'}, {...live,MainPID:'777'}, {...live,Job:'foreign'},
+    ]
+    const cases = [
+      sample([start,next,...Array<Service>(201).fill(live)], [listed,'',...Array<string>(201).fill('')],
+        [hit,empty,...Array<Window>(201).fill({populated:true,pid:live.MainPID})]),
+      ...wrong.map(item => sample([start,next,item],[listed,'',''],[hit,empty,{populated:true,pid:live.MainPID}])),
+      sample([start,next,live],[listed,'',''],[hit,empty,{populated:true,pid:'777'}]),
+    ]
+    const inputs = await inspect(retry(5))
+    for (const p of cases) {
+      let stops = 0
+      await expect(verifyVendorDnsPhase('quiesce',inputs,{
+        capture:async () => { await observeDnsServiceJobs(Infinity,unit,true,p); return retry(5) },
+        service:async () => retry(5).service,
+        stop:async () => { stops++ },
+      })).rejects.toThrow()
+      expect(stops).toBe(0)
+    }
+  })
+
   it('requires the same listed job, cgroup PID and completed attempt; missed or reused transitions remain held',async () => {
     const cases = [
       sample([start,next,retry(6).service],[listed,'',''],[hit,empty,empty]), // Uncredited partial cycle, next cycle skipped.
@@ -245,6 +281,52 @@ describe('listed DNS jobs at the installed capture and stop boundaries', () => {
       })).rejects.toThrow('MIGRATION_REQUIRED')
       expect(stops).toBe(0)
     }
+  })
+
+  it('recaptures both inventories after a witnessed boundary transition before stopping',async () => {
+    const state = retry(5), inputs = await inspect(state), idle = stopped(state)
+    let reads = 0, stops = 0, boundaries = 0
+    const ports = sample([dead,start,start,next], [listed,listed,listed,'',''], [empty,hit,empty,empty])
+    const result = await verifyVendorDnsPhase('quiesce',inputs,{
+      capture:async () => { reads++; return stops ? idle : state },
+      service:async (allowTransition = false) => {
+        boundaries++
+        if (boundaries === 1) {
+          expect(allowTransition).toBe(true)
+          return readDnsDecisionBoundary(Infinity,unit,ports)
+        }
+        return readDnsIdleBoundary(Infinity,unit,boundary(stops ? idle.service : state.service))
+      },
+      stop:async () => { expect(reads).toBe(4); expect(boundaries).toBe(2); stops++ },
+    })
+    expect(result).toBe('xpanel-pdns-vendor-pristine-v1')
+    expect(stops).toBe(1)
+  })
+
+  it('does not stop on a foreign job, changed job ID, failed transition or drift after a deferred boundary',async () => {
+    const state = retry(5), inputs = await inspect(state)
+    const bad = [
+      sample([],['832 pdns.service stop running'],[]),
+      sample([dead],[listed,'833 pdns.service start running'],[empty]),
+      sample([dead,start,next],[listed,listed,listed,''],[empty,empty,empty]),
+    ]
+    for (const ports of bad) {
+      let stops = 0
+      await expect(verifyVendorDnsPhase('quiesce',inputs,{
+        capture:async () => state,
+        service:() => readDnsDecisionBoundary(Infinity,unit,ports),
+        stop:async () => { stops++ },
+      })).rejects.toThrow()
+      expect(stops).toBe(0)
+    }
+    let reads = 0, stops = 0
+    const drift = structuredClone(state); drift.boot = '00000000-0000-4000-8000-000000000002'
+    await expect(verifyVendorDnsPhase('quiesce',inputs,{
+      capture:async () => ++reads > 2 ? drift : state,
+      service:async () => null,
+      stop:async () => { stops++ },
+    })).rejects.toThrow()
+    expect(stops).toBe(0)
   })
 
   it('waits for all concurrent observations and never stops when one fails',async () => {
