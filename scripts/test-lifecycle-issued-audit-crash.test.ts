@@ -1,7 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash } from 'node:crypto'
 import { constants, readFileSync } from 'node:fs'
-import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { parseIssuedLifecycleAuditJournal } from './lifecycle-issued-audit.mjs'
 
@@ -10,11 +9,15 @@ import { parseIssuedLifecycleAuditJournal } from './lifecycle-issued-audit.mjs'
 // The seam grants no production capability, starts no service and opens no SQLite file.
 const source = (name: string) => readFileSync(new URL(name, import.meta.url), 'utf8')
 const declarations = (text: string, names: string[]) => {
-  const ast = ts.createSourceFile('fixture.mjs', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
   return names.map(name => {
-    const node = ast.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === name)
-    if (!node) throw new Error('Missing actual function ' + name)
-    return node.getText(ast).replace(/^export /, '')
+    // These reviewed modules use top-level function declarations with an unindented
+    // closing brace. Require that exact source boundary; bind() compiles the slice.
+    const starts = [...text.matchAll(new RegExp('^(?:export )?(?:async )?function ' + name + '\\(', 'gm'))]
+    if (starts.length !== 1) throw new Error('Missing or ambiguous actual function ' + name)
+    const start = starts[0]!.index!
+    const end = /^\}(?=\r?\n|$)/m.exec(text.slice(start))
+    if (!end) throw new Error('Missing actual function boundary ' + name)
+    return text.slice(start, start + end.index + 1).replace(/^export /, '')
   }).join('\n')
 }
 const bind = (body: string, exports: string[], dependencies: Record<string, unknown>) =>
