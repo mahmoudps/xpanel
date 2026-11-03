@@ -347,20 +347,29 @@ const parseTar = async (stream, trust, destination) => {
           offset += result.bytesWritten
         }
       })
-      if (output) await output.sync()
+      if (output) {
+        // Creation is filtered by the caller's umask. Restore the authenticated mode on
+        // the held descriptor inside the private stage before making the file durable.
+        await output.chmod(mode)
+        await output.sync()
+      }
     } finally { if (output) await closeOwned(output) }
     await reader.consume((512 - size % 512) % 512, part => { if (part.some(byte => byte !== 0)) refuse('CORRUPT_ARCHIVE', 'Nonzero tar member padding') })
     if (metadataPaths.has(path)) metadata.set(path, Buffer.concat(parts, size))
     entries.push({ path, type, sha256: sha.digest('hex'), bytes: size, mode, uid, gid }); seen.set(alias, type)
   }
   const rawManifest = metadata.get('release-manifest.json'); if (!rawManifest) refuse('MANIFEST_INVALID', 'Release manifest is absent')
-  const manifest = authenticateManifest(rawManifest, trust), inventory = new Map(manifest.files.map(file => [file.path, file])), directories = new Set()
+  const manifest = authenticateManifest(rawManifest, trust), inventory = new Map(manifest.files.map(file => [file.path, file])), directories = new Map()
   for (const path of [...inventory.keys(), 'release-manifest.json']) {
     const segments = path.split('/')
-    for (let i = 1; i < segments.length; i++) { directories.add(segments.slice(0, i).join('/')); if (directories.size + manifest.files.length + 1 > bounds.members) refuse('LIMIT', 'Complete source tree member budget exceeded') }
+    for (let i = 1; i < segments.length; i++) { directories.set(segments.slice(0, i).join('/'), 0o755); if (directories.size + manifest.files.length + 1 > bounds.members) refuse('LIMIT', 'Complete source tree member budget exceeded') }
   }
   for (const entry of entries) {
-    if (entry.type === 'directory') { if (!directories.has(entry.path)) refuse('UNEXPECTED_FILE', 'Unmanifested directory'); continue }
+    if (entry.type === 'directory') {
+      if (!directories.has(entry.path)) refuse('UNEXPECTED_FILE', 'Unmanifested directory')
+      directories.set(entry.path, entry.mode)
+      continue
+    }
     if (entry.path === 'release-manifest.json') { if (entry.mode !== 0o644) refuse('UNSAFE_MODE', 'Manifest mode must be 0644'); continue }
     const file = inventory.get(entry.path)
     if (!file || file.sha256 !== entry.sha256 || file.bytes !== entry.bytes || file.mode !== entry.mode) refuse('CHECKSUM_MISMATCH', 'Archive file differs from signed inventory')
@@ -368,6 +377,15 @@ const parseTar = async (stream, trust, destination) => {
   }
   if (inventory.size) refuse('MISSING_FILE', 'A signed file is absent from the archive')
   verifyMetadata(manifest, metadata, bounds)
+  // Only authenticated descendants become traversable. The enclosing private stage stays 0700.
+  if (destination) for (const [path, mode] of directories) {
+    const directory = await open(join(destination, path), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    try {
+      rootStat(await directory.stat({ bigint: true }), true)
+      await directory.chmod(mode)
+      await directory.sync()
+    } finally { await closeOwned(directory) }
+  }
   return { manifest, entries, tarBytes: reader.bytes, manifestSha256: hash(rawManifest) }
 }
 

@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync, statSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -269,16 +270,77 @@ describe('buffered diagnostic rejection retires its archive descriptor', () => {
   })
 })
 
+// The child owns its umask and uses genuine Linux file descriptors, kernel modes and production verifier entry points.
+describe.skipIf(process.platform !== 'linux' || process.geteuid?.() !== 0)('authenticated Linux release staging modes', () => {
+  it.each(['0077', '0022'])('restores exact authenticated modes under umask %s and keeps the stage private', mask => {
+    const bytes = rewrite(entries => {
+      entries.push({ name: 'packages/db', type: 'directory', mode: 0o750, content: Buffer.alloc(0) })
+    })
+    const run = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import assert from 'node:assert/strict'
+      import { spawnSync } from 'node:child_process'
+      import { mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync, chmodSync, readFileSync } from 'node:fs'
+      import { join } from 'node:path'
+      const { withAuthenticatedReleaseArchive, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseTree } = await import(process.argv[1])
+      const mask = Number.parseInt(process.argv[2], 8)
+      process.umask(mask)
+      const fixture = mkdtempSync('/var/lib/xpanel-release-staging-modes-')
+      try {
+        const { archive, sha256, key, keyId } = JSON.parse(readFileSync(0, 'utf8'))
+        const source = join(fixture, 'input.tar.gz'), staging = join(fixture, 'staging')
+        mkdirSync(staging, { mode: 0o700 })
+        writeFileSync(source, Buffer.from(archive, 'base64'), { flag: 'wx', mode: 0o600 })
+        chmodSync(fixture, 0o755); chmodSync(staging, 0o755)
+        const probe = join(fixture, 'creation-mode')
+        writeFileSync(probe, '', { flag: 'wx', mode: 0o755 })
+        const mode = path => statSync(path).mode & 0o7777
+        assert.equal(mode(probe), 0o755 & ~mask)
+        const { value } = await withAuthenticatedReleaseArchive(source, { expectedArchiveSha256: sha256, signingKey: key, keyId }, async ({ report }) => {
+          const trust = { authenticatedArchive: report, signingKey: key, keyId }
+          const result = await stageAuthenticatedReleaseArchive(staging, trust)
+          assert.equal(result.activated, false)
+          assert.equal(mode(result.stagedAt), 0o700)
+          for (const [path, bits] of [['release-manifest.json', 0o644], ['VERSION', 0o644], ['scripts/install.sh', 0o755],
+            ['apps', 0o755], ['packages/db', 0o750], ['apps/api/src', 0o755]]) assert.equal(mode(join(result.stagedAt, path)), bits)
+          assert.equal((await verifyAuthenticatedReleaseTree(result.stagedAt, trust)).ok, true)
+          // Promotion changes only the wrapper; genuine non-root code must traverse its implicit directories.
+          chmodSync(result.stagedAt, 0o755)
+          const reader = spawnSync(process.execPath, ['--input-type=module', '-e',
+            'import {readFileSync} from "node:fs"; readFileSync(process.argv[1])', join(result.stagedAt, 'apps/api/src/main.ts')], { uid: 65534, gid: 65534, encoding: 'utf8', timeout: 5000 })
+          assert.equal(reader.status, 0); assert.equal(reader.stderr, '')
+          chmodSync(join(result.stagedAt, 'VERSION'), 0o600)
+          await assert.rejects(verifyAuthenticatedReleaseTree(result.stagedAt, trust), { code: 'CHECKSUM_MISMATCH' })
+          return result.ok
+        })
+        assert.equal(value, true)
+        assert.equal(process.umask(), mask)
+      } finally {
+        assert.equal(fixture.startsWith('/var/lib/xpanel-release-staging-modes-'), true)
+        assert.equal(fixture.split('/').length, 4)
+        rmSync(fixture, { recursive: true, force: true })
+      }
+    `, new URL('./release-verifier.mjs', import.meta.url).href, mask], {
+      input: JSON.stringify({ archive: bytes.toString('base64'), sha256: sha(bytes), key, keyId }),
+      encoding: 'utf8', timeout: 30_000, maxBuffer: 64 * 1024,
+    })
+    expect(run.error).toBeUndefined()
+    expect(run.signal).toBeNull()
+    expect(run.stderr).toBe('')
+    expect(run.status).toBe(0)
+  })
+})
+
 // Scoped Linux-identity diagnostics. Archive bytes/streams are real temporary files; root/proc
 // ownership and directory identities are mocked ONLY here. This is not native Linux proof.
 describe('retained archive FD lifetime diagnostics with explicit filesystem identity fixtures', () => {
   afterEach(() => { vi.doUnmock('node:fs'); vi.doUnmock('node:fs/promises'); vi.doUnmock('node:process'); vi.doUnmock('node:path'); vi.resetModules() })
-  const fixture = async () => {
+  const fixture = async (creationMask = 0) => {
     const real = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
     const fs = await vi.importActual<typeof import('node:fs')>('node:fs')
     const pathModule = await vi.importActual<typeof import('node:path')>('node:path')
     let backing = archiveFile(original), nextFd = 10_000, openedFile: any, closed = false, fileCloses = 0, directoryMode = 0o755, treeEpoch = 0, changeTreeDuringRead = false, closeFailure = false, stagingWriteFailure = false
-    let ownerRetiring = false, archiveClosedOutsideOwner = false, observedWriterFailure = false, readsAfterWriterFailure = 0
+    let ownerRetiring = false, archiveClosedOutsideOwner = false, observedWriterFailure = false, readsAfterWriterFailure = 0, stagingChmodFailure = false
+    const outputEvents: string[] = []
     let procFault = '', procEpoch = 0
     const procFilesystemCalls: string[] = []
     const dirs = new Map<number, string>()
@@ -317,9 +379,9 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
       readlink: async (path: string) => path === '/proc/self' ? String(process.pid) : '',
       mkdir: async (path: string, opts: { recursive?: boolean; mode?: number }) => {
         const target = canonical(path), parts = target.split('/')
-        for (let i = 2; i < parts.length; i++) if (!tree.has(parts.slice(0, i).join('/'))) tree.set(parts.slice(0, i).join('/'), { directory: true, mode: 0o755 })
+        for (let i = 2; i < parts.length; i++) if (!tree.has(parts.slice(0, i).join('/'))) tree.set(parts.slice(0, i).join('/'), { directory: true, mode: 0o755 & ~creationMask })
         if (!opts.recursive && tree.has(target)) throw Object.assign(new Error('diagnostic EEXIST'), { code: 'EEXIST' })
-        if (!tree.has(target)) tree.set(target, { directory: true, mode: opts.mode ?? 0o755 })
+        if (!tree.has(target)) tree.set(target, { directory: true, mode: (opts.mode ?? 0o755) & ~creationMask })
       },
       opendir: async (path: string) => {
         const base = canonical(path), names = [...tree.keys()].filter(path => path.startsWith(`${base}/`) && !path.slice(base.length + 1).includes('/')).map(path => path.slice(base.length + 1))
@@ -335,12 +397,12 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
         }
         if ((flags & fs.constants.O_CREAT) !== 0) {
           if (tree.has(canonical(path))) throw Object.assign(new Error('diagnostic EEXIST'), { code: 'EEXIST' })
-          tree.set(canonical(path), { content: Buffer.alloc(0), mode, uid: 0n, nlink: 1n })
+          tree.set(canonical(path), { content: Buffer.alloc(0), mode: mode & ~creationMask, uid: 0n, nlink: 1n })
         }
         const node = tree.get(canonical(path))
-        if (node && !node.directory) return { fd: nextFd++, stat: async () => treeStat(canonical(path)), write: async (bytes: Buffer, offset: number, length: number) => { if (stagingWriteFailure) { observedWriterFailure = true; throw new Error('diagnostic ENOSPC') } const chunk = bytes.subarray(offset, offset + length); node.content = Buffer.concat([node.content, chunk]); return { bytesWritten: chunk.length } }, sync: async () => undefined, createReadStream: () => { if (changeTreeDuringRead) { treeEpoch++; changeTreeDuringRead = false } return Readable.from([node.content]) }, close: async () => undefined }
+        if (node && !node.directory) return { fd: nextFd++, stat: async () => treeStat(canonical(path)), write: async (bytes: Buffer, offset: number, length: number) => { if (stagingWriteFailure) { observedWriterFailure = true; throw new Error('diagnostic ENOSPC') } const chunk = bytes.subarray(offset, offset + length); node.content = Buffer.concat([node.content, chunk]); return { bytesWritten: chunk.length } }, chmod: async (value: number) => { outputEvents.push('chmod:' + canonical(path)); if (stagingChmodFailure) throw new Error('diagnostic EPERM'); node.mode = value }, sync: async () => { outputEvents.push('sync:' + canonical(path)) }, createReadStream: () => { if (changeTreeDuringRead) { treeEpoch++; changeTreeDuringRead = false } return Readable.from([node.content]) }, close: async () => { outputEvents.push('close:' + canonical(path)) } }
         const normalized = canonical(path), fd = nextFd++; dirs.set(fd, normalized)
-        return { fd, stat: async () => directory(normalized), sync: async () => undefined, close: async () => { dirs.delete(fd) } }
+        return { fd, stat: async () => directory(normalized), chmod: async (value: number) => { tree.get(normalized).mode = value }, sync: async () => undefined, close: async () => { dirs.delete(fd) } }
       },
     }))
     const mod = await import('./release-verifier.mjs')
@@ -350,6 +412,9 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
       mutate: () => { const bytes = Buffer.from(original); bytes[bytes.length - 1] ^= 1; writeFileSync(backing, bytes) }, insecure: () => { directoryMode = 0o777 },
       failClose: () => { closeFailure = true },
       failStageWrite: () => { stagingWriteFailure = true },
+      failStageChmod: () => { stagingChmodFailure = true },
+      outputEvents: () => outputEvents,
+      mode: (path: string) => tree.get(path)?.mode,
       archiveClosedOutsideOwner: () => archiveClosedOutsideOwner,
       readsAfterWriterFailure: () => readsAfterWriterFailure,
       content: (path: string) => tree.get(path)?.content,
@@ -434,6 +499,61 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
     expect(f.content(`${value.stagedAt}/VERSION`).toString()).toBe('0.1.0\n')
     expect(f.isClosed()).toBe(true)
     await expect(f.mod.stageAuthenticatedReleaseArchive('/protected/staging', { authenticatedArchive: report, signingKey: key, keyId })).rejects.toMatchObject({ code: 'LIVE_ARCHIVE_REQUIRED' })
+  })
+  it('restores every authenticated file mode through its held output descriptor under creation mask 0077', async () => {
+    const f = await fixture(0o077)
+    const { value } = await f.mod.withAuthenticatedReleaseArchive(f.path, options(original), ({ report }: any) =>
+      f.mod.stageAuthenticatedReleaseArchive('/protected/staging', { authenticatedArchive: report, signingKey: key, keyId }))
+    const files = parseTarGzBuffer(original).filter(entry => entry.type === 'file')
+    expect(new Set(files.map(entry => entry.mode))).toEqual(new Set([0o644, 0o755]))
+    expect(f.mode(value.stagedAt)).toBe(0o700)
+    expect(f.mode(`${value.stagedAt}/apps`)).toBe(0o755)
+    expect(f.mode(`${value.stagedAt}/apps/api/src`)).toBe(0o755)
+    for (const entry of files) {
+      const path = `${value.stagedAt}/${entry.name}`
+      expect(f.mode(path)).toBe(entry.mode)
+      const operations = f.outputEvents().filter(event => event.endsWith(':' + path))
+      expect(operations).toEqual(['chmod:' + path, 'sync:' + path, 'close:' + path, 'close:' + path])
+    }
+    expect(f.fileCloses()).toBe(1); expect(f.isClosed()).toBe(true)
+  })
+  it('retains the failed stage and revokes its report when output descriptor chmod fails', async () => {
+    const f = await fixture(0o077); f.failStageChmod(); let report: any
+    await expect(f.mod.withAuthenticatedReleaseArchive(f.path, options(original), async (held: any) => {
+      report = held.report
+      return f.mod.stageAuthenticatedReleaseArchive('/protected/staging', { authenticatedArchive: report, signingKey: key, keyId })
+    })).rejects.toMatchObject({ code: 'ARCHIVE_USE_UNCERTAIN', stagingRetained: true })
+    expect(f.outputEvents().some(event => event.startsWith('chmod:'))).toBe(true)
+    expect(f.outputEvents().some(event => event.startsWith('sync:'))).toBe(false)
+    expect(f.outputEvents().at(-1)?.startsWith('close:')).toBe(true)
+    expect(f.fileCloses()).toBe(1); expect(f.isClosed()).toBe(true)
+    await expect(f.mod.verifyAuthenticatedReleaseTree('/protected/tree', { authenticatedArchive: report, signingKey: key, keyId })).rejects.toMatchObject({ code: 'TRUST_REQUIRED' })
+  })
+  it.each(['resolve', 'reject'] as const)('restores the private process mask after the legacy extractor can %s', async outcome => {
+    // Run the actual acquisition block with a legacy extractor that cannot restore file
+    // modes itself. The process is modeled here; no worker-wide umask is changed.
+    const source = readFileSync(new URL('./acquire-lifecycle-release.mjs', import.meta.url), 'utf8')
+    const start = source.indexOf('              effectsStarted = true\n')
+    const end = source.indexOf('              await sourcePin.verify();', start)
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start)
+    const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor
+    const execute = new AsyncFunction('process', 'verifier', 'keyPin', 'trust', 'report',
+      'let effectsStarted = false;\n' + source.slice(start, end) + '\nreturn staged')
+    let mask = 0o077, observedMask = -1
+    const maskWrites: number[] = [], report = {}, stage = { stagedAt: '/protected/staging/authenticated-fixture' }, failure = new Error('diagnostic legacy extraction failure')
+    const processFixture = { umask(value: number) { const prior = mask; mask = value; maskWrites.push(value); return prior } }
+    const verifier = { async stageAuthenticatedReleaseArchive(root: string, actual: any) {
+      observedMask = mask
+      expect(root).toBe('/opt/xpanel/staging'); expect(actual).toEqual({ signingKey: key, keyId, authenticatedArchive: report })
+      await Promise.resolve()
+      if (outcome === 'reject') throw failure
+      return stage
+    } }
+    const pending = execute(processFixture, verifier, { bytes: key }, { keyId }, report)
+    if (outcome === 'reject') await expect(pending).rejects.toBe(failure)
+    else expect(await pending).toBe(stage)
+    expect(observedMask).toBe(0o022); expect(mask).toBe(0o077)
+    expect(maskWrites).toEqual([0o022, 0o077])
   })
   it.each([
     ['acquire-lifecycle-release.mjs', 'stageAuthenticatedReleaseArchive', 1],
