@@ -61,6 +61,8 @@ export interface ExtendedRouteHelpers {
   store: StateStore
   homeBaseDir?: string
   serverSecret?: string
+  /** Fresh read-only enforcement observation from the protected native agent; never a saved setup flag. */
+  readQuotaState?: (caller: AuthenticatedCaller, path: string) => Promise<unknown>
   backupDestinationHost?: (caller: AuthenticatedCaller, path: string, body?: unknown) => Promise<unknown>
   /** Server-to-server transfer execution (apps/api/src/lifecycle-transfer-execution.ts); absent without the host agent. */
   /** Native transfer execution, background caller and cPanel import; absent without the host agent. */
@@ -618,6 +620,23 @@ export class ExtendedFeaturesStore {
 
 export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
   const ext = new ExtendedFeaturesStore(helpers.store.rootDir)
+  const observeSetupQuota = async (caller: AuthenticatedCaller, path: string, requested: boolean) => {
+    const unavailable = (reason: string) => ({ quotaInitialized: false, quotaInitialization: { status: 'unavailable' as const, reason } })
+    if (!helpers.readQuotaState) return requested ? unavailable('host_quota_initialization_not_connected')
+      : { quotaInitialized: false, quotaInitialization: { status: 'not_requested' as const, reason: null } }
+    try {
+      const raw = await helpers.readQuotaState(caller, path)
+      const value = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : null
+      if (value?.status === 'unavailable' && typeof value.reason === 'string' && /^[a-z0-9_]{1,80}$/.test(value.reason)) return unavailable(value.reason)
+      if (!value || !['enabled', 'disabled'].includes(String(value.status)) || typeof value.filesystem !== 'string'
+        || !['ext4', 'xfs'].includes(String(value.filesystemType)) || typeof value.source !== 'string' || !value.source.trim() || value.reason !== null) return unavailable('host_quota_observation_invalid')
+      const filesystem = validateQuotaFilesystem(value.filesystem)
+      if (filesystem !== '/' && path !== filesystem && !path.startsWith(filesystem + '/')) return unavailable('host_quota_observation_invalid')
+      const enabled = value.status === 'enabled'
+      return { quotaInitialized: enabled, quotaInitialization: { status: enabled ? 'enabled' as const : 'disabled' as const,
+        reason: enabled ? null : 'quota_not_enforced', filesystem, filesystemType: value.filesystemType as 'ext4' | 'xfs', observedAt: new Date().toISOString() } }
+    } catch { return unavailable('host_quota_observation_failed') }
+  }
   const freshExtendedMailCaller = async (req: Request, previous: AuthenticatedCaller): Promise<AuthenticatedCaller> => {
     const fresh = await helpers.requireCaller(req)
     if (isMailboxPrincipal(fresh) || fresh.principal.id !== previous.principal.id || fresh.principal.kind !== previous.principal.kind || fresh.sessionId !== previous.sessionId || fresh.apiTokenId !== previous.apiTokenId || fresh.principal.kind === 'user' && previous.principal.kind === 'user' && fresh.principal.accountId !== previous.principal.accountId) return fail('FORBIDDEN', 'mail administration authorization changed', { stateChanged: false })
@@ -736,11 +755,14 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           helpers.store.listServerIps(),
           ext.readOrDefault<Record<string, unknown> | null>('setup-wizard.json', null),
         ])
+        const quotaFilesystem = validateQuotaFilesystem(wizardState?.quotaFilesystem ?? '/home')
+        const quota = await observeSetupQuota(caller, quotaFilesystem, wizardState?.quotaInitializationRequested !== false)
         return jsonResponse({
           setupComplete,
           settings,
           ips,
-          wizardState,
+          wizardState: wizardState ? { ...wizardState, ...quota } : null,
+          ...quota,
           defaultSuggested: suggestServerSettings({ cores: 4, memoryMb: 8192 }),
         })
       }
@@ -825,11 +847,9 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         await helpers.store.markSetupComplete()
 
         const quotaInitializationRequested = body.initQuotas !== false
-        // Setup has no trusted host quota port. Preserve existing observed state and never turn intent into execution proof.
-        const quotaInitialized = false
-        const quotaInitialization = quotaInitializationRequested
-          ? { status: 'unavailable', reason: 'host_quota_initialization_not_connected' }
-          : { status: 'not_requested', reason: null }
+        // A successful CLI/installer initialization is reflected by a fresh native read, never by request intent.
+        // This setup write does not remount filesystems or initialize quota accounting.
+        const { quotaInitialized, quotaInitialization } = await observeSetupQuota(caller, quotaFilesystem, quotaInitializationRequested)
 
         const completedAt = new Date().toISOString()
         await ext.write('setup-wizard.json', {

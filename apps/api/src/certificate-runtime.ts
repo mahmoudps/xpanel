@@ -1,4 +1,4 @@
-import { fail, isUuid, assertAcl, isXpanelError } from '@xpanel/core'
+import { cleanString, fail, isUuid, assertAcl, isXpanelError, redactInlineSecrets } from '@xpanel/core'
 import { createManualCertificateInstall } from './certificate-install.ts'
 import type { Account, AuditEntry, Domain, Id, LiveEventScope, Reseller } from '@xpanel/core'
 import { services } from '@xpanel/render'
@@ -81,9 +81,15 @@ export function createCertificateRuntimeRouter(helpers: CertificateRuntimeHelper
           try { value = asObject(await response.json()) } catch { value = null }
           if (!response.ok) {
             const details = asObject(value?.details)
-            // An unreachable CA leaves no certificate material; report it without the raw transport text.
-            if (value?.code === 'CONFIG_TEST_FAILED' && typeof value.detail === 'string' && value.detail.startsWith('the certificate authority could not be reached')) return fail('CONFIG_TEST_FAILED', 'the certificate authority could not be reached', { stateChanged: false })
-            if (details?.stateChanged === false) return fail('PRECONDITION_FAILED', 'certificate host request was rejected', { stateChanged: false })
+            const authorityFailure = details?.reason === 'certificate_authority_rejected' || details?.reason === 'certificate_authority_unreachable'
+            if (value?.code === 'CONFIG_TEST_FAILED' && authorityFailure && details
+              && details.stateChanged === true && details.certificateMaterialChanged === false
+              && details.verificationRequired === false && details.unknownOutcome === false && typeof value.detail === 'string' && value.detail.trim()) {
+              return fail('CONFIG_TEST_FAILED', cleanString(redactInlineSecrets(value.detail.slice(0, 4096)), 512), {
+                reason: details.reason, stateChanged: true, certificateMaterialChanged: false, verificationRequired: false, unknownOutcome: false,
+              })
+            }
+            if (!authorityFailure && details?.stateChanged === false) return fail('PRECONDITION_FAILED', 'certificate host request was rejected', { stateChanged: false })
             return fail('SERVICE_UNAVAILABLE', 'certificate host request requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
           }
           const certificate = asObject(value?.certificate)

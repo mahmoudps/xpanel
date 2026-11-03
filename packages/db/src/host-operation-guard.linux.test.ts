@@ -1,7 +1,7 @@
 import { createStrictTestDb } from './strict-test-db.ts'
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
-import { chmod, chown, lstat, mkdtemp, rename, rm, symlink } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { chmod, chown, lstat, mkdtemp, readFile, rename, rm, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -9,12 +9,14 @@ import { disposableVmAcknowledgement } from '../../../scripts/test-linux-preflig
 import { createDb, type Db, type DbHandle } from './client.ts'
 import { migrate } from './migrate.ts'
 import { initializeOperationalMetadata, requireOperationalIdentity } from './repos/official-references.ts'
-import { getStrictDatabaseIdentity } from './sql-runner.ts'
+import { getStrictDatabaseIdentity, getStrictOperationDatabaseOrigin } from './sql-runner.ts'
+import { withReadonlyOperationDatabase, assertReadonlyOperationDatabaseOutsideTransaction, type ReadonlyOperationDatabase } from './readonly-operation-database.ts'
 import {
   HOST_OPERATION_GUARD_DIRECTORY,
   assertHostOperationGuardActive,
   assertHostOperationGuardHeld,
   withHostOperationGuard,
+  withReadonlyHostOperationGuard,
 } from './host-operation-guard.ts'
 import type { HostOperationGuard, HostOperationGuardBinding } from './host-operation-guard.ts'
 
@@ -309,5 +311,88 @@ describe('actual root host operation guard in a fresh disposable VM', () => {
         await owner.done
       }
     }
+  })
+})
+
+
+// These cases execute the actual reader and the same fixed native lock as strict managers.
+// They do not mint prepared/admission/coordinator readiness or fake a product installation.
+describe('actual read-only manager host exclusion in the disposable VM', () => {
+  const readonlyFixture = async () => {
+    const f = await fixture()
+    for (const path of [f.file, f.file + '-wal', f.file + '-shm']) await chmod(path, 0o600)
+    return f
+  }
+  const bytes = async (file: string) => Promise.all([file, file + '-wal'].map(async path =>
+    createHash('sha256').update(await readFile(path)).digest('hex')))
+
+  it('holds the real lock with zero SQL writes, rejects strict registration and retires leaked capabilities', async () => {
+    const f = await readonlyFixture(), before = await bytes(f.file)
+    let escaped: HostOperationGuard | undefined, readerAfter: ReadonlyOperationDatabase | undefined
+    await withReadonlyOperationDatabase(f.file, async reader => {
+      readerAfter = reader
+      await withReadonlyHostOperationGuard(reader, {}, async cap => {
+        escaped = cap
+        await assertHostOperationGuardHeld(cap, f.binding)
+        assertHostOperationGuardActive(cap, f.binding)
+        expect(() => getStrictOperationDatabaseOrigin(reader)).toThrow()
+        await expect(reader.exec('DELETE FROM operational_identity')).rejects.toThrow()
+        expect(await reader.query('SELECT total_changes() AS n')).toEqual([{ n: 0 }])
+        for (const copy of [{ ...reader }, new Proxy(reader, {})]) {
+          await expect(withReadonlyHostOperationGuard(copy as never, {}, async () => undefined)).rejects.toThrow()
+        }
+        for (const copy of [{ ...cap }, new Proxy(cap, {})]) expect(() => assertHostOperationGuardActive(copy, f.binding)).toThrow()
+      })
+      await recordOwnedParent()
+      expect(() => assertHostOperationGuardActive(escaped, f.binding)).toThrow()
+    })
+    expect(await bytes(f.file)).toEqual(before)
+    await expect(withReadonlyHostOperationGuard(readerAfter!, {}, async () => undefined)).rejects.toThrow()
+    // The normal strict path can acquire after the read-only owner actually retired.
+    await withHostOperationGuard(f.handle.db, {}, async cap => { await assertHostOperationGuardHeld(cap, f.binding) })
+  })
+
+  it('revokes physical authority on actual WAL drift and never acknowledges a swallowed refusal', async () => {
+    const f = await readonlyFixture()
+    await expect(withReadonlyOperationDatabase(f.file, reader => withReadonlyHostOperationGuard(reader, {}, async cap => {
+      await f.handle.db.exec('CREATE TABLE readonly_guard_writer_probe (id INTEGER PRIMARY KEY)')
+      await expect(assertHostOperationGuardHeld(cap, f.binding)).rejects.toThrow()
+      expect(() => assertHostOperationGuardActive(cap, f.binding)).toThrow()
+      return 'cannot acknowledge a changed origin'
+    }))).rejects.toThrow()
+    await recordOwnedParent()
+    await withHostOperationGuard(f.handle.db, {}, async cap => { await assertHostOperationGuardHeld(cap, f.binding) })
+  })
+
+  it('keeps the existing options allowlist and never accepts caller availability or lock roots', async () => {
+    const f = await readonlyFixture()
+    await withReadonlyOperationDatabase(f.file, async reader => {
+      for (const options of [{ stopped: true }, { directory: '/tmp/forged-host-lock' }, { assertCurrent: async () => undefined }]) {
+        let invoked = false
+        await expect(withReadonlyHostOperationGuard(reader, options as never, async () => { invoked = true })).rejects.toThrow()
+        expect(invoked).toBe(false)
+      }
+    })
+  })
+})
+
+
+describe('read-only host guard lock order', () => {
+  it('refuses outer reader and transaction identities while a real read snapshot is active', async () => {
+    const f = await fixture()
+    for (const path of [f.file, f.file + '-wal', f.file + '-shm']) await chmod(path, 0o600)
+    await withReadonlyOperationDatabase(f.file, async reader => {
+      await reader.transaction(async tx => {
+        for (const value of [reader, tx]) {
+          expect(() => assertReadonlyOperationDatabaseOutsideTransaction(value)).toThrow()
+          let invoked = false
+          await expect(withReadonlyHostOperationGuard(value as never, {}, async () => { invoked = true })).rejects.toThrow()
+          expect(invoked).toBe(false)
+        }
+      })
+      assertReadonlyOperationDatabaseOutsideTransaction(reader)
+      await withReadonlyHostOperationGuard(reader, {}, async cap => { await assertHostOperationGuardHeld(cap, f.binding) })
+      await recordOwnedParent()
+    })
   })
 })

@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { chmod, chown, lstat, mkdir, rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { fail } from '@xpanel/core'
 
 /** Permanent operational inode: never raw-read, copy, rename or unlink while writers may run. */
@@ -58,6 +59,27 @@ const openInitialized = async (path: string, timeoutMs: number, retryMs: number)
 /** One connection per scope; busy_timeout=0 plus asynchronous retries keeps same-process progress possible. */
 export const acquireWriterMutex = async (path: string, timeoutMs: number, retryMs: number): Promise<WriterMutexGuard> => {
   const db = await openInitialized(path, timeoutMs, retryMs)
+  return holdWriterMutex(path, db, timeoutMs, retryMs)
+}
+
+/** Existing operational inode only. No mkdir, initializer or orphan recovery.
+ * The caller must prove its narrower repair authority inside this real mutex.
+ * SQLite owns the operational fd; it is never raw-read or copied. */
+export const acquireExistingWriterMutex = async (path: string, timeoutMs: number, retryMs: number): Promise<WriterMutexGuard> => {
+  const before = await inspect(path), parent = await lstat(dirname(path), { bigint: true })
+  if (!before || !before.isFile() || before.isSymbolicLink() || before.nlink !== 1n
+    || process.platform !== 'win32' && ((before.mode & 0o777n) !== 0o660n || before.gid !== parent.gid)
+    || await inspect(path + '-init')) return fail('CONFLICT', 'existing writer mutex is unavailable')
+  // Node's SQLITE_OPEN_URI path plus mode=rw forbids creation after an unlink race.
+  const db = new DatabaseSync(pathToFileURL(path).href + '?mode=rw', { timeout: 0 })
+  try {
+    const after = await inspect(path)
+    if (!after || before.dev !== after.dev || before.ino !== after.ino) return fail('CONFLICT', 'existing writer mutex changed during open')
+  } catch (error) { db.close(); throw error }
+  return holdWriterMutex(path, db, timeoutMs, retryMs)
+}
+
+const holdWriterMutex = async (path: string, db: DatabaseSync, timeoutMs: number, retryMs: number): Promise<WriterMutexGuard> => {
   let initial
   try {
     initial = await inspect(path)

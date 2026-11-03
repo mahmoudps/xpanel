@@ -1,9 +1,11 @@
 import { fail } from '@xpanel/core'
+import { createHash } from 'node:crypto'
 import {
-  MONITORING_DF_INODE_ARGV, MONITORING_DF_SPACE_ARGV, MONITORING_PS_ARGV, monitoringJournalArgv, monitoringKillArgv,
+  MONITORING_DF_INODE_ARGV, MONITORING_PS_ARGV, monitoringJournalArgv, monitoringKillArgv,
 } from '../../../packages/os/src/monitoring-command.ts'
 import type { MonitoringLogQuery, MonitoringSignal, MonitoringSignalRequest } from '../../../packages/os/src/monitoring-command.ts'
 import { ioMountForTarget } from './io-device.ts'
+import { readHostDiskInventory, visibleMountInventory } from './host-info-disks.ts'
 
 export interface MonitoringCommandResult { ok: boolean; stdout: string; stderr: string }
 export type MonitoringRun = (argv: string[]) => Promise<MonitoringCommandResult>
@@ -205,19 +207,33 @@ export function parseRepquotaUsage(stdout: string): Map<string, { usedBytes: num
   return result
 }
 
-/** Filesystems from df; per-account home usage only from the existing user-quota report (never du over every home). */
+/** Complete namespace-bound filesystem bytes; per-account usage stays an independent quota report. */
 export async function readDisk(run: MonitoringRun, readFile: ((path: string) => Promise<string | null>) | undefined, accounts: readonly MonitoringAccount[], now: () => Date = () => new Date()): Promise<DiskObservation> {
-  const [space, inodes] = await Promise.all([command(run, MONITORING_DF_SPACE_ARGV), command(run, MONITORING_DF_INODE_ARGV)])
-  const observedAt = now().toISOString()
+  const inventory = await readHostDiskInventory({ readFile: path => readFile ? readFile(path) : Promise.resolve(null), runCommand: run }, now)
   let filesystems: DiskObservation['filesystems'] = { state: 'unavailable', items: [], inodes: 'unavailable', reason: 'filesystems-unavailable' }
-  if (space.ok) {
+  if (inventory.diskCoverage.status === 'complete') {
     try {
-      const rows = parseDfSpace(space.stdout)
+      const inodes = await command(run, MONITORING_DF_INODE_ARGV)
+      const mountinfo = readFile ? await readFile('/proc/self/mountinfo') : null
+      // Bracket the supplementary inode read too, including replacements at unchanged mount paths.
+      if (mountinfo === null || createHash('sha256').update(mountinfo).digest('hex') !== inventory.diskCoverage.mountInfoSha256) throw new Error('mount_inventory_changed')
+      const types = new Map<string, string | null>(visibleMountInventory(mountinfo).map(item => [item.mount, item.type]))
       let table: Map<string, { total: number; used: number; free: number }> | null = null
       if (inodes.ok) try { table = parseDfInodeTable(inodes.stdout) } catch { /* Inode counts stay unavailable; byte figures are independent. */ }
-      filesystems = { state: 'read', inodes: table ? 'read' : 'unavailable', items: rows.map(row => { const counts = table?.get(row.mount); return { ...row, inodes: counts && counts.total > 0 ? counts : null } }) }
+      const items = inventory.disks.map((row): FilesystemView => {
+        const type = types.get(row.mount)
+        // Retain the existing API payload bounds; unsupported values stay unavailable rather than becoming zero.
+        if (!type || row.availableBytes < 0 || row.filesystem.length === 0 || row.filesystem.length > 1024 || row.mount.length > 4096
+          || !row.filesystem.isWellFormed() || !row.mount.isWellFormed() || /[\u0000-\u001f\u007f]/.test(row.filesystem + row.mount)) throw new Error('invalid_filesystem')
+        const counts = table?.get(row.mount)
+        return { ...row, type, inodes: counts && counts.total > 0 ? counts : null }
+      })
+      filesystems = { state: 'read', inodes: table ? 'read' : 'unavailable', items }
     } catch { filesystems = { state: 'unavailable', items: [], inodes: 'unavailable', reason: 'invalid-filesystems' } }
+  } else if (inventory.diskCoverage.reason !== 'mount_inventory_unavailable' && inventory.diskCoverage.reason !== 'df_unavailable') {
+    filesystems.reason = 'invalid-filesystems'
   }
+  const observedAt = now().toISOString()
   const active = accounts.filter(account => account.status !== 'terminating').sort((left, right) => left.username.localeCompare(right.username))
   let mount: string | null = null
   try { const mountinfo = readFile ? await readFile('/proc/self/mountinfo') : null; mount = mountinfo ? ioMountForTarget(mountinfo, '/home')?.mountPoint ?? null : null } catch { /* Unknown mount means unknown quota identity. */ }

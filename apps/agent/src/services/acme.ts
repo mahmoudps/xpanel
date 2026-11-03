@@ -479,16 +479,18 @@ export class AcmeCertificateServiceAdapter {
     const publishedDnsTokens: { zone: string; recordName: string; tokens: string[] }[] = []
 
     const cleanup = async (): Promise<void> => {
+      let failed = false
       for (const path of stagedHttpPaths) {
-        await this.executor.removePath(path).catch(() => undefined)
+        await this.executor.removePath(path).catch(() => { failed = true })
       }
       if (this.dnsAdapter && publishedDnsTokens.length > 0) {
         for (const item of publishedDnsTokens) {
           await this.dnsAdapter
             .removeAcmeChallengeTxt(item.zone, item.recordName, item.tokens, { now })
-            .catch(() => undefined)
+            .catch(() => { failed = true })
         }
       }
+      if (failed) fail('SERVICE_UNAVAILABLE', 'ACME challenge cleanup requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
     }
 
     try {
@@ -881,7 +883,16 @@ export class AcmeCertificateServiceAdapter {
           nextRetryAt,
           updatedAt: new Date().toISOString(),
         }
-        await this.writeOrderState(state).catch(() => undefined)
+        let failureRecorded = false
+        try { await this.writeOrderState(state); failureRecorded = true } catch { /* Retain an uncertain outcome below. */ }
+        if (isXpanelError(err) && err.code === 'CONFIG_TEST_FAILED'
+          && (err.detail.reason === 'certificate_authority_rejected' || err.detail.reason === 'certificate_authority_unreachable') && validatedBundle === null) {
+          if (!failureRecorded) return fail('SERVICE_UNAVAILABLE', 'certificate order failure persistence requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
+          // The failed order/backoff was saved and challenges were cleaned. No certificate material reached publication.
+          // Bookkeeping did change: do not describe the entire host as unchanged.
+          return fail('CONFIG_TEST_FAILED', err.message, { reason: err.detail.reason, stateChanged: true,
+            certificateMaterialChanged: false, verificationRequired: false, unknownOutcome: false })
+        }
         throw err
       }
     })

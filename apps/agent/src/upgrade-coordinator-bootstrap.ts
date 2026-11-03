@@ -7,15 +7,17 @@ import type { UpgradeObservationDeps } from './upgrade-observation.ts'
 import { assertUpgradeIntentCurrent } from './upgrade-coordinator-validation.ts'
 import { parseUpgradeProcessBinding, readUpgradeIntentJob } from './upgrade-coordinator-contract.ts'
 import type { UpgradeProcessBinding } from './upgrade-coordinator-contract.ts'
-import { RELEASE_KEYS_PATH } from './upgrade-observation.ts'
 import { runNativeLifecycleCommand } from './lifecycle/native-runtime.ts'
 import { withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
+import { readNativeReleaseTrustIdentity } from '../../../scripts/lifecycle-root-safety.mjs'
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const review = (): never => fail('SERVICE_UNAVAILABLE', 'consumed upgrade handoff requires operator inspection; native execution will not be replayed', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
 export interface UpgradeHandoffConsumerOptions {
   db: Db
   observation?: Omit<UpgradeObservationDeps, 'db' | 'coordinatorAvailable'>
+  /** Fixed root-held archive trust in production; independently rechecked by native execution. */
+  archiveTrust: Readonly<{ keyId: string; signingKeyPath: string }>
   /** Native runtime only in production; injectable solely for isolated protocol tests. */
   runNative(input: unknown, binding: UpgradeProcessBinding): Promise<unknown>
 }
@@ -23,10 +25,14 @@ export interface UpgradeHandoffConsumerOptions {
 /** One-shot consumer. Its CAS is only a durable protocol fence; native root safety remains mandatory. */
 export async function consumeUpgradeHandoff(rawBinding: unknown, options: UpgradeHandoffConsumerOptions) {
   const binding = parseUpgradeProcessBinding(rawBinding)
-  const { saved, verified } = await withLifecycleWriterAdmission(async () => {
+  const archiveTrust = options.archiveTrust
+  if (!archiveTrust || typeof archiveTrust.keyId !== 'string' || !/^[A-Za-z0-9_.-]{1,64}$/.test(archiveTrust.keyId)
+    || typeof archiveTrust.signingKeyPath !== 'string' || !archiveTrust.signingKeyPath.startsWith('/')) return fail('PRECONDITION_FAILED', 'native archive trust identity is unavailable', { stateChanged: false })
+  const { keyId, signingKeyPath } = archiveTrust
+  const saved = await withLifecycleWriterAdmission(async () => {
   const saved = readUpgradeIntentJob(await getDurableJob(options.db, binding.jobId), binding)
   if (saved.job.checkpointStep !== 'dispatch-committed') return fail('PRECONDITION_FAILED', 'upgrade handoff is not awaiting first consumption; do not replay it', { stateChanged: false, verificationRequired: true })
-  const verified = await assertUpgradeIntentCurrent(options.db, saved.intent, options.observation)
+  await assertUpgradeIntentCurrent(options.db, saved.intent, options.observation)
   const now = new Date().toISOString()
   // Previous-step CAS prevents two consumers sharing one dispatch receipt from both entering native runtime.
   const claimed = await options.db.query<{ job_id: string }>(`UPDATE job_runtime_leases SET checkpoint_step='native-consumed', checkpoint_json=$1, updated_at=$2
@@ -35,12 +41,12 @@ export async function consumeUpgradeHandoff(rawBinding: unknown, options: Upgrad
       AND EXISTS(SELECT 1 FROM jobs WHERE id=$3 AND status='running' AND kind='lifecycle.upgrade.handoff') RETURNING job_id`,
     [JSON.stringify({ ...saved.job.checkpointData, nativeConsumedAt: now, automaticReplay: false }), now, binding.jobId, binding.requestFingerprint, binding.referenceCode, binding.workerId, binding.fencingToken])
   if (claimed.length !== 1) return fail('CONFLICT', 'upgrade handoff was consumed or its lease changed', { stateChanged: false, verificationRequired: true })
-  return { saved, verified }
+  return saved
   })
   try {
     await assertUpgradeIntentCurrent(options.db, saved.intent, options.observation)
     const result = await options.runNative({ schemaVersion: 1, command: 'upgrade', mode: 'apply', json: true, assumeYes: true,
-      artifact: { path: saved.intent.release.archivePath, expectedArchiveSha256: saved.intent.release.sha256, keyId: verified.manifest.keyId, signingKeyPath: RELEASE_KEYS_PATH } }, binding)
+      artifact: { path: saved.intent.release.archivePath, expectedArchiveSha256: saved.intent.release.sha256, keyId, signingKeyPath } }, binding)
     const details = object(result) && object(result.details) ? result.details : null
     if (!object(result) || result.exitCode !== 0 || result.code !== 'LIFECYCLE_NATIVE_COMMITTED' || result.outcome !== 'committed' || !details || details.currentVersion !== saved.intent.release.version || !isUuid(details.upgradeId)) return review()
     const upgrade = await getUpgrade(options.db, details.upgradeId as string)
@@ -70,6 +76,7 @@ export async function runNativeUpgradeCoordinatorBootstrap(rawBinding: unknown) 
     handle = createDb(path, { durability: 'strict' })
     const origin = await handle.db.transaction(async tx => getStrictOperationDatabaseOrigin(tx))
     if (origin.file !== path || origin.device !== String(info.dev) || origin.inode !== String(info.ino)) return fail('PRECONDITION_FAILED', 'canonical upgrade database changed', { stateChanged: false })
-    return await consumeUpgradeHandoff(binding, { db: handle.db, runNative: runNativeLifecycleCommand })
+    const archiveTrust = await readNativeReleaseTrustIdentity()
+    return await consumeUpgradeHandoff(binding, { db: handle.db, archiveTrust, runNative: runNativeLifecycleCommand })
   } finally { try { if (handle) await handle.close() } finally { await pinned.close() } }
 }

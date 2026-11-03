@@ -63,6 +63,10 @@ export async function runLifecycleRuntime(input) {
       const bootstrap = await import('./install-bootstrap.mjs')
       return await bootstrap.finalizePreparedInstallation(request)
     }
+    if (request.command === 'adopt' && request.mode === 'apply') {
+      const finalization = await import('./install-finalization-native.mjs')
+      return await finalization.runNativePreparedAdoption(request)
+    }
     const native = await import('./lifecycle-root-safety.mjs')
     return await native.executeNativeLifecycleCommand(request)
   } catch (error) {

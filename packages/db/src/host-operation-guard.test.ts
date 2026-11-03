@@ -6,6 +6,7 @@ import {
   assertHostOperationGuardActive,
   assertHostOperationGuardHeld,
   withHostOperationGuard,
+  withReadonlyHostOperationGuard,
 } from './host-operation-guard.ts'
 
 const binding = {
@@ -110,6 +111,28 @@ describe('host operation guard portable refusal boundary', () => {
         await expect(assertHostOperationGuardHeld({}, binding))
           .rejects.toThrow('no active outer database transaction is allowed for this operation')
       })
+    } finally { await handle.close() }
+  })
+})
+
+
+describe('read-only host guard admission does not accept caller authority', () => {
+  it('rejects copied origins, flags and assertion ports before consulting caller methods', async () => {
+    let invoked = 0
+    const fake = { ...binding, readonly: true, stopped: true, assertCurrent: async () => { invoked++ },
+      get query() { invoked++; throw new Error('untrusted query getter') },
+      get transaction() { invoked++; throw new Error('untrusted transaction getter') } }
+    for (const value of [null, {}, fake, new Proxy(fake, {})]) {
+      await expect(withReadonlyHostOperationGuard(value as never, {}, async () => { invoked++ })).rejects.toThrow()
+    }
+    expect(invoked).toBe(0)
+  })
+  it('does not substitute a real writable connection for the separate scoped reader', async () => {
+    const handle = createDb(':memory:')
+    let invoked = false
+    try {
+      await expect(withReadonlyHostOperationGuard(handle.db as never, {}, async () => { invoked = true })).rejects.toThrow()
+      expect(invoked).toBe(false)
     } finally { await handle.close() }
   })
 })

@@ -9,3 +9,12 @@ export function withInstallFinalizationStateDirectories<T>(uid:number,gid:number
 
 export function assertInstallFinalizationStartupScope(capability:unknown,unit:'xpanel-api.service'|'xpanel-agent.service'):Promise<Readonly<{receipt:unknown;operationId:string;serviceGid:number}>>
 export function assertInstallFinalizationStartupRetirement(capability:unknown):void
+
+export function parseNativePreparedAdoptionRequest(value:unknown):Readonly<Record<string,unknown>>
+export function runNativePreparedAdoption(value:unknown):ReturnType<typeof runNativeInstallFinalization>
+export function assertInstallAdoptionReadinessScope(capability:unknown,context:unknown,phase:'capturing'|'held'):Promise<void>
+
+export function installOwnershipCompletionSummary(kind:'install'|'adopt'):string
+
+/** Pure persisted-proof validator; cannot issue native authority. */
+export function assertInstallOwnershipCompletionProof(kind:'install'|'adopt',subject:string,intent:unknown,job:unknown):void

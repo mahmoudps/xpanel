@@ -50,9 +50,16 @@ export interface PreparedInstallBootstrap {
   readonly controlDbSchemaVersion: number
   readonly dependencyReceiptSha256: string
   readonly runtime: Readonly<{ nodePath: string; nodeSha256: string }>
+  readonly installationTransition?: Readonly<{ operationId: string; reference: string; previousBootstrapSha256: string }>
   readonly finalization?: import('./install-finalization.mjs').InstallFinalizationIntent
 }
 /** A protected source observation only; it does not confer the native finalization capability. */
 export function observePreparedInstallFinalization(): Promise<Readonly<{ bootstrap: PreparedInstallBootstrap; runtime: Readonly<{ nodePath: string; nodeSha256: string }> }>>
 /** The fixed native factory validates the unknown request independently before admitting effects. */
 export function finalizePreparedInstallation(request: unknown): ReturnType<typeof import('./install-finalization.mjs').runPreparedInstallFinalization>
+
+export { parsePreparedReleaseInput, withPreparedRelease, withExistingPreparedRelease, assertPreparedReleaseCurrent, preparedReleaseInfo, observeInstalledReleaseTree } from './prepared-release.mjs'
+export function observePreparedAdoptionSource(capability:unknown):Promise<Readonly<{bootstrap:PreparedInstallBootstrap;runtime:Readonly<{nodePath:string;nodeSha256:string}>;helper:import('./prepared-release.mjs').PreparedReleaseInfo}>>
+
+/** Read-only typed active-source observation; does not mint readiness or native mutation authority. */
+export function observeInstalledAcquisitionSource(): ReturnType<typeof observePreparedInstallFinalization>

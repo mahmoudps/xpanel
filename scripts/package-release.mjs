@@ -51,6 +51,30 @@ export const REQUIRED_ROOT_FILES = Object.freeze([
   'CLA.md',
   'scripts/install.sh',
   'scripts/management-tls.mjs',
+  'scripts/managed-units.mjs',
+  'scripts/managed-units.d.mts',
+  'scripts/coordinator-ownership.mjs',
+  'scripts/coordinator-ownership.d.mts',
+  'scripts/coordinator-install.mjs',
+  'scripts/coordinator-install.d.mts',
+  'scripts/coordinator-install-entry.mjs',
+  'scripts/coordinator-rotation.mjs',
+  'scripts/coordinator-rotation.d.mts',
+  'scripts/lifecycle-database-fence.mjs',
+  'scripts/lifecycle-database-fence.d.mts',
+  'scripts/coordinator-rotate-entry.mjs',
+  'scripts/root-operator.mjs',
+  'scripts/root-operator.d.mts',
+  'scripts/root-operator-entry.mjs',
+  'scripts/lifecycle-managed-files.mjs',
+  'scripts/installation-transition.mjs',
+  'scripts/installation-transition.d.mts',
+  'scripts/install-transition-observation.mjs',
+  'scripts/install-transition-observation.d.mts',
+  'scripts/acquire-lifecycle-release.mjs',
+  'scripts/prepare-lifecycle-release.mjs',
+  'scripts/prepared-release.mjs',
+  'scripts/prepared-release.d.mts',
   'scripts/release-verifier.mjs',
   'scripts/release-verifier.d.mts',
   'scripts/evidence/runtime.mjs',
@@ -252,8 +276,11 @@ const isIncludedRuntimeSource = (relPath) => {
   if (isDesignReference(relPath)) return false
   if (REQUIRED_ROOT_FILES.includes(relPath)) return true
   if (REQUIRED_LIFECYCLE_CONTROL_FILES.includes(relPath)) return true
-  // Fresh-install tooling is shipped when present, without changing legacy upgrade/recovery admission.
+  // Root lifecycle helpers ship when present; legacy release verification and
+  // recovery admission keep their existing required-root contract.
   if ([
+    'scripts/lifecycle-issued-audit.mjs', 'scripts/lifecycle-issued-audit.d.mts',
+    'scripts/management-tls-activation.mjs',
     'scripts/install-bootstrap.mjs', 'scripts/install-bootstrap.d.mts',
     'scripts/install-finalization.mjs', 'scripts/install-finalization.d.mts',
     'scripts/install-finalization-native.mjs', 'scripts/install-finalization-native.d.mts',
@@ -412,6 +439,34 @@ const collectSourceFiles = (sourceRoot) => {
   return found.sort()
 }
 
+// The acquisition bridge intentionally imports a separately authenticated old installation
+// and then an authenticated staged helper. These exact finite expressions are the only
+// computed imports with a reviewed runtime target set; this is packaging closure, not
+// a sandbox or native authorization. Every mapped target must still enter the package.
+const ACQUISITION_COMPUTED_IMPORTS = new Map([
+  ["pathToFileURL(root + '/scripts/' + name).href", ['scripts/lifecycle-ownership.mjs', 'scripts/install-bootstrap.mjs', 'scripts/release-verifier.mjs']],
+  ["pathToFileURL(staged.stagedAt + '/scripts/install-bootstrap.mjs').href", ['scripts/install-bootstrap.mjs']],
+  ["pathToFileURL(staged.stagedAt + '/scripts/prepared-release.mjs').href", ['scripts/prepared-release.mjs']],
+])
+const acquisitionComputedTargets = (path, source, imports) => {
+  const computed = imports.filter(item => item.type !== 'import-meta' && (typeof item.specifier !== 'string' || item.glob))
+  if (computed.length === 0) return new Map()
+  const refused = () => failRelease('UNRESOLVED_RELEASE_IMPORT', `Release source ${path} has a computed module import that cannot be checked`, { path })
+  if (path !== 'scripts/acquire-lifecycle-release.mjs' || computed.length !== ACQUISITION_COMPUTED_IMPORTS.size) return refused()
+  const retained = "retained = new Set(['scripts/lifecycle-ownership.mjs', 'scripts/install-bootstrap.mjs', 'scripts/release-verifier.mjs'])"
+  const checkedLoader = "check(retained.has('scripts/' + name), 'PREPARED_ACQUISITION_INSTALLED_MODULE_INVALID')\n      await verify(); return import(pathToFileURL(root + '/scripts/' + name).href)"
+  const normalized = source.replace(/\r\n/g, '\n')
+  if (normalized.split(retained).length !== 2 || normalized.split(checkedLoader).length !== 2) return refused()
+  const observed = new Map()
+  for (const item of computed) {
+    const expression = source.slice(item.start, item.end)
+    if (item.type !== 'dynamic' || item.glob || item.phase !== null || item.attributesStart !== -1
+      || observed.has(expression) || !ACQUISITION_COMPUTED_IMPORTS.has(expression)) return refused()
+    observed.set(expression, ACQUISITION_COMPUTED_IMPORTS.get(expression))
+  }
+  return observed
+}
+
 /** Validate production ESM imports and workspace exports before signing or writing staging. */
 const verifySourceClosure = (files) => {
   const packages = new Map()
@@ -466,10 +521,14 @@ const verifySourceClosure = (files) => {
         failRelease('RELEASE_DEPENDENCY_MISSING', `Workspace package is missing from release: ${packageName}`, { path, dependency })
       }
     }
-    for (const imported of parseModules(source)[0]) {
+    const imports = parseModules(source)[0], computedTargets = acquisitionComputedTargets(path, source, imports)
+    for (const imported of imports) {
       if (imported.type === 'import-meta') continue
       if (typeof imported.specifier !== 'string' || imported.glob) {
-        failRelease('UNRESOLVED_RELEASE_IMPORT', `Release source ${path} has a computed module import that cannot be checked`, { path })
+        const targets = computedTargets.get(source.slice(imported.start, imported.end))
+        if (!targets) failRelease('UNRESOLVED_RELEASE_IMPORT', `Release source ${path} has a computed module import that cannot be checked`, { path })
+        for (const target of targets) { requireFile(path, './' + posix.basename(target), target); checkedImports++ }
+        continue
       }
       checkImport(imported.specifier)
     }

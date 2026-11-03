@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Isolated dispatch seams only: these tests cannot create native authority or host effects.
 const seams = vi.hoisted(() => ({
-  root: vi.fn(), barrier: vi.fn(), status: vi.fn(), finalize: vi.fn(), legacy: vi.fn(),
+  root: vi.fn(), barrier: vi.fn(), status: vi.fn(), finalize: vi.fn(), adopt: vi.fn(), legacy: vi.fn(),
 }))
 vi.mock('./lifecycle-admission.mjs', () => ({ readLifecyclePublicStatus: seams.status, readLifecycleBarrier: seams.barrier }))
 vi.mock('./lifecycle-ownership.mjs', () => ({ requireLinuxRoot: seams.root, readInstallationReceipt: vi.fn(), readTrustedFile: vi.fn() }))
 vi.mock('./release-verifier.mjs', () => ({ verifyAuthenticatedReleaseArchive: vi.fn(), verifyAuthenticatedReleaseTree: vi.fn() }))
 vi.mock('./lifecycle-services.mjs', () => ({ observeOwnedControlPlaneUnits: vi.fn() }))
 vi.mock('./install-bootstrap.mjs', () => ({ finalizePreparedInstallation: seams.finalize }))
+vi.mock('./install-finalization-native.mjs', () => ({ runNativePreparedAdoption: seams.adopt }))
 vi.mock('./lifecycle-root-safety.mjs', () => ({ executeNativeLifecycleCommand: seams.legacy }))
 
 import { runLifecycleRuntime } from './lifecycle-runtime.mjs'
@@ -24,6 +25,7 @@ beforeEach(() => {
   seams.root.mockImplementation(() => undefined)
   seams.barrier.mockResolvedValue(null)
   seams.finalize.mockResolvedValue(completed)
+  seams.adopt.mockResolvedValue(completed)
   seams.legacy.mockResolvedValue(refused)
   vi.stubEnv('NODE_OPTIONS', '')
   vi.stubEnv('NODE_PATH', '')
@@ -50,12 +52,23 @@ describe('fixed prepared-install dispatch; isolated source contract only', () =>
     expect(seams.legacy).not.toHaveBeenCalled()
   })
 
-  it.each(['update', 'upgrade', 'adopt', 'recover'])('preserves %s on the existing native bridge', async command => {
+  it.each(['update', 'upgrade', 'recover'])('preserves %s on the existing native bridge', async command => {
     const input = { ...request, command }
     expect(await runLifecycleRuntime(input)).toEqual(refused)
     expect(seams.legacy).toHaveBeenCalledOnce()
     expect(seams.legacy.mock.calls[0]![0]).toEqual(input)
     expect(seams.finalize).not.toHaveBeenCalled()
+  })
+
+  it('routes explicit adopt/apply only to the authenticated prepared helper factory', async () => {
+    const input = { ...request, command: 'adopt' }
+    expect(await runLifecycleRuntime(input)).toEqual(completed)
+    expect(seams.adopt).toHaveBeenCalledExactlyOnceWith(input)
+    expect(seams.finalize).not.toHaveBeenCalled()
+    expect(seams.legacy).not.toHaveBeenCalled()
+    seams.barrier.mockResolvedValue({ phase: 'pending' }); seams.adopt.mockClear()
+    expect(await runLifecycleRuntime(input)).toMatchObject({ exitCode: 6, code: 'LIFECYCLE_RETAINED_ATTENTION' })
+    expect(seams.adopt).not.toHaveBeenCalled()
   })
 
   it('retains a pending lifecycle barrier before any fresh install finalization', async () => {

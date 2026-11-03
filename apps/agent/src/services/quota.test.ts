@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyObservedUserQuota, enableExistingUserQuota, fstabWithUserQuota, initializeUserQuota, lacksQuotaFormat, observeUserQuota, parseUserQuotaState, resolveHomeQuotaFilesystem, validateQuotaFilesystem } from './quota.ts'
+import { applyObservedUserQuota, enableExistingUserQuota, fstabWithUserQuota, initializeUserQuota, lacksQuotaFormat, observeHomeUserQuota, observeUserQuota, parseUserQuotaState, resolveHomeQuotaFilesystem, validateQuotaFilesystem } from './quota.ts'
 import type { QuotaCommandRunner } from './quota.ts'
 import { installQuotaSetup } from '../quota-setup.ts'
 
@@ -119,6 +119,16 @@ describe('user quota setup', () => {
   it('sets quota on the mount that holds /home, which is / when /home is not its own filesystem', async () => {
     expect(await resolveHomeQuotaFilesystem(host().ports.run)).toBe('/')
     await expect(resolveHomeQuotaFilesystem(async () => ({ ok: false, code: 1, stdout: '', stderr: '' }))).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+  })
+
+  it('reads enforcement after initialization on the mount holding /home without changing it again', async () => {
+    const h = host()
+    await initializeUserQuota(h.ports, '/home', STAMP)
+    h.commands.length = 0
+    const files = [...h.files.entries()]
+    expect(await observeHomeUserQuota(h.ports.run, '/home')).toMatchObject({ filesystem: '/', filesystemType: 'ext4', status: 'enabled', reason: null })
+    expect(h.commands.every(argv => argv[0] === '/usr/bin/findmnt' || argv[0] === '/usr/sbin/quotaon' && argv.includes('--print-state'))).toBe(true)
+    expect([...h.files.entries()]).toEqual(files)
   })
 
   it('adds journaled user quota to the one matching fstab entry and keeps the rest of the table', () => {

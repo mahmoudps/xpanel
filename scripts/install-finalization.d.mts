@@ -9,6 +9,27 @@ export interface InstallFinalizationContext {
   readonly state: Readonly<{revision: number; checksum: string; accountCount: 0}>
   readonly admissionFingerprint: string
 }
+/** Pure protocol data. Captured by a future fixed native adoption factory, never supplied by a caller as authority. */
+export interface InstallAdoptionContext extends Omit<InstallFinalizationContext, 'state'> {
+  readonly helperIdentity:Readonly<{version:string;archiveSha256:string;manifestSha256:string;dependencyReceiptSha256:string;sourceFilesDigest:string}>
+  readonly state: Readonly<{revision: number; checksum: string; accountCount: number; accountLifetimeDigest: string}>
+}
+export interface InstallAdoptionAccountLifetime {
+  readonly id: string
+  readonly username: string
+  readonly uid: number
+  readonly gid: number
+  readonly home: string
+  readonly createdAt: string
+  readonly primaryDomain: string
+  readonly ownerId: string | null
+  readonly planId: string
+}
+export interface InstallAdoptionState {
+  readonly revision: number
+  readonly checksum: string
+  readonly accounts: readonly InstallAdoptionAccountLifetime[]
+}
 export interface InstallFinalizationIntent {
   readonly schemaVersion: 1
   readonly jobId: string
@@ -29,7 +50,7 @@ export interface InstallFinalizationObservation {
   readonly ingress: Readonly<{configSha256:string; certificateSha256:string; audiences:readonly string[]}>
 }
 /** Internal composition only. Structural types and isolated port tests are not native authority. */
-export interface InstallFinalizationPorts {
+interface FinalizationProtocolPorts<Context> {
   readonly fs: Pick<FsPort, 'readFile'|'writeFileExclusive'|'rename'>
   readonly clock: Pick<ClockPort, 'now'>
   syncPath(path: string): Promise<void>
@@ -39,9 +60,9 @@ export interface InstallFinalizationPorts {
   /** I/O data is unknown until the protocol revalidates its exact current schema. */
   capturePrepared():Promise<unknown>
   /** Completes actual HTTP observations before any EX acquisition. */
-  observeReady(context:InstallFinalizationContext,subjectDigest:string):Promise<unknown>
+  observeReady(context:Context,subjectDigest:string):Promise<unknown>
   /** Reobserves root/source/receipt/origin/process/lease after queue and at each actual native effect. */
-  assertCurrent(context:InstallFinalizationContext,observation:InstallFinalizationObservation,intent:InstallFinalizationIntent|null):Promise<void>
+  assertCurrent(context:Context,observation:InstallFinalizationObservation,intent:InstallFinalizationIntent|null):Promise<void>
   readonly jobs: {
     /** Existing durable enqueue/dedupe plus genuine root intent authority; reply loss is unknown. */
     begin(input:Readonly<{kind:'lifecycle.adopt';requestFingerprint:string;rootPrincipalId:string}>):Promise<Readonly<{id:string;referenceCode:string;createdAt:string}>>
@@ -50,6 +71,15 @@ export interface InstallFinalizationPorts {
     assertComplete(intent:InstallFinalizationIntent,subjectDigest:string):Promise<void>
   }
 }
+export interface InstallFinalizationPorts extends FinalizationProtocolPorts<InstallFinalizationContext> {}
+export interface InstallAdoptionPorts extends FinalizationProtocolPorts<InstallAdoptionContext> {
+  /** One validated StateStore snapshot and its coherent authority under the native SH/EX lease; never a partial DB index. No reconcile or state writes. */
+  readAdoptionState():Promise<unknown>
+}
+export function installAdoptionAccountLifetimeDigest(accounts:readonly InstallAdoptionAccountLifetime[]):string
+export function assertInstallAdoptionState(context:InstallAdoptionContext,observed:unknown):void
+export function installAdoptionSubjectDigest(context:InstallAdoptionContext,previousReceiptSha256:string):string
+export function runPreparedInstallAdoption(ports:InstallAdoptionPorts):ReturnType<typeof runPreparedInstallFinalization>
 export function runPreparedInstallFinalization(ports:InstallFinalizationPorts):Promise<Readonly<{exitCode:0|3|6;code:string;outcome:'committed'|'blocked'|'attention';details:Readonly<Record<string,unknown>>}>>
 export function inspectInstallFinalizationRecovery(value:Readonly<{bootstrapBytes:string;receiptBytes:string;headBytes:string}>):Readonly<{bootstrap:Readonly<Record<string,unknown>>;receipt:Readonly<Record<string,unknown>>;head:Readonly<Record<string,unknown>>;intent:InstallFinalizationIntent}>
 export function installFinalizationSubjectDigest(context:InstallFinalizationContext,previousReceiptSha256:string):string

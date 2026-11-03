@@ -83,6 +83,7 @@ const settledError = async (db: Db, id: Id): Promise<never> => {
 export const createUpgrade = (
   db: Db,
   input: {
+    id?: string
     fromVersion: string
     toVersion: string
     actor: string
@@ -96,7 +97,7 @@ export const createUpgrade = (
     if (fromVersion === toVersion) fail('VALIDATION', 'fromVersion and toVersion are the same')
     const inFlight = await inFlightUpgrade(db)
     if (inFlight) fail('CONFLICT', 'another upgrade is in progress', { id: inFlight.id })
-    const id = randomUUID()
+    const id = input.id === undefined ? randomUUID() : assertId(input.id, 'upgrade id')
     const actor = assertLine(input.actor, 255, 'actor', { allowEmpty: false })
     const fromSchema = schemaVersion(input.fromSchemaVersion, 'fromSchemaVersion')
     const snapshotPath = input.snapshotPath === undefined ? null : assertAbsPath(input.snapshotPath, 'snapshotPath')

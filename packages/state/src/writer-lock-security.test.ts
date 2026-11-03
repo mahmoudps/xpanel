@@ -440,7 +440,13 @@ describe('mutex inode and metadata publication', () => {
     expect(JSON.parse(await readFile(writer.intentFilePath, 'utf8')).op).toBe('orphan-binding')
   })
   it('serializes concurrent first initialization in this process and across fresh child processes', async () => {
-    await Promise.all(Array.from({ length: 8 }, () => lock().readAuthorityAtBarrier()))
+    // Successful contention uses the production acquisition policy, not the short denial-test deadline.
+    const barriers = await Promise.allSettled(Array.from({ length: 8 }, () => new WriterLock(root).readAuthorityAtBarrier()))
+    // Drain every barrier before cleanup even if one fails, then preserve its original error.
+    for (const barrier of barriers) {
+      if (barrier.status === 'rejected') throw barrier.reason
+      expect(barrier.value).toMatchObject({ revision: 0, fencingToken: 0, references: {} })
+    }
     const cleanRoot = join(base, 'fresh')
     await mkdir(cleanRoot)
     root = cleanRoot

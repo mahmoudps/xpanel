@@ -113,6 +113,57 @@ describe('in-repo HTTP-01 ACME client', () => {
       challenge: 'http-01',
       directoryUrl: 'http://127.0.0.1/directory',
       onPublishChallenges: async () => undefined,
-    })).rejects.toMatchObject({ message: 'The ACME account could not be created.' })
+    })).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED', message: 'The ACME account could not be created.', detail: { reason: 'certificate_authority_rejected' } })
+  })
+})
+
+// Portable CA responses only: no external authority or native hosting is exercised.
+const refusalInput = {
+  certId: '11111111-1111-4111-8111-111111111111', identifiers: ['example.com'], challenge: 'http-01' as const,
+  directoryUrl: 'https://ca.example/directory', onPublishChallenges: async () => undefined,
+}
+const caRefusalTransport = (at: 'order' | 'challenge' | 'finalize' | 'settled-order', reason: string): typeof fetch => {
+  let challenged = false
+  const json = (body: unknown, status = 200, location?: string) => new Response(JSON.stringify(body), {
+    status, headers: { 'content-type': 'application/json', 'replay-nonce': 'synthetic-nonce', ...(location ? { location } : {}) },
+  })
+  return async input => {
+    const path = new URL(String(input)).pathname
+    if (path === '/directory') return json({ newNonce: 'https://ca.example/nonce', newAccount: 'https://ca.example/account', newOrder: 'https://ca.example/order' })
+    if (path === '/nonce') return new Response(null, { headers: { 'replay-nonce': 'synthetic-nonce' } })
+    if (path === '/account') return json({}, 201, 'https://ca.example/account/1')
+    if (path === '/order') return at === 'order' ? json({ detail: reason }, 429) : json({ status: 'pending', authorizations: ['https://ca.example/authorization'], finalize: 'https://ca.example/finalize' }, 201, 'https://ca.example/order/1')
+    if (path === '/authorization') return json({ status: challenged ? at === 'challenge' ? 'invalid' : 'valid' : 'pending', identifier: { value: 'example.com' },
+      challenges: [{ type: 'http-01', url: 'https://ca.example/challenge', token: TOKEN, status: 'pending', ...(challenged && at === 'challenge' ? { error: { detail: reason } } : {}) }] })
+    if (path === '/challenge') { challenged = true; return json({ status: 'pending' }) }
+    if (path === '/finalize') return at === 'finalize' ? json({ detail: reason }, 403) : json({ status: 'processing' })
+    if (path === '/order/1' && at === 'settled-order') return json({ status: 'invalid', error: { detail: reason } })
+    throw new Error('unexpected portable CA request')
+  }
+}
+
+describe('CA rejection classification', () => {
+  it.each(['order', 'challenge', 'finalize', 'settled-order'] as const)('retains the actual reason from a terminal %s rejection', async at => {
+    const reason = 'While processing CAA for example.com: SERVFAIL looking up CAA for example.com'
+    const client = createHttp01AcmeClient({ directoryUrl: refusalInput.directoryUrl, fetch: caRefusalTransport(at, reason), sleep: async () => undefined })
+    await expect(client(refusalInput)).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED', message: reason, detail: { reason: 'certificate_authority_rejected' } })
+  })
+  it('bounds and redacts a structured CA detail while never exposing a raw response body', async () => {
+    const hidden = 's'.repeat(40)
+    const client = (body: string) => createHttp01AcmeClient({ directoryUrl: refusalInput.directoryUrl, fetch: async () => new Response(body, { status: 403 }) })
+    const error = await client(JSON.stringify({ detail: 'CAA refused. token=' + hidden + '\n' + 'x'.repeat(5000) }))(refusalInput).catch(error => error)
+    expect(error.message).toContain('CAA refused. token=[REDACTED]')
+    expect(error.message).not.toContain(hidden); expect(error.message).not.toContain('\n')
+    expect(error.message.length).toBeLessThanOrEqual(526)
+    const raw = await client('<html>proxy diagnostic ' + hidden + '</html>')(refusalInput).catch(error => error)
+    expect(raw.message).toBe('ACME request failed with HTTP 403')
+    expect(JSON.stringify(raw)).not.toContain(hidden)
+  })
+  it('classifies authority transport failure distinctly from rejection without disclosing the exception text', async () => {
+    const hidden = 's'.repeat(40)
+    const client = createHttp01AcmeClient({ directoryUrl: refusalInput.directoryUrl, fetch: async () => { throw new Error('Authorization: Bearer ' + hidden) } })
+    const error = await client(refusalInput).catch(error => error)
+    expect(error.message).toBe('the certificate authority could not be reached')
+    expect(error.detail).toEqual({ reason: 'certificate_authority_unreachable' }); expect(JSON.stringify(error)).not.toContain(hidden)
   })
 })

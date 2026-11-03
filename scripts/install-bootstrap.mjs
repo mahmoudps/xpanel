@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { spawn } from 'node:child_process'
 import { createHash, createPublicKey, randomUUID, verify } from 'node:crypto'
 import { constants } from 'node:fs'
@@ -5,7 +6,7 @@ import { chmod, lstat, mkdir, open, readdir, readFile, readlink, realpath, renam
 import { dirname, join, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { clearDependencyGroupWorldWrite, offlineDependencyInstallArguments, withAuthenticatedReleaseArchive, stageAuthenticatedReleaseArchive } from './release-verifier.mjs'
-import { assertOwnedFile, assertTrustedDirectory, OWNED_PANEL_UNITS, parseInstallationReceipt, readTrustedFile, requireLinuxRoot, withTrustedDirectory, withTrustedFile } from './lifecycle-ownership.mjs'
+import { assertOwnedFile, assertTrustedDirectory, OWNED_PANEL_UNITS, parseInstallationReceipt, readTrustedFile, readInstallationReceipt, requireLinuxRoot, withTrustedDirectory, withTrustedFile } from './lifecycle-ownership.mjs'
 
 export const INSTALL_ROOT = '/opt/xpanel'
 export const BOOTSTRAP_PATH = '/var/lib/xpanel-lifecycle/bootstrap.json'
@@ -272,6 +273,7 @@ export async function prepareNewInstallation(input) {
         lockfileSha256: report.manifest.lockfileSha256, nodePath: runtime.nodePath, nodeVersion: PINNED_NODE, nodeSha256: runtime.nodeSha256, packageManagerPath: trust.packageManagerPath,
         packageManagerSha256: trust.packageManagerSha256, packageManager: report.manifest.runtime.packageManager, ...held.value.dependencies, tree: relocated }
       const dependencyReceiptSha256 = await writeNewJson(DEPENDENCY_RECEIPT, dependency)
+      if (REPAIR_CONTROL_FILES.every(path => report.manifest.files.some(entry => entry.path === path))) await publishPreparedReleaseProof(report, trust, runtime, dependency, false)
       if (!await exists('/etc/xpanel')) await newDirectory('/etc/xpanel')
       else await assertTrustedDirectory('/etc/xpanel')
       await persistTrust('/etc/xpanel/release-hmac.key', keyPin.bytes, 0o600)
@@ -297,7 +299,6 @@ async function verifyPreparedBootstrapSource(runtime, value) {
   check(value?.schemaVersion === 1 && VERSION.test(value.version)
     && value.releaseRoot === INSTALL_ROOT + '/releases/' + value.version && [value.archiveSha256, value.manifestSha256, value.dependencyReceiptSha256].every(item => typeof item === 'string' && SHA.test(item)), 'INSTALL_BOOTSTRAP_INVALID')
   check(await readlink(CURRENT) === value.releaseRoot && await realpath(CURRENT) === value.releaseRoot, 'INSTALL_CURRENT_CHANGED')
-  check(await realpath(fileURLToPath(import.meta.url)) === join(value.releaseRoot, 'scripts/install-bootstrap.mjs'), 'INSTALL_HELPER_SOURCE_MISMATCH')
   object(value.runtime, ['nodePath', 'nodeSha256'], 'INSTALL_RUNTIME_BINDING_INVALID')
   check(runtime.nodePath === value.runtime.nodePath && runtime.nodeSha256 === value.runtime.nodeSha256, 'INSTALL_RUNTIME_BINDING_INVALID')
   const dependency = await readTrustedFile(DEPENDENCY_RECEIPT, { exactMode: 0o600, maxBytes: 16 * 1024, sha256: value.dependencyReceiptSha256 })
@@ -321,15 +322,32 @@ async function verifyPreparedBootstrapSource(runtime, value) {
 async function preparedBootstrap(runtime) {
   const actual = await readTrustedFile(BOOTSTRAP_PATH, { exactMode: 0o600, maxBytes: 16 * 1024 }), value = parseJson(actual.bytes)
   check(['prepared', 'admission_ready', 'bootstrap_pending'].includes(value?.status), 'INSTALL_BOOTSTRAP_INVALID')
+  check(await realpath(fileURLToPath(import.meta.url)) === join(value.releaseRoot, 'scripts/install-bootstrap.mjs'), 'INSTALL_HELPER_SOURCE_MISMATCH')
   return verifyPreparedBootstrapSource(runtime, value)
 }
 
 /** Observe one exact prepared installation; this does not acquire native mutation authority. */
 export async function observePreparedInstallFinalization() {
+  return observeFinalizationSource(true)
+}
+
+/** Read-only acquisition proof, called only after the installed verifier authenticates this helper archive. */
+export async function observeInstalledAcquisitionSource() { return observeFinalizationSource(false) }
+
+async function observeFinalizationSource(requireSameHelper) {
   const runtime = await nativeContext()
   const actual = await readTrustedFile(BOOTSTRAP_PATH, { exactMode: 0o600, maxBytes: 16 * 1024 })
   let bootstrap = parseJson(actual.bytes)
   check(bootstrap?.status === 'bootstrap_pending' || bootstrap?.status === 'active', 'INSTALL_FINALIZATION_PREPARATION_REQUIRED')
+  if (bootstrap.status === 'active') {
+    const { withActiveInstallationObservation } = await import('./install-transition-observation.mjs')
+    return withActiveInstallationObservation(actual.bytes.toString('utf8'), async observed => {
+      if (requireSameHelper) check(await realpath(fileURLToPath(import.meta.url)) === join(observed.bootstrap.releaseRoot, 'scripts/install-bootstrap.mjs'), 'INSTALL_HELPER_SOURCE_MISMATCH')
+      await verifyPreparedBootstrapSource(runtime, observed.bootstrap)
+      await observed.assertCurrent()
+      return freeze({ bootstrap: observed.bootstrap, runtime })
+    })
+  }
   const recoveryPins = []
   if (bootstrap.status === 'active' || Object.hasOwn(bootstrap, 'finalization')) {
     const receipt = await readTrustedFile(LIFECYCLE + '/installation.json', { exactMode: 0o600, maxBytes: 64 * 1024 })
@@ -338,6 +356,7 @@ export async function observePreparedInstallFinalization() {
     bootstrap = inspectInstallFinalizationRecovery({ bootstrapBytes: actual.bytes.toString('utf8'), receiptBytes: receipt.bytes.toString('utf8'), headBytes: head.bytes.toString('utf8') }).bootstrap
     recoveryPins.push([LIFECYCLE + '/installation.json', receipt.sha256, 64 * 1024], [LIFECYCLE + '/HEAD', head.sha256, 16 * 1024])
   }
+  if (requireSameHelper) check(await realpath(fileURLToPath(import.meta.url)) === join(bootstrap.releaseRoot, 'scripts/install-bootstrap.mjs'), 'INSTALL_HELPER_SOURCE_MISMATCH')
   await verifyPreparedBootstrapSource(runtime, bootstrap)
   for (const [path, sha256, maxBytes] of recoveryPins) await readTrustedFile(path, { exactMode: 0o600, maxBytes, sha256 })
   await readTrustedFile(BOOTSTRAP_PATH, { exactMode: 0o600, maxBytes: 16 * 1024, sha256: actual.sha256 })
@@ -348,6 +367,191 @@ export async function observePreparedInstallFinalization() {
 export async function finalizePreparedInstallation(request) {
   const { runNativeInstallFinalization } = await import('./install-finalization-native.mjs')
   return runNativeInstallFinalization(request)
+}
+
+const preparedScopes = new WeakMap(), preparedActive = new AsyncLocalStorage()
+const PREPARED_ROOT = LIFECYCLE + '/prepared'
+const REPAIR_CONTROL_FILES = Object.freeze(['scripts/prepared-release.mjs', 'scripts/prepare-lifecycle-release.mjs',
+  'scripts/install-bootstrap.mjs', 'scripts/install-finalization.mjs', 'scripts/install-finalization-native.mjs',
+  'scripts/install-finalization-readiness.mjs', 'scripts/acquire-lifecycle-release.mjs', 'scripts/install-transition-observation.mjs'])
+
+async function publishPreparedReleaseProof(report, trust, runtime, dependency, directoryReady) {
+  const directory = PREPARED_ROOT + '/' + report.archiveSha256, dependencyReceiptPath = directory + '/dependencies.json'
+  if (!directoryReady) {
+    if (!await exists(PREPARED_ROOT)) await newDirectory(PREPARED_ROOT, 0o700)
+    else await assertTrustedDirectory(PREPARED_ROOT)
+    await newDirectory(PREPARED_ROOT + '/version-' + report.manifest.version, 0o700)
+    await newDirectory(directory, 0o700)
+  }
+  const dependencyReceiptSha256 = await writeNewJson(dependencyReceiptPath, dependency)
+  await writeNewJson(directory + '/prepared.json', { schemaVersion: 1, kind: 'xpanel-prepared-release', releaseRoot: dependency.root, version: report.manifest.version,
+    archiveSha256: report.archiveSha256, manifestSha256: report.manifestSha256, sourceFilesDigest: digest(JSON.stringify(report.manifest.files)),
+    treeSha256: dependency.tree.treeSha256, controlDbSchemaVersion: report.manifest.controlDbSchemaVersion, dependencyReceiptPath, dependencyReceiptSha256,
+    runtime: { ...runtime, nodeVersion: PINNED_NODE, packageManagerPath: trust.packageManagerPath, packageManagerSha256: trust.packageManagerSha256 } })
+}
+
+export function parsePreparedReleaseInput(value) {
+  object(value, ['artifactPath', 'expectedArchiveSha256'], 'PREPARED_RELEASE_INPUT_INVALID')
+  check(durableLocation(value.artifactPath) && value.artifactPath.endsWith('.tar.gz')
+    && typeof value.expectedArchiveSha256 === 'string' && SHA.test(value.expectedArchiveSha256), 'PREPARED_RELEASE_INPUT_INVALID')
+  return freeze(structuredClone(value))
+}
+
+/** Read-only full closure observation; parsed hashes never confer native authority. */
+export async function observeInstalledReleaseTree(root) {
+  requireLinuxRoot()
+  check(typeof root === 'string' && root.startsWith(INSTALL_ROOT + '/releases/')
+    && VERSION.test(root.slice((INSTALL_ROOT + '/releases/').length)), 'PREPARED_RELEASE_ROOT_INVALID')
+  return withTrustedDirectory(root, async pin => { const tree = await observeSecureTree(root); await pin.verify(); return freeze(tree) })
+}
+
+function preparedScope(capability) {
+  const scope = capability && typeof capability === 'object' ? preparedScopes.get(capability) : undefined
+  let current = preparedActive.getStore(), visible = false
+  while (current) {
+    check(current.live && current.pid === process.pid, 'PREPARED_RELEASE_CAPABILITY_REQUIRED')
+    if (current === scope) { visible = true; break }
+    current = current.parent
+  }
+  check(scope && scope.live && visible, 'PREPARED_RELEASE_CAPABILITY_REQUIRED')
+  return scope
+}
+
+export function preparedReleaseInfo(capability) { const scope = preparedScope(capability); return freeze({ ...structuredClone(scope.info), artifactPath: scope.artifactPath }) }
+
+export async function assertPreparedReleaseCurrent(capability) {
+  const scope = preparedScope(capability)
+  check(process.pid === scope.pid, 'PREPARED_RELEASE_PROCESS_CHANGED')
+  for (const pin of scope.pins) await pin.verify()
+  await readTrustedFile(scope.info.dependencyReceiptPath, { exactMode: 0o600, maxBytes: 16 * 1024, sha256: scope.info.dependencyReceiptSha256 })
+  await readTrustedFile(scope.recordPath, { exactMode: 0o600, maxBytes: 16 * 1024, sha256: scope.recordSha256 })
+  const helperPaths = await verifySourceInventory(scope.helperRoot, scope.helperReport)
+  const helperTree = await observeSecureTree(scope.helperRoot, helperPaths)
+  check(helperTree.treeSha256 === scope.helperTreeSha256, 'PREPARED_RELEASE_HELPER_CHANGED')
+  const paths = await verifySourceInventory(scope.info.releaseRoot, scope.report)
+  const tree = await observeSecureTree(scope.info.releaseRoot, paths)
+  check(tree.treeSha256 === scope.info.treeSha256, 'PREPARED_RELEASE_TREE_CHANGED')
+  for (const pin of scope.pins) await pin.verify()
+}
+
+/** The new helper and installed old source have separate identities; neither replaces the other. */
+export async function observePreparedAdoptionSource(capability) {
+  await assertPreparedReleaseCurrent(capability)
+  const helper = preparedReleaseInfo(capability)
+  check(await realpath(fileURLToPath(import.meta.url)) === helper.releaseRoot + '/scripts/install-bootstrap.mjs', 'PREPARED_ADOPTION_HELPER_MISMATCH')
+  const installed = await observeFinalizationSource(false)
+  check(installed.runtime.nodePath === helper.runtime.nodePath && installed.runtime.nodeSha256 === helper.runtime.nodeSha256,
+    'PREPARED_ADOPTION_RUNTIME_MISMATCH')
+  await assertPreparedReleaseCurrent(capability)
+  return freeze({ ...installed, helper })
+}
+
+/** Root-only product preparation. It never writes current, installed receipts, units or account data. */
+export const withPreparedRelease = (input, callback) => withPreparedReleaseScope(input, callback, true)
+/** Strict read-only reopening; missing/incomplete preparation is a conflict, never an install retry. */
+export const withExistingPreparedRelease = (input, callback) => withPreparedReleaseScope(input, callback, false)
+
+async function withPreparedReleaseScope(input, callback, mayPrepare) {
+  const options = parsePreparedReleaseInput(input), runtime = await nativeContext()
+  check(typeof callback === 'function', 'PREPARED_RELEASE_CALLBACK_REQUIRED')
+  const inputTrust = { trustPath: '/etc/xpanel/release-trust.json', keysPath: '/etc/xpanel/release-keys.json' }
+  const held = await withInputTrust(inputTrust, async ({ trust, keys, configPin, keyPin, keysPin }) => {
+    check(trust.signingKeyPath === '/etc/xpanel/release-hmac.key', 'PREPARED_RELEASE_TRUST_CHANGED')
+    return withTrustedFile(runtime.nodePath, { sha256: runtime.nodeSha256, maxBytes: 256 * 1024 * 1024 }, async nodePin => {
+      const sidecar = options.artifactPath.slice(0, -'.tar.gz'.length) + '.manifest.json'
+      return withTrustedFile(sidecar, { maxBytes: 4096 }, async publisherPin => {
+        const archiveTrust = { signingKey: keyPin.bytes, keyId: trust.keyId, expectedArchiveSha256: options.expectedArchiveSha256 }
+        const archive = await withAuthenticatedReleaseArchive(options.artifactPath, archiveTrust, async ({ report }) => {
+          verifyBootstrapPublisher(parseJson(publisherPin.bytes), report, keys)
+          check(report.manifest.runtime.nodeVersion === PINNED_NODE
+            && REPAIR_CONTROL_FILES.every(path => report.manifest.files.some(entry => entry.path === path)), 'PREPARED_RELEASE_CONTROLS_REQUIRED')
+          // Authenticate the complete delivered helper source before extraction or dependency effects.
+          const helperRoot = dirname(dirname(await realpath(fileURLToPath(import.meta.url))))
+          check(durableLocation(helperRoot), 'PREPARED_RELEASE_HELPER_LOCATION_INVALID')
+          const parentScope = preparedActive.getStore() ?? null
+          let helperReport = report
+          if (parentScope) {
+            await assertPreparedReleaseCurrent(parentScope.capability)
+            check(helperRoot === parentScope.helperRoot, 'PREPARED_RELEASE_HELPER_CHANGED')
+            helperReport = parentScope.helperReport
+          }
+          const helperPaths = await verifySourceInventory(helperRoot, helperReport)
+          const helperTree = await observeSecureTree(helperRoot, helperPaths)
+          const releaseRoot = INSTALL_ROOT + '/releases/' + report.manifest.version
+          const recordDirectory = PREPARED_ROOT + '/' + report.archiveSha256
+          const recordPath = recordDirectory + '/prepared.json', dependencyReceiptPath = recordDirectory + '/dependencies.json'
+          const pins = [configPin, keyPin, keysPin, nodePin, publisherPin]
+          for (const pin of pins) await pin.verify()
+          if (!await exists(recordPath)) {
+            check(mayPrepare, 'PREPARED_RELEASE_NOT_PREPARED')
+            const installation = await readInstallationReceipt(), source = installation.receipt.source
+            check(['bootstrap_pending', 'active'].includes(installation.receipt.status), 'PREPARED_RELEASE_INSTALLATION_REQUIRED')
+            const targetVersion = report.manifest.version.split('.').map(Number), oldVersion = source.version.split('.').map(Number)
+            check(targetVersion.some((value, i) => value > oldVersion[i] && targetVersion.slice(0, i).every((n, j) => n === oldVersion[j])), 'PREPARED_RELEASE_NEW_VERSION_REQUIRED')
+            check(!await exists(releaseRoot) && !await exists(recordDirectory), 'PREPARED_RELEASE_CONFLICT')
+            await assertTrustedDirectory(INSTALL_ROOT + '/releases'); await assertTrustedDirectory(INSTALL_ROOT + '/staging')
+            if (!await exists(PREPARED_ROOT)) await newDirectory(PREPARED_ROOT, 0o700)
+            else await assertTrustedDirectory(PREPARED_ROOT)
+            // mkdir is the exclusive durable intent; a crash never causes an automatic second dependency install.
+            await newDirectory(PREPARED_ROOT + '/version-' + report.manifest.version, 0o700)
+            await newDirectory(recordDirectory, 0o700)
+            await writeNewJson(recordDirectory + '/intent.json', { schemaVersion: 1, kind: 'xpanel-prepared-release-intent',
+              archiveSha256: report.archiveSha256, manifestSha256: report.manifestSha256, releaseRoot,
+              installedArchiveSha256: source.archiveSha256, createdAt: new Date().toISOString() })
+            for (const pin of pins) await pin.verify()
+            const staged = await stageAuthenticatedReleaseArchive(INSTALL_ROOT + '/staging', { ...archiveTrust, authenticatedArchive: report })
+            const dependencies = await verifyDependencies(staged.stagedAt, report, trust, runtime)
+            for (const pin of pins) await pin.verify()
+            check(!await exists(releaseRoot), 'PREPARED_RELEASE_CONFLICT')
+            await withTrustedDirectory(INSTALL_ROOT + '/releases', async parent => {
+              await rename(staged.stagedAt, releaseRoot); await chmod(releaseRoot, 0o755)
+              await syncDirectory(INSTALL_ROOT + '/releases'); await syncDirectory(INSTALL_ROOT + '/staging'); await parent.verify()
+            })
+            const sourcePaths = await verifySourceInventory(releaseRoot, report), relocated = await observeSecureTree(releaseRoot, sourcePaths)
+            check(relocated.treeSha256 === dependencies.tree.treeSha256, 'PREPARED_RELEASE_RELOCATION_CHANGED')
+            const dependency = { schemaVersion: 1, kind: 'xpanel-installed-dependencies', verifiedAt: new Date().toISOString(), root: releaseRoot,
+              archiveSha256: report.archiveSha256, manifestSha256: report.manifestSha256, controlDbSchemaVersion: report.manifest.controlDbSchemaVersion,
+              lockfileSha256: report.manifest.lockfileSha256, nodePath: runtime.nodePath, nodeVersion: PINNED_NODE, nodeSha256: runtime.nodeSha256,
+              packageManagerPath: trust.packageManagerPath, packageManagerSha256: trust.packageManagerSha256,
+              packageManager: report.manifest.runtime.packageManager, ...dependencies, tree: relocated }
+            await publishPreparedReleaseProof(report, trust, runtime, dependency, true)
+          }
+          return withTrustedDirectory(recordDirectory, async directoryPin => withTrustedFile(recordPath, { exactMode: 0o600, maxBytes: 16 * 1024 }, async recordPin => {
+            const record = parseJson(recordPin.bytes)
+            object(record, ['schemaVersion', 'kind', 'releaseRoot', 'version', 'archiveSha256', 'manifestSha256', 'sourceFilesDigest', 'treeSha256',
+              'controlDbSchemaVersion', 'dependencyReceiptPath', 'dependencyReceiptSha256', 'runtime'], 'PREPARED_RELEASE_RECEIPT_INVALID')
+            check(record.schemaVersion === 1 && record.kind === 'xpanel-prepared-release' && record.releaseRoot === releaseRoot
+              && record.version === report.manifest.version && record.archiveSha256 === report.archiveSha256 && record.manifestSha256 === report.manifestSha256
+              && record.sourceFilesDigest === digest(JSON.stringify(report.manifest.files)) && SHA.test(record.treeSha256)
+              && record.controlDbSchemaVersion === report.manifest.controlDbSchemaVersion && record.dependencyReceiptPath === dependencyReceiptPath
+              && SHA.test(record.dependencyReceiptSha256), 'PREPARED_RELEASE_RECEIPT_CHANGED')
+            object(record.runtime, ['nodePath', 'nodeSha256', 'nodeVersion', 'packageManagerPath', 'packageManagerSha256'], 'PREPARED_RELEASE_RUNTIME_INVALID')
+            check(record.runtime.nodePath === runtime.nodePath && record.runtime.nodeSha256 === runtime.nodeSha256 && record.runtime.nodeVersion === PINNED_NODE
+              && record.runtime.packageManagerPath === trust.packageManagerPath && record.runtime.packageManagerSha256 === trust.packageManagerSha256, 'PREPARED_RELEASE_RUNTIME_CHANGED')
+            return withTrustedFile(dependencyReceiptPath, { exactMode: 0o600, maxBytes: 16 * 1024, sha256: record.dependencyReceiptSha256 }, async dependencyPin => {
+              const dependency = parseJson(dependencyPin.bytes)
+              check(dependency.schemaVersion === 1 && dependency.kind === 'xpanel-installed-dependencies' && dependency.root === releaseRoot
+                && dependency.archiveSha256 === report.archiveSha256 && dependency.manifestSha256 === report.manifestSha256
+                && dependency.controlDbSchemaVersion === report.manifest.controlDbSchemaVersion && dependency.lockfileSha256 === report.manifest.lockfileSha256
+                && dependency.tree?.treeSha256 === record.treeSha256 && dependency.nodePath === runtime.nodePath && dependency.nodeSha256 === runtime.nodeSha256
+                && dependency.nodeVersion === PINNED_NODE && dependency.packageManager === report.manifest.runtime.packageManager
+                && dependency.packageManagerPath === trust.packageManagerPath && dependency.packageManagerSha256 === trust.packageManagerSha256,
+                'PREPARED_RELEASE_DEPENDENCY_CHANGED')
+              return withTrustedDirectory(helperRoot, async helperPin => withTrustedDirectory(releaseRoot, async sourcePin => {
+                const capability = Object.freeze(Object.create(null)), scope = { capability, helperRoot, helperReport, helperTreeSha256: helperTree.treeSha256, pid: process.pid, live: true, parent: parentScope, artifactPath: options.artifactPath, info: record, report, recordPath,
+                  recordSha256: recordPin.sha256, pins: [...pins, directoryPin, recordPin, dependencyPin, sourcePin, helperPin] }
+                preparedScopes.set(capability, scope)
+                try { return await preparedActive.run(scope, async () => { await assertPreparedReleaseCurrent(capability); const value = await callback(capability); await assertPreparedReleaseCurrent(capability); return value }) }
+                finally { scope.live = false; preparedScopes.delete(capability) }
+              }))
+            })
+          }))
+        })
+        return archive.value
+      })
+    })
+  })
+  return held
 }
 
 /** Publish managed-writer admission only from the actual initialized strict database origin. */

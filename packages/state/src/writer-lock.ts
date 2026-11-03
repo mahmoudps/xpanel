@@ -5,7 +5,7 @@ import { chmod, chown, lstat, mkdir, open, readFile, readdir, rename, rm } from 
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { assertInt, assertLine, fail } from '@xpanel/core'
 import { atomicRemove, atomicWriteJson, fsyncDir, isStateDirectoryDurabilityError, readJsonIfExists } from './atomic.ts'
-import { acquireWriterMutex, WRITER_MUTEX_FILE, type WriterMutexGuard } from './writer-mutex.ts'
+import { acquireWriterMutex, acquireExistingWriterMutex, WRITER_MUTEX_FILE, type WriterMutexGuard } from './writer-mutex.ts'
 import { claimStateOwnership } from './ownership.ts'
 import type { AllocatedReferenceRecord, ReferenceKind, StateAuthorityMetadata, WriterLockHolder } from './types.ts'
 import { formatShortReference, normalizeReferenceKind, validateStateAuthority, validateUidAllocator } from './validate-state.ts'
@@ -74,6 +74,11 @@ export interface WriterLease {
   release(): Promise<void>
 }
 type Holder = WriterLockHolder & { protocol?: string; mutexIdentity?: string }
+declare const unrecoveredMutexBrand: unique symbol
+export interface ExistingUnrecoveredWriterMutex { readonly [unrecoveredMutexBrand]: true; assertCurrent(): Promise<void> }
+interface UnrecoveredMutexScope { lock: WriterLock; guard: WriterMutexGuard; live: boolean; transferred: boolean }
+const unrecoveredMutexScope = new AsyncLocalStorage<UnrecoveredMutexScope>()
+const unrecoveredMutexes = new WeakMap<object, UnrecoveredMutexScope>()
 const defaultAuthority = (): StateAuthorityMetadata => ({ revision: 0, fencingToken: 0, updatedAt: new Date(0).toISOString(), references: {} })
 
 export class WriterLock {
@@ -395,11 +400,57 @@ export class WriterLock {
   }
   async acquire(opts?: { acquireTimeoutMs?: number }): Promise<WriterLease> {
     const guard = await this.guard(opts?.acquireTimeoutMs)
+    return this.acquireGuarded(guard, true)
+  }
+  /** A caller requiring a clean existing authority must never repair an orphan
+   * merely to obtain its first lease. The absence check occurs under the mutex. */
+  async withExistingUnrecoveredMutex<T>(callback: (scope: ExistingUnrecoveredWriterMutex) => Promise<T>): Promise<T> {
+    if (projectionReadScope.getStore()?.active) return fail('PRECONDITION_FAILED', 'projection read cannot acquire a lease')
+    const guard = await acquireExistingWriterMutex(this.mutexFilePath, this.acquireTimeoutMs, this.retryIntervalMs)
+    return this.withUnrecoveredGuard(guard, callback)
+  }
+  /** Initialization is allowed for an ordinary writer, but recovery is not:
+   * the caller's fixed exclusion gate runs under this mutex before any cleanup. */
+  async withUnrecoveredMutex<T>(callback: (scope: ExistingUnrecoveredWriterMutex) => Promise<T>): Promise<T> {
+    return this.withUnrecoveredGuard(await this.guard(), callback)
+  }
+  private async withUnrecoveredGuard<T>(guard: WriterMutexGuard, callback: (scope: ExistingUnrecoveredWriterMutex) => Promise<T>): Promise<T> {
+    const scope = { lock: this, guard, live: true, transferred: false }
+    const assertCurrent = async () => {
+      if (!scope.live || unrecoveredMutexScope.getStore() !== scope || scope.transferred) return fail('CONFLICT', 'unrecovered mutex scope is unavailable')
+      await guard.assertStable()
+    }
+    const proof = Object.freeze({ assertCurrent }) as ExistingUnrecoveredWriterMutex
+    unrecoveredMutexes.set(proof, scope)
+    try {
+      return await unrecoveredMutexScope.run(scope, async () => { await assertCurrent(); return callback(proof) })
+    } finally { scope.live = false; if (!scope.transferred) await guard.release() }
+  }
+  async acquireCleanFromExistingMutex(proof: ExistingUnrecoveredWriterMutex): Promise<WriterLease> {
+    return this.claimExistingMutex(proof, false)
+  }
+  /** Existing generic recovery, entered only after the caller's audit-specific
+   * exclusion checks under this same opaque physical mutex. */
+  async acquireRecoveringFromExistingMutex(proof: ExistingUnrecoveredWriterMutex): Promise<WriterLease> {
+    return this.claimExistingMutex(proof, true)
+  }
+  private async claimExistingMutex(proof: ExistingUnrecoveredWriterMutex, recover: boolean): Promise<WriterLease> {
+    const scope = proof && typeof proof === 'object' ? unrecoveredMutexes.get(proof) : undefined
+    if (!scope || scope.lock !== this || !scope.live || scope.transferred || unrecoveredMutexScope.getStore() !== scope) return fail('CONFLICT', 'unissued existing mutex')
+    await proof.assertCurrent()
+    if (!recover) {
+      const present = await lstat(this.lockDirPath).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+      if (present || (await readdir(this.stateDir)).some(name => name.startsWith('.lock-prepared-'))) return fail('CONFLICT', 'clean writer lease refuses retained owner evidence')
+    }
+    scope.transferred = true
+    return this.acquireGuarded(scope.guard, recover)
+  }
+  private async acquireGuarded(guard: WriterMutexGuard, recover: boolean): Promise<WriterLease> {
     let leaseOwnsGuard = false
     let prepared: string | undefined
     let publishedLease: string | undefined
     try {
-      await this.recoverOrphan(guard)
+      if (recover) await this.recoverOrphan(guard)
       const preAcquireAuthorityRaw = await readFile(this.authorityFilePath, 'utf8').catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
       const current = preAcquireAuthorityRaw === null ? defaultAuthority() : validateStateAuthority(JSON.parse(preAcquireAuthorityRaw))
       const fencingToken = assertInt(current.fencingToken + 1, 1, Number.MAX_SAFE_INTEGER, 'fencingToken')

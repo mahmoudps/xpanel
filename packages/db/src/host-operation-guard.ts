@@ -8,6 +8,7 @@ import { WriterLock } from '@xpanel/state'
 import type { WriterLease } from '@xpanel/state'
 import type { Db } from './client.ts'
 import { assertNoActiveDatabaseTransaction, assertRegisteredDatabaseRunner, getStrictDatabaseIdentity } from './sql-runner.ts'
+import { assertReadonlyOperationDatabaseCurrent, assertReadonlyOperationDatabaseOutsideTransaction, getReadonlyOperationDatabaseOrigin, type ReadonlyOperationDatabase } from './readonly-operation-database.ts'
 import { requireOperationalIdentity } from './repos/official-references.ts'
 
 export const HOST_OPERATION_GUARD_DIRECTORY = '/var/lib/xpanel-agent/host-operations'
@@ -52,6 +53,8 @@ interface GuardScope {
   readonly databasePin: DatabasePin
   readonly lease: WriterLease
   readonly assertions: Set<Promise<void>>
+  readonly assertReader?: () => Promise<void>
+  readonly assertReaderActive?: () => void
 }
 
 const capabilities = new WeakMap<object, GuardScope>()
@@ -191,10 +194,11 @@ const activeScope = (capability: unknown, expected: HostOperationGuardBinding): 
       expected.databaseInode !== state.binding.databaseInode || expected.issuerId !== state.binding.issuerId) {
     return fail('CONFLICT', 'the host operation guard belongs to another database or issuer')
   }
+  state.assertReaderActive?.()
   return state
 }
 
-/** Non-I/O lifetime/binding assertion for a short DB CAS, after the real physical assertion. */
+/** Lifetime/binding assertion for a short DB CAS, after the real physical assertion. */
 export const assertHostOperationGuardActive = (capability: unknown, expected: HostOperationGuardBinding): void => {
   activeScope(capability, expected)
 }
@@ -204,9 +208,11 @@ export const assertHostOperationGuardHeld = async (capability: unknown, expected
   assertNoActiveDatabaseTransaction()
   const state = activeScope(capability, expected)
   const pending = (async () => {
+    await state.assertReader?.()
     for (const pin of state.directories) await assertDirectory(pin)
     await assertDatabasePath(state.databasePin)
     await state.lease.assertFencingToken()
+    await state.assertReader?.()
     activeScope(capability, expected)
   })()
   state.assertions.add(pending)
@@ -229,12 +235,50 @@ export const withHostOperationGuard = async <T>(
   callback: (capability: HostOperationGuard) => Promise<T>,
 ): Promise<T> => {
   assertRegisteredDatabaseRunner(db)
+  return withBoundHostOperationGuard(() => captureDatabaseBinding(db), options, callback)
+}
+
+/** The same physical host lock, bound to a real scoped readonly reader. No DB write or effect authority is granted.
+ * This capability still requires the manager's signed helper, root principal and exact receipt/HEAD policy.
+ * No caller-provided origin, assertion port or availability flag is accepted. */
+export const withReadonlyHostOperationGuard = async <T>(
+  db: ReadonlyOperationDatabase,
+  options: HostOperationGuardOptions,
+  callback: (capability: HostOperationGuard) => Promise<T>,
+): Promise<T> => {
+  const original = getReadonlyOperationDatabaseOrigin(db)
+  const assertReaderActive = (): void => {
+    const current = getReadonlyOperationDatabaseOrigin(db)
+    if (['file', 'device', 'inode', 'issuerId'].some(key => current[key as keyof typeof current] !== original[key as keyof typeof original])) {
+      fail('CONFLICT', 'the read-only operation database origin changed')
+    }
+  }
+  const assertReader = async (): Promise<void> => {
+    assertReaderActive(); assertReadonlyOperationDatabaseOutsideTransaction(db)
+    await assertReadonlyOperationDatabaseCurrent(db)
+    assertReaderActive(); assertReadonlyOperationDatabaseOutsideTransaction(db)
+  }
+  const capture = async (): Promise<HostOperationGuardBinding> => {
+    await assertReader()
+    return Object.freeze({ databaseFile: original.file, databaseDevice: original.device, databaseInode: original.inode, issuerId: original.issuerId })
+  }
+  return withBoundHostOperationGuard(capture, options, callback, assertReader, assertReaderActive)
+}
+
+// Private shared physical implementation. Both public ingresses derive their binding from a registered native DB identity.
+const withBoundHostOperationGuard = async <T>(
+  capture: () => Promise<HostOperationGuardBinding>,
+  options: HostOperationGuardOptions,
+  callback: (capability: HostOperationGuard) => Promise<T>,
+  assertReader?: () => Promise<void>,
+  assertReaderActive?: () => void,
+): Promise<T> => {
   requireLinuxRoot()
   assertNoActiveDatabaseTransaction()
   const lockOptions = optionsFor(options)
   if (typeof callback !== 'function') return fail('VALIDATION', 'a host operation callback is required')
   if (scopes.getStore()?.phase === 'held') return fail('PRECONDITION_FAILED', 'nested host operation guards are unsupported')
-  const binding = await captureDatabaseBinding(db)
+  const binding = await capture()
   const databasePin = await pinDatabasePath(binding)
   const directories = await pinGuardDirectories()
   let lease: WriterLease | undefined
@@ -244,12 +288,12 @@ export const withHostOperationGuard = async <T>(
   let failed = false
   try {
     lease = await new WriterLock(HOST_OPERATION_GUARD_DIRECTORY, lockOptions).acquire()
-    const current = await captureDatabaseBinding(db)
+    const current = await capture()
     if (current.databaseFile !== binding.databaseFile || current.databaseDevice !== binding.databaseDevice ||
         current.databaseInode !== binding.databaseInode || current.issuerId !== binding.issuerId) {
       fail('CONFLICT', 'the strict operation database or issuer changed while acquiring host ownership')
     }
-    const ownedScope: GuardScope = { phase: 'held', faulted: false, binding, directories, databasePin, lease, assertions: new Set() }
+    const ownedScope: GuardScope = { phase: 'held', faulted: false, binding, directories, databasePin, lease, assertions: new Set(), assertReader, assertReaderActive }
     state = ownedScope
     const capability = Object.freeze(Object.create(null)) as HostOperationGuard
     capabilities.set(capability, ownedScope)

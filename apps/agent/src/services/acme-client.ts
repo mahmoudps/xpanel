@@ -1,5 +1,5 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto'
-import { fail } from '@xpanel/core'
+import { cleanString, fail, redactInlineSecrets } from '@xpanel/core'
 import type { AcmeCaClient, AcmeCaClientOrderInput, AcmeCaClientOrderResult, AcmeChallengeTokenMaterial } from './acme.ts'
 
 const ES256 = 'ES256'
@@ -95,13 +95,19 @@ const accountKey = (pem?: string): { privateKey: KeyObject; pem: string; jwk: Jw
   return { privateKey: generated.privateKey, pem: next, jwk: publicJwk(generated.publicKey) }
 }
 
+/** Only a CA response, not a transport exception or local write failure, may carry this classification. */
+const authorityRejected = (detail: unknown, fallback = 'the certificate authority refused the request'): never => {
+  const reason = typeof detail === 'string' && detail.trim() ? detail.trim() : fallback
+  return fail('CONFIG_TEST_FAILED', cleanString(redactInlineSecrets(reason.slice(0, 4096)), 512), { reason: 'certificate_authority_rejected' })
+}
+
 const problem = async (response: Response): Promise<string> => {
   const text = await response.text()
   try {
     const body = JSON.parse(text) as { detail?: unknown }
     if (typeof body.detail === 'string' && body.detail.trim()) return body.detail.trim()
-  } catch { /* use the raw response */ }
-  return text.trim() || `ACME request failed with HTTP ${response.status}`
+  } catch { /* HTML, proxy output and other raw response bodies are never user-facing diagnostics. */ }
+  return `ACME request failed with HTTP ${response.status}`
 }
 
 /**
@@ -117,9 +123,8 @@ export const createHttp01AcmeClient = (options: AcmeHttpClientOptions): AcmeCaCl
   const request = async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> => {
     try {
       return await transport(input, init)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'network error'
-      return fail('CONFIG_TEST_FAILED', `the certificate authority could not be reached (${message})`)
+    } catch {
+      return fail('CONFIG_TEST_FAILED', 'the certificate authority could not be reached', { reason: 'certificate_authority_unreachable' })
     }
   }
   const pause = options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)))
@@ -129,7 +134,7 @@ export const createHttp01AcmeClient = (options: AcmeHttpClientOptions): AcmeCaCl
 
   const directory = async (): Promise<Directory> => {
     const response = await request(directoryUrl, { headers: { accept: 'application/json' } })
-    if (!response.ok) fail('CONFIG_TEST_FAILED', await problem(response))
+    if (!response.ok) authorityRejected(await problem(response))
     const body = await response.json() as Partial<Directory>
     const newNonce = body.newNonce
     const newAccount = body.newAccount
@@ -140,6 +145,7 @@ export const createHttp01AcmeClient = (options: AcmeHttpClientOptions): AcmeCaCl
 
   const refreshNonce = async (url: string): Promise<void> => {
     const response = await request(url, { method: 'HEAD' })
+    if (!response.ok) authorityRejected(await problem(response))
     nonce = response.headers.get('replay-nonce') ?? ''
     if (!nonce) fail('CONFIG_TEST_FAILED', 'ACME server did not provide a nonce')
   }
@@ -171,7 +177,7 @@ export const createHttp01AcmeClient = (options: AcmeHttpClientOptions): AcmeCaCl
   }
 
   const json = async <T>(response: Response): Promise<T> => {
-    if (!response.ok) fail('CONFIG_TEST_FAILED', await problem(response))
+    if (!response.ok) authorityRejected(await problem(response))
     return await response.json() as T
   }
 
@@ -181,7 +187,7 @@ export const createHttp01AcmeClient = (options: AcmeHttpClientOptions): AcmeCaCl
     const endpoints = await directory()
     if (!nonce) await refreshNonce(endpoints.newNonce)
     const account = await signed(endpoints.newAccount, { termsOfServiceAgreed: true }, false)
-    if (!account.ok && account.status !== 200) fail('CONFIG_TEST_FAILED', await problem(account))
+    if (!account.ok && account.status !== 200) authorityRejected(await problem(account))
     kid = account.headers.get('location') ?? ''
     if (!kid) fail('CONFIG_TEST_FAILED', 'ACME account URL was not returned')
     const orderResponse = await signed(endpoints.newOrder, {
@@ -207,7 +213,7 @@ export const createHttp01AcmeClient = (options: AcmeHttpClientOptions): AcmeCaCl
     await input.onPublishChallenges(challenges)
     for (const url of challengeUrls) {
       const response = await signed(url, {}, true)
-      if (!response.ok) fail('CONFIG_TEST_FAILED', await problem(response))
+      if (!response.ok) authorityRejected(await problem(response))
     }
     for (const authorizationUrl of order.authorizations) {
       let status = 'pending'
@@ -216,7 +222,7 @@ export const createHttp01AcmeClient = (options: AcmeHttpClientOptions): AcmeCaCl
         status = authorization.status
         if (status === 'invalid') {
           const detail = authorization.challenges?.map(item => item.error?.detail).find(Boolean)
-          fail('CONFIG_TEST_FAILED', detail || 'HTTP-01 validation failed')
+          authorityRejected(detail, 'HTTP-01 validation failed')
         }
         if (status !== 'valid') await pause(2_000)
       }
@@ -225,17 +231,17 @@ export const createHttp01AcmeClient = (options: AcmeHttpClientOptions): AcmeCaCl
 
     const issuedKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
     const finalized = await signed(order.finalize, { csr: csrFor(input.identifiers, issuedKey.privateKey) }, true)
-    if (!finalized.ok) fail('CONFIG_TEST_FAILED', await problem(finalized))
+    if (!finalized.ok) authorityRejected(await problem(finalized))
     let certificateUrl = ''
     for (let attempt = 0; attempt < 40 && !certificateUrl; attempt += 1) {
-      const current = await json<{ status: string; certificate?: string }>(await signed(orderUrl, null, true))
-      if (current.status === 'invalid') fail('CONFIG_TEST_FAILED', 'ACME order failed after validation')
+      const current = await json<{ status: string; certificate?: string; error?: { detail?: string } }>(await signed(orderUrl, null, true))
+      if (current.status === 'invalid') authorityRejected(current.error?.detail, 'ACME order failed after validation')
       if (current.status === 'valid' && current.certificate) certificateUrl = current.certificate
       else await pause(2_000)
     }
     if (!certificateUrl) fail('CONFIG_TEST_FAILED', 'ACME order did not produce a certificate')
     const certificate = await signed(certificateUrl, null, true)
-    if (!certificate.ok) fail('CONFIG_TEST_FAILED', await problem(certificate))
+    if (!certificate.ok) authorityRejected(await problem(certificate))
     const fullchainPem = await certificate.text()
     const exported = issuedKey.privateKey.export({ type: 'pkcs8', format: 'pem' })
     return {

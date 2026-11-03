@@ -23,8 +23,10 @@ import { parseUpgradeProcessBinding, readUpgradeIntentJob } from '../upgrade-coo
 import type { UpgradeProcessBinding } from '../upgrade-coordinator-contract.ts'
 import { assertUpgradeIntentCurrent } from '../upgrade-coordinator-validation.ts'
 import { loadTrustedReleaseKeys, readReleaseManifestFor } from '../upgrade-observation.ts'
-import { assertCurrentLifecycleEffect, assertNativeLifecyclePrerequisites, createNativeUpgradeSafety, readNativeReleaseTrust, verifyCurrentLifecycleWriterReadiness } from '../../../../scripts/lifecycle-root-safety.mjs'
+import { assertCurrentLifecycleEffect, assertNativeLifecyclePrerequisites, assertNativeLifecycleRecoveryPrerequisites, withNativeRecoveryPreparation, createNativeUpgradeSafety, readNativeReleaseTrust, verifyCurrentLifecycleWriterReadiness, withNativeLifecycleDatabaseAdmission } from '../../../../scripts/lifecycle-root-safety.mjs'
 import { verifyAuthenticatedReleaseArchive } from '../../../../scripts/release-verifier.mjs'
+import { withPreparedRelease, parsePreparedReleaseInput } from '../../../../scripts/prepared-release.mjs'
+export { runNativeRootOperatorCommand } from '../../../../scripts/root-operator.mjs'
 
 const DATABASE = '/var/lib/xpanel/control.db'
 const STATE = '/var/lib/xpanel/state'
@@ -56,7 +58,8 @@ export const validateNativeLifecycleRequest = (input: unknown): NativeLifecycleR
     return Object.freeze({ command: value.command })
   }
   const artifact = record(value.artifact)
-  if (Object.keys(artifact).sort().join(',') !== 'expectedArchiveSha256,keyId,path,signingKeyPath' || !canonical(artifact.path) || dirname(artifact.path) !== '/opt/xpanel/downloads' || !canonical(artifact.signingKeyPath) || typeof artifact.keyId !== 'string' || !/^[A-Za-z0-9_.-]{1,64}$/.test(artifact.keyId) || typeof artifact.expectedArchiveSha256 !== 'string' || !SHA.test(artifact.expectedArchiveSha256)) return deny('LIFECYCLE_ARTIFACT_INVALID')
+  if (Object.keys(artifact).sort().join(',') !== 'expectedArchiveSha256,keyId,path,signingKeyPath' || !canonical(artifact.path) || !canonical(artifact.signingKeyPath) || typeof artifact.keyId !== 'string' || !/^[A-Za-z0-9_.-]{1,64}$/.test(artifact.keyId) || typeof artifact.expectedArchiveSha256 !== 'string' || !SHA.test(artifact.expectedArchiveSha256)) return deny('LIFECYCLE_ARTIFACT_INVALID')
+  parsePreparedReleaseInput({ artifactPath: artifact.path, expectedArchiveSha256: artifact.expectedArchiveSha256 })
   // signingKeyPath is accepted only for the common CLI grammar. It is never read here.
   return Object.freeze({ command: value.command, artifact: Object.freeze({ path: artifact.path, expectedArchiveSha256: artifact.expectedArchiveSha256, keyId: artifact.keyId }) })
 }
@@ -99,16 +102,18 @@ const panelOwner = async (): Promise<Owner> => {
   } finally { await handle.close() }
 }
 
-const nativeFilesystem = (owner: Owner): FsPort => {
+const nativeFilesystem = (owner: Owner, boundArtifactPath: string | null): FsPort => {
   const withParent = async <T>(path: string, operation: PathOperation, callback: (heldPath: string, parent: FileHandle) => Promise<T>): Promise<T> => {
-    if (!nativeLifecyclePathAllowed(path, operation)) return deny('LIFECYCLE_PATH_DENIED')
+    if (!nativeLifecyclePathAllowed(path, operation) && !(operation === 'read' && path === boundArtifactPath && canonical(path))) return deny('LIFECYCLE_PATH_DENIED')
     await assertCurrentLifecycleEffect(operation === 'read' ? 'service.observe' : 'filesystem.write')
-    const pins: { path: string; handle: FileHandle; dev: number; ino: number }[] = []
+    const pins: { path: string; handle: FileHandle; dev: number; ino: number; uid: number; gid: number; mode: number }[] = []
     const verify = async (): Promise<void> => {
       for (const pin of pins) {
         const [opened, named] = await Promise.all([pin.handle.stat(), lstat(pin.path)])
-        const diagnosticParent = pin.path === '/var/lib/xpanel' && named.uid === owner.uid && named.gid === owner.gid && (named.mode & 0o7777) === 0o2770
-        if (!opened.isDirectory() || !named.isDirectory() || named.isSymbolicLink() || opened.dev !== pin.dev || opened.ino !== pin.ino || named.dev !== pin.dev || named.ino !== pin.ino || !diagnosticParent && (named.uid !== 0 || (named.mode & 0o022) !== 0)) return deny('LIFECYCLE_PATH_ANCESTRY_CHANGED')
+        const diagnosticParent = pin.path === '/var/lib/xpanel' && pin.uid === owner.uid && pin.gid === owner.gid && [0o2770, 0o2750].includes(pin.mode)
+        if (!opened.isDirectory() || !named.isDirectory() || named.isSymbolicLink() || opened.dev !== pin.dev || opened.ino !== pin.ino || named.dev !== pin.dev || named.ino !== pin.ino
+          || [opened, named].some(info => info.uid !== pin.uid || info.gid !== pin.gid || (info.mode & 0o7777) !== pin.mode)
+          || !diagnosticParent && (pin.uid !== 0 || (pin.mode & 0o022) !== 0)) return deny('LIFECYCLE_PATH_ANCESTRY_CHANGED')
       }
     }
     try {
@@ -118,7 +123,7 @@ const nativeFilesystem = (owner: Owner): FsPort => {
         const fdPath = previous ? `/proc/self/fd/${previous.handle.fd}/${segment}` : '/'
         const handle = await open(fdPath, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
         const info = await handle.stat()
-        pins.push({ path: namedPath, handle, dev: info.dev, ino: info.ino })
+        pins.push({ path: namedPath, handle, dev: info.dev, ino: info.ino, uid: info.uid, gid: info.gid, mode: info.mode & 0o7777 })
         await verify()
       }
       const parent = pins.at(-1)!.handle
@@ -146,7 +151,7 @@ const guardedExecutor = (executor: LinuxHostExecutor): AgentExecutor => {
   return { preflight: plan => effect(() => executor.preflight(plan), 'service.observe'), writeFile: file => effect(() => executor.writeFile(file)), readFile: path => effect(() => executor.readFile(path), 'service.observe'), removePath: path => effect(() => executor.removePath(path)), runTest: test => effect(() => executor.runTest(test)), runAction: action => effect(async () => { if (action.kind === 'systemd') { const result = await executor.runCommand(['/usr/bin/systemctl', action.verb, action.unit]); if (result.code !== 0) return deny('LIFECYCLE_SERVICE_COMMAND_FAILED'); return } await executor.runAction(action) }), runCommand: argv => effect(() => executor.runCommand(argv)), readSliceMetrics: uid => effect(() => executor.readSliceMetrics(uid), 'service.observe') }
 }
 
-const composition = async (db: ReturnType<typeof createDb>['db'], actor: Principal, owner: Owner): Promise<{ ports: UpgradePorts; store: StateStore; os: Awaited<ReturnType<typeof detectOs>>; releaseKeys: readonly ReleaseVerificationKey[]; canaries: ReturnType<typeof createNativeLifecycleCanary> }> => {
+const composition = async (db: ReturnType<typeof createDb>['db'], actor: Principal, owner: Owner, boundArtifactPath: string | null): Promise<{ ports: UpgradePorts; store: StateStore; os: Awaited<ReturnType<typeof detectOs>>; releaseKeys: readonly ReleaseVerificationKey[]; canaries: ReturnType<typeof createNativeLifecycleCanary> }> => {
   const os = detectOs(path => readFileSync(path, 'utf8'))
   const store = new StateStore(STATE)
   await store.getAuthorityMetadata()
@@ -174,7 +179,7 @@ const composition = async (db: ReturnType<typeof createDb>['db'], actor: Princip
   } }
   // Root-held Ed25519 publisher keys only; missing, unsafe or HMAC trust yields an empty list that refuses upgrades.
   const releaseKeys = (await loadTrustedReleaseKeys()).keys
-  const ports = createProductionUpgradePorts({ db, fs: nativeFilesystem(owner), host, clock: { now: () => new Date(), sleep: ms => new Promise(resolve => setTimeout(resolve, ms)) }, trustedReleaseKeys: releaseKeys,
+  const ports = createProductionUpgradePorts({ db, fs: nativeFilesystem(owner, boundArtifactPath), host, clock: { now: () => new Date(), sleep: ms => new Promise(resolve => setTimeout(resolve, ms)) }, trustedReleaseKeys: releaseKeys,
     loadReleaseMigrations: root => loadMigrations(posix.join(root, 'packages/db/src/migrations')),
     probeFreeBytes: async path => { await assertCurrentLifecycleEffect('service.observe'); const value = await statfs(path, { bigint: true }); const bytes = value.bavail * value.bsize; if (bytes > BigInt(Number.MAX_SAFE_INTEGER)) return Number.MAX_SAFE_INTEGER; return Number(bytes) },
     probeOsRelease: async () => parseOsRelease(await readFile('/etc/os-release', 'utf8')),
@@ -210,32 +215,33 @@ export const runNativeLifecycleCommand = async (input: unknown, processBinding?:
   if (binding && request.command !== 'upgrade') return deny('LIFECYCLE_HANDOFF_COMMAND_MISMATCH')
   if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.geteuid?.() !== 0) return deny('LIFECYCLE_ROOT_LINUX_REQUIRED')
   if (process.version !== 'v26.12.1' || process.env.NODE_OPTIONS || process.env.NODE_PATH) return deny('LIFECYCLE_PINNED_RUNTIME_REQUIRED')
-  await assertNativeLifecyclePrerequisites()
-  const databasePin = await open(DATABASE, constants.O_RDONLY | constants.O_NOFOLLOW)
-  let handle: ReturnType<typeof createDb> | undefined
-  try {
-    const before = await databasePin.stat({ bigint: true })
-    if (!before.isFile() || before.nlink !== 1n) return deny('LIFECYCLE_DATABASE_UNSAFE')
-    handle = createDb(DATABASE, { durability: 'strict' })
+  if (request.command === 'recover') await assertNativeLifecycleRecoveryPrerequisites()
+  else await assertNativeLifecyclePrerequisites()
+  return withNativeLifecycleDatabaseAdmission(request.command === 'recover' ? 'recover' : 'upgrade', async admitted => {
+    const handle = { db: admitted.db }
     const origin = await handle.db.transaction(async tx => getStrictOperationDatabaseOrigin(tx))
-    if (origin.file !== DATABASE || origin.device !== String(before.dev) || origin.inode !== String(before.ino)) return deny('LIFECYCLE_DATABASE_CHANGED')
+    if (origin.file !== DATABASE) return deny('LIFECYCLE_DATABASE_CHANGED')
     const rows = await handle.db.query<{ id: string }>("SELECT id FROM principals WHERE kind='root' AND disabled=0 ORDER BY created_at,id LIMIT 2")
     if (rows.length !== 1) return deny('LIFECYCLE_ROOT_PRINCIPAL_AMBIGUOUS')
     const root = await getPrincipal(handle.db, rows[0]!.id)
-    if (!root || root.kind !== 'root' || root.disabled) return deny('LIFECYCLE_ROOT_PRINCIPAL_REQUIRED')
+    if (!root || root.kind !== 'root' || root.disabled || root.forcePasswordChange
+      || root.id !== admitted.principal.id || root.username !== admitted.principal.username) return deny('LIFECYCLE_ROOT_PRINCIPAL_REQUIRED')
     const actor: Principal = { kind: 'root', id: root.id, username: root.username }
     const handoff = binding ? readUpgradeIntentJob(await getDurableJob(handle.db, binding.jobId), binding) : null
     if (handoff && (handoff.job.checkpointStep !== 'native-consumed' || handoff.intent.principalId !== actor.id || handoff.intent.actor !== actor.username)) return deny('LIFECYCLE_HANDOFF_ACTOR_MISMATCH')
-    const { ports, os, releaseKeys, canaries } = await composition(handle.db, actor, await panelOwner())
+    const { ports, os, releaseKeys, canaries } = await composition(handle.db, actor, await panelOwner(), request.artifact?.path ?? null)
     // A stored target is metadata until the actual native safety scope admits that exact account lifetime.
     const canary = await canaries.select()
     const withCanary = (safety: UpgradeSafetyPort): UpgradeSafetyPort => ({ ...safety,
       withExclusive: work => safety.withExclusive(async () => { await canaries.assertSelectionCurrent(canary); return work() }),
     })
     if (request.command === 'recover') {
-      const safety = await createNativeUpgradeSafety({ db: handle.db, actorId: actor.id, operation: 'recover' })
-      await recoverUpgrade({ ...ports, safety: withCanary(safety) }, { actor, os, note: 'Native command observed current authority; physical retirement remains separately verified', canary: canary.username })
-      return { exitCode: 6, code: 'LIFECYCLE_RETIREMENT_PENDING', outcome: 'attention', details: { phase: 'retirement_pending', qualified: false } }
+      const result = await withNativeRecoveryPreparation(async preparedRelease => {
+        const safety = await createNativeUpgradeSafety({ db: handle!.db, actorId: actor.id, operation: 'recover', preparedRelease })
+        return recoverUpgrade({ ...ports, safety: withCanary(safety) }, { actor, os, note: 'Root operator requested recovery of the protected pending operation', canary: canary.username })
+      })
+      return { exitCode: result.outcome === 'retirement_pending' ? 6 : 0, code: result.outcome === 'retirement_pending' ? 'LIFECYCLE_RETIREMENT_PENDING' : 'LIFECYCLE_RECOVERED', outcome: result.outcome,
+        details: { phase: result.outcome, recordId: result.recordId, qualified: result.outcome !== 'retirement_pending' } }
     }
     const artifact = request.artifact!
     const trust = await readNativeReleaseTrust()
@@ -256,10 +262,13 @@ export const runNativeLifecycleCommand = async (input: unknown, processBinding?:
     const currentVersion = basename(currentTarget)
     if (!VERSION.test(currentVersion) || dirname(currentTarget) !== '/opt/xpanel/releases') return deny('LIFECYCLE_CURRENT_RELEASE_INVALID')
     if (request.command === 'update' && currentVersion.split('.')[0] !== release.version.split('.')[0]) return deny('LIFECYCLE_MAJOR_UPGRADE_REQUIRED')
-    const safety = await createNativeUpgradeSafety({ db: handle.db, actorId: actor.id, operation: 'upgrade', release })
-    const result = await runUpgrade({ ...ports, safety: withCanary(safety) }, { actor, os, release, canary: canary.username })
+    const result = await withPreparedRelease({ artifactPath: artifact.path, expectedArchiveSha256: artifact.expectedArchiveSha256 }, async preparedRelease => {
+      const safety = await createNativeUpgradeSafety({ db: handle!.db, actorId: actor.id, operation: 'upgrade', release, preparedRelease })
+      return runUpgrade({ ...ports, safety: withCanary(safety) }, { actor, os, release, canary: canary.username })
+    })
     return result.outcome === 'succeeded'
       ? { exitCode: 0, code: 'LIFECYCLE_NATIVE_COMMITTED', outcome: 'committed', details: { currentVersion: release.version, changed: true, upgradeId: result.recordId } }
+      : result.outcome === 'rolled_back' ? { exitCode: 5, code: 'LIFECYCLE_NATIVE_ROLLED_BACK', outcome: 'rolled_back', details: { phase: 'rolled_back', qualified: true, upgradeId: result.recordId } }
       : { exitCode: result.outcome === 'refused' ? 3 : 6, code: result.outcome === 'refused' ? 'LIFECYCLE_UPGRADE_REFUSED' : 'LIFECYCLE_RETIREMENT_PENDING', outcome: result.outcome === 'refused' ? 'blocked' : 'attention', details: { phase: 'retirement_pending', qualified: false } }
-  } finally { try { if (handle) await handle.close() } finally { await databasePin.close() } }
+  })
 }

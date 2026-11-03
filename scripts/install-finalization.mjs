@@ -33,15 +33,69 @@ const parse = (bytes, maximum) => {
   catch (error) { if (error?.code) throw error; fail('INSTALL_FINALIZATION_RECORD_INVALID') }
 }
 
-function contextOf(value) {
-  exact(value, ['source', 'runtime', 'database', 'rootPrincipalId', 'state', 'admissionFingerprint'], 'INSTALL_FINALIZATION_CONTEXT_INVALID')
+function baseContextOf(value, stateFields, contextFields = ['source', 'runtime', 'database', 'rootPrincipalId', 'state', 'admissionFingerprint']) {
+  exact(value, contextFields, 'INSTALL_FINALIZATION_CONTEXT_INVALID')
   exact(value.database, ['file', 'device', 'inode', 'issuerId'], 'INSTALL_FINALIZATION_DATABASE_INVALID')
-  exact(value.state, ['revision', 'checksum', 'accountCount'], 'INSTALL_FINALIZATION_STATE_INVALID')
+  exact(value.state, stateFields, 'INSTALL_FINALIZATION_STATE_INVALID')
   check(value.database.file === '/var/lib/xpanel/control.db' && DECIMAL.test(value.database.device) && DECIMAL.test(value.database.inode)
     && UUID.test(value.database.issuerId) && UUID.test(value.rootPrincipalId) && SHA.test(value.admissionFingerprint), 'INSTALL_FINALIZATION_DATABASE_INVALID')
-  check(Number.isSafeInteger(value.state.revision) && value.state.revision >= 0 && SHA.test(value.state.checksum)
-    && value.state.accountCount === 0, 'INSTALL_FINALIZATION_FRESH_INSTALL_REQUIRED')
   return structuredClone(value)
+}
+
+function contextOf(value) {
+  const context = baseContextOf(value, ['revision', 'checksum', 'accountCount'])
+  check(Number.isSafeInteger(context.state.revision) && context.state.revision >= 0 && SHA.test(context.state.checksum)
+    && context.state.accountCount === 0, 'INSTALL_FINALIZATION_FRESH_INSTALL_REQUIRED')
+  return context
+}
+
+function adoptionContextOf(value) {
+  const context = baseContextOf(value, ['revision', 'checksum', 'accountCount', 'accountLifetimeDigest'],
+    ['source', 'runtime', 'database', 'rootPrincipalId', 'state', 'admissionFingerprint', 'helperIdentity'])
+  exact(context.helperIdentity, ['version', 'archiveSha256', 'manifestSha256', 'dependencyReceiptSha256', 'sourceFilesDigest'], 'INSTALL_ADOPTION_HELPER_IDENTITY_INVALID')
+  check(typeof context.helperIdentity.version === 'string' && /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(context.helperIdentity.version)
+    && ['archiveSha256', 'manifestSha256', 'dependencyReceiptSha256', 'sourceFilesDigest'].every(key => typeof context.helperIdentity[key] === 'string' && SHA.test(context.helperIdentity[key])), 'INSTALL_ADOPTION_HELPER_IDENTITY_INVALID')
+  check(Number.isSafeInteger(context.state.revision) && context.state.revision >= 0 && SHA.test(context.state.checksum)
+    && Number.isSafeInteger(context.state.accountCount) && context.state.accountCount > 0
+    && SHA.test(context.state.accountLifetimeDigest), 'INSTALL_ADOPTION_POPULATED_STATE_REQUIRED')
+  return context
+}
+
+/** Allowlisted identity syntax only; the native factory must first validate the real StateStore accounts. */
+export function installAdoptionAccountLifetimeDigest(accounts) {
+  check(Array.isArray(accounts) && accounts.length > 0, 'INSTALL_ADOPTION_ACCOUNTS_INVALID')
+  const seen = Object.fromEntries(['id', 'username', 'uid', 'gid', 'home'].map(key => [key, new Set()]))
+  const lifetimes = []
+  for (let index = 0; index < accounts.length; index++) {
+    check(Object.hasOwn(Object.getOwnPropertyDescriptor(accounts, String(index)) ?? {}, 'value'), 'INSTALL_ADOPTION_ACCOUNTS_INVALID')
+    const account = accounts[index]
+    exact(account, ['id', 'username', 'uid', 'gid', 'home', 'createdAt', 'primaryDomain', 'ownerId', 'planId'], 'INSTALL_ADOPTION_ACCOUNT_INVALID')
+    check(typeof account.id === 'string' && UUID.test(account.id) && typeof account.username === 'string' && /^[a-z][a-z0-9]{0,15}$/.test(account.username)
+      && Number.isSafeInteger(account.uid) && account.uid >= 1000 && account.uid <= 60000
+      && account.gid === account.uid && typeof account.home === 'string' && account.home.length <= 4096
+      && posix.isAbsolute(account.home) && posix.normalize(account.home) === account.home && !/[\\\x00-\x20\x7f]/.test(account.home)
+      && account.home.endsWith('/' + account.username) && iso(account.createdAt)
+      && typeof account.primaryDomain === 'string' && /^[a-z0-9.-]{1,253}$/.test(account.primaryDomain)
+      && typeof account.planId === 'string' && UUID.test(account.planId)
+      && (account.ownerId === null || typeof account.ownerId === 'string' && UUID.test(account.ownerId)), 'INSTALL_ADOPTION_ACCOUNT_INVALID')
+    for (const key of Object.keys(seen)) {
+      check(!seen[key].has(account[key]), 'INSTALL_ADOPTION_ACCOUNT_DUPLICATE')
+      seen[key].add(account[key])
+    }
+    lifetimes.push(structuredClone(account))
+  }
+  lifetimes.sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+  return digest(canonical({ protocol: 'prepared-install-account-lifetimes-v1', accounts: lifetimes }))
+}
+
+/** Validates an independently recaptured census and exact desired-state identity; performs no writes. */
+export function assertInstallAdoptionState(context, observed) {
+  const expected = adoptionContextOf(context)
+  exact(observed, ['revision', 'checksum', 'accounts'], 'INSTALL_ADOPTION_STATE_INVALID')
+  const accountLifetimeDigest = installAdoptionAccountLifetimeDigest(observed.accounts)
+  check(observed.revision === expected.state.revision && observed.checksum === expected.state.checksum
+    && observed.accounts.length === expected.state.accountCount && accountLifetimeDigest === expected.state.accountLifetimeDigest,
+    'INSTALL_ADOPTION_STATE_CHANGED')
 }
 
 function intentOf(value) {
@@ -76,7 +130,7 @@ function observationOf(value, subject, context, now) {
   return structuredClone(value)
 }
 
-function validateState(state, context) {
+function validateState(state, context, subjectFor) {
   const bootstrap = parse(state.bootstrapBytes, 16 * 1024), receipt = parseInstallationReceipt(parse(state.receiptBytes, 64 * 1024)), head = parse(state.headBytes, 16 * 1024)
   check(same(receipt.source, context.source) && same(receipt.runtime, context.runtime), 'INSTALL_FINALIZATION_SOURCE_CHANGED')
   check(bootstrap.schemaVersion === 1 && ['bootstrap_pending', 'active'].includes(bootstrap.status)
@@ -88,7 +142,7 @@ function validateState(state, context) {
     && Number.isSafeInteger(head.sequence) && UUID.test(head.operationId) && iso(head.updatedAt), 'INSTALL_FINALIZATION_HEAD_CHANGED')
   const intent = bootstrap.finalization === undefined ? null : intentOf(bootstrap.finalization)
   const previousReceiptSha256 = intent?.previousReceiptSha256 ?? digest(state.receiptBytes)
-  const subjectDigest = digest(canonical({ context, previousReceiptSha256 }))
+  const subjectDigest = subjectFor(context, previousReceiptSha256)
   if (intent) {
     check(intent.subjectDigest === subjectDigest, 'INSTALL_FINALIZATION_INTENT_CHANGED')
     const current = digest(state.receiptBytes)
@@ -138,6 +192,18 @@ export function installFinalizationSubjectDigest(context, previousReceiptSha256)
   return digest(canonical({ context: contextOf(context), previousReceiptSha256 }))
 }
 
+/** Separate subject domain; neither this digest nor a supplied port object grants native authority. */
+export function installAdoptionSubjectDigest(context, previousReceiptSha256) {
+  check(typeof previousReceiptSha256 === 'string' && SHA.test(previousReceiptSha256), 'INSTALL_FINALIZATION_RECEIPT_CHANGED')
+  return digest(canonical({ protocol: 'prepared-install-adoption-v1', context: adoptionContextOf(context), previousReceiptSha256 }))
+}
+
+/** Pure populated-adoption protocol only. Native adoption remains unavailable until its fixed factory exists. */
+export async function runPreparedInstallAdoption(ports) {
+  return runFinalizationProtocol(ports, adoptionContextOf, installAdoptionSubjectDigest,
+    async context => assertInstallAdoptionState(context, await ports.readAdoptionState()))
+}
+
 /**
  * Isolated protocol using the existing lifecycle FsPort/ClockPort shapes. A fixed native
  * install-bootstrap factory must own every port and enforce actual effect admission.
@@ -145,15 +211,21 @@ export function installFinalizationSubjectDigest(context, previousReceiptSha256)
  * isolated port fixtures do not establish that native installation evidence.
  */
 export async function runPreparedInstallFinalization(ports) {
+  return runFinalizationProtocol(ports, contextOf, installFinalizationSubjectDigest)
+}
+
+// Policy selection is private and fixed by the two wrappers; request data cannot select a mode or authority.
+async function runFinalizationProtocol(ports, readContext, subjectFor, assertState = async () => {}) {
   let attemptedEffects = false, intentSeen = false
   try {
     let captured
     await ports.withSharedAdmission(async () => {
-      const context = contextOf(await ports.capturePrepared())
+      const context = readContext(await ports.capturePrepared())
       const state = await readState(ports.fs)
       // Preserve the known recovery boundary even when later receipt validation fails.
       intentSeen ||= Object.hasOwn(parse(state.bootstrapBytes, 16 * 1024), 'finalization')
-      const parsed = validateState(state, context)
+      await assertState(context)
+      const parsed = validateState(state, context, subjectFor)
       intentSeen = parsed.intent !== null
       const observation = observationOf(await ports.observeReady(context, parsed.subjectDigest), parsed.subjectDigest, context, ports.clock.now().getTime())
       captured = { context, observation, subjectDigest: parsed.subjectDigest }
@@ -165,12 +237,13 @@ export async function runPreparedInstallFinalization(ports) {
       let intent = null
       const fresh = async () => {
         await ports.assertCurrent(context, observation, intent)
+        await assertState(context)
         observationOf(observation, subjectDigest, context, ports.clock.now().getTime())
       }
       await fresh()
       const current = await readState(ports.fs)
       intentSeen ||= Object.hasOwn(parse(current.bootstrapBytes, 16 * 1024), 'finalization')
-      const parsed = validateState(current, context)
+      const parsed = validateState(current, context, subjectFor)
       check(parsed.subjectDigest === subjectDigest, 'INSTALL_FINALIZATION_INTENT_CHANGED')
       intent = parsed.intent; intentSeen ||= intent !== null
       await fresh()

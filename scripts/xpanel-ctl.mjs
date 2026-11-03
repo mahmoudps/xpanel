@@ -21,7 +21,7 @@ Commands:
   help, version              Show usage or runtime versions
   status, doctor             Read lifecycle state and prerequisites
   install                    Plan installation or finalize an already prepared install
-  adopt                      Plan adoption (native apply unavailable)
+  adopt                      Adopt a populated prepared install through a signed repair helper
   update                     Check or update within the current major version
   upgrade                    Plan or apply an explicit major-version upgrade
   rollback-release           Plan release recovery; native apply unavailable
@@ -33,7 +33,7 @@ Commands:
 Changes default to --plan. Applying requires --apply --yes and genuine native
 prerequisites. Install apply only finalizes an authenticated prepared installation;
 it does not provision a host or start services. Native update, upgrade and recover
-keep their existing admission. Other change commands refuse before effects.
+keep their existing admission. Adopt requires an authenticated prepared helper and preserves existing accounts. Other change commands refuse before effects.
 Only update supports --check.
 No purge or OS-upgrade command exists.
 

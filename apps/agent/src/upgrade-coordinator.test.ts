@@ -15,10 +15,11 @@ import { runNativeLifecycleCommand } from './lifecycle/native-runtime.ts'
 // Public PHC fixture only; it is not an account credential.
 const PHC = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const PRINCIPAL = '00000000-0000-4000-8000-000000000001'
+const ARCHIVE_TRUST = Object.freeze({ keyId: 'xpanel-archive-test', signingKeyPath: '/etc/xpanel/test-archive.key' })
 let f: UpgradeFixture, input: UpgradeHandoff, bindings: UpgradeProcessBinding[]
 const provider = (): QualifiedUpgradeProcessProvider => ({ readiness: async () => ({ available: true, reasons: [] }), launch: vi.fn(async (binding: Readonly<UpgradeProcessBinding>): Promise<{ accepted: true; binding: UpgradeProcessBinding }> => { bindings.push({ ...binding }); return { accepted: true, binding: { ...binding } } }) })
 const coordinator = (processProvider: QualifiedUpgradeProcessProvider | undefined = provider()) => new DurableUpgradeCoordinator({ db: f.db.db, provider: processProvider, observation: f.deps() })
-const consume = (binding: UpgradeProcessBinding, runNative: (input: unknown, binding: UpgradeProcessBinding) => Promise<unknown>) => consumeUpgradeHandoff(binding, { db: f.db.db, observation: f.deps(), runNative })
+const consume = (binding: UpgradeProcessBinding, runNative: (input: unknown, binding: UpgradeProcessBinding) => Promise<unknown>) => consumeUpgradeHandoff(binding, { db: f.db.db, observation: f.deps(), archiveTrust: ARCHIVE_TRUST, runNative })
 beforeEach(async () => {
   f = await createUpgradeFixture(); await f.stage('1.1.0'); bindings = []
   await createRootPrincipal(f.db.db, { id: PRINCIPAL, username: 'root', passwordHash: PHC })
@@ -90,9 +91,12 @@ describe('durable upgrade coordinator protocol (synthetic process provider only)
     expect(bindings).toHaveLength(1)
   })
 
-  it('consumes one dispatch exactly once, verifies the actual upgrade row and keeps the issued reference', async () => {
+  it('consumes one dispatch with independent archive trust, verifies the upgrade row and keeps the issued reference', async () => {
     const first = await coordinator().start(input)
-    const result = await consume(bindings[0]!, async () => {
+    expect(input.manifest.keyId).not.toBe(ARCHIVE_TRUST.keyId)
+    const result = await consume(bindings[0]!, async nativeRequest => {
+      expect(nativeRequest).toMatchObject({ artifact: { path: input.release.archivePath,
+        expectedArchiveSha256: input.release.sha256, keyId: ARCHIVE_TRUST.keyId, signingKeyPath: ARCHIVE_TRUST.signingKeyPath } })
       const upgrade = await createUpgrade(f.db.db, { fromVersion: '1.0.0', toVersion: '1.1.0', actor: 'root', fromSchemaVersion: f.db.migration.version })
       await finishUpgrade(f.db.db, upgrade.id, { status: 'succeeded', toSchemaVersion: input.release.schemaVersion })
       return { exitCode: 0, code: 'LIFECYCLE_NATIVE_COMMITTED', outcome: 'committed', details: { currentVersion: '1.1.0', upgradeId: upgrade.id } }
@@ -101,6 +105,24 @@ describe('durable upgrade coordinator protocol (synthetic process provider only)
     const unexpected = vi.fn()
     await expect(consume(bindings[0]!, unexpected)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
     expect(unexpected).not.toHaveBeenCalled()
+  })
+
+  it('does not consume a dispatch when native archive trust is missing', async () => {
+    await coordinator().start(input)
+    const run = vi.fn()
+    await expect(consumeUpgradeHandoff(bindings[0]!, { db: f.db.db, observation: f.deps(),
+      archiveTrust: undefined as never, runNative: run })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false } })
+    expect((await getDurableJob(f.db.db, bindings[0]!.jobId))?.checkpointStep).toBe('dispatch-committed')
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it('rechecks publisher verification independently of the archive trust identity', async () => {
+    await coordinator().start(input)
+    await f.writeKeys({ schemaVersion: 1, keys: [] })
+    const run = vi.fn()
+    await expect(consume(bindings[0]!, run)).rejects.toMatchObject({ detail: { stateChanged: false } })
+    expect((await getDurableJob(f.db.db, bindings[0]!.jobId))?.checkpointStep).toBe('dispatch-committed')
+    expect(run).not.toHaveBeenCalled()
   })
 
   it('refuses wrong fingerprint, cancelled lease and an expired lease without native calls', async () => {

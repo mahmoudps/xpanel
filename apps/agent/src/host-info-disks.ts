@@ -28,10 +28,12 @@ export interface HostDiskReader {
 const bounded = (text: string): boolean => Buffer.byteLength(text, 'utf8') <= MAX_HOST_DISK_INPUT_BYTES
 const decodeMount = (text: string): string => text.replace(/\\(040|011|012|134)/g, (_escape, octal: string) => String.fromCharCode(Number.parseInt(octal, 8)))
 
-/** Mounts are kernel namespace inventory, including pseudo filesystems and bind/file mounts. */
-export const visibleMountpoints = (text: string): string[] => {
+export interface VisibleHostMount { mount: string; type: string | null }
+
+/** Mounts are kernel namespace inventory; conflicting types at an overmounted path remain unknown. */
+export const visibleMountInventory = (text: string): VisibleHostMount[] => {
   if (!bounded(text) || text.includes('\u0000')) throw new Error('mount_inventory_capacity')
-  const mounts = new Set<string>(), ids = new Set<string>()
+  const mounts = new Map<string, string | null>(), ids = new Set<string>()
   for (const line of text.split('\n').filter(line => line !== '')) {
     const fields = line.split(' '), separator = fields.indexOf('-')
     if (separator < 6 || fields.length < separator + 4 || !/^\d+$/.test(fields[0] ?? '') || ids.has(fields[0]!) ||
@@ -42,12 +44,16 @@ export const visibleMountpoints = (text: string): string[] => {
     if (/\\(?!040|011|012|134)/.test(fields[4])) throw new Error('mount_inventory_invalid')
     const path = decodeMount(fields[4])
     if (path.includes('\uFFFD')) throw new Error('mount_inventory_invalid')
-    mounts.add(path)
+    const type = fields[separator + 1]!
+    if (!/^[A-Za-z0-9_.+-]{1,64}$/.test(type)) throw new Error('mount_inventory_invalid')
+    mounts.set(path, !mounts.has(path) || mounts.get(path) === type ? type : null)
     if (mounts.size > MAX_HOST_DISK_MOUNTS) throw new Error('mount_inventory_capacity')
   }
   if (!mounts.has('/')) throw new Error('mount_inventory_invalid')
-  return [...mounts].sort()
+  return [...mounts.keys()].sort().map(mount => ({ mount, type: mounts.get(mount) ?? null }))
 }
+
+export const visibleMountpoints = (text: string): string[] => visibleMountInventory(text).map(item => item.mount)
 
 const amount = (value: string): number | null => {
   if (!/^-?\d+$/.test(value)) return null

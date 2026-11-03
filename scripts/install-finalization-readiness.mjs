@@ -23,7 +23,7 @@ function canonical(value) {
     return JSON.stringify(key) + ':' + canonical(value[key])
   }).join(',') + '}'
 }
-function checkedContext(context) {
+function checkedContext(context, adoption = false) {
   check(context && context.source?.root === '/opt/xpanel' && /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(context.source.version)
     && context.runtime?.nodeVersion === '26.12.1' && typeof context.runtime.nodePath === 'string'
     && posix.isAbsolute(context.runtime.nodePath) && posix.normalize(context.runtime.nodePath) === context.runtime.nodePath
@@ -31,7 +31,7 @@ function checkedContext(context) {
     && [context.source.archiveSha256, context.source.manifestSha256, context.source.dependencyReceiptSha256,
       context.runtime.nodeSha256, context.runtime.systemctlSha256, context.runtime.nginxSha256, context.admissionFingerprint].every(value => typeof value === 'string' && SHA.test(value))
     && context.database?.file === '/var/lib/xpanel/control.db' && DECIMAL.test(context.database.device) && DECIMAL.test(context.database.inode)
-    && context.state?.accountCount === 0 && Number.isSafeInteger(context.state.revision) && context.state.revision >= 0
+    && (adoption ? Number.isSafeInteger(context.state?.accountCount) && context.state.accountCount > 0 && SHA.test(context.state.accountLifetimeDigest) : context.state?.accountCount === 0) && Number.isSafeInteger(context.state.revision) && context.state.revision >= 0
     && SHA.test(context.state.checksum) && typeof context.rootPrincipalId === 'string', 'INSTALL_READINESS_CONTEXT_INVALID')
   return JSON.parse(canonical(context))
 }
@@ -54,13 +54,13 @@ function checkedFacts(facts, context) {
 }
 
 /** Internal pure orchestration; only the fixed native singleton below is exported. */
-function createReadinessObserver(ports) {
+function createReadinessObserver(ports, validateContext = checkedContext) {
   const captures = new Map()
   const now = () => { const value = ports.now(); check(Number.isFinite(value), 'INSTALL_READINESS_CLOCK_INVALID'); return value }
   return {
     async capture(input, subjectDigest) {
       ports.assertRoot()
-      const context = checkedContext(input), started = now()
+      const context = validateContext(input), started = now()
       check(typeof subjectDigest === 'string' && SHA.test(subjectDigest), 'INSTALL_READINESS_SUBJECT_INVALID')
       for (const [key, value] of captures) if (value.expires <= started) captures.delete(key)
       check(captures.size < 16, 'INSTALL_READINESS_CAPTURE_LIMIT')
@@ -78,7 +78,7 @@ function createReadinessObserver(ports) {
     },
     async assertCurrent(input, observation) {
       ports.assertRoot()
-      const context = checkedContext(input), key = hash(canonical({ context, observation })), saved = captures.get(key)
+      const context = validateContext(input), key = hash(canonical({ context, observation })), saved = captures.get(key)
       check(saved && observation.mode === 'normal', 'INSTALL_READINESS_CAPTURE_REQUIRED')
       check(now() >= Date.parse(observation.observedAt) && now() < saved.expires, 'INSTALL_READINESS_EXPIRED')
       // No HTTPS/DNS/SH operation is reachable here. EX is already held by the native factory.
@@ -271,3 +271,19 @@ export const captureInstallFinalizationReadiness = (context, subjectDigest) => n
 /** Caller holds real EX. This never issues HTTPS or acquires SH; the factory also rechecks its opaque authority. */
 export const assertInstallFinalizationReadinessCurrent = (context, observation) => nativeObserver.assertCurrent(context, observation)
 export const releaseInstallFinalizationReadiness = observation => nativeObserver.release(observation)
+
+// This distinct observer is reachable only through the actual adoption factory's live opaque scope.
+const nativeAdoptionObserver = createReadinessObserver({ assertRoot: requireLinuxRoot, now: () => Date.now(), readFacts: readNativeFacts, observeHttps: captureManagementTlsReadiness }, context => checkedContext(context, true))
+export async function captureInstallAdoptionReadiness(capability, context, subjectDigest) {
+  const native = await import('./install-finalization-native.mjs')
+  await native.assertInstallAdoptionReadinessScope(capability, context, 'capturing')
+  const observation = await nativeAdoptionObserver.capture(context, subjectDigest)
+  try { await native.assertInstallAdoptionReadinessScope(capability, context, 'capturing'); return observation }
+  catch (error) { nativeAdoptionObserver.release(observation); throw error }
+}
+export async function assertInstallAdoptionReadinessCurrent(capability, context, observation) {
+  const native = await import('./install-finalization-native.mjs')
+  await native.assertInstallAdoptionReadinessScope(capability, context, 'held')
+  await nativeAdoptionObserver.assertCurrent(context, observation)
+}
+export const releaseInstallAdoptionReadiness = observation => nativeAdoptionObserver.release(observation)
