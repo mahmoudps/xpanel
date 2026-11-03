@@ -2,8 +2,10 @@
 // Every write goes to a sibling temp file, fsyncs the file descriptor, closes it,
 // renames over the target, and fsyncs the parent directory.
 import { lstat, mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import { claimStateOwnership } from './ownership.ts'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { fail } from '@xpanel/core'
 
 let tmpSeq = 0
@@ -78,6 +80,21 @@ const isTransientRenameContention = (err: unknown): boolean => {
   const code = (err as NodeJS.ErrnoException | null)?.code
   return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY'
 }
+const writeSyncedPayload = async (handle: FileHandle, payload: string, mode: number, rootOwned: boolean): Promise<void> => {
+  if (rootOwned) await handle.chown(0, 0)
+  await handle.chmod(mode)
+  await handle.writeFile(payload, 'utf8')
+  await handle.sync()
+}
+const renameWithRetry = async (source: string, target: string): Promise<void> => {
+  for (let attempt = 0; ; attempt++) {
+    try { await rename(source, target); return }
+    catch (error) {
+      if (attempt >= 5 || !isTransientRenameContention(error)) throw error
+      await sleepMs(5 * (attempt + 1))
+    }
+  }
+}
 
 /**
  * Atomically writes canonical JSON (`2`-space indented + trailing newline) to `filePath`.
@@ -85,13 +102,15 @@ const isTransientRenameContention = (err: unknown): boolean => {
  * When `beforeCommit` is provided (e.g. fencing-token assertion), it runs after the temp file
  * is synced and closed, immediately before the atomic `rename` over `filePath`.
  */
-export const atomicWriteJson = async (
+const writeJson = async (
   filePath: string,
   data: unknown,
   mode = 0o640,
   beforeCommit?: () => unknown | Promise<unknown>,
+  rootOwned = false,
 ): Promise<void> => {
   const dir = dirname(filePath)
+  if (rootOwned) return writeRootOwnedJson(filePath, data, mode, beforeCommit)
   // mkdir returns the first directory it created: every new level takes the state owner, not only the leaf,
   // or a root writer (the agent) leaves an intermediate directory the API cannot write into.
   const firstCreated = await mkdir(dir, { recursive: true, mode: 0o750 })
@@ -118,9 +137,7 @@ export const atomicWriteJson = async (
     const created = await fh.stat()
     temporaryIdentity = { dev: created.dev, ino: created.ino }
     // Creation mode is filtered by umask; enforce the requested mode on this owned FD.
-    await fh.chmod(mode)
-    await fh.writeFile(payload, 'utf8')
-    await fh.sync()
+    await writeSyncedPayload(fh, payload, mode, false)
     await fh.close()
   } catch (e) {
     await fh?.close().catch(() => undefined)
@@ -130,18 +147,7 @@ export const atomicWriteJson = async (
   try {
     if (beforeCommit) await beforeCommit()
     await claimStateOwnership(tmpPath)
-    for (let attempt = 0; ; attempt++) {
-      try {
-        await rename(tmpPath, filePath)
-        break
-      } catch (err) {
-        if (attempt < 5 && isTransientRenameContention(err)) {
-          await sleepMs(5 * (attempt + 1))
-          continue
-        }
-        throw err
-      }
-    }
+    await renameWithRetry(tmpPath, filePath)
   } catch (e) {
     await removeOwnedTemporary()
     throw e
@@ -149,6 +155,113 @@ export const atomicWriteJson = async (
   await claimStateOwnership(filePath)
   await fsyncDir(dir)
 }
+
+export const atomicWriteJson = async (filePath: string, data: unknown, mode = 0o640, beforeCommit?: () => unknown | Promise<unknown>): Promise<void> =>
+  writeJson(filePath, data, mode, beforeCommit)
+
+export const requireActualLinuxRoot = (): void => {
+  if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.geteuid?.() !== 0) {
+    return fail('PRECONDITION_FAILED', 'root-owned state requires actual Linux root')
+  }
+}
+
+/** Validate and pin every directory in a root-only state path. No existing inode is repaired. */
+export const pinRootOwnedDirectory = async (directory: string) => {
+  requireActualLinuxRoot()
+  if (!isAbsolute(directory) || resolve(directory) !== directory) return fail('VALIDATION', 'root-owned directory path must be canonical')
+  const paths: string[] = [sep]
+  for (const part of directory.slice(1).split(sep).filter(Boolean)) paths.push(join(paths.at(-1)!, part))
+  const pins: { path: string; handle: Awaited<ReturnType<typeof open>>; dev: bigint; ino: bigint }[] = []
+  const assert = async (): Promise<void> => {
+    requireActualLinuxRoot()
+    for (const [i, pin] of pins.entries()) {
+      const [held, named] = await Promise.all([pin.handle.stat({ bigint: true }), lstat(pin.path, { bigint: true })])
+      const safe = (s: typeof held) => s.isDirectory() && !s.isSymbolicLink() && s.uid === 0n && (s.mode & 0o022n) === 0n &&
+        (i !== pins.length - 1 || s.gid === 0n && (s.mode & 0o7777n) === 0o700n)
+      if (!safe(held) || !safe(named) || held.dev !== pin.dev || held.ino !== pin.ino || named.dev !== pin.dev || named.ino !== pin.ino) {
+        return fail('CONFLICT', 'root-owned state directory changed or is unsafe')
+      }
+    }
+  }
+  try {
+    for (const path of paths) {
+      const handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+      try {
+        const info = await handle.stat({ bigint: true })
+        pins.push({ path, handle, dev: info.dev, ino: info.ino })
+      } catch (error) { await handle.close(); throw error }
+    }
+    await assert()
+    return { handle: pins.at(-1)!.handle, assert, close: async () => {
+      const errors: unknown[] = []
+      for (const pin of pins.reverse()) try { await pin.handle.close() } catch (error) { errors.push(error) }
+      if (errors.length) throw new AggregateError(errors, 'root-owned directory descriptors could not be closed')
+    } }
+  } catch (error) {
+    for (const pin of pins.reverse()) await pin.handle.close().catch(() => undefined)
+    throw error
+  }
+}
+
+/** Root-only publication. The directory must already exist and be private. */
+const writeRootOwnedJson = async (filePath: string, data: unknown, mode: number, beforeCommit?: () => unknown | Promise<unknown>): Promise<void> => {
+  requireActualLinuxRoot()
+  if (!isAbsolute(filePath) || resolve(filePath) !== filePath || ![0o600, 0o640].includes(mode)) return fail('VALIDATION', 'invalid root-owned state publication')
+  const pin = await pinRootOwnedDirectory(dirname(filePath))
+  const dir = `/proc/self/fd/${pin.handle.fd}`
+  const target = join(dir, basename(filePath))
+  const tmp = join(dir, `.${basename(filePath)}.${process.pid}-${++tmpSeq}.tmp`)
+  const inspect = async (path: string) => lstat(path, { bigint: true }).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+  const safeTarget = (info: Awaited<ReturnType<typeof inspect>>): void => {
+    if (info && (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n || info.uid !== 0n || info.gid !== 0n || (info.mode & 0o022n) !== 0n)) fail('CONFLICT', 'root-owned state target is unsafe')
+  }
+  let temporaryIdentity: { dev: bigint; ino: bigint } | undefined
+  let published = false, failed = false, failure: unknown
+  try {
+    const prior = await inspect(target)
+    safeTarget(prior)
+    const fh = await open(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode)
+    try {
+      const created = await fh.stat({ bigint: true })
+      temporaryIdentity = { dev: created.dev, ino: created.ino }
+      await writeSyncedPayload(fh, `${JSON.stringify(data, null, 2)}\n`, mode, true)
+    } finally { await fh.close() }
+    if (beforeCommit) await beforeCommit()
+    await pin.assert()
+    const current = await inspect(target)
+    safeTarget(current)
+    if ((prior === null) !== (current === null) || prior && current && (prior.dev !== current.dev || prior.ino !== current.ino)) return fail('CONFLICT', 'root-owned state target changed')
+    const named = await inspect(tmp)
+    if (!named || !named.isFile() || named.nlink !== 1n || named.uid !== 0n || named.gid !== 0n || named.dev !== temporaryIdentity.dev || named.ino !== temporaryIdentity.ino) return fail('CONFLICT', 'root-owned temporary file changed')
+    await renameWithRetry(tmp, target)
+    published = true
+    temporaryIdentity = undefined
+    await fsyncDir(dir)
+    try { await pin.assert() }
+    catch (cause) { throw new StateDirectoryDurabilityError(dirname(filePath), 'sync', cause) }
+  } catch (cause) {
+    failed = true
+    failure = cause
+  } finally {
+    if (temporaryIdentity) {
+      const named = await inspect(tmp).catch(() => null)
+      if (named?.isFile() && named.dev === temporaryIdentity.dev && named.ino === temporaryIdentity.ino) await rm(tmp, { force: true }).catch(() => undefined)
+    }
+    try { await pin.close() }
+    catch (cause) {
+      if (failure instanceof StateDirectoryDurabilityError) failure.closeCause = cause
+      else if (failed) failure = new AggregateError([failure, cause], 'root-owned publication and directory cleanup failed')
+      else { failed = true; failure = cause }
+    }
+  }
+  if (failed) {
+    if (published && !isStateDirectoryDurabilityError(failure)) throw new StateDirectoryDurabilityError(dirname(filePath), 'close', failure)
+    throw failure
+  }
+}
+
+export const atomicWriteRootOwnedJson = async (filePath: string, data: unknown, mode = 0o640, beforeCommit?: () => unknown | Promise<unknown>): Promise<void> =>
+  writeJson(filePath, data, mode, beforeCommit, true)
 
 /** Reads and parses a JSON file, returning `null` if it does not exist. */
 export const readJsonIfExists = async <T>(filePath: string): Promise<T | null> => {

@@ -544,7 +544,9 @@ const captureIssuedPrefix = async (plan: Readonly<IssuedLifecycleAppendPlan>, di
     const lockPath = join(directory, '.lock')
     const lockInfo = await lstat(lockPath, { bigint: true }).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
     if (lockInfo) {
-      if (!lockInfo.isDirectory() || lockInfo.isSymbolicLink() || lockInfo.uid !== 0n || lockInfo.gid !== 0n || (lockInfo.mode & 0o7777n) !== 0o2770n) return unavailable('issued_lock_permissions')
+      // Old issued leases used 02770. Only this exact-plan observation/repair
+      // accepts that historical root:root marker; new leases are always 0700.
+      if (!lockInfo.isDirectory() || lockInfo.isSymbolicLink() || lockInfo.uid !== 0n || lockInfo.gid !== 0n || ![0o700n, 0o2770n].includes(lockInfo.mode & 0o7777n)) return unavailable('issued_lock_permissions')
       const handle = await open(lockPath, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
       const pin = { path: lockPath, handle, initial: lockInfo }; pins.push(pin); await check(pin)
       const names = await readdir(lockPath)
@@ -830,7 +832,7 @@ export const createRootOperationAuditAuthority = async (
   if (directory === '/var/lib/xpanel' || directory.startsWith('/var/lib/xpanel' + sep)) return unavailable('desired_state_directory_forbidden')
   const rootInfo = await validateDirectory(directory)
   const directoryIdentity = Object.freeze(identity(rootInfo))
-  const lock = new WriterLock(directory)
+  const lock = WriterLock.forRootOwnedDirectory(directory)
   const logPath = join(directory, OPERATION_AUDIT_LOG_NAME)
   const pendingPath = join(directory, OPERATION_AUDIT_PENDING_NAME)
   const anchorPath = join(directory, OPERATION_AUDIT_ANCHOR_NAME)

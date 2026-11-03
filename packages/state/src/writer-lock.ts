@@ -4,7 +4,7 @@ import { constants } from 'node:fs'
 import { chmod, chown, lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { assertInt, assertLine, fail } from '@xpanel/core'
-import { atomicRemove, atomicWriteJson, fsyncDir, isStateDirectoryDurabilityError, readJsonIfExists } from './atomic.ts'
+import { atomicRemove, atomicWriteJson, atomicWriteRootOwnedJson, pinRootOwnedDirectory, requireActualLinuxRoot, fsyncDir, isStateDirectoryDurabilityError, readJsonIfExists } from './atomic.ts'
 import { acquireWriterMutex, acquireExistingWriterMutex, WRITER_MUTEX_FILE, type WriterMutexGuard } from './writer-mutex.ts'
 import { claimStateOwnership } from './ownership.ts'
 import type { AllocatedReferenceRecord, ReferenceKind, StateAuthorityMetadata, WriterLockHolder } from './types.ts'
@@ -82,6 +82,7 @@ const unrecoveredMutexes = new WeakMap<object, UnrecoveredMutexScope>()
 const defaultAuthority = (): StateAuthorityMetadata => ({ revision: 0, fencingToken: 0, updatedAt: new Date(0).toISOString(), references: {} })
 
 export class WriterLock {
+  #rootOwned = false
   readonly stateDir: string
   private readonly acquireTimeoutMs: number
   private readonly retryIntervalMs: number
@@ -93,6 +94,39 @@ export class WriterLock {
     this.retryIntervalMs = assertInt(opts.retryIntervalMs ?? 15, 1, 60_000, 'retryIntervalMs')
     this.isPidAlive = opts.isPidAlive ?? isProcessAlive
     this.recoverAccountContactProjection = opts.recoverAccountContactProjection
+  }
+  static forRootOwnedDirectory(stateDir: string, opts: WriterLockOptions = {}): WriterLock {
+    requireActualLinuxRoot()
+    const lock = new WriterLock(stateDir, opts)
+    lock.#rootOwned = true
+    return lock
+  }
+  private async writeJson(path: string, data: unknown, mode = 0o640, beforeCommit?: () => unknown | Promise<unknown>): Promise<void> {
+    return this.#rootOwned ? atomicWriteRootOwnedJson(path, data, mode, beforeCommit) : atomicWriteJson(path, data, mode, beforeCommit)
+  }
+  private async rootGuard(existingOnly: boolean, timeoutMs: number): Promise<WriterMutexGuard> {
+    const pin = await pinRootOwnedDirectory(this.stateDir)
+    const check = async (): Promise<void> => {
+      await pin.assert()
+      const info = await lstat(this.mutexFilePath).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+      if (info && (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.uid !== 0 || info.gid !== 0)) return fail('CONFLICT', 'root-owned writer mutex is unsafe')
+      const lock = await lstat(this.lockDirPath).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+      if (lock && (!lock.isDirectory() || lock.isSymbolicLink() || lock.uid !== 0 || lock.gid !== 0 || (lock.mode & 0o7777) !== 0o700)) return fail('CONFLICT', 'root-owned writer lock directory is unsafe')
+      for (const path of [this.authorityFilePath, ...(lock ? [this.ownerFilePath, this.intentFilePath] : [])]) {
+        const file = await lstat(path).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+        if (file && (!file.isFile() || file.isSymbolicLink() || file.nlink !== 1 || file.uid !== 0 || file.gid !== 0 || (file.mode & 0o022) !== 0)) return fail('CONFLICT', 'root-owned writer metadata is unsafe')
+      }
+    }
+    let guard: WriterMutexGuard | undefined
+    try {
+      await check()
+      guard = existingOnly ? await acquireExistingWriterMutex(this.mutexFilePath, timeoutMs, this.retryIntervalMs) : await acquireWriterMutex(this.mutexFilePath, timeoutMs, this.retryIntervalMs)
+      await check()
+      const held = guard
+      return { identity: held.identity, assertStable: async () => { await check(); await held.assertStable() }, release: async () => {
+        try { await check(); await held.release() } finally { try { await held.release() } finally { await pin.close() } }
+      } }
+    } catch (error) { try { await guard?.release() } finally { await pin.close() }; throw error }
   }
   /** Trusted startup wiring; installing a port does not itself acquire or recover a lease. */
   registerAccountContactProjectionRecovery(repair: NonNullable<WriterLockOptions['recoverAccountContactProjection']>): void {
@@ -124,6 +158,7 @@ export class WriterLock {
   }
   private async guard(timeoutMs = this.acquireTimeoutMs): Promise<WriterMutexGuard> {
     if (projectionReadScope.getStore()?.active) return fail('PRECONDITION_FAILED', 'a recovered projection read cannot reenter a state barrier or mutation')
+    if (this.#rootOwned) return this.rootGuard(false, timeoutMs)
     await mkdir(this.stateDir, { recursive: true, mode: 0o750 })
     const existing = await lstat(this.mutexFilePath).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
     // Settle a new state directory's owner before the permanent mutex inherits its group.
@@ -216,7 +251,7 @@ export class WriterLock {
       if (!old) allocations.set(allocation.uid, allocation)
     }
     const merged = validateUidAllocator({ nextUid: Math.max(...allocators.map(value => value.nextUid)), allocated: [...allocations.values()].sort((a, b) => a.uid - b.uid) })
-    await atomicWriteJson(join(this.stateDir, 'uid-allocator.json'), merged)
+    await this.writeJson(join(this.stateDir, 'uid-allocator.json'), merged)
     if (!committed) for (const { entry, backupHash } of phases.toReversed()) {
       if (entry.name === 'uid-allocator.json') continue
       const live = join(this.stateDir, entry.name)
@@ -233,7 +268,7 @@ export class WriterLock {
       if (entry.name !== 'uid-allocator.json' && hash !== (committed ? entry.stagedHash : entry.originalHash)) return fail('VALIDATION', 'restored canonical result could not be proved')
       canonicalHashes.push(hash)
     }
-    await atomicWriteJson(this.intentFilePath, { ...journal, restore: { ...plan, cleanup: { canonicalHashes } } }, 0o640)
+    await this.writeJson(this.intentFilePath, { ...journal, restore: { ...plan, cleanup: { canonicalHashes } } }, 0o640)
     await rm(stage, { recursive: true, force: true })
     await rm(backup, { recursive: true, force: true })
   }
@@ -356,7 +391,7 @@ export class WriterLock {
       return fail('VALIDATION', 'orphan owner epoch is older than state authority; evidence retained')
     } else if (holder.fencingToken > authority.fencingToken) {
       if (holder.protocol !== PROTOCOL || holder.fencingToken !== authority.fencingToken + 1) return fail('VALIDATION', 'orphan owner epoch is inconsistent')
-      await atomicWriteJson(this.authorityFilePath, { ...authority, fencingToken: holder.fencingToken, updatedAt: new Date().toISOString() }, 0o640)
+      await this.writeJson(this.authorityFilePath, { ...authority, fencingToken: holder.fencingToken, updatedAt: new Date().toISOString() }, 0o640)
     }
     await rm(this.lockDirPath, { recursive: true })
   }
@@ -394,7 +429,7 @@ export class WriterLock {
       await this.recoverOrphan(guard)
       const current = await this.readAuthority()
       const next = { ...current, fencingToken: assertInt(current.fencingToken + 1, 1, Number.MAX_SAFE_INTEGER, 'fencingToken'), updatedAt: new Date().toISOString() }
-      await atomicWriteJson(this.authorityFilePath, next, 0o640)
+      await this.writeJson(this.authorityFilePath, next, 0o640)
       return next
     } finally { await guard.release() }
   }
@@ -406,7 +441,7 @@ export class WriterLock {
    * merely to obtain its first lease. The absence check occurs under the mutex. */
   async withExistingUnrecoveredMutex<T>(callback: (scope: ExistingUnrecoveredWriterMutex) => Promise<T>): Promise<T> {
     if (projectionReadScope.getStore()?.active) return fail('PRECONDITION_FAILED', 'projection read cannot acquire a lease')
-    const guard = await acquireExistingWriterMutex(this.mutexFilePath, this.acquireTimeoutMs, this.retryIntervalMs)
+    const guard = this.#rootOwned ? await this.rootGuard(true, this.acquireTimeoutMs) : await acquireExistingWriterMutex(this.mutexFilePath, this.acquireTimeoutMs, this.retryIntervalMs)
     return this.withUnrecoveredGuard(guard, callback)
   }
   /** Initialization is allowed for an ordinary writer, but recovery is not:
@@ -458,12 +493,21 @@ export class WriterLock {
       const holder: Holder = { protocol: PROTOCOL, mutexIdentity: guard.identity, pid: process.pid, fencingToken, leaseId, acquiredAt }
       prepared = join(this.stateDir, '.lock-prepared-' + process.pid + '-' + leaseId)
       await mkdir(prepared, { mode: 0o700 })
-      if (process.platform !== 'win32') { const parent = await lstat(this.stateDir); await chown(prepared, -1, parent.gid); await chmod(prepared, 0o2770) }
-      await atomicWriteJson(join(prepared, LOCK_OWNER_FILE), holder, 0o640)
+      if (this.#rootOwned) {
+        const named = await lstat(prepared)
+        const handle = await open(prepared, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+        try {
+          const info = await handle.stat()
+          if (!info.isDirectory() || info.uid !== 0 || !named.isDirectory() || named.isSymbolicLink() || named.dev !== info.dev || named.ino !== info.ino) return fail('CONFLICT', 'new root-owned writer directory is unsafe')
+          await handle.chown(0, 0)
+          await handle.chmod(0o700)
+        } finally { await handle.close() }
+      } else if (process.platform !== 'win32') { const parent = await lstat(this.stateDir); await chown(prepared, -1, parent.gid); await chmod(prepared, 0o2770) }
+      await this.writeJson(join(prepared, LOCK_OWNER_FILE), holder, 0o640)
       await rename(prepared, this.lockDirPath)
       prepared = undefined
       publishedLease = leaseId
-      await atomicWriteJson(this.authorityFilePath, { ...current, fencingToken, updatedAt: acquiredAt }, 0o640)
+      await this.writeJson(this.authorityFilePath, { ...current, fencingToken, updatedAt: acquiredAt }, 0o640)
       let committed = false, commitDurabilityUncertain = false, closing = false, released = false
       let tail: Promise<unknown> = Promise.resolve()
       let releasePromise: Promise<void> | undefined
@@ -497,7 +541,7 @@ export class WriterLock {
           const record: WriteIntentRecord = { ...value, leaseId, fencingToken, baseRevision: current.revision, recordedAt: new Date().toISOString() }
           // Validate the full prospective journal before publication, without canonical file effects.
           await this.validatedIntent(holder, record)
-          await atomicWriteJson(this.intentFilePath, record, 0o640)
+          await this.writeJson(this.intentFilePath, record, 0o640)
         }),
         recordRestoreIntent: input => run(async () => {
           await assertCurrent()
@@ -508,7 +552,7 @@ export class WriterLock {
           for (const name of input.entries) entries.push({ name, originalHash: await this.treeHash(join(this.stateDir, name)), stagedHash: await this.treeHash(join(this.stateDir, input.stageName, name)) })
           const record: WriteIntentRecord = { op: 'restoreGenerationSnapshot', leaseId, fencingToken, baseRevision: current.revision, recordedAt: new Date().toISOString(), createdRelPaths: [], backups: [], restore: { stageName: input.stageName, backupName: input.backupName, entries } }
           await this.validatedIntent(holder, record)
-          await atomicWriteJson(this.intentFilePath, record, 0o640)
+          await this.writeJson(this.intentFilePath, record, 0o640)
         }),
         rollbackIntent: () => run(() => rollbackCurrent()),
         quarantineExternalAccountIntent: (relativeAccountPath, expectedSha256) => run(async () => {
@@ -536,9 +580,9 @@ export class WriterLock {
           }
           const reviewPath = join(this.stateDir, '.remote-access-review-' + leaseId + '.json')
           if (await lstat(reviewPath).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })) return fail('CONFLICT', 'remote-access review evidence already exists')
-          await atomicWriteJson(reviewPath, { schemaVersion: 1, reason: 'external_account_source_preserved', expectedSha256: expectedSha256 ?? null, journal }, 0o600, () => assertCurrent())
+          await this.writeJson(reviewPath, { schemaVersion: 1, reason: 'external_account_source_preserved', expectedSha256: expectedSha256 ?? null, journal }, 0o600, () => assertCurrent())
           const identity = await fingerprint()
-          await atomicWriteJson(reviewPath, { schemaVersion: 1, reason: 'external_account_source_preserved', preservedFingerprint: identity, journal }, 0o600, () => assertCurrent())
+          await this.writeJson(reviewPath, { schemaVersion: 1, reason: 'external_account_source_preserved', preservedFingerprint: identity, journal }, 0o600, () => assertCurrent())
           if (await fingerprint() !== identity) return fail('CONFLICT', 'external account inode changed before intent quarantine')
           await rm(this.intentFilePath)
           await fsyncDir(this.lockDirPath)
@@ -557,7 +601,7 @@ export class WriterLock {
           if (committed || commitDurabilityUncertain) return fail('CONFLICT', 'state writer lease already committed or durability is uncertain')
           const revision = patch.revision !== undefined ? assertInt(patch.revision, latest.revision, Number.MAX_SAFE_INTEGER, 'revision') : patch.incrementRevision === false ? latest.revision : assertInt(latest.revision + 1, latest.revision, Number.MAX_SAFE_INTEGER, 'revision')
           const updated = validateStateAuthority({ ...latest, committedLeaseId: leaseId, revision, fencingToken, updatedAt: new Date().toISOString(), references: { ...latest.references, ...patch.references }, ...(latest.allocatedReferences || patch.allocatedReferences ? { allocatedReferences: { ...latest.allocatedReferences, ...patch.allocatedReferences } } : {}) })
-          try { await atomicWriteJson(this.authorityFilePath, updated, 0o640, () => assertCurrent()) }
+          try { await this.writeJson(this.authorityFilePath, updated, 0o640, () => assertCurrent()) }
           catch (error) {
             if (isStateDirectoryDurabilityError(error)) commitDurabilityUncertain = true
             throw error
