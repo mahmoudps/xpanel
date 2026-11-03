@@ -71,6 +71,19 @@ const fixture = async () => {
     log: join(directory, OPERATION_AUDIT_LOG_NAME), anchor: join(directory, OPERATION_AUDIT_ANCHOR_NAME), pending: join(directory, OPERATION_AUDIT_PENDING_NAME) }
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>
+// writeFile's requested mode is filtered by the real root lane's UMask=0077.
+// Establish the exact issued-owner metadata explicitly; never change that mask
+// or relax the production reader to accommodate an incorrectly prepared fixture.
+const writeFixtureOwner = async (directory: string, content: string) => {
+  const path = join(directory, 'owner.json')
+  await writeFile(path, content, { mode: 0o640, flag: 'wx' })
+  await chmod(path, 0o640)
+  const info = await lstat(path)
+  expect(info.isFile()).toBe(true)
+  expect(info.isSymbolicLink()).toBe(false)
+  expect({ uid: info.uid, gid: info.gid, nlink: info.nlink, mode: info.mode & 0o7777 }).toEqual({ uid: 0, gid: 0, nlink: 1, mode: 0o640 })
+  expect(await readFile(path, 'utf8')).toBe(content)
+}
 // Corrupt only this test's newly created private database, never an installed DB.
 // Save/recreate the exact trigger inside one transaction so no unprotected schema
 // escapes even if corruption setup fails. Production code never removes it.
@@ -200,16 +213,19 @@ describe('exact issued lifecycle append recovery algorithm; native admission is 
     if (kind === 'foreign-pending') await writeFile(f.pending, bytes.pending.toString().replace(f.plan.record.eventUid, randomUUID()), { mode: 0o600 })
     if (kind === 'extra-log') await writeFile(f.log, Buffer.concat([prior, bytes.line, bytes.line]))
     if (kind === 'candidate-without-pending') await writeFile(f.anchor + '.candidate', bytes.next, { mode: 0o600 })
-    if (kind === 'unknown-owner') { const path = join(f.directory, '.lock'); await mkdir(path); await chmod(path, 0o2770); await writeFile(join(path, 'owner.json'), '{}', { mode: 0o640 }) }
+    if (kind === 'unknown-owner') { const path = join(f.directory, '.lock'); await mkdir(path); await chmod(path, 0o2770); await writeFixtureOwner(path, '{}') }
     if (kind === 'missing-prior-index') await removeFixtureAuditIndex(f)
     const before = await disk(f.directory), rows = await f.handle.db.query('SELECT * FROM audit_log')
     const cap = {}; issuedRepairFixture.plans.set(cap, f.plan)
-    await expect(f.authority.repairIssuedLifecycleIntent(cap)).rejects.toThrow()
+    const repair = f.authority.repairIssuedLifecycleIntent(cap)
+    if (kind === 'unknown-owner') await expect(repair).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { reason: 'issued_foreign_owner' } })
+    else await expect(repair).rejects.toThrow()
     // Taking the real mutex can alter its own SQLite bookkeeping; it must not
     // change any business/audit inode, bytes, owner or authority.
     const withoutMutex = (items: unknown) => (items as { name: string }[]).filter(item => !item.name.startsWith('.writer-mutex.sqlite'))
     expect(withoutMutex(await disk(f.directory))).toEqual(withoutMutex(before))
     expect(await f.handle.db.query('SELECT * FROM audit_log')).toEqual(rows)
+    if (kind === 'unknown-owner') expect(await readFile(join(f.directory, '.lock', 'owner.json'), 'utf8')).toBe('{}')
   })
   it('refuses synthetic repair authority and expires prefix proofs without a receipt', async () => {
     const f = await issuedFixture(), before = await disk(f.directory)
@@ -230,7 +246,7 @@ describe('exact issued lifecycle append recovery algorithm; native admission is 
           JSON.stringify({ ...record.detail, _auditEventUid: record.eventUid, _auditSeq: record.seq, _auditPrevHash: record.prevHash, _auditEntryHash: record.entryHash }), record.outcome])
     }
     const owner = join(f.directory, '.lock'); await mkdir(owner); await chmod(owner, 0o2770)
-    await writeFile(join(owner, 'owner.json'), f.plan.writer.ownerRaw, { mode: 0o640 })
+    await writeFixtureOwner(owner, f.plan.writer.ownerRaw)
     const cap = {}; issuedRepairFixture.plans.set(cap, f.plan)
     await f.authority.repairIssuedLifecycleIntent(cap)
     expect((await readdir(f.directory)).includes('.lock')).toBe(false)
@@ -250,7 +266,7 @@ describe('exact issued lifecycle append recovery algorithm; native admission is 
   })
   it('blocks generic orphan cleanup before pending/HEAD, then permits ordinary adopt/reconcile after native retirement', async () => {
     const f = await issuedFixture(), owner = join(f.directory, '.lock')
-    await mkdir(owner); await chmod(owner, 0o2770); await writeFile(join(owner, 'owner.json'), f.plan.writer.ownerRaw, { mode: 0o640 })
+    await mkdir(owner); await chmod(owner, 0o2770); await writeFixtureOwner(owner, f.plan.writer.ownerRaw)
     const before = await readFile(join(f.directory, 'authority.json')), ownerBefore = await readFile(join(owner, 'owner.json'))
     issuedRepairFixture.unretired = true
     for (const run of [() => f.authority.recoverLifecycleIntent(f.binding), () => f.authority.appendReconcileIntent({ ...f.binding, purpose: 'host.reconcile.intent', action: 'host.reconcile', jobId: randomUUID() })]) {
