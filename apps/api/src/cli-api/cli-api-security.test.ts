@@ -100,6 +100,25 @@ describe('xuapi / xwhmapi act as the kernel-named caller through the panel autho
     expect([403, 404]).toContain(foreign.status)
   })
 
+  it('keeps the kernel peer when a route re-checks the caller on a copy of the request', async () => {
+    // The file route authenticates again after reading the body; without a host agent it then stops at 412.
+    expect(await run(alice.uid, 'xuapi', 'POST', '/api/accounts/alice/files', 'op=list')).toMatchObject({ code: 2, status: 412 })
+    expect(await run(0, 'xuapi', '--user=alice', 'POST', '/api/accounts/alice/files', 'op=list')).toMatchObject({ code: 2, status: 412 })
+    const foreign = await run(alice.uid, 'xuapi', 'POST', '/api/accounts/bobby/files', 'op=list')
+    expect([403, 404]).toContain(foreign.status)
+  })
+
+  it('re-checks the kernel peer, not a session, when an account retires its own mailbox', async () => {
+    const mailbox = (account: Account) => state.store.createServiceUser({ accountId: account.id, login: `retire@${account.primaryDomain}`,
+      passwordHash: '{SHA512-CRYPT}$6$clifixture$abcdefghijklmnopqrstuvwxyz0123456789', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
+    const own = await mailbox(alice), other = await mailbox(bob)
+    expect([403, 404]).toContain((await run(alice.uid, 'xuapi', 'DELETE', `/api/service-users/${other.id}`)).status)
+    // Admission passes as alice; without a host agent the native deletion then stays unverified.
+    expect(await run(alice.uid, 'xuapi', 'DELETE', `/api/service-users/${own.id}`))
+      .toMatchObject({ code: 2, status: 412, body: { details: { reason: 'mailbox_retirement_native_unverified' } } })
+    expect(await db.db.query<{ actor: string }>("SELECT actor FROM jobs WHERE kind='mailbox.retire'")).toEqual([{ actor: 'user:alice' }])
+  })
+
   it('refuses every attempt of an account to raise its privileges', async () => {
     expect(await run(alice.uid, 'xuapi', '--user=bobby', 'accounts', 'list')).toMatchObject({ code: 2, status: 403 })
     const asReseller: CliCall = { command: 'xuapi', actAs: { kind: 'reseller', name: 'resellerone' }, method: 'GET', path: '/api/accounts', body: null }
