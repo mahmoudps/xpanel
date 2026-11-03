@@ -435,6 +435,29 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
     expect(f.isClosed()).toBe(true)
     await expect(f.mod.stageAuthenticatedReleaseArchive('/protected/staging', { authenticatedArchive: report, signingKey: key, keyId })).rejects.toMatchObject({ code: 'LIVE_ARCHIVE_REQUIRED' })
   })
+  it.each([
+    ['acquire-lifecycle-release.mjs', 'stageAuthenticatedReleaseArchive', 1],
+    ['acquire-lifecycle-release.mjs', 'verifyAuthenticatedReleaseTree', 1],
+    ['install-bootstrap.mjs', 'stageAuthenticatedReleaseArchive', 2],
+  ] as const)('uses retained-report options at each %s %s call', async (filename, method, expectedCalls) => {
+    // These installed and bootstrap entrypoints use distinct module lifetimes. Exercise their actual
+    // option expressions with this verifier's branded report, without running the installer as root.
+    const source = readFileSync(new URL('./' + filename, import.meta.url), 'utf8')
+    const calls = [...source.matchAll(new RegExp('await (?:verifier\\.)?' + method + '\\([^,\\n]+, (\\{[^}\\n]+\\})\\)', 'g'))]
+    expect(calls).toHaveLength(expectedCalls)
+    for (const [, expression] of calls) {
+      const f = await fixture(), archiveTrust = options(original)
+      const callerOptions = new Function('keyPin', 'trust', 'archiveTrust', 'report', 'return (' + expression + ')')
+      const { value } = await f.mod.withAuthenticatedReleaseArchive(f.path, archiveTrust, async ({ report }: any) => {
+        const actual = callerOptions({ bytes: key }, { keyId }, archiveTrust, report)
+        return method === 'stageAuthenticatedReleaseArchive'
+          ? f.mod.stageAuthenticatedReleaseArchive('/protected/staging', actual)
+          : f.mod.verifyAuthenticatedReleaseTree('/protected/tree', actual)
+      })
+      expect(value.ok).toBe(true)
+      expect(f.isClosed()).toBe(true)
+    }
+  })
   it('retains an owned extracted stage when the archive path changes before lifetime retirement', async () => {
     const f = await fixture(); let stagedAt = ''
     await expect(f.mod.withAuthenticatedReleaseArchive(f.path, options(original), async ({ report }: any) => {

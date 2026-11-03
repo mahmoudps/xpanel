@@ -177,7 +177,7 @@ export async function acquireLifecycleRelease(input) {
               bootstrap.verifyBootstrapPublisher(JSON.parse(publisherPin.bytes.toString('utf8')), report, bootstrap.parseBootstrapKeys(JSON.parse(keysPin.bytes.toString('utf8'))))
               check(report.manifest.files.some(entry => entry.path === 'scripts/prepared-release.mjs'), 'PREPARED_ACQUISITION_CONTROLS_REQUIRED')
               effectsStarted = true
-              const staged = await verifier.stageAuthenticatedReleaseArchive('/opt/xpanel/staging', { ...archiveTrust, authenticatedArchive: report })
+              const staged = await verifier.stageAuthenticatedReleaseArchive('/opt/xpanel/staging', { signingKey: keyPin.bytes, keyId: trust.keyId, authenticatedArchive: report })
               await sourcePin.verify(); await trustPin.verify(); await keyPin.verify(); await keysPin.verify(); await publisherPin.verify()
               // The existing authenticated extractor has now verified every new source file before this import.
               const prepared = await withAuthenticatedWorkspaceResolution(staged.stagedAt, report.manifest, async () => {
@@ -188,7 +188,7 @@ export async function acquireLifecycleRelease(input) {
                 const target = await import(pathToFileURL(staged.stagedAt + '/scripts/prepared-release.mjs').href)
                 return target.withPreparedRelease(input, async capability => target.preparedReleaseInfo(capability))
               })
-              await verifier.verifyAuthenticatedReleaseTree(staged.stagedAt, { ...archiveTrust, authenticatedArchive: report })
+              await verifier.verifyAuthenticatedReleaseTree(staged.stagedAt, { signingKey: keyPin.bytes, keyId: trust.keyId, authenticatedArchive: report })
               await sourcePin.verify(); await trustPin.verify(); await keyPin.verify(); await keysPin.verify(); await publisherPin.verify()
               return prepared
             })

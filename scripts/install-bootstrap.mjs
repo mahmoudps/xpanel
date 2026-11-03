@@ -716,7 +716,7 @@ async function withPreparedReleaseScope(input, callback, mayPrepare) {
               archiveSha256: report.archiveSha256, manifestSha256: report.manifestSha256, releaseRoot,
               installedArchiveSha256: source.archiveSha256, createdAt: new Date().toISOString() })
             for (const pin of pins) await pin.verify()
-            const staged = await stageAuthenticatedReleaseArchive(INSTALL_ROOT + '/staging', { ...archiveTrust, authenticatedArchive: report })
+            const staged = await stageAuthenticatedReleaseArchive(INSTALL_ROOT + '/staging', { signingKey: keyPin.bytes, keyId: trust.keyId, authenticatedArchive: report })
             const dependencies = await verifyDependencies(staged.stagedAt, report, trust, runtime)
             for (const pin of pins) await pin.verify()
             check(!await exists(releaseRoot), 'PREPARED_RELEASE_CONFLICT')
