@@ -7,10 +7,44 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const port = vi.hoisted(() => ({
   files: new Map<string, Buffer>(), dirs: new Map<string, string[]>(), modes: new Map<string, number>(),
   owners: new Map<string, [number, number]>(), fds: new Map<number, string>(), nextFd: 20,
+  acls: new Map<string, string>(), nss: new Map<string, string>(), nssQueries: [] as string[],
+  symlinks: new Set<string>(), replacedInode: new Set<string>(), changedTime: new Set<string>(), onArchive: undefined as (() => void) | undefined,
   writes: [] as string[], commands: [] as string[], report: {} as any, loadedUnit: false as boolean | string,
   procStatus: 'Name:\tunit\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nGroups:\t0\n',
   threadStatus: '', extraThread: false, foreignView: false, extraAcl: false,
 }))
+const dataRoot = '/var/lib/xpanel'
+const nginxPasswd = 'nginx:x:324:325::/var/lib/nginx:/usr/sbin/nologin'
+const nginxGroup = 'nginx:x:325:'
+const earlyAcl = 'user::rwx\ngroup::rwx\nother::---'
+const lateAcl = 'user::rwx\nuser:324:--x\ngroup::rwx\nmask::rwx\nother::---'
+
+function lateFixture() {
+  port.dirs.set(dataRoot, ['acme', 'generations', 'state'])
+  port.dirs.set(dataRoot + '/acme', [])
+  port.modes.set(dataRoot + '/acme', 0o2755)
+  port.acls.set(dataRoot, lateAcl)
+}
+
+function nssReply(args: string[]) {
+  const [database, key] = args
+  if (database === 'passwd' && key === 'xpanel') return 'xpanel:x:123:124::/var/lib/xpanel:/usr/sbin/nologin'
+  if (database === 'passwd' && (key === 'nginx' || key === '324')) return nginxPasswd
+  if (database === 'group' && (key === 'nginx' || key === '325')) return nginxGroup
+  if (database === 'passwd' && key === 'nobody') return 'nobody:x:65534:65534::/nonexistent:/usr/sbin/nologin'
+  if (database === 'group' && key === 'xpanel') return 'xpanel:x:124:'
+  if (database === 'group' && key === 'xpanel-agent') return 'xpanel-agent:x:125:xpanel'
+  if (database === 'initgroups' && key === 'nginx') return 'nginx                325'
+  return ''
+}
+
+function fixtureAcl(args: string[]) {
+  const path = port.fds.get(Number(args.at(-1)!.split('/').at(-1)))!
+  const mode = port.modes.get(path)!
+  const base = mode === 0o2770 ? earlyAcl : mode === 0o2755 ? 'user::rwx\ngroup::r-x\nother::r-x' : 'user::rwx\ngroup::r-x\nother::---'
+  return (port.acls.get(path) ?? base) + '\n' + (port.extraAcl ? 'user:500:rwx\nmask::rwx\n' : '')
+}
+
 const digest = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 const normalized = (path: string) => path.replaceAll('\\', '/')
 function resolvedProcPath(path: string): string {
@@ -27,13 +61,13 @@ function procBytes(path: string) {
 }
 function missing(path: string): never { throw Object.assign(new Error('missing fixture path'), { code: 'ENOENT', path }) }
 function info(path: string) {
-  path = normalized(path)
+  path = resolvedProcPath(path)
   if (!port.files.has(path) && !port.dirs.has(path)) return missing(path)
   const owners = port.owners.get(path) ?? [0, 0]
   return { uid: BigInt(owners[0]), gid: BigInt(owners[1]), mode: BigInt(port.modes.get(path) ?? (port.dirs.has(path) ? 0o755 : 0o644)),
-    dev: 1n, ino: BigInt([...port.dirs.keys(), ...port.files.keys()].indexOf(path) + 1), nlink: 1n,
-    size: BigInt(port.files.get(path)?.length ?? 0), mtimeNs: 1n, ctimeNs: 1n,
-    isDirectory: () => port.dirs.has(path), isFile: () => port.files.has(path), isSymbolicLink: () => false }
+    dev: 1n, ino: BigInt([...port.dirs.keys(), ...port.files.keys()].indexOf(path) + (port.replacedInode.has(path) ? 1001 : 1)), nlink: 1n,
+    size: BigInt(port.files.get(path)?.length ?? 0), mtimeNs: 1n, ctimeNs: port.changedTime.has(path) ? 2n : 1n,
+    isDirectory: () => port.dirs.has(path) && !port.symlinks.has(path), isFile: () => port.files.has(path), isSymbolicLink: () => port.symlinks.has(path) }
 }
 vi.mock('node:fs/promises', async original => ({
   ...await original<typeof import('node:fs/promises')>(),
@@ -78,9 +112,9 @@ vi.mock('node:child_process', async original => ({
     const command = port.fds.get(Number(options.stdio[3]))!
     port.commands.push(command)
     const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter() })
-    const text = command === '/usr/bin/getent' ? 'xpanel:x:123:124::/var/lib/xpanel:/usr/sbin/nologin\n'
-      : command === '/usr/bin/getfacl' ? 'user::rwx\n' + ((port.modes.get(port.fds.get(Number(args.at(-1)!.split('/').at(-1)))!)! & 0o070) === 0o070 ? 'group::rwx\n' : 'group::r-x\n')
-        + 'other::---\n' + (port.extraAcl ? 'user:500:rwx\nmask::rwx\n' : '')
+    if (command === '/usr/bin/getent') port.nssQueries.push(args.join(' '))
+    const text = command === '/usr/bin/getent' ? (port.nss.get(args.join(' ')) ?? nssReply(args)) + '\n'
+      : command === '/usr/bin/getfacl' ? fixtureAcl(args)
       : port.loadedUnit === true || port.loadedUnit === args[1] ? 'LoadState=loaded\nActiveState=active\nMainPID=99\nControlPID=0\n'
         : args[1] === 'xpanel-management-tls.timer' ? 'LoadState=not-found\nActiveState=inactive\n'
           : 'LoadState=not-found\nActiveState=inactive\nMainPID=0\nControlPID=0\n'
@@ -114,7 +148,11 @@ vi.mock('./lifecycle-ownership.mjs', async original => ({
 }))
 vi.mock('./release-verifier.mjs', async original => ({
   ...await original<typeof import('./release-verifier.mjs')>(),
-  withAuthenticatedReleaseArchive: async (_path: string, _trust: unknown, callback: (input: any) => unknown) => ({ report: port.report, value: await callback({ report: port.report }) }),
+  withAuthenticatedReleaseArchive: async (_path: string, _trust: unknown, callback: (input: any) => unknown) => {
+    const value = await callback({ report: port.report })
+    port.onArchive?.()
+    return { report: port.report, value }
+  },
 }))
 
 import { resumePreparedInstallation } from './install-bootstrap.mjs'
@@ -124,6 +162,8 @@ const blob = (value: unknown) => Buffer.from(JSON.stringify(value))
 const put = (path: string, value: Buffer | string, mode = 0o644) => { port.files.set(normalized(path), Buffer.from(value)); port.modes.set(normalized(path), mode) }
 
 beforeEach(() => {
+  port.acls.clear(); port.nss.clear(); port.nssQueries.length = 0; port.onArchive = undefined
+  port.symlinks.clear(); port.replacedInode.clear(); port.changedTime.clear()
   port.files.clear(); port.dirs.clear(); port.modes.clear(); port.owners.clear(); port.fds.clear()
   port.writes.length = port.commands.length = 0; port.loadedUnit = false
   port.procStatus = 'Name:\tunit\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nGroups:\t0\n'
@@ -194,6 +234,108 @@ describe('read-only admission for the identical early prepared source, with fake
     expect(port.fds.size).toBe(0)
     expect(port.commands.every(path => ['/usr/bin/getent', '/usr/bin/systemctl', '/usr/bin/getfacl'].includes(path))).toBe(true)
   })
+  it('preserves the early service root with optional empty children and no nginx account requirement', async () => {
+    for (const name of ['state', 'generations']) port.dirs.delete(dataRoot + '/' + name)
+    port.dirs.set(dataRoot, [])
+    port.nss.set('passwd nginx', '')
+    await expect(resumePreparedInstallation(input)).resolves.toMatchObject({ resumed: true })
+    expect(port.nssQueries).toEqual(['passwd xpanel'])
+  })
+  it('resumes the same prepared release with the exact empty ACME layout and the current nginx traverse-only ACL', async () => {
+    lateFixture()
+    await expect(resumePreparedInstallation(input)).resolves.toMatchObject({ resumed: true, installationReceipt: 'pending', releaseRoot })
+    expect(port.nssQueries).toEqual(['passwd xpanel', ...Array.from({ length: 2 }, () => [
+      'passwd nginx', 'group nginx', 'passwd 324', 'group 325', 'passwd nobody', 'group xpanel', 'group xpanel-agent', 'initgroups nginx',
+    ]).flat()])
+    expect(port.fds.size).toBe(0)
+    expect(port.writes).toEqual([])
+  })
+  it.each([
+    ['orphan ACL', () => { port.acls.set(dataRoot, lateAcl) }],
+    ['orphan directory', () => { lateFixture(); port.acls.delete(dataRoot) }],
+    ['unexpected sibling', () => { lateFixture(); port.dirs.get(dataRoot)!.push('other') }],
+    ['absent state in late layout', () => { lateFixture(); port.dirs.set(dataRoot, ['acme', 'generations']) }],
+    ['absent generations in late layout', () => { lateFixture(); port.dirs.set(dataRoot, ['acme', 'state']) }],
+    ['unexpected ACME content', () => { lateFixture(); port.dirs.get(dataRoot + '/acme')!.push('challenge') }],
+    ['wrong ACME owner', () => { lateFixture(); port.owners.set(dataRoot + '/acme', [123, 124]) }],
+    ['wrong ACME group', () => { lateFixture(); port.owners.set(dataRoot + '/acme', [0, 124]) }],
+    ['missing inherited setgid', () => { lateFixture(); port.modes.set(dataRoot + '/acme', 0o755) }],
+    ['symbolic ACME directory', () => { lateFixture(); port.symlinks.add(dataRoot + '/acme') }],
+    ['regular file in place of ACME directory', () => { lateFixture(); port.dirs.delete(dataRoot + '/acme'); put(dataRoot + '/acme', 'file', 0o2755) }],
+  ] as const)('refuses the incomplete or substituted ACME state: %s', async (_name, change) => {
+    change()
+    await expect(resumePreparedInstallation(input)).rejects.toThrow()
+    expect(port.fds.size).toBe(0)
+    expect(port.writes).toEqual([])
+  })
+  it.each([
+    [dataRoot, lateAcl.replace('user:324:--x', 'user:326:--x')],
+    [dataRoot, lateAcl.replace('user:324:--x', 'user:324:r-x')],
+    [dataRoot, lateAcl.replace('user:324:--x', 'user:324:-wx')],
+    [dataRoot, lateAcl.replace('group::rwx', 'group::r-x')],
+    [dataRoot, lateAcl.replace('mask::rwx', 'mask::--x')],
+    [dataRoot, lateAcl.replace('other::---', 'other::--x')],
+    [dataRoot, lateAcl.replace('mask::rwx', 'group:325:--x\nmask::rwx')],
+    [dataRoot, lateAcl + '\ndefault:user::rwx'],
+    [dataRoot + '/acme', 'user::rwx\ngroup::rwx\nother::r-x'],
+    [dataRoot + '/acme', 'user::rwx\ngroup::r-x\nother::rwx'],
+    [dataRoot + '/acme', 'user::rwx\ngroup::r-x\nother::r-x\ndefault:user::rwx'],
+    [dataRoot + '/state', 'user::rwx\nuser:324:--x\ngroup::r-x\nmask::r-x\nother::---'],
+  ])('requires the exact stored access ACL without defaults at %s (%s)', async (path, acl) => {
+    lateFixture(); port.acls.set(path, acl)
+    await expect(resumePreparedInstallation(input)).rejects.toThrow('INSTALL_RESUME_DIRECTORY_ACL_UNSAFE')
+  })
+  it.each([
+    ['passwd nginx', ''], ['passwd nginx', nginxPasswd.replace('nginx:', 'another:')],
+    ['passwd nginx', nginxPasswd.replace(':324:', ':0:')], ['passwd nginx', nginxPasswd.replace(':324:', ':123:')],
+    ['passwd nginx', nginxPasswd.replace(':324:', ':65534:')], ['passwd nginx', nginxPasswd.replace(':325:', ':124:')],
+    ['passwd nginx', nginxPasswd.replace(':325:', ':65534:')], ['passwd nginx', nginxPasswd.replace(':325:', ':0:')],
+    ['passwd nginx', nginxPasswd.replace('/usr/sbin/nologin', '/bin/bash')],
+    ['passwd 324', nginxPasswd.replace('nginx:', 'alias:')], ['group nginx', 'another:x:325:'],
+    ['passwd nobody', 'nobody:x:324:65534::/nonexistent:/sbin/nologin'],
+    ['passwd nobody', 'nobody:x:65534:325::/nonexistent:/sbin/nologin'],
+    ['group xpanel-agent', 'xpanel-agent:x:125:xpanel,nginx'],
+    ['group xpanel-agent', 'xpanel-agent:x:325:xpanel'], ['group xpanel', 'xpanel:x:325:'],
+    ['group 325', 'alias:x:325:'], ['initgroups nginx', 'nginx 325 124'], ['initgroups nginx', 'nginx 325 0'],
+  ])('rejects a missing, ambiguous or privileged NSS principal (%s, %s)', async (query, value) => {
+    lateFixture(); port.nss.set(query, value)
+    await expect(resumePreparedInstallation(input)).rejects.toThrow('INSTALL_RESUME_NGINX_IDENTITY_INVALID')
+  })
+  it('still checks the unit and authenticated release in the late layout', async () => {
+    lateFixture(); port.loadedUnit = 'xpanel-api.service'
+    await expect(resumePreparedInstallation(input)).rejects.toThrow('INSTALL_RESUME_UNIT_PRESENT')
+    port.loadedUnit = false
+    const sidecar = '/root/releases/old.manifest.json'
+    put(sidecar, blob({ ...JSON.parse(port.files.get(sidecar)!.toString()), signature: '0'.repeat(128) }))
+    await expect(resumePreparedInstallation(input)).rejects.toThrow('INSTALL_PUBLISHER_SIGNATURE_INVALID')
+    expect(port.writes).toEqual([])
+  })
+  it('refuses a service writer that started while the prepared archive was checked', async () => {
+    lateFixture()
+    port.onArchive = () => {
+      port.extraThread = true
+      port.threadStatus = 'Uid:\t123\t123\t123\t123\nGid:\t124\t124\t124\t124\nGroups:\t124\n'
+    }
+    await expect(resumePreparedInstallation(input)).rejects.toThrow('INSTALL_RESUME_SERVICE_PROCESS_PRESENT')
+    expect(port.fds.size).toBe(0)
+    expect(port.writes).toEqual([])
+  })
+  it.each(['renamed root', 'replaced ACME', 'changed child ACL', 'renumbered nginx'] as const)(
+    'refuses %s between the initial data observation and the authenticated archive return', async scenario => {
+      lateFixture()
+      port.onArchive = () => {
+        if (scenario === 'renumbered nginx') port.nss.set('passwd 324', nginxPasswd.replace('nginx:', 'substitute:'))
+        else if (scenario === 'changed child ACL') {
+          port.acls.set(dataRoot + '/state', 'user::rwx\ngroup::r-x\nother::r-x')
+          port.changedTime.add(dataRoot + '/state')
+        }
+        else port.replacedInode.add(scenario === 'renamed root' ? dataRoot : dataRoot + '/acme')
+      }
+      await expect(resumePreparedInstallation(input)).rejects.toThrow(
+        scenario === 'renumbered nginx' ? 'INSTALL_RESUME_NGINX_IDENTITY_INVALID' : 'INSTALL_RESUME_DIRECTORY_CHANGED')
+      expect(port.fds.size).toBe(0)
+      expect(port.writes).toEqual([])
+    })
   it.each(['/var/lib/xpanel/control.db', '/var/lib/xpanel/control.db-wal', '/var/lib/xpanel/control.db-shm', '/var/lib/xpanel/install-journal.json', '/etc/xpanel/mariadb-admin.cnf', '/etc/systemd/system/xpanel-api.service'])('refuses persisted effects at %s', async path => {
     put(path, 'existing-effects')
     await expect(resumePreparedInstallation(input)).rejects.toThrow('INSTALL_RESUME_EFFECTS_PRESENT')
