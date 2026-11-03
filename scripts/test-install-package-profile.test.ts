@@ -197,13 +197,45 @@ describe('kernel quota format detection in the installer', () => {
     const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
     const functions = source.slice(source.indexOf('kernel_lacks_quota_format() {'), source.indexOf('# Every bootable kernel gets the modules'))
     const fixture = root.replaceAll('\\', '/')
-    const script = 'OS_FAMILY=rhel\ndie() { echo "$*" >&2; exit 1; }; assert_root_file() { :; }\n'
+    const script = 'OS_FAMILY=rhel\ndie() { echo "$*" >&2; exit 1; }; assert_root_file() { if [[ "$1" == */modules.builtin ]]; then echo "guarded $1" >&2; fi; }\n'
       + functions.replaceAll('/lib/modules/', `${fixture}/modules/`).replaceAll('/boot/vmlinuz-', `${fixture}/boot/vmlinuz-`)
       + 'inventory="$(bootable_kernel_releases)" || exit 1\nwhile read -r release; do if kernel_lacks_quota_format "$release"; then echo "lacks $release"; else echo "has $release"; fi; done <<< "$inventory"\n'
     const run = spawnSync(bash, ['-euo', 'pipefail'], { input: script, encoding: 'utf8', timeout: 10_000 })
     expect(run.status, run.stderr).toBe(0)
     expect(run.stdout.trim().split('\n').sort()).toEqual(['has builtin', 'has modular', 'lacks virtual'])
+    expect(run.stderr.trim().split('\n')).toHaveLength(1)
+    expect(run.stderr.trim()).toMatch(/^guarded .*\/modules\/builtin\/modules\.builtin$/)
   })
+  for (const scenario of ['read-error', 'guard-refusal', 'wrong-release-link', 'dangling-link', 'fifo'] as const) {
+    const unixSpecial = !['read-error', 'guard-refusal'].includes(scenario)
+    it.skipIf(unixSpecial && process.platform === 'win32')(`refuses an uncertain built-in index (${scenario})`, () => {
+      const root = mkdtempSync(join(tempParent, tempPrefix)); tempRoots.push(root)
+      const release = join(root, 'modules', 'target'), other = join(root, 'modules', 'other')
+      mkdirSync(release, { recursive: true }); mkdirSync(other)
+      const builtin = join(release, 'modules.builtin'), quota = 'kernel/fs/quota/quota_v2.ko\nkernel/fs/quota/quota_tree.ko\n'
+      writeFileSync(join(release, 'modules.dep'), quota)
+      if (scenario === 'wrong-release-link' || scenario === 'dangling-link') {
+        if (scenario === 'wrong-release-link') writeFileSync(join(other, 'modules.builtin'), quota)
+        symlinkSync('../other/modules.builtin', builtin)
+      } else if (scenario === 'fifo') {
+        expect(spawnSync('mkfifo', [builtin]).status).toBe(0)
+      } else writeFileSync(builtin, '')
+      const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
+      const functions = source.slice(source.indexOf('kernel_lacks_quota_format() {'), source.indexOf('bootable_kernel_releases() {'))
+      const fileGuard = source.slice(source.indexOf('assert_root_file() {'), source.indexOf('assert_pinned_runtime() {'))
+      // Exercise the real regular/non-symlink check with synthetic root ownership and a real canonical fixture path.
+      const script = 'die() { echo "$*" >&2; exit 1; }; assert_root_owned_path() { :; }\n'
+        + 'stat() { if [[ $2 == %u ]]; then echo 0; else echo 644; fi; }\n' + fileGuard
+        + (scenario === 'guard-refusal' ? 'stat() { if [[ $2 == %u && $4 == */modules.builtin ]]; then echo 1000; elif [[ $2 == %u ]]; then echo 0; else echo 644; fi; }\n' : '')
+        + (scenario === 'read-error' ? 'cat() { command cat "$@"; return 5; }\n' : '')
+        + functions.replaceAll('/lib/modules/', `${root.replaceAll('\\', '/')}/modules/`)
+        + 'if kernel_lacks_quota_format target; then echo lacks; else echo has; fi\n'
+      const run = spawnSync(bash, ['-euo', 'pipefail'], { input: script, encoding: 'utf8', timeout: 10_000 })
+      expect(run.error).toBeUndefined()
+      expect(run.status).toBe(1); expect(run.stdout).toBe('')
+      expect(run.stderr).toContain(scenario === 'read-error' ? 'could not be read' : scenario === 'guard-refusal' ? 'not root-owned' : 'missing or symbolic')
+    })
+  }
   it.each(['empty', 'missing-index', 'ubuntu-rescue'])('fails closed for an unobservable boot inventory: %s', scenario => {
     const root = mkdtempSync(join(tempParent, tempPrefix)); tempRoots.push(root)
     mkdirSync(join(root, 'boot'))
