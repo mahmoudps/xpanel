@@ -138,7 +138,8 @@ describe('lifecycle command boundary: source contracts, not native qualification
   it('describes prepared-install finalization without claiming host provisioning or native qualification', () => {
     expect(HELP).toContain('finalize an already prepared install')
     expect(HELP).toContain('does not provision a host or start services')
-    expect(HELP).toContain('adopt                      Plan adoption (native apply unavailable)')
+    expect(HELP).toContain('adopt                      Adopt a populated prepared install through a signed repair helper')
+    expect(HELP).toContain('Adopt requires an authenticated prepared helper and preserves existing accounts.')
     expect(parseLifecycleArgs(['install', '--apply', '--yes', ...artifact])).toMatchObject({ command: 'install', mode: 'apply', assumeYes: true })
     reject(['install', '--apply', '--yes'], 'ARTIFACT_PROOF_REQUIRED')
   })

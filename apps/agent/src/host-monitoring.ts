@@ -207,8 +207,8 @@ export function parseRepquotaUsage(stdout: string): Map<string, { usedBytes: num
   return result
 }
 
-/** Complete namespace-bound filesystem bytes; per-account usage stays an independent quota report. */
-export async function readDisk(run: MonitoringRun, readFile: ((path: string) => Promise<string | null>) | undefined, accounts: readonly MonitoringAccount[], now: () => Date = () => new Date()): Promise<DiskObservation> {
+/** Namespace-bound filesystem observations without reading account quota data. */
+export async function readFilesystems(run: MonitoringRun, readFile: ((path: string) => Promise<string | null>) | undefined, now: () => Date = () => new Date()): Promise<DiskObservation['filesystems']> {
   const inventory = await readHostDiskInventory({ readFile: path => readFile ? readFile(path) : Promise.resolve(null), runCommand: run }, now)
   let filesystems: DiskObservation['filesystems'] = { state: 'unavailable', items: [], inodes: 'unavailable', reason: 'filesystems-unavailable' }
   if (inventory.diskCoverage.status === 'complete') {
@@ -233,6 +233,12 @@ export async function readDisk(run: MonitoringRun, readFile: ((path: string) => 
   } else if (inventory.diskCoverage.reason !== 'mount_inventory_unavailable' && inventory.diskCoverage.reason !== 'df_unavailable') {
     filesystems.reason = 'invalid-filesystems'
   }
+  return filesystems
+}
+
+/** Complete namespace-bound filesystem bytes; per-account usage stays an independent quota report. */
+export async function readDisk(run: MonitoringRun, readFile: ((path: string) => Promise<string | null>) | undefined, accounts: readonly MonitoringAccount[], now: () => Date = () => new Date()): Promise<DiskObservation> {
+  const filesystems = await readFilesystems(run, readFile, now)
   const observedAt = now().toISOString()
   const active = accounts.filter(account => account.status !== 'terminating').sort((left, right) => left.username.localeCompare(right.username))
   let mount: string | null = null

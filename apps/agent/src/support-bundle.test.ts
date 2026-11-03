@@ -4,11 +4,13 @@ import { isSupportRedacted } from './support-bundle-redaction.ts'
 import { buildSupportBundle, handleSupportRoute, readPanelRelease, readSupportSummary, SUPPORT_BUNDLE_MANIFEST, SUPPORT_BUNDLE_SECTIONS, SUPPORT_LIMITS } from './support-bundle.ts'
 import type { SupportRouteContext } from './support-bundle.ts'
 import type { UpgradeHostFs } from './upgrade-observation.ts'
+import { HOST_DISK_DF_ARGV } from './host-info-disks.ts'
 
 const now = () => new Date('2026-10-27T10:00:00.000Z')
-const SPACE = 'Filesystem     Type     1-blocks        Used   Available Capacity Mounted on\n/dev/vda1      ext4  52521566208 20971520000 29393936384      42% /\n198.51.100.9:/export nfs4 1000 10 990 1% /mnt/share\n'
+const SPACE = 'Filesystem 1-blocks Used Available Capacity Mounted on\n/dev/vda1 52521566208 20971520000 29393936384 42% /\n198.51.100.9:/export 1000 10 990 1% /mnt/share\n'
 const INODES = 'Filesystem      Inodes  IUsed   IFree IUse% Mounted on\n/dev/vda1      3276800 250000 3026800    8% /\n198.51.100.9:/export 0 0 0 - /mnt/share\n'
 const FILES: Record<string, string> = {
+  '/proc/self/mountinfo': '20 1 8:1 / / rw - ext4 /dev/vda1 rw\n21 20 0:2 / /mnt/share rw - nfs4 198.51.100.9:/export rw\n',
   '/proc/uptime': '93784.52 180000.00\n',
   '/proc/meminfo': 'MemTotal:        2048000 kB\nMemFree:          100000 kB\nMemAvailable:    1024000 kB\nSwapTotal:        512000 kB\nSwapFree:         256000 kB\n',
   '/etc/os-release': 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04.1 LTS"\n',
@@ -38,7 +40,7 @@ function context(overrides: Partial<SupportRouteContext> = {}, journal: (unit: s
   const run = vi.fn(async (argv: string[]) => {
     const command = argv.join(' ')
     if (argv[0] === '/usr/bin/systemctl') { const unit = argv.at(-1)!; return { ok: true, stdout: ['nginx.service', 'xpanel-agent.service', 'xpanel-api.service'].includes(unit) ? 'loaded\nactive\n' : unit === 'postfix.service' ? 'loaded\nfailed\n' : 'not-found\ninactive\n', stderr: '' } }
-    if (command === '/usr/bin/df -B1 -P -T') return { ok: true, stdout: SPACE, stderr: '' }
+    if (command === HOST_DISK_DF_ARGV.join(' ')) return { ok: true, stdout: SPACE, stderr: '' }
     if (command === '/usr/bin/df -i -P') return { ok: true, stdout: INODES, stderr: '' }
     if (argv[0] === '/usr/bin/journalctl') { events.push('journal:' + argv[argv.indexOf('-u') + 1] + ':' + argv[argv.indexOf('-n') + 1]); return { ok: true, stdout: journal(argv[argv.indexOf('-u') + 1]!), stderr: '' } }
     events.push('unexpected:' + command)
@@ -109,8 +111,8 @@ describe('support bundle', () => {
     expect(bundle.resources.filesystems.items.map(fs => fs.mount)).toEqual(['/', '/mnt/share'])
     expect(bundle.drift).toEqual({ state: 'read', generationId: 7, manifestMissing: false, count: 3, byReason: { content_mismatch: 1, missing: 2 } })
     // Only fixed observers ran: no state file, database, key or account path was opened.
-    expect(events.filter(event => event.startsWith('read:'))).toEqual(expect.arrayContaining(['read:/proc/meminfo', 'read:/proc/uptime', 'read:/etc/os-release']))
-    expect(events.filter(event => event.startsWith('read:') && !['read:/proc/meminfo', 'read:/proc/uptime', 'read:/etc/os-release'].includes(event))).toEqual([])
+    expect(events.filter(event => event.startsWith('read:'))).toEqual(expect.arrayContaining(['read:/proc/meminfo', 'read:/proc/uptime', 'read:/etc/os-release', 'read:/proc/self/mountinfo']))
+    expect(events.filter(event => event.startsWith('read:') && !['read:/proc/meminfo', 'read:/proc/uptime', 'read:/etc/os-release', 'read:/proc/self/mountinfo'].includes(event))).toEqual([])
     expect(events.filter(event => event.startsWith('unexpected:'))).toEqual([])
   })
 
@@ -123,6 +125,18 @@ describe('support bundle', () => {
     expect(isSupportRedacted({ ...bundle, manifest: null })).toBe(true)
     const again = await buildSupportBundle(context().ctx)
     expect(JSON.stringify(again.journal)).toBe(JSON.stringify(bundle.journal))
+  })
+
+  it('reports a changed mount namespace as unavailable without reading quota data', async () => {
+    const { ctx, readFile, run } = context()
+    let mountReads = 0
+    readFile.mockImplementation(async path => path === '/proc/self/mountinfo'
+      ? ++mountReads === 1 ? FILES[path]! : FILES[path]!.replace('8:1', '8:2')
+      : FILES[path] ?? null)
+    const bundle = await buildSupportBundle(ctx)
+    expect(bundle.resources.filesystems).toEqual({ state: 'unavailable', truncated: false, items: [] })
+    expect(mountReads).toBe(2)
+    expect(run.mock.calls.some(([argv]) => argv[0] === '/usr/sbin/repquota')).toBe(false)
   })
 
   it('bounds each journal unit after redaction and marks it truncated', async () => {

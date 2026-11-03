@@ -16,15 +16,23 @@ describe('native lifecycle composition boundary', () => {
     expect(() => validateNativeLifecycleRequest({ ...input(), dbPath: '/tmp/other.db' })).toThrow('LIFECYCLE_REQUEST_INVALID')
   })
 
-  it('does not evaluate accessor claims, trust a receipt, or accept an alternate artifact directory', () => {
+  it('does not evaluate accessor claims, trust a receipt, or accept a transient artifact location', () => {
     let touched = false
     const accessor = Object.defineProperty({}, 'schemaVersion', { get() { touched = true; return 1 } })
     expect(() => validateNativeLifecycleRequest(accessor)).toThrow('LIFECYCLE_REQUEST_INVALID')
     expect(touched).toBe(false)
     expect(() => validateNativeLifecycleRequest({ ...input(), dependencyReceipt: { ready: true } })).toThrow('LIFECYCLE_RECEIPT_NOT_AUTHORITY')
-    for (const path of ['/tmp/release.tar.gz', '/opt/xpanel/downloads/../release.tar.gz', '/opt/xpanel/downloads/sub/release.tar.gz', '/home/user/release.tar.gz']) {
-      expect(() => validateNativeLifecycleRequest({ ...input(), artifact: { ...artifact, path } })).toThrow('LIFECYCLE_ARTIFACT_INVALID')
+    for (const path of ['/tmp/release.tar.gz', '/var/tmp/release.tar.gz', '/home/user/release.tar.gz']) {
+      expect(() => validateNativeLifecycleRequest({ ...input(), artifact: { ...artifact, path } })).toThrow('PREPARED_RELEASE_INPUT_INVALID')
     }
+    expect(() => validateNativeLifecycleRequest({ ...input(), artifact: { ...artifact, path: '/opt/xpanel/downloads/../release.tar.gz' } })).toThrow('LIFECYCLE_ARTIFACT_INVALID')
+  })
+
+  it('accepts durable nested artifact syntax without authenticating its contents or caller trust path', () => {
+    const path = '/opt/xpanel/downloads/sub/release.tar.gz'
+    expect(validateNativeLifecycleRequest({ ...input(), artifact: { ...artifact, path } })).toEqual({
+      command: 'upgrade', artifact: { path, expectedArchiveSha256: artifact.expectedArchiveSha256, keyId: artifact.keyId },
+    })
   })
 
   it('requires explicit apply confirmation and supports no caller-selected rollback pointers', () => {
