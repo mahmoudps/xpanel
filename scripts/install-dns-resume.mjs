@@ -473,6 +473,17 @@ async function finishListedAttempt(first,prior,read,ports,deadline) {
       } else requireFact(s.FragmentPath === start.FragmentPath && s.MainPID === start.MainPID && s.NRestarts === start.NRestarts
         && s.ExecMainStartTimestampMonotonic === start.ExecMainStartTimestampMonotonic,'SERVICE_HISTORY')
       if (frame.id === id && group.populated && group.pid === s.MainPID) witnessed = true
+    } else if (s.SubState === 'auto-restart-queued') {
+      // systemd can queue the next listed retry before replacing its previous
+      // execution record. This is only a waiting frame, never a witnessed start.
+      assertRestartPolicy(s)
+      requireFact(prior && !start && !member && frame.id === id && s.Job === id
+        && s.ActiveState === 'activating' && s.MainPID === '0' && !group.populated
+        && s.FragmentPath === prior.FragmentPath && positive(s.NRestarts) && Number(s.NRestarts) === Number(prior.NRestarts)+1
+        && s.ExecMainPID === prior.ExecMainPID
+        && s.ExecMainStartTimestampMonotonic === prior.ExecMainStartTimestampMonotonic
+        && s.ExecMainExitTimestampMonotonic === prior.ExecMainExitTimestampMonotonic
+        && s.Result === prior.Result && s.ExecMainCode === prior.ExecMainCode && s.ExecMainStatus === prior.ExecMainStatus,'SERVICE_HISTORY')
     } else {
       assertDeadRetry(s)
       if (start) {
@@ -502,20 +513,35 @@ async function followingStart(completed,spentId,read,ports,deadline) {
       requireFact(frame.id !== spentId,'SERVICE_JOB')
       return finishListedAttempt(frame,completed.service,read,ports,deadline)
     }
-    assertDeadRetry(frame.service)
-    requireFact(sameFailedAttempt(completed.service,frame.service) && !frame.group.populated,'SERVICE_HISTORY')
+    if (frame.service.SubState === 'start') {
+      // The independent list-jobs sample can lag the show sample. This frame is
+      // never credited as a witnessed attempt; a new listed full cycle is still required.
+      const s = frame.service, prior = completed.service
+      assertRestartPolicy(s)
+      requireFact(s.ActiveState === 'activating' && s.ControlGroup === '/system.slice/pdns.service'
+        && (noServiceJob(s.Job) || (positive(s.Job) && Number(s.Job) < 2**32)) && positive(s.MainPID) && Number(s.MainPID) > 1
+        && s.ExecMainPID === s.MainPID && positive(s.ExecMainStartTimestampMonotonic)
+        && s.FragmentPath === prior.FragmentPath && positive(s.NRestarts) && Number(s.NRestarts) === Number(prior.NRestarts)+1
+        && s.MainPID !== prior.ExecMainPID
+        && Number(s.ExecMainStartTimestampMonotonic) > Number(prior.ExecMainExitTimestampMonotonic)
+        && (!frame.group.populated || frame.group.pid === s.MainPID),'SERVICE_HISTORY')
+    } else {
+      assertDeadRetry(frame.service)
+      requireFact(sameFailedAttempt(completed.service,frame.service) && !frame.group.populated,'SERVICE_HISTORY')
+    }
     await ports.pause(8)
   }
   requireFact(false,'SERVICE_ATTEMPT')
 }
 
-export async function observeDnsServiceJobs(deadline,fragment,allowRetry,ports) {
+export async function observeDnsServiceJobs(deadline,fragment,allowRetry,ports,expectedFirstJob = null) {
   let latest, drained = false
   const read = () => dnsFrame(deadline,fragment,ports)
   const service = async () => {
     const prior = latest?.service
     latest = await read()
     const {id,service:s} = latest
+    if (!prior && expectedFirstJob !== null) requireFact(id === expectedFirstJob,'SERVICE_JOB')
     if (id === null && noServiceJob(s.Job)) return s
     requireFact(allowRetry && !drained && id !== null && (noServiceJob(s.Job) || s.Job === id),'SERVICE_JOB')
     const predecessor = s.SubState === 'start' ? prior : s
@@ -542,6 +568,17 @@ export async function readDnsIdleBoundary(deadline,fragment,ports) {
   requireFact(serviceKeys.every(k => first[k] === last[k]),'SERVICE_HISTORY')
   timeLeft(deadline)
   return last
+}
+
+// Only a listed, fully witnessed vendor retry can defer the decision. No stop
+// occurs in this path, and the caller must restart the complete inventory.
+export async function readDnsDecisionBoundary(deadline,fragment,ports) {
+  timeLeft(deadline)
+  const id = await jobAt(ports)
+  if (id === null) return readDnsIdleBoundary(deadline,fragment,ports)
+  const observed = await observeDnsServiceJobs(deadline,fragment,true,ports,id)
+  requireFact(observed.drained,'SERVICE_JOB')
+  return null
 }
 
 async function captureOnce(deadline,allowRetry) {
@@ -617,13 +654,22 @@ function binding(facts) {
 
 export async function verifyVendorDnsPhase(phase,expected,ports) {
   requireFact((phase === 'inspect' && expected === undefined) || (phase === 'quiesce' && /^[a-f0-9]{64}$/.test(expected)))
-  const first = await ports.capture(), firstState = vendorState(first), digest = binding(first)
-  const inspected = hash('sha256',firstState+':'+digest)
-  requireFact(expected === undefined || expected === inspected,'SOURCE_BINDING')
-  const last = await ports.capture(), state = vendorState(last)
-  requireFact(firstState === state && binding(last) === digest,'SOURCE_BINDING')
-  // File inventory may span an automatic retry. Both full samples must independently establish a dead process census.
-  const latest = await ports.service()
+  let inspected, digest, state, last, latest, priorInspected
+  for (let attempt = 0; ; attempt++) {
+    const first = await ports.capture(), firstState = vendorState(first)
+    digest = binding(first)
+    inspected = hash('sha256',firstState+':'+digest)
+    requireFact((expected === undefined || expected === inspected)
+      && (priorInspected === undefined || priorInspected === inspected),'SOURCE_BINDING')
+    last = await ports.capture()
+    state = vendorState(last)
+    requireFact(firstState === state && binding(last) === digest,'SOURCE_BINDING')
+    // A fully witnessed in-flight retry invalidates both inventories: recapture.
+    latest = await ports.service(true)
+    if (latest !== null) break
+    requireFact(attempt < 2,'SERVICE_ATTEMPT')
+    priorInspected = inspected
+  }
   const decision = {...last,service:latest}
   requireFact(vendorState(decision) === state && binding(decision) === digest,'SOURCE_BINDING')
   if (phase === 'inspect') return 'xpanel-pdns-vendor-inspected-v2 '+inspected
@@ -661,7 +707,7 @@ async function runNative() {
   const bounded = () => requireFact(performance.now() < deadline,'SERVICE_DEADLINE')
   const result = await verifyVendorDnsPhase(process.argv[2],process.argv[3],{
     capture: async (allowRetry = true) => { bounded(); const observation = await captureDnsInventory(deadline,allowRetry).catch(error => atRefusal('SOURCE_CAPTURE',error)); bounded(); return observation },
-    service: () => readDnsIdleBoundary(deadline,unit,livePorts).catch(error => atRefusal('SERVICE_STATE',error)),
+    service: (allowTransition = false) => (allowTransition ? readDnsDecisionBoundary(deadline,unit,livePorts) : readDnsIdleBoundary(deadline,unit,livePorts)).catch(error => atRefusal('SERVICE_STATE',error)),
     stop: async () => { bounded(); await command('systemctl',['--job-mode=fail','stop','pdns.service']); bounded() },
   })
   bounded()
