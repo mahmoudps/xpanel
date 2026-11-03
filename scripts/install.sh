@@ -891,19 +891,19 @@ apply_os_configuration() {
 # flavour ships them only in linux-modules-extra, so a kernel without them cannot mount a quota-enabled /home
 # at boot. Only explicitly named EL rescue images may lack a module tree.
 kernel_lacks_quota_format() {
-  local index module directory="/lib/modules/$1" builtin
+  local dep_index builtin_index="" module pattern directory="/lib/modules/$1" builtin
   [[ -d "$directory" && ! -L "$directory" ]] || die "Kernel module directory is missing or symbolic: $directory"
   directory="$(realpath -e -- "$directory")" || die "Kernel module directory could not be resolved."
-  local -a indexes=("$directory/modules.dep")
-  assert_root_file "${indexes[0]}" || die "Kernel module dependency index is untrusted."
+  assert_root_file "$directory/modules.dep" || die "Kernel module dependency index is untrusted."
+  dep_index="$(cat -- "$directory/modules.dep")" || die "Kernel module indexes could not be read."
   builtin="$directory/modules.builtin"
   if [[ -e "$builtin" || -L "$builtin" ]]; then
     assert_root_file "$builtin" || die "Kernel built-in module index is untrusted."
-    indexes=("$builtin" "${indexes[@]}")
+    builtin_index="$(cat -- "$builtin")" || die "Kernel module indexes could not be read."
   fi
-  index="$(cat -- "${indexes[@]}")" || die "Kernel module indexes could not be read."
   for module in quota_v2 quota_tree; do
-    grep -qE "(^|/)${module}\.ko(\.[a-z]+)?(:|$)" <<< "$index" || return 0
+    pattern="^([^[:space:]:/]+/)*${module}\.ko(\.[a-z]+)?"
+    grep -qE "${pattern}:" <<< "$dep_index" || grep -qE "${pattern}$" <<< "$builtin_index" || return 0
   done
   return 1
 }

@@ -186,6 +186,9 @@ describe('kernel quota format detection in the installer', () => {
     const kernels: Record<string, Record<string, string>> = {
       'modular': { 'modules.dep': 'kernel/fs/quota/quota_v2.ko.zst: kernel/fs/quota/quota_tree.ko.zst\nkernel/fs/quota/quota_tree.ko.zst:\n' },
       'builtin': { 'modules.dep': '', 'modules.builtin': 'kernel/fs/quota/quota_v2.ko\nkernel/fs/quota/quota_tree.ko\n' },
+      'rhs-only': { 'modules.dep': 'kernel/fs/ext4/ext4.ko.xz: kernel/fs/quota/quota_v2.ko.xz\nkernel/fs/quota/quota_tree.ko.xz:\n' },
+      'rhs-both': { 'modules.dep': 'kernel/drivers/x.ko: kernel/fs/quota/quota_v2.ko\nkernel/drivers/y.ko: kernel/fs/quota/quota_tree.ko\n' },
+      'no-colon': { 'modules.dep': 'kernel/fs/quota/quota_v2.ko\nkernel/fs/quota/quota_tree.ko:\n' },
       'virtual': { 'modules.dep': 'kernel/fs/ext4/ext4.ko.zst:\nkernel/fs/quota/quota_tree.ko.zst:\n' },
     }
     mkdirSync(join(root, 'boot'))
@@ -202,7 +205,7 @@ describe('kernel quota format detection in the installer', () => {
       + 'inventory="$(bootable_kernel_releases)" || exit 1\nwhile read -r release; do if kernel_lacks_quota_format "$release"; then echo "lacks $release"; else echo "has $release"; fi; done <<< "$inventory"\n'
     const run = spawnSync(bash, ['-euo', 'pipefail'], { input: script, encoding: 'utf8', timeout: 10_000 })
     expect(run.status, run.stderr).toBe(0)
-    expect(run.stdout.trim().split('\n').sort()).toEqual(['has builtin', 'has modular', 'lacks virtual'])
+    expect(run.stdout.trim().split('\n').sort()).toEqual(['has builtin', 'has modular', 'lacks no-colon', 'lacks rhs-both', 'lacks rhs-only', 'lacks virtual'])
     expect(run.stderr.trim().split('\n')).toHaveLength(1)
     expect(run.stderr.trim()).toMatch(/^guarded .*\/modules\/builtin\/modules\.builtin$/)
   })
