@@ -16,7 +16,8 @@ export const MARKER = '# Managed by xPanel management TLS lifecycle v1.\n'
 export const PATHS = Object.freeze({
   config: '/etc/xpanel/management-tls.json', apiEnv: '/etc/xpanel/api.env', secret: '/etc/xpanel/ingress.secret',
   state: '/var/lib/xpanel-management-tls', webroot: '/var/lib/xpanel-management-tls/challenge',
-  acme: '/etc/xpanel/management-acme', logs: '/var/log/xpanel-management-tls',
+  // Logs stay under the root-only state directory: Ubuntu's /var/log is root:syslog 0775, which no trusted ancestor walk admits.
+  acme: '/etc/xpanel/management-acme', logs: '/var/lib/xpanel-management-tls/logs',
   challenge: '/etc/nginx/conf.d/xpanel-management-challenge.conf', ingress: '/etc/nginx/conf.d/xpanel-management.conf',
   include: '/etc/nginx/xpanel-management/ingress-secret.conf', certs: '/etc/xpanel/management-certificates',
   service: '/etc/systemd/system/xpanel-management-tls.service', timer: '/etc/systemd/system/xpanel-management-tls.timer',
@@ -95,9 +96,13 @@ export function mergeApiEnvironment(content, config) {
 }
 
 const listen = (config, port, ssl = false) => config.addresses.map(address => `    listen ${isIP(address) === 6 ? `[${address}]` : address}:${port}${ssl ? ' ssl' : ''};`).join('\n')
+// 80 and 443 are shared with the account edge. nginx chooses among the servers of the exact socket a request
+// arrives on, so an address-specific listen here would capture every account site on that address.
+const sharedListen = (config, port, ssl = false) => [`    listen ${port}${ssl ? ' ssl' : ''};`,
+  ...(config.addresses.some(address => isIP(address) === 6) ? [`    listen [::]:${port}${ssl ? ' ssl' : ''};`] : [])].join('\n')
 export function renderChallenge(config) {
   return MARKER + profiles(config).map(point => `server {
-${listen(config, 80)}
+${sharedListen(config, 80)}
     server_name ${point.host};
     if ($host != "${point.host}") { return 421; }
     location ~ "^/\\.well-known/acme-challenge/[A-Za-z0-9_-]{1,128}$" {
@@ -115,7 +120,7 @@ export function renderIngress(config, generation) {
   const certificate = `${PATHS.certs}/${generation}`
   const tls = `    ssl_certificate ${certificate}/fullchain.pem;\n    ssl_certificate_key ${certificate}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;`
   return MARKER + `map $http_upgrade $xpanel_management_connection_upgrade { default upgrade; '' close; }\n\n` + profiles(config).map(point => `server {
-${listen(config, 443, true)}
+${sharedListen(config, 443, true)}
     server_name ${point.host};
 ${tls}
     if ($host != "${point.host}") { return 421; }
@@ -157,7 +162,7 @@ export function renderRenewalUnits(nodePath, layout = 'flat') {
 }
 
 export function certbotArguments(config) {
-  return ['certonly', '--config', `${PATHS.acme}/cli.ini`, '--config-dir', PATHS.acme, '--work-dir', `${PATHS.state}/acme-work`, '--logs-dir', PATHS.logs,
+  return ['certonly', '--config', `${PATHS.acme}/cli.ini`, '--config-dir', PATHS.acme, '--work-dir', `${PATHS.state}/acme-work`, '--logs-dir', PATHS.logs, '--max-log-backups', '10',
     '--server', ACME_DIRECTORY, '--non-interactive', '--agree-tos', '--email', config.acmeEmail, '--no-directory-hooks',
     '--webroot', '--webroot-path', PATHS.webroot, '--preferred-challenges', 'http-01', '--cert-name', 'xpanel-management', '--keep-until-expiring',
     ...profiles(config).flatMap(point => ['-d', point.host])]
@@ -229,7 +234,9 @@ function observeChildBirth(pid) {
 }
 
 /** Fixed argv-only root tools. Uncertain effects are retained, never signalled by a recycled PGID. */
-async function command(operation, executable, args, timeoutMs = 30_000, extraFd, acceptedExitCodes = [0]) {
+async function command(operation, requestedExecutable, args, timeoutMs = 30_000, extraFd, acceptedExitCodes = [0]) {
+  // Distributions ship some tools as symbolic links (EL: /usr/bin/certbot -> certbot-3); the resolved file is verified and run.
+  const executable = realpathSync(requestedExecutable)
   trustedExecutable(executable)
   const activePath = `${PATHS.state}/active-command.json`
   // The lock operation itself must not modify another holder's command receipt.
@@ -412,7 +419,9 @@ async function renewalTimerState(expectedFiles = new Map()) {
 function assertTimerSnapshot(original, current, expectedFiles, afterOwnReload = false) {
   assertOriginalReferences(expectedFiles)
   for (const [path, expected] of expectedFiles) if (!sameFileVersion(current.references.get(path), expected)) fail('RENEWAL_TIMER_CONCURRENT_DRIFT')
-  if (original.LoadState === 'not-found' && afterOwnReload) {
+  // systemd loads a not-found unit from disk on its next query, without daemon-reload; the file versions checked above
+  // show the loaded files are ours, so before the reload a fresh, never-started load of them is as valid as not-found.
+  if (original.LoadState === 'not-found' && (afterOwnReload || current.LoadState !== 'not-found')) {
     if (current.LoadState !== 'loaded' || current.ActiveState !== 'inactive' || current.SubState !== 'dead' || current.UnitFileState !== 'disabled' || current.InvocationID !== '') fail('RENEWAL_TIMER_CONCURRENT_DRIFT')
   } else for (const key of ['LoadState', 'ActiveState', 'SubState', 'UnitFileState', 'InvocationID', 'FragmentPath', 'DropInPaths']) if (original[key] !== current[key]) fail('RENEWAL_TIMER_CONCURRENT_DRIFT')
 }
@@ -426,11 +435,14 @@ async function nginxConfigurationDigest() {
 }
 
 async function preflightUnusedListeners(config) {
-  const inventory = await command('read-ingress-listeners', '/usr/bin/ss', ['--listening', '--tcp', '--numeric', '--no-header', '--processes'])
+  // iproute2 installs ss in /usr/bin on Debian and Ubuntu and in /usr/sbin on EL.
+  const ss = existsSync('/usr/bin/ss') ? '/usr/bin/ss' : '/usr/sbin/ss'
+  const inventory = await command('read-ingress-listeners', ss, ['--listening', '--tcp', '--numeric', '--no-header', '--processes'])
   const inventorySha256 = sha(inventory.stdout)
   // An exclusive real bind refuses Apache, legacy APIs and wildcard listeners.
   // No other service is stopped and no firewall/default vhost is rewritten.
-  for (const address of config.addresses) for (const port of [80, 443, 2083, 2087, 2096]) {
+  // 80 and 443 are shared with the account edge; only the management ports are bound exclusively.
+  for (const address of config.addresses) for (const port of [2083, 2087, 2096]) {
     await new Promise((resolveProbe, reject) => {
       const server = createServer(socket => socket.destroy())
       const timer = setTimeout(() => { server.close(); reject(Object.assign(new Error('INGRESS_BOOTSTRAP_BLOCKED_LISTENER'), { code: 'INGRESS_BOOTSTRAP_BLOCKED_LISTENER' })) }, 2_000)
@@ -520,8 +532,12 @@ function assertNoCertbotHooks() {
   if (renewal && /^\s*(?:pre_hook|post_hook|renew_hook|deploy_hook)\s*=\s*\S/m.test(renewal.bytes.toString('utf8'))) fail('ACME_UNREVIEWED_HOOK_REFUSED')
 }
 
+// The Debian, Ubuntu and EL certbot packages ship exactly these two settings: log rotation is left to logrotate
+// (certbotArguments sets its own bound) and renewal is announced as preconfigured. Neither changes issuance.
+const PACKAGED_CERTBOT_DEFAULTS = new Set(['max-log-backups = 0', 'preconfigured-renewal = True'])
+
 export function assertIsolatedDefaultConfig(text) {
-  if (text.split(/\r?\n/).some(line => { const value = line.trim(); return value && !value.startsWith('#') && !value.startsWith(';') })) fail('ACME_GLOBAL_CONFIGURATION_REVIEW_REQUIRED')
+  if (text.split(/\r?\n/).some(line => { const value = line.trim(); return value && !value.startsWith('#') && !value.startsWith(';') && !PACKAGED_CERTBOT_DEFAULTS.has(value) })) fail('ACME_GLOBAL_CONFIGURATION_REVIEW_REQUIRED')
 }
 
 export function renewalObservation(previousFingerprint, currentFingerprint, priorWasObserved = true) {

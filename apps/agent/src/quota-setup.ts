@@ -2,7 +2,7 @@ import { isXpanelError } from '@xpanel/core'
 import { assertSafeArgv } from '@xpanel/os'
 import { createProductionHostTargetMatcher, LinuxHostExecutor, type AgentExecutor } from './executor.ts'
 import { createHostJobRun } from './host-job-exec.ts'
-import { initializeUserQuota, type QuotaInitializationPorts } from './services/quota.ts'
+import { initializeUserQuota, readBootableKernels, type QuotaInitializationPorts } from './services/quota.ts'
 
 /** The native ports of user quota setup, shared by the root agent route and the installer. */
 export const nativeQuotaSetupPorts = (executor: AgentExecutor): QuotaInitializationPorts => {
@@ -15,6 +15,7 @@ export const nativeQuotaSetupPorts = (executor: AgentExecutor): QuotaInitializat
       const scanned = await scanRun(argv, { timeoutMs: 240_000, env: { LC_ALL: 'C' } })
       return { ok: scanned.ok, code: scanned.code ?? 1, stdout: scanned.stdout, stderr: scanned.stderr }
     },
+    bootableKernels: readBootableKernels,
     readFile: path => executor.readFile(path),
     writeFile: file => executor.writeFile(file),
   }

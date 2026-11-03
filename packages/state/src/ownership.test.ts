@@ -35,6 +35,19 @@ describe('state file ownership', () => {
     }
   })
 
+  it.skipIf(process.platform === 'win32')('gives every directory level a root writer creates to xpanel, not only the leaf', async () => {
+    const calls: string[] = []
+    setStateOwnershipDepsForTests({ euid: () => 0, lookup: () => ({ uid: 42, gid: 43 }), chown: async path => { calls.push(path) } })
+    const dir = await mkdtemp(join(tmpdir(), 'xpanel-state-owner-'))
+    try {
+      await atomicWriteJson(join(dir, 'extended', 'runtime', 'generations', '1.json'), {})
+      for (const level of ['extended', join('extended', 'runtime'), join('extended', 'runtime', 'generations')]) expect(calls).toContain(join(dir, level))
+      expect(calls).not.toContain(dir)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('leaves a file owned by the current user when the process is not root', async () => {
     let chowned = false
     setStateOwnershipDepsForTests({

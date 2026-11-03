@@ -259,6 +259,7 @@ const isIncludedRuntimeSource = (relPath) => {
     'scripts/install-finalization-native.mjs', 'scripts/install-finalization-native.d.mts',
     'scripts/install-finalization-readiness.mjs', 'scripts/install-finalization-readiness.d.mts',
     'scripts/install-startup.mjs', 'scripts/install-startup.d.mts',
+    'scripts/install-os-configuration.mjs',
   ].includes(relPath)) return true
   if (REQUIRED_SYSTEMD_UNITS.includes(relPath)) return true
   if (/^(?:apps|packages)\/[^/]+\/package\.json$/.test(relPath)) return true

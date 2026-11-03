@@ -26,7 +26,8 @@ export const aptProfile = (release: OsRelease): XpanelOsProfile => {
     codename: os.codename,
     packageManager: 'apt',
     // add-apt-repository imports the PPA signing key with gpg; adduser creates the nginx user
-    bootstrapPackages: ['software-properties-common', 'ca-certificates', 'gnupg', 'adduser', 'acl'],
+    // openssl creates the installer's self-signed default certificate
+    bootstrapPackages: ['software-properties-common', 'ca-certificates', 'gnupg', 'adduser', 'acl', 'openssl'],
     // Ubuntu's nginx runs as www-data, Apache's user; a separate identity keeps Nginx out of
     // anything Apache's shared children can read (temp bodies, cache, prefork docroots)
     extraSystemUsers: ['nginx'],
@@ -37,6 +38,8 @@ export const aptProfile = (release: OsRelease): XpanelOsProfile => {
       mariadb: ['mariadb-server'],
       postgresql: ['postgresql'],
       postfix: ['postfix'],
+      // The agent signs outgoing mail through the OpenDKIM milter and renders its configuration
+      opendkim: ['opendkim'],
       dovecot: ['dovecot-core', 'dovecot-imapd', 'dovecot-pop3d', 'dovecot-lmtpd', 'dovecot-sieve', 'dovecot-managesieved'],
       // The reconciler publishes BIND zone files; include its candidate validator and observer.
       powerdns: ['pdns-server', 'pdns-backend-bind', 'bind9-utils', 'dnsutils'],
@@ -60,6 +63,7 @@ export const aptProfile = (release: OsRelease): XpanelOsProfile => {
       postgresql: 'postgresql',
       postfix: 'postfix',
       dovecot: 'dovecot',
+      opendkim: 'opendkim',
       powerdns: 'pdns',
       redis: 'redis-server',
       ftp: 'pure-ftpd',

@@ -61,7 +61,7 @@ vi.mock('../../../scripts/lifecycle-admission.mjs', () => ({
   startLifecycleWriterParticipant: async (_role: string, options: { onFence: () => Promise<void> }) => { harness.onFence = options.onFence; return { close: async () => undefined } },
   withLifecycleWriterAdmission: async <T>(callback: () => Promise<T>): Promise<T> => { harness.writerEntries++; return callback() },
 }))
-vi.mock('./agent-origin.ts', () => ({ syncRuntimePublicOrigin: async () => undefined }))
+vi.mock('./agent-origin.ts', () => ({ syncRuntimePublicOrigin: async () => undefined, readManagementHosts: async () => [] }))
 vi.mock('./host-access.ts', () => ({ ensureAcmeWebRoot: async () => undefined }))
 vi.mock('./services/local-mail.ts', () => ({ ensureInstalledMail: async () => undefined }))
 vi.mock('./services/mail-websocket.ts', () => ({ enableMailWebsocketProxy: async () => undefined }))

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FakeHostExecutor, createProductionHostTargetMatcher } from './executor.ts'
 import type { HostTargetOperation } from './executor.ts'
-import { securityObservationCommands, isSecurityObservationCommand } from '@xpanel/os'
+import { profileFor, securityObservationCommands, isSecurityObservationCommand, SUPPORTED_OS } from '@xpanel/os'
 import { isMailQuarantineArgv, QUARANTINE_STATUS_FIELDS, QUARANTINE_SUMMARY_FIELDS, QUARANTINE_RAW_FIELDS, QUARANTINE_ID_FIELDS, quarantineStagePath, quarantineBayesPath } from '../../../packages/os/src/mail-quarantine-command.ts'
 
 // Production path/argv policy with a declared memory-only executor. These tests
@@ -41,6 +41,15 @@ describe('functional production host target admission', () => {
     for (const path of ['/var/lib/xpanel/mail-quarantine', '/var/lib/xpanel/mail-quarantine/' + accountId, '/var/lib/xpanel/mail-quarantine/' + accountId + '/stage']) only(path, ['ensure-directory'])
     only(quarantineStagePath(accountId, operationId), ['read', 'write', 'remove'])
     denied(['/var/lib/xpanel/mail-quarantine/' + '-'.repeat(36), '/var/lib/xpanel/mail-quarantine/' + accountId.toUpperCase() + '/stage', quarantineStagePath(accountId, operationId) + '/extra', '/var/lib/xpanel/mail-quarantine/' + accountId + '/stage/' + operationId + '.json', '/var/lib/xpanel/mail-quarantine/' + accountId + '/stage/../' + operationId + '.eml', quarantineBayesPath(accountId)])
+  })
+
+  it.each(SUPPORTED_OS.flatMap(os => os.versions.map(version => `${os.id} ${version}`)))('admits the daemon configuration roots of the %s profile', release => {
+    const [id, versionId] = release.split(' ')
+    const os = profileFor(`ID=${id}\nVERSION_ID="${versionId}"\n`)
+    for (const path of [os.paths.apacheRoot, os.paths.apacheVhostDir, os.paths.nginxVhostDir, os.paths.apacheLogDir, os.paths.powerdnsConfDir]) expect(matcher(path, 'ensure-directory'), path).toBe(true)
+    for (const path of [os.paths.apacheVhostDir + '/xpanel.conf', os.paths.apacheMainConf, os.phpFpmPoolDir('8.3') + '/alice.conf', os.paths.powerdnsConf, os.paths.nginxVhostDir + '/xpanel.conf']) {
+      for (const operation of ['read', 'write', 'remove'] as const) expect(matcher(path, operation), path + ' ' + operation).toBe(true)
+    }
   })
 
   it('grants ACME key/order persistence and management status only their real operations', () => {

@@ -59,6 +59,7 @@ export {
   apacheMpmActions,
   apacheMpmFiles,
   installBundle,
+  installConfiguration,
   installFiles,
   installPlan,
   installWarnings,

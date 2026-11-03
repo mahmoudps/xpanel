@@ -134,10 +134,12 @@ describe('host facts', () => {
   })
 
   it('parses systemctl show blocks per unit', async () => {
-    const host = fakeHost({ run: async () => ({ ok: true, code: 0, stderr: '', stdout: 'Id=a.service\nLoadState=loaded\nActiveState=active\nSubState=running\nActiveEnterTimestamp=@1761696000\nMemoryCurrent=1048576\nCPUUsageNSec=5\nNRestarts=0\n\nId=b.service\nLoadState=not-found\nActiveState=inactive\nSubState=dead\nActiveEnterTimestamp=\nMemoryCurrent=[not set]\nCPUUsageNSec=[not set]\nNRestarts=0\n' }) })
-    const states = await readUnitStates(host, ['a.service', 'b.service'])
-    expect(states.get('a.service')).toEqual({ load: 'loaded', active: 'active', sub: 'running', since: '2025-10-29T00:00:00.000Z', memoryBytes: 1048576, cpuNs: 5, restarts: 0 })
+    const host = fakeHost({ run: async () => ({ ok: true, code: 0, stderr: '', stdout: 'Id=a.service\nLoadState=loaded\nActiveState=active\nSubState=running\nActiveEnterTimestampMonotonic=60000000\nMemoryCurrent=1048576\nCPUUsageNSec=5\nNRestarts=0\n\nId=b.service\nLoadState=not-found\nActiveState=inactive\nSubState=dead\nActiveEnterTimestampMonotonic=0\nMemoryCurrent=[not set]\nCPUUsageNSec=[not set]\nNRestarts=0\n' }) })
+    // Entered 60 s after boot on a host up for 3600 s: 3540 s before now. No --timestamp=unix (absent in systemd 249).
+    const states = await readUnitStates(host, ['a.service', 'b.service'], { now: () => Date.parse('2025-10-29T01:00:00.000Z'), uptimeSeconds: () => 3600 })
+    expect(states.get('a.service')).toEqual({ load: 'loaded', active: 'active', sub: 'running', since: '2025-10-29T00:01:00.000Z', memoryBytes: 1048576, cpuNs: 5, restarts: 0 })
     expect(states.get('b.service')?.memoryBytes).toBeNull()
+    expect(states.get('b.service')?.since).toBeNull()
   })
 })
 

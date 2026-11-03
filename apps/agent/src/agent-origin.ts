@@ -65,6 +65,19 @@ export const mergeOriginIntoRuntime = (runtime: string, api: string): string | n
   return text.endsWith('\n') ? text : `${text}\n`
 }
 
+/**
+ * Hosts of the public management origins in api.env (management TLS ingress), lowercased. A missing or
+ * unreadable file, or an origin that is not a URL, contributes none.
+ */
+export const readManagementHosts = async (executor: Pick<AgentExecutor, 'readFile'>): Promise<string[]> => {
+  const api = await executor.readFile(API_ENV_PATH).catch(() => null)
+  if (api === null) return []
+  const rows = parseEnvAssignments(api)
+  return ORIGIN_KEYS.flatMap(key => {
+    try { return [new URL(rows.get(key) ?? '').hostname.toLowerCase()] } catch { return [] }
+  })
+}
+
 const backupStamp = (): string => new Date().toISOString().replace(/[:.]/g, '')
 
 /** Writes origin keys into the reconciler-owned runtime env. A missing runtime file is left alone. */

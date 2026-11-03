@@ -800,6 +800,7 @@ describe('fresh-install package source closure', () => {
     'scripts/install-finalization-native.mjs', 'scripts/install-finalization-native.d.mts',
     'scripts/install-finalization-readiness.mjs', 'scripts/install-finalization-readiness.d.mts',
     'scripts/install-startup.mjs', 'scripts/install-startup.d.mts',
+    'scripts/install-os-configuration.mjs',
   ]
 
   // Model the fixed import graph without executing any native participant or host port.

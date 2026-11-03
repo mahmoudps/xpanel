@@ -224,7 +224,7 @@ const engineRoles = (o: ResolvedInstallOptions): PackageRole[] => {
 
 const optionalRoles = (o: ResolvedInstallOptions): ServiceRole[] => {
   const roles: ServiceRole[] = []
-  if (o.withMail) roles.push('postfix', 'dovecot')
+  if (o.withMail) roles.push('postfix', 'opendkim', 'dovecot')
   if (o.withDns) roles.push('powerdns')
   if (o.withFtp) roles.push('ftp')
   return roles
@@ -251,8 +251,8 @@ const distroFpmOff = (p: XpanelOsProfile, versions: readonly PhpVersion[]): Inst
 
 /**
  * MPM selection for a fresh install. Debian switches with a2dismod/a2enmod (mpm_itk sits on prefork);
- * EL selects the MPM through the 00-mpm.conf file from apacheMpmFiles(). itk where it is not packaged
- * throws ENGINE_UNAVAILABLE instead of falling back to the shared apache identity.
+ * EL selects the MPM through the 00-mpm.conf file from apacheMpmFiles(); install.sh builds its itk module.
+ * itk where it cannot be provided throws ENGINE_UNAVAILABLE instead of falling back to the shared apache identity.
  */
 export const apacheMpmActions = (profile: XpanelOsProfile, mpm: ApacheMpm): InstallAction[] => {
   assertProfile(profile)
@@ -273,7 +273,9 @@ export const apacheMpmFiles = (profile: XpanelOsProfile, mpm: ApacheMpm): Render
   if (profile.family === 'debian') return []
   return [{
     path: assertAbsolutePath(`${profile.paths.apacheModulesConf}/00-mpm.conf`),
-    content: '# Managed by xPanel: Apache MPM selection.\nLoadModule mpm_prefork_module modules/mod_mpm_prefork.so\n',
+    // install.sh builds mpm_itk.so on EL; itk runs on top of prefork.
+    content: '# Managed by xPanel: Apache MPM selection.\nLoadModule mpm_prefork_module modules/mod_mpm_prefork.so\n'
+      + (mpm === 'itk' ? 'LoadModule mpm_itk_module modules/mpm_itk.so\n' : ''),
     mode: 0o644,
     owner: 'root',
     group: 'root',
@@ -322,26 +324,29 @@ const debianPlan = (p: XpanelOsProfile, o: ExtendedResolvedInstallOptions): Inst
     systemd('stop', p.services.apache),
     ...apt.install(rest),
     ...optionalRoles(o).map(r => systemd('stop', p.services[r])),
-    ...apacheMpmActions(p, o.apacheMpm),
-    ...apacheModuleActions(p),
-    ...distroFpmOff(p, o.phpVersions),
-    ...serviceActions(p, o),
+    ...configurationActions(p, o),
   ]
 }
+
+/** Everything after the packages are on the host: web server modules, distro FPM off, service enablement. */
+const configurationActions = (p: XpanelOsProfile, o: ExtendedResolvedInstallOptions): InstallAction[] => p.family === 'debian'
+  ? [...apacheMpmActions(p, o.apacheMpm), ...apacheModuleActions(p), ...distroFpmOff(p, o.phpVersions), ...serviceActions(p, o)]
+  : [
+      exec([requireBin(p.bin.postgresqlSetup, 'postgresql-setup'), '--initdb'], `${p.paths.postgresqlDataDir}/PG_VERSION`),
+      ...distroFpmOff(p, o.phpVersions),
+      ...serviceActions(p, o),
+    ]
 
 const rhelPlan = (p: XpanelOsProfile, o: ExtendedResolvedInstallOptions): InstallAction[] => {
   const all = unique([
     ...rolePackages(p, ['nginx', ...engineRoles(o), ...baseRoles(o), ...optionalRoles(o)]),
     ...phpPackages(p, o.phpVersions),
   ])
-  const initdb = exec([requireBin(p.bin.postgresqlSetup, 'postgresql-setup'), '--initdb'], `${p.paths.postgresqlDataDir}/PG_VERSION`)
   return [
     ...rhelRepos(p, o.phpVersions.length > 0),
     ...systemUserActions(p),
     ...dnf(p).install(all),
-    initdb,
-    ...distroFpmOff(p, o.phpVersions),
-    ...serviceActions(p, o),
+    ...configurationActions(p, o),
   ]
 }
 
@@ -492,6 +497,15 @@ export const installWarnings = (profile: XpanelOsProfile, options: ExtendedInsta
   }
   return w
 }
+
+/**
+ * The part of the install bundle that follows package installation, in plan order: what install.sh applies
+ * once its own package step is done (scripts/install-os-configuration.mjs hands it over).
+ */
+export const installConfiguration = (profile: XpanelOsProfile, options: ExtendedInstallOptions): { actions: InstallAction[]; files: RenderedFile[] } => ({
+  actions: configurationActions(profile, prepare(profile, options)),
+  files: installFiles(profile, options),
+})
 
 export const installBundle = (profile: XpanelOsProfile, options: ExtendedInstallOptions): InstallBundle => ({
   actions: installPlan(profile, options),

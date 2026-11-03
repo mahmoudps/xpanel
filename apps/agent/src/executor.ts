@@ -290,7 +290,10 @@ export interface LinuxExecutorOptions {
 const SYSTEM_CONFIG_PREFIXES: readonly string[] = [
   '/etc/nginx/',
   '/etc/apache2/',
+  // EL: Apache, Remi PHP and PowerDNS keep their configuration here
+  '/etc/httpd/',
   '/etc/php/',
+  '/etc/opt/remi/',
   '/etc/xpanel/php-fpm/',
   '/etc/xpanel/ssl/',
   '/etc/xpanel/modsecurity/',
@@ -306,12 +309,14 @@ const SYSTEM_CONFIG_PREFIXES: readonly string[] = [
   '/etc/opendkim/',
   '/etc/pure-ftpd/',
   '/etc/powerdns/',
+  '/etc/pdns/',
   '/var/lib/powerdns/',
   '/var/lib/xpanel/acme/',
   '/var/lib/xpanel/staging/',
   '/var/cache/xpanel/',
   '/var/log/xpanel/',
   '/var/log/apache2/',
+  '/var/log/httpd/',
   '/var/log/nginx/',
   '/var/www/xpanel-default/',
   '/var/www/xpanel-acme/',
@@ -326,12 +331,15 @@ const SYSTEM_EXACT_TARGETS = new Set<string>([
   '/opt/xpanel/bin/jailshell',
   '/etc/nginx',
   '/etc/apache2',
+  '/etc/httpd',
+  '/etc/opt/remi',
   '/etc/dovecot',
   '/etc/postfix',
   '/etc/opendkim',
   '/etc/opendkim.conf',
   '/etc/pure-ftpd',
   '/etc/powerdns',
+  '/etc/pdns',
   '/etc/xpanel/php-fpm',
   '/etc/xpanel/ssl',
   '/etc/xpanel/modsecurity',
@@ -347,6 +355,7 @@ const SYSTEM_EXACT_TARGETS = new Set<string>([
   '/var/log/xpanel/apache',
   '/var/log/xpanel/php-fpm',
   '/var/log/apache2',
+  '/var/log/httpd',
   '/var/log/nginx',
   '/var/www/xpanel-default',
   '/var/www/xpanel-acme',
@@ -570,7 +579,7 @@ export class LinuxHostExecutor implements AgentExecutor {
   private requireHostTarget(path: string, operation: HostTargetOperation): void {
     assertTrustedTargetPath(path)
     if (!this.trustedHostTargets.get(path)?.has(operation) && !this.trustedHostTargetMatcher?.(path, operation)) {
-      fail('PRECONDITION_FAILED', 'a reviewed exact host target capability is required; tenant I/O requires its confined runner', { operation })
+      fail('PRECONDITION_FAILED', 'a reviewed exact host target capability is required; tenant I/O requires its confined runner', { operation, path })
     }
   }
 

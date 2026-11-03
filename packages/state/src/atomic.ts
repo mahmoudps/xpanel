@@ -92,8 +92,12 @@ export const atomicWriteJson = async (
   beforeCommit?: () => unknown | Promise<unknown>,
 ): Promise<void> => {
   const dir = dirname(filePath)
-  await mkdir(dir, { recursive: true, mode: 0o750 })
-  await claimStateOwnership(dir)
+  // mkdir returns the first directory it created: every new level takes the state owner, not only the leaf,
+  // or a root writer (the agent) leaves an intermediate directory the API cannot write into.
+  const firstCreated = await mkdir(dir, { recursive: true, mode: 0o750 })
+  const levels = [dir]
+  if (firstCreated !== undefined) while (levels[0] !== firstCreated && dirname(levels[0]!) !== levels[0]) levels.unshift(dirname(levels[0]!))
+  for (const level of levels) await claimStateOwnership(level)
   const tmpName = `.${basename(filePath)}.${process.pid}-${++tmpSeq}.tmp`
   const tmpPath = join(dir, tmpName)
   const payload = `${JSON.stringify(data, null, 2)}\n`
