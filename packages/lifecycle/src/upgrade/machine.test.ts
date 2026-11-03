@@ -70,6 +70,8 @@ interface World {
   upgradeUnitActive: boolean
   events: string[]
   maintenanceSeenAtDump: boolean | null
+  /** Modeled protected source history, independent of whether snapshot files survive. */
+  sourceTransition: 'not-prepared' | 'prepared'
 }
 
 const isStateSnapshotTar = (argv: string[]): boolean =>
@@ -118,6 +120,7 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
     upgradeUnitActive: false,
     events: [],
     maintenanceSeenAtDump: null,
+    sourceTransition: 'not-prepared',
     ports: undefined as unknown as UpgradePorts,
   }
   host.handler = (a) => {
@@ -183,7 +186,10 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
       },
       acceptPreparedRelease: async () => false,
       upgradeRecordId: async () => `up-${w.db.rows.length + 1}`,
-      prepareInstallationSource: async recordId => { row(recordId); await sourceReceipt(recordId) },
+      prepareInstallationSource: async recordId => {
+        row(recordId); await sourceReceipt(recordId)
+        w.sourceTransition = 'prepared'
+      },
       selectInstallationSource: async ({ target, recordId, direction }) => {
         const receipt = await sourceReceipt(recordId)
         const expected = direction === 'forward' ? `/opt/xpanel/releases/${receipt.release.version}` : receipt.previousTarget
@@ -202,12 +208,16 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
         if (active.code !== 3) fail('PRECONDITION_FAILED', 'upgrade unit state is unknown; recovery cannot clear admission')
         const lock = await readLock(fs, LOCK), last = w.db.rows.at(-1)
         const recordId = lock?.recordId ?? (last && inFlight(last) ? last.id : null)
-        // A synthetic fixture without a snapshot models pre-transition recovery.
-        // Existing journals, including terminal or malformed ones, reach the real
-        // machine's validation/reselection; no fixture shortcut hides those checks.
+        // Mode is an explicit modeled history fact, not permission inferred from
+        // missing snapshot/journal files. Its nullable record matches native early abort.
         const hasJournal = recordId !== null && await fs.exists(`/var/lib/xpanel-lifecycle/backups/upgrade-${recordId}.rewind.json`)
         const hasReceipt = recordId !== null && await fs.exists(`/var/lib/xpanel-lifecycle/backups/upgrade-${recordId}.receipt.json`)
-        return { recordId, mode: recordId !== null && !hasJournal && !hasReceipt ? 'abort-before-transition' : 'rollback', hostOutcome: 'rolled_back' }
+        if (w.sourceTransition === 'prepared') {
+          if (recordId === null) fail('PRECONDITION_FAILED', 'synthetic prepared source record is missing')
+          return { recordId, mode: 'rollback', hostOutcome: 'rolled_back' }
+        }
+        if (hasJournal || hasReceipt) fail('PRECONDITION_FAILED', 'synthetic source history conflicts with retained evidence')
+        return { recordId, mode: 'abort-before-transition', hostOutcome: 'rolled_back' }
       },
       verifyRelease: async () => {},
       unpackVerifiedRelease: async (path, release) => {
@@ -383,6 +393,8 @@ describe('lifecycle safety regression oracles (portable ports, not native qualif
     }
     const observed = await recoverUpgrade(w.ports, { actor: ROOT, os: { family: 'debian' }, note: 'observe retirement failure', canary: null })
     expect(observed.status).toBe('retirement_pending')
+    expect(observed.recordId).toBeNull()
+    expect(w.events).toEqual(['start xpanel-api.service', 'start xpanel-agent.service'])
     expect(await w.fs.exists(RETIREMENT)).toBe(true)
     const barrierRemains = await w.fs.exists(LOCK) || await w.fs.exists(MAINTENANCE)
     w.ports.safety.syncPath = sync
@@ -622,8 +634,13 @@ describe('lifecycle safety regression oracles (portable ports, not native qualif
     expect(await w.fs.exists('/opt/xpanel/releases/1.1.0')).toBe(true)
     expect(w.audit.actions().at(-1)).toBe('upgrade.rollback_failed')
     expect((await runUpgrade(w.ports, plan())).outcome).toBe('refused')
-    // Recovery does not re-run a terminal rewind and refuses while the server is unhealthy.
-    await expect(recoverUpgrade(w.ports, { actor: ROOT, os: { family: 'debian' }, note: 'checked', canary: 'alice' })).rejects.toThrow(/canary alice served by uid 33/)
+    // The original UID fault remains recorded. An unknown journal is refused
+    // before a new health result could be mistaken for transition authority.
+    const unknownJournal = await w.fs.readFile(JOURNAL)
+    const beforeRecovery = { writes: w.fs.writes.length, units: w.host.systemd().length, audit: w.audit.entries.length }
+    await expect(recoverUpgrade(w.ports, { actor: ROOT, os: { family: 'debian' }, note: 'checked', canary: 'alice' })).rejects.toThrow(/rewind has an unresolved outcome/)
+    expect({ writes: w.fs.writes.length, units: w.host.systemd().length, audit: w.audit.entries.length }).toEqual(beforeRecovery)
+    expect(await w.fs.readFile(JOURNAL)).toBe(unknownJournal)
     expect(w.gen.activated).toEqual([41])
   })
 
@@ -635,6 +652,19 @@ describe('lifecycle safety regression oracles (portable ports, not native qualif
     expect(r.reason).toMatch(/WAL-safe backup failed/)
     expect(w.host.actions.some(a => a.kind === 'exec' && isReleaseUnpackTar(a.argv))).toBe(false)
     expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
+  })
+
+  it('does not reinterpret missing recovery files as pre-transition admission after source preparation', async () => {
+    const w = world()
+    w.controlPlane.ok = false
+    expect((await runUpgrade(w.ports, plan())).hostOutcome).toBe('rolled_back')
+    expect(w.sourceTransition).toBe('prepared')
+    await w.fs.remove(RECEIPT)
+    await w.fs.remove(JOURNAL)
+    const beforeRecovery = { writes: w.fs.writes.length, units: w.host.systemd().length, audit: w.audit.entries.length }
+    await expect(recoverUpgrade(w.ports, { actor: ROOT, os: { family: 'debian' }, note: 'files missing after transition', canary: 'alice' })).rejects.toThrow(/snapshot receipt is missing or malformed/)
+    expect({ writes: w.fs.writes.length, units: w.host.systemd().length, audit: w.audit.entries.length }).toEqual(beforeRecovery)
+    for (const marker of [LOCK, MAINTENANCE, RETIREMENT]) expect(await w.fs.exists(marker)).toBe(true)
   })
 
   it('does not publish a staging tree rejected by the authenticated tree verifier', async () => {
@@ -856,7 +886,7 @@ describe('runUpgrade: rollback after the switch', () => {
     expect(v.db.data).toBe('desired-state-v4')
   })
 
-  it('reports rollback_failed, keeps the lock and maintenance, and blocks until recovery', async () => {
+  it('retains a failed admission journal despite later healthy checks or an external source change', async () => {
     const w = world()
     w.controlPlane.ok = false
     const originalCompatibility = w.ports.safety.assertCompatibility
@@ -882,20 +912,24 @@ describe('runUpgrade: rollback after the switch', () => {
     const input = { actor: ROOT, os: { family: 'debian' as const }, note: 'restored the state directory by hand', canary: 'alice' }
     await expect(recoverUpgrade(w.ports, { ...input, note: '' })).rejects.toThrow(XpanelError)
     await expect(recoverUpgrade(w.ports, { ...input, actor: RESELLER })).rejects.toThrow(/only root/)
-    await expect(recoverUpgrade(w.ports, input)).rejects.toThrow(/qualified control-plane readiness failed/)
+    const failedJournal = await w.fs.readFile(JOURNAL)
+    expect(parseRewindJournal(failedJournal)).toMatchObject({ state: 'rewind-failed', done: [] })
+    await expect(recoverUpgrade(w.ports, input)).rejects.toThrow(/rewind has an unresolved outcome/)
     w.controlPlane.ok = true
     w.upgradeUnitActive = true
     await expect(recoverUpgrade(w.ports, input)).rejects.toThrow(/still running/)
     w.upgradeUnitActive = false
     w.ports.safety.assertCompatibility = originalCompatibility
-    // Explicit operator repair in this in-memory diagnostic; recovery itself never moves the link.
+    // An external change in this diagnostic does not establish a journaled recovery grant.
     w.fs.nodes.set('/opt/xpanel/current', { type: 'symlink', target: '/opt/xpanel/releases/1.0.0' })
-    const rec = await recoverUpgrade(w.ports, input)
-    expect(rec).toMatchObject({ status: 'retirement_pending', version: '1.0.0', closedRecordId: null })
-    expect(rec.problems.join()).toMatch(/durable lifecycle retirement/)
+    const beforeRecovery = { writes: w.fs.writes.length, units: w.host.systemd().length, audit: w.audit.entries.length }
+    await expect(recoverUpgrade(w.ports, input)).rejects.toThrow(/rewind has an unresolved outcome/)
+    expect({ writes: w.fs.writes.length, units: w.host.systemd().length, audit: w.audit.entries.length }).toEqual(beforeRecovery)
+    expect(await w.fs.readFile(JOURNAL)).toBe(failedJournal)
     expect(await w.fs.exists(LOCK)).toBe(true)
     expect(await w.fs.exists(MAINTENANCE)).toBe(true)
-    expect(w.audit.entries.at(-1)).toMatchObject({ action: 'upgrade.recovery_observed', outcome: 'failed', detail: { note: 'restored the state directory by hand' } })
+    expect(await w.fs.exists(RETIREMENT)).toBe(true)
+    expect(w.audit.entries.at(-1)).toMatchObject({ action: 'upgrade.rollback_failed', outcome: 'failed' })
 
     expect((await runUpgrade(w.ports, plan())).code).toBe('CONFLICT')
     await w.fs.remove('/opt/xpanel/releases/1.1.0')
@@ -931,9 +965,9 @@ describe('automatic rewind: crash inside every step, then resume', () => {
     }
     w.controlPlane.ok = false
     let saves = 0
-    const crash: { image: Pick<World, 'db' | 'gen' | 'identities'> & { nodes: FakeFs['nodes'] } | null } = { image: null }
+    const crash: { image: Pick<World, 'db' | 'gen' | 'identities' | 'sourceTransition'> & { nodes: FakeFs['nodes'] } | null } = { image: null }
     const capture = (e: Event): void => {
-      if (crash.image === null && when(e, saves, w)) crash.image = structuredClone({ nodes: w.fs.nodes, db: w.db, gen: w.gen, identities: w.identities })
+      if (crash.image === null && when(e, saves, w)) crash.image = structuredClone({ nodes: w.fs.nodes, db: w.db, gen: w.gen, identities: w.identities, sourceTransition: w.sourceTransition })
     }
     w.fs.failWhen = (op, path) => {
       if (op === 'write' && path === `${JOURNAL}.tmp`) saves++
@@ -948,7 +982,7 @@ describe('automatic rewind: crash inside every step, then resume', () => {
 
     // Power loss: a new process sees only what was on disk and in the index at that instant.
     const v = world()
-    Object.assign(v, { db: crashed.db, gen: crashed.gen, identities: crashed.identities })
+    Object.assign(v, { db: crashed.db, gen: crashed.gen, identities: crashed.identities, sourceTransition: crashed.sourceTransition })
     v.fs.nodes = crashed.nodes
     v.controlPlane.ok = false
     const before = parseRewindJournal(await v.fs.readFile(JOURNAL))
@@ -964,7 +998,7 @@ describe('automatic rewind: crash inside every step, then resume', () => {
     expect(await v.fs.readFile(`${STATE_ASIDE}/accounts/carol.yaml`)).toBe('uid: 1003\n')
     expect(v.db).toMatchObject({ schema: 6, data: 'desired-state-v4' })
     expect(v.gen.current).toBe(41)
-    // Journaled steps are not repeated; the unjournaled one is re-run idempotently.
+    // Journaled data steps are not repeated; source bindings and writer startup are revalidated.
     expect(v.host.actions.filter(a => a.kind === 'exec' && isStateRestoreTar(a.argv)).length).toBe(done.has('state-extract') ? 0 : 1)
     expect(v.events.filter(e => e === 'restore index').length).toBe(done.has('index') ? 0 : 1)
     expect(v.events.slice(0, 2)).toEqual(['stop xpanel-api.service', 'stop xpanel-agent.service'])
@@ -972,29 +1006,96 @@ describe('automatic rewind: crash inside every step, then resume', () => {
     expect(v.audit.entries.at(-1)).toMatchObject({ action: 'upgrade.recovery_observed', detail: { rewind: 'rewind-verified' } })
     for (const marker of [MAINTENANCE, LOCK, RETIREMENT]) expect(await v.fs.exists(marker)).toBe(true)
 
-    // A finished rewind is never run again.
+    // Fresh admission stops writers again, so source selection and start-panel
+    // repeat even for a verified rewind; completed data and generation steps do not.
+    const restored = v.host.actions.filter(a => a.kind === 'exec' && isStateRestoreTar(a.argv)).length
+    const activated = [...v.gen.activated]
     v.events.length = 0
     await recoverUpgrade(v.ports, { actor: ROOT, os: { family: 'debian' }, note: 'checked again', canary: 'alice' })
-    expect(v.events).toEqual([])
+    expect(v.events).toEqual(['stop xpanel-api.service', 'stop xpanel-agent.service', 'start xpanel-api.service', 'start xpanel-agent.service'])
+    expect(v.host.actions.filter(a => a.kind === 'exec' && isStateRestoreTar(a.argv)).length).toBe(restored)
+    expect(v.gen.activated).toEqual(activated)
+    expect(parseRewindJournal(await v.fs.readFile(JOURNAL))).toMatchObject({ state: 'rewind-verified', done: REWIND_STEPS, problems: [] })
+    for (const marker of [MAINTENANCE, LOCK, RETIREMENT]) expect(await v.fs.exists(marker)).toBe(true)
+  })
+
+  it('retains exact restart admission after source reselection and a failed resumed service start', async () => {
+    const w = world()
+    w.controlPlane.ok = false
+    expect((await runUpgrade(w.ports, plan())).rewind?.state).toBe('rewind-verified')
+    const restored = w.host.actions.filter(a => a.kind === 'exec' && isStateRestoreTar(a.argv)).length
+    const activated = [...w.gen.activated]
+    const handler = w.host.handler
+    let failStart = true
+    w.host.handler = a => {
+      if (failStart && a.kind === 'systemd' && a.verb === 'start' && a.unit === 'xpanel-agent.service') {
+        failStart = false
+        return { code: 1, stdout: '', stderr: 'injected resumed agent start failure' }
+      }
+      return handler?.(a)
+    }
+    const request = { actor: ROOT, os: { family: 'debian' as const }, note: 'retry owned control-plane startup', canary: 'alice' }
+    await expect(recoverUpgrade(w.ports, request)).rejects.toThrow(/rewind unverified/)
+    expect(failStart).toBe(false)
+    expect(parseRewindJournal(await w.fs.readFile(JOURNAL))).toMatchObject({
+      state: 'rewind-failed', done: REWIND_STEPS.filter(step => step !== 'start-panel'),
+      retryAdmission: 'restart-owned-control-plane', generation: 41,
+    })
+    expect(w.host.actions.filter(a => a.kind === 'exec' && isStateRestoreTar(a.argv))).toHaveLength(restored)
+    expect(w.gen.activated).toEqual(activated)
+    for (const marker of [MAINTENANCE, LOCK, RETIREMENT]) expect(await w.fs.exists(marker)).toBe(true)
+
+    w.events.length = 0
+    await expect(recoverUpgrade(w.ports, request)).resolves.toMatchObject({ status: 'retirement_pending', hostOutcome: 'rolled_back' })
+    expect(w.events).toEqual(['stop xpanel-api.service', 'stop xpanel-agent.service', 'start xpanel-api.service', 'start xpanel-agent.service'])
+    const completed = parseRewindJournal(await w.fs.readFile(JOURNAL))
+    expect(completed).toMatchObject({ state: 'rewind-verified', done: REWIND_STEPS, problems: [] })
+    expect(completed).not.toHaveProperty('retryAdmission')
+    expect(w.host.actions.filter(a => a.kind === 'exec' && isStateRestoreTar(a.argv))).toHaveLength(restored)
+    expect(w.gen.activated).toEqual(activated)
+    expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
+    for (const marker of [MAINTENANCE, LOCK, RETIREMENT]) expect(await w.fs.exists(marker)).toBe(true)
+  })
+
+  it('preserves a duplicate-checkpoint journal without normalizing it into recovery authority', async () => {
+    const w = world()
+    w.controlPlane.ok = false
+    expect((await runUpgrade(w.ports, plan())).rewind?.state).toBe('rewind-verified')
+    const journal = parseRewindJournal(await w.fs.readFile(JOURNAL))!
+    const malformed = JSON.stringify({ ...journal, done: [...journal.done, 'release'] }) + '\n'
+    w.fs.file(JOURNAL, malformed)
+    const before = { writes: w.fs.writes.length, units: w.host.systemd().length, audit: w.audit.entries.length }
+    await expect(recoverUpgrade(w.ports, { actor: ROOT, os: { family: 'debian' }, note: 'inspect duplicated checkpoint', canary: 'alice' }))
+      .rejects.toThrow(/rewind journal is malformed/)
+    expect({ writes: w.fs.writes.length, units: w.host.systemd().length, audit: w.audit.entries.length }).toEqual(before)
+    expect(await w.fs.readFile(JOURNAL)).toBe(malformed)
+    for (const marker of [MAINTENANCE, LOCK, RETIREMENT]) expect(await w.fs.exists(marker)).toBe(true)
   })
 
   it('a resumed rewind that cannot be proven stays unverified and is refused by recovery', async () => {
     const w = world()
     w.controlPlane.ok = false
-    const images: FakeFs['nodes'][] = []
+    const images: { nodes: FakeFs['nodes']; sourceTransition: World['sourceTransition'] }[] = []
     let saves = 0
     w.fs.failWhen = (op, path) => {
-      if (op === 'write' && path === `${JOURNAL}.tmp` && ++saves === 4) images.push(structuredClone(w.fs.nodes))
+      if (op === 'write' && path === `${JOURNAL}.tmp` && ++saves === 4) images.push(structuredClone({ nodes: w.fs.nodes, sourceTransition: w.sourceTransition }))
       return false
     }
     await runUpgrade(w.ports, plan())
     const v = world()
-    v.fs.nodes = images[0] as FakeFs['nodes']
+    v.fs.nodes = images[0]!.nodes
+    v.sourceTransition = images[0]!.sourceTransition
     v.served.set('alice', 33)
     v.faultsPersist = true
     await expect(recoverUpgrade(v.ports, { actor: ROOT, os: { family: 'debian' }, note: 'resumed', canary: 'alice' })).rejects.toThrow(/rewind unverified; operator action required: .*canary alice served by uid 33/)
     expect(parseRewindJournal(await v.fs.readFile(JOURNAL))?.state).toBe('rewind-unknown')
     expect(await v.fs.exists(RETIREMENT)).toBe(false)
+    const unknownJournal = await v.fs.readFile(JOURNAL)
+    const beforeRetry = { writes: v.fs.writes.length, units: v.host.systemd().length, audit: v.audit.entries.length }
+    v.faultsPersist = false
+    await expect(recoverUpgrade(v.ports, { actor: ROOT, os: { family: 'debian' }, note: 'health is now clear', canary: 'alice' })).rejects.toThrow(/rewind has an unresolved outcome/)
+    expect({ writes: v.fs.writes.length, units: v.host.systemd().length, audit: v.audit.entries.length }).toEqual(beforeRetry)
+    expect(await v.fs.readFile(JOURNAL)).toBe(unknownJournal)
   })
 })
 
@@ -1109,13 +1210,20 @@ describe('runUpgrade: failures before the switch', () => {
     expect(mode).toBe(0o644)
   })
 
-  it('a link switch that fails leaves the old release current', async () => {
+  it('a persistent link replacement failure preserves the old source and refuses unproven rollback', async () => {
     const w = world()
+    const originalState = await w.fs.readFile(STATE_FILE)
     w.fs.failWhen = (op, p) => op === 'rename' && p === '/opt/xpanel/current'
     const r = await runUpgrade(w.ports, plan())
-    expect(r).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'failed' })
+    expect(r).toMatchObject({ outcome: 'rollback_failed', hostOutcome: 'rollback_failed', rewind: { state: 'rewind-failed', done: [] } })
     expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
     expect(w.gen.reconciled).toBe(0)
+    expect(await w.fs.readFile(STATE_FILE)).toBe(originalState)
+    expect(w.host.actions.some(a => a.kind === 'exec' && isStateRestoreTar(a.argv))).toBe(false)
+    expect(w.events).not.toContain('restore index')
+    expect(w.gen.activated).toEqual([])
+    expect(w.host.systemd().some(action => action.verb === 'start' || action.verb === 'restart')).toBe(false)
+    for (const marker of [LOCK, MAINTENANCE, RETIREMENT]) expect(await w.fs.exists(marker)).toBe(true)
   })
 })
 
@@ -1212,9 +1320,8 @@ describe('upgrade plan validation', () => {
     expect(() => normalizeUpgradePlan({ ...p, release: { ...p.release, version: '../../etc' } })).toThrow(XpanelError)
     expect(() => normalizeUpgradePlan({ ...p, release: { ...p.release, archivePath: '/tmp/a b.tar.gz' } })).toThrow(XpanelError)
     expect(() => normalizeUpgradePlan({ ...p, release: { ...p.release, archivePath: 'relative.tar.gz' } })).toThrow(XpanelError)
-    expect(() => normalizeUpgradePlan({ ...p, release: { ...p.release, archivePath: '/home/alice/x.tar.gz' } })).toThrow(/must be inside \/opt\/xpanel\/downloads/)
-    for (const writable of ['/tmp/xpanel-1.1.0.tar.gz', '/var/lib/xpanel/downloads/xpanel-1.1.0.tar.gz', '/opt/xpanel/downloads/sub/x.tar.gz', '/opt/xpanel/x.tar.gz']) {
-      expect(() => normalizeUpgradePlan({ ...p, release: { ...p.release, archivePath: writable } }), writable).toThrow(/must be inside/)
+    for (const unsafe of ['/home/alice/x.tar.gz', '/var/lib/mysql/x.tar.gz', '/var/vmail/x.tar.gz', '/tmp/xpanel-1.1.0.tar.gz', '/var/tmp/xpanel-1.1.0.tar.gz', '/root/releases/x.zip']) {
+      expect(() => normalizeUpgradePlan({ ...p, release: { ...p.release, archivePath: unsafe } }), unsafe).toThrow(/durable non-customer path/)
     }
     expect(() => normalizeUpgradePlan({ ...p, layout: { downloadsDir: '/opt/xpanel/releases/dl' } })).toThrow(/must not nest/)
     expect(() => normalizeUpgradePlan({ ...p, layout: { downloadsDir: '/var/tmp/dl' } })).toThrow(/inside/)
@@ -1233,6 +1340,14 @@ describe('upgrade plan validation', () => {
     expect(() => normalizeUpgradePlan({ ...p, layout: { currentLink: '/usr/local/current' } })).toThrow(/inside/)
     expect(() => normalizeUpgradePlan({ ...p, layout: { lockFile: '/tmp/upgrade.lock' } })).toThrow(/inside/)
     expect(() => normalizeUpgradePlan({ ...p, layout: { stagingDir: '/opt/xpanel/releases/staging' } })).toThrow(/nest/)
+  })
+
+  it('accepts durable archive path syntax without treating syntax as native source authority', () => {
+    for (const archivePath of ['/root/releases/xpanel-1.1.0.tar.gz', '/var/lib/xpanel/downloads/xpanel-1.1.0.tar.gz', '/opt/xpanel/downloads/sub/x.tar.gz', '/opt/xpanel/x.tar.gz']) {
+      expect(normalizeUpgradePlan({ ...plan(), release: { ...plan().release, archivePath } }).release.archivePath).toBe(archivePath)
+    }
+    // No artifact is opened here. The native producer still requires a held
+    // authenticated archive and protected ancestry; normalization grants neither.
   })
 
   it('classifies customer data paths', () => {

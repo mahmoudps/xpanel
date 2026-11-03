@@ -552,6 +552,7 @@ export const parseRewindJournal = (raw: string | null): RewindJournal | null => 
   if (!isObject(v) || v.schemaVersion !== 1 || typeof v.recordId !== 'string' || !RECORD_ID.test(v.recordId)
     || !['rewind-started', 'rewind-verified', 'rewind-failed', 'rewind-unknown'].includes(String(v.state))
     || !Array.isArray(v.done) || !v.done.every(s => REWIND_STEPS.includes(s as RewindStep))
+    || new Set(v.done).size !== v.done.length
     || !(v.generation === null || Number.isSafeInteger(v.generation))
     || !Array.isArray(v.problems) || !v.problems.every(p => typeof p === 'string')
     || v.retryAdmission !== undefined && v.retryAdmission !== 'restart-owned-control-plane'
@@ -730,7 +731,9 @@ const rewind = async (c: Ctx, resumed: RewindJournal | null): Promise<RewindJour
         && Number.isSafeInteger(j.generation) && j.generation! > 0) j.retryAdmission = 'restart-owned-control-plane'
       return endRewind(c, j, 'rewind-failed', [`rewind:${step}: ${errorMessage(e)}`, `restored only: ${j.done.join(', ') || 'nothing'}`])
     }
-    j.done.push(step)
+    // Checkpoints describe completed steps, while host/filesystem actions retain their execution trace.
+    // A reselected release must not make a later start-only retry lose its exact completion proof.
+    j.done = REWIND_STEPS.filter(completed => completed === step || j.done.includes(completed))
     j.generation = c.newGeneration
     log(c, `rewind:${step}`, true, 'done')
     try {
