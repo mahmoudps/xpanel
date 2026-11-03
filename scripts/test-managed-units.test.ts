@@ -78,8 +78,9 @@ describe('managed unit rendering; no host, ownership or activation proof', () =>
   it('keeps TLS compatibility previews and renders native TLS against the resolved release', () => {
     for (const layout of ['flat', 'current'] as const) {
       const units = renderRenewalUnits('/usr/bin/node', layout)
-      expect(sha(units.service)).toBe(legacy[layout]['xpanel-management-tls.service'])
-      expect(sha(units.timer)).toBe(legacy[layout]['xpanel-management-tls.timer'])
+      const expected = new Map<string, string>(legacy[layout].map(entry => [entry.unitName, entry.contentSha256] as const))
+      expect(sha(units.service)).toBe(expected.get('xpanel-management-tls.service'))
+      expect(sha(units.timer)).toBe(expected.get('xpanel-management-tls.timer'))
     }
     const units = renderRenewalUnits('/usr/bin/node', '/opt/xpanel/releases/0.1.1')
     expect(units.service).toBe(renderManagedUnits(options())['xpanel-management-tls.service'])
