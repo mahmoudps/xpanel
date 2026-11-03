@@ -156,13 +156,59 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
   const row = (id: string): Row => w.db.rows.find((r) => r.id === id) ?? fail('NOT_FOUND', `no upgrade ${id}`)
   const inFlight = (r: Row): boolean => r.status === 'pending' || r.status === 'running'
   const faulty = (): boolean => w.faultsPersist || (fs.nodes.get('/opt/xpanel/current') as { target?: string } | undefined)?.target === '/opt/xpanel/releases/1.1.0'
+  let panel = ['xpanel-api.service', 'xpanel-agent.service']
+  // This is the portable engine's synthetic source-selection seam. The native
+  // producer separately proves receipts, prepared releases and managed unit ownership.
+  const sourceReceipt = async (recordId: string): Promise<{ stamp: string; previousTarget: string; release: { version: string } }> => {
+    const bytes = await fs.readFile(`/var/lib/xpanel-lifecycle/backups/upgrade-${recordId}.receipt.json`)
+    if (bytes === null) throw new Error('synthetic installation snapshot receipt missing')
+    const receipt = JSON.parse(bytes) as { recordId?: string; stamp?: string; previousTarget?: string; release?: { version?: string } }
+    if (receipt.recordId !== recordId || typeof receipt.stamp !== 'string' || typeof receipt.previousTarget !== 'string'
+      || typeof receipt.release?.version !== 'string') throw new Error('synthetic installation snapshot receipt changed')
+    return { stamp: receipt.stamp, previousTarget: receipt.previousTarget, release: { version: receipt.release.version } }
+  }
   w.ports = {
     // Deliberately synthetic sequencing seam. This does not qualify a native guard or writer barrier.
     safety: {
       withExclusive: async callback => callback(),
-      assertOwnedExecution: async () => {},
+      assertOwnedExecution: async units => { panel = [...units] },
       assertWritersQuiescent: async () => {},
       assertWriteBarrier: async () => {},
+      controlPlane: async verb => {
+        // Preserve the fixture's real FakeHost action/failure trace at the new port boundary.
+        for (const unit of panel) {
+          const result = await host.apply({ kind: 'systemd', verb, unit })
+          if (result.code !== 0) throw new Error(`${verb} ${unit} exited ${result.code}${result.stderr ? `: ${result.stderr}` : ''}`)
+        }
+      },
+      acceptPreparedRelease: async () => false,
+      upgradeRecordId: async () => `up-${w.db.rows.length + 1}`,
+      prepareInstallationSource: async recordId => { row(recordId); await sourceReceipt(recordId) },
+      selectInstallationSource: async ({ target, recordId, direction }) => {
+        const receipt = await sourceReceipt(recordId)
+        const expected = direction === 'forward' ? `/opt/xpanel/releases/${receipt.release.version}` : receipt.previousTarget
+        if (target !== expected) throw new Error('synthetic installation source target changed')
+        const temporary = `/opt/xpanel/.current-${receipt.stamp}${direction === 'rollback' ? '-rewind' : ''}`
+        if (await fs.readlink(temporary) !== null || await fs.exists(temporary)) await fs.remove(temporary)
+        await fs.symlink(target, temporary)
+        await fs.rename(temporary, '/opt/xpanel/current')
+        await w.ports.safety.syncPath('/opt/xpanel')
+      },
+      recoveryPlan: async () => {
+        // The diagnostic guard retains its existing owned-process fault seam;
+        // native recovery obtains this exclusion from the real coordinator scope.
+        const active = await host.apply({ kind: 'exec', argv: ['/usr/bin/systemctl', 'is-active', '--quiet', 'xpanel-upgrade.service'] })
+        if (active.code === 0) fail('CONFLICT', 'xpanel-upgrade.service is still running')
+        if (active.code !== 3) fail('PRECONDITION_FAILED', 'upgrade unit state is unknown; recovery cannot clear admission')
+        const lock = await readLock(fs, LOCK), last = w.db.rows.at(-1)
+        const recordId = lock?.recordId ?? (last && inFlight(last) ? last.id : null)
+        // A synthetic fixture without a snapshot models pre-transition recovery.
+        // Existing journals, including terminal or malformed ones, reach the real
+        // machine's validation/reselection; no fixture shortcut hides those checks.
+        const hasJournal = recordId !== null && await fs.exists(`/var/lib/xpanel-lifecycle/backups/upgrade-${recordId}.rewind.json`)
+        const hasReceipt = recordId !== null && await fs.exists(`/var/lib/xpanel-lifecycle/backups/upgrade-${recordId}.receipt.json`)
+        return { recordId, mode: recordId !== null && !hasJournal && !hasReceipt ? 'abort-before-transition' : 'rollback', hostOutcome: 'rolled_back' }
+      },
       verifyRelease: async () => {},
       unpackVerifiedRelease: async (path, release) => {
         const result = await host.apply({ kind: 'exec', argv: ['/usr/bin/tar', '--extract', '--gzip', `--file=${release.archivePath}`, `--directory=${path}`, '--no-same-owner', '--no-overwrite-dir'] })
@@ -231,9 +277,9 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
       latest: async () => w.db.rows.at(-1) ?? null,
       create: async (input) => {
         if (w.db.rows.some(inFlight)) fail('CONFLICT', 'another upgrade is in progress')
-        const id = `up-${w.db.rows.length + 1}`
-        w.db.rows.push({ id, ...input, status: 'pending', phase: null, toSchemaVersion: null, snapshotPath: null, healthReport: null, error: null })
-        return { id }
+        if (w.db.rows.some(existing => existing.id === input.id)) fail('CONFLICT', 'upgrade record already exists')
+        w.db.rows.push({ ...input, status: 'pending', phase: null, toSchemaVersion: null, snapshotPath: null, healthReport: null, error: null })
+        return { id: input.id }
       },
       setPhase: async (id, phase, extra) => {
         const r = row(id)

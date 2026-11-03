@@ -34,6 +34,7 @@ vi.mock('node:fs/promises', async original => {
       return failure('UNEXPECTED_REALPATH')
     },
     lstat: async (path: string) => {
+      if (['/var/lib/xpanel-lifecycle/writer-barrier.json', '/var/lib/xpanel-lifecycle/backups/retirement-attention.json'].includes(path)) return failure('ENOENT')
       if (path !== '/opt/xpanel/releases/0.1.0') return failure('UNEXPECTED_LSTAT')
       return { uid: 0n, gid: 0n, nlink: 1n, mode: 0o755n, size: 0n, isSymbolicLink: () => false, isDirectory: () => true, isFile: () => false }
     },
@@ -44,9 +45,19 @@ vi.mock('node:fs/promises', async original => {
 vi.mock('./lifecycle-ownership.mjs', async original => {
   const actual = await original<typeof import('./lifecycle-ownership.mjs')>()
   return { ...actual, requireLinuxRoot: fixture.root, assertTrustedDirectory: vi.fn(async () => undefined),
-    withTrustedFile: async (path: string, _options: unknown, callback: (value: object) => unknown) => {
-      if (!path.replaceAll('\\', '/').endsWith('/scripts/install-bootstrap.mjs')) return failure('UNEXPECTED_TRUSTED_FILE')
-      return callback({})
+    withTrustedFile: async (path: string, options: { exactMode?: number; maxBytes?: number; sha256?: string }, callback: (value: object) => unknown) => {
+      if (path.replaceAll('\\', '/').endsWith('/scripts/install-bootstrap.mjs')) return callback({})
+      if (!['/var/lib/xpanel-lifecycle/bootstrap.json', '/var/lib/xpanel-lifecycle/installation.json',
+        '/var/lib/xpanel-lifecycle/install-dependencies.json', '/var/lib/xpanel-lifecycle/HEAD'].includes(path)) return failure('UNEXPECTED_TRUSTED_FILE')
+      fixture.calls.push(path)
+      const current = fixture.files.get(path)
+      if (!current) return failure('ENOENT')
+      const bytes = Buffer.from(current), sha256 = createHash('sha256').update(bytes).digest('hex')
+      if (options.exactMode !== 0o600 || !options.maxBytes || bytes.length > options.maxBytes) return failure('UNEXPECTED_TRUSTED_FILE_OPTIONS')
+      if (options.sha256 && options.sha256 !== sha256) return failure('TRUSTED_FILE_DIGEST')
+      return callback({ bytes, sha256, verify: async () => {
+        if (!fixture.files.get(path)?.equals(bytes)) return failure('TRUSTED_FILE_DIGEST')
+      } })
     },
     readTrustedFile: async (path: string, options: { sha256?: string } = {}) => {
       fixture.calls.push(path)
@@ -131,12 +142,29 @@ describe('prepared bootstrap observation; isolated read-only adapter contract', 
     expect(fixture.native).not.toHaveBeenCalled()
   })
 
-  it('requires the recovery parser for an active retry while ordinary ownership capture still refuses active', async () => {
+  it('uses the typed active observer and recovery parser while ordinary ownership capture still refuses active', async () => {
+    fixture.files.set(headPath, Buffer.from('{"schemaVersion":1,"kind":"adopt","phase":"retired"}'))
     setBootstrap(bootstrap('active'))
     await expect(observePreparedInstallFinalization()).rejects.toThrow('INSTALL_FINALIZATION_MARKER_REQUIRED')
     setBootstrap(bootstrap('active', true))
     expect((await observePreparedInstallFinalization()).bootstrap.status).toBe('active')
+    expect(fixture.inspect).toHaveBeenLastCalledWith({ bootstrapBytes: fixture.files.get(bootstrapPath)!.toString(),
+      receiptBytes: fixture.files.get(receiptPath)!.toString(), headBytes: fixture.files.get(headPath)!.toString() })
+    expect(fixture.calls).toEqual(expect.arrayContaining([bootstrapPath, receiptPath, headPath, '/var/lib/xpanel-lifecycle/install-dependencies.json']))
     await expect(captureInstallOwnership()).rejects.toThrow('INSTALL_BOOTSTRAP_INVALID')
+    expect(fixture.inspect).toHaveBeenCalledTimes(2)
+    expect(fixture.native).not.toHaveBeenCalled()
+  })
+
+  it('rejects active metadata drift through the typed observer before returning source proof', async () => {
+    fixture.files.set(headPath, Buffer.from('{"schemaVersion":1,"kind":"adopt","phase":"retired"}'))
+    setBootstrap(bootstrap('active', true))
+    fixture.inspect.mockImplementationOnce((input: { bootstrapBytes: string }) => {
+      fixture.files.set(headPath, Buffer.from('{"schemaVersion":1,"kind":"adopt","phase":"pending"}'))
+      return { bootstrap: JSON.parse(input.bootstrapBytes) }
+    })
+    await expect(observePreparedInstallFinalization()).rejects.toThrow('TRUSTED_FILE_DIGEST')
+    expect(fixture.calls).not.toContain(join(root, 'release-manifest.json'))
     expect(fixture.native).not.toHaveBeenCalled()
   })
 

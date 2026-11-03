@@ -18,11 +18,21 @@ const sha = (bytes: Buffer): string => createHash('sha256').update(bytes).digest
 const key = 'diagnostic-release-key-not-a-production-credential'
 const keyId = 'diagnostic-release-anchor'
 const options = (bytes: Buffer) => ({ expectedArchiveSha256: sha(bytes), signingKey: key, keyId })
+// Native lifecycle controls are presence-only inputs in this tiny verifier fixture.
+// Their real import closure is exercised separately by the packager tests; no host code runs here.
+const isolatedNativeControlFixtures = new Set([
+  'scripts/coordinator-ownership.mjs', 'scripts/coordinator-install.mjs', 'scripts/coordinator-install-entry.mjs',
+  'scripts/coordinator-rotation.mjs', 'scripts/coordinator-rotate-entry.mjs', 'scripts/root-operator.mjs',
+  'scripts/root-operator-entry.mjs', 'scripts/lifecycle-managed-files.mjs', 'scripts/installation-transition.mjs',
+  'scripts/install-transition-observation.mjs', 'scripts/prepared-release.mjs', 'scripts/acquire-lifecycle-release.mjs',
+])
 let original: Buffer
 beforeAll(async () => {
   const sourceRoot = temp(), workspace = resolve(import.meta.dirname, '..')
   const write = (path: string, bytes: string | Buffer) => { mkdirSync(dirname(join(sourceRoot, path)), { recursive: true }); writeFileSync(join(sourceRoot, path), bytes) }
-  for (const path of [...REQUIRED_ROOT_FILES, ...REQUIRED_SYSTEMD_UNITS]) write(path, readFileSync(join(workspace, path)))
+  for (const path of [...REQUIRED_ROOT_FILES, ...REQUIRED_SYSTEMD_UNITS, 'scripts/management-tls-activation.mjs']) {
+    write(path, isolatedNativeControlFixtures.has(path) ? 'export {}\n' : readFileSync(join(workspace, path)))
+  }
   // Synthetic historical control inventory tests presence only. These stubs are never installed or run.
   for (const path of REQUIRED_LIFECYCLE_CONTROL_FILES.filter(path => !path.startsWith('scripts/install-bootstrap.'))) {
     if (!REQUIRED_ROOT_FILES.includes(path)) write(path, path.endsWith('.sh') || path === 'bin/xpanel-ctl' ? '#!/bin/sh\nexit 0\n' : 'export {}\n')
