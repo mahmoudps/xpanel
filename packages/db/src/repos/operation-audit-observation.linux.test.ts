@@ -465,12 +465,21 @@ describe('actual native nonmutating lifecycle audit observation', () => {
     expect(called).toBe(false)
     expect(await disk(f.root)).toEqual(before)
   })
-  it('refuses a substituted sidecar without following it or modifying its target', async () => {
-    const f = await fixture(), path = f.dbPath + '-wal', bytes = await readFile(path)
-    await rename(path, path + '.held'); await symlink(path + '.held', path)
-    await expect(withReadonlyOperationDatabase(f.dbPath, async () => undefined)).rejects.toThrow()
-    expect(await readFile(path + '.held')).toEqual(bytes)
-    await rm(path); await rename(path + '.held', path)
+  it('refuses a substituted sidecar without following it or modifying its target', { tags: ['feature', 'slow'] }, async () => {
+    // This is the kernel no-follow boundary, reached before SQLite opens or
+    // validates a schema. Avoid migrating unrelated audit state for this check.
+    const root = await mkdtemp('/root/xpanel-readonly-audit-'); roots.push(root); await chmod(root, 0o700)
+    const dbPath = join(root, 'control.sqlite'), path = dbPath + '-wal', target = path + '.held'
+    await writeFile(dbPath, 'protected database boundary fixture\n', { mode: 0o600, flag: 'wx' })
+    const bytes = Buffer.from('retained sidecar target\n')
+    await writeFile(target, bytes, { mode: 0o600, flag: 'wx' }); await symlink(target, path)
+    expect((await lstat(path)).isSymbolicLink()).toBe(true)
+    const before = await disk(root)
+    let called = false
+    await expect(withReadonlyOperationDatabase(dbPath, async () => { called = true })).rejects.toMatchObject({ code: 'ELOOP' })
+    expect(called).toBe(false)
+    expect(await readFile(target)).toEqual(bytes)
+    expect(await disk(root)).toEqual(before)
   })
   it('observes retained root files while SQLite is closed without granting a DB receipt', async () => {
     const f = await fixture(), origin = await f.handle.db.transaction(async tx => ({ ...getStrictOperationDatabaseOrigin(tx) }))

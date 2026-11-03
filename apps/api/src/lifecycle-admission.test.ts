@@ -35,14 +35,17 @@ vi.mock('node:fs/promises', async original => {
     return actual.lstat(...args)
   } }
 })
-vi.mock('../../../scripts/lifecycle-ownership.mjs', () => ({
-  withTrustedDirectory: async (_path: string, callback: () => unknown) => { if (model.failure) throw model.failure; return callback() },
-  withTrustedFile: async (path: string, _options: unknown, callback: (pin: { bytes: Buffer }) => unknown) => {
-    if (model.failure) throw model.failure
-    if (path !== '/var/lib/xpanel-lifecycle/writer-barrier.json' || !model.bytes) throw Object.assign(new Error('absent'), { code: 'ENOENT' })
-    return callback({ bytes: model.bytes })
-  },
-}))
+vi.mock('../../../scripts/lifecycle-ownership.mjs', async original => {
+  const actual = await original<typeof import('../../../scripts/lifecycle-ownership.mjs')>()
+  return { ...actual,
+    withTrustedDirectory: async (_path: string, callback: () => unknown) => { if (model.failure) throw model.failure; return callback() },
+    withTrustedFile: async (path: string, _options: unknown, callback: (pin: { bytes: Buffer }) => unknown) => {
+      if (model.failure) throw model.failure
+      if (path !== '/var/lib/xpanel-lifecycle/writer-barrier.json' || !model.bytes) throw Object.assign(new Error('absent'), { code: 'ENOENT' })
+      return callback({ bytes: model.bytes })
+    },
+  }
+})
 const pending = { schemaVersion: 1, operationId: '12345678-1234-4234-8234-123456789abc', reference: null, kind: 'upgrade', phase: 'pending', requestFingerprint: 'a'.repeat(64), sequence: 1, createdAt: '2026-10-24T12:00:00.000Z' }
 const fixturePrefix = '.xpanel-lifecycle-route-test-'
 const fixtureRoots = new Set<string>()

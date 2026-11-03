@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fail } from '@xpanel/core'
 import { evaluateServerHealth, SERVER_HEALTH_THRESHOLDS } from '../../agent/src/server-health.ts'
+import { HOST_DISK_DF_ARGV } from '../../agent/src/host-info-disks.ts'
 import type { ServerHealthReport, ServerHealthRouteContext } from '../../agent/src/server-health.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import { sha256Hex } from './auth.ts'
@@ -15,9 +16,10 @@ const at = '2026-10-27T10:00:00.000Z', DAY = 86_400_000, HOUR = 3_600_000
 const EMPTY = sha256Hex('null')
 const ROUTE = '/api/server/monitoring-alerts', EVALUATE = ROUTE + '/evaluate'
 // Same host fixture as apps/agent/src/server-health.test.ts, so the real evidence producer runs.
-const DF = 'Filesystem Type 1B-blocks Used Available Capacity Mounted on\n/dev/sda1 ext4 1000 960 40 96% /\ntmpfs tmpfs 100 100 0 100% /run\n/dev/sdb1 xfs 1000 100 900 10% /home\n'
+const DF = 'Filesystem 1B-blocks Used Available Capacity Mounted on\n/dev/sda1 1000 960 40 96% /\ntmpfs 100 100 0 100% /run\n/dev/sdb1 1000 100 900 10% /home\n'
 const DF_INODES = 'Filesystem Inodes IUsed IFree IUse% Mounted on\n/dev/sda1 100 90 10 90% /\ntmpfs 10 1 9 10% /run\n/dev/sdb1 0 0 0 - /home\n'
 const FILES: Record<string, string> = {
+  '/proc/self/mountinfo': '20 1 8:1 / / rw - ext4 /dev/sda1 rw\n21 20 0:2 / /run rw - tmpfs tmpfs rw\n22 20 8:17 / /home rw - xfs /dev/sdb1 rw\n',
   '/proc/loadavg': '1.00 3.00 0.50 1/100 1234\n',
   '/proc/cpuinfo': 'processor\t: 0\nmodel name\t: Test CPU\n\nprocessor\t: 1\nmodel name\t: Test CPU\n',
   '/proc/meminfo': 'MemTotal:        1000000 kB\nMemFree:          50000 kB\nMemAvailable:     100000 kB\nSwapTotal:          1000 kB\nSwapFree:            100 kB\n',
@@ -26,7 +28,8 @@ const FILES: Record<string, string> = {
 type Executor = NonNullable<ServerHealthRouteContext['executor']>
 const host = (files: Record<string, string> = FILES): Executor => ({
   readFile: async (path: string) => files[path] ?? null,
-  runCommand: async (argv: string[]) => argv[0] === '/usr/bin/df' ? { ok: true, code: 0, stdout: argv.includes('-i') ? DF_INODES : DF, stderr: '' }
+  runCommand: async (argv: string[]) => argv.join(' ') === HOST_DISK_DF_ARGV.join(' ') ? { ok: true, code: 0, stdout: DF, stderr: '' }
+    : argv.join(' ') === '/usr/bin/df -i -P' ? { ok: true, code: 0, stdout: DF_INODES, stderr: '' }
     : argv[0] === '/usr/bin/systemctl' ? { ok: true, code: 0, stdout: argv.at(-1) === 'nginx.service' ? 'loaded\nfailed\n' : 'loaded\nactive\n', stderr: '' } : { ok: false, code: 1, stdout: '', stderr: 'unexpected' },
 }) as unknown as Executor
 const cert = (name: string, days: number) => ({ names: [name], notAfter: new Date(Date.parse(at) + days * DAY).toISOString(), autoRenew: true, source: 'acme' as const })
@@ -87,6 +90,27 @@ describe('alert evaluation mapping', () => {
     expect(result.reboot).toMatchObject({ severity: 'warning', health: 'warning' })
     expect(result['disk-space']!.evidence).toContain('filesystems graded')
     expect(readSavedAlertEvaluation(JSON.parse(JSON.stringify(record)))).toEqual(record)
+  })
+
+  it.each(['missing', 'changed-after-inodes'] as const)('keeps disk alerts unverified for a %s mount namespace', async kind => {
+    const executor = host(), run = vi.spyOn(executor, 'runCommand')
+    let mountReads = 0
+    vi.spyOn(executor, 'readFile').mockImplementation(async path => {
+      if (path !== '/proc/self/mountinfo') return FILES[path] ?? null
+      mountReads++
+      if (kind === 'missing') return null
+      // Byte and inode commands both complete, but the same /home path now names a different device.
+      return mountReads <= 2 ? FILES[path]! : FILES[path]!.replace('8:17', '8:18')
+    })
+    const report = await observe(executor), result = byId(evaluate(report))
+    for (const id of ['disk-space', 'disk-inodes']) {
+      expect(report.checks.find(check => check.id === id)).toMatchObject({ state: 'unavailable', reason: 'filesystems_unread' })
+      expect(result[id]).toMatchObject({ state: 'unavailable', health: 'unavailable', severity: null, value: null, matches: [], firstFiredAt: null })
+    }
+    expect(result.load).toMatchObject({ state: 'firing', value: 1.5 })
+    expect(mountReads).toBe(kind === 'missing' ? 1 : 3)
+    const diskCommands = run.mock.calls.map(([argv]) => argv).filter(argv => argv[0] !== '/usr/bin/systemctl')
+    expect(diskCommands).toEqual(kind === 'missing' ? [] : [[...HOST_DISK_DF_ARGV], ['/usr/bin/df', '-i', '-P']])
   })
 
   it('applies threshold overrides and disabled rules', async () => {
