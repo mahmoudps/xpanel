@@ -2,7 +2,7 @@ import { generateKeyPairSync } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { signRootOperatorResponse } from './ops-upgrade-operator-protocol.ts'
-const seams = vi.hoisted(() => ({ kind: 'recover' as 'upgrade'|'recover', phases: [] as string[], failApply: false }))
+const seams = vi.hoisted(() => ({ kind: 'recover' as 'upgrade'|'recover', phases: [] as string[], failApply: false, textReply: false }))
 const key = generateKeyPairSync('ed25519')
 const operationId = '12345678-1234-4234-8234-123456789abc', archiveSha = 'e'.repeat(64)
 const identity = { pid: 1234, start: '55', bootId: '11111111-1111-4111-8111-111111111111', receiptSha256: 'a'.repeat(64) }
@@ -22,8 +22,9 @@ vi.mock('./ops-upgrade-native-observation.ts', () => ({
   ] }),
 }))
 vi.mock('node:net', () => ({ createServer: vi.fn(), createConnection: () => {
-  const socket = Object.assign(new EventEmitter(), { destroyed: false,
-    destroy() { this.destroyed = true; this.emit('close'); return this },
+  class FixtureSocket extends EventEmitter {
+    destroyed = false
+    destroy() { this.destroyed = true; this.emit('close'); return this }
     write(frame: Buffer) {
       const request = JSON.parse(frame.toString('utf8')); seams.phases.push(request.phase)
       queueMicrotask(() => {
@@ -34,16 +35,18 @@ vi.mock('node:net', () => ({ createServer: vi.fn(), createConnection: () => {
           resultDigest: request.phase === 'apply' ? 'c'.repeat(64) : null,
           outcome: request.phase === 'apply' ? { phase: 'succeeded', exitCode: 0 } : null,
         }, key.privateKey)
-        this.emit('data', Buffer.from(JSON.stringify(result) + '\n'))
+        const reply = JSON.stringify(result) + '\n'
+        this.emit('data', seams.textReply ? reply : Buffer.from(reply))
       })
       return true
-    },
-  })
+    }
+  }
+  const socket = new FixtureSocket()
   queueMicrotask(() => socket.emit('connect')); return socket
 } }))
 import { dispatchPreparedRootOperation } from './ops-upgrade-operator.ts'
 
-beforeEach(() => { seams.kind = 'recover'; seams.phases = []; seams.failApply = false })
+beforeEach(() => { seams.kind = 'recover'; seams.phases = []; seams.failApply = false; seams.textReply = false })
 // Signed protocol/client-order tests with explicit process/socket seams; no native transport acceptance.
 describe('prepared root operator client dispatch', () => {
   it('sends recover apply directly without fabricating or requiring observe readiness', async () => {
@@ -57,6 +60,12 @@ describe('prepared root operator client dispatch', () => {
   })
   it('never retries a lost recover apply response', async () => {
     seams.failApply = true
+    await expect(dispatchPreparedRootOperation({ operationId, kind: 'recover', expectedArchiveSha256: archiveSha }))
+      .rejects.toMatchObject({ unknownOutcome: true, retryAllowed: false, operationId })
+    expect(seams.phases).toEqual(['apply'])
+  })
+  it('refuses a decoded text reply without retrying an uncertain apply', async () => {
+    seams.textReply = true
     await expect(dispatchPreparedRootOperation({ operationId, kind: 'recover', expectedArchiveSha256: archiveSha }))
       .rejects.toMatchObject({ unknownOutcome: true, retryAllowed: false, operationId })
     expect(seams.phases).toEqual(['apply'])

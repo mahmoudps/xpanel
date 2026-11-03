@@ -32,6 +32,7 @@ async function exchange(request: RootOperatorRequest): Promise<RootOperatorRespo
       socket.once('connect', () => { try { const peer = kernelPeer(socket, addon); if (peer.uid !== 0 || peer.gid !== 0 || peer.pid !== actual.identity.pid) return refused(); socket.write(encodeUpgradeIpcFrame(request)) } catch (error) { finish(error) } })
       socket.on('data', chunk => {
         if (settled) return
+        if (!Buffer.isBuffer(chunk)) { finish(review(request.operationId)); return }
         if (frameSeen) { finish(review(request.operationId)); return }
         bytes = Buffer.concat([bytes, chunk]); if (bytes.length > UPGRADE_IPC_LIMIT) { finish(review(request.operationId)); return }
         if (!bytes.includes(10)) return
@@ -71,6 +72,7 @@ export async function startNativeRootOperatorServer() {
     const timer = setTimeout(() => socket.destroy(), 65000)
     socket.once('close', () => clearTimeout(timer)); socket.on('error', () => {})
     socket.on('data', chunk => {
+      if (!Buffer.isBuffer(chunk)) { socket.destroy(); return }
       if (handled) { socket.destroy(); return }
       bytes = Buffer.concat([bytes, chunk]); if (bytes.length > UPGRADE_IPC_LIMIT) { socket.destroy(); return }
       if (!bytes.includes(10)) return

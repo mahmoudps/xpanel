@@ -30,6 +30,7 @@ async function exchange(request: UpgradeIpcRequest): Promise<UpgradeIpcResponse>
       socket.once('connect', () => { try { const peer = kernelPeer(socket, addon); if (peer.uid !== 0 || peer.gid !== 0 || peer.pid !== before.identity.pid) return refuse(); socket.write(encodeUpgradeIpcFrame(request)) } catch (error) { done(error) } })
       socket.on('data', chunk => {
         if (settled) return
+        if (!Buffer.isBuffer(chunk)) { done(new Error('UPGRADE_IPC_BINARY_REQUIRED')); return }
         if (readingComplete) { done(new Error('UPGRADE_IPC_EXTRA_DATA')); return }
         bytes = Buffer.concat([bytes, chunk]); if (bytes.length > UPGRADE_IPC_LIMIT) { done(new Error('UPGRADE_IPC_LIMIT')); return }
         if (!bytes.includes(10)) return
@@ -88,6 +89,7 @@ export async function startNativeUpgradeIpcServer() {
     const deadline = setTimeout(() => socket.destroy(), IPC_TIMEOUT)
     socket.once('close', () => clearTimeout(deadline)); socket.on('error', () => {})
     socket.on('data', chunk => {
+      if (!Buffer.isBuffer(chunk)) { socket.destroy(); return }
       if (handled) { socket.destroy(); return }
       bytes = Buffer.concat([bytes, chunk]); if (bytes.length > UPGRADE_IPC_LIMIT) { socket.destroy(); return }
       if (!bytes.includes(10)) return
