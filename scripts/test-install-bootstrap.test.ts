@@ -1,6 +1,6 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { assertFreshInstallReleaseControls, parseBootstrapArgs, parseBootstrapKeys, parseBootstrapTrust, prepareNewInstallation, runBootstrapCli, verifyBootstrapPublisher } from './install-bootstrap.mjs'
+import { assertFreshInstallReleaseControls, parseBootstrapArgs, parseBootstrapKeys, parseBootstrapTrust, prepareNewInstallation, resumePreparedInstallation, runBootstrapCli, verifyBootstrapPublisher, verifyNewInstallation } from './install-bootstrap.mjs'
 
 const options = ['--artifact=/root/releases/xpanel-release-0.1.0.tar.gz', `--artifact-sha256=${'a'.repeat(64)}`, '--release-trust-file=/root/protected/archive-trust.json', '--release-keys-file=/root/protected/publisher-keys.json']
 const archiveTrust = () => ({ keyId: 'archive-anchor', packageManagerPath: '/opt/tools/pnpm', packageManagerSha256: 'b'.repeat(64), signingKeyPath: '/root/protected/archive-hmac' })
@@ -28,6 +28,7 @@ describe('new install input grammar; no native installation effects', () => {
     expect(parseBootstrapArgs(['plan', ...options])).toEqual({ phase: 'plan', artifactPath: '/root/releases/xpanel-release-0.1.0.tar.gz', artifactSha256: 'a'.repeat(64), trustPath: '/root/protected/archive-trust.json', keysPath: '/root/protected/publisher-keys.json' })
     expect(parseBootstrapArgs(['admission'])).toEqual({ phase: 'admission' })
     expect(parseBootstrapArgs(['capture'])).toEqual({ phase: 'capture' })
+    for (const phase of ['verify', 'resume']) expect(parseBootstrapArgs([phase, ...options])).toMatchObject({ phase, artifactSha256: 'a'.repeat(64) })
     for (const argv of [['plan'], ['prepare', ...options.slice(0, 3)], ['capture', ...options], ['activate'], ['plan', ...options, '--root=/tmp/xpanel'], ['plan', ...options, options[0]!]]) {
       expect(() => parseBootstrapArgs(argv)).toThrow()
     }
@@ -53,6 +54,16 @@ describe('new install input grammar; no native installation effects', () => {
   it('rejects extra native option fields before platform or host checks', async () => {
     await expect(prepareNewInstallation({ artifactPath: '/root/release.tar.gz', artifactSha256: 'a'.repeat(64), trustPath: '/root/trust.json', keysPath: '/root/keys.json', root: '/tmp/fake', statProvider: () => ({ uid: 0 }) } as never)).rejects.toThrow('INSTALL_OPTIONS_INVALID')
     await expect(prepareNewInstallation({ phase: 'plan', artifactPath: '/root/release.tar.gz', artifactSha256: 'a'.repeat(64), trustPath: '/root/trust.json', keysPath: '/root/keys.json' } as never)).rejects.toThrow('INSTALL_OPTIONS_INVALID')
+  })
+
+  it.each([verifyNewInstallation, resumePreparedInstallation])('does not admit injected native observations or a different phase', async native => {
+    const input = { artifactPath: '/root/release.tar.gz', artifactSha256: 'a'.repeat(64), trustPath: '/root/trust.json', keysPath: '/root/keys.json' }
+    for (const extra of [{ root: '/tmp/fake' }, { statProvider: () => ({ uid: 0 }) }, { prepared: true }, { phase: 'prepare' }]) {
+      await expect(native({ ...input, ...extra } as never)).rejects.toThrow('INSTALL_OPTIONS_INVALID')
+    }
+    let called = false
+    await expect(native(Object.defineProperty({ ...input }, 'prepared', { get() { called = true; return true } }) as never)).rejects.toThrow('INSTALL_OPTIONS_INVALID')
+    expect(called).toBe(false)
   })
 })
 

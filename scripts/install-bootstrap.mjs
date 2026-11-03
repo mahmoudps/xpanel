@@ -34,7 +34,7 @@ const parseJson = bytes => { try { return JSON.parse(new TextDecoder('utf-8', { 
 export function parseBootstrapArgs(argv) {
   check(Array.isArray(argv) && argv.length <= 6 && argv.every(value => typeof value === 'string'), 'INSTALL_OPTIONS_INVALID')
   const [phase, ...args] = argv
-  check(['plan', 'prepare', 'admission', 'capture'].includes(phase), 'INSTALL_PHASE_INVALID')
+  check(['plan', 'verify', 'prepare', 'resume', 'admission', 'capture'].includes(phase), 'INSTALL_PHASE_INVALID')
   const fields = new Map()
   const names = ['artifact', 'artifact-sha256', 'release-trust-file', 'release-keys-file']
   for (const argument of args) {
@@ -229,15 +229,7 @@ async function withInputTrust(options, callback) {
   })
 }
 
-/** Fresh-host only. Actual extraction, dependency effects and publication are never injectable. */
-export async function prepareNewInstallation(input) {
-  check(input && typeof input === 'object' && !Array.isArray(input)
-    && Reflect.ownKeys(input).every(key => ['phase', 'artifactPath', 'artifactSha256', 'trustPath', 'keysPath'].includes(key)
-      && Object.hasOwn(Object.getOwnPropertyDescriptor(input, key) ?? {}, 'value'))
-    && (input.phase === undefined || input.phase === 'prepare'), 'INSTALL_OPTIONS_INVALID')
-  const options = parseBootstrapArgs(['prepare', `--artifact=${input?.artifactPath}`, `--artifact-sha256=${input?.artifactSha256}`, `--release-trust-file=${input?.trustPath}`, `--release-keys-file=${input?.keysPath}`])
-  const runtime = await nativeContext()
-  process.umask(0o022)
+async function assertFreshInstallationHost() {
   for (const path of [INSTALL_ROOT, DATABASE, DATABASE + '-wal', DATABASE + '-shm', LIFECYCLE]) check(!await exists(path), 'INSTALL_EXISTING_HOST_REFUSED')
   for (const path of OWNED_PATHS) check(!await exists(path), 'INSTALL_EXISTING_CONTROL_PLANE_REFUSED')
   if (await exists('/var/lib/xpanel/state')) {
@@ -245,6 +237,190 @@ export async function prepareNewInstallation(input) {
     check((await readdir('/var/lib/xpanel/state')).length === 0, 'INSTALL_EXISTING_STATE_REFUSED')
   }
   await assertTrustedDirectory('/opt'); await assertTrustedDirectory('/var/lib')
+}
+
+async function withVerifiedBootstrapArchive(options, callback) {
+  return withInputTrust(options, async ({ trust, keys, configPin, keyPin, keysPin }) => {
+    const sidecar = options.artifactPath.slice(0, -'.tar.gz'.length) + '.manifest.json'
+    return withTrustedFile(sidecar, { maxBytes: 4096 }, async publisherPin => {
+      const held = await withAuthenticatedReleaseArchive(options.artifactPath,
+        { signingKey: keyPin.bytes, keyId: trust.keyId, expectedArchiveSha256: options.artifactSha256 }, async ({ report }) => {
+          verifyBootstrapPublisher(parseJson(publisherPin.bytes), report, keys)
+          assertFreshInstallReleaseControls(report)
+          check(report.manifest.runtime.nodeVersion === PINNED_NODE, 'INSTALL_RELEASE_CONTROLS_REQUIRED')
+          return callback({ report, trust, configPin, keyPin, keysPin })
+        })
+      await configPin.verify(); await keyPin.verify(); await keysPin.verify(); await publisherPin.verify()
+      return held.value
+    })
+  })
+}
+
+function nativeBootstrapInput(input, phase) {
+  check(input && typeof input === 'object' && !Array.isArray(input)
+    && Reflect.ownKeys(input).every(key => ['phase', 'artifactPath', 'artifactSha256', 'trustPath', 'keysPath'].includes(key)
+      && Object.hasOwn(Object.getOwnPropertyDescriptor(input, key) ?? {}, 'value'))
+    && (input.phase === undefined || input.phase === phase), 'INSTALL_OPTIONS_INVALID')
+  return parseBootstrapArgs([phase, `--artifact=${input.artifactPath}`, `--artifact-sha256=${input.artifactSha256}`, `--release-trust-file=${input.trustPath}`, `--release-keys-file=${input.keysPath}`])
+}
+
+async function emptyResumeDirectory(path, uid, gid, mode, allowed = []) {
+  const before = await lstat(path, { bigint: true })
+  check(before.isDirectory() && before.uid === BigInt(uid) && before.gid === BigInt(gid)
+    && Number(before.mode & 0o7777n) === mode, 'INSTALL_RESUME_DIRECTORY_UNSAFE')
+  const handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+  try {
+    const opened = await handle.stat({ bigint: true })
+    check(opened.dev === before.dev && opened.ino === before.ino, 'INSTALL_RESUME_DIRECTORY_CHANGED')
+    const acl = await command('/usr/bin/getfacl', ['--omit-header', '--absolute-names', '--numeric', '--no-effective',
+      '/proc/' + process.pid + '/fd/' + handle.fd])
+    const expectedAcl = ['user::rwx', (mode & 0o070) === 0o070 ? 'group::rwx' : 'group::r-x', 'other::---']
+    const aclLines = acl.text.trim().split('\n').filter(Boolean)
+    check(aclLines.length === expectedAcl.length && aclLines.every((line, index) => line === expectedAcl[index]), 'INSTALL_RESUME_DIRECTORY_ACL_UNSAFE')
+    check((await readdir('/proc/self/fd/' + handle.fd)).every(name => allowed.includes(name)), 'INSTALL_RESUME_STATE_PRESENT')
+    const named = await lstat(path, { bigint: true }), after = await handle.stat({ bigint: true })
+    check([named, after].every(info => ['dev', 'ino', 'uid', 'gid', 'mode', 'mtimeNs', 'ctimeNs'].every(key => info[key] === before[key])), 'INSTALL_RESUME_DIRECTORY_CHANGED')
+  } finally { await handle.close() }
+}
+
+async function emptyResumeData() {
+  if (await exists('/var/lib/xpanel')) {
+    const principal = await command('/usr/bin/getent', ['passwd', 'xpanel'])
+    const fields = principal.text.trim().split(':')
+    check(fields.length === 7 && fields[0] === 'xpanel' && /^[1-9][0-9]*$/.test(fields[2]) && /^[1-9][0-9]*$/.test(fields[3])
+      && fields[5] === '/var/lib/xpanel' && ['/sbin/nologin', '/usr/sbin/nologin'].includes(fields[6]), 'INSTALL_RESUME_SERVICE_IDENTITY_INVALID')
+    const uid = Number(fields[2]), gid = Number(fields[3])
+    check(Number.isSafeInteger(uid) && Number.isSafeInteger(gid), 'INSTALL_RESUME_SERVICE_IDENTITY_INVALID')
+    await assertResumeServiceQuiescent(uid, gid)
+    await emptyResumeDirectory('/var/lib/xpanel', uid, gid, 0o2770, ['state', 'generations'])
+    for (const path of ['/var/lib/xpanel/state', '/var/lib/xpanel/generations']) {
+      if (await exists(path)) await emptyResumeDirectory(path, uid, gid, 0o2750)
+    }
+    await assertResumeServiceQuiescent(uid, gid)
+  }
+  for (const path of ['/var/lib/xpanel-agent', '/run/xpanel']) {
+    if (await exists(path)) {
+      await assertTrustedDirectory(path)
+      check((await readdir(path)).length === 0, 'INSTALL_RESUME_STATE_PRESENT')
+    }
+  }
+}
+
+async function readResumeProcLeaf(base, name, limit) {
+  const handle = await open(base + '/' + name, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+  try {
+    const buffer = Buffer.alloc(limit + 1)
+    let total = 0
+    while (total <= limit) {
+      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, null)
+      if (!bytesRead) break
+      total += bytesRead
+    }
+    check(total <= limit, 'INSTALL_RESUME_PROCESS_UNOBSERVABLE')
+    return buffer.subarray(0, total).toString('utf8')
+  } finally { await handle.close() }
+}
+
+async function assertResumeHostView() {
+  check((await readFile('/proc/1/comm', 'utf8')).trim() === 'systemd', 'INSTALL_RESUME_HOST_VIEW_REQUIRED')
+  for (const name of ['pid', 'mnt', 'user', 'net']) {
+    check(await readlink('/proc/self/ns/' + name) === await readlink('/proc/1/ns/' + name), 'INSTALL_RESUME_HOST_VIEW_REQUIRED')
+  }
+}
+
+async function assertResumeServiceQuiescent(uid, gid) {
+  const pids = (await readdir('/proc')).filter(name => /^[1-9][0-9]*$/.test(name))
+  check(pids.length <= 16384, 'INSTALL_RESUME_PROCESS_LIMIT')
+  let tasks = 0
+  for (const pid of pids) {
+    let processPin
+    try {
+      processPin = await open('/proc/' + pid, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+      const taskRoot = '/proc/self/fd/' + processPin.fd + '/task'
+      const tids = await readdir(taskRoot)
+      check(tids.length <= 4096 && tids.every(name => /^[1-9][0-9]*$/.test(name)), 'INSTALL_RESUME_PROCESS_UNOBSERVABLE')
+      for (const tid of tids) {
+        check(++tasks <= 65536, 'INSTALL_RESUME_PROCESS_LIMIT')
+        let taskPin
+        try {
+          taskPin = await open(taskRoot + '/' + tid, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+          const base = '/proc/self/fd/' + taskPin.fd
+          const before = await readResumeProcLeaf(base, 'stat', 4096)
+          const status = await readResumeProcLeaf(base, 'status', 65536)
+          const ids = /^Uid:[ \t]+([0-9]+)[ \t]+([0-9]+)[ \t]+([0-9]+)[ \t]+([0-9]+)[ \t]*$/m.exec(status)
+          const gids = /^Gid:[ \t]+([0-9]+)[ \t]+([0-9]+)[ \t]+([0-9]+)[ \t]+([0-9]+)[ \t]*$/m.exec(status)
+          const groups = /^Groups:[ \t]*([0-9 \t]*)$/m.exec(status)
+          check(ids && gids && groups, 'INSTALL_RESUME_PROCESS_UNOBSERVABLE')
+          check(ids.slice(1).every(value => Number(value) !== uid)
+            && gids.slice(1).every(value => Number(value) !== gid)
+            && groups[1].trim().split(/[ \t]+/).filter(Boolean).every(value => Number(value) !== gid), 'INSTALL_RESUME_SERVICE_PROCESS_PRESENT')
+          const after = await readResumeProcLeaf(base, 'stat', 4096)
+          const birth = value => value.slice(value.lastIndexOf(')') + 2).trim().split(/\s+/)[19]
+          check(before.startsWith(tid + ' (') && after.startsWith(tid + ' (') && /^[1-9][0-9]*$/.test(birth(before) ?? '')
+            && birth(before) === birth(after), 'INSTALL_RESUME_PROCESS_CHANGED')
+        } catch (error) { if (error.code !== 'ENOENT') throw error }
+        finally { if (taskPin) await taskPin.close() }
+      }
+    } catch (error) { if (error.code !== 'ENOENT') throw error }
+    finally { if (processPin) await processPin.close() }
+  }
+}
+
+/** Authenticate fresh inputs without publishing product state, before OS prerequisites. */
+export async function verifyNewInstallation(input) {
+  const options = nativeBootstrapInput(input, 'verify')
+  await nativeContext(); await assertFreshInstallationHost()
+  return withVerifiedBootstrapArchive(options, async ({ report }) => freeze({ status: 'verified', version: report.manifest.version, active: false }))
+}
+
+/** Exact early preparation only; no DB, admission, owned units, receipt or source mutation. */
+export async function resumePreparedInstallation(input) {
+  const options = nativeBootstrapInput(input, 'resume')
+  const runtime = await nativeContext()
+  await assertResumeHostView()
+  return withTrustedFile(BOOTSTRAP_PATH, { exactMode: 0o600, maxBytes: 16 * 1024 }, async bootstrapPin => {
+    const bootstrap = parseJson(bootstrapPin.bytes)
+    object(bootstrap, ['schemaVersion', 'status', 'createdAt', 'version', 'releaseRoot', 'archiveSha256', 'manifestSha256', 'controlDbSchemaVersion', 'dependencyReceiptSha256', 'runtime'], 'INSTALL_RESUME_BOOTSTRAP_INVALID')
+    check(bootstrap.status === 'prepared' && bootstrap.archiveSha256 === options.artifactSha256, 'INSTALL_RESUME_PREPARED_REQUIRED')
+    for (const path of [DATABASE, DATABASE + '-wal', DATABASE + '-shm', '/var/lib/xpanel/install-journal.json',
+      '/etc/xpanel/mariadb-admin.cnf', ...OWNED_PATHS]) check(!await exists(path), 'INSTALL_RESUME_EFFECTS_PRESENT')
+    await assertTrustedDirectory(LIFECYCLE)
+    check((await readdir(LIFECYCLE)).every(name => ['bootstrap.json', 'install-dependencies.json', 'prepared'].includes(name)), 'INSTALL_RESUME_LIFECYCLE_EFFECTS_PRESENT')
+    await emptyResumeData()
+    for (const unit of [...OWNED_PANEL_UNITS, 'xpanel-lifecycle.service']) {
+      const result = await command('/usr/bin/systemctl', ['show', unit, '--property=LoadState,ActiveState,MainPID,ControlPID'])
+      const fields = Object.fromEntries(result.text.trim().split('\n').map(line => line.split('=')))
+      const noProcesses = unit === 'xpanel-management-tls.timer'
+        ? fields.MainPID === undefined && fields.ControlPID === undefined
+        : fields.MainPID === '0' && fields.ControlPID === '0'
+      check(fields.LoadState === 'not-found' && fields.ActiveState === 'inactive' && noProcesses, 'INSTALL_RESUME_UNIT_PRESENT')
+    }
+    await verifyPreparedBootstrapSource(runtime, bootstrap)
+    return withVerifiedBootstrapArchive(options, async ({ report, trust, keyPin, keysPin }) => {
+      check(report.manifest.version === bootstrap.version && report.manifestSha256 === bootstrap.manifestSha256
+        && report.manifest.controlDbSchemaVersion === bootstrap.controlDbSchemaVersion, 'INSTALL_RESUME_ARCHIVE_MISMATCH')
+      const installedTrust = parseBootstrapTrust(parseJson((await readTrustedFile('/etc/xpanel/release-trust.json', { exactMode: 0o600, maxBytes: 8192 })).bytes))
+      check(installedTrust.signingKeyPath === '/etc/xpanel/release-hmac.key' && installedTrust.keyId === trust.keyId
+        && installedTrust.packageManagerPath === trust.packageManagerPath && installedTrust.packageManagerSha256 === trust.packageManagerSha256,
+      'INSTALL_RESUME_TRUST_MISMATCH')
+      await readTrustedFile(installedTrust.signingKeyPath, { exactMode: 0o600, maxBytes: 4096, sha256: digest(keyPin.bytes) })
+      await readTrustedFile('/etc/xpanel/release-keys.json', { exactMode: 0o644, maxBytes: 16 * 1024, sha256: digest(keysPin.bytes) })
+      await verifySourceInventory(bootstrap.releaseRoot, report)
+      await verifyResumePreparedProof(report, trust, runtime, bootstrap)
+      await verifyPreparedBootstrapSource(runtime, bootstrap)
+      await bootstrapPin.verify()
+      return freeze({ status: 'prepared', version: bootstrap.version, releaseRoot: bootstrap.releaseRoot, currentLink: CURRENT,
+        dependencyReceiptSha256: bootstrap.dependencyReceiptSha256, installationReceipt: 'pending', resumed: true })
+    })
+  })
+}
+
+/** Fresh-host only. Actual extraction, dependency effects and publication are never injectable. */
+export async function prepareNewInstallation(input) {
+  const options = nativeBootstrapInput(input, 'prepare')
+  const runtime = await nativeContext()
+  process.umask(0o022)
+  await assertFreshInstallationHost()
   return withInputTrust(options, async ({ trust, keys, configPin, keyPin, keysPin }) => {
     const sidecarPath = options.artifactPath.slice(0, -'.tar.gz'.length) + '.manifest.json'
     return withTrustedFile(sidecarPath, { maxBytes: 4096 }, async publisherPin => {
@@ -375,6 +551,47 @@ const REPAIR_CONTROL_FILES = Object.freeze(['scripts/prepared-release.mjs', 'scr
   'scripts/install-bootstrap.mjs', 'scripts/install-finalization.mjs', 'scripts/install-finalization-native.mjs',
   'scripts/install-finalization-readiness.mjs', 'scripts/acquire-lifecycle-release.mjs', 'scripts/install-transition-observation.mjs'])
 
+async function verifyResumePreparedProof(report, trust, runtime, bootstrap) {
+  if (!REPAIR_CONTROL_FILES.every(path => report.manifest.files.some(entry => entry.path === path))) {
+    check(!await exists(PREPARED_ROOT), 'INSTALL_RESUME_PREPARED_PROOF_UNEXPECTED')
+    return
+  }
+  const archive = report.archiveSha256, directory = PREPARED_ROOT + '/' + archive
+  const version = PREPARED_ROOT + '/version-' + report.manifest.version
+  const inspect = async (path, names, callback) => withTrustedDirectory(path, async pin => {
+    const info = await lstat(path, { bigint: true })
+    check(Number(info.mode & 0o7777n) === 0o700, 'INSTALL_RESUME_PREPARED_DIRECTORY_UNSAFE')
+    const entries = (await readdir(path)).sort()
+    check(entries.length === names.length && entries.every((name, index) => name === [...names].sort()[index]), 'INSTALL_RESUME_PREPARED_CONTENTS_CHANGED')
+    await callback(); await pin.verify()
+  })
+  await inspect(PREPARED_ROOT, [archive, 'version-' + report.manifest.version], async () => {
+    await inspect(version, [], async () => {})
+    await inspect(directory, ['dependencies.json', 'prepared.json'], async () => {
+      const dependencyPath = directory + '/dependencies.json'
+      await withTrustedFile(dependencyPath, { exactMode: 0o600, maxBytes: 16 * 1024, sha256: bootstrap.dependencyReceiptSha256 }, async dependency => {
+        const recorded = parseJson(dependency.bytes)
+        await withTrustedFile(directory + '/prepared.json', { exactMode: 0o600, maxBytes: 16 * 1024 }, async proof => {
+          const value = parseJson(proof.bytes)
+          object(value, ['schemaVersion', 'kind', 'releaseRoot', 'version', 'archiveSha256', 'manifestSha256', 'sourceFilesDigest', 'treeSha256',
+            'controlDbSchemaVersion', 'dependencyReceiptPath', 'dependencyReceiptSha256', 'runtime'], 'INSTALL_RESUME_PREPARED_PROOF_INVALID')
+          object(value.runtime, ['nodePath', 'nodeSha256', 'nodeVersion', 'packageManagerPath', 'packageManagerSha256'], 'INSTALL_RESUME_PREPARED_PROOF_INVALID')
+          check(value.schemaVersion === 1 && value.kind === 'xpanel-prepared-release' && value.releaseRoot === bootstrap.releaseRoot
+            && value.version === bootstrap.version && value.archiveSha256 === archive && value.manifestSha256 === report.manifestSha256
+            && value.sourceFilesDigest === digest(JSON.stringify(report.manifest.files)) && value.treeSha256 === recorded.tree?.treeSha256
+            && value.controlDbSchemaVersion === bootstrap.controlDbSchemaVersion && value.dependencyReceiptPath === dependencyPath
+            && value.dependencyReceiptSha256 === dependency.sha256 && value.runtime.nodePath === runtime.nodePath
+            && value.runtime.nodeSha256 === runtime.nodeSha256 && value.runtime.nodeVersion === PINNED_NODE
+            && value.runtime.packageManagerPath === trust.packageManagerPath && value.runtime.packageManagerSha256 === trust.packageManagerSha256,
+          'INSTALL_RESUME_PREPARED_PROOF_MISMATCH')
+          await proof.verify()
+        })
+        await dependency.verify()
+      })
+    })
+  })
+}
+
 async function publishPreparedReleaseProof(report, trust, runtime, dependency, directoryReady) {
   const directory = PREPARED_ROOT + '/' + report.archiveSha256, dependencyReceiptPath = directory + '/dependencies.json'
   if (!directoryReady) {
@@ -499,7 +716,7 @@ async function withPreparedReleaseScope(input, callback, mayPrepare) {
               archiveSha256: report.archiveSha256, manifestSha256: report.manifestSha256, releaseRoot,
               installedArchiveSha256: source.archiveSha256, createdAt: new Date().toISOString() })
             for (const pin of pins) await pin.verify()
-            const staged = await stageAuthenticatedReleaseArchive(INSTALL_ROOT + '/staging', { ...archiveTrust, authenticatedArchive: report })
+            const staged = await stageAuthenticatedReleaseArchive(INSTALL_ROOT + '/staging', { signingKey: keyPin.bytes, keyId: trust.keyId, authenticatedArchive: report })
             const dependencies = await verifyDependencies(staged.stagedAt, report, trust, runtime)
             for (const pin of pins) await pin.verify()
             check(!await exists(releaseRoot), 'PREPARED_RELEASE_CONFLICT')
@@ -630,7 +847,9 @@ export async function runBootstrapCli(argv, streams = { stdout: process.stdout, 
   try {
     const options = parseBootstrapArgs(argv)
     const result = options.phase === 'plan' ? { status: 'plan', existingInstallations: 'refused', nativeExecution: 'not_run', installationReceipt: 'pending' }
-      : options.phase === 'prepare' ? await prepareNewInstallation(options)
+      : options.phase === 'verify' ? await verifyNewInstallation(options)
+        : options.phase === 'resume' ? await resumePreparedInstallation(options)
+          : options.phase === 'prepare' ? await prepareNewInstallation(options)
         : options.phase === 'admission' ? await establishInstallAdmission() : await captureInstallOwnership()
     streams.stdout.write(JSON.stringify(result) + '\n'); return 0
   } catch (error) {

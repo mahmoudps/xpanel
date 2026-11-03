@@ -94,6 +94,20 @@ describe('S03 installer service boundary (rendering only, no host proof)', () =>
     expect(installer).toContain('install -d -o xpanel -g xpanel -m 2770 /var/lib/xpanel')
     expect(installer).toContain('assert_service_groups')
     expect(installer).toContain('Unexpected member in private service group')
-    expect(installer.indexOf('assert_pinned_runtime\n')).toBeLessThan(installer.indexOf('apt-get update -y'))
+    // The first APT operation supplies kernel prerequisites before a fresh source is published.
+    // Its executable and archive are checked first; the full installed runtime precedes product packages.
+    const live = installer.slice(installer.indexOf('[[ "$(uname -s)" == "Linux" ]]'))
+    const prerequisites = live.indexOf('echo "[0/6] Preparing quota modules')
+    const packages = live.indexOf('echo "[2/6] Installing packages')
+    expect(prerequisites).toBeGreaterThan(0)
+    expect(packages).toBeGreaterThan(prerequisites)
+    for (const check of ['assert_root_file "$NODE_BIN"', '"$("$NODE_BIN" --version)" == "v$PINNED_NODE_VERSION"',
+      '"$SCRIPT_DIR/install-bootstrap.mjs" verify', '"$SCRIPT_DIR/install-bootstrap.mjs" resume']) {
+      expect(live.indexOf(check)).toBeGreaterThanOrEqual(0)
+      expect(live.indexOf(check)).toBeLessThan(prerequisites)
+    }
+    expect(live.indexOf('apt-get update -y')).toBeGreaterThan(prerequisites)
+    expect(live.indexOf('assert_pinned_runtime\n')).toBeGreaterThan(prerequisites)
+    expect(live.indexOf('assert_pinned_runtime\n')).toBeLessThan(packages)
   })
 })

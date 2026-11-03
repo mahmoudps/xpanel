@@ -148,6 +148,24 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
     expect(fixture.artifactProvenance).toBeNull()
   })
 
+  it('ships the optional kernel snapshot helper without invalidating earlier authenticated releases', async () => {
+    const path = 'scripts/install-kernel-quotas.sh'
+    expect(REQUIRED_ROOT_FILES).not.toContain(path)
+    const legacy = signedReleaseFixture!
+    await expect(verifyReleaseArchive(legacy.archivePath!, { signingKey: fixtureSigningKey, requireSignature: true })).resolves.toBeDefined()
+    expect(JSON.parse(readFileSync(join(legacy.stagingDir, 'release-manifest.json'), 'utf8')).files.some((file: { path: string }) => file.path === path)).toBe(false)
+    const sourceRoot = makeSourceFixture(), helpers = [path, 'scripts/install-kernel-package.mjs']
+    const content = new Map(helpers.map(helper => [helper, readFileSync(join(resolve(import.meta.dirname, '..'), helper))]))
+    for (const [helper, bytes] of content) writeSourceFile(sourceRoot, helper, bytes)
+    const built = await buildReleaseArtifact({ sourceRoot, outputDir: makeTempDir(), version: '0.1.2', signingKey: fixtureSigningKey, keyId: 'release-key-1' })
+    const verified = await verifyReleaseArchive(built.archivePath!, { signingKey: fixtureSigningKey, requireSignature: true })
+    for (const [helper, bytes] of content) {
+      expect(REQUIRED_ROOT_FILES).not.toContain(helper)
+      expect(verified.manifest.files.find((file: { path: string }) => file.path === helper)).toMatchObject({ mode: helper.endsWith('.sh') ? 0o755 : 0o644, sha256: createHash('sha256').update(bytes).digest('hex') })
+      expect(readFileSync(join(built.stagingDir, helper))).toEqual(bytes)
+    }
+  })
+
   it('derives SBOM workspace metadata from the captured archive inputs instead of rereading changed source', () => {
     const root = makeTempDir()
     const captured = new Map([['apps/api/package.json', { bytes: Buffer.from(JSON.stringify({ name: '@xpanel/api', version: '0.1.0', dependencies: {} })) }]])
@@ -817,6 +835,7 @@ describe('fresh-install package source closure', () => {
     'scripts/install-finalization-native.mjs', 'scripts/install-finalization-native.d.mts',
     'scripts/install-finalization-readiness.mjs', 'scripts/install-finalization-readiness.d.mts',
     'scripts/install-startup.mjs', 'scripts/install-startup.d.mts',
+    'scripts/install-dns-resume.mjs',
     'scripts/install-os-configuration.mjs',
   ]
 

@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -180,12 +180,15 @@ describe('OS profile configuration hand-over to the installer', () => {
 })
 
 describe('kernel quota format detection in the installer', () => {
-  it('lists bootable kernels with a module tree and finds quota_v2/quota_tree built in or as modules', () => {
+  it('lists all normal bootable kernels and finds quota_v2/quota_tree built in or as modules', () => {
     const root = mkdtempSync(join(tempParent, tempPrefix))
     tempRoots.push(root)
     const kernels: Record<string, Record<string, string>> = {
       'modular': { 'modules.dep': 'kernel/fs/quota/quota_v2.ko.zst: kernel/fs/quota/quota_tree.ko.zst\nkernel/fs/quota/quota_tree.ko.zst:\n' },
       'builtin': { 'modules.dep': '', 'modules.builtin': 'kernel/fs/quota/quota_v2.ko\nkernel/fs/quota/quota_tree.ko\n' },
+      'rhs-only': { 'modules.dep': 'kernel/fs/ext4/ext4.ko.xz: kernel/fs/quota/quota_v2.ko.xz\nkernel/fs/quota/quota_tree.ko.xz:\n' },
+      'rhs-both': { 'modules.dep': 'kernel/drivers/x.ko: kernel/fs/quota/quota_v2.ko\nkernel/drivers/y.ko: kernel/fs/quota/quota_tree.ko\n' },
+      'no-colon': { 'modules.dep': 'kernel/fs/quota/quota_v2.ko\nkernel/fs/quota/quota_tree.ko:\n' },
       'virtual': { 'modules.dep': 'kernel/fs/ext4/ext4.ko.zst:\nkernel/fs/quota/quota_tree.ko.zst:\n' },
     }
     mkdirSync(join(root, 'boot'))
@@ -197,11 +200,75 @@ describe('kernel quota format detection in the installer', () => {
     const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
     const functions = source.slice(source.indexOf('kernel_lacks_quota_format() {'), source.indexOf('# Every bootable kernel gets the modules'))
     const fixture = root.replaceAll('\\', '/')
-    const script = functions.replaceAll('/lib/modules/', `${fixture}/modules/`).replaceAll('/boot/vmlinuz-', `${fixture}/boot/vmlinuz-`)
-      + 'while read -r release; do if kernel_lacks_quota_format "$release"; then echo "lacks $release"; else echo "has $release"; fi; done < <(bootable_kernel_releases)\n'
-    const run = spawnSync(bash, ['-euo', 'pipefail', '-c', script], { encoding: 'utf8', timeout: 10_000 })
+    const script = 'OS_FAMILY=rhel\ndie() { echo "$*" >&2; exit 1; }; assert_root_file() { if [[ "$1" == */modules.builtin ]]; then echo "guarded $1" >&2; fi; }\n'
+      + functions.replaceAll('/lib/modules/', `${fixture}/modules/`).replaceAll('/boot/vmlinuz-', `${fixture}/boot/vmlinuz-`)
+      + 'inventory="$(bootable_kernel_releases)" || exit 1\nwhile read -r release; do if kernel_lacks_quota_format "$release"; then echo "lacks $release"; else echo "has $release"; fi; done <<< "$inventory"\n'
+    const run = spawnSync(bash, ['-euo', 'pipefail'], { input: script, encoding: 'utf8', timeout: 10_000 })
     expect(run.status, run.stderr).toBe(0)
-    expect(run.stdout.trim().split('\n').sort()).toEqual(['has builtin', 'has modular', 'lacks virtual'])
+    expect(run.stdout.trim().split('\n').sort()).toEqual(['has builtin', 'has modular', 'lacks no-colon', 'lacks rhs-both', 'lacks rhs-only', 'lacks virtual'])
+    expect(run.stderr.trim().split('\n')).toHaveLength(1)
+    expect(run.stderr.trim()).toMatch(/^guarded .*\/modules\/builtin\/modules\.builtin$/)
+  })
+  for (const scenario of ['read-error', 'guard-refusal', 'wrong-release-link', 'dangling-link', 'fifo'] as const) {
+    const unixSpecial = !['read-error', 'guard-refusal'].includes(scenario)
+    it.skipIf(unixSpecial && process.platform === 'win32')(`refuses an uncertain built-in index (${scenario})`, () => {
+      const root = mkdtempSync(join(tempParent, tempPrefix)); tempRoots.push(root)
+      const release = join(root, 'modules', 'target'), other = join(root, 'modules', 'other')
+      mkdirSync(release, { recursive: true }); mkdirSync(other)
+      const builtin = join(release, 'modules.builtin'), quota = 'kernel/fs/quota/quota_v2.ko\nkernel/fs/quota/quota_tree.ko\n'
+      writeFileSync(join(release, 'modules.dep'), quota)
+      if (scenario === 'wrong-release-link' || scenario === 'dangling-link') {
+        if (scenario === 'wrong-release-link') writeFileSync(join(other, 'modules.builtin'), quota)
+        symlinkSync('../other/modules.builtin', builtin)
+      } else if (scenario === 'fifo') {
+        expect(spawnSync('mkfifo', [builtin]).status).toBe(0)
+      } else writeFileSync(builtin, '')
+      const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
+      const functions = source.slice(source.indexOf('kernel_lacks_quota_format() {'), source.indexOf('bootable_kernel_releases() {'))
+      const fileGuard = source.slice(source.indexOf('assert_root_file() {'), source.indexOf('assert_pinned_runtime() {'))
+      // Exercise the real regular/non-symlink check with synthetic root ownership and a real canonical fixture path.
+      const script = 'die() { echo "$*" >&2; exit 1; }; assert_root_owned_path() { :; }\n'
+        + 'stat() { if [[ $2 == %u ]]; then echo 0; else echo 644; fi; }\n' + fileGuard
+        + (scenario === 'guard-refusal' ? 'stat() { if [[ $2 == %u && $4 == */modules.builtin ]]; then echo 1000; elif [[ $2 == %u ]]; then echo 0; else echo 644; fi; }\n' : '')
+        + (scenario === 'read-error' ? 'cat() { command cat "$@"; return 5; }\n' : '')
+        + functions.replaceAll('/lib/modules/', `${root.replaceAll('\\', '/')}/modules/`)
+        + 'if kernel_lacks_quota_format target; then echo lacks; else echo has; fi\n'
+      const run = spawnSync(bash, ['-euo', 'pipefail'], { input: script, encoding: 'utf8', timeout: 10_000 })
+      expect(run.error).toBeUndefined()
+      expect(run.status).toBe(1); expect(run.stdout).toBe('')
+      expect(run.stderr).toContain(scenario === 'read-error' ? 'could not be read' : scenario === 'guard-refusal' ? 'not root-owned' : 'missing or symbolic')
+    })
+  }
+  it.each(['empty', 'missing-index', 'ubuntu-rescue'])('fails closed for an unobservable boot inventory: %s', scenario => {
+    const root = mkdtempSync(join(tempParent, tempPrefix)); tempRoots.push(root)
+    mkdirSync(join(root, 'boot'))
+    if (scenario !== 'empty') writeFileSync(join(root, 'boot', `vmlinuz-${scenario === 'ubuntu-rescue' ? '0-rescue-abc' : '6.8.0'}`), '')
+    const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8'), fixture = root.replaceAll('\\', '/')
+    const functions = source.slice(source.indexOf('kernel_lacks_quota_format() {'), source.indexOf('# Every bootable kernel gets the modules'))
+    const script = 'OS_FAMILY=debian\ndie() { echo "$*" >&2; exit 1; }; assert_root_file() { :; }\n'
+      + functions.replaceAll('/lib/modules/', `${fixture}/modules/`).replaceAll('/boot/vmlinuz-', `${fixture}/boot/vmlinuz-`)
+      + 'inventory="$(bootable_kernel_releases)" || exit 1\necho "UNEXPECTED_ACCEPTANCE"\n'
+    const run = spawnSync(bash, ['-euo', 'pipefail'], { input: script, encoding: 'utf8', timeout: 10_000 })
+    expect(run.error).toBeUndefined()
+    expect(run.status).toBe(1)
+    expect(run.stderr).toMatch(/No supported bootable kernel|bootable kernel has no observable/)
+    expect(run.stdout).not.toContain('UNEXPECTED_ACCEPTANCE')
+  })
+  it.skipIf(process.platform === 'win32')('refuses a release directory aliased to another kernel tree', () => {
+    const root = mkdtempSync(join(tempParent, tempPrefix)); tempRoots.push(root)
+    mkdirSync(join(root, 'boot')); mkdirSync(join(root, 'modules', 'other'), { recursive: true })
+    writeFileSync(join(root, 'boot', 'vmlinuz-6.8.0'), '')
+    writeFileSync(join(root, 'modules', 'other', 'modules.dep'), '')
+    symlinkSync('other', join(root, 'modules', '6.8.0'))
+    const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
+    const functions = source.slice(source.indexOf('kernel_lacks_quota_format() {'), source.indexOf('# Every bootable kernel gets the modules'))
+    const program = 'OS_FAMILY=debian\ndie() { echo "$*" >&2; exit 1; }; assert_root_file() { :; }\n'
+      + functions.replaceAll('/lib/modules/', `${root}/modules/`).replaceAll('/boot/vmlinuz-', `${root}/boot/vmlinuz-`)
+      + 'bootable_kernel_releases\n'
+    const run = spawnSync(bash, ['-euo', 'pipefail'], { input: program, encoding: 'utf8', timeout: 10_000 })
+    expect(run.status, run.stderr).toBe(1)
+    expect(run.stderr).toContain('bootable kernel has no observable regular module index')
+    expect(run.stdout).toBe('')
   })
 })
 
