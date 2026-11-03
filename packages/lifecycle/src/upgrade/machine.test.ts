@@ -201,12 +201,15 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
         await w.ports.safety.syncPath('/opt/xpanel')
       },
       recoveryPlan: async () => {
+        const lock = await readLock(fs, LOCK), last = w.db.rows.at(-1)
+        // Mode alone is not retained admission. An empty or malformed-only
+        // diagnostic world cannot mint the native producer's early-abort grant.
+        if (lock === null && !(last && inFlight(last))) fail('PRECONDITION_FAILED', 'synthetic retained recovery admission missing')
         // The diagnostic guard retains its existing owned-process fault seam;
         // native recovery obtains this exclusion from the real coordinator scope.
         const active = await host.apply({ kind: 'exec', argv: ['/usr/bin/systemctl', 'is-active', '--quiet', 'xpanel-upgrade.service'] })
         if (active.code === 0) fail('CONFLICT', 'xpanel-upgrade.service is still running')
         if (active.code !== 3) fail('PRECONDITION_FAILED', 'upgrade unit state is unknown; recovery cannot clear admission')
-        const lock = await readLock(fs, LOCK), last = w.db.rows.at(-1)
         const recordId = lock?.recordId ?? (last && inFlight(last) ? last.id : null)
         // Mode is an explicit modeled history fact, not permission inferred from
         // missing snapshot/journal files. Its nullable record matches native early abort.
@@ -328,6 +331,19 @@ describe('mandatory lifecycle admission', () => {
     expect(w.fs.writes).toEqual([])
     expect(w.host.actions).toEqual([])
     expect(w.db.rows).toEqual([])
+  })
+
+  it('refuses an empty recovery fixture without inventing retained admission or effects', async () => {
+    const w = world()
+    const before = structuredClone({ nodes: w.fs.nodes, db: w.db, gen: w.gen })
+    await expect(recoverUpgrade(w.ports, { actor: ROOT, os: { family: 'debian' }, note: 'inspect an empty recovery world', canary: null }))
+      .rejects.toThrow(/synthetic retained recovery admission missing/)
+    expect({ nodes: w.fs.nodes, db: w.db, gen: w.gen }).toEqual(before)
+    expect(w.fs.writes).toEqual([])
+    expect(w.host.actions).toEqual([])
+    expect(w.audit.entries).toEqual([])
+    expect(w.events).toEqual([])
+    expect(w.sourceTransition).toBe('not-prepared')
   })
 
   it('rejects malformed recovery before announcing a native operation', async () => {
@@ -903,11 +919,14 @@ describe('runUpgrade: rollback after the switch', () => {
     expect((await readLock(w.fs, LOCK))?.state).toBe('rollback-failed')
     expect(await w.fs.exists(MAINTENANCE)).toBe(true)
     expect(await w.fs.exists('/opt/xpanel/releases/1.1.0')).toBe(true)
-    expect(w.audit.actions().at(-1)).toBe('upgrade.rollback_failed')
+    const failedAudit = structuredClone(w.audit.entries.at(-1))
+    expect(failedAudit).toMatchObject({ action: 'upgrade.rollback_failed', outcome: 'failed' })
 
     const again = await runUpgrade(w.ports, plan())
     expect(again).toMatchObject({ outcome: 'refused', code: 'CONFLICT' })
     expect(again.reason).toMatch(/durable lifecycle retirement/)
+    expect(w.audit.entries.at(-1)).toMatchObject({ action: 'upgrade.refused', outcome: 'denied' })
+    const retainedAudit = structuredClone(w.audit.entries)
 
     const input = { actor: ROOT, os: { family: 'debian' as const }, note: 'restored the state directory by hand', canary: 'alice' }
     await expect(recoverUpgrade(w.ports, { ...input, note: '' })).rejects.toThrow(XpanelError)
@@ -923,13 +942,17 @@ describe('runUpgrade: rollback after the switch', () => {
     // An external change in this diagnostic does not establish a journaled recovery grant.
     w.fs.nodes.set('/opt/xpanel/current', { type: 'symlink', target: '/opt/xpanel/releases/1.0.0' })
     const beforeRecovery = { writes: w.fs.writes.length, units: w.host.systemd().length, audit: w.audit.entries.length }
+    const retainedState = structuredClone({ nodes: w.fs.nodes, db: w.db, gen: w.gen })
     await expect(recoverUpgrade(w.ports, input)).rejects.toThrow(/rewind has an unresolved outcome/)
     expect({ writes: w.fs.writes.length, units: w.host.systemd().length, audit: w.audit.entries.length }).toEqual(beforeRecovery)
     expect(await w.fs.readFile(JOURNAL)).toBe(failedJournal)
     expect(await w.fs.exists(LOCK)).toBe(true)
     expect(await w.fs.exists(MAINTENANCE)).toBe(true)
     expect(await w.fs.exists(RETIREMENT)).toBe(true)
-    expect(w.audit.entries.at(-1)).toMatchObject({ action: 'upgrade.rollback_failed', outcome: 'failed' })
+    expect({ nodes: w.fs.nodes, db: w.db, gen: w.gen }).toEqual(retainedState)
+    expect(w.audit.entries).toEqual(retainedAudit)
+    expect(w.audit.entries.find(entry => entry.action === 'upgrade.rollback_failed')).toEqual(failedAudit)
+    expect(w.audit.entries.at(-1)).toMatchObject({ action: 'upgrade.refused', outcome: 'denied' })
 
     expect((await runUpgrade(w.ports, plan())).code).toBe('CONFLICT')
     await w.fs.remove('/opt/xpanel/releases/1.1.0')
