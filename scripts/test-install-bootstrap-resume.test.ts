@@ -250,6 +250,21 @@ describe('read-only admission for the identical early prepared source, with fake
     expect(port.fds.size).toBe(0)
     expect(port.writes).toEqual([])
   })
+  it('accepts the real getent initgroups form with no supplementary groups', async () => {
+    lateFixture()
+    port.nss.set('initgroups nginx', 'nginx')
+    await expect(resumePreparedInstallation(input)).resolves.toMatchObject({ resumed: true, installationReceipt: 'pending', releaseRoot })
+    expect(port.nssQueries.filter(query => query === 'initgroups nginx')).toHaveLength(2)
+    expect(port.fds.size).toBe(0)
+    expect(port.writes).toEqual([])
+  })
+  it.each(['nginx 325 124', 'nginx 325 0', 'nginx 124', 'nginx 0'])('rejects supplementary groups from getent initgroups: %s', async groups => {
+    lateFixture()
+    port.nss.set('initgroups nginx', groups)
+    await expect(resumePreparedInstallation(input)).rejects.toThrow('INSTALL_RESUME_NGINX_IDENTITY_INVALID')
+    expect(port.fds.size).toBe(0)
+    expect(port.writes).toEqual([])
+  })
   it.each([
     ['orphan ACL', () => { port.acls.set(dataRoot, lateAcl) }],
     ['orphan directory', () => { lateFixture(); port.acls.delete(dataRoot) }],
