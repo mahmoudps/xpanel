@@ -60,6 +60,7 @@ import type { TransferCheckpointStage } from './transfer-runner.ts'
 import {
   PanelUpgradeRunner,
   canonicalReleasePayload,
+  readLock,
   signReleaseManifestHmac,
   verifyReleaseArtifactSignature,
 } from './upgrade-runner.ts'
@@ -1632,10 +1633,67 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       },
     }
 
+    // Synthetic model sequencing only; these callbacks never establish native authority.
+    let panelUnits: readonly string[] = []
+    const issuedUpgradeIds: string[] = [], preparedRecordIds: string[] = []
+    const sourceSelections: Array<{ target: string; recordId: string; direction: 'forward' | 'rollback' }> = []
+    const sourceReceipt = async (recordId: string): Promise<{ stamp: string; previousTarget: string; release: { version: string } }> => {
+      const bytes = await fs.readFile(`/var/lib/xpanel-lifecycle/backups/upgrade-${recordId}.receipt.json`)
+      if (bytes === null) throw new Error('synthetic installation snapshot receipt missing')
+      const receipt = JSON.parse(bytes) as { recordId?: string; stamp?: string; previousTarget?: string; release?: { version?: string } }
+      if (receipt.recordId !== recordId || typeof receipt.stamp !== 'string' || typeof receipt.previousTarget !== 'string'
+        || typeof receipt.release?.version !== 'string') throw new Error('synthetic installation snapshot receipt changed')
+      return { stamp: receipt.stamp, previousTarget: receipt.previousTarget, release: { version: receipt.release.version } }
+    }
     // Explicit portable model seam. Production dependencies do not accept this field.
     modelSafety.current = {
         withExclusive: async callback => callback(),
-        assertOwnedExecution: async () => {}, assertWritersQuiescent: async () => {},
+        assertOwnedExecution: async units => { panelUnits = [...units] }, assertWritersQuiescent: async () => {},
+        controlPlane: async verb => {
+          // Keep HostPort failures, including the restart crash seam, observable.
+          for (const unit of panelUnits) {
+            const result = await host.apply({ kind: 'systemd', verb, unit })
+            if (result.code !== 0) throw new Error(`synthetic ${verb} ${unit} exited ${result.code}`)
+          }
+        },
+        acceptPreparedRelease: async () => false,
+        upgradeRecordId: async () => {
+          const id = `10000000-0000-4000-8000-${String(issuedUpgradeIds.length + 1).padStart(12, '0')}`
+          issuedUpgradeIds.push(id)
+          return id
+        },
+        prepareInstallationSource: async recordId => {
+          const row = await runner.ports.history.latest()
+          if (row?.id !== recordId) throw new Error('synthetic installation history record changed')
+          await sourceReceipt(recordId)
+          preparedRecordIds.push(recordId)
+        },
+        selectInstallationSource: async input => {
+          const receipt = await sourceReceipt(input.recordId)
+          const expected = input.direction === 'forward' ? `/opt/xpanel/releases/${receipt.release.version}` : receipt.previousTarget
+          if (input.target !== expected) throw new Error('synthetic installation source target changed')
+          const temporary = `/opt/xpanel/.current-${receipt.stamp}${input.direction === 'rollback' ? '-rewind' : ''}`
+          if (await fs.readlink(temporary) !== null || await fs.exists(temporary)) await fs.remove(temporary)
+          await fs.symlink(input.target, temporary)
+          await fs.rename(temporary, '/opt/xpanel/current')
+          sourceSelections.push({ ...input })
+        },
+        recoveryPlan: async () => {
+          const lock = await readLock(fs, '/var/lib/xpanel/upgrade.lock'), last = await runner.ports.history.latest()
+          const inFlight = last && (last.status === 'pending' || last.status === 'running')
+          if (lock === null && !inFlight) fail('PRECONDITION_FAILED', 'synthetic retained recovery admission missing')
+          const active = await host.apply({ kind: 'exec', argv: ['/usr/bin/systemctl', 'is-active', '--quiet', 'xpanel-upgrade.service'] })
+          if (active.code === 0) fail('CONFLICT', 'xpanel-upgrade.service is still running')
+          if (active.code !== 3) fail('PRECONDITION_FAILED', 'upgrade unit state is unknown; recovery cannot clear admission')
+          const recordId = lock?.recordId ?? (last && (last.status === 'pending' || last.status === 'running') ? last.id : null)
+          // Retained modeled source history determines mode. Lost files after
+          // preparation must reach real receipt validation, never grant early abort.
+          const hasReceipt = recordId !== null && await fs.exists(`/var/lib/xpanel-lifecycle/backups/upgrade-${recordId}.receipt.json`)
+          const hasJournal = recordId !== null && await fs.exists(`/var/lib/xpanel-lifecycle/backups/upgrade-${recordId}.rewind.json`)
+          if (recordId !== null && preparedRecordIds.includes(recordId)) return { recordId, mode: 'rollback', hostOutcome: 'rolled_back' }
+          if (hasReceipt || hasJournal) fail('PRECONDITION_FAILED', 'synthetic source history conflicts with retained evidence')
+          return { recordId, mode: 'abort-before-transition', hostOutcome: 'rolled_back' }
+        },
         assertWriteBarrier: async () => {}, verifyRelease: async () => {},
         unpackVerifiedRelease: async (path, release) => { const r = await host.apply({ kind: 'exec', argv: ['/usr/bin/tar', '--extract', '--gzip', `--file=${release.archivePath}`, `--directory=${path}`, '--no-same-owner', '--no-overwrite-dir'] }); if (r.code) throw new Error('synthetic extraction failed') },
         verifyStagedRelease: async () => {}, assertCompatibility: async () => {},
@@ -1739,6 +1797,9 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       getCurrentGen: () => currentGen,
       getDesiredStateContent: () => desiredStateContent,
       activatedGenerations,
+      issuedUpgradeIds,
+      preparedRecordIds,
+      sourceSelections,
       setQualifiedControlPlaneOk: (ok: boolean) => {
         qualifiedControlPlaneOk = ok
       },
@@ -1816,6 +1877,13 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       const rowsAfterRollback = await listUpgrades(h.testDb.db)
       expect(rowsAfterRollback).toHaveLength(1)
       expect(rowsAfterRollback[0]?.status).toBe('running')
+      expect(h.issuedUpgradeIds).toHaveLength(1)
+      expect(rowsAfterRollback[0]?.id).toBe(h.issuedUpgradeIds[0])
+      expect(h.preparedRecordIds).toEqual(h.issuedUpgradeIds)
+      expect(h.sourceSelections).toEqual([
+        { recordId: h.issuedUpgradeIds[0], direction: 'forward', target: '/opt/xpanel/releases/1.1.0' },
+        { recordId: h.issuedUpgradeIds[0], direction: 'rollback', target: '/opt/xpanel/releases/1.0.0' },
+      ])
 
       // A fixed canary cannot grant retirement or bypass the retained evidence.
       h.clock.ms += 60_000
@@ -1834,16 +1902,59 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       const rowsAfterSuccess = await listUpgrades(h.testDb.db)
       expect(rowsAfterSuccess).toHaveLength(1)
       expect(rowsAfterSuccess[0]?.status).toBe('running')
+      expect(h.issuedUpgradeIds).toHaveLength(1)
+      expect(h.sourceSelections).toHaveLength(2)
     } finally {
       await h.testDb.close()
     }
+  })
+
+  it('preserves the HostPort restart crash through synthetic control-plane dispatch', async () => {
+    const h = await createUpgradeTestHarness()
+    try {
+      h.setCrashOnSwitch(true)
+      const result = await h.runner.executeSignedUpgrade(h.basePlan, h.signedManifest)
+      expect(result).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
+      expect(result.reason).toMatch(/simulated power loss during panel unit restart/)
+      expect(result.rewind).toMatchObject({ state: 'rewind-verified' })
+      expect(h.sourceSelections.map(selection => selection.direction)).toEqual(['forward', 'rollback'])
+      expect(await h.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
+      expect(await h.fs.exists('/var/lib/xpanel/upgrade.lock')).toBe(true)
+      expect(await h.fs.exists('/var/lib/xpanel/maintenance.json')).toBe(true)
+      expect((await listUpgrades(h.testDb.db))[0]?.status).toBe('running')
+    } finally { await h.testDb.close() }
+  })
+
+  it('refuses recovery without retained model admission or after prepared source evidence is lost', async () => {
+    const h = await createUpgradeTestHarness()
+    const request = { actor: ROOT, os: { family: 'debian' as const }, note: 'inspect retained recovery evidence', canary: 'alice' }
+    try {
+      await expect(h.runner.recoverInterruptedUpgrade(request)).rejects.toThrow(/synthetic retained recovery admission missing/)
+      expect(h.issuedUpgradeIds).toEqual([])
+      expect(h.sourceSelections).toEqual([])
+      expect(await listUpgrades(h.testDb.db)).toEqual([])
+      h.setCrashOnSwitch(true)
+      expect((await h.runner.executeSignedUpgrade(h.basePlan, h.signedManifest)).rewind?.state).toBe('rewind-verified')
+      const recordId = h.preparedRecordIds[0]!
+      await h.fs.remove(`/var/lib/xpanel-lifecycle/backups/upgrade-${recordId}.receipt.json`)
+      await h.fs.remove(`/var/lib/xpanel-lifecycle/backups/upgrade-${recordId}.rewind.json`)
+      const before = { selections: structuredClone(h.sourceSelections), generations: [...h.activatedGenerations],
+        history: await listUpgrades(h.testDb.db), state: await h.fs.readFile('/var/lib/xpanel/state/desired.json') }
+      await expect(h.runner.recoverInterruptedUpgrade(request)).rejects.toThrow(/snapshot receipt is missing or malformed/)
+      expect({ selections: h.sourceSelections, generations: h.activatedGenerations,
+        history: await listUpgrades(h.testDb.db), state: await h.fs.readFile('/var/lib/xpanel/state/desired.json') }).toEqual(before)
+      expect(await h.fs.exists('/var/lib/xpanel/upgrade.lock')).toBe(true)
+      expect(await h.fs.exists('/var/lib/xpanel/maintenance.json')).toBe(true)
+    } finally { await h.testDb.close() }
   })
 
   it('records interrupted upgrade health without releasing barriers or admitting a subsequent upgrade', async () => {
     const h = await createUpgradeTestHarness()
     try {
       // Simulate an in-flight interrupted upgrade row in SQLite + leftover lock & maintenance files
+      const interruptedId = '10000000-0000-4000-8000-000000000099'
       const created = await h.runner.ports.history.create({
+        id: interruptedId,
         fromVersion: '1.0.0',
         toVersion: '1.1.0',
         actor: 'root',
@@ -1858,7 +1969,7 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       expect(refused.outcome).toBe('refused')
       expect(refused.code).toBe('CONFLICT')
 
-      // Observe health and close the stale row; no historical state or admission is restored.
+      // Observe health while preserving the stale row and barriers; no retirement is granted.
       const recovered = await h.runner.recoverInterruptedUpgrade({
         actor: ROOT,
         os: { family: 'debian' },
@@ -1869,6 +1980,11 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       expect(recovered.status).toBe('retirement_pending')
       expect(recovered.recordId).toBe(created.id)
       expect(recovered.closedRecordId).toBeNull()
+      expect(created.id).toBe(interruptedId)
+      expect((await listUpgrades(h.testDb.db))[0]?.status).toBe('running')
+      expect(h.issuedUpgradeIds).toEqual([])
+      expect(h.preparedRecordIds).toEqual([])
+      expect(h.sourceSelections).toEqual([])
       expect(await h.fs.exists('/var/lib/xpanel/upgrade.lock')).toBe(true)
       expect(await h.fs.exists('/var/lib/xpanel/maintenance.json')).toBe(true)
       expect(await h.fs.exists('/var/lib/xpanel-lifecycle/backups/retirement-attention.json')).toBe(true)
