@@ -651,7 +651,7 @@ async function runNativeFinalization(input, helperCapability) {
         return withTrustedFile(trust.signingKeyPath, { exactMode: 0o600, maxBytes: 4096 }, async keyPin => withTrustedFile('/etc/xpanel/release-keys.json', { maxBytes: 16 * 1024 }, async keysPin => {
           check(keyPin.bytes.length >= 32, 'INSTALL_HMAC_KEY_INVALID')
           const release = await import('./release-verifier.mjs')
-          return release.withAuthenticatedReleaseArchive(request.artifact.path, { signingKey: keyPin.bytes, keyId: trust.keyId, expectedArchiveSha256: request.artifact.expectedArchiveSha256 }, async ({ report }) => {
+          const authenticated = await release.withAuthenticatedReleaseArchive(request.artifact.path, { signingKey: keyPin.bytes, keyId: trust.keyId, expectedArchiveSha256: request.artifact.expectedArchiveSha256 }, async ({ report }) => {
             const sidecar = request.artifact.path.slice(0, -'.tar.gz'.length) + '.manifest.json'
             return withTrustedFile(sidecar, { maxBytes: 4096 }, async publisher => {
               bootstrapApi.verifyBootstrapPublisher(JSON.parse(publisher.bytes.toString('utf8')), report, bootstrapApi.parseBootstrapKeys(JSON.parse(keysPin.bytes.toString('utf8'))))
@@ -681,6 +681,7 @@ async function runNativeFinalization(input, helperCapability) {
               })
             })
           })
+          return authenticated.value
         }))
       })))
   } catch (error) {
