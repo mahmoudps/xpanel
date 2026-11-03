@@ -291,6 +291,12 @@ describe('actual native nonmutating lifecycle audit observation', () => {
     await expect(assertReadonlyLifecycleIntentObservationCurrent(escaped)).rejects.toThrow()
     for (const copied of [{ ...receipt }, new Proxy(receipt, {}), JSON.parse(JSON.stringify(receipt))]) await expect(verified(f, copied)).rejects.toThrow()
     await withReadonlyOperationDatabase(f.dbPath, async reader => {
+      // Copying every property, including the nominal brand, never copies the
+      // producer's registered identity or its retained observation scope.
+      const copiedReader = Object.freeze(Object.defineProperties({}, Object.getOwnPropertyDescriptors(reader)))
+      expect(Reflect.ownKeys(copiedReader)).toEqual(Reflect.ownKeys(reader))
+      expect(() => getReadonlyOperationDatabaseOrigin(copiedReader)).toThrow()
+      await expect(assertReadonlyOperationDatabaseCurrent(copiedReader)).rejects.toThrow()
       expect(await reader.query('SELECT total_changes() AS n')).toEqual([{ n: 0 }])
       await expect(reader.exec('DELETE FROM audit_log')).rejects.toThrow()
       await expect(reader.query('DELETE FROM audit_log RETURNING *')).rejects.toThrow()

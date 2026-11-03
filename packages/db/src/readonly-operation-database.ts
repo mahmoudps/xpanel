@@ -10,7 +10,7 @@ import { matchesReviewedOperationalMigrations, OPERATIONAL_SCHEMA_VERSION } from
 import { assertNoActiveDatabaseTransaction, type Row, type SqlRunner, type StrictOperationDatabaseOrigin } from './sql-runner.ts'
 import { lexSql } from './sql-lexer.ts'
 
-declare const readonlyBrand: unique symbol
+const readonlyBrand: unique symbol = Symbol('readonlyOperationDatabase')
 /** Separate native identity: never registered as a writable/strict transaction runner. */
 export interface ReadonlyOperationDatabase extends SqlRunner { readonly [readonlyBrand]: true }
 const scopes = new WeakMap<object, Scope>(), current = new AsyncLocalStorage<Scope>()
@@ -214,10 +214,11 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
       } catch (error) { try { Reflect.apply(execute, native, ['ROLLBACK']) } catch {} throw error }
       finally { active = false; state.inTransaction = false; scopes.delete(tx) }
     }
-    const reader = Object.freeze({
+    const reader: ReadonlyOperationDatabase = Object.freeze({
+      [readonlyBrand]: true as const,
       query: <R extends Row = Row>(sql: string, params?: readonly unknown[]) => transaction(tx => tx.query<R>(sql, params)),
       transaction, exec: async () => refused('readonly_exec_forbidden'),
-    }) as ReadonlyOperationDatabase
+    })
     scopes.set(reader, state)
     return await current.run(state, async () => { await state.verifyAsync(); const value = await callback(reader); await state.verifyAsync(); return value })
   } finally {
