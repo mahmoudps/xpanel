@@ -197,7 +197,7 @@ install_kernel_quota_snapshot_package 6.8.0-90-generic
 }
 
 describe('an explicitly selected signed Ubuntu kernel snapshot', () => {
-  it('installs the sealed kernel and its missing required dependency in the admitted APT transaction', () => {
+  it('installs the sealed kernel and its missing required dependency in the admitted APT transaction', { tags: ['slow'] }, () => {
     const { result, path, calls } = runSnapshot()
     expect(result.status, result.stderr).toBe(0)
     const downloads = calls.filter(call => call.includes('<download>'))
@@ -273,7 +273,7 @@ describe('an explicitly selected signed Ubuntu kernel snapshot', () => {
     expect(calls.some(call => call.includes('<install>'))).toBe(false)
   })
 
-  it('reacquires the exact iU archive and requires the hook re-unpack before accepting APT configuration', () => {
+  it('reacquires the exact iU archive and requires the hook re-unpack before accepting APT configuration', { tags: ['slow'] }, () => {
     const { result, calls } = runSnapshot("START_STATE='iU ' RESUME_PREPARED=1")
     expect(result.status, result.stderr).toBe(0)
     expect(calls.filter(call => call.includes('<download>'))).toHaveLength(2)

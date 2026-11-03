@@ -7,6 +7,7 @@ import type { RequestOptions } from 'node:https'
 import { connect as tlsConnect } from 'node:tls'
 import type { TLSSocket } from 'node:tls'
 import { posix } from 'node:path'
+import { Readable } from 'node:stream'
 import { fail, isXpanelError } from '@xpanel/core'
 import type { Account, Database } from '@xpanel/core'
 import { readCpanelArchive } from '@xpanel/lifecycle'
@@ -80,18 +81,16 @@ export const lowPriorityArgv = (command: TransferCommand): string[] => [...(comm
 
 export const spawnTransferCommand = (timeoutMs = TRANSFER_TASK_TIMEOUT_MS): TransferCommandRunner => async (command) => {
   const argv = lowPriorityArgv(command)
-  const stdout = command.stdoutFile ? await open(command.stdoutFile, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600) : null
-  const stdin = command.stdinFile ? await open(command.stdinFile, constants.O_RDONLY | constants.O_NOFOLLOW) : null
-  try {
-    return await new Promise<TransferCommandResult>((resolve, reject) => {
-      const child = spawn(argv[0]!, argv.slice(1), { stdio: [stdin ? stdin.fd : 'ignore', stdout ? stdout.fd : 'pipe', 'pipe'], env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin', LC_ALL: 'C' }, timeout: timeoutMs })
-      let out = '', err = ''
-      child.stdout?.on('data', (chunk: Buffer) => { if (out.length < 1024 * 1024) out += chunk.toString('utf8') })
-      child.stderr?.on('data', (chunk: Buffer) => { if (err.length < 64 * 1024) err += chunk.toString('utf8') })
-      child.once('error', reject)
-      child.once('close', code => resolve({ code: code ?? 1, stdout: out, stderr: err.trim().slice(0, 2000) }))
-    })
-  } finally { await stdout?.close(); await stdin?.close() }
+  await using stdout = command.stdoutFile ? await open(command.stdoutFile, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600) : null
+  await using stdin = command.stdinFile ? await open(command.stdinFile, constants.O_RDONLY | constants.O_NOFOLLOW) : null
+  return await new Promise<TransferCommandResult>((resolve, reject) => {
+    const child = spawn(argv[0]!, argv.slice(1), { stdio: [stdin ? stdin.fd : 'ignore', stdout ? stdout.fd : 'pipe', 'pipe'], env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin', LC_ALL: 'C' }, timeout: timeoutMs })
+    let out = '', err = ''
+    child.stdout?.on('data', (chunk: Buffer) => { if (out.length < 1024 * 1024) out += chunk.toString('utf8') })
+    child.stderr?.on('data', (chunk: Buffer) => { if (err.length < 64 * 1024) err += chunk.toString('utf8') })
+    child.once('error', reject)
+    child.once('close', code => resolve({ code: code ?? 1, stdout: out, stderr: err.trim().slice(0, 2000) }))
+  })
 }
 
 /**
@@ -533,10 +532,18 @@ export async function handleTransferTaskRoute(req: Request, url: URL, method: st
     try { name = decodeURIComponent(artifact!) } catch { return invalid('invalid artifact name') }
     const file = await controller.openArtifact(packageId.toLowerCase(), name)
     const handle = await open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW)
-    const info = await handle.stat()
-    if (!info.isFile() || info.size !== file.bytes) { await handle.close(); return fail('PRECONDITION_FAILED', 'the packaged artifact changed', { stateChanged: false }) }
-    const stream = handle.readableWebStream() as unknown as ReadableStream<Uint8Array>
-    return new Response(stream, { headers: { 'content-type': 'application/octet-stream', 'content-length': String(file.bytes), 'content-disposition': `attachment; filename="${name}"`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' } })
+    let stream: ReturnType<typeof handle.createReadStream> | undefined
+    try {
+      const info = await handle.stat()
+      if (!info.isFile() || info.size !== file.bytes) return fail('PRECONDITION_FAILED', 'the packaged artifact changed', { stateChanged: false })
+      stream = handle.createReadStream({ autoClose: true })
+      const body = Readable.toWeb(stream, { strategy: { highWaterMark: 0 } }) as ReadableStream<Uint8Array>
+      return new Response(body, { headers: { 'content-type': 'application/octet-stream', 'content-length': String(file.bytes), 'content-disposition': `attachment; filename="${name}"`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' } })
+    } catch (error) {
+      stream?.destroy()
+      await handle.close()
+      throw error
+    }
   }
   if (taskId && method === 'GET') return json({ task: await controller.get(taskId.toLowerCase()) })
   if (taskId) { await controller.discard(taskId.toLowerCase()); return json({ discarded: true }) }
