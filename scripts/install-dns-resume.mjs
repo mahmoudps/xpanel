@@ -32,7 +32,7 @@ const daemonPath = '/usr/sbin/pdns_server'
 const daemonSize = 5700392
 const daemonSha256 = '05a344f658bde6680735f2bc55f8919d7540051d32d81eb51e424296b6cc5476'
 const foreignRoots = ['/etc/bind','/etc/pdns','/var/named','/var/lib/bind','/var/cache/bind','/var/lib/pdns','/var/spool/powerdns','/run/pdns']
-const serviceKeys = ['Id','LoadState','ActiveState','SubState','MainPID','ControlPID','ControlGroup','DropInPaths','FragmentPath','NeedDaemonReload',
+const serviceKeys = ['Id','Names','LoadState','ActiveState','SubState','MainPID','ControlPID','ControlGroup','DropInPaths','FragmentPath','NeedDaemonReload',
   'UnitFileState','Type','User','Group','Restart','RestartUSec','Result','NRestarts','ExecMainPID','ExecMainCode','ExecMainStatus',
   'ExecMainStartTimestampMonotonic','ExecMainExitTimestampMonotonic','Job']
 const refusalMessage = 'INSTALL_RESUME_DNS_MIGRATION_REQUIRED'
@@ -79,7 +79,7 @@ function assertVendorFiles(facts) {
 }
 
 function assertVendorUnit(s,fragment) {
-  requireFact(exactNames(Object.keys(s),serviceKeys) && s.Id === 'pdns.service' && s.LoadState === 'loaded'
+  requireFact(exactNames(Object.keys(s),serviceKeys) && s.Id === 'pdns.service' && s.Names === 'pdns.service' && s.LoadState === 'loaded'
     && s.ControlPID === '0' && ['', '/system.slice/pdns.service'].includes(s.ControlGroup)
     && s.DropInPaths === '' && s.NeedDaemonReload === 'no' && [unit,'/lib/systemd/system/pdns.service'].includes(s.FragmentPath) && fragment === unit,'SERVICE_STATE')
 }
@@ -377,9 +377,6 @@ export async function coherentDnsService(deadline,fragment,allowRetry,ports) {
 async function inspectDnsEnvironment(uid) {
   const instances = await command('systemctl',['list-units','--all','--no-legend','--plain','--no-pager','pdns@*.service'])
   requireFact(!instances.trim())
-  const jobs = await command('systemctl',['list-jobs','--full','--no-legend','--no-pager'])
-  const relevantJobs = jobs.split('\n').filter(row => /(?:^|\s)pdns(?:@[^\s]*)?\.service(?:\s|$)/.test(row))
-  requireFact(relevantJobs.length === 0,'SERVICE_JOB')
   // Only the vendor template may be present. An enabled concrete alias can start after this check.
   const units = await command('systemctl',['list-unit-files','--no-legend','--no-pager','pdns@*.service'])
   requireFact(units.trim().split('\n').filter(Boolean).every(row => row.trim().split(/\s+/)[0] === 'pdns@.service'))
@@ -392,14 +389,162 @@ async function inspectDnsEnvironment(uid) {
     })
   }
   requireFact(!(await list('/etc',4096)).some(name => /^named(?:$|\.)/.test(name)))
-  return {jobs:relevantJobs,foreign}
+  return foreign
 }
 
-async function readService() {
-  return parseProperties(await command('systemctl',['show','pdns.service','--all','--property='+serviceKeys.join(',')]))
+function listedDnsJob(text) {
+  requireFact(typeof text === 'string' && text.length <= 512*1024,'SERVICE_JOB')
+  let id = null
+  const seen = new Set()
+  const lines = text.trim().split('\n')
+  requireFact(lines.length <= 4096,'SERVICE_JOB')
+  for (const line of lines) {
+    if (!line) continue
+    const columns = line.trim().split(/\s+/)
+    requireFact(columns.length === 4 && positive(columns[0]) && Number(columns[0]) < 2**32,'SERVICE_JOB')
+    const [number,name,type,state] = columns
+    requireFact(!seen.has(number),'SERVICE_JOB')
+    seen.add(number)
+    requireFact(/^\S+\.(?:automount|device|mount|path|scope|service|slice|socket|swap|target|timer)$/.test(name)
+      && /^[a-z]+(?:-[a-z]+)*$/.test(type) && (state === 'running' || state === 'waiting'),'SERVICE_JOB')
+    if (!/^pdns(?:@[^\s]*)?\.service$/.test(name)) continue
+    requireFact(id === null && name === 'pdns.service' && type === 'start' && state === 'running','SERVICE_JOB')
+    id = number
+  }
+  return id
 }
 
-async function capture(deadline,allowRetry) {
+export function dnsServicePorts(read = command,cgroup = cgroupWindow,pause = (delay = 25) => new Promise(resolve => setTimeout(resolve,delay))) {
+  return {
+    service:async () => parseProperties(await read('systemctl',['show','pdns.service','--all','--property='+serviceKeys.join(',')])),
+    jobs:() => read('systemctl',['list-jobs','--full','--no-legend','--no-pager']),
+    cgroup,pause,
+  }
+}
+const livePorts = dnsServicePorts()
+const jobAt = async ports => listedDnsJob(await ports.jobs().catch(error => atRefusal('SERVICE_JOB',error)))
+const groupAt = async ports => ports.cgroup().catch(error => atRefusal('CGROUP_READ',error))
+const timeLeft = deadline => requireFact(performance.now() < deadline,'SERVICE_DEADLINE')
+
+// Read the three independent views together: a short-lived process may be gone by
+// the time a second systemctl command exits. An inconsistent frame never admits a stop.
+async function dnsFrame(deadline,fragment,ports) {
+  timeLeft(deadline)
+  const results = await Promise.allSettled([ports.service(),jobAt(ports),groupAt(ports)])
+  for (const result of results) if (result.status === 'rejected') throw result.reason
+  const [service,id,group] = results.map(result => result.value)
+  timeLeft(deadline)
+  assertVendorUnit(service,fragment)
+  return {service,id,group}
+}
+function sameFailedAttempt(a,b) {
+  return a.NRestarts === b.NRestarts && a.ExecMainPID === b.ExecMainPID
+    && a.ExecMainStartTimestampMonotonic === b.ExecMainStartTimestampMonotonic
+    && a.ExecMainExitTimestampMonotonic === b.ExecMainExitTimestampMonotonic
+}
+
+// This identifies a systemd-managed attempt and its cgroup member. Neither the
+// submitter nor the member's current executable is inferred from these observations.
+async function finishListedAttempt(first,prior,read,ports,deadline) {
+  const id = first.id
+  requireFact(id !== null,'SERVICE_JOB')
+  if (prior) assertDeadRetry(prior)
+  const until = Math.min(deadline,performance.now()+1000)
+  let frame = first, start, member, witnessed = false
+  for (let i = 0; i < 40; i++) {
+    timeLeft(until)
+    const {service:s,group} = frame
+    requireFact(frame.id === null || frame.id === id,'SERVICE_JOB')
+    if (group.populated) {
+      requireFact(positive(group.pid) && Number(group.pid) > 1 && (!member || member === group.pid)
+        && (!prior || group.pid !== prior.ExecMainPID),'SERVICE_ATTEMPT')
+      member = group.pid
+    }
+    if (s.SubState === 'start') {
+      assertRestartPolicy(s)
+      requireFact(s.ActiveState === 'activating' && s.Job === id && s.ControlGroup === '/system.slice/pdns.service'
+        && positive(s.NRestarts) && positive(s.MainPID) && Number(s.MainPID) > 1 && s.ExecMainPID === s.MainPID
+        && positive(s.ExecMainStartTimestampMonotonic) && (!member || member === s.MainPID),'SERVICE_ATTEMPT')
+      if (prior) requireFact(s.FragmentPath === prior.FragmentPath && Number(s.NRestarts) === Number(prior.NRestarts)+1
+        && s.MainPID !== prior.ExecMainPID && Number(s.ExecMainStartTimestampMonotonic) > Number(prior.ExecMainExitTimestampMonotonic),'SERVICE_HISTORY')
+      if (!start) {
+        requireFact(frame.id === id,'SERVICE_JOB')
+        start = s
+      } else requireFact(s.FragmentPath === start.FragmentPath && s.MainPID === start.MainPID && s.NRestarts === start.NRestarts
+        && s.ExecMainStartTimestampMonotonic === start.ExecMainStartTimestampMonotonic,'SERVICE_HISTORY')
+      if (frame.id === id && group.populated && group.pid === s.MainPID) witnessed = true
+    } else {
+      assertDeadRetry(s)
+      if (start) {
+        requireFact(witnessed && frame.id === null && !group.populated && member === start.MainPID && s.ExecMainPID === start.MainPID
+          && s.FragmentPath === start.FragmentPath && s.NRestarts === start.NRestarts
+          && s.ExecMainStartTimestampMonotonic === start.ExecMainStartTimestampMonotonic,'SERVICE_HISTORY')
+        return frame
+      }
+      requireFact(prior && sameFailedAttempt(prior,s) && frame.id === id,'SERVICE_HISTORY')
+    }
+    if (i > 0 || start) await ports.pause(8)
+    frame = await read()
+  }
+  requireFact(false,'SERVICE_ATTEMPT')
+}
+
+// A first observation can already be mid-start. Its completion supplies a predecessor,
+// not credit. Demand an independently listed NEW full cycle after the exact one-second
+// vendor restart policy; skipped counters, ambiguous PIDs or a persistent job refuse.
+async function followingStart(completed,spentId,read,ports,deadline) {
+  const until = Math.min(deadline,performance.now()+2500)
+  for (let i = 0; i < 200; i++) {
+    timeLeft(until)
+    const frame = await read()
+    timeLeft(until)
+    if (frame.id !== null) {
+      requireFact(frame.id !== spentId,'SERVICE_JOB')
+      return finishListedAttempt(frame,completed.service,read,ports,deadline)
+    }
+    assertDeadRetry(frame.service)
+    requireFact(sameFailedAttempt(completed.service,frame.service) && !frame.group.populated,'SERVICE_HISTORY')
+    await ports.pause(8)
+  }
+  requireFact(false,'SERVICE_ATTEMPT')
+}
+
+export async function observeDnsServiceJobs(deadline,fragment,allowRetry,ports) {
+  let latest, drained = false
+  const read = () => dnsFrame(deadline,fragment,ports)
+  const service = async () => {
+    const prior = latest?.service
+    latest = await read()
+    const {id,service:s} = latest
+    if (id === null && noServiceJob(s.Job)) return s
+    requireFact(allowRetry && !drained && id !== null && (noServiceJob(s.Job) || s.Job === id),'SERVICE_JOB')
+    const predecessor = s.SubState === 'start' ? prior : s
+    latest = await finishListedAttempt(latest,predecessor,read,ports,deadline)
+    if (!predecessor) latest = await followingStart(latest,id,read,ports,deadline)
+    drained = true
+    return latest.service
+  }
+  const result = await coherentDnsService(deadline,fragment,allowRetry,{service,cgroup:async () => latest.group,pause:ports.pause})
+  return {service:result,drained}
+}
+
+// A read-only transition can run out of time. The effect boundary never waits on any job.
+export async function readDnsIdleBoundary(deadline,fragment,ports) {
+  timeLeft(deadline)
+  requireFact(await jobAt(ports) === null,'SERVICE_JOB')
+  const first = await ports.service()
+  assertVendorUnit(first,fragment)
+  requireFact(noServiceJob(first.Job),'SERVICE_JOB')
+  requireFact(first.MainPID === '0' && !(await groupAt(ports)).populated,'SERVICE_ATTEMPT')
+  const last = await ports.service()
+  assertVendorUnit(last,fragment)
+  requireFact(noServiceJob(last.Job) && await jobAt(ports) === null,'SERVICE_JOB')
+  requireFact(serviceKeys.every(k => first[k] === last[k]),'SERVICE_HISTORY')
+  timeLeft(deadline)
+  return last
+}
+
+async function captureOnce(deadline,allowRetry) {
   const ancestry = await captureAncestorAcls()
   const principal = (await command('getent',['passwd','pdns'])).trimEnd().split(':')
   const group = (await command('getent',['group','pdns'])).trimEnd().split(':')
@@ -441,15 +586,24 @@ async function capture(deadline,allowRetry) {
   const staticFacts = {principal:{uid,gid},packages,files,dirs,supermaster,daemon}
   assertVendorFiles(staticFacts)
   const fragment = await realpath(unit)
-  const {jobs,foreign} = await inspectDnsEnvironment(uid)
-  const service = await coherentDnsService(deadline,fragment,allowRetry,{
-    service:readService,cgroup:cgroupWindow,pause:() => new Promise(resolve => setTimeout(resolve,25)),
-  })
+  const foreign = await inspectDnsEnvironment(uid)
+  const {service,drained} = await observeDnsServiceJobs(deadline,fragment,allowRetry,livePorts)
+  if (drained) return null
   requireFact(await realpath(service.FragmentPath) === fragment)
   await assertDnsHostProcesses(uid,deadline).catch(error => atRefusal('TASK_CENSUS',error))
   requireFact(JSON.stringify(await captureAncestorAcls()) === JSON.stringify(ancestry),'SOURCE_BINDING')
-  return {principal:{uid,gid},packages,files,dirs,supermaster,daemon,boot,service,fragment,jobs,ancestry,foreign,
+  return {principal:{uid,gid},packages,files,dirs,supermaster,daemon,boot,service,fragment,jobs:[],ancestry,foreign,
     noOtherInstance:true,noForeignData:true,noDaemon:true,emptyCgroup:true}
+}
+
+export async function captureDnsInventory(deadline,allowRetry,read = captureOnce) {
+  const facts = await read(deadline,allowRetry)
+  if (facts !== null) return facts
+  timeLeft(deadline)
+  // No repeated waiting: an independently acquired clean inventory is mandatory.
+  const fresh = await read(deadline,false)
+  requireFact(fresh !== null,'SERVICE_JOB')
+  return fresh
 }
 
 function binding(facts) {
@@ -506,8 +660,8 @@ async function runNative() {
   const deadline = performance.now()+30000
   const bounded = () => requireFact(performance.now() < deadline,'SERVICE_DEADLINE')
   const result = await verifyVendorDnsPhase(process.argv[2],process.argv[3],{
-    capture: async (allowRetry = true) => { bounded(); const observation = await capture(deadline,allowRetry).catch(error => atRefusal('SOURCE_CAPTURE',error)); bounded(); return observation },
-    service: async () => { bounded(); const current = await readService().catch(error => atRefusal('SERVICE_STATE',error)); bounded(); return current },
+    capture: async (allowRetry = true) => { bounded(); const observation = await captureDnsInventory(deadline,allowRetry).catch(error => atRefusal('SOURCE_CAPTURE',error)); bounded(); return observation },
+    service: () => readDnsIdleBoundary(deadline,unit,livePorts).catch(error => atRefusal('SERVICE_STATE',error)),
     stop: async () => { bounded(); await command('systemctl',['--job-mode=fail','stop','pdns.service']); bounded() },
   })
   bounded()

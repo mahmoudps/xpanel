@@ -2,7 +2,7 @@ import { mkdtemp, open, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { coherentDnsService, dnsRefusalMessage, readDnsCgroupWindow, minimalDnsAcl, readPinnedDnsAcl, assertDnsHostProcesses, assertDnsResumeEntry, assertVendorPowerDnsShape, readAtMost, verifyVendorDnsPhase } from './install-dns-resume.mjs'
+import { captureDnsInventory, coherentDnsService, dnsRefusalMessage, dnsServicePorts, observeDnsServiceJobs, readDnsCgroupWindow, readDnsIdleBoundary, minimalDnsAcl, readPinnedDnsAcl, assertDnsHostProcesses, assertDnsResumeEntry, assertVendorPowerDnsShape, readAtMost, verifyVendorDnsPhase } from './install-dns-resume.mjs'
 
 const server = 'pdns-server'
 const bind = 'pdns-backend-bind'
@@ -31,7 +31,7 @@ function fixture() {
     ancestry:{'/var/lib':{identity:'root-owned-parent',acl:'user::rwx\ngroup::r-x\nother::r-x'}},
     foreign:{} as Record<string,{identity:string;acl:string}>,
     daemon:file(server,0o755,0,5700392,'05a344f658bde6680735f2bc55f8919d7540051d32d81eb51e424296b6cc5476','bda458e86b5eeccd2c8a6b5aa601e0b2'),boot:'00000000-0000-4000-8000-000000000001',jobs:[] as string[],
-    service:{Id:'pdns.service',LoadState:'loaded',ActiveState:'inactive',SubState:'dead',MainPID:'0',ControlPID:'0',ControlGroup:'',
+    service:{Id:'pdns.service',Names:'pdns.service',LoadState:'loaded',ActiveState:'inactive',SubState:'dead',MainPID:'0',ControlPID:'0',ControlGroup:'',
       DropInPaths:'',FragmentPath:unit,NeedDaemonReload:'no',UnitFileState:'enabled',Type:'notify',User:'pdns',Group:'pdns',
       Restart:'on-failure',RestartUSec:'1s',Result:'success',NRestarts:'0',ExecMainPID:'0',ExecMainCode:'0',ExecMainStatus:'0',
       ExecMainStartTimestampMonotonic:'0',ExecMainExitTimestampMonotonic:'0',Job:'0'},
@@ -126,6 +126,149 @@ function stopped(state: ReturnType<typeof retry>) {
   return inactive
 }
 
+describe('listed DNS jobs at the installed capture and stop boundaries', () => {
+  const dead = retry(4).service, next = retry(5).service
+  const start = {...next,SubState:'start',MainPID:next.ExecMainPID,ControlGroup:'/system.slice/pdns.service',Job:'832',Result:'success',ExecMainCode:'0',ExecMainStatus:'0'}
+  const listed = '832 pdns.service start running\n'
+  const provisioner = '73 provisioner.service start running\n'
+  const hit = {populated:true,pid:next.ExecMainPID}, empty = {populated:false}
+  type Service = typeof dead
+  type Window = {populated:boolean;pid?:string}
+  function sample(services: Service[],lists: string[],groups: Window[]) {
+    function take<T>(values: T[]) {
+      const value = values.shift()
+      if (value === undefined) throw Error('unexpected fixture read')
+      return value
+    }
+    return dnsServicePorts(async (tool:string,args:string[]) => {
+      expect(tool).toBe('systemctl')
+      if (args[0] === 'list-jobs') {
+        expect(args).toEqual(['list-jobs','--full','--no-legend','--no-pager'])
+        return provisioner+take(lists)
+      }
+      expect(args.slice(0,3)).toEqual(['show','pdns.service','--all'])
+      const value = take(services)
+      expect(args[3]?.slice('--property='.length).split(',').sort()).toEqual(Object.keys(value).sort())
+      return Object.entries(value).map(([key,v]) => key+'='+v).join('\n')+'\n'
+    },async () => take(groups),async () => {})
+  }
+  const clean = (service:Service) => sample([service],[''],[empty])
+  const boundary = (service:Service) => sample([service,service],['',''],[empty])
+  const transition = () => sample([dead,start,start,next],[listed,listed,'',''],[empty,hit,empty,empty])
+
+  it('discards the witnessed list-job sample, recaptures the complete inventory and checks a job-free write boundary',async () => {
+    const inputs = await inspect(retry(3)), current = retry(5), idle = stopped(current)
+    const inventories:boolean[] = []
+    let stops = 0, boundaries = 0
+    const proof = await verifyVendorDnsPhase('quiesce',inputs,{
+      capture:(allowRetry = true) => captureDnsInventory(Infinity,allowRetry,async (deadline:number,allowed:boolean) => {
+        inventories.push(allowed)
+        const data = stops ? idle : current
+        const ports = inventories.length === 1 ? transition() : clean(data.service)
+        const cut = await observeDnsServiceJobs(deadline,unit,allowed,ports)
+        return cut.drained ? null : {...data,service:cut.service}
+      }),
+      service:async () => {
+        boundaries++
+        return readDnsIdleBoundary(Infinity,unit,boundary(stops ? idle.service : current.service))
+      },
+      stop:async () => { expect(inventories).toEqual([true,false,true]); expect(boundaries).toBe(1); stops++ },
+    })
+    expect(proof).toBe('xpanel-pdns-vendor-pristine-v1')
+    expect(inventories).toEqual([true,false,true,false,false])
+    expect([stops,boundaries]).toEqual([1,2])
+  })
+
+  it('recognizes the running provisioner and requires a new complete cycle after first observing mid-start',async () => {
+    const successor = retry(6).service
+    const live = {...successor,SubState:'start',MainPID:successor.ExecMainPID,ControlGroup:start.ControlGroup,Job:'833',Result:'success',ExecMainCode:'0',ExecMainStatus:'0'}
+    const another = '833 pdns.service start running\n'
+    const result = await observeDnsServiceJobs(Infinity,unit,true,sample(
+      [start,next,next,live,successor],
+      [listed,'','',another,''],
+      [hit,empty,empty,{populated:true,pid:live.MainPID},empty],
+    ))
+    expect(result).toEqual({service:successor,drained:true})
+  })
+
+  it('requires the same listed job, cgroup PID and completed attempt; missed or reused transitions remain held',async () => {
+    const cases = [
+      sample([start,next,retry(6).service],[listed,'',''],[hit,empty,empty]), // Uncredited partial cycle, next cycle skipped.
+      sample([start,next,next],[listed,'',listed],[hit,empty,empty]), // Reused job ID.
+      sample([dead,next],[listed,''],[empty,empty]), // PID never witnessed running.
+      sample([dead,{...start,Job:'831'}],[listed,listed],[empty,hit]),
+      sample([dead,start],[listed,'831 pdns.service start running\n'],[empty,hit]),
+      sample([dead,start],[listed,''],[empty,hit]), // List ID never joined the actual start.
+      sample([dead,start,next],[listed,listed,''],[empty,empty,empty]),
+      sample([dead,start,next],[listed,listed,''],[hit,empty,empty]), // Never one joined live frame.
+      sample([dead,start],[listed,listed],[empty,{populated:true,pid:dead.ExecMainPID}]),
+      sample([dead,{...start,NRestarts:'6'}],[listed,listed],[empty,hit]),
+      sample([dead,{...start,ExecMainStartTimestampMonotonic:dead.ExecMainExitTimestampMonotonic}],[listed,listed],[empty,hit]),
+      sample([dead,start,{...next,ExecMainPID:'777'}],[listed,listed,''],[empty,hit,empty]),
+      sample([dead,start,{...next,ExecMainStartTimestampMonotonic:'4999'}],[listed,listed,''],[empty,hit,empty]),
+      sample([dead,start,{...next,ExecMainStatus:'9'}],[listed,listed,''],[empty,hit,empty]),
+      sample([dead,start,next],[listed,listed,listed],[empty,hit,empty]),
+      sample([dead,start,next],[listed,listed,''],[empty,hit,hit]),
+      sample([dead,{...start,Names:'pdns.service dns-alias.service'}],[listed,listed],[empty,hit]),
+      sample([start],['832 alias.service start running\n'],[hit]),
+      sample([dead,...Array<Service>(40).fill(start)],[listed,...Array<string>(40).fill(listed)],[empty,...Array<Window>(40).fill(hit)]),
+    ]
+    for (const ports of cases) await expect(observeDnsServiceJobs(Infinity,unit,true,ports)).rejects.toThrow('MIGRATION_REQUIRED')
+    await expect(observeDnsServiceJobs(0,unit,true,transition())).rejects.toMatchObject({code:'SERVICE_DEADLINE'})
+    await expect(observeDnsServiceJobs(Infinity,unit,false,transition())).rejects.toMatchObject({code:'SERVICE_JOB'})
+  })
+
+  it.each([
+    '832 pdns.service stop running','832 pdns.service restart running','832 pdns.service reload running',
+    '832 pdns.service start waiting','832 pdns@fixture.service start running','832 pdns@.service start running',
+    '832 pdns.service start running\n833 pdns.service start running',
+    '832 other.service start running\n832 pdns.service start running','73 unrelated.service reload running',
+    '832 pdns.service start running trailing','832 pdns.service start','0 pdns.service start running',
+    '4294967296 pdns.service start running','832 unrelated pdns.service running',
+  ])('refuses unsupported or ambiguous native list-jobs output %s',async row => {
+    await expect(observeDnsServiceJobs(Infinity,unit,true,sample([dead],[row],[empty]))).rejects.toMatchObject({code:'SERVICE_JOB'})
+  })
+
+  it('issues no stop if a new job, changed process or populated cgroup races the final read',async () => {
+    const state = retry(4), inputs = await inspect(state)
+    const cases = [
+      sample([],[listed],[]),
+      sample([dead,dead],['',listed],[empty]),
+      sample([{...dead,Job:'832'}],[''],[]),
+      sample([dead,next],['',''],[empty]),
+      sample([dead],[''],[hit]),
+    ]
+    for (const ports of cases) {
+      let stops = 0
+      await expect(verifyVendorDnsPhase('quiesce',inputs,{
+        capture:async () => state, service:() => readDnsIdleBoundary(Infinity,unit,ports),stop:async () => { stops++ },
+      })).rejects.toThrow('MIGRATION_REQUIRED')
+      expect(stops).toBe(0)
+    }
+  })
+
+  it('waits for all concurrent observations and never stops when one fails',async () => {
+    const state = retry(4), inputs = await inspect(state)
+    for (const failed of ['service','jobs','cgroup'] as const) {
+      const completed:string[] = []
+      let stops = 0
+      const finish = async (name:string) => { await new Promise(resolve => setTimeout(resolve,2)); completed.push(name) }
+      const ports = {
+        service:async () => { if (failed === 'service') { completed.push('service'); throw Error('unavailable') }; await finish('service'); return dead },
+        jobs:async () => { if (failed === 'jobs') { completed.push('jobs'); throw Error('unavailable') }; await finish('jobs'); return '' },
+        cgroup:async () => { if (failed === 'cgroup') { completed.push('cgroup'); throw Error('unavailable') }; await finish('cgroup'); return empty },
+        pause:async () => {},
+      }
+      await expect(verifyVendorDnsPhase('quiesce',inputs,{
+        capture:async () => { await observeDnsServiceJobs(Infinity,unit,true,ports); return state },
+        service:async () => dead,stop:async () => { stops++ },
+      })).rejects.toThrow()
+      expect(completed.sort()).toEqual(['cgroup','jobs','service'])
+      expect(stops).toBe(0)
+    }
+  })
+})
+
 describe('prepared DNS refusal reporting', () => {
   const base = 'INSTALL_RESUME_DNS_MIGRATION_REQUIRED'
   async function denial(work: Promise<unknown>,code: string) {
@@ -159,7 +302,7 @@ describe('prepared DNS refusal reporting', () => {
 
 describe('read-only service sampling at the vendor restart boundary', () => {
   const dead = retry(4).service, next = retry(5).service
-  const start = {...next,SubState:'start',MainPID:next.ExecMainPID,ControlGroup:'/system.slice/pdns.service',Job:'832'}
+  const start = {...next,SubState:'start',MainPID:next.ExecMainPID,ControlGroup:'/system.slice/pdns.service',Job:'832',Result:'success',ExecMainCode:'0',ExecMainStatus:'0'}
   const hit = {populated:true,pid:next.ExecMainPID}, empty = {populated:false}
   function inputs(services: typeof dead[],windows: (typeof hit | typeof empty)[]) {
     let pauses = 0, reads = 0
