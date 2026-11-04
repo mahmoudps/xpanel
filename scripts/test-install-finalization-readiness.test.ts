@@ -270,3 +270,59 @@ describe('EX unit snapshot uses protected file/cgroup reads only (isolated)', ()
     expect(f.tree).not.toHaveBeenCalled()
   })
 })
+
+describe('readiness cgroup writer-lock waiters', () => {
+  const cgroup = '/system.slice/xpanel-agent.service'
+  const service = { pid: 42, uid: 0, cgroup }
+  const root = { path: '/sys/fs/cgroup' + cgroup, processes: [42, 43] }
+  const group = { path: cgroup, exists: true, populated: true, nodes: [root], processes: [42, 43] }
+
+  function fixture() {
+    const identity = (parent: number, start: number) => `43 (flock) S ${parent} ${'0 '.repeat(17)}${start}`
+    const tool = { dev: 1n, ino: 2n }, lock = { dev: 1n, ino: 3n }
+    const proc = { stat: identity(42, 100), status: 'Uid:\t0\t0\t0\t0\n', cgroup: '0::' + cgroup + '\n',
+      cmdline: ['/proc/self/fd/4', '--shared', '--timeout', '15', '3', ''].join('\0') }
+    const files = { exe: tool, 'fd/4': tool, 'fd/3': lock }
+    const close = vi.fn(async () => {}), readlink = vi.fn(async () => '/usr/bin/flock')
+    const procText = vi.fn(async (_root: string, name: keyof typeof proc) => proc[name])
+    const project = new Function('LIFECYCLE_LOCK', 'constants', 'open', 'procText', 'readlink', 'stat', 'withTrustedFile', 'check',
+      ['processStart', 'isWriterLockChild', 'projectReadinessCgroups'].map(declared).join('\n') + '\nreturn projectReadinessCgroups'
+    )('/var/lib/xpanel-lifecycle/writer.lock', {}, async () => ({ fd: 50, close }), procText, readlink,
+      async (path: string) => files[path.replace('/proc/self/fd/50/', '') as keyof typeof files],
+      async (path: string, _options: unknown, run: (value: unknown) => Promise<unknown>) => run({ info: path.endsWith('/flock') ? tool : lock }), check)
+    return { identity, proc, files, close, readlink, procText, project }
+  }
+
+  it('projects away an authenticated waiter while keeping the main process and cgroup identity', async () => {
+    const f = fixture()
+    const expected = { ...group, nodes: [{ ...root, processes: [42] }], processes: [42] }
+    expect(await f.project([group], [service])).toEqual([expected])
+    expect(await f.project([expected], [service])).toEqual([expected])
+    expect(f.close).toHaveBeenCalledOnce()
+    expect(group.processes).toEqual([42, 43])
+  })
+
+  it.each(['parent', 'uid', 'arguments', 'cgroup', 'lock-fd', 'tool-fd', 'executable', 'retired', 'changed-start'])(
+    'keeps an unauthenticated member when %s fails', async mismatch => {
+      const f = fixture()
+      if (mismatch === 'parent') f.proc.stat = f.identity(41, 100)
+      if (mismatch === 'uid') f.proc.status = 'Uid:\t0\t1\t0\t0\n'
+      if (mismatch === 'arguments') f.proc.cmdline = f.proc.cmdline.replace('--shared', '--exclusive')
+      if (mismatch === 'cgroup') f.proc.cgroup = '0::/elsewhere\n'
+      if (mismatch === 'lock-fd') f.files['fd/3'] = f.files.exe
+      if (mismatch === 'tool-fd') f.files['fd/4'] = f.files['fd/3']
+      if (mismatch === 'executable') f.readlink.mockResolvedValue('/tmp/flock')
+      if (mismatch === 'retired') f.procText.mockRejectedValueOnce(Object.assign(new Error(), { code: 'ENOENT' }))
+      if (mismatch === 'changed-start') f.procText.mockResolvedValueOnce(f.proc.stat).mockImplementation(async (_root, name) =>
+        name === 'stat' ? f.identity(42, 101) : f.proc[name])
+      expect(await f.project([group], [service])).toEqual([group])
+      expect(f.close).toHaveBeenCalledOnce()
+    })
+
+  it('keeps moved members and descendant cgroup topology', async () => {
+    const f = fixture()
+    const moved = { ...group, nodes: [{ ...root, processes: [42] }, { path: root.path + '/unexpected', processes: [43] }] }
+    expect(await f.project([moved], [service])).toEqual([moved])
+    expect(f.procText).not.toHaveBeenCalled()
+  })
+})
