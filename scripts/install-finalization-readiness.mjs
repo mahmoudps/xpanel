@@ -3,7 +3,8 @@ import { constants, readFileSync, readlinkSync, statSync } from 'node:fs'
 import { lstat, open, readlink, readdir, realpath, stat } from 'node:fs/promises'
 import { performance } from 'node:perf_hooks'
 import { posix } from 'node:path'
-import { requireLinuxRoot, readInstallationReceipt, readTrustedFile, withTrustedDirectory, assertOwnedFile, assertTrustedDirectory } from './lifecycle-ownership.mjs'
+import { requireLinuxRoot, readInstallationReceipt, readTrustedFile, withTrustedDirectory, withTrustedFile, assertOwnedFile, assertTrustedDirectory } from './lifecycle-ownership.mjs'
+import { LIFECYCLE_LOCK } from './lifecycle-admission.mjs'
 import { observeOwnedControlPlaneUnits, projectOwnedControlPlaneObservation, readBoundedCgroupTree } from './lifecycle-services.mjs'
 import { captureManagementTlsReadiness, readManagementTlsReadiness } from './management-tls.mjs'
 
@@ -134,6 +135,55 @@ function processStart(text) {
   check(fields.length > 19 && /^(?:R|S|D|I)$/.test(fields[0]) && /^[1-9][0-9]*$/.test(fields[19]), 'INSTALL_READINESS_PROCESS_INVALID')
   return fields[19]
 }
+
+async function isWriterLockChild(pid, process, lock, tool) {
+  let directory
+  try {
+    directory = await open('/proc/' + pid, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+    const root = '/proc/self/fd/' + directory.fd
+    const identity = async () => {
+      const text = await procText(root, 'stat')
+      const parent = text.slice(text.lastIndexOf(')') + 2).split(/\s+/)[1]
+      return [Number(parent), processStart(text)]
+    }
+    const [parent, start] = await identity()
+    if (parent !== process.pid) return false
+    const ids = /^Uid:\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)$/m.exec(await procText(root, 'status'))
+    if (!ids || !ids.slice(1).every(id => Number(id) === process.uid)
+      || await procText(root, 'cgroup') !== '0::' + process.cgroup + '\n'
+      || await procText(root, 'cmdline') !== ['/proc/self/fd/4', '--shared', '--timeout', '15', '3', ''].join('\0')
+      || await readlink(root + '/exe') !== '/usr/bin/flock') return false
+    const same = (actual, expected) => actual.dev === expected.dev && actual.ino === expected.ino
+    const [exe, lockFd, toolFd] = await Promise.all(['exe', 'fd/3', 'fd/4'].map(name => stat(root + '/' + name, { bigint: true })))
+    if (!same(exe, tool.info) || !same(toolFd, tool.info) || !same(lockFd, lock.info)) return false
+    const [afterParent, afterStart] = await identity()
+    return afterParent === parent && afterStart === start && same(await stat(root + '/exe', { bigint: true }), tool.info)
+  } catch (error) {
+    // A retired or unreadable PID cannot be authenticated as a lock child.
+    if (['ENOENT', 'ESRCH', 'INSTALL_READINESS_PROCESS_INVALID'].includes(error.code)) return false
+    throw error
+  } finally { if (directory) await directory.close() }
+}
+
+async function projectReadinessCgroups(groups, processes) {
+  return Promise.all(groups.map(async group => {
+    const process = processes.find(row => row.cgroup === group.path)
+    const root = group.nodes.find(node => node.path === '/sys/fs/cgroup' + group.path)
+    const candidates = root?.processes.filter(pid => pid !== process?.pid) ?? []
+    if (!process || !candidates.length) return group
+    // A normal writer can be parked in flock even under EX. Ignore only direct
+    // lock helpers with the fixed executable, arguments, and trusted descriptors.
+    const waiting = await withTrustedFile(LIFECYCLE_LOCK, { exactMode: 0o644, maxBytes: 0 }, lock =>
+      withTrustedFile('/usr/bin/flock', { maxBytes: 1024 * 1024 }, async tool => {
+        const verified = new Set()
+        for (const pid of candidates) if (await isWriterLockChild(pid, process, lock, tool)) verified.add(pid)
+        return verified
+      }))
+    if (!waiting.size) return group
+    const nodes = group.nodes.map(node => node === root ? { ...node, processes: node.processes.filter(pid => !waiting.has(pid)) } : node)
+    return { ...group, nodes, processes: [...new Set(nodes.flatMap(node => node.processes))].sort((a, b) => a - b) }
+  }))
+}
 function accountId(text, name, field) {
   const rows = text.split('\n').filter(line => line.startsWith(name + ':'))
   check(rows.length === 1, 'INSTALL_READINESS_SYSTEM_ACCOUNT_INVALID')
@@ -262,6 +312,7 @@ async function readNativeFacts(context, previous) {
       const value = await processFacts(role, unit, context, node.info, role === 'api' ? apiUid : 0, agentGid)
       processes.push(value.process); sockets.push({ role, descriptors: value.sockets, processDirectory: value.processDirectory })
     }
+    const cgroups = await projectReadinessCgroups(observed.cgroups, processes)
     const management = await readManagementTlsReadiness()
     const again = await lstat('/opt/xpanel/current', { bigint: true })
     check(canonical(fileIdentity(current)) === canonical(fileIdentity(again)) && await readlink('/opt/xpanel/current') === expectedRoot, 'INSTALL_READINESS_CURRENT_LINK_CHANGED')
@@ -282,7 +333,7 @@ async function readNativeFacts(context, previous) {
       pins: { management, current: { ...fileIdentity(current), target: expectedRoot }, sockets,
         node: { ...fileIdentity(node.info), sha256: node.sha256 },
         passwd: { ...fileIdentity(passwd.info), sha256: passwd.sha256 }, groups: { ...fileIdentity(groups.info), sha256: groups.sha256 },
-        units, cgroups: observed.cgroups, unitFiles: observed.unitFiles } }
+        units, cgroups, unitFiles: observed.unitFiles } }
   })
 }
 const nativeObserver = createReadinessObserver({ assertRoot: requireLinuxRoot, now: () => Date.now(), readFacts: readNativeFacts, observeHttps: captureManagementTlsReadiness })
