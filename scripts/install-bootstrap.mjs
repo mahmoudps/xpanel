@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { spawn } from 'node:child_process'
 import { createHash, createPublicKey, randomUUID, verify } from 'node:crypto'
-import { constants } from 'node:fs'
+import { constants, lstatSync } from 'node:fs'
 import { chmod, lstat, mkdir, open, readdir, readFile, readlink, realpath, rename, symlink } from 'node:fs/promises'
 import { dirname, join, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -151,7 +151,15 @@ async function command(path, args, { cwd = '/', sha256, timeoutMs = 120_000 } = 
   })
 }
 
-async function observeSecureTree(root, sourcePaths) {
+const treeIdentity = info => [info.dev, info.ino, info.uid, info.gid, info.mode, info.nlink, info.size, info.mtimeNs, info.ctimeNs]
+function assertPreparedTreeIdentity(entries) {
+  for (const [path, expected] of entries) {
+    const info = lstatSync(path, { bigint: true, throwIfNoEntry: false })
+    check(info && treeIdentity(info).every((value, index) => value === expected[index]), 'PREPARED_RELEASE_TREE_CHANGED')
+  }
+}
+
+async function observeSecureTree(root, sourcePaths, identity) {
   const actualRoot = await realpath(root), entries = []; let count = 0
   const sourceDirectories = new Set([''])
   if (sourcePaths) for (const path of sourcePaths) {
@@ -165,6 +173,7 @@ async function observeSecureTree(root, sourcePaths) {
     const info = await lstat(path, { bigint: true })
     check(info.uid === 0n && info.gid === 0n && (info.isSymbolicLink() || (info.mode & 0o022n) === 0n), 'INSTALL_DEPENDENCY_OWNERSHIP')
     if (sourcePaths) check(dependencyPath(relative) || (info.isDirectory() ? sourceDirectories.has(relative) : sourcePaths.has(relative)), 'INSTALL_UNEXPECTED_SOURCE_PATH')
+    if (identity) identity.push([path, treeIdentity(info)])
     if (info.isSymbolicLink()) {
       const resolved = await realpath(path)
       check(resolved === actualRoot || resolved.startsWith(actualRoot + '/'), 'INSTALL_DEPENDENCY_ESCAPE')
@@ -716,12 +725,26 @@ export async function assertPreparedReleaseCurrent(capability) {
   for (const pin of scope.pins) await pin.verify()
   await readTrustedFile(scope.info.dependencyReceiptPath, { exactMode: 0o600, maxBytes: 16 * 1024, sha256: scope.info.dependencyReceiptSha256 })
   await readTrustedFile(scope.recordPath, { exactMode: 0o600, maxBytes: 16 * 1024, sha256: scope.recordSha256 })
-  const helperPaths = await verifySourceInventory(scope.helperRoot, scope.helperReport)
-  const helperTree = await observeSecureTree(scope.helperRoot, helperPaths)
-  check(helperTree.treeSha256 === scope.helperTreeSha256, 'PREPARED_RELEASE_HELPER_CHANGED')
-  const paths = await verifySourceInventory(scope.info.releaseRoot, scope.report)
-  const tree = await observeSecureTree(scope.info.releaseRoot, paths)
-  check(tree.treeSha256 === scope.info.treeSha256, 'PREPARED_RELEASE_TREE_CHANGED')
+  if (scope.treeIdentity) assertPreparedTreeIdentity(scope.treeIdentity)
+  else {
+    const sameTree = scope.helperRoot === scope.info.releaseRoot && scope.helperReport.archiveSha256 === scope.report.archiveSha256
+      && scope.helperReport.manifestSha256 === scope.report.manifestSha256
+    if (!sameTree) {
+      const helperPaths = await verifySourceInventory(scope.helperRoot, scope.helperReport)
+      const helperTree = await observeSecureTree(scope.helperRoot, helperPaths)
+      check(helperTree.treeSha256 === scope.helperTreeSha256, 'PREPARED_RELEASE_HELPER_CHANGED')
+    }
+    const paths = await verifySourceInventory(scope.info.releaseRoot, scope.report)
+    const identity = sameTree ? [] : null
+    const tree = await observeSecureTree(scope.info.releaseRoot, paths, identity)
+    check(tree.treeSha256 === scope.info.treeSha256 && (!sameTree || tree.treeSha256 === scope.helperTreeSha256), 'PREPARED_RELEASE_TREE_CHANGED')
+    if (identity) {
+      // Both roles use the same authenticated root. Retained ancestry pins and
+      // inode stamps detect file, symlink and directory changes inside the scope.
+      assertPreparedTreeIdentity(identity)
+      scope.treeIdentity = identity
+    }
+  }
   for (const pin of scope.pins) await pin.verify()
 }
 
@@ -832,7 +855,18 @@ async function withPreparedReleaseScope(input, callback, mayPrepare) {
                 const capability = Object.freeze(Object.create(null)), scope = { capability, helperRoot, helperReport, helperTreeSha256: helperTree.treeSha256, pid: process.pid, live: true, parent: parentScope, artifactPath: options.artifactPath, info: record, report, recordPath,
                   recordSha256: recordPin.sha256, pins: [...pins, directoryPin, recordPin, dependencyPin, sourcePin, helperPin] }
                 preparedScopes.set(capability, scope)
-                try { return await preparedActive.run(scope, async () => { await assertPreparedReleaseCurrent(capability); const value = await callback(capability); await assertPreparedReleaseCurrent(capability); return value }) }
+                try {
+                  return await preparedActive.run(scope, async () => {
+                    await assertPreparedReleaseCurrent(capability)
+                    const value = await callback(capability)
+                    await assertPreparedReleaseCurrent(capability)
+                    if (scope.treeIdentity) {
+                      scope.treeIdentity = null
+                      await assertPreparedReleaseCurrent(capability)
+                    }
+                    return value
+                  })
+                }
                 finally { scope.live = false; preparedScopes.delete(capability) }
               }))
             })

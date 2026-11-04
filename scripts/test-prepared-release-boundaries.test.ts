@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { posix } from 'node:path'
 import { describe, it } from 'vitest'
 import { assertPreparedReleaseCurrent, parsePreparedReleaseInput, preparedReleaseInfo } from './prepared-release.mjs'
 import { observePreparedAdoptionSource } from './install-bootstrap.mjs'
@@ -136,5 +138,77 @@ describe('isolated prepared-scope ancestor visibility', () => {
       f.parent.live = true; f.child.pid = 43; assert.throws(() => f.select(f.parentKey), /PREPARED_RELEASE_CAPABILITY_REQUIRED/)
       f.child.pid = 42; f.child.parent = null; assert.throws(() => f.select(f.parentKey), /PREPARED_RELEASE_CAPABILITY_REQUIRED/)
     })
+  })
+})
+
+describe('prepared helper and target tree revalidation', () => {
+  const source = readFileSync(new URL('./install-bootstrap.mjs', import.meta.url), 'utf8')
+  const section = (start: string, end: string) => {
+    const first = source.indexOf(start), last = source.indexOf(end, first)
+    assert(first >= 0 && last > first)
+    return source.slice(first, last)
+  }
+  async function fixture(sameRelease = true) {
+    const root = '/opt/xpanel/releases/0.1.2', modules = root + '/node_modules'
+    const files = new Map([
+      [root, { kind: 'directory', children: ['entry.mjs', 'node_modules'] }],
+      [root + '/entry.mjs', { kind: 'file' }],
+      [modules, { kind: 'directory', children: ['dependency', 'link'] }],
+      [modules + '/dependency', { kind: 'file' }],
+      [modules + '/link', { kind: 'symlink' }],
+    ].map(([path, value], index) => [path, { ...value as { kind: string; children?: string[] }, dev: 1n, ino: BigInt(index + 1),
+      uid: 0n, gid: 0n, nlink: 1n, size: 1n, mtimeNs: 1n, ctimeNs: 1n, mode: 0o644n }] as const))
+    let contentReads = 0
+    const stat = (path: string) => {
+      const node = files.get(path)
+      return node && { ...node, isDirectory: () => node.kind === 'directory',
+        isFile: () => node.kind === 'file', isSymbolicLink: () => node.kind === 'symlink' }
+    }
+    const report = { archiveSha256: 'archive', manifestSha256: 'manifest' }
+    const scope = { pid: process.pid, helperRoot: root, helperReport: sameRelease ? report : { ...report, archiveSha256: 'other' },
+      helperTreeSha256: '', report, info: { releaseRoot: root, treeSha256: '' },
+      pins: [{ verify: async () => {} }] }
+    const implementation = section('const treeIdentity =', 'async function verifySourceInventory(')
+      + section('export async function assertPreparedReleaseCurrent(', '/** The new helper and installed old source')
+        .replace('export async function', 'async function')
+    const api = new Function('lstatSync', 'lstat', 'readdir', 'readFile', 'readlink', 'realpath', 'posix', 'join', 'check',
+      'digest', 'preparedScope', 'readTrustedFile', 'verifySourceInventory',
+      implementation + '\nreturn { assertPreparedReleaseCurrent, observeSecureTree }')(
+      stat, async (path: string) => stat(path), async (path: string) => files.get(path)?.children?.slice(),
+      async () => { contentReads++; return Buffer.from('x') }, async () => 'dependency',
+      async (path: string) => path === modules + '/link' ? modules + '/dependency' : path,
+      posix, posix.join, (ok: unknown, code: string) => { if (!ok) throw new Error(code) },
+      (bytes: string) => createHash('sha256').update(bytes).digest('hex'), () => scope, async () => {},
+      async () => new Set(['entry.mjs']))
+    const observed = await api.observeSecureTree(root, new Set(['entry.mjs']))
+    scope.helperTreeSha256 = scope.info.treeSha256 = observed.treeSha256
+    contentReads = 0
+    return { files, root, modules, check: () => api.assertPreparedReleaseCurrent({}), reads: () => contentReads }
+  }
+
+  it('hashes a shared source once per lifetime and keeps distinct reports on full verification', async () => {
+    const same = await fixture()
+    await same.check()
+    assert.equal(same.reads(), 2)
+    await same.check()
+    assert.equal(same.reads(), 2)
+    const distinct = await fixture(false)
+    await distinct.check()
+    await distinct.check()
+    assert.equal(distinct.reads(), 8)
+  })
+
+  it('refuses same-size file rewrites, directory changes, and replaced or missing dependency links', async () => {
+    for (const change of ['file', 'directory', 'link', 'missing'] as const) {
+      const f = await fixture()
+      await f.check()
+      const path = change === 'file' ? f.root + '/entry.mjs' : change === 'directory' ? f.modules : f.modules + '/link'
+      const current = f.files.get(path)!
+      if (change === 'missing') f.files.delete(path)
+      else if (change === 'link') current.ino++
+      else current.ctimeNs++
+      await assert.rejects(f.check(), /PREPARED_RELEASE_TREE_CHANGED/)
+      assert.equal(f.reads(), 2)
+    }
   })
 })

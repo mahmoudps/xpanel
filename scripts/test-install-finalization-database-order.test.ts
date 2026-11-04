@@ -16,6 +16,7 @@ const section = (from: string, to: string) => {
 function harness() {
   const events: string[] = [], active = new AsyncLocalStorage<unknown>()
   let held: 'none' | 'SH' | 'EX' = 'none', readerLive = false, writerLive = false, stateLive = false
+  let wal = 0, readerWal = 0
   const check = (v: unknown, code: string) => { if (!v) throw new Error(code) }
   const origin = { file: '/var/lib/xpanel/control.db', device: '1', inode: '2', issuerId: 'issuer' }
   let currentOrigin = { ...origin }, principal = { id: 'root-id', username: 'root', kind: 'root', disabled: false, forcePasswordChange: false }
@@ -27,10 +28,10 @@ function harness() {
     getReadonlyOperationDatabaseOrigin(db: unknown) { check(readerLive && db === reader, 'actual reader required'); return currentOrigin },
     getStrictOperationDatabaseOrigin(db: unknown) { check(writerLive && db === writer, 'actual writer required'); return currentOrigin },
     getPrincipal: async () => ({ ...principal }),
-    assertReadonlyOperationDatabaseCurrent: async () => check(readerLive, 'reader retired'),
+    assertReadonlyOperationDatabaseCurrent: async () => check(readerLive && readerWal === wal, 'readonly WAL changed'),
     async withReadonlyOperationDatabase(_path: string, run: (db: unknown) => Promise<unknown>) {
       await assertSH(); check(!writerLive && !readerLive, 'overlapping database connection')
-      readerLive = true; events.push('reader:open')
+      readerLive = true; readerWal = wal; events.push('reader:open')
       try { return await run(reader) } finally { readerLive = false; events.push('reader:close') }
     },
     createDb() {
@@ -43,9 +44,22 @@ function harness() {
       events.push('guard:open'); try { return await run({}) } finally { events.push('guard:close') }
     },
   }
+  const runtime = { nodeSha256: 'runtime' }, bootstrap = { archiveSha256: 'archive', manifestSha256: 'manifest' }
+  const receipt = { source: { version: '0.1.1' }, runtime }
+  const paths = { bootstrap: 'bootstrap.json', receipt: 'installation.json', head: 'HEAD' }
   const scope: any = { dbApi, db: null, databaseAccess: null, phase: 'new', live: true, capability: {},
-    kind: 'install', databaseInfo: { dev: 1n, ino: 2n }, origin: null, originBinding: null, root: null,
-    flights: new Set(), startupDeadline: Date.now() + 60_000,
+    kind: 'install', databaseInfo: { dev: 1n, ino: 2n, uid: 999n }, origin: null, originBinding: null, root: null,
+    flights: new Set(), expected: new Map(), startupDeadline: Date.now() + 60_000,
+    request: { artifact: { expectedArchiveSha256: bootstrap.archiveSha256 } },
+    bootstrapApi: { observePreparedInstallFinalization: async () => ({ bootstrap, runtime }) },
+    stateDirectories: { verify: async () => { await assertSH(); check(!readerLive, 'source check retained reader') } },
+    readiness: { captureInstallFinalizationReadiness: async () => {
+      await assertSH()
+      check(!readerLive, 'HTTPS readiness retained reader')
+      wal += 1
+      events.push('readiness:wal-advanced')
+      return { processes: [{ role: 'api', uid: 999 }] }
+    } },
     store: {
       readSnapshot: async () => { throw new Error('recoverOrphan path must never run') },
       async withReadonlyObservation(run: (observation: any) => Promise<unknown>) {
@@ -71,11 +85,13 @@ function harness() {
     + section('function ports(scope)', 'export async function runNativeInstallFinalization(')
   const api = new Function('check', 'assertBase', 'assertLifecycleWriterAdmissionHeld', 'assertInstallFinalizationExclusivePhysicalHeld',
     'DATABASE', 'canonical', 'bindingFor', 'active', 'withLifecycleWriterAdmission', 'withInstallFinalizationExclusiveAdmission', 'nativeFilesystem', 'initializeDefaultRootOperationAuditDirectory',
-    implementation + '\nreturn { ports, withFinalizationReadonlyDatabase, withFinalizationWriterDatabase, readScopeSnapshot, rootInTransaction }')(
+    'PATHS', 'metadata', 'readInstallationReceipt', 'digest', 'installFinalizationSubjectDigest',
+    implementation + '\nreturn { ports, withCapturedFinalizationDatabase, withFinalizationWriterDatabase, readScopeSnapshot }')(
       check, async (s: unknown) => check(s === scope && scope.live, 'native scope missing'), assertSH, assertEX,
       origin.file, JSON.stringify, bindingFor, active, withSH, withEX, () => ({}), async () => {
         check(held === 'EX' && writerLive && !!scope.guard, 'audit initialization requires genuine model EX and host guard')
-      })
+      }, paths, async (path: string) => ({ bytes: Buffer.from(JSON.stringify(path === paths.bootstrap ? bootstrap : {})), sha256: path }),
+      async () => ({ receipt }), () => 'fingerprint', () => 'subject')
   return { api, scope, events, withSH, withEX, setOrigin: (value: typeof origin) => { currentOrigin = value }, origin,
     setPrincipal: (value: typeof principal) => { principal = value }, principal }
 }
@@ -95,32 +111,42 @@ describe('finalization connection lifetime under actual orchestration with isola
     for (const kind of ['install', 'adopt']) {
       const h = harness(); h.scope.kind = kind; h.scope.phase = 'capturing'
       await assert.rejects(h.api.withFinalizationWriterDatabase(h.scope, async () => {}), /physical SH required/)
-      await assert.rejects(h.api.withFinalizationReadonlyDatabase(h.scope, async () => {}), /physical SH required/)
+      await assert.rejects(h.api.withCapturedFinalizationDatabase(h.scope, async () => {}), /physical SH required/)
       await assert.rejects(h.api.readScopeSnapshot(h.scope), /physical SH required/)
       assert.deepEqual(h.events, [])
     }
   })
-  it('closes readonly DB and state before EX, then opens writer before the host guard', async () => {
+  it('retires the pinned WAL before HTTPS readiness while retaining root and DB identity for EX', async () => {
     const h = harness(), p = h.api.ports(h.scope)
     await p.withSharedAdmission(async () => {
-      await h.api.readScopeSnapshot(h.scope)
-      await h.scope.db.transaction((tx: unknown) => h.api.rootInTransaction(h.scope, tx))
-      h.scope.context = {}; h.scope.observation = {}; h.events.push('captured')
+      const context = await p.capturePrepared()
+      assert.deepEqual(context.database, h.origin)
+      assert.equal(context.rootPrincipalId, h.principal.id)
+      await p.observeReady(context, h.scope.subject)
     })
     assert.equal(h.scope.db, null)
     await p.withExclusiveAdmission(async () => { h.events.push('effect:EX') })
-    assert.deepEqual(h.events, ['SH:open', 'reader:open', 'state:open', 'state:close', 'captured', 'reader:close', 'SH:close',
+    assert.deepEqual(h.events, ['SH:open', 'state:open', 'state:close', 'reader:open', 'reader:close', 'readiness:wal-advanced', 'SH:close',
       'EX:open', 'writer:open:EX', 'guard:open', 'effect:EX', 'guard:close', 'writer:close:EX', 'EX:close'])
   })
   it('closes startup writer in its separate SH before the readiness reader or EX', async () => {
     const h = harness(); h.scope.phase = 'capturing'
-    await h.withSH(() => h.api.withFinalizationWriterDatabase(h.scope, async () => { h.events.push('startup:effect') }))
+    await h.withSH(() => h.api.withFinalizationWriterDatabase(h.scope, async () => {
+      const context = await h.api.ports(h.scope).capturePrepared()
+      assert.deepEqual(context.database, h.origin)
+      assert.equal(h.events.filter(event => event === 'reader:open').length, 0)
+      h.events.push('startup:effect')
+    }))
     h.scope.phase = 'new'
-    await h.api.ports(h.scope).withSharedAdmission(async () => { h.events.push('readiness') })
+    const p = h.api.ports(h.scope)
+    await p.withSharedAdmission(async () => {
+      const context = await p.capturePrepared()
+      await p.observeReady(context, h.scope.subject)
+    })
     assert(h.events.indexOf('state:close') < h.events.indexOf('writer:open:SH'))
     assert(h.events.indexOf('writer:close:SH') < h.events.indexOf('SH:close'))
     assert(h.events.indexOf('SH:close') < h.events.indexOf('reader:open'))
-    assert(h.events.indexOf('reader:open') < h.events.indexOf('readiness'))
+    assert(h.events.indexOf('reader:close') < h.events.indexOf('readiness:wal-advanced'))
   })
   it('forbids the startup write exception for populated adoption and retains the fresh zero-account gate', async () => {
     const h = harness(); h.scope.phase = 'capturing'; h.scope.kind = 'adopt'
@@ -133,7 +159,7 @@ describe('finalization connection lifetime under actual orchestration with isola
   it('revalidates persisted origin and root when EX reopens, closing a rejected writer before effects', async () => {
     for (const change of ['origin', 'root']) {
       const h = harness(), p = h.api.ports(h.scope)
-      await p.withSharedAdmission(async () => { h.scope.context = {}; h.scope.observation = {} })
+      await p.withSharedAdmission(async () => { await p.capturePrepared(); h.scope.observation = {} })
       if (change === 'origin') h.setOrigin({ ...h.origin, issuerId: 'replacement' })
       else h.setPrincipal({ ...h.principal, id: 'replacement' })
       await assert.rejects(p.withExclusiveAdmission(async () => { throw new Error('effect must not run') }), /INSTALL_FINALIZATION_(DATABASE|ROOT)_CHANGED/)
