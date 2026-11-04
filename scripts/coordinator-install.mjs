@@ -3,7 +3,7 @@ import { constants } from 'node:fs'
 import { lstat, open, readlink, realpath } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
-import { getPrincipal, getReadonlyOperationDatabaseOrigin, withReadonlyOperationDatabase, withReadonlyHostOperationGuard, assertReadonlyOperationDatabaseCurrent, assertHostOperationGuardHeld } from '../packages/db/src/index.ts'
+import { getPrincipal, getReadonlyOperationDatabaseOrigin, withReadonlyOperationDatabase, withReopenedReadonlyHostOperationGuard, assertReadonlyOperationDatabaseCurrent, assertHostOperationGuardHeld } from '../packages/db/src/index.ts'
 import { withLifecycleWriterAdmission } from './lifecycle-admission.mjs'
 import { observePreparedAdoptionSource } from './install-bootstrap.mjs'
 import { assertPreparedReleaseCurrent, preparedReleaseInfo } from './prepared-release.mjs'
@@ -16,37 +16,46 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const fail = code => { throw Object.assign(new Error(code), { code }) }
 const json = value => Buffer.from(JSON.stringify(value) + '\n')
 
-async function provisionedRoot(reader) {
-  await assertReadonlyOperationDatabaseCurrent(reader)
-  const origin = getReadonlyOperationDatabaseOrigin(reader)
-  const anchor = JSON.parse((await readTrustedFile('/var/lib/xpanel-agent/operation-audit/operation-audit-authority.json', { exactMode: 0o600, maxBytes: 16384 })).bytes)
-  if (['file', 'device', 'inode', 'issuerId'].some(key => anchor.origin?.[key] !== origin[key])) fail('COORDINATOR_PROTECTED_DATABASE_ORIGIN_CHANGED')
-  const roots = await reader.query("SELECT id FROM principals WHERE kind='root' AND disabled=0 ORDER BY created_at,id LIMIT 2")
-  if (roots.length !== 1) fail('COORDINATOR_ROOT_REQUIRED')
-  const root = await getPrincipal(reader, roots[0].id)
-  if (!root || root.disabled || root.forcePasswordChange || root.kind !== 'root') fail('COORDINATOR_ROOT_REQUIRED')
-  await assertReadonlyOperationDatabaseCurrent(reader)
-  return root
+/** Keep the physical lock across systemctl and file effects, with a fresh root observation at each boundary. */
+export async function withCoordinatorDatabaseAuthority(callback) {
+  return withLifecycleWriterAdmission(() => withReopenedReadonlyHostOperationGuard(DATABASE, {}, async (guard, binding) => {
+    const origin = Object.freeze({ file: binding.databaseFile, device: binding.databaseDevice, inode: binding.databaseInode, issuerId: binding.issuerId })
+    const anchorPath = '/var/lib/xpanel-agent/operation-audit/operation-audit-authority.json'
+    const anchorOptions = { exactMode: 0o600, maxBytes: 16384 }
+    const anchor = await readTrustedFile(anchorPath, anchorOptions)
+    const sameOrigin = value => ['file', 'device', 'inode', 'issuerId'].every(key => value?.[key] === origin[key])
+    if (!sameOrigin(JSON.parse(anchor.bytes).origin)) fail('COORDINATOR_PROTECTED_DATABASE_ORIGIN_CHANGED')
+    const readRoot = () => withReadonlyOperationDatabase(DATABASE, async reader => {
+      if (!sameOrigin(getReadonlyOperationDatabaseOrigin(reader))) fail('COORDINATOR_DATABASE_CHANGED')
+      const roots = await reader.query("SELECT id FROM principals WHERE kind='root' AND disabled=0 ORDER BY created_at,id LIMIT 2")
+      if (roots.length !== 1) fail('COORDINATOR_ROOT_REQUIRED')
+      const root = await getPrincipal(reader, roots[0].id)
+      if (!root || root.disabled || root.forcePasswordChange || root.kind !== 'root') fail('COORDINATOR_ROOT_REQUIRED')
+      await assertReadonlyOperationDatabaseCurrent(reader)
+      return root.id
+    })
+    const rootId = await readRoot()
+    const assertDatabaseAuthority = async () => {
+      await assertHostOperationGuardHeld(guard, binding)
+      await readTrustedFile(anchorPath, { ...anchorOptions, sha256: anchor.sha256 })
+      if (await readRoot() !== rootId) fail('COORDINATOR_AUTHORITY_CHANGED')
+    }
+    return callback({ origin, rootId, assertDatabaseAuthority })
+  }))
 }
 
 async function withExistingRegistrationGuard(prepared, callback) {
-  return withReadonlyOperationDatabase(DATABASE, async reader => {
-    const root = await provisionedRoot(reader)
-    return withLifecycleWriterAdmission(() => withReadonlyHostOperationGuard(reader, {}, async guard => {
-      const origin = getReadonlyOperationDatabaseOrigin(reader)
-      const binding = { databaseFile: origin.file, databaseDevice: origin.device, databaseInode: origin.inode, issuerId: origin.issuerId }
-      const baseline = await readTrustedFile('/var/lib/xpanel-lifecycle/HEAD', { exactMode: 0o600, maxBytes: 16384 })
-      const head = JSON.parse(baseline.bytes), installed = await readInstallationReceipt()
-      if (!['idle', 'retired'].includes(head.phase) || head.issuerId !== origin.issuerId || installed.receipt.status !== 'active') fail('COORDINATOR_RETAINED_ATTENTION')
-      const assertOrigin = async () => {
-        await assertPreparedReleaseCurrent(prepared); await assertHostOperationGuardHeld(guard, binding)
-        const currentRoot = await provisionedRoot(reader)
-        if (currentRoot.id !== root.id || (await readInstallationReceipt()).sha256 !== installed.sha256) fail('COORDINATOR_AUTHORITY_CHANGED')
-        await readTrustedFile('/var/lib/xpanel-lifecycle/HEAD', { exactMode: 0o600, maxBytes: 16384, sha256: baseline.sha256 })
-        for (const file of installed.receipt.files) await assertOwnedFile(file)
-      }
-      await assertOrigin(); const value = await callback(assertOrigin); await assertOrigin(); return value
-    }))
+  return withCoordinatorDatabaseAuthority(async ({ origin, assertDatabaseAuthority }) => {
+    const baseline = await readTrustedFile('/var/lib/xpanel-lifecycle/HEAD', { exactMode: 0o600, maxBytes: 16384 })
+    const head = JSON.parse(baseline.bytes), installed = await readInstallationReceipt()
+    if (!['idle', 'retired'].includes(head.phase) || head.issuerId !== origin.issuerId || installed.receipt.status !== 'active') fail('COORDINATOR_RETAINED_ATTENTION')
+    const assertOrigin = async () => {
+      await assertPreparedReleaseCurrent(prepared); await assertDatabaseAuthority()
+      if ((await readInstallationReceipt()).sha256 !== installed.sha256) fail('COORDINATOR_AUTHORITY_CHANGED')
+      await readTrustedFile('/var/lib/xpanel-lifecycle/HEAD', { exactMode: 0o600, maxBytes: 16384, sha256: baseline.sha256 })
+      for (const file of installed.receipt.files) await assertOwnedFile(file)
+    }
+    await assertOrigin(); const value = await callback(assertOrigin); await assertOrigin(); return value
   })
 }
 
@@ -117,15 +126,8 @@ export async function installPreparedCoordinator(prepared) {
   try {
     const database = await databasePin.stat({ bigint: true })
     if (!database.isFile() || database.nlink !== 1n) fail('COORDINATOR_DATABASE_UNSAFE')
-    return withReadonlyOperationDatabase(DATABASE, async reader => {
-    const root = await provisionedRoot(reader)
-    return withLifecycleWriterAdmission(() => withReadonlyHostOperationGuard(reader, {}, async guard => {
-      const origin = getReadonlyOperationDatabaseOrigin(reader)
+    return await withCoordinatorDatabaseAuthority(async ({ origin, assertDatabaseAuthority }) => {
       if (origin.file !== DATABASE || origin.device !== String(database.dev) || origin.inode !== String(database.ino)) fail('COORDINATOR_DATABASE_CHANGED')
-      const binding = { databaseFile: origin.file, databaseDevice: origin.device, databaseInode: origin.inode, issuerId: origin.issuerId }
-      const anchor = await readTrustedFile('/var/lib/xpanel-agent/operation-audit/operation-audit-authority.json', { exactMode: 0o600, maxBytes: 16384 })
-      const anchored = JSON.parse(anchor.bytes).origin
-      if (['file', 'device', 'inode', 'issuerId'].some(key => anchored?.[key] !== origin[key])) fail('COORDINATOR_PROTECTED_DATABASE_ORIGIN_CHANGED')
       const installed = await readInstallationReceipt()
       if (installed.receipt.status !== 'active') fail('COORDINATOR_INSTALLATION_REQUIRED')
       if (installed.receipt.runtime.nodePath !== helper.runtime.nodePath || installed.receipt.runtime.nodeSha256 !== helper.runtime.nodeSha256) fail('COORDINATOR_RUNTIME_CHANGED')
@@ -133,12 +135,7 @@ export async function installPreparedCoordinator(prepared) {
       const head = JSON.parse(baseline.bytes.toString('utf8'))
       if (!['idle', 'retired'].includes(head.phase) || head.issuerId !== origin.issuerId) fail('COORDINATOR_RETAINED_ATTENTION')
       const assertAuthority = async () => {
-        requireLinuxRoot(); await assertPreparedReleaseCurrent(prepared); await assertHostOperationGuardHeld(guard, binding)
-        await readTrustedFile('/var/lib/xpanel-agent/operation-audit/operation-audit-authority.json', { exactMode: 0o600, maxBytes: 16384, sha256: anchor.sha256 })
-        const currentOrigin = getReadonlyOperationDatabaseOrigin(reader)
-        const currentRoot = await getPrincipal(reader, root.id)
-        if (currentOrigin.device !== origin.device || currentOrigin.inode !== origin.inode || currentOrigin.issuerId !== origin.issuerId
-          || !currentRoot || currentRoot.disabled || currentRoot.forcePasswordChange || currentRoot.kind !== 'root') fail('COORDINATOR_AUTHORITY_CHANGED')
+        requireLinuxRoot(); await assertPreparedReleaseCurrent(prepared); await assertDatabaseAuthority()
         const current = await readInstallationReceipt()
         if (current.sha256 !== installed.sha256) fail('COORDINATOR_INSTALLATION_CHANGED')
         await readTrustedFile('/var/lib/xpanel-lifecycle/HEAD', { exactMode: 0o600, maxBytes: 16384, sha256: baseline.sha256 })
@@ -206,7 +203,6 @@ export async function installPreparedCoordinator(prepared) {
         // IPC/process/source qualification remains independently required; systemctl exit is not readiness.
         return Object.freeze({ status: 'registered', unit: receipt.unit, sourceVersion: helper.version, started: true, ready: false })
       } finally { privateKey.fill(0) }
-    }))
     })
   } finally { await databasePin.close() }
 }

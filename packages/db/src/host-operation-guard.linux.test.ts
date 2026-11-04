@@ -17,6 +17,7 @@ import {
   assertHostOperationGuardHeld,
   withHostOperationGuard,
   withReadonlyHostOperationGuard,
+  withReopenedReadonlyHostOperationGuard,
 } from './host-operation-guard.ts'
 import type { HostOperationGuard, HostOperationGuardBinding } from './host-operation-guard.ts'
 
@@ -490,6 +491,24 @@ describe('actual read-only manager host exclusion in the disposable VM', () => {
     expect(guardedWriterRan).toBe(true)
     await recordOwnedParent()
     await withHostOperationGuard(f.handle.db, {}, async cap => { await assertHostOperationGuardHeld(cap, f.binding) })
+  })
+
+  it('reopens short readers across an unrelated WAL commit while retaining physical ownership', async () => {
+    const f = await readonlyFixture()
+    let retained: HostOperationGuard | undefined
+    await withReopenedReadonlyHostOperationGuard(f.file, {}, async (capability, binding) => {
+      retained = capability
+      expect(binding).toEqual(f.binding)
+      await recordOwnedParent()
+      await assertHostOperationGuardHeld(capability, binding)
+      const before = await bytes(f.file)
+      await f.handle.db.exec('CREATE TABLE reopened_guard_writer_probe (id INTEGER PRIMARY KEY)')
+      expect(await bytes(f.file)).not.toEqual(before)
+      const after = await bytes(f.file)
+      await assertHostOperationGuardHeld(capability, binding)
+      expect(await bytes(f.file)).toEqual(after)
+    })
+    expect(() => assertHostOperationGuardActive(retained, f.binding)).toThrow()
   })
 
   it('rejects a later WAL ctime change even when ownership and bytes remain identical', async () => {

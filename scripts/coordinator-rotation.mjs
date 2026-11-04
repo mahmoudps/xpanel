@@ -3,8 +3,7 @@ import { spawn } from 'node:child_process'
 import { lstat, open, readFile, readlink, realpath, readdir } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { getPrincipal, getReadonlyOperationDatabaseOrigin, withReadonlyOperationDatabase, withReadonlyHostOperationGuard, assertReadonlyOperationDatabaseCurrent, assertHostOperationGuardHeld } from '../packages/db/src/index.ts'
-import { withLifecycleWriterAdmission } from './lifecycle-admission.mjs'
+import { withCoordinatorDatabaseAuthority } from './coordinator-install.mjs'
 import { observePreparedAdoptionSource } from './install-bootstrap.mjs'
 import { assertPreparedReleaseCurrent, preparedReleaseInfo, withExistingPreparedRelease, parsePreparedReleaseInput } from './prepared-release.mjs'
 import { requireLinuxRoot, assertOwnedFile, readInstallationReceipt, readTrustedFile, withTrustedFile } from './lifecycle-ownership.mjs'
@@ -219,57 +218,40 @@ export async function rotatePreparedCoordinator(input, prepared) {
   check(oldReceipt.runtime.nodePath === next.runtime.nodePath && oldReceipt.runtime.nodeSha256 === next.runtime.nodeSha256, 'COORDINATOR_ROTATION_RUNTIME_CHANGE_UNSUPPORTED')
   if (intent) check(JSON.stringify(intent.next.helper) === JSON.stringify(coordinatorHelperFromPrepared(next, next.artifactPath)), 'COORDINATOR_ROTATION_TARGET_CHANGED')
   return withExistingPreparedRelease({ artifactPath: oldReceipt.helper.archivePath, expectedArchiveSha256: oldReceipt.helper.archiveSha256 }, async oldPrepared => {
-    return withReadonlyOperationDatabase(DATABASE, async reader => {
-      await assertReadonlyOperationDatabaseCurrent(reader)
-      const preflightOrigin = getReadonlyOperationDatabaseOrigin(reader)
-      const preflightAnchor = JSON.parse((await readTrustedFile('/var/lib/xpanel-agent/operation-audit/operation-audit-authority.json', { exactMode: 0o600, maxBytes: 16384 })).bytes)
-      check(['file', 'device', 'inode', 'issuerId'].every(key => preflightAnchor.origin?.[key] === preflightOrigin[key]), 'COORDINATOR_ROTATION_DATABASE_CHANGED')
-      const roots = await reader.query("SELECT id FROM principals WHERE kind='root' AND disabled=0 ORDER BY created_at,id LIMIT 2")
-      check(roots.length === 1, 'COORDINATOR_ROTATION_ROOT_REQUIRED')
-      const rootId = roots[0].id, preflightRoot = await getPrincipal(reader, rootId)
-      check(preflightRoot?.kind === 'root' && !preflightRoot.disabled && !preflightRoot.forcePasswordChange, 'COORDINATOR_ROTATION_ROOT_CHANGED')
-      return await withLifecycleWriterAdmission(() => withReadonlyHostOperationGuard(reader, {}, async guard => {
-        const origin = getReadonlyOperationDatabaseOrigin(reader)
-        const binding = { databaseFile: origin.file, databaseDevice: origin.device, databaseInode: origin.inode, issuerId: origin.issuerId }
-        const installed = await readInstallationReceipt(), head = await readTrustedFile(ROOT + '/HEAD', { exactMode: 0o600, maxBytes: 16384 }), parsedHead = JSON.parse(head.bytes)
-        check(installed.receipt.status === 'active' && parsedHead.issuerId === origin.issuerId && ['idle', 'retired'].includes(parsedHead.phase)
-          && await managedPathAbsent(ROOT + '/writer-barrier.json'), 'COORDINATOR_ROTATION_LIFECYCLE_PENDING')
-        const scope = { path, intent, journal, oldReceipt, next, assertAuthority: null }
-        scope.assertAuthority = async () => {
-          requireLinuxRoot(); await assertPreparedReleaseCurrent(prepared); await assertPreparedReleaseCurrent(oldPrepared)
-          await assertHostOperationGuardHeld(guard, binding)
-          const currentOrigin = getReadonlyOperationDatabaseOrigin(reader)
-          const anchor = JSON.parse((await readTrustedFile('/var/lib/xpanel-agent/operation-audit/operation-audit-authority.json', { exactMode: 0o600, maxBytes: 16384 })).bytes)
-          check(['file', 'device', 'inode', 'issuerId'].every(key => currentOrigin[key] === origin[key] && anchor.origin?.[key] === origin[key]), 'COORDINATOR_ROTATION_DATABASE_CHANGED')
-          const principal = await getPrincipal(reader, rootId)
-          check(principal?.kind === 'root' && !principal.disabled && !principal.forcePasswordChange, 'COORDINATOR_ROTATION_ROOT_CHANGED')
-          check((await readInstallationReceipt()).sha256 === installed.sha256 && await managedPathAbsent(ROOT + '/writer-barrier.json'), 'COORDINATOR_ROTATION_INSTALLATION_CHANGED')
-          await readTrustedFile(ROOT + '/HEAD', { exactMode: 0o600, maxBytes: 16384, sha256: head.sha256 })
-          for (const file of oldReceipt.files) if (file.path !== P.unit) await assertOwnedFile(file)
-          for (const file of installed.receipt.files) await assertOwnedFile(file)
-        }
-        await scope.assertAuthority()
-        if (intent) {
-          await assertOwnedFile(journal.entry)
-          check(JSON.stringify(intent.origin) === JSON.stringify(origin) && intent.installedReceiptSha256 === installed.sha256 && intent.headSha256 === head.sha256, 'COORDINATOR_ROTATION_CONTEXT_CHANGED')
-          if (request.mode === 'apply') fail('COORDINATOR_ROTATION_EXPLICIT_RECOVERY_REQUIRED')
-        } else {
-          await withVerifiedCoordinatorOwnership(async ownership => {
-            const current = coordinatorOwnershipInfo(ownership)
-            check(current.helper.archiveSha256 === oldReceipt.helper.archiveSha256
-              && (await captureManagedFile(P.receipt)).entry.sha256 === current.receiptSha256, 'COORDINATOR_ROTATION_OWNERSHIP_CHANGED')
-          })
-          const previous = { unit: remember(await captureManagedFile(P.unit)), receipt: remember(await captureManagedFile(P.receipt)), registration: remember(await captureManagedFile(REGISTER)) }
-          scope.intent = { schemaVersion: 1, kind: 'xpanel-coordinator-rotation', operationId: request.operationId, phase: 'prepared', selection: 'next',
-            origin, rootPrincipalId: rootId, installedReceiptSha256: installed.sha256, headSha256: head.sha256, previous,
-            next: { helper: coordinatorHelperFromPrepared(next, next.artifactPath), runtime: next.runtime, unitSha256: hash(renderCoordinatorUnit(next.runtime.nodePath, next.releaseRoot)) },
-            createdAt: new Date().toISOString() }
-          parseJournal(scope.intent, request.operationId)
-          await persist(scope, {})
-        }
-        // Explicit recovery resumes the journal's selected direction; rollback is a separate root choice.
-        return select(scope, request.mode === 'rollback' ? 'previous' : scope.intent.selection)
-      }))
+    return withCoordinatorDatabaseAuthority(async ({ origin, rootId, assertDatabaseAuthority }) => {
+      const installed = await readInstallationReceipt(), head = await readTrustedFile(ROOT + '/HEAD', { exactMode: 0o600, maxBytes: 16384 }), parsedHead = JSON.parse(head.bytes)
+      check(installed.receipt.status === 'active' && parsedHead.issuerId === origin.issuerId && ['idle', 'retired'].includes(parsedHead.phase)
+        && await managedPathAbsent(ROOT + '/writer-barrier.json'), 'COORDINATOR_ROTATION_LIFECYCLE_PENDING')
+      const scope = { path, intent, journal, oldReceipt, next, assertAuthority: null }
+      scope.assertAuthority = async () => {
+        requireLinuxRoot(); await assertPreparedReleaseCurrent(prepared); await assertPreparedReleaseCurrent(oldPrepared)
+        await assertDatabaseAuthority()
+        check((await readInstallationReceipt()).sha256 === installed.sha256 && await managedPathAbsent(ROOT + '/writer-barrier.json'), 'COORDINATOR_ROTATION_INSTALLATION_CHANGED')
+        await readTrustedFile(ROOT + '/HEAD', { exactMode: 0o600, maxBytes: 16384, sha256: head.sha256 })
+        for (const file of oldReceipt.files) if (file.path !== P.unit) await assertOwnedFile(file)
+        for (const file of installed.receipt.files) await assertOwnedFile(file)
+      }
+      await scope.assertAuthority()
+      if (intent) {
+        await assertOwnedFile(journal.entry)
+        check(JSON.stringify(intent.origin) === JSON.stringify(origin) && intent.installedReceiptSha256 === installed.sha256 && intent.headSha256 === head.sha256, 'COORDINATOR_ROTATION_CONTEXT_CHANGED')
+        if (request.mode === 'apply') fail('COORDINATOR_ROTATION_EXPLICIT_RECOVERY_REQUIRED')
+      } else {
+        await withVerifiedCoordinatorOwnership(async ownership => {
+          const current = coordinatorOwnershipInfo(ownership)
+          check(current.helper.archiveSha256 === oldReceipt.helper.archiveSha256
+            && (await captureManagedFile(P.receipt)).entry.sha256 === current.receiptSha256, 'COORDINATOR_ROTATION_OWNERSHIP_CHANGED')
+        })
+        const previous = { unit: remember(await captureManagedFile(P.unit)), receipt: remember(await captureManagedFile(P.receipt)), registration: remember(await captureManagedFile(REGISTER)) }
+        scope.intent = { schemaVersion: 1, kind: 'xpanel-coordinator-rotation', operationId: request.operationId, phase: 'prepared', selection: 'next',
+          origin, rootPrincipalId: rootId, installedReceiptSha256: installed.sha256, headSha256: head.sha256, previous,
+          next: { helper: coordinatorHelperFromPrepared(next, next.artifactPath), runtime: next.runtime, unitSha256: hash(renderCoordinatorUnit(next.runtime.nodePath, next.releaseRoot)) },
+          createdAt: new Date().toISOString() }
+        parseJournal(scope.intent, request.operationId)
+        await persist(scope, {})
+      }
+      // Explicit recovery resumes the journal's selected direction; rollback is a separate root choice.
+      return select(scope, request.mode === 'rollback' ? 'previous' : scope.intent.selection)
     })
   })
 }
