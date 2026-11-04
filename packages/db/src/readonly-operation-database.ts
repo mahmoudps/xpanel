@@ -5,7 +5,7 @@ import { open, realpath, type FileHandle } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DatabaseSync, StatementSync, type SQLInputValue } from 'node:sqlite'
-import { assertId, fail } from '@xpanel/core'
+import { assertId, fail, XpanelError } from '@xpanel/core'
 import { matchesReviewedOperationalMigrations, OPERATIONAL_SCHEMA_VERSION } from './schema.ts'
 import { assertNoActiveDatabaseTransaction, type Row, type SqlRunner, type StrictOperationDatabaseOrigin } from './sql-runner.ts'
 import { lexSql } from './sql-lexer.ts'
@@ -17,6 +17,7 @@ const scopes = new WeakMap<object, Scope>(), current = new AsyncLocalStorage<Sco
 const prepare = DatabaseSync.prototype.prepare, execute = DatabaseSync.prototype.exec, close = DatabaseSync.prototype.close
 const iterate = StatementSync.prototype.iterate
 const refused = (reason: string): never => fail('PRECONDITION_FAILED', 'read-only operation database observation refused', { reason, stateChanged: false })
+const walCollisions = new WeakMap<XpanelError, symbol>()
 interface Pin { path: string; handle: FileHandle; initial: BigIntStats }
 interface Scope { live: boolean; origin: Readonly<StrictOperationDatabaseOrigin>; verify(): void; verifyAsync(): Promise<void>; inTransaction: boolean }
 interface ClosedDatabaseProof { origin: Readonly<StrictOperationDatabaseOrigin>; assertCurrent(): Promise<void>; assertScope(): void }
@@ -74,7 +75,24 @@ export async function withReadonlyClosedOperationDatabase<T>(capability: unknown
 export async function withReadonlyOperationDatabase<T>(path: string, callback: (db: ReadonlyOperationDatabase) => Promise<T>): Promise<T> {
   return readOperationDatabase(path, callback)
 }
-async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOperationDatabase) => Promise<T>, closed?: ClosedDatabaseProof): Promise<T> {
+/** For read-only observation callbacks. Reopen only after native WAL contention, with all pins retired. */
+export async function withReobservedReadonlyOperationDatabase<T>(path: string, callback: (db: ReadonlyOperationDatabase) => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    const observation = Symbol()
+    try { return await readOperationDatabase(path, callback, undefined, observation) }
+    catch (error) {
+      if (attempt >= 3 || !(error instanceof XpanelError) || walCollisions.get(error) !== observation) throw error
+    }
+  }
+}
+
+async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOperationDatabase) => Promise<T>, closed?: ClosedDatabaseProof, observation?: symbol): Promise<T> {
+  const walCollision = (reason: string): never => {
+    if (observation === undefined) return refused(reason)
+    const error = new XpanelError('PRECONDITION_FAILED', 'read-only operation database observation refused', { reason, stateChanged: false })
+    walCollisions.set(error, observation)
+    throw error
+  }
   assertNoActiveDatabaseTransaction()
   if (closed) await closed.assertCurrent()
   if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.geteuid?.() !== 0) return refused('linux_root_required')
@@ -113,6 +131,13 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
         if (lstatSync(path + suffix, { bigint: true, throwIfNoEntry: false })) return refused('closed_database_sidecar_present')
       }
     }
+    const assertSidecar = (expected: BigIntStats, held: BigIntStats, named: BigIntStats, contents: boolean, reason: string): void => {
+      if (!held.isFile() || !named.isFile() || named.isSymbolicLink() || !equal(expected, held) || !equal(expected, named)) return refused(reason)
+      if (contents && (!equal(expected, held, true) || !equal(expected, named, true))) {
+        if (held.size !== expected.size || held.mtimeNs !== expected.mtimeNs) return walCollision(reason)
+        return refused(reason)
+      }
+    }
     const physical = (): void => {
       if (closed) { closed.assertScope(); absentSidecars() }
       const held = fstatSync(file.fd, { bigint: true }), named = lstatSync(path, { bigint: true })
@@ -123,8 +148,7 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
       }
       for (const pin of sidecars) {
         const held = fstatSync(pin.handle.fd, { bigint: true }), named = lstatSync(pin.path, { bigint: true }), contents = pin.path.endsWith('-wal')
-        if (!held.isFile() || !named.isFile() || named.isSymbolicLink() || !equal(pin.initial, held, contents) || !equal(pin.initial, named, contents))
-          return refused('database_sidecar_changed')
+        assertSidecar(pin.initial, held, named, contents, 'database_sidecar_changed')
       }
       if (closed) absentSidecars()
     }
@@ -134,8 +158,7 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
       if (!wal || expected.size < 0n || expected.size > 2n * 1024n * 1024n * 1024n) return refused('database_wal_initialization_size_limit')
       const assertPinned = (): void => {
         const held = fstatSync(wal.handle.fd, { bigint: true }), named = lstatSync(wal.path, { bigint: true })
-        if (!held.isFile() || !named.isFile() || named.isSymbolicLink() || !equal(expected, held, true) || !equal(expected, named, true))
-          return refused('database_wal_initialization_changed')
+        assertSidecar(expected, held, named, true, 'database_wal_initialization_changed')
       }
       assertPinned()
       const hash = createHash('sha256'), block = Buffer.alloc(1024 * 1024)
@@ -166,9 +189,9 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
       // hashes alone cannot prove that no transient byte mutation took place.
       initializationDirectories()
       const initialized = fstatSync(wal.handle.fd, { bigint: true })
-      if (!equal(wal.initial, initialized) || initialized.size !== wal.initial.size
-        || initialized.mtimeNs !== wal.initial.mtimeNs || initialized.ctimeNs < wal.initial.ctimeNs
-        || hashWal(initialized) !== walBeforeOpenSha256) return refused('database_wal_initialization_changed')
+      if (!equal(wal.initial, initialized) || initialized.ctimeNs < wal.initial.ctimeNs) return refused('database_wal_initialization_changed')
+      if (initialized.size !== wal.initial.size || initialized.mtimeNs !== wal.initial.mtimeNs) return walCollision('database_wal_initialization_changed')
+      if (hashWal(initialized) !== walBeforeOpenSha256) return refused('database_wal_initialization_changed')
       initializationDirectories()
       wal.initial = initialized
       physical()
@@ -238,13 +261,13 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
       finishWalInitialization()
     }
     const version = closed ? undefined : dataVersion(), origin = readOrigin()
-    if (!closed && dataVersion() !== version) return refused('database_changed_during_capture')
+    if (!closed && dataVersion() !== version) return walCollision('database_changed_during_capture')
     scope = { live: true, origin, inTransaction: false, verify() {
       if (!this.live || current.getStore() !== this) return refused('retired_reader')
       if (closed) closed.assertScope()
-      if (!closed && dataVersion() !== version) return refused('database_wal_generation_changed')
+      if (!closed && dataVersion() !== version) return walCollision('database_wal_generation_changed')
       if (JSON.stringify(readOrigin()) !== JSON.stringify(origin)) return refused('database_issuer_or_schema_changed')
-      if (!closed && dataVersion() !== version) return refused('database_wal_generation_changed')
+      if (!closed && dataVersion() !== version) return walCollision('database_wal_generation_changed')
     }, async verifyAsync() { this.verify(); await checkClosed(); this.verify() } }
     const state = scope
     const transaction = async <R>(work: (tx: SqlRunner) => Promise<R>): Promise<R> => {

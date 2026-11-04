@@ -3,7 +3,7 @@ import { constants } from 'node:fs'
 import { lstat, open, readlink, realpath } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
-import { getPrincipal, getReadonlyOperationDatabaseOrigin, withReadonlyOperationDatabase, withReopenedReadonlyHostOperationGuard, assertReadonlyOperationDatabaseCurrent, assertHostOperationGuardHeld } from '../packages/db/src/index.ts'
+import { getPrincipal, getReadonlyOperationDatabaseOrigin, withReobservedReadonlyOperationDatabase, withReopenedReadonlyHostOperationGuard, assertReadonlyOperationDatabaseCurrent, assertHostOperationGuardHeld } from '../packages/db/src/index.ts'
 import { withLifecycleWriterAdmission } from './lifecycle-admission.mjs'
 import { observePreparedAdoptionSource } from './install-bootstrap.mjs'
 import { assertPreparedReleaseCurrent, preparedReleaseInfo } from './prepared-release.mjs'
@@ -25,7 +25,7 @@ export async function withCoordinatorDatabaseAuthority(callback) {
     const anchor = await readTrustedFile(anchorPath, anchorOptions)
     const sameOrigin = value => ['file', 'device', 'inode', 'issuerId'].every(key => value?.[key] === origin[key])
     if (!sameOrigin(JSON.parse(anchor.bytes).origin)) fail('COORDINATOR_PROTECTED_DATABASE_ORIGIN_CHANGED')
-    const readRoot = () => withReadonlyOperationDatabase(DATABASE, async reader => {
+    const readRoot = () => withReobservedReadonlyOperationDatabase(DATABASE, async reader => {
       if (!sameOrigin(getReadonlyOperationDatabaseOrigin(reader))) fail('COORDINATOR_DATABASE_CHANGED')
       const roots = await reader.query("SELECT id FROM principals WHERE kind='root' AND disabled=0 ORDER BY created_at,id LIMIT 2")
       if (roots.length !== 1) fail('COORDINATOR_ROOT_REQUIRED')

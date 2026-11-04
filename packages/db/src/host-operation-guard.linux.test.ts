@@ -10,7 +10,7 @@ import { createDb, type Db, type DbHandle } from './client.ts'
 import { migrate } from './migrate.ts'
 import { initializeOperationalMetadata, requireOperationalIdentity } from './repos/official-references.ts'
 import { getStrictDatabaseIdentity, getStrictOperationDatabaseOrigin } from './sql-runner.ts'
-import { withReadonlyOperationDatabase, assertReadonlyOperationDatabaseOutsideTransaction, type ReadonlyOperationDatabase } from './readonly-operation-database.ts'
+import { withReadonlyOperationDatabase, withReobservedReadonlyOperationDatabase, assertReadonlyOperationDatabaseOutsideTransaction, type ReadonlyOperationDatabase } from './readonly-operation-database.ts'
 import {
   HOST_OPERATION_GUARD_DIRECTORY,
   assertHostOperationGuardActive,
@@ -509,6 +509,40 @@ describe('actual read-only manager host exclusion in the disposable VM', () => {
       expect(await bytes(f.file)).toEqual(after)
     })
     expect(() => assertHostOperationGuardActive(retained, f.binding)).toThrow()
+  })
+
+  it('reopens only its own retired reader after a verified same-WAL collision', async () => {
+    const f = await readonlyFixture()
+    let started!: () => void, written!: () => void
+    const admitted = new Promise<void>(resolve => { started = resolve })
+    const advanced = new Promise<void>(resolve => { written = resolve })
+    let attempts = 0
+    let original: ReadonlyOperationDatabase | undefined
+    const result = withReobservedReadonlyOperationDatabase(f.file, async reader => {
+      if (++attempts === 1) {
+        original = reader
+        started()
+        await advanced
+      }
+      return reader.query('SELECT total_changes() AS n')
+    })
+    await Promise.race([admitted, result])
+    await f.handle.db.exec('CREATE TABLE reobserved_wal_probe (id INTEGER PRIMARY KEY)')
+    written()
+    await expect(result).resolves.toEqual([{ n: 0 }])
+    expect(attempts).toBe(2)
+    await expect(original!.query('SELECT total_changes() AS n')).rejects.toThrow()
+  })
+
+  it('does not reobserve a changed WAL mode', async () => {
+    const f = await readonlyFixture()
+    let attempts = 0
+    await expect(withReobservedReadonlyOperationDatabase(f.file, async reader => {
+      attempts++
+      await chmod(f.file + '-wal', 0o640)
+      return reader.query('SELECT total_changes() AS n')
+    })).rejects.toThrow()
+    expect(attempts).toBe(1)
   })
 
   it('rejects a later WAL ctime change even when ownership and bytes remain identical', async () => {
