@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { signRootOperatorResponse } from './ops-upgrade-operator-protocol.ts'
-const seams = vi.hoisted(() => ({ kind: 'recover' as 'upgrade'|'recover', phases: [] as string[], launcherOwnership: [] as unknown[], failApply: false, textReply: false }))
+const seams = vi.hoisted(() => ({ kind: 'recover' as 'upgrade'|'recover', phases: [] as string[], launcherOwnership: [] as unknown[], failApply: false, textReply: false, refuseCode: '' }))
 const key = generateKeyPairSync('ed25519')
 const operationId = '12345678-1234-4234-8234-123456789abc', archiveSha = 'e'.repeat(64)
 const identity = { pid: 1234, start: '55', bootId: '11111111-1111-4111-8111-111111111111', receiptSha256: 'a'.repeat(64) }
@@ -33,6 +33,7 @@ vi.mock('node:net', async () => {
       const request = JSON.parse(frame.toString('utf8')); seams.phases.push(request.phase)
       queueMicrotask(() => {
         if (seams.failApply && request.phase === 'apply') { this.emit('error', new Error('lost reply')); return }
+        if (seams.refuseCode) { this.emit('data', Buffer.from(seams.refuseCode)); return }
         const result = signRootOperatorResponse({ phase: request.phase === 'observe' ? 'ready' : 'finished', request,
           identity: { workerId: 'root-operator-22222222-2222-4222-8222-222222222222', ...identity },
           qualification: { digest: 'b'.repeat(64), observedAt: new Date().toISOString() },
@@ -49,12 +50,12 @@ vi.mock('node:net', async () => {
   queueMicrotask(() => socket.emit('connect')); return socket
   } }
 })
-import { dispatchPreparedRootOperation } from './ops-upgrade-operator.ts'
+import { dispatchPreparedRootOperation, rootOperatorReviewRecord } from './ops-upgrade-operator.ts'
 import type { CoordinatorOwnershipCapability } from '../../../scripts/coordinator-ownership.mjs'
 
 const ownership = Object.freeze({}) as CoordinatorOwnershipCapability
 
-beforeEach(() => { seams.kind = 'recover'; seams.phases = []; seams.launcherOwnership = []; seams.failApply = false; seams.textReply = false })
+beforeEach(() => { seams.kind = 'recover'; seams.phases = []; seams.launcherOwnership = []; seams.failApply = false; seams.textReply = false; seams.refuseCode = '' })
 // Signed protocol/client-order tests with explicit process/socket seams; no native transport acceptance.
 describe('prepared root operator client dispatch', () => {
   it('sends recover apply directly without fabricating or requiring observe readiness', async () => {
@@ -79,5 +80,19 @@ describe('prepared root operator client dispatch', () => {
     await expect(dispatchPreparedRootOperation({ operationId, kind: 'recover', expectedArchiveSha256: archiveSha }, ownership))
       .rejects.toMatchObject({ unknownOutcome: true, retryAllowed: false, operationId })
     expect(seams.phases).toEqual(['apply'])
+  })
+  it('preserves one server machine code and drops every other refusal byte', async () => {
+    seams.kind = 'upgrade'
+    seams.refuseCode = JSON.stringify({ refused: 'COORDINATOR_OWNERSHIP_SCOPE_REQUIRED' }) + '\n'
+    await expect(dispatchPreparedRootOperation({ operationId, kind: 'upgrade', expectedArchiveSha256: archiveSha }, ownership))
+      .rejects.toMatchObject({ code: 'COORDINATOR_OWNERSHIP_SCOPE_REQUIRED', unknownOutcome: true, retryAllowed: false, operationId })
+    expect(seams.phases).toEqual(['observe'])
+    seams.phases = []
+    seams.refuseCode = JSON.stringify({ refused: 'COORDINATOR_OWNERSHIP_SCOPE_REQUIRED', path: '/etc/shadow' }) + '\n'
+    await expect(dispatchPreparedRootOperation({ operationId, kind: 'upgrade', expectedArchiveSha256: archiveSha }, ownership))
+      .rejects.toMatchObject({ code: 'ROOT_OPERATOR_REVIEW_REQUIRED', retryAllowed: false })
+    expect(rootOperatorReviewRecord(operationId, Object.assign(new Error('open /root/private'), { code: 'COORDINATOR_OWNERSHIP_SCOPE_REQUIRED' })).code)
+      .toBe('COORDINATOR_OWNERSHIP_SCOPE_REQUIRED')
+    expect(rootOperatorReviewRecord(operationId, new Error('open /root/private')).code).toBe('ROOT_OPERATOR_REVIEW_REQUIRED')
   })
 })

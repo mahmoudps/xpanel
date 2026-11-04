@@ -2,7 +2,7 @@ import { realpath, readlink } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { requireLinuxRoot } from './lifecycle-ownership.mjs'
 import { withVerifiedCoordinatorOwnership, coordinatorOwnershipInfo, assertCoordinatorOwnershipCurrent } from './coordinator-ownership.mjs'
-import { dispatchPreparedRootOperation } from '../apps/agent/src/ops-upgrade-operator.ts'
+import { dispatchPreparedRootOperation, rootOperatorReviewRecord } from '../apps/agent/src/ops-upgrade-operator.ts'
 
 // Root OS operator entry from the authenticated helper. No request-controlled authority or source paths.
 requireLinuxRoot()
@@ -21,7 +21,7 @@ try {
   })
   process.stdout.write(JSON.stringify(result) + '\n')
   process.exitCode = result.phase === 'succeeded' ? 0 : 1
-} catch {
-  process.stderr.write(JSON.stringify({ operationId: input.operationId, state: 'review_required', retryAllowed: false }) + '\n')
+} catch (error) {
+  process.stderr.write(JSON.stringify(rootOperatorReviewRecord(input.operationId, error)) + '\n')
   process.exitCode = 1
 }

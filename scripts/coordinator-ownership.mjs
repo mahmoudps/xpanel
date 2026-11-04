@@ -79,6 +79,14 @@ export async function assertCoordinatorOwnershipCurrent(capability) {
   for (const entry of scope.receipt.files) await assertOwnedFile(entry)
 }
 
+/** Native listener callbacks can lose the async store. Re-enter the same live scope; do not mint another one. */
+export async function withVisibleCoordinatorOwnership(capability, callback) {
+  const scope = capability && scopes.get(capability)
+  check(typeof callback === 'function' && scope && scope.live && scope.pid === process.pid, 'COORDINATOR_OWNERSHIP_SCOPE_REQUIRED')
+  if (visible(scope)) return callback()
+  return active.run(scope, () => callback())
+}
+
 export function coordinatorOwnershipInfo(capability) {
   const scope = capability && scopes.get(capability)
   check(scope && visible(scope), 'COORDINATOR_OWNERSHIP_SCOPE_REQUIRED')
