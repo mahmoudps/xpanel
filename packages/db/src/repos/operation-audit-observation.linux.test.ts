@@ -213,7 +213,7 @@ describe('exact issued lifecycle append recovery algorithm; native admission is 
     if (kind === 'foreign-pending') await writeFile(f.pending, bytes.pending.toString().replace(f.plan.record.eventUid, randomUUID()), { mode: 0o600 })
     if (kind === 'extra-log') await writeFile(f.log, Buffer.concat([prior, bytes.line, bytes.line]))
     if (kind === 'candidate-without-pending') await writeFile(f.anchor + '.candidate', bytes.next, { mode: 0o600 })
-    if (kind === 'unknown-owner') { const path = join(f.directory, '.lock'); await mkdir(path); await chmod(path, 0o2770); await writeFixtureOwner(path, '{}') }
+    if (kind === 'unknown-owner') { const path = join(f.directory, '.lock'); await mkdir(path); await chmod(path, 0o700); await writeFixtureOwner(path, '{}') }
     if (kind === 'missing-prior-index') await removeFixtureAuditIndex(f)
     const before = await disk(f.directory), rows = await f.handle.db.query('SELECT * FROM audit_log')
     const cap = {}; issuedRepairFixture.plans.set(cap, f.plan)
@@ -235,7 +235,7 @@ describe('exact issued lifecycle append recovery algorithm; native admission is 
     expect(() => getReadonlyIssuedLifecycleAppendPrefixInfo({ ...escaped })).toThrow()
     expect(await disk(f.directory)).toEqual(before)
   })
-  it.each([true, false])('retires only the exact issued owner in the known finish window, pending retained=%s', async pendingRetained => {
+  it.each([[true, 0o700], [false, 0o700], [true, 0o2770], [false, 0o2770]] as const)('retires only the exact issued owner in the known finish window, pending retained=%s mode=%i', async (pendingRetained, mode) => {
     const f = await issuedFixture(), bytes = issuedBytes(f.plan), prior = await readFile(f.log)
     await writeFile(f.log, Buffer.concat([prior, bytes.line])); await writeFile(f.anchor, bytes.next)
     if (pendingRetained) await writeFile(f.pending, bytes.pending, { mode: 0o600 })
@@ -245,7 +245,7 @@ describe('exact issued lifecycle append recovery algorithm; native admission is 
         [record.at, record.actor, record.principalId, record.ip, record.action, record.target,
           JSON.stringify({ ...record.detail, _auditEventUid: record.eventUid, _auditSeq: record.seq, _auditPrevHash: record.prevHash, _auditEntryHash: record.entryHash }), record.outcome])
     }
-    const owner = join(f.directory, '.lock'); await mkdir(owner); await chmod(owner, 0o2770)
+    const owner = join(f.directory, '.lock'); await mkdir(owner); await chmod(owner, mode)
     await writeFixtureOwner(owner, f.plan.writer.ownerRaw)
     const cap = {}; issuedRepairFixture.plans.set(cap, f.plan)
     await f.authority.repairIssuedLifecycleIntent(cap)
@@ -266,7 +266,7 @@ describe('exact issued lifecycle append recovery algorithm; native admission is 
   })
   it('blocks generic orphan cleanup before pending/HEAD, then permits ordinary adopt/reconcile after native retirement', async () => {
     const f = await issuedFixture(), owner = join(f.directory, '.lock')
-    await mkdir(owner); await chmod(owner, 0o2770); await writeFixtureOwner(owner, f.plan.writer.ownerRaw)
+    await mkdir(owner); await chmod(owner, 0o700); await writeFixtureOwner(owner, f.plan.writer.ownerRaw)
     const before = await readFile(join(f.directory, 'authority.json')), ownerBefore = await readFile(join(owner, 'owner.json'))
     issuedRepairFixture.unretired = true
     for (const run of [() => f.authority.recoverLifecycleIntent(f.binding), () => f.authority.appendReconcileIntent({ ...f.binding, purpose: 'host.reconcile.intent', action: 'host.reconcile', jobId: randomUUID() })]) {

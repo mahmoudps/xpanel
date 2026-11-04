@@ -11,6 +11,7 @@ export const LIFECYCLE_BARRIER = LIFECYCLE_ROOT + '/writer-barrier.json'
 export const LIFECYCLE_LOCK = LIFECYCLE_ROOT + '/writer.lock'
 const exclusives = new WeakMap(), exclusiveScope = new AsyncLocalStorage(), writerScope = new AsyncLocalStorage()
 const installExclusives = new WeakMap(), installExclusiveScope = new AsyncLocalStorage()
+const agentPrivateExclusives = new WeakMap(), agentPrivateExclusiveScope = new AsyncLocalStorage()
 const recoveryObservationScope = new AsyncLocalStorage()
 const bootstrapExclusives = new WeakMap(), bootstrapExclusiveScope = new AsyncLocalStorage()
 const fail = (code, cause) => { throw Object.assign(new Error(code, cause ? { cause } : undefined), { code }) }
@@ -90,6 +91,7 @@ async function withKernelLock(exclusive, callback) {
 
 async function admittedWriter(callback) {
   if (recoveryObservationScope.getStore()?.active) fail('LIFECYCLE_RECOVERY_OBSERVATION_READONLY')
+  if (agentPrivateExclusiveScope.getStore()?.active) fail('AGENT_PRIVATE_STATE_NESTED_WRITER')
   if (installExclusiveScope.getStore()?.active) fail('INSTALL_FINALIZATION_NESTED_WRITER')
   if (typeof callback !== 'function') fail('LIFECYCLE_CALLBACK_REQUIRED')
   const exclusive = exclusiveScope.getStore()
@@ -130,7 +132,7 @@ export function withLifecycleWriterAdmission(callback) {
 /** Observation assertion only; legacy fallback, copied objects and retired callbacks never establish native SH. */
 export async function assertLifecycleWriterAdmissionHeld() {
   const state = writerScope.getStore()
-  if (!state?.active || exclusiveScope.getStore() || installExclusiveScope.getStore()) fail('LIFECYCLE_SHARED_ADMISSION_REQUIRED')
+  if (!state?.active || exclusiveScope.getStore() || agentPrivateExclusiveScope.getStore() || installExclusiveScope.getStore()) fail('LIFECYCLE_SHARED_ADMISSION_REQUIRED')
   await state.verify()
   await flock(state.fd, false, true)
   await assertLifecycleWritesAllowed()
@@ -138,7 +140,7 @@ export async function assertLifecycleWriterAdmissionHeld() {
 }
 /** Recovery observation alone: a branded native retained-journal scope, never a writer/effect capability. */
 export async function withLifecycleRecoveryObservationAdmission(capability, callback) {
-  if (typeof callback !== 'function' || recoveryObservationScope.getStore() || writerScope.getStore() || exclusiveScope.getStore() || installExclusiveScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
+  if (typeof callback !== 'function' || recoveryObservationScope.getStore() || writerScope.getStore() || exclusiveScope.getStore() || agentPrivateExclusiveScope.getStore() || installExclusiveScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
   const native = await import('./lifecycle-root-safety.mjs')
   await native.assertLifecycleRecoveryObservationHeld(capability)
   return withKernelLock(false, async lock => {
@@ -169,7 +171,7 @@ export function createLifecycleBackgroundResources(callback) { return writerScop
 export async function withLifecycleExclusiveAdmission(capability, callback) {
   const native = await import('./lifecycle-root-safety.mjs')
   await native.assertLifecycleRootSafetyHeld(capability, { effect: 'filesystem.write' })
-  if (exclusiveScope.getStore() || writerScope.getStore() || recoveryObservationScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
+  if (agentPrivateExclusiveScope.getStore() || exclusiveScope.getStore() || writerScope.getStore() || recoveryObservationScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
   return withKernelLock(true, async lock => {
     const state = { lock, active: true, capability }
     exclusives.set(capability, state)
@@ -183,7 +185,7 @@ export async function withLifecycleBootstrapExclusiveAdmission(capability, callb
   const native = await import('./lifecycle-root-safety.mjs')
   await native.assertLifecycleBootstrapHeld(capability)
   if (typeof callback !== 'function' || bootstrapExclusiveScope.getStore() || exclusiveScope.getStore() || writerScope.getStore()
-    || recoveryObservationScope.getStore() || installExclusiveScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
+    || recoveryObservationScope.getStore() || agentPrivateExclusiveScope.getStore() || installExclusiveScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
   return withKernelLock(true, async lock => {
     const state = { capability, lock, active: true, promoted: false }
     bootstrapExclusives.set(capability, state)
@@ -207,7 +209,7 @@ export async function withLifecyclePromotedExclusiveAdmission(bootstrap, capabil
   const native = await import('./lifecycle-root-safety.mjs')
   await native.assertLifecycleBootstrapPromotion(bootstrap, capability)
   const parent = bootstrapExclusives.get(bootstrap)
-  if (parent.promoted || exclusiveScope.getStore() || writerScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
+  if (agentPrivateExclusiveScope.getStore() || parent.promoted || exclusiveScope.getStore() || writerScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
   parent.promoted = true
   const state = { capability, lock: parent.lock, active: true }
   exclusives.set(capability, state)
@@ -337,7 +339,7 @@ export async function readLifecyclePublicStatus() {
 export async function withInstallFinalizationExclusiveAdmission(capability, callback) {
   const native = await import('./install-finalization-native.mjs')
   await native.assertInstallFinalizationNativeScope(capability, 'admission')
-  if (typeof callback !== 'function' || exclusiveScope.getStore() || writerScope.getStore() || installExclusiveScope.getStore() || recoveryObservationScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
+  if (typeof callback !== 'function' || exclusiveScope.getStore() || writerScope.getStore() || agentPrivateExclusiveScope.getStore() || installExclusiveScope.getStore() || recoveryObservationScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
   return withKernelLock(true, async lock => {
     await native.assertInstallFinalizationNativeScope(capability, 'admission')
     const state = { lock, active: true, capability }
@@ -349,9 +351,9 @@ export async function withInstallFinalizationExclusiveAdmission(capability, call
 
 export async function assertInstallFinalizationExclusivePhysicalHeld(capability) {
   const state = capability && typeof capability === 'object' ? installExclusives.get(capability) : undefined
-  if (!state || !state.active || installExclusiveScope.getStore() !== state) fail('INSTALL_FINALIZATION_EXCLUSIVE_REQUIRED')
+  if (!state || !state.active || agentPrivateExclusiveScope.getStore() || installExclusiveScope.getStore() !== state) fail('INSTALL_FINALIZATION_EXCLUSIVE_REQUIRED')
   await state.lock.verify(); await flock(state.lock.fd, true, true)
-  if (!state.active || installExclusiveScope.getStore() !== state) fail('INSTALL_FINALIZATION_EXCLUSIVE_REQUIRED')
+  if (!state.active || agentPrivateExclusiveScope.getStore() || installExclusiveScope.getStore() !== state) fail('INSTALL_FINALIZATION_EXCLUSIVE_REQUIRED')
 }
 export async function assertInstallFinalizationExclusiveHeld(capability) {
   await assertInstallFinalizationExclusivePhysicalHeld(capability)
@@ -364,9 +366,26 @@ export async function verifyInstallFinalizationParticipants(capability) {
   await assertInstallFinalizationExclusiveHeld(capability)
   const native = await import('./install-finalization-native.mjs')
   const info = native.installFinalizationNativeInfo(capability)
+  return verifyNormalParticipants(info.processes, info.probeId, () => assertInstallFinalizationExclusiveHeld(capability))
+}
+
+/** Fixed read-only normal-generation observation. A result never grants mutation authority. */
+export async function observeNormalLifecycleParticipants(processes, probeId) {
+  if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.geteuid?.() !== 0) fail('LINUX_ROOT_REQUIRED')
+  if (!Array.isArray(processes) || processes.length !== 2 || !UUID.test(probeId)
+    || !['api', 'agent'].every(role => processes.filter(item => item && item.role === role
+      && Number.isSafeInteger(item.pid) && item.pid > 1 && Number.isSafeInteger(item.uid) && item.uid >= 0
+      && typeof item.start === 'string' && /^[1-9][0-9]*$/.test(item.start)).length === 1)) fail('LIFECYCLE_PARTICIPANT_OBSERVATION_INVALID')
+  return verifyNormalParticipants(processes, probeId, async () => {
+    if (await readLifecycleBarrier()) fail('INSTALL_FINALIZATION_BARRIER_CHANGED')
+  })
+}
+
+async function verifyNormalParticipants(processes, probeId, current) {
+  await current()
   if (await readLifecycleBarrier()) fail('INSTALL_FINALIZATION_BARRIER_CHANGED')
   for (const role of ['api', 'agent']) {
-    const process = info.processes.find(item => item.role === role)
+    const process = processes.find(item => item.role === role)
     if (!process) fail('INSTALL_FINALIZATION_PROCESS_REQUIRED')
     const directory = '/run/xpanel/lifecycle-' + role, path = directory + '/participant.sock'
     const parent = await lstat(directory, { bigint: true })
@@ -398,7 +417,7 @@ export async function verifyInstallFinalizationParticipants(capability) {
         const client = connect(path); let bytes = '', parsed, failure
         client.setTimeout(2000, () => client.destroy(new Error('LIFECYCLE_WRITER_HANDSHAKE_TIMEOUT')))
         client.on('error', error => { failure = error })
-        client.on('connect', () => client.end(JSON.stringify({ nonce, operationId: info.probeId }) + '\n'))
+        client.on('connect', () => client.end(JSON.stringify({ nonce, operationId: probeId }) + '\n'))
         client.on('data', chunk => { bytes += chunk; if (Buffer.byteLength(bytes) > 8192) client.destroy(new Error('LIFECYCLE_WRITER_HANDSHAKE_LIMIT')) })
         client.on('end', () => { try { parsed = JSON.parse(bytes) } catch (error) { failure = error } })
         client.on('close', () => { if (failure || !parsed) reject(failure ?? new Error('LIFECYCLE_WRITER_HANDSHAKE_INCOMPLETE')); else resolve(parsed) })
@@ -407,9 +426,30 @@ export async function verifyInstallFinalizationParticipants(capability) {
       await verifyParent()
       const after = await lstat(path, { bigint: true })
       if (!after.isSocket() || socket.dev !== after.dev || socket.ino !== after.ino || socket.uid !== after.uid || socket.mode !== after.mode) fail('LIFECYCLE_WRITER_SOCKET_CHANGED')
-      await assertInstallFinalizationExclusiveHeld(capability)
+      await current()
     } finally { await pin.close() }
   }
   if (await readLifecycleBarrier()) fail('INSTALL_FINALIZATION_BARRIER_CHANGED')
   return true
+}
+
+/** One fixed maintenance scope; the new signed native factory alone mints its brand. */
+export async function withAgentPrivateStateMigrationExclusiveAdmission(capability, callback) {
+  const native = await import('./agent-private-state-migration.mjs')
+  await native.assertAgentPrivateStateMigrationScope(capability, 'admitting')
+  if (typeof callback !== 'function' || agentPrivateExclusiveScope.getStore() || bootstrapExclusiveScope.getStore()
+    || exclusiveScope.getStore() || writerScope.getStore() || recoveryObservationScope.getStore() || installExclusiveScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
+  return withKernelLock(true, async lock => {
+    await native.assertAgentPrivateStateMigrationScope(capability, 'admitting')
+    const state = { lock, capability, active: true }
+    agentPrivateExclusives.set(capability, state)
+    try { return await agentPrivateExclusiveScope.run(state, callback) }
+    finally { state.active = false; agentPrivateExclusives.delete(capability) }
+  })
+}
+export async function assertAgentPrivateStateMigrationExclusivePhysicalHeld(capability) {
+  const state = capability && typeof capability === 'object' ? agentPrivateExclusives.get(capability) : undefined
+  if (!state?.active || agentPrivateExclusiveScope.getStore() !== state) fail('AGENT_PRIVATE_STATE_EXCLUSIVE_REQUIRED')
+  await state.lock.verify(); await flock(state.lock.fd, true, true)
+  if (!state.active || agentPrivateExclusiveScope.getStore() !== state) fail('AGENT_PRIVATE_STATE_EXCLUSIVE_REQUIRED')
 }

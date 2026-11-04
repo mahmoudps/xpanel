@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { open, readFile, readlink, realpath, lstat, rename } from 'node:fs/promises'
+import { open, readFile, readlink, realpath, lstat, rename, mkdir } from 'node:fs/promises'
 import { posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { requireLinuxRoot, withTrustedDirectory, withTrustedFile, readTrustedFile, readInstallationReceipt, assertOwnedFile } from './lifecycle-ownership.mjs'
@@ -253,6 +253,11 @@ function checkCompletionProof(scope, job) {
   assertInstallOwnershipCompletionProof(scope.kind, scope.subject, scope.intent, job)
 }
 
+function installFinalizationEvidence(scope) {
+  return { context: scope.context, observation: scope.observation,
+    ...(scope.executionHelper ? { executionHelper: scope.executionHelper } : {}) }
+}
+
 function checkJob(scope, job) {
   check(job && job.kind === 'lifecycle.adopt' && job.actor === scope.root.username && job.accountId === null && job.requestFingerprint === scope.subject
     && job.referenceCode && canonical(job.detail?.lifecycleIntent) === canonical(lifecycleBinding(scope, job))
@@ -487,6 +492,51 @@ function nativeFilesystem(scope) {
   }
 }
 
+/** Fixed bootstrap bookkeeping only, after normal readiness and genuine EX/host exclusion. */
+async function initializeDefaultRootOperationAuditDirectory(scope) {
+  check(scope.phase === 'held' && scope.guard, 'INSTALL_AUDIT_EXCLUSIVE_REQUIRED')
+  await assertInstallFinalizationExclusiveHeld(scope.capability)
+  await assertCurrent(scope, scope.context, scope.observation, scope.intent)
+  const parentPath = '/var/lib/xpanel-agent', path = parentPath + '/operation-audit'
+  return withTrustedDirectory(parentPath, async ancestry => {
+    const parent = await open(parentPath, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+    let directory
+    const image = value => [value.dev, value.ino, value.uid, value.gid, value.mode].map(String).join(':')
+    const safe = value => value.isDirectory() && !value.isSymbolicLink() && value.uid === 0n && value.gid === 0n && (value.mode & 0o7777n) === 0o700n
+    try {
+      const baseline = await parent.stat({ bigint: true })
+      const verifyParent = async () => {
+        const [opened, named] = await Promise.all([parent.stat({ bigint: true }), lstat(parentPath, { bigint: true })])
+        check(safe(opened) && safe(named) && image(opened) === image(baseline) && image(named) === image(baseline), 'INSTALL_AUDIT_PARENT_CHANGED')
+        await ancestry.verify()
+      }
+      await verifyParent()
+      let named = await lstat(path, { bigint: true }).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+      const created = named === null
+      if (created) {
+        scope.changed = true // A failed/lost mkdir acknowledgement never proves unchanged state.
+        await mkdir(path, { mode: 0o700 })
+        named = await lstat(path, { bigint: true })
+      } else check(safe(named), 'INSTALL_AUDIT_DIRECTORY_UNSAFE')
+      directory = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+      const initial = await directory.stat({ bigint: true })
+      check(initial.isDirectory() && !named.isSymbolicLink() && initial.uid === 0n && initial.dev === named.dev && initial.ino === named.ino, 'INSTALL_AUDIT_DIRECTORY_CHANGED')
+      await verifyParent()
+      if (created) {
+        await directory.chown(0, 0); await directory.chmod(0o700); await directory.sync(); await parent.sync()
+      }
+      const [opened, current] = await Promise.all([directory.stat({ bigint: true }), lstat(path, { bigint: true })])
+      check(safe(opened) && safe(current) && opened.dev === initial.dev && opened.ino === initial.ino && image(opened) === image(current), 'INSTALL_AUDIT_DIRECTORY_CHANGED')
+      await verifyParent()
+      await assertCurrent(scope, scope.context, scope.observation, scope.intent)
+    } finally {
+      const closed = await Promise.allSettled([...(directory ? [directory.close()] : []), parent.close()])
+      const failures = closed.filter(value => value.status === 'rejected')
+      if (failures.length) throw new AggregateError(failures.map(value => value.reason), 'install audit directory retirement requires inspection')
+    }
+  })
+}
+
 function ports(scope) {
   const fs = nativeFilesystem(scope)
   return {
@@ -507,6 +557,7 @@ function ports(scope) {
             { acquireTimeoutMs: 1, retryIntervalMs: 1 }, async guard => {
               scope.guard = guard; scope.phase = 'held'
               try {
+                await initializeDefaultRootOperationAuditDirectory(scope)
                 if (scope.seedIntent && !scope.job) {
                   scope.intent = scope.seedIntent
                   await assertCurrent(scope, scope.context, scope.observation, scope.seedIntent)
@@ -550,7 +601,7 @@ function ports(scope) {
         state: { revision: snapshot.revision, checksum: snapshot.checksum, accountCount: snapshot.accounts.length,
           ...(scope.kind === 'adopt' ? { accountLifetimeDigest: installAdoptionAccountLifetimeDigest(snapshot.accounts.map(lifetimeOf)) } : {}) },
         admissionFingerprint: digest(JSON.stringify({ source: prepared.bootstrap.archiveSha256, manifest: prepared.bootstrap.manifestSha256, origin: scope.origin })) }
-      check((scope.kind === 'adopt' ? prepared.helper.archiveSha256 : prepared.bootstrap.archiveSha256) === scope.request.artifact.expectedArchiveSha256 && prepared.runtime.nodeSha256 === context.runtime.nodeSha256, 'INSTALL_FINALIZATION_SOURCE_CHANGED')
+      check((scope.helperCapability ? prepared.helper.archiveSha256 : prepared.bootstrap.archiveSha256) === scope.request.artifact.expectedArchiveSha256 && prepared.runtime.nodeSha256 === context.runtime.nodeSha256, 'INSTALL_FINALIZATION_SOURCE_CHANGED')
       scope.context = context
       scope.subject = (scope.kind === 'adopt' ? installAdoptionSubjectDigest : installFinalizationSubjectDigest)(context, scope.seedIntent?.previousReceiptSha256 ?? values[1].sha256)
       if (scope.job) check(previousSubject === scope.subject, 'INSTALL_STARTUP_SOURCE_CHANGED')
@@ -596,7 +647,7 @@ function ports(scope) {
         check((await metadata(PATHS.receipt)).sha256 === proof.receiptSha256 && proof.receiptSha256 === intent.expectedActiveSha256, 'INSTALL_FINALIZATION_READBACK_FAILED')
         await scope.dbApi.saveJobCheckpoint(scope.db, { jobId: scope.job.id, workerId: scope.workerId, fencingToken: scope.leaseFence,
           step: 'install-ownership-observed', data: { installFinalization: { subjectDigest: scope.subject, ...proof },
-            installFinalizationEvidence: { context: scope.context, observation: scope.observation } } })
+            installFinalizationEvidence: installFinalizationEvidence(scope) } })
         await assertCurrent(scope, scope.context, scope.observation, intent)
         scope.job = await scope.dbApi.completeJobWithLease(scope.db, { jobId: scope.job.id, workerId: scope.workerId, fencingToken: scope.leaseFence, status: 'succeeded',
           summary: installOwnershipCompletionSummary(scope.kind), detail: { ...scope.job.detail, installFinalization: { subjectDigest: scope.subject, rootPrincipalId: scope.root.id, ...proof } } },
@@ -621,6 +672,26 @@ function ports(scope) {
 
 export async function runNativeInstallFinalization(input) { return runNativeFinalization(input, null) }
 
+/** Signed new code may finalize a separately observed empty installation. Adoption remains populated-only. */
+export async function runNativePreparedInstallFinalization(input) {
+  let entered = false
+  try {
+    const request = parseNativeInstallFinalizationRequest(input), bootstrap = await import('./install-bootstrap.mjs')
+    return await bootstrap.withExistingPreparedRelease({ artifactPath: request.artifact.path, expectedArchiveSha256: request.artifact.expectedArchiveSha256 },
+      async capability => {
+        entered = true
+        const helper = bootstrap.preparedReleaseInfo(capability)
+        const executionHelper = Object.fromEntries(['version', 'archiveSha256', 'manifestSha256', 'dependencyReceiptSha256', 'sourceFilesDigest'].map(key => [key, helper[key]]))
+        const output = await runNativeFinalization(request, capability, true)
+        return { ...output, details: { ...output.details, executionHelper } }
+      })
+  } catch (error) {
+    const code = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,95}$/.test(error.code) ? error.code : 'INSTALL_EMPTY_HELPER_NATIVE_UNVERIFIED'
+    return { exitCode: entered ? 6 : 3, code, outcome: entered ? 'attention' : 'blocked', details: { status: entered ? 'attention' : 'blocked',
+      changed: entered ? null : false, qualified: false, nativeQualified: false, installReady: false, reason: code } }
+  }
+}
+
 /** Opens an authenticated new helper while finalizing the separately observed old installation. */
 export async function runNativePreparedAdoption(input) {
   try {
@@ -633,16 +704,23 @@ export async function runNativePreparedAdoption(input) {
   }
 }
 
-async function runNativeFinalization(input, helperCapability) {
+async function runNativeFinalization(input, helperCapability, preparedFresh = false) {
   let scope, databasePin, output
   try {
-    const request = (helperCapability ? parseNativePreparedAdoptionRequest : parseNativeInstallFinalizationRequest)(input), identity = await processIdentity()
+    const request = (helperCapability && !preparedFresh ? parseNativePreparedAdoptionRequest : parseNativeInstallFinalizationRequest)(input), identity = await processIdentity()
     const bootstrapModule = await import('./install-bootstrap.mjs')
     const bootstrapApi = helperCapability ? { ...bootstrapModule, observePreparedInstallFinalization: () => bootstrapModule.observePreparedAdoptionSource(helperCapability) } : bootstrapModule
     const prepared = await withLifecycleWriterAdmission(async () => {
       await assertLifecycleWriterAdmissionHeld()
       return bootstrapApi.observePreparedInstallFinalization()
     }), helperRoot = helperCapability ? prepared.helper.releaseRoot : prepared.bootstrap.releaseRoot
+    if (preparedFresh) {
+      check(helperCapability && prepared.helper.archiveSha256 !== prepared.bootstrap.archiveSha256, 'INSTALL_EMPTY_HELPER_IDENTITY_INVALID')
+      const intent = JSON.parse((await readTrustedFile(ROOT + '/prepared/' + prepared.helper.archiveSha256 + '/intent.json', { exactMode: 0o600, maxBytes: 16384 })).bytes.toString('utf8'))
+      check(intent.schemaVersion === 1 && intent.kind === 'xpanel-prepared-release-intent'
+        && intent.installedArchiveSha256 === prepared.bootstrap.archiveSha256 && intent.archiveSha256 === prepared.helper.archiveSha256
+        && intent.manifestSha256 === prepared.helper.manifestSha256 && intent.releaseRoot === prepared.helper.releaseRoot, 'INSTALL_EMPTY_HELPER_ACQUISITION_CHANGED')
+    }
     check(identity.executable === prepared.runtime.nodePath && await realpath(fileURLToPath(import.meta.url)) === helperRoot + '/scripts/install-finalization-native.mjs', 'INSTALL_HELPER_SOURCE_MISMATCH')
     output = await withTrustedDirectory(ROOT, async rootPin => withTrustedFile(identity.executable, { sha256: prepared.runtime.nodeSha256, maxBytes: 256 * 1024 * 1024 }, async nodePin =>
       withTrustedFile('/etc/xpanel/release-trust.json', { exactMode: 0o600, maxBytes: 8192 }, async trustPin => {
@@ -668,7 +746,9 @@ async function runNativeFinalization(input, helperCapability) {
               check(before.isFile() && before.nlink === 1n && before.uid === BigInt(passwd[0][2]) && before.gid === BigInt(passwd[0][3])
                 && Number(before.mode & 0o7777n) === 0o660, 'INSTALL_DATABASE_UNSAFE')
               const capability = Object.freeze(Object.create(null))
-              scope = { capability, kind: helperCapability ? 'adopt' : 'install', helperCapability, request, identity, bootstrapApi, readiness: helperCapability ? {
+              scope = { capability, kind: helperCapability && !preparedFresh ? 'adopt' : 'install', preparedFresh, helperCapability,
+                executionHelper: preparedFresh ? Object.fromEntries(['version', 'archiveSha256', 'manifestSha256', 'dependencyReceiptSha256', 'sourceFilesDigest'].map(key => [key, prepared.helper[key]])) : null,
+                request, identity, bootstrapApi, readiness: helperCapability && !preparedFresh ? {
                 captureInstallFinalizationReadiness: (context, subject) => readiness.captureInstallAdoptionReadiness(capability, context, subject),
                 assertInstallFinalizationReadinessCurrent: (context, observation) => readiness.assertInstallAdoptionReadinessCurrent(capability, context, observation),
                 releaseInstallFinalizationReadiness: observation => readiness.releaseInstallAdoptionReadiness(observation),
@@ -677,7 +757,7 @@ async function runNativeFinalization(input, helperCapability) {
                 live: true, phase: 'new', expected: new Map(), flights: new Set(), workerId: 'install-finalize:' + randomUUID(), probeId: randomUUID(), changed: false }
               scopes.set(capability, scope)
               if (!helperCapability && prepared.bootstrap.status === 'bootstrap_pending') await startPreparedInstallScope(scope)
-              return (helperCapability ? runPreparedInstallAdoption : runPreparedInstallFinalization)(ports(scope))
+              return (helperCapability && !preparedFresh ? runPreparedInstallAdoption : runPreparedInstallFinalization)(ports(scope))
               })
             })
           })

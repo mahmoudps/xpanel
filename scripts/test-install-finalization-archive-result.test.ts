@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // are established by this fixture. Keep the archive's real { report, value }
 // contract so a native result cannot be confused with the verification envelope.
 const fixture = vi.hoisted(() => ({
-  finalize: vi.fn(), archive: vi.fn(), startup: vi.fn(), closed: [] as string[],
+  finalize: vi.fn(), prepared: vi.fn(), archive: vi.fn(), startup: vi.fn(), helper: false, closed: [] as string[],
   report: { archiveSha256: 'a'.repeat(64), manifestSha256: 'b'.repeat(64) },
 }))
 vi.mock('node:fs/promises', () => {
@@ -22,7 +22,7 @@ vi.mock('node:fs/promises', () => {
     },
     readlink: async (path: string) => path === '/proc/self' ? String(process.pid) : '/opt/node-v26.12.1/bin/node',
     realpath: async (path: string) => path.endsWith('install-finalization-native.mjs')
-      ? '/opt/xpanel/releases/0.1.1/scripts/install-finalization-native.mjs' : path === process.execPath ? '/opt/node-v26.12.1/bin/node' : path,
+      ? '/opt/xpanel/releases/' + (fixture.helper ? '0.1.8' : '0.1.1') + '/scripts/install-finalization-native.mjs' : path === process.execPath ? '/opt/node-v26.12.1/bin/node' : path,
     lstat: async (path: string) => stat(path),
     open: async (path: string) => ({ stat: async () => stat(path), close: async () => { fixture.closed.push(path) } }),
     rename: vi.fn(),
@@ -32,6 +32,10 @@ vi.mock('./lifecycle-ownership.mjs', () => ({
   requireLinuxRoot: vi.fn(), assertOwnedFile: vi.fn(), readInstallationReceipt: vi.fn(),
   readTrustedFile: async (path: string) => {
     if (path === '/etc/passwd') return { bytes: Buffer.from('xpanel:x:1000:1000::/var/lib/xpanel:/usr/sbin/nologin\n') }
+    if (path === '/var/lib/xpanel-lifecycle/prepared/' + 'e'.repeat(64) + '/intent.json') return { bytes: Buffer.from(JSON.stringify({
+      schemaVersion: 1, kind: 'xpanel-prepared-release-intent', installedArchiveSha256: 'a'.repeat(64), archiveSha256: 'e'.repeat(64),
+      manifestSha256: 'f'.repeat(64), releaseRoot: '/opt/xpanel/releases/0.1.8',
+    })) }
     throw new Error('unexpected trusted read')
   },
   withTrustedDirectory: async (_path: string, run: (pin: unknown) => unknown) => run({ verify: async () => {} }),
@@ -45,6 +49,13 @@ vi.mock('./lifecycle-admission.mjs', () => ({
   assertInstallFinalizationExclusiveHeld: vi.fn(), verifyInstallFinalizationParticipants: vi.fn(),
 }))
 vi.mock('./install-bootstrap.mjs', () => ({
+  withExistingPreparedRelease: fixture.prepared,
+  preparedReleaseInfo: () => ({ version: '0.1.8', archiveSha256: 'e'.repeat(64), manifestSha256: 'f'.repeat(64), dependencyReceiptSha256: '4'.repeat(64), sourceFilesDigest: '5'.repeat(64) }),
+  observePreparedAdoptionSource: async () => ({
+    runtime: { nodePath: '/opt/node-v26.12.1/bin/node', nodeSha256: 'c'.repeat(64) },
+    bootstrap: { status: 'active', releaseRoot: '/opt/xpanel/releases/0.1.1', archiveSha256: 'a'.repeat(64), manifestSha256: 'b'.repeat(64) },
+    helper: { version: '0.1.8', releaseRoot: '/opt/xpanel/releases/0.1.8', archiveSha256: 'e'.repeat(64), manifestSha256: 'f'.repeat(64), dependencyReceiptSha256: '4'.repeat(64), sourceFilesDigest: '5'.repeat(64) },
+  }),
   observePreparedInstallFinalization: async () => ({
     runtime: { nodePath: '/opt/node-v26.12.1/bin/node', nodeSha256: 'c'.repeat(64) },
     bootstrap: { status: 'active', releaseRoot: '/opt/xpanel/releases/0.1.1', archiveSha256: 'a'.repeat(64), manifestSha256: 'b'.repeat(64) },
@@ -64,14 +75,43 @@ vi.mock('./install-finalization.mjs', async importOriginal => ({
   runPreparedInstallFinalization: fixture.finalize,
 }))
 
-import { runNativeInstallFinalization } from './install-finalization-native.mjs'
+import { runNativeInstallFinalization, runNativePreparedInstallFinalization } from './install-finalization-native.mjs'
 
 const request = { schemaVersion: 1, command: 'install', mode: 'apply', json: true, assumeYes: true,
   artifact: { path: '/root/release.tar.gz', expectedArchiveSha256: 'a'.repeat(64), keyId: 'test-key', signingKeyPath: '/etc/xpanel/release-hmac.key' } }
 
 beforeEach(() => {
-  vi.clearAllMocks(); fixture.closed = []
+  vi.clearAllMocks(); fixture.closed = []; fixture.helper = false
+  fixture.report = { archiveSha256: 'a'.repeat(64), manifestSha256: 'b'.repeat(64) }
+  fixture.prepared.mockImplementation(async (_input, callback) => callback({}))
   fixture.archive.mockImplementation(async (_path, _options, callback) => ({ report: fixture.report, value: await callback({ report: fixture.report }) }))
+})
+
+describe('prepared empty installation native routing with isolated source ports', () => {
+  const emptyRequest = { ...request, artifact: { ...request.artifact, expectedArchiveSha256: 'e'.repeat(64) } }
+  const result = { exitCode: 0, code: 'INSTALL_OWNERSHIP_ACTIVE', outcome: 'committed', details: { installationActive: true } }
+  it('uses the fixed empty protocol from the separately authenticated helper', async () => {
+    fixture.helper = true; fixture.report = { archiveSha256: 'e'.repeat(64), manifestSha256: 'f'.repeat(64) }
+    fixture.finalize.mockResolvedValue(result)
+    expect(await runNativePreparedInstallFinalization(emptyRequest)).toMatchObject({ ...result, details: { ...result.details,
+      executionHelper: { version: '0.1.8', archiveSha256: 'e'.repeat(64) } } })
+    expect(fixture.finalize).toHaveBeenCalledOnce()
+    expect(fixture.prepared).toHaveBeenCalledOnce(); expect(fixture.archive).toHaveBeenCalledOnce()
+  })
+  it('retains attention when prepared archive retirement fails after the callback', async () => {
+    fixture.helper = true; fixture.report = { archiveSha256: 'e'.repeat(64), manifestSha256: 'f'.repeat(64) }
+    fixture.finalize.mockResolvedValue(result)
+    fixture.prepared.mockImplementation(async (_input, callback) => {
+      await callback({}); throw Object.assign(new Error('withheld'), { code: 'ARCHIVE_USE_UNCERTAIN' })
+    })
+    expect(await runNativePreparedInstallFinalization(emptyRequest)).toMatchObject({ exitCode: 6, code: 'ARCHIVE_USE_UNCERTAIN', outcome: 'attention', details: { changed: null } })
+    expect(fixture.finalize).toHaveBeenCalledOnce()
+  })
+  it('blocks an unauthenticated helper before opening the finalization archive or protocol', async () => {
+    fixture.prepared.mockRejectedValue(Object.assign(new Error('withheld'), { code: 'PREPARED_RELEASE_INVALID' }))
+    expect(await runNativePreparedInstallFinalization(emptyRequest)).toMatchObject({ exitCode: 3, outcome: 'blocked', details: { changed: false } })
+    expect(fixture.finalize).not.toHaveBeenCalled(); expect(fixture.archive).not.toHaveBeenCalled()
+  })
 })
 
 describe('finalization archive result contract through isolated source ports', () => {

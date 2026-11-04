@@ -12,6 +12,7 @@ export function assertInstallFinalizationStartupRetirement(capability:unknown):v
 
 export function parseNativePreparedAdoptionRequest(value:unknown):Readonly<Record<string,unknown>>
 export function runNativePreparedAdoption(value:unknown):ReturnType<typeof runNativeInstallFinalization>
+export function runNativePreparedInstallFinalization(value:unknown):ReturnType<typeof runNativeInstallFinalization>
 export function assertInstallAdoptionReadinessScope(capability:unknown,context:unknown,phase:'capturing'|'held'):Promise<void>
 
 export function installOwnershipCompletionSummary(kind:'install'|'adopt'):string

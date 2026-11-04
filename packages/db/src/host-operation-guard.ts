@@ -287,7 +287,7 @@ const withBoundHostOperationGuard = async <T>(
   let failure: unknown
   let failed = false
   try {
-    lease = await new WriterLock(HOST_OPERATION_GUARD_DIRECTORY, lockOptions).acquire()
+    lease = await WriterLock.forRootOwnedDirectory(HOST_OPERATION_GUARD_DIRECTORY, lockOptions).acquire()
     const current = await capture()
     if (current.databaseFile !== binding.databaseFile || current.databaseDevice !== binding.databaseDevice ||
         current.databaseInode !== binding.databaseInode || current.issuerId !== binding.issuerId) {
