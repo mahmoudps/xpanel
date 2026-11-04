@@ -178,19 +178,19 @@ async function bindDatabase(scope, db, access) {
   scope.origin = origin; scope.originBinding = bindingFor(origin); scope.root = principal
 }
 function unbindDatabase(scope) { scope.db = null; scope.databaseAccess = null; scope.audit = null }
-async function withFinalizationReadonlyDatabase(scope, run) {
+async function withCapturedFinalizationDatabase(scope, run) {
   await assertDatabasePhase(scope)
+  if (scope.databaseAccess === 'writer') return run()
   check(scope.phase === 'capturing' && !scope.db, 'INSTALL_FINALIZATION_DATABASE_SCOPE_CONFLICT')
-  return scope.dbApi.withReadonlyOperationDatabase(DATABASE, async db => {
+  await scope.dbApi.withReadonlyOperationDatabase(DATABASE, async db => {
     try {
       await bindDatabase(scope, db, 'readonly')
-      await assertDatabasePhase(scope)
-      const result = await run()
+      await run()
       await scope.dbApi.assertReadonlyOperationDatabaseCurrent(db)
-      await assertDatabasePhase(scope)
-      return result
+      await assertLifecycleWriterAdmissionHeld()
     } finally { unbindDatabase(scope) }
   })
+  await assertDatabasePhase(scope)
 }
 async function withFinalizationWriterDatabase(scope, run) {
   await assertDatabasePhase(scope)
@@ -322,19 +322,21 @@ async function assertInstallCaptureCurrent(scope, requireStartupGuard = false) {
   await assertBase(scope)
   if (scope.guard) await scope.dbApi.assertHostOperationGuardHeld(scope.guard, scope.originBinding)
   await assertCapturedInstallSource(scope)
-  await scope.db.transaction(async tx => {
-    await rootInTransaction(scope, tx)
-    if (scope.job) checkJob(scope, await scope.dbApi.getDurableJob(tx, scope.job.id))
-    if (scope.intentReceipt && scope.databaseAccess === 'writer') scope.dbApi.assertOperationIntentReceipt(scope.intentReceipt, scope.operationBinding, tx)
-    if (scope.startupActive) assertInstallOperationWindow(scope)
-  })
-  if (scope.intentReceipt && scope.databaseAccess === 'readonly') {
-    // Readonly evidence cannot be checked by a strict-write transaction assertion.
-    // The native observer rejects pending root-audit repair instead of performing it.
-    await scope.dbApi.withReadonlyLifecycleIntentObservation(scope.db, scope.operationBinding, async observation => {
-      await observation.assertCurrent()
+  await withCapturedFinalizationDatabase(scope, async () => {
+    await scope.db.transaction(async tx => {
+      await rootInTransaction(scope, tx)
+      if (scope.job) checkJob(scope, await scope.dbApi.getDurableJob(tx, scope.job.id))
+      if (scope.intentReceipt && scope.databaseAccess === 'writer') scope.dbApi.assertOperationIntentReceipt(scope.intentReceipt, scope.operationBinding, tx)
+      if (scope.startupActive) assertInstallOperationWindow(scope)
     })
-  }
+    if (scope.intentReceipt && scope.databaseAccess === 'readonly') {
+      // Readonly evidence cannot be checked by a strict-write transaction assertion.
+      // The native observer rejects pending root-audit repair instead of performing it.
+      await scope.dbApi.withReadonlyLifecycleIntentObservation(scope.db, scope.operationBinding, async observation => {
+        await observation.assertCurrent()
+      })
+    }
+  })
 }
 export async function assertInstallFinalizationStartupScope(capability, unit) {
   const scope = capability && typeof capability === 'object' ? scopes.get(capability) : undefined
@@ -429,8 +431,11 @@ async function assertCurrent(scope, context, observation, intent) {
   }
   await assertCapturedInstallSource(scope)
   await scope.readiness.assertInstallFinalizationReadinessCurrent(context, observation)
-  if (!scope.participantsVerified) { await verifyInstallFinalizationParticipants(scope.capability); scope.participantsVerified = true }
-  await scope.readiness.assertInstallFinalizationReadinessCurrent(context, observation)
+  if (!scope.participantsVerified) {
+    await verifyInstallFinalizationParticipants(scope.capability)
+    await scope.readiness.assertInstallFinalizationReadinessCurrent(context, observation)
+    scope.participantsVerified = true
+  }
   await scope.db.transaction(async tx => {
     await rootInTransaction(scope, tx)
     if (scope.job) { const row = await scope.dbApi.getDurableJob(tx, scope.job.id); checkJob(scope, row); scope.job = row }
@@ -545,7 +550,7 @@ function ports(scope) {
       check(scope.phase === 'new', 'INSTALL_FINALIZATION_NATIVE_PHASE_INVALID')
       return active.run(scope, async () => {
         scope.phase = 'capturing'
-        try { return await withLifecycleWriterAdmission(() => withFinalizationReadonlyDatabase(scope, callback)) } finally { scope.phase = 'prepared' }
+        try { return await withLifecycleWriterAdmission(callback) } finally { scope.phase = 'prepared' }
       })
     },
     async withExclusiveAdmission(callback) {
@@ -594,6 +599,9 @@ function ports(scope) {
       await scope.stateDirectories.verify()
       const snapshot = await readScopeSnapshot(scope)
       await scope.stateDirectories.verify()
+      // Limit the pinned WAL lifetime to the identity read. Source and HTTPS
+      // verification can run alongside ordinary writers under shared admission.
+      await withCapturedFinalizationDatabase(scope, () => scope.db.transaction(tx => rootInTransaction(scope, tx)))
       const helper = scope.kind === 'adopt' ? scope.bootstrapApi.preparedReleaseInfo(scope.helperCapability) : null
       const context = { source: installation.receipt.source, runtime: installation.receipt.runtime,
         ...(helper ? { helperIdentity: Object.fromEntries(['version', 'archiveSha256', 'manifestSha256', 'dependencyReceiptSha256', 'sourceFilesDigest'].map(key => [key, helper[key]])) } : {}), database: {
@@ -606,7 +614,6 @@ function ports(scope) {
       scope.subject = (scope.kind === 'adopt' ? installAdoptionSubjectDigest : installFinalizationSubjectDigest)(context, scope.seedIntent?.previousReceiptSha256 ?? values[1].sha256)
       if (scope.job) check(previousSubject === scope.subject, 'INSTALL_STARTUP_SOURCE_CHANGED')
       if (scope.seedIntent) check(scope.seedIntent.subjectDigest === scope.subject, 'INSTALL_FINALIZATION_INTENT_CHANGED')
-      await scope.db.transaction(tx => rootInTransaction(scope, tx))
       return structuredClone(context)
     },
     async observeReady(context, subject) {

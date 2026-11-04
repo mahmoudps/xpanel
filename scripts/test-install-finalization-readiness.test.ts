@@ -17,6 +17,52 @@ const factory = new Function('check', 'SHA', 'DECIMAL', 'WINDOW_MS', 'hash', 'po
   ['canonical', 'checkedContext', 'checkedFacts', 'createReadinessObserver'].map(declared).join('\n') + '\nreturn createReadinessObserver'
 )(check, /^[a-f0-9]{64}$/, /^(0|[1-9][0-9]{0,19})$/, 30_000, (value: string) => createHash('sha256').update(value).digest('hex'), posix)
 
+describe('prepared readiness runtime identity', () => {
+  const start = source.indexOf('const fileIdentity ='), end = source.indexOf('async function procText(', start)
+  if (start < 0 || end <= start) throw new Error('runtime identity source missing')
+
+  function runtimeFixture() {
+    const runtime = { nodePath: '/opt/node/bin/node', nodeSha256: 'a'.repeat(64) }
+    const baseline = { dev: 1n, ino: 2n, uid: 0n, gid: 0n, mode: 0o755n, size: 500n, nlink: 1n,
+      mtimeNs: 4n, ctimeNs: 5n, isFile: () => true, isSymbolicLink: () => false }
+    let current = { ...baseline }, closed = 0
+    const hashRead = vi.fn(async () => ({ info: { ...baseline }, sha256: runtime.nodeSha256 }))
+    const open = vi.fn(async () => ({ stat: async () => ({ ...baseline }), close: async () => { closed++ } }))
+    const withTrustedDirectory = async (path: string, run: (pin: { verify(): Promise<void> }) => unknown) => {
+      expect(path).toBe('/opt/node/bin')
+      return run({ verify: async () => {} })
+    }
+    const api = new Function('check', 'posix', 'constants', 'readTrustedFile', 'withTrustedDirectory', 'open', 'lstat', 'canonical',
+      source.slice(start, end) + '\nreturn { readReadinessRuntime, fileIdentity }')(
+      check, posix, { O_RDONLY: 0, O_NOFOLLOW: 1, O_NONBLOCK: 2 }, hashRead,
+      withTrustedDirectory, open, async () => ({ ...current }), JSON.stringify)
+    const previous = { pins: { node: { ...api.fileIdentity(baseline), sha256: runtime.nodeSha256 } } }
+    return { runtime, previous, hashRead, open, api,
+      change: (updates: Partial<typeof baseline>) => { current = { ...baseline, ...updates } }, closed: () => closed }
+  }
+
+  it('authenticates runtime bytes at capture and checks the captured inode on later observations', async () => {
+    const f = runtimeFixture()
+    const first = await f.api.readReadinessRuntime(f.runtime)
+    const next = await f.api.readReadinessRuntime(f.runtime, f.previous)
+    expect(f.api.fileIdentity(next.info)).toEqual(f.api.fileIdentity(first.info))
+    expect(next.sha256).toBe(first.sha256)
+    expect(f.hashRead).toHaveBeenCalledOnce()
+    expect(f.open).toHaveBeenCalledWith(f.runtime.nodePath, 3)
+    expect(f.closed()).toBe(1)
+  })
+
+  it('refuses same-size rewrites, exchanged inodes, extra links and symlinks', async () => {
+    for (const updates of [{ ctimeNs: 6n }, { ino: 3n }, { nlink: 2n }, { isSymbolicLink: () => true }]) {
+      const f = runtimeFixture()
+      f.change(updates)
+      await expect(f.api.readReadinessRuntime(f.runtime, f.previous)).rejects.toThrow('INSTALL_READINESS_RUNTIME_CHANGED')
+      expect(f.hashRead).not.toHaveBeenCalled()
+      expect(f.closed()).toBe(1)
+    }
+  })
+})
+
 const fixture = () => {
   let time = Date.parse('2026-10-30T10:00:00.000Z')
   const hash = (letter: string) => letter.repeat(64)

@@ -96,6 +96,26 @@ function createReadinessObserver(ports, validateContext = checkedContext) {
 
 const fileIdentity = info => ({ device: String(info.dev), inode: String(info.ino), uid: Number(info.uid), gid: Number(info.gid),
   mode: Number(info.mode & 0o7777n), size: String(info.size), mtime: String(info.mtimeNs), ctime: String(info.ctimeNs) })
+
+async function readReadinessRuntime(runtime, previous) {
+  if (!previous) return readTrustedFile(runtime.nodePath, { maxBytes: 256 * 1024 * 1024, sha256: runtime.nodeSha256 })
+  const { sha256, ...expected } = previous.pins.node
+  check(sha256 === runtime.nodeSha256, 'INSTALL_READINESS_RUNTIME_CHANGED')
+  return withTrustedDirectory(posix.dirname(runtime.nodePath), async ancestry => {
+    const handle = await open(runtime.nodePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    try {
+      const matches = info => info.isFile() && !info.isSymbolicLink() && info.nlink === 1n
+        && canonical(fileIdentity(info)) === canonical(expected)
+      const info = await handle.stat({ bigint: true })
+      check(matches(info), 'INSTALL_READINESS_RUNTIME_CHANGED')
+      await ancestry.verify()
+      const named = await lstat(runtime.nodePath, { bigint: true })
+      check(matches(named) && matches(await handle.stat({ bigint: true })), 'INSTALL_READINESS_RUNTIME_CHANGED')
+      return { info, sha256 }
+    } finally { await handle.close() }
+  })
+}
+
 async function procText(root, name, maxBytes = 64 * 1024) {
   const handle = await open(root + '/' + name, constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
@@ -230,7 +250,7 @@ async function readNativeFacts(context, previous) {
   check(current.isSymbolicLink() && current.uid === 0n && current.gid === 0n
     && await readlink('/opt/xpanel/current') === expectedRoot && await realpath('/opt/xpanel/current') === expectedRoot, 'INSTALL_READINESS_CURRENT_LINK_INVALID')
   return withTrustedDirectory(expectedRoot, async ancestry => {
-    const node = await readTrustedFile(context.runtime.nodePath, { maxBytes: 256 * 1024 * 1024, sha256: context.runtime.nodeSha256 })
+    const node = await readReadinessRuntime(context.runtime, previous)
     const passwd = await readTrustedFile('/etc/passwd', { maxBytes: 1024 * 1024 })
     const groups = await readTrustedFile('/etc/group', { maxBytes: 1024 * 1024 })
     const apiUid = accountId(passwd.bytes.toString('utf8'), 'xpanel', 2), agentGid = accountId(groups.bytes.toString('utf8'), 'xpanel-agent', 2)
