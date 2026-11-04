@@ -8,7 +8,7 @@ import { WriterLock } from '@xpanel/state'
 import type { WriterLease } from '@xpanel/state'
 import type { Db } from './client.ts'
 import { assertNoActiveDatabaseTransaction, assertRegisteredDatabaseRunner, getStrictDatabaseIdentity } from './sql-runner.ts'
-import { assertReadonlyOperationDatabaseCurrent, assertReadonlyOperationDatabaseOutsideTransaction, getReadonlyOperationDatabaseOrigin, withReadonlyOperationDatabase, type ReadonlyOperationDatabase } from './readonly-operation-database.ts'
+import { assertReadonlyOperationDatabaseCurrent, assertReadonlyOperationDatabaseOutsideTransaction, getReadonlyOperationDatabaseOrigin, withReobservedReadonlyOperationDatabase, type ReadonlyOperationDatabase } from './readonly-operation-database.ts'
 import { requireOperationalIdentity } from './repos/official-references.ts'
 
 export const HOST_OPERATION_GUARD_DIRECTORY = '/var/lib/xpanel-agent/host-operations'
@@ -275,7 +275,7 @@ export const withReopenedReadonlyHostOperationGuard = async <T>(
 ): Promise<T> => {
   requireLinuxRoot()
   if (typeof callback !== 'function') return fail('VALIDATION', 'a host operation callback is required')
-  const read = () => withReadonlyOperationDatabase(file, async reader => {
+  const read = () => withReobservedReadonlyOperationDatabase(file, async reader => {
     const origin = getReadonlyOperationDatabaseOrigin(reader)
     await assertReadonlyOperationDatabaseCurrent(reader)
     return Object.freeze({ databaseFile: origin.file, databaseDevice: origin.device, databaseInode: origin.inode, issuerId: origin.issuerId })

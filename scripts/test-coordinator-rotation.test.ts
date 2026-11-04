@@ -42,7 +42,7 @@ describe('coordinator database observations retire before host effects', () => {
     const start = source.indexOf('export async function withCoordinatorDatabaseAuthority(')
     const end = source.indexOf('\nasync function withExistingRegistrationGuard(', start)
     const authority = new Function('DATABASE', 'withLifecycleWriterAdmission', 'withReopenedReadonlyHostOperationGuard', 'readTrustedFile',
-      'withReadonlyOperationDatabase', 'getReadonlyOperationDatabaseOrigin', 'getPrincipal', 'assertReadonlyOperationDatabaseCurrent',
+      'withReobservedReadonlyOperationDatabase', 'getReadonlyOperationDatabaseOrigin', 'getPrincipal', 'assertReadonlyOperationDatabaseCurrent',
       'assertHostOperationGuardHeld', 'fail', source.slice(start, end).replace(/^export /, '') + '\nreturn withCoordinatorDatabaseAuthority'
     )(file, (run: () => unknown) => run(), (_path: string, _options: unknown, run: (guard: object, value: typeof binding) => unknown) => run({}, binding),
       async () => ({ bytes: Buffer.from(JSON.stringify({ origin })), sha256: 'a'.repeat(64) }), observe, () => currentOrigin, () => root,
