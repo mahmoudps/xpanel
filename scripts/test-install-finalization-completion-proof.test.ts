@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { describe, it } from 'vitest'
 import { assertInstallOwnershipCompletionProof } from './install-finalization-native.mjs'
 import { installAdoptionSubjectDigest, installFinalizationSubjectDigest } from './install-finalization.mjs'
@@ -59,5 +60,50 @@ describe('persisted ownership completion proof uses the private entry kind', () 
     assert.throws(() => assertInstallOwnershipCompletionProof('adopt', adopted.subject, adopted.intent, adopted.job))
     const changed = fixture('adopt'); assert(changed.context.helperIdentity); changed.context.helperIdentity.archiveSha256 = sha('different helper')
     assert.throws(() => assertInstallOwnershipCompletionProof('adopt', changed.subject, changed.intent, changed.job))
+  })
+})
+
+describe('retained finalization job identity', () => {
+  const source = readFileSync(new URL('./install-finalization-native.mjs', import.meta.url), 'utf8')
+  const binding = source.match(/^function lifecycleBinding.*$/m)?.[0]
+  const start = source.indexOf('function assertInstallFinalizationJobBinding(')
+  const end = source.indexOf('function checkJob(', start)
+  assert(binding && start >= 0 && end > start)
+  const validate = new Function('check', 'canonical',
+    binding + '\n' + source.slice(start, end) + '\nreturn assertInstallFinalizationJobBinding')(
+    (condition: unknown, code: string) => { if (!condition) throw new Error(code) }, canonical)
+
+  function retained() {
+    const subject = sha('pending installation')
+    const root = { id: id(2), username: 'root' }
+    const scope = { subject, root, context: { rootPrincipalId: root.id } }
+    const job = { id: id(3), kind: 'lifecycle.adopt', actor: root.username, accountId: null, requestFingerprint: subject,
+      referenceCode: 'XP-JOB-2000-000042', status: 'running', idempotencyKey: 'install-finalization:' + subject,
+      detail: { lifecycleIntent: { purpose: 'host.lifecycle.intent', jobId: id(3), requestFingerprint: subject,
+        action: 'lifecycle.adopt', principalId: root.id }, installFinalization: { subjectDigest: subject, rootPrincipalId: '[REDACTED]' } } }
+    return { scope, job }
+  }
+
+  it('accepts a retained redaction only through the exact unfinished job binding', () => {
+    const { scope, job } = retained()
+    assert.doesNotThrow(() => validate(scope, job))
+    job.status = 'queued'
+    assert.doesNotThrow(() => validate(scope, job))
+    job.detail.installFinalization.rootPrincipalId = scope.root.id
+    job.status = 'succeeded'
+    assert.doesNotThrow(() => validate(scope, job))
+  })
+
+  it('refuses inconsistent authority, idempotency and finished redacted evidence', () => {
+    for (const mutate of [
+      (job: ReturnType<typeof retained>['job']) => { job.detail.lifecycleIntent.principalId = id(4) },
+      (job: ReturnType<typeof retained>['job']) => { job.detail.installFinalization.rootPrincipalId = id(4) },
+      (job: ReturnType<typeof retained>['job']) => { job.idempotencyKey = 'other-request' },
+      (job: ReturnType<typeof retained>['job']) => { job.status = 'succeeded' },
+    ]) {
+      const { scope, job } = retained()
+      mutate(job)
+      assert.throws(() => validate(scope, job), /INSTALL_FINALIZATION_JOB_CHANGED/)
+    }
   })
 })

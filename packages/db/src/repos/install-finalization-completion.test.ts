@@ -6,6 +6,7 @@ import {
   completeJobWithLease,
   enqueueDurableJob,
   getDurableJob,
+  saveJobCheckpoint,
   type CompleteJobLeaseAdmission,
 } from './jobs.ts'
 
@@ -24,7 +25,7 @@ async function leasedJob() {
   })
   const queued = await enqueueDurableJob(handle.db, {
     kind: 'lifecycle.adopt', actor: root.username, summary: 'Isolated finalization admission',
-    detail: { subjectDigest: '1'.repeat(64) },
+    detail: { installFinalization: { subjectDigest: '1'.repeat(64), rootPrincipalId: root.id } },
   })
   const job = await acquireJobLease(handle.db, {
     jobId: queued.id, workerId: 'isolated-finalizer', leaseDurationMs: 30_000,
@@ -46,6 +47,22 @@ async function expectRetainedLease(fixture: Awaited<ReturnType<typeof leasedJob>
 }
 
 describe('install finalization completion admission', () => {
+  it('retains the root binding in the durable job, checkpoint and completed proof', async () => {
+    const fixture = await leasedJob()
+    const rootPrincipalId = fixture.root.id
+    expect(fixture.job.detail.installFinalization).toMatchObject({ rootPrincipalId })
+    const installFinalizationEvidence = { context: { rootPrincipalId } }
+    await saveJobCheckpoint(fixture.handle.db, {
+      jobId: fixture.job.id, workerId: fixture.input.workerId, fencingToken: fixture.input.fencingToken,
+      step: 'install-ownership-observed', data: { installFinalizationEvidence },
+    })
+    const completed = await completeJobWithLease(fixture.handle.db, {
+      ...fixture.input, detail: { installFinalization: { rootPrincipalId, receiptSha256: '2'.repeat(64) } },
+    })
+    expect(completed.checkpointData.installFinalizationEvidence).toEqual(installFinalizationEvidence)
+    expect(completed.detail.installFinalization).toMatchObject({ rootPrincipalId })
+  })
+
   it('preserves completion behavior for existing callers without a guard', async () => {
     const fixture = await leasedJob()
     const completed = await completeJobWithLease(fixture.handle.db, fixture.input)
