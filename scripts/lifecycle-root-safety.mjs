@@ -1083,15 +1083,17 @@ async function runtimeDependencies(scope, root, report) {
 }
 
 /** Negative precheck before opening a writer connection; it does not mint an effect scope. */
-export async function assertNativeLifecyclePrerequisites() {
+export async function assertNativeLifecyclePrerequisites(ownership) {
   const processPin = await processIdentity()
   const { receipt } = await readInstallationReceipt()
   if (receipt.status !== 'active' || process.version !== `v${receipt.runtime.nodeVersion}` || processPin.executable !== await realpath(receipt.runtime.nodePath)) fail('LIFECYCLE_INSTALLATION_NOT_READY')
-  await withVerifiedCoordinatorOwnership(async coordinator => {
+  const verifyCoordinator = async coordinator => {
     const verified = coordinatorOwnershipInfo(coordinator)
     if (processPin.coordinatorUnit !== verified.unit || process.argv[1] !== verified.sourcePath) fail('LIFECYCLE_COORDINATOR_SOURCE_REQUIRED')
     await assertCoordinatorOwnershipCurrent(coordinator)
-  })
+  }
+  if (ownership === undefined) await withVerifiedCoordinatorOwnership(verifyCoordinator)
+  else await verifyCoordinator(ownership)
   await trustConfiguration()
   for (const file of receipt.files) await assertOwnedFile(file)
   await withTrustedFile(receipt.runtime.nodePath, { sha256: receipt.runtime.nodeSha256, maxBytes: 256 * 1024 * 1024 }, async () => {})

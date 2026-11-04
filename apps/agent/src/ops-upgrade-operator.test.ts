@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { signRootOperatorResponse } from './ops-upgrade-operator-protocol.ts'
-const seams = vi.hoisted(() => ({ kind: 'recover' as 'upgrade'|'recover', phases: [] as string[], failApply: false, textReply: false }))
+const seams = vi.hoisted(() => ({ kind: 'recover' as 'upgrade'|'recover', phases: [] as string[], launcherOwnership: [] as unknown[], failApply: false, textReply: false }))
 const key = generateKeyPairSync('ed25519')
 const operationId = '12345678-1234-4234-8234-123456789abc', archiveSha = 'e'.repeat(64)
 const identity = { pid: 1234, start: '55', bootId: '11111111-1111-4111-8111-111111111111', receiptSha256: 'a'.repeat(64) }
@@ -12,8 +12,11 @@ vi.mock('./lifecycle/native-runtime.ts', () => ({ runNativeRootOperatorCommand: 
 vi.mock('./peer-identity.ts', () => ({ loadInstalledPeerIdentityAddon: async () => ({}) }))
 vi.mock('./ops-upgrade-hosted-qualification.ts', () => ({ createNativeClosedRecoveryHostedUidQualification: vi.fn(), withNativeRootOperatorHostedUidQualification: vi.fn() }))
 vi.mock('./ops-upgrade-native-observation.ts', () => ({
-  observeLauncher: async () => ({ identity, publicKey: key.publicKey,
-    receipt: { helper: { archiveSha256: archiveSha, releaseRoot: '/opt/xpanel/releases/0.2.0' }, nodePath: '/usr/local/bin/node' } }),
+  observeLauncher: async (ownership: unknown) => {
+    seams.launcherOwnership.push(ownership)
+    return { identity, publicKey: key.publicKey,
+      receipt: { helper: { archiveSha256: archiveSha, releaseRoot: '/opt/xpanel/releases/0.2.0' }, nodePath: '/usr/local/bin/node' } }
+  },
   kernelPeer: () => ({ pid: identity.pid, uid: 0, gid: 0 }), socketIdentity: async () => 'fixed-socket-fixture',
   processFacts: async (pid: number) => ({ pid, start: '66', bootId: identity.bootId, exe: '/usr/local/bin/node', argv: [
     '/usr/local/bin/node', '/opt/xpanel/releases/0.2.0/scripts/root-operator-entry.mjs', '--kind=' + seams.kind,
@@ -47,28 +50,33 @@ vi.mock('node:net', async () => {
   } }
 })
 import { dispatchPreparedRootOperation } from './ops-upgrade-operator.ts'
+import type { CoordinatorOwnershipCapability } from '../../../scripts/coordinator-ownership.mjs'
 
-beforeEach(() => { seams.kind = 'recover'; seams.phases = []; seams.failApply = false; seams.textReply = false })
+const ownership = Object.freeze({}) as CoordinatorOwnershipCapability
+
+beforeEach(() => { seams.kind = 'recover'; seams.phases = []; seams.launcherOwnership = []; seams.failApply = false; seams.textReply = false })
 // Signed protocol/client-order tests with explicit process/socket seams; no native transport acceptance.
 describe('prepared root operator client dispatch', () => {
   it('sends recover apply directly without fabricating or requiring observe readiness', async () => {
-    const result = await dispatchPreparedRootOperation({ operationId, kind: 'recover', expectedArchiveSha256: archiveSha })
+    const result = await dispatchPreparedRootOperation({ operationId, kind: 'recover', expectedArchiveSha256: archiveSha }, ownership)
     expect(seams.phases).toEqual(['apply']); expect(result.phase).toBe('succeeded')
   })
   it('preserves upgrade observe before apply', async () => {
     seams.kind = 'upgrade'
-    await dispatchPreparedRootOperation({ operationId, kind: 'upgrade', expectedArchiveSha256: archiveSha })
+    await dispatchPreparedRootOperation({ operationId, kind: 'upgrade', expectedArchiveSha256: archiveSha }, ownership)
     expect(seams.phases).toEqual(['observe', 'apply'])
+    expect(seams.launcherOwnership).toHaveLength(4)
+    expect(seams.launcherOwnership.every(scope => scope === ownership)).toBe(true)
   })
   it('never retries a lost recover apply response', async () => {
     seams.failApply = true
-    await expect(dispatchPreparedRootOperation({ operationId, kind: 'recover', expectedArchiveSha256: archiveSha }))
+    await expect(dispatchPreparedRootOperation({ operationId, kind: 'recover', expectedArchiveSha256: archiveSha }, ownership))
       .rejects.toMatchObject({ unknownOutcome: true, retryAllowed: false, operationId })
     expect(seams.phases).toEqual(['apply'])
   })
   it('refuses a decoded text reply without retrying an uncertain apply', async () => {
     seams.textReply = true
-    await expect(dispatchPreparedRootOperation({ operationId, kind: 'recover', expectedArchiveSha256: archiveSha }))
+    await expect(dispatchPreparedRootOperation({ operationId, kind: 'recover', expectedArchiveSha256: archiveSha }, ownership))
       .rejects.toMatchObject({ unknownOutcome: true, retryAllowed: false, operationId })
     expect(seams.phases).toEqual(['apply'])
   })

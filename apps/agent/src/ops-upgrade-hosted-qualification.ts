@@ -97,7 +97,7 @@ async function ordinaryObservation(ownership: CoordinatorOwnershipCapability, re
   await assertCoordinatorOwnershipCurrent(ownership)
   const work = async (authority: ObservationAuthority) => { await authority.assertCurrent(); return withReadonlyOperationDatabase(DATABASE, db => collectHostedObservation(ownership, request, authority, db, false)) }
   if (recovery) return withNativeLifecycleRecoveryObservation(work)
-  await assertNativeLifecyclePrerequisites()
+  await assertNativeLifecyclePrerequisites(ownership)
   return withLifecycleWriterAdmission(() => work({ assertCurrent: assertLifecycleWriterAdmissionHeld, signal: AbortSignal.timeout(60000) }))
 }
 

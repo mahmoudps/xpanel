@@ -82,6 +82,7 @@ describe('fixed native hosted UID composition', () => {
     await expect(withNativeHostedUidQualification(capability, { kind: 'hello', nonce: randomUUID() }, async () => true)).rejects.toThrow('unissued')
     seams.shared.mockRejectedValueOnce(new Error('physical SH required'))
     await expect(withNativeHostedUidQualification(capability, { kind: 'hello', nonce: randomUUID() }, async () => true)).rejects.toThrow('physical SH required')
+    expect(seams.normal).toHaveBeenCalledExactlyOnceWith(capability)
     expect(seams.dbOpen).not.toHaveBeenCalled(); expect(seams.open).not.toHaveBeenCalled()
   })
   it('does not fabricate hosted UID on an empty host and retires the read-only connection', async () => {

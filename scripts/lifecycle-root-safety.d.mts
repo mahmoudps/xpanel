@@ -1,3 +1,4 @@
+import type { CoordinatorOwnershipCapability } from './coordinator-ownership.mjs'
 import type { Db } from '../packages/db/src/index.ts'
 import type { UpgradeLayout, ReleaseInfo, UpgradeSafetyPort } from '../packages/lifecycle/src/index.ts'
 export const NATIVE_RUNTIME_ABI_PROBE: string
@@ -25,7 +26,7 @@ export function admitSchemaTransition(input: Parameters<UpgradeSafetyPort['asser
 
 export function executeNativeLifecycleCommand(request: unknown): Promise<unknown>
 
-export function assertNativeLifecyclePrerequisites(): Promise<void>
+export function assertNativeLifecyclePrerequisites(ownership?: CoordinatorOwnershipCapability): Promise<void>
 export function assertNativeLifecycleRecoveryPrerequisites(): Promise<Readonly<{ transitionOperationId: string; mode: 'abort-before-transition' | 'rollback' | 'finish-publication' }>>
 export function withNativeRecoveryPreparation<T>(callback: (prepared: import('./prepared-release.mjs').PreparedReleaseCapability) => Promise<T>): Promise<T>
 export function assertLifecycleRecoveryObservationHeld(capability: unknown): Promise<void>
