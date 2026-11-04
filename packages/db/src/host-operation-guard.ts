@@ -8,7 +8,7 @@ import { WriterLock } from '@xpanel/state'
 import type { WriterLease } from '@xpanel/state'
 import type { Db } from './client.ts'
 import { assertNoActiveDatabaseTransaction, assertRegisteredDatabaseRunner, getStrictDatabaseIdentity } from './sql-runner.ts'
-import { assertReadonlyOperationDatabaseCurrent, assertReadonlyOperationDatabaseOutsideTransaction, getReadonlyOperationDatabaseOrigin, type ReadonlyOperationDatabase } from './readonly-operation-database.ts'
+import { assertReadonlyOperationDatabaseCurrent, assertReadonlyOperationDatabaseOutsideTransaction, getReadonlyOperationDatabaseOrigin, withReadonlyOperationDatabase, type ReadonlyOperationDatabase } from './readonly-operation-database.ts'
 import { requireOperationalIdentity } from './repos/official-references.ts'
 
 export const HOST_OPERATION_GUARD_DIRECTORY = '/var/lib/xpanel-agent/host-operations'
@@ -265,7 +265,34 @@ export const withReadonlyHostOperationGuard = async <T>(
   return withBoundHostOperationGuard(capture, options, callback, assertReader, assertReaderActive)
 }
 
-// Private shared physical implementation. Both public ingresses derive their binding from a registered native DB identity.
+/** Retains physical host exclusion while reobserving database identity in short native readers.
+ * Each read proves its own WAL generation. An unrelated commit between readers may proceed.
+ * Managers still verify their effect-specific authority before and after each operation. */
+export const withReopenedReadonlyHostOperationGuard = async <T>(
+  file: string,
+  options: HostOperationGuardOptions,
+  callback: (capability: HostOperationGuard, binding: HostOperationGuardBinding) => Promise<T>,
+): Promise<T> => {
+  requireLinuxRoot()
+  if (typeof callback !== 'function') return fail('VALIDATION', 'a host operation callback is required')
+  const read = () => withReadonlyOperationDatabase(file, async reader => {
+    const origin = getReadonlyOperationDatabaseOrigin(reader)
+    await assertReadonlyOperationDatabaseCurrent(reader)
+    return Object.freeze({ databaseFile: origin.file, databaseDevice: origin.device, databaseInode: origin.inode, issuerId: origin.issuerId })
+  })
+  const original = await read()
+  const capture = async () => {
+    const current = await read()
+    if (current.databaseFile !== original.databaseFile || current.databaseDevice !== original.databaseDevice ||
+        current.databaseInode !== original.databaseInode || current.issuerId !== original.issuerId) {
+      fail('CONFLICT', 'the read-only operation database origin changed')
+    }
+    return current
+  }
+  return withBoundHostOperationGuard(capture, options, capability => callback(capability, original), async () => { await capture() })
+}
+
+// Private shared physical implementation. The public ingresses derive their binding from a native DB identity.
 const withBoundHostOperationGuard = async <T>(
   capture: () => Promise<HostOperationGuardBinding>,
   options: HostOperationGuardOptions,
