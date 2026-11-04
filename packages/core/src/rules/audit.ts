@@ -4,6 +4,7 @@
 // strings are escaped so a hostile value cannot forge extra log lines, reorder the text with
 // bidi controls, or carry a lone surrogate that Postgres jsonb would refuse.
 import type { AuditEntry, Principal } from '../types.ts'
+import { isUuid } from '../schemas.ts'
 import { hasControlChars, invalid, isRecord, utf8Length } from './check.ts'
 
 /** The STANDARDS minimum (pass|secret|token|key) plus other names credentials travel under. */
@@ -119,8 +120,10 @@ const redactEntries = (entries: [string, unknown][], depth: number, ancestors: o
   const out: [string, unknown][] = []
   for (const [key, v] of entries.slice(0, p.items)) {
     const k = spend(p, cleanString(key, Math.min(128, p.string)))
-    // a flag such as passwordChanged: true carries no secret and is worth keeping
-    if (REDACT_KEY_RE.test(key) && v !== null && typeof v !== 'boolean') {
+    // The OTP substring overlaps the fixed root principal field. Preserve only
+    // a validated identity there; other credential-like fields stay redacted.
+    const principalIdentity = key === 'rootPrincipalId' && isUuid(v)
+    if (REDACT_KEY_RE.test(key) && v !== null && typeof v !== 'boolean' && !principalIdentity) {
       out.push([k, REDACTED])
       continue
     }

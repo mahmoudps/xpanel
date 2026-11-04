@@ -258,11 +258,18 @@ function installFinalizationEvidence(scope) {
     ...(scope.executionHelper ? { executionHelper: scope.executionHelper } : {}) }
 }
 
-function checkJob(scope, job) {
+function assertInstallFinalizationJobBinding(scope, job) {
+  const recorded = job?.detail?.installFinalization
+  const retainedRedaction = recorded?.rootPrincipalId === '[REDACTED]' && ['queued', 'running'].includes(job.status)
+    && job.idempotencyKey === 'install-finalization:' + scope.subject
   check(job && job.kind === 'lifecycle.adopt' && job.actor === scope.root.username && job.accountId === null && job.requestFingerprint === scope.subject
     && job.referenceCode && canonical(job.detail?.lifecycleIntent) === canonical(lifecycleBinding(scope, job))
-    && job.detail?.installFinalization?.subjectDigest === scope.subject && job.detail.installFinalization.rootPrincipalId === scope.root.id, 'INSTALL_FINALIZATION_JOB_CHANGED')
+    && recorded?.subjectDigest === scope.subject && (recorded.rootPrincipalId === scope.root.id || retainedRedaction), 'INSTALL_FINALIZATION_JOB_CHANGED')
   if (scope.intent) check(job.id === scope.intent.jobId && job.referenceCode === scope.intent.reference && job.createdAt === scope.intent.createdAt, 'INSTALL_FINALIZATION_JOB_CHANGED')
+}
+
+function checkJob(scope, job) {
+  assertInstallFinalizationJobBinding(scope, job)
   check(!job.cancelRequested && !job.needsAttention && !['failed', 'cancelled'].includes(job.status), 'INSTALL_FINALIZATION_JOB_REQUIRES_REVIEW')
   if (job.status === 'succeeded') {
     checkCompletionProof(scope, job)
@@ -273,7 +280,7 @@ function checkJob(scope, job) {
 }
 
 async function claim(scope, row) {
-  check(row && row.requestFingerprint === scope.subject, 'INSTALL_FINALIZATION_JOB_CHANGED')
+  assertInstallFinalizationJobBinding(scope, row)
   if (row.status === 'succeeded') { scope.job = row; checkJob(scope, row) }
   else {
     scope.changed = true
@@ -415,7 +422,7 @@ async function allocateInstallJob(scope) {
   const job = await scope.dbApi.enqueueDurableJob(scope.db, { id, kind: 'lifecycle.adopt', actor: scope.root.username,
     idempotencyKey: 'install-finalization:' + scope.subject, requestFingerprint: scope.subject, targetRevision: scope.context.state.revision,
     summary: scope.kind === 'adopt' ? 'Finalize observed populated-installation adoption' : 'Finalize observed fresh-install ownership', detail: { lifecycleIntent: binding, installFinalization: { subjectDigest: scope.subject, rootPrincipalId: scope.root.id } } },
-    async (tx, row) => { await rootInTransaction(scope, tx); check(row.requestFingerprint === scope.subject && canonical(row.detail.lifecycleIntent) === canonical(lifecycleBinding(scope, row)), 'INSTALL_FINALIZATION_JOB_CHANGED'); assertInstallOperationWindow(scope) })
+    async (tx, row) => { await rootInTransaction(scope, tx); assertInstallFinalizationJobBinding(scope, row); assertInstallOperationWindow(scope) })
   check(job.status !== 'succeeded', 'INSTALL_FINALIZATION_JOB_REQUIRES_REVIEW')
   await claim(scope, job)
 }

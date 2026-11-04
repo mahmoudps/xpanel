@@ -78,6 +78,19 @@ describe('auditEntry', () => {
     expect(e.detail.note).toBe(`uploaded ${REDACTED} for bob`)
   })
 
+  it('preserves only validated root principal identities despite the OTP substring', () => {
+    const principal = '00000000-0000-4000-8000-000000000001'
+    expect(redactSecrets({
+      job: { rootPrincipalId: principal, totp: principal },
+      checkpoint: { rootPrincipalId: 'invalid-identity' },
+      rootPrincipalIdToken: principal,
+    })).toEqual({
+      job: { rootPrincipalId: principal, totp: REDACTED },
+      checkpoint: { rootPrincipalId: REDACTED },
+      rootPrincipalIdToken: REDACTED,
+    })
+  })
+
   it('escapes bidi controls so a value cannot reorder what an operator reads', () => {
     const e = auditEntry(root, 'domain.create', 'evil\u202ecom.txt', { note: 'a\u2066b' }, 'ok')
     expect(e.target).toBe('evil\\u202ecom.txt')
