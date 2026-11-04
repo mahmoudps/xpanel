@@ -17,7 +17,7 @@ try {
     if (input.expectedArchiveSha256 !== info.helper.archiveSha256 || await realpath(fileURLToPath(import.meta.url)) !== source
       || await realpath(process.argv[1]) !== source || await readlink('/proc/self/exe') !== await realpath(info.nodePath)) throw new Error('ROOT_OPERATOR_ENTRY_UNOWNED')
     await assertCoordinatorOwnershipCurrent(ownership)
-    return dispatchPreparedRootOperation(input)
+    return dispatchPreparedRootOperation(input, ownership)
   })
   process.stdout.write(JSON.stringify(result) + '\n')
   process.exitCode = result.phase === 'succeeded' ? 0 : 1

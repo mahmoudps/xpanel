@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { chmod, lstat } from 'node:fs/promises'
 import { createConnection, createServer } from 'node:net'
-import { withVerifiedCoordinatorOwnership, assertCoordinatorOwnershipCurrent } from '../../../scripts/coordinator-ownership.mjs'
+import { withVerifiedCoordinatorOwnership, assertCoordinatorOwnershipCurrent, type CoordinatorOwnershipCapability } from '../../../scripts/coordinator-ownership.mjs'
 import { requireLinuxRoot, withTrustedFile } from '../../../scripts/lifecycle-ownership.mjs'
 import { runNativeRootOperatorCommand } from './lifecycle/native-runtime.ts'
 import { withNativeClosedDatabaseRecoveryAdmission } from '../../../scripts/lifecycle-root-safety.mjs'
@@ -17,46 +17,45 @@ export { ROOT_OPERATOR_SOCKET } from './ops-upgrade-root-dispatch.ts'
 const refused = (): never => { throw new Error('ROOT_OPERATOR_UNAVAILABLE') }
 const review = (operationId: string): Error => Object.assign(new Error('ROOT_OPERATOR_REVIEW_REQUIRED'), { operationId, unknownOutcome: true, retryAllowed: false })
 
-async function exchange(request: RootOperatorRequest): Promise<RootOperatorResponse> {
+async function exchange(ownership: CoordinatorOwnershipCapability, request: RootOperatorRequest): Promise<RootOperatorResponse> {
   requireLinuxRoot()
-  return withVerifiedCoordinatorOwnership(async ownership => {
-    const actual = await observeLauncher(ownership), addon = await loadInstalledPeerIdentityAddon(), pin = await socketIdentity(ROOT_OPERATOR_SOCKET), started = Date.now()
-    if (request.expectedArchiveSha256 !== actual.receipt.helper.archiveSha256) return refused()
-    const self = await processFacts(process.pid)
-    if (JSON.stringify(self.argv) !== JSON.stringify(rootOperatorArgv(actual.receipt.nodePath, actual.receipt.helper.releaseRoot, request))) return refused()
-    return new Promise<RootOperatorResponse>((resolve, reject) => {
-      const socket = createConnection({ path: ROOT_OPERATOR_SOCKET }); let bytes = Buffer.alloc(0), settled = false, frameSeen = false
-      const finish = (error?: unknown, response?: RootOperatorResponse) => { if (settled) return; settled = true; clearTimeout(timer); socket.destroy(); error ? reject(error) : resolve(response!) }
-      const timer = setTimeout(() => finish(review(request.operationId)), request.phase === 'apply' ? 1800000 : 65000)
-      socket.once('error', () => finish(review(request.operationId)))
-      socket.once('connect', () => { try { const peer = kernelPeer(socket, addon); if (peer.uid !== 0 || peer.gid !== 0 || peer.pid !== actual.identity.pid) return refused(); socket.write(encodeUpgradeIpcFrame(request)) } catch (error) { finish(error) } })
-      socket.on('data', chunk => {
-        if (settled) return
-        if (!Buffer.isBuffer(chunk)) { finish(review(request.operationId)); return }
-        if (frameSeen) { finish(review(request.operationId)); return }
-        bytes = Buffer.concat([bytes, chunk]); if (bytes.length > UPGRADE_IPC_LIMIT) { finish(review(request.operationId)); return }
-        if (!bytes.includes(10)) return
-        frameSeen = true
-        void (async () => {
-          const after = await observeLauncher(ownership)
-          if (JSON.stringify(actual.identity) !== JSON.stringify(after.identity) || await socketIdentity(ROOT_OPERATOR_SOCKET) !== pin) return refused()
-          const response = verifyRootOperatorResponse(decodeUpgradeIpcFrame(bytes), request, after.identity, after.publicKey)
-          const observed = Date.parse(response.qualification.observedAt)
-          if (observed < started || observed > Date.now()) return refused()
-          await assertCoordinatorOwnershipCurrent(ownership); finish(undefined, response)
-        })().catch(() => finish(review(request.operationId)))
-      })
-      socket.once('close', () => { if (!frameSeen) finish(review(request.operationId)) })
+  const actual = await observeLauncher(ownership), addon = await loadInstalledPeerIdentityAddon(), pin = await socketIdentity(ROOT_OPERATOR_SOCKET), started = Date.now()
+  if (request.expectedArchiveSha256 !== actual.receipt.helper.archiveSha256) return refused()
+  const self = await processFacts(process.pid)
+  if (JSON.stringify(self.argv) !== JSON.stringify(rootOperatorArgv(actual.receipt.nodePath, actual.receipt.helper.releaseRoot, request))) return refused()
+  return new Promise<RootOperatorResponse>((resolve, reject) => {
+    const socket = createConnection({ path: ROOT_OPERATOR_SOCKET }); let bytes = Buffer.alloc(0), settled = false, frameSeen = false
+    const finish = (error?: unknown, response?: RootOperatorResponse) => { if (settled) return; settled = true; clearTimeout(timer); socket.destroy(); error ? reject(error) : resolve(response!) }
+    const timer = setTimeout(() => finish(review(request.operationId)), request.phase === 'apply' ? 1800000 : 65000)
+    socket.once('error', () => finish(review(request.operationId)))
+    socket.once('connect', () => { try { const peer = kernelPeer(socket, addon); if (peer.uid !== 0 || peer.gid !== 0 || peer.pid !== actual.identity.pid) return refused(); socket.write(encodeUpgradeIpcFrame(request)) } catch (error) { finish(error) } })
+    socket.on('data', chunk => {
+      if (settled) return
+      if (!Buffer.isBuffer(chunk)) { finish(review(request.operationId)); return }
+      if (frameSeen) { finish(review(request.operationId)); return }
+      bytes = Buffer.concat([bytes, chunk]); if (bytes.length > UPGRADE_IPC_LIMIT) { finish(review(request.operationId)); return }
+      if (!bytes.includes(10)) return
+      frameSeen = true
+      void (async () => {
+        const after = await observeLauncher(ownership)
+        if (JSON.stringify(actual.identity) !== JSON.stringify(after.identity) || await socketIdentity(ROOT_OPERATOR_SOCKET) !== pin) return refused()
+        const response = verifyRootOperatorResponse(decodeUpgradeIpcFrame(bytes), request, after.identity, after.publicKey)
+        const observed = Date.parse(response.qualification.observedAt)
+        if (observed < started || observed > Date.now()) return refused()
+        await assertCoordinatorOwnershipCurrent(ownership); finish(undefined, response)
+      })().catch(() => finish(review(request.operationId)))
     })
+    socket.once('close', () => { if (!frameSeen) finish(review(request.operationId)) })
   })
 }
 
 /** Entry from the exact authenticated helper only; there is no retry or arbitrary root command transport. */
-export async function dispatchPreparedRootOperation(input: { operationId: string; kind: 'upgrade'|'recover'; expectedArchiveSha256: string }) {
+export async function dispatchPreparedRootOperation(input: { operationId: string; kind: 'upgrade'|'recover'; expectedArchiveSha256: string },
+  ownership: CoordinatorOwnershipCapability) {
   // A stopped recovery may need its narrowly authorized EX/stop phase before
   // observation is possible. Direct authenticated apply makes no ready claim.
-  if (input.kind === 'upgrade') await exchange(parseRootOperatorRequest({ ...input, phase: 'observe', nonce: randomUUID() }))
-  const applied = await exchange(parseRootOperatorRequest({ ...input, phase: 'apply', nonce: randomUUID() }))
+  if (input.kind === 'upgrade') await exchange(ownership, parseRootOperatorRequest({ ...input, phase: 'observe', nonce: randomUUID() }))
+  const applied = await exchange(ownership, parseRootOperatorRequest({ ...input, phase: 'apply', nonce: randomUUID() }))
   return Object.freeze({ operationId: input.operationId, ...applied.outcome!, resultDigest: applied.resultDigest, retryAllowed: false as const })
 }
 
