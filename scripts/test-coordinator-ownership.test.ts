@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { COORDINATOR_PATHS as P, assertCoordinatorOwnershipCurrent, coordinatorOwnershipInfo, parseCoordinatorOwnership, renderCoordinatorUnit } from './coordinator-ownership.mjs'
+import { AsyncResource } from 'node:async_hooks'
+import { COORDINATOR_PATHS as P, assertCoordinatorOwnershipCurrent, coordinatorOwnershipInfo, parseCoordinatorOwnership, renderCoordinatorUnit, withVisibleCoordinatorOwnership } from './coordinator-ownership.mjs'
 import { OWNED_PANEL_UNITS } from './lifecycle-ownership.mjs'
 
 const sha = 'a'.repeat(64)
@@ -43,5 +44,13 @@ describe('fixed root coordinator ownership; portable syntax only', () => {
     const parsed = parseCoordinatorOwnership(receipt())
     await expect(assertCoordinatorOwnershipCurrent(parsed)).rejects.toThrow('COORDINATOR_OWNERSHIP_SCOPE_REQUIRED')
     expect(() => coordinatorOwnershipInfo(parsed)).toThrow('COORDINATOR_OWNERSHIP_SCOPE_REQUIRED')
+  })
+  it('does not restore coordinator scope for a native callback without a live ownership capability', async () => {
+    const parsed = parseCoordinatorOwnership(receipt())
+    const resource = new AsyncResource('xpanel-native-listener')
+    await resource.runInAsyncScope(async () => {
+      await expect(withVisibleCoordinatorOwnership(parsed, async () => 'restored')).rejects.toThrow('COORDINATOR_OWNERSHIP_SCOPE_REQUIRED')
+    })
+    resource.emitDestroy()
   })
 })

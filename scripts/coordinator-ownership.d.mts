@@ -17,4 +17,5 @@ export function parseCoordinatorOwnership(value: unknown): Readonly<Record<strin
 export function coordinatorHelperFromPrepared(info: Readonly<Record<string, unknown>>, archivePath: string): CoordinatorHelperIdentity
 export function withVerifiedCoordinatorOwnership<T>(callback: (capability: CoordinatorOwnershipCapability) => Promise<T>): Promise<T>
 export function assertCoordinatorOwnershipCurrent(capability: unknown): Promise<void>
+export function withVisibleCoordinatorOwnership<T>(capability: unknown, callback: () => T | Promise<T>): Promise<T>
 export function coordinatorOwnershipInfo(capability: CoordinatorOwnershipCapability): CoordinatorOwnershipInfo

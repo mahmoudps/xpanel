@@ -14,8 +14,31 @@ import { decodeUpgradeIpcFrame, encodeUpgradeIpcFrame, parseLauncherKeyPair, UPG
 import { parseRootOperatorRequest, signRootOperatorResponse, verifyRootOperatorResponse, type RootOperatorRequest, type RootOperatorResponse } from './ops-upgrade-operator-protocol.ts'
 
 export { ROOT_OPERATOR_SOCKET } from './ops-upgrade-root-dispatch.ts'
+const MACHINE_CODE = /^[A-Z][A-Z0-9_]{0,79}$/
 const refused = (): never => { throw new Error('ROOT_OPERATOR_UNAVAILABLE') }
-const review = (operationId: string): Error => Object.assign(new Error('ROOT_OPERATOR_REVIEW_REQUIRED'), { operationId, unknownOutcome: true, retryAllowed: false })
+export function stableMachineCode(error: unknown): string {
+  const record = error && typeof error === 'object' ? error as { code?: unknown; message?: unknown } : undefined
+  const candidate = typeof record?.code === 'string' ? record.code : typeof record?.message === 'string' ? record.message : ''
+  return MACHINE_CODE.test(candidate) ? candidate : 'ROOT_OPERATOR_REVIEW_REQUIRED'
+}
+export function rootOperatorReviewRecord(operationId: string, error: unknown) {
+  return Object.freeze({ operationId, state: 'review_required' as const, code: stableMachineCode(error), retryAllowed: false as const })
+}
+const review = (operationId: string, code = 'ROOT_OPERATOR_REVIEW_REQUIRED'): Error => {
+  const stable = MACHINE_CODE.test(code) ? code : 'ROOT_OPERATOR_REVIEW_REQUIRED'
+  return Object.assign(new Error(stable), { operationId, code: stable, unknownOutcome: true, retryAllowed: false as const })
+}
+const refusalCode = (frame: Buffer): string | null => {
+  const text = frame.toString('utf8')
+  if (!text.endsWith('\n') || text.indexOf('\n') !== text.length - 1) return null
+  let parsed: unknown
+  try { parsed = JSON.parse(text) } catch { return null }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const keys = Reflect.ownKeys(parsed)
+  const value = (parsed as { refused?: unknown }).refused
+  if (keys.length !== 1 || keys[0] !== 'refused' || typeof value !== 'string' || !MACHINE_CODE.test(value)) return null
+  return value
+}
 
 async function exchange(ownership: CoordinatorOwnershipCapability, request: RootOperatorRequest): Promise<RootOperatorResponse> {
   requireLinuxRoot()
@@ -36,6 +59,8 @@ async function exchange(ownership: CoordinatorOwnershipCapability, request: Root
       bytes = Buffer.concat([bytes, chunk]); if (bytes.length > UPGRADE_IPC_LIMIT) { finish(review(request.operationId)); return }
       if (!bytes.includes(10)) return
       frameSeen = true
+      const refusedCode = refusalCode(bytes)
+      if (refusedCode) { finish(review(request.operationId, refusedCode)); return }
       void (async () => {
         const after = await observeLauncher(ownership)
         if (JSON.stringify(actual.identity) !== JSON.stringify(after.identity) || await socketIdentity(ROOT_OPERATOR_SOCKET) !== pin) return refused()
@@ -123,7 +148,7 @@ export async function startNativeRootOperatorServer() {
           if (!socket.destroyed) socket.end(encodeUpgradeIpcFrame(signRootOperatorResponse({ phase: request.phase === 'observe' ? 'ready' : 'finished', request,
             identity: { workerId, ...after.identity }, qualification: verifiedQualification, resultDigest, outcome }, pair.privateKey)))
         })
-      }).catch(() => socket.destroy()).finally(() => claim.release())
+      }).catch(error => { if (!socket.destroyed) socket.end(JSON.stringify({ refused: stableMachineCode(error) }) + '\n'); else socket.destroy() }).finally(() => claim.release())
     })
   })
   server.maxConnections = 4

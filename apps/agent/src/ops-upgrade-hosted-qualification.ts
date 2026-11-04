@@ -10,7 +10,7 @@ import { assertNativeLifecyclePrerequisites, withNativeLifecycleRecoveryObservat
 import { withLifecycleWriterAdmission, assertLifecycleWriterAdmissionHeld } from '../../../scripts/lifecycle-admission.mjs'
 import { readTrustedFile, withTrustedFile } from '../../../scripts/lifecycle-ownership.mjs'
 import { withInstallFinalizationStateDirectories } from '../../../scripts/install-finalization-native.mjs'
-import { assertCoordinatorOwnershipCurrent, coordinatorOwnershipInfo, type CoordinatorOwnershipCapability } from '../../../scripts/coordinator-ownership.mjs'
+import { assertCoordinatorOwnershipCurrent, coordinatorOwnershipInfo, withVisibleCoordinatorOwnership, type CoordinatorOwnershipCapability } from '../../../scripts/coordinator-ownership.mjs'
 import { createNativeHeldAccountHttp } from './account-provisioning-http.ts'
 import { assertProvisioningProcessBinding, unitIdentityShowArgv, openNativeProvisioningProcess, parseProvisioningProcessFiles, type ProvisioningProcessIdentity } from './account-provisioning-observer.ts'
 import { loadInstalledPeerIdentityAddon, type NativePeerIdentityAddon } from './peer-identity.ts'
@@ -94,7 +94,7 @@ export async function withNativeRootOperatorHostedUidQualification<T>(ownership:
   return callback(captured.proof)
 }
 async function ordinaryObservation(ownership: CoordinatorOwnershipCapability, request: UpgradeIpcRequest | RootOperatorRequest, recovery: boolean): Promise<Capture> {
-  await assertCoordinatorOwnershipCurrent(ownership)
+  await withVisibleCoordinatorOwnership(ownership, () => assertCoordinatorOwnershipCurrent(ownership))
   const work = async (authority: ObservationAuthority) => { await authority.assertCurrent(); return withReadonlyOperationDatabase(DATABASE, db => collectHostedObservation(ownership, request, authority, db, false)) }
   if (recovery) return withNativeLifecycleRecoveryObservation(work)
   await assertNativeLifecyclePrerequisites(ownership)
@@ -105,7 +105,7 @@ async function ordinaryObservation(ownership: CoordinatorOwnershipCapability, re
 async function collectHostedObservation(ownership: CoordinatorOwnershipCapability, request: UpgradeIpcRequest | RootOperatorRequest,
   authority: ObservationAuthority, db: ReadonlyOperationDatabase, retainProcess: boolean): Promise<Capture> {
   const owner = coordinatorOwnershipInfo(ownership)
-  await assertCoordinatorOwnershipCurrent(ownership); await authority.assertCurrent()
+  await withVisibleCoordinatorOwnership(ownership, () => assertCoordinatorOwnershipCurrent(ownership)); await authority.assertCurrent()
   let process: NativeProcessPin | undefined
   try {
     return await withTrustedFile('/etc/passwd', { maxBytes: 1024 * 1024 }, async passwd => {
@@ -139,7 +139,7 @@ async function collectHostedObservation(ownership: CoordinatorOwnershipCapabilit
           const retainedIdentity = retained ? digest(retained) : null
           const guard = async () => {
             if (signal.aborted || Date.now() >= domainDeadline) return refuse()
-            await assertCoordinatorOwnershipCurrent(ownership); await authority.assertCurrent(); await observation.assertCurrent(); await originCurrent()
+            await withVisibleCoordinatorOwnership(ownership, () => assertCoordinatorOwnershipCurrent(ownership)); await authority.assertCurrent(); await observation.assertCurrent(); await originCurrent()
             const active = await latestActive(db)
             if (active?.id !== generation.id || active.status !== 'active' || active.checksum !== generation.checksum || signal.aborted) return refuse()
             if (retainedIdentity !== null && (!authority.activeGenerationSource || digest(await authority.activeGenerationSource()) !== retainedIdentity)) return refuse()
@@ -219,7 +219,7 @@ export async function assertNativeHostedUidQualificationCurrent(value: unknown, 
   const state = qualificationState(value)
   if (state.dispatch !== dispatch) return refuse()
   await assertNativeRootOperatorDispatchHeld(dispatch); await assertNativeClosedDatabaseRecoveryScopeHeld(state.scope)
-  await assertCoordinatorOwnershipCurrent(state.ownership); await state.scope.assertCurrent()
+  await withVisibleCoordinatorOwnership(state.ownership, () => assertCoordinatorOwnershipCurrent(state.ownership)); await state.scope.assertCurrent()
   const captured = state.captured
   await readPinnedProcess(captured.process!, captured.observed, captured.account, captured.unit, captured.mainPid)
   const owner = coordinatorOwnershipInfo(state.ownership)
@@ -234,7 +234,7 @@ export async function assertNativeHostedUidQualificationCurrent(value: unknown, 
     await tool.verify()
   })
   await readPinnedProcess(captured.process!, captured.observed, captured.account, captured.unit, captured.mainPid)
-  await assertCoordinatorOwnershipCurrent(state.ownership); await assertNativeRootOperatorDispatchHeld(dispatch)
+  await withVisibleCoordinatorOwnership(state.ownership, () => assertCoordinatorOwnershipCurrent(state.ownership)); await assertNativeRootOperatorDispatchHeld(dispatch)
   if (qualificationState(value) !== state) return refuse()
 }
 /** One-shot bridge to fresh admission. A JSON digest or replay cannot consume this identity. */
