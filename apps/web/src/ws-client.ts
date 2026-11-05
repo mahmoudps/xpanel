@@ -64,6 +64,7 @@ import { WHM_SSH_CLIENT_BINDING } from './whm-ssh-client.ts'
 import { WHM_PHP_CLIENT_BINDING } from './whm-php-client.ts'
 import { WHM_FIREWALL_CLIENT_BINDING } from './whm-firewall-client.ts'
 import { WHM_MAIL_QUEUE_CLIENT_BINDING } from './whm-mail-queue-client.ts'
+import { WHM_ACCOUNT_BULK_CLIENT_BINDING } from './whm-account-bulk-client.ts'
 import { WHM_UPDATES_CLIENT_BINDING } from './whm-updates-client.ts'
 import { WHM_REPAIR_CLIENT_BINDING } from './whm-repair-client.ts'
 import { WHM_ACCOUNT_HEALTH_CLIENT_BINDING } from './whm-account-health-client.ts'
@@ -1903,6 +1904,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${WHM_PHP_CLIENT_BINDING})(askDialog);
     (${WHM_FIREWALL_CLIENT_BINDING})(askDialog);
     (${WHM_MAIL_QUEUE_CLIENT_BINDING})(askDialog);
+    (${WHM_ACCOUNT_BULK_CLIENT_BINDING})(askDialog);
     (${WHM_SERVICE_DETAIL_CLIENT_BINDING})(askDialog);
     (${WHM_DNS_TOOLS_CLIENT_BINDING})(askDialog);
     (${WHM_SECURITY_TOOLS_CLIENT_BINDING})(askDialog);

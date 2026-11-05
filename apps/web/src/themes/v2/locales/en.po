@@ -6107,11 +6107,6 @@ msgctxt "theme:v2"
 msgid "Use an IPv4 or IPv6 address, or a CIDR range such as 192.0.2.0/24."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
-msgctxt "theme:v2"
-msgid "Use each account’s actions and review its result before continuing."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
 msgctxt "theme:v2"
 msgid "Use suggested values"

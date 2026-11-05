@@ -4293,9 +4293,13 @@ msgstr "تغيير TTL جماعي"
 msgid "Bulk actions run one message at a time, up to 50 messages, and report each result."
 msgstr "تُنفَّذ الإجراءات الجماعية رسالةً تلو الأخرى، حتى 50 رسالة، مع نتيجة لكل منها."
 
-#: apps/web/src/board-port/approved-whm-account-components.ts
-msgid "Bulk changes have no reviewed sequential-operation contract. Use each account’s real actions and review its result before continuing. Selection does not modify accounts."
-msgstr "لا يوجد عقد مراجع لتنفيذ التغييرات الجماعية بالتسلسل. استخدم إجراءات كل حساب الفعلية وراجع نتيجتها قبل المتابعة. الاختيار لا يعدّل الحسابات."
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Bulk change finished: {applied} changed, {refused} not changed, {review} need review, {skipped} not attempted."
+msgstr "انتهى التغيير الجماعي: تغيّر {applied}، ولم يتغير {refused}، ويحتاج {review} إلى مراجعة، ولم تتم محاولة {skipped}."
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Bulk change unavailable. No changes were made."
+msgstr "التغيير الجماعي غير متاح. لم تُجرَ أي تغييرات."
 
 #: apps/web/src/whm-mail-queue-client.ts
 msgid "Bulk run finished: {confirmed} confirmed, {attempted} attempted, {unknown} unknown, {refused} refused or skipped."
@@ -5114,6 +5118,10 @@ msgstr "تغيّرت منذ المعاينة؛ لم تُكتب"
 #: apps/web/src/audit-labels.ts
 msgid "Changed the hostname"
 msgstr "غيّر اسم المضيف"
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Changed. Hosting verification is still required."
+msgstr "تم التغيير. ما زال التحقق من الاستضافة مطلوبًا."
 
 #: apps/web/src/board-port/extensions/store.ts
 msgid "Changelog"
@@ -10714,6 +10722,10 @@ msgstr "DNS الديناميكي غير متاح. لم تبدأ أي عملية 
 #: apps/web/src/board-port/whm-whmcs-workspace.ts
 msgid "Each WHMCS package name maps to one xPanel plan. Calls with an unmapped package are refused. Mapping changes are saved with Save connection."
 msgstr "يرتبط كل اسم باقة في WHMCS بخطة واحدة في xPanel. تُرفض الاستدعاءات التي تحمل باقة غير مربوطة. تُحفظ تغييرات الربط عند اختيار حفظ الاتصال."
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Each account is changed in turn with the same checks as its own action."
+msgstr "يتغير كل حساب بدوره بالفحوصات نفسها التي يخضع لها إجراؤه الفردي."
 
 #: apps/web/src/board-port/xwhm-dashboard.ts
 msgid "Each account is limited inside its own {slice}, so one busy site cannot take the whole server."
@@ -22123,6 +22135,10 @@ msgctxt "whm-backup-files-client"
 msgid "Not attempted yet"
 msgstr "لم يُحاوَل بعد"
 
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Not attempted."
+msgstr "لم تتم المحاولة."
+
 #: apps/web/src/whm-databases-client.ts
 msgid "Not attributed"
 msgstr "غير منسوب"
@@ -22151,6 +22167,26 @@ msgstr "غير مخزَّن مؤقتًا: إعادة توجيه"
 #: apps/web/src/sw-optimize-client.ts
 msgid "Not cached: suspended"
 msgstr "غير مخزَّن مؤقتًا: موقوف"
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Not changed."
+msgstr "لم يتغير."
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Not changed: plan or owner limits do not allow it."
+msgstr "لم يتغير: حدود الخطة أو المالك لا تسمح بذلك."
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Not changed: the account is not in a state for this change."
+msgstr "لم يتغير: حالة الحساب لا تسمح بهذا التغيير."
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Not changed: this account is no longer available."
+msgstr "لم يتغير: هذا الحساب لم يعد متاحًا."
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Not changed: you do not have permission for this account."
+msgstr "لم يتغير: ليست لديك صلاحية على هذا الحساب."
 
 #: apps/web/src/account-htaccess-client.ts apps/web/src/account-runtime-client.ts apps/web/src/account-web-directives-client.ts apps/web/src/board-port/account-htaccess-workspace.ts apps/web/src/board-port/account-web-directives-workspace.ts apps/web/src/board-port/extensions/shared.ts apps/web/src/board-port/site-health-workspace.ts apps/web/src/db-engines-client.ts apps/web/src/site-health-client.ts apps/web/src/whm-dns-tools-client.ts apps/web/src/whm-mail-quality-client.ts apps/web/src/whm-service-detail-client.ts
 msgid "Not checked"
@@ -24252,6 +24288,10 @@ msgstr "النتيجة غير معروفة"
 msgid "Outcome unknown. Postfix may have changed this message; reload the queue before acting again."
 msgstr "النتيجة غير معروفة. ربما غيّر Postfix هذه الرسالة؛ أعد قراءة الطابور قبل أي إجراء آخر."
 
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Outcome unknown. Review this account before retrying."
+msgstr "النتيجة غير معروفة. راجع هذا الحساب قبل إعادة المحاولة."
+
 #: apps/web/src/acct-backup-runs-client.ts apps/web/src/whm-backups-client.ts
 msgid "Outcome unknown; review required"
 msgstr "النتيجة غير معروفة؛ تلزم المراجعة"
@@ -24405,6 +24445,10 @@ msgstr "المالك بعد إنشاء هذا الحساب"
 #: apps/web/src/board-port/approved-whm-account-components.ts
 msgid "Owner choices not read"
 msgstr "خيارات المالك غير مقروءة"
+
+#: apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgid "Owner for selected accounts"
+msgstr "مالك الحسابات المحددة"
 
 #: apps/web/src/board-port/account-collaboration-workspace.ts apps/web/src/board-port/mailx-collections-workspace.ts
 msgid "Owner mailbox"
@@ -25556,6 +25600,10 @@ msgstr "حصة القرص في الخطة"
 #: apps/web/src/board-port/approved-xwhm.ts
 msgid "Plan editor"
 msgstr "محرر الخطط"
+
+#: apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgid "Plan for selected accounts"
+msgstr "خطة الحسابات المحددة"
 
 #: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/whm-transfer-workspace.ts
 msgid "Plan here"
@@ -29084,6 +29132,10 @@ msgstr "إعادة القراءة"
 msgctxt "whm-default-site-client"
 msgid "Reload"
 msgstr "إعادة القراءة"
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Reload accounts and review them before another bulk change."
+msgstr "أعد تحميل الحسابات وراجعها قبل أي تغيير جماعي آخر."
 
 #: apps/web/src/board-port/xmail-calendar-view.ts
 msgid "Reload calendars"
@@ -34060,6 +34112,10 @@ msgstr "حدّد 50 نطاقًا كحد أقصى في الفحص الواحد. �
 msgid "Select at most 50 messages for one bulk run. Nothing was sent."
 msgstr "حدّد 50 رسالة كحد أقصى في التنفيذ الواحد. لم يُرسل شيء."
 
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Select at most {limit} accounts for one bulk change."
+msgstr "اختر {limit} حسابًا على الأكثر لكل تغيير جماعي."
+
 #: apps/web/src/whm-backup-files-client.ts
 msgid "Select files or folders, then review the restore."
 msgstr "حدّد ملفات أو مجلدات ثم راجع الاستعادة."
@@ -34128,6 +34184,10 @@ msgstr "حسابات محددة"
 msgctxt "approved-whm-account-components"
 msgid "Selected accounts"
 msgstr "الحسابات المختارة"
+
+#: apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgid "Selected accounts change one at a time with the same checks as each account’s own action, up to 25 per request. Each result is listed here; nothing is retried automatically."
+msgstr "تتغير الحسابات المحددة واحدًا تلو الآخر بالفحوصات نفسها التي يخضع لها إجراء كل حساب، حتى 25 حسابًا في الطلب الواحد. تظهر نتيجة كل حساب هنا، ولا يُعاد أي شيء تلقائيًا."
 
 #: apps/web/src/board-port/account-backup-workspace.ts
 msgid "Selected archive"
@@ -37813,6 +37873,10 @@ msgstr "تغيّرت الهوية منذ قراءتها. أعد التحميل �
 #: apps/web/src/whm-panel-branding-client.ts
 msgid "The built-in image is shown again on the next page each person opens."
 msgstr "تظهر الصورة المدمجة مجددًا في الصفحة التالية التي يفتحها كل شخص."
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "The bulk result could not be verified. Reload accounts and review them before retrying."
+msgstr "تعذر التحقق من نتيجة التغيير الجماعي. أعد تحميل الحسابات وراجعها قبل إعادة المحاولة."
 
 #: apps/web/src/board-port/whm-support-workspace.ts
 msgid "The bundle is one JSON document generated on demand. It contains only the items below, after the redaction rules below. Review the manifest, confirm, then download. Nothing is sent anywhere; you decide whom to share the file with."
@@ -47557,6 +47621,22 @@ msgstr "{n, plural, zero {# ثانية} one {ثانية واحدة} two {ثان�
 msgid "{n, plural, one {# source token is stored.} other {# source tokens are stored.}}"
 msgstr "{n, plural, zero {لا توجد رموز محفوظة للخادم المصدر.} one {رمز واحد محفوظ للخادم المصدر.} two {رمزان محفوظان للخادم المصدر.} few {# رموز محفوظة للخادم المصدر.} many {# رمزًا محفوظًا للخادم المصدر.} other {# رمز محفوظ للخادم المصدر.}}"
 
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "{n, plural, one {Change {n} account to plan {plan}?} other {Change {n} accounts to plan {plan}?}}"
+msgstr "{n, plural, other {تغيير خطة الحسابات المحددة ({n}) إلى {plan}؟}}"
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "{n, plural, one {Move {n} account to owner {owner}?} other {Move {n} accounts to owner {owner}?}}"
+msgstr "{n, plural, other {نقل الحسابات المحددة ({n}) إلى المالك {owner}؟}}"
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "{n, plural, one {Suspend {n} account?} other {Suspend {n} accounts?}}"
+msgstr "{n, plural, other {تعليق الحسابات المحددة ({n})؟}}"
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "{n, plural, one {Unsuspend {n} account?} other {Unsuspend {n} accounts?}}"
+msgstr "{n, plural, other {إلغاء تعليق الحسابات المحددة ({n})؟}}"
+
 #: apps/web/src/account-ssl-client.ts
 msgid "{names} is installed on {domains}. Those sites switch to another certificate that covers them, or to the server default certificate. The certificate is not revoked."
 msgstr "الشهادة {names} مثبّتة على {domains}. ستنتقل هذه المواقع إلى شهادة أخرى تغطيها، أو إلى الشهادة الافتراضية للخادم. لن تُلغى الشهادة لدى الجهة المصدِرة."
@@ -47592,6 +47672,10 @@ msgstr "{n, plural, one {ساعة واحدة} two {ساعتان} few {{n} ساع
 #: apps/web/src/whm-mail-queue-client.ts
 msgid "{n} min"
 msgstr "{n, plural, one {دقيقة واحدة} two {دقيقتان} few {{n} دقائق} other {{n} دقيقة}}"
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "{n} selected"
+msgstr "{n} مختار"
 
 #: apps/web/src/whm-mail-server-client.ts
 msgid "{n} values differ from the configuration xPanel renders. Use the reviewed repair workflow."
