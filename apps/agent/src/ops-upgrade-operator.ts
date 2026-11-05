@@ -12,7 +12,7 @@ import { createNativeClosedRecoveryHostedUidQualification, withNativeRootOperato
 import { ROOT_OPERATOR_SOCKET, rootOperatorArgv, withVerifiedNativeRootOperatorDispatch } from './ops-upgrade-root-dispatch.ts'
 import { decodeUpgradeIpcFrame, encodeUpgradeIpcFrame, parseLauncherKeyPair, UPGRADE_IPC_LIMIT } from './ops-upgrade-ipc.ts'
 import { parseRootOperatorRequest, signRootOperatorResponse, verifyRootOperatorResponse, type RootOperatorRequest, type RootOperatorResponse } from './ops-upgrade-operator-protocol.ts'
-import { parseRootOperatorRefusal, rootOperatorServerRefusal, ROOT_OPERATOR_MACHINE_CODE } from './ops-upgrade-operator-refusal.ts'
+import { parseRootOperatorRefusal, rootOperatorServerRefusal, ROOT_OPERATOR_MACHINE_CODE, stableMachineCode } from './ops-upgrade-operator-refusal.ts'
 
 export { ROOT_OPERATOR_SOCKET } from './ops-upgrade-root-dispatch.ts'
 export { stableMachineCode, rootOperatorReviewRecord } from './ops-upgrade-operator-refusal.ts'
@@ -39,15 +39,17 @@ async function exchange(ownership: CoordinatorOwnershipCapability, request: Root
   if (JSON.stringify(self.argv) !== JSON.stringify(rootOperatorArgv(actual.receipt.nodePath, actual.receipt.helper.releaseRoot, request))) return refused()
   return new Promise<RootOperatorResponse>((resolve, reject) => {
     const socket = createConnection({ path: ROOT_OPERATOR_SOCKET }); let bytes = Buffer.alloc(0), settled = false, frameSeen = false
+    // Fixed client-side codes name the failing transport step; they carry no path, text or peer data.
+    const phase = request.phase === 'apply' ? 'APPLY' : 'OBSERVE', invalid = () => finish(review(request.operationId, 'ROOT_OPERATOR_PROTOCOL_INVALID'))
     const finish = (error?: unknown, response?: RootOperatorResponse) => { if (settled) return; settled = true; clearTimeout(timer); socket.destroy(); error ? reject(error) : resolve(response!) }
-    const timer = setTimeout(() => finish(review(request.operationId)), request.phase === 'apply' ? 1800000 : 65000)
-    socket.once('error', () => finish(review(request.operationId)))
+    const timer = setTimeout(() => finish(review(request.operationId, 'ROOT_OPERATOR_CLIENT_TIMEOUT_' + phase)), request.phase === 'apply' ? 1800000 : 65000)
+    socket.once('error', () => finish(review(request.operationId, 'ROOT_OPERATOR_SOCKET_ERROR_' + phase)))
     socket.once('connect', () => { try { const peer = kernelPeer(socket, addon); if (peer.uid !== 0 || peer.gid !== 0 || peer.pid !== actual.identity.pid) return refused(); socket.write(encodeUpgradeIpcFrame(request)) } catch (error) { finish(error) } })
     socket.on('data', chunk => {
       if (settled) return
-      if (!Buffer.isBuffer(chunk)) { finish(review(request.operationId)); return }
-      if (frameSeen) { finish(review(request.operationId)); return }
-      bytes = Buffer.concat([bytes, chunk]); if (bytes.length > UPGRADE_IPC_LIMIT) { finish(review(request.operationId)); return }
+      if (!Buffer.isBuffer(chunk)) { invalid(); return }
+      if (frameSeen) { invalid(); return }
+      bytes = Buffer.concat([bytes, chunk]); if (bytes.length > UPGRADE_IPC_LIMIT) { invalid(); return }
       if (!bytes.includes(10)) return
       frameSeen = true
       const refusedCode = parseRootOperatorRefusal(bytes)
@@ -59,9 +61,9 @@ async function exchange(ownership: CoordinatorOwnershipCapability, request: Root
         const observed = Date.parse(response.qualification.observedAt)
         if (observed < started || observed > Date.now()) return refused()
         await assertCoordinatorOwnershipCurrent(ownership); finish(undefined, response)
-      })().catch(() => finish(review(request.operationId)))
+      })().catch(error => finish(review(request.operationId, stableMachineCode(error))))
     })
-    socket.once('close', () => { if (!frameSeen) finish(review(request.operationId)) })
+    socket.once('close', () => { if (!frameSeen) finish(review(request.operationId, 'ROOT_OPERATOR_CLOSED_WITHOUT_FRAME_' + phase)) })
   })
 }
 
@@ -138,6 +140,9 @@ export async function startNativeRootOperatorServer() {
           await key.verify(); await assertCoordinatorOwnershipCurrent(ownership)
           if (!socket.destroyed) socket.end(encodeUpgradeIpcFrame(signRootOperatorResponse({ phase: request.phase === 'observe' ? 'ready' : 'finished', request,
             identity: { workerId, ...after.identity }, qualification: verifiedQualification, resultDigest, outcome }, pair.privateKey)))
+          // The client sends apply as soon as it verifies ready; a read-only observe must not hold the
+          // process slot through its trailing ownership checks, or apply is refused as busy.
+          if (request.phase === 'observe') claim.release()
         })
       }).catch(error => sendRefusal(socket, error)).finally(() => claim.release())
     })

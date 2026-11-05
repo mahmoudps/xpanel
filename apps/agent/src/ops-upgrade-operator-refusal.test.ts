@@ -1,13 +1,11 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import { test } from 'vitest'
 import {
   ROOT_OPERATOR_MACHINE_CODE, encodeRootOperatorRefusal, parseRootOperatorRefusal, rootOperatorRefusalJournalLine,
   rootOperatorReviewRecord, rootOperatorServerRefusal, rootOperatorServerRefusalCode, stableMachineCode,
-} from '../apps/agent/src/ops-upgrade-operator-refusal.ts'
+} from './ops-upgrade-operator-refusal.ts'
 
-// Standalone node:test file: run with the pinned runtime from the checkout root, e.g.
-// node --test tests/root-operator-refusal.node-test.ts
-// No vitest or workspace packages are needed; only the pure refusal rules are covered here.
+// Only the pure refusal rules are covered here; no socket, filesystem or authority is used.
 const operationId = '11111111-1111-4111-8111-111111111111'
 const stable = (message: string, code: string): Error => Object.assign(new Error(message), { code })
 
