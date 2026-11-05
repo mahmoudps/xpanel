@@ -7,7 +7,7 @@ import { StateStore, type StateSnapshot } from '@xpanel/state'
 import { detectOs } from '@xpanel/os'
 import { system } from '@xpanel/render'
 import { assertNativeLifecyclePrerequisites, withNativeLifecycleRecoveryObservation, assertNativeClosedDatabaseRecoveryScopeHeld } from '../../../scripts/lifecycle-root-safety.mjs'
-import { withLifecycleWriterAdmission, assertLifecycleWriterAdmissionHeld } from '../../../scripts/lifecycle-admission.mjs'
+import { withLifecycleWriterAdmission, assertLifecycleWriterAdmissionHeld, currentLifecycleWriterAdmission, withVisibleLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
 import { readTrustedFile, withTrustedFile } from '../../../scripts/lifecycle-ownership.mjs'
 import { withInstallFinalizationStateDirectories } from '../../../scripts/install-finalization-native.mjs'
 import { assertCoordinatorOwnershipCurrent, coordinatorOwnershipInfo, withVisibleCoordinatorOwnership, type CoordinatorOwnershipCapability } from '../../../scripts/coordinator-ownership.mjs'
@@ -98,7 +98,10 @@ async function ordinaryObservation(ownership: CoordinatorOwnershipCapability, re
   const work = async (authority: ObservationAuthority) => { await authority.assertCurrent(); return withReadonlyOperationDatabase(DATABASE, db => collectHostedObservation(ownership, request, authority, db, false)) }
   if (recovery) return withNativeLifecycleRecoveryObservation(work)
   await assertNativeLifecyclePrerequisites(ownership)
-  return withLifecycleWriterAdmission(() => work({ assertCurrent: assertLifecycleWriterAdmissionHeld, signal: AbortSignal.timeout(60000) }))
+  return withLifecycleWriterAdmission(() => {
+    const admission = currentLifecycleWriterAdmission()
+    return work({ assertCurrent: () => withVisibleLifecycleWriterAdmission(admission, () => assertLifecycleWriterAdmissionHeld()), signal: AbortSignal.timeout(60000) })
+  })
 }
 
 /** All SQL/StateStore/held-HTTP resources close before the returned evidence can be used for native admission. */

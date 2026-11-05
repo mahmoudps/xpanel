@@ -7,6 +7,8 @@ export function isLifecycleManaged(): Promise<boolean>
 export function assertLifecycleWritesAllowed(): Promise<void>
 export function lifecycleAdmissionResponse(request: Request, options?: {surface?: 'api' | 'agent'}): Promise<Response | null>
 export function withLifecycleWriterAdmission<T>(callback: () => T | Promise<T>): Promise<T>
+export function currentLifecycleWriterAdmission(): object
+export function withVisibleLifecycleWriterAdmission<T>(capability: unknown, callback: () => T | Promise<T>): Promise<T>
 export function assertLifecycleWriterAdmissionHeld(): Promise<void>
 export function withLifecycleRecoveryObservationAdmission<T>(capability: unknown, callback: () => Promise<T>): Promise<T>
 export function assertLifecycleRecoveryObservationAdmissionHeld(capability: unknown): Promise<void>

@@ -25,7 +25,7 @@ vi.mock('../../../scripts/lifecycle-root-safety.mjs', () => ({ assertNativeLifec
 vi.mock('./ops-upgrade-root-dispatch.ts', () => ({ assertNativeRootOperatorDispatchHeld: seams.dispatchHeld,
   getNativeRootOperatorDispatchInfo: () => ({ request: seams.request, coordinatorReceiptSha256: 'a'.repeat(64) }),
 }))
-vi.mock('../../../scripts/lifecycle-admission.mjs', () => ({ withLifecycleWriterAdmission: (run: () => unknown) => run(), assertLifecycleWriterAdmissionHeld: seams.shared }))
+vi.mock('../../../scripts/lifecycle-admission.mjs', () => ({ withLifecycleWriterAdmission: (run: () => unknown) => run(), assertLifecycleWriterAdmissionHeld: seams.shared, currentLifecycleWriterAdmission: () => ({}), withVisibleLifecycleWriterAdmission: async (_capability: unknown, work: () => unknown) => work() }))
 vi.mock('../../../scripts/lifecycle-ownership.mjs', () => ({
   withTrustedFile: (_path: string, _options: unknown, callback: (pin: unknown) => unknown) => callback({ bytes: Buffer.from('xpanel:x:992:992:xPanel:/var/lib/xpanel:/usr/sbin/nologin\n'), fd: 40, verify: vi.fn() }),
   readTrustedFile: async () => ({ bytes: Buffer.from('ID=ubuntu\nVERSION_ID=24.04\n') }),
