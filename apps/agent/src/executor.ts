@@ -373,7 +373,7 @@ const HOST_MEASUREMENT_READS = new Set<string>([
   '/proc/stat', '/proc/net/dev',
   '/proc/self/mountinfo',
   '/etc/os-release', '/usr/lib/os-release', '/opt/xpanel/VERSION',
-  '/etc/resolv.conf', '/proc/sys/kernel/hostname',
+  '/etc/resolv.conf', '/proc/sys/kernel/hostname', '/sys/fs/selinux/enforce',
   '/run/reboot-required',
   '/sys/fs/cgroup/xpanel.slice/cgroup.subtree_control',
   '/sys/fs/cgroup/cgroup.subtree_control',

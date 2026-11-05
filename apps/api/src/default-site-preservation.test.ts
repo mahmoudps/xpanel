@@ -55,7 +55,7 @@ describe('real HTTP legacy writers preserve dedicated default-site policy', () =
     const f = await fixture()
     const response = await f.request('/api/server/hostname', 'POST', { hostname: 'renamed.example.test' })
     expect(response.status, await response.clone().text()).toBe(200)
-    expect(await response.json()).toMatchObject({ ok: true, hostname: 'renamed.example.test' })
+    expect(await response.json()).toMatchObject({ hostname: 'renamed.example.test', application: { nativeApplied: false, kernelHostname: null }, reconcile: null })
     expect(await f.state.store.getServerSettings()).toEqual({ ...settings(), hostname: 'renamed.example.test', defaultSite: policy })
   })
   it('refuses a legacy save after policy changes before its writer lease without overwriting the newer policy', async () => {

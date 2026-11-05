@@ -914,38 +914,24 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         backendTlsPort: current?.backendTlsPort ?? 8443,
       })
 
-      const ips = await helpers.store.listServerIps()
-      const primaryIp = ips.find((i) => i.version === 4 && i.isPrimary)?.address ?? '127.0.1.1'
-      const shortHost = hostname.split('.')[0] ?? hostname
-      const renderedFiles = [
-        { path: '/etc/hostname', mode: 0o644, content: `${hostname}\n` },
-        {
-          path: '/etc/hosts',
-          mode: 0o644,
-          content: `127.0.0.1 localhost\n${primaryIp} ${hostname} ${shortHost}\n::1 localhost ip6-localhost ip6-loopback\n`,
-        },
-      ]
-      await ext.write('hostname-state.json', {
-        hostname,
-        previousHostname,
-        renderedFiles,
-        updatedAt: new Date().toISOString(),
-      })
-
       const reconcile = await helpers.triggerReconcile(caller)
+      // Applied only when the agent reconciled and observed the saved name as the kernel host name.
+      const observed = reconcile?.body.kernelHostname
+      const kernelHostname = typeof observed === 'string' ? observed : null
+      const nativeApplied = reconcile !== null && reconcile.ok && (reconcile.body.status === 'applied' || reconcile.body.status === 'noop') && kernelHostname === updated.hostname
       await helpers.emitAudit({
         actor: caller.principal.username,
         action: 'server.hostname_change',
         target: `server:${hostname}`,
-        detail: { previousHostname, hostname },
+        detail: { previousHostname, hostname, nativeApplied },
         outcome: 'ok',
         principalId: caller.principal.id,
       })
       return jsonResponse({
-        ok: true,
         hostname: updated.hostname,
         previousHostname,
-        files: renderedFiles,
+        settings: updated,
+        application: { nativeApplied, kernelHostname },
         reconcile: reconcile?.body ?? null,
       })
     }

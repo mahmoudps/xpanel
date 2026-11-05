@@ -322,14 +322,19 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     })
     assert.equal(hostRes.status, 200)
     const hostBody = (await hostRes.json()) as {
-      ok: boolean
       hostname: string
       previousHostname: string
-      files: { path: string; content: string }[]
+      settings: { hostname: string }
+      application: { nativeApplied: boolean; kernelHostname: string | null }
+      reconcile: { status: string } | null
     }
     assert.equal(hostBody.hostname, 'edge01.xpanel.test')
     assert.equal(hostBody.previousHostname, 'whm.xpanel.test')
-    assert.ok(hostBody.files.some((f) => f.path === '/etc/hostname' && f.content.includes('edge01.xpanel.test')))
+    assert.equal(hostBody.settings.hostname, 'edge01.xpanel.test')
+    assert.ok(hostBody.reconcile)
+    // The memory-only executor has no kernel host name, so the saved name is not reported as applied.
+    assert.deepEqual(hostBody.application, { nativeApplied: false, kernelHostname: null })
+    assert.equal('files' in hostBody, false)
 
     // Initialize filesystem quotas
     const quotaRes = await root.request('/api/server/quotas/init', {
