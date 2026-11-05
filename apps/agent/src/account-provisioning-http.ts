@@ -8,7 +8,7 @@ import { ACCOUNT_PROBE_HOLD_SECONDS, ACCOUNT_PROBE_ROUTE, accountProbePaths } fr
 import { canonicalProvisioningIdentity, parseProvisioningReconcileRequest } from '../../../packages/core/src/account-provisioning-contract.ts'
 import { assertProvisioningProcessBinding, openNativeProvisioningProcess, parseProvisioningProcessFiles, type HeldProvisioningHttpRequest, type ProvisioningProcessIdentity, type ReadonlyAccountObservationOptions } from './account-provisioning-observer.ts'
 import { captureCanarySource, type HeldCanarySource, type HeldHttpConnection, type NativeAccountHttpSubject, type NativeProvisioningHttpOptions } from './account-provisioning-http-source.ts'
-import { heldObservationInReaderScope, type ProvisioningDatabaseReaderPort } from './account-provisioning-database-reader.ts'
+import type { ProvisioningDatabaseReaderPort } from './account-provisioning-database-reader.ts'
 import type { HostEffectAuthority } from './host-effect-authority.ts'
 import type { NativePeerIdentityAddon, KernelPeerCredentials } from './peer-identity.ts'
 import { assertUnixSocketPeerHeldByProcess, inspectHeldUnixSocketPeer, type UnixSocketPeerPin } from './unix-socket-peer.ts'
@@ -367,9 +367,8 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
 /** Existing provisioning port: preserve its real job/request binding and reuse the concrete exchange. */
 export function createNativeAccountProvisioningHttp(options: NativeAccountHttpOptions): NativeHttpPort {
   const exchange = createNativeHeldAccountHttp(options)
-  const reader = options.databaseReader
-  // Every observation unit and later assertion of a held request re-enters the pinned read-only reader.
-  const scoped = <T>(work: () => Promise<T>): Promise<T> => reader ? reader.withReadonlyDatabase(async () => work()) : work()
+  // No reader is held across the native exchange: the canary source opens a short pinned reader for each
+  // generation read, because any live control write during a held reader refuses that reader.
   const bound = (input: Parameters<NativeHttpPort['assertHttpAvailable']>[0]) => {
     const request = parseProvisioningReconcileRequest(input.request), account = input.account
     if (canonicalProvisioningIdentity(request.authority.account) !== canonicalProvisioningIdentity({
@@ -379,10 +378,9 @@ export function createNativeAccountProvisioningHttp(options: NativeAccountHttpOp
     return { account, sourceChecksum: request.authority.desired.checksum, binding: request.binding }
   }
   return {
-    async assertHttpAvailable(input, context) { await scoped(async () => exchange.assertAvailable(bound(input).account, context)) },
+    async assertHttpAvailable(input, context) { await exchange.assertAvailable(bound(input).account, context) },
     async openCorrelatedHttpRequest(input: HttpInput, context) {
-      const held = await scoped(async () => exchange.open({ ...bound(input), challenge: input.challenge }, context))
-      return reader ? heldObservationInReaderScope(reader, held) : held
+      return exchange.open({ ...bound(input), challenge: input.challenge }, context)
     },
   }
 }
