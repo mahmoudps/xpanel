@@ -35,6 +35,15 @@ describe('theme-neutral account surface projection', () => {
     expect(projectPanelSurface(panel({ activeRoute: '/files/manager', catalog: unqualified }))).toBeUndefined()
   })
 
+  it('opens access and error log reads from the tools that deliver the logs page', () => {
+    const kinds = (unqualified: string) => projectPanelSurface(panel({ catalog: catalog.map(tool => tool.id === unqualified
+      ? { ...tool, status: 'researched' as const, delivery: { ...tool.delivery, status: 'researched' as const } } : tool) }))?.authority.logKinds
+    expect(kinds('no-such-tool')).toEqual(['access', 'error'])
+    expect(kinds('raw-access')).toEqual(['access', 'error'])
+    expect(kinds('visitors')).toEqual(['error'])
+    expect(kinds('errors')).toEqual(['access'])
+  })
+
   it('drops foreign account collections, mismatched plans and database grants outside the account', () => {
     const ownUser: DatabaseUser = { id: 'db-user-a', accountId: account.id, name: 'alice_app', grants: [{ databaseId: 'db-a', privileges: ['SELECT'] }] }
     const foreignUser: DatabaseUser = { ...ownUser, id: 'db-user-b', accountId: 'account-b', name: 'alice_foreign' }

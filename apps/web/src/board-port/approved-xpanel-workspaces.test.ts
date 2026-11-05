@@ -324,6 +324,17 @@ describe('account workspace structures and native binding boundaries', () => {
         assert.equal(emptyDocument.forms.length, 0);
     });
 
+    it('connects the logs workspace from visitors and errors, not from the raw-access download', () => {
+        const logs = (catalog: ReturnType<typeof qualify>) => renderApprovedXpanelWorkspace({ route: '/metrics/logs', locale: 'en', readOnly: false, account, domains: [domain], visibility: owner, catalog })!;
+        const download = logs(qualify('raw-access'));
+        assert.match(download, /data-workspace-mode="read-only"/);
+        assert.match(download, /data-logs-kinds=""/);
+        const tail = logs(qualify('visitors'));
+        assert.match(tail, /data-workspace-mode="connected"/);
+        assert.match(tail, /data-logs-kinds="access"/);
+        assert.match(logs(qualify('visitors', 'errors')), /data-logs-kinds="access error"/);
+    });
+
     it('renders self sessions from explicit personal authority independently of native qualification', () => {
         const base = { route: '/security/account', locale: 'en' as const, readOnly: false, account, domains: [domain], visibility: owner };
         const authPersonal = { state: 'ready' as const, canChangePassword: false, canReadSessions: true, canRevokeSessions: true, canReadApiTokens: false, canManageApiTokens: false };

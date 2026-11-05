@@ -116,7 +116,8 @@ function authority(
     allowUnlimited: context.allowUnlimited, ownerId: context.ownerId,
     relatedRoutes: access.routes, qualifiedTools: access.qualifiedTools, authorizedTools: access.authorizedTools,
     logKinds: [
-      ...(access.qualifiedTools.has('raw-access') ? ['access' as const] : []),
+      // The page shows a bounded access-log tail (visitors); raw-access is the gzip download.
+      ...(access.qualifiedTools.has('visitors') ? ['access' as const] : []),
       ...(access.qualifiedTools.has('errors') ? ['error' as const] : []),
     ],
     domainSelectionAvailable: context.domainSelectionAvailable === true,

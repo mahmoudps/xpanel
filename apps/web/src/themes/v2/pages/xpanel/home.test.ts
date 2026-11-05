@@ -191,6 +191,17 @@ describe('v2 account home', () => {
     expect(V2_PANEL_HOME_CSS).toContain('.v2-panel-home .v2-home-tool-grid{display:flex;flex-direction:column')
   })
 
+  it('opens the SSL and site log cards from the tools that deliver their pages', () => {
+    const card = (catalog: PanelPageProps['catalog'], keys: string) => parseMarkup(renderV2PanelHome(props({ catalog }))).find(node => node.attrs.get('data-tool-keys')?.endsWith(keys))!
+    const without = (id: string) => qualified.map(tool => tool.id === id ? { ...tool, status: 'researched' as const, delivery: { ...tool.delivery, status: 'researched' as const } } : tool)
+    for (const [keys, id] of [['https certificate autossl wildcard tls', 'ssl-tls-status'], ['error log apache nginx', 'visitors']] as const) {
+      expect(card(qualified, keys).attrs.get('data-tool-capability')).toBe(id)
+      expect(card(qualified, keys).tag).toBe('a')
+      expect(card(without(id), keys).tag).toBe('button')
+    }
+    expect(card(without('ssl-certificates'), 'https certificate autossl wildcard tls').tag).toBe('a')
+  })
+
   it('does not treat a foreign certificate record as the stored certificate of an owned site', () => {
     const certificateId = 'owned-domain-certificate-reference'
     const html = renderV2PanelHome(props({ domains: [{ ...domain, certificateId }], certificates: [{ id: certificateId, accountId: 'another-account', names: ['other.test'], source: 'acme', challenge: 'http-01', notAfter: '2027-01-01T00:00:00Z', autoRenew: true }] }))
