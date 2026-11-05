@@ -182,7 +182,8 @@ export function createCronWorkspaceRoutes(ports: CronWorkspacePorts) {
       detail: { jobCount: saved.length }, outcome: 'ok', principalId: caller.principal.id }, { accountId: account.id, resellerId: account.ownerId })
     const reconcile = await ports.triggerReconcile(caller, { scope: { accountId: account.id, resellerId: account.ownerId } })
     // Acknowledging a schedule whose units were not installed would leave a saved job that the host cannot run.
-    assertCronWorkspaceApplied(reconcile?.body)
+    // Without a host agent no reconcile runs (null): the save stays configuration-only with nativeApplied false.
+    if (reconcile) assertCronWorkspaceApplied(reconcile.body)
     return json({ ...project(account, saved), reconcile: reconcile?.body ?? null }, mode === 'create' ? 201 : 200)
   }
 }
