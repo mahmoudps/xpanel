@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { lstat, realpath } from 'node:fs/promises'
 import { fail, type Account, type Domain } from '@xpanel/core'
-import { latestActive, withReadonlyOperationDatabase, getReadonlyOperationDatabaseOrigin, assertReadonlyOperationDatabaseCurrent, type ReadonlyOperationDatabase } from '@xpanel/db'
+import { latestActive, withReadonlyOperationDatabase, getReadonlyOperationDatabaseOrigin, assertReadonlyOperationDatabaseCurrent, withVisibleReadonlyOperationDatabase, type ReadonlyOperationDatabase } from '@xpanel/db'
 import { StateStore, type StateSnapshot } from '@xpanel/state'
 import { detectOs } from '@xpanel/os'
 import { system } from '@xpanel/render'
@@ -140,7 +140,7 @@ async function collectHostedObservation(ownership: CoordinatorOwnershipCapabilit
           const manifest = await journal.readManifest(generation.id)
           if (!manifest || manifest.generationId !== generation.id || manifest.filesChecksum !== generation.checksum || manifest.stateChecksum !== sourceChecksum) return refuse()
           const retainedIdentity = retained ? digest(retained) : null
-          const guard = async () => {
+          const guard = async () => withVisibleReadonlyOperationDatabase(db, async () => {
             if (signal.aborted || Date.now() >= domainDeadline) return refuse()
             await withVisibleCoordinatorOwnership(ownership, () => assertCoordinatorOwnershipCurrent(ownership)); await authority.assertCurrent(); await observation.assertCurrent(); await originCurrent()
             const active = await latestActive(db)
@@ -148,7 +148,7 @@ async function collectHostedObservation(ownership: CoordinatorOwnershipCapabilit
             if (retainedIdentity !== null && (!authority.activeGenerationSource || digest(await authority.activeGenerationSource()) !== retainedIdentity)) return refuse()
             const now = await journal.readManifest(generation.id)
             if (digest(now) !== digest(manifest)) return refuse()
-          }
+          })
           const loaded = await loadInstalledPeerIdentityAddon()
           for (const method of ['openListener', 'acceptPeer', 'verifyListenerSocket', 'closeListener', 'closeFd', 'getSocketPeerCred', 'getUnixSocketPeer']) {
             if (typeof Reflect.get(loaded, method) !== 'function') return refuse()
