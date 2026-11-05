@@ -21,14 +21,14 @@ describe('native unit health', () => {
   it('accepts only an observed active systemd unit', async () => {
     const active = probe('Id=nginx.service\nActiveState=active\n')
     await expect(active.health('nginx.service')).resolves.toEqual({ ok: true })
-    expect(active.calls[0]).toEqual(['/usr/bin/systemctl', 'show', '--no-pager', '--property=Id,Names,LoadState,ActiveState,SubState,UnitFileState', '--', 'nginx.service'])
+    expect(active.calls[0]).toEqual(['/usr/bin/systemctl', 'show', '--no-pager', '--property=ActiveState', '--', 'nginx.service'])
     const inactive = probe('ActiveState=inactive\n')
     await expect(inactive.health('nginx.service')).resolves.toEqual({ ok: false, error: 'service unit nginx.service is inactive' })
     const failed = probe('', 1)
     await expect(failed.health('nginx.service')).resolves.toEqual({ ok: false, error: 'inactive' })
     const hidden = probe('')
     await expect(hidden.health('nginx.service')).resolves.toEqual({ ok: false, error: 'service unit nginx.service is unobserved' })
-    await expect(hidden.health('not a unit')).resolves.toEqual({ ok: false, error: 'service unit not a unit cannot be probed' })
+    await expect(hidden.health('not a unit')).resolves.toEqual({ ok: false, error: 'managed unit not a unit cannot be probed' })
     expect(hidden.calls).toHaveLength(1)
   })
 
