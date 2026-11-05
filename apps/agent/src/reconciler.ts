@@ -117,6 +117,15 @@ const startAndReload = (unit: string): HostAction[] => [{ kind: 'systemd', verb:
 const isManagedDnsPath = (path: string, zoneDir: string): boolean =>
   path === DNS_CATALOG_PATH || (path.startsWith(`${zoneDir}/`) && path.endsWith('.zone'))
 
+/**
+ * A terminating account's zones leave the rendered generation in the same generation that tears the
+ * account down; the manifest diff then removes the zone files and an empty catalog is published.
+ * Zones are matched by domain name because a bind zone file carries no account identity.
+ */
+export const zonesExcludingTerminatingAccounts = <T extends { name: string }>(
+  zones: readonly T[], domains: readonly { name: string; accountId: string }[], terminatingAccountIds: ReadonlySet<string>,
+): T[] => zones.filter(zone => !domains.some(domain => domain.name === zone.name && terminatingAccountIds.has(domain.accountId)))
+
 /** The generation remains the sole publisher, including when its final zone is removed. */
 export const retainEmptyManagedDnsCatalog = (
   compiled: CompiledGeneration,
@@ -689,7 +698,9 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   }
 
   // PowerDNS BIND zone files
-  for (const zone of snapshot.zones) {
+  const terminatingAccountIds = new Set(snapshot.accounts.filter(account => account.status === 'terminating').map(account => account.id))
+  const renderedZones = zonesExcludingTerminatingAccounts(snapshot.zones, snapshot.domains, terminatingAccountIds)
+  for (const zone of renderedZones) {
     const primaryNs = snapshot.server?.settings.nameservers[0] ?? `ns1.${zone.name}`
     const rname = `hostmaster.${zone.name}.`
     const path = `${zoneDir}/${zone.name}.zone`
@@ -727,7 +738,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   if (snapshot.zones.length > 0) {
     const namedConfLines = [
       '// Managed by xPanel: PowerDNS BIND zone catalog',
-      ...snapshot.zones.map(
+      ...renderedZones.map(
         (zone) => `zone "${zone.name}" {\n  type master;\n  file "${zoneDir}/${zone.name}.zone";\n};`,
       ),
       '',
@@ -739,7 +750,8 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       owner: 'root',
       group: 'root',
     })
-    postActions.push(...powerDnsReloadActions(snapshot.zones.map(zone => zone.name)))
+    if (renderedZones.length > 0) postActions.push(...powerDnsReloadActions(renderedZones.map(zone => zone.name)))
+    else postActions.push({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] }, { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] })
   }
 
   if (needsDaemonReload) {

@@ -4,7 +4,7 @@ import type { Db } from '@xpanel/db'
 import { profileFor } from '@xpanel/os'
 import type { StateStore } from '@xpanel/state'
 import type { AgentExecutor } from './executor.ts'
-import { buildGenerationManifest, HostReconciler, powerDnsReloadActions, retainEmptyManagedDnsCatalog, runGenerationDnsHook, sha256Text, type CompiledGeneration, type ReconcileJournalRecord } from './reconciler.ts'
+import { buildGenerationManifest, HostReconciler, powerDnsReloadActions, retainEmptyManagedDnsCatalog, runGenerationDnsHook, sha256Text, zonesExcludingTerminatingAccounts, type CompiledGeneration, type ReconcileJournalRecord } from './reconciler.ts'
 
 const dbPorts = vi.hoisted(() => ({ rollback: vi.fn(), audit: vi.fn() }))
 vi.mock('@xpanel/db', async importOriginal => ({ ...await importOriginal<typeof import('@xpanel/db')>(),
@@ -226,5 +226,20 @@ describe('generation-owned DNS publication boundary', { tags: ['unit'] }, () => 
     expect(fixture.journal.phase).toBe('needs_attention')
     expect(fixture.provider.verify).not.toHaveBeenCalled()
     expect(dbPorts.rollback).not.toHaveBeenCalled()
+  })
+})
+
+describe('terminating account zone retirement', { tags: ['unit'] }, () => {
+  it('drops only the zones owned by terminating accounts', () => {
+    const zones = [{ name: 'alice.test' }, { name: 'bob.test' }, { name: 'shop.bob.test' }, { name: 'carol.test' }]
+    const domains = [
+      { name: 'alice.test', accountId: 'a1' },
+      { name: 'bob.test', accountId: 'a2' },
+      { name: 'shop.bob.test', accountId: 'a2' },
+      { name: 'carol.test', accountId: 'a3' },
+    ]
+    expect(zonesExcludingTerminatingAccounts(zones, domains, new Set(['a2'])).map(zone => zone.name)).toEqual(['alice.test', 'carol.test'])
+    expect(zonesExcludingTerminatingAccounts(zones, domains, new Set())).toEqual(zones)
+    expect(zonesExcludingTerminatingAccounts(zones, domains, new Set(['a1', 'a2', 'a3']))).toEqual([])
   })
 })
