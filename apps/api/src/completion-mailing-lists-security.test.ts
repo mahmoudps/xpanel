@@ -7,6 +7,7 @@ import { createApiToken, createTestDb, createUserPrincipal } from '@xpanel/db'
 import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
 import { sha256Hex } from './auth.ts'
 import { createApiApp } from './server.ts'
+import { scriptedApplyAgent, TEST_AGENT_TOKEN } from './testing.ts'
 
 // Real-loopback acceptance for account mailing lists. Synthetic temporary API tokens only;
 // list delivery/moderation effects are not claimed.
@@ -37,7 +38,9 @@ const fixture = async () => {
   const credential = await token()
   const otherCredential = await token(otherPrincipal.id)
   const app = createApiApp({ db: database.db, store: state.store, serverSecret: 'mailing-lists-synthetic-server-secret' })
-  const request = (method = 'GET', body?: unknown, raw: string | null = credential, path = '/api/mail/mailing-lists') => app.fetch(new Request('http://localhost' + path, { method,
+  const host = scriptedApplyAgent()
+  const hosted = createApiApp({ db: database.db, store: state.store, serverSecret: 'mailing-lists-synthetic-server-secret', agentApp: host, agentToken: TEST_AGENT_TOKEN })
+  const request = (method = 'GET', body?: unknown, raw: string | null = credential, path = '/api/mail/mailing-lists', target = app) => target.fetch(new Request('http://localhost' + path, { method,
     headers: { ...(raw ? { authorization: 'Bearer ' + raw } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }) }))
   const path = join(state.rootDir, 'extended', 'mail', 'mailing-lists.json')
@@ -49,7 +52,7 @@ const fixture = async () => {
     members: ['one@example.test'], moderation: 'members', archiveEnabled: true, createdAt: '2026-01-01T00:00:00.000Z', ...patch,
   })
   const auditRows = (action: string) => database.db.query<{ [column: string]: unknown; action: string }>('SELECT action FROM audit_log WHERE action = $1', [action])
-  return { database, state, owner, other, principal, credential, otherCredential, request, seed, bytes, persisted, list, auditRows, features }
+  return { database, state, owner, other, principal, credential, otherCredential, request, seed, bytes, persisted, list, auditRows, features, host, hosted }
 }
 
 
@@ -159,6 +162,28 @@ describe('account mailing lists HTTP security acceptance', () => {
     expect(await response.json()).toEqual({ ok: true, revision: expect.any(Number), nativeApplied: false })
     expect(await f.persisted()).toEqual([])
     expect((await f.auditRows('mail.mailing_list.deleted')).length).toBe(1)
+  })
+
+  it('applies each saved list change on the host once and restores the saved lists when the host refuses', { tags: ['feature'] }, async () => {
+    const created = await f.request('POST', { address: 'news@mlista.example.test', members: ['one@example.test'], moderation: 'open' }, f.credential, undefined, f.hosted)
+    expect(created.status).toBe(201)
+    const receipt = await created.json() as { mailingList: MailingList; revision: number; nativeApplied: boolean }
+    expect(receipt).toMatchObject({ revision: expect.any(Number), nativeApplied: true })
+    expect(f.host.applies).toBe(1)
+    const saved = await f.bytes()
+    f.host.reply = { status: 'failed', failedTest: 'postfix', error: 'synthetic configuration test failure' }
+    const refused = await f.request('POST', { address: 'team@mlista.example.test', members: ['two@example.test'], moderation: 'open' }, f.credential, undefined, f.hosted)
+    expect(refused.status).toBe(422)
+    expect(await refused.json()).toMatchObject({ code: 'CONFIG_TEST_FAILED', details: { rolledBack: true, stateChanged: false, reason: 'synthetic configuration test failure' } })
+    // the refused apply, then one apply of the restored lists
+    expect(await f.bytes()).toBe(saved)
+    expect(f.host.applies).toBe(3)
+    expect(await f.auditRows('mail.routing.rolled_back')).toHaveLength(1)
+    f.host.reply = { status: 'applied' }
+    const removed = await f.request('DELETE', undefined, f.credential, '/api/mail/mailing-lists/' + receipt.mailingList.id, f.hosted)
+    expect(await removed.json()).toEqual({ ok: true, revision: expect.any(Number), nativeApplied: true })
+    expect(await f.persisted()).toEqual([])
+    expect(f.host.applies).toBe(4)
   })
 
   it('refuses deleting another account list and leaves it intact', async () => {

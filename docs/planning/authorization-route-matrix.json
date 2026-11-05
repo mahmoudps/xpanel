@@ -3580,6 +3580,66 @@
     },
     {
       "method": "GET",
+      "path": "/api/webmail/filters",
+      "surface": "api",
+      "resource": "webmail",
+      "requiredScope": "webmail:read",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts",
+        "email-filters"
+      ],
+      "ownershipSource": "extended/mail/filters.json(accountId, mailbox) + requireMailboxPrincipalAccess (mailbox scope only; the xMail listener admits this base)",
+      "allowedPrincipals": [
+        "root",
+        "reseller",
+        "user",
+        "mailbox"
+      ],
+      "enforcementPoint": "apps/api/src/mail/filter-routes.ts:createFilterRoutes(authorize) + apps/api/src/authorization.ts:requireMailboxPrincipalAccess"
+    },
+    {
+      "method": "POST",
+      "path": "/api/webmail/filters",
+      "surface": "api",
+      "resource": "webmail",
+      "requiredScope": "webmail:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts",
+        "email-filters"
+      ],
+      "ownershipSource": "requireAccountId + requireMailboxPrincipalAccess (scope=mailbox for mailbox principals; the xMail listener admits this base)",
+      "allowedPrincipals": [
+        "root",
+        "reseller",
+        "user",
+        "mailbox"
+      ],
+      "enforcementPoint": "apps/api/src/mail/filter-routes.ts:createFilterRoutes(authorize) + apps/api/src/authorization.ts:requireMailboxPrincipalAccess"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/webmail/filters/:id",
+      "surface": "api",
+      "resource": "webmail",
+      "requiredScope": "webmail:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts",
+        "email-filters"
+      ],
+      "ownershipSource": "extended/mail/filters.json(accountId, mailbox) -> assertRecordAccount + requireMailboxPrincipalAccess",
+      "allowedPrincipals": [
+        "root",
+        "reseller",
+        "user",
+        "mailbox"
+      ],
+      "enforcementPoint": "apps/api/src/mail/filter-routes.ts:createFilterRoutes(authorize) + apps/api/src/authorization.ts:requireMailboxPrincipalAccess"
+    },
+    {
+      "method": "GET",
       "path": "/api/webmail/folders",
       "surface": "api",
       "resource": "webmail",

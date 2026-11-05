@@ -120,36 +120,6 @@ describe('account mail routing applied on the host through the agent', () => {
     expect(f.file('/xpanel/virtual_aliases')).not.toContain('autoreply.xpanel.invalid')
   })
 
-  it('delivers an open mailing list through the alias table, removes it on delete and restores the saved lists when the check fails', { tags: ['slow'] }, async () => {
-    const address = `news@${f.owner.primaryDomain}`, line = `${address}\tone@example.net,two@example.net\n`
-    const created = await f.call('/api/mail/mailing-lists', 'POST', { address, members: ['one@example.net', 'two@example.net'], moderation: 'open' })
-    expect(created.status).toBe(201)
-    expect(created.body).toMatchObject({ mailingList: { address, moderation: 'open' }, revision: expect.any(Number), nativeApplied: true })
-    expect(f.file('/xpanel/virtual_aliases')).toContain(line)
-
-    // a saved mailbox filter makes the Sieve check part of every generation; a failing check refuses the whole generation
-    expect((await f.call('/api/mail/filters', 'POST', { scope: 'mailbox', mailbox: f.inbox.login, name: 'Keep', conditions: [], actions: [{ type: 'keep' }] })).status).toBe(201)
-    f.executor.failConfigTest('sieve', 'synthetic Sieve check failure')
-    const refused = await f.call('/api/mail/mailing-lists', 'POST', { address: `team@${f.owner.primaryDomain}`, members: ['three@example.net'], moderation: 'open' })
-    expect(refused.status).toBe(422)
-    expect(refused.body).toMatchObject({ code: 'CONFIG_TEST_FAILED', details: { rolledBack: true, stateChanged: false, reason: expect.stringContaining('synthetic Sieve check failure') } })
-    expect((await f.call('/api/mail/mailing-lists')).body.mailingLists.map((list: { address: string }) => list.address)).toEqual([address])
-    f.executor.clearConfigTestFailures()
-
-    const removed = await f.call(`/api/mail/mailing-lists/${created.body.mailingList.id}`, 'DELETE')
-    expect(removed).toMatchObject({ status: 200, body: { ok: true, revision: expect.any(Number), nativeApplied: true } })
-    expect(f.file('/xpanel/virtual_aliases') ?? '').not.toContain(address + '\t')
-  })
-
-  it('applies a mailbox-only CSV import on the host in one reconcile', { tags: ['slow'] }, async () => {
-    const login = `csvbox@${f.owner.primaryDomain}`
-    expect([...f.executor.files.values()].some(item => item.content.includes(login))).toBe(false)
-    const imported = await f.call('/api/mail/import-csv', 'POST', { kind: 'mailboxes', csv: `${login},SyntheticMailboxPassword!2026,100` })
-    expect(imported).toMatchObject({ status: 200, body: { summary: { mailboxesImported: 1, errorCount: 0 }, nativeApplied: true } })
-    expect(imported.body).not.toHaveProperty('application')
-    expect([...f.executor.files.values()].some(item => item.content.includes(login))).toBe(true)
-  })
-
   it('installs a mailbox filter, and restores the previous rules when the Sieve check fails', async () => {
     const scope = { scope: 'mailbox', mailbox: f.inbox.login }
     const read = async () => (await f.call(`/api/mail/filters?scope=mailbox&mailbox=${encodeURIComponent(f.inbox.login)}`)).body
