@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
-import { access, mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdtemp, open, rm, type FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, it, vi } from 'vitest'
+import { fileURLToPath } from 'node:url'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, it, vi } from 'vitest'
 import { createAgentApp, FakeHostExecutor, HostReconciler } from '@xpanel/agent'
 import { createDb, createRootPrincipal, createUserPrincipal, listAudit, migrate } from '@xpanel/db'
 import { defaultPlan } from '@xpanel/core'
@@ -15,6 +16,9 @@ import { ExtendedFeaturesStore, type InstalledAppRecord } from './extended-route
 import * as mailDocuments from './mail/document.ts'
 import { parseMarkup } from '../../web/src/html.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
+
+// Fixture hashes use the cheapest accepted cost (as team-test-fixture.ts); route-created hashes keep production cost.
+const FIXTURE_HASH_COST = { timeCost: 1, parallelism: 1 }
 
 interface HttpSessionClient {
   baseUrl: string
@@ -92,6 +96,18 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
   let serverHandle: Extract<Awaited<ReturnType<typeof startPanelServer>>, { quarantined: false }>
   let baseUrl: string
   let agentDb: ReturnType<typeof createDb>
+  // Every state write, writer lease and staged generation file calls FileHandle#sync, so device flush
+  // latency, not this file's contracts, set its wall time (2.5 s idle, over 30 s under a parallel lane).
+  // Flush durability is proven by packages/state atomic-durability tests; writes, renames and read-back stay real.
+  let restoreFileSync = (): void => {}
+  beforeAll(async () => {
+    const probe = await open(fileURLToPath(import.meta.url), 'r')
+    try {
+      const sync = vi.spyOn(Object.getPrototypeOf(probe) as FileHandle, 'sync').mockResolvedValue(undefined)
+      restoreFileSync = () => sync.mockRestore()
+    } finally { await probe.close() }
+  })
+  afterAll(() => restoreFileSync())
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'xpanel-ext-e2e-'))
     const dbPath = join(tmpDir, 'control.db')
@@ -99,7 +115,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     const os = profileFor('ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble')
     agentDb = createDb(dbPath)
     await migrate(agentDb.runner)
-    await createRootPrincipal(agentDb.db, { username: 'root', passwordHash: await hashPasswordArgon2id('RootPassword!2026'), forcePasswordChange: false })
+    await createRootPrincipal(agentDb.db, { username: 'root', passwordHash: await hashPasswordArgon2id('RootPassword!2026', FIXTURE_HASH_COST), forcePasswordChange: false })
     const store = new StateStore(stateDir)
     const executor = new FakeHostExecutor()
     const reconciler = new HostReconciler({ db: agentDb.db, store, executor, os })
@@ -194,7 +210,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     const { id: _seedId, ...planInput } = defaultPlan({ name: 'Document plan', featureListId: featureList.id })
     const plan = await serverHandle.store.createPlan(planInput)
     const password = 'DocumentOwnerPassword!2026'
-    const passwordHash = await hashPasswordArgon2id(password)
+    const passwordHash = await hashPasswordArgon2id(password, FIXTURE_HASH_COST)
     await serverHandle.store.saveServerIp({ address: '192.0.2.31', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     const account = await serverHandle.store.createAccount({ username: 'docowner', passwordHash, primaryDomain: 'docowner.example.test', planId: plan.id, ownerId: null,
       contactEmail: 'private-document-contact@example.test', ipv4: '192.0.2.31', shell: 'none',
@@ -337,7 +353,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     // This fake host has no private/native prepared-provisioning proof. Account
     // provisioning HTTP/WHMCS admission is tested by its dedicated strict suites;
     // this setup must not pretend a native account-create acknowledgement.
-    const accountPasswordHash = await hashPasswordArgon2id('NebulaPassword!2026')
+    const accountPasswordHash = await hashPasswordArgon2id('NebulaPassword!2026', FIXTURE_HASH_COST)
     const account = await serverHandle.store.createAccount({ username: 'nebula', primaryDomain: 'nebula.test', planId,
       ownerId: null, contactEmail: 'nebula@nebula.test', passwordHash: accountPasswordHash, shell: 'none',
       php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 500, processIdleTimeoutSec: 10 }, ini: {} },
