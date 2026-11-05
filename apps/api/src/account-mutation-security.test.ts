@@ -664,8 +664,8 @@ describe('account mutation outcomes and race boundaries', () => {
     expect(await f.database.db.query('SELECT id FROM principals WHERE account_id = $1', [f.account.id])).toEqual([])
     expect(await findPrincipalByUsername(f.database.db, f.neighbor.username)).not.toBeNull()
     expect(await f.state.store.getAccount(f.other.id)).not.toBeNull()
-    // One target-bound purge probe plus one applied termination generation.
-    expect(f.calls()).toBe(2)
+    // The target-bound probe is answered before the request counter; one applied generation follows.
+    expect(f.calls()).toBe(1)
   })
 
   it('revokes all linked aliases and tokens during suspension without changing disabled flags or neighbor access', async () => {
