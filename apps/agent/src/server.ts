@@ -1509,6 +1509,20 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       })
       if (dbUpgradeResponse) return dbUpgradeResponse
 
+      const accountCronAdmission = /^\/accounts\/([a-z][a-z0-9]{0,15})\/cron\/admission$/.exec(pathname)
+      if (accountCronAdmission) {
+        if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
+        if (url.search) return fail('VALIDATION', 'Cron admission does not accept query selectors', { stateChanged: false })
+        if (caller.role !== 'root' && !(caller.role === 'user' && caller.accountId !== undefined && caller.accountId !== null)) return fail('FORBIDDEN', 'Cron admission requires the signed-in account owner or root', { stateChanged: false })
+        const account = await deps.store.getAccountByUsername(accountCronAdmission[1]!)
+        if (!account) return fail('NOT_FOUND', 'account not found', { stateChanged: false })
+        if (caller.role === 'user' && caller.accountId !== account.id) return fail('FORBIDDEN', 'Cron admission requires the signed-in account owner', { stateChanged: false })
+        if (typeof deps.cronQualification !== 'function') return fail('PRECONDITION_FAILED', 'Trusted cron host qualification is unavailable', { stateChanged: false, reason: 'cron_qualification_missing' })
+        // Fixed probe: proves the host scheduler primitive for this account without reading a caller job.
+        await deps.cronQualification({ account, job: { id: randomUUID(), schedule: '0 * * * *', command: '/usr/bin/true', enabled: true }, action: 'observe' })
+        return jsonResponse({ available: true, contract: 'systemd-timers-oncalendar' })
+      }
+
       const accountCronWorkspace = /^\/accounts\/([a-z][a-z0-9]{0,15})\/cron\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(status|run)$/.exec(pathname)
       if (accountCronWorkspace) {
         if (method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } })

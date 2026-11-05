@@ -6,7 +6,7 @@ import { createHandoffSessionCheck } from './panel-handoff-authority.ts'
 import { parseAuditFilters } from './audit-filters.ts'
 import { createAccountBackupWorkspace } from './account-backup-workspace.ts'
 import { createCertificateRuntimeRouter } from './certificate-runtime.ts'
-import { createCronWorkspaceRoutes, type CronWorkspacePorts } from './cron-workspace.ts'
+import { assertCronHostAdmissionReply, createCronWorkspaceRoutes, type CronWorkspacePorts } from './cron-workspace.ts'
 import { createMailxWorkspaceRoutes } from './mailx-workspace.ts'
 import { createMailxCollectionsRoutes } from './mailx-collections.ts'
 import { handlePhpManageRoute, handlePhpWorkspaceRoute } from './php-workspace.ts'
@@ -1538,11 +1538,18 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   }
   const siteHealthDns = systemSiteHealthDns()
   const networkToolsGate = createNetworkToolsGate()
+  // Trusted host admission for cron mutations: the agent qualifies the host scheduler primitive for this
+  // account. Without it a saved schedule could be acknowledged while the host cannot execute it.
+  const admitCronHostFromAgent = async (caller: AuthenticatedCaller, account: Account, _action: 'save' | 'run'): Promise<void> => {
+    const response = await callAgent(`/accounts/${account.username}/cron/admission`, { caller })
+    const body = await response.json().catch(() => null)
+    assertCronHostAdmissionReply(response.status, body)
+  }
   const cronRouter = createCronWorkspaceRoutes({
     store: deps.store, requireCaller, emitAudit, triggerReconcile,
     ...(deps.os ? { osProfile: deps.os } : {}),
     withCronAccountLease: (id, operation) => deps.store.withCronAccountLease(id, operation),
-    admitCronMutation: (caller, account, action) => deps.admitCronMutation ? deps.admitCronMutation(caller, account, action) : fail('PRECONDITION_FAILED', 'cron host admission is unavailable', { stateChanged: false }),
+    admitCronMutation: (caller, account, action) => deps.admitCronMutation ? deps.admitCronMutation(caller, account, action) : admitCronHostFromAgent(caller, account, action),
     runCronNow: (caller, intent) => cronHost(caller, intent, 'run'),
     observeCronStatus: (caller, intent) => cronHost(caller, intent, 'status'),
   })

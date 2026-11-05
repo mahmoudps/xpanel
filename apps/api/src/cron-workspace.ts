@@ -22,6 +22,18 @@ export interface CronWorkspacePorts extends Pick<ExtendedRouteHelpers, 'store' |
   observeCronStatus?: (caller: AuthenticatedCaller, intent: CronJobIntent) => Promise<CronJobObservationReceipt>
 }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+
+export const CRON_ADMISSION_CONTRACT = 'systemd-timers-oncalendar'
+
+/** The agent admission probe must explicitly attest the host scheduler primitive; anything else fails closed. */
+export const assertCronHostAdmissionReply = (status: number, body: unknown): void => {
+  const record = object(body) ? body : null
+  if (status !== 200 || !record || record.available !== true || record.contract !== CRON_ADMISSION_CONTRACT) {
+    return fail('PRECONDITION_FAILED', 'cron host admission is unavailable', {
+      stateChanged: false, ...(record && typeof record.reason === 'string' ? { reason: record.reason } : {}),
+    })
+  }
+}
 const safeLine = (value: unknown, limit: number, field: string, allowEmpty = false): string => {
   if (typeof value !== 'string' || value.length > limit || !value.isWellFormed() || /[\u0000-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069\ufeff]/u.test(value) || !allowEmpty && !value.trim()) return fail('VALIDATION', `${field} must be bounded single-line text`, { stateChanged: false })
   return value
