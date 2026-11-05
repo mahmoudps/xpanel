@@ -410,7 +410,14 @@ export const GENERATED_ACCOUNT_TREE_RES: readonly RegExp[] = Object.freeze([
   /^\/run\/xpanel-fpm\/[a-z_][a-z0-9_-]{0,31}-[5-9]\.[0-9]{1,2}$/,
   /^\/run\/xpanel-ctr\/[a-z_][a-z0-9_-]{0,31}$/,
 ])
-export const isGeneratedAccountTreePath = (path: string): boolean => GENERATED_ACCOUNT_TREE_RES.some(pattern => pattern.test(path))
+/** Service-owned log directories that are never an account tree. */
+export const SHARED_LOG_DIR_NAMES: ReadonlySet<string> = new Set(['nginx', 'apache', 'php-fpm', 'php', 'mail', 'postfix', 'dovecot', 'pure-ftpd', 'opendkim', 'xpanel'])
+const ACCOUNT_LOG_DIR_RE = /^\/var\/log\/xpanel\/([A-Za-z0-9_-]+)$/
+export const isGeneratedAccountTreePath = (path: string): boolean => {
+  const logDir = ACCOUNT_LOG_DIR_RE.exec(path)
+  if (logDir && SHARED_LOG_DIR_NAMES.has(logDir[1]!)) return false
+  return GENERATED_ACCOUNT_TREE_RES.some(pattern => pattern.test(path))
+}
 export const MAILBOX_SIEVE_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/\.dovecot\.sieve$/
 const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\/php\.cgi|(?:public_html\/)?\.user\.ini)$/
 
