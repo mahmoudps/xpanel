@@ -72,13 +72,13 @@ describe('prepared root operator client dispatch', () => {
   it('never retries a lost recover apply response', async () => {
     seams.failApply = true
     await expect(dispatchPreparedRootOperation({ operationId, kind: 'recover', expectedArchiveSha256: archiveSha }, ownership))
-      .rejects.toMatchObject({ unknownOutcome: true, retryAllowed: false, operationId })
+      .rejects.toMatchObject({ code: 'ROOT_OPERATOR_SOCKET_ERROR_APPLY', unknownOutcome: true, retryAllowed: false, operationId })
     expect(seams.phases).toEqual(['apply'])
   })
   it('refuses a decoded text reply without retrying an uncertain apply', async () => {
     seams.textReply = true
     await expect(dispatchPreparedRootOperation({ operationId, kind: 'recover', expectedArchiveSha256: archiveSha }, ownership))
-      .rejects.toMatchObject({ unknownOutcome: true, retryAllowed: false, operationId })
+      .rejects.toMatchObject({ code: 'ROOT_OPERATOR_PROTOCOL_INVALID', unknownOutcome: true, retryAllowed: false, operationId })
     expect(seams.phases).toEqual(['apply'])
   })
   it('preserves one server machine code and drops every other refusal byte', async () => {
@@ -90,7 +90,7 @@ describe('prepared root operator client dispatch', () => {
     seams.phases = []
     seams.refuseCode = JSON.stringify({ refused: 'COORDINATOR_OWNERSHIP_SCOPE_REQUIRED', path: '/etc/shadow' }) + '\n'
     await expect(dispatchPreparedRootOperation({ operationId, kind: 'upgrade', expectedArchiveSha256: archiveSha }, ownership))
-      .rejects.toMatchObject({ code: 'ROOT_OPERATOR_REVIEW_REQUIRED', retryAllowed: false })
+      .rejects.toMatchObject({ code: 'ROOT_OPERATOR_PROTOCOL_INVALID', retryAllowed: false })
     expect(rootOperatorReviewRecord(operationId, Object.assign(new Error('open /root/private'), { code: 'COORDINATOR_OWNERSHIP_SCOPE_REQUIRED' })).code)
       .toBe('COORDINATOR_OWNERSHIP_SCOPE_REQUIRED')
     expect(rootOperatorReviewRecord(operationId, new Error('open /root/private')).code).toBe('ROOT_OPERATOR_REVIEW_REQUIRED')

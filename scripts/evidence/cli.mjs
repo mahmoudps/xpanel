@@ -21,6 +21,30 @@ export function parseArguments(args, allowed, required) {
   for (const key of required) if (result[key] === undefined) throw new Error(`Missing --${key}`)
   return result
 }
+
+/**
+ * Strict parser for reporting commands that need repeatable inputs and boolean
+ * flags. Unknown names, duplicate scalar values and duplicate flags are
+ * rejected rather than guessed; repeatable names collect their values in order.
+ */
+export function parseCommandArguments(args, { values = [], repeatable = [], flags = [], required = [] } = {}) {
+  const result = {}, seen = new Set()
+  for (const argument of args) {
+    const flag = /^--([a-z][a-z0-9-]*)$/.exec(argument)
+    if (flag !== null && flags.includes(flag[1])) {
+      if (seen.has(flag[1])) throw new Error('Use unique supported flags')
+      seen.add(flag[1]); result[flag[1]] = true
+      continue
+    }
+    const match = /^--([a-z][a-z0-9-]*)=(.+)$/.exec(argument)
+    if (!match || !(values.includes(match[1]) || repeatable.includes(match[1]))) throw new Error('Use unique supported --name=value arguments')
+    if (repeatable.includes(match[1])) { result[match[1]] ??= []; result[match[1]].push(match[2]); continue }
+    if (seen.has(match[1])) throw new Error('Use unique supported --name=value arguments')
+    seen.add(match[1]); result[match[1]] = match[2]
+  }
+  for (const key of required) if (result[key] === undefined) throw new Error(`Missing --${key}`)
+  return result
+}
 export async function runCli(main) {
   try { await main() }
   catch (error) {
