@@ -23,7 +23,10 @@ export interface NativeAccountHttpSubject {
   readonly challenge: string
 }
 export interface NativeProvisioningHttpOptions {
+  /** A pinned read-only operation database or an explicit live-reader port; never the writable handle. */
   readonly db: Db
+  /** Trusted startup composition of the pinned read-only reader; when present it replaces `db` for every read. */
+  readonly databaseReader?: { readonly database: () => Db }
   readonly store: Pick<StateStore, 'listDomains'>
   readonly reconciler: Pick<HostReconciler, 'journal'>
   readonly executor: AgentExecutor
@@ -220,7 +223,8 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
       || (domain.expiresAt !== null && (!Number.isFinite(Date.parse(domain.expiresAt)) || Date.parse(domain.expiresAt) <= Date.now()))) refused('primary_fpm_route_required')
     domainDeadline = domain.expiresAt === null ? Infinity : Date.parse(domain.expiresAt)
     const unit = system.fpmUnitName(account.username, domain.php.version), paths = accountProbePaths(account)
-    const active = await withVisibleReadonlyOperationDatabase(options.db, () => latestActive(options.db)); await guard()
+    const reader = options.databaseReader?.database() ?? options.db
+    const active = await withVisibleReadonlyOperationDatabase(reader, () => latestActive(reader)); await guard()
     if (!active || active.status !== 'active') return refused('active_generation_required')
     const manifest = await options.reconciler.journal.readManifest(active.id); await guard()
     if (!manifest || manifest.generationId !== active.id || manifest.filesChecksum !== active.checksum || manifest.stateChecksum !== input.sourceChecksum) refused('active_generation_binding_changed')
@@ -296,7 +300,8 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
     }
     const assertCurrent = async (): Promise<void> => {
       await guard()
-      const current = await withVisibleReadonlyOperationDatabase(options.db, () => latestActive(options.db))
+      const reader = options.databaseReader?.database() ?? options.db
+      const current = await withVisibleReadonlyOperationDatabase(reader, () => latestActive(reader))
       if (current?.id !== activeId || current.checksum !== generationChecksum) refused('active_generation_changed')
       for (const pin of pins) await pin.assertCurrent()
       const currentFpm = await unitIdentity(unit), currentNginx = await unitIdentity(nginxUnit)
