@@ -842,7 +842,8 @@ export class LinuxHostExecutor implements AgentExecutor {
         return
       }
       case 'delete-user': {
-        const res = await this.executeArgv(['/usr/sbin/userdel', action.name])
+        // Retire the home with the identity here so a subsequent reviewed home removal is idempotent.
+        const res = await this.executeArgv(['/usr/sbin/userdel', '-r', '--', action.name])
         if (!res.ok && !res.stderr.includes('does not exist')) {
           fail('CONFIG_TEST_FAILED', `userdel ${action.name} failed: ${res.stderr}`)
         }

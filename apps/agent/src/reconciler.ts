@@ -1180,7 +1180,7 @@ export class HostReconciler {
 
       for (const unit of reloadedUnits) {
         // One-shot cron services are inactive between timer triggers; the timer is the managed reload unit.
-        if (isOneShotCronService(unit)) continue
+        if (isOneShotCronService(unit) || unit.endsWith('.slice')) continue
         const health = await this.verifyUnitHealth(
           unit,
           journalRecord.previousActiveGenerationId ?? 0,
@@ -1980,7 +1980,7 @@ export class HostReconciler {
 
         for (const unit of journalRecord.reloadedUnits) {
           // One-shot cron services are inactive between timer triggers; the timer is the managed unit.
-          if (isOneShotCronService(unit)) continue
+          if (isOneShotCronService(unit) || unit.endsWith('.slice')) continue
           const probe = await this.verifyUnitHealth(unit, pendingGen.id)
           if (!probe.ok) {
             throw new StageFailureError(
