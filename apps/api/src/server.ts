@@ -1166,21 +1166,27 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     }
     const probeBody = await probe.json().catch(() => null) as { available?: unknown; contract?: unknown } | null
     if (probeBody?.available !== true || probeBody.contract !== 'target-bound-userdel') return unavailable()
-    const marked = await deps.store.markTerminating(current.id)
-    const purge = await callAgent(`/accounts/${marked.username}/purge`, {
-      method: 'POST', caller, body: { confirmUsername: marked.username, uid: marked.uid, home: marked.home },
-    })
-    const purgeBody = await purge.json().catch(() => null) as { purged?: unknown; reason?: unknown } | null
-    if (!purge.ok || purgeBody?.purged !== true) {
-      return fail('SERVICE_UNAVAILABLE', 'account purge did not complete', {
-        verificationRequired: true, reason: typeof purgeBody?.reason === 'string' ? purgeBody.reason : 'purge_failed', stateChanged: true,
+    const marked = current.status === 'terminating' ? current : await deps.store.markTerminating(current.id)
+    // Native teardown is the reconciler's terminate plan: stop the account's units and slices, clear the
+    // quota, delete the user and remove the home (and drop the account databases). The account leaves the
+    // desired state in the same admitted generation whose reported outcome proves those host effects.
+    try {
+      await applyAccountConfiguration(caller, marked, 'account.terminate', await deps.store.getRevision())
+    } catch (error) {
+      return fail(isXpanelError(error) ? error.code : 'SERVICE_UNAVAILABLE', 'account termination requires verification', {
+        ...(isXpanelError(error) ? error.detail : {}), verificationRequired: true, stateChanged: true, reason: 'termination_host_effect_unverified',
+      })
+    }
+    const remaining = await deps.store.getAccount(marked.id)
+    if (remaining) {
+      return fail('SERVICE_UNAVAILABLE', 'account termination did not complete', {
+        verificationRequired: true, stateChanged: true, reason: 'termination_not_completed',
       })
     }
     await revokeAccountSessionsAndTokens(deps.db, marked.id)
     terminalRegistry.revoke({ accountId: marked.id })
     const identities = await deps.db.query<{ id: string }>('SELECT id FROM principals WHERE account_id = $1 ORDER BY id', [marked.id])
     for (const identity of identities) await deletePrincipal(deps.db, identity.id)
-    await deps.store.deleteAccount(marked.id)
     await reindexFromState(deps.db, await deps.store.readSnapshot())
     await emitAudit({ actor: caller.principal.username, action: 'account.terminated', target: 'account:' + marked.username,
       detail: { purged: true }, outcome: 'ok', principalId: caller.principal.id,

@@ -42,6 +42,7 @@ import { observeFtpLog } from './ftp-log.ts'
 import { createHostBackupRunController, readBackupConfigFiles, readSavedBackupDestination } from './acct-backup-runs.ts'
 import { createAgentApp, listenAgentSocket, loadAgentCredentialFile } from './server.ts'
 import { createProvisioningDatabaseReaderPort } from './account-provisioning-database-reader.ts'
+import { createNativeCronQualification } from './cron-qualification.ts'
 import { createSystemdPtySpawner, DEFAULT_TERMINAL_PTY_HELPER, TerminalSessionManager, verifyTerminalPtyHelper } from './terminal-sessions.ts'
 import type { AgentApp } from './server.ts'
 import { awaitLifecycleWriterDrain, createLifecycleBackgroundResources, isLifecycleManaged, readLifecyclePublicStatus, startLifecycleWriterParticipant, withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
@@ -375,6 +376,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           store,
           db: dbHandle.db,
           executor,
+          cronQualification: createNativeCronQualification({ isActive: async unit => (await executor.runCommand(['/usr/bin/systemctl', 'is-active', unit])).code === 0 }),
           ...(accountFileRunner ? { accountFileRunner } : {}),
           ...(hostJobs ? { hostJobs } : {}),
           terminals,
