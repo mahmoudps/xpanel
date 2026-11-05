@@ -31,8 +31,9 @@ describe('reconciler unit health probe unit types', { tags: ['unit'] }, () => {
     const { commands, probe } = reconcilerWith('Id=xpanel-cron-alice-abc.timer\nActiveState=active\n')
     assert.deepEqual(await probe('xpanel-cron-alice-abc.timer'), { ok: true })
     assert.equal(commands.length, 1)
-    assert.equal(commands[0]![1], 'show')
-    assert.equal(commands[0]!.at(-1), 'xpanel-cron-alice-abc.timer')
+    assert.deepEqual(commands[0], ['/usr/bin/systemctl', 'show', '--no-pager', '--property=ActiveState', '--', 'xpanel-cron-alice-abc.timer'])
+    // Commas are not admitted by the reviewed SAFE_ARG grammar; a multi-property flag made every probe fail.
+    assert.ok(commands[0]!.every(element => !element.includes(',')))
   })
 
   it('probes an active socket unit', async () => {

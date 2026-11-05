@@ -959,9 +959,11 @@ export class HostReconciler {
     if (!/^[A-Za-z0-9](?:[A-Za-z0-9_.:@-]|\\x[0-9a-fA-F]{2})*\.(?:service|timer|socket)$/.test(unit) || unit.length > 200) {
       return { ok: false, error: `managed unit ${unit} cannot be probed` }
     }
+    // Only ActiveState is consumed, and every emitted argv element must satisfy the reviewed
+    // SAFE_ARG grammar (commas are not admitted), so request the single property the probe reads.
     const observed = await this.deps.executor.runCommand([
       '/usr/bin/systemctl', 'show', '--no-pager',
-      '--property=Id,Names,LoadState,ActiveState,SubState,UnitFileState',
+      '--property=ActiveState',
       '--', unit,
     ])
     if (!observed.ok || observed.code !== 0) {
