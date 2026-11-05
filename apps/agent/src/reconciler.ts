@@ -85,6 +85,21 @@ const DNS_CATALOG_PATH = '/etc/powerdns/named.conf.xpanel-zones'
 const DEFAULT_DNS_ZONE_DIR = '/var/lib/powerdns/zones'
 
 /**
+ * PowerDNS 4.x BIND backend: `rediscover` admits catalog additions/removals, but a changed zone
+ * file is only re-read by `bind-reload-now <zone>`; a plain `reload` keeps serving the old bytes.
+ * Order matters: rediscover first (so a newly added zone is known), then per-zone reload, then the
+ * global reload so removals are dropped.
+ */
+export const powerDnsReloadActions = (zones: readonly string[]): HostAction[] => {
+  const names = [...new Set(zones)].sort((a, b) => a.localeCompare(b))
+  return [
+    { kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] },
+    ...names.map((zone): HostAction => ({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'bind-reload-now', zone] })),
+    { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] },
+  ]
+}
+
+/**
  * The installer enables the web and mail daemons but leaves them stopped until the first generation that
  * configures them: start is a no-op on a running unit, and the reload then applies the new configuration.
  */
@@ -715,10 +730,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       owner: 'root',
       group: 'root',
     })
-    postActions.push(
-      { kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] },
-      { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] },
-    )
+    postActions.push(...powerDnsReloadActions(snapshot.zones.map(zone => zone.name)))
   }
 
   if (needsDaemonReload) {
@@ -1142,8 +1154,11 @@ export class HostReconciler {
           continue
         }
         if (unit === 'pdns.service' && dnsWasTouched) {
-          await this.deps.executor.runAction({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] })
-          await this.deps.executor.runAction({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] })
+          const restoredZoneDir = this.deps.zoneDir ?? DEFAULT_DNS_ZONE_DIR
+          const restoredZones = journalRecord.previousFilesBackup
+            .filter(entry => entry.existed && entry.path.startsWith(restoredZoneDir + '/') && entry.path.endsWith('.zone'))
+            .map(entry => entry.path.slice(restoredZoneDir.length + 1, -'.zone'.length))
+          for (const action of powerDnsReloadActions(restoredZones)) await this.deps.executor.runAction(action)
         } else {
           await this.deps.executor.runAction(rollbackReloadAction(unit))
         }

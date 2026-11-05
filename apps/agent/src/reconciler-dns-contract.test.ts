@@ -4,7 +4,7 @@ import type { Db } from '@xpanel/db'
 import { profileFor } from '@xpanel/os'
 import type { StateStore } from '@xpanel/state'
 import type { AgentExecutor } from './executor.ts'
-import { buildGenerationManifest, HostReconciler, retainEmptyManagedDnsCatalog, runGenerationDnsHook, sha256Text, type CompiledGeneration, type ReconcileJournalRecord } from './reconciler.ts'
+import { buildGenerationManifest, HostReconciler, powerDnsReloadActions, retainEmptyManagedDnsCatalog, runGenerationDnsHook, sha256Text, type CompiledGeneration, type ReconcileJournalRecord } from './reconciler.ts'
 
 const dbPorts = vi.hoisted(() => ({ rollback: vi.fn(), audit: vi.fn() }))
 vi.mock('@xpanel/db', async importOriginal => ({ ...await importOriginal<typeof import('@xpanel/db')>(),
@@ -78,6 +78,16 @@ const rollbackFixture = (observationFails = false, introduced = false) => {
 }
 
 describe('generation-owned DNS publication boundary', { tags: ['unit'] }, () => {
+  it('re-reads each changed BIND zone before the global reload', () => {
+    // PowerDNS 4.8 keeps serving the old zone bytes after `rediscover` + `reload`; only
+    // `bind-reload-now <zone>` re-parses a changed file (verified against the live backend).
+    expect(powerDnsReloadActions(['shop.example.test', 'example.test', 'example.test'])).toEqual([
+      { kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] },
+      { kind: 'exec', argv: ['/usr/bin/pdns_control', 'bind-reload-now', 'example.test'] },
+      { kind: 'exec', argv: ['/usr/bin/pdns_control', 'bind-reload-now', 'shop.example.test'] },
+      { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] },
+    ])
+  })
   it('retains a valid empty managed catalog and reload commands when the final owned zone is removed', () => {
     const candidate = compiled()
     retainEmptyManagedDnsCatalog(candidate, [zonePath, catalogPath])
