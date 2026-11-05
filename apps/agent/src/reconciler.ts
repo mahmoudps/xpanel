@@ -65,6 +65,7 @@ import type {
   ReconcileJournalPhase,
   ReconcileJournalRecord,
 } from './reconciler-journal.ts'
+import { hostEffectsChecksum } from './host-effects-checksum.ts'
 
 export * from './reconciler-journal.ts'
 
@@ -1633,11 +1634,15 @@ export class HostReconciler {
       await validateDnsCandidate()
     }
 
+    // Desired-state changes that only produce host actions (databases, quotas, runtime units) keep the same
+    // rendered files, so the unchanged-file shortcut must also compare the ordered action list.
+    const effectsChecksum = hostEffectsChecksum([...compiled.preActions, ...compiled.postActions])
     let repairedDriftCount = 0
     if (
       !opts.force &&
       currentGen &&
-      currentGen.checksum === filesChecksum
+      currentGen.checksum === filesChecksum &&
+      previousManifest?.effectsChecksum === effectsChecksum
     ) {
       const drift = await detectHostDrift(this.deps.executor, previousManifest)
       const mailDrift = compiled.localMail && await localMailNeedsUpdate(this.deps.executor, this.deps.os, compiled.localMailOptions)
@@ -1659,6 +1664,7 @@ export class HostReconciler {
       generationId: pendingGen.id,
       stateChecksum: snapshot.checksum,
       filesChecksum,
+      effectsChecksum,
       actor,
       files: compiled.files,
       postActions: compiled.postActions,

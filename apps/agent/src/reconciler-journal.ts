@@ -50,6 +50,8 @@ export interface GenerationManifest {
   files: OwnedFileEntry[]
   managedUnits: string[]
   testResults: RecordedConfigTestResult[]
+  /** Identity of the ordered host actions this generation applies; older manifests omit it. */
+  effectsChecksum?: string
 }
 
 export interface PreviousFileBackup {
@@ -256,6 +258,8 @@ export const buildGenerationManifest = (input: {
   postActions: readonly HostAction[]
   os: OsProfile
   createdAt?: string
+  /** Provided by the reconciler; tests that build manifests by hand may omit it. */
+  effectsChecksum?: string
 }): GenerationManifest => {
   const sortedFiles = [...input.files].sort((a, b) => a.path.localeCompare(b.path))
   const entries: OwnedFileEntry[] = sortedFiles.map((f) => {
@@ -297,6 +301,7 @@ export const buildGenerationManifest = (input: {
     generationId: input.generationId,
     stateChecksum: input.stateChecksum,
     filesChecksum: input.filesChecksum,
+    ...(input.effectsChecksum === undefined ? {} : { effectsChecksum: input.effectsChecksum }),
     createdAt: input.createdAt ?? new Date().toISOString(),
     actor: input.actor,
     files: entries,
