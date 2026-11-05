@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { networkInterfaces } from 'node:os'
 import { posix } from 'node:path'
 import { fail, type Account, type OsProfile } from '@xpanel/core'
-import { latestActive, type Db } from '@xpanel/db'
+import { latestActive, withVisibleReadonlyOperationDatabase, type Db } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
 import { edge, system } from '@xpanel/render'
 import { ACCOUNT_PROBE_ASSET, ACCOUNT_PROBE_PHP, accountProbeNamespace, accountProbePaths, assertAccountProbeIngress } from '../../../packages/render/src/system/account-probe.ts'
@@ -220,7 +220,7 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
       || (domain.expiresAt !== null && (!Number.isFinite(Date.parse(domain.expiresAt)) || Date.parse(domain.expiresAt) <= Date.now()))) refused('primary_fpm_route_required')
     domainDeadline = domain.expiresAt === null ? Infinity : Date.parse(domain.expiresAt)
     const unit = system.fpmUnitName(account.username, domain.php.version), paths = accountProbePaths(account)
-    const active = await latestActive(options.db); await guard()
+    const active = await withVisibleReadonlyOperationDatabase(options.db, () => latestActive(options.db)); await guard()
     if (!active || active.status !== 'active') return refused('active_generation_required')
     const manifest = await options.reconciler.journal.readManifest(active.id); await guard()
     if (!manifest || manifest.generationId !== active.id || manifest.filesChecksum !== active.checksum || manifest.stateChecksum !== input.sourceChecksum) refused('active_generation_binding_changed')
@@ -296,7 +296,7 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
     }
     const assertCurrent = async (): Promise<void> => {
       await guard()
-      const current = await latestActive(options.db)
+      const current = await withVisibleReadonlyOperationDatabase(options.db, () => latestActive(options.db))
       if (current?.id !== activeId || current.checksum !== generationChecksum) refused('active_generation_changed')
       for (const pin of pins) await pin.assertCurrent()
       const currentFpm = await unitIdentity(unit), currentNginx = await unitIdentity(nginxUnit)
