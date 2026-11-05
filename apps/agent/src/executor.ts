@@ -501,7 +501,19 @@ const execArgv = (
   argv: string[],
   opts: { timeoutMs?: number; maxBuffer?: number; skipSafeArgv?: boolean } = {},
 ): Promise<ConfigTestResult> => {
-  if (!opts.skipSafeArgv) assertValidCommandArgv(argv)
+  if (!opts.skipSafeArgv) {
+    try {
+      assertValidCommandArgv(argv)
+    } catch (error) {
+      // Bounded operator diagnostic: name the refused argv slot and its value preview, never env or files.
+      const detail = (error as { detail?: Record<string, unknown> }).detail
+      console.error('xpanel-agent unsafe argv:', JSON.stringify({ argv0: argv[0] ?? null,
+        index: typeof detail?.index === 'number' ? detail.index : null,
+        value: typeof detail?.value === 'string' ? detail.value.slice(0, 160) : null,
+        argvLength: argv.length }).slice(0, 400))
+      throw error
+    }
+  }
   const [cmd, ...args] = argv
   if (!cmd) return fail('VALIDATION', 'argv must not be empty')
   return new Promise((resolve) => {
