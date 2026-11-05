@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
-import { createProductionHostTargetMatcher, isAccountHomeRootPath, isSliceControlDirPath } from './executor.ts'
+import { createProductionHostTargetMatcher, isAccountHomeRootPath, isGeneratedAccountTreePath, isSliceControlDirPath } from './executor.ts'
 
 /**
  * Account termination removes the systemd control drop-in directories of the account slice and its
@@ -40,6 +40,18 @@ describe('account home tree removal predicate', { tags: ['unit'] }, () => {
     assert.equal(isAccountHomeRootPath('/home/trkrun1'), true)
     for (const path of ['/home/trkrun1/public_html', '/home/trkrun1/mail', '/home/qa1/../trkrun1', '/srv/home/trkrun1', '/home']) {
       assert.equal(isAccountHomeRootPath(path), false, path)
+    }
+  })
+})
+describe('generated account tree removal predicate', { tags: ['unit'] }, () => {
+  it('admits only the exact generated per-account directories as trees', () => {
+    for (const path of ['/home/trkrun1', '/var/log/xpanel/trkrun1', '/etc/xpanel/runtime/trkrun1',
+      '/run/xpanel-fpm/trkrun1-8.3', '/run/xpanel-ctr/trkrun1']) {
+      assert.equal(isGeneratedAccountTreePath(path), true, path)
+    }
+    for (const path of ['/var/log/xpanel/nginx', '/var/log/xpanel/trkrun1/error.log', '/etc/xpanel/runtime',
+      '/run/xpanel-fpm/trkrun1', '/etc/passwd', '/home/trkrun1/public_html']) {
+      assert.equal(isGeneratedAccountTreePath(path), false, path)
     }
   })
 })

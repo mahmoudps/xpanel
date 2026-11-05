@@ -399,6 +399,18 @@ export const isSliceControlDirPath = (path: string): boolean => SLICE_CONTROL_DI
 /** Exact account home root; termination removes its tree after the user is deleted. */
 export const ACCOUNT_HOME_ROOT_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}$/
 export const isAccountHomeRootPath = (path: string): boolean => ACCOUNT_HOME_ROOT_RE.test(path)
+/**
+ * Generated per-account directories the termination plan removes as trees. Each pattern is the exact
+ * shape the renderer creates; no arbitrary path or nested entry is admitted.
+ */
+export const GENERATED_ACCOUNT_TREE_RES: readonly RegExp[] = Object.freeze([
+  /^\/home\/[a-z_][a-z0-9_-]{0,31}$/,
+  /^\/var\/log\/xpanel\/[a-z_][a-z0-9_-]{0,31}$/,
+  /^\/etc\/xpanel\/runtime\/[a-z_][a-z0-9_-]{0,31}$/,
+  /^\/run\/xpanel-fpm\/[a-z_][a-z0-9_-]{0,31}-[5-9]\.[0-9]{1,2}$/,
+  /^\/run\/xpanel-ctr\/[a-z_][a-z0-9_-]{0,31}$/,
+])
+export const isGeneratedAccountTreePath = (path: string): boolean => GENERATED_ACCOUNT_TREE_RES.some(pattern => pattern.test(path))
 export const MAILBOX_SIEVE_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/\.dovecot\.sieve$/
 const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\/php\.cgi|(?:public_html\/)?\.user\.ini)$/
 
@@ -780,7 +792,7 @@ export class LinuxHostExecutor implements AgentExecutor {
             // systemd writes its set-property drop-ins under these exact slice-control directories, so
             // the generated directory is not empty when the account is retired. Only that reviewed
             // generated path may be removed as a tree; the host-target matcher already admitted it.
-            const treeRemovalAllowed = (rmdirError as NodeJS.ErrnoException).code === 'ENOTEMPTY' && (isSliceControlDirPath(path) || isAccountHomeRootPath(path))
+            const treeRemovalAllowed = (rmdirError as NodeJS.ErrnoException).code === 'ENOTEMPTY' && (isSliceControlDirPath(path) || isGeneratedAccountTreePath(path))
             if (!treeRemovalAllowed) throw rmdirError
             await removePinnedHostTree(target)
           }
