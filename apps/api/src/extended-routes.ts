@@ -5,7 +5,11 @@ import { join } from 'node:path'
 import {
   fail,
   assertBool,
+  assertCidr,
+  assertLine,
+  assertRedirectTarget,
   assertRelPath,
+  oneOf,
   assessMailboxMetadataAuthority,
   isXpanelError,
   suggestServerSettings,
@@ -450,6 +454,22 @@ const readJsonBody = async <T = Record<string, unknown>>(req: Request): Promise<
   if (!body || typeof body !== 'object' || Array.isArray(body)) return fail('VALIDATION', 'request body must be a JSON object')
   return body as T
 }
+
+/** An object holding only writable keys; values are validated by the caller before reaching a rendered line. */
+const writableFields = (value: unknown, allowed: readonly string[], what: string): Record<string, unknown> =>
+  value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => allowed.includes(key))
+    ? value as Record<string, unknown>
+    : fail('VALIDATION', `${what} accepts only ${allowed.join(', ')}`, { stateChanged: false })
+
+const boundedList = (value: unknown, max: number, what: string): unknown[] =>
+  Array.isArray(value) && value.length <= max ? value : fail('VALIDATION', `${what} must be a list of at most ${max} entries`, { stateChanged: false })
+
+const matching = (value: unknown, pattern: RegExp, what: string): string =>
+  typeof value === 'string' && pattern.test(value) ? value : fail('VALIDATION', `invalid ${what}`, { stateChanged: false })
+
+/** A site path such as /errors/404.html: shared relative-path rules after the leading slash. */
+const sitePath = (value: unknown, what: string): string =>
+  typeof value === 'string' && value.length > 1 && value.startsWith('/') ? `/${assertRelPath(value.slice(1), what)}` : fail('VALIDATION', `${what} must be a site path starting with /`, { stateChanged: false })
 
 export const compileVacationSieve = (cfg: {
   enabled: boolean
@@ -1567,18 +1587,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         return jsonResponse({ messages: filtered })
       }
       if (method === 'POST' && !messageItemMatch) {
-        const body = await readJsonBody<{
-          mailbox?: string
-          from?: string
-          to?: string[] | string
-          cc?: string[] | string
-          bcc?: string[] | string
-          subject?: string
-          textBody?: string
-          htmlBody?: string
-          attachments?: { filename: string; contentType: string; sizeBytes: number }[]
-          identityId?: Id | null
-        }>(req)
+        const body = await readJsonBody<{ mailbox?: string; from?: string; to?: string[] | string; identityId?: Id | null }>(req)
         const mailbox = isMailboxPrincipal(caller)
           ? await requireMailbox(helpers.store, caller, body.mailbox)
           : await requireMailbox(helpers.store, caller, body.mailbox ?? body.from)
@@ -1596,45 +1605,10 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
             ? body.to.split(',').map((s) => s.trim()).filter(Boolean)
             : []
         if (toList.length === 0) return fail('VALIDATION', 'at least one recipient (to) is required')
-        const sentMsg: WebmailMessage = {
-          id: randomUUID(),
-          mailbox,
-          folder: 'Sent',
-          from,
-          to: toList,
-          cc: Array.isArray(body.cc) ? body.cc : [],
-          bcc: Array.isArray(body.bcc) ? body.bcc : [],
-          subject: body.subject ?? '(no subject)',
-          textBody: body.textBody ?? '',
-          htmlBody: body.htmlBody ?? `<p>${body.textBody ?? ''}</p>`,
-          attachments: body.attachments ?? [],
-          identityId: body.identityId ?? null,
-          read: true,
-          starred: false,
-          sentAt: new Date().toISOString(),
-        }
-        messages.unshift(sentMsg)
-        // Also deliver to local recipient INBOX
-        for (const rcpt of toList) {
-          messages.unshift({
-            ...sentMsg,
-            id: randomUUID(),
-            mailbox: rcpt.toLowerCase(),
-            folder: 'INBOX',
-            read: false,
-          })
-        }
-        await ext.write('webmail/messages.json', messages)
-
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'webmail.message.sent',
-          target: `webmail:${sentMsg.id}`,
-          detail: { from, to: toList, subject: sentMsg.subject },
-          outcome: 'ok',
-          principalId: caller.principal.id,
+        // This JSON store has no SMTP or IMAP behind it: real submission and the Sent copy belong to the sealed mailbox session.
+        return fail('PRECONDITION_FAILED', 'send through the mailbox submission at /api/webmail/send; nothing was sent or stored', {
+          reason: 'mailbox_submission_required', stateChanged: false,
         })
-        return jsonResponse({ message: sentMsg }, 201)
       }
     }
 
@@ -2468,23 +2442,32 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           return jsonResponse({ config: await ext.readOrDefault(fileKey, defaultCfg) })
         }
         if (method === 'PUT') {
-          const body = await readJsonBody<Partial<HotlinkProtectionConfig>>(req)
-          const current = await ext.readOrDefault(fileKey, defaultCfg)
-          const merged = { ...current, ...body }
-          const extPattern = merged.protectedExtensions.join('|')
+          const body = writableFields(await readJsonBody(req), ['enabled', 'allowedUrls', 'protectedExtensions', 'allowDirectRequests', 'redirectUrl'], 'hotlink protection')
+          const merged = { ...await ext.readOrDefault(fileKey, defaultCfg), ...body }
+          // Every value lands in an nginx or Apache line, so stored values are revalidated along with the request.
+          const enabled = assertBool(merged.enabled, 'enabled'), allowDirectRequests = assertBool(merged.allowDirectRequests, 'allowDirectRequests')
+          const allowedUrls = boundedList(merged.allowedUrls, 100, 'allowedUrls').map(url => validateDomainName(url))
+          const protectedExtensions = boundedList(merged.protectedExtensions, 50, 'protectedExtensions').map(value => matching(value, /^[a-z0-9]{1,15}$/, 'protected extension'))
+          const redirectUrl = merged.redirectUrl === null ? null : assertRedirectTarget(merged.redirectUrl)
+          if (enabled && protectedExtensions.length === 0) return fail('VALIDATION', 'enabled hotlink protection needs at least one protected extension', { stateChanged: false })
+          const extPattern = protectedExtensions.join('|')
           const validReferers = [
-            ...(merged.allowDirectRequests ? ['none', 'blocked'] : []),
-            ...merged.allowedUrls,
+            ...(allowDirectRequests ? ['none', 'blocked'] : []),
+            ...allowedUrls,
           ].join(' ')
-          const compiledNginx = merged.enabled
-            ? `location ~* \\.(${extPattern})$ {\n  valid_referers ${validReferers};\n  if ($invalid_referer) {\n    return ${merged.redirectUrl ? `302 ${merged.redirectUrl}` : '403'};\n  }\n}`
+          const compiledNginx = enabled
+            ? `location ~* \\.(${extPattern})$ {\n  valid_referers ${validReferers};\n  if ($invalid_referer) {\n    return ${redirectUrl ? `302 ${redirectUrl}` : '403'};\n  }\n}`
             : '# Hotlink protection disabled'
-          const compiledApache = merged.enabled
-            ? `RewriteEngine on\n${merged.allowDirectRequests ? 'RewriteCond %{HTTP_REFERER} !^$\n' : ''}${merged.allowedUrls.map((u) => `RewriteCond %{HTTP_REFERER} !^https?://(www\\.)?${u.replace(/\./g, '\\.')} [NC]`).join('\n')}\nRewriteRule \\.(${extPattern})$ ${merged.redirectUrl ?? '-'} [F,NC,L]`
+          const compiledApache = enabled
+            ? `RewriteEngine on\n${allowDirectRequests ? 'RewriteCond %{HTTP_REFERER} !^$\n' : ''}${allowedUrls.map((u) => `RewriteCond %{HTTP_REFERER} !^https?://(www\\.)?${u.replace(/\./g, '\\.')} [NC]`).join('\n')}\nRewriteRule \\.(${extPattern})$ ${redirectUrl ?? '-'} [F,NC,L]`
             : '# Hotlink protection disabled'
           const config: HotlinkProtectionConfig = {
-            ...merged,
             accountId: account.id,
+            enabled,
+            allowedUrls,
+            protectedExtensions,
+            allowDirectRequests,
+            redirectUrl,
             compiledNginx,
             compiledApache,
             updatedAt: new Date().toISOString(),
@@ -2521,12 +2504,9 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           return jsonResponse({ config: await ext.readOrDefault(fileKey, defaultCfg) })
         }
         if (method === 'PUT') {
-          const body = await readJsonBody(req)
           // Port, endpoint and compiled text are server-derived; only these owner choices are writable.
           const flags = ['enabled', 'readOnly', 'requireTls', 'digestAuth'] as const
-          if (Object.keys(body).some(key => key !== 'rootPath' && !(flags as readonly string[]).includes(key))) {
-            return fail('VALIDATION', 'web disk accepts only enabled, rootPath, readOnly, requireTls and digestAuth', { stateChanged: false })
-          }
+          const body = writableFields(await readJsonBody(req), ['rootPath', ...flags], 'web disk')
           const merged = { ...await ext.readOrDefault(fileKey, defaultCfg), ...body } as WebDiskConfig
           // rootPath becomes an nginx alias line: a config-safe relative path, no traversal, quotes or control characters.
           assertRelPath(merged.rootPath, 'rootPath')
@@ -2578,27 +2558,46 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           return jsonResponse({ config: await ext.readOrDefault(fileKey, defaultCfg) })
         }
         if (method === 'PUT') {
-          const body = await readJsonBody<Partial<WebExtrasConfig>>(req)
-          const current = await ext.readOrDefault(fileKey, defaultCfg)
-          const merged = { ...current, ...body }
+          const body = writableFields(await readJsonBody(req), ['errorPages', 'redirects', 'mimeTypes', 'deniedCidrs', 'directoryIndexMode'], 'web extras')
+          const merged = { ...await ext.readOrDefault(fileKey, defaultCfg), ...body }
+          // Every value lands in an nginx or Apache line, so stored values are revalidated along with the request.
+          const pages = merged.errorPages
+          if (!pages || typeof pages !== 'object' || Array.isArray(pages) || Object.keys(pages).length > 20 || Object.keys(pages).some(code => !/^[45][0-9]{2}$/.test(code))) {
+            return fail('VALIDATION', 'error pages map at most 20 HTTP 4xx/5xx codes to site paths', { stateChanged: false })
+          }
+          const errorPages = Object.fromEntries(Object.entries(pages).map(([code, page]) => [code, sitePath(page, 'error page')]))
+          const redirects = boundedList(merged.redirects, 100, 'redirects').map((raw): WebExtrasConfig['redirects'][number] => {
+            const r = writableFields(raw, ['source', 'target', 'code', 'wildcard'], 'redirect')
+            return { source: sitePath(r.source, 'redirect source'), target: assertRedirectTarget(r.target), code: r.code === 301 || r.code === 302 ? r.code : fail('VALIDATION', 'redirect code must be 301 or 302', { stateChanged: false }), wildcard: assertBool(r.wildcard, 'wildcard') }
+          })
+          const mimeTypes = boundedList(merged.mimeTypes, 100, 'mimeTypes').map(raw => {
+            const m = writableFields(raw, ['extension', 'mimeType'], 'mime type')
+            return { extension: matching(m.extension, /^\.?[a-z0-9]{1,15}$/, 'mime extension'), mimeType: matching(m.mimeType, /^[a-z0-9][a-z0-9.+-]{0,63}\/[a-z0-9][a-z0-9.+-]{0,126}$/, 'mime type') }
+          })
+          const deniedCidrs = boundedList(merged.deniedCidrs, 200, 'deniedCidrs').map(cidr => assertCidr(cidr, 'deniedCidr'))
+          const directoryIndexMode = oneOf(merged.directoryIndexMode, ['disabled', 'standard', 'fancy'] as const, 'directoryIndexMode')
           const nginxLines: string[] = []
-          for (const [code, page] of Object.entries(merged.errorPages)) {
+          for (const [code, page] of Object.entries(errorPages)) {
             nginxLines.push(`error_page ${code} ${page};`)
           }
-          for (const cidr of merged.deniedCidrs) {
+          for (const cidr of deniedCidrs) {
             nginxLines.push(`deny ${cidr};`)
           }
           nginxLines.push(
-            `autoindex ${merged.directoryIndexMode === 'disabled' ? 'off' : 'on'};`,
+            `autoindex ${directoryIndexMode === 'disabled' ? 'off' : 'on'};`,
           )
           const apacheLines: string[] = [
-            `Options ${merged.directoryIndexMode === 'disabled' ? '-Indexes' : '+Indexes'}`,
-            ...Object.entries(merged.errorPages).map(([code, page]) => `ErrorDocument ${code} ${page}`),
-            ...merged.mimeTypes.map((m) => `AddType ${m.mimeType} ${m.extension}`),
+            `Options ${directoryIndexMode === 'disabled' ? '-Indexes' : '+Indexes'}`,
+            ...Object.entries(errorPages).map(([code, page]) => `ErrorDocument ${code} ${page}`),
+            ...mimeTypes.map((m) => `AddType ${m.mimeType} ${m.extension}`),
           ]
           const config: WebExtrasConfig = {
-            ...merged,
             accountId: account.id,
+            errorPages,
+            redirects,
+            mimeTypes,
+            deniedCidrs,
+            directoryIndexMode,
             compiledNginx: nginxLines.join('\n'),
             compiledApache: apacheLines.join('\n'),
             updatedAt: new Date().toISOString(),
@@ -2641,19 +2640,21 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         return jsonResponse({ config: await ext.readOrDefault(fileKey, defaultCfg) })
       }
       if (method === 'PUT') {
-        const body = await readJsonBody<{
-          hosts?: { address: string; engine?: 'mariadb' | 'postgresql' | 'both'; comment?: string }[]
-        }>(req)
-        const hosts = (body.hosts ?? []).map((h) => ({
-          address: h.address.trim(),
-          engine: h.engine ?? ('both' as const),
-          comment: h.comment ?? '',
-        }))
+        const body = writableFields(await readJsonBody(req), ['hosts'], 'remote database hosts')
+        // Addresses land in pg_hba lines and GRANT statements: canonical IPs/CIDRs only, no hostnames or quotes.
+        const hosts = boundedList(body.hosts ?? [], 100, 'hosts').map(raw => {
+          const h = writableFields(raw, ['address', 'engine', 'comment'], 'remote host')
+          return {
+            address: assertCidr(h.address, 'address'),
+            engine: h.engine === undefined ? 'both' as const : oneOf(h.engine, ['mariadb', 'postgresql', 'both'] as const, 'engine'),
+            comment: h.comment === undefined ? '' : assertLine(h.comment, 128, 'comment'),
+          }
+        })
         const compiledPgHba = hosts
           .filter((h) => h.engine === 'postgresql' || h.engine === 'both')
           .map(
             (h) =>
-              `host all +${account.username} ${h.address.includes('/') ? h.address : `${h.address}/32`} scram-sha-256`,
+              `host all +${account.username} ${h.address.includes('/') ? h.address : `${h.address}/${h.address.includes(':') ? 128 : 32}`} scram-sha-256`,
           )
           .join('\n')
         const compiledMariaDbGrants = hosts

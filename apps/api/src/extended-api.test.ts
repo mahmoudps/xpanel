@@ -492,7 +492,17 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
         identityId,
       },
     })
-    assert.equal(msgRes.status, 201)
+    // No SMTP or IMAP stands behind the JSON store, so it refuses instead of copying the message into recipients' INBOX.
+    assert.equal(msgRes.status, 412)
+    const msgRefusal = (await msgRes.json()) as { code: string; details: unknown }
+    assert.equal(msgRefusal.code, 'PRECONDITION_FAILED')
+    assert.deepEqual(msgRefusal.details, { reason: 'mailbox_submission_required', stateChanged: false })
+    assert.deepEqual(await new ExtendedFeaturesStore(serverHandle.store.rootDir).readOrDefault('webmail/messages.json', []), [])
+    await new ExtendedFeaturesStore(serverHandle.store.rootDir).write('webmail/messages.json', [{
+      id: '33333333-3333-4333-8333-333333333333', mailbox: 'support@nebula.test', folder: 'Sent', from: 'support@nebula.test', to: ['billing@nebula.test'], cc: [], bcc: [],
+      subject: 'Q4 Infrastructure Renewal Proposal', textBody: 'Attached is the Q4 NVMe cluster renewal quote.', htmlBody: '',
+      attachments: [{ filename: 'q4-quote.pdf', contentType: 'application/pdf', sizeBytes: 48120 }], identityId, read: true, starred: false, sentAt: '2026-10-01T09:10:11.123Z',
+    }])
 
     const searchRes = await root.request('/api/webmail/search?q=q4-quote.pdf&mailbox=support%40nebula.test')
     assert.equal(searchRes.status, 200)
@@ -875,7 +885,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.ok(actions.has('mail.domain_forwarder.created'))
     assert.ok(actions.has('mail.filter.created'))
     assert.ok(actions.has('mail.import_csv'))
-    assert.ok(actions.has('webmail.message.sent'))
+    assert.ok(!actions.has('webmail.message.sent'))
     assert.ok(actions.has('dns.email_auth.batch_provisioned'))
     assert.ok(!audits.some(a => a.action === 'backup.snapshot.restore_file' && a.outcome === 'ok'))
     assert.ok(!actions.has('git.repo.deployed') && !actions.has('database.maintenance.optimize') && !actions.has('cluster.node.added'))

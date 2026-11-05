@@ -387,15 +387,20 @@ describe('HTTP authorization security regressions', () => {
     const inboxMailboxToken = await tokenFor(aliceId, [`mailbox:${inboxUser.id}`, 'webmail:*', 'mail:*'])
     const siblingMailboxToken = await tokenFor(aliceId, [`mailbox:support:${alice.primaryDomain}`, 'webmail:*', 'mail:*'])
 
-    // Own mailbox access succeeds
+    // The JSON store cannot submit mail; sending belongs to the sealed mailbox session at /api/webmail/send.
     const sendOwn = await request(inboxMailboxToken, '/api/webmail/messages', 'POST', {
       to: ['external@example.test'],
       subject: 'Inbox internal note',
       textBody: 'CONFIDENTIAL_INBOX_BODY',
       attachments: [{ filename: 'invoice.pdf', contentType: 'application/pdf', sizeBytes: 128 }],
     })
-    expect(sendOwn.status).toBe(201)
-    const sentMsg = ((await sendOwn.json()) as { message: { id: string } }).message
+    expect(sendOwn.status).toBe(412)
+    expect(await sendOwn.json()).toMatchObject({ code: 'PRECONDITION_FAILED', details: { reason: 'mailbox_submission_required', stateChanged: false } })
+    // Own mailbox access to a stored message succeeds
+    const sentMsg = { id: randomUUID() }
+    await atomicWriteJson(join(state.rootDir, 'extended/webmail/messages.json'), [{ id: sentMsg.id, mailbox: inboxLogin, folder: 'Sent', from: inboxLogin, to: ['external@example.test'], cc: [], bcc: [],
+      subject: 'Inbox internal note', textBody: 'CONFIDENTIAL_INBOX_BODY', htmlBody: '', attachments: [{ filename: 'invoice.pdf', contentType: 'application/pdf', sizeBytes: 128 }],
+      identityId: null, read: true, starred: false, sentAt: new Date().toISOString() }])
 
     const foldersRes = await request(inboxMailboxToken, '/api/webmail/folders')
     expect(foldersRes.status).toBe(200)
