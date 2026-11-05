@@ -2388,6 +2388,81 @@
       "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
     },
     {
+      "method": "POST",
+      "path": "/api/accounts/bulk-actions/suspend",
+      "surface": "api",
+      "resource": "accounts",
+      "requiredScope": "accounts:write",
+      "resellerAcl": "suspend-account",
+      "featureEntitlement": [],
+      "ownershipSource": "store.accounts.ownerId per listed account, re-checked with a fresh caller before each account (allowUserSelf=false)",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/account-bulk-actions.ts (single-account use cases)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/accounts/bulk-actions/unsuspend",
+      "surface": "api",
+      "resource": "accounts",
+      "requiredScope": "accounts:write",
+      "resellerAcl": "suspend-account",
+      "featureEntitlement": [],
+      "ownershipSource": "store.accounts.ownerId per listed account, re-checked with a fresh caller before each account (allowUserSelf=false)",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/account-bulk-actions.ts (single-account use cases)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/accounts/bulk-actions/plan",
+      "surface": "api",
+      "resource": "accounts",
+      "requiredScope": "accounts:write",
+      "resellerAcl": "edit-account (+ change-plan)",
+      "featureEntitlement": [],
+      "ownershipSource": "store.accounts.ownerId per listed account, re-checked with a fresh caller before each account (allowUserSelf=false)",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/account-bulk-actions.ts (single-account use cases)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/accounts/bulk-actions/owner",
+      "surface": "api",
+      "resource": "accounts",
+      "requiredScope": "accounts:write",
+      "resellerAcl": "edit-account (rootOnly when ownerId changes)",
+      "featureEntitlement": [],
+      "ownershipSource": "store.accounts.ownerId per listed account, re-checked with a fresh caller before each account (allowUserSelf=false)",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/account-bulk-actions.ts (single-account use cases)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/accounts/bulk-actions",
+      "surface": "api",
+      "resource": "accounts",
+      "requiredScope": "accounts:write",
+      "resellerAcl": "terminate-account",
+      "featureEntitlement": [],
+      "ownershipSource": "store.accounts.ownerId per listed account, re-checked with a fresh caller before each account (allowUserSelf=false)",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/account-bulk-actions.ts (single-account use cases)"
+    },
+    {
       "method": "GET",
       "path": "/api/ips",
       "surface": "api",

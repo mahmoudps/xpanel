@@ -84,6 +84,7 @@ import { handleGitWorkspaceRoute } from './git-workspace.ts'
 import { handlePgpWorkspace } from './pgp-workspace.ts'
 import { createDynamicDnsRoutes } from './dynamic-dns.ts'
 import { handleWebDirectivesRoute } from './web-directives-workspace.ts'
+import { handleAccountBulkActionsRoute } from './account-bulk-actions.ts'
 import { handleMailLogWorkspaceRoute, handleMailTrackDeliveryRoute } from './mail-log-workspace.ts'
 import { handleFtpLogWorkspaceRoute } from './ftp-log-workspace.ts'
 import { handleUpgradeWorkspaceRoute } from './upgrade-workspace.ts'
@@ -3548,6 +3549,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
       const certificateResponse = await certificateRuntimeRouter(req, url, method)
       if (certificateResponse) return certificateResponse
+
+      const accountBulkResponse = await handleAccountBulkActionsRoute(req, url, method, { db: deps.db, requireCaller, readJsonBody, getAccount: id => deps.store.getAccount(id), assertCanAccessAccount, setSuspension: setAccountSuspensionAs, update: updateAccountAs, terminate: terminateAccountAs })
+      if (accountBulkResponse) return accountBulkResponse
 
       // ---- Accounts CRUD & Lifecycle -------------------------------------------------
       if (method === 'GET' && pathname === '/api/accounts') {
