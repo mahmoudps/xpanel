@@ -6,6 +6,7 @@ import type { BackupDestination, BackupScheduleConfig } from './extended-routes.
 import type { WhmBackupWorkspacePorts } from './backup-workspace.ts'
 import { createBackupRunsWorkspaceRoutes } from './acct-backup-runs-workspace.ts'
 import { createBackupCredentialsWorkspaceRoutes } from './backup-credentials-workspace.ts'
+import { backupSchedulerVerified, readBackupRunsView } from '../../agent/src/acct-backup-plan.ts'
 
 export type BackupLifecycleDestination = BackupDestination & { credentialRef?: string | null; verification?: BackupDestinationProof | null }
 export type BackupDestinationHost = (caller: AuthenticatedCaller, path: string, body?: unknown) => Promise<unknown>
@@ -43,6 +44,11 @@ const capabilities = async (ports: Pick<BackupDestinationsWorkspacePorts, 'desti
   } catch { return { available: false, profiles: [] } }
 }
 const profileFor = (destination: BackupLifecycleDestination, current: { available: boolean; profiles: BackupCredentialProfile[] }): BackupCredentialProfile | undefined => current.available ? current.profiles.find(profile => profile.ref === destination.credentialRef && profile.kinds.includes(destination.kind as BackupCredentialProfile['kinds'][number])) : undefined
+/** schedulerVerified from the agent's own timer observation; no host, no saved enabled schedule or an unreadable reply reads as unverified. */
+export async function observeBackupScheduler(ports: Pick<BackupDestinationsWorkspacePorts, 'destinationHost'>, caller: AuthenticatedCaller, schedule: BackupScheduleConfig | null): Promise<boolean> {
+  if (!schedule?.enabled || !ports.destinationHost) return false
+  try { return backupSchedulerVerified(readBackupRunsView(await ports.destinationHost(caller, '/host/backups/runs')), schedule, new Date()) } catch { return false }
+}
 export async function assertBackupDestinationsReady(destinations: readonly BackupLifecycleDestination[], ports: Pick<BackupDestinationsWorkspacePorts, 'destinationHost'>, caller: AuthenticatedCaller): Promise<void> {
   const current = await capabilities(ports, caller)
   if (destinations.some(destination => { const profile = profileFor(destination, current); return !destination.enabled || !profile || !backupDestinationProofCurrent(destination, destination.verification, profile.revision) })) return unavailable()
@@ -83,12 +89,12 @@ export function createBackupDestinationsWorkspaceRoutes(ports: BackupDestination
       let current = await ports.load()
       if (expected !== undefined && current.revision !== expected) return fail('CONFLICT', 'backup configuration changed; reload and review', { stateChanged: false })
       if (listing) {
-        const transport = await capabilities(ports, caller)
+        const [transport, schedulerVerified] = await Promise.all([capabilities(ports, caller), observeBackupScheduler(ports, caller, current.schedule)])
         await authorize()
         return json({ revision: current.revision, destinations: current.destinations.map(destination => {
           const profile = profileFor(destination, transport), verified = !!profile && backupDestinationProofCurrent(destination, destination.verification, profile.revision)
           return { ...destination, credentialRef: destination.credentialRef ?? null, verification: verified ? destination.verification : null, state: !profile ? 'unavailable' : verified ? destination.enabled ? 'active' : 'verified' : 'unverified', effectiveActive: destination.enabled && verified }
-        }), capabilities: { canTest: transport.available, profiles: transport.profiles }, application: { nativeApplied: false, schedulerVerified: false } })
+        }), capabilities: { canTest: transport.available, profiles: transport.profiles }, application: { nativeApplied: false, schedulerVerified } })
       }
       const target = current.destinations.find(destination => destination.id === match![1])
       if (!target) return fail('NOT_FOUND', 'backup destination no longer exists', { stateChanged: false })

@@ -38,7 +38,7 @@ export function readWhmBackupRunsView(raw: unknown): WhmBackupRunsView {
   const database = (username: string, value: unknown): string => typeof value === 'string' && /^[a-z][a-z0-9]{0,15}_[a-z0-9_]{1,47}$/.test(value) && value.startsWith(username + '_') ? value : bad()
   const zone = (value: unknown): string => typeof value === 'string' && value.length <= 253 && /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/.test(value) ? value : bad()
   if (!object(raw) || typeof raw.available !== 'boolean' || raw.nativeQualified !== false || typeof raw.revision !== 'string' || !/^[0-9a-f]{64}$/.test(raw.revision) || !Array.isArray(raw.runs) || raw.runs.length > 30 || !Array.isArray(raw.recoveries) || raw.recoveries.length > 30 || !Array.isArray(raw.restores) || raw.restores.length > 30
-    || !(raw.reason === null || ['no_executor', 'no_provider', 'no_schedule', 'no_destination', 'invalid_configuration', 'invalid_ledger'].includes(raw.reason as string)) || raw.available !== (raw.reason === null)) return bad()
+    || !(raw.reason === null || ['no_executor', 'no_provider', 'no_schedule', 'unsupported_compression', 'no_destination', 'invalid_configuration', 'invalid_ledger'].includes(raw.reason as string)) || raw.available !== (raw.reason === null)) return bad()
   let schedule: WhmBackupRunsView['schedule'] = null
   if (raw.schedule !== null) {
     if (!object(raw.schedule) || typeof raw.schedule.enabled !== 'boolean' || typeof raw.schedule.cron !== 'string' || !/^[0-9*,/ -]{1,100}$/.test(raw.schedule.cron)) return bad()
@@ -147,6 +147,7 @@ function bindWhmBackupRuns(ask: ((options: Record<string, unknown>) => Promise<u
       no_executor: t('Scheduled backups cannot run here: this server has no Linux host executor for account archives.'),
       no_provider: t('No trusted remote transport is configured. Add an S3-compatible or SFTP credential profile on the server, then test and activate a destination.'),
       no_schedule: t('No backup schedule is saved. Save a schedule; without destinations it keeps verified copies on this server only.'),
+      unsupported_compression: t('The saved schedule asks for Zstandard compression, which this server cannot write. Save the schedule with Gzip; nothing runs until then.'),
       no_destination: t('No selected destination is enabled with a current verification. Test and activate a destination first.'),
       invalid_configuration: t('The saved backup configuration could not be read. Review the schedule and destinations.'),
       invalid_ledger: t('The run history file {path} is in an older or unreadable format. Move it aside (for example to {path}.old) to start a new history; nothing runs until then.', { path: '/var/lib/xpanel/backup-runs.json' }),

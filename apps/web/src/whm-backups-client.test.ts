@@ -115,6 +115,19 @@ describe('WHM backups browser controller', () => {
     expect(status().dataset.state).toBe(mode); expect(action('save-schedule').disabled).toBe(true)
     expect(input('policy-cron').value).toBe('15 3 * * *'); expect(f.writes()).toHaveLength(1)
   })
+  it('lists Zstandard as unavailable, drafts gzip and states the observed backup timer', async () => {
+    const f = model(); Object.assign(f.getCurrent(), { schedule: null }); f.boot(); await tick()
+    const compress = document.querySelector<HTMLSelectElement>('#backup-layout-policy-compress')!, saved = () => document.querySelector('[data-backup-configuration-status]')!.textContent
+    expect(compress.querySelector<HTMLOptionElement>('option[value="1"]')!.disabled).toBe(true)
+    expect(compress.value).toBe('2')
+    edit('policy-cron', '15 3 * * *'); action('save-schedule').click(); await tick(); await tick()
+    expect(f.writes()[0]![2]).toMatchObject({ compress: 'gzip' })
+    expect(saved()).toBe('Saved configuration read; scheduling and remote transport remain unverified.')
+    f.getCurrent().application = { ...application, schedulerVerified: true }
+    action('refresh').click(); await tick()
+    expect(saved()).toBe('Saved configuration read; the backup timer is running this schedule. Remote transport remains unverified.')
+    expect(() => readWhmBackupWorkspace({ ...initial(), application: { ...application, schedulerVerified: 'yes' } })).toThrow()
+  })
   it('keeps an explicitly refused draft editable', async () => {
     const f = model(); f.boot(); await tick(); edit('policy-cron', '15 3 * * *'); f.setMode('refused')
     action('save-schedule').click(); await tick(); await tick()

@@ -46,6 +46,8 @@ export interface WhmBackupSnapshot {
 export interface WhmBackupWorkspaceView {
   revision: string; destinations: WhmBackupDestination[]; schedule: WhmBackupSchedule | null
   accounts: { id: string; username: string; primaryDomain: string; status: string }[]; snapshots: WhmBackupSnapshot[]
+  /** The agent backup timer was observed evaluating the saved, enabled schedule. */
+  schedulerVerified: boolean
 }
 const backupKinds = ['local', 'sftp', 's3', 'backblaze', 'rsync', 'ftp'] as const
 const backupObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -71,8 +73,9 @@ const backupRevision = (value: unknown): string => {
   if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) throw new Error('invalid_backup_revision')
   return value
 }
-const backupApplication = (value: unknown): void => {
-  if (!backupObject(value) || value.status !== 'configuration_only' || value.nativeApplied !== false) throw new Error('invalid_backup_application')
+const backupApplication = (value: unknown): boolean => {
+  if (!backupObject(value) || value.status !== 'configuration_only' || value.nativeApplied !== false || typeof value.schedulerVerified !== 'boolean') throw new Error('invalid_backup_application')
+  return value.schedulerVerified
 }
 export function readWhmBackupDestination(value: unknown): WhmBackupDestination {
   if (!backupObject(value) || !backupKinds.includes(value.kind as WhmBackupDestination['kind'])) throw new Error('invalid_backup_destination')
@@ -85,7 +88,7 @@ export function readWhmBackupSchedule(value: unknown): WhmBackupSchedule {
 }
 export function readWhmBackupWorkspace(value: unknown): WhmBackupWorkspaceView {
   if (!backupObject(value)) throw new Error('invalid_backup_workspace')
-  backupApplication(value.application)
+  const schedulerVerified = backupApplication(value.application)
   const accounts = backupArray(value.accounts, 10000, raw => {
     if (!backupObject(raw)) throw new Error('invalid_backup_account')
     return { id: backupIdentity(raw.id), username: backupText(raw.username, 32), primaryDomain: backupText(raw.primaryDomain, 253), status: backupText(raw.status, 32) }
@@ -99,7 +102,7 @@ export function readWhmBackupWorkspace(value: unknown): WhmBackupWorkspaceView {
       return { path: backupText(file.path), sizeBytes: backupInteger(file.sizeBytes), mode: backupInteger(file.mode, 0, 0o7777) }
     }), databases: backupArray(raw.databases, 10000, item => backupText(item, 128)), application: { status: 'recorded_metadata' as const, archiveVerified: false as const, restoreAvailable: false as const } }
   })
-  return { revision: backupRevision(value.revision), accounts, destinations, schedule: value.schedule === null ? null : readWhmBackupSchedule(value.schedule), snapshots }
+  return { revision: backupRevision(value.revision), accounts, destinations, schedule: value.schedule === null ? null : readWhmBackupSchedule(value.schedule), snapshots, schedulerVerified }
 }
 const backupStable = (value: unknown): string => Array.isArray(value) ? '[' + value.map(backupStable).join(',') + ']' : backupObject(value) ? '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + backupStable(value[key])).join(',') + '}' : JSON.stringify(value) ?? 'null'
 const backupUnknown = (error: unknown): boolean => {
@@ -148,6 +151,8 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.backupManage === 'true' && !root.closest(denied) && backupDestinationEditorPresent(root, destinationManager)
     const scheduleInputs = ['policy-enabled', 'policy-cron', 'daily-copies', 'weekly-copies', 'include-databases', 'include-mail', 'include-dns', 'include-control', 'start-time']
+    // Archives are written with gzip only, so Zstandard stays listed as an unavailable choice.
+    const zstd = root.querySelector<HTMLOptionElement>('#backup-layout-policy-compress option[value="1"]'); if (zstd) zstd.disabled = true
     const destinationInputs = ['destination-name', 'destination-endpoint', 'destination-prefix', 'destination-bucket', 'destination-region', 'destination-user', 'destination-retention']
     if (!delegatedDestinations) {
       const activationHelp = backupNode(root, 'activation', 'span'), activationLink = clientTemplateSlot(activationHelp, 'link', 'a') as HTMLAnchorElement
@@ -265,7 +270,7 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       input('include-databases').checked = schedule?.includeDatabases ?? true; input('include-mail').checked = schedule?.includeMail ?? true
       input('weekly-copies').value = String(schedule?.retentionWeekly ?? 4); input('include-dns').checked = schedule?.includeDns ?? true; input('include-control').checked = schedule?.includeControl ?? true
       const monthly = root.querySelector<HTMLInputElement>('#backup-layout-monthly-copies'); if (monthly) monthly.value = String(schedule?.retentionMonthly ?? 0)
-      select('frequency').value = schedule?.frequency === 'weekly' ? '3' : schedule?.frequency === 'monthly' ? '4' : '1'; select('policy-compress').value = schedule?.compress === 'gzip' ? '2' : '1'
+      select('frequency').value = schedule?.frequency === 'weekly' ? '3' : schedule?.frequency === 'monthly' ? '4' : '1'; select('policy-compress').value = schedule?.compress === 'zstd' ? '1' : '2'
       const cron = input('policy-cron').value.split(/\s+/)
       const pairedHours = (cron[1] ?? '').split(',').map(Number)
       if (schedule?.frequency === 'daily' && (cron[1] === '*/12' || pairedHours.length === 2 && pairedHours.every(Number.isInteger) && Math.abs(pairedHours[1]! - pairedHours[0]!) === 12)) select('frequency').value = '2'
@@ -286,7 +291,7 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       if (configuration) configuration.textContent = t('Saved schedule and destination metadata were read. The requested policy does not prove scheduler installation, transport trust or low-priority CPU/IO enforcement (weight 10).')
       root.querySelectorAll<HTMLElement>('[data-backup-account-choices]').forEach(choices => { const previous = choices.previousElementSibling; if (previous?.tagName === 'P' && previous.getAttribute('role') === 'status') previous.textContent = t('Authorized current accounts read: {count}', { count: view.accounts.length }) })
       const saved = root.querySelector<HTMLElement>('[data-backup-configuration-status]')
-      if (saved) saved.textContent = schedule ? t('Saved configuration read; scheduling and remote transport remain unverified.') : t('No schedule is stored. The controls contain an unsaved draft.')
+      if (saved) saved.textContent = !schedule ? t('No schedule is stored. The controls contain an unsaved draft.') : view.schedulerVerified ? t('Saved configuration read; the backup timer is running this schedule. Remote transport remains unverified.') : t('Saved configuration read; scheduling and remote transport remain unverified.')
     }
     const refresh = async (): Promise<void> => {
       if (busy || confirming || !admitted()) return
@@ -299,7 +304,7 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
     }
     const number = (value: string): number => { if (!/^\d+$/.test(value)) throw new Error('invalid_integer'); return backupInteger(Number(value), 1, 3650) }
     const copies = (value: string, max: number): number => { if (!/^\d+$/.test(value)) throw new Error('invalid_integer'); return backupInteger(Number(value), 0, max) }
-    const scheduleDraft = (): Omit<WhmBackupSchedule, 'updatedAt'> => ({ enabled: input('policy-enabled').checked, frequency: select('frequency').value === '3' ? 'weekly' : select('frequency').value === '4' ? 'monthly' : 'daily', cron: input('policy-cron').value.trim().replace(/\s+/g, ' '), retentionCount: number(input('daily-copies').value), retentionWeekly: copies(input('weekly-copies').value, 520), retentionMonthly: root.querySelector<HTMLInputElement>('#backup-layout-monthly-copies') ? copies(root.querySelector<HTMLInputElement>('#backup-layout-monthly-copies')!.value, 240) : current?.schedule?.retentionMonthly ?? 0, compress: select('policy-compress').value === '2' ? 'gzip' : 'zstd', includeDatabases: input('include-databases').checked, includeMail: input('include-mail').checked, includeDns: input('include-dns').checked, includeControl: input('include-control').checked, selectedAccounts: allAccounts ? 'all' : [...selectedAccounts], destinationIds: [...selectedDestinations] })
+    const scheduleDraft = (): Omit<WhmBackupSchedule, 'updatedAt'> => ({ enabled: input('policy-enabled').checked, frequency: select('frequency').value === '3' ? 'weekly' : select('frequency').value === '4' ? 'monthly' : 'daily', cron: input('policy-cron').value.trim().replace(/\s+/g, ' '), retentionCount: number(input('daily-copies').value), retentionWeekly: copies(input('weekly-copies').value, 520), retentionMonthly: root.querySelector<HTMLInputElement>('#backup-layout-monthly-copies') ? copies(root.querySelector<HTMLInputElement>('#backup-layout-monthly-copies')!.value, 240) : current?.schedule?.retentionMonthly ?? 0, compress: select('policy-compress').value === '1' ? 'zstd' : 'gzip', includeDatabases: input('include-databases').checked, includeMail: input('include-mail').checked, includeDns: input('include-dns').checked, includeControl: input('include-control').checked, selectedAccounts: allAccounts ? 'all' : [...selectedAccounts], destinationIds: [...selectedDestinations] })
     const destinationDraft = (): Omit<WhmBackupDestination, 'id' | 'createdAt'> => {
       const kind = backupKinds[Number(select('destination-kind').value) - 1]
       if (!kind) throw new Error('invalid_kind')

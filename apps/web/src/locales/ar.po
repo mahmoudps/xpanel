@@ -32669,6 +32669,10 @@ msgstr "قُرئت الإعدادات المحفوظة. رصد الخادم غي
 msgid "Saved configuration read; scheduling and remote transport remain unverified."
 msgstr "قُرئ الإعداد المحفوظ؛ الجدولة والنقل البعيد غير متحقق منهما."
 
+#: apps/web/src/whm-backups-client.ts
+msgid "Saved configuration read; the backup timer is running this schedule. Remote transport remains unverified."
+msgstr "قُرئ الإعداد المحفوظ؛ مؤقّت النسخ الاحتياطي يشغّل هذه الجدولة. النقل البعيد غير متحقق منه."
+
 #: apps/web/src/whm-domains-client.ts
 msgid "Saved configuration will be read again. No previous mutation is retried."
 msgstr "ستُقرأ الإعدادات المحفوظة مجددًا. لا يُعاد أي طلب تغيير سابق."
@@ -40582,6 +40586,10 @@ msgstr "تعذّر التحقق من ملف القواعد المحفوظ، لذ
 #: apps/web/src/account-web-directives-client.ts
 msgid "The saved rules were read from the actual file."
 msgstr "قُرئت القواعد المحفوظة من الملف الفعلي."
+
+#: apps/web/src/acct-backup-runs-client.ts
+msgid "The saved schedule asks for Zstandard compression, which this server cannot write. Save the schedule with Gzip; nothing runs until then."
+msgstr "تطلب الجدولة المحفوظة ضغط Zstandard، ولا يستطيع هذا الخادم كتابته. احفظ الجدولة بضغط Gzip؛ لن يعمل شيء حتى ذلك الحين."
 
 #: apps/web/src/whm-mail-quality-client.ts
 msgid "The saved sending address is not a public address."

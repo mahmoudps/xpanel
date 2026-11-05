@@ -29,7 +29,8 @@ const HEX = /^[0-9a-f]{64}$/
 
 export interface BackupRunAccount extends BackupAccountTarget { id: string }
 interface SavedDestination { target: BackupDestinationTarget; enabled: boolean; verification: BackupDestinationProof | null }
-interface SavedSchedule { enabled: boolean; cron: string; parsed: BackupCron; retentionCount: number; retentionWeekly: number; retentionMonthly: number; includeMail: boolean; includeDatabases: boolean; includeDns: boolean; includeControl: boolean; selectedAccounts: 'all' | string[]; destinationIds: string[]; updatedAt: string }
+/** `gzip` is false when the saved compression asks for another codec: archives are written with gzip only, so such a schedule never runs. */
+interface SavedSchedule { enabled: boolean; cron: string; parsed: BackupCron; gzip: boolean; retentionCount: number; retentionWeekly: number; retentionMonthly: number; includeMail: boolean; includeDatabases: boolean; includeDns: boolean; includeControl: boolean; selectedAccounts: 'all' | string[]; destinationIds: string[]; updatedAt: string }
 export interface SavedBackupConfig { destinations: SavedDestination[]; schedule: SavedSchedule | null }
 interface ActiveDestination { target: BackupDestinationTarget; profile: BackupCredentialProfile }
 export interface BackupRetentionPreview { destinationId: string; retentionDays: number; keep: BackupRetentionKeep; planDigest: string; rows: BackupRetentionRow[] }
@@ -49,12 +50,12 @@ export function readSavedBackupConfig(raw: { destinations: unknown; schedule: un
   if (new Set(destinations.map(item => item.target.id)).size !== destinations.length) invalidConfig()
   if (raw.schedule === null) return { destinations, schedule: null }
   // Fields added later read with the API's defaults, as the API reads the same file.
-  const s = object(raw.schedule) ? { retentionWeekly: 4, retentionMonthly: 0, includeDns: true, includeControl: true, ...raw.schedule } : raw.schedule
+  const s = object(raw.schedule) ? { retentionWeekly: 4, retentionMonthly: 0, includeDns: true, includeControl: true, compress: 'gzip', ...raw.schedule } : raw.schedule
   if (!object(s) || typeof s.enabled !== 'boolean' || typeof s.cron !== 'string' || typeof s.retentionCount !== 'number' || !Number.isSafeInteger(s.retentionCount) || s.retentionCount < 1 || s.retentionCount > 3650 || typeof s.includeMail !== 'boolean' || typeof s.includeDatabases !== 'boolean' || typeof s.includeDns !== 'boolean' || typeof s.includeControl !== 'boolean'
     || [s.retentionWeekly, s.retentionMonthly].some(value => typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 3650)
     || !(s.selectedAccounts === 'all' || Array.isArray(s.selectedAccounts) && s.selectedAccounts.length <= 10_000 && s.selectedAccounts.every(value => typeof value === 'string' && value.length <= 64))
     || !Array.isArray(s.destinationIds) || s.destinationIds.length > 50 || s.destinationIds.some(value => typeof value !== 'string' || !UUID.test(value)) || typeof s.updatedAt !== 'string' || !Number.isFinite(Date.parse(s.updatedAt))) return invalidConfig()
-  return { destinations, schedule: { enabled: s.enabled, cron: s.cron, parsed: parseBackupCron(s.cron), retentionCount: s.retentionCount, retentionWeekly: s.retentionWeekly as number, retentionMonthly: s.retentionMonthly as number, includeMail: s.includeMail, includeDatabases: s.includeDatabases, includeDns: s.includeDns, includeControl: s.includeControl, selectedAccounts: s.selectedAccounts === 'all' ? 'all' : [...s.selectedAccounts as string[]], destinationIds: [...s.destinationIds as string[]], updatedAt: s.updatedAt } }
+  return { destinations, schedule: { enabled: s.enabled, cron: s.cron, parsed: parseBackupCron(s.cron), gzip: s.compress === 'gzip', retentionCount: s.retentionCount, retentionWeekly: s.retentionWeekly as number, retentionMonthly: s.retentionMonthly as number, includeMail: s.includeMail, includeDatabases: s.includeDatabases, includeDns: s.includeDns, includeControl: s.includeControl, selectedAccounts: s.selectedAccounts === 'all' ? 'all' : [...s.selectedAccounts as string[]], destinationIds: [...s.destinationIds as string[]], updatedAt: s.updatedAt } }
 }
 const backupConfigPath = (stateRoot: string, file: string): string => join(stateRoot, 'extended', 'backups', file)
 export const readBackupConfigFiles = (stateRoot: string) => async (): Promise<{ destinations: unknown; schedule: unknown }> => ({
@@ -171,6 +172,8 @@ const ACCOUNT_DEFAULTS = { includeMail: true, includeDatabases: true, includeDns
 export function createBackupRunController(deps: BackupRunDeps) {
   const now = deps.now ?? (() => new Date())
   let active: { id: string; done: Promise<void> } | null = null
+  /** Last timer fire, and the saved schedule (by updatedAt) that fire or an earlier one still in force evaluated without error. */
+  let timer: { at: string; updatedAt: string | null } | null = null
   const signal = (): AbortSignal => AbortSignal.timeout(deps.transferTimeoutMs ?? BACKUP_TRANSFER_TIMEOUT_MS)
   const ledger = async (): Promise<BackupRunLedger> => {
     const saved = readBackupRunLedger(await deps.readLedger())
@@ -205,8 +208,9 @@ export function createBackupRunController(deps: BackupRunDeps) {
     const destinations = saved?.schedule ? await activeDestinations(saved, saved.schedule.destinationIds) : []
     // A schedule without destinations keeps verified local archives only; selected destinations must all be active.
     const selected = saved?.schedule?.destinationIds.length ?? 0
-    const reason = !deps.createBackup ? 'no_executor' : selected && !deps.provider ? 'no_provider' : !saved ? 'invalid_configuration' : !saved.schedule ? 'no_schedule' : destinations.length !== selected ? 'no_destination' : null
-    const schedule = saved?.schedule ? { enabled: saved.schedule.enabled, cron: saved.schedule.cron, nextRunAt: saved.schedule.enabled ? nextBackupCronRun(saved.schedule.parsed, new Date(Math.max(now().getTime() - 60_000, Date.parse(current.lastScheduledAt ?? saved.schedule.updatedAt))))?.toISOString() ?? null : null, lastScheduledAt: current.lastScheduledAt } : null
+    const reason = !deps.createBackup ? 'no_executor' : selected && !deps.provider ? 'no_provider' : !saved ? 'invalid_configuration' : !saved.schedule ? 'no_schedule' : !saved.schedule.gzip ? 'unsupported_compression' : destinations.length !== selected ? 'no_destination' : null
+    const schedule = saved?.schedule ? { enabled: saved.schedule.enabled, cron: saved.schedule.cron, nextRunAt: saved.schedule.enabled ? nextBackupCronRun(saved.schedule.parsed, new Date(Math.max(now().getTime() - 60_000, Date.parse(current.lastScheduledAt ?? saved.schedule.updatedAt))))?.toISOString() ?? null : null, lastScheduledAt: current.lastScheduledAt,
+      timerObservedAt: timer && timer.updatedAt === saved.schedule.updatedAt ? timer.at : null } : null
     return { available: reason === null, reason, revision: backupRunLedgerRevision(current), schedule, storage, activeId: active?.id ?? null, runs: current.runs, recoveries: current.recoveries, restores: current.restores, nativeQualified: false }
   }
 
@@ -340,6 +344,7 @@ export function createBackupRunController(deps: BackupRunDeps) {
     if (expectedRevision !== undefined && backupRunLedgerRevision(current) !== expectedRevision) return fail('CONFLICT', 'backup run history changed; read it again', { stateChanged: false })
     const saved = await config()
     if (!deps.createBackup || !saved || trigger !== 'account' && !saved.schedule) return fail('PRECONDITION_FAILED', 'scheduled backups need a Linux host executor and a saved schedule', { stateChanged: false })
+    if (saved.schedule && !saved.schedule.gzip) return fail('PRECONDITION_FAILED', 'the saved schedule asks for a compression this server cannot write; save it with gzip', { stateChanged: false, unsupported: true, reason: 'backup_compression_unavailable' })
     const policy = saved.schedule ?? ACCOUNT_DEFAULTS
     const destinations = await activeDestinations(saved, policy.destinationIds)
     if (destinations.length !== policy.destinationIds.length) return fail('PRECONDITION_FAILED', 'every selected destination must be enabled with a current verification and a trusted transport', { stateChanged: false })
@@ -366,12 +371,17 @@ export function createBackupRunController(deps: BackupRunDeps) {
     startAccounts: (actor: string, usernames: readonly string[], expectedRevision?: string) => start('account', actor, expectedRevision, usernames),
     /** Timer entry point (ROOT calls it about once a minute). Never throws; skipped ticks change nothing. */
     async tick(): Promise<{ started: string } | { skipped: string }> {
+      // A busy fire keeps the schedule the running timer already evaluated; any other fire must evaluate it again.
+      const at = now().toISOString()
+      timer = { at, updatedAt: active ? timer?.updatedAt ?? null : null }
       try {
         if (active) return { skipped: 'busy' }
         const saved = await config(), current = await ledger()
         if (!saved?.schedule?.enabled) return { skipped: 'disabled' }
-        if (!backupScheduleDue(saved.schedule.parsed, new Date(current.lastScheduledAt ?? saved.schedule.updatedAt), now())) return { skipped: 'not_due' }
-        return { started: (await start('schedule', 'scheduler')).id }
+        if (!backupScheduleDue(saved.schedule.parsed, new Date(current.lastScheduledAt ?? saved.schedule.updatedAt), now())) { timer = { at, updatedAt: saved.schedule.updatedAt }; return { skipped: 'not_due' } }
+        const run = await start('schedule', 'scheduler')
+        timer = { at, updatedAt: saved.schedule.updatedAt }
+        return { started: run.id }
       } catch { return { skipped: 'unavailable' } }
     },
     retentionPreview: (destinationId: string) => withDestination(destinationId, async (saved, destination, session) => retention(saved, destination, session, await ledger())),

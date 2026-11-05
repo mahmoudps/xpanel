@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fail } from '@xpanel/core'
 import { createBackupRunsWorkspaceRoutes, readBackupRetentionPreview } from './acct-backup-runs-workspace.ts'
+import { observeBackupScheduler } from './backup-destinations-workspace.ts'
 import type { BackupDestinationsWorkspacePorts } from './backup-destinations-workspace.ts'
+import type { BackupScheduleConfig } from './extended-routes.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 
 const ID = '11111111-1111-4111-8111-111111111111', RUN = '33333333-3333-4333-8333-333333333333', REV = 'a'.repeat(64), RUNS = 'b'.repeat(64)
@@ -76,5 +78,21 @@ describe('backup runs workspace API', () => {
     expect(readBackupRetentionPreview(plan, ID).rows).toHaveLength(1)
     for (const rows of [[{ ...row, action: 'delete' }], [{ ...row, name: 'alice/notes.txt' }], [{ ...row, username: 'bob' }]]) expect(() => readBackupRetentionPreview({ ...plan, rows }, ID)).toThrow()
     expect(() => readBackupRetentionPreview(plan, '22222222-2222-4222-8222-222222222222')).toThrow()
+  })
+})
+
+describe('backup scheduler observation', () => {
+  const saved = { enabled: true, cron: '0 2 * * *' } as BackupScheduleConfig
+  const seen = (timerObservedAt: string | null) => ({ ...view, available: true, reason: null, schedule: { enabled: true, cron: '0 2 * * *', nextRunAt: null, lastScheduledAt: null, timerObservedAt } })
+  it('is verified only by a fresh agent timer observation of the saved, enabled schedule', async () => {
+    const now = new Date().toISOString()
+    expect(await observeBackupScheduler({ destinationHost: async () => seen(now) }, root, saved)).toBe(true)
+    for (const reply of [seen(null), seen(new Date(Date.now() - 10 * 60_000).toISOString()), { ...seen(now), available: false, reason: 'no_destination' }, { ...seen(now), extra: true }])
+      expect(await observeBackupScheduler({ destinationHost: async () => reply }, root, saved)).toBe(false)
+    expect(await observeBackupScheduler({ destinationHost: async () => { throw new Error('socket hang up') } }, root, saved)).toBe(false)
+    const host = vi.fn(async () => seen(now))
+    expect(await observeBackupScheduler({ destinationHost: host }, root, { ...saved, enabled: false })).toBe(false)
+    expect(await observeBackupScheduler({}, root, saved)).toBe(false)
+    expect(host).not.toHaveBeenCalled()
   })
 })
