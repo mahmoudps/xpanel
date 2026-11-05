@@ -49,6 +49,7 @@ vi.mock('@xpanel/db', () => ({
     seams.dbOpen(path); seams.dbActive = true
     try { return await callback({ query: vi.fn() }) } finally { seams.dbActive = false; seams.dbClose() }
   },
+  withVisibleReadonlyOperationDatabase: async (_db: unknown, work: () => unknown) => work(),
 }))
 vi.mock('@xpanel/state', () => ({ StateStore: class {
   withReadonlyObservation(callback: (observation: unknown) => unknown) { return callback({ authority: { revision: 7 }, assertCurrent: seams.current, snapshot: snapshot(seams.currentChecksum) }) }

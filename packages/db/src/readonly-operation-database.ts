@@ -44,6 +44,14 @@ const registered = (db: unknown): Scope => {
   if (!scope?.live || current.getStore() !== scope) return refused('unissued_or_retired_reader')
   scope.verify(); return scope
 }
+/** Native callbacks drop the reader store. Re-enter that same live reader; do not open another connection. */
+export async function withVisibleReadonlyOperationDatabase<T>(db: unknown, callback: () => T | Promise<T>): Promise<T> {
+  const scope = db && typeof db === 'object' ? scopes.get(db) : undefined
+  const visible = current.getStore()
+  if (typeof callback !== 'function' || !scope?.live || (visible && visible !== scope)) return refused('unissued_or_retired_reader')
+  if (visible === scope) return callback()
+  return current.run(scope, () => callback())
+}
 export function getReadonlyOperationDatabaseOrigin(db: unknown): Readonly<StrictOperationDatabaseOrigin> { return registered(db).origin }
 /** Fixed lock-order assertion; only the actual registered reader/transaction can reach this state. */
 export function assertReadonlyOperationDatabaseOutsideTransaction(db: unknown): void {
