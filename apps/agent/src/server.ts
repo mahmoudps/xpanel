@@ -1523,7 +1523,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (typeof deps.cronQualification !== 'function') return fail('PRECONDITION_FAILED', 'Trusted cron host qualification is unavailable', { stateChanged: false, reason: 'cron_qualification_missing' })
         // Fixed probe: proves the host scheduler primitive for this account without reading a caller job.
         try {
-          await deps.cronQualification({ account, job: { id: randomUUID(), schedule: '0 * * * *', command: '/usr/bin/true', enabled: true }, action: 'observe' })
+          await deps.cronQualification({ account, job: { id: randomUUID(), accountId: account.id, schedule: '0 * * * *', command: '/usr/bin/true', comment: '', enabled: true }, action: 'observe' })
         } catch (error) {
           return fail(isXpanelError(error) ? error.code : 'PRECONDITION_FAILED', 'Trusted cron host qualification refused', {
             stateChanged: false, reason: isXpanelError(error) && typeof error.detail.reason === 'string' ? error.detail.reason : 'cron_host_qualification_refused',
