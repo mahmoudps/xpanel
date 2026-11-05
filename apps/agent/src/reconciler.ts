@@ -90,6 +90,14 @@ const DEFAULT_DNS_ZONE_DIR = '/var/lib/powerdns/zones'
  * Order matters: rediscover first (so a newly added zone is known), then per-zone reload, then the
  * global reload so removals are dropped.
  */
+/**
+ * A one-shot cron service is inactive between timer triggers; restarting it during rollback fails the
+ * reload and its post-rollback health probe reports the oneshot as inactive. The timer is the unit the
+ * rollback restores; the service is only started by that timer.
+ */
+export const rollbackReloadUnits = (units: readonly string[]): string[] =>
+  units.filter(unit => !/^xpanel-cron-[a-z0-9_-]+\.service$/.test(unit))
+
 export const powerDnsReloadActions = (zones: readonly string[]): HostAction[] => {
   const names = [...new Set(zones)].sort((a, b) => a.localeCompare(b))
   return [
@@ -1140,10 +1148,10 @@ export class HostReconciler {
       const introducedUnits = new Set(journalRecord.previousFilesBackup
         .filter(backup => !backup.existed && /\/systemd\/system\/[^/]+\.(?:service|timer|socket)$/.test(backup.path))
         .map(backup => backup.path.slice(backup.path.lastIndexOf('/') + 1)))
-      const unitsToReload =
+      const unitsToReload = rollbackReloadUnits(
         journalRecord.reloadedUnits.length > 0
           ? [...journalRecord.reloadedUnits].reverse()
-          : [...new Set(journalRecord.previousManifest?.files.flatMap((f) => f.dependentUnits) ?? [])].reverse()
+          : [...new Set(journalRecord.previousManifest?.files.flatMap((f) => f.dependentUnits) ?? [])].reverse())
       if (dnsWasTouched && !unitsToReload.includes('pdns.service')) unitsToReload.push('pdns.service')
       // Restored or removed unit files change systemd's view before any unit is touched.
       await this.deps.executor.runAction({ kind: 'systemd-daemon-reload' })

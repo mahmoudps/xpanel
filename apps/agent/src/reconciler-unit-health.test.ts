@@ -4,7 +4,7 @@ import { profileFor } from '@xpanel/os'
 import type { Db } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
 import type { AgentExecutor, ConfigTestResult } from './executor.ts'
-import { HostReconciler } from './reconciler.ts'
+import { HostReconciler, rollbackReloadUnits } from './reconciler.ts'
 
 /**
  * A generation can manage .service, .timer and .socket units. The post-reload health probe must
@@ -52,5 +52,17 @@ describe('reconciler unit health probe unit types', { tags: ['unit'] }, () => {
     assert.equal(result.ok, false)
     assert.match(String(result.error), /cannot be probed/)
     assert.equal(commands.length, 0)
+  })
+})
+
+describe('rollback reload unit filtering', { tags: ['unit'] }, () => {
+  it('never restarts a one-shot cron service, while keeping its timer and other units', () => {
+    assert.deepEqual(rollbackReloadUnits([
+      'xpanel-cron-alice-abc.service',
+      'xpanel-cron-alice-abc.timer',
+      'xpanel-php-fpm-alice-8.3.service',
+      'xpanel-cron-bob-b1c2.timer',
+      'nginx.service',
+    ]), ['xpanel-cron-alice-abc.timer', 'xpanel-php-fpm-alice-8.3.service', 'xpanel-cron-bob-b1c2.timer', 'nginx.service'])
   })
 })
