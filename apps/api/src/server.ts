@@ -1152,6 +1152,34 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     return { status: 'applied', generation: { id: Number(gen.id), status: 'active', checksum: gen.checksum }, filesCount: Number(body.filesCount), durationMs: body.durationMs }
   }
 
+  /**
+   * Termination legitimately removes the account from desired state inside the very generation that
+   * proves the host teardown, so the generic state-revision equality check cannot apply here. Accept
+   * only an applied generation with a valid active identity; the caller then re-reads desired state.
+   */
+  const applyTerminationConfiguration = async (caller: AuthenticatedCaller, account: Account): Promise<void> => {
+    let response: Response
+    try { response = await callAgent('/state/apply', { method: 'POST', caller, body: { force: false } }) }
+    catch { return accountMutationFailure(caller, account, 'account.terminate', 'unknown', 'host_transport_unknown') }
+    if (response.status !== 200) {
+      await response.body?.cancel().catch(() => undefined)
+      return accountMutationFailure(caller, account, 'account.terminate', 'failed', 'host_apply_rejected', response.status === 422 ? 'CONFIG_TEST_FAILED' : 'SERVICE_UNAVAILABLE', response.status)
+    }
+    let body: Record<string, unknown> | null
+    try { body = await readAccountApplyBody(response) }
+    catch { return accountMutationFailure(caller, account, 'account.terminate', 'unknown', 'host_reply_unverified') }
+    if (body?.status === 'failed') return accountMutationFailure(caller, account, 'account.terminate', 'failed', 'host_apply_failed', 'CONFIG_TEST_FAILED')
+    if (body?.status === 'noop') return
+    const generation = body?.generation
+    const gen = generation !== null && typeof generation === 'object' && !Array.isArray(generation) ? generation as Record<string, unknown> : null
+    if (body?.status !== 'applied' || !gen || !Number.isSafeInteger(gen.id) || Number(gen.id) < 1 || gen.status !== 'active'
+      || typeof gen.checksum !== 'string' || !/^[a-f0-9]{64}$/.test(gen.checksum)
+      || !Number.isSafeInteger(body.filesCount) || Number(body.filesCount) < 0
+      || typeof body.durationMs !== 'number' || !Number.isFinite(body.durationMs) || body.durationMs < 0) {
+      return accountMutationFailure(caller, account, 'account.terminate', 'unknown', 'host_reply_unverified')
+    }
+  }
+
   /** Verified target-bound purge of an account (DELETE /api/accounts/<id>, and the rollback of a failed transfer or import). */
   const purgeAccount = async (caller: AuthenticatedCaller, current: Account): Promise<void> => {
     const unavailable = () => fail('PRECONDITION_FAILED', 'account termination requires a verified target-bound purge operation', {
@@ -1171,7 +1199,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     // quota, delete the user and remove the home (and drop the account databases). The account leaves the
     // desired state in the same admitted generation whose reported outcome proves those host effects.
     try {
-      await applyAccountConfiguration(caller, marked, 'account.terminate', await deps.store.getRevision())
+      await applyTerminationConfiguration(caller, marked)
     } catch (error) {
       return fail(isXpanelError(error) ? error.code : 'SERVICE_UNAVAILABLE', 'account termination requires verification', {
         ...(isXpanelError(error) ? error.detail : {}), verificationRequired: true, stateChanged: true, reason: 'termination_host_effect_unverified',
