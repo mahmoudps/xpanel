@@ -1513,10 +1513,13 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (accountCronAdmission) {
         if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
         if (url.search) return fail('VALIDATION', 'Cron admission does not accept query selectors', { stateChanged: false })
-        if (caller.role !== 'root' && caller.role !== 'user') return fail('FORBIDDEN', 'Cron admission requires the signed-in account owner or root', { stateChanged: false })
+        if (caller.role === 'user') {
+          // A user may only qualify its own account; refuse before account lookup to avoid enumeration.
+          const own = caller.accountId ? await deps.store.getAccount(caller.accountId).catch(() => null) : null
+          if (!own || own.username !== accountCronAdmission[1]) return fail('FORBIDDEN', 'Cron admission requires the signed-in account owner', { stateChanged: false })
+        } else if (caller.role !== 'root') return fail('FORBIDDEN', 'Cron admission requires the signed-in account owner or root', { stateChanged: false })
         const account = await deps.store.getAccountByUsername(accountCronAdmission[1]!).catch(() => null)
         if (!account) return fail('NOT_FOUND', 'account not found', { stateChanged: false })
-        if (caller.role === 'user' && caller.accountId !== account.id) return fail('FORBIDDEN', 'Cron admission requires the signed-in account owner', { stateChanged: false })
         if (typeof deps.cronQualification !== 'function') return fail('PRECONDITION_FAILED', 'Trusted cron host qualification is unavailable', { stateChanged: false, reason: 'cron_qualification_missing' })
         // Fixed probe: proves the host scheduler primitive for this account without reading a caller job.
         try {
