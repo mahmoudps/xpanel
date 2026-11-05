@@ -21,8 +21,9 @@ export const CRON_UNIT_NAME = /^xpanel-cron-[a-z0-9_-]{1,128}\.(?:service|timer)
 
 /**
  * Trusted startup qualification for tenant cron. It proves the host scheduler primitives this
- * account's job needs (systemd timers active and the stored schedule translatable) instead of
- * assuming a configured unit alone is executable. It grants no host command.
+ * account's job needs (systemd timers active and the stored schedule translatable to at least one
+ * OnCalendar expression) instead of assuming a configured unit alone is executable. It grants no
+ * host command.
  */
 export const createNativeCronQualification = (options: CronQualificationOptions) => {
   if (typeof options.isActive !== 'function') throw new TypeError('cron qualification requires the native unit probe')
@@ -34,9 +35,13 @@ export const createNativeCronQualification = (options: CronQualificationOptions)
     }
     if (!job || typeof job.schedule !== 'string' || typeof job.command !== 'string' || job.command.length < 1) return unavailable('job_invalid')
     if (!CRON_UNIT_NAME.test('xpanel-cron-' + job.id + '.timer')) return unavailable('job_identity_invalid')
-    let onCalendar: string
-    try { onCalendar = system.cronToOnCalendar(job.schedule) } catch { return unavailable('schedule_not_supported') }
-    if (typeof onCalendar !== 'string' || onCalendar.length < 1) return unavailable('schedule_not_supported')
+    // The renderer returns one or more OnCalendar specifications (a bare array, never a string).
+    let onCalendar: string[]
+    try {
+      const rendered = system.cronToOnCalendar(job.schedule)
+      onCalendar = Array.isArray(rendered) ? rendered.filter((spec): spec is string => typeof spec === 'string' && spec.length > 0) : []
+    } catch { return unavailable('schedule_not_supported') }
+    if (onCalendar.length < 1) return unavailable('schedule_not_supported')
     if (!await options.isActive('timers.target')) return unavailable('systemd_timers_inactive')
     if (action === 'run' && !job.enabled) return unavailable('job_disabled')
   }
