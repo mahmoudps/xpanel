@@ -2,7 +2,7 @@ import { withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admissi
 import { randomUUID } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
-import { cronJobUnitId, fail, suspensionEffects } from '@xpanel/core'
+import { cronJobUnitId, fail, isXpanelError, suspensionEffects } from '@xpanel/core'
 import type {
   ConfigTest,
   HostAction,
