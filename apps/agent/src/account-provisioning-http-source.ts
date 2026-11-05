@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { networkInterfaces } from 'node:os'
 import { posix } from 'node:path'
 import { fail, type Account, type OsProfile } from '@xpanel/core'
-import { latestActive, withVisibleReadonlyOperationDatabase, type Db } from '@xpanel/db'
+import { latestActive, withVisibleReadonlyOperationDatabase, type Db, type ReadonlyOperationDatabase } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
 import { edge, system } from '@xpanel/render'
 import { ACCOUNT_PROBE_ASSET, ACCOUNT_PROBE_PHP, accountProbeNamespace, accountProbePaths, assertAccountProbeIngress } from '../../../packages/render/src/system/account-probe.ts'
@@ -23,16 +23,26 @@ export interface NativeAccountHttpSubject {
   readonly challenge: string
 }
 export interface NativeProvisioningHttpOptions {
-  /** A pinned read-only operation database or an explicit live-reader port; never the writable handle. */
-  readonly db: Db
+  /** A held pinned read-only operation database (closed recovery); never the writable handle. */
+  readonly db?: Db
   /** Trusted startup composition of the pinned read-only reader; when present it replaces `db` for every read. */
-  readonly databaseReader?: { readonly database: () => Db }
+  readonly databaseReader?: { readonly withReadonlyDatabase: <T>(work: (db: ReadonlyOperationDatabase) => Promise<T>) => Promise<T> }
   readonly store: Pick<StateStore, 'listDomains'>
   readonly reconciler: Pick<HostReconciler, 'journal'>
   readonly executor: AgentExecutor
   readonly os: OsProfile
 }
 const refused: (reason: string) => never = reason => fail('PRECONDITION_FAILED', 'the protected account HTTP source was not verified', { verificationRequired: true, reason })
+/**
+ * Each active-generation read opens its own short pinned reader. A reader held across the multi-second
+ * held exchange is refused by any concurrent control-database write (live job progress), so authority
+ * comes from the exact generation id/checksum comparisons, never from an unchanged WAL page set.
+ */
+const readActiveGeneration = (options: Pick<NativeProvisioningHttpOptions, 'db' | 'databaseReader'>) => {
+  if (options.databaseReader) return options.databaseReader.withReadonlyDatabase(reader => withVisibleReadonlyOperationDatabase(reader, () => latestActive(reader)))
+  const held = options.db
+  return held ? withVisibleReadonlyOperationDatabase(held, () => latestActive(held)) : refused('database_reader_required')
+}
 const sha = (bytes: Uint8Array | string): string => createHash('sha256').update(bytes).digest('hex')
 const safePath = (path: string): boolean => path.startsWith('/') && posix.normalize(path) === path && !/[\u0000-\u0020\u007f\\]/.test(path)
 export interface HeldHttpConnection {
@@ -223,8 +233,7 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
       || (domain.expiresAt !== null && (!Number.isFinite(Date.parse(domain.expiresAt)) || Date.parse(domain.expiresAt) <= Date.now()))) refused('primary_fpm_route_required')
     domainDeadline = domain.expiresAt === null ? Infinity : Date.parse(domain.expiresAt)
     const unit = system.fpmUnitName(account.username, domain.php.version), paths = accountProbePaths(account)
-    const reader = options.databaseReader?.database() ?? options.db
-    const active = await withVisibleReadonlyOperationDatabase(reader, () => latestActive(reader)); await guard()
+    const active = await readActiveGeneration(options); await guard()
     if (!active || active.status !== 'active') return refused('active_generation_required')
     const manifest = await options.reconciler.journal.readManifest(active.id); await guard()
     if (!manifest || manifest.generationId !== active.id || manifest.filesChecksum !== active.checksum || manifest.stateChecksum !== input.sourceChecksum) refused('active_generation_binding_changed')
@@ -300,8 +309,7 @@ export async function captureCanarySource(options: NativeProvisioningHttpOptions
     }
     const assertCurrent = async (): Promise<void> => {
       await guard()
-      const reader = options.databaseReader?.database() ?? options.db
-      const current = await withVisibleReadonlyOperationDatabase(reader, () => latestActive(reader))
+      const current = await readActiveGeneration(options)
       if (current?.id !== activeId || current.checksum !== generationChecksum) refused('active_generation_changed')
       for (const pin of pins) await pin.assertCurrent()
       const currentFpm = await unitIdentity(unit), currentNginx = await unitIdentity(nginxUnit)

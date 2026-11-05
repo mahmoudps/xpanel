@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { fail, type Account, type Domain } from '@xpanel/core'
-import { latestActive } from '@xpanel/db'
+import { latestActive, type Db } from '@xpanel/db'
 import type { AccountIdentity } from '@xpanel/lifecycle'
 import type { StateStore, StateAuthorityMetadata } from '@xpanel/state'
 import { system } from '@xpanel/render'
@@ -11,6 +11,8 @@ import { assertProvisioningProcessBinding } from '../account-provisioning-observ
 import type { CanaryHttpProbeResult } from './upgrade-runner.ts'
 
 export interface NativeLifecycleCanaryOptions extends Omit<NativeAccountHttpOptions, 'store'> {
+  /** The lifecycle composition always supplies its control handle; the canary reads generations through it. */
+  readonly db: Db
   readonly store: Pick<StateStore, 'listDomains' | 'getAccount' | 'getAuthorityMetadata' | 'readSnapshot' | 'withReadonlyObservation'>
 }
 const targetBrand = Symbol('native lifecycle canary target')
