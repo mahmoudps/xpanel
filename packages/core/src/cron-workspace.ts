@@ -48,3 +48,6 @@ export interface CronJobObservationReceipt {
   revision: string
   observation: CronExecutionStatus
 }
+
+/** Reply contract of the agent cron admission probe (host scheduler primitive for this account). */
+export const CRON_ADMISSION_CONTRACT = 'systemd-timers-oncalendar'

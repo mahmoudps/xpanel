@@ -105,9 +105,17 @@ it.skipIf(process.platform !== 'linux' || process.getuid?.() !== 0)('accepts the
     await writeOwned(join(directory, value.record.indexName), JSON.stringify(value.index))
     const read = () => new AccountProvisioningPreparationReader(stateRoot, owner).read(value.input)
     expect((await read()).metadata.operationKey).toBe(value.input.operationKey)
+    // A carried-over host may present an SGID-inherited private leaf (02700, group bits empty).
+    await chmod(directory, 0o2700)
+    expect((await read()).metadata.operationKey).toBe(value.input.operationKey)
+    await chmod(directory, 0o700)
     // The installer creates /var/lib/xpanel as setgid 02770 for its private service group.
     await chmod(parent, 0o2770)
     expect((await read()).metadata.operationKey).toBe(value.input.operationKey)
+    // Protected startup narrows that root to 02750 and the reader keeps accepting it.
+    await chmod(parent, 0o2750)
+    expect((await read()).metadata.operationKey).toBe(value.input.operationKey)
+    await chmod(parent, 0o2770)
     await chmod(stateRoot, 0o2770)
     await expect(read()).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
     await chmod(stateRoot, 0o2750)

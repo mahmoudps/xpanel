@@ -2,7 +2,7 @@ import { withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admissi
 import { randomUUID } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
-import { cronJobUnitId, fail, suspensionEffects } from '@xpanel/core'
+import { cronJobUnitId, fail, isXpanelError, suspensionEffects } from '@xpanel/core'
 import type {
   ConfigTest,
   HostAction,
@@ -65,6 +65,7 @@ import type {
   ReconcileJournalPhase,
   ReconcileJournalRecord,
 } from './reconciler-journal.ts'
+import { hostEffectsChecksum } from './host-effects-checksum.ts'
 
 export * from './reconciler-journal.ts'
 
@@ -84,6 +85,30 @@ const DNS_CATALOG_PATH = '/etc/powerdns/named.conf.xpanel-zones'
 const DEFAULT_DNS_ZONE_DIR = '/var/lib/powerdns/zones'
 
 /**
+ * PowerDNS 4.x BIND backend: `rediscover` admits catalog additions/removals, but a changed zone
+ * file is only re-read by `bind-reload-now <zone>`; a plain `reload` keeps serving the old bytes.
+ * Order matters: rediscover first (so a newly added zone is known), then per-zone reload, then the
+ * global reload so removals are dropped.
+ */
+/**
+ * A one-shot cron service is inactive between timer triggers; restarting it during rollback fails the
+ * reload and its post-rollback health probe reports the oneshot as inactive. The timer is the unit the
+ * rollback restores; the service is only started by that timer.
+ */
+/** A one-shot cron service is inactive between timer triggers; only its timer is a managed reload unit. */
+export const isOneShotCronService = (unit: string): boolean => /^xpanel-cron-[a-z0-9_-]+\.service$/.test(unit)
+export const rollbackReloadUnits = (units: readonly string[]): string[] => units.filter(unit => !isOneShotCronService(unit))
+
+export const powerDnsReloadActions = (zones: readonly string[]): HostAction[] => {
+  const names = [...new Set(zones)].sort((a, b) => a.localeCompare(b))
+  return [
+    { kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] },
+    ...names.map((zone): HostAction => ({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'bind-reload-now', zone] })),
+    { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] },
+  ]
+}
+
+/**
  * The installer enables the web and mail daemons but leaves them stopped until the first generation that
  * configures them: start is a no-op on a running unit, and the reload then applies the new configuration.
  */
@@ -91,6 +116,15 @@ const startAndReload = (unit: string): HostAction[] => [{ kind: 'systemd', verb:
 
 const isManagedDnsPath = (path: string, zoneDir: string): boolean =>
   path === DNS_CATALOG_PATH || (path.startsWith(`${zoneDir}/`) && path.endsWith('.zone'))
+
+/**
+ * A terminating account's zones leave the rendered generation in the same generation that tears the
+ * account down; the manifest diff then removes the zone files and an empty catalog is published.
+ * Zones are matched by domain name because a bind zone file carries no account identity.
+ */
+export const zonesExcludingTerminatingAccounts = <T extends { name: string }>(
+  zones: readonly T[], domains: readonly { name: string; accountId: string }[], terminatingAccountIds: ReadonlySet<string>,
+): T[] => zones.filter(zone => !domains.some(domain => domain.name === zone.name && terminatingAccountIds.has(domain.accountId)))
 
 /** The generation remains the sole publisher, including when its final zone is removed. */
 export const retainEmptyManagedDnsCatalog = (
@@ -664,7 +698,9 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   }
 
   // PowerDNS BIND zone files
-  for (const zone of snapshot.zones) {
+  const terminatingAccountIds = new Set(snapshot.accounts.filter(account => account.status === 'terminating').map(account => account.id))
+  const renderedZones = zonesExcludingTerminatingAccounts(snapshot.zones, snapshot.domains, terminatingAccountIds)
+  for (const zone of renderedZones) {
     const primaryNs = snapshot.server?.settings.nameservers[0] ?? `ns1.${zone.name}`
     const rname = `hostmaster.${zone.name}.`
     const path = `${zoneDir}/${zone.name}.zone`
@@ -702,7 +738,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   if (snapshot.zones.length > 0) {
     const namedConfLines = [
       '// Managed by xPanel: PowerDNS BIND zone catalog',
-      ...snapshot.zones.map(
+      ...renderedZones.map(
         (zone) => `zone "${zone.name}" {\n  type master;\n  file "${zoneDir}/${zone.name}.zone";\n};`,
       ),
       '',
@@ -714,10 +750,8 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       owner: 'root',
       group: 'root',
     })
-    postActions.push(
-      { kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] },
-      { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] },
-    )
+    if (renderedZones.length > 0) postActions.push(...powerDnsReloadActions(renderedZones.map(zone => zone.name)))
+    else postActions.push({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] }, { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] })
   }
 
   if (needsDaemonReload) {
@@ -941,12 +975,16 @@ export class HostReconciler {
     }
     // systemd resolves a bare name (os.services.postfix = 'postfix') to its .service unit.
     const unit = /^[A-Za-z0-9][A-Za-z0-9_:@-]*$/.test(rawUnit) ? `${rawUnit}.service` : rawUnit
-    if (!/^[A-Za-z0-9](?:[A-Za-z0-9_.:@-]|\\x[0-9a-fA-F]{2})*\.service$/.test(unit) || unit.length > 200) {
-      return { ok: false, error: `service unit ${unit} cannot be probed` }
+    // A generation may manage .service, .timer and .socket units; probing only .service units made
+    // every cron timer look unprobeable after a successful start and failed the generation.
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9_.:@-]|\\x[0-9a-fA-F]{2})*\.(?:service|timer|socket)$/.test(unit) || unit.length > 200) {
+      return { ok: false, error: `managed unit ${unit} cannot be probed` }
     }
+    // Only ActiveState is consumed, and every emitted argv element must satisfy the reviewed
+    // SAFE_ARG grammar (commas are not admitted), so request the single property the probe reads.
     const observed = await this.deps.executor.runCommand([
       '/usr/bin/systemctl', 'show', '--no-pager',
-      '--property=Id,Names,LoadState,ActiveState,SubState,UnitFileState',
+      '--property=ActiveState',
       '--', unit,
     ])
     if (!observed.ok || observed.code !== 0) {
@@ -1121,12 +1159,12 @@ export class HostReconciler {
 
       // Unit files the failed generation created have no restored definition to restart from.
       const introducedUnits = new Set(journalRecord.previousFilesBackup
-        .filter(backup => !backup.existed && /\/systemd\/system\/[^/]+\.service$/.test(backup.path))
+        .filter(backup => !backup.existed && /\/systemd\/system\/[^/]+\.(?:service|timer|socket)$/.test(backup.path))
         .map(backup => backup.path.slice(backup.path.lastIndexOf('/') + 1)))
-      const unitsToReload =
+      const unitsToReload = rollbackReloadUnits(
         journalRecord.reloadedUnits.length > 0
           ? [...journalRecord.reloadedUnits].reverse()
-          : [...new Set(journalRecord.previousManifest?.files.flatMap((f) => f.dependentUnits) ?? [])].reverse()
+          : [...new Set(journalRecord.previousManifest?.files.flatMap((f) => f.dependentUnits) ?? [])].reverse())
       if (dnsWasTouched && !unitsToReload.includes('pdns.service')) unitsToReload.push('pdns.service')
       // Restored or removed unit files change systemd's view before any unit is touched.
       await this.deps.executor.runAction({ kind: 'systemd-daemon-reload' })
@@ -1141,8 +1179,11 @@ export class HostReconciler {
           continue
         }
         if (unit === 'pdns.service' && dnsWasTouched) {
-          await this.deps.executor.runAction({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] })
-          await this.deps.executor.runAction({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] })
+          const restoredZoneDir = this.deps.zoneDir ?? DEFAULT_DNS_ZONE_DIR
+          const restoredZones = journalRecord.previousFilesBackup
+            .filter(entry => entry.existed && entry.path.startsWith(restoredZoneDir + '/') && entry.path.endsWith('.zone'))
+            .map(entry => entry.path.slice(restoredZoneDir.length + 1, -'.zone'.length))
+          for (const action of powerDnsReloadActions(restoredZones)) await this.deps.executor.runAction(action)
         } else {
           await this.deps.executor.runAction(rollbackReloadAction(unit))
         }
@@ -1150,6 +1191,8 @@ export class HostReconciler {
       }
 
       for (const unit of reloadedUnits) {
+        // One-shot cron services are inactive between timer triggers; the timer is the managed reload unit.
+        if (isOneShotCronService(unit) || unit.endsWith('.slice')) continue
         const health = await this.verifyUnitHealth(
           unit,
           journalRecord.previousActiveGenerationId ?? 0,
@@ -1163,7 +1206,9 @@ export class HostReconciler {
       await runGenerationDnsHook({ phase: 'verify', native, provider: this.deps.dnsPublication, files: previousFiles, removedPaths: absentPaths, zoneDir })
     } catch (rollbackErr) {
       journalRecord.phase = 'needs_attention'
-      journalRecord.error = `rollback failed after ${errorMsg}: ${(rollbackErr as Error).message}`
+      const rollbackDetail = isXpanelError(rollbackErr) && rollbackErr.detail && Object.keys(rollbackErr.detail).length
+        ? ` ${JSON.stringify(rollbackErr.detail).slice(0, 400)}` : ''
+      journalRecord.error = `rollback failed after ${errorMsg}: ${(rollbackErr as Error).message}${rollbackDetail}`
       await this.journal.saveJournal(journalRecord)
       throw rollbackErr
     }
@@ -1633,11 +1678,15 @@ export class HostReconciler {
       await validateDnsCandidate()
     }
 
+    // Desired-state changes that only produce host actions (databases, quotas, runtime units) keep the same
+    // rendered files, so the unchanged-file shortcut must also compare the ordered action list.
+    const effectsChecksum = hostEffectsChecksum([...compiled.preActions, ...compiled.postActions])
     let repairedDriftCount = 0
     if (
       !opts.force &&
       currentGen &&
-      currentGen.checksum === filesChecksum
+      currentGen.checksum === filesChecksum &&
+      previousManifest?.effectsChecksum === effectsChecksum
     ) {
       const drift = await detectHostDrift(this.deps.executor, previousManifest)
       const mailDrift = compiled.localMail && await localMailNeedsUpdate(this.deps.executor, this.deps.os, compiled.localMailOptions)
@@ -1659,6 +1708,7 @@ export class HostReconciler {
       generationId: pendingGen.id,
       stateChecksum: snapshot.checksum,
       filesChecksum,
+      effectsChecksum,
       actor,
       files: compiled.files,
       postActions: compiled.postActions,
@@ -1912,6 +1962,7 @@ export class HostReconciler {
           try {
             await this.deps.executor.runAction(action)
           } catch (actionErr) {
+            console.error('xpanel-agent reconcile post-action failed:', JSON.stringify(action).slice(0, 400))
             const unitLabel =
               action.kind === 'systemd'
                 ? action.unit
@@ -1941,6 +1992,8 @@ export class HostReconciler {
         this.emitStage(pendingGen.id, 'verify', 'running', scope)
 
         for (const unit of journalRecord.reloadedUnits) {
+          // One-shot cron services are inactive between timer triggers; the timer is the managed unit.
+          if (isOneShotCronService(unit) || unit.endsWith('.slice')) continue
           const probe = await this.verifyUnitHealth(unit, pendingGen.id)
           if (!probe.ok) {
             throw new StageFailureError(

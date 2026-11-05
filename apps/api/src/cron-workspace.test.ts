@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cronWorkspaceRevision, parseCronWorkspaceBody, validateCronWorkspaceDraft } from './cron-workspace.ts'
+import { assertCronHostAdmissionReply, assertCronWorkspaceApplied, cronWorkspaceRevision, parseCronWorkspaceBody, validateCronWorkspaceDraft } from './cron-workspace.ts'
 import type { CronJobState } from '@xpanel/state'
 
 const accountId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -45,5 +45,34 @@ describe('account cron validation and revisions', () => {
     expect(cronWorkspaceRevision('dddddddd-dddd-4ddd-8ddd-dddddddddddd', [first, second])).not.toBe(revision)
     expect(cronWorkspaceRevision(accountId, [{ ...first, command: first.command + ' ' }, second])).not.toBe(revision)
     expect(cronWorkspaceRevision(accountId, [{ ...first, enabled: false }, second])).not.toBe(revision)
+  })
+})
+
+describe('cron host admission reply contract', () => {
+  it('accepts only an explicit host admission attestation', () => {
+    expect(() => assertCronHostAdmissionReply(200, { available: true, contract: 'systemd-timers-oncalendar' })).not.toThrow()
+  })
+  it.each([
+    [412, { stateChanged: false }],
+    [200, { available: true }],
+    [200, { available: true, contract: 'unknown-contract' }],
+    [200, null],
+    [200, 'not-an-object'],
+  ])('fails closed for %s %j', (status, body) => {
+    expect(() => assertCronHostAdmissionReply(status as number, body)).toThrow(/cron host admission is unavailable/)
+  })
+})
+describe('cron save acknowledgement requires an applied generation', () => {
+  it('accepts an applied or unchanged generation', () => {
+    expect(() => assertCronWorkspaceApplied({ status: 'applied' })).not.toThrow()
+    expect(() => assertCronWorkspaceApplied({ status: 'noop' })).not.toThrow()
+  })
+  it.each([
+    [{ status: 'failed', failedTest: 'timer', error: 'unsafe argv element' }, 'cron_reconcile_failed'],
+    [null, 'cron_reconcile_missing'],
+    [{}, 'cron_reconcile_missing'],
+  ])('fails closed for %j', (body, reason) => {
+    expect(() => assertCronWorkspaceApplied(body)).toThrow(/cron host configuration requires verification/)
+    try { assertCronWorkspaceApplied(body) } catch (error) { expect((error as { detail?: { reason?: string } }).detail?.reason).toBe(reason) }
   })
 })

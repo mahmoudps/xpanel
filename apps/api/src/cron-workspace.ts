@@ -22,6 +22,30 @@ export interface CronWorkspacePorts extends Pick<ExtendedRouteHelpers, 'store' |
   observeCronStatus?: (caller: AuthenticatedCaller, intent: CronJobIntent) => Promise<CronJobObservationReceipt>
 }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+
+export const CRON_ADMISSION_CONTRACT = 'systemd-timers-oncalendar'
+
+/** The agent admission probe must explicitly attest the host scheduler primitive; anything else fails closed. */
+/** A saved schedule is only acknowledged when the generation that installs its units applied. */
+export const assertCronWorkspaceApplied = (reconcileBody: unknown): void => {
+  const record = object(reconcileBody) ? reconcileBody : null
+  const status = typeof record?.status === 'string' ? record.status : null
+  if (status === 'applied' || status === 'noop') return
+  return fail('SERVICE_UNAVAILABLE', 'cron host configuration requires verification', {
+    stateChanged: status !== null && status !== 'failed',
+    verificationRequired: true,
+    reason: status === null ? 'cron_reconcile_missing' : 'cron_reconcile_' + status,
+  })
+}
+
+export const assertCronHostAdmissionReply = (status: number, body: unknown): void => {
+  const record = object(body) ? body : null
+  if (status !== 200 || !record || record.available !== true || record.contract !== CRON_ADMISSION_CONTRACT) {
+    return fail('PRECONDITION_FAILED', 'cron host admission is unavailable', {
+      stateChanged: false, ...(record && typeof record.reason === 'string' ? { reason: record.reason } : {}),
+    })
+  }
+}
 const safeLine = (value: unknown, limit: number, field: string, allowEmpty = false): string => {
   if (typeof value !== 'string' || value.length > limit || !value.isWellFormed() || /[\u0000-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069\ufeff]/u.test(value) || !allowEmpty && !value.trim()) return fail('VALIDATION', `${field} must be bounded single-line text`, { stateChanged: false })
   return value
@@ -157,6 +181,9 @@ export function createCronWorkspaceRoutes(ports: CronWorkspacePorts) {
     await ports.emitAudit({ actor: caller.principal.username, action: 'cron.' + (mode === 'create' ? 'created' : mode === 'edit' ? 'updated' : 'deleted'), target: 'account:' + account.username,
       detail: { jobCount: saved.length }, outcome: 'ok', principalId: caller.principal.id }, { accountId: account.id, resellerId: account.ownerId })
     const reconcile = await ports.triggerReconcile(caller, { scope: { accountId: account.id, resellerId: account.ownerId } })
+    // Acknowledging a schedule whose units were not installed would leave a saved job that the host cannot run.
+    // Without a host agent no reconcile runs (null): the save stays configuration-only with nativeApplied false.
+    if (reconcile) assertCronWorkspaceApplied(reconcile.body)
     return json({ ...project(account, saved), reconcile: reconcile?.body ?? null }, mode === 'create' ? 201 : 200)
   }
 }

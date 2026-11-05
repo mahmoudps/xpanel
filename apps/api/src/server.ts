@@ -6,7 +6,7 @@ import { createHandoffSessionCheck } from './panel-handoff-authority.ts'
 import { parseAuditFilters } from './audit-filters.ts'
 import { createAccountBackupWorkspace } from './account-backup-workspace.ts'
 import { createCertificateRuntimeRouter } from './certificate-runtime.ts'
-import { createCronWorkspaceRoutes, type CronWorkspacePorts } from './cron-workspace.ts'
+import { assertCronHostAdmissionReply, createCronWorkspaceRoutes, type CronWorkspacePorts } from './cron-workspace.ts'
 import { createMailxWorkspaceRoutes } from './mailx-workspace.ts'
 import { createMailxCollectionsRoutes } from './mailx-collections.ts'
 import { handlePhpManageRoute, handlePhpWorkspaceRoute } from './php-workspace.ts'
@@ -1152,6 +1152,34 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     return { status: 'applied', generation: { id: Number(gen.id), status: 'active', checksum: gen.checksum }, filesCount: Number(body.filesCount), durationMs: body.durationMs }
   }
 
+  /**
+   * Termination legitimately removes the account from desired state inside the very generation that
+   * proves the host teardown, so the generic state-revision equality check cannot apply here. Accept
+   * only an applied generation with a valid active identity; the caller then re-reads desired state.
+   */
+  const applyTerminationConfiguration = async (caller: AuthenticatedCaller, account: Account): Promise<void> => {
+    let response: Response
+    try { response = await callAgent('/state/apply', { method: 'POST', caller, body: { force: false } }) }
+    catch { return accountMutationFailure(caller, account, 'account.terminate', 'unknown', 'host_transport_unknown') }
+    if (response.status !== 200) {
+      await response.body?.cancel().catch(() => undefined)
+      return accountMutationFailure(caller, account, 'account.terminate', 'failed', 'host_apply_rejected', response.status === 422 ? 'CONFIG_TEST_FAILED' : 'SERVICE_UNAVAILABLE', response.status)
+    }
+    let body: Record<string, unknown> | null
+    try { body = await readAccountApplyBody(response) }
+    catch { return accountMutationFailure(caller, account, 'account.terminate', 'unknown', 'host_reply_unverified') }
+    if (body?.status === 'failed') return accountMutationFailure(caller, account, 'account.terminate', 'failed', 'host_apply_failed', 'CONFIG_TEST_FAILED')
+    if (body?.status === 'noop') return
+    const generation = body?.generation
+    const gen = generation !== null && typeof generation === 'object' && !Array.isArray(generation) ? generation as Record<string, unknown> : null
+    if (body?.status !== 'applied' || !gen || !Number.isSafeInteger(gen.id) || Number(gen.id) < 1 || gen.status !== 'active'
+      || typeof gen.checksum !== 'string' || !/^[a-f0-9]{64}$/.test(gen.checksum)
+      || !Number.isSafeInteger(body.filesCount) || Number(body.filesCount) < 0
+      || typeof body.durationMs !== 'number' || !Number.isFinite(body.durationMs) || body.durationMs < 0) {
+      return accountMutationFailure(caller, account, 'account.terminate', 'unknown', 'host_reply_unverified')
+    }
+  }
+
   /** Verified target-bound purge of an account (DELETE /api/accounts/<id>, and the rollback of a failed transfer or import). */
   const purgeAccount = async (caller: AuthenticatedCaller, current: Account): Promise<void> => {
     const unavailable = () => fail('PRECONDITION_FAILED', 'account termination requires a verified target-bound purge operation', {
@@ -1166,21 +1194,27 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     }
     const probeBody = await probe.json().catch(() => null) as { available?: unknown; contract?: unknown } | null
     if (probeBody?.available !== true || probeBody.contract !== 'target-bound-userdel') return unavailable()
-    const marked = await deps.store.markTerminating(current.id)
-    const purge = await callAgent(`/accounts/${marked.username}/purge`, {
-      method: 'POST', caller, body: { confirmUsername: marked.username, uid: marked.uid, home: marked.home },
-    })
-    const purgeBody = await purge.json().catch(() => null) as { purged?: unknown; reason?: unknown } | null
-    if (!purge.ok || purgeBody?.purged !== true) {
-      return fail('SERVICE_UNAVAILABLE', 'account purge did not complete', {
-        verificationRequired: true, reason: typeof purgeBody?.reason === 'string' ? purgeBody.reason : 'purge_failed', stateChanged: true,
+    const marked = current.status === 'terminating' ? current : await deps.store.markTerminating(current.id)
+    // Native teardown is the reconciler's terminate plan: stop the account's units and slices, clear the
+    // quota, delete the user and remove the home (and drop the account databases). The account leaves the
+    // desired state in the same admitted generation whose reported outcome proves those host effects.
+    try {
+      await applyTerminationConfiguration(caller, marked)
+    } catch (error) {
+      return fail(isXpanelError(error) ? error.code : 'SERVICE_UNAVAILABLE', 'account termination requires verification', {
+        ...(isXpanelError(error) ? error.detail : {}), verificationRequired: true, stateChanged: true, reason: 'termination_host_effect_unverified',
+      })
+    }
+    const remaining = await deps.store.getAccount(marked.id)
+    if (remaining) {
+      return fail('SERVICE_UNAVAILABLE', 'account termination did not complete', {
+        verificationRequired: true, stateChanged: true, reason: 'termination_not_completed',
       })
     }
     await revokeAccountSessionsAndTokens(deps.db, marked.id)
     terminalRegistry.revoke({ accountId: marked.id })
     const identities = await deps.db.query<{ id: string }>('SELECT id FROM principals WHERE account_id = $1 ORDER BY id', [marked.id])
     for (const identity of identities) await deletePrincipal(deps.db, identity.id)
-    await deps.store.deleteAccount(marked.id)
     await reindexFromState(deps.db, await deps.store.readSnapshot())
     await emitAudit({ actor: caller.principal.username, action: 'account.terminated', target: 'account:' + marked.username,
       detail: { purged: true }, outcome: 'ok', principalId: caller.principal.id,
@@ -1532,11 +1566,18 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   }
   const siteHealthDns = systemSiteHealthDns()
   const networkToolsGate = createNetworkToolsGate()
+  // Trusted host admission for cron mutations: the agent qualifies the host scheduler primitive for this
+  // account. Without it a saved schedule could be acknowledged while the host cannot execute it.
+  const admitCronHostFromAgent = async (caller: AuthenticatedCaller, account: Account, _action: 'save' | 'run'): Promise<void> => {
+    const response = await callAgent(`/accounts/${account.username}/cron/admission`, { caller })
+    const body = await response.json().catch(() => null)
+    assertCronHostAdmissionReply(response.status, body)
+  }
   const cronRouter = createCronWorkspaceRoutes({
     store: deps.store, requireCaller, emitAudit, triggerReconcile,
     ...(deps.os ? { osProfile: deps.os } : {}),
     withCronAccountLease: (id, operation) => deps.store.withCronAccountLease(id, operation),
-    admitCronMutation: (caller, account, action) => deps.admitCronMutation ? deps.admitCronMutation(caller, account, action) : fail('PRECONDITION_FAILED', 'cron host admission is unavailable', { stateChanged: false }),
+    admitCronMutation: (caller, account, action) => deps.admitCronMutation ? deps.admitCronMutation(caller, account, action) : admitCronHostFromAgent(caller, account, action),
     runCronNow: (caller, intent) => cronHost(caller, intent, 'run'),
     observeCronStatus: (caller, intent) => cronHost(caller, intent, 'status'),
   })

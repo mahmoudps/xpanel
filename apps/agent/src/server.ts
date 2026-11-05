@@ -1509,8 +1509,32 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       })
       if (dbUpgradeResponse) return dbUpgradeResponse
 
+      const accountCronAdmission = /^\/accounts\/([a-z][a-z0-9]{0,15})\/cron\/admission$/.exec(pathname)
+      if (accountCronAdmission) {
+        if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
+        if (url.search) return fail('VALIDATION', 'Cron admission does not accept query selectors', { stateChanged: false })
+        if (caller.role === 'user') {
+          // A user may only qualify its own account; refuse before account lookup to avoid enumeration.
+          const own = caller.accountId ? await deps.store.getAccount(caller.accountId).catch(() => null) : null
+          if (!own || own.username !== accountCronAdmission[1]) return fail('FORBIDDEN', 'Cron admission requires the signed-in account owner', { stateChanged: false })
+        } else if (caller.role !== 'root') return fail('FORBIDDEN', 'Cron admission requires the signed-in account owner or root', { stateChanged: false })
+        const account = await deps.store.getAccountByUsername(accountCronAdmission[1]!).catch(() => null)
+        if (!account) return fail('NOT_FOUND', 'account not found', { stateChanged: false })
+        if (typeof deps.cronQualification !== 'function') return fail('PRECONDITION_FAILED', 'Trusted cron host qualification is unavailable', { stateChanged: false, reason: 'cron_qualification_missing' })
+        // Fixed probe: proves the host scheduler primitive for this account without reading a caller job.
+        try {
+          await deps.cronQualification({ account, job: { id: randomUUID(), accountId: account.id, schedule: '0 * * * *', command: '/usr/bin/true', comment: '', enabled: true }, action: 'observe' })
+        } catch (error) {
+          return fail(isXpanelError(error) ? error.code : 'PRECONDITION_FAILED', 'Trusted cron host qualification refused', {
+            stateChanged: false, reason: isXpanelError(error) && typeof error.detail.reason === 'string' ? error.detail.reason : 'cron_host_qualification_refused',
+          })
+        }
+        return jsonResponse({ available: true, contract: 'systemd-timers-oncalendar' })
+      }
+
       const accountCronWorkspace = /^\/accounts\/([a-z][a-z0-9]{0,15})\/cron\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(status|run)$/.exec(pathname)
       if (accountCronWorkspace) {
+        try {
         if (method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } })
         if (url.search) return fail('VALIDATION', 'Cron host requests do not accept query selectors', { stateChanged: false })
         if (caller.role !== 'user' || !caller.accountId) return fail('FORBIDDEN', 'Cron operations require the signed-in account owner', { stateChanged: false })
@@ -1536,13 +1560,28 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           await deps.cronQualification!({ account, job, action })
           const rendered = system.renderCronUnits(account, { id: cronJobUnitId(job.id), schedule: job.schedule, command: job.command, ...(job.maxRuntimeSec === undefined ? {} : { maxRuntimeSec: job.maxRuntimeSec }) }, profile)
           for (const file of [rendered.commandFile, rendered.service, rendered.timer]) {
-            if (await executor.readFile(file.path) !== file.content) return fail('PRECONDITION_FAILED', 'Cron host source differs from saved configuration; reconcile and review before execution', { stateChanged: false, sourceConflict: true })
+            const actual = await executor.readFile(file.path)
+            if (actual !== file.content) {
+              const expectedLines = file.content.split('\n'), actualLines = (actual ?? '').split('\n')
+              let at = 0
+              while (at < expectedLines.length && expectedLines[at] === actualLines[at]) at++
+              console.error('xpanel-agent cron source mismatch:', file.path, 'line', at,
+                'expected', JSON.stringify(expectedLines[at] ?? '<absent>').slice(0, 160),
+                'actual', actual === null ? '<missing>' : JSON.stringify(actualLines[at] ?? '<absent>').slice(0, 160))
+              return fail('PRECONDITION_FAILED', 'Cron host source differs from saved configuration; reconcile and review before execution', { stateChanged: false, sourceConflict: true })
+            }
           }
           const observation = action === 'run' ? await adapter.triggerCronNow(account, cronJobUnitId(job.id)) : await adapter.observeCronStatus(account, cronJobUnitId(job.id))
           return { context: { accountId: account.id, jobId: job.id }, revision, observation }
         })
         if (action === 'run') await appendAudit(deps.db, { actor: caller.actor, action: 'cron.host_run_requested', target: 'account:' + accountCronWorkspace[1], detail: { requested: true, completed: false, accountId: caller.accountId }, outcome: 'ok', principalId: caller.principalId })
         return jsonResponse(receipt, action === 'run' ? 202 : 200)
+        } catch (error) {
+          console.error('xpanel-agent cron host refused:', isXpanelError(error)
+            ? `${error.code}: ${error.message} ${JSON.stringify(error.detail).slice(0, 400)}`
+            : error instanceof Error ? error.message.split('\n')[0]!.slice(0, 300) : 'unexpected failure')
+          throw error
+        }
       }
 
       const accountBackupWorkspace = /^\/accounts\/([a-z][a-z0-9]{0,15})\/backup-workspace(?:\/|$)/.exec(pathname)
@@ -1598,11 +1637,20 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (pathname === '/reconcile') await assertRootCaller(caller, 'reconcile')
         const body = await readReconcileBody(req)
         if (caller.role !== 'root' && body.force) fail('FORBIDDEN', 'only root may force reconciliation')
-        const result = await deps.reconciler.reconcile({
-          force: caller.role === 'root' && body.force,
-          actor: caller.actor,
-          scope: { accountId: caller.accountId, resellerId: caller.resellerId },
-        })
+        let result: Awaited<ReturnType<typeof deps.reconciler.reconcile>>
+        try {
+          result = await deps.reconciler.reconcile({
+            force: caller.role === 'root' && body.force,
+            actor: caller.actor,
+            scope: { accountId: caller.accountId, resellerId: caller.resellerId },
+          })
+        } catch (error) {
+          // The caller gets a bounded refusal; the operator journal keeps the first cause (no request bytes).
+          console.error('xpanel-agent reconcile refused:', isXpanelError(error)
+            ? `${error.code}: ${error.message} ${JSON.stringify(error.detail).slice(0, 500)}`
+            : error instanceof Error ? error.message.split('\n')[0]!.slice(0, 300) : 'unexpected failure')
+          throw error
+        }
         return jsonResponse(result, result.status === 'failed' ? 422 : 200)
       }
 

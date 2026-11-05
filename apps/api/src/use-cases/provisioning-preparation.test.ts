@@ -89,6 +89,24 @@ describe.skipIf(!posix)('exact API service state ancestor trust', { tags: ['feat
     expect(input.preparePasswordHash).not.toHaveBeenCalled()
   })
 
+  it('admits a carried-over SGID-inherited private leaf with empty group bits', async () => {
+    const h = await shared(), input = request()
+    await mkdir(join(h.stateRoot, 'private'), { mode: 0o700 })
+    await chmod(join(h.stateRoot, 'private'), 0o700)
+    await mkdir(h.directory, { mode: 0o700 })
+    await chmod(h.directory, 0o2700)
+    const saved = await h.store.prepare(input)
+    expect((await lstat(h.directory)).mode & 0o7777).toBe(0o2700)
+    expect(await h.store.load(saved.reference, input.actorKey)).toEqual(saved)
+  })
+
+  it('admits the narrowed 02750 installed data root produced by protected startup', async () => {
+    const h = await shared(), input = request()
+    await chmod(h.stateRoot, 0o2750)
+    const saved = await h.store.prepare(input)
+    expect(await h.store.load(saved.reference, input.actorKey)).toEqual(saved)
+  })
+
   it.each(['path', 'uid', 'gid', 'mode', 'symlink'])('rejects a %s mismatch instead of broadening ancestor trust', async kind => {
     const h = await shared(), input = request(), trusted = { ...h.trustedStateRoot }
     if (kind === 'path') trusted.directory = h.root

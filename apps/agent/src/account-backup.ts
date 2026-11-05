@@ -116,6 +116,15 @@ export const createAccountBackup = async (input: {
   await input.executor.runAction({ kind: 'ensure-dir', path: root, mode: 0o700, owner: 'root', group: 'root' })
   await input.executor.runAction({ kind: 'ensure-dir', path: directory, mode: 0o700, owner: 'root', group: 'root' })
   try {
+    // Pre-create the staging archive as the account user. GNU tar writes the `--file` while it
+    // reads the same home directory; when tar creates the file itself the directory mtime changes
+    // mid-read and tar exits 1 with ".: file changed as we read it", which the workspace can only
+    // report as an unverified failure. An existing file is truncated without changing the home mtime.
+    await input.executor.runAction({
+      kind: 'exec',
+      runAsUser: input.account.username,
+      argv: ['/usr/bin/touch', '--', staging],
+    })
     await input.executor.runAction({
       kind: 'exec',
       runAsUser: input.account.username,

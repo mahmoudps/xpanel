@@ -41,6 +41,8 @@ import { MAIL_LOG_MAX_OUTPUT_BYTES, observeMailLog } from './mail-log.ts'
 import { observeFtpLog } from './ftp-log.ts'
 import { createHostBackupRunController, readBackupConfigFiles, readSavedBackupDestination } from './acct-backup-runs.ts'
 import { createAgentApp, listenAgentSocket, loadAgentCredentialFile } from './server.ts'
+import { createProvisioningDatabaseReaderPort } from './account-provisioning-database-reader.ts'
+import { createNativeCronQualification } from './cron-qualification.ts'
 import { createSystemdPtySpawner, DEFAULT_TERMINAL_PTY_HELPER, TerminalSessionManager, verifyTerminalPtyHelper } from './terminal-sessions.ts'
 import type { AgentApp } from './server.ts'
 import { awaitLifecycleWriterDrain, createLifecycleBackgroundResources, isLifecycleManaged, readLifecyclePublicStatus, startLifecycleWriterParticipant, withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
@@ -356,7 +358,8 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         }
         // Preparation files are API-owned: trust the API's own primary group, not the agent socket group.
         const provisioningOwner = { uid: provisioningOwnerUid, gid: await resolveServicePrimaryGid(provisioningOwnerUid) }
-        const nativeAccountHttp = createNativeAccountProvisioningHttp({ db: dbHandle.db, store, reconciler, executor, os,
+        const nativeAccountHttp = createNativeAccountProvisioningHttp({ db: dbHandle.db,
+          databaseReader: createProvisioningDatabaseReaderPort(dbPath), store, reconciler, executor, os,
           addon: await loadNativePeerIdentityAddon(),
         })
         const accountProvisioning = createAccountProvisioningRuntime({
@@ -373,6 +376,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           store,
           db: dbHandle.db,
           executor,
+          cronQualification: createNativeCronQualification({ isActive: async unit => (await executor.runCommand(['/usr/bin/systemctl', 'is-active', unit])).code === 0 }),
           ...(accountFileRunner ? { accountFileRunner } : {}),
           ...(hostJobs ? { hostJobs } : {}),
           terminals,

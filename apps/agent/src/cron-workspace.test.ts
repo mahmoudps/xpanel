@@ -36,13 +36,33 @@ const fixture = async () => {
   const intent = async () => ({ accountId: account.id, jobId: job.id, expectedRevision: await revision() })
   const call = async (action = 'status', options: { qualified?: boolean; principalId?: string; body?: Record<string, unknown>; username?: string } = {}) => app(options.qualified !== false).fetch(new Request('http://agent.test/accounts/' + (options.username ?? account.username) + '/cron/' + job.id + '/' + action, { method: 'POST', headers: { ...agentCallerHeaders({ principalId: options.principalId ?? principal.id, token }), 'content-type': 'application/json' }, body: JSON.stringify(options.body ?? await intent()) }))
   const starts = () => executor.executedCommands.filter(argv => argv[1] === 'start')
-  return { state, database, account, features, job, executor, principal, root, admission, intent, call, starts }
+  const admissionCall = async (options: { qualified?: boolean; principalId?: string; username?: string } = {}) => app(options.qualified !== false)
+    .fetch(new Request('http://agent.test/accounts/' + (options.username ?? account.username) + '/cron/admission', { headers: agentCallerHeaders({ principalId: options.principalId ?? principal.id, token }) }))
+  return { state, database, account, features, job, executor, principal, root, admission, intent, call, starts, admissionCall }
 }
 
 describe('cron guarded agent boundary', () => {
   let f: Awaited<ReturnType<typeof fixture>>
   beforeEach(async () => { f = await fixture() })
   afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
+
+  it('attests the host cron primitive for the account owner without requiring a saved job', async () => {
+    const response = await f.admissionCall()
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ available: true, contract: 'systemd-timers-oncalendar' })
+    expect(f.admission).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails closed when host qualification is missing or refuses', async () => {
+    expect((await f.admissionCall({ qualified: false })).status).toBe(412)
+    f.admission.mockRejectedValueOnce(Object.assign(new Error('refused'), { code: 'PRECONDITION_FAILED' }))
+    expect((await f.admissionCall()).status).toBe(412)
+  })
+
+  it('admits only the matching account owner or root, never another user identity', async () => {
+    expect((await f.admissionCall({ principalId: f.root.id })).status).toBe(200)
+    expect((await f.admissionCall({ username: 'cronb' })).status).toBe(403)
+  })
 
   it('fails closed without trusted local qualification before any host command', async () => {
     const before = f.executor.executedCommands.length

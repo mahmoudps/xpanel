@@ -393,6 +393,32 @@ export const MAILDIR_BOX_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?
 /** The per-domain directory that holds an account's Maildirs. */
 const MAIL_DOMAIN_DIR_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
 /** A mailbox's active Sieve script; the writer walks the account-owned parents without following links. */
+/** systemd's runtime set-property drop-in directory of one account slice; the only reviewed tree removal. */
+export const SLICE_CONTROL_DIR_RE = /^\/(?:etc|run)\/systemd\/system\.control\/xpanel-(?:[1-9][0-9]{3}|[1-5][0-9]{4}|60000)\.slice\.d$/
+export const isSliceControlDirPath = (path: string): boolean => SLICE_CONTROL_DIR_RE.test(path)
+/** Exact account home root; termination removes its tree after the user is deleted. */
+export const ACCOUNT_HOME_ROOT_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}$/
+export const isAccountHomeRootPath = (path: string): boolean => ACCOUNT_HOME_ROOT_RE.test(path)
+/**
+ * Generated per-account directories the termination plan removes as trees. Each pattern is the exact
+ * shape the renderer creates; no arbitrary path or nested entry is admitted.
+ */
+export const GENERATED_ACCOUNT_TREE_RES: readonly RegExp[] = Object.freeze([
+  /^\/home\/[a-z_][a-z0-9_-]{0,31}$/,
+  /^\/var\/log\/xpanel\/[a-z_][a-z0-9_-]{0,31}$/,
+  /^\/var\/log\/xpanel\/[a-z][a-z0-9-]{0,16}\/[a-z_][a-z0-9_-]{0,31}$/,
+  /^\/etc\/xpanel\/runtime\/[a-z_][a-z0-9_-]{0,31}$/,
+  /^\/run\/xpanel-fpm\/[a-z_][a-z0-9_-]{0,31}-[5-9]\.[0-9]{1,2}$/,
+  /^\/run\/xpanel-ctr\/[a-z_][a-z0-9_-]{0,31}$/,
+])
+/** Service-owned log directories that are never an account tree. */
+export const SHARED_LOG_DIR_NAMES: ReadonlySet<string> = new Set(['nginx', 'apache', 'php-fpm', 'php', 'mail', 'postfix', 'dovecot', 'pure-ftpd', 'opendkim', 'xpanel'])
+const ACCOUNT_LOG_DIR_RE = /^\/var\/log\/xpanel\/([A-Za-z0-9_-]+)$/
+export const isGeneratedAccountTreePath = (path: string): boolean => {
+  const logDir = ACCOUNT_LOG_DIR_RE.exec(path)
+  if (logDir && SHARED_LOG_DIR_NAMES.has(logDir[1]!)) return false
+  return GENERATED_ACCOUNT_TREE_RES.some(pattern => pattern.test(path))
+}
 export const MAILBOX_SIEVE_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/\.dovecot\.sieve$/
 const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\/php\.cgi|(?:public_html\/)?\.user\.ini)$/
 
@@ -430,6 +456,9 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
     if (path === '/var/lib/xpanel/acme-account/account-key.pem' || /^\/var\/lib\/xpanel\/acme-orders\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/.test(path)) return operation === 'read' || operation === 'write'
     if (path === '/var/lib/xpanel-management-tls/status.json') return operation === 'read'
     if (/^\/etc\/xpanel\/management-certificates\/[a-f0-9]{64}\/fullchain\.pem$/.test(path)) return operation === 'read'
+    // Account termination removes the systemd control drop-ins of its slice and logind user slice.
+    // Those trees sit outside the unit search path, so admit only the exact generated slice names.
+    if (/^\/(?:etc|run)\/systemd\/system\.control\/xpanel-(?:[1-9][0-9]{3}|[1-5][0-9]{4}|60000)\.slice\.d$/.test(path)) return operation === 'remove'
     if (path === '/home') return operation === 'ensure-directory'
     if (path === '/var/spool/postfix/opendkim') return operation === 'ensure-directory'
     // Root-operator quota setup only: the exact table and its timestamped backup.
@@ -498,7 +527,19 @@ const execArgv = (
   argv: string[],
   opts: { timeoutMs?: number; maxBuffer?: number; skipSafeArgv?: boolean } = {},
 ): Promise<ConfigTestResult> => {
-  if (!opts.skipSafeArgv) assertValidCommandArgv(argv)
+  if (!opts.skipSafeArgv) {
+    try {
+      assertValidCommandArgv(argv)
+    } catch (error) {
+      // Bounded operator diagnostic: name the refused argv slot and its value preview, never env or files.
+      const detail = (error as { detail?: Record<string, unknown> }).detail
+      console.error('xpanel-agent unsafe argv:', JSON.stringify({ argv0: argv[0] ?? null,
+        index: typeof detail?.index === 'number' ? detail.index : null,
+        value: typeof detail?.value === 'string' ? detail.value.slice(0, 160) : null,
+        argvLength: argv.length }).slice(0, 400))
+      throw error
+    }
+  }
   const [cmd, ...args] = argv
   if (!cmd) return fail('VALIDATION', 'argv must not be empty')
   return new Promise((resolve) => {
@@ -753,11 +794,23 @@ export class LinuxHostExecutor implements AgentExecutor {
           const code = (error as NodeJS.ErrnoException).code
           if (code === 'ENOENT') return
           if (code !== 'EISDIR' && code !== 'EPERM') throw error
-          await authorizedHostEffect(this, () => rmdir(target))
+          try {
+            await authorizedHostEffect(this, () => rmdir(target))
+          } catch (rmdirError) {
+            // systemd writes its set-property drop-ins under these exact slice-control directories, so
+            // the generated directory is not empty when the account is retired. Only that reviewed
+            // generated path may be removed as a tree; the host-target matcher already admitted it.
+            const treeRemovalAllowed = (rmdirError as NodeJS.ErrnoException).code === 'ENOTEMPTY' && (isSliceControlDirPath(path) || isGeneratedAccountTreePath(path))
+            if (!treeRemovalAllowed) throw rmdirError
+            await removePinnedHostTree(target)
+          }
         }
       })
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      // The descriptor-anchored target is opaque in errors; keep the reviewed logical path for the journal.
+      const cause = error instanceof Error ? error.message : String(error)
+      fail('CONFIG_TEST_FAILED', `managed removal failed for ${path}: ${cause}`.slice(0, 600))
     }
   }
 
@@ -812,7 +865,8 @@ export class LinuxHostExecutor implements AgentExecutor {
         return
       }
       case 'delete-user': {
-        const res = await this.executeArgv(['/usr/sbin/userdel', action.name])
+        // Retire the home with the identity here so a subsequent reviewed home removal is idempotent.
+        const res = await this.executeArgv(['/usr/sbin/userdel', '-r', '--', action.name])
         if (!res.ok && !res.stderr.includes('does not exist')) {
           fail('CONFIG_TEST_FAILED', `userdel ${action.name} failed: ${res.stderr}`)
         }
