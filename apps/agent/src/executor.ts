@@ -301,9 +301,6 @@ const SYSTEM_CONFIG_PREFIXES: readonly string[] = [
   '/etc/xpanel/runtime/',
   '/etc/systemd/system/',
   '/run/systemd/system/',
-  // systemd keeps transient slice control drop-ins outside the unit search path; termination removes them.
-  '/etc/systemd/system.control/',
-  '/run/systemd/system.control/',
   '/etc/sysctl.d/',
   '/etc/ssh/sshd_config.d/',
   '/etc/nftables.d/',
@@ -433,6 +430,9 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
     if (path === '/var/lib/xpanel/acme-account/account-key.pem' || /^\/var\/lib\/xpanel\/acme-orders\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/.test(path)) return operation === 'read' || operation === 'write'
     if (path === '/var/lib/xpanel-management-tls/status.json') return operation === 'read'
     if (/^\/etc\/xpanel\/management-certificates\/[a-f0-9]{64}\/fullchain\.pem$/.test(path)) return operation === 'read'
+    // Account termination removes the systemd control drop-ins of its slice and logind user slice.
+    // Those trees sit outside the unit search path, so admit only the exact generated slice names.
+    if (/^\/(?:etc|run)\/systemd\/system\.control\/xpanel-(?:[1-9][0-9]{3}|[1-5][0-9]{4}|60000)\.slice\.d$/.test(path)) return operation === 'remove'
     if (path === '/home') return operation === 'ensure-directory'
     if (path === '/var/spool/postfix/opendkim') return operation === 'ensure-directory'
     // Root-operator quota setup only: the exact table and its timestamped backup.
