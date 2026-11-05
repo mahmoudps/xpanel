@@ -7,6 +7,7 @@ import { managedPathAbsent, replaceManagedFile, ensureManagedPrivateDirectory } 
 
 const ROOT = '/var/lib/xpanel-lifecycle/operator-requests'
 const PURPOSE = 'xpanel-root-lifecycle-operator-v1', current = new AsyncLocalStorage()
+let visibleOperator = null
 const fail = code => { throw Object.assign(new Error(code), { code }) }
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const json = value => Buffer.from(JSON.stringify(value) + '\n')
@@ -24,9 +25,10 @@ export function parseRootOperatorRequest(value) {
 
 /** Native factory reads this live process-local context, never a request-provided actor or receipt. */
 export async function currentRootOperatorBinding() {
-  const scope = current.getStore()
+  const scope = current.getStore() ?? (visibleOperator?.live ? visibleOperator : null)
   if (!scope) return null
   if (!scope.live) fail('ROOT_OPERATOR_SCOPE_EXPIRED')
+  if (current.getStore() !== scope) return current.run(scope, () => currentRootOperatorBinding())
   await scope.assertCurrent()
   return Object.freeze({ purpose: PURPOSE, operationId: scope.request.operationId, requestSha256: scope.claim.entry.sha256, origin: scope.origin })
 }
@@ -68,6 +70,7 @@ export async function runNativeRootOperatorCommand(input, dispatch) {
           coordinatorReceiptSha256: owned.receiptSha256, helper: owned.helper, claimedAt: new Date().toISOString() }), 0o600, null, assertCurrent)
       })
       const scope = { live: true, request, claim, origin, assertCurrent }
+      visibleOperator = scope
       try {
         return await current.run(scope, async () => {
           const trust = await safety.readNativeReleaseTrustIdentity()
@@ -82,7 +85,7 @@ export async function runNativeRootOperatorCommand(input, dispatch) {
             claimSha256: claim.entry.sha256, completedAt: new Date().toISOString() }), 0o600, claim.entry, assertAuthority)
           return Object.freeze({ operationId: request.operationId, kind: request.kind, phase, resultDigest, exitCode: result.exitCode })
         })
-      } finally { scope.live = false }
+      } finally { scope.live = false; if (visibleOperator === scope) visibleOperator = null }
     }, dispatch)
   })
 }

@@ -17,9 +17,18 @@ export { ROOT_OPERATOR_SOCKET } from './ops-upgrade-root-dispatch.ts'
 const MACHINE_CODE = /^[A-Z][A-Z0-9_]{0,79}$/
 const refused = (): never => { throw new Error('ROOT_OPERATOR_UNAVAILABLE') }
 export function stableMachineCode(error: unknown): string {
-  const record = error && typeof error === 'object' ? error as { code?: unknown; message?: unknown } : undefined
-  const candidate = typeof record?.code === 'string' ? record.code : typeof record?.message === 'string' ? record.message : ''
-  return MACHINE_CODE.test(candidate) ? candidate : 'ROOT_OPERATOR_REVIEW_REQUIRED'
+  let current: unknown = error
+  let wrapper = ''
+  for (let depth = 0; current && depth < 6; depth += 1) {
+    const record = typeof current === 'object' ? current as { code?: unknown; message?: unknown; cause?: unknown } : undefined
+    const candidate = typeof record?.code === 'string' ? record.code : typeof record?.message === 'string' ? record.message : ''
+    if (MACHINE_CODE.test(candidate)) {
+      if (candidate !== 'ARCHIVE_USE_UNCERTAIN') return candidate
+      wrapper = candidate
+    }
+    current = record?.cause
+  }
+  return wrapper || 'ROOT_OPERATOR_REVIEW_REQUIRED'
 }
 export function rootOperatorReviewRecord(operationId: string, error: unknown) {
   return Object.freeze({ operationId, state: 'review_required' as const, code: stableMachineCode(error), retryAllowed: false as const })

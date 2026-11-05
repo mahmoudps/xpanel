@@ -11,7 +11,7 @@ import { StateStore, generationSourceIsLinked } from '../packages/state/src/inde
 import { clearDependencyGroupWorldWrite, offlineDependencyInstallArguments, withAuthenticatedReleaseArchive, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive } from './release-verifier.mjs'
 import { readInstallationReceipt, parseInstallationReceipt, assertOwnedFile, withTrustedFile, withTrustedDirectory, requireLinuxRoot, OWNED_PANEL_UNITS } from './lifecycle-ownership.mjs'
 import { observeOwnedControlPlaneUnits, assertOwnedControlPlaneQuiescent, awaitOwnedServiceChildren, projectOwnedControlPlaneObservation, stopAndDrainOwnedControlPlaneUnits } from './lifecycle-services.mjs'
-import { assertPreparedReleaseCurrent, preparedReleaseInfo, withExistingPreparedRelease, observeInstalledReleaseTree } from './prepared-release.mjs'
+import { assertPreparedReleaseCurrent, preparedReleaseInfo, withExistingPreparedRelease, withVisiblePreparedRelease, observeInstalledReleaseTree } from './prepared-release.mjs'
 import { captureManagedFile, ensureManagedPrivateDirectory, managedPathAbsent, replaceManagedFile } from './lifecycle-managed-files.mjs'
 import { withVerifiedCoordinatorOwnership, assertCoordinatorOwnershipCurrent, coordinatorOwnershipInfo } from './coordinator-ownership.mjs'
 import { prepareInstallationTransition, selectInstallationTransition, publishInstallationTransition, readInstallationTransitionRecovery, reopenInstallationTransition } from './installation-transition.mjs'
@@ -37,6 +37,7 @@ const factories = new WeakMap()
 const recoveryObservationScopes = new WeakMap()
 const recoveryObservationStorage = new AsyncLocalStorage()
 const bootstrapScopes = new WeakMap(), bootstrapStorage = new AsyncLocalStorage()
+let visibleBootstrap = null
 const closedRecoveryViews = new WeakMap()
 const auditIssuances = new WeakMap(), auditIssuanceStorage = new AsyncLocalStorage()
 const auditRepairs = new WeakMap(), auditRepairStorage = new AsyncLocalStorage()
@@ -202,6 +203,13 @@ async function assertProtectedDatabaseOrigin(origin) {
 
 const DATABASE = '/var/lib/xpanel/control.db'
 const originEqual = (a, b) => ['file', 'device', 'inode', 'issuerId'].every(key => a?.[key] === b?.[key])
+async function withVisibleLifecycleBootstrap(callback) {
+  const current = bootstrapStorage.getStore()
+  const scope = current ?? visibleBootstrap
+  if (typeof callback !== 'function' || !scope?.live || (visibleBootstrap && scope !== visibleBootstrap) || (current && current !== scope)) fail('LIFECYCLE_DATABASE_ADMISSION_REQUIRED')
+  if (current === scope) return callback()
+  return bootstrapStorage.run(scope, () => callback())
+}
 const bootstrap = capability => {
   const scope = capability && typeof capability === 'object' ? bootstrapScopes.get(capability) : undefined
   if (!scope?.live || bootstrapStorage.getStore() !== scope) fail('LIFECYCLE_BOOTSTRAP_SCOPE_REQUIRED')
@@ -210,6 +218,8 @@ const bootstrap = capability => {
 
 /** No SQLite calls: usable by the physical admission bridge and closed-reader rechecks. */
 export async function assertLifecycleBootstrapHeld(capability) {
+  const admitted = capability && typeof capability === 'object' ? bootstrapScopes.get(capability) : undefined
+  if (admitted?.live && admitted === visibleBootstrap && bootstrapStorage.getStore() !== admitted) return bootstrapStorage.run(admitted, () => assertLifecycleBootstrapHeld(capability))
   const scope = bootstrap(capability)
   if (JSON.stringify(await processIdentity()) !== JSON.stringify(scope.processPin)) fail('LIFECYCLE_COORDINATOR_CHANGED')
   await assertCoordinatorOwnershipCurrent(scope.coordinator)
@@ -321,8 +331,9 @@ async function withBootstrapScope(operation, dispatch, callback) {
       databasePin, capability, images, issuedCapture, prefixProof: null, pendingDbProof: null,
       fileProof: null, dbProof: null, dbHandle: null, stopCapture: null, closedPin: null, closed: false, controller: new AbortController() }
     bootstrapScopes.set(capability, scope)
+    visibleBootstrap = scope
     try { return await bootstrapStorage.run(scope, async () => { await assertLifecycleBootstrapHeld(capability); return callback(scope) }) }
-    finally { scope.live = false; scope.controller.abort(); bootstrapScopes.delete(capability); await databasePin.close() }
+    finally { scope.live = false; if (visibleBootstrap === scope) visibleBootstrap = null; scope.controller.abort(); bootstrapScopes.delete(capability); await databasePin.close() }
     })
   })
 }
@@ -395,6 +406,8 @@ export async function withNativeLifecycleDatabaseAdmission(operation, callback, 
 }
 
 export async function assertLifecycleBootstrapPromotion(initial, capability) {
+  const admitted = initial && typeof initial === 'object' ? bootstrapScopes.get(initial) : undefined
+  if (admitted?.live && admitted === visibleBootstrap && bootstrapStorage.getStore() !== admitted) return bootstrapStorage.run(admitted, () => assertLifecycleBootstrapPromotion(initial, capability))
   const scope = bootstrap(initial), operation = capabilities.get(capability)
   if (scope.phase !== 'writable' || !operation || operation.db !== scope.dbHandle?.db || operation.operation !== scope.operation
     || !originEqual(operation.origin, scope.origin)) fail('LIFECYCLE_BOOTSTRAP_PROMOTION_REFUSED')
@@ -686,7 +699,7 @@ async function desiredStateIdentity() {
 }
 
 async function initialInstallationValue(scope) {
-  await assertPreparedReleaseCurrent(scope.options.preparedRelease)
+  await withVisiblePreparedRelease(scope.options.preparedRelease, () => assertPreparedReleaseCurrent(scope.options.preparedRelease))
   const installed = await readInstallationReceipt(), entries = []
   for (const path of [ROOT + '/installation.json', ROOT + '/bootstrap.json', ROOT + '/install-dependencies.json', '/opt/xpanel/current']) entries.push((await captureManagedFile(path)).entry)
   for (const file of installed.receipt.files) { await assertOwnedFile(file); entries.push(file) }
@@ -892,7 +905,8 @@ export async function assertLifecycleRecoveryObservationHeld(capability) {
   const scope = capability && recoveryObservationScopes.get(capability)
   if (!scope || !scope.live || recoveryObservationStorage.getStore() !== scope) fail('LIFECYCLE_RECOVERY_OBSERVATION_REQUIRED')
   if (JSON.stringify(await processIdentity()) !== JSON.stringify(scope.processPin)) fail('LIFECYCLE_COORDINATOR_CHANGED')
-  await assertCoordinatorOwnershipCurrent(scope.coordinator); await assertPreparedReleaseCurrent(scope.prepared)
+  await assertCoordinatorOwnershipCurrent(scope.coordinator)
+  await withVisiblePreparedRelease(scope.prepared, () => assertPreparedReleaseCurrent(scope.prepared))
   await assertFixedCoordinatorMainProcess(scope.processPin, coordinatorOwnershipInfo(scope.coordinator))
   if ((await readHead()).hash !== scope.recovery.head.hash) fail('LIFECYCLE_RECOVERY_HEAD_CHANGED')
   await withTrustedFile(ROOT + '/writer-barrier.json', { exactMode: 0o644, maxBytes: 16384, sha256: scope.recovery.barrier.hash }, async () => {})
@@ -1109,11 +1123,14 @@ export async function createNativeUpgradeSafety(options) {
   const processPin = await processIdentity()
   if (!options || typeof options !== 'object' || Object.keys(options).some(key => !['db', 'actorId', 'operation', 'release', 'layout', 'preparedRelease'].includes(key)) || !ACTIONS.has(options.operation) || typeof options.actorId !== 'string') fail('LIFECYCLE_NATIVE_OPTIONS_INVALID')
   const db = options.db, operation = options.operation
-  const initial = bootstrapStorage.getStore()
-  if (!initial?.live || initial.phase !== 'writable' || initial.operation !== operation || initial.dbHandle?.db !== db) fail('LIFECYCLE_DATABASE_ADMISSION_REQUIRED')
+  const initial = await withVisibleLifecycleBootstrap(() => {
+    const scope = bootstrapStorage.getStore()
+    if (!scope?.live || scope.phase !== 'writable' || scope.operation !== operation || scope.dbHandle?.db !== db) fail('LIFECYCLE_DATABASE_ADMISSION_REQUIRED')
+    return scope
+  })
   const initialAdmission = await import('./lifecycle-admission.mjs')
   await initialAdmission.assertLifecycleBootstrapExclusivePhysicalHeld(initial.capability)
-  if (operation === 'upgrade') { await assertPreparedReleaseCurrent(options.preparedRelease) }
+  if (operation === 'upgrade') await withVisiblePreparedRelease(options.preparedRelease, () => assertPreparedReleaseCurrent(options.preparedRelease))
   const origin = await db.transaction(async tx => getStrictOperationDatabaseOrigin(tx))
   await assertProtectedDatabaseOrigin(origin)
   const operatorBinding = await (await import('./root-operator.mjs')).currentRootOperatorBinding()
@@ -1125,7 +1142,7 @@ export async function createNativeUpgradeSafety(options) {
   if (recovery && initial.recovery?.auditOnlyPreHead) recovery.auditOnlyPreHead = true
   const actual = recovery ? null : await readInstallationReceipt(), receipt = recovery?.capture.provisionalReceipt ?? actual.receipt
   if (recovery) {
-    await assertPreparedReleaseCurrent(options.preparedRelease)
+    await withVisiblePreparedRelease(options.preparedRelease, () => assertPreparedReleaseCurrent(options.preparedRelease))
     if (JSON.stringify(recovery.capture.intent.binding.origin) !== JSON.stringify(origin)
       || recovery.capture.intent.binding.accountLifetimeSha256 !== await accountLifetimeHash()) fail('LIFECYCLE_RECOVERY_IDENTITY_CHANGED')
     if (recovery.capture.recoveryMode === 'abort-before-transition' && await currentSchemaVersion(db) !== recovery.capture.intent.schema) fail('LIFECYCLE_INITIAL_SCHEMA_CHANGED')
@@ -1211,7 +1228,7 @@ export async function createNativeUpgradeSafety(options) {
               if (recovery) {
                 if (recovery.capture.recoveryMode !== 'abort-before-transition') scope.installationTransition = await reopenInstallationTransition(scope.capability, options.preparedRelease, recovery.capture)
                 scope.backup = recovery.capture.intent.binding.backup
-                scope.dependencies = preparedReleaseInfo(options.preparedRelease)
+                scope.dependencies = await withVisiblePreparedRelease(options.preparedRelease, () => preparedReleaseInfo(options.preparedRelease))
                 scope.restoreTimer = recovery.capture.intent.restoreTimer ?? recovery.capture.intent.binding.restoreTimer ?? false
               }
               const result = await callback()
@@ -1248,8 +1265,8 @@ export async function createNativeUpgradeSafety(options) {
     async acceptPreparedRelease(path) {
       const scope = await current()
       if (!scope.options.preparedRelease) return false
-      await assertPreparedReleaseCurrent(scope.options.preparedRelease)
-      const info = preparedReleaseInfo(scope.options.preparedRelease)
+      await withVisiblePreparedRelease(scope.options.preparedRelease, () => assertPreparedReleaseCurrent(scope.options.preparedRelease))
+      const info = await withVisiblePreparedRelease(scope.options.preparedRelease, () => preparedReleaseInfo(scope.options.preparedRelease))
       if (path !== info.releaseRoot || !scope.report || scope.report.archiveSha256 !== info.archiveSha256
         || scope.report.manifestSha256 !== info.manifestSha256 || info.version !== scope.options.release?.version) fail('LIFECYCLE_PREPARED_RELEASE_CHANGED')
       scope.dependencies = info
@@ -1272,7 +1289,9 @@ export async function createNativeUpgradeSafety(options) {
       if (!input || Object.keys(input).sort().join(',') !== 'direction,recordId,target'
         || !['forward', 'rollback'].includes(input.direction) || typeof input.recordId !== 'string') fail('LIFECYCLE_INSTALLATION_SELECTION_INVALID')
       if (input.direction === 'forward') {
-        if (!scope.backup || !scope.options.preparedRelease || input.target !== preparedReleaseInfo(scope.options.preparedRelease).releaseRoot) fail('LIFECYCLE_INSTALLATION_PREPARATION_REQUIRED')
+        if (!scope.backup || !scope.options.preparedRelease) fail('LIFECYCLE_INSTALLATION_PREPARATION_REQUIRED')
+        const preparedRoot = await withVisiblePreparedRelease(scope.options.preparedRelease, () => preparedReleaseInfo(scope.options.preparedRelease).releaseRoot)
+        if (input.target !== preparedRoot) fail('LIFECYCLE_INSTALLATION_PREPARATION_REQUIRED')
         await safety.prepareInstallationSource(input.recordId)
       }
       if (scope.recovery && input.recordId !== scope.recovery.capture.intent.binding.recordId) fail('LIFECYCLE_RECOVERY_RECORD_CHANGED')
