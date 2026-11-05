@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { lstat, realpath } from 'node:fs/promises'
 import { fail, type Account, type Domain } from '@xpanel/core'
-import { latestActive, withReadonlyOperationDatabase, getReadonlyOperationDatabaseOrigin, assertReadonlyOperationDatabaseCurrent, withVisibleReadonlyOperationDatabase, type ReadonlyOperationDatabase } from '@xpanel/db'
+import { latestActive, withReobservedReadonlyOperationDatabase, getReadonlyOperationDatabaseOrigin, assertReadonlyOperationDatabaseCurrent, withVisibleReadonlyOperationDatabase, type ReadonlyOperationDatabase } from '@xpanel/db'
 import { StateStore, type StateSnapshot } from '@xpanel/state'
 import { detectOs } from '@xpanel/os'
 import { system } from '@xpanel/render'
@@ -95,7 +95,13 @@ export async function withNativeRootOperatorHostedUidQualification<T>(ownership:
 }
 async function ordinaryObservation(ownership: CoordinatorOwnershipCapability, request: UpgradeIpcRequest | RootOperatorRequest, recovery: boolean): Promise<Capture> {
   await withVisibleCoordinatorOwnership(ownership, () => assertCoordinatorOwnershipCurrent(ownership))
-  const work = async (authority: ObservationAuthority) => { await authority.assertCurrent(); return withReadonlyOperationDatabase(DATABASE, db => collectHostedObservation(ownership, request, authority, db, false)) }
+  const work = async (authority: ObservationAuthority) => {
+    await authority.assertCurrent()
+    // The live API and agent keep writing (job progress, I/O samples) during the multi-second held exchange and
+    // any write refuses a pinned reader; pin only the database origin and read each generation in a fresh reader.
+    const origin = await withReobservedReadonlyOperationDatabase(DATABASE, async db => getReadonlyOperationDatabaseOrigin(db))
+    return collectHostedObservation(ownership, request, authority, { origin, fresh: read => withReobservedReadonlyOperationDatabase(DATABASE, read) }, false)
+  }
   if (recovery) return withNativeLifecycleRecoveryObservation(work)
   await assertNativeLifecyclePrerequisites(ownership)
   return withLifecycleWriterAdmission(() => {
@@ -104,9 +110,12 @@ async function ordinaryObservation(ownership: CoordinatorOwnershipCapability, re
   })
 }
 
+/** A closed recovery scope holds one immutable reader; the live path reads through fresh readers of one pinned origin. */
+type ObservationDatabase = { readonly held: ReadonlyOperationDatabase }
+  | { readonly origin: ReturnType<typeof getReadonlyOperationDatabaseOrigin>; readonly fresh: <T>(read: (db: ReadonlyOperationDatabase) => Promise<T>) => Promise<T> }
 /** All SQL/StateStore/held-HTTP resources close before the returned evidence can be used for native admission. */
 async function collectHostedObservation(ownership: CoordinatorOwnershipCapability, request: UpgradeIpcRequest | RootOperatorRequest,
-  authority: ObservationAuthority, db: ReadonlyOperationDatabase, retainProcess: boolean): Promise<Capture> {
+  authority: ObservationAuthority, database: ObservationDatabase, retainProcess: boolean): Promise<Capture> {
   const owner = coordinatorOwnershipInfo(ownership)
   await withVisibleCoordinatorOwnership(ownership, () => assertCoordinatorOwnershipCurrent(ownership)); await authority.assertCurrent()
   let process: NativeProcessPin | undefined
@@ -116,20 +125,26 @@ async function collectHostedObservation(ownership: CoordinatorOwnershipCapabilit
       const uid = Number(accounts[0]?.[2]), gid = Number(accounts[0]?.[3])
       if (accounts.length !== 1 || !Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(gid) || gid <= 0) return refuse()
       return withInstallFinalizationStateDirectories(uid, gid, async parent => {
-        const origin = getReadonlyOperationDatabaseOrigin(db), store = new StateStore(STATE)
+        const origin = 'held' in database ? getReadonlyOperationDatabaseOrigin(database.held) : database.origin, store = new StateStore(STATE)
+        const read = <T>(work: (db: ReadonlyOperationDatabase) => Promise<T>): Promise<T> => 'held' in database
+          ? withVisibleReadonlyOperationDatabase(database.held, () => work(database.held))
+          : database.fresh(async db => {
+            if (JSON.stringify(getReadonlyOperationDatabaseOrigin(db)) !== JSON.stringify(origin)) return refuse()
+            return withVisibleReadonlyOperationDatabase(db, () => work(db))
+          })
         const originCurrent = async () => {
-          await parent.verify(); await passwd.verify(); await assertReadonlyOperationDatabaseCurrent(db)
+          await parent.verify(); await passwd.verify(); if ('held' in database) await assertReadonlyOperationDatabaseCurrent(database.held)
           const file = await lstat(DATABASE, { bigint: true })
           if (!file.isFile() || file.isSymbolicLink() || file.nlink !== 1n || file.uid !== BigInt(uid) || file.gid !== BigInt(gid)
             || (file.mode & 0o7777n) !== 0o660n || String(file.dev) !== origin.device || String(file.ino) !== origin.inode
-            || JSON.stringify(getReadonlyOperationDatabaseOrigin(db)) !== JSON.stringify(origin)) return refuse()
+            || ('held' in database && JSON.stringify(getReadonlyOperationDatabaseOrigin(database.held)) !== JSON.stringify(origin))) return refuse()
         }
         await originCurrent()
         return store.withReadonlyObservation(async observation => {
           const currentSnapshot = observation.snapshot
           const retained = authority.activeGenerationSource ? await authority.activeGenerationSource() : undefined
           const source = retained?.snapshot ?? currentSnapshot, sourceChecksum = retained?.sourceChecksum ?? currentSnapshot.checksum
-          const generation = retained?.generation ?? await latestActive(db), journal = new ReconcilerJournal(STATE)
+          const generation = retained?.generation ?? await read(db => latestActive(db)), journal = new ReconcilerJournal(STATE)
           if (!generation || generation.status !== 'active' || source.checksum !== sourceChecksum) return refuse()
           const currentEligible = eligibleAccounts(currentSnapshot.accounts, currentSnapshot.domains)
           const account = eligibleAccounts(source.accounts, source.domains).find(value => currentEligible.some(current => JSON.stringify(lifetime(current)) === JSON.stringify(lifetime(value)))) ?? refuse()
@@ -140,15 +155,16 @@ async function collectHostedObservation(ownership: CoordinatorOwnershipCapabilit
           const manifest = await journal.readManifest(generation.id)
           if (!manifest || manifest.generationId !== generation.id || manifest.filesChecksum !== generation.checksum || manifest.stateChecksum !== sourceChecksum) return refuse()
           const retainedIdentity = retained ? digest(retained) : null
-          const guard = async () => withVisibleReadonlyOperationDatabase(db, async () => {
+          const guardBody = async () => {
             if (signal.aborted || Date.now() >= domainDeadline) return refuse()
             await withVisibleCoordinatorOwnership(ownership, () => assertCoordinatorOwnershipCurrent(ownership)); await authority.assertCurrent(); await observation.assertCurrent(); await originCurrent()
-            const active = await latestActive(db)
+            const active = await read(db => latestActive(db))
             if (active?.id !== generation.id || active.status !== 'active' || active.checksum !== generation.checksum || signal.aborted) return refuse()
             if (retainedIdentity !== null && (!authority.activeGenerationSource || digest(await authority.activeGenerationSource()) !== retainedIdentity)) return refuse()
             const now = await journal.readManifest(generation.id)
             if (digest(now) !== digest(manifest)) return refuse()
-          })
+          }
+          const guard = async () => 'held' in database ? withVisibleReadonlyOperationDatabase(database.held, guardBody) : guardBody()
           const loaded = await loadInstalledPeerIdentityAddon()
           for (const method of ['openListener', 'acceptPeer', 'verifyListenerSocket', 'closeListener', 'closeFd', 'getSocketPeerCred', 'getUnixSocketPeer']) {
             if (typeof Reflect.get(loaded, method) !== 'function') return refuse()
@@ -158,7 +174,8 @@ async function collectHostedObservation(ownership: CoordinatorOwnershipCapabilit
           const os = detectOs(path => path === '/etc/os-release' ? osText : null)
           return withTrustedFile('/usr/bin/systemctl', { sha256: owner.systemctlSha256, maxBytes: 16 * 1024 * 1024 }, async tool => {
             const executor = readonlyExecutor(tool, guard, system.fpmUnitName(account.username, domain.php.version)), context: HostEffectAuthority = { readOnly: true, signal, assertAuthority: guard }
-            const exchange = createNativeHeldAccountHttp({ db, store: { listDomains: async () => { await guard(); return source.domains } }, reconciler: { journal }, executor, os, addon })
+            const exchange = createNativeHeldAccountHttp({ ...('held' in database ? { db: database.held } : { databaseReader: { withReadonlyDatabase: read } }),
+              store: { listDomains: async () => { await guard(); return source.domains } }, reconciler: { journal }, executor, os, addon })
             const binding = digest({ purpose: 'xpanel-upgrade-pre-admission-hosted-uid-v1', request, coordinatorReceipt: owner.receiptSha256,
               sourceChecksum, currentDesiredChecksum: currentSnapshot.checksum, authority: observation.authority, databaseOrigin: origin, account, generationId: generation.id, filesChecksum: generation.checksum })
             const challenge = randomBytes(32).toString('hex')
@@ -205,7 +222,7 @@ export async function createNativeClosedRecoveryHostedUidQualification(ownership
   let captured: Capture | undefined
   try {
     const result = await scope.withReadonlyDatabase(async db => {
-      captured = await collectHostedObservation(ownership, request, scope, db, true)
+      captured = await collectHostedObservation(ownership, request, scope, { held: db }, true)
       return captured
     })
     if (!result.process) return refuse()

@@ -5,10 +5,21 @@ describe('canary source reader visibility', () => {
   it('reads each active generation inside its own short pinned read-only reader', () => {
     const source = readFileSync(new URL('./account-provisioning-http-source.ts', import.meta.url), 'utf8')
     expect(source.match(/await readActiveGeneration\(options\)/g)).toHaveLength(2)
-    expect(source).toContain('options.databaseReader.withReadonlyDatabase(reader => withVisibleReadonlyOperationDatabase(reader, () => latestActive(reader as unknown as Db)))')
+    expect(source).toContain('options.databaseReader.withReadonlyDatabase(reader => withVisibleReadonlyOperationDatabase(reader, () => latestActive(reader)))')
     // No observation may fall back to the constructor handle or reuse a reader held across the exchange.
     expect(source).not.toContain('.database()')
     expect(source.match(/latestActive\(/g)).toHaveLength(2)
+  })
+
+  it('reads the live upgrade observation through fresh readers of one pinned origin', () => {
+    const hosted = readFileSync(new URL('./ops-upgrade-hosted-qualification.ts', import.meta.url), 'utf8')
+    // Only the closed recovery scope may hold one reader for the whole observation; the live path must not.
+    expect(hosted).not.toMatch(/withReadonlyOperationDatabase\(DATABASE, db => collectHostedObservation/)
+    expect(hosted).toContain("collectHostedObservation(ownership, request, authority, { origin, fresh: read => withReobservedReadonlyOperationDatabase(DATABASE, read) }, false)")
+    expect(hosted).toContain("collectHostedObservation(ownership, request, scope, { held: db }, true)")
+    expect(hosted).toContain('if (JSON.stringify(getReadonlyOperationDatabaseOrigin(db)) !== JSON.stringify(origin)) return refuse()')
+    expect(hosted.match(/await read\(db => latestActive\(db\)\)/g)).toHaveLength(2)
+    expect(hosted).not.toMatch(/latestActive\(db\)(?!\))/)
   })
 
   it('composes the pinned reader for the live daemon without holding it across the native exchange', () => {

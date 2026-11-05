@@ -49,6 +49,10 @@ vi.mock('@xpanel/db', () => ({
     seams.dbOpen(path); seams.dbActive = true
     try { return await callback({ query: vi.fn() }) } finally { seams.dbActive = false; seams.dbClose() }
   },
+  withReobservedReadonlyOperationDatabase: async (path: string, callback: (db: unknown) => unknown) => {
+    seams.dbOpen(path); seams.dbActive = true
+    try { return await callback({ query: vi.fn() }) } finally { seams.dbActive = false; seams.dbClose() }
+  },
   withVisibleReadonlyOperationDatabase: async (_db: unknown, work: () => unknown) => work(),
 }))
 vi.mock('@xpanel/state', () => ({ StateStore: class {
@@ -91,7 +95,9 @@ describe('fixed native hosted UID composition', () => {
   it('does not fabricate hosted UID on an empty host and retires the read-only connection', async () => {
     seams.empty = true
     await expect(withNativeHostedUidQualification(capability, { kind: 'hello', nonce: randomUUID() }, async () => true)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
-    expect(seams.dbOpen).toHaveBeenCalledWith('/var/lib/xpanel/control.db'); expect(seams.dbClose).toHaveBeenCalledOnce(); expect(seams.open).not.toHaveBeenCalled()
+    // The live path opens short readers (origin, then generation) and closes every one before refusing.
+    expect(seams.dbOpen).toHaveBeenCalledWith('/var/lib/xpanel/control.db'); expect(seams.dbClose).toHaveBeenCalledTimes(seams.dbOpen.mock.calls.length)
+    expect(seams.dbActive).toBe(false); expect(seams.open).not.toHaveBeenCalled()
   })
   it('binds each nonce to a producer call and closes HTTP and SQLite before returning proof', async () => {
     const run = () => withNativeHostedUidQualification(capability, { kind: 'hello', nonce: randomUUID() }, async proof => {
@@ -99,7 +105,8 @@ describe('fixed native hosted UID composition', () => {
     })
     const first = await run(), second = await run()
     expect(first.digest).toMatch(/^[a-f0-9]{64}$/); expect(first.digest).not.toBe(second.digest)
-    expect(seams.open).toHaveBeenCalledTimes(2); expect(seams.dbClose).toHaveBeenCalledTimes(2)
+    // Every short live reader opened for the two observations is closed again; none stays open past a proof.
+    expect(seams.open).toHaveBeenCalledTimes(2); expect(seams.dbClose).toHaveBeenCalledTimes(seams.dbOpen.mock.calls.length); expect(seams.dbActive).toBe(false)
   })
   it('rejects wrong worker UID and releases held HTTP', async () => {
     seams.observedUid = 1002

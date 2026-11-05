@@ -23,8 +23,8 @@ export interface NativeAccountHttpSubject {
   readonly challenge: string
 }
 export interface NativeProvisioningHttpOptions {
-  /** A pinned read-only operation database or an explicit live-reader port; never the writable handle. */
-  readonly db: Db
+  /** A held pinned read-only operation database (closed recovery); never the writable handle. */
+  readonly db?: Db
   /** Trusted startup composition of the pinned read-only reader; when present it replaces `db` for every read. */
   readonly databaseReader?: { readonly withReadonlyDatabase: <T>(work: (db: ReadonlyOperationDatabase) => Promise<T>) => Promise<T> }
   readonly store: Pick<StateStore, 'listDomains'>
@@ -38,9 +38,11 @@ const refused: (reason: string) => never = reason => fail('PRECONDITION_FAILED',
  * held exchange is refused by any concurrent control-database write (live job progress), so authority
  * comes from the exact generation id/checksum comparisons, never from an unchanged WAL page set.
  */
-const readActiveGeneration = (options: Pick<NativeProvisioningHttpOptions, 'db' | 'databaseReader'>) => options.databaseReader
-  ? options.databaseReader.withReadonlyDatabase(reader => withVisibleReadonlyOperationDatabase(reader, () => latestActive(reader as unknown as Db)))
-  : withVisibleReadonlyOperationDatabase(options.db, () => latestActive(options.db))
+const readActiveGeneration = (options: Pick<NativeProvisioningHttpOptions, 'db' | 'databaseReader'>) => {
+  if (options.databaseReader) return options.databaseReader.withReadonlyDatabase(reader => withVisibleReadonlyOperationDatabase(reader, () => latestActive(reader)))
+  const held = options.db
+  return held ? withVisibleReadonlyOperationDatabase(held, () => latestActive(held)) : refused('database_reader_required')
+}
 const sha = (bytes: Uint8Array | string): string => createHash('sha256').update(bytes).digest('hex')
 const safePath = (path: string): boolean => path.startsWith('/') && posix.normalize(path) === path && !/[\u0000-\u0020\u007f\\]/.test(path)
 export interface HeldHttpConnection {
