@@ -809,7 +809,7 @@ export class LinuxHostExecutor implements AgentExecutor {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
       // The descriptor-anchored target is opaque in errors; keep the reviewed logical path for the journal.
       const cause = error instanceof Error ? error.message : String(error)
-      fail('CONFIG_TEST_FAILED', managed removal failed for \: \.slice(0, 600))
+      fail('CONFIG_TEST_FAILED', `managed removal failed for ${path}: ${cause}`.slice(0, 600))
     }
   }
 
