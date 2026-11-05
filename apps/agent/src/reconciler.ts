@@ -1950,6 +1950,7 @@ export class HostReconciler {
           try {
             await this.deps.executor.runAction(action)
           } catch (actionErr) {
+            console.error('xpanel-agent reconcile post-action failed:', JSON.stringify(action).slice(0, 400))
             const unitLabel =
               action.kind === 'systemd'
                 ? action.unit

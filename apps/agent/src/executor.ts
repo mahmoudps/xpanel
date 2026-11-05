@@ -806,7 +806,10 @@ export class LinuxHostExecutor implements AgentExecutor {
         }
       })
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      // The descriptor-anchored target is opaque in errors; keep the reviewed logical path for the journal.
+      const cause = error instanceof Error ? error.message : String(error)
+      fail('CONFIG_TEST_FAILED', managed removal failed for \: \.slice(0, 600))
     }
   }
 
