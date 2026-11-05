@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
-import { createProductionHostTargetMatcher, isSliceControlDirPath } from './executor.ts'
+import { createProductionHostTargetMatcher, isAccountHomeRootPath, isSliceControlDirPath } from './executor.ts'
 
 /**
  * Account termination removes the systemd control drop-in directories of the account slice and its
@@ -32,6 +32,14 @@ describe('slice-control tree removal predicate', { tags: ['unit'] }, () => {
     for (const path of ['/etc/systemd/system.control/sshd.service.d', '/etc/systemd/system.control/xpanel-20002.slice.d/sub',
       '/etc/systemd/system/xpanel-20002.slice.d', '/etc/systemd/system.control/user-20002.slice.d']) {
       assert.equal(isSliceControlDirPath(path), false, path)
+    }
+  })
+})
+describe('account home tree removal predicate', { tags: ['unit'] }, () => {
+  it('admits only the exact account home root as a termination tree', () => {
+    assert.equal(isAccountHomeRootPath('/home/trkrun1'), true)
+    for (const path of ['/home/trkrun1/public_html', '/home/trkrun1/mail', '/home/qa1/../trkrun1', '/srv/home/trkrun1', '/home']) {
+      assert.equal(isAccountHomeRootPath(path), false, path)
     }
   })
 })

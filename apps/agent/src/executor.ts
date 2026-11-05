@@ -396,6 +396,9 @@ const MAIL_DOMAIN_DIR_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a
 /** systemd's runtime set-property drop-in directory of one account slice; the only reviewed tree removal. */
 export const SLICE_CONTROL_DIR_RE = /^\/(?:etc|run)\/systemd\/system\.control\/xpanel-(?:[1-9][0-9]{3}|[1-5][0-9]{4}|60000)\.slice\.d$/
 export const isSliceControlDirPath = (path: string): boolean => SLICE_CONTROL_DIR_RE.test(path)
+/** Exact account home root; termination removes its tree after the user is deleted. */
+export const ACCOUNT_HOME_ROOT_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}$/
+export const isAccountHomeRootPath = (path: string): boolean => ACCOUNT_HOME_ROOT_RE.test(path)
 export const MAILBOX_SIEVE_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/\.dovecot\.sieve$/
 const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\/php\.cgi|(?:public_html\/)?\.user\.ini)$/
 
@@ -777,7 +780,8 @@ export class LinuxHostExecutor implements AgentExecutor {
             // systemd writes its set-property drop-ins under these exact slice-control directories, so
             // the generated directory is not empty when the account is retired. Only that reviewed
             // generated path may be removed as a tree; the host-target matcher already admitted it.
-            if ((rmdirError as NodeJS.ErrnoException).code !== 'ENOTEMPTY' || !isSliceControlDirPath(path)) throw rmdirError
+            const treeRemovalAllowed = (rmdirError as NodeJS.ErrnoException).code === 'ENOTEMPTY' && (isSliceControlDirPath(path) || isAccountHomeRootPath(path))
+            if (!treeRemovalAllowed) throw rmdirError
             await removePinnedHostTree(target)
           }
         }

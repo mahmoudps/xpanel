@@ -95,8 +95,9 @@ const DEFAULT_DNS_ZONE_DIR = '/var/lib/powerdns/zones'
  * reload and its post-rollback health probe reports the oneshot as inactive. The timer is the unit the
  * rollback restores; the service is only started by that timer.
  */
-export const rollbackReloadUnits = (units: readonly string[]): string[] =>
-  units.filter(unit => !/^xpanel-cron-[a-z0-9_-]+\.service$/.test(unit))
+/** A one-shot cron service is inactive between timer triggers; only its timer is a managed reload unit. */
+export const isOneShotCronService = (unit: string): boolean => /^xpanel-cron-[a-z0-9_-]+\.service$/.test(unit)
+export const rollbackReloadUnits = (units: readonly string[]): string[] => units.filter(unit => !isOneShotCronService(unit))
 
 export const powerDnsReloadActions = (zones: readonly string[]): HostAction[] => {
   const names = [...new Set(zones)].sort((a, b) => a.localeCompare(b))
@@ -1178,6 +1179,8 @@ export class HostReconciler {
       }
 
       for (const unit of reloadedUnits) {
+        // One-shot cron services are inactive between timer triggers; the timer is the managed reload unit.
+        if (isOneShotCronService(unit)) continue
         const health = await this.verifyUnitHealth(
           unit,
           journalRecord.previousActiveGenerationId ?? 0,
@@ -1976,6 +1979,8 @@ export class HostReconciler {
         this.emitStage(pendingGen.id, 'verify', 'running', scope)
 
         for (const unit of journalRecord.reloadedUnits) {
+          // One-shot cron services are inactive between timer triggers; the timer is the managed unit.
+          if (isOneShotCronService(unit)) continue
           const probe = await this.verifyUnitHealth(unit, pendingGen.id)
           if (!probe.ok) {
             throw new StageFailureError(

@@ -4,7 +4,7 @@ import { profileFor } from '@xpanel/os'
 import type { Db } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
 import type { AgentExecutor, ConfigTestResult } from './executor.ts'
-import { HostReconciler, rollbackReloadUnits } from './reconciler.ts'
+import { HostReconciler, isOneShotCronService, rollbackReloadUnits } from './reconciler.ts'
 
 /**
  * A generation can manage .service, .timer and .socket units. The post-reload health probe must
@@ -64,5 +64,12 @@ describe('rollback reload unit filtering', { tags: ['unit'] }, () => {
       'xpanel-cron-bob-b1c2.timer',
       'nginx.service',
     ]), ['xpanel-cron-alice-abc.timer', 'xpanel-php-fpm-alice-8.3.service', 'xpanel-cron-bob-b1c2.timer', 'nginx.service'])
+  })
+})
+describe('one-shot cron service classification', { tags: ['unit'] }, () => {
+  it('classifies cron services as oneshot and keeps timers as managed units', () => {
+    assert.equal(isOneShotCronService('xpanel-cron-alice-abc123.service'), true)
+    assert.equal(isOneShotCronService('xpanel-cron-alice-abc123.timer'), false)
+    assert.equal(isOneShotCronService('xpanel-php-fpm-alice-8.3.service'), false)
   })
 })
