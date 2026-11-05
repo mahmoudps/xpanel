@@ -128,7 +128,7 @@ export class FileProvisioningPreparationStore implements ProvisioningPreparation
       if (!this.allowedDirectory(path, info, uid)) {
         return refused('private_directory_untrusted')
       }
-      if (path === this.directory && (info.uid !== uid || (info.mode & 0o7777) !== 0o700)) return refused('private_directory_untrusted')
+      if (path === this.directory && (info.uid !== uid || !this.privateLeafMode(info))) return refused('private_directory_untrusted')
       const identity = { dev: info.dev, ino: info.ino, uid: info.uid, gid: info.gid, mode: info.mode }
       const original = this.directoryIdentities?.get(path)
       if (original && Object.keys(identity).some(key => identity[key as keyof typeof identity] !== original[key as keyof typeof original])) {
@@ -147,8 +147,14 @@ export class FileProvisioningPreparationStore implements ProvisioningPreparation
     // /var/lib/xpanel is deliberately setgid for its existing API/Agent service group. Only
     // that startup-pinned root may have 02770; its private child and every other ancestor stay strict.
     if (trusted && path === trusted.directory && trusted.uid === uid && info.uid === trusted.uid
-      && info.gid === trusted.gid && (info.mode & 0o7777) === 0o2770) return true
+      && info.gid === trusted.gid && ((info.mode & 0o7777) === 0o2770 || (info.mode & 0o7777) === 0o2750)) return true
     return (info.uid === uid || info.uid === 0) && (info.mode & 0o022) === 0
+  }
+
+  /** A carried-over host may have an SGID-inherited private leaf (02700). Group bits stay empty either way. */
+  private privateLeafMode(info: Stats): boolean {
+    const mode = info.mode & 0o7777
+    return mode === 0o700 || mode === 0o2700
   }
 
   private async initialize(): Promise<void> {
