@@ -1476,7 +1476,8 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (method === 'POST' && serviceRestart) {
         await assertRootCaller(caller, 'host.services.restart')
         if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
-        const service = await restartHostService(argv => deps.executor!.runCommand(argv), serviceRestart[1]!)
+        const os = secHostProfile() ?? fail('PRECONDITION_FAILED', 'service restarts need a supported host profile for their configuration tests', { stateChanged: false })
+        const service = await restartHostService(argv => deps.executor!.runCommand(argv), serviceRestart[1]!, os)
         return jsonResponse({ service })
       }
 
