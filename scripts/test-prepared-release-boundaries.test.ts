@@ -139,6 +139,26 @@ describe('isolated prepared-scope ancestor visibility', () => {
       f.child.pid = 42; f.child.parent = null; assert.throws(() => f.select(f.parentKey), /PREPARED_RELEASE_CAPABILITY_REQUIRED/)
     })
   })
+
+  it('re-enters one live prepared scope after the store is dropped and refuses a retired scope', async () => {
+    const start = source.indexOf('function preparedStoreVisible(expected) {')
+    const end = source.indexOf('\nexport function preparedReleaseInfo', start)
+    assert(start >= 0 && end > start)
+    const scopes = new WeakMap<object, Scope>(), active = new AsyncLocalStorage<Scope>()
+    const check = (value: unknown, code: string) => { if (!value) throw new Error(code) }
+    const reenter = new Function('preparedScopes', 'preparedActive', 'check', 'process', source.slice(start, end).replace('export async function', 'async function') + '\nreturn withVisiblePreparedRelease')(
+      scopes, active, check, { pid: 42 },
+    ) as (capability: unknown, callback: () => unknown) => Promise<unknown>
+    const parent: Scope = { live: true, pid: 42, parent: null }, child: Scope = { live: true, pid: 42, parent }
+    const childKey = {}
+    scopes.set(childKey, child)
+    let ran = false
+    await reenter(childKey, async () => { await Promise.resolve(); ran = true; assert.equal(active.getStore(), child) })
+    assert.equal(ran, true)
+    child.live = false
+    await assert.rejects(reenter(childKey, () => {}), /PREPARED_RELEASE_CAPABILITY_REQUIRED/)
+    await assert.rejects(reenter({}, () => {}), /PREPARED_RELEASE_CAPABILITY_REQUIRED/)
+  })
 })
 
 describe('prepared helper and target tree revalidation', () => {

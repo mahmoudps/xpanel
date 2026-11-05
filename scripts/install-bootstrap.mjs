@@ -717,6 +717,24 @@ function preparedScope(capability) {
   return scope
 }
 
+function preparedStoreVisible(expected) {
+  let current = preparedActive.getStore()
+  while (current) {
+    if (!current.live || current.pid !== process.pid) return false
+    if (current === expected) return true
+    current = current.parent
+  }
+  return false
+}
+
+/** Native callbacks drop the prepared store. Re-enter the same live scope; do not mint another one. */
+export async function withVisiblePreparedRelease(capability, callback) {
+  const scope = capability && typeof capability === 'object' ? preparedScopes.get(capability) : undefined
+  check(typeof callback === 'function' && scope && scope.live && scope.pid === process.pid, 'PREPARED_RELEASE_CAPABILITY_REQUIRED')
+  if (preparedStoreVisible(scope)) return callback()
+  return preparedActive.run(scope, () => callback())
+}
+
 export function preparedReleaseInfo(capability) { const scope = preparedScope(capability); return freeze({ ...structuredClone(scope.info), artifactPath: scope.artifactPath }) }
 
 export async function assertPreparedReleaseCurrent(capability) {

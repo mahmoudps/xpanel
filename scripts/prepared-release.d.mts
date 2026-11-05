@@ -13,5 +13,6 @@ export function parsePreparedReleaseInput(value:unknown):Readonly<PreparedReleas
 export function withPreparedRelease<T>(input:PreparedReleaseInput,callback:(capability:PreparedReleaseCapability)=>Promise<T>):Promise<T>
 export function withExistingPreparedRelease<T>(input:PreparedReleaseInput,callback:(capability:PreparedReleaseCapability)=>Promise<T>):Promise<T>
 export function assertPreparedReleaseCurrent(capability:unknown):Promise<void>
+export function withVisiblePreparedRelease<T>(capability:unknown, callback:() => T | Promise<T>):Promise<T>
 export function preparedReleaseInfo(capability:unknown):Readonly<PreparedReleaseInfo>
 export function observeInstalledReleaseTree(root:string):Promise<Readonly<{entries:number;treeSha256:string}>>
