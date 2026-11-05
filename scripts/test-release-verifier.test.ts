@@ -484,6 +484,37 @@ describe('retained archive FD lifetime diagnostics with explicit filesystem iden
     await expect(f.mod.verifyAuthenticatedReleaseArchive(f.path, options(original))).rejects.toMatchObject({ code: 'DESCRIPTOR_UNCERTAIN' })
     expect(f.fileCloses()).toBe(1)
   })
+  it('admits verifications nested in one archive lifetime past the concurrency ceiling and bounds their depth', async () => {
+    const f = await fixture()
+    let innermost: any
+    const nest = (levels: number): Promise<any> => levels === 0
+      ? f.mod.verifyAuthenticatedReleaseArchive(f.path, options(original)).catch((error: any) => { innermost = error; throw error })
+      : f.mod.withAuthenticatedReleaseArchive(f.path, options(original), () => nest(levels - 1))
+    // An upgrade apply nests five admissions in one chain; the former flat ceiling of four refused it BUSY.
+    await expect(nest(4)).resolves.toHaveProperty('value')
+    await expect(nest(7)).resolves.toHaveProperty('value')
+    expect(innermost).toBeUndefined()
+    await expect(nest(8)).rejects.toMatchObject({ code: 'ARCHIVE_USE_UNCERTAIN' })
+    expect(innermost).toMatchObject({ code: 'BUSY', message: 'Verification nesting ceiling reached' })
+  })
+  it('keeps the four-lifetime concurrency ceiling and admits work that outlives its parent afresh', async () => {
+    const f = await fixture()
+    let release!: () => void, later!: () => void, escaped!: Promise<unknown>
+    const gate = new Promise<void>(resolve => { release = resolve }), after = new Promise<void>(resolve => { later = resolve })
+    const lifetime = () => f.mod.withAuthenticatedReleaseArchive(f.path, options(original), () => gate)
+    const held = [lifetime(), lifetime(), lifetime()]
+    await f.mod.withAuthenticatedReleaseArchive(f.path, options(original), () => {
+      escaped = after.then(() => f.mod.verifyAuthenticatedReleaseArchive(f.path, options(original)))
+      return 'returned before its escaped work'
+    })
+    held.push(lifetime())
+    await expect(f.mod.verifyAuthenticatedReleaseArchive(f.path, options(original))).rejects.toMatchObject({ code: 'BUSY', message: 'Verification concurrency ceiling reached' })
+    later()
+    await expect(escaped).rejects.toMatchObject({ code: 'BUSY', message: 'Verification concurrency ceiling reached' })
+    release()
+    await Promise.all(held)
+    await expect(f.mod.verifyAuthenticatedReleaseArchive(f.path, options(original))).resolves.toBeDefined()
+  })
   it('verifies complete actual source-byte closure through the strict tree branch in diagnostic identities', async () => {
     const f = await fixture()
     const { value } = await f.mod.withAuthenticatedReleaseArchive(f.path, options(original), ({ report }: any) => f.mod.verifyAuthenticatedReleaseTree('/protected/tree', { authenticatedArchive: report, signingKey: key, keyId }))
