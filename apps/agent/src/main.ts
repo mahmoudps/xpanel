@@ -265,6 +265,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
             })
           },
           onError: () => { process.stderr.write('xpanel-agent bandwidth: collection could not be recorded\n') },
+          onWebLog: chunk => { websiteAnalytics.ingestSiteLog(chunk) },
         })
         const ioAnalytics = new IoAnalyticsEngine()
         const websiteAnalytics = new WebsiteAnalyticsEngine()

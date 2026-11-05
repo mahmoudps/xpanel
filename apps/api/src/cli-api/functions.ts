@@ -203,7 +203,6 @@ export const CLI_API_FUNCTIONS: Readonly<Record<CliApiCommand, readonly CliApiFu
     ['admin', 'preferences_update', 'PUT', '/api/admin/preferences'],
     ['analytics', 'io', 'GET', '/api/analytics/io'],
     ['analytics', 'websites', 'GET', '/api/analytics/websites/{domainId}'],
-    ['analytics', 'websites_ingest', 'POST', '/api/analytics/websites/ingest'],
     ['apps', 'create', 'POST', '/api/apps/{account}'],
     ['apps', 'delete', 'DELETE', '/api/apps/{account}/{appId}'],
     ['apps', 'get', 'GET', '/api/apps/{account}'],

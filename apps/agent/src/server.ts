@@ -1711,13 +1711,6 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         return jsonResponse(result.available ? result.snapshot : result, result.available ? 200 : 503)
       }
 
-      if (method === 'POST' && pathname === '/analytics/websites/ingest') {
-        await assertRootCaller(caller, 'analytics.websites.ingest')
-        const body = (await req.json()) as { lines?: string[] | string }
-        const ingested = webEngine.ingestJsonLogLines(body.lines ?? [])
-        return jsonResponse({ ok: true, ingested })
-      }
-
       const webAnalyticsMatch = /^\/analytics\/websites\/([0-9a-f-]{36})$/i.exec(pathname)
       if (method === 'GET' && webAnalyticsMatch) {
         const domainId = webAnalyticsMatch[1]!.toLowerCase()

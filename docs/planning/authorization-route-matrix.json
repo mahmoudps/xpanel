@@ -4956,20 +4956,6 @@
       "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + ownedAccounts"
     },
     {
-      "method": "POST",
-      "path": "/api/analytics/websites/ingest",
-      "surface": "api",
-      "resource": "analytics",
-      "requiredScope": "analytics:write",
-      "resellerAcl": null,
-      "featureEntitlement": [],
-      "ownershipSource": "rootOnly",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertRoot"
-    },
-    {
       "method": "GET",
       "path": "/api/analytics/websites/:domainId",
       "surface": "api",
@@ -5336,20 +5322,6 @@
       "resellerAcl": null,
       "featureEntitlement": [],
       "ownershipSource": "rootOnly on direct agent endpoint; API filters by ownedAccounts",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/agent/src/server.ts:authenticateService + authenticateCaller + assertRootCaller"
-    },
-    {
-      "method": "POST",
-      "path": "/analytics/websites/ingest",
-      "surface": "agent",
-      "resource": "agent.analytics_ingest",
-      "requiredScope": "x-xpanel-agent-token + x-xpanel-principal-id",
-      "resellerAcl": null,
-      "featureEntitlement": [],
-      "ownershipSource": "rootOnly",
       "allowedPrincipals": [
         "root"
       ],

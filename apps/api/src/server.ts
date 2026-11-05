@@ -4555,17 +4555,6 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         })
       }
 
-      if (method === 'POST' && pathname === '/api/analytics/websites/ingest') {
-        const caller = await requireCaller(req)
-        await assertRoot(caller, 'analytics.websites.ingest')
-        const body = await readJsonBody(req)
-        return callAgent('/analytics/websites/ingest', {
-          method: 'POST',
-          caller,
-          body,
-        })
-      }
-
       const webAnalyticsMatch = /^\/api\/analytics\/websites\/([0-9a-f-]{36})$/i.exec(pathname)
       if (method === 'GET' && webAnalyticsMatch) {
         const caller = await requireCaller(req)

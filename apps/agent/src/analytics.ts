@@ -19,6 +19,7 @@ import type { AccountSliceMetrics, AgentExecutor } from './executor.ts'
 import type { StateSnapshot, StateStore } from '@xpanel/state'
 import { readLifecyclePublicStatus } from '../../../scripts/lifecycle-admission.mjs'
 import { LinuxResourceObservationSampler, type ResourceSamplerReading } from './resource-observations.ts'
+import { BANDWIDTH_INTERVAL_MS } from './metering.ts'
 
 export type CanonicalIoAnalyticsRead = CanonicalIoAnalyticsUnavailable | { readonly available: true; readonly snapshot: IoAnalyticsSnapshot }
 
@@ -40,21 +41,22 @@ export interface IoAccountsView {
   unmeasuredAccounts: number
 }
 
+/** The fields of `log_format xpanel_metrics` (packages/render/src/edge/nginx.ts); times are seconds as nginx logs them. */
 export interface NginxMetricLogLine {
-  ts: string
+  time: string
   host: string
   ip: string
   method: string
   uri: string
   status: number
+  body_bytes: number
   bytes: number
-  rt: number
-  uct?: string | number
-  uht?: string | number
-  urt?: string | number
-  cache?: string
-  ref?: string
-  ua?: string
+  request_bytes: number
+  request_time: number
+  upstream_time: string
+  cache: string
+  referer: string
+  agent: string
 }
 
 export interface CgroupIoStatCounters {
@@ -668,10 +670,28 @@ export class CanonicalIoResourcePipeline {
   }
 }
 
+/** One site's newly consumed complete access-log lines, as the bandwidth meter read them (createBandwidthMeter onWebLog). */
+export interface SiteLogChunk {
+  path: string
+  accountId: Id
+  /** Each served name, exact or `*.name`, to the domain it belongs to (edge.groupSites owners). */
+  owners: ReadonlyMap<string, Pick<Domain, 'id'>>
+  identity: string
+  start: number
+  sizeBytes: number
+  bytes: Buffer
+  /** The collection instant. */
+  readAt: string
+  /** From this instant every line of the site reaches the reader, except the meter's rotation shortcut. */
+  since: string
+  /** The read reached the end of the file; at most a line still being written remains. */
+  caughtUp: boolean
+}
+
 interface StoredAccessRecord {
   tsMs: number
-  tsHourIso: string
-  host: string
+  domainId: Id
+  accountId: Id
   ip: string
   uri: string
   status: number
@@ -682,16 +702,39 @@ interface StoredAccessRecord {
   referrer: string
 }
 
-const parseSecToMs = (v: unknown): number => {
-  if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, v * 1000)
-  if (typeof v === 'string') {
-    const n = Number.parseFloat(v)
-    if (Number.isFinite(n)) return Math.max(0, n * 1000)
-  }
-  return 0
+const LOG_LINE_MAX_CHARS = 16 * 1024
+/** A domain whose site log was last read longer ago than three bandwidth collections is stale. */
+export const WEBSITE_ANALYTICS_STALE_MS = 3 * BANDWIDTH_INTERVAL_MS
+const WINDOW_MS = { '1h': 3_600_000, '24h': 86_400_000, '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 } as const
+
+const logText = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max
+const logCount = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
+const logSeconds = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
+
+/** One line of the edge's `log_format xpanel_metrics escape=json` (packages/render/src/edge/nginx.ts); null when malformed. */
+export function parseMetricsLogLine(line: string): NginxMetricLogLine | null {
+  let value: unknown
+  try { value = line.length <= LOG_LINE_MAX_CHARS ? JSON.parse(line) : null } catch { return null }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const v = value as Record<string, unknown>
+  if (!logText(v.time, 64) || !/^\d{4}-\d{2}-\d{2}T/.test(v.time) || !Number.isFinite(Date.parse(v.time)) || !logText(v.host, 255) || !v.host || !logText(v.ip, 64) || !logText(v.method, 32)
+    || !logText(v.uri, LOG_LINE_MAX_CHARS) || !logCount(v.status) || v.status < 100 || v.status > 599 || !logCount(v.body_bytes) || !logCount(v.bytes) || !logCount(v.request_bytes) || !logSeconds(v.request_time)
+    || !logText(v.upstream_time, 256) || !logText(v.cache, 32) || !logText(v.referer, LOG_LINE_MAX_CHARS) || !logText(v.agent, LOG_LINE_MAX_CHARS)) return null
+  return { time: v.time, host: v.host.toLowerCase(), ip: v.ip, method: v.method, uri: v.uri, status: v.status, body_bytes: v.body_bytes, bytes: v.bytes, request_bytes: v.request_bytes,
+    request_time: v.request_time, upstream_time: v.upstream_time, cache: v.cache, referer: v.referer, agent: v.agent }
 }
 
-const normalizeReferrer = (ref: string | undefined): string => {
+/** `$upstream_response_time` lists one value per upstream tried ("0.010, 0.020 : 0.003"); `-` adds nothing. */
+const upstreamMs = (value: string): number => value.split(/[,:]/).reduce((total, part) => { const n = Number(part.trim()); return Number.isFinite(n) && n >= 0 ? total + n * 1000 : total }, 0)
+
+/** nginx picks the exact name first, then the longest `*.suffix` wildcard. */
+const ownerOf = (owners: SiteLogChunk['owners'], host: string): Pick<Domain, 'id'> | undefined => {
+  let owner = owners.get(host)
+  for (let dot = host.indexOf('.'); !owner && dot >= 0; dot = host.indexOf('.', dot + 1)) owner = owners.get('*' + host.slice(dot))
+  return owner
+}
+
+const normalizeReferrer = (ref: string): string => {
   if (!ref || ref === '-' || ref.trim() === '') return 'Direct'
   try {
     const u = new URL(ref)
@@ -718,66 +761,68 @@ const rankTop = (counts: Map<string, { requests: number; bytes: number; errors5x
       ...(v.errors5xx > 0 && { errors5xx: v.errors5xx }),
     }))
 
+const unavailableWebsite = (reason: 'not-read' | 'stale' | 'window-not-covered'): never =>
+  fail('SERVICE_UNAVAILABLE', 'website analytics are unavailable for this window', { reason, stateChanged: false })
+
 /**
- * Incremental Nginx `xpanel_metrics` JSON access-log analytics engine.
- * Parses structured access log lines and builds real-time traffic, latency, cache hit ratio,
- * status breakdown, and top paths/referrers/IPs snapshots per domain or account.
+ * Per-domain website analytics from the edge's `xpanel_metrics` site access logs, fed by the bandwidth meter's incremental reads.
+ * Builds traffic, latency, cache hit ratio, status breakdown and top paths/referrers/IPs per domain. Records live in memory only,
+ * so a window is served only when every line of it was read in this process.
  */
 export class WebsiteAnalyticsEngine {
   private readonly records: StoredAccessRecord[] = []
   private readonly maxRecords: number
+  /** Per log path: the file identity and end offset already ingested, so a re-read of the same bytes is not counted twice. */
+  private readonly fed = new Map<string, { identity: string; end: number }>()
+  /** Per domain: since when every line is held, and the last read that reached the end of its site log. */
+  private readonly coverage = new Map<Id, { accountId: Id; sinceMs: number; throughMs: number | null }>()
 
   constructor(opts: { maxRecords?: number } = {}) {
     this.maxRecords = opts.maxRecords ?? 50_000
   }
 
-  ingestJsonLogLines(lines: readonly string[] | string): number {
-    const rawLines = typeof lines === 'string' ? lines.split(/\r?\n/) : lines
-    let ingested = 0
-    for (const line of rawLines) {
-      const trimmed = line.trim()
-      if (!trimmed.startsWith('{')) continue
-      try {
-        const parsed = JSON.parse(trimmed) as Partial<NginxMetricLogLine>
-        if (typeof parsed.host !== 'string' || typeof parsed.status !== 'number') continue
-        const d = parsed.ts ? new Date(parsed.ts) : new Date()
-        const tsMs = Number.isNaN(d.getTime()) ? Date.now() : d.getTime()
-        const hourDate = new Date(tsMs)
-        hourDate.setUTCMinutes(0, 0, 0)
-        const rawUri = typeof parsed.uri === 'string' ? parsed.uri : '/'
-        const cleanPath = (rawUri.split('?')[0] || '/').slice(0, 256)
-        const cacheStr = typeof parsed.cache === 'string' ? parsed.cache.toUpperCase() : ''
-        const cacheKind: 'hit' | 'miss' | 'bypass' =
-          cacheStr === 'HIT' || cacheStr === 'STALE' || cacheStr === 'REVALIDATED'
-            ? 'hit'
-            : cacheStr === 'BYPASS'
-              ? 'bypass'
-              : 'miss'
-
-        this.records.push({
-          tsMs,
-          tsHourIso: hourDate.toISOString(),
-          host: parsed.host.toLowerCase(),
-          ip: typeof parsed.ip === 'string' ? parsed.ip : '0.0.0.0',
-          uri: cleanPath,
-          status: parsed.status,
-          bytes: typeof parsed.bytes === 'number' && parsed.bytes > 0 ? parsed.bytes : 0,
-          rtMs: parseSecToMs(parsed.rt),
-          urtMs: parseSecToMs(parsed.urt),
-          cacheKind,
-          referrer: normalizeReferrer(parsed.ref),
-        })
-        ingested++
-      } catch {
-        // Ignore malformed log lines
-      }
+  /** Adds one site's newly read lines; a line counts for the domain that serves its host name. Returns the lines added. */
+  ingestSiteLog(chunk: SiteLogChunk): number {
+    const mark = this.fed.get(chunk.path), readEnd = chunk.start + chunk.bytes.length
+    // The same file read again from an earlier offset (a failed ledger write or a reset cursor) skips what was ingested; a smaller file was truncated.
+    const same = mark !== undefined && mark.identity === chunk.identity && chunk.sizeBytes >= mark.end
+    const skip = same ? Math.min(chunk.bytes.length, Math.max(0, mark.end - chunk.start)) : 0
+    this.fed.set(chunk.path, { identity: chunk.identity, end: same ? Math.max(mark.end, readEnd) : readEnd })
+    const readAtMs = Date.parse(chunk.readAt), sinceMs = Date.parse(chunk.since)
+    for (const { id } of new Set(chunk.owners.values())) {
+      const known = this.coverage.get(id)
+      const covered = known?.accountId === chunk.accountId ? known : { accountId: chunk.accountId, sinceMs, throughMs: null as number | null }
+      if (chunk.caughtUp) covered.throughMs = readAtMs
+      this.coverage.set(id, covered)
     }
-    if (this.records.length > this.maxRecords) {
-      this.records.splice(0, this.records.length - this.maxRecords)
+    let added = 0
+    for (const line of chunk.bytes.subarray(skip).toString('utf8').split('\n')) {
+      const entry = line ? parseMetricsLogLine(line) : null
+      const owner = entry ? ownerOf(chunk.owners, entry.host) : undefined
+      if (!entry || !owner) continue
+      const cache = entry.cache.toUpperCase()
+      this.records.push({
+        tsMs: Date.parse(entry.time),
+        domainId: owner.id,
+        accountId: chunk.accountId,
+        ip: entry.ip,
+        uri: (entry.uri.split('?')[0] || '/').slice(0, 256),
+        status: entry.status,
+        bytes: entry.bytes,
+        rtMs: entry.request_time * 1000,
+        urtMs: upstreamMs(entry.upstream_time),
+        cacheKind: cache === 'HIT' || cache === 'STALE' || cache === 'REVALIDATED' ? 'hit' : cache === 'BYPASS' ? 'bypass' : 'miss',
+        referrer: normalizeReferrer(entry.referer),
+      })
+      added++
     }
-    return ingested
+    const excess = this.records.length - this.maxRecords
+    // An evicted line ends its domain's complete history at that line.
+    if (excess > 0) for (const old of this.records.splice(0, excess)) { const covered = this.coverage.get(old.domainId); if (covered && covered.sinceMs <= old.tsMs) covered.sinceMs = old.tsMs + 1 }
+    return added
   }
 
+  /** The window ending at the domain's last complete read; refuses SERVICE_UNAVAILABLE when that window is not fully held or the read is stale. */
   queryDomainSnapshot(
     domain: Domain,
     opts: {
@@ -789,20 +834,15 @@ export class WebsiteAnalyticsEngine {
   ): WebsiteAnalyticsSnapshot {
     const window = opts.window ?? '24h'
     const now = opts.now ?? new Date()
-    const nowMs = now.getTime()
-    const windowMs =
-      window === '1h'
-        ? 3_600_000
-        : window === '24h'
-          ? 86_400_000
-          : window === '7d'
-            ? 7 * 86_400_000
-            : 30 * 86_400_000
-    const cutoffMs = nowMs - windowMs
-    const hostLower = domain.name.toLowerCase()
+    const covered = this.coverage.get(domain.id)
+    if (!covered || covered.accountId !== domain.accountId || covered.throughMs === null) return unavailableWebsite('not-read')
+    if (now.getTime() - covered.throughMs > WEBSITE_ANALYTICS_STALE_MS) return unavailableWebsite('stale')
+    const endMs = covered.throughMs
+    const cutoffMs = endMs - WINDOW_MS[window]
+    if (covered.sinceMs > cutoffMs) return unavailableWebsite('window-not-covered')
 
     const matching = this.records.filter(
-      (r) => r.tsMs >= cutoffMs && (r.host === hostLower || r.host === `www.${hostLower}`),
+      (r) => r.domainId === domain.id && r.accountId === domain.accountId && r.tsMs >= cutoffMs && r.tsMs <= endMs,
     )
 
     const bucketMap = new Map<
@@ -852,7 +892,8 @@ export class WebsiteAnalyticsEngine {
       else if (r.status >= 400 && r.status < 500) status4xx++
       else if (is5xx) status5xx++
 
-      let b = bucketMap.get(r.tsHourIso)
+      const hour = new Date(r.tsMs - r.tsMs % 3_600_000).toISOString()
+      let b = bucketMap.get(hour)
       if (!b) {
         b = {
           requests: 0,
@@ -868,7 +909,7 @@ export class WebsiteAnalyticsEngine {
           urtSumMs: 0,
           rts: [],
         }
-        bucketMap.set(r.tsHourIso, b)
+        bucketMap.set(hour, b)
       }
       b.requests++
       b.bytes += r.bytes
@@ -927,7 +968,7 @@ export class WebsiteAnalyticsEngine {
         }
       })
 
-    const atIso = now.toISOString()
+    const atIso = new Date(endMs).toISOString()
     const snapshot: WebsiteAnalyticsSnapshot = {
       domain: domain.name,
       accountId: domain.accountId,

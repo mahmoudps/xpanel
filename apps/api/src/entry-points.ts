@@ -111,7 +111,7 @@ export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: strin
   if (/^\/api\/accounts\/[^/]+\/certificates$/.test(pathname)) return method === 'GET' || method === 'POST'
   if (/^\/api\/accounts\/[^/]+\/certificates\/install$/.test(pathname)) return method === 'POST'
   if (/^\/api\/accounts\/[^/]+\/certificates\/[0-9a-f-]{36}$/.test(pathname)) return method === 'DELETE'
-  if (ownerFamilies.test(pathname)) return !['/api/analytics/io', '/api/analytics/websites/ingest'].includes(pathname)
+  if (ownerFamilies.test(pathname)) return pathname !== '/api/analytics/io'
   if (/^\/api\/mail(?:\/|$)/.test(pathname)) return pathname !== '/api/mail/ips' && pathname !== '/api/mail/caldav-carddav'
   return false
 }
