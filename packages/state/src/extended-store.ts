@@ -438,34 +438,6 @@ export interface ClusterNodeRecord {
   updatedAt: string
 }
 
-export interface LegacyTrafficSummary {
-  domain: string
-  generators: readonly ['awstats', 'webalizer']
-  monthly: {
-    month: string
-    uniqueVisitors: number
-    visits: number
-    pages: number
-    hits: number
-    bandwidthBytes: number
-  }[]
-  daily: {
-    date: string
-    visits: number
-    pages: number
-    hits: number
-    bandwidthBytes: number
-  }[]
-  totals: {
-    uniqueVisitors: number
-    visits: number
-    pages: number
-    hits: number
-    bandwidthBytes: number
-  }
-  updatedAt: string
-}
-
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -2215,59 +2187,4 @@ export class ExtendedFeaturesStore {
       return atomicRemove(this.extPath('cluster', 'nodes', `${safeId}.json`))
     })
   }
-
-  async getLegacyTrafficStats(domain: string): Promise<LegacyTrafficSummary> {
-    const canonical = validateDomainName(domain)
-    const stored = await readJsonIfExists<LegacyTrafficSummary>(
-      this.extPath('stats', 'legacy', `${canonical}.json`),
-    )
-    if (stored) return stored
-
-    const monthly = [
-      {
-        month: '2026-08',
-        uniqueVisitors: 1420,
-        visits: 2310,
-        pages: 8940,
-        hits: 34120,
-        bandwidthBytes: 512_480_000,
-      },
-      {
-        month: '2026-09',
-        uniqueVisitors: 1680,
-        visits: 2790,
-        pages: 10420,
-        hits: 41890,
-        bandwidthBytes: 638_976_000,
-      },
-      {
-        month: '2026-10',
-        uniqueVisitors: 1950,
-        visits: 3180,
-        pages: 12300,
-        hits: 48700,
-        bandwidthBytes: 745_120_000,
-      },
-    ]
-    const daily = [
-      { date: '2026-10-20', visits: 112, pages: 430, hits: 1680, bandwidthBytes: 24_500_000 },
-      { date: '2026-10-21', visits: 128, pages: 495, hits: 1920, bandwidthBytes: 28_100_000 },
-      { date: '2026-10-22', visits: 134, pages: 520, hits: 2040, bandwidthBytes: 30_200_000 },
-    ]
-    return {
-      domain: canonical,
-      generators: ['awstats', 'webalizer'],
-      monthly,
-      daily,
-      totals: {
-        uniqueVisitors: monthly.reduce((acc, m) => acc + m.uniqueVisitors, 0),
-        visits: monthly.reduce((acc, m) => acc + m.visits, 0),
-        pages: monthly.reduce((acc, m) => acc + m.pages, 0),
-        hits: monthly.reduce((acc, m) => acc + m.hits, 0),
-        bandwidthBytes: monthly.reduce((acc, m) => acc + m.bandwidthBytes, 0),
-      },
-      updatedAt: new Date().toISOString(),
-    }
-  }
-
 }

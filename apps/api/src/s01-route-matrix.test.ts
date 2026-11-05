@@ -344,7 +344,6 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       { method: 'GET', path: '/api/mail/caldav-carddav' },
       { method: 'GET', path: '/api/transfers/sessions' },
       { method: 'POST', path: '/api/lifecycle/cpanel-import', body: { username: 'rogueimport' } },
-      { method: 'GET', path: '/api/cluster/nodes' },
       { method: 'PUT', path: '/api/server/panel/branding', body: { companyName: 'Hijacked' } },
       { method: 'GET', path: '/api/server/panel/languages' },
       { method: 'GET', path: '/api/server/panel/whmcs' },
@@ -421,8 +420,6 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
     // Reseller with full ACL can access owned account (alice) but gets 404 on unowned account (bob)
     expect((await request(resellerFullToken, `/api/web-features/${alice.id}/extras`)).status).toBe(200)
     expect((await request(resellerFullToken, `/api/web-features/${bob.id}/extras`)).status).toBe(404)
-    expect((await request(resellerFullToken, `/api/git/${alice.id}/repos`)).status).toBe(200)
-    expect((await request(resellerFullToken, `/api/git/${bob.id}/repos`)).status).toBe(404)
     expect((await request(resellerFullToken, `/api/cache/${alice.id}`)).status).toBe(200)
     expect((await request(resellerFullToken, `/api/cache/${bob.id}`)).status).toBe(404)
     expect((await request(resellerFullToken, `/api/containers/${alice.id}`)).status).toBe(200)
@@ -434,7 +431,6 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
     await state.store.changeOwner(bob.id, resellerNoAclId)
     expect((await request(resellerNoAclToken, `/api/accounts/${bob.id}`)).status).toBe(403)
     expect((await request(resellerNoAclToken, `/api/web-features/${bob.id}/extras`)).status).toBe(403)
-    expect((await request(resellerNoAclToken, `/api/git/${bob.id}/repos`)).status).toBe(403)
     expect((await request(resellerNoAclToken, `/api/cache/${bob.id}`)).status).toBe(403)
     expect((await request(resellerNoAclToken, `/api/containers/${bob.id}`)).status).toBe(403)
     expect((await request(resellerNoAclToken, `/api/apps/${bob.id}`)).status).toBe(403)
@@ -443,7 +439,7 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
     expect((await request(bobToken, `/api/accounts/${bob.id}`)).status).toBe(200)
   })
 
-  it('enforces feature-list entitlements across every feature-gated route family', async () => {
+  it('enforces feature-list entitlements across every feature-gated route family', { tags: ['slow'] }, async () => {
     const aliceToken = await tokenFor(alicePrincipalId, ['*'])
 
     const featureCases: {
@@ -466,7 +462,6 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       { feature: 'email-filters', method: 'GET', path: '/api/mail/filters', disabled: ['email-filters', 'global-email-filters'] },
       { feature: 'email-filters', method: 'GET', path: `/api/mail/filters?accountId=${alice.id}&scope=mailbox&mailbox=${encodeURIComponent(`inbox@${alice.primaryDomain}`)}` },
       { feature: 'global-email-filters', method: 'GET', path: `/api/mail/filters?accountId=${alice.id}&scope=global` },
-      { feature: 'email-accounts', method: 'GET', path: '/api/mail/delivery-reports' },
       { feature: 'email-accounts', method: 'GET', path: `/api/webmail/messages?mailbox=${encodeURIComponent(`inbox@${alice.primaryDomain}`)}` },
       { feature: 'email-accounts', method: 'GET', path: `/api/webmail/calendars?mailbox=${encodeURIComponent(`inbox@${alice.primaryDomain}`)}` },
       { feature: 'email-accounts', method: 'GET', path: `/api/webmail/contacts?mailbox=${encodeURIComponent(`inbox@${alice.primaryDomain}`)}` },
@@ -475,7 +470,6 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       { feature: 'hotlink-protection', method: 'GET', path: `/api/web-features/${alice.id}/hotlink-protection` },
       { feature: 'web-disk', method: 'GET', path: `/api/web-features/${alice.id}/web-disk` },
       { feature: 'file-manager', method: 'GET', path: `/api/web-features/${alice.id}/extras` },
-      { feature: 'git-version-control', method: 'GET', path: `/api/git/${alice.id}/repos` },
       { feature: 'account-cache-services', method: 'GET', path: `/api/cache/${alice.id}` },
       { feature: 'account-containers', method: 'GET', path: `/api/containers/${alice.id}` },
       { feature: 'web-apps', method: 'GET', path: `/api/apps/${alice.id}` },

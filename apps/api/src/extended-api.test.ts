@@ -500,11 +500,8 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.ok(searchBody.total >= 1)
     assert.equal(searchBody.hits[0]?.subject, 'Q4 Infrastructure Renewal Proposal')
 
-    // Delivery report was automatically recorded for the sent webmail message
-    const delivRes = await root.request('/api/mail/delivery-reports?status=delivered')
-    assert.equal(delivRes.status, 200)
-    const delivBody = (await delivRes.json()) as { total: number }
-    assert.ok(delivBody.total >= 1)
+    // Delivery evidence comes only from the parsed Postfix journal (/api/server/mail-log/delivery); no invented report route remains.
+    assert.equal((await root.request('/api/mail/delivery-reports?status=delivered')).status, 404)
 
     const vacRes = await root.request('/api/webmail/vacation', {
       method: 'PUT',
@@ -703,7 +700,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.deepEqual(cpImport.details, { stateChanged: false, nativeApplied: false })
     assert.equal(await serverHandle.store.getAccountByUsername('legacyshop'), null)
 
-    // ---- Step F: Extended File Isolation & Web Extras + Git Push-to-Deploy ----
+    // ---- Step F: Extended File Isolation & Web Extras ----
     const dirPrivRes = await root.request(`/api/web-features/${account.id}/directory-privacy`, {
       method: 'PUT',
       body: {
@@ -754,27 +751,9 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     })
     assert.equal(extrasRes.status, 200)
 
-    const gitCreateRes = await root.request(`/api/git/${account.id}/repos`, {
-      method: 'POST',
-      body: {
-        name: 'storefront',
-        branch: 'main',
-        remoteUrl: 'https://github.com/nebula/storefront.git',
-      },
-    })
-    assert.equal(gitCreateRes.status, 201)
-    const repoId = ((await gitCreateRes.json()) as { repo: { id: string } }).repo.id
-
-    const gitDeployRes = await root.request(`/api/git/${account.id}/repos/${repoId}/deploy`, {
-      method: 'POST',
-      body: { commitSha: 'a1b2c3d4e5f6' },
-    })
-    assert.equal(gitDeployRes.status, 200)
-    const gitDeployBody = (await gitDeployRes.json()) as {
-      deployment: { commitSha: string; releaseDir: string; status: string }
-    }
-    assert.equal(gitDeployBody.deployment.commitSha, 'a1b2c3d4e5f6')
-    assert.equal(gitDeployBody.deployment.status, 'deployed')
+    // Git runs only through the agent-backed /api/account/git and /api/server/software/deployments; the record-only registry is gone.
+    assert.equal((await root.request(`/api/git/${account.id}/repos`, { method: 'POST', body: { name: 'storefront' } })).status, 404)
+    assert.equal((await root.request(`/api/git/${account.id}/repos/storefront/deploy`, { method: 'POST', body: { commitSha: 'a1b2c3d4e5f6' } })).status, 404)
 
     // ---- Step G: Database remote hosts, maintenance & private per-account cache ----
     // The metadata-only PostgreSQL and MongoDB routes are gone; PostgreSQL lives under /api/account/database-engines/postgresql.
@@ -799,9 +778,11 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
       method: 'POST',
       body: { engine: 'postgresql', database: 'nebula_analytics', operation: 'optimize' },
     })
-    assert.equal(maintRes.status, 200)
-    const maintBody = (await maintRes.json()) as { status: string }
-    assert.equal(maintBody.status, 'healthy')
+    // Nothing runs the maintenance statements yet, so the route refuses instead of reporting processed tables.
+    assert.equal(maintRes.status, 412)
+    const maintBody = (await maintRes.json()) as { code: string; details: unknown }
+    assert.equal(maintBody.code, 'PRECONDITION_FAILED')
+    assert.deepEqual(maintBody.details, { reason: 'database_maintenance_unavailable', stateChanged: false, nativeApplied: false })
 
     // Cache and container views project the saved runtime registry; only the owner's runtime route changes it.
     await atomicWriteJson(runtimeRegistryPath(serverHandle.store.rootDir, account.id), { apps: [], cache: { redis: { enabled: true, memoryMb: 64, binary: '/usr/bin/redis-server', updatedAt: '2026-10-29T00:00:00.000Z' }, memcached: null },
@@ -881,25 +862,9 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.equal(appListAfter.status, 200)
     assert.deepEqual(await appListAfter.json(), { apps: storedApps })
 
-    const nodeRes = await root.request('/api/cluster/nodes', {
-      method: 'POST',
-      body: {
-        name: 'eu-dns-01',
-        hostname: 'ns2.xpanel.test',
-        ipv4: '203.0.113.55',
-        role: 'dns',
-      },
-    })
-    assert.equal(nodeRes.status, 201)
-
-    const legacyStatsRes = await root.request('/api/analytics/legacy/nebula.test')
-    assert.equal(legacyStatsRes.status, 200)
-    const legacyStatsBody = (await legacyStatsRes.json()) as {
-      awstats: { uniqueVisitors: number }
-      webalizer: { dailyAvgHits: number }
-    }
-    assert.ok(legacyStatsBody.awstats.uniqueVisitors > 0)
-    assert.ok(legacyStatsBody.webalizer.dailyAvgHits > 0)
+    // No cluster membership or log-built statistics exist behind these paths, so they are not served at all.
+    assert.equal((await root.request('/api/cluster/nodes', { method: 'POST', body: { name: 'eu-dns-01', hostname: 'ns2.xpanel.test', ipv4: '203.0.113.55', role: 'dns' } })).status, 404)
+    assert.equal((await root.request('/api/analytics/legacy/nebula.test')).status, 404)
 
     // Verify audit log captured all major extended operations
     const audits = await listAudit(serverHandle.db, { limit: 200 })
@@ -913,7 +878,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.ok(actions.has('webmail.message.sent'))
     assert.ok(actions.has('dns.email_auth.batch_provisioned'))
     assert.ok(!audits.some(a => a.action === 'backup.snapshot.restore_file' && a.outcome === 'ok'))
-    assert.ok(actions.has('git.repo.deployed'))
+    assert.ok(!actions.has('git.repo.deployed') && !actions.has('database.maintenance.optimize') && !actions.has('cluster.node.added'))
     assert.ok(!actions.has('cache.updated') && !actions.has('container.created'))
     assert.ok(!actions.has('app.installed'))
     assert.ok(!actions.has('app.staging.cloned'))

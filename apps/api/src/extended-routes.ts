@@ -4,6 +4,8 @@ import { services as mailServices, system } from '@xpanel/render'
 import { join } from 'node:path'
 import {
   fail,
+  assertBool,
+  assertRelPath,
   assessMailboxMetadataAuthority,
   isXpanelError,
   suggestServerSettings,
@@ -155,19 +157,6 @@ export interface SpamSettingsState {
   allowlist: string[]
   blocklist: string[]
   updatedAt: string
-}
-
-export interface MailDeliveryReport {
-  id: Id
-  at: string
-  sender: string
-  recipient: string
-  domain: string
-  status: 'delivered' | 'deferred' | 'bounced' | 'rejected'
-  smtpCode: number
-  queueId: string
-  bytes: number
-  message: string
 }
 
 export interface CalDavCardDavConfig {
@@ -383,28 +372,6 @@ export interface WebExtrasConfig {
   updatedAt: string
 }
 
-export interface GitRepositoryRecord {
-  id: Id
-  accountId: Id
-  name: string
-  branch: string
-  remoteUrl: string
-  deployPath: string
-  postDeployCommand: string | null
-  autoDeploy: boolean
-  currentCommit: string | null
-  currentReleaseDir: string | null
-  deployments: {
-    id: Id
-    commitSha: string
-    releaseDir: string
-    currentSymlink: string
-    status: 'deployed' | 'rolled_back'
-    deployedAt: string
-  }[]
-  createdAt: string
-}
-
 export interface RemoteDatabaseHostsConfig {
   accountId: Id
   hosts: { address: string; engine: 'mariadb' | 'postgresql' | 'both'; comment: string }[]
@@ -464,18 +431,6 @@ export interface InstalledAppRecord {
   parentAppId: Id | null
   createdAt: string
   updatedAt: string
-}
-
-export interface ClusterNodeRecord {
-  id: Id
-  name: string
-  hostname: string
-  ipv4: string
-  role: 'web' | 'dns' | 'mail' | 'db' | 'all'
-  status: 'online' | 'syncing' | 'degraded'
-  wgPublicKey: string
-  region: string
-  joinedAt: string
 }
 
 // ---------------------------------------------------------------------------
@@ -1490,54 +1445,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       })
     }
 
-    if (pathname === '/api/mail/delivery-reports') {
-      const caller = await helpers.requireCaller(req)
-      const reports = await ext.readOrDefault<MailDeliveryReport[]>('mail/delivery-reports.json', [])
-      if (method === 'GET') {
-        const ownedIds = new Set((await ownedAccounts(helpers.store, caller)).map(account => account.id))
-        const ownedDomains = new Set((await helpers.store.listDomains()).filter(domain => ownedIds.has(domain.accountId)).map(domain => domain.name))
-        const statusFilter = url.searchParams.get('status')
-        const domainFilter = url.searchParams.get('domain')
-        const filtered = reports.filter(
-          (r) =>
-            (caller.principal.kind === 'root' || ownedDomains.has(r.domain)) &&
-            (!statusFilter || r.status === statusFilter) &&
-            (!domainFilter || r.domain === domainFilter),
-        )
-        return jsonResponse({ reports: filtered, total: filtered.length })
-      }
-      if (method === 'POST') {
-        await helpers.assertRoot(caller, 'mail.delivery_report.ingest')
-        const body = await readJsonBody<Partial<MailDeliveryReport>>(req)
-        const recipient = (body.recipient ?? 'user@example.com').toLowerCase()
-        const domain = body.domain ?? recipient.split('@')[1] ?? 'example.com'
-        const status = body.status ?? 'delivered'
-        const entry: MailDeliveryReport = {
-          id: randomUUID(),
-          at: new Date().toISOString(),
-          sender: (body.sender ?? 'postmaster@example.com').toLowerCase(),
-          recipient,
-          domain,
-          status,
-          smtpCode: body.smtpCode ?? (status === 'delivered' ? 250 : status === 'deferred' ? 451 : 550),
-          queueId: body.queueId ?? randomUUID().slice(0, 10).toUpperCase(),
-          bytes: body.bytes ?? 2048,
-          message: body.message ?? (status === 'delivered' ? '250 2.0.0 Ok: queued as delivered' : 'Delivery status logged'),
-        }
-        reports.unshift(entry)
-        await ext.write('mail/delivery-reports.json', reports)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'mail.delivery_report.logged',
-          target: `delivery:${entry.queueId}`,
-          detail: { status: entry.status, recipient: entry.recipient },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ report: entry }, 201)
-      }
-    }
-
     if (pathname === '/api/mail/caldav-carddav') {
       const caller = await helpers.requireCaller(req)
       await helpers.assertRoot(caller, 'mail.caldav_carddav')
@@ -1718,24 +1625,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           })
         }
         await ext.write('webmail/messages.json', messages)
-
-        // Append delivery report
-        const reports = await ext.readOrDefault<MailDeliveryReport[]>('mail/delivery-reports.json', [])
-        for (const rcpt of toList) {
-          reports.unshift({
-            id: randomUUID(),
-            at: sentMsg.sentAt,
-            sender: from,
-            recipient: rcpt.toLowerCase(),
-            domain: rcpt.split('@')[1] ?? 'example.com',
-            status: 'delivered',
-            smtpCode: 250,
-            queueId: sentMsg.id.slice(0, 8).toUpperCase(),
-            bytes: Buffer.byteLength(sentMsg.textBody + sentMsg.htmlBody, 'utf8'),
-            message: '250 2.0.0 Ok: delivered via Dovecot LMTP',
-          })
-        }
-        await ext.write('mail/delivery-reports.json', reports)
 
         await helpers.emitAudit({
           actor: caller.principal.username,
@@ -2451,7 +2340,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     }
 
     // =========================================================================
-    // 6. Extended File Isolation & Web Extras (/api/web-features/* & /api/git/*)
+    // 6. Extended File Isolation & Web Extras (/api/web-features/*)
     // =========================================================================
     const webFeatMatch = /^\/api\/web-features\/([^/]+)\/(directory-privacy|hotlink-protection|web-disk|extras)$/.exec(
       pathname,
@@ -2632,14 +2521,21 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           return jsonResponse({ config: await ext.readOrDefault(fileKey, defaultCfg) })
         }
         if (method === 'PUT') {
-          const body = await readJsonBody<Partial<WebDiskConfig>>(req)
-          const current = await ext.readOrDefault(fileKey, defaultCfg)
-          const merged = { ...current, ...body }
+          const body = await readJsonBody(req)
+          // Port, endpoint and compiled text are server-derived; only these owner choices are writable.
+          const flags = ['enabled', 'readOnly', 'requireTls', 'digestAuth'] as const
+          if (Object.keys(body).some(key => key !== 'rootPath' && !(flags as readonly string[]).includes(key))) {
+            return fail('VALIDATION', 'web disk accepts only enabled, rootPath, readOnly, requireTls and digestAuth', { stateChanged: false })
+          }
+          const merged = { ...await ext.readOrDefault(fileKey, defaultCfg), ...body } as WebDiskConfig
+          // rootPath becomes an nginx alias line: a config-safe relative path, no traversal, quotes or control characters.
+          assertRelPath(merged.rootPath, 'rootPath')
+          for (const flag of flags) assertBool(merged[flag], flag)
           const compiledConfig = [
             `# Isolated WebDAV jail for ${account.username} (UID ${account.uid})`,
             `location /webdav/${account.username}/ {`,
             `  alias ${account.home}/${merged.rootPath}/;`,
-            `  dav_methods ${merged.readOnly ? ' final' : 'PUT DELETE MKCOL COPY MOVE'};`,
+            `  dav_methods ${merged.readOnly ? 'off' : 'PUT DELETE MKCOL COPY MOVE'};`,
             `  dav_ext_methods PROPFIND OPTIONS;`,
             `  create_full_put_path on;`,
             `  dav_access user:rw group:r;`,
@@ -2721,98 +2617,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       }
     }
 
-    const gitDeployMatch = /^\/api\/git\/([^/]+)\/repos\/([^/]+)\/deploy$/.exec(pathname)
-    const gitRepoDeleteMatch = /^\/api\/git\/([^/]+)\/repos\/([^/]+)$/.exec(pathname)
-    const gitReposListMatch = /^\/api\/git\/([^/]+)\/repos$/.exec(pathname)
-    if (gitDeployMatch || gitRepoDeleteMatch || gitReposListMatch) {
-      const caller = await helpers.requireCaller(req)
-      const accountParam = (gitDeployMatch?.[1] ?? gitRepoDeleteMatch?.[1] ?? gitReposListMatch?.[1])!
-      const account = await helpers.resolveAccountParam(accountParam)
-      await helpers.assertCanAccessAccount(caller, account, 'git.repos')
-      const fileKey = `git/${account.id}/repos.json`
-      const repos = await ext.readOrDefault<GitRepositoryRecord[]>(fileKey, [])
-
-      if (gitReposListMatch && method === 'GET') {
-        return jsonResponse({ repos })
-      }
-      if (gitReposListMatch && method === 'POST') {
-        const body = await readJsonBody<Partial<GitRepositoryRecord>>(req)
-        if (!body.name) return fail('VALIDATION', 'repository name is required')
-        const repo: GitRepositoryRecord = {
-          id: randomUUID(),
-          accountId: account.id,
-          name: body.name,
-          branch: body.branch ?? 'main',
-          remoteUrl: body.remoteUrl ?? `https://github.com/${account.username}/${body.name}.git`,
-          deployPath: body.deployPath ?? `${account.home}/domains/${account.primaryDomain}/public_html`,
-          postDeployCommand: body.postDeployCommand ?? null,
-          autoDeploy: body.autoDeploy ?? true,
-          currentCommit: null,
-          currentReleaseDir: null,
-          deployments: [],
-          createdAt: new Date().toISOString(),
-        }
-        await helpers.assertCanAccessAccount(caller, account, 'git.repos')
-        repos.push(repo)
-        await ext.write(fileKey, repos)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'git.repo.created',
-          target: `account:${account.username}:git:${repo.name}`,
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ repo }, 201)
-      }
-      if (gitDeployMatch && method === 'POST') {
-        const repoId = gitDeployMatch[2]!
-        const repo = repos.find((r) => r.id === repoId || r.name === repoId)
-        if (!repo) return fail('NOT_FOUND', `git repository "${repoId}" not found`)
-        const body = await readJsonBody<{ commitSha?: string }>(req)
-        const commitSha =
-          body.commitSha ??
-          createHash('sha1')
-            .update(`${repo.id}:${Date.now()}`)
-            .digest('hex')
-            .slice(0, 12)
-        const deployedAt = new Date().toISOString()
-        const releaseDir = `${account.home}/git/${repo.name}/releases/${Date.now()}-${commitSha}`
-        const currentSymlink = `${account.home}/git/${repo.name}/current`
-        const deployment = {
-          id: randomUUID(),
-          commitSha,
-          releaseDir,
-          currentSymlink,
-          status: 'deployed' as const,
-          deployedAt,
-        }
-        await helpers.assertCanAccessAccount(caller, account, 'git.repos')
-        repo.currentCommit = commitSha
-        repo.currentReleaseDir = releaseDir
-        repo.deployments.unshift(deployment)
-        await ext.write(fileKey, repos)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'git.repo.deployed',
-          target: `account:${account.username}:git:${repo.name}`,
-          detail: { commitSha, releaseDir },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ ok: true, repo, deployment })
-      }
-      if ((gitRepoDeleteMatch || gitReposListMatch) && method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = gitRepoDeleteMatch?.[2] ?? url.searchParams.get('id') ?? body.id
-        const existing = repos.find((r) => r.id === targetId || r.name === targetId)
-        if (!existing) return fail('NOT_FOUND', `git repository "${targetId ?? ''}" not found`)
-        await helpers.assertCanAccessAccount(caller, account, 'git.repos')
-        const next = repos.filter((r) => r.id !== targetId && r.name !== targetId)
-        await ext.write(fileKey, next)
-        return jsonResponse({ ok: true })
-      }
-    }
-
     // =========================================================================
     // 7. Database remote hosts, maintenance and cache
     // =========================================================================
@@ -2880,12 +2684,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     const dbMaintMatch = /^\/api\/databases\/([^/]+)\/maintenance$/.exec(pathname)
     if (method === 'POST' && (dbMaintMatch || pathname === '/api/databases/repair')) {
       const caller = await helpers.requireCaller(req)
-      const body = await readJsonBody<{
-        accountId?: Id
-        engine?: 'mariadb' | 'postgresql'
-        database?: string
-        operation?: 'check' | 'repair' | 'optimize'
-      }>(req)
+      const body = await readJsonBody<{ accountId?: Id; database?: unknown }>(req)
       const account = await requireResolvedAccount(
         caller,
         dbMaintMatch?.[1] ?? body.accountId,
@@ -2894,37 +2693,13 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       if (dbMaintMatch?.[1] && body.accountId && body.accountId !== account.id && body.accountId !== account.username) {
         return fail('NOT_FOUND', `account "${body.accountId}" not found`)
       }
-
-      const engine = body.engine ?? 'mariadb'
-      const operation = body.operation ?? 'repair'
-      const database = body.database ?? `${account.username}_app`
-      if (database !== account.username && !database.startsWith(`${account.username}_`)) {
-        return fail('FORBIDDEN', `database "${database}" is outside account "${account.username}" namespace`)
+      const database = body.database
+      if (database !== undefined && (typeof database !== 'string' || (database !== account.username && !database.startsWith(`${account.username}_`)))) {
+        return fail('FORBIDDEN', `database is outside account "${account.username}" namespace`)
       }
-      const statements =
-        engine === 'mariadb'
-          ? [`${operation.toUpperCase()} TABLE \`${database}\`.*`]
-          : operation === 'optimize'
-            ? [`VACUUM (ANALYZE)Database "${database}"`, `REINDEX DATABASE "${database}"`]
-            : [`REINDEX DATABASE "${database}"`]
-
-      await helpers.emitAudit({
-        actor: caller.principal.username,
-        action: `database.maintenance.${operation}`,
-        target: `database:${engine}:${database}`,
-        detail: { engine, operation, statements },
-        outcome: 'ok',
-        principalId: caller.principal.id,
-      })
-      return jsonResponse({
-        ok: true,
-        accountId: account.id,
-        engine,
-        database,
-        operation,
-        statements,
-        tablesProcessed: 12,
-        status: 'healthy',
+      // No agent executor runs CHECK/REPAIR/OPTIMIZE yet; refuse rather than report a result nobody produced.
+      return fail('PRECONDITION_FAILED', 'database maintenance requires a connected host executor; nothing was run', {
+        reason: 'database_maintenance_unavailable', stateChanged: false, nativeApplied: false,
       })
     }
 
@@ -3097,93 +2872,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         await helpers.assertCanAccessAccount(caller, account, 'apps.manage')
         return applicationChangesUnavailable()
       }
-    }
-
-    const clusterNodeDeleteMatch = /^\/api\/cluster\/nodes\/([^/]+)$/.exec(pathname)
-    if (pathname === '/api/cluster/nodes' || clusterNodeDeleteMatch) {
-      const caller = await helpers.requireCaller(req)
-      await helpers.assertRoot(caller, 'cluster.nodes')
-      const nodes = await ext.readOrDefault<ClusterNodeRecord[]>('cluster/nodes.json', [])
-      if (method === 'GET') {
-        return jsonResponse({ nodes })
-      }
-      if (method === 'POST') {
-        const body = await readJsonBody<Partial<ClusterNodeRecord>>(req)
-        if (!body.name || !body.hostname || !body.ipv4) {
-          return fail('VALIDATION', 'node name, hostname, and ipv4 are required')
-        }
-        const node: ClusterNodeRecord = {
-          id: randomUUID(),
-          name: body.name,
-          hostname: validateDomainName(body.hostname),
-          ipv4: body.ipv4,
-          role: body.role ?? 'all',
-          status: body.status ?? 'online',
-          wgPublicKey: body.wgPublicKey ?? createHash('sha256').update(body.hostname).digest('base64'),
-          region: body.region ?? 'eu-central-1',
-          joinedAt: new Date().toISOString(),
-        }
-        nodes.push(node)
-        await ext.write('cluster/nodes.json', nodes)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'cluster.node.added',
-          target: `cluster-node:${node.hostname}`,
-          detail: { role: node.role, ipv4: node.ipv4 },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ node }, 201)
-      }
-      if (method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = clusterNodeDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
-        const next = nodes.filter((n) => n.id !== targetId && n.hostname !== targetId)
-        await ext.write('cluster/nodes.json', next)
-        return jsonResponse({ ok: true })
-      }
-    }
-
-    const legacyAnalyticsMatch = /^\/api\/analytics\/legacy\/([^/]+)$/.exec(pathname)
-    if (method === 'GET' && legacyAnalyticsMatch) {
-      const caller = await helpers.requireCaller(req)
-      const domain = decodeURIComponent(legacyAnalyticsMatch[1]!).toLowerCase()
-      await requireDomainAccount(helpers.store, caller, domain, 'analytics.websites')
-      return jsonResponse({
-        domain,
-        month: url.searchParams.get('month') ?? '2026-10',
-        awstats: {
-          uniqueVisitors: 4820,
-          numberOfVisits: 8910,
-          pages: 31400,
-          hits: 142800,
-          bandwidthBytes: 4_829_102_080,
-          topPages: [
-            { url: '/', views: 12400 },
-            { url: '/pricing', views: 4120 },
-            { url: '/docs', views: 3890 },
-          ],
-          topCountries: [
-            { country: 'US', hits: 52100 },
-            { country: 'DE', hits: 28400 },
-            { country: 'AE', hits: 19200 },
-          ],
-          httpStatusCodes: { '200': 134000, '301': 4200, '404': 4500, '500': 100 },
-        },
-        webalizer: {
-          dailyAvgHits: 4760,
-          dailyAvgFiles: 3920,
-          dailyAvgPages: 1046,
-          dailyAvgVisits: 297,
-          monthlyTotals: {
-            hits: 142800,
-            files: 117600,
-            pages: 31400,
-            visits: 8910,
-            kbytes: 4_715_920,
-          },
-        },
-      })
     }
 
     return null

@@ -3548,40 +3548,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/mail/delivery-reports",
-      "surface": "api",
-      "resource": "mail",
-      "requiredScope": "mail:read",
-      "resellerAcl": "list-accounts",
-      "featureEntitlement": [
-        "email-accounts"
-      ],
-      "ownershipSource": "store.domains(ownedAccounts)",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:ownedAccounts"
-    },
-    {
-      "method": "POST",
-      "path": "/api/mail/delivery-reports",
-      "surface": "api",
-      "resource": "mail",
-      "requiredScope": "mail:write",
-      "resellerAcl": null,
-      "featureEntitlement": [
-        "email-accounts"
-      ],
-      "ownershipSource": "rootOnly",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/api/src/extended-routes.ts:helpers.assertRoot"
-    },
-    {
-      "method": "GET",
       "path": "/api/mail/caldav-carddav",
       "surface": "api",
       "resource": "mail",
@@ -4658,78 +4624,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/git/:account/repos",
-      "surface": "api",
-      "resource": "git",
-      "requiredScope": "git:read",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "git-version-control"
-      ],
-      "ownershipSource": "store.accounts(:account)",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
-    },
-    {
-      "method": "POST",
-      "path": "/api/git/:account/repos",
-      "surface": "api",
-      "resource": "git",
-      "requiredScope": "git:write",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "git-version-control"
-      ],
-      "ownershipSource": "store.accounts(:account)",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
-    },
-    {
-      "method": "POST",
-      "path": "/api/git/:account/repos/:repoId/deploy",
-      "surface": "api",
-      "resource": "git",
-      "requiredScope": "git:write",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "git-version-control"
-      ],
-      "ownershipSource": "store.accounts(:account)",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/git/:account/repos/:repoId",
-      "surface": "api",
-      "resource": "git",
-      "requiredScope": "git:write",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "git-version-control"
-      ],
-      "ownershipSource": "store.accounts(:account)",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
-    },
-    {
-      "method": "GET",
       "path": "/api/cache/:account",
       "surface": "api",
       "resource": "cache",
@@ -4856,48 +4750,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/cluster/nodes",
-      "surface": "api",
-      "resource": "cluster",
-      "requiredScope": "cluster:read",
-      "resellerAcl": null,
-      "featureEntitlement": [],
-      "ownershipSource": "rootOnly",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + helpers.assertRoot"
-    },
-    {
-      "method": "POST",
-      "path": "/api/cluster/nodes",
-      "surface": "api",
-      "resource": "cluster",
-      "requiredScope": "cluster:write",
-      "resellerAcl": null,
-      "featureEntitlement": [],
-      "ownershipSource": "rootOnly",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + helpers.assertRoot"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/cluster/nodes/:id",
-      "surface": "api",
-      "resource": "cluster",
-      "requiredScope": "cluster:write",
-      "resellerAcl": null,
-      "featureEntitlement": [],
-      "ownershipSource": "rootOnly",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + helpers.assertRoot"
-    },
-    {
-      "method": "GET",
       "path": "/api/firewall",
       "surface": "api",
       "resource": "firewall",
@@ -4997,22 +4849,6 @@
         "user"
       ],
       "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
-    },
-    {
-      "method": "GET",
-      "path": "/api/analytics/legacy/:domain",
-      "surface": "api",
-      "resource": "analytics",
-      "requiredScope": "analytics:read",
-      "resellerAcl": "list-accounts",
-      "featureEntitlement": [],
-      "ownershipSource": "store.domains(:domain) -> requireDomainAccount",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:requireDomainAccount"
     },
     {
       "method": "GET",
