@@ -19,7 +19,7 @@ beforeEach(() => {
   const owner = { principal: { kind: 'user', id: id(8), username: 'alice', accountId: id(1) } }
   document.body.innerHTML = renderApprovedXpanelWorkspace({ route: '/security/ssl', locale: 'en', readOnly: false,
     account: { id: id(1), username: 'alice', status: 'active', primaryDomain: 'alice.test' }, domains: [{ id: id(2), accountId: id(1), name: 'alice.test', certificateId: id(3) }],
-    certificates: [acme], visibility: owner, catalog: [{ id: 'ssl-certificates', status: 'verified' }] } as never)!
+    certificates: [acme], visibility: owner, catalog: [{ id: 'ssl-tls-status', status: 'verified' }, { id: 'ssl-install', status: 'verified' }] } as never)!
   ;(globalThis as { xpT?: unknown }).xpT = (message: string, values?: Record<string, unknown>) => message.replace(/\{(\w+)\}/g, (_, key: string) => String(values?.[key] ?? '')).replace(/\{days, plural.*\}$/, String(values?.days) + ' days left')
 })
 afterEach(() => { vi.restoreAllMocks(); document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })

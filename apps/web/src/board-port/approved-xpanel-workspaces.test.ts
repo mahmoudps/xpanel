@@ -20,7 +20,7 @@ const domain: Domain = {
         }
     }, wildcard: false, certificateId: null, suspended: false, expiresAt: null, pathQuotaMb: 'unlimited', ipv4: account.ipv4, ipv6: null
 };
-const qualify = (id: string) => tools.map(tool => tool.id === id ? {
+const qualify = (...ids: string[]) => tools.map(tool => ids.includes(tool.id) ? {
     ...tool, status: 'verified' as const
 } : tool);
 const owner = {
@@ -287,7 +287,7 @@ describe('account workspace structures and native binding boundaries', () => {
         assert.match(html, /Saved rules are account configuration only/);
     });
 
-    it('requires the ssl-certificates capability and renders installed certificates, upload and actions without served-TLS claims', () => {
+    it('requires the ssl-tls-status and ssl-install capabilities and renders installed certificates, upload and actions without served-TLS claims', () => {
         const certificate = {
             id: 'certificate-workspace-1', accountId: account.id, names: [account.primaryDomain], source: 'acme' as const,
             challenge: 'http-01' as const, notAfter: '2027-01-01T00:00:00.000Z', autoRenew: true
@@ -297,7 +297,9 @@ describe('account workspace structures and native binding boundaries', () => {
             route: '/security/ssl', locale: 'en' as const, readOnly: false, account, domains: [assigned], visibility: owner, certificates: [certificate]
         };
         assert.doesNotMatch(renderApprovedXpanelWorkspace(base)!, /data-account-ssl/);
-        const html = renderApprovedXpanelWorkspace({ ...base, catalog: qualify('ssl-certificates') })!;
+        for (const partial of [qualify('ssl-certificates'), qualify('ssl-tls-status'), qualify('ssl-install')])
+            assert.doesNotMatch(renderApprovedXpanelWorkspace({ ...base, catalog: partial })!, /data-account-ssl/);
+        const html = renderApprovedXpanelWorkspace({ ...base, catalog: qualify('ssl-tls-status', 'ssl-install') })!;
         assert.match(html, /data-account-ssl/);
         assert.match(html, /data-certificate-form/);
         const parsed = new DOMParser().parseFromString(html, 'text/html');
@@ -315,7 +317,7 @@ describe('account workspace structures and native binding boundaries', () => {
         assert.doesNotMatch(html, /AutoSSL on/);
         assert.match(html, /2027-01-01/);
         assert.doesNotMatch(html, /certificate-workspace-1/);
-        const empty = renderApprovedXpanelWorkspace({ ...base, domains: [], certificates: [], catalog: qualify('ssl-certificates') })!;
+        const empty = renderApprovedXpanelWorkspace({ ...base, domains: [], certificates: [], catalog: qualify('ssl-tls-status', 'ssl-install') })!;
         assert.match(empty, /Add a domain before issuing a certificate/);
         const emptyDocument = new DOMParser().parseFromString(empty, 'text/html');
         assert.equal(emptyDocument.querySelectorAll('[data-certificate-form]').length, 0);

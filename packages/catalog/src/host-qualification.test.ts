@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { tools } from './data/index.ts'
+import { navigation } from './data/navigation.ts'
 import { HOST_PROBES, PHASE1_TOOL_PROBES, QUALIFIED_SCOPE, qualifyHostTools, type HostProbe, type HostQualificationReport } from './host-qualification.ts'
 import { visibleNavigation } from './navigation.ts'
 import type { VisibilityContext } from './visibility.ts'
@@ -73,7 +74,13 @@ describe('host qualification', () => {
     expect(qualified).toEqual(new Set(['list-accounts', 'modify-account', 'password-modification', 'manage-account-suspension', 'terminate-accounts', 'add-package', 'edit-package', 'delete-package', 'feature-list-crud', 'server-settings-edit', 'mysql-databases', 'mysql-users', 'ssl-tls-status', 'reseller-center',
       'panel-upgrade', 'aapanel-language-theme', 'service-ssl-certificates', 'xwhm-api-tokens', 'notification-center', 'mail-quality', 'panel-news',
       'service-config-health', 'api-shell', 'api-explorer', 'integrations-hub', 'trusted-proxies', 'backup-destinations',
-      'aapanel-panel-general', 'panel-branding', 'application-locales', 'whmcs-integration']))
+      'aapanel-panel-general', 'panel-branding', 'application-locales', 'whmcs-integration',
+      'xpanel-tools-home', 'xpanel-general-info', 'xpanel-global-search', 'cloudflare-account', 'password-security', 'two-factor-auth', 'api-tokens', 'command-line-api',
+      'account-preferences', 'change-style', 'manage-team', 'whm-global-search', 'list-suspended-accounts', 'show-reseller-accounts', 'reseller-account-limits',
+      'reseller-privileges', 'manage-reseller-ip-delegation', 'aapanel-site-list', 'list-parked-domains', 'list-subdomains', 'cloudflare-integration',
+      'aapanel-dns-provider-accounts', 'aapanel-provider-domains', 'manage-shell-access', 'root-ssh-keys', 'aapanel-recovery-cli', 'xwhm-two-factor-auth',
+      'transfer-tool-selection', 'account-transfer-progress', 'review-transfers-and-restores', 'tweak-display', 'locale-list', 'locale-edit', 'locale-xml-import',
+      'locale-xml-export', 'xwhm-api-shell']))
     expect(qualified.has('create-account')).toBe(false)
     expect(qualified.has('file-manager')).toBe(false)
     expect(qualified.has('email-accounts')).toBe(false)
@@ -179,7 +186,10 @@ describe('host qualification', () => {
   it('keeps unimplemented pages and extra tools closed even when every probe passed', () => {
     const qualified = qualifyHostTools(acceptedTools, allPassed)
     for (const id of ['server-software-update', 'distro-packages', 'package-db-rebuild', 'aapanel-third-party-plugin-import', 'xwhm-email-routing', 'mail-troubleshooter',
-      'db-root-password', 'db-ownership-map', 'aapanel-system-monitor', 'update-preferences', 'tweak-mail', 'account-repair', 'ip-blocker', 'apache-handlers', 'notification-channels', 'git-version-control', 'email-encryption', 'site-publisher']) {
+      'db-root-password', 'db-ownership-map', 'aapanel-system-monitor', 'update-preferences', 'tweak-mail', 'account-repair', 'ip-blocker', 'apache-handlers', 'notification-channels', 'git-version-control', 'email-encryption', 'site-publisher',
+      // Saved but never applied, unwired or refused on main: no host effect to prepare for.
+      'directory-privacy', 'web-disk', 'account-enhancements', 'web-template-editor', 'tweak-compression', 'reseller-nameservers', 'add-ip', 'bandwidth',
+      'web-stats-awstats', 'db-repair', 'configuration-cluster', 'git-deployments', 'spam-quarantine', 'app-installer', 'aapanel-firewall-switch']) {
       expect(qualified.find(tool => tool.id === id)?.status, id).toBe('researched')
     }
     expect(routesFor(allPassed)).not.toContain('/whm/monitoring/performance')
@@ -201,6 +211,30 @@ describe('host qualification', () => {
     expect(routesFor(withProbe('pdns', 'failed'), owner)).not.toContain('/domains/dynamic-dns')
     for (const id of ['restart-ssh', 'aapanel-boot-items', 'aapanel-supervisor', 'system-reboot', 'service-watchdog']) {
       expect(qualifyHostTools(acceptedTools, allPassed).find(tool => tool.id === id)?.status, id).not.toBe('verified')
+    }
+  })
+
+  it('declares readiness only for placed in-scope catalog tools and known probes', () => {
+    const placed = new Set(navigation.flatMap(surface => surface.sections.flatMap(section => section.pages.flatMap(page => page.tools))))
+    for (const [id, probes] of Object.entries(PHASE1_TOOL_PROBES)) {
+      const tool = tools.find(entry => entry.id === id)
+      expect(tool, id).toBeDefined()
+      expect(tool!.status, id).not.toBe('out-of-scope')
+      expect(placed.has(id), id).toBe(true)
+      expect(probes.length, id).toBeGreaterThan(0)
+      expect(new Set(probes).size, id).toBe(probes.length)
+      for (const probe of probes) expect(HOST_PROBES, `${id}: ${probe}`).toContain(probe)
+      // Only the audit log reads without the panel control plane.
+      if (id !== 'audit-log') expect(probes[0], id).toBe('control-plane')
+    }
+  })
+
+  it.each(Object.entries(PHASE1_TOOL_PROBES))('retains %s only while each declared probe passes', (id, probes) => {
+    const accepted = acceptedTools.find(tool => tool.id === id)!
+    expect(qualifyHostTools([accepted], allPassed)[0]?.status).toBe('verified')
+    for (const probe of probes) {
+      expect(qualifyHostTools([accepted], withProbe(probe, 'failed'))[0]?.status, probe).toBe('researched')
+      expect(qualifyHostTools([accepted], withProbe(probe, undefined))[0]?.status, probe).toBe('researched')
     }
   })
 
