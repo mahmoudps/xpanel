@@ -301,6 +301,9 @@ const SYSTEM_CONFIG_PREFIXES: readonly string[] = [
   '/etc/xpanel/runtime/',
   '/etc/systemd/system/',
   '/run/systemd/system/',
+  // systemd keeps transient slice control drop-ins outside the unit search path; termination removes them.
+  '/etc/systemd/system.control/',
+  '/run/systemd/system.control/',
   '/etc/sysctl.d/',
   '/etc/ssh/sshd_config.d/',
   '/etc/nftables.d/',
