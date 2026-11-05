@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash } from 'node:crypto'
 import { readlink, realpath } from 'node:fs/promises'
 import { assertOwnedFile, readTrustedFile, requireLinuxRoot, withTrustedFile } from './lifecycle-ownership.mjs'
-import { withExistingPreparedRelease, assertPreparedReleaseCurrent, preparedReleaseInfo } from './prepared-release.mjs'
+import { withExistingPreparedRelease, assertPreparedReleaseCurrent, preparedReleaseInfo, withVisiblePreparedRelease } from './prepared-release.mjs'
 
 export const COORDINATOR_PATHS = Object.freeze({
   receipt: '/var/lib/xpanel-lifecycle/coordinator.json', unit: '/etc/systemd/system/xpanel-lifecycle.service',
@@ -74,7 +74,7 @@ export async function assertCoordinatorOwnershipCurrent(capability) {
   const scope = capability && scopes.get(capability)
   check(scope && visible(scope), 'COORDINATOR_OWNERSHIP_SCOPE_REQUIRED')
   requireLinuxRoot()
-  await assertPreparedReleaseCurrent(scope.prepared)
+  await withVisiblePreparedRelease(scope.prepared, () => assertPreparedReleaseCurrent(scope.prepared))
   for (const verify of scope.pins) await verify()
   for (const entry of scope.receipt.files) await assertOwnedFile(entry)
 }
