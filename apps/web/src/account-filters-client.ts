@@ -67,6 +67,8 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
     const copy = (message: string, values?: MessageValues) => xpT(message, values)
     const blockedAncestor = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const canManage = root.dataset.filterManage === 'true', fixedMailbox = root.dataset.filterMailbox ?? ''
+    // the xMail listener admits only /api/webmail; the same filter route serves both bases
+    const filtersBase = fixedMailbox ? '/api/webmail/filters' : '/api/mail/filters'
     // a mailbox session learns its account from the first verified reply, then holds every later reply to it
     let expectedAccountId = root.dataset.filterAccount ?? ''
     const fieldLabels:Record<string,string>={from:copy(msgctxt('account-filters-client', 'From')),to:copy(msgctxt('account-filters-client', 'To')),subject:copy('Subject'),header:copy('Header'),body:copy('Body'),size:copy('Size'),contains:copy('contains'),is:copy('equals'),matches:copy('matches wildcards'),over:copy('over'),under:copy('under'),fileinto:copy('Move to folder'),redirect:copy('Redirect to address'),reject:copy('Reject with message'),keep:copy('Keep in Inbox'),discard:copy('Discard message'),'mark-read':copy('Mark as read'),stop:copy('Stop processing later rules')}
@@ -117,7 +119,7 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
       if (addAction) addAction.disabled ||= !canManage || !ready() || uncertain || (actionsRoot?.children.length ?? 0) + (stop?.checked ? 1 : 0) >= 10
       if (stop) stop.disabled ||= !canManage || !ready() || uncertain || !stop.checked && (actionsRoot?.children.length ?? 0) >= 10
     }
-    const endpoint = (chosen = selection) => '/api/mail/filters?scope=' + chosen.scope + (chosen.scope === 'mailbox' ? '&mailbox=' + encodeURIComponent(chosen.mailbox!) : '')
+    const endpoint = (chosen = selection) => filtersBase + '?scope=' + chosen.scope + (chosen.scope === 'mailbox' ? '&mailbox=' + encodeURIComponent(chosen.mailbox!) : '')
     const accountOf = (raw: unknown) => expectedAccountId || (filterObject(raw) && filterObject(raw.context) && typeof raw.context.accountId === 'string' ? raw.context.accountId : '')
     const read = async (chosen: FilterSelection, token: number) => {
       if (!request) throw new Error('session_transport_unavailable')
@@ -238,8 +240,8 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
       try { const fresh=await read(chosen,token);if(fresh.revision!==expected){state=fresh;paint();throw Object.assign(new Error('stale_filter_revision'),{status:409,details:{stateChanged:false}})}
         sent=true;const raw=await request(method,path,{...payload,expectedRevision:expected});const result=readFilterState(raw,{...chosen,accountId:expectedAccountId});acknowledged=true
         if(!filterObject(raw))throw new Error('invalid_write_acknowledgement')
-        if(method==='POST'&&path==='/api/mail/filters'){if(!filterObject(raw.filter)||typeof raw.filter.id!=='string'||fresh.filters.some(item=>item.id===(raw.filter as Record<string,unknown>).id)||result.filters.length!==fresh.filters.length+1)throw new Error('create_not_acknowledged');const created=result.filters.find(item=>item.id===(raw.filter as Record<string,unknown>).id);if(!created||!filterDraftMatches(created,payload as unknown as FilterDraft))throw new Error('created_filter_mismatch')}
-        else if(method==='PATCH'){if(!filterObject(raw.filter)||path!=='/api/mail/filters/'+encodeURIComponent(String(raw.filter.id)))throw new Error('edit_not_acknowledged')}
+        if(method==='POST'&&path===filtersBase){if(!filterObject(raw.filter)||typeof raw.filter.id!=='string'||fresh.filters.some(item=>item.id===(raw.filter as Record<string,unknown>).id)||result.filters.length!==fresh.filters.length+1)throw new Error('create_not_acknowledged');const created=result.filters.find(item=>item.id===(raw.filter as Record<string,unknown>).id);if(!created||!filterDraftMatches(created,payload as unknown as FilterDraft))throw new Error('created_filter_mismatch')}
+        else if(method==='PATCH'){if(!filterObject(raw.filter)||path!==filtersBase+'/'+encodeURIComponent(String(raw.filter.id)))throw new Error('edit_not_acknowledged')}
         else if(raw.ok!==true)throw new Error('mutation_not_acknowledged')
         if(!verify(result))throw new Error('filter_write_not_observed')
         const next=await read(chosen,token);if(next.revision!==result.revision||!verify(next))throw new Error('filter_readback_mismatch')
@@ -283,7 +285,7 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
       const field=(name:string)=>testForm.querySelector<HTMLInputElement|HTMLTextAreaElement>('[name="'+name+'"]')!.value
       if(['from','to','subject'].some(name=>filterHasForbiddenControl(field(name)))||/[\u0000\u2028\u2029]/.test(field('body'))){testStatus.textContent=copy('Remove control characters or line separators before testing.');return}
       const chosen={...selection},token=generation;busy=true;control();testStatus.textContent=copy('Testing…')
-      try{const trace=readFilterTrace(await request('POST','/api/mail/filters/test',{scope:chosen.scope,...(chosen.mailbox?{mailbox:chosen.mailbox}:{}),message:{from:field('from'),to:field('to'),subject:field('subject'),body:field('body')}}),chosen);if(token!==generation)return;paintTrace(trace);testStatus.textContent=copy('Test finished. Nothing was delivered or sent.')}
+      try{const trace=readFilterTrace(await request('POST',filtersBase+'/test',{scope:chosen.scope,...(chosen.mailbox?{mailbox:chosen.mailbox}:{}),message:{from:field('from'),to:field('to'),subject:field('subject'),body:field('body')}}),chosen);if(token!==generation)return;paintTrace(trace);testStatus.textContent=copy('Test finished. Nothing was delivered or sent.')}
       catch{if(traceList)traceList.textContent='';if(outcomeText)outcomeText.textContent='';testStatus.textContent=copy('The test could not run. Refresh the rules and check the sample message.')}
       finally{busy=false;control()}
     })
@@ -293,7 +295,7 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
     root.querySelector('[data-filter-add-action]')?.addEventListener('click',()=>{addAction();dirty=true;control()})
     root.querySelector('[data-filter-cancel]')?.addEventListener('click',()=>{if(form){form.hidden=true;dirty=false;editing=null;draftRevision=null}})
     form?.addEventListener('input',()=>{dirty=true});form?.addEventListener('change',()=>{dirty=true;control()})
-    form?.addEventListener('submit',event=>{event.preventDefault();if([...form.querySelectorAll<HTMLInputElement>('input')].some(input=>filterHasForbiddenControl(input.value))){note(copy('Remove control characters or line separators before saving. Your draft is kept.'),'failed');return}if(!form.reportValidity())return;const payload=draft();if(!payload.actions.length){note(copy('Add at least one action. Your draft is kept.'),'failed');return}const id=editing;void mutate(id?'PATCH':'POST','/api/mail/filters'+(id?'/'+encodeURIComponent(id):''),{...payload,...(!id?{scope:selection.scope,...(selection.mailbox?{mailbox:selection.mailbox}:{})}:{})},next=>id?next.filters.some(row=>row.id===id&&filterDraftMatches(row,payload)):next.filters.some(row=>filterDraftMatches(row,payload)),draftRevision??undefined)})
+    form?.addEventListener('submit',event=>{event.preventDefault();if([...form.querySelectorAll<HTMLInputElement>('input')].some(input=>filterHasForbiddenControl(input.value))){note(copy('Remove control characters or line separators before saving. Your draft is kept.'),'failed');return}if(!form.reportValidity())return;const payload=draft();if(!payload.actions.length){note(copy('Add at least one action. Your draft is kept.'),'failed');return}const id=editing;void mutate(id?'PATCH':'POST',filtersBase+(id?'/'+encodeURIComponent(id):''),{...payload,...(!id?{scope:selection.scope,...(selection.mailbox?{mailbox:selection.mailbox}:{})}:{})},next=>id?next.filters.some(row=>row.id===id&&filterDraftMatches(row,payload)):next.filters.some(row=>filterDraftMatches(row,payload)),draftRevision??undefined)})
     select?.addEventListener('change',async()=>{
       const before=filterSelectionKey(selection),wanted=select.value;if(busy){select.value=before;return}
       if(dirty){
@@ -313,11 +315,11 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
       const action=button.dataset.filterAction
       if(action==='edit'){if(!dirty)edit(row);else note(copy('Finish or cancel the current draft first.'),'failed');return}
       if(dirty){note(copy('Finish or cancel the current draft before changing saved rules.'),'failed');return}
-      if(action==='delete'){const token=generation;busy=true;control();const confirmed=askDialog?await askDialog({title:copy('Delete filter configuration'),body:typeof row.name==='string'?row.name:copy('Delete this saved configuration?'),confirm:copy('Delete configuration'),danger:true}):false;busy=false;control();if(confirmed!==true||token!==generation)return;void mutate('DELETE','/api/mail/filters/'+encodeURIComponent(row.id),{},next=>!next.filters.some(item=>item.id===row.id));return}
-      if(action==='toggle'){void mutate('PATCH','/api/mail/filters/'+encodeURIComponent(row.id),{enabled:!row.enabled},next=>next.filters.some(item=>item.id===row.id&&item.enabled===!row.enabled));return}
+      if(action==='delete'){const token=generation;busy=true;control();const confirmed=askDialog?await askDialog({title:copy('Delete filter configuration'),body:typeof row.name==='string'?row.name:copy('Delete this saved configuration?'),confirm:copy('Delete configuration'),danger:true}):false;busy=false;control();if(confirmed!==true||token!==generation)return;void mutate('DELETE',filtersBase+'/'+encodeURIComponent(row.id),{},next=>!next.filters.some(item=>item.id===row.id));return}
+      if(action==='toggle'){void mutate('PATCH',filtersBase+'/'+encodeURIComponent(row.id),{enabled:!row.enabled},next=>next.filters.some(item=>item.id===row.id&&item.enabled===!row.enabled));return}
       const index=state.filters.findIndex(item=>item.id===row.id),other=action==='up'?index-1:index+1;if(other<0||other>=state.filters.length)return
       const ids=state.filters.map(item=>item.id);[ids[index],ids[other]]=[ids[other]!,ids[index]!]
-      void mutate('POST','/api/mail/filters/reorder',{scope:selection.scope,...(selection.mailbox?{mailbox:selection.mailbox}:{}),orderedIds:ids},next=>JSON.stringify(next.filters.map(item=>item.id))===JSON.stringify(ids))
+      void mutate('POST',filtersBase+'/reorder',{scope:selection.scope,...(selection.mailbox?{mailbox:selection.mailbox}:{}),orderedIds:ids},next=>JSON.stringify(next.filters.map(item=>item.id))===JSON.stringify(ids))
     })
     control();void refresh()
   })

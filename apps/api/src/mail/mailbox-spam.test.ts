@@ -1,14 +1,16 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
+import { fail } from '@xpanel/core'
 import { handleMailboxSpamRoute, parseMailboxSpamFields } from './mailbox-spam.ts'
 import { cleanupMailboxToolsFixtures, mailboxToolsFixture, toolsAuthority, TOOLS_ACCOUNT, TOOLS_MAILBOX, TOOLS_OTHER } from './mailbox-spam-fixture.ts'
 const fields = { inherit: false, enabled: true, addHeaderScore: 8, spamBoxEnabled: true, allowlist: ['safe@example.test'], blocklist: ['bad@example.test'] }
 afterEach(cleanupMailboxToolsFixtures)
 async function harness() {
   const f = await mailboxToolsFixture()
-  const send = async (method = 'GET', body?: unknown, query = '') => handleMailboxSpamRoute(new Request('http://local/api/webmail/spam-preferences' + query, { method, ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) }), new URL('http://local/api/webmail/spam-preferences' + query), method, f.ports)
+  const routing = { commit: vi.fn(async () => 41), apply: vi.fn(async (): Promise<{ nativeApplied: boolean }> => ({ nativeApplied: true })) }
+  const send = async (method = 'GET', body?: unknown, query = '') => handleMailboxSpamRoute(new Request('http://local/api/webmail/spam-preferences' + query, { method, ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) }), new URL('http://local/api/webmail/spam-preferences' + query), method, { ...f.ports, routing })
   const view = async () => (await (await send())!.json()) as Record<string, any>
-  return { ...f, send, view }
+  return { ...f, routing, send, view }
 }
 describe('sealed mailbox spam preferences', () => {
   it('inherits actual account spam settings without exposing account sender lists or claiming activation', async () => {
@@ -48,6 +50,24 @@ describe('sealed mailbox spam preferences', () => {
   it('rejects a recreated or suspended current mailbox before reading saved data', async () => {
     const h = await harness(); h.recreate(); await expect(h.view()).rejects.toMatchObject({ code: 'FORBIDDEN' })
     const other = await harness(); other.suspend(); await expect(other.view()).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+  it('reconciles each real change once and never a stale or unchanged save', async () => {
+    const h = await harness(), before = await h.view(), file = h.path('webmail', 'spam-preferences', encodeURIComponent(TOOLS_MAILBOX) + '.json')
+    const reply: any = await (await h.send('PUT', { ...fields, expectedRevision: before.revision }))!.json()
+    expect(reply).toMatchObject({ stateChanged: true, nativeApplied: true })
+    expect(h.routing.commit).toHaveBeenCalledTimes(1)
+    expect(h.routing.apply.mock.calls.map(call => (call as unknown[]).slice(1))).toEqual([[41, { path: file, previous: null }]])
+    expect(h.audit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ detail: expect.objectContaining({ revision: 41, nativeApplied: true }) }))
+    const unchanged: any = await (await h.send('PUT', { ...fields, expectedRevision: reply.revision }))!.json()
+    expect(unchanged.stateChanged).toBe(false); expect(unchanged).not.toHaveProperty('nativeApplied')
+    await expect(h.send('PUT', { ...fields, inherit: true, expectedRevision: before.revision })).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(h.routing.apply).toHaveBeenCalledTimes(1)
+  })
+  it('reports a refused host configuration test without recording a saved change', async () => {
+    const h = await harness(), before = await h.view()
+    h.routing.apply.mockImplementationOnce(async () => fail('CONFIG_TEST_FAILED', 'the mail configuration test failed; the change was not applied and the previous configuration was restored', { stateChanged: false, rolledBack: true }))
+    await expect(h.send('PUT', { ...fields, expectedRevision: before.revision })).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED', detail: { rolledBack: true } })
+    expect(h.audit).not.toHaveBeenCalled()
   })
   it('marks an audit failure after a verified save as uncertain and leaves inspectable saved state', async () => {
     const h = await harness(), before = await h.view(); h.audit.mockRejectedValueOnce(new Error('audit unavailable'))

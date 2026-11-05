@@ -235,7 +235,8 @@ export function createFilterRoutes(ports: FilterRoutePorts) {
         redirects: projected.flatMap(step => step.actions.filter(action => action.type === 'redirect').map(action => ('target' in action ? action.target ?? null : null))) } }
   }
   return async (req: Request, url: URL, method: string): Promise<Response | null> => {
-    const base = '/api/mail/filters'
+    // xMail reaches the same route through its webmail base; the listener confines each base
+    const base = url.pathname.startsWith('/api/webmail/') ? '/api/webmail/filters' : '/api/mail/filters'
     if (url.pathname !== base && !url.pathname.startsWith(base + '/')) return null
     const suffix = url.pathname === base ? null : url.pathname.slice(base.length + 1)
     if (suffix?.includes('/') || !['GET', 'POST', 'PATCH', 'DELETE'].includes(method)) return null

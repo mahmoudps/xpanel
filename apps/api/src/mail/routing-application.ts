@@ -83,6 +83,9 @@ export const readMailRoutingStatus = async (store: StateStore, db: Db, failedApp
 /** Mail routing writes advance the state revision so the agent renders them, bound to that revision. */
 export const commitRoutingRevision = async (lease: WriterLease): Promise<number> => (await lease.commitAuthority({ incrementRevision: true })).revision
 
+/** The host agent applied the saved configuration or found it already running; per-record delivery is observed separately. */
+export const reconcileApplied = (reconcile: { body: Record<string, unknown> } | null): boolean => reconcile?.body.status === 'applied' || reconcile?.body.status === 'noop'
+
 export interface MailRoutingApplyPorts {
   store: StateStore
   db: Db
@@ -96,11 +99,11 @@ export interface MailRoutingApplyPorts {
  * configuration test restores the previous saved file (absolute path; null removes it), so
  * the server keeps its last working mail configuration, and refuses the change.
  */
-export const applyMailRoutingChange = async (ports: MailRoutingApplyPorts, revision: number, restore: { path: string; previous: unknown }): Promise<MailRoutingStatusView & { revision: number }> => {
+export const applyMailRoutingChange = async (ports: MailRoutingApplyPorts, revision: number, restore: { path: string; previous: unknown }): Promise<MailRoutingStatusView & { revision: number; nativeApplied: boolean }> => {
   let reconcile: { body: Record<string, unknown> } | null = null
   try { reconcile = await ports.reconcile() }
-  catch { return { ...await readMailRoutingStatus(ports.store, ports.db), revision } }
-  if (reconcile?.body.status !== 'failed') return { ...await readMailRoutingStatus(ports.store, ports.db), revision }
+  catch { return { ...await readMailRoutingStatus(ports.store, ports.db), revision, nativeApplied: false } }
+  if (reconcile?.body.status !== 'failed') return { ...await readMailRoutingStatus(ports.store, ports.db), revision, nativeApplied: reconcileApplied(reconcile) }
   const reason = String(reconcile.body.error ?? reconcile.body.failedTest ?? 'mail configuration test failed').slice(0, 500)
   try {
     const lease = await ports.store.getWriterLock().acquire()

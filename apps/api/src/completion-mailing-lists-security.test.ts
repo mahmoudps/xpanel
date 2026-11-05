@@ -109,6 +109,8 @@ describe('account mailing lists HTTP security acceptance', () => {
     const response = await f.request('POST', { name: ' Announce ', domain: 'MLISTA.example.test', members: [' One@Example.Test ', 'two@example.test'], moderation: 'moderated', archiveEnabled: false })
     expect(response.status).toBe(201)
     const body = await response.json() as { mailingList: MailingList }
+    // no host agent in this fixture: the list is saved and truthfully not applied
+    expect(body).toMatchObject({ revision: expect.any(Number), nativeApplied: false })
     expect(body.mailingList).toMatchObject({ accountId: f.owner.id, name: 'Announce', domain: 'mlista.example.test', address: 'announce@mlista.example.test', members: ['one@example.test', 'two@example.test'], moderation: 'moderated', archiveEnabled: false })
     expect(await f.persisted()).toEqual([body.mailingList])
     expect((await f.auditRows('mail.mailing_list.created')).length).toBe(1)
@@ -154,7 +156,7 @@ describe('account mailing lists HTTP security acceptance', () => {
     await f.seed([seeded])
     const response = await f.request('DELETE', undefined, f.credential, '/api/mail/mailing-lists/' + seeded.id)
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ ok: true })
+    expect(await response.json()).toEqual({ ok: true, revision: expect.any(Number), nativeApplied: false })
     expect(await f.persisted()).toEqual([])
     expect((await f.auditRows('mail.mailing_list.deleted')).length).toBe(1)
   })

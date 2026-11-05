@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { assessMailboxMetadataAuthority, fail, isXpanelError } from '@xpanel/core'
 import type { MailboxMetadataAuthority } from '@xpanel/core'
 import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
+import type { WriterLease } from '@xpanel/state'
 import type { SpamSettingsState } from '../extended-routes.ts'
 import { mailboxJson, methodNotAllowed } from './folder-admin.ts'
 import { assertMailboxMetadataAuthority } from './metadata-authority.ts'
@@ -19,6 +20,12 @@ export interface MailboxSpamView {
   review: 'mailbox_metadata_binding_unverified' | null
   capabilities: { canSave: boolean; mta: 'unverified'; sieve: 'unverified'; boxTrapper: false }
   application: { status: 'saved_only'; applied: false }
+}
+/** The mailbox Sieve policy is rendered by the host reconcile, like the other mail routing writes. */
+export interface MailboxSpamRouting {
+  commit: (lease: WriterLease) => Promise<number>
+  /** a failed configuration test restores `restore.previous` and throws */
+  apply: (request: Request, revision: number, restore: { path: string; previous: unknown }) => Promise<{ nativeApplied: boolean }>
 }
 const FIELDS = ['inherit', 'enabled', 'addHeaderScore', 'spamBoxEnabled', 'allowlist', 'blocklist'] as const
 const application = { status: 'saved_only' as const, applied: false as const }
@@ -58,8 +65,8 @@ async function readMailboxSpam(ports: MailboxToolsPorts, selected: BoundMailboxT
   const revision = createHash('sha256').update(JSON.stringify({ namespace: 'mailbox-spam:v1', authority, inherited, preferences, review: stored !== null && !matched })).digest('hex')
   return { stored, view: { context: { mailbox: authority.mailbox }, revision, inherited, preferences, effective, review: stored !== null && !matched ? 'mailbox_metadata_binding_unverified' : null, capabilities: { canSave: stored === null || matched, mta: 'unverified', sieve: 'unverified', boxTrapper: false }, application } }
 }
-/** Mailbox overrides share the existing account policy; MTA/Sieve activation is deliberately unclaimed. */
-export async function handleMailboxSpamRoute(request: Request, url: URL, method: string, ports: MailboxToolsPorts): Promise<Response | null> {
+/** Mailbox overrides share the existing account policy; a save is reconciled on the host, while MTA/Sieve delivery stays unclaimed here. */
+export async function handleMailboxSpamRoute(request: Request, url: URL, method: string, ports: MailboxToolsPorts & { routing: MailboxSpamRouting }): Promise<Response | null> {
   if (url.pathname !== '/api/webmail/spam-preferences') return null
   if (!['GET', 'PUT'].includes(method)) return methodNotAllowed(['GET', 'PUT'])
   if (url.search) return fail('VALIDATION', 'spam preferences accept no selectors', MAILBOX_TOOL_UNCHANGED)
@@ -67,7 +74,7 @@ export async function handleMailboxSpamRoute(request: Request, url: URL, method:
   const fields = body ? parseMailboxSpamFields(body) : null
   if (body && !mailboxToolRevision(body.expectedRevision)) return fail('VALIDATION', 'expectedRevision must be the captured revision', MAILBOX_TOOL_UNCHANGED)
   const selected = await openMailboxTool(request, ports), lease = await ports.store.getWriterLock().acquire()
-  let attempted = false, result: MailboxSpamView, changed = false
+  let attempted = false, result: MailboxSpamView, changed = false, revision = 0, previous: unknown = null
   try {
     await freshMailboxTool(request, ports, selected)
     const before = await readMailboxSpam(ports, selected)
@@ -81,12 +88,14 @@ export async function handleMailboxSpamRoute(request: Request, url: URL, method:
     await atomicWriteJson(ownPath(ports, selected), record, 0o640, () => lease.assertFencingToken())
     const after = await readMailboxSpam(ports, selected)
     if (JSON.stringify(after.view.preferences) !== JSON.stringify({ ...fields!, updatedAt: record.updatedAt }) || after.view.review !== null) throw new Error('spam_readback_mismatch')
-    await freshMailboxTool(request, ports, selected); result = after.view; changed = true
+    await freshMailboxTool(request, ports, selected); result = after.view; changed = true; previous = before.stored
+    revision = await ports.routing.commit(lease)
   } catch (error) {
     if (attempted) return fail('SERVICE_UNAVAILABLE', 'spam preference outcome requires inspection', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
     if (isXpanelError(error)) throw error
     return review()
   } finally { await lease.release() }
-  try { await ports.audit(request, { action: 'webmail.spam_preferences.updated', mailbox: selected.authority.mailbox, detail: { inherit: fields!.inherit, allowCount: fields!.allowlist.length, blockCount: fields!.blocklist.length, applied: false } }) } catch { return fail('SERVICE_UNAVAILABLE', 'saved spam preferences require audit review', { stateChanged: true, unknownOutcome: true, verificationRequired: true }) }
-  return mailboxJson({ ...result!, stateChanged: changed })
+  const { nativeApplied } = await ports.routing.apply(request, revision, { path: ownPath(ports, selected), previous })
+  try { await ports.audit(request, { action: 'webmail.spam_preferences.updated', mailbox: selected.authority.mailbox, detail: { inherit: fields!.inherit, allowCount: fields!.allowlist.length, blockCount: fields!.blocklist.length, revision, nativeApplied } }) } catch { return fail('SERVICE_UNAVAILABLE', 'saved spam preferences require audit review', { stateChanged: true, unknownOutcome: true, verificationRequired: true }) }
+  return mailboxJson({ ...result!, stateChanged: changed, nativeApplied })
 }

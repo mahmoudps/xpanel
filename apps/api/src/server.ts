@@ -2810,7 +2810,13 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (pathname === '/api/webmail/spam-preferences' || pathname === '/api/webmail/mailing-lists' || pathname.startsWith('/api/webmail/mailing-lists/')) {
         const ids = pathname === '/api/webmail/spam-preferences' ? ['webmail-spam-box', 'webmail-spam-autodelete'] : ['webmail-mailing-lists']
         const ports = { store: deps.store, open: async (request: Request) => (await authorizeNativeMailboxRequest(request, ids)).opened, audit: sealedImapPorts(ids[0]!).audit }
-        const response = pathname === '/api/webmail/spam-preferences' ? await handleMailboxSpamRoute(req, url, method, ports) : await handleMailboxMailingListsRoute(req, url, method, ports)
+        const routing = { commit: commitRoutingRevision, apply: async (request: Request, revision: number, restore: { path: string; previous: unknown }) => {
+          const { caller } = await authorizeNativeMailboxRequest(request, ids)
+          return applyMailRoutingChange({ store: deps.store, db: deps.db, reconcile: () => triggerReconcile(caller),
+            audit: reason => emitAudit({ actor: caller.principal.username, action: 'mail.routing.rolled_back', target: 'mail-routing:webmail/spam-preferences',
+              detail: { reason }, outcome: 'failed', principalId: caller.principal.id }) }, revision, restore)
+        } }
+        const response = pathname === '/api/webmail/spam-preferences' ? await handleMailboxSpamRoute(req, url, method, { ...ports, routing }) : await handleMailboxMailingListsRoute(req, url, method, ports)
         if (response) return response
       }
       if (pathname === '/api/webmail/preferences') {

@@ -51,7 +51,7 @@ afterEach(async () => {
 
 it('binds the actual V2 sealed-mailbox workspace without an account-wide scope selector', async () => {
   const { request } = mount('v2-mail'); await idle()
-  expect(request.mock.calls[0]).toEqual(['GET', '/api/mail/filters?scope=mailbox&mailbox=info%40alice.example.test'])
+  expect(request.mock.calls[0]).toEqual(['GET', '/api/webmail/filters?scope=mailbox&mailbox=info%40alice.example.test'])
   expect(document.querySelector('[data-filter-scope]')).toBeNull()
   q<HTMLButtonElement>('[data-filter-action="edit"]').click()
   expect(q<HTMLSelectElement>('[data-condition-field="field"]').value).toBe('subject')

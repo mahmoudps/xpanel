@@ -25897,8 +25897,8 @@ msgid "Preferences have not been read. No saved values are assumed."
 msgstr "لم تُقرأ التفضيلات. لا تُفترض أي قيم محفوظة."
 
 #: apps/web/src/mail-spam-client.ts
-msgid "Preferences read. Saved changes are not applied to delivery."
-msgstr "قُرئت التفضيلات. لا تُطبَّق التغييرات المحفوظة على التسليم."
+msgid "Preferences read. Delivery effects are not verified here."
+msgstr "قُرئت التفضيلات. لا يُتحقَّق هنا من أثرها على التسليم."
 
 #: apps/web/src/mail-mailbox-preferences-client.ts
 msgid "Preferences saved and read back."
@@ -25911,6 +25911,10 @@ msgstr "حُفظت التفضيلات وقُرئت مجددًا. طبّقها ا
 #: apps/web/src/mail-spam-client.ts
 msgid "Preferences saved and read back. Mail delivery changes remain unverified."
 msgstr "حُفظت التفضيلات وقُرئت للتحقق. تظل تغييرات تسليم البريد غير متحقق منها."
+
+#: apps/web/src/mail-spam-client.ts
+msgid "Preferences saved, read back and applied by the server. Delivery is not verified here."
+msgstr "حُفظت التفضيلات وقُرئت للتحقق وطبّقها الخادم. لا يُتحقَّق هنا من التسليم."
 
 #: apps/web/src/board-port/whm-server-observation-workspace.ts
 msgid "Prefix"

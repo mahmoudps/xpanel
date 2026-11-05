@@ -46,8 +46,9 @@ import type { TransferWorkspacePorts } from './transfer-workspace.ts'
 import { createTransferSourceDiscovery } from './acct-transfer-discovery.ts'
 import { readTransferCredentialToken } from './acct-transfer-credentials.ts'
 import { canonicalForwarderAddress, validateForwarderInput, type ForwarderAction } from './mail/forwarder-validation.ts'
-import { applyMailRoutingChange, commitRoutingRevision, readMailRoutingStatus, type MailRoutingRecordState, type MailRoutingStatusView } from './mail/routing-application.ts'
+import { applyMailRoutingChange, commitRoutingRevision, readMailRoutingStatus, reconcileApplied, type MailRoutingRecordState, type MailRoutingStatusView } from './mail/routing-application.ts'
 import { createFilterRoutes } from './mail/filter-routes.ts'
+import { assertDnsZoneRevision, dnsZoneRevision } from './dns-workspace.ts'
 import { createAutoresponderRoutes } from './mail/autoresponder-routes.ts'
 import { contactWorkspaceRevision, projectContactWorkspace, parseContactWorkspaceRequest,
   createWorkspaceContact, updateWorkspaceContact, normalizeContactGroups, updateWorkspaceContactGroups } from './mail/contact-workspace.ts'
@@ -1104,7 +1105,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       let attempted = false
       try {
       if (lease) caller = await freshExtendedMailCaller(req, caller)
-      const list = await ext.readOrDefault<MailingListRecord[]>('mail/mailing-lists.json', [])
+      const previous = await ext.readOrDefault<MailingListRecord[] | null>('mail/mailing-lists.json', null)
+      const list = [...previous ?? []]
       if (method === 'GET') {
         const visible = (await scopedRecords(caller, list)).map(publicMailingList)
         await freshExtendedMailCaller(req, caller)
@@ -1172,16 +1174,18 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         await atomicWriteJson(join(ext.baseDir, 'mail', 'mailing-lists.json'), list, 0o640, () => lease!.assertFencingToken())
         if (JSON.stringify(await ext.readOrDefault<MailingListRecord[]>('mail/mailing-lists.json', [])) !== JSON.stringify(list)) throw new Error('mailing list create readback mismatch')
         caller = await freshExtendedMailCaller(req, caller)
+        const revision = await commitRoutingRevision(lease!)
         await lease!.release(); lease = null
+        const { nativeApplied } = await applyMailRouting(caller, revision, { relPath: 'mail/mailing-lists.json', previous })
         await helpers.emitAudit({
           actor: caller.principal.username,
           action: 'mail.mailing_list.created',
           target: `mailing-list:${record.address}`,
-          detail: { membersCount: record.members.length },
+          detail: { membersCount: record.members.length, revision, nativeApplied },
           outcome: 'ok',
           principalId: caller.principal.id,
         }, { accountId: account.id, resellerId: account.ownerId })
-        return jsonResponse({ mailingList: publicMailingList(record) }, 201)
+        return jsonResponse({ mailingList: publicMailingList(record), revision, nativeApplied }, 201)
       }
       if (method === 'DELETE') {
         const body = await readJsonBody<{ id?: string }>(req)
@@ -1199,18 +1203,22 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         await atomicWriteJson(join(ext.baseDir, 'mail', 'mailing-lists.json'), next, 0o640, () => lease!.assertFencingToken())
         if (JSON.stringify(await ext.readOrDefault<MailingListRecord[]>('mail/mailing-lists.json', [])) !== JSON.stringify(next)) throw new Error('mailing list delete readback mismatch')
         caller = await freshExtendedMailCaller(req, caller)
+        const revision = await commitRoutingRevision(lease!)
         await lease!.release(); lease = null
+        const { nativeApplied } = await applyMailRouting(caller, revision, { relPath: 'mail/mailing-lists.json', previous })
         await helpers.emitAudit({
           actor: caller.principal.username,
           action: 'mail.mailing_list.deleted',
           target: `mailing-list:${String(targetId)}`,
+          detail: { revision, nativeApplied },
           outcome: 'ok',
           principalId: caller.principal.id,
         })
-        return jsonResponse({ ok: true })
+        return jsonResponse({ ok: true, revision, nativeApplied })
       }
       } catch (error) {
-        if (attempted) return fail('SERVICE_UNAVAILABLE', 'mailing list administration outcome requires inspection', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
+        // a refused configuration test restored the previous lists: report that refusal as is
+        if (attempted && !(isXpanelError(error) && error.code === 'CONFIG_TEST_FAILED')) return fail('SERVICE_UNAVAILABLE', 'mailing list administration outcome requires inspection', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
         throw error
       } finally { await lease?.release() }
     }
@@ -1429,14 +1437,18 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
 
       // one apply for the whole import; a failed test is reported, the imported rows stay saved for review
       let application: { state: string; reason: string | null; revision: number } | undefined
-      if (importRevision !== null) {
+      let nativeApplied = false
+      if (importRevision !== null || importedMailboxes.length > 0) {
         let failedApply: string | null = null
         try {
           const reconcile = await helpers.triggerReconcile(caller)
           if (reconcile?.body.status === 'failed') failedApply = String(reconcile.body.error ?? 'mail configuration test failed').slice(0, 500)
+          nativeApplied = reconcileApplied(reconcile)
         } catch { /* the status read below reports the host state */ }
-        const status = await readMailRoutingStatus(helpers.store, helpers.db, failedApply)
-        application = { ...status.record('forwarder', '', { domain: importedForwarders[0]!.sourceAddress.split('@')[1]! }), revision: importRevision }
+        if (importRevision !== null) {
+          const status = await readMailRoutingStatus(helpers.store, helpers.db, failedApply)
+          application = { ...status.record('forwarder', '', { domain: importedForwarders[0]!.sourceAddress.split('@')[1]! }), revision: importRevision }
+        }
       }
       await helpers.emitAudit({
         actor: caller.principal.username,
@@ -1446,6 +1458,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           mailboxesCount: importedMailboxes.length,
           forwardersCount: importedForwarders.length,
           ...(application ? { application } : {}),
+          nativeApplied,
           errorsCount: errors.length,
         },
         outcome: 'ok',
@@ -1456,6 +1469,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         importedMailboxes,
         importedForwarders,
         ...(application ? { application } : {}),
+        nativeApplied,
         errors,
         summary: {
           mailboxesImported: importedMailboxes.length,
@@ -2156,27 +2170,47 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         if (dmarcRecords.length === 0) nextRecords.push({ id: randomUUID(), zone: domName, name: '_dmarc', type: 'TXT', ttl: 14400, content: dmarc, priority: null })
         prepared.push({ domName, existingZone, domObj, nextRecords, spf, dkim, dmarc })
       }
+      const recordSet = (list: readonly DnsRecord[]): string => JSON.stringify(list.map(r => JSON.stringify([r.name, r.type, r.ttl, r.content, r.priority])).sort())
+      const conflicts: string[] = []
+      let changed = 0
       // Validate every requested signing key before changing any desired zone.
       for (const { domName, existingZone, domObj, nextRecords, spf, dkim, dmarc } of prepared) {
-        await helpers.store.saveDnsZone({
-          id: existingZone?.id ?? randomUUID(),
-          accountId: existingZone?.accountId ?? domObj?.accountId ?? null,
-          name: domName,
-          serial: existingZone ? existingZone.serial + 1 : 2026102201,
-          records: nextRecords,
-        })
+        // The serial moves only with real content; a zone changed since it was read above is refused, never overwritten.
+        if (!existingZone || recordSet(existingZone.records) !== recordSet(nextRecords)) {
+          try {
+            await helpers.store.saveDnsZone({
+              id: existingZone?.id ?? randomUUID(),
+              accountId: existingZone?.accountId ?? domObj?.accountId ?? null,
+              name: domName,
+              serial: mailServices.bumpSerial(existingZone?.serial ?? 0, new Date()),
+              records: nextRecords,
+            }, { dnsGuard: async latest => {
+              assertDnsZoneRevision(latest, dnsZoneRevision(existingZone))
+              await requireDomainAccount(helpers.store, await helpers.requireCaller(req), domName, 'dns.email_auth.batch')
+            } })
+          } catch (error) {
+            if (isXpanelError(error) && error.code === 'CONFLICT') { conflicts.push(domName); continue }
+            throw error
+          }
+          changed++
+        }
         provisioned.push({ domain: domName, spf, dkim, dmarc })
+      }
+      let nativeApplied = false
+      if (changed) {
+        try { nativeApplied = reconcileApplied(await helpers.triggerReconcile(caller)) } catch { /* reported as not applied */ }
       }
 
       await helpers.emitAudit({
         actor: caller.principal.username,
         action: 'dns.email_auth.batch_provisioned',
         target: 'dns:email-auth',
-        detail: { count: provisioned.length },
+        detail: { count: provisioned.length, changed, conflicts, nativeApplied },
         outcome: 'ok',
         principalId: caller.principal.id,
       })
-      return jsonResponse({ ok: true, provisioned, count: provisioned.length })
+      if (conflicts.length) return fail('CONFLICT', 'DNS zone changed; reload and review before retrying', { stateChanged: changed > 0, conflicts, provisioned: provisioned.map(item => item.domain), nativeApplied })
+      return jsonResponse({ ok: true, provisioned, count: provisioned.length, nativeApplied })
     }
 
     if (method === 'POST' && pathname === '/api/dns/cleanup') {

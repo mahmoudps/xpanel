@@ -377,6 +377,25 @@ describe('interactive entry point isolation on real HTTP and WebSocket listeners
     assert.equal(rendered, 1)
   })
 
+  it('serves the mailbox own filters on the xMail listener through the webmail base only', async () => {
+    const mail = await f.login('xmail')
+    const request = (profile: EntryPoint, path: string, method = 'GET', body?: unknown, session = mail) => f.request(profile, path, { method, cookie: session.cookie, csrf: session.data.csrfToken, ...(body !== undefined ? { body } : {}) })
+    const scope = { scope: 'mailbox', mailbox: f.mailbox.login }
+    const listed = await request('xmail', `/api/webmail/filters?scope=mailbox&mailbox=${encodeURIComponent(f.mailbox.login)}`)
+    assert.equal(listed.status, 200)
+    const view = await listed.json() as { context: { mailbox: string }; filters: unknown[]; revision: string }
+    assert.equal(view.context.mailbox, f.mailbox.login)
+    assert.deepEqual(view.filters, [])
+    const created = await request('xmail', '/api/webmail/filters', 'POST', { ...scope, name: 'Mailbox rule', conditions: [], actions: [{ type: 'keep' }], expectedRevision: view.revision })
+    assert.equal(created.status, 201)
+    const saved = await new ExtendedFeaturesStore(f.state.rootDir).readOrDefault<Array<{ name: string; scope: string; mailbox: string }>>('mail/filters.json', [])
+    assert.deepEqual(saved.map(rule => [rule.name, rule.scope, rule.mailbox]), [['Mailbox rule', 'mailbox', f.mailbox.login]])
+    assert.equal((await request('xmail', '/api/webmail/filters', 'POST', { scope: 'global', name: 'Account rule', conditions: [], actions: [{ type: 'keep' }] })).status, 403)
+    assert.equal((await request('xmail', '/api/mail/filters')).status, 404)
+    const panel = await f.login('xpanel')
+    assert.equal((await request('xpanel', '/api/webmail/filters', 'GET', undefined, panel)).status, 404)
+  })
+
   it('confines xPanel account-wide mail filters to the owning account without denied mutations', async () => {
     const other = await f.state.store.createAccount({ ...f.account, username: 'bob', primaryDomain: 'bob.example.test', contactEmail: 'bob@example.test', passwordHash: HASH,
       php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 500, processIdleTimeoutSec: 10 }, ini: {} } })

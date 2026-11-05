@@ -436,9 +436,10 @@ describe('mounted sealed mailbox tools', () => {
     expect(JSON.stringify(initial)).not.toContain('private-account-list@example.test')
     const response = await f.sealed.request('/api/webmail/spam-preferences', 'PUT', { ...spamFields, expectedRevision: initial.revision })
     expect(response.status).toBe(200)
-    expect(await response.json()).toMatchObject({ context: { mailbox: f.own.login }, preferences: spamFields, capabilities: { mta: 'unverified', sieve: 'unverified', boxTrapper: false }, application: { status: 'saved_only', applied: false } })
+    expect(await response.json()).toMatchObject({ context: { mailbox: f.own.login }, preferences: spamFields, capabilities: { mta: 'unverified', sieve: 'unverified', boxTrapper: false }, application: { status: 'saved_only', applied: false }, stateChanged: true, nativeApplied: false })
     expect((await f.sealed.request('/api/webmail/spam-preferences', 'PUT', { ...spamFields, expectedRevision: initial.revision })).status).toBe(409)
-    expect(await readFile(accountPath, 'utf8')).toBe(before); expect(f.hostCalls).toHaveLength(0)
+    // the save asks the host to reconcile once; this fixture's agent cannot apply, so nothing is claimed
+    expect(await readFile(accountPath, 'utf8')).toBe(before); expect(f.hostCalls.map(call => new URL(call.url).pathname)).toEqual(['/state/apply'])
   })
 
   it('rejects mailbox selectors and hosting-owner impersonation without metadata writes', async () => {

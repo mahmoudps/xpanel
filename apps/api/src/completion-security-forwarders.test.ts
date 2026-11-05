@@ -177,6 +177,18 @@ describe('forwarder configuration security acceptance with synthetic state', () 
     expect(await records()).toEqual([])
   })
 
+  it('refuses a mailbox-only CSV import without the email accounts feature and reports a saved import as not applied', async () => {
+    const csv = `inbox@${f.owner.primaryDomain},SyntheticMailboxPassword!2026,100`
+    await f.state.store.updateFeatureList(f.features.id, { disabled: ['email-accounts'] })
+    const before = (await f.state.store.readSnapshot()).serviceUsers
+    expect((await f.request(credential, '/api/mail/import-csv', 'POST', { kind: 'mailboxes', accountId: f.owner.id, csv })).status).toBe(403)
+    expect((await f.state.store.readSnapshot()).serviceUsers).toEqual(before)
+    await f.state.store.updateFeatureList(f.features.id, { disabled: [] })
+    const saved = await f.request(credential, '/api/mail/import-csv', 'POST', { kind: 'mailboxes', accountId: f.owner.id, csv })
+    expect(saved.status).toBe(200)
+    expect(await saved.json()).toMatchObject({ summary: { mailboxesImported: 1, errorCount: 0 }, nativeApplied: false })
+  })
+
   it('rechecks plan policy when an already loaded workspace submits a mutation', async () => {
     expect((await f.request(credential, route)).status).toBe(200)
     await f.state.store.updateFeatureList(f.features.id, { disabled: ['forwarders'] })
