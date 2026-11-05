@@ -226,6 +226,7 @@ export async function withLifecycleBootstrapExclusiveAdmission(capability, callb
 
 export async function assertLifecycleBootstrapExclusivePhysicalHeld(capability) {
   const state = capability && typeof capability === 'object' ? bootstrapExclusives.get(capability) : undefined
+  if (state?.active && !bootstrapExclusiveScope.getStore()) return bootstrapExclusiveScope.run(state, () => assertLifecycleBootstrapExclusivePhysicalHeld(capability))
   if (!state?.active || bootstrapExclusiveScope.getStore() !== state) fail('LIFECYCLE_BOOTSTRAP_EXCLUSIVE_REQUIRED')
   await state.lock.verify(); await flock(state.lock.fd, true, true)
 }

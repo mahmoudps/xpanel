@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readlink, realpath } from 'node:fs/promises'
 import { assertOwnedFile, parseInstallationReceipt, readInstallationReceipt, readTrustedFile, requireLinuxRoot, withTrustedDirectory } from './lifecycle-ownership.mjs'
-import { assertPreparedReleaseCurrent, preparedReleaseInfo, observeInstalledReleaseTree, parsePreparedReleaseInput } from './prepared-release.mjs'
+import { assertPreparedReleaseCurrent, preparedReleaseInfo, observeInstalledReleaseTree, parsePreparedReleaseInput, withVisiblePreparedRelease } from './prepared-release.mjs'
 import { renderManagedUnits } from './managed-units.mjs'
 import { captureManagedFile, managedPathAbsent, replaceManagedFile, replaceManagedLink, syncManagedDirectory } from './lifecycle-managed-files.mjs'
 
@@ -50,7 +50,7 @@ async function current(token) {
   check(state, 'INSTALLATION_TRANSITION_CAPABILITY_REQUIRED')
   const info = await authority(state.capability)
   check(info.operationId === state.activeOperationId && info.reference === state.activeReference, 'INSTALLATION_TRANSITION_SCOPE_CHANGED')
-  await assertPreparedReleaseCurrent(state.prepared)
+  await withVisiblePreparedRelease(state.prepared, () => assertPreparedReleaseCurrent(state.prepared))
   return state
 }
 async function writeJournal(state, patch) {
@@ -75,8 +75,8 @@ async function verifyPreviousSource(state) {
 export async function prepareInstallationTransition(capability, prepared) {
   const info = await authority(capability)
   check(typeof info.reference === 'string', 'INSTALLATION_TRANSITION_REFERENCE_REQUIRED')
-  await assertPreparedReleaseCurrent(prepared)
-  const target = preparedReleaseInfo(prepared), installed = await readInstallationReceipt()
+  await withVisiblePreparedRelease(prepared, () => assertPreparedReleaseCurrent(prepared))
+  const target = await withVisiblePreparedRelease(prepared, () => preparedReleaseInfo(prepared)), installed = await readInstallationReceipt()
   const original = installed.receipt
   check(original.status === 'active' && target.version !== original.source.version
     && target.runtime.nodePath === original.runtime.nodePath && target.runtime.nodeSha256 === original.runtime.nodeSha256, 'INSTALLATION_TRANSITION_SOURCE_INVALID')
@@ -119,7 +119,7 @@ export async function prepareInstallationTransition(capability, prepared) {
   check(intent.binding?.recordId && intent.binding?.origin && intent.binding?.intentBinding && SHA.test(intent.binding?.accountLifetimeSha256), 'INSTALLATION_TRANSITION_BINDING_REQUIRED')
   const state = { capability, prepared, original, intent, path, journal: null, selectedReceipt: original, activeOperationId: info.operationId, activeReference: info.reference }
   await verifyPreviousSource(state)
-  await authority(capability); await assertPreparedReleaseCurrent(prepared)
+  await authority(capability); await withVisiblePreparedRelease(prepared, () => assertPreparedReleaseCurrent(prepared))
   await writeJournal(state, {})
   const token = Object.freeze({}); transitions.set(token, state)
   return token
@@ -322,8 +322,8 @@ export async function reopenInstallationTransition(capability, prepared, capture
   const info = await authority(capability)
   check(info.kind === 'recover' && info.recoveryOf === capture.operationId && info.recoveryJournalSha256 === capture.journalEntry.sha256,
     'INSTALLATION_TRANSITION_RECOVERY_AUTHORITY_REQUIRED')
-  await assertPreparedReleaseCurrent(prepared)
-  const target = preparedReleaseInfo(prepared)
+  await withVisiblePreparedRelease(prepared, () => assertPreparedReleaseCurrent(prepared))
+  const target = await withVisiblePreparedRelease(prepared, () => preparedReleaseInfo(prepared))
   check(target.archiveSha256 === capture.intent.target.archiveSha256 && target.releaseRoot === capture.intent.target.releaseRoot
     && target.treeSha256 === capture.intent.target.treeSha256, 'INSTALLATION_TRANSITION_TARGET_CHANGED')
   await assertOwnedFile(capture.journalEntry)
