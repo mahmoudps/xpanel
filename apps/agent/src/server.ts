@@ -1598,11 +1598,20 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (pathname === '/reconcile') await assertRootCaller(caller, 'reconcile')
         const body = await readReconcileBody(req)
         if (caller.role !== 'root' && body.force) fail('FORBIDDEN', 'only root may force reconciliation')
-        const result = await deps.reconciler.reconcile({
-          force: caller.role === 'root' && body.force,
-          actor: caller.actor,
-          scope: { accountId: caller.accountId, resellerId: caller.resellerId },
-        })
+        let result: Awaited<ReturnType<typeof deps.reconciler.reconcile>>
+        try {
+          result = await deps.reconciler.reconcile({
+            force: caller.role === 'root' && body.force,
+            actor: caller.actor,
+            scope: { accountId: caller.accountId, resellerId: caller.resellerId },
+          })
+        } catch (error) {
+          // The caller gets a bounded refusal; the operator journal keeps the first cause (no request bytes).
+          console.error('xpanel-agent reconcile refused:', isXpanelError(error)
+            ? `${error.code}: ${error.message} ${JSON.stringify(error.detail).slice(0, 500)}`
+            : error instanceof Error ? error.message.split('\n')[0]!.slice(0, 300) : 'unexpected failure')
+          throw error
+        }
         return jsonResponse(result, result.status === 'failed' ? 422 : 200)
       }
 
