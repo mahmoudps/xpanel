@@ -1534,6 +1534,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
 
       const accountCronWorkspace = /^\/accounts\/([a-z][a-z0-9]{0,15})\/cron\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(status|run)$/.exec(pathname)
       if (accountCronWorkspace) {
+        try {
         if (method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } })
         if (url.search) return fail('VALIDATION', 'Cron host requests do not accept query selectors', { stateChanged: false })
         if (caller.role !== 'user' || !caller.accountId) return fail('FORBIDDEN', 'Cron operations require the signed-in account owner', { stateChanged: false })
@@ -1566,6 +1567,12 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         })
         if (action === 'run') await appendAudit(deps.db, { actor: caller.actor, action: 'cron.host_run_requested', target: 'account:' + accountCronWorkspace[1], detail: { requested: true, completed: false, accountId: caller.accountId }, outcome: 'ok', principalId: caller.principalId })
         return jsonResponse(receipt, action === 'run' ? 202 : 200)
+        } catch (error) {
+          console.error('xpanel-agent cron host refused:', isXpanelError(error)
+            ? `${error.code}: ${error.message} ${JSON.stringify(error.detail).slice(0, 400)}`
+            : error instanceof Error ? error.message.split('\n')[0]!.slice(0, 300) : 'unexpected failure')
+          throw error
+        }
       }
 
       const accountBackupWorkspace = /^\/accounts\/([a-z][a-z0-9]{0,15})\/backup-workspace(?:\/|$)/.exec(pathname)
