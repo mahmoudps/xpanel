@@ -17,5 +17,8 @@ describe('canary source reader visibility', () => {
     const http = readFileSync(new URL('./account-provisioning-http.ts', import.meta.url), 'utf8')
     expect(http).toContain("reader.withReadonlyDatabase(async () => work())")
     expect(http).toContain('heldObservationInReaderScope(reader, held)')
+    // The pinned reader is reobserved on WAL collisions; a single attempt refused during live writes.
+    const readerPort = readFileSync(new URL('./account-provisioning-database-reader.ts', import.meta.url), 'utf8')
+    expect(readerPort).toContain('withReobservedReadonlyOperationDatabase')
   })
 })

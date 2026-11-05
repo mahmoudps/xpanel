@@ -1,5 +1,5 @@
 import { fail } from '@xpanel/core'
-import { withReadonlyOperationDatabase, type Db, type ReadonlyOperationDatabase } from '@xpanel/db'
+import { withReobservedReadonlyOperationDatabase, type Db, type ReadonlyOperationDatabase } from '@xpanel/db'
 import { createLiveReaderSlot, heldObservationInDatabaseScope, type HeldScopedObservation } from './account-provisioning-database-scope.ts'
 
 /** Producer-facing port: a live pinned read-only reader, never the writable control handle. */
@@ -19,7 +19,7 @@ const unavailable = (): never => fail('PRECONDITION_FAILED', 'the account provis
  */
 export const createProvisioningDatabaseReaderPort = (databasePath: string): ProvisioningDatabaseReaderPort => {
   const slot = createLiveReaderSlot(<T>(work: (db: unknown) => Promise<T>) =>
-    withReadonlyOperationDatabase(databasePath, db => work(db as ReadonlyOperationDatabase)))
+    withReobservedReadonlyOperationDatabase(databasePath, db => work(db as ReadonlyOperationDatabase)))
   return Object.freeze({
     withReadonlyDatabase: <T>(work: (db: ReadonlyOperationDatabase) => Promise<T>): Promise<T> =>
       slot.withReadonlyDatabase(db => work(db as ReadonlyOperationDatabase)),
