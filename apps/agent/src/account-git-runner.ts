@@ -1,8 +1,8 @@
 import { lstat, realpath } from 'node:fs/promises'
 import { fail } from '@xpanel/core'
-import type { Account } from '@xpanel/core'
+import type { Account, OsFamily } from '@xpanel/core'
 import { system } from '@xpanel/render'
-import { buildGitCommand, isGitCommand, isGitPath, GIT_LIMITS } from '../../../packages/os/src/git-command.ts'
+import { buildGitCommand, isGitCommand, isGitPath, GIT_CORE_DIR, GIT_LIMITS } from '../../../packages/os/src/git-command.ts'
 import type { GitOperation } from '../../../packages/os/src/git-command.ts'
 import type { ConfigTestResult } from './executor.ts'
 
@@ -11,18 +11,18 @@ const environment = {
   HOME: '/nonexistent', XDG_CONFIG_HOME: '/nonexistent', CURL_HOME: '/nonexistent', GIT_TERMINAL_PROMPT: '0',
   GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_SYSTEM: '/dev/null', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_COUNT: '0',
   GIT_ATTR_NOSYSTEM: '1', GIT_OPTIONAL_LOCKS: '0', GIT_LFS_SKIP_SMUDGE: '1', GIT_PAGER: 'cat', LC_ALL: 'C',
-  GIT_EXEC_PATH: '/usr/lib/git-core',
 } as const
 const unset = 'GIT_CONFIG_PARAMETERS GIT_DIR GIT_COMMON_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_TEMPLATE_DIR GIT_SSH GIT_SSH_COMMAND GIT_ASKPASS SSH_ASKPASS SSH_AUTH_SOCK NETRC LD_PRELOAD LD_LIBRARY_PATH http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY no_proxy'
 /** Same account namespace as the file/cron runner, with executable paths restricted to Git and its HTTPS transport. */
-export function buildAccountGitCommand(account: Pick<Account, 'username' | 'uid' | 'gid' | 'home'>, path: string, operation: GitOperation): string[] {
+export function buildAccountGitCommand(account: Pick<Account, 'username' | 'uid' | 'gid' | 'home'>, path: string, operation: GitOperation, family: OsFamily): string[] {
   if (path !== '.' && !isGitPath(path)) return fail('VALIDATION', 'invalid Git repository path', { stateChanged: false })
-  const skeleton = system.buildJailedFileOpArgv(account, ['/usr/bin/git', '--version'], { cwdRel: path, env: environment })
+  const core = Object.hasOwn(GIT_CORE_DIR, family) ? GIT_CORE_DIR[family] : fail('UNSUPPORTED_OS', 'Git is not reviewed for this host profile', { stateChanged: false })
+  const skeleton = system.buildJailedFileOpArgv(account, ['/usr/bin/git', '--version'], { cwdRel: path, env: { ...environment, GIT_EXEC_PATH: core } })
   const delimiter = skeleton.lastIndexOf('--')
   const prefix = skeleton.slice(0, delimiter).map(value => value === 'User=' + account.username ? 'User=' + account.uid : value === 'Group=' + account.username ? 'Group=' + account.gid : value)
   return [...prefix, '--property', 'RuntimeMaxSec=' + GIT_LIMITS.timeoutSeconds + 's', '--property', 'TimeoutStopSec=5s',
     '--property', 'MemoryMax=512M', '--property', 'TasksMax=32', '--property', 'NoExecPaths=/',
-    '--property', 'ExecPaths=/usr/bin/git -/usr/lib/git-core/git-remote-http -/usr/lib/git-core/git-remote-https',
+    '--property', 'ExecPaths=/usr/bin/git -' + core + '/git-remote-http -' + core + '/git-remote-https',
     '--property', 'InaccessiblePaths=-' + account.home + '/.ssh -' + account.home + '/.netrc -' + account.home + '/.git-credentials',
     '--property', 'UnsetEnvironment=' + unset, '--', ...buildGitCommand(operation)]
 }
@@ -38,20 +38,21 @@ export function isAccountGitCommand(argv: readonly string[]): boolean {
   const bind = argv.find(value => value.startsWith('BindPaths='))?.slice(10)
   const cwd = argv.find(value => value.startsWith('--working-directory='))?.slice(20)
   const user = bind?.match(/^\/home\/([a-z][a-z0-9]{0,15})$/)?.[1]
-  if (!user || !uid || !gid || uid !== uidText || home !== '--setenv=HOME=/home/' + user || !cwd?.startsWith(bind + '/')) return false
+  const family = (Object.keys(GIT_CORE_DIR) as OsFamily[]).find(key => argv.includes('--setenv=GIT_EXEC_PATH=' + GIT_CORE_DIR[key]))
+  if (!user || !uid || !gid || !family || uid !== uidText || home !== '--setenv=HOME=/home/' + user || !cwd?.startsWith(bind + '/')) return false
   try {
-    const stub = buildAccountGitCommand({ username: user, uid: Number(uid), gid: Number(gid), home: bind! }, cwd.slice(bind!.length + 1), { op: 'status' })
+    const stub = buildAccountGitCommand({ username: user, uid: Number(uid), gid: Number(gid), home: bind! }, cwd.slice(bind!.length + 1), { op: 'status' }, family)
     return JSON.stringify(argv.slice(0, delimiter + 1)) === JSON.stringify(stub.slice(0, stub.indexOf('--') + 1))
   } catch { return false }
 }
 
 /** Only construct this adapter for a native Linux executor after host qualification. */
-export function createAccountGitRun(run: (argv: string[]) => Promise<ConfigTestResult>): AccountGitRun {
+export function createAccountGitRun(run: (argv: string[]) => Promise<ConfigTestResult>, family: OsFamily): AccountGitRun {
   return async (account, path, operation) => {
     const home = '/home/' + account.username
     const info = await lstat(home).catch(() => null)
     if (account.home !== home || !info?.isDirectory() || info.isSymbolicLink() || info.uid !== account.uid || info.gid !== account.gid || await realpath(home) !== home) return fail('PRECONDITION_FAILED', 'the account home identity could not be verified', { stateChanged: false })
-    const argv = buildAccountGitCommand(account, path, operation)
+    const argv = buildAccountGitCommand(account, path, operation, family)
     if (!isAccountGitCommand(argv)) return fail('PRECONDITION_FAILED', 'the isolated Git command was not admitted', { stateChanged: false })
     const result = await run(argv)
     if (Buffer.byteLength(result.stdout) > GIT_LIMITS.outputBytes || Buffer.byteLength(result.stderr) > 16384) return fail('PRECONDITION_FAILED', 'Git output exceeded its safe limit', { verificationRequired: true, unknownOutcome: true })

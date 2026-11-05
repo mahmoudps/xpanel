@@ -54,7 +54,17 @@ describe('1. First-Run Setup, Hostname Change & Filesystem Quota Initialization'
     ])
   })
 
+  it('renderHostnameChange keeps unrelated /etc/hosts lines and replaces only the host name mapping', () => {
+    const debian = '127.0.0.1\tlocalhost\n127.0.1.1\told-vm\n# IPv6 hosts\n::1     localhost ip6-localhost ip6-loopback\nff02::1 ip6-allnodes\n10.0.0.5 db.internal srv1 srv1.example.com\n203.0.113.10 old.example.com old\n'
+    const first = renderHostnameChange('srv1.example.com', '203.0.113.10', null, debian).files[1]!.content
+    expect(first).toBe('# Managed by xPanel\n127.0.0.1\tlocalhost\n# IPv6 hosts\n::1     localhost ip6-localhost ip6-loopback\nff02::1 ip6-allnodes\n10.0.0.5 db.internal\n203.0.113.10 srv1.example.com srv1\n')
+    // The written file is read back on the next reconcile; the result must not change.
+    expect(renderHostnameChange('srv1.example.com', '203.0.113.10', null, first).files[1]!.content).toBe(first)
+    expect(renderHostnameChange('srv1.example.com', '203.0.113.10', null, '').files[1]!.content).toBe('# Managed by xPanel\n127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n203.0.113.10 srv1.example.com srv1\n')
+  })
+
   it('renderHostnameChange rejects invalid hostnames or IPs', () => {
+    expect(() => renderHostnameChange(`${'a'.repeat(60)}.example.com`, '203.0.113.10')).toThrow(/at most 64 characters/)
     expect(() => renderHostnameChange('not-an-fqdn', '203.0.113.10')).toThrow()
     expect(() => renderHostnameChange('srv1.example.com', '999.999.999.999')).toThrow()
     expect(() => renderHostnameChange('srv1.example.com', '203.0.113.10', 'not-ipv6')).toThrow()

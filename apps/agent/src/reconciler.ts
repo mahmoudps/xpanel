@@ -28,7 +28,7 @@ import {
   reindexFromState,
 } from '@xpanel/db'
 import type { ConfigGeneration, Db } from '@xpanel/db'
-import { edge, services, system } from '@xpanel/render'
+import { edge, extended, services, system } from '@xpanel/render'
 import type { StateSnapshot, StateStore } from '@xpanel/state'
 import { assertGenerationRollbackPreconditions, generationSourceIsLinked, isStateDirectoryDurabilityError, parseGenerationRollbackRequest, withGenerationReconciliationLease } from '@xpanel/state'
 import type { GenerationRollbackRequest } from '@xpanel/state'
@@ -79,7 +79,11 @@ export interface CompiledGeneration {
   /** Postfix main.cf and master.cf are merged outside the owned file list. */
   localMail: boolean
   localMailOptions: services.PostfixMainOptions
+  /** Saved host name that hostnamectl applies in this generation; verified against the kernel name. */
+  hostname?: string
 }
+
+const KERNEL_HOSTNAME_PATH = '/proc/sys/kernel/hostname'
 
 const DNS_CATALOG_PATH = '/etc/powerdns/named.conf.xpanel-zones'
 const DEFAULT_DNS_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -188,6 +192,10 @@ export interface CompileOptions {
   runtime?: ReadonlyMap<string, RuntimeRegistry>
   /** Hosts the management TLS ingress serves on the shared 80/443 sockets (agent-origin.ts readManagementHosts). */
   managementHosts?: readonly string[]
+  /** Live /etc/hosts read after preflight; its unrelated lines are kept. Absent renders only the managed lines. */
+  etcHosts?: string | null
+  /** Kernel host name read after preflight; hostnamectl runs only when it differs from the saved name. */
+  observedHostname?: string | null
 }
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -210,6 +218,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   const terminatingAccounts: { id: Id; username: string }[] = []
   let localMail = false
   const localMailOptions: services.PostfixMainOptions = {}
+  let hostname: string | undefined
   const mailForwarding = opts.mailForwarding ?? { forwarders: [], rejects: [], domainForwarders: [], lists: [] }
 
   const seenTests = new Set<string>()
@@ -290,6 +299,14 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     )
     files.push(sshFile)
     addTest(system.sshdConfigTest(os))
+
+    const primaryIp = (version: 4 | 6): string | null => snapshot.ipPool?.find((entry) => entry.version === version && entry.isPrimary)?.address ?? null
+    const host = extended.renderHostnameChange(settings.hostname, primaryIp(4) ?? '127.0.1.1', primaryIp(6), opts.etcHosts ?? null)
+    files.push(...host.files)
+    if (typeof opts.observedHostname === 'string' && opts.observedHostname.trim() !== settings.hostname) {
+      postActions.push(...host.actions)
+      hostname = settings.hostname
+    }
   }
 
   // 2. Accounts, slices, domains, PHP-FPM pools, cron timers, MariaDB, Mail, FTP
@@ -784,6 +801,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     terminatingAccounts,
     localMail,
     localMailOptions,
+    ...(hostname ? { hostname } : {}),
   }
 }
 
@@ -1570,6 +1588,8 @@ export class HostReconciler {
     const appliedSnapshot = currentGen ? await this.deps.store.readGenerationSnapshot(currentGen.id) : null
     let accountIoDevices: ReadonlyMap<string, readonly string[]> | undefined
     let mailTls: CompileOptions['mailTls']
+    let etcHosts: string | null | undefined
+    let observedHostname: string | null | undefined
     const compileMail = (mailAuth: OpenDkimSigning | null, previousZones?: ReadonlyMap<string, string>) => {
       const next = compileDesiredGeneration(snapshot, {
         os: this.deps.os,
@@ -1586,6 +1606,8 @@ export class HostReconciler {
         secEdge,
         ...(trustedProxyAuthority ? { trustedProxyAuthority } : {}),
         runtime,
+        ...(etcHosts !== undefined ? { etcHosts } : {}),
+        ...(observedHostname !== undefined ? { observedHostname } : {}),
         now: new Date(),
       })
       if (appliedSnapshot) {
@@ -1668,6 +1690,10 @@ export class HostReconciler {
         const text = await this.deps.executor.readFile(path)
         if (text !== null) previousZones.set(path, text)
       } catch { /* An unreadable zone file keeps the serial already in state. */ }
+    }
+    if (snapshot.server) {
+      etcHosts = await this.deps.executor.readFile('/etc/hosts')
+      observedHostname = await this.deps.executor.readFile(KERNEL_HOSTNAME_PATH)
     }
     const refreshed = compileMail(mailAuth, previousZones)
     const nextChecksum = computeFilesChecksum(refreshed.files)
@@ -2002,6 +2028,10 @@ export class HostReconciler {
             )
           }
           journalRecord.verifiedUnits.push(unit)
+        }
+        if (compiled.hostname) {
+          const observed = (await this.deps.executor.readFile(KERNEL_HOSTNAME_PATH))?.trim() ?? null
+          if (observed !== compiled.hostname) throw new StageFailureError('hostname', `the system host name was not applied: expected ${compiled.hostname}, observed ${observed ?? 'none'}`)
         }
         await runGenerationDnsHook({ phase: 'verify', native: isRealLinuxExecutor, provider: this.deps.dnsPublication, files: verifiedStagedFiles,
           removedPaths: manifestDiff.removed.map(file => file.path), zoneDir: this.deps.zoneDir })

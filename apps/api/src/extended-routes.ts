@@ -797,6 +797,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
             ? canonicalIp(body.primaryIpv6.trim()).address
             : fail('VALIDATION', 'primary IPv6 address is invalid')
         const hostname = validateDomainName(body.hostname ?? existingSettings?.hostname ?? 'panel.xpanel.internal')
+        if (hostname.length > 64) return fail('VALIDATION', 'the server host name must be at most 64 characters', { stateChanged: false })
         const nameservers = (body.nameservers ?? existingSettings?.nameservers ?? [`ns1.${hostname}`, `ns2.${hostname}`]).map(
           (ns) => validateDomainName(ns),
         )
@@ -894,6 +895,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       const body = await readJsonBody<{ hostname?: string }>(req)
       if (!body.hostname) return fail('VALIDATION', 'hostname is required')
       const hostname = validateDomainName(body.hostname)
+      if (hostname.length > 64) return fail('VALIDATION', 'the server host name must be at most 64 characters', { stateChanged: false })
       const current = await helpers.store.getServerSettings()
       const suggested = suggestServerSettings({ cores: 4, memoryMb: 8192 })
       const previousHostname = current?.hostname ?? null

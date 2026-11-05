@@ -355,7 +355,7 @@ export interface AgentServerDeps {
   hostJobs?: HostJobRunner
   /** Absent until exclusive cache snapshot/recovery and crash recovery are independently qualified. */
   rhelCacheRecovery?: RhelCacheRecovery
-  /** Absent until the /var/lib/rpm snapshot provider (ops-package-recovery.ts createRpmDatabaseRecovery) is natively qualified. */
+  /** The /var/lib/rpm snapshot provider (ops-package-recovery.ts nativeRpmDatabaseRecovery); supplied on EL profiles only. */
   rpmDatabaseRecovery?: RhelCacheRecovery
   /** Trusted local cron evidence only; absence never admits scheduler operations. */
   cronQualification?: (input: { account: Account; job: CronWorkspaceJob; action: 'observe' | 'run' }) => Promise<void>

@@ -49,6 +49,9 @@ import { awaitLifecycleWriterDrain, createLifecycleBackgroundResources, isLifecy
 import { createMariaDbSqlRunner, DEFAULT_MARIADB_ADMIN_CNF, defaultCommandRunner as mariadbCommandRunner, MariaDbServiceAdapter, mariadbSocketForFamily } from './services/mariadb.ts'
 import { withPostgresqlSqlRunner } from './pg-sql.ts'
 import { createNativeDnsReconcileProvider } from './services/dns-native.ts'
+import { createAccountGitRun } from './account-git-runner.ts'
+import { GIT_BINARY, GIT_LIMITS } from '../../../packages/os/src/git-command.ts'
+import { nativeRpmDatabaseRecovery } from './ops-package-recovery.ts'
 
 export interface AgentDaemonOptions {
   dbPath?: string
@@ -221,6 +224,9 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           trustedHostTargetMatcher: createProductionHostTargetMatcher(),
           sqlRunner,
         })
+        // Account Git runs in the account jail; this bound outlasts its RuntimeMaxSec so systemd ends the unit first.
+        const gitExecutor = existsSync(GIT_BINARY) ? new LinuxHostExecutor({ timeoutMs: (GIT_LIMITS.timeoutSeconds + 15) * 1000, maxOutputBytes: GIT_LIMITS.outputBytes + 1 }) : null
+        const rpmDatabaseRecovery = nativeRpmDatabaseRecovery(os.family, argv => executor.runCommand(argv))
         const quotaFilesystem = configuredQuotaFilesystem !== undefined ? configuredQuotaFilesystem
           : await resolveHomeQuotaFilesystem(argv => executor.runCommand(argv)).catch(() => {
             process.stderr.write('xpanel-agent quota: the mount holding /home could not be observed; using /home\n')
@@ -378,6 +384,8 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           executor,
           cronQualification: createNativeCronQualification({ isActive: async unit => (await executor.runCommand(['/usr/bin/systemctl', 'is-active', unit])).code === 0 }),
           ...(accountFileRunner ? { accountFileRunner } : {}),
+          ...(gitExecutor ? { accountGitRun: createAccountGitRun(argv => gitExecutor.runCommand(argv), os.family) } : {}),
+          ...(rpmDatabaseRecovery ? { rpmDatabaseRecovery } : {}),
           ...(hostJobs ? { hostJobs } : {}),
           terminals,
           ioAnalytics,
