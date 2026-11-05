@@ -453,7 +453,8 @@ export class NativeAccountFileRunner implements AccountFileRunner {
       this.onObservation?.(observation)
       return fail(mappedCode, errPayload.message, {
         operation: request.op,
-        ...(request.op === 'write-checked' && ['VALIDATION', 'CONFLICT', 'FORBIDDEN', 'NOT_FOUND', 'LIMIT_EXCEEDED', 'PRECONDITION_FAILED'].includes(mappedCode) ? { stateChanged: false } : {}),
+        // These helpers refuse before their single publishing rename; later failures arrive as SERVICE_UNAVAILABLE.
+        ...(['write-checked', 'move', 'copy'].includes(request.op) && ['VALIDATION', 'CONFLICT', 'FORBIDDEN', 'NOT_FOUND', 'LIMIT_EXCEEDED', 'PRECONDITION_FAILED'].includes(mappedCode) ? { stateChanged: false } : {}),
         errno: errPayload.errno,
         errnoName: errPayload.errnoName,
         workerUid: envelope.worker.uid,

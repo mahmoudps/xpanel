@@ -3,7 +3,8 @@ import { describe, it } from 'vitest'
 import { defaultPlan, isXpanelError } from '@xpanel/core'
 import { createTestDb, createUserPrincipal, listAudit } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
-import { JailedFileManager } from './file-manager.ts'
+import { ACCOUNT_FILE_HELPER_PROTOCOL_VERSION } from './account-file-runner.ts'
+import { JailedFileManager, NativeAccountFileRunner } from './file-manager.ts'
 import type { AccountFileRequest, AccountFileRunner, FileEntry } from './file-manager.ts'
 import { agentCallerHeaders, createAgentApp } from './server.ts'
 
@@ -57,6 +58,27 @@ describe('confined move and copy requests', { tags: ['unit'] }, () => {
     const files = new JailedFileManager('/srv/homes/alice', 'unlimited', { account })
     for (const op of ['move', 'copy'] as const) {
       await assert.rejects(() => files[op]('public_html/a.txt', 'archive/b.txt'), (error: unknown) => isXpanelError(error) && error.code === 'PRECONDITION_FAILED' && error.detail?.stateChanged === false)
+    }
+  })
+})
+
+describe('confined runner refusal outcome for move and copy', { tags: ['unit'] }, () => {
+  const refusing = (code: string) => new JailedFileManager('/srv/homes/alice', 'unlimited', { account, runner: new NativeAccountFileRunner({
+    binaryPath: '/opt/xpanel/bin/xpanel-account-files',
+    spawner: async ({ stdinPayload }) => ({ exitCode: 0, signal: null, pid: 100, stderr: '', stdout: JSON.stringify({
+      protocolVersion: ACCOUNT_FILE_HELPER_PROTOCOL_VERSION, ok: false, op: (JSON.parse(stdinPayload) as { request: AccountFileRequest }).request.op,
+      worker: { pid: 100, uid: account.uid, gid: account.gid, cgroup: '/' }, error: { code, errno: 17, errnoName: 'EEXIST', message: 'refused' },
+    }) }),
+  }) })
+
+  it('marks helper refusals before the publishing rename as unchanged, and nothing after it', async () => {
+    for (const op of ['move', 'copy'] as const) {
+      for (const refusal of ['VALIDATION', 'CONFLICT', 'FORBIDDEN', 'NOT_FOUND', 'LIMIT_EXCEEDED', 'PRECONDITION_FAILED']) {
+        await assert.rejects(() => refusing(refusal)[op]('public_html/a.txt', 'archive/b.txt'), (error: unknown) => isXpanelError(error) && error.code === refusal && error.detail?.stateChanged === false)
+      }
+      for (const outcome of ['SERVICE_UNAVAILABLE', 'CONFIG_TEST_FAILED']) {
+        await assert.rejects(() => refusing(outcome)[op]('public_html/a.txt', 'archive/b.txt'), (error: unknown) => isXpanelError(error) && error.code === outcome && error.detail?.stateChanged === undefined)
+      }
     }
   })
 })

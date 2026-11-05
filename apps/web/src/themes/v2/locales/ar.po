@@ -6007,11 +6007,6 @@ msgctxt "theme:v2"
 msgid "UDP"
 msgstr "UDP"
 
-#: apps/web/src/themes/v2/pages/xpanel/files/index.ts
-msgctxt "theme:v2"
-msgid "Unavailable file actions"
-msgstr "إجراءات الملفات غير المتاحة"
-
 #: apps/web/src/themes/v2/components/change-review.ts
 msgctxt "theme:v2"
 msgid "Undo the change to {field}"

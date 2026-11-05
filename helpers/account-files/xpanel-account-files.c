@@ -2431,10 +2431,11 @@ static void read_source_and_destination(const JsonVal *req, const char *op, cons
   }
 }
 
+/* Runs after the publishing rename, so a failure here reports an outcome that needs inspection, never a refusal. */
 static void respond_entry_at(int dir_fd, const char *name, const char *rel_path) {
   struct stat st;
-  if (fstatat(dir_fd, name, &st, AT_SYMLINK_NOFOLLOW) != 0) respond_errno(errno, "fstatat result failed");
-  if (!S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode)) respond_error("CONFLICT", EAGAIN, "result entry changed during the operation");
+  if (fstatat(dir_fd, name, &st, AT_SYMLINK_NOFOLLOW) != 0) respond_error("SERVICE_UNAVAILABLE", errno, "result entry could not be read; outcome requires inspection");
+  if (!S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode)) respond_error("SERVICE_UNAVAILABLE", EAGAIN, "result entry changed during the operation; outcome requires inspection");
   StrBuf sb;
   sb_init(&sb, 256);
   append_file_entry_json(&sb, name, rel_path, S_ISDIR(st.st_mode) ? "directory" : "file",

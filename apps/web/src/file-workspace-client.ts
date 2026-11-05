@@ -96,13 +96,13 @@ export function createFileWorkspace(options:{send:WorkspaceSend;confirm?:Workspa
     finally{if(token===fileGeneration){state.loading=false;emit()}}
   }
   const edit=(content:string)=>{if(state.busy)return;fileGeneration++;state.loading=false;state.draft=content;state.dirty=state.opened?content!==state.opened.content:content!=='';emit()}
-  const perform=async(prepare:()=>Promise<WorkspaceRequest|null>,verify:(send:WorkspaceSend,request:WorkspaceRequest,reply:unknown)=>Promise<void>,review:(send:WorkspaceSend,request:WorkspaceRequest)=>Promise<void>,done?:(request:WorkspaceRequest)=>void)=>{
+  const perform=async(prepare:()=>Promise<WorkspaceRequest|null>,verify:(send:WorkspaceSend,request:WorkspaceRequest,reply:unknown)=>Promise<void>,review:(send:WorkspaceSend,request:WorkspaceRequest)=>Promise<void>,done?:(request:WorkspaceRequest)=>void,messages?:{pending?:string;success?:(request:WorkspaceRequest)=>string;refused?:(error:unknown)=>string|null})=>{
     if(state.busy||state.uncertain)return false
     state.busy=true;state.loading=false;++directoryGeneration;++fileGeneration;emit();let dispatched=false
-    try{const body=await prepare();if(!body)return false;reviewPending=()=>review(options.send,body);dispatched=true;const reply=await options.send(body);await verify(options.send,body,reply);done?.(body);reviewPending=null
+    try{const body=await prepare();if(!body)return false;reviewPending=()=>review(options.send,body);dispatched=true;if(messages?.pending)note(messages.pending,'loading');const reply=await options.send(body);await verify(options.send,body,reply);done?.(body);reviewPending=null
       try{state.entries=await listReply(state.directory);state.hasListed=true}catch{note(copy('Operation verified; directory refresh failed.'),'read');return true}
-      note(copy('Operation acknowledged and current state verified.'),'saved');return true
-    }catch(error){state.uncertain=dispatched&&workspaceWriteUncertain(error);note(state.uncertain?copy('The write outcome is uncertain. Your draft is kept. Use Refresh or Reload to review current state before another change.'):copy('The operation was refused. Your draft is kept.'),state.uncertain?'uncertain':'failed');if(!dispatched&&error instanceof Error&&error.message==='file_changed_before_save')note(copy('The file changed since it was opened. Your draft and original baseline are kept. Use Reload to explicitly reopen the current file.'),'conflict');if(!dispatched&&error instanceof Error&&error.message==='editor_limit_exceeded')note(copy('Text exceeds the 1 MiB UTF-8 editor limit. Your draft is kept.'),'failed');return false}
+      note(messages?.success?.(body)??copy('Operation acknowledged and current state verified.'),'saved');return true
+    }catch(error){state.uncertain=dispatched&&workspaceWriteUncertain(error);note(state.uncertain?copy('The write outcome is uncertain. Your draft is kept. Use Refresh or Reload to review current state before another change.'):messages?.refused?.(error)??copy('The operation was refused. Your draft is kept.'),state.uncertain?'uncertain':'failed');if(!dispatched&&error instanceof Error&&error.message==='file_changed_before_save')note(copy('The file changed since it was opened. Your draft and original baseline are kept. Use Reload to explicitly reopen the current file.'),'conflict');if(!dispatched&&error instanceof Error&&error.message==='editor_limit_exceeded')note(copy('Text exceeds the 1 MiB UTF-8 editor limit. Your draft is kept.'),'failed');return false}
     finally{state.busy=false;emit()}
   }
   const save=async()=>{
@@ -128,8 +128,20 @@ export function workspaceTrash(value:unknown,path?:string):{id:string;originalPa
 }
 export function workspaceTrashList(value:unknown):unknown[]{if(!workspaceObject(value)||!Array.isArray(value.items)||value.items.length>10000)throw new Error('invalid_trash_list');const ids=new Set<string>();for(const raw of value.items){const item=workspaceTrash(raw);if(ids.has(item.id))throw new Error('duplicate_trash_id');ids.add(item.id)}return value.items}
 
+/** Explains a definite move or copy refusal by its stable code; null leaves the generic refusal text. */
+export function workspaceRelocateRefusal(error:unknown):string|null{
+  const code=workspaceObject(error)?error.code:undefined
+  if(code==='VALIDATION'||(error instanceof Error&&['invalid_account_path','destination_inside_source'].includes(error.message)))return xpT('Enter a different path inside your home. It cannot be the item itself or a folder inside it. Nothing was changed.')
+  if(code==='CONFLICT')return xpT('Something already exists at that path. Nothing was replaced.')
+  if(code==='FORBIDDEN')return xpT('The change was refused: the path leaves your home or crosses a link, the item is a link or special file, or your access does not allow file changes. Nothing was changed.')
+  if(code==='NOT_FOUND')return xpT('The item or the destination folder no longer exists. Refresh files to see the current state.')
+  if(code==='LIMIT_EXCEEDED')return xpT('This exceeds a file limit: 10000 items or 128 MiB per copy, or your disk quota. Nothing was changed.')
+  if(code==='PRECONDITION_FAILED')return xpT('File operations are unavailable on this server. Nothing was changed.')
+  return null
+}
+
 type FileViewEntry={key:string;name:string;path:string;kind:string;sizeBytes:number;mode?:number;mtime:string}
-function createFilePresentation(root:HTMLElement,copy:(text:string)=>string,size:(bytes:number)=>string,when:(value:string)=>string){
+function createFilePresentation(root:HTMLElement,copy:(text:string)=>string,size:(bytes:number)=>string,when:(value:string)=>string,changed?:()=>void){
   const must=(selector:string,tag?:string):HTMLElement=>{
     const found=[...root.querySelectorAll<HTMLElement>(selector)]
     if(found.length!==1||found[0]!.closest('[data-file-manager]')!==root||(tag&&found[0]!.tagName!==tag))throw new Error('invalid_file_presentation')
@@ -186,6 +198,7 @@ function createFilePresentation(root:HTMLElement,copy:(text:string)=>string,size
     primary.disabled=locked||!available||available.disabled;secondary.disabled=locked||!second||second.disabled
     copyPath.disabled=locked||!single||typeof navigator.clipboard?.writeText!=='function'
     noMatches.hidden=!observed||!entries.length||visible.length!==0
+    changed?.()
   }
   const editor=()=>{
     if(!browse||!editorState)return
@@ -204,6 +217,7 @@ function createFilePresentation(root:HTMLElement,copy:(text:string)=>string,size
   return{
     reset:(records:FileViewEntry[],known:boolean)=>{entries=records;entriesByKey=new Map(records.map(entry=>[entry.key,entry]));observed=known;selected.clear();filter.value='';localStatus.hidden=true;for(const row of rows()){row.hidden=false;const input=row.querySelector<HTMLInputElement>('[data-xp-slot="select"]');input?.addEventListener('change',event=>{event.stopPropagation();const key=row.dataset.fileKey;if(!key||locked||!inScope()){paint();return}if(input.checked)selected.add(key);else selected.delete(key);paint()})}paint()},
     sync:(value:boolean,state?:WorkspaceState)=>{locked=value;if(state)editorState=state;paint();editor()},
+    selection:()=>current().map(entry=>({path:entry.path,kind:entry.kind})),
     openEditor:()=>{if(inScope()&&openedPath){editorClosed=false;editor();root.querySelector<HTMLTextAreaElement>('#jailed-code-editor')?.focus()}},
     upload:(name:string,bytes:number)=>{const row=cloneUpload();clientTemplateSlot(row,'name').textContent=name;clientTemplateSlot(row,'bytes').textContent=size(bytes);const dismiss=clientTemplateSlot(row,'dismiss','button') as HTMLButtonElement;dismiss.setAttribute('aria-label',copy('Close'));dismiss.textContent='×';dismiss.addEventListener('click',()=>{if(dismiss.disabled||!inScope())return;row.remove();uploadCount!.textContent=String(uploads!.children.length)});uploads!.append(row);uploadCount!.textContent=String(uploads!.children.length);uploadsEmpty!.hidden=true;return row},
     uploadState:(row:HTMLElement,state:string,pending=false)=>{if(!inScope()||!uploads?.contains(row))return;clientTemplateSlot(row,'state','span').textContent=copy(state);const progress=clientTemplateSlot(row,'progress','div');progress.hidden=!pending;progress.setAttribute('aria-label',copy('Uploads'));progress.setAttribute('aria-valuetext',copy(state));const dismiss=clientTemplateSlot(row,'dismiss','button') as HTMLButtonElement;const blocked=pending||state==='Upload outcome uncertain';if(blocked)dismiss.setAttribute('data-capability-unavailable','true');else dismiss.removeAttribute('data-capability-unavailable');dismiss.disabled=blocked}
@@ -257,7 +271,11 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
     let renderedEntries:WorkspaceEntry[]|null=null,renderedRead=false
     const size=(bytes:number)=>{const units=['B','KiB','MiB','GiB','TiB'];let amount=bytes,index=0;while(amount>=1024&&index<units.length-1){amount/=1024;index++}return amount.toFixed(index===0?0:amount>=10?1:2)+' '+units[index]}
     const when=(value:string)=>formatDisplayDateTime(value)
-    try{presentation=createFilePresentation(root,copy,size,when)}catch{root.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLTextAreaElement>('button,input,textarea').forEach(node=>{node.disabled=true});status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('File operations are unavailable.');return}
+    // The approved design places Copy and Move in a selection toolbar, which a theme may render beside this root; one browse root owns them.
+    const relocators=document.querySelectorAll('[data-file-manager="browse"]').length===1?[...document.querySelectorAll<HTMLButtonElement>('[data-file-selection-action]')].filter(button=>button.type==='button'&&['copy','move'].includes(button.dataset.fileSelectionAction??'')):[]
+    let latest:WorkspaceState|undefined
+    const syncRelocators=()=>{const chosen=latest?presentation.selection():[];for(const button of relocators)button.disabled=!latest||!!button.closest(denied)||button.hasAttribute('data-capability-unavailable')||latest.busy||latest.loading||latest.uncertain||!eligible()||chosen.length!==1||chosen[0]!.kind==='symlink'}
+    try{presentation=createFilePresentation(root,copy,size,when,syncRelocators)}catch{root.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLTextAreaElement>('button,input,textarea').forEach(node=>{node.disabled=true});status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('File operations are unavailable.');return}
     const actionButton=(parent:HTMLElement,label:string,kind:string,path:string,action:()=>void)=>{const button=templates.cloneAction();button.dataset.fileWorkspaceAction=kind;button.dataset.path=path;clientTemplateSlot(button,'label').textContent=label;button.addEventListener('click',event=>{event.stopPropagation();if(button.disabled||!eligible())return;action()});parent.appendChild(button);return button}
     const paint=(entries:WorkspaceEntry[],observed:boolean)=>{
       tbody.textContent=''
@@ -293,6 +311,7 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
       presentation.reset(entries.map(entry=>({...entry,key:entry.path})),observed)
     }
     const render=(state:WorkspaceState)=>{
+      latest=state
       root.setAttribute('aria-busy',String(state.busy));root.dataset.fileLoading=String(state.loading);root.dataset.fileUncertain=String(state.uncertain);root.dataset.fileRead=String(state.hasListed)
       if(editor.value!==state.draft)editor.value=state.draft
       editor.readOnly=state.busy||!eligible();editor.dataset.editorPath=state.opened?.path??''
@@ -301,6 +320,7 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
       if(renderedEntries!==state.entries||renderedRead!==state.hasListed){renderedEntries=state.entries;renderedRead=state.hasListed;paint(state.entries,state.hasListed)}
       root.querySelectorAll<HTMLButtonElement>('button').forEach(button=>{const action=button.dataset.action||button.dataset.fileWorkspaceAction;const review=action==='refresh-files'||action==='reload-file';button.disabled=!!button.closest(denied)||state.busy||!eligible()||(state.uncertain&&!review&&action!=='download')||(action==='save-file'&&(!state.opened||!state.dirty))||(action==='reload-file'&&!state.opened&&!state.uncertain)||(action==='parent-directory'&&state.directory==='')})
       presentation.sync(state.busy||state.loading||state.uncertain||!eligible(),state)
+      syncRelocators()
       status.hidden=!state.notice;status.dataset.state=state.noticeKind;status.setAttribute('role',state.noticeKind==='failed'||state.noticeKind==='uncertain'?'alert':'status');status.textContent=state.notice
     }
     const controller=createFileWorkspace({send,confirm:askDialog,changed:render})
@@ -319,6 +339,30 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
     root.querySelector<HTMLButtonElement>('[data-action="new-file"]')?.addEventListener('click',event=>{event.stopPropagation();void create('file')})
     root.querySelector<HTMLButtonElement>('[data-action="new-folder"]')?.addEventListener('click',event=>{event.stopPropagation();void create('directory')})
     root.querySelector<HTMLButtonElement>('[data-action="empty-trash"]')?.addEventListener('click',event=>{event.stopPropagation();if(!eligible())return;void controller.perform(async()=>{const ok=await askDialog?.({title:copy('Empty trash'),body:copy('Trash items will be deleted permanently.'),confirm:copy('Delete permanently'),danger:true});return ok===true?{op:'empty-trash'}:null},async(request,body,result)=>{if(!workspaceObject(result)||typeof result.removed!=='number'||!Number.isSafeInteger(result.removed)||result.removed<0||result.removed>10000)throw new Error('invalid_empty_trash_ack');if(workspaceTrashList(await request({op:'list-trash'})).length)throw new Error('trash_not_empty')},async request=>{workspaceTrashList(await request({op:'list-trash'}))})})
+    const relocate=async(kind:'copy'|'move')=>{
+      const chosen=presentation.selection()
+      if(!eligible()||controller.state.busy||controller.state.uncertain||chosen.length!==1||chosen[0]!.kind==='symlink')return
+      const source=chosen[0]!.path,sourceKind=chosen[0]!.kind,home=(root.dataset.accountHome??'').replace(/\/+$/,'')
+      const listed=async(request:WorkspaceSend,path:string)=>{const parent=path.split('/').slice(0,-1).join('/');return workspaceListing(await request({op:'list',path:parent}),parent)}
+      await controller.perform(async()=>{
+        const raw=await askDialog?.({title:kind==='copy'?copy('Copy'):copy('Move or rename'),body:source+' — '+(kind==='copy'?copy('Enter the full path for the copy inside your home. An existing item is never replaced.'):copy('Enter the new path inside your home; change only the name to rename. An existing item is never replaced.')),input:true,label:copy('Destination path'),value:source,preserveWhitespace:true,confirm:kind==='copy'?copy('Copy'):copy('Move')})
+        if(typeof raw!=='string')return null
+        // The location bar shows the home prefix, so a pasted absolute path inside the home is accepted.
+        const destination=workspacePath(home.startsWith('/')&&raw.startsWith(home+'/')?raw.slice(home.length+1):raw)
+        if(destination===source||destination.startsWith(source+'/'))throw new Error('destination_inside_source')
+        return{op:kind,path:source,destination}
+      },async(request,body,reply)=>{
+        const destination=body.destination as string
+        if(workspaceEntry(reply,destination).kind!==sourceKind)throw new Error('invalid_relocate_ack')
+        if(!(await listed(request,destination)).some(row=>row.path===destination&&row.kind===sourceKind))throw new Error('relocate_not_observed')
+        if(kind==='move'&&(await listed(request,source)).some(row=>row.path===source))throw new Error('move_source_still_present')
+      },async(request,body)=>{await listed(request,body.destination as string);await listed(request,source)},undefined,{
+        pending:kind==='copy'?copy('Copying. The result is shown only after it is read back.'):copy('Moving. The result is shown only after it is read back.'),
+        success:body=>kind==='copy'?copy('Copied to {path}. The folder was read back.',{path:String(body.destination)}):copy('Moved to {path}. The folder was read back.',{path:String(body.destination)}),
+        refused:workspaceRelocateRefusal,
+      })
+    }
+    for(const button of relocators)button.addEventListener('click',event=>{event.stopPropagation();if(!button.disabled&&!button.closest(denied)&&eligible())void relocate(button.dataset.fileSelectionAction==='copy'?'copy':'move')})
     const picker=root.querySelector<HTMLInputElement>('[data-file-upload]');let uploadDirectory:string|null=null
     root.querySelector<HTMLButtonElement>('[data-action="upload-file"]')?.addEventListener('click',()=>{if(!eligible()||controller.state.busy||controller.state.uncertain||!picker)return;uploadDirectory=controller.state.directory;picker.click()})
     picker?.addEventListener('change',()=>{
@@ -435,4 +479,4 @@ function bindTrashWorkspace(askDialog?:WorkspaceConfirm):void{
   })
 }
 
-export const FILE_WORKSPACE_CLIENT_BINDING = `(function(askDialog) { const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WORKSPACE_EDIT_BYTES=${WORKSPACE_EDIT_BYTES};const WORKSPACE_BINARY_BYTES=${WORKSPACE_BINARY_BYTES};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${createFilePresentation.toString()};${fileWorkspaceTemplates.toString()};${workspaceObject.toString()};${workspacePath.toString()};${workspaceLeaf.toString()};${workspaceMode.toString()};${workspaceTextBytes.toString()};${workspaceTime.toString()};${workspaceEntry.toString()};${workspaceListing.toString()};${workspaceText.toString()};${workspaceBinary.toString()};${workspaceWriteUncertain.toString()};${createFileWorkspace.toString()};${workspaceTrash.toString()};${workspaceTrashList.toString()};(${bindFileWorkspace.toString()})(askDialog);(${bindTrashWorkspace.toString()})(askDialog); })`
+export const FILE_WORKSPACE_CLIENT_BINDING = `(function(askDialog) { const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WORKSPACE_EDIT_BYTES=${WORKSPACE_EDIT_BYTES};const WORKSPACE_BINARY_BYTES=${WORKSPACE_BINARY_BYTES};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${createFilePresentation.toString()};${fileWorkspaceTemplates.toString()};${workspaceObject.toString()};${workspacePath.toString()};${workspaceLeaf.toString()};${workspaceMode.toString()};${workspaceTextBytes.toString()};${workspaceTime.toString()};${workspaceEntry.toString()};${workspaceListing.toString()};${workspaceText.toString()};${workspaceBinary.toString()};${workspaceWriteUncertain.toString()};${createFileWorkspace.toString()};${workspaceTrash.toString()};${workspaceTrashList.toString()};${workspaceRelocateRefusal.toString()};(${bindFileWorkspace.toString()})(askDialog);(${bindTrashWorkspace.toString()})(askDialog); })`

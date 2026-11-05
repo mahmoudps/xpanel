@@ -7154,6 +7154,10 @@ msgstr "نسخ ملفاً"
 msgid "Copied disabled feature keys"
 msgstr "مفاتيح الميزات المعطلة المنسوخة"
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Copied to {path}. The folder was read back."
+msgstr "نُسخ إلى {path}. أُعيدت قراءة المجلد."
+
 #: apps/web/src/whm-panel-tokens-client.ts apps/web/src/whm-whmcs-client.ts
 msgid "Copied."
 msgstr "نُسخ."
@@ -7173,6 +7177,10 @@ msgstr "نسخ"
 #: apps/web/src/board-port/approved-xpanel-workspaces.ts
 msgid "Copy a site to a private staging folder, review the changes and promote them to the live site."
 msgstr "انسخ موقعًا إلى مجلد تجريبي خاص، وراجع التغييرات، ثم انشرها على الموقع المباشر."
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "Copy and Move act on the one item selected in the file list. Compress and Extract are unavailable here; no change has been made."
+msgstr "يعمل النسخ والنقل على العنصر الوحيد المحدد في قائمة الملفات. الضغط والاستخراج غير متاحين هنا؛ لم يُجرَ أي تغيير."
 
 #: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/extensions/account-databases.ts
 msgid "Copy connection details"
@@ -7249,6 +7257,10 @@ msgstr "النسخ غير متاح في هذا المتصفح. حدّد الرم
 #: apps/web/src/acct-staging-client.ts
 msgid "Copying the site files…"
 msgstr "جارٍ نسخ ملفات الموقع…"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Copying. The result is shown only after it is read back."
+msgstr "جارٍ النسخ. لا تظهر النتيجة إلا بعد إعادة قراءتها."
 
 #: apps/web/src/board-port/sec-workspace.ts
 msgid "Core Rule Set version"
@@ -9508,6 +9520,10 @@ msgstr "إدارة الوجهات غير متاحة هنا."
 msgid "Destination name"
 msgstr "اسم الوجهة"
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Destination path"
+msgstr "مسار الوجهة"
+
 #: apps/web/src/board-port/approved-xwhm.ts
 msgid "Destination plan"
 msgstr "خطة الوجهة"
@@ -11407,6 +11423,10 @@ msgstr "أدخل مضيف العميل أو الشبكة."
 msgid "Enter a container name and an image. Nothing was started."
 msgstr "أدخل اسم الحاوية والصورة. لم يُشغَّل شيء."
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Enter a different path inside your home. It cannot be the item itself or a folder inside it. Nothing was changed."
+msgstr "أدخل مساراً آخر داخل مجلد المنزل. لا يمكن أن يكون العنصر نفسه أو مجلداً بداخله. لم يتغير شيء."
+
 #: apps/web/src/mail-folders-client.ts
 msgid "Enter a folder name."
 msgstr "أدخل اسم المجلد."
@@ -11613,9 +11633,17 @@ msgstr "أدخل موعد الانتهاء تاريخًا ووقتًا بتوق�
 msgid "Enter the full name, without www. Subdomains also use their full name; choose their parent below. Input is sent as typed."
 msgstr "أدخل الاسم الكامل دون www. أدخل الاسم الكامل للنطاق الفرعي أيضًا واختر النطاق الأب أدناه. يُرسل النص كما كُتب."
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Enter the full path for the copy inside your home. An existing item is never replaced."
+msgstr "أدخل المسار الكامل للنسخة داخل مجلد المنزل. لا يُستبدل أي عنصر موجود."
+
 #: apps/web/src/mail-folders-client.ts
 msgid "Enter the new folder name."
 msgstr "أدخل الاسم الجديد للمجلد."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Enter the new path inside your home; change only the name to rename. An existing item is never replaced."
+msgstr "أدخل المسار الجديد داخل مجلد المنزل؛ غيّر الاسم فقط لإعادة التسمية. لا يُستبدل أي عنصر موجود."
 
 #: apps/web/src/board-port/acct-transfer-server.ts
 msgid "Enter the source's HTTPS API address, for example https://source.example.com. Pin the SHA-256 fingerprint of its certificate, or leave the fingerprint empty to rely on the system certificate store. Redirects are never followed and the token is sent only after the certificate is accepted."
@@ -12660,6 +12688,10 @@ msgstr "مدير الملفات"
 #: apps/web/src/whm-dns-tools-client.ts
 msgid "File missing"
 msgstr "الملف مفقود"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "File operations are unavailable on this server. Nothing was changed."
+msgstr "عمليات الملفات غير متاحة على هذا الخادم. لم يتغير شيء."
 
 #: apps/web/src/file-workspace-client.ts
 msgid "File operations are unavailable."
@@ -18585,6 +18617,10 @@ msgstr "انقل كل الحسابات والخطط من خادم xPanel آخر 
 msgid "Move from {from} to {to}?"
 msgstr "نقل من {from} إلى {to}؟"
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Move or rename"
+msgstr "نقل أو إعادة تسمية"
+
 #: apps/web/src/mail-folder-workspace-client.ts
 msgid "Move outcome is unverified. Review this folder before another move."
 msgstr "نتيجة النقل غير مؤكدة. راجع هذا المجلد قبل نقل رسالة أخرى."
@@ -18654,6 +18690,10 @@ msgstr "نقل ملفاً أو أعاد تسميته"
 msgid "Moved to {folder}: {subject}"
 msgstr "نُقلت إلى {folder}: {subject}"
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Moved to {path}. The folder was read back."
+msgstr "نُقل إلى {path}. أُعيدت قراءة المجلد."
+
 #: apps/web/src/board-port/approved-whm-resellers.ts
 msgid "Moves an account to another owner. Only who manages the account changes."
 msgstr "ينقل الحساب إلى مالك آخر. تتغير الجهة التي تديره فقط."
@@ -18661,6 +18701,10 @@ msgstr "ينقل الحساب إلى مالك آخر. تتغير الجهة ال
 #: apps/web/src/mail-disk-usage-client.ts
 msgid "Moving messages to Trash…"
 msgstr "جارٍ نقل الرسائل إلى المحذوفات…"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Moving. The result is shown only after it is read back."
+msgstr "جارٍ النقل. لا تظهر النتيجة إلا بعد إعادة قراءتها."
 
 #: apps/web/src/surfaces/xwhm.ts
 msgid "Must exactly match the account above."
@@ -35745,6 +35789,10 @@ msgstr "تعذرت قراءة بعض القيم من خادم قواعد الب�
 msgid "Some values were refused. Review the marked fields; nothing was saved."
 msgstr "رُفضت بعض القيم. راجع الحقول المعلّمة؛ لم يُحفظ شيء."
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Something already exists at that path. Nothing was replaced."
+msgstr "يوجد عنصر بالفعل في هذا المسار. لم يُستبدل شيء."
+
 #: apps/web/src/status-page.ts
 msgid "Something went wrong"
 msgstr "حدث خطأ"
@@ -37970,6 +38018,10 @@ msgstr "رُفض التغيير. لم يتغير شيء."
 msgid "The change was refused. Nothing was changed."
 msgstr "رُفض التغيير. لم يُغيَّر أي شيء."
 
+#: apps/web/src/file-workspace-client.ts
+msgid "The change was refused: the path leaves your home or crosses a link, the item is a link or special file, or your access does not allow file changes. Nothing was changed."
+msgstr "رُفض التغيير: المسار يخرج من مجلد المنزل أو يمر عبر رابط، أو العنصر رابط أو ملف خاص، أو صلاحياتك لا تسمح بتغيير الملفات. لم يتغير شيء."
+
 #: apps/web/src/acct-staging-client.ts
 msgid "The changes are live. Replaced and removed files are in the trash."
 msgstr "التغييرات منشورة الآن. الملفات المستبدلة والمحذوفة في سلة المهملات."
@@ -38868,6 +38920,10 @@ msgstr "تتعذّر قراءة قائمة الحزم المثبتة، لذا ق
 #: apps/web/src/whm-composer-client.ts
 msgid "The isolated job installs exactly the reviewed graph without scripts, plugins or network access, and keeps a recovery snapshot."
 msgstr "تثبّت المهمة المعزولة المخطط المُراجَع بالضبط دون نصوص برمجية أو إضافات أو وصول إلى الشبكة، وتحتفظ بلقطة للاسترداد."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "The item or the destination folder no longer exists. Refresh files to see the current state."
+msgstr "العنصر أو مجلد الوجهة لم يعد موجوداً. حدّث الملفات لرؤية الحالة الحالية."
 
 #: apps/web/src/whm-jobs-client.ts
 msgid "The job can no longer be cancelled; it has already finished."
@@ -42166,6 +42222,10 @@ msgstr "اجتازت المسودة محلل Apache المحمي. لم يُحف�
 #: apps/web/src/mail-calendar-view-client.ts
 msgid "This event cannot be shown from the saved records that were read."
 msgstr "تعذر عرض هذا الحدث من السجلات المحفوظة المقروءة."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "This exceeds a file limit: 10000 items or 128 MiB per copy, or your disk quota. Nothing was changed."
+msgstr "يتجاوز هذا حداً للملفات: 10000 عنصر أو 128 MiB لكل نسخة، أو حصة القرص. لم يتغير شيء."
 
 #: apps/web/src/mail-disk-usage-client.ts
 msgid "This folder holds more than 50000 messages, so its cleanup cannot be measured here."

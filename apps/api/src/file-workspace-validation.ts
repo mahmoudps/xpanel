@@ -32,7 +32,8 @@ const fields = {
 } as const
 const TRASH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
-const badRequest = (message: string): never => fail('VALIDATION', message)
+// Request validation runs before any dispatch, so its refusal is a definite no-change outcome.
+const badRequest = (message: string): never => fail('VALIDATION', message, { stateChanged: false })
 const badReply = (op: FileWorkspaceRequest['op']): never => fail('CONFIG_TEST_FAILED', 'File workspace returned an invalid reply', { operation: op })
 const own = (value: object, key: string): boolean => Object.hasOwn(value, key)
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value))
