@@ -45,11 +45,11 @@ describe('account home tree removal predicate', { tags: ['unit'] }, () => {
 })
 describe('generated account tree removal predicate', { tags: ['unit'] }, () => {
   it('admits only the exact generated per-account directories as trees', () => {
-    for (const path of ['/home/trkrun1', '/var/log/xpanel/trkrun1', '/etc/xpanel/runtime/trkrun1',
+    for (const path of ['/home/trkrun1', '/var/log/xpanel/trkrun1', '/var/log/xpanel/php-fpm/trkrun1', '/etc/xpanel/runtime/trkrun1',
       '/run/xpanel-fpm/trkrun1-8.3', '/run/xpanel-ctr/trkrun1']) {
       assert.equal(isGeneratedAccountTreePath(path), true, path)
     }
-    for (const path of ['/var/log/xpanel/nginx', '/var/log/xpanel/trkrun1/error.log', '/etc/xpanel/runtime',
+    for (const path of ['/var/log/xpanel/nginx', '/var/log/xpanel/php-fpm', '/var/log/xpanel/php-fpm/../trkrun1', '/var/log/xpanel/trkrun1/error.log', '/etc/xpanel/runtime',
       '/run/xpanel-fpm/trkrun1', '/etc/passwd', '/home/trkrun1/public_html']) {
       assert.equal(isGeneratedAccountTreePath(path), false, path)
     }

@@ -406,6 +406,7 @@ export const isAccountHomeRootPath = (path: string): boolean => ACCOUNT_HOME_ROO
 export const GENERATED_ACCOUNT_TREE_RES: readonly RegExp[] = Object.freeze([
   /^\/home\/[a-z_][a-z0-9_-]{0,31}$/,
   /^\/var\/log\/xpanel\/[a-z_][a-z0-9_-]{0,31}$/,
+  /^\/var\/log\/xpanel\/[a-z][a-z0-9-]{0,16}\/[a-z_][a-z0-9_-]{0,31}$/,
   /^\/etc\/xpanel\/runtime\/[a-z_][a-z0-9_-]{0,31}$/,
   /^\/run\/xpanel-fpm\/[a-z_][a-z0-9_-]{0,31}-[5-9]\.[0-9]{1,2}$/,
   /^\/run\/xpanel-ctr\/[a-z_][a-z0-9_-]{0,31}$/,
