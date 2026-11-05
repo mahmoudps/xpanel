@@ -15,6 +15,8 @@ export interface FileWorkspaceReplyMap {
   'get-bytes': FileBytes
   mkdir: FileEntry
   chmod: FileEntry
+  move: FileEntry
+  copy: FileEntry
   trash: TrashItem
   'list-trash': { items: TrashItem[] }
   restore: FileEntry
@@ -25,7 +27,7 @@ export type FileWorkspaceReply<T extends FileWorkspaceRequest = FileWorkspaceReq
 const fields = {
   list: ['path', 'showHidden'], read: ['path'], write: ['path', 'content', 'overwrite', 'mode'],
   'put-bytes': ['path', 'contentBase64', 'overwrite', 'mode'], 'get-bytes': ['path'],
-  mkdir: ['path', 'mode'], chmod: ['path', 'mode'], trash: ['path'], 'list-trash': [],
+  mkdir: ['path', 'mode'], chmod: ['path', 'mode'], move: ['path', 'destination'], copy: ['path', 'destination'], trash: ['path'], 'list-trash': [],
   restore: ['trashId', 'overwrite'], 'empty-trash': ['olderThanDays'], 'purge-trash': ['trashId', 'originalPath', 'deletedAt'],
 } as const
 const TRASH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -71,6 +73,11 @@ export function validateFileWorkspaceRequest(input: unknown): FileWorkspaceReque
     }
     case 'mkdir': return { op, path: path(input.path), mode: mode(own(input, 'mode') ? input.mode : FILE_WORKSPACE_LIMITS.directoryMode, FILE_WORKSPACE_LIMITS.directoryMode) }
     case 'chmod': return { op, path: path(input.path), mode: mode(own(input, 'mode') ? input.mode : FILE_WORKSPACE_LIMITS.fileMode, FILE_WORKSPACE_LIMITS.directoryMode) }
+    case 'move': case 'copy': {
+      const source = path(input.path), destination = path(input.destination)
+      if (destination === source || destination.startsWith(source + '/')) return badRequest('The destination must not be the source or inside it')
+      return { op, path: source, destination }
+    }
     case 'list-trash': return { op }
     case 'restore':
       if (typeof input.trashId !== 'string' || !TRASH_ID.test(input.trashId)) return badRequest('A valid trash item ID is required')
@@ -160,6 +167,17 @@ function checkedReply(request: FileWorkspaceRequest, input: unknown): FileWorksp
     case 'chmod': {
       const item = changedEntry(input, op, request.path)
       if (item.mode !== request.mode) return badReply(op)
+      reply = item; break
+    }
+    // A move keeps the entry's own permissions; a copy is published within the panel ceilings.
+    case 'move': {
+      const item = entry(input, op, request.destination)
+      if (item.kind === 'symlink') return badReply(op)
+      reply = item; break
+    }
+    case 'copy': {
+      const item = changedEntry(input, op, request.destination)
+      if (item.kind === 'directory' && item.sizeBytes !== 0) return badReply(op)
       reply = item; break
     }
     case 'trash': reply = trashItem(input, op, request.path); break

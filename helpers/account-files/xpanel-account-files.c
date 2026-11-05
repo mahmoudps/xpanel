@@ -42,6 +42,8 @@
 #define XP_MAX_EDIT_BYTES_CEILING (1024 * 1024)
 #define XP_MAX_BINARY_BYTES (2 * 1024 * 1024)
 #define XP_MAX_LIST_ENTRIES_CEILING 10000
+#define XP_MAX_COPY_BYTES (128LL * 1024 * 1024)
+#define XP_MAX_TREE_DEPTH 32
 #define XP_MAX_PATH_BYTES 4096
 #define XP_MIN_ACCOUNT_ID 1000
 #define XP_MAX_ACCOUNT_ID 65533
@@ -2396,6 +2398,321 @@ static void op_purge_trash(int home_dirfd, uid_t uid, const JsonVal *req) {
   respond_success_raw(sb.data);
 }
 
+/* --- Confined move and copy --- */
+
+static bool rel_path_within(const char *candidate, const char *base) {
+  size_t n = strlen(base);
+  return strncmp(candidate, base, n) == 0 && (candidate[n] == '\0' || candidate[n] == '/');
+}
+
+static bool skipped_tree_name(const char *name) {
+  return strcmp(name, ".") == 0 || strcmp(name, "..") == 0 || strncmp(name, ".xpanel-tmp-", 12) == 0;
+}
+
+/* Moves and copies handle only account-owned directories and single-link regular files, never links or special files. */
+static void require_managed_entry(const struct stat *st, uid_t uid) {
+  if (st->st_uid != uid) respond_error("FORBIDDEN", EACCES, "entry owner UID does not match account UID");
+  if (S_ISLNK(st->st_mode)) respond_error("FORBIDDEN", ELOOP, "symbolic links cannot be moved or copied");
+  if (S_ISREG(st->st_mode) && st->st_nlink > 1) respond_error("FORBIDDEN", EMLINK, "hardlinked files cannot be moved or copied");
+  if (!S_ISREG(st->st_mode) && !S_ISDIR(st->st_mode)) respond_error("FORBIDDEN", EACCES, "special files cannot be moved or copied");
+}
+
+static void read_source_and_destination(const JsonVal *req, const char *op, const char **path, const char **destination) {
+  size_t path_len = 0, destination_len = 0;
+  if (!jv_get_str(req, "path", path, &path_len) || !jv_get_str(req, "destination", destination, &destination_len)) {
+    char msg[64];
+    snprintf(msg, sizeof(msg), "%s requires path and destination", op);
+    respond_error("VALIDATION", EINVAL, msg);
+  }
+  assert_safe_rel_path(*path, path_len, false);
+  assert_safe_rel_path(*destination, destination_len, false);
+  if (rel_path_within(*destination, *path)) {
+    respond_error("VALIDATION", EINVAL, "destination must not be the source or inside it");
+  }
+}
+
+static void respond_entry_at(int dir_fd, const char *name, const char *rel_path) {
+  struct stat st;
+  if (fstatat(dir_fd, name, &st, AT_SYMLINK_NOFOLLOW) != 0) respond_errno(errno, "fstatat result failed");
+  if (!S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode)) respond_error("CONFLICT", EAGAIN, "result entry changed during the operation");
+  StrBuf sb;
+  sb_init(&sb, 256);
+  append_file_entry_json(&sb, name, rel_path, S_ISDIR(st.st_mode) ? "directory" : "file",
+                         S_ISDIR(st.st_mode) ? 0 : (int64_t)st.st_size, st.st_mode, &st.st_mtim);
+  respond_success_raw(sb.data);
+}
+
+/* Renames one entry between two confined directories; an existing destination is never replaced. */
+static void op_move(int home_dirfd, uid_t uid, const JsonVal *req) {
+  const char *path = NULL, *destination = NULL;
+  read_source_and_destination(req, "move", &path, &destination);
+  char src_parent[XP_MAX_PATH_BYTES + 1], src_name[NAME_MAX + 1];
+  char dst_parent[XP_MAX_PATH_BYTES + 1], dst_name[NAME_MAX + 1];
+  split_rel_path(path, src_parent, src_name);
+  split_rel_path(destination, dst_parent, dst_name);
+
+  int src_fd = open_confined_dir(home_dirfd, src_parent, uid);
+  int dst_fd = open_confined_dir(home_dirfd, dst_parent, uid);
+  struct stat st;
+  if (fstatat(src_fd, src_name, &st, AT_SYMLINK_NOFOLLOW) != 0) respond_errno(errno, "fstatat move source failed");
+  require_managed_entry(&st, uid);
+  if (xp_renameat2(src_fd, src_name, dst_fd, dst_name, RENAME_NOREPLACE) != 0) respond_errno(errno, "renameat2 move failed");
+  (void)fsync(src_fd);
+  (void)fsync(dst_fd);
+  respond_entry_at(dst_fd, dst_name, destination);
+}
+
+typedef struct {
+  int64_t entries;
+  int64_t bytes;
+  int64_t max_entries;
+} CopyBudget;
+
+typedef struct {
+  const char *code;
+  int err;
+  const char *message;
+} CopyFailure;
+
+static CopyFailure g_copy_failure;
+static char g_copy_buffer[65536];
+
+static int copy_failed(const char *code, int err, const char *message) {
+  g_copy_failure.code = code;
+  g_copy_failure.err = err ? err : EIO;
+  g_copy_failure.message = message;
+  return -1;
+}
+
+static bool copy_budget_add(CopyBudget *budget, int64_t entries, int64_t bytes) {
+  budget->entries += entries;
+  budget->bytes += bytes;
+  return budget->entries <= budget->max_entries && budget->bytes <= XP_MAX_COPY_BYTES;
+}
+
+/* Bounds the whole source before anything is written, so a refused copy leaves no trace. */
+static void scan_copy_source(int parent_fd, const char *name, uid_t uid, int depth, CopyBudget *budget) {
+  if (depth > XP_MAX_TREE_DEPTH) respond_error("LIMIT_EXCEEDED", ELOOP, "directory nesting exceeds the copy limit");
+  struct stat st;
+  if (fstatat(parent_fd, name, &st, AT_SYMLINK_NOFOLLOW) != 0) respond_errno(errno, "fstatat copy source failed");
+  require_managed_entry(&st, uid);
+  if (!copy_budget_add(budget, 1, S_ISREG(st.st_mode) ? (int64_t)st.st_size : 0)) {
+    respond_error("LIMIT_EXCEEDED", EFBIG, "copy exceeds the entry or 128 MiB size limit");
+  }
+  if (S_ISREG(st.st_mode)) return;
+  int fd = xp_openat2(parent_fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW, 0, XP_RESOLVE_CONFINED);
+  if (fd < 0) respond_errno(errno, "openat2 copy source directory failed");
+  DIR *dirp = fdopendir(fd);
+  if (!dirp) respond_errno(errno, "fdopendir copy source failed");
+  for (;;) {
+    errno = 0;
+    struct dirent *de = readdir(dirp);
+    if (!de) {
+      if (errno != 0) respond_errno(errno, "readdir copy source failed");
+      break;
+    }
+    if (!skipped_tree_name(de->d_name)) scan_copy_source(dirfd(dirp), de->d_name, uid, depth + 1, budget);
+  }
+  closedir(dirp);
+}
+
+static int copy_entry_at(int src_parent, const char *src_name, int dst_parent, const char *dst_name, uid_t uid, int depth,
+                         int64_t max_file_mode, int64_t max_dir_mode, CopyBudget *budget);
+
+static int copy_regular_fd(int src, const struct stat *st, int dst_parent, const char *dst_name, int64_t max_file_mode, CopyBudget *budget) {
+  mode_t mode = (st->st_mode & 07777) & (mode_t)max_file_mode;
+  if (mode == 0) mode = (mode_t)max_file_mode;
+  int dst = xp_openat2(dst_parent, dst_name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600, XP_RESOLVE_CONFINED);
+  if (dst < 0) return copy_failed(NULL, errno, "openat2 copy target failed");
+  for (;;) {
+    ssize_t n = read(src, g_copy_buffer, sizeof(g_copy_buffer));
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      int err = errno;
+      close(dst);
+      return copy_failed(NULL, err, "read copy source failed");
+    }
+    if (n == 0) break;
+    if (!copy_budget_add(budget, 0, (int64_t)n)) {
+      close(dst);
+      return copy_failed("LIMIT_EXCEEDED", EFBIG, "copy exceeds the entry or 128 MiB size limit");
+    }
+    for (ssize_t off = 0; off < n; ) {
+      ssize_t w = write(dst, g_copy_buffer + off, (size_t)(n - off));
+      if (w < 0) {
+        if (errno == EINTR) continue;
+        int err = errno;
+        close(dst);
+        return copy_failed(NULL, err, "write copy target failed");
+      }
+      off += w;
+    }
+  }
+  if (fchmod(dst, mode) != 0) {
+    int err = errno;
+    close(dst);
+    return copy_failed(NULL, err, "fchmod copy target failed");
+  }
+  close(dst);
+  return 0;
+}
+
+static int copy_directory_fd(int src, const struct stat *st, int dst_parent, const char *dst_name, uid_t uid, int depth,
+                             int64_t max_file_mode, int64_t max_dir_mode, CopyBudget *budget) {
+  if (mkdirat(dst_parent, dst_name, 0700) != 0) return copy_failed(NULL, errno, "mkdirat copy target failed");
+  int dst = xp_openat2(dst_parent, dst_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW, 0, XP_RESOLVE_CONFINED);
+  if (dst < 0) return copy_failed(NULL, errno, "openat2 copy target directory failed");
+  int scan_fd = dup(src);
+  DIR *dirp = scan_fd < 0 ? NULL : fdopendir(scan_fd);
+  if (!dirp) {
+    int err = errno;
+    if (scan_fd >= 0) close(scan_fd);
+    close(dst);
+    return copy_failed(NULL, err, "fdopendir copy source failed");
+  }
+  int rc = 0;
+  for (;;) {
+    errno = 0;
+    struct dirent *de = readdir(dirp);
+    if (!de) {
+      if (errno != 0) rc = copy_failed(NULL, errno, "readdir copy source failed");
+      break;
+    }
+    if (skipped_tree_name(de->d_name)) continue;
+    rc = copy_entry_at(dirfd(dirp), de->d_name, dst, de->d_name, uid, depth + 1, max_file_mode, max_dir_mode, budget);
+    if (rc != 0) break;
+  }
+  closedir(dirp);
+  mode_t mode = (st->st_mode & 07777) & (mode_t)max_dir_mode;
+  if (mode == 0) mode = (mode_t)max_dir_mode;
+  if (rc == 0 && fchmod(dst, mode) != 0) rc = copy_failed(NULL, errno, "fchmod copy target directory failed");
+  close(dst);
+  return rc;
+}
+
+static int copy_entry_at(int src_parent, const char *src_name, int dst_parent, const char *dst_name, uid_t uid, int depth,
+                         int64_t max_file_mode, int64_t max_dir_mode, CopyBudget *budget) {
+  if (depth > XP_MAX_TREE_DEPTH) return copy_failed("LIMIT_EXCEEDED", ELOOP, "directory nesting exceeds the copy limit");
+  int src = xp_openat2(src_parent, src_name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK, 0, XP_RESOLVE_CONFINED);
+  if (src < 0) return copy_failed(NULL, errno, "openat2 copy source failed");
+  struct stat st;
+  if (fstat(src, &st) != 0) {
+    int err = errno;
+    close(src);
+    return copy_failed(NULL, err, "fstat copy source failed");
+  }
+  int rc;
+  if (st.st_uid != uid || !(S_ISDIR(st.st_mode) || (S_ISREG(st.st_mode) && st.st_nlink == 1))) {
+    rc = copy_failed("FORBIDDEN", EACCES, "copy source changed into an unsupported entry");
+  } else if (!copy_budget_add(budget, 1, 0)) {
+    rc = copy_failed("LIMIT_EXCEEDED", E2BIG, "copy exceeds the entry or 128 MiB size limit");
+  } else if (S_ISDIR(st.st_mode)) {
+    rc = copy_directory_fd(src, &st, dst_parent, dst_name, uid, depth, max_file_mode, max_dir_mode, budget);
+  } else {
+    rc = copy_regular_fd(src, &st, dst_parent, dst_name, max_file_mode, budget);
+  }
+  close(src);
+  return rc;
+}
+
+/* Best-effort removal of a staging tree this worker created; the original failure is what gets reported. */
+static void discard_tree_at(int parent_fd, const char *name, int depth) {
+  if (depth > XP_MAX_TREE_DEPTH + 1 || unlinkat(parent_fd, name, 0) == 0 || errno != EISDIR) return;
+  int fd = xp_openat2(parent_fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW, 0, XP_RESOLVE_CONFINED);
+  if (fd < 0) return;
+  (void)fchmod(fd, 0700);
+  DIR *dirp = fdopendir(fd);
+  if (!dirp) {
+    close(fd);
+    return;
+  }
+  struct dirent *de;
+  while ((de = readdir(dirp)) != NULL) {
+    if (strcmp(de->d_name, ".") != 0 && strcmp(de->d_name, "..") != 0) discard_tree_at(dirfd(dirp), de->d_name, depth + 1);
+  }
+  closedir(dirp);
+  (void)unlinkat(parent_fd, name, AT_REMOVEDIR);
+}
+
+/* Copies a file or tree into a hidden staging name, then publishes it with one no-replace rename.
+ * shortcut: a worker killed at its timeout leaves the hidden staging tree behind, as an interrupted
+ * publish does; add a sweep of stale .xpanel-tmp- entries if that shows up in real use. */
+static void op_copy(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_file_mode, int64_t max_dir_mode, int64_t max_list_entries) {
+  const char *path = NULL, *destination = NULL;
+  read_source_and_destination(req, "copy", &path, &destination);
+  char src_parent[XP_MAX_PATH_BYTES + 1], src_name[NAME_MAX + 1];
+  char dst_parent[XP_MAX_PATH_BYTES + 1], dst_name[NAME_MAX + 1];
+  split_rel_path(path, src_parent, src_name);
+  split_rel_path(destination, dst_parent, dst_name);
+
+  int src_fd = open_confined_dir(home_dirfd, src_parent, uid);
+  int dst_fd = open_confined_dir(home_dirfd, dst_parent, uid);
+  struct stat existing;
+  if (fstatat(dst_fd, dst_name, &existing, AT_SYMLINK_NOFOLLOW) == 0) respond_error("CONFLICT", EEXIST, "copy destination already exists");
+  if (errno != ENOENT) respond_errno(errno, "fstatat copy destination failed");
+  CopyBudget scanned = { .entries = 0, .bytes = 0, .max_entries = max_list_entries };
+  scan_copy_source(src_fd, src_name, uid, 0, &scanned);
+
+  char rand_hex[17], staging[NAME_MAX + 1];
+  generate_random_hex(rand_hex);
+  snprintf(staging, sizeof(staging), ".xpanel-tmp-%d-%s", (int)getpid(), rand_hex);
+  CopyBudget budget = { .entries = 0, .bytes = 0, .max_entries = max_list_entries };
+  if (copy_entry_at(src_fd, src_name, dst_fd, staging, uid, 0, max_file_mode, max_dir_mode, &budget) != 0) {
+    discard_tree_at(dst_fd, staging, 0);
+    if (g_copy_failure.code) respond_error(g_copy_failure.code, g_copy_failure.err, g_copy_failure.message);
+    respond_errno(g_copy_failure.err, g_copy_failure.message);
+  }
+  if (syncfs(dst_fd) != 0) {
+    int err = errno;
+    discard_tree_at(dst_fd, staging, 0);
+    respond_errno(err, "syncfs copy failed");
+  }
+  if (xp_renameat2(dst_fd, staging, dst_fd, dst_name, RENAME_NOREPLACE) != 0) {
+    int err = errno;
+    discard_tree_at(dst_fd, staging, 0);
+    respond_errno(err, "publish copy failed");
+  }
+  (void)fsync(dst_fd);
+  respond_entry_at(dst_fd, dst_name, destination);
+}
+
+static void run_operation(const char *op, int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_edit_bytes,
+                          int64_t max_file_mode, int64_t max_dir_mode, int64_t max_list_entries) {
+  if (strcmp(op, "list") == 0) {
+    op_list(home_dirfd, uid, req, max_list_entries);
+  } else if (strcmp(op, "read") == 0) {
+    op_read(home_dirfd, uid, req, max_edit_bytes);
+  } else if (strcmp(op, "write") == 0) {
+    op_write(home_dirfd, uid, req, max_edit_bytes, max_file_mode);
+  } else if (strcmp(op, "write-checked") == 0) {
+    op_write_checked(home_dirfd, uid, req, max_edit_bytes, max_file_mode);
+  } else if (strcmp(op, "put-bytes") == 0) {
+    op_put_bytes(home_dirfd, uid, req, max_file_mode);
+  } else if (strcmp(op, "get-bytes") == 0) {
+    op_get_bytes(home_dirfd, uid, req);
+  } else if (strcmp(op, "mkdir") == 0) {
+    op_mkdir(home_dirfd, uid, req, max_dir_mode);
+  } else if (strcmp(op, "chmod") == 0) {
+    op_chmod(home_dirfd, uid, req, max_file_mode, max_dir_mode);
+  } else if (strcmp(op, "move") == 0) {
+    op_move(home_dirfd, uid, req);
+  } else if (strcmp(op, "copy") == 0) {
+    op_copy(home_dirfd, uid, req, max_file_mode, max_dir_mode, max_list_entries);
+  } else if (strcmp(op, "trash") == 0) {
+    op_trash(home_dirfd, uid, req);
+  } else if (strcmp(op, "list-trash") == 0) {
+    op_list_trash(home_dirfd, uid, max_list_entries);
+  } else if (strcmp(op, "restore") == 0) {
+    op_restore(home_dirfd, uid, req, max_file_mode, max_dir_mode);
+  } else if (strcmp(op, "empty-trash") == 0) {
+    op_empty_trash(home_dirfd, uid, req);
+  } else if (strcmp(op, "purge-trash") == 0) {
+    op_purge_trash(home_dirfd, uid, req);
+  } else {
+    respond_error("VALIDATION", EINVAL, "unsupported account file operation");
+  }
+}
+
 int main(int argc, char **argv) {
   (void)argv;
   close_extra_fds();
@@ -2529,33 +2846,5 @@ int main(int argc, char **argv) {
   drop_privileges_irreversibly(home_dirfd, account_uid, account_gid);
 
   /* 4. Dispatch operation strictly relative to home_dirfd */
-  if (strcmp(op, "list") == 0) {
-    op_list(home_dirfd, account_uid, req, max_list_entries);
-  } else if (strcmp(op, "read") == 0) {
-    op_read(home_dirfd, account_uid, req, max_edit_bytes);
-  } else if (strcmp(op, "write") == 0) {
-    op_write(home_dirfd, account_uid, req, max_edit_bytes, max_file_mode);
-  } else if (strcmp(op, "write-checked") == 0) {
-    op_write_checked(home_dirfd, account_uid, req, max_edit_bytes, max_file_mode);
-  } else if (strcmp(op, "put-bytes") == 0) {
-    op_put_bytes(home_dirfd, account_uid, req, max_file_mode);
-  } else if (strcmp(op, "get-bytes") == 0) {
-    op_get_bytes(home_dirfd, account_uid, req);
-  } else if (strcmp(op, "mkdir") == 0) {
-    op_mkdir(home_dirfd, account_uid, req, max_dir_mode);
-  } else if (strcmp(op, "chmod") == 0) {
-    op_chmod(home_dirfd, account_uid, req, max_file_mode, max_dir_mode);
-  } else if (strcmp(op, "trash") == 0) {
-    op_trash(home_dirfd, account_uid, req);
-  } else if (strcmp(op, "list-trash") == 0) {
-    op_list_trash(home_dirfd, account_uid, max_list_entries);
-  } else if (strcmp(op, "restore") == 0) {
-    op_restore(home_dirfd, account_uid, req, max_file_mode, max_dir_mode);
-  } else if (strcmp(op, "empty-trash") == 0) {
-    op_empty_trash(home_dirfd, account_uid, req);
-  } else if (strcmp(op, "purge-trash") == 0) {
-    op_purge_trash(home_dirfd, account_uid, req);
-  } else {
-    respond_error("VALIDATION", EINVAL, "unsupported account file operation");
-  }
+  run_operation(op, home_dirfd, account_uid, req, max_edit_bytes, max_file_mode, max_dir_mode, max_list_entries);
 }

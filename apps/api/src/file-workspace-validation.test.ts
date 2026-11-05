@@ -44,6 +44,21 @@ describe('pure file workspace requests', () => {
     requestError(() => request({ op: 'read', path: bound + 'a' }))
   })
   it.each([null, [], 42, {}, { op: 'unknown' }, { op: 'toString' }, { op: 'list', path: null }, { op: 'list', path: undefined }, { op: 'list', showHidden: 'false' }, { op: 'list', showHidden: undefined }, { op: 'read' }, { op: 'read', path: 'a', uid: 1000 }, { op: 'write', path: 'a' }, { op: 'write', path: 'a', content: null }, { op: 'write', path: 'a', content: '\ud800' }, { op: 'write', path: 'a', content: '', overwrite: 0 }, { op: 'write', path: 'a', content: '', mode: undefined }, { op: 'put-bytes', path: 'a' }, { op: 'mkdir', path: 'a', content: '' }, { op: 'list-trash', path: '' }, { op: 'restore', trashId: 'not-a-uuid' }, { op: 'restore', trashId: id, overwrite: 'false' }, { op: 'empty-trash', olderThanDays: -1 }, { op: 'empty-trash', olderThanDays: 0.5 }, { op: 'empty-trash', olderThanDays: 36501 }, { op: 'empty-trash', olderThanDays: '1' }])('rejects wrong primitives and unknown operation fields: %j', input => requestError(() => request(input)))
+  it('normalizes move and copy to an exact source and destination', () => {
+    for (const op of ['move', 'copy']) {
+      expect(request({ op, path: 'public_html/a.txt', destination: 'archive/b.txt' })).toEqual({ op, path: 'public_html/a.txt', destination: 'archive/b.txt' })
+      expect(request({ op, path: 'public_html', destination: 'public_html2' })).toMatchObject({ destination: 'public_html2' })
+    }
+  })
+  it.each([
+    { path: 'a.txt' }, { path: 'a.txt', destination: null }, { path: 'a.txt', destination: 7 }, { path: 'a.txt', destination: 'b.txt', overwrite: true },
+    { path: 'a.txt', destination: '../outside/a.txt' }, { path: 'a.txt', destination: '/etc/passwd' }, { path: 'a.txt', destination: 'docs/../../a.txt' },
+    { path: '../a.txt', destination: 'b.txt' }, { path: 'a.txt', destination: '.trash/a.txt' }, { path: '.trash/a', destination: 'b' },
+    { path: 'docs', destination: 'docs' }, { path: 'docs', destination: 'docs/inner' }, { path: 'a.txt', destination: '' }, { path: '', destination: 'b.txt' },
+    { path: 'a.txt', destination: 'b\\c' }, { path: 'a.txt', destination: 'x'.repeat(4097) },
+  ])('rejects unsafe or self-nested move and copy %j', input => {
+    for (const op of ['move', 'copy']) requestError(() => request({ op, ...input }))
+  })
   it.each([0, -1, 0o644, 0o666, 0o750, 0o4640, 0.5, '0640', true])('rejects unsafe regular-file mode %j', mode => requestError(() => request({ op: 'write', path: 'a', content: '', mode })))
   it('preserves valid file and directory permission subsets', () => {
     expect(request({ op: 'write', path: 'a', content: '', mode: 0o600, overwrite: false })).toMatchObject({ mode: 0o600, overwrite: false })
@@ -111,6 +126,16 @@ describe('strict operation-bound file workspace replies', () => {
     replyError(() => validateFileWorkspaceReply(request({ op: 'chmod', path: 'docs/a.txt', mode: 0o750 }), entry('docs/a.txt', { mode: 0o750 })))
     expect(validateFileWorkspaceReply(request({ op: 'restore', trashId: id }), entry())).toEqual(entry())
     replyError(() => validateFileWorkspaceReply(request({ op: 'restore', trashId: id }), entry('docs/a.txt', { kind: 'symlink' })))
+  })
+  it('binds move and copy replies to the destination; a move keeps its mode, a copy stays within the ceilings', () => {
+    const move = request({ op: 'move', path: 'docs/a.txt', destination: 'archive/a.txt' })
+    expect(validateFileWorkspaceReply(move, entry('archive/a.txt', { mode: 0o644 }))).toMatchObject({ path: 'archive/a.txt', mode: 0o644 })
+    expect(validateFileWorkspaceReply(move, entry('archive/a.txt', { kind: 'directory', sizeBytes: 0, mode: 0o755 }))).toMatchObject({ kind: 'directory' })
+    for (const input of [entry('docs/a.txt'), entry('archive/a.txt', { kind: 'symlink' }), { ...entry('archive/a.txt'), ok: true }, null]) replyError(() => validateFileWorkspaceReply(move, input))
+    const copy = request({ op: 'copy', path: 'docs', destination: 'archive/docs' })
+    expect(validateFileWorkspaceReply(copy, entry('archive/docs', { kind: 'directory', sizeBytes: 0, mode: 0o750 }))).toMatchObject({ kind: 'directory' })
+    expect(validateFileWorkspaceReply(copy, entry('archive/docs', { mode: 0o600 }))).toMatchObject({ kind: 'file', mode: 0o600 })
+    for (const input of [entry('archive/docs', { mode: 0o644 }), entry('archive/docs', { kind: 'directory', sizeBytes: 4096, mode: 0o750 }), entry('archive/docs', { kind: 'directory', mode: 0o755, sizeBytes: 0 }), entry('archive/docs', { kind: 'symlink' }), entry('docs')]) replyError(() => validateFileWorkspaceReply(copy, input))
   })
   it('preserves exact trash/list-trash/empty-trash wrappers and bounded metadata', () => {
     expect(validateFileWorkspaceReply(request({ op: 'trash', path: 'docs/a.txt' }), item())).toEqual(item())

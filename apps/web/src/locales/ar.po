@@ -7146,6 +7146,10 @@ msgstr "التحويل غير متاح على هذا الخادم: فهو يحت
 msgid "Cookie and Set-Cookie values are replaced up to the end of the line."
 msgstr "تُستبدل قيم Cookie وSet-Cookie حتى نهاية السطر."
 
+#: apps/web/src/audit-labels.ts
+msgid "Copied a file"
+msgstr "نسخ ملفاً"
+
 #: apps/web/src/board-port/approved-whm-plan-components.ts
 msgid "Copied disabled feature keys"
 msgstr "مفاتيح الميزات المعطلة المنسوخة"
@@ -18641,6 +18645,10 @@ msgstr "نقل قاعدة بيانات إلى المحذوفات"
 #: apps/web/src/audit-labels.ts
 msgid "Moved a file to trash"
 msgstr "نقل ملفاً إلى المحذوفات"
+
+#: apps/web/src/audit-labels.ts
+msgid "Moved or renamed a file"
+msgstr "نقل ملفاً أو أعاد تسميته"
 
 #: apps/web/src/board-port/xmail-inbox.ts
 msgid "Moved to {folder}: {subject}"

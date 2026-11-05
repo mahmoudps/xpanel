@@ -426,6 +426,26 @@ describe('S04 Native Account File Helper on disposable Linux VM (A15, A16, A17)'
     }
   }, 60_000)
 
+  it('A15: copies and moves under the account UID through the confined worker without replacing a target', async () => {
+    const accountA = { username: userA, uid: uidA, gid: uidA, home: '/home/' + userA }
+    const manager = new JailedFileManager(homeA, 1024, { account: accountA, runner: createConfinedRunner() })
+    try {
+      await manager.mkdir('copy-source', 0o750)
+      await manager.writeText('copy-source/a.txt', 'copied bytes\n', { overwrite: false, mode: 0o640 })
+      expect(await manager.copy('copy-source', 'copy-target')).toMatchObject({ path: 'copy-target', kind: 'directory', mode: 0o750 })
+      const copied = await stat(join(homeA, 'copy-target', 'a.txt'))
+      expect([copied.uid, copied.gid, copied.mode & 0o7777]).toEqual([uidA, uidA, 0o640])
+      expect(await manager.move('copy-target/a.txt', 'copy-source/b.txt')).toMatchObject({ path: 'copy-source/b.txt', kind: 'file' })
+      expect(await readFile(join(homeA, 'copy-source', 'b.txt'), 'utf8')).toBe('copied bytes\n')
+      await expect(manager.move('copy-source/b.txt', 'copy-source/a.txt')).rejects.toMatchObject({ code: 'CONFLICT' })
+      await expect(manager.copy('copy-source', 'copy-source/inner')).rejects.toMatchObject({ code: 'VALIDATION' })
+      expect((await readdir(homeA)).filter(name => name.startsWith('.xpanel-tmp-'))).toEqual([])
+    } finally {
+      await rm(join(homeA, 'copy-source'), { recursive: true, force: true })
+      await rm(join(homeA, 'copy-target'), { recursive: true, force: true })
+    }
+  })
+
   it('A15 denial: refuses access to root-owned or foreign-UID files without falling back to privileged agent I/O', async () => {
     const runner = createConfinedRunner({
     })

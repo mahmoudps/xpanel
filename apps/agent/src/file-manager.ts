@@ -63,6 +63,10 @@ export type AccountFileRequest =
   | { op: 'get-bytes'; path: string }
   | { op: 'mkdir'; path: string; mode: number }
   | { op: 'chmod'; path: string; mode: number }
+  /** Rename or move; the helper never replaces an existing destination. */
+  | { op: 'move'; path: string; destination: string }
+  /** File or bounded tree copy, published under the destination only when complete. */
+  | { op: 'copy'; path: string; destination: string }
   | { op: 'trash'; path: string }
   | { op: 'list-trash' }
   | { op: 'restore'; trashId: string; overwrite: boolean }
@@ -135,6 +139,12 @@ const contentPath = (value: string): string => {
     fail('FORBIDDEN', 'trash contents are accessible only through trash operations')
   }
   return path
+}
+
+const sourceAndDestination = (path: string, destination: string): [string, string] => {
+  const from = contentPath(path), to = contentPath(destination)
+  if (to === from || to.startsWith(from + '/')) fail('VALIDATION', 'destination must not be the source or inside it')
+  return [from, to]
 }
 
 const trashId = (value: string): string => {
@@ -345,6 +355,21 @@ export class JailedFileManager {
     assertSafeDirMode(mode)
     const entry = changedEntry(await this.execute({ op: 'chmod', path: relative, mode }), 'chmod', relative)
     if (entry.mode !== mode) return invalidResult('chmod')
+    return entry
+  }
+
+  async move(path: string, destination: string): Promise<FileEntry> {
+    const [from, to] = sourceAndDestination(path, destination)
+    // A move keeps the entry's own permissions, which may predate the panel ceilings.
+    const entry = fileEntry(await this.execute({ op: 'move', path: from, destination: to }), 'move', to)
+    if (entry.kind === 'symlink') return invalidResult('move')
+    return entry
+  }
+
+  async copy(path: string, destination: string): Promise<FileEntry> {
+    const [from, to] = sourceAndDestination(path, destination)
+    const entry = changedEntry(await this.execute({ op: 'copy', path: from, destination: to }), 'copy', to)
+    if (entry.kind === 'directory' && entry.sizeBytes !== 0) return invalidResult('copy')
     return entry
   }
 
