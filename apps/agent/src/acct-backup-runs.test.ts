@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { backupDestinationProofDigest, backupDestinationTargetDigest } from '../../../packages/core/src/backup-destination.ts'
 import type { BackupDestinationTarget } from '../../../packages/core/src/backup-destination.ts'
-import { BACKUP_TIMER_FRESH_MS, backupRunLedgerRevision, backupSchedulerVerified, parseBackupArchiveName, planBackupRetention, readBackupRunLedger, readBackupRunsView } from './acct-backup-plan.ts'
+import { BACKUP_TIMER_FRESH_MS, backupRunLedgerRevision, backupSchedulerReason, parseBackupArchiveName, planBackupRetention, readBackupRunLedger, readBackupRunsView } from './acct-backup-plan.ts'
 import { createBackupRunController, handleBackupRunsRoute, readSavedBackupConfig } from './acct-backup-runs.ts'
 import type { BackupRunDeps } from './acct-backup-runs.ts'
 import type { BackupTransferProvider, BackupTransferSession } from './acct-backup-s3.ts'
@@ -121,10 +121,12 @@ describe('scheduled backup controller', () => {
     const view = readBackupRunsView(JSON.parse(JSON.stringify(await t.controller.view())))
     expect(view.schedule?.timerObservedAt).toBe('2026-10-28T01:30:00.000Z')
     const at = new Date('2026-10-28T01:30:00.000Z')
-    expect(backupSchedulerVerified(view, config.schedule, at)).toBe(true)
-    expect(backupSchedulerVerified(view, config.schedule, new Date(at.getTime() + BACKUP_TIMER_FRESH_MS + 1))).toBe(false)
-    for (const saved of [null, { ...config.schedule, enabled: false }, { ...config.schedule, cron: '0 3 * * *' }]) expect(backupSchedulerVerified(view, saved, at)).toBe(false)
-    expect(backupSchedulerVerified({ ...view, available: false, reason: 'no_destination' }, config.schedule, at)).toBe(false)
+    expect(backupSchedulerReason(view, config.schedule, at)).toBeNull()
+    expect(backupSchedulerReason(view, config.schedule, new Date(at.getTime() + BACKUP_TIMER_FRESH_MS + 1))).toBe('timer_not_observed')
+    expect(backupSchedulerReason(view, { ...config.schedule, cron: '0 3 * * *' }, at)).toBe('timer_not_observed')
+    for (const saved of [null, { ...config.schedule, enabled: false }]) expect(backupSchedulerReason(view, saved, at)).toBe('schedule_not_enabled')
+    expect(backupSchedulerReason({ ...view, available: false, reason: 'no_destination' }, config.schedule, at)).toBe('no_destination')
+    expect(backupSchedulerReason({ ...view, available: false, reason: 'no_schedule', schedule: null }, config.schedule, at)).toBe('timer_not_observed')
     // A newly saved schedule is unverified until the timer evaluates it; a disabled one is never evaluated.
     config.schedule = { ...config.schedule, updatedAt: '2026-10-28T01:31:00.000Z' }
     expect((await t.controller.view()).schedule?.timerObservedAt).toBeNull()

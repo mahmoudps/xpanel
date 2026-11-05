@@ -20145,6 +20145,10 @@ msgstr "لا توجد اعتمادات DNS ديناميكي بعد."
 msgid "No edge setting is stored."
 msgstr "لا إعداد للحافة محفوظ."
 
+#: apps/web/src/whm-backups-client.ts
+msgid "No enabled schedule is saved, so the backup timer runs nothing."
+msgstr "لا توجد جدولة مفعّلة محفوظة، لذا لا يشغّل مؤقّت النسخ الاحتياطي شيئًا."
+
 #: apps/web/src/board-port/approved-xpanel-pages.ts
 msgid "No end date"
 msgstr "بلا تاريخ انتهاء"
@@ -29101,6 +29105,10 @@ msgstr "SFTP بعيد"
 msgid "Remote access"
 msgstr "الوصول البعيد"
 
+#: apps/web/src/board-port/approved-whm-backups.ts
+msgid "Remote authentication and native archive verification remain unavailable until their service adapters are qualified. Separate weekly retention, private-key configuration and granular restore stay unavailable."
+msgstr "تبقى المصادقة البعيدة والتحقق من الأرشيف غير متاحين حتى تأهيل محولات الخدمات. يبقى الاحتفاظ الأسبوعي المنفصل وإعداد المفتاح الخاص والاستعادة التفصيلية غير متاحة."
+
 #: apps/web/src/board-canvas.ts
 msgid "Remote copy"
 msgstr "النسخة البعيدة"
@@ -32539,8 +32547,8 @@ msgid "Saved at (UTC)"
 msgstr "وقت الحفظ (UTC)"
 
 #: apps/web/src/whm-backups-client.ts
-msgid "Saved backup configuration read. Execution and archive verification remain unavailable."
-msgstr "قُرئت إعدادات النسخ المحفوظة. يبقى التنفيذ والتحقق من الأرشيف غير متاحين."
+msgid "Saved backup configuration read. Archive verification remains unavailable."
+msgstr "قُرئت إعدادات النسخ المحفوظة. يبقى التحقق من الأرشيف غير متاح."
 
 #: apps/web/src/board-port/whm-backup-destinations-workspace.ts
 msgid "Saved backup destinations"
@@ -32605,8 +32613,8 @@ msgid "Saved configuration and readback verified. Serving, DNS and TLS remain un
 msgstr "تأكد الإعداد المحفوظ والقراءة اللاحقة. خدمة الموقع وDNS وTLS غير متحقق منها."
 
 #: apps/web/src/whm-backups-client.ts
-msgid "Saved configuration and recorded snapshot metadata were read. Server-wide jobs, restore differences, remote connection checks and native archive verification remain unavailable."
-msgstr "قُرئت الإعدادات وبيانات اللقطات المسجلة. تبقى عمليات الخادم وفروق الاستعادة وفحوص الاتصال البعيد والتحقق من الأرشيف غير متاحة."
+msgid "Saved configuration and recorded snapshot metadata were read. Restore differences, remote connection checks and native archive verification remain unavailable."
+msgstr "قُرئت الإعدادات وبيانات اللقطات المسجلة. تبقى فروق الاستعادة وفحوص الاتصال البعيد والتحقق من الأرشيف غير متاحة."
 
 #: apps/web/src/board-port/whm-databases-workspace.ts
 msgid "Saved configuration by account"
@@ -33574,6 +33582,14 @@ msgstr "أوامر مجدولة لهذا الحساب."
 #: apps/web/src/board-port/approved-xpanel-pages.ts
 msgid "Scheduled commands, run results and output delivery."
 msgstr "الأوامر المجدولة ونتائج التشغيل وتسليم المخرجات."
+
+#: apps/web/src/board-port/approved-whm-backups.ts
+msgid "Scheduled execution has not been observed."
+msgstr "لم يُرصد التنفيذ المجدول بعد."
+
+#: apps/web/src/whm-backups-client.ts
+msgid "Scheduled execution is not verified."
+msgstr "التنفيذ المجدول غير متحقق منه."
 
 #: apps/web/src/board-canvas.ts apps/web/src/board-port/account-cron-workspace.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/design-board.ts
 msgid "Scheduled jobs"
@@ -37714,6 +37730,14 @@ msgstr "بدأ النسخ الاحتياطي. اقرأ مجددًا لمتابع
 #~ msgid "The backup was restored."
 #~ msgstr "استُعيدت النسخة."
 
+#: apps/web/src/whm-backups-client.ts
+msgid "The backup timer has not been observed evaluating this saved schedule within the last few minutes."
+msgstr "لم يُرصد مؤقّت النسخ الاحتياطي وهو يقيّم هذه الجدولة المحفوظة خلال الدقائق القليلة الماضية."
+
+#: apps/web/src/whm-backups-client.ts
+msgid "The backup timer is observed running this saved schedule."
+msgstr "رُصد مؤقّت النسخ الاحتياطي وهو يشغّل هذه الجدولة المحفوظة."
+
 #: apps/web/src/board-port/whm-ftp-log-workspace.ts
 msgid "The bounded read reached its line limit, so the oldest part of this window may be missing. Narrow the time range."
 msgstr "بلغت القراءة المحدودة حد الأسطر، لذا قد يكون الجزء الأقدم من هذه النافذة ناقصًا. ضيّق النطاق الزمني."
@@ -38668,6 +38692,10 @@ msgstr "رُفض إجراء المضيف. لم يتغير شيء."
 #: apps/web/src/whm-server-observation-client.ts
 msgid "The host agent cannot read this on this server."
 msgstr "لا يستطيع وكيل المضيف قراءة ذلك على هذا الخادم."
+
+#: apps/web/src/whm-backups-client.ts
+msgid "The host agent could not be read, so the backup timer was not observed."
+msgstr "تعذّرت قراءة وكيل الخادم، لذا لم يُرصد مؤقّت النسخ الاحتياطي."
 
 #: apps/web/src/whm-support-client.ts
 msgid "The host agent is not connected. Host facts and the bundle are unavailable; the manifest and contact are shown."
@@ -41836,8 +41864,8 @@ msgid "These collections changed since they were read. Reload and review before 
 msgstr "تغيرت هذه المجموعات منذ قراءتها. أعد التحميل وراجع قبل الحفظ."
 
 #: apps/web/src/board-port/approved-whm-backups.ts
-msgid "These controls save configuration only. Scheduled execution, remote authentication and native archive verification remain unavailable until their service adapters are qualified. Separate weekly retention, private-key configuration and granular restore stay unavailable."
-msgstr "تحفظ هذه العناصر الإعدادات فقط. يبقى التنفيذ المجدول والمصادقة البعيدة والتحقق من الأرشيف غير متاحة حتى تأهيل محولات الخدمات. يبقى الاحتفاظ الأسبوعي المنفصل وإعداد المفتاح الخاص والاستعادة التفصيلية غير متاحة."
+msgid "These controls save configuration only."
+msgstr "تحفظ هذه العناصر الإعدادات فقط."
 
 #: apps/web/src/board-port/ops-file-sharing-workspace.ts
 msgid "These directories are exported outside xPanel and are left unchanged."

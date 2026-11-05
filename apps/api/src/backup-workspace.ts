@@ -3,7 +3,7 @@ import { fail, isXpanelError } from '@xpanel/core'
 import type { WriterLease } from '@xpanel/state'
 import type { ExtendedRouteHelpers, BackupDestination, BackupScheduleConfig, BackupSnapshot } from './extended-routes.ts'
 import { assertBackupDestinationsReady, createBackupDestinationsWorkspaceRoutes, normalizeBackupDestinationMetadata, observeBackupScheduler } from './backup-destinations-workspace.ts'
-import type { BackupDestinationHost, BackupLifecycleDestination } from './backup-destinations-workspace.ts'
+import type { BackupDestinationHost, BackupLifecycleDestination, BackupSchedulerObservation } from './backup-destinations-workspace.ts'
 import { backupDestinationTargetDigest } from '../../../packages/core/src/backup-destination.ts'
 
 export type BackupWorkspaceStorageKey = 'backups/destinations.json' | 'backups/schedule.json' | 'backups/snapshots.json'
@@ -12,7 +12,7 @@ export interface WhmBackupWorkspacePorts extends Pick<ExtendedRouteHelpers, 'sto
   publish: (key: Exclude<BackupWorkspaceStorageKey, 'backups/snapshots.json'>, value: unknown, lease: WriterLease) => Promise<void>
   destinationHost?: BackupDestinationHost
 }
-const application = (schedulerVerified: boolean) => ({ status: 'configuration_only', nativeApplied: false, remoteConnectionVerified: false, schedulerVerified }) as const
+const application = (scheduler: BackupSchedulerObservation) => ({ status: 'configuration_only', nativeApplied: false, remoteConnectionVerified: false, ...scheduler }) as const
 const kinds = ['s3', 'sftp', 'rsync', 'backblaze', 'ftp', 'local'] as const
 const invalid = (message: string): never => fail('VALIDATION', message, { stateChanged: false })
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)

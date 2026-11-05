@@ -14,7 +14,7 @@ vi.mock('./themes/v2/messages.ts', async () => {
   return { v2Messages: createThemeMessages('v2', read('en'), { ar: read('ar') }) }
 })
 const ID = '11111111-1111-4111-8111-111111111111', RUN = '33333333-3333-4333-8333-333333333333', FILE = 'xpanel-backup-alice-20261028T020000Z.tar.gz', SHA = 'a'.repeat(64), REV = 'c'.repeat(64)
-const application = { status: 'configuration_only', nativeApplied: false, remoteConnectionVerified: false, schedulerVerified: false }
+const application = { status: 'configuration_only', nativeApplied: false, remoteConnectionVerified: false, schedulerVerified: false, schedulerReason: 'schedule_not_enabled' as string | null }
 const workspace = { revision: REV, application, accounts: [], destinations: [], schedule: null, snapshots: [] }
 const archive = (username: string, ok = true) => ({ username, file: ok ? `xpanel-backup-${username}-20261028T020000Z.tar.gz` : null, bytes: ok ? 2048 : null, sha256: ok ? SHA : null, databases: ok && username === 'alice' ? ['alice_wp'] : [], zones: ok && username === 'alice' ? ['alice.example.test'] : [], integrity: ok ? 'verified' : 'failed', reason: ok ? null : 'backup_failed', detail: ok ? null : 'mariadb-dump: Got error: 145: Table is marked as crashed' })
 const run = { id: RUN, trigger: 'schedule', actor: 'scheduler', startedAt: '2026-10-28T02:00:00.000Z', finishedAt: '2026-10-28T02:10:30.000Z', state: 'failed', destinationIds: [ID], accounts: 2, mailIncluded: true, databasesIncluded: true, dnsIncluded: true, control: null, localDeleted: null, retention: [],

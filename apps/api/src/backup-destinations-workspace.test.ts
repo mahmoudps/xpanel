@@ -22,9 +22,10 @@ describe('canonical backup destination lifecycle',()=>{
     t.files.set('backups/schedule.json',{enabled:true,frequency:'daily',cron:'0 2 * * *',retentionCount:7,retentionWeekly:4,retentionMonthly:0,compress:'gzip',includeDatabases:true,includeMail:true,includeDns:true,includeControl:true,selectedAccounts:'all',destinationIds:[],updatedAt:'2026-10-27T00:00:00.000Z'})
     let timerObservedAt:string|null=new Date().toISOString()
     t.host.mockImplementation((async(c:AuthenticatedCaller,path:string)=>path==='/host/backups/runs'?{available:true,reason:null,revision:'b'.repeat(64),schedule:{enabled:true,cron:'0 2 * * *',nextRunAt:null,lastScheduledAt:null,timerObservedAt},storage:null,activeId:null,runs:[],recoveries:[],restores:[],nativeQualified:false}:answer(c,path)) as never)
-    const flags=async()=>[(await(await t.call('/api/backups/workspace'))!.json() as {application:{schedulerVerified:boolean}}).application.schedulerVerified,(await t.read() as unknown as {application:{schedulerVerified:boolean}}).application.schedulerVerified]
-    expect(await flags()).toEqual([true,true])
+    type Scheduler={application:{schedulerVerified:boolean,schedulerReason:string|null}}
+    const flags=async()=>[(await(await t.call('/api/backups/workspace'))!.json() as Scheduler).application,(await t.read() as unknown as Scheduler).application].map(({schedulerVerified,schedulerReason})=>({schedulerVerified,schedulerReason}))
+    expect(await flags()).toEqual(Array(2).fill({schedulerVerified:true,schedulerReason:null}))
     timerObservedAt=null
-    expect(await flags()).toEqual([false,false])
+    expect(await flags()).toEqual(Array(2).fill({schedulerVerified:false,schedulerReason:'timer_not_observed'}))
   })
 })

@@ -84,15 +84,15 @@ describe('backup runs workspace API', () => {
 describe('backup scheduler observation', () => {
   const saved = { enabled: true, cron: '0 2 * * *' } as BackupScheduleConfig
   const seen = (timerObservedAt: string | null) => ({ ...view, available: true, reason: null, schedule: { enabled: true, cron: '0 2 * * *', nextRunAt: null, lastScheduledAt: null, timerObservedAt } })
-  it('is verified only by a fresh agent timer observation of the saved, enabled schedule', async () => {
-    const now = new Date().toISOString()
-    expect(await observeBackupScheduler({ destinationHost: async () => seen(now) }, root, saved)).toBe(true)
-    for (const reply of [seen(null), seen(new Date(Date.now() - 10 * 60_000).toISOString()), { ...seen(now), available: false, reason: 'no_destination' }, { ...seen(now), extra: true }])
-      expect(await observeBackupScheduler({ destinationHost: async () => reply }, root, saved)).toBe(false)
-    expect(await observeBackupScheduler({ destinationHost: async () => { throw new Error('socket hang up') } }, root, saved)).toBe(false)
+  it('is verified only by a fresh agent timer observation of the saved, enabled schedule, and says why not', async () => {
+    const now = new Date().toISOString(), observe = (reply: () => Promise<unknown>) => observeBackupScheduler({ destinationHost: reply }, root, saved)
+    expect(await observe(async () => seen(now))).toEqual({ schedulerVerified: true, schedulerReason: null })
+    for (const reply of [seen(null), seen(new Date(Date.now() - 10 * 60_000).toISOString())]) expect(await observe(async () => reply)).toEqual({ schedulerVerified: false, schedulerReason: 'timer_not_observed' })
+    expect(await observe(async () => ({ ...seen(now), available: false, reason: 'no_destination' }))).toEqual({ schedulerVerified: false, schedulerReason: 'no_destination' })
+    for (const reply of [async () => ({ ...seen(now), extra: true }), async () => { throw new Error('socket hang up') }]) expect(await observe(reply)).toEqual({ schedulerVerified: false, schedulerReason: 'host_unreadable' })
+    expect(await observeBackupScheduler({}, root, saved)).toEqual({ schedulerVerified: false, schedulerReason: 'host_unreadable' })
     const host = vi.fn(async () => seen(now))
-    expect(await observeBackupScheduler({ destinationHost: host }, root, { ...saved, enabled: false })).toBe(false)
-    expect(await observeBackupScheduler({}, root, saved)).toBe(false)
+    for (const schedule of [{ ...saved, enabled: false }, null]) expect(await observeBackupScheduler({ destinationHost: host }, root, schedule)).toEqual({ schedulerVerified: false, schedulerReason: 'schedule_not_enabled' })
     expect(host).not.toHaveBeenCalled()
   })
 })

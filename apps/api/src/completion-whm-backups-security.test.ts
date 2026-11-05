@@ -62,7 +62,7 @@ describe('WHM backup configuration loopback HTTP security', () => {
 
   it('reads a stable absent configuration without creating backup files or claiming execution', async () => {
     const first = await f.view(), second = await f.view()
-    expect(first).toMatchObject({ destinations: [], schedule: null, snapshots: [], application: { status: 'configuration_only', nativeApplied: false, schedulerVerified: false, remoteConnectionVerified: false } })
+    expect(first).toMatchObject({ destinations: [], schedule: null, snapshots: [], application: { status: 'configuration_only', nativeApplied: false, schedulerVerified: false, schedulerReason: 'schedule_not_enabled', remoteConnectionVerified: false } })
     expect(second.revision).toBe(first.revision)
     expect(await f.bytes('destinations')).toBe(''); expect(await f.bytes('schedule')).toBe('')
   })

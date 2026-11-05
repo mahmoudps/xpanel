@@ -175,10 +175,17 @@ export function readBackupRunsView(raw: unknown): BackupRunsView {
 
 /** The agent backup timer fires every 60 s; an observation older than two missed fires no longer proves it runs. */
 export const BACKUP_TIMER_FRESH_MS = 150_000
-/** The saved schedule is in force only when it is enabled, the agent can run it, and its timer was seen evaluating that same schedule recently. */
-export function backupSchedulerVerified(view: BackupRunsView, saved: { enabled: boolean; cron: string } | null, now: Date): boolean {
+export const BACKUP_SCHEDULER_REASONS = ['schedule_not_enabled', 'timer_not_observed', 'no_executor', 'no_provider', 'unsupported_compression', 'no_destination', 'invalid_configuration', 'invalid_ledger'] as const
+export type BackupSchedulerReason = typeof BACKUP_SCHEDULER_REASONS[number]
+/**
+ * Null when the saved schedule is in force: it is enabled, the agent can run it, and its timer was seen evaluating that same
+ * schedule recently. Otherwise why not; an agent that read no schedule has not evaluated this one.
+ */
+export function backupSchedulerReason(view: BackupRunsView, saved: { enabled: boolean; cron: string } | null, now: Date): BackupSchedulerReason | null {
+  if (!saved?.enabled) return 'schedule_not_enabled'
+  if (!view.available && view.reason !== null && view.reason !== 'no_schedule') return view.reason
   const observed = view.schedule?.timerObservedAt ? Date.parse(view.schedule.timerObservedAt) : Number.NaN, age = now.getTime() - observed
-  return !!saved?.enabled && view.available && view.schedule?.enabled === true && view.schedule.cron === saved.cron && age >= -5_000 && age <= BACKUP_TIMER_FRESH_MS
+  return view.available && view.schedule?.enabled === true && view.schedule.cron === saved.cron && age >= -5_000 && age <= BACKUP_TIMER_FRESH_MS ? null : 'timer_not_observed'
 }
 
 const isoWeek = (date: Date): string => {
