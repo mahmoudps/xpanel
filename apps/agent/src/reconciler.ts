@@ -954,8 +954,10 @@ export class HostReconciler {
     }
     // systemd resolves a bare name (os.services.postfix = 'postfix') to its .service unit.
     const unit = /^[A-Za-z0-9][A-Za-z0-9_:@-]*$/.test(rawUnit) ? `${rawUnit}.service` : rawUnit
-    if (!/^[A-Za-z0-9](?:[A-Za-z0-9_.:@-]|\\x[0-9a-fA-F]{2})*\.service$/.test(unit) || unit.length > 200) {
-      return { ok: false, error: `service unit ${unit} cannot be probed` }
+    // A generation may manage .service, .timer and .socket units; probing only .service units made
+    // every cron timer look unprobeable after a successful start and failed the generation.
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9_.:@-]|\\x[0-9a-fA-F]{2})*\.(?:service|timer|socket)$/.test(unit) || unit.length > 200) {
+      return { ok: false, error: `managed unit ${unit} cannot be probed` }
     }
     const observed = await this.deps.executor.runCommand([
       '/usr/bin/systemctl', 'show', '--no-pager',
@@ -1134,7 +1136,7 @@ export class HostReconciler {
 
       // Unit files the failed generation created have no restored definition to restart from.
       const introducedUnits = new Set(journalRecord.previousFilesBackup
-        .filter(backup => !backup.existed && /\/systemd\/system\/[^/]+\.service$/.test(backup.path))
+        .filter(backup => !backup.existed && /\/systemd\/system\/[^/]+\.(?:service|timer|socket)$/.test(backup.path))
         .map(backup => backup.path.slice(backup.path.lastIndexOf('/') + 1)))
       const unitsToReload =
         journalRecord.reloadedUnits.length > 0
