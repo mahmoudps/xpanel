@@ -10,6 +10,7 @@ export const LIFECYCLE_ROOT = '/var/lib/xpanel-lifecycle'
 export const LIFECYCLE_BARRIER = LIFECYCLE_ROOT + '/writer-barrier.json'
 export const LIFECYCLE_LOCK = LIFECYCLE_ROOT + '/writer.lock'
 const exclusives = new WeakMap(), exclusiveScope = new AsyncLocalStorage(), writerScope = new AsyncLocalStorage()
+const writerStates = new WeakMap(), writerCapabilities = new WeakMap()
 const installExclusives = new WeakMap(), installExclusiveScope = new AsyncLocalStorage()
 const agentPrivateExclusives = new WeakMap(), agentPrivateExclusiveScope = new AsyncLocalStorage()
 const recoveryObservationScope = new AsyncLocalStorage()
@@ -121,6 +122,32 @@ async function admittedWriter(callback) {
     try { return await writerScope.run(state, callback) }
     finally { while (state.pending.size) await Promise.allSettled([...state.pending]); state.active = false; activeWriters-- }
   })
+}
+
+function bindLifecycleWriter(state) {
+  let capability = writerCapabilities.get(state)
+  if (!capability) { capability = Object.freeze({}); writerCapabilities.set(state, capability); writerStates.set(capability, state) }
+  return capability
+}
+
+function writerAdmissionBlocked() {
+  return exclusiveScope.getStore() || agentPrivateExclusiveScope.getStore() || installExclusiveScope.getStore()
+}
+
+/** The visible shared admission only. A copied object is not a writer grant. */
+export function currentLifecycleWriterAdmission() {
+  const state = writerScope.getStore()
+  if (!state?.active || writerAdmissionBlocked()) fail('LIFECYCLE_SHARED_ADMISSION_REQUIRED')
+  return bindLifecycleWriter(state)
+}
+
+/** Native callbacks drop the writer store. Re-enter that same live admission; do not take another lock. */
+export async function withVisibleLifecycleWriterAdmission(capability, callback) {
+  const state = capability && typeof capability === 'object' ? writerStates.get(capability) : undefined
+  const current = writerScope.getStore()
+  if (typeof callback !== 'function' || !state?.active || writerAdmissionBlocked() || (current && current !== state)) fail('LIFECYCLE_SHARED_ADMISSION_REQUIRED')
+  if (current === state) return callback()
+  return writerScope.run(state, callback)
 }
 
 /** Tracks full admission retirement, including lock/FD closure, without observer deadlines. */
