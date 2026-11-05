@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { chmod, lstat } from 'node:fs/promises'
-import { createConnection, createServer } from 'node:net'
+import { createConnection, createServer, type Socket } from 'node:net'
 import { withVerifiedCoordinatorOwnership, assertCoordinatorOwnershipCurrent, type CoordinatorOwnershipCapability } from '../../../scripts/coordinator-ownership.mjs'
 import { requireLinuxRoot, withTrustedFile } from '../../../scripts/lifecycle-ownership.mjs'
 import { runNativeRootOperatorCommand } from './lifecycle/native-runtime.ts'
@@ -12,41 +12,23 @@ import { createNativeClosedRecoveryHostedUidQualification, withNativeRootOperato
 import { ROOT_OPERATOR_SOCKET, rootOperatorArgv, withVerifiedNativeRootOperatorDispatch } from './ops-upgrade-root-dispatch.ts'
 import { decodeUpgradeIpcFrame, encodeUpgradeIpcFrame, parseLauncherKeyPair, UPGRADE_IPC_LIMIT } from './ops-upgrade-ipc.ts'
 import { parseRootOperatorRequest, signRootOperatorResponse, verifyRootOperatorResponse, type RootOperatorRequest, type RootOperatorResponse } from './ops-upgrade-operator-protocol.ts'
+import { parseRootOperatorRefusal, rootOperatorServerRefusal, ROOT_OPERATOR_MACHINE_CODE } from './ops-upgrade-operator-refusal.ts'
 
 export { ROOT_OPERATOR_SOCKET } from './ops-upgrade-root-dispatch.ts'
-const MACHINE_CODE = /^[A-Z][A-Z0-9_]{0,79}$/
+export { stableMachineCode, rootOperatorReviewRecord } from './ops-upgrade-operator-refusal.ts'
 const refused = (): never => { throw new Error('ROOT_OPERATOR_UNAVAILABLE') }
-export function stableMachineCode(error: unknown): string {
-  let current: unknown = error
-  let wrapper = ''
-  for (let depth = 0; current && depth < 6; depth += 1) {
-    const record = typeof current === 'object' ? current as { code?: unknown; message?: unknown; cause?: unknown } : undefined
-    const candidate = typeof record?.code === 'string' ? record.code : typeof record?.message === 'string' ? record.message : ''
-    if (MACHINE_CODE.test(candidate)) {
-      if (candidate !== 'ARCHIVE_USE_UNCERTAIN') return candidate
-      wrapper = candidate
-    }
-    current = record?.cause
-  }
-  return wrapper || 'ROOT_OPERATOR_REVIEW_REQUIRED'
-}
-export function rootOperatorReviewRecord(operationId: string, error: unknown) {
-  return Object.freeze({ operationId, state: 'review_required' as const, code: stableMachineCode(error), retryAllowed: false as const })
-}
 const review = (operationId: string, code = 'ROOT_OPERATOR_REVIEW_REQUIRED'): Error => {
-  const stable = MACHINE_CODE.test(code) ? code : 'ROOT_OPERATOR_REVIEW_REQUIRED'
+  const stable = ROOT_OPERATOR_MACHINE_CODE.test(code) ? code : 'ROOT_OPERATOR_REVIEW_REQUIRED'
   return Object.assign(new Error(stable), { operationId, code: stable, unknownOutcome: true, retryAllowed: false as const })
 }
-const refusalCode = (frame: Buffer): string | null => {
-  const text = frame.toString('utf8')
-  if (!text.endsWith('\n') || text.indexOf('\n') !== text.length - 1) return null
-  let parsed: unknown
-  try { parsed = JSON.parse(text) } catch { return null }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-  const keys = Reflect.ownKeys(parsed)
-  const value = (parsed as { refused?: unknown }).refused
-  if (keys.length !== 1 || keys[0] !== 'refused' || typeof value !== 'string' || !MACHINE_CODE.test(value)) return null
-  return value
+const refusalSent = new WeakSet<Socket>()
+/** Exactly one structured refusal per connection; the bounded journal line survives a lost peer. */
+const sendRefusal = (socket: Socket, error: unknown): void => {
+  if (refusalSent.has(socket)) { socket.destroy(); return }
+  refusalSent.add(socket)
+  const refusal = rootOperatorServerRefusal(error)
+  try { process.stderr.write(refusal.journalLine) } catch { /* the journal sink must not swallow the refusal */ }
+  try { if (socket.destroyed || socket.writableEnded) socket.destroy(); else socket.end(refusal.frame) } catch { socket.destroy() }
 }
 
 async function exchange(ownership: CoordinatorOwnershipCapability, request: RootOperatorRequest): Promise<RootOperatorResponse> {
@@ -68,7 +50,7 @@ async function exchange(ownership: CoordinatorOwnershipCapability, request: Root
       bytes = Buffer.concat([bytes, chunk]); if (bytes.length > UPGRADE_IPC_LIMIT) { finish(review(request.operationId)); return }
       if (!bytes.includes(10)) return
       frameSeen = true
-      const refusedCode = refusalCode(bytes)
+      const refusedCode = parseRootOperatorRefusal(bytes)
       if (refusedCode) { finish(review(request.operationId, refusedCode)); return }
       void (async () => {
         const after = await observeLauncher(ownership)
@@ -111,7 +93,7 @@ export async function startNativeRootOperatorServer() {
       if (!bytes.includes(10)) return
       handled = true
       let claim: ReturnType<typeof claimCoordinatorRequest>, request: RootOperatorRequest
-      try { request = parseRootOperatorRequest(decodeUpgradeIpcFrame(bytes)); claim = claimCoordinatorRequest(request.kind === 'recover' ? 'recovery' : 'ordinary') } catch { socket.destroy(); return }
+      try { request = parseRootOperatorRequest(decodeUpgradeIpcFrame(bytes)); claim = claimCoordinatorRequest(request.kind === 'recover' ? 'recovery' : 'ordinary') } catch (error) { sendRefusal(socket, error); return }
       void withVerifiedCoordinatorOwnership(async ownership => {
         const peer = kernelPeer(socket, addon), actual = await observeLauncher(ownership)
         if (peer.uid !== 0 || peer.gid !== 0 || actual.identity.pid !== process.pid || JSON.stringify(actual.identity) !== JSON.stringify(initial.identity)
@@ -157,7 +139,7 @@ export async function startNativeRootOperatorServer() {
           if (!socket.destroyed) socket.end(encodeUpgradeIpcFrame(signRootOperatorResponse({ phase: request.phase === 'observe' ? 'ready' : 'finished', request,
             identity: { workerId, ...after.identity }, qualification: verifiedQualification, resultDigest, outcome }, pair.privateKey)))
         })
-      }).catch(error => { if (!socket.destroyed) socket.end(JSON.stringify({ refused: stableMachineCode(error) }) + '\n'); else socket.destroy() }).finally(() => claim.release())
+      }).catch(error => sendRefusal(socket, error)).finally(() => claim.release())
     })
   })
   server.maxConnections = 4
