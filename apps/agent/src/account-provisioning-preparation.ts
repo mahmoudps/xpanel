@@ -91,11 +91,16 @@ export class AccountProvisioningPreparationReader {
       for (const pin of pins) {
         const opened = await pin.handle.stat(), named = await lstat(pin.path)
         // Only the installed data root (/var/lib/xpanel, setgid for the private service group) may be 02770.
-        const trustedStateRoot = pin.path === posix.dirname(this.stateRoot) && named.uid === this.owner.uid && named.gid === this.owner.gid && (named.mode & 0o7777) === 0o2770
+        // Protected startup narrows that root to 02750; both shapes carry no group write permission.
+        const rootMode = named.mode & 0o7777
+        const trustedStateRoot = pin.path === posix.dirname(this.stateRoot) && named.uid === this.owner.uid && named.gid === this.owner.gid
+          && (rootMode === 0o2770 || rootMode === 0o2750)
         if (!opened.isDirectory() || !named.isDirectory() || named.isSymbolicLink()
           || opened.dev !== pin.dev || opened.ino !== pin.ino || named.dev !== pin.dev || named.ino !== pin.ino
           || (!trustedStateRoot && ((named.uid !== 0 && named.uid !== this.owner.uid) || (named.mode & 0o022)))) return refuse()
-        if (pin.path === this.directory && (named.uid !== this.owner.uid || (named.mode & 0o7777) !== 0o700)) return refuse()
+        // A carried-over host may have an SGID-inherited private leaf (02700); group bits stay empty either way.
+        const leafMode = named.mode & 0o7777
+        if (pin.path === this.directory && (named.uid !== this.owner.uid || (leafMode !== 0o700 && leafMode !== 0o2700))) return refuse()
       }
     }
     try {
