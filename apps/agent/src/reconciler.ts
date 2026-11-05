@@ -1181,7 +1181,9 @@ export class HostReconciler {
       await runGenerationDnsHook({ phase: 'verify', native, provider: this.deps.dnsPublication, files: previousFiles, removedPaths: absentPaths, zoneDir })
     } catch (rollbackErr) {
       journalRecord.phase = 'needs_attention'
-      journalRecord.error = `rollback failed after ${errorMsg}: ${(rollbackErr as Error).message}`
+      const rollbackDetail = isXpanelError(rollbackErr) && rollbackErr.detail && Object.keys(rollbackErr.detail).length
+        ? ` ${JSON.stringify(rollbackErr.detail).slice(0, 400)}` : ''
+      journalRecord.error = `rollback failed after ${errorMsg}: ${(rollbackErr as Error).message}${rollbackDetail}`
       await this.journal.saveJournal(journalRecord)
       throw rollbackErr
     }

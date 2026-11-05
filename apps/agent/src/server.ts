@@ -1560,7 +1560,16 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           await deps.cronQualification!({ account, job, action })
           const rendered = system.renderCronUnits(account, { id: cronJobUnitId(job.id), schedule: job.schedule, command: job.command, ...(job.maxRuntimeSec === undefined ? {} : { maxRuntimeSec: job.maxRuntimeSec }) }, profile)
           for (const file of [rendered.commandFile, rendered.service, rendered.timer]) {
-            if (await executor.readFile(file.path) !== file.content) return fail('PRECONDITION_FAILED', 'Cron host source differs from saved configuration; reconcile and review before execution', { stateChanged: false, sourceConflict: true })
+            const actual = await executor.readFile(file.path)
+            if (actual !== file.content) {
+              const expectedLines = file.content.split('\n'), actualLines = (actual ?? '').split('\n')
+              let at = 0
+              while (at < expectedLines.length && expectedLines[at] === actualLines[at]) at++
+              console.error('xpanel-agent cron source mismatch:', file.path, 'line', at,
+                'expected', JSON.stringify(expectedLines[at] ?? '<absent>').slice(0, 160),
+                'actual', actual === null ? '<missing>' : JSON.stringify(actualLines[at] ?? '<absent>').slice(0, 160))
+              return fail('PRECONDITION_FAILED', 'Cron host source differs from saved configuration; reconcile and review before execution', { stateChanged: false, sourceConflict: true })
+            }
           }
           const observation = action === 'run' ? await adapter.triggerCronNow(account, cronJobUnitId(job.id)) : await adapter.observeCronStatus(account, cronJobUnitId(job.id))
           return { context: { accountId: account.id, jobId: job.id }, revision, observation }
