@@ -179,6 +179,11 @@ describe('account backups', () => {
     expect(created).toEqual({ file: archiveName, bytes: 100 })
     const tar = executor.executedActions.find(action => action.kind === 'exec' && action.argv[0] === '/usr/bin/tar' && action.argv.includes('--create'))
     expect(tar).toMatchObject({ kind: 'exec', runAsUser: 'alice' })
+    // The staging file is pre-created so tar does not change the archived home mtime mid-read.
+    const stagingTouch = executor.executedActions.findIndex(action => action.kind === 'exec' && action.argv[0] === '/usr/bin/touch' && action.argv.includes('/home/alice/.xpanel-backup-20261023T165300Z.tar.gz'))
+    const tarIndex = executor.executedActions.indexOf(tar!)
+    expect(stagingTouch).toBeGreaterThanOrEqual(0)
+    expect(stagingTouch).toBeLessThan(tarIndex)
     expect(executor.executedActions.some(action => action.kind === 'remove-path' && action.path === '/home/alice/.xpanel-backup-20261023T165300Z.tar.gz')).toBe(true)
     executor.executedActions.length = 0
     await expect(createAccountBackup({ executor, account, now: stamp, readSize: async () => MAX_BACKUP_BYTES + 1 })).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' })
