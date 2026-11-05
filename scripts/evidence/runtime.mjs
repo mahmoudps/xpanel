@@ -7,13 +7,24 @@ import { validateSemanticReport } from './reports.mjs'
 
 const targetKey = target => JSON.stringify({ sourceFingerprint: target.sourceFingerprint, artifactSha256: target.artifactSha256, supportedProfiles: [...target.supportedProfiles].sort() })
 
-/** Pure bundle validation. A caller must separately trust the bundle's digest and deployment target. */
-export function verifyEvidenceBundle(bundle, { expectedTarget, expectedRequirements, evidenceRoot } = {}) {
+/**
+ * Pure bundle validation for one EvidenceBundle v1 document.
+ *
+ * `requireComplete` exists only for reporting consumers (for example the
+ * generated status surface): every supplied receipt and evidence row is still
+ * validated in full, but a report may describe a bundle that has not yet
+ * reached complete acceptance. The admission path (`verifyEvidenceBundle`, the
+ * trusted Linux loader and the API acceptance configuration) always requires
+ * complete evidence.
+ */
+export function validateEvidenceBundle(bundle, { expectedTarget, expectedRequirements, evidenceRoot, requireComplete = true, requireAllProfiles = requireComplete } = {}) {
   requireValue(bundle?.schemaVersion === 1 && bundle.kind === 'xpanel-capability-evidence', 'Unsupported detached evidence bundle')
-  validateTargetDocument({ schemaVersion: 1, kind: 'xpanel-verification-target', target: bundle.target, source: bundle.source, provenance: bundle.provenance })
+  validateTargetDocument({ schemaVersion: 1, kind: 'xpanel-verification-target', target: bundle.target, source: bundle.source, provenance: bundle.provenance }, { requireAllProfiles })
   validateRequirements(bundle.requirements)
-  validateTarget(expectedTarget)
-  requireValue(targetKey(bundle.target) === targetKey(expectedTarget), 'Evidence target does not match the deployed source/artifact/profiles')
+  if (expectedTarget !== undefined) {
+    validateTarget(expectedTarget)
+    requireValue(targetKey(bundle.target) === targetKey(expectedTarget), 'Evidence target does not match the deployed source/artifact/profiles')
+  }
   if (expectedRequirements !== undefined) requireValue(JSON.stringify(bundle.requirements) === JSON.stringify(validateRequirements(expectedRequirements)), 'Evidence requirements differ from the reviewed acceptance inventory')
   requireValue(Array.isArray(bundle.evidence) && Array.isArray(bundle.receipts) && bundle.receipts.length === bundle.evidence.length && bundle.receipts.length > 0, 'Incomplete receipt/evidence manifest')
   const receiptIds = new Set(), paths = new Set(), keys = new Set()
@@ -38,8 +49,14 @@ export function verifyEvidenceBundle(bundle, { expectedTarget, expectedRequireme
       validateSemanticReport(JSON.parse(reportBytes.toString('utf8')), entry.report.kind, requirement.checks[receipt.environment])
     }
   }
-  assertCompleteEvidence(bundle.evidence, bundle.target, bundle.requirements)
-  return { target: bundle.target, evidence: bundle.evidence, source: bundle.source, requirements: bundle.requirements }
+  if (requireComplete) assertCompleteEvidence(bundle.evidence, bundle.target, bundle.requirements)
+  return { target: bundle.target, evidence: bundle.evidence, source: bundle.source, requirements: bundle.requirements, receipts: bundle.receipts }
+}
+
+/** Admission validation: complete acceptance evidence only. */
+export function verifyEvidenceBundle(bundle, options = {}) {
+  requireValue(options.expectedTarget !== undefined, 'A deployed verification target is required')
+  return validateEvidenceBundle(bundle, { ...options, requireComplete: true, requireAllProfiles: true })
 }
 
 export function assertTrustedMetadata(entries) {

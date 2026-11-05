@@ -69,3 +69,7 @@ node --test scripts/evidence/evidence.test.mjs
 The same assertions are discovered by ordinary unit/portable lanes through `scripts/test-evidence.test.ts`; that wrapper registers them directly with Vitest and starts no extra process.
 
 The receipt list is a JSON array of paths contained in `evidenceRoot`; report paths are safe relative paths under the same directory. Raw reports remain separate from runtime bundles and must be reviewed for private content before any publication. No command here deploys, starts services or changes authorization. Successful tooling tests do not establish native feature acceptance.
+
+## Generated status
+
+`status.mjs` renders a generated per-tool/per-profile/per-tier report from reviewed requirements and one or more detached bundles, and `--check` is a CI gate that passes only when every reviewed requirement is verified. It is documented, with commands and the still-missing real evidence, in [docs/evidence/README.md](../../docs/evidence/README.md). It never writes `data/delivery.ts`.
