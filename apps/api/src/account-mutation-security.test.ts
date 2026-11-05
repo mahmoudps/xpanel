@@ -170,6 +170,11 @@ const fixture = async () => {
           php: { status: 200, uid: a.uid, cgroup } } }))
       return
     }
+    // A ready purge models the agent's terminate generation: host teardown removes the account from
+    // desired state inside the same applied generation that proves it.
+    if (request.url === '/state/apply' && purgeMode === 'ready' && (await state.store.getAccount(account.id))?.status === 'terminating') {
+      await state.store.deleteAccount((await state.store.markTerminating(account.id)).id)
+    }
     response.end(JSON.stringify({ status: 'applied', generation: { id: 1, createdAt: '2026-10-23T00:00:00Z', status: 'active', checksum: 'a'.repeat(64), error: null, actor: 'root', testedAt: '2026-10-23T00:00:00Z', activatedAt: '2026-10-23T00:00:00Z' }, filesCount: 2, durationMs: 1 }))
   })
   await new Promise<void>(resolve => host.listen(0, '127.0.0.1', resolve))
@@ -659,7 +664,8 @@ describe('account mutation outcomes and race boundaries', () => {
     expect(await f.database.db.query('SELECT id FROM principals WHERE account_id = $1', [f.account.id])).toEqual([])
     expect(await findPrincipalByUsername(f.database.db, f.neighbor.username)).not.toBeNull()
     expect(await f.state.store.getAccount(f.other.id)).not.toBeNull()
-    expect(f.calls()).toBe(0)
+    // One target-bound purge probe plus one applied termination generation.
+    expect(f.calls()).toBe(2)
   })
 
   it('revokes all linked aliases and tokens during suspension without changing disabled flags or neighbor access', async () => {
