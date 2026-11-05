@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { constants } from 'node:fs'
 import { chmod, open, lstat, stat, statfs, mkdir, opendir, readdir, readlink } from 'node:fs/promises'
@@ -234,11 +235,22 @@ const closeOwned = async handle => {
   try { await handle.close() }
   catch (error) { uncertainDescriptor = true; uncertainHandles.add(handle); throw new ReleaseVerificationError('DESCRIPTOR_UNCERTAIN', 'Descriptor retirement is uncertain; process recovery is required', error) }
 }
+// Nested admissions inside one admitted lifetime (a prepared release scope verifying its tree or another
+// release) are part of that verification: they count against the nesting ceiling, not the concurrency ceiling.
+// Work that outlives its parent lifetime is admitted afresh.
+const admission = new AsyncLocalStorage()
 const admitted = async run => {
   if (uncertainDescriptor) refuse('DESCRIPTOR_UNCERTAIN', 'Descriptor retirement is uncertain; process recovery is required')
+  const parent = admission.getStore()
+  if (parent?.live) {
+    if (parent.depth >= 8) refuse('BUSY', 'Verification nesting ceiling reached')
+    const frame = { depth: parent.depth + 1, live: true }
+    try { return await admission.run(frame, run) } finally { frame.live = false }
+  }
   if (active >= 4) refuse('BUSY', 'Verification concurrency ceiling reached')
   active++
-  try { return await run() } finally { active-- }
+  const frame = { depth: 1, live: true }
+  try { return await admission.run(frame, run) } finally { frame.live = false; active-- }
 }
 // The stream owns only this bounded adapter, never the retained FileHandle.
 // Destroying FileHandle.createReadStream can close its handle even with
