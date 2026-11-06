@@ -190,14 +190,14 @@ export const createProductionUpgradePorts = (deps: ProductionUpgradeDependencies
     reconcile: reason => deps.reconciler.reconcile(reason),
     activate: generationId => deps.reconciler.activate(generationId),
     status: () => deps.reconciler.status(),
-    async identities() {
-      const values = await deps.reconciler.identities()
+    async identities(limits) {
+      const observed = await deps.reconciler.identities(limits)
       canaryTargets.clear()
-      for (const value of values) {
+      for (const value of observed.accounts) {
         if (canaryTargets.has(value.username)) return fail('PRECONDITION_FAILED', 'ambiguous lifecycle account identity')
         canaryTargets.set(value.username, value)
       }
-      return values
+      return observed
     },
   }
 

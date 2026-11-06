@@ -1,4 +1,4 @@
-import type { Limit } from '@xpanel/core'
+import type { HostLimitObservation, Limit } from '@xpanel/core'
 import type { OsRelease } from '@xpanel/os'
 import type { AuditPort, ClockPort, FsPort, HostPort } from '../ports.ts'
 import type { PendingMigration } from './migrations.ts'
@@ -18,6 +18,16 @@ export interface AccountIdentity {
   quotas: Record<string, Limit>
 }
 
+/**
+ * Assigned-limit evidence each phase must prove. The running older release may never have applied a
+ * limit kind, so admission needs readable evidence only; the activated release must verify; a host
+ * running its pre-upgrade release again must be no worse than the evidence recorded at admission.
+ */
+export type LimitRequirement =
+  | { phase: 'precheck' }
+  | { phase: 'activated' }
+  | { phase: 'recovery'; baseline: HostLimitObservation | null }
+
 /** config_generations ids (bigint identity in the control DB). */
 export type GenerationId = number
 
@@ -31,7 +41,8 @@ export interface ReconcilerPort {
    */
   activate(generationId: GenerationId): Promise<{ generationId: GenerationId; units: UnitChange[] }>
   status(): Promise<{ converged: boolean; drift: string[] }>
-  identities(): Promise<AccountIdentity[]>
+  /** Refuses (LIFECYCLE_ASSIGNED_LIMITS_UNVERIFIED) when the observed limits do not meet `limits`. */
+  identities(limits: LimitRequirement): Promise<{ accounts: AccountIdentity[]; limits: HostLimitObservation }>
 }
 
 /** Backed by the db package's expand-only runner, pointed at the release's migrations directory. */

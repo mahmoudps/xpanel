@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { XpanelError, fail } from '@xpanel/core'
+import type { AccountLimitGap, HostLimitObservation } from '@xpanel/core'
 import type { OsRelease } from '@xpanel/os'
 import { FakeClock, FakeFs, FakeHost, MemoryAudit, RESELLER, ROOT, gate, osRelease } from '../testing/fakes.ts'
-import { REWIND_STEPS, isCustomerDataPath, normalizeUpgradePlan, parseRewindJournal, readLock, recoverUpgrade, runUpgrade } from './machine.ts'
+import { REWIND_STEPS, isCustomerDataPath, limitRequirementMet, normalizeUpgradePlan, parseRewindJournal, readLock, recoverUpgrade, runUpgrade } from './machine.ts'
 import type { RewindStep, UpgradePlan } from './machine.ts'
 import type { PendingMigration } from './migrations.ts'
-import type { AccountIdentity, UnitChange, UpgradePhase, UpgradePorts, UpgradeStatus } from './ports.ts'
+import type { AccountIdentity, LimitRequirement, UnitChange, UpgradePhase, UpgradePorts, UpgradeStatus } from './ports.ts'
 
 const ARCHIVE = '/opt/xpanel/downloads/xpanel-1.1.0.tar.gz'
 const ARCHIVE_BYTES = 'release-1.1.0'
@@ -24,6 +25,9 @@ const sha = (s: string): string => createHash('sha256').update(s).digest('hex')
 
 const alice: AccountIdentity = { username: 'alice', uid: 1001, gid: 1001, slice: 'xpanel-1001.slice', quotas: { diskMb: 5000, ioWriteBps: 10_000_000, memoryMb: 'unlimited' } }
 const bob: AccountIdentity = { username: 'bob', uid: 1002, gid: 1002, slice: 'xpanel-1002.slice', quotas: { diskMb: 1000, ioWriteBps: 'unlimited', memoryMb: 512 } }
+
+const limits = (status: HostLimitObservation['status'], gaps: AccountLimitGap[] = []): HostLimitObservation =>
+  ({ status, checkedAccounts: status === 'unavailable' ? 1 : 2, unavailableAccounts: status === 'unavailable' ? 1 : 0, gaps })
 
 const argValue = (argv: string[], flag: string): string | undefined =>
   argv.find((a) => a.startsWith(`${flag}=`))?.slice(flag.length + 1)
@@ -58,6 +62,9 @@ interface World {
   db: ControlState
   gen: { current: number; activated: number[]; reconciled: number }
   identities: AccountIdentity[]
+  /** assigned-limit evidence the host reports; the identities port enforces each phase's requirement like native */
+  limits: HostLimitObservation
+  requirements: LimitRequirement[]
   served: Map<string, number | null>
   controlPlane: { ok: boolean }
   /** health faults normally come with the new release; set when they must survive the rewind */
@@ -106,6 +113,8 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
     db: { schema: 4, applied: ['0001', '0002', '0003', '0004'], data: 'desired-state-v4', rows: [] },
     gen: { current: 41, activated: [], reconciled: 0 },
     identities: [structuredClone(alice), structuredClone(bob)],
+    limits: limits('verified'),
+    requirements: [],
     served: new Map([['alice', 1001]]),
     controlPlane: { ok: true },
     faultsPersist: false,
@@ -260,7 +269,11 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
         return { generationId: id, units: [{ unit: 'nginx.service', needs: 'reload' }, { unit: 'apache2.service', needs: 'reload' }] }
       },
       status: async () => ({ converged: w.converged.value, drift: w.converged.value ? [] : ['vhost alice.example'] }),
-      identities: async () => structuredClone(w.identities),
+      identities: async requirement => {
+        w.requirements.push(structuredClone(requirement))
+        if (!limitRequirementMet(requirement, w.limits)) throw Object.assign(new Error('LIFECYCLE_ASSIGNED_LIMITS_UNVERIFIED'), { code: 'LIFECYCLE_ASSIGNED_LIMITS_UNVERIFIED' })
+        return { accounts: structuredClone(w.identities), limits: structuredClone(w.limits) }
+      },
     },
     migrator: {
       currentSchema: async () => w.db.schema,
@@ -805,6 +818,73 @@ describe('runUpgrade: success', () => {
   it('runs on the EL family with the same absolute tools', async () => {
     const w = world({ os: osRelease('centos', '10', 'PLATFORM_ID="platform:el10"\n') })
     expect((await runUpgrade(w.ports, plan({ os: { family: 'rhel' } }))).outcome).toBe('retirement_pending')
+  })
+})
+
+describe('assigned-limit evidence per lifecycle phase', () => {
+  it('admits an upgrade from a release that never applied a limit kind and records that evidence', async () => {
+    const w = world()
+    w.limits = limits('gaps', ['io'])
+    w.afterReconcile = () => { w.limits = limits('verified') }
+    const r = await runUpgrade(w.ports, plan())
+    expect(r).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'succeeded' })
+    expect(r.steps).toContainEqual(expect.objectContaining({ phase: 'precheck', step: 'limits', ok: true, detail: 'assigned limits gaps: io' }))
+    expect((await readLock(w.fs, LOCK))?.limits).toEqual(limits('gaps', ['io']))
+    expect(w.requirements).toEqual([{ phase: 'precheck' }, { phase: 'activated' }])
+  })
+
+  it('refuses admission when the limit evidence is unreadable, before any effect', async () => {
+    const w = world()
+    w.limits = limits('unavailable')
+    await expect(runUpgrade(w.ports, plan())).rejects.toThrow('LIFECYCLE_ASSIGNED_LIMITS_UNVERIFIED')
+    expect(await w.fs.exists(LOCK)).toBe(false)
+    expect(w.db.rows).toEqual([])
+    expect(w.host.actions).toEqual([])
+  })
+
+  it('rolls back when the activated release does not verify, and accepts the rewound release no worse than admission', async () => {
+    const w = world()
+    w.limits = limits('gaps', ['io'])
+    const r = await runUpgrade(w.ports, plan())
+    expect(r).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
+    expect(r.reason).toMatch(/identity probe failed: LIFECYCLE_ASSIGNED_LIMITS_UNVERIFIED/)
+    expect(r.rewind?.state).toBe('rewind-verified')
+    expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
+    expect(w.requirements).toEqual([{ phase: 'precheck' }, { phase: 'activated' }, { phase: 'activated' }, { phase: 'activated' }, { phase: 'recovery', baseline: limits('gaps', ['io']) }])
+  })
+
+  it('recovers a pre-transition abort only when limits are no worse than the admission evidence', async () => {
+    const w = world()
+    w.limits = limits('gaps', ['io'])
+    const original = w.host.handler
+    w.host.handler = a => (a.kind === 'exec' && isStateSnapshotTar(a.argv) ? { code: 1, stdout: '', stderr: 'state archive failed' } : original?.(a))
+    expect(await runUpgrade(w.ports, plan())).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'failed' })
+    w.host.handler = original
+    expect((await readLock(w.fs, LOCK))?.limits).toEqual(limits('gaps', ['io']))
+    const input = { actor: ROOT, os: { family: 'debian' as const }, note: 'aborted before the transition', canary: 'alice' }
+    for (const worse of [limits('gaps', ['memory', 'io']), limits('unavailable')]) {
+      w.limits = worse
+      await expect(recoverUpgrade(w.ports, input)).rejects.toThrow(/identity probe failed: LIFECYCLE_ASSIGNED_LIMITS_UNVERIFIED/)
+    }
+    w.limits = limits('gaps', ['io'])
+    await expect(recoverUpgrade(w.ports, input)).resolves.toMatchObject({ status: 'retirement_pending', hostOutcome: 'rolled_back' })
+    w.limits = limits('verified')
+    await expect(recoverUpgrade(w.ports, input)).resolves.toMatchObject({ status: 'retirement_pending' })
+    expect(w.requirements.at(-1)).toEqual({ phase: 'recovery', baseline: limits('gaps', ['io']) })
+    // A recovery that keeps the selected target release holds it to the activated requirement.
+    const recoveryPlan = w.ports.safety.recoveryPlan
+    w.ports.safety.recoveryPlan = async () => ({ ...await recoveryPlan(), mode: 'finish-publication', hostOutcome: 'succeeded' })
+    w.limits = limits('gaps', ['io'])
+    await expect(recoverUpgrade(w.ports, input)).rejects.toThrow(/identity probe failed: LIFECYCLE_ASSIGNED_LIMITS_UNVERIFIED/)
+    expect(w.requirements.at(-1)).toEqual({ phase: 'activated' })
+  })
+
+  it('compares observed evidence with each phase requirement', () => {
+    expect(limitRequirementMet({ phase: 'activated' }, limits('gaps', ['io']))).toBe(false)
+    expect(limitRequirementMet({ phase: 'activated' }, limits('verified'))).toBe(true)
+    expect(limitRequirementMet({ phase: 'recovery', baseline: null }, limits('gaps', ['io']))).toBe(true)
+    expect(limitRequirementMet({ phase: 'recovery', baseline: null }, limits('unavailable'))).toBe(false)
+    expect(limitRequirementMet({ phase: 'recovery', baseline: limits('unavailable') }, limits('unavailable'))).toBe(true)
   })
 })
 
