@@ -115,8 +115,10 @@ export function assertProvisioningReply<T extends ProvisioningGenerationResult>(
     : status === 'noop' ? ['status', 'generation', 'stateChecksum']
       : status === 'failed' ? ['status', 'generation', 'failedTest', 'error'] : null
   if (!fields) return unverifiedReply()
-  const result = replyRecord(value.reconciliation, fields, status === 'applied' ? ['removedFilesCount', 'repairedDriftCount']
-    : status === 'failed' ? ['rolledBack', 'restoredGenerationId', 'stateChanged', 'verificationRequired'] : [])
+  // Every reconcile result may carry the observed kernel host name (null when the host exposes none).
+  const result = replyRecord(value.reconciliation, fields, ['kernelHostname', ...(status === 'applied' ? ['removedFilesCount', 'repairedDriftCount']
+    : status === 'failed' ? ['rolledBack', 'restoredGenerationId', 'stateChanged', 'verificationRequired'] : [])])
+  if (Object.hasOwn(result, 'kernelHostname') && result.kernelHostname !== null && !observedText(result.kernelHostname, 253)) return unverifiedReply()
   // These are the actual ConfigGeneration identity fields, not truthiness checks.
   const generation = replyRecord(result.generation, ['id', 'checksum', 'status'], ['createdAt', 'error', 'actor', 'testedAt', 'activatedAt'])
   if (!positiveId(generation.id) || !hex(generation.checksum)) return unverifiedReply()

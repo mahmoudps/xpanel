@@ -13,7 +13,7 @@ import { appendAudit, createDb, initializeOperationalMetadata, migrate, pruneMet
 import { detectOs, XPANEL_FPM_SOCKET_DIR } from '@xpanel/os'
 import { StateStore, atomicWriteJson, readJsonIfExists } from '@xpanel/state'
 import { createProductionAccountFileRunner, DEFAULT_FILE_WORKER_INCIDENT_DIR } from './production-file-runner.ts'
-import { CanonicalIoResourcePipeline, IoAnalyticsEngine, WebsiteAnalyticsEngine } from './analytics.ts'
+import { CanonicalIoResourcePipeline, IoAnalyticsEngine, readWebsiteAnalyticsStore, WEBSITE_ANALYTICS_PATH, WebsiteAnalyticsEngine } from './analytics.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
 import { ensureAcmeWebRoot } from './host-access.ts'
 import { readManagementHosts, syncRuntimePublicOrigin } from './agent-origin.ts'
@@ -49,6 +49,9 @@ import { awaitLifecycleWriterDrain, createLifecycleBackgroundResources, isLifecy
 import { createMariaDbSqlRunner, DEFAULT_MARIADB_ADMIN_CNF, defaultCommandRunner as mariadbCommandRunner, MariaDbServiceAdapter, mariadbSocketForFamily } from './services/mariadb.ts'
 import { withPostgresqlSqlRunner } from './pg-sql.ts'
 import { createNativeDnsReconcileProvider } from './services/dns-native.ts'
+import { createAccountGitRun } from './account-git-runner.ts'
+import { GIT_BINARY, GIT_LIMITS } from '../../../packages/os/src/git-command.ts'
+import { nativeRpmDatabaseRecovery } from './ops-package-recovery.ts'
 
 export interface AgentDaemonOptions {
   dbPath?: string
@@ -221,6 +224,9 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           trustedHostTargetMatcher: createProductionHostTargetMatcher(),
           sqlRunner,
         })
+        // Account Git runs in the account jail; this bound outlasts its RuntimeMaxSec so systemd ends the unit first.
+        const gitExecutor = existsSync(GIT_BINARY) ? new LinuxHostExecutor({ timeoutMs: (GIT_LIMITS.timeoutSeconds + 15) * 1000, maxOutputBytes: GIT_LIMITS.outputBytes + 1 }) : null
+        const rpmDatabaseRecovery = nativeRpmDatabaseRecovery(os.family, argv => executor.runCommand(argv))
         const quotaFilesystem = configuredQuotaFilesystem !== undefined ? configuredQuotaFilesystem
           : await resolveHomeQuotaFilesystem(argv => executor.runCommand(argv)).catch(() => {
             process.stderr.write('xpanel-agent quota: the mount holding /home could not be observed; using /home\n')
@@ -246,6 +252,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         })
         // Same bounded journal reader as /host/mail/log and /host/ftp/log (16 MiB output cap).
         const journalExecutor = process.platform === 'linux' ? new LinuxHostExecutor({ maxOutputBytes: MAIL_LOG_MAX_OUTPUT_BYTES }) : null
+        const websiteAnalytics = new WebsiteAnalyticsEngine({ store: { read: () => readWebsiteAnalyticsStore(), write: data => withLifecycleWriterAdmission(() => atomicWriteJson(WEBSITE_ANALYTICS_PATH, data, 0o600)) } })
         bandwidthMeter = createBandwidthMeter({ readState: () => store.readSnapshot(), readFrom: readProtectedLogFrom,
           readMail: journalExecutor ? (since, until) => observeMailLog({ run: argv => journalExecutor.runCommand(argv), since, until }) : null,
           readFtp: journalExecutor ? (since, until) => observeFtpLog({ run: argv => journalExecutor.runCommand(argv), readState: () => store.readSnapshot(), since, until }) : null,
@@ -259,9 +266,9 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
             })
           },
           onError: () => { process.stderr.write('xpanel-agent bandwidth: collection could not be recorded\n') },
+          webAnalytics: websiteAnalytics,
         })
         const ioAnalytics = new IoAnalyticsEngine()
-        const websiteAnalytics = new WebsiteAnalyticsEngine()
 
         const fileHelperBinaryPath =
           opts.fileHelperBinaryPath ?? process.env.XPANEL_FILE_HELPER_BINARY ?? '/opt/xpanel/bin/xpanel-account-files'
@@ -378,6 +385,8 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           executor,
           cronQualification: createNativeCronQualification({ isActive: async unit => (await executor.runCommand(['/usr/bin/systemctl', 'is-active', unit])).code === 0 }),
           ...(accountFileRunner ? { accountFileRunner } : {}),
+          ...(gitExecutor ? { accountGitRun: createAccountGitRun(argv => gitExecutor.runCommand(argv), os.family) } : {}),
+          ...(rpmDatabaseRecovery ? { rpmDatabaseRecovery } : {}),
           ...(hostJobs ? { hostJobs } : {}),
           terminals,
           ioAnalytics,

@@ -6,6 +6,8 @@ import type { BackupDestination, BackupScheduleConfig } from './extended-routes.
 import type { WhmBackupWorkspacePorts } from './backup-workspace.ts'
 import { createBackupRunsWorkspaceRoutes } from './acct-backup-runs-workspace.ts'
 import { createBackupCredentialsWorkspaceRoutes } from './backup-credentials-workspace.ts'
+import { backupSchedulerReason, readBackupRunsView } from '../../agent/src/acct-backup-plan.ts'
+import type { BackupSchedulerReason } from '../../agent/src/acct-backup-plan.ts'
 
 export type BackupLifecycleDestination = BackupDestination & { credentialRef?: string | null; verification?: BackupDestinationProof | null }
 export type BackupDestinationHost = (caller: AuthenticatedCaller, path: string, body?: unknown) => Promise<unknown>
@@ -43,6 +45,15 @@ const capabilities = async (ports: Pick<BackupDestinationsWorkspacePorts, 'desti
   } catch { return { available: false, profiles: [] } }
 }
 const profileFor = (destination: BackupLifecycleDestination, current: { available: boolean; profiles: BackupCredentialProfile[] }): BackupCredentialProfile | undefined => current.available ? current.profiles.find(profile => profile.ref === destination.credentialRef && profile.kinds.includes(destination.kind as BackupCredentialProfile['kinds'][number])) : undefined
+export interface BackupSchedulerObservation { schedulerVerified: boolean; schedulerReason: BackupSchedulerReason | 'host_unreadable' | null }
+/** The scheduler state from the agent's own timer observation; without a host or a readable reply it is unverified (`host_unreadable`). */
+export async function observeBackupScheduler(ports: Pick<BackupDestinationsWorkspacePorts, 'destinationHost'>, caller: AuthenticatedCaller, schedule: BackupScheduleConfig | null): Promise<BackupSchedulerObservation> {
+  let reason: BackupSchedulerObservation['schedulerReason'] = 'schedule_not_enabled'
+  if (schedule?.enabled) {
+    try { reason = ports.destinationHost ? backupSchedulerReason(readBackupRunsView(await ports.destinationHost(caller, '/host/backups/runs')), schedule, new Date()) : 'host_unreadable' } catch { reason = 'host_unreadable' }
+  }
+  return { schedulerVerified: reason === null, schedulerReason: reason }
+}
 export async function assertBackupDestinationsReady(destinations: readonly BackupLifecycleDestination[], ports: Pick<BackupDestinationsWorkspacePorts, 'destinationHost'>, caller: AuthenticatedCaller): Promise<void> {
   const current = await capabilities(ports, caller)
   if (destinations.some(destination => { const profile = profileFor(destination, current); return !destination.enabled || !profile || !backupDestinationProofCurrent(destination, destination.verification, profile.revision) })) return unavailable()
@@ -83,12 +94,12 @@ export function createBackupDestinationsWorkspaceRoutes(ports: BackupDestination
       let current = await ports.load()
       if (expected !== undefined && current.revision !== expected) return fail('CONFLICT', 'backup configuration changed; reload and review', { stateChanged: false })
       if (listing) {
-        const transport = await capabilities(ports, caller)
+        const [transport, scheduler] = await Promise.all([capabilities(ports, caller), observeBackupScheduler(ports, caller, current.schedule)])
         await authorize()
         return json({ revision: current.revision, destinations: current.destinations.map(destination => {
           const profile = profileFor(destination, transport), verified = !!profile && backupDestinationProofCurrent(destination, destination.verification, profile.revision)
           return { ...destination, credentialRef: destination.credentialRef ?? null, verification: verified ? destination.verification : null, state: !profile ? 'unavailable' : verified ? destination.enabled ? 'active' : 'verified' : 'unverified', effectiveActive: destination.enabled && verified }
-        }), capabilities: { canTest: transport.available, profiles: transport.profiles }, application: { nativeApplied: false, schedulerVerified: false } })
+        }), capabilities: { canTest: transport.available, profiles: transport.profiles }, application: { nativeApplied: false, ...scheduler } })
       }
       const target = current.destinations.find(destination => destination.id === match![1])
       if (!target) return fail('NOT_FOUND', 'backup destination no longer exists', { stateChanged: false })

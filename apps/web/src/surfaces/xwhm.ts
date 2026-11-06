@@ -329,7 +329,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           const canLogIn = (isRoot || heldAcls.has('edit-account')) && acc.status === 'active'
           const statusLabel = acc.status === 'active' ? translator(locale)('Active') : acc.status === 'suspended' ? translator(locale)(msgctxt('common', 'Suspended')) : translator(locale)('Terminating')
           const attributes = `data-account-id="${escapeHtml(acc.id)}" data-username="${escapeHtml(acc.username)}" data-domain="${escapeHtml(acc.primaryDomain)}"`
-          return `<tr data-account-row="${escapeHtml(acc.username)}" ${accountListRowAttributes(acc)}>
+          return `<tr data-account-row="${escapeHtml(acc.username)}" data-account-id="${escapeHtml(acc.id)}" ${accountListRowAttributes(acc)}>
           <td>${renderApprovedWhmAccountSelection({ ...props, locale }, acc.username)}</td>
           <td>
           <div class="xp-accounts__identity">

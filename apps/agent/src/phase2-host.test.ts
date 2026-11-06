@@ -13,6 +13,7 @@ import {
 } from './account-backup.ts'
 import { readHostConfigChecks, readHostIdentity } from './host-identity.ts'
 import { parseApacheVersion, parseDf, parseKernelRelease, parseLoadavg, parseMeminfo, parseNginxVersion, parseOsRelease, parsePackageVersion, parseProcUptime } from './host-info.ts'
+import { profileFor, serviceConfigTest } from '@xpanel/os'
 import { readHostServices, restartHostService, type HostCommandResult } from './host-services.ts'
 
 const account: BackupAccountTarget = { username: 'alice', home: '/home/alice', uid: 20014, status: 'active' }
@@ -114,7 +115,65 @@ describe('host measurements', () => {
   })
 })
 
+const debian = profileFor('ID=ubuntu\nVERSION_ID=24.04'), el = profileFor('ID=almalinux\nVERSION_ID=9.4')
+const FPM_UNITS = ['php8.3-fpm.service loaded inactive dead PHP 8.3 FastCGI', 'xpanel-php-fpm-alice-8.3.service loaded active running alice', 'xpanel-php-fpm-bob-8.2.service loaded failed failed bob',
+  'xpanel-php-fpm-carol-8.3.service loaded inactive dead carol', 'nginx.service loaded active running nginx'].join('\n')
+const FPM_FILES = ['php8.3-fpm.service disabled enabled', 'xpanel-php-fpm-alice-8.3.service enabled enabled', 'xpanel-php-fpm-bob-8.2.service enabled enabled',
+  'xpanel-php-fpm-carol-8.3.service disabled enabled', 'nginx.service enabled enabled'].join('\n')
+/** A host where `active` units are loaded and running; returns every non-observation argv it was asked to run. */
+const fakeHost = (active: readonly string[], refuse: (argv: string[]) => string | null = () => null) => {
+  const effects: string[][] = []
+  const run = async (argv: string[]): Promise<HostCommandResult> => {
+    if (argv[1] === 'show') return command(active.includes(argv.at(-1)!) ? 'loaded\nactive\n' : argv.at(-1) === 'php8.3-fpm.service' ? 'loaded\ninactive\n' : 'not-found\ninactive\n')
+    if (argv[1] === 'list-units') return command(FPM_UNITS)
+    if (argv[1] === 'list-unit-files') return command(FPM_FILES)
+    effects.push(argv)
+    const stderr = refuse(argv)
+    return stderr === null ? command('') : { ok: false, stdout: 'secret = from doveconf', stderr }
+  }
+  return { run, effects }
+}
+
 describe('host services', () => {
+  it.each([
+    ['nginx', 'nginx.service', debian], ['apache', 'apache2.service', debian], ['apache', 'httpd.service', el], ['ssh', 'ssh.service', debian], ['ssh', 'sshd.service', el],
+    ['postfix', 'postfix.service', el], ['dovecot', 'dovecot.service', debian], ['mariadb', 'mariadb.service', el], ['pdns', 'pdns.service', debian], ['opendkim', 'opendkim.service', el],
+  ] as const)('runs the %s configuration test on %s before restarting it', async (id, unit, os) => {
+    const host = fakeHost([unit])
+    await expect(restartHostService(host.run, id, os)).resolves.toMatchObject({ id, unit, state: 'active' })
+    expect(host.effects).toEqual([serviceConfigTest(unit, os), ['/usr/bin/systemctl', 'restart', '--', unit]])
+  })
+
+  it('restarts a daemon without an offline checker directly', async () => {
+    const host = fakeHost(['postgresql.service'])
+    await restartHostService(host.run, 'postgresql', el)
+    expect(host.effects).toEqual([['/usr/bin/systemctl', 'restart', '--', 'postgresql.service']])
+  })
+
+  it('refuses the restart when the configuration test fails and keeps only its bounded stderr', async () => {
+    const ssh = fakeHost(['ssh.service'], argv => argv[0] === '/usr/sbin/sshd' ? '/etc/ssh/sshd_config.d/50-x.conf line 3: Bad configuration option: Foo\n' : null)
+    await expect(restartHostService(ssh.run, 'ssh', debian)).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED',
+      detail: { stateChanged: false, reason: 'config_test_failed', unit: 'ssh.service', stderr: '/etc/ssh/sshd_config.d/50-x.conf line 3: Bad configuration option: Foo' } })
+    expect(ssh.effects).toEqual([serviceConfigTest('ssh.service', debian)])
+    const dovecot = fakeHost(['dovecot.service'], argv => argv[0] === 'doveconf' ? 'x'.repeat(5000) : null)
+    await expect(restartHostService(dovecot.run, 'dovecot', debian)).rejects.toMatchObject({ detail: { stderr: 'x'.repeat(1000) }, message: expect.not.stringContaining('secret') })
+    expect(dovecot.effects.some(argv => argv[1] === 'restart')).toBe(false)
+  })
+
+  it('restarts every enabled account PHP-FPM master after each passes its own test, and never starts the distro master', async () => {
+    const masters = ['xpanel-php-fpm-alice-8.3.service', 'xpanel-php-fpm-bob-8.2.service']
+    const host = fakeHost([])
+    await restartHostService(host.run, 'php-fpm', debian)
+    expect(host.effects).toEqual([...masters.map(unit => serviceConfigTest(unit, debian)), ...masters.map(unit => ['/usr/bin/systemctl', 'restart', '--', unit])])
+    const running = fakeHost(['php8.3-fpm.service'])
+    await restartHostService(running.run, 'php-fpm', debian)
+    expect(running.effects.filter(argv => argv[1] === 'restart').map(argv => argv[3])).toEqual(['php8.3-fpm.service', ...masters])
+    expect(running.effects[0]).toEqual(['/usr/sbin/php-fpm8.3', '-t'])
+    const broken = fakeHost([], argv => argv.includes('bob') ? 'ERROR: [pool bob] unknown entry' : null)
+    await expect(restartHostService(broken.run, 'php-fpm', debian)).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED', detail: { stateChanged: false, unit: 'xpanel-php-fpm-bob-8.2.service' } })
+    expect(broken.effects.some(argv => argv[1] === 'restart')).toBe(false)
+  })
+
   it('reports the loaded unit and refuses anything outside the allowlist', async () => {
     const calls: string[][] = []
     const run = async (argv: string[]): Promise<HostCommandResult> => {
@@ -125,7 +184,7 @@ describe('host services', () => {
         if (unit === 'mariadb.service') return command('loaded\nactive\n')
         return command('not-found\ninactive\n')
       }
-      return command('systemctl restart failed', false)
+      return argv[1] === 'restart' ? command('systemctl restart failed', false) : command('')
     }
     const rows = await readHostServices(run)
     expect(rows.find(row => row.id === 'apache')).toEqual({ id: 'apache', label: 'Apache', unit: 'httpd.service', state: 'failed' })
@@ -133,10 +192,10 @@ describe('host services', () => {
     expect(rows.find(row => row.id === 'pdns')).toMatchObject({ unit: null, state: 'not-installed' })
     const unchecked = await readHostServices(async () => command('systemctl missing', false))
     expect(unchecked.every(row => row.state === 'unchecked' && row.unit === null)).toBe(true)
-    await expect(restartHostService(run, 'sshd')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(restartHostService(run, 'sshd', debian)).rejects.toMatchObject({ code: 'NOT_FOUND' })
     expect(calls.some(argv => argv.includes('sshd'))).toBe(false)
-    await expect(restartHostService(run, 'pdns')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: 'PowerDNS is not installed on this server' })
-    await expect(restartHostService(run, 'apache')).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED', message: 'Apache did not restart (systemctl restart failed)' })
+    await expect(restartHostService(run, 'pdns', debian)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: 'PowerDNS is not installed on this server' })
+    await expect(restartHostService(run, 'apache', debian)).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED', message: 'Apache did not restart (systemctl restart failed)' })
   })
 
   it('prefers the active PHP-FPM unit and reports nginx, redis, and postgresql from systemctl', async () => {

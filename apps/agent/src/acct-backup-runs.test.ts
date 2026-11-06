@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { backupDestinationProofDigest, backupDestinationTargetDigest } from '../../../packages/core/src/backup-destination.ts'
 import type { BackupDestinationTarget } from '../../../packages/core/src/backup-destination.ts'
-import { backupRunLedgerRevision, parseBackupArchiveName, planBackupRetention, readBackupRunLedger, readBackupRunsView } from './acct-backup-plan.ts'
+import { BACKUP_TIMER_FRESH_MS, backupRunLedgerRevision, backupSchedulerReason, parseBackupArchiveName, planBackupRetention, readBackupRunLedger, readBackupRunsView } from './acct-backup-plan.ts'
 import { createBackupRunController, handleBackupRunsRoute, readSavedBackupConfig } from './acct-backup-runs.ts'
 import type { BackupRunDeps } from './acct-backup-runs.ts'
 import type { BackupTransferProvider, BackupTransferSession } from './acct-backup-s3.ts'
@@ -112,6 +112,45 @@ describe('scheduled backup controller', () => {
     expect(view.schedule?.lastScheduledAt).toBe('2026-10-28T02:00:30.000Z')
     expect(view.runs[0]).toMatchObject({ trigger: 'schedule', state: 'succeeded', retention: [{ destinationId: ID, deleted: 1, outcome: 'verified' }] })
     expect([...t.objects.keys()]).toEqual(['alice/' + FILE])
+  })
+  it('reports the timer as observed only after a fire evaluated the saved schedule, and only while that observation is fresh', async () => {
+    const config = { destinations: [savedDestination], schedule: { ...schedule, updatedAt: '2026-10-28T00:00:00.000Z' } }, t = setup({}, config)
+    expect((await t.controller.view()).schedule?.timerObservedAt).toBeNull()
+    t.setClock('2026-10-28T01:30:00.000Z')
+    expect(await t.controller.tick()).toEqual({ skipped: 'not_due' })
+    const view = readBackupRunsView(JSON.parse(JSON.stringify(await t.controller.view())))
+    expect(view.schedule?.timerObservedAt).toBe('2026-10-28T01:30:00.000Z')
+    const at = new Date('2026-10-28T01:30:00.000Z')
+    expect(backupSchedulerReason(view, config.schedule, at)).toBeNull()
+    expect(backupSchedulerReason(view, config.schedule, new Date(at.getTime() + BACKUP_TIMER_FRESH_MS + 1))).toBe('timer_not_observed')
+    expect(backupSchedulerReason(view, { ...config.schedule, cron: '0 3 * * *' }, at)).toBe('timer_not_observed')
+    for (const saved of [null, { ...config.schedule, enabled: false }]) expect(backupSchedulerReason(view, saved, at)).toBe('schedule_not_enabled')
+    expect(backupSchedulerReason({ ...view, available: false, reason: 'no_destination' }, config.schedule, at)).toBe('no_destination')
+    expect(backupSchedulerReason({ ...view, available: false, reason: 'no_schedule', schedule: null }, config.schedule, at)).toBe('timer_not_observed')
+    // A newly saved schedule is unverified until the timer evaluates it; a disabled one is never evaluated.
+    config.schedule = { ...config.schedule, updatedAt: '2026-10-28T01:31:00.000Z' }
+    expect((await t.controller.view()).schedule?.timerObservedAt).toBeNull()
+    config.schedule = { ...config.schedule, enabled: false }
+    expect(await t.controller.tick()).toEqual({ skipped: 'disabled' })
+    expect((await t.controller.view()).schedule?.timerObservedAt).toBeNull()
+  })
+  it('keeps the evaluated schedule across busy fires of a running scheduled backup', async () => {
+    const t = setup({}, { destinations: [savedDestination], schedule: { ...schedule, updatedAt: '2026-10-28T00:00:00.000Z' } })
+    expect(await t.controller.tick()).toHaveProperty('started')
+    t.setClock('2026-10-28T02:01:30.000Z')
+    expect(await t.controller.tick()).toEqual({ skipped: 'busy' })
+    expect((await t.controller.view()).schedule?.timerObservedAt).toBe('2026-10-28T02:01:30.000Z')
+    await t.controller.idle()
+  })
+  it('never runs a schedule saved with a codec it cannot write', async () => {
+    const t = setup({}, { destinations: [savedDestination], schedule: { ...schedule, compress: 'zstd' } })
+    expect(await t.controller.view()).toMatchObject({ available: false, reason: 'unsupported_compression' })
+    expect(readBackupRunsView(JSON.parse(JSON.stringify(await t.controller.view()))).reason).toBe('unsupported_compression')
+    await expect(t.controller.start('root', (await t.controller.view()).revision)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { reason: 'backup_compression_unavailable' } })
+    await expect(t.controller.startAccounts('root', ['alice'])).rejects.toMatchObject({ detail: { reason: 'backup_compression_unavailable' } })
+    expect(await t.controller.tick()).toEqual({ skipped: 'unavailable' })
+    expect(t.deps.createBackup).not.toHaveBeenCalled()
+    expect(t.ledger()).toBeNull()
   })
   it('shows a running record from another process as unknown', async () => {
     const t = setup()

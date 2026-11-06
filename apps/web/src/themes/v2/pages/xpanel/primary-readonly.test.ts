@@ -49,6 +49,12 @@ describe('primary Panel read-only layouts', () => {
     expect(scopePrimaryPanelFacts({ ...props, databases: [] }, authority(['mysql-databases'])).databases).toEqual([])
     expect(scopePrimaryPanelFacts({ ...props, databases: undefined }, authority(['mysql-databases'])).databases).toBeUndefined()
   })
+  it('scopes stored certificates to the certificate status capability', () => {
+    const certificate = { id: 'cert-a', accountId: account.id, names: [account.primaryDomain], source: 'acme' as const, challenge: 'http-01' as const, notAfter: '2027-01-01T00:00:00Z', autoRenew: true }
+    const props = { account, visibility, catalog, certificates: [certificate] }
+    expect(scopePrimaryPanelFacts(props, authority(['ssl-certificates'])).certificates).toBeUndefined()
+    expect(scopePrimaryPanelFacts(props, authority(['ssl-tls-status'])).certificates).toEqual([certificate])
+  })
   it('keeps mailbox creation and routing layouts disabled despite stale mutation flags', () => {
     const t = v2Messages.translator('en')
     const email = renderV2EmailAccountsPage(t, { domains: { state: 'unread' }, users: { state: 'unread' }, canManage: true, readOnly: true })

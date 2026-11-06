@@ -27,7 +27,7 @@ const table = (v: View, title: Copy, columns: readonly Copy[], message: Copy): s
 
 const workspaceConfiguration = (v: View): string => `<div class="xp-whm-backup-column" data-backup-saved-policy>
   <h3>${v.text(msgid('Saved policy and destination configuration'))}</h3>
-  <p class="xp-help">${v.text(msgid('These controls save configuration only. Scheduled execution, remote authentication and native archive verification remain unavailable until their service adapters are qualified. Separate weekly retention, private-key configuration and granular restore stay unavailable.'))}</p>
+  <p class="xp-help">${v.text(msgid('These controls save configuration only.'))} ${v.text(msgid('Scheduled execution has not been observed.'))} ${v.text(msgid('Remote authentication and native archive verification remain unavailable until their service adapters are qualified. Separate weekly retention, private-key configuration and granular restore stay unavailable.'))}</p>
   <div class="xp-whm-backup-fields">
     ${checkbox(v, 'policy-enabled', msgid('Request scheduled backups'))}
     ${input(v, 'policy-cron', msgid('Schedule expression (UTC)'), 'text', msgid('Five cron fields; the saved expression is the schedule authority.'))}

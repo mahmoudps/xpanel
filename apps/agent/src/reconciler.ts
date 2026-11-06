@@ -28,7 +28,7 @@ import {
   reindexFromState,
 } from '@xpanel/db'
 import type { ConfigGeneration, Db } from '@xpanel/db'
-import { edge, services, system } from '@xpanel/render'
+import { edge, extended, services, system } from '@xpanel/render'
 import type { StateSnapshot, StateStore } from '@xpanel/state'
 import { assertGenerationRollbackPreconditions, generationSourceIsLinked, isStateDirectoryDurabilityError, parseGenerationRollbackRequest, withGenerationReconciliationLease } from '@xpanel/state'
 import type { GenerationRollbackRequest } from '@xpanel/state'
@@ -79,7 +79,15 @@ export interface CompiledGeneration {
   /** Postfix main.cf and master.cf are merged outside the owned file list. */
   localMail: boolean
   localMailOptions: services.PostfixMainOptions
+  /** Saved host name that hostnamectl applies in this generation; verified against the kernel name. */
+  hostname?: string
 }
+
+const KERNEL_HOSTNAME_PATH = '/proc/sys/kernel/hostname'
+const SELINUX_ENFORCE_PATH = '/sys/fs/selinux/enforce'
+const HOSTNAME_FILES: readonly string[] = ['/etc/hostname', '/etc/hosts']
+/** EL policy labels /etc/hosts net_conf_t and /etc/hostname hostname_etc_t; an atomic rename into /etc leaves etc_t. */
+export const hostnameContextAction = (paths: readonly string[] = HOSTNAME_FILES): HostAction => ({ kind: 'exec', argv: ['/usr/sbin/restorecon', ...paths] })
 
 const DNS_CATALOG_PATH = '/etc/powerdns/named.conf.xpanel-zones'
 const DEFAULT_DNS_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -188,6 +196,12 @@ export interface CompileOptions {
   runtime?: ReadonlyMap<string, RuntimeRegistry>
   /** Hosts the management TLS ingress serves on the shared 80/443 sockets (agent-origin.ts readManagementHosts). */
   managementHosts?: readonly string[]
+  /** Live /etc/hosts read after preflight; its unrelated lines are kept. Absent renders only the managed lines. */
+  etcHosts?: string | null
+  /** Kernel host name read after preflight; hostnamectl runs only when it differs from the saved name. */
+  observedHostname?: string | null
+  /** SELinux is enabled (selinuxfs mounted); EL then restores the policy contexts of the host name files. */
+  selinux?: boolean
 }
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -210,6 +224,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   const terminatingAccounts: { id: Id; username: string }[] = []
   let localMail = false
   const localMailOptions: services.PostfixMainOptions = {}
+  let hostname: string | undefined
   const mailForwarding = opts.mailForwarding ?? { forwarders: [], rejects: [], domainForwarders: [], lists: [] }
 
   const seenTests = new Set<string>()
@@ -290,6 +305,15 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     )
     files.push(sshFile)
     addTest(system.sshdConfigTest(os))
+
+    const primaryIp = (version: 4 | 6): string | null => snapshot.ipPool?.find((entry) => entry.version === version && entry.isPrimary)?.address ?? null
+    const host = extended.renderHostnameChange(settings.hostname, primaryIp(4) ?? '127.0.1.1', primaryIp(6), opts.etcHosts ?? null)
+    files.push(...host.files)
+    if (os.family === 'rhel' && opts.selinux) postActions.push(hostnameContextAction())
+    if (typeof opts.observedHostname === 'string' && opts.observedHostname.trim() !== settings.hostname) {
+      postActions.push(...host.actions)
+      hostname = settings.hostname
+    }
   }
 
   // 2. Accounts, slices, domains, PHP-FPM pools, cron timers, MariaDB, Mail, FTP
@@ -784,6 +808,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     terminatingAccounts,
     localMail,
     localMailOptions,
+    ...(hostname ? { hostname } : {}),
   }
 }
 
@@ -809,7 +834,7 @@ export interface GenerationRollbackGuard {
 }
 
 export type ReconcileResult =
-  | { status: 'noop'; generation: ConfigGeneration | null; stateChecksum: string }
+  | { status: 'noop'; generation: ConfigGeneration | null; stateChecksum: string; kernelHostname?: string | null }
   | {
       status: 'applied'
       generation: ConfigGeneration
@@ -817,6 +842,8 @@ export type ReconcileResult =
       durationMs: number
       removedFilesCount?: number
       repairedDriftCount?: number
+      /** Kernel host name this reconciliation observed last (after verification or rollback). */
+      kernelHostname?: string | null
     }
   | {
       status: 'failed'
@@ -827,6 +854,7 @@ export type ReconcileResult =
       restoredGenerationId?: number | null
       stateChanged?: boolean
       verificationRequired?: true
+      kernelHostname?: string | null
     }
 
 export interface ReconciliationRecoveryResult {
@@ -1122,7 +1150,9 @@ export class HostReconciler {
     restoredFiles: string[]
     reloadedUnits: string[]
     verificationRequired: boolean
+    kernelHostname?: string | null
   }> {
+    let kernelHostname: string | null | undefined
     const restoredFiles: string[] = []
     const reloadedUnits: string[] = []
     const stoppedNewUnits: string[] = []
@@ -1148,6 +1178,10 @@ export class HostReconciler {
       for (const backup of journalRecord.previousFilesBackup) {
         await this.restoreBackedUpFile(backup)
         restoredFiles.push(backup.path)
+      }
+      const relabel = HOSTNAME_FILES.filter(path => journalRecord.previousFilesBackup.some(backup => backup.existed && backup.path === path))
+      if (this.deps.os.family === 'rhel' && relabel.length && await this.deps.executor.readFile(SELINUX_ENFORCE_PATH) !== null) {
+        await this.deps.executor.runAction(hostnameContextAction(relabel))
       }
 
       for (const unit of [...journalRecord.stoppedObsoleteUnits].reverse()) {
@@ -1204,6 +1238,16 @@ export class HostReconciler {
         }
       }
       await runGenerationDnsHook({ phase: 'verify', native, provider: this.deps.dnsPublication, files: previousFiles, removedPaths: absentPaths, zoneDir })
+      // A generation that may have run hostnamectl sets the kernel name back and proves it.
+      const previous = journalRecord.previousKernelHostname
+      if (previous !== undefined) {
+        kernelHostname = (await this.deps.executor.readFile(KERNEL_HOSTNAME_PATH))?.trim() ?? null
+        if (kernelHostname !== previous) {
+          await this.deps.executor.runAction({ kind: 'exec', argv: ['/usr/bin/hostnamectl', 'set-hostname', previous] })
+          kernelHostname = (await this.deps.executor.readFile(KERNEL_HOSTNAME_PATH))?.trim() ?? null
+          if (kernelHostname !== previous) fail('PRECONDITION_FAILED', 'the previous system host name could not be restored', { stateChanged: true, verificationRequired: true, expected: previous, observed: kernelHostname })
+        }
+      }
     } catch (rollbackErr) {
       journalRecord.phase = 'needs_attention'
       const rollbackDetail = isXpanelError(rollbackErr) && rollbackErr.detail && Object.keys(rollbackErr.detail).length
@@ -1261,6 +1305,7 @@ export class HostReconciler {
       restoredFiles,
       reloadedUnits,
       verificationRequired,
+      ...(kernelHostname !== undefined ? { kernelHostname } : {}),
     }
   }
 
@@ -1570,6 +1615,11 @@ export class HostReconciler {
     const appliedSnapshot = currentGen ? await this.deps.store.readGenerationSnapshot(currentGen.id) : null
     let accountIoDevices: ReadonlyMap<string, readonly string[]> | undefined
     let mailTls: CompileOptions['mailTls']
+    let etcHosts: string | null | undefined
+    let observedHostname: string | null | undefined
+    let selinux: boolean | undefined
+    let kernelHostname: string | null | undefined
+    const observedKernel = () => (kernelHostname !== undefined ? { kernelHostname } : {})
     const compileMail = (mailAuth: OpenDkimSigning | null, previousZones?: ReadonlyMap<string, string>) => {
       const next = compileDesiredGeneration(snapshot, {
         os: this.deps.os,
@@ -1586,6 +1636,9 @@ export class HostReconciler {
         secEdge,
         ...(trustedProxyAuthority ? { trustedProxyAuthority } : {}),
         runtime,
+        ...(etcHosts !== undefined ? { etcHosts } : {}),
+        ...(observedHostname !== undefined ? { observedHostname } : {}),
+        ...(selinux !== undefined ? { selinux } : {}),
         now: new Date(),
       })
       if (appliedSnapshot) {
@@ -1669,6 +1722,12 @@ export class HostReconciler {
         if (text !== null) previousZones.set(path, text)
       } catch { /* An unreadable zone file keeps the serial already in state. */ }
     }
+    if (snapshot.server) {
+      etcHosts = await this.deps.executor.readFile('/etc/hosts')
+      observedHostname = await this.deps.executor.readFile(KERNEL_HOSTNAME_PATH)
+      kernelHostname = observedHostname?.trim() ?? null
+      if (this.deps.os.family === 'rhel') selinux = await this.deps.executor.readFile(SELINUX_ENFORCE_PATH) !== null
+    }
     const refreshed = compileMail(mailAuth, previousZones)
     const nextChecksum = computeFilesChecksum(refreshed.files)
     if (nextChecksum !== filesChecksum) {
@@ -1693,7 +1752,7 @@ export class HostReconciler {
       await assertMailForwardingUnchanged()
       if (!drift.hasDrift && !drift.manifestMissing && !mailDrift) {
         await runGenerationDnsHook({ phase: 'verify', native: isRealLinuxExecutor, provider: this.deps.dnsPublication, files: compiled.files, removedPaths: removedPathsFor(compiled.files), zoneDir: this.deps.zoneDir })
-        return { status: 'noop', generation: currentGen, stateChecksum: snapshot.checksum }
+        return { status: 'noop', generation: currentGen, stateChecksum: snapshot.checksum, ...observedKernel() }
       }
       repairedDriftCount = drift.items.length + (mailDrift ? 1 : 0)
     }
@@ -1772,6 +1831,7 @@ export class HostReconciler {
       reloadedUnits: [],
       verifiedUnits: [],
       error: null,
+      ...(compiled.hostname && typeof observedHostname === 'string' ? { previousKernelHostname: observedHostname.trim() } : {}),
     }
 
     try {
@@ -1886,7 +1946,7 @@ export class HostReconciler {
             data: { generationId: pendingGen.id, failedTest: test.name, error: errorMsg },
           })
           this.emit({ id: randomUUID(), at: audit.at, kind: 'audit.entry', scope, data: audit })
-          return { status: 'failed', generation: failedGen, failedTest: test.name, error: errorMsg,
+          return { status: 'failed', generation: failedGen, failedTest: test.name, error: errorMsg, ...observedKernel(),
             stateChanged: verificationRequired,
             ...(verificationRequired && { verificationRequired: true as const }) }
         }
@@ -2003,6 +2063,11 @@ export class HostReconciler {
           }
           journalRecord.verifiedUnits.push(unit)
         }
+        if (compiled.hostname) {
+          const observed = (await this.deps.executor.readFile(KERNEL_HOSTNAME_PATH))?.trim() ?? null
+          kernelHostname = observed
+          if (observed !== compiled.hostname) throw new StageFailureError('hostname', `the system host name was not applied: expected ${compiled.hostname}, observed ${observed ?? 'none'}`)
+        }
         await runGenerationDnsHook({ phase: 'verify', native: isRealLinuxExecutor, provider: this.deps.dnsPublication, files: verifiedStagedFiles,
           removedPaths: manifestDiff.removed.map(file => file.path), zoneDir: this.deps.zoneDir })
 
@@ -2026,6 +2091,7 @@ export class HostReconciler {
           generation: rb.rolledBackGen,
           failedTest: failedUnit,
           error: errorMsg,
+          ...(rb.kernelHostname !== undefined ? { kernelHostname: rb.kernelHostname } : observedKernel()),
           ...(rb.verificationRequired && { stateChanged: true as const, verificationRequired: true as const }),
         }
       }
@@ -2087,6 +2153,7 @@ export class HostReconciler {
         durationMs,
         removedFilesCount: manifestDiff.removed.length,
         repairedDriftCount,
+        ...observedKernel(),
       }
     } catch (err) {
       if (err instanceof SimulatedProcessCrashWrapper) {

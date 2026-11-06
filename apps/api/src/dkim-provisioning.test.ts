@@ -90,6 +90,35 @@ describe('DNS email-auth public key provisioning', () => {
     expect(await f.state.store.getDnsZone(f.account.primaryDomain)).toEqual(before)
   })
 
+  it('bumps the zone serial and reconciles once per real change, and leaves an unchanged zone alone', async () => {
+    const f = await fixture(), reconcile = vi.spyOn(f.helpers, 'triggerReconcile')
+    const today = Number(new Date().toISOString().slice(0, 10).replaceAll('-', '')) * 100
+    await f.state.store.saveDnsZone({ id: randomUUID(), accountId: f.account.id, name: f.account.primaryDomain, serial: 2026102400, records: [] })
+    const first = await (await f.post())!.json() as { nativeApplied: boolean }
+    const changed = await f.state.store.getDnsZone(f.account.primaryDomain)
+    expect(first.nativeApplied).toBe(false)
+    expect(changed!.serial).toBe(Math.max(2026102401, today + 1))
+    expect(reconcile).toHaveBeenCalledTimes(1)
+    const second = await (await f.post())!.json() as { ok: boolean; count: number }
+    expect(second).toMatchObject({ ok: true, count: 1 })
+    expect(await f.state.store.getDnsZone(f.account.primaryDomain)).toEqual(changed)
+    expect(reconcile).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses to overwrite a zone that changed after it was read', async () => {
+    const f = await fixture(), reconcile = vi.spyOn(f.helpers, 'triggerReconcile')
+    await f.state.store.saveDnsZone({ id: randomUUID(), accountId: f.account.id, name: f.account.primaryDomain, serial: 2026102400, records: [] })
+    const concurrent = { id: randomUUID(), zone: f.account.primaryDomain, name: 'www', type: 'A' as const, ttl: 3600, content: '192.0.2.20', priority: null }
+    f.material.mockImplementationOnce(async () => {
+      const zone = (await f.state.store.getDnsZone(f.account.primaryDomain))!
+      await f.state.store.saveDnsZone({ ...zone, serial: zone.serial + 1, records: [concurrent] })
+      return { selector: 'xp202610', publicKeyPem: pair.publicKey }
+    })
+    await expect(f.post()).rejects.toMatchObject({ code: 'CONFLICT', detail: { stateChanged: false, conflicts: [f.account.primaryDomain], nativeApplied: false } })
+    expect((await f.state.store.getDnsZone(f.account.primaryDomain))!.records).toEqual([concurrent])
+    expect(reconcile).not.toHaveBeenCalled()
+  })
+
   it('validates every requested key before the first desired-zone mutation', async () => {
     const f = await fixture()
     const before = await f.state.store.getDnsZone(f.account.primaryDomain)

@@ -5,7 +5,8 @@ import type { LogSlice } from './account-logs.ts'
 import type { FtpLogObservation } from './ftp-log.ts'
 import type { MailLogObservation } from './mail-log.ts'
 import { UNAVAILABLE_DISK_LATENCY } from './host-metrics.ts'
-import { BANDWIDTH_INTERVAL_MS, addFtpObservation, addLogLines, addMailObservation, createBandwidthMeter, emptyBandwidthLedger, enforceBandwidthLimits, handleMeteringRoute, parseBandwidthLedger, withDiskLatency, type BandwidthLedger, type BandwidthReport, type MeteringRouteContext } from './metering.ts'
+import { WebsiteAnalyticsEngine, type SiteLogChunk } from './analytics.ts'
+import { BANDWIDTH_INTERVAL_MS, BANDWIDTH_SITE_READ_BYTES, BANDWIDTH_TICK_READ_BYTES, addFtpObservation, addLogLines, addMailObservation, createBandwidthMeter, emptyBandwidthLedger, enforceBandwidthLimits, handleMeteringRoute, parseBandwidthLedger, withDiskLatency, type BandwidthLedger, type BandwidthReport, type MeteringRouteContext } from './metering.ts'
 
 const NOW = new Date('2026-10-28T12:00:00.000Z')
 const ACCOUNT = '11111111-1111-4111-8111-111111111111', OTHER = '33333333-3333-4333-8333-333333333333'
@@ -117,12 +118,20 @@ describe('bandwidth meter', () => {
     const domains = accounts.map(owner => ({ ...domain, id: 'domain-' + owner.id, accountId: owner.id, name: owner.primaryDomain, docRoot: owner.home + '/public_html' }))
     const busy = Buffer.from(line('2026-10-28T01:00:00Z', 10).repeat(Math.ceil(4 * 1024 * 1024 / Buffer.byteLength(line('2026-10-28T01:00:00Z', 10)))))
     let ledger: unknown = null
+    const chunks: { length: number; complete: boolean; caughtUp: boolean }[] = []
     const instance = createBandwidthMeter({ onError: error => { throw error }, readState: async () => ({ accounts, domains, plans: [plan] }), readMail: null, readFtp: null, now: () => NOW,
       readFrom: async (path, offset, maxBytes) => { const start = Math.min(offset, busy.length); return { exists: true, identity: '1:' + path, sizeBytes: busy.length, start, bytes: busy.subarray(start, start + maxBytes) } },
-      readLedger: async () => ledger, writeLedger: async value => { ledger = structuredClone(value) } })
+      readLedger: async () => ledger, writeLedger: async value => { ledger = structuredClone(value) },
+      webAnalytics: { load: async () => undefined, save: async () => undefined,
+        ingestSiteLog: chunk => chunks.push({ length: chunk.bytes.length, complete: chunk.bytes.length === 0 || chunk.bytes.at(-1) === 10, caughtUp: chunk.caughtUp }) } })
     await instance.collect(true)
     // the 8 MiB budget reaches eight 1 MiB reads; the next collection starts at the first site it did not reach
     expect(Object.values((ledger as BandwidthLedger).cursors).filter(cursor => cursor.offset > 0)).toHaveLength(8)
+    // analytics receive the same bounded reads: complete lines only, at most 1 MiB per site and 8 MiB per collection
+    expect(chunks).toHaveLength(10)
+    expect(chunks.every(chunk => chunk.complete && !chunk.caughtUp && chunk.length <= BANDWIDTH_SITE_READ_BYTES)).toBe(true)
+    expect(chunks.filter(chunk => chunk.length > 0)).toHaveLength(8)
+    expect(chunks.reduce((sum, chunk) => sum + chunk.length, 0)).toBeLessThanOrEqual(BANDWIDTH_TICK_READ_BYTES)
     await instance.collect(true)
     expect(Object.values((ledger as BandwidthLedger).cursors).map(cursor => cursor.offset > 0)).toEqual(Array(10).fill(true))
   })
@@ -151,6 +160,53 @@ describe('bandwidth meter', () => {
     const { instance: later, clock, ledger: laterLedger } = meter({ [path]: { identity: '1:1', text: line('2026-09-30T23:00:00Z', 5) } })
     await later.collect(); clock.at = Date.parse('2026-12-01T00:00:00.000Z'); await later.collect()
     expect(laterLedger()?.months['2026-09']).toBeUndefined()
+  })
+  it('feeds website analytics the bytes it meters, once, across collections, restarts, rotation and truncation', async () => {
+    const at = (minutes: number): string => new Date(NOW.getTime() + minutes * 60_000).toISOString()
+    const hit = (minutes: number, bytes: number): string => JSON.stringify({ time: at(minutes), host: 'alice.test', ip: '192.0.2.1', method: 'GET', uri: '/', status: 200, body_bytes: bytes, bytes, request_bytes: 100,
+      request_time: 0.001, upstream_time: '', cache: '', referer: '', agent: 'curl/8' }) + '\n'
+    const files: Record<string, { identity: string; text: string }> = { [path]: { identity: '1:10', text: '' } }
+    const clock = { at: NOW.getTime() }
+    let ledger: unknown = null
+    const chunks: SiteLogChunk[] = []
+    const store = { data: null as unknown, broken: false, read: async () => store.data, write: async (value: unknown) => { if (store.broken) throw new Error('disk full'); store.data = structuredClone(value) } }
+    const start = (engine: WebsiteAnalyticsEngine) => createBandwidthMeter({ onError: error => { throw error }, readState: async () => ({ accounts: [account], domains: [domain], plans: [plan] }), readMail: null, readFtp: null,
+      now: () => new Date(clock.at), readLedger: async () => ledger, writeLedger: async value => { ledger = structuredClone(value) },
+      readFrom: async (file, offset, maxBytes) => { const all = Buffer.from(files[file]!.text), from = Math.min(offset, all.length); return { exists: true, identity: files[file]!.identity, sizeBytes: all.length, start: from, bytes: all.subarray(from, from + maxBytes) } },
+      webAnalytics: { load: () => engine.load(), save: day => engine.save(day), ingestSiteLog: chunk => { chunks.push(chunk); return engine.ingestSiteLog(chunk) } } })
+    const hour = (engine: WebsiteAnalyticsEngine) => engine.queryDomainSnapshot(domain, { window: '1h', now: new Date(clock.at) }).totals
+    const refused = (read: () => unknown): unknown => { try { read(); return null } catch (error) { return (error as { detail?: { reason?: unknown } }).detail?.reason } }
+    const first = new WebsiteAnalyticsEngine({ store })
+    await start(first).collect()
+    files[path]!.text += hit(20, 1000) + hit(40, 24) + '{"time":"'
+    clock.at = NOW.getTime() + 61 * 60_000; await start(first).collect()
+    // one read feeds both: the analytics of the fully read hour carry the metered bytes; the line still being written waits
+    expect(hour(first)).toMatchObject({ requests: 2, bytes: 1024 })
+    expect(web(ledger as BandwidthLedger)?.sentBytes).toBe(1024)
+    // a restart serves the saved hours at once and continues at the saved offset
+    const { offset } = (ledger as BandwidthLedger).cursors[path]!, savedAt = (ledger as BandwidthLedger).updatedAt
+    const second = new WebsiteAnalyticsEngine({ store }), meter2 = start(second)
+    await second.load()
+    expect(hour(second)).toEqual(hour(first))
+    files[path]!.text = files[path]!.text.slice(0, offset) + hit(62, 5)
+    clock.at = NOW.getTime() + 66 * 60_000; await meter2.collect()
+    expect(chunks.at(-1)).toMatchObject({ start: offset, since: savedAt, caughtUp: true })
+    files[path] = { identity: '1:11', text: hit(70, 7) + hit(71, 7) }
+    clock.at = NOW.getTime() + 71 * 60_000; await meter2.collect(true)
+    expect(chunks.at(-1)).toMatchObject({ identity: '1:11', start: 0 })
+    files[path] = { identity: '1:11', text: hit(75, 3) }
+    clock.at = NOW.getTime() + 76 * 60_000; await meter2.collect(true)
+    expect(chunks.at(-1)).toMatchObject({ identity: '1:11', start: 0, sizeBytes: Buffer.byteLength(hit(75, 3)) })
+    clock.at = NOW.getTime() + 125 * 60_000; await meter2.collect(true)
+    expect(hour(second)).toMatchObject({ requests: 4, bytes: 22 })
+    expect(web(ledger as BandwidthLedger)?.sentBytes).toBe(1024 + 5 + 14 + 3)
+    // a save lost before a restart leaves counted lines out of the store: that history is refused, not undercounted
+    files[path]!.text += hit(126, 9)
+    store.broken = true; clock.at = NOW.getTime() + 130 * 60_000; await meter2.collect(true); store.broken = false
+    const third = new WebsiteAnalyticsEngine({ store })
+    files[path]!.text += hit(131, 1)
+    clock.at = NOW.getTime() + 135 * 60_000; await start(third).collect(true)
+    expect(refused(() => hour(third))).toBe('window-not-covered')
   })
 })
 

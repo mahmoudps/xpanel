@@ -117,6 +117,8 @@ export interface ReconcileJournalRecord {
   reloadedUnits: string[]
   verifiedUnits: string[]
   error: string | null
+  /** Kernel host name before this generation's hostnamectl; rollback and crash recovery set it back. */
+  previousKernelHostname?: string
 }
 
 export const sha256Text = (content: string): string =>

@@ -38,13 +38,19 @@ function unchangedFailure(value: unknown): boolean {
   return details.stateChanged === false || value.stateChanged === false || record(value.details) && value.details.stateChanged === false
 }
 
-function refusedReply(upstreamStatus: number): Response {
+// A definite agent refusal keeps its own code only when that code belongs to the same HTTP status.
+const REFUSAL_STATUS: Record<string, number> = {
+  VALIDATION: 422, LIMIT_EXCEEDED: 422, UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, PRECONDITION_FAILED: 412,
+}
+function refusedReply(upstreamStatus: number, body: unknown): Response {
   const codes: Record<number, string> = {
     400: 'VALIDATION', 401: 'UNAUTHENTICATED', 403: 'FORBIDDEN', 404: 'NOT_FOUND',
     409: 'CONFLICT', 412: 'PRECONDITION_FAILED', 413: 'LIMIT_EXCEEDED', 422: 'VALIDATION',
   }
   const status = Object.hasOwn(codes, upstreamStatus) ? upstreamStatus : 503
-  return json({ code: codes[status] ?? 'SERVICE_UNAVAILABLE', error: 'The file operation could not be completed.',
+  const upstreamCode = record(body) && typeof body.code === 'string' && Object.hasOwn(REFUSAL_STATUS, body.code) && REFUSAL_STATUS[body.code] === status ? body.code : undefined
+  // Problem-detail field names, so the browser session transport keeps the code and the no-change fact.
+  return json({ code: upstreamCode ?? codes[status] ?? 'SERVICE_UNAVAILABLE', detail: 'The file operation could not be completed.',
     details: { stateChanged: false, upstreamStatus } }, status)
 }
 /** Validate the trusted agent's reply before an account file result reaches the browser. */
@@ -58,7 +64,7 @@ export async function executeFileWorkspaceRequest(request: FileWorkspaceRequest,
       if (mutation && !unchangedFailure(body)) return fail('SERVICE_UNAVAILABLE', 'file operation outcome requires verification', {
         stateChanged: true, verificationRequired: true, unknownOutcome: true, upstreamStatus: response.status,
       })
-      return refusedReply(response.status)
+      return refusedReply(response.status, body)
     }
     return json(validateFileWorkspaceReply(request, body))
   } catch {

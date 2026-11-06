@@ -1,4 +1,6 @@
 import { fail } from '@xpanel/core'
+import { isAccountFpmMaster, serviceConfigTest, SERVICE_MANAGER_FILES, SERVICE_MANAGER_LIST, type XpanelOsProfile } from '@xpanel/os'
+import { parseServiceManagerLists } from './service-manager.ts'
 
 export interface HostServiceSpec {
   id: string
@@ -87,21 +89,46 @@ export const readHostServices = async (run: (argv: string[]) => Promise<HostComm
   return rows
 }
 
+/** Enabled or running per-account masters; a suspended account's master is stopped and disabled and stays so. */
+const accountFpmMasters = async (run: (argv: string[]) => Promise<HostCommandResult>): Promise<string[]> => {
+  const units = await run([...SERVICE_MANAGER_LIST]), files = await run([...SERVICE_MANAGER_FILES])
+  let rows: ReturnType<typeof parseServiceManagerLists> = []
+  try { if (units.ok && files.ok) rows = parseServiceManagerLists(units.stdout, files.stdout) } catch { /* refused below */ }
+  if (rows.length === 0) return fail('PRECONDITION_FAILED', 'the account PHP-FPM masters could not be listed', { stateChanged: false })
+  return rows.filter(row => isAccountFpmMaster(row.unit) && row.load === 'loaded' && (row.boot === 'enabled' || row.active === 'active')).map(row => row.unit)
+}
+
 export const restartHostService = async (
   run: (argv: string[]) => Promise<HostCommandResult>,
   id: string,
+  os: XpanelOsProfile,
 ): Promise<HostServiceStatus> => {
   const service = hostServiceById(id)
   const current = (await readHostServices(run)).find(row => row.id === service.id)
-  if (!current?.unit) {
-    const reason = current?.state === 'unchecked' ? 'was not checked on this server' : 'is not installed on this server'
+  // PHP is served by one master per account; the distro master and its shared www pool stay off unless already running.
+  const units = service.id === 'php-fpm'
+    ? [...(current?.unit && current.state === 'active' ? [current.unit] : []), ...await accountFpmMasters(run)]
+    : current?.unit ? [current.unit] : []
+  if (units.length === 0) {
+    const reason = current?.state === 'unchecked' ? 'was not checked on this server' : current?.unit ? 'has no enabled account master on this server' : 'is not installed on this server'
     return fail('PRECONDITION_FAILED', `${service.label} ${reason}`)
   }
-  const restarted = await run(['/usr/bin/systemctl', 'restart', '--', current.unit])
-  if (!restarted.ok) {
-    const detail = (restarted.stderr || restarted.stdout || 'systemctl restart failed').trim().slice(0, 400)
-    return fail('CONFIG_TEST_FAILED', `${service.label} did not restart (${detail})`)
+  // every check passes before the first restart, so a failure leaves all running units untouched
+  for (const unit of units) {
+    const test = serviceConfigTest(unit, os)
+    const checked = test ? await run(test) : null
+    if (checked && !checked.ok) {
+      const stderr = (checked.stderr.trim() || 'the check failed without a message').slice(0, 1000)
+      return fail('CONFIG_TEST_FAILED', `${service.label} was not restarted: its configuration test failed (${stderr})`, { stateChanged: false, reason: 'config_test_failed', unit, stderr })
+    }
+  }
+  for (const unit of units) {
+    const restarted = await run(['/usr/bin/systemctl', 'restart', '--', unit])
+    if (!restarted.ok) {
+      const detail = (restarted.stderr || restarted.stdout || 'systemctl restart failed').trim().slice(0, 400)
+      return fail('CONFIG_TEST_FAILED', `${service.label} did not restart (${detail})`)
+    }
   }
   const after = (await readHostServices(run)).find(row => row.id === service.id)
-  return after ?? current
+  return after ?? current!
 }

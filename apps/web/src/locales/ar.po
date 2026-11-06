@@ -4293,9 +4293,13 @@ msgstr "تغيير TTL جماعي"
 msgid "Bulk actions run one message at a time, up to 50 messages, and report each result."
 msgstr "تُنفَّذ الإجراءات الجماعية رسالةً تلو الأخرى، حتى 50 رسالة، مع نتيجة لكل منها."
 
-#: apps/web/src/board-port/approved-whm-account-components.ts
-msgid "Bulk changes have no reviewed sequential-operation contract. Use each account’s real actions and review its result before continuing. Selection does not modify accounts."
-msgstr "لا يوجد عقد مراجع لتنفيذ التغييرات الجماعية بالتسلسل. استخدم إجراءات كل حساب الفعلية وراجع نتيجتها قبل المتابعة. الاختيار لا يعدّل الحسابات."
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Bulk change finished: {applied} changed, {refused} not changed, {review} need review, {skipped} not attempted."
+msgstr "انتهى التغيير الجماعي: تغيّر {applied}، ولم يتغير {refused}، ويحتاج {review} إلى مراجعة، ولم تتم محاولة {skipped}."
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Bulk change unavailable. No changes were made."
+msgstr "التغيير الجماعي غير متاح. لم تُجرَ أي تغييرات."
 
 #: apps/web/src/whm-mail-queue-client.ts
 msgid "Bulk run finished: {confirmed} confirmed, {attempted} attempted, {unknown} unknown, {refused} refused or skipped."
@@ -5114,6 +5118,10 @@ msgstr "تغيّرت منذ المعاينة؛ لم تُكتب"
 #: apps/web/src/audit-labels.ts
 msgid "Changed the hostname"
 msgstr "غيّر اسم المضيف"
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Changed. Hosting verification is still required."
+msgstr "تم التغيير. ما زال التحقق من الاستضافة مطلوبًا."
 
 #: apps/web/src/board-port/extensions/store.ts
 msgid "Changelog"
@@ -7146,9 +7154,17 @@ msgstr "التحويل غير متاح على هذا الخادم: فهو يحت
 msgid "Cookie and Set-Cookie values are replaced up to the end of the line."
 msgstr "تُستبدل قيم Cookie وSet-Cookie حتى نهاية السطر."
 
+#: apps/web/src/audit-labels.ts
+msgid "Copied a file"
+msgstr "نسخ ملفاً"
+
 #: apps/web/src/board-port/approved-whm-plan-components.ts
 msgid "Copied disabled feature keys"
 msgstr "مفاتيح الميزات المعطلة المنسوخة"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Copied to {path}. The folder was read back."
+msgstr "نُسخ إلى {path}. أُعيدت قراءة المجلد."
 
 #: apps/web/src/whm-panel-tokens-client.ts apps/web/src/whm-whmcs-client.ts
 msgid "Copied."
@@ -7169,6 +7185,10 @@ msgstr "نسخ"
 #: apps/web/src/board-port/approved-xpanel-workspaces.ts
 msgid "Copy a site to a private staging folder, review the changes and promote them to the live site."
 msgstr "انسخ موقعًا إلى مجلد تجريبي خاص، وراجع التغييرات، ثم انشرها على الموقع المباشر."
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "Copy and Move act on the one item selected in the file list. Compress and Extract are unavailable here; no change has been made."
+msgstr "يعمل النسخ والنقل على العنصر الوحيد المحدد في قائمة الملفات. الضغط والاستخراج غير متاحين هنا؛ لم يُجرَ أي تغيير."
 
 #: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/extensions/account-databases.ts
 msgid "Copy connection details"
@@ -7245,6 +7265,10 @@ msgstr "النسخ غير متاح في هذا المتصفح. حدّد الرم
 #: apps/web/src/acct-staging-client.ts
 msgid "Copying the site files…"
 msgstr "جارٍ نسخ ملفات الموقع…"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Copying. The result is shown only after it is read back."
+msgstr "جارٍ النسخ. لا تظهر النتيجة إلا بعد إعادة قراءتها."
 
 #: apps/web/src/board-port/sec-workspace.ts
 msgid "Core Rule Set version"
@@ -9504,6 +9528,10 @@ msgstr "إدارة الوجهات غير متاحة هنا."
 msgid "Destination name"
 msgstr "اسم الوجهة"
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Destination path"
+msgstr "مسار الوجهة"
+
 #: apps/web/src/board-port/approved-xwhm.ts
 msgid "Destination plan"
 msgstr "خطة الوجهة"
@@ -10695,6 +10723,10 @@ msgstr "DNS الديناميكي غير متاح. لم تبدأ أي عملية 
 msgid "Each WHMCS package name maps to one xPanel plan. Calls with an unmapped package are refused. Mapping changes are saved with Save connection."
 msgstr "يرتبط كل اسم باقة في WHMCS بخطة واحدة في xPanel. تُرفض الاستدعاءات التي تحمل باقة غير مربوطة. تُحفظ تغييرات الربط عند اختيار حفظ الاتصال."
 
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Each account is changed in turn with the same checks as its own action."
+msgstr "يتغير كل حساب بدوره بالفحوصات نفسها التي يخضع لها إجراؤه الفردي."
+
 #: apps/web/src/board-port/xwhm-dashboard.ts
 msgid "Each account is limited inside its own {slice}, so one busy site cannot take the whole server."
 msgstr "كل حساب محصور داخل شريحته {slice}، فلا يأخذ موقع واحد الخادم كله."
@@ -11403,6 +11435,10 @@ msgstr "أدخل مضيف العميل أو الشبكة."
 msgid "Enter a container name and an image. Nothing was started."
 msgstr "أدخل اسم الحاوية والصورة. لم يُشغَّل شيء."
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Enter a different path inside your home. It cannot be the item itself or a folder inside it. Nothing was changed."
+msgstr "أدخل مساراً آخر داخل مجلد المنزل. لا يمكن أن يكون العنصر نفسه أو مجلداً بداخله. لم يتغير شيء."
+
 #: apps/web/src/mail-folders-client.ts
 msgid "Enter a folder name."
 msgstr "أدخل اسم المجلد."
@@ -11609,9 +11645,17 @@ msgstr "أدخل موعد الانتهاء تاريخًا ووقتًا بتوق�
 msgid "Enter the full name, without www. Subdomains also use their full name; choose their parent below. Input is sent as typed."
 msgstr "أدخل الاسم الكامل دون www. أدخل الاسم الكامل للنطاق الفرعي أيضًا واختر النطاق الأب أدناه. يُرسل النص كما كُتب."
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Enter the full path for the copy inside your home. An existing item is never replaced."
+msgstr "أدخل المسار الكامل للنسخة داخل مجلد المنزل. لا يُستبدل أي عنصر موجود."
+
 #: apps/web/src/mail-folders-client.ts
 msgid "Enter the new folder name."
 msgstr "أدخل الاسم الجديد للمجلد."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Enter the new path inside your home; change only the name to rename. An existing item is never replaced."
+msgstr "أدخل المسار الجديد داخل مجلد المنزل؛ غيّر الاسم فقط لإعادة التسمية. لا يُستبدل أي عنصر موجود."
 
 #: apps/web/src/board-port/acct-transfer-server.ts
 msgid "Enter the source's HTTPS API address, for example https://source.example.com. Pin the SHA-256 fingerprint of its certificate, or leave the fingerprint empty to rely on the system certificate store. Redirects are never followed and the token is sent only after the certificate is accepted."
@@ -12656,6 +12700,10 @@ msgstr "مدير الملفات"
 #: apps/web/src/whm-dns-tools-client.ts
 msgid "File missing"
 msgstr "الملف مفقود"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "File operations are unavailable on this server. Nothing was changed."
+msgstr "عمليات الملفات غير متاحة على هذا الخادم. لم يتغير شيء."
 
 #: apps/web/src/file-workspace-client.ts
 msgid "File operations are unavailable."
@@ -18581,6 +18629,10 @@ msgstr "انقل كل الحسابات والخطط من خادم xPanel آخر 
 msgid "Move from {from} to {to}?"
 msgstr "نقل من {from} إلى {to}؟"
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Move or rename"
+msgstr "نقل أو إعادة تسمية"
+
 #: apps/web/src/mail-folder-workspace-client.ts
 msgid "Move outcome is unverified. Review this folder before another move."
 msgstr "نتيجة النقل غير مؤكدة. راجع هذا المجلد قبل نقل رسالة أخرى."
@@ -18642,9 +18694,17 @@ msgstr "نقل قاعدة بيانات إلى المحذوفات"
 msgid "Moved a file to trash"
 msgstr "نقل ملفاً إلى المحذوفات"
 
+#: apps/web/src/audit-labels.ts
+msgid "Moved or renamed a file"
+msgstr "نقل ملفاً أو أعاد تسميته"
+
 #: apps/web/src/board-port/xmail-inbox.ts
 msgid "Moved to {folder}: {subject}"
 msgstr "نُقلت إلى {folder}: {subject}"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Moved to {path}. The folder was read back."
+msgstr "نُقل إلى {path}. أُعيدت قراءة المجلد."
 
 #: apps/web/src/board-port/approved-whm-resellers.ts
 msgid "Moves an account to another owner. Only who manages the account changes."
@@ -18653,6 +18713,10 @@ msgstr "ينقل الحساب إلى مالك آخر. تتغير الجهة ال
 #: apps/web/src/mail-disk-usage-client.ts
 msgid "Moving messages to Trash…"
 msgstr "جارٍ نقل الرسائل إلى المحذوفات…"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Moving. The result is shown only after it is read back."
+msgstr "جارٍ النقل. لا تظهر النتيجة إلا بعد إعادة قراءتها."
 
 #: apps/web/src/surfaces/xwhm.ts
 msgid "Must exactly match the account above."
@@ -20144,6 +20208,10 @@ msgstr "لا توجد اعتمادات DNS ديناميكي بعد."
 #: apps/web/src/design-board.ts
 msgid "No edge setting is stored."
 msgstr "لا إعداد للحافة محفوظ."
+
+#: apps/web/src/whm-backups-client.ts
+msgid "No enabled schedule is saved, so the backup timer runs nothing."
+msgstr "لا توجد جدولة مفعّلة محفوظة، لذا لا يشغّل مؤقّت النسخ الاحتياطي شيئًا."
 
 #: apps/web/src/board-port/approved-xpanel-pages.ts
 msgid "No end date"
@@ -22067,6 +22135,10 @@ msgctxt "whm-backup-files-client"
 msgid "Not attempted yet"
 msgstr "لم يُحاوَل بعد"
 
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Not attempted."
+msgstr "لم تتم المحاولة."
+
 #: apps/web/src/whm-databases-client.ts
 msgid "Not attributed"
 msgstr "غير منسوب"
@@ -22095,6 +22167,26 @@ msgstr "غير مخزَّن مؤقتًا: إعادة توجيه"
 #: apps/web/src/sw-optimize-client.ts
 msgid "Not cached: suspended"
 msgstr "غير مخزَّن مؤقتًا: موقوف"
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Not changed."
+msgstr "لم يتغير."
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Not changed: plan or owner limits do not allow it."
+msgstr "لم يتغير: حدود الخطة أو المالك لا تسمح بذلك."
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Not changed: the account is not in a state for this change."
+msgstr "لم يتغير: حالة الحساب لا تسمح بهذا التغيير."
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Not changed: this account is no longer available."
+msgstr "لم يتغير: هذا الحساب لم يعد متاحًا."
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Not changed: you do not have permission for this account."
+msgstr "لم يتغير: ليست لديك صلاحية على هذا الحساب."
 
 #: apps/web/src/account-htaccess-client.ts apps/web/src/account-runtime-client.ts apps/web/src/account-web-directives-client.ts apps/web/src/board-port/account-htaccess-workspace.ts apps/web/src/board-port/account-web-directives-workspace.ts apps/web/src/board-port/extensions/shared.ts apps/web/src/board-port/site-health-workspace.ts apps/web/src/db-engines-client.ts apps/web/src/site-health-client.ts apps/web/src/whm-dns-tools-client.ts apps/web/src/whm-mail-quality-client.ts apps/web/src/whm-service-detail-client.ts
 msgid "Not checked"
@@ -24196,6 +24288,10 @@ msgstr "النتيجة غير معروفة"
 msgid "Outcome unknown. Postfix may have changed this message; reload the queue before acting again."
 msgstr "النتيجة غير معروفة. ربما غيّر Postfix هذه الرسالة؛ أعد قراءة الطابور قبل أي إجراء آخر."
 
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Outcome unknown. Review this account before retrying."
+msgstr "النتيجة غير معروفة. راجع هذا الحساب قبل إعادة المحاولة."
+
 #: apps/web/src/acct-backup-runs-client.ts apps/web/src/whm-backups-client.ts
 msgid "Outcome unknown; review required"
 msgstr "النتيجة غير معروفة؛ تلزم المراجعة"
@@ -24349,6 +24445,10 @@ msgstr "المالك بعد إنشاء هذا الحساب"
 #: apps/web/src/board-port/approved-whm-account-components.ts
 msgid "Owner choices not read"
 msgstr "خيارات المالك غير مقروءة"
+
+#: apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgid "Owner for selected accounts"
+msgstr "مالك الحسابات المحددة"
 
 #: apps/web/src/board-port/account-collaboration-workspace.ts apps/web/src/board-port/mailx-collections-workspace.ts
 msgid "Owner mailbox"
@@ -25501,6 +25601,10 @@ msgstr "حصة القرص في الخطة"
 msgid "Plan editor"
 msgstr "محرر الخطط"
 
+#: apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgid "Plan for selected accounts"
+msgstr "خطة الحسابات المحددة"
+
 #: apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/whm-transfer-workspace.ts
 msgid "Plan here"
 msgstr "الخطة هنا"
@@ -25897,8 +26001,8 @@ msgid "Preferences have not been read. No saved values are assumed."
 msgstr "لم تُقرأ التفضيلات. لا تُفترض أي قيم محفوظة."
 
 #: apps/web/src/mail-spam-client.ts
-msgid "Preferences read. Saved changes are not applied to delivery."
-msgstr "قُرئت التفضيلات. لا تُطبَّق التغييرات المحفوظة على التسليم."
+msgid "Preferences read. Delivery effects are not verified here."
+msgstr "قُرئت التفضيلات. لا يُتحقَّق هنا من أثرها على التسليم."
 
 #: apps/web/src/mail-mailbox-preferences-client.ts
 msgid "Preferences saved and read back."
@@ -25911,6 +26015,10 @@ msgstr "حُفظت التفضيلات وقُرئت مجددًا. طبّقها ا
 #: apps/web/src/mail-spam-client.ts
 msgid "Preferences saved and read back. Mail delivery changes remain unverified."
 msgstr "حُفظت التفضيلات وقُرئت للتحقق. تظل تغييرات تسليم البريد غير متحقق منها."
+
+#: apps/web/src/mail-spam-client.ts
+msgid "Preferences saved, read back and applied by the server. Delivery is not verified here."
+msgstr "حُفظت التفضيلات وقُرئت للتحقق وطبّقها الخادم. لا يُتحقَّق هنا من التسليم."
 
 #: apps/web/src/board-port/whm-server-observation-workspace.ts
 msgid "Prefix"
@@ -29025,6 +29133,10 @@ msgctxt "whm-default-site-client"
 msgid "Reload"
 msgstr "إعادة القراءة"
 
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Reload accounts and review them before another bulk change."
+msgstr "أعد تحميل الحسابات وراجعها قبل أي تغيير جماعي آخر."
+
 #: apps/web/src/board-port/xmail-calendar-view.ts
 msgid "Reload calendars"
 msgstr "إعادة قراءة التقويمات"
@@ -29096,6 +29208,10 @@ msgstr "SFTP بعيد"
 #: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/extensions/account-databases.ts
 msgid "Remote access"
 msgstr "الوصول البعيد"
+
+#: apps/web/src/board-port/approved-whm-backups.ts
+msgid "Remote authentication and native archive verification remain unavailable until their service adapters are qualified. Separate weekly retention, private-key configuration and granular restore stay unavailable."
+msgstr "تبقى المصادقة البعيدة والتحقق من الأرشيف غير متاحين حتى تأهيل محولات الخدمات. يبقى الاحتفاظ الأسبوعي المنفصل وإعداد المفتاح الخاص والاستعادة التفصيلية غير متاحة."
 
 #: apps/web/src/board-canvas.ts
 msgid "Remote copy"
@@ -32535,8 +32651,8 @@ msgid "Saved at (UTC)"
 msgstr "وقت الحفظ (UTC)"
 
 #: apps/web/src/whm-backups-client.ts
-msgid "Saved backup configuration read. Execution and archive verification remain unavailable."
-msgstr "قُرئت إعدادات النسخ المحفوظة. يبقى التنفيذ والتحقق من الأرشيف غير متاحين."
+msgid "Saved backup configuration read. Archive verification remains unavailable."
+msgstr "قُرئت إعدادات النسخ المحفوظة. يبقى التحقق من الأرشيف غير متاح."
 
 #: apps/web/src/board-port/whm-backup-destinations-workspace.ts
 msgid "Saved backup destinations"
@@ -32601,8 +32717,8 @@ msgid "Saved configuration and readback verified. Serving, DNS and TLS remain un
 msgstr "تأكد الإعداد المحفوظ والقراءة اللاحقة. خدمة الموقع وDNS وTLS غير متحقق منها."
 
 #: apps/web/src/whm-backups-client.ts
-msgid "Saved configuration and recorded snapshot metadata were read. Server-wide jobs, restore differences, remote connection checks and native archive verification remain unavailable."
-msgstr "قُرئت الإعدادات وبيانات اللقطات المسجلة. تبقى عمليات الخادم وفروق الاستعادة وفحوص الاتصال البعيد والتحقق من الأرشيف غير متاحة."
+msgid "Saved configuration and recorded snapshot metadata were read. Restore differences, remote connection checks and native archive verification remain unavailable."
+msgstr "قُرئت الإعدادات وبيانات اللقطات المسجلة. تبقى فروق الاستعادة وفحوص الاتصال البعيد والتحقق من الأرشيف غير متاحة."
 
 #: apps/web/src/board-port/whm-databases-workspace.ts
 msgid "Saved configuration by account"
@@ -32664,6 +32780,10 @@ msgstr "قُرئت الإعدادات المحفوظة. رصد الخادم غي
 #: apps/web/src/whm-backups-client.ts
 msgid "Saved configuration read; scheduling and remote transport remain unverified."
 msgstr "قُرئ الإعداد المحفوظ؛ الجدولة والنقل البعيد غير متحقق منهما."
+
+#: apps/web/src/whm-backups-client.ts
+msgid "Saved configuration read; the backup timer is running this schedule. Remote transport remains unverified."
+msgstr "قُرئ الإعداد المحفوظ؛ مؤقّت النسخ الاحتياطي يشغّل هذه الجدولة. النقل البعيد غير متحقق منه."
 
 #: apps/web/src/whm-domains-client.ts
 msgid "Saved configuration will be read again. No previous mutation is retried."
@@ -33567,6 +33687,14 @@ msgstr "أوامر مجدولة لهذا الحساب."
 msgid "Scheduled commands, run results and output delivery."
 msgstr "الأوامر المجدولة ونتائج التشغيل وتسليم المخرجات."
 
+#: apps/web/src/board-port/approved-whm-backups.ts
+msgid "Scheduled execution has not been observed."
+msgstr "لم يُرصد التنفيذ المجدول بعد."
+
+#: apps/web/src/whm-backups-client.ts
+msgid "Scheduled execution is not verified."
+msgstr "التنفيذ المجدول غير متحقق منه."
+
 #: apps/web/src/board-canvas.ts apps/web/src/board-port/account-cron-workspace.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/design-board.ts
 msgid "Scheduled jobs"
 msgstr "المهام المجدولة"
@@ -33984,6 +34112,10 @@ msgstr "حدّد 50 نطاقًا كحد أقصى في الفحص الواحد. �
 msgid "Select at most 50 messages for one bulk run. Nothing was sent."
 msgstr "حدّد 50 رسالة كحد أقصى في التنفيذ الواحد. لم يُرسل شيء."
 
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "Select at most {limit} accounts for one bulk change."
+msgstr "اختر {limit} حسابًا على الأكثر لكل تغيير جماعي."
+
 #: apps/web/src/whm-backup-files-client.ts
 msgid "Select files or folders, then review the restore."
 msgstr "حدّد ملفات أو مجلدات ثم راجع الاستعادة."
@@ -34052,6 +34184,10 @@ msgstr "حسابات محددة"
 msgctxt "approved-whm-account-components"
 msgid "Selected accounts"
 msgstr "الحسابات المختارة"
+
+#: apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/themes/v2/pages/xwhm/accounts/list.ts
+msgid "Selected accounts change one at a time with the same checks as each account’s own action, up to 25 per request. Each result is listed here; nothing is retried automatically."
+msgstr "تتغير الحسابات المحددة واحدًا تلو الآخر بالفحوصات نفسها التي يخضع لها إجراء كل حساب، حتى 25 حسابًا في الطلب الواحد. تظهر نتيجة كل حساب هنا، ولا يُعاد أي شيء تلقائيًا."
 
 #: apps/web/src/board-port/account-backup-workspace.ts
 msgid "Selected archive"
@@ -35712,6 +35848,10 @@ msgstr "تعذرت قراءة بعض القيم من خادم قواعد الب�
 #: apps/web/src/account-web-directives-client.ts
 msgid "Some values were refused. Review the marked fields; nothing was saved."
 msgstr "رُفضت بعض القيم. راجع الحقول المعلّمة؛ لم يُحفظ شيء."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Something already exists at that path. Nothing was replaced."
+msgstr "يوجد عنصر بالفعل في هذا المسار. لم يُستبدل شيء."
 
 #: apps/web/src/status-page.ts
 msgid "Something went wrong"
@@ -37706,6 +37846,14 @@ msgstr "بدأ النسخ الاحتياطي. اقرأ مجددًا لمتابع
 #~ msgid "The backup was restored."
 #~ msgstr "استُعيدت النسخة."
 
+#: apps/web/src/whm-backups-client.ts
+msgid "The backup timer has not been observed evaluating this saved schedule within the last few minutes."
+msgstr "لم يُرصد مؤقّت النسخ الاحتياطي وهو يقيّم هذه الجدولة المحفوظة خلال الدقائق القليلة الماضية."
+
+#: apps/web/src/whm-backups-client.ts
+msgid "The backup timer is observed running this saved schedule."
+msgstr "رُصد مؤقّت النسخ الاحتياطي وهو يشغّل هذه الجدولة المحفوظة."
+
 #: apps/web/src/board-port/whm-ftp-log-workspace.ts
 msgid "The bounded read reached its line limit, so the oldest part of this window may be missing. Narrow the time range."
 msgstr "بلغت القراءة المحدودة حد الأسطر، لذا قد يكون الجزء الأقدم من هذه النافذة ناقصًا. ضيّق النطاق الزمني."
@@ -37725,6 +37873,10 @@ msgstr "تغيّرت الهوية منذ قراءتها. أعد التحميل �
 #: apps/web/src/whm-panel-branding-client.ts
 msgid "The built-in image is shown again on the next page each person opens."
 msgstr "تظهر الصورة المدمجة مجددًا في الصفحة التالية التي يفتحها كل شخص."
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "The bulk result could not be verified. Reload accounts and review them before retrying."
+msgstr "تعذر التحقق من نتيجة التغيير الجماعي. أعد تحميل الحسابات وراجعها قبل إعادة المحاولة."
 
 #: apps/web/src/board-port/whm-support-workspace.ts
 msgid "The bundle is one JSON document generated on demand. It contains only the items below, after the redaction rules below. Review the manifest, confirm, then download. Nothing is sent anywhere; you decide whom to share the file with."
@@ -37929,6 +38081,10 @@ msgstr "رُفض التغيير. لم يتغير شيء."
 #: apps/web/src/account-runtime-client.ts apps/web/src/sw-applications-client.ts
 msgid "The change was refused. Nothing was changed."
 msgstr "رُفض التغيير. لم يُغيَّر أي شيء."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "The change was refused: the path leaves your home or crosses a link, the item is a link or special file, or your access does not allow file changes. Nothing was changed."
+msgstr "رُفض التغيير: المسار يخرج من مجلد المنزل أو يمر عبر رابط، أو العنصر رابط أو ملف خاص، أو صلاحياتك لا تسمح بتغيير الملفات. لم يتغير شيء."
 
 #: apps/web/src/acct-staging-client.ts
 msgid "The changes are live. Replaced and removed files are in the trash."
@@ -38661,6 +38817,10 @@ msgstr "رُفض إجراء المضيف. لم يتغير شيء."
 msgid "The host agent cannot read this on this server."
 msgstr "لا يستطيع وكيل المضيف قراءة ذلك على هذا الخادم."
 
+#: apps/web/src/whm-backups-client.ts
+msgid "The host agent could not be read, so the backup timer was not observed."
+msgstr "تعذّرت قراءة وكيل الخادم، لذا لم يُرصد مؤقّت النسخ الاحتياطي."
+
 #: apps/web/src/whm-support-client.ts
 msgid "The host agent is not connected. Host facts and the bundle are unavailable; the manifest and contact are shown."
 msgstr "وكيل المضيف غير متصل. حقائق المضيف والحزمة غير متاحة؛ يُعرض البيان وجهة الاتصال."
@@ -38824,6 +38984,10 @@ msgstr "تتعذّر قراءة قائمة الحزم المثبتة، لذا ق
 #: apps/web/src/whm-composer-client.ts
 msgid "The isolated job installs exactly the reviewed graph without scripts, plugins or network access, and keeps a recovery snapshot."
 msgstr "تثبّت المهمة المعزولة المخطط المُراجَع بالضبط دون نصوص برمجية أو إضافات أو وصول إلى الشبكة، وتحتفظ بلقطة للاسترداد."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "The item or the destination folder no longer exists. Refresh files to see the current state."
+msgstr "العنصر أو مجلد الوجهة لم يعد موجوداً. حدّث الملفات لرؤية الحالة الحالية."
 
 #: apps/web/src/whm-jobs-client.ts
 msgid "The job can no longer be cancelled; it has already finished."
@@ -40579,6 +40743,10 @@ msgstr "تعذّر التحقق من ملف القواعد المحفوظ، لذ
 msgid "The saved rules were read from the actual file."
 msgstr "قُرئت القواعد المحفوظة من الملف الفعلي."
 
+#: apps/web/src/acct-backup-runs-client.ts
+msgid "The saved schedule asks for Zstandard compression, which this server cannot write. Save the schedule with Gzip; nothing runs until then."
+msgstr "تطلب الجدولة المحفوظة ضغط Zstandard، ولا يستطيع هذا الخادم كتابته. احفظ الجدولة بضغط Gzip؛ لن يعمل شيء حتى ذلك الحين."
+
 #: apps/web/src/whm-mail-quality-client.ts
 msgid "The saved sending address is not a public address."
 msgstr "عنوان الإرسال المحفوظ ليس عنوانًا عامًا."
@@ -41824,8 +41992,8 @@ msgid "These collections changed since they were read. Reload and review before 
 msgstr "تغيرت هذه المجموعات منذ قراءتها. أعد التحميل وراجع قبل الحفظ."
 
 #: apps/web/src/board-port/approved-whm-backups.ts
-msgid "These controls save configuration only. Scheduled execution, remote authentication and native archive verification remain unavailable until their service adapters are qualified. Separate weekly retention, private-key configuration and granular restore stay unavailable."
-msgstr "تحفظ هذه العناصر الإعدادات فقط. يبقى التنفيذ المجدول والمصادقة البعيدة والتحقق من الأرشيف غير متاحة حتى تأهيل محولات الخدمات. يبقى الاحتفاظ الأسبوعي المنفصل وإعداد المفتاح الخاص والاستعادة التفصيلية غير متاحة."
+msgid "These controls save configuration only."
+msgstr "تحفظ هذه العناصر الإعدادات فقط."
 
 #: apps/web/src/board-port/ops-file-sharing-workspace.ts
 msgid "These directories are exported outside xPanel and are left unchanged."
@@ -42118,6 +42286,10 @@ msgstr "اجتازت المسودة محلل Apache المحمي. لم يُحف�
 #: apps/web/src/mail-calendar-view-client.ts
 msgid "This event cannot be shown from the saved records that were read."
 msgstr "تعذر عرض هذا الحدث من السجلات المحفوظة المقروءة."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "This exceeds a file limit: 10000 items or 128 MiB per copy, or your disk quota. Nothing was changed."
+msgstr "يتجاوز هذا حداً للملفات: 10000 عنصر أو 128 MiB لكل نسخة، أو حصة القرص. لم يتغير شيء."
 
 #: apps/web/src/mail-disk-usage-client.ts
 msgid "This folder holds more than 50000 messages, so its cleanup cannot be measured here."
@@ -47449,6 +47621,22 @@ msgstr "{n, plural, zero {# ثانية} one {ثانية واحدة} two {ثان�
 msgid "{n, plural, one {# source token is stored.} other {# source tokens are stored.}}"
 msgstr "{n, plural, zero {لا توجد رموز محفوظة للخادم المصدر.} one {رمز واحد محفوظ للخادم المصدر.} two {رمزان محفوظان للخادم المصدر.} few {# رموز محفوظة للخادم المصدر.} many {# رمزًا محفوظًا للخادم المصدر.} other {# رمز محفوظ للخادم المصدر.}}"
 
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "{n, plural, one {Change {n} account to plan {plan}?} other {Change {n} accounts to plan {plan}?}}"
+msgstr "{n, plural, other {تغيير خطة الحسابات المحددة ({n}) إلى {plan}؟}}"
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "{n, plural, one {Move {n} account to owner {owner}?} other {Move {n} accounts to owner {owner}?}}"
+msgstr "{n, plural, other {نقل الحسابات المحددة ({n}) إلى المالك {owner}؟}}"
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "{n, plural, one {Suspend {n} account?} other {Suspend {n} accounts?}}"
+msgstr "{n, plural, other {تعليق الحسابات المحددة ({n})؟}}"
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "{n, plural, one {Unsuspend {n} account?} other {Unsuspend {n} accounts?}}"
+msgstr "{n, plural, other {إلغاء تعليق الحسابات المحددة ({n})؟}}"
+
 #: apps/web/src/account-ssl-client.ts
 msgid "{names} is installed on {domains}. Those sites switch to another certificate that covers them, or to the server default certificate. The certificate is not revoked."
 msgstr "الشهادة {names} مثبّتة على {domains}. ستنتقل هذه المواقع إلى شهادة أخرى تغطيها، أو إلى الشهادة الافتراضية للخادم. لن تُلغى الشهادة لدى الجهة المصدِرة."
@@ -47484,6 +47672,10 @@ msgstr "{n, plural, one {ساعة واحدة} two {ساعتان} few {{n} ساع
 #: apps/web/src/whm-mail-queue-client.ts
 msgid "{n} min"
 msgstr "{n, plural, one {دقيقة واحدة} two {دقيقتان} few {{n} دقائق} other {{n} دقيقة}}"
+
+#: apps/web/src/whm-account-bulk-client.ts
+msgid "{n} selected"
+msgstr "{n} مختار"
 
 #: apps/web/src/whm-mail-server-client.ts
 msgid "{n} values differ from the configuration xPanel renders. Use the reviewed repair workflow."

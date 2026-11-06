@@ -3,9 +3,10 @@ import { createReadStream } from 'node:fs'
 import { copyFile, lstat, mkdir, open, readdir, readFile, rename, rm, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fail } from '@xpanel/core'
+import type { OsFamily } from '@xpanel/core'
 import { RPM_INSTALLED_IDENTITY_ARGV } from '../../../packages/os/src/ops-package-recovery-command.ts'
 import type { PackageSafety } from './ops-package-writers.ts'
-import { packageSafetyRefusal } from './ops-package-writers.ts'
+import { nativePackageSafetyPorts, observePackageSafety, packageSafetyRefusal } from './ops-package-writers.ts'
 import type { RepairCommandResult, RhelCacheRecovery, RhelCacheSnapshot } from './repair-center.ts'
 
 export type PackageSnapshotKind = 'dnf-cache' | 'rpm-database'
@@ -222,6 +223,16 @@ export const createRhelCacheRecovery = (ports: PackageRecoveryPorts): RhelCacheR
 export const createRpmDatabaseRecovery = (ports: PackageRecoveryPorts): RhelCacheRecovery => ({
   begin: input => beginPackageSnapshot(ports, 'rpm-database', input),
 })
+
+/** Root-only retention of package snapshots until an operator releases them. */
+export const PACKAGE_RECOVERY_DIR = '/var/lib/xpanel-agent/package-recovery'
+
+/** The rpmdb rebuild snapshot provider exists only on EL profiles; Debian/Ubuntu keep that repair unavailable. */
+export const nativeRpmDatabaseRecovery = (family: OsFamily, run: PackageRecoveryPorts['run'], recoveryDir = PACKAGE_RECOVERY_DIR): RhelCacheRecovery | undefined =>
+  family !== 'rhel' ? undefined : createRpmDatabaseRecovery({
+    recoveryDir, sourceDir: '/var/lib/rpm', configFiles: nativeDnfConfigFiles, run,
+    safety: () => observePackageSafety('rhel', nativePackageSafetyPorts(run)), isProcessAlive,
+  })
 
 export const nativeDnfConfigFiles = async (): Promise<string[]> => {
   let repos: string[] = []

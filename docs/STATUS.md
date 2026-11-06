@@ -32,8 +32,8 @@ Counted from this checkout, without treating a renderer, route or probe as accep
 | Navigation pages | 203 | 68 xPanel, 116 xWHM, 19 xMail |
 | Registered document aliases | 14 | 7 account store aliases, 3 xWHM store aliases, 4 mailbox aliases |
 | Registered documents | 217 | 203 pages plus 14 aliases; route hooks and V2 stylesheets cover this same set |
-| Phase-1 host-probe entries | 113 | Prerequisites only; they do not accept a tool |
-| Reduced qualified-scope notes | 50 | A later accepted workspace would still leave the named remainder unavailable |
+| Phase-1 host-probe entries | 246 | Prerequisites only; they do not accept a tool |
+| Reduced qualified-scope notes | 150 | A later accepted workspace would still leave the named remainder unavailable |
 | Production TypeScript files under `apps/` and `packages/` | 1286 | Excludes `*.test.ts` |
 | Test TypeScript files under `apps/` and `packages/` | 961 | Fixture coverage, not a delivery receipt |
 

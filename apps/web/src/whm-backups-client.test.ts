@@ -6,7 +6,7 @@ import { bindWhmBackupDestinations } from './whm-backup-destinations-client.ts'
 import { readWhmBackupWorkspace, WHM_BACKUPS_CLIENT_BINDING } from './whm-backups-client.ts'
 
 const id = (n: number) => 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(n).padStart(12, '0')
-const application = { status: 'configuration_only', nativeApplied: false, remoteConnectionVerified: false, schedulerVerified: false }
+const application = { status: 'configuration_only', nativeApplied: false, remoteConnectionVerified: false, schedulerVerified: false, schedulerReason: 'schedule_not_enabled' as string | null }
 const initial = () => ({ revision: '1'.padStart(64, '0'), application, accounts: [{ id: id(1), username: 'ownerone', primaryDomain: 'one.example.test', status: 'active' }],
   destinations: [{ id: id(2), name: 'Local configuration', kind: 'local', endpoint: '/var/backups/xpanel', bucket: null, region: null, pathPrefix: '/var/backups/xpanel/daily', username: null, retentionDays: 30, enabled: true, createdAt: '2026-10-26T00:00:00.000Z' }],
   schedule: { enabled: false, frequency: 'daily', cron: '0 2 * * *', retentionCount: 7, retentionWeekly: 4, retentionMonthly: 0, compress: 'zstd', includeDatabases: true, includeMail: true, includeDns: true, includeControl: true, selectedAccounts: 'all', destinationIds: [], updatedAt: '2026-10-26T00:00:00.000Z' },
@@ -114,6 +114,29 @@ describe('WHM backups browser controller', () => {
     action('save-schedule').click(); await tick(); await tick()
     expect(status().dataset.state).toBe(mode); expect(action('save-schedule').disabled).toBe(true)
     expect(input('policy-cron').value).toBe('15 3 * * *'); expect(f.writes()).toHaveLength(1)
+  })
+  it('lists Zstandard as unavailable, drafts gzip and states the observed backup timer', async () => {
+    const help = () => document.querySelector('[data-backup-saved-policy]>.xp-help')!.textContent
+    expect(help()).toContain('Scheduled execution has not been observed.')
+    const f = model(); Object.assign(f.getCurrent(), { schedule: null }); f.boot(); await tick()
+    expect(help()).toContain('Scheduled execution is not verified. No enabled schedule is saved, so the backup timer runs nothing.')
+    const compress = document.querySelector<HTMLSelectElement>('#backup-layout-policy-compress')!, saved = () => document.querySelector('[data-backup-configuration-status]')!.textContent
+    expect(compress.querySelector<HTMLOptionElement>('option[value="1"]')!.disabled).toBe(true)
+    expect(compress.value).toBe('2')
+    edit('policy-cron', '15 3 * * *'); action('save-schedule').click(); await tick(); await tick()
+    expect(f.writes()[0]![2]).toMatchObject({ compress: 'gzip' })
+    expect(saved()).toBe('Saved configuration read; scheduling and remote transport remain unverified.')
+    f.getCurrent().application = { ...application, schedulerReason: 'timer_not_observed' }
+    action('refresh').click(); await tick()
+    expect(help()).toContain('Scheduled execution is not verified. The backup timer has not been observed evaluating this saved schedule within the last few minutes.')
+    f.getCurrent().application = { ...application, schedulerVerified: true, schedulerReason: null }
+    action('refresh').click(); await tick()
+    expect(saved()).toBe('Saved configuration read; the backup timer is running this schedule. Remote transport remains unverified.')
+    expect(help()).toContain('The backup timer is observed running this saved schedule.')
+    expect(help()).not.toContain('not verified')
+    expect(document.querySelector('#whm-backup-layout-unavailable')!.textContent).not.toContain('Server-wide jobs')
+    for (const bad of [{ schedulerVerified: 'yes' }, { schedulerVerified: true, schedulerReason: 'timer_not_observed' }, { schedulerVerified: false, schedulerReason: null }, { schedulerReason: 'invented' }])
+      expect(() => readWhmBackupWorkspace({ ...initial(), application: { ...application, ...bad } })).toThrow()
   })
   it('keeps an explicitly refused draft editable', async () => {
     const f = model(); f.boot(); await tick(); edit('policy-cron', '15 3 * * *'); f.setMode('refused')

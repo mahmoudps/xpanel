@@ -714,7 +714,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     assert.equal(getCfgData.config.userIni.memory_limit, '256M')
   })
 
-  it('7. Server IO Monitor & Website Analytics ingestion/querying + real-time WebSocket RBAC event filtering', async () => {
+  it('7. Server IO Monitor & Website Analytics ingestion/querying + real-time WebSocket RBAC event filtering', { tags: ['slow'] }, async () => {
     const { client: root } = await loginRoot()
     await root.request('/api/server/settings', { method: 'PUT', body: DEFAULT_SETTINGS })
 
@@ -768,44 +768,23 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     assert.equal(ioRead.mock.calls.length, 0)
     ioRead.mockRestore()
 
-    // Ingest structured website access logs as root
+    // Site access logs in the edge's xpanel_metrics format, as the bandwidth meter hands them to the engine
     const nowIso = new Date().toISOString()
-    const ingestRes = await root.request('/api/analytics/websites/ingest', {
-      method: 'POST',
-      body: {
-        lines: [
-          JSON.stringify({
-            ts: nowIso,
-            host: 'alice.example.com',
-            ip: '198.51.100.42',
-            method: 'GET',
-            uri: '/index.php',
-            status: 200,
-            bytes: 4096,
-            rt: 0.012,
-            urt: 0.009,
-            cache: 'HIT',
-            ref: 'https://www.google.com',
-          }),
-          JSON.stringify({
-            ts: nowIso,
-            host: 'bob.example.com',
-            ip: '198.51.100.99',
-            method: 'GET',
-            uri: '/secret',
-            status: 502,
-            bytes: 512,
-            rt: 0.095,
-            urt: 0.08,
-            cache: 'BYPASS',
-            ref: '-',
-          }),
-        ],
-      },
-    })
-    assert.equal(ingestRes.status, 200)
-    const ingestData = (await ingestRes.json()) as { ingested: number }
-    assert.equal(ingestData.ingested, 2)
+    const since = new Date(Date.now() - 2 * 86_400_000).toISOString()
+    // windows hold complete hours: these requests were served in the previous hour
+    const lastHour = new Date(Date.now() - 3_600_000).toISOString()
+    const metric = (fields: Record<string, unknown>) => JSON.stringify({ time: lastHour, method: 'GET', body_bytes: 0, request_bytes: 300, upstream_time: '', referer: '', agent: 'curl/8', ...fields }) + '\n'
+    const feed = (accountId: string, domain: { id: string; name: string }, line: string) => {
+      const bytes = Buffer.from(line)
+      return websiteAnalytics.ingestSiteLog({ path: `/var/log/xpanel/nginx/${domain.name}.access.log`, accountId, owners: new Map([[domain.name, domain]]), identity: '1:' + domain.name,
+        start: 0, sizeBytes: bytes.length, bytes, readAt: nowIso, since, caughtUp: true })
+    }
+    assert.equal(feed(aliceAccData.account.id, { id: aliceAccData.primaryDomain.id, name: 'alice.example.com' },
+      metric({ host: 'alice.example.com', ip: '198.51.100.42', uri: '/index.php', status: 200, bytes: 4096, request_time: 0.012, upstream_time: '0.009', cache: 'HIT', referer: 'https://www.google.com' })), 1)
+    assert.equal(feed(bobAccData.account.id, { id: bobAccData.primaryDomain.id, name: 'bob.example.com' },
+      metric({ host: 'bob.example.com', ip: '198.51.100.99', uri: '/secret', status: 502, bytes: 512, request_time: 0.095, upstream_time: '0.08', cache: 'BYPASS', referer: '-' })), 1)
+    // The manual ingest route is gone: only the site logs feed the engine.
+    assert.equal((await root.request('/api/analytics/websites/ingest', { method: 'POST', body: { lines: [] } })).status, 404)
 
     // Alice can query her own domain's website analytics
     const aliceWebRes = await alice.request(`/api/analytics/websites/${aliceAccData.primaryDomain.id}?window=24h`)

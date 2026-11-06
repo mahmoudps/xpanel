@@ -373,7 +373,7 @@ const HOST_MEASUREMENT_READS = new Set<string>([
   '/proc/stat', '/proc/net/dev',
   '/proc/self/mountinfo',
   '/etc/os-release', '/usr/lib/os-release', '/opt/xpanel/VERSION',
-  '/etc/hostname', '/etc/resolv.conf',
+  '/etc/resolv.conf', '/proc/sys/kernel/hostname', '/sys/fs/selinux/enforce',
   '/run/reboot-required',
   '/sys/fs/cgroup/xpanel.slice/cgroup.subtree_control',
   '/sys/fs/cgroup/cgroup.subtree_control',
@@ -428,6 +428,8 @@ const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\
  */
 export const createProductionHostTargetMatcher = (): ((path: string, operation: HostTargetOperation) => boolean) => {
   return (path: string, operation: HostTargetOperation): boolean => {
+    // Saved server host name (renderHostnameChange); /etc/hosts keeps its unrelated lines.
+    if (path === '/etc/hostname' || path === '/etc/hosts') return operation === 'read' || operation === 'write' || operation === 'remove'
     if (HOST_MEASUREMENT_READS.has(path)) return operation === 'read'
     if (path === '/etc/xpanel/account-probe' || path === '/etc/xpanel/account-probe/runtime'
       || path === '/run/xpanel-account-probe' || /^\/run\/xpanel-account-probe\/(?:[1-9][0-9]{3}|[1-5][0-9]{4}|60000)$/.test(path)) return operation === 'ensure-directory'

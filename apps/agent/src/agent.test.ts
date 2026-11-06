@@ -445,45 +445,20 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
     const savedMetrics = await listMetricsHistory(dbHandle.db, { scope: 'account', accountId: account.id })
     assert.equal(savedMetrics.length >= 1, true)
 
-    // 2. Ingest Nginx JSON metrics and query website analytics
+    // 2. Feed xpanel_metrics site log lines the way the bandwidth meter reads them, then query website analytics
     const nowIso = new Date().toISOString()
-    const ingestRes = await app.fetch(
-      new Request('http://agent.local/analytics/websites/ingest', {
-        method: 'POST',
-        headers: rootHeaders,
-        body: JSON.stringify({
-          lines: [
-            JSON.stringify({
-              ts: nowIso,
-              host: primaryDomain.name,
-              ip: '198.51.100.25',
-              method: 'GET',
-              uri: '/products?page=1',
-              status: 200,
-              bytes: 14200,
-              rt: 0.018,
-              urt: 0.012,
-              cache: 'HIT',
-              ref: 'https://www.google.com/search?q=alice',
-            }),
-            JSON.stringify({
-              ts: nowIso,
-              host: primaryDomain.name,
-              ip: '198.51.100.99',
-              method: 'POST',
-              uri: '/checkout',
-              status: 201,
-              bytes: 2048,
-              rt: 0.064,
-              urt: 0.055,
-              cache: 'BYPASS',
-              ref: '-',
-            }),
-          ],
-        }),
-      }),
+    // windows hold complete hours: these requests were served in the previous hour
+    const lastHour = new Date(Date.now() - 3_600_000).toISOString()
+    const metric = (fields: Record<string, unknown>) => JSON.stringify({ time: lastHour, host: primaryDomain.name, method: 'GET', body_bytes: 0, request_bytes: 300, upstream_time: '', cache: '', referer: '', agent: 'curl/8', ...fields }) + '\n'
+    const siteLog = Buffer.from(
+      metric({ ip: '198.51.100.25', uri: '/products?page=1', status: 200, bytes: 14200, request_time: 0.018, upstream_time: '0.012', cache: 'HIT', referer: 'https://www.google.com/search?q=alice' })
+      + metric({ ip: '198.51.100.99', method: 'POST', uri: '/checkout', status: 201, bytes: 2048, request_time: 0.064, upstream_time: '0.055', cache: 'BYPASS', referer: '-' }),
     )
-    assert.equal(ingestRes.status, 200)
+    websiteAnalytics.ingestSiteLog({ path: '/var/log/xpanel/nginx/' + primaryDomain.name + '.access.log', accountId: account.id, owners: new Map([[primaryDomain.name, primaryDomain]]),
+      identity: '1:1', start: 0, sizeBytes: siteLog.length, bytes: siteLog, readAt: nowIso, since: new Date(Date.now() - 2 * 86_400_000).toISOString(), caughtUp: true })
+    // The manual ingest route is gone: only the site logs feed the engine.
+    const ingestRes = await app.fetch(new Request('http://agent.local/analytics/websites/ingest', { method: 'POST', headers: rootHeaders, body: JSON.stringify({ lines: [] }) }))
+    assert.equal(ingestRes.status, 404)
 
     const webRes = await app.fetch(
       new Request(`http://agent.local/analytics/websites/${primaryDomain.id}?window=24h`, {
@@ -504,6 +479,10 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
     assert.equal(webSnap.totals.cacheHitRatioPercent, 50)
     assert.equal(webSnap.topPaths.map((p) => p.key).includes('/products'), true)
     assert.equal(events.some((e) => e.kind === 'website.analytics'), true)
+    // The log was read for two days only: a 30-day window is unavailable, not a partial count.
+    const longRes = await app.fetch(new Request(`http://agent.local/analytics/websites/${primaryDomain.id}?window=30d`, { headers: aliceHeaders }))
+    assert.equal(longRes.status, 503)
+    assert.deepEqual(((await longRes.json()) as { details: unknown }).details, { reason: 'window-not-covered', stateChanged: false })
 
     // 3. Missing confined execution fails closed and records the failure
     const writeRes = await app.fetch(

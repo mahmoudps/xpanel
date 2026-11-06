@@ -2388,6 +2388,81 @@
       "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
     },
     {
+      "method": "POST",
+      "path": "/api/accounts/bulk-actions/suspend",
+      "surface": "api",
+      "resource": "accounts",
+      "requiredScope": "accounts:write",
+      "resellerAcl": "suspend-account",
+      "featureEntitlement": [],
+      "ownershipSource": "store.accounts.ownerId per listed account, re-checked with a fresh caller before each account (allowUserSelf=false)",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/account-bulk-actions.ts (single-account use cases)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/accounts/bulk-actions/unsuspend",
+      "surface": "api",
+      "resource": "accounts",
+      "requiredScope": "accounts:write",
+      "resellerAcl": "suspend-account",
+      "featureEntitlement": [],
+      "ownershipSource": "store.accounts.ownerId per listed account, re-checked with a fresh caller before each account (allowUserSelf=false)",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/account-bulk-actions.ts (single-account use cases)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/accounts/bulk-actions/plan",
+      "surface": "api",
+      "resource": "accounts",
+      "requiredScope": "accounts:write",
+      "resellerAcl": "edit-account (+ change-plan)",
+      "featureEntitlement": [],
+      "ownershipSource": "store.accounts.ownerId per listed account, re-checked with a fresh caller before each account (allowUserSelf=false)",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/account-bulk-actions.ts (single-account use cases)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/accounts/bulk-actions/owner",
+      "surface": "api",
+      "resource": "accounts",
+      "requiredScope": "accounts:write",
+      "resellerAcl": "edit-account (rootOnly when ownerId changes)",
+      "featureEntitlement": [],
+      "ownershipSource": "store.accounts.ownerId per listed account, re-checked with a fresh caller before each account (allowUserSelf=false)",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/account-bulk-actions.ts (single-account use cases)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/accounts/bulk-actions",
+      "surface": "api",
+      "resource": "accounts",
+      "requiredScope": "accounts:write",
+      "resellerAcl": "terminate-account",
+      "featureEntitlement": [],
+      "ownershipSource": "store.accounts.ownerId per listed account, re-checked with a fresh caller before each account (allowUserSelf=false)",
+      "allowedPrincipals": [
+        "root",
+        "reseller"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/account-bulk-actions.ts (single-account use cases)"
+    },
+    {
       "method": "GET",
       "path": "/api/ips",
       "surface": "api",
@@ -3548,40 +3623,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/mail/delivery-reports",
-      "surface": "api",
-      "resource": "mail",
-      "requiredScope": "mail:read",
-      "resellerAcl": "list-accounts",
-      "featureEntitlement": [
-        "email-accounts"
-      ],
-      "ownershipSource": "store.domains(ownedAccounts)",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:ownedAccounts"
-    },
-    {
-      "method": "POST",
-      "path": "/api/mail/delivery-reports",
-      "surface": "api",
-      "resource": "mail",
-      "requiredScope": "mail:write",
-      "resellerAcl": null,
-      "featureEntitlement": [
-        "email-accounts"
-      ],
-      "ownershipSource": "rootOnly",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/api/src/extended-routes.ts:helpers.assertRoot"
-    },
-    {
-      "method": "GET",
       "path": "/api/mail/caldav-carddav",
       "surface": "api",
       "resource": "mail",
@@ -3611,6 +3652,66 @@
         "root"
       ],
       "enforcementPoint": "apps/api/src/extended-routes.ts:helpers.assertRoot"
+    },
+    {
+      "method": "GET",
+      "path": "/api/webmail/filters",
+      "surface": "api",
+      "resource": "webmail",
+      "requiredScope": "webmail:read",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts",
+        "email-filters"
+      ],
+      "ownershipSource": "extended/mail/filters.json(accountId, mailbox) + requireMailboxPrincipalAccess (mailbox scope only; the xMail listener admits this base)",
+      "allowedPrincipals": [
+        "root",
+        "reseller",
+        "user",
+        "mailbox"
+      ],
+      "enforcementPoint": "apps/api/src/mail/filter-routes.ts:createFilterRoutes(authorize) + apps/api/src/authorization.ts:requireMailboxPrincipalAccess"
+    },
+    {
+      "method": "POST",
+      "path": "/api/webmail/filters",
+      "surface": "api",
+      "resource": "webmail",
+      "requiredScope": "webmail:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts",
+        "email-filters"
+      ],
+      "ownershipSource": "requireAccountId + requireMailboxPrincipalAccess (scope=mailbox for mailbox principals; the xMail listener admits this base)",
+      "allowedPrincipals": [
+        "root",
+        "reseller",
+        "user",
+        "mailbox"
+      ],
+      "enforcementPoint": "apps/api/src/mail/filter-routes.ts:createFilterRoutes(authorize) + apps/api/src/authorization.ts:requireMailboxPrincipalAccess"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/webmail/filters/:id",
+      "surface": "api",
+      "resource": "webmail",
+      "requiredScope": "webmail:write",
+      "resellerAcl": "edit-account",
+      "featureEntitlement": [
+        "email-accounts",
+        "email-filters"
+      ],
+      "ownershipSource": "extended/mail/filters.json(accountId, mailbox) -> assertRecordAccount + requireMailboxPrincipalAccess",
+      "allowedPrincipals": [
+        "root",
+        "reseller",
+        "user",
+        "mailbox"
+      ],
+      "enforcementPoint": "apps/api/src/mail/filter-routes.ts:createFilterRoutes(authorize) + apps/api/src/authorization.ts:requireMailboxPrincipalAccess"
     },
     {
       "method": "GET",
@@ -4658,78 +4759,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/git/:account/repos",
-      "surface": "api",
-      "resource": "git",
-      "requiredScope": "git:read",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "git-version-control"
-      ],
-      "ownershipSource": "store.accounts(:account)",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
-    },
-    {
-      "method": "POST",
-      "path": "/api/git/:account/repos",
-      "surface": "api",
-      "resource": "git",
-      "requiredScope": "git:write",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "git-version-control"
-      ],
-      "ownershipSource": "store.accounts(:account)",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
-    },
-    {
-      "method": "POST",
-      "path": "/api/git/:account/repos/:repoId/deploy",
-      "surface": "api",
-      "resource": "git",
-      "requiredScope": "git:write",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "git-version-control"
-      ],
-      "ownershipSource": "store.accounts(:account)",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/git/:account/repos/:repoId",
-      "surface": "api",
-      "resource": "git",
-      "requiredScope": "git:write",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "git-version-control"
-      ],
-      "ownershipSource": "store.accounts(:account)",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
-    },
-    {
-      "method": "GET",
       "path": "/api/cache/:account",
       "surface": "api",
       "resource": "cache",
@@ -4856,48 +4885,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/cluster/nodes",
-      "surface": "api",
-      "resource": "cluster",
-      "requiredScope": "cluster:read",
-      "resellerAcl": null,
-      "featureEntitlement": [],
-      "ownershipSource": "rootOnly",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + helpers.assertRoot"
-    },
-    {
-      "method": "POST",
-      "path": "/api/cluster/nodes",
-      "surface": "api",
-      "resource": "cluster",
-      "requiredScope": "cluster:write",
-      "resellerAcl": null,
-      "featureEntitlement": [],
-      "ownershipSource": "rootOnly",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + helpers.assertRoot"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/cluster/nodes/:id",
-      "surface": "api",
-      "resource": "cluster",
-      "requiredScope": "cluster:write",
-      "resellerAcl": null,
-      "featureEntitlement": [],
-      "ownershipSource": "rootOnly",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + helpers.assertRoot"
-    },
-    {
-      "method": "GET",
       "path": "/api/firewall",
       "surface": "api",
       "resource": "firewall",
@@ -4969,20 +4956,6 @@
       "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + ownedAccounts"
     },
     {
-      "method": "POST",
-      "path": "/api/analytics/websites/ingest",
-      "surface": "api",
-      "resource": "analytics",
-      "requiredScope": "analytics:write",
-      "resellerAcl": null,
-      "featureEntitlement": [],
-      "ownershipSource": "rootOnly",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertRoot"
-    },
-    {
       "method": "GET",
       "path": "/api/analytics/websites/:domainId",
       "surface": "api",
@@ -4997,22 +4970,6 @@
         "user"
       ],
       "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
-    },
-    {
-      "method": "GET",
-      "path": "/api/analytics/legacy/:domain",
-      "surface": "api",
-      "resource": "analytics",
-      "requiredScope": "analytics:read",
-      "resellerAcl": "list-accounts",
-      "featureEntitlement": [],
-      "ownershipSource": "store.domains(:domain) -> requireDomainAccount",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:requireDomainAccount"
     },
     {
       "method": "GET",
@@ -5365,20 +5322,6 @@
       "resellerAcl": null,
       "featureEntitlement": [],
       "ownershipSource": "rootOnly on direct agent endpoint; API filters by ownedAccounts",
-      "allowedPrincipals": [
-        "root"
-      ],
-      "enforcementPoint": "apps/agent/src/server.ts:authenticateService + authenticateCaller + assertRootCaller"
-    },
-    {
-      "method": "POST",
-      "path": "/analytics/websites/ingest",
-      "surface": "agent",
-      "resource": "agent.analytics_ingest",
-      "requiredScope": "x-xpanel-agent-token + x-xpanel-principal-id",
-      "resellerAcl": null,
-      "featureEntitlement": [],
-      "ownershipSource": "rootOnly",
       "allowedPrincipals": [
         "root"
       ],

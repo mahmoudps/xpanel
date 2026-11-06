@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { fail, isXpanelError } from '@xpanel/core'
 import type { WriterLease } from '@xpanel/state'
 import type { ExtendedRouteHelpers, BackupDestination, BackupScheduleConfig, BackupSnapshot } from './extended-routes.ts'
-import { assertBackupDestinationsReady, createBackupDestinationsWorkspaceRoutes, normalizeBackupDestinationMetadata } from './backup-destinations-workspace.ts'
-import type { BackupDestinationHost, BackupLifecycleDestination } from './backup-destinations-workspace.ts'
+import { assertBackupDestinationsReady, createBackupDestinationsWorkspaceRoutes, normalizeBackupDestinationMetadata, observeBackupScheduler } from './backup-destinations-workspace.ts'
+import type { BackupDestinationHost, BackupLifecycleDestination, BackupSchedulerObservation } from './backup-destinations-workspace.ts'
 import { backupDestinationTargetDigest } from '../../../packages/core/src/backup-destination.ts'
 
 export type BackupWorkspaceStorageKey = 'backups/destinations.json' | 'backups/schedule.json' | 'backups/snapshots.json'
@@ -12,7 +12,7 @@ export interface WhmBackupWorkspacePorts extends Pick<ExtendedRouteHelpers, 'sto
   publish: (key: Exclude<BackupWorkspaceStorageKey, 'backups/snapshots.json'>, value: unknown, lease: WriterLease) => Promise<void>
   destinationHost?: BackupDestinationHost
 }
-const application = { status: 'configuration_only', nativeApplied: false, remoteConnectionVerified: false, schedulerVerified: false } as const
+const application = (scheduler: BackupSchedulerObservation) => ({ status: 'configuration_only', nativeApplied: false, remoteConnectionVerified: false, ...scheduler }) as const
 const kinds = ['s3', 'sftp', 'rsync', 'backblaze', 'ftp', 'local'] as const
 const invalid = (message: string): never => fail('VALIDATION', message, { stateChanged: false })
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -84,7 +84,7 @@ export function validateBackupDestination(value: unknown, saved?: Pick<BackupDes
 }
 
 const scheduleFields = ['enabled', 'frequency', 'cron', 'retentionCount', 'retentionWeekly', 'retentionMonthly', 'compress', 'includeDatabases', 'includeMail', 'includeDns', 'includeControl', 'selectedAccounts', 'destinationIds'] as const
-const defaults: BackupScheduleConfig = { enabled: false, frequency: 'daily', cron: '0 2 * * *', retentionCount: 7, retentionWeekly: 4, retentionMonthly: 0, compress: 'zstd', includeDatabases: true, includeMail: true, includeDns: true, includeControl: true, selectedAccounts: 'all', destinationIds: [], updatedAt: '' }
+const defaults: BackupScheduleConfig = { enabled: false, frequency: 'daily', cron: '0 2 * * *', retentionCount: 7, retentionWeekly: 4, retentionMonthly: 0, compress: 'gzip', includeDatabases: true, includeMail: true, includeDns: true, includeControl: true, selectedAccounts: 'all', destinationIds: [], updatedAt: '' }
 export function validateBackupSchedule(value: unknown, current: BackupScheduleConfig | null = null): BackupScheduleConfig {
   if (!object(value)) return invalid('backup schedule must be an object')
   onlyKeys(value, scheduleFields)
@@ -180,14 +180,17 @@ export function createWhmBackupWorkspaceRoutes(ports: WhmBackupWorkspacePorts) {
     if (workspace && url.search) return invalid('backup workspace does not accept selectors')
     if (method === 'GET') {
       const lease = await ports.store.getWriterLock().acquire()
+      let read: { schedule: BackupScheduleConfig | null; body: Record<string, unknown> }
       try {
         const fresh = await ports.requireCaller(request)
         await ports.assertRoot(fresh, 'backups.configuration')
         if (fresh.principal.id !== caller.principal.id || fresh.sessionId !== caller.sessionId || fresh.apiTokenId !== caller.apiTokenId) return fail('FORBIDDEN', 'backup authorization changed', { stateChanged: false })
         const current = await load()
-        if (readWorkspace) return json({ ...current, snapshots: snapshotMetadata(await ports.read('backups/snapshots.json')), accounts: (await ports.store.listAccounts()).map(account => ({ id: account.id, username: account.username, primaryDomain: account.primaryDomain, status: account.status })), application })
-        return json(destinationsRoute ? { destinations: current.destinations, revision: current.revision, application } : { schedule: current.schedule ?? defaults, persisted: current.schedule !== null, revision: current.revision, application })
+        read = { schedule: current.schedule, body: readWorkspace ? { ...current, snapshots: snapshotMetadata(await ports.read('backups/snapshots.json')), accounts: (await ports.store.listAccounts()).map(account => ({ id: account.id, username: account.username, primaryDomain: account.primaryDomain, status: account.status })) }
+          : destinationsRoute ? { destinations: current.destinations, revision: current.revision } : { schedule: current.schedule ?? defaults, persisted: current.schedule !== null, revision: current.revision } }
       } finally { await lease.release() }
+      // The agent timer is observed after the lease is released, so a slow host reply never holds the configuration writer.
+      return json({ ...read.body, application: application(await observeBackupScheduler(ports, caller, read.schedule)) })
     }
     if (destinationsRoute && method !== 'POST' && method !== 'DELETE' && method !== 'PATCH' || scheduleRoute && method !== 'PUT') return json({ detail: 'method not allowed', code: 'METHOD_NOT_ALLOWED' }, 405)
     const body = await readBody(request), expected = body.expectedRevision
@@ -195,7 +198,7 @@ export function createWhmBackupWorkspaceRoutes(ports: WhmBackupWorkspacePorts) {
     if (expected !== undefined && (typeof expected !== 'string' || !/^[0-9a-f]{64}$/.test(expected))) return invalid('expectedRevision must be a saved revision')
     const lease = await ports.store.getWriterLock().acquire()
     let writeAttempted = false
-    let result: Record<string, unknown>, audit: { action: string; target: string }, status = 200
+    let result: Record<string, unknown>, audit: { action: string; target: string }, status = 200, replySchedule: BackupScheduleConfig | null = null
     try {
       const fresh = await ports.requireCaller(request)
       await ports.assertRoot(fresh, 'backups.configuration')
@@ -213,6 +216,7 @@ export function createWhmBackupWorkspaceRoutes(ports: WhmBackupWorkspacePorts) {
       const { expectedRevision: _expected, ...draft } = body
       if (scheduleRoute) {
         schedule = validateBackupSchedule(draft, schedule)
+        if (schedule.compress !== 'gzip') return fail('PRECONDITION_FAILED', 'Zstandard compression is unavailable: this server writes gzip archives only', { stateChanged: false, unsupported: true, reason: 'backup_compression_unavailable' })
         const accounts = await ports.store.listAccounts(), names = new Set(accounts.flatMap(account => [account.username, account.id])), destinationsById = new Map(destinations.map(destination => [destination.id, destination]))
         if (schedule.selectedAccounts !== 'all' && schedule.selectedAccounts.some(username => !names.has(username))) return invalid('selected account no longer exists')
         if (schedule.enabled && schedule.selectedAccounts !== 'all' && schedule.selectedAccounts.length === 0) return invalid('an enabled schedule requires selected accounts')
@@ -253,7 +257,7 @@ export function createWhmBackupWorkspaceRoutes(ports: WhmBackupWorkspacePorts) {
         result = { destination }; audit = { action: previous ? 'backup.destination.updated' : 'backup.destination.created', target: 'backup-destination:' + destination.name }; status = previous ? 200 : 201
       }
       await lease.assertFencingToken()
-      result = { ...result, revision: revision(destinations, schedule), application }
+      result = { ...result, revision: revision(destinations, schedule) }; replySchedule = schedule
     } catch (error) {
       if (writeAttempted) return fail('SERVICE_UNAVAILABLE', 'backup configuration write requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
       if (isXpanelError(error)) return fail(error.code, error.message, { ...error.detail, stateChanged: false })
@@ -261,6 +265,6 @@ export function createWhmBackupWorkspaceRoutes(ports: WhmBackupWorkspacePorts) {
     } finally { await lease.release() }
     try { await ports.emitAudit({ actor: caller.principal.username, principalId: caller.principal.id, ...audit, outcome: 'ok' }) }
     catch { return fail('SERVICE_UNAVAILABLE', 'backup configuration audit requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true }) }
-    return json(result, status)
+    return json({ ...result, application: application(await observeBackupScheduler(ports, caller, replySchedule)) }, status)
   }
 }

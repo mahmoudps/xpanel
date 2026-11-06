@@ -32,6 +32,24 @@ import { assertDbHost } from '../services/mariadb.ts'
 // 1. First-Run Setup, Hostname Change & Filesystem Quota Initialization
 // ============================================================================
 
+const HOSTS_MARKER = '# Managed by xPanel'
+
+/**
+ * Keeps every unrelated line of the current `/etc/hosts`. Lines for the addresses xPanel maps
+ * (primary IPs and Debian's 127.0.1.1 host slot) are replaced; the managed names are removed elsewhere.
+ */
+const preservedHostsLines = (current: string, addresses: ReadonlySet<string>, names: ReadonlySet<string>): string[] =>
+  current.split('\n').flatMap((line): string[] => {
+    const body = line.split('#')[0]!.trim()
+    if (line.trim() === HOSTS_MARKER) return []
+    if (!body) return [line]
+    const [address, ...aliases] = body.split(/\s+/)
+    if (addresses.has(address!)) return []
+    const kept = aliases.filter((alias) => !names.has(alias.toLowerCase()))
+    if (kept.length === aliases.length) return [line]
+    return kept.length ? [[address, ...kept].join(' ')] : []
+  })
+
 /**
  * Validates FQDN and IP addresses, renders `/etc/hostname` and `/etc/hosts`,
  * and returns the `hostnamectl set-hostname` execution action.
@@ -40,20 +58,27 @@ export const renderHostnameChange = (
   newHostname: string,
   ipv4: string,
   ipv6?: string | null,
+  currentHosts?: string | null,
 ): { files: RenderedFile[]; actions: HostAction[] } => {
   const fqdn = normalizeHostname(newHostname, 'hostname')
   const labels = fqdn.split('.')
   if (labels.length < 2) {
     return invalid('hostname', newHostname, 'must be a fully-qualified domain name (e.g. host.example.com)')
   }
+  // sethostname(2) refuses names above HOST_NAME_MAX (64 on Linux).
+  if (fqdn.length > 64) return invalid('hostname', newHostname, 'must be at most 64 characters to be applied as the system host name')
   const shortHost = labels[0]!
   const v4 = canonicalIpv4(ipv4, 'ipv4')
   const v6 = ipv6 !== undefined && ipv6 !== null && ipv6 !== '' ? canonicalIpv6(ipv6, 'ipv6') : null
 
+  const current = typeof currentHosts === 'string' ? currentHosts.replace(/\n+$/, '') : ''
+  const preserved = current ? preservedHostsLines(current, new Set(['127.0.1.1', v4, ...(v6 ? [v6] : [])]), new Set([fqdn, shortHost])) : []
+  const maps = (address: string): boolean => preserved.some((line) => line.split('#')[0]!.trim().split(/\s+/)[0] === address)
   const hostsLines = [
-    '# Managed by xPanel',
-    '127.0.0.1 localhost',
-    '::1 localhost ip6-localhost ip6-loopback',
+    HOSTS_MARKER,
+    ...(maps('127.0.0.1') ? [] : ['127.0.0.1 localhost']),
+    ...(maps('::1') ? [] : ['::1 localhost ip6-localhost ip6-loopback']),
+    ...preserved,
     `${v4} ${fqdn} ${shortHost}`,
   ]
   if (v6) {

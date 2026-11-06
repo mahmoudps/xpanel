@@ -219,7 +219,10 @@ describe('host capability probes', () => {
     expect(match('/proc/stat', 'read')).toBe(true)
     expect(match('/proc/stat', 'write')).toBe(false)
     expect(match('/proc/self/environ', 'read')).toBe(false)
-    expect(match('/proc/sys/kernel/hostname', 'read')).toBe(false)
+    // The host name apply verifies the kernel name; the name stays read-only.
+    expect(match('/proc/sys/kernel/hostname', 'read')).toBe(true)
+    expect(match('/proc/sys/kernel/hostname', 'write')).toBe(false)
+    expect(match('/proc/sys/kernel/domainname', 'read')).toBe(false)
     expect(match('/proc/net/dev', 'read')).toBe(true)
     expect(match('/proc/net/dev', 'write')).toBe(false)
     expect(match('/proc/net/dev', 'remove')).toBe(false)

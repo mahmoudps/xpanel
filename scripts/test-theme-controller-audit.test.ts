@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assertControllerReviewMappings, assertSelectorReview, nonliteralSelectorSites, selectorSourceDigest } from './theme-controller-audit.mjs'
+import { assertControllerReviewMappings, assertControllerSourceAudit, assertSelectorReview, nonliteralSelectorSites, selectorSourceDigest } from './theme-controller-audit.mjs'
 import type { SelectorSourceReview } from '../apps/web/src/themes/selector-audit-data.ts'
 
 const path = 'apps/web/src/synthetic-client.ts'
@@ -10,6 +10,10 @@ const reviewed = (source: string): SelectorSourceReview => ({
 })
 
 describe('controller source classifications', () => {
+  // A source edit without its review update otherwise surfaces only when the route-hook generator runs.
+  it('keeps the committed selector reviews in step with the real web sources', () => {
+    expect(() => assertControllerSourceAudit()).not.toThrow()
+  })
   it('counts all five selector APIs without treating literals, comments or regular expressions as sites', () => {
     const source = `function bind(root, key, guard, id) {
       root.querySelector('[data-part-' + key + ']')

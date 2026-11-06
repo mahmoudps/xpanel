@@ -72,6 +72,16 @@ describe('authenticated provisioning reply runtime schema', { tags: ['unit'] }, 
     expect(assert(r, value)).toEqual(value.execution)
     expect(assert(r, { ...value, reconciliation: { status: 'noop', generation: value.reconciliation.generation, stateChecksum: r.authority.desired.checksum } })).toEqual(value.execution)
   })
+  it('accepts the observed kernel host name on every result and refuses a malformed one', () => {
+    const r = request(), value = reply(r)
+    for (const kernelHostname of ['host.example.test', null]) {
+      expect(assert(r, { ...value, reconciliation: { ...value.reconciliation, kernelHostname } })).toEqual(value.execution)
+      expect(assert(r, { ...value, reconciliation: { status: 'noop', generation: value.reconciliation.generation, stateChecksum: r.authority.desired.checksum, kernelHostname } })).toEqual(value.execution)
+    }
+    for (const kernelHostname of ['', ' ', 'x'.repeat(254), 7, {}]) {
+      expect(() => assert(r, { ...value, reconciliation: { ...value.reconciliation, kernelHostname } })).toThrow()
+    }
+  })
   it('retains a well-shaped known failure without treating it as execution evidence', () => {
     const r = request(), value = reply(r)
     expect(assert(r, { binding: r.binding, outcome: 'known', reconciliation: { status: 'failed', generation: { ...value.reconciliation.generation, status: 'failed' }, failedTest: 'nginx -t', error: 'invalid config\nline 2', stateChanged: true, verificationRequired: true } })).toBeUndefined()

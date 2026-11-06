@@ -4,6 +4,12 @@ import { services as mailServices, system } from '@xpanel/render'
 import { join } from 'node:path'
 import {
   fail,
+  assertBool,
+  assertCidr,
+  assertLine,
+  assertRedirectTarget,
+  assertRelPath,
+  oneOf,
   assessMailboxMetadataAuthority,
   isXpanelError,
   suggestServerSettings,
@@ -40,8 +46,9 @@ import type { TransferWorkspacePorts } from './transfer-workspace.ts'
 import { createTransferSourceDiscovery } from './acct-transfer-discovery.ts'
 import { readTransferCredentialToken } from './acct-transfer-credentials.ts'
 import { canonicalForwarderAddress, validateForwarderInput, type ForwarderAction } from './mail/forwarder-validation.ts'
-import { applyMailRoutingChange, commitRoutingRevision, readMailRoutingStatus, type MailRoutingRecordState, type MailRoutingStatusView } from './mail/routing-application.ts'
+import { applyMailRoutingChange, commitRoutingRevision, readMailRoutingStatus, reconcileApplied, type MailRoutingRecordState, type MailRoutingStatusView } from './mail/routing-application.ts'
 import { createFilterRoutes } from './mail/filter-routes.ts'
+import { assertDnsZoneRevision, dnsZoneRevision } from './dns-workspace.ts'
 import { createAutoresponderRoutes } from './mail/autoresponder-routes.ts'
 import { contactWorkspaceRevision, projectContactWorkspace, parseContactWorkspaceRequest,
   createWorkspaceContact, updateWorkspaceContact, normalizeContactGroups, updateWorkspaceContactGroups } from './mail/contact-workspace.ts'
@@ -155,19 +162,6 @@ export interface SpamSettingsState {
   allowlist: string[]
   blocklist: string[]
   updatedAt: string
-}
-
-export interface MailDeliveryReport {
-  id: Id
-  at: string
-  sender: string
-  recipient: string
-  domain: string
-  status: 'delivered' | 'deferred' | 'bounced' | 'rejected'
-  smtpCode: number
-  queueId: string
-  bytes: number
-  message: string
 }
 
 export interface CalDavCardDavConfig {
@@ -383,28 +377,6 @@ export interface WebExtrasConfig {
   updatedAt: string
 }
 
-export interface GitRepositoryRecord {
-  id: Id
-  accountId: Id
-  name: string
-  branch: string
-  remoteUrl: string
-  deployPath: string
-  postDeployCommand: string | null
-  autoDeploy: boolean
-  currentCommit: string | null
-  currentReleaseDir: string | null
-  deployments: {
-    id: Id
-    commitSha: string
-    releaseDir: string
-    currentSymlink: string
-    status: 'deployed' | 'rolled_back'
-    deployedAt: string
-  }[]
-  createdAt: string
-}
-
 export interface RemoteDatabaseHostsConfig {
   accountId: Id
   hosts: { address: string; engine: 'mariadb' | 'postgresql' | 'both'; comment: string }[]
@@ -466,18 +438,6 @@ export interface InstalledAppRecord {
   updatedAt: string
 }
 
-export interface ClusterNodeRecord {
-  id: Id
-  name: string
-  hostname: string
-  ipv4: string
-  role: 'web' | 'dns' | 'mail' | 'db' | 'all'
-  status: 'online' | 'syncing' | 'degraded'
-  wgPublicKey: string
-  region: string
-  joinedAt: string
-}
-
 // ---------------------------------------------------------------------------
 // Compilers & Helpers
 // ---------------------------------------------------------------------------
@@ -495,6 +455,22 @@ const readJsonBody = async <T = Record<string, unknown>>(req: Request): Promise<
   if (!body || typeof body !== 'object' || Array.isArray(body)) return fail('VALIDATION', 'request body must be a JSON object')
   return body as T
 }
+
+/** An object holding only writable keys; values are validated by the caller before reaching a rendered line. */
+const writableFields = (value: unknown, allowed: readonly string[], what: string): Record<string, unknown> =>
+  value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => allowed.includes(key))
+    ? value as Record<string, unknown>
+    : fail('VALIDATION', `${what} accepts only ${allowed.join(', ')}`, { stateChanged: false })
+
+const boundedList = (value: unknown, max: number, what: string): unknown[] =>
+  Array.isArray(value) && value.length <= max ? value : fail('VALIDATION', `${what} must be a list of at most ${max} entries`, { stateChanged: false })
+
+const matching = (value: unknown, pattern: RegExp, what: string): string =>
+  typeof value === 'string' && pattern.test(value) ? value : fail('VALIDATION', `invalid ${what}`, { stateChanged: false })
+
+/** A site path such as /errors/404.html: shared relative-path rules after the leading slash. */
+const sitePath = (value: unknown, what: string): string =>
+  typeof value === 'string' && value.length > 1 && value.startsWith('/') ? `/${assertRelPath(value.slice(1), what)}` : fail('VALIDATION', `${what} must be a site path starting with /`, { stateChanged: false })
 
 export const compileVacationSieve = (cfg: {
   enabled: boolean
@@ -797,6 +773,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
             ? canonicalIp(body.primaryIpv6.trim()).address
             : fail('VALIDATION', 'primary IPv6 address is invalid')
         const hostname = validateDomainName(body.hostname ?? existingSettings?.hostname ?? 'panel.xpanel.internal')
+        if (hostname.length > 64) return fail('VALIDATION', 'the server host name must be at most 64 characters', { stateChanged: false })
         const nameservers = (body.nameservers ?? existingSettings?.nameservers ?? [`ns1.${hostname}`, `ns2.${hostname}`]).map(
           (ns) => validateDomainName(ns),
         )
@@ -894,6 +871,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       const body = await readJsonBody<{ hostname?: string }>(req)
       if (!body.hostname) return fail('VALIDATION', 'hostname is required')
       const hostname = validateDomainName(body.hostname)
+      if (hostname.length > 64) return fail('VALIDATION', 'the server host name must be at most 64 characters', { stateChanged: false })
       const current = await helpers.store.getServerSettings()
       const suggested = suggestServerSettings({ cores: 4, memoryMb: 8192 })
       const previousHostname = current?.hostname ?? null
@@ -912,38 +890,24 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         backendTlsPort: current?.backendTlsPort ?? 8443,
       })
 
-      const ips = await helpers.store.listServerIps()
-      const primaryIp = ips.find((i) => i.version === 4 && i.isPrimary)?.address ?? '127.0.1.1'
-      const shortHost = hostname.split('.')[0] ?? hostname
-      const renderedFiles = [
-        { path: '/etc/hostname', mode: 0o644, content: `${hostname}\n` },
-        {
-          path: '/etc/hosts',
-          mode: 0o644,
-          content: `127.0.0.1 localhost\n${primaryIp} ${hostname} ${shortHost}\n::1 localhost ip6-localhost ip6-loopback\n`,
-        },
-      ]
-      await ext.write('hostname-state.json', {
-        hostname,
-        previousHostname,
-        renderedFiles,
-        updatedAt: new Date().toISOString(),
-      })
-
       const reconcile = await helpers.triggerReconcile(caller)
+      // Applied only when the agent reconciled and observed the saved name as the kernel host name.
+      const observed = reconcile?.body.kernelHostname
+      const kernelHostname = typeof observed === 'string' ? observed : null
+      const nativeApplied = reconcile !== null && reconcile.ok && (reconcile.body.status === 'applied' || reconcile.body.status === 'noop') && kernelHostname === updated.hostname
       await helpers.emitAudit({
         actor: caller.principal.username,
         action: 'server.hostname_change',
         target: `server:${hostname}`,
-        detail: { previousHostname, hostname },
+        detail: { previousHostname, hostname, nativeApplied },
         outcome: 'ok',
         principalId: caller.principal.id,
       })
       return jsonResponse({
-        ok: true,
         hostname: updated.hostname,
         previousHostname,
-        files: renderedFiles,
+        settings: updated,
+        application: { nativeApplied, kernelHostname },
         reconcile: reconcile?.body ?? null,
       })
     }
@@ -1141,7 +1105,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       let attempted = false
       try {
       if (lease) caller = await freshExtendedMailCaller(req, caller)
-      const list = await ext.readOrDefault<MailingListRecord[]>('mail/mailing-lists.json', [])
+      const previous = await ext.readOrDefault<MailingListRecord[] | null>('mail/mailing-lists.json', null)
+      const list = [...previous ?? []]
       if (method === 'GET') {
         const visible = (await scopedRecords(caller, list)).map(publicMailingList)
         await freshExtendedMailCaller(req, caller)
@@ -1209,16 +1174,18 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         await atomicWriteJson(join(ext.baseDir, 'mail', 'mailing-lists.json'), list, 0o640, () => lease!.assertFencingToken())
         if (JSON.stringify(await ext.readOrDefault<MailingListRecord[]>('mail/mailing-lists.json', [])) !== JSON.stringify(list)) throw new Error('mailing list create readback mismatch')
         caller = await freshExtendedMailCaller(req, caller)
+        const revision = await commitRoutingRevision(lease!)
         await lease!.release(); lease = null
+        const { nativeApplied } = await applyMailRouting(caller, revision, { relPath: 'mail/mailing-lists.json', previous })
         await helpers.emitAudit({
           actor: caller.principal.username,
           action: 'mail.mailing_list.created',
           target: `mailing-list:${record.address}`,
-          detail: { membersCount: record.members.length },
+          detail: { membersCount: record.members.length, revision, nativeApplied },
           outcome: 'ok',
           principalId: caller.principal.id,
         }, { accountId: account.id, resellerId: account.ownerId })
-        return jsonResponse({ mailingList: publicMailingList(record) }, 201)
+        return jsonResponse({ mailingList: publicMailingList(record), revision, nativeApplied }, 201)
       }
       if (method === 'DELETE') {
         const body = await readJsonBody<{ id?: string }>(req)
@@ -1236,18 +1203,22 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         await atomicWriteJson(join(ext.baseDir, 'mail', 'mailing-lists.json'), next, 0o640, () => lease!.assertFencingToken())
         if (JSON.stringify(await ext.readOrDefault<MailingListRecord[]>('mail/mailing-lists.json', [])) !== JSON.stringify(next)) throw new Error('mailing list delete readback mismatch')
         caller = await freshExtendedMailCaller(req, caller)
+        const revision = await commitRoutingRevision(lease!)
         await lease!.release(); lease = null
+        const { nativeApplied } = await applyMailRouting(caller, revision, { relPath: 'mail/mailing-lists.json', previous })
         await helpers.emitAudit({
           actor: caller.principal.username,
           action: 'mail.mailing_list.deleted',
           target: `mailing-list:${String(targetId)}`,
+          detail: { revision, nativeApplied },
           outcome: 'ok',
           principalId: caller.principal.id,
         })
-        return jsonResponse({ ok: true })
+        return jsonResponse({ ok: true, revision, nativeApplied })
       }
       } catch (error) {
-        if (attempted) return fail('SERVICE_UNAVAILABLE', 'mailing list administration outcome requires inspection', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
+        // a refused configuration test restored the previous lists: report that refusal as is
+        if (attempted && !(isXpanelError(error) && error.code === 'CONFIG_TEST_FAILED')) return fail('SERVICE_UNAVAILABLE', 'mailing list administration outcome requires inspection', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
         throw error
       } finally { await lease?.release() }
     }
@@ -1466,14 +1437,18 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
 
       // one apply for the whole import; a failed test is reported, the imported rows stay saved for review
       let application: { state: string; reason: string | null; revision: number } | undefined
-      if (importRevision !== null) {
+      let nativeApplied = false
+      if (importRevision !== null || importedMailboxes.length > 0) {
         let failedApply: string | null = null
         try {
           const reconcile = await helpers.triggerReconcile(caller)
           if (reconcile?.body.status === 'failed') failedApply = String(reconcile.body.error ?? 'mail configuration test failed').slice(0, 500)
+          nativeApplied = reconcileApplied(reconcile)
         } catch { /* the status read below reports the host state */ }
-        const status = await readMailRoutingStatus(helpers.store, helpers.db, failedApply)
-        application = { ...status.record('forwarder', '', { domain: importedForwarders[0]!.sourceAddress.split('@')[1]! }), revision: importRevision }
+        if (importRevision !== null) {
+          const status = await readMailRoutingStatus(helpers.store, helpers.db, failedApply)
+          application = { ...status.record('forwarder', '', { domain: importedForwarders[0]!.sourceAddress.split('@')[1]! }), revision: importRevision }
+        }
       }
       await helpers.emitAudit({
         actor: caller.principal.username,
@@ -1483,6 +1458,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           mailboxesCount: importedMailboxes.length,
           forwardersCount: importedForwarders.length,
           ...(application ? { application } : {}),
+          nativeApplied,
           errorsCount: errors.length,
         },
         outcome: 'ok',
@@ -1493,6 +1469,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         importedMailboxes,
         importedForwarders,
         ...(application ? { application } : {}),
+        nativeApplied,
         errors,
         summary: {
           mailboxesImported: importedMailboxes.length,
@@ -1500,54 +1477,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           errorCount: errors.length,
         },
       })
-    }
-
-    if (pathname === '/api/mail/delivery-reports') {
-      const caller = await helpers.requireCaller(req)
-      const reports = await ext.readOrDefault<MailDeliveryReport[]>('mail/delivery-reports.json', [])
-      if (method === 'GET') {
-        const ownedIds = new Set((await ownedAccounts(helpers.store, caller)).map(account => account.id))
-        const ownedDomains = new Set((await helpers.store.listDomains()).filter(domain => ownedIds.has(domain.accountId)).map(domain => domain.name))
-        const statusFilter = url.searchParams.get('status')
-        const domainFilter = url.searchParams.get('domain')
-        const filtered = reports.filter(
-          (r) =>
-            (caller.principal.kind === 'root' || ownedDomains.has(r.domain)) &&
-            (!statusFilter || r.status === statusFilter) &&
-            (!domainFilter || r.domain === domainFilter),
-        )
-        return jsonResponse({ reports: filtered, total: filtered.length })
-      }
-      if (method === 'POST') {
-        await helpers.assertRoot(caller, 'mail.delivery_report.ingest')
-        const body = await readJsonBody<Partial<MailDeliveryReport>>(req)
-        const recipient = (body.recipient ?? 'user@example.com').toLowerCase()
-        const domain = body.domain ?? recipient.split('@')[1] ?? 'example.com'
-        const status = body.status ?? 'delivered'
-        const entry: MailDeliveryReport = {
-          id: randomUUID(),
-          at: new Date().toISOString(),
-          sender: (body.sender ?? 'postmaster@example.com').toLowerCase(),
-          recipient,
-          domain,
-          status,
-          smtpCode: body.smtpCode ?? (status === 'delivered' ? 250 : status === 'deferred' ? 451 : 550),
-          queueId: body.queueId ?? randomUUID().slice(0, 10).toUpperCase(),
-          bytes: body.bytes ?? 2048,
-          message: body.message ?? (status === 'delivered' ? '250 2.0.0 Ok: queued as delivered' : 'Delivery status logged'),
-        }
-        reports.unshift(entry)
-        await ext.write('mail/delivery-reports.json', reports)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'mail.delivery_report.logged',
-          target: `delivery:${entry.queueId}`,
-          detail: { status: entry.status, recipient: entry.recipient },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ report: entry }, 201)
-      }
     }
 
     if (pathname === '/api/mail/caldav-carddav') {
@@ -1672,18 +1601,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         return jsonResponse({ messages: filtered })
       }
       if (method === 'POST' && !messageItemMatch) {
-        const body = await readJsonBody<{
-          mailbox?: string
-          from?: string
-          to?: string[] | string
-          cc?: string[] | string
-          bcc?: string[] | string
-          subject?: string
-          textBody?: string
-          htmlBody?: string
-          attachments?: { filename: string; contentType: string; sizeBytes: number }[]
-          identityId?: Id | null
-        }>(req)
+        const body = await readJsonBody<{ mailbox?: string; from?: string; to?: string[] | string; identityId?: Id | null }>(req)
         const mailbox = isMailboxPrincipal(caller)
           ? await requireMailbox(helpers.store, caller, body.mailbox)
           : await requireMailbox(helpers.store, caller, body.mailbox ?? body.from)
@@ -1701,63 +1619,10 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
             ? body.to.split(',').map((s) => s.trim()).filter(Boolean)
             : []
         if (toList.length === 0) return fail('VALIDATION', 'at least one recipient (to) is required')
-        const sentMsg: WebmailMessage = {
-          id: randomUUID(),
-          mailbox,
-          folder: 'Sent',
-          from,
-          to: toList,
-          cc: Array.isArray(body.cc) ? body.cc : [],
-          bcc: Array.isArray(body.bcc) ? body.bcc : [],
-          subject: body.subject ?? '(no subject)',
-          textBody: body.textBody ?? '',
-          htmlBody: body.htmlBody ?? `<p>${body.textBody ?? ''}</p>`,
-          attachments: body.attachments ?? [],
-          identityId: body.identityId ?? null,
-          read: true,
-          starred: false,
-          sentAt: new Date().toISOString(),
-        }
-        messages.unshift(sentMsg)
-        // Also deliver to local recipient INBOX
-        for (const rcpt of toList) {
-          messages.unshift({
-            ...sentMsg,
-            id: randomUUID(),
-            mailbox: rcpt.toLowerCase(),
-            folder: 'INBOX',
-            read: false,
-          })
-        }
-        await ext.write('webmail/messages.json', messages)
-
-        // Append delivery report
-        const reports = await ext.readOrDefault<MailDeliveryReport[]>('mail/delivery-reports.json', [])
-        for (const rcpt of toList) {
-          reports.unshift({
-            id: randomUUID(),
-            at: sentMsg.sentAt,
-            sender: from,
-            recipient: rcpt.toLowerCase(),
-            domain: rcpt.split('@')[1] ?? 'example.com',
-            status: 'delivered',
-            smtpCode: 250,
-            queueId: sentMsg.id.slice(0, 8).toUpperCase(),
-            bytes: Buffer.byteLength(sentMsg.textBody + sentMsg.htmlBody, 'utf8'),
-            message: '250 2.0.0 Ok: delivered via Dovecot LMTP',
-          })
-        }
-        await ext.write('mail/delivery-reports.json', reports)
-
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'webmail.message.sent',
-          target: `webmail:${sentMsg.id}`,
-          detail: { from, to: toList, subject: sentMsg.subject },
-          outcome: 'ok',
-          principalId: caller.principal.id,
+        // This JSON store has no SMTP or IMAP behind it: real submission and the Sent copy belong to the sealed mailbox session.
+        return fail('PRECONDITION_FAILED', 'send through the mailbox submission at /api/webmail/send; nothing was sent or stored', {
+          reason: 'mailbox_submission_required', stateChanged: false,
         })
-        return jsonResponse({ message: sentMsg }, 201)
       }
     }
 
@@ -2305,27 +2170,47 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         if (dmarcRecords.length === 0) nextRecords.push({ id: randomUUID(), zone: domName, name: '_dmarc', type: 'TXT', ttl: 14400, content: dmarc, priority: null })
         prepared.push({ domName, existingZone, domObj, nextRecords, spf, dkim, dmarc })
       }
+      const recordSet = (list: readonly DnsRecord[]): string => JSON.stringify(list.map(r => JSON.stringify([r.name, r.type, r.ttl, r.content, r.priority])).sort())
+      const conflicts: string[] = []
+      let changed = 0
       // Validate every requested signing key before changing any desired zone.
       for (const { domName, existingZone, domObj, nextRecords, spf, dkim, dmarc } of prepared) {
-        await helpers.store.saveDnsZone({
-          id: existingZone?.id ?? randomUUID(),
-          accountId: existingZone?.accountId ?? domObj?.accountId ?? null,
-          name: domName,
-          serial: existingZone ? existingZone.serial + 1 : 2026102201,
-          records: nextRecords,
-        })
+        // The serial moves only with real content; a zone changed since it was read above is refused, never overwritten.
+        if (!existingZone || recordSet(existingZone.records) !== recordSet(nextRecords)) {
+          try {
+            await helpers.store.saveDnsZone({
+              id: existingZone?.id ?? randomUUID(),
+              accountId: existingZone?.accountId ?? domObj?.accountId ?? null,
+              name: domName,
+              serial: mailServices.bumpSerial(existingZone?.serial ?? 0, new Date()),
+              records: nextRecords,
+            }, { dnsGuard: async latest => {
+              assertDnsZoneRevision(latest, dnsZoneRevision(existingZone))
+              await requireDomainAccount(helpers.store, await helpers.requireCaller(req), domName, 'dns.email_auth.batch')
+            } })
+          } catch (error) {
+            if (isXpanelError(error) && error.code === 'CONFLICT') { conflicts.push(domName); continue }
+            throw error
+          }
+          changed++
+        }
         provisioned.push({ domain: domName, spf, dkim, dmarc })
+      }
+      let nativeApplied = false
+      if (changed) {
+        try { nativeApplied = reconcileApplied(await helpers.triggerReconcile(caller)) } catch { /* reported as not applied */ }
       }
 
       await helpers.emitAudit({
         actor: caller.principal.username,
         action: 'dns.email_auth.batch_provisioned',
         target: 'dns:email-auth',
-        detail: { count: provisioned.length },
+        detail: { count: provisioned.length, changed, conflicts, nativeApplied },
         outcome: 'ok',
         principalId: caller.principal.id,
       })
-      return jsonResponse({ ok: true, provisioned, count: provisioned.length })
+      if (conflicts.length) return fail('CONFLICT', 'DNS zone changed; reload and review before retrying', { stateChanged: changed > 0, conflicts, provisioned: provisioned.map(item => item.domain), nativeApplied })
+      return jsonResponse({ ok: true, provisioned, count: provisioned.length, nativeApplied })
     }
 
     if (method === 'POST' && pathname === '/api/dns/cleanup') {
@@ -2463,7 +2348,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     }
 
     // =========================================================================
-    // 6. Extended File Isolation & Web Extras (/api/web-features/* & /api/git/*)
+    // 6. Extended File Isolation & Web Extras (/api/web-features/*)
     // =========================================================================
     const webFeatMatch = /^\/api\/web-features\/([^/]+)\/(directory-privacy|hotlink-protection|web-disk|extras)$/.exec(
       pathname,
@@ -2591,23 +2476,32 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           return jsonResponse({ config: await ext.readOrDefault(fileKey, defaultCfg) })
         }
         if (method === 'PUT') {
-          const body = await readJsonBody<Partial<HotlinkProtectionConfig>>(req)
-          const current = await ext.readOrDefault(fileKey, defaultCfg)
-          const merged = { ...current, ...body }
-          const extPattern = merged.protectedExtensions.join('|')
+          const body = writableFields(await readJsonBody(req), ['enabled', 'allowedUrls', 'protectedExtensions', 'allowDirectRequests', 'redirectUrl'], 'hotlink protection')
+          const merged = { ...await ext.readOrDefault(fileKey, defaultCfg), ...body }
+          // Every value lands in an nginx or Apache line, so stored values are revalidated along with the request.
+          const enabled = assertBool(merged.enabled, 'enabled'), allowDirectRequests = assertBool(merged.allowDirectRequests, 'allowDirectRequests')
+          const allowedUrls = boundedList(merged.allowedUrls, 100, 'allowedUrls').map(url => validateDomainName(url))
+          const protectedExtensions = boundedList(merged.protectedExtensions, 50, 'protectedExtensions').map(value => matching(value, /^[a-z0-9]{1,15}$/, 'protected extension'))
+          const redirectUrl = merged.redirectUrl === null ? null : assertRedirectTarget(merged.redirectUrl)
+          if (enabled && protectedExtensions.length === 0) return fail('VALIDATION', 'enabled hotlink protection needs at least one protected extension', { stateChanged: false })
+          const extPattern = protectedExtensions.join('|')
           const validReferers = [
-            ...(merged.allowDirectRequests ? ['none', 'blocked'] : []),
-            ...merged.allowedUrls,
+            ...(allowDirectRequests ? ['none', 'blocked'] : []),
+            ...allowedUrls,
           ].join(' ')
-          const compiledNginx = merged.enabled
-            ? `location ~* \\.(${extPattern})$ {\n  valid_referers ${validReferers};\n  if ($invalid_referer) {\n    return ${merged.redirectUrl ? `302 ${merged.redirectUrl}` : '403'};\n  }\n}`
+          const compiledNginx = enabled
+            ? `location ~* \\.(${extPattern})$ {\n  valid_referers ${validReferers};\n  if ($invalid_referer) {\n    return ${redirectUrl ? `302 ${redirectUrl}` : '403'};\n  }\n}`
             : '# Hotlink protection disabled'
-          const compiledApache = merged.enabled
-            ? `RewriteEngine on\n${merged.allowDirectRequests ? 'RewriteCond %{HTTP_REFERER} !^$\n' : ''}${merged.allowedUrls.map((u) => `RewriteCond %{HTTP_REFERER} !^https?://(www\\.)?${u.replace(/\./g, '\\.')} [NC]`).join('\n')}\nRewriteRule \\.(${extPattern})$ ${merged.redirectUrl ?? '-'} [F,NC,L]`
+          const compiledApache = enabled
+            ? `RewriteEngine on\n${allowDirectRequests ? 'RewriteCond %{HTTP_REFERER} !^$\n' : ''}${allowedUrls.map((u) => `RewriteCond %{HTTP_REFERER} !^https?://(www\\.)?${u.replace(/\./g, '\\.')} [NC]`).join('\n')}\nRewriteRule \\.(${extPattern})$ ${redirectUrl ?? '-'} [F,NC,L]`
             : '# Hotlink protection disabled'
           const config: HotlinkProtectionConfig = {
-            ...merged,
             accountId: account.id,
+            enabled,
+            allowedUrls,
+            protectedExtensions,
+            allowDirectRequests,
+            redirectUrl,
             compiledNginx,
             compiledApache,
             updatedAt: new Date().toISOString(),
@@ -2644,14 +2538,18 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           return jsonResponse({ config: await ext.readOrDefault(fileKey, defaultCfg) })
         }
         if (method === 'PUT') {
-          const body = await readJsonBody<Partial<WebDiskConfig>>(req)
-          const current = await ext.readOrDefault(fileKey, defaultCfg)
-          const merged = { ...current, ...body }
+          // Port, endpoint and compiled text are server-derived; only these owner choices are writable.
+          const flags = ['enabled', 'readOnly', 'requireTls', 'digestAuth'] as const
+          const body = writableFields(await readJsonBody(req), ['rootPath', ...flags], 'web disk')
+          const merged = { ...await ext.readOrDefault(fileKey, defaultCfg), ...body } as WebDiskConfig
+          // rootPath becomes an nginx alias line: a config-safe relative path, no traversal, quotes or control characters.
+          assertRelPath(merged.rootPath, 'rootPath')
+          for (const flag of flags) assertBool(merged[flag], flag)
           const compiledConfig = [
             `# Isolated WebDAV jail for ${account.username} (UID ${account.uid})`,
             `location /webdav/${account.username}/ {`,
             `  alias ${account.home}/${merged.rootPath}/;`,
-            `  dav_methods ${merged.readOnly ? ' final' : 'PUT DELETE MKCOL COPY MOVE'};`,
+            `  dav_methods ${merged.readOnly ? 'off' : 'PUT DELETE MKCOL COPY MOVE'};`,
             `  dav_ext_methods PROPFIND OPTIONS;`,
             `  create_full_put_path on;`,
             `  dav_access user:rw group:r;`,
@@ -2694,27 +2592,46 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           return jsonResponse({ config: await ext.readOrDefault(fileKey, defaultCfg) })
         }
         if (method === 'PUT') {
-          const body = await readJsonBody<Partial<WebExtrasConfig>>(req)
-          const current = await ext.readOrDefault(fileKey, defaultCfg)
-          const merged = { ...current, ...body }
+          const body = writableFields(await readJsonBody(req), ['errorPages', 'redirects', 'mimeTypes', 'deniedCidrs', 'directoryIndexMode'], 'web extras')
+          const merged = { ...await ext.readOrDefault(fileKey, defaultCfg), ...body }
+          // Every value lands in an nginx or Apache line, so stored values are revalidated along with the request.
+          const pages = merged.errorPages
+          if (!pages || typeof pages !== 'object' || Array.isArray(pages) || Object.keys(pages).length > 20 || Object.keys(pages).some(code => !/^[45][0-9]{2}$/.test(code))) {
+            return fail('VALIDATION', 'error pages map at most 20 HTTP 4xx/5xx codes to site paths', { stateChanged: false })
+          }
+          const errorPages = Object.fromEntries(Object.entries(pages).map(([code, page]) => [code, sitePath(page, 'error page')]))
+          const redirects = boundedList(merged.redirects, 100, 'redirects').map((raw): WebExtrasConfig['redirects'][number] => {
+            const r = writableFields(raw, ['source', 'target', 'code', 'wildcard'], 'redirect')
+            return { source: sitePath(r.source, 'redirect source'), target: assertRedirectTarget(r.target), code: r.code === 301 || r.code === 302 ? r.code : fail('VALIDATION', 'redirect code must be 301 or 302', { stateChanged: false }), wildcard: assertBool(r.wildcard, 'wildcard') }
+          })
+          const mimeTypes = boundedList(merged.mimeTypes, 100, 'mimeTypes').map(raw => {
+            const m = writableFields(raw, ['extension', 'mimeType'], 'mime type')
+            return { extension: matching(m.extension, /^\.?[a-z0-9]{1,15}$/, 'mime extension'), mimeType: matching(m.mimeType, /^[a-z0-9][a-z0-9.+-]{0,63}\/[a-z0-9][a-z0-9.+-]{0,126}$/, 'mime type') }
+          })
+          const deniedCidrs = boundedList(merged.deniedCidrs, 200, 'deniedCidrs').map(cidr => assertCidr(cidr, 'deniedCidr'))
+          const directoryIndexMode = oneOf(merged.directoryIndexMode, ['disabled', 'standard', 'fancy'] as const, 'directoryIndexMode')
           const nginxLines: string[] = []
-          for (const [code, page] of Object.entries(merged.errorPages)) {
+          for (const [code, page] of Object.entries(errorPages)) {
             nginxLines.push(`error_page ${code} ${page};`)
           }
-          for (const cidr of merged.deniedCidrs) {
+          for (const cidr of deniedCidrs) {
             nginxLines.push(`deny ${cidr};`)
           }
           nginxLines.push(
-            `autoindex ${merged.directoryIndexMode === 'disabled' ? 'off' : 'on'};`,
+            `autoindex ${directoryIndexMode === 'disabled' ? 'off' : 'on'};`,
           )
           const apacheLines: string[] = [
-            `Options ${merged.directoryIndexMode === 'disabled' ? '-Indexes' : '+Indexes'}`,
-            ...Object.entries(merged.errorPages).map(([code, page]) => `ErrorDocument ${code} ${page}`),
-            ...merged.mimeTypes.map((m) => `AddType ${m.mimeType} ${m.extension}`),
+            `Options ${directoryIndexMode === 'disabled' ? '-Indexes' : '+Indexes'}`,
+            ...Object.entries(errorPages).map(([code, page]) => `ErrorDocument ${code} ${page}`),
+            ...mimeTypes.map((m) => `AddType ${m.mimeType} ${m.extension}`),
           ]
           const config: WebExtrasConfig = {
-            ...merged,
             accountId: account.id,
+            errorPages,
+            redirects,
+            mimeTypes,
+            deniedCidrs,
+            directoryIndexMode,
             compiledNginx: nginxLines.join('\n'),
             compiledApache: apacheLines.join('\n'),
             updatedAt: new Date().toISOString(),
@@ -2730,98 +2647,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           })
           return jsonResponse({ config })
         }
-      }
-    }
-
-    const gitDeployMatch = /^\/api\/git\/([^/]+)\/repos\/([^/]+)\/deploy$/.exec(pathname)
-    const gitRepoDeleteMatch = /^\/api\/git\/([^/]+)\/repos\/([^/]+)$/.exec(pathname)
-    const gitReposListMatch = /^\/api\/git\/([^/]+)\/repos$/.exec(pathname)
-    if (gitDeployMatch || gitRepoDeleteMatch || gitReposListMatch) {
-      const caller = await helpers.requireCaller(req)
-      const accountParam = (gitDeployMatch?.[1] ?? gitRepoDeleteMatch?.[1] ?? gitReposListMatch?.[1])!
-      const account = await helpers.resolveAccountParam(accountParam)
-      await helpers.assertCanAccessAccount(caller, account, 'git.repos')
-      const fileKey = `git/${account.id}/repos.json`
-      const repos = await ext.readOrDefault<GitRepositoryRecord[]>(fileKey, [])
-
-      if (gitReposListMatch && method === 'GET') {
-        return jsonResponse({ repos })
-      }
-      if (gitReposListMatch && method === 'POST') {
-        const body = await readJsonBody<Partial<GitRepositoryRecord>>(req)
-        if (!body.name) return fail('VALIDATION', 'repository name is required')
-        const repo: GitRepositoryRecord = {
-          id: randomUUID(),
-          accountId: account.id,
-          name: body.name,
-          branch: body.branch ?? 'main',
-          remoteUrl: body.remoteUrl ?? `https://github.com/${account.username}/${body.name}.git`,
-          deployPath: body.deployPath ?? `${account.home}/domains/${account.primaryDomain}/public_html`,
-          postDeployCommand: body.postDeployCommand ?? null,
-          autoDeploy: body.autoDeploy ?? true,
-          currentCommit: null,
-          currentReleaseDir: null,
-          deployments: [],
-          createdAt: new Date().toISOString(),
-        }
-        await helpers.assertCanAccessAccount(caller, account, 'git.repos')
-        repos.push(repo)
-        await ext.write(fileKey, repos)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'git.repo.created',
-          target: `account:${account.username}:git:${repo.name}`,
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ repo }, 201)
-      }
-      if (gitDeployMatch && method === 'POST') {
-        const repoId = gitDeployMatch[2]!
-        const repo = repos.find((r) => r.id === repoId || r.name === repoId)
-        if (!repo) return fail('NOT_FOUND', `git repository "${repoId}" not found`)
-        const body = await readJsonBody<{ commitSha?: string }>(req)
-        const commitSha =
-          body.commitSha ??
-          createHash('sha1')
-            .update(`${repo.id}:${Date.now()}`)
-            .digest('hex')
-            .slice(0, 12)
-        const deployedAt = new Date().toISOString()
-        const releaseDir = `${account.home}/git/${repo.name}/releases/${Date.now()}-${commitSha}`
-        const currentSymlink = `${account.home}/git/${repo.name}/current`
-        const deployment = {
-          id: randomUUID(),
-          commitSha,
-          releaseDir,
-          currentSymlink,
-          status: 'deployed' as const,
-          deployedAt,
-        }
-        await helpers.assertCanAccessAccount(caller, account, 'git.repos')
-        repo.currentCommit = commitSha
-        repo.currentReleaseDir = releaseDir
-        repo.deployments.unshift(deployment)
-        await ext.write(fileKey, repos)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'git.repo.deployed',
-          target: `account:${account.username}:git:${repo.name}`,
-          detail: { commitSha, releaseDir },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ ok: true, repo, deployment })
-      }
-      if ((gitRepoDeleteMatch || gitReposListMatch) && method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = gitRepoDeleteMatch?.[2] ?? url.searchParams.get('id') ?? body.id
-        const existing = repos.find((r) => r.id === targetId || r.name === targetId)
-        if (!existing) return fail('NOT_FOUND', `git repository "${targetId ?? ''}" not found`)
-        await helpers.assertCanAccessAccount(caller, account, 'git.repos')
-        const next = repos.filter((r) => r.id !== targetId && r.name !== targetId)
-        await ext.write(fileKey, next)
-        return jsonResponse({ ok: true })
       }
     }
 
@@ -2849,19 +2674,21 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         return jsonResponse({ config: await ext.readOrDefault(fileKey, defaultCfg) })
       }
       if (method === 'PUT') {
-        const body = await readJsonBody<{
-          hosts?: { address: string; engine?: 'mariadb' | 'postgresql' | 'both'; comment?: string }[]
-        }>(req)
-        const hosts = (body.hosts ?? []).map((h) => ({
-          address: h.address.trim(),
-          engine: h.engine ?? ('both' as const),
-          comment: h.comment ?? '',
-        }))
+        const body = writableFields(await readJsonBody(req), ['hosts'], 'remote database hosts')
+        // Addresses land in pg_hba lines and GRANT statements: canonical IPs/CIDRs only, no hostnames or quotes.
+        const hosts = boundedList(body.hosts ?? [], 100, 'hosts').map(raw => {
+          const h = writableFields(raw, ['address', 'engine', 'comment'], 'remote host')
+          return {
+            address: assertCidr(h.address, 'address'),
+            engine: h.engine === undefined ? 'both' as const : oneOf(h.engine, ['mariadb', 'postgresql', 'both'] as const, 'engine'),
+            comment: h.comment === undefined ? '' : assertLine(h.comment, 128, 'comment'),
+          }
+        })
         const compiledPgHba = hosts
           .filter((h) => h.engine === 'postgresql' || h.engine === 'both')
           .map(
             (h) =>
-              `host all +${account.username} ${h.address.includes('/') ? h.address : `${h.address}/32`} scram-sha-256`,
+              `host all +${account.username} ${h.address.includes('/') ? h.address : `${h.address}/${h.address.includes(':') ? 128 : 32}`} scram-sha-256`,
           )
           .join('\n')
         const compiledMariaDbGrants = hosts
@@ -2892,12 +2719,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     const dbMaintMatch = /^\/api\/databases\/([^/]+)\/maintenance$/.exec(pathname)
     if (method === 'POST' && (dbMaintMatch || pathname === '/api/databases/repair')) {
       const caller = await helpers.requireCaller(req)
-      const body = await readJsonBody<{
-        accountId?: Id
-        engine?: 'mariadb' | 'postgresql'
-        database?: string
-        operation?: 'check' | 'repair' | 'optimize'
-      }>(req)
+      const body = await readJsonBody<{ accountId?: Id; database?: unknown }>(req)
       const account = await requireResolvedAccount(
         caller,
         dbMaintMatch?.[1] ?? body.accountId,
@@ -2906,37 +2728,13 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       if (dbMaintMatch?.[1] && body.accountId && body.accountId !== account.id && body.accountId !== account.username) {
         return fail('NOT_FOUND', `account "${body.accountId}" not found`)
       }
-
-      const engine = body.engine ?? 'mariadb'
-      const operation = body.operation ?? 'repair'
-      const database = body.database ?? `${account.username}_app`
-      if (database !== account.username && !database.startsWith(`${account.username}_`)) {
-        return fail('FORBIDDEN', `database "${database}" is outside account "${account.username}" namespace`)
+      const database = body.database
+      if (database !== undefined && (typeof database !== 'string' || (database !== account.username && !database.startsWith(`${account.username}_`)))) {
+        return fail('FORBIDDEN', `database is outside account "${account.username}" namespace`)
       }
-      const statements =
-        engine === 'mariadb'
-          ? [`${operation.toUpperCase()} TABLE \`${database}\`.*`]
-          : operation === 'optimize'
-            ? [`VACUUM (ANALYZE)Database "${database}"`, `REINDEX DATABASE "${database}"`]
-            : [`REINDEX DATABASE "${database}"`]
-
-      await helpers.emitAudit({
-        actor: caller.principal.username,
-        action: `database.maintenance.${operation}`,
-        target: `database:${engine}:${database}`,
-        detail: { engine, operation, statements },
-        outcome: 'ok',
-        principalId: caller.principal.id,
-      })
-      return jsonResponse({
-        ok: true,
-        accountId: account.id,
-        engine,
-        database,
-        operation,
-        statements,
-        tablesProcessed: 12,
-        status: 'healthy',
+      // No agent executor runs CHECK/REPAIR/OPTIMIZE yet; refuse rather than report a result nobody produced.
+      return fail('PRECONDITION_FAILED', 'database maintenance requires a connected host executor; nothing was run', {
+        reason: 'database_maintenance_unavailable', stateChanged: false, nativeApplied: false,
       })
     }
 
@@ -3109,93 +2907,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         await helpers.assertCanAccessAccount(caller, account, 'apps.manage')
         return applicationChangesUnavailable()
       }
-    }
-
-    const clusterNodeDeleteMatch = /^\/api\/cluster\/nodes\/([^/]+)$/.exec(pathname)
-    if (pathname === '/api/cluster/nodes' || clusterNodeDeleteMatch) {
-      const caller = await helpers.requireCaller(req)
-      await helpers.assertRoot(caller, 'cluster.nodes')
-      const nodes = await ext.readOrDefault<ClusterNodeRecord[]>('cluster/nodes.json', [])
-      if (method === 'GET') {
-        return jsonResponse({ nodes })
-      }
-      if (method === 'POST') {
-        const body = await readJsonBody<Partial<ClusterNodeRecord>>(req)
-        if (!body.name || !body.hostname || !body.ipv4) {
-          return fail('VALIDATION', 'node name, hostname, and ipv4 are required')
-        }
-        const node: ClusterNodeRecord = {
-          id: randomUUID(),
-          name: body.name,
-          hostname: validateDomainName(body.hostname),
-          ipv4: body.ipv4,
-          role: body.role ?? 'all',
-          status: body.status ?? 'online',
-          wgPublicKey: body.wgPublicKey ?? createHash('sha256').update(body.hostname).digest('base64'),
-          region: body.region ?? 'eu-central-1',
-          joinedAt: new Date().toISOString(),
-        }
-        nodes.push(node)
-        await ext.write('cluster/nodes.json', nodes)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'cluster.node.added',
-          target: `cluster-node:${node.hostname}`,
-          detail: { role: node.role, ipv4: node.ipv4 },
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ node }, 201)
-      }
-      if (method === 'DELETE') {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = clusterNodeDeleteMatch?.[1] ?? url.searchParams.get('id') ?? body.id
-        const next = nodes.filter((n) => n.id !== targetId && n.hostname !== targetId)
-        await ext.write('cluster/nodes.json', next)
-        return jsonResponse({ ok: true })
-      }
-    }
-
-    const legacyAnalyticsMatch = /^\/api\/analytics\/legacy\/([^/]+)$/.exec(pathname)
-    if (method === 'GET' && legacyAnalyticsMatch) {
-      const caller = await helpers.requireCaller(req)
-      const domain = decodeURIComponent(legacyAnalyticsMatch[1]!).toLowerCase()
-      await requireDomainAccount(helpers.store, caller, domain, 'analytics.websites')
-      return jsonResponse({
-        domain,
-        month: url.searchParams.get('month') ?? '2026-10',
-        awstats: {
-          uniqueVisitors: 4820,
-          numberOfVisits: 8910,
-          pages: 31400,
-          hits: 142800,
-          bandwidthBytes: 4_829_102_080,
-          topPages: [
-            { url: '/', views: 12400 },
-            { url: '/pricing', views: 4120 },
-            { url: '/docs', views: 3890 },
-          ],
-          topCountries: [
-            { country: 'US', hits: 52100 },
-            { country: 'DE', hits: 28400 },
-            { country: 'AE', hits: 19200 },
-          ],
-          httpStatusCodes: { '200': 134000, '301': 4200, '404': 4500, '500': 100 },
-        },
-        webalizer: {
-          dailyAvgHits: 4760,
-          dailyAvgFiles: 3920,
-          dailyAvgPages: 1046,
-          dailyAvgVisits: 297,
-          monthlyTotals: {
-            hits: 142800,
-            files: 117600,
-            pages: 31400,
-            visits: 8910,
-            kbytes: 4_715_920,
-          },
-        },
-      })
     }
 
     return null

@@ -41,4 +41,14 @@ describe('purge-trash file workspace grammar', () => {
     await expect(executeFileWorkspaceRequest(request, reply({ ...item, deletedAt: '2026-10-26T00:00:00.000Z' }))).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', detail: { verificationRequired: true } })
     expect(await (await executeFileWorkspaceRequest(request, reply(item))).json()).toEqual(item)
   })
+
+  it('keeps a definite refusal code the browser transport can read, only when it matches the HTTP status', async () => {
+    const move = validateFileWorkspaceRequest({ op: 'move', path: 'docs/a.txt', destination: 'docs/b.txt' })
+    for (const [code, status, expected] of [['LIMIT_EXCEEDED', 422, 'LIMIT_EXCEEDED'], ['CONFLICT', 409, 'CONFLICT'], ['CONFLICT', 404, 'NOT_FOUND'], ['SERVICE_UNAVAILABLE', 422, 'VALIDATION']] as const) {
+      const refused = await executeFileWorkspaceRequest(move, reply({ code, details: { stateChanged: false } }, status))
+      expect(refused.status).toBe(status)
+      expect(await refused.json()).toEqual({ code: expected, detail: 'The file operation could not be completed.', details: { stateChanged: false, upstreamStatus: status } })
+    }
+    expect(() => validateFileWorkspaceRequest({ op: 'move', path: 'docs', destination: 'docs/inner' })).toThrowError(expect.objectContaining({ code: 'VALIDATION', detail: { stateChanged: false } }))
+  })
 })

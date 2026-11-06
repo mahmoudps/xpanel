@@ -84,6 +84,7 @@ import { handleGitWorkspaceRoute } from './git-workspace.ts'
 import { handlePgpWorkspace } from './pgp-workspace.ts'
 import { createDynamicDnsRoutes } from './dynamic-dns.ts'
 import { handleWebDirectivesRoute } from './web-directives-workspace.ts'
+import { handleAccountBulkActionsRoute } from './account-bulk-actions.ts'
 import { handleMailLogWorkspaceRoute, handleMailTrackDeliveryRoute } from './mail-log-workspace.ts'
 import { handleFtpLogWorkspaceRoute } from './ftp-log-workspace.ts'
 import { handleUpgradeWorkspaceRoute } from './upgrade-workspace.ts'
@@ -2810,7 +2811,13 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (pathname === '/api/webmail/spam-preferences' || pathname === '/api/webmail/mailing-lists' || pathname.startsWith('/api/webmail/mailing-lists/')) {
         const ids = pathname === '/api/webmail/spam-preferences' ? ['webmail-spam-box', 'webmail-spam-autodelete'] : ['webmail-mailing-lists']
         const ports = { store: deps.store, open: async (request: Request) => (await authorizeNativeMailboxRequest(request, ids)).opened, audit: sealedImapPorts(ids[0]!).audit }
-        const response = pathname === '/api/webmail/spam-preferences' ? await handleMailboxSpamRoute(req, url, method, ports) : await handleMailboxMailingListsRoute(req, url, method, ports)
+        const routing = { commit: commitRoutingRevision, apply: async (request: Request, revision: number, restore: { path: string; previous: unknown }) => {
+          const { caller } = await authorizeNativeMailboxRequest(request, ids)
+          return applyMailRoutingChange({ store: deps.store, db: deps.db, reconcile: () => triggerReconcile(caller),
+            audit: reason => emitAudit({ actor: caller.principal.username, action: 'mail.routing.rolled_back', target: 'mail-routing:webmail/spam-preferences',
+              detail: { reason }, outcome: 'failed', principalId: caller.principal.id }) }, revision, restore)
+        } }
+        const response = pathname === '/api/webmail/spam-preferences' ? await handleMailboxSpamRoute(req, url, method, { ...ports, routing }) : await handleMailboxMailingListsRoute(req, url, method, ports)
         if (response) return response
       }
       if (pathname === '/api/webmail/preferences') {
@@ -3542,6 +3549,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
       const certificateResponse = await certificateRuntimeRouter(req, url, method)
       if (certificateResponse) return certificateResponse
+
+      const accountBulkResponse = await handleAccountBulkActionsRoute(req, url, method, { db: deps.db, requireCaller, readJsonBody, getAccount: id => deps.store.getAccount(id), assertCanAccessAccount, setSuspension: setAccountSuspensionAs, update: updateAccountAs, terminate: terminateAccountAs })
+      if (accountBulkResponse) return accountBulkResponse
 
       // ---- Accounts CRUD & Lifecycle -------------------------------------------------
       if (method === 'GET' && pathname === '/api/accounts') {
@@ -4542,17 +4552,6 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         return jsonResponse({
           ...snap,
           accounts: snap.accounts.filter((a) => a.accountId === principal.accountId),
-        })
-      }
-
-      if (method === 'POST' && pathname === '/api/analytics/websites/ingest') {
-        const caller = await requireCaller(req)
-        await assertRoot(caller, 'analytics.websites.ingest')
-        const body = await readJsonBody(req)
-        return callAgent('/analytics/websites/ingest', {
-          method: 'POST',
-          caller,
-          body,
         })
       }
 

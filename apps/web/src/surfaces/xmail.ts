@@ -213,7 +213,7 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
     </div>
   </section><aside class="xp-mail-compose-aside" aria-labelledby="mail-sender-heading"><section class="xp-card"><h2 id="mail-sender-heading">${text('Sending as')}</h2><dl>${field(text('Address'), mailbox)}</dl></section>${quota ? `<section class="xp-card"><h2>${text('Mailbox quota')}</h2>${quota}</section>` : ''}</aside></div>`
 
-  // the mailbox owner's own rules through /api/mail/filters, the same API and Sieve path as xPanel
+  // the mailbox owner's own rules through /api/webmail/filters, the same filter route and Sieve path as xPanel
   const filtersHtml = `<section class="xp-card" data-section="sieve-filters" aria-labelledby="sieve-rules-heading" style="display:grid;gap:var(--xp-space-group,24px)"><h2 id="sieve-rules-heading" style="margin:0">${text('Filters')}</h2>${mailbox ? renderFilterWorkspace({ lang: locale, canManage: qualifiedMailRoutes.has('/mail/settings/filters') && visibleMailToolIds.has('webmail-email-filters'), fixedMailbox: mailbox }) : `<p role="status">${text('Mailbox has not been read.')}</p>`}</section>`
   const mailboxCanManage = mailbox.length > 0
   const content = activeRoute === '/mail/later' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailTools({ locale, mailbox, canManage: mailbox.length > 0, searchAvailable: canSearchMailbox, attachmentsAvailable: attachmentReadEnabled, quotaAvailable: visibleMailToolIds.has('webmail-disk-cleanup') })}`

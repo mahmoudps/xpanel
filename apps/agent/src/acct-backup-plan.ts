@@ -34,8 +34,9 @@ export interface BackupRunLedger { version: 1; lastScheduledAt: string | null; r
 export interface BackupStorageSpace { freeBytes: number; totalBytes: number }
 export interface BackupRunsView {
   /** `invalid_ledger`: the run history file is in an older or damaged format; move it aside to start a new history. */
-  available: boolean; reason: 'no_executor' | 'no_provider' | 'no_schedule' | 'no_destination' | 'invalid_configuration' | 'invalid_ledger' | null; revision: string
-  schedule: { enabled: boolean; cron: string; nextRunAt: string | null; lastScheduledAt: string | null } | null
+  available: boolean; reason: 'no_executor' | 'no_provider' | 'no_schedule' | 'unsupported_compression' | 'no_destination' | 'invalid_configuration' | 'invalid_ledger' | null; revision: string
+  /** `timerObservedAt`: when this agent's backup timer last fired after evaluating this saved schedule; null until it has. */
+  schedule: { enabled: boolean; cron: string; nextRunAt: string | null; lastScheduledAt: string | null; timerObservedAt: string | null } | null
   /** Space on the filesystem of the local archive store; null where it cannot be read. */
   storage: BackupStorageSpace | null
   activeId: string | null; runs: BackupRun[]; recoveries: BackupRecovery[]; restores: BackupPartRestore[]; nativeQualified: false
@@ -157,19 +158,34 @@ const spaceOf = (raw: unknown): BackupStorageSpace | null => {
 export function readBackupRunsView(raw: unknown): BackupRunsView {
   const value = exact(raw, ['available', 'reason', 'revision', 'schedule', 'storage', 'activeId', 'runs', 'recoveries', 'restores', 'nativeQualified'])
   if (typeof value.available !== 'boolean' || value.nativeQualified !== false || typeof value.revision !== 'string' || !HEX.test(value.revision)) return bad()
-  const reason = oneOf(value.reason, ['no_executor', 'no_provider', 'no_schedule', 'no_destination', 'invalid_configuration', 'invalid_ledger'], true)
+  const reason = oneOf(value.reason, ['no_executor', 'no_provider', 'no_schedule', 'unsupported_compression', 'no_destination', 'invalid_configuration', 'invalid_ledger'], true)
   if (value.available !== (reason === null)) return bad()
   let schedule: BackupRunsView['schedule'] = null
   if (value.schedule !== null) {
-    const s = exact(value.schedule, ['enabled', 'cron', 'nextRunAt', 'lastScheduledAt'])
+    const s = exact(value.schedule, ['enabled', 'cron', 'nextRunAt', 'lastScheduledAt', 'timerObservedAt'])
     if (typeof s.enabled !== 'boolean' || typeof s.cron !== 'string' || s.cron.length > 100 || !/^[0-9*,/ -]+$/.test(s.cron)) return bad()
-    schedule = { enabled: s.enabled, cron: s.cron, nextRunAt: stamp(s.nextRunAt, true), lastScheduledAt: stamp(s.lastScheduledAt, true) }
+    schedule = { enabled: s.enabled, cron: s.cron, nextRunAt: stamp(s.nextRunAt, true), lastScheduledAt: stamp(s.lastScheduledAt, true), timerObservedAt: stamp(s.timerObservedAt, true) }
   }
   const ledger = readBackupRunLedger({ version: 1, lastScheduledAt: schedule?.lastScheduledAt ?? null, runs: value.runs, recoveries: value.recoveries, restores: value.restores })
   const activeId = value.activeId === null ? null : uuid(value.activeId)
   const running = [...ledger.runs, ...ledger.recoveries, ...ledger.restores].find(item => item.state === 'running')
   if ((running?.id ?? null) !== activeId) return bad()
   return { available: value.available, reason, revision: value.revision, schedule, storage: spaceOf(value.storage), activeId, runs: ledger.runs, recoveries: ledger.recoveries, restores: ledger.restores, nativeQualified: false }
+}
+
+/** The agent backup timer fires every 60 s; an observation older than two missed fires no longer proves it runs. */
+export const BACKUP_TIMER_FRESH_MS = 150_000
+export const BACKUP_SCHEDULER_REASONS = ['schedule_not_enabled', 'timer_not_observed', 'no_executor', 'no_provider', 'unsupported_compression', 'no_destination', 'invalid_configuration', 'invalid_ledger'] as const
+export type BackupSchedulerReason = typeof BACKUP_SCHEDULER_REASONS[number]
+/**
+ * Null when the saved schedule is in force: it is enabled, the agent can run it, and its timer was seen evaluating that same
+ * schedule recently. Otherwise why not; an agent that read no schedule has not evaluated this one.
+ */
+export function backupSchedulerReason(view: BackupRunsView, saved: { enabled: boolean; cron: string } | null, now: Date): BackupSchedulerReason | null {
+  if (!saved?.enabled) return 'schedule_not_enabled'
+  if (!view.available && view.reason !== null && view.reason !== 'no_schedule') return view.reason
+  const observed = view.schedule?.timerObservedAt ? Date.parse(view.schedule.timerObservedAt) : Number.NaN, age = now.getTime() - observed
+  return view.available && view.schedule?.enabled === true && view.schedule.cron === saved.cron && age >= -5_000 && age <= BACKUP_TIMER_FRESH_MS ? null : 'timer_not_observed'
 }
 
 const isoWeek = (date: Date): string => {

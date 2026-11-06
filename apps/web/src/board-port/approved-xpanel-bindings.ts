@@ -55,7 +55,8 @@ export const renderConnectedPanelDirectoryPrivacy = (p: ApprovedXpanelWorkspaceP
 };
 
 export const renderConnectedPanelSsl = (p: ApprovedXpanelWorkspaceProps): string | undefined => {
-    if (p.route !== '/security/ssl' || !available(p, 'ssl-certificates'))
+    // Status rows are ssl-tls-status; issue, install, renew and remove are ssl-install.
+    if (p.route !== '/security/ssl' || !['ssl-tls-status', 'ssl-install'].every(id => available(p, id)))
         return undefined;
     const domains = p.domains?.filter(domain => domain.accountId === p.account?.id) ?? [];
     const certificates = (p.certificates ?? []).filter(certificate => certificate.accountId === p.account?.id);

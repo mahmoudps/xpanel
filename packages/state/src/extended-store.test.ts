@@ -491,12 +491,6 @@ describe('ExtendedFeaturesStore', () => {
       })
       expect(await store.listClusterNodes()).toHaveLength(1)
       expect(await store.deleteClusterNode(node.id)).toBe(true)
-
-      const traffic = await store.getLegacyTrafficStats('blog.example.com')
-      expect(traffic.generators).toEqual(['awstats', 'webalizer'])
-      expect(traffic.monthly.length).toBeGreaterThan(0)
-      expect(traffic.daily.length).toBeGreaterThan(0)
-
     })
   })
 })

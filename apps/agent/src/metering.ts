@@ -2,7 +2,7 @@ import { fail } from '@xpanel/core'
 import type { Account, Domain, Plan } from '@xpanel/core'
 import { edge } from '@xpanel/render'
 import type { LogSlice } from './account-logs.ts'
-import type { IoAccountsView } from './analytics.ts'
+import type { IoAccountsView, SiteLogChunk, WebsiteAnalyticsFeed } from './analytics.ts'
 import type { FtpLogObservation } from './ftp-log.ts'
 import { UNAVAILABLE_DISK_LATENCY, type DiskLatency } from './host-metrics.ts'
 import type { MailLogObservation } from './mail-log.ts'
@@ -75,6 +75,8 @@ export interface BandwidthMeterOptions {
   writeLedger: (ledger: BandwidthLedger) => Promise<void>
   /** Runs after each recorded collection (plan enforcement); its failure is reported through onError. */
   afterCollect?: () => Promise<void>
+  /** Website analytics from the same site log reads. Saved before the ledger, so a lost save shows as a gap and a lost ledger write as a re-read it skips. */
+  webAnalytics?: WebsiteAnalyticsFeed
   now?: () => Date
   onError?: (error: unknown) => void
 }
@@ -177,13 +179,13 @@ export function addFtpObservation(ledger: BandwidthLedger, observation: FtpLogOb
 }
 
 /** Site logs per account; an account whose saved sites cannot be grouped is listed in failed, not skipped silently. */
-const sitesOf = (saved: { accounts: readonly Account[]; domains: readonly Domain[] }): { sites: { accountId: string; path: string }[]; failed: Set<string> } => {
-  const seen = new Map<string, string>(), failed = new Set<string>()
+const sitesOf = (saved: { accounts: readonly Account[]; domains: readonly Domain[] }): { sites: { accountId: string; path: string; owners: ReadonlyMap<string, Domain> }[]; failed: Set<string> } => {
+  const seen = new Map<string, { accountId: string; owners: ReadonlyMap<string, Domain> }>(), failed = new Set<string>()
   for (const account of saved.accounts) {
-    try { for (const group of edge.groupSites(account, saved.domains.filter(domain => domain.accountId === account.id))) seen.set(edge.nginxAccessLog(group.main.name), account.id) }
+    try { for (const group of edge.groupSites(account, saved.domains.filter(domain => domain.accountId === account.id))) seen.set(edge.nginxAccessLog(group.main.name), { accountId: account.id, owners: group.owners }) }
     catch { failed.add(account.id) }
   }
-  return { sites: [...seen].map(([path, accountId]) => ({ path, accountId })).sort((a, b) => a.path.localeCompare(b.path)), failed }
+  return { sites: [...seen].map(([path, site]) => ({ path, ...site })).sort((a, b) => a.path.localeCompare(b.path)), failed }
 }
 
 /** Incremental per-account bandwidth from the saved site access logs and the mail and FTP journals. One collection at a time. */
@@ -209,6 +211,7 @@ export function createBandwidthMeter(options: BandwidthMeterOptions) {
     const current = monthOf(at), keep = new Set(Array.from({ length: BANDWIDTH_MONTHS_KEPT }, (_, index) => monthBefore(current, index)))
     const { sites, failed } = sitesOf(saved), listed = sites.slice(0, BANDWIDTH_MAX_SITES), cursors: BandwidthLedger['cursors'] = {}
     let budget = BANDWIDTH_TICK_READ_BYTES
+    await options.webAnalytics?.load()
     // Coverage fields describe the latest collection only; totals and cursors carry over.
     ledger.pendingBytes = 0; ledger.skippedLines = 0; ledger.unavailableSites = sites.length - listed.length + failed.size
     // Round robin: start where the last collection's budget ran out, so busy early sites cannot starve the later ones.
@@ -226,9 +229,14 @@ export function createBandwidthMeter(options: BandwidthMeterOptions) {
         if (slice.exists && known && (slice.identity !== known.identity || slice.sizeBytes < known.offset)) slice = await options.readFrom(site.path, 0, max)
         if (!slice.exists || slice.identity === null) { ledger.unavailableSites++; continue }
         const consumed = budget > 0 ? addLogLines(ledger, site.accountId, slice.bytes, slice.bytes.length === max, keep) : 0
+        const caughtUp = budget > 0 && slice.start + slice.bytes.length >= slice.sizeBytes
         budget -= slice.bytes.length
         cursors[site.path] = { accountId: site.accountId, identity: slice.identity, offset: slice.start + consumed }
         ledger.pendingBytes += slice.sizeBytes - (slice.start + consumed)
+        // A known cursor continues the previous collection's read; a new one starts now.
+        const chunk: SiteLogChunk = { path: site.path, accountId: site.accountId, owners: site.owners, identity: slice.identity, start: slice.start, sizeBytes: slice.sizeBytes,
+          bytes: slice.bytes.subarray(0, consumed), readAt: at.toISOString(), since: known ? ledger.updatedAt ?? at.toISOString() : at.toISOString(), caughtUp }
+        try { options.webAnalytics?.ingestSiteLog(chunk) } catch { /* Analytics cannot stop metering. */ }
       } catch { ledger.unavailableSites++; if (known) cursors[site.path] = known }
     }
     ledger.cursors = cursors
@@ -240,6 +248,7 @@ export function createBandwidthMeter(options: BandwidthMeterOptions) {
     for (const month of Object.keys(ledger.months)) if (!keep.has(month)) delete ledger.months[month]
     ledger.updatedAt = at.toISOString()
     if (stopped) return
+    await options.webAnalytics?.save(at).catch(() => undefined)
     await options.writeLedger(ledger)
     if (!stopped && options.afterCollect) await options.afterCollect()
   }

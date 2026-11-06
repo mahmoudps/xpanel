@@ -5,6 +5,7 @@ import { createApiToken, createTestDb, createUserPrincipal } from '@xpanel/db'
 import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
 import { sha256Hex } from './auth.ts'
 import { createApiApp } from './server.ts'
+import { scriptedApplyAgent, TEST_AGENT_TOKEN } from './testing.ts'
 
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 
@@ -23,15 +24,17 @@ const fixture = async () => {
   const [owner, other] = accounts
   const principal = await createUserPrincipal(database.db, { username: owner!.username, accountId: owner!.id, passwordHash: HASH })
   const app = createApiApp({ db: database.db, store: state.store, serverSecret: 'forwarder-synthetic-server-secret-at-least-32-bytes' })
+  const host = scriptedApplyAgent()
+  const hosted = createApiApp({ db: database.db, store: state.store, serverSecret: 'forwarder-synthetic-server-secret-at-least-32-bytes', agentApp: host, agentToken: TEST_AGENT_TOKEN })
   const token = async (scopes: string[]) => {
     const raw = `xp_${randomUUID()}`
     await createApiToken(database.db, { principalId: principal.id, name: 'Synthetic forwarder test', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 60000).toISOString() })
     return raw
   }
-  const request = (raw: string, path: string, method = 'GET', body?: unknown) => app.fetch(new Request(`http://localhost${path}`, { method,
+  const request = (raw: string, path: string, method = 'GET', body?: unknown, target = app) => target.fetch(new Request(`http://localhost${path}`, { method,
     headers: { authorization: `Bearer ${raw}`, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }))
-  return { database, state, features, owner: owner!, other: other!, token, request }
+  return { database, state, features, owner: owner!, other: other!, token, request, host, hosted }
 }
 
 describe('forwarder configuration security acceptance with synthetic state', () => {
@@ -175,6 +178,29 @@ describe('forwarder configuration security acceptance with synthetic state', () 
     expect((await f.state.store.readSnapshot()).serviceUsers).toEqual(before)
     await f.state.store.updateFeatureList(f.features.id, { disabled: [] })
     expect(await records()).toEqual([])
+  })
+
+  it('refuses a mailbox-only CSV import without the email accounts feature and reports a saved import as not applied', async () => {
+    const csv = `inbox@${f.owner.primaryDomain},SyntheticMailboxPassword!2026,100`
+    await f.state.store.updateFeatureList(f.features.id, { disabled: ['email-accounts'] })
+    const before = (await f.state.store.readSnapshot()).serviceUsers
+    expect((await f.request(credential, '/api/mail/import-csv', 'POST', { kind: 'mailboxes', accountId: f.owner.id, csv })).status).toBe(403)
+    expect((await f.state.store.readSnapshot()).serviceUsers).toEqual(before)
+    await f.state.store.updateFeatureList(f.features.id, { disabled: [] })
+    const saved = await f.request(credential, '/api/mail/import-csv', 'POST', { kind: 'mailboxes', accountId: f.owner.id, csv })
+    expect(saved.status).toBe(200)
+    expect(await saved.json()).toMatchObject({ summary: { mailboxesImported: 1, errorCount: 0 }, nativeApplied: false })
+  })
+
+  it('applies a saved mailbox-only CSV import on the host in one reconcile', { tags: ['feature'] }, async () => {
+    const domain = f.owner.primaryDomain
+    const response = await f.request(credential, '/api/mail/import-csv', 'POST', { kind: 'mailboxes', accountId: f.owner.id,
+      csv: [`one@${domain},SyntheticMailboxPassword!2026,100`, `two@${domain},SyntheticMailboxPassword!2026,100`].join('\n') }, f.hosted)
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body).toMatchObject({ summary: { mailboxesImported: 2, errorCount: 0 }, nativeApplied: true })
+    expect(body).not.toHaveProperty('application')
+    expect(f.host.applies).toBe(1)
   })
 
   it('rechecks plan policy when an already loaded workspace submits a mutation', async () => {

@@ -26,7 +26,7 @@ export function scopePrimaryPanelFacts(props: PanelPageProps, authority?: Surfac
     serviceUsers: permit('email-accounts') ? props.serviceUsers?.filter(row => row.accountId === account!.id) : undefined,
     databases: permit('mysql-databases') ? props.databases?.filter(row => row.accountId === account!.id) : undefined,
     databaseUsers: permit('mysql-users') ? props.databaseUsers?.filter(row => row.accountId === account!.id) : undefined,
-    certificates: permit('ssl-certificates') ? props.certificates?.filter(row => row.accountId === account!.id) : undefined,
+    certificates: permit('ssl-tls-status') ? props.certificates?.filter(row => row.accountId === account!.id) : undefined,
     dnsRecords: permit('dns-zone-records') ? props.dnsRecords?.filter(row => props.domains?.some(domain => domain.accountId === account!.id && domain.name === row.zone)) : undefined,
     usage: permit('resource-usage') ? props.usage : undefined,
     websiteAnalytics: permit('bandwidth') ? props.websiteAnalytics : undefined,
@@ -186,7 +186,7 @@ export const PANEL_HOME_TOOL_GROUPS: readonly HomeToolGroup[] = [
     homeTool(msgid('Raw access logs'), '/metrics/logs', 'download', 'raw-access', 'nginx log download'),
   ] },
   { label: msgid('Security'), icon: 'shield', tone: 'warn', tools: [
-    homeTool(msgid('SSL/TLS'), '/security/ssl', 'shield', 'ssl-certificates', 'https certificate autossl wildcard tls'),
+    homeTool(msgid('SSL/TLS'), '/security/ssl', 'shield', 'ssl-tls-status', 'https certificate autossl wildcard tls'),
     homeTool(msgctxt('xpanel-home', 'Two-factor authentication'), '/security/account', 'shield', 'two-factor-auth', '2fa totp otp'),
     homeTool(msgid('API tokens'), '/security/account', 'code', 'api-tokens', 'api token automation'),
     homeTool(msgid('Path protection'), '/files/directory-privacy', 'shield', 'directory-privacy', 'directory privacy password folder'),
@@ -201,7 +201,7 @@ export const PANEL_HOME_TOOL_GROUPS: readonly HomeToolGroup[] = [
     homeTool(msgid('Cron jobs'), '/advanced/cron', 'calendar', 'cron-jobs', 'cron schedule timer'),
     homeTool(msgid('Resources & quotas'), '/resources', 'activity', 'resource-usage', 'limits io memory slice cgroup'),
     homeTool(msgid('Processes'), '/resources', 'cpu', 'resource-usage', 'process pid kill tasks', 'processes'),
-    homeTool(msgid('Site logs'), '/metrics/logs', 'files', 'raw-access', 'error log apache nginx'),
+    homeTool(msgid('Site logs'), '/metrics/logs', 'files', 'visitors', 'error log apache nginx'),
   ] },
   { label: msgid('Preferences'), icon: 'gear', tools: [
     homeTool(msgid('Language'), '/preferences/language', 'language', 'change-language', 'arabic locale language'),

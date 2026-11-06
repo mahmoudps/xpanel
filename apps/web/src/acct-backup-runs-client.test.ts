@@ -56,6 +56,7 @@ describe('backup runs client', () => {
     expect(readWhmBackupRunsView(view()).runs[0]!.entries[0]!.outcome).toBe('verified')
     expect(readWhmBackupRunsView(view()).restores[0]!.items).toEqual([{ part: 'database', name: 'alice_wp', result: 'restored', reason: null }])
     expect(readWhmBackupRunsView(view({ available: false, reason: 'invalid_ledger', runs: [], restores: [] })).reason).toBe('invalid_ledger')
+    expect(readWhmBackupRunsView(view({ available: false, reason: 'unsupported_compression' })).reason).toBe('unsupported_compression')
     expect(readWhmBackupRunsView(view({ runs: [{ ...run, destinationIds: [], entries: [], retention: [] }] })).runs[0]!.archives[0]!.integrity).toBe('verified')
     for (const raw of [view({ nativeQualified: true }), view({ available: true, reason: 'no_provider' }), view({ runs: [{ ...run, entries: [{ ...entry, outcome: 'failed', reason: 'readback_mismatch' }] }] }),
       view({ runs: [{ ...run, entries: [{ ...entry, file: 'xpanel-backup-bob-20261028T020000Z.tar.gz' }] }] }), view({ runs: [{ ...run, state: 'running', finishedAt: null }] }), view({ runs: [{ ...run, archives: [{ ...run.archives[0], integrity: 'failed', reason: 'integrity_failed' }] }] }),

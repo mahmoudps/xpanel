@@ -1,5 +1,9 @@
+import type { OsFamily } from '@xpanel/core'
+
 /** git(1), git-status(1), git-for-each-ref(1), git-log(1): fixed machine-readable formats. */
 export const GIT_BINARY = '/usr/bin/git'
+/** git --exec-path: the HTTPS transport helpers ship here (Debian/Ubuntu git, EL git-core). */
+export const GIT_CORE_DIR: Readonly<Record<OsFamily, string>> = { debian: '/usr/lib/git-core', rhel: '/usr/libexec/git-core' }
 export const GIT_LIMITS = { repositories: 20, branches: 100, commits: 20, outputBytes: 262144, timeoutSeconds: 60 } as const
 export const GIT_CONFIG = [
   'credential.helper=', 'credential.interactive=false', 'core.hooksPath=/dev/null', 'core.fsmonitor=false',

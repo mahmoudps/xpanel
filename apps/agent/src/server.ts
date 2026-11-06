@@ -355,7 +355,7 @@ export interface AgentServerDeps {
   hostJobs?: HostJobRunner
   /** Absent until exclusive cache snapshot/recovery and crash recovery are independently qualified. */
   rhelCacheRecovery?: RhelCacheRecovery
-  /** Absent until the /var/lib/rpm snapshot provider (ops-package-recovery.ts createRpmDatabaseRecovery) is natively qualified. */
+  /** The /var/lib/rpm snapshot provider (ops-package-recovery.ts nativeRpmDatabaseRecovery); supplied on EL profiles only. */
   rpmDatabaseRecovery?: RhelCacheRecovery
   /** Trusted local cron evidence only; absence never admits scheduler operations. */
   cronQualification?: (input: { account: Account; job: CronWorkspaceJob; action: 'observe' | 'run' }) => Promise<void>
@@ -402,6 +402,8 @@ const FILE_AUDIT_ACTIONS: Readonly<Record<string, string>> = {
   'put-bytes': 'file.write',
   mkdir: 'file.mkdir',
   chmod: 'file.chmod',
+  move: 'file.move',
+  copy: 'file.copy',
   trash: 'file.trash',
   restore: 'file.restore',
   'empty-trash': 'file.empty_trash',
@@ -672,14 +674,14 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
     const fields: Record<string, readonly string[]> = {
       list: ['path', 'showHidden'], read: ['path'], write: ['path', 'content', 'overwrite', 'mode'],
       'put-bytes': ['path', 'contentBase64', 'overwrite', 'mode'], 'get-bytes': ['path'],
-      mkdir: ['path', 'mode'], chmod: ['path', 'mode'], trash: ['path'],
+      mkdir: ['path', 'mode'], chmod: ['path', 'mode'], move: ['path', 'destination'], copy: ['path', 'destination'], trash: ['path'],
       'list-trash': [], restore: ['trashId', 'overwrite'], 'empty-trash': ['olderThanDays'],
       'purge-trash': ['trashId', 'originalPath', 'deletedAt'],
     }
     if (typeof body.op !== 'string' || !Object.hasOwn(fields, body.op)) fail('VALIDATION', 'unsupported file operation')
     const op = body.op as string
     if (Object.keys(body).some(key => key !== 'op' && !fields[op]!.includes(key))) fail('VALIDATION', 'unknown file operation field')
-    for (const key of ['path', 'content', 'contentBase64', 'trashId', 'originalPath', 'deletedAt']) {
+    for (const key of ['path', 'destination', 'content', 'contentBase64', 'trashId', 'originalPath', 'deletedAt']) {
       if (body[key] !== undefined && typeof body[key] !== 'string') fail('VALIDATION', `${key} must be a string`)
     }
     for (const key of ['overwrite', 'showHidden']) {
@@ -691,7 +693,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
     if (op === 'write' && typeof body.content !== 'string') fail('VALIDATION', 'write content is required')
     if (op === 'put-bytes' && typeof body.contentBase64 !== 'string') fail('VALIDATION', 'binary content is required')
     return body as {
-      op: string; path?: string; content?: string; contentBase64?: string; overwrite?: boolean; mode?: number;
+      op: string; path?: string; destination?: string; content?: string; contentBase64?: string; overwrite?: boolean; mode?: number;
       showHidden?: boolean; trashId?: string; olderThanDays?: number; originalPath?: string; deletedAt?: string
     }
   }
@@ -1476,7 +1478,8 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (method === 'POST' && serviceRestart) {
         await assertRootCaller(caller, 'host.services.restart')
         if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
-        const service = await restartHostService(argv => deps.executor!.runCommand(argv), serviceRestart[1]!)
+        const os = secHostProfile() ?? fail('PRECONDITION_FAILED', 'service restarts need a supported host profile for their configuration tests', { stateChanged: false })
+        const service = await restartHostService(argv => deps.executor!.runCommand(argv), serviceRestart[1]!, os)
         return jsonResponse({ service })
       }
 
@@ -1708,13 +1711,6 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         return jsonResponse(result.available ? result.snapshot : result, result.available ? 200 : 503)
       }
 
-      if (method === 'POST' && pathname === '/analytics/websites/ingest') {
-        await assertRootCaller(caller, 'analytics.websites.ingest')
-        const body = (await req.json()) as { lines?: string[] | string }
-        const ingested = webEngine.ingestJsonLogLines(body.lines ?? [])
-        return jsonResponse({ ok: true, ingested })
-      }
-
       const webAnalyticsMatch = /^\/analytics\/websites\/([0-9a-f-]{36})$/i.exec(pathname)
       if (method === 'GET' && webAnalyticsMatch) {
         const domainId = webAnalyticsMatch[1]!.toLowerCase()
@@ -1920,6 +1916,12 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             case 'chmod':
               result = await fm.chmod(body.path ?? '', body.mode ?? 0o640)
               break
+            case 'move':
+              result = await fm.move(body.path ?? '', body.destination ?? '')
+              break
+            case 'copy':
+              result = await fm.copy(body.path ?? '', body.destination ?? '')
+              break
             case 'trash':
               result = await fm.moveToTrash(body.path ?? '')
               break
@@ -1950,6 +1952,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
               detail: {
                 op: body.op,
                 path: body.path ?? body.originalPath ?? null,
+                ...(body.destination !== undefined && { destination: body.destination }),
                 ...(body.mode !== undefined && { mode: body.mode }),
                 ...(body.trashId !== undefined && { trashId: body.trashId }),
               },

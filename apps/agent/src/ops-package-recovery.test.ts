@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RPM_INSTALLED_IDENTITY_ARGV, RPMDB_REBUILD_ARGV, isOpsPackageRecoveryCommand } from '../../../packages/os/src/ops-package-recovery-command.ts'
-import { beginPackageSnapshot, createRhelCacheRecovery, readInstalledIdentity, readRetainedPackageSnapshot } from './ops-package-recovery.ts'
+import { RPMDB_VERIFY_ARGV } from '../../../packages/os/src/repair-command.ts'
+import { beginPackageSnapshot, createRhelCacheRecovery, nativeRpmDatabaseRecovery, readInstalledIdentity, readRetainedPackageSnapshot } from './ops-package-recovery.ts'
+import { FakeHostExecutor } from './executor.ts'
 import type { PackageRecoveryPorts } from './ops-package-recovery.ts'
 
 let base = ''
@@ -115,5 +117,18 @@ describe('executor admission for package recovery', () => {
     const { isRpmInstalledIdentityCommand } = await import('../../../packages/os/src/ops-package-recovery-command.ts')
     expect(isRpmInstalledIdentityCommand([...RPM_INSTALLED_IDENTITY_ARGV])).toBe(true)
     expect(isRpmInstalledIdentityCommand([...RPMDB_REBUILD_ARGV])).toBe(false)
+  })
+})
+
+describe('native rpm database recovery wiring', () => {
+  it('exists only on EL profiles and refuses a snapshot it cannot identify without changing state', async () => {
+    const run = vi.fn(async (_argv: string[]) => ({ ok: false, code: 1, stdout: '', stderr: 'rpm unavailable' }))
+    expect(nativeRpmDatabaseRecovery('debian', run, join(base, 'recovery'))).toBeUndefined()
+    const recovery = nativeRpmDatabaseRecovery('rhel', run, join(base, 'recovery'))!
+    await expect(recovery.begin(input)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false } })
+    expect(run.mock.calls[0]![0]).toEqual([...RPMDB_VERIFY_ARGV])
+    // Every argv the provider runs is admitted by the shared executor allowlist.
+    for (const [argv] of run.mock.calls) await new FakeHostExecutor().runCommand(argv)
+    expect(await readdir(join(base, 'recovery'))).toEqual([])
   })
 })
