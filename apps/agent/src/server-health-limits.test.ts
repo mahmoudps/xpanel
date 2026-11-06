@@ -11,7 +11,7 @@ const plan = { ...base, resources: { ...base.resources, memoryMb: 1024, maxProce
 const alice = { id: 'a1', username: 'alice', uid: 20001, home: '/home/alice', planId: 'plan', status: 'active' } as Account
 const slice = (overrides: Partial<AccountSliceMetrics> = {}): AccountSliceMetrics => ({
   uid: 20001, cpuUsageUsec: 0, memoryCurrentBytes: 1000 * MIB, ioReadBytes: 0, ioWriteBytes: 0, pidsCurrent: 10,
-  memoryMax: '1073741824\n', pidsMax: '32\n', cpuMax: '150000 100000\n', ioMax: '8:2 rbps=1000 wbps=2000 riops=30 wiops=40\n', ...overrides,
+  memoryMax: '1073741824\n', pidsMax: '32\n', cpuMax: '150000 100000\n', ioMax: '8:0 rbps=1000 wbps=2000 riops=30 wiops=40\n', ...overrides,
 })
 const quota = (used: number, hard: number) => `*** Report for user quotas on device /dev/sda2\nBlock grace time: 7days\nBlock limits\nUser used soft hard grace\nalice -- ${used} 0 ${hard} 0 0 0\n`
 class Host extends FakeHostExecutor {
@@ -19,7 +19,9 @@ class Host extends FakeHostExecutor {
   report = quota(102400, 2097152)
   commands: string[][] = []
   override async readFile(path: string): Promise<string | null> {
-    return ({ '/proc/self/mountinfo': '1 0 8:2 / /home rw - ext4 /dev/sda2 rw\n', '/sys/fs/cgroup/cgroup.subtree_control': 'cpu memory io pids\n' } as Record<string, string>)[path] ?? null
+    // /home on partition sda2 (8:2): io.max rows name the whole disk sda (8:0).
+    return ({ '/proc/self/mountinfo': '1 0 8:2 / /home rw - ext4 /dev/sda2 rw\n', '/sys/fs/cgroup/cgroup.subtree_control': 'cpu memory io pids\n',
+      '/sys/dev/block/8:2/uevent': 'MAJOR=8\nMINOR=2\nDEVNAME=sda2\nDEVTYPE=partition\nPARTN=2\n', '/sys/block/sda/sda2/dev': '8:2\n', '/sys/block/sda/dev': '8:0\n' } as Record<string, string>)[path] ?? null
   }
   override async runCommand(argv: string[]) { this.commands.push(argv); return { ok: true, code: 0, stdout: this.report, stderr: '' } }
   override async readSliceMetrics(): Promise<AccountSliceMetrics | null> { if (this.metrics instanceof Error) throw this.metrics; return this.metrics }
@@ -40,8 +42,8 @@ describe('server resource limits', () => {
     expect(row.cpu).toMatchObject({ limit: 150, enforced: '150000 100000', enforcement: 'match', usage: 140, percent: 93.3, usageState: 'high' })
     expect(row.memory).toMatchObject({ limit: 1024 * MIB, enforcement: 'match', usage: 1000 * MIB, percent: 97.7, usageState: 'high' })
     expect(row.processes).toMatchObject({ limit: 64, enforced: '32', enforcement: 'drift', usage: 10, percent: 15.6, usageState: 'ok' })
-    expect(row['io-write-bps']).toMatchObject({ limit: 2000, enforced: '8:2 wbps=2000', enforcement: 'match', usage: 1900, percent: 95, usageState: 'high' })
-    expect(row['io-read-iops']).toMatchObject({ enforced: '8:2 riops=30', enforcement: 'match', percent: 10 })
+    expect(row['io-write-bps']).toMatchObject({ limit: 2000, enforced: '8:0 wbps=2000', enforcement: 'match', usage: 1900, percent: 95, usageState: 'high' })
+    expect(row['io-read-iops']).toMatchObject({ enforced: '8:0 riops=30', enforcement: 'match', percent: 10 })
     expect(row.disk).toMatchObject({ limit: 2048 * MIB, enforced: String(2097152 * 1024), enforcement: 'match', usage: 102400 * 1024, percent: 4.9, usageState: 'ok' })
     expect(host.commands).toEqual([['/usr/sbin/repquota', '-u', '/home']])
   })
@@ -49,7 +51,7 @@ describe('server resource limits', () => {
   it('treats unlimited plans as matching only uncapped kernel values', async () => {
     const unlimited = { ...plan, resources: { ...plan.resources, memoryMb: 'unlimited' as const, cpuPercent: 'unlimited' as const, ioWriteBps: 'unlimited' as const, diskMb: 'unlimited' as const } }
     const host = new Host()
-    host.metrics = slice({ memoryMax: 'max\n', cpuMax: 'max 100000\n', ioMax: '8:2 rbps=1000 wbps=max riops=30 wiops=40\n' })
+    host.metrics = slice({ memoryMax: 'max\n', cpuMax: 'max 100000\n', ioMax: '8:0 rbps=1000 wbps=max riops=30 wiops=40\n' })
     host.report = quota(10, 0)
     let row = rows((await readServerLimits({ accounts: [alice], plans: [unlimited], executor: host, readResources: async () => sample(), now })).accounts[0]!)
     for (const id of ['memory', 'cpu', 'io-write-bps', 'disk'] as const) expect(row[id]).toMatchObject({ limit: 'unlimited', enforcement: 'match', usageState: 'unlimited', percent: null })

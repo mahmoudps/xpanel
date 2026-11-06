@@ -9,6 +9,19 @@ const caps = (): ObservedAccountLimits => ({ memoryMax: '1073741824', pidsMax: '
 const account = { id: 'account', username: 'alice', uid: 20001, home: '/home/alice', planId: plan.id, status: 'active' } as Account
 const quota = (hard: string) => `*** Report for user quotas on device /dev/sda2\nBlock limits\nUser used soft hard grace\nalice -- 100 0 ${hard} 0 0 0\n`
 
+// /home on partition sda2 (8:2); the kernel keys io.max by the whole disk sda (8:0).
+const host = () => {
+  class Reader extends FakeHostExecutor {
+    ioMax = '8:0 rbps=1000 wbps=2000 riops=30 wiops=40'
+    override async readSliceMetrics(): Promise<AccountSliceMetrics | null> { return { uid: 20001, cpuUsageUsec: 0, memoryCurrentBytes: 0, ioReadBytes: 0, ioWriteBytes: 0, pidsCurrent: 0, ...caps(), ioMax: this.ioMax } }
+    override async runCommand() { return { ok: true, code: 0, stdout: quota('2097152'), stderr: '' } }
+  }
+  const reader = new Reader()
+  for (const [path, content] of Object.entries({ '/proc/self/mountinfo': '1 0 8:2 / /home rw - ext4 /dev/sda2 rw\n', '/sys/fs/cgroup/cgroup.subtree_control': 'cpu memory io pids',
+    '/sys/dev/block/8:2/uevent': 'MAJOR=8\nMINOR=2\nDEVNAME=sda2\nDEVTYPE=partition\nPARTN=2\n', '/sys/block/sda/sda2/dev': '8:2\n', '/sys/block/sda/dev': '8:0\n' })) reader.files.set(path, { path, content, mode: 0o444, owner: 'root', group: 'root' })
+  return reader
+}
+
 describe('assigned plan versus observed host caps', () => {
   it('accepts only matching quantities, units, CPU ratios and all four IO dimensions', () => {
     expect(compareAccountLimits(resources, caps())).toEqual({ gaps: [], unavailable: false })
@@ -38,17 +51,21 @@ describe('assigned plan versus observed host caps', () => {
   })
 
   it('reports partial accounts, unread plans/slices and zero accounts without positive fallback', async () => {
-    class Reader extends FakeHostExecutor {
-      override async readSliceMetrics(): Promise<AccountSliceMetrics | null> { return { uid: 20001, cpuUsageUsec: 0, memoryCurrentBytes: 0, ioReadBytes: 0, ioWriteBytes: 0, pidsCurrent: 0, ...caps() } }
-      override async runCommand() { return { ok: true, code: 0, stdout: quota('2097152'), stderr: '' } }
-    }
-    const reader = new Reader()
-    for (const [path, content] of [['/proc/self/mountinfo', '1 0 8:2 / /home rw - ext4 /dev/sda2 rw\n'], ['/sys/fs/cgroup/cgroup.subtree_control', 'cpu memory io pids']]) reader.files.set(path!, { path: path!, content: content!, mode: 0o444, owner: 'root', group: 'root' })
+    const reader = host()
     expect(await observeHostLimits(reader, [account], [{ ...plan, resources }], '/home')).toEqual({ status: 'verified', checkedAccounts: 1, unavailableAccounts: 0, gaps: [] })
     expect((await observeHostLimits(reader, [account], [], '/home')).status).toBe('unavailable')
     expect((await observeHostLimits(reader, [account, { ...account, id: 'missing', planId: 'missing' }], [{ ...plan, resources }], '/home'))).toMatchObject({ status: 'unavailable', checkedAccounts: 1, unavailableAccounts: 1 })
     expect((await observeHostLimits(reader, [], [plan], '/home')).status).toBe('unavailable')
     reader.readSliceMetrics = async () => { throw new Error('unread') }
     expect((await observeHostLimits(reader, [account], [{ ...plan, resources }], '/home')).status).toBe('unavailable')
+  })
+
+  it('keys io.max by the whole disk under a partition-backed home and never verifies an unproven device', async () => {
+    const reader = host()
+    reader.ioMax = '8:2 rbps=1000 wbps=2000 riops=30 wiops=40'
+    expect(await observeHostLimits(reader, [account], [{ ...plan, resources }], '/home')).toEqual({ status: 'gaps', checkedAccounts: 1, unavailableAccounts: 0, gaps: ['io'] })
+    reader.ioMax = '8:0 rbps=1000 wbps=2000 riops=30 wiops=40'
+    reader.files.delete('/sys/block/sda/dev')
+    expect(await observeHostLimits(reader, [account], [{ ...plan, resources }], '/home')).toMatchObject({ status: 'unavailable', checkedAccounts: 0, unavailableAccounts: 1 })
   })
 })
