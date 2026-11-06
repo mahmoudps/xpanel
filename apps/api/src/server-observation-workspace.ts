@@ -1,5 +1,6 @@
 import { isIP } from 'node:net'
 import { fail } from '@xpanel/core'
+import { isPhpVersion, phpCompact } from '@xpanel/os'
 import type { Database, Domain, ServerIpEntry, ServerSettings, ServiceUser } from '@xpanel/core'
 import { SERVER_CRON_ENTRY_NAME, SERVER_HOSTNAME, SERVER_IFNAME, SERVER_UNIT_NAME, SERVER_WORD, serverTimerOwner } from '../../../packages/os/src/server-observation-command.ts'
 import type {
@@ -144,7 +145,7 @@ export function summarizeServerRole(saved: ServerObservationSaved) {
     { id: 'web-edge', value: settings ? 'nginx' : null, count: null, services: ['nginx'] },
     // OpenLiteSpeed has no reviewed service probe, so its observed state is not claimed.
     { id: 'web-backend', value: settings ? settings.engine === 'apache' ? 'apache mpm-' + settings.apacheMpm : settings.engine : null, count: null, services: settings?.engine === 'apache' ? ['apache'] : [] },
-    { id: 'php', value: phpVersions.length ? phpVersions.join(', ') : null, count: counts.phpDomains, services: ['php-fpm'] },
+    { id: 'php', value: phpVersions.length ? phpVersions.join(', ') : null, count: counts.phpDomains, services: phpVersions.filter(isPhpVersion).map(version => 'php-fpm-' + phpCompact(version)) },
     { id: 'mail', value: null, count: counts.mailboxes, services: ['postfix', 'dovecot', 'opendkim'] },
     { id: 'dns', value: null, count: counts.zones, services: ['pdns'] },
     { id: 'database', value: 'mariadb', count: counts.databases, services: ['mariadb'] },

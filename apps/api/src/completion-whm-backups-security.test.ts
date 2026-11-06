@@ -82,14 +82,14 @@ describe('WHM backup configuration loopback HTTP security', () => {
     const input = { enabled: true, frequency: 'daily', cron: '0 2 * * *', retentionCount: 7, compress: 'gzip', includeDatabases: true, includeMail: false, selectedAccounts: 'all', destinationIds: [created.destination.id], expectedRevision: created.revision }
     const response = await f.request('/api/backups/workspace/schedule', 'PUT', input)
     expect(response.status).toBe(422)
-    // Archives are written with gzip only: Zstandard is refused with a stable reason instead of being saved and ignored.
-    const zstd = await f.request('/api/backups/workspace/schedule', 'PUT', { ...input, enabled: false, compress: 'zstd' })
-    expect(zstd.status).toBe(412)
-    expect(await zstd.json()).toMatchObject({ code: 'PRECONDITION_FAILED', details: { reason: 'backup_compression_unavailable', stateChanged: false } })
     expect(await f.bytes('schedule')).toBe('')
     const disabled = await f.request('/api/backups/workspace/schedule', 'PUT', { ...input, enabled: false })
     expect(disabled.status).toBe(200)
     expect(JSON.parse(await f.bytes('schedule'))).toMatchObject({ cron: '0 2 * * *', includeMail: false, compress: 'gzip' })
+    // Zstandard is saved desired state; the agent refuses to run it with backup_compression_unavailable while zstd is not installed.
+    const zstd = await f.request('/api/backups/workspace/schedule', 'PUT', { ...input, enabled: false, compress: 'zstd', expectedRevision: (await disabled.json() as { revision: string }).revision })
+    expect(zstd.status).toBe(200)
+    expect(JSON.parse(await f.bytes('schedule'))).toMatchObject({ compress: 'zstd' })
     const before = await f.bytes('destinations'), current = await f.view()
     expect((await f.request('/api/backups/workspace/destinations/' + created.destination.id, 'DELETE', { expectedRevision: current.revision })).status).toBe(409)
     expect(await f.bytes('destinations')).toBe(before)

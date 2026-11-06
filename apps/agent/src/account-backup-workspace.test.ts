@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { link, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -8,6 +9,8 @@ import * as archives from './account-backup.ts'
 import { accountBackupPreview, downloadAccountBackup, handleAccountBackupAgentRequest, inspectAccountBackupArchive, previewAccountBackup, restoreAccountBackupWithRecovery } from './account-backup-workspace.ts'
 import type { AccountBackupIdentity, AccountHomeEntry } from './account-backup-workspace.ts'
 import { FakeHostExecutor } from './executor.ts'
+import { BACKUP_COMPRESSOR } from './acct-backup-archive.ts'
+import { runBackupCommand } from './backup-low-priority.ts'
 
 // Actual tar.gz and filesystem descriptors. Privileged execution/home reads are explicit fakes;
 // these tests do not qualify Linux uid isolation, native tar execution or disaster recovery.
@@ -66,6 +69,22 @@ describe('account archive inspection and ownership', () => {
     await expect(inspectAccountBackupArchive({ root: f.root, account, file })).rejects.toMatchObject({ code: 'VALIDATION' })
     await rm(f.path); await mkdir(f.path)
     await expect(archives.openAccountBackupArchive(f.root, account, file)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+  })
+  it('reads a .tar.zst name only as Zstandard data and serves it as application/zstd', async () => {
+    const f = await fixture(), zst = file.replace('.tar.gz', '.tar.zst')
+    await writeFile(join(f.root, account.username, zst), f.bytes, { mode: 0o600 })
+    await expect(inspectAccountBackupArchive({ root: f.root, account, file: zst })).rejects.toMatchObject({ code: 'VALIDATION', message: 'the account archive must be tar data compressed as its name says' })
+    const response = await downloadAccountBackup({ root: f.root, account, file: zst })
+    expect(response.headers.get('content-type')).toBe('application/zstd')
+    await response.body?.cancel()
+  })
+  // Real zstd(1) on the Linux lab host; the archive bytes are digested while zstd decompresses them.
+  it.runIf(process.platform === 'linux' && existsSync('/usr/bin/zstd'))('inspects real .tar.zst bytes through zstd with exact digests', async () => {
+    const f = await fixture(), zst = file.replace('.tar.gz', '.tar.zst'), tar = join(f.root, 'home.tar')
+    await writeFile(tar, await buildTar([{ name: './public_html/index.html', content: 'new', mode: 0o640 }]))
+    expect(await runBackupCommand({ argv: BACKUP_COMPRESSOR.zstd, stdinPath: tar, stdoutPath: join(f.root, account.username, zst), maxStdoutBytes: 1 << 20 })).toMatchObject({ ok: true })
+    const bytes = await readFile(join(f.root, account.username, zst))
+    expect(await inspectAccountBackupArchive({ root: f.root, account, file: zst })).toMatchObject({ file: zst, bytes: bytes.length, sha256: digest(bytes), files: [{ path: 'public_html/index.html', bytes: 3, mode: 0o640, sha256: digest('new') }] })
   })
   it('binds differences to archive bytes, current contents and the persistent account identity', () => {
     const inventory = { file, bytes: 123, sha256: digest('archive'), files: [

@@ -10,9 +10,9 @@ import type { BackupCredentialProfile, BackupCron, BackupDestinationProof, Backu
 import { DEFAULT_BACKUP_DIR, listAccountBackups, MAX_BACKUP_BYTES, openAccountBackupArchive } from './account-backup.ts'
 import { buildControlSnapshot, buildServerBackupArchive, listControlSnapshot, listServerBackupArchive } from './acct-backup-archive.ts'
 import type { BackupArchiveBuildDeps, BackupArchiveListing } from './acct-backup-archive.ts'
-import { runBackupCommand } from './backup-low-priority.ts'
+import { runBackupCommand, zstdInstalled } from './backup-low-priority.ts'
 import type { BackupCommandRunner } from './backup-low-priority.ts'
-import type { BackupAccountTarget } from './account-backup.ts'
+import type { BackupAccountTarget, BackupCompression } from './account-backup.ts'
 import type { AgentExecutor } from './executor.ts'
 import { withPinnedHostTargetParent } from './host-target-parent.ts'
 import { BACKUP_CONTROL, BACKUP_RUN_LIMITS, backupArchiveName, backupRunDetail, backupRunLedgerRevision, parseBackupArchiveName, planBackupRetention, readBackupRunLedger } from './acct-backup-plan.ts'
@@ -29,8 +29,7 @@ const HEX = /^[0-9a-f]{64}$/
 
 export interface BackupRunAccount extends BackupAccountTarget { id: string }
 interface SavedDestination { target: BackupDestinationTarget; enabled: boolean; verification: BackupDestinationProof | null }
-/** `gzip` is false when the saved compression asks for another codec: archives are written with gzip only, so such a schedule never runs. */
-interface SavedSchedule { enabled: boolean; cron: string; parsed: BackupCron; gzip: boolean; retentionCount: number; retentionWeekly: number; retentionMonthly: number; includeMail: boolean; includeDatabases: boolean; includeDns: boolean; includeControl: boolean; selectedAccounts: 'all' | string[]; destinationIds: string[]; updatedAt: string }
+interface SavedSchedule { enabled: boolean; cron: string; parsed: BackupCron; compress: BackupCompression; retentionCount: number; retentionWeekly: number; retentionMonthly: number; includeMail: boolean; includeDatabases: boolean; includeDns: boolean; includeControl: boolean; selectedAccounts: 'all' | string[]; destinationIds: string[]; updatedAt: string }
 export interface SavedBackupConfig { destinations: SavedDestination[]; schedule: SavedSchedule | null }
 interface ActiveDestination { target: BackupDestinationTarget; profile: BackupCredentialProfile }
 export interface BackupRetentionPreview { destinationId: string; retentionDays: number; keep: BackupRetentionKeep; planDigest: string; rows: BackupRetentionRow[] }
@@ -54,8 +53,9 @@ export function readSavedBackupConfig(raw: { destinations: unknown; schedule: un
   if (!object(s) || typeof s.enabled !== 'boolean' || typeof s.cron !== 'string' || typeof s.retentionCount !== 'number' || !Number.isSafeInteger(s.retentionCount) || s.retentionCount < 1 || s.retentionCount > 3650 || typeof s.includeMail !== 'boolean' || typeof s.includeDatabases !== 'boolean' || typeof s.includeDns !== 'boolean' || typeof s.includeControl !== 'boolean'
     || [s.retentionWeekly, s.retentionMonthly].some(value => typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 3650)
     || !(s.selectedAccounts === 'all' || Array.isArray(s.selectedAccounts) && s.selectedAccounts.length <= 10_000 && s.selectedAccounts.every(value => typeof value === 'string' && value.length <= 64))
-    || !Array.isArray(s.destinationIds) || s.destinationIds.length > 50 || s.destinationIds.some(value => typeof value !== 'string' || !UUID.test(value)) || typeof s.updatedAt !== 'string' || !Number.isFinite(Date.parse(s.updatedAt))) return invalidConfig()
-  return { destinations, schedule: { enabled: s.enabled, cron: s.cron, parsed: parseBackupCron(s.cron), gzip: s.compress === 'gzip', retentionCount: s.retentionCount, retentionWeekly: s.retentionWeekly as number, retentionMonthly: s.retentionMonthly as number, includeMail: s.includeMail, includeDatabases: s.includeDatabases, includeDns: s.includeDns, includeControl: s.includeControl, selectedAccounts: s.selectedAccounts === 'all' ? 'all' : [...s.selectedAccounts as string[]], destinationIds: [...s.destinationIds as string[]], updatedAt: s.updatedAt } }
+    || !Array.isArray(s.destinationIds) || s.destinationIds.length > 50 || s.destinationIds.some(value => typeof value !== 'string' || !UUID.test(value)) || typeof s.updatedAt !== 'string' || !Number.isFinite(Date.parse(s.updatedAt))
+    || s.compress !== 'gzip' && s.compress !== 'zstd') return invalidConfig()
+  return { destinations, schedule: { enabled: s.enabled, cron: s.cron, parsed: parseBackupCron(s.cron), compress: s.compress, retentionCount: s.retentionCount, retentionWeekly: s.retentionWeekly as number, retentionMonthly: s.retentionMonthly as number, includeMail: s.includeMail, includeDatabases: s.includeDatabases, includeDns: s.includeDns, includeControl: s.includeControl, selectedAccounts: s.selectedAccounts === 'all' ? 'all' : [...s.selectedAccounts as string[]], destinationIds: [...s.destinationIds as string[]], updatedAt: s.updatedAt } }
 }
 const backupConfigPath = (stateRoot: string, file: string): string => join(stateRoot, 'extended', 'backups', file)
 export const readBackupConfigFiles = (stateRoot: string) => async (): Promise<{ destinations: unknown; schedule: unknown }> => ({
@@ -142,7 +142,7 @@ export interface BackupRunDeps {
   provider: BackupTransferProvider | null
   listAccounts(): Promise<readonly BackupRunAccount[]>
   /** buildServerBackupArchive on a Linux host; null where account archives cannot be created. */
-  createBackup: ((account: BackupRunAccount, options: { excludeMail: boolean; includeDatabases: boolean; includeDns: boolean }) => Promise<{ file: string; bytes: number; databases: string[]; zones: string[] }>) | null
+  createBackup: ((account: BackupRunAccount, options: { excludeMail: boolean; includeDatabases: boolean; includeDns: boolean; compression: BackupCompression }) => Promise<{ file: string; bytes: number; databases: string[]; zones: string[] }>) | null
   /** Integrity read of a local archive (listServerBackupArchive); throws when it fails. */
   verifyArchive(account: BackupRunAccount, file: string): Promise<BackupArchiveListing>
   readLocalArchive(account: BackupRunAccount, file: string): Promise<BackupArchiveSource>
@@ -151,7 +151,7 @@ export interface BackupRunDeps {
   deleteLocalArchive(account: BackupRunAccount, file: string): Promise<void>
   /** Once-per-run control-state snapshot (build, integrity read, source, list, delete); null where it cannot be taken. */
   control?: {
-    build(): Promise<{ file: string; bytes: number }>; verify(file: string): Promise<unknown>; read(file: string): Promise<BackupArchiveSource>
+    build(compression: BackupCompression): Promise<{ file: string; bytes: number }>; verify(file: string): Promise<unknown>; read(file: string): Promise<BackupArchiveSource>
     list(): Promise<BackupRemoteArchive[]>; delete(file: string): Promise<void>
   } | null
   /** Space on the local archive filesystem; null where it cannot be read. */
@@ -160,13 +160,15 @@ export interface BackupRunDeps {
   storeRecovered(account: BackupRunAccount, file: string, chunks: AsyncIterable<Uint8Array>, expected: { bytes: number; sha256: string }): Promise<'recovered' | 'exists' | 'mismatch'>
   readLedger(): Promise<unknown>
   writeLedger(ledger: BackupRunLedger): Promise<void>
+  /** Whether zstd(1) is installed; a Zstandard schedule refuses to run without it. */
+  zstdInstalled(): Promise<boolean>
   now?: () => Date
   transferTimeoutMs?: number
 }
 export const backupLedgerFile = (path = BACKUP_RUN_LEDGER_PATH) => ({ readLedger: () => readJsonIfExists<unknown>(path), writeLedger: (ledger: BackupRunLedger) => atomicWriteJson(path, ledger, 0o600) })
 export const defaultBackupArchiveRoot = (): string => process.env.XPANEL_BACKUP_DIR || DEFAULT_BACKUP_DIR
-/** Defaults for a per-account backup when no schedule is saved: everything included, kept on this server. */
-const ACCOUNT_DEFAULTS = { includeMail: true, includeDatabases: true, includeDns: true, destinationIds: [] as string[] }
+/** Defaults for a per-account backup when no schedule is saved: everything included, gzip, kept on this server. */
+const ACCOUNT_DEFAULTS = { includeMail: true, includeDatabases: true, includeDns: true, compress: 'gzip' as BackupCompression, destinationIds: [] as string[] }
 
 /** One backup operation (run, retention apply, recovery or restore) at a time in this agent process; ROOT keeps a single instance. */
 export function createBackupRunController(deps: BackupRunDeps) {
@@ -198,6 +200,7 @@ export function createBackupRunController(deps: BackupRunDeps) {
   const claim = (id: string, task: () => Promise<void>): void => { const slot = { id, done: Promise.resolve() }; active = slot; slot.done = task().catch(() => undefined).finally(() => { if (active === slot) active = null }) }
   const busy = (): void => { if (active) fail('CONFLICT', 'another backup operation is running; wait for it to finish', { stateChanged: false }) }
   const keepOf = (saved: SavedBackupConfig | null): BackupRetentionKeep => ({ daily: saved?.schedule?.retentionCount ?? 7, weekly: saved?.schedule?.retentionWeekly ?? 0, monthly: saved?.schedule?.retentionMonthly ?? 0 })
+  const codecMissing = async (schedule: SavedSchedule | null): Promise<boolean> => schedule?.compress === 'zstd' && !await deps.zstdInstalled()
 
   async function view(): Promise<BackupRunsView> {
     const storage = await deps.storage?.().catch(() => null) ?? null
@@ -208,7 +211,7 @@ export function createBackupRunController(deps: BackupRunDeps) {
     const destinations = saved?.schedule ? await activeDestinations(saved, saved.schedule.destinationIds) : []
     // A schedule without destinations keeps verified local archives only; selected destinations must all be active.
     const selected = saved?.schedule?.destinationIds.length ?? 0
-    const reason = !deps.createBackup ? 'no_executor' : selected && !deps.provider ? 'no_provider' : !saved ? 'invalid_configuration' : !saved.schedule ? 'no_schedule' : !saved.schedule.gzip ? 'unsupported_compression' : destinations.length !== selected ? 'no_destination' : null
+    const reason = !deps.createBackup ? 'no_executor' : selected && !deps.provider ? 'no_provider' : !saved ? 'invalid_configuration' : !saved.schedule ? 'no_schedule' : await codecMissing(saved.schedule) ? 'unsupported_compression' : destinations.length !== selected ? 'no_destination' : null
     const schedule = saved?.schedule ? { enabled: saved.schedule.enabled, cron: saved.schedule.cron, nextRunAt: saved.schedule.enabled ? nextBackupCronRun(saved.schedule.parsed, new Date(Math.max(now().getTime() - 60_000, Date.parse(current.lastScheduledAt ?? saved.schedule.updatedAt))))?.toISOString() ?? null : null, lastScheduledAt: current.lastScheduledAt,
       timerObservedAt: timer && timer.updatedAt === saved.schedule.updatedAt ? timer.at : null } : null
     return { available: reason === null, reason, revision: backupRunLedgerRevision(current), schedule, storage, activeId: active?.id ?? null, runs: current.runs, recoveries: current.recoveries, restores: current.restores, nativeQualified: false }
@@ -290,13 +293,13 @@ export function createBackupRunController(deps: BackupRunDeps) {
   }
   const failedArchive = (username: string): BackupRunArchive => ({ username, file: null, bytes: null, sha256: null, databases: [], zones: [], integrity: 'failed', reason: 'backup_failed', detail: null })
 
-  async function executeRun(run: BackupRun, accounts: readonly BackupRunAccount[], keep: BackupRetentionKeep, includeControl: boolean): Promise<void> {
+  async function executeRun(run: BackupRun, accounts: readonly BackupRunAccount[], keep: BackupRetentionKeep, includeControl: boolean, compression: BackupCompression): Promise<void> {
     const save = async (): Promise<void> => { await persist(current => ({ ...current, runs: current.runs.map(item => item.id === run.id ? structuredClone(run) : item) })).catch(() => undefined) }
     if (includeControl && deps.control) {
       const control = failedArchive(BACKUP_CONTROL)
       let source: BackupArchiveSource | null = null
       try {
-        const built = await deps.control.build()
+        const built = await deps.control.build(compression)
         control.file = built.file; control.reason = 'integrity_failed'
         await deps.control.verify(built.file)
         source = await deps.control.read(built.file)
@@ -310,7 +313,7 @@ export function createBackupRunController(deps: BackupRunDeps) {
       const archive = failedArchive(account.username)
       let source: BackupArchiveSource | null = null
       try {
-        const built = await deps.createBackup!(account, { excludeMail: !run.mailIncluded, includeDatabases: run.databasesIncluded, includeDns: run.dnsIncluded })
+        const built = await deps.createBackup!(account, { excludeMail: !run.mailIncluded, includeDatabases: run.databasesIncluded, includeDns: run.dnsIncluded, compression })
         Object.assign(archive, { file: built.file, databases: [...built.databases].sort(), zones: [...built.zones].sort(), reason: 'integrity_failed' })
         // The archive must read back completely, holding exactly the parts it was built with, before it counts or is uploaded.
         const listing = await deps.verifyArchive(account, built.file), read = await deps.readLocalArchive(account, built.file)
@@ -344,7 +347,7 @@ export function createBackupRunController(deps: BackupRunDeps) {
     if (expectedRevision !== undefined && backupRunLedgerRevision(current) !== expectedRevision) return fail('CONFLICT', 'backup run history changed; read it again', { stateChanged: false })
     const saved = await config()
     if (!deps.createBackup || !saved || trigger !== 'account' && !saved.schedule) return fail('PRECONDITION_FAILED', 'scheduled backups need a Linux host executor and a saved schedule', { stateChanged: false })
-    if (saved.schedule && !saved.schedule.gzip) return fail('PRECONDITION_FAILED', 'the saved schedule asks for a compression this server cannot write; save it with gzip', { stateChanged: false, unsupported: true, reason: 'backup_compression_unavailable' })
+    if (await codecMissing(saved.schedule)) return fail('PRECONDITION_FAILED', 'the saved schedule asks for Zstandard, but the zstd program is not installed on this server; install zstd or save the schedule with gzip', { stateChanged: false, unsupported: true, reason: 'backup_compression_unavailable' })
     const policy = saved.schedule ?? ACCOUNT_DEFAULTS
     const destinations = await activeDestinations(saved, policy.destinationIds)
     if (destinations.length !== policy.destinationIds.length) return fail('PRECONDITION_FAILED', 'every selected destination must be enabled with a current verification and a trusted transport', { stateChanged: false })
@@ -357,7 +360,7 @@ export function createBackupRunController(deps: BackupRunDeps) {
     const run: BackupRun = { id: randomUUID(), trigger, actor, startedAt, finishedAt: null, state: 'running', destinationIds: destinations.map(item => item.target.id), accounts: accounts.length,
       mailIncluded: policy.includeMail, databasesIncluded: policy.includeDatabases, dnsIncluded: policy.includeDns, archives: [], control: null, entries: [], retention: [], localDeleted: null }
     await persist(value => ({ ...value, ...(trigger === 'schedule' ? { lastScheduledAt: startedAt } : {}), runs: [structuredClone(run), ...value.runs].slice(0, BACKUP_RUN_LIMITS.runs) }))
-    claim(run.id, () => executeRun(run, accounts, keepOf(saved), includeControl).catch(async () => {
+    claim(run.id, () => executeRun(run, accounts, keepOf(saved), includeControl, policy.compress).catch(async () => {
       run.state = 'unknown'; run.finishedAt = now().toISOString()
       await persist(value => ({ ...value, runs: value.runs.map(item => item.id === run.id ? structuredClone(run) : item) })).catch(() => undefined)
     }))
@@ -475,8 +478,8 @@ export function createHostBackupRunController(input: { executor: AgentExecutor |
   const root = input.root ?? defaultBackupArchiveRoot(), executor = input.executor, run = input.run ?? runBackupCommand, databases = input.databases
   const noDump: BackupArchiveBuildDeps['dump'] = () => fail('PRECONDITION_FAILED', 'database dumps are unavailable on this host', { stateChanged: false })
   const controlDir = posix.join(root, BACKUP_CONTROL), copyControlDatabase = input.copyControlDatabase
-  return createBackupRunController({ readConfig: readBackupConfigFiles(input.stateRoot), provider: input.provider, listAccounts: input.listAccounts, ...backupLedgerFile(input.ledgerPath),
-    createBackup: executor ? async (account, options) => buildServerBackupArchive({ root, account, excludeMail: options.excludeMail,
+  return createBackupRunController({ readConfig: readBackupConfigFiles(input.stateRoot), provider: input.provider, listAccounts: input.listAccounts, ...backupLedgerFile(input.ledgerPath), zstdInstalled,
+    createBackup: executor ? async (account, options) => buildServerBackupArchive({ root, account, excludeMail: options.excludeMail, compression: options.compression,
       databases: options.includeDatabases && databases ? await databases.list(account) : [], zones: options.includeDns && input.zones ? await input.zones.list(account) : [], deps: { run, dump: databases?.dump ?? noDump } }) : null,
     verifyArchive: (account, file) => listServerBackupArchive({ root, account, file, run }),
     readLocalArchive: (account, file) => localBackupArchiveSource(root, account, file),
@@ -486,7 +489,7 @@ export function createHostBackupRunController(input: { executor: AgentExecutor |
     }),
     deleteLocalArchive: (account, file) => withPinnedHostTargetParent(posix.join(root, ...backupArchiveName(account.username, file).split('/')), pinned => unlink(pinned)),
     control: executor && copyControlDatabase ? {
-      build: () => buildControlSnapshot({ root, stateDir: input.stateRoot, copyDatabase: copyControlDatabase, run }),
+      build: compression => buildControlSnapshot({ root, stateDir: input.stateRoot, copyDatabase: copyControlDatabase, run, compression }),
       verify: file => listControlSnapshot({ root, file, run }),
       read: file => localFileSource(posix.join(controlDir, backupArchiveName(BACKUP_CONTROL, file).split('/')[1]!)),
       list: async () => {

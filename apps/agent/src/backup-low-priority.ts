@@ -1,12 +1,20 @@
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { open } from 'node:fs/promises'
+import { access, open } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import { fail, isXpanelError } from '@xpanel/core'
 
 /** nice(1) 19 and ionice(1) best-effort level 7: backup work yields CPU and disk to sites on a 1 vCPU host but still finishes. */
 export const BACKUP_LOW_PRIORITY = ['/usr/bin/nice', '-n', '19', '/usr/bin/ionice', '-c', '2', '-n', '7'] as const
 export const BACKUP_COMMAND_TIMEOUT_MS = 2 * 60 * 60_000
 const MAX_STDERR_BYTES = 64 * 1024
+const COMMAND_ENV = { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', LC_ALL: 'C' }
+/** zstd(1) from the distribution package every OS profile installs; GNU tar --zstd runs the same program. */
+export const ZSTD = '/usr/bin/zstd'
+export const zstdInstalled = (): Promise<boolean> => access(ZSTD, constants.X_OK).then(() => true, () => false)
+export const zstdUnavailable = (): never => fail('PRECONDITION_FAILED', 'Zstandard archives need the zstd program, which is not installed on this server', { stateChanged: false, unsupported: true, reason: 'backup_compression_unavailable' })
 
 export interface BackupCommand {
   argv: readonly string[]
@@ -38,7 +46,7 @@ export const runBackupCommand: BackupCommandRunner = async command => {
   try {
     if (command.stdinPath) input = await open(command.stdinPath, constants.O_RDONLY | constants.O_NOFOLLOW)
     return await new Promise<BackupCommandResult>((resolve, reject) => {
-      const child = spawn(cmd!, args, { stdio: [input ? input.fd : command.stdinText !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'], env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', LC_ALL: 'C' }, windowsHide: true })
+      const child = spawn(cmd!, args, { stdio: [input ? input.fd : command.stdinText !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'], env: COMMAND_ENV, windowsHide: true })
       if (command.stdinText !== undefined) { child.stdin!.on('error', () => undefined); child.stdin!.end(command.stdinText) }
       const out = child.stdout!, err = child.stderr!, stdout: Buffer[] = [], stderr: Buffer[] = []
       let stdoutBytes = 0, stderrBytes = 0, killed: string | null = null, writes = Promise.resolve()
@@ -67,4 +75,23 @@ export const runBackupCommand: BackupCommandRunner = async command => {
     await output?.close().catch(() => undefined)
     await input?.close().catch(() => undefined)
   }
+}
+
+/**
+ * Tar bytes of a Zstandard stream, decompressed by a low-priority `zstd -d` child (argv only, nothing on disk). zstd checks
+ * every block and the frame checksum; a nonzero exit fails the read after the last chunk, so a damaged archive never reads whole.
+ */
+export async function* zstdDecompressed(source: AsyncIterable<Uint8Array>): AsyncGenerator<Buffer> {
+  const [cmd, ...args] = lowPriorityArgv({ argv: [ZSTD, '-d', '-c', '-q'] })
+  const child = spawn(cmd!, args, { stdio: ['pipe', 'pipe', 'ignore'], env: COMMAND_ENV, windowsHide: true })
+  const exited = new Promise<number | null>(resolve => { child.on('error', () => resolve(null)); child.on('close', resolve) })
+  const fed = pipeline(Readable.from(source), child.stdin!).then(() => null, (error: unknown) => { child.kill('SIGKILL'); return error })
+  try {
+    for await (const chunk of child.stdout!) yield chunk as Buffer
+    const [error, code] = await Promise.all([fed, exited])
+    if (isXpanelError(error)) throw error
+    // ionice(1) of the priority prefix exits 127 when the program it should run does not exist.
+    if (code === 127) zstdUnavailable()
+    if (error || code !== 0) fail('VALIDATION', 'the Zstandard archive failed its integrity check', { stateChanged: false })
+  } finally { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL') }
 }

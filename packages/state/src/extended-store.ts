@@ -296,24 +296,6 @@ export interface TransferSession {
 // Types — 5. Extended File Isolation & Web Features
 // ---------------------------------------------------------------------------
 
-export interface DirectoryPrivacyUser {
-  username: string
-  passwordHash: string
-}
-
-export interface DirectoryPrivacyRule {
-  relDir: string
-  authTitle: string
-  enabled: boolean
-  users: DirectoryPrivacyUser[]
-  updatedAt: string
-}
-
-export interface DirectoryPrivacyState extends DirectoryPrivacyRule {
-  accountId: string
-  rules: DirectoryPrivacyRule[]
-}
-
 export interface HotlinkProtectionConfig {
   accountId: string
   enabled: boolean
@@ -1645,65 +1627,6 @@ export class ExtendedFeaturesStore {
   // =========================================================================
   // 5. Extended File Isolation & Web Features
   // =========================================================================
-
-  async getDirectoryPrivacy(accountId: string): Promise<DirectoryPrivacyState> {
-    const safeAcc = safeSlug(accountId, 'accountId')
-    const stored = await readJsonIfExists<{ rules: DirectoryPrivacyRule[] }>(
-      this.extPath('web', 'directory-privacy', `${safeAcc}.json`),
-    )
-    const rules = stored?.rules ?? []
-    const latest = rules[rules.length - 1] ?? {
-      relDir: 'public_html',
-      authTitle: 'Restricted Area',
-      enabled: false,
-      users: [],
-      updatedAt: new Date(0).toISOString(),
-    }
-    return {
-      accountId,
-      ...latest,
-      rules,
-    }
-  }
-
-  saveDirectoryPrivacy(
-    accountId: string,
-    rule: {
-      relDir: string
-      authTitle: string
-      enabled: boolean
-      users: DirectoryPrivacyUser[]
-    },
-  ): Promise<DirectoryPrivacyState> {
-    return this.mutex.run(async () => {
-      const safeAcc = safeSlug(accountId, 'accountId')
-      const relDir = assertRelPath(rule.relDir, 'relDir')
-      const authTitle = assertLine(rule.authTitle, 128, 'authTitle', { allowEmpty: false })
-      const enabled = assertBool(rule.enabled, 'enabled')
-      const users = (rule.users ?? []).map((u) => ({
-        username: assertLine(u.username, 64, 'username', { allowEmpty: false }),
-        passwordHash: assertLine(u.passwordHash, 512, 'passwordHash', { allowEmpty: false }),
-      }))
-      const current = await this.getDirectoryPrivacy(accountId)
-      const entry: DirectoryPrivacyRule = {
-        relDir,
-        authTitle,
-        enabled,
-        users,
-        updatedAt: new Date().toISOString(),
-      }
-      const nextRules = [...current.rules.filter((r) => r.relDir !== relDir), entry]
-      await atomicWriteJson(this.extPath('web', 'directory-privacy', `${safeAcc}.json`), {
-        accountId,
-        rules: nextRules,
-      })
-      return {
-        accountId,
-        ...entry,
-        rules: nextRules,
-      }
-    })
-  }
 
   async getHotlinkProtection(accountId: string): Promise<HotlinkProtectionConfig> {
     const safeAcc = safeSlug(accountId, 'accountId')

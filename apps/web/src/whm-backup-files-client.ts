@@ -37,7 +37,7 @@ export function readBackupFilesReply(kind: string, value: unknown, expected: Bac
     return value.accounts.map(item => object(item) && typeof item.username === 'string' && user.test(item.username) && text(item.primaryDomain, 253) ? { username: item.username, primaryDomain: item.primaryDomain } : bad())
   }
   if (!user.test(expected.username ?? '') || !object(value) || !object(value.context) || value.context.username !== expected.username || typeof value.context.accountId !== 'string') return bad()
-  const archiveName = new RegExp('^xpanel-backup-' + expected.username + '-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\\.tar\\.gz$')
+  const archiveName = new RegExp('^xpanel-backup-' + expected.username + '-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\\.tar\\.(?:gz|zst)$')
   const created = (item: unknown): item is string => typeof item === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(item)
   const reasonCode = (item: unknown): item is string | null => item === null || typeof item === 'string' && /^[a-z][a-z-]{0,40}$/.test(item)
   if (kind === 'archives') {
@@ -120,7 +120,7 @@ function bindWhmBackupFiles(): void {
     let busy = false, username = '', opened: BackupFilesBrowseView | null = null, directory = '', pending = 0
     let reviewed: (BackupFilesPreviewView & { paths: string[]; destination: string }) | null = null
     const REASONS: Record<string, string> = {
-      format: msgid('not gzip-compressed tar data'), file: msgid('not a single regular file owned by the backup service'),
+      format: msgid('not tar data compressed as its name says'), file: msgid('not a single regular file owned by the backup service'),
       size: msgid('larger than 2 GiB or too many entries'), unsafe: msgid('contains links, devices or unsafe paths'), changed: msgid('changed while it was inspected'),
       'too-large': msgid('larger than the 2 MiB confined write limit'), 'path-too-long': msgid('the destination path is too long'),
       'mail-preserved': msgid('mail data and settings are not restored in place'), reserved: msgid('the trash folder is managed by the file manager'),

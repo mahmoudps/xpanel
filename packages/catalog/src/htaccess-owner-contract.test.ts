@@ -52,8 +52,13 @@ describe('bounded account rewrite contract', () => {
 
 it('does not certify the bounded rewrite contract from a synthetic healthy host report', () => {
   const report = { executor: 'linux' as const, probes: Object.fromEntries(HOST_PROBES.map(probe => [probe, 'passed' as const])) }
-  expect(PHASE1_TOOL_PROBES['domain-htaccess']).toBeUndefined()
-  const observed = qualifyHostTools([qualified(bounded())], report, true)
+  expect(PHASE1_TOOL_PROBES['domain-htaccess']).toEqual(['control-plane', 'files', 'apache'])
+  const observed = qualifyHostTools([bounded()], report, true)
   expect(observed[0]!.status).toBe('researched')
   expect(observed[0]!.delivery.status).toBe('researched')
+  // Separately supplied acceptance is retained only while the confined file helper and Apache probes pass.
+  expect(qualifyHostTools([qualified(bounded())], report, true)[0]!.status).toBe('verified')
+  for (const probe of ['files', 'apache'] as const) {
+    expect(qualifyHostTools([qualified(bounded())], { ...report, probes: { ...report.probes, [probe]: 'failed' as const } }, true)[0]!.status, probe).toBe('researched')
+  }
 })

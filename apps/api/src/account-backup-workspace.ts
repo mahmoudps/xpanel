@@ -2,6 +2,7 @@ import { fail } from '@xpanel/core'
 import type { Account } from '@xpanel/core'
 import type { AuthenticatedCaller } from './auth.ts'
 import { isMailboxPrincipal } from './authorization.ts'
+import { BACKUP_ARCHIVE_SUFFIX, backupCodecOf } from '../../agent/src/account-backup.ts'
 
 const MAX_BYTES = 2 * 1024 * 1024 * 1024
 const MAX_REPLY_BYTES = 8 * 1024 * 1024
@@ -16,7 +17,7 @@ export interface AccountBackupWorkspaceDeps {
 interface ArchiveView { file: string; bytes: number }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const archiveFile = (username: string, value: unknown): string => {
-  if (typeof value !== 'string' || !new RegExp('^xpanel-backup-' + username + '-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\\.tar\\.gz$').test(value)) return fail('VALIDATION', 'account archive file name is invalid', { stateChanged: false })
+  if (typeof value !== 'string' || !new RegExp('^xpanel-backup-' + username + '-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?' + BACKUP_ARCHIVE_SUFFIX + '$').test(value)) return fail('VALIDATION', 'account archive file name is invalid', { stateChanged: false })
   return value
 }
 const archive = (value: unknown, username: string, listing = false): ArchiveView => {
@@ -101,10 +102,11 @@ export function createAccountBackupWorkspace(deps: AccountBackupWorkspaceDeps) {
       context = await authorize(req, action, context)
       const response = await deps.requestAgent(context, '/' + encodeURIComponent(file!) + '/download', { method: 'GET' })
       if (!response.ok) return response
-      if (!response.body || response.headers.get('content-type') !== 'application/gzip' || response.headers.get('content-length') !== String(selected.bytes) || response.headers.get('content-disposition') !== `attachment; filename="${file}"`) { await response.body?.cancel(); return fail('PRECONDITION_FAILED', 'archive download headers could not be verified') }
+      const mediaType = backupCodecOf(file!).mediaType
+      if (!response.body || response.headers.get('content-type') !== mediaType || response.headers.get('content-length') !== String(selected.bytes) || response.headers.get('content-disposition') !== `attachment; filename="${file}"`) { await response.body?.cancel(); return fail('PRECONDITION_FAILED', 'archive download headers could not be verified') }
       try { await deps.audit(context, 'backup.download.started', file!, 'ok') }
       catch (error) { await response.body.cancel().catch(() => undefined); throw error }
-      return new Response(response.body, { headers: { 'content-type': 'application/gzip', 'content-length': String(selected.bytes), 'content-disposition': `attachment; filename="${file}"`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-accel-buffering': 'no' } })
+      return new Response(response.body, { headers: { 'content-type': mediaType, 'content-length': String(selected.bytes), 'content-disposition': `attachment; filename="${file}"`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-accel-buffering': 'no' } })
     }
     if (match && method === 'GET' && match[2] === 'preview.csv') {
       if ([...url.searchParams.keys()].some(key => key !== 'revision') || !/^[a-f0-9]{64}$/.test(url.searchParams.get('revision') ?? '')) return fail('VALIDATION', 'the reviewed backup revision is required')

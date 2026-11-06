@@ -43,6 +43,7 @@ import { resolveAccountIoDevices } from './io-device.ts'
 import { databaseUserRemoteSqlHosts, databaseUserSqlHosts } from './db-remote-provider.ts'
 import { postgresqlAccountStatements, postgresqlSqlAction } from './pg-sql.ts'
 import { readSecEdgeConfiguration } from './sec-waf.ts'
+import { compilerAccessInput } from './compiler-access.ts'
 import { readMailForwardingConfiguration, readMailfxRenderInput, type MailForwardingConfiguration, type MailfxRenderInput } from './mailfx-render.ts'
 import { compileAccountRuntime, EMPTY_RUNTIME, readRuntimeGeneration, readRuntimeRegistries, removeRuntimeRegistry, restoreRuntimeRegistries, runtimeUnitNames, saveRuntimeGeneration, savedRuntimes, type RuntimeRegistry } from './account-runtime.ts'
 import type { SecEdgeConfiguration } from './sec-waf.ts'
@@ -213,6 +214,8 @@ export interface CompileOptions {
   observedHostname?: string | null
   /** SELinux is enabled (selinuxfs mounted); EL then restores the policy contexts of the host name files. */
   selinux?: boolean
+  /** Saved Compiler Access (compiler-access.ts); absent or null leaves the compiler permissions untouched. */
+  compilerAccess?: system.CompilerAccessInput | null
 }
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -808,6 +811,13 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     return users.length ? postgresqlAccountStatements(account, (snapshot.postgresqlDatabases ?? []).filter((database) => database.accountId === account.id), users) : []
   })
   if (postgresqlStatements.length > 0) postActions.push(postgresqlSqlAction(postgresqlStatements))
+
+  // After account provisioning: gpasswd -M names only users that already exist.
+  if (opts.compilerAccess) {
+    const compilers = system.renderCompilerAccess(os, opts.compilerAccess)
+    files.push(...compilers.files)
+    postActions.push(...compilers.actions)
+  }
 
   files.sort((a, b) => a.path.localeCompare(b.path))
   return {
@@ -1595,6 +1605,7 @@ export class HostReconciler {
     let mailFx = await readMailfxRenderInput(this.deps.store.rootDir, snapshot, this.deps.os.family, null)
     // sec: saved WAF/flood edge input and the activated trusted-proxy authority
     const secEdge = await readSecEdgeConfiguration(this.deps.store.rootDir, { family: this.deps.os.family, domains: snapshot.domains })
+    const compilerAccess = await compilerAccessInput(this.deps.store.rootDir, this.deps.os.family, snapshot)
     const runtime = await readRuntimeRegistries(this.deps.store.rootDir, snapshot.accounts)
     const runtimeText = JSON.stringify(savedRuntimes(runtime))
     if (opts.expectedRestoredRuntime && runtimeText !== JSON.stringify(savedRuntimes(opts.expectedRestoredRuntime))) {
@@ -1645,6 +1656,7 @@ export class HostReconciler {
         mailFx,
         ...(mailTls !== undefined ? { mailTls } : {}),
         secEdge,
+        compilerAccess,
         ...(trustedProxyAuthority ? { trustedProxyAuthority } : {}),
         runtime,
         ...(etcHosts !== undefined ? { etcHosts } : {}),

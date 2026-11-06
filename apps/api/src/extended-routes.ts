@@ -324,22 +324,6 @@ export interface BackupSnapshot {
   createdAt: string
 }
 
-export interface DirectoryPrivacyRule {
-  path: string
-  authName: string
-  enabled: boolean
-  users: { username: string; passwordHash: string }[]
-}
-
-export interface DirectoryPrivacyConfig {
-  accountId: Id
-  rules: DirectoryPrivacyRule[]
-  compiledHtpasswd: string
-  compiledNginx: string
-  compiledApache: string
-  updatedAt: string
-}
-
 export interface HotlinkProtectionConfig {
   accountId: Id
   enabled: boolean
@@ -619,10 +603,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     return fresh
   }
   const publicMailingList = (record: MailingListRecord) => { const { memberAuthorities: _bindings, ...visible } = record; return visible }
-  const publicDirectoryPrivacy = (config: DirectoryPrivacyConfig) => {
-    const { compiledHtpasswd: _credentialFile, ...safe } = config
-    return { ...safe, rules: safe.rules.map(rule => ({ ...rule, users: rule.users.map(user => ({ username: user.username })) })) }
-  }
 
 
   const scopedRecords = async <T extends { accountId: Id | null }>(caller: AuthenticatedCaller, records: readonly T[]): Promise<T[]> => {
@@ -2350,7 +2330,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     // =========================================================================
     // 6. Extended File Isolation & Web Extras (/api/web-features/*)
     // =========================================================================
-    const webFeatMatch = /^\/api\/web-features\/([^/]+)\/(directory-privacy|hotlink-protection|web-disk|extras)$/.exec(
+    const webFeatMatch = /^\/api\/web-features\/([^/]+)\/(hotlink-protection|web-disk|extras)$/.exec(
       pathname,
     )
     if (webFeatMatch) {
@@ -2358,106 +2338,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       const account = await helpers.resolveAccountParam(webFeatMatch[1]!)
       const featureKind = webFeatMatch[2]!
       await helpers.assertCanAccessAccount(caller, account, `web_features.${featureKind}`)
-
-      if (featureKind === 'directory-privacy') {
-        const fileKey = `web-features/${account.id}/directory-privacy.json`
-        const defaultCfg: DirectoryPrivacyConfig = {
-          accountId: account.id,
-          rules: [],
-          compiledHtpasswd: '',
-          compiledNginx: '',
-          compiledApache: '',
-          updatedAt: new Date().toISOString(),
-        }
-        if (method === 'GET') {
-          return jsonResponse({ config: publicDirectoryPrivacy(await ext.readOrDefault(fileKey, defaultCfg)) })
-        }
-        if (method === 'PUT') {
-          const body = await readJsonBody<{
-            rules?: {
-              path: string
-              authName?: string
-              enabled?: boolean
-              users?: { username: string; password?: string; passwordHash?: string }[]
-            }[]
-          }>(req)
-          // The compiled nginx/apache fragments interpolate these values, so the input is
-          // normalized and constrained here before it can reach a rendered directive.
-          const controlText = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/
-          const rawRules = body.rules ?? []
-          if (!Array.isArray(rawRules) || rawRules.length > 1000) return fail('VALIDATION', 'directory privacy rules must be an array of at most 1000 entries', { stateChanged: false })
-          const seenPaths = new Set<string>()
-          for (const rule of rawRules) {
-            if (!rule || typeof rule !== 'object' || Array.isArray(rule)) return fail('VALIDATION', 'each directory privacy rule must be an object', { stateChanged: false })
-            if (typeof rule.path !== 'string' || rule.path.length > 512 || controlText.test(rule.path)) return fail('VALIDATION', 'each protected directory needs a canonical relative path', { stateChanged: false })
-            const normalizedPath = rule.path.startsWith('/') ? rule.path : `/${rule.path}`
-            if (!/^\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/.test(normalizedPath) || normalizedPath.split('/').slice(1).some(part => part === '' || part === '.' || part === '..')) {
-              return fail('VALIDATION', 'protected directory paths must be canonical and free of traversal segments', { stateChanged: false })
-            }
-            if (seenPaths.has(normalizedPath)) return fail('VALIDATION', 'each protected directory may be listed only once', { stateChanged: false })
-            seenPaths.add(normalizedPath)
-            if (rule.authName !== undefined && (typeof rule.authName !== 'string' || rule.authName.length > 128 || controlText.test(rule.authName))) {
-              return fail('VALIDATION', 'the authentication prompt must be bounded text without control characters', { stateChanged: false })
-            }
-            if (rule.enabled !== undefined && typeof rule.enabled !== 'boolean') return fail('VALIDATION', 'the enabled flag must be a boolean', { stateChanged: false })
-            if (rule.users !== undefined && (!Array.isArray(rule.users) || rule.users.length > 100)) return fail('VALIDATION', 'each protected directory may list at most 100 users', { stateChanged: false })
-            const seenUsers = new Set<string>()
-            for (const user of rule.users ?? []) {
-              if (!user || typeof user !== 'object' || Array.isArray(user) || typeof user.username !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(user.username)) {
-                return fail('VALIDATION', 'each protected-directory user needs a bounded username', { stateChanged: false })
-              }
-              if (seenUsers.has(user.username)) return fail('VALIDATION', 'each username may be listed only once per directory', { stateChanged: false })
-              seenUsers.add(user.username)
-            }
-          }
-          const rules: DirectoryPrivacyRule[] = await Promise.all(rawRules.map(async (r) => ({
-            path: r.path.startsWith('/') ? r.path : `/${r.path}`,
-            authName: r.authName ?? 'Protected Area',
-            enabled: r.enabled ?? true,
-            users: await Promise.all((r.users ?? []).map(async (u) => ({
-              username: u.username,
-              passwordHash: await passwordHashFromInput(u),
-            }))),
-          })))
-          const compiledHtpasswd = rules
-            .flatMap((r) => r.users.map((u) => `${u.username}:${u.passwordHash}`))
-            .join('\n')
-          const compiledNginx = rules
-            .filter((r) => r.enabled)
-            .map(
-              (r) =>
-                `location ^~ ${r.path} {\n  auth_basic "${r.authName}";\n  auth_basic_user_file ${account.home}/.htpasswd;\n}`,
-            )
-            .join('\n\n')
-          const compiledApache = rules
-            .filter((r) => r.enabled)
-            .map(
-              (r) =>
-                `<Directory "${account.home}/public_html${r.path}">\n  AuthType Basic\n  AuthName "${r.authName}"\n  AuthUserFile "${account.home}/.htpasswd"\n  Require valid-user\n</Directory>`,
-            )
-            .join('\n\n')
-
-          const config: DirectoryPrivacyConfig = {
-            accountId: account.id,
-            rules,
-            compiledHtpasswd,
-            compiledNginx,
-            compiledApache,
-            updatedAt: new Date().toISOString(),
-          }
-          await helpers.assertCanAccessAccount(caller, account, `web_features.${featureKind}`)
-          await ext.write(fileKey, config)
-          await helpers.emitAudit({
-            actor: caller.principal.username,
-            action: 'web_features.directory_privacy.updated',
-            target: `account:${account.username}`,
-            detail: { rulesCount: rules.length },
-            outcome: 'ok',
-            principalId: caller.principal.id,
-          })
-          return jsonResponse({ config: publicDirectoryPrivacy(config) })
-        }
-      }
 
       if (featureKind === 'hotlink-protection') {
         const fileKey = `web-features/${account.id}/hotlink-protection.json`

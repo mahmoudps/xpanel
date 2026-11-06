@@ -456,7 +456,8 @@ export const cgiWrapperDirs = (account: Account, settings: ServerSettings, os: O
 /** Modules the rendered configuration needs; the OS layer enables them (a2enmod / conf.modules.d). */
 export const requiredApacheModules = (settings: ServerSettings, domains: Domain[] = []): string[] => {
   const mpm = assertApacheEngine(settings)
-  const mods = new Set(['mpm_prefork', 'remoteip', 'setenvif', 'alias', 'dir', 'mime', 'authz_core', 'authz_host', 'rewrite', 'headers'])
+  // auth_basic, authn_core, authn_file and authz_user serve Directory Privacy's per-folder Basic auth.
+  const mods = new Set(['mpm_prefork', 'remoteip', 'setenvif', 'alias', 'dir', 'mime', 'authz_core', 'authz_host', 'rewrite', 'headers', 'auth_basic', 'authn_core', 'authn_file', 'authz_user'])
   if (mpm === 'itk') mods.add('mpm_itk')
   for (const d of domains) {
     if (d.siteType !== 'php') continue

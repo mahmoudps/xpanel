@@ -50,8 +50,11 @@ function refusedReply(upstreamStatus: number, body: unknown): Response {
   const status = Object.hasOwn(codes, upstreamStatus) ? upstreamStatus : 503
   const upstreamCode = record(body) && typeof body.code === 'string' && Object.hasOwn(REFUSAL_STATUS, body.code) && REFUSAL_STATUS[body.code] === status ? body.code : undefined
   // Problem-detail field names, so the browser session transport keeps the code and the no-change fact.
+  const details = record(body) && record(body.details) ? body.details : {}
+  // A stable machine reason (for example archive_format_unavailable) names a refusal the code alone does not.
+  const reason = typeof details.reason === 'string' && /^[a-z][a-z_]{0,63}$/.test(details.reason) ? details.reason : undefined
   return json({ code: upstreamCode ?? codes[status] ?? 'SERVICE_UNAVAILABLE', detail: 'The file operation could not be completed.',
-    details: { stateChanged: false, upstreamStatus } }, status)
+    details: { stateChanged: false, upstreamStatus, ...(reason ? { reason } : {}) } }, status)
 }
 /** Validate the trusted agent's reply before an account file result reaches the browser. */
 export async function executeFileWorkspaceRequest(request: FileWorkspaceRequest, invoke: () => Promise<Response>): Promise<Response> {

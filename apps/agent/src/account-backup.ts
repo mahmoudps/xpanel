@@ -6,6 +6,7 @@ import { dirname, posix } from 'node:path'
 import { fail } from '@xpanel/core'
 import type { AgentExecutor } from './executor.ts'
 import { withPinnedHostTargetParent } from './host-target-parent.ts'
+import { zstdInstalled, zstdUnavailable } from './backup-low-priority.ts'
 
 export const DEFAULT_BACKUP_DIR = '/var/lib/xpanel/backups'
 export const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024
@@ -14,6 +15,19 @@ export const RESTORE_STAGING_DIR = '/run/xpanel/account-restores'
 const USERNAME_RE = /^[a-z][a-z0-9]{0,15}$/
 const STAMP_RE = /^[0-9]{8}T[0-9]{6}Z$/
 const NONCE_RE = /^[a-f0-9]{12}$/
+
+/** Archive codecs by file name suffix: every reader uses exactly the codec the name declares. */
+export const BACKUP_CODECS = {
+  gzip: { suffix: '.tar.gz', tar: '--gzip', mediaType: 'application/gzip', magic: [0x1f, 0x8b] },
+  zstd: { suffix: '.tar.zst', tar: '--zstd', mediaType: 'application/zstd', magic: [0x28, 0xb5, 0x2f, 0xfd] },
+} as const
+export type BackupCompression = keyof typeof BACKUP_CODECS
+/** Regular expression source of the archive suffixes, for the name grammars. */
+export const BACKUP_ARCHIVE_SUFFIX = '\\.tar\\.(?:gz|zst)'
+export const backupCodecOf = (file: string) => BACKUP_CODECS[file.endsWith(BACKUP_CODECS.zstd.suffix) ? 'zstd' : 'gzip']
+/** A failed read of a Zstandard archive is reported as unavailable, not as damage, when zstd itself is missing. */
+export const backupReadFailed = async (file: string, failure: () => never): Promise<never> =>
+  backupCodecOf(file) === BACKUP_CODECS.zstd && !await zstdInstalled() ? zstdUnavailable() : failure()
 
 export interface BackupAccountTarget {
   username: string
@@ -36,14 +50,14 @@ export const assertBackupAccountTarget = (account: BackupAccountTarget): void =>
   if (account.status === 'terminating') fail('PRECONDITION_FAILED', 'a terminating account cannot be backed up or restored')
 }
 
-export const backupFileName = (username: string, stamp: string, nonce?: string): string => {
+export const backupFileName = (username: string, stamp: string, compression: BackupCompression, nonce?: string): string => {
   if (!USERNAME_RE.test(username) || !STAMP_RE.test(stamp) || nonce !== undefined && !NONCE_RE.test(nonce)) fail('VALIDATION', 'backup file name is invalid')
-  return `xpanel-backup-${username}-${stamp}${nonce ? '-' + nonce : ''}.tar.gz`
+  return `xpanel-backup-${username}-${stamp}${nonce ? '-' + nonce : ''}${BACKUP_CODECS[compression].suffix}`
 }
 
 export const assertBackupFileName = (username: string, file: string): string => {
   if (!USERNAME_RE.test(username)) fail('VALIDATION', 'account username is invalid')
-  const expected = new RegExp(`^xpanel-backup-${username}-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\\.tar\\.gz$`)
+  const expected = new RegExp(`^xpanel-backup-${username}-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?${BACKUP_ARCHIVE_SUFFIX}$`)
   if (file !== posix.basename(file) || !expected.test(file)) fail('VALIDATION', 'backup file name is invalid')
   return file
 }
@@ -88,7 +102,7 @@ export const listAccountBackups = async (root: string, account: BackupAccountTar
   }
   const files: BackupArchive[] = []
   for (const name of names.sort()) {
-    if (!new RegExp(`^xpanel-backup-${account.username}-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\\.tar\\.gz$`).test(name)) continue
+    if (!new RegExp(`^xpanel-backup-${account.username}-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?${BACKUP_ARCHIVE_SUFFIX}$`).test(name)) continue
     const info = await lstat(posix.join(root, account.username, name))
     if (!info.isFile()) continue
     files.push({ file: name, bytes: info.size })
@@ -109,7 +123,7 @@ export const createAccountBackup = async (input: {
   assertBackupAccountTarget(input.account)
   const root = input.root ?? DEFAULT_BACKUP_DIR
   const stamp = stampOf(input.now ?? new Date())
-  const file = backupFileName(input.account.username, stamp, input.nonce)
+  const file = backupFileName(input.account.username, stamp, 'gzip', input.nonce)
   const directory = posix.join(root, input.account.username)
   const destination = archivePath(root, input.account.username, file)
   const staging = posix.join(input.account.home, `.xpanel-backup-${stamp}${input.nonce ? '-' + input.nonce : ''}.tar.gz`)
@@ -159,13 +173,14 @@ export const restoreAccountBackup = async (input: {
   const root = input.root ?? DEFAULT_BACKUP_DIR
   const file = assertBackupFileName(input.account.username, input.file)
   const source = archivePath(root, input.account.username, file)
-  const listed = await input.executor.runCommand(['/usr/bin/tar', '--list', '--gzip', `--file=${source}`])
-  if (!listed.ok) fail('PRECONDITION_FAILED', 'the backup archive could not be read')
+  const codec = backupCodecOf(file)
+  const listed = await input.executor.runCommand(['/usr/bin/tar', '--list', codec.tar, `--file=${source}`])
+  if (!listed.ok) await backupReadFailed(file, () => fail('PRECONDITION_FAILED', 'the backup archive could not be read'))
   assertMembers(listed.stdout)
   if (input.inspectSource) await input.inspectSource(source)
   else { const opened = await openAccountBackupArchive(root, input.account, file); await opened.handle.close() }
   const directory = posix.join(RESTORE_STAGING_DIR, input.account.username)
-  const staging = posix.join(directory, `${randomUUID()}.tar.gz`)
+  const staging = posix.join(directory, randomUUID() + codec.suffix)
   await input.executor.runAction({ kind: 'ensure-dir', path: RESTORE_STAGING_DIR, mode: 0o711, owner: 'root', group: 'root' })
   await input.executor.runAction({ kind: 'ensure-dir', path: directory, mode: 0o710, owner: 'root', group: input.account.username })
   try {
@@ -175,7 +190,7 @@ export const restoreAccountBackup = async (input: {
     await input.executor.runAction({
       kind: 'exec',
       runAsUser: input.account.username,
-      argv: ['/usr/bin/tar', '--extract', '--gzip', `--file=${staging}`, `--directory=${input.account.home}`, '--no-overwrite-dir', '--no-same-owner', '--anchored', '--exclude=./.xpanel-backup-data', '--exclude=.xpanel-backup-data', ...(input.preserveMail ? ['--anchored', '--exclude=./mail', '--exclude=./etc', '--exclude=mail', '--exclude=etc'] : []), '--'],
+      argv: ['/usr/bin/tar', '--extract', codec.tar, `--file=${staging}`, `--directory=${input.account.home}`, '--no-overwrite-dir', '--no-same-owner', '--anchored', '--exclude=./.xpanel-backup-data', '--exclude=.xpanel-backup-data', ...(input.preserveMail ? ['--anchored', '--exclude=./mail', '--exclude=./etc', '--exclude=mail', '--exclude=etc'] : []), '--'],
     })
   } finally {
     await input.executor.runAction({ kind: 'remove-path', path: staging }).catch(() => undefined)

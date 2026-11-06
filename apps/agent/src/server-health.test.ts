@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { StateSnapshot } from '@xpanel/state'
 import { defaultPlan, type Account } from '@xpanel/core'
+import { SERVICE_MANAGER_FILES, SERVICE_MANAGER_LIST } from '@xpanel/os'
 import { FakeHostExecutor, type AccountSliceMetrics } from './executor.ts'
 import { HOST_DISK_DF_ARGV } from './host-info-disks.ts'
 import { bandwidthCheck, evaluateServerHealth, handleServerHealthRoute, SERVER_HEALTH_THRESHOLDS } from './server-health.ts'
@@ -39,6 +40,7 @@ class Host extends FakeHostExecutor {
     if (this.failing) return { ok: false, code: 1, stdout: '', stderr: 'denied' }
     if (argv.join(' ') === HOST_DISK_DF_ARGV.join(' ')) return { ok: true, code: 0, stdout: DF, stderr: '' }
     if (argv.join(' ') === '/usr/bin/df -i -P') return { ok: true, code: 0, stdout: DF_INODES, stderr: '' }
+    if (argv[1] === 'list-units' || argv[1] === 'list-unit-files') return { ok: true, code: 0, stdout: `xpanel-php-fpm-alice-8.3.service ${argv[1] === 'list-units' ? 'loaded active running alice' : 'enabled enabled'}\n`, stderr: '' }
     if (argv[0] === '/usr/bin/systemctl') return { ok: true, code: 0, stdout: argv.at(-1) === 'nginx.service' ? 'loaded\nfailed\n' : 'loaded\nactive\n', stderr: '' }
     return { ok: false, code: 1, stdout: '', stderr: 'unexpected' }
   }
@@ -73,7 +75,7 @@ describe('server health checks', () => {
     expect(checks.certificates!.items!.map(entry => [entry.name, entry.reason])).toEqual([['old.example.test', 'cert_expired'], ['soon.example.test', 'cert_expiring']])
     expect(checks.reboot).toMatchObject({ state: 'warning', reason: 'reboot_required' })
     expect(report.counts).toEqual({ ok: 0, warning: 4, problem: 5, unavailable: 1 })
-    expect(host.commands.every(argv => argv.join(' ') === HOST_DISK_DF_ARGV.join(' ') || argv.join(' ') === '/usr/bin/df -i -P' || argv[0] === '/usr/bin/systemctl' && argv[1] === 'show')).toBe(true)
+    expect(host.commands.every(argv => argv.join(' ') === HOST_DISK_DF_ARGV.join(' ') || argv.join(' ') === '/usr/bin/df -i -P' || argv[0] === '/usr/bin/systemctl' && argv[1] === 'show' || [SERVICE_MANAGER_LIST, SERVICE_MANAGER_FILES].some(list => argv.join(' ') === list.join(' ')))).toBe(true)
   })
 
   it('keeps disk health unavailable when the mount namespace cannot be read', async () => {

@@ -8,6 +8,7 @@ import {
   renderAccountMemcachedUnit,
   renderAccountRedisInstance,
   renderCalDavCardDavInclude,
+  parseHtpasswd,
   renderDirectoryPrivacy,
   renderDomainForwardersMap,
   renderGitPostReceiveHook,
@@ -290,21 +291,36 @@ describe('3. Operational DNS (Zone Templates, Batch DKIM/SPF/DMARC, Zone Cleanup
 })
 
 describe('4. Extended File & Web Isolation (Directory Privacy, Hotlink, Web Disk, Git Hook)', () => {
-  it('renderDirectoryPrivacy renders htpasswd file, nginxSnippet, and apacheSnippet', () => {
-    const res = renderDirectoryPrivacy(sampleAccount, 'public_html/admin', 'Restricted Area', [
-      { username: 'admin', passwordHash: '$2y$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234' },
-    ])
-    expect(res.htpasswdFile.path).toBe('/home/alice/.htpasswds/public_html/admin/passwd')
-    expect(res.htpasswdFile.content).toContain('admin:$2y$10$')
-    expect(res.nginxSnippet).toContain('auth_basic "Restricted Area";')
-    expect(res.apacheSnippet).toContain('AuthType Basic')
-    expect(res.apacheSnippet).toContain('Require valid-user')
+  const SHA512 = '$6$saltstring$svn8UoSVapNtMuq1ukKS4tPQd8iKwSMHWjl/O817G3uBnIFNjnQJuesI68u4OTLiBFdcbYEdFCoEOfaS35inz1'
+  const BCRYPT = '$2y$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234'
+  it('renderDirectoryPrivacy renders the cPanel passwd file and the Basic auth .htaccess block', () => {
+    const res = renderDirectoryPrivacy(sampleAccount, 'public_html/admin', { enabled: true, authName: 'Restricted Area', users: [
+      { username: 'admin', passwordHash: SHA512 }, { username: 'ops', passwordHash: BCRYPT },
+    ] })
+    expect(res.passwdPath).toBe('.htpasswds/public_html/admin/passwd')
+    expect(res.passwd).toBe(`admin:${SHA512}\nops:${BCRYPT}\n`)
+    expect(res.htaccessBody).toEqual(['AuthType Basic', 'AuthName "Restricted Area"', 'AuthUserFile "/home/alice/.htpasswds/public_html/admin/passwd"', 'Require valid-user'])
+    const off = renderDirectoryPrivacy(sampleAccount, 'public_html/admin', { enabled: false, authName: '', users: [{ username: 'admin', passwordHash: SHA512 }] })
+    expect(off.htaccessBody).toEqual([])
+    expect(off.passwd).toBe(`admin:${SHA512}\n`)
+    expect(renderDirectoryPrivacy(sampleAccount, 'public_html', { enabled: true, authName: 'Site', users: [] }).passwd).toBe('')
+  })
 
-    expect(() =>
-      renderDirectoryPrivacy(sampleAccount, '../etc', 'Bad', [
-        { username: 'admin', passwordHash: '$2y$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234' },
-      ]),
-    ).toThrow()
+  it.each([
+    ['traversal', { rel: '../etc' }], ['absolute', { rel: '/public_html' }], ['trailing slash', { rel: 'public_html/' }], ['hidden top folder', { rel: '.htpasswds/x' }],
+    ['quote in name', { authName: 'a"b' }], ['backslash in name', { authName: 'a\b' }], ['newline in name', { authName: 'a\nRequire all granted' }], ['empty name when enabled', { authName: '' }],
+    ['untrimmed name', { authName: ' A ' }], ['bad username', { users: [{ username: 'a:b', passwordHash: SHA512 }] }],
+    ['duplicate user', { users: [{ username: 'a', passwordHash: SHA512 }, { username: 'a', passwordHash: SHA512 }] }],
+    ['argon2 hash Apache cannot verify', { users: [{ username: 'a', passwordHash: '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA' }] }],
+    ['plain text password', { users: [{ username: 'a', passwordHash: 'secret password' }] }],
+  ])('renderDirectoryPrivacy refuses %s', (_name, patch: { rel?: string; authName?: string; users?: { username: string; passwordHash: string }[] }) => {
+    expect(() => renderDirectoryPrivacy(sampleAccount, patch.rel ?? 'public_html/admin', { enabled: true, authName: patch.authName ?? 'Area', users: patch.users ?? [] })).toThrow()
+  })
+
+  it('parseHtpasswd keeps Apache hashes and refuses lines it cannot manage', () => {
+    expect(parseHtpasswd('')).toEqual([])
+    expect(parseHtpasswd(`a:${SHA512}\nb:${BCRYPT}\nc:{SHA}W6ph5Mm5Pz8GgiULbPgzG37mj9g=\nd:$apr1$abcdefgh$abcdefghijklmnopqrstuv\n`)!.map(entry => entry.username)).toEqual(['a', 'b', 'c', 'd'])
+    for (const bad of ['# comment\n', 'a\n', `a:${SHA512}\na:${SHA512}\n`, 'a:plaintext\n', `\na:${SHA512}\n`, `user@x:${SHA512}\n`]) expect(parseHtpasswd(bad), bad).toBeNull()
   })
 
   it('renderHotlinkProtection renders Nginx and Apache hotlink rules', () => {

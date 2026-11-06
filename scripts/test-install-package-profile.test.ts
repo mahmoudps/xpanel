@@ -305,6 +305,9 @@ describe('bootstrap package and repository parity with the declared OS profiles'
     expect(sorted(actualPackages)).toEqual(sorted([
       ...packageInputs(actions), ...bootstrapExtras(profile.family, php),
     ]))
+    // Zstandard backup archives need zstd(1) on every supported OS.
+    expect(lineValues(run.stdout, 'Bootstrap Packages')).toContain('zstd')
+    expect(profile.bootstrapPackages).toContain('zstd')
     expect(sorted(lineValues(run.stdout, 'Repository Sources'))).toEqual(sorted(repositoryInputs(actions)))
     if (profile.family === 'rhel') {
       expect(run.stdout).toContain('Production preflight rejects this engine/MPM plan; Apache itk is required.')

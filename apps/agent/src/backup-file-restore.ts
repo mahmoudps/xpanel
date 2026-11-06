@@ -3,7 +3,8 @@ import type { FileHandle } from 'node:fs/promises'
 import { assertAcl, fail, isXpanelError } from '@xpanel/core'
 import type { Account, FeatureList, Plan, Reseller } from '@xpanel/core'
 import { walkTar } from '@xpanel/lifecycle'
-import { listAccountBackups, MAX_BACKUP_BYTES, openAccountBackupArchive } from './account-backup.ts'
+import { BACKUP_CODECS, backupCodecOf, listAccountBackups, MAX_BACKUP_BYTES, openAccountBackupArchive } from './account-backup.ts'
+import { zstdDecompressed } from './backup-low-priority.ts'
 import type { BackupAccountTarget } from './account-backup.ts'
 import { inspectAccountBackupArchive, MAX_ACCOUNT_BACKUP_ENTRIES } from './account-backup-workspace.ts'
 import type { AccountArchiveInventory } from './account-backup-workspace.ts'
@@ -148,7 +149,8 @@ export async function writePlannedFiles(input: { root: string; target: BackupAcc
     const opened = await openAccountBackupArchive(input.root, input.target, input.inventory.file)
     try {
       if (opened.bytes !== input.inventory.bytes) fail('CONFLICT', 'the backup archive changed after review', unchanged)
-      await walkTar(archiveBytes(opened.handle, opened.bytes), async (entry, body) => {
+      const bytes = archiveBytes(opened.handle, opened.bytes)
+      await walkTar(backupCodecOf(input.inventory.file) === BACKUP_CODECS.zstd ? zstdDecompressed(bytes) : bytes, async (entry, body) => {
         const row = entry.type === 'file' ? pending.get(entry.path) : undefined
         if (!row) return
         if (input.expired()) { stopped = true; throw stop }
@@ -253,9 +255,9 @@ export async function handleBackupFileRestoreRoute(req: Request, url: URL, metho
         try {
           const opened = await openAccountBackupArchive(root, targetOf(initial), archive.file)
           try {
-            const signature = Buffer.alloc(2), read = await opened.handle.read(signature, 0, 2, 0)
-            const gzip = read.bytesRead === 2 && signature[0] === 0x1f && signature[1] === 0x8b
-            listed.push({ file: archive.file, bytes: opened.bytes, createdAt, integrity: gzip ? 'unverified' : 'rejected', reason: gzip ? null : 'format' })
+            const magic = Buffer.from(backupCodecOf(archive.file).magic), signature = Buffer.alloc(magic.length), read = await opened.handle.read(signature, 0, magic.length, 0)
+            const format = read.bytesRead === magic.length && signature.equals(magic)
+            listed.push({ file: archive.file, bytes: opened.bytes, createdAt, integrity: format ? 'unverified' : 'rejected', reason: format ? null : 'format' })
           } finally { await opened.handle.close() }
         } catch (error) {
           if (!isXpanelError(error)) throw error

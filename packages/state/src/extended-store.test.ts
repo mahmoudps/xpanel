@@ -357,16 +357,7 @@ describe('ExtendedFeaturesStore', () => {
   describe('5. Extended File Isolation & Web Features', () => {
     const accId = 'acc-web-01'
 
-    it('manages directory privacy, hotlink protection, WebDisk, Git deploy repos, and web extras', async () => {
-      const priv = await store.saveDirectoryPrivacy(accId, {
-        relDir: 'public_html/admin',
-        authTitle: 'Staff Only',
-        enabled: true,
-        users: [{ username: 'admin', passwordHash: '$argon2id$v=19$m=65536,t=3,p=1$salt$hash' }],
-      })
-      expect(priv.enabled).toBe(true)
-      expect((await store.getDirectoryPrivacy(accId)).authTitle).toBe('Staff Only')
-
+    it('manages hotlink protection, WebDisk, Git deploy repos, and web extras', async () => {
       const hotlink = await store.saveHotlinkProtection(accId, {
         enabled: true,
         allowedDomains: ['example.com', 'cdn.example.com'],

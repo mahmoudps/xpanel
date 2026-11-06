@@ -322,7 +322,7 @@ describe('renderPhpCgiWrapper', () => {
 describe('requiredApacheModules', () => {
   it('lists modules per handler and MPM', () => {
     const itk = requiredApacheModules(settings(), [domain(), domain({ id: 'd2', name: 'b.example', php: php({ handler: 'cgi' }) })])
-    expect(itk).toEqual(expect.arrayContaining(['mpm_itk', 'mpm_prefork', 'remoteip', 'proxy_fcgi', 'actions', 'cgi']))
+    expect(itk).toEqual(expect.arrayContaining(['mpm_itk', 'mpm_prefork', 'remoteip', 'proxy_fcgi', 'actions', 'cgi', 'auth_basic', 'authn_file', 'authz_user']))
     expect(itk).not.toContain('suexec')
     const pf = requiredApacheModules(prefork, [domain({ php: php({ handler: 'suphp' }) })])
     expect(pf).toEqual(expect.arrayContaining(['suexec', 'actions', 'cgi']))

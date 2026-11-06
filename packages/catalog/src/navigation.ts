@@ -121,6 +121,8 @@ export const visibleNavigation = (
     if (!allowsPageRole(page, ctx)) return false
     if (page.route === '/home' && accountResolved) return true
     if (page.tools.length === 0) return false
+    // The mail routing policy API is root-only, so a reseller DNS ACL alone never admits this page.
+    if (page.route === '/whm/email/routing' && ctx.principal.kind !== 'root') return false
     if (page.tools.every(id => allowed.has(id))) return true
     // The server dashboard reads the same host sample as Server Information.
     // Its own tools stay on this page, and the page opens once that probe is verified.

@@ -1,11 +1,12 @@
 import { fail } from '@xpanel/core'
-import type { AccountFileRequest, FileBytes, FileEntry, FileText, TrashItem } from '../../agent/src/file-manager.ts'
+import type { AccountFileRequest, ArchiveExtraction, FileBytes, FileEntry, FileText, TrashItem } from '../../agent/src/file-manager.ts'
 
 // Aligned with the existing agent wire contract without importing its native runtime.
 export const FILE_WORKSPACE_LIMITS = Object.freeze({
   pathBytes: 4096, textBytes: 1024 * 1024, binaryBytes: 2 * 1024 * 1024,
-  listEntries: 10000, fileMode: 0o640, directoryMode: 0o750, retentionDays: 36500,
+  listEntries: 10000, fileMode: 0o640, directoryMode: 0o750, retentionDays: 36500, archiveBytes: 512 * 1024 * 1024,
 })
+const ARCHIVE_NAME = /[.](?:zip|tar|tar[.]gz|tgz|tar[.]bz2|tbz2|tar[.]zst|tzst)$/i
 export type FileWorkspaceRequest = Exclude<AccountFileRequest, { op: 'write-checked' }>
 export interface FileWorkspaceReplyMap {
   list: { entries: FileEntry[] }
@@ -17,6 +18,8 @@ export interface FileWorkspaceReplyMap {
   chmod: FileEntry
   move: FileEntry
   copy: FileEntry
+  compress: FileEntry
+  extract: ArchiveExtraction
   trash: TrashItem
   'list-trash': { items: TrashItem[] }
   restore: FileEntry
@@ -27,7 +30,7 @@ export type FileWorkspaceReply<T extends FileWorkspaceRequest = FileWorkspaceReq
 const fields = {
   list: ['path', 'showHidden'], read: ['path'], write: ['path', 'content', 'overwrite', 'mode'],
   'put-bytes': ['path', 'contentBase64', 'overwrite', 'mode'], 'get-bytes': ['path'],
-  mkdir: ['path', 'mode'], chmod: ['path', 'mode'], move: ['path', 'destination'], copy: ['path', 'destination'], trash: ['path'], 'list-trash': [],
+  mkdir: ['path', 'mode'], chmod: ['path', 'mode'], move: ['path', 'destination'], copy: ['path', 'destination'], compress: ['path', 'destination'], extract: ['path', 'destination'], trash: ['path'], 'list-trash': [],
   restore: ['trashId', 'overwrite'], 'empty-trash': ['olderThanDays'], 'purge-trash': ['trashId', 'originalPath', 'deletedAt'],
 } as const
 const TRASH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -74,11 +77,14 @@ export function validateFileWorkspaceRequest(input: unknown): FileWorkspaceReque
     }
     case 'mkdir': return { op, path: path(input.path), mode: mode(own(input, 'mode') ? input.mode : FILE_WORKSPACE_LIMITS.directoryMode, FILE_WORKSPACE_LIMITS.directoryMode) }
     case 'chmod': return { op, path: path(input.path), mode: mode(own(input, 'mode') ? input.mode : FILE_WORKSPACE_LIMITS.fileMode, FILE_WORKSPACE_LIMITS.directoryMode) }
-    case 'move': case 'copy': {
+    case 'move': case 'copy': case 'compress': {
       const source = path(input.path), destination = path(input.destination)
       if (destination === source || destination.startsWith(source + '/')) return badRequest('The destination must not be the source or inside it')
+      if (op === 'compress' && !ARCHIVE_NAME.test(destination)) return badRequest('The archive name must end in .zip, .tar, .tar.gz, .tgz, .tar.bz2, .tbz2, .tar.zst or .tzst')
       return { op, path: source, destination }
     }
+    // The destination folder may be the account home itself.
+    case 'extract': return { op, path: path(input.path), destination: path(input.destination, true) }
     case 'list-trash': return { op }
     case 'restore':
       if (typeof input.trashId !== 'string' || !TRASH_ID.test(input.trashId)) return badRequest('A valid trash item ID is required')
@@ -180,6 +186,17 @@ function checkedReply(request: FileWorkspaceRequest, input: unknown): FileWorksp
       const item = changedEntry(input, op, request.destination)
       if (item.kind === 'directory' && item.sizeBytes !== 0) return badReply(op)
       reply = item; break
+    }
+    case 'compress': {
+      const item = changedEntry(input, op, request.destination)
+      if (item.kind !== 'file') return badReply(op)
+      reply = item; break
+    }
+    case 'extract': {
+      const body = result(input, ['destination', 'entries', 'bytes'], op)
+      if (body.destination !== request.destination || !bytes(body.entries) || body.entries > FILE_WORKSPACE_LIMITS.listEntries ||
+          !bytes(body.bytes) || body.bytes > FILE_WORKSPACE_LIMITS.archiveBytes) return badReply(op)
+      reply = { destination: request.destination, entries: body.entries, bytes: body.bytes }; break
     }
     case 'trash': reply = trashItem(input, op, request.path); break
     case 'list-trash': {

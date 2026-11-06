@@ -115,13 +115,13 @@ describe('WHM backups browser controller', () => {
     expect(status().dataset.state).toBe(mode); expect(action('save-schedule').disabled).toBe(true)
     expect(input('policy-cron').value).toBe('15 3 * * *'); expect(f.writes()).toHaveLength(1)
   })
-  it('lists Zstandard as unavailable, drafts gzip and states the observed backup timer', async () => {
+  it('offers Zstandard, drafts gzip and states the observed backup timer', async () => {
     const help = () => document.querySelector('[data-backup-saved-policy]>.xp-help')!.textContent
     expect(help()).toContain('Scheduled execution has not been observed.')
     const f = model(); Object.assign(f.getCurrent(), { schedule: null }); f.boot(); await tick()
     expect(help()).toContain('Scheduled execution is not verified. No enabled schedule is saved, so the backup timer runs nothing.')
     const compress = document.querySelector<HTMLSelectElement>('#backup-layout-policy-compress')!, saved = () => document.querySelector('[data-backup-configuration-status]')!.textContent
-    expect(compress.querySelector<HTMLOptionElement>('option[value="1"]')!.disabled).toBe(true)
+    expect(compress.querySelector<HTMLOptionElement>('option[value="1"]')!.disabled).toBe(false)
     expect(compress.value).toBe('2')
     edit('policy-cron', '15 3 * * *'); action('save-schedule').click(); await tick(); await tick()
     expect(f.writes()[0]![2]).toMatchObject({ compress: 'gzip' })

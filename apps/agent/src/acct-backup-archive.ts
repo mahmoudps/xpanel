@@ -3,25 +3,31 @@ import { createHash, randomUUID } from 'node:crypto'
 import { link, lstat, mkdir, open, rm, writeFile } from 'node:fs/promises'
 import { dirname, posix } from 'node:path'
 import { fail } from '@xpanel/core'
-import { assertBackupAccountTarget, backupFileName, DEFAULT_BACKUP_DIR, MAX_BACKUP_BYTES } from './account-backup.ts'
-import type { BackupAccountTarget } from './account-backup.ts'
+import { assertBackupAccountTarget, BACKUP_CODECS, backupCodecOf, backupFileName, backupReadFailed, DEFAULT_BACKUP_DIR, MAX_BACKUP_BYTES } from './account-backup.ts'
+import type { BackupAccountTarget, BackupCompression } from './account-backup.ts'
 import { BACKUP_CONTROL, isBackupZoneName } from './acct-backup-plan.ts'
 import { withPinnedHostTargetParent } from './host-target-parent.ts'
+import { ZSTD } from './backup-low-priority.ts'
 import type { BackupCommandRunner } from './backup-low-priority.ts'
 
 /**
  * Server backup archive: the account home as tar members `./...`, plus root-written parts under `.xpanel-backup-data/`:
  * MariaDB dumps `databases/<db>.sql`, DNS zones as saved desired state `dns/<zone>.json`, and `manifest.json` with each
- * part's size and SHA-256. One gzip stream, one file. The home tar excludes `./.xpanel-backup-*`, so a home path can never
- * pose as a part.
+ * part's size and SHA-256. One gzip or Zstandard stream (the schedule setting), one file. The home tar excludes `./.xpanel-backup-*`,
+ * so a home path can never pose as a part.
  */
 export const BACKUP_DATA_DIR = '.xpanel-backup-data'
 export const BACKUP_DATA_MANIFEST = BACKUP_DATA_DIR + '/manifest.json'
-/** Uncompressed tar bound before gzip; the published archive stays within MAX_BACKUP_BYTES. */
+/** Uncompressed tar bound before compression; the published archive stays within MAX_BACKUP_BYTES. */
 export const MAX_BACKUP_TAR_BYTES = 16 * 1024 * 1024 * 1024
 /** A saved zone is small JSON; larger means it is not ours. */
 export const MAX_BACKUP_ZONE_BYTES = 1024 * 1024
 const MAX_LISTING_BYTES = 32 * 1024 * 1024
+/** Compressor argv per codec, staged tar on stdin; zstd level 3 on one thread is measured in docs/decisions/2026-11-06-zstd-backups.md. */
+export const BACKUP_COMPRESSOR: Readonly<Record<BackupCompression, readonly string[]>> = {
+  gzip: ['/usr/bin/gzip', '-c', '-n', '-6'],
+  zstd: [ZSTD, '-q', '-c', '-3', '--check', '--single-thread'],
+}
 const DATABASE = /^[a-z][a-z0-9]{0,15}_[a-z0-9_]{1,47}$/
 const MEMBER = /^\.xpanel-backup-data\/(?:(databases)\/([a-z][a-z0-9]{0,15}_[a-z0-9_]{1,47})\.sql|(dns)\/([a-z0-9.-]{1,253})\.json)$/
 
@@ -95,16 +101,16 @@ const ensureRootDirectory = async (path: string): Promise<void> => {
 const commandFailed = (what: string, stderr: string): never => fail('CONFIG_TEST_FAILED', `${what} failed: ${stderr.trim().slice(0, 500)}`, { stateChanged: false })
 const stampOf = (date: Date): string => date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
 
-/** Compresses a staged tar at low priority and links the complete file at `destination`, never over an existing one. */
-const publish = async (run: BackupCommandRunner, tarPath: string, stage: string, destination: string): Promise<number> => {
-  const gzipPath = posix.join(stage, 'archive.tar.gz')
-  const compressed = await run({ argv: ['/usr/bin/gzip', '-c', '-n', '-6'], stdinPath: tarPath, stdoutPath: gzipPath, maxStdoutBytes: MAX_BACKUP_BYTES })
+/** Compresses a staged tar at low priority with the codec of `compression` and links the complete file at `destination`, never over an existing one. */
+const publish = async (run: BackupCommandRunner, tarPath: string, stage: string, destination: string, compression: BackupCompression): Promise<number> => {
+  const archivePath = posix.join(stage, 'archive' + BACKUP_CODECS[compression].suffix)
+  const compressed = await run({ argv: BACKUP_COMPRESSOR[compression], stdinPath: tarPath, stdoutPath: archivePath, maxStdoutBytes: MAX_BACKUP_BYTES })
   if (compressed.killed === 'output limit') fail('LIMIT_EXCEEDED', 'the backup archive is larger than 2 GiB')
-  if (!compressed.ok) commandFailed('archive compression', compressed.killed ?? compressed.stderr)
+  if (!compressed.ok) await backupReadFailed(destination, () => commandFailed('archive compression', compressed.killed ?? compressed.stderr))
   await rm(tarPath, { force: true })
   await withPinnedHostTargetParent(destination, async pinned => {
     // link is exclusive: an existing archive is never overwritten, and only the complete file publishes.
-    await link(gzipPath, pinned)
+    await link(archivePath, pinned)
     if (process.platform === 'linux') { const parent = await open(dirname(pinned), constants.O_RDONLY | constants.O_DIRECTORY); try { await parent.sync() } finally { await parent.close() } }
   })
   return compressed.stdoutBytes
@@ -117,16 +123,16 @@ const withStage = async <T>(directory: string, task: (stage: string) => Promise<
 
 /**
  * Builds one archive at low priority without staging anything in the account home: tar runs as the account and streams to a
- * root-only build directory, dumps and zones are appended by root, gzip compresses, and only the complete file is linked.
+ * root-only build directory, dumps and zones are appended by root, gzip or zstd compresses, and only the complete file is linked.
  */
-export async function buildServerBackupArchive(input: { root?: string; account: BackupAccountTarget; databases: readonly string[]; zones: readonly { name: string; content: string }[]; excludeMail: boolean; now?: Date; nonce?: string; deps: BackupArchiveBuildDeps }): Promise<BuiltBackupArchive> {
+export async function buildServerBackupArchive(input: { root?: string; account: BackupAccountTarget; databases: readonly string[]; zones: readonly { name: string; content: string }[]; excludeMail: boolean; compression: BackupCompression; now?: Date; nonce?: string; deps: BackupArchiveBuildDeps }): Promise<BuiltBackupArchive> {
   const { account, deps } = input
   assertBackupAccountTarget(account)
   const databases = [...new Set(input.databases)].sort(), zones = [...input.zones].sort((a, b) => a.name < b.name ? -1 : 1)
   if (databases.some(name => !DATABASE.test(name) || !name.startsWith(account.username + '_'))) fail('VALIDATION', 'a backup database does not belong to the account')
   if (zones.some(zone => !isBackupZoneName(zone.name) || Buffer.byteLength(zone.content) > MAX_BACKUP_ZONE_BYTES) || new Set(zones.map(zone => zone.name)).size !== zones.length) fail('VALIDATION', 'a backup zone is invalid')
   const root = input.root ?? DEFAULT_BACKUP_DIR, directory = posix.join(root, account.username)
-  const file = backupFileName(account.username, stampOf(input.now ?? new Date()), input.nonce)
+  const file = backupFileName(account.username, stampOf(input.now ?? new Date()), input.compression, input.nonce)
   await ensureRootDirectory(root); await ensureRootDirectory(directory)
   return withStage(directory, async stage => {
     const tarPath = posix.join(stage, 'home.tar')
@@ -148,18 +154,18 @@ export async function buildServerBackupArchive(input: { root?: string; account: 
       const appended = await deps.run({ argv: ['/usr/bin/tar', '--append', `--file=${tarPath}`, `--directory=${extra}`, '--owner=0', '--group=0', '--numeric-owner', '--', BACKUP_DATA_DIR], maxStdoutBytes: 64 * 1024 })
       if (!appended.ok) commandFailed('backup data archive', appended.killed ?? appended.stderr)
     }
-    const bytes = await publish(deps.run, tarPath, stage, posix.join(directory, file))
+    const bytes = await publish(deps.run, tarPath, stage, posix.join(directory, file), input.compression)
     return { file, bytes, databases, zones: zones.map(zone => zone.name) }
   })
 }
 
-export const controlSnapshotName = (date: Date, nonce?: string): string => `xpanel-control-${stampOf(date)}${nonce ? '-' + nonce : ''}.tar.gz`
+export const controlSnapshotName = (date: Date, compression: BackupCompression, nonce?: string): string => `xpanel-control-${stampOf(date)}${nonce ? '-' + nonce : ''}${BACKUP_CODECS[compression].suffix}`
 /**
  * Once-per-run snapshot of the control state for disaster recovery and upgrade rollback: the desired-state directory plus a
  * consistent copy of the index database (`control.db`), into `<root>/_control/`. It is never restored per account.
  */
-export async function buildControlSnapshot(input: { root?: string; stateDir: string; copyDatabase(outputPath: string): Promise<void>; run: BackupCommandRunner; now?: Date }): Promise<{ file: string; bytes: number }> {
-  const root = input.root ?? DEFAULT_BACKUP_DIR, directory = posix.join(root, BACKUP_CONTROL), file = controlSnapshotName(input.now ?? new Date())
+export async function buildControlSnapshot(input: { root?: string; stateDir: string; copyDatabase(outputPath: string): Promise<void>; run: BackupCommandRunner; compression: BackupCompression; now?: Date }): Promise<{ file: string; bytes: number }> {
+  const root = input.root ?? DEFAULT_BACKUP_DIR, directory = posix.join(root, BACKUP_CONTROL), file = controlSnapshotName(input.now ?? new Date(), input.compression)
   await ensureRootDirectory(root); await ensureRootDirectory(directory)
   return withStage(directory, async stage => {
     const tarPath = posix.join(stage, 'control.tar'), extra = posix.join(stage, 'extra')
@@ -169,22 +175,22 @@ export async function buildControlSnapshot(input: { root?: string; stateDir: str
     await input.copyDatabase(posix.join(extra, 'control.db'))
     const appended = await input.run({ argv: ['/usr/bin/tar', '--append', `--file=${tarPath}`, `--directory=${extra}`, '--owner=0', '--group=0', '--numeric-owner', '--', 'control.db'], maxStdoutBytes: 64 * 1024 })
     if (!appended.ok) commandFailed('control database archive', appended.killed ?? appended.stderr)
-    return { file, bytes: await publish(input.run, tarPath, stage, posix.join(directory, file)) }
+    return { file, bytes: await publish(input.run, tarPath, stage, posix.join(directory, file), input.compression) }
   })
 }
 
 const listArchive = async (run: BackupCommandRunner, path: string): Promise<string> => {
-  const listed = await run({ argv: ['/usr/bin/tar', '--list', '--gzip', `--file=${path}`], maxStdoutBytes: MAX_LISTING_BYTES })
-  return listed.ok ? listed.stdout : fail('PRECONDITION_FAILED', 'the backup archive failed its integrity read', { stateChanged: false })
+  const listed = await run({ argv: ['/usr/bin/tar', '--list', backupCodecOf(path).tar, `--file=${path}`], maxStdoutBytes: MAX_LISTING_BYTES })
+  return listed.ok ? listed.stdout : backupReadFailed(path, () => fail('PRECONDITION_FAILED', 'the backup archive failed its integrity read', { stateChanged: false }))
 }
-/** Full low-priority read of the gzip stream (CRC and length) and of every tar header; returns what the archive holds. */
+/** Full low-priority read of the compressed stream (gzip CRC and length, or every zstd block and the frame checksum) and of every tar header; returns what the archive holds. */
 export async function listServerBackupArchive(input: { root?: string; account: BackupAccountTarget; file: string; run: BackupCommandRunner }): Promise<BackupArchiveListing> {
   assertBackupAccountTarget(input.account)
   return readBackupArchiveListing(await listArchive(input.run, posix.join(input.root ?? DEFAULT_BACKUP_DIR, input.account.username, input.file)))
 }
 /** The same integrity read for a control snapshot: it must hold the database copy and stay relative. */
 export async function listControlSnapshot(input: { root?: string; file: string; run: BackupCommandRunner }): Promise<{ members: number }> {
-  if (!/^xpanel-control-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.gz$/.test(input.file)) fail('VALIDATION', 'invalid control snapshot name')
+  if (!/^xpanel-control-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.(?:gz|zst)$/.test(input.file)) fail('VALIDATION', 'invalid control snapshot name')
   const lines = (await listArchive(input.run, posix.join(input.root ?? DEFAULT_BACKUP_DIR, BACKUP_CONTROL, input.file))).split('\n').filter(Boolean)
   if (lines.some(line => line.startsWith('/') || line.split('/').includes('..')) || !lines.includes('control.db')) fail('VALIDATION', 'the control snapshot is incomplete', { stateChanged: false })
   return { members: lines.length }
@@ -194,7 +200,7 @@ export async function listControlSnapshot(input: { root?: string; file: string; 
 export async function extractBackupPart(input: { root?: string; account: BackupAccountTarget; file: string; part: BackupPart; name: string; expected: BackupPartDigest; outputPath: string; run: BackupCommandRunner }): Promise<BackupPartDigest> {
   if (input.expected.name !== input.name) return fail('NOT_FOUND', 'the part is not in this backup', { stateChanged: false })
   const path = posix.join(input.root ?? DEFAULT_BACKUP_DIR, input.account.username, input.file)
-  const extracted = await input.run({ argv: ['/usr/bin/tar', '--extract', '--gzip', '--to-stdout', '--occurrence=1', `--file=${path}`, '--', backupPartMember(input.part, input.name)], stdoutPath: input.outputPath, maxStdoutBytes: input.expected.bytes })
-  if (!extracted.ok || extracted.stdoutBytes !== input.expected.bytes) return fail('PRECONDITION_FAILED', 'the backup part could not be read from the archive', { stateChanged: false })
+  const extracted = await input.run({ argv: ['/usr/bin/tar', '--extract', backupCodecOf(path).tar, '--to-stdout', '--occurrence=1', `--file=${path}`, '--', backupPartMember(input.part, input.name)], stdoutPath: input.outputPath, maxStdoutBytes: input.expected.bytes })
+  if (!extracted.ok || extracted.stdoutBytes !== input.expected.bytes) return backupReadFailed(path, () => fail('PRECONDITION_FAILED', 'the backup part could not be read from the archive', { stateChanged: false }))
   return input.expected
 }

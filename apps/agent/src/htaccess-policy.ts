@@ -8,6 +8,10 @@ export interface HtaccessPhpPlan { content: string; settings: Record<string, str
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069\ufeff]/
 const DIRECTIVES = new Set(['rewriteengine', 'rewritebase', 'rewritecond', 'rewriterule', 'redirect', 'redirectmatch', 'errordocument', 'directoryindex', 'options', 'header', 'requestheader', 'expiresactive', 'expiresdefault', 'expiresbytype', 'addtype', 'addcharset', 'adddefaultcharset', 'addoutputfilterbytype', 'require', 'order', 'allow', 'deny', 'defaulttype', 'fileetag'])
 const SECTIONS = new Set(['ifmodule', 'files', 'filesmatch'])
+/** The only lines of the agent-written directory privacy block; Auth* stays refused everywhere else. */
+const PRIVACY_MARKERS = ['# BEGIN xPanel directory-privacy', '# END xPanel directory-privacy'] as const
+const PRIVACY_LINES: readonly RegExp[] = [/^AuthType Basic$/, /^AuthName "[^"\\\u0000-\u001f\u007f]{1,128}"$/,
+  /^AuthUserFile "\/home[0-9]{0,2}\/[a-z][a-z0-9]{0,15}\/\.htpasswds(?:\/(?!\.\.?\/)[A-Za-z0-9._-]+)+\/passwd"$/, /^Require valid-user$/]
 
 /** Parse words without evaluating Apache configuration variables or expressions. */
 function words(line: string): string[] {
@@ -36,13 +40,15 @@ export function inspectHtaccess(content: unknown): HtaccessPolicy {
   if (physical.length > 4096) return fail('LIMIT_EXCEEDED', '.htaccess content exceeds 4096 lines', { stateChanged: false })
   const issue = (line: number, code: string, message: string): void => { issues.push({ line, code, message }) }
   if (CONTROL.test(content)) issue(1, 'unsafe_text', 'Control and bidirectional override characters are not allowed.')
-  let logical = '', start = 1
+  let logical = '', start = 1, privacy = false
   for (let index = 0; index < physical.length; index++) {
     const raw = physical[index]!
     if (!logical) start = index + 1
     logical += raw.endsWith('\\') ? raw.slice(0, -1) : raw
     if (raw.endsWith('\\')) continue
     const line = logical.trim(); logical = ''
+    if (line === PRIVACY_MARKERS[0] || line === PRIVACY_MARKERS[1]) { privacy = line === PRIVACY_MARKERS[0]; continue }
+    if (privacy) { if (!PRIVACY_LINES.some(pattern => pattern.test(line))) issue(start, 'directory_privacy', 'The directory privacy block may hold only its AuthType, AuthName, AuthUserFile and Require lines.'); continue }
     if (!line || line.startsWith('#')) continue
     let tokens: string[]
     try { tokens = words(line) } catch { issue(start, 'quote', 'An Apache argument has an unterminated quote.'); continue }

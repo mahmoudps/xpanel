@@ -70,3 +70,47 @@ describe('confirmed native service restart', () => {
     const send = vi.fn<Request>(); boot(send, vi.fn(), 'data-capability-unavailable="true"'); await tick(); expect(send).not.toHaveBeenCalled(); expect(button()).toBeNull()
   })
 })
+
+describe('PHP-FPM version rows', { tags: ['unit'] }, () => {
+  const fpm = (version: string, masters: number, running: number, failed: number) => ({
+    id: 'php-fpm-' + version.replace('.', ''), label: 'PHP-FPM ' + version, unit: null, fpm: { version, masters, running, failed },
+    state: masters > 0 && running === masters ? 'active' : failed > 0 ? 'failed' : 'inactive',
+  })
+  const versions = [fpm('8.2', 3, 2, 1), fpm('8.3', 2, 2, 0), fpm('8.4', 0, 0, 0), fpm('8.1', 2, 1, 0)]
+  const row = (id: string) => document.querySelector<HTMLElement>(`[data-service-key="${id}"]`)!
+  const slot = (id: string, name: string) => row(id).querySelector(`[data-xp-slot="${name}"]`)?.textContent
+
+  it('shows each installed version with its master counts and restarts only versions that have masters', async () => {
+    const send = vi.fn<Request>().mockResolvedValue({ services: [service, ...versions] }); boot(send); await tick()
+    expect(['php-fpm-82', 'php-fpm-83', 'php-fpm-84', 'php-fpm-81'].map(id => slot(id, 'state'))).toEqual(['Partly failed: 1 of 3 masters failed', 'Running: 2 of 2 masters', 'No account masters', 'Stopped: 1 of 2 masters'])
+    expect(slot('php-fpm-83', 'unit')).toBe('xpanel-php-fpm-*-8.3.service')
+    expect(slot('php-fpm-83', 'version')).toBe('8.3')
+    expect(slot('php-fpm-83', 'role')).toBe('PHP pools: 2 account masters, each in its slice')
+    expect(slot('php-fpm-84', 'role')).toBe('No account uses this PHP version')
+    expect(row('php-fpm-84').dataset.serviceArea).toBe('web')
+    expect([...document.querySelectorAll<HTMLButtonElement>('button[data-service-id]')].map(item => item.dataset.serviceId)).toEqual(['apache', 'php-fpm-82', 'php-fpm-83', 'php-fpm-81'])
+  })
+
+  it('confirms the version restart by master count and verifies the read-back by id', async () => {
+    const send = vi.fn<Request>().mockResolvedValueOnce({ services: versions }).mockResolvedValueOnce({ service: versions[1] }).mockResolvedValueOnce({ services: versions })
+    const confirm = boot(send); await tick()
+    row('php-fpm-83').querySelector<HTMLButtonElement>('button[data-service-id]')!.click(); await tick()
+    expect(confirm.mock.calls[0]![0]).toMatchObject({ body: 'Restart all 2 PHP-FPM 8.3 account masters? PHP requests in progress fail.' })
+    expect(send.mock.calls[1]).toEqual(['POST', '/api/server/services/php-fpm-83/restart', {}])
+    expect(status().dataset.state).toBe('active')
+  })
+
+  it('does not claim a restart while any master of the version is still down', async () => {
+    const send = vi.fn<Request>().mockResolvedValueOnce({ services: versions }).mockResolvedValueOnce({ service: versions[0] })
+    boot(send); await tick()
+    row('php-fpm-82').querySelector<HTMLButtonElement>('button[data-service-id]')!.click(); await tick()
+    expect(status().dataset.state).toBe('uncertain')
+  })
+
+  it.each([
+    { ...fpm('8.3', 2, 1, 0), state: 'active' }, { ...fpm('8.3', 1, 1, 1) }, { ...fpm('8.3', 1, 1, 0), id: 'php-fpm-84' }, { ...fpm('8.3', 1, 1, 0), unit: 'xpanel-php-fpm-alice-8.3.service' },
+  ])('refuses a version row whose counts, id or unit disagree: %j', async bad => {
+    const send = vi.fn<Request>().mockResolvedValue({ services: [bad] }); boot(send); await tick()
+    expect(status().dataset.state).toBe('failed'); expect(button()).toBeNull()
+  })
+})

@@ -5,15 +5,15 @@ import { archiveCreatedAt, BACKUP_ARCHIVE_NAME } from './backup-file-restore-req
 export const BACKUP_RUN_LIMITS = { runs: 30, entries: 2000, recoveries: 30, restores: 30, restoreItems: 20, retention: 50, listed: 10_000, detail: 500 } as const
 /** Pseudo-account of the once-per-run control-state snapshot; never a username (usernames start with a letter). */
 export const BACKUP_CONTROL = '_control'
-const CONTROL_ARCHIVE = /^xpanel-control-([0-9]{8}T[0-9]{6}Z)(?:-[a-f0-9]{12})?\.tar\.gz$/
+const CONTROL_ARCHIVE = /^xpanel-control-([0-9]{8}T[0-9]{6}Z)(?:-[a-f0-9]{12})?\.tar\.(?:gz|zst)$/
 export type BackupRunEntryOutcome = 'verified' | 'failed' | 'unknown'
 export const BACKUP_RUN_REASONS = ['backup_failed', 'integrity_failed', 'destination_inactive', 'transport_unavailable', 'upload_unknown', 'readback_mismatch', 'interrupted'] as const
 export type BackupRunReason = typeof BACKUP_RUN_REASONS[number]
 export interface BackupRunEntry { username: string; destinationId: string; file: string | null; bytes: number | null; sha256: string | null; outcome: BackupRunEntryOutcome; reason: BackupRunReason | null }
 export interface BackupRetentionOutcome { destinationId: string; deleted: number; outcome: BackupRunEntryOutcome }
 /**
- * The local archive of one account (or the control snapshot) in a run: built, then fully read back (gzip CRC and every tar
- * header) before any upload. `detail` keeps the failing command's message, without control characters, for the run log.
+ * The local archive of one account (or the control snapshot) in a run: built, then fully read back (gzip CRC or zstd frame
+ * checksum, and every tar header) before any upload. `detail` keeps the failing command's message, without control characters, for the run log.
  */
 export interface BackupRunArchive { username: string; file: string | null; bytes: number | null; sha256: string | null; databases: string[]; zones: string[]; integrity: 'verified' | 'failed'; reason: 'backup_failed' | 'integrity_failed' | null; detail: string | null }
 export interface BackupRun {

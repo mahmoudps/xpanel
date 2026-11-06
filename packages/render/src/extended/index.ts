@@ -691,77 +691,68 @@ const assertSafeRelativeSubpath = (what: string, relPath: string): string => {
   return s
 }
 
+/** cPanel layout: the password file of `<dir>` lives at `~/.htpasswds/<dir>/passwd`, outside every document root. */
+export const HTPASSWDS_DIR = '.htpasswds'
+export const DIRECTORY_PRIVACY_MAX_USERS = 100
+export const HTPASSWD_USERNAME = /^[A-Za-z0-9._-]{1,64}$/
+// Hashes Apache verifies: bcrypt and apr1 natively, SHA-256/512-crypt and DES through crypt(3) on Linux, {SHA}.
+const HTPASSWD_HASH = /^(?:\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}|\$[56]\$(?:rounds=[0-9]{1,9}\$)?[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{43,86}|\$apr1\$[./A-Za-z0-9]{1,8}\$[./A-Za-z0-9]{22}|\{SHA\}[A-Za-z0-9+/]{27}=|[./A-Za-z0-9]{13})$/
+export interface HtpasswdEntry { username: string; passwordHash: string }
+export const isHtpasswdHash = (value: unknown): value is string => typeof value === 'string' && HTPASSWD_HASH.test(value)
+
+/** Account-relative directory: canonical segments, never hidden at the top (keeps `.htpasswds` and dot folders out). */
+export const assertDirectoryPrivacyPath = (relDir: unknown): string => {
+  const rel = assertString('protected directory', relDir, 512)
+  if (rel !== assertSafeRelativeSubpath('protected directory', rel) || rel.startsWith('.')) {
+    return invalid('protected directory', relDir, 'must be a canonical folder path inside the account home')
+  }
+  return rel
+}
+
+/** Strict `user:hash` lines; any other line makes the file unmanageable (null) rather than reinterpreted. */
+export const parseHtpasswd = (content: string): HtpasswdEntry[] | null => {
+  const entries: HtpasswdEntry[] = []
+  const lines = content.split('\n')
+  if (lines.at(-1) === '') lines.pop()
+  for (const line of lines) {
+    const split = line.indexOf(':'), username = line.slice(0, split), passwordHash = line.slice(split + 1)
+    if (split < 1 || !HTPASSWD_USERNAME.test(username) || !isHtpasswdHash(passwordHash) || entries.some(entry => entry.username === username)) return null
+    entries.push({ username, passwordHash })
+  }
+  return entries
+}
+
 /**
- * Renders `.htpasswd` file and corresponding Nginx and Apache basic auth snippets
- * for directory privacy protection.
+ * One protected directory, as cPanel lays it out: the password file and the `.htaccess` block body
+ * (AuthType Basic, AuthName, AuthUserFile, Require valid-user). A disabled directory has no block.
  */
 export const renderDirectoryPrivacy = (
   account: Pick<Account, 'username' | 'home'>,
   relDir: string,
-  authTitle: string,
-  users: readonly { username: string; passwordHash: string }[],
-): { htpasswdFile: RenderedFile; nginxSnippet: string; apacheSnippet: string } => {
-  const username = assertUsername(account?.username)
+  config: { enabled: boolean; authName: string; users: readonly HtpasswdEntry[] },
+): { passwdPath: string; passwd: string; htaccessBody: string[] } => {
+  assertUsername(account?.username)
   const home = assertAbsPath('account home', account?.home)
-  const cleanRel = assertSafeRelativeSubpath('relDir', relDir)
-  const title = assertLine('authTitle', authTitle, 128)
-  if (/["\\]/.test(title) || title.trim().length === 0) {
-    return invalid('authTitle', authTitle, 'must be a non-empty title without quotes or backslashes')
+  const rel = assertDirectoryPrivacyPath(relDir)
+  if (typeof config?.enabled !== 'boolean') return invalid('enabled', config?.enabled, 'must be a boolean')
+  const title = assertLine('authName', config.authName, 128)
+  if (/["\\]/.test(title) || title.trim() !== title || (config.enabled && !title)) {
+    return invalid('authName', config.authName, 'must be a trimmed name without quotes or backslashes')
   }
-  if (!Array.isArray(users) || users.length === 0) {
-    return invalid('users', users, 'requires at least one authorized user')
+  if (!Array.isArray(config.users) || config.users.length > DIRECTORY_PRIVACY_MAX_USERS) return invalid('users', config.users, `must be a list of at most ${DIRECTORY_PRIVACY_MAX_USERS}`)
+  const seen = new Set<string>()
+  const lines = config.users.map((user) => {
+    if (typeof user?.username !== 'string' || !HTPASSWD_USERNAME.test(user.username) || seen.has(user.username)) return invalid('htpasswd username', user?.username, 'must be unique and contain only [A-Za-z0-9._-]')
+    if (!isHtpasswdHash(user.passwordHash)) return invalid('htpasswd passwordHash', '[redacted]', 'must be an Apache-supported password hash')
+    seen.add(user.username)
+    return `${user.username}:${user.passwordHash}`
+  })
+  const passwdPath = `${HTPASSWDS_DIR}/${rel}/passwd`
+  return {
+    passwdPath,
+    passwd: lines.map((line) => line + '\n').join(''),
+    htaccessBody: config.enabled ? ['AuthType Basic', `AuthName "${title}"`, `AuthUserFile "${home}/${passwdPath}"`, 'Require valid-user'] : [],
   }
-
-  const seenUsers = new Set<string>()
-  const htpasswdLines: string[] = []
-  for (const u of users) {
-    const user = assertString('htpasswd username', u?.username, 64)
-    if (!/^[A-Za-z0-9._-]+$/.test(user)) {
-      return invalid('htpasswd username', user, 'must contain only [A-Za-z0-9._-]')
-    }
-    if (seenUsers.has(user)) {
-      return invalid('htpasswd username', user, 'duplicate username')
-    }
-    seenUsers.add(user)
-
-    const hash = assertLine('htpasswd passwordHash', u?.passwordHash, 256)
-    if (!/^(\$2[aby]\$|\$apr1\$|\$6\$|\{SHA\})[^\s:]+$/.test(hash)) {
-      return invalid('htpasswd passwordHash', '[redacted]', 'must be a valid bcrypt, apr1, or sha512 crypt hash')
-    }
-    htpasswdLines.push(`${user}:${hash}`)
-  }
-
-  htpasswdLines.sort()
-  const htpasswdPath = `${home}/.htpasswds/${cleanRel}/passwd`
-  const targetDir = `${home}/${cleanRel}`
-
-  const htpasswdFile: RenderedFile = {
-    path: htpasswdPath,
-    content: `${htpasswdLines.join('\n')}\n`,
-    mode: 0o640,
-    owner: username,
-    group: 'www-data',
-  }
-
-  const nginxSnippet = [
-    `location ^~ /${cleanRel.replace(/^public_html\/?/, '')} {`,
-    `  auth_basic "${title}";`,
-    `  auth_basic_user_file ${htpasswdPath};`,
-    '}',
-    '',
-  ].join('\n')
-
-  const apacheSnippet = [
-    `<Directory "${targetDir}">`,
-    '  AuthType Basic',
-    `  AuthName "${title}"`,
-    `  AuthUserFile "${htpasswdPath}"`,
-    '  Require valid-user',
-    '</Directory>',
-    '',
-  ].join('\n')
-
-  return { htpasswdFile, nginxSnippet, apacheSnippet }
 }
 
 /**

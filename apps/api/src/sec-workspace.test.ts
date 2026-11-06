@@ -32,6 +32,24 @@ function harness(overrides: Partial<SecWorkspaceHelpers> = {}, caller = ROOT) {
 const access = (xwhm: { cidr: string; note: string }[]) => ({ listeners: { xpanel: [], xwhm, xmail: [] } })
 
 describe('sec server workspaces', () => {
+  it('saves Compiler Access for existing accounts only, lists grantable accounts and projects the host read strictly', async () => {
+    const jailed = { id: '44444444-4444-4444-8444-444444444444', username: 'bob', status: 'active', planId: 'j', shell: 'jailed' }
+    const store = { listAccounts: async () => [{ ...ACCOUNT, shell: 'none' }, jailed], listPlans: async () => [{ id: 'p', shell: 'jailed' }, { id: 'j', shell: 'jailed' }] }
+    const observation = { observedAt: '2026-11-06T00:00:00.000Z', family: 'debian', state: 'drift', policy: null, expected: null, group: { exists: false, gid: null, members: [] },
+      commands: [{ name: 'gcc', present: true, restricted: false, mode: 0o755 }], hook: { mechanism: 'dpkg-post-invoke', available: true, installed: false } }
+    const h = harness({ callHost: vi.fn(async () => observation) })
+    Object.assign(h.helpers.store, store)
+    const view = await (await h.send('/api/server/sec/compiler-access'))!.json()
+    expect(view).toMatchObject({ state: 'default', policy: { restricted: false, accountIds: [] }, observation: { state: 'drift', commands: [{ name: 'gcc', restricted: false }] }, reason: null,
+      accounts: [{ id: ACCOUNT.id, username: 'alice', jailedShell: false }, { id: jailed.id, username: 'bob', jailedShell: true }] })
+    await expect(h.send('/api/server/sec/compiler-access', 'PUT', { policy: { restricted: true, accountIds: ['55555555-5555-4555-8555-555555555555'] }, expectedRevision: view.revision })).rejects.toMatchObject({ code: 'VALIDATION' })
+    const saved = await (await h.send('/api/server/sec/compiler-access', 'PUT', { policy: { restricted: true, accountIds: [jailed.id, ACCOUNT.id] }, expectedRevision: view.revision }))!.json()
+    expect(saved).toMatchObject({ state: 'saved', policy: { restricted: true, accountIds: [ACCOUNT.id, jailed.id] }, reconcile: 'requested' })
+    expect(h.helpers.triggerReconcile).toHaveBeenCalled()
+    const forged = harness({ callHost: vi.fn(async () => ({ ...observation, commands: [{ name: 'bash', present: true, restricted: false, mode: 0o755 }] })) })
+    Object.assign(forged.helpers.store, store)
+    expect(await (await forged.send('/api/server/sec/compiler-access'))!.json()).toMatchObject({ observation: null, reason: 'observation_unverified' })
+  })
   it('reads defaults with the strict host observation and refuses selectors, methods and non-root callers', async () => {
     const h = harness()
     const view = await (await h.send('/api/server/sec/waf'))!.json()

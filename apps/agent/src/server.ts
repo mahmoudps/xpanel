@@ -23,6 +23,7 @@ import { JailedFileManager } from './file-manager.ts'
 import { HtaccessWorkspace, deriveHtaccessTarget } from './htaccess-workspace.ts'
 import { parseHtaccessRequest } from './htaccess-contract.ts'
 import { createNativeHtaccessValidator, probeHtaccessTarget } from './htaccess-native.ts'
+import { parseDirectoryPrivacyRequest, runDirectoryPrivacyRequest } from './directory-privacy.ts'
 import { AcmeCertificateServiceAdapter } from './services/acme.ts'
 import { createHttp01AcmeClient } from './services/acme-client.ts'
 import { computeLeafFingerprintSha256 } from './services/acme.ts'
@@ -153,7 +154,7 @@ import {
   assertValidKernelPeerCredentials,
   bindVerifiedRequestPeer,
   DEFAULT_AGENT_SOCKET_BACKLOG,
-  AGENT_ROUTE_TIMEOUT_MS,
+  agentRouteTimeoutMs,
   DEFAULT_AGENT_SOCKET_IDLE_TIMEOUT_MS,
   getVerifiedRequestPeer,
   loadNativePeerIdentityAddon,
@@ -404,6 +405,8 @@ const FILE_AUDIT_ACTIONS: Readonly<Record<string, string>> = {
   chmod: 'file.chmod',
   move: 'file.move',
   copy: 'file.copy',
+  compress: 'file.compress',
+  extract: 'file.extract',
   trash: 'file.trash',
   restore: 'file.restore',
   'empty-trash': 'file.empty_trash',
@@ -675,7 +678,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       list: ['path', 'showHidden'], read: ['path'], write: ['path', 'content', 'overwrite', 'mode'],
       'put-bytes': ['path', 'contentBase64', 'overwrite', 'mode'], 'get-bytes': ['path'],
       mkdir: ['path', 'mode'], chmod: ['path', 'mode'], move: ['path', 'destination'], copy: ['path', 'destination'], trash: ['path'],
-      'list-trash': [], restore: ['trashId', 'overwrite'], 'empty-trash': ['olderThanDays'],
+      compress: ['path', 'destination'], extract: ['path', 'destination'], 'list-trash': [], restore: ['trashId', 'overwrite'], 'empty-trash': ['olderThanDays'],
       'purge-trash': ['trashId', 'originalPath', 'deletedAt'],
     }
     if (typeof body.op !== 'string' || !Object.hasOwn(fields, body.op)) fail('VALIDATION', 'unsupported file operation')
@@ -1360,6 +1363,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         os: { family: deps.os.family, nginxConf: (secProfile?.paths.nginxRoot ?? '/etc/nginx') + '/nginx.conf', powerdnsUnit: secProfile?.services.powerdns ?? 'pdns' },
         rootDir: deps.store.rootDir,
         zones: async () => (await deps.store.readSnapshot()).zones.map(zone => zone.name),
+        accounts: async () => { const snapshot = await deps.store.readSnapshot(); return { accounts: snapshot.accounts, plans: snapshot.plans } },
         audit: entry => appendAudit(deps.db, { ...entry, principalId: caller.principalId }),
       })
       if (secResponse) return secResponse
@@ -1775,6 +1779,36 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         })
       }
 
+      const privacyMatch = /^\/accounts\/([a-z][a-z0-9]{0,15})\/directory-privacy$/.exec(pathname)
+      if (method === 'POST' && privacyMatch) {
+        const username = privacyMatch[1]!
+        const body = parseDirectoryPrivacyRequest(await readObjectBody(req))
+        const account = await deps.store.getAccountByUsername(username)
+        if (!account) return fail('NOT_FOUND', 'account not found', { stateChanged: false })
+        return await deps.store.withAccountLifecycleLease(account.id, async fresh => {
+          const authorize = async () => {
+            const principal = await getPrincipal(deps.db, caller.principalId)
+            if (!principal || principal.disabled || fresh.username !== username || principal.kind === 'user' && (principal.accountId !== fresh.id || principal.username !== fresh.username)) return fail('FORBIDDEN', 'the current account caller is unavailable', { stateChanged: false })
+            await assertAccountCaller({ principalId: principal.id, actor: principal.username, role: principal.kind,
+              accountId: principal.accountId, resellerId: principal.kind === 'reseller' ? principal.id : null }, fresh, 'directory-privacy')
+            const plan = await deps.store.getPlan(fresh.planId), features = plan ? await deps.store.getFeatureList(plan.featureListId) : null
+            if (!plan || !features || features.disabled.includes('directory-privacy')) return fail('FORBIDDEN', 'Directory Privacy is unavailable in the current plan', { stateChanged: false })
+            return plan
+          }
+          const plan = await authorize(), settings = await deps.store.getServerSettings()
+          const result = await runDirectoryPrivacyRequest({ account: fresh, domains: await deps.store.listDomains({ accountId: fresh.id }), settings, request: body,
+            files: new JailedFileManager(resolveAccountHome(fresh.home, fresh.username), plan.resources.diskMb, { account: fresh, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
+            authorize: async () => { await authorize() },
+            ...(settings ? { probe: (domain: string, path: string) => probeHtaccessTarget({ engine: settings.engine, backendPort: settings.backendPort, domainName: domain }, path) } : {}) })
+          if (body.op === 'save') {
+            try { await appendAudit(deps.db, { actor: caller.actor, action: 'account.directory_privacy.saved', target: 'account:' + fresh.username,
+              detail: { path: body.path, enabled: body.enabled, users: body.users.length, httpStatus: result.application.httpStatus }, outcome: 'ok' }) }
+            catch { return fail('SERVICE_UNAVAILABLE', 'the protected folder outcome and audit require inspection', { stateChanged: true, unknownOutcome: true, verificationRequired: true }) }
+          }
+          return jsonResponse(result)
+        })
+      }
+
       const accountSshResponse = await handleAccountSshRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), audit: entry => appendAudit(deps.db, entry),
         files: (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
@@ -1921,6 +1955,12 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
               break
             case 'copy':
               result = await fm.copy(body.path ?? '', body.destination ?? '')
+              break
+            case 'compress':
+              result = await fm.compress(body.path ?? '', body.destination ?? '')
+              break
+            case 'extract':
+              result = await fm.extract(body.path ?? '', body.destination ?? '')
               break
             case 'trash':
               result = await fm.moveToTrash(body.path ?? '')
@@ -2226,7 +2266,7 @@ export const listenAgentSocket = async (
           return fail('SERVICE_UNAVAILABLE', 'agent concurrent request limit exceeded')
         }
         // A request-bound host effect may stay silent until it finishes; the idle timeout must not cut it mid-effect.
-        const routeBudget = AGENT_ROUTE_TIMEOUT_MS.get((req.url ?? '').split('?')[0]!)
+        const routeBudget = agentRouteTimeoutMs((req.url ?? '').split('?')[0]!)
         if (isEventsStream) {
           req.socket.setTimeout(0)
         } else if (routeBudget !== undefined) {

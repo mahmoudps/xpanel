@@ -71,7 +71,7 @@ describe('host qualification', () => {
       files: 'failed',
     })
     const qualified = new Set(qualifyHostTools(acceptedTools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
-    expect(qualified).toEqual(new Set(['list-accounts', 'modify-account', 'password-modification', 'manage-account-suspension', 'terminate-accounts', 'add-package', 'edit-package', 'delete-package', 'feature-list-crud', 'server-settings-edit', 'mysql-databases', 'mysql-users', 'ssl-tls-status', 'reseller-center',
+    expect(qualified).toEqual(new Set(['list-accounts', 'modify-account', 'password-modification', 'manage-account-suspension', 'terminate-accounts', 'add-package', 'edit-package', 'delete-package', 'feature-list-crud', 'feature-manager', 'server-settings-edit', 'basic-server-setup', 'mysql-databases', 'mysql-users', 'ssl-tls-status', 'reseller-center',
       'panel-upgrade', 'aapanel-language-theme', 'service-ssl-certificates', 'xwhm-api-tokens', 'notification-center', 'mail-quality', 'panel-news',
       'service-config-health', 'api-shell', 'api-explorer', 'integrations-hub', 'trusted-proxies', 'backup-destinations',
       'aapanel-panel-general', 'panel-branding', 'application-locales', 'whmcs-integration',
@@ -167,6 +167,7 @@ describe('host qualification', () => {
     ['/whm/server/cron', 'systemd'], ['/whm/server/networking', 'iproute'], ['/whm/server/role', 'systemd'], ['/whm/services/dns', 'pdns'],
     ['/whm/services/ftp', 'systemd'], ['/whm/services/certificates', 'control-plane'], ['/whm/accounts/health', 'getent'], ['/whm/panel/api-tokens', 'control-plane'],
     ['/whm/panel/notifications', 'control-plane'], ['/whm/security/intrusion', 'fail2ban'], ['/whm/security/antivirus', 'clamav'], ['/whm/security/isolation', 'getent'],
+    ['/whm/monitoring/performance', 'host-info'], ['/whm/monitoring/performance', 'procps'],
   ] as const)('opens %s on a Linux host only while the %s probe passes', (route, probe) => {
     expect(routesFor(allPassed)).toContain(route)
     expect(routesFor(withProbe(probe, 'failed'))).not.toContain(route)
@@ -177,6 +178,7 @@ describe('host qualification', () => {
   it.each([
     ['/mail/tools/track-delivery', 'journal'], ['/mail/folders', 'mail'], ['/mail/tools/disk-usage', 'mail'], ['/mail/tools/connect-devices', 'mail'],
     ['/advanced/error-pages', 'files'], ['/advanced/indexes', 'apache'], ['/advanced/mime-types', 'files'], ['/security/hotlink', 'files'], ['/domains/redirects', 'apache'],
+    ['/security/ip-blocker', 'files'], ['/security/ip-blocker', 'apache'], ['/domains/site-publisher', 'files'],
   ] as const)('opens the owner page %s only while the %s probe passes', (route, probe) => {
     expect(routesFor(allPassed, owner)).toContain(route)
     expect(routesFor(withProbe(probe, 'failed'), owner)).not.toContain(route)
@@ -185,18 +187,47 @@ describe('host qualification', () => {
 
   it('keeps unimplemented pages and extra tools closed even when every probe passed', () => {
     const qualified = qualifyHostTools(acceptedTools, allPassed)
-    for (const id of ['server-software-update', 'distro-packages', 'package-db-rebuild', 'aapanel-third-party-plugin-import', 'xwhm-email-routing', 'mail-troubleshooter',
-      'db-root-password', 'db-ownership-map', 'aapanel-system-monitor', 'update-preferences', 'tweak-mail', 'account-repair', 'ip-blocker', 'apache-handlers', 'notification-channels', 'git-version-control', 'email-encryption', 'site-publisher',
+    for (const id of ['distro-packages', 'package-db-rebuild', 'aapanel-third-party-plugin-import', 'mail-troubleshooter',
+      'db-root-password', 'db-ownership-map', 'update-preferences', 'account-repair', 'apache-handlers', 'git-version-control', 'email-encryption',
       // Saved but never applied, unwired or refused on main: no host effect to prepare for.
       'directory-privacy', 'web-disk', 'account-enhancements', 'web-template-editor', 'tweak-compression', 'reseller-nameservers', 'add-ip', 'bandwidth',
       'web-stats-awstats', 'db-repair', 'configuration-cluster', 'git-deployments', 'spam-quarantine', 'app-installer', 'aapanel-firewall-switch']) {
       expect(qualified.find(tool => tool.id === id)?.status, id).toBe('researched')
     }
-    expect(routesFor(allPassed)).not.toContain('/whm/monitoring/performance')
-    expect(routesFor(allPassed, owner)).not.toContain('/security/ip-blocker')
     expect(routesFor(allPassed, owner)).not.toContain('/advanced/handlers')
     const dnsReseller: VisibilityContext = { principal: { kind: 'reseller', id: 'reseller', username: 'reseller' }, reseller: { acl: ['manage-dns'] } }
+    expect(qualified.find(tool => tool.id === 'xwhm-email-routing')?.status).toBe('verified')
     expect(routesFor(allPassed, dnsReseller)).not.toContain('/whm/email/routing')
+  })
+
+  // Each implemented effect names the binaries, units and readers its API and agent path use.
+  const IMPLEMENTED_EFFECT_PROBES: Readonly<Record<string, readonly HostProbe[]>> = {
+    'site-publisher': ['control-plane', 'files'],
+    'ip-blocker': ['control-plane', 'files', 'apache'],
+    'server-software-update': ['control-plane', 'packages', 'host-jobs'],
+    'xwhm-email-routing': ['control-plane', 'mail', 'mail-config'],
+    'tweak-mail': ['control-plane', 'mail', 'mail-config'],
+    'aapanel-system-monitor': ['control-plane', 'host-info', 'procps'],
+    'notification-channels': ['control-plane', 'mail'],
+    'restart-ssh': ['control-plane', 'systemd', 'host-jobs'],
+    'aapanel-boot-items': ['control-plane', 'systemd', 'host-jobs'],
+    'system-reboot': ['control-plane', 'systemd', 'host-jobs'],
+    'domain-htaccess': ['control-plane', 'files', 'apache'],
+    'feature-manager': ['control-plane'],
+    'basic-server-setup': ['control-plane'],
+    'zone-editor': ['control-plane', 'pdns'],
+    'php-version-selector': ['control-plane', 'apache', 'systemd'],
+    'multiphp-ini-editor': ['control-plane', 'apache', 'systemd'],
+  }
+
+  it('declares the host needs of every implemented effect without an exception', () => {
+    expect(Object.fromEntries(Object.keys(IMPLEMENTED_EFFECT_PROBES).map(id => [id, PHASE1_TOOL_PROBES[id]]))).toEqual(IMPLEMENTED_EFFECT_PROBES)
+    for (const id of Object.keys(IMPLEMENTED_EFFECT_PROBES)) {
+      // A probe list is readiness only: the shipped catalog keeps each tool researched on a fully passing host.
+      expect(qualifyHostTools(tools, allPassed).find(tool => tool.id === id)?.status, id).toBe('researched')
+      // Partial workspaces name what they leave undelivered; these two deliver their whole declared behavior.
+      if (!['restart-ssh', 'domain-htaccess'].includes(id)) expect(QUALIFIED_SCOPE[id], id).toBeDefined()
+    }
   })
 
   it('opens scoped workspaces only with their affected host evidence', () => {
@@ -209,8 +240,11 @@ describe('host qualification', () => {
     expect(routesFor(withProbe('network-counters', 'failed'))).not.toContain('/whm/monitoring/traffic')
     expect(routesFor(allPassed, owner)).toContain('/domains/dynamic-dns')
     expect(routesFor(withProbe('pdns', 'failed'), owner)).not.toContain('/domains/dynamic-dns')
-    for (const id of ['restart-ssh', 'aapanel-boot-items', 'aapanel-supervisor', 'system-reboot', 'service-watchdog']) {
+    for (const id of ['aapanel-supervisor', 'service-watchdog']) {
       expect(qualifyHostTools(acceptedTools, allPassed).find(tool => tool.id === id)?.status, id).not.toBe('verified')
+    }
+    for (const id of ['restart-ssh', 'aapanel-boot-items', 'system-reboot']) {
+      expect(qualifyHostTools(acceptedTools, withProbe('host-jobs', 'failed')).find(tool => tool.id === id)?.status, id).toBe('researched')
     }
   })
 

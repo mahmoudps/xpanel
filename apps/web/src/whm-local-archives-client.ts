@@ -32,7 +32,7 @@ function bindLocalArchives(): void {
         const names = new Set<string>()
         const rendered = raw.backups.map((value: unknown) => {
           const item = value as { file?: unknown; bytes?: unknown }
-          if (!item || typeof item.file !== 'string' || !new RegExp('^xpanel-backup-' + username + '-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\\.tar\\.gz$').test(item.file) || names.has(item.file) || !Number.isSafeInteger(item.bytes) || Number(item.bytes) < 0) throw new Error('invalid_local_archive')
+          if (!item || typeof item.file !== 'string' || !new RegExp('^xpanel-backup-' + username + '-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\\.tar\\.(?:gz|zst)$').test(item.file) || names.has(item.file) || !Number.isSafeInteger(item.bytes) || Number(item.bytes) < 0) throw new Error('invalid_local_archive')
           names.add(item.file)
           const row = cloneClientTemplate(template, 'tr', ['archive', 'bytes', 'review'])
           clientTemplateSlot(row, 'archive').textContent = item.file

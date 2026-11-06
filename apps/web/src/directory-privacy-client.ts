@@ -8,39 +8,41 @@ import type { MessageValues } from './i18n.ts'
 /**
  * Directory privacy browser controller.
  *
- * Reads and writes the account's protected-directory rules through the real
- * `/api/web-features/:username/directory-privacy` route. Password hashes are never
- * returned by the server, so every saved user requires a freshly entered password;
- * the UI states that limitation explicitly instead of silently dropping users.
- * Everything here is saved configuration only: no web-server protection is claimed.
+ * Reads the account's protected folders through `/api/web-features/:username/directory-privacy` and saves
+ * each changed folder with its own revision. The agent writes the folder's `.htaccess` block and
+ * `~/.htpasswds/<folder>/passwd`; a folder is reported as protected by the web server only when Apache
+ * answered 401 without credentials. Password hashes never reach the browser; an empty password keeps a user's.
  */
 
 export interface DirectoryPrivacyUser { username: string; password: string; existing: boolean }
 export interface DirectoryPrivacyRuleDraft { path: string; authName: string; enabled: boolean; users: DirectoryPrivacyUser[] }
+export interface DirectoryPrivacyFolder { path: string; authName: string; enabled: boolean; users: string[]; revision: string; conflict: string | null; url: { domain: string; path: string } | null; directives: string[] }
 export interface DirectoryPrivacySnapshot {
-  rules: { path: string; authName: string; enabled: boolean; users: string[] }[]
-  compiledNginx: string
-  compiledApache: string
-  updatedAt: string
+  canSave: boolean
+  folders: DirectoryPrivacyFolder[]
+  application: { status: 'read' | 'saved'; httpStatus: number | null; protectionVerified: boolean | null }
 }
+export interface DirectoryPrivacyChange { path: string; revision: string | null; body: { path: string; enabled: boolean; authName: string; users: ({ username: string } | { username: string; password: string })[] } }
 export type DirectoryPrivacyStatus = 'unavailable' | 'reading' | 'read' | 'saving' | 'saved' | 'stale' | 'failed' | 'uncertain'
 
 const unsafe = /[\u0000-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069\ufeff]/
 const USERNAME = /^[A-Za-z0-9._-]{1,64}$/
+const REVISION = /^[0-9a-f]{64}$/
 
 export function directoryPrivacyObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
+/** Account-relative folder such as public_html/private; surrounding slashes typed by a person are dropped. */
 export function directoryPrivacyPath(value: unknown): string {
   if (typeof value !== 'string' || !value.isWellFormed() || unsafe.test(value)) throw new Error('invalid_directory_path')
   const trimmed = value.trim()
   if (!trimmed || trimmed.length > 512) throw new Error('invalid_directory_path')
   const segments = trimmed.replace(/^\/+/, '').replace(/\/+$/, '').split('/')
-  if (!segments.length || segments.some(part => !part || part === '.' || part === '..' || !/^[A-Za-z0-9._-]+$/.test(part))) throw new Error('invalid_directory_path')
-  return '/' + segments.join('/')
+  if (!segments.length || segments[0]!.startsWith('.') || segments.some(part => !part || part === '.' || part === '..' || !/^[A-Za-z0-9._-]+$/.test(part))) throw new Error('invalid_directory_path')
+  return segments.join('/')
 }
 export function directoryPrivacyPrompt(value: unknown): string {
-  if (typeof value !== 'string' || !value.isWellFormed() || unsafe.test(value)) throw new Error('invalid_directory_prompt')
+  if (typeof value !== 'string' || !value.isWellFormed() || unsafe.test(value) || /["\\]/.test(value)) throw new Error('invalid_directory_prompt')
   const trimmed = value.trim()
   if (!trimmed || trimmed.length > 128) throw new Error('invalid_directory_prompt')
   return trimmed
@@ -54,78 +56,67 @@ export function directoryPrivacyPassword(value: unknown): string {
   return value
 }
 
-/** Validates the public GET reply and refuses foreign-account or malformed payloads. */
+/** Validates the agent-backed reply and refuses foreign-account or malformed payloads. */
 export function directoryPrivacyConfig(value: unknown, username: string): DirectoryPrivacySnapshot {
-  if (!directoryPrivacyObject(value) || !directoryPrivacyObject(value.config)) throw new Error('invalid_directory_privacy')
-  const config = value.config
-  if (config.accountId !== undefined && typeof config.accountId !== 'string') throw new Error('invalid_directory_privacy')
-  if (!Array.isArray(config.rules) || config.rules.length > 1000) throw new Error('invalid_directory_privacy')
-  const rules = config.rules.map(raw => {
-    if (!directoryPrivacyObject(raw)) throw new Error('invalid_directory_privacy')
-    const path = typeof raw.path === 'string' ? directoryPrivacyPath(raw.path) : (() => { throw new Error('invalid_directory_privacy') })()
-    if (typeof raw.authName !== 'string' || !raw.authName.isWellFormed() || unsafe.test(raw.authName)) throw new Error('invalid_directory_privacy')
-    const authName = raw.authName.trim() || 'Protected Area'
-    if (raw.authName.length > 128) throw new Error('invalid_directory_privacy')
-    if (typeof raw.enabled !== 'boolean') throw new Error('invalid_directory_privacy')
-    if (!Array.isArray(raw.users) || raw.users.length > 100) throw new Error('invalid_directory_privacy')
-    const users = raw.users.map(user => {
-      if (!directoryPrivacyObject(user) || typeof user.username !== 'string' || !USERNAME.test(user.username) || Object.keys(user).some(key => key !== 'username')) throw new Error('invalid_directory_privacy')
-      return user.username
-    })
-    if (new Set(users).size !== users.length) throw new Error('invalid_directory_privacy')
-    return { path, authName, enabled: raw.enabled, users }
+  if (!directoryPrivacyObject(value) || !directoryPrivacyObject(value.context) || value.context.username !== username || !directoryPrivacyObject(value.capabilities) || typeof value.capabilities.canSave !== 'boolean'
+    || !directoryPrivacyObject(value.application) || !['read', 'saved'].includes(value.application.status as string) || !Array.isArray(value.directories) || value.directories.length > 100) throw new Error('invalid_directory_privacy')
+  const application = value.application
+  const httpStatus = application.httpStatus === null || Number.isSafeInteger(application.httpStatus) ? application.httpStatus as number | null : (() => { throw new Error('invalid_directory_privacy') })()
+  const protectionVerified = application.protectionVerified === null || typeof application.protectionVerified === 'boolean' ? application.protectionVerified as boolean | null : (() => { throw new Error('invalid_directory_privacy') })()
+  const folders = value.directories.map(raw => {
+    if (!directoryPrivacyObject(raw) || typeof raw.path !== 'string' || directoryPrivacyPath(raw.path) !== raw.path || typeof raw.enabled !== 'boolean' || typeof raw.authName !== 'string' || raw.authName.length > 128 || unsafe.test(raw.authName)
+      || typeof raw.revision !== 'string' || !REVISION.test(raw.revision) || !Array.isArray(raw.users) || raw.users.length > 100 || raw.users.some(user => typeof user !== 'string' || !USERNAME.test(user)) || new Set(raw.users).size !== raw.users.length
+      || !Array.isArray(raw.directives) || raw.directives.length > 8 || raw.directives.some(line => typeof line !== 'string' || line.length > 1024 || unsafe.test(line))) throw new Error('invalid_directory_privacy')
+    const conflict = raw.conflict === null ? null : directoryPrivacyObject(raw.conflict) && typeof raw.conflict.code === 'string' && /^[a-z_]{1,40}$/.test(raw.conflict.code) ? raw.conflict.code : (() => { throw new Error('invalid_directory_privacy') })()
+    const url = raw.url === null ? null : directoryPrivacyObject(raw.url) && typeof raw.url.domain === 'string' && typeof raw.url.path === 'string' && !unsafe.test(raw.url.domain + raw.url.path) ? { domain: raw.url.domain, path: raw.url.path } : (() => { throw new Error('invalid_directory_privacy') })()
+    return { path: raw.path, authName: raw.authName, enabled: raw.enabled, users: [...raw.users as string[]], revision: raw.revision, conflict, url, directives: [...raw.directives as string[]] }
   })
-  const compiledNginx = typeof config.compiledNginx === 'string' ? config.compiledNginx : ''
-  const compiledApache = typeof config.compiledApache === 'string' ? config.compiledApache : ''
-  const updatedAt = typeof config.updatedAt === 'string' && Number.isFinite(Date.parse(config.updatedAt)) ? config.updatedAt : ''
-  void username
-  return { rules, compiledNginx, compiledApache, updatedAt }
+  return { canSave: value.capabilities.canSave, folders, application: { status: application.status as 'read' | 'saved', httpStatus, protectionVerified } }
 }
 
 /** Current-value signature used to refuse silently overwriting another writer's change. */
 export function directoryPrivacySignature(snapshot: DirectoryPrivacySnapshot): string {
-  return JSON.stringify({ rules: snapshot.rules.map(rule => ({ path: rule.path, authName: rule.authName, enabled: rule.enabled, users: [...rule.users].sort() })), updatedAt: snapshot.updatedAt })
+  return JSON.stringify(snapshot.folders.map(folder => [folder.path, folder.revision]))
 }
 
 export function directoryPrivacyDraft(snapshot: DirectoryPrivacySnapshot): DirectoryPrivacyRuleDraft[] {
-  return snapshot.rules.map(rule => ({ path: rule.path, authName: rule.authName, enabled: rule.enabled, users: rule.users.map(username => ({ username, password: '', existing: true })) }))
-}
-export function directoryPrivacyDraftKey(rule: DirectoryPrivacyRuleDraft): string {
-  const users = rule.users.map(user => user.username).sort().join(',')
-  return JSON.stringify([rule.path, rule.authName, rule.enabled, users])
-}
-export function directoryPrivacyDraftMatchesSnapshot(draft: readonly DirectoryPrivacyRuleDraft[], snapshot: DirectoryPrivacySnapshot): boolean {
-  if (draft.length !== snapshot.rules.length) return false
-  return draft.every((rule, index) => directoryPrivacyDraftKey(rule) === directoryPrivacyDraftKey({ path: snapshot.rules[index]!.path, authName: snapshot.rules[index]!.authName, enabled: snapshot.rules[index]!.enabled, users: snapshot.rules[index]!.users.map(username => ({ username, password: '', existing: true })) }))
+  return snapshot.folders.map(folder => ({ path: folder.path, authName: folder.authName, enabled: folder.enabled, users: folder.users.map(username => ({ username, password: '', existing: true })) }))
 }
 
-/** Exact server PUT body. Every kept user needs a freshly entered password. */
-export function directoryPrivacyPayload(draft: readonly DirectoryPrivacyRuleDraft[]): { rules: { path: string; authName: string; enabled: boolean; users: { username: string; password: string }[] }[] } {
-  if (!draft.length) return { rules: [] }
-  if (draft.length > 1000) throw new Error('too_many_directory_rules')
-  const seen = new Set<string>()
-  const rules = draft.map(rule => {
+/** The saved `.htaccess` directives of every protected folder, exactly as the agent read them back. */
+export function directoryPrivacyPreview(snapshot: DirectoryPrivacySnapshot): string {
+  return snapshot.folders.filter(folder => folder.directives.length).map(folder => '# ' + folder.path + '/.htaccess\n' + folder.directives.join('\n')).join('\n\n')
+}
+
+/** One PUT per changed folder; a removed folder is saved unprotected with no users. Existing users without a new password keep theirs. */
+export function directoryPrivacyChanges(draft: readonly DirectoryPrivacyRuleDraft[], snapshot: DirectoryPrivacySnapshot): DirectoryPrivacyChange[] {
+  if (draft.length > 100) throw new Error('too_many_directory_rules')
+  const seen = new Set<string>(), changes: DirectoryPrivacyChange[] = []
+  for (const rule of draft) {
     const path = directoryPrivacyPath(rule.path)
     if (seen.has(path)) throw new Error('duplicate_directory_path')
     seen.add(path)
-    const authName = directoryPrivacyPrompt(rule.authName)
-    if (typeof rule.enabled !== 'boolean') throw new Error('invalid_directory_rule')
-    if (rule.users.length > 100) throw new Error('too_many_directory_users')
+    if (typeof rule.enabled !== 'boolean' || rule.users.length > 100) throw new Error('invalid_directory_rule')
+    const authName = rule.enabled || rule.authName.trim() ? directoryPrivacyPrompt(rule.authName) : ''
     const usernames = new Set<string>()
     const users = rule.users.map(user => {
       const username = directoryPrivacyUsername(user.username)
       if (usernames.has(username)) throw new Error('duplicate_directory_user')
       usernames.add(username)
-      if (!user.password) throw new Error('password_required_for_existing_users')
-      return { username, password: directoryPrivacyPassword(user.password) }
+      if (!user.password && !user.existing) throw new Error('password_required_for_new_users')
+      return user.password ? { username, password: directoryPrivacyPassword(user.password) } : { username }
     })
-    return { path, authName, enabled: rule.enabled, users }
-  })
-  return { rules }
+    const saved = snapshot.folders.find(folder => folder.path === path)
+    const same = saved && saved.enabled === rule.enabled && saved.authName === authName && saved.users.join(',') === users.map(user => user.username).join(',') && users.every(user => !('password' in user))
+    if (!same) changes.push({ path, revision: saved?.revision ?? null, body: { path, enabled: rule.enabled, authName, users } })
+  }
+  for (const folder of snapshot.folders) if (!seen.has(folder.path)) changes.push({ path: folder.path, revision: folder.revision, body: { path: folder.path, enabled: false, authName: '', users: [] } })
+  return changes
 }
 
 function bindDirectoryPrivacy(askDialog: ((options: Record<string, unknown>) => Promise<unknown>) | undefined): void {
   const copy = (message: string, values?: MessageValues): string => xpT(message, values)
+  void askDialog
   document.querySelectorAll<HTMLElement>('[data-directory-privacy]').forEach(root => {
     if (root.dataset.directoryPrivacyBound === 'true') return
     root.dataset.directoryPrivacyBound = 'true'
@@ -142,19 +133,25 @@ function bindDirectoryPrivacy(askDialog: ((options: Record<string, unknown>) => 
     const saveButton = root.querySelector<HTMLButtonElement>('[data-directory-privacy-save]')
     const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     if (!rows || !status) return
+    const route = '/api/web-features/' + encodeURIComponent(username) + '/directory-privacy'
     const controls = (): (HTMLButtonElement | HTMLInputElement)[] => [...root.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button,input')]
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const eligible = (): boolean => root.isConnected && !root.closest(denied) && /^[a-z][a-z0-9]{0,15}$/.test(username)
     let draft: DirectoryPrivacyRuleDraft[] = []
     let baseline: DirectoryPrivacySnapshot | null = null
     let busy = false, uncertain = false
+    // controls of folders whose files need review; rebuilt on every paint
+    let conflicted = new Set<HTMLElement>()
     const setStatus = (message: string, kind: DirectoryPrivacyStatus): void => {
       status.hidden = !message
       status.dataset.state = kind
       status.setAttribute('role', kind === 'failed' || kind === 'uncertain' ? 'alert' : 'status')
       status.textContent = message
     }
-    const lock = (): void => { const blocked = busy || uncertain || !eligible(); controls().forEach(control => { control.disabled = blocked }) }
+    const lock = (): void => {
+      const blocked = busy || uncertain || !eligible() || baseline?.canSave === false
+      controls().forEach(control => { control.disabled = blocked || conflicted.has(control) })
+    }
     const ruleSlots = ['path', 'prompt', 'users', 'enabled', 'remove']
     const userSlots = ['name-label', 'username', 'password-label', 'password', 'remove']
     const clone = (name: string, tag: string, slots: readonly string[]): HTMLElement => cloneClientTemplate(clientTemplate(root, name), tag, slots)
@@ -175,6 +172,7 @@ function bindDirectoryPrivacy(askDialog: ((options: Record<string, unknown>) => 
     }
     const paint = (): void => {
       rows.textContent = ''
+      conflicted = new Set()
       draft.forEach((rule, index) => {
         const row = clone('directory-privacy-rule', 'tr', ruleSlots); row.dataset.directoryPrivacyRule = rule.path
         clientTemplateSlot(row, 'path', 'bdi').textContent = rule.path
@@ -189,7 +187,8 @@ function bindDirectoryPrivacy(askDialog: ((options: Record<string, unknown>) => 
           password.id = 'directory-privacy-user-password-' + index + '-' + userIndex
           const passwordLabel = clientTemplateSlot(line, 'password-label', 'label') as HTMLLabelElement
           passwordLabel.htmlFor = password.id; passwordLabel.textContent = copy('Password')
-          password.placeholder = copy('Password (required on save)')
+          password.placeholder = user.existing ? copy('Leave empty to keep the current password') : copy('Password (required on save)')
+          password.value = user.password
           password.dataset.directoryPrivacyUserPassword = user.username
           password.addEventListener('input', event => { user.password = (event.target as HTMLInputElement).value })
           const removeUser = clientTemplateSlot(line, 'remove', 'button') as HTMLButtonElement
@@ -203,6 +202,7 @@ function bindDirectoryPrivacy(askDialog: ((options: Record<string, unknown>) => 
         enabled.addEventListener('change', event => { rule.enabled = (event.target as HTMLInputElement).checked })
         removeRule.textContent = copy('Remove folder')
         removeRule.addEventListener('click', event => { event.stopPropagation(); if (removeRule.disabled || busy || uncertain || !eligible()) return; draft.splice(index, 1); paint(); lock() })
+        if (baseline?.folders.some(folder => folder.path === rule.path && folder.conflict)) row.querySelectorAll<HTMLElement>('button,input').forEach(control => conflicted.add(control))
         rows.appendChild(row)
       })
       if (!draft.length) {
@@ -210,18 +210,22 @@ function bindDirectoryPrivacy(askDialog: ((options: Record<string, unknown>) => 
         clientTemplateSlot(row, 'message').textContent = baseline ? copy('No protected folders are saved.') : copy('Protected folders have not been read.')
         rows.appendChild(row)
       }
-      if (previewWrap) previewWrap.hidden = draft.length === 0
+      const text = baseline ? directoryPrivacyPreview(baseline) : ''
+      if (preview) preview.textContent = text
+      if (previewWrap) previewWrap.hidden = !text
       lock()
     }
+    const readMessage = (snapshot: DirectoryPrivacySnapshot): string => !snapshot.canSave ? copy('Directory privacy needs the Apache web server and an active account. Nothing can be changed now.')
+      : snapshot.folders.some(folder => folder.conflict) ? copy('Some folders have access rules or edits this page does not manage. Review their .htaccess before changing them here.')
+        : copy('Protected folders read from the account files.')
     const read = async (): Promise<void> => {
       if (busy) return
       busy = true; lock(); setStatus(copy('Reading saved protected folders…'), 'reading')
       try {
-        const snapshot = directoryPrivacyConfig(await transport!('GET', '/api/web-features/' + encodeURIComponent(username) + '/directory-privacy'), username)
+        const snapshot = directoryPrivacyConfig(await transport!('GET', route), username)
         baseline = snapshot; draft = directoryPrivacyDraft(snapshot)
-        if (preview) preview.textContent = [snapshot.compiledNginx, snapshot.compiledApache].filter(Boolean).join('\n\n')
         paint()
-        setStatus(copy('Saved rules read. They are configuration only; web-server protection is not verified here.'), 'read')
+        setStatus(readMessage(snapshot), 'read')
       } catch {
         setStatus(copy('Saved protected folders could not be read. Nothing was changed.'), 'failed')
       } finally { busy = false; lock() }
@@ -233,7 +237,6 @@ function bindDirectoryPrivacy(askDialog: ((options: Record<string, unknown>) => 
         if (draft.some(rule => rule.path === path)) throw new Error('duplicate_directory_path')
         const authName = directoryPrivacyPrompt(addPrompt?.value ?? '')
         const user = { username: directoryPrivacyUsername(addUsername?.value ?? ''), password: directoryPrivacyPassword(addPassword?.value ?? ''), existing: false }
-        if (draft.some(rule => rule.users.some(existing => existing.username === user.username))) throw new Error('duplicate_directory_user')
         draft = [...draft, { path, authName, enabled: true, users: [user] }]
         if (addPath) addPath.value = ''
         if (addPrompt) addPrompt.value = ''
@@ -243,38 +246,49 @@ function bindDirectoryPrivacy(askDialog: ((options: Record<string, unknown>) => 
         setStatus(copy('Folder added to the draft. Save to store it; nothing has been written yet.'), 'read')
       } catch (error) {
         const message = error instanceof Error && error.message === 'duplicate_directory_path' ? copy('That folder is already listed once.')
-          : error instanceof Error && error.message === 'duplicate_directory_user' ? copy('That username is already listed on another folder.')
-            : copy('Folder, prompt, username and a password of at least 8 characters are required.')
+          : copy('Folder, prompt, username and a password of at least 8 characters are required.')
         setStatus(message, 'failed')
       }
     }
     const save = async (): Promise<void> => {
       if (busy || uncertain || !baseline || !eligible()) return
-      let body: ReturnType<typeof directoryPrivacyPayload>
-      try { body = directoryPrivacyPayload(draft) } catch (error) {
-        setStatus(error instanceof Error && error.message === 'password_required_for_existing_users'
-          ? copy('Enter a password for every kept user. Saved password hashes are never returned, so each save re-proves the credentials.')
+      let changes: DirectoryPrivacyChange[]
+      try { changes = directoryPrivacyChanges(draft, baseline) } catch (error) {
+        setStatus(error instanceof Error && error.message === 'password_required_for_new_users'
+          ? copy('Enter a password for every new user.')
           : copy('Fix the protected-folder fields before saving. Nothing was sent.'), 'failed')
         return
       }
+      if (!changes.length) { setStatus(copy('There are no changes to save.'), 'read'); return }
       busy = true; lock(); setStatus(copy('Verifying the saved rules before writing…'), 'saving')
       let dispatched = false
+      const results: DirectoryPrivacySnapshot['application'][] = []
       try {
-        const current = directoryPrivacyConfig(await transport!('GET', '/api/web-features/' + encodeURIComponent(username) + '/directory-privacy'), username)
+        const current = directoryPrivacyConfig(await transport!('GET', route), username)
         if (directoryPrivacySignature(current) !== directoryPrivacySignature(baseline)) {
           setStatus(copy('The saved rules changed elsewhere. Your draft is kept; refresh before saving again.'), 'stale')
           return
         }
-        dispatched = true
-        const saved = directoryPrivacyConfig(await transport!('PUT', '/api/web-features/' + encodeURIComponent(username) + '/directory-privacy', body), username)
-        const expectedPaths = body.rules.map(rule => rule.path)
-        const observedPaths = saved.rules.map(rule => rule.path)
-        const matches = expectedPaths.length === observedPaths.length && expectedPaths.every((path, index) => path === observedPaths[index] && body.rules[index]!.authName === saved.rules[index]!.authName && body.rules[index]!.enabled === saved.rules[index]!.enabled && body.rules[index]!.users.map(user => user.username).join(',') === saved.rules[index]!.users.join(','))
-        if (!matches) throw new Error('readback_mismatch')
-        baseline = saved; draft = directoryPrivacyDraft(saved)
-        if (preview) preview.textContent = [saved.compiledNginx, saved.compiledApache].filter(Boolean).join('\n\n')
+        for (const change of changes) {
+          let revision = change.revision
+          if (revision === null) {
+            const folder = directoryPrivacyConfig(await transport!('GET', route + '?path=' + encodeURIComponent(change.path)), username).folders[0]
+            if (!folder || folder.path !== change.path || folder.conflict) { setStatus(copy('The folder {path} cannot be protected here. Check that it exists inside a site and has no other access rules.', { path: change.path }), 'failed'); return }
+            revision = folder.revision
+          }
+          dispatched = true
+          const saved = directoryPrivacyConfig(await transport!('PUT', route, { ...change.body, expectedRevision: revision }), username)
+          const folder = saved.folders[0]
+          if (saved.application.status !== 'saved' || saved.folders.length !== 1 || folder!.path !== change.path || folder!.enabled !== change.body.enabled || folder!.users.join(',') !== change.body.users.map(user => user.username).join(',')) throw new Error('readback_mismatch')
+          results.push(saved.application)
+        }
+        baseline = directoryPrivacyConfig(await transport!('GET', route), username); draft = directoryPrivacyDraft(baseline)
         paint()
-        setStatus(copy('Saved rules were stored and read back. Web-server application remains unverified on the host.'), 'saved')
+        const protectedResults = results.filter((_result, index) => changes[index]!.body.enabled)
+        setStatus(protectedResults.some(result => result.protectionVerified === false) ? copy('Saved, but the web server did not ask for a password on a protected folder. Review it before relying on the protection.')
+          : !protectedResults.length ? copy('Saved and read back.')
+            : protectedResults.every(result => result.protectionVerified === true) ? copy('Saved. The web server now asks for a password on every protected folder that changed.')
+              : copy('Saved and read back. The web server answer could not be checked for every folder.'), 'saved')
       } catch (error) {
         const detail = directoryPrivacyObject(error) && directoryPrivacyObject(error.details) ? error.details : {}
         const certain = directoryPrivacyObject(error) && (error.stateChanged === false || detail.stateChanged === false) && detail.unknownOutcome !== true && detail.verificationRequired !== true
@@ -298,4 +312,4 @@ function bindDirectoryPrivacy(askDialog: ((options: Record<string, unknown>) => 
   })
 }
 
-export const DIRECTORY_PRIVACY_CLIENT_BINDING = `(function(askDialog){const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const USERNAME=${USERNAME.toString()};const unsafe=${unsafe.toString()};const directoryPrivacyObject=${directoryPrivacyObject.toString()};const directoryPrivacyPath=${directoryPrivacyPath.toString()};const directoryPrivacyPrompt=${directoryPrivacyPrompt.toString()};const directoryPrivacyUsername=${directoryPrivacyUsername.toString()};const directoryPrivacyPassword=${directoryPrivacyPassword.toString()};const directoryPrivacyConfig=${directoryPrivacyConfig.toString()};const directoryPrivacySignature=${directoryPrivacySignature.toString()};const directoryPrivacyDraft=${directoryPrivacyDraft.toString()};const directoryPrivacyDraftKey=${directoryPrivacyDraftKey.toString()};const directoryPrivacyDraftMatchesSnapshot=${directoryPrivacyDraftMatchesSnapshot.toString()};const directoryPrivacyPayload=${directoryPrivacyPayload.toString()};(${bindDirectoryPrivacy.toString()})(askDialog);})`
+export const DIRECTORY_PRIVACY_CLIENT_BINDING = `(function(askDialog){const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const USERNAME=${USERNAME.toString()};const REVISION=${REVISION.toString()};const unsafe=${unsafe.toString()};const directoryPrivacyObject=${directoryPrivacyObject.toString()};const directoryPrivacyPath=${directoryPrivacyPath.toString()};const directoryPrivacyPrompt=${directoryPrivacyPrompt.toString()};const directoryPrivacyUsername=${directoryPrivacyUsername.toString()};const directoryPrivacyPassword=${directoryPrivacyPassword.toString()};const directoryPrivacyConfig=${directoryPrivacyConfig.toString()};const directoryPrivacySignature=${directoryPrivacySignature.toString()};const directoryPrivacyDraft=${directoryPrivacyDraft.toString()};const directoryPrivacyPreview=${directoryPrivacyPreview.toString()};const directoryPrivacyChanges=${directoryPrivacyChanges.toString()};(${bindDirectoryPrivacy.toString()})(askDialog);})`

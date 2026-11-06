@@ -171,7 +171,7 @@ describe('part restore', () => {
     let ledger: unknown = { version: 1, lastScheduledAt: null, runs: options.recorded === false ? [] : [run], recoveries: [], restores: [] }
     const controller = createBackupRunController({ readConfig: async () => ({ destinations: null, schedule: null }), provider: null, listAccounts: async () => [], createBackup: null,
       verifyArchive: async () => { throw new Error('unused') }, readLocalArchive: async () => { throw new Error('unused') }, listLocalArchives: async () => [], deleteLocalArchive: async () => {},
-      storeRecovered: async () => 'exists', readLedger: async () => ledger, writeLedger: async value => { ledger = structuredClone(value) } } satisfies BackupRunDeps)
+      storeRecovered: async () => 'exists', readLedger: async () => ledger, writeLedger: async value => { ledger = structuredClone(value) }, zstdInstalled: async () => true } satisfies BackupRunDeps)
     const restored: { database: string; content: string; sha256: string }[] = []
     const restoreDatabase = vi.fn(async (_account: Account, database: string, inputPath: string, sha256: string) => { restored.push({ database, content: await readFile(inputPath, 'utf8'), sha256 }) })
     const runner = vi.fn(async (command: BackupCommand) => {

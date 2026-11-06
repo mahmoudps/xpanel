@@ -2517,6 +2517,10 @@ msgstr "عنوان يبدأ بـ https://، يظهر كرابط «مساعدة»
 msgid "An installed update takes effect only after a reboot."
 msgstr "لا يسري تحديث مثبت إلا بعد إعادة التشغيل."
 
+#: apps/web/src/file-workspace-client.ts
+msgid "An item with that name already exists, or the archive repeats a name. Nothing was replaced."
+msgstr "يوجد عنصر بهذا الاسم مسبقاً، أو أن الأرشيف يكرر اسماً. لم يُستبدل شيء."
+
 #: apps/web/src/whm-upgrade-client.ts
 msgid "An upgrade is recorded as locked."
 msgstr "سُجلت ترقية بحالة مقفلة."
@@ -3163,6 +3167,10 @@ msgstr "أرشفة الرسائل"
 #: apps/web/src/mailx-archive-client.ts
 msgid "Archive outgoing mail for {domain}"
 msgstr "أرشفة البريد الصادر للنطاق {domain}"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Archive path"
+msgstr "مسار الأرشيف"
 
 #: apps/web/src/board-port/mailx-archive-workspace.ts
 msgid "Archive state"
@@ -6474,9 +6482,21 @@ msgstr "ضغط"
 msgid "Compress proxied responses"
 msgstr "ضغط الاستجابات الممررة عبر الوكيل"
 
+#: apps/web/src/audit-labels.ts
+msgid "Compressed a file or folder"
+msgstr "ضغط ملفاً أو مجلداً"
+
 #: apps/web/src/board-port/sw-optimize-workspace.ts
 msgid "Compressed content types"
 msgstr "أنواع المحتوى المضغوطة"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Compressed into {path}. The folder was read back."
+msgstr "ضُغط في {path}. أُعيدت قراءة المجلد."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Compressing. The archive is shown only after it is read back."
+msgstr "جارٍ الضغط. لا يظهر الأرشيف إلا بعد إعادة قراءته."
 
 #: apps/web/src/board-port/approved-whm-backups.ts apps/web/src/board-port/sw-optimize-workspace.ts
 msgid "Compression"
@@ -7186,10 +7206,6 @@ msgstr "نسخ"
 msgid "Copy a site to a private staging folder, review the changes and promote them to the live site."
 msgstr "انسخ موقعًا إلى مجلد تجريبي خاص، وراجع التغييرات، ثم انشرها على الموقع المباشر."
 
-#: apps/web/src/board-port/approved-xpanel-workspaces.ts
-msgid "Copy and Move act on the one item selected in the file list. Compress and Extract are unavailable here; no change has been made."
-msgstr "يعمل النسخ والنقل على العنصر الوحيد المحدد في قائمة الملفات. الضغط والاستخراج غير متاحين هنا؛ لم يُجرَ أي تغيير."
-
 #: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/extensions/account-databases.ts
 msgid "Copy connection details"
 msgstr "نسخ تفاصيل الاتصال"
@@ -7249,6 +7265,10 @@ msgstr "انسخ مفتاح التوقيع هذا الآن. لن يُعرض مر
 #: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/whm-panel-tokens-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/design-board.ts
 msgid "Copy token"
 msgstr "نسخ الرمز"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "Copy, Move, Compress and Extract act on the one item selected in the file list. Extract needs a zip, tar, gz, bz2 or zst file."
+msgstr "تعمل أوامر النسخ والنقل والضغط والاستخراج على العنصر الوحيد المحدد في قائمة الملفات. يحتاج الاستخراج إلى ملف zip أو tar أو gz أو bz2 أو zst."
 
 #: apps/web/src/whm-transfer-client.ts
 msgid "Copying"
@@ -9520,6 +9540,10 @@ msgstr "إعداد الوجهة"
 msgid "Destination enabled in saved policy"
 msgstr "الوجهة مفعّلة في السياسة المحفوظة"
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Destination folder"
+msgstr "مجلد الوجهة"
+
 #: apps/web/src/whm-backup-destinations-client.ts
 msgid "Destination management is unavailable here."
 msgstr "إدارة الوجهات غير متاحة هنا."
@@ -9764,6 +9788,10 @@ msgstr "خصوصية المجلدات"
 #: apps/web/src/directory-privacy-client.ts
 msgid "Directory privacy editing is unavailable here. No rules were read or changed."
 msgstr "تحرير خصوصية المجلدات غير متاح هنا. لم تُقرأ أو تُغيّر أي قواعد."
+
+#: apps/web/src/directory-privacy-client.ts
+msgid "Directory privacy needs the Apache web server and an active account. Nothing can be changed now."
+msgstr "تتطلب خصوصية المجلدات خادم الويب Apache وحسابًا نشطًا. لا يمكن تغيير شيء الآن."
 
 #: apps/web/src/file-workspace-client.ts
 msgid "Directory read."
@@ -10751,6 +10779,11 @@ msgstr "يبدأ كل جدول مفعّل المهمة بهوية مستخدم �
 msgid "Each endpoint is signed with HMAC-SHA256 over a timestamped body. Secrets are stored on the server and never shown here. Failed deliveries are retried on a fixed schedule and recorded in the delivery log."
 msgstr "تُوقَّع كل نقطة نهاية بخوارزمية HMAC-SHA256 على محتوى مختوم بالوقت. تُخزَّن الأسرار على الخادم ولا تُعرض هنا أبدًا. يُعاد تسليم العمليات الفاشلة وفق جدول ثابت وتُسجَّل في سجل التسليم."
 
+#: apps/web/src/board-port/approved-xpanel-bindings.ts
+#: apps/web/src/themes/v2/pages/xpanel/files/privacy.ts
+msgid "Each folder keeps its rules in its own .htaccess file and its users in ~/.htpasswds. A folder counts as protected only after the web server asked for a password."
+msgstr "يحفظ كل مجلد قواعده في ملف .htaccess الخاص به ومستخدميه في ~/.htpasswds. لا يُعدّ المجلد محميًا إلا بعد أن يطلب خادم الويب كلمة مرور."
+
 #: apps/web/src/account-reverse-proxy-client.ts
 msgid "Each header can be listed once."
 msgstr "يمكن إدراج كل ترويسة مرة واحدة."
@@ -11271,6 +11304,10 @@ msgstr "انتهى الدعم"
 msgid "End session"
 msgstr "إنهاء الجلسة"
 
+#: apps/web/src/file-workspace-client.ts
+msgid "End the archive name in .zip, .tar, .tar.gz, .tar.bz2 or .tar.zst. Nothing was changed."
+msgstr "اجعل اسم الأرشيف ينتهي بـ .zip أو .tar أو .tar.gz أو .tar.bz2 أو .tar.zst. لم يتغير شيء."
+
 #: apps/web/src/board-port/xmail-calendar-view.ts
 msgid "End time"
 msgstr "وقت النهاية"
@@ -11490,8 +11527,8 @@ msgid "Enter a new name. Creating this copy does not modify the source list or r
 msgstr "أدخل اسمًا جديدًا. لا يعدل إنشاء النسخة القائمة الأصلية أو يعيد تعيين خطة. يطبق الخادم الملكية ويتحقق من الطلب."
 
 #: apps/web/src/directory-privacy-client.ts
-msgid "Enter a password for every kept user. Saved password hashes are never returned, so each save re-proves the credentials."
-msgstr "أدخل كلمة مرور لكل مستخدم محتفظ به. لا تُعاد تجزئات كلمات المرور المحفوظة أبدًا، لذا يلزم إثبات بيانات الدخول في كل حفظ."
+msgid "Enter a password for every new user."
+msgstr "أدخل كلمة مرور لكل مستخدم جديد."
 
 #: apps/web/src/account-network-tools-client.ts
 msgid "Enter a port from 1 to 65535."
@@ -11625,6 +11662,10 @@ msgstr "أدخل الرمز المكوّن من 6 أرقام من تطبيق ا�
 msgid "Enter the WHMCS URL as an https:// address."
 msgstr "أدخل عنوان URL لـ WHMCS بصيغة https://."
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Enter the archive path inside your home. Its ending sets the format: .zip, .tar, .tar.gz, .tar.bz2 or .tar.zst. An existing item is never replaced."
+msgstr "أدخل مسار الأرشيف داخل مجلدك الرئيسي. تحدد نهايته الصيغة: .zip أو .tar أو .tar.gz أو .tar.bz2 أو .tar.zst. لا يُستبدل أي عنصر موجود."
+
 #: apps/web/src/whm-transfer-client.ts
 msgid "Enter the cPanel host, its pinned host key and the cPanel username. Nothing was sent."
 msgstr "أدخل مضيف cPanel ومفتاح المضيف المثبت واسم مستخدم cPanel. لم يُرسل شيء."
@@ -11640,6 +11681,10 @@ msgstr "أدخل اسم الوجهة أولًا؛ يُسمّى زوج المفا
 #: apps/web/src/acct-team-client.ts
 msgid "Enter the expiry as a UTC date and time."
 msgstr "أدخل موعد الانتهاء تاريخًا ووقتًا بتوقيت UTC."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Enter the folder to extract into, inside your home. Leave it empty for your home folder. Existing items are never replaced."
+msgstr "أدخل المجلد الذي يُستخرج إليه داخل مجلدك الرئيسي. اتركه فارغاً لمجلدك الرئيسي. لا تُستبدل العناصر الموجودة."
 
 #: apps/web/src/board-port/extensions/account-domains.ts
 msgid "Enter the full name, without www. Subdomains also use their full name; choose their parent below. Input is sent as typed."
@@ -12307,6 +12352,18 @@ msgstr "سجلات منطقة إضافية"
 msgid "Extract"
 msgstr "فك الضغط"
 
+#: apps/web/src/audit-labels.ts
+msgid "Extracted an archive"
+msgstr "استخرج أرشيفاً"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Extracted {count, plural, one {# item} other {# items}} into {path}. The folder was read back."
+msgstr "استُخرج {count, plural, zero {لا شيء} one {عنصر واحد} two {عنصران} few {# عناصر} many {# عنصراً} other {# عنصر}} إلى {path}. أُعيدت قراءة المجلد."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Extracting. The result is shown only after the folder is read back."
+msgstr "جارٍ الاستخراج. لا تظهر النتيجة إلا بعد إعادة قراءة المجلد."
+
 #: apps/web/src/whm-php-client.ts
 msgid "FPM not installed"
 msgstr "FPM غير مثبت"
@@ -12559,6 +12616,10 @@ msgstr "عمليات الدخول الفاشلة"
 #: apps/web/src/ws-client.ts
 msgid "Failed validation test: {failedTest}"
 msgstr "فشل اختبار التحقق: {failedTest}"
+
+#: apps/web/src/approved-host-services-client.ts
+msgid "Failed: {failed} of {total} masters"
+msgstr "فشلت: {failed} من {total} عمليات رئيسية"
 
 #: apps/web/src/board-port/whm-support-workspace.ts
 msgid "Failure"
@@ -16506,6 +16567,10 @@ msgstr "تعلّم البريد غير المزعج من صندوق الوارد
 msgid "Learn spam from Junk"
 msgstr "تعلّم البريد المزعج من Junk"
 
+#: apps/web/src/themes/v2/pages/xpanel/files/privacy.ts
+msgid "Leave a password empty to keep the current password of that user."
+msgstr "اترك كلمة المرور فارغة للإبقاء على كلمة المرور الحالية لذلك المستخدم."
+
 #: apps/web/src/board-port/approved-xpanel-bindings.ts
 msgid "Leave an INI override blank to inherit the runtime default. Clearing a saved override removes it."
 msgstr "اترك قيمة INI فارغة لوراثة إعداد بيئة التشغيل الافتراضي. إفراغ القيمة المحفوظة يزيل التخصيص."
@@ -16513,6 +16578,10 @@ msgstr "اترك قيمة INI فارغة لوراثة إعداد بيئة الت
 #: apps/web/src/board-port/mailx-whm-workspace.ts
 msgid "Leave empty for no server-wide copy."
 msgstr "اتركه فارغًا لعدم إنشاء نسخة على مستوى الخادم."
+
+#: apps/web/src/directory-privacy-client.ts
+msgid "Leave empty to keep the current password"
+msgstr "اتركه فارغًا للإبقاء على كلمة المرور الحالية"
 
 #: apps/web/src/board-port/mailx-whm-workspace.ts
 msgid "Leave empty to keep the saved password. It is stored only on this server and is never shown again."
@@ -19474,6 +19543,10 @@ msgstr "لا يقترب أي حساب من حد النطاق الترددي ال
 msgid "No account is selected."
 msgstr "لم يُحدَّد حساب."
 
+#: apps/web/src/approved-host-services-client.ts
+msgid "No account masters"
+msgstr "لا توجد عمليات رئيسية للحسابات"
+
 #: apps/web/src/whm-server-health-client.ts
 msgid "No account matches this filter."
 msgstr "لا يطابق أي حساب هذه التصفية."
@@ -19489,6 +19562,10 @@ msgstr "لم تُقرأ موارد أي حساب بعد."
 #: apps/web/src/board-port/whm-monitoring-workspace.ts
 msgid "No account usage has been read."
 msgstr "لم يُقرأ استخدام الحسابات."
+
+#: apps/web/src/approved-host-services-client.ts
+msgid "No account uses this PHP version"
+msgstr "لا يستخدم أي حساب إصدار PHP هذا"
 
 #: apps/web/src/board-port/approved-whm-account-components.ts
 msgid "No account-creation operation has been observed. The live create acknowledgement does not establish completion of every host task below."
@@ -24212,6 +24289,10 @@ msgstr "تتحد قواعد وصول أخرى في هذا الملف مع الع
 msgid "Other access settings"
 msgstr "إعدادات الوصول الأخرى"
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Other archive work is running on this server. Try again shortly. Nothing was changed."
+msgstr "يجري عمل أرشفة آخر على هذا الخادم. حاول مرة أخرى بعد قليل. لم يتغير شيء."
+
 #: apps/web/src/whm-server-observation-client.ts
 msgid "Other entry"
 msgstr "مدخل آخر"
@@ -24566,6 +24647,10 @@ msgstr "جرد PHP غير متاح هنا. لم يُقرأ أو يُغيّر ش�
 #: apps/web/src/whm-php-client.ts
 msgid "PHP management is unavailable on this host. Nothing was changed."
 msgstr "إدارة PHP غير متاحة على هذا الخادم. لم يُغيّر شيء."
+
+#: apps/web/src/approved-host-services-client.ts
+msgid "PHP pools: {count} account masters, each in its slice"
+msgstr "مجمعات PHP: {count} عمليات رئيسية للحسابات، كل منها داخل شريحة حسابه"
 
 #: apps/web/src/board-port/extensions/account-domains.ts
 msgid "PHP selection, Node, Python, proxy, wildcard, DNS and certificate changes require their separate qualified workflows."
@@ -25028,6 +25113,10 @@ msgstr "مثبت جزئيًا"
 #: apps/web/src/whm-metering-client.ts
 msgid "Partly counted"
 msgstr "محسوب جزئيًا"
+
+#: apps/web/src/approved-host-services-client.ts
+msgid "Partly failed: {failed} of {total} masters failed"
+msgstr "فشل جزئي: فشلت {failed} من {total} عمليات رئيسية"
 
 #: apps/web/src/whm-software-center-client.ts
 msgid "Partly installed"
@@ -26557,6 +26646,10 @@ msgstr "تُخدم المجلدات المحمية عبر HTTPS فقط. تبقى
 #: apps/web/src/directory-privacy-client.ts
 msgid "Protected folders have not been read."
 msgstr "لم تُقرأ المجلدات المحمية."
+
+#: apps/web/src/directory-privacy-client.ts
+msgid "Protected folders read from the account files."
+msgstr "قُرئت المجلدات المحمية من ملفات الحساب."
 
 #: apps/web/src/whm-trusted-proxies-client.ts
 msgid "Protected ingress, recovery or observation is unavailable. No activation is claimed."
@@ -30408,6 +30501,10 @@ msgstr "إعادة تشغيل PostgreSQL"
 msgid "Restart PowerDNS"
 msgstr "إعادة تشغيل PowerDNS"
 
+#: apps/web/src/approved-host-services-client.ts
+msgid "Restart all {count} PHP-FPM {version} account masters? PHP requests in progress fail."
+msgstr "هل تريد إعادة تشغيل جميع العمليات الرئيسية للحسابات في PHP-FPM {version} وعددها {count}؟ ستفشل طلبات PHP الجارية."
+
 #: apps/web/src/approved-host-services-client.ts apps/web/src/whm-service-detail-client.ts
 msgid "Restart cancelled. No restart request was sent."
 msgstr "أُلغيت إعادة التشغيل. لم يُرسل طلب إعادة تشغيل."
@@ -31906,6 +32003,10 @@ msgstr "الإصدار العامل"
 msgid "Running, creating or changing system timers is not available here."
 msgstr "تشغيل مؤقتات النظام أو إنشاؤها أو تغييرها غير متاح هنا."
 
+#: apps/web/src/approved-host-services-client.ts
+msgid "Running: {running} of {total} masters"
+msgstr "قيد التشغيل: {running} من {total} عمليات رئيسية"
+
 #: apps/web/src/account-network-tools-client.ts
 msgid "Running…"
 msgstr "جارٍ التشغيل…"
@@ -32638,6 +32739,10 @@ msgstr "حُفظت وأُعيدت قراءتها. تُطبَّق القوائم 
 msgid "Saved and read back. The lists are not enforced until the request gate is connected."
 msgstr "حُفظت وأُعيدت قراءتها. لن تُنفَّذ القوائم حتى تُوصَل بوابة الطلبات."
 
+#: apps/web/src/directory-privacy-client.ts
+msgid "Saved and read back. The web server answer could not be checked for every folder."
+msgstr "حُفظ وقُرئ مجددًا. تعذّر التحقق من رد خادم الويب لكل مجلد."
+
 #: apps/web/src/board-port/whm-announcements-workspace.ts
 msgid "Saved announcements"
 msgstr "الإعلانات المحفوظة"
@@ -33133,21 +33238,9 @@ msgstr "قُرئ الدور المحفوظ والخدمات المرصودة."
 msgid "Saved role read. Observed services: {reason}"
 msgstr "قُرئ الدور المحفوظ. الخدمات المرصودة: {reason}"
 
-#: apps/web/src/board-port/approved-xpanel-bindings.ts
-msgid "Saved rules are account configuration only. The web server applies them after host verification; this page does not claim a folder is protected yet."
-msgstr "القواعد المحفوظة إعداد للحساب فقط. يطبقها خادم الويب بعد تحقق المضيف؛ لا تدّعي هذه الصفحة أن المجلد محمي الآن."
-
 #: apps/web/src/whm-monitoring-alerts-client.ts
 msgid "Saved rules read."
 msgstr "قُرئت القواعد المحفوظة."
-
-#: apps/web/src/directory-privacy-client.ts
-msgid "Saved rules read. They are configuration only; web-server protection is not verified here."
-msgstr "قُرئت القواعد المحفوظة. هي إعداد فقط؛ لا يُتحقق هنا من حماية خادم الويب."
-
-#: apps/web/src/directory-privacy-client.ts
-msgid "Saved rules were stored and read back. Web-server application remains unverified on the host."
-msgstr "حُفظت القواعد وقُرئت مجددًا. يبقى تطبيقها على خادم الويب غير متحقق منه على المضيف."
 
 #: apps/web/src/whm-backups-client.ts
 msgid "Saved schedule and destination metadata were read. The requested policy does not prove scheduler installation, transport trust or low-priority CPU/IO enforcement (weight 10)."
@@ -33340,6 +33433,10 @@ msgstr "تم الحفظ، لكن الإعدادات الجديدة لم تجتز
 msgid "Saved, but the server reported that applying it failed. The previous generation stays active."
 msgstr "تم الحفظ، لكن الخادم أبلغ بفشل تطبيقه. ويبقى الجيل السابق نشطًا."
 
+#: apps/web/src/directory-privacy-client.ts
+msgid "Saved, but the web server did not ask for a password on a protected folder. Review it before relying on the protection."
+msgstr "حُفظ، لكن خادم الويب لم يطلب كلمة مرور على مجلد محمي. راجعه قبل الاعتماد على الحماية."
+
 #: apps/web/src/acct-backup-runs-client.ts
 msgid "Saved, disabled"
 msgstr "محفوظ، معطّل"
@@ -33375,6 +33472,10 @@ msgstr "تم الحفظ. طُلب من الخادم تطبيقه؛ حدّث ال
 #: apps/web/src/account-forwarders-client.ts
 msgid "Saved. The table shows what the mail server runs."
 msgstr "حُفظ. يبيّن الجدول ما يطبّقه خادم البريد."
+
+#: apps/web/src/directory-privacy-client.ts
+msgid "Saved. The web server now asks for a password on every protected folder that changed."
+msgstr "حُفظ. يطلب خادم الويب الآن كلمة مرور على كل مجلد محمي تغيّر."
 
 #: apps/web/src/mailx-archive-client.ts apps/web/src/mailx-whm-client.ts apps/web/src/whm-mail-server-client.ts
 msgid "Saved. There was nothing to apply."
@@ -35777,6 +35878,10 @@ msgstr "تعذّر تأكيد بعض عمليات الحذف بإعادة سرد
 msgid "Some enforced limits differ from their plans."
 msgstr "تختلف بعض الحدود المفروضة عن خططها."
 
+#: apps/web/src/directory-privacy-client.ts
+msgid "Some folders have access rules or edits this page does not manage. Review their .htaccess before changing them here."
+msgstr "في بعض المجلدات قواعد وصول أو تعديلات لا تديرها هذه الصفحة. راجع ملف .htaccess الخاص بها قبل تغييرها هنا."
+
 #: apps/web/src/board-port/whm-security-tools-workspace.ts
 msgid "Some jails have names outside the reviewed format and were not read."
 msgstr "بعض السجون أسماؤها خارج الصيغة المراجَعة ولم تُقرأ."
@@ -36384,6 +36489,10 @@ msgstr "توقفت المعالجة"
 #: apps/web/src/account-runtime-client.ts
 msgid "Stopped."
 msgstr "أُوقف."
+
+#: apps/web/src/approved-host-services-client.ts
+msgid "Stopped: {stopped} of {total} masters"
+msgstr "متوقفة: {stopped} من {total} عمليات رئيسية"
 
 #: apps/web/src/db-engines-client.ts
 msgid "Stopping"
@@ -37343,10 +37452,6 @@ msgstr "لم يعد عضو الفريق هذا موجودًا. حدّث بيان
 msgid "That template no longer exists. Refresh the templates."
 msgstr "لم يعد هذا القالب موجودًا. حدّث القوالب."
 
-#: apps/web/src/directory-privacy-client.ts
-msgid "That username is already listed on another folder."
-msgstr "اسم المستخدم هذا مدرج بالفعل على مجلد آخر."
-
 #: apps/web/src/design-board.ts
 msgid "The .htaccess file for this site."
 msgstr "ملف .htaccess لهذا الموقع."
@@ -37765,6 +37870,10 @@ msgstr "لم تُقرأ قائمة الأرشيفات."
 #: apps/web/src/whm-transfer-client.ts
 msgid "The archive was discarded."
 msgstr "تم تجاهل الأرشيف."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "The archive was refused: it holds links, special files or paths that leave the folder, the path crosses a link, or your access does not allow file changes. Nothing was changed."
+msgstr "رُفض الأرشيف: فهو يحتوي روابط أو ملفات خاصة أو مسارات تخرج من المجلد، أو أن المسار يعبر رابطاً، أو أن صلاحياتك لا تسمح بتغيير الملفات. لم يتغير شيء."
 
 #: apps/web/src/whm-transfer-client.ts
 msgid "The archive was uploaded and its SHA-256 recorded. The server is reading it now."
@@ -38748,6 +38857,10 @@ msgstr "يظهر المجلد في تطبيقات البريد."
 #: apps/web/src/mail-folders-client.ts
 msgid "The folder still holds messages. Review the count and confirm again."
 msgstr "ما زال المجلد يحتوي على رسائل. راجع العدد وأكّد مجددًا."
+
+#: apps/web/src/directory-privacy-client.ts
+msgid "The folder {path} cannot be protected here. Check that it exists inside a site and has no other access rules."
+msgstr "لا يمكن حماية المجلد {path} هنا. تحقق من وجوده داخل موقع وعدم احتوائه على قواعد وصول أخرى."
 
 #: apps/web/src/board-canvas.ts
 msgid "The function policy has not been read."
@@ -41935,6 +42048,10 @@ msgstr "لا توجد حسابات لقراءتها."
 msgid "There are no accounts."
 msgstr "لا توجد حسابات."
 
+#: apps/web/src/directory-privacy-client.ts
+msgid "There are no changes to save."
+msgstr "لا توجد تغييرات لحفظها."
+
 #: apps/web/src/whm-mail-quality-client.ts
 msgid "There are no hosted mail domains to check."
 msgstr "لا توجد نطاقات بريد مستضافة لفحصها."
@@ -42171,6 +42288,10 @@ msgstr "فشل فحص هذا الأرشيف ولا يمكن استعراضه."
 msgid "This archive failed integrity inspection. No file can be restored from it."
 msgstr "فشل فحص سلامة هذا الأرشيف. لا يمكن استعادة أي ملف منه."
 
+#: apps/web/src/file-workspace-client.ts
+msgid "This archive format is not available on this server. Nothing was changed."
+msgstr "صيغة الأرشيف هذه غير متاحة على هذا الخادم. لم يتغير شيء."
+
 #: apps/web/src/acct-restore-client.ts
 msgid "This backup contains no mailbox messages."
 msgstr "لا تحتوي هذه النسخة الاحتياطية على رسائل بريد."
@@ -42290,6 +42411,10 @@ msgstr "تعذر عرض هذا الحدث من السجلات المحفوظة �
 #: apps/web/src/file-workspace-client.ts
 msgid "This exceeds a file limit: 10000 items or 128 MiB per copy, or your disk quota. Nothing was changed."
 msgstr "يتجاوز هذا حداً للملفات: 10000 عنصر أو 128 MiB لكل نسخة، أو حصة القرص. لم يتغير شيء."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "This exceeds an archive limit: 10000 items, 512 MiB, expanding more than 250 times, or your disk quota. Nothing was changed."
+msgstr "هذا يتجاوز حداً للأرشيف: 10000 عنصر، أو 512 MiB، أو تمدداً بأكثر من 250 ضعفاً، أو حصة القرص لديك. لم يتغير شيء."
 
 #: apps/web/src/mail-disk-usage-client.ts
 msgid "This folder holds more than 50000 messages, so its cleanup cannot be measured here."
@@ -44329,6 +44454,10 @@ msgid "Updated directory privacy"
 msgstr "حدّث خصوصية دليل"
 
 #: apps/web/src/audit-labels.ts
+msgid "Saved directory privacy"
+msgstr "حفظ خصوصية دليل"
+
+#: apps/web/src/audit-labels.ts
 msgid "Updated domain configuration"
 msgstr "حدّث إعداد النطاق"
 
@@ -44709,6 +44838,10 @@ msgstr "استخدم عنوان http أو https كاملًا دون علامات
 #: apps/web/src/account-pgp-client.ts
 msgid "Use a name, a current mailbox, 1–3650 days and a passphrase of at least 12 characters."
 msgstr "استخدم اسمًا وعنوان بريد حاليًا ومدة 1–3650 يومًا وعبارة مرور من 12 حرفًا على الأقل."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Use a path inside your home, outside the item itself, and a complete, unencrypted zip, tar, tar.gz, tar.bz2, tar.zst, gz, bz2 or zst file. Nothing was changed."
+msgstr "استخدم مساراً داخل مجلدك الرئيسي وخارج العنصر نفسه، وملف zip أو tar أو tar.gz أو tar.bz2 أو tar.zst أو gz أو bz2 أو zst مكتملاً وغير مشفر. لم يتغير شيء."
 
 #: apps/web/src/account-web-directives-client.ts
 msgid "Use a path that starts with / without spaces, quotes, .. segments or a query string."
@@ -46623,8 +46756,8 @@ msgid "not enforced"
 msgstr "غير مفروض"
 
 #: apps/web/src/acct-restore-client.ts apps/web/src/whm-backup-files-client.ts
-msgid "not gzip-compressed tar data"
-msgstr "ليست بيانات tar مضغوطة بـ gzip"
+msgid "not tar data compressed as its name says"
+msgstr "ليست بيانات tar مضغوطة كما يذكر اسمها"
 
 #: apps/web/src/board-port/xpanel-home.ts
 msgid "not measured yet"

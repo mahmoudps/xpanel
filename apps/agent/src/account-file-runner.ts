@@ -12,6 +12,11 @@ export const MAX_HELPER_STDIN_BYTES = 4 * 1024 * 1024
 export const MAX_HELPER_STDOUT_BYTES = 4 * 1024 * 1024
 export const MAX_HELPER_STDERR_BYTES = 64 * 1024
 export const DEFAULT_HELPER_TIMEOUT_MS = 15_000
+/** Compress and extract move up to 512 MiB through one codec; the agent route allows them this long plus margin. */
+export const ARCHIVE_HELPER_TIMEOUT_MS = 120_000
+/** Archive work may hold at most this many of the host's file worker slots, so browsing stays available. */
+export const MAX_ACTIVE_ARCHIVE_OPERATIONS = 2
+const ARCHIVE_OPERATIONS: ReadonlySet<AccountFileRequest['op']> = new Set(['compress', 'extract'])
 export const DEFAULT_FILE_WORKER_INCIDENT_DIR = '/var/lib/xpanel-agent/file-worker-incidents'
 export const MIN_CONFINED_ACCOUNT_ID = 1000
 export const MAX_CONFINED_ACCOUNT_ID = 65_533
@@ -28,6 +33,8 @@ export interface HelperErrorPayload {
   errno: number
   errnoName: string
   message: string
+  /** A stable machine reason for a refusal the code alone does not name. */
+  reason?: string
 }
 
 export interface HelperResponseEnvelope {
@@ -261,6 +268,7 @@ export class NativeAccountFileRunner implements AccountFileRunner {
   private readonly workerPool: SystemdAccountFileWorkerPool | undefined
 
   readonly observations: HelperExecutionObservation[] = []
+  private activeArchives = 0
 
   constructor(opts: NativeAccountFileRunnerOptions) {
     if (!opts || typeof opts.binaryPath !== 'string' || opts.binaryPath.length === 0) {
@@ -322,6 +330,13 @@ export class NativeAccountFileRunner implements AccountFileRunner {
           request.remove && request.content !== '' || !request.expectedExists && (request.expectedContent !== '' || request.expectedMtime !== '') ||
           request.expectedExists && !Number.isFinite(Date.parse(request.expectedMtime)) ||
           !Number.isSafeInteger(request.mode) || request.mode <= 0 || request.mode > context.maxFileMode || (request.mode & ~context.maxFileMode) !== 0) return fail('VALIDATION', 'checked file operation requires its exact bounded preimage', { stateChanged: false })
+    }
+    if (ARCHIVE_OPERATIONS.has(request.op)) {
+      if (this.activeArchives >= MAX_ACTIVE_ARCHIVE_OPERATIONS) {
+        return fail('SERVICE_UNAVAILABLE', 'another archive operation is running; try again shortly', { operation: request.op, stateChanged: false, reason: 'archive_capacity_busy' })
+      }
+      this.activeArchives++
+      try { return await this.runConfined(context, request) } finally { this.activeArchives-- }
     }
     try { return await this.runConfined(context, request) }
     catch (error) {
@@ -386,7 +401,7 @@ export class NativeAccountFileRunner implements AccountFileRunner {
         fail('LIMIT_EXCEEDED', 'account file request exceeds maximum helper stdin size')
       }
       return {
-        binaryPath: this.binaryPath, stdinPayload, timeoutMs: this.timeoutMs,
+        binaryPath: this.binaryPath, stdinPayload, timeoutMs: ARCHIVE_OPERATIONS.has(request.op) ? ARCHIVE_HELPER_TIMEOUT_MS : this.timeoutMs,
         maxStdoutBytes: this.maxStdoutBytes, maxStderrBytes: MAX_HELPER_STDERR_BYTES,
         ...(this.onLiveWorker ? {
           onStdoutLine: async (line: string) => {
@@ -454,9 +469,10 @@ export class NativeAccountFileRunner implements AccountFileRunner {
       return fail(mappedCode, errPayload.message, {
         operation: request.op,
         // These helpers refuse before their single publishing rename; later failures arrive as SERVICE_UNAVAILABLE.
-        ...(['write-checked', 'move', 'copy'].includes(request.op) && ['VALIDATION', 'CONFLICT', 'FORBIDDEN', 'NOT_FOUND', 'LIMIT_EXCEEDED', 'PRECONDITION_FAILED'].includes(mappedCode) ? { stateChanged: false } : {}),
+        ...(['write-checked', 'move', 'copy', 'compress', 'extract'].includes(request.op) && ['VALIDATION', 'CONFLICT', 'FORBIDDEN', 'NOT_FOUND', 'LIMIT_EXCEEDED', 'PRECONDITION_FAILED'].includes(mappedCode) ? { stateChanged: false } : {}),
         errno: errPayload.errno,
         errnoName: errPayload.errnoName,
+        ...(typeof errPayload.reason === 'string' && /^[a-z][a-z_]{0,63}$/.test(errPayload.reason) ? { reason: errPayload.reason } : {}),
         workerUid: envelope.worker.uid,
         workerGid: envelope.worker.gid,
         workerPid: envelope.worker.pid,

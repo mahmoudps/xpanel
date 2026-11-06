@@ -6,9 +6,10 @@ import { fail, isUuid } from '@xpanel/core'
 import { hashing, walkTar } from '@xpanel/lifecycle'
 import type { AgentExecutor } from './executor.ts'
 import { withPinnedHostTargetParent } from './host-target-parent.ts'
-import { assertBackupFileName, createAccountBackup, DEFAULT_BACKUP_DIR, listAccountBackups, MAX_BACKUP_BYTES, openAccountBackupArchive, restoreAccountBackup } from './account-backup.ts'
+import { assertBackupFileName, BACKUP_CODECS, backupCodecOf, createAccountBackup, DEFAULT_BACKUP_DIR, listAccountBackups, MAX_BACKUP_BYTES, openAccountBackupArchive, restoreAccountBackup } from './account-backup.ts'
 import type { BackupAccountTarget, BackupArchive } from './account-backup.ts'
 import { BACKUP_DATA_DIR } from './acct-backup-archive.ts'
+import { zstdDecompressed } from './backup-low-priority.ts'
 
 export const MAX_ACCOUNT_BACKUP_ENTRIES = 10000
 export interface AccountBackupIdentity extends BackupAccountTarget { id: string; gid: number }
@@ -33,8 +34,8 @@ const identity = (account: AccountBackupIdentity) => {
 export async function inspectAccountBackupArchive(input: { root?: string; account: BackupAccountTarget; file: string }): Promise<AccountArchiveInventory> {
   const opened = await openAccountBackupArchive(input.root ?? DEFAULT_BACKUP_DIR, input.account, input.file)
   try {
-    const signature = Buffer.alloc(2)
-    if ((await opened.handle.read(signature, 0, 2, 0)).bytesRead !== 2 || signature[0] !== 0x1f || signature[1] !== 0x8b) fail('VALIDATION', 'the account archive must be gzip-compressed tar data')
+    const codec = backupCodecOf(input.file), magic = Buffer.from(codec.magic), signature = Buffer.alloc(magic.length)
+    if ((await opened.handle.read(signature, 0, magic.length, 0)).bytesRead !== magic.length || !signature.equals(magic)) fail('VALIDATION', 'the account archive must be tar data compressed as its name says')
     const before = await opened.handle.stat(), digest = createHash('sha256'), files: AccountArchiveFile[] = [], parts: AccountArchiveFile[] = []
     const names = new Set<string>()
     let compressedBytes = 0
@@ -47,7 +48,7 @@ export async function inspectAccountBackupArchive(input: { root?: string; accoun
         compressedBytes += chunk.byteLength; digest.update(chunk); yield chunk
       }
     }
-    await walkTar(source(), async (entry, body) => {
+    await walkTar(codec === BACKUP_CODECS.zstd ? zstdDecompressed(source()) : source(), async (entry, body) => {
       if (entry.type === 'directory') return
       if (entry.type !== 'file') return fail('VALIDATION', 'account home restore does not accept archive links')
       if (names.has(entry.path)) return fail('VALIDATION', 'the account archive contains duplicate file paths')
@@ -156,7 +157,7 @@ export async function downloadAccountBackup(input: { root?: string; account: Bac
     },
     async cancel() { await close() },
   })
-  return new Response(body, { headers: { 'content-type': 'application/gzip', 'content-length': String(opened.bytes),
+  return new Response(body, { headers: { 'content-type': backupCodecOf(input.file).mediaType, 'content-length': String(opened.bytes),
     'content-disposition': `attachment; filename="${input.file}"`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-accel-buffering': 'no' } })
 }
 

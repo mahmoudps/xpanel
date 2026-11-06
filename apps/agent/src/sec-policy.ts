@@ -7,6 +7,7 @@ export const SEC_WAF_SITES_STATE = 'extended/server/sec-waf-sites.json'
 export const SEC_FLOOD_STATE = 'extended/server/sec-flood.json'
 export const SEC_PANEL_ACCESS_STATE = 'extended/server/sec-panel-access.json'
 export const SEC_DNS_CLUSTER_STATE = 'extended/dns/sec-cluster.json'
+export const SEC_COMPILER_ACCESS_STATE = 'extended/server/compiler-access.json'
 export const SEC_LISTENERS = ['xpanel', 'xwhm', 'xmail'] as const
 export type SecListener = typeof SEC_LISTENERS[number]
 export const SEC_LISTENER_PORTS: Readonly<Record<SecListener, number>> = { xpanel: 2083, xwhm: 2087, xmail: 2096 }
@@ -37,17 +38,20 @@ export interface SecPanelAccessPolicy { listeners: Record<SecListener, SecAccess
 export interface SecDnsPeer { name: string; address: string }
 export interface SecDnsClusterConfig { peers: SecDnsPeer[] }
 export interface SecWafSites { sites: Record<string, { accountId: string; modsecurity: boolean }> }
+/** cPanel WHM Compiler Access: restricted = root and the granted accounts only; false = enabled for all users. */
+export interface SecCompilerAccessPolicy { restricted: boolean; accountIds: string[] }
 export interface SecRecord<T> { version: 1; policy: T; updatedAt: string }
-export type SecKind = 'waf' | 'flood' | 'panel-access' | 'dns-cluster' | 'waf-sites'
+export type SecKind = 'waf' | 'flood' | 'panel-access' | 'dns-cluster' | 'waf-sites' | 'compiler-access'
 
-export const SEC_DEFAULTS: { waf: SecWafPolicy; flood: SecFloodPolicy; 'panel-access': SecPanelAccessPolicy; 'dns-cluster': SecDnsClusterConfig; 'waf-sites': SecWafSites } = {
+export const SEC_DEFAULTS: { waf: SecWafPolicy; flood: SecFloodPolicy; 'panel-access': SecPanelAccessPolicy; 'dns-cluster': SecDnsClusterConfig; 'waf-sites': SecWafSites; 'compiler-access': SecCompilerAccessPolicy } = {
   waf: { requestsPerSecond: null, burst: null, maxBodyMb: 128, deniedResponse: 403, denyIps: [], denyPaths: [], denyUserAgents: [], modsecurity: true },
   flood: { enabled: false, connectionsPerAddress: null, newConnectionsPerSecond: null, newConnectionsBurst: null, pingPerSecond: null, webConnectionsPerAddress: null },
   'panel-access': { listeners: { xpanel: [], xwhm: [], xmail: [] } },
   'dns-cluster': { peers: [] },
   'waf-sites': { sites: {} },
+  'compiler-access': { restricted: false, accountIds: [] },
 }
-export const SEC_STATE_PATHS: Readonly<Record<SecKind, string>> = { waf: SEC_WAF_STATE, flood: SEC_FLOOD_STATE, 'panel-access': SEC_PANEL_ACCESS_STATE, 'dns-cluster': SEC_DNS_CLUSTER_STATE, 'waf-sites': SEC_WAF_SITES_STATE }
+export const SEC_STATE_PATHS: Readonly<Record<SecKind, string>> = { waf: SEC_WAF_STATE, flood: SEC_FLOOD_STATE, 'panel-access': SEC_PANEL_ACCESS_STATE, 'dns-cluster': SEC_DNS_CLUSTER_STATE, 'waf-sites': SEC_WAF_SITES_STATE, 'compiler-access': SEC_COMPILER_ACCESS_STATE }
 
 const unchanged = { stateChanged: false }
 const invalid = (message: string): never => fail('VALIDATION', message, unchanged)
@@ -142,7 +146,14 @@ export function parseSecWafSites(value: unknown): SecWafSites {
   return { sites }
 }
 
-const PARSERS: Readonly<Record<SecKind, (value: unknown) => unknown>> = { waf: parseSecWafPolicy, flood: parseSecFloodPolicy, 'panel-access': parseSecPanelAccessPolicy, 'dns-cluster': parseSecDnsClusterConfig, 'waf-sites': parseSecWafSites }
+/** Granted accounts are kept by id, so a deleted account leaves the group on the next reconcile. */
+export function parseSecCompilerAccessPolicy(value: unknown): SecCompilerAccessPolicy {
+  if (!object(value) || !keys(value, ['restricted', 'accountIds']) || typeof value.restricted !== 'boolean') return invalid('compiler access needs exactly restricted and accountIds')
+  const accountIds = distinct(list(value.accountIds, 5000, 'granted accounts').map(id => typeof id === 'string' && ACCOUNT_ID.test(id) ? id : invalid('granted accounts are account ids')), 'granted account')
+  return { restricted: value.restricted, accountIds: [...accountIds].sort() }
+}
+
+const PARSERS: Readonly<Record<SecKind, (value: unknown) => unknown>> = { waf: parseSecWafPolicy, flood: parseSecFloodPolicy, 'panel-access': parseSecPanelAccessPolicy, 'dns-cluster': parseSecDnsClusterConfig, 'waf-sites': parseSecWafSites, 'compiler-access': parseSecCompilerAccessPolicy }
 export const parseSecPolicy = <K extends SecKind>(kind: K, value: unknown): typeof SEC_DEFAULTS[K] => PARSERS[kind](value) as typeof SEC_DEFAULTS[K]
 /** A saved record is accepted only when it round-trips exactly through its grammar. */
 export function readSecRecord<K extends SecKind>(kind: K, value: unknown): SecRecord<typeof SEC_DEFAULTS[K]> | null {

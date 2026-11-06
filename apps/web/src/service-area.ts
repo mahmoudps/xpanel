@@ -12,6 +12,8 @@ export function serviceArea(id: string | null, unit: string | null): string {
     ['xpanel-api', 'data', ['xpanel-api.service']], ['xpanel-agent', 'data', ['xpanel-agent.service']],
     ['cron', 'access', ['cron.service', 'cronie.service']], ['ssh', 'access', ['ssh.service', 'sshd.service']],
   ]
+  // A PHP-FPM row aggregates one PHP version's account masters, so it never names a single unit.
+  if (id !== null && /^php-fpm(?:-[0-9]{2})?$/.test(id)) return unit === null ? 'web' : 'unread'
   if (id !== null) {
     const match = known.find(row => row[0] === id)
     return match && (unit === null || match[2].includes(unit)) ? match[1] : 'unread'

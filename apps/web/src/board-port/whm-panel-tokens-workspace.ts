@@ -14,7 +14,6 @@ export const PANEL_TOKEN_SCOPE_LABELS: Readonly<Record<string, string>> = {
   branding: msgid('Branding'),
   cache: msgid('Cache services'),
   catalog: msgid('Tool catalog'),
-  cluster: msgid('DNS cluster'),
   containers: msgid('Containers'),
   cron: msgctxt('whm-panel-tokens-workspace', 'Cron jobs'),
   databases: msgid('Databases'),

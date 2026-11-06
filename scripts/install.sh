@@ -196,7 +196,7 @@ fi
 
 PHP_COMPACT="${PHP_VERSION//./}"
 if [[ "$OS_FAMILY" == "debian" ]]; then
-  BOOTSTRAP_PACKAGES=(software-properties-common ca-certificates curl gnupg adduser acl openssl)
+  BOOTSTRAP_PACKAGES=(software-properties-common ca-certificates curl gnupg adduser acl openssl zstd)
   REPOSITORY_SOURCES=(universe ppa:ondrej/php)
   REPOSITORY_PACKAGES=()
   PHP_JSON_PACKAGE="php7.4-json"
@@ -239,7 +239,7 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
   [[ "$WITH_FTP" -eq 1 ]] && PACKAGES+=(pure-ftpd)
   [[ "$WITH_MODSECURITY" -eq 1 ]] && PACKAGES+=(libapache2-mod-security2 modsecurity-crs)
 else
-  BOOTSTRAP_PACKAGES=(dnf-plugins-core acl policycoreutils-python-utils openssl)
+  BOOTSTRAP_PACKAGES=(dnf-plugins-core acl policycoreutils-python-utils openssl zstd)
   REPOSITORY_SOURCES=(crb)
   EPEL_PACKAGES=(epel-release)
   if [[ "$OS_ID" == "centos" ]]; then

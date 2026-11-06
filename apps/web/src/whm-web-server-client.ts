@@ -8,7 +8,7 @@ type WebValues = Record<string, string | number | boolean>
 export interface WhmWebGeneration { id: number; createdAt: string; status: string; checksum: string; filesCount?: number }
 export interface WhmWebDesiredState { revision: number; checksum: string; pending: boolean }
 export interface WhmWebGenerationRead { generations: WhmWebGeneration[]; currentGeneration: WhmWebGeneration | null; desiredState: WhmWebDesiredState | null; canRollback: boolean; rollbackEligibleGenerationIds: number[] }
-interface WhmWebService { id: string; label: string; unit: string | null; state: string }
+interface WhmWebService { id: string; label: string; unit: string | null; state: string; fpmVersion: string | null }
 export function whmWebObject(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value) }
 export function readWhmWebGeneration(value: unknown): WhmWebGeneration {
   if (!whmWebObject(value) || typeof value.id !== 'number' || !Number.isSafeInteger(value.id) || value.id <= 0 || typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt)) || typeof value.status !== 'string' || !['pending', 'tested', 'active', 'superseded', 'failed', 'rolled_back'].includes(value.status) || typeof value.checksum !== 'string' || !/^[0-9a-f]{64}$/.test(value.checksum)) throw new Error('invalid_generation')
@@ -37,9 +37,11 @@ export function readWhmWebServices(value: unknown): WhmWebService[] {
   if (!whmWebObject(value) || !Array.isArray(value.services) || value.services.length > 256) throw new Error('invalid_services')
   const seen = new Set<string>()
   return value.services.map(raw => {
-    if (!whmWebObject(raw) || typeof raw.id !== 'string' || !/^[a-z0-9-]{1,64}$/.test(raw.id) || seen.has(raw.id) || typeof raw.label !== 'string' || raw.label.length > 128 || /[\u0000-\u001f\u007f]/.test(raw.label) || raw.unit !== null && (typeof raw.unit !== 'string' || !/^[a-zA-Z0-9@_.-]{1,128}$/.test(raw.unit)) || typeof raw.state !== 'string' || !['active', 'inactive', 'failed', 'not-installed', 'unchecked'].includes(raw.state) || ['active', 'inactive', 'failed'].includes(raw.state) && raw.unit === null) throw new Error('invalid_service')
+    // Only a PHP-FPM version row observes a state without one unit: it counts that version's account masters.
+    const fpmVersion = whmWebObject(raw) && raw.unit === null && whmWebObject(raw.fpm) && typeof raw.fpm.version === 'string' && /^[0-9]\.[0-9]$/.test(raw.fpm.version) && raw.id === 'php-fpm-' + raw.fpm.version.replace('.', '') ? raw.fpm.version : null
+    if (!whmWebObject(raw) || typeof raw.id !== 'string' || !/^[a-z0-9-]{1,64}$/.test(raw.id) || seen.has(raw.id) || typeof raw.label !== 'string' || raw.label.length > 128 || /[\u0000-\u001f\u007f]/.test(raw.label) || raw.unit !== null && (typeof raw.unit !== 'string' || !/^[a-zA-Z0-9@_.-]{1,128}$/.test(raw.unit)) || typeof raw.state !== 'string' || !['active', 'inactive', 'failed', 'not-installed', 'unchecked'].includes(raw.state) || ['active', 'inactive', 'failed'].includes(raw.state) && raw.unit === null && fpmVersion === null) throw new Error('invalid_service')
     seen.add(raw.id)
-    return { id: raw.id, label: raw.label, unit: raw.unit as string | null, state: raw.state }
+    return { id: raw.id, label: raw.label, unit: raw.unit as string | null, state: raw.state, fpmVersion }
   })
 }
 export function readWhmWebSettings(value: unknown): WebValues {
@@ -134,7 +136,7 @@ function bindWhmWebServer(askDialog: ((options: Record<string, unknown>) => Prom
       if (!body) return
       body.textContent = ''
       const names: Record<string, string> = { active: t(msgctxt('whm-web-server-client', 'Active')), inactive: t('Inactive'), failed: t(msgctxt('whm-web-server-client', 'Failed')), 'not-installed': t('Not installed'), unchecked: t('Not read') }
-      for (const service of services.filter(item => ['nginx', 'apache', 'php-fpm', 'openlitespeed'].includes(item.id))) { const row = document.createElement('tr'); cell(row, service.label); cell(row, service.unit ?? (service.state === 'not-installed' ? t('Not installed') : t('Not read')), true); cell(row, names[service.state]!); body.append(row) }
+      for (const service of services.filter(item => ['nginx', 'apache', 'php-fpm', 'openlitespeed'].includes(item.id) || item.fpmVersion !== null)) { const row = document.createElement('tr'); cell(row, service.label); cell(row, service.fpmVersion !== null ? 'xpanel-php-fpm-*-' + service.fpmVersion + '.service' : service.unit ?? (service.state === 'not-installed' ? t('Not installed') : t('Not read')), true); cell(row, names[service.state]!); body.append(row) }
       if (!body.childElementCount) empty(body, 3, t('No web-service observation was returned. Availability is not assumed.'))
     }
     const load = async (explicit = false): Promise<void> => {
