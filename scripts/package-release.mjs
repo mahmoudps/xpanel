@@ -51,6 +51,8 @@ export const REQUIRED_ROOT_FILES = Object.freeze([
   'CLA.md',
   'scripts/install.sh',
   'scripts/management-tls.mjs',
+  'scripts/nginx-http2.mjs',
+  'scripts/nginx-http2.d.mts',
   'scripts/managed-units.mjs',
   'scripts/managed-units.d.mts',
   'scripts/coordinator-ownership.mjs',

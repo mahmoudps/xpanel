@@ -9,6 +9,9 @@ import { describe, expect, it, vi } from 'vitest'
 // Source diagnostics only. These tests do not issue a certificate or emulate a trusted CA.
 import { ACME_DIRECTORY, PATHS, assertIsolatedDefaultConfig, awaitReadiness, certbotArguments, mergeApiEnvironment, parseConfigArguments, renderChallenge, renderIngress, renderRenewalUnits, renewalObservation, requiredEnvironment, sameFileVersion, validateConfig } from './management-tls.mjs'
 import { ACTIVATION_KIND, ACTIVATION_PATH } from './management-tls-activation.mjs'
+import { NGINX_HTTP2_STYLES, nginxHttp2Style } from './nginx-http2.mjs'
+import { renderDefaultSite, renderNginxSite } from '../packages/render/src/edge/nginx.ts'
+import { account, cert, domain, serverBlocks, settings } from '../packages/render/src/edge/testkit.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const input = () => ({ schemaVersion: 1, hostname: 'panel.example.org', addresses: ['192.0.2.10'], acmeEmail: 'admin@example.org', acceptAcmeTerms: true })
@@ -64,14 +67,14 @@ const modelFilesystem = () => {
 }
 const transactionBindings = (fs: ReturnType<typeof modelFilesystem>) => ({ ...fs, constants, PATHS, sha: digest, fail: codedFailure, sameFileVersion, stamp: () => String(Math.random()).slice(2), command: async (_operation: string, _executable: string, args: string[]) => { const original = fs.get(args[2])!; fs.put(args[3], original.bytes, original.st.mode & 0o777, original.st.gid) } })
 
-const lifecycleModel = (options: { expired?: boolean; rejectCandidate?: boolean; rejectActivation?: boolean; rejectStatus?: boolean; mutate?: 'api' | 'secret' | 'config' | 'timer' } = {}) => {
+const lifecycleModel = (options: { expired?: boolean; rejectCandidate?: boolean; rejectActivation?: boolean; rejectStatus?: boolean; mutate?: 'api' | 'secret' | 'config' | 'timer'; http2?: 'listen' | 'directive' } = {}) => {
   const fs = modelFilesystem(), value = config(), operations: string[] = [], statuses: any[] = []
   const oldFingerprint = 'a'.repeat(64), newFingerprint = 'b'.repeat(64)
   fs.put(PATHS.config, JSON.stringify(value), 0o600)
   fs.put(PATHS.secret, '1'.repeat(64) + '\n', 0o640, 100)
   fs.put(PATHS.apiEnv, Object.entries(requiredEnvironment(value)).map(([key, item]) => `${key}=${item}\n`).join(''), 0o640, 100)
   fs.put(PATHS.challenge, renderChallenge(value), 0o644)
-  fs.put(PATHS.ingress, renderIngress(value, oldFingerprint), 0o644)
+  fs.put(PATHS.ingress, renderIngress(value, oldFingerprint, 'listen'), 0o644)
   fs.put(PATHS.include, '# Managed by xPanel management TLS lifecycle v1.\ninclude\n', 0o600)
   fs.put(PATHS.service, '# Managed by xPanel management TLS lifecycle v1.\nservice\n', 0o644)
   fs.put(PATHS.timer, '# Managed by xPanel management TLS lifecycle v1.\ntimer\n', 0o644)
@@ -92,6 +95,7 @@ const lifecycleModel = (options: { expired?: boolean; rejectCandidate?: boolean;
     ...transactionBindings(fs), command, MARKER: '# Managed by xPanel management TLS lifecycle v1.\n', validateConfig, mergeApiEnvironment, certbotArguments,
     renewalTimerState: timerRead, nginxState: async () => ({ LoadState: 'loaded', ActiveState: 'active', SubState: 'running', InvocationID: 'a'.repeat(32), MainPID: '10' }), nginxConfigurationDigest: async () => 'configuration-hash', dnsPreflight: async () => {},
     preflightUnusedListeners: async () => {}, assertNginxInvocation: async () => {}, nginxReload: async () => {}, assertNoCertbotHooks: () => {},
+    observeNginxHttp2: async () => options.http2 ?? 'listen',
     installedCertificate: () => ({ generation: oldFingerprint }),
     servedReady: async (_config: unknown, certificate: { generation: string }) => { if (options.expired && certificate.generation === oldFingerprint) codedFailure('CERT_HAS_EXPIRED'); if (options.rejectCandidate && certificate.generation === newFingerprint) codedFailure('CANDIDATE_NOT_TRUSTED'); return { attempts: 1 } },
     readCertificate: () => ({ generation: newFingerprint, fullchain: 'diagnostic bytes', key: 'diagnostic bytes', expiresAt: '2030-01-01T00:00:00.000Z' }),
@@ -150,7 +154,7 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
     expect(source).toContain('applicationBootstrap: \'pending\'')
   })
   it('lets a synchronous account provisioning answer through every management entry point', () => {
-    const rendered = renderIngress(config(), 'a'.repeat(64))
+    const rendered = renderIngress(config(), 'a'.repeat(64), 'listen')
     expect(rendered.match(/proxy_pass http:\/\/127\.0\.0\.1:120(83|87|96);/g)).toHaveLength(3)
     expect(rendered.match(/^ {8}proxy_read_timeout 300s;$/gm)).toHaveLength(3)
   })
@@ -247,13 +251,14 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
     expect(text).not.toContain('server_name example.org')
   })
   it('keeps canonical443 redirects outside API origins and uses one protected ingress include', () => {
-    const text = renderIngress(config(), 'a'.repeat(64))
+    const text = renderIngress(config(), 'a'.repeat(64), 'directive')
     for (const [port, backend] of [[2083, 12083], [2087, 12087], [2096, 12096]]) {
       expect(text).toContain(`listen 192.0.2.10:${port} ssl;`)
       expect(text).toContain(`proxy_pass http://127.0.0.1:${backend};`)
     }
     // Shared with the account edge: an address-specific 443 would capture every account site on the address.
     expect(text.match(/^ {4}listen 443 ssl;$/gm)).toHaveLength(3)
+    expect(text.match(/^ {4}http2 on;$/gm)).toHaveLength(3)
     expect(text).not.toContain('192.0.2.10:443')
     expect(text.match(/include \/etc\/nginx\/xpanel-management\/ingress-secret.conf;/g)).toHaveLength(3)
     expect(text.match(/proxy_set_header Upgrade \$http_upgrade;/g)).toHaveLength(3)
@@ -263,13 +268,13 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
     expect(text).toContain('proxy_set_header X-Forwarded-For $remote_addr;')
     expect(text).not.toContain('0.0.0.0')
     expect(text).not.toContain('proxy_pass https')
-    expect(() => renderIngress(config(), '../escape')).toThrow()
+    expect(() => renderIngress(config(), '../escape', 'listen')).toThrow()
   })
   it('renders IPv6 exact binds and gives renewal the same reviewed lifecycle', () => {
     const value = validateConfig({ ...input(), addresses: ['192.0.2.10', '2001:db8::10'] })
     expect(renderChallenge(value)).toContain('listen [::]:80;')
     expect(renderChallenge(config())).not.toContain('[::]')
-    expect(renderIngress(value, 'b'.repeat(64))).toContain('listen [2001:db8::10]:2087 ssl;')
+    expect(renderIngress(value, 'b'.repeat(64), 'listen')).toContain('listen [2001:db8::10]:2087 ssl;')
     const units = renderRenewalUnits('/opt/xpanel-runtime/bin/node')
     expect(units.service).toContain('ExecStart=/opt/xpanel-runtime/bin/node /opt/xpanel/scripts/management-tls.mjs renew')
     expect(units.service).toContain('KillMode=control-group')
@@ -279,6 +284,49 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
     expect(current.service).toContain('ExecStart=/opt/xpanel-runtime/bin/node /opt/xpanel/current/scripts/management-tls.mjs renew')
     expect(current.timer).toBe(units.timer)
     expect(() => renderRenewalUnits('/usr/bin/node', 'arbitrary')).toThrow()
+  })
+  it('renders the shared 443 servers in the listen style nginx before 1.25.1 requires', () => {
+    const value = validateConfig({ ...input(), addresses: ['192.0.2.10', '2001:db8::10'] })
+    const text = renderIngress(value, 'a'.repeat(64), 'listen')
+    expect(text.match(/^ {4}listen 443 ssl http2;$/gm)).toHaveLength(3)
+    expect(text.match(/^ {4}listen \[::\]:443 ssl http2;$/gm)).toHaveLength(3)
+    expect(text).not.toContain('http2 on;')
+    // The exclusive management ports keep their own options in either style.
+    expect(text).toContain('listen 192.0.2.10:2083 ssl;')
+    expect(renderIngress(value, 'a'.repeat(64), 'directive')).toContain('listen [::]:443 ssl;\n    http2 on;\n')
+    for (const http2 of [undefined, 'h2', 'listen http2']) expect(() => renderIngress(value, 'a'.repeat(64), http2)).toThrow('NGINX_HTTP2_STYLE_INVALID')
+  })
+  it.each(NGINX_HTTP2_STYLES)('gives the management and account servers on the shared 443 socket identical protocol options (%s)', http2 => {
+    const value = validateConfig({ ...input(), addresses: ['192.0.2.10', '2001:db8::10'] })
+    const edge = { ...settings(), edge: { http2 } }
+    const combined = [renderIngress(value, 'a'.repeat(64), http2), renderDefaultSite({ settings: edge }), renderNginxSite(account(), [domain()], edge, cert())].join('\n')
+    const options = new Map<string, Set<string>>()
+    for (const [, socket, rest] of combined.matchAll(/^ *listen ((?:\[::\]:)?443)((?: [a-z0-9_]+)*);$/gm)) {
+      options.set(socket!, (options.get(socket!) ?? new Set()).add(rest!.replace(' default_server', '')))
+    }
+    expect([...options.keys()].sort()).toEqual(['443', '[::]:443'])
+    for (const seen of options.values()) expect([...seen]).toEqual([http2 === 'listen' ? ' ssl http2' : ' ssl'])
+    const servers = serverBlocks(combined).filter(block => /listen 443 /.test(block))
+    expect(servers).toHaveLength(5)
+    for (const server of servers) expect(server.includes('http2 on;')).toBe(http2 === 'directive')
+  })
+  it('recognizes its own ingress in either style and refuses any other text', () => {
+    const { managedIngress } = loadDeclarations(['managedIngress'], { NGINX_HTTP2_STYLES, renderIngress })
+    const value = config(), generation = 'a'.repeat(64)
+    for (const http2 of NGINX_HTTP2_STYLES) expect(managedIngress(renderIngress(value, generation, http2), value, generation)).toBe(true)
+    // The earlier rendering without any HTTP/2 option conflicts with the account edge; it is not adopted.
+    expect(managedIngress(renderIngress(value, generation, 'directive').replaceAll('\n    http2 on;', ''), value, generation)).toBe(false)
+    expect(managedIngress(renderIngress(value, generation, 'listen') + '# edited\n', value, generation)).toBe(false)
+  })
+  it('reads the HTTP/2 style from the installed nginx binary and refuses an unreadable version', async () => {
+    const calls: unknown[][] = []
+    const observe = (stderr: string) => loadDeclarations(['observeNginxHttp2'], {
+      command: async (...args: unknown[]) => { calls.push(args); return { stdout: '', stderr } }, nginxHttp2Style, fail: codedFailure,
+    }).observeNginxHttp2()
+    await expect(observe('nginx version: nginx/1.24.0 (Ubuntu)\n')).resolves.toBe('listen')
+    await expect(observe('nginx version: nginx/1.26.3\n')).resolves.toBe('directive')
+    await expect(observe('')).rejects.toMatchObject({ code: 'NGINX_VERSION_UNOBSERVED' })
+    expect(calls[0]).toEqual(['read-nginx-version', '/usr/sbin/nginx', ['-v'], 5_000])
   })
   it('waits through old-worker certificate mismatch instead of equating successful reload to readiness', async () => {
     let now = 0, count = 0
@@ -343,6 +391,11 @@ describe('management TLS retained-failure control-flow diagnostics (modeled kern
     expect(model.statuses.at(-1).status).toBe('ingress-observed-ready')
     expect(model.statuses.at(-1)).not.toHaveProperty('activationRecordSha256')
   })
+  it('writes the new ingress in the HTTP/2 style observed from the installed nginx', async () => {
+    const model = lifecycleModel({ http2: 'directive' })
+    await model.invoke('renew')
+    expect(model.fs.get(PATHS.ingress)!.bytes.toString()).toBe(renderIngress(model.value, 'b'.repeat(64), 'directive'))
+  })
   it('permits an expired installed baseline to reach repair and never labels it previously observed', async () => {
     const model = lifecycleModel({ expired: true })
     await expect(model.invoke()).resolves.toBeUndefined()
@@ -353,7 +406,7 @@ describe('management TLS retained-failure control-flow diagnostics (modeled kern
     const model = lifecycleModel({ expired: true, rejectCandidate: true })
     await expect(model.invoke()).rejects.toThrow('CANDIDATE_NOT_TRUSTED')
     expect(model.statuses.at(-1)).toMatchObject({ status: 'failed', previousServedFingerprint: null, priorReadiness: 'baseline-unhealthy', rollback: 'owned-files-restored-prior-baseline-unhealthy' })
-    expect(model.fs.get(PATHS.ingress)!.bytes.toString()).toBe(renderIngress(model.value, model.oldFingerprint))
+    expect(model.fs.get(PATHS.ingress)!.bytes.toString()).toBe(renderIngress(model.value, model.oldFingerprint, 'listen'))
   })
   it.each(['api', 'secret', 'config'] as const)('preserves an original %s reference changed while issuance is pending', async mutate => {
     const model = lifecycleModel({ mutate })

@@ -216,6 +216,8 @@ export interface CompileOptions {
   runtime?: ReadonlyMap<string, RuntimeRegistry>
   /** Hosts the management TLS ingress serves on the shared 80/443 sockets (agent-origin.ts readManagementHosts). */
   managementHosts?: readonly string[]
+  /** HTTP/2 style of the installed nginx, read after preflight; the management ingress renders the same one. */
+  nginxHttp2?: edge.NginxHttp2Style
   /** Live /etc/hosts read after preflight; its unrelated lines are kept. Absent renders only the managed lines. */
   etcHosts?: string | null
   /** Kernel host name read after preflight; hostnamectl runs only when it differs from the saved name. */
@@ -267,6 +269,9 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   }
   const plansById = new Map(snapshot.plans.map((p) => [p.id, p]))
   const certs = snapshot.certificates
+  // sec: saved WAF edge input. Every server on the shared 443 socket must carry the same protocol options.
+  const edgeSettings = (settings: ServerSettings): ServerSettings =>
+    ({ ...settings, edge: { ...opts.secEdge?.edge, ...(opts.nginxHttp2 && { http2: opts.nginxHttp2 }) } }) as ServerSettings
 
   // 1. Server-level edge, backend, SSH, symlink protection, jailed shell, and firewall
   if (snapshot.server) {
@@ -279,10 +284,9 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
 
     preActions.push(...edge.nginxEdgeDirs(os))
     // sec: WAF edge input and trusted-proxy authority
-    const secEdgeSettings = opts.secEdge ? { ...settings, edge: opts.secEdge.edge } as ServerSettings : settings
-    files.push(edge.renderNginxMain(secEdgeSettings, os, opts.trustedProxyAuthority))
+    files.push(edge.renderNginxMain(edgeSettings(settings), os, opts.trustedProxyAuthority))
     if (opts.secEdge?.edge.modsecurity) files.push(edge.renderModsecurityMain(opts.secEdge.edge.modsecurity))
-    files.push(edge.defaultSiteFile(os, { settings, ...(opts.managementHosts ? { excludedNames: opts.managementHosts } : {}) }))
+    files.push(edge.defaultSiteFile(os, { settings: edgeSettings(settings), ...(opts.managementHosts ? { excludedNames: opts.managementHosts } : {}) }))
     addTest(edge.nginxConfigTest(os))
 
     if (settings.engine === 'apache') {
@@ -461,7 +465,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     if (snapshot.server && accountDomains.length > 0) {
       const settings = snapshot.server.settings
       // sec: per-site WAF limits and ModSecurity switches
-      files.push(edge.nginxSiteFile(account, accountDomains, opts.secEdge ? { ...settings, edge: opts.secEdge.edge } as ServerSettings : settings, os, certs, { now, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}), ...(runtimeRender ? { appRoutes: runtimeRender.routes } : {}) }))
+      files.push(edge.nginxSiteFile(account, accountDomains, edgeSettings(settings), os, certs, { now, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}), ...(runtimeRender ? { appRoutes: runtimeRender.routes } : {}) }))
 
       // Per-domain custom configuration drop-in files (cPanel userdata style) + .user.ini
       if (snapshot.domainCustomConfigs && snapshot.domainCustomConfigs.length > 0) {
@@ -1704,6 +1708,7 @@ export class HostReconciler {
     let etcHosts: string | null | undefined
     let observedHostname: string | null | undefined
     let selinux: boolean | undefined
+    let nginxHttp2: edge.NginxHttp2Style | undefined
     let kernelHostname: string | null | undefined
     const observedKernel = () => (kernelHostname !== undefined ? { kernelHostname } : {})
     const compileMail = (mailAuth: OpenDkimSigning | null, previousZones?: ReadonlyMap<string, string>) => {
@@ -1727,6 +1732,7 @@ export class HostReconciler {
         ...(etcHosts !== undefined ? { etcHosts } : {}),
         ...(observedHostname !== undefined ? { observedHostname } : {}),
         ...(selinux !== undefined ? { selinux } : {}),
+        ...(nginxHttp2 && { nginxHttp2 }),
         now: new Date(),
       })
       if (appliedSnapshot) {
@@ -1817,6 +1823,10 @@ export class HostReconciler {
       observedHostname = await this.deps.executor.readFile(KERNEL_HOSTNAME_PATH)
       kernelHostname = observedHostname?.trim() ?? null
       if (this.deps.os.family === 'rhel') selinux = await this.deps.executor.readFile(SELINUX_ENFORCE_PATH) !== null
+      // The binary that runs the config test reports its release on stderr.
+      const version = await this.deps.executor.runCommand([edge.nginxBinary(this.deps.os), '-v'])
+      nginxHttp2 = (version.ok ? edge.nginxHttp2Style(version.stderr) : null)
+        ?? fail('PRECONDITION_FAILED', 'the installed nginx version could not be observed', { stateChanged: false })
     }
     const refreshed = compileMail(mailAuth, previousZones)
     const nextChecksum = computeFilesChecksum(refreshed.files)

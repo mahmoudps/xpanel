@@ -105,6 +105,8 @@ export class FakeHostExecutor implements AgentExecutor {
   readonly executedCommands: string[][] = []
   readonly sqlStatements: { engine: 'mariadb' | 'postgresql'; statement: string }[] = []
   readonly sliceMetrics = new Map<number, AccountSliceMetrics>()
+  /** Declared `nginx -v` answer (stderr) of the modeled host. */
+  nginxVersion = 'nginx version: nginx/1.24.0\n'
 
   private failingTests = new Map<string, string>()
   private failingCommands = new Map<string, { code: number; stderr: string; stdout: string }>()
@@ -254,6 +256,7 @@ export class FakeHostExecutor implements AgentExecutor {
       this.units.set(unit, current)
       return { ok: true, code: 0, stdout: '', stderr: '' }
     }
+    if (argv.length === 2 && argv[1] === '-v' && /(?:^|\/)nginx$/.test(argv[0] ?? '')) return { ok: true, code: 0, stdout: '', stderr: this.nginxVersion }
     return {
       ok: true,
       code: 0,

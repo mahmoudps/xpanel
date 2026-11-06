@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
 import { renderManagedUnits, renderManagedUnitPlan } from './managed-units.mjs'
 import { ACTIVATION_KIND, ACTIVATION_PATH, activationCommandEvidence, observeManagementActivation, completeManagementActivation } from './management-tls-activation.mjs'
+import { NGINX_HTTP2_STYLES, nginxHttp2Style } from './nginx-http2.mjs'
 
 export const ACME_DIRECTORY = 'https://acme-v02.api.letsencrypt.org/directory'
 export const MARKER = '# Managed by xPanel management TLS lifecycle v1.\n'
@@ -100,8 +101,8 @@ export function mergeApiEnvironment(content, config) {
 const listen = (config, port, ssl = false) => config.addresses.map(address => `    listen ${isIP(address) === 6 ? `[${address}]` : address}:${port}${ssl ? ' ssl' : ''};`).join('\n')
 // 80 and 443 are shared with the account edge. nginx chooses among the servers of the exact socket a request
 // arrives on, so an address-specific listen here would capture every account site on that address.
-const sharedListen = (config, port, ssl = false) => [`    listen ${port}${ssl ? ' ssl' : ''};`,
-  ...(config.addresses.some(address => isIP(address) === 6) ? [`    listen [::]:${port}${ssl ? ' ssl' : ''};`] : [])].join('\n')
+const sharedListen = (config, port, options = '') => [`    listen ${port}${options};`,
+  ...(config.addresses.some(address => isIP(address) === 6) ? [`    listen [::]:${port}${options};`] : [])].join('\n')
 export function renderChallenge(config) {
   return MARKER + profiles(config).map(point => `server {
 ${sharedListen(config, 80)}
@@ -117,12 +118,15 @@ ${sharedListen(config, 80)}
 `).join('\n')
 }
 
-export function renderIngress(config, generation) {
+// nginx requires the account edge's protocol options on every server of the shared 443 socket.
+export function renderIngress(config, generation, http2) {
   if (!/^[a-f0-9]{64}$/.test(generation)) fail('CERTIFICATE_GENERATION_INVALID')
+  if (!NGINX_HTTP2_STYLES.includes(http2)) fail('NGINX_HTTP2_STYLE_INVALID')
+  const shared443 = sharedListen(config, 443, http2 === 'listen' ? ' ssl http2' : ' ssl') + (http2 === 'directive' ? '\n    http2 on;' : '')
   const certificate = `${PATHS.certs}/${generation}`
   const tls = `    ssl_certificate ${certificate}/fullchain.pem;\n    ssl_certificate_key ${certificate}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;`
   return MARKER + `map $http_upgrade $xpanel_management_connection_upgrade { default upgrade; '' close; }\n\n` + profiles(config).map(point => `server {
-${sharedListen(config, 443, true)}
+${shared443}
     server_name ${point.host};
 ${tls}
     if ($host != "${point.host}") { return 421; }
@@ -379,6 +383,16 @@ function assertOriginalReferences(references) {
   for (const [path, expected] of references) if (!sameFileVersion(existing(path), expected)) fail('ORIGINAL_REFERENCE_DRIFT')
 }
 
+// An nginx update between runs changes the style, so an ingress rendered for either one is still this lifecycle's file.
+function managedIngress(text, config, generation) {
+  return NGINX_HTTP2_STYLES.some(http2 => text === renderIngress(config, generation, http2))
+}
+
+async function observeNginxHttp2() {
+  const result = await command('read-nginx-version', '/usr/sbin/nginx', ['-v'], 5_000)
+  return nginxHttp2Style(result.stderr) ?? fail('NGINX_VERSION_UNOBSERVED')
+}
+
 async function nginxReload() {
   const result = await command('nginx-config-test', '/usr/sbin/nginx', ['-t'])
   if (/conflicting server name|duplicate listen|emerg|warn/i.test(result.stderr)) fail('NGINX_CONFIG_CONFLICT')
@@ -519,7 +533,7 @@ function installedCertificate(config) {
   if (!ingress) return null
   const text = ingress.bytes.toString('utf8')
   const generation = /ssl_certificate \/etc\/xpanel\/management-certificates\/([a-f0-9]{64})\/fullchain\.pem;/.exec(text)?.[1]
-  if (!generation || text !== renderIngress(config, generation)) fail('MANAGED_INGRESS_EXPLICIT_MIGRATION_REQUIRED')
+  if (!generation || !managedIngress(text, config, generation)) fail('MANAGED_INGRESS_EXPLICIT_MIGRATION_REQUIRED')
   const certificate = new X509Certificate(readRootFile(`${PATHS.certs}/${generation}/fullchain.pem`, 128 * 1024, true).bytes)
   if (sha(certificate.raw) !== generation) fail('INSTALLED_CERTIFICATE_DRIFT')
   return { generation }
@@ -619,6 +633,7 @@ async function lifecycle(config, phase, configReference, layout = 'flat') {
       saveStatus({ phase, status: 'ingress-observed-ready', fingerprint: certificate.generation, expiresAt: certificate.expiresAt, applicationBootstrap: 'identity-and-optional-MFA-remain-independent', attempts: result.attempts })
       return
     }
+    const http2 = await observeNginxHttp2()
     priorCertificate = installedCertificate(config)
     priorObservation.installedFingerprint = priorCertificate?.generation ?? null
     if (priorCertificate && initialNginx.ActiveState === 'active') {
@@ -668,7 +683,7 @@ async function lifecycle(config, phase, configReference, layout = 'flat') {
     }
     await transaction.write(PATHS.include, MARKER + `proxy_set_header X-XPanel-Ingress-Secret "${secret.bytes.toString('utf8').trim()}";\n`, 0o600, 0, false, managedReferences.get(PATHS.include))
     await transaction.write(PATHS.apiEnv, merged, api.st.mode & 0o777, api.st.gid, true, api)
-    await transaction.write(PATHS.ingress, renderIngress(config, certificate.generation), 0o644, 0, false, managedReferences.get(PATHS.ingress))
+    await transaction.write(PATHS.ingress, renderIngress(config, certificate.generation, http2), 0o644, 0, false, managedReferences.get(PATHS.ingress))
     if (phase === 'prepare') {
       const beforeUnitWrite = await renewalTimerState()
       assertTimerSnapshot(initialTimer, beforeUnitWrite, initialTimer.references)
@@ -826,7 +841,7 @@ export function readManagementTlsReadiness() {
   if (secretReference.mode !== 0o640 || secretReference.gid !== gid || ![0o600, 0o640].includes(apiReference.mode) || apiReference.gid !== gid) fail('INSTALL_READINESS_TLS_READER_INVALID')
   if (!/^[a-f0-9]{64}\n?$/.test(secret.toString('utf8')) || mergeApiEnvironment(api.toString('utf8'), config) !== api.toString('utf8')) fail('INSTALL_READINESS_TLS_ENV_INVALID')
   const ingress = read(PATHS.ingress, 1024 * 1024), certificate = readCertificate(config), installed = installedCertificate(config)
-  if (!installed || installed.generation !== certificate.generation || ingress.toString('utf8') !== renderIngress(config, certificate.generation)) fail('INSTALL_READINESS_TLS_INGRESS_CHANGED')
+  if (!installed || installed.generation !== certificate.generation || !managedIngress(ingress.toString('utf8'), config, certificate.generation)) fail('INSTALL_READINESS_TLS_INGRESS_CHANGED')
   const include = read(PATHS.include, 16 * 1024, true)
   if (!include.toString('utf8').startsWith(MARKER) || !include.toString('utf8').includes(secret.toString('utf8').trim())) fail('INSTALL_READINESS_TLS_INCLUDE_INVALID')
   read(PATHS.certs + '/' + certificate.generation + '/fullchain.pem', 128 * 1024, true)
