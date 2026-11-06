@@ -152,8 +152,6 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.backupManage === 'true' && !root.closest(denied) && backupDestinationEditorPresent(root, destinationManager)
     const scheduleInputs = ['policy-enabled', 'policy-cron', 'daily-copies', 'weekly-copies', 'include-databases', 'include-mail', 'include-dns', 'include-control', 'start-time']
-    // Archives are written with gzip only, so Zstandard stays listed as an unavailable choice.
-    const zstd = root.querySelector<HTMLOptionElement>('#backup-layout-policy-compress option[value="1"]'); if (zstd) zstd.disabled = true
     const destinationInputs = ['destination-name', 'destination-endpoint', 'destination-prefix', 'destination-bucket', 'destination-region', 'destination-user', 'destination-retention']
     if (!delegatedDestinations) {
       const activationHelp = backupNode(root, 'activation', 'span'), activationLink = clientTemplateSlot(activationHelp, 'link', 'a') as HTMLAnchorElement

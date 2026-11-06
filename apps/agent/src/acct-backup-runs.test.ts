@@ -36,7 +36,7 @@ const setup = (overrides: Partial<BackupRunDeps> = {}, config: { destinations: u
     readLocalArchive: async () => ({ bytes: 3, sha256: SHA, chunks: async function* () { yield BYTES } }),
     storeRecovered: vi.fn(async (_account, file, chunks, expected) => { const parts: Uint8Array[] = []; for await (const chunk of chunks) parts.push(chunk); const bytes = Buffer.concat(parts); if (sha(bytes) !== expected.sha256) return 'mismatch'; if (stored.has(file)) return 'exists'; stored.set(file, bytes); return 'recovered' }),
     readLedger: async () => ledger, writeLedger: async value => { ledger = structuredClone(value) },
-    now: () => clock, ...overrides,
+    zstdInstalled: async () => true, now: () => clock, ...overrides,
   }
   return { deps, objects, stored, session, provider, controller: createBackupRunController(deps), ledger: () => ledger, setLedger: (value: unknown) => { ledger = value }, setClock: (value: string) => { clock = new Date(value) } }
 }
@@ -84,7 +84,7 @@ describe('scheduled backup controller', () => {
     const view = readBackupRunsView(JSON.parse(JSON.stringify(await t.controller.view())))
     expect(view.runs[0]).toMatchObject({ id: run.id, state: 'succeeded', entries: [{ username: 'alice', file: FILE, sha256: SHA, outcome: 'verified', reason: null }], databasesIncluded: true,
       archives: [{ username: 'alice', file: FILE, sha256: SHA, integrity: 'verified', reason: null }] })
-    expect(t.deps.createBackup).toHaveBeenCalledWith(expect.objectContaining({ username: 'alice' }), { excludeMail: false, includeDatabases: true, includeDns: true })
+    expect(t.deps.createBackup).toHaveBeenCalledWith(expect.objectContaining({ username: 'alice' }), { excludeMail: false, includeDatabases: true, includeDns: true, compression: 'gzip' })
     expect(t.objects.get('alice/' + FILE)).toEqual(Buffer.from(BYTES))
   })
   it('keeps mismatched readback failed and interrupted uploads unknown', async () => {
@@ -142,8 +142,8 @@ describe('scheduled backup controller', () => {
     expect((await t.controller.view()).schedule?.timerObservedAt).toBe('2026-10-28T02:01:30.000Z')
     await t.controller.idle()
   })
-  it('never runs a schedule saved with a codec it cannot write', async () => {
-    const t = setup({}, { destinations: [savedDestination], schedule: { ...schedule, compress: 'zstd' } })
+  it('never runs a Zstandard schedule while zstd is not installed', async () => {
+    const t = setup({ zstdInstalled: async () => false }, { destinations: [savedDestination], schedule: { ...schedule, compress: 'zstd' } })
     expect(await t.controller.view()).toMatchObject({ available: false, reason: 'unsupported_compression' })
     expect(readBackupRunsView(JSON.parse(JSON.stringify(await t.controller.view()))).reason).toBe('unsupported_compression')
     await expect(t.controller.start('root', (await t.controller.view()).revision)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { reason: 'backup_compression_unavailable' } })
@@ -151,6 +151,17 @@ describe('scheduled backup controller', () => {
     expect(await t.controller.tick()).toEqual({ skipped: 'unavailable' })
     expect(t.deps.createBackup).not.toHaveBeenCalled()
     expect(t.ledger()).toBeNull()
+  })
+  it('writes every archive of a Zstandard schedule with zstd when it is installed, and reads an unknown codec as invalid', async () => {
+    const control = { build: vi.fn(async () => ({ file: 'xpanel-control-20261028T020000Z.tar.zst', bytes: 3 })), verify: vi.fn(async () => ({ members: 2 })), read: vi.fn(async () => ({ bytes: 3, sha256: SHA, chunks: async function* () { yield BYTES } })), list: async () => [], delete: vi.fn(async () => {}) }
+    const t = setup({ control, createBackup: vi.fn(async () => ({ file: FILE.replace('.tar.gz', '.tar.zst'), bytes: 3, databases: [] as string[], zones: [] as string[] })) }, { destinations: [savedDestination], schedule: { ...schedule, compress: 'zstd', includeControl: true } })
+    expect(await t.controller.view()).toMatchObject({ available: true, reason: null })
+    await t.controller.start('root', (await t.controller.view()).revision); await t.controller.idle()
+    expect(t.deps.createBackup).toHaveBeenCalledWith(expect.objectContaining({ username: 'alice' }), expect.objectContaining({ compression: 'zstd' }))
+    expect(control.build).toHaveBeenCalledWith('zstd')
+    expect((await t.controller.view()).runs[0]).toMatchObject({ state: 'succeeded', archives: [{ file: 'xpanel-backup-alice-20261028T020000Z.tar.zst', integrity: 'verified' }] })
+    expect(t.objects.has('alice/xpanel-backup-alice-20261028T020000Z.tar.zst')).toBe(true)
+    expect(() => readSavedBackupConfig({ destinations: [], schedule: { ...schedule, compress: 'xz', updatedAt: '2026-10-28T00:00:00.000Z' } })).toThrow('invalid_backup_configuration')
   })
   it('shows a running record from another process as unknown', async () => {
     const t = setup()

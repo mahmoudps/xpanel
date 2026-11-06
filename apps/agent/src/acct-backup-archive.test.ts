@@ -1,14 +1,15 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { backupPartOf, buildControlSnapshot, buildServerBackupArchive, extractBackupPart, listControlSnapshot, listServerBackupArchive, readBackupArchiveListing, readBackupDataManifest } from './acct-backup-archive.ts'
+import { BACKUP_COMPRESSOR, backupPartOf, buildControlSnapshot, buildServerBackupArchive, extractBackupPart, listControlSnapshot, listServerBackupArchive, readBackupArchiveListing, readBackupDataManifest } from './acct-backup-archive.ts'
 import type { BackupCommand, BackupCommandResult } from './backup-low-priority.ts'
-import { BACKUP_LOW_PRIORITY, lowPriorityArgv, runBackupCommand } from './backup-low-priority.ts'
+import { BACKUP_LOW_PRIORITY, lowPriorityArgv, runBackupCommand, zstdDecompressed } from './backup-low-priority.ts'
 
 // Fake command runner over real files: it checks the argv each step receives, not GNU tar, gzip or MariaDB themselves.
 const account = { username: 'alice', home: '/home/alice', uid: 20014, status: 'active' }
-const SHA = 'a'.repeat(64), FILE = 'xpanel-backup-alice-20261028T020000Z.tar.gz'
+const SHA = 'a'.repeat(64), FILE = 'xpanel-backup-alice-20261028T020000Z.tar.gz', ZST = 'xpanel-backup-alice-20261028T020000Z.tar.zst'
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) if (basename(root).startsWith('xpanel-backup-archive-')) await rm(root, { recursive: true, force: true }) })
 const temp = async (): Promise<string> => { const root = await mkdtemp(join(tmpdir(), 'xpanel-backup-archive-')); roots.push(root); return root }
@@ -25,7 +26,7 @@ describe('server backup archive build', () => {
   it('streams the home as the account, appends root-written dumps and zones with a manifest and publishes only the complete gzip', async () => {
     const root = await temp(), run = fakeRun()
     const dump = vi.fn(async (_account: unknown, name: string, path: string) => { await writeFile(path, 'dump of ' + name, { flag: 'wx' }); return { bytes: 12, sha256: SHA } })
-    const built = await buildServerBackupArchive({ root, account, databases: ['alice_wp', 'alice_shop', 'alice_wp'], zones: [zone], excludeMail: true, now: new Date('2026-10-28T02:00:00.000Z'), deps: { run, dump } })
+    const built = await buildServerBackupArchive({ root, account, databases: ['alice_wp', 'alice_shop', 'alice_wp'], zones: [zone], excludeMail: true, compression: 'gzip', now: new Date('2026-10-28T02:00:00.000Z'), deps: { run, dump } })
     expect(built).toEqual({ file: FILE, bytes: 2, databases: ['alice_shop', 'alice_wp'], zones: ['alice.example.test'] })
     expect(await readdir(join(root, 'alice'))).toEqual([built.file])
     expect(await readFile(join(root, 'alice', built.file), 'utf8')).toBe('gz')
@@ -36,9 +37,19 @@ describe('server backup archive build', () => {
     expect(gzip).toMatchObject({ argv: ['/usr/bin/gzip', '-c', '-n', '-6'], maxStdoutBytes: 2 * 1024 * 1024 * 1024 })
     expect(dump.mock.calls.map(call => call[1])).toEqual(['alice_shop', 'alice_wp'])
   })
+  it('writes a Zstandard schedule as one .tar.zst through zstd level 3, one thread, with the frame checksum', async () => {
+    const root = await temp(), run = fakeRun(), dump = vi.fn(async () => ({ bytes: 1, sha256: SHA }))
+    const built = await buildServerBackupArchive({ root, account, databases: [], zones: [], excludeMail: false, compression: 'zstd', now: new Date('2026-10-28T02:00:00.000Z'), deps: { run, dump } })
+    expect(built.file).toBe(ZST)
+    expect(await readdir(join(root, 'alice'))).toEqual([ZST])
+    expect(run.mock.calls.at(-1)![0]).toMatchObject({ argv: ['/usr/bin/zstd', '-q', '-c', '-3', '--check', '--single-thread'], maxStdoutBytes: 2 * 1024 * 1024 * 1024 })
+    expect(run.mock.calls.at(-1)![0].stdinPath).toMatch(/\/home\.tar$/)
+    const control = await buildControlSnapshot({ root, stateDir: '/var/lib/xpanel/state', copyDatabase: async path => { await writeFile(path, 'sqlite', { flag: 'wx' }) }, run: fakeRun(), compression: 'zstd', now: new Date('2026-10-28T02:00:00.000Z') })
+    expect(control.file).toBe('xpanel-control-20261028T020000Z.tar.zst')
+  })
   it('refuses foreign parts, keeps no partial archive on failure and never overwrites an archive', async () => {
     const root = await temp(), dump = vi.fn(async () => ({ bytes: 1, sha256: SHA }))
-    const base = { root, account, zones: [], excludeMail: false }
+    const base = { root, account, zones: [], excludeMail: false, compression: 'gzip' as const }
     await expect(buildServerBackupArchive({ ...base, databases: ['bob_wp'], deps: { run: fakeRun(), dump } })).rejects.toMatchObject({ code: 'VALIDATION' })
     await expect(buildServerBackupArchive({ ...base, databases: [], zones: [{ name: '../etc', content: '{}' }], deps: { run: fakeRun(), dump } })).rejects.toMatchObject({ code: 'VALIDATION' })
     await expect(buildServerBackupArchive({ ...base, databases: [], deps: { run: fakeRun({ create: { ...ok(), ok: false, code: 2, stderr: 'tar: /home/alice: Cannot open' } }), dump } })).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED', message: expect.stringContaining('Cannot open') })
@@ -51,7 +62,7 @@ describe('server backup archive build', () => {
   })
   it('takes the control snapshot from the state directory plus a database copy, outside every account directory', async () => {
     const root = await temp(), run = fakeRun(), copyDatabase = vi.fn(async (path: string) => { await writeFile(path, 'sqlite', { flag: 'wx' }) })
-    const built = await buildControlSnapshot({ root, stateDir: '/var/lib/xpanel/state', copyDatabase, run, now: new Date('2026-10-28T02:00:00.000Z') })
+    const built = await buildControlSnapshot({ root, stateDir: '/var/lib/xpanel/state', copyDatabase, run, compression: 'gzip', now: new Date('2026-10-28T02:00:00.000Z') })
     expect(built).toEqual({ file: 'xpanel-control-20261028T020000Z.tar.gz', bytes: 2 })
     expect(await readdir(join(root, '_control'))).toEqual([built.file])
     expect(run.mock.calls[0]![0]).toMatchObject({ argv: ['/usr/bin/tar', '--create', '--file=-', '--directory=/var/lib/xpanel/state', '--', '.'] })
@@ -96,6 +107,16 @@ describe('archive listing and manifest', () => {
     const failed = vi.fn(async () => ({ ...ok(), ok: false, code: 2, stderr: 'gzip: stdin: invalid compressed data--crc error' }))
     await expect(listServerBackupArchive({ root: '/backups', account, file: FILE, run: failed })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
   })
+  it('reads a .tar.zst archive only with tar --zstd, and a failed read never lists it', async () => {
+    const commands: BackupCommand[] = []
+    const run = vi.fn(async (command: BackupCommand) => { commands.push(command); return command.argv.includes('--list') ? ok(0, './\n') : ok(10) })
+    await listServerBackupArchive({ root: '/backups', account, file: ZST, run })
+    await extractBackupPart({ root: '/backups', account, file: ZST, part: 'database', name: 'alice_wp', expected: { name: 'alice_wp', bytes: 10, sha256: SHA }, outputPath: '/stage/x.sql', run })
+    await listControlSnapshot({ root: '/backups', file: 'xpanel-control-20261028T020000Z.tar.zst', run: vi.fn(async () => ok(0, 'control.db\n')) })
+    expect(commands.map(command => command.argv.slice(0, 3))).toEqual([['/usr/bin/tar', '--list', '--zstd'], ['/usr/bin/tar', '--extract', '--zstd']])
+    const failed = vi.fn(async () => ({ ...ok(), ok: false, code: 2, stderr: 'zstd: /*stdin*\\: checksum error' }))
+    await expect(listServerBackupArchive({ root: '/backups', account, file: ZST, run: failed })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false } })
+  })
   it('prefixes every backup command with nice and ionice, and runuser for account work', () => {
     expect(lowPriorityArgv({ argv: ['/usr/bin/tar', '--create'], runAsUser: 'alice' })).toEqual([...BACKUP_LOW_PRIORITY, '/usr/sbin/runuser', '-u', 'alice', '--', '/usr/bin/tar', '--create'])
     expect(BACKUP_LOW_PRIORITY).toEqual(['/usr/bin/nice', '-n', '19', '/usr/bin/ionice', '-c', '2', '-n', '7'])
@@ -109,5 +130,20 @@ describe('archive listing and manifest', () => {
     await expect(runBackupCommand({ argv: ['/bin/echo', 'again'], stdoutPath: join(root, 'out'), maxStdoutBytes: 100 })).rejects.toMatchObject({ code: 'EEXIST' })
     expect(await runBackupCommand({ argv: ['/usr/bin/yes'], maxStdoutBytes: 1024 })).toMatchObject({ ok: false, killed: 'output limit' })
     expect(await runBackupCommand({ argv: ['/bin/cat'], stdinText: 'batch\n', maxStdoutBytes: 100 })).toMatchObject({ ok: true, stdout: 'batch\n' })
+  })
+  // Real GNU tar and zstd on the Linux lab host: the frame checksum gates the archive read in both readers.
+  it.runIf(process.platform === 'linux' && existsSync('/usr/bin/zstd'))('round-trips a real .tar.zst and refuses it after one changed byte', async () => {
+    const root = await temp(), home = join(root, 'home'), dir = join(root, 'alice')
+    await mkdir(home); await mkdir(dir); await writeFile(join(home, 'index.php'), '<?php echo "hello";\n'.repeat(200))
+    expect(await runBackupCommand({ argv: ['/usr/bin/tar', '--create', '--file=-', `--directory=${home}`, '--', '.'], stdoutPath: join(root, 'home.tar'), maxStdoutBytes: 1 << 20 })).toMatchObject({ ok: true })
+    expect(await runBackupCommand({ argv: BACKUP_COMPRESSOR.zstd, stdinPath: join(root, 'home.tar'), stdoutPath: join(dir, ZST), maxStdoutBytes: 1 << 20 })).toMatchObject({ ok: true })
+    expect(await listServerBackupArchive({ root, account, file: ZST, run: runBackupCommand })).toMatchObject({ members: 2, manifest: false })
+    const bytes = await readFile(join(dir, ZST)), tar = await readFile(join(root, 'home.tar'))
+    const read = async (): Promise<Buffer> => { const parts: Buffer[] = []; for await (const chunk of zstdDecompressed((async function* () { yield bytes })())) parts.push(chunk); return Buffer.concat(parts) }
+    expect((await read()).equals(tar)).toBe(true)
+    bytes.writeUInt8(bytes.readUInt8(bytes.length - 2) ^ 0xff, bytes.length - 2)
+    await writeFile(join(dir, ZST), bytes)
+    await expect(listServerBackupArchive({ root, account, file: ZST, run: runBackupCommand })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: 'the backup archive failed its integrity read' })
+    await expect(read()).rejects.toMatchObject({ code: 'VALIDATION', message: 'the Zstandard archive failed its integrity check' })
   })
 })

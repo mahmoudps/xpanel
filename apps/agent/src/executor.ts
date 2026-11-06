@@ -451,7 +451,7 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
       || /^\/var\/lib\/xpanel\/backups\/account-workspaces\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\/[a-z][a-z0-9]{0,15})?$/.test(path)
       || path === '/run/xpanel/account-restores' || /^\/run\/xpanel\/account-restores\/[a-z][a-z0-9]{0,15}$/.test(path)) return operation === 'ensure-directory'
     if (/^\/home\/[a-z][a-z0-9]{0,15}\/\.xpanel-backup-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.gz$/.test(path)
-      || /^\/run\/xpanel\/account-restores\/[a-z][a-z0-9]{0,15}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tar\.gz$/.test(path)) return operation === 'remove'
+      || /^\/run\/xpanel\/account-restores\/[a-z][a-z0-9]{0,15}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tar\.(?:gz|zst)$/.test(path)) return operation === 'remove'
     if (path === '/root/.ssh' || path === '/var/lib/xpanel-agent/security') return operation === 'ensure-directory'
     if (path === '/root/.ssh/authorized_keys' || path === '/var/lib/xpanel-agent/security/root-managed-keys.json' || path === '/var/lib/xpanel-agent/security/root-key-write.json') return operation === 'read' || operation === 'write' || operation === 'remove'
     if (/^\/root\/\.ssh\/authorized_keys\.bak\.[0-9]{17}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(path)

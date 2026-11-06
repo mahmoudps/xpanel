@@ -112,7 +112,7 @@ function bindRestoreMore(): void {
     const selected = new Set<string>()
     let busy = false, username = '', file = '', inventory: RestoreMoreInventory | null = null, reviewed: (RestoreMorePreview & { mailboxes: string[] }) | null = null, again = false
     const REASONS: Record<string, string> = {
-      format: msgid('not gzip-compressed tar data'), file: msgid('not a single regular file owned by the backup service'), size: msgid('larger than 2 GiB or too many entries'), unsafe: msgid('contains links, devices or unsafe paths'), changed: msgid('changed while it was inspected'),
+      format: msgid('not tar data compressed as its name says'), file: msgid('not a single regular file owned by the backup service'), size: msgid('larger than 2 GiB or too many entries'), unsafe: msgid('contains links, devices or unsafe paths'), changed: msgid('changed while it was inspected'),
       quota: msgid('the account disk quota refused the file'), 'parent-not-directory': msgid('a folder on the destination path is missing or is a file'), 'refused-by-writer': msgid('the confined writer refused this path, for example a link'), busy: msgid('the destination folder was busy'),
       'write-unknown': msgid('the write outcome is unknown; inspect the file'), 'directory-unknown': msgid('the folder outcome is unknown; inspect it'), 'readback-mismatch': msgid('the written file does not match the archive; inspect it'),
       'readback-unavailable': msgid('the written file could not be read back; inspect it'), 'archive-changed': msgid('the archive content changed after review'), 'archive-read': msgid('the archive could not be read further'),

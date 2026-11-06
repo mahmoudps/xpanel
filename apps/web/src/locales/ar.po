@@ -46655,8 +46655,8 @@ msgid "not enforced"
 msgstr "غير مفروض"
 
 #: apps/web/src/acct-restore-client.ts apps/web/src/whm-backup-files-client.ts
-msgid "not gzip-compressed tar data"
-msgstr "ليست بيانات tar مضغوطة بـ gzip"
+msgid "not tar data compressed as its name says"
+msgstr "ليست بيانات tar مضغوطة كما يذكر اسمها"
 
 #: apps/web/src/board-port/xpanel-home.ts
 msgid "not measured yet"

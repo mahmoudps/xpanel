@@ -52,7 +52,7 @@ describe('WHM restore files client', () => {
     expect([...q<HTMLSelectElement>('[data-backup-files-account]').options].map(option => option.value)).toEqual(['', 'alice'])
     await choose('alice')
     expect(q(`button[data-file="${BAD}"]`).hasAttribute('disabled')).toBe(true)
-    expect(q('[data-backup-files-archives]').textContent).toContain('Rejected: not gzip-compressed tar data')
+    expect(q('[data-backup-files-archives]').textContent).toContain('Rejected: not tar data compressed as its name says')
     expect(q('[data-backup-files-steps] [aria-current]').getAttribute('data-step')).toBe('backup')
     await click(q(`button[data-file="${FILE}"]`))
     expect(request).toHaveBeenLastCalledWith('POST', '/api/backups/files/alice/browse', { file: FILE })
@@ -148,7 +148,7 @@ describe('WHM restore files client', () => {
     document.documentElement.lang = 'ar'; document.documentElement.dir = 'rtl'
     const request = server()
     await openArchive(request)
-    expect(q('[data-backup-files-archives]').textContent).toContain('مرفوض: ليست بيانات tar مضغوطة بـ gzip')
+    expect(q('[data-backup-files-archives]').textContent).toContain('مرفوض: ليست بيانات tar مضغوطة كما يذكر اسمها')
     expect(q(`button[data-file="${FILE}"]`).getAttribute('aria-label')).toBe('فتح النسخة ' + FILE)
     expect(q('[data-backup-files-entries] input[value="notes.txt"]').getAttribute('aria-label')).toBe('تحديد notes.txt')
     await check('notes.txt'); await click(q('[data-backup-files-preview]'))

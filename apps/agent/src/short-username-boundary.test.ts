@@ -102,11 +102,13 @@ describe('short username agent dispatch retains target and privilege authority',
     expect(executor.files.size).toBe(written)
   })
   it.each(names)('keeps archive names account-bound for %s', username => {
-    const file = backupFileName(username, '20261024T120000Z')
+    const file = backupFileName(username, '20261024T120000Z', 'gzip')
     expect(file).toBe(`xpanel-backup-${username}-20261024T120000Z.tar.gz`)
     expect(assertBackupFileName(username, file)).toBe(file)
+    expect(assertBackupFileName(username, backupFileName(username, '20261024T120000Z', 'zstd'))).toBe(`xpanel-backup-${username}-20261024T120000Z.tar.zst`)
     expect(() => assertBackupFileName(username, '../' + file)).toThrow()
-    expect(() => assertBackupFileName(username, backupFileName(username === 'a' ? 'ab' : 'a', '20261024T120000Z'))).toThrow()
+    expect(() => assertBackupFileName(username, file.replace('.tar.gz', '.tar.xz'))).toThrow()
+    expect(() => assertBackupFileName(username, backupFileName(username === 'a' ? 'ab' : 'a', '20261024T120000Z', 'gzip'))).toThrow()
   })
   it.each(['abcdefghijklmnopq', 'A', 'a_', 'a-b', 'root'])('keeps invalid/reserved names out of account dispatch: %s', async username => {
     expect(() => validateUsername(username)).toThrow()

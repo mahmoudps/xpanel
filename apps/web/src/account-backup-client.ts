@@ -16,7 +16,7 @@ interface RestoreDifference { path: string; state: ArchiveState; archiveBytes: n
 interface RestorePreview { file: string; bytes: number; revision: string; archiveSha256: string; rows: RestoreDifference[]; counts: Record<ArchiveState, number> }
 const backupObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const backupFile = (username: string, value: unknown): string => {
-  if (!/^[a-z][a-z0-9]{0,15}$/.test(username) || typeof value !== 'string' || !new RegExp('^xpanel-backup-' + username + '-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\\.tar\\.gz$').test(value)) throw new Error('invalid_account_archive')
+  if (!/^[a-z][a-z0-9]{0,15}$/.test(username) || typeof value !== 'string' || !new RegExp('^xpanel-backup-' + username + '-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\\.tar\\.(?:gz|zst)$').test(value)) throw new Error('invalid_account_archive')
   return value
 }
 const backupContext = (value: unknown, accountId: string, username: string): Record<string, unknown> => {

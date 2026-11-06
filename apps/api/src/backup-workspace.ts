@@ -216,7 +216,6 @@ export function createWhmBackupWorkspaceRoutes(ports: WhmBackupWorkspacePorts) {
       const { expectedRevision: _expected, ...draft } = body
       if (scheduleRoute) {
         schedule = validateBackupSchedule(draft, schedule)
-        if (schedule.compress !== 'gzip') return fail('PRECONDITION_FAILED', 'Zstandard compression is unavailable: this server writes gzip archives only', { stateChanged: false, unsupported: true, reason: 'backup_compression_unavailable' })
         const accounts = await ports.store.listAccounts(), names = new Set(accounts.flatMap(account => [account.username, account.id])), destinationsById = new Map(destinations.map(destination => [destination.id, destination]))
         if (schedule.selectedAccounts !== 'all' && schedule.selectedAccounts.some(username => !names.has(username))) return invalid('selected account no longer exists')
         if (schedule.enabled && schedule.selectedAccounts !== 'all' && schedule.selectedAccounts.length === 0) return invalid('an enabled schedule requires selected accounts')

@@ -7,6 +7,7 @@ import { AGENT_ROUTE_TIMEOUT_MS, assertAgentCredential, assertRootOwnedAgentPath
 import type { AgentApp } from '@xpanel/agent'
 import { fail, isUuid, XpanelError } from '@xpanel/core'
 import type { LiveEvent } from '@xpanel/core'
+import { BACKUP_ARCHIVE_SUFFIX, backupCodecOf } from '../../agent/src/account-backup.ts'
 
 export interface AgentClientOptions {
   socketPath: string
@@ -72,9 +73,9 @@ const archiveDownloadFile = (request: Request, url: URL): ArchiveDownload | null
   if (!match) return null
   let file: string
   try { file = decodeURIComponent(match[2]!) } catch { return fail('VALIDATION', 'agent archive path is invalid') }
-  if (!new RegExp('^xpanel-backup-' + match[1] + '-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\\.tar\\.gz$').test(file)) return fail('VALIDATION', 'agent archive path is invalid')
+  if (!new RegExp('^xpanel-backup-' + match[1] + '-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?' + BACKUP_ARCHIVE_SUFFIX + '$').test(file)) return fail('VALIDATION', 'agent archive path is invalid')
   if (!isUuid(request.headers.get('x-xpanel-principal-id'))) return fail('VALIDATION', 'agent archive request requires a principal identity')
-  return { file, contentType: 'application/gzip', maxBytes: MAX_ARCHIVE_RESPONSE_BYTES }
+  return { file, contentType: backupCodecOf(file).mediaType, maxBytes: MAX_ARCHIVE_RESPONSE_BYTES }
 }
 
 /** Archive and transfer artifact routes alone get a larger response budget; ordinary JSON stays bounded. */

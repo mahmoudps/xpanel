@@ -32,8 +32,8 @@ export function readWhmBackupRunsView(raw: unknown): WhmBackupRunsView {
   const uuid = (value: unknown): string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value) ? value : bad()
   const stamp = (value: unknown, nullable = false): string | null => nullable && value === null ? null : typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) ? value : bad()
   const archive = (username: unknown, file: unknown): boolean => typeof username === 'string' && typeof file === 'string' && (username === '_control'
-    ? /^xpanel-control-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.gz$/.test(file)
-    : /^[a-z][a-z0-9]{0,15}$/.test(username) && file.startsWith('xpanel-backup-' + username + '-') && /^xpanel-backup-[a-z][a-z0-9]{0,15}-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.gz$/.test(file))
+    ? /^xpanel-control-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.(?:gz|zst)$/.test(file)
+    : /^[a-z][a-z0-9]{0,15}$/.test(username) && file.startsWith('xpanel-backup-' + username + '-') && /^xpanel-backup-[a-z][a-z0-9]{0,15}-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.(?:gz|zst)$/.test(file))
   const count = (value: unknown): number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : bad()
   const database = (username: string, value: unknown): string => typeof value === 'string' && /^[a-z][a-z0-9]{0,15}_[a-z0-9_]{1,47}$/.test(value) && value.startsWith(username + '_') ? value : bad()
   const zone = (value: unknown): string => typeof value === 'string' && value.length <= 253 && /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/.test(value) ? value : bad()

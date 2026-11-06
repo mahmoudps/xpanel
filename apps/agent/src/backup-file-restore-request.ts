@@ -6,7 +6,7 @@ export const MAX_RESTORE_SELECTION = 500
 export const MAX_RESTORE_FILES = 500
 export const MAX_LISTED_ARCHIVES = 200
 export const MAX_RESTORE_PATH_BYTES = 4096
-export const BACKUP_ARCHIVE_NAME = /^xpanel-backup-[a-z][a-z0-9]{0,15}-([0-9]{8}T[0-9]{6}Z)(?:-([a-f0-9]{12}))?\.tar\.gz$/
+export const BACKUP_ARCHIVE_NAME = /^xpanel-backup-[a-z][a-z0-9]{0,15}-([0-9]{8}T[0-9]{6}Z)(?:-([a-f0-9]{12}))?\.tar\.(?:gz|zst)$/
 export const RESTORE_REVISION = /^[0-9a-f]{64}$/
 const unchanged = { stateChanged: false }
 
