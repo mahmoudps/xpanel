@@ -206,7 +206,7 @@ describe('prepared helper and target tree revalidation', () => {
     return { files, root, modules, check: () => api.assertPreparedReleaseCurrent({}), reads: () => contentReads }
   }
 
-  it('hashes a shared source once per lifetime and keeps distinct reports on full verification', async () => {
+  it('hashes each authenticated root once per lifetime, shared or distinct', async () => {
     const same = await fixture()
     await same.check()
     assert.equal(same.reads(), 2)
@@ -214,21 +214,23 @@ describe('prepared helper and target tree revalidation', () => {
     assert.equal(same.reads(), 2)
     const distinct = await fixture(false)
     await distinct.check()
+    assert.equal(distinct.reads(), 4)
     await distinct.check()
-    assert.equal(distinct.reads(), 8)
+    assert.equal(distinct.reads(), 4)
   })
 
   it('refuses same-size file rewrites, directory changes, and replaced or missing dependency links', async () => {
-    for (const change of ['file', 'directory', 'link', 'missing'] as const) {
-      const f = await fixture()
-      await f.check()
-      const path = change === 'file' ? f.root + '/entry.mjs' : change === 'directory' ? f.modules : f.modules + '/link'
-      const current = f.files.get(path)!
-      if (change === 'missing') f.files.delete(path)
-      else if (change === 'link') current.ino++
-      else current.ctimeNs++
-      await assert.rejects(f.check(), /PREPARED_RELEASE_TREE_CHANGED/)
-      assert.equal(f.reads(), 2)
-    }
+    for (const sameRelease of [true, false])
+      for (const change of ['file', 'directory', 'link', 'missing'] as const) {
+        const f = await fixture(sameRelease)
+        await f.check()
+        const path = change === 'file' ? f.root + '/entry.mjs' : change === 'directory' ? f.modules : f.modules + '/link'
+        const current = f.files.get(path)!
+        if (change === 'missing') f.files.delete(path)
+        else if (change === 'link') current.ino++
+        else current.ctimeNs++
+        await assert.rejects(f.check(), /PREPARED_RELEASE_TREE_CHANGED/)
+        assert.equal(f.reads(), sameRelease ? 2 : 4)
+      }
   })
 })
