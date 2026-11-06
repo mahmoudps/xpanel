@@ -184,7 +184,9 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
       for (const pin of pins) {
         const held = fstatSync(pin.handle.fd, { bigint: true }), named = lstatSync(pin.path, { bigint: true })
         if (!held.isDirectory() || !named.isDirectory() || named.isSymbolicLink()
-          || !equal(pin.initial, held, true) || !equal(pin.initial, named, true)) return refused('database_initialization_ancestor_changed')
+          // Live writers keep other files beside the database (bandwidth.json is rewritten every minute), so a changed
+          // ancestor is contention like a moving WAL: a reobserved reader discards this attempt and proves a fresh one.
+          || !equal(pin.initial, held, true) || !equal(pin.initial, named, true)) return walCollision('database_initialization_ancestor_changed')
       }
     }
     if (wal) initializationDirectories()

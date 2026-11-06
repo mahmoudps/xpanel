@@ -135,15 +135,16 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { DatabaseSync, StatementSync } from 'node:sqlite'
 const [observerUrl,file,mode]=process.argv.slice(1), wal=file+'-wal'
+const namespace=mode.startsWith('namespace'), reobserved=mode==='namespace-reobserved'
 const before=fs.lstatSync(wal,{bigint:true}), original=fs.readFileSync(wal)
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex')
 const held=wal+'.aba-original', replacement=wal+'.aba-replacement'
 const originalPrepare=DatabaseSync.prototype.prepare, originalIterate=StatementSync.prototype.iterate
 const statements=new WeakSet()
-let injected=false, completed=false, restored=false, callback=false, rejected=false, reason=null, connection
+let injected=false, completed=false, restored=false, callback=false, callbacks=0, rejected=false, reason=null, connection
 let originalVersion=null, marker=null, transientVersion=null, stableVersion=null, issuer=null, queriedIssuer=null, purgeBypassed=false
 let markerOffset=-1
-if(mode!=='namespace') {
+if(!namespace) {
  const size=original.readUInt32BE(8), pageSize=size===1?65536:size
  if(pageSize<512 || (original.length-32)%(pageSize+24)!==0) throw new Error('Fixture WAL frames are incomplete')
  for(let at=32;at+24+pageSize<=original.length;at+=24+pageSize) if(original.readUInt32BE(at)===1) markerOffset=at+24+60
@@ -153,7 +154,7 @@ if(mode!=='namespace') {
 const scalar=()=>[...Reflect.apply(originalIterate,Reflect.apply(originalPrepare,connection,['PRAGMA user_version']),[])][0].user_version
 const restore=()=>{
  if(!injected || restored) return
- if(mode==='namespace') {
+ if(namespace) {
   fs.renameSync(wal,replacement); fs.renameSync(held,wal)
  } else {
   const fd=fs.openSync(wal,'r+')
@@ -169,7 +170,7 @@ DatabaseSync.prototype.prepare=function(sql,...args){
  if(mode==='bytes-without-purge' && sql==='PRAGMA shrink_memory') { purgeBypassed=true; return Reflect.apply(originalPrepare,this,['SELECT 1']) }
  if(!injected && sql==='PRAGMA main.data_version') {
   connection=this
-  if(mode==='namespace') {
+  if(namespace) {
    fs.renameSync(wal,held); fs.copyFileSync(held,wal,fs.constants.COPYFILE_EXCL); fs.chmodSync(wal,Number(before.mode&0o7777n))
   } else {
    const fd=fs.openSync(wal,'r+'), bytes=Buffer.alloc(4); bytes.writeUInt32BE(marker)
@@ -186,24 +187,24 @@ StatementSync.prototype.iterate=function*(...args){
  const target=statements.has(this)
  try {
   yield* Reflect.apply(originalIterate,this,args)
-  if(target) { completed=true; if(mode!=='namespace') transientVersion=scalar() }
+  if(target) { completed=true; if(!namespace) transientVersion=scalar() }
  } finally { if(target) restore() }
 }
 try {
  const observer=await import(observerUrl)
  try {
-  await observer.withReadonlyOperationDatabase(file,async reader=>{
-   callback=true
+  await (reobserved?observer.withReobservedReadonlyOperationDatabase:observer.withReadonlyOperationDatabase)(file,async reader=>{
+   callback=true; callbacks++
    issuer=observer.getReadonlyOperationDatabaseOrigin(reader).issuerId
    queriedIssuer=(await reader.query('SELECT issuer_id FROM operational_identity WHERE singleton=1'))[0].issuer_id
-   if(mode!=='namespace') stableVersion=scalar()
+   if(!namespace) stableVersion=scalar()
   })
  } catch(error) { rejected=true; reason=error.detail?.reason??null }
 } finally {
  try { restore() } finally { DatabaseSync.prototype.prepare=originalPrepare; StatementSync.prototype.iterate=originalIterate }
 }
 const after=fs.lstatSync(wal,{bigint:true})
-process.stdout.write(JSON.stringify({injected,completed,restored,callback,rejected,reason,originalVersion,marker,transientVersion,stableVersion,issuer,queriedIssuer,purgeBypassed,
+process.stdout.write(JSON.stringify({injected,completed,restored,callback,callbacks,rejected,reason,originalVersion,marker,transientVersion,stableVersion,issuer,queriedIssuer,purgeBypassed,
  sameInode:before.dev===after.dev&&before.ino===after.ino,sameBytes:digest(original)===digest(fs.readFileSync(wal)),mtimeRestored:before.mtimeNs===after.mtimeNs})+'\n')
 `
 const unsupportedRuntimeProgram = String.raw`
@@ -228,7 +229,7 @@ try {
 }
 process.stdout.write(JSON.stringify({fileOpens,sqlitePrepares,sqliteCloses,callback,rejected,reason})+'\n')
 `
-const initializationFault = async (file: string, mode: 'namespace' | 'bytes' | 'bytes-without-purge' | 'runtime') => {
+const initializationFault = async (file: string, mode: 'namespace' | 'namespace-reobserved' | 'bytes' | 'bytes-without-purge' | 'runtime') => {
   const child = spawn(process.execPath, ['--input-type=module', '-e', mode === 'runtime' ? unsupportedRuntimeProgram : initializationFaultProgram,
     pathToFileURL(join(import.meta.dirname, 'readonly-operation-database.ts')).href, file, mode],
   { stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000, killSignal: 'SIGKILL' })
@@ -575,6 +576,12 @@ describe('actual read-only manager host exclusion in the disposable VM', () => {
     const f = await readonlyFixture(), result = await initializationFault(f.file, 'namespace')
     expect(result).toMatchObject({ injected: true, completed: true, restored: true, callback: false, rejected: true,
       reason: 'database_initialization_ancestor_changed', sameInode: true, sameBytes: true, mtimeRestored: true })
+  })
+
+  it('reopens a live observation whose initialization saw a namespace change and proves the restored WAL afresh', async () => {
+    const f = await readonlyFixture(), result = await initializationFault(f.file, 'namespace-reobserved')
+    expect(result).toMatchObject({ injected: true, completed: true, restored: true, callback: true, callbacks: 1, rejected: false,
+      reason: null, sameInode: true, sameBytes: true, mtimeRestored: true })
   })
 
   it('refuses an unreviewed live-observer runtime before opening files or SQLite', async () => {

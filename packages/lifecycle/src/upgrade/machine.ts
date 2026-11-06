@@ -170,8 +170,11 @@ const stateRestoreArgv = (t: LifecycleTools, file: string, scratch: string, excl
 /**
  * StateStore lease and lock artifacts are never restored: a stale lease or a hot mutex WAL from the
  * snapshot must not block the restored release. Unanchored: canonical state names never start with a dot.
+ * The generation journal is not restored either: it records what the host actually applied, so it moves
+ * forward with the host (state-swap carries the live journal into the restored desired state), and the
+ * rewind generation is built on top of the generation the upgrade applied.
  */
-export const REWIND_EXCLUDES: readonly string[] = ['.lock', '.lock-prepared-*', '.rollback-*.tmp', '.writer-mutex.sqlite-wal', '.writer-mutex.sqlite-shm', '.writer-mutex.sqlite-journal']
+export const REWIND_EXCLUDES: readonly string[] = ['.lock', '.lock-prepared-*', '.rollback-*.tmp', '.writer-mutex.sqlite-wal', '.writer-mutex.sqlite-shm', '.writer-mutex.sqlite-journal', 'state/generations']
 /** An uncommitted StateStore write journal means the snapshot caught a write mid-flight: it needs review, never a restore. */
 const PENDING_STATE_WRITE = 'state/.lock/intent.json'
 /** Set-aside state trees kept after verified rewinds, newest last. */
@@ -655,6 +658,8 @@ const rewindStep = async (c: Ctx, r: SnapshotReceipt, step: RewindStep): Promise
     await run(c, 'rewind:state-sync', { kind: 'exec', argv: [c.plan.tools.sync, '--file-system', scratch], runAsUser: 'root' })
   } else if (step === 'state-swap') {
     if (await c.fs.exists(restored)) {
+      const liveJournal = posix.join(live, 'generations'), restoredJournal = posix.join(restored, 'generations')
+      if (await c.fs.exists(liveJournal) && !(await c.fs.exists(restoredJournal))) await c.fs.rename(liveJournal, restoredJournal)
       if (await c.fs.exists(live)) {
         if (await c.fs.exists(aside)) throw new Error(`${live} and ${aside} both exist; inspect them before resuming`)
         await c.fs.rename(live, aside)

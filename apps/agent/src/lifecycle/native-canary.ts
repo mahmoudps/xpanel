@@ -10,9 +10,11 @@ import type { HostEffectAuthority } from '../host-effect-authority.ts'
 import { assertProvisioningProcessBinding } from '../account-provisioning-observer.ts'
 import type { CanaryHttpProbeResult } from './upgrade-runner.ts'
 
-export interface NativeLifecycleCanaryOptions extends Omit<NativeAccountHttpOptions, 'store'> {
+export interface NativeLifecycleCanaryOptions extends Omit<NativeAccountHttpOptions, 'store' | 'databaseReader'> {
   /** The lifecycle composition always supplies its control handle; the canary reads generations through it. */
   readonly db: Db
+  /** Fresh pinned readers for the held account HTTP exchange, which refuses the control handle as an unissued reader. */
+  readonly databaseReader: NonNullable<NativeAccountHttpOptions['databaseReader']>
   readonly store: Pick<StateStore, 'listDomains' | 'getAccount' | 'getAuthorityMetadata' | 'readSnapshot' | 'withReadonlyObservation'>
 }
 const targetBrand = Symbol('native lifecycle canary target')
@@ -37,7 +39,9 @@ interface TargetRecord { readonly operationId: string; readonly accountId: strin
 
 /** Concrete composition. No request-supplied authority, producer, target ID, URL or readiness flag. */
 export function createNativeLifecycleCanary(options: NativeLifecycleCanaryOptions) {
-  const exchange = createNativeHeldAccountHttp(options)
+  // The exchange reads generations only through fresh pinned readers, never through the control handle.
+  const { db: _control, ...exchangeOptions } = options
+  const exchange = createNativeHeldAccountHttp(exchangeOptions)
   const selections = new WeakMap<object, SelectionRecord>(), targets = new WeakMap<object, TargetRecord>()
   const baselines = new Map<string, string>()
   let operation: string | undefined, selected: SelectionRecord | undefined
