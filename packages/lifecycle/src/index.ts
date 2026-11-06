@@ -29,7 +29,7 @@ export { preflight } from './upgrade/preflight.ts'
 export type { PreflightCheck, PreflightCheckId, PreflightInput, PreflightReport } from './upgrade/preflight.ts'
 export { assertHotPathMigrations } from './upgrade/migrations.ts'
 export type { PendingMigration } from './upgrade/migrations.ts'
-export { DEFAULT_LAYOUT, DEFAULT_PANEL_UNITS, REWIND_STEPS, UPGRADE_UNIT, isCustomerDataPath, normalizeUpgradePlan, parseRewindJournal, readLock, recoverUpgrade, rewindJournalPath, runUpgrade } from './upgrade/machine.ts'
+export { DEFAULT_LAYOUT, DEFAULT_PANEL_UNITS, REWIND_STEPS, UPGRADE_UNIT, isCustomerDataPath, limitRequirementMet, normalizeUpgradePlan, parseRewindJournal, readLock, recoverUpgrade, rewindJournalPath, runUpgrade } from './upgrade/machine.ts'
 export type {
   LockInfo,
   LockState,
@@ -50,6 +50,7 @@ export type {
   AccountIdentity,
   GenerationId,
   HealthPort,
+  LimitRequirement,
   MigratorPort,
   ReconcilerPort,
   SystemProbePort,

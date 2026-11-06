@@ -2,7 +2,7 @@ import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto
 import { posix } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { XpanelError, fail } from '@xpanel/core'
-import type { AuditEntry, HostAction, OsProfile, Principal } from '@xpanel/core'
+import type { AuditEntry, HostAction, HostLimitObservation, OsProfile, Principal } from '@xpanel/core'
 import { createTestDb, listUpgrades, loadMigrations, parseMigration } from '@xpanel/db'
 import {
   computeManifest,
@@ -1738,16 +1738,19 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
         async status() {
           return { converged: true, drift: [] }
         },
-        async identities(): Promise<AccountIdentity[]> {
-          return [
-            {
-              username: 'alice',
-              uid: 1001,
-              gid: 1001,
-              slice: 'xpanel-1001.slice',
-              quotas: { diskMb: 2048 },
-            },
-          ]
+        async identities(): Promise<{ accounts: AccountIdentity[]; limits: HostLimitObservation }> {
+          return {
+            accounts: [
+              {
+                username: 'alice',
+                uid: 1001,
+                gid: 1001,
+                slice: 'xpanel-1001.slice',
+                quotas: { diskMb: 2048 },
+              },
+            ],
+            limits: { status: 'verified', checkedAccounts: 1, unavailableAccounts: 0, gaps: [] },
+          }
         },
       },
       loadReleaseMigrations: async () => [...baseMigrations, newMigration],

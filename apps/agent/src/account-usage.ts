@@ -1,7 +1,7 @@
 import type { AgentExecutor } from './executor.ts'
 import type { ResourceLimits } from '@xpanel/core'
 import { compareAccountLimits } from './limit-gaps.ts'
-import { ioDeviceForMount } from './io-device.ts'
+import { ioDiskForMount } from './io-device.ts'
 
 const USERNAME = /^[a-z][a-z0-9]{0,15}$/
 const PHP_VERSIONS = ['8.5', '8.4', '8.3', '8.2', '8.1', '8.0', '7.4'] as const
@@ -66,7 +66,7 @@ export const readAccountUsage = async (
       sample.processCount = slice.pidsCurrent
       if (input.resources && input.resources.ioWriteBps !== 'unlimited') {
         const mountinfo = await executor.readFile('/proc/self/mountinfo')
-        const device = mountinfo ? ioDeviceForMount(mountinfo, input.home) : null
+        const device = mountinfo ? await ioDiskForMount(executor, mountinfo, input.home) : null
         const comparison = compareAccountLimits({ ...input.resources, memoryMb: 'unlimited', maxProcesses: 'unlimited', cpuPercent: 'unlimited', diskMb: 'unlimited' }, {
           memoryMax: null, pidsMax: null, cpuMax: null, diskQuotaHardKb: null,
           ioMax: slice.ioMax ?? null, ioDevices: device ? [device] : null,

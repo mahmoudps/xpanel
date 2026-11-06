@@ -10,6 +10,7 @@ import { createProductionHostTargetMatcher, LinuxHostExecutor, MAILDIR_BOX_RE } 
 import { parseLoadavg, parseMeminfo } from './host-info.ts'
 import { parseServiceManagerBootTime } from './service-manager.ts'
 import { classifyHostBinaries, probeAuditLog, readHostMeasurements } from './host-probes.ts'
+import { ioDiskForDevice, ioMountForTarget } from './io-device.ts'
 
 describe('host capability probes', () => {
   it('requires every exact benchmark binary and actual parsed network evidence', () => {
@@ -30,12 +31,16 @@ describe('host capability probes', () => {
     const database = await createTestDb()
     const certificate = vi.spyOn(hostIdentity, 'readServedCertificatePem').mockResolvedValue(null)
     class Reader extends LinuxHostExecutor {
-      ioMax = '8:2 rbps=1 wbps=1 riops=1 wiops=1'
+      ioMax = '8:0 rbps=1 wbps=1 riops=1 wiops=1'
       override async readFile(path: string): Promise<string | null> {
         if (path === '/proc/loadavg') return '0.1 0.2 0.3 1/100 1'
         if (path === '/proc/meminfo') return 'MemTotal: 2048 kB\nMemAvailable: 1024 kB\n'
         if (path.endsWith('/cgroup.subtree_control')) return 'cpu memory io pids'
         if (path === '/proc/self/mountinfo') return '1 0 8:1 / / rw - ext4 /dev/sda1 rw\n2 1 8:2 / /home rw - ext4 /dev/sda2 rw\n'
+        // /home on partition sda2 (8:2): io.max rows name the whole disk sda (8:0).
+        if (path === '/sys/dev/block/8:2/uevent') return 'MAJOR=8\nMINOR=2\nDEVNAME=sda2\nDEVTYPE=partition\nPARTN=2\n'
+        if (path === '/sys/block/sda/sda2/dev') return '8:2\n'
+        if (path === '/sys/block/sda/dev') return '8:0\n'
         return null
       }
       override async runCommand(argv: string[]) {
@@ -79,6 +84,8 @@ describe('host capability probes', () => {
       }
       expect((await usage()).ioEnforced).toBe(false)
       executor.ioMax = '8:2 rbps=1000 wbps=1000 riops=10 wiops=10'
+      expect((await usage()).ioEnforced).toBe(false)
+      executor.ioMax = '8:0 rbps=1000 wbps=1000 riops=10 wiops=10'
       expect(await usage()).toMatchObject({ ioEnforced: true, memoryBytes: 1234, processCount: 4 })
       assigned.mockResolvedValueOnce(null)
       expect((await usage()).ioEnforced).toBeNull()
@@ -234,6 +241,13 @@ describe('host capability probes', () => {
     expect(match('/sys/fs/cgroup/xpanel.slice/cgroup.subtree_control', 'read')).toBe(true)
     expect(match('/sys/fs/cgroup/cgroup.subtree_control', 'read')).toBe(true)
     expect(match('/sys/fs/cgroup/cgroup.subtree_control', 'write')).toBe(false)
+    // Read-only block identity facts for whole-disk io.max resolution; no other /sys or /proc block path.
+    for (const path of ['/proc/partitions', '/sys/dev/block/8:1/uevent', '/sys/dev/block/253:0/slaves/sda2/dev', '/sys/block/sda/dev', '/sys/block/nvme0n1/nvme0n1p2/dev']) {
+      expect(match(path, 'read'), path).toBe(true)
+      for (const operation of ['write', 'remove', 'ensure-directory'] as const) expect(match(path, operation), path).toBe(false)
+    }
+    for (const path of ['/sys/dev/block/8:1/../8:0/uevent', '/sys/dev/block/0:5/uevent', '/sys/dev/block/8:1/dev', '/sys/dev/block/8:1/holders/dm-0/dev', '/sys/dev/block/8:1/slaves/../dev',
+      '/sys/block/sda/queue/scheduler', '/sys/block/sda/sda1/sda1/dev', '/sys/block/../dev', '/sys/block/.x/dev', '/sys/class/block/sda/dev', '/sys/block/sda/uevent', '/proc/diskstats']) expect(match(path, 'read'), path).toBe(false)
     const maildir = '/home/alice/mail/alice.example.com/ftp_and_mail'
     expect(MAILDIR_BOX_RE.test(maildir)).toBe(true)
     expect(match(maildir, 'remove')).toBe(true)
@@ -253,5 +267,8 @@ describe('host capability probes', () => {
     expect(parseServiceManagerBootTime(await executor.readFile('/proc/stat'))).toBeGreaterThan(0)
     await expect(executor.readFile('/proc/self/environ')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
     await expect(executor.readFile('/proc/1/mountinfo')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    // Actual sysfs through the reviewed grants: a block-backed root resolves to the whole disk io.max accepts.
+    const root = ioMountForTarget(await executor.readFile('/proc/self/mountinfo') ?? '', '/')?.device
+    if (root) expect(await executor.readFile(`/sys/dev/block/${await ioDiskForDevice(executor, root)}/uevent`)).toContain('DEVTYPE=disk')
   })
 })

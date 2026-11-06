@@ -1,6 +1,6 @@
 import { posix } from 'node:path'
 import { auditEntry, fail } from '@xpanel/core'
-import type { ErrorCode, HostAction, OsProfile, Principal } from '@xpanel/core'
+import type { ErrorCode, HostAction, HostLimitObservation, OsProfile, Principal } from '@xpanel/core'
 import { ACME_DIR, acmeTraverseAclArgv, assertUnitName } from '@xpanel/os'
 import type { FsPort } from '../ports.ts'
 import { errorCode, errorMessage } from '../ports.ts'
@@ -12,7 +12,7 @@ import { assertHotPathMigrations } from './migrations.ts'
 import { preflight } from './preflight.ts'
 import type { PreflightCheck } from './preflight.ts'
 import { assertSemver, parseSemver } from './semver.ts'
-import type { AccountIdentity, GenerationId, UnitChange, UpgradePhase, UpgradePorts, UpgradeRow } from './ports.ts'
+import type { AccountIdentity, GenerationId, LimitRequirement, UnitChange, UpgradePhase, UpgradePorts, UpgradeRow } from './ports.ts'
 
 export interface UpgradeLayout {
   root: string
@@ -269,6 +269,8 @@ export interface LockInfo {
   actor: string
   to: string
   at: string
+  /** Assigned-limit evidence the precheck observed on the pre-upgrade release; recovery must be no worse. */
+  limits: HostLimitObservation | null
 }
 
 interface Ctx {
@@ -287,6 +289,7 @@ interface Ctx {
   previousGeneration: GenerationId | null
   newGeneration: GenerationId | null
   identitiesBefore: AccountIdentity[]
+  limitsBefore: HostLimitObservation | null
   staging: string | null
   releaseCreated: boolean
   migrated: string[]
@@ -421,7 +424,7 @@ const retainRetirementAttention = async (ports: UpgradePorts, fs: FsPort, layout
 }
 
 const lockInfo = (c: Ctx, state: LockState): string =>
-  `${JSON.stringify({ state, recordId: c.recordId, actor: c.plan.actor.username, to: c.plan.release.version, at: nowIso(c) } satisfies LockInfo)}\n`
+  `${JSON.stringify({ state, recordId: c.recordId, actor: c.plan.actor.username, to: c.plan.release.version, at: nowIso(c), limits: c.limitsBefore } satisfies LockInfo)}\n`
 
 const identityDrift = (before: AccountIdentity[], after: AccountIdentity[]): string[] => {
   const byName = new Map(after.map((a) => [a.username, a]))
@@ -438,6 +441,14 @@ const identityDrift = (before: AccountIdentity[], after: AccountIdentity[]): str
   return out
 }
 
+/** Whether observed assigned-limit evidence meets a phase's requirement (see LimitRequirement). */
+export const limitRequirementMet = (requirement: LimitRequirement, observed: HostLimitObservation): boolean => {
+  if (requirement.phase === 'activated') return observed.status === 'verified'
+  const baseline = requirement.phase === 'recovery' ? requirement.baseline : null
+  if (observed.status === 'unavailable') return baseline?.status === 'unavailable'
+  return !baseline || baseline.status === 'unavailable' || observed.gaps.every(gap => baseline.gaps.includes(gap))
+}
+
 const probe = async <T>(fn: () => Promise<T>, what: string, problems: string[]): Promise<T | undefined> => {
   try {
     return await fn()
@@ -452,14 +463,15 @@ interface HealthInput {
   canary: string | null
   /** identities to compare against; null skips the comparison (recovery has no baseline) */
   before: AccountIdentity[] | null
+  limits: LimitRequirement
 }
 
-/** Converged desired state, unchanged identities, actual canary UID and qualified control-plane service readiness. */
-const healthProblems = async ({ ports, canary, before }: HealthInput): Promise<string[]> => {
+/** Converged desired state, unchanged identities, met limit requirement, actual canary UID and qualified control-plane service readiness. */
+const healthProblems = async ({ ports, canary, before, limits }: HealthInput): Promise<string[]> => {
   const p: string[] = []
   const st = await probe(() => ports.reconciler.status(), 'reconciler status', p)
   if (st && !st.converged) p.push(`reconciler not converged${st.drift.length ? `: ${st.drift.join(', ')}` : ''}`)
-  const now = await probe(() => ports.reconciler.identities(), 'identity', p)
+  const now = (await probe(() => ports.reconciler.identities(limits), 'identity', p))?.accounts
   if (now && before) p.push(...identityDrift(before, now))
   if (canary !== null) {
     const expected = (before ?? now ?? []).find((i) => i.username === canary)?.uid
@@ -472,9 +484,9 @@ const healthProblems = async ({ ports, canary, before }: HealthInput): Promise<s
   return p
 }
 
-const healthGate = async (c: Ctx): Promise<void> => {
+const healthGate = async (c: Ctx, limits: LimitRequirement): Promise<void> => {
   for (let attempt = 1; attempt <= c.plan.health.attempts; attempt++) {
-    c.healthProblems = await healthProblems({ ports: c.ports, canary: c.plan.canary, before: c.identitiesBefore })
+    c.healthProblems = await healthProblems({ ports: c.ports, canary: c.plan.canary, before: c.identitiesBefore, limits })
     if (c.healthProblems.length === 0) {
       log(c, 'health', true, `healthy on attempt ${attempt}`)
       return
@@ -749,7 +761,7 @@ const rewind = async (c: Ctx, resumed: RewindJournal | null): Promise<RewindJour
   const generation = await probe(() => c.ports.reconciler.currentGeneration(), 'generation', problems)
   if (generation !== undefined && generation !== c.newGeneration) problems.push(`generation ${generation} is active, expected the rewound ${String(c.newGeneration)}`)
   try {
-    await healthGate(c)
+    await healthGate(c, { phase: 'recovery', baseline: c.limitsBefore })
   } catch {
     problems.push(...c.healthProblems)
   }
@@ -901,7 +913,11 @@ const precheck = async (c: Ctx): Promise<UpgradeResult | null> => {
   const releaseDir = posix.join(l.releasesDir, c.plan.release.version)
   if (await c.fs.exists(releaseDir) && !await c.ports.safety.acceptPreparedRelease(releaseDir)) return refuse(c, 'CONFLICT', `${releaseDir} already exists; remove it after inspection`)
   if ((await c.fs.sha256(c.plan.release.archivePath)) !== c.plan.release.sha256) return refuse(c, 'VALIDATION', 'release archive checksum mismatch')
-  c.identitiesBefore = await reconciler.identities()
+  // The running release may never have applied a limit kind: record its gaps as evidence, refuse only unreadable evidence.
+  const observed = await reconciler.identities({ phase: 'precheck' })
+  c.identitiesBefore = observed.accounts
+  c.limitsBefore = observed.limits
+  log(c, 'limits', true, `assigned limits ${observed.limits.status}${observed.limits.gaps.length ? `: ${observed.limits.gaps.join(', ')}` : ''}`)
   if (c.plan.canary && !c.identitiesBefore.some((i) => i.username === c.plan.canary)) {
     return refuse(c, 'NOT_FOUND', `canary account ${c.plan.canary} does not exist`)
   }
@@ -948,7 +964,7 @@ const execute = async (c: Ctx): Promise<UpgradeResult> => {
   try {
     await activateStep(c)
     await enterPhase(c, 'health-check')
-    await healthGate(c)
+    await healthGate(c, { phase: 'activated' })
   } catch (e) {
     return rollback(c, e, releaseDir)
   }
@@ -971,6 +987,7 @@ const newCtx = (ports: UpgradePorts, plan: NormalizedPlan): Ctx => ({
   previousGeneration: null,
   newGeneration: null,
   identitiesBefore: [],
+  limitsBefore: null,
   staging: null,
   releaseCreated: false,
   migrated: [],
@@ -1017,13 +1034,18 @@ const withLock = async (c: Ctx, body: () => Promise<UpgradeResult>): Promise<Upg
   }
 }
 
+const LIMIT_GAPS: readonly string[] = ['memory', 'pids', 'io', 'cpu', 'disk']
+const parseLimits = (v: unknown): HostLimitObservation | null => isObject(v) && ['verified', 'gaps', 'unavailable'].includes(String(v.status))
+  && isNonNegInt(v.checkedAccounts) && isNonNegInt(v.unavailableAccounts) && Array.isArray(v.gaps) && v.gaps.every(gap => LIMIT_GAPS.includes(gap))
+  ? { status: v.status as HostLimitObservation['status'], checkedAccounts: v.checkedAccounts, unavailableAccounts: v.unavailableAccounts, gaps: [...v.gaps] as HostLimitObservation['gaps'] } : null
+
 export const readLock = async (fs: Pick<FsPort, 'readFile'>, path: string): Promise<LockInfo | null> => {
   const raw = await fs.readFile(path)
   if (raw === null) return null
   try {
     const v = JSON.parse(raw) as Partial<LockInfo>
     return v && (v.state === 'running' || v.state === 'rollback-failed' || v.state === 'retirement-pending')
-      ? { state: v.state, recordId: typeof v.recordId === 'string' ? v.recordId : null, actor: String(v.actor ?? ''), to: String(v.to ?? ''), at: String(v.at ?? '') }
+      ? { state: v.state, recordId: typeof v.recordId === 'string' ? v.recordId : null, actor: String(v.actor ?? ''), to: String(v.to ?? ''), at: String(v.at ?? ''), limits: parseLimits(v.limits) }
       : null
   } catch {
     return null
@@ -1065,7 +1087,7 @@ export interface RecoverResult {
  * Continues a rewind a crash left at `rewind-started`, inside the recovery's admission scope.
  * Terminal journals are never re-run: failed or unverified rewinds wait for the operator.
  */
-const resumeRewind = async (ports: UpgradePorts, actor: Principal, os: Pick<OsProfile, 'family'>, layout: UpgradeLayout, recordId: string | null): Promise<RewindJournal | null> => {
+const resumeRewind = async (ports: UpgradePorts, actor: Principal, os: Pick<OsProfile, 'family'>, layout: UpgradeLayout, recordId: string | null, limitsBefore: HostLimitObservation | null): Promise<RewindJournal | null> => {
   if (recordId === null || !RECORD_ID.test(recordId)) return null
   const fs = guardFs(ports.fs, layout)
   const rawJournal = await fs.readFile(rewindJournalPath(layout, recordId))
@@ -1088,7 +1110,7 @@ const resumeRewind = async (ports: UpgradePorts, actor: Principal, os: Pick<OsPr
   })
   Object.assign(c, {
     stamp: r.stamp, phase: 'rollback', recordId, from: r.from, fromSchema: r.fromSchema, previousTarget: r.previousTarget,
-    snapshot: r.snapshot.path, previousGeneration: r.previousGeneration, identitiesBefore: r.identitiesBefore, effectsStarted: true,
+    snapshot: r.snapshot.path, previousGeneration: r.previousGeneration, identitiesBefore: r.identitiesBefore, limitsBefore, effectsStarted: true,
   })
   // Native admission pins exact source/unit/metadata images; reselect release even when current already matches.
   const resumed = journal ? { ...journal, state: 'rewind-started' as const, done: journal.done.filter(step => step !== 'release' && step !== 'start-panel') } : null
@@ -1115,19 +1137,21 @@ const recoverWithinGuard = async (ports: UpgradePorts, input: RecoverInput): Pro
   const nativePlan = await ports.safety.recoveryPlan()
   if (!lockPresent && !isInFlight(last) && nativePlan.mode === 'rollback') return fail('PRECONDITION_FAILED', 'nothing to recover: no upgrade lock and no upgrade in flight')
   if (nativePlan.recordId !== null && nativePlan.recordId !== (lock?.recordId ?? last?.id)) return fail('PRECONDITION_FAILED', 'recovery record changed')
-  const rewound = nativePlan.mode === 'rollback' ? await resumeRewind(ports, actor, input.os, layout, nativePlan.recordId) : null
+  const rewound = nativePlan.mode === 'rollback' ? await resumeRewind(ports, actor, input.os, layout, nativePlan.recordId, lock?.limits ?? null) : null
   if (nativePlan.mode !== 'rollback') await ports.safety.controlPlane('start')
   if (rewound && rewound.state !== 'rewind-verified') {
     return fail('PRECONDITION_FAILED', `rewind unverified; operator action required: ${rewound.problems.join('; ')}`, { rewind: rewound })
   }
   const version = versionFromTarget(await fs.readlink(layout.currentLink), layout)
   if (!version) return fail('PRECONDITION_FAILED', `${layout.currentLink} does not point at a release`)
-  const problems = await healthProblems({ ports, canary, before: null })
+  const hostOutcome = nativePlan.mode === 'rollback' ? 'rolled_back' : nativePlan.hostOutcome
+  // The selected target release must verify; the pre-upgrade release must be no worse than admission (no lock: none recorded).
+  const problems = await healthProblems({ ports, canary, before: null, limits: hostOutcome === 'succeeded' ? { phase: 'activated' } : { phase: 'recovery', baseline: lock?.limits ?? null } })
   if (problems.length) return fail('PRECONDITION_FAILED', `server is not healthy yet: ${problems.join('; ')}`, { problems })
   await retainRetirementAttention(ports, fs, layout, { recoveryObserved: true, version, recordId: last?.id ?? null, observedAt: ports.clock.now().toISOString() })
   const recordId = last && isInFlight(last) ? last.id : null
   await ports.audit.record(auditEntry(actor, 'upgrade.recovery_observed', 'xpanel', { note, version, lock, recordId, closedRecordId: null, rewind: rewound?.state ?? null, retirementPending: true }, 'failed', { now: ports.clock.now() }))
-  return { outcome: 'retirement_pending', hostOutcome: nativePlan.mode === 'rollback' ? 'rolled_back' : nativePlan.hostOutcome,
+  return { outcome: 'retirement_pending', hostOutcome,
     status: 'retirement_pending', version, recordId: nativePlan.recordId, closedRecordId: null, problems: [RETIREMENT_REQUIRED] }
 }
 

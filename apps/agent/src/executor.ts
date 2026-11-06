@@ -377,7 +377,11 @@ const HOST_MEASUREMENT_READS = new Set<string>([
   '/run/reboot-required',
   '/sys/fs/cgroup/xpanel.slice/cgroup.subtree_control',
   '/sys/fs/cgroup/cgroup.subtree_control',
+  '/proc/partitions',
 ])
+/** Block-device identity attributes (`uevent`, `dev`) that resolve an IO target to the whole disk io.max accepts. */
+const BLOCK_DEVICE_FACT_RE = /^\/sys\/(?:dev\/block\/[1-9][0-9]{0,3}:(?:0|[1-9][0-9]{0,6})\/(?:uevent|slaves\/[A-Za-z0-9][A-Za-z0-9_-]{0,31}\/dev)|block\/[A-Za-z0-9][A-Za-z0-9_-]{0,31}(?:\/[A-Za-z0-9][A-Za-z0-9_-]{0,31})?\/dev)$/
+const isHostMeasurementRead = (path: string): boolean => HOST_MEASUREMENT_READS.has(path) || BLOCK_DEVICE_FACT_RE.test(path)
 
 /** systemd drop-in directories such as user-<uid>.slice.d. The parent unit dir already exists. */
 const SYSTEMD_DROPIN_DIR_RE = /\/[^/]+\.(?:slice|service|socket|timer)\.d$/
@@ -430,7 +434,7 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
   return (path: string, operation: HostTargetOperation): boolean => {
     // Saved server host name (renderHostnameChange); /etc/hosts keeps its unrelated lines.
     if (path === '/etc/hostname' || path === '/etc/hosts') return operation === 'read' || operation === 'write' || operation === 'remove'
-    if (HOST_MEASUREMENT_READS.has(path)) return operation === 'read'
+    if (isHostMeasurementRead(path)) return operation === 'read'
     if (path === '/etc/xpanel/account-probe' || path === '/etc/xpanel/account-probe/runtime'
       || path === '/run/xpanel-account-probe' || /^\/run\/xpanel-account-probe\/(?:[1-9][0-9]{3}|[1-5][0-9]{4}|60000)$/.test(path)) return operation === 'ensure-directory'
     if (path === '/etc/xpanel/account-probe/probe.php') return operation === 'read' || operation === 'write' || operation === 'remove'
@@ -769,11 +773,11 @@ export class LinuxHostExecutor implements AgentExecutor {
       const read = async (target: string): Promise<string> => {
         return withOwnedHostFileHandle(await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)), async fh => {
           const metadata = await fh.stat()
-          if (!metadata.isFile() || (!HOST_MEASUREMENT_READS.has(path) && metadata.nlink !== 1)) fail('PRECONDITION_FAILED', 'managed host content must be a regular file without hard links')
+          if (!metadata.isFile() || (!isHostMeasurementRead(path) && metadata.nlink !== 1)) fail('PRECONDITION_FAILED', 'managed host content must be a regular file without hard links')
           return await fh.readFile('utf8')
         })
       }
-      return HOST_MEASUREMENT_READS.has(path) ? await read(path) : await withPinnedHostTargetParent(path, read)
+      return isHostMeasurementRead(path) ? await read(path) : await withPinnedHostTargetParent(path, read)
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
       throw err
