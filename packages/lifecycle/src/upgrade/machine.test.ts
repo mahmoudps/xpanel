@@ -970,6 +970,17 @@ describe('runUpgrade: rollback after the switch', () => {
     const r = await runUpgrade(w.ports, plan())
     expect(r).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
     expect(r.reason).toMatch(/qualified control-plane readiness probe failed: connection refused/)
+    // A refusal's stable reason code reaches the report; free text in the reason slot never does.
+    for (const [reason, shown] of [['held_http_correlation_not_verified', ' (held_http_correlation_not_verified)'], ['Not a code; see journal', '']] as const) {
+      const coded = world()
+      coded.ports.health.qualifiedControlPlane = async () => {
+        if (await coded.fs.readlink('/opt/xpanel/current') === '/opt/xpanel/releases/1.1.0') fail('PRECONDITION_FAILED', 'the held account HTTP request did not verify', { reason })
+        return true
+      }
+      const failed = await runUpgrade(coded.ports, plan())
+      expect(failed.reason).toContain(`qualified control-plane readiness probe failed: the held account HTTP request did not verify${shown}`)
+      if (!shown) expect(failed.reason).not.toContain(reason)
+    }
   })
 
   it('does not accept a missing qualified control-plane observation as healthy', async () => {

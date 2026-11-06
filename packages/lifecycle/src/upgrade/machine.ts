@@ -452,11 +452,18 @@ export const limitRequirementMet = (requirement: LimitRequirement, observed: Hos
   return !baseline || baseline.status === 'unavailable' || observed.gaps.every(gap => baseline.gaps.includes(gap))
 }
 
+/** A refusal's stable reason code, so the attention report names the failed check without the host journal. */
+const stableReason = (e: unknown): string | undefined => {
+  const reason = typeof e === 'object' && e !== null && 'detail' in e ? (e as { detail?: { reason?: unknown } }).detail?.reason : undefined
+  return typeof reason === 'string' && /^[a-z][a-z0-9_]{0,95}$/.test(reason) ? reason : undefined
+}
+
 const probe = async <T>(fn: () => Promise<T>, what: string, problems: string[]): Promise<T | undefined> => {
   try {
     return await fn()
   } catch (e) {
-    problems.push(`${what} probe failed: ${errorMessage(e)}`)
+    const reason = stableReason(e)
+    problems.push(`${what} probe failed: ${errorMessage(e)}${reason ? ` (${reason})` : ''}`)
     return undefined
   }
 }
