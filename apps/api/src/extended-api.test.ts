@@ -711,25 +711,10 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.equal(await serverHandle.store.getAccountByUsername('legacyshop'), null)
 
     // ---- Step F: Extended File Isolation & Web Extras ----
-    const dirPrivRes = await root.request(`/api/web-features/${account.id}/directory-privacy`, {
-      method: 'PUT',
-      body: {
-        rules: [
-          {
-            path: '/admin',
-            authName: 'Nebula Admin Area',
-            users: [{ username: 'ops', password: 'OpsSecret!2026' }],
-          },
-        ],
-      },
-    })
-    assert.equal(dirPrivRes.status, 200)
-    const dirPrivBody = (await dirPrivRes.json()) as {
-      config: { compiledNginx: string; rules: { users: Record<string, unknown>[] }[] }
-    }
-    assert.match(dirPrivBody.config.compiledNginx, /auth_basic "Nebula Admin Area"/)
-    assert.ok(!('compiledHtpasswd' in dirPrivBody.config))
-    assert.ok(dirPrivBody.config.rules.every(rule => rule.users.every(user => !('passwordHash' in user))))
+    // Directory privacy lives in the account files; without the confined account file runner nothing is read or claimed.
+    const dirPrivRes = await root.request(`/api/web-features/${account.id}/directory-privacy`)
+    assert.equal(dirPrivRes.status, 412)
+    assert.equal(((await dirPrivRes.json()) as { code: string }).code, 'PRECONDITION_FAILED')
 
     const hotlinkRes = await root.request(`/api/web-features/${account.id}/hotlink-protection`, {
       method: 'PUT',

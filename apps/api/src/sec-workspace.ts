@@ -24,6 +24,7 @@ const SERVER: Readonly<Record<string, { kind: ServerKind; host: string | null; r
   '/api/server/sec/flood': { kind: 'flood', host: '/host/sec/flood', reconcile: true },
   '/api/server/sec/panel-access': { kind: 'panel-access', host: null, reconcile: false },
   '/api/server/sec/dns-cluster': { kind: 'dns-cluster', host: '/host/sec/dns-cluster', reconcile: false },
+  '/api/server/sec/compiler-access': { kind: 'compiler-access', host: '/host/sec/compiler-access', reconcile: true },
 }
 const ACCOUNT_WAF = '/api/account/sec/waf'
 const unchanged = { stateChanged: false }
@@ -62,6 +63,22 @@ export function projectSecDnsClusterObservation(value: unknown): unknown {
     : { launch: s.launch, primary: s.primary, disableAxfr: s.disableAxfr, allowAxfrIps: addresses(s.allowAxfrIps), alsoNotify: addresses(s.alsoNotify), includeDir: s.includeDir }) : null
   const peers = value.peers.map(item => object(item) && boolOrNull(item.transferAllowed) && boolOrNull(item.notified) ? { ...peerOf(item), transferAllowed: item.transferAllowed, notified: item.notified } : unverified())
   return { observedAt: value.observedAt, state: value.state, settings, application: value.application, peers }
+}
+const COMPILER_USER = /^[a-z][a-z0-9]{0,15}$/
+const ACCOUNT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const users = (value: unknown, max: number): string[] => Array.isArray(value) && value.length <= max && value.every(item => typeof item === 'string' && COMPILER_USER.test(item)) ? [...value as string[]] : unverified()
+export function projectSecCompilerAccessObservation(value: unknown): unknown {
+  if (!object(value) || !iso(value.observedAt) || !(value.family === 'debian' || value.family === 'rhel' || typeof value.family === 'string' && value.family.length <= 32) || !oneOf(value.state, ['unmanaged', 'applied', 'drift'] as const)
+    || !object(value.group) || typeof value.group.exists !== 'boolean' || !(value.group.gid === null || count(value.group.gid)) || !Array.isArray(value.commands) || value.commands.length > 16
+    || !object(value.hook) || !(value.hook.mechanism === null || oneOf(value.hook.mechanism, ['dpkg-post-invoke', 'dnf-post-transaction-actions'] as const)) || typeof value.hook.available !== 'boolean' || typeof value.hook.installed !== 'boolean') return unverified()
+  const policy = value.policy === null ? null : object(value.policy) && typeof value.policy.restricted === 'boolean' && Array.isArray(value.policy.accountIds) && value.policy.accountIds.length <= 5000 && value.policy.accountIds.every(id => typeof id === 'string' && ACCOUNT_ID.test(id))
+    ? { restricted: value.policy.restricted, accountIds: [...value.policy.accountIds as string[]] } : unverified()
+  const expected = value.expected === null ? null : object(value.expected) && Array.isArray(value.expected.excluded) && value.expected.excluded.length <= 5000
+    ? { members: users(value.expected.members, 5000), excluded: value.expected.excluded.map(item => object(item) && typeof item.username === 'string' && COMPILER_USER.test(item.username) && item.reason === 'jailed_shell' ? { username: item.username, reason: item.reason } : unverified()) } : unverified()
+  const commands = value.commands.map(item => object(item) && oneOf(item.name, ['gcc', 'cc', 'c++', 'g++', 'as', 'ld'] as const) && typeof item.present === 'boolean' && boolOrNull(item.restricted) && (item.mode === null || count(item.mode) && item.mode <= 0o7777)
+    ? { name: item.name, present: item.present, restricted: item.restricted, mode: item.mode } : unverified())
+  return { observedAt: value.observedAt, family: value.family, state: value.state, policy, expected, group: { exists: value.group.exists, gid: value.group.gid, members: users(value.group.members, 5000) }, commands,
+    hook: { mechanism: value.hook.mechanism, available: value.hook.available, installed: value.hook.installed } }
 }
 const ZONE_STATES = ['in_sync', 'behind', 'ahead', 'not_served', 'refused', 'unreachable', 'local_unavailable'] as const
 export function projectSecPeerVerification(value: unknown, peer: string): unknown {
@@ -129,9 +146,16 @@ async function hostRead(helpers: SecWorkspaceHelpers, caller: AuthenticatedCalle
   try { return { observation: project(await helpers.callHost(caller, hostPath)), reason: null } }
   catch (error) { return { observation: null, reason: isXpanelError(error) && error.code === 'PRECONDITION_FAILED' && error.message.includes('verified') ? 'observation_unverified' : 'host_unavailable' } }
 }
-const PROJECT: Readonly<Record<string, (value: unknown) => unknown>> = { waf: projectSecWafObservation, flood: projectSecFloodObservation, 'dns-cluster': projectSecDnsClusterObservation }
+const PROJECT: Readonly<Record<string, (value: unknown) => unknown>> = { waf: projectSecWafObservation, flood: projectSecFloodObservation, 'dns-cluster': projectSecDnsClusterObservation, 'compiler-access': projectSecCompilerAccessObservation }
 
-/** Root WAF, flood, panel access and DNS cluster workspaces plus the account owner's per-domain ModSecurity switch. */
+/** Accounts the Compiler Access grant list offers; a jailed shell stays restricted (agent compiler-access.ts). */
+const compilerAccounts = async (store: StateStore): Promise<{ id: string; username: string; jailedShell: boolean }[]> => {
+  const plans = new Map((await store.listPlans()).map(plan => [plan.id, plan.shell]))
+  return (await store.listAccounts()).filter(account => account.status !== 'terminating').map(account => ({ id: account.id, username: account.username, jailedShell: account.shell === 'jailed' && (plans.get(account.planId) ?? 'jailed') === 'jailed' }))
+    .sort((left, right) => left.username.localeCompare(right.username)).slice(0, 5000)
+}
+
+/** Root WAF, flood, panel access, DNS cluster and Compiler Access workspaces plus the account owner's per-domain ModSecurity switch. */
 export async function handleSecWorkspaceRoute(request: Request, url: URL, method: string, helpers: SecWorkspaceHelpers): Promise<Response | null> {
   if (url.pathname === ACCOUNT_WAF) return accountWaf(request, url, method, helpers)
   const verify = url.pathname === '/api/server/sec/dns-cluster/verify', apply = url.pathname === '/api/server/sec/dns-cluster/apply'
@@ -175,13 +199,19 @@ export async function handleSecWorkspaceRoute(request: Request, url: URL, method
   if (method === 'GET') {
     const view = viewOf(kind, await readRaw(helpers.store, kind))
     const host = route.host ? await hostRead(helpers, caller, route.host, PROJECT[kind]!) : null
-    const extra = kind === 'panel-access' ? { client: clientFacts(view.policy as SecPanelAccessPolicy ?? SEC_DEFAULTS['panel-access'], helpers.readClient(request)), enforcement: helpers.panelAccessEnforced ? 'api_listener' : 'not_connected' } : {}
+    const extra = kind === 'panel-access' ? { client: clientFacts(view.policy as SecPanelAccessPolicy ?? SEC_DEFAULTS['panel-access'], helpers.readClient(request)), enforcement: helpers.panelAccessEnforced ? 'api_listener' : 'not_connected' }
+      : kind === 'compiler-access' ? { accounts: await compilerAccounts(helpers.store) } : {}
     await fresh()
     return workspaceJson({ ...view, ...(host ? host : {}), ...extra })
   }
   const body = await bodyOf(request, 96 * 1024)
   if (Object.keys(body).sort().join() !== 'expectedRevision,policy') return invalid('only policy and expectedRevision are accepted')
   const expectedRevision = revisionOf(body.expectedRevision), policy = parseSecPolicy(kind, body.policy)
+  if (kind === 'compiler-access') {
+    // Granted accounts must exist now; one deleted later simply leaves the group on the next reconcile.
+    const known = new Set((await helpers.store.listAccounts()).map(account => account.id))
+    if ((policy as { accountIds: string[] }).accountIds.some(id => !known.has(id))) return invalid('every granted account must exist')
+  }
   const saved = await writeRecord(helpers, kind, expectedRevision, () => {
     // Self-lockout guard: the list for the entry point in use (xWHM when it cannot be told) must still admit this request's address.
     const client = helpers.readClient(request), listener = client.listener ?? 'xwhm'

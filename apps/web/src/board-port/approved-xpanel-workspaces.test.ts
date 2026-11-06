@@ -284,7 +284,8 @@ describe('account workspace structures and native binding boundaries', () => {
         for (const hook of ['data-directory-privacy-rows', 'data-directory-privacy-status', 'data-directory-privacy-add', 'data-directory-privacy-save', 'data-directory-privacy-path', 'data-directory-privacy-prompt', 'data-directory-privacy-username', 'data-directory-privacy-password', 'data-directory-privacy-preview'])
             assert.ok(html.includes(hook), hook);
         assert.doesNotMatch(html, /<form\b/);
-        assert.match(html, /Saved rules are account configuration only/);
+        assert.match(html, /A folder counts as protected only after the web server asked for a password/);
+        assert.match(html, /placeholder="public_html\/private"/);
     });
 
     it('requires the ssl-tls-status and ssl-install capabilities and renders installed certificates, upload and actions without served-TLS claims', () => {

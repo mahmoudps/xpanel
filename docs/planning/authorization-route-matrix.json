@@ -3060,6 +3060,34 @@
     },
     {
       "method": "GET",
+      "path": "/api/server/sec/compiler-access",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:read",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-workspace.ts:assertRoot"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/server/sec/compiler-access",
+      "surface": "api",
+      "resource": "server",
+      "requiredScope": "server:write",
+      "resellerAcl": null,
+      "featureEntitlement": [],
+      "ownershipSource": "rootOnly",
+      "allowedPrincipals": [
+        "root"
+      ],
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized(rootOnly) + apps/api/src/sec-workspace.ts:assertRoot"
+    },
+    {
+      "method": "GET",
       "path": "/api/server/sec/flood",
       "surface": "api",
       "resource": "server",

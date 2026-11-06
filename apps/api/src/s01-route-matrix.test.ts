@@ -449,6 +449,8 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       body?: unknown
       /** Features that must all be disabled before the route is denied. */
       disabled?: string[]
+      /** Status once entitled, when the route itself then refuses truthfully. */
+      allowed?: number
     }[] = [
       { feature: 'mysql-databases', method: 'GET', path: '/api/databases' },
       { feature: 'mysql-databases', method: 'GET', path: `/api/databases/${alice.id}/remote-hosts` },
@@ -466,7 +468,8 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       { feature: 'email-accounts', method: 'GET', path: `/api/webmail/calendars?mailbox=${encodeURIComponent(`inbox@${alice.primaryDomain}`)}` },
       { feature: 'email-accounts', method: 'GET', path: `/api/webmail/contacts?mailbox=${encodeURIComponent(`inbox@${alice.primaryDomain}`)}` },
       { feature: 'backup', method: 'GET', path: `/api/backups/snapshots?accountId=${alice.id}` },
-      { feature: 'directory-privacy', method: 'GET', path: `/api/web-features/${alice.id}/directory-privacy` },
+      // Folders live in the account files: past the entitlement, no host agent here is a truthful 412.
+      { feature: 'directory-privacy', method: 'GET', path: `/api/web-features/${alice.id}/directory-privacy`, allowed: 412 },
       { feature: 'hotlink-protection', method: 'GET', path: `/api/web-features/${alice.id}/hotlink-protection` },
       { feature: 'web-disk', method: 'GET', path: `/api/web-features/${alice.id}/web-disk` },
       { feature: 'file-manager', method: 'GET', path: `/api/web-features/${alice.id}/extras` },
@@ -478,7 +481,7 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
     for (const testCase of featureCases) {
       await state.store.updateFeatureList(featureListId, { disabled: [] })
       const allowedRes = await request(aliceToken, testCase.path, testCase.method, testCase.body)
-      expect(allowedRes.status, `enabled ${testCase.feature} -> ${testCase.path}`).toBe(200)
+      expect(allowedRes.status, `enabled ${testCase.feature} -> ${testCase.path}`).toBe(testCase.allowed ?? 200)
 
       await state.store.updateFeatureList(featureListId, { disabled: testCase.disabled ?? [testCase.feature] })
       const deniedRes = await request(aliceToken, testCase.path, testCase.method, testCase.body)

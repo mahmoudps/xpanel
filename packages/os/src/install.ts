@@ -21,7 +21,7 @@ const REMI = 'https://rpms.remirepo.net/enterprise'
 // conf.modules.d by default; Debian leaves actions, cgi, suexec, proxy_fcgi and friends off.
 const DEBIAN_APACHE_MODULES = [
   'alias', 'dir', 'mime', 'authz_core', 'authz_host', 'setenvif', 'rewrite', 'headers', 'remoteip', 'ssl',
-  'proxy', 'proxy_fcgi', 'actions', 'cgi', 'suexec', 'fcgid',
+  'proxy', 'proxy_fcgi', 'actions', 'cgi', 'suexec', 'fcgid', 'auth_basic', 'authn_core', 'authn_file', 'authz_user',
 ]
 // status.conf serves /server-status to `Require local`, and every tenant process can reach the
 // loopback backend directly: it would list all accounts' requests

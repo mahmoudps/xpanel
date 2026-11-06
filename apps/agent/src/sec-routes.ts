@@ -5,6 +5,8 @@ import type { AgentExecutor } from './executor.ts'
 import { applySecDnsCluster, observeSecDnsCluster, secQuerySoa, verifySecDnsPeer } from './sec-dns-cluster.ts'
 import type { SecListDir, SecQuerySoa } from './sec-dns-cluster.ts'
 import { observeSecFlood } from './sec-flood.ts'
+import { observeCompilerAccess } from './compiler-access.ts'
+import type { Account, Plan } from '@xpanel/core'
 import { effectiveSecPolicy, SEC_DNS_CLUSTER_STATE, secRevision } from './sec-policy.ts'
 import { observeSecWaf, secPresent, secReadText } from './sec-waf.ts'
 import type { SecPresent, SecReadText } from './sec-waf.ts'
@@ -20,6 +22,8 @@ export interface SecRouteContext {
   os: { family: string; nginxConf: string; powerdnsUnit: string }
   rootDir: string
   zones: () => Promise<readonly string[]>
+  /** accounts and plans for the compiler group's expected members */
+  accounts?: () => Promise<{ accounts: readonly Account[]; plans: readonly Plan[] }>
   audit?: (entry: SecAuditEntry) => Promise<unknown>
   present?: SecPresent
   readText?: SecReadText
@@ -33,6 +37,7 @@ const ROUTES: Readonly<Record<string, { method: 'GET' | 'POST'; action: string }
   '/host/sec/dns-cluster': { method: 'GET', action: 'dns.cluster.read' },
   '/host/sec/dns-cluster/verify': { method: 'GET', action: 'dns.cluster.verify' },
   '/host/sec/dns-cluster/apply': { method: 'POST', action: 'dns.cluster.apply' },
+  '/host/sec/compiler-access': { method: 'GET', action: 'security.compiler_access.read' },
 }
 const unchanged = { stateChanged: false }
 const json = (body: unknown): Response => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
@@ -65,6 +70,10 @@ export async function handleSecRoute(req: Request, url: URL, method: string, ctx
 
   if (url.pathname === '/host/sec/waf') return json(await observeSecWaf({ family: ctx.os.family, readNginxMain: () => executor.readFile(ctx.os.nginxConf), present, readText, now }))
   if (url.pathname === '/host/sec/flood') return json(await observeSecFlood({ run: argv => executor.runCommand(argv), present, now }))
+  if (url.pathname === '/host/sec/compiler-access') {
+    if (!ctx.accounts) return fail('PRECONDITION_FAILED', 'compiler access observation needs the account state', unchanged)
+    return json(await observeCompilerAccess({ root: ctx.rootDir, family: ctx.os.family, snapshot: await ctx.accounts(), run: argv => executor.runCommand(argv), present, now }))
+  }
   const raw = await readSaved(ctx.rootDir), peers = effectiveSecPolicy('dns-cluster', raw).peers
   const dir = ctx.listDir ? { listDir: ctx.listDir } : {}
   if (url.pathname === '/host/sec/dns-cluster') return json(await observeSecDnsCluster({ family: ctx.os.family, peers, readText, ...dir, now }))

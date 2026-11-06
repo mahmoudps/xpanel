@@ -328,6 +328,10 @@ const SYSTEM_CONFIG_PREFIXES: readonly string[] = [
 
 const SYSTEM_EXACT_TARGETS = new Set<string>([
   '/usr/local/bin/xpanel-jailshell',
+  // Compiler Access (packages/render/src/system/compiler.ts): the script and its package-manager hooks
+  '/usr/local/sbin/xpanel-compiler-access',
+  '/etc/dpkg/dpkg.cfg.d/xpanel-compiler-access',
+  '/etc/dnf/plugins/post-transaction-actions.d/xpanel-compiler-access.action',
   '/opt/xpanel/bin/jailshell',
   '/etc/nginx',
   '/etc/apache2',

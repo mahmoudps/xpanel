@@ -4782,11 +4782,6 @@ msgctxt "theme:v2"
 msgid "Saved configuration does not establish running pool state."
 msgstr "لا تثبت الإعدادات المحفوظة حالة تشغيل المجمعات."
 
-#: apps/web/src/themes/v2/pages/xpanel/files/privacy.ts
-msgctxt "theme:v2"
-msgid "Saved configuration only; web-server protection is not verified here."
-msgstr "هذه إعدادات محفوظة فقط؛ لم يُتحقق هنا من الحماية على خادم الويب."
-
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Saved database configuration and current MariaDB observations."

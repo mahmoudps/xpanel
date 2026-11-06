@@ -9765,6 +9765,10 @@ msgstr "خصوصية المجلدات"
 msgid "Directory privacy editing is unavailable here. No rules were read or changed."
 msgstr "تحرير خصوصية المجلدات غير متاح هنا. لم تُقرأ أو تُغيّر أي قواعد."
 
+#: apps/web/src/directory-privacy-client.ts
+msgid "Directory privacy needs the Apache web server and an active account. Nothing can be changed now."
+msgstr "تتطلب خصوصية المجلدات خادم الويب Apache وحسابًا نشطًا. لا يمكن تغيير شيء الآن."
+
 #: apps/web/src/file-workspace-client.ts
 msgid "Directory read."
 msgstr "قُرئ المجلد."
@@ -10751,6 +10755,11 @@ msgstr "يبدأ كل جدول مفعّل المهمة بهوية مستخدم �
 msgid "Each endpoint is signed with HMAC-SHA256 over a timestamped body. Secrets are stored on the server and never shown here. Failed deliveries are retried on a fixed schedule and recorded in the delivery log."
 msgstr "تُوقَّع كل نقطة نهاية بخوارزمية HMAC-SHA256 على محتوى مختوم بالوقت. تُخزَّن الأسرار على الخادم ولا تُعرض هنا أبدًا. يُعاد تسليم العمليات الفاشلة وفق جدول ثابت وتُسجَّل في سجل التسليم."
 
+#: apps/web/src/board-port/approved-xpanel-bindings.ts
+#: apps/web/src/themes/v2/pages/xpanel/files/privacy.ts
+msgid "Each folder keeps its rules in its own .htaccess file and its users in ~/.htpasswds. A folder counts as protected only after the web server asked for a password."
+msgstr "يحفظ كل مجلد قواعده في ملف .htaccess الخاص به ومستخدميه في ~/.htpasswds. لا يُعدّ المجلد محميًا إلا بعد أن يطلب خادم الويب كلمة مرور."
+
 #: apps/web/src/account-reverse-proxy-client.ts
 msgid "Each header can be listed once."
 msgstr "يمكن إدراج كل ترويسة مرة واحدة."
@@ -11490,8 +11499,8 @@ msgid "Enter a new name. Creating this copy does not modify the source list or r
 msgstr "أدخل اسمًا جديدًا. لا يعدل إنشاء النسخة القائمة الأصلية أو يعيد تعيين خطة. يطبق الخادم الملكية ويتحقق من الطلب."
 
 #: apps/web/src/directory-privacy-client.ts
-msgid "Enter a password for every kept user. Saved password hashes are never returned, so each save re-proves the credentials."
-msgstr "أدخل كلمة مرور لكل مستخدم محتفظ به. لا تُعاد تجزئات كلمات المرور المحفوظة أبدًا، لذا يلزم إثبات بيانات الدخول في كل حفظ."
+msgid "Enter a password for every new user."
+msgstr "أدخل كلمة مرور لكل مستخدم جديد."
 
 #: apps/web/src/account-network-tools-client.ts
 msgid "Enter a port from 1 to 65535."
@@ -16510,6 +16519,10 @@ msgstr "تعلّم البريد غير المزعج من صندوق الوارد
 msgid "Learn spam from Junk"
 msgstr "تعلّم البريد المزعج من Junk"
 
+#: apps/web/src/themes/v2/pages/xpanel/files/privacy.ts
+msgid "Leave a password empty to keep the current password of that user."
+msgstr "اترك كلمة المرور فارغة للإبقاء على كلمة المرور الحالية لذلك المستخدم."
+
 #: apps/web/src/board-port/approved-xpanel-bindings.ts
 msgid "Leave an INI override blank to inherit the runtime default. Clearing a saved override removes it."
 msgstr "اترك قيمة INI فارغة لوراثة إعداد بيئة التشغيل الافتراضي. إفراغ القيمة المحفوظة يزيل التخصيص."
@@ -16517,6 +16530,10 @@ msgstr "اترك قيمة INI فارغة لوراثة إعداد بيئة الت
 #: apps/web/src/board-port/mailx-whm-workspace.ts
 msgid "Leave empty for no server-wide copy."
 msgstr "اتركه فارغًا لعدم إنشاء نسخة على مستوى الخادم."
+
+#: apps/web/src/directory-privacy-client.ts
+msgid "Leave empty to keep the current password"
+msgstr "اتركه فارغًا للإبقاء على كلمة المرور الحالية"
 
 #: apps/web/src/board-port/mailx-whm-workspace.ts
 msgid "Leave empty to keep the saved password. It is stored only on this server and is never shown again."
@@ -26578,6 +26595,10 @@ msgstr "تُخدم المجلدات المحمية عبر HTTPS فقط. تبقى
 msgid "Protected folders have not been read."
 msgstr "لم تُقرأ المجلدات المحمية."
 
+#: apps/web/src/directory-privacy-client.ts
+msgid "Protected folders read from the account files."
+msgstr "قُرئت المجلدات المحمية من ملفات الحساب."
+
 #: apps/web/src/whm-trusted-proxies-client.ts
 msgid "Protected ingress, recovery or observation is unavailable. No activation is claimed."
 msgstr "المدخل المحمي أو الاستعادة أو الرصد غير متاح. لا يُدّعى أي تفعيل."
@@ -32666,6 +32687,10 @@ msgstr "حُفظت وأُعيدت قراءتها. تُطبَّق القوائم 
 msgid "Saved and read back. The lists are not enforced until the request gate is connected."
 msgstr "حُفظت وأُعيدت قراءتها. لن تُنفَّذ القوائم حتى تُوصَل بوابة الطلبات."
 
+#: apps/web/src/directory-privacy-client.ts
+msgid "Saved and read back. The web server answer could not be checked for every folder."
+msgstr "حُفظ وقُرئ مجددًا. تعذّر التحقق من رد خادم الويب لكل مجلد."
+
 #: apps/web/src/board-port/whm-announcements-workspace.ts
 msgid "Saved announcements"
 msgstr "الإعلانات المحفوظة"
@@ -33161,21 +33186,9 @@ msgstr "قُرئ الدور المحفوظ والخدمات المرصودة."
 msgid "Saved role read. Observed services: {reason}"
 msgstr "قُرئ الدور المحفوظ. الخدمات المرصودة: {reason}"
 
-#: apps/web/src/board-port/approved-xpanel-bindings.ts
-msgid "Saved rules are account configuration only. The web server applies them after host verification; this page does not claim a folder is protected yet."
-msgstr "القواعد المحفوظة إعداد للحساب فقط. يطبقها خادم الويب بعد تحقق المضيف؛ لا تدّعي هذه الصفحة أن المجلد محمي الآن."
-
 #: apps/web/src/whm-monitoring-alerts-client.ts
 msgid "Saved rules read."
 msgstr "قُرئت القواعد المحفوظة."
-
-#: apps/web/src/directory-privacy-client.ts
-msgid "Saved rules read. They are configuration only; web-server protection is not verified here."
-msgstr "قُرئت القواعد المحفوظة. هي إعداد فقط؛ لا يُتحقق هنا من حماية خادم الويب."
-
-#: apps/web/src/directory-privacy-client.ts
-msgid "Saved rules were stored and read back. Web-server application remains unverified on the host."
-msgstr "حُفظت القواعد وقُرئت مجددًا. يبقى تطبيقها على خادم الويب غير متحقق منه على المضيف."
 
 #: apps/web/src/whm-backups-client.ts
 msgid "Saved schedule and destination metadata were read. The requested policy does not prove scheduler installation, transport trust or low-priority CPU/IO enforcement (weight 10)."
@@ -33368,6 +33381,10 @@ msgstr "تم الحفظ، لكن الإعدادات الجديدة لم تجتز
 msgid "Saved, but the server reported that applying it failed. The previous generation stays active."
 msgstr "تم الحفظ، لكن الخادم أبلغ بفشل تطبيقه. ويبقى الجيل السابق نشطًا."
 
+#: apps/web/src/directory-privacy-client.ts
+msgid "Saved, but the web server did not ask for a password on a protected folder. Review it before relying on the protection."
+msgstr "حُفظ، لكن خادم الويب لم يطلب كلمة مرور على مجلد محمي. راجعه قبل الاعتماد على الحماية."
+
 #: apps/web/src/acct-backup-runs-client.ts
 msgid "Saved, disabled"
 msgstr "محفوظ، معطّل"
@@ -33403,6 +33420,10 @@ msgstr "تم الحفظ. طُلب من الخادم تطبيقه؛ حدّث ال
 #: apps/web/src/account-forwarders-client.ts
 msgid "Saved. The table shows what the mail server runs."
 msgstr "حُفظ. يبيّن الجدول ما يطبّقه خادم البريد."
+
+#: apps/web/src/directory-privacy-client.ts
+msgid "Saved. The web server now asks for a password on every protected folder that changed."
+msgstr "حُفظ. يطلب خادم الويب الآن كلمة مرور على كل مجلد محمي تغيّر."
 
 #: apps/web/src/mailx-archive-client.ts apps/web/src/mailx-whm-client.ts apps/web/src/whm-mail-server-client.ts
 msgid "Saved. There was nothing to apply."
@@ -35805,6 +35826,10 @@ msgstr "تعذّر تأكيد بعض عمليات الحذف بإعادة سرد
 msgid "Some enforced limits differ from their plans."
 msgstr "تختلف بعض الحدود المفروضة عن خططها."
 
+#: apps/web/src/directory-privacy-client.ts
+msgid "Some folders have access rules or edits this page does not manage. Review their .htaccess before changing them here."
+msgstr "في بعض المجلدات قواعد وصول أو تعديلات لا تديرها هذه الصفحة. راجع ملف .htaccess الخاص بها قبل تغييرها هنا."
+
 #: apps/web/src/board-port/whm-security-tools-workspace.ts
 msgid "Some jails have names outside the reviewed format and were not read."
 msgstr "بعض السجون أسماؤها خارج الصيغة المراجَعة ولم تُقرأ."
@@ -37375,10 +37400,6 @@ msgstr "لم يعد عضو الفريق هذا موجودًا. حدّث بيان
 msgid "That template no longer exists. Refresh the templates."
 msgstr "لم يعد هذا القالب موجودًا. حدّث القوالب."
 
-#: apps/web/src/directory-privacy-client.ts
-msgid "That username is already listed on another folder."
-msgstr "اسم المستخدم هذا مدرج بالفعل على مجلد آخر."
-
 #: apps/web/src/design-board.ts
 msgid "The .htaccess file for this site."
 msgstr "ملف .htaccess لهذا الموقع."
@@ -38780,6 +38801,10 @@ msgstr "يظهر المجلد في تطبيقات البريد."
 #: apps/web/src/mail-folders-client.ts
 msgid "The folder still holds messages. Review the count and confirm again."
 msgstr "ما زال المجلد يحتوي على رسائل. راجع العدد وأكّد مجددًا."
+
+#: apps/web/src/directory-privacy-client.ts
+msgid "The folder {path} cannot be protected here. Check that it exists inside a site and has no other access rules."
+msgstr "لا يمكن حماية المجلد {path} هنا. تحقق من وجوده داخل موقع وعدم احتوائه على قواعد وصول أخرى."
 
 #: apps/web/src/board-canvas.ts
 msgid "The function policy has not been read."
@@ -41966,6 +41991,10 @@ msgstr "لا توجد حسابات لقراءتها."
 #: apps/web/src/whm-server-health-client.ts
 msgid "There are no accounts."
 msgstr "لا توجد حسابات."
+
+#: apps/web/src/directory-privacy-client.ts
+msgid "There are no changes to save."
+msgstr "لا توجد تغييرات لحفظها."
 
 #: apps/web/src/whm-mail-quality-client.ts
 msgid "There are no hosted mail domains to check."

@@ -6,14 +6,12 @@ import { sha256Hex } from './auth.ts'
 import { createApiApp } from './server.ts'
 import { TEST_SERVER_SECRET } from './testing.ts'
 
-// Real-loopback acceptance for the directory-privacy web-features route. The route compiles
-// nginx/apache fragments from the stored rules, so input normalization is security-relevant.
+// Real-loopback acceptance for the directory-privacy web-features route: authority, scope and feature policy
+// run before the protected host agent is asked, and without that agent the route refuses truthfully.
 // Synthetic temporary API tokens only; no host effect is claimed.
 
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const cleanup: Array<() => Promise<unknown>> = []
-interface RuleView { path: string; authName: string; enabled: boolean; users: { username: string }[] }
-interface ConfigView { config: { rules: RuleView[]; compiledNginx: string; compiledApache: string; updatedAt: string; accountId?: string } }
 interface AuditRow { [column: string]: unknown; actor: string; principal_id: string | null; action: string; target: string; outcome: string }
 
 const fixture = async () => {
@@ -44,15 +42,10 @@ const fixture = async () => {
   const request = (path: string, method = 'GET', body?: unknown, raw: string | null = credential) => app.fetch(new Request('http://localhost' + path, { method,
     headers: { ...(raw ? { authorization: 'Bearer ' + raw } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }) }))
-  const config = async (raw = credential): Promise<ConfigView> => {
-    const response = await request(base, 'GET', undefined, raw)
-    expect(response.status).toBe(200)
-    return await response.json() as ConfigView
-  }
-  const rules = (patch: Record<string, unknown> = {}) => [{ path: 'private', authName: 'Private area', enabled: true, users: [{ username: 'alice', password: 'correct horse battery' }], ...patch }]
+  const save = (patch: Record<string, unknown> = {}) => ({ path: 'public_html/private', expectedRevision: 'a'.repeat(64), enabled: true, authName: 'Private area', users: [{ username: 'alice', password: 'correct horse battery' }], ...patch })
   const storedBytes = async () => JSON.stringify(await state.store.readSnapshot())
   const auditRows = (action: string) => database.db.query<AuditRow>('SELECT actor, principal_id, action, target, outcome FROM audit_log WHERE action = $1 ORDER BY id ASC', [action])
-  return { database, state, features, owner, other, principal, credential, readOnly, neighborCredential, request, base, config, rules, storedBytes, auditRows }
+  return { database, state, features, owner, other, principal, credential, readOnly, neighborCredential, request, base, save, storedBytes, auditRows }
 }
 
 describe('directory privacy web-features HTTP security acceptance', () => {
@@ -64,96 +57,39 @@ describe('directory privacy web-features HTTP security acceptance', () => {
     if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Synthetic directory privacy cleanup failed')
   })
 
-  it('reads an empty configuration without exposing credential material', async () => {
-    const body = await f.config()
-    expect(body.config.rules).toEqual([])
-    expect(body.config.compiledNginx).toBe('')
-    expect(body.config.compiledApache).toBe('')
-    expect(body.config.updatedAt).toEqual(expect.any(String))
-    const text = JSON.stringify(body)
-    expect(text).not.toMatch(/passwordHash|compiledHtpasswd|\$argon2/)
+  it('refuses truthfully without the protected host agent and writes nothing', async () => {
+    const before = await f.storedBytes()
+    for (const [method, body] of [['GET', undefined], ['PUT', f.save()]] as const) {
+      const response = await f.request(f.base, method, body)
+      expect(response.status, method).toBe(412)
+      const problem = await response.json() as { code: string; details: Record<string, unknown> }
+      expect(problem.code).toBe('PRECONDITION_FAILED')
+      expect(problem.details).toMatchObject({ stateChanged: false, reason: 'host_agent_unavailable' })
+      expect(JSON.stringify(problem)).not.toMatch(/correct horse|\$6\$|\$argon2/)
+    }
+    expect(await f.storedBytes()).toBe(before)
+    expect(await f.auditRows('web_features.directory_privacy.updated')).toEqual([])
     const anonymous = await f.request(f.base, 'GET', undefined, null)
     expect(anonymous.status).toBe(401)
-  })
-
-  it('stores normalized rules, compiles directives and hides password hashes', async () => {
-    const response = await f.request(f.base, 'PUT', { rules: f.rules() })
-    expect(response.status).toBe(200)
-    const body = await response.json() as ConfigView
-    expect(body.config.rules).toEqual([{ path: '/private', authName: 'Private area', enabled: true, users: [{ username: 'alice' }] }])
-    expect(body.config.compiledNginx).toContain('location ^~ /private')
-    expect(body.config.compiledNginx).toContain('auth_basic "Private area"')
-    expect(body.config.compiledNginx).toContain(`${f.owner.home}/.htpasswd`)
-    expect(body.config.compiledApache).toContain('<Directory ')
-    const text = JSON.stringify(body)
-    expect(text).not.toMatch(/passwordHash|compiledHtpasswd|correct horse|\$argon2/)
-    const readback = await f.config()
-    expect(readback).toEqual(body)
-    const audited = await f.auditRows('web_features.directory_privacy.updated')
-    expect(audited.length).toBe(1)
-    expect(audited[0]).toMatchObject({ actor: f.owner.username, principal_id: f.principal.id, outcome: 'ok' })
-  })
-
-  it.each([
-    ['traversal path', { path: '../etc' }],
-    ['control characters in path', { path: '/private\nuser root;' }],
-    ['absolute injection path', { path: '/private; root' }],
-    ['prompt injection', { authName: 'x"\n}location / {' }],
-    ['unbounded prompt', { authName: 'x'.repeat(129) }],
-    ['non-boolean enabled', { enabled: 'yes' }],
-    ['malformed username', { users: [{ username: '../root', password: 'correct horse battery' }] }],
-  ])('refuses %s and keeps the stored configuration unchanged', async (_name, patch) => {
-    const before = await f.storedBytes()
-    const response = await f.request(f.base, 'PUT', { rules: f.rules(patch) })
-    expect(response.status).toBe(422)
-    expect(await f.storedBytes()).toBe(before)
-  })
-
-  it('refuses duplicate folders and duplicate users without writing', async () => {
-    const before = await f.storedBytes()
-    const duplicatePath = await f.request(f.base, 'PUT', { rules: [f.rules()[0], f.rules()[0]] })
-    expect(duplicatePath.status).toBe(422)
-    const duplicateUser = await f.request(f.base, 'PUT', { rules: f.rules({ users: [{ username: 'alice', password: 'correct horse battery' }, { username: 'alice', password: 'another horse battery' }] }) })
-    expect(duplicateUser.status).toBe(422)
-    expect(await f.storedBytes()).toBe(before)
-  })
-
-  it('refuses a short password and an over-limit rule list without writing', async () => {
-    const before = await f.storedBytes()
-    const short = await f.request(f.base, 'PUT', { rules: f.rules({ users: [{ username: 'alice', password: 'short' }] }) })
-    expect(short.status).toBe(422)
-    const tooMany = await f.request(f.base, 'PUT', { rules: Array.from({ length: 1001 }, (_value, index) => ({ path: '/p' + index, enabled: true, users: [] })) })
-    expect(tooMany.status).toBe(422)
-    expect(await f.storedBytes()).toBe(before)
   })
 
   it('keeps the route behind the directory-privacy feature policy', async () => {
     await f.state.store.updateFeatureList(f.features.id, { disabled: ['directory-privacy'] })
     const before = await f.storedBytes()
-    const denied = await f.request(f.base, 'PUT', { rules: f.rules() })
+    const denied = await f.request(f.base, 'PUT', f.save())
     expect(denied.status).toBe(403)
     expect(await f.storedBytes()).toBe(before)
     await f.state.store.updateFeatureList(f.features.id, { disabled: [] })
-    const allowed = await f.request(f.base, 'PUT', { rules: f.rules() })
-    expect(allowed.status).toBe(200)
+    const allowed = await f.request(f.base, 'PUT', f.save())
+    expect(allowed.status).toBe(412)
   })
 
   it('does not let a neighbor or a read-only token write rules', async () => {
     const before = await f.storedBytes()
-    const neighbor = await f.request('/api/web-features/' + f.owner.username + '/directory-privacy', 'PUT', { rules: f.rules() }, f.neighborCredential)
+    const neighbor = await f.request('/api/web-features/' + f.owner.username + '/directory-privacy', 'PUT', f.save(), f.neighborCredential)
     expect([403, 404]).toContain(neighbor.status)
-    const readOnly = await f.request(f.base, 'PUT', { rules: f.rules() }, f.readOnly)
+    const readOnly = await f.request(f.base, 'PUT', f.save(), f.readOnly)
     expect(readOnly.status).toBe(403)
     expect(await f.storedBytes()).toBe(before)
-  })
-
-  it('replaces rules on a later save and stops compiling disabled folders', async () => {
-    expect((await f.request(f.base, 'PUT', { rules: f.rules() })).status).toBe(200)
-    const response = await f.request(f.base, 'PUT', { rules: [{ path: '/disabled-area', authName: 'Disabled', enabled: false, users: [{ username: 'bob', password: 'another horse battery' }] }] })
-    expect(response.status).toBe(200)
-    const body = await response.json() as ConfigView
-    expect(body.config.rules).toEqual([{ path: '/disabled-area', authName: 'Disabled', enabled: false, users: [{ username: 'bob' }] }])
-    expect(body.config.compiledNginx).not.toContain('location ^~ /disabled-area')
-    expect((await f.config()).config.rules).toEqual(body.config.rules)
   })
 })

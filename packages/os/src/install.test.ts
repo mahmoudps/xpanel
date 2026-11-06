@@ -538,7 +538,7 @@ describe('Debian web-server identities and modules', () => {
 
   it('enables every module the edge renderer can require', () => {
     const a2enmod = execs(plan).find(a => a[0] === '/usr/sbin/a2enmod' && a.includes('proxy_fcgi'))!
-    for (const m of ['actions', 'cgi', 'suexec', 'fcgid', 'proxy', 'proxy_fcgi', 'remoteip', 'setenvif', 'rewrite', 'headers', 'alias', 'dir', 'mime', 'authz_core', 'authz_host']) {
+    for (const m of ['actions', 'cgi', 'suexec', 'fcgid', 'proxy', 'proxy_fcgi', 'remoteip', 'setenvif', 'rewrite', 'headers', 'alias', 'dir', 'mime', 'authz_core', 'authz_host', 'auth_basic', 'authn_core', 'authn_file', 'authz_user']) {
       expect(a2enmod).toContain(m)
     }
     expect(a2enmod).not.toContain('mpm_event')

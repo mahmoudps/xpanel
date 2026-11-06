@@ -411,6 +411,14 @@ describe('renderNginxSite', () => {
     expect(renderNginxSite(a, [domain()], settings(), null, { cache: false })).not.toContain('proxy_cache ')
   })
 
+  it('never serves account files itself, so Apache Directory Privacy sees every request, static files included', () => {
+    const c = renderNginxSite(a, [domain()], settings())
+    expect(c).not.toMatch(/^\s*(?:root|try_files) /m)
+    expect(c.match(/^\s*alias .*$/gm)).toEqual([expect.stringContaining('acme')])
+    // authenticated answers are neither stored nor served from the shared cache
+    expect(c).toContain('proxy_no_cache $xpanel_nocache_method $xpanel_nocache_cookie $http_authorization $upstream_http_set_cookie;')
+  })
+
   it('applies a default client_max_body_size and the edge override', () => {
     expect(renderNginxSite(a, [domain()], settings())).toContain('client_max_body_size 128m;')
     expect(renderNginxSite(a, [domain()], edge({ clientMaxBodyMb: 512 }))).toContain('client_max_body_size 512m;')

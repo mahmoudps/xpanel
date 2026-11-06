@@ -84,13 +84,14 @@ export function createNativeHtaccessValidator(options: { apacheControlPath: stri
   } }
 }
 
-/** Fixed loopback only, with an authoritative Host and no redirect following. */
-export async function probeHtaccessTarget(target: HtaccessTarget): Promise<number> {
-  if (target.engine !== 'apache' || !Number.isSafeInteger(target.backendPort) || target.backendPort < 1 || target.backendPort > 65535 || validateDomainName(target.domainName) !== target.domainName) return fail('PRECONDITION_FAILED', 'the trusted Apache site probe is unavailable', { stateChanged: false })
+/** Fixed loopback only, with an authoritative Host and no redirect following. `path` is a folder URL of the site. */
+export async function probeHtaccessTarget(target: Pick<HtaccessTarget, 'engine' | 'backendPort' | 'domainName'>, path = '/'): Promise<number> {
+  if (target.engine !== 'apache' || !Number.isSafeInteger(target.backendPort) || target.backendPort < 1 || target.backendPort > 65535 || validateDomainName(target.domainName) !== target.domainName
+    || !/^\/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*\/)*$/.test(path) || path.length > 1024) return fail('PRECONDITION_FAILED', 'the trusted Apache site probe is unavailable', { stateChanged: false })
   return new Promise((resolve, reject) => {
     let settled = false
     const finish = (error: Error | null, status?: number): void => { if (settled) return; settled = true; clearTimeout(timer); if (error) reject(error); else resolve(status!) }
-    const request = httpRequest({ hostname: '127.0.0.1', port: target.backendPort, path: '/?xpanel_htaccess_check=' + randomUUID(), method: 'GET', agent: false, maxHeaderSize: 32 * 1024,
+    const request = httpRequest({ hostname: '127.0.0.1', port: target.backendPort, path: path + '?xpanel_htaccess_check=' + randomUUID(), method: 'GET', agent: false, maxHeaderSize: 32 * 1024,
       headers: { host: target.domainName, 'x-forwarded-proto': 'https', 'cache-control': 'no-cache', connection: 'close' } }, response => { const status = response.statusCode; response.destroy(); finish(status ? null : new Error('missing_probe_status'), status) })
     const timer = setTimeout(() => request.destroy(new Error('site_probe_timeout')), 3000)
     request.once('error', error => finish(error)); request.end()

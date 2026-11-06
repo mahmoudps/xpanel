@@ -641,10 +641,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/account-web-directives-client.ts",
-    "sha256": "0caeab518082e1458d2baab6641d75ba0cd6041ec7b804c1ad15a542e9b14895",
+    "sha256": "0feae67dc44e01f12d778d86e6b814ed0168c6d4d7fcb925bb54523a9af30998",
     "sites": [
       {
-        "line": 153,
+        "line": 155,
         "column": 88,
         "method": "querySelector",
         "argument": "selector",
@@ -654,7 +654,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 173,
+        "line": 175,
         "column": 107,
         "method": "closest",
         "argument": "denied",
@@ -1288,10 +1288,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/directory-privacy-client.ts",
-    "sha256": "7593a9fefb1bba1185cbf2526afd004dcef5b72d9ef9078e96f0da4a570c4b9c",
+    "sha256": "0c734dd73c16b10e99f050e93c26130db565f90ba9f8828ddd5dc323aaca2215",
     "sites": [
       {
-        "line": 147,
+        "line": 139,
         "column": 71,
         "method": "closest",
         "argument": "denied",

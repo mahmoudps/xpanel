@@ -23,6 +23,7 @@ import { JailedFileManager } from './file-manager.ts'
 import { HtaccessWorkspace, deriveHtaccessTarget } from './htaccess-workspace.ts'
 import { parseHtaccessRequest } from './htaccess-contract.ts'
 import { createNativeHtaccessValidator, probeHtaccessTarget } from './htaccess-native.ts'
+import { parseDirectoryPrivacyRequest, runDirectoryPrivacyRequest } from './directory-privacy.ts'
 import { AcmeCertificateServiceAdapter } from './services/acme.ts'
 import { createHttp01AcmeClient } from './services/acme-client.ts'
 import { computeLeafFingerprintSha256 } from './services/acme.ts'
@@ -1360,6 +1361,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         os: { family: deps.os.family, nginxConf: (secProfile?.paths.nginxRoot ?? '/etc/nginx') + '/nginx.conf', powerdnsUnit: secProfile?.services.powerdns ?? 'pdns' },
         rootDir: deps.store.rootDir,
         zones: async () => (await deps.store.readSnapshot()).zones.map(zone => zone.name),
+        accounts: async () => { const snapshot = await deps.store.readSnapshot(); return { accounts: snapshot.accounts, plans: snapshot.plans } },
         audit: entry => appendAudit(deps.db, { ...entry, principalId: caller.principalId }),
       })
       if (secResponse) return secResponse
@@ -1770,6 +1772,36 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             try { await appendAudit(deps.db, { actor: caller.actor, action: 'domain.htaccess.' + body.op, target: 'domain:' + result.context.domainName,
               detail: { status: result.application.status, syntaxChecked: result.application.syntaxChecked, httpStatus: result.application.httpStatus, nativeQualified: false }, outcome: result.application.status === 'rolled_back' || result.validation?.valid === false ? 'failed' : 'ok' }) }
             catch { return fail('SERVICE_UNAVAILABLE', '.htaccess outcome and audit require inspection', { stateChanged: true, unknownOutcome: true, verificationRequired: true }) }
+          }
+          return jsonResponse(result)
+        })
+      }
+
+      const privacyMatch = /^\/accounts\/([a-z][a-z0-9]{0,15})\/directory-privacy$/.exec(pathname)
+      if (method === 'POST' && privacyMatch) {
+        const username = privacyMatch[1]!
+        const body = parseDirectoryPrivacyRequest(await readObjectBody(req))
+        const account = await deps.store.getAccountByUsername(username)
+        if (!account) return fail('NOT_FOUND', 'account not found', { stateChanged: false })
+        return await deps.store.withAccountLifecycleLease(account.id, async fresh => {
+          const authorize = async () => {
+            const principal = await getPrincipal(deps.db, caller.principalId)
+            if (!principal || principal.disabled || fresh.username !== username || principal.kind === 'user' && (principal.accountId !== fresh.id || principal.username !== fresh.username)) return fail('FORBIDDEN', 'the current account caller is unavailable', { stateChanged: false })
+            await assertAccountCaller({ principalId: principal.id, actor: principal.username, role: principal.kind,
+              accountId: principal.accountId, resellerId: principal.kind === 'reseller' ? principal.id : null }, fresh, 'directory-privacy')
+            const plan = await deps.store.getPlan(fresh.planId), features = plan ? await deps.store.getFeatureList(plan.featureListId) : null
+            if (!plan || !features || features.disabled.includes('directory-privacy')) return fail('FORBIDDEN', 'Directory Privacy is unavailable in the current plan', { stateChanged: false })
+            return plan
+          }
+          const plan = await authorize(), settings = await deps.store.getServerSettings()
+          const result = await runDirectoryPrivacyRequest({ account: fresh, domains: await deps.store.listDomains({ accountId: fresh.id }), settings, request: body,
+            files: new JailedFileManager(resolveAccountHome(fresh.home, fresh.username), plan.resources.diskMb, { account: fresh, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
+            authorize: async () => { await authorize() },
+            ...(settings ? { probe: (domain: string, path: string) => probeHtaccessTarget({ engine: settings.engine, backendPort: settings.backendPort, domainName: domain }, path) } : {}) })
+          if (body.op === 'save') {
+            try { await appendAudit(deps.db, { actor: caller.actor, action: 'account.directory_privacy.saved', target: 'account:' + fresh.username,
+              detail: { path: body.path, enabled: body.enabled, users: body.users.length, httpStatus: result.application.httpStatus }, outcome: 'ok' }) }
+            catch { return fail('SERVICE_UNAVAILABLE', 'the protected folder outcome and audit require inspection', { stateChanged: true, unknownOutcome: true, verificationRequired: true }) }
           }
           return jsonResponse(result)
         })

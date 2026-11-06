@@ -63,11 +63,12 @@ describe('v2 account files pages', () => {
     expect(missing).toContain('data-action="upload-file" disabled')
   })
 
-  it('renders privacy as unread configuration, with fresh-password fields and all controller hooks', () => {
+  it('renders privacy as unread folders, with optional password fields and all controller hooks', () => {
     const html = renderV2DirectoryPrivacyPage(t, { surface: { account }, canManage: true })
     for (const hook of ['data-directory-privacy', 'data-account-username="alice"', 'data-directory-privacy-path', 'data-directory-privacy-prompt', 'data-directory-privacy-username', 'data-directory-privacy-password', 'data-directory-privacy-add', 'data-directory-privacy-save', 'data-directory-privacy-status', 'data-directory-privacy-rows', 'data-directory-privacy-preview-wrap', 'data-directory-privacy-preview']) expect(html).toContain(hook)
     expect(html).toContain('Protected folders have not been read.')
-    expect(html).toContain('Saved configuration only; web-server protection is not verified here.')
+    expect(html).toContain('A folder counts as protected only after the web server asked for a password.')
+    expect(html).toContain('Leave a password empty to keep the current password of that user.')
     expect(html).not.toContain('Saved rules read.')
     expect(html).not.toContain('type="password" value=')
     expect(html).not.toContain('No protected folders are saved.')

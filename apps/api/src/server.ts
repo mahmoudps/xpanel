@@ -84,6 +84,7 @@ import { handleGitWorkspaceRoute } from './git-workspace.ts'
 import { handlePgpWorkspace } from './pgp-workspace.ts'
 import { createDynamicDnsRoutes } from './dynamic-dns.ts'
 import { handleWebDirectivesRoute } from './web-directives-workspace.ts'
+import { handleDirectoryPrivacyRoute } from './directory-privacy-workspace.ts'
 import { handleAccountBulkActionsRoute } from './account-bulk-actions.ts'
 import { handleMailLogWorkspaceRoute, handleMailTrackDeliveryRoute } from './mail-log-workspace.ts'
 import { handleFtpLogWorkspaceRoute } from './ftp-log-workspace.ts'
@@ -3546,6 +3547,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
       const webDirectivesResponse = await handleWebDirectivesRoute(req, url, method, { store: deps.store, requireCaller, assertCanAccessAccount, readJsonBody, callAgent })
       if (webDirectivesResponse) return webDirectivesResponse
+      const directoryPrivacyResponse = await handleDirectoryPrivacyRoute(req, url, method, { store: deps.store, requireCaller, assertCanAccessAccount, resolveAccountParam, emitAudit,
+        readAgent: deps.agentApp && deps.agentToken ? readNativeWorkspace : null })
+      if (directoryPrivacyResponse) return directoryPrivacyResponse
 
       const certificateResponse = await certificateRuntimeRouter(req, url, method)
       if (certificateResponse) return certificateResponse

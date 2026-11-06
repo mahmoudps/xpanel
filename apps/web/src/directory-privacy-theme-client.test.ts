@@ -5,7 +5,10 @@ import { directoryPrivacyClientTemplates } from './board-port/directory-privacy-
 import { v2DirectoryPrivacyClientTemplates } from './themes/v2/pages/xpanel/files/directory-privacy-client-templates.ts'
 
 const tick = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
-const snapshot = (enabled = true) => ({ config: { rules: [{ path: '/private', authName: '<svg>Private</svg>', enabled, users: [{ username: 'alice' }] }], compiledNginx: 'saved nginx', compiledApache: 'saved apache', updatedAt: '2026-10-30T00:00:00.000Z' } })
+const R1 = 'a'.repeat(64)
+const snapshot = (enabled = true) => ({ context: { accountId: '11111111-1111-4111-8111-111111111111', username: 'owner' }, roots: [{ domain: 'owner.example.test', path: 'public_html' }], capabilities: { canSave: true, reason: null },
+  directories: [{ path: 'public_html/private', authName: '<svg>Private</svg>', enabled, users: ['alice'], revision: R1, conflict: null, directives: [], url: { domain: 'owner.example.test', path: '/private/' } }],
+  application: { status: enabled ? 'read' : 'saved', httpStatus: null, protectionVerified: null, nativeQualified: false } })
 const workspace = (templates: string) => `<section data-directory-privacy data-account-username="owner"><table><tbody data-directory-privacy-rows></tbody></table><p data-directory-privacy-status></p><input data-directory-privacy-path><input data-directory-privacy-prompt><input data-directory-privacy-username><input type="password" data-directory-privacy-password><button data-directory-privacy-add disabled>Add</button><button data-directory-privacy-save disabled>Save</button><div data-directory-privacy-preview-wrap hidden><pre data-directory-privacy-preview></pre></div>${templates}</section>`
 function boot(html: string, send: ReturnType<typeof vi.fn>) {
   document.body.innerHTML = html
@@ -17,10 +20,10 @@ afterEach(() => { document.body.replaceChildren(); delete (window as Window & { 
 
 describe.each(['classic', 'v2'] as const)('%s saved directory privacy templates', theme => {
   const templates = () => theme === 'classic' ? directoryPrivacyClientTemplates() : v2DirectoryPrivacyClientTemplates()
-  it('uses the selected rows and password labels, and preserves the verified saved-rule request', async () => {
+  it('uses the selected rows and password labels, and sends the revision-bound folder request', async () => {
     const send = vi.fn(async (method: string) => snapshot(method !== 'PUT'))
     boot(workspace(templates()), send); await tick()
-    const row = document.querySelector<HTMLElement>('[data-directory-privacy-rule="/private"]')!
+    const row = document.querySelector<HTMLElement>('[data-directory-privacy-rule="public_html/private"]')!
     expect(row).not.toBeNull()
     const name = row.querySelector<HTMLElement>('[data-xp-slot="username"]')!
     expect(name.textContent).toBe('alice'); expect(name.dir).toBe('ltr')
@@ -35,7 +38,8 @@ describe.each(['classic', 'v2'] as const)('%s saved directory privacy templates'
     expect(send.mock.calls).toEqual([
       ['GET', '/api/web-features/owner/directory-privacy'],
       ['GET', '/api/web-features/owner/directory-privacy'],
-      ['PUT', '/api/web-features/owner/directory-privacy', { rules: [{ path: '/private', authName: '<svg>Private</svg>', enabled: false, users: [{ username: 'alice', password: 'new correct horse' }] }] }],
+      ['PUT', '/api/web-features/owner/directory-privacy', { path: 'public_html/private', enabled: false, authName: '<svg>Private</svg>', users: [{ username: 'alice', password: 'new correct horse' }], expectedRevision: R1 }],
+      ['GET', '/api/web-features/owner/directory-privacy'],
     ])
     expect(document.querySelector<HTMLElement>('[data-directory-privacy-status]')!.dataset.state).toBe('saved')
   })

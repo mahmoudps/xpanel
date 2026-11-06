@@ -5,6 +5,9 @@ import { inspectHtaccess } from './htaccess-policy.ts'
 /** xPanel-owned marked blocks inside the checked domain .htaccess; every other byte stays untouched. */
 export const WEB_DIRECTIVE_FEATURES = ['error-pages', 'indexes', 'mime-types', 'hotlink', 'ip-blocker', 'redirects'] as const
 export type WebDirectiveFeature = typeof WEB_DIRECTIVE_FEATURES[number]
+/** Every marked block name; directory privacy owns per-directory blocks through its own workspace. */
+export const MANAGED_HTACCESS_BLOCKS = [...WEB_DIRECTIVE_FEATURES, 'directory-privacy'] as const
+export type ManagedHtaccessBlock = typeof MANAGED_HTACCESS_BLOCKS[number]
 export const ERROR_PAGE_CODES = [400, 401, 403, 404, 500, 502, 503] as const
 export interface ErrorPagesModel { entries: { code: number; path: string }[] }
 export interface IndexesModel { listing: 'inherit' | 'enabled' | 'disabled' }
@@ -18,7 +21,7 @@ export interface WebDirectiveFieldIssue { field: string; code: string }
 export interface WebDirectiveConflict { code: string; line: number }
 interface Rec { text: string; eol: string }
 export interface ManagedHtaccessDocument {
-  records: Rec[]; eol: string; blocks: Map<WebDirectiveFeature, { start: number; end: number }>
+  records: Rec[]; eol: string; blocks: Map<ManagedHtaccessBlock, { start: number; end: number }>
   conflict: WebDirectiveConflict | null; unmanagedLines: number; accessRules: number; rewriteDisabled: number
 }
 export const WEB_DIRECTIVE_LIMITS = { 'error-pages': ERROR_PAGE_CODES.length, 'mime-types': 100, hotlinkHosts: 32, hotlinkExtensions: 32, 'ip-blocker': 500, redirects: 200 } as const
@@ -207,11 +210,11 @@ function bodyToRaw(feature: WebDirectiveFeature, lines: string[]): unknown {
 /** Splits records exactly like the PHP migration planner; markers must be exact and top level. */
 export function parseManagedHtaccess(content: string): ManagedHtaccessDocument {
   const records = [...content.matchAll(/([^\r\n]*)(\r\n|\r|\n|$)/g)].filter(match => match[0] !== '').map(match => ({ text: match[1]!, eol: match[2]! }))
-  const blocks = new Map<WebDirectiveFeature, { start: number; end: number }>(), stack: string[] = []
-  let open: { feature: WebDirectiveFeature; start: number } | null = null, conflict: WebDirectiveConflict | null = null, unmanagedLines = 0, accessRules = 0, rewriteDisabled = 0
+  const blocks = new Map<ManagedHtaccessBlock, { start: number; end: number }>(), stack: string[] = []
+  let open: { feature: ManagedHtaccessBlock; start: number } | null = null, conflict: WebDirectiveConflict | null = null, unmanagedLines = 0, accessRules = 0, rewriteDisabled = 0
   for (let index = 0; index < records.length && !conflict; index++) {
     const text = records[index]!.text, line = index + 1, continued = index > 0 && records[index - 1]!.text.endsWith('\\')
-    const marker = /^# (BEGIN|END) xPanel ([a-z-]+)$/.exec(text), feature = WEB_DIRECTIVE_FEATURES.find(name => name === marker?.[2])
+    const marker = /^# (BEGIN|END) xPanel ([a-z-]+)$/.exec(text), feature = MANAGED_HTACCESS_BLOCKS.find(name => name === marker?.[2])
     if (MARKER_LIKE.test(text) && !feature) conflict = { code: 'marker_malformed', line }
     else if (marker?.[1] === 'BEGIN' && feature) {
       if (open) conflict = { code: 'marker_nested', line }
@@ -237,7 +240,9 @@ export function parseManagedHtaccess(content: string): ManagedHtaccessDocument {
 
 export function readWebDirective<F extends WebDirectiveFeature>(document: ManagedHtaccessDocument, feature: F, context: WebDirectiveContext): { model: WebDirectiveModels[F]; managed: boolean; conflict: WebDirectiveConflict | null } {
   const empty = defaultWebDirectiveModel(feature, context), block = document.conflict ? undefined : document.blocks.get(feature)
-  const environment = document.conflict ?? (feature === 'ip-blocker' && document.accessRules ? { code: 'access_rules_present', line: document.accessRules } : feature === 'hotlink' && document.rewriteDisabled ? { code: 'rewrite_disabled', line: document.rewriteDisabled } : null)
+  // Same-level Require lines combine as RequireAny, so a directory-privacy block would open the blocker.
+  const accessRules = document.accessRules || (document.blocks.get('directory-privacy')?.start ?? -1) + 1
+  const environment = document.conflict ?? (feature === 'ip-blocker' && accessRules ? { code: 'access_rules_present', line: accessRules } : feature === 'hotlink' && document.rewriteDisabled ? { code: 'rewrite_disabled', line: document.rewriteDisabled } : null)
   if (!block) return { model: empty, managed: false, conflict: environment }
   const lines = document.records.slice(block.start + 1, block.end).map(record => record.text)
   try {
@@ -251,8 +256,13 @@ export function readWebDirective<F extends WebDirectiveFeature>(document: Manage
 export function mergeWebDirective<F extends WebDirectiveFeature>(content: string, feature: F, model: WebDirectiveModels[F], context: WebDirectiveContext): string {
   const document = parseManagedHtaccess(content), current = readWebDirective(document, feature, context)
   if (current.conflict) return fail('CONFLICT', 'the managed .htaccess block requires review', { stateChanged: false, conflict: current.conflict })
-  const body = renderWebDirectiveBody(feature, model), block = document.blocks.get(feature)
-  const lines = body.length ? ['# BEGIN xPanel ' + feature, ...body, '# END xPanel ' + feature] : []
+  return replaceManagedBlock(content, document, feature, renderWebDirectiveBody(feature, model))
+}
+
+/** The caller has checked the document for conflicts; an empty body removes the block. */
+export function replaceManagedBlock(content: string, document: ManagedHtaccessDocument, name: ManagedHtaccessBlock, body: readonly string[]): string {
+  const block = document.blocks.get(name)
+  const lines = body.length ? ['# BEGIN xPanel ' + name, ...body, '# END xPanel ' + name] : []
   const join = (records: Rec[]): string => records.map(record => record.text + record.eol).join('')
   if (block) return join(document.records.slice(0, block.start)) + (lines.length ? lines.join(document.eol) + document.records[block.end]!.eol : '') + join(document.records.slice(block.end + 1))
   return lines.length ? lines.join(document.eol) + document.eol + content : content
