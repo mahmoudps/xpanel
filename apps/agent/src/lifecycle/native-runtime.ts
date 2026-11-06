@@ -13,7 +13,7 @@ import { createProductionHostTargetMatcher, LinuxHostExecutor } from '../executo
 import type { AgentExecutor } from '../executor.ts'
 import { resolveHomeQuotaFilesystem } from '../services/quota.ts'
 import { observeHostLimits } from '../limit-gaps.ts'
-import { HostReconciler } from '../reconciler.ts'
+import { createNativeHostReconciler } from '../native-reconciler.ts'
 import { loadNativePeerIdentityAddon } from '../peer-identity.ts'
 import { createNativeLifecycleCanary } from './native-canary.ts'
 import { createProductionUpgradePorts, verifySignedManifestForRelease } from './upgrade-runner.ts'
@@ -160,7 +160,7 @@ const composition = async (db: ReturnType<typeof createDb>['db'], actor: Princip
   const resolvedOs = await os
   // A read-only mount observation, outside lifecycle effects.
   const quotaFilesystem = await resolveHomeQuotaFilesystem(argv => native.runCommand(argv)).catch(() => '/home')
-  const reconciler = new HostReconciler({ store, db, executor, os: resolvedOs, quotaFilesystem, healthProbe: async unit => { const result = await executor.runCommand(['/usr/bin/systemctl', 'is-active', '--quiet', unit]); return { ok: result.code === 0, ...(result.code !== 0 ? { error: 'Native service was not active' } : {}) } } })
+  const { reconciler } = await createNativeHostReconciler({ store, db, executor, os: resolvedOs, quotaFilesystem, healthProbe: async unit => { const result = await executor.runCommand(['/usr/bin/systemctl', 'is-active', '--quiet', unit]); return { ok: result.code === 0, ...(result.code !== 0 ? { error: 'Native service was not active' } : {}) } } })
   const canaries = createNativeLifecycleCanary({ db, store, executor, reconciler, os: resolvedOs, addon: await loadNativePeerIdentityAddon() })
   const host: HostPort = { async apply(action: HostAction) {
     const kind = action.kind === 'systemd' && action.verb === 'stop' ? 'service.stop' : action.kind === 'systemd' ? 'service.start' : 'filesystem.write'
@@ -269,6 +269,6 @@ export const runNativeLifecycleCommand = async (input: unknown, processBinding?:
     return result.outcome === 'succeeded'
       ? { exitCode: 0, code: 'LIFECYCLE_NATIVE_COMMITTED', outcome: 'committed', details: { currentVersion: release.version, changed: true, upgradeId: result.recordId } }
       : result.outcome === 'rolled_back' ? { exitCode: 5, code: 'LIFECYCLE_NATIVE_ROLLED_BACK', outcome: 'rolled_back', details: { phase: 'rolled_back', qualified: true, upgradeId: result.recordId } }
-      : { exitCode: result.outcome === 'refused' ? 3 : 6, code: result.outcome === 'refused' ? 'LIFECYCLE_UPGRADE_REFUSED' : 'LIFECYCLE_RETIREMENT_PENDING', outcome: result.outcome === 'refused' ? 'blocked' : 'attention', details: { phase: 'retirement_pending', qualified: false } }
+      : { exitCode: result.outcome === 'refused' ? 3 : 6, code: result.outcome === 'refused' ? 'LIFECYCLE_UPGRADE_REFUSED' : result.outcome === 'rollback_failed' ? 'LIFECYCLE_ROLLBACK_FAILED' : 'LIFECYCLE_RETIREMENT_PENDING', outcome: result.outcome === 'refused' ? 'blocked' : 'attention', details: { phase: 'retirement_pending', qualified: false } }
   })
 }

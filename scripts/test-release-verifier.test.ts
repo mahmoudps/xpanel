@@ -7,7 +7,7 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 import { Readable } from 'node:stream'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { buildReleaseArtifact, createTarGzBuffer, parseTarGzBuffer, REQUIRED_ROOT_FILES, REQUIRED_RELEASE_ENTRYPOINTS, REQUIRED_SYSTEMD_UNITS } from './package-release.mjs'
-import { clearDependencyGroupWorldWrite, offlineDependencyInstallArguments, RELEASE_VERIFICATION_LIMITS, REQUIRED_LIFECYCLE_CONTROL_FILES, serializeManifestPayload, signManifestPayload, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive, verifyAuthenticatedReleaseTree, withAuthenticatedReleaseArchive } from './release-verifier.mjs'
+import { normalizeDependencyModes, offlineDependencyInstallArguments, RELEASE_VERIFICATION_LIMITS, REQUIRED_LIFECYCLE_CONTROL_FILES, serializeManifestPayload, signManifestPayload, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive, verifyAuthenticatedReleaseTree, withAuthenticatedReleaseArchive } from './release-verifier.mjs'
 
 const roots: string[] = []
 const temp = (): string => { const path = mkdtempSync(join(tmpdir(), 'xpanel-runtime-verifier-')); roots.push(path); return path }
@@ -67,22 +67,27 @@ describe('strict authenticated runtime release verifier, diagnostic archives onl
     expect(offlineDependencyInstallArguments(report.manifest)).toEqual(['install', '--offline', '--frozen-lockfile', '--prod', '--ignore-scripts', '--verify-store-integrity', `--config.node-version=${report.manifest.runtime.nodeVersion}`])
     expect(report.manifest.runtime.nodeVersion).toMatch(/^\d+\.\d+\.\d+$/)
   })
-  it.skipIf(process.platform === 'win32')('clears group and world write on installed dependency trees only, without following links', async () => {
+  it.skipIf(process.platform === 'win32')('sets fixed modes on installed dependency trees only, whatever the umask, without following links', async () => {
     const root = temp(), outside = temp()
-    for (const dir of ['node_modules/.pnpm/fast-fifo@1.3.2/node_modules/fast-fifo', 'packages/os/node_modules/@xpanel', 'apps/api/src']) mkdirSync(join(root, dir), { recursive: true })
-    writeFileSync(join(root, 'node_modules/.pnpm/fast-fifo@1.3.2/node_modules/fast-fifo/index.js'), '')
-    writeFileSync(join(root, 'apps/api/src/main.ts'), '')
+    const pkg = 'node_modules/.pnpm/fast-fifo@1.3.2/node_modules/fast-fifo'
+    for (const dir of [pkg, 'packages/os/node_modules/@xpanel', 'apps/api/node_modules/@xpanel', 'apps/api/src']) mkdirSync(join(root, dir), { recursive: true })
+    for (const file of [`${pkg}/index.js`, `${pkg}/cli.js`, `${pkg}/loose.js`, 'node_modules/.pnpm-workspace-state-v1.json', 'apps/api/src/main.ts']) writeFileSync(join(root, file), '')
     symlinkSync(outside, join(root, 'packages/os/node_modules/@xpanel/core'))
-    for (const path of ['node_modules/.pnpm/fast-fifo@1.3.2/node_modules/fast-fifo', 'packages/os/node_modules/@xpanel', 'apps/api/src']) chmodSync(join(root, path), 0o777)
-    chmodSync(join(root, 'node_modules/.pnpm/fast-fifo@1.3.2/node_modules/fast-fifo/index.js'), 0o666)
-    chmodSync(outside, 0o777)
-    await clearDependencyGroupWorldWrite(root)
-    const mode = (path: string) => statSync(path).mode & 0o777
-    expect(mode(join(root, 'node_modules/.pnpm/fast-fifo@1.3.2/node_modules/fast-fifo'))).toBe(0o755)
-    expect(mode(join(root, 'node_modules/.pnpm/fast-fifo@1.3.2/node_modules/fast-fifo/index.js'))).toBe(0o644)
-    expect(mode(join(root, 'packages/os/node_modules/@xpanel'))).toBe(0o755)
-    expect(mode(join(root, 'apps/api/src'))).toBe(0o777)
-    expect(mode(outside)).toBe(0o777)
+    // What pnpm leaves under umask 0077 (owner-only), plus its occasional 0777 directory and a 0666 file.
+    for (const path of ['node_modules', 'apps/api/node_modules', 'apps/api/node_modules/@xpanel', pkg]) chmodSync(join(root, path), 0o700)
+    chmodSync(join(root, 'packages/os/node_modules/@xpanel'), 0o777)
+    chmodSync(join(root, `${pkg}/index.js`), 0o600)
+    chmodSync(join(root, `${pkg}/cli.js`), 0o700)
+    chmodSync(join(root, `${pkg}/loose.js`), 0o666)
+    chmodSync(join(root, 'node_modules/.pnpm-workspace-state-v1.json'), 0o600)
+    chmodSync(join(root, 'apps/api/src'), 0o777)
+    chmodSync(outside, 0o700)
+    await normalizeDependencyModes(root)
+    const mode = (path: string) => statSync(join(root, path)).mode & 0o7777
+    for (const path of ['node_modules', 'apps/api/node_modules', 'apps/api/node_modules/@xpanel', pkg, 'packages/os/node_modules/@xpanel', `${pkg}/cli.js`]) expect(mode(path)).toBe(0o755)
+    for (const path of [`${pkg}/index.js`, `${pkg}/loose.js`, 'node_modules/.pnpm-workspace-state-v1.json']) expect(mode(path)).toBe(0o644)
+    expect(mode('apps/api/src')).toBe(0o777)
+    expect(statSync(outside).mode & 0o777).toBe(0o700)
   })
   it('keeps historical lifecycle control presence valid without optional fresh-install tooling', async () => {
     const report = await verify()

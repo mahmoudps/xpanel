@@ -11,6 +11,7 @@ let visibleOperator = null
 const fail = code => { throw Object.assign(new Error(code), { code }) }
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const json = value => Buffer.from(JSON.stringify(value) + '\n')
+const STABLE = /^[A-Z][A-Z0-9_]{0,95}$/
 
 /** Syntax only; transport must establish kernel UID 0 and the distinct signed operator purpose. */
 export function parseRootOperatorRequest(value) {
@@ -80,6 +81,8 @@ export async function runNativeRootOperatorCommand(input, dispatch) {
           const result = await safety.executeNativeLifecycleCommand(command)
           await assertCurrent()
           const phase = result.exitCode === 0 ? 'succeeded' : 'attention'
+          // The signed response carries only the phase; the coordinator journal keeps the stable code for review.
+          if (phase === 'attention') process.stderr.write(`xpanel-root-operator-attention kind=${request.kind} code=${STABLE.test(result.code) ? result.code : 'UNSTABLE'}\n`)
           const resultDigest = hash(json(result))
           await replaceManagedFile(path, json({ schemaVersion: 1, purpose: PURPOSE, ...request, origin, phase, resultDigest,
             claimSha256: claim.entry.sha256, completedAt: new Date().toISOString() }), 0o600, claim.entry, assertAuthority)

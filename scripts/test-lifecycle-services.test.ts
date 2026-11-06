@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseCgroupProcesses, parseControlPlaneUnitInventory, parseSystemctlJobs, parseSystemctlProperties, parseFileWorkerUnit, parseFileWorkerIncident, projectOwnedControlPlaneObservation, quiescentControlPlaneFailures, stopAndDrainOwnedControlPlaneUnits } from './lifecycle-services.mjs'
+import { controlPlaneUnitSettled, parseCgroupProcesses, parseControlPlaneUnitInventory, parseSystemctlJobs, parseSystemctlProperties, parseFileWorkerUnit, parseFileWorkerIncident, projectOwnedControlPlaneObservation, quiescentControlPlaneFailures, stopAndDrainOwnedControlPlaneUnits } from './lifecycle-services.mjs'
 
 const properties = (unit = 'xpanel-api.service') => ({
   Id: unit, LoadState: 'loaded', ActiveState: 'active', SubState: 'running',
@@ -74,6 +74,24 @@ describe('finite file worker diagnostics, not a quiescence grant', () => {
   ])('rejects an inconsistent incident %j', patch => {
     expect(() => parseFileWorkerIncident({ version: 1, unit: name, uid: 20003, reason: 'operation started', status: 'in-flight', recordedAt: '2026-10-24T00:00:00.000Z', ...patch })).toThrow('FILE_WORKER_INCIDENT_INVALID')
   })
+})
+
+describe('control-plane unit settled before a stop', () => {
+  const unit = (patch: Record<string, string>) => ({ ...properties(), ...patch })
+  it.each([
+    ['running', {}],
+    ['inactive', { ActiveState: 'inactive', SubState: 'dead', MainPID: '0' }],
+    ['failed', { ActiveState: 'failed', SubState: 'failed', MainPID: '0' }],
+    ['waiting to restart after a crash', { ActiveState: 'activating', SubState: 'auto-restart', MainPID: '0' }],
+  ])('accepts a %s unit', (_, patch) => { expect(controlPlaneUnitSettled(unit(patch))).toBe(true) })
+  it.each([
+    ['starting', { ActiveState: 'activating', SubState: 'start' }],
+    ['restarting with a process', { ActiveState: 'activating', SubState: 'auto-restart', MainPID: '120' }],
+    ['restarting with a control process', { ActiveState: 'activating', SubState: 'auto-restart', MainPID: '0', ControlPID: '121' }],
+    ['with its restart queued', { ActiveState: 'activating', SubState: 'auto-restart-queued', MainPID: '0' }],
+    ['stopping', { ActiveState: 'deactivating', SubState: 'stop-sigterm' }],
+    ['reloading', { ActiveState: 'reloading', SubState: 'reload' }],
+  ])('refuses a %s unit', (_, patch) => { expect(controlPlaneUnitSettled(unit(patch))).toBe(false) })
 })
 
 describe('control-plane quiescence decision', () => {

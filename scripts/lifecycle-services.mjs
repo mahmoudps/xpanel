@@ -248,13 +248,20 @@ async function observeWorkers(receipt, inventory, previousPaths, allowActive) {
   return workers
 }
 
+/**
+ * Pure: no start or stop is in flight. A Restart=always service that keeps failing waits in activating/auto-restart
+ * with no process between attempts; stop cancels that restart, so rollback and recovery stop it like a failed unit.
+ */
+export const controlPlaneUnitSettled = state => ['active', 'inactive', 'failed'].includes(state.ActiveState)
+  || (state.ActiveState === 'activating' && state.SubState === 'auto-restart' && state.MainPID === '0' && state.ControlPID === '0')
+
 async function observe(receipt, previousPaths = [], coordinatorUnit = null, allowActiveWorkers = false) {
   const units = []
   for (const unit of UNITS) {
     const state = parseSystemctlProperties(await systemctl(receipt, ['show', unit, `--property=${PROPERTIES.join(',')}`]))
     check(state.Id === unit && state.LoadState === 'loaded' && state.FragmentPath === `/etc/systemd/system/${unit}` && state.DropInPaths === '' && state.NeedDaemonReload === 'no', 'CONTROL_PLANE_UNIT_CONFIGURATION_DRIFT')
     check(state.Job === '' || state.Job === '0', 'CONTROL_PLANE_JOB_PENDING')
-    check(['active', 'inactive', 'failed'].includes(state.ActiveState), 'CONTROL_PLANE_TRANSITION_PENDING')
+    check(controlPlaneUnitSettled(state), 'CONTROL_PLANE_TRANSITION_PENDING')
     const triggers = state.Triggers ? state.Triggers.split(' ') : [], triggeredBy = state.TriggeredBy ? state.TriggeredBy.split(' ') : []
     check(triggers.every(name => name === 'xpanel-management-tls.service' && unit === 'xpanel-management-tls.timer') && triggeredBy.every(name => name === 'xpanel-management-tls.timer' && unit === 'xpanel-management-tls.service'), 'UNKNOWN_CONTROL_PLANE_ACTIVATOR')
     if (unit.endsWith('.service')) check(state.KillMode === 'control-group' && (state.ControlGroup === '' || posix.basename(state.ControlGroup) === unit), 'CONTROL_PLANE_CGROUP_UNOWNED')
