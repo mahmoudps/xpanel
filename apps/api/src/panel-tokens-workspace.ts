@@ -13,7 +13,7 @@ export type PanelTokensWorkspaceHelpers = Pick<ExtendedRouteHelpers, 'db' | 'req
 
 /** Every resource policyForRequest (authorization.ts) assigns, plus the direct events/tls scope checks. A token grants `<resource>:read|write`. */
 export const API_TOKEN_SCOPE_RESOURCES = [
-  'accounts', 'account-preferences', 'analytics', 'apps', 'audit', 'auth', 'backups', 'branding', 'cache', 'catalog', 'cluster', 'containers', 'cron',
+  'accounts', 'account-preferences', 'analytics', 'apps', 'audit', 'auth', 'backups', 'branding', 'cache', 'catalog', 'containers', 'cron',
   'databases', 'dns', 'domains', 'events', 'feature-lists', 'files', 'firewall', 'generations', 'git', 'ips', 'jobs', 'languages', 'lifecycle', 'mail',
   'plans', 'reconcile', 'resellers', 'search', 'security', 'server', 'service-users', 'shell', 'tls', 'webmail', 'whmcs',
 ] as const

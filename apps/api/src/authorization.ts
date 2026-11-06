@@ -222,7 +222,7 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (/^\/api\/git(?:\/|$)/.test(pathname)) return { resource: 'git', acl: 'edit-account', toolIds: ['git-version-control'] }
   if (/^\/api\/(?:cache|containers|apps)(?:\/|$)/.test(pathname)) return { resource: pathname.split('/')[2]!, acl: 'edit-account', toolIds: [pathname.startsWith('/api/cache/') ? 'account-cache-services' : pathname.startsWith('/api/containers/') ? 'account-containers' : 'web-apps'] }
   if (/^\/api\/analytics(?:\/|$)/.test(pathname)) return { resource: 'analytics', acl: 'list-accounts' }
-  if (/^\/api\/(?:firewall|generations|reconcile|cluster)(?:\/|$)/.test(pathname)) return { resource: pathname.split('/')[2]!, rootOnly: true }
+  if (/^\/api\/(?:firewall|generations|reconcile)(?:\/|$)/.test(pathname)) return { resource: pathname.split('/')[2]!, rootOnly: true }
   if (pathname === '/api/audit') return { resource: 'audit', acl: 'list-accounts' }
   return fail('FORBIDDEN', 'no authorization policy is declared for this route')
 }

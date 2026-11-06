@@ -3,10 +3,11 @@ import { randomBytes } from 'node:crypto'
 import { assertPrivilegedSessionAuthorization, captureMfaRuntimePolicy, fail } from '@xpanel/core'
 import { createApiToken, createRootPrincipal, createSession, createTestDb, findActiveApiTokenByHash, findActiveSessionByTokenHash, getPrincipal, listApiTokensForPrincipal, setTotpSecret } from '@xpanel/db'
 import type { Db, PrincipalRecord } from '@xpanel/db'
+import type { StateStore } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
 import { authenticateRequest, deriveCsrfToken, sha256Hex } from './auth.ts'
 import { sessionCookieName, sessionTokenHash } from './entry-points.ts'
-import { policyForRequest } from './authorization.ts'
+import { assertRequestAuthorized, hasApiScope, policyForRequest } from './authorization.ts'
 import { API_TOKEN_MAX_ACTIVE, API_TOKEN_SCOPE_RESOURCES, handlePanelTokensWorkspaceRoute, parseApiTokenCreate } from './panel-tokens-workspace.ts'
 import type { PanelTokensWorkspaceHelpers } from './panel-tokens-workspace.ts'
 import { PANEL_TOKEN_SCOPE_LABELS } from '../../web/src/board-port/whm-panel-tokens-workspace.ts'
@@ -153,7 +154,7 @@ describe('API token scope vocabulary', () => {
   it('is exactly the resources the route policy assigns, and the web labels cover the same list', () => {
     const sample: Record<string, string> = {
       accounts: '/api/accounts', 'account-preferences': '/api/account/preferences', analytics: '/api/analytics', apps: '/api/apps/x', audit: '/api/audit', auth: '/api/auth/me',
-      backups: '/api/backups', branding: '/api/server/panel/branding', cache: '/api/cache/x', catalog: '/api/catalog', cluster: '/api/cluster', containers: '/api/containers/x', cron: '/api/account/cron',
+      backups: '/api/backups', branding: '/api/server/panel/branding', cache: '/api/cache/x', catalog: '/api/catalog', containers: '/api/containers/x', cron: '/api/account/cron',
       databases: '/api/databases', dns: '/api/dns', domains: '/api/domains', events: '/api/events/recent', 'feature-lists': '/api/feature-lists', files: '/api/accounts/x/files',
       firewall: '/api/firewall', generations: '/api/generations', git: '/api/git', ips: '/api/ips', jobs: '/api/jobs', languages: '/api/server/panel/languages', lifecycle: '/api/transfers',
       mail: '/api/mail', plans: '/api/plans', reconcile: '/api/reconcile', resellers: '/api/resellers', search: '/api/search', security: '/api/security/workspace', server: BASE,
@@ -165,9 +166,21 @@ describe('API token scope vocabulary', () => {
   })
 
   it.each([
-    [['accounts:admin']], [['mailbox:x']], [[]], [['accounts:read', 'accounts:read']], [['*', 'accounts:read']], [['nope:read']], ['accounts:read'], [[1]],
+    [['accounts:admin']], [['mailbox:x']], [['cluster:read']], [['cluster:write']], [[]], [['accounts:read', 'accounts:read']], [['*', 'accounts:read']], [['nope:read']], ['accounts:read'], [[1]],
   ])('rejects scopes %j', scopes => {
     expect(() => parseApiTokenCreate({ name: 'x', scopes, expiresInDays: 1 })).toThrow(expect.objectContaining({ code: 'VALIDATION' }))
+  })
+
+  it('keeps a stored cluster grant visible as issued and lets it authorize nothing', async () => {
+    const secret = 'xp_' + randomBytes(32).toString('base64url')
+    await createApiToken(database.db, { principalId: root.principal.id, name: 'legacy', tokenHash: sha256Hex(secret), scopes: ['cluster:read', 'cluster:write'], expiresAt: new Date(Date.now() + 86_400_000).toISOString() })
+    const listed = await (await call(BASE, 'GET', helpers().helpers))!.json() as { tokens: { scopes: string[]; state: string }[] }
+    expect(listed.tokens).toMatchObject([{ scopes: ['cluster:read', 'cluster:write'], state: 'active' }])
+    const bearer = await authenticateRequest(database.db, new Request('http://localhost/api/server/info', { headers: { authorization: 'Bearer ' + secret } }), { serverSecret: SERVER_SECRET })
+    expect(bearer?.scopes).toEqual(['cluster:read', 'cluster:write'])
+    for (const resource of API_TOKEN_SCOPE_RESOURCES) for (const access of ['read', 'write']) expect(hasApiScope(bearer!, `${resource}:${access}`), resource).toBe(false)
+    await expect(assertRequestAuthorized({} as StateStore, bearer!, new Request('http://localhost/api/server/info'))).rejects.toMatchObject({ code: 'FORBIDDEN', detail: { requiredScope: 'server:read' } })
+    expect(() => policyForRequest('/api/cluster/nodes', 'GET')).toThrow(expect.objectContaining({ code: 'FORBIDDEN' }))
   })
 
   it('accepts a known subset or the all-scopes grant alone', () => {

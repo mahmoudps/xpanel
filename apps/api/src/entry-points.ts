@@ -30,7 +30,7 @@ export const sessionCookieName = (entryPoint?: EntryPoint, secure = false): stri
 
 const authRoutes = new Set(['login', 'logout', 'me', 'change-password', '2fa/setup', '2fa/enable', '2fa/disable', 'team/password'])
 const ownerFamilies = /^\/api\/(?:domains|databases|service-users|dns|backups|web-features|git|cache|containers|apps|analytics)(?:\/|$)/
-const administratorFamilies = /^\/api\/(?:server|setup|jobs|feature-lists|plans|resellers|accounts|ips|domains|databases|service-users|dns|mail|backups|transfers|lifecycle|web-features|git|cache|containers|apps|analytics|firewall|generations|reconcile|cluster|audit)(?:\/|$)/
+const administratorFamilies = /^\/api\/(?:server|setup|jobs|feature-lists|plans|resellers|accounts|ips|domains|databases|service-users|dns|mail|backups|transfers|lifecycle|web-features|git|cache|containers|apps|analytics|firewall|generations|reconcile|audit)(?:\/|$)/
 
 /** Listener confinement is additional to, and never a replacement for, route RBAC and ownership checks. */
 export const entryPointAllowsApiRoute = (entryPoint: EntryPoint, pathname: string, method: string): boolean => {
