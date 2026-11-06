@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { lstat, open, readFile, readlink, readdir, chmod, unlink } from 'node:fs/promises'
+import { lstat, open, readFile, readlink, readdir, chmod } from 'node:fs/promises'
 import { createServer, connect } from 'node:net'
 import { randomBytes } from 'node:crypto'
 import { withTrustedFile, withTrustedDirectory } from './lifecycle-ownership.mjs'
@@ -346,13 +346,21 @@ export async function startLifecycleWriterParticipant(role, { onFence } = {}) {
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(path, resolve) })
     await chmod(path, 0o600); await verifyParent()
     const owned = await lstat(path, { bigint: true })
+    const changed = () => Object.assign(new Error('LIFECYCLE_PARTICIPANT_SOCKET_CHANGED'), { code: 'LIFECYCLE_PARTICIPANT_SOCKET_CHANGED' })
     return Object.freeze({ close: async () => {
       try {
+        // server.close() unlinks the bound name itself (libuv), so prove that name is still this socket first.
+        let failure = null
+        try {
+          await verifyParent()
+          const current = await lstat(path, { bigint: true })
+          if (!current.isSocket() || current.dev !== owned.dev || current.ino !== owned.ino || current.uid !== owned.uid) failure = changed()
+        } catch (error) { failure = error.code === 'ENOENT' ? changed() : error }
         await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+        if (failure) throw failure
         await verifyParent()
-        const current = await lstat(path, { bigint: true })
-        if (!current.isSocket() || current.dev !== owned.dev || current.ino !== owned.ino || current.uid !== owned.uid) fail('LIFECYCLE_PARTICIPANT_SOCKET_CHANGED')
-        await unlink(path)
+        try { await lstat(path) } catch (error) { if (error.code === 'ENOENT') return; throw error }
+        throw changed()
       } finally { await parentPin.close() }
     } })
   } catch (error) { server.close(); await parentPin.close(); throw error }

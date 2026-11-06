@@ -102,3 +102,16 @@ test('the client parses exactly one refusal frame and reports the code without r
   exchangeOnce([frame])
   assert.deepEqual({ attempts, settlements, reportedCode }, { attempts: 1, settlements: 1, reportedCode: 'COORDINATOR_OWNERSHIP_SCOPE_REQUIRED' })
 })
+
+test('an owned-file drift names its product path and field in the root journal only, never in the client frame', () => {
+  const drift = Object.assign(new Error('OWNED_FILE_DRIFT'), { code: 'OWNED_FILE_DRIFT', entryPath: '/var/lib/xpanel-lifecycle/recovery-stops/11111111-1111-4111-8111-111111111111.json', field: 'inode' })
+  const refusal = rootOperatorServerRefusal(Object.assign(new Error('Archive callback failed'), { code: 'ARCHIVE_USE_UNCERTAIN', cause: drift }))
+  assert.equal(refusal.code, 'OWNED_FILE_DRIFT')
+  assert.equal(refusal.journalLine, 'xpanel-root-operator-refused code=OWNED_FILE_DRIFT path=/var/lib/xpanel-lifecycle/recovery-stops/11111111-1111-4111-8111-111111111111.json field=inode\n')
+  assert.equal(parseRootOperatorRefusal(refusal.frame), 'OWNED_FILE_DRIFT')
+  assert.equal(refusal.frame.toString('utf8'), '{"refused":"OWNED_FILE_DRIFT"}\n')
+  // Anything that is not a plain canonical product path is left out of the journal.
+  for (const entryPath of ['relative/path', '/etc/../shadow', '/var/lib/x\ny', '/tmp/a b']) {
+    assert.equal(rootOperatorServerRefusal(Object.assign(new Error('OWNED_FILE_DRIFT'), { code: 'OWNED_FILE_DRIFT', entryPath, field: 'inode' })).journalLine, 'xpanel-root-operator-refused code=OWNED_FILE_DRIFT\n')
+  }
+})

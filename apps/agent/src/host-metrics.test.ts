@@ -81,4 +81,18 @@ describe('observed host history collection', () => {
     let drained = false; const stopped = collector.stop().then(() => { drained = true }); await Promise.resolve(); expect(drained).toBe(false)
     finish(); await stopped; await vi.advanceTimersByTimeAsync(5000); expect(write).toHaveBeenCalledTimes(1)
   })
+  it('drains a sample whose write the lifecycle fence refuses: the tick reports it, stop resolves', async () => {
+    vi.useFakeTimers()
+    let refuse!: (error: Error) => void
+    const write = vi.fn((_observation: unknown, _at: string) => new Promise<void>((_resolve, reject) => { refuse = reject }))
+    const onError = vi.fn()
+    const collector = createHostMetricsCollector({ reader: reader(), write, onError, intervalMs: 1000 })
+    collector.start(); await vi.advanceTimersByTimeAsync(0)
+    const stopped = collector.stop()
+    refuse(Object.assign(new Error('LIFECYCLE_WRITES_FENCED'), { code: 'LIFECYCLE_WRITES_FENCED' }))
+    await expect(stopped).resolves.toBeUndefined()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(onError).toHaveBeenCalledTimes(1); expect(onError.mock.calls[0]?.[0]).toMatchObject({ code: 'LIFECYCLE_WRITES_FENCED' })
+    await vi.advanceTimersByTimeAsync(5000); expect(write).toHaveBeenCalledTimes(1)
+  })
 })

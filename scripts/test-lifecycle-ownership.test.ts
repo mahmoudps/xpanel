@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { OWNED_PANEL_UNITS, isRemovableControlPlanePath, parseInstallationReceipt, preservingUninstallPlan, requireLinuxRoot } from './lifecycle-ownership.mjs'
+import { OWNED_PANEL_UNITS, isRemovableControlPlanePath, ownedFileDriftField, parseInstallationReceipt, preservingUninstallPlan, requireLinuxRoot } from './lifecycle-ownership.mjs'
 
 const sha = 'a'.repeat(64)
 const unit = (name: string) => ({ path: `/etc/systemd/system/${name}`, kind: 'file', device: '2049', inode: name === 'xpanel-api.service' ? '101' : '102', size: 100, mode: 0o644, sha256: sha, target: null })
@@ -79,5 +79,20 @@ describe('root installation receipt syntax and preserving uninstall plan; not op
   })
   it('has no fake-platform or caller-provided root bypass', () => {
     if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.geteuid?.() !== 0) expect(() => requireLinuxRoot()).toThrow(/LINUX_ROOT_REQUIRED/)
+  })
+})
+
+describe('owned file drift names the recorded identity field that changed', () => {
+  const entry = unit('xpanel-agent.service')
+  const named = (overrides: Record<string, unknown> = {}) => ({ dev: 2049n, ino: 102n, size: 100n, mode: 0o100644n, uid: 0n, gid: 0n, nlink: 1n,
+    isFile: () => true, isSymbolicLink: () => false, ...overrides }) as unknown as import('node:fs').BigIntStats
+  it('accepts the exact recorded inode and reports each drifted field', () => {
+    expect(ownedFileDriftField(entry, named())).toBeNull()
+    expect(ownedFileDriftField(entry, named({ dev: 2050n }))).toBe('device')
+    expect(ownedFileDriftField(entry, named({ ino: 103n }))).toBe('inode')
+    expect(ownedFileDriftField(entry, named({ size: 101n }))).toBe('size')
+    expect(ownedFileDriftField(entry, named({ mode: 0o100600n }))).toBe('mode')
+    expect(ownedFileDriftField(entry, named({ gid: 1n }))).toBe('owner')
+    expect(ownedFileDriftField(entry, named({ nlink: 2n }))).toBe('kind')
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseCgroupProcesses, parseControlPlaneUnitInventory, parseSystemctlJobs, parseSystemctlProperties, parseFileWorkerUnit, parseFileWorkerIncident, projectOwnedControlPlaneObservation, stopAndDrainOwnedControlPlaneUnits } from './lifecycle-services.mjs'
+import { parseCgroupProcesses, parseControlPlaneUnitInventory, parseSystemctlJobs, parseSystemctlProperties, parseFileWorkerUnit, parseFileWorkerIncident, projectOwnedControlPlaneObservation, quiescentControlPlaneFailures, stopAndDrainOwnedControlPlaneUnits } from './lifecycle-services.mjs'
 
 const properties = (unit = 'xpanel-api.service') => ({
   Id: unit, LoadState: 'loaded', ActiveState: 'active', SubState: 'running',
@@ -73,5 +73,24 @@ describe('finite file worker diagnostics, not a quiescence grant', () => {
     { uid: 20004 }, { status: 'finished' }, { reason: '' }, { recordedAt: 'invalid' }, { extra: true }, { version: '1' },
   ])('rejects an inconsistent incident %j', patch => {
     expect(() => parseFileWorkerIncident({ version: 1, unit: name, uid: 20003, reason: 'operation started', status: 'in-flight', recordedAt: '2026-10-24T00:00:00.000Z', ...patch })).toThrow('FILE_WORKER_INCIDENT_INVALID')
+  })
+})
+
+describe('control-plane quiescence decision', () => {
+  const stopped = (unit: string, ActiveState = 'inactive', MainPID = '0') => ({ ...properties(unit), ActiveState, SubState: ActiveState === 'failed' ? 'failed' : 'dead', MainPID, ControlGroup: '' })
+  const empty = { path: '/system.slice/xpanel-agent.service', exists: false, nodes: [], processes: [] as number[], populated: false }
+  const observation = (agent: ReturnType<typeof stopped>, cgroup = empty) => ({ units: [stopped('xpanel-api.service'), agent, stopped('xpanel-management-tls.service'), { ...stopped('xpanel-management-tls.timer'), Id: 'xpanel-management-tls.timer' }], cgroups: [cgroup] })
+  it('accepts inactive units with empty cgroups', () => {
+    expect(quiescentControlPlaneFailures(observation(stopped('xpanel-agent.service')))).toEqual([])
+  })
+  it('accepts a failed unit whose processes are gone and names it for reporting', () => {
+    expect(quiescentControlPlaneFailures(observation(stopped('xpanel-agent.service', 'failed')))).toEqual(['xpanel-agent.service'])
+  })
+  it('refuses a failed unit that still has a process', () => {
+    expect(() => quiescentControlPlaneFailures(observation(stopped('xpanel-agent.service', 'failed'), { ...empty, exists: true, processes: [4242], populated: true }))).toThrow('CONTROL_PLANE_NOT_QUIESCENT')
+    expect(() => quiescentControlPlaneFailures(observation(stopped('xpanel-agent.service', 'failed', '4242')))).toThrow('CONTROL_PLANE_NOT_QUIESCENT')
+  })
+  it.each(['activating', 'deactivating', 'active', 'reloading'])('refuses a %s unit', state => {
+    expect(() => quiescentControlPlaneFailures(observation(stopped('xpanel-agent.service', state)))).toThrow('CONTROL_PLANE_NOT_QUIESCENT')
   })
 })

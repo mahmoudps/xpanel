@@ -167,6 +167,7 @@ export function createHostMetricsCollector(options: {
       return disk.observedAt !== null && now - Date.parse(disk.observedAt) <= 3 * intervalMs ? disk : UNAVAILABLE_DISK_LATENCY
     },
     start(): void { if (started || stopped) return; started = true; void tick() },
-    async stop(): Promise<void> { stopped = true; clearTimeout(timer); await active },
+    // tick() already reports a failed collection (a write refused by the lifecycle fence); stop only drains it.
+    async stop(): Promise<void> { stopped = true; clearTimeout(timer); await active?.catch(() => undefined) },
   }
 }

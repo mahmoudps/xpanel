@@ -318,6 +318,17 @@ export async function observeOwnedControlPlaneUnits(input, capability) {
   return capture(receipt, [await observe(receipt, [], authority?.coordinatorUnit, true)], [], authority)
 }
 
+/**
+ * Pure decision over one observation. A unit is stopped when it is inactive, or failed (its last
+ * process exited non-zero) with no main or control process; every owned cgroup must be empty.
+ * Returns the failed units, which the caller reports and clears.
+ */
+export function quiescentControlPlaneFailures(observation) {
+  check(observation.units.every(state => ['inactive', 'failed'].includes(state.ActiveState) && (!state.Id.endsWith('.service') || (state.MainPID === '0' && state.ControlPID === '0')))
+    && observation.cgroups.every(group => !group.populated && group.processes.length === 0), 'CONTROL_PLANE_NOT_QUIESCENT')
+  return observation.units.filter(state => state.ActiveState === 'failed').map(state => state.Id)
+}
+
 export async function assertOwnedControlPlaneQuiescent(input, capturedBefore, capability) {
   const receipt = await ownership(input), prior = captures.get(capturedBefore)
   check(prior?.receiptSha256 === digest(receipt), 'CONTROL_PLANE_CAPTURE_REQUIRED')
@@ -326,7 +337,7 @@ export async function assertOwnedControlPlaneQuiescent(input, capturedBefore, ca
   for (let pass = 0; pass < 2; pass++) {
     if (authority) await rootAuthority(capability, 'service.observe')
     const actual = await observe(receipt, prior.paths, authority?.coordinatorUnit)
-    check(actual.units.every(state => state.ActiveState === 'inactive' && (!state.Id.endsWith('.service') || (state.MainPID === '0' && state.ControlPID === '0'))) && actual.cgroups.every(group => !group.populated && group.processes.length === 0), 'CONTROL_PLANE_NOT_QUIESCENT')
+    quiescentControlPlaneFailures(actual)
     observations.push(actual)
     if (pass === 0) await new Promise(resolve => setTimeout(resolve, 100))
   }
@@ -338,7 +349,16 @@ export async function stopAndDrainOwnedControlPlaneUnits(input, capability) {
   const receipt = await ownership(input), before = await observeOwnedControlPlaneUnits(receipt, capability)
   // Stop the only accepted activator first. PID1 stops the exact receipt-owned units.
   for (const unit of UNITS) { await rootAuthority(capability, 'service.stop'); await systemctl(receipt, ['stop', unit]); await rootAuthority(capability, 'service.stop') }
-  return assertOwnedControlPlaneQuiescent(receipt, before, capability)
+  const stopped = await assertOwnedControlPlaneQuiescent(receipt, before, capability)
+  const failed = quiescentControlPlaneFailures(stopped.observations.at(-1))
+  if (!failed.length) return stopped
+  // The processes are gone; clear the failed result so a later start begins clean. The capture keeps the evidence.
+  for (const unit of failed) {
+    await rootAuthority(capability, 'service.stop'); await systemctl(receipt, ['reset-failed', unit]); await rootAuthority(capability, 'service.stop')
+    process.stderr.write(`xpanel-lifecycle: ${unit} stopped in the failed state with no remaining process; failed state cleared\n`)
+  }
+  const cleared = await assertOwnedControlPlaneQuiescent(receipt, stopped, capability), held = captures.get(cleared)
+  return capture(receipt, [...stopped.observations, ...cleared.observations], held.paths, held.authority)
 }
 
 /** Post-rename observation; it never moves files or reloads/stops shared services. */
