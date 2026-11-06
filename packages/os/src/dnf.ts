@@ -22,8 +22,9 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
     major: os.major,
     codename: '',
     packageManager: 'dnf',
-    // semanage sets the SELinux port types and file contexts xPanel needs while SELinux stays enforcing; zstd writes Zstandard backup archives
-    bootstrapPackages: ['dnf-plugins-core', 'acl', 'policycoreutils-python-utils', 'openssl', 'zstd'],
+    // semanage sets the SELinux port types and file contexts xPanel needs while SELinux stays enforcing; zstd writes Zstandard backup archives;
+    // EL 9 and 10 both ship dnf 4, whose post-transaction-actions plugin re-applies Compiler Access after compiler updates
+    bootstrapPackages: ['dnf-plugins-core', 'acl', 'policycoreutils-python-utils', 'openssl', 'zstd', 'python3-dnf-plugin-post-transaction-actions'],
     // the nginx and httpd packages create their own users
     extraSystemUsers: [],
     packages: {

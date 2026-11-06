@@ -43,6 +43,10 @@ describe('compiler access policy and members', { tags: ['unit'] }, () => {
     const root = await saved({ restricted: true, accountIds: [A] })
     expect(await compilerAccessInput(root, 'rhel', { accounts, plans }, async () => false)).toEqual({ restricted: true, members: ['alice'], packageHook: false })
     expect(await compilerAccessInput(root, 'debian', { accounts, plans }, async (path, kind) => path === '/etc/dpkg/dpkg.cfg.d' && kind === 'directory')).toEqual({ restricted: true, members: ['alice'], packageHook: true })
+    // A removed dnf plugin leaves its action directory behind while our action is in it; only its configuration proves it is installed.
+    const plugin = { '/etc/dnf/plugins/post-transaction-actions.d': 'directory', '/etc/dnf/plugins/post-transaction-actions.conf': 'file' } as Record<string, string>
+    expect(await compilerAccessInput(root, 'rhel', { accounts, plans }, async (path, kind) => plugin[path] === kind)).toMatchObject({ packageHook: true })
+    expect(await compilerAccessInput(root, 'rhel', { accounts, plans }, async (path, kind) => kind === 'directory' && plugin[path] === kind)).toMatchObject({ packageHook: false })
     expect(await compilerAccessInput(await saved({ restricted: false, accountIds: [A] }), 'debian', { accounts, plans }, async () => true)).toMatchObject({ restricted: false, packageHook: false })
   })
   it('admits exactly the script and hook files', () => {

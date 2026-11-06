@@ -308,6 +308,11 @@ describe('bootstrap package and repository parity with the declared OS profiles'
     // Zstandard backup archives need zstd(1) on every supported OS.
     expect(lineValues(run.stdout, 'Bootstrap Packages')).toContain('zstd')
     expect(profile.bootstrapPackages).toContain('zstd')
+    // The Compiler Access re-apply hook on EL runs through the dnf 4 post-transaction-actions plugin (EL 9 and 10 ship no dnf 5).
+    if (profile.family === 'rhel') {
+      expect(lineValues(run.stdout, 'Bootstrap Packages')).toContain('python3-dnf-plugin-post-transaction-actions')
+      expect(profile.bootstrapPackages).toContain('python3-dnf-plugin-post-transaction-actions')
+    }
     expect(sorted(lineValues(run.stdout, 'Repository Sources'))).toEqual(sorted(repositoryInputs(actions)))
     if (profile.family === 'rhel') {
       expect(run.stdout).toContain('Production preflight rejects this engine/MPM plan; Apache itk is required.')
