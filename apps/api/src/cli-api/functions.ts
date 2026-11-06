@@ -336,6 +336,8 @@ export const CLI_API_FUNCTIONS: Readonly<Record<CliApiCommand, readonly CliApiFu
     ['server', 'nodes_update', 'PUT', '/api/server/nodes'],
     ['server', 'nodes_verify', 'POST', '/api/server/nodes/verify'],
     ['server', 'quotas_init', 'POST', '/api/server/quotas/init'],
+    ['server', 'sec_compiler_access_get', 'GET', '/api/server/sec/compiler-access'],
+    ['server', 'sec_compiler_access_update', 'PUT', '/api/server/sec/compiler-access'],
     ['server', 'sec_dns_cluster_apply', 'POST', '/api/server/sec/dns-cluster/apply'],
     ['server', 'sec_dns_cluster_get', 'GET', '/api/server/sec/dns-cluster'],
     ['server', 'sec_dns_cluster_update', 'PUT', '/api/server/sec/dns-cluster'],

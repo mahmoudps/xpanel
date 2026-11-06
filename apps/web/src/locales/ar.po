@@ -44454,6 +44454,10 @@ msgid "Updated directory privacy"
 msgstr "حدّث خصوصية دليل"
 
 #: apps/web/src/audit-labels.ts
+msgid "Saved directory privacy"
+msgstr "حفظ خصوصية دليل"
+
+#: apps/web/src/audit-labels.ts
 msgid "Updated domain configuration"
 msgstr "حدّث إعداد النطاق"
 

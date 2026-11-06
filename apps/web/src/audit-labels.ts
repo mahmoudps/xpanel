@@ -50,6 +50,7 @@ export const AUDIT_LABELS: Readonly<Record<string, string>> = {
   'account.pgp.import': msgid('Imported account OpenPGP keys'),
   'account.pgp.delete': msgid('Removed account OpenPGP keys'),
   'account.contact.updated': msgid('Updated an account contact'),
+  'account.directory_privacy.saved': msgid('Saved directory privacy'),
   'account.create.configuration_failed': msgid('Account creation failed on the host'),
   'account.desired.created': msgid('Requested an account'),
   'account.desired.suspended': msgid('Requested a suspension'),

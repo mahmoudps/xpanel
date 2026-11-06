@@ -20,6 +20,8 @@ int main(int argc, char **argv) {
   static char input[XP_MAX_STDIN_BYTES + 1];
   size_t total = 0;
   if (argc != 4) return 2;
+  /* The production helper sets this umask when it drops privileges; the harness skips that step. */
+  umask(0027);
   for (;;) {
     ssize_t n = read(STDIN_FILENO, input + total, XP_MAX_STDIN_BYTES - total);
     if (n < 0 && errno == EINTR) continue;
