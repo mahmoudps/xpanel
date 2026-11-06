@@ -91,6 +91,19 @@ export const nativeLifecyclePathAllowed = (path: string, operation: PathOperatio
 
 const missing = (error: unknown): boolean => (error as NodeJS.ErrnoException)?.code === 'ENOENT'
 type Owner = { uid: number; gid: number }
+type AncestorPin = { path: string; uid: number; gid: number; mode: number }
+const PANEL_STATE_PARENT = /^\/var\/lib\/xpanel\/(?:state|\.rewind-[A-Za-z0-9][A-Za-z0-9-]{0,63}\/state)$/
+/**
+ * Ancestors of a lifecycle path are root-owned and not group/world writable. The panel data root and the
+ * desired-state trees inside it belong to the panel user with their installed modes; whoever can write the data
+ * root can already replace those trees whole, so holding them as parents grants nothing more.
+ */
+export const lifecycleAncestorAccepted = (pin: AncestorPin, owner: Owner): boolean => {
+  if (pin.uid === 0) return (pin.mode & 0o022) === 0
+  if (pin.uid !== owner.uid || pin.gid !== owner.gid) return false
+  if (pin.path === '/var/lib/xpanel') return [0o2770, 0o2750].includes(pin.mode)
+  return PANEL_STATE_PARENT.test(pin.path) && pin.mode === 0o2750
+}
 const panelOwner = async (): Promise<Owner> => {
   const handle = await open('/etc/passwd', constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
@@ -111,10 +124,9 @@ const nativeFilesystem = (owner: Owner, boundArtifactPath: string | null): FsPor
     const verify = async (): Promise<void> => {
       for (const pin of pins) {
         const [opened, named] = await Promise.all([pin.handle.stat(), lstat(pin.path)])
-        const diagnosticParent = pin.path === '/var/lib/xpanel' && pin.uid === owner.uid && pin.gid === owner.gid && [0o2770, 0o2750].includes(pin.mode)
         if (!opened.isDirectory() || !named.isDirectory() || named.isSymbolicLink() || opened.dev !== pin.dev || opened.ino !== pin.ino || named.dev !== pin.dev || named.ino !== pin.ino
           || [opened, named].some(info => info.uid !== pin.uid || info.gid !== pin.gid || (info.mode & 0o7777) !== pin.mode)
-          || !diagnosticParent && (pin.uid !== 0 || (pin.mode & 0o022) !== 0)) return deny('LIFECYCLE_PATH_ANCESTRY_CHANGED')
+          || !lifecycleAncestorAccepted(pin, owner)) return deny('LIFECYCLE_PATH_ANCESTRY_CHANGED')
       }
     }
     try {

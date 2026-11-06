@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { nativeLifecyclePathAllowed, releaseInfoFromAuthenticatedReport, runNativeLifecycleCommand, validateNativeLifecycleRequest } from './native-runtime.ts'
+import { lifecycleAncestorAccepted, nativeLifecyclePathAllowed, releaseInfoFromAuthenticatedReport, runNativeLifecycleCommand, validateNativeLifecycleRequest } from './native-runtime.ts'
 
 const artifact = { path: '/opt/xpanel/downloads/release.tar.gz', expectedArchiveSha256: 'a'.repeat(64), keyId: 'release-key', signingKeyPath: '/tmp/caller-key' }
 const input = (command = 'upgrade') => ({ schemaVersion: 1, command, mode: 'apply', json: true, assumeYes: true, artifact })
@@ -61,6 +61,25 @@ describe('native lifecycle composition boundary', () => {
     for (const path of ['/var/lib/xpanel/state', '/var/lib/xpanel/.rewind-8a6f0c1e/state', '/var/lib/xpanel-lifecycle/backups/upgrade-8a6f0c1e.receipt.json', '/var/lib/xpanel-lifecycle/backups/20261022T013500Z.tar.gz']) expect(nativeLifecyclePathAllowed(path, 'remove')).toBe(false)
     for (const path of ['/var/lib/xpanel/state/accounts', '/var/lib/xpanel/state/generations/manifests', '/var/lib/xpanel/.pre-rewind-8a6f0c1e/generations', '/var/lib/xpanel/.rewind-../state', '/var/lib/xpanel/.pre-rewind-', '/var/lib/xpanel/control.db']) expect(nativeLifecyclePathAllowed(path, 'write')).toBe(false)
     for (const path of ['/opt/xpanel/staging/../../etc/passwd','/var/lib/xpanel/maintenance.json/child', '/opt/xpanel/current/child', 'C:/tmp/release']) expect(nativeLifecyclePathAllowed(path, 'write')).toBe(false)
+  })
+
+  it('holds root-owned ancestors and only the panel data root and desired-state trees owned by the panel user', () => {
+    const owner = { uid: 990, gid: 990 }, rewind = '/var/lib/xpanel/.rewind-8a6f0c1e-2b7d-4c55-9a1e-0d2f4b6c8e10'
+    const pin = (path: string, uid: number, gid: number, mode: number) => lifecycleAncestorAccepted({ path, uid, gid, mode }, owner)
+    expect(pin('/var', 0, 0, 0o755)).toBe(true)
+    expect(pin(rewind, 0, 990, 0o2700)).toBe(true)
+    expect(pin('/var/lib/xpanel', 990, 990, 0o2770)).toBe(true)
+    expect(pin('/var/lib/xpanel', 990, 990, 0o2750)).toBe(true)
+    // The rewind carries the generation journal between the live and restored desired-state trees.
+    expect(pin('/var/lib/xpanel/state', 990, 990, 0o2750)).toBe(true)
+    expect(pin(rewind + '/state', 990, 990, 0o2750)).toBe(true)
+    expect(pin('/var', 0, 0, 0o775)).toBe(false)
+    expect(pin('/var/lib/xpanel/state', 990, 990, 0o2770)).toBe(false)
+    expect(pin('/var/lib/xpanel/state', 991, 990, 0o2750)).toBe(false)
+    expect(pin('/var/lib/xpanel/state/accounts', 990, 990, 0o2750)).toBe(false)
+    expect(pin('/var/lib/xpanel/.pre-rewind-8a6f0c1e', 990, 990, 0o2750)).toBe(false)
+    expect(pin('/var/lib/xpanel/.rewind-../state', 990, 990, 0o2750)).toBe(false)
+    expect(pin('/var/lib/xpanel-lifecycle', 990, 990, 0o2750)).toBe(false)
   })
 
   it.skipIf(process.platform === 'linux' && process.getuid?.() === 0 && process.geteuid?.() === 0)('denies on the actual non-root/non-Linux runtime before opening native state', async () => {

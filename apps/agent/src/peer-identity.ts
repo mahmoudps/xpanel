@@ -1,3 +1,4 @@
+import { AsyncResource } from 'node:async_hooks'
 import { spawnSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { constants, existsSync, realpathSync } from 'node:fs'
@@ -283,6 +284,24 @@ export const INSTALLED_PEER_IDENTITY_ADDON = '/opt/xpanel/bin/xpanel-peer-identi
 
 let cachedNativeAddon: NativePeerIdentityAddon | null = null
 
+/**
+ * libuv runs the listener's readable callback with no async context, which drops AsyncLocalStorage-scoped
+ * authority (the lifecycle observation scope). Each callback runs in the context that opened its listener.
+ */
+export const contextualPeerIdentityAddon = (native: NativePeerIdentityAddon): NativePeerIdentityAddon => {
+  const getUnixSocketPeer = native.getUnixSocketPeer
+  return Object.freeze({
+    openListener: (socketPath: string, gid: number, mode: number, backlog: number, onReadable: () => void) =>
+      native.openListener(socketPath, gid, mode, backlog, AsyncResource.bind(onReadable)),
+    acceptPeer: (listener: unknown) => native.acceptPeer(listener),
+    verifyListenerSocket: (listener: unknown) => native.verifyListenerSocket(listener),
+    closeListener: (listener: unknown) => native.closeListener(listener),
+    closeFd: (fd: number) => native.closeFd(fd),
+    getSocketPeerCred: (fd: number) => native.getSocketPeerCred(fd),
+    ...(typeof getUnixSocketPeer === 'function' ? { getUnixSocketPeer: (fd: number) => getUnixSocketPeer.call(native, fd) } : {}),
+  })
+}
+
 const verifyRootOwnedDirectoryChain = async (dirPath: string): Promise<void> => {
   if (process.platform !== 'linux' || !isAbsolute(dirPath)) {
     fail('PRECONDITION_FAILED', 'native peer identity directory requires an absolute Linux path')
@@ -359,8 +378,8 @@ export const loadNativePeerIdentityAddon = async (options?: {
     await verifyCompiledAddonBinary(prebuiltPath)
     const mod = { exports: {} as NativePeerIdentityAddon }
     process.dlopen(mod, prebuiltPath)
-    cachedNativeAddon = mod.exports
-    return mod.exports
+    cachedNativeAddon = contextualPeerIdentityAddon(mod.exports)
+    return cachedNativeAddon
   }
 
   const cacheRoot = resolve(options?.cacheDir ?? '/var/cache/xpanel/native')
@@ -379,8 +398,9 @@ export const loadNativePeerIdentityAddon = async (options?: {
       await verifyCompiledAddonBinary(binaryPath, expectedSha)
       const mod = { exports: {} as NativePeerIdentityAddon }
       process.dlopen(mod, binaryPath)
-      if (!options?.cacheDir) cachedNativeAddon = mod.exports
-      return mod.exports
+      const addon = contextualPeerIdentityAddon(mod.exports)
+      if (!options?.cacheDir) cachedNativeAddon = addon
+      return addon
     }
   }
 
@@ -442,8 +462,9 @@ export const loadNativePeerIdentityAddon = async (options?: {
     ) {
       fail('PRECONDITION_FAILED', 'native SO_PEERCRED verifier did not export the required interface')
     }
-    if (!options?.cacheDir) cachedNativeAddon = mod.exports
-    return mod.exports
+    const addon = contextualPeerIdentityAddon(mod.exports)
+    if (!options?.cacheDir) cachedNativeAddon = addon
+    return addon
   } catch (err) {
     if (isXpanelError(err)) throw err
     return fail('PRECONDITION_FAILED', 'unable to load native SO_PEERCRED verifier')
