@@ -7,10 +7,10 @@ const displayDateTime = formatDisplayDateTime
 const clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
-export type SecSavedKind = 'waf' | 'flood' | 'panel-access' | 'dns-cluster'
-export interface SecSavedView { state: 'default' | 'saved' | 'invalid'; policy: Record<string, unknown> | null; updatedAt: string | null; revision: string; observation: Record<string, unknown> | null; reason: string | null; reconcile: string | null; client: { listener: string | null; address: string | null; admitted: Record<string, boolean> } | null; enforcement: string | null }
+export type SecSavedKind = 'waf' | 'flood' | 'panel-access' | 'dns-cluster' | 'compiler-access'
+export interface SecSavedView { state: 'default' | 'saved' | 'invalid'; policy: Record<string, unknown> | null; updatedAt: string | null; revision: string; observation: Record<string, unknown> | null; reason: string | null; reconcile: string | null; client: { listener: string | null; address: string | null; admitted: Record<string, boolean> } | null; enforcement: string | null; accounts: { id: string; username: string; jailedShell: boolean }[] | null }
 
-/** Strict reader for GET/PUT /api/server/sec/{waf,flood,panel-access,dns-cluster}: the policy must match its grammar's shape exactly. */
+/** Strict reader for GET/PUT /api/server/sec/{waf,flood,panel-access,dns-cluster,compiler-access}: the policy must match its grammar's shape exactly. */
 export function readSecSavedView(value: unknown, kind: SecSavedKind): SecSavedView {
   const object = (item: unknown): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item)
   const keys = (item: Record<string, unknown>, expected: string): boolean => Object.keys(item).sort().join() === expected
@@ -23,13 +23,16 @@ export function readSecSavedView(value: unknown, kind: SecSavedKind): SecSavedVi
     const valid = kind === 'waf' ? keys(p, 'burst,deniedResponse,denyIps,denyPaths,denyUserAgents,maxBodyMb,modsecurity,requestsPerSecond') && [p.requestsPerSecond, p.burst, p.maxBodyMb].every(limit) && (p.deniedResponse === 403 || p.deniedResponse === 444) && typeof p.modsecurity === 'boolean' && strings(p.denyIps, 1000) && strings(p.denyPaths, 100) && strings(p.denyUserAgents, 100)
       : kind === 'flood' ? keys(p, 'connectionsPerAddress,enabled,newConnectionsBurst,newConnectionsPerSecond,pingPerSecond,webConnectionsPerAddress') && typeof p.enabled === 'boolean' && [p.connectionsPerAddress, p.newConnectionsBurst, p.newConnectionsPerSecond, p.pingPerSecond, p.webConnectionsPerAddress].every(limit)
       : kind === 'panel-access' ? keys(p, 'listeners') && object(p.listeners) && keys(p.listeners, 'xmail,xpanel,xwhm') && Object.values(p.listeners).every(list => Array.isArray(list) && list.length <= 256 && list.every(entry => object(entry) && keys(entry, 'cidr,note') && typeof entry.cidr === 'string' && /^[0-9a-f:./]{2,49}$/.test(entry.cidr) && typeof entry.note === 'string' && entry.note.length <= 64))
+      : kind === 'compiler-access' ? keys(p, 'accountIds,restricted') && typeof p.restricted === 'boolean' && Array.isArray(p.accountIds) && p.accountIds.length <= 5000 && p.accountIds.every(id => typeof id === 'string' && /^[0-9a-f-]{36}$/.test(id))
       : keys(p, 'peers') && Array.isArray(p.peers) && p.peers.length <= 16 && p.peers.every(peer => object(peer) && keys(peer, 'address,name') && typeof peer.name === 'string' && /^[a-z0-9.-]{1,253}$/.test(peer.name) && typeof peer.address === 'string' && /^[0-9a-f:.]{2,45}$/.test(peer.address))
     if (!valid) throw new Error('invalid_sec_policy')
   }
   const client = value.client
   if (client !== undefined && !(object(client) && (client.listener === null || ['xpanel', 'xwhm', 'xmail'].includes(String(client.listener))) && (client.address === null || typeof client.address === 'string' && client.address.length <= 45) && object(client.admitted))) throw new Error('invalid_sec_view')
+  const accounts = value.accounts
+  if (accounts !== undefined && !(Array.isArray(accounts) && accounts.length <= 5000 && accounts.every(item => object(item) && keys(item, 'id,jailedShell,username') && typeof item.id === 'string' && typeof item.username === 'string' && /^[a-z][a-z0-9]{0,15}$/.test(item.username) && typeof item.jailedShell === 'boolean'))) throw new Error('invalid_sec_view')
   return { state: value.state as SecSavedView['state'], policy: object(p) ? p : null, updatedAt: value.updatedAt as string | null, revision: value.revision, observation: object(value.observation) ? value.observation : null, reason: typeof value.reason === 'string' ? value.reason : null,
-    reconcile: typeof value.reconcile === 'string' ? value.reconcile : null, client: object(client) ? client as SecSavedView['client'] : null, enforcement: typeof value.enforcement === 'string' ? value.enforcement : null }
+    reconcile: typeof value.reconcile === 'string' ? value.reconcile : null, client: object(client) ? client as SecSavedView['client'] : null, enforcement: typeof value.enforcement === 'string' ? value.enforcement : null, accounts: Array.isArray(accounts) ? accounts as SecSavedView['accounts'] : null }
 }
 export interface SecAccountWafView { server: Record<string, unknown> | null; live: { connector: boolean | null; crsVersion: string | null; active: { lists: boolean | null; modsecurity: boolean | null } } | null; revision: string; domains: { domain: string; modsecurity: boolean }[]; reconcile: string | null }
 export function readSecAccountWafView(value: unknown): SecAccountWafView {
@@ -139,7 +142,7 @@ export function secKit(root: HTMLElement, askDialog: Ask | undefined, displayDat
 function bindSecSecurity(askDialog: Ask | undefined): void {
   document.querySelectorAll<HTMLElement>('[data-sec-workspace]').forEach(root => {
     const page = root.dataset.secPage ?? ''
-    if (root.dataset.secBound === 'true' || !['waf', 'flood', 'panel-access', 'account-waf'].includes(page)) return
+    if (root.dataset.secBound === 'true' || !['waf', 'flood', 'panel-access', 'account-waf', 'compiler-access'].includes(page)) return
     root.dataset.secBound = 'true'
     const k = secKit(root, askDialog, displayDateTime), t = k.t
     const refresh = k.q<HTMLButtonElement>('[data-sec-action="refresh"]'), save = k.q<HTMLButtonElement>('[data-sec-action="save"]')
@@ -186,7 +189,8 @@ function bindSecSecurity(askDialog: Ask | undefined): void {
       return
     }
 
-    const kind = page as 'waf' | 'flood' | 'panel-access', path = '/api/server/sec/' + kind
+    const kind = page as 'waf' | 'flood' | 'panel-access' | 'compiler-access', path = '/api/server/sec/' + kind
+    type CompilerPolicy = { restricted: boolean; accountIds: string[] }
     let view: SecSavedView | null = null
     // The API reports the apply outcome only on PUT; GET carries just the saved time, so the outcome stays known only for the revision this page saved.
     let applied: { revision: string; reconcile: string | null; at: string | null } | null = null
@@ -202,10 +206,10 @@ function bindSecSecurity(askDialog: Ask | undefined): void {
         setValue('denied', p.deniedResponse); setValue('deny-ips', (p.denyIps as string[]).join('\n')); setValue('deny-paths', (p.denyPaths as string[]).join('\n')); setValue('deny-agents', (p.denyUserAgents as string[]).join('\n')); setValue('modsecurity', p.modsecurity)
       } else if (kind === 'flood') {
         setValue('enabled', p.enabled); setValue('conn', p.connectionsPerAddress); setValue('rate', p.newConnectionsPerSecond); setValue('burst', p.newConnectionsBurst); setValue('ping', p.pingPerSecond); setValue('web-conn', p.webConnectionsPerAddress)
-      } else {
+      } else if (kind === 'panel-access') {
         const listeners = p.listeners as Record<string, { cidr: string; note: string }[]>
         for (const name of ['xpanel', 'xwhm', 'xmail']) setValue(name, listeners[name]!.map(entry => entry.note ? entry.cidr + '  # ' + entry.note : entry.cidr).join('\n'))
-      }
+      } else setValue('restricted', p.restricted)
     }
     const paintHost = (next: SecSavedView): void => {
       const o = next.observation as Record<string, any> | null
@@ -224,11 +228,43 @@ function bindSecSecurity(askDialog: Ask | undefined): void {
         const tracked = (o?.tracked ?? []) as { set: string; elements: number }[], sum = (prefix: string): string => String(tracked.filter(item => item.set.startsWith(prefix)).reduce((total, item) => total + item.elements, 0))
         k.rows('kernel', state === 'read' ? [[t('Connections per address'), String(o!.rules.connections), sum('xpanel_flood_conn')], [t('New connections per second per address'), String(o!.rules.rate), sum('xpanel_flood_rate')], [t('Ping requests per second'), String(o!.rules.ping), '-']] : [],
           !o ? t('The running firewall has not been read.') : t('The running firewall could not be read.'), 3)
-      } else {
+      } else if (kind === 'panel-access') {
         const c = next.client
         k.field('listener', c?.listener ? ({ xpanel: 'xPanel', xwhm: 'xWHM', xmail: 'xMail' } as Record<string, string>)[c.listener]! : t('Not known'))
         k.field('address', c?.address ?? t('Not known'))
         k.field('enforcement', next.enforcement === 'api_listener' ? t('Checked on every request') : t('Not connected; saved lists are not enforced yet'), next.enforcement === 'api_listener' ? 'good' : 'warn')
+      } else {
+        const p = next.policy as CompilerPolicy | null, accounts = next.accounts ?? [], granted = p?.accountIds ?? []
+        const group = o?.group as { exists: boolean; gid: number | null; members: string[] } | undefined, hook = o?.hook as { mechanism: string | null; available: boolean; installed: boolean } | undefined
+        const found = ((o?.commands ?? []) as { present: boolean; restricted: boolean | null }[]).filter(command => command.present)
+        k.field('restriction', !p ? null : next.state === 'default' ? t('Not managed; the distribution permissions are unchanged') : p.restricted ? t('Restricted to root and the granted accounts') : t('Enabled for all users'))
+        k.field('host-state', !o ? null : o.state === 'applied' ? t('Applied on this server') : o.state === 'drift' ? t('Not applied: this server differs from the saved policy') : t('Not managed'), o?.state === 'applied' ? 'good' : o?.state === 'drift' ? 'warn' : 'neutral')
+        k.field('commands', o ? t('{restricted} of {present} installed commands restricted', { restricted: found.filter(command => command.restricted === true).length, present: found.length }) : null)
+        k.field('group', !group ? null : group.exists ? t('Exists (GID {gid})', { gid: String(group.gid) }) : t('Not created'))
+        // The EL hook needs the dnf post-transaction-actions plugin; without a hook only the next reconcile re-applies the restriction.
+        k.field('hook', !hook ? null : hook.installed ? (hook.mechanism === 'dpkg-post-invoke' ? t('Installed: dpkg runs it after every package change') : t('Installed: dnf runs it after compiler package updates'))
+          : !hook.mechanism ? t('No package-manager hook on this system. Each reconcile re-applies the restriction.')
+          : !hook.available ? (hook.mechanism === 'dnf-post-transaction-actions' ? t('Unavailable: the dnf post-transaction-actions plugin is not installed. Each reconcile re-applies the restriction.') : t('Unavailable: the dpkg configuration directory is missing. Each reconcile re-applies the restriction.'))
+          : t(msgctxt('sec-security-client', 'Not installed')), hook?.installed ? 'good' : hook && !hook.available ? 'warn' : 'neutral')
+        k.field('observed-at', k.when(o?.observedAt))
+        k.rows('exceptions', granted.map(id => {
+          const account = accounts.find(item => item.id === id)
+          return [k.technical(account?.username ?? id), !account ? t('Not a current account; it is dropped with the next change') : account.jailedShell ? t('Jailed shell: stays restricted') : !p!.restricted ? t('Not needed while compilers are enabled for all users')
+            : !group ? t('Granted; group membership not read') : group.members.includes(account.username) ? t('In the compiler group') : t('Not in the compiler group yet')]
+        }), p?.restricted ? t('No accounts are granted. Only root can run the compilers.') : t('No accounts are granted.'), 2)
+        const select = k.input<HTMLSelectElement>('account')
+        if (select) {
+          const current = select.value, first = select.options[0]
+          select.textContent = ''
+          if (first) select.append(first)
+          for (const account of accounts) {
+            const option = document.createElement('option')
+            option.value = account.id; option.textContent = account.jailedShell ? t('{name} (jailed shell)', { name: account.username }) : account.username
+            option.disabled = account.jailedShell && !granted.includes(account.id)
+            select.append(option)
+          }
+          select.value = accounts.some(account => account.id === current) ? current : ''
+        }
       }
     }
     const paint = (next: SecSavedView): void => {
@@ -251,18 +287,50 @@ function bindSecSecurity(askDialog: Ask | undefined): void {
       return { listeners }
     }
     const load = (): Promise<void> => k.guarded(async () => { k.note('reading', t('Reading…')); try { paint(readSecSavedView(await k.send('GET', path), kind)) } catch (error) { view = null; loaded = false; k.note('failed', k.failure(k.outcome(error))) } })
-    save?.addEventListener('click', () => void k.guarded(async () => {
-      if (!view || view.state === 'invalid' || !k.manageable()) return
-      let policy: Record<string, unknown>
-      try { policy = build() } catch { k.show('invalid', t('Enter whole numbers in the limit fields, or leave them empty.')); return }
+    // Runs inside k.guarded: one revision-bound PUT, then a GET that must read the same revision and policy back.
+    const put = async (current: SecSavedView, policy: Record<string, unknown>): Promise<void> => {
       try {
-        const ack = readSecSavedView(await k.send('PUT', path, { policy, expectedRevision: view.revision }), kind)
+        const ack = readSecSavedView(await k.send('PUT', path, { policy, expectedRevision: current.revision }), kind)
         const again = readSecSavedView(await k.send('GET', path), kind)
         if (ack.state !== 'saved' || again.revision !== ack.revision || JSON.stringify(again.policy) !== JSON.stringify(ack.policy)) throw new Error('readback')
         applied = { revision: ack.revision, reconcile: ack.reconcile, at: ack.updatedAt }
         paint(again); k.show('read', kind === 'panel-access' ? (again.enforcement === 'api_listener' ? t('Saved and read back. The lists apply to the next request.') : t('Saved and read back. The lists are not enforced until the request gate is connected.')) : k.reconcileText(ack.reconcile))
       } catch (error) { k.show(k.outcome(error), k.failure(k.outcome(error))) }
+    }
+    save?.addEventListener('click', () => void k.guarded(async () => {
+      if (!view || view.state === 'invalid' || !k.manageable()) return
+      let policy: Record<string, unknown>
+      try { policy = build() } catch { k.show('invalid', t('Enter whole numbers in the limit fields, or leave them empty.')); return }
+      await put(view, policy)
     }))
+    if (kind === 'compiler-access') {
+      const restricted = k.input('restricted'), account = k.input<HTMLSelectElement>('account')
+      const grant = k.q<HTMLButtonElement>('[data-sec-action="grant"]'), revoke = k.q<HTMLButtonElement>('[data-sec-action="revoke"]')
+      const policyOf = (): CompilerPolicy | null => view && view.state !== 'invalid' ? view.policy as CompilerPolicy | null : null
+      // The API refuses ids of deleted accounts, and the agent already ignores them, so a change drops them.
+      const existing = (ids: string[]): string[] => view?.accounts ? ids.filter(id => view!.accounts!.some(item => item.id === id)) : ids
+      k.controls.push(() => {
+        const p = policyOf(), id = account?.value ?? '', target = view?.accounts?.find(item => item.id === id), ready = loaded && !k.isBusy() && k.manageable() && !!p && !!target
+        if (grant) grant.disabled = !ready || p!.accountIds.includes(id) || target!.jailedShell
+        if (revoke) revoke.disabled = !ready || !p!.accountIds.includes(id)
+      })
+      account?.addEventListener('change', () => k.lock())
+      restricted?.addEventListener('change', () => void k.guarded(async () => {
+        const p = policyOf(), on = restricted?.checked === true
+        if (!view || !p || !k.manageable() || on === p.restricted) return
+        if (!await k.confirm(on ? { title: t('Restrict compilers?'), body: t('Only root and the granted accounts can run the compilers. Builds that other accounts start will fail.'), confirm: t('Restrict compilers') }
+          : { title: t('Enable compilers for all users?'), body: t('Every account with shell access can run the compilers again.'), confirm: t('Enable for all users') })) return
+        await put(view, { restricted: on, accountIds: existing(p.accountIds) })
+      }).finally(() => { const p = policyOf(); if (p) setValue('restricted', p.restricted) }))
+      const change = (add: boolean): Promise<void> => k.guarded(async () => {
+        const p = policyOf(), id = account?.value ?? '', target = view?.accounts?.find(item => item.id === id)
+        if (!view || !p || !target || !k.manageable()) return
+        if (add && target.jailedShell) { k.show('refused', t('Accounts on a jailed shell stay restricted and cannot be added.')); return }
+        await put(view, { restricted: p.restricted, accountIds: existing(add ? [...new Set([...p.accountIds, id])] : p.accountIds.filter(item => item !== id)) })
+      })
+      grant?.addEventListener('click', () => void change(true))
+      revoke?.addEventListener('click', () => void change(false))
+    }
     refresh?.addEventListener('click', () => void load())
     void load()
   })

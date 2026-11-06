@@ -1317,6 +1317,14 @@ msgstr "لم تُقرأ الحسابات بعد."
 msgid "Accounts not read"
 msgstr "الحسابات غير مقروءة"
 
+#: apps/web/src/sec-security-client.ts
+msgid "Accounts on a jailed shell stay restricted and cannot be added."
+msgstr "تبقى الحسابات ذات الطرفية المعزولة مقيّدة ولا يمكن إضافتها."
+
+#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+msgid "Accounts on a jailed shell stay restricted and cannot be added. Change the shell of the account or its plan first."
+msgstr "تبقى الحسابات ذات الطرفية المعزولة مقيّدة ولا يمكن إضافتها. غيّر طرفية الحساب أو خطته أولًا."
+
 #: apps/web/src/board-port/whm-announcements-workspace.ts
 msgid "Accounts on a plan"
 msgstr "حسابات خطة محددة"
@@ -2940,7 +2948,7 @@ msgctxt "approved-xpanel-pages"
 msgid "Applied on host"
 msgstr "المطبق على المضيف"
 
-#: apps/web/src/board-port/mailx-archive-workspace.ts apps/web/src/board-port/mailx-mail-tools-workspace.ts apps/web/src/board-port/mailx-whm-workspace.ts
+#: apps/web/src/board-port/mailx-archive-workspace.ts apps/web/src/board-port/mailx-mail-tools-workspace.ts apps/web/src/board-port/mailx-whm-workspace.ts apps/web/src/sec-security-client.ts
 msgid "Applied on this server"
 msgstr "مطبَّقة على هذا الخادم"
 
@@ -6378,6 +6386,10 @@ msgstr "لم يُقرأ الوصول إلى المصرّف أو استثناءا
 msgid "Compiler exceptions"
 msgstr "استثناءات المترجم"
 
+#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+msgid "Compiler group"
+msgstr "مجموعة المترجمات"
+
 #: apps/web/src/board-canvas.ts apps/web/src/design-board.ts
 msgid "Compiler lock"
 msgstr "قفل المصرّف"
@@ -6386,6 +6398,10 @@ msgstr "قفل المصرّف"
 msgctxt "approved-xwhm"
 msgid "Compiler lock"
 msgstr "قفل المترجم"
+
+#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+msgid "Compilers"
+msgstr "المترجمات"
 
 #: apps/agent/src/repair-center.ts
 msgid "Complete interrupted package configuration"
@@ -11219,6 +11235,10 @@ msgstr "تمكين عند البدء"
 msgid "Enable auto-ban"
 msgstr "تفعيل الحظر التلقائي"
 
+#: apps/web/src/sec-security-client.ts
+msgid "Enable compilers for all users?"
+msgstr "تفعيل المترجمات لجميع المستخدمين؟"
+
 #: apps/web/src/account-filters-client.ts
 msgid "Enable configuration"
 msgstr "تفعيل الإعداد"
@@ -11226,6 +11246,10 @@ msgstr "تفعيل الإعداد"
 #: apps/web/src/board-port/extensions/account-spam.ts
 msgid "Enable filtering"
 msgstr "تفعيل الفلترة"
+
+#: apps/web/src/sec-security-client.ts
+msgid "Enable for all users"
+msgstr "تفعيل لجميع المستخدمين"
 
 #: apps/web/src/board-port/account-web-directives-workspace.ts apps/web/src/board-port/approved-xpanel-pages.ts
 msgid "Enable hotlink protection"
@@ -11275,6 +11299,10 @@ msgstr "إعداد مفعّل"
 #: apps/web/src/whm-backups-client.ts
 msgid "Enabled configuration; connection unverified"
 msgstr "إعداد مفعّل؛ الاتصال غير متحقق"
+
+#: apps/web/src/sec-security-client.ts
+msgid "Enabled for all users"
+msgstr "مفعّلة لجميع المستخدمين"
 
 #: apps/web/src/account-ssh-client.ts
 msgid "Enabled for this account"
@@ -11925,6 +11953,10 @@ msgstr "كل الحسابات ضمن حدود خططها."
 msgid "Every account tool except calendars and contacts, service users, the owner preferences and sign-in security, API tokens and this team page."
 msgstr "كل أدوات الحساب باستثناء التقويمات وجهات الاتصال، ومستخدمي الخدمات، وتفضيلات المالك وأمان تسجيل دخوله، ورموز API، وصفحة الفريق هذه."
 
+#: apps/web/src/sec-security-client.ts
+msgid "Every account with shell access can run the compilers again."
+msgstr "يستطيع كل حساب لديه وصول إلى الطرفية تشغيل المترجمات مجددًا."
+
 #: apps/web/src/account-runtime-client.ts
 msgid "Every cached value is removed."
 msgstr "تُحذف كل القيم المخزّنة مؤقتًا."
@@ -12088,6 +12120,10 @@ msgstr "تحتفظ النطاقات الحالية بإصدارها."
 #: apps/web/src/acct-restore-client.ts apps/web/src/whm-backups-client.ts
 msgid "Exists"
 msgstr "موجود"
+
+#: apps/web/src/sec-security-client.ts
+msgid "Exists (GID {gid})"
+msgstr "موجودة (GID {gid})"
 
 #: apps/web/src/board-port/whm-configuration-health-workspace.ts apps/web/src/board-port/whm-jobs-workspace.ts
 msgid "Exit code"
@@ -13819,6 +13855,10 @@ msgstr "منح استثناء"
 msgid "Grant on"
 msgstr "منح على"
 
+#: apps/web/src/sec-security-client.ts
+msgid "Granted; group membership not read"
+msgstr "ممنوح؛ لم تُقرأ عضوية المجموعة"
+
 #: apps/web/src/board-port/whm-databases-workspace.ts apps/web/src/surfaces/xpanel.ts
 msgid "Grants"
 msgstr "الصلاحيات"
@@ -14382,6 +14422,10 @@ msgstr "سجل أداء المضيف"
 #: apps/web/src/surfaces/xwhm.ts
 msgid "Host resource measurements unavailable."
 msgstr "قياسات موارد الخادم غير متاحة."
+
+#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+msgid "Host state"
+msgstr "حالة الخادم"
 
 #: apps/web/src/whm-repair-client.ts
 msgid "Host state changed since diagnostics ran. Run diagnostics again before repairing."
@@ -14983,6 +15027,10 @@ msgstr "متزامن"
 msgctxt "xwhm-dashboard"
 msgid "In sync"
 msgstr "متزامن"
+
+#: apps/web/src/sec-security-client.ts
+msgid "In the compiler group"
+msgstr "ضمن مجموعة المترجمات"
 
 #: apps/web/src/board-canvas.ts
 msgid "In the renewal window"
@@ -15604,6 +15652,14 @@ msgstr "الإصدارات المثبتة"
 msgid "Installed, not active"
 msgstr "مثبّت وغير نشط"
 
+#: apps/web/src/sec-security-client.ts
+msgid "Installed: dnf runs it after compiler package updates"
+msgstr "مثبّت: يشغّله dnf بعد تحديث حزم المترجمات"
+
+#: apps/web/src/sec-security-client.ts
+msgid "Installed: dpkg runs it after every package change"
+msgstr "مثبّت: يشغّله dpkg بعد كل تغيير في الحزم"
+
 #: apps/web/src/board-port/extensions/store.ts
 msgid "Installer activity"
 msgstr "نشاط المثبّت"
@@ -15918,6 +15974,10 @@ msgstr "طرفية معزولة"
 #: apps/web/src/plan-editor.ts
 msgid "Jailed shell access"
 msgstr "وصول الطرفية المعزولة"
+
+#: apps/web/src/sec-security-client.ts
+msgid "Jailed shell: stays restricted"
+msgstr "طرفية معزولة: يبقى مقيّدًا"
 
 #: apps/web/src/board-port/ops-terminal-workspace.ts
 msgid "Jailed, from your plan"
@@ -19575,6 +19635,14 @@ msgstr "لم تُرصد عملية إنشاء حساب. لا يثبت إقرار
 msgid "No account-isolation report has been read. Isolation and shell-policy changes are unavailable."
 msgstr "لم يُقرأ تقرير عزل الحسابات. تغييرات العزل وسياسات الطرفية غير متاحة."
 
+#: apps/web/src/sec-security-client.ts
+msgid "No accounts are granted."
+msgstr "لا توجد حسابات ممنوحة."
+
+#: apps/web/src/sec-security-client.ts
+msgid "No accounts are granted. Only root can run the compilers."
+msgstr "لا توجد حسابات ممنوحة. يستطيع root وحده تشغيل المترجمات."
+
 #: apps/web/src/board-port/approved-whm-resellers.ts
 msgid "No accounts are owned by this reseller."
 msgstr "لا يملك هذا الموزع أي حسابات."
@@ -20910,6 +20978,10 @@ msgstr "لا توجد باقة مربوطة. يُرفض كل استدعاء يح
 msgid "No package updates are pending."
 msgstr "لا توجد تحديثات حزم معلقة."
 
+#: apps/web/src/sec-security-client.ts
+msgid "No package-manager hook on this system. Each reconcile re-applies the restriction."
+msgstr "لا يوجد خطّاف لمدير الحزم على هذا النظام. تعيد كل مطابقة تطبيق التقييد."
+
 #: apps/web/src/account-packages-client.ts
 msgid "No packages are managed in this private library."
 msgstr "لا توجد حزم مدارة في هذه المكتبة الخاصة."
@@ -22130,6 +22202,10 @@ msgstr "لم يُرفع شيء"
 msgid "None. Create one before enabling the webhook."
 msgstr "لا يوجد. أنشئ مفتاحًا قبل تفعيل خطاف الويب."
 
+#: apps/web/src/sec-security-client.ts
+msgid "Not a current account; it is dropped with the next change"
+msgstr "ليس حسابًا حاليًا؛ يُحذف مع التغيير التالي"
+
 #: apps/web/src/whm-dns-tools-client.ts apps/web/src/whm-service-detail-client.ts
 msgid "Not a regular file"
 msgstr "ليس ملفًا عاديًا"
@@ -22176,6 +22252,10 @@ msgstr "لم يُطبَّق بعد"
 
 msgid "Not applied: the running PowerDNS settings differ from the saved peers."
 msgstr "غير مطبّق: إعدادات PowerDNS العاملة تختلف عن الأقران المحفوظين."
+
+#: apps/web/src/sec-security-client.ts
+msgid "Not applied: this server differs from the saved policy"
+msgstr "غير مطبَّقة: هذا الخادم يختلف عن السياسة المحفوظة"
 
 #: apps/web/src/whm-php-client.ts
 msgid "Not applied: {reason}"
@@ -22357,6 +22437,10 @@ msgstr "غير محسوب"
 msgid "Not covered"
 msgstr "غير مغطى"
 
+#: apps/web/src/sec-security-client.ts
+msgid "Not created"
+msgstr "غير منشأة"
+
 #: apps/web/src/mailx-mail-tools-client.ts
 msgid "Not delivered: posting is limited to members or moderated, which needs a list manager"
 msgstr "لا يُسلَّم: النشر مقصور على الأعضاء أو خاضع للإشراف، وهذا يتطلب مدير قوائم"
@@ -22429,6 +22513,10 @@ msgstr "لم يُستورد: {reason}"
 msgid "Not in saved state"
 msgstr "غير موجودة في الحالة المحفوظة"
 
+#: apps/web/src/sec-security-client.ts
+msgid "Not in the compiler group yet"
+msgstr "ليس ضمن مجموعة المترجمات بعد"
+
 #: apps/web/src/acct-restore-client.ts
 msgid "Not in this backup"
 msgstr "غير موجود في هذه النسخة الاحتياطية"
@@ -22494,6 +22582,10 @@ msgstr "غير مُدار (تبقى قيمة الخادم)"
 msgid "Not managed by xPanel"
 msgstr "غير مُدار بواسطة xPanel"
 
+#: apps/web/src/sec-security-client.ts
+msgid "Not managed; the distribution permissions are unchanged"
+msgstr "غير مُدار؛ صلاحيات التوزيعة دون تغيير"
+
 #: apps/web/src/whm-ftp-log-client.ts
 msgid "Not mapped"
 msgstr "غير مرتبط"
@@ -22521,6 +22613,10 @@ msgstr "غير مقاسة؛ لم تُضبط وجهة"
 #: apps/web/src/account-ssl-client.ts
 msgid "Not needed"
 msgstr "غير مطلوب"
+
+#: apps/web/src/sec-security-client.ts
+msgid "Not needed while compilers are enabled for all users"
+msgstr "غير مطلوب ما دامت المترجمات مفعّلة لجميع المستخدمين"
 
 #: apps/web/src/account-cron-client.ts apps/web/src/board-port/approved-whm-account-components.ts apps/web/src/whm-configuration-health-client.ts apps/web/src/whm-databases-client.ts apps/web/src/whm-security-client.ts apps/web/src/whm-service-manager-client.ts apps/web/src/whm-ssh-client.ts
 msgid "Not observed"
@@ -23780,6 +23876,10 @@ msgstr "تُطبّق تغييرات ملفات الحساب التي روجعت 
 #: apps/web/src/board-port/whm-developer-workspace.ts
 msgid "Only reviewed response fields are shown. Credential values, session information and internal identifiers are omitted."
 msgstr "تُعرض حقول الاستجابة المراجعة فقط. تُحذف قيم بيانات الاعتماد ومعلومات الجلسة والمعرّفات الداخلية."
+
+#: apps/web/src/sec-security-client.ts
+msgid "Only root and the granted accounts can run the compilers. Builds that other accounts start will fail."
+msgstr "يستطيع root والحسابات الممنوحة فقط تشغيل المترجمات. ستفشل عمليات البناء التي تبدؤها الحسابات الأخرى."
 
 #: apps/web/src/board-port/approved-whm-account-components.ts
 msgid "Only root may change account ownership."
@@ -27142,6 +27242,10 @@ msgstr "حد المعدل"
 #: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/xpanel-home.ts
 msgid "Raw access logs"
 msgstr "سجلات الوصول الخام"
+
+#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+msgid "Re-apply after package updates"
+msgstr "إعادة التطبيق بعد تحديث الحزم"
 
 #: apps/web/src/board-port/ops-terminal-workspace.ts
 msgid "Re-authenticate to open a session"
@@ -30850,6 +30954,22 @@ msgstr "تتطلب الاستعادة صلاحية تعديل الحساب."
 #: apps/web/src/board-port/approved-xwhm.ts
 msgid "Restrict compiler access"
 msgstr "تقييد الوصول إلى المترجم"
+
+#: apps/web/src/sec-security-client.ts
+msgid "Restrict compilers"
+msgstr "تقييد المترجمات"
+
+#: apps/web/src/sec-security-client.ts
+msgid "Restrict compilers?"
+msgstr "تقييد المترجمات؟"
+
+#: apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/security/overview.ts
+msgid "Restricted commands"
+msgstr "الأوامر المقيّدة"
+
+#: apps/web/src/sec-security-client.ts
+msgid "Restricted to root and the granted accounts"
+msgstr "مقيّدة على root والحسابات الممنوحة"
 
 #: apps/web/src/board-canvas.ts apps/web/src/board-port/account-backup-workspace.ts apps/web/src/board-port/account-network-tools-workspace.ts apps/web/src/board-port/account-virus-scan-workspace.ts apps/web/src/board-port/acct-restore-workspace.ts apps/web/src/board-port/acct-staging-workspace.ts apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/board-port/ops-integrations-workspace.ts apps/web/src/board-port/sec-workspace.ts apps/web/src/board-port/site-health-workspace.ts apps/web/src/board-port/whm-backup-files-workspace.ts apps/web/src/board-port/whm-benchmark-workspace.ts apps/web/src/board-port/whm-configuration-health-workspace.ts apps/web/src/board-port/whm-developer-workspace.ts apps/web/src/board-port/whm-dns-tools-workspace.ts apps/web/src/board-port/whm-monitoring-alerts-workspace.ts apps/web/src/board-port/whm-security-components.ts apps/web/src/board-port/whm-security-tools-workspace.ts apps/web/src/board-port/whm-service-detail-workspace.ts apps/web/src/board-port/whm-ssl-install-workspace.ts apps/web/src/board-port/whm-upgrade-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/board-port/xwhm-dashboard.ts apps/web/src/design-board.ts apps/web/src/surfaces/xwhm.ts
 msgid "Result"
@@ -43873,6 +43993,14 @@ msgstr "غير متاح: وسيط مقابس systemd غير موجود"
 msgid "Unavailable: the confined account file writer is not installed on this server"
 msgstr "غير متاح: كاتب ملفات الحساب المقيَّد غير مثبت على هذا الخادم"
 
+#: apps/web/src/sec-security-client.ts
+msgid "Unavailable: the dnf post-transaction-actions plugin is not installed. Each reconcile re-applies the restriction."
+msgstr "غير متاح: إضافة post-transaction-actions لـ dnf غير مثبتة. تعيد كل مطابقة تطبيق التقييد."
+
+#: apps/web/src/sec-security-client.ts
+msgid "Unavailable: the dpkg configuration directory is missing. Each reconcile re-applies the restriction."
+msgstr "غير متاح: مجلد إعدادات dpkg مفقود. تعيد كل مطابقة تطبيق التقييد."
+
 #: apps/web/src/whm-trusted-proxies-client.ts
 msgid "Unavailable; protected dedicated ingress and recovery are required"
 msgstr "غير متاح؛ يلزم مدخل مخصص ومحمي وإمكانية استعادة"
@@ -47782,6 +47910,10 @@ msgstr "الشهادة {names} غير مثبّتة على أي موقع. لن ت
 msgid "{names}, expires {date}"
 msgstr "{names}، تنتهي في {date}"
 
+#: apps/web/src/sec-security-client.ts
+msgid "{name} (jailed shell)"
+msgstr "{name} (طرفية معزولة)"
+
 #: apps/web/src/acct-enhancements-client.ts
 msgid "{name} is also removed from every plan, account and reseller limit that uses it."
 msgstr "تُزال {name} أيضًا من كل خطة وحساب وحد موزع يستخدمها."
@@ -47857,6 +47989,10 @@ msgstr "{required} مطلوبة على {path}، والمساحة الحرة {fre
 #: apps/web/src/acct-restore-client.ts apps/web/src/whm-backup-files-client.ts
 msgid "{restored} restored, {skipped} skipped, {failed} failed, {notAttempted} not attempted."
 msgstr "استُعيد {restored}، وتُجووز {skipped}، وفشل {failed}، ولم يُحاوَل {notAttempted}."
+
+#: apps/web/src/sec-security-client.ts
+msgid "{restricted} of {present} installed commands restricted"
+msgstr "{restricted} من {present} من الأوامر المثبتة مقيّدة"
 
 #: apps/web/src/board-port/xwhm-dashboard.ts
 msgid "{running} running · {missing} not installed"

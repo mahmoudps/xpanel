@@ -4,10 +4,12 @@ import { xpTemplate } from '../../../html.ts'
 import { actions, area, button, check, context, esc, field, fields, help, inputControl, link, page, section, select, status, table, type WhmObservationInput } from '../monitoring/common.ts'
 
 export function renderV2WhmSecurityOverview(input: WhmObservationInput): string {
-  const { t, canRead } = context(input)
+  const { t, canRead, canManage } = context(input)
   const summaries = `<section class="v2-kpi-row" aria-label="${esc(t(msgctxt('theme:v2', 'Security advisor')))}">${[msgid('Checks'), msgid('Warnings'), msgid('Problems'), msgid('Not verified')].map(label => kpiCard({ label: t(label), value: '—', note: t(msgid('Not read')), headingLevel: 2 })).join('')}</section>`
   const factTemplates = xpTemplate('whm-security-fact-technical', '<div><dt data-xp-slot="label"></dt><dd><bdi class="v2-mono" dir="ltr" data-xp-slot="value"></bdi></dd></div>') + xpTemplate('whm-security-fact-text', '<div><dt data-xp-slot="label"></dt><dd><span data-xp-slot="value"></span></dd></div>')
   const evidence = `<div class="v2-observation__groups" data-whm-security-evidence>${help(t, msgid('Checks show individual host observations. No overall security score or capability qualification is inferred. Configuration values are labeled separately.'))}<dl class="v2-observation__facts" data-whm-security-configuration></dl>${table(t, msgid('Security observations have not been read'), [msgid('Check'), msgid('State'), msgid('Observed value')], { 'data-whm-security-check-rows': true })}${actions(button(t, msgid('Read security observations'), { 'data-whm-security-refresh': true }))}${status(t, msgid('Security observations have not been read.'), { 'data-whm-security-status': true })}${factTemplates}</div>`
+  const compilerFacts = ([['restriction', msgid('Compilers')], ['host-state', msgid('Host state')], ['commands', msgid('Restricted commands')], ['group', msgid('Compiler group')], ['hook', msgid('Re-apply after package updates')], ['updated', msgid('Last saved (UTC)')], ['reconcile', msgid('Last apply request')], ['observed-at', msgid('Observed at (UTC)')]] as const)
+    .map(([key, label]) => `<div><dt>${esc(t(label))}</dt><dd><bdi data-sec-field="${key}">${esc(t(msgid('Not read')))}</bdi></dd></div>`).join('')
   const notConnected = help(t, msgid('This setting has no connected host operation. No changes have been applied.'))
   const body = summaries + section(t, 'security-evidence', msgctxt('theme:v2', 'Advisor findings'), evidence)
     + section(t, 'security-access', msgid('Access'), fields(field(t, 'v2-security-panel-port', msgid('Panel port'), inputControl('v2-security-panel-port', {}, false, ` dir="ltr"${canRead && input.serverSettings ? ` value="${esc(input.serverSettings.panelPort)}"` : ''}`, 'number'))
@@ -37,10 +39,15 @@ export function renderV2WhmSecurityOverview(input: WhmObservationInput): string 
     + section(t, 'security-php-functions', msgid('Dangerous PHP functions'), help(t, msgid('Global function policy and per-account exceptions have not been read. A listed function is not a verified prohibition.'))
       + fields(['exec', 'shell_exec', 'system', 'passthru', 'proc_open', 'popen'].map(name => check(t, name, {})).join(''))
       + table(t, msgid('PHP function exceptions'), [msgid('Account'), msgid('Functions'), msgid('Reason')], { 'data-v2-security-php-exceptions': true }) + actions(button(t, msgid('Add exception'))) + notConnected)
-    + section(t, 'security-compiler', msgctxt('approved-xwhm', 'Compiler lock'), check(t, msgid('Restrict compiler access'), {})
-      + table(t, msgid('Compiler exceptions'), [msgid('Account'), msgid('Reason')], { 'data-v2-security-compiler-exceptions': true })
-      + field(t, 'v2-security-compiler-account', msgid('Account'), select(t, 'v2-security-compiler-account', {}, (canRead ? input.accounts ?? [] : []).map(account => [account.username, account.username] as const)))
-      + actions(button(t, msgid('Add account')) + button(t, msgid('Remove exception'))) + notConnected)
+    // cPanel WHM Compiler Access, painted by the sec client from GET /api/server/sec/compiler-access.
+    + section(t, 'security-compiler', msgctxt('approved-xwhm', 'Compiler lock'), check(t, msgid('Restrict compiler access'), { 'data-sec-input': 'restricted' })
+      + `<dl class="v2-observation__facts">${compilerFacts}</dl>`
+      + table(t, msgid('Compiler exceptions'), [msgid('Account'), msgid('Reason')], { 'data-sec-rows': 'exceptions' })
+      + field(t, 'v2-security-compiler-account', msgid('Account'), select(t, 'v2-security-compiler-account', { 'data-sec-input': 'account' }, [['', msgid('Select an account')]]), msgid('Accounts on a jailed shell stay restricted and cannot be added. Change the shell of the account or its plan first.'))
+      + actions(button(t, msgid('Add account'), { 'data-sec-action': 'grant' }) + button(t, msgid('Remove exception'), { 'data-sec-action': 'revoke' }) + button(t, msgid('Refresh'), { 'data-sec-action': 'refresh' }, canRead))
+      + status(t, canRead ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-sec-status': true }, canRead ? 'unread' : 'unavailable')
+      + status(t, '', { 'data-sec-result': true }, 'unread', true),
+      { 'data-sec-workspace': true, 'data-sec-page': 'compiler-access', 'data-sec-can-read': String(canRead), 'data-sec-can-manage': String(canManage) })
     + section(t, 'security-review', msgid('Review policy changes'), actions(button(t, msgid('Discard')) + button(t, msgid('Save and apply'), {}, false, true))
       + help(t, msgid('No global host-policy write or reviewed draft is connected here. Existing password and optional-factor settings use their own authenticated workflow.')))
   return page(input, '/whm/security', msgctxt('theme:v2', 'Security advisor'), msgid('Access policy, optional multi-factor authentication and host protections.'), body)

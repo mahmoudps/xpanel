@@ -2343,10 +2343,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/sec-security-client.ts",
-    "sha256": "694860e75c82e3bbc9c04a975d412d6ce864b13904150d9227289c69748684af",
+    "sha256": "0d30f261d7c672fda6144e095b4bdeaa4437f625dc3a233dff3c79cfe086e8b4",
     "sites": [
       {
-        "line": 45,
+        "line": 48,
         "column": 100,
         "method": "querySelector",
         "argument": "selector",
@@ -2354,6 +2354,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         "controllers": [
           "sec-kit-account-cloudflare",
           "sec-kit-account-waf",
+          "sec-kit-compiler-access",
           "sec-kit-dns-cluster",
           "sec-kit-dns-providers",
           "sec-kit-flood",
@@ -2362,7 +2363,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 46,
+        "line": 49,
         "column": 104,
         "method": "querySelectorAll",
         "argument": "selector",
@@ -2370,6 +2371,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         "controllers": [
           "sec-kit-account-cloudflare",
           "sec-kit-account-waf",
+          "sec-kit-compiler-access",
           "sec-kit-dns-cluster",
           "sec-kit-dns-providers",
           "sec-kit-flood",
@@ -2378,7 +2380,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 51,
+        "line": 54,
         "column": 128,
         "method": "closest",
         "argument": "denied",

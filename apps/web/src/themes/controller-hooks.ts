@@ -9309,6 +9309,34 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
   },
   {
     "applicableRoutes": [
+      "/whm/security"
+    ],
+    "id": "sec-kit-compiler-access",
+    "requiredSelectors": [
+      "[data-sec-status]",
+      "[data-sec-result]",
+      "[data-sec-field=\"restriction\"]",
+      "[data-sec-field=\"host-state\"]",
+      "[data-sec-field=\"commands\"]",
+      "[data-sec-field=\"group\"]",
+      "[data-sec-field=\"hook\"]",
+      "[data-sec-field=\"updated\"]",
+      "[data-sec-field=\"reconcile\"]",
+      "[data-sec-field=\"observed-at\"]",
+      "[data-sec-input=\"restricted\"]",
+      "[data-sec-input=\"account\"]",
+      "[data-sec-rows=\"exceptions\"]",
+      "[data-sec-action=\"refresh\"]",
+      "[data-sec-action=\"grant\"]",
+      "[data-sec-action=\"revoke\"]"
+    ],
+    "rootAttributes": {
+      "data-sec-page": "compiler-access"
+    },
+    "rootSelector": "[data-sec-workspace]"
+  },
+  {
+    "applicableRoutes": [
       "/software/apps"
     ],
     "id": "sw-applications-forwarded",
