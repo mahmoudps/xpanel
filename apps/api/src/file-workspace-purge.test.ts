@@ -51,4 +51,14 @@ describe('purge-trash file workspace grammar', () => {
     }
     expect(() => validateFileWorkspaceRequest({ op: 'move', path: 'docs', destination: 'docs/inner' })).toThrowError(expect.objectContaining({ code: 'VALIDATION', detail: { stateChanged: false } }))
   })
+
+  it('passes only a well-formed stable reason with a definite archive refusal', async () => {
+    const extract = validateFileWorkspaceRequest({ op: 'extract', path: 'site.tar.zst', destination: '' })
+    const missing = await executeFileWorkspaceRequest(extract, reply({ code: 'PRECONDITION_FAILED', details: { stateChanged: false, reason: 'archive_format_unavailable', errno: 38 } }, 412))
+    expect(await missing.json()).toEqual({ code: 'PRECONDITION_FAILED', detail: 'The file operation could not be completed.', details: { stateChanged: false, upstreamStatus: 412, reason: 'archive_format_unavailable' } })
+    const busy = await executeFileWorkspaceRequest(extract, reply({ code: 'SERVICE_UNAVAILABLE', details: { stateChanged: false, reason: 'archive_capacity_busy' } }, 503))
+    expect([busy.status, (await busy.json()).details]).toEqual([503, { stateChanged: false, upstreamStatus: 503, reason: 'archive_capacity_busy' }])
+    const odd = await executeFileWorkspaceRequest(extract, reply({ code: 'CONFLICT', details: { stateChanged: false, reason: '/etc/passwd' } }, 409))
+    expect((await odd.json()).details).toEqual({ stateChanged: false, upstreamStatus: 409 })
+  })
 })

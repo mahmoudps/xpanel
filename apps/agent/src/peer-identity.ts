@@ -16,6 +16,10 @@ export const AGENT_ROUTE_TIMEOUT_MS: ReadonlyMap<string, number> = new Map([
   // The agent bounds the quota accounting scan at 240 s; this leaves room for remount and verification.
   ['/host/quota/initialize', 300_000],
 ])
+const ACCOUNT_FILES_ROUTE = /^\/accounts\/[a-z][a-z0-9]{0,15}\/files$/
+/** Account file requests include archive operations, whose confined worker may run 120 s before it answers. */
+export const agentRouteTimeoutMs = (pathname: string): number | undefined =>
+  AGENT_ROUTE_TIMEOUT_MS.get(pathname) ?? (ACCOUNT_FILES_ROUTE.test(pathname) ? 150_000 : undefined)
 
 export interface KernelPeerCredentials {
   readonly uid: number

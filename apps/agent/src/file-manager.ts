@@ -9,6 +9,10 @@ export const MAX_BINARY_BYTES = 2 * 1024 * 1024
 export const MAX_FILE_MODE = 0o640
 export const MAX_DIR_MODE = 0o750
 export const MAX_FILE_LIST_ENTRIES = 10_000
+/** Uncompressed bytes one compress or extract may move (the helper also caps it at the plan disk quota). */
+export const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
+/** The archive names compress writes; the suffix decides the format so a name always tells the truth. */
+export const ARCHIVE_NAME = /\.(?:zip|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.zst|tzst)$/i
 
 type FileAccount = Pick<Account, 'username' | 'uid' | 'gid' | 'home'>
 
@@ -43,6 +47,13 @@ export interface FileBytes {
   mtime: string
 }
 
+export interface ArchiveExtraction {
+  /** The folder the archive was extracted into; '' is the account home. */
+  destination: string
+  entries: number
+  bytes: number
+}
+
 export interface AccountFileContext {
   account: Readonly<FileAccount>
   homeRoot: string
@@ -67,6 +78,10 @@ export type AccountFileRequest =
   | { op: 'move'; path: string; destination: string }
   /** File or bounded tree copy, published under the destination only when complete. */
   | { op: 'copy'; path: string; destination: string }
+  /** Writes a new zip or tar archive of one file or folder; never replaces an existing item. */
+  | { op: 'compress'; path: string; destination: string }
+  /** Extracts a zip, tar (plain, gzip, bzip2, zstd) or single compressed file into a folder; never replaces an item. */
+  | { op: 'extract'; path: string; destination: string }
   | { op: 'trash'; path: string }
   | { op: 'list-trash' }
   | { op: 'restore'; trashId: string; overwrite: boolean }
@@ -371,6 +386,23 @@ export class JailedFileManager {
     const entry = changedEntry(await this.execute({ op: 'copy', path: from, destination: to }), 'copy', to)
     if (entry.kind === 'directory' && entry.sizeBytes !== 0) return invalidResult('copy')
     return entry
+  }
+
+  async compress(path: string, destination: string): Promise<FileEntry> {
+    const [from, to] = sourceAndDestination(path, destination)
+    if (!ARCHIVE_NAME.test(to)) fail('VALIDATION', 'archive name must end in .zip, .tar, .tar.gz, .tgz, .tar.bz2, .tbz2, .tar.zst or .tzst')
+    const entry = changedEntry(await this.execute({ op: 'compress', path: from, destination: to }), 'compress', to)
+    if (entry.kind !== 'file') return invalidResult('compress')
+    return entry
+  }
+
+  async extract(path: string, destination: string): Promise<ArchiveExtraction> {
+    const archive = contentPath(path)
+    const folder = destination === '' ? '' : contentPath(destination)
+    const result = resultRecord(await this.execute({ op: 'extract', path: archive, destination: folder }), ['destination', 'entries', 'bytes'], 'extract')
+    if (result.destination !== folder || !validByteCount(result.entries) || result.entries > MAX_FILE_LIST_ENTRIES ||
+        !validByteCount(result.bytes) || result.bytes > MAX_ARCHIVE_BYTES) return invalidResult('extract')
+    return { destination: folder, entries: result.entries, bytes: result.bytes }
   }
 
   async moveToTrash(path: string): Promise<TrashItem> {

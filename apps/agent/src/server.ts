@@ -154,7 +154,7 @@ import {
   assertValidKernelPeerCredentials,
   bindVerifiedRequestPeer,
   DEFAULT_AGENT_SOCKET_BACKLOG,
-  AGENT_ROUTE_TIMEOUT_MS,
+  agentRouteTimeoutMs,
   DEFAULT_AGENT_SOCKET_IDLE_TIMEOUT_MS,
   getVerifiedRequestPeer,
   loadNativePeerIdentityAddon,
@@ -405,6 +405,8 @@ const FILE_AUDIT_ACTIONS: Readonly<Record<string, string>> = {
   chmod: 'file.chmod',
   move: 'file.move',
   copy: 'file.copy',
+  compress: 'file.compress',
+  extract: 'file.extract',
   trash: 'file.trash',
   restore: 'file.restore',
   'empty-trash': 'file.empty_trash',
@@ -676,7 +678,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       list: ['path', 'showHidden'], read: ['path'], write: ['path', 'content', 'overwrite', 'mode'],
       'put-bytes': ['path', 'contentBase64', 'overwrite', 'mode'], 'get-bytes': ['path'],
       mkdir: ['path', 'mode'], chmod: ['path', 'mode'], move: ['path', 'destination'], copy: ['path', 'destination'], trash: ['path'],
-      'list-trash': [], restore: ['trashId', 'overwrite'], 'empty-trash': ['olderThanDays'],
+      compress: ['path', 'destination'], extract: ['path', 'destination'], 'list-trash': [], restore: ['trashId', 'overwrite'], 'empty-trash': ['olderThanDays'],
       'purge-trash': ['trashId', 'originalPath', 'deletedAt'],
     }
     if (typeof body.op !== 'string' || !Object.hasOwn(fields, body.op)) fail('VALIDATION', 'unsupported file operation')
@@ -1954,6 +1956,12 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
             case 'copy':
               result = await fm.copy(body.path ?? '', body.destination ?? '')
               break
+            case 'compress':
+              result = await fm.compress(body.path ?? '', body.destination ?? '')
+              break
+            case 'extract':
+              result = await fm.extract(body.path ?? '', body.destination ?? '')
+              break
             case 'trash':
               result = await fm.moveToTrash(body.path ?? '')
               break
@@ -2258,7 +2266,7 @@ export const listenAgentSocket = async (
           return fail('SERVICE_UNAVAILABLE', 'agent concurrent request limit exceeded')
         }
         // A request-bound host effect may stay silent until it finishes; the idle timeout must not cut it mid-effect.
-        const routeBudget = AGENT_ROUTE_TIMEOUT_MS.get((req.url ?? '').split('?')[0]!)
+        const routeBudget = agentRouteTimeoutMs((req.url ?? '').split('?')[0]!)
         if (isEventsStream) {
           req.socket.setTimeout(0)
         } else if (routeBudget !== undefined) {

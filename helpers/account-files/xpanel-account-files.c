@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include <ctype.h>
 #include <dirent.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
@@ -43,6 +44,7 @@
 #define XP_MAX_BINARY_BYTES (2 * 1024 * 1024)
 #define XP_MAX_LIST_ENTRIES_CEILING 10000
 #define XP_MAX_COPY_BYTES (128LL * 1024 * 1024)
+#define XP_COPY_LIMIT_MESSAGE "copy exceeds the entry or 128 MiB size limit"
 #define XP_MAX_TREE_DEPTH 32
 #define XP_MAX_PATH_BYTES 4096
 #define XP_MIN_ACCOUNT_ID 1000
@@ -296,8 +298,22 @@ static void append_worker_json(StrBuf *sb) {
   sb_append_char(sb, '}');
 }
 
-static void respond_error(const char *code, int err_num, const char *msg) __attribute__((noreturn));
-static void respond_error(const char *code, int err_num, const char *msg) {
+/* A hidden staging entry that every failure response removes, so a refused archive operation leaves no trace. */
+static struct {
+  bool active;
+  int parent_fd;
+  char name[NAME_MAX + 1];
+} g_staging;
+
+static void discard_tree_at(int parent_fd, const char *name, int depth);
+
+/* reason is an optional stable machine code for a refusal that the error code alone does not name. */
+static void respond_failure(const char *code, int err_num, const char *reason, const char *msg) __attribute__((noreturn));
+static void respond_failure(const char *code, int err_num, const char *reason, const char *msg) {
+  if (g_staging.active) {
+    g_staging.active = false;
+    discard_tree_at(g_staging.parent_fd, g_staging.name, 0);
+  }
   StrBuf sb;
   sb_init(&sb, 512);
   sb_append_fmt(&sb, "{\"protocolVersion\":%d,\"ok\":false,\"op\":", XP_PROTOCOL_VERSION);
@@ -310,11 +326,20 @@ static void respond_error(const char *code, int err_num, const char *msg) {
   sb_append_json_cstr(&sb, errno_to_name(err_num));
   sb_append_str(&sb, ",\"message\":");
   sb_append_json_cstr(&sb, msg);
+  if (reason) {
+    sb_append_str(&sb, ",\"reason\":");
+    sb_append_json_cstr(&sb, reason);
+  }
   sb_append_str(&sb, "}}\n");
   write_all_stdout(sb.data, sb.len);
   free(sb.data);
   maybe_hold_open();
   _exit(0);
+}
+
+static void respond_error(const char *code, int err_num, const char *msg) __attribute__((noreturn));
+static void respond_error(const char *code, int err_num, const char *msg) {
+  respond_failure(code, err_num, NULL, msg);
 }
 
 static void respond_errno(int err_num, const char *prefix) __attribute__((noreturn));
@@ -2467,6 +2492,8 @@ typedef struct {
   int64_t entries;
   int64_t bytes;
   int64_t max_entries;
+  int64_t max_bytes;
+  const char *limit_message;
 } CopyBudget;
 
 typedef struct {
@@ -2488,7 +2515,7 @@ static int copy_failed(const char *code, int err, const char *message) {
 static bool copy_budget_add(CopyBudget *budget, int64_t entries, int64_t bytes) {
   budget->entries += entries;
   budget->bytes += bytes;
-  return budget->entries <= budget->max_entries && budget->bytes <= XP_MAX_COPY_BYTES;
+  return budget->entries <= budget->max_entries && budget->bytes <= budget->max_bytes;
 }
 
 /* Bounds the whole source before anything is written, so a refused copy leaves no trace. */
@@ -2498,7 +2525,7 @@ static void scan_copy_source(int parent_fd, const char *name, uid_t uid, int dep
   if (fstatat(parent_fd, name, &st, AT_SYMLINK_NOFOLLOW) != 0) respond_errno(errno, "fstatat copy source failed");
   require_managed_entry(&st, uid);
   if (!copy_budget_add(budget, 1, S_ISREG(st.st_mode) ? (int64_t)st.st_size : 0)) {
-    respond_error("LIMIT_EXCEEDED", EFBIG, "copy exceeds the entry or 128 MiB size limit");
+    respond_error("LIMIT_EXCEEDED", EFBIG, budget->limit_message);
   }
   if (S_ISREG(st.st_mode)) return;
   int fd = xp_openat2(parent_fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW, 0, XP_RESOLVE_CONFINED);
@@ -2536,7 +2563,7 @@ static int copy_regular_fd(int src, const struct stat *st, int dst_parent, const
     if (n == 0) break;
     if (!copy_budget_add(budget, 0, (int64_t)n)) {
       close(dst);
-      return copy_failed("LIMIT_EXCEEDED", EFBIG, "copy exceeds the entry or 128 MiB size limit");
+      return copy_failed("LIMIT_EXCEEDED", EFBIG, budget->limit_message);
     }
     for (ssize_t off = 0; off < n; ) {
       ssize_t w = write(dst, g_copy_buffer + off, (size_t)(n - off));
@@ -2606,7 +2633,7 @@ static int copy_entry_at(int src_parent, const char *src_name, int dst_parent, c
   if (st.st_uid != uid || !(S_ISDIR(st.st_mode) || (S_ISREG(st.st_mode) && st.st_nlink == 1))) {
     rc = copy_failed("FORBIDDEN", EACCES, "copy source changed into an unsupported entry");
   } else if (!copy_budget_add(budget, 1, 0)) {
-    rc = copy_failed("LIMIT_EXCEEDED", E2BIG, "copy exceeds the entry or 128 MiB size limit");
+    rc = copy_failed("LIMIT_EXCEEDED", E2BIG, budget->limit_message);
   } else if (S_ISDIR(st.st_mode)) {
     rc = copy_directory_fd(src, &st, dst_parent, dst_name, uid, depth, max_file_mode, max_dir_mode, budget);
   } else {
@@ -2651,13 +2678,13 @@ static void op_copy(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_f
   struct stat existing;
   if (fstatat(dst_fd, dst_name, &existing, AT_SYMLINK_NOFOLLOW) == 0) respond_error("CONFLICT", EEXIST, "copy destination already exists");
   if (errno != ENOENT) respond_errno(errno, "fstatat copy destination failed");
-  CopyBudget scanned = { .entries = 0, .bytes = 0, .max_entries = max_list_entries };
+  CopyBudget scanned = { .entries = 0, .bytes = 0, .max_entries = max_list_entries, .max_bytes = XP_MAX_COPY_BYTES, .limit_message = XP_COPY_LIMIT_MESSAGE };
   scan_copy_source(src_fd, src_name, uid, 0, &scanned);
 
   char rand_hex[17], staging[NAME_MAX + 1];
   generate_random_hex(rand_hex);
   snprintf(staging, sizeof(staging), ".xpanel-tmp-%d-%s", (int)getpid(), rand_hex);
-  CopyBudget budget = { .entries = 0, .bytes = 0, .max_entries = max_list_entries };
+  CopyBudget budget = { .entries = 0, .bytes = 0, .max_entries = max_list_entries, .max_bytes = XP_MAX_COPY_BYTES, .limit_message = XP_COPY_LIMIT_MESSAGE };
   if (copy_entry_at(src_fd, src_name, dst_fd, staging, uid, 0, max_file_mode, max_dir_mode, &budget) != 0) {
     discard_tree_at(dst_fd, staging, 0);
     if (g_copy_failure.code) respond_error(g_copy_failure.code, g_copy_failure.err, g_copy_failure.message);
@@ -2673,6 +2700,1261 @@ static void op_copy(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_f
     discard_tree_at(dst_fd, staging, 0);
     respond_errno(err, "publish copy failed");
   }
+  (void)fsync(dst_fd);
+  respond_entry_at(dst_fd, dst_name, destination);
+}
+
+/* --- Confined archives: compress and extract --- */
+
+/* The codecs are the system zlib, libbz2 and libzstd, which the distribution package manager itself links.
+ * They are loaded by soname inside the dropped-privilege worker, so the build needs no headers and a missing
+ * library refuses only its own formats. */
+#ifndef XP_ZLIB_SONAME
+#define XP_ZLIB_SONAME "libz.so.1"
+#endif
+#ifndef XP_BZIP2_SONAME
+#define XP_BZIP2_SONAME "libbz2.so.1"
+#endif
+#ifndef XP_ZSTD_SONAME
+#define XP_ZSTD_SONAME "libzstd.so.1"
+#endif
+
+/* bzip2 -9 runs at about 11 MiB/s on one 3.6 GHz core; 512 MiB keeps the slowest codec inside the 120 s worker on a slower vCPU. */
+#define XP_MAX_ARCHIVE_BYTES (512LL * 1024 * 1024)
+#define XP_ARCHIVE_LIMIT_MESSAGE "archive exceeds the entry, 512 MiB size or disk quota limit"
+#define XP_ARCHIVE_RATIO_FLOOR (16LL * 1024 * 1024)
+#define XP_MAX_ARCHIVE_RATIO 250
+#define XP_MAX_ZIP_DIRECTORY_BYTES (8 * 1024 * 1024)
+#define XP_MAX_PAX_BYTES 65536
+#define XP_IO_CHUNK 65536
+
+static int64_t g_archive_quota_bytes;
+
+typedef enum { XC_NONE, XC_GZIP, XC_DEFLATE, XC_BZIP2, XC_ZSTD } Codec;
+
+/* Mirrors of the stable public stream structs (zlib 1.2+ and zlib-ng compat, bzip2 1.0, zstd 1.4+).
+ * zlib's init functions also compare sizeof(z_stream) and refuse a mismatch. */
+typedef struct {
+  const unsigned char *next_in;
+  unsigned int avail_in;
+  unsigned long total_in;
+  unsigned char *next_out;
+  unsigned int avail_out;
+  unsigned long total_out;
+  const char *msg;
+  void *state;
+  void *zalloc;
+  void *zfree;
+  void *opaque;
+  int data_type;
+  unsigned long adler;
+  unsigned long reserved;
+} XpZStream;
+
+typedef struct {
+  char *next_in;
+  unsigned int avail_in, total_in_lo32, total_in_hi32;
+  char *next_out;
+  unsigned int avail_out, total_out_lo32, total_out_hi32;
+  void *state;
+  void *bzalloc;
+  void *bzfree;
+  void *opaque;
+} XpBzStream;
+
+typedef struct { const void *src; size_t size, pos; } XpZstdIn;
+typedef struct { void *dst; size_t size, pos; } XpZstdOut;
+
+static struct {
+  bool zlib, bzip2, zstd;
+  const char *(*zlib_version)(void);
+  int (*deflate_init2)(XpZStream *, int, int, int, int, int, const char *, int);
+  int (*deflate)(XpZStream *, int);
+  int (*deflate_end)(XpZStream *);
+  int (*inflate_init2)(XpZStream *, int, const char *, int);
+  int (*inflate)(XpZStream *, int);
+  int (*inflate_reset)(XpZStream *);
+  int (*inflate_end)(XpZStream *);
+  unsigned long (*crc32)(unsigned long, const unsigned char *, unsigned int);
+  int (*bz_compress_init)(XpBzStream *, int, int, int);
+  int (*bz_compress)(XpBzStream *, int);
+  int (*bz_compress_end)(XpBzStream *);
+  int (*bz_decompress_init)(XpBzStream *, int, int);
+  int (*bz_decompress)(XpBzStream *);
+  int (*bz_decompress_end)(XpBzStream *);
+  void *(*zstd_create_cctx)(void);
+  size_t (*zstd_cctx_set)(void *, int, int);
+  size_t (*zstd_compress2)(void *, XpZstdOut *, XpZstdIn *, int);
+  size_t (*zstd_free_cctx)(void *);
+  void *(*zstd_create_dctx)(void);
+  size_t (*zstd_dctx_set)(void *, int, int);
+  size_t (*zstd_decompress)(void *, XpZstdOut *, XpZstdIn *);
+  size_t (*zstd_free_dctx)(void *);
+  unsigned int (*zstd_is_error)(size_t);
+} g_codec;
+
+#define XP_BIND(handle, field, symbol) ((g_codec.field = (__typeof__(g_codec.field))dlsym(handle, symbol)) != NULL)
+
+static void codec_unavailable(void) __attribute__((noreturn));
+static void codec_unavailable(void) {
+  respond_failure("PRECONDITION_FAILED", ENOSYS, "archive_format_unavailable", "the library for this archive format is not available on this server");
+}
+
+static void require_codec(Codec codec) {
+  void *h;
+  if ((codec == XC_GZIP || codec == XC_DEFLATE) && !g_codec.zlib) {
+    h = dlopen(XP_ZLIB_SONAME, RTLD_NOW | RTLD_LOCAL);
+    g_codec.zlib = h && XP_BIND(h, zlib_version, "zlibVersion") && XP_BIND(h, deflate_init2, "deflateInit2_") &&
+      XP_BIND(h, deflate, "deflate") && XP_BIND(h, deflate_end, "deflateEnd") && XP_BIND(h, inflate_init2, "inflateInit2_") &&
+      XP_BIND(h, inflate, "inflate") && XP_BIND(h, inflate_reset, "inflateReset") && XP_BIND(h, inflate_end, "inflateEnd") &&
+      XP_BIND(h, crc32, "crc32");
+    if (!g_codec.zlib) codec_unavailable();
+  } else if (codec == XC_BZIP2 && !g_codec.bzip2) {
+    h = dlopen(XP_BZIP2_SONAME, RTLD_NOW | RTLD_LOCAL);
+    g_codec.bzip2 = h && XP_BIND(h, bz_compress_init, "BZ2_bzCompressInit") && XP_BIND(h, bz_compress, "BZ2_bzCompress") &&
+      XP_BIND(h, bz_compress_end, "BZ2_bzCompressEnd") && XP_BIND(h, bz_decompress_init, "BZ2_bzDecompressInit") &&
+      XP_BIND(h, bz_decompress, "BZ2_bzDecompress") && XP_BIND(h, bz_decompress_end, "BZ2_bzDecompressEnd");
+    if (!g_codec.bzip2) codec_unavailable();
+  } else if (codec == XC_ZSTD && !g_codec.zstd) {
+    h = dlopen(XP_ZSTD_SONAME, RTLD_NOW | RTLD_LOCAL);
+    g_codec.zstd = h && XP_BIND(h, zstd_create_cctx, "ZSTD_createCCtx") && XP_BIND(h, zstd_cctx_set, "ZSTD_CCtx_setParameter") &&
+      XP_BIND(h, zstd_compress2, "ZSTD_compressStream2") && XP_BIND(h, zstd_free_cctx, "ZSTD_freeCCtx") &&
+      XP_BIND(h, zstd_create_dctx, "ZSTD_createDCtx") && XP_BIND(h, zstd_dctx_set, "ZSTD_DCtx_setParameter") &&
+      XP_BIND(h, zstd_decompress, "ZSTD_decompressStream") && XP_BIND(h, zstd_free_dctx, "ZSTD_freeDCtx") &&
+      XP_BIND(h, zstd_is_error, "ZSTD_isError");
+    if (!g_codec.zstd) codec_unavailable();
+  }
+}
+
+static void archive_malformed(void) __attribute__((noreturn));
+static void archive_malformed(void) {
+  respond_error("VALIDATION", EINVAL, "archive is malformed, truncated or corrupt");
+}
+
+static void write_fd_all(int fd, const void *data, size_t n) {
+  const unsigned char *p = data;
+  while (n > 0) {
+    ssize_t w = write(fd, p, n);
+    if (w < 0) {
+      if (errno == EINTR) continue;
+      respond_errno(errno, "write archive output failed");
+    }
+    p += w;
+    n -= (size_t)w;
+  }
+}
+
+static void pread_exact(int fd, void *buf, size_t n, int64_t offset) {
+  size_t got = 0;
+  while (got < n) {
+    ssize_t r = pread(fd, (unsigned char *)buf + got, n - got, (off_t)offset + (off_t)got);
+    if (r < 0) {
+      if (errno == EINTR) continue;
+      respond_errno(errno, "read archive failed");
+    }
+    if (r == 0) archive_malformed();
+    got += (size_t)r;
+  }
+}
+
+/* --- Streaming compressor --- */
+
+typedef struct {
+  Codec codec;
+  int fd;
+  int64_t written;
+  XpZStream z;
+  XpBzStream bz;
+  void *zstd;
+  unsigned char out[XP_IO_CHUNK];
+} Writer;
+
+static void writer_open(Writer *w, Codec codec, int fd) {
+  memset(&w->z, 0, sizeof(w->z));
+  memset(&w->bz, 0, sizeof(w->bz));
+  w->codec = codec;
+  w->fd = fd;
+  w->written = 0;
+  w->zstd = NULL;
+  require_codec(codec);
+  bool ok = true;
+  if (codec == XC_GZIP || codec == XC_DEFLATE) {
+    ok = g_codec.deflate_init2(&w->z, 6, 8, codec == XC_GZIP ? 31 : -15, 8, 0, g_codec.zlib_version(), (int)sizeof(XpZStream)) == 0;
+  } else if (codec == XC_BZIP2) {
+    ok = g_codec.bz_compress_init(&w->bz, 9, 0, 0) == 0;
+  } else if (codec == XC_ZSTD) {
+    w->zstd = g_codec.zstd_create_cctx();
+    ok = w->zstd && !g_codec.zstd_is_error(g_codec.zstd_cctx_set(w->zstd, 100 /* ZSTD_c_compressionLevel */, 3));
+  }
+  if (!ok) codec_unavailable();
+}
+
+static void writer_emit(Writer *w, size_t have) {
+  write_fd_all(w->fd, w->out, have);
+  w->written += (int64_t)have;
+}
+
+static void writer_put(Writer *w, const void *data, size_t n, bool finish) {
+  /* bzip2 reports an empty BZ_RUN step as a parameter error, and it moves nothing for any codec. */
+  if (n == 0 && !finish) return;
+  if (w->codec == XC_NONE) {
+    if (n) write_fd_all(w->fd, data, n);
+    w->written += (int64_t)n;
+    return;
+  }
+  if (w->codec == XC_GZIP || w->codec == XC_DEFLATE) {
+    w->z.next_in = data;
+    w->z.avail_in = (unsigned int)n;
+    for (;;) {
+      w->z.next_out = w->out;
+      w->z.avail_out = sizeof(w->out);
+      int rc = g_codec.deflate(&w->z, finish ? 4 /* Z_FINISH */ : 0);
+      if (rc != 0 && rc != 1 && rc != -5) respond_error("CONFIG_TEST_FAILED", EIO, "archive compression failed");
+      writer_emit(w, sizeof(w->out) - w->z.avail_out);
+      if (finish ? rc == 1 /* Z_STREAM_END */ : w->z.avail_out != 0) break;
+    }
+  } else if (w->codec == XC_BZIP2) {
+    w->bz.next_in = (char *)(uintptr_t)data;
+    w->bz.avail_in = (unsigned int)n;
+    for (;;) {
+      w->bz.next_out = (char *)w->out;
+      w->bz.avail_out = sizeof(w->out);
+      int rc = g_codec.bz_compress(&w->bz, finish ? 2 /* BZ_FINISH */ : 0);
+      if (rc < 0) respond_error("CONFIG_TEST_FAILED", EIO, "archive compression failed");
+      writer_emit(w, sizeof(w->out) - w->bz.avail_out);
+      if (finish ? rc == 4 /* BZ_STREAM_END */ : w->bz.avail_in == 0) break;
+    }
+  } else {
+    XpZstdIn in = { data, n, 0 };
+    for (;;) {
+      XpZstdOut out = { w->out, sizeof(w->out), 0 };
+      size_t left = g_codec.zstd_compress2(w->zstd, &out, &in, finish ? 2 /* ZSTD_e_end */ : 0);
+      if (g_codec.zstd_is_error(left)) respond_error("CONFIG_TEST_FAILED", EIO, "archive compression failed");
+      writer_emit(w, out.pos);
+      if (finish ? left == 0 : in.pos == in.size) break;
+    }
+  }
+}
+
+static void writer_close(Writer *w) {
+  if (w->codec == XC_NONE) return;
+  writer_put(w, NULL, 0, true);
+  if (w->codec == XC_GZIP || w->codec == XC_DEFLATE) g_codec.deflate_end(&w->z);
+  else if (w->codec == XC_BZIP2) g_codec.bz_compress_end(&w->bz);
+  else g_codec.zstd_free_cctx(w->zstd);
+}
+
+/* --- Streaming decompressor over a byte range of the archive file --- */
+
+typedef struct {
+  Codec codec;
+  int fd;
+  int64_t offset, remaining, produced, ratio_base;
+  bool in_eof, ended;
+  size_t in_len, in_pos;
+  XpZStream z;
+  XpBzStream bz;
+  void *zstd;
+  size_t zstd_hint;
+  unsigned char in[XP_IO_CHUNK];
+} Reader;
+
+/* ratio_base is the compressed size that the output may outgrow only within the bomb ratio; 0 checks nothing. */
+static void reader_open(Reader *r, Codec codec, int fd, int64_t offset, int64_t length, int64_t ratio_base) {
+  memset(&r->z, 0, sizeof(r->z));
+  memset(&r->bz, 0, sizeof(r->bz));
+  r->codec = codec;
+  r->fd = fd;
+  r->offset = offset;
+  r->remaining = length;
+  r->produced = 0;
+  r->ratio_base = ratio_base;
+  r->in_eof = r->ended = false;
+  r->in_len = r->in_pos = 0;
+  r->zstd = NULL;
+  r->zstd_hint = 0;
+  require_codec(codec);
+  bool ok = true;
+  if (codec == XC_GZIP || codec == XC_DEFLATE) {
+    ok = g_codec.inflate_init2(&r->z, codec == XC_GZIP ? 31 : -15, g_codec.zlib_version(), (int)sizeof(XpZStream)) == 0;
+  } else if (codec == XC_BZIP2) {
+    ok = g_codec.bz_decompress_init(&r->bz, 0, 0) == 0;
+  } else if (codec == XC_ZSTD) {
+    r->zstd = g_codec.zstd_create_dctx();
+    /* A frame may declare a window up to 2 GiB; refuse more than 16 MiB inside the 64 MiB worker. */
+    ok = r->zstd && !g_codec.zstd_is_error(g_codec.zstd_dctx_set(r->zstd, 100 /* ZSTD_d_windowLogMax */, 24));
+  }
+  if (!ok) codec_unavailable();
+}
+
+static bool reader_fill(Reader *r) {
+  if (r->in_pos < r->in_len) return true;
+  if (r->in_eof) return false;
+  size_t want = r->remaining < (int64_t)sizeof(r->in) ? (size_t)r->remaining : sizeof(r->in);
+  ssize_t n = 0;
+  if (want > 0) {
+    do { n = pread(r->fd, r->in, want, (off_t)r->offset); } while (n < 0 && errno == EINTR);
+    if (n < 0) respond_errno(errno, "read archive failed");
+  }
+  if (n == 0) {
+    r->in_eof = true;
+    return false;
+  }
+  r->offset += n;
+  r->remaining -= n;
+  r->in_pos = 0;
+  r->in_len = (size_t)n;
+  return true;
+}
+
+/* Returns 0 only at the end of the stream; malformed input never returns. */
+static size_t reader_read(Reader *r, unsigned char *out, size_t cap) {
+  size_t got = 0;
+  while (got == 0 && !r->ended && cap > 0) {
+    bool more = reader_fill(r);
+    if (r->codec == XC_NONE) {
+      if (!more) { r->ended = true; break; }
+      got = r->in_len - r->in_pos < cap ? r->in_len - r->in_pos : cap;
+      memcpy(out, r->in + r->in_pos, got);
+      r->in_pos += got;
+    } else if (r->codec == XC_GZIP || r->codec == XC_DEFLATE) {
+      r->z.next_in = r->in + r->in_pos;
+      r->z.avail_in = (unsigned int)(r->in_len - r->in_pos);
+      r->z.next_out = out;
+      r->z.avail_out = (unsigned int)cap;
+      int rc = g_codec.inflate(&r->z, 0);
+      r->in_pos = r->in_len - r->z.avail_in;
+      got = cap - r->z.avail_out;
+      if (rc == 1 /* Z_STREAM_END */) {
+        /* A following gzip member continues the stream; other trailing bytes are padding. */
+        if (r->codec == XC_GZIP && reader_fill(r) && r->in[r->in_pos] == 0x1f) {
+          if (g_codec.inflate_reset(&r->z) != 0) archive_malformed();
+        } else {
+          r->ended = true;
+        }
+      } else if (rc == -5 /* Z_BUF_ERROR */) {
+        if (!more) archive_malformed();
+      } else if (rc != 0) {
+        archive_malformed();
+      }
+    } else if (r->codec == XC_BZIP2) {
+      r->bz.next_in = (char *)(r->in + r->in_pos);
+      r->bz.avail_in = (unsigned int)(r->in_len - r->in_pos);
+      r->bz.next_out = (char *)out;
+      r->bz.avail_out = (unsigned int)cap;
+      int rc = g_codec.bz_decompress(&r->bz);
+      r->in_pos = r->in_len - r->bz.avail_in;
+      got = cap - r->bz.avail_out;
+      if (rc == 4 /* BZ_STREAM_END */) {
+        g_codec.bz_decompress_end(&r->bz);
+        memset(&r->bz, 0, sizeof(r->bz));
+        if (reader_fill(r) && r->in[r->in_pos] == 'B') {
+          if (g_codec.bz_decompress_init(&r->bz, 0, 0) != 0) archive_malformed();
+        } else {
+          r->ended = true;
+        }
+      } else if (rc != 0 || (got == 0 && !more)) {
+        archive_malformed();
+      }
+    } else {
+      XpZstdIn in = { r->in + r->in_pos, r->in_len - r->in_pos, 0 };
+      XpZstdOut o = { out, cap, 0 };
+      size_t rc = g_codec.zstd_decompress(r->zstd, &o, &in);
+      if (g_codec.zstd_is_error(rc)) archive_malformed();
+      r->in_pos += in.pos;
+      got = o.pos;
+      /* Only a call that moved data tells whether the last frame is complete (0) or still open. */
+      if (in.size > 0 || got > 0) r->zstd_hint = rc;
+      if (got == 0 && !more) {
+        rc = r->zstd_hint;
+        if (rc != 0) archive_malformed();
+        r->ended = true;
+      }
+    }
+  }
+  r->produced += (int64_t)got;
+  if (r->ratio_base > 0 && r->produced > XP_ARCHIVE_RATIO_FLOOR && r->produced / XP_MAX_ARCHIVE_RATIO > r->ratio_base) {
+    respond_error("LIMIT_EXCEEDED", EFBIG, "archive expands beyond the decompression ratio limit");
+  }
+  return got;
+}
+
+static size_t reader_full(Reader *r, unsigned char *out, size_t n) {
+  size_t got = 0;
+  while (got < n) {
+    size_t step = reader_read(r, out + got, n - got);
+    if (step == 0) break;
+    got += step;
+  }
+  return got;
+}
+
+static void reader_skip(Reader *r, int64_t n) {
+  while (n > 0) {
+    size_t step = n < (int64_t)sizeof(g_copy_buffer) ? (size_t)n : sizeof(g_copy_buffer);
+    if (reader_full(r, (unsigned char *)g_copy_buffer, step) != step) archive_malformed();
+    n -= (int64_t)step;
+  }
+}
+
+static void reader_close(Reader *r) {
+  if (r->codec == XC_GZIP || r->codec == XC_DEFLATE) g_codec.inflate_end(&r->z);
+  else if (r->codec == XC_BZIP2 && !r->ended) g_codec.bz_decompress_end(&r->bz);
+  else if (r->codec == XC_ZSTD) g_codec.zstd_free_dctx(r->zstd);
+}
+
+/* --- Extraction into a hidden staging folder --- */
+
+typedef struct {
+  int root_fd;
+  int parent_fd;
+  int64_t entries, bytes, max_entries, max_bytes;
+  char parent[XP_MAX_PATH_BYTES + 1];
+} Extract;
+
+/* Normalizes and validates one entry name. Returns false for the archive's own root entry ("./"). */
+static bool archive_entry_name(const char *raw, size_t len, char out[XP_MAX_PATH_BYTES + 1], bool *directory) {
+  while (len >= 2 && raw[0] == '.' && raw[1] == '/') { raw += 2; len -= 2; }
+  *directory = false;
+  while (len > 0 && raw[len - 1] == '/') { len--; *directory = true; }
+  if (len == 0 || (len == 1 && raw[0] == '.')) return false;
+  if (len > XP_MAX_PATH_BYTES) respond_error("LIMIT_EXCEEDED", ENAMETOOLONG, "archive entry path is too long");
+  if (memchr(raw, '\0', len)) respond_error("FORBIDDEN", EACCES, "archive entry name contains a NUL byte");
+  memcpy(out, raw, len);
+  out[len] = '\0';
+  /* Refuses absolute names, drive letters, "..", empty segments, backslashes, control bytes and the trash. */
+  assert_safe_rel_path(out, len, false);
+  int depth = 0;
+  for (const char *segment = out; segment; ) {
+    const char *slash = strchr(segment, '/');
+    size_t seg_len = slash ? (size_t)(slash - segment) : strlen(segment);
+    if (seg_len > NAME_MAX) respond_error("VALIDATION", ENAMETOOLONG, "archive entry name segment exceeds NAME_MAX");
+    if (strncmp(segment, ".xpanel-tmp-", 12) == 0) respond_error("FORBIDDEN", EACCES, "archive entry uses a reserved staging name");
+    if (++depth > XP_MAX_TREE_DEPTH) respond_error("LIMIT_EXCEEDED", ELOOP, "archive entry nesting exceeds the depth limit");
+    segment = slash ? slash + 1 : NULL;
+  }
+  return true;
+}
+
+static void extract_count(Extract *x, int64_t declared_bytes) {
+  if (++x->entries > x->max_entries || declared_bytes < 0 || declared_bytes > x->max_bytes - x->bytes) {
+    respond_error("LIMIT_EXCEEDED", EFBIG, XP_ARCHIVE_LIMIT_MESSAGE);
+  }
+}
+
+/* Opens (creating as needed) the folder holding path, beneath the staging root and without following links. */
+static int extract_parent(Extract *x, const char *path, char leaf[NAME_MAX + 1]) {
+  const char *slash = strrchr(path, '/');
+  size_t plen = slash ? (size_t)(slash - path) : 0;
+  snprintf(leaf, NAME_MAX + 1, "%s", slash ? slash + 1 : path);
+  if (x->parent_fd >= 0 && strlen(x->parent) == plen && memcmp(x->parent, path, plen) == 0) return x->parent_fd;
+  if (x->parent_fd >= 0 && x->parent_fd != x->root_fd) close(x->parent_fd);
+  x->parent_fd = -1;
+  int fd = x->root_fd;
+  for (size_t start = 0; start < plen; ) {
+    const char *end = memchr(path + start, '/', plen - start);
+    size_t seg_len = end ? (size_t)(end - (path + start)) : plen - start;
+    char segment[NAME_MAX + 1];
+    memcpy(segment, path + start, seg_len);
+    segment[seg_len] = '\0';
+    if (mkdirat(fd, segment, 0750) != 0 && errno != EEXIST) respond_errno(errno, "create archive folder failed");
+    int next = xp_openat2(fd, segment, O_RDONLY | O_DIRECTORY | O_NOFOLLOW, 0, XP_RESOLVE_CONFINED);
+    if (next < 0) {
+      if (errno == ENOTDIR) respond_error("CONFLICT", ENOTDIR, "archive uses one name for both a file and a folder");
+      respond_errno(errno, "open archive folder failed");
+    }
+    if (fd != x->root_fd) close(fd);
+    fd = next;
+    start += seg_len + 1;
+  }
+  memcpy(x->parent, path, plen);
+  x->parent[plen] = '\0';
+  x->parent_fd = fd;
+  return fd;
+}
+
+static void extract_dir(Extract *x, const char *path, mode_t mode) {
+  extract_count(x, 0);
+  char leaf[NAME_MAX + 1];
+  int parent = extract_parent(x, path, leaf);
+  if (mkdirat(parent, leaf, (mode & 0750) | 0700) == 0) return;
+  struct stat st;
+  if (errno != EEXIST) respond_errno(errno, "create archive folder failed");
+  if (fstatat(parent, leaf, &st, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISDIR(st.st_mode)) {
+    respond_error("CONFLICT", EEXIST, "archive uses one name for both a file and a folder");
+  }
+}
+
+static int extract_file_open(Extract *x, const char *path, int64_t declared_bytes) {
+  extract_count(x, declared_bytes);
+  char leaf[NAME_MAX + 1];
+  int parent = extract_parent(x, path, leaf);
+  int fd = xp_openat2(parent, leaf, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600, XP_RESOLVE_CONFINED);
+  if (fd < 0) {
+    if (errno == EEXIST) respond_error("CONFLICT", EEXIST, "archive contains the same entry twice");
+    respond_errno(errno, "create archive file failed");
+  }
+  return fd;
+}
+
+static void extract_write(Extract *x, int fd, const unsigned char *data, size_t n) {
+  if ((int64_t)n > x->max_bytes - x->bytes) respond_error("LIMIT_EXCEEDED", EFBIG, XP_ARCHIVE_LIMIT_MESSAGE);
+  x->bytes += (int64_t)n;
+  write_fd_all(fd, data, n);
+}
+
+/* Setuid, setgid, sticky and execute bits never survive: modes are clamped to the 0640 file ceiling. */
+static void extract_file_close(int fd, mode_t mode, time_t mtime) {
+  if (fchmod(fd, (mode & 0640) | 0600) != 0) respond_errno(errno, "set archive file mode failed");
+  struct timespec times[2] = { { mtime, 0 }, { mtime, 0 } };
+  (void)futimens(fd, times);
+  close(fd);
+}
+
+/* --- tar (ustar, pax and GNU long names) --- */
+
+static int64_t tar_number(const unsigned char *field, size_t len, bool *ok) {
+  if (field[0] & 0x80) { *ok = false; return 0; }
+  size_t i = 0;
+  while (i < len && field[i] == ' ') i++;
+  int64_t value = 0;
+  for (; i < len && field[i] >= '0' && field[i] <= '7'; i++) {
+    if (value > (INT64_MAX >> 3)) { *ok = false; return 0; }
+    value = value * 8 + (field[i] - '0');
+  }
+  for (; i < len; i++) if (field[i] != ' ' && field[i] != '\0') *ok = false;
+  return value;
+}
+
+static bool tar_checksum_ok(const unsigned char h[512]) {
+  bool ok = true;
+  int64_t stored = tar_number(h + 148, 8, &ok);
+  int64_t unsigned_sum = 0, signed_sum = 0;
+  for (int i = 0; i < 512; i++) {
+    unsigned char c = (i >= 148 && i < 156) ? ' ' : h[i];
+    unsigned_sum += c;
+    signed_sum += (signed char)c;
+  }
+  return ok && (stored == unsigned_sum || stored == signed_sum);
+}
+
+static bool all_zero(const unsigned char *p, size_t n) {
+  for (size_t i = 0; i < n; i++) if (p[i]) return false;
+  return true;
+}
+
+static void tar_parse_pax(const char *data, size_t len, char path[XP_MAX_PATH_BYTES + 2], bool *have_path, int64_t *size) {
+  size_t pos = 0;
+  while (pos < len) {
+    size_t record = 0, i = pos;
+    while (i < len && data[i] >= '0' && data[i] <= '9') {
+      record = record * 10 + (size_t)(data[i] - '0');
+      if (record > len) archive_malformed();
+      i++;
+    }
+    if (i >= len || data[i] != ' ' || record == 0 || record > len - pos || data[pos + record - 1] != '\n') archive_malformed();
+    const char *key = data + i + 1;
+    size_t kv_len = pos + record - 1 - (i + 1);
+    const char *eq = memchr(key, '=', kv_len);
+    if (!eq) archive_malformed();
+    size_t key_len = (size_t)(eq - key), value_len = kv_len - key_len - 1;
+    const char *value = eq + 1;
+    if (key_len == 4 && memcmp(key, "path", 4) == 0) {
+      if (value_len > XP_MAX_PATH_BYTES) respond_error("LIMIT_EXCEEDED", ENAMETOOLONG, "archive entry path is too long");
+      if (memchr(value, '\0', value_len)) respond_error("FORBIDDEN", EACCES, "archive entry name contains a NUL byte");
+      memcpy(path, value, value_len);
+      path[value_len] = '\0';
+      *have_path = true;
+    } else if (key_len == 4 && memcmp(key, "size", 4) == 0) {
+      int64_t parsed = 0;
+      if (value_len == 0 || value_len > 18) archive_malformed();
+      for (size_t k = 0; k < value_len; k++) {
+        if (value[k] < '0' || value[k] > '9') archive_malformed();
+        parsed = parsed * 10 + (value[k] - '0');
+      }
+      *size = parsed;
+    } else if (key_len > 11 && memcmp(key, "GNU.sparse.", 11) == 0) {
+      respond_error("VALIDATION", EINVAL, "archive contains a sparse file, which is not supported");
+    }
+    pos += record;
+  }
+}
+
+static void extract_tar(Extract *x, Reader *r, const unsigned char first[512]) {
+  unsigned char h[512];
+  char override[XP_MAX_PATH_BYTES + 2];
+  bool have_override = false, use_first = true;
+  int64_t override_size = -1;
+  for (;;) {
+    if (use_first) {
+      memcpy(h, first, 512);
+      use_first = false;
+    } else {
+      size_t n = reader_full(r, h, 512);
+      if (n == 0) return;
+      if (n != 512) archive_malformed();
+    }
+    if (all_zero(h, 512)) {
+      size_t n = reader_full(r, h, 512);
+      if (n == 0 || (n == 512 && all_zero(h, 512))) return;
+      archive_malformed();
+    }
+    if (!tar_checksum_ok(h)) archive_malformed();
+    bool ok = true, mtime_ok = true;
+    int64_t size = tar_number(h + 124, 12, &ok);
+    mode_t mode = (mode_t)tar_number(h + 100, 8, &ok);
+    time_t mtime = (time_t)tar_number(h + 136, 12, &mtime_ok);
+    if (!ok) archive_malformed();
+    if (!mtime_ok) mtime = 0;
+    if (override_size >= 0) size = override_size;
+    int64_t padded = size + ((512 - size % 512) % 512);
+    char type = (char)h[156];
+    if (type == 'x' || type == 'L') {
+      if (size > (type == 'x' ? XP_MAX_PAX_BYTES : XP_MAX_PATH_BYTES + 1)) respond_error("LIMIT_EXCEEDED", E2BIG, "archive entry header is too large");
+      char *data = calloc(1, (size_t)size + 1);
+      if (!data) _exit(12);
+      if (reader_full(r, (unsigned char *)data, (size_t)size) != (size_t)size) archive_malformed();
+      reader_skip(r, padded - size);
+      if (type == 'x') {
+        tar_parse_pax(data, (size_t)size, override, &have_override, &override_size);
+      } else {
+        snprintf(override, sizeof(override), "%s", data);
+        have_override = true;
+      }
+      free(data);
+      continue;
+    }
+    if (type == 'g' || type == 'K') {
+      reader_skip(r, padded);
+      continue;
+    }
+    if (type == '1' || type == '2') respond_error("FORBIDDEN", ELOOP, "archive contains a link; links are not extracted");
+    if (type == '3' || type == '4' || type == '6') respond_error("FORBIDDEN", EACCES, "archive contains a device or FIFO entry");
+    if (type != '0' && type != '\0' && type != '7' && type != '5') respond_error("VALIDATION", EINVAL, "archive contains an unsupported entry type");
+
+    char name[XP_MAX_PATH_BYTES + 2];
+    if (have_override) {
+      snprintf(name, sizeof(name), "%s", override);
+    } else {
+      char base[101], prefix[156];
+      memcpy(base, h, 100);
+      base[100] = '\0';
+      memcpy(prefix, h + 345, 155);
+      prefix[155] = '\0';
+      if (memcmp(h + 257, "ustar", 6) == 0 && prefix[0]) snprintf(name, sizeof(name), "%s/%s", prefix, base);
+      else snprintf(name, sizeof(name), "%s", base);
+    }
+    have_override = false;
+    override_size = -1;
+    char path[XP_MAX_PATH_BYTES + 1];
+    bool directory = false;
+    if (!archive_entry_name(name, strlen(name), path, &directory)) {
+      reader_skip(r, padded);
+      continue;
+    }
+    if (type == '5' || directory) {
+      extract_dir(x, path, mode);
+      reader_skip(r, padded);
+      continue;
+    }
+    int fd = extract_file_open(x, path, size);
+    for (int64_t left = size; left > 0; ) {
+      size_t step = left < (int64_t)sizeof(g_copy_buffer) ? (size_t)left : sizeof(g_copy_buffer);
+      size_t n = reader_read(r, (unsigned char *)g_copy_buffer, step);
+      if (n == 0) archive_malformed();
+      extract_write(x, fd, (const unsigned char *)g_copy_buffer, n);
+      left -= (int64_t)n;
+    }
+    reader_skip(r, padded - size);
+    extract_file_close(fd, mode, mtime);
+  }
+}
+
+/* --- zip (stored and deflate, zip64 sizes) --- */
+
+static uint16_t le16(const unsigned char *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
+static uint32_t le32(const unsigned char *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
+static uint64_t le64(const unsigned char *p) { return (uint64_t)le32(p) | ((uint64_t)le32(p + 4) << 32); }
+static void put16(unsigned char *p, uint32_t v) { p[0] = (unsigned char)v; p[1] = (unsigned char)(v >> 8); }
+static void put32(unsigned char *p, uint32_t v) { put16(p, v & 0xffff); put16(p + 2, v >> 16); }
+
+typedef struct {
+  int64_t offset, csize, usize;
+  uint32_t crc;
+  uint16_t method;
+  bool directory;
+  mode_t mode;
+  time_t mtime;
+  const char *name;
+  size_t name_len;
+} ZipItem;
+
+static int cmp_zip_item(const void *a, const void *b) {
+  int64_t x = ((const ZipItem *)a)->offset, y = ((const ZipItem *)b)->offset;
+  return x < y ? -1 : x > y;
+}
+
+static time_t dos_time(uint16_t time, uint16_t date) {
+  struct tm tm;
+  memset(&tm, 0, sizeof(tm));
+  tm.tm_sec = (time & 0x1f) * 2;
+  tm.tm_min = (time >> 5) & 0x3f;
+  tm.tm_hour = time >> 11;
+  tm.tm_mday = (date & 0x1f) ? (date & 0x1f) : 1;
+  tm.tm_mon = ((date >> 5) & 0x0f) ? ((date >> 5) & 0x0f) - 1 : 0;
+  tm.tm_year = (date >> 9) + 80;
+  time_t value = timegm(&tm);
+  return value < 0 ? 0 : value;
+}
+
+static void extract_zip(Extract *x, int fd, int64_t size) {
+  require_codec(XC_DEFLATE);
+  if (size < 22) archive_malformed();
+  size_t tail = size < 65557 ? (size_t)size : 65557;
+  unsigned char *t = malloc(tail);
+  if (!t) _exit(12);
+  pread_exact(fd, t, tail, size - (int64_t)tail);
+  ssize_t e = -1;
+  for (ssize_t i = (ssize_t)tail - 22; i >= 0; i--) {
+    if (le32(t + i) == 0x06054b50 && (size_t)i + 22 + le16(t + i + 20) == tail) { e = i; break; }
+  }
+  if (e < 0) archive_malformed();
+  int64_t directory_end = size - (int64_t)tail + e;
+  uint64_t count = le16(t + e + 10), cd_size = le32(t + e + 12), cd_offset = le32(t + e + 16);
+  if (le16(t + e + 4) != 0 || le16(t + e + 6) != 0 || le16(t + e + 8) != count) {
+    respond_error("VALIDATION", EINVAL, "multi-volume zip archives are not supported");
+  }
+  if (count == 0xffff || cd_size == 0xffffffffu || cd_offset == 0xffffffffu) {
+    if (e < 20 || le32(t + e - 20) != 0x07064b50) archive_malformed();
+    uint64_t record = le64(t + e - 20 + 8);
+    unsigned char z64[56];
+    if (record > (uint64_t)directory_end || (uint64_t)directory_end - record < 56) archive_malformed();
+    pread_exact(fd, z64, 56, (int64_t)record);
+    if (le32(z64) != 0x06064b50) archive_malformed();
+    count = le64(z64 + 32);
+    cd_size = le64(z64 + 40);
+    cd_offset = le64(z64 + 48);
+    directory_end = (int64_t)record;
+  }
+  free(t);
+  if (count > (uint64_t)x->max_entries) respond_error("LIMIT_EXCEEDED", EFBIG, XP_ARCHIVE_LIMIT_MESSAGE);
+  if (cd_size > XP_MAX_ZIP_DIRECTORY_BYTES) respond_error("LIMIT_EXCEEDED", EFBIG, "zip central directory exceeds its size limit");
+  if (cd_offset > (uint64_t)directory_end || cd_size > (uint64_t)directory_end - cd_offset) archive_malformed();
+  unsigned char *cd = malloc(cd_size ? cd_size : 1);
+  ZipItem *items = calloc(count ? count : 1, sizeof(ZipItem));
+  if (!cd || !items) _exit(12);
+  pread_exact(fd, cd, cd_size, (int64_t)cd_offset);
+  size_t pos = 0;
+  int64_t declared = 0;
+  for (uint64_t i = 0; i < count; i++) {
+    if (pos + 46 > cd_size || le32(cd + pos) != 0x02014b50) archive_malformed();
+    const unsigned char *p = cd + pos;
+    uint16_t made_by = le16(p + 4), flags = le16(p + 8), method = le16(p + 10);
+    uint16_t name_len = le16(p + 28), extra_len = le16(p + 30), comment_len = le16(p + 32);
+    uint64_t csize = le32(p + 20), usize = le32(p + 24), offset = le32(p + 42);
+    uint32_t attributes = le32(p + 38);
+    if (pos + 46 + name_len + extra_len + comment_len > cd_size) archive_malformed();
+    for (const unsigned char *q = p + 46 + name_len, *end = q + extra_len; q + 4 <= end; ) {
+      uint16_t id = le16(q), len = le16(q + 2);
+      const unsigned char *data = q + 4, *stop = data + len;
+      if (stop > end) archive_malformed();
+      if (id == 0x0001) {
+        if (usize == 0xffffffffu) { if (data + 8 > stop) archive_malformed(); usize = le64(data); data += 8; }
+        if (csize == 0xffffffffu) { if (data + 8 > stop) archive_malformed(); csize = le64(data); data += 8; }
+        if (offset == 0xffffffffu) { if (data + 8 > stop) archive_malformed(); offset = le64(data); }
+      }
+      q = stop;
+    }
+    if (flags & 0x41) respond_error("VALIDATION", EINVAL, "encrypted zip entries are not supported");
+    if (method != 0 && method != 8) respond_error("VALIDATION", EINVAL, "zip entry uses an unsupported compression method");
+    if ((method == 0 && csize != usize) || usize > (uint64_t)INT64_MAX || csize > (uint64_t)size || offset > (uint64_t)size) archive_malformed();
+    bool unix_mode = (made_by >> 8) == 3 || (made_by >> 8) == 19;
+    mode_t mode = unix_mode ? (mode_t)(attributes >> 16) : 0;
+    bool directory = name_len > 0 && p[46 + name_len - 1] == '/';
+    if (unix_mode && (mode & S_IFMT) != 0) {
+      if (S_ISLNK(mode)) respond_error("FORBIDDEN", ELOOP, "archive contains a link; links are not extracted");
+      if (S_ISDIR(mode)) directory = true;
+      else if (!S_ISREG(mode)) respond_error("FORBIDDEN", EACCES, "archive contains a device or FIFO entry");
+    } else if (!unix_mode && (attributes & 0x10)) {
+      directory = true;
+    }
+    mode &= 07777;
+    items[i] = (ZipItem){ .offset = (int64_t)offset, .csize = (int64_t)csize, .usize = (int64_t)usize, .crc = le32(p + 16),
+      .method = method, .directory = directory, .mode = mode ? mode : (directory ? 0750 : 0640),
+      .mtime = dos_time(le16(p + 12), le16(p + 14)), .name = (const char *)p + 46, .name_len = name_len };
+    if ((int64_t)usize > x->max_bytes - declared) respond_error("LIMIT_EXCEEDED", EFBIG, XP_ARCHIVE_LIMIT_MESSAGE);
+    declared += (int64_t)usize;
+    pos += 46 + (size_t)name_len + extra_len + comment_len;
+  }
+  if (declared > XP_ARCHIVE_RATIO_FLOOR && declared / XP_MAX_ARCHIVE_RATIO > size) {
+    respond_error("LIMIT_EXCEEDED", EFBIG, "archive expands beyond the decompression ratio limit");
+  }
+  qsort(items, count, sizeof(ZipItem), cmp_zip_item);
+  for (uint64_t i = 0; i < count; i++) {
+    ZipItem *item = &items[i];
+    /* Entries may not share or overlap their data, which defeats overlapping-entry zip bombs. */
+    int64_t boundary = i + 1 < count ? items[i + 1].offset : (int64_t)cd_offset;
+    unsigned char local[30];
+    if (item->offset > boundary || boundary - item->offset < 30) archive_malformed();
+    pread_exact(fd, local, 30, item->offset);
+    if (le32(local) != 0x04034b50) archive_malformed();
+    int64_t data = item->offset + 30 + le16(local + 26) + le16(local + 28);
+    if (data > boundary || item->csize > boundary - data) archive_malformed();
+    char path[XP_MAX_PATH_BYTES + 1];
+    bool slash = false;
+    if (!archive_entry_name(item->name, item->name_len, path, &slash)) continue;
+    if (item->directory || slash) {
+      extract_dir(x, path, item->mode);
+      continue;
+    }
+    int out = extract_file_open(x, path, item->usize);
+    Reader *r = calloc(1, sizeof(Reader));
+    if (!r) _exit(12);
+    reader_open(r, item->method == 8 ? XC_DEFLATE : XC_NONE, fd, data, item->csize, 0);
+    unsigned long crc = 0;
+    int64_t total = 0;
+    for (;;) {
+      size_t n = reader_read(r, (unsigned char *)g_copy_buffer, sizeof(g_copy_buffer));
+      if (n == 0) break;
+      if ((int64_t)n > item->usize - total) archive_malformed();
+      total += (int64_t)n;
+      crc = g_codec.crc32(crc, (const unsigned char *)g_copy_buffer, (unsigned int)n);
+      extract_write(x, out, (const unsigned char *)g_copy_buffer, n);
+    }
+    reader_close(r);
+    free(r);
+    if (total != item->usize || (uint32_t)crc != item->crc) archive_malformed();
+    extract_file_close(out, item->mode, item->mtime);
+  }
+  free(items);
+  free(cd);
+}
+
+/* A compressed single file (.gz, .bz2, .zst) becomes one file named without that suffix. */
+static void extract_single(Extract *x, Reader *r, const char *archive_name, const unsigned char *first, size_t first_len, time_t mtime) {
+  static const char *const suffixes[] = { ".gz", ".bz2", ".zst" };
+  char name[NAME_MAX + 1] = "";
+  size_t len = strlen(archive_name);
+  for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
+    size_t s = strlen(suffixes[i]);
+    if (len > s && strcasecmp(archive_name + len - s, suffixes[i]) == 0) {
+      memcpy(name, archive_name, len - s);
+      name[len - s] = '\0';
+    }
+  }
+  if (!name[0]) respond_error("VALIDATION", EINVAL, "a compressed single file must end in .gz, .bz2 or .zst");
+  char path[XP_MAX_PATH_BYTES + 1];
+  bool directory = false;
+  if (!archive_entry_name(name, strlen(name), path, &directory) || directory) respond_error("VALIDATION", EINVAL, "the extracted file name is not valid");
+  int fd = extract_file_open(x, path, 0);
+  extract_write(x, fd, first, first_len);
+  for (;;) {
+    size_t n = reader_read(r, (unsigned char *)g_copy_buffer, sizeof(g_copy_buffer));
+    if (n == 0) break;
+    extract_write(x, fd, (const unsigned char *)g_copy_buffer, n);
+  }
+  extract_file_close(fd, 0640, mtime);
+}
+
+static int64_t archive_byte_ceiling(void) {
+  return g_archive_quota_bytes > 0 && g_archive_quota_bytes < XP_MAX_ARCHIVE_BYTES ? g_archive_quota_bytes : XP_MAX_ARCHIVE_BYTES;
+}
+
+static void start_staging(int parent_fd, bool directory) {
+  char rand_hex[17];
+  generate_random_hex(rand_hex);
+  snprintf(g_staging.name, sizeof(g_staging.name), ".xpanel-tmp-%d-%s", (int)getpid(), rand_hex);
+  g_staging.parent_fd = parent_fd;
+  int rc = directory ? mkdirat(parent_fd, g_staging.name, 0700)
+                     : xp_openat2(parent_fd, g_staging.name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600, XP_RESOLVE_CONFINED);
+  if (rc < 0) respond_errno(errno, "create archive staging entry failed");
+  g_staging.active = true;
+  if (!directory) close(rc);
+}
+
+/* Moves each staged top-level entry into an existing folder. Nothing is published while any name is taken. */
+static void publish_staged_children(int staging_fd, int dest_fd) {
+  int scan_fd = dup(staging_fd);
+  DIR *dirp = scan_fd < 0 ? NULL : fdopendir(scan_fd);
+  if (!dirp) respond_errno(errno, "read archive staging folder failed");
+  StrBuf names;
+  sb_init(&names, 1024);
+  size_t count = 0;
+  for (;;) {
+    errno = 0;
+    struct dirent *de = readdir(dirp);
+    if (!de) {
+      if (errno != 0) respond_errno(errno, "read archive staging folder failed");
+      break;
+    }
+    if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
+    struct stat st;
+    if (fstatat(dest_fd, de->d_name, &st, AT_SYMLINK_NOFOLLOW) == 0) respond_error("CONFLICT", EEXIST, "an item from the archive already exists in the destination folder");
+    if (errno != ENOENT) respond_errno(errno, "inspect destination folder failed");
+    sb_append_mem(&names, de->d_name, strlen(de->d_name) + 1);
+    count++;
+  }
+  closedir(dirp);
+  const char *name = names.data;
+  for (size_t i = 0; i < count; i++, name += strlen(name) + 1) {
+    if (xp_renameat2(staging_fd, name, dest_fd, name, RENAME_NOREPLACE) != 0) {
+      if (i == 0) respond_errno(errno, "publish extracted entry failed");
+      respond_error("SERVICE_UNAVAILABLE", errno, "extraction was partly published; outcome requires inspection");
+    }
+  }
+  free(names.data);
+}
+
+static void op_extract(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_list_entries) {
+  const char *path = NULL, *destination = NULL;
+  size_t path_len = 0, destination_len = 0;
+  if (!jv_get_str(req, "path", &path, &path_len) || !jv_get_str(req, "destination", &destination, &destination_len)) {
+    respond_error("VALIDATION", EINVAL, "extract requires path and destination");
+  }
+  assert_safe_rel_path(path, path_len, false);
+  assert_safe_rel_path(destination, destination_len, true);
+  char archive_parent[XP_MAX_PATH_BYTES + 1], archive_name[NAME_MAX + 1];
+  split_rel_path(path, archive_parent, archive_name);
+  int archive_dir = open_confined_dir(home_dirfd, archive_parent, uid);
+  int afd = xp_openat2(archive_dir, archive_name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK, 0, XP_RESOLVE_CONFINED);
+  if (afd < 0) respond_errno(errno, "open archive failed");
+  struct stat ast;
+  if (fstat(afd, &ast) != 0) respond_errno(errno, "inspect archive failed");
+  if (!S_ISREG(ast.st_mode)) respond_error("FORBIDDEN", EACCES, "only a regular file can be extracted");
+  if (ast.st_uid != uid) respond_error("FORBIDDEN", EACCES, "archive owner UID does not match account UID");
+  if (ast.st_nlink > 1) respond_error("FORBIDDEN", EMLINK, "hardlinked files cannot be extracted");
+
+  bool exists = true;
+  int dest_fd = -1, stage_parent = -1;
+  char dest_name[NAME_MAX + 1] = "";
+  if (destination_len == 0) {
+    dest_fd = open_confined_dir(home_dirfd, "", uid);
+    stage_parent = dest_fd;
+  } else {
+    char dest_parent[XP_MAX_PATH_BYTES + 1];
+    split_rel_path(destination, dest_parent, dest_name);
+    int parent_fd = open_confined_dir(home_dirfd, dest_parent, uid);
+    struct stat dst;
+    if (fstatat(parent_fd, dest_name, &dst, AT_SYMLINK_NOFOLLOW) == 0) {
+      dest_fd = open_confined_dir(home_dirfd, destination, uid);
+      stage_parent = dest_fd;
+    } else if (errno == ENOENT) {
+      exists = false;
+      stage_parent = parent_fd;
+    } else {
+      respond_errno(errno, "inspect destination failed");
+    }
+  }
+
+  start_staging(stage_parent, true);
+  int root = xp_openat2(stage_parent, g_staging.name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW, 0, XP_RESOLVE_CONFINED);
+  if (root < 0) respond_errno(errno, "open archive staging folder failed");
+  Extract x = { .root_fd = root, .parent_fd = -1, .max_entries = max_list_entries, .max_bytes = archive_byte_ceiling() };
+  unsigned char head[4] = { 0 };
+  if (ast.st_size >= 4) pread_exact(afd, head, 4, 0);
+  if (head[0] == 'P' && head[1] == 'K' && ((head[2] == 3 && head[3] == 4) || (head[2] == 5 && head[3] == 6))) {
+    extract_zip(&x, afd, ast.st_size);
+  } else {
+    Codec codec = head[0] == 0x1f && head[1] == 0x8b ? XC_GZIP
+      : head[0] == 'B' && head[1] == 'Z' && head[2] == 'h' ? XC_BZIP2
+      : head[0] == 0x28 && head[1] == 0xb5 && head[2] == 0x2f && head[3] == 0xfd ? XC_ZSTD : XC_NONE;
+    Reader *r = calloc(1, sizeof(Reader));
+    if (!r) _exit(12);
+    reader_open(r, codec, afd, 0, ast.st_size, codec == XC_NONE ? 0 : ast.st_size);
+    unsigned char first[512];
+    size_t n = reader_full(r, first, sizeof(first));
+    if (n == sizeof(first) && tar_checksum_ok(first)) extract_tar(&x, r, first);
+    else if (codec == XC_NONE) respond_error("VALIDATION", EINVAL, "the file is not a supported archive");
+    else extract_single(&x, r, archive_name, first, n, ast.st_mtim.tv_sec);
+    reader_close(r);
+    free(r);
+  }
+  if (syncfs(root) != 0) respond_errno(errno, "syncfs extraction failed");
+  if (!exists) {
+    if (fchmod(root, 0750) != 0) respond_errno(errno, "set extraction folder mode failed");
+    if (xp_renameat2(stage_parent, g_staging.name, stage_parent, dest_name, RENAME_NOREPLACE) != 0) respond_errno(errno, "publish extraction failed");
+    g_staging.active = false;
+  } else {
+    publish_staged_children(root, dest_fd);
+    g_staging.active = false;
+    (void)unlinkat(stage_parent, g_staging.name, AT_REMOVEDIR);
+  }
+  (void)fsync(stage_parent);
+  StrBuf sb;
+  sb_init(&sb, 256);
+  sb_append_str(&sb, "{\"destination\":");
+  sb_append_json_str(&sb, destination, destination_len);
+  sb_append_fmt(&sb, ",\"entries\":%" PRId64 ",\"bytes\":%" PRId64 "}", x.entries, x.bytes);
+  respond_success_raw(sb.data);
+}
+
+/* --- Compression --- */
+
+typedef struct {
+  bool zip;
+  int fd;
+  Writer w;
+  Writer entry;
+  int64_t offset, entry_offset, usize;
+  unsigned long crc;
+  StrBuf central;
+  uint32_t central_count;
+} ArchiveOut;
+
+static void tar_number_field(unsigned char *field, size_t len, uint64_t value) {
+  memset(field, '0', len - 1);
+  field[len - 1] = '\0';
+  for (size_t i = len - 1; i-- > 0 && value; value >>= 3) field[i] = (unsigned char)('0' + (value & 7));
+}
+
+static size_t decimal_digits(size_t value) {
+  size_t digits = 1;
+  while (value >= 10) { value /= 10; digits++; }
+  return digits;
+}
+
+static void tar_write_header(Writer *w, const char *name, size_t name_len, char type, mode_t mode, int64_t size, time_t mtime) {
+  unsigned char h[512];
+  if (name_len > 100) {
+    /* Names longer than the ustar field travel in a pax "path" record, which every current tar reads. */
+    size_t base = strlen(" path=") + name_len + 1, record = base + decimal_digits(base);
+    if (decimal_digits(record) != decimal_digits(base)) record++;
+    char *pax = malloc(record + 1);
+    if (!pax) _exit(12);
+    int written = snprintf(pax, record + 1, "%zu path=%s\n", record, name);
+    if (written < 0 || (size_t)written != record) respond_error("CONFIG_TEST_FAILED", EINVAL, "archive header encoding failed");
+    tar_write_header(w, "PaxHeader", 9, 'x', 0640, (int64_t)record, mtime);
+    writer_put(w, pax, record, false);
+    memset(h, 0, sizeof(h));
+    writer_put(w, h, (512 - record % 512) % 512, false);
+    free(pax);
+    name_len = 100;
+  }
+  memset(h, 0, sizeof(h));
+  memcpy(h, name, name_len);
+  tar_number_field(h + 100, 8, mode & 0777);
+  tar_number_field(h + 108, 8, getuid());
+  tar_number_field(h + 116, 8, getgid());
+  tar_number_field(h + 124, 12, (uint64_t)size);
+  tar_number_field(h + 136, 12, mtime > 0 ? (uint64_t)mtime : 0);
+  h[156] = (unsigned char)type;
+  memcpy(h + 257, "ustar", 6);
+  memcpy(h + 263, "00", 2);
+  memset(h + 148, ' ', 8);
+  unsigned int sum = 0;
+  for (int i = 0; i < 512; i++) sum += h[i];
+  tar_number_field(h + 148, 7, sum);
+  writer_put(w, h, sizeof(h), false);
+}
+
+static void dos_stamp(time_t when, uint16_t *time_out, uint16_t *date_out) {
+  struct tm tm;
+  memset(&tm, 0, sizeof(tm));
+  gmtime_r(&when, &tm);
+  if (tm.tm_year < 80) { tm.tm_year = 80; tm.tm_mon = 0; tm.tm_mday = 1; tm.tm_hour = tm.tm_min = tm.tm_sec = 0; }
+  *time_out = (uint16_t)((tm.tm_hour << 11) | (tm.tm_min << 5) | (tm.tm_sec / 2));
+  *date_out = (uint16_t)(((tm.tm_year - 80) << 9) | ((tm.tm_mon + 1) << 5) | tm.tm_mday);
+}
+
+static void archive_entry_begin(ArchiveOut *o, const char *name, size_t name_len, bool directory, const struct stat *st) {
+  if (!o->zip) {
+    tar_write_header(&o->w, name, name_len, directory ? '5' : '0', st->st_mode, directory ? 0 : (int64_t)st->st_size, st->st_mtim.tv_sec);
+    return;
+  }
+  uint16_t dtime, ddate;
+  dos_stamp(st->st_mtim.tv_sec, &dtime, &ddate);
+  unsigned char local[30];
+  memset(local, 0, sizeof(local));
+  put32(local, 0x04034b50);
+  put16(local + 4, 20);
+  put16(local + 6, 0x0800);
+  put16(local + 8, directory ? 0 : 8);
+  put16(local + 10, dtime);
+  put16(local + 12, ddate);
+  put16(local + 26, (uint32_t)name_len);
+  o->entry_offset = o->offset;
+  write_fd_all(o->fd, local, sizeof(local));
+  write_fd_all(o->fd, name, name_len);
+  o->offset += 30 + (int64_t)name_len;
+  o->crc = 0;
+  o->usize = 0;
+  if (!directory) writer_open(&o->entry, XC_DEFLATE, o->fd);
+}
+
+static void archive_entry_data(ArchiveOut *o, const unsigned char *data, size_t n) {
+  if (!o->zip) {
+    writer_put(&o->w, data, n, false);
+    return;
+  }
+  o->crc = g_codec.crc32(o->crc, data, (unsigned int)n);
+  o->usize += (int64_t)n;
+  writer_put(&o->entry, data, n, false);
+}
+
+static void archive_entry_end(ArchiveOut *o, const char *name, size_t name_len, bool directory, const struct stat *st) {
+  if (!o->zip) {
+    static const unsigned char zeros[512];
+    if (!directory) writer_put(&o->w, zeros, (512 - (size_t)(st->st_size % 512)) % 512, false);
+    return;
+  }
+  int64_t csize = 0;
+  if (!directory) {
+    writer_close(&o->entry);
+    csize = o->entry.written;
+  }
+  o->offset += csize;
+  unsigned char sizes[12];
+  put32(sizes, (uint32_t)o->crc);
+  put32(sizes + 4, (uint32_t)csize);
+  put32(sizes + 8, (uint32_t)o->usize);
+  if (pwrite(o->fd, sizes, sizeof(sizes), (off_t)o->entry_offset + 14) != (ssize_t)sizeof(sizes)) respond_errno(errno ? errno : EIO, "write archive output failed");
+  uint16_t dtime, ddate;
+  dos_stamp(st->st_mtim.tv_sec, &dtime, &ddate);
+  unsigned char c[46];
+  memset(c, 0, sizeof(c));
+  put32(c, 0x02014b50);
+  put16(c + 4, (3 << 8) | 30);
+  put16(c + 6, 20);
+  put16(c + 8, 0x0800);
+  put16(c + 10, directory ? 0 : 8);
+  put16(c + 12, dtime);
+  put16(c + 14, ddate);
+  memcpy(c + 16, sizes, sizeof(sizes));
+  put16(c + 28, (uint32_t)name_len);
+  put32(c + 38, ((uint32_t)((directory ? S_IFDIR : S_IFREG) | (st->st_mode & 0777)) << 16) | (directory ? 0x10 : 0));
+  put32(c + 42, (uint32_t)o->entry_offset);
+  sb_append_mem(&o->central, (const char *)c, sizeof(c));
+  sb_append_mem(&o->central, name, name_len);
+  o->central_count++;
+  if (o->central.len > XP_MAX_ZIP_DIRECTORY_BYTES) respond_error("LIMIT_EXCEEDED", EFBIG, "zip central directory exceeds its size limit");
+}
+
+static void archive_finish(ArchiveOut *o) {
+  if (!o->zip) {
+    static const unsigned char zeros[1024];
+    writer_put(&o->w, zeros, sizeof(zeros), false);
+    writer_close(&o->w);
+    return;
+  }
+  write_fd_all(o->fd, o->central.data, o->central.len);
+  unsigned char end[22];
+  memset(end, 0, sizeof(end));
+  put32(end, 0x06054b50);
+  put16(end + 8, o->central_count);
+  put16(end + 10, o->central_count);
+  put32(end + 12, (uint32_t)o->central.len);
+  put32(end + 16, (uint32_t)o->offset);
+  write_fd_all(o->fd, end, sizeof(end));
+}
+
+/* Adds one entry (recursively for a folder); rel holds its archive name and is restored on return. */
+static void archive_add(ArchiveOut *o, int parent_fd, const char *name, char *rel, size_t rel_len, uid_t uid, int depth, CopyBudget *budget) {
+  if (depth > XP_MAX_TREE_DEPTH) respond_error("LIMIT_EXCEEDED", ELOOP, "directory nesting exceeds the archive limit");
+  int fd = xp_openat2(parent_fd, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK, 0, XP_RESOLVE_CONFINED);
+  if (fd < 0) respond_errno(errno, "open archive source failed");
+  struct stat st;
+  if (fstat(fd, &st) != 0) respond_errno(errno, "inspect archive source failed");
+  require_managed_entry(&st, uid);
+  if (!copy_budget_add(budget, 1, S_ISREG(st.st_mode) ? (int64_t)st.st_size : 0)) respond_error("LIMIT_EXCEEDED", EFBIG, budget->limit_message);
+  if (S_ISDIR(st.st_mode)) {
+    if (rel_len + 1 > XP_MAX_PATH_BYTES) respond_error("LIMIT_EXCEEDED", ENAMETOOLONG, "archive entry path is too long");
+    rel[rel_len] = '/';
+    rel[rel_len + 1] = '\0';
+    archive_entry_begin(o, rel, rel_len + 1, true, &st);
+    archive_entry_end(o, rel, rel_len + 1, true, &st);
+    DIR *dirp = fdopendir(fd);
+    if (!dirp) respond_errno(errno, "read archive source folder failed");
+    for (;;) {
+      errno = 0;
+      struct dirent *de = readdir(dirp);
+      if (!de) {
+        if (errno != 0) respond_errno(errno, "read archive source folder failed");
+        break;
+      }
+      if (skipped_tree_name(de->d_name)) continue;
+      size_t child_len = strlen(de->d_name);
+      if (rel_len + 1 + child_len > XP_MAX_PATH_BYTES) respond_error("LIMIT_EXCEEDED", ENAMETOOLONG, "archive entry path is too long");
+      memcpy(rel + rel_len + 1, de->d_name, child_len + 1);
+      archive_add(o, dirfd(dirp), de->d_name, rel, rel_len + 1 + child_len, uid, depth + 1, budget);
+    }
+    closedir(dirp);
+    rel[rel_len] = '\0';
+    return;
+  }
+  archive_entry_begin(o, rel, rel_len, false, &st);
+  int64_t total = 0;
+  for (;;) {
+    ssize_t n = read(fd, g_copy_buffer, sizeof(g_copy_buffer));
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      respond_errno(errno, "read archive source failed");
+    }
+    if (n == 0) break;
+    if (n > st.st_size - total) break;
+    total += n;
+    archive_entry_data(o, (const unsigned char *)g_copy_buffer, (size_t)n);
+  }
+  if (total != st.st_size) respond_error("CONFLICT", EAGAIN, "a file changed while it was being archived");
+  archive_entry_end(o, rel, rel_len, false, &st);
+  close(fd);
+}
+
+/* Maps the archive name's suffix to its format, so a name always tells the truth about its content. */
+static bool archive_format(const char *name, bool *zip, Codec *codec) {
+  static const struct { const char *suffix; bool zip; Codec codec; } formats[] = {
+    { ".zip", true, XC_DEFLATE }, { ".tar", false, XC_NONE }, { ".tar.gz", false, XC_GZIP }, { ".tgz", false, XC_GZIP },
+    { ".tar.bz2", false, XC_BZIP2 }, { ".tbz2", false, XC_BZIP2 }, { ".tar.zst", false, XC_ZSTD }, { ".tzst", false, XC_ZSTD },
+  };
+  size_t len = strlen(name);
+  for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); i++) {
+    size_t s = strlen(formats[i].suffix);
+    if (len > s && strcasecmp(name + len - s, formats[i].suffix) == 0) {
+      *zip = formats[i].zip;
+      *codec = formats[i].codec;
+      return true;
+    }
+  }
+  return false;
+}
+
+static void op_compress(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_file_mode, int64_t max_list_entries) {
+  const char *path = NULL, *destination = NULL;
+  read_source_and_destination(req, "compress", &path, &destination);
+  ArchiveOut *o = calloc(1, sizeof(ArchiveOut));
+  if (!o) _exit(12);
+  Codec codec = XC_NONE;
+  if (!archive_format(destination, &o->zip, &codec)) {
+    respond_error("VALIDATION", EINVAL, "archive name must end in .zip, .tar, .tar.gz, .tgz, .tar.bz2, .tbz2, .tar.zst or .tzst");
+  }
+  require_codec(codec);
+  char src_parent[XP_MAX_PATH_BYTES + 1], src_name[NAME_MAX + 1];
+  char dst_parent[XP_MAX_PATH_BYTES + 1], dst_name[NAME_MAX + 1];
+  split_rel_path(path, src_parent, src_name);
+  split_rel_path(destination, dst_parent, dst_name);
+  int src_fd = open_confined_dir(home_dirfd, src_parent, uid);
+  int dst_fd = open_confined_dir(home_dirfd, dst_parent, uid);
+  struct stat existing;
+  if (fstatat(dst_fd, dst_name, &existing, AT_SYMLINK_NOFOLLOW) == 0) respond_error("CONFLICT", EEXIST, "archive destination already exists");
+  if (errno != ENOENT) respond_errno(errno, "fstatat archive destination failed");
+  CopyBudget scanned = { .entries = 0, .bytes = 0, .max_entries = max_list_entries, .max_bytes = archive_byte_ceiling(), .limit_message = XP_ARCHIVE_LIMIT_MESSAGE };
+  scan_copy_source(src_fd, src_name, uid, 0, &scanned);
+
+  start_staging(dst_fd, false);
+  o->fd = xp_openat2(dst_fd, g_staging.name, O_WRONLY | O_NOFOLLOW, 0, XP_RESOLVE_CONFINED);
+  if (o->fd < 0) respond_errno(errno, "open archive staging file failed");
+  if (o->zip) sb_init(&o->central, 4096);
+  else writer_open(&o->w, codec, o->fd);
+  char rel[XP_MAX_PATH_BYTES + 2];
+  snprintf(rel, sizeof(rel), "%s", src_name);
+  CopyBudget budget = scanned;
+  budget.entries = budget.bytes = 0;
+  archive_add(o, src_fd, src_name, rel, strlen(rel), uid, 0, &budget);
+  archive_finish(o);
+  if (fchmod(o->fd, (mode_t)(max_file_mode & 0640)) != 0) respond_errno(errno, "set archive mode failed");
+  if (fsync(o->fd) != 0) respond_errno(errno, "fsync archive failed");
+  close(o->fd);
+  if (xp_renameat2(dst_fd, g_staging.name, dst_fd, dst_name, RENAME_NOREPLACE) != 0) respond_errno(errno, "publish archive failed");
+  g_staging.active = false;
   (void)fsync(dst_fd);
   respond_entry_at(dst_fd, dst_name, destination);
 }
@@ -2699,6 +3981,10 @@ static void run_operation(const char *op, int home_dirfd, uid_t uid, const JsonV
     op_move(home_dirfd, uid, req);
   } else if (strcmp(op, "copy") == 0) {
     op_copy(home_dirfd, uid, req, max_file_mode, max_dir_mode, max_list_entries);
+  } else if (strcmp(op, "compress") == 0) {
+    op_compress(home_dirfd, uid, req, max_file_mode, max_list_entries);
+  } else if (strcmp(op, "extract") == 0) {
+    op_extract(home_dirfd, uid, req, max_list_entries);
   } else if (strcmp(op, "trash") == 0) {
     op_trash(home_dirfd, uid, req);
   } else if (strcmp(op, "list-trash") == 0) {
@@ -2800,6 +4086,10 @@ int main(int argc, char **argv) {
   (void)jv_get_int(ctx, "maxFileMode", &max_file_mode);
   (void)jv_get_int(ctx, "maxDirMode", &max_dir_mode);
   (void)jv_get_int(ctx, "maxListEntries", &max_list_entries);
+  int64_t disk_quota_mb = 0;
+  if (jv_get_int(ctx, "diskQuotaMb", &disk_quota_mb) && disk_quota_mb > 0 && disk_quota_mb <= XP_MAX_ARCHIVE_BYTES / (1024 * 1024)) {
+    g_archive_quota_bytes = disk_quota_mb * 1024 * 1024;
+  }
 
   if (max_edit_bytes <= 0 || max_edit_bytes > XP_MAX_EDIT_BYTES_CEILING ||
       max_file_mode <= 0 || max_file_mode > 0640 || (max_file_mode & ~0640) != 0 ||

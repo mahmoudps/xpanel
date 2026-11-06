@@ -3,7 +3,7 @@ import type { ClientRequest, IncomingMessage } from 'node:http'
 import { dirname, isAbsolute } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { lstat } from 'node:fs/promises'
-import { AGENT_ROUTE_TIMEOUT_MS, assertAgentCredential, assertRootOwnedAgentPath, MAX_AGENT_MESSAGE_BYTES } from '@xpanel/agent'
+import { agentRouteTimeoutMs, assertAgentCredential, assertRootOwnedAgentPath, MAX_AGENT_MESSAGE_BYTES } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
 import { fail, isUuid, XpanelError } from '@xpanel/core'
 import type { LiveEvent } from '@xpanel/core'
@@ -196,7 +196,7 @@ export const createAgentClient = (options: AgentClientOptions): AgentApp & { clo
     return new Promise<Response>((resolveResponse, rejectResponse) => {
       const outgoing = request({
         socketPath: options.socketPath, path: `${url.pathname}${url.search}`,
-        method: req.method, headers, timeout: Math.max(timeout, AGENT_ROUTE_TIMEOUT_MS.get(url.pathname) ?? 0), signal: req.signal,
+        method: req.method, headers, timeout: Math.max(timeout, agentRouteTimeoutMs(url.pathname) ?? 0), signal: req.signal,
       }, response => {
         if (terminalOutput && response.statusCode === 200 && response.headers['content-type'] === 'application/x-ndjson') {
           resolveResponse(terminalOutputResponse(response, outgoing))
