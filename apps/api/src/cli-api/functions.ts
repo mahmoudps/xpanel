@@ -186,6 +186,11 @@ export const CLI_API_FUNCTIONS: Readonly<Record<CliApiCommand, readonly CliApiFu
     ['web-features', 'web_disk_update', 'PUT', '/api/web-features/{account}/web-disk'],
   ],
   xwhmapi: [
+    ['accounts', 'bulk_owner', 'POST', '/api/accounts/bulk-actions/owner'],
+    ['accounts', 'bulk_plan', 'POST', '/api/accounts/bulk-actions/plan'],
+    ['accounts', 'bulk_suspend', 'POST', '/api/accounts/bulk-actions/suspend'],
+    ['accounts', 'bulk_terminate', 'DELETE', '/api/accounts/bulk-actions'],
+    ['accounts', 'bulk_unsuspend', 'POST', '/api/accounts/bulk-actions/unsuspend'],
     ['accounts', 'certificates_create', 'POST', '/api/accounts/{account}/certificates'],
     ['accounts', 'certificates_delete', 'DELETE', '/api/accounts/{account}/certificates/{id}'],
     ['accounts', 'certificates_install', 'POST', '/api/accounts/{account}/certificates/install'],
