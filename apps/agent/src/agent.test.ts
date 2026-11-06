@@ -447,7 +447,9 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
 
     // 2. Feed xpanel_metrics site log lines the way the bandwidth meter reads them, then query website analytics
     const nowIso = new Date().toISOString()
-    const metric = (fields: Record<string, unknown>) => JSON.stringify({ time: nowIso, host: primaryDomain.name, method: 'GET', body_bytes: 0, request_bytes: 300, upstream_time: '', cache: '', referer: '', agent: 'curl/8', ...fields }) + '\n'
+    // windows hold complete hours: these requests were served in the previous hour
+    const lastHour = new Date(Date.now() - 3_600_000).toISOString()
+    const metric = (fields: Record<string, unknown>) => JSON.stringify({ time: lastHour, host: primaryDomain.name, method: 'GET', body_bytes: 0, request_bytes: 300, upstream_time: '', cache: '', referer: '', agent: 'curl/8', ...fields }) + '\n'
     const siteLog = Buffer.from(
       metric({ ip: '198.51.100.25', uri: '/products?page=1', status: 200, bytes: 14200, request_time: 0.018, upstream_time: '0.012', cache: 'HIT', referer: 'https://www.google.com/search?q=alice' })
       + metric({ ip: '198.51.100.99', method: 'POST', uri: '/checkout', status: 201, bytes: 2048, request_time: 0.064, upstream_time: '0.055', cache: 'BYPASS', referer: '-' }),

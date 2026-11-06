@@ -13,7 +13,7 @@ A registered document is a navigation destination, not an authorization or servi
 | Account list and plans | Filters operate on authorized loaded rows. Plan edits use the stored plan and PATCH; creation uses POST. Submitted resource values use the displayed units. |
 | Application catalog | Read-only pages inherit their canonical installer page's role and capability. Missing signed catalogs, job reads or installer services leave actions disabled. |
 | Server analytics | One cached resource pipeline. A missing, stale, incomplete or unmeasured snapshot is unavailable, rather than a numeric zero. |
-| Website analytics | Fed only by the bandwidth meter's reads of the edge site access logs. A window the current agent process has not read completely, or a stale read, is unavailable, rather than a partial count. |
+| Website analytics | Fed only by the bandwidth meter's reads of the edge site access logs and kept as bounded hour and day aggregates across agent restarts. A window covers complete hours (1h, 24h) or complete UTC days (7d, 30d); one not read completely, or a stale read, is unavailable, rather than a partial count. |
 | Host limits and DNS | Enforcement requires assigned-plan values and actual device/unit evidence. Reconciliation compares actual prior zone content before reusing a serial. |
 | Lifecycle | Privileged effects require persisted intent and the native root/FD/process ownership protocol. A parsed artifact or portable test cannot grant that authority. |
 

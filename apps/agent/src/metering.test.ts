@@ -122,7 +122,8 @@ describe('bandwidth meter', () => {
     const instance = createBandwidthMeter({ onError: error => { throw error }, readState: async () => ({ accounts, domains, plans: [plan] }), readMail: null, readFtp: null, now: () => NOW,
       readFrom: async (path, offset, maxBytes) => { const start = Math.min(offset, busy.length); return { exists: true, identity: '1:' + path, sizeBytes: busy.length, start, bytes: busy.subarray(start, start + maxBytes) } },
       readLedger: async () => ledger, writeLedger: async value => { ledger = structuredClone(value) },
-      onWebLog: chunk => { chunks.push({ length: chunk.bytes.length, complete: chunk.bytes.length === 0 || chunk.bytes.at(-1) === 10, caughtUp: chunk.caughtUp }) } })
+      webAnalytics: { load: async () => undefined, save: async () => undefined,
+        ingestSiteLog: chunk => chunks.push({ length: chunk.bytes.length, complete: chunk.bytes.length === 0 || chunk.bytes.at(-1) === 10, caughtUp: chunk.caughtUp }) } })
     await instance.collect(true)
     // the 8 MiB budget reaches eight 1 MiB reads; the next collection starts at the first site it did not reach
     expect(Object.values((ledger as BandwidthLedger).cursors).filter(cursor => cursor.offset > 0)).toHaveLength(8)
@@ -160,7 +161,7 @@ describe('bandwidth meter', () => {
     await later.collect(); clock.at = Date.parse('2026-12-01T00:00:00.000Z'); await later.collect()
     expect(laterLedger()?.months['2026-09']).toBeUndefined()
   })
-  it('feeds website analytics the bytes it meters, once, across collections, a restart, rotation and truncation', async () => {
+  it('feeds website analytics the bytes it meters, once, across collections, restarts, rotation and truncation', async () => {
     const at = (minutes: number): string => new Date(NOW.getTime() + minutes * 60_000).toISOString()
     const hit = (minutes: number, bytes: number): string => JSON.stringify({ time: at(minutes), host: 'alice.test', ip: '192.0.2.1', method: 'GET', uri: '/', status: 200, body_bytes: bytes, bytes, request_bytes: 100,
       request_time: 0.001, upstream_time: '', cache: '', referer: '', agent: 'curl/8' }) + '\n'
@@ -168,26 +169,28 @@ describe('bandwidth meter', () => {
     const clock = { at: NOW.getTime() }
     let ledger: unknown = null
     const chunks: SiteLogChunk[] = []
+    const store = { data: null as unknown, broken: false, read: async () => store.data, write: async (value: unknown) => { if (store.broken) throw new Error('disk full'); store.data = structuredClone(value) } }
     const start = (engine: WebsiteAnalyticsEngine) => createBandwidthMeter({ onError: error => { throw error }, readState: async () => ({ accounts: [account], domains: [domain], plans: [plan] }), readMail: null, readFtp: null,
       now: () => new Date(clock.at), readLedger: async () => ledger, writeLedger: async value => { ledger = structuredClone(value) },
       readFrom: async (file, offset, maxBytes) => { const all = Buffer.from(files[file]!.text), from = Math.min(offset, all.length); return { exists: true, identity: files[file]!.identity, sizeBytes: all.length, start: from, bytes: all.subarray(from, from + maxBytes) } },
-      onWebLog: chunk => { chunks.push(chunk); engine.ingestSiteLog(chunk) } })
+      webAnalytics: { load: () => engine.load(), save: day => engine.save(day), ingestSiteLog: chunk => { chunks.push(chunk); return engine.ingestSiteLog(chunk) } } })
     const hour = (engine: WebsiteAnalyticsEngine) => engine.queryDomainSnapshot(domain, { window: '1h', now: new Date(clock.at) }).totals
     const refused = (read: () => unknown): unknown => { try { read(); return null } catch (error) { return (error as { detail?: { reason?: unknown } }).detail?.reason } }
-    const first = new WebsiteAnalyticsEngine(), meter1 = start(first)
-    await meter1.collect()
+    const first = new WebsiteAnalyticsEngine({ store })
+    await start(first).collect()
     files[path]!.text += hit(20, 1000) + hit(40, 24) + '{"time":"'
-    clock.at = NOW.getTime() + 61 * 60_000; await meter1.collect()
-    // one read feeds both: the analytics of a fully read hour carry the metered bytes; the line still being written waits
+    clock.at = NOW.getTime() + 61 * 60_000; await start(first).collect()
+    // one read feeds both: the analytics of the fully read hour carry the metered bytes; the line still being written waits
     expect(hour(first)).toMatchObject({ requests: 2, bytes: 1024 })
     expect(web(ledger as BandwidthLedger)?.sentBytes).toBe(1024)
-    // a restart continues at the saved offset; the new process holds no complete hour yet
+    // a restart serves the saved hours at once and continues at the saved offset
     const { offset } = (ledger as BandwidthLedger).cursors[path]!, savedAt = (ledger as BandwidthLedger).updatedAt
+    const second = new WebsiteAnalyticsEngine({ store }), meter2 = start(second)
+    await second.load()
+    expect(hour(second)).toEqual(hour(first))
     files[path]!.text = files[path]!.text.slice(0, offset) + hit(62, 5)
-    const second = new WebsiteAnalyticsEngine(), meter2 = start(second)
     clock.at = NOW.getTime() + 66 * 60_000; await meter2.collect()
     expect(chunks.at(-1)).toMatchObject({ start: offset, since: savedAt, caughtUp: true })
-    expect(refused(() => hour(second))).toBe('window-not-covered')
     files[path] = { identity: '1:11', text: hit(70, 7) + hit(71, 7) }
     clock.at = NOW.getTime() + 71 * 60_000; await meter2.collect(true)
     expect(chunks.at(-1)).toMatchObject({ identity: '1:11', start: 0 })
@@ -195,8 +198,15 @@ describe('bandwidth meter', () => {
     clock.at = NOW.getTime() + 76 * 60_000; await meter2.collect(true)
     expect(chunks.at(-1)).toMatchObject({ identity: '1:11', start: 0, sizeBytes: Buffer.byteLength(hit(75, 3)) })
     clock.at = NOW.getTime() + 125 * 60_000; await meter2.collect(true)
-    expect(hour(second)).toMatchObject({ requests: 3, bytes: 17 })
+    expect(hour(second)).toMatchObject({ requests: 4, bytes: 22 })
     expect(web(ledger as BandwidthLedger)?.sentBytes).toBe(1024 + 5 + 14 + 3)
+    // a save lost before a restart leaves counted lines out of the store: that history is refused, not undercounted
+    files[path]!.text += hit(126, 9)
+    store.broken = true; clock.at = NOW.getTime() + 130 * 60_000; await meter2.collect(true); store.broken = false
+    const third = new WebsiteAnalyticsEngine({ store })
+    files[path]!.text += hit(131, 1)
+    clock.at = NOW.getTime() + 135 * 60_000; await start(third).collect(true)
+    expect(refused(() => hour(third))).toBe('window-not-covered')
   })
 })
 

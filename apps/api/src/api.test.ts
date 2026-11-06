@@ -771,7 +771,9 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     // Site access logs in the edge's xpanel_metrics format, as the bandwidth meter hands them to the engine
     const nowIso = new Date().toISOString()
     const since = new Date(Date.now() - 2 * 86_400_000).toISOString()
-    const metric = (fields: Record<string, unknown>) => JSON.stringify({ time: nowIso, method: 'GET', body_bytes: 0, request_bytes: 300, upstream_time: '', referer: '', agent: 'curl/8', ...fields }) + '\n'
+    // windows hold complete hours: these requests were served in the previous hour
+    const lastHour = new Date(Date.now() - 3_600_000).toISOString()
+    const metric = (fields: Record<string, unknown>) => JSON.stringify({ time: lastHour, method: 'GET', body_bytes: 0, request_bytes: 300, upstream_time: '', referer: '', agent: 'curl/8', ...fields }) + '\n'
     const feed = (accountId: string, domain: { id: string; name: string }, line: string) => {
       const bytes = Buffer.from(line)
       return websiteAnalytics.ingestSiteLog({ path: `/var/log/xpanel/nginx/${domain.name}.access.log`, accountId, owners: new Map([[domain.name, domain]]), identity: '1:' + domain.name,

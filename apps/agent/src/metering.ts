@@ -2,7 +2,7 @@ import { fail } from '@xpanel/core'
 import type { Account, Domain, Plan } from '@xpanel/core'
 import { edge } from '@xpanel/render'
 import type { LogSlice } from './account-logs.ts'
-import type { IoAccountsView, SiteLogChunk } from './analytics.ts'
+import type { IoAccountsView, SiteLogChunk, WebsiteAnalyticsFeed } from './analytics.ts'
 import type { FtpLogObservation } from './ftp-log.ts'
 import { UNAVAILABLE_DISK_LATENCY, type DiskLatency } from './host-metrics.ts'
 import type { MailLogObservation } from './mail-log.ts'
@@ -75,8 +75,8 @@ export interface BandwidthMeterOptions {
   writeLedger: (ledger: BandwidthLedger) => Promise<void>
   /** Runs after each recorded collection (plan enforcement); its failure is reported through onError. */
   afterCollect?: () => Promise<void>
-  /** Receives each read site's newly consumed lines (website analytics) before the ledger write, so it must tolerate a re-read. */
-  onWebLog?: (chunk: SiteLogChunk) => void
+  /** Website analytics from the same site log reads. Saved before the ledger, so a lost save shows as a gap and a lost ledger write as a re-read it skips. */
+  webAnalytics?: WebsiteAnalyticsFeed
   now?: () => Date
   onError?: (error: unknown) => void
 }
@@ -211,6 +211,7 @@ export function createBandwidthMeter(options: BandwidthMeterOptions) {
     const current = monthOf(at), keep = new Set(Array.from({ length: BANDWIDTH_MONTHS_KEPT }, (_, index) => monthBefore(current, index)))
     const { sites, failed } = sitesOf(saved), listed = sites.slice(0, BANDWIDTH_MAX_SITES), cursors: BandwidthLedger['cursors'] = {}
     let budget = BANDWIDTH_TICK_READ_BYTES
+    await options.webAnalytics?.load()
     // Coverage fields describe the latest collection only; totals and cursors carry over.
     ledger.pendingBytes = 0; ledger.skippedLines = 0; ledger.unavailableSites = sites.length - listed.length + failed.size
     // Round robin: start where the last collection's budget ran out, so busy early sites cannot starve the later ones.
@@ -235,7 +236,7 @@ export function createBandwidthMeter(options: BandwidthMeterOptions) {
         // A known cursor continues the previous collection's read; a new one starts now.
         const chunk: SiteLogChunk = { path: site.path, accountId: site.accountId, owners: site.owners, identity: slice.identity, start: slice.start, sizeBytes: slice.sizeBytes,
           bytes: slice.bytes.subarray(0, consumed), readAt: at.toISOString(), since: known ? ledger.updatedAt ?? at.toISOString() : at.toISOString(), caughtUp }
-        try { options.onWebLog?.(chunk) } catch { /* Analytics cannot stop metering. */ }
+        try { options.webAnalytics?.ingestSiteLog(chunk) } catch { /* Analytics cannot stop metering. */ }
       } catch { ledger.unavailableSites++; if (known) cursors[site.path] = known }
     }
     ledger.cursors = cursors
@@ -247,6 +248,7 @@ export function createBandwidthMeter(options: BandwidthMeterOptions) {
     for (const month of Object.keys(ledger.months)) if (!keep.has(month)) delete ledger.months[month]
     ledger.updatedAt = at.toISOString()
     if (stopped) return
+    await options.webAnalytics?.save(at).catch(() => undefined)
     await options.writeLedger(ledger)
     if (!stopped && options.afterCollect) await options.afterCollect()
   }

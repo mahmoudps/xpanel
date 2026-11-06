@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { readFile, stat } from 'node:fs/promises'
 import { performance } from 'node:perf_hooks'
 import { assertResourceConfigurationBinding, fail, isUnlimited, parseResourceObservationSnapshot, RESOURCE_SAMPLE_INTERVAL_MS } from '@xpanel/core'
 import type {
@@ -670,7 +671,7 @@ export class CanonicalIoResourcePipeline {
   }
 }
 
-/** One site's newly consumed complete access-log lines, as the bandwidth meter read them (createBandwidthMeter onWebLog). */
+/** One site's newly consumed complete access-log lines, as the bandwidth meter read them. */
 export interface SiteLogChunk {
   path: string
   accountId: Id
@@ -688,24 +689,50 @@ export interface SiteLogChunk {
   caughtUp: boolean
 }
 
-interface StoredAccessRecord {
-  tsMs: number
-  domainId: Id
-  accountId: Id
-  ip: string
-  uri: string
-  status: number
-  bytes: number
-  rtMs: number
-  urtMs: number
-  cacheKind: 'hit' | 'miss' | 'bypass'
-  referrer: string
+/** What the bandwidth meter drives: loaded before its first read, fed each site read, saved before each ledger write. */
+export interface WebsiteAnalyticsFeed {
+  load(): Promise<void>
+  ingestSiteLog(chunk: SiteLogChunk): number
+  save(at: Date): Promise<void>
 }
 
-const LOG_LINE_MAX_CHARS = 16 * 1024
+/** The private aggregate store; read returns null when there is none. */
+export interface WebsiteAnalyticsStore {
+  read(): Promise<unknown>
+  write(data: unknown): Promise<void>
+}
+
+export const WEBSITE_ANALYTICS_PATH = '/var/lib/xpanel/website-analytics.json'
+/** Hard bound of the store file; the oldest buckets are dropped first. */
+export const WEBSITE_ANALYTICS_MAX_BYTES = 8 * 1024 * 1024
 /** A domain whose site log was last read longer ago than three bandwidth collections is stale. */
 export const WEBSITE_ANALYTICS_STALE_MS = 3 * BANDWIDTH_INTERVAL_MS
-const WINDOW_MS = { '1h': 3_600_000, '24h': 86_400_000, '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 } as const
+
+const HOUR_MS = 3_600_000
+const DAY_MS = 86_400_000
+/** Hour buckets serve the 1h and 24h windows, day buckets the 7d and 30d windows. */
+const HOURS_KEPT = 26
+const DAYS_KEPT = 31
+const WINDOW_MS = { '1h': HOUR_MS, '24h': 24 * HOUR_MS, '7d': 7 * DAY_MS, '30d': 30 * DAY_MS } as const
+/** Top rows a finished bucket keeps, and the distinct keys a bucket still being filled tracks. */
+const TOP_KEPT = 10
+const TOP_LIVE = 100
+/** Request-time histogram: bin i holds (1.25^(i-1), 1.25^i] ms, the last bin everything above. */
+const RT_GROWTH = 1.25
+const RT_BINS = 54
+/** requests, bytes, 1xx unused, then 2xx..5xx at their class index, cache hit/miss/bypass, request ms sum, upstream ms sum, request ms max. */
+const N_REQUESTS = 0, N_BYTES = 1, N_HIT = 6, N_MISS = 7, N_BYPASS = 8, N_RT_SUM = 9, N_URT_SUM = 10, N_RT_MAX = 11, N_RT_BIN = 12
+const SLOTS = N_RT_BIN + RT_BINS
+/** HyperLogLog registers for unique visitors: about 6.5% standard error, small counts near exact; no address is stored. */
+const VISITOR_REGISTERS = 256
+const LOG_LINE_MAX_CHARS = 16 * 1024
+
+type TopRow = [requests: number, bytes: number, errors5xx: number]
+interface Bucket { start: number; n: Float64Array; visitors: Uint8Array; top: [paths: Map<string, TopRow>, referrers: Map<string, TopRow>, clients: Map<string, TopRow>] }
+/** Per domain: since when every line is held, the last read that reached the end of its site log, and its buckets. */
+interface DomainState { accountId: Id; sinceMs: number; throughMs: number | null; hours: Map<number, Bucket>; days: Map<number, Bucket> }
+/** Per log path: the file identity and end offset already counted, and whether that read reached the end of the file. */
+interface FedMark { identity: string; end: number; complete: boolean; at: number }
 
 const logText = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max
 const logCount = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
@@ -744,85 +771,261 @@ const normalizeReferrer = (ref: string): string => {
   }
 }
 
-const percentile95 = (sortedAsc: readonly number[]): number => {
-  if (sortedAsc.length === 0) return 0
-  const idx = Math.min(sortedAsc.length - 1, Math.floor(sortedAsc.length * 0.95))
-  return Number((sortedAsc[idx] ?? 0).toFixed(2))
+/** FNV-1a with the murmur3 finalizer: an even 32-bit spread for the visitor registers. */
+const hash32 = (text: string): number => {
+  let h = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193)
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b)
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35)
+  return (h ^ (h >>> 16)) >>> 0
 }
 
-const rankTop = (counts: Map<string, { requests: number; bytes: number; errors5xx: number }>, limit = 10): WebsiteTopEntry[] =>
+const visitorEstimate = (registers: Uint8Array): number => {
+  let sum = 0, zeros = 0
+  for (const rank of registers) { sum += 2 ** -rank; if (rank === 0) zeros++ }
+  const m = registers.length, raw = 0.7213 / (1 + 1.079 / m) * m * m / sum
+  return Math.round(raw <= 2.5 * m && zeros > 0 ? m * Math.log(m / zeros) : raw)
+}
+
+const round2 = (value: number): number => Number(value.toFixed(2))
+
+/** Interpolated within the histogram bin, never above the slowest request. */
+const percentile95 = (n: Float64Array): number => {
+  const total = n[N_REQUESTS]!
+  if (total === 0) return 0
+  const rank = Math.floor(total * 0.95)
+  let seen = 0
+  for (let bin = 0; bin < RT_BINS; bin++) {
+    const inBin = n[N_RT_BIN + bin]!
+    if (seen + inBin > rank) {
+      const low = bin === 0 ? 0 : RT_GROWTH ** (bin - 1), high = RT_GROWTH ** bin
+      return round2(Math.min(n[N_RT_MAX]!, low + (high - low) * (rank - seen + 1) / inBin))
+    }
+    seen += inBin
+  }
+  return round2(n[N_RT_MAX]!)
+}
+
+const rankTop = (counts: Map<string, TopRow>, limit = TOP_KEPT): WebsiteTopEntry[] =>
   [...counts.entries()]
-    .sort((a, b) => b[1].requests - a[1].requests || b[1].bytes - a[1].bytes)
+    .sort((a, b) => b[1][0] - a[1][0] || b[1][1] - a[1][1] || (a[0] < b[0] ? -1 : 1))
     .slice(0, limit)
-    .map(([key, v]) => ({
-      key,
-      requests: v.requests,
-      bytes: v.bytes,
-      ...(v.errors5xx > 0 && { errors5xx: v.errors5xx }),
-    }))
+    .map(([key, [requests, bytes, errors5xx]]) => ({ key, requests, bytes, ...(errors5xx > 0 && { errors5xx }) }))
+
+const newBucket = (start: number): Bucket => ({ start, n: new Float64Array(SLOTS), visitors: new Uint8Array(VISITOR_REGISTERS), top: [new Map(), new Map(), new Map()] })
+
+const bucketAt = (buckets: Map<number, Bucket>, start: number): Bucket => {
+  let bucket = buckets.get(start)
+  if (!bucket) buckets.set(start, bucket = newBucket(start))
+  return bucket
+}
+
+/** Merges counts into target; a finished bucket's top rows are lower bounds for keys outside its kept rows. */
+const mergeInto = (target: Bucket, source: Bucket): void => {
+  for (let slot = 0; slot < SLOTS; slot++) target.n[slot] = slot === N_RT_MAX ? Math.max(target.n[slot]!, source.n[slot]!) : target.n[slot]! + source.n[slot]!
+  for (let register = 0; register < VISITOR_REGISTERS; register++) target.visitors[register] = Math.max(target.visitors[register]!, source.visitors[register]!)
+  source.top.forEach((rows, list) => {
+    const into = target.top[list as 0 | 1 | 2]
+    for (const [key, [requests, bytes, errors]] of rows) {
+      const row = into.get(key)
+      if (row) { row[0] += requests; row[1] += bytes; row[2] += errors } else into.set(key, [requests, bytes, errors])
+    }
+  })
+}
+
+const countLine = (bucket: Bucket, slots: readonly number[], bytes: number, rtMs: number, urtMs: number, register: number, rank: number, keys: readonly string[], error: number): void => {
+  const n = bucket.n
+  for (const slot of slots) n[slot] = n[slot]! + 1
+  n[N_BYTES] = n[N_BYTES]! + bytes
+  n[N_RT_SUM] = n[N_RT_SUM]! + rtMs
+  n[N_URT_SUM] = n[N_URT_SUM]! + urtMs
+  n[N_RT_MAX] = Math.max(n[N_RT_MAX]!, rtMs)
+  bucket.visitors[register] = Math.max(bucket.visitors[register]!, rank)
+  keys.forEach((key, list) => {
+    const rows = bucket.top[list as 0 | 1 | 2], row = rows.get(key)
+    if (row) { row[0]++; row[1] += bytes; row[2] += error } else if (rows.size < TOP_LIVE) rows.set(key, [1, bytes, error])
+  })
+}
+
+const trimTop = (bucket: Bucket): void => {
+  for (const rows of bucket.top) {
+    if (rows.size <= TOP_KEPT) continue
+    const kept = new Set(rankTop(rows).map(entry => entry.key))
+    for (const key of rows.keys()) if (!kept.has(key)) rows.delete(key)
+  }
+}
+
+const encodeBucket = (bucket: Bucket): string => {
+  const slots: number[] = []
+  bucket.n.forEach((value, slot) => { if (value !== 0) slots.push(slot, value) })
+  const set = bucket.visitors.reduce((total, rank) => total + (rank > 0 ? 1 : 0), 0)
+  const sparse: number[] = []
+  if (set < VISITOR_REGISTERS / 2) bucket.visitors.forEach((rank, register) => { if (rank > 0) sparse.push(register, rank) })
+  const visitors = Buffer.from(set < VISITOR_REGISTERS / 2 ? Uint8Array.from(sparse) : bucket.visitors).toString('base64')
+  return JSON.stringify([bucket.start, slots, visitors, ...bucket.top.map(rows => rankTop(rows).map(entry => [entry.key, entry.requests, entry.bytes, entry.errors5xx ?? 0]))])
+}
+
+const decodeBucket = (text: unknown, unit: number): Bucket | null => {
+  if (typeof text !== 'string' || text.length > 64 * 1024) return null
+  let value: unknown
+  try { value = JSON.parse(text) } catch { return null }
+  if (!Array.isArray(value) || value.length !== 6) return null
+  const [start, slots, visitors, ...lists] = value as unknown[]
+  if (!Number.isSafeInteger(start) || (start as number) % unit !== 0 || !Array.isArray(slots) || slots.length % 2 !== 0 || slots.length > 2 * SLOTS || typeof visitors !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(visitors)) return null
+  const bucket = newBucket(start as number)
+  for (let i = 0; i < slots.length; i += 2) {
+    const slot = slots[i], count = slots[i + 1]
+    if (!Number.isInteger(slot) || slot < 0 || slot >= SLOTS || typeof count !== 'number' || !Number.isFinite(count) || count < 0) return null
+    bucket.n[slot] = count
+  }
+  const registers = Buffer.from(visitors, 'base64')
+  if (registers.length === VISITOR_REGISTERS) bucket.visitors.set(registers)
+  else if (registers.length % 2 === 0 && registers.length < VISITOR_REGISTERS) for (let i = 0; i < registers.length; i += 2) bucket.visitors[registers[i]!] = registers[i + 1]!
+  else return null
+  if (bucket.visitors.some(rank => rank > 25)) return null
+  for (const [list, rows] of lists.entries()) {
+    if (!Array.isArray(rows) || rows.length > TOP_KEPT) return null
+    for (const row of rows as unknown[]) {
+      if (!Array.isArray(row) || row.length !== 4 || typeof row[0] !== 'string' || !row[0] || row[0].length > 256 || !logCount(row[1]) || !logCount(row[2]) || !logCount(row[3])) return null
+      bucket.top[list]!.set(row[0], [row[1], row[2], row[3]])
+    }
+  }
+  return bucket
+}
+
+/** Accepts only a well-formed store; anything else is discarded and the windows are read again. */
+const parseStore = (raw: unknown): { marks: Map<string, FedMark>; domains: Map<Id, DomainState> } | null => {
+  const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+  const instant = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0
+  if (!object(raw) || !object(raw.marks) || !object(raw.domains)) return null
+  const marks = new Map<string, FedMark>(), domains = new Map<Id, DomainState>()
+  for (const [path, mark] of Object.entries(raw.marks)) {
+    if (path.length > 512 || !object(mark) || !logText(mark.identity, 64) || !logCount(mark.end) || typeof mark.complete !== 'boolean' || !instant(mark.at)) return null
+    marks.set(path, { identity: mark.identity, end: mark.end, complete: mark.complete, at: mark.at })
+  }
+  for (const [id, state] of Object.entries(raw.domains)) {
+    if (id.length > 64 || !object(state) || !logText(state.accountId, 64) || !instant(state.since) || state.through !== null && !instant(state.through) || !Array.isArray(state.hours) || !Array.isArray(state.days)) return null
+    const hours = state.hours.map(text => decodeBucket(text, HOUR_MS)), days = state.days.map(text => decodeBucket(text, DAY_MS))
+    if (hours.includes(null) || days.includes(null) || hours.length > HOURS_KEPT || days.length > DAYS_KEPT) return null
+    domains.set(id, { accountId: state.accountId, sinceMs: state.since, throughMs: state.through as number | null,
+      hours: new Map(hours.map(bucket => [bucket!.start, bucket!])), days: new Map(days.map(bucket => [bucket!.start, bucket!])) })
+  }
+  return { marks, domains }
+}
+
+/** Reads the store file; a missing file is null, an oversized one is refused so the engine discards it. */
+export const readWebsiteAnalyticsStore = async (path = WEBSITE_ANALYTICS_PATH): Promise<unknown> => {
+  let info
+  try { info = await stat(path) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
+  if (!info.isFile() || info.size > WEBSITE_ANALYTICS_MAX_BYTES) return fail('PRECONDITION_FAILED', 'the website analytics store is not a bounded regular file', { stateChanged: false })
+  return JSON.parse(await readFile(path, 'utf8'))
+}
 
 const unavailableWebsite = (reason: 'not-read' | 'stale' | 'window-not-covered'): never =>
   fail('SERVICE_UNAVAILABLE', 'website analytics are unavailable for this window', { reason, stateChanged: false })
 
 /**
  * Per-domain website analytics from the edge's `xpanel_metrics` site access logs, fed by the bandwidth meter's incremental reads.
- * Builds traffic, latency, cache hit ratio, status breakdown and top paths/referrers/IPs per domain. Records live in memory only,
- * so a window is served only when every line of it was read in this process.
+ * Lines are counted into hour and day buckets (traffic, status, cache, latency histogram, visitor registers, top rows), persisted
+ * once per collection, so an agent restart keeps every window it had read. A window is served only when all of it was read.
  */
-export class WebsiteAnalyticsEngine {
-  private readonly records: StoredAccessRecord[] = []
-  private readonly maxRecords: number
-  /** Per log path: the file identity and end offset already ingested, so a re-read of the same bytes is not counted twice. */
-  private readonly fed = new Map<string, { identity: string; end: number }>()
-  /** Per domain: since when every line is held, and the last read that reached the end of its site log. */
-  private readonly coverage = new Map<Id, { accountId: Id; sinceMs: number; throughMs: number | null }>()
+export class WebsiteAnalyticsEngine implements WebsiteAnalyticsFeed {
+  private marks = new Map<string, FedMark>()
+  private domains = new Map<Id, DomainState>()
+  private readonly store: WebsiteAnalyticsStore | undefined
+  private readonly maxBytes: number
+  private readonly loaded: Promise<void>
 
-  constructor(opts: { maxRecords?: number } = {}) {
-    this.maxRecords = opts.maxRecords ?? 50_000
+  constructor(opts: { store?: WebsiteAnalyticsStore; maxBytes?: number } = {}) {
+    this.store = opts.store
+    this.maxBytes = opts.maxBytes ?? WEBSITE_ANALYTICS_MAX_BYTES
+    // An unreadable or malformed store is discarded: windows refuse until they are read again, and the next save replaces it.
+    this.loaded = (async () => {
+      const parsed = parseStore(await this.store?.read().catch(() => null) ?? null)
+      if (parsed) { this.marks = parsed.marks; this.domains = parsed.domains }
+    })().catch(() => undefined)
+  }
+
+  load(): Promise<void> {
+    return this.loaded
   }
 
   /** Adds one site's newly read lines; a line counts for the domain that serves its host name. Returns the lines added. */
   ingestSiteLog(chunk: SiteLogChunk): number {
-    const mark = this.fed.get(chunk.path), readEnd = chunk.start + chunk.bytes.length
-    // The same file read again from an earlier offset (a failed ledger write or a reset cursor) skips what was ingested; a smaller file was truncated.
-    const same = mark !== undefined && mark.identity === chunk.identity && chunk.sizeBytes >= mark.end
-    const skip = same ? Math.min(chunk.bytes.length, Math.max(0, mark.end - chunk.start)) : 0
-    this.fed.set(chunk.path, { identity: chunk.identity, end: same ? Math.max(mark.end, readEnd) : readEnd })
-    const readAtMs = Date.parse(chunk.readAt), sinceMs = Date.parse(chunk.since)
+    const readAtMs = Date.parse(chunk.readAt), mark = this.marks.get(chunk.path), readEnd = chunk.start + chunk.bytes.length
+    const sameFile = mark !== undefined && mark.identity === chunk.identity && chunk.sizeBytes >= mark.end
+    // Lines between the counted end and this read were lost (a save that failed before a restart); a new or truncated file
+    // continues the history only after a recent complete read of the old one, as the meter's rotation shortcut assumes.
+    const continuous = mark !== undefined && (sameFile ? chunk.start <= mark.end : mark.complete && readAtMs - mark.at <= WEBSITE_ANALYTICS_STALE_MS)
+    const skip = sameFile ? Math.min(chunk.bytes.length, Math.max(0, mark.end - chunk.start)) : 0
+    this.marks.set(chunk.path, { identity: chunk.identity, end: sameFile ? Math.max(mark.end, readEnd) : readEnd, complete: chunk.caughtUp, at: readAtMs })
+    const restartAt = mark !== undefined && !sameFile ? readAtMs : Date.parse(chunk.since)
     for (const { id } of new Set(chunk.owners.values())) {
-      const known = this.coverage.get(id)
-      const covered = known?.accountId === chunk.accountId ? known : { accountId: chunk.accountId, sinceMs, throughMs: null as number | null }
-      if (chunk.caughtUp) covered.throughMs = readAtMs
-      this.coverage.set(id, covered)
+      const known = this.domains.get(id), owned = known !== undefined && known.accountId === chunk.accountId ? known : undefined
+      // A new owner starts empty; the same owner keeps its counted buckets even when its complete history restarts.
+      const state: DomainState = owned && continuous ? owned
+        : { accountId: chunk.accountId, sinceMs: restartAt, throughMs: null, hours: owned?.hours ?? new Map(), days: owned?.days ?? new Map() }
+      if (chunk.caughtUp) state.throughMs = readAtMs
+      this.domains.set(id, state)
     }
+    const hourCutoff = readAtMs - readAtMs % HOUR_MS - (HOURS_KEPT - 1) * HOUR_MS, dayCutoff = readAtMs - readAtMs % DAY_MS - (DAYS_KEPT - 1) * DAY_MS
     let added = 0
     for (const line of chunk.bytes.subarray(skip).toString('utf8').split('\n')) {
       const entry = line ? parseMetricsLogLine(line) : null
       const owner = entry ? ownerOf(chunk.owners, entry.host) : undefined
-      if (!entry || !owner) continue
-      const cache = entry.cache.toUpperCase()
-      this.records.push({
-        tsMs: Date.parse(entry.time),
-        domainId: owner.id,
-        accountId: chunk.accountId,
-        ip: entry.ip,
-        uri: (entry.uri.split('?')[0] || '/').slice(0, 256),
-        status: entry.status,
-        bytes: entry.bytes,
-        rtMs: entry.request_time * 1000,
-        urtMs: upstreamMs(entry.upstream_time),
-        cacheKind: cache === 'HIT' || cache === 'STALE' || cache === 'REVALIDATED' ? 'hit' : cache === 'BYPASS' ? 'bypass' : 'miss',
-        referrer: normalizeReferrer(entry.referer),
-      })
+      const state = owner ? this.domains.get(owner.id) : undefined
+      const at = entry ? Date.parse(entry.time) : NaN
+      if (!entry || !state || at < dayCutoff) continue
+      const rtMs = entry.request_time * 1000, cache = entry.cache.toUpperCase(), error = entry.status >= 500 ? 1 : 0
+      const slot = cache === 'HIT' || cache === 'STALE' || cache === 'REVALIDATED' ? N_HIT : cache === 'BYPASS' ? N_BYPASS : N_MISS
+      const bin = rtMs <= 1 ? 0 : Math.min(RT_BINS - 1, Math.ceil(Math.log(rtMs) / Math.log(RT_GROWTH)))
+      const hash = hash32(entry.ip), register = hash >>> 24, rank = Math.min(25, Math.clz32(hash << 8) + 1)
+      const keys = [(entry.uri.split('?')[0] || '/').slice(0, 256), normalizeReferrer(entry.referer), entry.ip.slice(0, 64)]
+      const statusClass = Math.floor(entry.status / 100), slots = statusClass >= 2 ? [N_REQUESTS, slot, N_RT_BIN + bin, statusClass] : [N_REQUESTS, slot, N_RT_BIN + bin]
+      const buckets = at >= hourCutoff ? [bucketAt(state.hours, at - at % HOUR_MS), bucketAt(state.days, at - at % DAY_MS)] : [bucketAt(state.days, at - at % DAY_MS)]
+      for (const bucket of buckets) countLine(bucket, slots, entry.bytes, rtMs, upstreamMs(entry.upstream_time), register, rank, keys, error)
       added++
     }
-    const excess = this.records.length - this.maxRecords
-    // An evicted line ends its domain's complete history at that line.
-    if (excess > 0) for (const old of this.records.splice(0, excess)) { const covered = this.coverage.get(old.domainId); if (covered && covered.sinceMs <= old.tsMs) covered.sinceMs = old.tsMs + 1 }
     return added
   }
 
-  /** The window ending at the domain's last complete read; refuses SERVICE_UNAVAILABLE when that window is not fully held or the read is stale. */
+  /** Prunes by retention and the size bound, then writes the store; a failed write is retried by the next collection. */
+  async save(at: Date): Promise<void> {
+    await this.loaded
+    const atMs = at.getTime(), hourCutoff = atMs - atMs % HOUR_MS - (HOURS_KEPT - 1) * HOUR_MS, dayCutoff = atMs - atMs % DAY_MS - (DAYS_KEPT - 1) * DAY_MS
+    const encoded: { state: DomainState; buckets: Map<number, Bucket>; start: number; end: number; text: string; bytes: number }[] = []
+    let total = 1024
+    for (const [path, mark] of this.marks) if (mark.at < dayCutoff) this.marks.delete(path); else total += 256 + Buffer.byteLength(path)
+    for (const [id, state] of this.domains) {
+      for (const [buckets, cutoff, unit] of [[state.hours, hourCutoff, HOUR_MS], [state.days, dayCutoff, DAY_MS]] as const) {
+        for (const bucket of buckets.values()) {
+          if (bucket.start < cutoff) { buckets.delete(bucket.start); continue }
+          if (bucket.start + unit <= atMs - atMs % unit) trimTop(bucket)
+          const text = encodeBucket(bucket), bytes = Buffer.byteLength(JSON.stringify(text)) + 24
+          encoded.push({ state, buckets, start: bucket.start, end: bucket.start + unit, text, bytes })
+          total += bytes
+        }
+      }
+      if (!state.hours.size && !state.days.size && (state.throughMs ?? 0) < dayCutoff) this.domains.delete(id); else total += 256
+    }
+    // Over the bound, the oldest buckets go first and the domain's complete history then starts after them.
+    encoded.sort((a, b) => a.end - b.end)
+    for (const dropped of encoded) {
+      if (total <= this.maxBytes) break
+      dropped.buckets.delete(dropped.start)
+      dropped.state.sinceMs = Math.max(dropped.state.sinceMs, dropped.end)
+      dropped.text = ''
+      total -= dropped.bytes
+    }
+    if (!this.store) return
+    const texts = new Map<Bucket, string>()
+    for (const item of encoded) if (item.text) texts.set(item.buckets.get(item.start)!, item.text)
+    const domains = Object.fromEntries([...this.domains].map(([id, state]) => [id, { accountId: state.accountId, since: state.sinceMs, through: state.throughMs,
+      hours: [...state.hours.values()].map(bucket => texts.get(bucket)!), days: [...state.days.values()].map(bucket => texts.get(bucket)!) }]))
+    try { await this.store.write({ marks: Object.fromEntries(this.marks), domains }) } catch { /* A restart before the next save shows the unsaved lines as a gap. */ }
+  }
+
+  /** Complete hours (1h, 24h) or complete UTC days (7d, 30d) before the domain's last complete read; refuses when any of it was not read. */
   queryDomainSnapshot(
     domain: Domain,
     opts: {
@@ -834,163 +1037,45 @@ export class WebsiteAnalyticsEngine {
   ): WebsiteAnalyticsSnapshot {
     const window = opts.window ?? '24h'
     const now = opts.now ?? new Date()
-    const covered = this.coverage.get(domain.id)
-    if (!covered || covered.accountId !== domain.accountId || covered.throughMs === null) return unavailableWebsite('not-read')
-    if (now.getTime() - covered.throughMs > WEBSITE_ANALYTICS_STALE_MS) return unavailableWebsite('stale')
-    const endMs = covered.throughMs
-    const cutoffMs = endMs - WINDOW_MS[window]
-    if (covered.sinceMs > cutoffMs) return unavailableWebsite('window-not-covered')
-
-    const matching = this.records.filter(
-      (r) => r.domainId === domain.id && r.accountId === domain.accountId && r.tsMs >= cutoffMs && r.tsMs <= endMs,
-    )
-
-    const bucketMap = new Map<
-      string,
-      {
-        requests: number
-        bytes: number
-        s2xx: number
-        s3xx: number
-        s4xx: number
-        s5xx: number
-        cacheHit: number
-        cacheMiss: number
-        cacheBypass: number
-        rtSumMs: number
-        urtSumMs: number
-        rts: number[]
-      }
-    >()
-
-    const allIps = new Set<string>()
-    const rts: number[] = []
-    let totalBytes = 0
-    let totalRtMs = 0
-    let totalUrtMs = 0
-    let cacheHits = 0
-    let status2xx = 0
-    let status3xx = 0
-    let status4xx = 0
-    let status5xx = 0
-
-    const pathCounts = new Map<string, { requests: number; bytes: number; errors5xx: number }>()
-    const refCounts = new Map<string, { requests: number; bytes: number; errors5xx: number }>()
-    const ipCounts = new Map<string, { requests: number; bytes: number; errors5xx: number }>()
-
-    for (const r of matching) {
-      allIps.add(r.ip)
-      totalBytes += r.bytes
-      totalRtMs += r.rtMs
-      totalUrtMs += r.urtMs
-      rts.push(r.rtMs)
-      if (r.cacheKind === 'hit') cacheHits++
-
-      const is5xx = r.status >= 500
-      if (r.status >= 200 && r.status < 300) status2xx++
-      else if (r.status >= 300 && r.status < 400) status3xx++
-      else if (r.status >= 400 && r.status < 500) status4xx++
-      else if (is5xx) status5xx++
-
-      const hour = new Date(r.tsMs - r.tsMs % 3_600_000).toISOString()
-      let b = bucketMap.get(hour)
-      if (!b) {
-        b = {
-          requests: 0,
-          bytes: 0,
-          s2xx: 0,
-          s3xx: 0,
-          s4xx: 0,
-          s5xx: 0,
-          cacheHit: 0,
-          cacheMiss: 0,
-          cacheBypass: 0,
-          rtSumMs: 0,
-          urtSumMs: 0,
-          rts: [],
-        }
-        bucketMap.set(hour, b)
-      }
-      b.requests++
-      b.bytes += r.bytes
-      b.rtSumMs += r.rtMs
-      b.urtSumMs += r.urtMs
-      b.rts.push(r.rtMs)
-      if (r.cacheKind === 'hit') b.cacheHit++
-      else if (r.cacheKind === 'bypass') b.cacheBypass++
-      else b.cacheMiss++
-
-      if (r.status >= 200 && r.status < 300) b.s2xx++
-      else if (r.status >= 300 && r.status < 400) b.s3xx++
-      else if (r.status >= 400 && r.status < 500) b.s4xx++
-      else if (is5xx) b.s5xx++
-
-      const p = pathCounts.get(r.uri) ?? { requests: 0, bytes: 0, errors5xx: 0 }
-      p.requests++
-      p.bytes += r.bytes
-      if (is5xx) p.errors5xx++
-      pathCounts.set(r.uri, p)
-
-      const rf = refCounts.get(r.referrer) ?? { requests: 0, bytes: 0, errors5xx: 0 }
-      rf.requests++
-      rf.bytes += r.bytes
-      if (is5xx) rf.errors5xx++
-      refCounts.set(r.referrer, rf)
-
-      const ic = ipCounts.get(r.ip) ?? { requests: 0, bytes: 0, errors5xx: 0 }
-      ic.requests++
-      ic.bytes += r.bytes
-      if (is5xx) ic.errors5xx++
-      ipCounts.set(r.ip, ic)
-    }
-
-    rts.sort((a, b) => a - b)
-    const totalRequests = matching.length
-
-    const series: WebsiteTrafficBucket[] = [...bucketMap.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([at, b]) => {
-        b.rts.sort((x, y) => x - y)
-        return {
-          at,
-          requests: b.requests,
-          bytes: b.bytes,
-          status2xx: b.s2xx,
-          status3xx: b.s3xx,
-          status4xx: b.s4xx,
-          status5xx: b.s5xx,
-          cacheHit: b.cacheHit,
-          cacheMiss: b.cacheMiss,
-          cacheBypass: b.cacheBypass,
-          avgRequestTimeMs: b.requests > 0 ? Number((b.rtSumMs / b.requests).toFixed(2)) : 0,
-          p95RequestTimeMs: percentile95(b.rts),
-          avgUpstreamTimeMs: b.requests > 0 ? Number((b.urtSumMs / b.requests).toFixed(2)) : 0,
-        }
-      })
-
+    const state = this.domains.get(domain.id)
+    if (!state || state.accountId !== domain.accountId || state.throughMs === null) return unavailableWebsite('not-read')
+    if (now.getTime() - state.throughMs > WEBSITE_ANALYTICS_STALE_MS) return unavailableWebsite('stale')
+    const daily = window === '7d' || window === '30d', unit = daily ? DAY_MS : HOUR_MS
+    const endMs = state.throughMs - state.throughMs % unit, startMs = endMs - WINDOW_MS[window]
+    if (state.sinceMs > startMs) return unavailableWebsite('window-not-covered')
+    const buckets = [...(daily ? state.days : state.hours).values()].filter(bucket => bucket.start >= startMs && bucket.start < endMs).sort((a, b) => a.start - b.start)
+    const total = newBucket(startMs)
+    for (const bucket of buckets) mergeInto(total, bucket)
+    const n = total.n, requests = n[N_REQUESTS]!
+    const series: WebsiteTrafficBucket[] = buckets.map(bucket => {
+      const b = bucket.n, count = b[N_REQUESTS]!
+      return { at: new Date(bucket.start).toISOString(), requests: count, bytes: b[N_BYTES]!, status2xx: b[2]!, status3xx: b[3]!, status4xx: b[4]!, status5xx: b[5]!,
+        cacheHit: b[N_HIT]!, cacheMiss: b[N_MISS]!, cacheBypass: b[N_BYPASS]!, avgRequestTimeMs: count > 0 ? round2(b[N_RT_SUM]! / count) : 0,
+        p95RequestTimeMs: percentile95(b), avgUpstreamTimeMs: count > 0 ? round2(b[N_URT_SUM]! / count) : 0 }
+    })
     const atIso = new Date(endMs).toISOString()
     const snapshot: WebsiteAnalyticsSnapshot = {
       domain: domain.name,
       accountId: domain.accountId,
       at: atIso,
       totals: {
-        requests: totalRequests,
-        bytes: totalBytes,
-        uniqueVisitors: allIps.size,
-        cacheHitRatioPercent: totalRequests > 0 ? Number(((cacheHits / totalRequests) * 100).toFixed(1)) : 0,
-        errorRatePercent: totalRequests > 0 ? Number(((status5xx / totalRequests) * 100).toFixed(2)) : 0,
-        avgRequestTimeMs: totalRequests > 0 ? Number((totalRtMs / totalRequests).toFixed(2)) : 0,
-        p95RequestTimeMs: percentile95(rts),
-        avgUpstreamTimeMs: totalRequests > 0 ? Number((totalUrtMs / totalRequests).toFixed(2)) : 0,
-        status2xx,
-        status3xx,
-        status4xx,
-        status5xx,
+        requests,
+        bytes: n[N_BYTES]!,
+        uniqueVisitors: visitorEstimate(total.visitors),
+        cacheHitRatioPercent: requests > 0 ? Number((n[N_HIT]! / requests * 100).toFixed(1)) : 0,
+        errorRatePercent: requests > 0 ? Number((n[5]! / requests * 100).toFixed(2)) : 0,
+        avgRequestTimeMs: requests > 0 ? round2(n[N_RT_SUM]! / requests) : 0,
+        p95RequestTimeMs: percentile95(n),
+        avgUpstreamTimeMs: requests > 0 ? round2(n[N_URT_SUM]! / requests) : 0,
+        status2xx: n[2]!,
+        status3xx: n[3]!,
+        status4xx: n[4]!,
+        status5xx: n[5]!,
       },
       series,
-      topPaths: rankTop(pathCounts),
-      topReferrers: rankTop(refCounts),
-      topClientIps: rankTop(ipCounts),
+      topPaths: rankTop(total.top[0]),
+      topReferrers: rankTop(total.top[1]),
+      topClientIps: rankTop(total.top[2]),
     }
 
     if (opts.onEvent) {
@@ -1006,4 +1091,3 @@ export class WebsiteAnalyticsEngine {
     return snapshot
   }
 }
-
