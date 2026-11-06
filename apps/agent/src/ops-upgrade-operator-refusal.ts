@@ -42,10 +42,24 @@ export function encodeRootOperatorRefusal(code: string): Buffer {
   return frame
 }
 
-/** One bounded sanitized journal line: no stack, path, secret or operation payload. */
-export function rootOperatorRefusalJournalLine(code: string): string {
+/** One bounded sanitized journal line: no stack, secret or operation payload. */
+export function rootOperatorRefusalJournalLine(code: string, detail = ''): string {
   if (typeof code !== 'string' || !ROOT_OPERATOR_MACHINE_CODE.test(code)) throw new Error('ROOT_OPERATOR_REFUSAL_CODE_INVALID')
-  return JOURNAL_PREFIX + code + '\n'
+  return JOURNAL_PREFIX + code + detail + '\n'
+}
+
+const OWNED_PATH = /^\/[A-Za-z0-9._@:+-]+(?:\/[A-Za-z0-9._@:+-]+)*$/
+/** Root-journal detail of an owned-file drift: the product-owned path and the drifted identity field, never sent to the client. */
+export const ownedFileDriftDetail = (error: unknown): string => {
+  let current: unknown = error
+  for (let depth = 0; current && depth < 6; depth += 1) {
+    const record = typeof current === 'object' ? current as { entryPath?: unknown; field?: unknown; cause?: unknown } : undefined
+    const path = record?.entryPath, field = record?.field
+    if (typeof path === 'string' && path.length <= 255 && OWNED_PATH.test(path) && !path.split('/').includes('..')
+      && typeof field === 'string' && /^[a-z]{1,16}$/.test(field)) return ` path=${path} field=${field}`
+    current = record?.cause
+  }
+  return ''
 }
 
 export interface RootOperatorServerRefusal { readonly code: string; readonly frame: Buffer; readonly journalLine: string }
@@ -53,7 +67,7 @@ export interface RootOperatorServerRefusal { readonly code: string; readonly fra
 /** The single server-side refusal payload; callers may only write its frame and journal line. */
 export function rootOperatorServerRefusal(error: unknown): RootOperatorServerRefusal {
   const code = rootOperatorServerRefusalCode(error)
-  return Object.freeze({ code, frame: encodeRootOperatorRefusal(code), journalLine: rootOperatorRefusalJournalLine(code) })
+  return Object.freeze({ code, frame: encodeRootOperatorRefusal(code), journalLine: rootOperatorRefusalJournalLine(code, ownedFileDriftDetail(error)) })
 }
 
 /** Client parser for exactly one single-key refusal frame; anything else is not a refusal. */

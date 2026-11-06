@@ -16,6 +16,7 @@ const harness = vi.hoisted(() => ({
   recordMetrics: vi.fn(async () => undefined),
   metricOptions: undefined as { write: (observation: Record<string, number | null>, at: string) => Promise<unknown> } | undefined,
   lifecycleManaged: false,
+  participantClose: vi.fn(async (): Promise<void> => undefined),
   onFence: undefined as (() => Promise<void>) | undefined,
   writerEntries: 0,
   pipelines: 0,
@@ -58,7 +59,7 @@ vi.mock('../../../scripts/lifecycle-admission.mjs', () => ({
   createLifecycleBackgroundResources: <T>(callback: () => T): T => callback(),
   isLifecycleManaged: async () => harness.lifecycleManaged,
   readLifecyclePublicStatus: async () => ({ active: false, reference: null, phase: 'normal' }),
-  startLifecycleWriterParticipant: async (_role: string, options: { onFence: () => Promise<void> }) => { harness.onFence = options.onFence; return { close: async () => undefined } },
+  startLifecycleWriterParticipant: async (_role: string, options: { onFence: () => Promise<void> }) => { harness.onFence = options.onFence; return { close: harness.participantClose } },
   withLifecycleWriterAdmission: async <T>(callback: () => Promise<T>): Promise<T> => { harness.writerEntries++; return callback() },
 }))
 vi.mock('./agent-origin.ts', () => ({ syncRuntimePublicOrigin: async () => undefined, readManagementHosts: async () => [] }))
@@ -111,7 +112,7 @@ vi.mock('./peer-identity.ts', () => ({
   },
 }))
 
-import { AGENT_SHUTDOWN_TIMEOUT_MS, attachAgentProcessLifecycle, startAgentDaemon } from './main.ts'
+import { AGENT_SHUTDOWN_TIMEOUT_MS, attachAgentProcessLifecycle, shutdownFailureCodes, startAgentDaemon } from './main.ts'
 
 const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
 const originalGetuid = Object.getOwnPropertyDescriptor(process, 'getuid')
@@ -138,6 +139,7 @@ beforeEach(() => {
   harness.recordMetrics.mockReset().mockResolvedValue(undefined)
   harness.metricOptions = undefined
   harness.lifecycleManaged = false
+  harness.participantClose.mockReset().mockResolvedValue(undefined)
   harness.onFence = undefined
   harness.writerEntries = 0
 })
@@ -228,6 +230,18 @@ describe('privileged worker readiness in actual agent composition', () => {
     assert.equal(harness.dbClose.mock.calls.length, 1)
   })
 
+  it('names every failed shutdown step with its stable code and still closes the database', async () => {
+    harness.lifecycleManaged = true
+    harness.metricsStop.mockRejectedValue(Object.assign(new Error('refused'), { code: 'LIFECYCLE_WRITES_FENCED' }))
+    harness.participantClose.mockRejectedValue(Object.assign(new Error('lstat /run/xpanel/lifecycle-agent/participant.sock'), { code: 'ENOENT' }))
+    const daemon = await start()
+    const failure = await daemon.close().then(() => null, (error: unknown) => error)
+    assert.ok(failure instanceof AggregateError)
+    assert.deepEqual(shutdownFailureCodes(failure), ['hostMetrics.stop:LIFECYCLE_WRITES_FENCED', 'participant.close:ENOENT'])
+    assert.equal(harness.dbClose.mock.calls.length, 1)
+    assert.equal(harness.participantClose.mock.calls.length, 1)
+  })
+
   it('never reports a clean close when privileged worker recovery is unresolved', async () => {
     harness.runnerClose.mockRejectedValue(new Error('inspected recovery required'))
     const daemon = await start()
@@ -278,6 +292,17 @@ describe('standalone agent process recovery lifetime', () => {
     await flush()
     assert.deepEqual(processState.exitCodes, [1])
     assert.equal(close.mock.calls.length, 1)
+  })
+
+  it('prints each failed step and its stable code on SIGTERM, never the error message', async () => {
+    harness.lifecycleManaged = true
+    harness.participantClose.mockRejectedValue(Object.assign(new Error('lstat /run/xpanel/lifecycle-agent/participant.sock'), { code: 'ENOENT' }))
+    const daemon = await start()
+    const processState = processHarness()
+    attachAgentProcessLifecycle(daemon)
+    processState.signals.get('SIGTERM')!()
+    await vi.waitFor(() => assert.deepEqual(processState.exitCodes, [1]))
+    assert.deepEqual(processState.stderr.mock.calls.map(call => call[0]), ['xpanel-agent shutdown requires operational recovery: participant.close:ENOENT\n'])
   })
 
   it('uses one bounded shutdown for repeated signals and exits 0 only after clean ordinary close', async () => {

@@ -30,7 +30,7 @@ export type FileWorkspaceReply<T extends FileWorkspaceRequest = FileWorkspaceReq
 const fields = {
   list: ['path', 'showHidden'], read: ['path'], write: ['path', 'content', 'overwrite', 'mode'],
   'put-bytes': ['path', 'contentBase64', 'overwrite', 'mode'], 'get-bytes': ['path'],
-  mkdir: ['path', 'mode'], chmod: ['path', 'mode'], move: ['path', 'destination'], copy: ['path', 'destination'], compress: ['path', 'destination'], extract: ['path', 'destination'], trash: ['path'], 'list-trash': [],
+  mkdir: ['path', 'mode'], chmod: ['path', 'mode'], move: ['path', 'destination'], copy: ['path', 'destination'], compress: ['paths', 'destination'], extract: ['path', 'destination'], trash: ['path'], 'list-trash': [],
   restore: ['trashId', 'overwrite'], 'empty-trash': ['olderThanDays'], 'purge-trash': ['trashId', 'originalPath', 'deletedAt'],
 } as const
 const TRASH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -77,11 +77,20 @@ export function validateFileWorkspaceRequest(input: unknown): FileWorkspaceReque
     }
     case 'mkdir': return { op, path: path(input.path), mode: mode(own(input, 'mode') ? input.mode : FILE_WORKSPACE_LIMITS.directoryMode, FILE_WORKSPACE_LIMITS.directoryMode) }
     case 'chmod': return { op, path: path(input.path), mode: mode(own(input, 'mode') ? input.mode : FILE_WORKSPACE_LIMITS.fileMode, FILE_WORKSPACE_LIMITS.directoryMode) }
-    case 'move': case 'copy': case 'compress': {
+    case 'move': case 'copy': {
       const source = path(input.path), destination = path(input.destination)
       if (destination === source || destination.startsWith(source + '/')) return badRequest('The destination must not be the source or inside it')
-      if (op === 'compress' && !ARCHIVE_NAME.test(destination)) return badRequest('The archive name must end in .zip, .tar, .tar.gz, .tgz, .tar.bz2, .tbz2, .tar.zst or .tzst')
       return { op, path: source, destination }
+    }
+    // A file manager selection: distinct items of one folder, at most one per listed entry.
+    case 'compress': {
+      if (!Array.isArray(input.paths) || input.paths.length === 0 || input.paths.length > FILE_WORKSPACE_LIMITS.listEntries) return badRequest('Select 1 to 10000 items to compress')
+      const sources = input.paths.map(item => path(item)), destination = path(input.destination)
+      const folder = (item: string): string => item.slice(0, Math.max(0, item.lastIndexOf('/')))
+      if (new Set(sources).size !== sources.length || sources.some(item => folder(item) !== folder(sources[0]!))) return badRequest('The selected items must be distinct and in one folder')
+      if (sources.some(source => destination === source || destination.startsWith(source + '/'))) return badRequest('The destination must not be the source or inside it')
+      if (!ARCHIVE_NAME.test(destination)) return badRequest('The archive name must end in .zip, .tar, .tar.gz, .tgz, .tar.bz2, .tbz2, .tar.zst or .tzst')
+      return { op, paths: sources, destination }
     }
     // The destination folder may be the account home itself.
     case 'extract': return { op, path: path(input.path), destination: path(input.destination, true) }

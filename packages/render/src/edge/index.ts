@@ -1,4 +1,5 @@
 export * from './nginx.ts'
+export * from '../../../../scripts/nginx-http2.mjs'
 export * from './waf.ts'
 export * from './apache.ts'
 export * from './phpfpm.ts'

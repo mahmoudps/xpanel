@@ -73,7 +73,8 @@ export async function replaceManagedFile(path, bytes, mode, expected, assertAuth
     const actual = await captureManagedFile(path, bytes.length)
     if (actual.entry.device !== String(identity.dev) || actual.entry.inode !== String(identity.ino)
       || actual.entry.sha256 !== managedBytesHash(bytes) || actual.entry.mode !== mode) fail('MANAGED_WRITE_READBACK_FAILED')
-    await parent.verify(); await assertAuthority()
+    // The path now names the read-back replacement; an authority that pins this file must check that identity.
+    await parent.verify(); await assertAuthority(actual)
     return actual
   })
 }

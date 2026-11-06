@@ -25,14 +25,16 @@ const manager = (reply: (request: Readonly<AccountFileRequest>) => unknown) => {
 }
 
 describe('confined compress and extract requests', { tags: ['unit'] }, () => {
-  it('sends exactly the source and destination and returns the archive entry or the extraction counts', async () => {
+  it('sends exactly the sources and destination and returns the archive entry or the extraction counts', async () => {
     const compressed = manager(request => entry((request as { destination: string }).destination))
-    assert.deepEqual(await compressed.files.compress('public_html', 'backups/site.tar.gz'), entry('backups/site.tar.gz'))
+    assert.deepEqual(await compressed.files.compress(['public_html'], 'backups/site.tar.gz'), entry('backups/site.tar.gz'))
+    assert.deepEqual(await compressed.files.compress(['site/index.php', 'site/theme', 'site/.htaccess'], 'site.zip'), entry('site.zip'))
     const extracted = manager(request => ({ destination: (request as { destination: string }).destination, entries: 12, bytes: 4096 }))
     assert.deepEqual(await extracted.files.extract('backups/site.tar.gz', ''), { destination: '', entries: 12, bytes: 4096 })
     assert.deepEqual(await extracted.files.extract('backups/site.zip', 'restore'), { destination: 'restore', entries: 12, bytes: 4096 })
     assert.deepEqual([...compressed.calls, ...extracted.calls], [
-      { op: 'compress', path: 'public_html', destination: 'backups/site.tar.gz' },
+      { op: 'compress', paths: ['public_html'], destination: 'backups/site.tar.gz' },
+      { op: 'compress', paths: ['site/index.php', 'site/theme', 'site/.htaccess'], destination: 'site.zip' },
       { op: 'extract', path: 'backups/site.tar.gz', destination: '' },
       { op: 'extract', path: 'backups/site.zip', destination: 'restore' },
     ])
@@ -43,7 +45,16 @@ describe('confined compress and extract requests', { tags: ['unit'] }, () => {
     ['public_html', 'site.rar'], ['public_html', 'site.gz'], ['public_html', 'site'], ['.trash/x', 'site.zip'],
   ])('refuses to compress %j into %j before the runner', async (path, destination) => {
     const { files, calls } = manager(() => entry(destination))
-    await assert.rejects(() => files.compress(path, destination), (error: unknown) => isXpanelError(error) && ['VALIDATION', 'FORBIDDEN'].includes(error.code))
+    await assert.rejects(() => files.compress([path], destination), (error: unknown) => isXpanelError(error) && ['VALIDATION', 'FORBIDDEN'].includes(error.code))
+    assert.equal(calls.length, 0)
+  })
+
+  it.each([
+    [[], 'site.zip'], [Array.from({ length: 10_001 }, (_, i) => `f${i}`), 'site.zip'], [['a', 'a'], 'site.zip'], [['site/a', 'other/b'], 'site.zip'],
+    [['a', 'site/b'], 'site.zip'], [['site/a', 'site/b'], 'site/b/all.zip'], [['a', '../b'], 'site.zip'], [['a', 7], 'site.zip'],
+  ])('refuses the selection %j into %j before the runner', async (paths, destination) => {
+    const { files, calls } = manager(() => entry(destination))
+    await assert.rejects(() => files.compress(paths as string[], destination), (error: unknown) => isXpanelError(error) && ['VALIDATION', 'FORBIDDEN'].includes(error.code))
     assert.equal(calls.length, 0)
   })
 
@@ -55,7 +66,7 @@ describe('confined compress and extract requests', { tags: ['unit'] }, () => {
 
   it('treats an acknowledgement for another target, a folder archive or out-of-ceiling counts as invalid', async () => {
     for (const reply of [entry('other.zip'), entry('site.zip', { kind: 'directory', sizeBytes: 0, mode: 0o750 }), entry('site.zip', { mode: 0o644 }), null]) {
-      await assert.rejects(() => manager(() => reply).files.compress('public_html', 'site.zip'), code('CONFIG_TEST_FAILED'))
+      await assert.rejects(() => manager(() => reply).files.compress(['public_html'], 'site.zip'), code('CONFIG_TEST_FAILED'))
     }
     for (const reply of [{ destination: 'elsewhere', entries: 1, bytes: 1 }, { destination: 'out', entries: 10_001, bytes: 1 }, { destination: 'out', entries: 1, bytes: 512 * 1024 * 1024 + 1 },
       { destination: 'out', entries: -1, bytes: 1 }, { destination: 'out', entries: 1, bytes: 1, extra: true }, entry('out')]) {
@@ -75,7 +86,7 @@ describe('confined runner for archive operations', { tags: ['unit'] }, () => {
   it('marks helper refusals as unchanged and keeps only a well-formed stable reason', async () => {
     const refusing = files(async ({ stdinPayload }) => answer(stdinPayload, {
       ok: false, error: { code: 'PRECONDITION_FAILED', errno: 38, errnoName: 'ENOSYS', message: 'unavailable', reason: 'archive_format_unavailable' } }))
-    await assert.rejects(() => refusing.compress('public_html', 'site.tar.zst'), (error: unknown) => isXpanelError(error) && error.code === 'PRECONDITION_FAILED' &&
+    await assert.rejects(() => refusing.compress(['public_html'], 'site.tar.zst'), (error: unknown) => isXpanelError(error) && error.code === 'PRECONDITION_FAILED' &&
       error.detail?.stateChanged === false && error.detail?.reason === 'archive_format_unavailable')
     const partial = files(async ({ stdinPayload }) => answer(stdinPayload, {
       ok: false, error: { code: 'SERVICE_UNAVAILABLE', errno: 5, errnoName: 'EIO', message: 'partly published', reason: 'Not A Reason!' } }))
@@ -111,7 +122,7 @@ describe('confined runner for archive operations', { tags: ['unit'] }, () => {
 })
 
 describe('agent file route compress and extract', { tags: ['feature'] }, () => {
-  it('admits only the exact wire fields, runs the helper operation and audits source and destination', async () => {
+  it('admits only the exact wire fields, runs the helper operation and audits a bounded selection and the destination', async () => {
     const state = await createTestStateStore(), db = await createTestDb()
     try {
       const features = await state.store.createFeatureList({ name: 'Standard', ownerId: null, disabled: [] })
@@ -129,19 +140,23 @@ describe('agent file route compress and extract', { tags: ['feature'] }, () => {
       const token = 'a'.repeat(64)
       const app = createAgentApp({ store: state.store, db: db.db, agentToken: token, os: { id: 'ubuntu', versionId: '24.04', family: 'debian' }, accountFileRunner: runner } as Parameters<typeof createAgentApp>[0])
       const post = (body: unknown) => app.fetch(new Request('http://agent.local/accounts/alice/files', { method: 'POST', headers: { ...agentCallerHeaders({ principalId: principal.id, token }), 'content-type': 'application/json' }, body: JSON.stringify(body) }))
-      for (const bad of [{ op: 'compress', path: 'a', destination: 'a.zip', format: 'zip' }, { op: 'extract', path: 'a.zip', destination: 7 }, { op: 'extract', path: 'a.zip', target: 'out' }]) assert.equal((await post(bad)).status, 422)
+      for (const bad of [{ op: 'compress', paths: ['a'], destination: 'a.zip', format: 'zip' }, { op: 'compress', path: 'a', destination: 'a.zip' }, { op: 'compress', paths: 'a', destination: 'a.zip' },
+        { op: 'compress', paths: ['a', 1], destination: 'a.zip' }, { op: 'extract', path: 'a.zip', destination: 7 }, { op: 'extract', path: 'a.zip', target: 'out' }]) assert.equal((await post(bad)).status, 422)
       assert.equal(calls.length, 0)
-      const compressed = await post({ op: 'compress', path: 'public_html', destination: 'site.zip' })
+      const compressed = await post({ op: 'compress', paths: ['public_html', 'logs'], destination: 'site.zip' })
       assert.equal(compressed.status, 200)
       assert.deepEqual(await compressed.json(), entry('site.zip'))
       const extracted = await post({ op: 'extract', path: 'site.zip', destination: '' })
       assert.equal(extracted.status, 200)
       assert.deepEqual(await extracted.json(), { destination: '', entries: 2, bytes: 10 })
+      assert.deepEqual(calls.find(call => call.op === 'compress'), { op: 'compress', paths: ['public_html', 'logs'], destination: 'site.zip' })
       const audit = await listAudit(db.db, { limit: 10 })
-      for (const [action, op, path, destination] of [['file.compress', 'compress', 'public_html', 'site.zip'], ['file.extract', 'extract', 'site.zip', '']]) {
+      for (const [action, target, detail] of [['file.compress', 'account:alice:site.zip', { op: 'compress', path: null, items: 2, destination: 'site.zip' }],
+        ['file.extract', 'account:alice:site.zip', { op: 'extract', path: 'site.zip', destination: '' }]] as const) {
         const row = audit.find(item => item.action === action)
         assert.equal(row?.outcome, 'ok')
-        assert.deepEqual(row?.detail, { op, path, destination })
+        assert.equal(row?.target, target)
+        assert.deepEqual(row?.detail, detail)
       }
     } finally { await state.close(); await db.close() }
   })

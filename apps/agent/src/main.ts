@@ -70,6 +70,30 @@ export interface AgentDaemonOptions {
 
 const detectHostOsProfile = async (): Promise<OsProfile> => detectOs((p) => readFileSync(p, 'utf8'))
 
+/** A failed shutdown step keeps its cause; diagnostics print the step and a stable code, never the message. */
+class ShutdownStepError extends Error {
+  readonly step: string
+  constructor(step: string, cause: unknown) { super(`${step} failed`, { cause }); this.step = step }
+}
+const stableCode = (error: unknown): string => {
+  const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined
+  if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,79}$/.test(code)) return code
+  const name = error instanceof Error ? error.constructor.name : typeof error
+  return /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name) ? name : 'unknown'
+}
+/** Bounded `step:code` entries of an aggregated shutdown failure, free of messages, paths and secrets. */
+export const shutdownFailureCodes = (error: unknown): string[] => {
+  const codes: string[] = []
+  const visit = (value: unknown, step: string, depth: number): void => {
+    if (codes.length >= 16) return
+    if (value instanceof ShutdownStepError && depth < 8) visit(value.cause, value.step, depth + 1)
+    else if (value instanceof AggregateError && depth < 8) { for (const item of value.errors) visit(item, step, depth + 1) }
+    else codes.push(`${step}:${stableCode(value)}`)
+  }
+  visit(error, 'agent', 0)
+  return codes
+}
+
 /** A frozen maintenance endpoint does not open a database or manufacture authenticated state. */
 const quarantinedAgentApp = (agentToken: string): AgentApp => ({
   async fetch(request) {
@@ -145,8 +169,8 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
       let closing: Promise<void> | undefined
       const close = (): Promise<void> => closing ??= (async () => {
         const errors: unknown[] = []
-        try { await listener.close() } catch (error) { errors.push(error) }
-        try { await closeParticipant() } catch (error) { errors.push(error) }
+        try { await listener.close() } catch (error) { errors.push(new ShutdownStepError('listener.close', error)) }
+        try { await closeParticipant() } catch (error) { errors.push(new ShutdownStepError('participant.close', error)) }
         if (errors.length) throw new AggregateError(errors, 'quarantined agent IPC shutdown requires inspection')
       })()
       return { app, socketPath, close, recoveryRequired: new Promise<void>(() => {}), quarantined: true as const }
@@ -183,14 +207,14 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
       let closing: Promise<void> | undefined
       const closeResources = (): Promise<void> => resourcesClosing ??= (async () => {
         const errors: unknown[] = []
-        try { await listener?.close() } catch (error) { errors.push(error) }
-        try { hostJobs?.close() } catch (error) { errors.push(error) }
-        try { terminals?.closeAll() } catch (error) { errors.push(error) }
-        try { await hostMetrics?.stop() } catch (error) { errors.push(error) }
-        try { await bandwidthMeter?.stop() } catch (error) { errors.push(error) }
-        try { clearInterval(backupTimer); await backupRuns?.idle() } catch (error) { errors.push(error) }
-        try { await ioResourcePipeline?.stop() } catch (error) { errors.push(error) }
-        try { await accountFileRunner?.close() } catch (error) { errors.push(error) }
+        try { await listener?.close() } catch (error) { errors.push(new ShutdownStepError('listener.close', error)) }
+        try { hostJobs?.close() } catch (error) { errors.push(new ShutdownStepError('hostJobs.close', error)) }
+        try { terminals?.closeAll() } catch (error) { errors.push(new ShutdownStepError('terminals.closeAll', error)) }
+        try { await hostMetrics?.stop() } catch (error) { errors.push(new ShutdownStepError('hostMetrics.stop', error)) }
+        try { await bandwidthMeter?.stop() } catch (error) { errors.push(new ShutdownStepError('bandwidthMeter.stop', error)) }
+        try { clearInterval(backupTimer); await backupRuns?.idle() } catch (error) { errors.push(new ShutdownStepError('backupRuns.idle', error)) }
+        try { await ioResourcePipeline?.stop() } catch (error) { errors.push(new ShutdownStepError('ioResourcePipeline.stop', error)) }
+        try { await accountFileRunner?.close() } catch (error) { errors.push(new ShutdownStepError('accountFileRunner.close', error)) }
         if (errors.length) throw new AggregateError(errors, 'agent resource shutdown requires inspection')
       })()
       const closeNormal = (): Promise<void> => closing ??= (async () => {
@@ -199,11 +223,11 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         await startupSettled
         const errors: unknown[] = []
         try { await closeResources() } catch (error) { errors.push(error) }
-        try { await awaitLifecycleWriterDrain() } catch (error) { errors.push(error) }
-        try { await dbHandle.close() } catch (error) { errors.push(error) }
+        try { await awaitLifecycleWriterDrain() } catch (error) { errors.push(new ShutdownStepError('writerDrain', error)) }
+        try { await dbHandle.close() } catch (error) { errors.push(new ShutdownStepError('database.close', error)) }
         // Closing owned IPC is process cleanup, never a host-drain assertion or
         // permission to remove an incident, root barrier, or retirement fence.
-        try { await closeParticipant() } catch (error) { errors.push(error) }
+        try { await closeParticipant() } catch (error) { errors.push(new ShutdownStepError('participant.close', error)) }
         if (errors.length) throw new AggregateError(errors, 'agent shutdown requires operational recovery')
       })()
       closeDaemon = closeNormal
@@ -439,10 +463,11 @@ export const attachAgentProcessLifecycle = (daemon: { close: () => Promise<void>
   let exitCode = 0
   let exited = false
   let recoveryReported = false
-  const reportRecovery = (): void => {
-    if (recoveryReported) return
+  const reportRecovery = (error?: unknown): void => {
+    const detail = error === undefined ? '' : `: ${shutdownFailureCodes(error).join(', ')}`
+    if (recoveryReported && !detail) return
     recoveryReported = true
-    process.stderr.write('xpanel-agent shutdown requires operational recovery\n')
+    process.stderr.write(`xpanel-agent shutdown requires operational recovery${detail}\n`)
   }
   const finish = (code: number): void => {
     if (exited) return
@@ -456,7 +481,7 @@ export const attachAgentProcessLifecycle = (daemon: { close: () => Promise<void>
     deadline = setTimeout(() => { reportRecovery(); finish(1) }, AGENT_SHUTDOWN_TIMEOUT_MS)
     stopping = Promise.resolve().then(() => daemon.close()).then(
       () => finish(exitCode),
-      () => { reportRecovery(); finish(1) },
+      (error: unknown) => { reportRecovery(error); finish(1) },
     )
   }
   process.once('SIGINT', () => shutdown(0))
@@ -484,7 +509,7 @@ if (isMainModule()) {
       attachAgentProcessLifecycle(daemon)
     })
     .catch((err) => {
-      process.stderr.write(`xpanel-agent fatal error: ${err instanceof Error ? err.message : String(err)}\n`)
+      process.stderr.write(`xpanel-agent fatal error: ${err instanceof Error ? err.message : String(err)}${err instanceof AggregateError ? ` (${shutdownFailureCodes(err).join(', ')})` : ''}\n`)
       process.exit(1)
     })
 }

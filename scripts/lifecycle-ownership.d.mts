@@ -19,5 +19,6 @@ export function assertTrustedDirectory(path: string): Promise<void>
 export function withTrustedFile<T>(path: string, options: TrustedFileOptions, callback: (pin: TrustedFilePin) => Promise<T>): Promise<T>
 export function readTrustedFile(path: string, options?: TrustedFileOptions): Promise<TrustedFileContents>
 export function readInstallationReceipt(): Promise<{ receipt: Readonly<InstallationReceipt>; sha256: string }>
+export function ownedFileDriftField(entry: OwnedLifecycleFile, named: import('node:fs').BigIntStats): 'device' | 'inode' | 'size' | 'mode' | 'owner' | 'kind' | null
 export function assertOwnedFile(entry: OwnedLifecycleFile): Promise<void>
 export function preservingUninstallPlan(receipt: InstallationReceipt): Readonly<Record<string, unknown>>

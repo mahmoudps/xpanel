@@ -13,6 +13,7 @@ import {
   BANDWIDTH_LIMIT_PAGE,
   type EdgeSettings,
 } from './nginx.ts'
+import { nginxHttp2Style } from '../../../../scripts/nginx-http2.mjs'
 import { account, blockOf, cert, codeOf, debianOs, domain, rhelOs, serverBlocks, settings } from './testkit.ts'
 
 const edge = (e: EdgeSettings['edge']): EdgeSettings => ({ ...settings(), edge: e })
@@ -537,6 +538,13 @@ describe('renderDefaultSite', () => {
     expect(c).not.toContain('proxy_pass')
   })
 
+  it('enables HTTP/2 with the directive instead of the listen option for nginx 1.25.1 and later', () => {
+    const c = renderDefaultSite({ settings: edge({ http2: 'directive' }) })
+    expect(c).toContain('listen 443 ssl default_server;\n    listen [::]:443 ssl default_server;\n    http2 on;\n')
+    expect(c).not.toContain(' http2 default_server;')
+    expect(c).toContain('listen 80 default_server;')
+  })
+
   it('leaves the hostname to the management ingress that already serves it on the shared sockets', () => {
     const settings = edge({})
     expect(renderDefaultSite({ settings })).toContain(`server_name _ ${settings.hostname};`)
@@ -559,6 +567,27 @@ describe('renderDefaultSite', () => {
   it('has balanced braces', () => {
     const c = renderDefaultSite()
     expect(blockOf(c, 'server').length).toBe(c.trimEnd().length - c.indexOf('server {'))
+  })
+})
+
+describe('nginxHttp2Style', () => {
+  it('follows the installed release: the listen option before 1.25.1, the directive from 1.25.1', () => {
+    for (const [output, style] of [
+      ['nginx version: nginx/1.18.0 (Ubuntu)\n', 'listen'],
+      ['nginx version: nginx/1.20.1\n', 'listen'],
+      ['nginx version: nginx/1.24.0 (Ubuntu)\n', 'listen'],
+      ['nginx version: nginx/1.25.0\n', 'listen'],
+      ['nginx version: nginx/1.25.1\n', 'directive'],
+      ['nginx version: nginx/1.26.3\n', 'directive'],
+      ['nginx version: freenginx/1.27.4\n', 'directive'],
+      ['nginx version: nginx/2.0.0\n', 'directive'],
+    ] as const) expect(nginxHttp2Style(output), output).toBe(style)
+  })
+
+  it('names no style when the output carries no version', () => {
+    for (const output of ['', 'nginx: command not found\n', '[jailshell] /usr/sbin/nginx -v\n', 'version: nginx/1.26.3\n', 'nginx version: nginx/1.26\n']) {
+      expect(nginxHttp2Style(output), output).toBeNull()
+    }
   })
 })
 

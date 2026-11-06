@@ -128,7 +128,7 @@ describe('file workspace API boundary with explicitly fake agent transport', () 
     const before = f.seen.length
     for (const body of [{ op: 'write', path, content: 'Denied' }, { op: 'trash', path }, { op: 'put-bytes', path, contentBase64: 'eA==' },
       { op: 'move', path, destination: 'public_html/moved.txt' }, { op: 'copy', path, destination: 'public_html/copied.txt' },
-      { op: 'compress', path, destination: 'public_html/site.zip' }, { op: 'extract', path, destination: 'public_html' }]) expect((await f.request(body, { token: raw })).status).toBe(403)
+      { op: 'compress', paths: [path], destination: 'public_html/site.zip' }, { op: 'extract', path, destination: 'public_html' }]) expect((await f.request(body, { token: raw })).status).toBe(403)
     expect(f.seen).toHaveLength(before)
     expect(f.files.get(path)).toBe('Original\n')
   })

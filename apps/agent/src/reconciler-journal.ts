@@ -121,6 +121,18 @@ export interface ReconcileJournalRecord {
   previousKernelHostname?: string
 }
 
+/**
+ * Progress of one terminating account's irreversible removal. `removing` is written before userdel and
+ * `removed` after it succeeds, so a later reconciliation never deletes a confirmed-removed user again.
+ */
+export interface AccountRetirementRecord {
+  schemaVersion: 1
+  accountId: string
+  username: string
+  uid: number
+  user: 'removing' | 'removed'
+}
+
 export const sha256Text = (content: string): string =>
   createHash('sha256').update(content, 'utf8').digest('hex')
 
@@ -619,6 +631,35 @@ export class ReconcilerJournal {
 
   async writeManifest(manifest: GenerationManifest): Promise<void> {
     await fsyncWriteJson(this.manifestPath(manifest.generationId), manifest)
+  }
+
+  private retirementPath(accountId: string): string {
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(accountId)) fail('VALIDATION', 'account retirement records need a plain account id')
+    return join(this.baseDir, 'journal', `retirement-${accountId}.json`)
+  }
+
+  /** Recorded user-removal progress of the terminating accounts; a record that names another identity fails closed. */
+  async readRetirements(accounts: readonly { id: string; username: string; uid: number }[]): Promise<Map<string, AccountRetirementRecord['user']>> {
+    const progress = new Map<string, AccountRetirementRecord['user']>()
+    for (const account of accounts) {
+      const record = await readJsonSafe<AccountRetirementRecord>(this.retirementPath(account.id))
+      if (!record) continue
+      if (record.schemaVersion !== 1 || record.accountId !== account.id || record.username !== account.username
+        || record.uid !== account.uid || (record.user !== 'removing' && record.user !== 'removed')) {
+        fail('PRECONDITION_FAILED', 'an account retirement record does not match its terminating account', { stateChanged: false, verificationRequired: true })
+      }
+      progress.set(account.id, record.user)
+    }
+    return progress
+  }
+
+  async saveRetirement(record: AccountRetirementRecord): Promise<void> {
+    await fsyncWriteJson(this.retirementPath(record.accountId), record)
+  }
+
+  /** Runs after the account left desired state, so a record that survives a crash is never read again. */
+  async clearRetirement(accountId: string): Promise<void> {
+    await rm(this.retirementPath(accountId), { force: true })
   }
 
   async readActiveJournal(): Promise<ReconcileJournalRecord | null> {

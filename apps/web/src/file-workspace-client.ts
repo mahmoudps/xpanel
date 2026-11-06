@@ -290,7 +290,8 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
     const relocators=document.querySelectorAll('[data-file-manager="browse"]').length===1?[...document.querySelectorAll<HTMLButtonElement>('[data-file-selection-action]')].filter(button=>button.type==='button'&&['copy','move','compress','extract'].includes(button.dataset.fileSelectionAction??'')):[]
     const archiveFile=/[.](?:zip|tar|tgz|tbz2|tzst|gz|bz2|zst)$/i
     let latest:WorkspaceState|undefined
-    const syncRelocators=()=>{const chosen=latest?presentation.selection():[],one=chosen.length===1?chosen[0]!:null;for(const button of relocators)button.disabled=!latest||!!button.closest(denied)||button.hasAttribute('data-capability-unavailable')||latest.busy||latest.loading||latest.uncertain||!eligible()||!one||one.kind==='symlink'||(button.dataset.fileSelectionAction==='extract'&&(one.kind!=='file'||!archiveFile.test(one.path)))}
+    // Compress takes the whole selection of the open folder, as cPanel does; the other actions take exactly one item.
+    const syncRelocators=()=>{const chosen=latest?presentation.selection():[],one=chosen.length===1?chosen[0]!:null;for(const button of relocators){const action=button.dataset.fileSelectionAction;button.disabled=!latest||!!button.closest(denied)||button.hasAttribute('data-capability-unavailable')||latest.busy||latest.loading||latest.uncertain||!eligible()||(action==='compress'?!chosen.length||chosen.some(item=>item.kind==='symlink'):!one||one.kind==='symlink'||(action==='extract'&&(one.kind!=='file'||!archiveFile.test(one.path))))}}
     try{presentation=createFilePresentation(root,copy,size,when,syncRelocators)}catch{root.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLTextAreaElement>('button,input,textarea').forEach(node=>{node.disabled=true});status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('File operations are unavailable.');return}
     const actionButton=(parent:HTMLElement,label:string,kind:string,path:string,action:()=>void)=>{const button=templates.cloneAction();button.dataset.fileWorkspaceAction=kind;button.dataset.path=path;clientTemplateSlot(button,'label').textContent=label;button.addEventListener('click',event=>{event.stopPropagation();if(button.disabled||!eligible())return;action()});parent.appendChild(button);return button}
     const paint=(entries:WorkspaceEntry[],observed:boolean)=>{
@@ -380,22 +381,24 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
     }
     const archive=async(kind:'compress'|'extract')=>{
       const chosen=presentation.selection()
-      if(!eligible()||controller.state.busy||controller.state.uncertain||chosen.length!==1||chosen[0]!.kind==='symlink')return
-      const source=chosen[0]!.path,home=(root.dataset.accountHome??'').replace(/\/+$/,'')
+      if(!eligible()||controller.state.busy||controller.state.uncertain||!chosen.length||(kind==='extract'&&chosen.length!==1)||chosen.some(item=>item.kind==='symlink'))return
+      const sources=chosen.map(item=>item.path),source=sources[0]!,home=(root.dataset.accountHome??'').replace(/\/+$/,'')
+      const named=sources.length>3?sources.slice(0,3).join(', ')+'…':sources.join(', ')
       const folder=async(request:WorkspaceSend,path:string)=>workspaceListing(await request({op:'list',path}),path)
       const parent=(path:string)=>path.split('/').slice(0,-1).join('/')
       let extracted=0
       await controller.perform(async()=>{
         const raw=await askDialog?.(kind==='compress'
-          ?{title:copy('Compress'),body:source+' — '+copy('Enter the archive path inside your home. Its ending sets the format: .zip, .tar, .tar.gz, .tar.bz2 or .tar.zst. An existing item is never replaced.'),input:true,label:copy('Archive path'),value:source+'.zip',preserveWhitespace:true,confirm:copy('Compress')}
+          ?{title:copy('Compress'),body:named+' — '+copy('Enter the archive path inside your home. Its ending sets the format: .zip, .tar, .tar.gz, .tar.bz2 or .tar.zst. An existing item is never replaced.'),input:true,label:copy('Archive path'),value:source+'.zip',preserveWhitespace:true,confirm:copy('Compress')}
           :{title:copy('Extract'),body:source+' — '+copy('Enter the folder to extract into, inside your home. Leave it empty for your home folder. Existing items are never replaced.'),input:true,label:copy('Destination folder'),value:parent(source),preserveWhitespace:true,confirm:copy('Extract')})
         if(typeof raw!=='string')return null
         // The location bar shows the home prefix, so a pasted absolute path inside the home is accepted.
         const relative=home.startsWith('/')&&(raw===home||raw.startsWith(home+'/'))?raw.slice(home.length+1):raw
         const destination=workspacePath(relative,kind==='extract')
-        if(kind==='compress'&&(destination===source||destination.startsWith(source+'/')))throw new Error('destination_inside_source')
-        if(kind==='compress'&&!/[.](?:zip|tar|tar[.]gz|tgz|tar[.]bz2|tbz2|tar[.]zst|tzst)$/i.test(destination))throw new Error('unsupported_archive_name')
-        return{op:kind,path:source,destination}
+        if(kind==='extract')return{op:kind,path:source,destination}
+        if(sources.some(item=>destination===item||destination.startsWith(item+'/')))throw new Error('destination_inside_source')
+        if(!/[.](?:zip|tar|tar[.]gz|tgz|tar[.]bz2|tbz2|tar[.]zst|tzst)$/i.test(destination))throw new Error('unsupported_archive_name')
+        return{op:kind,paths:sources,destination}
       },async(request,body,reply)=>{
         const destination=body.destination as string
         if(kind==='compress'){

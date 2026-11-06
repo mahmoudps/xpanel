@@ -73,10 +73,34 @@ export function createNativeUpgradeIpcPorts(): UpgradeLauncherPorts | null {
     },
   }
 }
+export const COORDINATOR_STARTUP_ATTEMPTS = 3
+const changedWhileVerifying = (error: unknown): boolean => {
+  let current = error
+  for (let depth = 0; current && typeof current === 'object' && depth < 6; depth += 1) {
+    if ((current as { code?: unknown }).code === 'FILE_CHANGED') return true
+    current = (current as { cause?: unknown }).cause
+  }
+  return false
+}
+/**
+ * A write into an ancestor of the helper archive (for example lifecycle state beside it) changes that
+ * directory's times while startup verifies the archive. Each retry is a complete fresh verification
+ * with no effect done yet; any other refusal, or a third change, fails closed.
+ */
+export async function verifyCoordinatorStartup<T>(verify: () => Promise<T>, sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try { return await verify() } catch (error) {
+      if (attempt >= COORDINATOR_STARTUP_ATTEMPTS || !changedWhileVerifying(error)) throw error
+      process.stderr.write(`xpanel-lifecycle startup: protected source changed during verification; verifying again (${attempt}/${COORDINATOR_STARTUP_ATTEMPTS - 1})\n`)
+      await sleep(1000 * attempt)
+    }
+  }
+}
+
 /** Dedicated same-MainPID executable. Per-message qualification retires SH admission before native admission. */
 export async function startNativeUpgradeIpcServer() {
   requireLinuxRoot()
-  const initial = await withVerifiedCoordinatorOwnership(observeLauncher)
+  const initial = await verifyCoordinatorStartup(() => withVerifiedCoordinatorOwnership(observeLauncher))
   if (initial.identity.pid !== process.pid || await realpath(fileURLToPath(import.meta.url)) !== initial.receipt.sourcePath) return refuse()
   const addon = await loadInstalledPeerIdentityAddon(), workerId = 'upgrade-coordinator-' + randomUUID(), usedJobs = new Set<string>()
   let operation: Promise<unknown> | undefined, qualifying = false

@@ -85,6 +85,12 @@ soname (`dlopen`) after it drops to the account UID. Its own small tar (ustar, p
   `PRECONDITION_FAILED` and reason `archive_format_unavailable`. It never reports false success.
   tar.zst is therefore offered when libzstd loads in the worker. That library, not the CLI binary, does the work.
 
+Selection: like cPanel, Compress takes every item selected in the open folder (files and folders) and writes one
+archive. Each item becomes a top-level entry under its own name. The request carries `paths`: 1 to 10,000 distinct
+items that share one folder, and an archive path outside all of them. The api, the agent and the helper each check
+this. The entry, size, quota and ratio ceilings, the worker budget and the two-operation limit count the whole
+selection.
+
 Formats: compress writes zip, tar, tar.gz/tgz, tar.bz2/tbz2 and tar.zst/tzst. The name suffix chooses the format,
 so a name never lies about its content. Extract detects the format by content: zip, tar, gzip, bzip2 or zstd tar,
 and a single .gz, .bz2 or .zst file (decompressed beside its name).
@@ -109,7 +115,7 @@ and a single .gz, .bz2 or .zst file (decompressed beside its name).
 
 ## Not done
 
-- Compress works on one selected item; cPanel can compress a multi-item selection. To combine several items,
-  compress the folder that holds them.
+- The audit record of a compress names the archive and the number of selected items, not each item, so it stays
+  within the audit detail size limit.
 - There is no progress bar. The result is shown after it is read back.
 - A worker killed at its timeout leaves its hidden staging entry, as copy does today.

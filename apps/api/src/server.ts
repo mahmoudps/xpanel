@@ -128,8 +128,8 @@ import { chmod, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { IncomingMessage, Server } from 'node:http'
 import { networkInterfaces } from 'node:os'
-import { agentCallerHeaders } from '@xpanel/agent'
-import type { AgentApp } from '@xpanel/agent'
+import { ACCOUNT_RETIREMENT_STEPS, agentCallerHeaders } from '@xpanel/agent'
+import type { AccountRetirementStep, AgentApp } from '@xpanel/agent'
 import { groups, visibleTools, visibleNavigation } from '@xpanel/catalog'
 import {
   bindMfaRuntimePolicy,
@@ -1158,8 +1158,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
    * Termination legitimately removes the account from desired state inside the very generation that
    * proves the host teardown, so the generic state-revision equality check cannot apply here. Accept
    * only an applied generation with a valid active identity; the caller then re-reads desired state.
+   * Returns the account's irreversible removal step that stopped after that generation committed, if any.
    */
-  const applyTerminationConfiguration = async (caller: AuthenticatedCaller, account: Account): Promise<void> => {
+  const applyTerminationConfiguration = async (caller: AuthenticatedCaller, account: Account): Promise<{ userRemoved: boolean; failedStep: AccountRetirementStep } | undefined> => {
     let response: Response
     try { response = await callAgent('/state/apply', { method: 'POST', caller, body: { force: false } }) }
     catch { return accountMutationFailure(caller, account, 'account.terminate', 'unknown', 'host_transport_unknown') }
@@ -1174,12 +1175,17 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     if (body?.status === 'noop') return
     const generation = body?.generation
     const gen = generation !== null && typeof generation === 'object' && !Array.isArray(generation) ? generation as Record<string, unknown> : null
+    const incomplete = body?.incompleteRetirements
     if (body?.status !== 'applied' || !gen || !Number.isSafeInteger(gen.id) || Number(gen.id) < 1 || gen.status !== 'active'
       || typeof gen.checksum !== 'string' || !/^[a-f0-9]{64}$/.test(gen.checksum)
       || !Number.isSafeInteger(body.filesCount) || Number(body.filesCount) < 0
-      || typeof body.durationMs !== 'number' || !Number.isFinite(body.durationMs) || body.durationMs < 0) {
+      || typeof body.durationMs !== 'number' || !Number.isFinite(body.durationMs) || body.durationMs < 0
+      || (incomplete !== undefined && (!Array.isArray(incomplete) || incomplete.some(entry => entry === null || typeof entry !== 'object'
+        || typeof entry.accountId !== 'string' || typeof entry.userRemoved !== 'boolean' || !ACCOUNT_RETIREMENT_STEPS.includes(entry.failedStep))))) {
       return accountMutationFailure(caller, account, 'account.terminate', 'unknown', 'host_reply_unverified')
     }
+    const own = (incomplete as { accountId: string; userRemoved: boolean; failedStep: AccountRetirementStep }[] | undefined)?.find(entry => entry.accountId === account.id)
+    return own && { userRemoved: own.userRemoved, failedStep: own.failedStep }
   }
 
   /** Verified target-bound purge of an account (DELETE /api/accounts/<id>, and the rollback of a failed transfer or import). */
@@ -1200,11 +1206,20 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     // Native teardown is the reconciler's terminate plan: stop the account's units and slices, clear the
     // quota, delete the user and remove the home (and drop the account databases). The account leaves the
     // desired state in the same admitted generation whose reported outcome proves those host effects.
+    let retirement: Awaited<ReturnType<typeof applyTerminationConfiguration>>
     try {
-      await applyTerminationConfiguration(caller, marked)
+      retirement = await applyTerminationConfiguration(caller, marked)
     } catch (error) {
       return fail(isXpanelError(error) ? error.code : 'SERVICE_UNAVAILABLE', 'account termination requires verification', {
         ...(isXpanelError(error) ? error.detail : {}), verificationRequired: true, stateChanged: true, reason: 'termination_host_effect_unverified',
+      })
+    }
+    // The account's configuration already left the host; a later reconciliation resumes at the named step.
+    if (retirement) {
+      return fail('SERVICE_UNAVAILABLE', retirement.userRemoved
+        ? 'the account user was removed, but a later removal step needs repair'
+        : 'the account configuration was removed, but removing the account user needs repair', {
+        verificationRequired: true, stateChanged: true, reason: 'account_retirement_incomplete', ...retirement,
       })
     }
     const remaining = await deps.store.getAccount(marked.id)
@@ -1722,6 +1737,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       }),
     })
     const result = await serialProvisioning(() => lifecycle.provisionPreparedAccount({ actor: caller.principal, idempotencyKey, preparationReference: prepared.preparationReference })).catch(error => {
+      // A consumed request key is a known refusal before any effect; it carries no diagnostics or operation IDs.
+      if (isXpanelError(error) && error.detail.reason === 'provisioning_key_already_completed') throw error
       // Agent diagnostics and internal operation IDs are not a public failure contract. A lost
       // acknowledgment never becomes a rollback claim or permission to repeat privileged work.
       return fail(isXpanelError(error) ? error.code : 'SERVICE_UNAVAILABLE', 'account provisioning did not acknowledge a verified outcome', {

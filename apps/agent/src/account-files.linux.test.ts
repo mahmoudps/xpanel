@@ -452,12 +452,12 @@ describe('S04 Native Account File Helper on disposable Linux VM (A15, A16, A17)'
     try {
       await manager.mkdir('pack-source', 0o750)
       await manager.writeText('pack-source/a.txt', 'packed bytes\n', { overwrite: false, mode: 0o640 })
-      expect(await manager.compress('pack-source', 'pack.tar.gz')).toMatchObject({ path: 'pack.tar.gz', kind: 'file', mode: 0o640 })
+      expect(await manager.compress(['pack-source'], 'pack.tar.gz')).toMatchObject({ path: 'pack.tar.gz', kind: 'file', mode: 0o640 })
       expect(await manager.extract('pack.tar.gz', 'pack-target')).toEqual({ destination: 'pack-target', entries: 2, bytes: 13 })
       const extracted = await stat(join(homeA, 'pack-target', 'pack-source', 'a.txt'))
       expect([extracted.uid, extracted.gid, extracted.mode & 0o7777]).toEqual([uidA, uidA, 0o640])
       await expect(manager.extract('pack.tar.gz', 'pack-target')).rejects.toMatchObject({ code: 'CONFLICT' })
-      await expect(manager.compress('pack-source', 'pack.tar.gz')).rejects.toMatchObject({ code: 'CONFLICT' })
+      await expect(manager.compress(['pack-source'], 'pack.tar.gz')).rejects.toMatchObject({ code: 'CONFLICT' })
       expect((await readdir(homeA)).filter(name => name.startsWith('.xpanel-tmp-'))).toEqual([])
     } finally {
       for (const name of ['pack-source', 'pack-target', 'pack.tar.gz']) await rm(join(homeA, name), { recursive: true, force: true })

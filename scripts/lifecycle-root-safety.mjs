@@ -631,8 +631,10 @@ export async function withNativeClosedDatabaseRecoveryAdmission(dispatch, observ
         scope.phase = 'stopping'
         scope.stopCapture = await stopAndDrainOwnedControlPlaneUnits(scope.receipt, scope.capability)
         await assertRecoveryDrained(scope)
-        scope.stopJournal = await replaceManagedFile(path, Buffer.from(JSON.stringify({ ...JSON.parse(scope.stopJournal.bytes), phase: 'quiescent' }) + '\n'),
-          0o600, scope.stopJournal.entry, () => assertBootstrapStopAuthority(scope))
+        const failedUnits = [...new Set(projectOwnedControlPlaneObservation(scope.stopCapture).observations.flatMap(item => item.units).filter(unit => unit.ActiveState === 'failed').map(unit => unit.Id))]
+        // After the rename the journal has a new inode: bind the authority check to the read-back replacement.
+        scope.stopJournal = await replaceManagedFile(path, Buffer.from(JSON.stringify({ ...JSON.parse(scope.stopJournal.bytes), phase: 'quiescent', failedUnits }) + '\n'),
+          0o600, scope.stopJournal.entry, async replaced => { if (replaced) scope.stopJournal = replaced; await assertBootstrapStopAuthority(scope) })
         const initialFile = await captureManagedFile(`${ROOT}/admission-${scope.recovery.capture.operationId}.json`), initial = JSON.parse(initialFile.bytes)
         if (initialFile.entry.mode !== 0o600 || initial.operationId !== scope.recovery.capture.operationId || initial.kind !== 'xpanel-initial-upgrade-admission'
           || !SHA.test(initial.desiredState?.checksum) || initial.binding?.accountLifetimeSha256 !== scope.recovery.capture.intent.binding.accountLifetimeSha256

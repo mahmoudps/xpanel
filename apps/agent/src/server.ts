@@ -678,7 +678,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       list: ['path', 'showHidden'], read: ['path'], write: ['path', 'content', 'overwrite', 'mode'],
       'put-bytes': ['path', 'contentBase64', 'overwrite', 'mode'], 'get-bytes': ['path'],
       mkdir: ['path', 'mode'], chmod: ['path', 'mode'], move: ['path', 'destination'], copy: ['path', 'destination'], trash: ['path'],
-      compress: ['path', 'destination'], extract: ['path', 'destination'], 'list-trash': [], restore: ['trashId', 'overwrite'], 'empty-trash': ['olderThanDays'],
+      compress: ['paths', 'destination'], extract: ['path', 'destination'], 'list-trash': [], restore: ['trashId', 'overwrite'], 'empty-trash': ['olderThanDays'],
       'purge-trash': ['trashId', 'originalPath', 'deletedAt'],
     }
     if (typeof body.op !== 'string' || !Object.hasOwn(fields, body.op)) fail('VALIDATION', 'unsupported file operation')
@@ -687,6 +687,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
     for (const key of ['path', 'destination', 'content', 'contentBase64', 'trashId', 'originalPath', 'deletedAt']) {
       if (body[key] !== undefined && typeof body[key] !== 'string') fail('VALIDATION', `${key} must be a string`)
     }
+    if (body.paths !== undefined && (!Array.isArray(body.paths) || body.paths.some(path => typeof path !== 'string'))) fail('VALIDATION', 'paths must be an array of strings')
     for (const key of ['overwrite', 'showHidden']) {
       if (body[key] !== undefined && typeof body[key] !== 'boolean') fail('VALIDATION', `${key} must be a boolean`)
     }
@@ -696,7 +697,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
     if (op === 'write' && typeof body.content !== 'string') fail('VALIDATION', 'write content is required')
     if (op === 'put-bytes' && typeof body.contentBase64 !== 'string') fail('VALIDATION', 'binary content is required')
     return body as {
-      op: string; path?: string; destination?: string; content?: string; contentBase64?: string; overwrite?: boolean; mode?: number;
+      op: string; path?: string; paths?: string[]; destination?: string; content?: string; contentBase64?: string; overwrite?: boolean; mode?: number;
       showHidden?: boolean; trashId?: string; olderThanDays?: number; originalPath?: string; deletedAt?: string
     }
   }
@@ -1921,7 +1922,8 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         const body = await readFileBody(req)
 
         const auditAction = FILE_AUDIT_ACTIONS[body.op]
-        const target = `account:${account.username}:${body.path ?? body.trashId ?? ''}`
+        // A compress selection has no single path: the archive it writes names it, and the detail keeps only its item count.
+        const target = `account:${account.username}:${body.path ?? body.trashId ?? body.destination ?? ''}`
 
         try {
           let result: unknown
@@ -1957,7 +1959,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
               result = await fm.copy(body.path ?? '', body.destination ?? '')
               break
             case 'compress':
-              result = await fm.compress(body.path ?? '', body.destination ?? '')
+              result = await fm.compress(body.paths ?? [], body.destination ?? '')
               break
             case 'extract':
               result = await fm.extract(body.path ?? '', body.destination ?? '')
@@ -1992,6 +1994,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
               detail: {
                 op: body.op,
                 path: body.path ?? body.originalPath ?? null,
+                ...(body.paths !== undefined && { items: body.paths.length }),
                 ...(body.destination !== undefined && { destination: body.destination }),
                 ...(body.mode !== undefined && { mode: body.mode }),
                 ...(body.trashId !== undefined && { trashId: body.trashId }),
@@ -2009,6 +2012,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
               detail: {
                 op: body.op,
                 path: body.path ?? body.originalPath ?? null,
+                ...(body.paths !== undefined && { items: body.paths.length }),
                 error: isXpanelError(err) ? err.message : 'File operation failed',
               },
               outcome: isXpanelError(err) && err.code === 'FORBIDDEN' ? 'denied' : 'failed',

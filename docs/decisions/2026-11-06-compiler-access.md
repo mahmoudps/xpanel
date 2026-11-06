@@ -32,9 +32,24 @@ every reconcile and from the package manager:
 | Ubuntu 22.04/24.04 | `/etc/dpkg/dpkg.cfg.d/xpanel-compiler-access` with `post-invoke` | Built into dpkg; runs after every dpkg run, including apt, unattended-upgrades and a direct `dpkg -i`. No package to install. |
 | EL 9/10 | `/etc/dnf/plugins/post-transaction-actions.d/xpanel-compiler-access.action` for `gcc*` and `binutils*` | The dnf-plugins-core post-transaction-actions plugin is the reviewed dnf hook; it runs once per transaction that installs or updates those packages. |
 
-On EL the hook needs the plugin package (`python3-dnf-plugin-post-transaction-actions`); the OS package profiles are
-owned by another package, so the agent installs the hook only when the plugin's directory exists and reports
-`hook.available: false` otherwise. A direct `rpm -U` bypasses dnf; the next reconcile re-applies the restriction.
+On EL the hook needs the plugin package `python3-dnf-plugin-post-transaction-actions`, which the installer now
+installs with the bootstrap packages (OS profile and `scripts/install.sh`, checked by the install parity test).
+Checked 2026-11-06 against the published repositories, not a running host:
+
+| Release | dnf | Plugin package (BaseOS) | Actions file |
+|---|---|---|---|
+| EL 9 (Rocky 9 BaseOS) | dnf 4.14, dnf-plugins-core 4.3.0 | `python3-dnf-plugin-post-transaction-actions` 4.3.0 | `/etc/dnf/plugins/post-transaction-actions.d/*.action` |
+| EL 10 (Rocky 10 BaseOS; CentOS Stream 10 BaseOS has the same dnf and dnf-plugins-core) | dnf 4.20, dnf-plugins-core 4.7.0 | `python3-dnf-plugin-post-transaction-actions` 4.7.0 | same |
+
+Both releases ship dnf 4; Rocky 10 BaseOS and AppStream carry no `dnf5` or `libdnf5` package, so the dnf 5 actions plugin
+(`libdnf5-plugin-actions`, `actions.d/*.actions`, five fields `callback:filter:direction:options:command`) does not
+apply. Both plugin versions read the same three-field line `package_filter:transaction_state:command`, match the filter
+as a glob on the package NEVRA, and run each distinct command once per transaction, so one action file serves both
+releases. The agent installs the action only when the plugin is present: its action directory and its own
+configuration file `/etc/dnf/plugins/post-transaction-actions.conf`. The configuration file is the proof, because
+removing the plugin leaves the directory behind while our action is in it. Otherwise it reports
+`hook.available: false`. A plugin switched off with `enabled=0` in that file is not detected. A direct `rpm -U`
+bypasses dnf; the next reconcile re-applies the restriction.
 
 Rejected options: a systemd path unit on `/usr/bin` (every package write and the script's own `chmod` raise inotify
 events; a large transaction can hit the unit's trigger limit and leave it failed, so it is not robust); a dnf Python

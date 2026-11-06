@@ -37,7 +37,10 @@ describe('PostgreSQL reconciliation', () => {
     await state.store.suspendAccount(account.id, 'billing')
     expect(postgresql(compileDesiredGeneration(await state.store.readSnapshot(), { os }).postActions)[0]!.statements.some(statement => statement.includes('WITH NOLOGIN'))).toBe(true)
     await state.store.markTerminating(account.id)
-    expect(postgresql(compileDesiredGeneration(await state.store.readSnapshot(), { os }).postActions)[0]!.statements).toEqual([
+    // Dropping data cannot be rolled back, so the drops run with the account retirement after the commit.
+    const terminating = compileDesiredGeneration(await state.store.readSnapshot(), { os })
+    expect(postgresql(terminating.postActions)).toEqual([])
+    expect(postgresql(terminating.terminatingAccounts.flatMap(entry => entry.retire.map(step => step.action)))[0]!.statements).toEqual([
       'DROP DATABASE IF EXISTS "alice_shop" WITH (FORCE);',
       `SELECT 'DROP OWNED BY "alice_app"' FROM pg_catalog.pg_roles WHERE rolname = 'alice_app'\\gexec`, 'DROP ROLE IF EXISTS "alice_app";',
     ])

@@ -239,7 +239,8 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
   [[ "$WITH_FTP" -eq 1 ]] && PACKAGES+=(pure-ftpd)
   [[ "$WITH_MODSECURITY" -eq 1 ]] && PACKAGES+=(libapache2-mod-security2 modsecurity-crs)
 else
-  BOOTSTRAP_PACKAGES=(dnf-plugins-core acl policycoreutils-python-utils openssl zstd)
+  # EL 9 and 10 ship dnf 4; its post-transaction-actions plugin re-applies Compiler Access after compiler updates.
+  BOOTSTRAP_PACKAGES=(dnf-plugins-core acl policycoreutils-python-utils openssl zstd python3-dnf-plugin-post-transaction-actions)
   REPOSITORY_SOURCES=(crb)
   EPEL_PACKAGES=(epel-release)
   if [[ "$OS_ID" == "centos" ]]; then

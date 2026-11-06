@@ -117,6 +117,17 @@ describe('provisioning identity and uncertain host effects', () => {
     expect(h.reconcile).not.toHaveBeenCalled()
   })
 
+  it('refuses a request key whose completed creation was terminated since, before any lease or host effect', async () => {
+    const h = harness()
+    h.store.getAccount.mockResolvedValue(null as never)
+    dbPort.enqueue.mockResolvedValue({ ...job({ status: 'succeeded', checkpointData: checkpoint() }), deduplicated: true })
+    await expect(h.coordinator.provisionAccount(input())).rejects.toMatchObject({ code: 'CONFLICT',
+      detail: { reason: 'provisioning_key_already_completed', stateChanged: false, verificationRequired: false } })
+    expect(dbPort.lease).not.toHaveBeenCalled()
+    expect(h.store.createAccount).not.toHaveBeenCalled()
+    expect(h.reconcile).not.toHaveBeenCalled()
+  })
+
   it('reauthorizes the current owner on a completed-job replay after ownership transfer', async () => {
     const h = harness()
     const reseller: Principal = { id: 'reseller-id', kind: 'reseller', username: 'seller' }

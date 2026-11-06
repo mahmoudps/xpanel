@@ -118,15 +118,28 @@ export async function readInstallationReceipt() {
   return withTrustedFile(INSTALLATION_RECEIPT, { maxBytes: 64 * 1024, exactMode: 0o600 }, async actual => Object.freeze({ receipt: parseInstallationReceipt(JSON.parse(actual.bytes.toString('utf8'))), sha256: actual.sha256 }))
 }
 
+/** Pure: the first recorded identity field that the named inode no longer matches, or null. */
+export function ownedFileDriftField(entry, named) {
+  if (String(named.dev) !== entry.device) return 'device'
+  if (String(named.ino) !== entry.inode) return 'inode'
+  if (Number(named.size) !== entry.size) return 'size'
+  if (Number(named.mode & 0o7777n) !== entry.mode) return 'mode'
+  if (named.uid !== 0n || named.gid !== 0n) return 'owner'
+  if (entry.kind !== 'symlink' && (!named.isFile() || named.isSymbolicLink() || named.nlink !== 1n)) return 'kind'
+  return null
+}
+// The owned path is product-defined, never a secret; root-only diagnostics name it so a drift is inspectable.
+const ownedFileDrift = (entry, field) => Object.assign(new Error('OWNED_FILE_DRIFT'), { code: 'OWNED_FILE_DRIFT', entryPath: entry.path, field })
+
 export async function assertOwnedFile(entry) {
   await assertTrustedDirectory(dirname(entry.path))
   const named = await lstat(entry.path, { bigint: true })
-  safe(String(named.dev) === entry.device && String(named.ino) === entry.inode && Number(named.size) === entry.size && Number(named.mode & 0o7777n) === entry.mode && named.uid === 0n && named.gid === 0n, 'OWNED_FILE_DRIFT')
+  const field = ownedFileDriftField(entry, named)
+  if (field) throw ownedFileDrift(entry, field)
   if (entry.kind === 'symlink') safe(named.isSymbolicLink() && await readlink(entry.path) === entry.target && await realpath(entry.path) === await realpath(entry.target), 'OWNED_LINK_DRIFT')
   else {
-    safe(named.isFile() && !named.isSymbolicLink() && named.nlink === 1n, 'OWNED_FILE_DRIFT')
     const opened = await readTrustedFile(entry.path, { maxBytes: 1024 * 1024, sha256: entry.sha256 })
-    safe(String(opened.info.dev) === entry.device && String(opened.info.ino) === entry.inode, 'OWNED_FILE_DRIFT')
+    if (String(opened.info.dev) !== entry.device || String(opened.info.ino) !== entry.inode) throw ownedFileDrift(entry, 'inode')
   }
 }
 

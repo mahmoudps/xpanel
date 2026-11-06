@@ -7,6 +7,7 @@ import type { TrustedProxyRenderAuthority } from '../../../core/src/trusted-prox
 import type { Account, Certificate, ConfigTest, Domain, HostAction, Limit, OsProfile, ProxyOptions, RenderedFile, ServerSettings } from '@xpanel/core'
 import { posix } from 'node:path'
 import { certPaths, DEFAULT_TLS, nginxAccessLog, nginxBinary, nginxErrorLog, nginxModuleIncludes, XP_PATHS } from './paths.ts'
+import type { NginxHttp2Style } from '../../../../scripts/nginx-http2.mjs'
 import { nginxQuote } from './quote.ts'
 import { asCertList, certForName, groupSites, siteMode, siteUpstream, type RenderTime, type SiteGroup, type UpstreamPolicy } from './sites.ts'
 import {
@@ -40,8 +41,8 @@ export interface EdgeExtras {
   proxyCacheMaxMb?: number
   /** listen on [::] too (default true) */
   ipv6?: boolean
-  /** 'listen' = `listen 443 ssl http2` (nginx < 1.25.1), 'directive' = `http2 on;` */
-  http2?: 'listen' | 'directive'
+  /** 'listen' = `listen 443 ssl http2` (nginx < 1.25.1), 'directive' = `http2 on;`; the agent sets the installed binary's style */
+  http2?: NginxHttp2Style
   /** nginx >= 1.19.4: refuse TLS for unbound names instead of using the fallback certificate */
   sslRejectHandshake?: boolean
   /** override the distribution's dynamic-module includes */

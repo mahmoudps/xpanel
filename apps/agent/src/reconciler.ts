@@ -61,6 +61,7 @@ import {
   validateStagedCandidateSyntax,
 } from './reconciler-journal.ts'
 import type {
+  AccountRetirementRecord,
   DriftReport,
   PreviousFileBackup,
   ReconcileJournalPhase,
@@ -70,13 +71,20 @@ import { hostEffectsChecksum } from './host-effects-checksum.ts'
 
 export * from './reconciler-journal.ts'
 
+/** Irreversible steps of an account termination, in the order they run once its generation committed. */
+export const ACCOUNT_RETIREMENT_STEPS = ['quota', 'user', 'home', 'container-runtime', 'mariadb', 'postgresql'] as const
+export type AccountRetirementStep = typeof ACCOUNT_RETIREMENT_STEPS[number]
+/** A terminating account whose removal stopped after its generation committed; it stays terminating. */
+export interface IncompleteRetirement { accountId: Id; username: string; userRemoved: boolean; failedStep: AccountRetirementStep }
+
 export interface CompiledGeneration {
   stateChecksum: string
   files: RenderedFile[]
   tests: ConfigTest[]
   preActions: HostAction[]
   postActions: HostAction[]
-  terminatingAccounts: { id: Id; username: string }[]
+  /** `retire` runs only after the generation committed; deleting the user cannot be rolled back. */
+  terminatingAccounts: { id: Id; username: string; uid: number; userRemoved: boolean; retire: { step: AccountRetirementStep; action: HostAction }[] }[]
   /** Postfix main.cf and master.cf are merged outside the owned file list. */
   localMail: boolean
   localMailOptions: services.PostfixMainOptions
@@ -208,6 +216,8 @@ export interface CompileOptions {
   runtime?: ReadonlyMap<string, RuntimeRegistry>
   /** Hosts the management TLS ingress serves on the shared 80/443 sockets (agent-origin.ts readManagementHosts). */
   managementHosts?: readonly string[]
+  /** HTTP/2 style of the installed nginx, read after preflight; the management ingress renders the same one. */
+  nginxHttp2?: edge.NginxHttp2Style
   /** Live /etc/hosts read after preflight; its unrelated lines are kept. Absent renders only the managed lines. */
   etcHosts?: string | null
   /** Kernel host name read after preflight; hostnamectl runs only when it differs from the saved name. */
@@ -216,6 +226,8 @@ export interface CompileOptions {
   selinux?: boolean
   /** Saved Compiler Access (compiler-access.ts); absent or null leaves the compiler permissions untouched. */
   compilerAccess?: system.CompilerAccessInput | null
+  /** Recorded user-removal progress of terminating accounts (ReconcilerJournal.readRetirements). */
+  retirements?: ReadonlyMap<string, AccountRetirementRecord['user']>
 }
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -235,7 +247,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   const tests: ConfigTest[] = []
   const preActions: HostAction[] = []
   const postActions: HostAction[] = []
-  const terminatingAccounts: { id: Id; username: string }[] = []
+  const terminatingAccounts: CompiledGeneration['terminatingAccounts'] = []
   let localMail = false
   const localMailOptions: services.PostfixMainOptions = {}
   let hostname: string | undefined
@@ -257,6 +269,9 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   }
   const plansById = new Map(snapshot.plans.map((p) => [p.id, p]))
   const certs = snapshot.certificates
+  // sec: saved WAF edge input. Every server on the shared 443 socket must carry the same protocol options.
+  const edgeSettings = (settings: ServerSettings): ServerSettings =>
+    ({ ...settings, edge: { ...opts.secEdge?.edge, ...(opts.nginxHttp2 && { http2: opts.nginxHttp2 }) } }) as ServerSettings
 
   // 1. Server-level edge, backend, SSH, symlink protection, jailed shell, and firewall
   if (snapshot.server) {
@@ -269,10 +284,9 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
 
     preActions.push(...edge.nginxEdgeDirs(os))
     // sec: WAF edge input and trusted-proxy authority
-    const secEdgeSettings = opts.secEdge ? { ...settings, edge: opts.secEdge.edge } as ServerSettings : settings
-    files.push(edge.renderNginxMain(secEdgeSettings, os, opts.trustedProxyAuthority))
+    files.push(edge.renderNginxMain(edgeSettings(settings), os, opts.trustedProxyAuthority))
     if (opts.secEdge?.edge.modsecurity) files.push(edge.renderModsecurityMain(opts.secEdge.edge.modsecurity))
-    files.push(edge.defaultSiteFile(os, { settings, ...(opts.managementHosts ? { excludedNames: opts.managementHosts } : {}) }))
+    files.push(edge.defaultSiteFile(os, { settings: edgeSettings(settings), ...(opts.managementHosts ? { excludedNames: opts.managementHosts } : {}) }))
     addTest(edge.nginxConfigTest(os))
 
     if (settings.engine === 'apache') {
@@ -367,22 +381,36 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
         }),
         ...runtimeUnitNames(account, opts.runtime?.get(account.id) ?? EMPTY_RUNTIME),
       ]
-      postActions.push(
-        ...system.accountTerminateActions(account, os, {
-          confirmUsername: account.username,
-          units,
-          quotaFilesystem,
-        }),
-        // Podman keeps its per-account runtime directory across container restarts; the units above are stopped.
-        ...((opts.runtime?.get(account.id)?.containers.length ?? 0) > 0 ? [{ kind: 'remove-path' as const, path: system.containerRuntimeDir(account.username) }] : []),
-      )
-      for (const db of accountDbs) {
-        sqlStatements.push(...services.dropDatabase(db.name, account.username))
+      const plan = system.accountTerminateActions(account, os, {
+        confirmUsername: account.username,
+        units,
+        quotaFilesystem,
+      })
+      // Stopping units and removing their files stays in the generation, which can still roll back. From the
+      // quota clear on (user deletion, home and database removal) nothing can be restored.
+      const cut = plan.findIndex(action => action.kind === 'set-quota' || action.kind === 'delete-user')
+      postActions.push(...plan.slice(0, cut))
+      const progress = opts.retirements?.get(account.id)
+      const retire = plan.slice(cut).flatMap((action): CompiledGeneration['terminatingAccounts'][number]['retire'] => {
+        // A user that may already be gone has no quota to clear; a confirmed removal is never repeated.
+        if (action.kind === 'set-quota') return progress ? [] : [{ step: 'quota', action }]
+        if (action.kind === 'delete-user') return progress === 'removed' ? [] : [{ step: 'user', action }]
+        return [{ step: 'home', action }]
+      })
+      // Podman keeps its per-account runtime directory across container restarts; the units above are stopped.
+      if ((opts.runtime?.get(account.id)?.containers.length ?? 0) > 0) {
+        retire.push({ step: 'container-runtime', action: { kind: 'remove-path', path: system.containerRuntimeDir(account.username) } })
       }
-      for (const dbu of accountDbUsers) {
-        for (const host of ['localhost', ...databaseUserRemoteSqlHosts(account)]) sqlStatements.push(...services.dropUser(dbu.name, account.username, [host]))
+      const drops = [
+        ...accountDbs.flatMap(db => services.dropDatabase(db.name, account.username)),
+        ...accountDbUsers.flatMap(dbu => ['localhost', ...databaseUserRemoteSqlHosts(account)].flatMap(host => services.dropUser(dbu.name, account.username, [host]))),
+      ]
+      if (drops.length > 0) retire.push({ step: 'mariadb', action: services.sqlAction(drops) })
+      const pgUsers = (snapshot.postgresqlUsers ?? []).filter(user => user.accountId === account.id)
+      if (pgUsers.length > 0) {
+        retire.push({ step: 'postgresql', action: postgresqlSqlAction(postgresqlAccountStatements(account, (snapshot.postgresqlDatabases ?? []).filter(database => database.accountId === account.id), pgUsers)) })
       }
-      terminatingAccounts.push({ id: account.id, username: account.username })
+      terminatingAccounts.push({ id: account.id, username: account.username, uid: account.uid, userRemoved: progress === 'removed', retire })
       continue
     }
 
@@ -437,7 +465,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     if (snapshot.server && accountDomains.length > 0) {
       const settings = snapshot.server.settings
       // sec: per-site WAF limits and ModSecurity switches
-      files.push(edge.nginxSiteFile(account, accountDomains, opts.secEdge ? { ...settings, edge: opts.secEdge.edge } as ServerSettings : settings, os, certs, { now, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}), ...(runtimeRender ? { appRoutes: runtimeRender.routes } : {}) }))
+      files.push(edge.nginxSiteFile(account, accountDomains, edgeSettings(settings), os, certs, { now, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}), ...(runtimeRender ? { appRoutes: runtimeRender.routes } : {}) }))
 
       // Per-domain custom configuration drop-in files (cPanel userdata style) + .user.ini
       if (snapshot.domainCustomConfigs && snapshot.domainCustomConfigs.length > 0) {
@@ -806,7 +834,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     postActions.push(services.sqlAction(sqlStatements))
   }
   // PostgreSQL only for accounts that saved PostgreSQL users, so a server without PostgreSQL never needs it.
-  const postgresqlStatements = snapshot.accounts.flatMap((account) => {
+  const postgresqlStatements = snapshot.accounts.filter(account => account.status !== 'terminating').flatMap((account) => {
     const users = (snapshot.postgresqlUsers ?? []).filter((user) => user.accountId === account.id)
     return users.length ? postgresqlAccountStatements(account, (snapshot.postgresqlDatabases ?? []).filter((database) => database.accountId === account.id), users) : []
   })
@@ -865,6 +893,8 @@ export type ReconcileResult =
       repairedDriftCount?: number
       /** Kernel host name this reconciliation observed last (after verification or rollback). */
       kernelHostname?: string | null
+      /** Present only when a terminating account's removal stopped after this generation committed. */
+      incompleteRetirements?: IncompleteRetirement[]
     }
   | {
       status: 'failed'
@@ -1555,6 +1585,43 @@ export class HostReconciler {
   }
 
   /**
+   * Runs each terminating account's irreversible removal after its generation committed, and removes a fully
+   * retired account from desired state. A failed step is never rolled back: the account stays terminating with
+   * its user-removal progress recorded, and a later reconciliation resumes at the failed step.
+   */
+  private async retireAccounts(accounts: CompiledGeneration['terminatingAccounts']): Promise<IncompleteRetirement[]> {
+    const incomplete: IncompleteRetirement[] = []
+    for (const account of accounts) {
+      const record = { schemaVersion: 1 as const, accountId: account.id, username: account.username, uid: account.uid }
+      let userRemoved = account.userRemoved
+      let failedStep: AccountRetirementStep | undefined
+      for (const { step, action } of account.retire) {
+        try {
+          if (step === 'user') await this.journal.saveRetirement({ ...record, user: 'removing' })
+          await this.deps.executor.runAction(action)
+          if (step === 'user') {
+            await this.journal.saveRetirement({ ...record, user: 'removed' })
+            userRemoved = true
+          }
+        } catch (error) {
+          console.error('xpanel-agent account retirement step failed:', account.username, step,
+            error instanceof Error ? error.message.split('\n')[0]!.slice(0, 300) : 'unexpected failure')
+          failedStep = step
+          break
+        }
+      }
+      if (failedStep) {
+        incomplete.push({ accountId: account.id, username: account.username, userRemoved, failedStep })
+        continue
+      }
+      await this.deps.store.deleteAccount(account.id)
+      await removeRuntimeRegistry(this.deps.store.rootDir, account.id)
+      await this.journal.clearRetirement(account.id)
+    }
+    return incomplete
+  }
+
+  /**
    * Reconciles the host to the desired state in `/var/lib/xpanel/state/`.
    * Stages candidate files, runs every service's config test before touching live paths,
    * removes only owned obsolete files, rolls back on reload/health failure, or activates
@@ -1607,6 +1674,7 @@ export class HostReconciler {
     const secEdge = await readSecEdgeConfiguration(this.deps.store.rootDir, { family: this.deps.os.family, domains: snapshot.domains })
     const compilerAccess = await compilerAccessInput(this.deps.store.rootDir, this.deps.os.family, snapshot)
     const runtime = await readRuntimeRegistries(this.deps.store.rootDir, snapshot.accounts)
+    const retirements = await this.journal.readRetirements(snapshot.accounts.filter(account => account.status === 'terminating'))
     const runtimeText = JSON.stringify(savedRuntimes(runtime))
     if (opts.expectedRestoredRuntime && runtimeText !== JSON.stringify(savedRuntimes(opts.expectedRestoredRuntime))) {
       fail('CONFLICT', 'Saved runtime services changed after generation restore; review the restored state before reconciliation', { stateChanged: true, verificationRequired: true })
@@ -1640,6 +1708,7 @@ export class HostReconciler {
     let etcHosts: string | null | undefined
     let observedHostname: string | null | undefined
     let selinux: boolean | undefined
+    let nginxHttp2: edge.NginxHttp2Style | undefined
     let kernelHostname: string | null | undefined
     const observedKernel = () => (kernelHostname !== undefined ? { kernelHostname } : {})
     const compileMail = (mailAuth: OpenDkimSigning | null, previousZones?: ReadonlyMap<string, string>) => {
@@ -1659,9 +1728,11 @@ export class HostReconciler {
         compilerAccess,
         ...(trustedProxyAuthority ? { trustedProxyAuthority } : {}),
         runtime,
+        retirements,
         ...(etcHosts !== undefined ? { etcHosts } : {}),
         ...(observedHostname !== undefined ? { observedHostname } : {}),
         ...(selinux !== undefined ? { selinux } : {}),
+        ...(nginxHttp2 && { nginxHttp2 }),
         now: new Date(),
       })
       if (appliedSnapshot) {
@@ -1689,6 +1760,8 @@ export class HostReconciler {
         postActions: [
           ...next.postActions,
           ...previewDiff.removed.map((removed) => ({ kind: 'remove-path' as const, path: removed.path })),
+          // Retirement runs after the commit, so its targets and SQL runner are admitted here, before any effect.
+          ...next.terminatingAccounts.flatMap(account => account.retire.map(entry => entry.action)),
         ],
       }
     }
@@ -1750,6 +1823,10 @@ export class HostReconciler {
       observedHostname = await this.deps.executor.readFile(KERNEL_HOSTNAME_PATH)
       kernelHostname = observedHostname?.trim() ?? null
       if (this.deps.os.family === 'rhel') selinux = await this.deps.executor.readFile(SELINUX_ENFORCE_PATH) !== null
+      // The binary that runs the config test reports its release on stderr.
+      const version = await this.deps.executor.runCommand([edge.nginxBinary(this.deps.os), '-v'])
+      nginxHttp2 = (version.ok ? edge.nginxHttp2Style(version.stderr) : null)
+        ?? fail('PRECONDITION_FAILED', 'the installed nginx version could not be observed', { stateChanged: false })
     }
     const refreshed = compileMail(mailAuth, previousZones)
     const nextChecksum = computeFilesChecksum(refreshed.files)
@@ -1766,6 +1843,8 @@ export class HostReconciler {
     let repairedDriftCount = 0
     if (
       !opts.force &&
+      // A terminating account still has its removal pending, even when the rendered host already omits it.
+      compiled.terminatingAccounts.length === 0 &&
       currentGen &&
       currentGen.checksum === filesChecksum &&
       previousManifest?.effectsChecksum === effectsChecksum
@@ -2119,12 +2198,6 @@ export class HostReconciler {
         }
       }
 
-      // Remove terminated accounts from desired state now that their host resources are gone and verified
-      for (const term of compiled.terminatingAccounts) {
-        await this.deps.store.deleteAccount(term.id)
-        await removeRuntimeRegistry(this.deps.store.rootDir, term.id)
-      }
-
       await assertHostEffectAuthority(this.deps.executor)
       // Once admitted, complete the existing activation/manifest/projection
       // protocol before acknowledging authority again. A loss cannot be called
@@ -2132,13 +2205,16 @@ export class HostReconciler {
       const appliedGen = await activate(this.deps.db, pendingGen.id)
       await this.journal.writeManifest(candidateManifest)
 
-      const finalSnapshot =
-        compiled.terminatingAccounts.length > 0 ? await this.deps.store.readSnapshot() : snapshot
-      await reindexFromState(this.deps.db, finalSnapshot)
-
+      // Committed before any user is deleted: neither a later failure nor a crash can roll back
+      // configuration files that belong to a removed user.
       journalRecord.phase = 'committed'
       await this.journal.saveJournal(journalRecord)
       await this.journal.cleanupStagingDir(pendingGen.id)
+
+      const incompleteRetirements = await this.retireAccounts(compiled.terminatingAccounts)
+      const finalSnapshot =
+        compiled.terminatingAccounts.length > 0 ? await this.deps.store.readSnapshot() : snapshot
+      await reindexFromState(this.deps.db, finalSnapshot)
 
       this.emitStage(pendingGen.id, 'verify', 'passed', scope)
 
@@ -2153,6 +2229,7 @@ export class HostReconciler {
           removedFilesCount: manifestDiff.removed.length,
           repairedDriftCount,
           durationMs,
+          ...(incompleteRetirements.length > 0 && { incompleteRetirements }),
         },
         outcome: 'ok',
       })
@@ -2177,6 +2254,7 @@ export class HostReconciler {
         removedFilesCount: manifestDiff.removed.length,
         repairedDriftCount,
         ...observedKernel(),
+        ...(incompleteRetirements.length > 0 && { incompleteRetirements }),
       }
     } catch (err) {
       if (err instanceof SimulatedProcessCrashWrapper) {

@@ -36,9 +36,20 @@ export function compilerAccessMembers(snapshot: { accounts: readonly Account[]; 
   return { members, excluded }
 }
 
-/** The package-manager hook can be installed only where its directory exists (EL needs the dnf post-transaction-actions plugin). */
-export const compilerAccessHookAvailable = async (family: string, check: CompilerPresent = present): Promise<boolean> =>
-  (family === 'debian' || family === 'rhel') && await check(system.COMPILER_ACCESS_HOOKS[family].replace(/\/[^/]+$/, ''), 'directory').catch(() => null) === true
+// What runs each family's hook: dpkg reads its own configuration directory; EL 9 and 10 both ship dnf 4, whose
+// post-transaction-actions plugin reads the action directory. Removing the plugin keeps that directory while our
+// action is in it, so the plugin's own configuration file is what proves the plugin is installed.
+const HOOK_RUNNERS: Readonly<Record<'debian' | 'rhel', readonly (readonly [string, 'file' | 'directory'])[]>> = {
+  debian: [['/etc/dpkg/dpkg.cfg.d', 'directory']],
+  rhel: [['/etc/dnf/plugins/post-transaction-actions.d', 'directory'], ['/etc/dnf/plugins/post-transaction-actions.conf', 'file']],
+}
+
+/** The package-manager hook is installed only where something runs it (EL needs the dnf post-transaction-actions plugin). */
+export const compilerAccessHookAvailable = async (family: string, check: CompilerPresent = present): Promise<boolean> => {
+  if (family !== 'debian' && family !== 'rhel') return false
+  for (const [path, kind] of HOOK_RUNNERS[family]) if (await check(path, kind).catch(() => null) !== true) return false
+  return true
+}
 
 /** Reconcile input, or null when nothing is managed. */
 export async function compilerAccessInput(root: string, family: string, snapshot: { accounts: readonly Account[]; plans: readonly Plan[] }, check: CompilerPresent = present): Promise<system.CompilerAccessInput | null> {
