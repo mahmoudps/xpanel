@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { tools } from '@xpanel/catalog'
 import type { Account } from '@xpanel/core'
-import { FILE_WORKSPACE_CLIENT_BINDING, workspaceRelocateRefusal } from './file-workspace-client.ts'
+import { FILE_WORKSPACE_CLIENT_BINDING, workspaceArchiveRefusal, workspaceRelocateRefusal } from './file-workspace-client.ts'
 import { renderPanelSurface } from './surfaces/xpanel.ts'
 import { v2Messages } from './themes/v2/messages.ts'
 import { renderV2FilesPage } from './themes/v2/pages/xpanel/files/index.ts'
@@ -19,14 +19,16 @@ const file = (path: string, kind = 'file') => ({ name: path.split('/').at(-1)!, 
 type Body = Record<string, unknown>
 
 /** Keeps host state so every acknowledgement can be read back the way the controller verifies it. */
-const host = (refuse?: (body: Body) => unknown) => {
-  const entries = new Map([['a.txt', file('a.txt')], ['archive', file('archive', 'directory')]])
+const host = (refuse?: (body: Body) => unknown, extra: ReturnType<typeof file>[] = []) => {
+  const entries = new Map([file('a.txt'), file('archive', 'directory'), ...extra].map(entry => [entry.path, entry]))
   const calls: Body[] = []
   const request = vi.fn(async (_method: string, _path: string, body: Body) => {
     calls.push(body)
     if (body.op === 'list') return { entries: [...entries.values()].filter(entry => entry.path.split('/').slice(0, -1).join('/') === body.path) }
     const refusal = refuse?.(body)
     if (refusal) throw refusal
+    if (body.op === 'compress') { const made = file(body.destination as string); entries.set(made.path, made); return made }
+    if (body.op === 'extract') { const out = file([body.destination, 'readme.txt'].filter(Boolean).join('/')); entries.set(out.path, out); return { destination: body.destination, entries: 1, bytes: 2 } }
     const source = entries.get(body.path as string)!, moved = { ...source, ...file(body.destination as string, source.kind) }
     if (body.op === 'move') entries.delete(source.path)
     entries.set(moved.path, moved)
@@ -45,7 +47,7 @@ const boot = (html: string, request: ReturnType<typeof host>['request'], answer:
 const v2 = (canManage = true, authority?: Partial<SurfaceAuthority>) =>
   renderV2FilesPage(v2Messages.translator('en'), { surface: { account, files: [] }, canManage, ...(authority ? { authority: authority as SurfaceAuthority } : {}) })
 const status = (root: HTMLElement) => root.querySelector<HTMLElement>('[data-file-status]')!
-const action = (name: 'copy' | 'move') => document.querySelector<HTMLButtonElement>(`[data-file-selection-action="${name}"]`)!
+const action = (name: 'copy' | 'move' | 'compress' | 'extract') => document.querySelector<HTMLButtonElement>(`[data-file-selection-action="${name}"]`)!
 const select = (root: HTMLElement, path = 'a.txt') => {
   const input = root.querySelector<HTMLInputElement>(`tr[data-file-path="${path}"] [data-xp-slot="select"]`)!
   input.checked = true
@@ -129,12 +131,12 @@ describe('file selection Copy and Move handlers', { tags: ['feature'] }, () => {
     const closed = host()
     boot(v2(false), closed.request)
     expect(closed.request).not.toHaveBeenCalled()
-    for (const name of ['copy', 'move'] as const) expect([action(name).disabled, action(name).hasAttribute('data-capability-unavailable')]).toEqual([true, true])
+    for (const name of ['copy', 'move', 'compress', 'extract'] as const) expect([action(name).disabled, action(name).hasAttribute('data-capability-unavailable')]).toEqual([true, true])
     const unqualified = host()
     const { root, ask } = boot(v2(true, { qualifiedTools: new Set(), presentation: 'live', canManage: true }), unqualified.request)
     await settled(root)
     select(root)
-    for (const name of ['copy', 'move'] as const) {
+    for (const name of ['copy', 'move', 'compress', 'extract'] as const) {
       expect([action(name).disabled, action(name).hasAttribute('data-capability-unavailable')]).toEqual([true, true])
       action(name).disabled = false
       action(name).click()
@@ -152,11 +154,11 @@ describe('classic selection actions gate', { tags: ['unit'] }, () => {
     visibility: { principal: { kind: 'user', id: 'principal', username: account.username, accountId: account.id }, disabledFeatures: new Set() },
     catalog: tools.map(tool => tool.id === 'file-manager' && verified ? { ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } } : tool),
   })
-  it('connects Copy and Move only behind the verified file-manager tool; Compress and Extract stay unavailable', () => {
+  it('connects Copy, Move, Compress and Extract only behind the verified file-manager tool', () => {
     document.body.innerHTML = classic(true)
     const card = document.querySelector('[data-workspace-section="selection-actions"]')!
     expect([...card.querySelectorAll('button')].map(button => [button.textContent, button.dataset.fileSelectionAction ?? button.dataset.wiring, button.disabled]))
-      .toEqual([['Copy', 'copy', true], ['Move', 'move', true], ['Compress', 'soon', true], ['Extract', 'soon', true]])
+      .toEqual([['Copy', 'copy', true], ['Move', 'move', true], ['Compress', 'compress', true], ['Extract', 'extract', true]])
     document.body.innerHTML = classic(false)
     expect(document.querySelectorAll('[data-file-selection-action]')).toHaveLength(0)
     expect(document.querySelectorAll('[data-workspace-section="selection-actions"] [data-wiring="soon"]')).toHaveLength(4)
@@ -171,5 +173,76 @@ describe('move and copy refusal copy', { tags: ['unit'] }, () => {
     expect(workspaceRelocateRefusal(new Error('invalid_account_path'))).toBe(coded('VALIDATION'))
     expect(coded('SERVICE_UNAVAILABLE')).toBeNull()
     expect(workspaceRelocateRefusal(null)).toBeNull()
+  })
+})
+
+describe('file selection Compress and Extract handlers', { tags: ['feature'] }, () => {
+  const archive = file('site.tar.gz')
+
+  it('enables Compress for one item and Extract only for one archive file, then writes and reads back the named archive', async () => {
+    const fake = host(undefined, [archive])
+    const { root, ask } = boot(v2(), fake.request, 'a.txt.tar.gz')
+    await settled(root)
+    select(root)
+    expect([action('compress').disabled, action('extract').disabled]).toEqual([false, true])
+    root.querySelector<HTMLInputElement>('tr[data-file-path="a.txt"] [data-xp-slot="select"]')!.checked = false
+    root.querySelector('tr[data-file-path="a.txt"] [data-xp-slot="select"]')!.dispatchEvent(new Event('change', { bubbles: true }))
+    select(root, 'site.tar.gz')
+    expect(action('extract').disabled).toBe(false)
+    root.querySelector<HTMLInputElement>('tr[data-file-path="site.tar.gz"] [data-xp-slot="select"]')!.checked = false
+    root.querySelector('tr[data-file-path="site.tar.gz"] [data-xp-slot="select"]')!.dispatchEvent(new Event('change', { bubbles: true }))
+    select(root)
+    action('compress').click()
+    await settled(root, 'saved')
+    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ input: true, value: 'a.txt.zip' }))
+    expect(fake.mutations()).toEqual([{ op: 'compress', path: 'a.txt', destination: 'a.txt.tar.gz' }])
+    expect(status(root).textContent).toBe('Compressed into a.txt.tar.gz. The folder was read back.')
+  })
+
+  it('extracts into the folder holding the archive by default and reports what the helper wrote', async () => {
+    const fake = host(undefined, [archive])
+    const { root, ask } = boot(v2(), fake.request, '')
+    await settled(root)
+    select(root, 'site.tar.gz')
+    action('extract').click()
+    await settled(root, 'saved')
+    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ input: true, value: '' }))
+    expect(fake.mutations()).toEqual([{ op: 'extract', path: 'site.tar.gz', destination: '' }])
+    expect(status(root).textContent).toBe('Extracted 1 item into /home/alice. The folder was read back.')
+    expect(root.querySelector('tr[data-file-path="readme.txt"]')).not.toBeNull()
+  })
+
+  it('refuses an archive name without a supported ending before any request', async () => {
+    const fake = host()
+    const { root } = boot(v2(), fake.request, 'a.rar')
+    await settled(root)
+    select(root)
+    action('compress').click()
+    await settled(root, 'failed')
+    expect(fake.mutations()).toEqual([])
+    expect(status(root).textContent).toBe('End the archive name in .zip, .tar, .tar.gz, .tar.bz2 or .tar.zst. Nothing was changed.')
+  })
+
+  it('names a missing format library by its stable reason and keeps further changes available', async () => {
+    const fake = host(() => Object.assign(new Error('refused'), { code: 'PRECONDITION_FAILED', status: 412, details: { stateChanged: false, reason: 'archive_format_unavailable' } }), [archive])
+    const { root } = boot(v2(), fake.request, 'out')
+    await settled(root)
+    select(root, 'site.tar.gz')
+    action('extract').click()
+    await settled(root, 'failed')
+    expect(status(root).textContent).toBe('This archive format is not available on this server. Nothing was changed.')
+    expect(root.dataset.fileUncertain).toBe('false')
+  })
+})
+
+describe('compress and extract refusal copy', { tags: ['unit'] }, () => {
+  it('names each stable code and reason and leaves unknown failures to the generic text', () => {
+    const coded = (code: string, reason?: string) => workspaceArchiveRefusal(Object.assign(new Error('x'), { code, details: { stateChanged: false, ...(reason ? { reason } : {}) } }))
+    expect(coded('SERVICE_UNAVAILABLE', 'archive_capacity_busy')).toBe('Other archive work is running on this server. Try again shortly. Nothing was changed.')
+    expect(coded('LIMIT_EXCEEDED')).toBe('This exceeds an archive limit: 10000 items, 512 MiB, expanding more than 250 times, or your disk quota. Nothing was changed.')
+    for (const code of ['VALIDATION', 'CONFLICT', 'FORBIDDEN', 'NOT_FOUND', 'PRECONDITION_FAILED']) expect(coded(code)).toMatch(/\.$/)
+    expect(workspaceArchiveRefusal(new Error('destination_inside_source'))).toBe(coded('VALIDATION'))
+    expect(coded('SERVICE_UNAVAILABLE')).toBeNull()
+    expect(workspaceArchiveRefusal(null)).toBeNull()
   })
 })

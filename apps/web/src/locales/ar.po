@@ -2517,6 +2517,10 @@ msgstr "عنوان يبدأ بـ https://، يظهر كرابط «مساعدة»
 msgid "An installed update takes effect only after a reboot."
 msgstr "لا يسري تحديث مثبت إلا بعد إعادة التشغيل."
 
+#: apps/web/src/file-workspace-client.ts
+msgid "An item with that name already exists, or the archive repeats a name. Nothing was replaced."
+msgstr "يوجد عنصر بهذا الاسم مسبقاً، أو أن الأرشيف يكرر اسماً. لم يُستبدل شيء."
+
 #: apps/web/src/whm-upgrade-client.ts
 msgid "An upgrade is recorded as locked."
 msgstr "سُجلت ترقية بحالة مقفلة."
@@ -3163,6 +3167,10 @@ msgstr "أرشفة الرسائل"
 #: apps/web/src/mailx-archive-client.ts
 msgid "Archive outgoing mail for {domain}"
 msgstr "أرشفة البريد الصادر للنطاق {domain}"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Archive path"
+msgstr "مسار الأرشيف"
 
 #: apps/web/src/board-port/mailx-archive-workspace.ts
 msgid "Archive state"
@@ -6474,9 +6482,21 @@ msgstr "ضغط"
 msgid "Compress proxied responses"
 msgstr "ضغط الاستجابات الممررة عبر الوكيل"
 
+#: apps/web/src/audit-labels.ts
+msgid "Compressed a file or folder"
+msgstr "ضغط ملفاً أو مجلداً"
+
 #: apps/web/src/board-port/sw-optimize-workspace.ts
 msgid "Compressed content types"
 msgstr "أنواع المحتوى المضغوطة"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Compressed into {path}. The folder was read back."
+msgstr "ضُغط في {path}. أُعيدت قراءة المجلد."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Compressing. The archive is shown only after it is read back."
+msgstr "جارٍ الضغط. لا يظهر الأرشيف إلا بعد إعادة قراءته."
 
 #: apps/web/src/board-port/approved-whm-backups.ts apps/web/src/board-port/sw-optimize-workspace.ts
 msgid "Compression"
@@ -7186,10 +7206,6 @@ msgstr "نسخ"
 msgid "Copy a site to a private staging folder, review the changes and promote them to the live site."
 msgstr "انسخ موقعًا إلى مجلد تجريبي خاص، وراجع التغييرات، ثم انشرها على الموقع المباشر."
 
-#: apps/web/src/board-port/approved-xpanel-workspaces.ts
-msgid "Copy and Move act on the one item selected in the file list. Compress and Extract are unavailable here; no change has been made."
-msgstr "يعمل النسخ والنقل على العنصر الوحيد المحدد في قائمة الملفات. الضغط والاستخراج غير متاحين هنا؛ لم يُجرَ أي تغيير."
-
 #: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/extensions/account-databases.ts
 msgid "Copy connection details"
 msgstr "نسخ تفاصيل الاتصال"
@@ -7249,6 +7265,10 @@ msgstr "انسخ مفتاح التوقيع هذا الآن. لن يُعرض مر
 #: apps/web/src/board-port/approved-xpanel-pages.ts apps/web/src/board-port/whm-panel-tokens-workspace.ts apps/web/src/board-port/whm-whmcs-workspace.ts apps/web/src/design-board.ts
 msgid "Copy token"
 msgstr "نسخ الرمز"
+
+#: apps/web/src/board-port/approved-xpanel-workspaces.ts
+msgid "Copy, Move, Compress and Extract act on the one item selected in the file list. Extract needs a zip, tar, gz, bz2 or zst file."
+msgstr "تعمل أوامر النسخ والنقل والضغط والاستخراج على العنصر الوحيد المحدد في قائمة الملفات. يحتاج الاستخراج إلى ملف zip أو tar أو gz أو bz2 أو zst."
 
 #: apps/web/src/whm-transfer-client.ts
 msgid "Copying"
@@ -9520,6 +9540,10 @@ msgstr "إعداد الوجهة"
 msgid "Destination enabled in saved policy"
 msgstr "الوجهة مفعّلة في السياسة المحفوظة"
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Destination folder"
+msgstr "مجلد الوجهة"
+
 #: apps/web/src/whm-backup-destinations-client.ts
 msgid "Destination management is unavailable here."
 msgstr "إدارة الوجهات غير متاحة هنا."
@@ -11280,6 +11304,10 @@ msgstr "انتهى الدعم"
 msgid "End session"
 msgstr "إنهاء الجلسة"
 
+#: apps/web/src/file-workspace-client.ts
+msgid "End the archive name in .zip, .tar, .tar.gz, .tar.bz2 or .tar.zst. Nothing was changed."
+msgstr "اجعل اسم الأرشيف ينتهي بـ .zip أو .tar أو .tar.gz أو .tar.bz2 أو .tar.zst. لم يتغير شيء."
+
 #: apps/web/src/board-port/xmail-calendar-view.ts
 msgid "End time"
 msgstr "وقت النهاية"
@@ -11634,6 +11662,10 @@ msgstr "أدخل الرمز المكوّن من 6 أرقام من تطبيق ا�
 msgid "Enter the WHMCS URL as an https:// address."
 msgstr "أدخل عنوان URL لـ WHMCS بصيغة https://."
 
+#: apps/web/src/file-workspace-client.ts
+msgid "Enter the archive path inside your home. Its ending sets the format: .zip, .tar, .tar.gz, .tar.bz2 or .tar.zst. An existing item is never replaced."
+msgstr "أدخل مسار الأرشيف داخل مجلدك الرئيسي. تحدد نهايته الصيغة: .zip أو .tar أو .tar.gz أو .tar.bz2 أو .tar.zst. لا يُستبدل أي عنصر موجود."
+
 #: apps/web/src/whm-transfer-client.ts
 msgid "Enter the cPanel host, its pinned host key and the cPanel username. Nothing was sent."
 msgstr "أدخل مضيف cPanel ومفتاح المضيف المثبت واسم مستخدم cPanel. لم يُرسل شيء."
@@ -11649,6 +11681,10 @@ msgstr "أدخل اسم الوجهة أولًا؛ يُسمّى زوج المفا
 #: apps/web/src/acct-team-client.ts
 msgid "Enter the expiry as a UTC date and time."
 msgstr "أدخل موعد الانتهاء تاريخًا ووقتًا بتوقيت UTC."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Enter the folder to extract into, inside your home. Leave it empty for your home folder. Existing items are never replaced."
+msgstr "أدخل المجلد الذي يُستخرج إليه داخل مجلدك الرئيسي. اتركه فارغاً لمجلدك الرئيسي. لا تُستبدل العناصر الموجودة."
 
 #: apps/web/src/board-port/extensions/account-domains.ts
 msgid "Enter the full name, without www. Subdomains also use their full name; choose their parent below. Input is sent as typed."
@@ -12315,6 +12351,18 @@ msgstr "سجلات منطقة إضافية"
 #: apps/web/src/board-port/approved-xpanel-pages.ts
 msgid "Extract"
 msgstr "فك الضغط"
+
+#: apps/web/src/audit-labels.ts
+msgid "Extracted an archive"
+msgstr "استخرج أرشيفاً"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Extracted {count, plural, one {# item} other {# items}} into {path}. The folder was read back."
+msgstr "استُخرج {count, plural, zero {لا شيء} one {عنصر واحد} two {عنصران} few {# عناصر} many {# عنصراً} other {# عنصر}} إلى {path}. أُعيدت قراءة المجلد."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Extracting. The result is shown only after the folder is read back."
+msgstr "جارٍ الاستخراج. لا تظهر النتيجة إلا بعد إعادة قراءة المجلد."
 
 #: apps/web/src/whm-php-client.ts
 msgid "FPM not installed"
@@ -24240,6 +24288,10 @@ msgstr "تتحد قواعد وصول أخرى في هذا الملف مع الع
 #: apps/web/src/board-port/sec-workspace.ts
 msgid "Other access settings"
 msgstr "إعدادات الوصول الأخرى"
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Other archive work is running on this server. Try again shortly. Nothing was changed."
+msgstr "يجري عمل أرشفة آخر على هذا الخادم. حاول مرة أخرى بعد قليل. لم يتغير شيء."
 
 #: apps/web/src/whm-server-observation-client.ts
 msgid "Other entry"
@@ -37819,6 +37871,10 @@ msgstr "لم تُقرأ قائمة الأرشيفات."
 msgid "The archive was discarded."
 msgstr "تم تجاهل الأرشيف."
 
+#: apps/web/src/file-workspace-client.ts
+msgid "The archive was refused: it holds links, special files or paths that leave the folder, the path crosses a link, or your access does not allow file changes. Nothing was changed."
+msgstr "رُفض الأرشيف: فهو يحتوي روابط أو ملفات خاصة أو مسارات تخرج من المجلد، أو أن المسار يعبر رابطاً، أو أن صلاحياتك لا تسمح بتغيير الملفات. لم يتغير شيء."
+
 #: apps/web/src/whm-transfer-client.ts
 msgid "The archive was uploaded and its SHA-256 recorded. The server is reading it now."
 msgstr "رُفع الأرشيف وسُجّل SHA-256 الخاص به. يقرؤه الخادم الآن."
@@ -42232,6 +42288,10 @@ msgstr "فشل فحص هذا الأرشيف ولا يمكن استعراضه."
 msgid "This archive failed integrity inspection. No file can be restored from it."
 msgstr "فشل فحص سلامة هذا الأرشيف. لا يمكن استعادة أي ملف منه."
 
+#: apps/web/src/file-workspace-client.ts
+msgid "This archive format is not available on this server. Nothing was changed."
+msgstr "صيغة الأرشيف هذه غير متاحة على هذا الخادم. لم يتغير شيء."
+
 #: apps/web/src/acct-restore-client.ts
 msgid "This backup contains no mailbox messages."
 msgstr "لا تحتوي هذه النسخة الاحتياطية على رسائل بريد."
@@ -42351,6 +42411,10 @@ msgstr "تعذر عرض هذا الحدث من السجلات المحفوظة �
 #: apps/web/src/file-workspace-client.ts
 msgid "This exceeds a file limit: 10000 items or 128 MiB per copy, or your disk quota. Nothing was changed."
 msgstr "يتجاوز هذا حداً للملفات: 10000 عنصر أو 128 MiB لكل نسخة، أو حصة القرص. لم يتغير شيء."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "This exceeds an archive limit: 10000 items, 512 MiB, expanding more than 250 times, or your disk quota. Nothing was changed."
+msgstr "هذا يتجاوز حداً للأرشيف: 10000 عنصر، أو 512 MiB، أو تمدداً بأكثر من 250 ضعفاً، أو حصة القرص لديك. لم يتغير شيء."
 
 #: apps/web/src/mail-disk-usage-client.ts
 msgid "This folder holds more than 50000 messages, so its cleanup cannot be measured here."
@@ -44770,6 +44834,10 @@ msgstr "استخدم عنوان http أو https كاملًا دون علامات
 #: apps/web/src/account-pgp-client.ts
 msgid "Use a name, a current mailbox, 1–3650 days and a passphrase of at least 12 characters."
 msgstr "استخدم اسمًا وعنوان بريد حاليًا ومدة 1–3650 يومًا وعبارة مرور من 12 حرفًا على الأقل."
+
+#: apps/web/src/file-workspace-client.ts
+msgid "Use a path inside your home, outside the item itself, and a complete, unencrypted zip, tar, tar.gz, tar.bz2, tar.zst, gz, bz2 or zst file. Nothing was changed."
+msgstr "استخدم مساراً داخل مجلدك الرئيسي وخارج العنصر نفسه، وملف zip أو tar أو tar.gz أو tar.bz2 أو tar.zst أو gz أو bz2 أو zst مكتملاً وغير مشفر. لم يتغير شيء."
 
 #: apps/web/src/account-web-directives-client.ts
 msgid "Use a path that starts with / without spaces, quotes, .. segments or a query string."

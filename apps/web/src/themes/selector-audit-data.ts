@@ -1330,10 +1330,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/file-workspace-client.ts",
-    "sha256": "0519863de07731a917f146de9359d1e4cc5215b4b71a70d9e082a98ae6a1b084",
+    "sha256": "8e3b29e91f0fd9a9b5f3065f8474fec5bb62413470940a72ae806c34e31ca56c",
     "sites": [
       {
-        "line": 146,
+        "line": 161,
         "column": 56,
         "method": "querySelectorAll",
         "argument": "selector",
@@ -1344,7 +1344,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 178,
+        "line": 193,
         "column": 71,
         "method": "querySelector",
         "argument": "'[data-file-workspace-action=\"'+action+'\"]'",
@@ -1355,7 +1355,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 194,
+        "line": 209,
         "column": 77,
         "method": "querySelector",
         "argument": "'[data-file-workspace-action=\"'+action+'\"]'",
@@ -1366,7 +1366,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 195,
+        "line": 210,
         "column": 74,
         "method": "querySelector",
         "argument": "'[data-file-workspace-action=\"'+(browse?'chmod':'purge')+'\"]'",
@@ -1377,7 +1377,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 266,
+        "line": 281,
         "column": 93,
         "method": "closest",
         "argument": "denied",
@@ -1387,8 +1387,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 277,
-        "column": 152,
+        "line": 293,
+        "column": 190,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -1397,7 +1397,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 321,
+        "line": 337,
         "column": 241,
         "method": "closest",
         "argument": "denied",
@@ -1407,8 +1407,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 365,
-        "column": 137,
+        "line": 415,
+        "column": 183,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -1417,7 +1417,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 389,
+        "line": 439,
         "column": 92,
         "method": "closest",
         "argument": "denied",
@@ -1427,7 +1427,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 401,
+        "line": 451,
         "column": 264,
         "method": "closest",
         "argument": "denied",

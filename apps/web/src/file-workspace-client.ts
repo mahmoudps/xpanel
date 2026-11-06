@@ -140,6 +140,21 @@ export function workspaceRelocateRefusal(error:unknown):string|null{
   return null
 }
 
+/** Explains a definite compress or extract refusal by its stable code and reason; null leaves the generic refusal text. */
+export function workspaceArchiveRefusal(error:unknown):string|null{
+  const failure=workspaceObject(error)?error:{},details=workspaceObject(failure.details)?failure.details:{},code=failure.code
+  if(details.reason==='archive_format_unavailable')return xpT('This archive format is not available on this server. Nothing was changed.')
+  if(details.reason==='archive_capacity_busy')return xpT('Other archive work is running on this server. Try again shortly. Nothing was changed.')
+  if(error instanceof Error&&error.message==='unsupported_archive_name')return xpT('End the archive name in .zip, .tar, .tar.gz, .tar.bz2 or .tar.zst. Nothing was changed.')
+  if(code==='VALIDATION'||(error instanceof Error&&['invalid_account_path','destination_inside_source'].includes(error.message)))return xpT('Use a path inside your home, outside the item itself, and a complete, unencrypted zip, tar, tar.gz, tar.bz2, tar.zst, gz, bz2 or zst file. Nothing was changed.')
+  if(code==='CONFLICT')return xpT('An item with that name already exists, or the archive repeats a name. Nothing was replaced.')
+  if(code==='FORBIDDEN')return xpT('The archive was refused: it holds links, special files or paths that leave the folder, the path crosses a link, or your access does not allow file changes. Nothing was changed.')
+  if(code==='NOT_FOUND')return xpT('The item or the destination folder no longer exists. Refresh files to see the current state.')
+  if(code==='LIMIT_EXCEEDED')return xpT('This exceeds an archive limit: 10000 items, 512 MiB, expanding more than 250 times, or your disk quota. Nothing was changed.')
+  if(code==='PRECONDITION_FAILED')return xpT('File operations are unavailable on this server. Nothing was changed.')
+  return null
+}
+
 type FileViewEntry={key:string;name:string;path:string;kind:string;sizeBytes:number;mode?:number;mtime:string}
 function createFilePresentation(root:HTMLElement,copy:(text:string)=>string,size:(bytes:number)=>string,when:(value:string)=>string,changed?:()=>void){
   const must=(selector:string,tag?:string):HTMLElement=>{
@@ -271,10 +286,11 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
     let renderedEntries:WorkspaceEntry[]|null=null,renderedRead=false
     const size=(bytes:number)=>{const units=['B','KiB','MiB','GiB','TiB'];let amount=bytes,index=0;while(amount>=1024&&index<units.length-1){amount/=1024;index++}return amount.toFixed(index===0?0:amount>=10?1:2)+' '+units[index]}
     const when=(value:string)=>formatDisplayDateTime(value)
-    // The approved design places Copy and Move in a selection toolbar, which a theme may render beside this root; one browse root owns them.
-    const relocators=document.querySelectorAll('[data-file-manager="browse"]').length===1?[...document.querySelectorAll<HTMLButtonElement>('[data-file-selection-action]')].filter(button=>button.type==='button'&&['copy','move'].includes(button.dataset.fileSelectionAction??'')):[]
+    // The approved design places Copy, Move, Compress and Extract in a selection toolbar, which a theme may render beside this root; one browse root owns them.
+    const relocators=document.querySelectorAll('[data-file-manager="browse"]').length===1?[...document.querySelectorAll<HTMLButtonElement>('[data-file-selection-action]')].filter(button=>button.type==='button'&&['copy','move','compress','extract'].includes(button.dataset.fileSelectionAction??'')):[]
+    const archiveFile=/[.](?:zip|tar|tgz|tbz2|tzst|gz|bz2|zst)$/i
     let latest:WorkspaceState|undefined
-    const syncRelocators=()=>{const chosen=latest?presentation.selection():[];for(const button of relocators)button.disabled=!latest||!!button.closest(denied)||button.hasAttribute('data-capability-unavailable')||latest.busy||latest.loading||latest.uncertain||!eligible()||chosen.length!==1||chosen[0]!.kind==='symlink'}
+    const syncRelocators=()=>{const chosen=latest?presentation.selection():[],one=chosen.length===1?chosen[0]!:null;for(const button of relocators)button.disabled=!latest||!!button.closest(denied)||button.hasAttribute('data-capability-unavailable')||latest.busy||latest.loading||latest.uncertain||!eligible()||!one||one.kind==='symlink'||(button.dataset.fileSelectionAction==='extract'&&(one.kind!=='file'||!archiveFile.test(one.path)))}
     try{presentation=createFilePresentation(root,copy,size,when,syncRelocators)}catch{root.querySelectorAll<HTMLButtonElement|HTMLInputElement|HTMLTextAreaElement>('button,input,textarea').forEach(node=>{node.disabled=true});status.hidden=false;status.dataset.state='unavailable';status.textContent=copy('File operations are unavailable.');return}
     const actionButton=(parent:HTMLElement,label:string,kind:string,path:string,action:()=>void)=>{const button=templates.cloneAction();button.dataset.fileWorkspaceAction=kind;button.dataset.path=path;clientTemplateSlot(button,'label').textContent=label;button.addEventListener('click',event=>{event.stopPropagation();if(button.disabled||!eligible())return;action()});parent.appendChild(button);return button}
     const paint=(entries:WorkspaceEntry[],observed:boolean)=>{
@@ -362,7 +378,41 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
         refused:workspaceRelocateRefusal,
       })
     }
-    for(const button of relocators)button.addEventListener('click',event=>{event.stopPropagation();if(!button.disabled&&!button.closest(denied)&&eligible())void relocate(button.dataset.fileSelectionAction==='copy'?'copy':'move')})
+    const archive=async(kind:'compress'|'extract')=>{
+      const chosen=presentation.selection()
+      if(!eligible()||controller.state.busy||controller.state.uncertain||chosen.length!==1||chosen[0]!.kind==='symlink')return
+      const source=chosen[0]!.path,home=(root.dataset.accountHome??'').replace(/\/+$/,'')
+      const folder=async(request:WorkspaceSend,path:string)=>workspaceListing(await request({op:'list',path}),path)
+      const parent=(path:string)=>path.split('/').slice(0,-1).join('/')
+      let extracted=0
+      await controller.perform(async()=>{
+        const raw=await askDialog?.(kind==='compress'
+          ?{title:copy('Compress'),body:source+' — '+copy('Enter the archive path inside your home. Its ending sets the format: .zip, .tar, .tar.gz, .tar.bz2 or .tar.zst. An existing item is never replaced.'),input:true,label:copy('Archive path'),value:source+'.zip',preserveWhitespace:true,confirm:copy('Compress')}
+          :{title:copy('Extract'),body:source+' — '+copy('Enter the folder to extract into, inside your home. Leave it empty for your home folder. Existing items are never replaced.'),input:true,label:copy('Destination folder'),value:parent(source),preserveWhitespace:true,confirm:copy('Extract')})
+        if(typeof raw!=='string')return null
+        // The location bar shows the home prefix, so a pasted absolute path inside the home is accepted.
+        const relative=home.startsWith('/')&&(raw===home||raw.startsWith(home+'/'))?raw.slice(home.length+1):raw
+        const destination=workspacePath(relative,kind==='extract')
+        if(kind==='compress'&&(destination===source||destination.startsWith(source+'/')))throw new Error('destination_inside_source')
+        if(kind==='compress'&&!/[.](?:zip|tar|tar[.]gz|tgz|tar[.]bz2|tbz2|tar[.]zst|tzst)$/i.test(destination))throw new Error('unsupported_archive_name')
+        return{op:kind,path:source,destination}
+      },async(request,body,reply)=>{
+        const destination=body.destination as string
+        if(kind==='compress'){
+          if(workspaceEntry(reply,destination).kind!=='file')throw new Error('invalid_archive_ack')
+          if(!(await folder(request,parent(destination))).some(row=>row.path===destination&&row.kind==='file'))throw new Error('archive_not_observed')
+          return
+        }
+        if(!workspaceObject(reply)||reply.destination!==destination||typeof reply.entries!=='number'||!Number.isSafeInteger(reply.entries)||reply.entries<0||typeof reply.bytes!=='number'||!Number.isSafeInteger(reply.bytes)||reply.bytes<0)throw new Error('invalid_extract_ack')
+        extracted=reply.entries
+        await folder(request,destination)
+      },async(request,body)=>{const destination=body.destination as string;await folder(request,kind==='compress'?parent(destination):destination)},undefined,{
+        pending:kind==='compress'?copy('Compressing. The archive is shown only after it is read back.'):copy('Extracting. The result is shown only after the folder is read back.'),
+        success:body=>kind==='compress'?copy('Compressed into {path}. The folder was read back.',{path:String(body.destination)}):copy('Extracted {count, plural, one {# item} other {# items}} into {path}. The folder was read back.',{count:extracted,path:String(body.destination)||home}),
+        refused:workspaceArchiveRefusal,
+      })
+    }
+    for(const button of relocators)button.addEventListener('click',event=>{event.stopPropagation();const action=button.dataset.fileSelectionAction;if(button.disabled||button.closest(denied)||!eligible())return;if(action==='compress'||action==='extract')void archive(action);else void relocate(action==='copy'?'copy':'move')})
     const picker=root.querySelector<HTMLInputElement>('[data-file-upload]');let uploadDirectory:string|null=null
     root.querySelector<HTMLButtonElement>('[data-action="upload-file"]')?.addEventListener('click',()=>{if(!eligible()||controller.state.busy||controller.state.uncertain||!picker)return;uploadDirectory=controller.state.directory;picker.click()})
     picker?.addEventListener('change',()=>{
@@ -479,4 +529,4 @@ function bindTrashWorkspace(askDialog?:WorkspaceConfirm):void{
   })
 }
 
-export const FILE_WORKSPACE_CLIENT_BINDING = `(function(askDialog) { const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WORKSPACE_EDIT_BYTES=${WORKSPACE_EDIT_BYTES};const WORKSPACE_BINARY_BYTES=${WORKSPACE_BINARY_BYTES};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${createFilePresentation.toString()};${fileWorkspaceTemplates.toString()};${workspaceObject.toString()};${workspacePath.toString()};${workspaceLeaf.toString()};${workspaceMode.toString()};${workspaceTextBytes.toString()};${workspaceTime.toString()};${workspaceEntry.toString()};${workspaceListing.toString()};${workspaceText.toString()};${workspaceBinary.toString()};${workspaceWriteUncertain.toString()};${createFileWorkspace.toString()};${workspaceTrash.toString()};${workspaceTrashList.toString()};${workspaceRelocateRefusal.toString()};(${bindFileWorkspace.toString()})(askDialog);(${bindTrashWorkspace.toString()})(askDialog); })`
+export const FILE_WORKSPACE_CLIENT_BINDING = `(function(askDialog) { const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WORKSPACE_EDIT_BYTES=${WORKSPACE_EDIT_BYTES};const WORKSPACE_BINARY_BYTES=${WORKSPACE_BINARY_BYTES};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${createFilePresentation.toString()};${fileWorkspaceTemplates.toString()};${workspaceObject.toString()};${workspacePath.toString()};${workspaceLeaf.toString()};${workspaceMode.toString()};${workspaceTextBytes.toString()};${workspaceTime.toString()};${workspaceEntry.toString()};${workspaceListing.toString()};${workspaceText.toString()};${workspaceBinary.toString()};${workspaceWriteUncertain.toString()};${createFileWorkspace.toString()};${workspaceTrash.toString()};${workspaceTrashList.toString()};${workspaceRelocateRefusal.toString()};${workspaceArchiveRefusal.toString()};(${bindFileWorkspace.toString()})(askDialog);(${bindTrashWorkspace.toString()})(askDialog); })`
