@@ -143,8 +143,8 @@ export interface StagedAuthenticatedRelease extends AuthenticatedReleaseTree {
 
 /** pnpm arguments for the offline production install of an authenticated release, checked against its pinned Node. */
 export function offlineDependencyInstallArguments(manifest: Pick<ReleaseManifestCore, 'runtime'>): string[]
-/** Clears group and world write on the installed node_modules trees of a root-only staged release. */
-export function clearDependencyGroupWorldWrite(root: string): Promise<void>
+/** Sets the fixed dependency modes on the installed node_modules trees of a root-only staged release, whatever the umask. */
+export function normalizeDependencyModes(root: string): Promise<void>
 /** Insertion-order JSON serialization; undefined input can return undefined. */
 export function serializeManifestPayload(manifestCore: unknown): string | undefined
 export function signManifestPayload(canonicalJson: string, signingKey: Parameters<typeof createHmac>[1]): string

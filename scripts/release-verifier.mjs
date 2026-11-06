@@ -38,15 +38,17 @@ export const DESIGN_REFERENCE_INPUTS = Object.freeze({ directories: Object.freez
 export const offlineDependencyInstallArguments = manifest => ['install', '--offline', '--frozen-lockfile', '--prod', '--ignore-scripts', '--verify-store-integrity', `--config.node-version=${manifest.runtime.nodeVersion}`]
 
 /**
- * pnpm 12 now and then leaves a dependency directory 0777 (seen on different packages from run to run). The install
- * runs in a root-only staging tree, so group and world write is cleared on the installed node_modules trees before
- * they are observed; symbolic links are not followed.
+ * Installed dependencies are public code the unprivileged services read, so their modes are fixed rather than taken
+ * from pnpm or the caller's umask: pnpm 12 now and then leaves a directory 0777, and under umask 0077 it creates
+ * every entry owner-only, which the API cannot traverse. Directories become 0755, files 0644, or 0755 when their
+ * owner may execute them; symbolic links are not followed.
  */
-export const clearDependencyGroupWorldWrite = async root => {
+const dependencyMode = info => info.isDirectory() || (Number(info.mode) & 0o100) !== 0 ? 0o755 : 0o644
+export const normalizeDependencyModes = async root => {
   const visit = async path => {
     const info = await lstat(path)
     if (info.isSymbolicLink()) return
-    if ((info.mode & 0o022) !== 0 && (info.isDirectory() || info.isFile())) await chmod(path, info.mode & 0o7755)
+    if ((info.isDirectory() || info.isFile()) && (info.mode & 0o7777) !== dependencyMode(info)) await chmod(path, dependencyMode(info))
     if (info.isDirectory()) for (const name of await readdir(path)) await visit(join(path, name))
   }
   const trees = [join(root, 'node_modules')]

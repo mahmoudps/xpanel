@@ -8,7 +8,7 @@ import { basename, dirname, join, posix } from 'node:path'
 import { ReconcilerJournal } from '../apps/agent/src/reconciler-journal.ts'
 import { withHostOperationGuard, assertHostOperationGuardHeld, assertHostOperationGuardActive, getStrictOperationDatabaseOrigin, createRootOperationAuditAuthority, withReadonlyOperationDatabase, withReadonlyLifecycleIntentObservation, assertOperationIntentReceipt, getPrincipal, getDurableJob, createJob, finishJob, finishUpgrade, currentSchemaVersion, latestUpgrade, reindexFromState } from '../packages/db/src/index.ts'
 import { StateStore, generationSourceIsLinked } from '../packages/state/src/index.ts'
-import { clearDependencyGroupWorldWrite, offlineDependencyInstallArguments, withAuthenticatedReleaseArchive, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive } from './release-verifier.mjs'
+import { normalizeDependencyModes, offlineDependencyInstallArguments, withAuthenticatedReleaseArchive, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive } from './release-verifier.mjs'
 import { readInstallationReceipt, parseInstallationReceipt, assertOwnedFile, withTrustedFile, withTrustedDirectory, requireLinuxRoot, OWNED_PANEL_UNITS } from './lifecycle-ownership.mjs'
 import { observeOwnedControlPlaneUnits, assertOwnedControlPlaneQuiescent, awaitOwnedServiceChildren, projectOwnedControlPlaneObservation, stopAndDrainOwnedControlPlaneUnits } from './lifecycle-services.mjs'
 import { assertPreparedReleaseCurrent, preparedReleaseInfo, withExistingPreparedRelease, withVisiblePreparedRelease, observeInstalledReleaseTree } from './prepared-release.mjs'
@@ -1077,7 +1077,7 @@ async function runtimeDependencies(scope, root, report) {
   if (checked.code !== 0 || checked.output.trim() !== report.manifest.runtime.packageManager.split('@').at(-1)) fail('LIFECYCLE_PACKAGE_MANAGER_MISMATCH')
   const installed = await nativeCommand(manager, offlineDependencyInstallArguments(report.manifest), { cwd: root, sha256: scope.trust.packageManagerSha256, timeoutMs: 120_000 })
   if (installed.code !== 0) fail('LIFECYCLE_DEPENDENCY_INSTALL_FAILED')
-  await clearDependencyGroupWorldWrite(root)
+  await normalizeDependencyModes(root)
   const lock = await readFile(join(root, 'pnpm-lock.yaml'))
   if (sha(lock) !== report.manifest.lockfileSha256) fail('LIFECYCLE_LOCKFILE_CHANGED')
   const moduleRoot = join(root, 'node_modules'), actualRoot = await realpath(root)

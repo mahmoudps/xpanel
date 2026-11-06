@@ -16,12 +16,12 @@ import { createProductionAccountFileRunner, DEFAULT_FILE_WORKER_INCIDENT_DIR } f
 import { CanonicalIoResourcePipeline, IoAnalyticsEngine, readWebsiteAnalyticsStore, WEBSITE_ANALYTICS_PATH, WebsiteAnalyticsEngine } from './analytics.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
 import { ensureAcmeWebRoot } from './host-access.ts'
-import { readManagementHosts, syncRuntimePublicOrigin } from './agent-origin.ts'
+import { syncRuntimePublicOrigin } from './agent-origin.ts'
 import { ensureInstalledMail } from './services/local-mail.ts'
 import { enableMailWebsocketProxy } from './services/mail-websocket.ts'
 import { readOpenDkimPublished, writeOpenDkimPublished } from './services/opendkim-live.ts'
 import { resolveHomeQuotaFilesystem } from './services/quota.ts'
-import { HostReconciler } from './reconciler.ts'
+import { createNativeHostReconciler } from './native-reconciler.ts'
 import { loadNativePeerIdentityAddon, resolveProvisionedPeerUids, resolveServicePrimaryGid } from './peer-identity.ts'
 import { AccountProvisioningPreparationReader } from './account-provisioning-preparation.ts'
 import { provisioningAuthorizationPorts } from './account-provisioning-authorization.ts'
@@ -48,7 +48,6 @@ import type { AgentApp } from './server.ts'
 import { awaitLifecycleWriterDrain, createLifecycleBackgroundResources, isLifecycleManaged, readLifecyclePublicStatus, startLifecycleWriterParticipant, withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
 import { createMariaDbSqlRunner, DEFAULT_MARIADB_ADMIN_CNF, defaultCommandRunner as mariadbCommandRunner, MariaDbServiceAdapter, mariadbSocketForFamily } from './services/mariadb.ts'
 import { withPostgresqlSqlRunner } from './pg-sql.ts'
-import { createNativeDnsReconcileProvider } from './services/dns-native.ts'
 import { createAccountGitRun } from './account-git-runner.ts'
 import { GIT_BINARY, GIT_LIMITS } from '../../../packages/os/src/git-command.ts'
 import { nativeRpmDatabaseRecovery } from './ops-package-recovery.ts'
@@ -315,19 +314,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         const terminalHelperPath = opts.terminalPtyBinaryPath ?? process.env.XPANEL_TERMINAL_PTY_BINARY ?? DEFAULT_TERMINAL_PTY_HELPER
         if (await verifyTerminalPtyHelper(terminalHelperPath)) terminals = new TerminalSessionManager(createSystemdPtySpawner(terminalHelperPath))
 
-        const dnsPublication = createNativeDnsReconcileProvider({ executor, family: os.family,
-          readOwnedPaths: async () => new Set((await reconciler.ownedChecksums()).keys()),
-        })
-        const reconciler: HostReconciler = new HostReconciler({
-          store,
-          db: dbHandle.db,
-          executor,
-          os,
-          quotaFilesystem,
-          ioDevices,
-          dnsPublication,
-          managementHosts: await readManagementHosts(executor),
-        })
+        const { reconciler, dnsPublication } = await createNativeHostReconciler({ store, db: dbHandle.db, executor, os, quotaFilesystem, ioDevices })
         await syncRuntimePublicOrigin(executor).catch((error: unknown) => {
           process.stderr.write(`xpanel-agent public origin: ${error instanceof Error ? error.message : String(error)}\n`)
         })
