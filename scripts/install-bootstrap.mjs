@@ -747,21 +747,19 @@ export async function assertPreparedReleaseCurrent(capability) {
   else {
     const sameTree = scope.helperRoot === scope.info.releaseRoot && scope.helperReport.archiveSha256 === scope.report.archiveSha256
       && scope.helperReport.manifestSha256 === scope.report.manifestSha256
+    const identity = []
     if (!sameTree) {
       const helperPaths = await verifySourceInventory(scope.helperRoot, scope.helperReport)
-      const helperTree = await observeSecureTree(scope.helperRoot, helperPaths)
+      const helperTree = await observeSecureTree(scope.helperRoot, helperPaths, identity)
       check(helperTree.treeSha256 === scope.helperTreeSha256, 'PREPARED_RELEASE_HELPER_CHANGED')
     }
     const paths = await verifySourceInventory(scope.info.releaseRoot, scope.report)
-    const identity = sameTree ? [] : null
     const tree = await observeSecureTree(scope.info.releaseRoot, paths, identity)
     check(tree.treeSha256 === scope.info.treeSha256 && (!sameTree || tree.treeSha256 === scope.helperTreeSha256), 'PREPARED_RELEASE_TREE_CHANGED')
-    if (identity) {
-      // Both roles use the same authenticated root. Retained ancestry pins and
-      // inode stamps detect file, symlink and directory changes inside the scope.
-      assertPreparedTreeIdentity(identity)
-      scope.treeIdentity = identity
-    }
+    // One full hash per authenticated root per scope lifetime. Retained ancestry pins and inode stamps
+    // detect file, symlink and directory changes in either root; the scope ends on a full verification.
+    assertPreparedTreeIdentity(identity)
+    scope.treeIdentity = identity
   }
   for (const pin of scope.pins) await pin.verify()
 }
