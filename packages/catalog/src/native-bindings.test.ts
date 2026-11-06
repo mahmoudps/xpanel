@@ -69,10 +69,12 @@ describe('native workspace capability boundaries', () => {
 
   it('does not promote the original broader IDs even with all supported host probes passed', () => {
     const qualified = qualifyHostTools(tools, allPassed, true)
-    for (const id of broadIds) {
-      expect(qualified.find(tool => tool.id === id)?.status, id).toBe('researched')
-      expect(PHASE1_TOOL_PROBES[id], id).toBeUndefined()
-    }
+    for (const id of broadIds) expect(qualified.find(tool => tool.id === id)?.status, id).toBe('researched')
+    // Readiness only: the broader tools whose effect exists declare their host needs; the others have none.
+    expect(Object.fromEntries(broadIds.map(id => [id, PHASE1_TOOL_PROBES[id]]))).toEqual({
+      'feature-manager': ['control-plane'], 'tweak-packages': undefined, 'initial-setup-wizard': undefined, 'basic-server-setup': ['control-plane'],
+      'php-version-selector': ['control-plane', 'apache', 'systemd'], 'multiphp-ini-editor': ['control-plane', 'apache', 'systemd'], 'zone-editor': ['control-plane', 'pdns'], dnssec: undefined,
+    })
     expect(page('/whm/plans/features').tools).toEqual(['feature-manager', 'tweak-packages', 'feature-list-crud'])
     expect(page('/software/php').tools).toEqual(['php-version-selector', 'multiphp-ini-editor', 'domain-php-settings'])
     expect(page('/domains/zone-editor').tools).toEqual(['zone-editor', 'dnssec', 'dns-zone-records'])
