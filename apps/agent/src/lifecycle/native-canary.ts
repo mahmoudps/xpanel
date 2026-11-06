@@ -21,6 +21,8 @@ const targetBrand = Symbol('native lifecycle canary target')
 export interface LifecycleCanaryTarget extends AccountIdentity { readonly [targetBrand]: true }
 export interface NativeCanarySelection { readonly username: string | null }
 const refused: (reason: string) => never = reason => fail('PRECONDITION_FAILED', 'the scoped lifecycle account observation was not verified', { verificationRequired: true, reason })
+/** The held exchange enforces its own hold deadline; the canary bounds the guards around it and never cuts the exchange short. */
+export const LIFECYCLE_CANARY_DEADLINE_MS = (system.ACCOUNT_PROBE_HOLD_SECONDS + 15) * 1000
 const lifetime = (account: Account): string => JSON.stringify({ id: account.id, username: account.username, uid: account.uid, gid: account.gid,
   home: account.home, primaryDomain: account.primaryDomain, ownerId: account.ownerId, planId: account.planId, createdAt: account.createdAt })
 const commit = (meta: StateAuthorityMetadata): string => JSON.stringify({ revision: meta.revision, fence: meta.fencingToken, commit: meta.committedLeaseId ?? null })
@@ -139,7 +141,7 @@ export function createNativeLifecycleCanary(options: NativeLifecycleCanaryOption
         if (!generation || generation.status !== 'active') return refused('canary_active_generation_required')
         const manifest = await options.reconciler.journal.readManifest(generation.id); await authority.assertAuthority()
         if (!manifest || manifest.generationId !== generation.id || manifest.filesChecksum !== generation.checksum || manifest.stateChecksum !== snapshot.checksum) return refused('canary_current_generation_mismatch')
-        const stateCommit = commit(after), signal = AbortSignal.any([authority.signal, AbortSignal.timeout(15000)])
+        const stateCommit = commit(after), signal = AbortSignal.any([authority.signal, AbortSignal.timeout(LIFECYCLE_CANARY_DEADLINE_MS)])
         const guard = async (): Promise<void> => {
           if (signal.aborted || Date.now() >= domainDeadline) refused('lifecycle_canary_deadline_or_cancel')
           await authority.assertAuthority()
