@@ -113,8 +113,22 @@ export const powerDnsReloadActions = (zones: readonly string[]): HostAction[] =>
     { kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] },
     ...names.map((zone): HostAction => ({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'bind-reload-now', zone] })),
     { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] },
+    POWERDNS_CACHE_PURGE,
   ]
 }
+
+/**
+ * PowerDNS keeps answering a removed or changed zone from its packet and query caches (20 s by default)
+ * after rediscover/reload, so the observation probes that follow would see the old answer.
+ */
+export const POWERDNS_CACHE_PURGE: HostAction = { kind: 'exec', argv: ['/usr/bin/pdns_control', 'purge'] }
+
+/** A catalog that ends empty only needs rediscovery, the global reload and the cache purge. */
+const powerDnsEmptyCatalogActions = (): HostAction[] => [
+  { kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] },
+  { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] },
+  POWERDNS_CACHE_PURGE,
+]
 
 /**
  * The installer enables the web and mail daemons but leaves them stopped until the first generation that
@@ -144,10 +158,7 @@ export const retainEmptyManagedDnsCatalog = (
     || !previousPaths.some(path => isManagedDnsPath(path, zoneDir))) return
   compiled.files.push({ path: DNS_CATALOG_PATH, content: '// Managed by xPanel: PowerDNS BIND zone catalog\n', mode: 0o644, owner: 'root', group: 'root' })
   compiled.files.sort((a, b) => a.path.localeCompare(b.path))
-  compiled.postActions.push(
-    { kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] },
-    { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] },
-  )
+  compiled.postActions.push(...powerDnsEmptyCatalogActions())
 }
 
 /** Native DNS effects require a validator/observer; modeled fixtures cannot create native proof. */
@@ -775,7 +786,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       group: 'root',
     })
     if (renderedZones.length > 0) postActions.push(...powerDnsReloadActions(renderedZones.map(zone => zone.name)))
-    else postActions.push({ kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] }, { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] })
+    else postActions.push(...powerDnsEmptyCatalogActions())
   }
 
   if (needsDaemonReload) {

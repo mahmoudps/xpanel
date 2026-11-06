@@ -36,7 +36,7 @@ const rollbackFixture = (observationFails = false, introduced = false) => {
     writeFile: async entry => { events.push(`restore:${entry.path}`); files.set(entry.path, entry) },
     removePath: async path => { events.push(`remove:${path}`); files.delete(path) },
     runAction: async (action: HostAction) => {
-      if (action.kind === 'exec' && action.argv[0] === '/usr/bin/pdns_control' && ['rediscover', 'reload'].includes(action.argv[1] ?? '')) {
+      if (action.kind === 'exec' && action.argv[0] === '/usr/bin/pdns_control' && ['rediscover', 'reload', 'purge'].includes(action.argv[1] ?? '')) {
         events.push(`dns:${action.argv[1]}`)
       } else if (action.kind === 'systemd' && action.unit === 'nginx.service' && action.verb === 'reload') {
         events.push('nginx:reload')
@@ -86,6 +86,7 @@ describe('generation-owned DNS publication boundary', { tags: ['unit'] }, () => 
       { kind: 'exec', argv: ['/usr/bin/pdns_control', 'bind-reload-now', 'example.test'] },
       { kind: 'exec', argv: ['/usr/bin/pdns_control', 'bind-reload-now', 'shop.example.test'] },
       { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] },
+      { kind: 'exec', argv: ['/usr/bin/pdns_control', 'purge'] },
     ])
   })
   it('retains a valid empty managed catalog and reload commands when the final owned zone is removed', () => {
@@ -95,10 +96,11 @@ describe('generation-owned DNS publication boundary', { tags: ['unit'] }, () => 
     expect(candidate.postActions).toEqual([
       { kind: 'exec', argv: ['/usr/bin/pdns_control', 'rediscover'] },
       { kind: 'exec', argv: ['/usr/bin/pdns_control', 'reload'] },
+      { kind: 'exec', argv: ['/usr/bin/pdns_control', 'purge'] },
     ])
     retainEmptyManagedDnsCatalog(candidate, [zonePath, catalogPath])
     expect(candidate.files).toHaveLength(1)
-    expect(candidate.postActions).toHaveLength(2)
+    expect(candidate.postActions).toHaveLength(3)
   })
 
   it('does not introduce a DNS requirement on a host whose generations never owned DNS', () => {
@@ -194,6 +196,7 @@ describe('generation-owned DNS publication boundary', { tags: ['unit'] }, () => 
     expect(fixture.events.indexOf(`restore:${catalogPath}`)).toBeLessThan(fixture.events.indexOf('systemd:daemon-reload'))
     expect(fixture.events.indexOf('systemd:daemon-reload')).toBeLessThan(fixture.events.indexOf('dns:rediscover'))
     expect(fixture.events.indexOf('dns:rediscover')).toBeLessThan(fixture.events.indexOf('dns:reload'))
+    expect(fixture.events.indexOf('dns:reload')).toBeLessThan(fixture.events.indexOf('dns:purge'))
     expect(fixture.events.indexOf('dns:reload')).toBeLessThan(fixture.events.indexOf('dns:verify'))
     expect(dbPorts.rollback).toHaveBeenCalledTimes(1)
   })

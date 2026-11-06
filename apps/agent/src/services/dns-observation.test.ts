@@ -32,6 +32,21 @@ describe('authoritative DNS observations and recovery', () => {
       ['/usr/bin/pdns_control', 'rediscover'], ['/usr/bin/pdns_control', 'bind-reload-now', 'example.com'],
     ])
   })
+  it('purges the PowerDNS answer caches before observing a deleted zone', async () => {
+    // A zone probed seconds earlier is still answered from the packet cache after its removal.
+    const executor = new FakeHostExecutor()
+    const order: string[] = []
+    const adapter = new AuthoritativeDnsServiceAdapter({ executor, prober: async input => {
+      order.push(input.deleted ? 'probe:deleted' : 'probe:published')
+      return explicitProbe(input)
+    } })
+    await adapter.publishZone({ zone: 'example.com', records: records(), now })
+    const before = executor.executedCommands.length
+    await adapter.deleteZone('example.com')
+    const commands = executor.executedCommands.slice(before).map(argv => argv.join(' '))
+    expect(commands).toEqual(['/usr/bin/pdns_control rediscover', '/usr/bin/pdns_control purge'])
+    expect(order).toEqual(['probe:published', 'probe:deleted'])
+  })
   it('refuses pdnsutil as a candidate-file validator before any host action', () => {
     const executor = new FakeHostExecutor()
     expect(() => new AuthoritativeDnsServiceAdapter({ executor, syntaxTool: 'pdnsutil' })).toThrow()
