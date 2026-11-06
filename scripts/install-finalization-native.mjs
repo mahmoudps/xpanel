@@ -20,6 +20,14 @@ const check = (condition, code) => { if (!condition) fail(code) }
 const record = (value, keys) => check(value && typeof value === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(value))
   && Reflect.ownKeys(value).length === keys.length && Reflect.ownKeys(value).every(key => typeof key === 'string' && keys.includes(key) && Object.hasOwn(Object.getOwnPropertyDescriptor(value, key) ?? {}, 'value')), 'INSTALL_FINALIZATION_REQUEST_INVALID')
 const canonicalPath = path => typeof path === 'string' && path.length <= 4096 && posix.isAbsolute(path) && posix.normalize(path) === path && !/[\\\x00-\x20\x7f]/.test(path)
+/** The archive lifetime wraps every refusal as ARCHIVE_USE_UNCERTAIN; the reason carries the innermost stable code. */
+export function finalizationReason(error, fallback) {
+  let reason = fallback
+  for (let current = error, depth = 0; current && typeof current === 'object' && depth < 8; current = current.cause, depth++) {
+    if (typeof current.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(current.code)) reason = current.code
+  }
+  return reason
+}
 
 export function parseNativeInstallFinalizationRequest(value) { return parseFinalizationRequest(value, 'install') }
 export function parseNativePreparedAdoptionRequest(value) { return parseFinalizationRequest(value, 'adopt') }
@@ -781,7 +789,7 @@ async function runNativeFinalization(input, helperCapability, preparedFresh = fa
   } catch (error) {
     const code = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,95}$/.test(error.code) ? error.code : 'INSTALL_FINALIZATION_NATIVE_UNVERIFIED'
     const attention = scope?.changed === true
-    output = { exitCode: attention ? 6 : 3, code, outcome: attention ? 'attention' : 'blocked', details: { status: attention ? 'attention' : 'blocked', changed: attention, qualified: false, nativeQualified: false, installReady: false, reason: code } }
+    output = { exitCode: attention ? 6 : 3, code, outcome: attention ? 'attention' : 'blocked', details: { status: attention ? 'attention' : 'blocked', changed: attention, qualified: false, nativeQualified: false, installReady: false, reason: finalizationReason(error, code) } }
   } finally {
     const errors = []
     if (scope) {

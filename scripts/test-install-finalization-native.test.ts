@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { beforeEach, describe, it, vi } from 'vitest'
-import { parseNativeInstallFinalizationRequest, installFinalizationMetadataTarget, assertInstallFinalizationNativeScope, installFinalizationNativeInfo, runNativeInstallFinalization, withInstallFinalizationStateDirectories } from './install-finalization-native.mjs'
+import { finalizationReason, parseNativeInstallFinalizationRequest, installFinalizationMetadataTarget, assertInstallFinalizationNativeScope, installFinalizationNativeInfo, runNativeInstallFinalization, withInstallFinalizationStateDirectories } from './install-finalization-native.mjs'
 import { withInstallFinalizationExclusiveAdmission, verifyInstallFinalizationParticipants } from './lifecycle-admission.mjs'
 
 
@@ -44,6 +44,13 @@ const request = { schemaVersion: 1, command: 'install', mode: 'apply', json: tru
 const jobId = '12345678-1234-4234-8234-123456789abc'
 
 describe('native install finalization boundaries; no platform spoof or native effects', () => {
+  it('reports the innermost stable code behind the archive lifetime wrapper', () => {
+    const inner = Object.assign(new Error('x'), { code: 'INSTALL_FINALIZATION_STATE_CHANGED' })
+    const wrapped = Object.assign(new Error('y', { cause: Object.assign(new Error('z', { cause: inner }), { code: 'PRECONDITION_FAILED' }) }), { code: 'ARCHIVE_USE_UNCERTAIN' })
+    assert.equal(finalizationReason(wrapped, 'ARCHIVE_USE_UNCERTAIN'), 'INSTALL_FINALIZATION_STATE_CHANGED')
+    assert.equal(finalizationReason(Object.assign(new Error('w', { cause: new Error('raw message') }), { code: 'ARCHIVE_USE_UNCERTAIN' }), 'ARCHIVE_USE_UNCERTAIN'), 'ARCHIVE_USE_UNCERTAIN')
+    assert.equal(finalizationReason({ code: 'lower_case' }, 'INSTALL_FINALIZATION_NATIVE_UNVERIFIED'), 'INSTALL_FINALIZATION_NATIVE_UNVERIFIED')
+  })
   it('accepts only the finite install/apply grammar without a caller-selected provider', () => {
     const parsed = parseNativeInstallFinalizationRequest(request)
     assert(Object.isFrozen(parsed)); assert.deepEqual(parsed, request)

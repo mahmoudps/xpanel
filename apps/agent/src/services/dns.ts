@@ -309,13 +309,17 @@ export class AuthoritativeDnsServiceAdapter {
     if (!discovered.ok) {
       fail('CONFIG_TEST_FAILED', 'PowerDNS could not rediscover the managed zone configuration', { exitCode: discovered.code })
     }
-    if (zone === undefined) return
-    const res = await this.executor.runCommand([this.pdnsControlBinary, 'bind-reload-now', zone])
-    if (!res.ok) {
-      fail('CONFIG_TEST_FAILED', `pdns_control bind-reload-now failed: ${res.stderr || res.stdout}`, {
-        exitCode: res.code,
-      })
+    if (zone !== undefined) {
+      const res = await this.executor.runCommand([this.pdnsControlBinary, 'bind-reload-now', zone])
+      if (!res.ok) {
+        fail('CONFIG_TEST_FAILED', `pdns_control bind-reload-now failed: ${res.stderr || res.stdout}`, {
+          exitCode: res.code,
+        })
+      }
     }
+    // The packet and query caches keep answering a removed or changed zone until they expire; the probes that follow must not see them.
+    const purged = await this.executor.runCommand([this.pdnsControlBinary, 'purge'])
+    if (!purged.ok) fail('CONFIG_TEST_FAILED', 'PowerDNS could not purge its answer caches', { exitCode: purged.code })
   }
 
   private async defaultDigProbe(input: {
