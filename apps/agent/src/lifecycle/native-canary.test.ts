@@ -10,7 +10,8 @@ import { ReconcilerJournal } from '../reconciler-journal.ts'
 import type { HostEffectAuthority } from '../host-effect-authority.ts'
 import type { HeldNativeAccountHttpRequest, NativeAccountHttpOptions } from '../account-provisioning-http.ts'
 import type { NativeAccountHttpSubject } from '../account-provisioning-http-source.ts'
-import { createNativeLifecycleCanary, type NativeLifecycleCanaryOptions } from './native-canary.ts'
+import { system } from '@xpanel/render'
+import { createNativeLifecycleCanary, LIFECYCLE_CANARY_DEADLINE_MS, type NativeLifecycleCanaryOptions } from './native-canary.ts'
 
 // Synthetic scope/transport composition only. No native capability or Linux qualification is minted by these tests.
 const fixture = vi.hoisted(() => {
@@ -127,6 +128,14 @@ describe('lifecycle canary composition with simulated native scope and held exch
     const s = await scene(), target = await s.issued()
     await expect(s.canaries.observe(target)).resolves.toEqual({ httpStatus: 200, servedByUid: 20001, cgroupSlice: 'xpanel-20001.slice', serviceActive: true })
     expect(fixture.closes).toBe(1)
+  })
+  it('gives the held exchange its whole hold deadline before the canary cancels it', async () => {
+    const s = await scene(), target = await s.issued(), timeouts: number[] = []
+    const timeout = AbortSignal.timeout.bind(AbortSignal)
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => { timeouts.push(ms); return timeout(ms) })
+    await s.canaries.observe(target)
+    expect(LIFECYCLE_CANARY_DEADLINE_MS).toBeGreaterThan(system.ACCOUNT_PROBE_HOLD_SECONDS * 1000)
+    expect(timeouts).toEqual([LIFECYCLE_CANARY_DEADLINE_MS])
   })
   it('rejects a held worker with a different UID instead of returning the requested UID', async () => {
     const s = await scene(), target = await s.issued(); fixture.uid = 33
