@@ -195,8 +195,32 @@ describe('file selection Compress and Extract handlers', { tags: ['feature'] }, 
     action('compress').click()
     await settled(root, 'saved')
     expect(ask).toHaveBeenCalledWith(expect.objectContaining({ input: true, value: 'a.txt.zip' }))
-    expect(fake.mutations()).toEqual([{ op: 'compress', path: 'a.txt', destination: 'a.txt.tar.gz' }])
+    expect(fake.mutations()).toEqual([{ op: 'compress', paths: ['a.txt'], destination: 'a.txt.tar.gz' }])
     expect(status(root).textContent).toBe('Compressed into a.txt.tar.gz. The folder was read back.')
+  })
+
+  it('compresses every selected item of the folder into one archive while the one-item actions stay disabled', async () => {
+    const fake = host(undefined, [archive])
+    const { root, ask } = boot(v2(), fake.request, 'bundle.zip')
+    await settled(root)
+    for (const path of ['a.txt', 'archive', 'site.tar.gz']) select(root, path)
+    expect((['copy', 'move', 'compress', 'extract'] as const).map(name => action(name).disabled)).toEqual([true, true, false, true])
+    action('compress').click()
+    await settled(root, 'saved')
+    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ input: true, value: 'a.txt.zip', body: expect.stringMatching(/^a\.txt, archive, site\.tar\.gz — /) }))
+    expect(fake.mutations()).toEqual([{ op: 'compress', paths: ['a.txt', 'archive', 'site.tar.gz'], destination: 'bundle.zip' }])
+    expect(status(root).textContent).toBe('Compressed into bundle.zip. The folder was read back.')
+  })
+
+  it('refuses an archive path inside any selected folder before any request', async () => {
+    const fake = host()
+    const { root } = boot(v2(), fake.request, 'archive/all.zip')
+    await settled(root)
+    for (const path of ['a.txt', 'archive']) select(root, path)
+    action('compress').click()
+    await settled(root, 'failed')
+    expect(fake.mutations()).toEqual([])
+    expect(status(root).textContent).toContain('Nothing was changed.')
   })
 
   it('extracts into the folder holding the archive by default and reports what the helper wrote', async () => {

@@ -78,8 +78,8 @@ export type AccountFileRequest =
   | { op: 'move'; path: string; destination: string }
   /** File or bounded tree copy, published under the destination only when complete. */
   | { op: 'copy'; path: string; destination: string }
-  /** Writes a new zip or tar archive of one file or folder; never replaces an existing item. */
-  | { op: 'compress'; path: string; destination: string }
+  /** Writes a new zip or tar archive of the selected items of one folder; never replaces an existing item. */
+  | { op: 'compress'; paths: string[]; destination: string }
   /** Extracts a zip, tar (plain, gzip, bzip2, zstd) or single compressed file into a folder; never replaces an item. */
   | { op: 'extract'; path: string; destination: string }
   | { op: 'trash'; path: string }
@@ -388,10 +388,15 @@ export class JailedFileManager {
     return entry
   }
 
-  async compress(path: string, destination: string): Promise<FileEntry> {
-    const [from, to] = sourceAndDestination(path, destination)
+  /** Archives a file manager selection: distinct items of one folder, each under its own name. */
+  async compress(paths: readonly string[], destination: string): Promise<FileEntry> {
+    if (!Array.isArray(paths) || paths.length === 0 || paths.length > MAX_FILE_LIST_ENTRIES) fail('VALIDATION', 'compress takes 1 to 10000 items')
+    const to = contentPath(destination)
+    const from = paths.map(path => sourceAndDestination(path, to)[0])
+    const folder = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf('/')))
+    if (new Set(from).size !== from.length || from.some(path => folder(path) !== folder(from[0]!))) fail('VALIDATION', 'compressed items must be distinct and share one folder')
     if (!ARCHIVE_NAME.test(to)) fail('VALIDATION', 'archive name must end in .zip, .tar, .tar.gz, .tgz, .tar.bz2, .tbz2, .tar.zst or .tzst')
-    const entry = changedEntry(await this.execute({ op: 'compress', path: from, destination: to }), 'compress', to)
+    const entry = changedEntry(await this.execute({ op: 'compress', paths: from, destination: to }), 'compress', to)
     if (entry.kind !== 'file') return invalidResult('compress')
     return entry
   }

@@ -1330,7 +1330,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/file-workspace-client.ts",
-    "sha256": "8e3b29e91f0fd9a9b5f3065f8474fec5bb62413470940a72ae806c34e31ca56c",
+    "sha256": "36d83a9ee95ac176f9ad6304019814bd924eadaca277271f69ce7221e36860f0",
     "sites": [
       {
         "line": 161,
@@ -1387,8 +1387,8 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 293,
-        "column": 190,
+        "line": 294,
+        "column": 239,
         "method": "closest",
         "argument": "denied",
         "classification": "literal-ineligibility-ancestor-policy",
@@ -1397,7 +1397,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 337,
+        "line": 338,
         "column": 241,
         "method": "closest",
         "argument": "denied",
@@ -1407,7 +1407,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 415,
+        "line": 418,
         "column": 183,
         "method": "closest",
         "argument": "denied",
@@ -1417,7 +1417,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 439,
+        "line": 442,
         "column": 92,
         "method": "closest",
         "argument": "denied",
@@ -1427,7 +1427,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 451,
+        "line": 454,
         "column": 264,
         "method": "closest",
         "argument": "denied",

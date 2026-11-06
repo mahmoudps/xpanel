@@ -7267,8 +7267,8 @@ msgid "Copy token"
 msgstr "نسخ الرمز"
 
 #: apps/web/src/board-port/approved-xpanel-workspaces.ts
-msgid "Copy, Move, Compress and Extract act on the one item selected in the file list. Extract needs a zip, tar, gz, bz2 or zst file."
-msgstr "تعمل أوامر النسخ والنقل والضغط والاستخراج على العنصر الوحيد المحدد في قائمة الملفات. يحتاج الاستخراج إلى ملف zip أو tar أو gz أو bz2 أو zst."
+msgid "Copy, Move and Extract act on the one item selected in the file list; Compress takes every selected item. Extract needs a zip, tar, gz, bz2 or zst file."
+msgstr "تعمل أوامر النسخ والنقل والاستخراج على العنصر الوحيد المحدد في قائمة الملفات، ويضغط أمر الضغط كل العناصر المحددة. يحتاج الاستخراج إلى ملف zip أو tar أو gz أو bz2 أو zst."
 
 #: apps/web/src/whm-transfer-client.ts
 msgid "Copying"

@@ -137,19 +137,26 @@ describe('strict operation-bound file workspace replies', () => {
     expect(validateFileWorkspaceReply(copy, entry('archive/docs', { mode: 0o600 }))).toMatchObject({ kind: 'file', mode: 0o600 })
     for (const input of [entry('archive/docs', { mode: 0o644 }), entry('archive/docs', { kind: 'directory', sizeBytes: 4096, mode: 0o750 }), entry('archive/docs', { kind: 'directory', mode: 0o755, sizeBytes: 0 }), entry('archive/docs', { kind: 'symlink' }), entry('docs')]) replyError(() => validateFileWorkspaceReply(copy, input))
   })
-  it('admits compress into a named archive and extract into a folder or the home, and binds their replies', () => {
+  it('admits compress of a one-folder selection into a named archive and extract into a folder or the home, and binds their replies', () => {
     for (const destination of ['backups/site.zip', 'site.tar', 'site.tar.gz', 'site.TGZ', 'site.tar.bz2', 'site.tbz2', 'site.tar.zst', 'site.tzst']) {
-      expect(request({ op: 'compress', path: 'public_html', destination })).toEqual({ op: 'compress', path: 'public_html', destination })
+      expect(request({ op: 'compress', paths: ['public_html'], destination })).toEqual({ op: 'compress', paths: ['public_html'], destination })
     }
+    expect(request({ op: 'compress', paths: ['public_html/a.php', 'public_html/img', 'public_html/.htaccess'], destination: 'public_html/site.zip' }))
+      .toEqual({ op: 'compress', paths: ['public_html/a.php', 'public_html/img', 'public_html/.htaccess'], destination: 'public_html/site.zip' })
+    expect(request({ op: 'compress', paths: Array.from({ length: limits.listEntries }, (_, i) => `f${i}`), destination: 'all.zip' })).toMatchObject({ op: 'compress' })
     for (const input of [{ destination: 'site.rar' }, { destination: 'site.gz' }, { destination: 'public_html/site.zip' }, { destination: '../site.zip' }, { destination: '' }, { destination: 'a.zip', format: 'zip' }]) {
-      requestError(() => request({ op: 'compress', path: 'public_html', ...input }))
+      requestError(() => request({ op: 'compress', paths: ['public_html'], ...input }))
     }
+    for (const paths of [[], 'public_html', [7], ['../x'], ['a', 'a'], ['a', 'b/c'], ['b/a', 'c/a'], ['a', 'site'], Array.from({ length: limits.listEntries + 1 }, (_, i) => `f${i}`)]) {
+      requestError(() => request({ op: 'compress', paths, destination: 'site/all.zip' }))
+    }
+    requestError(() => request({ op: 'compress', path: 'public_html', destination: 'site.zip' }))
     expect(request({ op: 'extract', path: 'site.zip', destination: '' })).toEqual({ op: 'extract', path: 'site.zip', destination: '' })
     expect(request({ op: 'extract', path: 'site.zip', destination: 'restore' })).toEqual({ op: 'extract', path: 'site.zip', destination: 'restore' })
     for (const input of [{ path: '', destination: 'out' }, { path: 'a.zip' }, { path: 'a.zip', destination: '../out' }, { path: 'a.zip', destination: '.trash' }, { path: 'a.zip', destination: 'out', overwrite: true }]) {
       requestError(() => request({ op: 'extract', ...input }))
     }
-    const compress = request({ op: 'compress', path: 'public_html', destination: 'site.zip' })
+    const compress = request({ op: 'compress', paths: ['public_html'], destination: 'site.zip' })
     expect(validateFileWorkspaceReply(compress, entry('site.zip'))).toEqual(entry('site.zip'))
     for (const input of [entry('other.zip'), entry('site.zip', { kind: 'directory', sizeBytes: 0, mode: 0o750 }), entry('site.zip', { mode: 0o644 })]) replyError(() => validateFileWorkspaceReply(compress, input))
     const extract = request({ op: 'extract', path: 'site.zip', destination: '' })

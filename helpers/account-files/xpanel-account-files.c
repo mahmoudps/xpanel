@@ -373,7 +373,8 @@ typedef enum {
   JV_BOOL,
   JV_NUMBER,
   JV_STRING,
-  JV_OBJECT
+  JV_OBJECT,
+  JV_ARRAY
 } JsonKind;
 
 typedef struct JsonVal JsonVal;
@@ -388,6 +389,7 @@ struct JsonVal {
   int64_t int_val;
   char *str_val;
   size_t str_len;
+  /* Object members; an array keeps its items here in order with a NULL key. */
   JsonProp *props;
   size_t prop_count;
 };
@@ -563,12 +565,54 @@ static JsonVal *jp_parse_object(JsonParser *p, int depth) {
   return NULL;
 }
 
+static JsonVal *jp_parse_array(JsonParser *p, int depth) {
+  if (depth > 8 || p->pos >= p->len || p->src[p->pos] != '[') return NULL;
+  p->pos++;
+  JsonVal *v = calloc(1, sizeof(JsonVal));
+  if (!v) _exit(12);
+  v->kind = JV_ARRAY;
+  size_t cap = 8;
+  v->props = calloc(cap, sizeof(JsonProp));
+  if (!v->props) _exit(12);
+
+  jp_skip_ws(p);
+  if (p->pos < p->len && p->src[p->pos] == ']') {
+    p->pos++;
+    return v;
+  }
+  while (p->pos < p->len) {
+    JsonVal *child = jp_parse_value(p, depth + 1);
+    if (!child) return NULL;
+    if (v->prop_count == cap) {
+      cap *= 2;
+      JsonProp *np = realloc(v->props, cap * sizeof(JsonProp));
+      if (!np) _exit(12);
+      v->props = np;
+    }
+    v->props[v->prop_count].key = NULL;
+    v->props[v->prop_count].val = child;
+    v->prop_count++;
+    jp_skip_ws(p);
+    if (p->pos < p->len && p->src[p->pos] == ',') {
+      p->pos++;
+      continue;
+    }
+    if (p->pos < p->len && p->src[p->pos] == ']') {
+      p->pos++;
+      return v;
+    }
+    return NULL;
+  }
+  return NULL;
+}
+
 static JsonVal *jp_parse_value(JsonParser *p, int depth) {
   if (depth > 8) return NULL;
   jp_skip_ws(p);
   if (p->pos >= p->len) return NULL;
   char c = p->src[p->pos];
   if (c == '{') return jp_parse_object(p, depth);
+  if (c == '[') return jp_parse_array(p, depth);
   if (c == '"') {
     JsonVal *v = calloc(1, sizeof(JsonVal));
     if (!v) _exit(12);
@@ -3917,9 +3961,20 @@ static bool archive_format(const char *name, bool *zip, Codec *codec) {
   return false;
 }
 
+static int compare_names(const void *left, const void *right) {
+  return strcmp(*(const char *const *)left, *(const char *const *)right);
+}
+
+/* A file manager selection: every path lies in one folder and becomes a top-level entry under its own name. */
 static void op_compress(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_file_mode, int64_t max_list_entries) {
-  const char *path = NULL, *destination = NULL;
-  read_source_and_destination(req, "compress", &path, &destination);
+  const JsonVal *paths = jv_get(req, "paths");
+  const char *destination = NULL;
+  size_t destination_len = 0;
+  if (!paths || paths->kind != JV_ARRAY || paths->prop_count == 0 || !jv_get_str(req, "destination", &destination, &destination_len)) {
+    respond_error("VALIDATION", EINVAL, "compress requires paths and destination");
+  }
+  if (paths->prop_count > (size_t)max_list_entries) respond_error("LIMIT_EXCEEDED", EFBIG, XP_ARCHIVE_LIMIT_MESSAGE);
+  assert_safe_rel_path(destination, destination_len, false);
   ArchiveOut *o = calloc(1, sizeof(ArchiveOut));
   if (!o) _exit(12);
   Codec codec = XC_NONE;
@@ -3927,9 +3982,25 @@ static void op_compress(int home_dirfd, uid_t uid, const JsonVal *req, int64_t m
     respond_error("VALIDATION", EINVAL, "archive name must end in .zip, .tar, .tar.gz, .tgz, .tar.bz2, .tbz2, .tar.zst or .tzst");
   }
   require_codec(codec);
-  char src_parent[XP_MAX_PATH_BYTES + 1], src_name[NAME_MAX + 1];
+  size_t count = paths->prop_count;
+  const char **names = calloc(count, sizeof(char *));
+  if (!names) _exit(12);
+  char src_parent[XP_MAX_PATH_BYTES + 1], parent[XP_MAX_PATH_BYTES + 1], name[NAME_MAX + 1];
+  for (size_t i = 0; i < count; i++) {
+    const JsonVal *item = paths->props[i].val;
+    if (item->kind != JV_STRING) respond_error("VALIDATION", EINVAL, "compress paths must be strings");
+    assert_safe_rel_path(item->str_val, item->str_len, false);
+    if (rel_path_within(destination, item->str_val)) respond_error("VALIDATION", EINVAL, "destination must not be the source or inside it");
+    split_rel_path(item->str_val, i == 0 ? src_parent : parent, name);
+    if (i > 0 && strcmp(parent, src_parent) != 0) respond_error("VALIDATION", EINVAL, "compressed items must share one folder");
+    const char *slash = strrchr(item->str_val, '/');
+    names[i] = slash ? slash + 1 : item->str_val;
+  }
+  qsort(names, count, sizeof(char *), compare_names);
+  for (size_t i = 1; i < count; i++) {
+    if (strcmp(names[i - 1], names[i]) == 0) respond_error("VALIDATION", EINVAL, "compressed items must be distinct");
+  }
   char dst_parent[XP_MAX_PATH_BYTES + 1], dst_name[NAME_MAX + 1];
-  split_rel_path(path, src_parent, src_name);
   split_rel_path(destination, dst_parent, dst_name);
   int src_fd = open_confined_dir(home_dirfd, src_parent, uid);
   int dst_fd = open_confined_dir(home_dirfd, dst_parent, uid);
@@ -3937,7 +4008,7 @@ static void op_compress(int home_dirfd, uid_t uid, const JsonVal *req, int64_t m
   if (fstatat(dst_fd, dst_name, &existing, AT_SYMLINK_NOFOLLOW) == 0) respond_error("CONFLICT", EEXIST, "archive destination already exists");
   if (errno != ENOENT) respond_errno(errno, "fstatat archive destination failed");
   CopyBudget scanned = { .entries = 0, .bytes = 0, .max_entries = max_list_entries, .max_bytes = archive_byte_ceiling(), .limit_message = XP_ARCHIVE_LIMIT_MESSAGE };
-  scan_copy_source(src_fd, src_name, uid, 0, &scanned);
+  for (size_t i = 0; i < count; i++) scan_copy_source(src_fd, names[i], uid, 0, &scanned);
 
   start_staging(dst_fd, false);
   o->fd = xp_openat2(dst_fd, g_staging.name, O_WRONLY | O_NOFOLLOW, 0, XP_RESOLVE_CONFINED);
@@ -3945,10 +4016,12 @@ static void op_compress(int home_dirfd, uid_t uid, const JsonVal *req, int64_t m
   if (o->zip) sb_init(&o->central, 4096);
   else writer_open(&o->w, codec, o->fd);
   char rel[XP_MAX_PATH_BYTES + 2];
-  snprintf(rel, sizeof(rel), "%s", src_name);
   CopyBudget budget = scanned;
   budget.entries = budget.bytes = 0;
-  archive_add(o, src_fd, src_name, rel, strlen(rel), uid, 0, &budget);
+  for (size_t i = 0; i < count; i++) {
+    snprintf(rel, sizeof(rel), "%s", names[i]);
+    archive_add(o, src_fd, names[i], rel, strlen(rel), uid, 0, &budget);
+  }
   archive_finish(o);
   if (fchmod(o->fd, (mode_t)(max_file_mode & 0640)) != 0) respond_errno(errno, "set archive mode failed");
   if (fsync(o->fd) != 0) respond_errno(errno, "fsync archive failed");

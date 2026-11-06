@@ -150,7 +150,7 @@ describe.runIf(compilable)('account file helper compress and extract', { tags: [
   }
 
   it.each(['site.zip', 'site.tar', 'site.tar.gz', 'site.tgz', 'site.tar.bz2', 'site.tar.zst'])('compresses a folder to %s and extracts it back unchanged', async archive => {
-    expect(run({ op: 'compress', path: 'site', destination: archive })).toMatchObject({ ok: true, result: { name: archive, path: archive, kind: 'file', mode: 0o640 } })
+    expect(run({ op: 'compress', paths: ['site'], destination: archive })).toMatchObject({ ok: true, result: { name: archive, path: archive, kind: 'file', mode: 0o640 } })
     expect(await modeOf(join(home, archive))).toBe(0o640)
     expect(run(extract(archive, 'restored'))).toMatchObject({ ok: true, result: { destination: 'restored', entries: 6, bytes: 13 + 24_000 + 3 } })
     expect(await modeOf(join(home, 'restored'))).toBe(0o750)
@@ -158,10 +158,24 @@ describe.runIf(compilable)('account file helper compress and extract', { tags: [
     expect((await names(home)).filter(name => name.startsWith('.xpanel-tmp-'))).toEqual([])
   })
 
+  it.each(['parts.zip', 'parts.tar', 'parts.tar.gz', 'parts.tar.bz2', 'parts.tar.zst'])('compresses several items of one folder into %s, each under its own name', async archive => {
+    expect(run({ op: 'compress', paths: ['site/theme', 'site/index.php'], destination: archive })).toMatchObject({ ok: true, result: { path: archive, kind: 'file', mode: 0o640 } })
+    expect(run(extract(archive, 'restored'))).toMatchObject({ ok: true, result: { destination: 'restored', entries: 5, bytes: 13 + 24_000 + 3 } })
+    expect(await names(join(home, 'restored'))).toEqual(['index.php', 'theme'])
+    expect(await readFile(join(home, 'restored', 'index.php'), 'utf8')).toBe('<?php echo 1;')
+    expect(await readFile(join(home, 'restored', 'theme', 'style.css'), 'utf8')).toBe('body{}'.repeat(4000))
+    expect(await readFile(join(home, 'restored', 'theme', 'css', 'a-very-long-file-name-'.repeat(6) + '.css'), 'utf8')).toBe('a{}')
+    expect(await modeOf(join(home, 'restored', 'theme', 'style.css'))).toBe(0o600)
+    expect((await names(home)).filter(name => name.startsWith('.xpanel-tmp-'))).toEqual([])
+  })
+
   it.runIf(existsSync('/usr/bin/tar'))('writes tar archives that GNU tar reads, and reads GNU tar archives with long names', async () => {
-    expect(run({ op: 'compress', path: 'site', destination: 'site.tar.gz' }).ok).toBe(true)
+    expect(run({ op: 'compress', paths: ['site'], destination: 'site.tar.gz' }).ok).toBe(true)
     const listed = execFileSync('/usr/bin/tar', ['-tzf', join(home, 'site.tar.gz')], { encoding: 'utf8' }).trim().split('\n').sort()
     expect(listed).toEqual(['site/', 'site/index.php', 'site/theme/', 'site/theme/css/', 'site/theme/css/' + 'a-very-long-file-name-'.repeat(6) + '.css', 'site/theme/style.css'])
+    expect(run({ op: 'compress', paths: ['site/theme', 'site/index.php'], destination: 'parts.tar.gz' }).ok).toBe(true)
+    expect(execFileSync('/usr/bin/tar', ['-tzf', join(home, 'parts.tar.gz')], { encoding: 'utf8' }).trim().split('\n').sort())
+      .toEqual(['index.php', 'theme/', 'theme/css/', 'theme/css/' + 'a-very-long-file-name-'.repeat(6) + '.css', 'theme/style.css'])
     execFileSync('/usr/bin/tar', ['-C', home, '-czf', join(home, 'gnu.tar.gz'), './site'])
     expect(run(extract('gnu.tar.gz', 'from-gnu'))).toMatchObject({ ok: true, result: { destination: 'from-gnu' } })
     await expectSiteCopy(join(home, 'from-gnu'))
@@ -266,24 +280,40 @@ describe.runIf(compilable)('account file helper compress and extract', { tags: [
 
   it('refuses compress requests that would replace, mislabel, follow links or exceed the ceilings', async () => {
     await writeFile(join(home, 'taken.zip'), 'keep')
-    refused({ op: 'compress', path: 'site', destination: 'taken.zip' }, 'CONFLICT')
+    refused({ op: 'compress', paths: ['site'], destination: 'taken.zip' }, 'CONFLICT')
     expect(await readFile(join(home, 'taken.zip'), 'utf8')).toBe('keep')
-    refused({ op: 'compress', path: 'site', destination: 'site.rar' }, 'VALIDATION')
-    refused({ op: 'compress', path: 'site', destination: 'site/inside.zip' }, 'VALIDATION')
-    refused({ op: 'compress', path: 'site', destination: '../site.zip' }, 'FORBIDDEN')
-    refused({ op: 'compress', path: 'site', destination: 'site.zip' }, 'LIMIT_EXCEEDED', { maxEntries: 3 })
-    refused({ op: 'compress', path: 'site', destination: 'site.zip' }, 'LIMIT_EXCEEDED', { quotaBytes: 1024 })
+    refused({ op: 'compress', paths: ['site'], destination: 'site.rar' }, 'VALIDATION')
+    refused({ op: 'compress', paths: ['site'], destination: 'site/inside.zip' }, 'VALIDATION')
+    refused({ op: 'compress', paths: ['site'], destination: '../site.zip' }, 'FORBIDDEN')
+    refused({ op: 'compress', paths: ['site'], destination: 'site.zip' }, 'LIMIT_EXCEEDED', { maxEntries: 3 })
+    refused({ op: 'compress', paths: ['site'], destination: 'site.zip' }, 'LIMIT_EXCEEDED', { quotaBytes: 1024 })
     await symlink('/etc/passwd', join(home, 'site', 'theme', 'passwd'))
-    refused({ op: 'compress', path: 'site', destination: 'site.tar.gz' }, 'FORBIDDEN')
+    refused({ op: 'compress', paths: ['site'], destination: 'site.tar.gz' }, 'FORBIDDEN')
     expect(await names(home)).toEqual(['site', 'taken.zip'])
   })
 
+  it('refuses a selection that is empty, repeated, spread over folders, encloses the archive or exceeds the ceilings', async () => {
+    for (const request of [{ op: 'compress', path: 'site', destination: 'a.zip' }, { op: 'compress', paths: [], destination: 'a.zip' }, { op: 'compress', paths: 'site', destination: 'a.zip' },
+      { op: 'compress', paths: ['site', 7], destination: 'a.zip' }, { op: 'compress', paths: ['site', 'site'], destination: 'a.zip' },
+      { op: 'compress', paths: ['site/index.php', 'site/theme/style.css'], destination: 'a.zip' }, { op: 'compress', paths: ['site/index.php', 'site/theme'], destination: 'site/theme/a.zip' }]) {
+      refused(request, 'VALIDATION')
+    }
+    refused({ op: 'compress', paths: ['site/index.php', '../outside'], destination: 'a.zip' }, 'FORBIDDEN')
+    refused({ op: 'compress', paths: ['site/index.php', 'site/theme'], destination: 'a.zip' }, 'LIMIT_EXCEEDED', { maxEntries: 1 })
+    refused({ op: 'compress', paths: ['site/index.php', 'site/theme'], destination: 'a.zip' }, 'LIMIT_EXCEEDED', { maxEntries: 4 })
+    refused({ op: 'compress', paths: ['site/index.php', 'site/theme'], destination: 'a.zip' }, 'LIMIT_EXCEEDED', { quotaBytes: 1024 })
+    await symlink('/etc/passwd', join(home, 'site', 'passwd'))
+    refused({ op: 'compress', paths: ['site/index.php', 'site/passwd'], destination: 'a.zip' }, 'FORBIDDEN')
+    expect(await names(home)).toEqual(['site'])
+    expect(await names(join(home, 'site'))).toEqual(['index.php', 'passwd', 'theme'])
+  })
+
   it('reports a missing codec library with a stable reason instead of writing anything', async () => {
-    const error = refused({ op: 'compress', path: 'site', destination: 'site.tar.zst' }, 'PRECONDITION_FAILED', { binary: withoutZstd })
+    const error = refused({ op: 'compress', paths: ['site'], destination: 'site.tar.zst' }, 'PRECONDITION_FAILED', { binary: withoutZstd })
     expect(error?.reason).toBe('archive_format_unavailable')
     await put('notes.md.zst', zstdCompressSync('# notes\n'))
     expect(refused(extract('notes.md.zst', ''), 'PRECONDITION_FAILED', { binary: withoutZstd })?.reason).toBe('archive_format_unavailable')
-    expect(run({ op: 'compress', path: 'site', destination: 'site.tar.gz' }, { binary: withoutZstd }).ok).toBe(true)
+    expect(run({ op: 'compress', paths: ['site'], destination: 'site.tar.gz' }, { binary: withoutZstd }).ok).toBe(true)
     expect(await names(home)).toEqual(['notes.md.zst', 'site', 'site.tar.gz'])
   })
 })
