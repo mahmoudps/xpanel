@@ -19,6 +19,7 @@ const CONTROL_COPY = `${SNAPSHOT}.control.db`
 const RECEIPT = '/var/lib/xpanel-lifecycle/backups/upgrade-up-1.receipt.json'
 const JOURNAL = '/var/lib/xpanel-lifecycle/backups/upgrade-up-1.rewind.json'
 const STATE_FILE = '/var/lib/xpanel/state/accounts/alice.yaml'
+const JOURNAL_MANIFESTS = '/var/lib/xpanel/state/generations/manifests'
 const STATE_ASIDE = '/var/lib/xpanel/.pre-rewind-up-1'
 const EXCLUDES = '/var/lib/xpanel-lifecycle/backups/upgrade-up-1.rewind-exclude'
 const sha = (s: string): string => createHash('sha256').update(s).digest('hex')
@@ -150,9 +151,16 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
       let entries: [string, string][]
       try { entries = JSON.parse(archive?.type === 'file' ? archive.content : '') } catch { return { code: 2, stdout: '', stderr: 'gzip: stdin: not in gzip format' } }
       if (a.argv.includes('--list')) return { code: 0, stdout: entries.map(([rel]) => `${rel}\n`).join(''), stderr: '' }
-      // GNU tar default for --exclude-from: unanchored wildcard patterns matched against each path component.
+      // GNU tar defaults for --exclude-from: unanchored wildcard patterns matched at any component boundary;
+      // a matched directory excludes everything below it.
       const excludes = (fs.nodes.get(argValue(a.argv, '--exclude-from') as string) as { content: string } | undefined)?.content.split('\n').filter(Boolean) ?? []
-      const excluded = (rel: string): boolean => rel.split('/').some(part => excludes.some(p => new RegExp(`^${p.replace(/[.]/g, '\\.').replace(/\*/g, '.*')}$`).test(part)))
+      const excluded = (rel: string): boolean => {
+        const parts = rel.split('/')
+        return excludes.some(p => {
+          const width = p.split('/').length, pattern = new RegExp(`^${p.replace(/[.]/g, '\\.').replace(/\*/g, '.*')}$`)
+          return parts.some((_, at) => at + width <= parts.length && pattern.test(parts.slice(at, at + width).join('/')))
+        })
+      }
       const dir = argValue(a.argv, '--directory') as string
       fs.nodes.set(`${dir}/state`, { type: 'dir', mode: 0o700 })
       for (const [rel, content] of entries) if (!excluded(rel)) fs.file(`${dir}/${rel}`, content, 0o600)
@@ -510,14 +518,20 @@ describe('lifecycle safety regression oracles (portable ports, not native qualif
 
   it('rewinds release link, state files, index and units together from the receipt-verified snapshot', async () => {
     const w = world()
+    w.fs.file(JOURNAL_MANIFESTS + '/gen-40.json', 'applied before the upgrade')
     w.afterReconcile = () => {
       w.db.data += '+written-by-1.1.0'
       w.fs.file(STATE_FILE, 'uid: 1001\nnote: 1.1.0\n')
       w.fs.file('/var/lib/xpanel/state/accounts/carol.yaml', 'uid: 1003\n')
+      w.fs.file(JOURNAL_MANIFESTS + '/gen-41.json', 'applied by 1.1.0')
     }
     w.controlPlane.ok = false
     const r = await runUpgrade(w.ports, plan())
     expect(r).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
+    // The generation journal records what the host applied: it moves forward with the host, never back with the state.
+    expect(await w.fs.readFile(JOURNAL_MANIFESTS + '/gen-41.json')).toBe('applied by 1.1.0')
+    expect(await w.fs.readFile(JOURNAL_MANIFESTS + '/gen-40.json')).toBe('applied before the upgrade')
+    expect(await w.fs.exists(`${STATE_ASIDE}/generations`)).toBe(false)
     expect(r.rewind).toMatchObject({ state: 'rewind-verified', done: ['release', 'state-extract', 'state-swap', 'index', 'units', 'start-panel'], problems: [] })
     expect(JSON.parse(await w.fs.readFile(JOURNAL) as string)).toEqual(r.rewind)
     expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
@@ -569,17 +583,17 @@ describe('lifecycle safety regression oracles (portable ports, not native qualif
       ['/var/lib/xpanel/state/.lock-prepared-4242-a', '{}'],
       ['/var/lib/xpanel/state/.writer-mutex.sqlite', 'mutex'],
       ['/var/lib/xpanel/state/.writer-mutex.sqlite-wal', 'hot'],
-      ['/var/lib/xpanel/state/generations/.writer-mutex.sqlite-shm', 'hot'],
+      ['/var/lib/xpanel/state/plans/.writer-mutex.sqlite-shm', 'hot'],
       ['/var/lib/xpanel/state/accounts/.rollback-4242-x.tmp', 'partial'],
     ] as const) w.fs.file(path, content)
     w.controlPlane.ok = false
     expect((await runUpgrade(w.ports, plan())).rewind?.state).toBe('rewind-verified')
     expect(await w.fs.readFile(STATE_FILE)).toBe('uid: 1001\n')
     expect(await w.fs.readFile('/var/lib/xpanel/state/.writer-mutex.sqlite')).toBe('mutex')
-    for (const gone of ['.lock', '.lock/owner.json', '.lock-prepared-4242-a', '.writer-mutex.sqlite-wal', 'generations/.writer-mutex.sqlite-shm', 'accounts/.rollback-4242-x.tmp']) {
+    for (const gone of ['.lock', '.lock/owner.json', '.lock-prepared-4242-a', '.writer-mutex.sqlite-wal', 'plans/.writer-mutex.sqlite-shm', 'accounts/.rollback-4242-x.tmp']) {
       expect(await w.fs.exists(`/var/lib/xpanel/state/${gone}`), gone).toBe(false)
     }
-    expect(await w.fs.readFile(EXCLUDES)).toBe('.lock\n.lock-prepared-*\n.rollback-*.tmp\n.writer-mutex.sqlite-wal\n.writer-mutex.sqlite-shm\n.writer-mutex.sqlite-journal\n')
+    expect(await w.fs.readFile(EXCLUDES)).toBe('.lock\n.lock-prepared-*\n.rollback-*.tmp\n.writer-mutex.sqlite-wal\n.writer-mutex.sqlite-shm\n.writer-mutex.sqlite-journal\nstate/generations\n')
   })
 
   it('refuses a snapshot that caught an uncommitted StateStore write', async () => {

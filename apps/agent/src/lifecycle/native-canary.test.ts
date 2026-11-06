@@ -16,9 +16,9 @@ import { createNativeLifecycleCanary, type NativeLifecycleCanaryOptions } from '
 const fixture = vi.hoisted(() => {
   const generation: ConfigGeneration = { id: 7, checksum: 'd'.repeat(64), status: 'active', actor: 'root', createdAt: '2026-10-31T00:00:00Z', testedAt: null, activatedAt: null, error: null }
   const state: { operation: string; kind: string; allowed: boolean; opens: number; closes: number; releases: number; uid: number; generation: ConfigGeneration;
-    openHook: (context: HostEffectAuthority) => Promise<void>; closeFails: boolean } = {
+    openHook: (context: HostEffectAuthority) => Promise<void>; closeFails: boolean; exchangeOptions: unknown } = {
     operation: 'operation-a', kind: 'upgrade', allowed: true, opens: 0, closes: 0, releases: 0, uid: 20001, generation,
-    openHook: async () => {}, closeFails: false,
+    openHook: async () => {}, closeFails: false, exchangeOptions: undefined,
   }
   return state
 })
@@ -37,7 +37,7 @@ vi.mock('../../../../scripts/lifecycle-root-safety.mjs', () => ({
   },
 }))
 vi.mock('../account-provisioning-http.ts', () => ({
-  createNativeHeldAccountHttp: (_options: NativeAccountHttpOptions) => ({
+  createNativeHeldAccountHttp: (options: NativeAccountHttpOptions) => (fixture.exchangeOptions = options, {
     async assertAvailable(_account: Account, context: HostEffectAuthority) { await context.assertAuthority() },
     async open(subject: NativeAccountHttpSubject, context: HostEffectAuthority): Promise<HeldNativeAccountHttpRequest> {
       fixture.opens++; await fixture.openHook(context); await context.assertAuthority()
@@ -73,7 +73,8 @@ async function scene() {
   const journal = new ReconcilerJournal(state.rootDir)
   vi.spyOn(journal, 'readManifest').mockImplementation(async generationId => ({ schemaVersion: 1, generationId, stateChecksum: snapshot.checksum,
     filesChecksum: fixture.generation.checksum, createdAt: '2026-10-31T00:00:00Z', actor: 'root', files: [], managedUnits: [], testResults: [] }))
-  const options: NativeLifecycleCanaryOptions = { db: database.db, executor: new FakeHostExecutor(), os: debianOs, reconciler: { journal },
+  const databaseReader = { withReadonlyDatabase: async () => { throw new Error('fixture exchange reader is not used by the simulated exchange') } }
+  const options: NativeLifecycleCanaryOptions = { db: database.db, databaseReader, executor: new FakeHostExecutor(), os: debianOs, reconciler: { journal },
     store: { readSnapshot: async () => structuredClone(snapshot), getAuthorityMetadata: async () => ({ ...meta }), listDomains: async () => snapshot.domains,
       // Portable state-observation seam only; production pins real state files.
       withReadonlyObservation: async work => {
@@ -99,10 +100,15 @@ async function scene() {
     if (!target) throw new Error('fixture target missing')
     return target
   }
-  return { canaries, tenant, stored, primary, snapshot, meta, identity, issued }
+  return { canaries, tenant, stored, primary, snapshot, meta, identity, issued, databaseReader }
 }
 
 describe('lifecycle canary composition with simulated native scope and held exchange; not native qualification', { tags: ['feature'] }, () => {
+  it('gives the held account HTTP exchange fresh pinned readers and never the control handle', async () => {
+    const s = await scene(), exchange = fixture.exchangeOptions as NativeAccountHttpOptions
+    expect(exchange.databaseReader).toBe(s.databaseReader)
+    expect('db' in exchange).toBe(false)
+  })
   it('accepts empty-host selection only while the actual stored host remains empty', async () => {
     const s = await scene(); s.snapshot.accounts = []; s.snapshot.domains = []
     const choice = await s.canaries.select(); expect(choice.username).toBeNull()

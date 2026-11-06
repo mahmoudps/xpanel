@@ -16,6 +16,7 @@ import { observeHostLimits } from '../limit-gaps.ts'
 import { createNativeHostReconciler } from '../native-reconciler.ts'
 import { loadNativePeerIdentityAddon } from '../peer-identity.ts'
 import { createNativeLifecycleCanary } from './native-canary.ts'
+import { createProvisioningDatabaseReaderPort } from '../account-provisioning-database-reader.ts'
 import { createProductionUpgradePorts, verifySignedManifestForRelease } from './upgrade-runner.ts'
 import type { ReleaseVerificationKey } from './upgrade-runner.ts'
 import { signedReleaseManifestDigest } from './upgrade-runner.ts'
@@ -74,7 +75,7 @@ export const releaseInfoFromAuthenticatedReport = (input: unknown, artifact: Non
 type PathOperation = 'read' | 'write' | 'remove' | 'directory' | 'link'
 /** Rewind scratch and set-aside trees beside the live state directory, keyed by upgrade record id. */
 const REWIND_SCRATCH = /^\/var\/lib\/xpanel\/\.rewind-[A-Za-z0-9][A-Za-z0-9-]{0,63}$/
-const REWIND_PATH = /^\/var\/lib\/xpanel\/(?:state|\.pre-rewind-[A-Za-z0-9][A-Za-z0-9-]{0,63}|\.rewind-[A-Za-z0-9][A-Za-z0-9-]{0,63}\/state)$/
+const REWIND_PATH = /^\/var\/lib\/xpanel\/(?:state(?:\/generations)?|\.pre-rewind-[A-Za-z0-9][A-Za-z0-9-]{0,63}|\.rewind-[A-Za-z0-9][A-Za-z0-9-]{0,63}\/state(?:\/generations)?)$/
 /** Retention removes only sealed (root-owned) set-aside trees and empty scratch; the live state tree never. */
 const REWIND_REMOVABLE = /^\/var\/lib\/xpanel\/\.(?:pre-rewind|rewind)-[A-Za-z0-9][A-Za-z0-9-]{0,63}$/
 /** Exact native engine paths only; policy matching is not an admission grant. */
@@ -161,7 +162,7 @@ const composition = async (db: ReturnType<typeof createDb>['db'], actor: Princip
   // A read-only mount observation, outside lifecycle effects.
   const quotaFilesystem = await resolveHomeQuotaFilesystem(argv => native.runCommand(argv)).catch(() => '/home')
   const { reconciler } = await createNativeHostReconciler({ store, db, executor, os: resolvedOs, quotaFilesystem, healthProbe: async unit => { const result = await executor.runCommand(['/usr/bin/systemctl', 'is-active', '--quiet', unit]); return { ok: result.code === 0, ...(result.code !== 0 ? { error: 'Native service was not active' } : {}) } } })
-  const canaries = createNativeLifecycleCanary({ db, store, executor, reconciler, os: resolvedOs, addon: await loadNativePeerIdentityAddon() })
+  const canaries = createNativeLifecycleCanary({ db, databaseReader: createProvisioningDatabaseReaderPort(DATABASE), store, executor, reconciler, os: resolvedOs, addon: await loadNativePeerIdentityAddon() })
   const host: HostPort = { async apply(action: HostAction) {
     const kind = action.kind === 'systemd' && action.verb === 'stop' ? 'service.stop' : action.kind === 'systemd' ? 'service.start' : 'filesystem.write'
     await assertCurrentLifecycleEffect(kind)
