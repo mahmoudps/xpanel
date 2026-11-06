@@ -6,7 +6,8 @@ const viewAction = canonicalViewAction
 const serviceArea = canonicalServiceArea
 /// <reference lib="dom" />
 type ConfirmRestart = (options: Record<string, unknown>) => Promise<string | boolean | null>
-type HostRow = { id: string; label: string; unit: string | null; state: string }
+type FpmVersion = { version: string; masters: number; running: number; failed: number }
+type HostRow = { id: string; label: string; unit: string | null; state: string; fpm: FpmVersion | null }
 
 function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
   document.querySelectorAll<HTMLElement>('[data-host-services]').forEach(root => {
@@ -24,15 +25,30 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
     const copy = (message: string, values?: MessageValues) => xpT(message, values)
     const unread = () => copy('Not read')
     const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
+    const count = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    const parseFpm = (row: Record<string, unknown>): FpmVersion | null => {
+      if (row.fpm === undefined) return null
+      const fpm = row.fpm
+      // The agent derives a version row's state from its master counts; a row where they disagree is not shown.
+      if (!record(fpm) || typeof fpm.version !== 'string' || !/^[0-9]\.[0-9]$/.test(fpm.version) || row.id !== 'php-fpm-' + fpm.version.replace('.', '') || row.unit !== null
+        || !count(fpm.masters) || !count(fpm.running) || !count(fpm.failed) || fpm.running + fpm.failed > fpm.masters
+        || row.state !== (fpm.masters > 0 && fpm.running === fpm.masters ? 'active' : fpm.failed > 0 ? 'failed' : 'inactive')) throw new Error('unread')
+      return { version: fpm.version, masters: fpm.masters, running: fpm.running, failed: fpm.failed }
+    }
     const parseRows = (value: unknown): HostRow[] => {
       if (!record(value) || !Array.isArray(value.services)) throw new Error('unread')
       const seen = new Set<string>()
       return value.services.map(row => {
         if (!record(row) || typeof row.id !== 'string' || !/^[a-z0-9-]{1,64}$/.test(row.id) || seen.has(row.id) || typeof row.label !== 'string' || (row.unit !== null && typeof row.unit !== 'string') || typeof row.state !== 'string' || !['active', 'inactive', 'failed', 'not-installed', 'unchecked'].includes(row.state)) throw new Error('unread')
         seen.add(row.id)
-        return { id: row.id, label: row.label, unit: row.unit, state: row.state }
+        return { id: row.id, label: row.label, unit: row.unit, state: row.state, fpm: parseFpm(row) }
       })
     }
+    const fpmState = (fpm: FpmVersion): string => fpm.masters === 0 ? copy('No account masters')
+      : fpm.running === fpm.masters ? copy('Running: {running} of {total} masters', { running: fpm.running, total: fpm.masters })
+      : fpm.failed === fpm.masters ? copy('Failed: {failed} of {total} masters', { failed: fpm.failed, total: fpm.masters })
+      : fpm.failed > 0 ? copy('Partly failed: {failed} of {total} masters failed', { failed: fpm.failed, total: fpm.masters })
+      : copy('Stopped: {stopped} of {total} masters', { stopped: fpm.masters - fpm.running, total: fpm.masters })
     const note = (message: string, state: string) => {
       status.textContent = message; status.hidden = false; status.dataset.state = state
       status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status')
@@ -104,19 +120,23 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
       const unitCount = new Map<string, number>()
       for (const service of services) if (service.unit) unitCount.set(service.unit, (unitCount.get(service.unit) ?? 0) + 1)
       const nextRows = services.map(service => {
+        const fpm = service.fpm
         const unique = !!service.unit && unitCount.get(service.unit) === 1
         const identityKnown = serviceArea(service.id, service.unit) !== 'unread'
         const source = unique && identityKnown && service.state !== 'unchecked' ? snapshots.get(service.unit!) : undefined
-        const facts = source?.length === 1 ? source[0]! : { role: unread(), version: unread(), memory: unread(), boot: unread() }
+        const facts = fpm ? { role: fpm.masters === 0 ? copy('No account uses this PHP version') : copy('PHP pools: {count} account masters, each in its slice', { count: fpm.masters }), version: fpm.version, memory: unread(), boot: unread() }
+          : source?.length === 1 ? source[0]! : { role: unread(), version: unread(), memory: unread(), boot: unread() }
         const knownState = identityKnown && (service.state === 'not-installed' ? service.unit === null : unique)
-        const state = !knownState ? unread() : service.state === 'active' ? copy('Running') : service.state === 'inactive' ? copy('Stopped') : service.state === 'failed' ? copy('Failed') : service.state === 'not-installed' ? copy('Not installed') : unread()
-        const row = cloneViewRecord(root, 'host-service-row', 'tr', { service: service.label, unit: service.unit || unread(), state, role: facts.role, version: facts.version, uptime: unread(), memory: facts.memory, 'reload-label': copy('Reload'), 'restart-label': copy('Restart') })
-        row.dataset.serviceKey = service.id; row.dataset.serviceLabel = service.label; row.dataset.serviceUnit = service.unit ?? ''; row.dataset.serviceState = state; row.dataset.serviceArea = serviceArea(service.id, service.unit)
+        const state = fpm && identityKnown ? fpmState(fpm) : !knownState ? unread() : service.state === 'active' ? copy('Running') : service.state === 'inactive' ? copy('Stopped') : service.state === 'failed' ? copy('Failed') : service.state === 'not-installed' ? copy('Not installed') : unread()
+        // The systemd pattern that selects exactly this version's account masters.
+        const unit = fpm ? 'xpanel-php-fpm-*-' + fpm.version + '.service' : service.unit
+        const row = cloneViewRecord(root, 'host-service-row', 'tr', { service: service.label, unit: unit || unread(), state, role: facts.role, version: facts.version, uptime: unread(), memory: facts.memory, 'reload-label': copy('Reload'), 'restart-label': copy('Restart') })
+        row.dataset.serviceKey = service.id; row.dataset.serviceLabel = service.label; row.dataset.serviceUnit = unit ?? ''; row.dataset.serviceState = state; row.dataset.serviceArea = serviceArea(service.id, service.unit)
         row.dataset.healthRole = facts.role; row.dataset.healthVersion = facts.version; row.dataset.healthMemory = facts.memory; row.dataset.healthBoot = facts.boot
         const select = viewAction(row, 'select'); select.dataset.serviceSelect = ''; select.setAttribute('aria-pressed', 'false')
         const detail = own<HTMLElement>('[data-host-service-details]'); if (detail?.id) select.setAttribute('aria-controls', detail.id)
         const button = viewAction(row, 'restart')
-        if (service.unit && unique && serviceArea(service.id, service.unit) !== 'unread' && service.state !== 'unchecked' && service.state !== 'not-installed') {
+        if (fpm ? identityKnown && fpm.masters > 0 : service.unit && unique && identityKnown && service.state !== 'unchecked' && service.state !== 'not-installed') {
           button.dataset.serviceId = service.id
           button.addEventListener('click', async () => {
             if (busy || review.has(service.id) || button.disabled || !admitted() || root.dataset.hostCanManage === 'false' || !preflight()) return
@@ -124,7 +144,7 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
             busy = true; lockButtons()
             let mutationStarted = false, verificationPending = false
             try {
-              const confirmed = await confirmRestart({ title: copy('Restart service'), body: copy('Restart this service? Active connections may be interrupted: {service}', { service: service.label }), confirm: copy('Restart'), danger: true })
+              const confirmed = await confirmRestart({ title: copy('Restart service'), body: fpm ? copy('Restart all {count} PHP-FPM {version} account masters? PHP requests in progress fail.', { count: fpm.masters, version: fpm.version }) : copy('Restart this service? Active connections may be interrupted: {service}', { service: service.label }), confirm: copy('Restart'), danger: true })
               if (!confirmed) { note(copy('Restart cancelled. No restart request was sent.'), 'cancelled'); return }
               if (!admitted() || !button.isConnected || root.dataset.hostCanManage === 'false' || !preflight()) return
               note(copy('Restarting the selected service…'), 'pending')
@@ -137,7 +157,7 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
               const fresh = parseRows(await request!('GET', '/api/server/services'))
               if (!admitted() || !preflight()) { review.add(service.id); return }
               const observed = fresh.filter(item => item.id === service.id && item.unit === service.unit)
-              if (observed.length !== 1 || observed[0]!.state !== 'active' || fresh.filter(item => item.unit === service.unit).length !== 1) throw new Error('unverified')
+              if (observed.length !== 1 || observed[0]!.state !== 'active' || service.unit !== null && fresh.filter(item => item.unit === service.unit).length !== 1) throw new Error('unverified')
               paint(fresh)
               note(copy('The restart completed and the service was read back as active.'), 'active')
             } catch (error) {

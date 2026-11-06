@@ -107,7 +107,7 @@ describe('API server observation workspace', () => {
       saved: { state: 'read', hostname: 'web1.example.test', engine: 'apache', apacheMpm: 'itk', setupCompletedAt: '2026-10-01T00:00:00.000Z', phpVersions: ['8.3', '8.10'], counts: { accounts: 2, domains: 4, phpDomains: 3, mailboxes: 1, databases: 1, zones: 1 } },
       components: [
         { id: 'web-edge', value: 'nginx', count: null, services: ['nginx'] }, { id: 'web-backend', value: 'apache mpm-itk', count: null, services: ['apache'] },
-        { id: 'php', value: '8.3, 8.10', count: 3, services: ['php-fpm'] }, { id: 'mail', value: null, count: 1, services: ['postfix', 'dovecot', 'opendkim'] },
+        { id: 'php', value: '8.3, 8.10', count: 3, services: ['php-fpm-83'] }, { id: 'mail', value: null, count: 1, services: ['postfix', 'dovecot', 'opendkim'] },
         { id: 'dns', value: null, count: 1, services: ['pdns'] }, { id: 'database', value: 'mariadb', count: 1, services: ['mariadb'] },
       ],
     })

@@ -117,9 +117,9 @@ describe('host measurements', () => {
 
 const debian = profileFor('ID=ubuntu\nVERSION_ID=24.04'), el = profileFor('ID=almalinux\nVERSION_ID=9.4')
 const FPM_UNITS = ['php8.3-fpm.service loaded inactive dead PHP 8.3 FastCGI', 'xpanel-php-fpm-alice-8.3.service loaded active running alice', 'xpanel-php-fpm-bob-8.2.service loaded failed failed bob',
-  'xpanel-php-fpm-carol-8.3.service loaded inactive dead carol', 'nginx.service loaded active running nginx'].join('\n')
-const FPM_FILES = ['php8.3-fpm.service disabled enabled', 'xpanel-php-fpm-alice-8.3.service enabled enabled', 'xpanel-php-fpm-bob-8.2.service enabled enabled',
-  'xpanel-php-fpm-carol-8.3.service disabled enabled', 'nginx.service enabled enabled'].join('\n')
+  'xpanel-php-fpm-dave-8.2.service loaded active running dave', 'xpanel-php-fpm-carol-8.3.service loaded inactive dead carol', 'nginx.service loaded active running nginx'].join('\n')
+const FPM_FILES = ['php8.3-fpm.service disabled enabled', 'php8.4-fpm.service disabled enabled', 'xpanel-php-fpm-alice-8.3.service enabled enabled', 'xpanel-php-fpm-bob-8.2.service enabled enabled',
+  'xpanel-php-fpm-dave-8.2.service enabled enabled', 'xpanel-php-fpm-carol-8.3.service disabled enabled', 'nginx.service enabled enabled'].join('\n')
 /** A host where `active` units are loaded and running; returns every non-observation argv it was asked to run. */
 const fakeHost = (active: readonly string[], refuse: (argv: string[]) => string | null = () => null) => {
   const effects: string[][] = []
@@ -160,18 +160,43 @@ describe('host services', () => {
     expect(dovecot.effects.some(argv => argv[1] === 'restart')).toBe(false)
   })
 
-  it('restarts every enabled account PHP-FPM master after each passes its own test, and never starts the distro master', async () => {
-    const masters = ['xpanel-php-fpm-alice-8.3.service', 'xpanel-php-fpm-bob-8.2.service']
+  it('restarts exactly one version of account masters after each passes its own test, and never the distro master', async () => {
+    const masters = ['xpanel-php-fpm-bob-8.2.service', 'xpanel-php-fpm-dave-8.2.service']
     const host = fakeHost([])
-    await restartHostService(host.run, 'php-fpm', debian)
+    await expect(restartHostService(host.run, 'php-fpm-82', debian)).resolves.toMatchObject({ id: 'php-fpm-82', unit: null, fpm: { version: '8.2', masters: 2 } })
     expect(host.effects).toEqual([...masters.map(unit => serviceConfigTest(unit, debian)), ...masters.map(unit => ['/usr/bin/systemctl', 'restart', '--', unit])])
     const running = fakeHost(['php8.3-fpm.service'])
-    await restartHostService(running.run, 'php-fpm', debian)
-    expect(running.effects.filter(argv => argv[1] === 'restart').map(argv => argv[3])).toEqual(['php8.3-fpm.service', ...masters])
-    expect(running.effects[0]).toEqual(['/usr/sbin/php-fpm8.3', '-t'])
+    await expect(restartHostService(running.run, 'php-fpm-83', debian)).resolves.toMatchObject({ id: 'php-fpm-83', state: 'active', fpm: { masters: 1, running: 1, failed: 0 } })
+    expect(running.effects).toEqual([serviceConfigTest('xpanel-php-fpm-alice-8.3.service', debian), ['/usr/bin/systemctl', 'restart', '--', 'xpanel-php-fpm-alice-8.3.service']])
     const broken = fakeHost([], argv => argv.includes('bob') ? 'ERROR: [pool bob] unknown entry' : null)
-    await expect(restartHostService(broken.run, 'php-fpm', debian)).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED', detail: { stateChanged: false, unit: 'xpanel-php-fpm-bob-8.2.service' } })
+    await expect(restartHostService(broken.run, 'php-fpm-82', debian)).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED', detail: { stateChanged: false, unit: 'xpanel-php-fpm-bob-8.2.service' } })
     expect(broken.effects.some(argv => argv[1] === 'restart')).toBe(false)
+  })
+
+  it('refuses a PHP-FPM version without account masters and ids outside the supported versions', async () => {
+    const host = fakeHost([])
+    await expect(restartHostService(host.run, 'php-fpm-84', debian)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: 'PHP-FPM 8.4 has no enabled account master on this server', detail: { stateChanged: false } })
+    await expect(restartHostService(host.run, 'php-fpm-74', debian)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    for (const id of ['php-fpm', 'php-fpm-99', 'php-fpm-8.3']) await expect(restartHostService(host.run, id, debian)).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    const unlisted = fakeHost([])
+    await expect(restartHostService(async argv => argv[1] === 'list-units' ? command('', false) : unlisted.run(argv), 'php-fpm-83', debian)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: 'the account PHP-FPM masters could not be listed' })
+    expect([...host.effects, ...unlisted.effects]).toEqual([])
+  })
+
+  it('reports one PHP-FPM row per installed version with running, failed and stopped master counts', async () => {
+    const rows = await readHostServices(fakeHost([]).run)
+    expect(rows.map(row => row.id).slice(0, 6)).toEqual(['nginx', 'apache', 'php-fpm-82', 'php-fpm-83', 'php-fpm-84', 'mariadb'])
+    expect(rows.filter(row => row.fpm)).toEqual([
+      { id: 'php-fpm-82', label: 'PHP-FPM 8.2', unit: null, state: 'failed', fpm: { version: '8.2', masters: 2, running: 1, failed: 1 } },
+      { id: 'php-fpm-83', label: 'PHP-FPM 8.3', unit: null, state: 'active', fpm: { version: '8.3', masters: 1, running: 1, failed: 0 } },
+      { id: 'php-fpm-84', label: 'PHP-FPM 8.4', unit: null, state: 'inactive', fpm: { version: '8.4', masters: 0, running: 0, failed: 0 } },
+    ])
+    const inventory = (units: string, files: string) => async (argv: string[]): Promise<HostCommandResult> =>
+      command(argv[1] === 'list-units' ? units : argv[1] === 'list-unit-files' ? files : 'not-found\ninactive\n')
+    const remi = await readHostServices(inventory('xpanel-php-fpm-alice-8.1.service loaded inactive dead alice', 'php81-php-fpm.service disabled disabled\nxpanel-php-fpm-alice-8.1.service enabled enabled'))
+    expect(remi.filter(row => row.id.startsWith('php-fpm'))).toEqual([{ id: 'php-fpm-81', label: 'PHP-FPM 8.1', unit: null, state: 'inactive', fpm: { version: '8.1', masters: 1, running: 0, failed: 0 } }])
+    const none = await readHostServices(inventory('nginx.service loaded active running nginx', 'nginx.service enabled enabled'))
+    expect(none.filter(row => row.id.startsWith('php-fpm'))).toEqual([{ id: 'php-fpm', label: 'PHP-FPM', unit: null, state: 'not-installed' }])
   })
 
   it('reports the loaded unit and refuses anything outside the allowlist', async () => {
@@ -198,19 +223,17 @@ describe('host services', () => {
     await expect(restartHostService(run, 'apache', debian)).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED', message: 'Apache did not restart (systemctl restart failed)' })
   })
 
-  it('prefers the active PHP-FPM unit and reports nginx, redis, and postgresql from systemctl', async () => {
+  it('reports nginx, redis, and postgresql from systemctl and PHP-FPM as unchecked when the unit inventory is unreadable', async () => {
     const run = async (argv: string[]): Promise<HostCommandResult> => {
       const unit = argv.at(-1) ?? ''
       if (unit === 'nginx.service') return command('loaded\nactive\n')
-      if (unit === 'php8.3-fpm.service') return command('not-found\ninactive\n')
-      if (unit === 'php8.1-fpm.service') return command('loaded\nactive\n')
       if (unit === 'redis-server.service') return command('loaded\ninactive\n')
       if (unit === 'postgresql.service') return command('not-found\ninactive\n')
       return command('not-found\ninactive\n')
     }
     const rows = await readHostServices(run)
     expect(rows.find(row => row.id === 'nginx')).toMatchObject({ unit: 'nginx.service', state: 'active' })
-    expect(rows.find(row => row.id === 'php-fpm')).toMatchObject({ label: 'PHP-FPM', unit: 'php8.1-fpm.service', state: 'active' })
+    expect(rows.filter(row => row.id.startsWith('php-fpm'))).toEqual([{ id: 'php-fpm', label: 'PHP-FPM', unit: null, state: 'unchecked' }])
     expect(rows.find(row => row.id === 'redis')).toMatchObject({ unit: 'redis-server.service', state: 'inactive' })
     expect(rows.find(row => row.id === 'postgresql')).toMatchObject({ unit: null, state: 'not-installed' })
   })

@@ -12560,6 +12560,10 @@ msgstr "عمليات الدخول الفاشلة"
 msgid "Failed validation test: {failedTest}"
 msgstr "فشل اختبار التحقق: {failedTest}"
 
+#: apps/web/src/approved-host-services-client.ts
+msgid "Failed: {failed} of {total} masters"
+msgstr "فشلت: {failed} من {total} عمليات رئيسية"
+
 #: apps/web/src/board-port/whm-support-workspace.ts
 msgid "Failure"
 msgstr "الفشل"
@@ -19474,6 +19478,10 @@ msgstr "لا يقترب أي حساب من حد النطاق الترددي ال
 msgid "No account is selected."
 msgstr "لم يُحدَّد حساب."
 
+#: apps/web/src/approved-host-services-client.ts
+msgid "No account masters"
+msgstr "لا توجد عمليات رئيسية للحسابات"
+
 #: apps/web/src/whm-server-health-client.ts
 msgid "No account matches this filter."
 msgstr "لا يطابق أي حساب هذه التصفية."
@@ -19489,6 +19497,10 @@ msgstr "لم تُقرأ موارد أي حساب بعد."
 #: apps/web/src/board-port/whm-monitoring-workspace.ts
 msgid "No account usage has been read."
 msgstr "لم يُقرأ استخدام الحسابات."
+
+#: apps/web/src/approved-host-services-client.ts
+msgid "No account uses this PHP version"
+msgstr "لا يستخدم أي حساب إصدار PHP هذا"
 
 #: apps/web/src/board-port/approved-whm-account-components.ts
 msgid "No account-creation operation has been observed. The live create acknowledgement does not establish completion of every host task below."
@@ -24567,6 +24579,10 @@ msgstr "جرد PHP غير متاح هنا. لم يُقرأ أو يُغيّر ش�
 msgid "PHP management is unavailable on this host. Nothing was changed."
 msgstr "إدارة PHP غير متاحة على هذا الخادم. لم يُغيّر شيء."
 
+#: apps/web/src/approved-host-services-client.ts
+msgid "PHP pools: {count} account masters, each in its slice"
+msgstr "مجمعات PHP: {count} عمليات رئيسية للحسابات، كل منها داخل شريحة حسابه"
+
 #: apps/web/src/board-port/extensions/account-domains.ts
 msgid "PHP selection, Node, Python, proxy, wildcard, DNS and certificate changes require their separate qualified workflows."
 msgstr "اختيار PHP وNode وPython والوكيل والبدل الشامل وDNS والشهادات تتطلب مساراتها المنفصلة المؤهلة."
@@ -25028,6 +25044,10 @@ msgstr "مثبت جزئيًا"
 #: apps/web/src/whm-metering-client.ts
 msgid "Partly counted"
 msgstr "محسوب جزئيًا"
+
+#: apps/web/src/approved-host-services-client.ts
+msgid "Partly failed: {failed} of {total} masters failed"
+msgstr "فشل جزئي: فشلت {failed} من {total} عمليات رئيسية"
 
 #: apps/web/src/whm-software-center-client.ts
 msgid "Partly installed"
@@ -30408,6 +30428,10 @@ msgstr "إعادة تشغيل PostgreSQL"
 msgid "Restart PowerDNS"
 msgstr "إعادة تشغيل PowerDNS"
 
+#: apps/web/src/approved-host-services-client.ts
+msgid "Restart all {count} PHP-FPM {version} account masters? PHP requests in progress fail."
+msgstr "هل تريد إعادة تشغيل جميع العمليات الرئيسية للحسابات في PHP-FPM {version} وعددها {count}؟ ستفشل طلبات PHP الجارية."
+
 #: apps/web/src/approved-host-services-client.ts apps/web/src/whm-service-detail-client.ts
 msgid "Restart cancelled. No restart request was sent."
 msgstr "أُلغيت إعادة التشغيل. لم يُرسل طلب إعادة تشغيل."
@@ -31905,6 +31929,10 @@ msgstr "الإصدار العامل"
 #: apps/web/src/board-port/whm-server-observation-workspace.ts
 msgid "Running, creating or changing system timers is not available here."
 msgstr "تشغيل مؤقتات النظام أو إنشاؤها أو تغييرها غير متاح هنا."
+
+#: apps/web/src/approved-host-services-client.ts
+msgid "Running: {running} of {total} masters"
+msgstr "قيد التشغيل: {running} من {total} عمليات رئيسية"
 
 #: apps/web/src/account-network-tools-client.ts
 msgid "Running…"
@@ -36384,6 +36412,10 @@ msgstr "توقفت المعالجة"
 #: apps/web/src/account-runtime-client.ts
 msgid "Stopped."
 msgstr "أُوقف."
+
+#: apps/web/src/approved-host-services-client.ts
+msgid "Stopped: {stopped} of {total} masters"
+msgstr "متوقفة: {stopped} من {total} عمليات رئيسية"
 
 #: apps/web/src/db-engines-client.ts
 msgid "Stopping"

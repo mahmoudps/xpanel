@@ -36,7 +36,6 @@ const SAFE_ARG = /^[A-Za-z0-9@+=:./_-]+$/
 const ACTIVE = new Set([
   'nginx.service',
   'apache2.service',
-  'php8.3-fpm.service',
   'mariadb.service',
   'postfix.service',
   'dovecot.service',
@@ -49,7 +48,14 @@ const ACTIVE = new Set([
   'ssh.service',
 ])
 
-const serviceText = (unit: string): string => {
+/** systemctl list-units / list-unit-files: PHP 8.3 installed with one running account master. */
+const UNIT_INVENTORY: Readonly<Record<string, string>> = {
+  'list-units': 'xpanel-php-fpm-alice-8.3.service loaded active running alice\n',
+  'list-unit-files': 'php8.3-fpm.service disabled enabled\nxpanel-php-fpm-alice-8.3.service enabled enabled\n',
+}
+
+const serviceText = (unit: string, verb = ''): string => {
+  if (Object.hasOwn(UNIT_INVENTORY, verb)) return UNIT_INVENTORY[verb]!
   if (unit === 'redis-server.service') return 'loaded\ninactive\n'
   if (ACTIVE.has(unit)) return 'loaded\nactive\n'
   return 'not-found\ninactive\n'
@@ -110,7 +116,7 @@ export const labHostDashboard = async (
   const services = await readHostServices(async (command): Promise<HostCommandResult> => {
     argv.push(command)
     const unit = command.at(-1) ?? ''
-    return { ok: true, stdout: serviceText(unit), stderr: '' }
+    return { ok: true, stdout: serviceText(unit, command[1]), stderr: '' }
   })
   if (!argv.every(command => command.every(arg => SAFE_ARG.test(arg)))) throw new Error('service command argv left the safe set')
   const sample = mapAgentHostInfo(info)

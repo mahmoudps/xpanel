@@ -79,7 +79,7 @@ describe('lab host command fixture', () => {
     assert.deepEqual(model.services.map(row => [row.name, row.status.label]), [
       ['nginx', 'Running'],
       ['Apache', 'Running'],
-      ['PHP-FPM', 'Running'],
+      ['PHP-FPM 8.3', 'Running'],
       ['MariaDB', 'Running'],
       ['PostgreSQL', 'Not installed'],
       ['Redis', 'Stopped'],
