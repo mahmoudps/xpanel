@@ -484,6 +484,12 @@ export class AccountLifecycleCoordinator {
           ...(lastVerifiedExecution && { lastVerifiedExecution }),
         }
       }
+      // The completed operation's account was terminated since; its key cannot authorize a second creation.
+      if (!acc) {
+        return fail('CONFLICT', 'this request key already completed an earlier account creation; send the request with a new key', {
+          stateChanged: false, verificationRequired: false, reason: 'provisioning_key_already_completed',
+        })
+      }
     }
 
     const initialLease = await acquireJobLease(this.db, {
@@ -1458,6 +1464,13 @@ export class AccountLifecycleCoordinator {
       })
       if (reconciliation.status === 'failed') {
         fail('PRECONDITION_FAILED', `host reconciliation failed during account termination: ${reconciliation.error}`)
+      }
+      const retirement = reconciliation.status === 'applied' ? reconciliation.incompleteRetirements?.find(entry => entry.accountId === existing.id) : undefined
+      if (retirement) {
+        fail('SERVICE_UNAVAILABLE', 'account removal stopped after its configuration left the host', {
+          stateChanged: true, verificationRequired: true, reason: 'account_retirement_incomplete',
+          userRemoved: retirement.userRemoved, failedStep: retirement.failedStep,
+        })
       }
     } else {
       await this.store.deleteAccount(existing.id)

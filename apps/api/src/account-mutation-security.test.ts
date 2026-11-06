@@ -99,7 +99,7 @@ const fixture = async () => {
   const rootSession = await session(root.id)
   const resellerSession = await session(resellerPrincipal.id)
   let mode: Outcome = 'applied'
-  let purgeMode: 'missing' | 'ready' = 'missing'
+  let purgeMode: 'missing' | 'ready' | 'incomplete' = 'missing'
   let calls = 0
   const hostPaths: string[] = []
   let pause: { enter: () => void; gate: Promise<void> } | undefined
@@ -114,7 +114,7 @@ const fixture = async () => {
   const host = createHttpServer(async (request, response) => {
     const purgePath = '/accounts/' + account.username + '/purge'
     if (request.url === purgePath) {
-      if (purgeMode !== 'ready') { response.writeHead(404); response.end(); return }
+      if (purgeMode === 'missing') { response.writeHead(404); response.end(); return }
       response.setHeader('content-type', 'application/json')
       if (request.method === 'GET') { response.end(JSON.stringify({ available: true, contract: 'target-bound-userdel' })); return }
       request.resume()
@@ -172,10 +172,13 @@ const fixture = async () => {
     }
     // A ready purge models the agent's terminate generation: host teardown removes the account from
     // desired state inside the same applied generation that proves it.
-    if (request.url === '/state/apply' && purgeMode === 'ready' && (await state.store.getAccount(account.id))?.status === 'terminating') {
+    const terminating = request.url === '/state/apply' && (await state.store.getAccount(account.id))?.status === 'terminating'
+    if (terminating && purgeMode === 'ready') {
       await state.store.deleteAccount((await state.store.markTerminating(account.id)).id)
     }
-    response.end(JSON.stringify({ status: 'applied', generation: { id: 1, createdAt: '2026-10-23T00:00:00Z', status: 'active', checksum: 'a'.repeat(64), error: null, actor: 'root', testedAt: '2026-10-23T00:00:00Z', activatedAt: '2026-10-23T00:00:00Z' }, filesCount: 2, durationMs: 1 }))
+    // The agent's generation committed, then the account's home removal failed after userdel.
+    const incompleteRetirements = terminating && purgeMode === 'incomplete' ? [{ accountId: account.id, username: account.username, userRemoved: true, failedStep: 'home' }] : undefined
+    response.end(JSON.stringify({ status: 'applied', generation: { id: 1, createdAt: '2026-10-23T00:00:00Z', status: 'active', checksum: 'a'.repeat(64), error: null, actor: 'root', testedAt: '2026-10-23T00:00:00Z', activatedAt: '2026-10-23T00:00:00Z' }, filesCount: 2, durationMs: 1, ...(incompleteRetirements && { incompleteRetirements }) }))
   })
   await new Promise<void>(resolve => host.listen(0, '127.0.0.1', resolve))
   const hostPort = (host.address() as { port: number }).port
@@ -240,7 +243,7 @@ const fixture = async () => {
     if (action === 'update') return request('PATCH', '/api/accounts/' + account.id, { shell: 'jailed' }, options)
     return request('DELETE', '/api/accounts/' + account.id, { confirmUsername: account.username }, options)
   }
-  return { database, state, plan, accountInput, account, other, root, reseller, owner, alias, neighbor, rootSession, resellerSession, request, open, fingerprints, identities, accountSuccess, perform, holdNextApply, hostPaths, setMode: (value: Outcome) => { mode = value }, setPurge: (value: 'missing' | 'ready') => { purgeMode = value }, calls: () => calls }
+  return { database, state, plan, accountInput, account, other, root, reseller, owner, alias, neighbor, rootSession, resellerSession, request, open, fingerprints, identities, accountSuccess, perform, holdNextApply, hostPaths, setMode: (value: Outcome) => { mode = value }, setPurge: (value: 'missing' | 'ready' | 'incomplete') => { purgeMode = value }, calls: () => calls }
 }
 
 describe('real HTTP account mutation security', () => {
@@ -665,6 +668,29 @@ describe('account mutation outcomes and race boundaries', () => {
     expect(await findPrincipalByUsername(f.database.db, f.neighbor.username)).not.toBeNull()
     expect(await f.state.store.getAccount(f.other.id)).not.toBeNull()
     // The target-bound probe is answered before the request counter; one applied generation follows.
+    expect(f.calls()).toBe(1)
+  })
+
+  it('reports a removed account user whose later removal step needs repair and keeps the account terminating', async () => {
+    f.setPurge('incomplete')
+    const response = await f.request('DELETE', '/api/accounts/' + f.account.id, { confirmUsername: f.account.username })
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({ code: 'SERVICE_UNAVAILABLE', details: { reason: 'account_retirement_incomplete',
+      userRemoved: true, failedStep: 'home', stateChanged: true, verificationRequired: true } })
+    expect((await f.state.store.getAccount(f.account.id))?.status).toBe('terminating')
+    expect(await f.database.db.query('SELECT id FROM principals WHERE account_id = $1', [f.account.id])).not.toEqual([])
+    expect(f.calls()).toBe(1)
+  })
+
+  it('refuses a request key whose completed creation was terminated since, without a second host call', async () => {
+    expect((await f.perform('create')).status).toBe(201)
+    const created = (await f.state.store.getAccountByUsername('newowner7'))!
+    await f.state.store.deleteAccount((await f.state.store.markTerminating(created.id)).id)
+    await deletePrincipal(f.database.db, (await findPrincipalByUsername(f.database.db, 'newowner7'))!.id)
+    const replay = await f.perform('create')
+    expect(replay.status).toBe(409)
+    expect(await replay.json()).toMatchObject({ code: 'CONFLICT', details: { reason: 'provisioning_key_already_completed', stateChanged: false, verificationRequired: false } })
+    expect(await f.state.store.getAccountByUsername('newowner7')).toBeNull()
     expect(f.calls()).toBe(1)
   })
 
