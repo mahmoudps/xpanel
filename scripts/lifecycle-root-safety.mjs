@@ -888,7 +888,7 @@ export async function assertNativeLifecycleRecoveryPrerequisites() {
 }
 
 async function assertFixedCoordinatorMainProcess(processPin, info) {
-  const shown = await nativeCommand('/usr/bin/systemctl', ['show', info.unit, '--property=MainPID,ControlPID,ControlGroup,FragmentPath,DropInPaths,User'], { sha256: info.systemctlSha256 })
+  const shown = await nativeCommand('/usr/bin/systemctl', ['show', info.unit, '--property=MainPID,ControlPID,ControlGroup,FragmentPath,DropInPaths,User'])
   const values = Object.fromEntries(shown.output.trim().split('\n').map(line => { const at = line.indexOf('='); return [line.slice(0, at), line.slice(at + 1)] }))
   if (shown.code !== 0 || values.MainPID !== String(process.pid) || values.ControlPID !== '0' || values.ControlGroup !== '/system.slice/' + info.unit
     || values.FragmentPath !== '/etc/systemd/system/' + info.unit || values.DropInPaths || !['', 'root', '0'].includes(values.User)
@@ -1053,7 +1053,7 @@ export async function observeLifecycleWriterService(capability, role, expected) 
   await assertLifecycleRootSafetyHeld(capability, { effect: 'service.observe' })
   if (!['api', 'agent'].includes(role)) fail('LIFECYCLE_WRITER_ROLE_INVALID')
   const scope = capabilities.get(capability), unit = `xpanel-${role}.service`
-  const shown = await nativeCommand('/usr/bin/systemctl', ['show', unit, '--property=MainPID,ControlPID,ControlGroup,FragmentPath,DropInPaths,ActiveState,User'], { sha256: scope.receipt.runtime.systemctlSha256 })
+  const shown = await nativeCommand('/usr/bin/systemctl', ['show', unit, '--property=MainPID,ControlPID,ControlGroup,FragmentPath,DropInPaths,ActiveState,User'])
   const properties = Object.fromEntries(shown.output.trim().split('\n').map(line => { const at = line.indexOf('='); return [line.slice(0, at), line.slice(at + 1)] }))
   if (shown.code !== 0 || !/^[1-9][0-9]*$/.test(properties.MainPID) || properties.ControlPID !== '0' || properties.ActiveState !== 'active' || properties.ControlGroup !== `/system.slice/${unit}` || properties.FragmentPath !== `/etc/systemd/system/${unit}` || properties.DropInPaths || (role === 'api' ? properties.User !== 'xpanel' : !['', 'root', '0'].includes(properties.User))) fail('LIFECYCLE_WRITER_SERVICE_UNOWNED')
   const pid = Number(properties.MainPID)
@@ -1113,8 +1113,8 @@ export async function assertNativeLifecyclePrerequisites(ownership) {
   await trustConfiguration()
   for (const file of receipt.files) await assertOwnedFile(file)
   await withTrustedFile(receipt.runtime.nodePath, { sha256: receipt.runtime.nodeSha256, maxBytes: 256 * 1024 * 1024 }, async () => {})
-  await withTrustedFile('/usr/bin/systemctl', { sha256: receipt.runtime.systemctlSha256, maxBytes: 16 * 1024 * 1024 }, async () => {})
-  const controller = await nativeCommand('/usr/bin/systemctl', ['show', processPin.coordinatorUnit, '--property=MainPID,ControlPID,ControlGroup,FragmentPath,DropInPaths,User'], { sha256: receipt.runtime.systemctlSha256 })
+  await withTrustedFile('/usr/bin/systemctl', { maxBytes: 16 * 1024 * 1024 }, async () => {})
+  const controller = await nativeCommand('/usr/bin/systemctl', ['show', processPin.coordinatorUnit, '--property=MainPID,ControlPID,ControlGroup,FragmentPath,DropInPaths,User'])
   const properties = Object.fromEntries(controller.output.trim().split('\n').map(line => { const at = line.indexOf('='); return [line.slice(0, at), line.slice(at + 1)] }))
   if (controller.code !== 0 || properties.MainPID !== String(process.pid) || properties.ControlPID !== '0' || properties.ControlGroup !== `/system.slice/${processPin.coordinatorUnit}` || properties.FragmentPath !== `/etc/systemd/system/${processPin.coordinatorUnit}` || properties.DropInPaths || !['', 'root', '0'].includes(properties.User)) fail('LIFECYCLE_OWNED_COORDINATOR_REQUIRED')
   await withTrustedFile(properties.FragmentPath, { maxBytes: 65536 }, async () => {})
@@ -1152,7 +1152,7 @@ export async function createNativeUpgradeSafety(options) {
   if (receipt.status !== 'active' || process.version !== `v${receipt.runtime.nodeVersion}` || processPin.executable !== await realpath(receipt.runtime.nodePath)) fail('LIFECYCLE_INSTALLATION_NOT_READY')
   const trust = await trustConfiguration()
   for (const file of receipt.files) await assertOwnedFile(file)
-  const controller = await nativeCommand('/usr/bin/systemctl', ['show', processPin.coordinatorUnit, '--property=MainPID,ControlPID,ControlGroup,FragmentPath,DropInPaths,User'], { sha256: receipt.runtime.systemctlSha256 })
+  const controller = await nativeCommand('/usr/bin/systemctl', ['show', processPin.coordinatorUnit, '--property=MainPID,ControlPID,ControlGroup,FragmentPath,DropInPaths,User'])
   const properties = Object.fromEntries(controller.output.trim().split('\n').map(line => { const at = line.indexOf('='); return [line.slice(0, at), line.slice(at + 1)] }))
   if (controller.code !== 0 || properties.MainPID !== String(process.pid) || properties.ControlPID !== '0' || properties.ControlGroup !== `/system.slice/${processPin.coordinatorUnit}` || properties.FragmentPath !== `/etc/systemd/system/${processPin.coordinatorUnit}` || properties.DropInPaths || !['', 'root', '0'].includes(properties.User)) fail('LIFECYCLE_OWNED_COORDINATOR_REQUIRED')
   await withTrustedFile(properties.FragmentPath, { maxBytes: 65536 }, async () => {})
@@ -1167,7 +1167,7 @@ export async function createNativeUpgradeSafety(options) {
       return withVerifiedCoordinatorOwnership(async coordinator => {
         const verified = coordinatorOwnershipInfo(coordinator)
         if (processPin.coordinatorUnit !== verified.unit || process.argv[1] !== verified.sourcePath) fail('LIFECYCLE_COORDINATOR_SOURCE_REQUIRED')
-        return withHostOperationGuard(db, {}, async guard => withTrustedDirectory(ROOT, async parent => withTrustedFile('/usr/bin/systemctl', { sha256: receipt.runtime.systemctlSha256, maxBytes: 16 * 1024 * 1024 }, async tool => withTrustedFile(receipt.runtime.nodePath, { sha256: receipt.runtime.nodeSha256, maxBytes: 256 * 1024 * 1024 }, async node => {
+        return withHostOperationGuard(db, {}, async guard => withTrustedDirectory(ROOT, async parent => withTrustedFile('/usr/bin/systemctl', { maxBytes: 16 * 1024 * 1024 }, async tool => withTrustedFile(receipt.runtime.nodePath, { sha256: receipt.runtime.nodeSha256, maxBytes: 256 * 1024 * 1024 }, async node => {
         const head = await readHead()
         if (head.value.issuerId !== origin.issuerId || (recovery ? head.hash !== recovery.head.hash : !['idle', 'retired'].includes(head.value.phase))) fail('LIFECYCLE_RETAINED_ATTENTION')
         let originalIntentReceipt, originalJob
@@ -1260,7 +1260,7 @@ export async function createNativeUpgradeSafety(options) {
       for (const file of scope.receipt.files) await assertOwnedFile(file)
       for (const unit of ['xpanel-agent.service', 'xpanel-api.service', ...(scope.restoreTimer ? ['xpanel-management-tls.timer'] : [])]) {
         await assertScope(scope)
-        const result = await nativeCommand('/usr/bin/systemctl', [unit.endsWith('.timer') ? 'start' : verb, unit], { sha256: scope.receipt.runtime.systemctlSha256 })
+        const result = await nativeCommand('/usr/bin/systemctl', [unit.endsWith('.timer') ? 'start' : verb, unit])
         if (result.code !== 0) fail('LIFECYCLE_SERVICE_START_FAILED')
       }
     },
@@ -1301,7 +1301,7 @@ export async function createNativeUpgradeSafety(options) {
       const receipt = await selectInstallationTransition(scope.installationTransition, input.direction === 'forward' ? 'target' : 'previous')
       if (input.target !== '/opt/xpanel/releases/' + receipt.source.version) fail('LIFECYCLE_INSTALLATION_SELECTION_CHANGED')
       scope.receipt = receipt
-      const reloaded = await nativeCommand('/usr/bin/systemctl', ['daemon-reload'], { sha256: receipt.runtime.systemctlSha256 })
+      const reloaded = await nativeCommand('/usr/bin/systemctl', ['daemon-reload'])
       if (reloaded.code !== 0) fail('LIFECYCLE_SYSTEMD_RELOAD_FAILED')
       scope.capture = await observeOwnedControlPlaneUnits(scope.receipt, scope.capability)
     },
@@ -1496,7 +1496,7 @@ async function settleNative(scope, result) {
     catch (error) { if (error.code === 'ENOENT' && path !== ROOT + '/writer-barrier.json') continue; throw error }
     await unlink(path); const directory = await open(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW); try { await directory.sync() } finally { await directory.close() }
   }
-  await queueWriterRestart((path, args) => nativeCommand(path, args, { sha256: scope.receipt.runtime.systemctlSha256 }))
+  await queueWriterRestart(nativeCommand)
   return Object.freeze({ ...result, outcome: result.hostOutcome,
     ...(Object.hasOwn(result, 'status') ? { status: 'recovered', closedRecordId: result.recordId, problems: [] } : {}), reason: null, code: null })
 }

@@ -9,8 +9,8 @@ export const NATIVE_UPGRADE_UNIT = 'xpanel-lifecycle.service'
 export const NATIVE_UPGRADE_SOCKET = '/run/xpanel-lifecycle/upgrade.sock'
 const PUBLIC_KEY = '/etc/xpanel/lifecycle-launcher.pub'
 const refuse = (): never => { throw new Error('UPGRADE_LAUNCHER_UNAVAILABLE') }
-export async function unitProperties(unit: 'xpanel-lifecycle.service' | 'xpanel-agent.service', hash: string): Promise<Record<string, string>> {
-  return withTrustedFile('/usr/bin/systemctl', { sha256: hash, maxBytes: 16 * 1024 * 1024 }, async tool => {
+export async function unitProperties(unit: 'xpanel-lifecycle.service' | 'xpanel-agent.service'): Promise<Record<string, string>> {
+  return withTrustedFile('/usr/bin/systemctl', { maxBytes: 16 * 1024 * 1024 }, async tool => {
     const output = await new Promise<string>((resolve, reject) => {
       const child = spawn('/proc/self/fd/3', ['show', unit, '--property=Id,LoadState,ActiveState,MainPID,ControlPID,ControlGroup,FragmentPath,DropInPaths,User'],
         { env: { PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'pipe', tool.fd] })
@@ -42,7 +42,7 @@ export async function observeLauncher(ownership: CoordinatorOwnershipCapability)
   requireLinuxRoot()
   if (process.version !== 'v26.12.1' || process.env.NODE_OPTIONS || process.env.NODE_PATH) return refuse()
   await assertCoordinatorOwnershipCurrent(ownership)
-  const receipt = coordinatorOwnershipInfo(ownership), state = await unitProperties(NATIVE_UPGRADE_UNIT, receipt.systemctlSha256)
+  const receipt = coordinatorOwnershipInfo(ownership), state = await unitProperties(NATIVE_UPGRADE_UNIT)
   if (state.Id !== NATIVE_UPGRADE_UNIT || state.LoadState !== 'loaded' || state.ActiveState !== 'active' || state.ControlPID !== '0'
     || state.ControlGroup !== `/system.slice/${NATIVE_UPGRADE_UNIT}` || state.FragmentPath !== `/etc/systemd/system/${NATIVE_UPGRADE_UNIT}`
     || state.DropInPaths || !['', 'root', '0'].includes(state.User ?? '')) return refuse()

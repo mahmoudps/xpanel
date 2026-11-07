@@ -6,7 +6,7 @@ export interface CoordinatorHelperIdentity {
   readonly dependencyReceiptSha256: string; readonly treeSha256: string
 }
 export interface CoordinatorOwnershipInfo {
-  readonly unit: 'xpanel-lifecycle.service'; readonly nodePath: string; readonly nodeSha256: string; readonly systemctlSha256: string
+  readonly unit: 'xpanel-lifecycle.service'; readonly nodePath: string; readonly nodeSha256: string
   readonly sourcePath: string; readonly unitSha256: string; readonly addonSha256: string; readonly publicKeySha256: string
   readonly receiptSha256: string; readonly helper: CoordinatorHelperIdentity
 }

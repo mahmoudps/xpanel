@@ -60,9 +60,9 @@ async function withExistingRegistrationGuard(prepared, callback) {
 }
 
 /** Retain the executable inode until actual child close; timeout never means retirement. */
-async function systemctl(hash, args, assertAuthority) {
+async function systemctl(args, assertAuthority) {
   await assertAuthority()
-  return withTrustedFile('/usr/bin/systemctl', { maxBytes: 16 * 1024 * 1024, sha256: hash }, async pin => {
+  return withTrustedFile('/usr/bin/systemctl', { maxBytes: 16 * 1024 * 1024 }, async pin => {
     let uncertain = false
     const result = await new Promise((resolve, reject) => {
       const child = spawn('/proc/self/fd/3', ['--system', '--no-ask-password', '--no-pager', ...args], { cwd: '/', shell: false, stdio: ['ignore', 'pipe', 'pipe', pin.fd], env: { PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C', SYSTEMD_PAGERSECURE: '1' } })
@@ -109,14 +109,14 @@ export async function installPreparedCoordinator(prepared) {
         async () => { await assertOrigin(); await assertCoordinatorOwnershipCurrent(capability) })
       registration = { bytes: updated.bytes, sha256: updated.entry.sha256 }
     }
-    await systemctl(current.systemctlSha256, ['daemon-reload'], assertAuthority)
-    const state = await systemctl(current.systemctlSha256, ['show', current.unit, '--property=MainPID,ControlPID,ActiveState,FragmentPath,DropInPaths'], assertAuthority)
+    await systemctl(['daemon-reload'], assertAuthority)
+    const state = await systemctl(['show', current.unit, '--property=MainPID,ControlPID,ActiveState,FragmentPath,DropInPaths'], assertAuthority)
     const fields = Object.fromEntries(state.trim().split('\n').map(line => { const at = line.indexOf('='); return [line.slice(0, at), line.slice(at + 1)] }))
     if (fields.FragmentPath !== PATHS.unit || fields.DropInPaths || fields.ControlPID !== '0') fail('COORDINATOR_REGISTRATION_STATE_UNKNOWN')
     let started = false
     if (fields.ActiveState === 'inactive' && fields.MainPID === '0') {
-      await systemctl(current.systemctlSha256, ['daemon-reload'], assertAuthority)
-      await systemctl(current.systemctlSha256, ['start', current.unit], assertAuthority)
+      await systemctl(['daemon-reload'], assertAuthority)
+      await systemctl(['start', current.unit], assertAuthority)
       started = true
     } else if (fields.ActiveState !== 'active' || !/^[1-9][0-9]*$/.test(fields.MainPID)) fail('COORDINATOR_REGISTRATION_STATE_UNKNOWN')
     return Object.freeze({ status: 'registered', unit: current.unit, sourceVersion: current.helper.version, started, ready: false, ipcQualificationRequired: true })
@@ -150,7 +150,7 @@ export async function installPreparedCoordinator(prepared) {
           || JSON.stringify(priorIntent.helper) !== JSON.stringify(coordinatorHelperFromPrepared(helper, helper.artifactPath))) fail('COORDINATOR_REGISTRATION_RECOVERY_REQUIRED')
         await assertOwnedFile(interrupted.entry)
       } else for (const path of [PATHS.unit, PATHS.enabled, PATHS.privateKey, PATHS.publicKey, PATHS.receipt]) if (!await managedPathAbsent(path)) fail('COORDINATOR_FOREIGN_PATH_PRESERVED')
-      const priorState = await systemctl(installed.receipt.runtime.systemctlSha256, ['show', 'xpanel-lifecycle.service', '--property=LoadState,ActiveState,MainPID,ControlPID'], assertAuthority)
+      const priorState = await systemctl(['show', 'xpanel-lifecycle.service', '--property=LoadState,ActiveState,MainPID,ControlPID'], assertAuthority)
       const fields = Object.fromEntries(priorState.trim().split('\n').map(line => { const at = line.indexOf('='); return [line.slice(0, at), line.slice(at + 1)] }))
       if ((!priorIntent && fields.LoadState !== 'not-found') || !['not-found', 'loaded'].includes(fields.LoadState)
         || fields.ActiveState !== 'inactive' || fields.MainPID !== '0' || fields.ControlPID !== '0') fail('COORDINATOR_EXISTING_UNIT_PRESERVED')
@@ -197,8 +197,8 @@ export async function installPreparedCoordinator(prepared) {
         await replaceManagedFile(PATHS.receipt, json(receipt), 0o600, null, assertAuthority)
         journal = await replaceManagedFile(JOURNAL, json({ ...intent, phase: 'registered', receiptSha256: sha(json(receipt)) }), 0o600, journal.entry, assertAuthority)
         await withVerifiedCoordinatorOwnership(async () => { await assertAuthority() })
-        await systemctl(receipt.runtime.systemctlSha256, ['daemon-reload'], assertAuthority)
-        await systemctl(receipt.runtime.systemctlSha256, ['start', receipt.unit], assertAuthority)
+        await systemctl(['daemon-reload'], assertAuthority)
+        await systemctl(['start', receipt.unit], assertAuthority)
         await replaceManagedFile(JOURNAL, json({ ...intent, phase: 'start_requested', receiptSha256: sha(json(receipt)) }), 0o600, journal.entry, assertAuthority)
         // IPC/process/source qualification remains independently required; systemctl exit is not readiness.
         return Object.freeze({ status: 'registered', unit: receipt.unit, sourceVersion: helper.version, started: true, ready: false })

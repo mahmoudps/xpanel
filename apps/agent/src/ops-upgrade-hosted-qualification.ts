@@ -172,7 +172,7 @@ async function collectHostedObservation(ownership: CoordinatorOwnershipCapabilit
           const addon = loaded as NativePeerIdentityAddon
           const osText = (await readTrustedFile(await realpath('/etc/os-release'), { maxBytes: 65536 })).bytes.toString('utf8')
           const os = detectOs(path => path === '/etc/os-release' ? osText : null)
-          return withTrustedFile('/usr/bin/systemctl', { sha256: owner.systemctlSha256, maxBytes: 16 * 1024 * 1024 }, async tool => {
+          return withTrustedFile('/usr/bin/systemctl', { maxBytes: 16 * 1024 * 1024 }, async tool => {
             const executor = readonlyExecutor(tool, guard, system.fpmUnitName(account.username, domain.php.version)), context: HostEffectAuthority = { readOnly: true, signal, assertAuthority: guard }
             const exchange = createNativeHeldAccountHttp({ ...('held' in database ? { db: database.held } : { databaseReader: { withReadonlyDatabase: read } }),
               store: { listDomains: async () => { await guard(); return source.domains } }, reconciler: { journal }, executor, os, addon })
@@ -242,8 +242,7 @@ export async function assertNativeHostedUidQualificationCurrent(value: unknown, 
   await withVisibleCoordinatorOwnership(state.ownership, () => assertCoordinatorOwnershipCurrent(state.ownership)); await state.scope.assertCurrent()
   const captured = state.captured
   await readPinnedProcess(captured.process!, captured.observed, captured.account, captured.unit, captured.mainPid)
-  const owner = coordinatorOwnershipInfo(state.ownership)
-  await withTrustedFile('/usr/bin/systemctl', { sha256: owner.systemctlSha256, maxBytes: 16 * 1024 * 1024 }, async tool => {
+  await withTrustedFile('/usr/bin/systemctl', { maxBytes: 16 * 1024 * 1024 }, async tool => {
     const guard = async () => { qualificationState(value); await assertNativeRootOperatorDispatchHeld(dispatch); await assertNativeClosedDatabaseRecoveryScopeHeld(state.scope) }
     const result = await readonlyExecutor(tool, guard, captured.unit).runCommand(unitIdentityShowArgv(captured.unit))
     const fields = new Map<string, string>()

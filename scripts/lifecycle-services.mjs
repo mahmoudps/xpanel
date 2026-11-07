@@ -151,9 +151,9 @@ export async function readBoundedCgroupTree(directory) {
   return freeze({ nodes, processes: [...new Set(nodes.flatMap(node => node.processes))].sort((a, b) => a - b), populated: nodes.some(node => node.populated) })
 }
 
-async function systemctl(receipt, args) {
+async function systemctl(args) {
   requireLinuxRoot(); check(!uncertainChild, 'SERVICE_CHILD_REQUIRES_INSPECTION')
-  return withTrustedFile('/usr/bin/systemctl', { maxBytes: 8 * 1024 * 1024, sha256: receipt.runtime.systemctlSha256 }, async executable => {
+  return withTrustedFile('/usr/bin/systemctl', { maxBytes: 8 * 1024 * 1024 }, async executable => {
     const result = await new Promise((resolve, reject) => {
       // Execute the retained inode, inherited as fd 3, rather than reopening a mutable pathname.
       const child = spawn('/proc/self/fd/3', ['--system', '--no-ask-password', '--no-pager', ...args], { cwd: '/', shell: false, stdio: ['ignore', 'pipe', 'pipe', executable.fd], env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin', LANG: 'C', LC_ALL: 'C', SYSTEMD_COLORS: '0', SYSTEMD_PAGERSECURE: '1' } })
@@ -229,7 +229,7 @@ async function workerIncidents() {
   })
 }
 
-async function observeWorkers(receipt, inventory, previousPaths, allowActive) {
+async function observeWorkers(inventory, previousPaths, allowActive) {
   const incidents = await workerIncidents()
   if (!allowActive) check(incidents.size === 0, 'FILE_WORKER_INCIDENT_REQUIRES_INSPECTION')
   const names = new Set([...incidents.keys(), ...inventory.filter(item => item.unit.startsWith('xpanel-files-')).map(item => item.unit), ...previousPaths.filter(path => posix.basename(path).startsWith('xpanel-files-')).map(path => posix.basename(path))])
@@ -237,7 +237,7 @@ async function observeWorkers(receipt, inventory, previousPaths, allowActive) {
   const workers = []
   for (const name of names) {
     const identity = parseFileWorkerUnit(name)
-    const state = parseSystemctlProperties(await systemctl(receipt, ['show', name, `--property=${PROPERTIES.join(',')}`]))
+    const state = parseSystemctlProperties(await systemctl(['show', name, `--property=${PROPERTIES.join(',')}`]))
     check(state.Id === name && ['loaded', 'not-found'].includes(state.LoadState) && state.DropInPaths === '' && state.NeedDaemonReload === 'no', 'FILE_WORKER_CONFIGURATION_DRIFT')
     if (state.LoadState === 'loaded') check(state.FragmentPath === `/run/systemd/transient/${name}` && state.KillMode === 'control-group', 'FILE_WORKER_CONFIGURATION_DRIFT')
     check(state.ControlGroup === '' || state.ControlGroup === identity.cgroup, 'FILE_WORKER_CGROUP_UNOWNED')
@@ -255,10 +255,10 @@ async function observeWorkers(receipt, inventory, previousPaths, allowActive) {
 export const controlPlaneUnitSettled = state => ['active', 'inactive', 'failed'].includes(state.ActiveState)
   || (state.ActiveState === 'activating' && state.SubState === 'auto-restart' && state.MainPID === '0' && state.ControlPID === '0')
 
-async function observe(receipt, previousPaths = [], coordinatorUnit = null, allowActiveWorkers = false) {
+async function observe(previousPaths = [], coordinatorUnit = null, allowActiveWorkers = false) {
   const units = []
   for (const unit of UNITS) {
-    const state = parseSystemctlProperties(await systemctl(receipt, ['show', unit, `--property=${PROPERTIES.join(',')}`]))
+    const state = parseSystemctlProperties(await systemctl(['show', unit, `--property=${PROPERTIES.join(',')}`]))
     check(state.Id === unit && state.LoadState === 'loaded' && state.FragmentPath === `/etc/systemd/system/${unit}` && state.DropInPaths === '' && state.NeedDaemonReload === 'no', 'CONTROL_PLANE_UNIT_CONFIGURATION_DRIFT')
     check(state.Job === '' || state.Job === '0', 'CONTROL_PLANE_JOB_PENDING')
     check(controlPlaneUnitSettled(state), 'CONTROL_PLANE_TRANSITION_PENDING')
@@ -267,11 +267,11 @@ async function observe(receipt, previousPaths = [], coordinatorUnit = null, allo
     if (unit.endsWith('.service')) check(state.KillMode === 'control-group' && (state.ControlGroup === '' || posix.basename(state.ControlGroup) === unit), 'CONTROL_PLANE_CGROUP_UNOWNED')
     units.push(state)
   }
-  const inventory = parseControlPlaneUnitInventory(await systemctl(receipt, ['list-units', '--all', '--plain', '--full', '--no-legend', 'xpanel*']))
+  const inventory = parseControlPlaneUnitInventory(await systemctl(['list-units', '--all', '--plain', '--full', '--no-legend', 'xpanel*']))
   check(UNITS.every(unit => inventory.some(item => item.unit === unit && item.load === 'loaded')), 'CONTROL_PLANE_UNITS_NOT_LOADED')
   rejectUnknownUnits(inventory, coordinatorUnit)
-  const workers = await observeWorkers(receipt, inventory, previousPaths, allowActiveWorkers)
-  const jobs = parseSystemctlJobs(await systemctl(receipt, ['list-jobs', '--plain', '--full', '--no-legend']))
+  const workers = await observeWorkers(inventory, previousPaths, allowActiveWorkers)
+  const jobs = parseSystemctlJobs(await systemctl(['list-jobs', '--plain', '--full', '--no-legend']))
   check(!jobs.some(job => job.unit !== coordinatorUnit && !(allowActiveWorkers && workers.some(worker => worker.unit === job.unit && !worker.terminal)) && (UNITS.includes(job.unit) || /^xpanel-(?:files|management|api|agent|upgrade|lifecycle)/.test(job.unit))), 'CONTROL_PLANE_JOB_PENDING')
   const paths = [...new Set([...previousPaths, ...units.map(state => state.ControlGroup).filter(Boolean), ...workers.map(worker => worker.cgroup)])].sort()
   return { observedAt: new Date().toISOString(), units, workers, inventory, jobs, cgroups: await observeCgroups(paths) }
@@ -322,7 +322,7 @@ async function observationAuthority(capability, prior) {
 export async function observeOwnedControlPlaneUnits(input, capability) {
   const authority = await observationAuthority(capability)
   const receipt = await ownership(input)
-  return capture(receipt, [await observe(receipt, [], authority?.coordinatorUnit, true)], [], authority)
+  return capture(receipt, [await observe([], authority?.coordinatorUnit, true)], [], authority)
 }
 
 /**
@@ -343,7 +343,7 @@ export async function assertOwnedControlPlaneQuiescent(input, capturedBefore, ca
   const observations = []
   for (let pass = 0; pass < 2; pass++) {
     if (authority) await rootAuthority(capability, 'service.observe')
-    const actual = await observe(receipt, prior.paths, authority?.coordinatorUnit)
+    const actual = await observe(prior.paths, authority?.coordinatorUnit)
     quiescentControlPlaneFailures(actual)
     observations.push(actual)
     if (pass === 0) await new Promise(resolve => setTimeout(resolve, 100))
@@ -355,13 +355,13 @@ export async function stopAndDrainOwnedControlPlaneUnits(input, capability) {
   await rootAuthority(capability, 'service.stop')
   const receipt = await ownership(input), before = await observeOwnedControlPlaneUnits(receipt, capability)
   // Stop the only accepted activator first. PID1 stops the exact receipt-owned units.
-  for (const unit of UNITS) { await rootAuthority(capability, 'service.stop'); await systemctl(receipt, ['stop', unit]); await rootAuthority(capability, 'service.stop') }
+  for (const unit of UNITS) { await rootAuthority(capability, 'service.stop'); await systemctl(['stop', unit]); await rootAuthority(capability, 'service.stop') }
   const stopped = await assertOwnedControlPlaneQuiescent(receipt, before, capability)
   const failed = quiescentControlPlaneFailures(stopped.observations.at(-1))
   if (!failed.length) return stopped
   // The processes are gone; clear the failed result so a later start begins clean. The capture keeps the evidence.
   for (const unit of failed) {
-    await rootAuthority(capability, 'service.stop'); await systemctl(receipt, ['reset-failed', unit]); await rootAuthority(capability, 'service.stop')
+    await rootAuthority(capability, 'service.stop'); await systemctl(['reset-failed', unit]); await rootAuthority(capability, 'service.stop')
     process.stderr.write(`xpanel-lifecycle: ${unit} stopped in the failed state with no remaining process; failed state cleared\n`)
   }
   const cleared = await assertOwnedControlPlaneQuiescent(receipt, stopped, capability), held = captures.get(cleared)
@@ -394,11 +394,11 @@ export async function observeRetiredControlPlaneUnits(input, capturedBefore, exc
   const observations = []
   for (let pass = 0; pass < 2; pass++) {
     await rootAuthority(exclusiveCapability, 'service.observe')
-    const inventory = parseControlPlaneUnitInventory(await systemctl(receipt, ['list-units', '--all', '--plain', '--full', '--no-legend', 'xpanel*']))
+    const inventory = parseControlPlaneUnitInventory(await systemctl(['list-units', '--all', '--plain', '--full', '--no-legend', 'xpanel*']))
     rejectUnknownUnits(inventory, authority.coordinatorUnit)
-    await observeWorkers(receipt, inventory, prior.paths, false)
+    await observeWorkers(inventory, prior.paths, false)
     check(inventory.filter(item => UNITS.includes(item.unit)).every(item => item.load === 'not-found' && item.active === 'inactive' && item.sub === 'dead'), 'RETIRED_UNIT_STILL_LOADED')
-    const jobs = parseSystemctlJobs(await systemctl(receipt, ['list-jobs', '--plain', '--full', '--no-legend']))
+    const jobs = parseSystemctlJobs(await systemctl(['list-jobs', '--plain', '--full', '--no-legend']))
     check(!jobs.some(job => job.unit !== authority.coordinatorUnit && (UNITS.includes(job.unit) || /^xpanel-(?:files|management|api|agent|upgrade|lifecycle)/.test(job.unit))), 'RETIRED_UNIT_JOB_PENDING')
     const cgroups = await observeCgroups(prior.paths)
     check(cgroups.every(group => !group.populated && group.processes.length === 0), 'CONTROL_PLANE_NOT_QUIESCENT')
@@ -448,13 +448,13 @@ export async function startPreparedInstallParticipant(capability, unit) {
     assertPreparedInstallEnvironmentFile(path, info.serviceGid, file.info, file.bytes.toString('utf8'))
   })
   const paths = INSTALL_PARTICIPANTS.map(unit => '/system.slice/' + unit)
-  const before = await observe(receipt, paths)
+  const before = await observe(paths)
   if (installParticipantState(before, unit) === 'active') return Object.freeze({ started: false })
-  parseInstallParticipantStartContract(await systemctl(receipt, ['show', unit, '--property=Type,ExecStartPost,ExecCondition']))
+  parseInstallParticipantStartContract(await systemctl(['show', unit, '--property=Type,ExecStartPost,ExecCondition']))
   await native.assertInstallFinalizationStartupScope(capability, unit)
-  await systemctl(receipt, ['start', unit])
+  await systemctl(['start', unit])
   await native.assertInstallFinalizationStartupScope(capability, unit)
-  const after = await observe(receipt, paths)
+  const after = await observe(paths)
   check(installParticipantState(after, unit) === 'active', 'INSTALL_START_NOT_RUNNING')
   return Object.freeze({ started: true })
 }

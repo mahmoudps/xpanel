@@ -47,6 +47,7 @@ export function parseCoordinatorOwnership(value) {
     && path(helper.archivePath) && helper.archivePath.endsWith('.tar.gz') && !/^\/(?:home[0-9]*|tmp|var\/tmp)\//.test(helper.archivePath)
     && helper.dependencyReceiptPath === '/var/lib/xpanel-lifecycle/prepared/' + helper.archiveSha256 + '/dependencies.json'
     && ['archiveSha256', 'manifestSha256', 'sourceFilesDigest', 'dependencyReceiptSha256', 'treeSha256'].every(key => typeof helper[key] === 'string' && SHA.test(helper[key])), 'COORDINATOR_SOURCE_INVALID')
+  // systemctlSha256 is an install-time observation. Package updates replace systemctl, so nothing compares it.
   exact(value.runtime, ['nodePath', 'nodeVersion', 'nodeSha256', 'systemctlSha256'], 'COORDINATOR_RUNTIME_INVALID')
   check(path(value.runtime.nodePath) && value.runtime.nodeVersion === '26.12.1'
     && ['nodeSha256', 'systemctlSha256'].every(key => typeof value.runtime[key] === 'string' && SHA.test(value.runtime[key])), 'COORDINATOR_RUNTIME_INVALID')
@@ -92,7 +93,7 @@ export function coordinatorOwnershipInfo(capability) {
   check(scope && visible(scope), 'COORDINATOR_OWNERSHIP_SCOPE_REQUIRED')
   const entry = name => scope.receipt.files.find(file => file.path === COORDINATOR_PATHS[name])
   return freeze({ unit: UNIT, nodePath: scope.receipt.runtime.nodePath, nodeSha256: scope.receipt.runtime.nodeSha256,
-    systemctlSha256: scope.receipt.runtime.systemctlSha256, sourcePath: scope.receipt.helper.releaseRoot + '/apps/agent/src/ops-upgrade-native.ts',
+    sourcePath: scope.receipt.helper.releaseRoot + '/apps/agent/src/ops-upgrade-native.ts',
     unitSha256: entry('unit').sha256, addonSha256: entry('addon').sha256, publicKeySha256: entry('publicKey').sha256,
     receiptSha256: scope.receiptSha256, helper: scope.receipt.helper })
 }
@@ -112,7 +113,7 @@ export async function withVerifiedCoordinatorOwnership(callback) {
       const regular = receipt.files.filter(entry => entry.kind === 'file')
       const pin = async index => {
         if (index === regular.length) return withTrustedFile(receipt.runtime.nodePath, { maxBytes: 256 * 1024 * 1024, sha256: receipt.runtime.nodeSha256 }, async node =>
-          withTrustedFile('/usr/bin/systemctl', { maxBytes: 16 * 1024 * 1024, sha256: receipt.runtime.systemctlSha256 }, async systemctl => {
+          withTrustedFile('/usr/bin/systemctl', { maxBytes: 16 * 1024 * 1024 }, async systemctl => {
             scope.pins.push(node.verify, systemctl.verify)
             const unit = await readTrustedFile(COORDINATOR_PATHS.unit, { maxBytes: 65536 })
             check(unit.sha256 === digest(renderCoordinatorUnit(receipt.runtime.nodePath, receipt.helper.releaseRoot)), 'COORDINATOR_UNIT_CONTRACT_CHANGED')
