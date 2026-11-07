@@ -295,6 +295,7 @@ const isIncludedRuntimeSource = (relPath) => {
     'scripts/install-os-configuration.mjs',
     'scripts/install-kernel-quotas.sh',
     'scripts/install-kernel-package.mjs',
+    'scripts/selinux-account-homes.sh',
   ].includes(relPath)) return true
   if (REQUIRED_SYSTEMD_UNITS.includes(relPath)) return true
   if (/^(?:apps|packages)\/[^/]+\/package\.json$/.test(relPath)) return true
