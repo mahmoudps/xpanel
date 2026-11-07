@@ -70,6 +70,8 @@ export interface ExtendedRouteHelpers {
   serverSecret?: string
   /** Fresh read-only enforcement observation from the protected native agent; never a saved setup flag. */
   readQuotaState?: (caller: AuthenticatedCaller, path: string) => Promise<unknown>
+  /** Root quota setup on the protected native agent; a refusal carries the agent's own code, text and details. */
+  initializeQuota?: (caller: AuthenticatedCaller, path: string) => Promise<Record<string, unknown>>
   backupDestinationHost?: (caller: AuthenticatedCaller, path: string, body?: unknown) => Promise<unknown>
   /** Server-to-server transfer execution (apps/api/src/lifecycle-transfer-execution.ts); absent without the host agent. */
   /** Native transfer execution, background caller and cPanel import; absent without the host agent. */
@@ -897,9 +899,23 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       await helpers.assertRoot(caller, 'server.quota_init')
       const body = await readJsonBody<{ filesystem?: string }>(req)
       const filesystem = validateQuotaFilesystem(body.filesystem === undefined ? '/home' : body.filesystem)
-      return fail('SERVICE_UNAVAILABLE', 'host quota initialization is not connected; no quota state was changed', {
-        filesystem, stateChanged: false, reason: 'host_quota_initialization_not_connected',
+      if (!helpers.initializeQuota) {
+        return fail('SERVICE_UNAVAILABLE', 'host quota initialization is not connected; no quota state was changed', {
+          filesystem, stateChanged: false, reason: 'host_quota_initialization_not_connected',
+        })
+      }
+      const audit = (outcome: 'ok' | 'failed', detail: Record<string, unknown>) => helpers.emitAudit({
+        actor: caller.principal.username, action: 'server.quota_init', target: `filesystem:${filesystem}`,
+        detail: { filesystem, ...detail }, outcome, principalId: caller.principal.id,
       })
+      let result: Record<string, unknown>
+      try { result = await helpers.initializeQuota(caller, filesystem) }
+      catch (error) {
+        await audit('failed', { reason: error instanceof Error ? error.message : 'unknown' })
+        throw error
+      }
+      await audit('ok', { changed: result.changed, fstabBackup: result.fstabBackup ?? null })
+      return jsonResponse(result)
     }
 
     // =========================================================================

@@ -132,6 +132,7 @@ describe('SELinux settings of the EL installer', () => {
       'setsebool() { echo "setsebool $*"; }', 'install() { echo "install $*"; }', 'restorecon() { echo "restorecon $*"; }',
       'semodule() { echo "semodule $*"; }', 'write_config() { echo "write_config $1"; "$2" | sed "s/^/  /"; }',
       'systemd-tmpfiles() { echo "systemd-tmpfiles $*"; }',
+      'export -f semanage setsebool', `INSTALL_SOURCE_ROOT=${rootDir}`,
       'WITH_MAIL=1', 'WITH_DNS=1',
     ].join('\n')
     const run = spawnSync(bash, ['-euo', 'pipefail', '-c', `${stubs}\n${functions}\nconfigure_selinux\n`], { encoding: 'utf8', timeout: 10_000 })
@@ -142,6 +143,8 @@ describe('SELinux settings of the EL installer', () => {
     expect(calls).toContain('setsebool -P httpd_can_network_connect 1')
     expect(calls).toContain("semanage fcontext -m -t httpd_log_t /var/log/xpanel(/.*)?")
     expect(calls).toContain('restorecon -R /var/log/xpanel')
+    expect(calls).toContain('setsebool -P httpd_enable_homedirs 1')
+    expect(calls.some(call => call.startsWith('semanage fcontext -m -t httpd_sys_rw_content_t /home/'))).toBe(true)
     expect(calls).toContain('semanage fcontext -a -e /var/lib/pdns /var/lib/powerdns')
     expect(calls).toContain('  d /run/xpanel-account-probe 0711 root root -')
     expect(calls).toContain('  (allow httpd_t unconfined_service_t (unix_stream_socket (connectto)))')

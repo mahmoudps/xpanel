@@ -1486,7 +1486,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     store: deps.store,
     serverSecret,
     ...(deps.agentApp && deps.agentToken ? { readQuotaState: (caller: AuthenticatedCaller, path: string) =>
-      readNativeWorkspace(caller, '/host/quota?path=' + encodeURIComponent(path), undefined, false, 'GET') } : {}),
+      readNativeWorkspace(caller, '/host/quota?path=' + encodeURIComponent(path), undefined, false, 'GET'),
+    initializeQuota: (caller: AuthenticatedCaller, path: string) =>
+      readNativeWorkspace(caller, '/host/quota/initialize', { path }, true, 'POST', null, true) } : {}),
     backupDestinationHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined),
     ...(deps.agentApp && deps.agentToken ? { transferPorts: (() => {
       const agent = (caller: AuthenticatedCaller, path: string, init: { method?: string; body?: unknown } = {}) => callAgent(path, { caller, ...init })
@@ -1550,7 +1552,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     },
   })
 
-  const readNativeWorkspace = async <T>(caller: AuthenticatedCaller, path: string, input?: unknown, mutation = false, method = 'POST', managementClient: string | null = null): Promise<T> => {
+  const readNativeWorkspace = async <T>(caller: AuthenticatedCaller, path: string, input?: unknown, mutation = false, method = 'POST', managementClient: string | null = null, relayRefusal = false): Promise<T> => {
     let response: Response
     try { response = await callAgent(path, { caller, ...(input === undefined ? {} : { method, body: input }), ...(managementClient ? { managementClient } : {}) }) }
     catch { return fail('SERVICE_UNAVAILABLE', 'protected host transport could not be verified', { stateChanged: mutation, verificationRequired: mutation, unknownOutcome: mutation }) }
@@ -1566,8 +1568,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       const problem = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {}
       const detail = problem.details && typeof problem.details === 'object' && !Array.isArray(problem.details) ? problem.details as Record<string, unknown> : {}
       const knownUnchanged = detail.stateChanged === false && detail.unknownOutcome !== true && detail.verificationRequired !== true
-      const code: ErrorCode = response.status === 401 ? 'UNAUTHENTICATED' : response.status === 403 ? 'FORBIDDEN' : response.status === 404 ? 'NOT_FOUND' : response.status === 409 ? 'CONFLICT' : response.status === 422 ? 'VALIDATION' : 'PRECONDITION_FAILED'
-      return fail(code, 'the protected host request was refused', { stateChanged: mutation && !knownUnchanged, ...(mutation && !knownUnchanged ? { unknownOutcome: true, verificationRequired: true } : {}) })
+      const relayed = relayRefusal ? (['VALIDATION', 'SERVICE_UNAVAILABLE', 'CONFIG_TEST_FAILED'] as const).find(known => known === problem.code) : undefined
+      const code: ErrorCode = relayed ?? (response.status === 401 ? 'UNAUTHENTICATED' : response.status === 403 ? 'FORBIDDEN' : response.status === 404 ? 'NOT_FOUND' : response.status === 409 ? 'CONFLICT' : response.status === 422 ? 'VALIDATION' : 'PRECONDITION_FAILED')
+      return fail(code, relayRefusal && typeof problem.detail === 'string' ? problem.detail : 'the protected host request was refused', { ...(relayRefusal ? detail : {}), stateChanged: mutation && !knownUnchanged, ...(mutation && !knownUnchanged ? { unknownOutcome: true, verificationRequired: true } : {}) })
     }
     return body as T
   }

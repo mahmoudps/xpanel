@@ -154,6 +154,17 @@ describe('transfer host tasks', () => {
     expect(t.installed).toEqual(['bob:bob.example.test:PEM:PEM'])
     await expect(readdir(join(t.deps.root!, 'incoming', fetched.id))).rejects.toThrow()
   })
+  it('relabels a transferred home after it matches the archive, and never a home that differs', async () => {
+    const restore = async (compare?: string) => {
+      const relabelled: string[] = []
+      const t = await setup({ ...(compare ? { compare } : {}), relabelHome: async target => { relabelled.push(target.username) }, download: async () => (async function* () { yield Buffer.from('DATA') })() })
+      const fetched = await t.settled(await t.controller.start({ kind: 'fetch', username: 'bob', url: 'https://s.example.test/p', token: 't', tlsFingerprint: null, artifacts: [{ name: 'home.tar.gz', bytes: 4, sha256: sha('DATA') }] }))
+      const restored = await t.settled(await t.controller.start({ kind: 'restore', username: 'bob', fetch: fetched.id, databases: [], certificates: [] }))
+      return { state: restored.state, relabelled }
+    }
+    expect(await restore()).toEqual({ state: 'succeeded', relabelled: ['bob'] })
+    expect(await restore('./public_html/index.php: Contents differ\n')).toEqual({ state: 'failed', relabelled: [] })
+  })
   it('fails a restore whose home differs from the archive and refuses databases outside the account', async () => {
     const t = await setup({ compare: './public_html/index.php: Contents differ\n./x: Mode differs\n', download: async () => (async function* () { yield Buffer.from('DATA') })() })
     const fetched = await t.settled(await t.controller.start({ kind: 'fetch', username: 'bob', url: 'https://s.example.test/p', token: 't', tlsFingerprint: null, artifacts: [{ name: 'home.tar.gz', bytes: 4, sha256: sha('DATA') }] }))

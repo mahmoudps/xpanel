@@ -36,6 +36,19 @@ export const ACCOUNT_DIRS: readonly AccountDir[] = [
   { rel: 'mail', mode: 0o700 },
 ]
 
+/** The directories every account has, home first. */
+export const accountDirPaths = (home: string): string[] => ACCOUNT_DIRS.map(d => d.rel ? `${home}/${d.rel}` : home)
+
+/**
+ * EL file contexts of account paths. -F also replaces the customizable types restorecon otherwise keeps.
+ * It runs as the account: a home is tenant-writable, and a root walk could be steered through a swapped symlink.
+ */
+export const accountContextAction = (username: string, paths: readonly string[], recursive = false) => ({
+  kind: 'exec' as const,
+  runAsUser: assertUsername(username),
+  argv: ['/usr/sbin/restorecon', ...(recursive ? ['-R'] : []), '-F', '-i', ...paths.map(path => assertAbsPath('account path', path))],
+})
+
 export interface ProvisionOptions {
   /** mount point that holds the homes, or null when that filesystem has no quota support */
   quotaFilesystem: string | null

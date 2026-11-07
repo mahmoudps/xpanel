@@ -7,6 +7,7 @@ import { fail } from '@xpanel/core'
 import type { AgentExecutor } from './executor.ts'
 import { withPinnedHostTargetParent } from './host-target-parent.ts'
 import { zstdInstalled, zstdUnavailable } from './backup-low-priority.ts'
+import { relabelAccountPaths } from './selinux-homes.ts'
 
 export const DEFAULT_BACKUP_DIR = '/var/lib/xpanel/backups'
 export const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024
@@ -166,6 +167,8 @@ export const restoreAccountBackup = async (input: {
   file: string
   /** Owner home-only restore preserves mailbox data and mail settings. */
   preserveMail?: boolean
+  /** OS family of the host; EL relabels the restored tree. */
+  family?: string
   /** Trusted fixture port; the dispatcher never accepts this from a request body. */
   inspectSource?: (path: string) => Promise<void>
 }): Promise<{ file: string }> => {
@@ -195,6 +198,7 @@ export const restoreAccountBackup = async (input: {
   } finally {
     await input.executor.runAction({ kind: 'remove-path', path: staging }).catch(() => undefined)
   }
+  await relabelAccountPaths(input.executor, input.family, input.account.username, [input.account.home])
   return { file }
 }
 

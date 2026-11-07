@@ -6,7 +6,7 @@ import type { ExtendedRouteHelpers } from './extended-routes.ts'
 const caller = { principal: { id: 'root-fixture', kind: 'root', username: 'root' }, sessionId: 'root-session' } as AuthenticatedCaller
 
 describe('quota initialization requires a connected host port', () => {
-  const fixture = (readQuotaState?: ExtendedRouteHelpers['readQuotaState'], wizardState: Record<string, unknown> | null = null) => {
+  const fixture = (readQuotaState?: ExtendedRouteHelpers['readQuotaState'], wizardState: Record<string, unknown> | null = null, initializeQuota?: ExtendedRouteHelpers['initializeQuota']) => {
     const reads = vi.spyOn(ExtendedFeaturesStore.prototype, 'readOrDefault').mockImplementation(async <T>(key: string, fallback: T): Promise<T> =>
       (key === 'setup-wizard.json' ? wizardState : fallback) as T)
     const writes = vi.spyOn(ExtendedFeaturesStore.prototype, 'write')
@@ -18,7 +18,7 @@ describe('quota initialization requires a connected host port', () => {
         saveServerSettings: async (value: unknown) => value, saveServerIp: async (value: unknown) => value,
         markSetupComplete: async () => undefined,
       }, db: {}, requireCaller: async () => caller, assertRoot, emitAudit,
-      triggerReconcile: vi.fn(async () => null), ...(readQuotaState ? { readQuotaState } : {}),
+      triggerReconcile: vi.fn(async () => null), ...(readQuotaState ? { readQuotaState } : {}), ...(initializeQuota ? { initializeQuota } : {}),
     } as unknown as ExtendedRouteHelpers
     const router = createExtendedApiRouter(helpers)
     const request = (body: unknown, path = '/api/server/quotas/init', method = 'POST') => {
@@ -41,6 +41,36 @@ describe('quota initialization requires a connected host port', () => {
     try {
       await expect(host.request({ filesystem: 'relative' })).rejects.toMatchObject({ code: 'VALIDATION' })
       expect(host.writes).not.toHaveBeenCalled()
+    } finally { host.restore() }
+  })
+  it('reports and audits the result of the connected agent', async () => {
+    const result = { filesystem: '/', filesystemType: 'ext4', status: 'enabled', changed: true, fstabBackup: '/etc/fstab.bak.20261107T100000Z' }
+    const initialize = vi.fn(async () => result), host = fixture(undefined, null, initialize)
+    try {
+      const response = await host.request({ filesystem: '/home' })
+      expect(await response!.json()).toEqual(result)
+      expect(host.assertRoot).toHaveBeenCalledWith(caller, 'server.quota_init')
+      expect(initialize).toHaveBeenCalledExactlyOnceWith(caller, '/home')
+      expect(host.emitAudit).toHaveBeenCalledExactlyOnceWith({ actor: 'root', action: 'server.quota_init', target: 'filesystem:/home', outcome: 'ok', principalId: 'root-fixture',
+        detail: { filesystem: '/home', changed: true, fstabBackup: result.fstabBackup } })
+      expect(host.writes).not.toHaveBeenCalled()
+    } finally { host.restore() }
+  })
+  it('passes the agent refusal through unchanged and audits it as failed', async () => {
+    const refusal = Object.assign(new Error('automatic quota setup supports ext4'), { code: 'PRECONDITION_FAILED', detail: { stateChanged: false } })
+    const host = fixture(undefined, null, async () => { throw refusal })
+    try {
+      await expect(host.request({})).rejects.toBe(refusal)
+      expect(host.emitAudit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ action: 'server.quota_init', outcome: 'failed', detail: { filesystem: '/home', reason: 'automatic quota setup supports ext4' } }))
+    } finally { host.restore() }
+  })
+  it('never calls the agent before root authorization or filesystem validation', async () => {
+    const initialize = vi.fn(async () => ({})), host = fixture(undefined, null, initialize)
+    try {
+      host.assertRoot.mockRejectedValueOnce(new Error('denied'))
+      await expect(host.request({ filesystem: '/home' })).rejects.toThrow('denied')
+      await expect(host.request({ filesystem: 'relative' })).rejects.toMatchObject({ code: 'VALIDATION' })
+      expect(initialize).not.toHaveBeenCalled(); expect(host.emitAudit).not.toHaveBeenCalled()
     } finally { host.restore() }
   })
   it('keeps setup completion separate from quota execution and preserves existing quota metadata', async () => {

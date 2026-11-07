@@ -40,6 +40,7 @@ import { removedMaildirPaths } from './services/mail.ts'
 import type { DnsReconcileProvider } from './services/dns-native.ts'
 import { chooseZoneSerial, stampZoneContent } from './zone-serial.ts'
 import { resolveAccountIoDevices } from './io-device.ts'
+import { SELINUX_ENFORCE_PATH } from './selinux-homes.ts'
 import { databaseUserRemoteSqlHosts, databaseUserSqlHosts } from './db-remote-provider.ts'
 import { postgresqlAccountStatements, postgresqlSqlAction } from './pg-sql.ts'
 import { readSecEdgeConfiguration } from './sec-waf.ts'
@@ -93,7 +94,6 @@ export interface CompiledGeneration {
 }
 
 const KERNEL_HOSTNAME_PATH = '/proc/sys/kernel/hostname'
-const SELINUX_ENFORCE_PATH = '/sys/fs/selinux/enforce'
 const HOSTNAME_FILES: readonly string[] = ['/etc/hostname', '/etc/hosts']
 /** EL policy labels /etc/hosts net_conf_t and /etc/hostname hostname_etc_t; an atomic rename into /etc leaves etc_t. */
 export const hostnameContextAction = (paths: readonly string[] = HOSTNAME_FILES): HostAction => ({ kind: 'exec', argv: ['/usr/sbin/restorecon', ...paths] })
@@ -231,6 +231,15 @@ export interface CompileOptions {
 }
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
+
+/** A domain can point at a folder that already holds files labelled for the home, so its whole tree is relabelled. */
+const newDocRootContextActions = (snapshot: StateSnapshot, applied: StateSnapshot | null): HostAction[] => {
+  const known = new Set(applied?.domains.map(domain => domain.docRoot))
+  return snapshot.accounts.flatMap(account => {
+    const roots = snapshot.domains.filter(domain => domain.accountId === account.id && !known.has(domain.docRoot)).map(domain => domain.docRoot)
+    return account.status !== 'terminating' && roots.length ? [system.accountContextAction(account.username, [...new Set(roots)], true)] : []
+  })
+}
 
 /**
  * Pure compiler: turns a validated `StateSnapshot` and `OsProfile` into the complete set
@@ -420,6 +429,10 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
 
     // Provision Linux group, user, 0750 home dirs, and filesystem quota
     preActions.push(...system.accountProvisionActions(account, plan, os, { quotaFilesystem }))
+    // Directories created under /home inherit its home_root_t, which Apache and PHP-FPM may not read.
+    if (os.family === 'rhel' && opts.selinux) {
+      preActions.push(system.accountContextAction(account.username, [...new Set([...system.accountDirPaths(account.home), ...accountDomains.map(domain => domain.docRoot)])]))
+    }
 
     // Account systemd slice & logind user slice drop-in. The drop-in directory is
     // created before the atomic write so user-<uid>.slice.d/.tmp can be published.
@@ -1830,7 +1843,9 @@ export class HostReconciler {
     }
     const refreshed = compileMail(mailAuth, previousZones)
     const nextChecksum = computeFilesChecksum(refreshed.files)
-    if (nextChecksum !== filesChecksum) {
+    // An observed fact such as SELinux can change the actions alone.
+    const actionsChanged = hostEffectsChecksum([...refreshed.preActions, ...refreshed.postActions]) !== hostEffectsChecksum([...compiled.preActions, ...compiled.postActions])
+    if (nextChecksum !== filesChecksum || actionsChanged) {
       compiled = refreshed
       filesChecksum = nextChecksum
       await this.deps.executor.preflight(preflightOf(compiled, filesChecksum))
@@ -1858,6 +1873,9 @@ export class HostReconciler {
       }
       repairedDriftCount = drift.items.length + (mailDrift ? 1 : 0)
     }
+
+    // Once per new document root, so it stays out of the effects checksum that decides a no-op.
+    if (selinux) compiled.preActions.push(...newDocRootContextActions(snapshot, appliedSnapshot))
 
     await assertHostEffectAuthority(this.deps.executor)
     const pendingGen = await createGeneration(this.deps.db, {

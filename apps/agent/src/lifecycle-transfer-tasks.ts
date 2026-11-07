@@ -66,6 +66,8 @@ export interface TransferTaskDeps {
   run: TransferCommandRunner
   download?: TransferDownload
   mariadb: { adminDefaultsFile: string; mariadbBinary: string; mariadbDumpBinary: string; verifyAdminConfig(): Promise<void>; verifyDatabaseObjects(database: string, username: string): Promise<{ tables: unknown[] }> }
+  /** EL file contexts of a home that arrived from an archive. */
+  relabelHome?: (account: Account) => Promise<void>
   /** installManualCertificate bound to the host executor; returns the candidate files' metadata. */
   installCertificate: (account: Account, domain: string, fullchainPem: string, privateKeyPem: string) => Promise<{ certificate: Record<string, unknown> }>
   now?: () => Date
@@ -258,6 +260,7 @@ export function createTransferTaskController(deps: TransferTaskDeps) {
       if (compared.code > 1) fail('CONFIG_TEST_FAILED', 'the restored home could not be compared with the archive')
       const problems = tarCompareProblems(compared.stdout)
       if (problems.length) fail('PRECONDITION_FAILED', 'the restored home differs from the archive: ' + problems.join('; ').slice(0, 300))
+      await deps.relabelHome?.(account)
       return { compared: true }
     } finally { await rm(staging, { recursive: true, force: true }) }
   }

@@ -1397,6 +1397,15 @@ export function isSettledControlPlaneProjection(value) {
   return OWNED_PANEL_UNITS.every(unit => seen.has(unit))
 }
 
+/** API and agent started behind the barrier stay quarantined until a process restart. Queued, so settlement never waits on daemon startup. */
+export async function queueWriterRestart(run) {
+  for (const unit of ['xpanel-agent.service', 'xpanel-api.service']) {
+    let code = null
+    try { code = (await run('/usr/bin/systemctl', ['restart', '--no-block', unit])).code } catch { code = null }
+    if (code !== 0) process.stderr.write(`xpanel-lifecycle: restart of ${unit} refused after retirement code=LIFECYCLE_WRITER_RESTART_REFUSED\n`)
+  }
+}
+
 async function settleNative(scope, result) {
   await assertScope(scope)
   if (!result || result.outcome !== 'retirement_pending') return result
@@ -1487,6 +1496,7 @@ async function settleNative(scope, result) {
     catch (error) { if (error.code === 'ENOENT' && path !== ROOT + '/writer-barrier.json') continue; throw error }
     await unlink(path); const directory = await open(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW); try { await directory.sync() } finally { await directory.close() }
   }
+  await queueWriterRestart((path, args) => nativeCommand(path, args, { sha256: scope.receipt.runtime.systemctlSha256 }))
   return Object.freeze({ ...result, outcome: result.hostOutcome,
     ...(Object.hasOwn(result, 'status') ? { status: 'recovered', closedRecordId: result.recordId, problems: [] } : {}), reason: null, code: null })
 }

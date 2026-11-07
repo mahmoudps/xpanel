@@ -803,6 +803,7 @@ configure_selinux() {
   semanage fcontext -a -t httpd_log_t '/var/log/xpanel(/.*)?' 2> /dev/null \
     || semanage fcontext -m -t httpd_log_t '/var/log/xpanel(/.*)?' || die "SELinux refused the xPanel log context."
   restorecon -R /var/log/xpanel
+  bash "$INSTALL_SOURCE_ROOT/scripts/selinux-account-homes.sh" || die "SELinux refused the account home policy."
   # Account provisioning holds a probe request on a socket the agent opens under /run/xpanel-account-probe, and
   # nginx proxies to it. tmpfiles creates the directory at boot with the httpd_var_run_t type that the agent's
   # per-account directories and sockets inherit (the rule is spelled /var/run: the policy equates /run with it);

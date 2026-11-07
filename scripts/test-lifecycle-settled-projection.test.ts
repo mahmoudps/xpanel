@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { isSettledControlPlaneProjection } from './lifecycle-root-safety.mjs'
+import { readFileSync } from 'node:fs'
+import { describe, expect, it, vi } from 'vitest'
+import { isSettledControlPlaneProjection, queueWriterRestart } from './lifecycle-root-safety.mjs'
 
 const unit = (Id: string, ActiveState: string, MainPID = '0') => ({ Id, ActiveState, MainPID, ControlPID: '0' })
 const api = unit('xpanel-api.service', 'active', '10')
@@ -27,5 +28,30 @@ describe('settled control plane projection', () => {
 
   it('refuses a missing unit', () => {
     expect(settled(api, agent, renewal)).toBe(false)
+  })
+})
+
+describe('writers after retirement', () => {
+  it('queues the agent, then the API, out of quarantine', async () => {
+    const calls: string[][] = []
+    await queueWriterRestart(async (path, args) => { calls.push([path, ...args]); return { code: 0 } })
+    expect(calls).toEqual([
+      ['/usr/bin/systemctl', 'restart', '--no-block', 'xpanel-agent.service'],
+      ['/usr/bin/systemctl', 'restart', '--no-block', 'xpanel-api.service'],
+    ])
+  })
+
+  it('reports a refused restart and still tries the next writer, because retirement is already final', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const calls: string[] = []
+    await queueWriterRestart(async (_path, args) => { calls.push(args.at(-1)!); if (calls.length === 1) throw new Error('refused'); return { code: 1 } })
+    expect(calls).toEqual(['xpanel-agent.service', 'xpanel-api.service'])
+    expect(stderr.mock.calls.filter(call => String(call[0]).includes('LIFECYCLE_WRITER_RESTART_REFUSED'))).toHaveLength(2)
+    stderr.mockRestore()
+  })
+
+  it('restarts only after settlement removed the barrier', () => {
+    const source = readFileSync(new URL('./lifecycle-root-safety.mjs', import.meta.url), 'utf8')
+    expect(source.indexOf('await queueWriterRestart(')).toBeGreaterThan(source.indexOf("ROOT + '/writer-barrier.json']) {"))
   })
 })

@@ -163,6 +163,8 @@ export interface DirectoryPrivacyInput {
   authorize: () => Promise<void>
   /** loopback Apache request for a folder URL of one site; absent leaves the HTTP outcome unchecked */
   probe?: (domain: string, path: string) => Promise<number>
+  /** EL file contexts of ~/.htpasswds, which the file helper creates with the type of the home */
+  relabelPasswords?: () => Promise<void>
 }
 
 /** Read or save one folder. The caller holds the account lifecycle lease. */
@@ -216,7 +218,7 @@ export async function runDirectoryPrivacyRequest(input: DirectoryPrivacyInput): 
   }
   try {
     // Apache must never see a block whose password file is missing: the file goes first when protecting, last when not.
-    if (rendered.htaccessBody.length) { await writePasswd(); await writeHtaccess() } else { await writeHtaccess(); await writePasswd() }
+    if (rendered.htaccessBody.length) { await writePasswd(); await input.relabelPasswords?.(); await writeHtaccess() } else { await writeHtaccess(); await writePasswd() }
     const saved = await folderState(files, path)
     if ((saved.htaccess?.content ?? null) !== htaccessAfter || (saved.passwd?.content ?? null) !== passwdAfter) return fail('SERVICE_UNAVAILABLE', 'the protected folder write requires inspection', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
     const directory = project(account, roots, path, saved)
