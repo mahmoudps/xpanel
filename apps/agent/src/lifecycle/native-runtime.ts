@@ -173,7 +173,7 @@ const composition = async (db: ReturnType<typeof createDb>['db'], actor: Princip
   const resolvedOs = await os
   // A read-only mount observation, outside lifecycle effects.
   const quotaFilesystem = await resolveHomeQuotaFilesystem(argv => native.runCommand(argv)).catch(() => '/home')
-  const { reconciler } = await createNativeHostReconciler({ store, db, executor, os: resolvedOs, quotaFilesystem, healthProbe: async unit => { const result = await executor.runCommand(['/usr/bin/systemctl', 'is-active', '--quiet', unit]); return { ok: result.code === 0, ...(result.code !== 0 ? { error: 'Native service was not active' } : {}) } } })
+  const { reconciler } = await createNativeHostReconciler({ store, db, executor, os: resolvedOs, quotaFilesystem, healthProbe: async unit => { const result = await executor.runCommand(['/usr/bin/systemctl', 'is-active', '--quiet', unit]); return { ok: result.code === 0, ...(result.code !== 0 ? { error: 'Native service was not active' } : {}) } } }, native)
   const canaries = createNativeLifecycleCanary({ db, databaseReader: createProvisioningDatabaseReaderPort(DATABASE), store, executor, reconciler, os: resolvedOs, addon: await loadNativePeerIdentityAddon() })
   const host: HostPort = { async apply(action: HostAction) {
     const kind = action.kind === 'systemd' && action.verb === 'stop' ? 'service.stop' : action.kind === 'systemd' ? 'service.start' : 'filesystem.write'

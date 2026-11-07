@@ -10,6 +10,10 @@ describe('management hosts', () => {
     executor.files.set(file.path, { ...file, content: 'XPANEL_WHM_PUBLIC_ORIGIN=https://WHM.Panel.example.test:2087\nXPANEL_PANEL_PUBLIC_ORIGIN=https://panel.example.test:2083\nXPANEL_MAIL_PUBLIC_ORIGIN=not a url\n' })
     expect(await readManagementHosts(executor)).toEqual(['whm.panel.example.test', 'panel.example.test'])
   })
+
+  it('never turns a refused read into an empty host list', async () => {
+    await expect(readManagementHosts({ readFile: () => Promise.reject(new Error('LIFECYCLE_NATIVE_SCOPE_REQUIRED')) })).rejects.toThrow('LIFECYCLE_NATIVE_SCOPE_REQUIRED')
+  })
 })
 
 describe('runtime public origin', () => {

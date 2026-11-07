@@ -1379,6 +1379,9 @@ export async function createNativeUpgradeSafety(options) {
   return Object.freeze(safety)
 }
 
+// A finished renewal run that failed holds no process and writes no panel state; its status file reports it.
+const finishedRenewal = unit => unit.Id === 'xpanel-management-tls.service' && unit.ActiveState === 'failed' && unit.MainPID === '0' && unit.ControlPID === '0'
+
 /** Syntax/state projection only; it cannot establish native capture, ownership or writer admission. */
 export function isSettledControlPlaneProjection(value) {
   if (!value || !Array.isArray(value.observations) || value.observations.length === 0) return false
@@ -1387,7 +1390,7 @@ export function isSettledControlPlaneProjection(value) {
   const seen = new Set()
   for (const unit of latest.units) {
     if (!unit || !OWNED_PANEL_UNITS.includes(unit.Id) || seen.has(unit.Id)
-      || !['active', 'inactive'].includes(unit.ActiveState)) return false
+      || !(['active', 'inactive'].includes(unit.ActiveState) || finishedRenewal(unit))) return false
     if (['xpanel-api.service', 'xpanel-agent.service'].includes(unit.Id) && unit.ActiveState !== 'active') return false
     seen.add(unit.Id)
   }
@@ -1402,10 +1405,17 @@ async function settleNative(scope, result) {
   const earlyAbort = scope.recovery?.capture.recoveryMode === 'abort-before-transition'
   if (!scope.dependencies || !scope.capture || !earlyAbort && (!scope.backup || !scope.installationTransition) || !['succeeded', 'rolled_back'].includes(result.hostOutcome)) return result
   const observation = projectOwnedControlPlaneObservation(await observeOwnedControlPlaneUnits(scope.receipt, scope.capability))
-  if (!isSettledControlPlaneProjection(observation)) return result
+  if (!isSettledControlPlaneProjection(observation)) {
+    const units = observation.observations.at(-1)?.units.map(unit => `${unit.Id}=${unit.ActiveState}`).join(' ')
+    process.stderr.write(`xpanel-lifecycle: retirement withheld code=LIFECYCLE_CONTROL_PLANE_UNSETTLED ${units}\n`)
+    return result
+  }
   // Retirement also requires actual active writers holding the current shared admission generation.
   const admission = await import('./lifecycle-admission.mjs')
-  if (!await admission.verifyNativeWriterGeneration(scope.capability, scope.job.id)) return result
+  if (!await admission.verifyNativeWriterGeneration(scope.capability, scope.job.id)) {
+    process.stderr.write('xpanel-lifecycle: retirement withheld code=LIFECYCLE_WRITER_GENERATION_UNVERIFIED\n')
+    return result
+  }
   await assertScope(scope)
   let installation
   if (earlyAbort) {

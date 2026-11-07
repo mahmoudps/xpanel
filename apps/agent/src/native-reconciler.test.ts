@@ -22,4 +22,18 @@ describe('one native reconciler composition for the agent and the lifecycle runt
     expect(typeof dnsPublication.verify).toBe('function')
     expect(deps.managementHosts).toEqual(['whm.example.test', 'panel.example.test', 'mail.example.test'])
   })
+
+  it('reads the hosts through the given reader when the executor needs a lifecycle scope', async () => {
+    const executor = { readFile: () => Promise.reject(new Error('LIFECYCLE_NATIVE_SCOPE_REQUIRED')) } as unknown as ReconcilerDeps['executor']
+    const reader = { readFile: async () => 'XPANEL_PANEL_PUBLIC_ORIGIN=https://panel.example.test:2083' }
+    const base = { store: { rootDir: '/var/lib/xpanel/state' } as ReconcilerDeps['store'], db: {} as ReconcilerDeps['db'], executor, os: { family: 'debian' } as ReconcilerDeps['os'] }
+    await expect(createNativeHostReconciler(base)).rejects.toThrow('LIFECYCLE_NATIVE_SCOPE_REQUIRED')
+    const { reconciler } = await createNativeHostReconciler(base, reader)
+    expect((reconciler as unknown as { deps: ReconcilerDeps }).deps.managementHosts).toEqual(['panel.example.test'])
+  })
+
+  it('composes the lifecycle runtime with its unguarded reader, because composition runs outside the lifecycle scope', () => {
+    const source = readFileSync(join(import.meta.dirname, 'lifecycle/native-runtime.ts'), 'utf8')
+    expect(source).toContain("{ error: 'Native service was not active' } : {}) } } }, native)")
+  })
 })

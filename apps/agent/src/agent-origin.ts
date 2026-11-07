@@ -66,11 +66,12 @@ export const mergeOriginIntoRuntime = (runtime: string, api: string): string | n
 }
 
 /**
- * Hosts of the public management origins in api.env (management TLS ingress), lowercased. A missing or
- * unreadable file, or an origin that is not a URL, contributes none.
+ * Hosts of the public management origins in api.env (management TLS ingress), lowercased. A missing file
+ * or an origin that is not a URL contributes none. A refused read throws: hosts silently lost render a
+ * default site that collides with the ingress.
  */
 export const readManagementHosts = async (executor: Pick<AgentExecutor, 'readFile'>): Promise<string[]> => {
-  const api = await executor.readFile(API_ENV_PATH).catch(() => null)
+  const api = await executor.readFile(API_ENV_PATH)
   if (api === null) return []
   const rows = parseEnvAssignments(api)
   return ORIGIN_KEYS.flatMap(key => {
