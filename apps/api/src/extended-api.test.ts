@@ -341,10 +341,11 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
       method: 'POST',
       body: { filesystem: '/home' },
     })
-    assert.equal(quotaRes.status, 503)
-    const quotaBody = (await quotaRes.json()) as { details: { stateChanged: boolean; reason: string } }
+    // The route reaches the agent now; this fixture's memory-only executor refuses, and that refusal is reported.
+    assert.equal(quotaRes.status, 412)
+    const quotaBody = (await quotaRes.json()) as { detail: string; details: { stateChanged: boolean } }
     assert.equal(quotaBody.details.stateChanged, false)
-    assert.equal(quotaBody.details.reason, 'host_quota_initialization_not_connected')
+    assert.equal(quotaBody.detail, 'quota setup requires the native Linux host executor')
 
     // Create a plan and hosting account for tenant-scoped features
     const planRes = await root.request('/api/plans', {
