@@ -1,4 +1,7 @@
 import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { DEFAULT_SERVER_FTP_SETTINGS, validateServerFtpSettings } from '@xpanel/core'
 import type { HostAction, OsProfile } from '@xpanel/core'
 import { describe, expect, it } from 'vitest'
@@ -99,13 +102,13 @@ describe('Anonymous FTP host effect', () => {
   })
   it('answers pure-authd only for mapped logins, treating the login as data', () => {
     const script = compileFtpServer(snapshot(open), { os: debian, certPresent: true, anonymous: state }).files.find(file => file.path.endsWith('xpanel-anonymous-auth'))!
-    const map = process.env.TMPDIR + '/ftp-anon-map-' + process.pid
+    const dir = mkdtempSync(join(tmpdir(), 'ftp-anon-map-')), map = join(dir, 'map')
     execFileSync('/bin/sh', ['-c', 'printf "anonymous@example.test\\t/run/xpanelftp/ro/home/alice/public_ftp/./\\n" > "$0"', map])
     const run = (login: string) => execFileSync('/bin/sh', ['-c', script.content.replaceAll(FTP_ANONYMOUS_MAP, map)], { env: { ...process.env, AUTHD_ACCOUNT: login } }).toString()
     expect(run('anonymous@example.test')).toBe('auth_ok:1\nuid:65534\ngid:65534\ndir:/run/xpanelftp/ro/home/alice/public_ftp/./\nend\n')
     expect(run('anonymous@none.test')).toBe('auth_ok:0\nend\n')
     expect(run('x" == "x" { system("id") } "')).toBe('auth_ok:0\nend\n')
-    execFileSync('/bin/rm', ['-f', map])
+    rmSync(dir, { recursive: true, force: true })
   })
   it('refuses a malformed saved state and an upload flag without access', () => {
     expect(parseAnonymousFtpState(null)).toEqual({})
