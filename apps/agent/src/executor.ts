@@ -449,6 +449,7 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
       return operation === 'read' || operation === 'write'
     }
     if (path === '/etc/xpanel/api.env') return operation === 'read'
+    if (path === '/etc/xpanel/selinux-account-homes.sha256') return operation === 'read' || operation === 'write'
     // Podman runtime state of a terminated account; its units are already stopped.
     if (/^\/run\/xpanel-ctr\/[a-z][a-z0-9]{0,15}$/.test(path)) return operation === 'remove'
     if (path === '/etc/xpanel/cron') return operation === 'ensure-directory'

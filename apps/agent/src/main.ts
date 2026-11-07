@@ -16,6 +16,7 @@ import { createProductionAccountFileRunner, DEFAULT_FILE_WORKER_INCIDENT_DIR } f
 import { CanonicalIoResourcePipeline, IoAnalyticsEngine, readWebsiteAnalyticsStore, WEBSITE_ANALYTICS_PATH, WebsiteAnalyticsEngine } from './analytics.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
 import { ensureAcmeWebRoot } from './host-access.ts'
+import { ACCOUNT_RELABEL_TIMEOUT_MS, ensureAccountHomeContexts } from './selinux-homes.ts'
 import { syncRuntimePublicOrigin } from './agent-origin.ts'
 import { ensureInstalledMail } from './services/local-mail.ts'
 import { enableMailWebsocketProxy } from './services/mail-websocket.ts'
@@ -421,6 +422,10 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         if (recoveryDetected) {
           fail('PRECONDITION_FAILED', 'privileged file worker recovery is required before agent startup')
         }
+        // After the socket listens: the first relabel of a large host must not hold the upgrade's health gate.
+        void store.readSnapshot()
+          .then(snapshot => ensureAccountHomeContexts(new LinuxHostExecutor({ timeoutMs: ACCOUNT_RELABEL_TIMEOUT_MS, trustedHostTargetMatcher: createProductionHostTargetMatcher() }), os.family, snapshot.accounts))
+          .catch((error: unknown) => { process.stderr.write(`xpanel-agent SELinux account homes: ${error instanceof Error ? error.message : String(error)}\n`) })
         if (!resourcesFenced) createLifecycleBackgroundResources(() => hostMetrics!.start())
         if (!resourcesFenced) { backupTimer = setInterval(() => { void backupRuns!.tick(); if (process.platform === 'linux') void bandwidthMeter!.collect() }, 60_000); backupTimer.unref() }
         return { app, socketPath, close: closeNormal, recoveryRequired, quarantined: false as const }
