@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { open, type FileHandle } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { suggestServerSettings } from '@xpanel/core'
 import type { HostAction } from '@xpanel/core'
 import { createTestDb, type TestDbHandle } from '@xpanel/db'
@@ -12,7 +14,17 @@ const ARGON2 = '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNo
 const ubuntu = profileFor('ID=ubuntu\nVERSION_ID="24.04"\n')
 const el = profileFor('ID=almalinux\nVERSION_ID="9.6"\n')
 const ACCOUNT_PATHS = ['/home/alice', '/home/alice/public_html', '/home/alice/tmp', '/home/alice/logs', '/home/alice/mail']
-const contextActions = (actions: readonly HostAction[]) => actions.filter(action => action.kind === 'exec' && action.argv[0] === '/usr/sbin/restorecon')
+const contextActions = (actions: readonly HostAction[]) => actions.filter(action => action.kind === 'exec' && action.argv[0] === '/usr/sbin/restorecon' && action.runAsUser !== undefined)
+// Device flushes, not these contracts, set the wall time; flush durability is proven by packages/state atomic-durability tests.
+let restoreFileSync = (): void => {}
+beforeAll(async () => {
+  const probe = await open(fileURLToPath(import.meta.url), 'r')
+  try {
+    const sync = vi.spyOn(Object.getPrototypeOf(probe) as FileHandle, 'sync').mockResolvedValue(undefined)
+    restoreFileSync = () => sync.mockRestore()
+  } finally { await probe.close() }
+})
+afterAll(() => restoreFileSync())
 
 describe('EL account paths in a generation', { tags: ['feature'] }, () => {
   let state: TestStateStoreHandle
