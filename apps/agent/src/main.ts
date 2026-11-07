@@ -423,7 +423,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           fail('PRECONDITION_FAILED', 'privileged file worker recovery is required before agent startup')
         }
         // After the socket listens: the first relabel of a large host must not hold the upgrade's health gate.
-        void store.readSnapshot()
+        if (os.family === 'rhel') void store.readSnapshot()
           .then(snapshot => ensureAccountHomeContexts(new LinuxHostExecutor({ timeoutMs: ACCOUNT_RELABEL_TIMEOUT_MS, trustedHostTargetMatcher: createProductionHostTargetMatcher() }), os.family, snapshot.accounts))
           .catch((error: unknown) => { process.stderr.write(`xpanel-agent SELinux account homes: ${error instanceof Error ? error.message : String(error)}\n`) })
         if (!resourcesFenced) createLifecycleBackgroundResources(() => hostMetrics!.start())
