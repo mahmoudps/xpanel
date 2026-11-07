@@ -9,7 +9,7 @@ export interface FileSharingRouteContext {
   /** Re-authenticates the caller and requires root each time. */
   assertRoot: (action: string) => Promise<{ actor: string }>
   store: Pick<StateStore, 'rootDir' | 'getWriterLock'>
-  /** Absent until the native NFS server, export table and re-export are qualified. */
+  /** Absent off a native Linux host. */
   provider: FileSharingNativeProvider | null
 }
 

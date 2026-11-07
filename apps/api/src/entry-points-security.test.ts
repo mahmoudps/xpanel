@@ -12,6 +12,7 @@ import type { MailboxTransport } from './mail/inbox.ts'
 import { ENTRY_POINTS, entryPointAllowsApiRoute, sessionCookieName, sessionTokenHash, type EntryPoint } from './entry-points.ts'
 import { createApiApp, listenApiServer, type ApiServerDeps } from './server.ts'
 import { ExtendedFeaturesStore } from './extended-routes.ts'
+import { writeSignInLockout } from './testing/sign-in-policy-fixture.ts'
 
 // Public independent libargon2 vector; these identities and network listeners exist only in this test.
 const PASSWORD = 'correct horse battery staple'
@@ -56,8 +57,9 @@ const fixture = async () => {
     async send() { return { messageId: '<synthetic-entry-point@example.test>' } },
   }
   const servers = new Map<EntryPoint, Awaited<ReturnType<typeof listenApiServer>>>()
+  await writeSignInLockout(state.store.rootDir, 20)
   for (const profile of profiles) {
-    const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: profile, publicOrigin: origin(profile), allowedOrigins: [origin(profile)], secureCookies: true, requireOriginHeader: true, lockoutThreshold: 20,
+    const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: profile, publicOrigin: origin(profile), allowedOrigins: [origin(profile)], secureCookies: true, requireOriginHeader: true,
       ...(profile === 'xmail' ? { mailboxTransport, mailboxEnvironment: { XPANEL_IMAP_HOST: '127.0.0.1', XPANEL_IMAP_PORT: String(imapAddress.port), XPANEL_IMAP_TIMEOUT_MS: '100' } } : {}),
     })
     const listener = await listenApiServer(app, { host: '127.0.0.1', port: 0 })

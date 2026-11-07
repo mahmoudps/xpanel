@@ -1,5 +1,7 @@
 import { readFile as fsReadFile, stat } from 'node:fs/promises'
 import { join, posix } from 'node:path'
+import { svcWafInput } from './svc-waf.ts'
+import { SVC_STATE_PATHS } from './svc-policy.ts'
 import { fail } from '@xpanel/core'
 import type { edge, system } from '@xpanel/render'
 import { SEC_CRS_HEADER_FILE, SEC_MODSEC_PATHS } from '../../../packages/os/src/sec-host-command.ts'
@@ -79,7 +81,10 @@ export async function readSecEdgeConfiguration(root: string, input: { family: st
   if (waf.modsecurity && (input.family === 'debian' || input.family === 'rhel')) {
     const paths = SEC_MODSEC_PATHS[input.family]
     const engineConf = await present(paths.nginxModule, 'file').catch(() => null) === true ? await first(paths.engineConf, present, 'file') : null
-    if (engineConf) modsecurity = { engineConf, crsDir: await first(paths.crsDirs, present, 'directory') }
+    if (engineConf) {
+      const crsDir = await first(paths.crsDirs, present, 'directory')
+      modsecurity = { engineConf, crsDir, ...await svcWafInput(effectiveSecPolicy('waf-rules', await readState(root, SVC_STATE_PATHS['waf-rules'])), effectiveSecPolicy('waf-vendors', await readState(root, SVC_STATE_PATHS['waf-vendors'])), crsDir) }
+    }
   }
   const sites: Record<string, edge.WafSitePolicy> = {}
   for (const domain of input.domains) {

@@ -26,8 +26,9 @@ export const aptProfile = (release: OsRelease): XpanelOsProfile => {
     codename: os.codename,
     packageManager: 'apt',
     // add-apt-repository imports the PPA signing key with gpg; adduser creates the nginx user
-    // openssl creates the installer's self-signed default certificate; zstd writes Zstandard backup archives
-    bootstrapPackages: ['software-properties-common', 'ca-certificates', 'gnupg', 'adduser', 'acl', 'openssl', 'zstd'],
+    // openssl creates the installer's self-signed default certificate; zstd writes Zstandard backup archives;
+    // logrotate rotates the server logs listed in /etc/logrotate.d/xpanel
+    bootstrapPackages: ['software-properties-common', 'ca-certificates', 'gnupg', 'adduser', 'acl', 'openssl', 'zstd', 'logrotate', 'python3'],
     // Ubuntu's nginx runs as www-data, Apache's user; a separate identity keeps Nginx out of
     // anything Apache's shared children can read (temp bodies, cache, prefork docroots)
     extraSystemUsers: ['nginx'],
@@ -40,13 +41,15 @@ export const aptProfile = (release: OsRelease): XpanelOsProfile => {
       postfix: ['postfix'],
       // The agent signs outgoing mail through the OpenDKIM milter and renders its configuration
       opendkim: ['opendkim'],
-      dovecot: ['dovecot-core', 'dovecot-imapd', 'dovecot-pop3d', 'dovecot-lmtpd', 'dovecot-sieve', 'dovecot-managesieved'],
+      // dovecot-fts-xapian: the full text search plugin behind the xMail search index, in universe on Ubuntu 22.04 and 24.04
+      dovecot: ['dovecot-core', 'dovecot-imapd', 'dovecot-pop3d', 'dovecot-lmtpd', 'dovecot-sieve', 'dovecot-managesieved', 'dovecot-fts-xapian'],
       // The reconciler publishes BIND zone files; include its candidate validator and observer.
       powerdns: ['pdns-server', 'pdns-backend-bind', 'bind9-utils', 'dnsutils'],
       redis: ['redis-server'],
       // PureDB virtual users carry the account UID/GID, so FTP logins map onto the account
       ftp: ['pure-ftpd'],
-      sshd: ['openssh-server'],
+      // sudo carries the one rule that lets a login shell enter its private view
+      sshd: ['openssh-server', 'sudo'],
       nftables: ['nftables'],
       'apache-itk': ['libapache2-mpm-itk'],
       'apache-suexec': ['apache2-suexec-custom'],
@@ -54,6 +57,12 @@ export const aptProfile = (release: OsRelease): XpanelOsProfile => {
       quota: ['quota'],
       acme: ['certbot'],
       modsecurity: ['libapache2-mod-security2', 'modsecurity-crs'],
+      // AWStats and Webalizer for the per-site statistics; GeoIP2 lets the AWStats country plugin read the DB-IP database
+      'web-stats': ['awstats', 'webalizer', 'libgeoip2-perl'],
+      // universe; the lighttpd package also starts a distribution daemon on :80, which the plan stops and disables
+      webdav: ['lighttpd', 'lighttpd-mod-webdav'],
+      // the library only: the radicale package would add its own system daemon and user
+      caldav: ['python3-radicale'],
     },
     services: {
       nginx: 'nginx',

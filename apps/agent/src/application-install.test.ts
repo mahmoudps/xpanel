@@ -13,11 +13,11 @@ import type { ApplicationArtifactProvider, ApplicationInstallAction, Application
 import { HostJobRunner } from './host-jobs.ts'
 
 // Explicit synthetic descriptor/transaction port. No filesystem, account, network or native install.
-const target: ApplicationTarget = { accountId: '11111111-1111-4111-8111-111111111111', domainId: '22222222-2222-4222-8222-222222222222', uid: 1001, gid: 1001, identity: applicationDigest('held-account-directory-identity') }
+const target: ApplicationTarget = { accountId: '11111111-1111-4111-8111-111111111111', domainId: '22222222-2222-4222-8222-222222222222', domain: 'a.example', username: 'alice', home: '/home/alice', root: 'public_html', path: '', uid: 1001, gid: 1001, identity: applicationDigest('held-account-directory-identity') }
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 const initial = (): ApplicationObservedState => ({ revision: applicationDigest('empty-target'), unmanagedRevision: applicationDigest('unchanged-unmanaged-files'), empty: true, managedClean: true, recoveryRequired: false, installation: null })
 const artifact = (version: string) => {
-  const content = '<?php echo "' + version + '";', bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, appId: 'sample', version, files: [{ path: 'index.php', sha256: applicationDigest(content), bytes: Buffer.byteLength(content), mode: '0644', contentBase64: Buffer.from(content).toString('base64') }] }))
+  const content = '<?php echo "' + version + '";', bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, appId: 'sample', version, setup: { database: false, config: null }, files: [{ path: 'index.php', sha256: applicationDigest(content), bytes: Buffer.byteLength(content), mode: '0644' }] }) + '\n' + content)
   const descriptor: ApplicationArtifactDescriptor = { format: 'xpanel-files-v1', sha256: applicationDigest(bytes), bytes: bytes.length }
   return { bytes, descriptor, verified: verifyApplicationArtifact(bytes, descriptor, 'sample', version) }
 }
@@ -50,7 +50,7 @@ const fixture = () => {
           const tx = transactions.get(intent.transactionId)!
           expect(verified === null || verified.descriptor.sha256 === intent.next?.artifactSha256).toBe(true)
           const old = tx.before.installation, prior = old ? { appId: old.appId, version: old.version, artifactSha256: old.artifactSha256, files: old.files } : null
-          state = { revision: applicationDigest('applied:' + intent.transactionId), unmanagedRevision: tx.before.unmanagedRevision, empty: intent.next === null, managedClean: true, recoveryRequired: false, installation: intent.next ? { ...copy(intent.next), previous: prior } : null }
+          state = { revision: applicationDigest('applied:' + intent.transactionId), unmanagedRevision: tx.before.unmanagedRevision, empty: intent.next === null, managedClean: true, recoveryRequired: false, installation: intent.next ? { ...copy(intent.next), previous: prior, database: null, config: null } : null }
           tx.expected = state.revision
           if (failure === 'readback') state = { ...state, managedClean: false }
           if (failure === 'unmanaged') state = { ...state, unmanagedRevision: applicationDigest('unexpected-unmanaged-change') }
@@ -79,7 +79,7 @@ const fixture = () => {
     },
   }
   const deps: ApplicationInstallDeps = {
-    provider, catalog: async () => catalog, policy: () => policy,
+    provider, catalog: async () => catalog, removalCatalog: async () => catalog, policy: () => policy,
     assertFresh: async () => { events.push('fresh'); if (revoked) throw new Error('revoked'); return { ...currentTarget } },
     assertAuthority: async () => { events.push('authority'); if (revoked) throw new Error('revoked') },
     withAccountLease: async <T>(_target: ApplicationTarget, operation: (fresh: ApplicationTarget) => Promise<T>): Promise<T> => {
@@ -138,6 +138,16 @@ describe('recoverable descriptor-confined application transactions', () => {
     if (failure === 'commit-after') expect(t.state().installation?.version).toBe('1.0.0')
     if (failure === 'recover' || failure === 'unmanaged') expect(job.verification?.ok).toBe(false)
   })
+  it('removes under an expired catalog and refuses every other action there', async () => {
+    const t = fixture()
+    await execute(t, t.request('install', '1.0.0'))
+    t.deps.policy = () => ({ ...t.policy, now: new Date('2026-12-01T00:00:00.000Z') })
+    await expect(t.coordinator.prepare(t.request('update', '2.0.0'))).rejects.toThrow()
+    await expect(readApplicationInstallation(t.deps)).rejects.toThrow()
+    expect((await readApplicationInstallation(t.deps, 'remove')).observation?.installation?.appId).toBe('sample')
+    await execute(t, t.request('remove'))
+    expect(t.state().installation).toBeNull()
+  })
   it('revalidates fresh authority before the next effect and permits only identity-fenced cleanup after revocation', async () => {
     const t = fixture(); t.hooks.afterApply = async () => t.revoke()
     const { job } = await execute(t, t.request('install', '1.0.0'))
@@ -165,7 +175,10 @@ describe('recoverable descriptor-confined application transactions', () => {
     await expect(t.coordinator.prepare(t.request('update', '1.0.0'))).rejects.toMatchObject({ code: 'CONFLICT' })
     await expect(t.coordinator.prepare(t.request('rollback'))).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
     t.setState({ ...t.state(), managedClean: false })
-    await expect(t.coordinator.prepare(t.request('remove'))).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    await expect(t.coordinator.prepare(t.request('update', '2.0.0'))).rejects.toMatchObject({ detail: { reason: 'application_files_modified' } })
+    await expect(t.coordinator.prepare(t.request('remove'))).resolves.toMatchObject({ plan: { kind: 'application.remove' } })
+    t.setState({ ...t.state(), recoveryRequired: true, revision: applicationDigest('stranded') })
+    await expect(t.coordinator.prepare(t.request('remove'))).rejects.toMatchObject({ detail: { reason: 'application_recovery_required' } })
   })
   it('deduplicates identical prepared intent and never accepts arbitrary command transport or bounds', async () => {
     const t = fixture(), request = t.request('install', '1.0.0')

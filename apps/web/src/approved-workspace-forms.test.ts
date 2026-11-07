@@ -68,7 +68,10 @@ describe('approved workspace configuration values', () => {
     expect(workspaceFeatureReceipt({ featureList: { id, name: 'One', disabled: ['SSL/TLS', 'popaccts (Email Accounts)'] } }, 'One', ['SSL/TLS', 'SSL/TLS', 'popaccts (Email Accounts)'])).toBe(true)
   })
   it('parses explicit reseller unlimited values without erasing hidden ACL privileges', () => {
-    expect(workspaceResellerPatch({ acl: ['list-accounts', 'manage-plans'] }, { maxAccountsUnlimited: true, totalDiskMb: '20480', totalBandwidthMb: '50000', totalBandwidthMbUnlimited: false, oversell: false, nameservers: 'ns1.example.test\nns2.example.test', delegatedIps: '192.0.2.1\n2001:db8::1' }, ['create-account', 'manage-plans'], ['create-account'])).toEqual({ acl: ['list-accounts', 'create-account'], maxAccounts: 'unlimited', totalDiskMb: 20480, totalBandwidthMb: 50000, oversell: false, nameservers: ['ns1.example.test', 'ns2.example.test'], delegatedIps: ['192.0.2.1', '2001:db8::1'] })
+    expect(workspaceResellerPatch({ acl: ['list-accounts', 'manage-plans'] }, { maxAccountsUnlimited: true, totalDiskMb: '20480', totalBandwidthMb: '50000', totalBandwidthMbUnlimited: false, oversellDisk: true, oversellBandwidth: false, nameservers: 'ns1.example.test\nns2.example.test', delegatedIps: '192.0.2.1\n2001:db8::1' }, ['create-account', 'manage-plans'], ['create-account'])).toEqual({ acl: ['list-accounts', 'create-account'], maxAccounts: 'unlimited', totalDiskMb: 20480, totalBandwidthMb: 50000, oversell: { disk: true, bandwidth: false }, nameservers: ['ns1.example.test', 'ns2.example.test'], delegatedIps: ['192.0.2.1', '2001:db8::1'] })
+    expect(() => workspaceResellerPatch({ acl: [] }, { oversellDisk: true }, [], [])).toThrow('oversell')
+    expect(workspaceResellerPatch({ acl: [] }, { contactEmail: ' ops@example.test ', sharedIp: '' }, [], [])).toEqual({ contactEmail: 'ops@example.test', sharedIp: null })
+    expect(() => workspaceResellerPatch({ acl: [] }, { contactEmail: 'two words@example.test' }, [], [])).toThrow('contactEmail')
     expect(() => workspaceResellerPatch({ acl: [] }, { maxAccountsUnlimited: false }, [], [])).toThrow('maxAccounts')
   })
 })
@@ -354,9 +357,9 @@ describe('approved workspace browser bindings', () => {
     document.querySelector<HTMLButtonElement>('button')!.click(); await tick(); expect(send).not.toHaveBeenCalled()
   })
   it('updates reseller metadata through current read, patch, and verified readback', async () => {
-    const payload = { acl: ['list-accounts', 'create-account'], maxAccounts: 'unlimited', totalDiskMb: 20480, oversell: false, nameservers: ['ns1.example.test', 'ns2.example.test'], delegatedIps: [] }
+    const payload = { acl: ['list-accounts', 'create-account'], maxAccounts: 'unlimited', totalDiskMb: 20480, oversell: { disk: false, bandwidth: false }, nameservers: ['ns1.example.test', 'ns2.example.test'], delegatedIps: [] }
     const send = vi.fn<Request>().mockResolvedValueOnce({ resellers: [{ id, acl: ['list-accounts', 'manage-plans'] }] }).mockResolvedValueOnce({ reseller: { id, ...payload } }).mockResolvedValueOnce({ resellers: [{ id, ...payload, acl: ['create-account', 'list-accounts'] }] }); request(send)
-    boot(`<form data-reseller-update-form data-reseller-id="${id}"><input name="acl" value="create-account" type="checkbox" checked><input name="acl" value="manage-plans" type="checkbox"><input name="maxAccountsUnlimited" data-reseller-unlimited-field="maxAccounts" type="checkbox" checked><input name="maxAccounts" value="" disabled>${field('totalDiskMb', '20480')}<input name="oversell" type="checkbox"><textarea name="nameservers">ns1.example.test\nns2.example.test</textarea><textarea name="delegatedIps"></textarea><button type="submit">Save</button><p data-reseller-update-status></p></form>`)
+    boot(`<form data-reseller-update-form data-reseller-id="${id}"><input name="acl" value="create-account" type="checkbox" checked><input name="acl" value="manage-plans" type="checkbox"><input name="maxAccountsUnlimited" data-reseller-unlimited-field="maxAccounts" type="checkbox" checked><input name="maxAccounts" value="" disabled>${field('totalDiskMb', '20480')}<input name="oversellDisk" type="checkbox"><input name="oversellBandwidth" type="checkbox"><textarea name="nameservers">ns1.example.test\nns2.example.test</textarea><textarea name="delegatedIps"></textarea><button type="submit">Save</button><p data-reseller-update-status></p></form>`)
     submit(); await tick()
     expect(send.mock.calls).toEqual([['GET', '/api/resellers'], ['PATCH', '/api/resellers/' + id, payload], ['GET', '/api/resellers']])
     expect(status().dataset.state).toBe('stored'); expect(status().textContent).not.toContain('host applied')

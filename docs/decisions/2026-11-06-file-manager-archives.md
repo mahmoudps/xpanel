@@ -117,5 +117,6 @@ and a single .gz, .bz2 or .zst file (decompressed beside its name).
 
 - The audit record of a compress names the archive and the number of selected items, not each item, so it stays
   within the audit detail size limit.
-- There is no progress bar. The result is shown after it is read back.
-- A worker killed at its timeout leaves its hidden staging entry, as copy does today.
+- The progress bar is indeterminate. The helper answers once, so no percentage exists to show.
+
+A worker killed at its timeout leaves its hidden staging entry until the next listing of that folder removes it, once it is an hour old.

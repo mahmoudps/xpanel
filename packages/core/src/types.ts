@@ -1,4 +1,5 @@
 import type { DatabaseRemoteAccessEntry } from './database-remote-access.ts'
+import type { SiteOptions } from './site-options.ts'
 
 // Domain model shared by api, agent, render, state, db, lifecycle and web.
 // Desired state lives in files under /var/lib/xpanel/state/; these types are its pure, framework-free shape.
@@ -129,6 +130,40 @@ export interface Account {
   createdAt: string
   /** UTC month ('YYYY-MM') in which the agent found the account over its enforced monthly bandwidth; its sites serve the limit page. */
   bandwidthLimitedMonth?: string
+  /** Per-account overrides of the package limits; read them through effectivePlan(plan, account). */
+  limits?: AccountLimits
+  /** UTC day ('YYYY-MM-DD') through which root relieved the account from bandwidth enforcement. */
+  bandwidthReliefDate?: string
+  /** Raw access log archiving of the account's sites; absent means the server defaults. */
+  logs?: AccountLogSettings
+  /** Only root may unsuspend an account whose suspension is locked. */
+  suspendLocked?: boolean
+  /** Rearrange an Account in progress: the account is held suspended, with its mail deferred, until this clears. */
+  homeMove?: HomeMove
+}
+
+export interface HomeMove {
+  /** the new home, `<root>/<username>` */
+  to: string
+  /** what the account returns to */
+  resumeStatus: 'active' | 'suspended'
+  resumeReason: string | null
+  resumeSuspendedAt: string | null
+}
+
+/** A field that is absent or null keeps the package (plan) value. */
+export interface AccountLimits {
+  resources?: { [K in keyof ResourceLimits]?: Limit | null }
+  caps?: { [K in PlanCapKey]?: Limit | null }
+}
+
+export interface AccountLogSettings {
+  /** keep rotated raw access logs as archives in the account's ~/logs */
+  archive: boolean
+  /** remove last month's archives at the start of a month */
+  removePreviousMonthArchive: boolean
+  /** days an archive is kept; null keeps them until removed */
+  retentionDays: number | null
 }
 
 export type ResellerAcl =
@@ -154,10 +189,24 @@ export interface Reseller {
   maxAccounts: Limit
   totalDiskMb: Limit
   totalBandwidthMb: Limit
-  /** when false, sum of assigned plan limits may not exceed totals */
-  oversell: boolean
+  /** per resource: when false, the sum of assigned account limits may not exceed that total */
+  oversell: { disk: boolean; bandwidth: boolean }
   nameservers: string[]
   delegatedIps: string[]
+  /** packages the reseller may assign, each with its own account count; absent means every package it can see */
+  packageLimits?: { planId: Id; maxAccounts: Limit }[]
+  /** shared address the reseller's new accounts use instead of the server default */
+  sharedIp?: string | null
+  /** where Email All Resellers reaches the reseller */
+  contactEmail?: string
+  /** sign-in blocked and owned accounts suspended by the reseller suspension */
+  suspended?: boolean
+}
+
+/** A saved, named set of reseller privileges (`acl-lists/<name>.json`). */
+export interface ResellerAclList {
+  name: string
+  acl: ResellerAcl[]
 }
 
 /** Functions root may re-enable for one account; the rest of DANGEROUS_FUNCTIONS always stays disabled. */
@@ -215,6 +264,10 @@ export interface Domain {
   ipv6?: string | null
   /** Reverse-proxy request options of a `proxy` site; omission keeps the defaults (WebSocket on, client Host, no extra headers). */
   proxy?: ProxyOptions
+  /** Redirect plain HTTP to HTTPS for this site's names that have a certificate (ACME stays on HTTP); aliases follow their parent. */
+  forceHttps?: boolean
+  /** Per-site settings beyond the site type; omission keeps every default. */
+  site?: SiteOptions
 }
 
 export interface ProxyOptions {
@@ -233,8 +286,10 @@ export interface ServiceUser {
   login: string
   services: { email: boolean; ftp: boolean; webdisk: boolean }
   mailboxQuotaMb: Limit
-  /** relative to account home */
+  /** relative to account home; also the Web Disk directory */
   ftpDir: string
+  /** Web Disk login may only read; absent is read-write */
+  webdiskReadOnly?: boolean
 }
 
 export interface Database {
@@ -300,8 +355,10 @@ export interface FirewallRule {
 }
 
 export interface DefaultSitePolicy {
-  response: 'reject' | 'redirect'
+  response: 'reject' | 'redirect' | 'site'
   redirectTo: string | null
+  /** The hosted domain that answers unbound names; present only with response 'site'. */
+  site?: string
   refuseHttps: boolean
 }
 
@@ -337,6 +394,66 @@ export interface ServerSettings {
   defaultPhpVersion?: string
   /** Root-granted disable_functions exceptions per account, on every PHP version and handler. */
   phpFunctionExceptions?: PhpFunctionException[]
+  /** Saved web server directives; absent keeps the rendered defaults. */
+  web?: ServerWebSettings
+  /** FTP Server Configuration; absent keeps DEFAULT_SERVER_FTP_SETTINGS. */
+  ftp?: ServerFtpSettings
+  /** SSH sign-in policy, login alarm and shell jail; absent keeps DEFAULT_SERVER_SSH_SETTINGS. */
+  ssh?: ServerSshSettings
+}
+
+export type SshRootLogin = 'yes' | 'prohibit-password' | 'forced-commands-only' | 'no'
+
+/** What an SSH login shell of an account sees. Service, cron and application units are always isolated; this covers login shells. */
+export interface ShellJailPolicy {
+  privateTmp: boolean
+  hiddenHomes: boolean
+  systemView: boolean
+  exceptions: { username: string; reason: string }[]
+}
+
+export interface ServerSshSettings {
+  passwordAuth: boolean
+  pubkeyAuth: boolean
+  rootLogin: SshRootLogin
+  /** The old port, which stays open only while a port change proves the new one. */
+  previousPort?: number
+  loginAlarm: boolean
+  jail: ShellJailPolicy
+}
+
+export type TlsProtocol = 'TLSv1.2' | 'TLSv1.3'
+
+export interface ServerFtpSettings {
+  /** false stops and disables pure-ftpd (FTP Server Selection offers no second daemon). */
+  enabled: boolean
+  tls: 'required' | 'optional'
+  tlsCipherSuite: string
+  anonymous: boolean
+  anonymousUploads: boolean
+  maxIdleMinutes: number
+  maxConnections: number
+  maxConnectionsPerIp: number
+  passivePorts: { min: number; max: number }
+  brokenClients: boolean
+  listingLimit: number
+}
+
+export interface ServerWebSettings {
+  timeoutSec: number
+  clientMaxBodyMb: number
+  tlsProtocols: TlsProtocol[]
+  /** OpenSSL cipher list for TLS 1.2 */
+  tlsCiphers: string
+  gzip: { enabled: boolean; level: number }
+  /** ordered directory index basenames */
+  directoryIndex: string[]
+  /** Apache RLimitMEM in MB; null leaves it unset */
+  rlimitMemMb: number | null
+  /** Apache RLimitCPU in seconds; null leaves it unset */
+  rlimitCpuSec: number | null
+  /** directive text included at fixed points of the rendered configuration */
+  includes: { apachePreMain: string; apachePreVhost: string; apachePostVhost: string; nginxHttp: string }
 }
 
 export interface AuditEntry {
@@ -409,6 +526,29 @@ export interface ServerIpEntry {
   /** Reverse DNS (PTR) hostname used for HELO and rDNS checks */
   ptrHostname: string | null
   isPrimary: boolean
+  notes: string
+  /** never offered for assignment */
+  reserved?: boolean
+  /** 1:1 NAT: the public address that reaches this private local address; DNS publishes it, listeners keep the local one */
+  publicAddress?: string
+  /** held after an account moved off this address until the new binding is verified */
+  releasing?: { accountId: Id; since: string }
+}
+
+/** Remote Service IPs: remote SMTP servers exempt from the local connection and rate limits, and remote nameservers admitted for zone transfers. */
+export interface RemoteServiceIps {
+  smtp: string[]
+  nameservers: string[]
+}
+
+/** An IPv6 range delegated from the server pool (`ip-ranges.json`). */
+export interface Ipv6Range {
+  id: Id
+  /** canonical IPv6 CIDR */
+  cidr: string
+  ownerKind: IpOwnerKind
+  /** null for root, otherwise the reseller or account id */
+  ownerId: Id | null
   notes: string
 }
 
@@ -493,6 +633,8 @@ export interface WebsiteTopEntry {
   requests: number
   bytes: number
   errors5xx?: number
+  /** ISO country of a client address, when the local GeoIP database resolved it. */
+  country?: string
 }
 
 export interface WebsiteAnalyticsSnapshot {
@@ -517,6 +659,8 @@ export interface WebsiteAnalyticsSnapshot {
   topPaths: WebsiteTopEntry[]
   topReferrers: WebsiteTopEntry[]
   topClientIps: WebsiteTopEntry[]
+  /** The Analog switch is off for this site or plan: the lists above are withheld, not empty. */
+  analog?: 'off'
 }
 
 export type ReconcileStage = 'render' | 'test' | 'switch' | 'reload' | 'verify'

@@ -12,7 +12,7 @@ import { parseMarkup } from '../../../../markup.ts'
 import { v2Messages } from '../../../messages.ts'
 
 const root = { kind: 'root' as const, id: '10000000-0000-4000-8000-000000000001', username: 'operator' }
-const reseller: Reseller = { id: '10000000-0000-4000-8000-000000000002', username: 'provider', acl: ['manage-plans', 'manage-feature-lists'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] }
+const reseller: Reseller = { id: '10000000-0000-4000-8000-000000000002', username: 'provider', acl: ['manage-plans', 'manage-feature-lists'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
 const plan: Plan = { ...defaultPlan({ id: '20000000-0000-4000-8000-000000000001', name: 'Saved plan', featureListId: '30000000-0000-4000-8000-000000000001' }), resources: { ...defaultPlan().resources, maxProcesses: 'unlimited' } }
 const account: Account = { id: '40000000-0000-4000-8000-000000000001', username: 'alice', uid: 1001, gid: 1001, home: '/home/alice', primaryDomain: 'alice.example.test', planId: plan.id, ownerId: null, status: 'active', suspendReason: null, contactEmail: 'alice@example.test', ipv4: '192.0.2.1', shell: 'jailed', createdAt: '2026-01-01T00:00:00Z' }
 const catalog = tools.map(tool => ({ ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } }))
@@ -72,6 +72,9 @@ describe('v2 plan family', () => {
     expect(html).toContain('Checked controls disable the named tool.')
   })
   it('preserves an unread feature membership instead of treating it as all enabled', () => {
+    const custom = renderV2WhmFeatures(t, props({ pluginFeatures: [{ key: 'plugin:acme', label: 'Acme notes' }], featureLists: [{ id: plan.featureListId, name: 'Saved features', ownerId: null, disabled: ['plugin:acme'] }] }), authority)
+    expect(custom).toContain('Acme notes')
+    expect(custom).toMatch(/value="plugin:acme"[^>]* checked/)
     const html = renderV2WhmFeatures(t, props({ featureLists: [{ id: plan.featureListId, name: 'Unread features', ownerId: null }] }), authority)
     expect(html).toContain('Feature membership has not been read. Reload this list before editing its tools.')
     expect(html).not.toContain('data-feature-list-update-form')
@@ -87,7 +90,7 @@ describe('v2 plan family', () => {
     const html = renderV2WhmEnhancements(t, props(), authority)
     for (const name of ['id', 'label', 'kind', 'min', 'max', 'assign-scope', 'assign-target', 'assign-enhancement', 'assign-value', 'limit-reseller', 'limit-enhancement', 'limit-value']) expect(html).toContain(`data-acct-enh-input="${name}"`)
     for (const name of ['definition', 'assignment', 'limit']) expect(html).toContain(`data-acct-enh-form="${name}"`)
-    expect(html).toContain('Saving here changes no account limit.')
+    expect(html).toContain('the panel changes no account limit from them')
     expect(html).toContain('data-state="unread"')
   })
   it('never grants root-only enhancement operations to a reseller presentation', () => {

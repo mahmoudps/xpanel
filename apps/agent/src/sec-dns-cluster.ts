@@ -1,4 +1,5 @@
 import { Resolver } from 'node:dns/promises'
+import { renderAllowAxfrIps } from './remote-service-ips.ts'
 import { readdir } from 'node:fs/promises'
 import { posix } from 'node:path'
 import { fail } from '@xpanel/core'
@@ -82,7 +83,7 @@ export async function observeSecDnsCluster(input: { family: string; peers: reado
 }
 
 /** RFC 1982 serial arithmetic: is a strictly behind b? */
-const behind = (a: number, b: number): boolean => a !== b && ((a < b && b - a < 2 ** 31) || (a > b && a - b > 2 ** 31))
+export const secSerialBehind = (a: number, b: number): boolean => a !== b && ((a < b && b - a < 2 ** 31) || (a > b && a - b > 2 ** 31))
 export const secQuerySoa: SecQuerySoa = async (server, zone) => {
   // shortcut: c-ares does not expose the AA flag, so a recursive peer answer is not distinguished; upgrade to dig +norec during native qualification.
   const resolver = new Resolver({ timeout: 2000, tries: 1 })
@@ -105,7 +106,7 @@ export async function verifySecDnsPeer(input: { peer: SecDnsPeer; zones: readonl
       const [mine, theirs] = await Promise.all([query(local, zone).catch((): SecSoaAnswer => ({ error: 'failed' })), query(input.peer.address, zone).catch((): SecSoaAnswer => ({ error: 'failed' }))])
       const localSerial = 'serial' in mine ? mine.serial : null, peerSerial = 'serial' in theirs ? theirs.serial : null
       const state: SecZoneTransferState = localSerial === null ? 'local_unavailable' : peerSerial === null ? ('error' in theirs && theirs.error !== 'failed' ? theirs.error : 'unreachable')
-        : peerSerial === localSerial ? 'in_sync' : behind(peerSerial, localSerial) ? 'behind' : 'ahead'
+        : peerSerial === localSerial ? 'in_sync' : secSerialBehind(peerSerial, localSerial) ? 'behind' : 'ahead'
       rows[index] = { zone, localSerial, peerSerial, state }
     }
   }
@@ -116,10 +117,10 @@ export async function verifySecDnsPeer(input: { peer: SecDnsPeer; zones: readonl
 }
 
 /** pdns.conf drop-in: send NOTIFY for changed serials and admit AXFR only from loopback and the saved peers. */
-export function renderSecDnsClusterDropIn(peers: readonly SecDnsPeer[]): string {
+export function renderSecDnsClusterDropIn(peers: readonly SecDnsPeer[], remoteNameservers: readonly string[] = []): string {
   const addresses = peers.map(peer => peer.address)
   return ['# Managed by xPanel: DNS cluster peers. Manual edits are replaced on the next apply.', `primary=${addresses.length ? 'yes' : 'no'}`,
-    `allow-axfr-ips=${['127.0.0.0/8', '::1', ...addresses].join(',')}`, ...(addresses.length ? [`also-notify=${addresses.join(',')}`] : []), ''].join('\n')
+    renderAllowAxfrIps(addresses, remoteNameservers), ...(addresses.length ? [`also-notify=${addresses.join(',')}`] : []), ''].join('\n')
 }
 
 export interface SecDnsApplyPorts {
@@ -133,6 +134,8 @@ export interface SecDnsApplyPorts {
   /** proves the restarted server answers for a hosted zone; null when nothing is hosted */
   probe: () => Promise<boolean | null>
   authorize: () => Promise<void>
+  /** Remote Service IPs nameservers, admitted for transfers beside the peers */
+  remoteNameservers?: readonly string[]
 }
 export interface SecDnsApplyResult { outcome: 'applied' | 'unchanged'; observation: SecDnsClusterObservation }
 
@@ -144,7 +147,7 @@ export async function applySecDnsCluster(peers: readonly SecDnsPeer[], ports: Se
   if (!settings.includeDir) return blocked('pdns.conf has no include-dir, so a managed drop-in would not be read', 'include_dir_missing')
   const path = posix.join(settings.includeDir, SEC_DNS_DROP_IN)
   if (!path.startsWith('/etc/powerdns/')) return blocked('the include-dir is outside the reviewed PowerDNS configuration path', 'include_dir_not_admitted')
-  const previous = await ports.readText(path), content = renderSecDnsClusterDropIn(peers)
+  const previous = await ports.readText(path), content = renderSecDnsClusterDropIn(peers, ports.remoteNameservers)
   const observe = () => observeSecDnsCluster({ family: ports.family, peers, readText: ports.readText, ...(ports.listDir ? { listDir: ports.listDir } : {}) })
   if (previous === content) return { outcome: 'unchanged', observation: await observe() }
   await ports.authorize()

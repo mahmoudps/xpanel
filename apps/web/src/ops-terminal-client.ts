@@ -91,6 +91,7 @@ function bindTerminals(): void {
     const send = (message: unknown): void => { if (socket && socket.readyState === 1) socket.send(JSON.stringify(message)) }
     // At most 1000 code points per message keeps every frame under the 4096-byte input limit.
     const sendInput = (data: string): void => { const points = Array.from(data); for (let index = 0; index < points.length; index += 1000) send({ type: 'input', data: points.slice(index, index + 1000).join('') }) }
+    root.addEventListener('xpanel:terminal-input', event => { const detail = (event as CustomEvent<{ text: string; sent: boolean }>).detail; if (phase === 'open' && !detail.sent) { sendInput(detail.text.replace(/\n+$/, '') + '\r'); detail.sent = true } })
     const size = (): { cols: number; rows: number } => ({ cols: clamp(term?.cols ?? 80, 20, 500), rows: clamp(term?.rows ?? 24, 5, 200) })
     const emulator = async (): Promise<Emulator> => {
       await loadEmulator()
@@ -138,16 +139,19 @@ function bindTerminals(): void {
       ws.onerror = () => finish('error')
     }
 
+    // A container page links here; the target is one account's container, never a host shell.
+    const search = new URLSearchParams(location.search), containerId = search.get('container')
+    const container = kind === 'root' && containerId ? { account: search.get('account') ?? '', id: containerId, shell: search.get('shell') === 'bash' ? 'bash' : 'sh', asRoot: search.get('user') === 'root' } : null
     const open = async (): Promise<void> => {
       if (busy || !admitted() || !available || phase === 'open' || phase === 'connecting') return
-      let body: Record<string, string> = {}
+      let body: Record<string, unknown> = {}
       if (kind === 'root') {
         if (!password?.value) { note('empty', t('Enter your password to open a session.')); password?.setAttribute('aria-invalid', 'true'); password?.focus(); return }
         if (secondFactor && !/^[0-9]{6}$/.test(totp?.value ?? '')) { note('code', t('Enter the 6-digit code from your authenticator app.')); totp?.focus(); return }
-        body = { password: password.value, ...(secondFactor && totp ? { totpCode: totp.value } : {}) }
+        body = { password: password.value, ...(secondFactor && totp ? { totpCode: totp.value } : {}), ...(container ? { container } : {}) }
         password.removeAttribute('aria-invalid')
       }
-      busy = true; sync(); note('opening', kind === 'root' ? t('Re-authenticating…') : t('Opening…'))
+      busy = true; sync(); note('opening', container ? t('Re-authenticating to open a shell in container {id} of {account}…', { id: container.id.slice(0, 12), account: container.account }) : kind === 'root' ? t('Re-authenticating…') : t('Opening…'))
       // Load the emulator before asking for a ticket, so a failed load never spends one.
       try { await emulator() } catch { busy = false; note('failed', t('The terminal could not be loaded. Nothing was opened.')); sync(); return }
       try {

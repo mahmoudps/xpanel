@@ -151,6 +151,12 @@ const parseHostname = (text: string): string | null => {
 const parseNameservers = (text: string): string[] => text.split('\n').map(line => line.trim()).filter(line => line !== '' && !/^[#;]/.test(line))
   .map(line => line.split(/\s+/)).filter(tokens => tokens[0] === 'nameserver').map(tokens => tokens.length === 2 ? address(tokens[1]) : malformed())
 
+/** The interfaces and their addresses alone, as the IP alias reconcile reads them; null when they could not be read. */
+export async function readServerInterfaces(run: ServerObservationRun): Promise<ServerInterface[] | null> {
+  const interfaces = await readJsonArray(run, SERVER_ADDRESSES_ARGV, SERVER_INTERFACE_LIMIT, parseInterface)
+  return interfaces.state === 'read' && !interfaces.truncated && new Set(interfaces.items.map(item => item.name)).size === interfaces.items.length ? interfaces.items : null
+}
+
 /** Interfaces, routes, static hostname and resolver lines. Read-only; nothing is changed. */
 export async function readServerNetwork(input: { run?: ServerObservationRun; readFile?: ServerObservationReadFile; now?: () => Date }): Promise<ServerNetworkRead> {
   const observedAt = (input.now?.() ?? new Date()).toISOString()

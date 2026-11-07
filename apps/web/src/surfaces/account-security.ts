@@ -17,6 +17,10 @@ export interface AccountSecurityCardProps {
   surface: 'xwhm' | 'xpanel' | 'xmail'
   /** Server-derived handed-off sessions can observe factor state but cannot manage it. */
   readOnly?: boolean
+  /** The security questions and external sign-in cards are live only in a qualified document. */
+  identityToolsAvailable?: boolean
+  /** The account plan withdrew the security questions from this owner. */
+  securityPolicyDisabled?: boolean
 }
 
 const line = (locale: Locale, message: string): string => escapeHtml(translator(locale)(message))
@@ -27,10 +31,14 @@ const cliHint = (locale: Locale): string => {
   return `${escapeHtml(before ?? '')}<bdi dir="ltr" class="xp-mono" style="overflow-wrap: anywhere">${command}</bdi>${escapeHtml(after ?? '')}`
 }
 
+/** Owner decision D5: a mailbox's authenticator guards xMail sign-in only. */
+const mailboxScope = (locale: Locale): string => `<p class="xp-help" data-mailbox-factor-scope>${line(locale, 'The authenticator protects xMail sign-in only. Mail apps that use IMAP, POP3 or SMTP keep using the mailbox password, and app passwords are not offered.')}</p>`
+
 /** Optional authenticator enrollment. It never replaces the password session or closes the workspace. */
 export const renderAccountSecurityCard = (props: AccountSecurityCardProps): string => {
   const { locale, totpEnabled, principalKind, surface } = props
   const rootOperator = principalKind === 'root' && surface === 'xwhm'
+  const mailbox = surface === 'xmail', api = mailbox ? ' data-auth-api="/api/webmail/security"' : '', scope = mailbox ? mailboxScope(locale) : ''
   if (props.mfaMode === 'disabled') {
     const notice = translator(locale)('Two-factor verification is disabled in development. Saved factors and recovery codes stay unchanged. Factor management is unavailable in this mode.')
     return `<section class="xp-card xp-account-security" style="display:flex;flex-direction:column;gap:var(--xp-space-card)" data-account-security="two-factor" data-auth-state="development-disabled" data-mfa-disabled data-mfa-configured="${totpEnabled}" aria-labelledby="account-security-heading">
@@ -46,14 +54,21 @@ export const renderAccountSecurityCard = (props: AccountSecurityCardProps): stri
     </section>`
   }
   if (totpEnabled) {
-    return `<section class="xp-card xp-account-security" style="display:flex;flex-direction:column;gap:var(--xp-space-card)" data-account-security="two-factor" data-mfa-enabled="true" aria-labelledby="account-security-heading">
+    return `<section class="xp-card xp-account-security" style="display:flex;flex-direction:column;gap:var(--xp-space-card)" data-account-security="two-factor" data-mfa-enabled="true"${api} aria-labelledby="account-security-heading">
       <h2 id="account-security-heading">${line(locale, 'Two-factor authentication')}</h2>
       <p class="xp-prose" role="status">${line(locale, 'Sign-in asks for an authenticator code because two-factor authentication is enabled.')}</p>
-      ${rootOperator ? `<p class="xp-help">${cliHint(locale)}</p>` : ''}
+      ${rootOperator ? `<p class="xp-help">${cliHint(locale)}</p>` : ''}${scope}
+      ${mailbox ? `<div role="alert" data-auth-error hidden></div><p class="xp-help" role="status" aria-live="polite" data-auth-status></p>
+      <form class="xp-form" data-auth-disable-form>
+        <div class="xp-field"><label class="xp-label" for="removal-password">${line(locale, 'Confirm current password')}</label><input id="removal-password" name="password" type="password" class="xp-input" dir="ltr" autocomplete="current-password" required /></div>
+        <div class="xp-field"><label class="xp-label" for="removal-code">${line(locale, 'Authenticator code')}</label><input id="removal-code" name="code" class="xp-input xp-mono" dir="ltr" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" /></div>
+        <div class="xp-field"><label class="xp-label" for="removal-recovery">${line(locale, 'Recovery code')}</label><input id="removal-recovery" name="recoveryCode" class="xp-input xp-mono" dir="ltr" type="text" autocomplete="off" /></div>
+        <button type="submit" class="xp-btn">${line(locale, 'Remove two-factor authentication')}</button>
+      </form>` : ''}
     </section>`
   }
-  return `<section class="xp-card xp-account-security" style="display:flex;flex-direction:column;gap:var(--xp-space-card)" data-account-security="two-factor" data-auth-state="optional" aria-labelledby="account-security-heading">
-    <h2 id="account-security-heading">${line(locale, 'Two-factor authentication')}</h2>
+  return `<section class="xp-card xp-account-security" style="display:flex;flex-direction:column;gap:var(--xp-space-card)" data-account-security="two-factor" data-auth-state="optional"${api} aria-labelledby="account-security-heading">
+    <h2 id="account-security-heading">${line(locale, 'Two-factor authentication')}</h2>${scope}
     <div role="alert" data-auth-error hidden></div>
     <p class="xp-help" role="status" aria-live="polite" data-auth-status></p>
     <div data-auth-enrollment>
@@ -84,5 +99,19 @@ export const renderAccountSecurityCard = (props: AccountSecurityCardProps): stri
       <ul data-auth-recovery-codes></ul>
       <button type="button" class="xp-btn xp-btn--primary" data-action="acknowledge-recovery">${line(locale, 'I saved the codes — continue')}</button>
     </section>
+  </section>`
+}
+
+/** Classic xMail: the mailbox changes its own password through the mailbox route (account-password-client.ts). */
+export const renderMailboxPasswordCard = (locale: Locale, canChange: boolean): string => {
+  const secret = (id: string, name: string, label: string, auto: string) => `<div class="xp-field"><label class="xp-label" for="${id}">${line(locale, label)}</label><input id="${id}" name="${name}" type="password" class="xp-input" dir="ltr" autocomplete="${auto}" required${name === 'currentPassword' ? '' : ' minlength="8"'}${canChange ? '' : ' disabled'} /></div>`
+  return `<section class="xp-card" style="display:flex;flex-direction:column;gap:var(--xp-space-card)" data-account-password data-account-password-can-change="${canChange}" data-account-password-state="${canChange ? 'ready' : 'unavailable'}" aria-busy="false" aria-labelledby="mailbox-password-heading">
+    <h2 id="mailbox-password-heading">${line(locale, 'Mailbox password')}</h2>
+    <form class="xp-form" method="post" action="/api/webmail/security/password" data-account-password-form>
+      ${secret('mailbox-current-password', 'currentPassword', 'Current password', 'current-password')}${secret('mailbox-new-password', 'newPassword', 'New password', 'new-password')}${secret('mailbox-confirm-password', 'confirmPassword', 'Confirm new password', 'new-password')}
+      <p class="xp-help">${line(locale, 'The new password is used for webmail and for mail apps that use IMAP, POP3 or SMTP. Every mailbox session ends; sign in again afterwards.')}</p>
+      <p role="status" data-account-password-status hidden></p>
+      <button type="submit" class="xp-btn xp-btn--primary" data-account-password-submit${canChange ? '' : ' disabled'}>${line(locale, 'Change password')}</button>
+    </form>
   </section>`
 }

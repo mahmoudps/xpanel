@@ -13,7 +13,7 @@ export const MAX_SHARES = 200, MAX_CLIENTS = 64
 export const FILE_SHARING_STATE_PATH = 'extended/file-sharing/shares.json'
 const SHARE_ID = /^shr_[0-9a-z]{16}$/
 // exports(5): exported directories are absolute real paths. xPanel manages only account homes and a dedicated shares root.
-const SHARE_ROOTS = ['/home/', '/srv/shares/']
+const SHARE_ROOTS = ['/home/', ...Array.from({ length: 100 }, (_, n) => `/home${n}/`), '/srv/shares/']
 // exports(5) machine specs this grammar accepts: a single host, an IPv4 CIDR, a wildcard FQDN, or everyone (*). No netgroups, no gss.
 const HOSTNAME = /^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(?:\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$/
 const WILDCARD_FQDN = /^\*(?:\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))+$/

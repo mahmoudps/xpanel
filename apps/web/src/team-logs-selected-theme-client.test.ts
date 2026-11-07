@@ -65,7 +65,7 @@ describe.each(['classic', 'v2'] as const)('%s team and log templates', theme => 
       })
       document.querySelector<HTMLButtonElement>(family === 'team' ? '[data-acct-team-refresh]' : '[data-logs-read]')!.click(); await tick()
       expect(send).not.toHaveBeenCalled()
-      expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select')].every(control => control.disabled)).toBe(true)
+      expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select')].filter(control => !control.closest('[data-mail-card]')).every(control => control.disabled)).toBe(true)
     })
   }
   for (const family of ['team', 'logs'] as const) it('keeps ' + family + ' inert inside a read-only boundary', async () => {

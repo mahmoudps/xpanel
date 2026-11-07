@@ -15,7 +15,7 @@ const certificate: StoredCertificate = { id: id(3), accountId: account.id, names
   fingerprintSha256: 'a'.repeat(64), lastError: 'PRIVATE-DIAGNOSTIC-DO-NOT-RETURN', renewedAt: null }
 const fixture = () => {
   const snapshot = { revision: 7, accounts: [structuredClone(account)], domains: [structuredClone(domain)], certificates: [structuredClone(certificate)] }
-  const store = { listAccounts: async () => snapshot.accounts, readSnapshot: async () => snapshot } as unknown as StateStore
+  const store = { rootDir: '/nonexistent', listAccounts: async () => snapshot.accounts, readSnapshot: async () => snapshot } as unknown as StateStore
   const principal = { kind: 'root' as const, id: id(9), username: 'root' }
   const caller: AuthenticatedCaller = {
     principal,

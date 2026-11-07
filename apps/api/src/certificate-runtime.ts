@@ -8,7 +8,8 @@ import type { NewCertificate, StateStore, StoredCertificate } from '@xpanel/stat
 import type { AuthenticatedCaller } from './auth.ts'
 import { assertApiScope, isMailboxPrincipal } from './authorization.ts'
 import { createCertificateWorkspaceRouter, certificateWorkspaceRevision, projectWorkspaceCertificate } from './certificate-workspace.ts'
-import type { CertificateRouteScope, CertificateWorkspaceInstall } from './certificate-workspace.ts'
+import { readAutoSslScheduler } from './autossl.ts'
+import type { CertificateRouteScope, CertificateWorkspaceHelpers, CertificateWorkspaceInstall } from './certificate-workspace.ts'
 
 /** The AutoSSL renewal window of certsForAutoRenew; an unparsable notAfter counts as due. */
 const CERTIFICATE_RENEWAL_WINDOW_MS = 30 * 86_400_000
@@ -26,6 +27,40 @@ export interface CertificateRuntimeHelpers {
   requireHostAgent: () => void
   readJsonBody: (request: Request) => Promise<Record<string, unknown>>
   jsonResponse: (body: unknown) => Response
+  readStoreMaterial?: CertificateWorkspaceHelpers['readStoreMaterial']
+}
+
+const asObject = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+export type AgentCall = (path: string, options: { method?: string; body?: unknown }) => Promise<Response>
+/** The account certificate request of the host agent, with every acknowledgement field checked. */
+export const requestAcmeMaterial = async (call: AgentCall, username: string, body: Record<string, unknown>) => {
+  let response: Response
+  try { response = await call('/accounts/' + username + '/certificates', { method: 'POST', body }) }
+  catch { return fail('SERVICE_UNAVAILABLE', 'certificate host request requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true }) }
+  let value: Record<string, unknown> | null
+  try { value = asObject(await response.json()) } catch { value = null }
+  if (!response.ok) {
+    const details = asObject(value?.details)
+    const authorityFailure = details?.reason === 'certificate_authority_rejected' || details?.reason === 'certificate_authority_unreachable'
+    if (value?.code === 'CONFIG_TEST_FAILED' && authorityFailure && details
+      && details.stateChanged === true && details.certificateMaterialChanged === false
+      && details.verificationRequired === false && details.unknownOutcome === false && typeof value.detail === 'string' && value.detail.trim()) {
+      return fail('CONFIG_TEST_FAILED', cleanString(redactInlineSecrets(value.detail.slice(0, 4096)), 512), {
+        reason: details.reason, stateChanged: true, certificateMaterialChanged: false, verificationRequired: false, unknownOutcome: false,
+      })
+    }
+    if (!authorityFailure && details?.stateChanged === false) return fail('PRECONDITION_FAILED', 'certificate host request was rejected', { stateChanged: false })
+    return fail('SERVICE_UNAVAILABLE', 'certificate host request requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
+  }
+  const certificate = asObject(value?.certificate)
+  if (!certificate || !isUuid(certificate.id) || !Array.isArray(certificate.names) || !certificate.names.length || certificate.names.length > 100
+    || !certificate.names.every(name => typeof name === 'string') || typeof certificate.notAfter !== 'string' || !Number.isFinite(Date.parse(certificate.notAfter))
+    || typeof certificate.fingerprintSha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(certificate.fingerprintSha256)) return fail('SERVICE_UNAVAILABLE', 'certificate host acknowledgement requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
+  const paths = services.certFiles(certificate.id)
+  if (certificate.certPath !== paths.fullchain || certificate.keyPath !== paths.privkey) return fail('SERVICE_UNAVAILABLE', 'certificate host paths require verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
+  return { id: certificate.id, names: certificate.names as string[], notAfter: certificate.notAfter,
+    notBefore: typeof certificate.notBefore === 'string' ? certificate.notBefore : null,
+    certPath: paths.fullchain, keyPath: paths.privkey, fingerprintSha256: certificate.fingerprintSha256 }
 }
 
 /** One mounted runtime for the existing account endpoint and the WHM certificate workspace. */
@@ -37,7 +72,6 @@ export function createCertificateRuntimeRouter(helpers: CertificateRuntimeHelper
       const accountCertificatesMatch = /^\/api\/accounts\/([a-z][a-z0-9]{0,15})\/certificates(\/[^/]+)?$/.exec(pathname)
       const workspacePath = pathname === '/api/certificate-workspace' || pathname.startsWith('/api/certificate-workspace/')
       if (workspacePath || accountCertificatesMatch) {
-        const asObject = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
         const assertAdministrator = async (caller: AuthenticatedCaller): Promise<void> => {
           if (isMailboxPrincipal(caller) || !['root', 'reseller'].includes(caller.principal.kind)) return fail('FORBIDDEN', 'root or reseller certificate access is required', { stateChanged: false })
           if (caller.apiTokenId !== null) assertApiScope(caller, method === 'GET' ? 'tls:read' : 'tls:write')
@@ -73,35 +107,7 @@ export function createCertificateRuntimeRouter(helpers: CertificateRuntimeHelper
             ...(generation && Number.isSafeInteger(generation.id) && typeof generation.checksum === 'string'
               ? { generation: { id: generation.id, status: generation.status, checksum: generation.checksum } } : {}) }
         }
-        const requestCertificateMaterial = async (caller: AuthenticatedCaller, username: string, body: Record<string, unknown>) => {
-          let response: Response
-          try { response = await callAgent('/accounts/' + username + '/certificates', { method: 'POST', caller, body }) }
-          catch { return fail('SERVICE_UNAVAILABLE', 'certificate host request requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true }) }
-          let value: Record<string, unknown> | null
-          try { value = asObject(await response.json()) } catch { value = null }
-          if (!response.ok) {
-            const details = asObject(value?.details)
-            const authorityFailure = details?.reason === 'certificate_authority_rejected' || details?.reason === 'certificate_authority_unreachable'
-            if (value?.code === 'CONFIG_TEST_FAILED' && authorityFailure && details
-              && details.stateChanged === true && details.certificateMaterialChanged === false
-              && details.verificationRequired === false && details.unknownOutcome === false && typeof value.detail === 'string' && value.detail.trim()) {
-              return fail('CONFIG_TEST_FAILED', cleanString(redactInlineSecrets(value.detail.slice(0, 4096)), 512), {
-                reason: details.reason, stateChanged: true, certificateMaterialChanged: false, verificationRequired: false, unknownOutcome: false,
-              })
-            }
-            if (!authorityFailure && details?.stateChanged === false) return fail('PRECONDITION_FAILED', 'certificate host request was rejected', { stateChanged: false })
-            return fail('SERVICE_UNAVAILABLE', 'certificate host request requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
-          }
-          const certificate = asObject(value?.certificate)
-          if (!certificate || !isUuid(certificate.id) || !Array.isArray(certificate.names) || !certificate.names.length || certificate.names.length > 100
-            || !certificate.names.every(name => typeof name === 'string') || typeof certificate.notAfter !== 'string' || !Number.isFinite(Date.parse(certificate.notAfter))
-            || typeof certificate.fingerprintSha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(certificate.fingerprintSha256)) return fail('SERVICE_UNAVAILABLE', 'certificate host acknowledgement requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
-          const paths = services.certFiles(certificate.id)
-          if (certificate.certPath !== paths.fullchain || certificate.keyPath !== paths.privkey) return fail('SERVICE_UNAVAILABLE', 'certificate host paths require verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
-          return { id: certificate.id, names: certificate.names as string[], notAfter: certificate.notAfter,
-            notBefore: typeof certificate.notBefore === 'string' ? certificate.notBefore : null,
-            certPath: paths.fullchain, keyPath: paths.privkey, fingerprintSha256: certificate.fingerprintSha256 }
-        }
+        const requestCertificateMaterial = (caller: AuthenticatedCaller, username: string, body: Record<string, unknown>) => requestAcmeMaterial((path, options) => callAgent(path, { ...options, caller }), username, body)
         const commitCertificate = async (input: { request: Request; caller: AuthenticatedCaller; account: Account; domain: Domain;
           expectedRevision: number; material: Awaited<ReturnType<typeof requestCertificateMaterial>>; source: 'upload' | 'acme';
           renewalId?: string; administrator: boolean }) => {
@@ -134,6 +140,7 @@ export function createCertificateRuntimeRouter(helpers: CertificateRuntimeHelper
         }
         {
           const router = createCertificateWorkspaceRouter({ store: helpers.store, requireCaller, assertAdministrator, issueAvailable: helpers.hostAvailable, removeAvailable: helpers.hostAvailable,
+            ...(helpers.hostAvailable && helpers.readStoreMaterial ? { readStoreMaterial: helpers.readStoreMaterial } : {}),
             assertAccountCaller: async (caller, account, routeMethod) => {
               assertAccountScope(caller, routeMethod !== 'GET')
               await assertCanAccessAccount(caller, account, 'certificates')
@@ -163,7 +170,7 @@ export function createCertificateRuntimeRouter(helpers: CertificateRuntimeHelper
               if (current.principal.id !== caller.principal.id || current.principal.kind !== caller.principal.kind || await helpers.store.getRevision() !== baseline) return fail('CONFLICT', 'certificate observation scope changed', { stateChanged: false })
               await assertAdministrator(current)
               return { scope: 'authorized_saved_certificate_ids', inventoryComplete: false, totalEligibleAccounts: eligible.length,
-                inspectedAccounts: inspected.length, accounts: inspected, managementTls, scheduler: { state: 'unavailable', nextRunAt: null, reason: 'site_scheduler_not_connected' } }
+                inspectedAccounts: inspected.length, accounts: inspected, managementTls, scheduler: await readAutoSslScheduler(helpers.store) }
             },
             assertCanReadAccount: (caller, account) => assertCanAccessAccount(caller, account, 'certificates'),
             assertCanWriteAccount: async (caller, account) => { await assertCanAccessAccount(caller, account, 'certificates'); await assertCanBindCertificate(caller, account) },

@@ -80,7 +80,7 @@ const sampleHostingSnapshot = (): StateSnapshot => {
   const now = new Date().toISOString()
   const base: Omit<StateSnapshot, 'checksum'> = {
     server: null,
-    firewall: { rules: [], prefixLists: [] },
+    firewall: { rules: [], prefixLists: [], enabled: false, blockPing: false },
     uidAllocator: { nextUid: 20002, allocated: [{ uid: 20001, username: 'tenantalpha', allocatedAt: now }] },
     resellers: [
       {
@@ -90,7 +90,7 @@ const sampleHostingSnapshot = (): StateSnapshot => {
         maxAccounts: 25,
         totalDiskMb: 50_000,
         totalBandwidthMb: 500_000,
-        oversell: false,
+        oversell: { disk: false, bandwidth: false },
         nameservers: ['ns1.example.test', 'ns2.example.test'],
         delegatedIps: ['192.0.2.10'],
       },

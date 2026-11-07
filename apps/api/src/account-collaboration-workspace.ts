@@ -3,9 +3,10 @@ import { assessMailboxMetadataAuthority, fail, isUuid, isXpanelError } from '@xp
 import type { Account, MailboxMetadataAuthority } from '@xpanel/core'
 import type { StateStore } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
-import type { ExtendedRouteHelpers, WebmailCalendar, WebmailContact } from './extended-routes.ts'
+import type { ExtendedRouteHelpers, WebmailCalendar, WebmailContact, WebmailDavPorts } from './extended-routes.ts'
 import { assertAccountFeatures, isMailboxPrincipal } from './authorization.ts'
 import { calendarCollectionRevision, calendarColor, calendarTimezone, calendarWorkspaceRevision, CALENDAR_LIMITS } from './mail/calendar-workspace.ts'
+import { davStoreTooLarge, isDavStoreTooLarge } from './mail/dav-store.ts'
 import { MAILBOX_METADATA_REVIEW_REQUIRED } from './mail/metadata-authority.ts'
 
 type Audit = Parameters<ExtendedRouteHelpers['emitAudit']>[0]
@@ -15,8 +16,7 @@ export interface AccountCollaborationHelpers {
   requireCaller: (req: Request, options?: { allowUnverifiedMfa?: boolean; deferDeniedAudit?: (input: Audit) => void }) => Promise<AuthenticatedCaller>
   assertCanAccessAccount: ExtendedRouteHelpers['assertCanAccessAccount']
   emitAudit: ExtendedRouteHelpers['emitAudit']
-  readCalendars: () => Promise<WebmailCalendar[]>
-  readContacts: () => Promise<WebmailContact[]>
+  dav: Pick<WebmailDavPorts, 'open'>
   /** Existing createCalendarWorkspaceRoutes handler; preserve original Request.url and identity. */
   calendarRoute: (req: Request, url: URL, method: string) => Promise<Response | null>
 }
@@ -56,20 +56,30 @@ export function createAccountCollaborationRoutes(helpers: AccountCollaborationHe
   }
   const capture = async (req: Request, initial: Awaited<ReturnType<typeof authorize>>) => {
     const deferred: Audit[] = []
+    // Store reads stay outside the lease: a tenant's slow store must not hold shared state.
+    const seenCalendars = new Map<string, WebmailCalendar>(), seenContacts = new Map<string, WebmailContact>(), tooLarge = new Set<string>()
+    for (const service of (await helpers.store.listServiceUsers(initial.account.id)).filter(service => service.services.email).slice(0, 1000)) {
+      const session = helpers.dav.open(initial.caller, initial.account, { accountId: initial.account.id, serviceUserId: service.id, mailbox: service.login.toLowerCase() })
+      // A shared record comes back once for its owner and once for each grantee.
+      try {
+        for (const calendar of await session.calendars()) seenCalendars.set(calendar.id, calendar)
+        for (const contact of await session.contacts()) seenContacts.set(contact.id, contact)
+      } catch (error) { if (!isDavStoreTooLarge(error)) throw error; tooLarge.add(service.login.toLowerCase()) }
+    }
+    const calendars = [...seenCalendars.values()], contacts = [...seenContacts.values()]
     try {
       return await helpers.store.withAccountLifecycleLease(initial.account.id, async account => {
         await authorize(req, initial.caller, account, deferred)
         const services = (await helpers.store.listServiceUsers(account.id)).filter(service => service.services.email)
         if (services.length > 1000 || new Set(services.map(service => service.login.toLowerCase())).size !== services.length) return review()
         const authorities = new Map(services.map(service => [service.login.toLowerCase(), { accountId: account.id, serviceUserId: service.id, mailbox: service.login.toLowerCase() } satisfies MailboxMetadataAuthority]))
-        const [calendars, contacts] = await Promise.all([helpers.readCalendars(), helpers.readContacts()])
-        if (!Array.isArray(calendars) || !Array.isArray(contacts) || calendars.length > 100000 || contacts.length > 100000) return review()
-        const bindings = [...authorities.values()].map(authority => {
-          const ownCalendars = calendars.filter(calendar => object(calendar) && assessMailboxMetadataAuthority(calendar.owner, calendar.ownerAuthority, authority) === 'match')
+        if (calendars.length > 100000 || contacts.length > 100000) return review()
+        const bindings = [...authorities.values()].filter(authority => !tooLarge.has(authority.mailbox)).map(authority => {
+          const ownCalendars = calendars.filter(calendar => object(calendar) && assessMailboxMetadataAuthority(calendar.owner, calendar.ownerAuthority, authority) === 'match').slice(0, CALENDAR_LIMITS.calendars)
           const ownContacts = contacts.filter(contact => object(contact) && assessMailboxMetadataAuthority(contact.owner, contact.ownerAuthority, authority) === 'match')
-          if (ownCalendars.length > CALENDAR_LIMITS.calendars || ownContacts.length > 10000) return review()
+          if (ownContacts.length > 10000) return review()
           const calendarRows = ownCalendars.map(calendar => {
-            if (!isUuid(calendar.id) || !safeText(calendar.name, 200) || !Array.isArray(calendar.shares) || calendar.shares.length > 100 || calendar.events !== undefined && (!Array.isArray(calendar.events) || calendar.events.length > CALENDAR_LIMITS.events)) return review()
+            if (!isUuid(calendar.id) || !safeText(calendar.name, 200) || !Array.isArray(calendar.shares) || calendar.shares.length > 100) return review()
             calendarColor(calendar.color); calendarTimezone(calendar.timezone)
             const shares = calendar.shares.flatMap(share => {
               if (!object(share) || typeof share.principal !== 'string') return []
@@ -85,15 +95,15 @@ export function createAccountCollaborationRoutes(helpers: AccountCollaborationHe
           return { authority, rawRevision: revision, public: { mailbox: authority.mailbox, revision: publicRevision(authority, revision), calendars: calendarRows, contacts: { count: ownContacts.length, groupCount: groups.size }, canCreateCalendar: ownCalendars.length < CALENDAR_LIMITS.calendars } }
         })
         await authorize(req, initial.caller, account, deferred)
-        return { account, bindings, calendars }
+        return { account, bindings, calendars, tooLarge: [...tooLarge].filter(mailbox => authorities.has(mailbox)) }
       })
     } finally { for (const audit of deferred) await helpers.emitAudit(audit) }
   }
   const project = (saved: Awaited<ReturnType<typeof capture>>) => {
-    const view = { context: { account: saved.account.username }, source: 'saved-mailbox-metadata', mailboxes: saved.bindings.map(binding => binding.public),
+    const view = { context: { account: saved.account.username }, source: 'dav-store', mailboxes: [...saved.bindings.map(binding => binding.public), ...saved.tooLarge.map(mailbox => ({ mailbox, refused: 'dav_store_too_large' }))],
       limits: { mailboxes: 1000, calendarsPerMailbox: CALENDAR_LIMITS.calendars }, metadataReview: MAILBOX_METADATA_REVIEW_REQUIRED,
-      capabilities: { createCalendar: true, caldav: false, carddav: false, addressBookCollections: false, taskLists: false, protectedDefaults: false },
-      application: { status: 'saved_metadata', nativeApplied: false, syncVerified: false } }
+      capabilities: { createCalendar: true, caldav: true, carddav: true, addressBookCollections: true, taskLists: true, protectedDefaults: true },
+      application: { status: 'dav_store', nativeApplied: true, syncVerified: false } }
     if (Buffer.byteLength(JSON.stringify(view), 'utf8') > 2 * 1024 * 1024) return fail('LIMIT_EXCEEDED', 'the authorized collection overview exceeds its response bound', unchanged)
     return view
   }
@@ -107,6 +117,7 @@ export function createAccountCollaborationRoutes(helpers: AccountCollaborationHe
       return fail('VALIDATION', 'the selected mailbox, current collection revision and supported calendar fields are required', unchanged)
     const fields = editing ? { name: (raw.name as string).trim(), color: calendarColor(raw.color), timezone: calendarTimezone(raw.timezone) } : null
     const before = await capture(req, initial), selected = before.bindings.find(binding => binding.authority.mailbox === raw.mailbox)
+    if (before.tooLarge.includes(raw.mailbox)) return davStoreTooLarge()
     if (!selected) return fail('NOT_FOUND', 'mailbox not found', unchanged)
     if (selected.public.revision !== raw.expectedRevision) return fail('CONFLICT', 'mailbox calendars changed; explicitly reload before changing', unchanged)
     const target = before.calendars.find(calendar => publicCalendarId(selected.authority, calendar.id) === id && assessMailboxMetadataAuthority(calendar.owner, calendar.ownerAuthority, selected.authority) === 'match')
@@ -138,6 +149,7 @@ export function createAccountCollaborationRoutes(helpers: AccountCollaborationHe
     if (Object.keys(raw).some(key => !['mailbox', 'name', 'color', 'timezone', 'expectedRevision'].includes(key)) || !safeText(raw.mailbox, 254) || !safeText(raw.name, 200) || typeof raw.expectedRevision !== 'string' || !/^[0-9a-f]{64}$/.test(raw.expectedRevision)) return fail('VALIDATION', 'the selected mailbox, current collection revision and supported calendar fields are required', unchanged)
     const color = calendarColor(raw.color), timezone = calendarTimezone(raw.timezone), name = raw.name.trim()
     const before = await capture(req, initial), selected = before.bindings.find(binding => binding.authority.mailbox === raw.mailbox)
+    if (before.tooLarge.includes(raw.mailbox)) return davStoreTooLarge()
     if (!selected) return fail('NOT_FOUND', 'mailbox not found', unchanged)
     if (selected.public.revision !== raw.expectedRevision) return fail('CONFLICT', 'mailbox calendars changed; explicitly reload before creating', unchanged)
     if (!selected.public.canCreateCalendar) return fail('LIMIT_EXCEEDED', 'mailbox calendar capacity reached', unchanged)

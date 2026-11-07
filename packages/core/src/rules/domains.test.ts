@@ -12,6 +12,7 @@ import {
   serverNames,
   validateDocRoot,
   validateHome,
+  isAccountHome,
 } from './domains.ts'
 
 const code = (fn: () => unknown): string | null => {
@@ -302,5 +303,12 @@ describe('canRenamePrimary', () => {
 
   it('may rename to the www of the old name since the old name goes away', () => {
     expect(canRenamePrimary(account, 'www.example.com', all).ok).toBe(true)
+  })
+})
+
+describe('isAccountHome', () => {
+  it('admits the home roots and nothing beside them', () => {
+    expect(['/home/bob', '/home2/bob', '/home99/bob'].every(home => isAccountHome(home, 'bob'))).toBe(true)
+    expect(['/home100/bob', '/homes/bob', '/home/bob/x', '/srv/bob', '/home/bobby', '', 1].some(home => isAccountHome(home, 'bob'))).toBe(false)
   })
 })

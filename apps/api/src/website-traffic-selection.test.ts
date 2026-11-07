@@ -25,7 +25,7 @@ vi.mock('../../web/src/index.ts', async importOriginal => {
 // do not create a host executor or claim native analytics qualification.
 vi.mock('./host-catalog.ts', async () => {
   const { tools } = await import('@xpanel/catalog')
-  return { loadQualifiedCatalog: async () => tools.map(tool => ({ ...tool, status: 'verified' as const,
+  return { qualificationModeOn: () => false, loadQualifiedCatalog: async () => tools.map(tool => ({ ...tool, status: 'verified' as const,
     delivery: { ...tool.delivery, status: 'verified' as const, reason: 'Synthetic SSR traffic selection fixture only.' },
   })) }
 })
@@ -136,7 +136,7 @@ const lastPanel = (): Record<string, unknown> => {
 describe('owned website traffic selection at the production document boundary', () => {
   it.each([
     ['/metrics/traffic', '7d', ADDON_NAME.toUpperCase()],
-    ['/metrics/web-stats', '30d', ADDON_NAME],
+    ['/metrics/traffic', '30d', ADDON_NAME],
   ] as const)('selects the owned addon on %s with the exact %s agent request', { tags: ['feature'] }, (route, window, selected) => withFixture(async fixture => {
     const calls: Request[] = [], snapshot = observation()
     const render = await renderer(fixture, calls, snapshot)
@@ -150,6 +150,18 @@ describe('owned website traffic selection at the production document boundary', 
       websiteAnalyticsDomainSelectionAvailable: true, websiteAnalytics: snapshot })
     expect(lastPanel()).not.toHaveProperty('websiteAnalyticsUnavailable')
     expect((lastPanel().domains as Domain[]).every(domain => domain.accountId === account.id)).toBe(true)
+  }))
+
+  it('reads web statistics with only the site, entry and month selectors and no traffic observation', { tags: ['feature'] }, () => withFixture(async fixture => {
+    const calls: Request[] = []
+    const render = await renderer(fixture, calls)
+    expect((await render(request(fixture, `/metrics/web-stats?site=${ADDON_NAME}&scheme=https&month=2026-10&domain=${FOREIGN_NAME}&window=7d`))).status).toBe(200)
+    expect(calls.map(call => call.url)).toEqual([`http://agent.local/accounts/${account.username}/web-stats?site=${ADDON_NAME}&scheme=https&month=2026-10`])
+    expect(calls[0]!.headers.get('x-xpanel-principal-id')).toBe(principal.id)
+    // The fixture agent answers traffic reads only, so the statistics read is unavailable rather than empty.
+    expect(lastPanel()).toMatchObject({ webStatsUnavailable: true })
+    expect(lastPanel()).not.toHaveProperty('webStats')
+    expect(lastPanel()).not.toHaveProperty('websiteAnalytics')
   }))
 
   it('refuses another account\'s real domain before any agent read or foreign-state disclosure', { tags: ['feature'] }, () => withFixture(async fixture => {
@@ -191,7 +203,7 @@ describe('owned website traffic selection at the production document boundary', 
   it('keeps the selected addon and window explicit when the agent read fails', { tags: ['feature'] }, () => withFixture(async fixture => {
     const calls: Request[] = []
     const render = await renderer(fixture, calls, { error: 'synthetic observation unavailable' }, 503)
-    expect((await render(request(fixture, `/metrics/web-stats?domain=${ADDON_NAME}&window=7d`))).status).toBe(200)
+    expect((await render(request(fixture, `/metrics/traffic?domain=${ADDON_NAME}&window=7d`))).status).toBe(200)
     expect(calls.map(call => call.url)).toEqual([`http://agent.local/analytics/websites/${addon.id}?window=7d`])
     expect(lastPanel()).toMatchObject({ activeDomain: addon.name, websiteAnalyticsWindow: '7d',
       websiteAnalyticsDomainSelectionAvailable: true, websiteAnalyticsUnavailable: true })

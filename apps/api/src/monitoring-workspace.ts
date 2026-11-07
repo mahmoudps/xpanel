@@ -1,8 +1,8 @@
 import { fail, isXpanelError } from '@xpanel/core'
 import type { MetricsCursor, MetricsSample } from '@xpanel/db'
-import { MONITORING_PID_MAX, monitoringLogSearch, parseMonitoringLogQuery, parseMonitoringSignalRequest } from '../../../packages/os/src/monitoring-command.ts'
+import { MONITORING_PID_MAX, monitoringLogSearch, parseMonitoringLogQuery, parseMonitoringSignalRequest, parseMonitoringUserKillRequest } from '../../../packages/os/src/monitoring-command.ts'
 import type { MonitoringLogQuery, MonitoringSignalRequest } from '../../../packages/os/src/monitoring-command.ts'
-import type { AccountDiskView, DiskObservation, FilesystemView, LogObservation, ProcessObservation, ProcessView, SignalOutcome } from '../../agent/src/host-monitoring.ts'
+import type { AccountDiskView, DiskObservation, FilesystemView, LogObservation, ProcessObservation, ProcessView, SignalOutcome, UserKillOutcome } from '../../agent/src/host-monitoring.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 
 export interface MonitoringWorkspaceHelpers {
@@ -29,7 +29,7 @@ export interface PerformanceHistory {
 
 const PAGE = 2000
 const MAX_HISTORY_SAMPLES = 20_160
-const PATHS = new Set(['/api/server/monitoring/processes', '/api/server/monitoring/disk', '/api/server/monitoring/logs', '/api/server/monitoring/performance', '/api/server/monitoring/processes/signal'])
+const PATHS = new Set(['/api/server/monitoring/processes', '/api/server/monitoring/disk', '/api/server/monitoring/logs', '/api/server/monitoring/performance', '/api/server/monitoring/processes/signal', '/api/server/monitoring/processes/kill-user'])
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const text = (value: unknown, max: number, min = 1): value is string => typeof value === 'string' && value.length >= min && value.length <= max && value.isWellFormed() && !/[\u0000-\u001f\u007f]/.test(value)
 const iso = (value: unknown): value is string => typeof value === 'string' && value.length <= 32 && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && Number.isFinite(Date.parse(value))
@@ -106,6 +106,13 @@ export function projectSignalOutcome(value: unknown, request: MonitoringSignalRe
   return { state: value.state, signal: request.signal, pid: request.pid, commandOk: value.commandOk, observedAt: value.observedAt, verificationRequired: value.verificationRequired as boolean }
 }
 
+export function projectUserKillOutcome(value: unknown, username: string): UserKillOutcome {
+  if (!object(value) || !oneOf(value.state, ['confirmed', 'attempted', 'unknown'] as const) || value.username !== username || !count(value.signalled, 4_294_967_295) || !count(value.exempt, 4_294_967_295) || !iso(value.observedAt)
+    || (value.state === 'unknown' ? value.remaining !== null : !count(value.remaining, 4_294_967_295) || value.remaining === 0 !== (value.state === 'confirmed')) || value.verificationRequired !== (value.state !== 'confirmed'))
+    return fail('PRECONDITION_FAILED', 'the process sweep outcome requires review', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
+  return { state: value.state, username, signalled: value.signalled, remaining: value.remaining as number | null, exempt: value.exempt, observedAt: value.observedAt, verificationRequired: value.verificationRequired as boolean }
+}
+
 /** Fixed buckets per window; an empty bucket is a gap (null), never zero. Values are averaged as recorded. */
 export function downsampleHostMetrics(samples: readonly MetricsSample[], window: PerformanceWindow, toMs: number, truncated: boolean): PerformanceHistory {
   const { ms, buckets } = PERFORMANCE_WINDOWS[window], fromMs = toMs - ms, bucketMs = ms / buckets
@@ -164,7 +171,8 @@ export async function readHostPerformance(list: MonitoringWorkspaceHelpers['list
 export async function handleMonitoringWorkspaceRoute(request: Request, url: URL, method: string, helpers: MonitoringWorkspaceHelpers): Promise<Response | null> {
   const path = url.pathname
   if (!PATHS.has(path)) return null
-  const signal = path === '/api/server/monitoring/processes/signal', action = signal ? 'server.monitoring.processes.signal' : 'server.monitoring.read'
+  const killUser = path === '/api/server/monitoring/processes/kill-user', signal = killUser || path === '/api/server/monitoring/processes/signal'
+  const action = killUser ? 'server.monitoring.processes.kill_user' : signal ? 'server.monitoring.processes.signal' : 'server.monitoring.read'
   const caller = await unchanged(() => helpers.requireCaller(request))
   await unchanged(() => helpers.assertRoot(caller, action))
   if (method !== (signal ? 'POST' : 'GET')) return new Response(null, { status: 405, headers: { allow: signal ? 'POST' : 'GET' } })
@@ -183,10 +191,19 @@ export async function handleMonitoringWorkspaceRoute(request: Request, url: URL,
   if (request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return fail('VALIDATION', 'JSON is required', { stateChanged: false })
   let body: unknown
   try { body = await request.json() } catch { return fail('VALIDATION', 'request body is not valid JSON', { stateChanged: false }) }
-  const reviewed = parseMonitoringSignalRequest(body)
+  const reviewed = killUser ? parseMonitoringUserKillRequest(body) : parseMonitoringSignalRequest(body)
   const fresh = await unchanged(() => helpers.requireCaller(request))
   if (fresh.principal.id !== caller.principal.id || fresh.sessionId !== caller.sessionId || fresh.apiTokenId !== caller.apiTokenId) return fail('FORBIDDEN', 'process signal authorization changed', { stateChanged: false })
   await unchanged(() => helpers.assertRoot(fresh, action))
+  if ('username' in reviewed) {
+    const target = 'account:' + reviewed.username
+    try { await helpers.emitAudit({ actor: fresh.principal.username, action: 'server.process.kill_user_requested', target, detail: { username: reviewed.username }, outcome: 'ok', principalId: fresh.principal.id }) }
+    catch { return fail('PRECONDITION_FAILED', 'the process sweep could not be audited before dispatch', { stateChanged: false }) }
+    const outcome = projectUserKillOutcome(await helpers.readHost(fresh, '/host/monitoring/processes/kill-user', { username: reviewed.username, killConfirmed: true }), reviewed.username)
+    try { await helpers.emitAudit({ actor: fresh.principal.username, action: 'server.process.kill_user', target, detail: { username: reviewed.username, state: outcome.state, signalled: outcome.signalled, remaining: outcome.remaining, exempt: outcome.exempt }, outcome: outcome.state === 'confirmed' ? 'ok' : 'failed', principalId: fresh.principal.id }) }
+    catch { return fail('SERVICE_UNAVAILABLE', 'the process sweep outcome requires audit review', { stateChanged: true, unknownOutcome: true, verificationRequired: true }) }
+    return json(outcome)
+  }
   const target = 'process:' + String(reviewed.pid), detail = { pid: reviewed.pid, uid: reviewed.uid, comm: reviewed.comm, signal: reviewed.signal }
   try { await helpers.emitAudit({ actor: fresh.principal.username, action: 'server.process.signal_requested', target, detail, outcome: 'ok', principalId: fresh.principal.id }) }
   catch { return fail('PRECONDITION_FAILED', 'the process signal could not be audited before dispatch', { stateChanged: false }) }

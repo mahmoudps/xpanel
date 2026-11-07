@@ -34,7 +34,7 @@ describe('administrator preferences response parser', () => {
       { ...defaults(), principalId: 'private' }, { ...defaults(), application: 'applied' }, { ...defaults(), revision: 'bad' },
       { ...defaults(), state: 'saved' }, { ...saved(), updatedAt: 'today' }, { ...defaults(), state: 'invalid' },
       { ...defaults(), preferences: { ...defaults().preferences, theme: 'dark' } },
-      { ...saved(), preferences: { ...saved().preferences, language: 'fr' } }, { ...saved(), preferences: { ...saved().preferences, scope: 'all' } },
+      { ...saved(), preferences: { ...saved().preferences, language: 'not a tag' } }, { ...saved(), preferences: { ...saved().preferences, scope: 'all' } },
     ]) expect(() => readAdminPreferencesView(invalid)).toThrow()
   })
 })

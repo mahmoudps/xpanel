@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { suggestServerSettings } from '@xpanel/core'
 import { profileFor } from '@xpanel/os'
 import { createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
+import { services } from '@xpanel/render'
+import { createProductionHostTargetMatcher } from './executor.ts'
+import { LIST_POLICY_DEFAULTS, listGateRules } from './list-moderation-policy.ts'
 import { compileDesiredGeneration } from './reconciler.ts'
+import { MAILX_RSPAMD_MILTER } from '../../../packages/os/src/mailx-command.ts'
 
 const ARGON2 = '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g'
 const os = profileFor('ID=ubuntu\nVERSION_ID="24.04"\n')
@@ -23,6 +27,33 @@ async function seed() {
 const file = (compiled: ReturnType<typeof compileDesiredGeneration>, suffix: string): string => compiled.files.find(item => item.path.endsWith(suffix))?.content ?? ''
 
 describe('server mail routing in the generation', () => {
+  it('renders the rspamd header file and reloads rspamd only with the rspamd milter', async () => {
+    const snapshot = await seed()
+    const rspamd = compileDesiredGeneration(snapshot, { os, mailFx: { spamMilter: MAILX_RSPAMD_MILTER, sieve: [] } })
+    expect(file(rspamd, '/rspamd/local.d/milter_headers.conf')).toContain('use = ["x-spam-status", "x-spam-level"];')
+    expect(rspamd.postActions).toContainEqual({ kind: 'systemd', verb: 'reload', unit: 'rspamd.service' })
+    expect(createProductionHostTargetMatcher()('/etc/rspamd/local.d/milter_headers.conf', 'write')).toBe(true)
+    const none = compileDesiredGeneration(snapshot, { os, mailFx: { spamMilter: null, sieve: [] } })
+    expect(file(none, '/rspamd/local.d/milter_headers.conf')).toBe('')
+    expect(none.postActions).not.toContainEqual({ kind: 'systemd', verb: 'reload', unit: 'rspamd.service' })
+  })
+
+  it('delivers a gated list through a hidden user of its account, with the check compiled and allowed on the host', async () => {
+    const snapshot = await seed(), account = snapshot.accounts[0]!, address = 'team@alice.example.com'
+    const gate = services.listGateAddress(account.id, address), rules = listGateRules({ address, members: ['a@remote.example'], moderation: 'members', policy: LIST_POLICY_DEFAULTS }, account.home)
+    const lists = [{ accountId: account.id, address, members: ['a@remote.example'], gate: { gate, account: { username: account.username, uid: account.uid, gid: account.gid, home: account.home }, rules } }]
+    const compiled = compileDesiredGeneration(snapshot, { os, mailFx: { spamMilter: null, sieve: [], listGateProgram: '#!x' }, mailForwarding: { forwarders: [], rejects: [], domainForwarders: [], lists } })
+    const paths = services.listGatePaths('/etc/dovecot/xpanel/sieve', gate)
+    expect(file(compiled, '/virtual_aliases')).toContain(`${address}\t${gate}`)
+    expect(file(compiled, '/virtual_aliases')).not.toContain('a@remote.example')
+    expect(file(compiled, `/${services.autoreplyDomain(account.id)}.passwd`)).toContain(gate)
+    expect(file(compiled, '.list.json')).toContain('"posting":"members"')
+    expect(file(compiled, '/95-xpanel-sieve.conf')).toContain('sieve_extprograms')
+    expect(compiled.postActions).toContainEqual({ kind: 'exec', argv: ['/usr/bin/sievec', paths.script] })
+    const allowed = createProductionHostTargetMatcher()
+    for (const path of [services.LIST_GATE_PROGRAM, paths.rules, paths.script]) expect(allowed(path, 'write'), path).toBe(true)
+  })
+
   it('keeps a backup or remote domain out of local delivery and uses the chosen submission certificate', async () => {
     const snapshot = await seed()
     const local = compileDesiredGeneration(snapshot, { os, mailTls: undefined, mailFx: { spamMilter: null, sieve: [] } })

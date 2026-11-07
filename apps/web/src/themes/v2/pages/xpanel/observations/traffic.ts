@@ -3,21 +3,24 @@ import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { formatAsciiBytes, formatAsciiNumber, formatDisplayDateTime } from '../../../../../display-format.ts'
 import { parseWebsiteAnalyticsSnapshot, WEBSITE_ANALYTICS_WINDOWS, type WebsiteAnalyticsWindow } from '../../../../../models/website-analytics.ts'
 import { kpiCard, lineChart, notice } from '../../../components/index.ts'
-import { emailContext, esc, facts, field, fields, header, missingAccount, page, section, select, table, technical, unread } from '../email-tools/common.ts'
+import { actions, button, emailContext, esc, facts, field, fields, header, missingAccount, page, section, select, table, technical, unread } from '../email-tools/common.ts'
 import type { PanelObservationAuthority } from './common.ts'
 
-export function renderV2PanelTraffic(props: PanelSurfaceProps, authority?: PanelObservationAuthority, route: '/metrics/traffic' | '/metrics/web-stats' = '/metrics/traffic'): string {
+export function renderV2PanelTraffic(props: PanelSurfaceProps, authority?: PanelObservationAuthority): string {
+  const route = '/metrics/traffic'
   const { locale, t, account, domains } = emailContext(props, authority)
-  const title = route === '/metrics/web-stats' ? t(msgid('Web statistics')) : t(msgctxt('theme:v2', 'Traffic & bandwidth'))
+  const title = t(msgctxt('theme:v2', 'Traffic & bandwidth'))
   const requestedDomain = props.activeDomain ?? (account?.primaryDomain ?? '')
   const selected = domains?.find(row => row.name === requestedDomain) ?? (props.activeDomain === undefined ? domains?.[0] : undefined)
-  const factTools = route === '/metrics/web-stats' ? ['web-stats-awstats', 'web-stats-webalizer', 'web-stats-analog', 'web-stats-ftp', 'metrics-editor'] : ['traffic-monitor-account', 'bandwidth']
+  const factTools = ['traffic-monitor-account', 'bandwidth']
   const factsAuthorized = authority?.presentation !== 'read-only' || factTools.some(id => authority.authorizedTools?.has(id))
   const snapshot = factsAuthorized && selected && props.websiteAnalytics !== undefined
     ? parseWebsiteAnalyticsSnapshot(props.websiteAnalytics, { accountId: (account?.id ?? ''), domain: selected.name }) : null
   const readState = props.websiteAnalyticsUnavailable || props.websiteAnalytics !== undefined && !snapshot
     ? 'unavailable' : snapshot ? snapshot.series.length ? 'loaded' : 'empty' : 'unread'
   const observed = readState === 'loaded' ? snapshot! : undefined
+  // The Analog switch withholds these lists, so they read as not read rather than empty.
+  const report = observed?.analog === 'off' ? undefined : observed
   const window = props.websiteAnalyticsWindow && WEBSITE_ANALYTICS_WINDOWS.includes(props.websiteAnalyticsWindow) ? props.websiteAnalyticsWindow : undefined
   const windowLabel = (value: WebsiteAnalyticsWindow): string => value === '1h' ? t(msgid('Last hour')) : value === '24h' ? t(msgid('Last 24 hours')) : value === '7d' ? t(msgid('Last 7 days')) : t(msgid('Last 30 days'))
   const params = new URLSearchParams({ lang: locale, theme: props.theme ?? 'dark', ...(selected ? { domain: selected.name } : {}) })
@@ -61,9 +64,9 @@ export function renderV2PanelTraffic(props: PanelSurfaceProps, authority?: Panel
     + facts([{ label: t(msgid('Unique visitors')), valueHtml: totals ? technical(totals.uniqueVisitors) : esc(t(msgid('Not read'))) }]))
   const entries = (rows: readonly WebsiteTopEntry[] | undefined, columns: number, errorOnly = false): string => rows === undefined ? unread(t, columns) : rows.length === 0
     ? `<tr><td colspan="${columns}">${esc(t(msgid('No records were returned.')))}</td></tr>`
-    : rows.map(row => `<tr><td>${technical(row.key)}</td><td>${technical(errorOnly ? row.errors5xx! : formatAsciiNumber(row.requests))}</td>${errorOnly ? '' : `<td>${technical(formatAsciiBytes(row.bytes))}</td>`}</tr>`).join('')
+    : rows.map(row => `<tr><td>${technical(row.country ? `${row.key} ${row.country}` : row.key)}</td><td>${technical(errorOnly ? row.errors5xx! : formatAsciiNumber(row.requests))}</td>${errorOnly ? '' : `<td>${technical(formatAsciiBytes(row.bytes))}</td>`}</tr>`).join('')
   const paths = section('v2-traffic-pages', t(msgid('Top pages')),
-    table('v2-traffic-page-records', t(msgid('Top pages')), [t(msgid('Path')), t(msgid('Requests')), t(msgid('Transferred'))], entries(observed?.topPaths, 3)))
+    table('v2-traffic-page-records', t(msgid('Top pages')), [t(msgid('Path')), t(msgid('Requests')), t(msgid('Transferred'))], entries(report?.topPaths, 3)))
   const statusRows = ['2xx', '3xx', '4xx', '5xx'].map(code => {
     const count = totals?.[`status${code}` as 'status2xx' | 'status3xx' | 'status4xx' | 'status5xx']
     return `<tr><td>${technical(code)}</td><td>${count === undefined ? esc(t(msgid('Not read'))) : technical(formatAsciiNumber(count))}</td></tr>`
@@ -71,21 +74,27 @@ export function renderV2PanelTraffic(props: PanelSurfaceProps, authority?: Panel
   const responses = section('v2-traffic-status', t(msgid('Responses by status')),
     table('v2-traffic-status-records', t(msgid('Responses by status')), [t(msgid('Status')), t(msgid('Requests'))], statusRows))
   const errors = section('v2-traffic-errors', t(msgid('Errors by path')),
-    table('v2-traffic-error-records', t(msgid('Errors by path')), [t(msgid('Path')), t(msgid('Errors'))], entries(observed?.topPaths.filter(row => (row.errors5xx ?? 0) > 0), 2, true)))
+    table('v2-traffic-error-records', t(msgid('Errors by path')), [t(msgid('Path')), t(msgid('Errors'))], entries(report?.topPaths.filter(row => (row.errors5xx ?? 0) > 0), 2, true)))
   const referrers = section('v2-traffic-referrers', t(msgid('Top Referrers')),
-    table('v2-traffic-referrer-records', t(msgid('Top Referrers')), [t(msgid('Referrer')), t(msgid('Requests')), t(msgid('Transferred'))], entries(observed?.topReferrers, 3)))
+    table('v2-traffic-referrer-records', t(msgid('Top Referrers')), [t(msgid('Referrer')), t(msgid('Requests')), t(msgid('Transferred'))], entries(report?.topReferrers, 3)))
   const clients = section('v2-traffic-clients', t(msgid('Top Client IP Addresses')),
-    table('v2-traffic-client-records', t(msgid('Top Client IP Addresses')), [t(msgid('Client')), t(msgid('Requests')), t(msgid('Transferred'))], entries(observed?.topClientIps, 3)))
+    table('v2-traffic-client-records', t(msgid('Top Client IP Addresses')), [t(msgid('Client')), t(msgid('Requests')), t(msgid('Transferred'))], entries(report?.topClientIps, 3)))
   const latency = section('v2-traffic-cache-latency', t(msgid('Avg / P95 Latency')),
     facts([{ label: t(msgid('Cache Hit Ratio')), valueHtml: totals ? technical(value(totals.cacheHitRatioPercent, 'percent')) : esc(t(msgid('Not read'))) }, { label: t(msgctxt('theme:v2', 'Average request latency')), valueHtml: totals ? technical(value(totals.avgRequestTimeMs, 'ms')) : esc(t(msgid('Not read'))) }, { label: t(msgctxt('theme:v2', 'P95 request latency')), valueHtml: totals ? technical(value(totals.p95RequestTimeMs, 'ms')) : esc(t(msgid('Not read'))) }]))
   const logs = section('v2-traffic-raw-logs', t(msgid('Raw access logs')),
     `<p>${esc(t(msgctxt('theme:v2', 'Read the bounded access log in the site log workspace. Archived log downloads have not been qualified.')))}</p>`
-    + (authority?.relatedRoutes?.has('/metrics/logs') ? `<a class="v2-btn" href="/metrics/logs?${esc(params.toString())}">${esc(t(msgid('Read log')))}</a>` : `<button type="button" class="v2-btn" disabled>${esc(t(msgid('Read log')))}</button>`)
-    + `<button type="button" class="v2-btn" disabled>${esc(t(msgid('Download logs')))}</button>`)
+    + (authority?.relatedRoutes?.has('/metrics/logs') ? `<a class="v2-btn" href="/metrics/logs?${esc(params.toString())}">${esc(t(msgid('Read log')))}</a>` : `<button type="button" class="v2-btn" disabled>${esc(t(msgid('Read log')))}</button>`))
   return page(locale, route, header(t, route, title, t(msgctxt('theme:v2', 'Visitors, requests, bandwidth and errors for your domains, counted from the Nginx access logs.')))
     + `<div class="v2-panel-extra__groups"${!authority?.canRead || authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''} data-surface-widget="website-analytics" data-chart-state="${readState}"${selected ? ` data-domain="${esc(selected.name)}"` : ''}>${scope}${status}${summary}${requests}<div class="v2-panel-extra__split"><div class="v2-panel-extra__groups"${!authority?.canRead || authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''}>${visitors}${paths}${responses}${errors}${referrers}${clients}</div><aside class="v2-panel-extra__groups"${!authority?.canRead || authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''} aria-label="${esc(t(msgid('Workspace information')))}">${bandwidth}${latency}${logs}</aside></div></div>`)
 }
 
-export function renderV2PanelWebStatistics(props: PanelSurfaceProps, authority?: PanelObservationAuthority): string {
-  return renderV2PanelTraffic(props, authority, '/metrics/web-stats')
+export const ftpReport = (props: PanelSurfaceProps, authority: PanelObservationAuthority | undefined): string => {
+  const { t } = emailContext(props, authority), fact = (key: string, label: string): { label: string; valueHtml: string } => ({ label, valueHtml: `<bdi dir="ltr" data-ftp-report-fact="${key}">${esc(t(msgid('Not read')))}</bdi>` })
+  const rows = (id: string, label: string, heads: readonly string[], hook: string): string => table(id, label, heads, '', { [hook]: true })
+  return `<div data-ftp-report${authority?.canRead && authority.presentation !== 'read-only' ? '' : ' data-readonly="true"'}>` + section('v2-ftp-report', t(msgid('FTP statistics')),
+    fields(field('v2-ftp-report-month', t(msgid('Month')), '<input id="v2-ftp-report-month" type="month" dir="ltr" data-ftp-report-month>')) + actions(button(t(msgid('Read FTP report')), { 'data-ftp-report-read': true }, false))
+    + `<p role="status" data-state="unread" data-ftp-report-status>${esc(t(msgid('The FTP report has not been read.')))}</p>` + facts([fact('transfers', t(msgid('Transfers'))), fact('downloads', t(msgid('Downloads'))), fact('uploads', t(msgid('Uploads'))), fact('bytes', t(msgid('Data transferred')))])
+    + rows('v2-ftp-report-days', t(msgid('Transfers by day')), [t(msgid('Day')), t(msgid('Transfers')), t(msgid('Data transferred'))], 'data-ftp-report-days')
+    + rows('v2-ftp-report-hours', t(msgid('Transfers by hour (UTC)')), [t(msgid('Hour')), t(msgid('Transfers')), t(msgid('Data transferred'))], 'data-ftp-report-hours')
+    + rows('v2-ftp-report-users', t(msgid('Transfers by FTP login')), [t(msgid('Login')), t(msgid('Downloads')), t(msgid('Uploads')), t(msgid('Data transferred'))], 'data-ftp-report-users')) + '</div>'
 }

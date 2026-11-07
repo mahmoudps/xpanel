@@ -10,6 +10,9 @@ import type { StateStore } from '@xpanel/state'
  */
 export interface PanelConfigFile<T> {
   readonly path: string
+  readonly namespace: string
+  /** The validator of this file; null for a value it would refuse. */
+  parse(raw: unknown): T | null
   /** Parsed saved value, the defaults when no file exists, or null when the saved file fails validation. */
   read(): Promise<{ raw: unknown; value: T | null }>
   /** The last good value for per-request effects; a missing or invalid file yields the defaults. */
@@ -26,7 +29,13 @@ const files = new Map<string, PanelConfigFile<unknown>>()
 /** One instance per path, so the document renderer and the API routes share the cache in one process. */
 export function panelConfigFile<T>(store: Pick<StateStore, 'rootDir' | 'getWriterLock'>, name: string, namespace: string,
   parse: (raw: unknown) => T | null, defaults: () => T): PanelConfigFile<T> {
-  const path = `${store.rootDir}/extended/panel/${name}`
+  return stateConfigFile(store, `extended/panel/${name}`, namespace, parse, defaults)
+}
+
+/** The same revision-bound file for any root-owned configuration path below the state root. */
+export function stateConfigFile<T>(store: Pick<StateStore, 'rootDir' | 'getWriterLock'>, relativePath: string, namespace: string,
+  parse: (raw: unknown) => T | null, defaults: () => T, mode = 0o640): PanelConfigFile<T> {
+  const path = `${store.rootDir}/${relativePath}`
   const existing = files.get(path)
   if (existing) return existing as PanelConfigFile<T>
   let cached: { key: string; raw: unknown; value: T | null } | null = null
@@ -44,6 +53,8 @@ export function panelConfigFile<T>(store: Pick<StateStore, 'rootDir' | 'getWrite
   }
   const file: PanelConfigFile<T> = {
     path,
+    namespace,
+    parse,
     read,
     current: async () => { try { return (await read()).value ?? defaults() } catch { return defaults() } },
     write: async (next, expectedRevision, assertAuthority) => {
@@ -55,7 +66,7 @@ export function panelConfigFile<T>(store: Pick<StateStore, 'rootDir' | 'getWrite
         if (panelConfigRevision(namespace, raw) !== expectedRevision) return fail('CONFLICT', 'the configuration changed; reload before saving', unchanged)
         await lease.assertFencingToken()
         try {
-          await atomicWriteJson(path, next, 0o640, async () => { await assertAuthority(); await lease.assertFencingToken() })
+          await atomicWriteJson(path, next, mode, async () => { await assertAuthority(); await lease.assertFencingToken() })
           cached = null
           const saved = await read()
           if (JSON.stringify(saved.raw) !== JSON.stringify(next) || saved.value === null) throw new Error('panel_config_readback_failed')

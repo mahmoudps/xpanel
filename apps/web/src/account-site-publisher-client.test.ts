@@ -4,7 +4,7 @@ import { ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING, readSitePublisherView } from './
 import { renderAccountSitePublisherWorkspace } from './board-port/account-site-publisher-workspace.ts'
 
 const accountId = '11111111-1111-4111-8111-111111111111', domainId = '22222222-2222-4222-8222-222222222222'
-const view = () => ({ context: { accountId, domainId, domainName: 'example.test', path: 'public_html' }, revision: 'a'.repeat(64), files: ['index.html', 'index.htm', 'index.php'].map(name => ({ name, exists: false, hash: null, sizeBytes: 0 })), recovery: { status: 'none', createdAt: null }, capabilities: { canPublish: false, canRollback: false }, application: { status: 'read', nativeQualified: false } })
+const view = () => ({ context: { accountId, domainId, domainName: 'example.test', path: 'public_html' }, revision: 'a'.repeat(64), files: ['index.html', 'index.htm', 'index.php'].map(name => ({ name, exists: false, hash: null, sizeBytes: 0 })), recovery: { status: 'none', createdAt: null }, capabilities: { canPublish: true, canRollback: false }, application: { status: 'read', nativeQualified: false } })
 const html = (canManage = true, lang: 'en' | 'ar' = 'en') => renderAccountSitePublisherWorkspace({ lang, accountId, domains: [{ id: domainId, name: 'example.test' }], canManage })
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
 const $ = <T extends Element>(name: string): T => document.querySelector<T>('[data-sitepub-' + name + ']')!
@@ -17,7 +17,7 @@ async function bind(canManage: boolean, request: (method: string, path: string, 
 afterEach(() => { document.documentElement.lang = 'en'; document.documentElement.dir = 'ltr'; document.body.replaceChildren(); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; vi.restoreAllMocks() })
 describe('site publisher workspace', () => {
   it('keeps approved controls in both languages with an isolated preview and truthful backup boundary', () => {
-    for (const lang of ['en', 'ar'] as const) { const markup = html(true, lang); expect(markup).toContain('dir="' + (lang === 'ar' ? 'rtl' : 'ltr') + '"'); expect(markup).toContain('sandbox=""'); expect(markup).toContain('data-sitepub-publish disabled'); expect(markup).not.toMatch(/[٠-٩۰-۹]/); expect(markup).toContain(lang === 'en' ? '30-day retention' : '30 يومًا') }
+    for (const lang of ['en', 'ar'] as const) { const markup = html(true, lang); expect(markup).toContain('dir="' + (lang === 'ar' ? 'rtl' : 'ltr') + '"'); expect(markup).toContain('sandbox=""'); expect(markup).toContain('data-sitepub-publish disabled'); expect(markup).not.toMatch(/[٠-٩۰-۹]/); expect(markup).toContain(lang === 'en' ? 'kept for 30 days' : '30 يومًا') }
     expect(html()).not.toContain('<form'); expect(ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING).not.toContain('innerHTML')
   })
   it('leaves unavailable and read-only pages inert', async () => {
@@ -25,20 +25,27 @@ describe('site publisher workspace', () => {
     await bind(false, request)
     expect(request).not.toHaveBeenCalled(); expect([...document.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button,input,select,textarea')].every(control => control.disabled)).toBe(true)
   })
-  it('allows preview while publishing is unqualified and never sends a publish request', async () => {
-    const request = vi.fn(async (method: string, path: string) => path.endsWith('/preview') ? { html: '<!doctype html><html><body>Hello</body></html>', hash: 'b'.repeat(64) } : view())
+  it('publishes only the previewed draft after confirmation and reads the result back', async () => {
+    const published = { ...view(), revision: 'c'.repeat(64), files: view().files.map((file, i) => i === 0 ? { ...file, exists: true, hash: 'b'.repeat(64), sizeBytes: 10 } : file), recovery: { status: 'published', createdAt: '2026-11-07T10:00:00.000Z' }, capabilities: { canPublish: true, canRollback: true } }
+    let state: unknown = view()
+    const request = vi.fn(async (method: string, path: string, _body?: unknown) => {
+      if (path.endsWith('/preview')) return { html: '<!doctype html><html><body>Hello</body></html>', hash: 'b'.repeat(64) }
+      if (path.endsWith('/publish')) { state = published; return { ...published, application: { status: 'published', nativeQualified: false } } }
+      return state
+    })
     await bind(true, request)
     expect(request).toHaveBeenCalledWith('GET', '/api/domains/' + domainId + '/site-publisher')
     $<HTMLInputElement>('title').value = 'Title'; $<HTMLTextAreaElement>('message').value = 'Message'
     expect($<HTMLButtonElement>('preview').disabled).toBe(false); expect($<HTMLButtonElement>('publish').disabled).toBe(true)
     $<HTMLButtonElement>('preview').click(); await settle(); await settle()
-    expect($<HTMLIFrameElement>('frame').hidden).toBe(false); expect($<HTMLButtonElement>('publish').disabled).toBe(true)
-    $<HTMLButtonElement>('publish').click(); await settle()
-    expect(request.mock.calls.some(call => call[1].endsWith('/publish'))).toBe(false)
+    expect($<HTMLIFrameElement>('frame').hidden).toBe(false); expect($<HTMLButtonElement>('publish').disabled).toBe(false)
+    $<HTMLButtonElement>('publish').click()
+    await vi.waitFor(() => expect($('status').getAttribute('data-state')).toBe('saved'))
+    expect(request.mock.calls.find(call => call[1].endsWith('/publish'))![2]).toEqual({ expectedRevision: 'a'.repeat(64), draft: { template: 'coming-soon', lang: 'en', title: 'Title', message: 'Message', email: '', phone: '' } })
   })
   it('rejects foreign targets, unsafe paths and forged publish availability', () => {
     expect(readSitePublisherView(view(), accountId, domainId)).toEqual(view())
-    for (const change of [{ context: { ...view().context, accountId: domainId } }, { context: { ...view().context, path: '/root' } }, { context: { ...view().context, path: 'a/../b' } }, { capabilities: { canPublish: true, canRollback: false } }, { application: { status: 'published', nativeQualified: false } }]) expect(() => readSitePublisherView({ ...view(), ...change }, accountId, domainId)).toThrow()
+    for (const change of [{ context: { ...view().context, accountId: domainId } }, { context: { ...view().context, path: '/root' } }, { context: { ...view().context, path: 'a/../b' } }, { capabilities: { canPublish: 'yes', canRollback: false } }, { recovery: { status: 'prepared', createdAt: '2026-10-27T09:01:02.123Z' }, capabilities: { canPublish: true, canRollback: true } }, { application: { status: 'published', nativeQualified: false } }]) expect(() => readSitePublisherView({ ...view(), ...change }, accountId, domainId)).toThrow()
   })
   it('locks controls after an invalid read and escapes domain labels', async () => {
     await bind(true, async () => ({ ...view(), context: { ...view().context, accountId: domainId } }))

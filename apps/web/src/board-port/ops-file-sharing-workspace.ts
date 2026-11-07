@@ -17,6 +17,7 @@ export function renderOpsFileSharingWorkspace(input: { locale: Locale; canRead: 
       </dl>
       <div class="xp-whm-detail-actions"><button type="button" class="xp-btn xp-btn--primary" data-ops-shares-action="read"${input.canRead ? '' : ' disabled'}>${t('Read shares')}</button><button type="button" class="xp-btn" data-ops-shares-action="apply" disabled>${t('Apply to active exports')}</button></div>
       <p class="xp-help">${t('Shares are saved as configuration. Applying rewrites the one managed exports file and re-exports with exportfs; active state is read back from the kernel export table. Other NFS exports on this server are never changed.')}</p>
+      <p class="xp-help">${t('Clients connect on port 2049. Allow it for them on the firewall page.')}</p>
     </section>
     <section class="xp-whm-detail-card" data-whm-detail-section="shares-list" aria-labelledby="ops-shares-list">
       <h2 id="ops-shares-list">${t('Shares')}</h2>

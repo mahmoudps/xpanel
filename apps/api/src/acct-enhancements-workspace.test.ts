@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { fail } from '@xpanel/core'
 import type { AuthenticatedCaller } from './auth.ts'
 import { sha256Hex } from './auth.ts'
-import { assertEnhancementsAgainstDirectory, effectiveEnhancements, handleAccountEnhancementsRoute, parseEnhancementsDocument, readSavedEnhancements, resellerUsage } from './acct-enhancements-workspace.ts'
-import type { EnhancementsDirectory, EnhancementsHelpers } from './acct-enhancements-workspace.ts'
+import { assertEnhancementsAgainstDirectory, assignEnhancement, effectiveEnhancements, handleAccountEnhancementsRoute, parseEnhancementsDocument, readSavedEnhancements, resellerUsage } from './acct-enhancements-workspace.ts'
+import type { EnhancementsDirectory, EnhancementsDocument, EnhancementsHelpers } from './acct-enhancements-workspace.ts'
 
 const PLAN = '33333333-3333-4333-8333-333333333333', RESELLER = '22222222-2222-4222-8222-222222222222'
 const A = '55555555-5555-4555-8555-555555555551', B = '55555555-5555-4555-8555-555555555552', C = '55555555-5555-4555-8555-555555555553'
@@ -89,7 +89,7 @@ describe('account enhancements route', () => {
     expect((await call('POST', helpers().h))!.status).toBe(405)
     await expect(call('GET', helpers().h, undefined, '/api/server/account-enhancements?plan=x')).rejects.toMatchObject({ code: 'VALIDATION' })
     const body = await (await call('GET', helpers().h))!.json() as Record<string, unknown>
-    expect(body).toMatchObject({ state: 'default', revision: EMPTY, application: { enforced: false, resellerAssignment: false } })
+    expect(body).toMatchObject({ state: 'default', revision: EMPTY, application: { enforced: false, resellerAssignment: true } })
   })
   it('saves with CAS, readback and audit', async () => {
     const { h, audits } = helpers()
@@ -106,5 +106,27 @@ describe('account enhancements route', () => {
     expect(saved()).toBeNull()
     const bad = { definitions: 'x' }
     await expect(call('PUT', helpers(bad).h, { expectedRevision: sha256Hex(JSON.stringify(bad)), ...doc() })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+  })
+})
+
+describe('reseller assignment', () => {
+  const account = (id: string, ownerId: string | null) => ({ id, username: id, planId: 'p', ownerId })
+  const [one, two, three] = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333']
+  const reseller = '44444444-4444-4444-8444-444444444444'
+  const accounts = [account(one!, reseller), account(two!, reseller), account(three!, reseller)]
+  const definition = { id: 'x', label: 'X', kind: 'flag', min: null, max: null } as const
+  const base = (limit: number | null | undefined): EnhancementsDocument => ({ definitions: [definition], planAssignments: {}, accountAssignments: {}, resellerLimits: limit === undefined ? {} : { [reseller]: { x: limit } } })
+  it('stops the assignment past the limit and refuses all at 0', () => {
+    let document = assignEnhancement(base(2), accounts, one!, 'x', true, reseller)
+    document = assignEnhancement(document, accounts, two!, 'x', true, reseller)
+    expect(() => assignEnhancement(document, accounts, three!, 'x', true, reseller)).toThrow(expect.objectContaining({ code: 'LIMIT_EXCEEDED' }))
+    expect(assignEnhancement(document, accounts, one!, 'x', true, reseller).accountAssignments[one!]).toEqual({ x: true })
+    expect(() => assignEnhancement(base(0), accounts, one!, 'x', true, reseller)).toThrow(expect.objectContaining({ code: 'LIMIT_EXCEEDED' }))
+  })
+  it('needs a grant from root for a reseller, not for root, and unassigning frees the slot', () => {
+    expect(() => assignEnhancement(base(undefined), accounts, one!, 'x', true, reseller)).toThrow(expect.objectContaining({ code: 'FORBIDDEN', detail: expect.objectContaining({ reason: 'enhancement_not_granted' }) }))
+    const document = assignEnhancement(base(undefined), accounts, one!, 'x', true, null)
+    expect(assignEnhancement(document, accounts, one!, 'x', null, null).accountAssignments).toEqual({})
+    expect(assignEnhancement(base(null), accounts, one!, 'x', true, reseller).accountAssignments[one!]).toEqual({ x: true })
   })
 })

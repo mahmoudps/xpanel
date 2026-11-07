@@ -21,7 +21,7 @@ const otherFeatureId = '20000000-0000-4000-8000-000000000002'
 const resellerId = '30000000-0000-4000-8000-000000000001'
 const neighborId = '30000000-0000-4000-8000-000000000002'
 const principal = { kind: 'root', id: 'synthetic-root', username: 'synthetic-root' }
-const reseller = { id: resellerId, username: 'scopedreseller', acl: ['list-accounts', 'edit-account', 'suspend-account', 'change-password', 'terminate-account', 'create-account', 'manage-plans'], maxAccounts: 40, totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited', oversell: true, nameservers: [], delegatedIps: [] }
+const reseller = { id: resellerId, username: 'scopedreseller', acl: ['list-accounts', 'edit-account', 'suspend-account', 'change-password', 'terminate-account', 'create-account', 'manage-plans'], maxAccounts: 40, totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited', oversell: { disk: true, bandwidth: true }, nameservers: [], delegatedIps: [] }
 const plan = defaultPlan({ id: planId, name: 'Standard', ownerId: null, featureListId: featureId })
 plan.resources.ioReadBps = 2 * 1048576
 plan.resources.ioWriteBps = 1048576
@@ -292,13 +292,16 @@ async function plansFlow(page, host, state, result, expect, visit) {
   const link = new URL(await editLink.getAttribute('href'), host.baseUrl)
   assert.equal(link.searchParams.get('planId'), planId); assert.equal(link.searchParams.get('lang'), state.locale); assert.equal(link.searchParams.get('theme'), state.theme)
   await expect(save).toBeDisabled()
-  await form.locator('[name=name]').fill('Renamed'); await expect(save).toBeEnabled()
-  await form.locator('[name=name]').fill(plan.name); await expect(save).toBeDisabled()
-  await form.locator('[name=name]').fill('Renamed')
+  // Plan names are permanent, so the editor keeps the saved name and the edit lands on a limit.
+  await expect(form.locator('[name=name]')).toHaveJSProperty('readOnly', true)
+  const limit = form.locator('[name=ioReadBps]')
+  await limit.fill('3'); await expect(save).toBeEnabled()
+  await limit.fill('2'); await expect(save).toBeDisabled()
+  await limit.fill('3')
   const release = host.holdNextPlan(), start = host.requests.length
   const firstResponse = page.waitForResponse(response => response.request().method() === 'PATCH')
   try {
-    await form.locator('[name=name]').press('Enter')
+    await limit.press('Enter')
     await expect(form).toHaveAttribute('aria-busy', 'true')
     await form.evaluate(form => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
   } finally { release() }
@@ -306,15 +309,15 @@ async function plansFlow(page, host, state, result, expect, visit) {
   const first = host.requests.slice(start).filter(request => request.method === 'PATCH')
   assert.equal(first.length, 1); assert.equal(first[0].path, '/api/plans/' + planId)
   // the editor always sends the per-plan bandwidth enforcement switch; a plan without it saves it off
-  assert.deepEqual(first[0].body, (({ id, ownerId, ...body }) => ({ ...body, name: 'Renamed', enforceBandwidth: plan.enforceBandwidth ?? false }))(plan))
+  assert.deepEqual(first[0].body, (({ id, ownerId, ...body }) => ({ ...body, resources: { ...body.resources, ioReadBps: 3145728 }, enforceBandwidth: plan.enforceBandwidth ?? false }))(plan))
   assert.equal(Object.hasOwn(first[0].body, 'ownerId'), false)
   await form.locator('[name=ioReadBps]').fill('8'); await form.locator('[name=ioWriteBps]').fill('4')
   const secondResponse = page.waitForResponse(response => response.request().method() === 'PATCH')
   await form.locator('[name=ioWriteBps]').press('Enter'); await secondResponse; await expect(status).toHaveAttribute('data-state', 'pending')
   const second = host.requests.filter(request => request.method === 'PATCH').at(-1)
   assert.equal(second.body.resources.ioReadBps, 8388608); assert.equal(second.body.resources.ioWriteBps, 4194304)
-  assert.equal(second.body.name, 'Renamed'); assert.equal(second.body.featureListId, featureId); assert.equal(Object.hasOwn(second.body, 'ownerId'), false)
-  host.setPlanMode('refused'); await form.locator('[name=name]').fill('Refused')
+  assert.equal(second.body.name, plan.name); assert.equal(second.body.featureListId, featureId); assert.equal(Object.hasOwn(second.body, 'ownerId'), false)
+  host.setPlanMode('refused'); await limit.fill('5')
   const refusal = page.waitForResponse(response => response.request().method() === 'PATCH')
   await save.click(); await refusal; await expect(status).toHaveAttribute('data-state', 'failed'); await expect(save).toBeEnabled()
   await expect(status).not.toContainText('untrusted-synthetic-detail')

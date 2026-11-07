@@ -30,6 +30,26 @@ const post = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'cont
 const refusal = async (promise: Promise<unknown>) => { try { await promise; return 'resolved' } catch (error) { return isXpanelError(error) ? [error.code, error.detail.stateChanged] : String(error) } }
 
 describe('monitoring workspace API', () => {
+  it('sweeps one account with a fresh root re-check and both audit records', async () => {
+    const swept = { state: 'confirmed', username: 'alice', signalled: 3, remaining: 0, exempt: 1, observedAt: '2026-10-27T12:00:01.000Z', verificationRequired: false }
+    const path = '/api/server/monitoring/processes/kill-user', body = { username: 'alice', killConfirmed: true }
+    const readHost = vi.fn(async (_caller: AuthenticatedCaller, _path: string, _body?: unknown): Promise<unknown> => swept), { value, emitAudit } = helpers({ readHost })
+    expect(await (await call(path, value, post(body)))!.json()).toEqual(swept)
+    expect(readHost.mock.calls[0]!.slice(1)).toEqual(['/host/monitoring/processes/kill-user', body])
+    expect(emitAudit.mock.calls.map(([entry]) => [entry.action, entry.outcome])).toEqual([['server.process.kill_user_requested', 'ok'], ['server.process.kill_user', 'ok']])
+    const hostForReseller = vi.fn(async () => swept)
+    expect(await refusal(call(path, helpers({ requireCaller: async () => caller('reseller'), readHost: hostForReseller }).value, post(body)))).toEqual(['FORBIDDEN', false])
+    expect(hostForReseller).not.toHaveBeenCalled()
+    expect((await call(path, value))!.headers.get('allow')).toBe('POST')
+    expect(await refusal(call(path, value, post({ username: 'alice' })))).toEqual(['VALIDATION', false])
+    const attempted = helpers({ readHost: vi.fn(async () => ({ ...swept, state: 'attempted', remaining: 2, verificationRequired: true })) })
+    expect(await (await call(path, attempted.value, post(body)))!.json()).toMatchObject({ state: 'attempted', remaining: 2 })
+    expect(attempted.emitAudit.mock.calls[1]![0].outcome).toBe('failed')
+    for (const forged of [{ ...swept, username: 'bob' }, { ...swept, state: 'confirmed', remaining: 1 }, { ...swept, state: 'unknown', remaining: 0, verificationRequired: true }, { ...swept, verificationRequired: true }]) {
+      const reply = helpers({ readHost: vi.fn(async () => forged) })
+      await expect(call(path, reply.value, post(body))).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { unknownOutcome: true } })
+    }
+  })
   it('requires root, exact methods and no selectors on fixed reads', async () => {
     const denied = helpers({ requireCaller: async () => caller('reseller') })
     for (const path of ['/api/server/monitoring/processes', '/api/server/monitoring/disk', '/api/server/monitoring/logs?unit=nginx.service', '/api/server/monitoring/performance']) expect(await refusal(call(path, denied.value))).toEqual(['FORBIDDEN', false])

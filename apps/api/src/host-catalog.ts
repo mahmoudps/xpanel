@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
-import { buildDeliveryCatalog, qualifyHostTools, type CatalogTool, type HostQualificationReport, type VerificationTarget } from '@xpanel/catalog'
+import { admitForQualification, buildDeliveryCatalog, qualifyHostTools, tools, type CatalogTool, type HostQualificationReport, type VerificationTarget } from '@xpanel/catalog'
 import type { AgentApp } from '@xpanel/agent'
 import { loadTrustedEvidenceBundle, type CapabilityRequirement } from '../../../scripts/evidence/runtime.mjs'
+import { readQualificationMode } from './qualification-mode.ts'
 
 export interface HostCatalogSource {
   fetch: AgentApp['fetch']
@@ -22,6 +23,8 @@ export interface QualifiedCatalogProvider {
   readonly acceptanceIdentity: string
   load(source: HostCatalogSource | null): Promise<readonly CatalogTool[]>
   reset(): void
+  /** Read fresh, so removing the switch closes the gate at once. */
+  qualificationMode(): boolean
 }
 
 const freeze = <T>(value: T): T => {
@@ -33,27 +36,34 @@ const freeze = <T>(value: T): T => {
 }
 
 /** Acceptance is captured once; host reports can only narrow this immutable snapshot. */
-export const createQualifiedCatalogProvider = (acceptance?: TrustedAcceptanceOptions): QualifiedCatalogProvider => {
+export const createQualifiedCatalogProvider = (acceptance?: TrustedAcceptanceOptions, readMode: () => boolean = readQualificationMode): QualifiedCatalogProvider => {
   // Invalid configured evidence throws before any listener is opened. No accepted fallback exists.
   const verified = acceptance ? loadTrustedEvidenceBundle(acceptance) : undefined
-  const base = freeze(structuredClone(buildDeliveryCatalog(verified?.evidence ?? [], verified?.target ?? null)))
+  // Without operator acceptance the shipped catalog applies: its delivery evidence is the reviewed release publication.
+  const base = freeze(structuredClone(verified ? buildDeliveryCatalog(verified.evidence, verified.target) : tools))
   const acceptanceIdentity = createHash('sha256').update(JSON.stringify(acceptance ? {
     digest: acceptance.expectedSha256, target: acceptance.expectedTarget, requirements: acceptance.expectedRequirements,
   } : { accepted: false })).digest('hex')
-  type Entry = { at: number; token: string; fetch: HostCatalogSource['fetch']; enabled: boolean; catalog: readonly CatalogTool[] }
+  type Entry = { at: number; token: string; fetch: HostCatalogSource['fetch']; enabled: boolean; admit: boolean; catalog: readonly CatalogTool[] }
   let cache = new WeakMap<object, Entry>()
   let lastEnabled: boolean | undefined
-  const close = (report: HostQualificationReport | null, enabled: boolean) => freeze(qualifyHostTools(base, report, enabled))
+  // Operator acceptance marks a qualified host: it never honours the lab switch.
+  const qualificationMode = (): boolean => !acceptance && readMode()
+  const close = (report: HostQualificationReport | null, enabled: boolean, admit: boolean) => {
+    const demoted = qualifyHostTools(base, report, enabled)
+    return freeze(admit ? admitForQualification(demoted, report) : demoted)
+  }
   return Object.freeze({
-    acceptanceIdentity,
+    acceptanceIdentity, qualificationMode,
     reset: () => { cache = new WeakMap() },
     async load(source: HostCatalogSource | null): Promise<readonly CatalogTool[]> {
       const enabled = process.env.XPANEL_HOST_QUALIFICATION !== 'off'
       if (lastEnabled !== enabled) { cache = new WeakMap(); lastEnabled = enabled }
-      if (!source || !enabled) return close(null, enabled)
+      if (!source || !enabled) return close(null, enabled, false)
+      const admit = qualificationMode()
       const key = source.identity ?? source.fetch
       const now = Date.now(), cached = cache.get(key)
-      if (cached && cached.token === source.token && cached.fetch === source.fetch && cached.enabled === enabled && now - cached.at < 15_000) return cached.catalog
+      if (cached && cached.token === source.token && cached.fetch === source.fetch && cached.enabled === enabled && cached.admit === admit && now - cached.at < 15_000) return cached.catalog
       let report: HostQualificationReport | null = null
       try {
         const response = await source.fetch(new Request('http://agent.local/health', { headers: { 'x-xpanel-agent-token': source.token }, signal: AbortSignal.timeout(5000) }))
@@ -68,8 +78,8 @@ export const createQualifiedCatalogProvider = (acceptance?: TrustedAcceptanceOpt
           }
         }
       } catch { /* An unread, failed or expired host report never establishes readiness. */ }
-      const catalog = close(report, enabled)
-      cache.set(key, { at: now, token: source.token, fetch: source.fetch, enabled, catalog })
+      const catalog = close(report, enabled, admit)
+      cache.set(key, { at: now, token: source.token, fetch: source.fetch, enabled, admit, catalog })
       return catalog
     },
   })
@@ -80,3 +90,4 @@ let defaultProvider: QualifiedCatalogProvider | undefined
 export const resetQualifiedCatalogCache = (): void => { defaultProvider?.reset() }
 export const loadQualifiedCatalog = (source: HostCatalogSource | null): Promise<readonly CatalogTool[]> =>
   (defaultProvider ??= createQualifiedCatalogProvider()).load(source)
+export const qualificationModeOn = (): boolean => (defaultProvider ??= createQualifiedCatalogProvider()).qualificationMode()

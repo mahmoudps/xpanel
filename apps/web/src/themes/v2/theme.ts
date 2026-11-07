@@ -1,6 +1,6 @@
 import { projectMailSurfaceView } from '../../models/mail.ts'
 import { projectPanelSurface, projectWhmSurface } from '../../models/theme-surface.ts'
-import type { ThemeSurface, ThemeViewProps, UiTheme } from '../contract.ts'
+import type { ThemeSurface, ThemeViewProps, ThemePackageTokens, UiTheme } from '../contract.ts'
 import { v2Assets } from './assets.ts'
 import { renderV2Document } from './document.ts'
 import { v2Messages } from './messages.ts'
@@ -25,6 +25,18 @@ function coreUnavailable(surface: ThemeSurface, props: ThemeViewProps & { readon
 /** Complete composition; registration is a separate core decision after controller conformance. */
 export const v2Theme: UiTheme = Object.freeze<UiTheme>({
   id: 'v2', assets: v2Assets, messages: v2Messages, renderDocument: renderV2Document,
+  // Colors and radii an uploaded package may change; spacing, type and focus stay fixed by the standards.
+  packageTokens: Object.freeze<ThemePackageTokens>({
+    required: ['--accent', '--bg', '--surface', '--text'],
+    optional: ['--subtle', '--sunken', '--line', '--line-strong', '--text-2', '--muted', '--accent-fill', '--accent-fill-hover', '--accent-soft', '--accent-line', '--on-accent',
+      '--nav', '--nav-2', '--nav-line', '--nav-text', '--nav-muted', '--nav-strong', '--radius-card', '--radius-control'],
+    radii: ['--radius-card', '--radius-control'],
+    contrast: [['--text', '--surface'], ['--text', '--bg']],
+    defaults: {
+      light: { '--accent': '#1d5bd6', '--bg': '#f3f5f9', '--surface': '#ffffff', '--text': '#0e1726' },
+      dark: { '--accent': '#84a9fa', '--bg': '#0a1220', '--surface': '#111c2e', '--text': '#e7edf6' },
+    },
+  }),
   renderLogin: renderV2Login, renderStatus: renderV2Status, renderUnavailable,
   renderPanel: createV2PanelSurface(projectPanelSurface, props => coreUnavailable('xpanel', props)),
   renderWhm: createV2WhmSurface(projectWhmSurface, props => coreUnavailable('xwhm', props)),

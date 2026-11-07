@@ -57,7 +57,7 @@ describe('database-only desired state applies as host effects', { tags: ['featur
     return { account, plan }
   }
 
-  it('applies a database-only change, then returns to noop without a second effect', async () => {
+  it('applies a database-only change, then returns to noop without a second effect', { tags: ['slow'] }, async () => {
     const { account } = await seed()
     const reconciler = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os })
     const initial = await reconciler.reconcile({ actor: 'root', mailAuth: null })
@@ -79,7 +79,7 @@ describe('database-only desired state applies as host effects', { tags: ['featur
     assert.equal(active.checksum, initial.generation.checksum)
   })
 
-  it('applies once for a legacy manifest that predates the host-effect identity, then noops', async () => {
+  it('applies once for a legacy manifest that predates the host-effect identity, then noops', { tags: ['slow'] }, async () => {
     const { account } = await seed()
     const reconciler = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os })
     const initial = await reconciler.reconcile({ actor: 'root', mailAuth: null })

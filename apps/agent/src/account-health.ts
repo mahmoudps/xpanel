@@ -1,5 +1,5 @@
 import { lstat } from 'node:fs/promises'
-import { assertAcl, availableHandlers, fail } from '@xpanel/core'
+import { assertAcl, availableHandlers, effectivePlan, fail } from '@xpanel/core'
 import type { Account, ApacheMpm, Certificate, Domain, Engine, FeatureList, Plan, Reseller, ServiceUser } from '@xpanel/core'
 import { SUPPORTED_PHP_VERSIONS } from '@xpanel/os'
 import { parseRepquotaUsage } from './host-monitoring.ts'
@@ -92,7 +92,7 @@ function quotaReader(host: AccountHealthHost): (home: string) => Promise<QuotaRe
 }
 
 async function accountChecks(account: Account, state: AccountHealthState, host: AccountHealthHost | null, quota: ((home: string) => Promise<QuotaRead>) | null, now: number): Promise<HealthCheck[]> {
-  const plan = state.plans.find(entry => entry.id === account.planId)
+  const stored = state.plans.find(entry => entry.id === account.planId), plan = stored && effectivePlan(stored, account)
   const features = plan ? state.featureLists.find(entry => entry.id === plan.featureListId) : undefined
   const noHost = (id: HealthCheckId): HealthCheck => check(id, 'unavailable', 'host_unavailable', 'native host observation is unavailable')
   const checks: HealthCheck[] = [

@@ -25,9 +25,13 @@ export * from './composer-command.ts'
 export * from './git-command.ts'
 export * from './gpg-command.ts'
 export * from './security-observation-command.ts'
+export * from './ssh-host-command.ts'
 export * from './mail-quarantine-command.ts'
 export * from './mail-queue-command.ts'
 export * from './mail-log-command.ts'
+export * from './mail-trace-command.ts'
+export * from './mail-mailbox-actions-command.ts'
+export * from './mailbox-repair-command.ts'
 export * from './ftp-log-command.ts'
 export * from './monitoring-command.ts'
 export { isMailServerCommand } from './mail-server-command.ts'
@@ -66,7 +70,10 @@ export {
   itkAvailable,
   phpInstallPlan,
   resolveInstallOptions,
+  rhelAwstatsFile,
 } from './install.ts'
+export { EL_SOURCE_BUILDS, releaseFeatures } from './release-packages.ts'
+export type { ElSourceBuild, ReleaseFeature } from './release-packages.ts'
 export { ACME_DIR, ACME_PARENT, acmeDirAction, acmeTraverseAclArgv, acmeTraverseProbeArgv, assertNginxUser } from './acme-access.ts'
 export {
   SAFE_ARG,
@@ -79,4 +86,3 @@ export {
 } from './validate.ts'
 export * from './application-artifact.ts'
 export * from './composer-job-command.ts'
-export * from './account-package-command.ts'

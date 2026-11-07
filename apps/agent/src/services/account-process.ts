@@ -1,5 +1,5 @@
 import { posix } from 'node:path'
-import { fail, suspensionEffects } from '@xpanel/core'
+import { effectivePlan, fail, suspensionEffects } from '@xpanel/core'
 import type { Account, OsProfile, Plan, CronExecutionStatus } from '@xpanel/core'
 import { system } from '@xpanel/render'
 import type { AgentExecutor } from '../executor.ts'
@@ -188,7 +188,7 @@ export class AccountProcessServiceAdapter {
       }
     }
 
-    const fm = new JailedFileManager(input.account.home, input.plan.resources.diskMb, {
+    const fm = new JailedFileManager(input.account.home, effectivePlan(input.plan, input.account).resources.diskMb, {
       account: input.account,
       ...(this.accountFileRunner ? { runner: this.accountFileRunner } : {}),
     })

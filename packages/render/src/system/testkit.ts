@@ -5,7 +5,7 @@ import type { Account, FirewallRule, OsProfile, PackageRole, Plan, ResourceLimit
 const SERVICE_ROLES: ServiceRole[] = [
   'nginx', 'apache', 'openlitespeed', 'mariadb', 'postgresql', 'postfix', 'dovecot', 'powerdns', 'redis', 'ftp', 'sshd', 'nftables',
 ]
-const PACKAGE_ROLES: PackageRole[] = [...SERVICE_ROLES, 'apache-itk', 'apache-suexec', 'apache-fcgi', 'quota', 'acme', 'modsecurity']
+const PACKAGE_ROLES: PackageRole[] = [...SERVICE_ROLES, 'apache-itk', 'apache-suexec', 'apache-fcgi', 'quota', 'acme', 'modsecurity', 'web-stats', 'webdav', 'caldav']
 
 const roles = <K extends string>(keys: K[], f: (k: K) => string): Record<K, string> =>
   Object.fromEntries(keys.map((k) => [k, f(k)])) as Record<K, string>

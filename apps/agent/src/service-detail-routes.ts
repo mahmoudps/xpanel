@@ -9,6 +9,7 @@ export interface ServiceDetailRouteContext {
   /** Null when this agent is not running with the native Linux host executor. */
   host: ServiceDetailHost | null
   readState: () => Promise<ServiceDetailState>
+  family?: 'debian' | 'rhel'
   now?: () => Date
 }
 
@@ -26,7 +27,7 @@ export async function handleServiceDetailRoute(_req: Request, url: URL, method: 
   if (!ctx.host) return fail('PRECONDITION_FAILED', 'service detail requires the native Linux host executor', { stateChanged: false })
   const input = { host: ctx.host, readState: ctx.readState, ...(ctx.now ? { now: ctx.now } : {}) }
   if (kind === 'dns') return json(await readDnsServiceDetail(input))
-  if (kind === 'ftp') return json(await readFtpServiceDetail(input))
+  if (kind === 'ftp') return json(await readFtpServiceDetail({ ...input, ...(ctx.family ? { family: ctx.family } : {}) }))
   if (kind === 'certificates') return json(await readCertificatesServiceDetail(input))
   let state: ServiceDetailState
   try { state = await ctx.readState() } catch { return fail('PRECONDITION_FAILED', 'saved DNS state could not be read', { stateChanged: false }) }

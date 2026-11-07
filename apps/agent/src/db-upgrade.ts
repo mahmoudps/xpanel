@@ -1,5 +1,6 @@
+import { assertLocalDatabaseServer } from './db-profiles.ts'
 import { createHash } from 'node:crypto'
-import { fail, isXpanelError, msgid } from '@xpanel/core'
+import { DB_UPGRADE_WARNINGS, fail, isXpanelError, msgid } from '@xpanel/core'
 import { APT_UPGRADE_ENV, isPackageManagerCommand, packageUpgradeArgv } from '../../../packages/os/src/package-manager-command.ts'
 import { DB_ADMIN_DEFAULTS_FILE, DB_UPGRADE_BACKUP_DIR, DB_UPGRADE_BACKUP_DIR_ARGV, MARIADB_UPGRADE_ARGV, dbUpgradeBackupFile, isDatabaseEngineCommand, mariadbTryRestartArgv, mariadbUpgradeDumpArgv } from '../../../packages/os/src/db-engines-command.ts'
 import { comparePackageVersions, isSelectablePackage, readSystemUpdatePlan } from './package-manager.ts'
@@ -9,7 +10,7 @@ import { readDbPackages } from './db-engines.ts'
 import type { DbFamily, DbRun } from './db-engines.ts'
 
 /** Server version as reported by SELECT VERSION(); the same reviewed statement the database pages use. */
-export interface DbUpgradeSql { version(): Promise<string> }
+export interface DbUpgradeSql { version(): Promise<string>; isRemote?(): Promise<boolean> }
 export interface DbUpgradeObservation {
   state: 'read' | 'unavailable'
   reason: 'unsupported-host' | 'not-installed' | 'package-manager-unavailable' | 'package-manager-busy' | 'invalid-package-manager-output' | 'admin-credentials-unsupported' | null
@@ -106,9 +107,13 @@ export async function handleDbUpgradeRoute(req: Request, url: URL, method: strin
   if (!apply) { const observed = await read(); await fresh(); return json(200, observed) }
   if (req.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return fail('VALIDATION', 'JSON is required', { stateChanged: false })
   let body: unknown
-  try { const text = await req.text(); body = text.length <= 256 ? JSON.parse(text) : null } catch { body = null }
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || typeof (body as { expectedRevision?: unknown }).expectedRevision !== 'string' || !/^[0-9a-f]{64}$/.test((body as { expectedRevision: string }).expectedRevision)) return fail('VALIDATION', 'exactly the observed expectedRevision is required', { stateChanged: false })
+  try { const text = await req.text(); body = text.length <= 512 ? JSON.parse(text) : null } catch { body = null }
+  const parsed = body as { expectedRevision?: unknown; acknowledgedWarnings?: unknown } | null
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.keys(parsed).length !== 2 || typeof parsed.expectedRevision !== 'string' || !/^[0-9a-f]{64}$/.test(parsed.expectedRevision) || !Array.isArray(parsed.acknowledgedWarnings)) return fail('VALIDATION', 'the reviewed upgrade revision and acknowledged warnings are required', { stateChanged: false })
+  const acknowledged: readonly unknown[] = parsed.acknowledgedWarnings
+  if (!DB_UPGRADE_WARNINGS.every(warning => acknowledged.includes(warning))) return fail('PRECONDITION_FAILED', 'every upgrade warning must be acknowledged', { stateChanged: false, reason: 'warnings_not_acknowledged', warnings: DB_UPGRADE_WARNINGS })
   if (!deps.submitJob || !deps.sql || !deps.run) return fail('PRECONDITION_FAILED', 'the host job runner or MariaDB administration is unavailable; nothing was submitted', { stateChanged: false })
+  await assertLocalDatabaseServer(deps.sql)
   const observed = await read()
   if (observed.revision !== (body as { expectedRevision: string }).expectedRevision) return fail('CONFLICT', 'the MariaDB upgrade plan changed since it was reviewed', { stateChanged: false, currentRevision: observed.revision })
   const plan = buildDbUpgradeJobPlan({ observed, now: (deps.now ?? (() => new Date()))(), sql: deps.sql, assertRoot: fresh })

@@ -144,6 +144,16 @@ describe('host services', () => {
     expect(host.effects).toEqual([serviceConfigTest(unit, os), ['/usr/bin/systemctl', 'restart', '--', unit]])
   })
 
+  it('refuses a stopped service that boot has disabled and leaves it stopped', async () => {
+    const stopped = async (argv: string[]): Promise<HostCommandResult> => {
+      if (argv[1] === 'show') return command(argv.at(-1) === 'pdns.service' ? 'loaded\ninactive\n' : 'not-found\ninactive\n')
+      if (argv[1] === 'list-units') return command('pdns.service loaded inactive dead')
+      if (argv[1] === 'list-unit-files') return command('pdns.service disabled enabled')
+      throw new Error('no effect may run: ' + argv.join(' '))
+    }
+    await expect(restartHostService(stopped, 'pdns', debian)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { reason: 'service_disabled', stateChanged: false } })
+  })
+
   it('restarts a daemon without an offline checker directly', async () => {
     const host = fakeHost(['postgresql.service'])
     await restartHostService(host.run, 'postgresql', el)

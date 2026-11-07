@@ -48,7 +48,7 @@ const fixture = (hostAvailable = true) => {
     await opts.certificateGuard?.(snapshot.certificates.find(row => row.id === certificateId) ?? null, snapshot.domains)
     snapshot.certificates = snapshot.certificates.filter(row => row.id !== certificateId); snapshot.domains.forEach(row => { if (row.certificateId === certificateId) row.certificateId = null }); snapshot.revision++; return true
   })
-  const store = { getAccount: async () => account, getAccountByUsername: async (name: string) => name === account.username ? account : null,
+  const store = { rootDir: '/nonexistent', getAccount: async () => account, getAccountByUsername: async (name: string) => name === account.username ? account : null,
     getRevision: async () => snapshot.revision, readSnapshot: async () => snapshot, listAccounts: async () => snapshot.accounts,
     listDomains: async () => snapshot.domains, saveCertificateBinding: save, deleteCertificate: remove } as unknown as StateStore
   const agent = vi.fn(async (path: string, options: { body?: unknown }) => {

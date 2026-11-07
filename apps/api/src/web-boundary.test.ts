@@ -325,7 +325,7 @@ describe('production web renderer boundary regressions', () => {
   it.each(['no-acl', 'root-only', 'route-acl'] as const)('denies reseller document admission before a hosting snapshot: %s', async condition => {
     const reseller = await state.store.createReseller({ username: 'boundaryreseller', passwordHash: PUBLIC_VECTOR,
       acl: condition === 'no-acl' ? [] : ['list-accounts'], maxAccounts: 2, totalDiskMb: 1024,
-      totalBandwidthMb: 2048, oversell: false, nameservers: [], delegatedIps: [],
+      totalBandwidthMb: 2048, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [],
     })
     const principal = await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash: PUBLIC_VECTOR })
     const cookie = await session(principal.id)
@@ -344,7 +344,7 @@ describe('production web renderer boundary regressions', () => {
   it.each([false, true])('hydrates only the authenticated reseller security model with list-accounts=%s', async listAccounts => {
     const reseller = await state.store.createReseller({ username: 'selfreseller', passwordHash: PUBLIC_VECTOR,
       acl: listAccounts ? ['list-accounts'] : [], maxAccounts: 2, totalDiskMb: 1024,
-      totalBandwidthMb: 2048, oversell: false, nameservers: [], delegatedIps: [],
+      totalBandwidthMb: 2048, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [],
     })
     const principal = await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash: PUBLIC_VECTOR })
     if (listAccounts) await setTotpSecret(db.db, principal.id, new Uint8Array(32))
@@ -359,6 +359,7 @@ describe('production web renderer boundary regressions', () => {
       surface: 'xwhm', mfaRuntimeMode: 'optional', activeRoute: '/whm/security/sign-in',
       security: { totpEnabled: listAccounts },
       visibility: { principal: { kind: 'reseller', id: principal.id, username: principal.username } },
+      noticePosition: 'bottom-right', personal: { notifications: { announcements: true, bandwidth: true, disk: true }, onboardingDismissed: false },
     })
     expect(accountSecurityControls(html)).toHaveLength(1)
     expect(html).toContain(listAccounts ? 'data-mfa-enabled="true"' : 'data-auth-state="optional"')
@@ -381,7 +382,7 @@ describe('production web renderer boundary regressions', () => {
 
   it.each(['missing', 'mismatched', 'disabled', 'password-change', 'revoked', 'expired', 'mfa-pending', 'api-token'] as const)('does not open reseller self security for a %s actor or session', async condition => {
     const reseller = condition === 'missing' ? undefined : await state.store.createReseller({ username: 'guardreseller', passwordHash: PUBLIC_VECTOR,
-      acl: [], maxAccounts: 2, totalDiskMb: 1024, totalBandwidthMb: 2048, oversell: false, nameservers: [], delegatedIps: [],
+      acl: [], maxAccounts: 2, totalDiskMb: 1024, totalBandwidthMb: 2048, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [],
     })
     const principal = await createResellerPrincipal(db.db, {
       ...(reseller ? { id: reseller.id } : {}), username: condition === 'mismatched' ? 'differentactor' : 'guardreseller', passwordHash: PUBLIC_VECTOR,
@@ -638,7 +639,7 @@ describe('production web renderer boundary regressions', () => {
     const snapshot = Object.freeze(tools.slice(0, 1))
     expect(snapshot.some(tool => tool.status === 'verified')).toBe(false)
     const load = vi.fn(async (_source: HostCatalogSource | null) => snapshot)
-    const catalogProvider = { acceptanceIdentity: 'synthetic-unaccepted-snapshot', load, reset: () => {} }
+    const catalogProvider = { acceptanceIdentity: 'synthetic-unaccepted-snapshot', load, reset: () => {}, qualificationMode: () => false }
     const render = await createDefaultWebRenderer({ store: state.store, db: db.db, serverSecret: SERVER_SECRET, catalogProvider })
     for (const [path, status] of [['/whm/accounts', 200], ['/whm/not-a-registered-page', 404], ['/whm/preferences', 200]] as const) {
       const response = await render(request(path, cookie))

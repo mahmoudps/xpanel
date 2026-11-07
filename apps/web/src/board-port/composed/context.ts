@@ -1,4 +1,4 @@
-import type { Account, Domain, Plan, Principal, Reseller, ServiceUser } from '@xpanel/core'
+import type { Account, Plan, Principal, Reseller, ServiceUser } from '@xpanel/core'
 import type { Locale } from '../../i18n.ts'
 /** Read models supplied by the authenticated adapter, never by request query flags.
  * Omitted arrays have not been read; an empty array is a completed empty read.
@@ -12,10 +12,8 @@ export interface ComposedContext {
   reseller?: Pick<Reseller, 'id' | 'acl'>
   account?: Account
   plan?: Plan
-  domains?: readonly Domain[]
   serviceUsers?: readonly ServiceUser[]
   accounts?: readonly Account[]
-  resellers?: readonly Reseller[]
   usage?: {
     phpVersion: string | null
     diskBytes: number | null
@@ -27,7 +25,7 @@ export interface ComposedContext {
     bandwidthMonth?: { month: string; totalBytes: number | null; limitBytes: number | null; usedPercent: number | null; enforced: boolean; limited: boolean }
   }
   /** Only logical reader names, never raw host errors or credentials. */
-  failedReads?: readonly ('domains' | 'serviceUsers' | 'accounts' | 'resellers' | 'usage')[]
+  failedReads?: readonly ('serviceUsers' | 'accounts' | 'usage')[]
 }
 
 export const canReadSelectedAccount = (context: ComposedContext): boolean => {

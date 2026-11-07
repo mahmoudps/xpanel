@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { fail } from '@xpanel/core'
 import type { Account } from '@xpanel/core'
 import type { AuthenticatedCaller } from './auth.ts'
-import { handleBackupFileRestoreWorkspaceRoute } from './backup-file-restore-workspace.ts'
-import type { BackupFileRestoreWorkspacePorts } from './backup-file-restore-workspace.ts'
+import { handleBackupFileRestoreWorkspaceRoute, handleOwnerFileRestorationRoute } from './backup-file-restore-workspace.ts'
+import type { BackupFileRestoreWorkspacePorts, OwnerFileRestorationPorts } from './backup-file-restore-workspace.ts'
 
 const FILE = 'xpanel-backup-alice-20261026T100000Z.tar.gz', REVISION = 'a'.repeat(64), SHA = 'b'.repeat(64)
 const caller = (kind: string, id = kind + '-1', extra: Record<string, unknown> = {}) => ({ principal: { kind, id, username: kind }, sessionId: 'session-1', apiTokenId: null, scopes: [], ...extra }) as unknown as AuthenticatedCaller
@@ -113,5 +113,52 @@ describe('WHM file restore API', () => {
     await expect(call(foreign.value, '/api/backups/files/alice')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false } })
     const counts = ports({ callAgent: vi.fn(async () => Response.json({ ...(replies['/accounts/alice/backup-files/restore'] as object), counts: { restored: 0, 'skipped-exists': 1, failed: 0, 'not-attempted': 0 } })) })
     await expect(call(counts.value, '/api/backups/files/alice/restore', { file: FILE, paths: ['a'], destination: 'new-folder', expectedRevision: REVISION })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+  })
+})
+
+describe('owner file and directory restoration API', () => {
+  const owner = caller('user', 'user-1', {})
+  ;(owner.principal as { accountId?: string }).accountId = alice.id
+  const ownerPorts = (overrides: Partial<OwnerFileRestorationPorts> = {}) => {
+    const forwarded: { path: string; method?: string; body?: unknown }[] = []
+    const value: OwnerFileRestorationPorts = {
+      requireCaller: vi.fn(async () => owner),
+      getAccount: vi.fn(async (id: string) => id === alice.id ? alice : null),
+      assertCanAccessAccount: vi.fn(async () => undefined),
+      assertAccountFeatures: vi.fn(async () => undefined),
+      callAgent: vi.fn(async (path, options) => { forwarded.push({ path, method: options.method, body: options.body }); return Response.json(replies[path]) }),
+      ...overrides,
+    }
+    return { value, forwarded }
+  }
+  const ownerCall = (p: OwnerFileRestorationPorts, path: string, body?: unknown) => {
+    const url = new URL('http://localhost' + path), method = body === undefined ? 'GET' : 'POST'
+    return handleOwnerFileRestorationRoute(new Request(url, body === undefined ? { method } : { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), url, method, p)
+  }
+  it('binds every request to the session account and its file-restoration feature', async () => {
+    const { value, forwarded } = ownerPorts()
+    expect((await (await ownerCall(value, '/api/account/file-restoration'))!.json()).archives).toHaveLength(1)
+    expect((await (await ownerCall(value, '/api/account/file-restoration/restore', { file: FILE, paths: ['public_html'], destination: 'new-folder', expectedRevision: REVISION }))!.json()).counts.restored).toBe(1)
+    expect(forwarded.map(item => item.path)).toEqual(['/accounts/alice/backup-files', '/accounts/alice/backup-files/restore'])
+    expect(value.assertAccountFeatures).toHaveBeenCalledWith(owner, alice, ['file-restoration'])
+    expect(await ownerCall(value, '/api/backups/files')).toBeNull()
+  })
+  it('refuses mail, panel settings and trash paths with path_not_restorable before transport', async () => {
+    const { value, forwarded } = ownerPorts()
+    for (const path of ['mail/example.test/info/cur/1', 'etc', '.xpanel/site-publisher', '.trash/x']) {
+      await expect(ownerCall(value, '/api/account/file-restoration/preview', { file: FILE, paths: ['public_html', path], destination: 'replace' })).rejects.toMatchObject({ code: 'VALIDATION', detail: { reason: 'path_not_restorable', stateChanged: false } })
+    }
+    expect(forwarded).toEqual([])
+  })
+  it('refuses resellers, root, team and mailbox sessions and feature-disabled plans', async () => {
+    for (const kind of ['root', 'reseller', 'team']) {
+      const { value } = ownerPorts({ requireCaller: vi.fn(async () => caller(kind)) })
+      await expect(ownerCall(value, '/api/account/file-restoration')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    }
+    const { value, forwarded } = ownerPorts({ assertAccountFeatures: vi.fn(async () => fail('FORBIDDEN', 'disabled')) })
+    await expect(ownerCall(value, '/api/account/file-restoration')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(forwarded).toEqual([])
+    const url = new URL('http://localhost/api/account/file-restoration?username=bob')
+    await expect(handleOwnerFileRestorationRoute(new Request(url), url, 'GET', ownerPorts().value)).rejects.toMatchObject({ code: 'VALIDATION' })
   })
 })

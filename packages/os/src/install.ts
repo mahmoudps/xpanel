@@ -22,6 +22,8 @@ const REMI = 'https://rpms.remirepo.net/enterprise'
 const DEBIAN_APACHE_MODULES = [
   'alias', 'dir', 'mime', 'authz_core', 'authz_host', 'setenvif', 'rewrite', 'headers', 'remoteip', 'ssl',
   'proxy', 'proxy_fcgi', 'actions', 'cgi', 'suexec', 'fcgid', 'auth_basic', 'authn_core', 'authn_file', 'authz_user',
+  // Apache Handlers: server-parsed (mod_include) and type-map (mod_negotiation); EL loads both from 00-base.conf.
+  'include', 'negotiation',
 ]
 // status.conf serves /server-status to `Require local`, and every tenant process can reach the
 // loopback backend directly: it would list all accounts' requests
@@ -33,7 +35,9 @@ const DEBIAN_DISABLED_SITES = ['000-default']
 // unattended-upgrades often holds the dpkg lock on a freshly booted host
 const DPKG_LOCK_TIMEOUT_SEC = 600
 const SYSTEM_USER = /^[a-z_][a-z0-9_-]{0,31}$/
-const BASE_ROLES: readonly PackageRole[] = ['mariadb', 'postgresql', 'redis', 'sshd', 'nftables', 'quota', 'acme']
+const BASE_ROLES: readonly PackageRole[] = ['mariadb', 'postgresql', 'redis', 'sshd', 'nftables', 'quota', 'acme', 'web-stats', 'webdav', 'caldav']
+// Web Disk runs one lighttpd per login as the account; the distribution's own daemon (started on :80 by Debian) stays off.
+export const DISTRO_DAEMONS_OFF: readonly string[] = ['lighttpd']
 /** started right away: the panel needs its databases before the first reconcile */
 const DATA_SERVICES: readonly ServiceRole[] = ['mariadb', 'postgresql', 'redis']
 const OPTION_KEYS = new Set(['engine', 'phpVersions', 'withMail', 'withDns', 'withFtp', 'apacheMpm', 'withModSecurity', 'withMariaDb'])
@@ -328,12 +332,15 @@ const debianPlan = (p: XpanelOsProfile, o: ExtendedResolvedInstallOptions): Inst
   ]
 }
 
-/** Everything after the packages are on the host: web server modules, distro FPM off, service enablement. */
+const distroDaemonsOff = (): InstallAction[] => DISTRO_DAEMONS_OFF.flatMap(unit => [systemd('stop', unit), systemd('disable', unit)])
+
+/** Everything after the packages are on the host: web server modules, distro FPM and daemons off, service enablement. */
 const configurationActions = (p: XpanelOsProfile, o: ExtendedResolvedInstallOptions): InstallAction[] => p.family === 'debian'
-  ? [...apacheMpmActions(p, o.apacheMpm), ...apacheModuleActions(p), ...distroFpmOff(p, o.phpVersions), ...serviceActions(p, o)]
+  ? [...apacheMpmActions(p, o.apacheMpm), ...apacheModuleActions(p), ...distroFpmOff(p, o.phpVersions), ...distroDaemonsOff(), ...serviceActions(p, o)]
   : [
       exec([requireBin(p.bin.postgresqlSetup, 'postgresql-setup'), '--initdb'], `${p.paths.postgresqlDataDir}/PG_VERSION`),
       ...distroFpmOff(p, o.phpVersions),
+      ...distroDaemonsOff(),
       ...serviceActions(p, o),
     ]
 
@@ -430,6 +437,18 @@ const rhelSslFile = (p: XpanelOsProfile): RenderedFile[] =>
         'SSLSessionCacheTimeout 300',
       ])]
 
+/**
+ * EPEL's AWStats ships conf.d/awstats.conf, a ScriptAlias admitted by `Require local`; behind the nginx edge every visitor
+ * arrives from loopback, so it stays as an empty managed file. The statistics run executes awstats.pl itself.
+ */
+export const rhelAwstatsFile = (p: XpanelOsProfile): RenderedFile[] =>
+  p.packages['web-stats'].includes('awstats')
+    ? [rootFile(`${assertAbsolutePath(p.paths.apacheVhostDir).replace(/\/$/, '')}/awstats.conf`, [
+        '# Managed by xPanel: the AWStats CGI is not published; reports are generated per account and shown in the panel.',
+        '# Kept in place so that awstats package updates do not restore the stock file.',
+      ])]
+    : []
+
 /** EL welcome.conf stays as an empty managed file: httpd updates restore it when it is deleted. */
 const rhelWelcomeFile = (p: XpanelOsProfile): RenderedFile[] =>
   p.paths.apacheWelcomeConf === null
@@ -457,6 +476,7 @@ export const installFiles = (profile: XpanelOsProfile, options: ExtendedInstallO
       rhelMainFile(profile),
       ...rhelSslFile(profile),
       ...rhelWelcomeFile(profile),
+      ...rhelAwstatsFile(profile),
       ...suexecFile(profile),
     ]
   }

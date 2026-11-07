@@ -3,7 +3,7 @@ import { canOpenRegisteredRoute, isToolAuthorized, tools, type CatalogTool, type
 import type { Locale } from '../../../i18n.ts'
 import { v2Messages } from '../messages.ts'
 import { renderV2Document } from '../document.ts'
-import { renderV2Shell, type V2ShellProps } from './shell.ts'
+import { renderV2Shell, SHELL_CSS, type V2ShellProps } from './shell.ts'
 
 // Every tool qualified, so the sidebar shows the full role-filtered navigation.
 const catalog = tools.map(tool => ({ ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } }))
@@ -65,6 +65,10 @@ describe('v2 shell', () => {
     const document = renderV2Document({ htmlAttributes: 'lang="en" dir="ltr" data-theme="dark" data-surface="xwhm" data-realtime-enabled="true"', htmlAttributeSuffix: ' data-ui-theme="v2"', faviconHref: '/favicon.svg', headHtml: '', title: 'Accounts', bodyHtml: html })
     const htmlTag = document.match(/<html[^>]*>/)![0]
     for (const name of CONTRACT.documentAttributes) expect(htmlTag, name).toContain(` ${name}="`)
+  })
+
+  it('lets the search button shrink below its nowrap label on a phone', () => {
+    expect(SHELL_CSS).toMatch(/\.v2-search\{[^}]*min-width:0/)
   })
 
   it('keeps the element shapes the runtime relies on', () => {

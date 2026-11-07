@@ -1,6 +1,7 @@
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { escapeHtml } from '../../../html.ts'
 import { gitHistoryClientTemplates } from '../settings/utility-client-templates.ts'
+import { renderV2GitHistoryBrowser } from './gitweb.ts'
 import { deniedOperationAuthority, operationButton, operationCard, operationContext, operationFacts, operationField, operationPage, operationTable, unreadRow, type PanelOperationAuthority } from './common.ts'
 
 /** Repository requests and revision/HEAD guards stay in the existing core controller. */
@@ -21,7 +22,7 @@ ${operationField('v2-git-url', t(msgid('Public HTTPS clone URL')), '<input id="v
 ${operationField('v2-git-branch', t(msgid('Existing branch')), '<select id="v2-git-branch" dir="ltr" data-git-branch disabled><option value="">—</option></select>')}<div class="v2-panel-operation-actions">${operationButton(t(msgid('Switch branch')), { 'data-git-checkout': true })}${operationButton(t(msgid('Pull fast-forward only')), { 'data-git-pull': true })}</div>
 <p>${escapeHtml(t(msgid('Switching and pulling require a clean working tree. Commit or discard your changes through your own Git workflow first.')))}</p>
 ${operationTable('v2-git-history', t(msgid('Recent commits')), [t(msgid('Commit')), t(msgid('Date')), t(msgid('Message'))], { 'data-git-history': true }, unreadRow(3, t(msgid('History has not been read.'))))}`)
-  const deployment = operationCard('v2-git-deployment', t(msgid('Deployment tasks')), `<p>${escapeHtml(t(msgid('Deployment tasks and Git web access are unavailable. Repository actions do not publish your website.')))}</p>${operationButton(t(msgid('Deploy')))}`)
+  const deployment = operationCard('v2-git-deployment', t(msgid('Deployment tasks')), `<p>${escapeHtml(t(msgid('Deploy runs the deployment.tasks of .cpanel.yml at the current commit, inside your account jail. It needs shell access, a clean working tree and at least one commit.')))}</p>${operationFacts([{ label: t(msgid('Last deployed')), valueHtml: `<bdi dir="ltr" data-git-deployed>${escapeHtml(unread)}</bdi>` }])}<div class="v2-panel-operation-actions">${operationButton(t(msgid('Deploy')), { 'data-git-deploy': true })}</div><p>${escapeHtml(t(msgid('Git web access is unavailable.')))}</p>`)
   return operationPage(props, '/files/git', t(msgid('Git & deployments')), t(msgctxt('theme:v2', 'Inspect account-confined repositories and review each branch or fast-forward change.')),
-    `<div data-account-git data-account="${escapeHtml(account?.id ?? '')}" data-git-manage="${canManage}" class="v2-panel-operation-stack">${gitHistoryClientTemplates()}<div class="v2-panel-operation-columns"><div class="v2-panel-operation-stack">${repositories}${create}${details}</div><aside class="v2-panel-operation-stack" aria-label="${escapeHtml(t(msgid('Deployment tasks')))}">${deployment}</aside></div></div>`, undefined, authority)
+    `<div data-account-git data-account="${escapeHtml(account?.id ?? '')}" data-git-manage="${canManage}" class="v2-panel-operation-stack">${gitHistoryClientTemplates()}<div class="v2-panel-operation-columns"><div class="v2-panel-operation-stack">${repositories}${create}${details}${renderV2GitHistoryBrowser(t, canManage)}</div><aside class="v2-panel-operation-stack" aria-label="${escapeHtml(t(msgid('Deployment tasks')))}">${deployment}</aside></div></div>`, undefined, authority)
 }

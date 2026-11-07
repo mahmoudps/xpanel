@@ -8,12 +8,15 @@ import { connect as tlsConnect } from 'node:tls'
 import type { TLSSocket } from 'node:tls'
 import { posix } from 'node:path'
 import { Readable } from 'node:stream'
-import { fail, isXpanelError } from '@xpanel/core'
+import { COMPRESSION_LEVEL_KEY, fail, isAccountHome, isXpanelError } from '@xpanel/core'
 import type { Account, Database } from '@xpanel/core'
 import { readCpanelArchive } from '@xpanel/lifecycle'
+import { services } from '@xpanel/render'
 import type { Body, ImportPlan, ImportSink, SinkItem } from '@xpanel/lifecycle'
 import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
 import type { StoredCertificate } from '@xpanel/state'
+import { backupCompressorArgv } from './acct-backup-archive.ts'
+import { readSavedTweakValues } from './tweak-values.ts'
 
 /**
  * Account transfer and cPanel import host work: one task at a time, every command at the lowest CPU and IO
@@ -32,8 +35,11 @@ const SHA = /^[0-9a-f]{64}$/
 const ARTIFACT = /^(?:home\.tar\.gz|db-[a-z][a-z0-9]{0,15}_[A-Za-z0-9_]{1,48}\.sql|(?:cert|key)-[0-9]{1,3}\.pem)$/
 const SSH_FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}=?$/
 const TLS_FINGERPRINT = /^[0-9A-F]{2}(?::[0-9A-F]{2}){31}$/
+const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+/** Written by the panel and the web server themselves; a change there is not the customer's data. */
+const VOLATILE_HOME_DIRS = ['logs', 'tmp', '.cache']
 
-export type TransferTaskKind = 'package' | 'fetch' | 'restore' | 'cpanel-fetch' | 'cpanel-inspect' | 'cpanel-restore'
+export type TransferTaskKind = 'package' | 'fetch' | 'restore' | 'cpanel-fetch' | 'cpanel-inspect' | 'cpanel-restore' | 'home-changes'
 export type TransferTaskState = 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted'
 export interface TransferTask {
   id: string
@@ -225,7 +231,7 @@ export function createTransferTaskController(deps: TransferTaskDeps) {
   const accountOf = async (username: string): Promise<Account> => {
     const account = await deps.store.getAccountByUsername(username)
     if (!account || account.username !== username || account.status === 'terminating') return fail('NOT_FOUND', 'account not found', { stateChanged: false })
-    if (account.home !== '/home/' + username) fail('PRECONDITION_FAILED', 'the account home is not the expected directory')
+    if (!isAccountHome(account.home, username)) fail('PRECONDITION_FAILED', 'the account home is not the expected directory')
     return account
   }
   const taskDir = async (...parts: string[]): Promise<string> => {
@@ -236,27 +242,38 @@ export function createTransferTaskController(deps: TransferTaskDeps) {
   const ok = (result: TransferCommandResult, what: string, accept: readonly number[] = [0]): TransferCommandResult =>
     accept.includes(result.code) ? result : fail('CONFIG_TEST_FAILED', what + ' failed: ' + (result.stderr || 'exit ' + result.code).slice(0, 300))
   const dumpArgv = (database: string): string[] => [deps.mariadb.mariadbDumpBinary, '--defaults-extra-file=' + deps.mariadb.adminDefaultsFile, '--single-transaction', '--routines', '--triggers', '--events', '--hex-blob', '--default-character-set=utf8mb4', '--no-create-db', '--', database]
-  const restoreDatabase = async (account: Account, path: string, database: string): Promise<number> => {
+  /** The final sync replaces the first copy: a table dropped on the source must not survive here, and grants are kept by name. */
+  const restoreDatabase = async (account: Account, path: string, database: string, replace = false): Promise<number> => {
     if (!database.startsWith(account.username + '_')) fail('VALIDATION', 'a restored database must belong to the account')
+    if (replace) ok(await deps.run({ argv: [deps.mariadb.mariadbBinary, '--defaults-extra-file=' + deps.mariadb.adminDefaultsFile, '--execute=' + [...services.dropDatabase(database, account.username), ...services.createDatabase(database, account.username)].join('; ')] }), 'clearing ' + database)
     ok(await deps.run({ argv: [deps.mariadb.mariadbBinary, '--defaults-extra-file=' + deps.mariadb.adminDefaultsFile, '--default-character-set=utf8mb4', '--database=' + database], stdinFile: path }), 'restore of ' + database)
     return (await deps.mariadb.verifyDatabaseObjects(database, account.username)).tables.length
   }
 
-  /** Extracts a home archive as the account user, then compares the result with the archive (content, size, type, links). */
-  const restoreHome = async (account: Account, archive: string): Promise<{ compared: true }> => {
-    const listed = ok(await deps.run({ argv: ['/usr/bin/tar', '--list', '--gzip', '--file=' + archive] }), 'reading the home archive')
-    assertTarMembers(listed.stdout)
+  /** A directory only root and this account can enter; what is handed over inside it goes through install. */
+  const accountStaging = async (account: Account): Promise<string> => {
     const stagingRoot = deps.restoreStaging ?? '/run/xpanel/account-restores'
     const staging = posix.join(stagingRoot, account.username)
     await mkdir(stagingRoot, { recursive: true, mode: 0o711 })
     await rm(staging, { recursive: true, force: true })
     await mkdir(staging, { mode: 0o710 })
+    return staging
+  }
+
+  /**
+   * Extracts a home archive as the account user, then compares the result with the archive (content, size, type, links).
+   * An incremental archive also removes what the source removed since the first copy: tar reads that from the archive.
+   */
+  const restoreHome = async (account: Account, archive: string, incremental = false): Promise<{ compared: true }> => {
+    const listed = ok(await deps.run({ argv: ['/usr/bin/tar', '--list', '--gzip', '--file=' + archive] }), 'reading the home archive')
+    assertTarMembers(listed.stdout)
+    const staging = await accountStaging(account), level = incremental ? ['--listed-incremental=/dev/null'] : []
     const copy = posix.join(staging, randomUUID() + '.tar.gz')
     try {
       ok(await deps.run({ argv: ['/usr/bin/install', '-m', '0640', '-o', 'root', '-g', account.username, '--', archive, copy] }), 'staging the home archive')
       ok(await deps.run({ argv: ['/bin/chgrp', account.username, '--', staging] }), 'staging the home archive')
-      ok(await deps.run({ asUser: account.username, argv: ['/usr/bin/tar', '--extract', '--gzip', '--file=' + copy, '--directory=' + account.home, '--no-same-owner', '--no-overwrite-dir'] }), 'extracting the home')
-      const compared = await deps.run({ asUser: account.username, argv: ['/usr/bin/tar', '--compare', '--gzip', '--file=' + copy, '--directory=' + account.home] })
+      ok(await deps.run({ asUser: account.username, argv: ['/usr/bin/tar', '--extract', '--gzip', ...level, '--file=' + copy, '--directory=' + account.home, '--no-same-owner', '--no-overwrite-dir'] }), 'extracting the home')
+      const compared = await deps.run({ asUser: account.username, argv: ['/usr/bin/tar', '--compare', '--gzip', ...level, '--file=' + copy, '--directory=' + account.home] })
       if (compared.code > 1) fail('CONFIG_TEST_FAILED', 'the restored home could not be compared with the archive')
       const problems = tarCompareProblems(compared.stdout)
       if (problems.length) fail('PRECONDITION_FAILED', 'the restored home differs from the archive: ' + problems.join('; ').slice(0, 300))
@@ -265,13 +282,43 @@ export function createTransferTaskController(deps: TransferTaskDeps) {
     } finally { await rm(staging, { recursive: true, force: true }) }
   }
 
+  /**
+   * GNU tar level file: the first copy of a live transfer records the home, the final sync archives what changed since,
+   * with the names that remain, so the destination can drop the rest. tar rewrites the file in place as the account user.
+   */
+  const archiveIncremental = async (account: Account, dir: string, tar: string, base: string | null): Promise<void> => {
+    const first = base === null ? null : await succeeded(base, 'package')
+    if (first && first.username !== account.username) fail('VALIDATION', 'the first copy belongs to another account')
+    const staging = await accountStaging(account), level = posix.join(staging, randomUUID() + '.snar')
+    try {
+      ok(await deps.run({ argv: ['/usr/bin/install', '-m', '0660', '-o', 'root', '-g', account.username, '--', first ? posix.join(root, 'source', first.id, 'home.snar') : '/dev/null', level] }), 'preparing the home level file')
+      ok(await deps.run({ argv: ['/bin/chgrp', account.username, '--', staging] }), 'preparing the home level file')
+      ok(await deps.run({ asUser: account.username, argv: ['/usr/bin/tar', '--create', '--listed-incremental=' + level, '--directory=' + account.home, '--exclude=./.xpanel-backup-*', '--', '.'], stdoutFile: tar }), 'archiving the home', [0, 1])
+      ok(await deps.run({ argv: ['/usr/bin/install', '-m', '0600', '-o', 'root', '-g', 'root', '--', level, posix.join(dir, 'home.snar')] }), 'keeping the home level file')
+    } finally { await rm(staging, { recursive: true, force: true }) }
+  }
+
+  /** Whether the customer changed the home since a moment; the path itself is never reported. */
+  const homeChanged = async (task: TransferTask, since: string): Promise<Record<string, unknown>> => {
+    const account = await accountOf(task.username)
+    const prune = VOLATILE_HOME_DIRS.flatMap((name, index) => [...(index ? ['-o'] : []), '-path', posix.join(account.home, name)])
+    const found = ok(await deps.run({ asUser: account.username, argv: ['/usr/bin/find', account.home, '-xdev', '(', ...prune, ')', '-prune', '-o', '-type', 'f', '-newermt', since, '-print', '-quit'] }), 'reading the home', [0, 1])
+    return { changed: found.stdout.trim().length > 0 }
+  }
+
   /** Source: the home (mail included) as the account user, each MariaDB database and each account certificate. */
-  const packageAccount = async (task: TransferTask): Promise<Record<string, unknown>> => {
+  const packageAccount = async (task: TransferTask, live: { base: string | null } | null): Promise<Record<string, unknown>> => {
     const account = await accountOf(task.username)
     const snapshot = await deps.store.readSnapshot()
     const dir = await taskDir('source', task.id)
     const databases = snapshot.databases.filter(db => db.accountId === account.id && db.engine === 'mariadb' && db.trashedAt === null)
-    ok(await deps.run({ asUser: account.username, argv: ['/usr/bin/tar', '--create', '--gzip', '--directory=' + account.home, '--exclude=./.xpanel-backup-*', '--', '.'], stdoutFile: posix.join(dir, 'home.tar.gz') }), 'archiving the home', [0, 1])
+    // The account streams an uncompressed tar; root compresses it at the Tweak Settings gzip level.
+    const tar = posix.join(dir, 'home.tar')
+    if (live) await archiveIncremental(account, dir, tar, live.base)
+    else ok(await deps.run({ asUser: account.username, argv: ['/usr/bin/tar', '--create', '--directory=' + account.home, '--exclude=./.xpanel-backup-*', '--', '.'], stdoutFile: tar }), 'archiving the home', [0, 1])
+    const level = (await readSavedTweakValues(deps.stateRoot))[COMPRESSION_LEVEL_KEY.gzip] as number
+    ok(await deps.run({ argv: backupCompressorArgv('gzip', level), stdinFile: tar, stdoutFile: posix.join(dir, 'home.tar.gz') }), 'compressing the home')
+    await rm(tar, { force: true })
     if (databases.length) await deps.mariadb.verifyAdminConfig()
     for (const db of databases) ok(await deps.run({ argv: dumpArgv(db.name), stdoutFile: posix.join(dir, 'db-' + db.name + '.sql') }), 'dump of ' + db.name)
     const certificates: { id: string; names: string[]; cert: string; key: string }[] = []
@@ -293,18 +340,18 @@ export function createTransferTaskController(deps: TransferTaskDeps) {
     return { artifacts: input.artifacts, bytes: input.artifacts.reduce((sum, artifact) => sum + artifact.bytes, 0) }
   }
 
-  const restore = async (task: TransferTask, input: { fetch: string; databases: { artifact: string; target: string }[]; certificates: { cert: string; key: string; domain: string }[] }): Promise<Record<string, unknown>> => {
+  const restore = async (task: TransferTask, input: { fetch: string; databases: { artifact: string; target: string }[]; certificates: { cert: string; key: string; domain: string }[]; incremental: boolean }): Promise<Record<string, unknown>> => {
     const account = await accountOf(task.username)
     const fetched = await succeeded(input.fetch, 'fetch')
     const dir = posix.join(root, 'incoming', fetched.id)
     const listed = new Set(((fetched.result?.artifacts ?? []) as TransferArtifact[]).map(artifact => artifact.name))
     const result: { home: unknown; databases: { name: string; tables: number }[]; certificates: Record<string, unknown>[] } = { home: null, databases: [], certificates: [] }
     if (!listed.has('home.tar.gz')) fail('PRECONDITION_FAILED', 'the transfer package has no home archive')
-    result.home = await restoreHome(account, posix.join(dir, 'home.tar.gz'))
+    result.home = await restoreHome(account, posix.join(dir, 'home.tar.gz'), input.incremental)
     if (input.databases.length) await deps.mariadb.verifyAdminConfig()
     for (const db of input.databases) {
       if (!listed.has(db.artifact)) fail('PRECONDITION_FAILED', db.artifact + ' is not part of the transfer package')
-      result.databases.push({ name: db.target, tables: await restoreDatabase(account, posix.join(dir, db.artifact), db.target) })
+      result.databases.push({ name: db.target, tables: await restoreDatabase(account, posix.join(dir, db.artifact), db.target, input.incremental) })
     }
     for (const cert of input.certificates) {
       if (!listed.has(cert.cert) || !listed.has(cert.key)) fail('PRECONDITION_FAILED', 'a certificate is not part of the transfer package')
@@ -394,7 +441,19 @@ export function createTransferTaskController(deps: TransferTaskDeps) {
     const username = (key: string): string => USERNAME.test(String(body[key])) ? body[key] as string : invalid('invalid ' + key)
     const keys = (allowed: string[]): void => { if (Object.keys(body).some(key => !allowed.includes(key))) invalid('unsupported transfer task fields') }
     switch (body.kind) {
-      case 'package': keys(['kind', 'username']); await accountOf(username('username')); return submit('package', username('username'), packageAccount)
+      case 'package': {
+        keys(['kind', 'username', 'live', 'base'])
+        if (body.live !== undefined && body.live !== true) invalid('invalid live flag')
+        const base = body.base === undefined ? null : body.live === true && UUID.test(String(body.base)) ? body.base as string : invalid('invalid first copy')
+        await accountOf(username('username'))
+        return submit('package', username('username'), task => packageAccount(task, body.live === true ? { base } : null))
+      }
+      case 'home-changes': {
+        keys(['kind', 'username', 'since'])
+        const since = STAMP.test(String(body.since)) ? body.since as string : invalid('invalid moment')
+        await accountOf(username('username'))
+        return submit('home-changes', username('username'), task => homeChanged(task, since))
+      }
       case 'fetch': {
         keys(['kind', 'username', 'url', 'token', 'tlsFingerprint', 'artifacts'])
         const url = new URL(text('url', 2048))
@@ -405,12 +464,13 @@ export function createTransferTaskController(deps: TransferTaskDeps) {
         return submit('fetch', username('username'), task => fetchArtifacts(task, { url: url.href.replace(/\/+$/, ''), token, tlsFingerprint: fp as string | null, artifacts }))
       }
       case 'restore': {
-        keys(['kind', 'username', 'fetch', 'databases', 'certificates'])
+        keys(['kind', 'username', 'fetch', 'databases', 'certificates', 'incremental'])
+        if (body.incremental !== undefined && body.incremental !== true) invalid('invalid incremental flag')
         const fetchId = UUID.test(String(body.fetch)) ? body.fetch as string : invalid('invalid fetch task')
         const databases = list(body.databases).map(item => object(item) && ARTIFACT.test(String(item.artifact)) && typeof item.target === 'string' && /^[a-z][a-z0-9]{0,15}_[A-Za-z0-9_]{1,48}$/.test(item.target) ? { artifact: item.artifact as string, target: item.target } : invalid('invalid database mapping'))
         const certificates = list(body.certificates).map(item => object(item) && ARTIFACT.test(String(item.cert)) && ARTIFACT.test(String(item.key)) && typeof item.domain === 'string' && item.domain.length <= 253 ? { cert: item.cert as string, key: item.key as string, domain: item.domain } : invalid('invalid certificate mapping'))
         await accountOf(username('username'))
-        return submit('restore', username('username'), task => restore(task, { fetch: fetchId, databases, certificates }))
+        return submit('restore', username('username'), task => restore(task, { fetch: fetchId, databases, certificates, incremental: body.incremental === true }))
       }
       case 'cpanel-fetch': {
         keys(['kind', 'username', 'host', 'port', 'hostKeyFingerprint'])

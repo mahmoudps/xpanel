@@ -78,7 +78,7 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
     const readCalendar = (value: unknown): CalendarView => {
       if (!object(value) || typeof value.id !== 'string' || !id.test(value.id) || !email(value.owner) || !safeText(value.name, 200) || !value.name.trim() || !safeText(value.color, 80) || !safeText(value.timezone, 100) || typeof value.revision !== 'string' || !revision.test(value.revision) || typeof value.canWrite !== 'boolean' || typeof value.canManage !== 'boolean' || typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt)) || !Array.isArray(value.events) || !Array.isArray(value.shares)) throw new Error('invalid_calendar')
       if (value.canManage !== (value.owner.toLowerCase() === mailbox.toLowerCase()) || value.canManage && !value.canWrite || !value.canManage && value.shares.length) throw new Error('invalid_calendar_scope')
-      if (value.events.length > 10000 || value.shares.length > 1000 || typeof value.storedBytes !== 'number' || !Number.isSafeInteger(value.storedBytes) || value.storedBytes < 1) throw new Error('invalid_calendar_capacity')
+      if (value.events.length > 50000 || value.shares.length > 1000 || typeof value.storedBytes !== 'number' || !Number.isSafeInteger(value.storedBytes) || value.storedBytes < 1) throw new Error('invalid_calendar_capacity')
       const events = value.events.map(raw => {
         if (!object(raw) || typeof raw.id !== 'string' || !id.test(raw.id) || !safeText(raw.uid, 512) || !safeText(raw.summary, 300) || !safeText(raw.description, 5000, true) || !safeText(raw.location, 500) || !timestamp(raw.dtstart) || !timestamp(raw.dtend) || !safeText(raw.timezone, 100)) throw new Error('invalid_event')
         return { id: raw.id, uid: raw.uid, summary: raw.summary, description: raw.description, location: raw.location, dtstart: raw.dtstart, dtend: raw.dtend, timezone: raw.timezone }
@@ -92,7 +92,7 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
       return { id: value.id, owner: value.owner, name: value.name, color: value.color, timezone: value.timezone, revision: value.revision, storedBytes: value.storedBytes, canWrite: value.canWrite, canManage: value.canManage, createdAt: value.createdAt, events, shares }
     }
     const context = (value: unknown): Record<string, unknown> => {
-      if (!object(value) || !object(value.context) || value.context.mailbox !== mailbox || !object(value.application) || value.application.nativeApplied !== false || value.application.syncVerified !== false) throw new Error('calendar_context_mismatch')
+      if (!object(value) || !object(value.context) || value.context.mailbox !== mailbox || !object(value.application) || value.application.nativeApplied !== true || value.application.syncVerified !== false) throw new Error('calendar_context_mismatch')
       if (value.unknownOutcome === true || value.verificationRequired === true || object(value.details) && (value.details.unknownOutcome === true || value.details.verificationRequired === true)) throw new Error('calendar_unknown_ack')
       return value
     }
@@ -152,8 +152,8 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
         if ((dirty() || review) && !await confirm(t('Discard edits and read calendars?'), t('Unsaved edits are discarded only after a successful authorized read. A previous write is never retried.'), true)) return
         announce('reading', t('Reading saved calendar records…'))
         install(readWorkspace(await request('GET', '/api/webmail/calendars')), calendarId === undefined ? selected?.id : calendarId)
-        announce('read', t('Saved calendars read. Device synchronization remains unverified.'))
-      } catch { announce(review ? 'uncertain' : 'failed', t('Calendars could not be read. Your edits are kept and no mutation was sent.')) }
+        announce('read', t('Calendars read.'))
+      } catch (error) { announce(review ? 'uncertain' : 'failed', (error as { details?: { reason?: unknown } } | null)?.details?.reason === 'dav_store_too_large' ? t('This mailbox’s calendars and contacts are too large to open here. Nothing was changed, and your devices still have them.') : t('Calendars could not be read. Your edits are kept and no mutation was sent.')) }
       finally { busy = false; lock() }
     }
     const mutate = async (method: string, path: string, body: Record<string, unknown>, title: string, danger = false): Promise<void> => {
@@ -163,7 +163,7 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
       const deletion = method === 'DELETE' && !path.endsWith('/share') && !eventRoute
       busy = true; lock(); let submitted = false
       try {
-        if (!await confirm(title, (target?.name ?? String(body.name ?? '')) + '\n' + t('This changes stored calendar records. Saved records are reloaded afterward and other unsaved fields are discarded. Device synchronization remains unverified.'), danger)) return
+        if (!await confirm(title, (target?.name ?? String(body.name ?? '')) + '\n' + t('This changes the calendar your devices sync. Records are reloaded afterward and other unsaved fields are discarded.'), danger)) return
         if (!admitted()) return
         announce('saving', t('Saving and reading back calendar records…'))
         submitted = true
@@ -209,14 +209,14 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
         const found = observed.calendars.find(calendar => calendar.id === (acknowledged?.id ?? target?.id))
         if (deletion ? !!found : !found || JSON.stringify(found) !== JSON.stringify(acknowledged)) throw new Error('calendar_persisted_readback_mismatch')
         install(observed, deletion ? undefined : acknowledged!.id)
-        announce(deletion ? 'deleted' : 'saved', t('Calendar records saved and read back. Device synchronization remains unverified.'))
+        announce(deletion ? 'deleted' : 'saved', t('Calendar records saved and read back. Devices receive them on their next sync.'))
       } catch (error) {
         const failure = object(error) ? error : {}, detail = object(failure.details) ? failure.details : {}
         const noChange = detail.stateChanged === false || failure.stateChanged === false || typeof failure.status === 'number' && [400, 401, 403, 404, 412, 413, 422].includes(failure.status) && detail.stateChanged !== true && detail.unknownOutcome !== true && detail.verificationRequired !== true
         review = submitted && (!noChange || failure.status === 409)
         announce(review ? failure.status === 409 ? 'stale' : 'uncertain' : 'failed', review
           ? t('The result requires review. Your edits are kept; no retry was sent. Read saved calendars before continuing.')
-          : t('The request was refused or could not be sent. Your edits are kept; nothing was retried.'))
+          : detail.reason === 'dav_default_collection' ? t('The default collection cannot be deleted.') : t('The request was refused or could not be sent. Your edits are kept; nothing was retried.'))
       } finally { busy = false; lock() }
     }
     const invalid = (): void => announce('failed', t('Check required fields, ASCII dates and event order. Nothing was sent.'))
@@ -255,7 +255,7 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
         const value = context(reply)
         if (value.calendarId !== target.id || value.revision !== target.revision || typeof value.ics !== 'string' || new TextEncoder().encode(value.ics).length > 8 * 1024 * 1024 || typeof value.eventsCount !== 'number' || value.eventsCount !== target.events.length) throw new Error('invalid_export')
         exported.value = value.ics; downloadSource = value.ics
-        announce('exported', t('Stored iCalendar source read. Download is ready; device synchronization is unverified.'))
+        announce('exported', t('iCalendar source read. Download is ready.'))
       }).catch(() => { clearExport(); announce('failed', t('Export could not be verified. Read saved calendars before exporting again.')) }).finally(() => { busy = false; lock() })
     })
     button('download').addEventListener('click', () => {

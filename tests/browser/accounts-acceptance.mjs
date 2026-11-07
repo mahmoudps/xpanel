@@ -57,8 +57,8 @@ async function fixture() {
     if (url.pathname.startsWith('/api/')) {
       res.setHeader('content-type', 'application/json')
       if (url.pathname === '/api/auth/me') { res.end(JSON.stringify({ csrfToken: 'synthetic-ui-fixture-csrf' })); return }
-      // The shell's personal interface-preference read is not part of the account request ledger.
-      if (url.pathname === '/api/auth/ui-preferences') { res.statusCode = 404; res.end(JSON.stringify({ code: 'NOT_FOUND' })); return }
+      // The shell's personal reads are not part of the account request ledger.
+      if (['/api/auth/ui-preferences', '/api/admin/favorites', '/api/admin/notifications'].includes(url.pathname)) { res.statusCode = 404; res.end(JSON.stringify({ code: 'NOT_FOUND' })); return }
       if (url.pathname === '/api/ips' && req.method === 'GET') {
         assert.equal(url.searchParams.get('view'), 'allocation')
         assert.equal(url.searchParams.get('planId'), plan.id)

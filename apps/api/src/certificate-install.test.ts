@@ -67,11 +67,11 @@ const fixture = () => {
     return { certificate, reconcile: { status: 'applied', scope: 'global_configuration', targetVerified: false, generation: { id: 3, status: 'active', checksum: 'c'.repeat(64) } } }
   })
   const install = createManualCertificateInstall({ store, install: commit, now: () => now })
-  const post = (body: Record<string, unknown>, who = rootCaller) => {
+  const post = (body: Record<string, unknown>, who = rootCaller, extra: Partial<CertificateWorkspaceHelpers> = {}) => {
     const router = createCertificateWorkspaceRouter({ store, requireCaller: async request => { await assertRequestAuthorized(store, who, request); return who },
       assertAdministrator: async current => { if (current.principal.kind === 'reseller') assertAcl(current.principal, await store.getReseller(current.principal.id), 'manage-ssl') },
       assertCanReadAccount: async () => {}, assertCanWriteAccount: (current, account) => assertAccountAuthorized(store, current, account, 'certificates'),
-      removeCertificate: async () => ({}), installCertificate: install })
+      removeCertificate: async () => ({}), installCertificate: install, ...extra })
     const url = new URL('/api/certificate-workspace/install', 'http://localhost')
     return router(new Request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'alice', domain: 'example.test', expectedRevision: 7, fullchainPem: chain, privateKeyPem: pem(site.privateKey), ...body }) }), url, 'POST')
   }
@@ -93,6 +93,21 @@ describe('manual certificate installation', () => {
     expect(f.commit).toHaveBeenCalledOnce()
     const forwarded = f.commit.mock.calls[0]![0].body
     expect(forwarded).toEqual({ username: 'alice', domain: 'example.test', expectedRevision: 7, fullchainPem: leafPem + intermediatePem + rootPem, privateKeyPem: pem(site.privateKey) })
+  })
+  it('installs a stored ~/ssl certificate with its matching stored key and an optional CA bundle', async () => {
+    const f = fixture(), leafPem = leaf()
+    const readStoreMaterial = vi.fn(async () => ({ certificatePem: leafPem, privateKeyPem: pem(site.privateKey) }))
+    const stored = { fullchainPem: undefined, privateKeyPem: undefined, storeCertificateId: 'example_test_0a1b2c3d' }
+    const response = await f.post({ ...stored, caBundlePem: intermediatePem + rootPem }, rootCaller, { readStoreMaterial })
+    expect(response?.status).toBe(200)
+    expect(await response!.text()).not.toMatch(/PRIVATE KEY|BEGIN CERTIFICATE/)
+    expect(readStoreMaterial).toHaveBeenCalledWith(expect.objectContaining({ certificateId: 'example_test_0a1b2c3d', account: expect.objectContaining({ username: 'alice' }) }))
+    expect(f.commit.mock.calls[0]![0].body).toEqual({ username: 'alice', domain: 'example.test', expectedRevision: 7, fullchainPem: leafPem + intermediatePem + rootPem, privateKeyPem: pem(site.privateKey) })
+    const refused = async (body: Record<string, unknown>, extra: Partial<CertificateWorkspaceHelpers> = { readStoreMaterial }) => { try { await fixture().post(body, rootCaller, extra); return 'accepted' } catch (error) { return (error as { code: string }).code } }
+    expect(await refused({ storeCertificateId: 'example_test_0a1b2c3d' })).toBe('VALIDATION')
+    expect(await refused({ ...stored, storeCertificateId: '../x' })).toBe('VALIDATION')
+    expect(await refused({ caBundlePem: intermediatePem })).toBe('VALIDATION')
+    expect(await refused(stored, {})).toBe('PRECONDITION_FAILED')
   })
   it('requires the chosen www and alias names to be covered and owned by the account', () => {
     expect(check(chain, undefined, { requiredNames: ['www.example.test'] }).requiredNames).toEqual(['www.example.test'])

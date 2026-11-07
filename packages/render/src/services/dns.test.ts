@@ -472,3 +472,18 @@ describe('ACME dns-01 TXT changes', () => {
     rejects(() => acmeTxtChange('example.com', 'www.example.com', t1, 'upsert' as 'add'), /add or delete/)
   })
 })
+
+describe('default zone options', () => {
+  const zone = (extra: object) => defaultZoneRecords('example.com', { ipv4: '192.0.2.1', nameservers: ['ns1.example.com', 'ns2.other.test'], mailHost: 'mail.example.com', adminEmail: 'a@example.com', serial: 1, ...extra })
+  const names = (extra: object) => zone(extra).map(record => record.name)
+  it('adds service names only on request', () => {
+    expect(names({})).not.toContain('webmail')
+    expect(names({ serviceSubdomains: true })).toEqual(expect.arrayContaining(['webmail', 'cpanel', 'whm', 'webdisk', 'cpcalendars', 'cpcontacts']))
+  })
+  it('leaves out autodiscover and nameserver addresses when asked', () => {
+    expect(names({})).toEqual(expect.arrayContaining(['autoconfig', 'autodiscover', '_autodiscover._tcp', 'ns1']))
+    expect(names({ autodiscover: false }).filter(name => name.includes('auto'))).toEqual([])
+    expect(names({ nameserverRecords: false })).not.toContain('ns1')
+  })
+})
+

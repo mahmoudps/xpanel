@@ -1,4 +1,4 @@
-import { fail } from '@xpanel/core'
+import { fail, isAccountHome } from '@xpanel/core'
 
 export const GPG_FINGERPRINT = /^(?:[A-F0-9]{40}|[A-F0-9]{64})$/
 export const GPG_REVISION = /^[a-f0-9]{64}$/
@@ -19,7 +19,7 @@ export interface GpgIdentity { username: string; uid: number; gid: number; home:
 const bad = (): never => fail('VALIDATION', 'invalid OpenPGP command', { stateChanged: false })
 export const isGpgUid = (value: unknown): value is string => typeof value === 'string' && value.length <= 320 && !/[\u007f-\u009f\u2028-\u202e\u2066-\u2069]/.test(value) && /^[^<>\r\n\x00-\x1f]{1,100} <[a-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[a-z0-9.-]{1,253}>$/.test(value)
 export function gpgIdentity(value: GpgIdentity): GpgIdentity {
-  if (!/^[a-z][a-z0-9]{1,15}$/.test(value.username) || value.home !== '/home/' + value.username || !Number.isSafeInteger(value.uid) || value.uid < 1000 || value.uid > 65533 || !Number.isSafeInteger(value.gid) || value.gid < 1000 || value.gid > 65533) return bad()
+  if (!/^[a-z][a-z0-9]{1,15}$/.test(value.username) || !isAccountHome(value.home, value.username) || !Number.isSafeInteger(value.uid) || value.uid < 1000 || value.uid > 65533 || !Number.isSafeInteger(value.gid) || value.gid < 1000 || value.gid > 65533) return bad()
   return value
 }
 /** gpg(1): --no-options must be first; batch + loopback passphrase-fd reads one secret line from stdin. */
@@ -54,9 +54,9 @@ export function gpgAccountArgv(identity: GpgIdentity, command: GpgCommand): stri
 export function isGpgCommand(argv: readonly unknown[]): boolean {
   if (argv.length === 3 && argv[0] === '/usr/bin/gpg' && argv[1] === '--no-options' && argv[2] === '--version') return true
   if (argv.some(value => typeof value !== 'string') || argv.length < 17 || argv[0] !== '/usr/bin/setpriv' || argv[1] !== '--reuid' || argv[3] !== '--regid' || argv[5] !== '--clear-groups' || argv[6] !== '--no-new-privs' || argv[7] !== '--') return false
-  const args = argv as string[], match = /^\/home\/([a-z][a-z0-9]{1,15})\/\.gnupg$/.exec(args[11] ?? '')
+  const args = argv as string[], match = /^(\/home[1-9]?[0-9]?\/([a-z][a-z0-9]{1,15}))\/\.gnupg$/.exec(args[11] ?? '')
   if (!match) return false
-  const identity = { username: match[1]!, uid: Number(args[2]), gid: Number(args[4]), home: '/home/' + match[1] }
+  const identity = { username: match[2]!, uid: Number(args[2]), gid: Number(args[4]), home: match[1]! }
   const tail = args.slice(17), commands: GpgCommand[] = [{ op: 'version' }, { op: 'public' }, { op: 'secret' }, { op: 'inspect' }, { op: 'import' }]
   if (tail.length >= 1) for (const op of ['export', 'delete'] as const) commands.push({ op, fingerprint: args.at(-1)! })
   for (const algorithm of ['ed25519', 'rsa3072'] as const) {

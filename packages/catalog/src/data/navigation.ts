@@ -781,7 +781,8 @@ export const navigation: NavSurface[] = [
             ],
             "tools": [
               "domains",
-              "create-domain"
+              "create-domain",
+              "force-https-redirect"
             ],
             "keywords": [
               "Domains",
@@ -815,7 +816,6 @@ export const navigation: NavSurface[] = [
               "owner"
             ],
             "tools": [
-              "force-https-redirect",
               "manage-domain",
               "aapanel-site-start-stop",
               "aapanel-site-expiry",
@@ -2107,18 +2107,16 @@ export const navigation: NavSurface[] = [
             ],
             "tools": [
               "email-all-users",
-              "email-all-resellers",
               "panel-news"
             ],
             "keywords": [
               "Email All Users",
-              "Email All Resellers",
               "cPanel News",
               "Panel News",
               "Broadcast",
               "Message customers"
             ],
-            "summary": "The one broadcast channel: email every account or every reseller and edit the news shown on users' home pages."
+            "summary": "The broadcast channel for account owners: email every account and edit the news shown on users' home pages."
           },
           {
             "id": "templates",
@@ -2128,7 +2126,8 @@ export const navigation: NavSurface[] = [
             "artboard": null,
             "primaryAction": "Save template",
             "roles": [
-              "root"
+              "root",
+              "reseller:edit-account"
             ],
             "tools": [
               "skeleton-directory",
@@ -2215,7 +2214,8 @@ export const navigation: NavSurface[] = [
             "artboard": null,
             "primaryAction": "Assign enhancement",
             "roles": [
-              "root"
+              "root",
+              "reseller:edit-account"
             ],
             "tools": [
               "account-enhancements"
@@ -2273,13 +2273,15 @@ export const navigation: NavSurface[] = [
               "view-reseller-usage-and-account-status",
               "reseller-account-limits",
               "reseller-package-limits",
-              "change-ownership-multiple-accounts"
+              "change-ownership-multiple-accounts",
+              "email-all-resellers"
             ],
             "keywords": [
               "Show Reseller Accounts",
-              "Reseller limits"
+              "Reseller limits",
+              "Email All Resellers"
             ],
-            "summary": "Reseller usage, account lists, package limits and bulk ownership changes."
+            "summary": "Reseller usage, account lists, package limits, bulk ownership changes and email to every reseller."
           },
           {
             "id": "reseller-privileges",
@@ -3518,7 +3520,6 @@ export const navigation: NavSurface[] = [
             "tools": [
               "web-stack-builder",
               "apache-global-config",
-              "nginx-proxy-manager",
               "aapanel-openlitespeed-manager",
               "directory-index-priority",
               "web-config-includes",
@@ -3688,6 +3689,27 @@ export const navigation: NavSurface[] = [
               "index.html"
             ],
             "summary": "Server administrator ordering of default index filenames; unavailable until the capability and its task screen are qualified."
+          },
+          {
+            "id": "nginx-proxy",
+            "name": "NGINX reverse proxy",
+            "route": "/whm/services/nginx-proxy",
+            "template": "list",
+            "artboard": null,
+            "primaryAction": null,
+            "roles": [
+              "root"
+            ],
+            "tools": [
+              "nginx-proxy-manager"
+            ],
+            "keywords": [
+              "NGINX Manager",
+              "Reverse proxy",
+              "Proxy rules",
+              "Response cache"
+            ],
+            "summary": "Server administrator reverse proxy rules per domain and response cache per account; unavailable until the capability and its task screen are qualified."
           }
         ]
       },
@@ -5429,7 +5451,6 @@ export const navigation: NavSurface[] = [
             "tools": [
               "webmail-password",
               "webmail-two-factor",
-              "webmail-external-auth",
               "webmail-signin"
             ],
             "keywords": [
@@ -5437,14 +5458,11 @@ export const navigation: NavSurface[] = [
               "Change password",
               "Two-Factor Authentication",
               "2FA",
-              "External Authentication",
-              "Linked External Logins",
-              "OpenID Connect",
               "Sign in",
               "Sessions",
               "Sign out everywhere"
             ],
-            "summary": "Change your mailbox password, enrol two-factor sign-in, link approved external logins and manage your signed-in sessions."
+            "summary": "Change your mailbox password, enrol two-factor sign-in and manage your signed-in sessions."
           }
         ]
       }

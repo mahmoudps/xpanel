@@ -1,12 +1,13 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
-interface DefaultSitePolicy { response: 'reject' | 'redirect'; redirectTo: string | null; refuseHttps: boolean }
+interface DefaultSitePolicy { response: 'reject' | 'redirect' | 'site'; redirectTo: string | null; site?: string; refuseHttps: boolean }
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 interface DefaultSiteRead { policy: DefaultSitePolicy; revision: string; qualified: boolean; application: 'unverified' | 'not_requested' | 'global_configuration_applied' }
 const defaultSiteObject = (raw: unknown): raw is Record<string, unknown> => !!raw && typeof raw === 'object' && !Array.isArray(raw)
 export function defaultSitePolicy(raw: unknown): DefaultSitePolicy | null {
-  if (!defaultSiteObject(raw) || !['reject', 'redirect'].includes(String(raw.response)) || typeof raw.refuseHttps !== 'boolean') return null
+  if (!defaultSiteObject(raw) || !['reject', 'redirect', 'site'].includes(String(raw.response)) || typeof raw.refuseHttps !== 'boolean') return null
+  if (raw.response === 'site') return raw.redirectTo === null && typeof raw.site === 'string' && /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/.test(raw.site) ? { response: 'site', redirectTo: null, site: raw.site, refuseHttps: raw.refuseHttps } : null
   if (raw.response === 'reject') return raw.redirectTo === null ? { response: 'reject', redirectTo: null, refuseHttps: raw.refuseHttps } : null
   if (typeof raw.redirectTo !== 'string' || !raw.redirectTo || raw.redirectTo.length > 2048 || !raw.redirectTo.isWellFormed() || /[\u0000-\u0020\u007f-\u009f\\$]/.test(raw.redirectTo)) return null
   try {
@@ -34,18 +35,18 @@ function bindWhmDefaultSite(askDialog: ((options: Record<string, unknown>) => Pr
     if (![form, response, redirect, refuse, save, discard, refresh, status, logs, logStatus].every(Boolean)) return
     const admitted = () => root.isConnected && root.dataset.defaultSiteEnabled === 'true' && !!request && !root.closest('[data-capability-state="unavailable"],[data-capability-state="soon"],[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[aria-disabled="true"],fieldset:disabled')
     let view: DefaultSiteRead | null = null, busy = false, uncertain = false, stale = false, generation = 0
-    const draft = () => ({ response: response.value, redirectTo: response.value === 'redirect' ? redirect.value : null, refuseHttps: refuse.checked })
+    const draft = () => response.value === 'site' ? { response: 'site', redirectTo: null, site: redirect.value, refuseHttps: refuse.checked } : { response: response.value, redirectTo: response.value === 'redirect' ? redirect.value : null, refuseHttps: refuse.checked }
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
     const dirty = () => !!view && !same(defaultSitePolicy(draft()) ?? draft(), view.policy)
     const announce = (state: string, text: string) => { status.dataset.state = state; status.textContent = text; status.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(state) ? 'alert' : 'status') }
     const controls = () => {
       const disabled = !admitted() || !view || !view.qualified || busy || uncertain || stale
-      response.disabled = disabled; redirect.disabled = disabled || response.value !== 'redirect'; refuse.disabled = disabled
+      response.disabled = disabled; redirect.disabled = disabled || response.value === 'reject'; refuse.disabled = disabled
       save.disabled = disabled || !dirty() || !defaultSitePolicy(draft()) || !askDialog
       refresh.disabled = !admitted() || busy; discard.disabled = !admitted() || busy || !dirty() && !uncertain && !stale
       root.setAttribute('aria-busy', String(busy)); root.dataset.dirty = String(dirty())
     }
-    const install = (next: DefaultSiteRead) => { view = next; response.value = next.policy.response; redirect.value = next.policy.redirectTo ?? ''; refuse.checked = next.policy.refuseHttps }
+    const install = (next: DefaultSiteRead) => { view = next; response.value = next.policy.response; redirect.value = next.policy.site ?? next.policy.redirectTo ?? ''; refuse.checked = next.policy.refuseHttps }
     const renderLogs = (raw: unknown) => {
       if (!defaultSiteObject(raw) || !defaultSiteObject(raw.observation)) throw new Error('invalid_observation')
       const data = raw.observation

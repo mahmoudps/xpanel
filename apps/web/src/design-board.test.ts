@@ -196,7 +196,7 @@ describe('design board routes', () => {
     expect(map).toContain('Route registration does not grant access')
     expect(map).toContain('Additional document destinations')
     const routes = [...map.matchAll(/data-reference-route="([^"]+)"/g)].map(match => match[1])
-    expect(routes).toHaveLength(203)
+    expect(routes).toHaveLength(204)
     expect(new Set(routes).size).toBe(routes.length)
     expect(map).not.toContain('all 187 pages')
   })

@@ -11,6 +11,7 @@ import { parseLoadavg, parseMeminfo } from './host-info.ts'
 import { parseServiceManagerBootTime } from './service-manager.ts'
 import { classifyHostBinaries, probeAuditLog, readHostMeasurements } from './host-probes.ts'
 import { ioDiskForDevice, ioMountForTarget } from './io-device.ts'
+import { isWebStatsEngineCheck } from './web-stats-format.ts'
 
 describe('host capability probes', () => {
   it('requires every exact benchmark binary and actual parsed network evidence', () => {
@@ -19,6 +20,18 @@ describe('host capability probes', () => {
     for (const missing of binaries) expect(classifyHostBinaries(path => binaries.includes(path) && path !== missing, false).benchmark).toBe('failed')
     expect(classifyHostBinaries(() => true, false)['network-counters']).toBe('failed')
     expect(classifyHostBinaries(() => false, false, false, { networkCounters: true })['network-counters']).toBe('passed')
+    expect(classifyHostBinaries(path => path === '/usr/bin/openssl', false).openssl).toBe('passed')
+    expect(classifyHostBinaries(path => path !== '/usr/bin/openssl', false).openssl).toBe('failed')
+  })
+
+  it('passes the DAV probe only with lighttpd, its WebDAV module, the Radicale library and the socket proxy', () => {
+    const base = ['/usr/sbin/lighttpd', '/usr/bin/python3', '/usr/lib/systemd/systemd-socket-proxyd']
+    const debian = [...base, '/usr/lib/lighttpd/mod_webdav.so', '/usr/lib/python3/dist-packages/radicale/__init__.py']
+    const el10 = [...base, '/usr/lib64/lighttpd/mod_webdav.so', '/usr/lib/python3.12/site-packages/radicale/__init__.py']
+    for (const host of [debian, el10]) {
+      expect(classifyHostBinaries(path => host.includes(path), false).dav).toBe('passed')
+      for (const missing of host) expect(classifyHostBinaries(path => host.includes(path) && path !== missing, false).dav, missing).toBe('failed')
+    }
   })
 
   it('qualifies interface counters only after reading the actual proc format', async () => {
@@ -123,6 +136,28 @@ describe('host capability probes', () => {
     await expect(probeAuditLog(async () => { throw new Error('unread') })).resolves.toBe(false)
   })
 
+  it('fails an installed engine that no longer runs, without touching one that is absent', async () => {
+    const everything = () => true
+    const measured = (over: Partial<Record<string, { ok: boolean; stdout?: string } | 'throw'>>, present: (path: string) => boolean = everything) => readHostMeasurements({
+      readFile: async () => null,
+      runCommand: async argv => { const reply = over[argv[0]!]; if (reply === 'throw') throw new Error('denied'); return reply ?? { ok: true } },
+    }, 'nginx', present)
+    const webalizer = { stdout: 'Webalizer V2.23-08 (Linux 6.1 x86_64) locale\n', ok: false }
+    expect((await measured({ '/usr/bin/webalizer': webalizer })).statsEngines).toEqual({ awstats: true, webalizer: true })
+    const lostLibrary = await measured({ '/usr/bin/webalizer': { stdout: '', ok: false } })
+    expect(lostLibrary.statsEngines).toEqual({ awstats: true, webalizer: false })
+    expect(classifyHostBinaries(everything, true, false, lostLibrary)).toMatchObject({ webalizer: 'failed', awstats: 'passed', 'web-stats': 'passed' })
+    const lostModule = await measured({ '/usr/bin/perl': { ok: false }, '/usr/bin/webalizer': 'throw' })
+    expect(lostModule.statsEngines).toEqual({ awstats: false, webalizer: false })
+    expect(classifyHostBinaries(everything, true, false, lostModule)).toMatchObject({ webalizer: 'failed', awstats: 'failed', 'web-stats': 'failed' })
+    const commands: string[][] = []
+    await readHostMeasurements({ readFile: async () => null, runCommand: async argv => { commands.push(argv); return { ok: true } } }, 'nginx', () => false)
+    expect(commands.flat()).not.toContain('/usr/bin/webalizer')
+    expect(commands.flat()).not.toContain('/usr/bin/perl')
+    for (const argv of [['/usr/bin/webalizer', '-V'], ['/usr/bin/perl', '-c', '/usr/share/awstats/wwwroot/cgi-bin/awstats.pl'], ['/usr/bin/perl', '-c', '/usr/lib/cgi-bin/awstats.pl']]) expect(isWebStatsEngineCheck(argv), argv.join(' ')).toBe(true)
+    for (const argv of [['/usr/bin/perl', '-c', '/home/alice/x.pl'], ['/usr/bin/perl', '-e', 'print 1'], ['/usr/bin/webalizer', '-c', '/dev/null']]) expect(isWebStatsEngineCheck(argv), argv.join(' ')).toBe(false)
+  })
+
   it.each([
     ['mail-queue', ['/usr/sbin/postqueue', '/usr/sbin/postsuper']],
     ['journal', ['/usr/bin/journalctl']],
@@ -133,6 +168,11 @@ describe('host capability probes', () => {
     ['fail2ban', ['/usr/bin/fail2ban-client']],
     ['clamav', ['/usr/bin/clamscan', '/usr/bin/freshclam', '/usr/bin/nice']],
     ['getent', ['/usr/bin/getent']],
+    ['awstats', ['/usr/lib/cgi-bin/awstats.pl', '/usr/bin/perl', '/usr/bin/nice', '/usr/bin/ionice', '/usr/sbin/runuser', '/usr/bin/mkdir', '/usr/bin/touch', '/usr/bin/cat']],
+    ['awstats', ['/usr/share/awstats/wwwroot/cgi-bin/awstats.pl', '/usr/bin/perl', '/usr/bin/nice', '/usr/bin/ionice', '/usr/sbin/runuser', '/usr/bin/mkdir', '/usr/bin/touch', '/usr/bin/cat']],
+    ['webalizer', ['/usr/bin/webalizer', '/usr/bin/nice', '/usr/bin/ionice', '/usr/sbin/runuser', '/usr/bin/mkdir', '/usr/bin/touch', '/usr/bin/cat']],
+    ['web-stats', ['/usr/bin/webalizer', '/usr/bin/nice', '/usr/bin/ionice', '/usr/sbin/runuser', '/usr/bin/mkdir', '/usr/bin/touch', '/usr/bin/cat']],
+    ['web-stats', ['/usr/lib/cgi-bin/awstats.pl', '/usr/bin/perl', '/usr/bin/nice', '/usr/bin/ionice', '/usr/sbin/runuser', '/usr/bin/mkdir', '/usr/bin/touch', '/usr/bin/cat']],
   ] as const)('passes %s only with every binary its argv grammar executes', (probe, paths) => {
     expect(classifyHostBinaries(path => (paths as readonly string[]).includes(path), false)[probe]).toBe('passed')
     for (const missing of paths) expect(classifyHostBinaries(path => path !== missing && (paths as readonly string[]).includes(path), false)[probe], missing).toBe('failed')

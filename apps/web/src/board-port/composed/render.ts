@@ -1,5 +1,5 @@
 import { escapeHtml, formatBytes, normalizeAsciiDigits } from '../../tokens.ts'
-import { composedXpanelRoutes, composedXwhmRoutes, nativeComposedRoutePaths } from './all.ts'
+import { composedXpanelRoutes, nativeComposedRoutePaths } from './all.ts'
 import { canReadSelectedAccount, canReadWhm, type ComposedContext } from './context.ts'
 import { copyOf, type ComposedRoute, type Copy } from './types.ts'
 import { COMPOSED_LAYOUT_CSS, renderComposedLayout } from './layout.ts'
@@ -10,22 +10,11 @@ type ReadView = { state: ReadState; rows?: Cell[][]; facts?: Array<{ label: Copy
 const cell = (text: unknown, technical = false): Cell => ({ text: text === null || text === undefined ? '' : String(text), technical })
 const choose = (context: ComposedContext, message: string, values?: MessageValues): string => translator(context.locale)(message, values)
 const missing = (context: ComposedContext): string => choose(context, 'Not read')
-const unlimited = (context: ComposedContext, value: unknown): string => value === 'unlimited' ? choose(context, 'Unlimited') : String(value)
 const complete = (rows: Cell[][]): ReadView => ({ state: rows.length ? 'loaded' : 'empty', rows })
 
 const readView = (spec: ComposedRoute, context: ComposedContext): ReadView => {
   if (spec.surface === 'xpanel' ? !canReadSelectedAccount(context) : !canReadWhm(context)) return { state: 'denied' }
   if (spec.bind === 'soon' || spec.bind === 'git') return { state: 'unavailable' }
-  if (spec.bind === 'webdisk') {
-    if (context.failedReads?.includes('serviceUsers')) return { state: 'failed' }
-    if (context.serviceUsers === undefined) return { state: 'unread' }
-    return complete(context.serviceUsers.filter(row => row.accountId === context.account?.id && row.services.webdisk).map(row => [cell(row.login, true), cell(row.ftpDir, true)]))
-  }
-  if (spec.bind === 'ssl-files') {
-    if (context.failedReads?.includes('domains')) return { state: 'failed' }
-    if (context.domains === undefined) return { state: 'unread' }
-    return complete(context.domains.filter(row => row.accountId === context.account?.id).map(row => [cell(row.name, true), cell(row.certificateId ? choose(context, 'Assigned') : choose(context, 'Unassigned'))]))
-  }
   if (spec.bind === 'panel-usage') {
     if (context.failedReads?.includes('usage')) return { state: 'failed' }
     const account = context.account!
@@ -37,14 +26,6 @@ const readView = (spec: ComposedRoute, context: ComposedContext): ReadView => {
       { label: msgid('Disk usage'), value: cell(context.usage?.diskBytes === undefined || context.usage.diskBytes === null ? missing(context) : formatBytes(context.usage.diskBytes), true) },
       { label: msgid('Bandwidth'), value: cell(choose(context, 'Not measured')) },
     ] }
-  }
-  if (spec.bind === 'resellers' || spec.bind === 'reseller-acl') {
-    if (context.failedReads?.includes('resellers')) return { state: 'failed' }
-    if (context.resellers === undefined) return { state: 'unread' }
-    const principal = context.principal!
-    return complete(context.resellers.filter(row => principal.kind === 'root' || row.id === principal.id).map(row => spec.bind === 'reseller-acl'
-      ? [cell(row.username, true), cell(row.acl.join(', ') || choose(context, msgctxt('render', 'None')), true)]
-      : [cell(row.username, true), cell(unlimited(context, row.maxAccounts), typeof row.maxAccounts === 'number'), cell(row.nameservers.join(', ') || choose(context, msgctxt('render', 'None')), true)]))
   }
   // The remaining bindings belong to existing native controllers or lack a read model.
   // A metadata entry never manufactures service results or a parallel mutation form.
@@ -85,8 +66,7 @@ export const renderComposedRoutes = (routes: readonly ComposedRoute[], context: 
 }
 
 export const renderComposedXpanel = (context: ComposedContext): string | undefined => renderComposedRoutes(composedXpanelRoutes, context)
-export const renderComposedXwhm = (context: ComposedContext): string | undefined => renderComposedRoutes(composedXwhmRoutes, context)
 /** Static disabled layout only: no identity, observations or provider reads are forwarded. */
-export const renderUnavailableComposedRoute = (surface: 'xpanel' | 'xwhm', route: string, locale: ComposedContext['locale']): string | undefined =>
-  renderComposedRoutes(surface === 'xpanel' ? composedXpanelRoutes : composedXwhmRoutes, { locale, route }, true)
+export const renderUnavailableComposedRoute = (route: string, locale: ComposedContext['locale']): string | undefined =>
+  renderComposedRoutes(composedXpanelRoutes, { locale, route }, true)
 export type { ComposedContext } from './context.ts'

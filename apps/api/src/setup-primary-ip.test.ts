@@ -43,6 +43,16 @@ describe('setup primary IP HTTP contract', () => {
     for (const spy of Object.values(spies)) expect(spy).not.toHaveBeenCalled()
   }
 
+  it('completes setup once and answers CONFLICT afterwards', async () => {
+    const complete = () => fetch(`http://127.0.0.1:${listener.port}/api/setup/wizard/complete`, { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: '{}' })
+    expect((await complete()).status).toBe(412)
+    await existing4()
+    expect((await post(body)).status).toBe(200)
+    const again = await complete()
+    expect(again.status).toBe(409)
+    expect(await again.json()).toMatchObject({ code: 'CONFLICT' })
+  })
+
   it('reuses the current primary IPv4 and leaves omitted IPv6 inventory exactly intact', async () => {
     const ipv4 = await existing4(), ipv6 = await existing6()
     const ips = vi.spyOn(state.store, 'saveServerIp')

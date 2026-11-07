@@ -5,7 +5,7 @@ const cloneClientTemplate = canonicalCloneClientTemplate
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 /// <reference lib="dom" />
-export type WebDirectiveClientFeature = 'error-pages' | 'indexes' | 'mime-types' | 'hotlink' | 'ip-blocker' | 'redirects'
+export type WebDirectiveClientFeature = 'error-pages' | 'indexes' | 'mime-types' | 'handlers' | 'hotlink' | 'redirects'
 export interface WebDirectivesClientView {
   feature: WebDirectiveClientFeature
   context: { accountId: string; domainId: string; domainName: string; path: string; engine: string }
@@ -15,11 +15,12 @@ export interface WebDirectivesClientView {
   application: { status: 'read' | 'validated' | 'saved' | 'rolled_back'; syntaxChecked: boolean; httpStatus: number | null; nativeQualified: false }
   validation?: { valid: boolean; nativeChecked: boolean; issues: { line: number; code: string }[] }
   existence?: 'not-checked'
+  system?: { handler: string; extensions: string[] }[]
 }
 export interface WebDirectivesClientState { domainId: string; view: WebDirectivesClientView | null; draft: Record<string, unknown> | null; dirty: boolean; busy: boolean; review: boolean; status: string; message: string; fields: { field: string; code: string }[] }
-const WD_FEATURES = ['error-pages', 'indexes', 'mime-types', 'hotlink', 'ip-blocker', 'redirects']
-// Managed .htaccess block names; directory privacy writes its block through its own workspace.
-const WD_BLOCKS = [...WD_FEATURES, 'directory-privacy']
+const WD_FEATURES = ['error-pages', 'indexes', 'mime-types', 'handlers', 'hotlink', 'redirects']
+// Managed .htaccess block names; directory privacy and leech protection write their blocks through their own workspaces.
+const WD_BLOCKS = [...WD_FEATURES, 'directory-privacy', 'leech-protection']
 const WD_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const WD_REVISION = /^[0-9a-f]{64}$/
 const wdObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -34,7 +35,7 @@ function readWebDirectiveModel(feature: string, value: unknown): Record<string, 
     : feature === 'hotlink' ? wdExact(value, ['enabled', 'allowedHosts', 'extensions', 'allowEmptyReferrer', 'redirectUrl']) && typeof value.enabled === 'boolean' && typeof value.allowEmptyReferrer === 'boolean' && strings(value.allowedHosts, 32, 253) && strings(value.extensions, 32, 10) && (value.redirectUrl === null || text(value.redirectUrl, 2048))
     : feature === 'error-pages' ? !!entries && entries.length <= 7 && entries.every(entry => wdExact(entry, ['code', 'path']) && [400, 401, 403, 404, 500, 502, 503].includes(entry.code as number) && text(entry.path, 512) && String(entry.path).startsWith('/'))
     : feature === 'mime-types' ? !!entries && entries.length <= 100 && entries.every(entry => wdExact(entry, ['type', 'extensions']) && text(entry.type, 255) && strings(entry.extensions, 16, 17) && (entry.extensions as unknown[]).length > 0)
-    : feature === 'ip-blocker' ? !!entries && entries.length <= 500 && entries.every(entry => text(entry, 64))
+    : feature === 'handlers' ? !!entries && entries.length <= 50 && entries.every(entry => wdExact(entry, ['handler', 'extensions']) && text(entry.handler, 32) && strings(entry.extensions, 16, 17) && (entry.extensions as unknown[]).length > 0)
     : feature === 'redirects' ? !!entries && entries.length <= 200 && entries.every(entry => wdExact(entry, ['status', 'path', 'target']) && (entry.status === 301 || entry.status === 302) && text(entry.path, 512) && String(entry.path).startsWith('/') && text(entry.target, 2048))
     : false
   if (!valid) throw new Error('invalid_web_directive_model')
@@ -48,6 +49,7 @@ export function readWebDirectivesView(value: unknown, feature: string, domainId:
   if (!wdExact(caps, ['canSave', 'reason']) || typeof caps.canSave !== 'boolean' || caps.reason !== null && (typeof caps.reason !== 'string' || !/^[a-z_]{1,40}$/.test(caps.reason)) || caps.canSave !== (caps.reason === null) || !wdObject(application) || !['read', 'validated', 'saved', 'rolled_back'].includes(String(application.status)) || typeof application.syntaxChecked !== 'boolean' || application.nativeQualified !== false || application.httpStatus !== null && !(Number.isInteger(application.httpStatus) && (application.httpStatus as number) >= 100 && (application.httpStatus as number) <= 599)) throw new Error('invalid_web_directive_status')
   if (validation !== undefined && !(wdObject(validation) && typeof validation.valid === 'boolean' && typeof validation.nativeChecked === 'boolean' && Array.isArray(validation.issues) && validation.issues.length <= 50 && validation.issues.every(issue => wdObject(issue) && Number.isSafeInteger(issue.line) && typeof issue.code === 'string' && /^[a-z_]{1,40}$/.test(issue.code)))) throw new Error('invalid_web_directive_validation')
   if (feature === 'error-pages' ? value.existence !== 'not-checked' : value.existence !== undefined) throw new Error('invalid_web_directive_existence')
+  if (feature === 'handlers' ? !(Array.isArray(value.system) && value.system.length <= 4 && value.system.every(item => wdExact(item, ['handler', 'extensions']) && typeof item.handler === 'string' && /^[a-z-]{1,32}$/.test(item.handler) && Array.isArray(item.extensions) && item.extensions.length <= 16 && item.extensions.every(name => typeof name === 'string' && /^\.[a-z0-9]{1,16}$/.test(name)))) : value.system !== undefined) throw new Error('invalid_web_directive_system')
   readWebDirectiveModel(feature, value.model)
   return value as unknown as WebDirectivesClientView
 }
@@ -132,8 +134,10 @@ function bindAccountWebDirectives(askDialog: unknown): void {
     mime_type: msgid('Use type/subtype with a registered top-level type, for example text/markdown.'), executable_type: msgid('Executable content types are not allowed.'),
     extension: msgid('Use letters and digits only, for example .md.'), executable_extension: msgid('Script extensions such as .php are not allowed.'),
     host: msgid('Use a full host name, for example example.com.'), url: msgid('Use a full http or https address without quotes, spaces or parentheses.'),
-    redirect_loop: msgid('This target would redirect back to itself.'), address: msgid('Use an IPv4 or IPv6 address or a CIDR range.'),
-    protected_address: msgid('Loopback and all-address ranges cannot be blocked.'), status: msgid('Choose 301 or 302.'), listing: msgid('Choose one of the listed options.'),
+    redirect_loop: msgid('This target would redirect back to itself.'), status: msgid('Choose 301 or 302.'), listing: msgid('Choose one of the listed options.'),
+    handler: msgid('Choose one of the listed handlers. Custom handler names are not accepted.'), handler_not_permitted: msgid('This handler would expose server information of other accounts and is not permitted.'),
+    handler_unavailable: msgid('The server module for this handler is not installed.'), handler_requires_itk: msgid('CGI programs need the per-account Apache identity (mpm-itk) on this server.'),
+    system_extension: msgid('This extension belongs to the server configuration, for example .php for the domain PHP handler.'),
     unchanged: msgid('There is no change to save.'), too_large: msgid('The .htaccess file would exceed 64 KiB.'),
   }
   const REASON: Record<string, string> = {
@@ -182,7 +186,7 @@ function bindAccountWebDirectives(askDialog: unknown): void {
     const adapters: Record<string, { key: (entry: Entry) => string; from: (form: Record<string, string | boolean>) => Entry; to: (entry: Entry) => Record<string, unknown>; cells: (entry: Entry) => [string, boolean][]; required: string[] }> = {
       'error-pages': { key: entry => String((entry as Record<string, unknown>).code), from: form => ({ code: Number(form.code), path: String(form.path).trim() }), to: entry => ({ code: String((entry as Record<string, unknown>).code), path: (entry as Record<string, unknown>).path }), cells: entry => [[String((entry as Record<string, unknown>).code), true], [String((entry as Record<string, unknown>).path), true], [copy('Not checked'), false]], required: ['path'] },
       'mime-types': { key: entry => String((entry as Record<string, unknown>).type), from: form => ({ type: String(form.type).trim(), extensions: words(form.extensions) }), to: entry => ({ type: (entry as Record<string, unknown>).type, extensions: ((entry as Record<string, unknown>).extensions as string[]).join(' ') }), cells: entry => [[String((entry as Record<string, unknown>).type), true], [((entry as Record<string, unknown>).extensions as string[]).join(' '), true]], required: ['type', 'extensions'] },
-      'ip-blocker': { key: entry => String(entry), from: form => String(form.address).trim(), to: entry => ({ address: entry }), cells: entry => [[String(entry), true]], required: ['address'] },
+      handlers: { key: entry => String((entry as Record<string, unknown>).handler), from: form => ({ handler: String(form.handler), extensions: words(form.extensions) }), to: entry => ({ handler: (entry as Record<string, unknown>).handler, extensions: ((entry as Record<string, unknown>).extensions as string[]).join(' ') }), cells: entry => [[String((entry as Record<string, unknown>).handler), true], [((entry as Record<string, unknown>).extensions as string[]).join(' '), true]], required: ['handler', 'extensions'] },
       redirects: { key: entry => String((entry as Record<string, unknown>).path), from: form => ({ status: Number(form.status), path: String(form.path).trim(), target: String(form.target).trim() }), to: entry => ({ status: String((entry as Record<string, unknown>).status), path: (entry as Record<string, unknown>).path, target: (entry as Record<string, unknown>).target }), cells: entry => [[String((entry as Record<string, unknown>).status), true], [String((entry as Record<string, unknown>).path), true], [String((entry as Record<string, unknown>).target), true]], required: ['path', 'target'] },
     }
     const settings = (form: Record<string, string | boolean>): Record<string, unknown> => feature === 'indexes' ? { listing: form.listing } : { enabled: form.enabled === true, allowedHosts: words(form.allowedHosts), extensions: words(form.extensions), allowEmptyReferrer: form.allowEmptyReferrer === true, redirectUrl: form.action === 'redirect' ? String(form.redirectUrl).trim() : null }
@@ -207,6 +211,12 @@ function bindAccountWebDirectives(askDialog: unknown): void {
       if (view && view.document.unmanagedLines > 0) notice.append(line(copy('This .htaccess file also has {count} lines that this page does not manage. They are kept unchanged.', { count: view.document.unmanagedLines })))
       notice.hidden = !notice.childElementCount
       const known = new Set<string>(), errors = [...local, ...state.fields]
+      const system = q<HTMLElement>('[data-wd-system]')
+      if (system) {
+        system.textContent = ''
+        for (const item of view?.system ?? []) { const row = template('web-directive-summary', 'tr', ['label', 'value']); clientTemplateSlot(row, 'label').textContent = item.handler; const value = clientTemplateSlot(row, 'value'); value.textContent = item.extensions.join(' '); value.dir = 'ltr'; system.append(row) }
+        if (!system.childElementCount) { const row = template('web-directive-empty', 'tr', ['message']), empty = clientTemplateSlot(row, 'message', 'td') as HTMLTableCellElement; empty.colSpan = 2; empty.textContent = view ? copy('This domain has no server handler mappings.') : copy('The current rules have not been read.'); system.append(row) }
+      }
       rows.textContent = ''
       const draft = state.draft
       if (list) {

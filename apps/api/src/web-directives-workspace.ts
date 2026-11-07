@@ -7,11 +7,13 @@ import { executeHtaccessWorkspaceRequest } from './htaccess-workspace.ts'
 import { HTACCESS_MAX_BYTES } from '../../agent/src/htaccess-policy.ts'
 import type { HtaccessRequest, HtaccessView } from '../../agent/src/htaccess-workspace.ts'
 import { mergeWebDirective, parseManagedHtaccess, parseWebDirectiveModel, readWebDirective, webDirectivePolicyAllows } from '../../agent/src/htaccess-managed.ts'
-import type { WebDirectiveFeature } from '../../agent/src/htaccess-managed.ts'
+import type { WebDirectiveFeature, WebDirectiveModels } from '../../agent/src/htaccess-managed.ts'
 
-export const WEB_DIRECTIVES_ROUTE = /^\/api\/domains\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/web-directives\/(error-pages|indexes|mime-types|hotlink|ip-blocker|redirects)$/
+export const WEB_DIRECTIVES_ROUTE = /^\/api\/domains\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/web-directives\/(error-pages|indexes|mime-types|handlers|hotlink|redirects)$/
 /** Plan features per page; the agent's .htaccess route separately enforces aapanel-url-rewrite. */
-export const WEB_DIRECTIVE_TOOL_IDS: Readonly<Record<WebDirectiveFeature, string>> = { 'error-pages': 'error-pages', indexes: 'indexes', 'mime-types': 'mime-types', hotlink: 'hotlink-protection', 'ip-blocker': 'ip-blocker', redirects: 'redirects' }
+export const WEB_DIRECTIVE_TOOL_IDS: Readonly<Record<WebDirectiveFeature, string>> = { 'error-pages': 'error-pages', indexes: 'indexes', 'mime-types': 'mime-types', handlers: 'apache-handlers', hotlink: 'hotlink-protection', redirects: 'redirects' }
+/** The server's own mapping for this domain (cPanel's read-only system handlers): the domain PHP handler owns .php. */
+export const systemHandlers = (domain: Pick<Domain, 'siteType' | 'php'>): { handler: string; extensions: string[] }[] => domain.siteType === 'php' ? [{ handler: 'php-' + domain.php.handler, extensions: ['.php'] }] : []
 export interface WebDirectivesPorts {
   store: StateStore
   requireCaller(req: Request): Promise<AuthenticatedCaller>
@@ -27,7 +29,7 @@ const object = (value: unknown): value is Record<string, unknown> => !!value && 
 const AGENT_REASONS: Readonly<Record<string, WebDirectiveReason>> = { 'The domain is not an active file-backed site.': 'inactive', 'The protected Apache validation service is unavailable.': 'validator' }
 
 /** Feature projection of the checked .htaccess view; the file content itself is not returned. */
-export function projectWebDirective(feature: WebDirectiveFeature, view: HtaccessView) {
+export function projectWebDirective(feature: WebDirectiveFeature, view: HtaccessView, system: { handler: string; extensions: string[] }[] = []) {
   const document = parseManagedHtaccess(view.document.content), current = readWebDirective(document, feature, { domainName: view.context.domainName })
   const reason: WebDirectiveReason = view.reviewRequired ? 'review_required' : view.context.engine !== 'apache' ? 'engine' : !view.capabilities.canSave ? AGENT_REASONS[view.capabilities.reason ?? ''] ?? 'unavailable'
     : !webDirectivePolicyAllows(feature) ? 'policy' : current.conflict ? 'conflict' : null
@@ -36,7 +38,7 @@ export function projectWebDirective(feature: WebDirectiveFeature, view: Htaccess
     managed: current.managed, model: current.model, conflict: current.conflict, capabilities: { canSave: reason === null, reason },
     application: { status: view.application.status, syntaxChecked: view.application.syntaxChecked, httpStatus: view.application.httpStatus, nativeQualified: false as const },
     ...(view.validation ? { validation: { valid: view.validation.valid, nativeChecked: view.validation.nativeChecked, issues: view.validation.issues.slice(0, 50).map(issue => ({ line: issue.line, code: issue.code })) } } : {}),
-    ...(feature === 'error-pages' ? { existence: 'not-checked' as const } : {}) }
+    ...(feature === 'error-pages' ? { existence: 'not-checked' as const } : {}), ...(feature === 'handlers' ? { system } : {}) }
 }
 
 /** GET reads one feature; PUT re-reads, merges its block and submits the existing checked .htaccess save. */
@@ -59,12 +61,16 @@ export async function handleWebDirectivesRoute(req: Request, url: URL, method: s
   const send = (caller: AuthenticatedCaller, request: HtaccessRequest): Promise<Response> => executeHtaccessWorkspaceRequest(target, request, () => ports.callAgent(agentPath, { caller, method: 'POST', body: request }))
   const read = await send(first.caller, { op: 'read' })
   if (read.status !== 200) return read
-  const view = await read.json() as HtaccessView, projected = projectWebDirective(feature, view)
+  const system = feature === 'handlers' ? systemHandlers(first.domain) : []
+  const view = await read.json() as HtaccessView, projected = projectWebDirective(feature, view, system)
   if (method === 'GET') return json(projected)
   const body = await ports.readJsonBody(req)
   if (!object(body) || Object.keys(body).length !== 2 || !Object.hasOwn(body, 'expectedRevision') || !Object.hasOwn(body, 'model')) return fail('VALIDATION', 'web directive saves take only expectedRevision and model', { stateChanged: false })
   if (typeof body.expectedRevision !== 'string' || !/^[0-9a-f]{64}$/.test(body.expectedRevision)) return fail('VALIDATION', 'a saved .htaccess revision is required', { stateChanged: false })
   const model = parseWebDirectiveModel(feature, body.model, { domainName: view.context.domainName })
+  // Only an mpm-itk child already runs as the account; a CGI program under the shared prefork identity would not.
+  const cgi = feature === 'handlers' && (model as WebDirectiveModels['handlers']).entries.some(entry => entry.handler === 'cgi-script') ? (body.model as { entries: { handler: unknown }[] }).entries.findIndex(entry => entry.handler === 'cgi-script') : -1
+  if (cgi >= 0 && (await ports.store.getServerSettings())?.apacheMpm !== 'itk') return fail('VALIDATION', 'CGI programs need the per-account Apache identity', { stateChanged: false, fields: [{ field: 'entries.' + cgi + '.handler', code: 'handler_requires_itk' }] })
   if (view.document.revision !== body.expectedRevision) return fail('CONFLICT', '.htaccess changed; read it before saving', { stateChanged: false })
   if (!projected.capabilities.canSave) return fail('PRECONDITION_FAILED', 'this web directive cannot be saved now', { stateChanged: false, reason: projected.capabilities.reason, conflict: projected.conflict })
   const content = mergeWebDirective(view.document.content, feature, model, { domainName: view.context.domainName })
@@ -79,5 +85,5 @@ export async function handleWebDirectivesRoute(req: Request, url: URL, method: s
   // The agent reply is its own post-write re-read; an unexpected body is not reported as success.
   if (!['saved', 'validated', 'rolled_back'].includes(result.application.status) || result.application.status === 'saved' && (result.document.content !== content || !result.application.syntaxChecked)
     || result.application.status === 'validated' && (result.document.revision !== body.expectedRevision || result.validation?.valid !== false)) return fail('SERVICE_UNAVAILABLE', 'web directive outcome requires inspection', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
-  return json(projectWebDirective(feature, result))
+  return json(projectWebDirective(feature, result, system))
 }

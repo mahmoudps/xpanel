@@ -1,4 +1,5 @@
 import { fail } from '@xpanel/core'
+import type { Account } from '@xpanel/core'
 import { sha256Hex } from './auth.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
@@ -109,7 +110,7 @@ export function readSavedEnhancements(raw: unknown): EnhancementsDocument | null
   try { const document = parseEnhancementsDocument(raw); return JSON.stringify(document) === JSON.stringify(raw) ? document : null } catch { return null }
 }
 
-const directoryOf = async (helpers: EnhancementsHelpers): Promise<EnhancementsDirectory> => {
+const directoryOf = async (helpers: Pick<EnhancementsHelpers, 'store'>): Promise<EnhancementsDirectory> => {
   const snapshot = await helpers.store.readSnapshot()
   return { plans: snapshot.plans.map(plan => ({ id: plan.id, name: plan.name })), accounts: snapshot.accounts.map(account => ({ id: account.id, username: account.username, planId: account.planId, ownerId: account.ownerId })), resellers: snapshot.resellers.map(reseller => ({ id: reseller.id, username: reseller.username })) }
 }
@@ -117,8 +118,8 @@ const view = (raw: unknown, directory: EnhancementsDirectory) => {
   const document = readSavedEnhancements(raw)
   return {
     state: raw === null ? 'default' : document ? 'saved' : 'invalid', revision: revisionOf(raw), document: document ?? EMPTY_ENHANCEMENTS, directory,
-    // Saved entitlements; no xPanel feature reads them yet and resellers cannot assign them from their own screens.
-    application: { enforced: false, resellerAssignment: false },
+    // Saved entitlements handed to lifecycle hooks; the panel itself grants nothing from them.
+    application: { enforced: false, resellerAssignment: true },
   }
 }
 const readJson = async (request: Request): Promise<unknown> => {
@@ -161,5 +162,68 @@ export async function handleAccountEnhancementsRoute(request: Request, url: URL,
     try { await helpers.emitAudit({ actor: actor.principal.username, principalId: actor.principal.id, action: 'server.account-enhancements.updated', target: 'account-enhancements', detail: { definitions: document.definitions.length, plans: Object.keys(document.planAssignments).length, accounts: Object.keys(document.accountAssignments).length, resellers: Object.keys(document.resellerLimits).length }, outcome: 'ok' }) }
     catch { return fail('SERVICE_UNAVAILABLE', 'the enhancements are saved but their audit record requires review', { stateChanged: true, verificationRequired: true }) }
     return json(200, view(saved, directory))
+  })
+}
+
+/** One account's assignment change. A reseller assigns only what root gave it a limit for, up to that limit. */
+export function assignEnhancement(document: EnhancementsDocument, accounts: EnhancementsDirectory['accounts'], accountId: string, id: string, value: unknown, resellerId: string | null): EnhancementsDocument {
+  const definitions = new Map(document.definitions.map(definition => [definition.id, definition]))
+  if (!definitions.has(id)) return invalid('this enhancement is not defined')
+  const values = { ...document.accountAssignments[accountId] }
+  if (value === null) delete values[id]
+  else {
+    Object.assign(values, valuesOf({ [id]: value }, definitions, 'the assignment'))
+    if (resellerId !== null) {
+      const limits = document.resellerLimits[resellerId]
+      if (!limits || !Object.hasOwn(limits, id)) return fail('FORBIDDEN', 'root has not given this reseller the enhancement', { stateChanged: false, reason: 'enhancement_not_granted' })
+      const limit = limits[id]!, held = accounts.filter(account => account.ownerId === resellerId && account.id !== accountId && document.accountAssignments[account.id]?.[id] !== undefined).length
+      if (limit !== null && held + 1 > limit) return fail('LIMIT_EXCEEDED', `the limit for ${id} is ${limit}`, { stateChanged: false, enhancement: id, limit })
+    }
+  }
+  const { [accountId]: _old, ...rest } = document.accountAssignments
+  return { ...document, accountAssignments: Object.keys(values).length ? { ...rest, [accountId]: values } : rest }
+}
+
+export interface EnhancementAssignmentPorts extends Pick<EnhancementsHelpers, 'store' | 'requireCaller' | 'emitAudit' | 'readSaved' | 'writeSaved'> {
+  /** null for root. */
+  resellerOf: (caller: AuthenticatedCaller) => Promise<string | null>
+  assertCanModify: (caller: AuthenticatedCaller, account: Account) => Promise<void>
+}
+const ACCOUNT_ROUTE = /^\/api\/accounts\/([0-9a-f-]{36})\/enhancements$/
+
+/** GET /api/accounts/enhancements: what the caller may assign. PUT /api/accounts/:id/enhancements: one change, revision-checked. */
+export async function handleEnhancementAssignmentRoute(request: Request, url: URL, method: string, ports: EnhancementAssignmentPorts): Promise<Response | null> {
+  const match = ACCOUNT_ROUTE.exec(url.pathname)
+  if (url.pathname !== '/api/accounts/enhancements' && !match) return null
+  const caller = await ports.requireCaller(request)
+  if (caller.principal.kind !== 'root' && caller.principal.kind !== 'reseller') return fail('FORBIDDEN', 'hosting administrator permission is required', { stateChanged: false })
+  const allow = match ? 'PUT' : 'GET'
+  if (method !== allow) return new Response(null, { status: 405, headers: { allow } })
+  if (url.search) return invalid('account enhancements do not accept selectors')
+  const resellerId = await ports.resellerOf(caller)
+  const owned = (directory: EnhancementsDirectory): EnhancementsDirectory['accounts'] => directory.accounts.filter(account => resellerId === null || account.ownerId === resellerId)
+  if (!match) {
+    const raw = await ports.readSaved(), document = readSavedEnhancements(raw) ?? EMPTY_ENHANCEMENTS, directory = await directoryOf(ports)
+    const limits = resellerId === null ? null : document.resellerLimits[resellerId] ?? {}
+    return json(200, { revision: revisionOf(raw), definitions: document.definitions.filter(definition => limits === null || Object.hasOwn(limits, definition.id)), limits, usage: resellerId === null ? {} : resellerUsage(document, directory.accounts, resellerId),
+      accounts: owned(directory).map(account => ({ id: account.id, username: account.username, values: document.accountAssignments[account.id] ?? {} })) })
+  }
+  const body = await readJson(request)
+  if (!object(body) || keys(body) !== 'enhancement,expectedRevision,value' || typeof body.enhancement !== 'string' || typeof body.expectedRevision !== 'string') return invalid('exactly enhancement, value and expectedRevision are required')
+  const account = await ports.store.getAccount(match[1]!) ?? fail('NOT_FOUND', 'account not found', { stateChanged: false })
+  await ports.assertCanModify(caller, account)
+  return serial(async () => {
+    const raw = await ports.readSaved()
+    if (revisionOf(raw) !== body.expectedRevision) return fail('CONFLICT', 'enhancements changed since they were read; reload before saving', { stateChanged: false })
+    const document = readSavedEnhancements(raw) ?? fail('PRECONDITION_FAILED', 'the saved enhancements file requires review before it can be changed', { stateChanged: false })
+    const directory = await directoryOf(ports)
+    const next = assignEnhancement(document, directory.accounts, account.id, body.enhancement as string, body.value, resellerId)
+    assertEnhancementsAgainstDirectory(next, directory)
+    try { await ports.writeSaved(next) }
+    catch { return fail('SERVICE_UNAVAILABLE', 'the enhancements write requires review', { stateChanged: true, verificationRequired: true, unknownOutcome: true }) }
+    if (revisionOf(await ports.readSaved()) !== revisionOf(next)) return fail('SERVICE_UNAVAILABLE', 'the saved enhancements could not be verified', { stateChanged: true, verificationRequired: true })
+    try { await ports.emitAudit({ actor: caller.principal.username, principalId: caller.principal.id, action: body.value === null ? 'account.enhancement.unassigned' : 'account.enhancement.assigned', target: 'account:' + account.username, detail: { enhancement: body.enhancement }, outcome: 'ok' }) }
+    catch { return fail('SERVICE_UNAVAILABLE', 'the enhancement is saved but its audit record requires review', { stateChanged: true, verificationRequired: true }) }
+    return json(200, { revision: revisionOf(next), values: next.accountAssignments[account.id] ?? {} })
   })
 }

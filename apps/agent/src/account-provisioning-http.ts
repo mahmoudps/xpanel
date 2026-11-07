@@ -24,7 +24,10 @@ export interface HeldNativeAccountHttpRequest extends HeldProvisioningHttpReques
   readonly unit: string
   readonly mainPid: number
 }
-const refused: (reason: string) => never = reason => fail('PRECONDITION_FAILED', 'the held account HTTP request did not verify', { verificationRequired: true, reason })
+const refused: (reason: string, detail?: Record<string, unknown>) => never = (reason, detail) => fail('PRECONDITION_FAILED', 'the held account HTTP request did not verify', { verificationRequired: true, reason, ...detail })
+/** Marks a refusal a caller may retry: a peer dropped the connection and cleanup proved nothing of the exchange is left. */
+export const transportResetDetail = (failure: unknown, settled: boolean): Record<string, true> =>
+  settled && ['ECONNRESET', 'EPIPE'].includes(String((failure as NodeJS.ErrnoException | undefined)?.code)) ? { transportReset: true } : {}
 /** Code, message and reason identifier, or the first line of a system error; never request bytes. */
 const describeFailure = (error: unknown): string => isXpanelError(error)
   ? `${error.code}: ${error.message}${typeof error.detail.reason === 'string' ? ` (${error.detail.reason})` : ''}`
@@ -306,7 +309,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
               } catch (error) { failOperation(error) }
             })
             actual.once('end', () => { if (!releasing || !received.equals(expectedBody) || !actual.complete) failOperation(new Error('actual HTTP request incomplete')); else httpDone.resolve() })
-            actual.once('aborted', () => failOperation(new Error('actual HTTP response aborted')))
+            actual.once('aborted', () => failOperation(Object.assign(new Error('actual HTTP response aborted'), { code: 'ECONNRESET' })))
             actual.once('error', failOperation)
           } catch (error) { failOperation(error) }
         })
@@ -335,7 +338,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
           unit: heldSource.unit, mainPid: heldSource.mainPid,
           close() {
             if (!closePromise) closePromise = (async () => {
-              let rejected = false
+              let rejected = false, settled = true
               try {
                 await assertCurrent()
                 const live = callback
@@ -346,9 +349,9 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
               } catch (error) {
                 rejected = true; failOperation(error); quarantined.add(account.uid)
                 console.error('xpanel-agent held account HTTP release failed:', describeFailure(failure), stages())
-                return refused('held_http_release_not_verified')
               }
-              finally { try { await cleanup() } catch (error) { if (!rejected) throw error } }
+              finally { try { await cleanup() } catch (error) { settled = false; if (!rejected) throw error } }
+              if (rejected) refused('held_http_release_not_verified', transportResetDetail(failure, settled))
             })()
             return closePromise
           },
@@ -357,8 +360,9 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
         failOperation(error); quarantined.add(account.uid)
         // The refusal is generic; the operator needs the first failure to find the host prerequisite.
         console.error('xpanel-agent account HTTP correlation failed:', describeFailure(failure), stages())
-        try { await cleanup() } catch { /* Preserve the primary failed observation; the UID remains quarantined. */ }
-        return refused('held_http_correlation_not_verified')
+        let settled = true
+        try { await cleanup() } catch { settled = false /* Preserve the primary failed observation; the UID remains quarantined. */ }
+        return refused('held_http_correlation_not_verified', transportResetDetail(failure, settled))
       }
     },
   }

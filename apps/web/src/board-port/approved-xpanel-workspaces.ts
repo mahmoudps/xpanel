@@ -1,15 +1,23 @@
+import { renderTeamAuditCard } from './account-team-audit-card.ts'
+import { renderFileToolsCards, renderWebsiteBackupsCard } from './account-owner-tools-cards.ts'
 import type { PanelSurfaceProps } from '../surfaces/xpanel.ts';
 import { ACCOUNT_SELF_PASSWORD_MIN_LENGTH } from '@xpanel/core';
 import type { AuthPersonalView } from '../themes/contract.ts';
 import { accountApiTokenClientTemplates } from '../account-api-tokens-templates.ts';
 import { isToolAuthorized } from '@xpanel/catalog'
 import { type Locale, translator } from '../i18n.ts'
+import { renderClassicMailCards } from './mail-cards.ts'
+import { mailCardsFor } from '../mail-cards.ts'
 import { escapeHtml, normalizeAsciiDigits } from '../tokens.ts';
 import { contextualizeNavigationHref } from '../document-routes.ts';
 import { parseWebsiteAnalyticsSnapshot, WEBSITE_ANALYTICS_WINDOWS } from '../models/website-analytics.ts';
+import { parseWebStatsView, webalizerReportHref, WEB_STATS_GENERATORS, WEB_STATS_SCHEMES, type WebStatsGenerator, type WebStatsView } from '../models/web-stats.ts';
 import { buildApprovedPanelPage } from './approved-xpanel-pages.ts';
 import { renderAccountBackupWorkspace } from './account-backup-workspace.ts';
+import { renderAccountFileRestorationWorkspace } from './account-file-restoration-workspace.ts';
 import { renderAccountCronWorkspace } from './account-cron-workspace.ts';
+import { renderFtpReportCard } from './ftp-tools-workspace.ts';
+import { renderDbWizardCard } from './whm-db-tools-workspace.ts';
 import { renderAccountHtaccessWorkspace } from './account-htaccess-workspace.ts';
 import { ACCOUNT_WEB_DIRECTIVE_ROUTES, renderAccountWebDirectivePage } from './account-web-directives-workspace.ts';
 import { renderAccountSshWorkspace } from './account-ssh-workspace.ts';
@@ -18,11 +26,15 @@ import { renderAccountVirusScanWorkspace } from './account-virus-scan-workspace.
 import { renderAccountNetworkToolsWorkspace } from './account-network-tools-workspace.ts';
 import { renderAccountDatabaseInsightsWorkspace } from './account-database-insights-workspace.ts';
 import { renderAccountDynamicDnsWorkspace } from './account-dynamic-dns-workspace.ts';
+import { renderAccountWebDiskWorkspace } from './account-dav-workspace.ts';
 import { renderAccountSitePublisherWorkspace } from './account-site-publisher-workspace.ts';
 import { renderAccountGitWorkspace } from './account-git-workspace.ts';
 import { renderAccountReverseProxyWorkspace } from './account-reverse-proxy-workspace.ts';
+import { renderAccountSiteSettingsWorkspace } from './account-site-settings-workspace.ts';
 import { renderAccountPgpWorkspace } from './account-pgp-workspace.ts';
 import { renderAccountPackagesWorkspace } from './account-packages-workspace.ts';
+import { renderToolCard } from './tool-card-view.ts';
+import { apiShellCard } from '../models/tool-cards.ts';
 import { renderAccountDatabaseRemoteWorkspace } from './account-database-remote-workspace.ts';
 import { renderAccountCollaborationWorkspace } from './account-collaboration-workspace.ts';
 import { renderMailxArchiveWorkspace } from './mailx-archive-workspace.ts';
@@ -30,6 +42,7 @@ import { renderMailxCollectionsWorkspace } from './mailx-collections-workspace.t
 import { renderSwApplicationsWorkspace } from './sw-applications-workspace.ts';
 import { renderAccountCacheWorkspace, renderAccountContainersWorkspace } from './account-runtime-workspace.ts';
 import { renderSwOptimizeWorkspace } from './sw-optimize-workspace.ts';
+import { renderAccountIpBlockerWorkspace } from './account-edge-workspace.ts';
 import { renderAccountDbEngineWorkspace } from './db-engines-workspace.ts';
 import type { AccountDbEnginePage } from './db-engines-workspace.ts';
 import { renderAccountStagingWorkspace } from './acct-staging-workspace.ts';
@@ -37,6 +50,8 @@ import { renderAccountTeamWorkspace } from './acct-team-workspace.ts';
 import { renderWhmDeveloperWorkspace } from './whm-developer-workspace.ts';
 import { renderSiteHealthWorkspace } from './site-health-workspace.ts';
 import { renderSecWorkspace } from './sec-workspace.ts';
+import { renderSslStoreWorkspace } from './ssl-store-workspace.ts';
+import { renderClassicDnssecSection } from './dnssec-section.ts';
 import { renderConnectedPanelPhp, renderConnectedPanelDns, renderConnectedPanelDirectoryPrivacy, renderConnectedPanelSsl, renderConnectedPanelSessions } from './approved-xpanel-bindings.ts';
 type Copy = string;
 export interface ApprovedXpanelWorkspaceProps extends Omit<PanelSurfaceProps, 'locale'> {
@@ -46,7 +61,7 @@ export interface ApprovedXpanelWorkspaceProps extends Omit<PanelSurfaceProps, 'l
     nativeHtml?: string;
     authPersonal?: AuthPersonalView;
 }
-export const approvedXpanelWorkspaceRoutes: ReadonlySet<string> = new Set(['/domains/reverse-proxy', '/resources', '/email/accounts', '/files/manager', '/files/trash', '/files/directory-privacy', '/domains/site-settings', '/files/backup', '/databases/mariadb', '/domains', '/domains/zone-editor', '/metrics/traffic', '/metrics/web-stats', '/security/ssl', '/security/account', '/software/php', '/software/htaccess', '/advanced/cron', '/advanced/error-pages', '/advanced/indexes', '/advanced/mime-types', '/advanced/handlers', '/security/hotlink', '/security/ip-blocker', '/domains/redirects', '/security/ssh', '/metrics/logs', '/health', '/security/virus-scanner', '/advanced/network-tools', '/databases/insights', '/domains/dynamic-dns', '/domains/site-publisher', '/files/git', '/email/encryption', '/software/packages', '/databases/remote-access', '/email/calendars-contacts', '/advanced/api-shell', '/email/archive', '/domains/staging', '/preferences/team', '/databases/phpmyadmin', '/databases/postgresql', '/databases/phppgadmin', '/software/apps', '/software/containers', '/software/cache', '/software/optimize', '/security/waf', '/domains/cloudflare']);
+export const approvedXpanelWorkspaceRoutes: ReadonlySet<string> = new Set(['/domains/reverse-proxy', '/resources', '/email/accounts', '/files/manager', '/files/trash', '/files/directory-privacy', '/domains/site-settings', '/files/backup', '/databases/mariadb', '/domains', '/domains/zone-editor', '/metrics/traffic', '/metrics/web-stats', '/security/ssl', '/security/account', '/software/php', '/software/htaccess', '/advanced/cron', '/advanced/error-pages', '/advanced/indexes', '/advanced/mime-types', '/advanced/handlers', '/security/hotlink', '/security/ip-blocker', '/domains/redirects', '/security/ssh', '/metrics/logs', '/health', '/security/virus-scanner', '/advanced/network-tools', '/databases/insights', '/domains/dynamic-dns', '/domains/site-publisher', '/files/git', '/files/web-disk', '/email/encryption', '/software/packages', '/databases/remote-access', '/email/calendars-contacts', '/advanced/api-shell', '/email/archive', '/domains/staging', '/preferences/team', '/databases/phpmyadmin', '/databases/postgresql', '/databases/phppgadmin', '/software/apps', '/software/containers', '/software/cache', '/software/optimize', '/security/waf', '/domains/cloudflare', '/security/ssl/files']);
 const copy = (p: ApprovedXpanelWorkspaceProps, x: Copy): string => escapeHtml(translator(p.locale)(x));
 const value = (x: unknown): string => escapeHtml(normalizeAsciiDigits(x == null ? '' : String(x)));
 const unread: Copy = msgctxt('approved-xpanel-workspaces', 'Not read');
@@ -105,6 +120,9 @@ const control = (p: ApprovedXpanelWorkspaceProps, section: string, field: Field,
 const technicalTableColumns: Readonly<Record<string, readonly number[]>> = {
     'top-pages': [0, 1, 2],
     'error-paths': [0, 1],
+    'web-stats-days': [0, 1, 2, 3, 4], 'web-stats-history': [0, 1, 2, 3, 4, 5], 'web-stats-hours': [0, 1, 2, 3], 'web-stats-countries': [0, 1, 2, 3],
+    'web-stats-browsers': [0, 1], 'web-stats-os': [0, 1], 'web-stats-codes': [0, 1, 2], 'web-stats-pages': [0, 1, 2, 3, 4], 'web-stats-referrers': [0, 1, 2],
+    'web-stats-robots': [0, 1, 2], 'web-stats-engines': [2], 'web-stats-sites': [0],
 };
 const tableCell = (p: ApprovedXpanelWorkspaceProps, section: Section, row: readonly string[], index: number): string => {
     const raw = row[index];
@@ -128,7 +146,7 @@ const renderSection = (p: ApprovedXpanelWorkspaceProps, section: Section, aside 
     }
     const hook = (action: Copy): string => section.actionHooks?.[action] === undefined ? ' data-wiring="soon"' : ` data-file-selection-action="${escapeHtml(section.actionHooks[action])}"`;
     const actionHelp = section.actionHooks ? msgid('Copy, Move and Extract act on the one item selected in the file list; Compress takes every selected item. Extract needs a zip, tar, gz, bz2 or zst file.') : msgid('This control is unavailable until its service and permissions are confirmed. No change has been made.');
-    const actions = section.actions ? `<div class="xp-panel-detail__actions">${section.actions.map((action, index) => `<button type="button" class="xp-btn${index === section.actions!.length - 1 ? ' xp-btn--primary' : ''}" disabled${hook(action)}>${copy(p, action)}</button>`).join('')}</div><p class="xp-help" role="status">${copy(p, actionHelp)}</p>` : '';
+    const connected = section.actions?.filter(action => section.actionHooks?.[action] !== undefined), actions = connected?.length ? `<div class="xp-panel-detail__actions">${connected.map((action, index) => `<button type="button" class="xp-btn${index === connected.length - 1 ? ' xp-btn--primary' : ''}" disabled${hook(action)}>${copy(p, action)}</button>`).join('')}</div><p class="xp-help" role="status">${copy(p, actionHelp)}</p>` : '';
     return `<section class="xp-panel-detail__card" data-workspace-section="${section.id}" aria-labelledby="panel-detail-${section.id}"><h2 id="panel-detail-${section.id}">${title}</h2>${steps}${message}${chart}${table}${fields}${actions}</section>`;
 };
 const styles = `<style>.xp-approved-panel{display:flex;flex-direction:column;gap:32px;min-inline-size:0;text-align:start}.xp-approved-panel h1,.xp-approved-panel h2,.xp-approved-panel p,.xp-approved-panel dl,.xp-approved-panel dd{margin:0}.xp-panel-detail__heading{display:flex;flex-direction:column;gap:8px}.xp-panel-detail__heading h1{font-size:26px;line-height:34px}.xp-panel-detail__layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,320px);gap:24px;align-items:start;min-inline-size:0}.xp-panel-detail__main,.xp-panel-detail__aside,.xp-panel-detail__native{display:flex;flex-direction:column;gap:24px;min-inline-size:0}.xp-panel-detail__card{display:flex;flex-direction:column;gap:24px;min-inline-size:0;padding:24px;border:1px solid var(--xp-border,#e2e6ec);border-radius:12px;background:var(--xp-bg-surface)}.xp-panel-detail__card h2{font-size:18px;line-height:28px}.xp-panel-detail__card p{line-height:1.6}.xp-panel-detail__facts,.xp-panel-detail__fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:16px;min-inline-size:0}.xp-panel-detail__facts>div,.xp-approved-panel .xp-field{display:flex;flex-direction:column;align-items:stretch;gap:8px;min-inline-size:0}.xp-panel-detail__facts dt{font-size:14px;color:var(--xp-text-muted,#5d6b7e)}.xp-panel-detail__facts dd{overflow-wrap:anywhere;text-align:start}.xp-panel-detail__actions{display:flex;flex-wrap:wrap;gap:16px}.xp-approved-panel input,.xp-approved-panel select,.xp-approved-panel textarea{text-align:left;max-inline-size:100%;min-inline-size:0}.xp-approved-panel:lang(ar) :is(input,select,textarea){text-align:right}.xp-approved-panel bdi{unicode-bidi:isolate;overflow-wrap:anywhere}.xp-approved-panel .xp-table-wrap{min-inline-size:0;max-inline-size:100%;overflow:auto}.xp-approved-panel .xp-table{inline-size:100%}.xp-approved-panel .xp-table th,.xp-approved-panel .xp-table td{text-align:start;vertical-align:top;overflow-wrap:anywhere}.xp-panel-detail__steps{display:flex;flex-wrap:wrap;gap:16px;margin:0;padding:0;list-style:none}.xp-panel-detail__steps li{display:flex;align-items:center;gap:8px}.xp-panel-detail__steps b{display:inline-flex;align-items:center;justify-content:center;inline-size:32px;block-size:32px;border:1px solid var(--xp-border,#e2e6ec);border-radius:50%}.xp-panel-detail__radio{display:flex;flex-direction:column;gap:16px;border:0;padding:0;margin:0;min-inline-size:0}.xp-panel-detail__radio legend{margin-block-end:8px;font-weight:600}.xp-panel-detail__radio .xp-check{display:flex;align-items:center;gap:8px;min-block-size:44px}.xp-panel-detail__plot{display:flex;align-items:center;justify-content:center;min-block-size:160px;padding:16px;border:1px dashed var(--xp-border,#e2e6ec);border-radius:8px;text-align:center}.xp-panel-detail__aside .xp-panel-detail__facts{grid-template-columns:minmax(0,1fr)}.xp-approved-panel .xp-panel-detail__technical-cell{direction:ltr;unicode-bidi:isolate;white-space:nowrap;overflow-wrap:normal;word-break:normal}.xp-approved-panel[data-approved-xpanel-workspace="/resources"] [data-section="slice-resources"] .xp-board-dl{display:grid;gap:16px;min-inline-size:0}.xp-approved-panel[data-approved-xpanel-workspace="/resources"] [data-section="slice-resources"] .xp-fact{flex-direction:column;align-items:stretch;gap:8px;padding:0;border:0}.xp-approved-panel[data-approved-xpanel-workspace="/resources"] [data-section="slice-resources"] .xp-fact dd{min-inline-size:0;max-inline-size:100%;text-align:start;overflow-x:auto}.xp-approved-panel[data-approved-xpanel-workspace="/resources"] [data-section="slice-resources"] .xp-fact dd bdi{white-space:nowrap;overflow-wrap:normal;word-break:normal}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] .xp-panel-detail__main{gap:32px}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] #xpanel-file-manager .xp-field>label{text-box-trim:trim-end;text-box-edge:text}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] [data-file-manager-table] td:nth-child(2){white-space:nowrap;overflow-wrap:normal;word-break:normal}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] #jailed-code-editor{direction:ltr;text-align:left;white-space:pre;tab-size:2;overflow:auto}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] [data-file-manager-table] td:last-child{white-space:nowrap}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] [data-file-manager-table] .xp-btn{white-space:nowrap;overflow-wrap:normal;word-break:normal;inline-size:max-content;min-inline-size:44px;max-inline-size:none;flex:none}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] .xp-file-location{display:inline-flex;direction:ltr;unicode-bidi:isolate;white-space:nowrap;gap:0;min-inline-size:0;max-inline-size:100%;overflow:auto}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] .xp-file-location>*{flex:none}@media(max-width:1100px){.xp-panel-detail__layout{grid-template-columns:minmax(0,1fr)}}@media(max-width:600px){.xp-panel-detail__card{padding:16px}}@media(max-width:800px){.xp-panel-detail__heading h1{line-height:36px}.xp-panel-detail__fields{grid-template-columns:minmax(0,1fr)}}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] #xpanel-file-manager>.xp-card__header,.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] #xpanel-file-manager [data-in-browser-editor]>.xp-card__header,.xp-approved-panel[data-approved-xpanel-workspace="/files/trash"] #xpanel-file-manager>.xp-card__header{margin-block-end:var(--xp-space-group)}.xp-approved-panel[data-approved-xpanel-workspace="/files/manager"] #xpanel-file-manager [data-chmod-policy-modal]{gap:var(--xp-space-group)}.xp-approved-panel:dir(rtl)[data-approved-xpanel-workspace="/files/directory-privacy"] [data-directory-privacy-prompt]{text-align:right}.xp-approved-panel:dir(rtl)[data-approved-xpanel-workspace="/files/manager"] #jailed-code-editor{text-align:right}.xp-approved-panel[data-approved-xpanel-workspace="/files/trash"] [data-file-manager-table] :is(td:first-child,td:nth-child(3),td:nth-child(4),td:nth-child(5),td:last-child){white-space:nowrap;overflow-wrap:normal;word-break:normal}.xp-approved-panel[data-approved-xpanel-workspace="/files/trash"] [data-file-manager-table] .xp-btn{white-space:nowrap;overflow-wrap:normal;word-break:normal;inline-size:max-content;min-inline-size:var(--xp-hit-target);max-inline-size:none;flex:none}.xp-approved-panel[data-approved-xpanel-workspace="/security/ssl"] [data-certificate-form]>h3{margin:0;font-size:var(--xp-type-card);line-height:var(--xp-leading-card)}
@@ -188,11 +206,48 @@ const renderClassicTrafficSelection = (p: ApprovedXpanelWorkspaceProps): { html:
         html: `<section class="xp-panel-detail__card" data-workspace-section="metrics-scope" aria-labelledby="panel-detail-metrics-scope"><h2 id="panel-detail-metrics-scope">${copy(p, msgid('Traffic selection'))}</h2><div class="xp-panel-detail__fields">${fieldOpen('panel-traffic-domain-label')}${hiddenContext}${window ? `<input type="hidden" name="window" value="${window}">` : ''}<span id="panel-traffic-domain-label" class="xp-label">${copy(p, msgid('Domain'))}</span><div class="xp-panel-detail__actions" role="group" aria-labelledby="panel-traffic-domain-label">${domainButtons || `<span>${copy(p, unread)}</span>`}</div>${fieldClose}${fieldOpen('panel-traffic-range-label')}${hiddenContext}${selected ? `<input type="hidden" name="domain" value="${escapeHtml(selected.name)}">` : ''}<span id="panel-traffic-range-label" class="xp-label">${copy(p, msgid('Range'))}</span><div class="xp-panel-detail__actions" role="group" aria-labelledby="panel-traffic-range-label">${rangeButtons}</div>${fieldClose}</div></section>`,
     };
 };
+/** Metrics Editor: per-site engine switches; web-stats-client.ts saves them. An engine the administrator controls stays visible and locked. */
+const renderClassicMetricsEditor = (p: ApprovedXpanelWorkspaceProps, view: WebStatsView | null): string => {
+    const enabled = !p.readOnly && view?.choice.revision != null && p.catalog?.some(tool => tool.id === 'metrics-editor' && tool.status === 'verified' && tool.delivery.status === 'verified') === true;
+    const box = (site: string, selected: readonly string[], engine: WebStatsGenerator, label: string): string => {
+        const locked = !view!.choice.choosable.includes(engine) || !view!.engines[engine].installed || !view!.engines[engine].entitled;
+        return `<td><input type="checkbox" data-web-stats-choice data-site="${escapeHtml(site)}" data-engine="${engine}" data-locked="${locked}" aria-label="${escapeHtml(label + ' ' + site)}"${selected.includes(engine) ? ' checked' : ''} disabled></td>`;
+    };
+    const rows = (view?.sites ?? []).map(row => `<tr><td><bdi dir="ltr" class="xp-mono">${escapeHtml(row.site)}</bdi></td>${box(row.site, row.selected, 'analog', 'Analog')}${box(row.site, row.selected, 'awstats', 'AWStats')}${box(row.site, row.selected, 'webalizer', 'Webalizer')}</tr>`).join('');
+    const locked = view !== null && WEB_STATS_GENERATORS.some(engine => !view.choice.choosable.includes(engine));
+    return `<section class="xp-panel-detail__card" data-workspace-section="web-stats-metrics" aria-labelledby="panel-detail-web-stats-metrics" data-web-stats-metrics data-web-stats-enabled="${enabled}" data-web-stats-revision="${escapeHtml(view?.choice.revision ?? '')}"><h2 id="panel-detail-web-stats-metrics">${copy(p, msgid('Metrics Editor'))}</h2><p>${copy(p, locked ? msgid('The server administrator controls at least one engine; it stays as set.') : msgid('Choose which statistics engines run for each site. A change applies to the next run.'))}</p><div class="xp-table-wrap"><table class="xp-table"><thead><tr><th>${copy(p, msgid('Domain'))}</th><th>AWStats</th><th>Webalizer</th></tr></thead><tbody>${rows || `<tr><td colspan="3">${copy(p, unread)}</td></tr>`}</tbody></table></div><div class="xp-panel-detail__actions"><button type="button" class="xp-btn xp-btn--primary" data-web-stats-metrics-save disabled>${copy(p, msgid('Save'))}</button></div><p role="status" data-web-stats-metrics-status data-state="idle"></p></section>`;
+};
+/** GET selection of site, entry and month, and the Webalizer report of the selection when its last run updated it. */
+const renderClassicWebStatsSelection = (p: ApprovedXpanelWorkspaceProps): string => {
+    const view = p.account && p.webStatsUnavailable !== true && p.webStats !== undefined ? parseWebStatsView(p.webStats, { accountId: p.account.id }) : null;
+    const selection = view?.selection ?? null;
+    const enabled = !p.readOnly && selection !== null;
+    const contextHref = contextualizeNavigationHref(p.route, { locale: p.locale, theme: p.theme ?? 'dark', density: p.density ?? 'comfortable' });
+    const hidden = (pairs: [string, string][]): string => [...new URL(contextHref, 'http://xpanel.invalid').searchParams, ...pairs].map(([name, content]) => `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(content)}">`).join('');
+    const group = (id: string, label: Copy, name: string, keep: [string, string][], options: [string, string, boolean][]): string => {
+        const buttons = options.map(([content, text, technical]) => `<button type="submit" name="${name}" value="${escapeHtml(content)}" class="xp-btn${content === (selection as Record<string, string> | null)?.[name] ? ' xp-btn--primary' : ''}" aria-pressed="${content === (selection as Record<string, string> | null)?.[name]}"${enabled ? '' : ' disabled'}>${technical ? `<bdi dir="ltr" class="xp-mono">${escapeHtml(text)}</bdi>` : escapeHtml(text)}</button>`).join('');
+        const body = `${hidden(keep)}<span id="${id}" class="xp-label">${copy(p, label)}</span><div class="xp-panel-detail__actions" role="group" aria-labelledby="${id}">${buttons || `<span>${copy(p, unread)}</span>`}</div>`;
+        return p.readOnly ? `<div class="xp-field" aria-labelledby="${id}">${body}</div>` : `<form method="get" action="${escapeHtml(p.route)}" class="xp-field" aria-labelledby="${id}">${body}</form>`;
+    };
+    const months = [...new Set([...(view?.months ?? []).map(row => row.month), ...(selection ? [selection.month] : [])])].sort().reverse();
+    const scheme = selection ? view!.sites.find(row => row.site === selection.site)?.schemes[selection.scheme] : undefined;
+    const open = enabled && scheme?.webalizer?.state === 'updated' && view!.engines.webalizer.installed && view!.engines.webalizer.entitled;
+    const link = open ? `<a class="xp-btn" href="${escapeHtml(webalizerReportHref(selection!.site, selection!.scheme))}" target="_blank" rel="noopener noreferrer">${copy(p, msgid('Open Webalizer report'))}</a>`
+        : '';
+    return `<section class="xp-panel-detail__card" data-workspace-section="web-stats-scope" aria-labelledby="panel-detail-web-stats-scope"><h2 id="panel-detail-web-stats-scope">${copy(p, msgid('Report selection'))}</h2><div class="xp-panel-detail__fields">${
+        group('panel-web-stats-site-label', msgid('Domain'), 'site', selection ? [['scheme', selection.scheme], ['month', selection.month]] : [], (view?.sites ?? []).map(row => [row.site, row.site, true]))
+        }${group('panel-web-stats-scheme-label', msgid('Entry'), 'scheme', selection ? [['site', selection.site], ['month', selection.month]] : [], WEB_STATS_SCHEMES.map(value => [value, translator(p.locale)(value === 'https' ? msgid('SSL (https)') : msgid('Non-SSL (http)')), false]))
+        }${group('panel-web-stats-month-label', msgid('Month'), 'month', selection ? [['site', selection.site], ['scheme', selection.scheme]] : [], months.map(month => [month, month, true]))
+        }</div><div class="xp-panel-detail__actions">${link}</div><p><a href="https://db-ip.com" rel="noopener noreferrer" target="_blank">${copy(p, msgid('IP Geolocation by DB-IP'))}</a></p></section>${renderClassicMetricsEditor(p, view)}`;
+};
+// Both database routes return their own document, so the wizard joins each of them there.
+const classicDbWizard = (p: ApprovedXpanelWorkspaceProps, engine: 'mariadb' | 'postgresql'): string => !p.readOnly && p.account ? renderDbWizardCard(p.locale ?? 'en', { engine, username: p.account.username,
+    canManage: p.catalog?.some(tool => tool.id === (engine === 'mariadb' ? 'database-wizard' : 'postgresql-database-wizard') && tool.status === 'verified' && tool.delivery.status === 'verified') === true }) : '';
 export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): string | undefined => {
     if (!approvedXpanelWorkspaceRoutes.has(p.route))
         return undefined;
     if (p.route === '/security/account')
-        return renderClassicAccountSecurityWorkspace(p);
+        return renderClassicAccountSecurityWorkspace(p) + (p.account ? renderTeamAuditCard(p.locale, p.account.id) : '');
     if (p.route === '/domains/reverse-proxy') {
         const principal = p.visibility?.principal;
         const canManage = !p.readOnly && p.account?.status === 'active' && principal?.kind === 'user' && principal.accountId === p.account.id && p.catalog?.some(tool => tool.id === 'domains' && tool.status === 'verified') === true;
@@ -205,7 +260,7 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
     }
     const webDirective = ACCOUNT_WEB_DIRECTIVE_ROUTES[p.route];
     if (webDirective) {
-        const principal = p.visibility?.principal, toolId = ({ 'error-pages': 'error-pages', indexes: 'indexes', 'mime-types': 'mime-types', handlers: 'apache-handlers', hotlink: 'hotlink-protection', 'ip-blocker': 'ip-blocker', redirects: 'redirects' } as const)[webDirective];
+        const principal = p.visibility?.principal, toolId = ({ 'error-pages': 'error-pages', indexes: 'indexes', 'mime-types': 'mime-types', handlers: 'apache-handlers', hotlink: 'hotlink-protection', redirects: 'redirects' } as const)[webDirective];
         const canManage = !p.readOnly && p.account?.status === 'active' && principal?.kind === 'user' && principal.accountId === p.account.id
             && ['aapanel-url-rewrite', toolId].every(id => p.catalog?.some(tool => tool.id === id && tool.status === 'verified') === true);
         const domains = p.readOnly ? [] : p.domains ?? [], selected = domains.find(domain => domain.accountId === p.account?.id && domain.name === p.activeDomain);
@@ -218,14 +273,14 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
         '/preferences/team': [msgid('Account team'), msgid('Record who works on this account and which tools their roles cover.')],
         '/databases/phpmyadmin': ['phpMyAdmin', msgid('Open phpMyAdmin for your own databases with a single-use sign-on.')],
         '/databases/postgresql': [msgid('PostgreSQL databases'), msgid('Create PostgreSQL databases and users for your account and manage their passwords and trash.')],
-        '/databases/phppgadmin': ['phpPgAdmin', msgid('See whether the PostgreSQL web client can be opened for your account.')],
+        '/databases/phppgadmin': ['phpPgAdmin', msgid('Open phpPgAdmin for your own databases with a single-use sign-on.')],
         '/software/apps': [msgid('Applications'), msgid('Install signed-catalog applications on your domains as verified jobs.')],
         '/software/containers': [msgid('Containers'), msgid('Containers that run under your own user, with their images and logs.')],
         '/software/cache': [msgid('Redis & Memcached'), msgid('A private Redis or Memcached for your account on a socket in your home, capped by your plan.')],
         '/software/optimize': [msgid('Optimize website'), msgid('See the compression and response cache that serve your sites.')],
         '/email/archive': [msgid('Email archive'), msgid('Keep copies of incoming and outgoing mail for your domains in a mailbox you choose.')],
         '/email/calendars-contacts': [msgid('Calendars and contacts'), msgid('Manage supported collections in your existing mailbox stores.')],
-        '/advanced/api-shell': [msgid('API explorer'), msgid('Run supported API reads with your current account session.')],
+        '/advanced/api-shell': [msgid('API explorer'), msgid('Run API functions and supported reads with your current account session.')],
         '/security/ssh': [msgid('SSH access'), msgid('Manage the public keys that can sign in to this account over SSH.')],
         '/metrics/logs': [msgid('Logs'), msgid('Read recent web access and error logs for your domains.')],
         '/health': [msgid('Site health'), msgid('Check DNS, website, certificate and PHP for every site you own.')],
@@ -235,9 +290,12 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
         '/domains/dynamic-dns': [msgid('Dynamic DNS'), msgid('Manage update credentials for DNS records in your own zones.')],
         '/domains/site-publisher': [msgid('Site publisher'), msgid('Preview a template and inspect publication and recovery availability for your domains.')],
         '/files/git': [msgid('Git version control'), msgid('Manage registered repositories within your account. Native operations require a qualified runner.')],
+        '/files/web-disk': [msgid('Web Disk'), msgid('Reach your files from a computer or phone as a network drive over HTTPS.')],
         '/email/encryption': [msgid('OpenPGP keys'), msgid('Manage your account keyring. Message encryption is unavailable.')],
+        '/security/ip-blocker': [msgid('IP blocker'), msgid('Stop given IP addresses, ranges or host names from reaching your websites.')],
         '/security/waf': [msgid('Web application firewall'), msgid('See the protection that applies to your sites and switch ModSecurity per domain.')],
         '/domains/cloudflare': [msgid('Cloudflare'), msgid('Inspect the Cloudflare zone of your connected domains and purge their cache.')],
+        '/security/ssl/files': [msgid('Certificate files'), msgid('Private keys, signing requests and certificates stored in ~/ssl of this account.')],
     };
     const accountTool = ACCOUNT_TOOL_PAGES[p.route];
     if (accountTool) {
@@ -245,30 +303,33 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
         const owner = !p.readOnly && p.account?.status === 'active' && principal?.kind === 'user' && principal.accountId === p.account.id;
         const verified = (id: string): boolean => owner && p.catalog?.some(tool => tool.id === id && tool.status === 'verified') === true;
         const selected = domains.find(domain => domain.accountId === accountId && domain.name === p.activeDomain);
-        const newTool = ({ '/domains/dynamic-dns': 'dynamic-dns', '/domains/site-publisher': 'site-publisher', '/files/git': 'git-version-control', '/email/encryption': 'email-encryption', '/software/packages': 'php-pear-packages', '/databases/remote-access': 'remote-database-access', '/email/calendars-contacts': 'calendars-contacts-management', '/email/archive': 'email-archive', '/domains/staging': 'site-staging', '/preferences/team': 'manage-team', '/databases/phpmyadmin': 'phpmyadmin', '/databases/postgresql': 'postgresql-databases', '/databases/phppgadmin': 'phppgadmin', '/software/apps': 'application-manager', '/software/containers': 'account-containers', '/software/cache': 'account-cache-services', '/software/optimize': 'optimize-website', '/advanced/api-shell': 'api-shell', '/security/waf': 'modsecurity', '/domains/cloudflare': 'cloudflare-account' } as Readonly<Record<string, string>>)[p.route];
+        const newTool = ({ '/domains/dynamic-dns': 'dynamic-dns', '/domains/site-publisher': 'site-publisher', '/files/git': 'git-version-control', '/files/web-disk': 'web-disk', '/email/encryption': 'email-encryption', '/software/packages': 'php-pear-packages', '/databases/remote-access': 'remote-database-access', '/email/calendars-contacts': 'calendars-contacts-management', '/email/archive': 'email-archive', '/domains/staging': 'site-staging', '/preferences/team': 'manage-team', '/databases/phpmyadmin': 'phpmyadmin', '/databases/postgresql': 'postgresql-databases', '/databases/phppgadmin': 'phppgadmin', '/software/apps': 'application-manager', '/software/containers': 'account-containers', '/software/cache': 'account-cache-services', '/software/optimize': 'optimize-website', '/advanced/api-shell': 'api-shell', '/security/waf': 'modsecurity', '/security/ip-blocker': 'ip-blocker', '/domains/cloudflare': 'cloudflare-account', '/security/ssl/files': 'ssl-certificates' } as Readonly<Record<string, string>>)[p.route];
         if (newTool) {
             const canManage = verified(newTool), body = p.route === '/domains/dynamic-dns' ? renderAccountDynamicDnsWorkspace({ lang: p.locale, accountId, canManage })
                 : p.route === '/domains/site-publisher' ? renderAccountSitePublisherWorkspace({ lang: p.locale, accountId, domains: domains.filter(domain => domain.accountId === accountId), canManage })
                 : p.route === '/files/git' ? renderAccountGitWorkspace({ lang: p.locale, accountId, canManage })
+                : p.route === '/files/web-disk' ? renderAccountWebDiskWorkspace({ lang: p.locale, accountId, home: p.readOnly ? '' : p.account?.home ?? '', canManage })
                 : p.route === '/email/encryption' ? renderAccountPgpWorkspace({ lang: p.locale, accountId, username: p.readOnly ? '' : p.account?.username ?? '', canManage })
                 : p.route === '/software/packages' ? renderAccountPackagesWorkspace({ lang: p.locale, accountId, canManage })
                 : p.route === '/databases/remote-access' ? renderAccountDatabaseRemoteWorkspace({ lang: p.locale, accountId, username: p.readOnly ? '' : p.account?.username ?? '', canManage })
                 : p.route === '/email/archive' ? renderMailxArchiveWorkspace({ locale: p.locale, canManage })
-                : ['/databases/phpmyadmin', '/databases/postgresql', '/databases/phppgadmin'].includes(p.route) ? renderAccountDbEngineWorkspace({ page: p.route.slice(11) as AccountDbEnginePage, lang: p.locale, accountId, username: p.readOnly ? '' : p.account?.username ?? '', canManage })
+                : ['/databases/phpmyadmin', '/databases/postgresql', '/databases/phppgadmin'].includes(p.route) ? renderAccountDbEngineWorkspace({ page: p.route.slice(11) as AccountDbEnginePage, lang: p.locale, accountId, username: p.readOnly ? '' : p.account?.username ?? '', canManage }) + (p.route === '/databases/postgresql' ? classicDbWizard(p, 'postgresql') : '')
                 : p.route === '/software/apps' ? renderSwApplicationsWorkspace({ lang: p.locale, canManage })
                 : p.route === '/software/containers' ? renderAccountContainersWorkspace({ lang: p.locale, canManage })
                 : p.route === '/software/cache' ? renderAccountCacheWorkspace({ lang: p.locale, canManage })
-                : p.route === '/software/optimize' ? renderSwOptimizeWorkspace({ lang: p.locale, canRead: canManage })
-                : p.route === '/email/calendars-contacts' ? renderAccountCollaborationWorkspace({ locale: p.locale, canManage }) + renderMailxCollectionsWorkspace({ locale: p.locale, canManage })
+                : p.route === '/security/ip-blocker' ? renderAccountIpBlockerWorkspace({ lang: p.locale, accountId, canManage })
+                : p.route === '/software/optimize' ? renderSwOptimizeWorkspace({ lang: p.locale, canRead: canManage, accountId, canManageCache: verified('nginx-cache-control') })
+                : p.route === '/email/calendars-contacts' ? renderAccountCollaborationWorkspace({ locale: p.locale, canManage }) + renderMailxCollectionsWorkspace({ locale: p.locale, canManage, accountId, canReadDav: verified('calendars-contacts-config') })
                 : p.route === '/domains/staging' ? renderAccountStagingWorkspace({ lang: p.locale, accountId, canManage })
                 : p.route === '/preferences/team' ? renderAccountTeamWorkspace({ lang: p.locale, accountId, canManage })
+                : p.route === '/security/ssl/files' ? renderSslStoreWorkspace({ locale: p.locale, mode: 'account', username: p.readOnly ? '' : p.account?.username ?? '', canManage })
                 : p.route === '/security/waf' || p.route === '/domains/cloudflare' ? renderSecWorkspace({ page: p.route === '/security/waf' ? 'account-waf' : 'account-cloudflare', locale: p.locale, canRead: canManage, canManage })
-                : renderWhmDeveloperWorkspace({ locale: p.locale, surface: 'account', canRead: canManage });
+                : renderWhmDeveloperWorkspace({ locale: p.locale, surface: 'account', canRead: canManage }) + renderToolCard({ locale: p.locale, canManage }, apiShellCard('account'));
             return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="${p.route}" data-workspace-section="workspace" data-workspace-mode="${canManage ? 'connected' : 'read-only'}"${canManage ? '' : ' data-wiring="soon"'}><header class="xp-panel-detail__heading"><h1>${copy(p, accountTool[0])}</h1><p>${copy(p, accountTool[1])}</p></header>${body}</section>`;
         }
         const connected = p.route === '/security/ssh' ? verified('ssh-access') : p.route === '/metrics/logs' ? verified('visitors') || verified('errors') : p.route === '/security/virus-scanner' ? verified('virus-scanner') : p.route === '/advanced/network-tools' ? verified('track-dns') : p.route === '/databases/insights' ? verified('database-insights') : verified('account-health-overview');
         const body = p.route === '/security/ssh' ? renderAccountSshWorkspace({ lang: p.locale, accountId, username: p.readOnly ? '' : p.account?.username ?? '', canManage: verified('ssh-access') })
-            : p.route === '/metrics/logs' ? renderAccountLogsWorkspace({ lang: p.locale, accountId, domains, ...(selected ? { selectedDomainId: selected.id } : {}), kinds: [...(verified('visitors') ? ['access' as const] : []), ...(verified('errors') ? ['error' as const] : [])] })
+            : p.route === '/metrics/logs' ? renderAccountLogsWorkspace({ lang: p.locale, accountId, domains, ...(selected ? { selectedDomainId: selected.id } : {}), kinds: [...(verified('visitors') ? ['access' as const] : []), ...(verified('errors') ? ['error' as const] : [])], rawAccess: verified('raw-access') }) + renderClassicMailCards(mailCardsFor(p.route, translator(p.locale), { canRead: verified('track-delivery'), canAct: () => false }), p.locale)
             : p.route === '/security/virus-scanner' ? renderAccountVirusScanWorkspace({ lang: p.locale, accountId, canManage: verified('virus-scanner') })
             : p.route === '/advanced/network-tools' ? renderAccountNetworkToolsWorkspace({ lang: p.locale, accountId, canManage: verified('track-dns') })
             : p.route === '/databases/insights' ? renderAccountDatabaseInsightsWorkspace({ lang: p.locale, accountId, canManage: verified('database-insights') })
@@ -283,12 +344,14 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
         return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="/domains" data-workspace-mode="connected"><header class="xp-panel-detail__heading"><h1>${copy(p, page.title)}</h1><p>${copy(p, page.description)}</p></header>${p.nativeHtml}</section>`;
     }
     if (p.route === '/databases/mariadb' && !p.readOnly && p.nativeHtml?.includes('data-database-workspace')) {
-        return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="/databases/mariadb" data-workspace-mode="connected"><header class="xp-panel-detail__heading"><h1>${copy(p, page.title)}</h1><p>${copy(p, page.description)}</p></header>${p.nativeHtml}</section>`;
+        return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="/databases/mariadb" data-workspace-mode="connected"><header class="xp-panel-detail__heading"><h1>${copy(p, page.title)}</h1><p>${copy(p, page.description)}</p></header>${p.nativeHtml}${classicDbWizard(p, 'mariadb')}</section>`;
     }
     const accountBackup = p.route === '/files/backup' && !p.readOnly && p.account
         && p.visibility?.principal.kind === 'user' && p.visibility.principal.accountId === p.account.id
         ? renderAccountBackupWorkspace({ lang: p.locale, accountId: p.account.id, username: p.account.username,
             canManage: p.account.status === 'active' && ['backup', 'backup-restoration'].every(id => p.catalog?.some(tool => tool.id === id && tool.status === 'verified') === true) })
+          + renderWebsiteBackupsCard(p.locale)
+          + renderAccountFileRestorationWorkspace({ lang: p.locale, username: p.account.username, canRead: p.account.status === 'active', canRestore: p.catalog?.some(tool => tool.id === 'file-restoration' && tool.status === 'verified') === true })
         : undefined;
     if (p.route === '/software/htaccess' && !p.readOnly && p.account) {
         const canManage = p.account.status === 'active' && p.visibility?.principal.kind === 'user' && p.visibility.principal.accountId === p.account.id
@@ -302,19 +365,24 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
     const directoryPrivacy = renderConnectedPanelDirectoryPrivacy(p);
     const ssl = renderConnectedPanelSsl(p);
     const sessions = renderConnectedPanelSessions(p);
+    const dnssec = p.route === '/domains/zone-editor' && p.account ? renderClassicDnssecSection({ locale: p.locale, zones: (p.domains ?? []).filter(domain => domain.accountId === p.account!.id).map(domain => domain.name), ...(p.activeDomain ? { selected: p.activeDomain } : {}),
+        connected: !p.readOnly && p.account.status === 'active' && p.visibility?.principal.kind === 'user' && p.visibility.principal.accountId === p.account.id && p.catalog?.some(tool => tool.id === 'dnssec' && tool.status === 'verified') === true }) : undefined;
+    const siteSettings = p.route === '/domains/site-settings' && !p.readOnly && p.account ? renderAccountSiteSettingsWorkspace({ lang: p.locale, accountId: p.account.id, home: p.account.home, domainId: (p.domains?.find(domain => domain.name === p.activeDomain) ?? p.domains?.find(domain => domain.accountId === p.account!.id))?.id ?? '', domains: (p.domains ?? []).filter(domain => domain.accountId === p.account!.id),
+        canManage: p.account.status === 'active' && p.visibility?.principal.kind === 'user' && p.visibility.principal.accountId === p.account.id && p.catalog?.some(tool => tool.id === 'manage-domain' && tool.status === 'verified') === true }) : undefined;
     const replacesNative = p.route === '/software/php' || p.route === '/files/backup' || dns !== undefined || directoryPrivacy !== undefined || ssl !== undefined;
-    const trafficSelection = p.route === '/metrics/traffic' || p.route === '/metrics/web-stats' ? renderClassicTrafficSelection(p) : undefined;
+    const trafficSelection = p.route === '/metrics/traffic' ? renderClassicTrafficSelection(p) : p.route === '/metrics/web-stats' ? { html: renderClassicWebStatsSelection(p), nativeAllowed: false } : undefined;
     const nativeHtml = !p.readOnly && !replacesNative && trafficSelection?.nativeAllowed !== false ? p.nativeHtml : undefined;
     const sections = page.sections.filter(section => php === undefined || !['php-domain', 'php-pool', 'php-ini'].includes(section.id))
         .filter(section => dns === undefined || !['dns-add-record', 'dns-records-unread'].includes(section.id))
+        .filter(section => siteSettings === undefined || !['site-selector', 'site-binding', 'site-name-actions', 'site-template', 'site-runtime', 'site-lifecycle', 'site-redirects', 'site-redirect-list', 'site-proxy', 'site-logs'].includes(section.id))
         .filter(section => directoryPrivacy === undefined || !['protected-folders', 'protect-folder'].includes(section.id))
         .filter(section => ssl === undefined || !['certificate-wizard', 'installed-certificates'].includes(section.id))
-        .filter(section => trafficSelection === undefined || section.id !== 'metrics-scope');
+        .filter(section => trafficSelection === undefined || section.id !== 'metrics-scope' && section.id !== 'web-stats-scope');
     // The selection actions connect only behind the same catalog gate as the native file manager they act on.
     const fileSelection = p.route === '/files/manager' && nativeHtml?.includes('data-file-manager="browse"') === true && p.account?.status === 'active' && p.visibility !== undefined
         && p.catalog?.some(tool => tool.id === 'file-manager' && tool.status === 'verified' && tool.delivery.status === 'verified' && isToolAuthorized(tool, p.visibility!)) === true;
     const heading = nativeHtml ? '' : `<header class="xp-panel-detail__heading"><h1>${copy(p, page.title)}</h1><p>${copy(p, page.description)}</p></header>`;
-    return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="${escapeHtml(p.route)}" data-workspace-mode="${p.readOnly ? 'read-only' : 'connected'}">${heading}<div class="xp-panel-detail__layout"><div class="xp-panel-detail__main">${trafficSelection?.html ?? ''}${nativeHtml ? `<div class="xp-panel-detail__native">${nativeHtml}</div>` : ''}${php ?? ''}${dns ?? ''}${directoryPrivacy ?? ''}${ssl ?? ''}${sessions ?? ''}${accountBackup ?? ''}${sections.map(section => renderSection(p, fileSelection && section.id === 'selection-actions' ? { ...section, actionHooks: { [msgid('Copy')]: 'copy', [msgid('Move')]: 'move', [msgid('Compress')]: 'compress', [msgid('Extract')]: 'extract' } } : section)).join('')}</div><aside class="xp-panel-detail__aside" aria-label="${copy(p, msgid('Workspace information'))}">${page.aside.map(section => renderSection(p, section, true)).join('')}</aside></div></section>`;
+    return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="${escapeHtml(p.route)}" data-workspace-mode="${p.readOnly ? 'read-only' : 'connected'}">${heading}<div class="xp-panel-detail__layout"><div class="xp-panel-detail__main">${siteSettings ?? ''}${trafficSelection?.html ?? ''}${nativeHtml ? `<div class="xp-panel-detail__native">${nativeHtml}</div>` : ''}${php ?? ''}${dns ?? ''}${dnssec ?? ''}${directoryPrivacy ?? ''}${ssl ?? ''}${sessions ?? ''}${accountBackup ?? ''}${p.route === '/metrics/web-stats' && !p.readOnly ? renderFtpReportCard(p.locale ?? 'en') : ''}${sections.map(section => renderSection(p, fileSelection && section.id === 'selection-actions' ? { ...section, actionHooks: { [msgid('Copy')]: 'copy', [msgid('Move')]: 'move', [msgid('Compress')]: 'compress', [msgid('Extract')]: 'extract' } } : section)).join('')}</div><aside class="xp-panel-detail__aside" aria-label="${copy(p, msgid('Workspace information'))}">${page.aside.map(section => renderSection(p, section, true)).join('')}</aside></div>${fileSelection ? renderFileToolsCards(p.locale, p.account!.username) : ''}</section>`;
 };
 const pageFor = buildApprovedPanelPage;
 

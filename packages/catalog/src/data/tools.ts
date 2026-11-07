@@ -2731,7 +2731,7 @@ export const tools: ToolDefinition[] = [
     "surface": "xwhm",
     "groupId": "whm-security-center",
     "name": "External Authentication",
-    "summary": "OpenID Connect identity providers that users can link for sign-in to the user panel, admin panel and webmail.",
+    "summary": "OpenID Connect identity providers that users can link for sign-in to the user panel and admin panel.",
     "featureKey": null,
     "resellerAcl": null,
     "rootOnly": true,
@@ -4411,7 +4411,8 @@ export const tools: ToolDefinition[] = [
     "resellerAcl": null,
     "rootOnly": false,
     "entity": "external-identity",
-    "status": "researched"
+    "status": "out-of-scope",
+    "outOfScopeReason": "External sign-in covers panel users only: a mailbox session needs the mailbox password for IMAP, so an identity provider cannot open one."
   },
   {
     "id": "webmail-analytics-consent",
@@ -6080,7 +6081,7 @@ export const tools: ToolDefinition[] = [
     "surface": "aapanel",
     "groupId": "aapanel-files",
     "name": "File Sharing Links",
-    "summary": "Creates shareable links to files or directories and manages them.",
+    "summary": "Creates expiring links to single files and manages them.",
     "featureKey": null,
     "resellerAcl": null,
     "rootOnly": true,

@@ -69,7 +69,7 @@ const resellerInput = (username: string, over: Partial<NewReseller> = {}): NewRe
   maxAccounts: 10,
   totalDiskMb: 100_000,
   totalBandwidthMb: 'unlimited',
-  oversell: false,
+  oversell: { disk: false, bandwidth: false },
   nameservers: [],
   delegatedIps: [],
   ...over,
@@ -222,6 +222,26 @@ describe('accounts, plans, resellers and UID allocator invariants', () => {
     expect(await code(h.store.updatePlan(small.id, { resources: { diskMb: 8000 } }))).toBe('OVERSELL_BLOCKED')
     expect((await h.store.updatePlan(small.id, { resources: { diskMb: 6000 } })).resources.diskMb).toBe(6000)
     expect(await h.store.resellerUsage(r.id)).toMatchObject({ accounts: 2, diskMb: 12_000 })
+  })
+
+  it('reads saved per-account fields and applies limit overrides to usage and caps', async () => {
+    const r = await h.store.createReseller(resellerInput(`ovr${next()}`, { totalDiskMb: 'unlimited' }))
+    const plan = await seedPlan({ ownerId: r.id, caps: { ...planInput('x').caps, addonDomains: 0 } })
+    const account = await h.store.createAccount(accountInput(plan.id, { ownerId: r.id }))
+    expect(await h.store.resellerUsage(r.id)).toMatchObject({ diskMb: 10_240 })
+    expect(await code(h.store.createDomain(domainInput(account, `extra${next()}.example.com`)))).toBe('LIMIT_EXCEEDED')
+    const file = join(h.rootDir, 'accounts', account.username, 'account.json')
+    const saved = { limits: { resources: { diskMb: 2048, memoryMb: null }, caps: { addonDomains: 1 } }, bandwidthReliefDate: '2026-11-06',
+      logs: { archive: true, removePreviousMonthArchive: false, retentionDays: 7 }, suspendLocked: true }
+    await writeFile(file, JSON.stringify({ ...JSON.parse(await readFile(file, 'utf8')), ...saved }))
+    expect(await h.store.getAccount(account.id)).toMatchObject({ ...saved, limits: { resources: { diskMb: 2048 }, caps: { addonDomains: 1 } } })
+    expect((await h.store.readSnapshot()).accounts.find(a => a.id === account.id)?.limits).toEqual({ resources: { diskMb: 2048 }, caps: { addonDomains: 1 } })
+    expect(await h.store.resellerUsage(r.id)).toMatchObject({ diskMb: 2048 })
+    await h.store.createDomain(domainInput(account, `extra${next()}.example.com`))
+    const valid = await readFile(file, 'utf8')
+    await writeFile(file, JSON.stringify({ ...JSON.parse(valid), limits: { resources: { diskMb: 0 } } }))
+    expect(await code(h.store.readSnapshot())).toBe('VALIDATION')
+    await writeFile(file, valid)
   })
 })
 

@@ -15,6 +15,7 @@ A registered document is a navigation destination, not an authorization or servi
 | Server analytics | One cached resource pipeline. A missing, stale, incomplete or unmeasured snapshot is unavailable, rather than a numeric zero. |
 | Website analytics | Fed only by the bandwidth meter's reads of the edge site access logs and kept as bounded hour and day aggregates across agent restarts. A window covers complete hours (1h, 24h) or complete UTC days (7d, 30d); one not read completely, or a stale read, is unavailable, rather than a partial count. |
 | Host limits and DNS | Enforcement requires assigned-plan values and actual device/unit evidence. Reconciliation compares actual prior zone content before reusing a serial. |
+| Services and security centre | A saved switch is not an observation. Traceroute modes, the SMTP rule, pam_limits, ModSecurity and web status are reported from the host itself; a host without them shows that state, and WAF deploy refuses rules that nothing would enforce. |
 | Lifecycle | Privileged effects require persisted intent and the native root/FD/process ownership protocol. A parsed artifact or portable test cannot grant that authority. |
 
 ## Authentication modes

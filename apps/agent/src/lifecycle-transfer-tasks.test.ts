@@ -38,7 +38,7 @@ const setup = async (overrides: Partial<TransferTaskDeps> & { compare?: string; 
     run: async command => {
       commands.push(command)
       if (overrides.failOn && command.argv.join(' ').includes(overrides.failOn)) return { code: 2, stdout: '', stderr: 'synthetic failure' }
-      if (command.stdoutFile) await writeFile(command.stdoutFile, command.argv[0] === '/usr/bin/tar' ? 'HOME-ARCHIVE' : '-- dump of ' + command.argv.at(-1))
+      if (command.stdoutFile) await writeFile(command.stdoutFile, command.argv[0] === '/usr/bin/tar' ? 'HOME-TAR' : command.argv[0] === '/usr/bin/gzip' ? 'HOME-ARCHIVE' : '-- dump of ' + command.argv.at(-1))
       if (command.argv.includes('--compare')) return { code: overrides.compare ? 1 : 0, stdout: overrides.compare ?? '', stderr: '' }
       if (command.argv.includes('--create') && command.argv.some(arg => arg.startsWith('--file='))) await writeFile(command.argv.find(arg => arg.startsWith('--file='))!.slice(7), 'STAGED')
       return { code: 0, stdout: command.argv.includes('--list') ? './\n./public_html/index.php\n' : '', stderr: '' }
@@ -119,12 +119,59 @@ describe('transfer host tasks', () => {
     const artifacts = task.result!.artifacts as { name: string; bytes: number; sha256: string }[]
     expect(artifacts.map(item => item.name)).toEqual(['cert-0.pem', 'db-alice_wp.sql', 'home.tar.gz', 'key-0.pem'])
     expect(artifacts.find(item => item.name === 'home.tar.gz')).toEqual({ name: 'home.tar.gz', bytes: 12, sha256: sha('HOME-ARCHIVE') })
-    expect(t.commands[0]).toMatchObject({ asUser: 'alice', argv: ['/usr/bin/tar', '--create', '--gzip', '--directory=/home/alice', '--exclude=./.xpanel-backup-*', '--', '.'] })
-    expect(t.commands[1]!.argv).toEqual(expect.arrayContaining(['--single-transaction', '--routines', '--triggers', '--events', '--no-create-db', 'alice_wp']))
+    expect(t.commands[0]).toMatchObject({ asUser: 'alice', argv: ['/usr/bin/tar', '--create', '--directory=/home/alice', '--exclude=./.xpanel-backup-*', '--', '.'] })
+    expect(t.commands[1]).toEqual({ argv: ['/usr/bin/gzip', '-c', '-n', '-6'], stdinFile: t.commands[0]!.stdoutFile, stdoutFile: expect.stringMatching(/\/home\.tar\.gz$/) })
+    expect(t.commands[2]!.argv).toEqual(expect.arrayContaining(['--single-transaction', '--routines', '--triggers', '--events', '--no-create-db', 'alice_wp']))
     expect(t.commands.some(command => command.argv.includes('alice_old'))).toBe(false)
     expect(task.result!.certificates).toEqual([{ id: 'c1', names: ['alice.example.test'], cert: 'cert-0.pem', key: 'key-0.pem' }])
     expect((await t.controller.openArtifact(task.id, 'home.tar.gz')).bytes).toBe(12)
     await expect(t.controller.openArtifact(task.id, '../tasks.json')).rejects.toThrow(/not found/)
+  })
+  it('archives a live home against a level file the account can write and root keeps', async () => {
+    const t = await setup()
+    const task = await t.settled(await t.controller.start({ kind: 'package', username: 'alice', live: true }))
+    expect(task.state).toBe('succeeded')
+    const tar = t.commands.find(command => command.argv.some(arg => arg.startsWith('--listed-incremental=')))!
+    expect(tar.asUser).toBe('alice')
+    const level = tar.argv.find(arg => arg.startsWith('--listed-incremental='))!.split('=')[1]!
+    expect(t.commands.map(command => command.argv.join(' '))).toEqual(expect.arrayContaining(['/usr/bin/install -m 0660 -o root -g alice -- /dev/null ' + level]))
+    expect(t.commands.some(command => command.argv[0] === '/usr/bin/install' && command.argv.includes('0600') && command.argv.at(-1)!.endsWith('home.snar'))).toBe(true)
+    // the level file is not a package artifact: only the host that made it needs it
+    expect((task.result!.artifacts as { name: string }[]).map(artifact => artifact.name)).not.toContain('home.snar')
+  })
+  it('refuses a live base that is not a finished package of the same account', async () => {
+    const t = await setup()
+    await expect(t.controller.start({ kind: 'package', username: 'alice', base: randomUUID() })).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(t.controller.start({ kind: 'package', username: 'alice', live: 'yes' })).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(t.controller.start({ kind: 'home-changes', username: 'alice', since: 'now' })).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(t.controller.start({ kind: 'restore', username: 'alice', fetch: randomUUID(), databases: [], certificates: [], incremental: 'yes' })).rejects.toMatchObject({ code: 'VALIDATION' })
+    const other = await t.settled(await t.controller.start({ kind: 'package', username: 'bob' }))
+    expect(other.state).toBe('succeeded')
+    const refused = await t.settled(await t.controller.start({ kind: 'package', username: 'alice', live: true, base: other.id }))
+    expect(refused).toMatchObject({ state: 'failed', error: 'the first copy belongs to another account' })
+    const missing = await t.settled(await t.controller.start({ kind: 'package', username: 'alice', live: true, base: randomUUID() }))
+    expect(missing.state).toBe('failed')
+  })
+  it('replaces each database on an incremental restore and keeps the first copy untouched otherwise', async () => {
+    const t = await setup()
+    const artifacts = [{ name: 'home.tar.gz', content: 'H' }, { name: 'db-alice_wp.sql', content: 'D' }].map(item => ({ name: item.name, bytes: 1, sha256: sha(item.content) }))
+    const bytes: Record<string, string> = { 'home.tar.gz': 'H', 'db-alice_wp.sql': 'D' }
+    t.deps.download = async ({ url }) => (async function* () { yield Buffer.from(bytes[url.split('/').at(-1)!]!) })()
+    const controller = createTransferTaskController(t.deps)
+    const settle = async (task: TransferTask) => { for (let i = 0; i < 400; i++) { const current = await controller.get(task.id); if (current.state !== 'queued' && current.state !== 'running') return current; await new Promise(resolve => setTimeout(resolve, 5)) } throw new Error('task did not settle') }
+    const fetched = await settle(await controller.start({ kind: 'fetch', username: 'alice', url: 'https://source.example.test/p', token: 't', tlsFingerprint: null, artifacts }))
+    const task = await settle(await controller.start({ kind: 'restore', username: 'alice', fetch: fetched.id, databases: [{ artifact: 'db-alice_wp.sql', target: 'alice_wp' }], certificates: [], incremental: true }))
+    expect(task.state).toBe('succeeded')
+    const joined = t.commands.map(command => command.argv.join(' '))
+    expect(joined.filter(line => line.includes('--listed-incremental=/dev/null'))).toHaveLength(2)
+    expect(joined.find(line => line.includes('--execute='))).toContain('DROP DATABASE IF EXISTS `alice_wp`; CREATE DATABASE IF NOT EXISTS `alice_wp`')
+  })
+  it('compresses the home package at the saved Tweak Settings gzip level', async () => {
+    const t = await setup()
+    await mkdir(join(t.deps.stateRoot, 'extended', 'server'), { recursive: true })
+    await writeFile(join(t.deps.stateRoot, 'extended', 'server', 'tweak-settings.json'), JSON.stringify({ 'compression.gzipLevel': 9 }))
+    expect((await t.settled(await t.controller.start({ kind: 'package', username: 'alice' }))).state).toBe('succeeded')
+    expect(t.commands[1]!.argv).toEqual(['/usr/bin/gzip', '-c', '-n', '-9'])
   })
   it('runs every command at the lowest CPU and IO priority, as the account when asked', () => {
     expect(lowPriorityArgv({ argv: ['/usr/bin/tar', '--list'], asUser: 'alice' })).toEqual(['/usr/sbin/runuser', '-u', 'alice', '--', '/usr/bin/nice', '-n', '19', '/usr/bin/ionice', '-c', '2', '-n', '7', '/usr/bin/tar', '--list'])
@@ -183,9 +230,10 @@ describe('transfer host tasks', () => {
       commands.push(command)
       if (command.argv[0] === '/usr/bin/tar') {
         if (commands.length === 1) { enterFirstHome(); await firstHomeReleased }
-        await writeFile(command.stdoutFile!, 'HOME-ARCHIVE')
+        await writeFile(command.stdoutFile!, 'HOME-TAR')
         return { code: 0, stdout: '', stderr: '' }
       }
+      if (command.argv[0] === '/usr/bin/gzip') { await writeFile(command.stdoutFile!, 'HOME-ARCHIVE'); return { code: 0, stdout: '', stderr: '' } }
       if (command.argv[0] === '/usr/bin/mariadb-dump') return { code: 2, stdout: '', stderr: 'synthetic failure' }
       throw new Error('unexpected package command')
     } })
@@ -206,8 +254,8 @@ describe('transfer host tasks', () => {
     }
     expect(await t.controller.get(first.id)).toMatchObject({ state: 'failed', error: expect.stringMatching(/dump of alice_wp failed: synthetic failure/) })
     expect(settledSecond).toMatchObject({ state: 'failed', error: expect.stringMatching(/dump of alice_wp failed: synthetic failure/) })
-    expect(commands.map(command => command.argv[0])).toEqual(['/usr/bin/tar', '/usr/bin/mariadb-dump', '/usr/bin/tar', '/usr/bin/mariadb-dump'])
-    expect(commands[2]!.stdoutFile).toContain(second!.id)
+    expect(commands.map(command => command.argv[0])).toEqual(['/usr/bin/tar', '/usr/bin/gzip', '/usr/bin/mariadb-dump', '/usr/bin/tar', '/usr/bin/gzip', '/usr/bin/mariadb-dump'])
+    expect(commands[3]!.stdoutFile).toContain(second!.id)
   })
   it('recovers saved running and queued tasks as interrupted without changing completed tasks', async () => {
     const createdAt = '2026-10-29T00:00:00.000Z', restartedAt = '2026-10-29T01:00:00.000Z'

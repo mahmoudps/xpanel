@@ -25,7 +25,7 @@ describe('edge optimization policy', () => {
   it('returns only the owner account domains with truthful policy states', async () => {
     const view = readSwOptimizeView(await (await read(context()))!.json())
     expect(view.domains).toEqual([{ name: 'a.example', redirect: true, suspended: false }, { name: 'b.example', redirect: false, suspended: true }])
-    expect(view.policy!.cache.configured).toBe(true); expect(view.actions).toEqual({ siteCompression: false, siteCache: false, purge: false })
+    expect(view.policy!.cache.configured).toBe(true); expect(view.actions).toEqual({ siteCompression: false })
     expect(readSwOptimizeView(await (await read(context({ readEdgeMain: null })))!.json()).reason).toBe('edge-config-unavailable')
     expect(readSwOptimizeView(await (await read(context({ readEdgeMain: async () => managed + 'gzip on;\n' })))!.json()).reason).toBe('invalid-edge-config')
   })

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { link, lstat, open, readdir, unlink } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { dirname, posix } from 'node:path'
-import { fail } from '@xpanel/core'
+import { fail, isAccountHome } from '@xpanel/core'
 import type { AgentExecutor } from './executor.ts'
 import { withPinnedHostTargetParent } from './host-target-parent.ts'
 import { zstdInstalled, zstdUnavailable } from './backup-low-priority.ts'
@@ -46,7 +46,7 @@ const stampOf = (date: Date): string => date.toISOString().replace(/[-:]/g, '').
 
 export const assertBackupAccountTarget = (account: BackupAccountTarget): void => {
   if (!USERNAME_RE.test(account.username)) fail('VALIDATION', 'account username is invalid')
-  if (account.home !== `/home/${account.username}`) fail('PRECONDITION_FAILED', 'the account home is not the expected directory')
+  if (!isAccountHome(account.home, account.username)) fail('PRECONDITION_FAILED', 'the account home is not the expected directory')
   if (!Number.isInteger(account.uid) || account.uid < 20_000 || account.uid > 60_000) fail('PRECONDITION_FAILED', 'the account is not a panel-managed user')
   if (account.status === 'terminating') fail('PRECONDITION_FAILED', 'a terminating account cannot be backed up or restored')
 }

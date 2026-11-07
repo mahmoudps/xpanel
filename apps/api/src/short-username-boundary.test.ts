@@ -35,7 +35,7 @@ describe('short usernames retain API routes, scope and transport limits', () => 
     const plan = await state.store.createPlan(seed)
     await state.store.saveServerIp({ address: '192.0.2.42', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
     const root = await createRootPrincipal(db.db, { username: 'root', passwordHash: hash, forcePasswordChange: false }); rootToken = await tokenFor(root.id)
-    const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: hash, acl: ['list-accounts', 'edit-account', 'manage-ssl', 'transfer'], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] })
+    const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: hash, acl: ['list-accounts', 'edit-account', 'manage-ssl', 'transfer'], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
     const resellerPrincipal = await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash: hash })
     resellerToken = await tokenFor(resellerPrincipal.id)
     for (const username of names) {

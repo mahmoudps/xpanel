@@ -59,7 +59,7 @@ export function projectZoneCheck(value: unknown, zone: string): DnsZoneCheck {
 }
 
 export function projectFtpDetail(value: unknown): FtpServiceDetail {
-  if (!object(value) || value.kind !== 'ftp' || !iso(value.observedAt) || value.confDir !== '/etc/pure-ftpd/conf' || !Array.isArray(value.settings) || value.settings.length > 32
+  if (!object(value) || value.kind !== 'ftp' || !iso(value.observedAt) || !['/etc/pure-ftpd/conf', '/etc/pure-ftpd/pure-ftpd.conf'].includes(String(value.confDir)) || !Array.isArray(value.settings) || value.settings.length > 32
     || !orNull(value.ftpAccounts, (item): item is number => count(item))) return bad()
   const seen = new Set<string>()
   const settings: FtpSettingRow[] = value.settings.map(raw => {
@@ -69,7 +69,7 @@ export function projectFtpDetail(value: unknown): FtpServiceDetail {
     seen.add(raw.name)
     return { name: raw.name, desired: raw.desired, observed: raw.observed, state: raw.state }
   })
-  return { kind: 'ftp', observedAt: value.observedAt, service: service(value.service, 'pure-ftpd'), confDir: value.confDir, settings, ftpAccounts: value.ftpAccounts }
+  return { kind: 'ftp', observedAt: value.observedAt, service: service(value.service, 'pure-ftpd'), confDir: value.confDir as string, settings, ftpAccounts: value.ftpAccounts }
 }
 
 const ENDPOINTS = ['panel', 'postfix', 'dovecot', 'pure-ftpd'] as const

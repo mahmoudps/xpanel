@@ -3,6 +3,7 @@ import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { v2Messages } from '../../../messages.ts'
 import { card, statusPill } from '../../../components/index.ts'
 import { escapeHtml } from '../../../html.ts'
+import { renderV2DnssecCard } from './dnssec.ts'
 import { missingServiceAccount, serviceButton, serviceFacts, serviceField, serviceHeader, technical, type PanelServiceAuthority } from './common.ts'
 
 /** Desired-state editor. Public DNS answers and mail delivery are separate observations. */
@@ -44,7 +45,6 @@ export function renderV2DnsPage(props: PanelSurfaceProps, authority: PanelServic
   const delivery = card({
     title: t('Email deliverability'), titleId: 'v2-dns-delivery-heading',
     description: t(msgctxt('theme:v2', 'Public SPF, DKIM, DMARC and reverse DNS have not been checked by this page.')),
-    actionsHtml: serviceButton(t('Check again'), undefined, true),
     bodyHtml: `<div class="v2-panel-service__fields">${['SPF', 'DKIM', 'DMARC'].map(label => `<div class="v2-panel-service__note"><h3>${label}</h3>${statusPill({ tone: 'neutral', label: t('Not observed') })}</div>`).join('')}</div>`,
   })
   const process = card({
@@ -55,5 +55,5 @@ export function renderV2DnsPage(props: PanelSurfaceProps, authority: PanelServic
     title: t(msgctxt('theme:v2', 'Record types')), titleId: 'v2-dns-types-heading',
     bodyHtml: `<div class="v2-panel-service__note"><p>${escapeHtml(t(msgctxt('theme:v2', 'A and AAAA point to addresses. CNAME points to another host name. MX and SRV include a priority; TXT and CAA store their record content.')))}</p><p>${escapeHtml(t(msgctxt('theme:v2', 'The row editor validates the name, type, content, TTL and priority before saving the zone.')))}</p></div>`,
   })
-  return `<section class="v2-panel-service"${readOnly || !account ? ' data-readonly="true"' : ''} data-v2-panel-service="dns">${serviceHeader(t, '/domains/zone-editor', t('Zone editor'), t('Review records and check deliverability separately.'))}${summary}${delivery}<div class="v2-panel-service__columns"><div class="v2-panel-service__main">${editor}</div><aside class="v2-panel-service__aside" aria-label="${escapeHtml(t('Workspace information'))}">${process}${reference}</aside></div></section>`
+  return `<section class="v2-panel-service"${readOnly || !account ? ' data-readonly="true"' : ''} data-v2-panel-service="dns">${serviceHeader(t, '/domains/zone-editor', t('Zone editor'), t('Review records and check deliverability separately.'))}${summary}${delivery}<div class="v2-panel-service__columns"><div class="v2-panel-service__main">${editor}${account ? renderV2DnssecCard(t, { zones: domains.map(domain => domain.name), ...(selected ? { selected: selected.name } : {}), connected: !readOnly && authority.qualifiedTools?.has('dnssec') === true }) : ''}</div><aside class="v2-panel-service__aside" aria-label="${escapeHtml(t('Workspace information'))}">${process}${reference}</aside></div></section>`
 }

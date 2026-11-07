@@ -22,7 +22,7 @@ const qualifiedControlPlaneFixture = (ids: readonly string[]) => {
 const reseller: Reseller = {
   id: '10000000-0000-4000-8000-000000000001', username: 'provider7',
   acl: ['list-accounts', 'create-account', 'manage-dns'], maxAccounts: 9,
-  totalDiskMb: 8192, totalBandwidthMb: 32768, oversell: false,
+  totalDiskMb: 8192, totalBandwidthMb: 32768, oversell: { disk: false, bandwidth: false },
   nameservers: ['ns1.provider7.example.test', 'ns2.provider7.example.test'], delegatedIps: ['192.0.2.77'],
 }
 const other: Reseller = { ...reseller, id: '10000000-0000-4000-8000-000000000002', username: 'provider8', delegatedIps: [] }
@@ -70,7 +70,7 @@ describe('detailed reseller administration', () => {
     expect(first).not.toContain(foreign.primaryDomain)
     expect(first).toContain('Configured plan7')
     expect(first).toContain('Assigned plan limits')
-    expect(first).toContain('Actual use not read')
+    expect(first).toContain('Disk use: Not read')
     expect(first).toContain('Resolution has not been probed')
     expect(first).not.toContain('Resolves to')
     expect(first).not.toContain('data-host-success')
@@ -140,7 +140,7 @@ describe('detailed reseller administration', () => {
   })
 
   it('preserves unlimited limits, Arabic labels, isolated technical values and truthful states', () => {
-    const html = renderApprovedWhmResellers({ ...base(), locale: 'ar', resellers: [{ ...reseller, maxAccounts: 'unlimited', totalDiskMb: 'unlimited', oversell: true }] })
+    const html = renderApprovedWhmResellers({ ...base(), locale: 'ar', resellers: [{ ...reseller, maxAccounts: 'unlimited', totalDiskMb: 'unlimited', oversell: { disk: true, bandwidth: true } }] })
     expect(html).toContain('dir="rtl"')
     expect(html).toMatch(/name="maxAccountsUnlimited"[^>]*checked/)
     expect(html).toMatch(/name="maxAccounts"[^>]*disabled/)
@@ -150,12 +150,13 @@ describe('detailed reseller administration', () => {
     expect(html).not.toMatch(/[٠-٩۰-۹]/)
   })
 
-  it('escapes values and keeps unsupported suspend action unavailable', () => {
+  it('escapes values and connects the suspend action', () => {
     const html = renderApprovedWhmResellers({ ...base(), resellers: [{ ...reseller, username: '<script>secret</script>', nameservers: ['"><img onerror=attack>'] }] })
     expect(html).toContain('&lt;script&gt;secret&lt;/script&gt;')
     expect(html).not.toContain('<script>secret')
     expect(html).not.toContain('<img onerror')
-    expect(html).toMatch(/<button[^>]*disabled[^>]*>Suspend reseller<\/button>/)
+    expect(html).toMatch(/<button[^>]*data-reseller-suspend="[^"]+"[^>]*>Suspend reseller<\/button>/)
+    expect(renderApprovedWhmResellers({ ...base(), resellers: [{ ...reseller, suspended: true }] })).toMatch(/<button[^>]*data-reseller-suspended="true"[^>]*>Unsuspend reseller<\/button>/)
     expect(html).not.toContain('Resolves to')
   })
 
@@ -200,11 +201,12 @@ describe('detailed reseller administration', () => {
   it('renders the approved save bar card with Suspend first and status, Discard and Save at the end', () => {
     const html = renderApprovedWhmResellers(base())
     const form = html.slice(html.indexOf('data-reseller-update-form="true"'), html.indexOf('</form>', html.indexOf('data-reseller-update-form="true"')))
-    expect(form).toContain('<div class="xp-reseller-savebar" data-reseller-savebar><button class="xp-btn" type="button" disabled data-wiring="soon">Suspend reseller</button><div class="xp-reseller-actions"><p class="xp-help" data-reseller-update-status role="status"></p><button type="reset" class="xp-btn">Discard changes</button><button type="submit" class="xp-btn xp-btn--primary">Save reseller</button></div></div>')
+    expect(form).toContain(`<div class="xp-reseller-savebar" data-reseller-savebar><button class="xp-btn" type="button" data-reseller-suspend="${reseller.id}" data-reseller-suspended="false">Suspend reseller</button><p class="xp-help" role="status" data-reseller-suspend-status></p><div class="xp-reseller-actions"><p class="xp-help" data-reseller-update-status role="status"></p><button type="reset" class="xp-btn">Discard changes</button><button type="submit" class="xp-btn xp-btn--primary">Save reseller</button></div></div>`)
     expect(form.trimEnd().endsWith('</div></div>')).toBe(true)
     expect(html).toContain('.xp-reseller-reference .xp-reseller-savebar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--xp-space-field,16px);padding:var(--xp-space-field,16px) var(--xp-space-card,24px);border:1px solid var(--xp-border);border-radius:var(--xp-radius-lg,12px);background:var(--xp-bg-surface)}')
     const readOnly = renderApprovedWhmResellers({ ...base(), capabilityUnavailable: true })
-    expect(readOnly).toContain('<div class="xp-reseller-savebar" data-reseller-savebar><button class="xp-btn" type="button" disabled data-wiring="soon">Suspend reseller</button><div class="xp-reseller-actions"><button class="xp-btn" type="button" disabled data-wiring="soon">Discard changes</button><button class="xp-btn" type="button" disabled data-wiring="soon">Save reseller</button></div></div>')
+    expect(readOnly).toMatch(/<div class="xp-reseller-savebar" data-reseller-savebar><button class="xp-btn" type="button" data-reseller-suspend="[^"]*" data-reseller-suspended="false" disabled>Suspend reseller<\/button>/)
+    expect(readOnly).toContain(`data-reseller-suspend-status></p><div class="xp-reseller-actions"><button class="xp-btn" type="button" disabled data-wiring="soon">Discard changes</button><button class="xp-btn" type="button" disabled data-wiring="soon">Save reseller</button></div></div>`)
   })
 
   it('keeps reseller anchors CSS-safe and distinct for any stored id', () => {

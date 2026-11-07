@@ -105,6 +105,30 @@ describe('monitoring client binding', () => {
     expect(state()).toBe('saved')
     expect(pids()).toEqual(['1301', '5000'])
   })
+  it('kills all processes of one account after confirmation and reports what stays', async () => {
+    const reply = { state: 'attempted', username: 'alice', signalled: 2, remaining: 1, exempt: 0, observedAt: '2026-10-27T12:00:01.000Z', verificationRequired: true }
+    const send = vi.fn(async (method: string): Promise<unknown> => method === 'GET' ? processes() : reply)
+    const ask = vi.fn(async () => true)
+    boot(renderWhmMonitoringProcesses({ locale: 'en', canRead: true, canSignal: true }), send, ask); await tick()
+    const button = () => document.querySelector<HTMLButtonElement>('[data-whm-monitoring-kill-user="alice"]')!
+    expect(button().textContent).toBe('Kill all')
+    button().click(); await tick()
+    expect(send).toHaveBeenCalledWith('POST', '/api/server/monitoring/processes/kill-user', { username: 'alice', killConfirmed: true })
+    expect(state()).toBe('uncertain')
+    expect(text('[data-whm-monitoring-status]')).toContain('1 processes of alice are still present')
+    Object.assign(reply, { state: 'confirmed', remaining: 0, exempt: 1, verificationRequired: false })
+    button().click(); await tick()
+    expect(state()).toBe('saved')
+    expect(text('[data-whm-monitoring-status]')).toContain('No process of alice remains; 2 were signalled. 1 panel helpers were left running.')
+    send.mockClear(); ask.mockResolvedValue(false)
+    button().click(); await tick()
+    expect(send).not.toHaveBeenCalled()
+  })
+  it('shows no sweep control without signal permission', async () => {
+    boot(renderWhmMonitoringProcesses({ locale: 'en', canRead: true, canSignal: false }), vi.fn(async () => processes()), vi.fn(async () => true)); await tick()
+    expect(document.querySelector('[data-whm-monitoring-kill-user]')).toBeNull()
+    expect(text('[data-whm-monitoring-account-rows]')).toContain('Signals unavailable')
+  })
   it('sends nothing when confirmation is declined and reports 409 and unknown outcomes truthfully', async () => {
     const send = vi.fn(async (method: string): Promise<unknown> => { if (method === 'GET') return processes(); throw Object.assign(new Error('refused'), { status: 409, details: { stateChanged: false } }) })
     const ask = vi.fn(async () => false)

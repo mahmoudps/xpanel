@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { applyMailQueueAction, readMailQueue } from './mail-queue.ts'
+import { applyMailQueueAction, drainMailQueue, readMailQueue } from './mail-queue.ts'
 import type { MailQueueCommandResult } from './mail-queue.ts'
 import { isMailQueueCommand } from '../../../packages/os/src/mail-queue-command.ts'
 
@@ -86,6 +86,12 @@ describe('Postfix queue actions', () => {
     expect(calls).toEqual([['/usr/sbin/postqueue', '-j'], ['/usr/sbin/postsuper', '-d', '4F2A1B3C9D', 'deferred'], ['/usr/sbin/postqueue', '-j']])
     expect(authorize).toHaveBeenCalledTimes(1)
   })
+  it('answers NOT_FOUND for a deleted message and CONFLICT for releasing one that is not held', async () => {
+    const empty = ok('')
+    await expect(applyMailQueueAction({ ...base, action: 'delete', run: scripted(empty).run })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(applyMailQueueAction({ ...base, action: 'release', expectedQueue: 'hold', run: scripted(empty).run })).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(applyMailQueueAction({ ...base, action: 'release', expectedQueue: 'hold', run: scripted(ok(deferred)).run })).rejects.toMatchObject({ code: 'CONFLICT' })
+  })
   it('confirms hold and release by the observed queue', async () => {
     expect(await applyMailQueueAction({ ...base, action: 'hold', run: scripted(ok(deferred), ok(''), ok(held)).run })).toMatchObject({ outcome: 'confirmed', after: { present: true, queue: 'hold' } })
     expect(await applyMailQueueAction({ ...base, action: 'release', expectedQueue: 'hold', run: scripted(ok(held), ok(''), ok(deferred)).run })).toMatchObject({ outcome: 'confirmed', after: { queue: 'deferred' } })
@@ -98,10 +104,10 @@ describe('Postfix queue actions', () => {
     expect(calls[1]).toEqual(['/usr/sbin/postqueue', '-i', '4F2A1B3C9D'])
     expect(JSON.stringify(result)).not.toContain('delivered')
   })
-  it('returns 409 without running a command when the message is gone or moved', async () => {
-    for (const listing of ['', held]) {
+  it('refuses without running a command when the message is gone or moved', async () => {
+    for (const [listing, code] of [['', 'NOT_FOUND'], [held, 'CONFLICT']] as const) {
       const { run, calls } = scripted(ok(listing))
-      await expect(applyMailQueueAction({ ...base, run })).rejects.toMatchObject({ code: 'CONFLICT', detail: { stateChanged: false } })
+      await expect(applyMailQueueAction({ ...base, run })).rejects.toMatchObject({ code, detail: { stateChanged: false } })
       expect(calls).toHaveLength(1)
     }
     const { run } = scripted({ ok: false, code: 1, stdout: '', stderr: '' })
@@ -125,5 +131,16 @@ describe('Postfix queue actions', () => {
       await expect(applyMailQueueAction({ ...base, run, ...input } as never)).rejects.toMatchObject({ code: 'VALIDATION', detail: { stateChanged: false } })
     }
     expect(run).not.toHaveBeenCalled()
+  })
+  it('drains only what the named domains wait for, and reports what stays', async () => {
+    const line = (id: string, address: string) => JSON.stringify({ queue_name: 'deferred', queue_id: id, arrival_time: 1793095200, message_size: 1, sender: 's@a.test', recipients: [{ address }] }) + '\n'
+    const script = (listings: string[]) => { const calls: string[] = []; return { calls, run: async (argv: readonly string[]) => { calls.push(argv[1]!); return { ok: true, code: 0, stdout: argv[1] === '-j' ? listings.shift() ?? '' : '', stderr: '' } } } }
+    const quick = { sleep: async () => {}, timeoutMs: 0 }
+    const later = script([line('4F2A1B3C9D', 'r@Example.net'), ''])
+    expect(await drainMailQueue({ run: later.run, domains: ['example.net'], sleep: async () => {}, timeoutMs: 1000 })).toEqual({ drained: true, remaining: 0 })
+    expect(later.calls).toEqual(['-j', '-i', '-j'])
+    expect(await drainMailQueue({ run: script([line('4F2A1B3C9D', 'r@other.test')]).run, domains: ['example.net'], ...quick })).toEqual({ drained: true, remaining: 0 })
+    expect(await drainMailQueue({ run: script([line('4F2A1B3C9D', 'r@example.net')]).run, domains: ['example.net'], ...quick })).toEqual({ drained: false, remaining: 1 })
+    expect(await drainMailQueue({ run: async () => { throw new Error('down') }, domains: ['example.net'], ...quick })).toEqual({ drained: false, remaining: null })
   })
 })

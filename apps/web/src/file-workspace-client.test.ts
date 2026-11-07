@@ -1,7 +1,7 @@
 import { renderPanelSurface } from './surfaces/xpanel.ts'
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { createFileWorkspace, FILE_WORKSPACE_CLIENT_BINDING, workspaceBinary, workspaceEntry, workspaceLeaf, workspaceListing, workspaceMode, workspacePath, workspaceText, workspaceTextBytes, workspaceTrash, workspaceTrashList, workspaceWriteUncertain, type WorkspaceText } from './file-workspace-client.ts'
+import { createFileWorkspace, FILE_WORKSPACE_CLIENT_BINDING, workspaceBinary, workspaceDecoded, workspaceEntry, workspaceLeaf, workspaceListing, workspaceMode, workspacePath, workspaceText, workspaceTextBytes, workspaceTrash, workspaceTrashList, workspaceWriteUncertain, type WorkspaceText } from './file-workspace-client.ts'
 
 const timestamp='2026-10-25T00:00:00.000Z'
 const text=(path:string,content:string):WorkspaceText=>({path,content,sizeBytes:new TextEncoder().encode(content).length,mtime:timestamp})
@@ -130,5 +130,56 @@ describe('classic account file render contracts', () => {
     expect(empty).toContain('colspan="7"')
     expect(unread).toContain('data-file-editor-panel hidden')
     expect(unread).toContain('id="jailed-code-editor"')
+  })
+})
+
+describe('editor character set', () => {
+  const stamp = '2026-11-07T10:00:00.000Z', path = 'site/a.txt', entry = (sizeBytes: number) => ({ name: 'a.txt', path, kind: 'file', mode: 0o640, sizeBytes, mtime: stamp })
+  const bytes = (text: string) => ({ path, contentBase64: btoa(text), sizeBytes: text.length, mtime: stamp })
+  const rig = (disk: { binary: string }) => {
+    const sent: Record<string, unknown>[] = []
+    const send = async (body: Record<string, unknown>): Promise<unknown> => {
+      sent.push(body)
+      if (body.op === 'get-bytes') return bytes(disk.binary)
+      if (body.op === 'read') { const content = new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(disk.binary, c => c.charCodeAt(0))); return { path, content, sizeBytes: disk.binary.length, mtime: stamp } }
+      if (body.op === 'write') {
+        const text = body.content as string, single = body.to_charset !== undefined && [...text].every(c => c.codePointAt(0)! <= (body.to_charset === 'US-ASCII' ? 0x7f : 0xff))
+        disk.binary = single ? text : String.fromCharCode(...new TextEncoder().encode(text)); return entry(disk.binary.length)
+      }
+      return { path: '', entries: [] }
+    }
+    return { sent, workspace: createFileWorkspace({ send: send as never }) }
+  }
+  it('decodes single-byte files and refuses a byte outside the charset', () => {
+    expect(workspaceDecoded(bytes('caf\u00e9'), path, 'ISO-8859-1')).toMatchObject({ content: 'caf\u00e9', sizeBytes: 5 })
+    expect(() => workspaceDecoded(bytes('caf\u00e9'), path, 'US-ASCII')).toThrow('charset_mismatch')
+  })
+  it('opens by bytes and saves with to_charset, verifying the single-byte write', async () => {
+    const disk = { binary: 'caf\u00e9' }, { sent, workspace } = rig(disk)
+    workspace.setCharset('ISO-8859-1', false)
+    expect(await workspace.open(path)).toBe(true)
+    expect(workspace.state.draft).toBe('caf\u00e9')
+    workspace.edit('caf\u00e9!')
+    expect(await workspace.save()).toBe(true)
+    expect(sent.find(body => body.op === 'write')).toMatchObject({ content: 'caf\u00e9!', to_charset: 'ISO-8859-1', fallback: false })
+    expect(disk.binary).toBe('caf\u00e9!')
+    expect(workspace.state.dirty).toBe(false)
+  })
+  it('stops before sending a character the charset lacks, unless fallback keeps UTF-8', async () => {
+    const disk = { binary: 'abc' }, { sent, workspace } = rig(disk)
+    workspace.setCharset('US-ASCII', false)
+    await workspace.open(path); workspace.edit('caf\u00e9')
+    expect(await workspace.save()).toBe(false)
+    expect(workspace.state.notice).toContain('US-ASCII')
+    expect(sent.some(body => body.op === 'write')).toBe(false)
+    workspace.setCharset('US-ASCII', true)
+    expect(await workspace.save()).toBe(true)
+    expect(sent.find(body => body.op === 'write')).toMatchObject({ to_charset: 'US-ASCII', fallback: true })
+    expect(workspace.state.charset).toBe('UTF-8')
+  })
+  it('sends no charset field for UTF-8, so the plain text write stays as it was', async () => {
+    const disk = { binary: 'abc' }, { sent, workspace } = rig(disk)
+    await workspace.open(path); workspace.edit('abcd'); await workspace.save()
+    expect(Object.keys(sent.find(body => body.op === 'write')!).sort()).toEqual(['content', 'mode', 'op', 'overwrite', 'path'])
   })
 })

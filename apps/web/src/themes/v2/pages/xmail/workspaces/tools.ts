@@ -1,5 +1,9 @@
 import { v2MailClientTemplates } from '../client-templates.ts'
+import { v2ListAdminBody } from '../../xpanel/email-tools/list-admin.ts'
+import { mailCardsFor } from '../../../../../mail-cards.ts'
+import { renderV2MailCards } from '../../mail-cards.ts'
 import { formatMailboxQuota } from '../../../../../models/mail.ts'
+import { mailHomeGroups } from '../../../../../mail-home-groups.ts'
 import { actions, button, check, ctx, esc, facts, field, fields, input, page, section, select, table, technical, unreadRow, type MailWorkspaceInput } from './common.ts'
 
 function attachmentWorkspace(value: MailWorkspaceInput): string {
@@ -53,7 +57,8 @@ export function renderMailConnectDevicesPage(value: MailWorkspaceInput): string 
   return page(value, t(msgid('Connect devices')), t(msgid('Use these settings in desktop and mobile mail apps. Your password is the mailbox password; it is never shown here or included in setup files.')),
     section('v2-mail-devices', t(msgid('Connect mail apps and devices')), `<p data-mail-devices-status data-state="unread" role="status">${esc(t(readable ? msgid('Settings have not been read.') : msgid('Mail client setup is unavailable for this mailbox session. Nothing was read.')))}</p>${summary}`)
     + section('v2-mail-devices-manual', t(msgid('Manual settings')), `${table('v2-mail-devices-table', t(msgid('Incoming and outgoing mail servers')), [t(msgid('Service')), t(msgid('Server')), t(msgid('Port')), t(msgid('Security')), t(msgid('Username'))], unreadRow(t(msgid('Settings have not been read.')), 5), { 'data-mail-devices-rows': true })}<p>${esc(t(msgid('Prefer IMAP on port 993. Authentication uses your normal password over an encrypted connection. POP3 is not offered by this server.')))}</p>`)
-    + section('v2-mail-devices-download', t(msgid('Automatic setup files')), `<p data-mail-devices-download-note>${esc(t(msgid('Setup files are available after the settings are read.')))}</p>${actions(download('autoconfig', t(msgid('Download Thunderbird setup (XML)'))) + download('apple', t(msgid('Download Apple profile (iPhone, iPad, Mac)'))))}<ol><li>${esc(t(msgid('Thunderbird: open the downloaded XML from the account setup when asked, or enter the manual settings above.')))}</li><li>${esc(t(msgid('Apple devices: open the profile, review it in Settings, install it, then enter your mailbox password when asked. The profile is not signed.')))}</li></ol>`),
+    + section('v2-mail-devices-download', t(msgid('Automatic setup files')), `<p data-mail-devices-download-note>${esc(t(msgid('Setup files are available after the settings are read.')))}</p>${actions(download('autoconfig', t(msgid('Download Thunderbird setup (XML)'))) + download('apple', t(msgid('Download Apple profile (iPhone, iPad, Mac)'))))}<ol><li>${esc(t(msgid('Thunderbird: open the downloaded XML from the account setup when asked, or enter the manual settings above.')))}</li><li>${esc(t(msgid('Apple devices: open the profile, review it in Settings, install it, then enter your mailbox password when asked. The profile is not signed.')))}</li></ol>`)
+    + section('v2-mail-devices-send', t(msgid('Email these settings')), `<form class="v2-form" data-mail-devices-send-form novalidate><p>${esc(t(msgid('Sends the server, ports and username to one address, up to 5 messages per hour. Your password is never included.')))}</p><div class="v2-field"><label for="v2-mail-devices-send-email">${esc(t(msgid('Send to')))}</label><input id="v2-mail-devices-send-email" type="email" dir="ltr" autocomplete="email" spellcheck="false" maxlength="254" data-mail-devices-send-email disabled></div>${actions(`<button class="v2-btn" type="submit" data-mail-devices-send disabled>${esc(t(msgid('Send instructions')))}</button>`)}<p data-mail-devices-send-status data-state="unread" role="status" hidden></p></form>`),
     { 'data-mail-connect-devices': true, 'data-devices-mailbox': value.mailbox, 'data-devices-can-read': String(readable) })
 }
 
@@ -61,7 +66,7 @@ export function renderMailMailingListsPage(value: MailWorkspaceInput): string {
   const { t, editable } = ctx(value)
   return page(value, t(msgid('Mailing lists')), t(msgctxt('theme:v2', 'Inspect only public lists and verified memberships of this mailbox. Other members are never displayed.')),
     section('v2-mail-lists', t(msgid('Mailing lists')), `<p role="note">${esc(t(msgid('Changes save membership configuration. Native list delivery has not been verified. Posting moderation is separate from the owner-controlled subscription policy.')))}</p><p data-lists-status data-state="unread" role="status">${esc(t(msgid('The mailing lists have not been read.')))}</p>${actions(button(t(msgid('Read lists')), { 'data-lists-refresh': true }))}${table('v2-mail-lists-table', t(msgid('Mailing lists and your memberships')), [t(msgid('List address')), t(msgid('Name')), t(msgid('Disk usage')), t(msgid('Subscription access')), t(msgid('Administrators')), t(msgid('Your membership')), t(msgid('Actions'))], unreadRow(t(msgid('The mailing lists have not been read.')), 7), { 'data-lists-rows': true })}<p>${esc(t(msgid('Older membership records without a verified mailbox lifetime need provider review. Private lists are not available for self subscription.')))}</p>`)
-    + section('v2-mail-lists-admin', t(msgid('List administration')), `<p>${esc(t(msgid('Administration sign-on, moderation queues, archive access and storage measurements are unavailable here.')))}</p>${actions(button(t(msgid('Open administration'))) + button(t(msgid('Moderation queue'))) + button(t(msgid('Open archives'))))}`),
+    + section('v2-mail-lists-admin', t(msgid('List administration')), v2ListAdminBody(t, editable)),
     { 'data-mail-mailing-lists': true, 'data-lists-mailbox': value.mailbox, 'data-lists-manage': String(editable) })
 }
 
@@ -76,11 +81,13 @@ export function renderMailTrackDeliveryPage(value: MailWorkspaceInput): string {
     { 'data-mail-track-delivery': true, 'data-track-mailbox': value.mailbox, 'data-track-can-read': String(readable) })
 }
 
+const homeTiles = (value: MailWorkspaceInput, t: ReturnType<typeof ctx>['t']): string => mailHomeGroups(value.authorizedRoutes ?? new Set<string>()).map(group => `<div data-mail-home-group><h3>${esc(t(group.title))}</h3><ul>${group.tiles.map(tile => `<li><a href="${tile.route}">${esc(t(tile.label))}</a></li>`).join('')}</ul></div>`).join('')
+
 export function renderMailOverviewPage(value: MailWorkspaceInput): string {
   const { t, factsReadable } = ctx(value)
   const quota = factsReadable ? formatMailboxQuota(value.quotaUsedMb, value.quotaLimitMb, value.locale ?? 'en', value.quotaUsedBytes) : { text: '—', percent: null }
   return page(value, t(msgid('Mailbox quota')), t(msgctxt('theme:v2', 'Measured mailbox storage and the configured quota remain distinct.')),
-    section('v2-mail-overview', t(msgid('Mailbox quota')), `${facts([{ label: t(msgid('Mailbox')), valueHtml: technical(value.mailbox) }, { label: t(msgid('Mailbox quota')), valueHtml: technical(quota.text) }])}${quota.percent === null ? `<p role="status">${esc(t(msgctxt('xmail', 'Unavailable')))}</p>` : `<meter min="0" max="100" value="${quota.percent}" aria-label="${esc(t(msgid('Mailbox quota')))}"></meter>`}`, undefined, { 'data-section': 'mail-overview' }))
+    section('v2-mail-overview', t(msgid('Mailbox quota')), `${facts([{ label: t(msgid('Mailbox')), valueHtml: technical(value.mailbox) }, { label: t(msgid('Mailbox quota')), valueHtml: technical(quota.text) }])}${quota.percent === null ? `<p role="status">${esc(t(msgctxt('xmail', 'Unavailable')))}</p>` : `<meter min="0" max="100" value="${quota.percent}" aria-label="${esc(t(msgid('Mailbox quota')))}"></meter>`}${homeTiles(value, t)}`, undefined, { 'data-section': 'mail-overview' }))
 }
 
 export function renderMailToolsPage(value: MailWorkspaceInput): string {
@@ -96,15 +103,20 @@ export function renderMailToolsPage(value: MailWorkspaceInput): string {
   const linkRows = links.map(([route, label, help]) => `<li><a class="v2-btn"${readable && value.authorizedRoutes?.has(route!) ? ` href="${route}?lang=${value.locale ?? 'en'}"` : ' aria-disabled="true"'}>${esc(label!)}</a><p>${esc(help!)}</p></li>`).join('')
   const quota = `${facts([{ label: t(msgid('Used bytes')), valueHtml: `<bdi dir="ltr" data-tools-used>${esc(t(msgctxt('xmail-tools', 'Not read')))}</bdi>` }, { label: t(msgid('Storage limit (bytes)')), valueHtml: `<bdi dir="ltr" data-tools-limit>${esc(t(msgctxt('xmail-tools:3', 'Not read')))}</bdi>` }, { label: t(msgctxt('xmail-tools', 'Observed at')), valueHtml: `<bdi dir="ltr" data-tools-observed>${esc(t(msgctxt('xmail-tools:3', 'Not read')))}</bdi>` }])}<p data-tools-status role="status">${esc(t(msgid('Read the current quota from the mailbox server.')))}</p>${actions(button(t(msgid('Read quota')), { 'data-tools-refresh': true }))}`
   return page(value, t(msgid('Mailbox tools')), t(msgctxt('theme:v2', 'Existing mailbox workflows retain their own permissions and read-back states.')),
-    section('v2-mail-tools', t(msgid('More mail tools')), `<ul class="v2-mail-workspace__list">${linkRows}</ul><p>${esc(t(msgid('Junk training and search-index administration are unavailable here. Existing search reads the mailbox; no learner update or index rebuild is claimed.')))}</p>${actions(button(t(msgid('Train spam learner'))) + button(t(msgid('Rebuild search index'))))}`)
+    section('v2-mail-tools', t(msgid('More mail tools')), `<ul class="v2-mail-workspace__list">${linkRows}</ul><p>${esc(t(msgid('Mark a message as junk or not junk from its toolbar in Inbox; that also trains the spam filter.')))}</p>`)
     + section('v2-mail-tools-quota', t(msgid('Mailbox quota')), quota, undefined, { 'data-mail-tools-quota': true, 'data-tools-mailbox': value.mailbox, 'data-tools-available': String(readable && value.quotaAvailable === true) })
-    + searchWorkspace(value))
+    + searchWorkspace(value) + renderV2MailCards(mailCardsFor('/mail/later', t, { canRead: readable, canAct: () => readable && value.searchIndexAvailable === true }), value.locale ?? 'en'))
 }
 
-/** Core inserts its own theme account-security slot; no authentication form is duplicated here. */
+/** Core inserts its own theme account-security slot; the mailbox password form posts to the mailbox route only. */
 export function renderMailSecurityPage(value: MailWorkspaceInput): string {
-  const { t, readable } = ctx(value)
+  const { t, readable, editable } = ctx(value)
   const unread = section('v2-mail-security-status', t(msgid('Security')), `<p role="status" data-mail-security-unread>${esc(t(msgctxt('theme:v2', 'The account-security workspace has not been provided. No security setting was changed.')))}</p>`)
   const security = value.securityHtml && (readable || value.readOnly === true) ? value.securityHtml : unread
-  return page(value, t(msgid('Security')), t(msgctxt('theme:v2', 'Mailbox sign-in security uses the current authenticated account-security workspace.')), security)
+  const off = !editable, secret = (id: string, name: string, label: string, auto: string) => field(id, label, input(id, name, 'password', ` dir="ltr" autocomplete="${auto}" required${name === 'currentPassword' ? '' : ' minlength="8"'}`, off))
+  const password = section('v2-mail-password', t(msgid('Mailbox password')), `<div data-account-password data-account-password-can-change="${editable}" data-account-password-state="${editable ? 'ready' : 'unavailable'}" aria-busy="false"><form method="post" action="/api/webmail/security/password" data-account-password-form>`
+    + fields(secret('v2-mail-current-password', 'currentPassword', t(msgid('Current password')), 'current-password') + secret('v2-mail-new-password', 'newPassword', t(msgid('New password')), 'new-password') + secret('v2-mail-confirm-password', 'confirmPassword', t(msgid('Confirm new password')), 'new-password'))
+    + `<p class="v2-muted">${esc(t(msgid('The new password is used for webmail and for mail apps that use IMAP, POP3 or SMTP. Every mailbox session ends; sign in again afterwards.')))}</p><p role="status" data-account-password-status hidden></p>`
+    + actions(`<button type="submit" class="v2-btn v2-btn--primary" data-account-password-submit${off ? ' disabled' : ''}>${esc(t(msgid('Change password')))}</button>`) + '</form></div>')
+  return page(value, t(msgid('Security')), t(msgctxt('theme:v2', 'Mailbox sign-in security uses the current authenticated account-security workspace.')), password + security)
 }

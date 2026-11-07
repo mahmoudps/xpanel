@@ -39,6 +39,11 @@ const analytics = (route: string): ObservationCounterpart => ({
     requiredSelectors: ['section[aria-labelledby="v2-traffic-selection-heading"] h2#v2-traffic-selection-heading', 'section[aria-labelledby="v2-traffic-requests-heading"] h2#v2-traffic-requests-heading', 'section[aria-labelledby="v2-traffic-visitors-heading"] h2#v2-traffic-visitors-heading'],
     elements: [{ selector: 'form', tags: ['form'], attributes: { method: 'get', action: route }, occurrence: 'every', required: false }] },
 })
+/** The classic page no longer holds a placeholder to replace, so V2 keeps this as a route requirement of its own. */
+export const V2_WEB_STATS_REQUIREMENT: ControllerDeclaration = { id: 'v2-semantic-web-stats:/metrics/web-stats', rootSelector: '[data-surface-widget="web-stats"]', rootRequired: true, applicableRoutes: ['/metrics/web-stats'],
+  rootAttributes: { 'data-chart-state': { oneOf: ['unread', 'unavailable', 'empty', 'loaded'] } },
+  requiredSelectors: ['section[aria-labelledby="v2-web-stats-selection-heading"] h2#v2-web-stats-selection-heading', 'section[aria-labelledby="v2-web-stats-days-heading"] h2#v2-web-stats-days-heading', 'section[aria-labelledby="v2-web-stats-engines-heading"] h2#v2-web-stats-engines-heading'],
+  elements: [{ selector: 'form', tags: ['form'], attributes: { method: 'get', action: '/metrics/web-stats' }, occurrence: 'every', required: false }] }
 const store = (route: string): ObservationCounterpart => ({
   route, legacyHook: '[data-wiring="unavailable"]',
   evidence: 'V2 software/catalog.ts renderV2WhmStore: installer absent; data-installer-state=unavailable on its visible status, with all approved action buttons disabled by common.button default.',
@@ -51,12 +56,12 @@ const store = (route: string): ObservationCounterpart => ({
 /** Each replaced wiring observation has a real source-owned counterpart. Never mark an operational
  * Files/Services ancestor as soon: those clients correctly deny such ancestors. */
 export const V2_OBSERVATION_COUNTERPARTS: readonly ObservationCounterpart[] = [
-  native('/domains/site-settings', 'form[data-userdata-form]', 'ws-client userdata-config-fields; preserve its independent field/controller requirements'),
+  native('/resources', '[data-resource-observation]', 'V2 resources shows saved limits and marks each observation unread; it holds no refresh control without a reader.'),
   native('/domains/zone-editor', '[data-dns-editor]', 'dns client zone-editor declaration remains required'),
   native('/email/accounts', 'form[data-mailbox-form]', 'ws-client mailbox form + password/quota declarations remain required', ['[name="domainId"]', '[name="localPart"]', '[name="password"]', '[data-mailbox-status]']),
   native('/files/backup', '[data-account-backup]', 'account-backup-client.ts and independent account-backup declaration'),
   native('/files/trash', '[data-file-manager="trash"]', 'file-workspace-client.ts:340-357; preserve its exact identity, revision, readback and denied-ancestor guards'),
-  analytics('/metrics/traffic'), analytics('/metrics/web-stats'),
+  analytics('/metrics/traffic'),
   native('/security/account', 'section[data-account-security="two-factor"]', 'core accountSecurity slot + optional, disabled-development and handed-off forms remain governed by original independent declarations'),
   native('/software/php', 'form[data-domain-php-form]', 'V2 software/php.ts real stored domain PHP editor and existing core client fields', ['[name="domainId"]', '[name="version"]', '[name="handler"]', '[name="fpm.mode"]', '[data-domain-php-status]']),
   native('/whm/security/firewall', '[data-approved-whm-operations="/whm/security/firewall"]', 'whm-firewall-client and existing qualified/denied conditional table/editor declarations'),
@@ -72,8 +77,6 @@ const extraObservations: readonly ObservationCounterpart[] = [
   ...['/mail/inbox', '/mail/sent', '/mail/drafts', '/mail/trash'].map(route => ({ route, legacyHook: '[data-total]' as const,
     evidence: 'V2 inbox emits data-total only for a known total, always data-loaded/data-rest on the actual pager. Core tolerates absent total.',
     requirement: { id: 'v2-semantic-mail-count:' + route, rootSelector: 'span[data-mail-pager]', rootRequired: true, applicableRoutes: [route], parentRootSelector: '[data-mail-folder-workspace]', rootAttributes: { 'data-loaded': true, 'data-rest': true } } })),
-  { route: '/whm/security/ssh', legacyHook: '[data-server-settings-form]', evidence: 'Generic server-settings form is consumed only on /whm/services/web. SSH uses its own keys root and current independent controller.',
-    requirement: { id: 'v2-semantic-ssh-keys', rootSelector: '[data-whm-ssh-keys]', rootRequired: true, applicableRoutes: ['/whm/security/ssh'], rootAttributes: { 'data-whm-ssh-manage': { oneOf: ['true', 'false'] } }, requiredSelectors: ['[data-whm-ssh-status]', '[data-whm-ssh-key-rows]'] } },
   { route: '/whm/software/php', legacyHook: '[data-php-extension-draft-grid]', evidence: 'whm-php-client.ts287-303 fills the real extensions table and typed switch;304 only hides the optional legacy draft.',
     requirement: { id: 'v2-semantic-php-extension-table', rootSelector: '[data-whm-detail-section="php-extensions"]', rootRequired: true, applicableRoutes: ['/whm/software/php'], requiredSelectors: ['tbody'] } },
 ]
@@ -620,13 +623,15 @@ export function v2RouteContracts(): ReturnType<typeof routeContracts> {
     // Core status-page admission is document-root-only; the Classic badge updater is class-scoped.
     // V2 exposes the real same-core live-state machine rather than a cosmetic xp-badge data-status.
     for (const counterpart of counterparts) {
-      if (!base.hooks.includes(counterpart.legacyHook)) throw new Error('v2_observation_mapping_stale:' + base.route + ':' + counterpart.legacyHook)
+      // A retired classic placeholder leaves its V2 requirement in force.
+      if (counterpart.legacyHook !== '[data-wiring="soon"]' && !base.hooks.includes(counterpart.legacyHook)) throw new Error('v2_observation_mapping_stale:' + base.route + ':' + counterpart.legacyHook)
     }
     return { ...base, hooks, authoritativeControllers: [
       ...(backupRoutes.includes(base.route) ? (base.authoritativeControllers ?? []).map(v2BackupDeclaration) : (base.authoritativeControllers ?? [])), ...V2_SHARED_CHROME_REQUIREMENTS,
       { id: 'v2-semantic-document-surface', rootSelector: 'html', rootRequired: true, rootAttributes: { 'data-surface': base.surface } },
       ...counterparts.map(item => item.requirement),
       ...(base.route === '/home' ? [homeRequirement] : []),
+      ...(base.route === '/metrics/web-stats' ? [V2_WEB_STATS_REQUIREMENT] : []),
       ...(backupRoutes.includes(base.route) ? [{ id:'v2-semantic-backup-manager-mode',rootSelector:backupParent,rootRequired:true,applicableRoutes:backupRoutes,rootAttributes:{'data-backup-manage':{oneOf:['true','false']}} }] : []),
       ...(base.route === '/whm/software/php' ? [phpSwitchRequirement] : []),
     ] }

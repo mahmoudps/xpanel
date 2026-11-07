@@ -277,6 +277,8 @@ describe('transfer session', () => {
     expect(itemPercent({ ...p, phase: 'pending' })).toBe(0)
     expect(itemPercent({ ...p, phase: 'done' })).toBe(100)
     expect(itemPercent({ ...p, phase: 'reconciling' })).toBe(80)
+    expect(itemPercent({ ...p, phase: 'syncing' })).toBe(90)
+    expect(itemPercent({ ...p, phase: 'cutover' })).toBe(95)
     expect(itemPercent({ ...p, bytes: 100 })).toBe(99)
     expect(itemStatus(p)).toBe('running')
     expect(itemStatus({ ...p, phase: 'done' })).toBe('succeeded')

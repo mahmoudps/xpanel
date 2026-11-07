@@ -17,7 +17,7 @@ export interface MailLogEvent { at: string; source: string; kind: MailLogKind; t
 export interface MailLogRecipient { address: string; originalAddress: string | null; status: DeliveryStatus; dsn: string | null; relay: string | null; response: string | null; at: string; attempts: number }
 export interface MailLogMessage {
   queueId: string | null; firstSeen: string; lastSeen: string; sender: string | null; size: number | null; recipientCount: number | null
-  messageId: string | null; client: string | null; saslUsername: string | null; status: MailLogStatus; dsn: string | null
+  messageId: string | null; client: string | null; saslUsername: string | null; status: MailLogStatus; dsn: string | null; spamScore: number | null
   recipients: MailLogRecipient[]; recipientsOmitted: number; events: MailLogEvent[]; eventsOmitted: number
 }
 export interface MailLogCounts { records: number; events: number; skipped: number; unparsed: number; untrusted: number }
@@ -31,7 +31,7 @@ export interface MailLogServerView extends Base { scope: 'server'; limit: number
 export interface MailboxDeliveryEvent { at: string; kind: 'received' | 'queued' | 'delivery' | 'rejected' | 'expired' | 'notification' | 'removed'; status?: DeliveryStatus; dsn?: string | null }
 export interface MailboxDeliveryMessage {
   queueId: string | null; role: 'sender' | 'recipient' | 'both'; firstSeen: string; lastSeen: string; sender: string | null; size: number | null
-  status: MailLogStatus; dsn: string | null; recipients: Omit<MailLogRecipient, 'originalAddress'>[]; otherRecipients: number; events: MailboxDeliveryEvent[]; eventsOmitted: number
+  status: MailLogStatus; dsn: string | null; spamScore: number | null; recipients: Omit<MailLogRecipient, 'originalAddress'>[]; otherRecipients: number; events: MailboxDeliveryEvent[]; eventsOmitted: number
 }
 export interface MailLogMailboxView extends Base { scope: 'mailbox'; mailbox: string; complete: boolean; messages: MailboxDeliveryMessage[]; omittedMessages: number }
 
@@ -40,13 +40,19 @@ interface Line {
   recipient?: string; originalRecipient?: string | null; status?: DeliveryStatus; dsn?: string | null; relay?: string | null; response?: string | null
   sender?: string; size?: number; recipientCount?: number; messageId?: string; client?: string; saslUsername?: string | null
 }
-interface Built { queueId: string | null; firstSeen: string; lastSeen: string; sender: string | null; size: number | null; recipientCount: number | null; messageId: string | null; client: string | null; saslUsername: string | null; expired: boolean; recipients: Map<string, MailLogRecipient>; lines: Line[] }
+export interface Built { queueId: string | null; firstSeen: string; lastSeen: string; sender: string | null; size: number | null; recipientCount: number | null; messageId: string | null; client: string | null; saslUsername: string | null; expired: boolean; recipients: Map<string, MailLogRecipient>; lines: Line[]; spamScore?: number | null }
 export interface MailLogObservation extends Base { limit: number; lineLimitReached: boolean; counts: MailLogCounts; messages: Built[] }
 
 export const MAIL_LOG_MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 const MESSAGE_BUDGET = 900 * 1024
-const MAX_OUT = 200
-const SERVICES = new Map<string, string>(MAIL_LOG_IDENTIFIERS.map(id => [id, id.slice('postfix/'.length)]))
+export const MAX_OUT = 200
+const SERVICES = new Map<string, string>(MAIL_LOG_IDENTIFIERS.filter(id => id.startsWith('postfix/')).map(id => [id, id.slice('postfix/'.length)]))
+/** The scanners that log a verdict; spamd is a Perl program. */
+const SCANNER_EXE: Readonly<Record<string, string>> = { rspamd: '/usr/bin/rspamd', spamd: '/usr/bin/perl' }
+// rspamd_task_write_log: "... qid: <QUEUEID>, ... (default: F (no action): [1.20/15.00] [...])"
+const RSPAMD_SCORE = /\bqid: <([0-9A-Za-z]{6,26})>.*?: \[(-?[0-9]{1,6}(?:\.[0-9]{1,3})?)\/-?[0-9]/
+// spamd(8): "spamd: result: . 3 - SYMBOLS scantime=... mid=<id>,..."
+const SPAMD_SCORE = /^spamd: result: \S (-?[0-9]{1,6}) - .*\bmid=(<[^<>]{1,998}>)/
 const DELIVERY_SOURCES = new Set(['smtp', 'lmtp', 'local', 'virtual', 'pipe', 'error'])
 const EXE = /^\/usr\/(?:lib|libexec)\/postfix\/(?:sbin\/|bin\/)?([a-z]{3,8})$/
 // Postfix log_adhoc(3) grammar: QUEUEID: to=<a>[, orig_to=<a>], relay=R[, conn_use=N], delay=D, delays=a/b/c/d, dsn=X.Y.Z, status=S (text)
@@ -57,7 +63,7 @@ const CLIENT = /^client=([^\s,]{1,300})((?:, [a-z_]{1,32}=[^,]{0,300})*)$/
 const NOTICE = /^sender (?:non-delivery|delivery status|delay) notification: ([0-9A-Za-z]{6,26})$/
 const REJECT = /^(?:milter-)?reject: /
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g
-const ADDRESS_TOKEN = /[^\s<>()[\];,"'=]+@[^\s<>()[\];,"']+/g
+export const ADDRESS_TOKEN = /[^\s<>()[\];,"'=]+@[^\s<>()[\];,"']+/g
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const order: readonly DeliveryStatus[] = ['expired', 'bounced', 'deferred', 'rejected', 'sent']
 
@@ -66,19 +72,21 @@ export const clipMailLogText = (value: string, max = 1024): string => {
   const clean = value.replace(CONTROL, ' ').toWellFormed()
   return Buffer.byteLength(clean) <= max ? clean : Buffer.from(clean).subarray(0, max).toString('utf8').replace(/�+$/, '')
 }
-const lower = (value: string | null | undefined): string => (value ?? '').toLowerCase()
-const domainOf = (address: string | null): string => { const at = lower(address).lastIndexOf('@'); return at < 0 ? '' : lower(address).slice(at + 1) }
+export const lower = (value: string | null | undefined): string => (value ?? '').toLowerCase()
+export const domainOf = (address: string | null): string => { const at = lower(address).lastIndexOf('@'); return at < 0 ? '' : lower(address).slice(at + 1) }
 
 function journalRecord(line: string): { at: string; source: string; text: string } | 'untrusted' | null {
   let value: unknown
   try { value = JSON.parse(line) } catch { return null }
   // JOURNAL_EXPORT_FORMATS: binary fields are byte arrays and fields over 4096 bytes are null; neither is a readable Postfix line.
   if (!object(value) || typeof value.MESSAGE !== 'string' || typeof value.SYSLOG_IDENTIFIER !== 'string' || typeof value.__REALTIME_TIMESTAMP !== 'string' || !/^[0-9]{1,17}$/.test(value.__REALTIME_TIMESTAMP)) return null
-  const source = SERVICES.get(value.SYSLOG_IDENTIFIER)
+  const scanner = SCANNER_EXE[value.SYSLOG_IDENTIFIER]
+  if (scanner !== undefined && value._EXE !== scanner) return 'untrusted'
+  const source = scanner !== undefined ? value.SYSLOG_IDENTIFIER : SERVICES.get(value.SYSLOG_IDENTIFIER)
   if (!source) return null
   const exe = typeof value._EXE === 'string' ? EXE.exec(value._EXE)?.[1] : undefined
   // lmtp is installed as a link to smtp; /proc/<pid>/exe can resolve to either name.
-  if (exe !== source && !(source === 'lmtp' && exe === 'smtp')) return 'untrusted'
+  if (scanner === undefined && exe !== source && !(source === 'lmtp' && exe === 'smtp')) return 'untrusted'
   const ms = Math.floor(Number(value.__REALTIME_TIMESTAMP) / 1000)
   if (!Number.isSafeInteger(ms) || ms > 253402300799999) return null
   return { at: new Date(ms).toISOString(), source, text: value.MESSAGE }
@@ -134,7 +142,7 @@ function apply(message: Built, line: Line): void {
   message.recipients.set(key, { address: clipMailLogText(line.recipient, 254), originalAddress: line.originalRecipient == null ? null : clipMailLogText(line.originalRecipient, 254), status: line.status!, dsn: line.dsn ?? null, relay: line.relay ?? null, response: line.response ?? null, at: line.at, attempts: (current?.attempts ?? 0) + 1 })
 }
 
-const statusOf = (recipients: readonly MailLogRecipient[], expired: boolean): [MailLogStatus, string | null] => {
+export const statusOf = (recipients: readonly MailLogRecipient[], expired: boolean): [MailLogStatus, string | null] => {
   for (const status of order) {
     const match = recipients.find(item => status === 'expired' ? item.status === 'expired' || expired && item.status === 'deferred' : item.status === status)
     if (match || status === 'expired' && expired) return [status, match?.dsn ?? null]
@@ -156,10 +164,17 @@ export async function observeMailLog(input: { run: MailLogRun | null; since: str
   // journalctl(1) prints "-- No entries --" for an empty match unless --quiet is given.
   const lines = result.stdout.split('\n').filter(line => line.trim() !== '' && line.trim() !== '-- No entries --').slice(0, limit)
   const open = new Map<string, Built>(), done: Built[] = []
+  const scores = new Map<string, number>()
   for (const raw of lines) {
     counts.records++
     const record = journalRecord(raw)
     if (record === 'untrusted') { counts.untrusted++; continue }
+    if (record && (record.source === 'rspamd' || record.source === 'spamd')) {
+      const verdict = record.source === 'rspamd' ? RSPAMD_SCORE.exec(record.text) : SPAMD_SCORE.exec(record.text)
+      if (verdict) scores.set(record.source === 'rspamd' ? verdict[1]! : verdict[2]!, Number(record.source === 'rspamd' ? verdict[2] : verdict[1]))
+      counts.skipped++
+      continue
+    }
     const line = record ? postfixLine(record) : null
     if (line === null) { counts.unparsed++; continue }
     if (line === 'skip') { counts.skipped++; continue }
@@ -170,15 +185,16 @@ export async function observeMailLog(input: { run: MailLogRun | null; since: str
     else open.set(line.queueId, message)
   }
   done.push(...open.values())
+  for (const message of done) message.spamScore = scores.get(message.queueId ?? '') ?? scores.get(message.messageId ?? '') ?? null
   return { state: 'read', ...base, lineLimitReached: lines.length >= limit, counts, messages: done }
 }
 
-const fit = <T>(items: readonly T[]): { kept: T[]; omitted: number } => {
+export const fit = <T>(items: readonly T[]): { kept: T[]; omitted: number } => {
   const kept: T[] = []; let bytes = 0
   for (const item of items) { const size = Buffer.byteLength(JSON.stringify(item)) + 1; if (bytes + size > MESSAGE_BUDGET) break; bytes += size; kept.push(item) }
   return { kept, omitted: items.length - kept.length }
 }
-const newest = (left: Built, right: Built): number => right.lastSeen.localeCompare(left.lastSeen) || lower(left.queueId).localeCompare(lower(right.queueId))
+export const newest = (left: Built, right: Built): number => right.lastSeen.localeCompare(left.lastSeen) || lower(left.queueId).localeCompare(lower(right.queueId))
 const top = (counts: Map<string, number>): [string, number][] => [...counts].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])).slice(0, 10)
 const bump = (counts: Map<string, number>, key: string): void => { counts.set(key, (counts.get(key) ?? 0) + 1) }
 
@@ -209,7 +225,7 @@ const publicMessage = (message: Built): MailLogMessage => {
   const recipients = [...message.recipients.values()], [status, dsn] = statusOf(recipients, message.expired)
   return {
     queueId: message.queueId, firstSeen: message.firstSeen, lastSeen: message.lastSeen, sender: message.sender === null ? null : clipMailLogText(message.sender, 254),
-    size: message.size, recipientCount: message.recipientCount, messageId: message.messageId, client: message.client === null ? null : clipMailLogText(message.client, 300),
+    size: message.size, recipientCount: message.recipientCount, spamScore: message.spamScore ?? null, messageId: message.messageId, client: message.client === null ? null : clipMailLogText(message.client, 300),
     saslUsername: message.saslUsername === null ? null : clipMailLogText(message.saslUsername, 254), status, dsn,
     recipients: recipients.slice(0, MAX_OUT), recipientsOmitted: Math.max(0, recipients.length - MAX_OUT),
     events: message.lines.slice(-MAX_OUT).map(line => ({ at: line.at, source: line.source, kind: line.kind, text: line.text })), eventsOmitted: Math.max(0, message.lines.length - MAX_OUT),
@@ -251,7 +267,7 @@ export function projectMailboxMailLog(observation: MailLogObservation, mailbox: 
       queueId: message.queueId, role: sent && mine.length ? 'both' : sent ? 'sender' : 'recipient', firstSeen: message.firstSeen, lastSeen: message.lastSeen,
       // The envelope sender is part of what the mailbox received; other recipients never are.
       sender: message.sender ? clipMailLogText(message.sender, 254) : null,
-      size: message.size, status, dsn,
+      size: message.size, status, dsn, spamScore: message.spamScore ?? null,
       recipients: mine.slice(0, MAX_OUT).map(item => ({ address: mailbox, status: item.status, dsn: item.dsn, relay: item.relay, response: redact(item.response), at: item.at, attempts: item.attempts })),
       otherRecipients: all.length - mine.length, events: events.slice(-MAX_OUT), eventsOmitted: Math.max(0, events.length - MAX_OUT),
     })
@@ -271,7 +287,7 @@ export interface MailLogAuthorityPorts {
 }
 
 /** Mirrors the API sealed-session binding (openAuthorizedMailboxSession): only the mailbox's own principal may read its events. */
-export async function assertMailLogMailboxCaller(ports: MailLogAuthorityPorts, caller: AgentCallerIdentity, address: string): Promise<void> {
+export async function assertMailLogMailboxCaller(ports: MailLogAuthorityPorts, caller: AgentCallerIdentity, address: string, features: readonly string[] = AGENT_TRACK_DELIVERY_FEATURE_POLICY): Promise<void> {
   const denied = (): never => fail('FORBIDDEN', 'a current sealed mailbox identity is required for delivery tracking', { stateChanged: false })
   if (caller.role !== 'user' || !caller.accountId || !isMailLogMailbox(address)) return denied()
   const principal = await ports.principal(caller.principalId)
@@ -279,8 +295,8 @@ export async function assertMailLogMailboxCaller(ports: MailLogAuthorityPorts, c
     || principal.accountId !== caller.accountId || ![mailboxPrincipalUsername(address), address].includes(principal.username.toLowerCase())) return denied()
   const [mailbox, account] = await Promise.all([ports.store.getServiceUserByLogin(address), ports.store.getAccount(caller.accountId)])
   if (!mailbox || !mailbox.services.email || mailbox.accountId !== caller.accountId || mailbox.login.toLowerCase() !== address || !account || account.status !== 'active') return denied()
-  const plan = await ports.store.getPlan(account.planId), features = plan ? await ports.store.getFeatureList(plan.featureListId) : null
-  if (!features || AGENT_TRACK_DELIVERY_FEATURE_POLICY.some(key => features.disabled.includes(key))) fail('FORBIDDEN', 'delivery tracking is unavailable in the current account feature policy', { stateChanged: false })
+  const plan = await ports.store.getPlan(account.planId), list = plan ? await ports.store.getFeatureList(plan.featureListId) : null
+  if (!list || features.some(key => list.disabled.includes(key))) fail('FORBIDDEN', 'delivery tracking is unavailable in the current account feature policy', { stateChanged: false })
 }
 
 export interface MailLogRouteContext {

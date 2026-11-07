@@ -11,7 +11,7 @@ const PLAN = '33333333-3333-4333-8333-333333333333', RESELLER = '22222222-2222-4
 const definitions = [{ id: 'priority-support', label: 'Priority support', kind: 'flag', min: null, max: null }, { id: 'extra-sites', label: 'Extra sites', kind: 'limit', min: 0, max: 10 }]
 const document_ = (overrides: Record<string, unknown> = {}) => ({ definitions, planAssignments: { [PLAN]: { 'extra-sites': 2 } }, accountAssignments: { [A]: { 'priority-support': true } }, resellerLimits: { [RESELLER]: { 'priority-support': 2 } }, ...overrides })
 const directory = { plans: [{ id: PLAN, name: 'Starter' }], accounts: [{ id: A, username: 'alice', planId: PLAN, ownerId: RESELLER }], resellers: [{ id: RESELLER, username: 'res1' }] }
-const view = (overrides: Record<string, unknown> = {}) => ({ state: 'saved', revision: R1, document: document_(), directory, application: { enforced: false, resellerAssignment: false }, ...overrides })
+const view = (overrides: Record<string, unknown> = {}) => ({ state: 'saved', revision: R1, document: document_(), directory, application: { enforced: false, resellerAssignment: true }, ...overrides })
 type Send = (method: string, path: string, body?: unknown) => Promise<unknown>
 const flush = async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const boot = (send?: Send, locale: 'en' | 'ar' = 'en', canManage = true, ask?: (options: Record<string, unknown>) => Promise<unknown>, theme: 'classic' | 'v2' = 'classic') => {
@@ -32,7 +32,7 @@ afterEach(() => { document.body.innerHTML = ''; document.documentElement.lang = 
 describe('account enhancements parser', () => {
   it('accepts the server view and refuses enforcement claims or bad values', () => {
     expect(readWhmEnhancementsView(view()).document.definitions).toHaveLength(2)
-    for (const bad of [view({ application: { enforced: true, resellerAssignment: false } }), view({ document: document_({ accountAssignments: { [A]: { 'extra-sites': 11 } } }) }), view({ document: document_({ planAssignments: { [PLAN]: { unknown: true } } }) }), view({ state: 'default' })])
+    for (const bad of [view({ application: { enforced: true, resellerAssignment: true } }), view({ document: document_({ accountAssignments: { [A]: { 'extra-sites': 11 } } }) }), view({ document: document_({ planAssignments: { [PLAN]: { unknown: true } } }) }), view({ state: 'default' })])
       expect(() => readWhmEnhancementsView(bad)).toThrow()
   })
 })
@@ -68,7 +68,7 @@ describe('account enhancements client', () => {
     expect($('[data-acct-enh-rows="definitions"]').textContent).toContain('Extra sites')
     expect($('[data-acct-enh-rows="assignments"]').textContent).toContain('Starter')
     expect($('[data-acct-enh-rows="limits"]').textContent).toContain('res1')
-    expect($('[data-acct-enh-application]').textContent).toContain('No xPanel feature reads them yet')
+    expect($('[data-acct-enh-application]').textContent).toContain('Lifecycle hooks receive them')
   })
   it('saves a limit assignment as the whole document with the revision', async () => {
     const send = vi.fn(async (method: string) => method === 'GET' ? view() : view({ revision: R2, document: document_({ accountAssignments: { [A]: { 'priority-support': true, 'extra-sites': 5 } } }) }))

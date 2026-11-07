@@ -22,7 +22,7 @@ const fixture = async () => {
     caps: { addonDomains: 2, aliasDomains: 2, subdomains: 2, mailboxes: 2, forwarders: 2, mailingLists: 2, ftpAccounts: 2, databases: 2, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
   })
   await store.saveServerIp({ address: '192.0.2.42', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '' })
-  const resellerInput = { passwordHash: HASH, acl: ['list-accounts', 'edit-account', 'suspend-account', 'terminate-account', 'change-plan'] as const, maxAccounts: 100, totalDiskMb: 1000000, totalBandwidthMb: 'unlimited' as const, oversell: false, nameservers: [], delegatedIps: ['192.0.2.42'] }
+  const resellerInput = { passwordHash: HASH, acl: ['list-accounts', 'edit-account', 'suspend-account', 'terminate-account', 'change-plan'] as const, maxAccounts: 100, totalDiskMb: 1000000, totalBandwidthMb: 'unlimited' as const, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: ['192.0.2.42'] }
   const resellerA = await store.createReseller({ ...resellerInput, acl: [...resellerInput.acl], username: 'resellera' })
   const resellerB = await store.createReseller({ ...resellerInput, acl: [...resellerInput.acl], username: 'resellerb' })
   const accountInput = { passwordHash: HASH, planId: plan.id, contactEmail: 'owner@example.test', ipv4: '192.0.2.42', shell: 'none' as const,

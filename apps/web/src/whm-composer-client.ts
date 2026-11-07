@@ -23,11 +23,13 @@ function bindWhmComposer(askDialog: Ask | undefined, parse: typeof readComposerW
     const reviewRegion = root.querySelector<HTMLElement>('[data-composer-review-region]'), reviewBody = root.querySelector<HTMLElement>('[data-composer-review-packages]'), runHelp = root.querySelector<HTMLElement>('[data-composer-run-help]'), jobLink = root.querySelector<HTMLAnchorElement>('[data-composer-job-link]'), liveLog = root.querySelector<HTMLElement>('[data-composer-live-log]')
     const blocked = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.composerCanRead === 'true' && !root.closest(blocked)
+    const phpSelect = root.querySelector<HTMLSelectElement>('[data-composer-php]'), mirror = root.querySelector<HTMLInputElement>('[data-composer-mirror]')
+    const choices = (): { phpVersion: string | null; mirror: string | null } => ({ phpVersion: phpSelect?.value || null, mirror: mirror?.value.trim() || null })
     let busy = false, projects: ComposerWorkspaceView['projects'] = [], current: ComposerWorkspaceView | null = null, review: ComposerJobReviewView | null = null, locked = false
     // Job controls follow the agent's qualified-provider state; an unknown submission locks them until the next read.
     const runnable = (): boolean => admitted() && !busy && !locked && current?.actions.install === true && current.selected?.state === 'read' && typeof askDialog === 'function'
     const clearReview = (): void => { review = null; if (reviewRegion) reviewRegion.hidden = true; if (reviewBody) reviewBody.textContent = '' }
-    const lockJobs = (): void => { if (runAction) runAction.disabled = !runnable(); if (reviewButton) reviewButton.disabled = !runnable(); if (runButton) runButton.disabled = !runnable() || !review || review.action !== runAction?.value }
+    const lockJobs = (): void => { if (phpSelect) phpSelect.disabled = !runnable(); if (mirror) mirror.disabled = !runnable(); if (runAction) runAction.disabled = !runnable(); if (reviewButton) reviewButton.disabled = !runnable(); if (runButton) runButton.disabled = !runnable() || !review || review.action !== runAction?.value }
     // Human status text in a value slot leaves the technical mono font.
     const text = (key: string, value: string, human = false): void => { const node = root.querySelector<HTMLElement>('[data-composer-' + key + ']'); if (!node) return; node.textContent = value; node.toggleAttribute('data-human', human) }
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
@@ -35,7 +37,7 @@ function bindWhmComposer(askDialog: Ask | undefined, parse: typeof readComposerW
     const clear = (): void => { for (const key of ['account', 'directory', 'php', 'manifest', 'lock', 'vendor', 'match']) text(key, t('Not read'), true); empty(t('No selected project has been read.')) }
     const paint = (value: ComposerWorkspaceView): void => {
       current = value; locked = false; clearReview()
-      if (runHelp) runHelp.textContent = value.actions.install ? t('Review the dependency graph that the confined provider resolves, then submit it as a host job. Project scripts and plugins never run.') : t('Install, update and custom mirrors require a reviewed account-isolated Composer job runner with script/plugin restrictions, resource limits and verified ownership. That provider is unavailable; no job can be submitted here.')
+      if (runHelp) runHelp.textContent = value.actions.install ? t('Review the locked packages, then submit the run as a host job. Composer runs as the account; project scripts and plugins stay off.') : t('Install, update and custom mirrors require a reviewed account-isolated Composer job runner with script/plugin restrictions, resource limits and verified ownership. That provider is unavailable; no job can be submitted here.')
       projects = value.projects; target.textContent = ''
       const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = projects.length ? t(msgctxt('whm-composer-client', 'Choose a site')) : t('No active PHP sites'); target.append(placeholder)
       for (const item of projects) { const option = document.createElement('option'); option.value = item.selector; option.textContent = item.domain + ' — ' + item.account; target.append(option) }
@@ -69,18 +71,32 @@ function bindWhmComposer(askDialog: Ask | undefined, parse: typeof readComposerW
       finally { busy = false; refresh.disabled = !admitted(); target.disabled = !admitted() || projects.length === 0; root.setAttribute('aria-busy', 'false'); lockJobs() }
     }
     const code = (error: unknown): number => error && typeof error === 'object' ? Number((error as Record<string, any>).status) : NaN
+    // The job log is the live output: one bounded read every two seconds while the job runs.
+    const followLog = async (id: string): Promise<void> => {
+      let offset = 0, text = ''
+      for (let round = 0; round < 360 && root.isConnected; round++) {
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        try {
+          const page = await request!('GET', '/api/jobs/' + id + '/log?offset=' + offset + '&limit=65536') as { nextOffset?: unknown; text?: unknown }, job = await request!('GET', '/api/jobs/' + id) as { job?: { status?: unknown } }
+          if (typeof page.text !== 'string' || typeof page.nextOffset !== 'number') return
+          offset = page.nextOffset; text = (text + page.text).slice(-16384)
+          if (liveLog && text) liveLog.textContent = text
+          if (!['queued', 'running'].includes(String(job.job?.status))) return
+        } catch { return }
+      }
+    }
     const reviewJob = async (): Promise<void> => {
       if (!runnable() || !runAction || !request || !current?.selected) return
       const domainId = current.selected.selector, action = runAction.value
       busy = true; clearReview(); lockJobs(); note('reading', t('Resolving the dependency graph with the confined provider…'))
       try {
-        const next = parseReview(await request('POST', '/api/server/composer/jobs/preview', { action, domainId }))
+        const next = parseReview(await request('POST', '/api/server/composer/jobs/preview', { action, domainId, ...choices() }))
         if (next.action !== action || next.domainId !== domainId || current?.selected?.selector !== domainId || !admitted()) throw new Error('wrong_review')
         review = next
         if (reviewBody) for (const item of next.packages) reviewBody.append(cloneViewRecord(root, 'software-composer-review-row', 'tr', { name: item.name, version: item.version, development: item.development ? t('Yes') : t('No') }))
         if (reviewRegion) reviewRegion.hidden = false
         note('read', t('Review ready: {count, plural, one {# package} other {# packages}} in the resolved graph. Submit it to run the isolated job.', { count: next.packages.length }))
-      } catch (error) { note('failed', code(error) === 412 ? t('The confined Composer provider is unavailable on this server. No job was submitted.') : code(error) === 409 ? t('The project changed. Read it again before reviewing.') : t('The review could not be verified. No job was submitted.')) }
+      } catch (error) { note('failed', code(error) === 412 ? t('Composer jobs are unavailable on this server. No job was submitted.') : code(error) === 409 ? t('The project changed. Read it again before reviewing.') : t('The review could not be verified. No job was submitted.')) }
       finally { busy = false; lockJobs() }
     }
     const runJob = async (): Promise<void> => {
@@ -88,15 +104,16 @@ function bindWhmComposer(askDialog: Ask | undefined, parse: typeof readComposerW
       const reviewed = review
       busy = true; lockJobs()
       let approved = false
-      try { approved = await askDialog!({ title: t('Run Composer {action} for {domain}?', { action: reviewed.action, domain: reviewed.domain }), body: t('The isolated job installs exactly the reviewed graph without scripts, plugins or network access, and keeps a recovery snapshot.'), danger: true, confirm: t('Submit host job') }) === true } catch { approved = false }
+      try { approved = await askDialog!({ title: t('Run Composer {action} for {domain}?', { action: reviewed.action, domain: reviewed.domain }), body: t('Composer runs as the account of the site, without project scripts or plugins.'), danger: true, confirm: t('Submit host job') }) === true } catch { approved = false }
       if (!approved || review !== reviewed || !admitted()) { busy = false; lockJobs(); return }
       note('reading', t('Submitting the host job…'))
       try {
-        const result = await request('POST', '/api/server/composer/jobs/apply', { action: reviewed.action, domainId: reviewed.domainId, expectedRevision: reviewed.expectedRevision, reviewFingerprint: reviewed.reviewFingerprint }) as { job?: { id?: unknown; kind?: unknown } }
+        const result = await request('POST', '/api/server/composer/jobs/apply', { action: reviewed.action, domainId: reviewed.domainId, ...choices(), expectedRevision: reviewed.expectedRevision, reviewFingerprint: reviewed.reviewFingerprint }) as { job?: { id?: unknown; kind?: unknown } }
         if (!result || typeof result.job?.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(result.job.id) || result.job.kind !== 'composer.dependencies.' + reviewed.action) throw { details: {} }
         locked = true; clearReview()
         if (jobLink) jobLink.href = '/whm/jobs?job=' + encodeURIComponent(result.job.id)
         if (liveLog) liveLog.textContent = t('Job submitted. Its verified result and log appear on the host jobs page.')
+        void followLog(result.job.id)
         note('submitted', t('Host job submitted. Dependency metadata is unchanged here until you read the site again after the job finishes.'))
       } catch (error) {
         const detail = error && typeof error === 'object' ? (error as Record<string, any>).details ?? (error as Record<string, any>).detail : null

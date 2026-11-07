@@ -3,7 +3,7 @@ import { MAILX_DEFAULTS, MAILX_MARKER, mailxMailboxEffects, readMailxMailboxSpam
 import type { MailxSaved } from './mailx-policy.ts'
 
 const at = '2026-10-28T10:00:00.000Z'
-const empty = (): MailxSaved => ({ sections: { spam: null, relay: null, bcc: null, marketing: null, server: null, routing: null }, archives: [] })
+const empty = (): MailxSaved => ({ sections: { outbound: null, spam: null, relay: null, bcc: null, marketing: null, server: null, routing: null, spamd: null, country: null, advanced: null, greylist: null }, archives: [] })
 
 describe('mail policy grammar', () => {
   it('accepts exact policies and rejects unknown, unordered or unsafe values', () => {
@@ -60,9 +60,9 @@ describe('mailbox spam preference effects', () => {
     ownerAuthority: { accountId: 'acc', serviceUserId: 'su', mailbox: 'a@shop.example' }, updatedAt: '2026-10-28T09:00:00.000Z' }
   it('parses strictly; an inherited preference keeps only its sender lists natively', () => {
     const row = readMailxMailboxSpam(pref)
-    expect(mailxMailboxEffects(row)).toEqual({ allowlist: false, filtering: false, score: false, blocklist: true, spamBox: false })
-    expect(mailxMailboxEffects({ ...row, inherit: false })).toEqual({ allowlist: false, filtering: false, score: false, blocklist: true, spamBox: true })
-    expect(mailxMailboxEffects({ ...row, inherit: false, enabled: false, blocklist: [] })).toEqual({ allowlist: false, filtering: true, score: false, blocklist: false, spamBox: false })
+    expect(mailxMailboxEffects(row)).toEqual({ allowlist: false, filtering: false, score: false, blocklist: true, spamBox: false, autoDelete: false })
+    expect(mailxMailboxEffects({ ...row, inherit: false })).toEqual({ allowlist: false, filtering: false, score: false, blocklist: true, spamBox: true, autoDelete: false })
+    expect(mailxMailboxEffects({ ...row, inherit: false, enabled: false, blocklist: [] })).toEqual({ allowlist: false, filtering: true, score: false, blocklist: false, spamBox: false, autoDelete: false })
     expect(renderMailxMailboxSettings([row]).content).toBe(MAILX_MARKER + String.fromCharCode(10))
     expect(renderMailxMailboxSettings([{ ...row, inherit: false, enabled: false }]).content).toContain('want_spam = yes;')
     for (const bad of [{ ...pref, extra: 1 }, { ...pref, allowlist: ['x"@y.example'] }, { ...pref, ownerAuthority: { ...pref.ownerAuthority, mailbox: 'b@shop.example' } }, { ...pref, addHeaderScore: 101 }])

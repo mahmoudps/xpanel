@@ -1,4 +1,6 @@
 import { accountRoutingClientTemplates } from '../email-tools/routing-client-templates.ts'
+import { mailCardsFor } from '../../../../../mail-cards.ts'
+import { renderV2MailCards } from '../../mail-cards.ts'
 import { localeDirection, type Translate } from '../../../../../i18n.ts'
 import { card } from '../../../components/card.ts'
 import { dataTable, type DataTableRow } from '../../../components/data-table.ts'
@@ -89,7 +91,7 @@ export function renderV2EmailForwardersPage(t: Translate, props: EmailForwarders
   if (props.readOnly === true) props = { ...props, canManage: false }
   return `<div class="v2-email-routing"${props.readOnly === true ? ' data-readonly="true"' : ''} lang="${t.locale}" dir="${localeDirection(t.locale)}">${layoutRoot(t, {
     header: { breadcrumb: [{ label: 'xPanel', href: '/home' }, { label: t('Email accounts'), href: '/email/accounts' }, { label: t('Forwarders') }], route: '/email/forwarders', title: t('Forwarders') },
-  }, `<div class="v2-stack">${forwarders(t, props)}${autoresponders(t, props)}${defaultAddress(t, props)}</div>`)}</div>`
+  }, `<div class="v2-stack">${forwarders(t, props)}${autoresponders(t, props)}${defaultAddress(t, props)}${renderV2MailCards(mailCardsFor('/email/forwarders', t, { canRead: props.readOnly !== true && props.domainsObserved === true, canAct: () => props.canManage === true, domains: props.domains.map(domain => domain.name) }), t.locale)}</div>`)}</div>`
 }
 
 export const EMAIL_ROUTING_CSS = `.v2-email-routing-workspace{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}

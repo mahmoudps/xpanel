@@ -42,7 +42,7 @@ function bindSwOptimize(parse: typeof readSwOptimizeView): void {
         const view = parse(await transport!('GET', '/api/account/optimize'))
         if (!admitted()) return
         paint(view)
-        note(view.state === 'read' ? 'read' : 'unavailable', view.state === 'read' ? t('Policy read from the managed edge configuration. Per-site rules and purge are unavailable.')
+        note(view.state === 'read' ? 'read' : 'unavailable', view.state === 'read' ? t('Policy read from the managed edge configuration.')
           : view.reason === 'unmanaged-edge-config' ? t('The edge configuration is not managed by xPanel, so its policy is not shown.') : view.reason === 'invalid-edge-config' ? t('The edge configuration could not be verified. No policy is shown.') : t('The edge configuration cannot be read on this server. No policy is shown.'))
       } catch { if (admitted()) { paint(null); note('failed', t('The optimization policy could not be verified. Read again; nothing was changed.')) } }
       finally { busy = false; refresh.disabled = !admitted() }

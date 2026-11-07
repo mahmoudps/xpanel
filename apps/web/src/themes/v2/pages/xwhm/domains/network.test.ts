@@ -75,7 +75,7 @@ describe('independent v2 WHM domains, DNS and certificate pages', () => {
     expect(nodes.find(node => node.attrs.has('data-dns-records'))?.tag).toBe('tbody')
     for (const hook of ['refresh', 'add-record', 'add-zone', 'save', 'delete']) expect(nodes.find(node => node.attrs.has(`data-dns-${hook}`))?.attrs.get('type')).toBe('button')
     expect(html).toContain('SOA serials are allocated by the server.')
-    expect(html).toContain('no file was imported or exported.')
+    expect(html).toContain('Nothing has been imported.')
   })
 
   it('uses actual API numeric bounds in its record and TTL templates', () => {

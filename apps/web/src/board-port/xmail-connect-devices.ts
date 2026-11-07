@@ -22,5 +22,11 @@ export function renderMailConnectDevices(input: { locale: Locale; mailbox: strin
       <div class="xp-mail-devices__actions">${download('autoconfig', t('Download Thunderbird setup (XML)'))}${download('apple', t('Download Apple profile (iPhone, iPad, Mac)'))}</div>
       <ol><li>${t('Thunderbird: open the downloaded XML from the account setup when asked, or enter the manual settings above.')}</li><li>${t('Apple devices: open the profile, review it in Settings, install it, then enter your mailbox password when asked. The profile is not signed.')}</li></ol>
     </div>
+    <form class="xp-mail-devices__group" data-mail-devices-send-form novalidate><h3>${t('Email these settings')}</h3>
+      <p class="xp-help">${t('Sends the server, ports and username to one address, up to 5 messages per hour. Your password is never included.')}</p>
+      <div class="xp-field"><label class="xp-label" for="mail-devices-send-email">${t('Send to')}</label><input id="mail-devices-send-email" class="xp-input" type="email" dir="ltr" autocomplete="email" spellcheck="false" maxlength="254" data-mail-devices-send-email disabled></div>
+      <div class="xp-mail-devices__actions"><button type="submit" class="xp-btn" data-mail-devices-send disabled>${t('Send instructions')}</button></div>
+      <p class="xp-help" data-mail-devices-send-status data-state="unread" role="status" hidden></p>
+    </form>
   </section>`
 }

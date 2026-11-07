@@ -31,7 +31,7 @@ export function renderWhmServerTimers(input: WhmServerObservationPageInput): str
     + h.facts([['observed-at', msgid('Observed at (UTC)'), true], ['timer-total', msgid('Timers'), true], ['timer-panel', msgid('Panel timers'), true], ['timer-account', msgid('Account cron timers'), true]])
     + `<div class="xp-whm-detail-fields">${h.field('whm-server-observation-owner', msgid('Owner'), `<select id="whm-server-observation-owner" data-whm-server-observation-owner${h.on ? '' : ' disabled'}>${owners.map(([value, label]) => `<option value="${value}">${h.t(label)}</option>`).join('')}</select>`)}${h.field('whm-server-observation-search', msgid('Search timer or unit'), `<input id="whm-server-observation-search" type="search" dir="ltr" maxlength="255" autocomplete="off" data-whm-server-observation-search${h.on ? '' : ' disabled'}>`)}</div>`
     + h.table(msgid('Systemd timers'), 'timer-rows', [[msgid('Timer')], [msgid('Owner')], [msgid('Activates')], [msgid('Next run (UTC)')], [msgid('Last run (UTC)')]], msgid('No timers have been read.'))
-    + h.help(msgid('Running, creating or changing system timers is not available here.')))
+    + h.help(msgid('Server tasks you create below run as their own timers and appear in this list.')))
   + h.card('cron-directory', msgid('Cron directory'),
     h.help(msgid('Only file names in /etc/cron.d are listed. File contents are never read.'))
     + h.status(msgid('The cron directory has not been read.'), 'cron-status')

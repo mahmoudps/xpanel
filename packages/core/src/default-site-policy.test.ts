@@ -16,6 +16,11 @@ describe('persisted explicit default-site policy', () => {
     expect(validateDefaultSitePolicy({ response: 'reject', refuseHttps: true })).toEqual({ response: 'reject', redirectTo: null, refuseHttps: true })
     expect(validateServerSettings({ ...settings(), defaultSite: { response: 'reject', redirectTo: null, refuseHttps: false } }).defaultSite).toEqual({ response: 'reject', redirectTo: null, refuseHttps: false })
   })
+  it('names one hosted domain for the site response and nothing else', () => {
+    expect(validateDefaultSitePolicy({ response: 'site', site: 'Alpha.Example.TEST', refuseHttps: false })).toEqual({ response: 'site', redirectTo: null, site: 'alpha.example.test', refuseHttps: false })
+    expect(validateServerSettings({ ...settings(), defaultSite: { response: 'site', redirectTo: null, site: 'alpha.example.test', refuseHttps: true } }).defaultSite?.site).toBe('alpha.example.test')
+    for (const raw of [{ response: 'site', refuseHttps: false }, { response: 'site', site: 'bad..name', refuseHttps: false }, { response: 'site', site: 'a.test', redirectTo: 'https://a.test/', refuseHttps: false }, { response: 'reject', site: 'a.test', refuseHttps: false }]) expect(() => validateDefaultSitePolicy(raw)).toThrow()
+  })
   it('persists a canonical fixed HTTP or HTTPS URL without interpreting request variables', () => {
     expect(validateDefaultSitePolicy({ response: 'redirect', redirectTo: 'HTTPS://Example.TEST/path?q=%24host', refuseHttps: false })).toEqual({ response: 'redirect', redirectTo: 'https://example.test/path?q=%24host', refuseHttps: false })
     expect(validateDefaultSitePolicy({ response: 'redirect', redirectTo: 'http://example.test:8080/', refuseHttps: true }).redirectTo).toBe('http://example.test:8080/')

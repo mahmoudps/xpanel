@@ -23,7 +23,7 @@ function setup(options: { disabled?: string[]; caller?: AuthenticatedCaller; rep
   }
   const readAgent = vi.fn(async (_caller: AuthenticatedCaller, path: string, input?: unknown) => {
     const url = new URL('http://agent.local' + path)
-    const response = await handleAgentNetworkTools(new Request(url, { method: 'POST', body: JSON.stringify(input) }), url, 'POST', { caller: { principalId: 'p-alice', actor: 'alice', role: 'user', accountId: ACCOUNT, resellerId: null }, host,
+    const response = await handleAgentNetworkTools(new Request(url, { method: 'POST', body: JSON.stringify(input) }), url, 'POST', { caller: { principalId: 'p-alice', actor: 'alice', role: 'user', accountId: ACCOUNT, resellerId: null }, host, traceRouteAllowed: async () => true,
       store: { getAccountByUsername: async () => account, getPlan: async () => ({ featureListId: 'list' }) as Plan, getFeatureList: async () => ({ id: 'list', name: 'f', ownerId: null, disabled: [] }) },
       currentPrincipal: async () => ({ kind: 'user', id: 'p-alice', username: 'alice', accountId: ACCOUNT, disabled: false }), now: () => new Date('2026-10-27T02:00:00.000Z') })
     const value = await response!.json() as Record<string, unknown>

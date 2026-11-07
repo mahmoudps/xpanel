@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -67,6 +68,141 @@ describe('Apache module check of the installer', () => {
     expect(ok.stdout.trim(), ok.stderr).toBe('PASS')
     const missing = spawnSync(bash, ['-euo', 'pipefail', '-c', script(false)], { encoding: 'utf8', timeout: 10_000 })
     expect(missing.stdout.trim()).toBe('DIE Apache did not load mpm-itk.')
+  })
+})
+
+describe('statistics engines the EL repositories lack', () => {
+  const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
+  const functions = readFileSync(join(rootDir, 'scripts/el-source-builds.sh'), 'utf8')
+  const sha256 = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
+  const tarball = (root: string, files: Record<string, string>): string => {
+    const tree = join(root, 'tree'), archive = join(root, 'orig.tar.gz')
+    for (const [name, text] of Object.entries(files)) { mkdirSync(dirname(join(tree, 'orig', name)), { recursive: true }); writeFileSync(join(tree, 'orig', name), text, { mode: 0o755 }) }
+    expect(spawnSync('tar', ['-czf', archive, '-C', tree, 'orig']).status).toBe(0)
+    return archive
+  }
+  const scratch = () => { const root = mkdtempSync(join(tempParent, tempPrefix)); tempRoots.push(root); return root }
+  // The build, the installer's root-only steps and the network are doubles; digest, unpacking and source edits are real.
+  const run = (root: string, call: string, env: string) => spawnSync(bash, ['-euo', 'pipefail', '-c', `die() { echo "DIE $*"; exit 1; }
+curl() { cp -- "$ARCHIVE" "$7"; }
+install() { if [[ "$1" == -d ]]; then mkdir -p -- "\${@: -1}"; else cp -- "\${@: -2:1}" "\${@: -1}"; fi; }
+chown() { :; }
+${functions}
+${env}
+${call} && echo DONE`], { encoding: 'utf8', timeout: 10_000, env: { ...process.env, ROOT: root } })
+
+  describe('Webalizer', () => {
+    const preserve = 'memcpy(&hist[0], &hist[1], sizeof(hist[0])*i);\nmemcpy(&hist[0],&hist[1],sizeof(hist[0])*i);\n'
+    const configure = '#!/bin/bash\nprintf \'%s\\n\' "$*" "$CFLAGS" > "$ROOT/configured"\n'
+    const version = (output: string) => `make() { printf '#!/bin/bash\\necho "${output}"\\nexit 1\\n' > webalizer; chmod +x webalizer; }`
+    const setup = (major: number, output = 'Webalizer V2.23-08 (Linux 6.1 x86_64) locale', digest?: string) => {
+      const root = scratch(), archive = tarball(root, { configure, 'preserve.c': preserve })
+      return { root, result: run(root, 'install_el_webalizer', `ARCHIVE=${archive}; OS_MAJOR=${major}; EL_WEBALIZER_SHA256=${digest ?? sha256(archive)}; EL_WEBALIZER_BINARY=${root}/webalizer-installed; ${version(output)}`) }
+    }
+
+    it.each([[9, false], [10, true]])('builds EL %i without DNS and with the history fix', (major, permissive) => {
+      const { root, result } = setup(major)
+      expect(result.stdout.trim(), result.stderr).toBe('DONE')
+      const [args, cflags] = readFileSync(join(root, 'configured'), 'utf8').trim().split('\n')
+      expect(args).toBe('--disable-dns')
+      expect(cflags).toContain('-std=gnu89')
+      expect(cflags!.includes('-fpermissive')).toBe(permissive)
+      expect(existsSync(join(root, 'webalizer-installed'))).toBe(true)
+    })
+
+    it('applies the history fix to both call sites before it configures', () => {
+      const root = scratch(), archive = tarball(root, { configure: '#!/bin/bash\ncp preserve.c "$ROOT/preserve.seen"\n', 'preserve.c': preserve })
+      const result = run(root, 'install_el_webalizer', `ARCHIVE=${archive}; OS_MAJOR=9; EL_WEBALIZER_SHA256=${sha256(archive)}; EL_WEBALIZER_BINARY=${root}/installed; ${version('Webalizer V2.23-08')}`)
+      expect(result.stdout.trim(), result.stderr).toBe('DONE')
+      expect(readFileSync(join(root, 'preserve.seen'), 'utf8')).toBe('memmove(&hist[0], &hist[1], sizeof(hist[0])*i);\nmemmove(&hist[0],&hist[1],sizeof(hist[0])*i);\n')
+    })
+
+    it('refuses a source whose digest differs before anything is unpacked or built', () => {
+      const { root, result } = setup(9, undefined, 'a'.repeat(64))
+      // sha256sum reports the mismatch on its own line first.
+      expect(result.stdout.trim().split('\n').at(-1)).toBe('DIE Webalizer could not be fetched, verified or built.')
+      expect(existsSync(join(root, 'configured'))).toBe(false)
+      expect(existsSync(join(root, 'webalizer-installed'))).toBe(false)
+    })
+
+    it('refuses a binary that does not report the pinned release', () => {
+      expect(setup(9, '').result.stdout.trim()).toBe('DIE Webalizer was built but does not run.')
+      expect(setup(9, 'Webalizer V2.21-02').result.stdout.trim()).toBe('DIE Webalizer was built but does not run.')
+    })
+  })
+
+  describe('AWStats', () => {
+    const script = '#!/usr/bin/perl\nopen( DNSFILE, "$filetoload" )\nopen( DNSFILE, ">$filetosave" )\n'
+    const setup = (text = script, check = 0, digest?: string) => {
+      const root = scratch(), archive = tarball(root, { 'wwwroot/cgi-bin/awstats.pl': text, 'wwwroot/cgi-bin/lib/x.pm': '1;\n', 'wwwroot/cgi-bin/plugins/geoip2_country.pm': '1;\n', 'docs/index.html': '' })
+      const target = join(root, 'share/wwwroot/cgi-bin')
+      return { target, result: run(root, 'install_el_awstats', `ARCHIVE=${archive}; EL_AWSTATS_SHA256=${digest ?? sha256(archive)}; EL_AWSTATS_DIR=${target}; perl() { [[ "$1" == -c ]] && return ${check}; }`) }
+    }
+
+    it('installs only the program tree, with the CVE fix and the writer untouched', () => {
+      const { target, result } = setup()
+      expect(result.stdout.trim(), result.stderr).toBe('DONE')
+      expect(readFileSync(join(target, 'awstats.pl'), 'utf8')).toBe('#!/usr/bin/perl\nopen( DNSFILE, "<", "$filetoload" )\nopen( DNSFILE, ">$filetosave" )\n')
+      expect(existsSync(join(target, 'plugins/geoip2_country.pm'))).toBe(true)
+      expect(existsSync(join(target, '../docs'))).toBe(false)
+    })
+
+    it('refuses a changed source, a source the fix no longer fits and a program whose modules do not load', () => {
+      const changed = setup(undefined, 0, 'a'.repeat(64))
+      expect(changed.result.stdout.trim().split('\n').at(-1)).toBe('DIE AWStats could not be fetched or verified.')
+      expect(existsSync(changed.target)).toBe(false)
+      expect(setup('#!/usr/bin/perl\n').result.stdout.trim()).toBe('DIE AWStats could not be fetched or verified.')
+      expect(setup(script, 1).result.stdout.trim()).toBe('DIE AWStats was installed but its Perl modules do not load.')
+    })
+  })
+
+  describe('Dovecot search index plugin', () => {
+    const plugin = '/src/.libs/lib21_fts_xapian_plugin.so'
+    const configure = '#!/bin/bash\nprintf \'%s\\n\' "$*" "$CFLAGS" "$CXXFLAGS" > "$ROOT/configured"\n'
+    const setup = (build = `mkdir -p src/.libs; echo plugin > .${plugin}`, digest?: string) => {
+      const root = scratch(), archive = tarball(root, { 'configure.ac': 'AC_INIT\n', configure })
+      return { root, result: run(root, 'install_el_fts_xapian', `ARCHIVE=${archive}; EL_FTS_SHA256=${digest ?? sha256(archive)}; EL_FTS_MODULE=${root}/module.so; autoreconf() { touch "$ROOT/autoreconf-$1"; }; make() { ${build}; }`) }
+    }
+
+    it('generates configure, builds against the installed Dovecot and installs only the plugin', () => {
+      const { root, result } = setup()
+      expect(result.stdout.trim(), result.stderr).toBe('DONE')
+      expect(existsSync(join(root, 'autoreconf--i'))).toBe(true)
+      const [args, cflags, cxxflags] = readFileSync(join(root, 'configured'), 'utf8').trim().split('\n')
+      expect(args).toBe('--with-dovecot=/usr/lib64/dovecot')
+      expect(cflags).toContain('-fstack-protector-strong')
+      expect(cxxflags).toBe(cflags)
+      expect(readFileSync(join(root, 'module.so'), 'utf8')).toBe('plugin\n')
+    })
+
+    it('refuses a source whose digest differs before anything is unpacked or built', () => {
+      const { root, result } = setup(undefined, 'a'.repeat(64))
+      expect(result.stdout.trim().split('\n').at(-1)).toBe('DIE The Dovecot search index plugin could not be fetched, verified or built.')
+      expect(existsSync(join(root, 'configured'))).toBe(false)
+      expect(existsSync(join(root, 'module.so'))).toBe(false)
+    })
+
+    it('installs nothing when the build fails', () => {
+      const { root, result } = setup('return 1')
+      expect(result.stdout.trim().split('\n').at(-1)).toBe('DIE The Dovecot search index plugin could not be fetched, verified or built.')
+      expect(existsSync(join(root, 'module.so'))).toBe(false)
+    })
+  })
+
+  it('pins exact releases over HTTPS and builds only what EL repositories lack', () => {
+    expect(functions).toMatch(/EL_WEBALIZER_URL="https:\/\/deb\.debian\.org\/debian\/pool\/main\/w\/webalizer\/webalizer_2\.23\.08\.orig\.tar\.gz"/)
+    expect(functions).toMatch(/EL_WEBALIZER_SHA256="edaddb5aa41cc4a081a1500e3fa96615d4b41bc12086bcedf9938018ce79ed8d"/)
+    expect(functions).toMatch(/EL_AWSTATS_URL="https:\/\/deb\.debian\.org\/debian\/pool\/main\/a\/awstats\/awstats_8\.0\.orig\.tar\.gz"/)
+    expect(functions).toMatch(/EL_AWSTATS_SHA256="3ef76ff96c5398477dd8a11134e266e538a487067f6906a3ac8a38bfd11c11e0"/)
+    expect(functions).toMatch(/EL_FTS_URL="https:\/\/deb\.debian\.org\/debian\/pool\/main\/d\/dovecot-fts-xapian\/dovecot-fts-xapian_1\.9\.3\.orig\.tar\.gz"/)
+    expect(functions).toMatch(/EL_FTS_SHA256="b2ab1623d45d19f3086e8044957b1572d65659849ccc19bd6b276dac07f98df7"/)
+    expect(functions).toContain('--proto =https')
+    expect(source).toContain('if [[ "$OS_FAMILY" == "rhel" && "$WITH_MAIL" -eq 1 ]]; then\n  echo "[2a/6] Building the Dovecot search index plugin from its pinned upstream release..."\n  install_el_fts_xapian\n  record_el_source_build fts-xapian dovecot\nfi\n')
+    const flow = source.slice(source.indexOf('Building the statistics engines EL repositories lack') - 60, source.indexOf('[2/6] Ensuring every bootable kernel'))
+    expect(flow).toContain('if [[ "$OS_FAMILY" == "rhel" ]]; then')
+    expect(flow).toContain('if [[ "$OS_MAJOR" -ge 10 ]]; then\n    install_el_awstats\n    record_el_source_build awstats')
+    expect(flow).toContain('  install_el_webalizer\n  record_el_source_build webalizer\n')
+    expect(source).toContain('  install_el_mpm_itk\n  record_el_source_build mpm-itk httpd\n')
   })
 })
 
@@ -311,6 +447,10 @@ describe('bootstrap package and repository parity with the declared OS profiles'
     // Zstandard backup archives need zstd(1) on every supported OS.
     expect(lineValues(run.stdout, 'Bootstrap Packages')).toContain('zstd')
     expect(profile.bootstrapPackages).toContain('zstd')
+    // Web Disk (lighttpd mod_webdav) and calendars and contacts (the Radicale library) on every supported OS.
+    const davPackages = profile.family === 'debian' ? ['lighttpd', 'lighttpd-mod-webdav', 'python3-radicale'] : ['lighttpd', 'lighttpd-mod_webdav', 'python3-radicale3']
+    expect(lineValues(run.stdout, 'Package List      ')).toEqual(expect.arrayContaining(davPackages))
+    expect([...profile.packages.webdav, ...profile.packages.caldav]).toEqual(davPackages)
     // The Compiler Access re-apply hook on EL runs through the dnf 4 post-transaction-actions plugin (EL 9 and 10 ship no dnf 5).
     if (profile.family === 'rhel') {
       expect(lineValues(run.stdout, 'Bootstrap Packages')).toContain('python3-dnf-plugin-post-transaction-actions')

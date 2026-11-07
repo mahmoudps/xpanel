@@ -17,7 +17,7 @@ const props = { account, plan: defaultPlan({ id: account.planId, name: 'Plan' })
 const revision = 'a'.repeat(64)
 const response = (section: 'spam' | 'lists') => section === 'lists'
   ? { host: 'connected', observedAt: '2026-10-29T12:00:00.000Z', aliases: 'read', compositeRevision: revision, capabilities: { moderation: false, archive: false }, lists: [{ address: '<literal>@example.test', members: 2, state: 'delivering' }] }
-  : { host: 'connected', observedAt: '2026-10-29T12:00:00.000Z', engine: { engine: 'rspamd', wiring: 'wired' }, compositeRevision: revision, capabilities: { learning: true, boxTrapper: false }, mailboxes: [{ mailbox: '<literal>@example.test', preference: 'saved', native: 'applied', effects: { allowlist: true, filtering: false, score: false, blocklist: false, spamBox: false } }] }
+  : { host: 'connected', observedAt: '2026-10-29T12:00:00.000Z', engine: { engine: 'rspamd', wiring: 'wired' }, compositeRevision: revision, capabilities: { learning: true }, mailboxes: [{ mailbox: '<literal>@example.test', preference: 'saved', native: 'applied', effects: { allowlist: true, filtering: false, score: false, blocklist: false, spamBox: false } }] }
 function mount(theme: 'classic' | 'v2', section: 'spam' | 'lists', canManage = true) {
   document.body.innerHTML = theme === 'classic' ? renderMailxMailToolsWorkspace({ locale: 'en', section, canManage })
     : section === 'spam' ? renderV2PanelSpamFilters(props, { canRead: true, canManage }) : renderV2PanelMailingLists(props, { canRead: true, canManage })

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { isAbsolute, join, posix } from 'node:path'
-import { fail, isUuid, isXpanelError, validateDomainName, validateUsername } from '@xpanel/core'
+import { fail, isUuid, servedDocRoot, isXpanelError, validateDomainName, validateUsername } from '@xpanel/core'
 import type { Account, Domain, ServerSettings } from '@xpanel/core'
 import { AsyncMutex, atomicWriteJson, readJsonIfExists } from '@xpanel/state'
 import type { FileText, JailedFileManager } from './file-manager.ts'
@@ -61,7 +61,7 @@ export function deriveHtaccessTarget(account: Account, domain: Domain, settings:
   if (!serving || !isUuid(serving.id) || serving.accountId !== account.id || serving.kind === 'alias' || domain.kind === 'alias' && serving.id !== domain.parentId) return fail('PRECONDITION_FAILED', 'the current serving domain could not be resolved', { stateChanged: false })
   const username = validateUsername(account.username), domainName = validateDomainName(domain.name)
   if (typeof account.home !== 'string' || !posix.isAbsolute(account.home) || posix.normalize(account.home) !== account.home || /[\\\u0000-\u001f\u007f"']/.test(account.home) || !posix.isAbsolute(serving.docRoot) || posix.normalize(serving.docRoot) !== serving.docRoot || /[\\\u0000-\u001f\u007f"']/.test(serving.docRoot) || serving.docRoot.includes('${')) return fail('PRECONDITION_FAILED', 'domain file target is not canonical', { stateChanged: false })
-  const relative = posix.relative(account.home, serving.docRoot)
+  const relative = posix.relative(account.home, servedDocRoot(serving))
   if (relative === '..' || relative.startsWith('../') || posix.isAbsolute(relative) || relative === '.trash' || relative.startsWith('.trash/')) return fail('FORBIDDEN', 'domain document root is outside the account file workspace', { stateChanged: false })
   const path = relative ? relative + '/.htaccess' : '.htaccess'
   const backendPort = settings?.backendPort ?? 0

@@ -1,3 +1,4 @@
+import { managementWhmPort } from './panel-access.ts'
 import { createHash } from 'node:crypto'
 import { lstat, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { request as httpsRequest } from 'node:https'
@@ -124,7 +125,7 @@ export const secIngressRenderAuthorityNative = (): Promise<TrustedProxyRenderAut
 /** Host ports. File writes are atomic renames of root-owned 0600 files; nginx.conf goes through the reviewed executor. */
 export function nativeSecIngressPorts(input: {
   readNginxMain: () => Promise<string | null>; writeNginxMain: (content: string) => Promise<void>; renderNginxMain: SecIngressPorts['renderNginxMain']
-  testNginx: () => Promise<boolean>; reloadNginx: () => Promise<void>; managementClient: () => string | null; managementPort?: number; managementHost?: string
+  testNginx: () => Promise<boolean>; reloadNginx: () => Promise<void>; managementClient: () => string | null; managementPort?: () => Promise<number>; managementHost?: string
 }): SecIngressPorts {
   return {
     readProtected: readProtectedNative,
@@ -134,11 +135,11 @@ export function nativeSecIngressPorts(input: {
     localAddresses: localAddressesNative,
     managementClient: input.managementClient,
     // Loopback TLS request to the xWHM listener: proves the management entry point still answers after the reload; forwarded headers play no part.
-    probeManagement: () => new Promise<boolean>(resolve => {
-      const req = httpsRequest({ host: '127.0.0.1', port: input.managementPort ?? 2087, path: '/api/health', method: 'GET', rejectUnauthorized: false, timeout: 5000, ...(input.managementHost ? { servername: input.managementHost, headers: { host: input.managementHost } } : {}) },
+    probeManagement: async () => { const port = await input.managementPort?.() ?? 2087; return new Promise<boolean>(resolve => {
+      const req = httpsRequest({ host: '127.0.0.1', port, path: '/api/health', method: 'GET', rejectUnauthorized: false, timeout: 5000, ...(input.managementHost ? { servername: input.managementHost, headers: { host: input.managementHost } } : {}) },
         res => { res.resume(); resolve(res.statusCode === 200) })
       req.on('timeout', () => { req.destroy(); resolve(false) }); req.on('error', () => resolve(false)); req.end()
-    }),
+    }) },
   }
 }
 
@@ -163,5 +164,6 @@ export function secIngressProviderFor(input: {
     testNginx: async () => { const result = await input.executor.runTest(edgeRender.nginxConfigTest(input.os)); return result.ok && result.code === 0 },
     reloadNginx: () => input.executor.runAction({ kind: 'systemd', verb: 'reload', unit: input.os.services.nginx }),
     managementClient: () => input.managementClient,
+    managementPort: () => managementWhmPort(input.executor),
   }))
 }

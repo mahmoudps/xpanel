@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   MONITORING_DF_INODE_ARGV, MONITORING_DF_SPACE_ARGV, MONITORING_LOG_UNITS, MONITORING_PS_ARGV,
-  isMonitoringCommand, monitoringJournalArgv, monitoringKillArgv, monitoringLogSearch, parseMonitoringLogQuery, parseMonitoringSignalRequest,
+  MONITORING_PS_UNIT_ARGV, isMonitoringCommand, monitoringJournalArgv, monitoringKillArgv, parseMonitoringUserKillRequest, monitoringLogSearch, parseMonitoringLogQuery, parseMonitoringSignalRequest,
 } from './monitoring-command.ts'
 
 const query = (value: string) => parseMonitoringLogQuery(new URLSearchParams(value))
@@ -11,6 +11,7 @@ describe('monitoring command grammar', () => {
   it('admits only the exact observers, the bounded journal grammar and one signal to one pid', () => {
     for (const argv of [MONITORING_PS_ARGV, MONITORING_DF_SPACE_ARGV, MONITORING_DF_INODE_ARGV]) expect(isMonitoringCommand([...argv])).toBe(true)
     expect(MONITORING_PS_ARGV.join(' ')).not.toMatch(/args|cmd|command/)
+    expect(isMonitoringCommand(MONITORING_PS_UNIT_ARGV)).toBe(true)
     expect(isMonitoringCommand(monitoringKillArgv(4242, 'TERM'))).toBe(true)
     expect(isMonitoringCommand(monitoringKillArgv(4242, 'KILL'))).toBe(true)
     const full = monitoringJournalArgv(query('unit=nginx.service&lines=500&since=2026-10-27T10:00Z&priority=3'))
@@ -48,5 +49,10 @@ describe('monitoring command grammar', () => {
       { ...signal, startedAt: '2026-10-27T10:00:00Z' }, { ...signal, extra: 1 }, { pid: 4242 }, null, [],
     ]) expect(() => parseMonitoringSignalRequest(value)).toThrow()
     expect(() => monitoringKillArgv(1, 'TERM')).toThrow()
+  })
+  it('takes one user name and the explicit KILL confirmation for a sweep', () => {
+    expect(parseMonitoringUserKillRequest({ username: 'alice', killConfirmed: true })).toEqual({ username: 'alice' })
+    for (const body of [null, {}, { username: 'alice' }, { username: 'alice', killConfirmed: 'yes' }, { username: 'alice', killConfirmed: true, signal: 'KILL' }, { username: 'Alice', killConfirmed: true }, { username: 'a b', killConfirmed: true }, { username: 7, killConfirmed: true }])
+      expect(() => parseMonitoringUserKillRequest(body)).toThrow()
   })
 })

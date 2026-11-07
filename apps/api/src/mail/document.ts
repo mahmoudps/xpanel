@@ -198,7 +198,6 @@ const zoneTxt = (
 const previewOf = (text: string): string =>
   text.split(/\r?\n/).map(line => line.trim()).find(line => line.length > 0)?.slice(0, 180) ?? ''
 
-const UNSAVED_SETTINGS = new Date(0).toISOString()
 
 /**
  * Reads the values the xMail pages are allowed to show.
@@ -278,20 +277,9 @@ export const loadMailDocument = async (input: {
   } catch { /* unknown */ }
 
   try {
-    const fine = await extended.getServerFineSettings() as {
-      updatedAt?: string
-      mtaMaxMsgSizeMb?: number
-      mta?: { maxMessageSizeMb?: number }
-    }
     const fromFile = typeof input.postfixMain === 'string' ? messageSizeLimitBytes(input.postfixMain) : null
     const formatted = fromFile !== null ? formatMessageSizeLimit(fromFile) : null
     if (formatted) document.identitySize = formatted
-    else {
-      const size = fine.mta?.maxMessageSizeMb ?? fine.mtaMaxMsgSizeMb
-      if (fine.updatedAt && fine.updatedAt !== UNSAVED_SETTINGS && typeof size === 'number' && Number.isFinite(size) && size > 0) {
-        document.identitySize = `${size} MiB per message`
-      }
-    }
   } catch { /* unknown */ }
 
   // A handed-off session has no mailbox credential: the message list is unavailable, never empty.

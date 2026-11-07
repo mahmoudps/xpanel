@@ -19,7 +19,6 @@ export function renderMailxWhmWorkspace({ locale, page, canRead, canManage }: Ma
       { key: 'greylisting', label: t('Greylisting'), kind: 'check', help: t('Ask unknown senders to retry later. Needs rspamd.') },
       { key: 'greylistScore', label: t('Greylist at score'), kind: 'number', step: '0.5', min: 0.5, max: 100 },
       { key: 'blockedDomains', label: t('Blocked sender domains'), kind: 'lines', help: t('One domain per line, at most 500. Mail from these domains is refused.') },
-      { key: 'countries', label: t('Filter incoming mail by country'), kind: 'text', disabled: true, help: t('Country filtering needs a GeoIP country database, which this server does not provide.') },
     ],
     relay: [
       { key: 'enabled', label: t('Send outgoing mail through a relay'), kind: 'check' },

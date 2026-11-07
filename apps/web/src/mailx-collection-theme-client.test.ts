@@ -17,7 +17,7 @@ const tick = async () => { for (let n = 0; n < 6; n++) await new Promise(resolve
 const account: Account = { id: 'account-a', username: 'alice', uid: 20001, gid: 20001, home: '/home/alice', primaryDomain: 'shop.example', planId: 'plan-a', ownerId: null, status: 'active', suspendReason: null, contactEmail: 'alice@example.test', ipv4: '192.0.2.10', shell: 'jailed', createdAt: '2026-10-29T00:00:00Z' }
 const revision = 'a'.repeat(64), calendarId = 'b'.repeat(32), bookId = 'c'.repeat(32)
 const archive = { saved: true, revision, choices: [{ domain: 'shop.example', mailboxes: ['archive@shop.example'] }], policy: { domains: [{ domain: 'shop.example', mailbox: 'archive@shop.example', incoming: true, outgoing: false, retentionDays: 30 }] }, updatedAt: null, observedAt: null, host: 'connected', state: 'applied', rows: [{ domain: 'shop.example', admission: 'eligible', conflicts: [] }], capabilities: { retentionJobs: true } }
-const collections = { context: { account: 'alice' }, dav: { caldav: 'unavailable', carddav: 'unavailable' }, application: { davServed: false }, mailboxes: [{ mailbox: 'archive@shop.example', revision, defaultCalendar: calendarId, calendars: [{ id: calendarId, name: 'Work', description: 'Team description' }], addressBooks: [{ id: bookId, name: 'Clients', description: 'Saved addresses', isDefault: true }], taskLists: [] }] }
+const collections = { context: { account: 'alice' }, application: { davServed: true }, mailboxes: [{ mailbox: 'archive@shop.example', revision, defaultCalendar: calendarId, calendars: [{ id: calendarId, name: 'Work', description: 'Team description' }], addressBooks: [{ id: bookId, name: 'Clients', description: '', isDefault: true, removable: true }], taskLists: [] }] }
 const calendars = { context: { account: 'alice' }, mailboxes: [{ mailbox: 'archive@shop.example', revision, calendars: [{ id: calendarId, name: 'Work', color: '#4f6bed', timezone: 'UTC' }] }] }
 
 for (const theme of ['classic', 'v2'] as const) for (const family of ['archive', 'collections'] as const) {
@@ -61,6 +61,12 @@ for (const theme of ['classic', 'v2'] as const) for (const family of ['archive',
       expect(send).not.toHaveBeenCalled()
       expect([...root.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input,select,button,textarea')].every(control => control.disabled)).toBe(true)
       expect(root.querySelector('[data-mailx-' + family + '-status]')?.textContent).toContain('Nothing was read')
+    })
+    it.runIf(family === 'collections')('says a store is too large instead of showing part of it', async () => {
+      const { send, boot } = mount()
+      send.mockImplementation(async () => { throw { status: 412, details: { reason: 'dav_store_too_large', stateChanged: false } } })
+      boot(); await tick()
+      expect(document.querySelector('[data-mailx-collections-status]')?.textContent).toContain('too large to open here')
     })
     it('preserves denied admission without reading or exposing selected rows', async () => {
       const { send, boot } = mount(false); boot(); await tick()

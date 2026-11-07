@@ -114,6 +114,8 @@ export const assertHandlerAvailable = (handler: PhpHandler, ctx: HandlerContext)
 }
 
 const FPM_MODES = ['ondemand', 'dynamic', 'static'] as const
+/** Pool values of a new domain. A domain still holding exactly these has not chosen its own, so saved server defaults apply to it. */
+export const DEFAULT_FPM: Readonly<FpmSettings> = Object.freeze({ mode: 'ondemand', maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 500, processIdleTimeoutSec: 10 })
 const FPM_KEYS = ['mode', 'maxChildren', 'startServers', 'minSpareServers', 'maxSpareServers', 'maxRequests', 'processIdleTimeoutSec'] as const
 export const FPM_MAX_CHILDREN = 1024
 

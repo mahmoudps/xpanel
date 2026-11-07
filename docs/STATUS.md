@@ -32,10 +32,11 @@ Counted from this checkout, without treating a renderer, route or probe as accep
 | Navigation pages | 203 | 68 xPanel, 116 xWHM, 19 xMail |
 | Registered document aliases | 14 | 7 account store aliases, 3 xWHM store aliases, 4 mailbox aliases |
 | Registered documents | 217 | 203 pages plus 14 aliases; route hooks and V2 stylesheets cover this same set |
-| Phase-1 host-probe entries | 262 | Prerequisites only; they do not accept a tool |
-| Reduced qualified-scope notes | 164 | A later accepted workspace would still leave the named remainder unavailable |
-| Production TypeScript files under `apps/` and `packages/` | 1286 | Excludes `*.test.ts` |
-| Test TypeScript files under `apps/` and `packages/` | 961 | Fixture coverage, not a delivery receipt |
+| Phase-1 host-probe entries | 331 | Prerequisites only; they do not accept a tool |
+| Reduced qualified-scope notes | 191 | A later accepted workspace would still leave the named remainder unavailable |
+| Reviewed qualification drivers | 175 | Plans only: none has run on a host, so no tool gained evidence |
+| Production TypeScript files under `apps/` and `packages/` | 1323 | Excludes `*.test.ts` |
+| Test TypeScript files under `apps/` and `packages/` | 1018 | Fixture coverage, not a delivery receipt |
 
 `packages/catalog/src/data/delivery.ts` ships `deliveryEvidence = []` and `deliveryTarget = null`. `assessDelivery` therefore leaves every in-scope tool `researched`. `apps/api/src/main.ts` starts with `startPanelEntrypoints()` and does not pass a trusted evidence bundle. `qualifyHostTools` is demotion-only: a passing Linux probe report cannot move `researched`, `implemented` or `integrated` to `verified`. The live agent `GET /health` classification does not emit the `control-plane` probe that the phase-1 map requires. Under the default qualification switch, a future accepted tool that depends on that probe would be narrowed back to `researched` by the live health payload.
 

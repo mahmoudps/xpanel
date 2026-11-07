@@ -1,3 +1,4 @@
+import { DB_SERVICE_TOOLS } from '../../../models/db-services.ts'
 import { alternateLocales } from '../../../i18n.ts'
 import { projectActionState } from '../../../models/action-state.ts'
 import type { WhmSurfaceView } from '../../../models/theme-surface.ts'
@@ -24,6 +25,7 @@ import { renderV2WhmServiceToolPage } from '../pages/xwhm/service-tools/index.ts
 import { renderV2WhmServerPage } from '../pages/xwhm/server/index.ts'
 import { renderV2WhmPanelPage } from '../pages/xwhm/panel/index.ts'
 import { renderV2Shell } from '../shell/shell.ts'
+import { renderV2SvcPanels } from '../pages/xwhm/svc-panels.ts'
 
 export type V2WhmProjector = (props: WhmSurfaceProps & ThemeViewProps) => WhmSurfaceView | undefined
 
@@ -51,7 +53,18 @@ export function renderV2WhmBody(view: WhmSurfaceView): string | undefined {
       const observation = { ...props, observationAuthority: a,
         monitoringLogUnits: view.monitoringLogUnits, monitoringLogDefaultLines: view.monitoringLogDefaultLines, monitoringLogMaxLines: view.monitoringLogMaxLines }
       const data = { ...props, dataAuthority: { presentation: a.presentation, canReadFacts: a.canReadFacts, authorizedTools: a.authorizedTools, canRead: a.canRead, canManage: a.canManage,
-        canKill: root && a.canManage && view.route === '/whm/databases/processes' && a.qualifiedTools.has('db-process-list') } }
+        canKill: root && a.canManage && view.route === '/whm/databases/processes' && a.qualifiedTools.has('db-process-list'),
+        canRepair: root && a.canManage && view.route === '/whm/databases' && a.qualifiedTools.has('db-repair'),
+        canRootPassword: root && a.canManage && view.route === '/whm/databases/servers' && a.qualifiedTools.has('db-root-password'),
+        canFtpSettings: root && a.canManage && view.route === '/whm/services/ftp' && a.qualifiedTools.has('ftp-server-config'),
+        canDbMap: root && a.canManage && view.route === '/whm/databases' && a.qualifiedTools.has('db-ownership-map'),
+        canDbHosts: root && a.canManage && view.route === '/whm/databases/users' && a.qualifiedTools.has('db-access-hosts'),
+        canDbSettings: root && a.canManage && view.route === '/whm/databases/servers' && a.qualifiedTools.has('tweak-sql'),
+        canPostgresql: root && a.canManage && view.route === '/whm/databases/servers' && a.qualifiedTools.has('postgresql-setup'),
+        canDbProfiles: root && a.canManage && view.route === '/whm/databases/servers' && a.qualifiedTools.has('db-server-profiles'),
+        canDbService: root && a.canManage && a.qualifiedTools.has(DB_SERVICE_TOOLS[view.route] ?? ''),
+        canDbQuota: root && a.canManage && view.route === '/whm/databases' && a.qualifiedTools.has('aapanel-db-quota'),
+        canPmaAccess: root && a.canManage && view.route === '/whm/databases/phpmyadmin' && a.qualifiedTools.has('aapanel-phpmyadmin-access') } }
       return renderV2WhmPlanPage(t, props, a) ?? renderV2WhmResellerPage(t, props, a) ?? renderV2WhmNetworkPage(props, a)
         ?? renderV2WhmMailPage({ ...props, mailAuthority: a })
         ?? renderV2WhmMonitoringPage(observation) ?? renderV2WhmSecurityPage(observation) ?? renderV2WhmActivityPage(observation)
@@ -67,8 +80,9 @@ export function createV2WhmSurface(project: V2WhmProjector, unavailable: UiTheme
     const view = project(input)
     if (view === undefined) return unavailable(input)
     const props = view.props, principal = props.principal, locale = props.locale ?? 'en', scheme = props.theme ?? 'light'
-    const t = v2Messages.translator(locale), content = renderV2WhmBody(view)
-    if (content === undefined) throw new Error('v2_whm_implementation_gap:' + view.route)
+    const t = v2Messages.translator(locale), body = renderV2WhmBody(view)
+    if (body === undefined) throw new Error('v2_whm_implementation_gap:' + view.route)
+    const content = body + renderV2SvcPanels(view.route, t, locale, view.authority.canRead && principal.kind === 'root', tool => view.authority.canManage && view.authority.qualifiedTools.has(tool))
     const query = (changes: Record<string, string>): string => {
       const values = new URLSearchParams({ lang: locale, theme: scheme, ...(props.density ? { density: props.density } : {}), ...changes })
       if (props.planEditorState?.kind === 'edit') values.set('planId', props.planEditorState.plan.id)

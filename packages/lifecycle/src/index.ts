@@ -4,6 +4,7 @@
 
 export type { AuditPort, ClockPort, ExecResult, FsPort, HostPort } from './ports.ts'
 export { lifecycleTools } from './tools.ts'
+export { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 export type { LifecycleTools } from './tools.ts'
 export { assertExecSteps, stepPaths } from './steps.ts'
 export type {
@@ -119,6 +120,7 @@ export type { AccountArchiveManifest, ArchiveDbUser, ArchiveDomain } from './tra
 
 // cPanel account backup import (public cpmove layout)
 export { readCpanelArchive } from './cpanel-import/import.ts'
+export { parseSafeYaml } from './cpanel-import/parsers.ts'
 export type { CpanelImportOptions } from './cpanel-import/import.ts'
 export type {
   ImportAccount,

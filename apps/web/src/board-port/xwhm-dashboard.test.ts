@@ -64,7 +64,7 @@ describe('xWHM dashboard board port', () => {
 
   it('keeps the board regions in the sample fixture', () => {
     const html = renderWhmDashboard(whmDashboardFixture())
-    for (const marker of ['Search tools and accounts', '>Create account</a>', 'id="rec-title"', 'Server resources', 'role="meter"', 'id="acc-title"', 'id="host-title"', 'Recent audit entries', 'Check for drift now', 'Generation 142 · active']) {
+    for (const marker of ['Search tools and accounts', '>Create account</a>', 'id="rec-title"', 'Server resources', 'role="meter"', 'id="acc-title"', 'id="host-title"', 'Recent audit entries', 'Generation 142 · active']) {
       assert.ok(html.includes(marker), marker)
     }
     assert.equal(html.includes('Activity & Jobs'), false)

@@ -19,12 +19,19 @@ export interface LoginSurfaceProps {
   handoffFailed?: boolean
   /** Configured administrator contact. Shown only when it is a plain email address. */
   supportEmail?: string
+  /** Identity providers root enabled for this listener (id and button name only). */
+  externalProviders?: readonly { readonly id: string; readonly label: string }[]
 }
+
+/** Provider ids the server accepted; anything else is never turned into a sign-in link. */
+export const loginExternalProviders = (props: Pick<LoginSurfaceProps, 'audience' | 'externalProviders'>): readonly { readonly id: string; readonly label: string }[] =>
+  props.audience === 'xmail' ? [] : (props.externalProviders ?? []).filter(item => /^[a-z0-9-]{1,32}$/.test(item.id) && item.label.length > 0 && item.label.length <= 64).slice(0, 8)
 
 export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
   const locale: Locale = isLocale(props.locale) ? props.locale : SOURCE_LOCALE
   const theme = props.theme === 'light' ? 'light' : 'dark'
   const isAudience = (value: unknown): value is NonNullable<LoginSurfaceProps['audience']> => value === 'xpanel' || value === 'xwhm' || value === 'xmail'
+  const providers = loginExternalProviders(props)
   const audience = isAudience(props.audience) ? props.audience : undefined
   const targetSurface = audience ?? (isAudience(props.targetSurface) ? props.targetSurface : 'xpanel')
   const brand = audience === 'xwhm' ? 'xWHM' : audience === 'xmail' ? 'xMail' : 'xPanel'
@@ -78,7 +85,7 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
       <p class="xp-help" role="status" aria-live="polite" data-auth-status></p>
       <noscript><p>${text('JavaScript is required to submit this sign-in form.')}</p></noscript>
       <form class="xp-form" method="post" action="/api/auth/login" aria-labelledby="login-heading" aria-describedby="login-description" data-login-form>
-        <div class="xp-login-credential-fields">
+        <div class="xp-login-credential-fields" data-login-credentials>
         <div class="xp-field">
           <label class="xp-label" for="login-username">${audience === 'xmail' ? text('Mailbox address') : text('Username')}</label>
           <input id="login-username" name="username" type="text" class="xp-input" dir="ltr" autocomplete="username" autocapitalize="none" spellcheck="false" required value="${escapeHtml(props.username ?? '')}" />
@@ -115,8 +122,14 @@ export const renderLoginSurface = (props: LoginSurfaceProps = {}): string => {
           <button type="button" class="xp-btn xp-btn--ghost xp-login-factor-toggle" data-action="toggle-login-factor" data-login-factor-toggle aria-controls="login-factor-totp login-factor-recovery" aria-pressed="false">${text(msgctxt('login', 'Use a recovery code'))}</button>
           </div>
         </fieldset>`}
+        <fieldset class="xp-fieldset" data-auth-security-questions hidden>
+          <legend class="xp-label">${text('Security questions')}</legend>
+          <div class="xp-login-challenge-content" data-auth-security-question-list></div>
+        </fieldset>
         <button type="submit" class="xp-btn xp-btn--primary" data-auth-submit disabled>${text('Sign in')}</button>
       </form>
+      <template data-auth-security-question-template><div class="xp-field"><label class="xp-label"></label><input type="password" class="xp-input" dir="auto" maxlength="200" autocomplete="off" data-security-answer /></div></template>
+      ${providers.length ? `<section class="xp-login-challenge-content" data-login-external aria-label="${text('Sign in with an identity provider')}"><p class="xp-help">${text('Or sign in with an identity provider linked to your account.')}</p>${providers.map(item => `<a class="xp-btn" href="/api/auth/oidc/start?provider=${escapeHtml(item.id)}" data-login-external-provider="${escapeHtml(item.id)}">${escapeHtml(translator(locale)('Continue with {provider}', { provider: item.label }))}</a>`).join('')}</section>` : ''}
       ${audience === 'xwhm' || audience === 'xmail' ? '' : renderTeamPasswordSection(props.locale)}
       <section class="xp-login-success" data-login-success data-required-auth-state="authenticated" aria-labelledby="login-success-heading" role="status">
         <h2 id="login-success-heading">${text('You are signed in')}</h2>

@@ -7,8 +7,12 @@ import {
   validateMailIpConfig,
   validateServerIpEntry,
   validateServerIpPool,
+  validateIpv6Ranges,
   resolveAccountIpAssignment,
   projectAccountIpAvailability,
+  nextRangeAddress,
+  isPrivateAddress,
+  natPublicAddresses,
 } from './ip-pool.ts'
 
 describe('Multi-IPv4 / Multi-IPv6 hierarchy (root, reseller, account, domain, mail server)', () => {
@@ -237,5 +241,93 @@ describe('strict IP assignment and advisory allocation projection', () => {
       expect(() => projectAccountIpAvailability(context({ pool: [shared, { ...free, address }] }))).toThrow(/hosting/)
     }
     expect(() => resolveAccountIpAssignment({ extraIps: [free.address, free.address] }, context())).toThrow(/repeated/)
+  })
+})
+
+describe('reserved addresses, release holds and the reseller shared IP in assignment', () => {
+  const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+  const entry = (n: number, over = {}) => validateServerIpEntry({ id: id(n), address: `192.0.2.${n}`, version: 4, prefixLength: 24, interfaceName: 'test0', role: 'dedicated', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '', ...over })
+  const shared = entry(10, { role: 'shared', isPrimary: true })
+  const context = (pool: unknown[], over = {}) => ({ accountId: id(40), ownerId: null, planDedicatedIp: true, reseller: null, pool, allAccounts: [], ...over }) as Parameters<typeof resolveAccountIpAssignment>[1]
+
+  it('never offers a reserved address, by literal, pool id or automatic choice, but keeps it for its holder', () => {
+    const reserved = entry(11, { reserved: true })
+    expect(() => resolveAccountIpAssignment({ ipv4: reserved.address }, context([shared, reserved]))).toThrowError(expect.objectContaining({ code: 'FORBIDDEN', detail: expect.objectContaining({ reason: 'ip_reserved' }) }))
+    expect(() => resolveAccountIpAssignment({ ipAssignment: { mode: 'dedicated', poolId: reserved.id } }, context([shared, reserved]))).toThrowError(expect.objectContaining({ detail: expect.objectContaining({ reason: 'ip_reserved' }) }))
+    expect(() => resolveAccountIpAssignment({ ipAssignment: { mode: 'dedicated' } }, context([shared, reserved]))).toThrowError(expect.objectContaining({ code: 'PRECONDITION_FAILED' }))
+    expect(projectAccountIpAvailability(context([shared, reserved])).dedicated.count).toBe(0)
+    const holder = { id: id(40), ipv4: reserved.address, ipv6: null, extraIps: [] }
+    expect(resolveAccountIpAssignment({ ipv4: reserved.address }, context([shared, reserved], { allAccounts: [holder] })).ipv4).toBe(reserved.address)
+    expect(() => validateServerIpEntry({ ...shared, reserved: true })).toThrow(/default IP cannot be reserved/)
+  })
+
+  it('holds a released address for the account that left it until the hold is cleared', () => {
+    const held = entry(11, { releasing: { accountId: id(41), since: '2026-11-06T10:00:00Z' } })
+    expect(() => resolveAccountIpAssignment({ ipv4: held.address }, context([shared, held]))).toThrowError(expect.objectContaining({ code: 'CONFLICT', detail: expect.objectContaining({ reason: 'ip_releasing' }) }))
+    expect(() => resolveAccountIpAssignment({ ipAssignment: { mode: 'dedicated' } }, context([shared, held]))).toThrowError(expect.objectContaining({ code: 'PRECONDITION_FAILED' }))
+    expect(resolveAccountIpAssignment({ ipv4: held.address }, context([shared, held], { accountId: id(41) })).ipv4).toBe(held.address)
+    const { releasing: _released, ...free } = held
+    expect(resolveAccountIpAssignment({ ipv4: free.address }, context([shared, free])).ipv4).toBe(free.address)
+  })
+
+  it('gives a reseller account the reseller main shared IP instead of the server default', () => {
+    const resellerShared = entry(12, { role: 'shared' }), reseller = { id: id(20), delegatedIps: [resellerShared.address], sharedIp: resellerShared.address }
+    const ctx = context([shared, resellerShared], { ownerId: reseller.id, reseller })
+    expect(resolveAccountIpAssignment({}, ctx)).toEqual({ ipv4: resellerShared.address })
+    expect(projectAccountIpAvailability(ctx).defaultSharedIpv4).toEqual({ poolId: resellerShared.id, address: resellerShared.address })
+    expect(resolveAccountIpAssignment({}, context([shared, resellerShared], { ownerId: reseller.id, reseller: { ...reseller, sharedIp: null } })).ipv4).toBe(shared.address)
+    expect(() => resolveAccountIpAssignment({}, context([shared], { ownerId: reseller.id, reseller }))).toThrowError(expect.objectContaining({ code: 'PRECONDITION_FAILED' }))
+  })
+
+  it('maps a private address to its 1:1 NAT public address and refuses an unknown mapping in NAT mode', () => {
+    const local = entry(11, { address: '10.0.0.11' }), mapped = entry(12, { address: '10.0.0.12', publicAddress: '203.0.113.12' })
+    expect(mapped.publicAddress).toBe('203.0.113.12')
+    expect(isPrivateAddress('172.20.1.1') && isPrivateAddress('192.168.1.1') && isPrivateAddress('100.64.0.1') && isPrivateAddress('fd00::1')).toBe(true)
+    expect(isPrivateAddress('203.0.113.12') || isPrivateAddress('2001:db8::1')).toBe(false)
+    expect(() => entry(13, { publicAddress: '203.0.113.13' })).toThrow(/private local address/)
+    expect(() => entry(14, { address: '10.0.0.14', publicAddress: '10.0.0.15' })).toThrow(/public address/)
+    expect(() => validateServerIpPool([mapped, entry(15, { address: '10.0.0.15', publicAddress: '203.0.113.12' })])).toThrow(/maps one local address/)
+    expect(natPublicAddresses([shared, mapped])).toEqual(new Map([['10.0.0.12', '203.0.113.12']]))
+    expect(resolveAccountIpAssignment({ ipv4: mapped.address }, context([shared, mapped, local])).ipv4).toBe('10.0.0.12')
+    expect(() => resolveAccountIpAssignment({ ipv4: local.address }, context([shared, mapped, local]))).toThrowError(expect.objectContaining({ code: 'PRECONDITION_FAILED', detail: expect.objectContaining({ reason: 'nat_mapping_unknown' }) }))
+    // Without any mapping the server is not in NAT mode and a private address stays assignable.
+    expect(resolveAccountIpAssignment({ ipv4: local.address }, context([shared, local])).ipv4).toBe('10.0.0.11')
+  })
+
+  it('allocates the next unused address of an IPv6 range', () => {
+    expect(nextRangeAddress({ cidr: '2001:db8:0:1::/64' }, new Set())).toBe('2001:db8:0:1::1')
+    expect(nextRangeAddress({ cidr: '2001:db8:0:1::/64' }, new Set(['2001:db8:0:1::1', '2001:db8:0:1::2']))).toBe('2001:db8:0:1::3')
+    expect(nextRangeAddress({ cidr: '2001:db8::/127' }, new Set(['2001:db8::1']))).toBeNull()
+  })
+})
+
+describe('IP reservation, release hold and IPv6 ranges', () => {
+  const entry = { id: '00000000-0000-4000-8000-0000000000a1', address: '198.51.100.7', prefixLength: 24, interfaceName: 'eth0', role: 'dedicated', ownerKind: 'root', ownerId: null, ptrHostname: null, notes: '' }
+  const range = (cidr: string, id = '00000000-0000-4000-8000-0000000000b1') => ({ id, cidr, ownerKind: 'root', ownerId: null, notes: '' })
+
+  it('keeps an entry without the new fields unchanged', () => {
+    expect(validateServerIpEntry(entry)).not.toHaveProperty('reserved')
+    expect(validateServerIpEntry(entry)).not.toHaveProperty('releasing')
+  })
+
+  it('keeps reserved and a release hold, and refuses malformed ones', () => {
+    const held = validateServerIpEntry({ ...entry, reserved: true, releasing: { accountId: '00000000-0000-4000-8000-0000000000C1', since: '2026-11-06T10:00:00Z' } })
+    expect(held).toMatchObject({ reserved: true, releasing: { accountId: '00000000-0000-4000-8000-0000000000c1', since: '2026-11-06T10:00:00.000Z' } })
+    expect(() => validateServerIpEntry({ ...entry, reserved: 'yes' })).toThrow(/reserved/)
+    expect(() => validateServerIpEntry({ ...entry, releasing: { accountId: 'alice', since: '2026-11-06T10:00:00Z' } })).toThrow(/releasing/)
+    expect(() => validateServerIpEntry({ ...entry, releasing: { accountId: '00000000-0000-4000-8000-0000000000c1' } })).toThrow()
+  })
+
+  it('canonicalizes IPv6 ranges and refuses host bits, IPv4, overlaps and duplicates', () => {
+    expect(validateIpv6Ranges([range('2001:DB8:0:1::/64')])).toEqual([range('2001:db8:0:1::/64')])
+    expect(() => validateIpv6Ranges([range('2001:db8::1/64')])).toThrow(/zero host bits/)
+    expect(() => validateIpv6Ranges([range('192.0.2.0/24')])).toThrow(/IPv6 network/)
+    expect(() => validateIpv6Ranges([range('2001:db8::')])).toThrow(/IPv6 network/)
+    expect(() => validateIpv6Ranges([range('2001:db8::/48'), range('2001:db8:0:1::/64', '00000000-0000-4000-8000-0000000000b2')])).toThrow(/overlap/)
+    expect(validateIpv6Ranges([range('2001:db8:0:2::/64'), range('2001:db8:0:1::/64', '00000000-0000-4000-8000-0000000000b2')]).map(r => r.cidr))
+      .toEqual(['2001:db8:0:1::/64', '2001:db8:0:2::/64'])
+    expect(() => validateIpv6Ranges([range('2001:db8:0:1::/64'), range('2001:db8:0:2::/64')])).toThrow(/duplicate/)
+    expect(() => validateIpv6Ranges([{ ...range('2001:db8::/64'), ownerKind: 'reseller', ownerId: null }])).toThrow(/ownerId/)
+    expect(() => validateIpv6Ranges([{ ...range('2001:db8::/64'), extra: 1 }])).toThrow()
   })
 })

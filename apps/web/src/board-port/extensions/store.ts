@@ -1,6 +1,7 @@
 import type { Account, Domain, Plan, Principal } from '@xpanel/core'
 import type { Locale } from '../../i18n.ts'
 import '../../i18n.ts'
+import { renderWhmSiteInstancesCard, renderWhmSiteSoftwareCard } from '../whm-extend-workspace.ts'
 import { extensionCard, extensionCollection, extensionDisabled, extensionFact, extensionFrame, extensionText, type ExtensionCopy, type ExtensionRouteSpec, type ReadCollection } from './shared.ts'
 
 const accountTitles: readonly (readonly [string, ExtensionCopy])[] = [
@@ -32,6 +33,8 @@ export interface StoreExtensionInput {
   domains?: ReadCollection<Pick<Domain, 'accountId' | 'name'>>
   plans?: ReadCollection<Pick<Plan, 'name'>>
   platform?: { state: 'unread' } | { state: 'read'; name: string; version: string }
+  /** An unqualified page keeps every control disabled. */
+  readOnly?: boolean
 }
 
 /** Read-only presentation. It has no signed-catalog reader or installer transport. */
@@ -45,13 +48,13 @@ export const renderStoreExtension = (input: StoreExtensionInput): string => {
   const account = input.account
   if (root ? principal.kind !== 'root' : !account || principal.kind !== 'user' || principal.accountId !== account.id || account.status !== 'active') return ''
   const viewNavigation = `<nav class="xp-extension__actions" aria-label="${extensionText(locale, msgid('Store views'))}">${storeRouteSpecs.filter(item => item.surface === spec.surface).map(item => `<a class="xp-btn${item.route === route ? ' xp-btn--primary' : ''}" href="${item.route}" data-nav-route="${item.route}"${item.route === route ? ' aria-current="page"' : ''}>${extensionText(locale, item.title)}</a>`).join('')}</nav>`
-  const unavailable = extensionCard(locale, msgid('Installer unavailable'), `<p data-installer-state="unavailable">${extensionText(locale, msgid('A signed catalog and installer are not connected to this view. Installation, update and rollback controls are unavailable; job state has not been read.'))}</p><dl class="xp-extension__facts">${extensionFact(locale, msgid('Catalog'), undefined)}${extensionFact(locale, msgid('Installed applications'), undefined)}${extensionFact(locale, msgid('Platform'), input.platform?.state === 'read' ? input.platform.name : undefined)}${extensionFact(locale, msgid('Platform version'), input.platform?.state === 'read' ? input.platform.version : undefined, true)}</dl>`)
+  const unavailable = extensionCard(locale, msgid('Installer unavailable'), `<p data-installer-state="unavailable">${extensionText(locale, root ? msgid('Accounts install applications from their Applications page, and root manages copies under Installed applications. This store view has no installer controls.') : msgid('A signed catalog and installer are not connected to this view. Installation, update and rollback controls are unavailable; job state has not been read.'))}</p><dl class="xp-extension__facts">${extensionFact(locale, msgid('Catalog'), undefined)}${extensionFact(locale, msgid('Installed applications'), undefined)}${extensionFact(locale, msgid('Platform'), input.platform?.state === 'read' ? input.platform.name : undefined)}${extensionFact(locale, msgid('Platform version'), input.platform?.state === 'read' ? input.platform.version : undefined, true)}</dl>`)
   let details = ''
   if (root) {
     if (route.endsWith('/activity')) {
       details = extensionCard(locale, msgid('Installer activity'), `<p data-collection-state="unread">${extensionText(locale, msgid('Installer activity was not read. General audit events are not installer activity.'))}</p>`)
     } else {
-      details = extensionCard(locale, msgid('Catalog authority'), `<dl class="xp-extension__facts">${extensionFact(locale, msgid('Catalog sources'), undefined)}${extensionFact(locale, msgid('Trusted signing keys'), undefined)}${extensionFact(locale, msgctxt('store', 'Extensions'), undefined)}</dl><p>${extensionText(locale, msgid('Private signing keys are never shown here.'))}</p>${extensionCollection(locale, input.plans, msgid('The read returned no plans.'), plan => `<dl class="xp-extension__facts">${extensionFact(locale, msgid('Plan'), plan.name)}${extensionFact(locale, msgid('Application feature key'), undefined)}</dl>`)}<div class="xp-extension__actions">${extensionDisabled(locale, msgid('Add source'))}${extensionDisabled(locale, msgid('Save feature keys'))}${extensionDisabled(locale, msgid('Install extension'))}</div>`)
+      details = extensionCard(locale, msgid('Catalog authority'), `<dl class="xp-extension__facts">${extensionFact(locale, msgid('Catalog sources'), undefined)}${extensionFact(locale, msgid('Trusted signing keys'), undefined)}${extensionFact(locale, msgctxt('store', 'Extensions'), undefined)}</dl><p>${extensionText(locale, msgid('Private signing keys are never shown here.'))}</p>${extensionCollection(locale, input.plans, msgid('The read returned no plans.'), plan => `<dl class="xp-extension__facts">${extensionFact(locale, msgid('Plan'), plan.name)}${extensionFact(locale, msgid('Application feature key'), undefined)}</dl>`)}`)
     }
   } else {
     const domains = input.domains?.state === 'read' ? { state: 'read' as const, items: input.domains.items.filter(domain => domain.accountId === input.account?.id) } : undefined
@@ -60,5 +63,6 @@ export const renderStoreExtension = (input: StoreExtensionInput): string => {
     if (route.endsWith('/progress') || route.endsWith('/updates')) details += extensionCard(locale, msgid('Job state'), `<p data-installer-progress="unread">${extensionText(locale, msgid('Job state, progress and logs have not been read.'))}</p>`)
   }
   const actions = extensionCard(locale, msgid('Available actions'), `<div class="xp-extension__actions">${extensionDisabled(locale, msgid('Install'))}${extensionDisabled(locale, msgid('Update'))}${extensionDisabled(locale, msgid('Roll back'))}${extensionDisabled(locale, msgid('Uninstall'))}${extensionDisabled(locale, msgid('Retry'))}</div>`)
-  return extensionFrame(locale, spec.title, `${viewNavigation}${unavailable}${details}${actions}`)
+  const signed = route === '/whm/software/store' ? renderWhmSiteSoftwareCard({ locale, canManage: input.readOnly !== true }) + renderWhmSiteInstancesCard({ locale, canManage: input.readOnly !== true }) : ''
+  return extensionFrame(locale, spec.title, `${viewNavigation}${unavailable}${details}${signed}${actions}`)
 }

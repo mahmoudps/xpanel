@@ -161,7 +161,7 @@ describe('classic selection actions gate', { tags: ['unit'] }, () => {
       .toEqual([['Copy', 'copy', true], ['Move', 'move', true], ['Compress', 'compress', true], ['Extract', 'extract', true]])
     document.body.innerHTML = classic(false)
     expect(document.querySelectorAll('[data-file-selection-action]')).toHaveLength(0)
-    expect(document.querySelectorAll('[data-workspace-section="selection-actions"] [data-wiring="soon"]')).toHaveLength(4)
+    expect(document.querySelectorAll('[data-workspace-section="selection-actions"] button')).toHaveLength(0)
   })
 })
 

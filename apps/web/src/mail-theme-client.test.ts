@@ -68,9 +68,17 @@ describe.each(['classic', 'v2'] as const)('%s mailbox dynamic templates', theme 
     await tick(); expect(send).not.toHaveBeenCalled()
     expect(document.querySelector<HTMLButtonElement>('[data-attachment-refresh]')!.disabled).toBe(true)
   })
+  it('says a store is too large instead of showing an empty or partial calendar', async () => {
+    const html = theme === 'classic' ? renderMailCalendarView({ locale: 'en', mailbox, canManage: true }) : renderMailCalendarPage({ ...input, route: '/mail/calendar' })
+    const send = vi.fn(async () => { throw { status: 412, details: { reason: 'dav_store_too_large', stateChanged: false } } })
+    const { document } = mount(html, MAIL_CALENDAR_VIEW_CLIENT_BINDING, send)
+    await tick()
+    expect(document.body.textContent).toContain('too large to open here')
+    expect(send).toHaveBeenCalledTimes(1)
+  })
   it('constructs month, week and day grids from its own templates after a real validated calendar read', async () => {
     const html = theme === 'classic' ? renderMailCalendarView({ locale: 'en', mailbox, canManage: true }) : renderMailCalendarPage({ ...input, route: '/mail/calendar' })
-    const send = vi.fn(async () => ({ context: { mailbox }, application: { status: 'stored_configuration', nativeApplied: false, syncVerified: false }, revision: 'a'.repeat(64), calendars: [], limits: { calendars: 25, events: 1000, shares: 100, icsBytes: 262144, calendarBytes: 524288 } }))
+    const send = vi.fn(async () => ({ context: { mailbox }, application: { status: 'dav_store', nativeApplied: true, syncVerified: false }, revision: 'a'.repeat(64), calendars: [], limits: { calendars: 25, events: 1000, shares: 100, icsBytes: 262144, calendarBytes: 524288 } }))
     const { document } = mount(html, MAIL_CALENDAR_VIEW_CLIENT_BINDING, send)
     await tick()
     const days = () => document.querySelectorAll('[data-calview-day]')

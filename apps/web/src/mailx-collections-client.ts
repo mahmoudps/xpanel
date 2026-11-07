@@ -6,12 +6,13 @@ const cloneClientTemplate = canonicalCloneClientTemplate
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 
-export type MailxCollectionItemView = { id: string | null; name: string; description: string; isDefault: boolean }
+export type MailxCollectionItemView = { id: string | null; name: string; description: string; isDefault: boolean; removable: boolean }
 export type MailxCollectionsView = {
   account: string
+  refused: string[]
   mailboxes: { mailbox: string; revision: string; defaultCalendar: string | null; calendars: { id: string; name: string; description: string }[]; addressBooks: MailxCollectionItemView[]; taskLists: MailxCollectionItemView[] }[]
 }
-export type MailxCalendarsView = { account: string; mailboxes: { mailbox: string; revision: string; calendars: { id: string; name: string; color: string; timezone: string }[] }[] }
+export type MailxCalendarsView = { account: string; refused: string[]; mailboxes: { mailbox: string; revision: string; calendars: { id: string; name: string; color: string; timezone: string }[] }[] }
 type Ask = (options: { title: string; body: string; confirm: string; danger?: boolean }) => Promise<unknown>
 type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
 
@@ -23,20 +24,22 @@ export function readMailxCollections(value: unknown, kind: 'collections' | 'cale
   const id = (item: unknown): item is string => typeof item === 'string' && /^[0-9a-f]{32}$/.test(item)
   const list = <T>(item: unknown, max: number, read: (raw: Record<string, unknown>) => T): T[] => Array.isArray(item) && item.length <= max ? item.map(raw => object(raw) ? read(raw) : bad()) : bad()
   const entries = (item: unknown): MailxCollectionItemView[] => {
-    const rows = list(item, 50, raw => id(raw.id) && text(raw.name, 200) && text(raw.description, 500, true) && typeof raw.isDefault === 'boolean' ? { id: raw.id, name: raw.name, description: raw.description, isDefault: raw.isDefault } : bad())
+    const rows = list(item, 50, raw => id(raw.id) && text(raw.name, 200) && text(raw.description, 500, true) && typeof raw.isDefault === 'boolean' && typeof raw.removable === 'boolean' ? { id: raw.id, name: raw.name, description: raw.description, isDefault: raw.isDefault, removable: raw.removable } : bad())
     return rows.length && rows.filter(row => row.isDefault).length !== 1 ? bad() : rows
   }
   if (!object(value) || !object(value.context) || !text(value.context.account, 16)) return bad()
+  const tooLarge = (raw: unknown): raw is { mailbox: string } => object(raw) && raw.refused === 'dav_store_too_large' && text(raw.mailbox, 254)
+  const rows: unknown[] = Array.isArray(value.mailboxes) ? value.mailboxes : bad(), refused = rows.filter(tooLarge).map(raw => raw.mailbox), mailboxes = rows.filter(raw => !tooLarge(raw))
   if (kind === 'collections') {
-    if (!object(value.dav) || value.dav.caldav !== 'unavailable' || value.dav.carddav !== 'unavailable' || !object(value.application) || value.application.davServed !== false) return bad()
-    return { account: value.context.account, mailboxes: list(value.mailboxes, 1000, raw => {
+    if (!object(value.application) || value.application.davServed !== true) return bad()
+    return { account: value.context.account, refused, mailboxes: list(mailboxes, 1000, raw => {
       if (!text(raw.mailbox, 254) || typeof raw.revision !== 'string' || !/^[0-9a-f]{64}$/.test(raw.revision)) return bad()
       const calendars = list(raw.calendars, 25, item => id(item.id) && text(item.name, 200) && text(item.description, 500, true) ? { id: item.id, name: item.name, description: item.description } : bad())
       if (!(raw.defaultCalendar === null || calendars.some(item => item.id === raw.defaultCalendar))) return bad()
       return { mailbox: raw.mailbox, revision: raw.revision, defaultCalendar: raw.defaultCalendar as string | null, calendars, addressBooks: entries(raw.addressBooks), taskLists: entries(raw.taskLists) }
     }) }
   }
-  return { account: value.context.account, mailboxes: list(value.mailboxes, 1000, raw => text(raw.mailbox, 254) && typeof raw.revision === 'string' && /^[0-9a-f]{64}$/.test(raw.revision)
+  return { account: value.context.account, refused, mailboxes: list(mailboxes, 1000, raw => text(raw.mailbox, 254) && typeof raw.revision === 'string' && /^[0-9a-f]{64}$/.test(raw.revision)
     ? { mailbox: raw.mailbox, revision: raw.revision, calendars: list(raw.calendars, 25, item => id(item.id) && text(item.name, 200) && text(item.color, 80) && text(item.timezone, 100) ? { id: item.id, name: item.name, color: item.color, timezone: item.timezone } : bad()) } : bad()) }
 }
 
@@ -92,6 +95,7 @@ function bindMailxCollections(askDialog: Ask | undefined): void {
       const description = clientTemplateSlot(tr, 'description', 'input') as HTMLInputElement; description.value = item.description; description.setAttribute('aria-label', t('Description'))
       const fallback = clientTemplateSlot(tr, 'default', 'input') as HTMLInputElement; fallback.name = 'mailx-default-' + kind; fallback.checked = item.isDefault; fallback.setAttribute('aria-label', t('Default'))
       const remove = clientTemplateSlot(tr, 'remove', 'button') as HTMLButtonElement; remove.textContent = t('Remove')
+      if (!item.removable) remove.remove()
       remove.addEventListener('click', () => { tr.remove(); if (!bodies[kind].querySelector('tr[data-item-id]')) empty(kind) })
       return tr
     }
@@ -123,18 +127,20 @@ function bindMailxCollections(askDialog: Ask | undefined): void {
         const boxes = nextCollections.mailboxes.map(item => ({ value: item.mailbox, label: item.mailbox }))
         options(boxSelect, boxes, boxSelect.value); options(calMailbox, nextCalendars.mailboxes.map(item => ({ value: item.mailbox, label: item.mailbox })), calMailbox.value)
         if (after) note(status, 'saved', after)
-        else note(status, boxes.length ? 'read' : 'empty', boxes.length ? t('Collection settings read. They are not served to devices until a DAV server is connected.') : t('No current email-enabled mailboxes are saved for this account.'))
+        else if (nextCollections.refused.length) note(status, 'failed', t('Read, except these mailboxes, too large to open here: {mailboxes}. Nothing was changed, and your devices still have them.', { mailboxes: nextCollections.refused.map(box => '\u2068' + box + '\u2069').join(', ') }))
+        else note(status, boxes.length ? 'read' : 'empty', boxes.length ? t('Collection settings read.') : t('No current email-enabled mailboxes are saved for this account.'))
         // A just-reported calendar outcome stays visible across the readback.
         if (!['saved', 'failed'].includes(calStatus.dataset.state ?? '')) note(calStatus, 'read', nextCalendars.mailboxes.some(item => item.calendars.length) ? t('Choose a calendar to edit or delete.') : t('No saved calendars were found.'))
         busy = false; paintCalendar(); paintSettings()
-      } catch { note(status, 'failed', t('Collection settings could not be read. Explicitly reload before changing anything.')) }
+      } catch (error) { note(status, 'failed', (error as { details?: { reason?: unknown } } | null)?.details?.reason === 'dav_store_too_large' ? t('This mailbox’s calendars and contacts are too large to open here. Nothing was changed, and your devices still have them.') : t('Collection settings could not be read. Explicitly reload before changing anything.')) }
       finally { busy = false; controls() }
     }
     const failure = (error: unknown): string => {
       const problem = error && typeof error === 'object' ? error as { status?: number; code?: string; details?: Record<string, unknown> } : {}, details = problem.details && typeof problem.details === 'object' ? problem.details : {}
       return details.unknownOutcome === true || details.verificationRequired === true ? t('The outcome is unknown. Reload and review before retrying.')
         : problem.status === 409 || problem.code === 'CONFLICT' ? t('These collections changed since they were read. Reload and review before saving.')
-          : problem.status === 422 || problem.code === 'VALIDATION' ? t('Some values are not valid. Nothing was saved.') : t('The request failed. Reload to see what was saved.')
+          : details.reason === 'dav_default_collection' ? t('The default collection cannot be deleted.')
+            : problem.status === 422 || problem.code === 'VALIDATION' ? t('Some values are not valid. Nothing was saved.') : t('The request failed. Reload to see what was saved.')
     }
     const change = async (method: 'PATCH' | 'DELETE'): Promise<void> => {
       const box = calendarBox(), current = calendar(), fields = method === 'PATCH' ? draft() : null
@@ -150,7 +156,7 @@ function bindMailxCollections(askDialog: Ask | undefined): void {
       finally { busy = false; controls() }
       await load()
     }
-    const collect = (kind: 'address-books' | 'task-lists'): MailxCollectionItemView[] => [...bodies[kind].querySelectorAll<HTMLTableRowElement>('tr[data-item-id]')].map(tr => ({
+    const collect = (kind: 'address-books' | 'task-lists'): Omit<MailxCollectionItemView, 'removable'>[] => [...bodies[kind].querySelectorAll<HTMLTableRowElement>('tr[data-item-id]')].map(tr => ({
       id: tr.dataset.itemId || null, name: tr.querySelector<HTMLInputElement>('[data-item-name]')!.value.trim(), description: tr.querySelector<HTMLInputElement>('[data-item-description]')!.value.trim(), isDefault: tr.querySelector<HTMLInputElement>('[data-item-default]')!.checked }))
     calMailbox.addEventListener('change', paintCalendar); calTarget.addEventListener('change', paintCalendar)
     for (const control of [calName, calColor, calZone]) control.addEventListener('input', controls)
@@ -159,7 +165,7 @@ function bindMailxCollections(askDialog: Ask | undefined): void {
     root.querySelectorAll<HTMLButtonElement>('[data-mailx-add]').forEach(button => button.addEventListener('click', () => {
       const kind = button.dataset.mailxAdd as 'address-books' | 'task-lists'
       if (!bodies[kind].querySelector('tr[data-item-id]')) bodies[kind].replaceChildren()
-      bodies[kind].append(row(kind, { id: null, name: '', description: '', isDefault: !bodies[kind].querySelector('tr[data-item-id]') })); controls()
+      bodies[kind].append(row(kind, { id: null, name: '', description: '', isDefault: !bodies[kind].querySelector('tr[data-item-id]'), removable: true })); controls()
     }))
     // A read-only document renders this block as a <div>, which never submits.
     if (form instanceof HTMLFormElement) form.addEventListener('submit', event => {

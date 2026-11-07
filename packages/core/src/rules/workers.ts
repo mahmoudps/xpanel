@@ -179,3 +179,11 @@ export const validateNginxWorkers = (nginx: unknown): NginxWorkers => {
     keepaliveTimeoutSec: n.keepaliveTimeoutSec,
   }
 }
+
+/** The worker form fields suggested for sampled hardware as JSON, or null while the hardware has not been read. */
+export const suggestedWorkerFields = (sample?: { cores?: number; memory?: { totalBytes: number } } | null): string | null => {
+  const memoryMb = Math.floor((sample?.memory?.totalBytes ?? 0) / 1048576)
+  if (!sample?.cores || memoryMb < 256) return null
+  const { nginx, apache } = suggestServerSettings({ cores: sample.cores, memoryMb })
+  return JSON.stringify(Object.fromEntries([...Object.entries(nginx).map(([key, value]) => ['nginx.' + key, value]), ...Object.entries(apache).map(([key, value]) => ['apache.' + key, value])]))
+}

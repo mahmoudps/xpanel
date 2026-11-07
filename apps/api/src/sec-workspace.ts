@@ -16,6 +16,8 @@ export interface SecWorkspaceHelpers extends Pick<ExtendedRouteHelpers, 'require
   readClient: (request: Request) => { listener: SecListener | null; address: string | null }
   /** True only when the API request pipeline enforces saved panel access (secPanelAccessGate). */
   panelAccessEnforced: boolean
+  /** Run state that belongs beside a saved policy (schedule, queue, holds). */
+  readExtra?: (kind: SecKind) => Promise<Record<string, unknown>>
   now?: () => Date
 }
 type ServerKind = Exclude<SecKind, 'waf-sites'>
@@ -25,6 +27,18 @@ const SERVER: Readonly<Record<string, { kind: ServerKind; host: string | null; r
   '/api/server/sec/panel-access': { kind: 'panel-access', host: null, reconcile: false },
   '/api/server/sec/dns-cluster': { kind: 'dns-cluster', host: '/host/sec/dns-cluster', reconcile: false },
   '/api/server/sec/compiler-access': { kind: 'compiler-access', host: '/host/sec/compiler-access', reconcile: true },
+  '/api/server/sec/traceroute': { kind: 'traceroute', host: '/host/svc/traceroute', reconcile: true },
+  '/api/server/sec/smtp-restrictions': { kind: 'smtp-restrictions', host: '/host/svc/smtp-restrictions', reconcile: true },
+  '/api/server/sec/fork-bomb': { kind: 'fork-bomb', host: '/host/svc/fork-bomb', reconcile: true },
+  '/api/server/sec/process-killer': { kind: 'process-killer', host: '/host/svc/process-killer', reconcile: false },
+  '/api/server/sec/antivirus-scope': { kind: 'antivirus-scope', host: null, reconcile: false },
+  '/api/server/sec/php-fpm-defaults': { kind: 'php-fpm-defaults', host: '/host/svc/php-fpm-defaults', reconcile: true },
+  '/api/server/sec/waf-rules': { kind: 'waf-rules', host: '/host/svc/waf-hits', reconcile: false },
+  '/api/server/sec/waf-vendors': { kind: 'waf-vendors', host: '/host/svc/waf-files', reconcile: true },
+  '/api/server/sec/autossl': { kind: 'autossl', host: null, reconcile: false },
+  '/api/server/sec/webdisk-tls': { kind: 'webdisk-tls', host: null, reconcile: true },
+  '/api/server/sec/outbound-spam': { kind: 'outbound-spam', host: null, reconcile: false },
+  '/api/server/sec/auto-dns': { kind: 'auto-dns', host: null, reconcile: false },
 }
 const ACCOUNT_WAF = '/api/account/sec/waf'
 const unchanged = { stateChanged: false }
@@ -38,6 +52,18 @@ const text = (value: unknown, max: number): value is string => typeof value === 
 const path = (value: unknown): value is string | null => value === null || typeof value === 'string' && value.length <= 256 && /^\/[A-Za-z0-9._/-]+$/.test(value)
 const unverified = (): never => fail('PRECONDITION_FAILED', 'the host observation could not be verified', { stateChanged: false, verificationRequired: true })
 
+const SVC_UNSAFE = /[\u0000\u2028-\u202e\u2066-\u2069\ufeff]/
+/** Agent observations are bounded, plain JSON before a browser sees them. */
+export function projectSvcObservation(value: unknown, depth = 0): unknown {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number' && Number.isFinite(value)) return value
+  if (depth < 8 && typeof value === 'string' && value.length <= 8192 && !SVC_UNSAFE.test(value)) return value
+  if (depth < 8 && Array.isArray(value) && value.length <= 5000) return value.map(item => projectSvcObservation(item, depth + 1))
+  if (depth < 8 && value && typeof value === 'object') {
+    const entries = Object.entries(value)
+    if (entries.length <= 5000) return Object.fromEntries(entries.map(([key, item]) => [key, projectSvcObservation(item, depth + 1)]))
+  }
+  return fail('PRECONDITION_FAILED', 'the host observation could not be verified', { stateChanged: false, verificationRequired: true })
+}
 export function projectSecWafObservation(value: unknown): unknown {
   if (!object(value) || !iso(value.observedAt) || !(value.family === null || oneOf(value.family, ['debian', 'rhel'] as const)) || !object(value.connector) || !boolOrNull(value.connector.nginx) || !boolOrNull(value.connector.apache)
     || !object(value.engineConf) || !path(value.engineConf.path) || !(value.engineConf.ruleEngine === null || oneOf(value.engineConf.ruleEngine, ['On', 'Off', 'DetectionOnly'] as const))
@@ -96,7 +122,7 @@ export function projectSecPeerVerification(value: unknown, peer: string): unknow
 }
 
 interface SecView { state: 'default' | 'saved' | 'invalid'; policy: unknown; updatedAt: string | null; revision: string }
-const readRaw = async (store: Pick<StateStore, 'rootDir'>, kind: SecKind): Promise<unknown> => {
+export const readSecRaw = async (store: Pick<StateStore, 'rootDir'>, kind: SecKind): Promise<unknown> => {
   try { return await readJsonIfExists<unknown>(join(store.rootDir, SEC_STATE_PATHS[kind])) } catch { return fail('PRECONDITION_FAILED', 'saved configuration is unreadable; review it before changing it', unchanged) }
 }
 const viewOf = (kind: SecKind, raw: unknown): SecView => {
@@ -104,7 +130,7 @@ const viewOf = (kind: SecKind, raw: unknown): SecView => {
   return { state: raw === null ? 'default' : record ? 'saved' : 'invalid', policy: raw === null ? structuredClone(SEC_DEFAULTS[kind]) : record?.policy ?? null, updatedAt: record?.updatedAt ?? null, revision: secRevision(kind, raw) }
 }
 const same = (left: AuthenticatedCaller, right: AuthenticatedCaller): boolean => left.principal.id === right.principal.id && left.sessionId === right.sessionId && left.apiTokenId === right.apiTokenId
-const bodyOf = async (request: Request, max: number): Promise<Record<string, unknown>> => {
+export const secBody = async (request: Request, max: number): Promise<Record<string, unknown>> => {
   if (request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return invalid('JSON is required')
   const raw = await request.text()
   if (Buffer.byteLength(raw) > max) return invalid('the request is too large')
@@ -112,30 +138,37 @@ const bodyOf = async (request: Request, max: number): Promise<Record<string, unk
   try { value = JSON.parse(raw) } catch { return invalid('valid JSON is required') }
   return object(value) ? value : invalid('a JSON object is required')
 }
-const revisionOf = (value: unknown): string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value) ? value : invalid('the exact observed revision is required')
-const reconcileOutcome = async (helpers: SecWorkspaceHelpers, caller: AuthenticatedCaller): Promise<'requested' | 'failed' | 'not_connected' | 'unknown'> => {
+export const secRevisionOf = (value: unknown): string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value) ? value : invalid('the exact observed revision is required')
+export const reconcileSecOutcome = async (helpers: Pick<SecWorkspaceHelpers, 'triggerReconcile'>, caller: AuthenticatedCaller): Promise<'requested' | 'failed' | 'not_connected' | 'unknown'> => {
   try { const result = await helpers.triggerReconcile(caller); return result === null ? 'not_connected' : result.ok ? 'requested' : 'failed' } catch { return 'unknown' }
 }
 
 /** Revision-bound write of one desired-state file; the saved effect is proven by a re-read before it is reported. */
-async function writeRecord(helpers: SecWorkspaceHelpers, kind: SecKind, expectedRevision: string, build: (raw: unknown) => unknown, fresh: () => Promise<unknown>): Promise<unknown> {
+export async function writeSecRecord(helpers: Pick<SecWorkspaceHelpers, 'store'> & { now?: () => Date }, kind: SecKind, expectedRevision: string, build: (raw: unknown) => unknown, fresh: () => Promise<unknown>): Promise<unknown> {
   const lease = await helpers.store.getWriterLock().acquire()
   let attempted = false
   try {
     await fresh()
-    const raw = await readRaw(helpers.store, kind)
+    const raw = await readSecRaw(helpers.store, kind)
     if (raw !== null && !readSecRecord(kind, raw)) return fail('PRECONDITION_FAILED', 'saved configuration requires review before changing it', unchanged)
     if (secRevision(kind, raw) !== expectedRevision) return fail('CONFLICT', 'saved configuration changed; reload before saving', unchanged)
     const record = { version: 1, policy: build(raw), updatedAt: (helpers.now ?? (() => new Date()))().toISOString() }
     await lease.assertFencingToken(); attempted = true
     await atomicWriteJson(join(helpers.store.rootDir, SEC_STATE_PATHS[kind]), record, 0o640, async () => { await fresh(); await lease.assertFencingToken() })
-    const saved = await readRaw(helpers.store, kind)
+    const saved = await readSecRaw(helpers.store, kind)
     if (JSON.stringify(saved) !== JSON.stringify(record)) throw new Error('readback_mismatch')
     return saved
   } catch (error) {
     if (attempted) return fail('SERVICE_UNAVAILABLE', 'the saved configuration could not be verified; review before retrying', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
     throw error
   } finally { await lease.release() }
+}
+
+/** A PUT changes only the switches of vendors that install already verified; their metadata stays as installed. */
+const keepInstalledVendors = (next: typeof SEC_DEFAULTS['waf-vendors'], raw: unknown): typeof SEC_DEFAULTS['waf-vendors'] => {
+  const saved = raw === null ? [] : readSecRecord('waf-vendors', raw)!.policy.vendors
+  if (next.vendors.map(vendor => vendor.id).sort().join() !== saved.map(vendor => vendor.id).sort().join()) return invalid('vendors are added and removed through install and remove')
+  return { crsDisabledFiles: next.crsDisabledFiles, vendors: saved.map(vendor => { const item = next.vendors.find(entry => entry.id === vendor.id)!; return { ...vendor, enabled: item.enabled, autoUpdate: item.autoUpdate, disabledFiles: item.disabledFiles } }) }
 }
 
 const clientFacts = (policy: SecPanelAccessPolicy, client: { listener: SecListener | null; address: string | null }) => ({ listener: client.listener, address: client.address,
@@ -146,7 +179,7 @@ async function hostRead(helpers: SecWorkspaceHelpers, caller: AuthenticatedCalle
   try { return { observation: project(await helpers.callHost(caller, hostPath)), reason: null } }
   catch (error) { return { observation: null, reason: isXpanelError(error) && error.code === 'PRECONDITION_FAILED' && error.message.includes('verified') ? 'observation_unverified' : 'host_unavailable' } }
 }
-const PROJECT: Readonly<Record<string, (value: unknown) => unknown>> = { waf: projectSecWafObservation, flood: projectSecFloodObservation, 'dns-cluster': projectSecDnsClusterObservation, 'compiler-access': projectSecCompilerAccessObservation }
+const PROJECT: Readonly<Record<string, (value: unknown) => unknown>> = { traceroute: projectSvcObservation, 'smtp-restrictions': projectSvcObservation, 'fork-bomb': projectSvcObservation, 'process-killer': projectSvcObservation, 'php-fpm-defaults': projectSvcObservation, 'waf-rules': projectSvcObservation, 'waf-vendors': projectSvcObservation, waf: projectSecWafObservation, flood: projectSecFloodObservation, 'dns-cluster': projectSecDnsClusterObservation, 'compiler-access': projectSecCompilerAccessObservation }
 
 /** Accounts the Compiler Access grant list offers; a jailed shell stays restricted (agent compiler-access.ts). */
 const compilerAccounts = async (store: StateStore): Promise<{ id: string; username: string; jailedShell: boolean }[]> => {
@@ -179,9 +212,9 @@ export async function handleSecWorkspaceRoute(request: Request, url: URL, method
     return workspaceJson(result)
   }
   if (apply) {
-    const body = await bodyOf(request, 512)
+    const body = await secBody(request, 512)
     if (Object.keys(body).join() !== 'expectedRevision') return invalid('only expectedRevision is accepted')
-    const expectedRevision = revisionOf(body.expectedRevision), raw = await readRaw(helpers.store, kind)
+    const expectedRevision = secRevisionOf(body.expectedRevision), raw = await readSecRaw(helpers.store, kind)
     if (!readSecRecord(kind, raw)) return fail('PRECONDITION_FAILED', 'save the cluster peers before applying them', unchanged)
     if (secRevision(kind, raw) !== expectedRevision) return fail('CONFLICT', 'saved cluster configuration changed; reload before applying', unchanged)
     if (!helpers.callHost) return fail('PRECONDITION_FAILED', 'applying cluster settings needs the host agent', unchanged)
@@ -197,22 +230,27 @@ export async function handleSecWorkspaceRoute(request: Request, url: URL, method
   }
 
   if (method === 'GET') {
-    const view = viewOf(kind, await readRaw(helpers.store, kind))
+    const view = viewOf(kind, await readSecRaw(helpers.store, kind))
     const host = route.host ? await hostRead(helpers, caller, route.host, PROJECT[kind]!) : null
     const extra = kind === 'panel-access' ? { client: clientFacts(view.policy as SecPanelAccessPolicy ?? SEC_DEFAULTS['panel-access'], helpers.readClient(request)), enforcement: helpers.panelAccessEnforced ? 'api_listener' : 'not_connected' }
-      : kind === 'compiler-access' ? { accounts: await compilerAccounts(helpers.store) } : {}
+      : kind === 'compiler-access' || kind === 'process-killer' || kind === 'antivirus-scope' ? { accounts: await compilerAccounts(helpers.store) }
+      : kind === 'waf-rules' ? { engineLive: (await hostRead(helpers, caller, '/host/sec/waf', projectSecWafObservation)).observation } : {}
+    const more = await helpers.readExtra?.(kind)
     await fresh()
-    return workspaceJson({ ...view, ...(host ? host : {}), ...extra })
+    return workspaceJson({ ...view, ...(host ? host : {}), ...extra, ...more })
   }
-  const body = await bodyOf(request, 96 * 1024)
+  const body = await secBody(request, 96 * 1024)
   if (Object.keys(body).sort().join() !== 'expectedRevision,policy') return invalid('only policy and expectedRevision are accepted')
-  const expectedRevision = revisionOf(body.expectedRevision), policy = parseSecPolicy(kind, body.policy)
+  const expectedRevision = secRevisionOf(body.expectedRevision), policy = parseSecPolicy(kind, body.policy)
   if (kind === 'compiler-access') {
     // Granted accounts must exist now; one deleted later simply leaves the group on the next reconcile.
     const known = new Set((await helpers.store.listAccounts()).map(account => account.id))
     if ((policy as { accountIds: string[] }).accountIds.some(id => !known.has(id))) return invalid('every granted account must exist')
   }
-  const saved = await writeRecord(helpers, kind, expectedRevision, () => {
+  const saved = await writeSecRecord(helpers, kind, expectedRevision, raw => {
+    // Deployed rules change only through deploy, and a vendor enters only through install, which checks its archive.
+    if (kind === 'waf-rules') { const held = raw === null ? SEC_DEFAULTS['waf-rules'] : readSecRecord('waf-rules', raw)!.policy; return { ...policy as typeof SEC_DEFAULTS['waf-rules'], deployed: held.deployed, deployedEngine: held.deployedEngine } }
+    if (kind === 'waf-vendors') return keepInstalledVendors(policy as typeof SEC_DEFAULTS['waf-vendors'], raw)
     // Self-lockout guard: the list for the entry point in use (xWHM when it cannot be told) must still admit this request's address.
     const client = helpers.readClient(request), listener = client.listener ?? 'xwhm'
     if (kind === 'panel-access' && !secPanelAccessAdmits(policy as SecPanelAccessPolicy, listener, client.address)) return fail('CONFLICT', client.address ? 'the allowlist would lock out your current address on this entry point' : 'your current address could not be verified, so a restricting allowlist cannot be saved', { stateChanged: false, reason: 'self_lockout' })
@@ -221,7 +259,7 @@ export async function handleSecWorkspaceRoute(request: Request, url: URL, method
   const current = await fresh().catch(() => null)
   try { await helpers.emitAudit({ actor: caller.principal.username, action: `server.sec.${kind}.saved`, target: 'server:sec:' + kind, principalId: caller.principal.id, outcome: 'ok', detail: { revision: secRevision(kind, saved) } }) }
   catch { return fail('SERVICE_UNAVAILABLE', 'the configuration was saved but its audit record requires review', { stateChanged: true, verificationRequired: true }) }
-  const reconcile = route.reconcile && current ? await reconcileOutcome(helpers, current) : null
+  const reconcile = route.reconcile && current ? await reconcileSecOutcome(helpers, current) : null
   return workspaceJson({ ...viewOf(kind, saved), reconcile })
 }
 
@@ -231,7 +269,7 @@ async function accountWaf(request: Request, url: URL, method: string, helpers: S
   if (url.search) return invalid('the account WAF accepts no selectors')
   const ports = { store: helpers.store, requireCaller: (req: Request) => helpers.requireCaller(req) }
   const first = await authorizeAccountOwner(ports, request, ['modsecurity'], 'Web application firewall')
-  const server = viewOf('waf', await readRaw(helpers.store, 'waf')), sitesRaw = await readRaw(helpers.store, 'waf-sites'), sites = viewOf('waf-sites', sitesRaw)
+  const server = viewOf('waf', await readSecRaw(helpers.store, 'waf')), sitesRaw = await readSecRaw(helpers.store, 'waf-sites'), sites = viewOf('waf-sites', sitesRaw)
   const view = async (account: typeof first.account, sitesView: SecView) => {
     const domains = (await helpers.store.listDomains({ accountId: account.id })).map(domain => domain.name).sort()
     const switches = (sitesView.policy as { sites: Record<string, { accountId: string; modsecurity: boolean }> } | null)?.sites ?? {}
@@ -243,9 +281,9 @@ async function accountWaf(request: Request, url: URL, method: string, helpers: S
       domains: domains.map(name => ({ domain: name, modsecurity: switches[name]?.accountId === account.id ? switches[name]!.modsecurity : true })) }
   }
   if (method === 'GET') return workspaceJson(await view(first.account, sites))
-  const body = await bodyOf(request, 1024)
+  const body = await secBody(request, 1024)
   if (Object.keys(body).sort().join() !== 'domain,expectedRevision,modsecurity' || typeof body.modsecurity !== 'boolean' || typeof body.domain !== 'string') return invalid('only domain, modsecurity and expectedRevision are accepted')
-  const expectedRevision = revisionOf(body.expectedRevision), domain = body.domain, enabled = body.modsecurity
+  const expectedRevision = secRevisionOf(body.expectedRevision), domain = body.domain, enabled = body.modsecurity
   const fresh = async () => {
     const again = await authorizeAccountOwner(ports, request, ['modsecurity'], 'Web application firewall')
     if (again.caller.principal.id !== first.caller.principal.id || again.account.id !== first.account.id) return fail('CONFLICT', 'the account binding changed before saving', unchanged)
@@ -253,7 +291,7 @@ async function accountWaf(request: Request, url: URL, method: string, helpers: S
     return owned ? again : fail('NOT_FOUND', 'domain not found', unchanged)
   }
   await fresh()
-  const saved = await writeRecord(helpers, 'waf-sites', expectedRevision, raw => {
+  const saved = await writeSecRecord(helpers, 'waf-sites', expectedRevision, raw => {
     const current = raw === null ? { sites: {} } : readSecRecord('waf-sites', raw)!.policy, next = { ...current.sites }
     // Only an "off" switch is stored; "on" is the default and removes the entry.
     if (enabled) delete next[domain]; else next[domain] = { accountId: first.account.id, modsecurity: false }
@@ -262,6 +300,6 @@ async function accountWaf(request: Request, url: URL, method: string, helpers: S
   const current = await fresh().catch(() => null)
   try { await helpers.emitAudit({ actor: first.caller.principal.username, action: 'account.sec.waf.saved', target: 'domain:' + domain, principalId: first.caller.principal.id, outcome: 'ok', detail: { modsecurity: enabled } }) }
   catch { return fail('SERVICE_UNAVAILABLE', 'the switch was saved but its audit record requires review', { stateChanged: true, verificationRequired: true }) }
-  const reconcile = current ? await reconcileOutcome(helpers, current.caller) : null
+  const reconcile = current ? await reconcileSecOutcome(helpers, current.caller) : null
   return workspaceJson({ ...await view(current?.account ?? first.account, viewOf('waf-sites', saved)), reconcile })
 }

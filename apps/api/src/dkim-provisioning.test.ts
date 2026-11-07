@@ -35,6 +35,7 @@ const fixture = async () => {
     assertCanAccessAccount: async (value, target) => { if (value.principal.kind === 'user' && value.principal.accountId !== target.id) fail('FORBIDDEN', 'account access denied') },
     resolveAccountParam: async () => account, resolveResellerId: async () => null, emitAudit: async () => {}, triggerReconcile: async () => null,
     readDkimPublicMaterial: material,
+    dav: { open: () => { throw new Error('this route has no calendar store') }, lock: async () => () => undefined },
   }
   const router = createExtendedApiRouter(helpers)
   const post = (domains = [account.primaryDomain]) => {

@@ -6,6 +6,12 @@ import { fileURLToPath } from 'node:url'
 
 export const ACTIVATION_KIND = 'xpanel-management-tls-activation'
 export const ACTIVATION_PATH = '/var/lib/xpanel-management-tls/activation.json'
+/** The three entry points. Panel access may give each its own host and port; `bound` marks a host the owner chose. */
+export const managementProfiles = config => [
+  { name: 'xpanel', host: config.access?.hosts.xpanel ?? config.hostname, port: config.access?.ports.xpanel ?? 2083, backend: 12083, bound: Boolean(config.access?.hosts.xpanel) },
+  { name: 'xwhm', host: config.access?.hosts.xwhm ?? `whm.${config.hostname}`, port: config.access?.ports.xwhm ?? 2087, backend: 12087, bound: Boolean(config.access?.hosts.xwhm) },
+  { name: 'xmail', host: config.access?.hosts.xmail ?? `mail.${config.hostname}`, port: config.access?.ports.xmail ?? 2096, backend: 12096, bound: Boolean(config.access?.hosts.xmail) },
+]
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const fail = code => { throw Object.assign(new Error(code), { code }) }
 const check = (condition, code) => { if (!condition) fail(code) }
@@ -70,7 +76,7 @@ export function parseActivationProcess(stat, status, command, pid) {
   return { pid: Number(pid), parentPid: Number(fields[1]), uid: Number(uids[1]), startTicks: fields[19], role, commandSha256: digest(command) }
 }
 
-export function parseActivationListeners(text) {
+export function parseActivationListeners(text, ports = [443, 2083, 2087, 2096]) {
   check(typeof text === 'string' && text.length <= 1024 * 1024, 'ACTIVATION_LISTENER_INPUT_INVALID')
   const listeners = []
   for (const line of text.trim().split('\n').slice(1)) {
@@ -79,7 +85,7 @@ export function parseActivationListeners(text) {
     if (fields[3] !== '0A') continue
     check(/^[1-9][0-9]*$/.test(fields[9]), 'ACTIVATION_LISTENER_INPUT_INVALID')
     const port = Number.parseInt(fields[1].split(':')[1], 16)
-    if ([443, 2083, 2087, 2096].includes(port)) listeners.push({ inode: fields[9], port, localAddressHex: fields[1].split(':')[0].toUpperCase() })
+    if (ports.includes(port)) listeners.push({ inode: fields[9], port, localAddressHex: fields[1].split(':')[0].toUpperCase() })
   }
   return listeners
 }
@@ -115,8 +121,9 @@ export function observeManagementActivation(nginxState, paths, certificateSha256
   const childrenText = () => readBounded(`/proc/${master.pid}/task/${master.pid}/children`, 16384).toString('utf8').trim()
   const childrenBefore = childrenText(), children = childrenBefore ? childrenBefore.split(/\s+/) : []
   check(children.length <= 256 && children.every(pidNumber) && new Set(children).size === children.length, 'ACTIVATION_WORKERS_INVALID')
-  const listeners = [...parseActivationListeners(readBounded(`/proc/${master.pid}/net/tcp`, 1024 * 1024).toString('utf8')),
-    ...parseActivationListeners(readBounded(`/proc/${master.pid}/net/tcp6`, 1024 * 1024).toString('utf8'))]
+  const points = managementProfiles(config), watched = [443, ...points.map(point => point.port)]
+  const listeners = [...parseActivationListeners(readBounded(`/proc/${master.pid}/net/tcp`, 1024 * 1024).toString('utf8'), watched),
+    ...parseActivationListeners(readBounded(`/proc/${master.pid}/net/tcp6`, 1024 * 1024).toString('utf8'), watched)]
   const workers = []
   for (const pid of children) {
     const worker = processObservation(Number(pid), executable)
@@ -135,9 +142,7 @@ export function observeManagementActivation(nginxState, paths, certificateSha256
   check(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(bootId), 'ACTIVATION_BOOT_INVALID')
   return { bootId, sourceInputs, files, certificateSha256, invocationId: nginxState.InvocationID,
     nginxMaster: processIdentity(master), nginxWorkers: workers.sort((a, b) => a.pid - b.pid).map(worker => ({ ...processIdentity(worker), listeners: worker.listeners })), routes: [
-      { audience: 'xpanel', origin: `https://${config.hostname}:2083`, addresses: [...config.addresses], backend: '127.0.0.1:12083' },
-      { audience: 'xwhm', origin: `https://whm.${config.hostname}:2087`, addresses: [...config.addresses], backend: '127.0.0.1:12087' },
-      { audience: 'xmail', origin: `https://mail.${config.hostname}:2096`, addresses: [...config.addresses], backend: '127.0.0.1:12096' },
+      ...points.map(point => ({ audience: point.name, origin: `https://${point.host}:${point.port}`, addresses: [...config.addresses], backend: `127.0.0.1:${point.backend}` })),
     ] }
 }
 
@@ -151,7 +156,7 @@ export function activationCommandEvidence(command) {
 
 /** Called only after the real product reload and served TLS readiness succeeded. */
 export function completeManagementActivation({ before, after, command, phase, activatedAt }) {
-  check(['prepare', 'renew'].includes(phase), 'ACTIVATION_PHASE_INVALID')
+  check(['prepare', 'renew', 'rebind'].includes(phase), 'ACTIVATION_PHASE_INVALID')
   for (const key of ['bootId', 'sourceInputs', 'files', 'certificateSha256', 'invocationId', 'routes']) check(same(before[key], after[key]), 'ACTIVATION_INPUT_CHANGED')
   check(same(processIdentity(before.nginxMaster), processIdentity(after.nginxMaster)), 'ACTIVATION_MASTER_CHANGED')
   check(command?.operation === 'nginx-reload' && command.exitCode === 0 && command.signal === null && command.remainingProcessGroup === false
@@ -176,7 +181,7 @@ export function completeManagementActivation({ before, after, command, phase, ac
     // reload may fork between observation and this reload. Same-tick ordering is
     // unknowable at kernel tick precision and remains unproven, never rounded up.
     check(/^[1-9][0-9]*$/.test(worker.startTicks) && BigInt(worker.startTicks) > BigInt(command.birth.kernelStartTime), 'ACTIVATION_WORKER_ORDER_UNPROVEN')
-    check([2083, 2087, 2096].every(port => worker.listeners.some(listener => listener.port === port)), 'ACTIVATION_ACCEPTING_WORKER_UNOBSERVED')
+    check(after.routes.map(route => Number(new URL(route.origin).port)).every(port => worker.listeners.some(listener => listener.port === port)), 'ACTIVATION_ACCEPTING_WORKER_UNOBSERVED')
   }
   const safeCommand = { ...activationCommandEvidence(command), configurationTest: activationCommandEvidence(tested) }
   return { schemaVersion: 1, kind: ACTIVATION_KIND, activatedAt, phase, bootId: after.bootId, sourceInputs: after.sourceInputs,

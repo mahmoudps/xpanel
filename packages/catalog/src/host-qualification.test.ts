@@ -71,16 +71,23 @@ describe('host qualification', () => {
       files: 'failed',
     })
     const qualified = new Set(qualifyHostTools(acceptedTools, report).filter(tool => tool.status === 'verified').map(tool => tool.id))
-    expect(qualified).toEqual(new Set(['list-accounts', 'modify-account', 'password-modification', 'manage-account-suspension', 'terminate-accounts', 'add-package', 'edit-package', 'delete-package', 'feature-list-crud', 'feature-manager', 'server-settings-edit', 'basic-server-setup', 'mysql-databases', 'mysql-users', 'ssl-tls-status', 'reseller-center',
-      'panel-upgrade', 'aapanel-language-theme', 'service-ssl-certificates', 'xwhm-api-tokens', 'notification-center', 'mail-quality', 'panel-news',
-      'service-config-health', 'api-shell', 'api-explorer', 'integrations-hub', 'trusted-proxies', 'backup-destinations',
+    expect(qualified).toEqual(new Set(['aapanel-saved-commands', 'linked-server-nodes', 'configuration-cluster', 'database-wizard', 'list-accounts', 'modify-account', 'password-modification', 'manage-account-suspension', 'terminate-accounts', 'add-package', 'edit-package', 'delete-package', 'feature-list-crud', 'feature-manager', 'server-settings-edit', 'basic-server-setup', 'mysql-databases', 'mysql-users', 'ssl-tls-status', 'reseller-center',
+      'aapanel-provider-dns-records', 'aapanel-auto-dns-on-site-create', 'notification-templates', 'panel-upgrade', 'aapanel-language-theme', 'service-ssl-certificates', 'xwhm-api-tokens', 'notification-center', 'mail-quality', 'panel-news',
+      'service-config-health', 'api-shell', 'api-explorer', 'integrations-hub', 'aapanel-third-party-plugin-import', 'metrics-export', 'error-reporting', 'config-as-code', 'trusted-proxies', 'backup-destinations',
+      'change-root-password', 'security-questions', 'security-policy', 'external-authentication',
       'aapanel-panel-general', 'panel-branding', 'application-locales', 'whmcs-integration',
-      'xpanel-tools-home', 'xpanel-general-info', 'xpanel-global-search', 'cloudflare-account', 'password-security', 'two-factor-auth', 'api-tokens', 'command-line-api',
-      'account-preferences', 'change-style', 'manage-team', 'whm-global-search', 'list-suspended-accounts', 'show-reseller-accounts', 'reseller-account-limits',
+      'manage-demo-mode', 'hooks-manager', 'registered-apps', 'plugin-generator', 'theme-manager', 'site-software-catalog', 'account-enhancements',
+      'tweak-domains', 'xpanel-tools-home', 'xpanel-general-info', 'xpanel-global-search', 'cloudflare-account', 'password-security', 'two-factor-auth', 'api-tokens', 'command-line-api',
+      'change-language', 'xpanel-notifications', 'xpanel-onboarding-assistant',
+      'account-preferences', 'change-style', 'manage-team', 'whm-global-search', 'list-suspended-accounts', 'show-reseller-accounts', 'reseller-account-limits', 'reseller-nameservers',
       'reseller-privileges', 'manage-reseller-ip-delegation', 'aapanel-site-list', 'list-parked-domains', 'list-subdomains', 'cloudflare-integration',
       'aapanel-dns-provider-accounts', 'aapanel-provider-domains', 'manage-shell-access', 'root-ssh-keys', 'aapanel-recovery-cli', 'xwhm-two-factor-auth',
+      'aapanel-security-entrance', 'aapanel-unauth-response', 'aapanel-basic-auth', 'aapanel-temporary-login',
       'transfer-tool-selection', 'account-transfer-progress', 'review-transfers-and-restores', 'tweak-display', 'locale-list', 'locale-edit', 'locale-xml-import',
-      'locale-xml-export', 'xwhm-api-shell']))
+      'locale-xml-export', 'xwhm-api-shell', 'reserved-ips', 'ip-usage-report', 'reset-resellers', 'reseller-package-limits', 'manage-reseller-shared-ip',
+      'advanced-settings-browser', 'tweak-system', 'tweak-security', 'tweak-stats-logs', 'tweak-logging', 'password-strength', 'security-policies', 'default-key-type', 'panel-change-log',
+      'change-ownership-multiple-accounts', 'user-manager', 'locale-delete', 'tweak-notifications', 'tweak-development', 'disk-usage', 'webmail-filter-test',
+      'force-password-change', 'account-enhancements', 'tweak-packages', 'whm-home-favorites', 'whm-notifications', 'locale-copy']))
     expect(qualified.has('create-account')).toBe(false)
     expect(qualified.has('file-manager')).toBe(false)
     expect(qualified.has('email-accounts')).toBe(false)
@@ -123,7 +130,7 @@ describe('host qualification', () => {
     for (const id of ['reseller-center', 'dns-zone-manager', 'add-dns-zone', 'delete-dns-zone', 'backup-restoration', 'restart-web', 'restart-mysql', 'restart-mta', 'restart-imap', 'restart-ftp', 'restart-dns', 'server-information', 'zone-ttl-bulk']) {
       expect(qualified.has(id), id).toBe(true)
     }
-    for (const id of ['restart-ssh', 'aapanel-performance-test', 'backup-config', 'hostname-a-record', 'dns-config-cleanup', 'create-account', 'file-manager']) {
+    for (const id of ['restart-ssh', 'aapanel-performance-test', 'backup-config', 'create-account', 'file-manager']) {
       expect(qualified.has(id), id).toBe(false)
     }
     const root = { principal: { kind: 'root' as const, id: '00000000-0000-4000-8000-000000000001', username: 'root' } }
@@ -178,7 +185,7 @@ describe('host qualification', () => {
   it.each([
     ['/mail/tools/track-delivery', 'journal'], ['/mail/folders', 'mail'], ['/mail/tools/disk-usage', 'mail'], ['/mail/tools/connect-devices', 'mail'],
     ['/advanced/error-pages', 'files'], ['/advanced/indexes', 'apache'], ['/advanced/mime-types', 'files'], ['/security/hotlink', 'files'], ['/domains/redirects', 'apache'],
-    ['/security/ip-blocker', 'files'], ['/security/ip-blocker', 'apache'], ['/domains/site-publisher', 'files'],
+    ['/security/ip-blocker', 'apache'], ['/advanced/handlers', 'files'], ['/advanced/handlers', 'apache'], ['/domains/site-publisher', 'files'],
   ] as const)('opens the owner page %s only while the %s probe passes', (route, probe) => {
     expect(routesFor(allPassed, owner)).toContain(route)
     expect(routesFor(withProbe(probe, 'failed'), owner)).not.toContain(route)
@@ -187,14 +194,12 @@ describe('host qualification', () => {
 
   it('keeps unimplemented pages and extra tools closed even when every probe passed', () => {
     const qualified = qualifyHostTools(acceptedTools, allPassed)
-    for (const id of ['distro-packages', 'package-db-rebuild', 'aapanel-third-party-plugin-import', 'mail-troubleshooter',
-      'db-root-password', 'db-ownership-map', 'update-preferences', 'account-repair', 'apache-handlers', 'git-version-control', 'email-encryption',
+    for (const id of ['distro-packages',
+      'web-stack-builder', 'nameserver-report', 'connect-devices',
       // Saved but never applied, unwired or refused on main: no host effect to prepare for.
-      'directory-privacy', 'web-disk', 'account-enhancements', 'web-template-editor', 'tweak-compression', 'reseller-nameservers', 'add-ip', 'bandwidth',
-      'web-stats-awstats', 'db-repair', 'configuration-cluster', 'git-deployments', 'spam-quarantine', 'app-installer', 'aapanel-firewall-switch']) {
+      'git-deployments', 'spam-quarantine', 'app-installer']) {
       expect(qualified.find(tool => tool.id === id)?.status, id).toBe('researched')
     }
-    expect(routesFor(allPassed, owner)).not.toContain('/advanced/handlers')
     const dnsReseller: VisibilityContext = { principal: { kind: 'reseller', id: 'reseller', username: 'reseller' }, reseller: { acl: ['manage-dns'] } }
     expect(qualified.find(tool => tool.id === 'xwhm-email-routing')?.status).toBe('verified')
     expect(routesFor(allPassed, dnsReseller)).not.toContain('/whm/email/routing')
@@ -202,8 +207,61 @@ describe('host qualification', () => {
 
   // Each implemented effect names the binaries, units and readers its API and agent path use.
   const IMPLEMENTED_EFFECT_PROBES: Readonly<Record<string, readonly HostProbe[]>> = {
+    'live-transfer': ['control-plane', 'linux-account', 'apache', 'mariadb-admin', 'mail', 'pdns'],
+    'linked-server-nodes': ['control-plane'],
+    'configuration-cluster': ['control-plane'],
+    'account-repair': ['control-plane', 'linux-account', 'files', 'host-jobs'],
+    'email-disk-usage': ['control-plane', 'mail', 'files'],
+    gitweb: ['control-plane', 'files', 'systemd'],
+    'raw-ftp-log-download': ['control-plane', 'journal', 'files'],
+    'mail-troubleshooter': ['control-plane', 'mail'],
+    'view-relayers': ['control-plane', 'mail', 'journal'],
+    'view-sent-summary': ['control-plane', 'mail', 'journal'],
+    'repair-mailbox-permissions': ['control-plane', 'mail', 'host-jobs'],
+    'spam-daemon-startup': ['control-plane', 'mail', 'mail-config', 'systemd'],
+    'incoming-mail-country-filter': ['control-plane', 'mail', 'mail-config'],
+    'address-importer': ['control-plane', 'mail'],
+    'email-deliverability': ['control-plane', 'mail', 'pdns'],
+    'email-routing': ['control-plane', 'mail', 'mail-config'],
+    'email-encryption': ['control-plane', 'linux-account', 'files'],
+    greylisting: ['control-plane', 'mail', 'mail-config'],
+    'track-delivery': ['control-plane', 'mail', 'journal'],
+    'webmail-search-index': ['control-plane', 'mail', 'host-jobs'],
+    'webmail-spam-marking': ['control-plane', 'mail'],
     'site-publisher': ['control-plane', 'files'],
-    'ip-blocker': ['control-plane', 'files', 'apache'],
+    'ssl-private-keys': ['control-plane', 'files'],
+    'ssl-csrs': ['control-plane', 'files', 'openssl'],
+    'ssl-certificates': ['control-plane', 'files', 'openssl'],
+    'generate-csr': ['control-plane', 'files', 'openssl'],
+    'ssl-storage': ['control-plane', 'files'],
+    'default-key-type': ['control-plane'],
+    'webmail-password': ['control-plane', 'mail'],
+    'webmail-two-factor': ['control-plane', 'mail'],
+    'ip-blocker': ['control-plane', 'apache'],
+    'apache-handlers': ['control-plane', 'files', 'apache'],
+    'nginx-cache-control': ['control-plane', 'apache'],
+    'nginx-proxy-manager': ['control-plane', 'apache'],
+    'leech-protection': ['control-plane', 'files', 'apache'],
+    'file-restoration': ['control-plane', 'files', 'backups'],
+    'web-apps': ['control-plane', 'systemd', 'files'],
+    'website-backups': ['control-plane', 'files', 'backups'],
+    'images': ['control-plane', 'files'],
+    'html-editor': ['control-plane', 'files'],
+    'perl-modules': ['control-plane', 'systemd', 'files'],
+    'optimize-website': ['control-plane', 'systemd'],
+    'change-language': ['control-plane'],
+    'xpanel-notifications': ['control-plane'],
+    'xpanel-onboarding-assistant': ['control-plane'],
+    'xpanel-server-information': ['control-plane', 'systemd'],
+    'team-audit-log': ['control-plane', 'audit_log'],
+    'webmail-plus-addressing': ['control-plane', 'mail'],
+    'webmail-contact-info': ['control-plane', 'mail'],
+    'web-disk': ['control-plane', 'dav'],
+    'calendars-contacts-config': ['control-plane', 'dav'],
+    'calendars-contacts-management': ['control-plane', 'mail', 'dav'],
+    'webmail-calendar': ['control-plane', 'mail', 'dav'],
+    'webmail-address-book': ['control-plane', 'mail', 'dav'],
+    'webmail-dav-config': ['control-plane', 'mail', 'dav'],
     'server-software-update': ['control-plane', 'packages', 'host-jobs'],
     'xwhm-email-routing': ['control-plane', 'mail', 'mail-config'],
     'tweak-mail': ['control-plane', 'mail', 'mail-config'],
@@ -218,6 +276,60 @@ describe('host qualification', () => {
     'zone-editor': ['control-plane', 'pdns'],
     'php-version-selector': ['control-plane', 'apache', 'systemd'],
     'multiphp-ini-editor': ['control-plane', 'apache', 'systemd'],
+    'add-ip': ['control-plane', 'iproute'],
+    'change-site-ip': ['control-plane', 'iproute', 'apache', 'pdns'],
+    'ip-migration-wizard': ['control-plane', 'iproute', 'apache', 'pdns'],
+    'rebuild-ip-pool': ['control-plane', 'iproute'],
+    'reserved-ips': ['control-plane'],
+    'ip-usage-report': ['control-plane'],
+    'ipv6-ranges': ['control-plane', 'iproute'],
+    'assign-ipv6': ['control-plane', 'iproute', 'apache', 'pdns'],
+    'reset-resellers': ['control-plane'],
+    'reseller-package-limits': ['control-plane'],
+    'manage-reseller-shared-ip': ['control-plane'],
+    'email-all-resellers': ['control-plane', 'mail'],
+    'reseller-nameservers': ['control-plane'],
+    'advanced-settings-browser': ['control-plane'],
+    'tweak-system': ['control-plane'],
+    'password-strength': ['control-plane'],
+    'security-policies': ['control-plane'],
+    'apache-global-config': ['control-plane', 'apache', 'systemd'],
+    'directory-index-priority': ['control-plane', 'apache'],
+    'web-config-includes': ['control-plane', 'apache', 'systemd'],
+    'process-memory-limit': ['control-plane', 'apache', 'systemd'],
+    'tweak-compression': ['control-plane', 'backups'],
+    'web-stats-awstats': ['control-plane', 'awstats'],
+    'web-stats-webalizer': ['control-plane', 'webalizer'],
+    'metrics-editor': ['control-plane', 'web-stats'],
+    'web-stats-engines': ['control-plane', 'web-stats'],
+    'manage-demo-mode': ['control-plane'],
+    'hooks-manager': ['control-plane', 'linux-account'],
+    'registered-apps': ['control-plane'],
+    'plugin-generator': ['control-plane'],
+    'theme-manager': ['control-plane'],
+    'site-software-catalog': ['control-plane'],
+    'site-software-instances': ['control-plane', 'files', 'mariadb', 'host-jobs'],
+    'account-enhancements': ['control-plane'],
+    'db-repair': ['control-plane', 'mariadb-admin'],
+    'db-root-password': ['control-plane', 'mariadb-admin'],
+    'db-access-hosts': ['control-plane', 'mariadb-admin', 'systemd'],
+    'db-ownership-map': ['control-plane', 'mariadb-admin'],
+    'postgresql-setup': ['control-plane', 'systemd'],
+    'tweak-sql': ['control-plane', 'mariadb-admin', 'systemd'],
+    'database-wizard': ['control-plane', 'mariadb'],
+    'postgresql-database-wizard': ['control-plane', 'systemd'],
+    phppgadmin: ['control-plane', 'packages'],
+    'ftp-server-selection': ['control-plane', 'systemd'],
+    'anonymous-ftp': ['control-plane', 'linux-account', 'files', 'systemd'],
+    'ftp-connections': ['control-plane', 'procps', 'systemd'],
+    'web-stats-ftp': ['control-plane', 'journal'],
+    'aapanel-db-quota': ['control-plane', 'mariadb-admin'],
+    'aapanel-phpmyadmin-access': ['control-plane', 'packages', 'apache', 'systemd'],
+    'aapanel-postgresql-service': ['control-plane', 'packages', 'systemd', 'host-jobs'],
+    'aapanel-redis-keys': ['control-plane', 'packages', 'systemd'],
+    'aapanel-mongodb': ['control-plane', 'packages', 'systemd', 'host-jobs'],
+    'aapanel-redis-service': ['control-plane', 'packages', 'systemd', 'host-jobs'],
+    'aapanel-mongodb-service': ['control-plane', 'packages', 'systemd'],
   }
 
   it('declares the host needs of every implemented effect without an exception', () => {
@@ -241,7 +353,7 @@ describe('host qualification', () => {
     expect(routesFor(allPassed, owner)).toContain('/domains/dynamic-dns')
     expect(routesFor(withProbe('pdns', 'failed'), owner)).not.toContain('/domains/dynamic-dns')
     for (const id of ['aapanel-supervisor', 'service-watchdog']) {
-      expect(qualifyHostTools(acceptedTools, allPassed).find(tool => tool.id === id)?.status, id).not.toBe('verified')
+      expect(qualifyHostTools(acceptedTools, withProbe('systemd', 'failed')).find(tool => tool.id === id)?.status, id).not.toBe('verified')
     }
     for (const id of ['restart-ssh', 'aapanel-boot-items', 'system-reboot']) {
       expect(qualifyHostTools(acceptedTools, withProbe('host-jobs', 'failed')).find(tool => tool.id === id)?.status, id).toBe('researched')

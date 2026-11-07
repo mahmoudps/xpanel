@@ -61,13 +61,46 @@ const responseHeaders = (response: IncomingMessage): Headers => {
 const MAX_ARCHIVE_RESPONSE_BYTES = 2 * 1024 * 1024 * 1024
 const MAX_TRANSFER_ARTIFACT_BYTES = 50 * 1024 ** 3
 const TRANSFER_ARTIFACT = /^\/transfers\/packages\/[0-9a-f-]{36}\/(home\.tar\.gz|db-[a-z][a-z0-9]{0,15}_[A-Za-z0-9_]{1,48}\.sql|(?:cert|key)-[0-9]{1,3}\.pem)$/
-interface ArchiveDownload { file: string; contentType: string; maxBytes: number }
+/** file names the exact attachment, or a pattern for a stream whose length is unknown until it ends (compressed while read). */
+interface ArchiveDownload { file: string | RegExp; contentType: string; maxBytes: number; streamed?: boolean }
+const RAW_SERVER_LOG = /^\/host\/logs\/raw\/(?:nginx|apache)\/((?:access|error)\.log(?:\.[1-9][0-9]?)?(?:\.gz)?)$/
+export const RAW_SERVER_LOG_MAX_BYTES = 1024 * 1024 * 1024
+const SHARE_LINK_CONTENT = /^\/host\/file-sharing\/links\/[0-9a-f]{64}\/content$/
 const archiveDownloadFile = (request: Request, url: URL): ArchiveDownload | null => {
-  if (request.method !== 'GET' || url.search) return null
+  if (request.method !== 'GET') return null
+  if (url.pathname === '/host/ftp/log/raw') {
+    if (!isUuid(request.headers.get('x-xpanel-principal-id'))) return fail('VALIDATION', 'agent archive request requires a principal identity')
+    return { file: /^attachment; filename="[a-z0-9.-]{1,253}\.ftp\.log\.gz"$/, contentType: 'application/gzip', maxBytes: MAX_ARCHIVE_RESPONSE_BYTES, streamed: true }
+  }
+  if (url.search) return null
+  if (SHARE_LINK_CONTENT.test(url.pathname)) {
+    if (!isUuid(request.headers.get('x-xpanel-principal-id'))) return fail('VALIDATION', 'agent archive request requires a principal identity')
+    return { file: /^attachment; filename="[A-Za-z0-9._-]{1,200}"$/, contentType: 'application/octet-stream', maxBytes: MAX_ARCHIVE_RESPONSE_BYTES, streamed: true }
+  }
   const artifact = TRANSFER_ARTIFACT.exec(url.pathname)
   if (artifact) {
     if (!isUuid(request.headers.get('x-xpanel-principal-id'))) return fail('VALIDATION', 'agent archive request requires a principal identity')
     return { file: artifact[1]!, contentType: 'application/octet-stream', maxBytes: MAX_TRANSFER_ARTIFACT_BYTES }
+  }
+  const currentLog = /^\/accounts\/[a-z][a-z0-9]{0,15}\/logs\/[0-9a-f-]{36}\/access\/download$/.test(url.pathname)
+  if (currentLog) {
+    if (!isUuid(request.headers.get('x-xpanel-principal-id'))) return fail('VALIDATION', 'agent archive request requires a principal identity')
+    return { file: /^attachment; filename="[a-z0-9.-]{1,253}\.access\.log\.gz"$/, contentType: 'application/gzip', maxBytes: MAX_ARCHIVE_RESPONSE_BYTES, streamed: true }
+  }
+  const panelBackup = /^\/host\/panel-backups\/(xpanel-control-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.(?:gz|zst))$/.exec(url.pathname)
+  if (panelBackup) {
+    if (!isUuid(request.headers.get('x-xpanel-principal-id'))) return fail('VALIDATION', 'agent archive request requires a principal identity')
+    return { file: panelBackup[1]!, contentType: backupCodecOf(panelBackup[1]!).mediaType, maxBytes: MAX_ARCHIVE_RESPONSE_BYTES }
+  }
+  const rawLog = RAW_SERVER_LOG.exec(url.pathname)
+  if (rawLog) {
+    if (!isUuid(request.headers.get('x-xpanel-principal-id'))) return fail('VALIDATION', 'agent archive request requires a principal identity')
+    return { file: rawLog[1]!, contentType: rawLog[1]!.endsWith('.gz') ? 'application/gzip' : 'application/octet-stream', maxBytes: RAW_SERVER_LOG_MAX_BYTES }
+  }
+  const logArchive = /^\/accounts\/[a-z][a-z0-9]{0,15}\/logs\/archives\/([a-z0-9.-]{1,280}\.gz)$/.exec(url.pathname)
+  if (logArchive) {
+    if (!isUuid(request.headers.get('x-xpanel-principal-id'))) return fail('VALIDATION', 'agent archive request requires a principal identity')
+    return { file: logArchive[1]!, contentType: 'application/gzip', maxBytes: MAX_ARCHIVE_RESPONSE_BYTES }
   }
   const match = /^\/accounts\/([a-z][a-z0-9]{0,15})\/backup-workspace\/([^/]+)\/download$/.exec(url.pathname)
   if (!match) return null
@@ -79,13 +112,14 @@ const archiveDownloadFile = (request: Request, url: URL): ArchiveDownload | null
 }
 
 /** Archive and transfer artifact routes alone get a larger response budget; ordinary JSON stays bounded. */
-const archiveResponse = (incoming: IncomingMessage, outgoing: ClientRequest, { file, contentType, maxBytes }: ArchiveDownload): Response => {
+const archiveResponse = (incoming: IncomingMessage, outgoing: ClientRequest, { file, contentType, maxBytes, streamed }: ArchiveDownload): Response => {
   // A socket may fail before the response body's first pull attaches its iterator.
   incoming.on('error', () => undefined)
-  const headers = responseHeaders(incoming), declared = headers.get('content-length')
+  const headers = responseHeaders(incoming), declared = headers.get('content-length'), disposition = headers.get('content-disposition') ?? ''
   const invalid = headers.get('content-type') !== contentType || headers.has('content-encoding')
-    || headers.get('content-disposition') !== `attachment; filename="${file}"` || !declared || !/^[1-9][0-9]*$/.test(declared)
-  const expected = declared && /^[1-9][0-9]*$/.test(declared) ? Number(declared) : 0
+    || (typeof file === 'string' ? disposition !== `attachment; filename="${file}"` : !file.test(disposition)) || !streamed && (!declared || !/^[1-9][0-9]*$/.test(declared))
+  // A streamed body has no length before it ends; it is held to the route's bound instead.
+  const expected = streamed ? maxBytes : declared && /^[1-9][0-9]*$/.test(declared) ? Number(declared) : 0
   if (invalid || !Number.isSafeInteger(expected) || expected > maxBytes) {
     incoming.once('error', () => undefined); incoming.destroy(); outgoing.destroy()
     return fail(expected > maxBytes ? 'LIMIT_EXCEEDED' : 'PRECONDITION_FAILED', 'agent archive response headers could not be verified')
@@ -100,7 +134,7 @@ const archiveResponse = (incoming: IncomingMessage, outgoing: ClientRequest, { f
         const next = await iterator.next()
         if (ended) return
         if (next.done) {
-          if (bytes !== expected) throw unavailable()
+          if (!streamed && bytes !== expected) throw unavailable()
           ended = true; controller.close(); return
         }
         const chunk = Buffer.from(next.value)
@@ -121,9 +155,9 @@ const archiveResponse = (incoming: IncomingMessage, outgoing: ClientRequest, { f
   return new Response(stream, { status: 200, headers })
 }
 
-const TERMINAL_OUTPUT_ROUTE = /^\/terminal\/sessions\/[0-9a-f-]{36}\/output$/
+const TERMINAL_OUTPUT_ROUTE = /^\/(?:terminal\/sessions\/[0-9a-f-]{36}\/output|host\/software\/containers\/log-stream)$/
 
-/** A terminal's output stays open for the session's life; it streams with backpressure and no idle timeout. */
+/** A terminal's output or a live log stays open for its whole life; it streams with backpressure and no idle timeout. */
 const terminalOutputResponse = (incoming: IncomingMessage, outgoing: ClientRequest): Response => {
   incoming.on('error', () => undefined)
   outgoing.setTimeout(0)

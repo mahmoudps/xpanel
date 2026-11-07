@@ -59,7 +59,7 @@ describe('account termination point of no return', { tags: ['feature'] }, () => 
     expect(steps(new Map([[alice.id, 'removed']]))).toEqual([[alice.id, true, ['home', 'mariadb']]])
   })
 
-  it('runs every observation before deleting the user, so a DNS observation failure rolls back while the user still exists', async () => {
+  it('runs every observation before deleting the user, so a DNS observation failure rolls back while the user still exists', { tags: ['slow'] }, async () => {
     const { alice, bob } = await seed()
     const observer = dns()
     const reconciler = reconcilerWith(observer.provider)
@@ -79,7 +79,7 @@ describe('account termination point of no return', { tags: ['feature'] }, () => 
     expect(await state.store.getAccount(bob.id)).not.toBeNull()
   })
 
-  it('never rolls back after userdel: reports the named step, keeps the account terminating and completes it without a second userdel', async () => {
+  it('never rolls back after userdel: reports the named step, keeps the account terminating and completes it without a second userdel', { tags: ['slow'] }, async () => {
     const { alice, bob } = await seed()
     const reconciler = reconcilerWith()
     expect((await reconciler.reconcile({ actor: 'root', mailAuth: null })).status).toBe('applied')

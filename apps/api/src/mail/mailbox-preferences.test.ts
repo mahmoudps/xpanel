@@ -44,7 +44,7 @@ describe('mailbox preferences view', () => {
     await write(join(root, 'extended', 'webmail', 'identities.json'), [identity(IDENTITY, MAILBOX), identity(FOREIGN_IDENTITY, 'bob@example.test', { ...authority, mailbox: 'bob@example.test' })])
     const view = await harness().read()
     expect(view).toMatchObject({ context: { mailbox: MAILBOX }, preferences: null, review: null, identities: [{ id: IDENTITY, displayName: 'Alice Sales', email: MAILBOX }],
-      application: { status: 'saved_only', applied: false }, revision: mailboxPreferencesRevision(null, null) })
+      application: { status: 'applied_on_next_load', applied: true }, revision: mailboxPreferencesRevision(null, null) })
     // The rendered Postfix local-delivery block decides; Dovecot's own delimiter does not make Postfix accept user+tag.
     const rendered = render.localDeliveryMainBlock(profileFor('ID=ubuntu\nVERSION_ID="24.04"\n'))
     expect(view.plusAddressing.state).toBe(/^recipient_delimiter = \S/m.test(rendered) ? 'supported' : 'not-supported')

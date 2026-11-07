@@ -270,7 +270,7 @@ describe('approved transfer comparison and finite records', () => {
 
 
 describe('V2 named source credential refresh admission', () => {
-  it.each(['accounts', 'server'] as const)('reads and refreshes named credentials in the %s workspace without a mutation', async scope => {
+  it.each(['accounts', 'server'] as const)('reads and refreshes named credentials in the %s workspace without a mutation', { tags: ['slow'] }, async scope => {
     mount(renderV2TransferPage({ locale: 'en', canRead: true, canManage: true, scope }))
     const root = document.querySelector<HTMLElement>('[data-transfer-workspace]')
     const credential = document.querySelector<HTMLSelectElement>('[data-transfer-credential]')

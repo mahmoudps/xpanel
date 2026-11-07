@@ -130,6 +130,16 @@ describe('strict persisted transfer workspace loopback boundary', () => {
     expect(await countPersistedActiveTransfers(f.state.store)).toBe(0)
     expect(await f.bytes()).toBe(cancelled)
   })
+  it('removes only a cancelled session, and audits the removal', async () => {
+    f = await fixture()
+    const current = await f.create(), path = '/api/transfers/sessions/' + current.session.id
+    expect((await f.request(path, 'DELETE')).status).toBe(409)
+    await f.step(current, 'cancel')
+    expect((await f.request(path, 'DELETE')).status).toBe(200)
+    expect((await f.request(path, 'DELETE')).status).toBe(404)
+    expect(f.audits.filter(entry => entry === 'transfer.session.deleted')).toHaveLength(1)
+  })
+
   it('refuses corrupt persisted activity instead of reporting no active transfers', async () => {
     await f.create()
     const document = JSON.parse(await f.bytes()) as { sessions: Array<{ events: unknown[] }> }
@@ -175,6 +185,36 @@ describe('strict persisted transfer workspace loopback boundary', () => {
     current = await f.step(current, 'review')
     expect(current.session.state).toBe('reviewed'); expect(current.digest).toMatch(/^[0-9a-f]{64}$/)
     const before = await f.bytes(); expect((await f.patch(current, 'run', { digest: current.digest })).status).toBe(412); expect(await f.bytes()).toBe(before)
+  })
+  it('starts a live session from a linked server only, and the review it confirms says live', async () => {
+    const nodeAuth = async (id: string) => ({ kind: 'api-token' as const, url: 'https://whm.source.example.test:2087', tokenId: id, tlsFingerprint: Array.from({ length: 32 }, () => 'AB').join(':') })
+    f = await fixture({ ...background, discover: async () => discovered(), nodeAuth, execution: { admit: async () => undefined, recover: async () => false, run: async () => undefined } })
+    expect((await f.request('/api/transfers/sessions', 'POST', { live: true, auth: auth() })).status).toBe(422)
+    expect((await f.request('/api/transfers/sessions', 'POST', { auth: auth(), node: 'node_' + 'a'.repeat(16) })).status).toBe(422)
+    expect((await f.request('/api/transfers/sessions', 'POST', {})).status).toBe(422)
+    const made = await f.request('/api/transfers/sessions', 'POST', { node: 'node_' + 'a'.repeat(16), live: true })
+    expect(made.status).toBe(201)
+    let current = await made.json() as Awaited<ReturnType<typeof f.create>>
+    expect(current.session).toMatchObject({ live: true, auth: { tokenId: 'node_' + 'a'.repeat(16) } })
+    expect(JSON.stringify(current)).not.toContain('xp_')
+    current = await f.step(current, 'discover'); current = await f.step(current, 'select', { accounts: ['alice'], plans: ['gold'] }); current = await f.step(current, 'review')
+    expect(current).toMatchObject({ review: { live: true } })
+  })
+  it('reverts a cut-over account once, and only one the session moved live', async () => {
+    const revert = vi.fn(async () => ({ cutoverAt: '2026-11-07T10:00:00.000Z', zones: 1, revertedAt: '2026-11-07T11:00:00.000Z' }))
+    const nodeAuth = async (id: string) => ({ kind: 'api-token' as const, url: 'https://whm.source.example.test:2087', tokenId: id, tlsFingerprint: null })
+    f = await fixture({ ...background, discover: async () => discovered(), nodeAuth, execution: { admit: async () => undefined, recover: async () => false, revert,
+      run: async (_caller, _session, _review, emit) => { await emit({ type: 'progress', account: 'alice', phase: 'exporting' }); await emit({ type: 'progress', account: 'alice', phase: 'done' }, { createdAccountId: 'x', live: { cutoverAt: '2026-11-07T10:00:00.000Z', zones: 1, revertedAt: null } }) } } })
+    let current = await (await f.request('/api/transfers/sessions', 'POST', { node: 'node_' + 'a'.repeat(16), live: true })).json() as Awaited<ReturnType<typeof f.create>>
+    current = await f.step(current, 'discover'); current = await f.step(current, 'select', { accounts: ['alice'], plans: ['gold'] }); current = await f.step(current, 'review')
+    expect((await f.patch(current, 'run', { digest: current.digest })).status).toBe(202)
+    await vi.waitFor(async () => { current = await (await f.request('/api/transfers/sessions/' + current.session.id)).json() as typeof current; expect(current).toMatchObject({ session: { state: 'completed' }, running: false }) })
+    expect((await f.patch(current, 'revert', { account: 'nobody', acceptLoss: false })).status).toBe(404)
+    expect((await f.patch(current, 'revert', { account: 'alice', acceptLoss: 'yes' })).status).toBe(422)
+    const reverted = await f.patch(current, 'revert', { account: 'alice', acceptLoss: true })
+    expect(reverted.status).toBe(200)
+    expect(revert).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: current.session.id }), 'alice', expect.objectContaining({ createdAccountId: 'x' }), true)
+    expect(await reverted.json()).toMatchObject({ results: { alice: { live: { revertedAt: '2026-11-07T11:00:00.000Z' } } } })
   })
   it('leaves reviewed state unchanged when native admission rejects execution', async () => {
     let runCalls = 0

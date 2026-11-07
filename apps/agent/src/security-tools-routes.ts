@@ -1,15 +1,16 @@
 import { realpath, stat } from 'node:fs/promises'
 import { posix } from 'node:path'
-import { fail, isXpanelError } from '@xpanel/core'
-import type { Account, Domain, Plan } from '@xpanel/core'
+import { effectiveServerSshSettings, fail, isXpanelError } from '@xpanel/core'
+import type { Account, Domain, Plan, ServerSettings } from '@xpanel/core'
 import type { AgentExecutor } from './executor.ts'
 import type { HostJobPlan, HostJobView } from './host-job-contract.ts'
 import { resolveAccountIoDevices } from './io-device.ts'
 import { buildAntivirusScanPlan, buildSignatureUpdatePlan, readAntivirus } from './security-tools-antivirus.ts'
+import type { ScanScope } from '../../../packages/os/src/security-tools-command.ts'
 import type { AntivirusJobs } from './security-tools-antivirus.ts'
 import { readIntrusion, unbanAddress } from './security-tools-intrusion.ts'
 import type { BinaryPresent, UnbanResult } from './security-tools-intrusion.ts'
-import { inspectAccountHome, readAccountIsolation } from './security-tools-isolation.ts'
+import { inspectAccountHome, readAccountIsolation, verifyShellJail } from './security-tools-isolation.ts'
 import type { InspectHome } from './security-tools-isolation.ts'
 import { FRESHCLAM, isAccountUsername, isFail2banAddress, isFail2banJail, isScanTarget } from '../../../packages/os/src/security-tools-command.ts'
 
@@ -19,13 +20,15 @@ export interface SecurityToolsRouteContext {
   assertRoot: (action: string) => Promise<{ actor: string }>
   /** Native Linux host executor only; null keeps every host read unavailable instead of simulating one. */
   executor: AgentExecutor | null
-  readSnapshot: () => Promise<{ accounts: readonly Account[]; plans: readonly Plan[]; domains: readonly Domain[] }>
+  readSnapshot: () => Promise<{ accounts: readonly Account[]; plans: readonly Plan[]; domains: readonly Domain[]; server?: { settings: ServerSettings } | null }>
   submitJob: ((plan: HostJobPlan, actor: string) => Promise<HostJobView>) | null
   jobs: AntivirusJobs | null
   audit?: (entry: SecurityToolsAuditEntry) => Promise<unknown>
   present?: BinaryPresent
   inspectHome?: InspectHome
   resolveHome?: (home: string) => Promise<string>
+  /** Saved Antivirus Scanner Configuration for this user; absent scans the whole home. */
+  scanScope?: (home: string, username: string) => Promise<ScanScope | undefined>
   ioDevices?: (account: Account) => Promise<readonly string[] | null>
   now?: () => Date
 }
@@ -37,6 +40,7 @@ const ROUTES: Readonly<Record<string, { method: 'GET' | 'POST'; action: string; 
   '/host/security-tools/antivirus/scan': { method: 'POST', action: 'security.antivirus.scan', fields: ['account'] },
   '/host/security-tools/antivirus/update': { method: 'POST', action: 'security.antivirus.update', fields: [] },
   '/host/security-tools/isolation': { method: 'GET', action: 'security.isolation.read' },
+  '/host/security-tools/isolation/verify': { method: 'POST', action: 'security.isolation.read', fields: ['account'] },
 }
 const unchanged = { stateChanged: false }
 const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
@@ -120,7 +124,14 @@ export async function handleSecurityToolsRoute(req: Request, url: URL, method: s
       if (isScanTarget(resolved) && posix.basename(resolved) === account.username && facts?.type === 'directory' && facts.uid === account.uid) target = resolved
     } catch { target = null }
     if (!target) return fail('PRECONDITION_FAILED', 'the account home is not a directory owned by the account, so it was not scanned', { ...unchanged, reason: 'account_home_unverified' })
-    return submitted(ctx, buildAntivirusScanPlan({ accountId: account.id, username: account.username, target }), await confirm(), { action: 'security.antivirus.scan_submitted', target: 'account:' + account.username })
+    const scope = await (ctx.scanScope ?? (async () => undefined))(target, account.username)
+    return submitted(ctx, buildAntivirusScanPlan({ accountId: account.id, username: account.username, target, ...(scope ? { scope } : {}) }), await confirm(), { action: 'security.antivirus.scan_submitted', target: 'account:' + account.username })
+  }
+
+  if (url.pathname === '/host/security-tools/isolation/verify') {
+    const account = snapshot.accounts.find(item => item.username === body!.account && item.status === 'active')
+    if (!account) return fail('NOT_FOUND', 'active account not found', unchanged)
+    return json(await verifyShellJail({ account, others: snapshot.accounts.filter(item => item.status !== 'terminating'), policy: effectiveServerSshSettings(snapshot.server?.settings).jail, executor, now }))
   }
 
   const accounts = snapshot.accounts.filter(item => isAccountUsername(item.username)).map(item => ({ username: item.username, status: item.status })).sort((a, b) => a.username.localeCompare(b.username)).slice(0, 5000)

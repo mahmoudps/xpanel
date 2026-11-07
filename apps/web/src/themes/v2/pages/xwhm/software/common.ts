@@ -8,7 +8,7 @@ import { v2Messages } from '../../../messages.ts'
 import { v2SoftwareClientTemplates } from './client-templates.ts'
 
 /** Core resolves the route, listener, principal and capability before creating this presentation input. */
-export interface WhmDataAuthority { readonly canRead: boolean; readonly canManage: boolean; readonly canKill?: boolean }
+export interface WhmDataAuthority { readonly canRead: boolean; readonly canManage: boolean; readonly canKill?: boolean; readonly canRepair?: boolean; readonly canRootPassword?: boolean; readonly canDbProfiles?: boolean; readonly canFtpSettings?: boolean; readonly canDbMap?: boolean; readonly canDbHosts?: boolean; readonly canDbSettings?: boolean; readonly canPostgresql?: boolean; readonly canDbService?: boolean; readonly canDbQuota?: boolean; readonly canPmaAccess?: boolean }
 export interface WhmDataPageInput extends WhmSurfaceProps { readonly dataAuthority?: WhmDataAuthority }
 export const DENIED_DATA_AUTHORITY: WhmDataAuthority = Object.freeze({ canRead: false, canManage: false })
 export function context(input: WhmDataPageInput, authority = input.dataAuthority ?? DENIED_DATA_AUTHORITY) {
@@ -64,6 +64,7 @@ export const WHM_DATA_COMMON_CSS = `.v2-whm-data{display:flex;flex-direction:col
 .v2-whm-data__list{padding-inline-start:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2)}
 .v2-whm-data__preview{display:flex;flex-direction:column;gap:var(--space-3);padding:var(--v2-panel-padding);border:1px solid var(--line);border-radius:var(--radius-control)}
 .v2-whm-data pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.v2-whm-data [data-ctr-workspace] pre{max-block-size:24rem;overflow:auto}
 .v2-whm-data :is(input,textarea,select)[dir=ltr]{text-align:var(--v2-control-align,start)}
 .v2-whm-data [hidden]{display:none!important}
 @media(max-width:1000px){.v2-whm-data__split{grid-template-columns:minmax(0,1fr)}}

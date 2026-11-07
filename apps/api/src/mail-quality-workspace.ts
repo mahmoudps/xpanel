@@ -351,6 +351,11 @@ export function hostedMailDomains(saved: MailQualitySaved): { rows: { domain: st
   return { rows: view.domains.filter(row => row.mailboxes > 0).map(row => ({ domain: row.domain.toLowerCase(), account: row.account, mailboxes: row.mailboxes, zone: row.zone, mx: row.mx.map(item => ({ priority: item.priority, host: host(item.host) })) })), truncated: view.truncated }
 }
 
+/** Every domain of one account, with or without mailboxes: an owner checks a domain before creating its first mailbox. */
+export function ownedMailDomains(saved: MailQualitySaved, username: string): ReturnType<typeof hostedMailDomains>['rows'] {
+  return buildMailServerView('routing', null, 'not-connected', null, saved).domains.filter(row => row.account === username).map(row => ({ domain: row.domain.toLowerCase(), account: row.account, mailboxes: row.mailboxes, zone: row.zone, mx: row.mx.map(item => ({ priority: item.priority, host: host(item.host) })) }))
+}
+
 const sendingIdentity = (saved: MailQualitySaved, domainName: string | null): { sending: SendingAddress[]; helo: string | null; hostname: string | null } => {
   const pool = saved.ipPool ?? [], config = saved.mailIpConfig ?? null, hostname = saved.server?.settings.hostname ? host(saved.server.settings.hostname) : null
   const primary = (version: 4 | 6): string | null => (pool.find(ip => ip.version === version && ip.isPrimary) ?? pool.find(ip => ip.version === version))?.address ?? null
@@ -369,7 +374,7 @@ export function mailQualityTarget(saved: MailQualitySaved, row: ReturnType<typeo
   return { domain: row.domain, savedMx: row.mx, zone: zone ? { name: zone.name, records: zone.records } : null, ...identity, local }
 }
 
-async function readCheckBody(request: Request): Promise<string[]> {
+export async function readMailQualityDomains(request: Request): Promise<string[]> {
   if (request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return fail('VALIDATION', 'application/json is required', { stateChanged: false })
   const text = await request.text()
   if (text.length > 16_384) return fail('VALIDATION', 'mail quality request exceeds the bounded body size', { stateChanged: false })
@@ -392,7 +397,7 @@ export async function handleMailQualityWorkspaceRoute(request: Request, url: URL
   const allowed = url.pathname === LIST ? 'GET' : 'POST'
   if (method !== allowed) return new Response(null, { status: 405, headers: { allow: allowed } })
   if (url.search) return fail('VALIDATION', 'mail quality routes do not accept selectors', { stateChanged: false })
-  const requested = url.pathname === CHECK ? await readCheckBody(request) : null
+  const requested = url.pathname === CHECK ? await readMailQualityDomains(request) : null
   const saved = await helpers.readSaved(), hosted = hostedMailDomains(saved)
   let body: unknown
   if (!requested) {

@@ -6,16 +6,18 @@ import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 interface CollaborationCalendar { name: string; color: string; timezone: string; eventCount: number; shares: { mailbox: string; permission: 'read' | 'read-write' }[] }
 interface CollaborationMailbox { mailbox: string; revision: string; calendars: CollaborationCalendar[]; contacts: { count: number; groupCount: number }; canCreateCalendar: boolean }
-interface CollaborationView { account: string; mailboxes: CollaborationMailbox[] }
+interface CollaborationRefused { mailbox: string; refused: 'dav_store_too_large' }
+interface CollaborationView { account: string; mailboxes: (CollaborationMailbox | CollaborationRefused)[] }
 const collaborationObject = (raw: unknown): raw is Record<string, unknown> => !!raw && typeof raw === 'object' && !Array.isArray(raw)
 const collaborationText = (raw: unknown, max: number): raw is string => typeof raw === 'string' && !!raw.trim() && raw.length <= max && raw.isWellFormed() && !/[\u0000-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069\ufeff]/.test(raw)
 const collaborationMailbox = (raw: unknown): raw is string => collaborationText(raw, 254) && /^[^\s@/\\<>]+@[A-Za-z0-9.-]+$/.test(raw)
 export function readAccountCollaboration(raw: unknown): CollaborationView | null {
-  if (!collaborationObject(raw) || raw.source !== 'saved-mailbox-metadata' || !collaborationObject(raw.context) || !collaborationText(raw.context.account, 16) || !Array.isArray(raw.mailboxes) || raw.mailboxes.length > 1000
-    || !collaborationObject(raw.capabilities) || raw.capabilities.createCalendar !== true || ['caldav', 'carddav', 'addressBookCollections', 'taskLists', 'protectedDefaults'].some(key => (raw.capabilities as Record<string, unknown>)[key] !== false)
-    || !collaborationObject(raw.application) || raw.application.status !== 'saved_metadata' || raw.application.nativeApplied !== false || raw.application.syncVerified !== false) return null
+  if (!collaborationObject(raw) || raw.source !== 'dav-store' || !collaborationObject(raw.context) || !collaborationText(raw.context.account, 16) || !Array.isArray(raw.mailboxes) || raw.mailboxes.length > 1000
+    || !collaborationObject(raw.capabilities) || raw.capabilities.createCalendar !== true || ['caldav', 'carddav', 'addressBookCollections', 'taskLists', 'protectedDefaults'].some(key => (raw.capabilities as Record<string, unknown>)[key] !== true)
+    || !collaborationObject(raw.application) || raw.application.status !== 'dav_store' || raw.application.nativeApplied !== true || raw.application.syncVerified !== false) return null
   const names = new Set<string>()
   for (const mailbox of raw.mailboxes) {
+    if (collaborationObject(mailbox) && mailbox.refused === 'dav_store_too_large' && collaborationMailbox(mailbox.mailbox) && !names.has(mailbox.mailbox)) { names.add(mailbox.mailbox); continue }
     if (!collaborationObject(mailbox) || !collaborationMailbox(mailbox.mailbox) || names.has(mailbox.mailbox) || typeof mailbox.revision !== 'string' || !/^[0-9a-f]{64}$/.test(mailbox.revision) || typeof mailbox.canCreateCalendar !== 'boolean'
       || !Array.isArray(mailbox.calendars) || mailbox.calendars.length > 25 || !collaborationObject(mailbox.contacts) || !Number.isSafeInteger(mailbox.contacts.count) || Number(mailbox.contacts.count) < 0 || Number(mailbox.contacts.count) > 10000 || !Number.isSafeInteger(mailbox.contacts.groupCount) || Number(mailbox.contacts.groupCount) < 0 || Number(mailbox.contacts.groupCount) > 2560000) return null
     names.add(mailbox.mailbox)
@@ -24,8 +26,8 @@ export function readAccountCollaboration(raw: unknown): CollaborationView | null
       for (const share of calendar.shares) if (!collaborationObject(share) || !collaborationMailbox(share.mailbox) || !['read', 'read-write'].includes(String(share.permission))) return null
     }
   }
-  for (const mailbox of raw.mailboxes as unknown as CollaborationMailbox[]) for (const calendar of mailbox.calendars) for (const share of calendar.shares) if (!names.has(share.mailbox) || share.mailbox === mailbox.mailbox) return null
-  return { account: raw.context.account, mailboxes: raw.mailboxes as unknown as CollaborationMailbox[] }
+  for (const mailbox of raw.mailboxes as unknown as CollaborationView['mailboxes']) for (const calendar of 'refused' in mailbox ? [] : mailbox.calendars) for (const share of calendar.shares) if (!names.has(share.mailbox) || share.mailbox === mailbox.mailbox) return null
+  return { account: raw.context.account, mailboxes: raw.mailboxes as unknown as CollaborationView['mailboxes'] }
 }
 const collaborationAscii = (raw: string) => raw.replace(/[\u0660-\u0669\u06f0-\u06f9]/g, digit => String(digit.charCodeAt(0) - (digit.charCodeAt(0) >= 0x06f0 ? 0x06f0 : 0x0660)))
 function bindAccountCollaboration(askDialog: ((options: Record<string, unknown>) => Promise<unknown>) | undefined): void {
@@ -39,7 +41,8 @@ function bindAccountCollaboration(askDialog: ((options: Record<string, unknown>)
     if (![mailbox, name, color, timezone, create, refresh, status, rows, shares].every(Boolean)) return
     let view: CollaborationView | null = null, busy = false, locked = false
     const admitted = () => root.isConnected && root.dataset.collaborationEnabled === 'true' && !!request && !root.closest('[data-capability-state="unavailable"],[data-capability-state="soon"],[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[aria-disabled="true"],fieldset:disabled')
-    const selected = () => view?.mailboxes.find(item => item.mailbox === mailbox.value)
+    const opened = (from: CollaborationView | null | undefined, address: string) => { const item = from?.mailboxes.find(row => row.mailbox === address); return item && !('refused' in item) ? item : undefined }
+    const selected = () => opened(view, mailbox.value)
     const draft = () => {
       if (!collaborationText(name.value, 200) || !/^#[0-9a-f]{6}$/i.test(color.value) || !/^[A-Za-z0-9_+-]+(?:\/[A-Za-z0-9_+-]+)*$/.test(timezone.value) || timezone.value.length > 100) return null
       try { new Intl.DateTimeFormat('en', { timeZone: timezone.value }).format(0) } catch { return null }
@@ -65,6 +68,7 @@ function bindAccountCollaboration(askDialog: ((options: Record<string, unknown>)
       const previous = mailbox.value; view = next; mailbox.replaceChildren(); rows.replaceChildren(); shares.replaceChildren()
       for (const item of next.mailboxes) {
         const option = document.createElement('option'); option.value = item.mailbox; option.textContent = item.mailbox; mailbox.append(option)
+        if ('refused' in item) { option.disabled = true; empty(rows, 5, '\u2068' + item.mailbox + '\u2069: ' + t('This mailbox’s calendars and contacts are too large to open here. Nothing was changed, and your devices still have them.')); continue }
         for (const calendar of item.calendars) {
           const row = rowFor(5); cell(row, item.mailbox, true); cell(row, calendar.name); cell(row, t(msgctxt('account-collaboration-client', 'Calendar'))); cell(row, String(calendar.eventCount), true); cell(row, calendar.timezone + ' / ' + calendar.color, true); rows.append(row)
           for (const share of calendar.shares) { const shared = rowFor(4); cell(shared, item.mailbox, true); cell(shared, calendar.name); cell(shared, share.mailbox, true); cell(shared, share.permission === 'read-write' ? t('Read and write') : t('Read only')); shares.append(shared) }
@@ -82,8 +86,11 @@ function bindAccountCollaboration(askDialog: ((options: Record<string, unknown>)
         const next = readAccountCollaboration(await request!('GET', '/api/account/collaboration'))
         if (!next || view && next.account !== view.account) throw new Error('invalid_collaboration_view')
         if (!admitted()) return
-        paint(next); locked = false; message(next.mailboxes.length ? 'read' : 'empty', t('Current saved mailbox metadata read. Device synchronization remains unverified.'))
-      } catch { locked = true; message('failed', t('Collections could not be verified. The draft is retained; explicitly reload.')) }
+        paint(next); locked = false
+        const refused = next.mailboxes.filter(item => 'refused' in item).map(item => '\u2068' + item.mailbox + '\u2069')
+        if (refused.length) message('failed', t('Read, except these mailboxes, too large to open here: {mailboxes}. Nothing was changed, and your devices still have them.', { mailboxes: refused.join(', ') }))
+        else message(next.mailboxes.length ? 'read' : 'empty', t('Current mailbox calendars and contacts read.'))
+      } catch (error) { locked = true; message('failed', (error as { details?: { reason?: unknown } } | null)?.details?.reason === 'dav_store_too_large' ? t('This mailbox’s calendars and contacts are too large to open here. Nothing was changed, and your devices still have them.') : t('Collections could not be verified. The draft is retained; explicitly reload.')) }
       finally { busy = false; controls() }
     }
     for (const field of [name, color, timezone]) field.addEventListener('input', controls)
@@ -97,10 +104,10 @@ function bindAccountCollaboration(askDialog: ((options: Record<string, unknown>)
       try {
         const raw = await request!('POST', '/api/account/collaboration/calendars', { mailbox: owner.mailbox, expectedRevision: owner.revision, ...fields }), ack = readAccountCollaboration(raw)
         if (!ack || !collaborationObject(raw) || raw.stateChanged !== true || !collaborationObject(raw.created) || raw.created.mailbox !== owner.mailbox || raw.created.name !== fields.name || raw.created.color !== fields.color || raw.created.timezone !== fields.timezone || ack.account !== before.account) throw new Error('invalid_calendar_ack')
-        const after = readAccountCollaboration(await request!('GET', '/api/account/collaboration')), saved = after?.mailboxes.find(item => item.mailbox === owner.mailbox), acknowledged = ack.mailboxes.find(item => item.mailbox === owner.mailbox)
+        const after = readAccountCollaboration(await request!('GET', '/api/account/collaboration')), saved = opened(after, owner.mailbox), acknowledged = opened(ack, owner.mailbox)
         if (!after || after.account !== before.account || !saved || saved.revision !== acknowledged?.revision || !saved.calendars.some(calendar => calendar.name === fields.name && calendar.color === fields.color && calendar.timezone === fields.timezone && calendar.eventCount === 0 && calendar.shares.length === 0)) throw new Error('calendar_readback_mismatch')
         if (!admitted()) return
-        paint(after); name.value = ''; locked = false; message('saved', t('Calendar created and read back from the existing saved collection. DAV discovery and synchronization remain unverified.'))
+        paint(after); name.value = ''; locked = false; message('saved', t('Calendar created and read back. Devices receive it on their next sync.'))
       } catch (error) {
         locked = true
         const details = collaborationObject(error) && collaborationObject(error.details) ? error.details : collaborationObject(error) && collaborationObject(error.detail) ? error.detail : {}

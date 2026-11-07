@@ -21,7 +21,7 @@ export function readWhmAccountTemplatesView(value: unknown): WhmAccountTemplates
   const page = (item: unknown): WhmTemplatePage => object(item) && text(item.title, 140) && text(item.body, 2000) ? { title: item.title, body: item.body } : bad()
   if (!object(value) || !['default', 'saved', 'invalid'].includes(value.state as string) || typeof value.revision !== 'string' || !/^[0-9a-f]{64}$/.test(value.revision)
     || !Array.isArray(value.templates) || value.templates.length > 20 || (value.state !== 'saved' && value.templates.length > 0) || !Array.isArray(value.plans) || value.plans.length > 5000
-    || !object(value.application) || value.application.appliedToNewAccounts !== true || value.application.defaultPagePublished !== false || value.application.suspendedPagePublished !== false || !(value.changed === undefined || uuid(value.changed))) return bad()
+    || !object(value.application) || value.application.appliedToNewAccounts !== true || value.application.defaultPagePublished !== true || value.application.suspendedPagePublished !== true || !(value.changed === undefined || uuid(value.changed))) return bad()
   const plans = value.plans.map(item => object(item) && uuid(item.id) && text(item.name, 128) ? { id: item.id, name: item.name } : bad())
   const templates = value.templates.map((item): WhmAccountTemplate => {
     if (!object(item) || !uuid(item.id) || !text(item.name, 64) || !item.name || typeof item.zone !== 'string' || item.zone.length > 60000 || !Array.isArray(item.records) || item.records.length > 50

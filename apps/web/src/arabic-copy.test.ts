@@ -32,9 +32,9 @@ const whm: WhmSurfaceProps = {
 }
 
 const ALLOWED = new Set([
-  'xpanel', 'xwhm', 'xmail', 'ssl', 'tls', 'dns', 'ftp', 'ttl', 'php', 'html', 'http', 'https',
+  'xpanel', 'xwhm', 'xmail', 'ssl', 'tls', 'dns', 'ftp', 'ttl', 'php', 'html', 'http', 'https', 'utf-8',
   'mariadb', 'powerdns', 'bind', 'nginx', 'apache', 'acme', 'ctrl', 'utc', 'ibm', 'rfc', 'totp',
-  'spf', 'dkim', 'dmarc', 'inbox', 'sieve', 'nftables', 'postfix', 'dovecot', 'chroot', 'chmod',
+  'spf', 'dkim', 'dmarc', 'dnssec', 'inbox', 'sieve', 'nftables', 'postfix', 'dovecot', 'chroot', 'chmod',
   'systemd', 'cgroup', 'slice', 'uid', 'ssh', 'ipv4', 'ipv6', 'argon2id', 'sqlite', 'csv', 'json',
   'utf', 'ascii', 'ok', 'mb', 'gb', 'kb', 'tb', 'cpu', 'rss', 'ptr', 'helo', 'ehlo', 'spf',
   'public_html', 'trash', 'user', 'ini', 'conf', 'fpm', 'ondemand', 'english',

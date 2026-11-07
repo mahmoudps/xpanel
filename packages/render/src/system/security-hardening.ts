@@ -9,6 +9,7 @@ import type {
   RenderedFile,
 } from '@xpanel/core'
 import { DEFAULT_JAIL_SHELL } from './account.ts'
+import { SHELL_JAIL_ARGV_FD, SHELL_JAIL_ENTER, SUDO_BINARY } from './shell-jail.ts'
 import { SYSCTL_BINARY } from './nftables.ts'
 import { accountSliceName } from './slice.ts'
 import { assertAbsPath, assertAccountHome, assertAccountIdentity, invalid } from './validate.ts'
@@ -220,7 +221,7 @@ export const assertSafeAccountRootChain = (input: AccountRootChainInput): void =
  * Even when invoked as a login shell by sshd, the account lands in its own cgroup slice
  * with an isolated environment and restricted umask `0027`.
  */
-export const renderJailShellBinary = (jailShellPath = DEFAULT_JAIL_SHELL): RenderedFile => {
+export const renderJailShellBinary = (jailShellPath = DEFAULT_JAIL_SHELL, jailed = false): RenderedFile => {
   const path = assertAbsPath('jailShellPath', jailShellPath)
   const lines = [
     '#!/bin/sh',
@@ -239,6 +240,20 @@ export const renderJailShellBinary = (jailShellPath = DEFAULT_JAIL_SHELL): Rende
     '  echo "xPanel jailshell: account root is a symlink; refusing login" >&2',
     '  exit 1',
     'fi',
+    // A sandboxed caller (the web terminal unit, or the jail itself on its way back) already has its view and cannot use sudo.
+    // The sudo rule takes no argument, so a command crosses on a descriptor that root never reads and that is read here, unprivileged.
+    ...(jailed ? [
+      `if [ "\${XPANEL_JAIL_ARGV:-}" = ${SHELL_JAIL_ARGV_FD} ] && [ -e /proc/self/fd/${SHELL_JAIL_ARGV_FD} ]; then`,
+      `  exec /bin/bash --norc --noprofile -c 'unset XPANEL_JAIL_ARGV; mapfile -d "" -t argv <&${SHELL_JAIL_ARGV_FD}; exec ${SHELL_JAIL_ARGV_FD}<&-; exec "$0" "\${argv[@]}"' ${path}`,
+      'fi',
+      'unset XPANEL_JAIL_ARGV',
+      `if ! grep -q '^NoNewPrivs:[[:space:]]*1' /proc/self/status; then`,
+      `  [ "$#" -gt 0 ] || exec ${SUDO_BINARY} -n ${SHELL_JAIL_ENTER}`,
+      '  exec 4<&0',
+      `  printf '%s\\0' "$@" | { exec ${SHELL_JAIL_ARGV_FD}<&0 0<&4 4<&-; exec ${SUDO_BINARY} -n ${SHELL_JAIL_ENTER}; }`,
+      '  exit 0',
+      'fi',
+    ] : []),
     'export TMPDIR="$HOME/tmp"',
     'export TMP="$HOME/tmp"',
     'export TEMP="$HOME/tmp"',
@@ -301,7 +316,7 @@ export const parseAndValidateJailedCommand = (command: string | readonly string[
     })
   }
   for (const arg of tokens.slice(1)) {
-    if (arg === '..' || arg.startsWith('../') || arg.includes('/../') || (arg.startsWith('/') && !arg.startsWith('/home/'))) {
+    if (arg === '..' || arg.startsWith('../') || arg.includes('/../') || (arg.startsWith('/') && !/^\/home[1-9]?[0-9]?\//.test(arg))) {
       fail('FORBIDDEN', `argument "${arg}" references a path outside the account home`, { arg })
     }
   }
@@ -403,6 +418,7 @@ export const renderDomainCustomIncludes = (
   docRoot: string,
   custom: DomainCustomConfig,
   _os?: OsProfile,
+  openBasedir?: string,
 ): RenderedFile[] => {
   const id = assertAccountIdentity(account)
   const baseDir = `${USERDATA_ROOT}/${id.username}/${custom.domainName}`
@@ -445,7 +461,7 @@ export const renderDomainCustomIncludes = (
     group: 'root',
   })
 
-  const iniEntries = Object.entries(custom.userIni)
+  const iniEntries = [...Object.entries(custom.userIni), ...(openBasedir ? [['open_basedir', openBasedir]] : [])]
   if (iniEntries.length > 0) {
     const iniLines = [
       `; Managed by xPanel userdata for ${custom.domainName}`,
@@ -461,6 +477,14 @@ export const renderDomainCustomIncludes = (
   }
 
   return files
+}
+
+/** `.user.ini` of an isolated site without saved custom configuration. */
+export const renderSiteIsolationIni = (account: Pick<Account, 'username' | 'uid' | 'gid' | 'home'>, docRoot: string, domainName: string, openBasedir: string): RenderedFile => {
+  const id = assertAccountIdentity(account)
+  return { path: `${docRoot}/.user.ini`, content: `; Managed by xPanel for ${domainName}
+open_basedir = ${openBasedir}
+`, mode: 0o640, owner: id.username, group: id.username }
 }
 
 /**

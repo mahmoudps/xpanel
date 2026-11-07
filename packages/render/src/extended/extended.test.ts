@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildAppInstallManifest,
-  buildDatabaseRepairArgv,
   findOrphanDnsZones,
   parseAddressImportCsv,
   provisionBatchDkimSpfDmarc,
   renderAccountMemcachedUnit,
   renderAccountRedisInstance,
-  renderCalDavCardDavInclude,
   parseHtpasswd,
   renderDirectoryPrivacy,
   renderDomainForwardersMap,
@@ -24,8 +22,6 @@ import {
   renderRemoteMysqlGrantsSql,
   renderRootlessContainerUnit,
   renderSieveFilterScript,
-  renderWebDiskConfig,
-  renderWebStackProfile,
   renderZoneFromTemplate,
 } from './index.ts'
 
@@ -88,19 +84,20 @@ describe('1. First-Run Setup, Hostname Change & Filesystem Quota Initialization'
     expect(() => renderQuotaInitActions('/home; rm -rf /')).toThrow()
   })
 
-  it('renderLogrotateConfig renders /etc/logrotate.d/xpanel', () => {
-    const file = renderLogrotateConfig({ rotateDays: 14, maxSizeMb: 100, compress: true })
+  it('renderLogrotateConfig rotates error, backend and PHP-FPM logs but never the metered site access logs', () => {
+    const file = renderLogrotateConfig({ rotateDays: 14, apacheService: 'apache2', fpmAccounts: ['bob', 'alice', 'bob'] })
     expect(file.path).toBe('/etc/logrotate.d/xpanel')
-    expect(file.content).toContain('/var/log/nginx/domains/*.log')
-    expect(file.content).toContain('/var/log/apache2/domains/*.log')
-    expect(file.content).toContain('/var/log/xpanel/*.log')
+    expect(file.content).toContain('/var/log/xpanel/nginx/*.error.log {')
+    expect(file.content).not.toContain('access.log')
+    expect(file.content).toContain('/var/log/xpanel/apache/*.log {')
+    expect(file.content).toContain('/usr/bin/systemctl kill --kill-whom=main --signal=USR1 nginx.service')
+    expect(file.content).toContain('/usr/bin/systemctl reload apache2.service')
     expect(file.content).toContain('rotate 14')
-    expect(file.content).toContain('maxsize 100M')
-    expect(file.content).toContain('compress\n  delaycompress')
-
-    const uncompressed = renderLogrotateConfig({ rotateDays: 7, maxSizeMb: 50, compress: false })
-    expect(uncompressed.content).toContain('nocompress')
-    expect(() => renderLogrotateConfig({ rotateDays: 0, maxSizeMb: 50, compress: true })).toThrow()
+    expect(file.content.match(/php-fpm\/\w+\/\*\.log \{\n {2}su \w+ \w+/g)).toEqual(['php-fpm/alice/*.log {\n  su alice alice', 'php-fpm/bob/*.log {\n  su bob bob'])
+    expect(renderLogrotateConfig({ rotateDays: 7, apacheService: null, fpmAccounts: [] }).content).not.toContain('apache')
+    expect(() => renderLogrotateConfig({ rotateDays: 0, apacheService: null, fpmAccounts: [] })).toThrow()
+    expect(() => renderLogrotateConfig({ rotateDays: 7, apacheService: 'x; rm', fpmAccounts: [] })).toThrow()
+    expect(() => renderLogrotateConfig({ rotateDays: 7, apacheService: null, fpmAccounts: ['../etc'] })).toThrow()
   })
 })
 
@@ -227,13 +224,6 @@ describe('2. Deep Mail (Domain Forwarders, Mailing Lists, Sieve Filters, CSV Imp
     expect(parsed.errors[0]?.line).toBe(7)
     expect(parsed.errors[1]?.line).toBe(8)
   })
-
-  it('renderCalDavCardDavInclude renders Nginx .well-known redirects', () => {
-    const snippet = renderCalDavCardDavInclude('example.com')
-    expect(snippet).toContain('location = /.well-known/caldav')
-    expect(snippet).toContain('location = /.well-known/carddav')
-    expect(snippet).toContain('return 301 https://example.com/dav/;')
-  })
 })
 
 describe('3. Operational DNS (Zone Templates, Batch DKIM/SPF/DMARC, Zone Cleanup)', () => {
@@ -337,15 +327,6 @@ describe('4. Extended File & Web Isolation (Directory Privacy, Hotlink, Web Disk
     expect(res.apacheSnippet).toContain('RewriteRule \\.(jpg|png|mp4)$ https://example.com/no-hotlink.png [R=302,L]')
   })
 
-  it('renderWebDiskConfig renders per-account WebDAV config', () => {
-    const rw = renderWebDiskConfig(sampleAccount, true, false)
-    expect(rw.path).toBe('/etc/xpanel/webdav/alice.conf')
-    expect(rw.content).toContain('dav_methods PUT DELETE MKCOL COPY MOVE;')
-
-    const ro = renderWebDiskConfig(sampleAccount, true, true)
-    expect(ro.content).toContain('limit_except GET HEAD OPTIONS PROPFIND')
-  })
-
   it('renderGitPostReceiveHook renders isolated post-receive deployment script', () => {
     const hook = renderGitPostReceiveHook(sampleAccount, 'my-site', 'public_html', 'main')
     expect(hook.path).toBe('/home/alice/repos/my-site.git/hooks/post-receive')
@@ -376,26 +357,6 @@ describe('5. Databases Beyond MariaDB (PostgreSQL, Remote Access, Repair, Redis,
     expect(grants).toEqual([
       "GRANT ALL PRIVILEGES ON `alice\\_shop`.* TO 'alice_web'@'198.51.100.10';",
       "GRANT ALL PRIVILEGES ON `alice\\_shop`.* TO 'alice_web'@'db.example.com';",
-    ])
-  })
-
-  it('buildDatabaseRepairArgv builds argv-only commands for mariadb and postgresql', () => {
-    expect(buildDatabaseRepairArgv('mariadb', 'alice_db', 'repair')).toEqual([
-      '/usr/bin/mysqlcheck',
-      '--repair',
-      '--databases',
-      'alice_db',
-    ])
-    expect(buildDatabaseRepairArgv('postgresql', 'alice_db', 'optimize')).toEqual([
-      '/usr/bin/vacuumdb',
-      '--full',
-      '--dbname',
-      'alice_db',
-    ])
-    expect(buildDatabaseRepairArgv('postgresql', 'alice_db', 'repair')).toEqual([
-      '/usr/bin/reindexdb',
-      '--dbname',
-      'alice_db',
     ])
   })
 
@@ -478,20 +439,5 @@ describe('6. Server Settings, Rootless Containers, App Store & Web Stack Profile
       expect(manifest.cliSetupArgv.length).toBeGreaterThan(0)
       expect(manifest.envVars.APP_DOMAIN).toBe('app.example.com')
     }
-  })
-
-  it('renderWebStackProfile renders /etc/xpanel/web-stack.conf', () => {
-    const file = renderWebStackProfile({
-      engine: 'openlitespeed',
-      http3Quic: true,
-      brotli: true,
-      wafOwaspCrs: true,
-      phpVersions: ['8.3', '8.2'],
-      maxMemoryPerProcessMb: 512,
-    })
-    expect(file.path).toBe('/etc/xpanel/web-stack.conf')
-    expect(file.content).toContain('engine = openlitespeed')
-    expect(file.content).toContain('http3_quic = enabled')
-    expect(file.content).toContain('php_versions = 8.2,8.3')
   })
 })

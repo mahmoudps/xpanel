@@ -41,7 +41,8 @@ export function renderWhmMailServerWorkspace({ locale, page, canRead, canManage 
   const card = (key: string, title: string, body: string): string => `<section class="xp-whm-mail-server__card" aria-labelledby="${id(key)}"><h2 id="${id(key)}">${title}</h2>${body}</section>`
   const compared = [t('Observed'), t('Rendered by xPanel'), t('State')]
   const titles: Record<WhmMailServerPage, string> = { server: t('Postfix and Dovecot settings'), routing: t('Routing settings'), outbound: t('Rate and size limits') }
-  const settings = card('settings', titles[page], (page === 'outbound' ? `<p class="xp-help">${t('A limit that is not set in main.cf uses the Postfix default.')}</p>` : '')
+  const settings = card('settings', titles[page], (page === 'outbound' ? `<p class="xp-help">${t('A limit that is not set in main.cf uses the Postfix default.')}</p>`
+    + `<p class="xp-help">${t('The remote SMTP servers saved in Remote service IPs are also included in smtpd_client_event_limit_exceptions; they are changed only there.')} <a href="/whm/server/ips">${t('Remote service IPs')}</a></p>` : '')
     + table('settings', titles[page], [t('Source'), t('Setting'), ...compared]))
   const services = page === 'routing' ? '' : card('services', page === 'server' ? t('Listening services (master.cf)') : t('Submission services'),
     `<p class="xp-help">${t('Only reviewed -o overrides are shown; other overrides are counted.')}</p>`

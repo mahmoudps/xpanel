@@ -4,7 +4,7 @@ import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fail, isUuid, isXpanelError, msgid } from '@xpanel/core'
-import type { Account, Principal, ServiceUser } from '@xpanel/core'
+import type { Account, MfaRuntimeMode, Principal, ServiceUser } from '@xpanel/core'
 import {
   createAuthenticatedSession,
   createUserPrincipal,
@@ -22,7 +22,7 @@ import {
 } from '@xpanel/db'
 import type { Db, DurableJobRecord, MailboxSessionRecord, PrincipalRecord, SessionRecord } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
-import { hashPasswordArgon2id } from '../auth.ts'
+import { hashPasswordArgon2id, verifyPasswordArgon2id } from '../auth.ts'
 import type { AuthenticatedCaller } from '../auth.ts'
 import { assertAccountFeatures } from '../authorization.ts'
 import { sessionTokenHash } from '../entry-points.ts'
@@ -31,6 +31,7 @@ import { attachmentsFromBodyStructure, ImapProtocolClient, type ImapFetchedMessa
 import { imapDialPlan } from './idle.ts'
 import { smtpHumanCopy, SmtpSubmissionClient } from './smtp.ts'
 import { sanitizeEmailHtml } from './mime.ts'
+import { verifyMailboxSecondFactor } from './mailbox-security.ts'
 import type { MimeAttachmentInput } from './mime.ts'
 
 export interface MailAttachmentSummary {
@@ -475,7 +476,8 @@ export const establishHandoffMailboxSession = async (input: {
       expiresAt: new Date(Date.now() + input.ttlMs).toISOString(),
       ip: input.ip,
       userAgent: input.userAgent,
-      mfaVerified: false,
+      // Like the xPanel owner handoff, the issuer's authenticated session stands for the second factor (D5: it guards sign-in).
+      mfaVerified: true,
       impersonator: input.impersonator,
       expectedPasswordHash: principalRecord.passwordHash,
       expectedTotpEnabled: principalRecord.totpEnabled,
@@ -506,6 +508,10 @@ export const establishMailboxSession = async (input: {
   entryPoint?: EntryPoint
   mailbox: string
   password: string
+  totpCode?: unknown
+  recoveryCode?: unknown
+  /** The runtime MFA policy; an enrolled factor is required unless MFA is disabled. */
+  mfaMode?: MfaRuntimeMode
   ip: string
   userAgent: string
 }): Promise<EstablishedMailboxSession> => {
@@ -513,7 +519,11 @@ export const establishMailboxSession = async (input: {
   if (!input.password) fail('VALIDATION', 'username and password are required')
   const serviceUser = await input.store.getServiceUserByLogin(mailbox)
   const account = serviceUser ? await input.store.getAccount(serviceUser.accountId) : null
-  if (!serviceUser || !serviceUser.services.email || !account || account.status !== 'active') {
+  if (!serviceUser || !serviceUser.services.email || !account) return fail('UNAUTHENTICATED', 'invalid username or password')
+  if (account.status !== 'active') {
+    // IMAP is closed on a suspended account, so the stored hash decides; only the right password learns the account state.
+    const stored = await input.store.getServiceUserHash(serviceUser.id)
+    if (stored?.startsWith('{ARGON2ID}') && await verifyPasswordArgon2id(input.password, stored.slice('{ARGON2ID}'.length))) return fail('FORBIDDEN', 'this mailbox account is suspended', { reason: 'account_suspended' })
     return fail('UNAUTHENTICATED', 'invalid username or password')
   }
   await assertMailboxIdentityAvailable(input.db, serviceUser.id, mailbox)
@@ -529,17 +539,21 @@ export const establishMailboxSession = async (input: {
     || !currentService.services.email || !currentAccount || currentAccount.status !== 'active') {
     return fail('UNAUTHENTICATED', 'mailbox identity changed; sign in again')
   }
+  // The password was accepted; an enrolled mailbox now needs its authenticator or one recovery code.
+  const mfaVerified = await verifyMailboxSecondFactor({ db: input.db, serverSecret: input.serverSecret, mfaMode: input.mfaMode ?? 'optional',
+    principal: await findPrincipalByUsername(input.db, mailboxPrincipalUsername(mailbox)), totpCode: input.totpCode, recoveryCode: input.recoveryCode })
   const creationHash = await prepareMailboxPrincipalCreation(input.db, mailbox)
   const rawToken = randomBytes(32).toString('hex')
   const issued = await input.db.transaction(async tx => {
     const principalRecord = await ensureMailboxPrincipal(tx, mailbox, account.id, serviceUser.id, creationHash)
+    if (input.mfaMode !== 'disabled' && principalRecord.totpEnabled && !mfaVerified) return fail('UNAUTHENTICATED', 'credentials changed; authenticate again')
     const session = await createAuthenticatedSession(tx, {
       principalId: principalRecord.id,
       tokenHash: sessionTokenHash(rawToken, input.entryPoint),
       expiresAt: new Date(Date.now() + 24 * 3600_000).toISOString(),
       ip: input.ip,
       userAgent: input.userAgent,
-      mfaVerified: false,
+      mfaVerified,
       expectedPasswordHash: principalRecord.passwordHash,
       expectedTotpEnabled: principalRecord.totpEnabled,
       expectedSealedSecret: principalRecord.totpSecretEnc,

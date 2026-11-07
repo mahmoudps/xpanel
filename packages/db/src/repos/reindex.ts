@@ -307,8 +307,8 @@ export const reindexFromState = async (
         await tx.query(
           `INSERT INTO idx_resellers (
             id, username, acl, max_accounts, total_disk_mb, total_bandwidth_mb,
-            oversell, nameservers, delegated_ips, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            oversell, oversell_bandwidth, nameservers, delegated_ips, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
           [
             r.id,
             r.username,
@@ -316,7 +316,8 @@ export const reindexFromState = async (
             limitToSql(r.maxAccounts),
             limitToSql(r.totalDiskMb),
             limitToSql(r.totalBandwidthMb),
-            r.oversell ? 1 : 0,
+            r.oversell.disk ? 1 : 0,
+            r.oversell.bandwidth ? 1 : 0,
             JSON.stringify(r.nameservers),
             JSON.stringify(r.delegatedIps),
             now,
@@ -728,6 +729,7 @@ export const listIndexedResellers = async (db: Db): Promise<Reseller[]> => {
     total_disk_mb: number | null
     total_bandwidth_mb: number | null
     oversell: number
+    oversell_bandwidth: number
     nameservers: string
     delegated_ips: string
   }>(`SELECT * FROM idx_resellers ORDER BY username ASC`)
@@ -738,7 +740,7 @@ export const listIndexedResellers = async (db: Db): Promise<Reseller[]> => {
     maxAccounts: r.max_accounts ?? 'unlimited',
     totalDiskMb: r.total_disk_mb ?? 'unlimited',
     totalBandwidthMb: r.total_bandwidth_mb ?? 'unlimited',
-    oversell: Boolean(r.oversell),
+    oversell: { disk: Boolean(r.oversell), bandwidth: Boolean(r.oversell_bandwidth) },
     nameservers: JSON.parse(r.nameservers) as string[],
     delegatedIps: JSON.parse(r.delegated_ips) as string[],
   }))

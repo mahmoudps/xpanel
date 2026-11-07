@@ -7,14 +7,18 @@ import {
   findPrincipalByUsername,
   isJobStepCompleted,
   latestActive,
+  listSecurityQuestions,
   reindexFromState,
   reopenAttentionJob,
+  replaceSecurityQuestions,
   setPasswordHash,
   setTotpSecret,
 } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
 import { passwordHashFromInput } from './auth.ts'
+import { passwordAllowed } from './password-policy.ts'
+import { runPanelAccessCli } from './panel-access-cli.ts'
 
 export interface CliDeps {
   db: Db
@@ -41,7 +45,8 @@ const readPlaintextPassword = async (readPassword: () => Promise<string>): Promi
     return fail('PRECONDITION_FAILED', 'could not read password from standard input')
   }
   const password = input.replace(/\r?\n$/, '')
-  if (password.length < 8 || Buffer.byteLength(password, 'utf8') > 1024 || /[\r\n]/.test(password)) {
+  // Root recovery never reads hosting state, so the saved strength policy is not loaded here: the 8-character rule applies.
+  if (!passwordAllowed(password, 'panel') || Buffer.byteLength(password, 'utf8') > 1024 || /[\r\n]/.test(password)) {
     return fail('VALIDATION', 'password input must be a single line of at least 8 characters and at most 1024 UTF-8 bytes')
   }
   return password
@@ -90,8 +95,9 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
           '  rollback <generation-id>             Restore and reconcile a previous generation',
           '  reindex                              Rebuild SQLite search/cache index from state',
           '  init-root --password-stdin           Provision root once from standard input; requires a password change',
-          '  reset-password <username> --password-stdin  Read one password from standard input',
+          '  reset-password <username> --password-stdin  Read one password from standard input; also removes security questions',
           '  disable-2fa <username> [--confirm]   Recover an enrolled factor with explicit confirmation',
+          '  panel-access show | reset <part>     Show or clear allowlists, entrance, response, basic auth, stopped entry points or temporary links',
           '  recover-provisioning <job-id> --attest-host-recovered  Requeue an account whose host step was interrupted, after reconcile',
           '  init-quotas [--path <dir>]           Enable enforced user disk quota on the filesystem of account homes (default /home)',
           '  repair-state-ownership               Root-only: give the xpanel user the state tree',
@@ -238,6 +244,7 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
           ? await readPlaintextPassword(async () => inlinePassword)
           : await readPlaintextPassword(deps.readPassword!)
         const passwordHash = await passwordHashFromInput({ password })
+        const securityQuestions = (await listSecurityQuestions(deps.db, principal.id)).length
         await setPasswordHash(deps.db, principal.id, passwordHash, {
           forceChange: false,
           clearLockout: true,
@@ -245,12 +252,14 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
             actor: 'cli:root',
             action: 'auth.password_reset',
             target: `principal:${principal.username}`,
-            detail: { via: 'cli' },
+            detail: { via: 'cli', securityQuestionsRemoved: securityQuestions },
             outcome: 'ok',
             principalId: principal.id,
           },
         })
-        writeOut(`Password reset for "${principal.username}" and active lockouts cleared.`)
+        // Shell recovery must get the user back in: forgotten answers would otherwise still block the new password.
+        await replaceSecurityQuestions(deps.db, principal.id, [])
+        writeOut(`Password reset for "${principal.username}" and active lockouts cleared.${securityQuestions ? ' Security questions were removed.' : ''}`)
         return {
           code: 0,
           stdout: outLines.join('\n'),
@@ -291,6 +300,11 @@ export const runCli = async (argv: readonly string[], deps: CliDeps): Promise<Cl
           stderr: errLines.join('\n'),
           data: { username: principal.username, totpEnabled: false },
         }
+      }
+
+      case 'panel-access': {
+        const data = await runPanelAccessCli(rest, { db: deps.db, store: deps.store, writeOut })
+        return { code: 0, stdout: outLines.join('\n'), stderr: errLines.join('\n'), data }
       }
 
       case 'init-quotas': {

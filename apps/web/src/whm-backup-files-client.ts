@@ -84,7 +84,9 @@ function bindWhmBackupFiles(): void {
     const status = find('status'), account = find<HTMLSelectElement>('account'), archives = find('archives'), entries = find('entries'), pathView = find('path'), up = find<HTMLButtonElement>('up')
     const selectionNote = find('selection'), folderView = find('folder'), destination = find<HTMLFieldSetElement>('destination'), clear = find<HTMLButtonElement>('clear'), previewButton = find<HTMLButtonElement>('preview')
     const review = find('review'), ack = find<HTMLInputElement>('ack'), restoreButton = find<HTMLButtonElement>('restore'), results = find('results'), more = find<HTMLButtonElement>('continue'), steps = find('steps')
-    if (!status || !account || !archives || !entries || !pathView || !up || !selectionNote || !folderView || !destination || !clear || !previewButton || !review || !ack || !restoreButton || !results || !more || !steps) return
+    // Owner mode (xPanel File and Directory Restoration): the session account is fixed, so there is no account picker.
+    const owner = root.dataset.backupFilesOwner === 'true'
+    if (!status || !account && !owner || !archives || !entries || !pathView || !up || !selectionNote || !folderView || !destination || !clear || !previewButton || !review || !ack || !restoreButton || !results || !more || !steps) return
     const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.backupFilesCanRead === 'true' && !root.closest(denied)
@@ -117,7 +119,7 @@ function bindWhmBackupFiles(): void {
     }
     const canRestore = root.dataset.backupFilesCanRestore === 'true', MAX_SELECTION = 500, SHOWN = 1000
     const selected = new Set<string>()
-    let busy = false, username = '', opened: BackupFilesBrowseView | null = null, directory = '', pending = 0
+    let busy = false, username = owner ? root.dataset.backupFilesUsername ?? '' : '', opened: BackupFilesBrowseView | null = null, directory = '', pending = 0
     let reviewed: (BackupFilesPreviewView & { paths: string[]; destination: string }) | null = null
     const REASONS: Record<string, string> = {
       format: msgid('not tar data compressed as its name says'), file: msgid('not a single regular file owned by the backup service'),
@@ -153,17 +155,17 @@ function bindWhmBackupFiles(): void {
     const fact = (name: string, value: Node | string): void => { find(name)?.replaceChildren(value) }
     const step = (name: string): void => steps.querySelectorAll<HTMLElement>('li').forEach(item => { if (item.dataset.step === name) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current') })
     const covered = (path: string): boolean => [...selected].some(item => path.startsWith(item + '/'))
-    const base = (): string => '/api/backups/files/' + encodeURIComponent(username)
-    const choice = (): string => destination.querySelector<HTMLInputElement>('input[type=radio]:checked')?.value === 'in-place' ? 'in-place' : 'new-folder'
+    const base = (): string => owner ? '/api/account/file-restoration' : '/api/backups/files/' + encodeURIComponent(username)
+    const choice = (): string => { const value = destination.querySelector<HTMLInputElement>('input[type=radio]:checked')?.value; return value === 'in-place' || value === 'replace' ? value : 'new-folder' }
     const sync = (): void => {
       const usable = !!opened && opened.archive.integrity === 'verified'
-      account.disabled = busy || account.options.length < 2
+      if (account) account.disabled = busy || account.options.length < 2
       up.disabled = busy || !usable || !directory
       destination.disabled = busy || !usable
       destination.querySelectorAll<HTMLInputElement>('input').forEach(input => { input.disabled = destination.disabled })
       clear.disabled = busy || !selected.size
       previewButton.disabled = busy || !usable || !selected.size
-      const restorable = canRestore && !!reviewed && reviewed.counts.restore > 0 && reviewed.quota.fits && reviewed.writer === 'available'
+      const restorable = canRestore && !!reviewed && reviewed.counts.restore + (reviewed.destination === 'replace' ? reviewed.counts.present : 0) > 0 && reviewed.quota.fits && reviewed.writer === 'available'
       if (!restorable) ack.checked = false
       ack.disabled = busy || !restorable
       restoreButton.disabled = busy || !restorable || !ack.checked
@@ -219,7 +221,8 @@ function bindWhmBackupFiles(): void {
     }
     const renderReview = (view: BackupFilesPreviewView): void => {
       fill(review, view.rows.map(row => {
-        const action = row.action === 'refuse' ? t('Not restored: {reason}', { reason: reason(row.reason) }) : row.exists === 'yes' ? t('Skip, already present') : row.exists === 'no' ? t('Restore') : t('Restore if still absent')
+        const replacing = choice() === 'replace'
+        const action = row.action === 'refuse' ? t('Not restored: {reason}', { reason: reason(row.reason) }) : row.exists === 'yes' ? (replacing ? t('Replace the current file') : t('Skip, already present')) : row.exists === 'no' ? t('Restore') : replacing ? t('Restore, replacing any current file') : t('Restore if still absent')
         return record('backup-files-review', 'tr', { path: row.path, destination: row.destination, size: size(row.bytes), action })
       }), t('No file was selected.'), 4)
       fact('count-restore', String(view.counts.restore)); fact('count-present', String(view.counts.present)); fact('count-refused', String(view.counts.refused)); fact('planned', technical(size(view.quota.plannedBytes)))
@@ -245,18 +248,18 @@ function bindWhmBackupFiles(): void {
       note(view.counts.failed || view.verificationRequired ? 'failed' : 'read', summary + (view.verificationRequired ? ' ' + t('Some results require inspection of the account home.') : view.complete ? '' : ' ' + t('Continue the restore for the remaining files.')))
     })
 
-    account.addEventListener('change', () => {
-      if (busy) return
-      username = account.value; opened = null; directory = ''; selected.clear(); invalidate(); resetResults(); renderArchives([]); renderEntries()
-      resetFacts(['archive', 'integrity', 'sha256']); folderView.textContent = 'restored-…'
-      if (!username) { step('account'); sync(); return }
-      const chosen = username
-      void run(t('Reading backups…'), async () => {
+    const listArchives = (chosen: string): Promise<void> => run(t('Reading backups…'), async () => {
         const listing = readBackupFilesReply('archives', await transport!('GET', base()), { username: chosen })
         renderArchives(listing.archives); step('backup')
         note('read', !listing.archives.length ? t('This account has no backups in the server backup store.')
           : listing.truncated ? t('Showing the newest 200 of {total} backups. Open one to browse its files.', { total: listing.total }) : t('Open a backup to browse its files.'))
-      })
+    })
+    account?.addEventListener('change', () => {
+      if (busy) return
+      username = account!.value; opened = null; directory = ''; selected.clear(); invalidate(); resetResults(); renderArchives([]); renderEntries()
+      resetFacts(['archive', 'integrity', 'sha256']); folderView.textContent = 'restored-…'
+      if (!username) { step('account'); sync(); return }
+      void listArchives(username)
     })
     archives.addEventListener('click', event => {
       const button = (event.target as Element).closest<HTMLButtonElement>('button[data-file]')
@@ -309,11 +312,12 @@ function bindWhmBackupFiles(): void {
     restoreButton.addEventListener('click', () => { if (!restoreButton.disabled) void restore() })
     more.addEventListener('click', () => { if (!more.disabled) void restore() })
 
+    if (owner) { void listArchives(username); return }
     void run(t('Reading accounts…'), async () => {
       const list = readBackupFilesReply('accounts', await transport!('GET', '/api/backups/files'))
       const placeholder = record('backup-files-option', 'option', { label: list.length ? t('Choose an account') : t('No active accounts are visible') }) as HTMLOptionElement
       placeholder.value = ''
-      account.replaceChildren(placeholder, ...list.map(item => { const option = record('backup-files-option', 'option', { label: item.username + ' · ' + item.primaryDomain }) as HTMLOptionElement; option.value = item.username; return option }))
+      account!.replaceChildren(placeholder, ...list.map(item => { const option = record('backup-files-option', 'option', { label: item.username + ' · ' + item.primaryDomain }) as HTMLOptionElement; option.value = item.username; return option }))
       note('read', list.length ? t('Choose an account to list its backups.') : t('No active accounts are visible to you.'))
     })
   })

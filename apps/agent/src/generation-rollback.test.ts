@@ -36,7 +36,7 @@ async function fixture() {
   return { state, db, root, executor, reconciler, target, targetSource, current, snapshot, request, authorize, restore }
 }
 describe('guarded generation rollback through actual state and generation stores', () => {
-  it('returns the actual new active generation while preserving reviewed target identity and source', async () => {
+  it('returns the actual new active generation while preserving reviewed target identity and source', { tags: ['slow'] }, async () => {
     const f = await fixture(), result = await f.restore()
     expect(result.status).toBe('applied'); expect(result.generation!.id).toBeGreaterThan(f.current.id)
     expect(result.generation!.id).not.toBe(f.target.id)
@@ -82,7 +82,7 @@ describe('guarded generation rollback through actual state and generation stores
     expect((await f.state.store.getServerSettings())!.sshPort).toBe(2200)
     expect((await latestActive(f.db.db))!.id).toBe(f.current.id)
   })
-  it('preserves the real failed candidate and previous active host generation when syntax validation fails', async () => {
+  it('preserves the real failed candidate and previous active host generation when syntax validation fails', { tags: ['slow'] }, async () => {
     const f = await fixture(); f.executor.failConfigTest('sshd', 'declared configuration test failure')
     const result = await f.restore()
     expect(result.status).toBe('failed'); expect(result.generation!.status).toBe('failed')

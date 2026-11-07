@@ -12,7 +12,6 @@ const FIELDS: Readonly<Record<MailPolicyPage, readonly Field[]>> = {
     { key: 'greylisting', label: msgid('Greylisting'), kind: 'check', help: msgid('Ask unknown senders to retry later. Needs rspamd.') },
     { key: 'greylistScore', label: msgid('Greylist at score'), kind: 'number', step: 0.5, min: 0.5, max: 100 },
     { key: 'blockedDomains', label: msgid('Blocked sender domains'), kind: 'lines', help: msgid('One domain per line, at most 500. Mail from these domains is refused.') },
-    { key: 'countries', label: msgid('Filter incoming mail by country'), kind: 'text', help: msgid('Country filtering needs a GeoIP country database, which this server does not provide.') },
   ],
   relay: [
     { key: 'enabled', label: msgid('Send outgoing mail through a relay'), kind: 'check' },
@@ -42,7 +41,7 @@ const NOTES: Record<MailPolicyPage, string> = {
   spam: msgid('xPanel writes the thresholds to the detected filter (rspamd local.d files or a SpamAssassin site file), checks them and reloads the filter. While filtering is on, the configuration generation adds the filter to Postfix after OpenDKIM (rspamd directly, SpamAssassin through spamass-milter).'),
   relay: msgid('xPanel sets relayhost, a TLS policy for the relay and, when a username is saved, a SASL password table readable only by root.'),
   bcc: msgid('xPanel sets always_bcc and the recipient and sender BCC tables. Account archive copies use the same tables; a rule here wins over an archive for the same domain.'),
-  marketing: msgid('These Postfix limits apply to every SMTP client, including other mail servers. xPanel does not send campaigns.'),
+  marketing: msgid('These Postfix limits apply to every SMTP client, including other mail servers. Subscriber groups, campaigns and automation flows follow below.'),
 }
 
 export function renderV2WhmMailPolicy(input: WhmMailPageInput, kind: MailPolicyPage): string {

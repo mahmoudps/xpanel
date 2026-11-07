@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createTestStateStore } from '@xpanel/state'
 import { buildReview, createTransferSession, transition } from '@xpanel/lifecycle'
 import type { TransferEvent } from '@xpanel/lifecycle'
+import { readAccountEdgeState } from '../../agent/src/account-edge.ts'
 import { createTransferExecution, renamePrefixed, transferZoneRecords } from './lifecycle-transfer-execution.ts'
 import type { TransferExecutionDeps } from './lifecycle-transfer-execution.ts'
 import { signTransferManifest } from './acct-transfer-source.ts'
@@ -19,8 +20,11 @@ const caller = { principal: { kind: 'root', id: randomUUID(), username: 'root' }
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0)) await close() })
 
+const EDGE = { ipBlocker: { version: 1, entries: ['203.0.113.7'], updatedAt: '2026-10-29T00:00:00.000Z' }, cache: { version: 1, enabled: false, epoch: null, purgedAt: null, updatedAt: '2026-10-29T00:00:00.000Z' },
+  leech: { version: 1, folders: [{ path: 'public_html/members', maxLogins: 3, redirectUrl: 'https://example.test/shared', alertEmail: null, disableUsers: false }], updatedAt: '2026-10-29T00:00:00.000Z' } } satisfies TransferAccountBundle['edge']
 const bundleOf = (username: string): TransferAccountBundle => ({
-  account: { username, home: '/home/' + username, primaryDomain: username + '.example.test', contactEmail: 'owner@example.test', shell: 'jailed', ipv4: '203.0.113.5' },
+  account: { username, home: '/home/' + username, primaryDomain: username + '.example.test', contactEmail: 'owner@example.test', shell: 'jailed', ipv4: '203.0.113.5',
+    limits: { resources: { diskMb: 2000, bandwidthMbMonth: 'unlimited' } }, logs: { archive: false, removePreviousMonthArchive: false, retentionDays: 7 } },
   plan: { name: 'gold', resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
     caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 4, forwarders: 4, mailingLists: 5, ftpAccounts: 5, databases: 5, phpWorkers: 5 }, dedicatedIp: false, shell: 'jailed', defaultMailboxQuotaMb: 100 } as never,
   domains: [
@@ -29,10 +33,11 @@ const bundleOf = (username: string): TransferAccountBundle => ({
   ],
   databases: [{ name: username + '_wp', artifact: 'db-' + username + '_wp.sql' }],
   databaseUsers: [{ name: username + '_wpuser', authPlugin: 'mysql_native_password', authString: '*' + 'A'.repeat(40), grants: [{ database: username + '_wp', privileges: ['SELECT', 'INSERT'] }] }],
-  mailboxes: [{ login: 'info@' + username + '.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH }],
+  mailboxes: [{ id: username === 'alice' ? 'aaaaaaaa-0000-4000-8000-000000000001' : 'aaaaaaaa-0000-4000-8000-000000000002', login: 'info@' + username + '.example.test', services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html', passwordHash: HASH }],
   zones: [{ name: username + '.example.test', records: [{ name: '@', type: 'A', ttl: 300, content: '203.0.113.5', priority: null }, { name: '@', type: 'NS', ttl: 86400, content: 'ns1.source.example.', priority: null }, { name: '@', type: 'MX', ttl: 300, content: 'mail.' + username + '.example.test.', priority: 10 }] }],
   cron: [{ schedule: '@daily', command: 'php /home/' + username + '/public_html/cron.php', comment: 'nightly', enabled: true }],
   certificates: [{ names: [username + '.example.test'], cert: 'cert-0.pem', key: 'key-0.pem' }],
+  edge: EDGE,
 })
 const artifacts = (username: string) => ['home.tar.gz', 'db-' + username + '_wp.sql', 'cert-0.pem', 'key-0.pem'].map(name => ({ name, bytes: 10, sha256: 'c'.repeat(64) }))
 const signed = (username: string, token = TOKEN) => {
@@ -91,7 +96,7 @@ const fixture = async (options: { withPlan?: boolean; failTask?: string; badSign
     await execution.run(caller, s, buildReview(s), async (event, result) => { events.push(event); if (result) results[event.account] = result; if (event.phase === 'done' || event.phase === 'failed') done++ }, async () => done >= stopAfter)
   }
   for (const name of options.existing ?? []) await deps.createAccount(caller, { username: name, primaryDomain: name + '.local.test', planId: (await store.listPlans())[0]!.id })
-  return { store, calls, events, results, run, execution, applied: () => applied }
+  return { state, store, calls, events, results, run, execution, applied: () => applied }
 }
 
 describe('server-to-server transfer execution', () => {
@@ -101,6 +106,10 @@ describe('server-to-server transfer execution', () => {
     expect(f.events.map(event => event.type === 'progress' ? event.phase : event.type)).toEqual(['exporting', 'copying', 'importing', 'reconciling', 'done'])
     const account = (await f.store.getAccountByUsername('alice2'))!
     const domains = (await f.store.listDomains()).filter(domain => domain.accountId === account.id)
+    // IP Blocker, cache and Leech Protection files are written again under the new account id
+    expect(await readAccountEdgeState(f.store.rootDir, account.id)).toEqual(EDGE)
+    // the account's own limits and archive settings travel with it
+    expect(account).toMatchObject({ limits: { resources: { diskMb: 2000, bandwidthMbMonth: 'unlimited' } }, logs: { archive: false, retentionDays: 7 } })
     expect(domains.map(domain => [domain.name, domain.docRoot, domain.php.version]).sort()).toEqual([['alice.example.test', '/home/alice2/public_html', '8.2'], ['blog.alice.example.test', '/home/alice2/public_html/blog', '8.3']])
     const snapshot = await f.store.readSnapshot()
     expect(snapshot.databases.filter(db => db.accountId === account.id).map(db => db.name)).toEqual(['alice2_wp'])
@@ -117,8 +126,10 @@ describe('server-to-server transfer execution', () => {
       'DELETE /api/transfers/source/accounts/alice/package/' + PKG, 'audit transfer.account.imported']))
     expect(f.results.alice).toMatchObject({ domains: ['alice.example.test', 'blog.alice.example.test'], databases: ['alice2_wp'], mailboxes: 1, zones: ['alice.example.test'], cronJobs: 1, certificates: 1, rolledBack: false, home: { compared: true } })
     expect(f.applied()).toBe(2)
+    // the mailbox's calendars arrive in the home under this id
+    expect((await f.state.store.readSnapshot()).serviceUsers.find(user => user.login === 'info@alice.example.test')?.id).toBe('aaaaaaaa-0000-4000-8000-000000000001')
   })
-  it('removes the partial account when the host restore fails and goes on with the next account', async () => {
+  it('removes the partial account when the host restore fails and goes on with the next account', { tags: ['slow'] }, async () => {
     const f = await fixture({ failTask: 'restore' })
     await f.run(sessionFor(['alice', 'bob'], { usernames: [], plans: ['gold'] }))
     const failed = f.events.filter(event => event.type === 'progress' && event.phase === 'failed') as Extract<TransferEvent, { type: 'progress' }>[]
@@ -137,9 +148,9 @@ describe('server-to-server transfer execution', () => {
     expect(f.calls.some(call => call.startsWith('remove'))).toBe(false)
     expect((await f.store.getAccountByUsername('alice'))?.id).toBe(kept.id)
     // restart recovery removes only the identity this run recorded, never an account found by name
-    expect(await f.execution.recover(caller, { targetUsername: 'alice' } as never, undefined)).toBe(false)
+    expect(await f.execution.recover(caller, { targetUsername: 'alice' } as never, undefined, {} as never)).toBe(false)
     expect((await f.store.getAccountByUsername('alice'))?.id).toBe(kept.id)
-    expect(await f.execution.recover(caller, { targetUsername: 'alice' } as never, { createdAccountId: kept.id })).toBe(true)
+    expect(await f.execution.recover(caller, { targetUsername: 'alice' } as never, { createdAccountId: kept.id }, {} as never)).toBe(true)
   })
   it('changes nothing for an account whose package manifest is not signed with the stored token', async () => {
     const f = await fixture({ badSignature: 'alice' })

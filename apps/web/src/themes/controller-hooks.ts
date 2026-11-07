@@ -4,6 +4,459 @@ import type { ControllerDeclaration } from './controller-conformance.ts'
 export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclaration[] = [
   {
     "applicableRoutes": [
+      "/whm/security/ssh"
+    ],
+    "id": "whm-ssh-policy",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-whm-ssh-policy]",
+      "input[data-whm-ssh-port]",
+      "select[data-whm-ssh-auth]",
+      "select[data-whm-ssh-root]",
+      "button[data-whm-ssh-apply]",
+      "[data-whm-ssh-policy-status]",
+      "button[data-whm-ssh-start]",
+      "button[data-whm-ssh-stop]",
+      "[data-whm-ssh-service-status]",
+      "input[data-whm-ssh-alarm]",
+      "[data-whm-ssh-alarm-status]",
+      "[data-whm-ssh-fact=\"active\"]",
+      "[data-whm-ssh-fact=\"enabled\"]",
+      "[data-whm-ssh-fact=\"today-accepted\"]",
+      "[data-whm-ssh-fact=\"today-failed\"]",
+      "[data-whm-ssh-fact=\"total-accepted\"]",
+      "[data-whm-ssh-fact=\"total-failed\"]"
+    ],
+    "rootSelector": "[data-whm-detail-route=\"/whm/security/ssh\"]",
+    "rootRequired": false,
+    "qualifiedOnly": false,
+    "variants": []
+  },
+  {
+    "applicableRoutes": [
+      "/whm/security/firewall"
+    ],
+    "id": "whm-firewall-policy",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "input[data-whm-firewall-enabled]",
+      "[data-whm-firewall-policy-status]"
+    ],
+    "rootSelector": "[data-whm-firewall-policy]",
+    "rootRequired": false,
+    "qualifiedOnly": false,
+    "variants": []
+  },
+  {
+    "applicableRoutes": [
+      "/whm/security/isolation"
+    ],
+    "id": "whm-isolation-policy",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "input[data-whm-isolation-switch=\"privateTmp\"]",
+      "input[data-whm-isolation-switch=\"hiddenHomes\"]",
+      "input[data-whm-isolation-switch=\"systemView\"]",
+      "textarea[data-whm-isolation-exceptions]",
+      "button[data-whm-isolation-save]",
+      "button[data-whm-isolation-verify]",
+      "[data-whm-isolation-status]",
+      "tbody[data-whm-isolation-proof]"
+    ],
+    "rootSelector": "[data-whm-isolation-policy]",
+    "rootRequired": false,
+    "qualifiedOnly": false,
+    "variants": []
+  },
+  {
+    "applicableRoutes": [
+      "/domains/site-settings"
+    ],
+    "id": "account-site-settings",
+    "nestedScopes": [],
+    "optionalSelectors": [
+      "[data-site-selector]"
+    ],
+    "requiredSelectors": [
+      "[data-site-deny-add]",
+      "[data-site-deny-directory]",
+      "[data-site-deny-extensions]",
+      "[data-site-deny-name]",
+      "[data-site-deny-rows]",
+      "[data-site-docroot]",
+      "[data-site-expiry]",
+      "[data-site-isolated]",
+      "[data-site-no-expiry]",
+      "[data-site-quota-state]",
+      "[data-site-quota-unlimited]",
+      "[data-site-quota]",
+      "[data-site-reminder-address]",
+      "[data-site-reminder-days]",
+      "[data-site-reset]",
+      "[data-site-review-ack]",
+      "[data-site-review-rows]",
+      "[data-site-run-directory]",
+      "[data-site-save]",
+      "[data-site-start]",
+      "[data-site-state]",
+      "[data-site-status]",
+      "[data-site-stop]",
+      "[data-site-stopped-message]",
+      "[data-site-traffic-enabled]",
+      "[data-site-traffic-ip]",
+      "[data-site-traffic-preset]",
+      "[data-site-traffic-rate]",
+      "[data-site-traffic-site]",
+      "[data-site-visitor-log]"
+    ],
+    "rootSelector": "[data-site-settings]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-site-stop]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-start]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-save]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-reset]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-deny-add]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-docroot]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-run-directory]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-isolated]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-visitor-log]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-expiry]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-no-expiry]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-quota]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-quota-unlimited]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-reminder-address]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-reminder-days]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-traffic-enabled]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-traffic-site]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-traffic-ip]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-traffic-rate]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-deny-name]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-deny-directory]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-deny-extensions]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-review-ack]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-stopped-message]",
+        "tags": [
+          "textarea"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-traffic-preset]",
+        "tags": [
+          "select"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-deny-rows]",
+        "tags": [
+          "tbody"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-site-review-rows]",
+        "tags": [
+          "tbody"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/whm/domains"
+    ],
+    "id": "whm-domain-bulk",
+    "rootRequired": false,
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-domain-bulk-action]",
+      "[data-domain-bulk-count]",
+      "[data-domain-bulk-results]",
+      "[data-domain-bulk-run]",
+      "[data-domain-bulk-status]",
+      "[data-domain-bulk-value]",
+      "[data-domain-select-all]"
+    ],
+    "rootSelector": "[data-domain-bulk]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-domain-bulk-run]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-domain-bulk-action]",
+        "tags": [
+          "select"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-domain-bulk-value]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/whm/dns"
+    ],
+    "id": "whm-dns-file",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-dns-file-cancel]",
+      "[data-dns-file-export]",
+      "[data-dns-file-import]",
+      "[data-dns-file-input]",
+      "[data-dns-file-preview]",
+      "[data-dns-file-rows]",
+      "[data-dns-file-status]",
+      "[data-dns-file-text]"
+    ],
+    "rootSelector": "[data-dns-file]",
+    "variants": [],
+    "elements": []
+  },
+  {
+    "applicableRoutes": [
+      "/metrics/web-stats"
+    ],
+    "id": "web-stats-metrics",
+    "nestedScopes": [],
+    "optionalSelectors": [
+      "input[data-web-stats-choice]"
+    ],
+    "requiredSelectors": [
+      "[data-web-stats-metrics-save]",
+      "[data-web-stats-metrics-status]"
+    ],
+    "rootSelector": "[data-web-stats-metrics]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-web-stats-metrics-save]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/whm/accounts"
+    ],
+    "id": "web-stats-locks",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-web-stats-lock]",
+      "[data-web-stats-locks-save]",
+      "[data-web-stats-locks-status]"
+    ],
+    "rootRequired": false,
+    "rootSelector": "[data-web-stats-locks]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-web-stats-locks-save]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/whm/monitoring/logs"
+    ],
+    "id": "web-stats-engines",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-web-stats-policy]",
+      "[data-web-stats-save]",
+      "[data-web-stats-process]",
+      "[data-web-stats-process-user]",
+      "[data-web-stats-status]",
+      "[data-web-stats-summary]",
+      "[data-web-stats-behind]"
+    ],
+    "rootSelector": "[data-web-stats-engines]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-web-stats-save]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-web-stats-process]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
       "/files/backup"
     ],
     "id": "account-backup",
@@ -296,6 +749,8 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
     "optionalSelectors": [
       "[data-git-checkout]",
       "[data-git-clone]",
+      "[data-git-deploy]",
+      "[data-git-deployed]",
       "[data-git-init]",
       "[data-git-inspect]",
       "[data-git-pull]",
@@ -371,6 +826,14 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
       },
       {
         "selector": "[data-git-init]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first",
+        "required": false
+      },
+      {
+        "selector": "[data-git-deploy]",
         "tags": [
           "button"
         ],
@@ -686,60 +1149,26 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
       "/software/packages"
     ],
     "id": "account-packages",
-    "nestedScopes": [],
-    "optionalSelectors": [],
     "requiredSelectors": [
-      "[data-packages-available]",
-      "[data-packages-capability]",
+      "[data-packages-library]",
+      "[data-packages-php]",
+      "[data-packages-snippet]",
       "[data-packages-installed]",
-      "[data-packages-inventory]",
-      "[data-packages-recover]",
+      "[data-packages-select]",
+      "[data-package-op=\"update\"]",
+      "[data-package-op=\"reinstall\"]",
+      "[data-package-op=\"remove\"]",
+      "[data-packages-docs]",
       "[data-packages-refresh]",
+      "[data-packages-name]",
       "[data-packages-search]",
+      "[data-package-op=\"install\"]",
+      "[data-packages-search-run]",
+      "[data-packages-results]",
+      "[data-packages-system]",
       "[data-packages-status]"
     ],
-    "rootSelector": "[data-account-packages]",
-    "variants": [],
-    "elements": [
-      {
-        "selector": "[data-packages-recover]",
-        "tags": [
-          "button"
-        ],
-        "occurrence": "first"
-      },
-      {
-        "selector": "[data-packages-refresh]",
-        "tags": [
-          "button"
-        ],
-        "occurrence": "first"
-      },
-      {
-        "selector": "[data-packages-search]",
-        "tags": [
-          "input"
-        ],
-        "occurrence": "first"
-      },
-      {
-        "selector": "[data-package-op]",
-        "tags": [
-          "button"
-        ],
-        "occurrence": "every",
-        "required": false
-      },
-      {
-        "selector": "input,button",
-        "tags": [
-          "button",
-          "input"
-        ],
-        "occurrence": "every",
-        "required": false
-      }
-    ]
+    "rootSelector": "[data-account-packages]"
   },
   {
     "applicableRoutes": [
@@ -832,6 +1261,118 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
         "required": false
       }
     ],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/mail/settings/preferences",
+      "/preferences",
+      "/preferences/language"
+    ],
+    "id": "personal-preferences",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-personal-status]",
+      "[data-personal-save]"
+    ],
+    "rootSelector": "[data-personal-preferences]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/security/account"
+    ],
+    "id": "account-team-audit",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-team-audit-rows]",
+      "[data-team-audit-status]",
+      "[data-team-audit-read]",
+      "[data-team-audit-search]",
+      "[data-team-audit-more]"
+    ],
+    "rootSelector": "[data-team-audit]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/server-information"
+    ],
+    "id": "server-information",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-server-services]",
+      "[data-server-info-status]",
+      "[data-server-info-read]"
+    ],
+    "rootSelector": "[data-server-information]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/software/packages"
+    ],
+    "id": "perl-modules",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-perl-install]",
+      "[data-perl-module]",
+      "[data-perl-rows]",
+      "[data-perl-status]",
+      "[data-perl-log-read]",
+      "[data-perl-log]",
+      "[data-perl-search]",
+      "[data-perl-search-run]",
+      "[data-perl-search-rows]",
+      "[data-perl-search-status]"
+    ],
+    "rootSelector": "[data-perl-modules]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/software/optimize"
+    ],
+    "id": "site-compression",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-compression-mode]",
+      "[data-compression-types]",
+      "[data-compression-save]",
+      "[data-compression-status]"
+    ],
+    "rootSelector": "[data-site-compression]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/files/backup"
+    ],
+    "id": "website-backups",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-website-domain]",
+      "[data-website-rows]",
+      "[data-website-status]",
+      "[data-website-create]",
+      "[data-website-databases]",
+      "[data-website-mode]",
+      "[data-website-fit]",
+      "[data-website-notify]"
+    ],
+    "rootSelector": "[data-website-backups]",
+    "variants": [],
     "conditionalRequirements": []
   },
   {
@@ -1742,6 +2283,21 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
           "[data-runtime-action=\"app-deps\"]",
           "[data-runtime-action=\"app-log\"]",
           "[data-runtime-action=\"deps-log\"]",
+          "[data-runtime-input=\"web-name\"]",
+          "[data-runtime-input=\"web-kind\"]",
+          "[data-runtime-input=\"web-url\"]",
+          "[data-runtime-input=\"web-branch\"]",
+          "[data-runtime-input=\"web-subfolder\"]",
+          "[data-runtime-input=\"web-domain\"]",
+          "[data-runtime-input=\"web-path\"]",
+          "[data-runtime-input=\"web-category\"]",
+          "[data-runtime-input=\"web-framework\"]",
+          "[data-runtime-input=\"web-build\"]",
+          "[data-runtime-input=\"web-start\"]",
+          "[data-runtime-input=\"web-output\"]",
+          "[data-runtime-action=\"web-stage\"]",
+          "[data-runtime-webapp]",
+          "[data-runtime-detected]",
           "[data-runtime-action=\"env-add\"]",
           "[data-runtime-apps]",
           "[data-runtime-env]"
@@ -2054,7 +2610,7 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
       "/advanced/indexes",
       "/advanced/mime-types",
       "/security/hotlink",
-      "/security/ip-blocker",
+      "/advanced/handlers",
       "/domains/redirects"
     ],
     "id": "account-web-directives",
@@ -2128,13 +2684,14 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
       },
       {
         "applicableRoutes": [
-          "/security/ip-blocker"
+          "/advanced/handlers"
         ],
         "requiredSelectors": [
           "[data-wd-add]",
-          "[data-wd-clear]"
+          "[data-wd-clear]",
+          "[data-wd-system]"
         ],
-        "rootSelector": "[data-web-directives=\"ip-blocker\"]",
+        "rootSelector": "[data-web-directives=\"handlers\"]",
         "id": "account-web-directives:variants:2",
         "elements": [
           {
@@ -5833,10 +6390,8 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
     "id": "ops-nodes-dynamic-36",
     "optionalSelectors": [],
     "requiredSelectors": [
+      "[data-ops-nodes-code]",
       "[data-ops-nodes-label]",
-      "[data-ops-nodes-host]",
-      "[data-ops-nodes-port]",
-      "[data-ops-nodes-fingerprint]",
       "[data-ops-nodes-role]"
     ],
     "rootSelector": "[data-ops-nodes-workspace]",
@@ -5851,25 +6406,7 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
         "occurrence": "first"
       },
       {
-        "selector": "[data-ops-nodes-host]",
-        "tags": [
-          "input",
-          "select"
-        ],
-        "attributes": {},
-        "occurrence": "first"
-      },
-      {
-        "selector": "[data-ops-nodes-port]",
-        "tags": [
-          "input",
-          "select"
-        ],
-        "attributes": {},
-        "occurrence": "first"
-      },
-      {
-        "selector": "[data-ops-nodes-fingerprint]",
+        "selector": "[data-ops-nodes-code]",
         "tags": [
           "input",
           "select"
@@ -5895,12 +6432,21 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
     "id": "ops-nodes-dynamic-37",
     "optionalSelectors": [],
     "requiredSelectors": [
-      "[data-ops-nodes-action=\"read\"]"
+      "[data-ops-nodes-action=\"read\"]",
+      "[data-ops-nodes-action=\"invite\"]"
     ],
     "rootSelector": "[data-ops-nodes-workspace]",
     "elements": [
       {
         "selector": "[data-ops-nodes-action=\"read\"]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {},
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-ops-nodes-action=\"invite\"]",
         "tags": [
           "button"
         ],
@@ -6106,6 +6652,7 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
   },
   {
     "applicableRoutes": [
+      "/files/backup",
       "/whm/backups/files"
     ],
     "id": "whm-backup-files-dynamic-80",
@@ -6662,7 +7209,12 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
           "[data-whm-db-fact=\"users\"]",
           "[data-whm-db-fact=\"grants\"]",
           "[data-whm-db-fact=\"savedOnly\"]",
-          "[data-whm-db-fact=\"serverOnly\"]"
+          "[data-whm-db-fact=\"serverOnly\"]",
+          "[data-whm-db-maint-database]",
+          "[data-whm-db-maint-action]",
+          "[data-whm-db-maint-run]",
+          "[data-whm-db-maint-status]",
+          "[data-whm-db-rows=\"maintenance\"]"
         ],
         "rootAttributes": {
           "data-db-kind": "overview"
@@ -6705,7 +7257,15 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
           "[data-whm-db-fact=\"socket\"]",
           "[data-whm-db-fact=\"bind_address\"]",
           "[data-whm-db-fact=\"skip_networking\"]",
-          "[data-whm-db-fact=\"max_connections\"]"
+          "[data-whm-db-fact=\"max_connections\"]",
+          "[data-whm-db-root-password]",
+          "[data-db-root-fact=\"clientFile\"]",
+          "[data-db-root-new]",
+          "[data-db-root-confirm]",
+          "[data-db-root-strength]",
+          "[data-db-root-generate]",
+          "[data-db-root-submit]",
+          "[data-db-root-status]"
         ],
         "rootAttributes": {
           "data-db-kind": "servers"
@@ -9185,6 +9745,35 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
     "applicableRoutes": [
       "/whm/security/panel-access"
     ],
+    "id": "panel-access-gate",
+    "requiredSelectors": [
+      "[data-sec-status]",
+      "[data-sec-result]",
+      "[data-sec-field=\"pa-origin-xwhm\"]",
+      "[data-sec-field=\"pa-trial\"]",
+      "[data-sec-field=\"pa-entrance-url\"]",
+      "[data-sec-field=\"pa-temp-url\"]",
+      "[data-sec-input=\"pa-port-xwhm\"]",
+      "[data-sec-input=\"pa-host-xwhm\"]",
+      "[data-sec-input=\"pa-entrance-path\"]",
+      "[data-sec-input=\"pa-response\"]",
+      "[data-sec-input=\"pa-basic-username\"]",
+      "[data-sec-input=\"pa-temp-lifetime\"]",
+      "[data-sec-action=\"pa-binding-save\"]",
+      "[data-sec-action=\"pa-confirm\"]",
+      "[data-sec-action=\"pa-revert\"]",
+      "[data-sec-action=\"pa-gate-save\"]",
+      "[data-sec-action=\"pa-temp-create\"]",
+      "[data-sec-action=\"pa-temp-revoke\"]",
+      "[data-sec-action=\"pa-reload\"]",
+      "[data-sec-rows=\"pa-temporary\"]"
+    ],
+    "rootSelector": "[data-panel-access]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/security/panel-access"
+    ],
     "id": "sec-kit-panel-access",
     "requiredSelectors": [
       "[data-sec-status]",
@@ -9232,6 +9821,66 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
       "data-sec-page": "dns-providers"
     },
     "rootSelector": "[data-sec-workspace]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/databases/servers"
+    ],
+    "id": "whm-db-profiles",
+    "requiredSelectors": [
+      "[data-sec-status]",
+      "[data-sec-result]",
+      "[data-sec-field=\"profile-active\"]",
+      "[data-sec-rows=\"profiles\"]",
+      "[data-sec-input=\"profile-name\"]",
+      "[data-sec-input=\"profile-host\"]",
+      "[data-sec-input=\"profile-port\"]",
+      "[data-sec-input=\"profile-user\"]",
+      "[data-sec-input=\"profile-password\"]",
+      "[data-sec-input=\"profile-description\"]",
+      "[data-sec-input=\"profile-ca\"]",
+      "[data-sec-action=\"profiles-refresh\"]",
+      "[data-sec-action=\"profile-save\"]"
+    ],
+    "rootAttributes": {},
+    "rootSelector": "[data-db-profiles-workspace]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/dns/cluster"
+    ],
+    "id": "dns-cluster-members",
+    "requiredSelectors": [
+      "[data-sec-status]",
+      "[data-sec-result]",
+      "[data-sec-field=\"cluster-state\"]",
+      "[data-sec-field=\"cluster-pin\"]",
+      "[data-sec-field=\"issued-token\"]",
+      "[data-sec-input=\"cluster-enabled\"]",
+      "[data-sec-input=\"cluster-threshold\"]",
+      "[data-sec-input=\"member-name\"]",
+      "[data-sec-input=\"member-address\"]",
+      "[data-sec-input=\"member-port\"]",
+      "[data-sec-input=\"member-role\"]",
+      "[data-sec-input=\"member-pin\"]",
+      "[data-sec-input=\"member-token\"]",
+      "[data-sec-input=\"inbound-name\"]",
+      "[data-sec-input=\"inbound-address\"]",
+      "[data-sec-input=\"sync-mode\"]",
+      "[data-sec-input=\"sync-zone\"]",
+      "[data-sec-input=\"sync-missing\"]",
+      "[data-sec-rows=\"members\"]",
+      "[data-sec-rows=\"inbound\"]",
+      "[data-sec-rows=\"conflicts\"]",
+      "[data-sec-rows=\"sync\"]",
+      "[data-sec-action=\"cluster-refresh\"]",
+      "[data-sec-action=\"cluster-save\"]",
+      "[data-sec-action=\"member-add\"]",
+      "[data-sec-action=\"inbound-issue\"]",
+      "[data-sec-action=\"sync-run\"]"
+    ],
+    "rootAttributes": {},
+    "rootSelector": "[data-dns-cluster-workspace]"
   },
   {
     "applicableRoutes": [
@@ -9347,6 +9996,9 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
       "[data-sw-apps-domain-select]",
       "[data-sw-apps-expires]",
       "[data-sw-apps-installed]",
+      "[data-sw-apps-instance-select]",
+      "[data-sw-apps-instances]",
+      "[data-sw-apps-path-input]",
       "[data-sw-apps-previous]",
       "[data-sw-apps-recovery]",
       "[data-sw-apps-refresh]",
@@ -11272,7 +11924,12 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
     ],
     "id": "panel-home-desktop-filter",
     "documentAttributes": {
-      "data-ui-theme": { "oneOf": ["", "classic"] }
+      "data-ui-theme": {
+        "oneOf": [
+          "",
+          "classic"
+        ]
+      }
     },
     "optionalSelectors": [
       "#tool-filter-count",
@@ -11289,7 +11946,12 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
     ],
     "id": "panel-home-phone-filter",
     "documentAttributes": {
-      "data-ui-theme": { "oneOf": ["", "classic"] }
+      "data-ui-theme": {
+        "oneOf": [
+          "",
+          "classic"
+        ]
+      }
     },
     "optionalSelectors": [
       "#m-filter-count"
@@ -11305,7 +11967,12 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
     ],
     "id": "home-desktop-filter-ids",
     "documentAttributes": {
-      "data-ui-theme": { "oneOf": ["", "classic"] }
+      "data-ui-theme": {
+        "oneOf": [
+          "",
+          "classic"
+        ]
+      }
     },
     "relations": [
       {
@@ -11336,7 +12003,12 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
     ],
     "id": "home-phone-filter-ids",
     "documentAttributes": {
-      "data-ui-theme": { "oneOf": ["", "classic"] }
+      "data-ui-theme": {
+        "oneOf": [
+          "",
+          "classic"
+        ]
+      }
     },
     "relations": [
       {
@@ -11362,7 +12034,12 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
     ],
     "id": "home-group-controls-relation",
     "documentAttributes": {
-      "data-ui-theme": { "oneOf": ["", "classic"] }
+      "data-ui-theme": {
+        "oneOf": [
+          "",
+          "classic"
+        ]
+      }
     },
     "relations": [
       {
@@ -12126,30 +12803,6 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
     ]
   },
   {
-    "id": "account-web-field-controls:ip-blocker",
-    "rootSelector": "[data-web-directives=\"ip-blocker\"]",
-    "rootRequired": true,
-    "applicableRoutes": [
-      "/security/ip-blocker"
-    ],
-    "requiredSelectors": [
-      "[data-wd-field=\"address\"]"
-    ],
-    "elements": [
-      {
-        "selector": "[data-wd-field=\"address\"]",
-        "tags": [
-          "input"
-        ],
-        "attributes": {
-          "type": "text"
-        },
-        "occurrence": "first",
-        "required": true
-      }
-    ]
-  },
-  {
     "id": "account-web-field-controls:redirects",
     "rootSelector": "[data-web-directives=\"redirects\"]",
     "rootRequired": true,
@@ -12195,1744 +12848,1914 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
       }
     ]
   },
-{
-  "id": "ui-theme-preferences",
-  "rootSelector": "[data-ui-theme-preferences]",
-  "routeScope": {
-    "kind": "authenticated",
-    "surfaces": [
-      "xpanel",
-      "xwhm",
-      "xmail"
-    ]
-  },
-  "requiredSelectors": [
-    "form[data-ui-theme-form]",
-    "select[data-ui-theme-choice]",
-    "button[data-ui-theme-save]",
-    "button[data-ui-theme-reload]",
-    "[data-ui-theme-status]"
-  ],
-  "elements": [
-    {
-      "selector": "[data-ui-theme-save]",
-      "tags": [
-        "button"
-      ],
-      "attributes": {
-        "type": "submit"
-      },
-      "occurrence": "every"
-    },
-    {
-      "selector": "[data-ui-theme-reload]",
-      "tags": [
-        "button"
-      ],
-      "attributes": {
-        "type": "button"
-      },
-      "occurrence": "every"
-    }
-  ],
-  "semanticRelations": [
-    {
-      "selector": "[data-ui-theme-choice]",
-      "ancestorHook": "form[data-ui-theme-form]",
-      "tag": "select"
-    },
-    {
-      "selector": "[data-ui-theme-save]",
-      "ancestorHook": "form[data-ui-theme-form]",
-      "tag": "button"
-    }
-  ],
-  "variants": [
-    {
-      "id": "ui-theme-preferences:unique:1",
-      "rootSelector": "[data-ui-theme-preferences]",
-      "scopeSelector": "form[data-ui-theme-form]",
-      "scopeCount": 1,
-      "requiredSelectors": []
-    },
-    {
-      "id": "ui-theme-preferences:unique:2",
-      "rootSelector": "[data-ui-theme-preferences]",
-      "scopeSelector": "select[data-ui-theme-choice]",
-      "scopeCount": 1,
-      "requiredSelectors": []
-    },
-    {
-      "id": "ui-theme-preferences:unique:3",
-      "rootSelector": "[data-ui-theme-preferences]",
-      "scopeSelector": "button[data-ui-theme-save]",
-      "scopeCount": 1,
-      "requiredSelectors": []
-    },
-    {
-      "id": "ui-theme-preferences:unique:4",
-      "rootSelector": "[data-ui-theme-preferences]",
-      "scopeSelector": "button[data-ui-theme-reload]",
-      "scopeCount": 1,
-      "requiredSelectors": []
-    },
-    {
-      "id": "ui-theme-preferences:unique:5",
-      "rootSelector": "[data-ui-theme-preferences]",
-      "scopeSelector": "[data-ui-theme-status]",
-      "scopeCount": 1,
-      "requiredSelectors": []
-    }
-  ]
-},
-{
-  "id": "panel-home-tools",
-  "rootSelector": "[data-panel-home]",
-  "applicableRoutes": [
-    "/home"
-  ],
-  "qualifiedOnly": false,
-  "ownScopeOnly": true,
-  "requiredSelectors": [
-    "input[data-home-filter]",
-    "#tool-filter-count",
-    "[data-tool-section]",
-    "[data-tool-empty]"
-  ],
-  "optionalSelectors": [
-    "[data-tool-group]",
-    "[data-tool]",
-    "[data-group-count]",
-    "[data-home-empty-title]",
-    "[data-home-filter-clear]"
-  ],
-  "elements": [
-    {
-      "selector": "[data-home-filter]",
-      "tags": [
-        "input"
-      ],
-      "occurrence": "every"
-    },
-    {
-      "selector": "[data-home-filter-clear]",
-      "tags": [
-        "button"
-      ],
-      "required": false,
-      "occurrence": "every"
-    }
-  ],
-  "relations": [
-    {
-      "targetId": "tool-filter-count",
-      "sameRoot": "[data-panel-home]",
-      "targetMustBeUnique": true,
-      "required": true
-    }
-  ],
-  "variants": [
-    {
-      "id": "panel-home-tools:unique:1",
-      "rootSelector": "[data-panel-home]",
-      "scopeSelector": "input[data-home-filter]",
-      "scopeCount": 1,
-      "requiredSelectors": [],
-      "ownScopeOnly": true
-    },
-    {
-      "id": "panel-home-tools:unique:2",
-      "rootSelector": "[data-panel-home]",
-      "scopeSelector": "#tool-filter-count",
-      "scopeCount": 1,
-      "requiredSelectors": [],
-      "ownScopeOnly": true
-    },
-    {
-      "id": "panel-home-tools:unique:3",
-      "rootSelector": "[data-panel-home]",
-      "scopeSelector": "[data-tool-section]",
-      "scopeCount": 1,
-      "requiredSelectors": [],
-      "ownScopeOnly": true
-    },
-    {
-      "id": "panel-home-tools:unique:4",
-      "rootSelector": "[data-panel-home]",
-      "scopeSelector": "[data-tool-empty]",
-      "scopeCount": 1,
-      "requiredSelectors": [],
-      "ownScopeOnly": true
-    }
-  ],
-  "documentAttributes": {
-    "data-ui-theme": "v2"
-  }
-},
-{
-  "id": "whm-transfer-import-projections",
-  "rootSelector": "[data-transfer-workspace]",
-  "applicableRoutes": [
-    "/whm/transfers"
-  ],
-  "lookupScope": {
-    "kind": "closest",
-    "selector": "[data-whm-detail-route]"
-  },
-  "scopeSelector": "[data-whm-detail-section=\"transfer-import\"]",
-  "scopeCount": 1,
-  "requiredSelectors": [
-    "tbody[data-transfer-import-warnings]",
-    "tbody[data-transfer-import-domains], [data-transfer-import-part=\"domains\"] tbody",
-    "tbody[data-transfer-import-home], [data-transfer-import-part=\"home\"] tbody",
-    "tbody[data-transfer-import-databases], [data-transfer-import-part=\"databases\"] tbody",
-    "tbody[data-transfer-import-mail], [data-transfer-import-part=\"mail\"] tbody",
-    "tbody[data-transfer-import-dns], [data-transfer-import-part=\"dns\"] tbody"
-  ],
-  "optionalSelectors": [
-    "[data-transfer-import-observation]"
-  ]
-},
-{
-  "id": "account-mailing-lists",
-  "rootSelector": "[data-mailing-lists]",
-  "applicableRoutes": [
-    "/email/mailing-lists"
-  ],
-  "requiredSelectors": [
-    "tbody[data-mailing-lists-rows]",
-    "[data-mailing-list-status]",
-    "input[data-ml-name]",
-    "select[data-ml-domain]",
-    "textarea[data-ml-members]",
-    "select[data-ml-moderation]",
-    "input[data-ml-archive]",
-    "button[data-ml-create]"
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"account-mailing-list-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "[data-xp-slot=\"address\"]",
-        "[data-xp-slot=\"members\"]",
-        "[data-xp-slot=\"moderation\"]",
-        "[data-xp-slot=\"archive\"]",
-        "button[data-xp-slot=\"remove\"]"
+  {
+    "id": "ui-theme-preferences",
+    "rootSelector": "[data-ui-theme-preferences]",
+    "routeScope": {
+      "kind": "authenticated",
+      "surfaces": [
+        "xpanel",
+        "xwhm",
+        "xmail"
       ]
     },
-    {
-      "templateSelector": "template[data-xp-template=\"account-mailing-list-empty\"]",
-      "requiredSelectors": [
-        "tr",
-        "[data-xp-slot=\"message\"]"
-      ]
-    }
-  ]
-},
-{
-  "id": "account-sessions",
-  "rootSelector": "[data-account-sessions]",
-  "requiredSelectors": [
-    "[data-sessions-rows]",
-    "[data-sessions-status]",
-    "button[data-sessions-revoke-others]"
-  ],
-  "applicableRoutes": [
-    "/security/account"
-  ],
-  "qualifiedOnly": false,
-  "routeScope": {
-    "kind": "authenticated",
-    "surfaces": [
-      "xpanel"
-    ]
-  },
-  "variants": [
-    {
-      "id": "account-sessions-card",
-      "rootSelector": "[data-account-sessions]",
-      "rootRequired": false,
-      "rootAttributeExclusions": {
-        "data-sessions-layout": "table"
+    "requiredSelectors": [
+      "form[data-ui-theme-form]",
+      "select[data-ui-theme-choice]",
+      "button[data-ui-theme-save]",
+      "button[data-ui-theme-reload]",
+      "[data-ui-theme-status]"
+    ],
+    "elements": [
+      {
+        "selector": "[data-ui-theme-save]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {
+          "type": "submit"
+        },
+        "occurrence": "every"
       },
-      "templateScopes": [
-        {
-          "templateSelector": "template[data-xp-template=\"account-session-row\"]",
-          "requiredSelectors": [
-            "article",
-            "[data-xp-slot=\"title\"]",
-            "[data-xp-slot=\"verification\"]",
-            "[data-xp-slot=\"network-label\"]",
-            "[data-xp-slot=\"network\"]",
-            "[data-xp-slot=\"client-label\"]",
-            "[data-xp-slot=\"client\"]",
-            "[data-xp-slot=\"last-active-label\"]",
-            "[data-xp-slot=\"last-active\"]",
-            "[data-xp-slot=\"expires-label\"]",
-            "[data-xp-slot=\"expires\"]",
-            "[data-xp-slot=\"actions\"]"
-          ]
+      {
+        "selector": "[data-ui-theme-reload]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {
+          "type": "button"
         },
-        {
-          "templateSelector": "template[data-xp-template=\"account-session-action\"]",
-          "requiredSelectors": [
-            "button",
-            "[data-xp-slot=\"label\"]"
-          ]
-        },
-        {
-          "templateSelector": "template[data-xp-template=\"account-session-empty\"]",
-          "requiredSelectors": [
-            "p",
-            "[data-xp-slot=\"message\"]"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "account-sessions-table",
-      "rootSelector": "[data-account-sessions]",
-      "rootRequired": false,
-      "rootAttributes": {
-        "data-sessions-layout": "table"
-      },
-      "requiredSelectors": [
-        "tbody[data-sessions-rows]"
-      ],
-      "templateScopes": [
-        {
-          "templateSelector": "template[data-xp-template=\"account-session-row\"]",
-          "requiredSelectors": [
-            "tr",
-            "[data-xp-slot=\"title\"]",
-            "[data-xp-slot=\"verification\"]",
-            "[data-xp-slot=\"network-label\"]",
-            "[data-xp-slot=\"network\"]",
-            "[data-xp-slot=\"client-label\"]",
-            "[data-xp-slot=\"client\"]",
-            "[data-xp-slot=\"last-active-label\"]",
-            "[data-xp-slot=\"last-active\"]",
-            "[data-xp-slot=\"expires-label\"]",
-            "[data-xp-slot=\"expires\"]",
-            "[data-xp-slot=\"actions\"]",
-            "[data-xp-slot=\"created-label\"]",
-            "[data-xp-slot=\"created\"]"
-          ]
-        },
-        {
-          "templateSelector": "template[data-xp-template=\"account-session-action\"]",
-          "requiredSelectors": [
-            "button[type=\"button\"]",
-            "[data-xp-slot=\"label\"]"
-          ]
-        },
-        {
-          "templateSelector": "template[data-xp-template=\"account-session-empty\"]",
-          "requiredSelectors": [
-            "tr",
-            "td[colspan=\"6\"][data-xp-slot=\"message\"]"
-          ]
-        }
-      ]
-    }
-  ]
-},
-{
-  "id": "account-password",
-  "rootSelector": "[data-account-password]",
-  "qualifiedOnly": false,
-  "applicableRoutes": [
-    "/security/account"
-  ],
-  "routeScope": {
-    "kind": "authenticated",
-    "surfaces": [
-      "xpanel"
-    ]
-  },
-  "ownScopeOnly": true,
-  "requiredSelectors": [
-    "form[data-account-password-form]",
-    "input[type=\"password\"][name=\"currentPassword\"]",
-    "input[type=\"password\"][name=\"newPassword\"]",
-    "input[type=\"password\"][name=\"confirmPassword\"]",
-    "button[type=\"submit\"][data-account-password-submit]",
-    "[data-account-password-status]"
-  ],
-  "optionalSelectors": [
-    "input[type=\"checkbox\"][data-account-password-show]",
-    "[data-account-password-rule=\"length\"]",
-    "[data-account-password-rule-state]",
-    "[data-account-password-current-error]",
-    "[data-account-password-new-error]",
-    "[data-account-password-confirm-error]"
-  ],
-  "elements": [
-    {
-      "selector": "form[data-account-password-form]",
-      "tags": [
-        "form"
-      ],
-      "attributes": {
-        "method": "post",
-        "action": "/api/auth/change-password"
+        "occurrence": "every"
       }
-    }
-  ]
-},
-{
-  "id": "account-api-tokens",
-  "rootSelector": "[data-account-api-tokens]",
-  "qualifiedOnly": false,
-  "applicableRoutes": [
-    "/security/account"
-  ],
-  "routeScope": {
-    "kind": "authenticated",
-    "surfaces": [
-      "xpanel"
+    ],
+    "semanticRelations": [
+      {
+        "selector": "[data-ui-theme-choice]",
+        "ancestorHook": "form[data-ui-theme-form]",
+        "tag": "select"
+      },
+      {
+        "selector": "[data-ui-theme-save]",
+        "ancestorHook": "form[data-ui-theme-form]",
+        "tag": "button"
+      }
+    ],
+    "variants": [
+      {
+        "id": "ui-theme-preferences:unique:1",
+        "rootSelector": "[data-ui-theme-preferences]",
+        "scopeSelector": "form[data-ui-theme-form]",
+        "scopeCount": 1,
+        "requiredSelectors": []
+      },
+      {
+        "id": "ui-theme-preferences:unique:2",
+        "rootSelector": "[data-ui-theme-preferences]",
+        "scopeSelector": "select[data-ui-theme-choice]",
+        "scopeCount": 1,
+        "requiredSelectors": []
+      },
+      {
+        "id": "ui-theme-preferences:unique:3",
+        "rootSelector": "[data-ui-theme-preferences]",
+        "scopeSelector": "button[data-ui-theme-save]",
+        "scopeCount": 1,
+        "requiredSelectors": []
+      },
+      {
+        "id": "ui-theme-preferences:unique:4",
+        "rootSelector": "[data-ui-theme-preferences]",
+        "scopeSelector": "button[data-ui-theme-reload]",
+        "scopeCount": 1,
+        "requiredSelectors": []
+      },
+      {
+        "id": "ui-theme-preferences:unique:5",
+        "rootSelector": "[data-ui-theme-preferences]",
+        "scopeSelector": "[data-ui-theme-status]",
+        "scopeCount": 1,
+        "requiredSelectors": []
+      }
     ]
   },
-  "ownScopeOnly": true,
-  "requiredSelectors": [
-    "[data-account-tokens-status]",
-    "[data-account-tokens-rows]",
-    "[data-account-tokens-refresh]",
-    "[data-account-tokens-empty]",
-    "[data-account-tokens-loading]",
-    "[data-account-tokens-create]",
-    "[data-account-tokens-name]",
-    "[data-account-tokens-expiry]",
-    "[data-account-tokens-allowed-ips]",
-    "[data-account-tokens-read-only]",
-    "[data-account-tokens-submit]",
-    "[data-account-tokens-clear]",
-    "[data-account-tokens-select-all]",
-    "[data-account-tokens-bulk-revoke]",
-    "[data-account-tokens-reveal]",
-    "[data-account-tokens-reveal-text]",
-    "[data-account-tokens-secret]",
-    "[data-account-tokens-copy]",
-    "[data-account-tokens-done]",
-    "[data-account-tokens-copy-status]",
-    "[data-account-tokens-mutation-status]"
-  ],
-  "optionalSelectors": [
-    "[data-account-tokens-count]"
-  ],
-  "elements": [
-    {
-      "selector": "[data-account-tokens-status]",
-      "tags": [
-        "p"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-rows]",
-      "tags": [
-        "tbody"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-refresh]",
-      "tags": [
-        "button"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-empty]",
-      "tags": [
-        "p",
-        "div"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-loading]",
-      "tags": [
-        "p",
-        "div"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-create]",
-      "tags": [
-        "form"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-name]",
-      "tags": [
-        "input"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-expiry]",
-      "tags": [
-        "select"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-allowed-ips]",
-      "tags": [
-        "input"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-read-only]",
-      "tags": [
-        "input"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-submit]",
-      "tags": [
-        "button"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-clear]",
-      "tags": [
-        "button"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-select-all]",
-      "tags": [
-        "input"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-bulk-revoke]",
-      "tags": [
-        "button"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-reveal]",
-      "tags": [
-        "div"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-reveal-text]",
-      "tags": [
-        "p"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-secret]",
-      "tags": [
-        "code"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-copy]",
-      "tags": [
-        "button"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-done]",
-      "tags": [
-        "button"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-copy-status]",
-      "tags": [
-        "p"
-      ]
-    },
-    {
-      "selector": "[data-account-tokens-mutation-status]",
-      "tags": [
-        "p"
-      ]
+  {
+    "id": "panel-home-tools",
+    "rootSelector": "[data-panel-home]",
+    "applicableRoutes": [
+      "/home"
+    ],
+    "qualifiedOnly": false,
+    "ownScopeOnly": true,
+    "requiredSelectors": [
+      "input[data-home-filter]",
+      "#tool-filter-count",
+      "[data-tool-section]",
+      "[data-tool-empty]"
+    ],
+    "optionalSelectors": [
+      "[data-tool-group]",
+      "[data-tool]",
+      "[data-group-count]",
+      "[data-home-empty-title]",
+      "[data-home-filter-clear]"
+    ],
+    "elements": [
+      {
+        "selector": "[data-home-filter]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "every"
+      },
+      {
+        "selector": "[data-home-filter-clear]",
+        "tags": [
+          "button"
+        ],
+        "required": false,
+        "occurrence": "every"
+      }
+    ],
+    "relations": [
+      {
+        "targetId": "tool-filter-count",
+        "sameRoot": "[data-panel-home]",
+        "targetMustBeUnique": true,
+        "required": true
+      }
+    ],
+    "variants": [
+      {
+        "id": "panel-home-tools:unique:1",
+        "rootSelector": "[data-panel-home]",
+        "scopeSelector": "input[data-home-filter]",
+        "scopeCount": 1,
+        "requiredSelectors": [],
+        "ownScopeOnly": true
+      },
+      {
+        "id": "panel-home-tools:unique:2",
+        "rootSelector": "[data-panel-home]",
+        "scopeSelector": "#tool-filter-count",
+        "scopeCount": 1,
+        "requiredSelectors": [],
+        "ownScopeOnly": true
+      },
+      {
+        "id": "panel-home-tools:unique:3",
+        "rootSelector": "[data-panel-home]",
+        "scopeSelector": "[data-tool-section]",
+        "scopeCount": 1,
+        "requiredSelectors": [],
+        "ownScopeOnly": true
+      },
+      {
+        "id": "panel-home-tools:unique:4",
+        "rootSelector": "[data-panel-home]",
+        "scopeSelector": "[data-tool-empty]",
+        "scopeCount": 1,
+        "requiredSelectors": [],
+        "ownScopeOnly": true
+      }
+    ],
+    "documentAttributes": {
+      "data-ui-theme": "v2"
     }
-  ],
-  "perMatchRequired": [
-    {
-      "selector": "input[type=\"checkbox\"][data-account-tokens-scope]",
-      "eachAttributes": {
-        "value": [
-          "files:read",
-          "files:write",
-          "databases:read",
-          "databases:write",
-          "dns:read",
-          "dns:write",
-          "mail:read",
-          "mail:write",
-          "backups:read",
-          "backups:write",
-          "cron:read",
-          "cron:write"
+  },
+  {
+    "id": "whm-transfer-import-projections",
+    "rootSelector": "[data-transfer-workspace]",
+    "applicableRoutes": [
+      "/whm/transfers"
+    ],
+    "lookupScope": {
+      "kind": "closest",
+      "selector": "[data-whm-detail-route]"
+    },
+    "scopeSelector": "[data-whm-detail-section=\"transfer-import\"]",
+    "scopeCount": 1,
+    "requiredSelectors": [
+      "tbody[data-transfer-import-warnings]",
+      "tbody[data-transfer-import-domains], [data-transfer-import-part=\"domains\"] tbody",
+      "tbody[data-transfer-import-home], [data-transfer-import-part=\"home\"] tbody",
+      "tbody[data-transfer-import-databases], [data-transfer-import-part=\"databases\"] tbody",
+      "tbody[data-transfer-import-mail], [data-transfer-import-part=\"mail\"] tbody",
+      "tbody[data-transfer-import-dns], [data-transfer-import-part=\"dns\"] tbody"
+    ],
+    "optionalSelectors": [
+      "[data-transfer-import-observation]"
+    ]
+  },
+  {
+    "id": "account-mailing-lists",
+    "rootSelector": "[data-mailing-lists]",
+    "applicableRoutes": [
+      "/email/mailing-lists"
+    ],
+    "requiredSelectors": [
+      "tbody[data-mailing-lists-rows]",
+      "[data-mailing-list-status]",
+      "input[data-ml-name]",
+      "select[data-ml-domain]",
+      "textarea[data-ml-members]",
+      "select[data-ml-moderation]",
+      "input[data-ml-archive]",
+      "button[data-ml-create]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"account-mailing-list-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"address\"]",
+          "[data-xp-slot=\"members\"]",
+          "[data-xp-slot=\"moderation\"]",
+          "[data-xp-slot=\"archive\"]",
+          "button[data-xp-slot=\"remove\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"account-mailing-list-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"message\"]"
         ]
       }
-    },
-    {
-      "selector": "select[data-account-tokens-expiry] option",
-      "eachAttributes": {
-        "value": [
-          "30",
-          "90",
-          "180",
-          "365"
-        ]
-      }
-    }
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"account-token-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "input[type=\"checkbox\"][data-xp-slot=\"select\"]",
-        "bdi[dir=\"ltr\"][data-xp-slot=\"name\"]",
-        "span[data-xp-slot=\"state\"]",
-        "td[data-xp-slot=\"scopes\"]",
-        "td[data-xp-slot=\"addresses\"]",
-        "td[data-xp-slot=\"created\"]",
-        "td[data-xp-slot=\"expires\"]",
-        "td[data-xp-slot=\"used\"]",
-        "td[data-xp-slot=\"actions\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"account-token-actions\"]",
-      "requiredSelectors": [
-        "div[data-xp-slot=\"content\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"account-token-rename\"]",
-      "requiredSelectors": [
-        "button[type=\"button\"][data-xp-action=\"rename\"][data-xp-slot=\"content\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"account-token-revoke\"]",
-      "requiredSelectors": [
-        "button[type=\"button\"][data-xp-action=\"revoke\"][data-xp-slot=\"content\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"account-token-state-active\"]",
-      "requiredSelectors": [
-        "span[data-xp-slot=\"content\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"account-token-state-expired\"]",
-      "requiredSelectors": [
-        "span[data-xp-slot=\"content\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"account-token-state-revoked\"]",
-      "requiredSelectors": [
-        "span[data-xp-slot=\"content\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"account-token-empty\"]",
-      "requiredSelectors": [
-        "tr",
-        "td[colspan=\"7\"][data-xp-slot=\"content\"]"
-      ]
-    }
-  ]
-},
-{
-  "id": "directory-privacy",
-  "rootSelector": "[data-directory-privacy]",
-  "applicableRoutes": [
-    "/files/directory-privacy"
-  ],
-  "requiredSelectors": [
-    "tbody[data-directory-privacy-rows]",
-    "[data-directory-privacy-status]",
-    "[data-directory-privacy-preview]",
-    "[data-directory-privacy-preview-wrap]",
-    "input[data-directory-privacy-path]",
-    "input[data-directory-privacy-prompt]",
-    "input[data-directory-privacy-username]",
-    "input[data-directory-privacy-password]",
-    "button[data-directory-privacy-add]",
-    "button[data-directory-privacy-save]"
-  ],
-  "elements": [
-    {
-      "selector": "[data-directory-privacy-password]",
-      "tags": [
-        "input"
-      ],
-      "attributes": {
-        "type": "password"
-      },
-      "occurrence": "every"
-    }
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"directory-privacy-rule\"]",
-      "requiredSelectors": [
-        "tr",
-        "bdi[data-xp-slot=\"path\"]",
-        "[data-xp-slot=\"prompt\"]",
-        "div[data-xp-slot=\"users\"]",
-        "input[type=\"checkbox\"][data-xp-slot=\"enabled\"]",
-        "button[data-xp-slot=\"remove\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"directory-privacy-user\"]",
-      "requiredSelectors": [
-        "div",
-        "[data-xp-slot=\"name-label\"]",
-        "bdi[data-xp-slot=\"username\"]",
-        "label[data-xp-slot=\"password-label\"]",
-        "input[type=\"password\"][data-xp-slot=\"password\"]",
-        "button[data-xp-slot=\"remove\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"directory-privacy-empty\"]",
-      "requiredSelectors": [
-        "tr",
-        "[data-xp-slot=\"message\"]"
-      ]
-    }
-  ]
-},
-{
-  "id": "file-workspace-browse",
-  "rootSelector": "[data-file-manager=\"browse\"]",
-  "applicableRoutes": [
-    "/files/manager"
-  ],
-  "requiredSelectors": [
-    "textarea#jailed-code-editor",
-    "[data-file-manager-table] tbody",
-    "[data-file-status]",
-    "[data-file-current-path]",
-    "[data-file-selected-path]"
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"file-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "[data-xp-slot=\"name\"]",
-        "[data-xp-slot=\"kind\"]",
-        "[data-xp-slot=\"size\"]",
-        "[data-xp-slot=\"mode\"]",
-        "[data-xp-slot=\"modified\"]",
-        "[data-xp-slot=\"actions\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"file-action\"]",
-      "requiredSelectors": [
-        "button",
-        "[data-xp-slot=\"label\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"file-empty-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "[data-xp-slot=\"message\"]"
-      ]
-    }
-  ]
-},
-{
-  "id": "file-workspace-trash",
-  "rootSelector": "[data-file-manager=\"trash\"]",
-  "applicableRoutes": [
-    "/files/trash"
-  ],
-  "requiredSelectors": [
-    "[data-file-manager-table] tbody",
-    "[data-file-status]"
-  ],
-  "optionalSelectors": [
-    "[data-trash-empty]"
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"trash-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "[data-xp-slot=\"name\"]",
-        "[data-xp-slot=\"kind\"]",
-        "[data-xp-slot=\"size\"]",
-        "[data-xp-slot=\"mode\"]",
-        "[data-xp-slot=\"modified\"]",
-        "[data-xp-slot=\"actions\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"trash-action\"]",
-      "requiredSelectors": [
-        "button",
-        "[data-xp-slot=\"label\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"trash-purge-action\"]",
-      "requiredSelectors": [
-        "button",
-        "[data-xp-slot=\"label\"]"
-      ]
-    }
-  ]
-},
-{
-  "id": "mail-attachments-root",
-  "rootSelector": "[data-mail-attachments]",
-  "applicableRoutes": [
-    "/mail/search",
-    "/mail/later"
-  ],
-  "requiredSelectors": [
-    "[data-attachment-status]",
-    "[data-attachment-list]",
-    "[data-attachment-refresh]"
-  ],
-  "elements": [
-    {
-      "selector": "[data-attachment-status]",
-      "tags": [
-        "p"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-attachment-list]",
-      "tags": [
-        "ul"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-attachment-refresh]",
-      "tags": [
-        "button"
-      ],
-      "attributes": {
-        "type": "button"
-      },
-      "occurrence": "every",
-      "required": true
-    }
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"mail-attachment-row\"]",
-      "requiredSelectors": [
-        "li",
-        "a[data-xp-slot=\"link\"]",
-        "span[data-xp-slot=\"badge\"]",
-        "bdi[data-xp-slot=\"name\"]",
-        "bdi[data-xp-slot=\"size\"]"
-      ]
-    }
-  ],
-  "optionalSelectors": [
-    "[data-attachment-heading]"
-  ]
-},
-{
-  "id": "mail-attachments-mounted-reading-root",
-  "rootSelector": "[data-mail-attachments]",
-  "applicableRoutes": [
-    "/mail/inbox",
-    "/mail/sent",
-    "/mail/drafts",
-    "/mail/trash"
-  ],
-  "requiredSelectors": [
-    "[data-attachment-status]",
-    "[data-attachment-list]",
-    "[data-attachment-refresh]"
-  ],
-  "elements": [
-    {
-      "selector": "[data-attachment-status]",
-      "tags": [
-        "p"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-attachment-list]",
-      "tags": [
-        "ul"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-attachment-refresh]",
-      "tags": [
-        "button"
-      ],
-      "attributes": {
-        "type": "button"
-      },
-      "occurrence": "every",
-      "required": true
-    }
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"mail-attachment-row\"]",
-      "requiredSelectors": [
-        "li",
-        "a[data-xp-slot=\"link\"]",
-        "span[data-xp-slot=\"badge\"]",
-        "bdi[data-xp-slot=\"name\"]",
-        "bdi[data-xp-slot=\"size\"]"
-      ]
-    }
-  ],
-  "optionalSelectors": [
-    "[data-attachment-heading]"
-  ],
-  "rootRequired": false
-},
-{
-  "id": "mail-compose-attachments-root",
-  "rootSelector": "[data-compose-attachments]",
-  "applicableRoutes": [
-    "/mail/compose"
-  ],
-  "requiredSelectors": [
-    "[data-compose-attachment-open]",
-    "[data-compose-attachment-input]",
-    "[data-compose-attachment-list]",
-    "[data-compose-attachment-status]"
-  ],
-  "elements": [
-    {
-      "selector": "[data-compose-attachment-open]",
-      "tags": [
-        "button"
-      ],
-      "attributes": {
-        "type": "button"
-      },
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-compose-attachment-input]",
-      "tags": [
-        "input"
-      ],
-      "attributes": {
-        "type": "file",
-        "multiple": true
-      },
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-compose-attachment-list]",
-      "tags": [
-        "ul"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-compose-attachment-status]",
-      "tags": [
-        "p",
-        "span"
-      ],
-      "occurrence": "every",
-      "required": true,
-      "attributes": {
-        "role": "status"
-      }
-    }
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"mail-compose-attachment-row\"]",
-      "requiredSelectors": [
-        "li",
-        "bdi[data-xp-slot=\"name\"]",
-        "bdi[data-xp-slot=\"size\"]",
-        "button[data-xp-slot=\"remove\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"mail-compose-attachment-dismiss\"]",
-      "requiredSelectors": [
-        "button[data-xp-slot=\"label\"]"
-      ]
-    }
-  ],
-  "optionalSelectors": [
-    "[data-compose-attachment-summary]"
-  ]
-},
-{
-  "id": "mail-contacts-tools-root",
-  "rootSelector": "[data-mail-contacts-tools]",
-  "applicableRoutes": [
-    "/mail/contacts"
-  ],
-  "requiredSelectors": [
-    "[data-contacts-import-text]",
-    "[data-contacts-import]",
-    "[data-contacts-export]",
-    "[data-contacts-shares]"
-  ],
-  "elements": [
-    {
-      "selector": "[data-contacts-import-text]",
-      "tags": [
-        "textarea"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-contacts-import]",
-      "tags": [
-        "button"
-      ],
-      "attributes": {
-        "type": "button"
-      },
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-contacts-export]",
-      "tags": [
-        "button"
-      ],
-      "attributes": {
-        "type": "button"
-      },
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-contacts-shares]",
-      "tags": [
-        "ul"
-      ],
-      "occurrence": "every",
-      "required": true
-    }
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"mail-contact-share\"]",
-      "requiredSelectors": [
-        "li",
-        "bdi[data-xp-slot=\"address\"]",
-        "span[data-xp-slot=\"permission\"]",
-        "button[data-xp-slot=\"remove\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"mail-contact-share-empty\"]",
-      "requiredSelectors": [
-        "li[data-xp-slot=\"message\"]"
-      ]
-    }
-  ],
-  "optionalSelectors": [
-    "[data-contacts-import-file]",
-    "[data-contacts-import-preview]",
-    "[data-contacts-import-status]",
-    "[data-contacts-export-status]",
-    "[data-contacts-share-contact]",
-    "[data-contacts-share-principal]",
-    "[data-contacts-share-permission]",
-    "[data-contacts-share-add]",
-    "[data-contacts-share-status]"
-  ]
-},
-{
-  "id": "mail-identities-root",
-  "rootSelector": "[data-mail-identities]",
-  "applicableRoutes": [
-    "/mail/settings/identities"
-  ],
-  "requiredSelectors": [
-    "[data-identities-rows]",
-    "[data-identities-status]",
-    "[data-identities-display-name]",
-    "[data-identities-reply-to]",
-    "[data-identities-text-signature]",
-    "[data-identities-html-signature]",
-    "[data-identities-default]",
-    "[data-identities-save]"
-  ],
-  "elements": [
-    {
-      "selector": "[data-identities-rows]",
-      "tags": [
-        "div"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-identities-status]",
-      "tags": [
-        "p"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-identities-display-name]",
-      "tags": [
-        "input"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-identities-reply-to]",
-      "tags": [
-        "input"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-identities-text-signature]",
-      "tags": [
-        "textarea"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-identities-html-signature]",
-      "tags": [
-        "textarea"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-identities-default]",
-      "tags": [
-        "input"
-      ],
-      "attributes": {
-        "type": "checkbox"
-      },
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-identities-save]",
-      "tags": [
-        "button"
-      ],
-      "attributes": {
-        "type": "button"
-      },
-      "occurrence": "every",
-      "required": true
-    }
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"mail-identity-card\"]",
-      "requiredSelectors": [
-        "article",
-        "strong[data-xp-slot=\"name\"]",
-        "span[data-xp-slot=\"badge\"]",
-        "dl[data-xp-slot=\"facts\"]",
-        "div[data-xp-slot=\"actions\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"mail-identity-fact\"]",
-      "requiredSelectors": [
-        "div",
-        "dt[data-xp-slot=\"label\"]",
-        "bdi[data-xp-slot=\"value\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"mail-identity-action\"]",
-      "requiredSelectors": [
-        "button[data-xp-slot=\"label\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"mail-identity-empty\"]",
-      "requiredSelectors": [
-        "p[data-xp-slot=\"message\"]"
-      ]
-    }
-  ],
-  "optionalSelectors": [
-    "[data-identities-form-title]",
-    "[data-identities-reset]",
-    "#identities-email"
-  ]
-},
-{
-  "id": "mail-mailbox-forwarders-root",
-  "rootSelector": "[data-mail-forwarders]",
-  "applicableRoutes": [
-    "/mail/settings/forwarders"
-  ],
-  "requiredSelectors": [
-    "[data-forwarders-status]",
-    "[data-forwarders-rows]",
-    "[data-forwarders-count]",
-    "input[name=\"destination\"]",
-    "[data-forwarders-add]",
-    "[data-forwarders-refresh]"
-  ],
-  "elements": [
-    {
-      "selector": "[data-forwarders-status]",
-      "tags": [
-        "p"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-forwarders-rows]",
-      "tags": [
-        "tbody"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "input[name=\"destination\"]",
-      "tags": [
-        "input"
-      ],
-      "attributes": {
-        "type": "email"
-      },
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-forwarders-add]",
-      "tags": [
-        "button"
-      ],
-      "attributes": {
-        "type": "button"
-      },
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-forwarders-refresh]",
-      "tags": [
-        "button"
-      ],
-      "attributes": {
-        "type": "button"
-      },
-      "occurrence": "every",
-      "required": true
-    }
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"mail-forwarder-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "bdi[data-xp-slot=\"address\"]",
-        "button[data-xp-slot=\"remove\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"mail-forwarder-empty\"]",
-      "requiredSelectors": [
-        "tr",
-        "td[data-xp-slot=\"message\"]"
-      ]
-    }
-  ],
-  "optionalSelectors": [
-    "[data-forwarders-application]"
-  ]
-},
-{
-  "id": "mail-mailing-lists-root",
-  "rootSelector": "[data-mail-mailing-lists]",
-  "applicableRoutes": [
-    "/mail/tools/mailing-lists"
-  ],
-  "requiredSelectors": [
-    "[data-lists-status]",
-    "[data-lists-rows]",
-    "[data-lists-refresh]"
-  ],
-  "elements": [
-    {
-      "selector": "[data-lists-status]",
-      "tags": [
-        "p"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-lists-rows]",
-      "tags": [
-        "tbody"
-      ],
-      "occurrence": "every",
-      "required": true
-    },
-    {
-      "selector": "[data-lists-refresh]",
-      "tags": [
-        "button"
-      ],
-      "attributes": {
-        "type": "button"
-      },
-      "occurrence": "every",
-      "required": true
-    }
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"mail-membership-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "bdi[data-xp-slot=\"address\"]",
-        "td[data-xp-slot=\"name\"]",
-        "td[data-xp-slot=\"observed\"]",
-        "td[data-xp-slot=\"subscription\"]",
-        "td[data-xp-slot=\"posting\"]",
-        "td[data-xp-slot=\"membership\"]",
-        "button[data-xp-slot=\"action\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"mail-membership-empty\"]",
-      "requiredSelectors": [
-        "tr",
-        "td[data-xp-slot=\"message\"]"
-      ]
-    }
-  ],
-  "optionalSelectors": []
-},
-{
-  "id": "acct-transfer-credentials",
-  "rootSelector": "[data-acct-transfer-credentials]",
-  "applicableRoutes": [
-    "/whm/transfers/server"
-  ],
-  "requiredSelectors": [
-    "[data-acct-transfer-credentials-status]",
-    "tbody[data-acct-transfer-credentials-rows]",
-    "[data-acct-transfer-credentials-loading]",
-    "[data-acct-transfer-credentials-empty]",
-    "[data-acct-transfer-credentials-form]",
-    "input[data-acct-transfer-credential-input=\"label\"]",
-    "input[type=\"password\"][data-acct-transfer-credential-input=\"token\"]",
-    "button[data-acct-transfer-credential-save]",
-    "button[type=\"button\"][data-acct-transfer-credentials-refresh]"
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"transfer-credential-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "button[type=\"button\"][data-xp-action=\"remove\"][disabled]",
-        "[data-xp-slot=\"label\"]",
-        "[data-xp-slot=\"fingerprint\"]",
-        "[data-xp-slot=\"created\"]",
-        "[data-xp-slot=\"actor\"]",
-        "[data-xp-slot=\"remove-label\"]"
-      ]
-    }
-  ]
-},
-{
-  "id": "approved-host-services",
-  "rootSelector": "[data-host-services]",
-  "applicableRoutes": [
-    "/whm/services"
-  ],
-  "requiredSelectors": [
-    "tbody[data-host-service-rows]",
-    "[data-host-service-status]"
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"host-service-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "button[type=\"button\"][data-xp-action=\"restart\"][disabled]",
-        "[data-xp-slot=\"service\"]",
-        "[data-xp-slot=\"unit\"]",
-        "[data-xp-slot=\"state\"]",
-        "[data-xp-slot=\"restart-label\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"host-service-empty\"]",
-      "requiredSelectors": [
-        "tr",
-        "td[data-xp-slot=\"message\"]"
-      ]
-    }
-  ],
-  "optionalSelectors": [
-    "[data-host-service-search]",
-    "[data-host-service-details]"
-  ]
-},
-{
-  "id": "sw-addon-services",
-  "rootSelector": "[data-sw-addons]",
-  "applicableRoutes": [
-    "/whm/software/addon-services"
-  ],
-  "requiredSelectors": [
-    "[data-sw-addons-status]",
-    "button[type=\"button\"][data-sw-addons-refresh]",
-    "tbody[data-sw-addons-rows]",
-    "[data-sw-addons-job]",
-    "a[data-sw-addons-job-link]"
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"software-addon-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "button[type=\"button\"][data-xp-action=\"start\"][disabled]",
-        "button[type=\"button\"][data-xp-action=\"stop\"][disabled]",
-        "button[type=\"button\"][data-xp-action=\"restart\"][disabled]",
-        "[data-xp-slot=\"service\"]",
-        "[data-xp-slot=\"kind\"]",
-        "[data-xp-slot=\"package\"]",
-        "[data-xp-slot=\"unit\"]",
-        "[data-xp-slot=\"state\"]",
-        "[data-xp-slot=\"boot\"]",
-        "[data-xp-slot=\"start-label\"]",
-        "[data-xp-slot=\"stop-label\"]",
-        "[data-xp-slot=\"restart-label\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"software-addon-empty\"]",
-      "requiredSelectors": [
-        "tr",
-        "td[data-xp-slot=\"message\"]"
-      ]
-    }
-  ]
-},
-{
-  "id": "sw-app-projects",
-  "rootSelector": "[data-sw-projects]",
-  "applicableRoutes": [
-    "/whm/software/application-projects"
-  ],
-  "requiredSelectors": [
-    "[data-sw-projects-status]",
-    "button[type=\"button\"][data-sw-projects-refresh]",
-    "tbody[data-sw-projects-runtimes]"
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"software-project-runtime-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "[data-xp-slot=\"name\"]",
-        "[data-xp-slot=\"state\"]",
-        "[data-xp-slot=\"version\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"software-project-runtime-empty\"]",
-      "requiredSelectors": [
-        "tr",
-        "td[data-xp-slot=\"message\"]"
-      ]
-    }
-  ]
-},
-{
-  "id": "whm-ips",
-  "rootSelector": "[data-whm-ip-pool]",
-  "applicableRoutes": [
-    "/whm/server/ips"
-  ],
-  "requiredSelectors": [
-    "form[data-add-ip-form]",
-    "[data-add-ip-form] button[type=\"submit\"]",
-    "[data-ip-pool-table] tbody",
-    "[data-add-ip-status]",
-    "[data-ip-pool-status]",
-    "[data-ip-pool-count-label]"
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"whm-ip-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "span[data-xp-action=\"role\"]",
-        "span[data-xp-action=\"primary\"]",
-        "button[type=\"button\"][data-xp-action=\"remove\"][disabled]",
-        "[data-xp-slot=\"address\"]",
-        "[data-xp-slot=\"version\"]",
-        "[data-xp-slot=\"interface\"]",
-        "[data-xp-slot=\"owner\"]",
-        "[data-xp-slot=\"ptr\"]",
-        "[data-xp-slot=\"remove-label\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"whm-ip-empty\"]",
-      "requiredSelectors": [
-        "tr",
-        "td[data-xp-slot=\"message\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"whm-ip-role-web\"]",
-      "requiredSelectors": [
-        "span",
-        "[data-xp-slot=\"label\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"whm-ip-role-mail\"]",
-      "requiredSelectors": [
-        "span",
-        "[data-xp-slot=\"label\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"whm-ip-primary\"]",
-      "requiredSelectors": [
-        "span",
-        "[data-xp-slot=\"label\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"whm-ip-secondary\"]",
-      "requiredSelectors": [
-        "span",
-        "[data-xp-slot=\"label\"]"
-      ]
-    }
-  ]
-},
-{
-  "id": "whm-local-archives",
-  "rootSelector": "[data-account-backups]",
-  "rootRequired": false,
-  "routeScope": {
-    "kind": "authenticated",
-    "surfaces": [
-      "xwhm"
     ]
   },
-  "requiredSelectors": [
-    "select[data-backup-account]",
-    "tbody[data-backup-files]",
-    "[data-backup-status]",
-    "button[data-backup-create]",
-    "button[data-backup-local-read]"
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"whm-local-archive-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "[data-xp-slot=\"archive\"]",
-        "[data-xp-slot=\"bytes\"]",
-        "a[data-xp-slot=\"review\"]"
-      ]
-    }
-  ]
-},
-{
-  "id": "whm-panel-data",
-  "rootSelector": "[data-whm-generations]",
-  "applicableRoutes": [
-    "/whm/panel/data"
-  ],
-  "requiredSelectors": [
-    "[data-generations-status]",
-    "tbody[data-generation-rows]"
-  ],
-  "optionalSelectors": [
-    "[data-generations-current]",
-    "[data-action=\"rollback-generation\"]"
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"whm-generation-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "[data-xp-slot=\"generation\"]",
-        "[data-xp-slot=\"created\"]",
-        "[data-xp-slot=\"summary\"]",
-        "[data-xp-slot=\"state\"]",
-        "[data-xp-slot=\"actions\"]"
+  {
+    "id": "account-sessions",
+    "rootSelector": "[data-account-sessions]",
+    "requiredSelectors": [
+      "[data-sessions-rows]",
+      "[data-sessions-status]",
+      "button[data-sessions-revoke-others]"
+    ],
+    "applicableRoutes": [
+      "/security/account"
+    ],
+    "qualifiedOnly": false,
+    "routeScope": {
+      "kind": "authenticated",
+      "surfaces": [
+        "xpanel"
       ]
     },
-    {
-      "templateSelector": "template[data-xp-template=\"whm-generation-empty\"]",
-      "requiredSelectors": [
-        "tr",
-        "td[data-xp-slot=\"content\"]"
+    "variants": [
+      {
+        "id": "account-sessions-card",
+        "rootSelector": "[data-account-sessions]",
+        "rootRequired": false,
+        "rootAttributeExclusions": {
+          "data-sessions-layout": "table"
+        },
+        "templateScopes": [
+          {
+            "templateSelector": "template[data-xp-template=\"account-session-row\"]",
+            "requiredSelectors": [
+              "article",
+              "[data-xp-slot=\"title\"]",
+              "[data-xp-slot=\"verification\"]",
+              "[data-xp-slot=\"network-label\"]",
+              "[data-xp-slot=\"network\"]",
+              "[data-xp-slot=\"client-label\"]",
+              "[data-xp-slot=\"client\"]",
+              "[data-xp-slot=\"last-active-label\"]",
+              "[data-xp-slot=\"last-active\"]",
+              "[data-xp-slot=\"expires-label\"]",
+              "[data-xp-slot=\"expires\"]",
+              "[data-xp-slot=\"actions\"]"
+            ]
+          },
+          {
+            "templateSelector": "template[data-xp-template=\"account-session-action\"]",
+            "requiredSelectors": [
+              "button",
+              "[data-xp-slot=\"label\"]"
+            ]
+          },
+          {
+            "templateSelector": "template[data-xp-template=\"account-session-empty\"]",
+            "requiredSelectors": [
+              "p",
+              "[data-xp-slot=\"message\"]"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "account-sessions-table",
+        "rootSelector": "[data-account-sessions]",
+        "rootRequired": false,
+        "rootAttributes": {
+          "data-sessions-layout": "table"
+        },
+        "requiredSelectors": [
+          "tbody[data-sessions-rows]"
+        ],
+        "templateScopes": [
+          {
+            "templateSelector": "template[data-xp-template=\"account-session-row\"]",
+            "requiredSelectors": [
+              "tr",
+              "[data-xp-slot=\"title\"]",
+              "[data-xp-slot=\"verification\"]",
+              "[data-xp-slot=\"network-label\"]",
+              "[data-xp-slot=\"network\"]",
+              "[data-xp-slot=\"client-label\"]",
+              "[data-xp-slot=\"client\"]",
+              "[data-xp-slot=\"last-active-label\"]",
+              "[data-xp-slot=\"last-active\"]",
+              "[data-xp-slot=\"expires-label\"]",
+              "[data-xp-slot=\"expires\"]",
+              "[data-xp-slot=\"actions\"]",
+              "[data-xp-slot=\"created-label\"]",
+              "[data-xp-slot=\"created\"]"
+            ]
+          },
+          {
+            "templateSelector": "template[data-xp-template=\"account-session-action\"]",
+            "requiredSelectors": [
+              "button[type=\"button\"]",
+              "[data-xp-slot=\"label\"]"
+            ]
+          },
+          {
+            "templateSelector": "template[data-xp-template=\"account-session-empty\"]",
+            "requiredSelectors": [
+              "tr",
+              "td[colspan=\"6\"][data-xp-slot=\"message\"]"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "account-password",
+    "rootSelector": "[data-account-password]",
+    "qualifiedOnly": false,
+    "applicableRoutes": [
+      "/security/account"
+    ],
+    "routeScope": {
+      "kind": "authenticated",
+      "surfaces": [
+        "xpanel"
       ]
     },
-    {
-      "templateSelector": "template[data-xp-template=\"whm-generation-rollback\"]",
-      "requiredSelectors": [
-        "button[type=\"button\"][disabled]",
-        "[data-xp-slot=\"content\"]"
+    "ownScopeOnly": true,
+    "requiredSelectors": [
+      "form[data-account-password-form]",
+      "input[type=\"password\"][name=\"currentPassword\"]",
+      "input[type=\"password\"][name=\"newPassword\"]",
+      "input[type=\"password\"][name=\"confirmPassword\"]",
+      "button[type=\"submit\"][data-account-password-submit]",
+      "[data-account-password-status]"
+    ],
+    "optionalSelectors": [
+      "input[type=\"checkbox\"][data-account-password-show]",
+      "[data-account-password-rule=\"length\"]",
+      "[data-account-password-rule-state]",
+      "[data-account-password-current-error]",
+      "[data-account-password-new-error]",
+      "[data-account-password-confirm-error]"
+    ],
+    "elements": [
+      {
+        "selector": "form[data-account-password-form]",
+        "tags": [
+          "form"
+        ],
+        "attributes": {
+          "method": "post",
+          "action": "/api/auth/change-password"
+        }
+      }
+    ]
+  },
+  {
+    "id": "account-api-tokens",
+    "rootSelector": "[data-account-api-tokens]",
+    "qualifiedOnly": false,
+    "applicableRoutes": [
+      "/security/account"
+    ],
+    "routeScope": {
+      "kind": "authenticated",
+      "surfaces": [
+        "xpanel"
       ]
     },
-    {
-      "templateSelector": "template[data-xp-template=\"whm-generation-state-active\"]",
-      "requiredSelectors": [
-        "span",
-        "[data-xp-slot=\"content\"]"
+    "ownScopeOnly": true,
+    "requiredSelectors": [
+      "[data-account-tokens-status]",
+      "[data-account-tokens-rows]",
+      "[data-account-tokens-refresh]",
+      "[data-account-tokens-empty]",
+      "[data-account-tokens-loading]",
+      "[data-account-tokens-create]",
+      "[data-account-tokens-name]",
+      "[data-account-tokens-expiry]",
+      "[data-account-tokens-allowed-ips]",
+      "[data-account-tokens-read-only]",
+      "[data-account-tokens-submit]",
+      "[data-account-tokens-clear]",
+      "[data-account-tokens-select-all]",
+      "[data-account-tokens-bulk-revoke]",
+      "[data-account-tokens-reveal]",
+      "[data-account-tokens-reveal-text]",
+      "[data-account-tokens-secret]",
+      "[data-account-tokens-copy]",
+      "[data-account-tokens-done]",
+      "[data-account-tokens-copy-status]",
+      "[data-account-tokens-mutation-status]"
+    ],
+    "optionalSelectors": [
+      "[data-account-tokens-count]"
+    ],
+    "elements": [
+      {
+        "selector": "[data-account-tokens-status]",
+        "tags": [
+          "p"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-rows]",
+        "tags": [
+          "tbody"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-refresh]",
+        "tags": [
+          "button"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-empty]",
+        "tags": [
+          "p",
+          "div"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-loading]",
+        "tags": [
+          "p",
+          "div"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-create]",
+        "tags": [
+          "form"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-name]",
+        "tags": [
+          "input"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-expiry]",
+        "tags": [
+          "select"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-allowed-ips]",
+        "tags": [
+          "input"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-read-only]",
+        "tags": [
+          "input"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-submit]",
+        "tags": [
+          "button"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-clear]",
+        "tags": [
+          "button"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-select-all]",
+        "tags": [
+          "input"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-bulk-revoke]",
+        "tags": [
+          "button"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-reveal]",
+        "tags": [
+          "div"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-reveal-text]",
+        "tags": [
+          "p"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-secret]",
+        "tags": [
+          "code"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-copy]",
+        "tags": [
+          "button"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-done]",
+        "tags": [
+          "button"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-copy-status]",
+        "tags": [
+          "p"
+        ]
+      },
+      {
+        "selector": "[data-account-tokens-mutation-status]",
+        "tags": [
+          "p"
+        ]
+      }
+    ],
+    "perMatchRequired": [
+      {
+        "selector": "input[type=\"checkbox\"][data-account-tokens-scope]",
+        "eachAttributes": {
+          "value": [
+            "files:read",
+            "files:write",
+            "databases:read",
+            "databases:write",
+            "dns:read",
+            "dns:write",
+            "mail:read",
+            "mail:write",
+            "backups:read",
+            "backups:write",
+            "cron:read",
+            "cron:write"
+          ]
+        }
+      },
+      {
+        "selector": "select[data-account-tokens-expiry] option",
+        "eachAttributes": {
+          "value": [
+            "30",
+            "90",
+            "180",
+            "365"
+          ]
+        }
+      }
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"account-token-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "input[type=\"checkbox\"][data-xp-slot=\"select\"]",
+          "bdi[dir=\"ltr\"][data-xp-slot=\"name\"]",
+          "span[data-xp-slot=\"state\"]",
+          "td[data-xp-slot=\"scopes\"]",
+          "td[data-xp-slot=\"addresses\"]",
+          "td[data-xp-slot=\"created\"]",
+          "td[data-xp-slot=\"expires\"]",
+          "td[data-xp-slot=\"used\"]",
+          "td[data-xp-slot=\"actions\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"account-token-actions\"]",
+        "requiredSelectors": [
+          "div[data-xp-slot=\"content\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"account-token-rename\"]",
+        "requiredSelectors": [
+          "button[type=\"button\"][data-xp-action=\"rename\"][data-xp-slot=\"content\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"account-token-revoke\"]",
+        "requiredSelectors": [
+          "button[type=\"button\"][data-xp-action=\"revoke\"][data-xp-slot=\"content\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"account-token-state-active\"]",
+        "requiredSelectors": [
+          "span[data-xp-slot=\"content\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"account-token-state-expired\"]",
+        "requiredSelectors": [
+          "span[data-xp-slot=\"content\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"account-token-state-revoked\"]",
+        "requiredSelectors": [
+          "span[data-xp-slot=\"content\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"account-token-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[colspan=\"7\"][data-xp-slot=\"content\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "directory-privacy",
+    "rootSelector": "[data-directory-privacy]",
+    "applicableRoutes": [
+      "/files/directory-privacy"
+    ],
+    "requiredSelectors": [
+      "tbody[data-directory-privacy-rows]",
+      "[data-directory-privacy-status]",
+      "[data-directory-privacy-preview]",
+      "[data-directory-privacy-preview-wrap]",
+      "input[data-directory-privacy-path]",
+      "input[data-directory-privacy-prompt]",
+      "input[data-directory-privacy-username]",
+      "input[data-directory-privacy-password]",
+      "button[data-directory-privacy-add]",
+      "button[data-directory-privacy-save]"
+    ],
+    "elements": [
+      {
+        "selector": "[data-directory-privacy-password]",
+        "tags": [
+          "input"
+        ],
+        "attributes": {
+          "type": "password"
+        },
+        "occurrence": "every"
+      }
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"directory-privacy-rule\"]",
+        "requiredSelectors": [
+          "tr",
+          "bdi[data-xp-slot=\"path\"]",
+          "[data-xp-slot=\"prompt\"]",
+          "div[data-xp-slot=\"users\"]",
+          "input[type=\"checkbox\"][data-xp-slot=\"enabled\"]",
+          "button[data-xp-slot=\"remove\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"directory-privacy-user\"]",
+        "requiredSelectors": [
+          "div",
+          "[data-xp-slot=\"name-label\"]",
+          "bdi[data-xp-slot=\"username\"]",
+          "label[data-xp-slot=\"password-label\"]",
+          "input[type=\"password\"][data-xp-slot=\"password\"]",
+          "button[data-xp-slot=\"remove\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"directory-privacy-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"message\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "dnssec",
+    "rootSelector": "[data-dnssec]",
+    "applicableRoutes": [
+      "/domains/zone-editor"
+    ],
+    "requiredSelectors": [
+      "select[data-dnssec-zone]",
+      "[data-dnssec-status]",
+      "tbody[data-dnssec-keys]",
+      "tbody[data-dnssec-rollovers]",
+      "[data-dnssec-ds]",
+      "[data-dnssec-signing]",
+      "[data-dnssec-publication]",
+      "[data-dnssec-nsec]",
+      "[data-dnssec-observed]",
+      "select[data-dnssec-algorithm]",
+      "select[data-dnssec-layout]",
+      "select[data-dnssec-add-type]",
+      "select[data-dnssec-nsec-mode]",
+      "input[data-dnssec-disable-confirm]",
+      "input[type=\"checkbox\"][data-dnssec-ds-updated]",
+      "button[data-dnssec-enable]",
+      "button[data-dnssec-add-key]",
+      "button[data-dnssec-nsec-save]",
+      "button[data-dnssec-refresh]",
+      "button[data-dnssec-disable]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"dnssec-key\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"id\"]",
+          "[data-xp-slot=\"type\"]",
+          "[data-xp-slot=\"algorithm\"]",
+          "[data-xp-slot=\"tag\"]",
+          "[data-xp-slot=\"state\"]",
+          "div[data-xp-slot=\"actions\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"dnssec-action\"]",
+        "requiredSelectors": [
+          "button"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"dnssec-rollover\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"keys\"]",
+          "[data-xp-slot=\"type\"]",
+          "[data-xp-slot=\"not-before\"]",
+          "button[data-xp-slot=\"action\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"dnssec-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"message\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "boxtrapper",
+    "rootSelector": "[data-boxtrapper]",
+    "applicableRoutes": [
+      "/email/spam-filters",
+      "/mail/settings/spam"
+    ],
+    "requiredSelectors": [
+      "[data-boxtrapper-status]",
+      "input[data-boxtrapper-enabled]",
+      "input[data-boxtrapper-name]",
+      "input[data-boxtrapper-days]",
+      "input[data-boxtrapper-score]",
+      "input[data-boxtrapper-auto-sent]",
+      "input[data-boxtrapper-association]",
+      "textarea[data-boxtrapper-extra]",
+      "textarea[data-boxtrapper-forward]",
+      "select[data-boxtrapper-template]",
+      "input[data-boxtrapper-template-subject]",
+      "textarea[data-boxtrapper-template-body]",
+      "button[data-boxtrapper-template-reset]",
+      "button[data-boxtrapper-save]",
+      "textarea[data-boxtrapper-list=\"allow\"]",
+      "textarea[data-boxtrapper-list=\"ignore\"]",
+      "textarea[data-boxtrapper-list=\"deny\"]",
+      "button[data-boxtrapper-lists-save]",
+      "select[data-boxtrapper-day]",
+      "tbody[data-boxtrapper-queue]",
+      "button[data-boxtrapper-act=\"allow\"]",
+      "button[data-boxtrapper-act=\"deliver\"]",
+      "button[data-boxtrapper-act=\"delete\"]",
+      "button[data-boxtrapper-act=\"ignore\"]",
+      "button[data-boxtrapper-act=\"deny\"]",
+      "pre[data-boxtrapper-message]",
+      "select[data-boxtrapper-log-day]",
+      "pre[data-boxtrapper-log]"
+    ]
+  },
+  {
+    "id": "mailing-list-password",
+    "rootSelector": "[data-list-password]",
+    "applicableRoutes": [
+      "/email/mailing-lists"
+    ],
+    "requiredSelectors": [
+      "select[data-list-password-list]",
+      "input[type=\"password\"][data-list-password-input]",
+      "button[data-list-password-save]",
+      "[data-list-admin-status]"
+    ]
+  },
+  {
+    "id": "mailing-list-admin",
+    "rootSelector": "[data-list-admin]",
+    "applicableRoutes": [
+      "/mail/tools/mailing-lists"
+    ],
+    "requiredSelectors": [
+      "input[data-list-admin-address]",
+      "input[type=\"password\"][data-list-admin-password]",
+      "input[data-list-admin-member]",
+      "tbody[data-list-admin-members]",
+      "button[data-list-admin-open]",
+      "button[data-list-admin-add]",
+      "button[data-moderation-open]",
+      "[data-list-admin-status]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"list-admin-member\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"address\"]",
+          "button[data-xp-slot=\"action\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mailing-list-reset",
+    "rootSelector": "[data-list-reset]",
+    "applicableRoutes": [
+      "/whm/email/maintenance"
+    ],
+    "requiredSelectors": [
+      "tbody[data-list-reset-rows]",
+      "select[data-list-reset-list]",
+      "input[type=\"password\"][data-list-reset-password]",
+      "button[data-list-reset-save]",
+      "button[data-list-restart]",
+      "[data-list-admin-status]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"list-reset-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"address\"]",
+          "[data-xp-slot=\"account\"]",
+          "[data-xp-slot=\"password\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "file-workspace-browse",
+    "rootSelector": "[data-file-manager=\"browse\"]",
+    "applicableRoutes": [
+      "/files/manager"
+    ],
+    "requiredSelectors": [
+      "textarea#jailed-code-editor",
+      "[data-file-manager-table] tbody",
+      "[data-file-status]",
+      "[data-file-current-path]",
+      "[data-file-selected-path]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"file-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"name\"]",
+          "[data-xp-slot=\"kind\"]",
+          "[data-xp-slot=\"size\"]",
+          "[data-xp-slot=\"mode\"]",
+          "[data-xp-slot=\"modified\"]",
+          "[data-xp-slot=\"actions\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"file-action\"]",
+        "requiredSelectors": [
+          "button",
+          "[data-xp-slot=\"label\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"file-empty-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"message\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "file-workspace-trash",
+    "rootSelector": "[data-file-manager=\"trash\"]",
+    "applicableRoutes": [
+      "/files/trash"
+    ],
+    "requiredSelectors": [
+      "[data-file-manager-table] tbody",
+      "[data-file-status]"
+    ],
+    "optionalSelectors": [
+      "[data-trash-empty]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"trash-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"name\"]",
+          "[data-xp-slot=\"kind\"]",
+          "[data-xp-slot=\"size\"]",
+          "[data-xp-slot=\"mode\"]",
+          "[data-xp-slot=\"modified\"]",
+          "[data-xp-slot=\"actions\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"trash-action\"]",
+        "requiredSelectors": [
+          "button",
+          "[data-xp-slot=\"label\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"trash-purge-action\"]",
+        "requiredSelectors": [
+          "button",
+          "[data-xp-slot=\"label\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mail-attachments-root",
+    "rootSelector": "[data-mail-attachments]",
+    "applicableRoutes": [
+      "/mail/search",
+      "/mail/later"
+    ],
+    "requiredSelectors": [
+      "[data-attachment-status]",
+      "[data-attachment-list]",
+      "[data-attachment-refresh]"
+    ],
+    "elements": [
+      {
+        "selector": "[data-attachment-status]",
+        "tags": [
+          "p"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-attachment-list]",
+        "tags": [
+          "ul"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-attachment-refresh]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {
+          "type": "button"
+        },
+        "occurrence": "every",
+        "required": true
+      }
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"mail-attachment-row\"]",
+        "requiredSelectors": [
+          "li",
+          "a[data-xp-slot=\"link\"]",
+          "span[data-xp-slot=\"badge\"]",
+          "bdi[data-xp-slot=\"name\"]",
+          "bdi[data-xp-slot=\"size\"]"
+        ]
+      }
+    ],
+    "optionalSelectors": [
+      "[data-attachment-heading]"
+    ]
+  },
+  {
+    "id": "mail-attachments-mounted-reading-root",
+    "rootSelector": "[data-mail-attachments]",
+    "applicableRoutes": [
+      "/mail/inbox",
+      "/mail/sent",
+      "/mail/drafts",
+      "/mail/trash"
+    ],
+    "requiredSelectors": [
+      "[data-attachment-status]",
+      "[data-attachment-list]",
+      "[data-attachment-refresh]"
+    ],
+    "elements": [
+      {
+        "selector": "[data-attachment-status]",
+        "tags": [
+          "p"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-attachment-list]",
+        "tags": [
+          "ul"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-attachment-refresh]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {
+          "type": "button"
+        },
+        "occurrence": "every",
+        "required": true
+      }
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"mail-attachment-row\"]",
+        "requiredSelectors": [
+          "li",
+          "a[data-xp-slot=\"link\"]",
+          "span[data-xp-slot=\"badge\"]",
+          "bdi[data-xp-slot=\"name\"]",
+          "bdi[data-xp-slot=\"size\"]"
+        ]
+      }
+    ],
+    "optionalSelectors": [
+      "[data-attachment-heading]"
+    ],
+    "rootRequired": false
+  },
+  {
+    "id": "mail-compose-attachments-root",
+    "rootSelector": "[data-compose-attachments]",
+    "applicableRoutes": [
+      "/mail/compose"
+    ],
+    "requiredSelectors": [
+      "[data-compose-attachment-open]",
+      "[data-compose-attachment-input]",
+      "[data-compose-attachment-list]",
+      "[data-compose-attachment-status]"
+    ],
+    "elements": [
+      {
+        "selector": "[data-compose-attachment-open]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {
+          "type": "button"
+        },
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-compose-attachment-input]",
+        "tags": [
+          "input"
+        ],
+        "attributes": {
+          "type": "file",
+          "multiple": true
+        },
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-compose-attachment-list]",
+        "tags": [
+          "ul"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-compose-attachment-status]",
+        "tags": [
+          "p",
+          "span"
+        ],
+        "occurrence": "every",
+        "required": true,
+        "attributes": {
+          "role": "status"
+        }
+      }
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"mail-compose-attachment-row\"]",
+        "requiredSelectors": [
+          "li",
+          "bdi[data-xp-slot=\"name\"]",
+          "bdi[data-xp-slot=\"size\"]",
+          "button[data-xp-slot=\"remove\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"mail-compose-attachment-dismiss\"]",
+        "requiredSelectors": [
+          "button[data-xp-slot=\"label\"]"
+        ]
+      }
+    ],
+    "optionalSelectors": [
+      "[data-compose-attachment-summary]"
+    ]
+  },
+  {
+    "id": "mail-contacts-tools-root",
+    "rootSelector": "[data-mail-contacts-tools]",
+    "applicableRoutes": [
+      "/mail/contacts"
+    ],
+    "requiredSelectors": [
+      "[data-contacts-import-text]",
+      "[data-contacts-import]",
+      "[data-contacts-export]",
+      "[data-contacts-shares]"
+    ],
+    "elements": [
+      {
+        "selector": "[data-contacts-import-text]",
+        "tags": [
+          "textarea"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-contacts-import]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {
+          "type": "button"
+        },
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-contacts-export]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {
+          "type": "button"
+        },
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-contacts-shares]",
+        "tags": [
+          "ul"
+        ],
+        "occurrence": "every",
+        "required": true
+      }
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"mail-contact-share\"]",
+        "requiredSelectors": [
+          "li",
+          "bdi[data-xp-slot=\"address\"]",
+          "span[data-xp-slot=\"permission\"]",
+          "button[data-xp-slot=\"remove\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"mail-contact-share-empty\"]",
+        "requiredSelectors": [
+          "li[data-xp-slot=\"message\"]"
+        ]
+      }
+    ],
+    "optionalSelectors": [
+      "[data-contacts-import-file]",
+      "[data-contacts-import-preview]",
+      "[data-contacts-import-status]",
+      "[data-contacts-export-status]",
+      "[data-contacts-share-contact]",
+      "[data-contacts-share-principal]",
+      "[data-contacts-share-permission]",
+      "[data-contacts-share-add]",
+      "[data-contacts-share-status]"
+    ]
+  },
+  {
+    "id": "mail-identities-root",
+    "rootSelector": "[data-mail-identities]",
+    "applicableRoutes": [
+      "/mail/settings/identities"
+    ],
+    "requiredSelectors": [
+      "[data-identities-rows]",
+      "[data-identities-status]",
+      "[data-identities-display-name]",
+      "[data-identities-reply-to]",
+      "[data-identities-text-signature]",
+      "[data-identities-html-signature]",
+      "[data-identities-default]",
+      "[data-identities-save]"
+    ],
+    "elements": [
+      {
+        "selector": "[data-identities-rows]",
+        "tags": [
+          "div"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-identities-status]",
+        "tags": [
+          "p"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-identities-display-name]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-identities-reply-to]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-identities-text-signature]",
+        "tags": [
+          "textarea"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-identities-html-signature]",
+        "tags": [
+          "textarea"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-identities-default]",
+        "tags": [
+          "input"
+        ],
+        "attributes": {
+          "type": "checkbox"
+        },
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-identities-save]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {
+          "type": "button"
+        },
+        "occurrence": "every",
+        "required": true
+      }
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"mail-identity-card\"]",
+        "requiredSelectors": [
+          "article",
+          "strong[data-xp-slot=\"name\"]",
+          "span[data-xp-slot=\"badge\"]",
+          "dl[data-xp-slot=\"facts\"]",
+          "div[data-xp-slot=\"actions\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"mail-identity-fact\"]",
+        "requiredSelectors": [
+          "div",
+          "dt[data-xp-slot=\"label\"]",
+          "bdi[data-xp-slot=\"value\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"mail-identity-action\"]",
+        "requiredSelectors": [
+          "button[data-xp-slot=\"label\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"mail-identity-empty\"]",
+        "requiredSelectors": [
+          "p[data-xp-slot=\"message\"]"
+        ]
+      }
+    ],
+    "optionalSelectors": [
+      "[data-identities-form-title]",
+      "[data-identities-reset]",
+      "#identities-email"
+    ]
+  },
+  {
+    "id": "mail-mailbox-forwarders-root",
+    "rootSelector": "[data-mail-forwarders]",
+    "applicableRoutes": [
+      "/mail/settings/forwarders"
+    ],
+    "requiredSelectors": [
+      "[data-forwarders-status]",
+      "[data-forwarders-rows]",
+      "[data-forwarders-count]",
+      "input[name=\"destination\"]",
+      "[data-forwarders-add]",
+      "[data-forwarders-refresh]"
+    ],
+    "elements": [
+      {
+        "selector": "[data-forwarders-status]",
+        "tags": [
+          "p"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-forwarders-rows]",
+        "tags": [
+          "tbody"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "input[name=\"destination\"]",
+        "tags": [
+          "input"
+        ],
+        "attributes": {
+          "type": "email"
+        },
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-forwarders-add]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {
+          "type": "button"
+        },
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-forwarders-refresh]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {
+          "type": "button"
+        },
+        "occurrence": "every",
+        "required": true
+      }
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"mail-forwarder-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "bdi[data-xp-slot=\"address\"]",
+          "button[data-xp-slot=\"remove\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"mail-forwarder-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      }
+    ],
+    "optionalSelectors": [
+      "[data-forwarders-application]"
+    ]
+  },
+  {
+    "id": "mail-mailing-lists-root",
+    "rootSelector": "[data-mail-mailing-lists]",
+    "applicableRoutes": [
+      "/mail/tools/mailing-lists"
+    ],
+    "requiredSelectors": [
+      "[data-lists-status]",
+      "[data-lists-rows]",
+      "[data-lists-refresh]"
+    ],
+    "elements": [
+      {
+        "selector": "[data-lists-status]",
+        "tags": [
+          "p"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-lists-rows]",
+        "tags": [
+          "tbody"
+        ],
+        "occurrence": "every",
+        "required": true
+      },
+      {
+        "selector": "[data-lists-refresh]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {
+          "type": "button"
+        },
+        "occurrence": "every",
+        "required": true
+      }
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"mail-membership-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "bdi[data-xp-slot=\"address\"]",
+          "td[data-xp-slot=\"name\"]",
+          "td[data-xp-slot=\"observed\"]",
+          "td[data-xp-slot=\"subscription\"]",
+          "td[data-xp-slot=\"posting\"]",
+          "td[data-xp-slot=\"membership\"]",
+          "button[data-xp-slot=\"action\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"mail-membership-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      }
+    ],
+    "optionalSelectors": []
+  },
+  {
+    "id": "acct-transfer-credentials",
+    "rootSelector": "[data-acct-transfer-credentials]",
+    "applicableRoutes": [
+      "/whm/transfers/server"
+    ],
+    "requiredSelectors": [
+      "[data-acct-transfer-credentials-status]",
+      "tbody[data-acct-transfer-credentials-rows]",
+      "[data-acct-transfer-credentials-loading]",
+      "[data-acct-transfer-credentials-empty]",
+      "[data-acct-transfer-credentials-form]",
+      "input[data-acct-transfer-credential-input=\"label\"]",
+      "input[type=\"password\"][data-acct-transfer-credential-input=\"token\"]",
+      "button[data-acct-transfer-credential-save]",
+      "button[type=\"button\"][data-acct-transfer-credentials-refresh]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"transfer-credential-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "button[type=\"button\"][data-xp-action=\"remove\"][disabled]",
+          "[data-xp-slot=\"label\"]",
+          "[data-xp-slot=\"fingerprint\"]",
+          "[data-xp-slot=\"created\"]",
+          "[data-xp-slot=\"actor\"]",
+          "[data-xp-slot=\"remove-label\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "approved-host-services",
+    "rootSelector": "[data-host-services]",
+    "applicableRoutes": [
+      "/whm/services"
+    ],
+    "requiredSelectors": [
+      "tbody[data-host-service-rows]",
+      "[data-host-service-status]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"host-service-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "button[type=\"button\"][data-xp-action=\"restart\"][disabled]",
+          "[data-xp-slot=\"service\"]",
+          "[data-xp-slot=\"unit\"]",
+          "[data-xp-slot=\"state\"]",
+          "[data-xp-slot=\"restart-label\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"host-service-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      }
+    ],
+    "optionalSelectors": [
+      "[data-host-service-search]",
+      "[data-host-service-details]"
+    ]
+  },
+  {
+    "id": "sw-addon-services",
+    "rootSelector": "[data-sw-addons]",
+    "applicableRoutes": [
+      "/whm/software/addon-services"
+    ],
+    "requiredSelectors": [
+      "[data-sw-addons-status]",
+      "button[type=\"button\"][data-sw-addons-refresh]",
+      "tbody[data-sw-addons-rows]",
+      "[data-sw-addons-job]",
+      "a[data-sw-addons-job-link]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"software-addon-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "button[type=\"button\"][data-xp-action=\"start\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"stop\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"restart\"][disabled]",
+          "[data-xp-slot=\"service\"]",
+          "[data-xp-slot=\"kind\"]",
+          "[data-xp-slot=\"package\"]",
+          "[data-xp-slot=\"unit\"]",
+          "[data-xp-slot=\"state\"]",
+          "[data-xp-slot=\"boot\"]",
+          "[data-xp-slot=\"start-label\"]",
+          "[data-xp-slot=\"stop-label\"]",
+          "[data-xp-slot=\"restart-label\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"software-addon-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "sw-app-projects",
+    "rootSelector": "[data-sw-projects]",
+    "applicableRoutes": [
+      "/whm/software/application-projects"
+    ],
+    "requiredSelectors": [
+      "[data-sw-projects-status]",
+      "button[type=\"button\"][data-sw-projects-refresh]",
+      "tbody[data-sw-projects-runtimes]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"software-project-runtime-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"name\"]",
+          "[data-xp-slot=\"state\"]",
+          "[data-xp-slot=\"version\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"software-project-runtime-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "whm-ips",
+    "rootSelector": "[data-whm-ip-pool]",
+    "applicableRoutes": [
+      "/whm/server/ips"
+    ],
+    "requiredSelectors": [
+      "form[data-add-ip-form]",
+      "[data-add-ip-form] button[type=\"submit\"]",
+      "[data-ip-pool-table] tbody",
+      "[data-add-ip-status]",
+      "[data-ip-pool-status]",
+      "[data-ip-pool-count-label]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"whm-ip-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "span[data-xp-action=\"role\"]",
+          "span[data-xp-action=\"primary\"]",
+          "button[type=\"button\"][data-xp-action=\"remove\"][disabled]",
+          "[data-xp-slot=\"address\"]",
+          "[data-xp-slot=\"version\"]",
+          "[data-xp-slot=\"interface\"]",
+          "[data-xp-slot=\"owner\"]",
+          "[data-xp-slot=\"ptr\"]",
+          "[data-xp-slot=\"remove-label\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"whm-ip-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"whm-ip-role-web\"]",
+        "requiredSelectors": [
+          "span",
+          "[data-xp-slot=\"label\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"whm-ip-role-mail\"]",
+        "requiredSelectors": [
+          "span",
+          "[data-xp-slot=\"label\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"whm-ip-primary\"]",
+        "requiredSelectors": [
+          "span",
+          "[data-xp-slot=\"label\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"whm-ip-secondary\"]",
+        "requiredSelectors": [
+          "span",
+          "[data-xp-slot=\"label\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "whm-local-archives",
+    "rootSelector": "[data-account-backups]",
+    "rootRequired": false,
+    "routeScope": {
+      "kind": "authenticated",
+      "surfaces": [
+        "xwhm"
       ]
     },
-    {
-      "templateSelector": "template[data-xp-template=\"whm-generation-state-other\"]",
-      "requiredSelectors": [
-        "span",
-        "[data-xp-slot=\"content\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"whm-generation-current-active\"]",
-      "requiredSelectors": [
-        "span",
-        "[data-xp-slot=\"content\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"whm-generation-current-none\"]",
-      "requiredSelectors": [
-        "span",
-        "[data-xp-slot=\"content\"]"
-      ]
-    }
-  ]
-},
-{
-  "id": "zone-editor",
-  "rootSelector": "[data-dns-editor]",
-  "applicableRoutes": [
-    "/domains/zone-editor",
-    "/whm/dns"
-  ],
-  "requiredSelectors": [
-    "select[data-dns-zone]",
-    "select[data-dns-account]",
-    "input[data-dns-new-name]",
-    "tbody[data-dns-records]",
-    "[data-dns-status]",
-    "button[data-dns-add-record]",
-    "button[data-dns-add-zone]",
-    "button[data-dns-save]",
-    "button[data-dns-delete]"
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"dns-record-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "input[type=\"text\"][data-xp-slot=\"name\"][disabled]",
-        "select[data-xp-slot=\"type\"][disabled]",
-        "input[type=\"number\"][data-xp-slot=\"ttl\"][disabled]",
-        "input[type=\"text\"][data-xp-slot=\"content\"][disabled]",
-        "input[type=\"number\"][data-xp-slot=\"priority\"][disabled]",
-        "button[type=\"button\"][data-xp-slot=\"remove\"][disabled]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"dns-record-empty\"]",
-      "requiredSelectors": [
-        "tr",
-        "td[data-xp-slot=\"message\"]"
-      ]
-    }
-  ]
-},
-{
-  "id": "sw-containers-list",
-  "rootSelector": "[data-sw-containers][data-sw-can-read]",
-  "applicableRoutes": [
-    "/whm/software/containers"
-  ],
-  "requiredSelectors": [
-    "[data-sw-status]",
-    "button[data-sw-refresh]",
-    "tbody[data-sw-containers]",
-    "select[data-sw-filter-engine]",
-    "input[data-sw-filter-search]",
-    "[data-sw-job]",
-    "a[data-sw-job-link]"
-  ],
-  "optionalSelectors": [
-    "[data-sw-engine-state]",
-    "[data-sw-observed]"
-  ],
-  "templateScopes": [
-    {
-      "templateSelector": "template[data-xp-template=\"software-container-row\"]",
-      "requiredSelectors": [
-        "tr",
-        "[data-xp-slot=\"name\"]",
-        "[data-xp-slot=\"engine\"]",
-        "[data-xp-slot=\"image\"]",
-        "[data-xp-slot=\"state\"]",
-        "[data-xp-slot=\"status\"]",
-        "[data-xp-slot=\"ports\"]",
-        "button[type=\"button\"][data-xp-action=\"start\"][disabled]",
-        "button[type=\"button\"][data-xp-action=\"stop\"][disabled]",
-        "button[type=\"button\"][data-xp-action=\"restart\"][disabled]",
-        "[data-xp-slot=\"start-label\"]",
-        "[data-xp-slot=\"stop-label\"]",
-        "[data-xp-slot=\"restart-label\"]"
-      ]
-    },
-    {
-      "templateSelector": "template[data-xp-template=\"software-container-empty\"]",
-      "requiredSelectors": [
-        "tr",
-        "td[data-xp-slot=\"message\"]"
-      ]
-    }
-  ]
-},
+    "requiredSelectors": [
+      "select[data-backup-account]",
+      "tbody[data-backup-files]",
+      "[data-backup-status]",
+      "button[data-backup-create]",
+      "button[data-backup-local-read]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"whm-local-archive-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"archive\"]",
+          "[data-xp-slot=\"bytes\"]",
+          "a[data-xp-slot=\"review\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "whm-panel-data",
+    "rootSelector": "[data-whm-generations]",
+    "applicableRoutes": [
+      "/whm/panel/data"
+    ],
+    "requiredSelectors": [
+      "[data-generations-status]",
+      "tbody[data-generation-rows]"
+    ],
+    "optionalSelectors": [
+      "[data-generations-current]",
+      "[data-action=\"rollback-generation\"]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"whm-generation-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"generation\"]",
+          "[data-xp-slot=\"created\"]",
+          "[data-xp-slot=\"summary\"]",
+          "[data-xp-slot=\"state\"]",
+          "[data-xp-slot=\"actions\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"whm-generation-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"content\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"whm-generation-rollback\"]",
+        "requiredSelectors": [
+          "button[type=\"button\"][disabled]",
+          "[data-xp-slot=\"content\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"whm-generation-state-active\"]",
+        "requiredSelectors": [
+          "span",
+          "[data-xp-slot=\"content\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"whm-generation-state-other\"]",
+        "requiredSelectors": [
+          "span",
+          "[data-xp-slot=\"content\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"whm-generation-current-active\"]",
+        "requiredSelectors": [
+          "span",
+          "[data-xp-slot=\"content\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"whm-generation-current-none\"]",
+        "requiredSelectors": [
+          "span",
+          "[data-xp-slot=\"content\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "zone-editor",
+    "rootSelector": "[data-dns-editor]",
+    "applicableRoutes": [
+      "/domains/zone-editor",
+      "/whm/dns"
+    ],
+    "requiredSelectors": [
+      "select[data-dns-zone]",
+      "select[data-dns-account]",
+      "input[data-dns-new-name]",
+      "tbody[data-dns-records]",
+      "[data-dns-status]",
+      "button[data-dns-add-record]",
+      "button[data-dns-add-zone]",
+      "button[data-dns-save]",
+      "button[data-dns-delete]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"dns-record-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "input[type=\"text\"][data-xp-slot=\"name\"][disabled]",
+          "select[data-xp-slot=\"type\"][disabled]",
+          "input[type=\"number\"][data-xp-slot=\"ttl\"][disabled]",
+          "input[type=\"text\"][data-xp-slot=\"content\"][disabled]",
+          "input[type=\"number\"][data-xp-slot=\"priority\"][disabled]",
+          "button[type=\"button\"][data-xp-slot=\"remove\"][disabled]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"dns-record-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "sw-containers-list",
+    "rootSelector": "[data-sw-containers][data-sw-can-read]",
+    "applicableRoutes": [
+      "/whm/software/containers"
+    ],
+    "requiredSelectors": [
+      "[data-sw-status]",
+      "button[data-sw-refresh]",
+      "tbody[data-sw-containers]",
+      "select[data-sw-filter-engine]",
+      "input[data-sw-filter-search]",
+      "[data-sw-job]",
+      "a[data-sw-job-link]"
+    ],
+    "optionalSelectors": [
+      "[data-sw-engine-state]",
+      "[data-sw-observed]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"software-container-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"name\"]",
+          "[data-xp-slot=\"engine\"]",
+          "[data-xp-slot=\"image\"]",
+          "[data-xp-slot=\"state\"]",
+          "[data-xp-slot=\"status\"]",
+          "[data-xp-slot=\"ports\"]",
+          "button[type=\"button\"][data-xp-action=\"start\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"stop\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"restart\"][disabled]",
+          "[data-xp-slot=\"start-label\"]",
+          "[data-xp-slot=\"stop-label\"]",
+          "[data-xp-slot=\"restart-label\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"software-container-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      }
+    ]
+  },
   {
     "id": "whm-account-details",
     "rootSelector": "[data-account-detail-workspace]",
@@ -15281,6 +16104,2253 @@ export const AUTHORITATIVE_CONTROLLER_DECLARATIONS: readonly ControllerDeclarati
         ],
         "attributes": {},
         "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "id": "whm-server-ops",
+    "rootSelector": "[data-server-ops]",
+    "rootRequired": false,
+    "applicableRoutes": [
+      "/whm/server/networking",
+      "/whm/server/role",
+      "/whm/server/cron",
+      "/whm/server/upgrade",
+      "/whm/dns/more",
+      "/whm/domains",
+      "/whm/email/quality",
+      "/whm/services/dns",
+      "/whm/services/ftp",
+      "/whm/services/certificates",
+      "/whm/panel/notifications"
+    ],
+    "ownScopeOnly": true,
+    "requiredSelectors": [
+      "[data-server-ops-status]",
+      "[data-server-ops-submit]"
+    ],
+    "optionalSelectors": [
+      "[data-server-ops-rows]",
+      "[data-server-ops-job]"
+    ]
+  },
+  {
+    "id": "whm-host-tools",
+    "rootSelector": "[data-host-tool]",
+    "rootRequired": false,
+    "applicableRoutes": [
+      "/whm/server/cron",
+      "/whm/server/terminal",
+      "/whm/server/networking",
+      "/whm/server/setup",
+      "/whm/services/more",
+      "/whm/software/php",
+      "/whm/monitoring/logs"
+    ],
+    "ownScopeOnly": true,
+    "requiredSelectors": [
+      "[data-host-tool-status]"
+    ],
+    "optionalSelectors": [
+      "[data-host-tool-submit]",
+      "[data-host-tool-cancel]",
+      "[data-host-tool-rows]",
+      "[data-host-tool-log]",
+      "[data-host-tool-reveal]",
+      "[data-host-tool-job]",
+      "[data-host-tool-tool]",
+      "[data-host-tool-fact]",
+      "[data-host-tool-fields]",
+      "[data-host-tool-from]",
+      "[data-host-tool-when]"
+    ]
+  },
+  {
+    "id": "whm-ip-tools",
+    "rootSelector": "[data-whm-ip-tools]",
+    "rootRequired": false,
+    "applicableRoutes": [
+      "/whm/server/ips"
+    ],
+    "requiredSelectors": [
+      "[data-ip-change-form]",
+      "[data-ip-change-status]",
+      "[data-remote-ips-form]",
+      "[data-remote-ips-status]",
+      "[data-ip-change-many-form]",
+      "[data-ip-change-many-status]",
+      "[data-ip-reserve-status]",
+      "[data-ip-usage-refresh]",
+      "[data-ip-usage-status]",
+      "[data-ip-rebuild]",
+      "[data-ip-rebuild-status]",
+      "[data-ip-migrate-form]",
+      "[data-ip-migrate-status]",
+      "[data-ip-range-form]",
+      "[data-ip-assign6-form]",
+      "[data-ip-range-status]",
+      "[data-ip-tools-status]"
+    ]
+  },
+  {
+    "id": "whm-reseller-lists",
+    "rootSelector": "[data-whm-reseller-lists]",
+    "rootRequired": false,
+    "applicableRoutes": [
+      "/whm/resellers/privileges"
+    ],
+    "requiredSelectors": [
+      "[data-acl-list-form]",
+      "[data-acl-list-apply-form]",
+      "[data-acl-list-status]"
+    ]
+  },
+  {
+    "id": "whm-force-password",
+    "rootSelector": "[data-whm-force-password]",
+    "rootRequired": false,
+    "applicableRoutes": [
+      "/whm/accounts/health"
+    ],
+    "requiredSelectors": [
+      "[data-force-password-rows]",
+      "[data-force-password-all]",
+      "[data-force-password-none]",
+      "[data-force-password-save]",
+      "[data-force-password-status]"
+    ]
+  },
+  {
+    "id": "whm-rearrange",
+    "rootSelector": "[data-whm-rearrange]",
+    "rootRequired": false,
+    "applicableRoutes": [
+      "/whm/accounts/health"
+    ],
+    "requiredSelectors": [
+      "[data-rearrange-form]",
+      "[data-rearrange-submit]",
+      "[data-rearrange-status]"
+    ]
+  },
+  {
+    "id": "whm-shell-access",
+    "rootSelector": "[data-whm-shell-access]",
+    "rootRequired": false,
+    "applicableRoutes": [
+      "/whm/security/isolation"
+    ],
+    "requiredSelectors": [
+      "[data-shell-rows]",
+      "[data-shell-all=\"jailed\"]",
+      "[data-shell-all=\"none\"]",
+      "[data-shell-status]"
+    ]
+  },
+  {
+    "id": "whm-email-users",
+    "rootSelector": "[data-whm-email-users]",
+    "rootRequired": false,
+    "applicableRoutes": [
+      "/whm/accounts/announcements"
+    ],
+    "requiredSelectors": [
+      "[data-email-users-form]",
+      "[data-email-users-review]",
+      "[data-email-users-send]",
+      "[data-email-users-status]",
+      "[data-email-users-recipients]"
+    ]
+  },
+  {
+    "id": "whm-account-enhancements",
+    "rootSelector": "[data-whm-account-enhancements]",
+    "rootRequired": false,
+    "applicableRoutes": [
+      "/whm/plans/enhancements"
+    ],
+    "requiredSelectors": [
+      "[data-enh-assign-form]",
+      "[data-enh-assign]",
+      "[data-enh-unassign]",
+      "[data-enh-assign-status]"
+    ]
+  },
+  {
+    "id": "whm-web-templates",
+    "rootSelector": "[data-whm-web-templates]",
+    "rootRequired": false,
+    "applicableRoutes": [
+      "/whm/accounts/templates"
+    ],
+    "requiredSelectors": [
+      "[data-web-template-form=\"default\"]",
+      "[data-web-template-form=\"suspended\"]",
+      "[data-web-template-preview]",
+      "[data-web-template-status]"
+    ]
+  },
+  {
+    "id": "whm-skeleton",
+    "rootSelector": "[data-whm-skeleton]",
+    "rootRequired": false,
+    "applicableRoutes": [
+      "/whm/accounts/templates"
+    ],
+    "requiredSelectors": [
+      "[data-skeleton-rows]",
+      "[data-skeleton-form]",
+      "[data-skeleton-status]"
+    ]
+  },
+  {
+    "id": "whm-locale-copy",
+    "rootSelector": "[data-whm-locale-copy]",
+    "rootRequired": false,
+    "applicableRoutes": [
+      "/whm/panel/languages"
+    ],
+    "requiredSelectors": [
+      "[data-locale-copy-rows]",
+      "[data-locale-copy-form]",
+      "[data-locale-copy-status]"
+    ]
+  },
+  {
+    "id": "whm-reseller-email",
+    "rootSelector": "[data-whm-reseller-email]",
+    "rootRequired": false,
+    "applicableRoutes": [
+      "/whm/resellers/more"
+    ],
+    "requiredSelectors": [
+      "[data-reseller-email-form]",
+      "[data-reseller-email-status]"
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/whm/security"
+    ],
+    "id": "sign-in-policy",
+    "requiredSelectors": [
+      "[data-sign-in-status]",
+      "[data-sign-in-save]",
+      "[data-sign-in-refresh]",
+      "[data-sign-in-lockouts]",
+      "[data-sign-in-unlock-target]",
+      "[data-sign-in-unlock=\"username\"]",
+      "[data-sign-in-unlock=\"ip\"]",
+      "[data-sign-in-field=\"lockout.username.attempts\"]",
+      "[data-sign-in-field=\"lockout.username.windowMin\"]",
+      "[data-sign-in-field=\"lockout.username.durationMin\"]",
+      "[data-sign-in-field=\"lockout.ip.attempts\"]",
+      "[data-sign-in-field=\"lockout.ip.windowMin\"]",
+      "[data-sign-in-field=\"lockout.ip.durationMin\"]",
+      "[data-sign-in-field=\"lockout.ipAllow\"]",
+      "[data-sign-in-field=\"lockout.ipDeny\"]",
+      "[data-sign-in-field=\"passwordStrength.default\"]",
+      "[data-sign-in-field=\"passwordStrength.perService.panel\"]",
+      "[data-sign-in-field=\"passwordStrength.perService.mail\"]",
+      "[data-sign-in-field=\"passwordStrength.perService.ftp\"]",
+      "[data-sign-in-field=\"passwordStrength.perService.database\"]",
+      "[data-sign-in-field=\"passwordStrength.perService.webdisk\"]",
+      "[data-sign-in-field=\"passwordStrength.perService.directory\"]",
+      "[data-sign-in-field=\"session.idleMin\"]",
+      "[data-sign-in-field=\"session.absoluteHours\"]"
+    ],
+    "rootSelector": "[data-sign-in-policy]",
+    "elements": [
+      {
+        "selector": "[data-sign-in-save]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {},
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-sign-in-unlock-target]",
+        "tags": [
+          "select"
+        ],
+        "attributes": {},
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/whm/services/web"
+    ],
+    "id": "whm-web-directives",
+    "requiredSelectors": [
+      "[data-web-directives-status]",
+      "[name=\"web.timeoutSec\"]",
+      "[name=\"web.clientMaxBodyMb\"]",
+      "[name=\"web.tlsCiphers\"]",
+      "[name=\"web.tlsProtocols\"]",
+      "[name=\"web.gzip.enabled\"]",
+      "[name=\"web.gzip.level\"]",
+      "[name=\"web.directoryIndex\"]",
+      "[name=\"web.rlimitMemMb\"]",
+      "[name=\"web.rlimitCpuSec\"]",
+      "[name=\"web.includes.apachePreMain\"]",
+      "[name=\"web.includes.apachePreVhost\"]",
+      "[name=\"web.includes.apachePostVhost\"]",
+      "[name=\"web.includes.nginxHttp\"]"
+    ],
+    "rootSelector": "[data-web-directives-form]",
+    "elements": [
+      {
+        "selector": "[name=\"web.directoryIndex\"]",
+        "tags": [
+          "textarea"
+        ],
+        "attributes": {},
+        "occurrence": "first"
+      },
+      {
+        "selector": "[name=\"web.includes.nginxHttp\"]",
+        "tags": [
+          "textarea"
+        ],
+        "attributes": {},
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/whm/server/setup"
+    ],
+    "id": "whm-tweak-settings",
+    "requiredSelectors": [
+      "[data-tweak-search]",
+      "[data-tweak-empty]",
+      "[data-tweak-save]",
+      "[data-tweak-refresh]",
+      "[data-tweak-status]",
+      "[data-setting-row]",
+      "[data-setting-value]",
+      "[data-tweak-input=\"server.healthCheckMinutes\"]",
+      "[data-setting-group=\"compression\"]",
+      "[data-tweak-input=\"compression.gzipLevel\"]",
+      "[data-tweak-input=\"compression.zstdLevel\"]"
+    ],
+    "rootSelector": "[data-tweak-settings]",
+    "elements": [
+      {
+        "selector": "[data-tweak-save]",
+        "tags": [
+          "button"
+        ],
+        "attributes": {},
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-tweak-search]",
+        "tags": [
+          "input"
+        ],
+        "attributes": {},
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "id": "ssl-store-account",
+    "rootSelector": "[data-ssl-store][data-ssl-store-mode=\"account\"]",
+    "applicableRoutes": [
+      "/security/ssl/files"
+    ],
+    "ownScopeOnly": true,
+    "requiredSelectors": [
+      "[data-ssl-store-status]",
+      "button[type=\"button\"][data-ssl-store-refresh]",
+      "tbody[data-ssl-store-keys]",
+      "tbody[data-ssl-store-csrs]",
+      "tbody[data-ssl-store-certificates]",
+      "[data-ssl-store-viewer]",
+      "pre[data-ssl-store-pem]",
+      "button[type=\"button\"][data-ssl-store-viewer-close]"
+    ],
+    "optionalSelectors": [
+      "form[data-ssl-store-key-form]",
+      "form[data-ssl-store-csr-form]",
+      "form[data-ssl-store-certificate-form]",
+      "form[data-ssl-store-import-form]",
+      "form[data-ssl-store-install-form]",
+      "select[name=\"keyType\"]",
+      "select[name=\"keyId\"]",
+      "select[name=\"storeCertificateId\"]",
+      "select[name=\"domain\"]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"ssl-store-action\"]",
+        "requiredSelectors": [
+          "button[type=\"button\"][data-xp-slot=\"label\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "ssl-store-storage",
+    "rootSelector": "[data-ssl-store][data-ssl-store-mode=\"storage\"]",
+    "applicableRoutes": [
+      "/whm/ssl"
+    ],
+    "ownScopeOnly": true,
+    "requiredSelectors": [
+      "[data-ssl-store-status]",
+      "button[type=\"button\"][data-ssl-store-refresh]",
+      "select[data-ssl-store-account]",
+      "tbody[data-ssl-store-keys]",
+      "tbody[data-ssl-store-csrs]",
+      "tbody[data-ssl-store-certificates]",
+      "[data-ssl-store-viewer]",
+      "pre[data-ssl-store-pem]",
+      "button[type=\"button\"][data-ssl-store-viewer-close]"
+    ],
+    "optionalSelectors": [],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"ssl-store-action\"]",
+        "requiredSelectors": [
+          "button[type=\"button\"][data-xp-slot=\"label\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "ssl-store-generate",
+    "rootSelector": "[data-ssl-store][data-ssl-store-mode=\"generate\"]",
+    "applicableRoutes": [
+      "/whm/ssl/install"
+    ],
+    "ownScopeOnly": true,
+    "requiredSelectors": [
+      "[data-ssl-store-status]",
+      "button[type=\"button\"][data-ssl-store-refresh]",
+      "select[data-ssl-store-account]"
+    ],
+    "optionalSelectors": [
+      "form[data-ssl-store-certificate-form]",
+      "select[name=\"keyType\"]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"ssl-store-action\"]",
+        "requiredSelectors": [
+          "button[type=\"button\"][data-xp-slot=\"label\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "ssl-store-service",
+    "rootSelector": "[data-ssl-store][data-ssl-store-mode=\"service\"]",
+    "applicableRoutes": [
+      "/whm/services/certificates"
+    ],
+    "ownScopeOnly": true,
+    "requiredSelectors": [
+      "[data-ssl-store-status]",
+      "button[type=\"button\"][data-ssl-store-refresh]",
+      "tbody[data-ssl-store-certificates]",
+      "[data-ssl-store-viewer]",
+      "pre[data-ssl-store-pem]",
+      "button[type=\"button\"][data-ssl-store-viewer-close]"
+    ],
+    "optionalSelectors": [
+      "form[data-ssl-store-service-form]",
+      "select[name=\"storeCertificateId\"]",
+      "select[name=\"service\"]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"ssl-store-action\"]",
+        "requiredSelectors": [
+          "button[type=\"button\"][data-xp-slot=\"label\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/whm/accounts/health"
+    ],
+    "id": "whm-demo-mode",
+    "requiredSelectors": [
+      "[data-demo-mode-status]",
+      "[data-demo-mode-result]",
+      "[data-demo-mode-rows]",
+      "[data-demo-mode-account]",
+      "[data-demo-mode-enable]",
+      "[data-demo-mode-disable]",
+      "[data-demo-mode-refresh]"
+    ],
+    "rootSelector": "[data-demo-mode-workspace]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/panel/developer"
+    ],
+    "id": "whm-hooks",
+    "requiredSelectors": [
+      "[data-hooks-status]",
+      "[data-hooks-result]",
+      "[data-hooks-directory]",
+      "[data-hooks-rows]",
+      "[data-hooks-select]",
+      "[data-hooks-action=\"enable\"]",
+      "[data-hooks-action=\"disable\"]",
+      "[data-hooks-action=\"up\"]",
+      "[data-hooks-action=\"down\"]",
+      "[data-hooks-action=\"delete\"]",
+      "[data-hooks-action=\"refresh\"]"
+    ],
+    "rootSelector": "[data-hooks-workspace]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/panel/developer"
+    ],
+    "id": "whm-registered-apps",
+    "requiredSelectors": [
+      "[data-registered-apps-status]",
+      "[data-registered-apps-rows]",
+      "[data-registered-apps-refresh]"
+    ],
+    "rootSelector": "[data-registered-apps-workspace]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/panel/branding"
+    ],
+    "id": "whm-theme-packages",
+    "requiredSelectors": [
+      "[data-theme-packages-status]",
+      "[data-theme-packages-result]",
+      "[data-theme-packages-rows]",
+      "[data-theme-packages-file]",
+      "[data-theme-packages-select]",
+      "[data-theme-packages-clone-id]",
+      "[data-theme-packages-clone-name]",
+      "[data-theme-packages-action=\"upload\"]",
+      "[data-theme-packages-action=\"clone\"]",
+      "[data-theme-packages-action=\"download\"]",
+      "[data-theme-packages-action=\"delete\"]",
+      "[data-theme-packages-action=\"refresh\"]"
+    ],
+    "rootSelector": "[data-theme-packages-workspace]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/software/site-software",
+      "/whm/software/store"
+    ],
+    "id": "whm-site-software",
+    "requiredSelectors": [
+      "[data-site-software-status]",
+      "[data-site-software-result]",
+      "[data-site-software-rows]",
+      "[data-site-software-file]",
+      "[data-site-software-select]",
+      "[data-site-software-fact=\"trust\"]",
+      "[data-site-software-fact=\"keys\"]",
+      "[data-site-software-fact=\"sequence\"]",
+      "[data-site-software-fact=\"issued\"]",
+      "[data-site-software-fact=\"expires\"]",
+      "[data-site-software-action=\"import\"]",
+      "[data-site-software-action=\"offer\"]",
+      "[data-site-software-action=\"withdraw\"]",
+      "[data-site-software-action=\"refresh\"]"
+    ],
+    "rootSelector": "[data-site-software-workspace]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/software/site-software",
+      "/whm/software/store"
+    ],
+    "id": "whm-site-instances",
+    "requiredSelectors": [
+      "[data-site-instances-status]",
+      "[data-site-instances-rows]",
+      "[data-site-instances-releases]",
+      "[data-site-instances-select]",
+      "[data-site-instances-release-select]",
+      "[data-site-instances-file]",
+      "[data-site-instances-action=\"update\"]",
+      "[data-site-instances-action=\"remove\"]",
+      "[data-site-instances-action=\"refresh\"]",
+      "[data-site-instances-action=\"upload\"]"
+    ],
+    "rootSelector": "[data-site-instances]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/panel/developer"
+    ],
+    "id": "whm-plugin-packages",
+    "requiredSelectors": [
+      "[data-plugin-packages-status]",
+      "[data-plugin-packages-result]",
+      "[data-plugin-packages-rows]",
+      "[data-plugin-packages-select]",
+      "[data-plugin-packages-file]",
+      "[data-plugin-packages-overwrite]",
+      "[data-plugin-packages-action=\"install\"]",
+      "[data-plugin-packages-action=\"download\"]",
+      "[data-plugin-packages-action=\"delete\"]",
+      "[data-plugin-packages-action=\"refresh\"]",
+      "[data-plugin-packages-action=\"add\"]",
+      "[data-plugin-packages-action=\"clear\"]",
+      "[data-plugin-packages-action=\"generate\"]",
+      "[data-plugin-generator-input=\"name\"]",
+      "[data-plugin-generator-input=\"id\"]",
+      "[data-plugin-generator-input=\"item\"]",
+      "[data-plugin-generator-input=\"group\"]",
+      "[data-plugin-generator-input=\"priority\"]",
+      "[data-plugin-generator-input=\"uri\"]",
+      "[data-plugin-generator-input=\"feature\"]",
+      "[data-plugin-generator-icon]",
+      "[data-plugin-generator-rows]"
+    ],
+    "rootSelector": "[data-plugin-packages-workspace]"
+  },
+  {
+    "id": "account-plugins-owned-root",
+    "rootSelector": "[data-account-plugins]",
+    "rootRequired": false,
+    "qualifiedOnly": false,
+    "requiredSelectors": [
+      "div[data-account-plugins-list]",
+      "p[data-account-plugins-status]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"account-plugin-group\"]",
+        "requiredSelectors": [
+          "h2[data-xp-slot=\"title\"]",
+          "ul[data-xp-slot=\"items\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"account-plugin-link\"]",
+        "requiredSelectors": [
+          "a[data-xp-slot=\"link\"]",
+          "img[data-xp-slot=\"icon\"]",
+          "span[data-xp-slot=\"name\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/whm/security/ssh"
+    ],
+    "id": "identity-root-password",
+    "requiredSelectors": [
+      "[data-sec-status]",
+      "[data-sec-result]",
+      "[data-sec-action=\"refresh\"]",
+      "[data-sec-field=\"host\"]",
+      "[data-sec-field=\"second-factor\"]",
+      "[data-sec-field=\"strength\"]",
+      "[data-sec-input=\"password\"]",
+      "[data-sec-input=\"confirmation\"]",
+      "[data-sec-input=\"current-password\"]",
+      "[data-sec-input=\"totp\"]",
+      "[data-sec-action=\"generate\"]",
+      "[data-sec-action=\"change\"]",
+      "[data-identity-totp]"
+    ],
+    "rootAttributes": {
+      "data-sec-page": "root-password"
+    },
+    "rootSelector": "[data-sec-workspace]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/security/ssh"
+    ],
+    "id": "identity-admin-group",
+    "requiredSelectors": [
+      "[data-sec-status]",
+      "[data-sec-result]",
+      "[data-sec-action=\"refresh\"]",
+      "[data-sec-field=\"group\"]",
+      "[data-sec-field=\"observed-at\"]",
+      "[data-sec-rows=\"members\"]",
+      "[data-sec-input=\"account\"]",
+      "[data-sec-action=\"add\"]"
+    ],
+    "rootAttributes": {
+      "data-sec-page": "admin-group"
+    },
+    "rootSelector": "[data-sec-workspace]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/security/sign-in"
+    ],
+    "id": "identity-security-policy",
+    "rootRequired": false,
+    "requiredSelectors": [
+      "[data-sec-status]",
+      "[data-sec-result]",
+      "[data-sec-action=\"refresh\"]",
+      "[data-sec-field=\"policy-state\"]",
+      "[data-sec-field=\"updated\"]",
+      "[data-sec-input=\"verified-ip\"]",
+      "[data-sec-action=\"save\"]",
+      "[data-sec-input=\"reset-username\"]",
+      "[data-sec-action=\"reset-user\"]"
+    ],
+    "rootAttributes": {
+      "data-sec-page": "security-policy"
+    },
+    "rootSelector": "[data-sec-workspace]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/security/sign-in",
+      "/security/account"
+    ],
+    "id": "identity-security-questions",
+    "rootRequired": false,
+    "requiredSelectors": [
+      "[data-sec-status]",
+      "[data-sec-result]",
+      "[data-sec-action=\"refresh\"]",
+      "[data-sec-field=\"policy\"]",
+      "[data-sec-field=\"count\"]",
+      "[data-sec-field=\"client\"]",
+      "[data-sec-rows=\"questions\"]",
+      "[data-sec-rows=\"addresses\"]",
+      "[data-sec-input=\"question-1\"]",
+      "[data-sec-input=\"answer-1\"]",
+      "[data-sec-input=\"question-2\"]",
+      "[data-sec-input=\"answer-2\"]",
+      "[data-sec-input=\"question-3\"]",
+      "[data-sec-input=\"answer-3\"]",
+      "[data-sec-input=\"current-password\"]",
+      "[data-sec-input=\"address\"]",
+      "[data-sec-action=\"save\"]",
+      "[data-sec-action=\"clear\"]",
+      "[data-sec-action=\"add-address\"]",
+      "[data-sec-action=\"add-current\"]"
+    ],
+    "rootAttributes": {
+      "data-sec-page": "security-questions"
+    },
+    "rootSelector": "[data-sec-workspace]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/security/sign-in"
+    ],
+    "id": "identity-external-providers",
+    "rootRequired": false,
+    "requiredSelectors": [
+      "[data-sec-status]",
+      "[data-sec-result]",
+      "[data-sec-action=\"refresh\"]",
+      "[data-sec-field=\"redirect-uris\"]",
+      "[data-sec-rows=\"providers\"]",
+      "[data-sec-rows=\"links\"]",
+      "[data-sec-input=\"provider-id\"]",
+      "[data-sec-input=\"provider-label\"]",
+      "[data-sec-input=\"provider-issuer\"]",
+      "[data-sec-input=\"provider-client-id\"]",
+      "[data-sec-input=\"provider-client-secret\"]",
+      "[data-sec-input=\"provider-xpanel\"]",
+      "[data-sec-input=\"provider-xwhm\"]",
+      "[data-sec-action=\"save-provider\"]",
+      "[data-sec-action=\"new-provider\"]"
+    ],
+    "rootAttributes": {
+      "data-sec-page": "external-providers"
+    },
+    "rootSelector": "[data-sec-workspace]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/security/sign-in",
+      "/security/account"
+    ],
+    "id": "identity-external-identities",
+    "rootRequired": false,
+    "requiredSelectors": [
+      "[data-sec-status]",
+      "[data-sec-result]",
+      "[data-sec-action=\"refresh\"]",
+      "[data-sec-field=\"availability\"]",
+      "[data-sec-rows=\"identities\"]",
+      "[data-sec-input=\"provider\"]",
+      "[data-sec-input=\"current-password\"]",
+      "[data-sec-action=\"link\"]"
+    ],
+    "rootAttributes": {
+      "data-sec-page": "external-identities"
+    },
+    "rootSelector": "[data-sec-workspace]"
+  },
+  {
+    "id": "account-web-field-controls:handlers",
+    "rootSelector": "[data-web-directives=\"handlers\"]",
+    "rootRequired": true,
+    "applicableRoutes": [
+      "/advanced/handlers"
+    ],
+    "requiredSelectors": [
+      "[data-wd-field=\"handler\"]",
+      "[data-wd-field=\"extensions\"]"
+    ],
+    "elements": [
+      {
+        "selector": "[data-wd-field=\"handler\"]",
+        "tags": [
+          "select"
+        ],
+        "attributes": {},
+        "occurrence": "first",
+        "required": true
+      },
+      {
+        "selector": "[data-wd-field=\"extensions\"]",
+        "tags": [
+          "input"
+        ],
+        "attributes": {
+          "type": "text"
+        },
+        "occurrence": "first",
+        "required": true
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/security/ip-blocker"
+    ],
+    "id": "account-ip-blocker",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-ipb-input]",
+      "[data-ipb-add]",
+      "[data-ipb-refresh]",
+      "[data-ipb-status]",
+      "[data-ipb-rows]",
+      "[data-ipb-error]",
+      "[data-ipb-count]"
+    ],
+    "rootSelector": "[data-ip-blocker]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-ipb-input]",
+        "tags": [
+          "input"
+        ],
+        "attributes": {
+          "type": "text"
+        },
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-ipb-add]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-ipb-refresh]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/software/optimize"
+    ],
+    "id": "account-edge-cache",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-edge-cache-purge]",
+      "[data-edge-cache-toggle]",
+      "[data-edge-cache-status]",
+      "[data-edge-cache-state]",
+      "[data-edge-cache-purged]"
+    ],
+    "rootSelector": "[data-edge-cache]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-edge-cache-purge]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-edge-cache-toggle]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/files/directory-privacy"
+    ],
+    "id": "account-leech-protection",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-lp-folder]",
+      "[data-lp-max]",
+      "[data-lp-url]",
+      "[data-lp-email]",
+      "[data-lp-disable]",
+      "[data-lp-save]",
+      "[data-lp-refresh]",
+      "[data-lp-status]",
+      "[data-lp-error]",
+      "[data-lp-rows]"
+    ],
+    "rootSelector": "[data-leech-protection]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-lp-folder]",
+        "tags": [
+          "select"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-lp-max]",
+        "tags": [
+          "input"
+        ],
+        "attributes": {
+          "type": "number"
+        },
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-lp-disable]",
+        "tags": [
+          "input"
+        ],
+        "attributes": {
+          "type": "checkbox"
+        },
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-lp-save]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-lp-refresh]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/whm/databases"
+    ],
+    "id": "whm-db-map-tool",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-db-map-account]",
+      "[data-db-map-databases]",
+      "[data-db-map-users]",
+      "[data-db-map-status]",
+      "[data-db-map-submit]"
+    ],
+    "rootSelector": "[data-db-map-tool]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/whm/databases/users"
+    ],
+    "id": "whm-db-access-hosts",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-db-hosts-list]",
+      "[data-db-hosts-status]",
+      "[data-db-hosts-save]",
+      "[data-db-hosts-push]"
+    ],
+    "rootSelector": "[data-db-hosts-tool]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/whm/databases/servers"
+    ],
+    "id": "whm-db-settings",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-db-setting-limits]",
+      "[data-db-setting-pool]",
+      "[data-db-settings-save]",
+      "[data-db-settings-status]"
+    ],
+    "rootSelector": "[data-db-settings-tool]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/whm/databases/servers"
+    ],
+    "id": "whm-db-postgresql",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-db-pg-status]",
+      "[data-db-pg-roles]",
+      "[data-db-pg-new]",
+      "[data-db-pg-confirm]",
+      "[data-db-pg-generate]",
+      "[data-db-pg-submit]"
+    ],
+    "rootSelector": "[data-db-pg-tool]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/whm/databases/servers"
+    ],
+    "id": "whm-db-root-password",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-db-root-new]",
+      "[data-db-root-confirm]",
+      "[data-db-root-generate]",
+      "[data-db-root-submit]",
+      "[data-db-root-status]",
+      "[data-db-root-strength]"
+    ],
+    "rootSelector": "[data-whm-db-root-password]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/whm/services/ftp"
+    ],
+    "id": "whm-ftp-server-settings",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-ftp-setting]",
+      "[data-ftp-settings-save]",
+      "[data-ftp-settings-status]"
+    ],
+    "rootSelector": "[data-ftp-server-settings]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/databases/mariadb",
+      "/databases/postgresql"
+    ],
+    "id": "account-db-wizard",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-db-wizard-step]",
+      "[data-db-wizard-name]",
+      "[data-db-wizard-user]",
+      "[data-db-wizard-password]",
+      "[data-db-wizard-generate]",
+      "[data-db-wizard-back]",
+      "[data-db-wizard-next]",
+      "[data-db-wizard-status]",
+      "[data-db-wizard-summary]",
+      "[data-db-wizard-again]"
+    ],
+    "rootSelector": "[data-db-wizard]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/files/ftp"
+    ],
+    "id": "account-ftp-sessions",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-ftp-sessions]",
+      "[data-ftp-sessions-status]",
+      "[data-ftp-sessions-refresh]",
+      "[data-ftp-sessions-all]"
+    ],
+    "rootSelector": "[data-ftp-sessions-tool]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/files/ftp"
+    ],
+    "id": "account-ftp-anonymous",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-ftp-anonymous-enabled]",
+      "[data-ftp-anonymous-uploads]",
+      "[data-ftp-anonymous-welcome]",
+      "[data-ftp-anonymous-logins]",
+      "[data-ftp-anonymous-save]",
+      "[data-ftp-anonymous-status]"
+    ],
+    "rootSelector": "[data-ftp-anonymous-tool]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/metrics/web-stats"
+    ],
+    "id": "account-ftp-report",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-ftp-report-month]",
+      "[data-ftp-report-read]",
+      "[data-ftp-report-status]",
+      "[data-ftp-report-days]",
+      "[data-ftp-report-hours]",
+      "[data-ftp-report-users]"
+    ],
+    "rootSelector": "[data-ftp-report]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/mail/settings/preferences"
+    ],
+    "id": "mailbox-settings",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-mailbox-settings-plus]",
+      "[data-mailbox-settings-addresses]",
+      "[data-mailbox-settings-alerts]",
+      "[data-mailbox-settings-ranges]",
+      "[data-mailbox-settings-warning]",
+      "[data-mailbox-settings-save]",
+      "[data-mailbox-settings-status]"
+    ],
+    "rootSelector": "[data-mailbox-settings]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/email/deliverability",
+      "/email/filters",
+      "/email/forwarders",
+      "/email/spam-filters",
+      "/mail/later",
+      "/metrics/logs",
+      "/whm/email/delivery",
+      "/whm/email/maintenance",
+      "/whm/email/outbound",
+      "/whm/email/server",
+      "/whm/email/spam"
+    ],
+    "id": "mail-cards",
+    "nestedScopes": [],
+    "optionalSelectors": [
+      "[data-mail-card-fact]",
+      "[data-mail-card-field]",
+      "[data-mail-card-action]",
+      "[data-mail-card-rows]",
+      "[data-mail-card-list]"
+    ],
+    "requiredSelectors": [
+      "[data-mail-card-status]"
+    ],
+    "rootSelector": "[data-mail-card]",
+    "variants": []
+  },
+  {
+    "applicableRoutes": [
+      "/files/web-disk"
+    ],
+    "id": "account-web-disk",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-web-disk-addresses]",
+      "[data-web-disk-cancel]",
+      "[data-web-disk-directory]",
+      "[data-web-disk-domain]",
+      "[data-web-disk-download]",
+      "[data-web-disk-form-title]",
+      "[data-web-disk-local]",
+      "[data-web-disk-password]",
+      "[data-web-disk-read-only]",
+      "[data-web-disk-refresh]",
+      "[data-web-disk-rows]",
+      "[data-web-disk-save]",
+      "[data-web-disk-status]",
+      "[data-web-disk-unsecured]"
+    ],
+    "rootSelector": "[data-account-web-disk]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-web-disk-cancel]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-web-disk-directory]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-web-disk-domain]",
+        "tags": [
+          "select"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-web-disk-local]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-web-disk-password]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-web-disk-read-only]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-web-disk-refresh]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-web-disk-save]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/email/calendars-contacts",
+      "/mail/settings/calendars"
+    ],
+    "id": "dav-connection",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-dav-refresh]",
+      "[data-dav-rows]",
+      "[data-dav-status]",
+      "[data-dav-unsecured]"
+    ],
+    "rootSelector": "[data-dav-connection]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-dav-refresh]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/whm/databases/redis"
+    ],
+    "id": "whm-db-service-redis",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-dbs-status]",
+      "[data-dbs-control]",
+      "[data-dbs-settings-save]",
+      "[data-dbs-file]",
+      "[data-dbs-file-text]",
+      "[data-dbs-file-load]",
+      "[data-dbs-file-save]",
+      "[data-dbs-field]",
+      "[data-dbs-fact]",
+      "[data-dbs-backup]",
+      "[data-dbs-rows=\"backups\"]",
+      "[data-dbs-password-generate]",
+      "[data-dbs-password-save]",
+      "[data-dbs-password-clear]",
+      "[data-dbs-version-target]",
+      "[data-dbs-version-switch]",
+      "[data-dbs-keys-db]",
+      "[data-dbs-keys-match]",
+      "[data-dbs-keys-read]",
+      "[data-dbs-keys-more]",
+      "[data-dbs-rows=\"keys\"]",
+      "[data-dbs-key-save]",
+      "[data-dbs-flush]",
+      "[data-dbs-flush-all]"
+    ],
+    "rootSelector": "[data-db-service=\"redis\"]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/whm/databases/mongodb"
+    ],
+    "id": "whm-db-service-mongodb",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-dbs-status]",
+      "[data-dbs-control]",
+      "[data-dbs-settings-save]",
+      "[data-dbs-file]",
+      "[data-dbs-file-text]",
+      "[data-dbs-file-load]",
+      "[data-dbs-file-save]",
+      "[data-dbs-field]",
+      "[data-dbs-fact]",
+      "[data-dbs-backup]",
+      "[data-dbs-rows=\"backups\"]",
+      "[data-dbs-log-read]",
+      "[data-dbs-log]",
+      "[data-dbs-import-file]",
+      "[data-dbs-import-upload]",
+      "[data-dbs-auth-on]",
+      "[data-dbs-auth-off]",
+      "[data-dbs-db-create]",
+      "[data-dbs-db-delete]",
+      "[data-dbs-rows=\"databases\"]"
+    ],
+    "rootSelector": "[data-db-service=\"mongodb\"]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/whm/databases/servers"
+    ],
+    "id": "whm-db-service-postgresql",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-dbs-status]",
+      "[data-dbs-control]",
+      "[data-dbs-settings-save]",
+      "[data-dbs-file]",
+      "[data-dbs-file-text]",
+      "[data-dbs-file-load]",
+      "[data-dbs-file-save]",
+      "[data-dbs-field]",
+      "[data-dbs-fact]",
+      "[data-dbs-version-target]",
+      "[data-dbs-version-switch]",
+      "[data-dbs-data-move]",
+      "[data-dbs-log-read]",
+      "[data-dbs-log]"
+    ],
+    "rootSelector": "[data-db-service=\"postgresql\"]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/whm/databases"
+    ],
+    "id": "whm-db-quota",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-db-quota-rows]",
+      "[data-db-quota-database]",
+      "[data-db-quota-limit]",
+      "[data-db-quota-save]",
+      "[data-db-quota-clear]",
+      "[data-db-quota-status]"
+    ],
+    "rootSelector": "[data-db-quota-tool]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/whm/databases/phpmyadmin"
+    ],
+    "id": "whm-db-pma-access",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-pma-public]",
+      "[data-pma-http]",
+      "[data-pma-https]",
+      "[data-pma-php]",
+      "[data-pma-user]",
+      "[data-pma-password]",
+      "[data-pma-save]",
+      "[data-pma-status]"
+    ],
+    "rootSelector": "[data-db-pma-access]",
+    "variants": [],
+    "conditionalRequirements": []
+  },
+  {
+    "applicableRoutes": [
+      "/whm/panel/developer"
+    ],
+    "id": "panel-metrics-export",
+    "requiredSelectors": [
+      "[data-metrics-fact=\"path\"]",
+      "[data-metrics-fact=\"scope\"]",
+      "[data-metrics-enabled]",
+      "[data-metrics-allow]",
+      "[data-metrics-save]",
+      "[data-metrics-refresh]",
+      "[data-metrics-status]"
+    ],
+    "rootSelector": "[data-metrics-export]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/panel/integrations"
+    ],
+    "id": "panel-error-reporting",
+    "requiredSelectors": [
+      "[data-error-dsn]",
+      "[data-error-environment]",
+      "[data-error-rate]",
+      "[data-error-save]",
+      "[data-error-test]",
+      "[data-error-refresh]",
+      "[data-error-status]"
+    ],
+    "rootSelector": "[data-error-reporting]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/panel/data"
+    ],
+    "id": "panel-config-code",
+    "requiredSelectors": [
+      "[data-config-file]",
+      "[data-config-export]",
+      "[data-config-preview]",
+      "[data-config-apply]",
+      "[data-config-status]",
+      "[data-config-changes]"
+    ],
+    "rootSelector": "[data-config-code]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/panel/data"
+    ],
+    "id": "panel-backups",
+    "requiredSelectors": [
+      "[data-panel-backup-folder]",
+      "[data-panel-backup-rows]",
+      "[data-panel-backup-select]",
+      "[data-panel-backup-file]",
+      "[data-panel-backup-overwrite]",
+      "[data-panel-backup-action=\"create\"]",
+      "[data-panel-backup-action=\"upload\"]",
+      "[data-panel-backup-action=\"download\"]",
+      "[data-panel-backup-action=\"restore\"]",
+      "[data-panel-backup-action=\"delete\"]",
+      "[data-panel-backup-action=\"refresh\"]",
+      "[data-panel-backup-status]",
+      "[data-panel-backup-report]"
+    ],
+    "rootSelector": "[data-panel-backups]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/panel/developer",
+      "/advanced/api-shell"
+    ],
+    "id": "panel-api-shell",
+    "requiredSelectors": [
+      "[data-shell-function]",
+      "[data-shell-params]",
+      "[data-shell-start]",
+      "[data-shell-limit]",
+      "[data-shell-filter-column]",
+      "[data-shell-filter-type]",
+      "[data-shell-filter-value]",
+      "[data-shell-sort-column]",
+      "[data-shell-sort-method]",
+      "[data-shell-sort-reverse]",
+      "[data-shell-columns]",
+      "[data-shell-token]",
+      "[data-shell-preview]",
+      "[data-shell-cli]",
+      "[data-shell-curl]",
+      "[data-shell-run]",
+      "[data-shell-refresh]",
+      "[data-shell-openapi]",
+      "[data-shell-status]",
+      "[data-shell-view]",
+      "[data-shell-tree]",
+      "[data-shell-table]",
+      "[data-shell-headers]",
+      "[data-shell-raw]"
+    ],
+    "rootSelector": "[data-api-shell]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/software/application-projects"
+    ],
+    "id": "panel-projects",
+    "requiredSelectors": [
+      "[data-sw-projects-rows]",
+      "[data-sw-project-select]",
+      "[data-sw-project-action=\"app.start\"]",
+      "[data-sw-project-action=\"app.stop\"]",
+      "[data-sw-project-action=\"app.restart\"]",
+      "[data-sw-project-action=\"app.remove\"]",
+      "[data-sw-project-log-read]",
+      "[data-sw-project-refresh]",
+      "[data-sw-project-log]",
+      "[data-sw-project-account]",
+      "[data-sw-project-name]",
+      "[data-sw-project-runtime]",
+      "[data-sw-project-jdk]",
+      "[data-sw-project-root]",
+      "[data-sw-project-startup]",
+      "[data-sw-project-command]",
+      "[data-sw-project-domain]",
+      "[data-sw-project-path]",
+      "[data-sw-project-port]",
+      "[data-sw-project-env]",
+      "[data-sw-project-open]",
+      "[data-sw-project-save]",
+      "[data-sw-project-status]"
+    ],
+    "rootSelector": "[data-sw-projects-manager]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/software/runtimes"
+    ],
+    "id": "panel-python-runtimes",
+    "requiredSelectors": [
+      "[data-python-versions]",
+      "[data-python-envs]",
+      "[data-python-env-select]",
+      "[data-python-env-account]",
+      "[data-python-env-name]",
+      "[data-python-env-version]",
+      "[data-python-env-create]",
+      "[data-python-env-remove]",
+      "[data-python-refresh]",
+      "[data-python-status]"
+    ],
+    "rootSelector": "[data-python-runtimes]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/software/catalog"
+    ],
+    "id": "panel-plugin-import",
+    "requiredSelectors": [
+      "[data-plugin-import-file]",
+      "[data-plugin-import-overwrite]",
+      "[data-plugin-import-run]",
+      "[data-plugin-import-status]"
+    ],
+    "rootSelector": "[data-plugin-import]"
+  },
+  {
+    "applicableRoutes": [
+      "/whm/server/file-sharing"
+    ],
+    "id": "file-share-links",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-file-share-path]",
+      "[data-file-share-hours]",
+      "[data-file-share-create]",
+      "[data-file-share-read]",
+      "[data-file-share-status]",
+      "[data-file-share-rows]",
+      "[data-file-share-result]",
+      "[data-file-share-url]",
+      "[data-file-share-copy]"
+    ],
+    "rootSelector": "[data-file-share-links]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-file-share-create]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-file-share-hours]",
+        "tags": [
+          "select"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/whm/monitoring/logs"
+    ],
+    "id": "whm-log-tools",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-log-analysis-site]",
+      "[data-log-analysis-run]",
+      "[data-log-analysis-status]",
+      "[data-log-analysis-rows]",
+      "[data-log-analysis-samples]",
+      "[data-database-log-kind]",
+      "[data-database-log-read]",
+      "[data-database-log-status]",
+      "[data-raw-ftp-domain]",
+      "[data-raw-ftp-hours]",
+      "[data-raw-ftp-download]",
+      "[data-raw-ftp-status]"
+    ],
+    "rootSelector": "[data-whm-log-tools]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-log-analysis-run]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-database-log-read]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-raw-ftp-download]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-log-analysis-site]",
+        "tags": [
+          "select"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/files/git"
+    ],
+    "id": "account-gitweb",
+    "nestedScopes": [],
+    "optionalSelectors": [
+      "[data-gitweb-patch-download]",
+      "[data-gitweb-blob-raw]",
+      "[data-gitweb-file-history]"
+    ],
+    "requiredSelectors": [
+      "[data-gitweb-status]",
+      "[data-gitweb-rev]",
+      "[data-gitweb-search-kind]",
+      "[data-gitweb-search-text]",
+      "[data-gitweb-log]",
+      "[data-gitweb-tree]",
+      "[data-gitweb-refs]",
+      "[data-gitweb-search]",
+      "[data-gitweb-more]",
+      "[data-gitweb-up]",
+      "[data-gitweb-location]",
+      "[data-gitweb-log-rows]",
+      "[data-gitweb-tree-rows]",
+      "[data-gitweb-refs-rows]",
+      "[data-gitweb-grep-rows]",
+      "[data-gitweb-changes-rows]",
+      "[data-gitweb-patch]",
+      "[data-gitweb-blob]"
+    ],
+    "rootSelector": "[data-account-gitweb]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-gitweb-log]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-gitweb-rev]",
+        "tags": [
+          "select"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/preferences/users"
+    ],
+    "id": "service-users",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-service-users-rows]",
+      "[data-service-users-status]",
+      "[data-service-user-local]",
+      "[data-service-user-domain]",
+      "[data-service-user-password]",
+      "[data-service-user-generate]",
+      "[data-service-user-email]",
+      "[data-service-user-quota]",
+      "[data-service-user-ftp]",
+      "[data-service-user-dir]",
+      "[data-service-user-webdisk]",
+      "[data-service-user-readonly]",
+      "[data-service-user-save]",
+      "[data-service-user-cancel]"
+    ],
+    "rootSelector": "[data-service-users]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-service-user-save]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-service-user-domain]",
+        "tags": [
+          "select"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/email/filters"
+    ],
+    "id": "email-disk-usage",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-email-usage-mailbox]",
+      "[data-email-usage-read]",
+      "[data-email-usage-search]",
+      "[data-email-usage-rows]",
+      "[data-email-usage-status]",
+      "[data-email-usage-folder]",
+      "[data-email-usage-preset]",
+      "[data-email-usage-custom]",
+      "[data-email-usage-query]",
+      "[data-email-usage-run]"
+    ],
+    "rootSelector": "[data-email-disk-usage]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-email-usage-run]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-email-usage-mailbox]",
+        "tags": [
+          "select"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "applicableRoutes": [
+      "/whm/accounts/health"
+    ],
+    "id": "whm-account-repair",
+    "nestedScopes": [],
+    "optionalSelectors": [],
+    "requiredSelectors": [
+      "[data-account-repair-accounts]",
+      "[data-account-repair-ownership]",
+      "[data-account-repair-rerender]",
+      "[data-account-repair-preview]",
+      "[data-account-repair-run]",
+      "[data-account-repair-rows]",
+      "[data-account-repair-status]"
+    ],
+    "rootSelector": "[data-whm-account-repair]",
+    "variants": [],
+    "elements": [
+      {
+        "selector": "[data-account-repair-run]",
+        "tags": [
+          "button"
+        ],
+        "occurrence": "first"
+      },
+      {
+        "selector": "[data-account-repair-accounts]",
+        "tags": [
+          "input"
+        ],
+        "occurrence": "first"
+      }
+    ]
+  },
+  {
+    "id": "ctr-workspace-list",
+    "rootSelector": "[data-ctr-workspace][data-ctr-page=\"list\"][data-ctr-can-read][data-ctr-can-manage]",
+    "applicableRoutes": [
+      "/whm/software/containers"
+    ],
+    "requiredSelectors": [
+      "[data-ctr-field=\"account\"]",
+      "[data-ctr-field=\"status\"]",
+      "[data-ctr-field=\"job\"]",
+      "[data-ctr-field=\"job-link\"]",
+      "[data-ctr-field=\"total-accounts\"]",
+      "[data-ctr-field=\"total-stacks\"]",
+      "[data-ctr-field=\"total-services\"]",
+      "[data-ctr-field=\"total-running\"]",
+      "[data-ctr-field=\"detail\"]",
+      "[data-ctr-field=\"detail-name\"]",
+      "[data-ctr-field=\"detail-image\"]",
+      "[data-ctr-field=\"detail-state\"]",
+      "[data-ctr-field=\"detail-started\"]",
+      "[data-ctr-field=\"detail-ips\"]",
+      "[data-ctr-field=\"detail-ports\"]",
+      "[data-ctr-field=\"detail-networks\"]",
+      "[data-ctr-field=\"detail-restart\"]",
+      "[data-ctr-field=\"detail-mounts\"]",
+      "[data-ctr-field=\"detail-logs\"]",
+      "[data-ctr-field=\"logs-state\"]",
+      "[data-ctr-field=\"terminal\"]",
+      "[data-ctr-field=\"terminal-shell\"]",
+      "[data-ctr-field=\"terminal-user\"]",
+      "[data-ctr-field=\"terminal-link\"]",
+      "[data-ctr-field=\"catalog-source\"]",
+      "[data-ctr-field=\"catalog-expires\"]",
+      "[data-ctr-field=\"feed-url\"]",
+      "[data-ctr-field=\"catalog-envelope\"]",
+      "button[type=\"button\"][data-ctr-do=\"catalog-update\"]",
+      "[data-ctr-field=\"managed\"]",
+      "[data-ctr-field=\"restart\"]",
+      "[data-ctr-field=\"network\"]",
+      "[data-ctr-field=\"commit-tag\"]",
+      "[data-ctr-field=\"stack-name\"]",
+      "[data-ctr-field=\"stack-notes\"]",
+      "[data-ctr-field=\"stack-template\"]",
+      "[data-ctr-field=\"stack-yaml\"]",
+      "[data-ctr-field=\"stack-env\"]",
+      "[data-ctr-field=\"stack-logs\"]",
+      "[data-ctr-field=\"template-search\"]",
+      "[data-ctr-field=\"app\"]",
+      "[data-ctr-field=\"app-name\"]",
+      "[data-ctr-field=\"app-version\"]",
+      "[data-ctr-field=\"app-bind\"]",
+      "[data-ctr-field=\"app-port\"]",
+      "[data-ctr-field=\"app-memory\"]",
+      "[data-ctr-field=\"app-cpu\"]",
+      "button[type=\"button\"][data-ctr-do=\"read\"]",
+      "button[type=\"button\"][data-ctr-do=\"detail-logs\"]",
+      "button[type=\"button\"][data-ctr-do=\"restart-save\"]",
+      "button[type=\"button\"][data-ctr-do=\"network-join\"]",
+      "button[type=\"button\"][data-ctr-do=\"network-leave\"]",
+      "button[type=\"button\"][data-ctr-do=\"commit\"]",
+      "button[type=\"button\"][data-ctr-do=\"stack-save\"]",
+      "button[type=\"button\"][data-ctr-do=\"stack-clear\"]",
+      "button[type=\"button\"][data-ctr-do=\"app-install\"]",
+      "tbody[data-ctr-rows=\"accounts\"]",
+      "tbody[data-ctr-rows=\"stats\"]",
+      "tbody[data-ctr-rows=\"stacks\"]",
+      "tbody[data-ctr-rows=\"templates\"]",
+      "tbody[data-ctr-rows=\"apps\"]"
+    ],
+    "optionalSelectors": [],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-accounts-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"account\"]",
+          "[data-xp-slot=\"engine\"]",
+          "[data-xp-slot=\"stacks\"]",
+          "[data-xp-slot=\"services\"]",
+          "[data-xp-slot=\"running\"]",
+          "button[type=\"button\"][data-xp-action=\"select\"][disabled]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-accounts-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-stats-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"name\"]",
+          "[data-xp-slot=\"state\"]",
+          "[data-xp-slot=\"cpu\"]",
+          "[data-xp-slot=\"memory\"]",
+          "[data-xp-slot=\"network\"]",
+          "button[type=\"button\"][data-xp-action=\"details\"][disabled]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-stats-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-stacks-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"name\"]",
+          "[data-xp-slot=\"kind\"]",
+          "[data-xp-slot=\"services\"]",
+          "[data-xp-slot=\"ports\"]",
+          "[data-xp-slot=\"updated\"]",
+          "button[type=\"button\"][data-xp-action=\"start\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"stop\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"restart\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"update\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"edit\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"logs\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"remove\"][disabled]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-stacks-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-templates-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"name\"]",
+          "[data-xp-slot=\"description\"]",
+          "button[type=\"button\"][data-xp-action=\"use\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"remove\"][disabled]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-templates-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-apps-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"name\"]",
+          "[data-xp-slot=\"description\"]",
+          "[data-xp-slot=\"version\"]",
+          "button[type=\"button\"][data-xp-action=\"choose\"][disabled]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-apps-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "ctr-workspace-engine",
+    "rootSelector": "[data-ctr-workspace][data-ctr-page=\"engine\"][data-ctr-can-read][data-ctr-can-manage]",
+    "applicableRoutes": [
+      "/whm/software/containers/engine"
+    ],
+    "requiredSelectors": [
+      "[data-ctr-field=\"account\"]",
+      "[data-ctr-field=\"status\"]",
+      "[data-ctr-field=\"job\"]",
+      "[data-ctr-field=\"job-link\"]",
+      "[data-ctr-field=\"config-path\"]",
+      "[data-ctr-field=\"search-registry\"]",
+      "[data-ctr-field=\"search-term\"]",
+      "[data-ctr-field=\"push-destination\"]",
+      "[data-ctr-field=\"archive-path\"]",
+      "[data-ctr-field=\"build-tag\"]",
+      "[data-ctr-field=\"build-context\"]",
+      "[data-ctr-field=\"build-file\"]",
+      "button[type=\"button\"][data-ctr-do=\"search\"]",
+      "button[type=\"button\"][data-ctr-do=\"image-import\"]",
+      "button[type=\"button\"][data-ctr-do=\"image-build\"]",
+      "tbody[data-ctr-rows=\"search\"]",
+      "[data-ctr-field=\"stack-path\"]",
+      "[data-ctr-field=\"image\"]",
+      "[data-ctr-field=\"registry-host\"]",
+      "[data-ctr-field=\"registry-namespace\"]",
+      "[data-ctr-field=\"registry-mirror\"]",
+      "[data-ctr-field=\"login-host\"]",
+      "[data-ctr-field=\"login-username\"]",
+      "[data-ctr-field=\"login-password\"]",
+      "[data-ctr-field=\"network-name\"]",
+      "[data-ctr-field=\"network-subnet\"]",
+      "[data-ctr-field=\"network-gateway\"]",
+      "[data-ctr-field=\"network-range\"]",
+      "[data-ctr-field=\"network-ipv6\"]",
+      "[data-ctr-field=\"network-labels\"]",
+      "[data-ctr-field=\"volume-name\"]",
+      "[data-ctr-field=\"volume-options\"]",
+      "[data-ctr-field=\"volume-labels\"]",
+      "button[type=\"button\"][data-ctr-do=\"read\"]",
+      "button[type=\"button\"][data-ctr-do=\"repair\"]",
+      "button[type=\"button\"][data-ctr-do=\"image-pull\"]",
+      "button[type=\"button\"][data-ctr-do=\"image-prune\"]",
+      "button[type=\"button\"][data-ctr-do=\"registry-save\"]",
+      "button[type=\"button\"][data-ctr-do=\"login\"]",
+      "button[type=\"button\"][data-ctr-do=\"network-create\"]",
+      "button[type=\"button\"][data-ctr-do=\"network-prune\"]",
+      "button[type=\"button\"][data-ctr-do=\"volume-create\"]",
+      "button[type=\"button\"][data-ctr-do=\"volume-prune\"]",
+      "tbody[data-ctr-rows=\"images\"]",
+      "tbody[data-ctr-rows=\"registries\"]",
+      "tbody[data-ctr-rows=\"logins\"]",
+      "tbody[data-ctr-rows=\"networks\"]",
+      "tbody[data-ctr-rows=\"volumes\"]"
+    ],
+    "optionalSelectors": [],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-images-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"reference\"]",
+          "[data-xp-slot=\"tags\"]",
+          "[data-xp-slot=\"size\"]",
+          "button[type=\"button\"][data-xp-action=\"push\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"export\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"remove\"][disabled]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-images-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-registries-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"host\"]",
+          "[data-xp-slot=\"namespace\"]",
+          "[data-xp-slot=\"mirror\"]",
+          "button[type=\"button\"][data-xp-action=\"edit\"][disabled]",
+          "button[type=\"button\"][data-xp-action=\"remove\"][disabled]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-registries-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-logins-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"host\"]",
+          "[data-xp-slot=\"username\"]",
+          "button[type=\"button\"][data-xp-action=\"logout\"][disabled]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-logins-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-networks-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"name\"]",
+          "[data-xp-slot=\"driver\"]",
+          "[data-xp-slot=\"subnets\"]",
+          "button[type=\"button\"][data-xp-action=\"remove\"][disabled]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-networks-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-volumes-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "[data-xp-slot=\"name\"]",
+          "[data-xp-slot=\"driver\"]",
+          "button[type=\"button\"][data-xp-action=\"remove\"][disabled]"
+        ]
+      },
+      {
+        "templateSelector": "template[data-xp-template=\"ctr-volumes-empty\"]",
+        "requiredSelectors": [
+          "tr",
+          "td[data-xp-slot=\"message\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "list-moderation",
+    "rootSelector": "[data-list-moderation]",
+    "applicableRoutes": [
+      "/email/mailing-lists"
+    ],
+    "requiredSelectors": [
+      "select[data-moderation-list]",
+      "select[data-moderation-posting]",
+      "select[data-moderation-subscription]",
+      "select[data-moderation-non-member]",
+      "select[data-moderation-member]",
+      "textarea[data-moderation-moderators]",
+      "textarea[data-moderation-moderated]",
+      "textarea[data-moderation-accept]",
+      "textarea[data-moderation-hold]",
+      "textarea[data-moderation-reject-senders]",
+      "textarea[data-moderation-discard-senders]",
+      "input[data-moderation-size]",
+      "input[data-moderation-retention]",
+      "input[data-moderation-notify-moderators]",
+      "input[data-moderation-notify-sender]",
+      "button[data-moderation-save]",
+      "[data-moderation-state]",
+      "[data-moderation-held]"
+    ]
+  },
+  {
+    "id": "list-moderation-queue",
+    "rootSelector": "[data-moderation-queue]",
+    "applicableRoutes": [
+      "/email/mailing-lists",
+      "/mail/tools/mailing-lists"
+    ],
+    "requiredSelectors": [
+      "[data-moderation-status]",
+      "tbody[data-moderation-rows]",
+      "input[data-moderation-reason]",
+      "button[data-moderation-approve]",
+      "button[data-moderation-reject]",
+      "button[data-moderation-discard]",
+      "pre[data-moderation-message]"
+    ],
+    "templateScopes": [
+      {
+        "templateSelector": "template[data-xp-template=\"list-moderation-row\"]",
+        "requiredSelectors": [
+          "tr",
+          "input[data-xp-slot=\"select\"]",
+          "[data-xp-slot=\"from\"]",
+          "[data-xp-slot=\"subject\"]",
+          "[data-xp-slot=\"reason\"]",
+          "[data-xp-slot=\"at\"]",
+          "button[data-xp-slot=\"open\"]"
+        ]
       }
     ]
   }

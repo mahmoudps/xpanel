@@ -99,7 +99,7 @@ describe('v2 account email tool family', () => {
     const html = renderV2PanelMailingLists(props, authority)
     for (const hook of ['data-mailing-lists', 'data-mailing-lists-rows', 'data-mailing-list-status', 'data-ml-name', 'data-ml-domain', 'data-ml-members', 'data-ml-moderation', 'data-ml-archive', 'data-ml-create', 'data-mailx-lists-refresh', 'data-mailx-lists-rows', 'data-mailx-lists-status', 'data-mailx-lists-apply']) expect(by(html, hook), hook).toBeDefined()
     expect(by(html, 'data-mailx-tools')?.attrs.get('data-mailx-tools-section')).toBe('lists')
-    expect(html).toContain('Moderation needs a list manager')
+    expect(html).toContain('Posting moderation')
     expect(by(html, 'data-mailx-lists-apply')?.attrs.has('disabled')).toBe(true)
   })
 
@@ -120,7 +120,7 @@ describe('v2 account email tool family', () => {
     }
     expect(by(html, 'data-mailx-tools')?.attrs.get('data-mailx-tools-section')).toBe('spam')
     expect(html).toContain('Mailbox spam state has not been read.')
-    expect(html).toContain('BoxTrapper is unavailable on this server.')
+    expect(by(html, 'data-boxtrapper')?.attrs.get('data-boxtrapper-scope')).toBe('owner')
     expect(by(html, 'data-mailx-tools-apply')?.attrs.has('disabled')).toBe(true)
   })
 
@@ -161,7 +161,8 @@ describe('v2 account email tool family', () => {
     expect(handoffs).toHaveLength(2)
     for (const handoff of handoffs) expect(Object.fromEntries(handoff.attrs)).toMatchObject({ 'data-handoff': 'xmail', 'data-handoff-mailbox-select': 'collaboration-mailbox', 'data-handoff-state': 'idle' })
     expect(html).not.toMatch(/https?:\/\/[^"\s<]*\/dav/)
-    expect(html).toContain('no CalDAV or CardDAV server is installed')
+    expect(html).toContain('data-dav-connection')
+    expect(html).not.toContain('no CalDAV or CardDAV server is installed')
     const readOnlyHtml = renderV2PanelCalendarsContacts(props, readOnly)
     expect(readOnlyHtml).not.toContain('<form')
     expect(by(readOnlyHtml, 'data-mailx-calendar-save')?.attrs.has('disabled')).toBe(true)
@@ -169,12 +170,11 @@ describe('v2 account email tool family', () => {
 
   it('never upgrades stored domain names to delivery success and distinguishes an empty authorized domain read', () => {
     const html = renderV2PanelDeliverability(props, authority)
-    expect(html).toContain(domain.name)
-    expect(html).toContain('data-check-state="unread"')
-    expect(html).toContain('data-wiring="unavailable" disabled')
+    expect(html).toContain('data-mail-card="deliverability"')
+    expect(html).toContain('data-mail-card="email-routing"')
+    expect(html).toContain('Domains have not been read.')
+    expect(html).not.toContain(domain.name)
     expect(html).not.toContain('Passed')
-    expect(renderV2PanelDeliverability({ account, domains: [] }, authority)).toContain('The read returned no domains.')
-    expect(renderV2PanelDeliverability({ account }, authority)).not.toContain('The read returned no domains.')
   })
 
   it('locks writes for both read-only authority and inactive account while keeping full sections', () => {

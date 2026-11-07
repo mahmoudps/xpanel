@@ -1,11 +1,10 @@
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { assessMailboxMetadataAuthority, fail, isXpanelError } from '@xpanel/core'
 import type { MailboxMetadataAuthority } from '@xpanel/core'
 import { assertMailboxMetadataAuthority, captureMailboxMetadataAuthority, resolveMailboxMetadataAuthority, MAILBOX_METADATA_REVIEW_REQUIRED } from './metadata-authority.ts'
-import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
 import type { ExtendedRouteHelpers, WebmailContact } from '../extended-routes.ts'
+import type { ContactGroupRecord } from './dav-store.ts'
+import { sameContacts } from './dav-store.ts'
 import type { AuthenticatedCaller } from '../auth.ts'
 import { isMailboxPrincipal, requireMailboxPrincipalAccess } from '../authorization.ts'
 import {
@@ -14,13 +13,8 @@ import {
   projectContactWorkspace, updateWorkspaceContactGroups,
 } from './contact-workspace.ts'
 
-interface ContactGroupDefinition { owner: string; ownerAuthority?: MailboxMetadataAuthority; name: string; createdAt: string | null }
-export interface ContactToolsRoutePorts extends Pick<ExtendedRouteHelpers, 'store' | 'requireCaller' | 'emitAudit'> {
-  /** Trusted storage dependency; the default uses the same canonical files as legacy contacts. */
-  writeJson?: typeof atomicWriteJson
-}
-const CONTACTS = 'extended/webmail/contacts.json'
-const GROUPS = 'extended/webmail/contact-groups.json'
+type ContactGroupDefinition = ContactGroupRecord
+export type ContactToolsRoutePorts = Pick<ExtendedRouteHelpers, 'store' | 'requireCaller' | 'emitAudit' | 'dav'>
 export const CONTACT_GROUPS_READ_BUDGET = { maxContacts: 20000, maxGroups: 4096, maxMemberships: 1000000, maxResponseBytes: 16 * 1024 * 1024 } as const
 const REVISION = /^[0-9a-f]{64}$/
 const CONTACT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -117,8 +111,8 @@ const storedContacts = (value: unknown): WebmailContact[] => {
   return value as WebmailContact[]
 }
 
-/** Called while the legacy Contacts handler already holds the shared writer lease. */
-export const assertContactMutationCapacity = async (store: ContactToolsRoutePorts['store'], current: readonly WebmailContact[], next: readonly WebmailContact[], mailbox: string): Promise<void> => {
+/** Called while the Contacts handler holds the mailbox lock. */
+export const assertContactMutationCapacity = async (store: ContactToolsRoutePorts['store'], current: readonly WebmailContact[], next: readonly WebmailContact[], mailbox: string, readDefinitions: (owner: string) => Promise<ContactGroupDefinition[]>): Promise<void> => {
   const previousById = new Map(current.map(contact => [contact.id, contact]))
   const owners = new Set([mailbox])
   for (const contact of next) {
@@ -134,9 +128,7 @@ export const assertContactMutationCapacity = async (store: ContactToolsRoutePort
     const changes = after.filter(contact => { const previous = previousById.get(contact.id); return !previous || JSON.stringify(previous.groups) !== JSON.stringify(contact.groups) })
     if (!changes.length) continue
     for (const contact of changes) normalizeContactGroups(contact.groups, previousById.get(contact.id)?.groups)
-    const raw = await readJsonIfExists(join(store.rootDir, GROUPS)) ?? []
-    if (!Array.isArray(raw)) return fail('PRECONDITION_FAILED', 'stored contact groups require review', { stateChanged: false })
-    const definitions = storedDefinitions(raw.filter(group => assessMailboxMetadataAuthority(group?.owner, group?.ownerAuthority, authority) === 'match'))
+    const definitions = storedDefinitions(await readDefinitions(ownerMailbox))
     const previousGroups = definitionsFor(definitions, before, ownerMailbox).length, nextGroups = definitionsFor(definitions, after, ownerMailbox).length
     if (nextGroups > CONTACT_GROUPS_PER_MAILBOX_MAX && nextGroups > previousGroups) return fail('LIMIT_EXCEEDED', 'mailbox contact group capacity reached', { stateChanged: false })
   }
@@ -172,9 +164,8 @@ export const createContactToolsRoutes = (ports: ContactToolsRoutePorts) => async
   }
   const binding = await requireMailboxPrincipalAccess(ports.store, caller)
   const mailbox = binding.mailbox
-  const lease = await ports.store.getWriterLock().acquire()
-  const file = (path: string): string => join(ports.store.rootDir, path)
-  let intentAttempted = false, journal = false, committed = false, saved: Record<string, unknown> | null = null
+  const release = await ports.dav.lock(binding.serviceUserId)
+  let attempted = false, committed = false, saved: Record<string, unknown> | null = null
   let audit: { action: string; target: string } | null = null
   let fresh = caller, scopeAccount = binding.account
   try {
@@ -184,13 +175,11 @@ export const createContactToolsRoutes = (ports: ContactToolsRoutePorts) => async
     scopeAccount = currentBinding.account
     if (currentBinding.mailbox !== mailbox || currentBinding.serviceUserId !== binding.serviceUserId || currentBinding.account.id !== binding.account.id) return fail('NOT_FOUND', 'mailbox not found', { stateChanged: false })
     const authority = await captureMailboxMetadataAuthority(ports.store, mailbox)
-    const rawContacts = await readJsonIfExists(file(CONTACTS)) ?? [], rawDefinitions = await readJsonIfExists(file(GROUPS)) ?? []
-    if (!Array.isArray(rawContacts) || !Array.isArray(rawDefinitions)) return fail('PRECONDITION_FAILED', 'stored contact collection requires review', { stateChanged: false })
+    const session = ports.dav.open(fresh, currentBinding.account, authority)
+    const rawContacts = await session.contacts()
     const matches = (record: { owner?: unknown; ownerAuthority?: unknown }) => assessMailboxMetadataAuthority(record?.owner, record?.ownerAuthority, authority) === 'match'
     const contacts = storedContacts(rawContacts.filter(matches))
-    const definitions = storedDefinitions(rawDefinitions.filter(matches))
-    const preserveContacts = (next: WebmailContact[]) => { const byId = new Map(next.map(contact => [contact.id, contact])); return rawContacts.flatMap(contact => matches(contact) ? byId.has(contact.id) ? [byId.get(contact.id)!] : [] : [contact]) }
-    const preserveDefinitions = (next: ContactGroupDefinition[]) => [...rawDefinitions.filter(group => !matches(group)), ...next.map(group => ({ ...group, ownerAuthority: authority }))]
+    const definitions = storedDefinitions(await session.groups())
     if (read) {
       const scoped = owned(contacts, mailbox)
       const counts = { ownedContacts: scoped.length, groups: definitionsFor(definitions, contacts, mailbox).length, memberships: scoped.reduce((count, contact) => count + contact.groups.length, 0) }
@@ -258,33 +247,25 @@ export const createContactToolsRoutes = (ports: ContactToolsRoutePorts) => async
         saved = { deletedContactId: id }; audit = { action: 'webmail.contact.deleted', target: 'contact:' + id }
       }
     }
-    const backups = await Promise.all([CONTACTS, GROUPS].map(async relPath => {
-      const content = await readFile(file(relPath)).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
-      return { relPath, existed: content !== null, ...(content === null ? {} : { contentBase64: content.toString('base64') }) }
-    }))
-    intentAttempted = true
-    await lease.recordIntent({ op: 'webmailContactTools', backups, createdRelPaths: [] })
-    journal = true
-    const write = ports.writeJson ?? atomicWriteJson
-    const publishedContacts = preserveContacts(nextContacts), publishedDefinitions = preserveDefinitions(nextDefinitions)
-    await write(file(CONTACTS), publishedContacts, 0o640, () => lease.assertFencingToken())
-    await write(file(GROUPS), publishedDefinitions, 0o640, () => lease.assertFencingToken())
-    if (digest(await readJsonIfExists(file(CONTACTS))) !== digest(publishedContacts) || digest(await readJsonIfExists(file(GROUPS))) !== digest(publishedDefinitions)) throw new Error('contact tools readback mismatch')
-    await lease.commitAuthority({ incrementRevision: false }); committed = true
-    await lease.clearIntent()
+    attempted = true
+    const publishedContacts = [...rawContacts.filter(contact => !matches(contact)), ...nextContacts]
+    await session.publishContacts(publishedContacts)
+    if (JSON.stringify(definitions) !== JSON.stringify(nextDefinitions)) await session.publishGroups(nextDefinitions)
+    const persisted = await session.contacts()
+    if (!sameContacts(persisted, publishedContacts)) throw new Error('contact tools readback mismatch')
+    committed = true
+    // The reply carries what the store holds: its revisions are the ones the next save must present.
+    nextContacts = storedContacts(persisted.filter(matches))
+    nextDefinitions = storedDefinitions(await session.groups())
+    if (saved?.contact) { const updated = saved.contact as { id: string }; saved = { contact: projectContactWorkspace(nextContacts.find(contact => contact.id === updated.id)!) } }
     const resultGroups = projectGroups(nextDefinitions, nextContacts, mailbox)
     if (saved?.groupName) saved = { group: resultGroups.find(group => group.name === saved!.groupName), revision: collectionRevision(nextDefinitions, nextContacts, mailbox), capacity: capacity(nextDefinitions, nextContacts, mailbox) }
     else if (remove) saved = { ...saved, revision: collectionRevision(nextDefinitions, nextContacts, mailbox), capacity: capacity(nextDefinitions, nextContacts, mailbox) }
   } catch (error) {
-    if (intentAttempted && !journal) return fail('SERVICE_UNAVAILABLE', 'contact tools journal requires verification', { stateChanged: false, verificationRequired: true, unknownOutcome: true })
-    if (journal && !committed) {
-      try { await lease.rollbackIntent(); await lease.restorePreAcquireAuthorityIfUncommitted() }
-      catch { return fail('SERVICE_UNAVAILABLE', 'contact tools recovery requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true }) }
-    }
-    if (committed) return fail('SERVICE_UNAVAILABLE', 'contact tools outcome requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
+    if (attempted && !committed) return fail('SERVICE_UNAVAILABLE', 'contact tools outcome requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
     if (isXpanelError(error)) return fail(error.code, error.message, { ...error.detail, stateChanged: false })
-    return fail('SERVICE_UNAVAILABLE', journal ? 'contact tools write was refused and restored from recorded preimages' : 'contact tools could not be read or validated', { stateChanged: false })
-  } finally { await lease.release() }
+    return fail('SERVICE_UNAVAILABLE', 'contact tools could not be read or validated', { stateChanged: false })
+  } finally { release() }
   try {
     await ports.emitAudit({ actor: fresh.principal.username, action: audit!.action, target: audit!.target, outcome: 'ok', principalId: fresh.principal.id }, { accountId: scopeAccount.id, resellerId: scopeAccount.ownerId })
   } catch { return fail('SERVICE_UNAVAILABLE', 'contact tools audit requires verification', { stateChanged: true, verificationRequired: true, unknownOutcome: true }) }

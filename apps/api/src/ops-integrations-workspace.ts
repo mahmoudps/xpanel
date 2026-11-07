@@ -66,7 +66,7 @@ export async function handleIntegrationsWorkspaceRoute(request: Request, url: UR
     }
     const now = helpers.now ?? (() => new Date())
     const payload = JSON.stringify({ event: 'account.created', test: true, at: now().toISOString() })
-    const record = await deliverWebhook({ endpoint, secret, delivery: { id: 'whd_test_' + now().getTime().toString(16), event: 'account.created', payload, timestamp: Math.floor(now().getTime() / 1000) }, send: helpers.sender, now })
+    const record = await deliverWebhook({ endpoint, secret, delivery: { id: 'whd_test_' + now().getTime().toString(16), event: 'account.created', payload, timestamp: Math.floor(now().getTime() / 1000) }, send: helpers.sender, now, maxAttempts: 1 })
     const log = [...await helpers.readLog(), record].slice(-MAX_LOG)
     await helpers.writeLog(log)
     await fresh()

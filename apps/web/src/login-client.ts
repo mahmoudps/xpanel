@@ -14,11 +14,13 @@ export const LOGIN_CLIENT_SCRIPT = MOBILE_NAVIGATION_CLIENT_SCRIPT + /* js */ St
     pending: xpT('Verifying…'), mfa: xpT('Enter an authenticator code or one recovery code.'),
     both: xpT('Enter either an authenticator code or one recovery code.'), locked: xpT('Sign-in is temporarily locked. Retry after: {time}'),
     enrollment: xpT('Two-factor authentication is optional. Confirm your password to begin.'), confirm: xpT('Enter the code from your authenticator app.'),
-    codes: xpT('Two-factor authentication is enabled. Save your recovery codes before continuing.'),
+    codes: xpT('Two-factor authentication is enabled. Save your recovery codes before continuing.'), removed: xpT('Two-factor authentication was removed. Sign-in asks only for the password.'),
     mismatch: xpT('The new passwords do not match.'), changed: xpT('Password changed. Sign in again.'),
     session: xpT('The session could not be verified. Sign in again.'), unexpected: xpT('Unexpected server response.'),
     show: xpT('Show password'), hide: xpT('Hide password'), required: xpT('A password change is required.'),
-    timeout: xpT('The request timed out. Try again.'), recoverySwitch: xpT(msgctxt('login', 'Use a recovery code')), authenticatorSwitch: xpT('Use an authenticator code')
+    timeout: xpT('The request timed out. Try again.'), recoverySwitch: xpT(msgctxt('login', 'Use a recovery code')), authenticatorSwitch: xpT('Use an authenticator code'),
+    answers: xpT('This address is not verified for your account. Answer your security questions to continue.'), answersWrong: xpT('The answers are not correct. Try again.'),
+    externalFailed: xpT('The sign-in with the identity provider did not complete. Sign in again.'), notLinked: xpT('That identity is not linked to a user of this panel. Sign in with your password and link it under account security.')
   };
   var csrfToken = null;
   var principal = null;
@@ -28,6 +30,8 @@ export const LOGIN_CLIENT_SCRIPT = MOBILE_NAVIGATION_CLIENT_SCRIPT + /* js */ St
   var mfaDisabled = document.documentElement.getAttribute('data-mfa-mode') === 'disabled';
   var security = document.querySelector('[data-account-security="two-factor"]');
   var securityReadOnly = Boolean(security && security.getAttribute('data-auth-readonly') === 'true');
+  // A mailbox enrolls through its own routes, which confirm the password with the mail server.
+  var authApi = security && security.getAttribute('data-auth-api') === '/api/webmail/security' ? '/api/webmail/security' : '/api/auth';
   var errorBox = document.querySelector('[data-auth-error]');
   var statusBox = document.querySelector('[data-auth-status]');
   var lockedUntil = 0;
@@ -47,7 +51,7 @@ export const LOGIN_CLIENT_SCRIPT = MOBILE_NAVIGATION_CLIENT_SCRIPT + /* js */ St
     form.querySelectorAll('button[type="submit"]').forEach(function (button) { button.disabled = active || lockedUntil > Date.now() || ((form === setup || form === enroll) && factorManagementBlocked()); });
   }
   function clearCredentials() {
-    document.querySelectorAll('[name="password"], [name="currentPassword"], [name="newPassword"], [name="confirmPassword"], [name="totpCode"], [name="recoveryCode"], [name="code"]').forEach(function (input) { input.value = ''; });
+    document.querySelectorAll('[name="password"], [name="currentPassword"], [name="newPassword"], [name="confirmPassword"], [name="totpCode"], [name="recoveryCode"], [name="code"], [data-security-answer]').forEach(function (input) { input.value = ''; });
   }
   function clearEnrollment() {
     recoveryCodes = [];
@@ -173,7 +177,7 @@ export const LOGIN_CLIENT_SCRIPT = MOBILE_NAVIGATION_CLIENT_SCRIPT + /* js */ St
   }
   function changeLoginCredentials() {
     if (!shell || !login || shell.getAttribute('data-auth-state') !== 'mfa-required' || lockedUntil > Date.now() || login.getAttribute('aria-busy') === 'true') return false;
-    clearCredentials();
+    clearCredentials(); resetIdentitySteps();
     selectLoginFactor('totp', false);
     show('[data-auth-mfa-fields]', false);
     var fields = document.querySelector('[data-auth-mfa-fields]');
@@ -192,6 +196,8 @@ export const LOGIN_CLIENT_SCRIPT = MOBILE_NAVIGATION_CLIENT_SCRIPT + /* js */ St
       var fields = document.querySelector('[data-auth-mfa-fields]'); if (fields) fields.setAttribute('data-2fa-step', 'required');
       message(copy.mfa, false); selectLoginFactor('totp', true); return;
     }
+    if (details.securityQuestionsRequired === true && Array.isArray(details.questions)) { showQuestions(details.questions, error.message === 'the security answers are incorrect'); return; }
+    if (details.reason === 'identity_not_linked' || details.reason === 'external_flow_missing') { resetIdentitySteps(); message(details.reason === 'identity_not_linked' ? copy.notLinked : copy.externalFailed, true); return; }
     message(localizedError(error), true);
   }
   function redirectToWorkspace() {
@@ -224,6 +230,8 @@ export const LOGIN_CLIENT_SCRIPT = MOBILE_NAVIGATION_CLIENT_SCRIPT + /* js */ St
       var body = { username: value(login, 'username').trim(), password: value(login, 'password') };
       if (totpCode) body.totpCode = totpCode;
       if (recoveryCode) body.recoveryCode = recoveryCode;
+      var answers = securityAnswers(); if (answers) body.securityAnswers = answers;
+      if (externalMode) { delete body.username; delete body.password; body.external = true; }
       busy(login, true); message(copy.pending, false);
       try {
         var data = await requestJson('POST', '/api/auth/login', body);
@@ -244,7 +252,7 @@ export const LOGIN_CLIENT_SCRIPT = MOBILE_NAVIGATION_CLIENT_SCRIPT + /* js */ St
     event.preventDefault(); if (factorManagementBlocked() || setup.getAttribute('aria-busy') === 'true' || !setup.reportValidity()) return;
     busy(setup, true); message(copy.pending, false);
     try {
-      var data = await sessionRequest('POST', '/api/auth/2fa/setup', { password: value(setup, 'password') });
+      var data = await sessionRequest('POST', authApi + '/2fa/setup', { password: value(setup, 'password') });
       if (typeof data.secret !== 'string' || !data.secret || !Array.isArray(data.recoveryCodes) || !data.recoveryCodes.length || data.recoveryCodes.some(function (code) { return typeof code !== 'string'; })) throw new Error(copy.unexpected);
       clearEnrollment(); recoveryCodes = data.recoveryCodes.slice();
       document.querySelector('[data-auth-totp-secret]').textContent = data.secret;
@@ -260,13 +268,29 @@ export const LOGIN_CLIENT_SCRIPT = MOBILE_NAVIGATION_CLIENT_SCRIPT + /* js */ St
     event.preventDefault(); if (factorManagementBlocked() || enroll.getAttribute('aria-busy') === 'true' || !enroll.reportValidity()) return;
     busy(enroll, true); message(copy.pending, false);
     try {
-      var result = await sessionRequest('POST', '/api/auth/2fa/enable', { code: value(enroll, 'code').trim() });
+      var result = await sessionRequest('POST', authApi + '/2fa/enable', { code: value(enroll, 'code').trim() });
       if (result.ok !== true || result.totpEnabled !== true) throw new Error(copy.unexpected);
       var list = document.querySelector('[data-auth-recovery-codes]'); list.replaceChildren();
       recoveryCodes.forEach(function (code) { var item = document.createElement('li'); var value = document.createElement('bdi'); value.dir = 'ltr'; value.textContent = code; item.appendChild(value); list.appendChild(item); });
       step('recovery-codes'); message(copy.codes, false);
     } catch (error) { authError(error); }
     finally { field(enroll, 'code').value = ''; busy(enroll, false); }
+  });
+
+  var removal = authApi === '/api/webmail/security' ? document.querySelector('[data-auth-disable-form]') : null;
+  if (removal) removal.addEventListener('submit', async function (event) {
+    event.preventDefault(); if (factorManagementBlocked() || removal.getAttribute('aria-busy') === 'true' || !removal.reportValidity()) return;
+    var code = value(removal, 'code').trim(), recoveryCode = value(removal, 'recoveryCode').trim();
+    if ((code && recoveryCode) || (!code && !recoveryCode)) { message(copy.both, true); return; }
+    busy(removal, true); message(copy.pending, false);
+    try {
+      var body = { password: value(removal, 'password') };
+      if (code) body.code = code; else body.recoveryCode = recoveryCode;
+      var result = await sessionRequest('POST', authApi + '/2fa/disable', body);
+      if (result.ok !== true || result.totpEnabled !== false) throw new Error(copy.unexpected);
+      clearCredentials(); message(copy.removed, false); window.location.reload();
+    } catch (error) { authError(error); }
+    finally { clearCredentials(); busy(removal, false); }
   });
 
   var password = document.querySelector('[data-auth-password-form]');
@@ -328,13 +352,62 @@ export const LOGIN_CLIENT_SCRIPT = MOBILE_NAVIGATION_CLIENT_SCRIPT + /* js */ St
             if (typeof me.csrfToken === 'string' && me.csrfToken) csrfToken = me.csrfToken;
           } catch (ignored) { /* A missing token still attempts sign-out. */ }
         }
-        await requestJson('POST', '/api/auth/logout', {}, csrfToken || undefined);
-        csrfToken = null; principal = null; clearCredentials(); clearEnrollment(); window.location.assign('/login?lang=' + lang);
+        var signedOut = await requestJson('POST', '/api/auth/logout', {}, csrfToken || undefined);
+        csrfToken = null; principal = null; clearCredentials(); clearEnrollment(); window.location.assign(signedOut && signedOut.redirect || '/login?lang=' + lang);
       } catch (error) {
         if (error.status === 401) window.location.assign('/login?lang=' + lang);
         else { message(localizedError(error), true); button.disabled = false; }
       }
     }
   });
+
+  // Security questions after the password, and sign-in through an identity provider this browser completed.
+  var externalMode = false;
+  var questionBox = document.querySelector('[data-auth-security-questions]');
+  function questionInputs() { return questionBox ? Array.prototype.slice.call(questionBox.querySelectorAll('[data-security-answer]')) : []; }
+  function securityAnswers() { return questionBox && !questionBox.hidden ? questionInputs().map(function (input) { return input.value; }) : null; }
+  function resetIdentitySteps() {
+    if (questionBox) { questionBox.hidden = true; var list = questionBox.querySelector('[data-auth-security-question-list]'); if (list) list.replaceChildren(); }
+    if (externalMode && login) {
+      externalMode = false;
+      var credentials = login.querySelector('[data-login-credentials]'); if (credentials) credentials.hidden = false;
+      ['username', 'password'].forEach(function (name) { var input = field(login, name); if (input) input.required = true; });
+    }
+  }
+  function showQuestions(questions, wrong) {
+    var list = questionBox && questionBox.querySelector('[data-auth-security-question-list]');
+    var template = document.querySelector('template[data-auth-security-question-template]');
+    var prototype = template && template.content.firstElementChild;
+    if (!list || !prototype) { message(copy.unexpected, true); return; }
+    list.replaceChildren();
+    questions.forEach(function (item, index) {
+      if (!item || typeof item.question !== 'string' || index > 4) return;
+      var node = prototype.cloneNode(true), label = node.querySelector('label'), input = node.querySelector('[data-security-answer]');
+      if (!label || !input) return;
+      var written = document.createElement('bdi'); written.textContent = item.question; input.id = 'login-security-answer-' + (index + 1); label.setAttribute('for', input.id); label.replaceChildren(written);
+      list.appendChild(node);
+    });
+    questionBox.hidden = false; step('credentials'); setState('security-questions');
+    message(wrong ? copy.answersWrong : copy.answers, wrong);
+    var first = questionInputs()[0]; if (first) first.focus();
+  }
+  var externalSearch = window.location && typeof window.location.search === 'string' ? window.location.search : '';
+  if (login && /[?&]external=/.test(externalSearch)) {
+    var externalQuery = new URLSearchParams(externalSearch), externalResult = externalQuery.get('external'), externalReason = externalQuery.get('reason');
+    externalQuery.delete('external'); externalQuery.delete('reason');
+    history.replaceState(null, '', window.location.pathname + (externalQuery.toString() ? '?' + externalQuery.toString() : ''));
+    if (externalResult === 'failed') message(externalReason === 'identity_not_linked' ? copy.notLinked : copy.externalFailed, true);
+    else if (externalResult === 'verified') requestJson('GET', '/api/auth/oidc/pending').then(function (data) {
+      if (!data || data.pending !== true || typeof data.username !== 'string') { message(data && data.reason === 'identity_not_linked' ? copy.notLinked : copy.externalFailed, true); return; }
+      externalMode = true;
+      var credentials = login.querySelector('[data-login-credentials]'); if (credentials) credentials.hidden = true;
+      ['username', 'password'].forEach(function (name) { var input = field(login, name); if (input) { input.required = false; input.value = ''; } });
+      var provider = data.provider && typeof data.provider.label === 'string' ? data.provider.label : '';
+      var enrolled = data.secondFactor === 'enrolled' && !mfaDisabled;
+      message(xpT('Signed in with {provider} as {username}.', { provider: provider, username: data.username }), false);
+      if (enrolled) { step('mfa-required'); show('[data-auth-mfa-fields]', true); selectLoginFactor('totp', true); }
+      else if (typeof login.requestSubmit === 'function') login.requestSubmit();
+    }).catch(function (error) { authError(error); });
+  }
 })();
 `

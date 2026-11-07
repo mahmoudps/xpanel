@@ -1,0 +1,42 @@
+# Linked servers, the configuration cluster and live transfer
+
+Scope: Linked Server Nodes, Configuration Cluster, Live Transfer.
+
+The owner asked for this code ahead of the second lab host (decision 13 of 2026-11-06). Nothing here has run on two real hosts. Every test uses fake peers: real routes, tokens, files and link state on both ends, with TLS modelled as a pin comparison. Each scope note says so, and the tools stay unqualified until a second host exists.
+
+## Choices
+
+- **The credential is a narrow API token, the proof is the pin.** cPanel links servers with API tokens, and the transfer channel already authenticates that way, so a link is a pair of tokens rather than a new signature scheme: one issued by each side, and each side pinning the other's management certificate. A call proves both ends: the pin the callee, the token the caller. Reusing the token means revocation, expiry, scopes and the audit trail of `requireCaller` apply unchanged.
+- **A new `nodes` scope.** A link token holds `nodes:read`, `nodes:write` and `lifecycle:read`. It reaches the peer routes and reads account packages, and nothing of root's own pages. A full-root token, as cPanel uses, would hand a stolen link every root route.
+- **Root never sees a link token.** Each crosses once inside the pinned channel. The only value shown is the link code: a 30-minute token that can do nothing but call `join`, spent on first use. It carries the certificate fingerprint too, so the first pin comes from the operator's out-of-band copy, not from the network.
+- **Both directions are proved before anything is saved.** The invited server dials the requester back on the pin it claims, under the token it handed over, before it accepts. The requester then dials the invited server under the token it got back.
+- **The id of a node** is derived from the server secret, so there is no extra file, and a server can recognise itself. A cloned server would share it and be refused as a self-link; relinking clones needs a new secret.
+- **Renewed certificates are announced, not re-trusted.** Certbot rotates the key at renewal, so neither a certificate nor an SPKI pin survives one, and a link would break every 60 days. The renewing server sees its new fingerprint (one TLS handshake every 6 hours, no daemon) and tells each peer over that peer's own pinned channel, which still holds. If both renew inside one window the pins are stale on both sides: verification shows the new fingerprint and root compares it and re-pins, which is only accepted once the node answers on it with its own identity.
+- **The registry editor is gone.** `PUT /api/server/nodes` stored a typed-in node that could never be used. Prelaunch clean cutover: a node exists only through a link. `PATCH` covers label, role and re-pinning.
+- **Configuration sections are revision-bound files.** Each section is an existing `PanelConfigFile`, so a member validates with the same parser its own page uses, and writes with the same fencing. A section is the raw file; `null` means a file on its defaults, and rolling back to `null` removes the file rather than writing defaults. Only portable files are offered: Tweak Settings, update preferences, the maintenance schedule and the sign-in policy. Update preferences keep the member's own owner, because a principal id means nothing on another server.
+- **A member keeps what each file held**, so a rollback is exact and needs no second copy on the master. Only the newest push on a member can roll back; a file changed after the push refuses (`local_changes`) until root chooses to overwrite. All files validate before the first one changes, and a write that fails midway restores the ones already written.
+- **Live transfer extends the transfer that exists.** The reviewed session, the package, the signed manifest, the verified fetch and the restore are the same code; `live` adds phases and is part of the review digest. `DurableTransferRunner` stays as it was: it is not on any production path, and it buffers archives in memory.
+- **The final sync is GNU tar's level file.** The first copy records a level 0, and the final sync archives what changed since, plus the names that remain, so the destination deletes what the source deleted. This was run with real tar on real files, unprivileged. rsync would need a daemon or SSH between the servers and is not in the five profiles' base set.
+- **Freeze is account suspension**, the full path: panel sessions, cron, PHP-FPM, shell, FTP and mail logins stop. Suspension alone keeps delivering mail, and a message landing after the final sync would be lost, so a frozen account also defers mail with 450; senders retry and the mail arrives through the relay after the cutover. Deferred mail Postfix accepted before the freeze is sent on by queue id, and the source waits up to 30 seconds for the account's queue to empty before the final sync. A message that stays queued refuses the freeze with `live_mail_queued` and releases the source. Downtime is the final sync. Databases are dumped again and replaced, so a table the source dropped does not survive.
+- **An account that changes during the copy is refused.** Domains, databases, database users, mailboxes, zones and cron are compared between the two packages. Re-applying them under a suspended source would be a second implementation of the first copy; a refused transfer releases the source and removes the copy.
+- **Cutover at the source.** Zone A records at the source address move to the destination with a 300 s TTL, and a moved record is what the nginx, Postfix and Dovecot renderers read. Sites proxy to the destination under the requested name; accepted mail goes to the destination by `transport_maps` to its address, so no MX lookup can loop back here; IMAP and POP3 logins pass through with Dovecot `proxy=y`, with the password hash carried by the transfer. All of it is honoured only while the account is suspended, and unsuspending clears it.
+- **Zone scope.** AAAA records keep pointing here, where the proxy answers them, and SPF text is left as it is; the first copy rewrites neither for the destination either.
+- **Rollback is `revert`.** Each source step writes its record first, so the source can be released even if the destination never comes back. After a cutover, a change in the destination home since the cutover refuses until root accepts the loss. Logs, tmp and caches do not count. Database changes cannot be measured cheaply, so the confirmation states they are lost.
+
+## Resource use
+
+No new daemon and no new listener. Peers use the xWHM port. The pin watch is one TLS handshake per 6 hours while a link exists. Config pushes run one member at a time; live transfers run with the existing transfer queue at the lowest CPU and IO priority.
+
+## Not built, with the reason
+
+- **Mail or service offload to a node, dedistribution, force-dedistribute**: no account is distributed, so there is nothing to pull back on unlink. This is a separate feature; the Link Server Nodes scope note says so.
+- **Credential rotation.** A link token lasts 365 days, the limit of the tokens page. Linking again replaces it.
+- **Member status read by the master.** The master keeps what each push reported. A file changed on a member shows up when a rollback refuses.
+- **NS and registrar changes.** The source zone moves its A records; delegation stays with the operator.
+- **Verifying the destination certificate when proxying a moved site.** It may not be issued yet at cutover, and nginx cannot pin one per site. The hop carries TLS without identity until DNS has moved.
+- **Measuring database writes after a cutover**: `information_schema` update times are not reliable across engines, so the guard reads the home only.
+- **Proxying FTP, Web Disk and DAV** after a cutover: they follow DNS.
+
+## What only a real pair of hosts can prove
+
+Whether a message Postfix had already queued when the freeze began can reach the mailbox after the final sync started: the defer stops new mail, not its queue. The handshake against a real management certificate, including an ACME renewal; real freeze, final sync and restore as account users with SELinux enforcing on EL; a request answered through the source with SNI to the destination; mail relayed by `transport_maps` from a suspended account; Dovecot `proxy=y` with `starttls=any-cert` on 2.3 and 2.4; revert after real traffic.

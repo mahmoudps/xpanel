@@ -4,7 +4,7 @@ import { MONITORING_PS_ARGV } from '../../../packages/os/src/monitoring-command.
 import { HOST_DISK_DF_ARGV } from './host-info-disks.ts'
 import {
   parseDfInodeTable, parseDfSpace, parseJournalJson, parsePsOutput, parseRepquotaUsage, processProtection,
-  readDisk, readLogs, readProcesses, signalProcess,
+  killAccountProcesses, readDisk, readLogs, readProcesses, signalProcess, sweepTarget,
 } from './host-monitoring.ts'
 import type { MonitoringRun } from './host-monitoring.ts'
 
@@ -218,5 +218,62 @@ describe('journal observation', () => {
     expect(capped.items[0]!.message!.endsWith('299')).toBe(true)
     expect(await readLogs(runner({}), query, now)).toMatchObject({ state: 'unavailable', items: [], reason: 'journal-unavailable' })
     expect(await readLogs(runner({ '/usr/bin/journalctl --no-pager -o json --output-fields=MESSAGE,PRIORITY,_SYSTEMD_UNIT,_PID -n 1 -u nginx.service': { ok: true, stdout: lines } }), { ...query, lines: 1 }, now)).toMatchObject({ state: 'unavailable', reason: 'invalid-journal' })
+  })
+})
+
+describe('kill all for one user', () => {
+  const alice = { username: 'alice', uid: 20001, status: 'active' }
+  const row = (pid: number, uid: number, comm: string): string => `${pid} 1 ${uid} ${uid === 0 ? 'root' : 'alice'} 0.0 0.1 100 60 S ${comm}`
+  const rig = (reads: string[][], units = '', opts: { unitsOk?: boolean } = {}) => {
+    let read = 0
+    const calls: string[][] = [], dispatched = vi.fn(async () => {})
+    const run: MonitoringRun = async argv => {
+      calls.push(argv)
+      if (argv[1] === '-eo' && argv[2] === 'pid=,unit=') return { ok: opts.unitsOk !== false, stdout: units, stderr: '' }
+      if (argv[0] === '/usr/bin/ps') return { ok: true, stdout: reads[Math.min(read++, reads.length - 1)]!.join('\n') + '\n', stderr: '' }
+      return { ok: true, stdout: '', stderr: '' }
+    }
+    return { run, calls, dispatched, options: { beforeDispatch: dispatched, now, sleep: async () => {} }, kills: () => calls.filter(argv => argv[0] === '/usr/bin/kill').map(argv => argv.slice(2).join(' ')) }
+  }
+  const init = row(1, 0, 'systemd')
+
+  it('sends KILL to everything of the account and again to what stays, confirming only when nothing remains', async () => {
+    const t = rig([[init, row(4242, 20001, 'php'), row(4243, 20001, 'bash')], [init, row(4243, 20001, 'bash')], [init]])
+    expect(await killAccountProcesses(t.run, alice, t.options)).toMatchObject({ state: 'confirmed', username: 'alice', signalled: 2, remaining: 0, exempt: 0, verificationRequired: false })
+    expect(t.kills()).toEqual(['KILL 4242', 'KILL 4243', 'KILL 4243'])
+    expect(t.dispatched).toHaveBeenCalledOnce()
+  })
+  it('never touches another uid and catches a fork between rounds', async () => {
+    const t = rig([[init, row(4242, 20001, 'php'), row(5000, 20002, 'php')], [init, row(4250, 20001, 'php'), row(5000, 20002, 'php')], [init, row(5000, 20002, 'php')]])
+    expect(await killAccountProcesses(t.run, alice, t.options)).toMatchObject({ state: 'confirmed', signalled: 2 })
+    expect(t.kills()).toEqual(['KILL 4242', 'KILL 4250'])
+  })
+  it('leaves helpers in the panel units alone, by cgroup and not by the name an account can choose', async () => {
+    const list = [init, row(4242, 20001, 'xpanel-miner'), row(4243, 20001, 'account-files')]
+    const t = rig([list, [init, row(4243, 20001, 'account-files')]], '4243 xpanel-agent.service\n4242 session-3.scope\n1 -\n')
+    expect(await killAccountProcesses(t.run, alice, t.options)).toMatchObject({ state: 'confirmed', signalled: 1, remaining: 0, exempt: 1 })
+    expect(t.kills()).toEqual(['KILL 4242'])
+  })
+  it('reports what a service restarted and an unreadable list instead of success', async () => {
+    const t = rig([[init, row(4242, 20001, 'php')]])
+    expect(await killAccountProcesses(t.run, alice, t.options)).toMatchObject({ state: 'attempted', remaining: 1, verificationRequired: true })
+    expect(t.kills()).toEqual(['KILL 4242', 'KILL 4242', 'KILL 4242'])
+    let units = 0
+    const blind = rig([[init, row(4242, 20001, 'php')]])
+    const run: MonitoringRun = async argv => argv[2] === 'pid=,unit=' && units++ ? { ok: false, stdout: '', stderr: '' } : blind.run(argv)
+    expect(await killAccountProcesses(run, alice, blind.options)).toMatchObject({ state: 'unknown', remaining: null, verificationRequired: true })
+  })
+  it('sends nothing when the list cannot be read first, or when the audit refuses', async () => {
+    const t = rig([[init, row(4242, 20001, 'php')]], '', { unitsOk: false })
+    await expect(killAccountProcesses(t.run, alice, t.options)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false } })
+    const u = rig([[init, row(4242, 20001, 'php')]])
+    await expect(killAccountProcesses(u.run, alice, { ...u.options, beforeDispatch: async () => { throw new Error('no audit') } })).rejects.toThrow('no audit')
+    expect([...t.kills(), ...u.kills()]).toEqual([])
+  })
+  it('accepts a saved account only, so root, service, panel and terminating users are protected', () => {
+    const accounts = [alice, { username: 'gone', uid: 20002, status: 'terminating' }, { username: 'low', uid: 33, status: 'active' }]
+    expect(sweepTarget(accounts, 'alice')).toBe(alice)
+    for (const name of ['root', 'www-data', 'xpanel', 'xpanel-agent', 'gone', 'low', 'nobody-here'])
+      expect(() => sweepTarget(accounts, name)).toThrow(expect.objectContaining({ code: 'FORBIDDEN', detail: expect.objectContaining({ stateChanged: false, reason: 'protected-user' }) }))
   })
 })

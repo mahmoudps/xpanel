@@ -1,27 +1,29 @@
 import { accountProbeNginxLocation } from '../system/account-probe.ts'
+import { davWellKnownLocations } from '../system/dav.ts'
+import { movedTarget, renderAccountEdgeServer, type AccountEdgePolicy } from './account-edge.ts'
 // Nginx edge on 80/443. It proxies to the loopback backend (Apache or OpenLiteSpeed) or to an
 // app upstream, caches responses (never files), and never opens anything inside a home.
-import { assertProxyOptions, validateDefaultSitePolicy, validateNginxWorkers } from '@xpanel/core'
-import { readAdmittedTrustedProxyPolicy, renderTrustedProxyRealIp } from '../../../core/src/trusted-proxies.ts'
-import type { TrustedProxyRenderAuthority } from '../../../core/src/trusted-proxies.ts'
-import type { Account, Certificate, ConfigTest, Domain, HostAction, Limit, OsProfile, ProxyOptions, RenderedFile, ServerSettings } from '@xpanel/core'
-import { posix } from 'node:path'
-import { certPaths, DEFAULT_TLS, nginxAccessLog, nginxBinary, nginxErrorLog, nginxModuleIncludes, XP_PATHS } from './paths.ts'
+import { assertProxyOptions, resolveDomainEffectiveIps, validateDefaultSitePolicy } from '@xpanel/core'
+import type { Account, Certificate, Domain, Limit, OsProfile, ProxyOptions, RenderedFile, ServerSettings } from '@xpanel/core'
+import { certPaths, DEFAULT_TLS, nginxAccessLog, nginxErrorLog, XP_PATHS } from './paths.ts'
 import type { NginxHttp2Style } from '../../../../scripts/nginx-http2.mjs'
+import { accountPageDir, panelRedirectLocations, type PanelRedirect } from './account-pages.ts'
+import { renderNginxMain } from './nginx-main.ts'
+import { withProxyRules, type ProxyRule } from './proxy-rules.ts'
+import { block, extras, indent } from './nginx-syntax.ts'
 import { nginxQuote } from './quote.ts'
+import { mailAutoconfigLocations, renderMailAutoconfigServers, type MailAutoconfigOption } from './mail-autoconfig.ts'
 import { asCertList, certForName, groupSites, siteMode, siteUpstream, type RenderTime, type SiteGroup, type UpstreamPolicy } from './sites.ts'
 import {
   assertBackendPort,
   assertDomainName,
-  assertIncludeGlob,
-  assertInt,
   assertSafeAbsPath,
-  assertSystemUser,
   formatCidr,
   parseCidr,
   invalid,
 } from './validate.ts'
-import { renderWafHttp, renderWafSite, type ModsecuritySettings, type WafGlobalPolicy, type WafSitePolicy } from './waf.ts'
+import { renderWafSite, type ModsecuritySettings, type WafGlobalPolicy, type WafSitePolicy } from './waf.ts'
+import { renderSiteEdge, siteStoppedLocations } from './site-options.ts'
 
 /**
  * Edge settings not in the shared ServerSettings contract. Optional so a plain
@@ -53,143 +55,33 @@ export interface EdgeExtras {
 
 export type EdgeSettings = ServerSettings & { edge?: EdgeExtras }
 
-const extras = (s: ServerSettings): EdgeExtras => (s as EdgeSettings).edge ?? {}
-
-const indent = (lines: string[], n = 1): string[] => lines.map((l) => (l === '' ? l : `${'    '.repeat(n)}${l}`))
-
-const block = (head: string, body: string[]): string[] => [`${head} {`, ...indent(body), '}']
-
-// ---- main ---------------------------------------------------------------------------------
-
-const realIp = (e: EdgeExtras, authority?: TrustedProxyRenderAuthority): string[] => {
-  if (e.trustedProxies !== undefined || e.realIpHeader !== undefined) invalid('real IP authority', 'legacy edge extras', 'use the guarded canonical trusted proxy policy')
-  const policy = authority ? readAdmittedTrustedProxyPolicy(authority) : { cidrs: [], header: 'X-Forwarded-For' as const }
-  return renderTrustedProxyRealIp(policy).trimEnd().split('\n')
-}
-const METRICS_FORMAT = [
-  `'{"time":"$time_iso8601","host":"$host","ip":"$remote_addr","method":"$request_method",'`,
-  `'"uri":"$request_uri","status":$status,"body_bytes":$body_bytes_sent,"bytes":$bytes_sent,'`,
-  `'"request_bytes":$request_length,"request_time":$request_time,'`,
-  `'"upstream_time":"$upstream_response_time","cache":"$upstream_cache_status",'`,
-  `'"referer":"$http_referer","agent":"$http_user_agent"}'`,
-]
-
-/** Worker tuning by the core rule (worker_rlimit_nofile covers a client and an upstream fd per connection). */
-export const assertNginxTuning = (s: ServerSettings): ServerSettings['nginx'] => validateNginxWorkers(s.nginx)
-
-/** /etc/nginx/nginx.conf (path from the OsProfile). */
-export const renderNginxMain = (settings: ServerSettings, os: OsProfile, trustedProxyAuthority?: TrustedProxyRenderAuthority): RenderedFile => {
-  const n = assertNginxTuning(settings)
-  const e = extras(settings)
-  const user = assertSystemUser(os.paths.nginxUser, 'nginx user')
-  const root = assertSafeAbsPath(os.paths.nginxRoot, 'nginx root')
-  const vhostDir = assertSafeAbsPath(os.paths.nginxVhostDir, 'nginx vhost dir')
-  const modules = (e.nginxModuleIncludes ?? nginxModuleIncludes(os)).map((m) => assertIncludeGlob(m, 'nginx module include'))
-  const cacheMb = assertInt('proxy cache size (MB)', e.proxyCacheMaxMb ?? 1024, 16, 1048576)
-
-  const http = [
-    `include ${root}/mime.types;`,
-    'default_type application/octet-stream;',
-    'server_tokens off;',
-    'sendfile on;',
-    'tcp_nopush on;',
-    'tcp_nodelay on;',
-    `keepalive_timeout ${n.keepaliveTimeoutSec}s;`,
-    'types_hash_max_size 4096;',
-    // a bucket must hold the longest legal name (253 chars + pointer), or one customer's long
-    // domain fails `nginx -t` for the whole server
-    'server_names_hash_bucket_size 512;',
-    'server_names_hash_max_size 16384;',
-    'variables_hash_max_size 2048;',
-    'map_hash_bucket_size 128;',
-    'client_max_body_size 128m;',
-    '',
-    `log_format xpanel_metrics escape=json`,
-    ...indent(METRICS_FORMAT),
-    '    ;',
-    `access_log ${XP_PATHS.nginxLogDir}/access.log xpanel_metrics;`,
-    '',
-    ...realIp(e, trustedProxyAuthority),
-    '',
-    'ssl_protocols TLSv1.2 TLSv1.3;',
-    'ssl_prefer_server_ciphers off;',
-    'ssl_session_cache shared:xpanel_tls:32m;',
-    'ssl_session_timeout 1d;',
-    'ssl_session_tickets off;',
-    '',
-    'gzip on;',
-    'gzip_vary on;',
-    'gzip_proxied any;',
-    'gzip_min_length 1024;',
-    'gzip_types text/plain text/css text/xml application/json application/javascript application/xml application/rss+xml image/svg+xml;',
-    '',
-    '# responses only: Nginx never reads customer files',
-    `proxy_cache_path ${XP_PATHS.nginxCacheDir} levels=1:2 keys_zone=xpanel_cache:64m max_size=${cacheMb}m inactive=60m use_temp_path=off;`,
-    ...block('map $request_method $xpanel_nocache_method', ['GET 0;', 'HEAD 0;', 'default 1;']),
-    ...block('map $http_cookie $xpanel_nocache_cookie', ['"" 0;', 'default 1;']),
-    ...block('map $http_upgrade $xpanel_connection', ['"" close;', 'default upgrade;']),
-    'proxy_http_version 1.1;',
-    'proxy_connect_timeout 10s;',
-    'proxy_send_timeout 300s;',
-    'proxy_read_timeout 300s;',
-    'proxy_buffers 16 16k;',
-    'proxy_buffer_size 16k;',
-    '',
-    ...renderWafHttp(e.waf, e.modsecurity).trimEnd().split('\n'),
-    '',
-    `include ${assertIncludeGlob(`${vhostDir}/*.conf`)};`,
-  ]
-
-  const lines = [
-    '# Managed by xPanel. Changes are overwritten on the next config generation.',
-    `user ${user};`,
-    `worker_processes ${n.workerProcesses};`,
-    `worker_rlimit_nofile ${n.workerRlimitNofile};`,
-    'pid /run/nginx.pid;',
-    `error_log ${XP_PATHS.nginxLogDir}/error.log warn;`,
-    ...modules.map((m) => `include ${m};`),
-    '',
-    ...block('events', [`worker_connections ${n.workerConnections};`, `multi_accept ${n.multiAccept ? 'on' : 'off'};`]),
-    '',
-    ...block('http', http),
-  ]
-  return { path: `${root}/nginx.conf`, content: `${lines.join('\n')}\n`, mode: 0o644, owner: 'root', group: 'root' }
-}
-
-/** Directories the edge needs; the cache belongs to the nginx worker user, nothing to an account. */
-export const nginxEdgeDirs = (os: OsProfile): HostAction[] => {
-  const user = assertSystemUser(os.paths.nginxUser, 'nginx user')
-  // Parents first: ensure-dir creates one level. The cache parent is traverse-only so the nginx workers reach
-  // their cache while the agent's root-only native cache beside it stays unlisted.
-  return [
-    { kind: 'ensure-dir', path: posix.dirname(XP_PATHS.nginxCacheDir), mode: 0o711, owner: 'root', group: 'root' },
-    { kind: 'ensure-dir', path: XP_PATHS.nginxCacheDir, mode: 0o700, owner: user, group: user },
-    { kind: 'ensure-dir', path: XP_PATHS.nginxLogDir, mode: 0o750, owner: 'root', group: user },
-    { kind: 'ensure-dir', path: XP_PATHS.acmeDir, mode: 0o755, owner: 'root', group: 'root' },
-    { kind: 'ensure-dir', path: posix.dirname(XP_PATHS.suspendedDir), mode: 0o755, owner: 'root', group: 'root' },
-    { kind: 'ensure-dir', path: XP_PATHS.suspendedDir, mode: 0o755, owner: 'root', group: 'root' },
-    { kind: 'ensure-dir', path: XP_PATHS.defaultSiteDir, mode: 0o755, owner: 'root', group: 'root' },
-  ]
-}
-
-export const nginxConfigTest = (os: OsProfile): ConfigTest => ({
-  name: 'nginx',
-  argv: [nginxBinary(os), '-t', '-q', '-c', `${assertSafeAbsPath(os.paths.nginxRoot, 'nginx root')}/nginx.conf`],
-})
-
 // ---- sites --------------------------------------------------------------------------------
 
 export interface NginxSiteOptions extends UpstreamPolicy {
   /** WAF policy per site, keyed by the site's main domain name */
   waf?: Record<string, WafSitePolicy>
-  /** redirect plain HTTP to HTTPS for names that have a certificate (ACME stays on HTTP) */
-  forceHttps?: boolean
   /** response cache for proxied sites (default true) */
   cache?: boolean
   /** time used to stop expired sites (default: the time of rendering) */
   now?: RenderTime
   /** runtime apps per site, keyed by the site's main domain name */
   appRoutes?: Record<string, AppRoute[]>
+  /** canonical pool addresses with the dedicated role: a site on one listens on that address only */
+  dedicatedAddresses?: ReadonlySet<string>
+  /** reverse proxy rules per site, keyed by the site's main domain name (proxy-rules.ts) */
+  proxyRules?: Record<string, ProxyRule[]>
+  /** the account's IP Blocker list and cache epoch (account-edge.ts) */
+  accountEdge?: AccountEdgePolicy | null
+  /** mail client autoconfiguration for the account's domains that receive mail */
+  mailAutoconfig?: MailAutoconfigOption
+  /** the account's names on the calendar port, which the site's .well-known paths redirect to */
+  calDavNames?: readonly string[]
+  /** account compression choice; absent keeps the server default from the main configuration */
+  compression?: { mode: 'disabled' | 'all' | 'types'; types: string[] }
+  /** panel paths the site answers with a redirect (Tweak Settings: Redirection) */
+  panelRedirects?: readonly PanelRedirect[]
+  /** the account's Web Template Editor page set; absent is the server's own */
+  pageScope?: string
 }
 
 /** A runtime app served on a URL path of a site through its root-owned front socket. */
@@ -203,11 +95,16 @@ export interface AppRoute {
 const APP_ROUTE_PATH_RE = /^\/(?:[a-z0-9][a-z0-9._-]{0,62}(?:\/[a-z0-9][a-z0-9._-]{0,62}){0,3})?$/
 const APP_SOCKET_RE = /^\/run\/xpanel-app-proxy\/[a-z][a-z0-9]{0,15}-[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\.sock$/
 
-const listen = (port: 80 | 443, e: EdgeExtras, extra = ''): string[] => {
+/** A dedicated address of a site, or null for every address; `default*` makes the site that address's default server. */
+interface Bind { v4: string | null; v6: string | null; default4: boolean; default6: boolean }
+
+// A specific-address listen shares the wildcard socket of the default site, so nginx needs no bound alias to start.
+const listen = (port: 80 | 443, e: EdgeExtras, extra = '', bind?: Bind): string[] => {
   const h2 = port === 443 && (e.http2 ?? 'listen') === 'listen' ? ' http2' : ''
   const ssl = port === 443 ? ' ssl' : ''
-  const out = [`listen ${port}${ssl}${h2}${extra};`]
-  if (e.ipv6 !== false) out.push(`listen [::]:${port}${ssl}${h2}${extra};`)
+  const flag = (on: boolean | undefined): string => on ? ' default_server' : ''
+  const out = [`listen ${bind?.v4 ? `${bind.v4}:` : ''}${port}${ssl}${h2}${extra}${flag(bind?.default4)};`]
+  if (e.ipv6 !== false) out.push(`listen [${bind?.v6 ?? '::'}]:${port}${ssl}${h2}${extra}${flag(bind?.default6)};`)
   if (port === 443 && e.http2 === 'directive') out.push('http2 on;')
   return out
 }
@@ -216,9 +113,9 @@ const listen = (port: 80 | 443, e: EdgeExtras, extra = ''): string[] => {
 const acmeLocation = (): string[] =>
   block('location ^~ /.well-known/acme-challenge/', [`alias ${XP_PATHS.acmeDir}/;`, 'default_type text/plain;'])
 
-const suspendedLocations = (): string[] => [
+const suspendedLocations = (pageScope?: string): string[] => [
   'error_page 404 503 /index.html;',
-  ...block('location = /index.html', [`root ${XP_PATHS.suspendedDir};`, 'internal;', 'add_header Retry-After 3600 always;']),
+  ...block('location = /index.html', [`root ${accountPageDir('suspended', pageScope)};`, 'internal;', 'add_header Retry-After 3600 always;']),
   ...block('location /', ['return 503;']),
 ]
 
@@ -234,6 +131,8 @@ interface ProxyTarget {
   pre?: string[]
   /** owner options of a reverse-proxy site; absent keeps the defaults */
   options?: ProxyOptions
+  /** fixed backend Host: the default site answers for names no vhost knows */
+  host?: string
 }
 
 const proxyLocation = (t: ProxyTarget, cache: boolean, at = '/'): string[] => {
@@ -241,7 +140,7 @@ const proxyLocation = (t: ProxyTarget, cache: boolean, at = '/'): string[] => {
   const body = [
     ...(t.pre ?? []),
     `proxy_pass ${t.url};`,
-    o?.hostHeader === 'upstream' ? 'proxy_set_header Host $proxy_host;' : 'proxy_set_header Host $host;',
+    t.host ? `proxy_set_header Host ${t.host};` : o?.hostHeader === 'upstream' ? 'proxy_set_header Host $proxy_host;' : 'proxy_set_header Host $host;',
     'proxy_set_header X-Real-IP $remote_addr;',
     'proxy_set_header X-Forwarded-For $remote_addr;',
     'proxy_set_header Forwarded "";',
@@ -260,7 +159,7 @@ const proxyLocation = (t: ProxyTarget, cache: boolean, at = '/'): string[] => {
     body.push(
       'proxy_cache xpanel_cache;',
       // $host keeps tenants apart: the default key would use the shared backend address
-      'proxy_cache_key $scheme$host$request_uri;',
+      'proxy_cache_key $xpanel_cache_epoch$scheme$host$request_uri;',
       'proxy_cache_methods GET HEAD;',
       'proxy_cache_bypass $xpanel_nocache_method $xpanel_nocache_cookie $http_authorization;',
       'proxy_no_cache $xpanel_nocache_method $xpanel_nocache_cookie $http_authorization $upstream_http_set_cookie;',
@@ -319,12 +218,24 @@ interface SiteCtx {
   e: EdgeExtras
   opts: NginxSiteOptions
   backend: string
+  /** listen addresses of one server block of a site */
+  bind: (g: SiteGroup, port: 80 | 443) => Bind
+}
+
+/** Nginx always compresses text/html when gzip is on, and warns when it is listed. */
+export const siteCompressionLines = (choice: NginxSiteOptions['compression']): string[] => {
+  if (!choice) return []
+  if (choice.mode === 'disabled') return ['gzip off;']
+  const types = choice.mode === 'all' ? ['*'] : choice.types.filter(type => type !== 'text/html')
+  return ['gzip on;', ...(types.length ? [`gzip_types ${types.join(' ')};`] : [])]
 }
 
 const siteBody = (g: SiteGroup, ctx: SiteCtx, toHttps: boolean): string[] => {
   const mode = siteMode(ctx.account, g.main, ctx.opts.now)
-  const body = acmeLocation()
-  if (mode === 'suspended') return [...body, ...suspendedLocations()]
+  const body = [...siteCompressionLines(ctx.opts.compression), ...acmeLocation(), ...mailAutoconfigLocations(ctx.opts.mailAutoconfig, g), ...davWellKnownLocations(ctx.opts.calDavNames, [g.main.name, ...g.aliases.map(alias => alias.name)])]
+  // A live transfer moved this account: the suspended source answers through the destination until it is unsuspended.
+  if (mode === 'suspended' && ctx.opts.accountEdge?.movedTo) return [...body, ...proxyLocation(movedTarget(ctx.opts.accountEdge.movedTo), false)]
+  if (mode === 'suspended') return [...body, ...(siteStoppedLocations(ctx.account, g.main) ?? suspendedLocations(ctx.opts.pageScope))]
   // Only the websites stop: mail, FTP and the panels are separate services. ACME renewals keep working.
   if (ctx.account.bandwidthLimitedMonth !== undefined) return [...body, ...bandwidthLimitLocations()]
   if (g.main.kind === 'primary' && g.main.siteType === 'php' && g.main.php.handler === 'fpm' && !g.main.redirect) {
@@ -333,9 +244,10 @@ const siteBody = (g: SiteGroup, ctx: SiteCtx, toHttps: boolean): string[] => {
   if (mode === 'redirect' && g.main.redirect) {
     return [...body, ...block('location /', [`return ${g.main.redirect.code} ${nginxQuote(g.main.redirect.to)};`])]
   }
+  body.push(...panelRedirectLocations(ctx.opts.panelRedirects))
   if (toHttps) return [...body, ...block('location /', ['return 301 https://$host$request_uri;'])]
   const cache = ctx.opts.cache !== false
-  const apps = appLocations(ctx.opts.appRoutes?.[g.main.name] ?? [])
+  const apps = withProxyRules(appLocations(ctx.opts.appRoutes?.[g.main.name] ?? []), body, ctx.opts.proxyRules?.[g.main.name], ctx.settings, (target, at) => proxyLocation(target, cache, at))
   if (apps.root) return [...body, ...apps.paths, ...apps.root]
   if (mode === 'upstream') return [...body, ...apps.paths, ...proxyLocation(upstreamTarget(g.main, ctx), cache)]
   return [...body, ...apps.paths, ...proxyLocation({ url: ctx.backend, tls: false }, cache)]
@@ -365,29 +277,32 @@ const renderGroup = (g: SiteGroup, ctx: SiteCtx, certs: Certificate[]): string[]
     modsecurityPresent: Boolean(ctx.e.modsecurity),
     ...(ctx.e.waf?.denyStatus ? { denyStatus: ctx.e.waf.denyStatus } : {}),
   })
+  const site = renderSiteEdge(g.main, siteMode(ctx.account, g.main, ctx.opts.now) !== 'suspended')
   const head = (names: string[]): string[] => [
     `server_name ${names.join(' ')};`,
-    `access_log ${nginxAccessLog(name)} xpanel_metrics;`,
+    `access_log ${nginxAccessLog(name)} ${site.logFormat};`,
     `error_log ${nginxErrorLog(name)} warn;`,
     ...waf.server,
+    ...site.server,
+    ...renderAccountEdgeServer(ctx.opts.accountEdge, ctx.opts.cache !== false),
   ]
   const parts = partitionByCert(g, certs)
   const secure = parts.filter((p): p is NamePart & { cert: Certificate } => p.cert !== null)
   const out = [`# site ${name}${g.aliases.length ? ` (+ ${g.aliases.map((a) => a.name).join(', ')})` : ''}`]
-  out.push(...waf.http)
-  if (ctx.opts.forceHttps) {
+  out.push(...waf.http, ...site.http)
+  if (g.main.forceHttps) {
     const tlsNames = secure.flatMap((p) => p.names)
     const plainNames = parts.filter((p) => p.cert === null).flatMap((p) => p.names)
-    if (tlsNames.length) out.push(...block('server', [...listen(80, ctx.e), ...head(tlsNames), ...siteBody(g, ctx, true)]))
-    if (plainNames.length) out.push(...block('server', [...listen(80, ctx.e), ...head(plainNames), ...siteBody(g, ctx, false)]))
+    if (tlsNames.length) out.push(...block('server', [...listen(80, ctx.e, '', ctx.bind(g, 80)), ...head(tlsNames), ...siteBody(g, ctx, true)]))
+    if (plainNames.length) out.push(...block('server', [...listen(80, ctx.e, '', ctx.bind(g, 80)), ...head(plainNames), ...siteBody(g, ctx, false)]))
   } else {
-    out.push(...block('server', [...listen(80, ctx.e), ...head([...g.names, ...g.wildcards]), ...siteBody(g, ctx, false)]))
+    out.push(...block('server', [...listen(80, ctx.e, '', ctx.bind(g, 80)), ...head([...g.names, ...g.wildcards]), ...siteBody(g, ctx, false)]))
   }
   for (const p of secure) {
     const files = certPaths(p.cert.id)
     out.push(
       ...block('server', [
-        ...listen(443, ctx.e),
+        ...listen(443, ctx.e, '', ctx.bind(g, 443)),
         ...head(p.names),
         `ssl_certificate ${files.cert};`,
         `ssl_certificate_key ${files.key};`,
@@ -416,16 +331,35 @@ export const renderNginxSite = (
   opts: NginxSiteOptions = {},
 ): string => {
   const groups = groupSites(account, domains)
+  const dedicated = opts.dedicatedAddresses
+  const bindOf = (g: SiteGroup): { v4: string | null; v6: string | null } => {
+    const ips = resolveDomainEffectiveIps(g.main, account)
+    return { v4: dedicated?.has(ips.ipv4) ? ips.ipv4 : null, v6: ips.ipv6 !== null && dedicated?.has(ips.ipv6) ? ips.ipv6 : null }
+  }
+  // cPanel serves the account's primary site for a request to its dedicated address that names no other site.
+  const owner = new Map<string, SiteGroup>()
+  for (const g of [...groups].sort((a, b) => Number(b.main.kind === 'primary') - Number(a.main.kind === 'primary'))) {
+    for (const address of Object.values(bindOf(g))) if (address !== null && !owner.has(address)) owner.set(address, g)
+  }
+  const claimed = new Set<string>()
+  const take = (g: SiteGroup, address: string | null, port: number): boolean => {
+    if (address === null || owner.get(address) !== g || claimed.has(`${address} ${port}`)) return false
+    claimed.add(`${address} ${port}`)
+    return true
+  }
   const ctx: SiteCtx = {
     account,
     settings,
     e: extras(settings),
     opts,
     backend: `http://127.0.0.1:${assertBackendPort(settings)}`,
+    bind: (g, port) => { const b = bindOf(g); return { ...b, default4: take(g, b.v4, port), default6: take(g, b.v6, port) } },
   }
   // a certificate owned by another account is never installed here, whatever the caller passed
   const certs = asCertList(cert).filter((c) => c.accountId === null || c.accountId === account.id)
   const parts = groups.map((g) => renderGroup(g, ctx, certs).join('\n'))
+  const autoconfig = renderMailAutoconfigServers(opts.mailAutoconfig, groups, certs, port => listen(port, ctx.e))
+  if (autoconfig.length) parts.push(autoconfig.join('\n'))
   return `# Managed by xPanel: account ${account.username}\n\n${parts.join('\n\n')}\n`
 }
 
@@ -457,7 +391,11 @@ export interface DefaultSiteOptions {
   excludedNames?: readonly string[]
 }
 
-/** Catch-all for names no account has bound: a static notice, 404, and ACME for the hostname. */
+/** Never cached: the cache key carries the visitor's unbound name, not the site that answered. */
+const defaultSiteProxy = (site: string, settings: ServerSettings): string[] =>
+  proxyLocation({ url: `http://127.0.0.1:${assertBackendPort(settings)}`, tls: false, host: assertDomainName(site, 'default site') }, false)
+
+/** Catch-all for names no account has bound: a static notice, 404, a fixed redirect or one hosted site, and ACME for the hostname. */
 export const renderDefaultSite = (opts: DefaultSiteOptions = {}): string => {
   const e = opts.settings ? extras(opts.settings) : {}
   const policy = opts.settings?.defaultSite === undefined ? undefined : validateDefaultSitePolicy(opts.settings.defaultSite)
@@ -481,7 +419,7 @@ export const renderDefaultSite = (opts: DefaultSiteOptions = {}): string => {
     `root ${XP_PATHS.defaultSiteDir};`,
     'error_page 404 /index.html;',
     ...block('location = /index.html', ['internal;']),
-    ...block('location /', [policy?.response === 'redirect' ? `return 302 ${nginxQuote(policy.redirectTo!, 'default site redirect')};` : 'return 404;']),
+    ...(policy?.response === 'site' ? defaultSiteProxy(policy.site!, opts.settings!) : block('location /', [policy?.response === 'redirect' ? `return 302 ${nginxQuote(policy.redirectTo!, 'default site redirect')};` : 'return 404;'])),
   ]
   return ['# Managed by xPanel: default site for unbound names', ...block('server', body)].join('\n') + '\n'
 }
@@ -496,6 +434,7 @@ export const defaultSiteFile = (os: OsProfile, opts: DefaultSiteOptions = {}): R
 
 // ---- H05 edge isolation & header sanitization validators ----------------------------------
 
+const SCOPED_PAGE_ROOT = new RegExp(`^(?:${XP_PATHS.suspendedDir}|${XP_PATHS.defaultSiteDir})/[a-z0-9][a-z0-9-]{0,99}$`)
 const ALLOWED_NGINX_ROOTS = new Set<string>([
   `${XP_PATHS.acmeDir}/`,
   XP_PATHS.acmeDir,
@@ -522,7 +461,7 @@ export const assertNginxZeroHomeAccess = (
   for (const match of nginxConfigContent.matchAll(/\b(root|alias)\s+([^;\s]+)\s*;/g)) {
     const directive = match[1] ?? 'root'
     const target = match[2] ?? ''
-    if (!ALLOWED_NGINX_ROOTS.has(target)) {
+    if (!ALLOWED_NGINX_ROOTS.has(target) && !SCOPED_PAGE_ROOT.test(target)) {
       invalid(`nginx ${directive}`, target, `only xPanel system directories (${[...ALLOWED_NGINX_ROOTS].join(', ')}) are permitted in Nginx`)
     }
   }
@@ -571,6 +510,7 @@ export interface NginxEdgeIsolationProof {
     returns404: boolean
     noProxyPass: boolean
     fixedRedirect?: string
+    fixedSite?: string
   }
 }
 
@@ -605,9 +545,13 @@ export const verifyNginxEdgeIsolation = (
   const noProxyPass = !def.content.includes('proxy_pass')
   const policy = settings.defaultSite === undefined ? undefined : validateDefaultSitePolicy(settings.defaultSite)
   const fixedRedirect = policy?.response === 'redirect' ? policy.redirectTo! : undefined
-  const responseMatches = fixedRedirect === undefined ? returns404 : !returns404 && def.content.includes(`return 302 ${nginxQuote(fixedRedirect, 'default site redirect')};`)
-  if (!defaultServer80 || !defaultServer443 || !responseMatches || !noProxyPass) {
-    return invalid('nginx default catch-all site', def.path, 'must be default_server on 80/443 with the explicit response policy and without proxy_pass')
+  const fixedSite = policy?.response === 'site' ? policy.site! : undefined
+  // Only Host is fixed here; every other forwarded header follows the rule of a site.
+  if (fixedSite !== undefined) assertNginxEdgeHeaderSanitization(def.content.replace(`proxy_set_header Host ${fixedSite};`, 'proxy_set_header Host $host;'))
+  const responseMatches = fixedSite !== undefined ? !returns404 && def.content.includes(`proxy_set_header Host ${fixedSite};`)
+    : fixedRedirect === undefined ? returns404 : !returns404 && def.content.includes(`return 302 ${nginxQuote(fixedRedirect, 'default site redirect')};`)
+  if (!defaultServer80 || !defaultServer443 || !responseMatches || noProxyPass === (fixedSite !== undefined)) {
+    return invalid('nginx default catch-all site', def.path, 'must be default_server on 80/443 with the explicit response policy, and only a chosen site may use proxy_pass')
   }
 
   return {
@@ -615,7 +559,7 @@ export const verifyNginxEdgeIsolation = (
     trustedProxiesConfigured: main.content.includes('set_real_ip_from '),
     zeroHomeAccess: true,
     headersSanitized: true,
-    cacheKeyIncludesHost: site.includes('proxy_cache_key $scheme$host$request_uri;') || opts.cache === false,
+    cacheKeyIncludesHost: site.includes('proxy_cache_key $xpanel_cache_epoch$scheme$host$request_uri;') || opts.cache === false,
     defaultCatchall: {
       file: def.path,
       defaultServer80,
@@ -623,6 +567,7 @@ export const verifyNginxEdgeIsolation = (
       returns404,
       noProxyPass,
       ...(fixedRedirect !== undefined ? { fixedRedirect } : {}),
+      ...(fixedSite !== undefined ? { fixedSite } : {}),
     },
   }
 }

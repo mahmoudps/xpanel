@@ -33,7 +33,7 @@ export function readWhmEnhancementsView(value: unknown): WhmEnhancementsView {
   const uuid = (item: unknown): item is string => typeof item === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(item)
   const amount = (item: unknown): item is number => typeof item === 'number' && Number.isSafeInteger(item) && item >= 0 && item <= 1_000_000_000
   if (!object(value) || !['default', 'saved', 'invalid'].includes(value.state as string) || typeof value.revision !== 'string' || !/^[0-9a-f]{64}$/.test(value.revision)
-    || !object(value.document) || !object(value.directory) || !object(value.application) || value.application.enforced !== false || value.application.resellerAssignment !== false) return bad()
+    || !object(value.document) || !object(value.directory) || !object(value.application) || value.application.enforced !== false || value.application.resellerAssignment !== true) return bad()
   const doc = value.document, dir = value.directory
   if (!Array.isArray(doc.definitions) || doc.definitions.length > 50 || (value.state !== 'saved' && doc.definitions.length > 0)) return bad()
   const definitions = doc.definitions.map((item): WhmEnhancementDefinition => object(item) && typeof item.id === 'string' && /^[a-z][a-z0-9-]{0,47}$/.test(item.id) && typeof item.label === 'string' && item.label.length > 0 && [...item.label].length <= 80

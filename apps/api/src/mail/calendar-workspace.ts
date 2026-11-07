@@ -1,13 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { assessMailboxMetadataAuthority, fail } from '@xpanel/core'
 import type { Account, MailboxMetadataAuthority } from '@xpanel/core'
-import type { StateStore } from '@xpanel/state'
 import type { AuthenticatedCaller } from '../auth.ts'
 import type { ExtendedRouteHelpers, WebmailCalendar, WebmailCalendarEvent } from '../extended-routes.ts'
 import { assertAccountFeatures, isMailboxPrincipal, requireMailbox, requireMailboxPrincipalAccess } from '../authorization.ts'
+import type { DavSession } from './dav-store.ts'
+import { sameCalendars } from './dav-store.ts'
 import { assertMailboxMetadataAuthority, captureMailboxMetadataAuthority, resolveMailboxMetadataAuthority } from './metadata-authority.ts'
 
-export const CALENDAR_LIMITS = { calendars: 25, events: 1000, shares: 100, icsBytes: 256 * 1024, calendarBytes: 512 * 1024 } as const
+// What xMail may add. A device can hold more; the account's disk quota is the store's limit.
+export const CALENDAR_LIMITS = { calendars: 25, events: 10000, shares: 100, icsBytes: 256 * 1024, calendarBytes: 6 * 1024 * 1024 } as const
 const revisionPattern = /^[0-9a-f]{64}$/
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const unsafe = /[\u0000-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069\ufeff]/
@@ -96,18 +98,19 @@ const readStore = (value: unknown): WebmailCalendar[] => {
   if (new Set(value.map(calendar => calendar.id)).size !== value.length) return fail('PRECONDITION_FAILED', 'calendar storage has duplicate identities', { stateChanged: false })
   return value as WebmailCalendar[]
 }
-type CalendarLease = Awaited<ReturnType<ReturnType<StateStore['getWriterLock']>['acquire']>>
 export interface CalendarWorkspaceDependencies {
   helpers: Pick<ExtendedRouteHelpers, 'store' | 'requireCaller' | 'assertCanAccessAccount' | 'emitAudit'>
-  readRecords: () => Promise<WebmailCalendar[]>
-  /** The API binds the single calendars.json path and the writer lease fencing callback. */
-  publishRecords: (records: WebmailCalendar[], lease: CalendarLease) => Promise<void>
+  /** The mailbox's view of its account's store; panel writes to one mailbox run one at a time and hold no shared lease. */
+  dav: {
+    open: (caller: AuthenticatedCaller, account: Account, authority: MailboxMetadataAuthority) => DavSession
+    lock: (key: string) => Promise<() => void>
+  }
   parseIcs: (source: string, timezone: string) => WebmailCalendarEvent[]
   renderIcs: (calendar: WebmailCalendar) => string
 }
 const json = (value: unknown, status = 200): Response => Response.json(value, { status, headers: { 'cache-control': 'no-store' } })
 const sameCaller = (before: AuthenticatedCaller, after: AuthenticatedCaller): boolean => before.principal.id === after.principal.id && before.principal.kind === after.principal.kind && before.sessionId === after.sessionId && before.apiTokenId === after.apiTokenId
-const application = { status: 'stored_configuration', nativeApplied: false, syncVerified: false } as const
+const application = { status: 'dav_store', nativeApplied: true, syncVerified: false } as const
 const publicCalendarRecord = (calendar: WebmailCalendar) => ({
   id: calendar.id, owner: calendar.owner, name: calendar.name, color: calendar.color, timezone: calendar.timezone,
   shares: calendar.shares.map(share => ({ principal: share.principal, permission: share.permission, sharedAt: share.sharedAt })),
@@ -166,9 +169,7 @@ export const createCalendarWorkspaceRoutes = (deps: CalendarWorkspaceDependencie
       if (!sealed && typeof targetId === 'string') return fail('NOT_FOUND', 'calendar not found', { stateChanged: false })
       return invalid('calendar identity is invalid')
     }
-    const initial = readStore(await deps.readRecords())
-    const initialCalendar = typeof targetId === 'string' ? initial.find(calendar => calendar.id === targetId) : undefined
-    const requestedMailbox = sealed ? undefined : creating ? body.owner ?? url.searchParams.get('mailbox') : body.mailbox ?? url.searchParams.get('mailbox') ?? initialCalendar?.owner
+    const requestedMailbox = sealed ? undefined : creating ? body.owner ?? url.searchParams.get('mailbox') : body.mailbox ?? url.searchParams.get('mailbox')
     if (requestedMailbox !== undefined && requestedMailbox !== null && typeof requestedMailbox !== 'string') return invalid('mailbox selector must be text')
     const mailbox = await requireMailbox(helpers.store, caller, requestedMailbox as string | null | undefined)
     const selectedService = await helpers.store.getServiceUserByLogin(mailbox)
@@ -177,6 +178,9 @@ export const createCalendarWorkspaceRoutes = (deps: CalendarWorkspaceDependencie
     if (!account || account.status !== 'active') return fail('FORBIDDEN', 'hosting account is unavailable', { stateChanged: false })
     const authority = await captureMailboxMetadataAuthority(helpers.store, mailbox)
     if (authority.accountId !== account.id || authority.serviceUserId !== selectedService.id) return fail('NOT_FOUND', 'mailbox not found', { stateChanged: false })
+    const session = deps.dav.open(caller, account, authority)
+    const initial = readStore(await session.calendars())
+    const initialCalendar = typeof targetId === 'string' ? initial.find(calendar => calendar.id === targetId) : undefined
     const context = { mailbox }
     const visible = async (calendars: WebmailCalendar[]): Promise<WebmailCalendar[]> => {
       const selected: WebmailCalendar[] = []
@@ -211,7 +215,7 @@ export const createCalendarWorkspaceRoutes = (deps: CalendarWorkspaceDependencie
     else if (operation === 'share') keys(body, ['principal', 'permission', 'expectedRevision'], sealed)
     else if (method === 'DELETE') keys(body, ['expectedRevision'], sealed)
     else keys(body, ['name', 'color', 'timezone', 'events', 'expectedRevision'], sealed)
-    const lease = await helpers.store.getWriterLock().acquire()
+    const release = await deps.dav.lock(selectedService.id)
     let writeAttempted = false, result: WebmailCalendar | null = null, importedCount = 0, auditAction = '', committed = false
     let previousCalendar: WebmailCalendar | null = null, eventResult: WebmailCalendarEvent | null = null, deletedEventId: string | null = null
     let sealedResult: ReturnType<typeof projectCalendarWorkspace> | null = null
@@ -234,7 +238,7 @@ export const createCalendarWorkspaceRoutes = (deps: CalendarWorkspaceDependencie
       auditAccount = currentAccount
       const currentAuthority = await captureMailboxMetadataAuthority(helpers.store, mailbox)
       if (currentAuthority.accountId !== account.id || currentAuthority.serviceUserId !== selectedService.id) return fail('NOT_FOUND', 'mailbox not found', { stateChanged: false })
-      const calendars = readStore(await deps.readRecords())
+      const calendars = readStore(await session.calendars())
       const target = typeof targetId === 'string' ? calendars.find(calendar => calendar.id === targetId) : undefined
       let next = [...calendars]
       if (creating) {
@@ -313,6 +317,7 @@ export const createCalendarWorkspaceRoutes = (deps: CalendarWorkspaceDependencie
           result.events = events; importedCount = imported.length; auditAction = 'webmail.calendar.imported'
         } else if (method === 'DELETE') {
           if (!owned) return fail('FORBIDDEN', 'only the calendar owner may delete the calendar', { stateChanged: false })
+          if (session.isDefaultCalendar(target.id)) return fail('PRECONDITION_FAILED', 'the default calendar cannot be deleted', { stateChanged: false, reason: 'dav_default_collection' })
           next = calendars.filter(calendar => calendar.id !== target.id); auditAction = 'webmail.calendar.deleted'
         } else if (method === 'PATCH' || method === 'PUT') {
           if (!await accessible(target, currentAuthority, currentAccount, true, true)) return fail('FORBIDDEN', 'calendar share is read-only', { stateChanged: false })
@@ -331,16 +336,22 @@ export const createCalendarWorkspaceRoutes = (deps: CalendarWorkspaceDependencie
         if (bytes > CALENDAR_LIMITS.calendarBytes && bytes > previousBytes) return invalid('calendar data capacity reached; reduce event content before increasing this record')
       }
       writeAttempted = true
-      await deps.publishRecords(next, lease)
-      const persisted = readStore(await deps.readRecords())
-      if (JSON.stringify(persisted) !== JSON.stringify(next)) return fail('PRECONDITION_FAILED', 'calendar publication readback requires review', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
+      await session.publishCalendars(next)
+      const persisted = readStore(await session.calendars())
+      if (!sameCalendars(persisted, next)) return fail('PRECONDITION_FAILED', 'calendar publication readback requires review', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
+      // The reply carries what the store holds: its revision is the one the next save must present.
+      const stored = result && persisted.find(calendar => calendar.id === result!.id)
+      if (stored) {
+        const storedEvent = eventResult && stored.events?.find(event => event.id === eventResult!.id)
+        result = stored
+        if (storedEvent) eventResult = storedEvent
+      }
       if (sealed && result && auditAction !== 'webmail.calendar.deleted') sealedResult = await project(result, currentAuthority)
-      await lease.commitAuthority({ incrementRevision: false })
       committed = true
     } catch (error) {
       if (writeAttempted) return fail('PRECONDITION_FAILED', 'calendar write outcome requires review', { stateChanged: true, verificationRequired: true, unknownOutcome: true })
       throw error
-    } finally { await lease.release() }
+    } finally { release() }
     if (!committed || !result) return fail('PRECONDITION_FAILED', 'calendar write requires review', { stateChanged: true, unknownOutcome: true })
     try {
       await helpers.emitAudit({ actor: auditCaller.principal.username, action: auditAction, target: `calendar:${result.name}`,

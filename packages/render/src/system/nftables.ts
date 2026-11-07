@@ -14,6 +14,8 @@
 
 import {
   fail,
+  MAX_ACCOUNT_UID,
+  MIN_ACCOUNT_UID,
   MANAGEMENT_PUBLIC_PORTS,
   MANAGEMENT_BACKEND_PORTS,
   formatCidr,
@@ -68,9 +70,27 @@ export interface NftSettings {
   forwardPolicy?: 'drop' | 'accept'
   /** Union of active accounts' remote-database sources (canonical CIDRs); opens TCP/3306 only. */
   databaseRemoteSources?: readonly string[]
+  /** pure-ftpd's passive data ports; absent while FTP is disabled or not installed */
+  ftpPassivePorts?: { min: number; max: number }
+  /** the frp service port and tunnel range; absent while the frp server is off */
+  frpPorts?: { bindPort: number; portMin: number; portMax: number }
+  /** phpMyAdmin Access: nginx answers here, with 403 while public access is off */
+  webClientPorts?: readonly number[]
+  /** clients of the applied NFS exports: IPv4 addresses or CIDRs, or `*`; absent or empty keeps TCP/2049 closed */
+  nfsClients?: readonly string[]
   /** per-source limits on the web ports and a global ping limit; absent or null renders no flood rules */
   flood?: NftFloodSettings | null
+  /** Outbound SMTP Restrictions: hosting accounts reach remote SMTP only through the local MTA */
+  smtpRestricted?: boolean
+  /** false leaves the operator's list out and accepts what no guard refuses; absent means on */
+  enabled?: boolean
+  /** the server ignores ping from every address, whatever the list says */
+  blockPing?: boolean
+  /** Private TCP ports of Go and Java apps; `open` also accepts the port from outside */
+  appPorts?: readonly { port: number; uid: number; open: boolean }[]
 }
+
+export interface NftContainerLoopback { port: number; protocol: 'tcp' | 'udp'; uid: number }
 
 export interface NftFloodSettings {
   /** concurrent connections per source address (nft ct count) */
@@ -83,6 +103,9 @@ export interface NftFloodSettings {
 }
 export const FLOOD_SETS = { conn4: 'xpanel_flood_conn4', conn6: 'xpanel_flood_conn6', rate4: 'xpanel_flood_rate4', rate6: 'xpanel_flood_rate6' } as const
 export const FLOOD_COMMENT_PREFIX = 'xpanel-flood:'
+export const SMTP_RESTRICTION_COMMENT = 'xpanel-smtp-restriction'
+export const CONTAINER_LOOPBACK_COMMENT = 'xpanel-container-loopback'
+export const SMTP_RESTRICTED_PORTS: readonly number[] = [25, 465, 587]
 
 type Proto = 'tcp' | 'udp'
 
@@ -100,6 +123,10 @@ interface PrefixSets {
 }
 
 interface NormalSettings {
+  nfsClients: readonly string[]
+  ftpPassivePorts?: { min: number; max: number }
+  frpPorts?: { bindPort: number; portMin: number; portMax: number }
+  webClientPorts: number[]
   panelPort: number
   managementPorts: number[]
   sshPort: number
@@ -111,6 +138,8 @@ interface NormalSettings {
   bans: { ip: IpAddress; remaining: number }[]
   forwardPolicy: 'drop' | 'accept'
   flood: NftFloodSettings | null
+  smtpRestricted: boolean
+  appPorts: NftSettings['appPorts']
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
@@ -191,7 +220,10 @@ const normalizeSettings = (s: NftSettings): NormalSettings => {
     const remaining = assertInt('ban expiresAt', b.expiresAt, 0, 2 ** 40) - now
     return remaining > 0 ? [{ ip, remaining }] : []
   })
-  return { panelPort, managementPorts, sshPort, backendPorts, webPorts, lists: normalizeLists(s.prefixLists), databaseRemote: normalizeDatabaseRemote(s.databaseRemoteSources), banTimeoutSec, bans, forwardPolicy, flood: normalizeFlood(s.flood) }
+  const ftp = s.ftpPassivePorts
+  if (ftp && !(Number.isInteger(ftp.min) && Number.isInteger(ftp.max) && ftp.min >= 1024 && ftp.max <= 65535 && ftp.min < ftp.max)) return invalid('ftpPassivePorts must be a port range from 1024 to 65535')
+  const nfsClients = [...new Set(s.nfsClients ?? [])].filter(host => host === '*' || /^\d{1,3}(?:\.\d{1,3}){3}(?:\/\d{1,2})?$/.test(host))
+  return { nfsClients, ...(ftp ? { ftpPassivePorts: { min: ftp.min, max: ftp.max } } : {}), ...(s.frpPorts ? { frpPorts: { bindPort: assertInt('frp port', s.frpPorts.bindPort, 1024, 65535), portMin: assertInt('frp port', s.frpPorts.portMin, 1024, 65535), portMax: assertInt('frp port', s.frpPorts.portMax, 1024, 65535) } } : {}), webClientPorts: (s.webClientPorts ?? []).map((p) => assertPort('webClientPort', p)), panelPort, managementPorts, sshPort, backendPorts, webPorts, lists: normalizeLists(s.prefixLists), databaseRemote: normalizeDatabaseRemote(s.databaseRemoteSources), banTimeoutSec, bans, forwardPolicy, flood: normalizeFlood(s.flood), smtpRestricted: s.smtpRestricted === true, appPorts: s.appPorts }
 }
 
 const normalizeFlood = (f: NftSettings['flood']): NftFloodSettings | null => {
@@ -336,14 +368,20 @@ const chain = (name: string, decl: string, body: string[]): string[] => [`  chai
  * SELF_LOCKOUT a list in which any configured management port has no enabled accept: on a remote server that
  * ruleset could only be undone from the console. The per-session check is core's assertNoSelfLockout().
  */
+const appPorts = (list: NftSettings['appPorts']): readonly { port: number; uid: number; open: boolean }[] => {
+  for (const app of list ?? []) { assertPort('app port', app.port); assertInt('app port owner', app.uid, MIN_ACCOUNT_UID, MAX_ACCOUNT_UID) }
+  return list ?? []
+}
+
 export const renderNftables = (rules: readonly FirewallRule[], settings: NftSettings, os: Pick<OsProfile, 'paths'>): RenderedFile => {
   const ns = normalizeSettings(settings)
   const parsed = parseRules(rules)
   for (const r of parsed) assertRenderable(r, ns)
-  for (const port of ns.managementPorts) {
+  const off = settings.enabled === false
+  if (!off) for (const port of ns.managementPorts) {
     if (!parsed.some((r) => opensPanel(r, ns, port))) fail('SELF_LOCKOUT', `no enabled rule accepts the management port ${port}; the ruleset would lock everyone out`, { panelPort: port })
   }
-  const active = parsed.filter((r) => r.rule.enabled)
+  const active = off ? [] : parsed.filter((r) => r.rule.enabled)
   const filters = active.filter((r) => r.rule.kind !== 'forward')
   const forwards = active.filter((r) => r.rule.kind === 'forward')
   const guarded = portSet([ns.sshPort, ...ns.managementPorts])
@@ -365,7 +403,7 @@ export const renderNftables = (rules: readonly FirewallRule[], settings: NftSett
     }),
   ]
 
-  const input = chain('input', 'type filter hook input priority filter; policy drop;', [
+  const input = chain('input', `type filter hook input priority filter; policy ${off ? 'accept' : 'drop'};`, [
     'iif "lo" accept',
     'ct state invalid drop',
     // before established, so a new ban also cuts the attacker's open connections
@@ -380,10 +418,18 @@ export const renderNftables = (rules: readonly FirewallRule[], settings: NftSett
     // DHCPv6 replies come from another address than the multicast solicit, so conntrack misses them.
     'ip6 daddr fe80::/64 udp dport 546 accept comment "xpanel: dhcpv6 client"',
     ...floodRules(ns.flood, ns.webPorts),
+    ...(settings.blockPing === true ? ['icmp type echo-request drop comment "xpanel: ping blocked"', 'icmpv6 type echo-request drop comment "xpanel: ping blocked"'] : []),
     ...filters.flatMap((r) => inputLines(r, ns.lists)),
     // After the operator's list: an administrator drop for a source or for 3306 always wins over tenant access.
     `ip saddr @${DB_REMOTE_SET_V4} tcp dport 3306 accept comment "xpanel: remote database access"`,
     `ip6 saddr @${DB_REMOTE_SET_V6} tcp dport 3306 accept comment "xpanel: remote database access"`,
+    // Remote database access stays a list of addresses when the operator turns the firewall off.
+    ...(off ? ['tcp dport 3306 drop comment "xpanel: remote database access"'] : []),
+    ...(ns.ftpPassivePorts ? [`tcp dport ${ns.ftpPassivePorts.min}-${ns.ftpPassivePorts.max} accept comment "xpanel: ftp passive data"`] : []),
+    ...(ns.frpPorts ? [`tcp dport { ${ns.frpPorts.bindPort}, ${ns.frpPorts.portMin}-${ns.frpPorts.portMax} } accept comment "xpanel: frp"`] : []),
+    ...(ns.webClientPorts.length ? [`tcp dport ${portSet(ns.webClientPorts)} accept comment "xpanel: database web client"`] : []),
+    ...(ns.nfsClients.length ? [`${ns.nfsClients.includes('*') ? '' : `ip saddr { ${ns.nfsClients.join(', ')} } `}tcp dport 2049 accept comment "xpanel: nfs clients"`] : []),
+    ...appPorts(ns.appPorts).filter(app => app.open).map(app => `tcp dport ${app.port} accept comment "xpanel: app port"`),
   ])
 
   const forwardMatches = (r: NormalRule, verdict: string): string[] => {
@@ -422,6 +468,15 @@ export const renderNftables = (rules: readonly FirewallRule[], settings: NftSett
     '',
     ...forward,
     ...nat,
+    ...(ns.smtpRestricted || appPorts(ns.appPorts).length ? ['', ...chain('output', 'type filter hook output priority filter; policy accept;', [
+      // A private app port answers its owner only: another account can neither reach it nor answer in its place while the app is down.
+      ...appPorts(ns.appPorts).flatMap(app => [`oif "lo" tcp dport ${app.port} meta skuid != ${app.uid} reject with tcp reset comment "xpanel: app port"`, `oif "lo" tcp sport ${app.port} meta skuid != ${app.uid} drop comment "xpanel: app port"`]),
+      ...(ns.smtpRestricted ? [
+        // Local delivery stays open: every address of this host routes through lo. System users (the MTA, the list manager) sit below the account range.
+        'oif "lo" accept',
+        `meta skuid ${MIN_ACCOUNT_UID}-${MAX_ACCOUNT_UID} tcp dport ${portSet([...SMTP_RESTRICTED_PORTS])} reject with tcp reset comment "${SMTP_RESTRICTION_COMMENT}"`,
+      ] : []),
+    ])] : []),
     '}',
     '',
   ].join('\n')
@@ -440,6 +495,31 @@ export const nftApplyActions = (os: Pick<OsProfile, 'paths' | 'services'>): Host
   { kind: 'exec', argv: [NFT_BINARY, '-f', assertAbsPath('nftablesConf', os.paths.nftablesConf)] },
   { kind: 'systemd', verb: 'enable', unit: os.services.nftables },
 ]
+
+export const CONTAINER_GUARD_TABLE = 'xpanel_ctr_guard'
+export const CONTAINER_GUARD_PATH = '/etc/xpanel/container-guard.nft'
+export const CONTAINER_GUARD_UNIT = 'xpanel-container-guard.service'
+
+/**
+ * A rootless container's loopback port is open to every local user. Other hosting accounts are refused here, in a
+ * table and unit of their own: the guard holds with no firewall rules at all, and neither ruleset rewrites the other.
+ * Nginx and system users stay below the account range, so a reverse proxy keeps working.
+ */
+export const renderContainerGuard = (ports: readonly NftContainerLoopback[], os: Pick<OsProfile, 'paths'>): { rules: RenderedFile; unit: RenderedFile; actions: HostAction[] } | null => {
+  if (!ports.length) return null
+  const lines = ports.map(({ port, protocol, uid }) => {
+    assertInt('container port', port, 1024, 65535); assertInt('container owner', uid, MIN_ACCOUNT_UID, MAX_ACCOUNT_UID)
+    return `ip daddr 127.0.0.1 ${protocol === 'udp' ? 'udp' : 'tcp'} dport ${port} meta skuid ${MIN_ACCOUNT_UID}-${MAX_ACCOUNT_UID} meta skuid != ${uid} reject${protocol === 'udp' ? '' : ' with tcp reset'} comment "${CONTAINER_LOOPBACK_COMMENT}"`
+  })
+  const rules = [`#!${NFT_BINARY} -f`, '# Generated by xPanel.', `table inet ${CONTAINER_GUARD_TABLE}`, `delete table inet ${CONTAINER_GUARD_TABLE}`, '', `table inet ${CONTAINER_GUARD_TABLE} {`, ...chain('output', 'type filter hook output priority filter; policy accept;', lines), '}', ''].join('\n')
+  const unit = ['# Generated by xPanel.', '[Unit]', 'Description=xPanel guard for container loopback ports', 'After=nftables.service', '', '[Service]', 'Type=oneshot', 'RemainAfterExit=yes', `ExecStart=${NFT_BINARY} -f ${CONTAINER_GUARD_PATH}`, `ExecStop=${NFT_BINARY} delete table inet ${CONTAINER_GUARD_TABLE}`, '', '[Install]', 'WantedBy=multi-user.target', ''].join('\n')
+  return {
+    rules: { path: CONTAINER_GUARD_PATH, content: rules, mode: 0o600, owner: 'root', group: 'root' },
+    unit: { path: `${assertAbsPath('systemdDir', os.paths.systemdDir)}/${CONTAINER_GUARD_UNIT}`, content: unit, mode: 0o644, owner: 'root', group: 'root' },
+    // nft -f swaps the table in one transaction, so a changed port list never leaves a gap.
+    actions: [{ kind: 'exec', argv: [NFT_BINARY, '-f', CONTAINER_GUARD_PATH] }, { kind: 'systemd', verb: 'enable', unit: CONTAINER_GUARD_UNIT }, { kind: 'systemd', verb: 'start', unit: CONTAINER_GUARD_UNIT }],
+  }
+}
 
 /**
  * DNAT to other hosts needs routing for the family of each enabled forward target. IPv6 forwarding

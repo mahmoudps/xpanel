@@ -103,11 +103,16 @@ describe('output parsers', () => {
 
 describe('agent network tools route', () => {
   const principal = { kind: 'user', id: 'p-alice', username: 'alice', accountId: ACCOUNT, disabled: false }
-  const setup = (over: { role?: 'user' | 'reseller' | 'root'; disabled?: string[]; host?: NetworkToolsHost | null; principals?: (typeof principal | null)[] } = {}) => {
+  it('refuses trace route while root keeps it off, and only trace route', async () => {
+    const { call } = setup({ traceRoute: false })
+    await expect(call('/accounts/alice/network-tools/traceroute', { host: 'example.com' })).rejects.toMatchObject({ code: 'FORBIDDEN', detail: { reason: 'traceroute_disabled' } })
+    expect((await call('/accounts/alice/network-tools/dns', { name: 'example.com', type: 'A' }))!.status).toBe(200)
+  })
+  const setup = (over: { role?: 'user' | 'reseller' | 'root'; disabled?: string[]; host?: NetworkToolsHost | null; principals?: (typeof principal | null)[]; traceRoute?: boolean } = {}) => {
     const host = over.host === undefined ? fakeHost({ 'example.com': { A: ['93.184.215.14'], MX: ['10 mail.example.com'] }, 'internal.example.com': { A: ['192.168.1.9'] } }) : over.host, principals = [...(over.principals ?? [])]
     const deps: NetworkToolsRouteDeps = { caller: { principalId: 'p-alice', actor: 'alice', role: over.role ?? 'user', accountId: over.role && over.role !== 'user' ? null : ACCOUNT, resellerId: null },
       store: { getAccountByUsername: async name => name === 'alice' ? account : null, getPlan: async () => ({ featureListId: 'list' }) as Plan, getFeatureList: async () => ({ id: 'list', name: 'f', ownerId: null, disabled: over.disabled ?? [] }) },
-      currentPrincipal: async () => principals.length ? principals.shift()! : principal, host, now: () => new Date('2026-10-27T02:00:00.000Z') }
+      currentPrincipal: async () => principals.length ? principals.shift()! : principal, host, traceRouteAllowed: async () => over.traceRoute !== false, now: () => new Date('2026-10-27T02:00:00.000Z') }
     const call = (path: string, body: unknown, method = 'POST') => { const url = new URL('http://agent.local' + path); return handleNetworkToolsRoute(new Request(url, { method, ...(method === 'POST' ? { body: JSON.stringify(body) } : {}) }), url, method, deps) }
     return { call, host }
   }

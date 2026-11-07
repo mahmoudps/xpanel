@@ -211,6 +211,8 @@ export interface LoginFailureInput {
   /** Fixed observation window; expiry or a completed lock starts a new counter. */
   windowMs: number
   lockoutDurationMs: number
+  /** The address counter's own limits; absent uses the username limits above. */
+  ipLimits?: { threshold: number; windowMs: number; lockoutDurationMs: number }
   surface?: LoginSurface
   reason?: string | null
   now?: string
@@ -281,17 +283,20 @@ export const recordLoginFailure = (db: Db, input: LoginFailureInput): Promise<Lo
     const username = assertLine(input.username, 128, 'username', { allowEmpty: false }).trim().toLowerCase()
     if (!username) fail('VALIDATION', 'username must not be empty')
     const ip = assertIp(input.ip, 'ip')
-    const threshold = assertInt(input.threshold, 1, 1_000_000, 'threshold')
-    const windowMs = assertInt(input.windowMs, 1, 604_800_000, 'windowMs')
-    const duration = assertInt(input.lockoutDurationMs, 1, 604_800_000, 'lockoutDurationMs')
     const now = input.now === undefined ? nowIso() : assertIsoDate(input.now, 'now').toISOString()
-    const expiry = Date.parse(now) + duration
-    if (expiry > 8_640_000_000_000_000) fail('VALIDATION', 'lockout expiry exceeds the supported date range')
-    const policy = { threshold, windowMs, now, lockedUntil: new Date(expiry).toISOString() }
+    const policyOf = (limits: { threshold: number; windowMs: number; lockoutDurationMs: number }): FailurePolicy => {
+      const threshold = assertInt(limits.threshold, 1, 1_000_000, 'threshold')
+      const windowMs = assertInt(limits.windowMs, 1, 604_800_000, 'windowMs')
+      const duration = assertInt(limits.lockoutDurationMs, 1, 604_800_000, 'lockoutDurationMs')
+      const expiry = Date.parse(now) + duration
+      if (expiry > 8_640_000_000_000_000) fail('VALIDATION', 'lockout expiry exceeds the supported date range')
+      return { threshold, windowMs, now, lockedUntil: new Date(expiry).toISOString() }
+    }
+    const userPolicy = policyOf(input), ipPolicy = input.ipLimits === undefined ? userPolicy : policyOf(input.ipLimits)
     return db.transaction(async (tx) => {
       await recordLoginAttempt(tx, { surface: input.surface ?? 'panel', username, ip, success: false, reason: input.reason ?? null, at: now })
-      const user = await advanceFailureCounter(tx, { kind: 'username', value: username }, policy)
-      const source = await advanceFailureCounter(tx, { kind: 'ip', value: ip }, policy)
+      const user = await advanceFailureCounter(tx, { kind: 'username', value: username }, userPolicy)
+      const source = await advanceFailureCounter(tx, { kind: 'ip', value: ip }, ipPolicy)
       const lockedUntil = [user.lockedUntil, source.lockedUntil].filter((value): value is string => value !== null).sort().at(-1) ?? null
       return { usernameFailures: user.failures, ipFailures: source.failures, lockedUntil }
     })

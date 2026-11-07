@@ -8,6 +8,7 @@ import type { Db, PrincipalRecord } from '@xpanel/db'
 import { StateStore } from '@xpanel/state'
 import * as auth from './auth.ts'
 import { createApiApp } from './server.ts'
+import { writeSignInLockout } from './testing/sign-in-policy-fixture.ts'
 
 // Independent libargon2 fixture: https://argon2-cffi.readthedocs.io/en/21.3.0/
 const PASSWORD = 'correct horse battery staple'
@@ -83,10 +84,10 @@ describe('identity: bounded native password work', () => {
     await assert.rejects(auth.passwordHashFromInput({}), /at least 8/)
     await assert.rejects(auth.passwordHashFromInput({ password: 'short' }), /at least 8/)
     await assert.rejects(auth.passwordHashFromInput({ password: PASSWORD, passwordHash: INDEPENDENT_HASH }), /not both/)
-    await assert.rejects(auth.passwordHashFromInput({ passwordHash: INDEPENDENT_HASH }, { service: true }), /scheme/)
+    await assert.rejects(auth.passwordHashFromInput({ passwordHash: INDEPENDENT_HASH }, { service: ['mail'] }), /scheme/)
     assert.equal(await auth.passwordHashFromInput({ passwordHash: INDEPENDENT_HASH }), INDEPENDENT_HASH)
-    assert.equal(await auth.passwordHashFromInput({ passwordHash: `{ARGON2ID}${INDEPENDENT_HASH}` }, { service: true }), `{ARGON2ID}${INDEPENDENT_HASH}`)
-    const generated = await auth.passwordHashFromInput({ password: PASSWORD }, { service: true })
+    assert.equal(await auth.passwordHashFromInput({ passwordHash: `{ARGON2ID}${INDEPENDENT_HASH}` }, { service: ['mail'] }), `{ARGON2ID}${INDEPENDENT_HASH}`)
+    const generated = await auth.passwordHashFromInput({ password: PASSWORD }, { service: ['mail'] })
     assert.ok(generated.startsWith('{ARGON2ID}'))
     assert.equal(await auth.verifyPasswordArgon2id(PASSWORD, generated.slice('{ARGON2ID}'.length)), true)
   })
@@ -99,7 +100,7 @@ describe('identity: bounded native password work', () => {
     await pending
   })
 
-  it('rejects excess queued password work rather than allocating unbounded native jobs', async () => {
+  it('rejects excess queued password work rather than allocating unbounded native jobs', { tags: ['slow'] }, async () => {
     const capacity = auth.MAX_PASSWORD_DERIVATIONS + auth.MAX_PENDING_PASSWORD_DERIVATIONS
     const attempts = Array.from({ length: capacity + 1 }, () => auth.hashPasswordArgon2id(PASSWORD))
     const results = await Promise.allSettled(attempts)
@@ -117,7 +118,7 @@ describe('identity: bounded native password work', () => {
     assert.equal(await auth.verifyPasswordArgon2id(PASSWORD, INDEPENDENT_HASH), true)
   })
 
-  it('enforces HTTP 503 queue bounds during a concurrent login burst while keeping /api/health responsive and RSS bounded', async () => {
+  it('enforces HTTP 503 queue bounds during a concurrent login burst while keeping /api/health responsive and RSS bounded', { tags: ['slow'] }, async () => {
     await withIdentity(async (db, root) => {
       const store = new StateStore(join(tmpdir(), `xpanel-kdf-burst-${randomUUID()}`))
 
@@ -145,11 +146,11 @@ describe('identity: bounded native password work', () => {
         exec: sql => db.exec(sql),
         transaction: run => db.transaction(run),
       }
+      await writeSignInLockout(store.rootDir, 1000)
       const app = createApiApp({
         db: apiDb,
         store,
         serverSecret: 'burst-test-server-secret-at-least-32-bytes!!',
-        lockoutThreshold: 1000,
       })
       let gateTimeout: ReturnType<typeof setTimeout> | undefined
       let rssSampler: ReturnType<typeof setInterval> | undefined

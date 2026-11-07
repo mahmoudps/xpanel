@@ -96,7 +96,7 @@ describe('V2 account-create capability projection', () => {
     })
 
     it('does not derive create permission from a qualified host in ' + locale, { tags: ['feature'] }, () => {
-      const reseller: Reseller = { id: 'denied-reseller', username: 'partner', acl: [], maxAccounts: 2, totalDiskMb: 1000, totalBandwidthMb: 1000, oversell: false, nameservers: [], delegatedIps: [] }
+      const reseller: Reseller = { id: 'denied-reseller', username: 'partner', acl: [], maxAccounts: 2, totalDiskMb: 1000, totalBandwidthMb: 1000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
       const actor: Principal = { kind: 'reseller', id: reseller.id, username: reseller.username }
       expectCreateClosed(renderV2WhmAccountCreate(v2Messages.translator(locale), { ...createProps, locale, principal: actor, visibility: { principal: actor, reseller }, activeReseller: reseller }))
     })

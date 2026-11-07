@@ -31,7 +31,7 @@ async function fixture(options: { qualifiedGate?: boolean; transport?: boolean; 
   const database = await createTestDb(); cleanup.push(() => database.close())
   const state = await createTestStateStore(); cleanup.push(() => state.close())
   const root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
-  const reseller = await state.store.createReseller({ username: 'securityseller', passwordHash: HASH, acl: ['list-accounts'], maxAccounts: 2, totalDiskMb: 1000, totalBandwidthMb: 1000, oversell: false, nameservers: [], delegatedIps: [] })
+  const reseller = await state.store.createReseller({ username: 'securityseller', passwordHash: HASH, acl: ['list-accounts'], maxAccounts: 2, totalDiskMb: 1000, totalBandwidthMb: 1000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
   await createResellerPrincipal(database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
   const token = async (principalId: string, scopes = ['*']) => {
     const raw = 'xp_' + randomUUID()

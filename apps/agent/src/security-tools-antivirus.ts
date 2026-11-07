@@ -1,9 +1,10 @@
 import { posix } from 'node:path'
 import { fail, msgid } from '@xpanel/core'
 import type { HostJobPlan, HostJobView } from './host-job-contract.ts'
+import type { ScanScope } from '../../../packages/os/src/security-tools-command.ts'
 import type { HostJobRunner } from './host-jobs.ts'
 import type { BinaryPresent, SecurityToolsRun } from './security-tools-intrusion.ts'
-import { CLAMSCAN, CLAMSCAN_VERSION_ARGV, FRESHCLAM, FRESHCLAM_UPDATE_ARGV, clamscanHomeArgv, isAccountUsername, isAntivirusJobCommand, isScanTarget } from '../../../packages/os/src/security-tools-command.ts'
+import { CLAMSCAN, CLAMSCAN_VERSION_ARGV, FRESHCLAM, FRESHCLAM_UPDATE_ARGV, clamscanHomeArgv, clamscanScopedArgv, isAccountUsername, isAntivirusJobCommand, isScanTarget, readScopedScan } from '../../../packages/os/src/security-tools-command.ts'
 
 export type AntivirusJobs = Pick<HostJobRunner, 'list' | 'readLog'>
 export interface ClamavVersion { version: string; signatureVersion: number | null; signatureDate: string | null }
@@ -55,8 +56,7 @@ export function parseClamscanReport(text: string): { target: string | null; summ
   const lines = typeof text === 'string' ? text.split('\n') : []
   const prefix = '$ ' + clamscanHomeArgv('/home/xpanel').slice(0, -1).join(' ') + ' '
   const command = lines.find(line => line.startsWith(prefix))
-  const candidate = command?.slice(prefix.length)
-  const target = isScanTarget(candidate) && command === '$ ' + clamscanHomeArgv(candidate).join(' ') ? candidate : null
+  const target = command === undefined ? null : readScopedScan(command.slice(prefix.length).split(' '))?.target ?? null
   let summaryAt = -1
   for (let index = lines.length - 1; index >= 0; index--) if (lines[index] === SUMMARY) { summaryAt = index; break }
   let summary: ScanSummary | null = null
@@ -83,13 +83,14 @@ export function parseClamscanReport(text: string): { target: string | null; summ
   return { target, summary, infected, matched }
 }
 
-export function buildAntivirusScanPlan(input: { accountId: string; username: string; target: string }): HostJobPlan {
-  const { accountId, username, target } = input
+const WHOLE_HOME: ScanScope = { home: true, mail: true, publicFtp: true, publicWeb: true }
+export function buildAntivirusScanPlan(input: { accountId: string; username: string; target: string; scope?: ScanScope }): HostJobPlan {
+  const { accountId, username, target, scope = WHOLE_HOME } = input
   if (!isAccountUsername(username) || !isScanTarget(target) || posix.basename(target) !== username) return fail('VALIDATION', 'a scan targets exactly one account home', { stateChanged: false })
   return {
-    kind: SCAN_JOB_KIND, summary: 'Antivirus scan of account ' + username, accountId, fingerprint: { username, target }, detail: { username, target },
+    kind: SCAN_JOB_KIND, summary: 'Antivirus scan of account ' + username, accountId, fingerprint: { username, target, scope }, detail: { username, target, scope },
     // clamscan(1) RETURN CODES: 0 no virus found, 1 virus(es) found, 2 error. Exit 1 is a completed scan with findings.
-    steps: [{ id: 'scan', successExitCodes: [1], title: msgid('Scan the account home with ClamAV'), argv: clamscanHomeArgv(target), timeoutMs: 3_600_000, mutates: false }],
+    steps: [{ id: 'scan', successExitCodes: [1], title: msgid('Scan the account home with ClamAV'), argv: clamscanScopedArgv(target, scope), timeoutMs: 3_600_000, mutates: false }],
     policy: isAntivirusJobCommand,
   }
 }

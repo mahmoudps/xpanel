@@ -2,13 +2,15 @@ import { X509Certificate } from 'node:crypto'
 import { lstat, readdir } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { fail } from '@xpanel/core'
+import { effectiveServerFtpSettings, fail } from '@xpanel/core'
+import type { ServerSettings } from '@xpanel/core'
 import { services } from '@xpanel/render'
 import { readHostServices } from './host-services.ts'
 import type { HostServiceStatus } from './host-services.ts'
 import { withPinnedHostTargetParent } from './host-target-parent.ts'
 import { DEFAULT_DNS_ZONE_DIR } from './services/dns.ts'
-import { DEFAULT_PURE_FTPD_CONF_DIR, renderPureFtpdDaemonConfigs } from './services/ftp.ts'
+import { DEFAULT_PURE_FTPD_CONF_DIR, pureFtpdDirectives, renderPureFtpdDaemonConfigs } from './services/ftp.ts'
+import { FTP_CONF_FILE, parsePureFtpdConfFile } from './ftp-server.ts'
 import { PDNS_RPING_ARGV, PDNS_VERSION_ARGV, isServiceDetailZone, pdnsCheckZoneArgv } from '../../../packages/os/src/service-detail-command.ts'
 
 export interface ServiceDetailCommandResult { ok: boolean; code: number; stdout: string; stderr: string }
@@ -26,7 +28,7 @@ export interface ServiceDetailHost {
 export interface ServiceDetailState {
   zones: readonly { name: string; serial: number }[]
   serviceUsers: readonly { services: { ftp: boolean } }[]
-  server: { settings: { hostname: string } } | null
+  server: { settings: { hostname: string } & Pick<ServerSettings, 'ftp'> } | null
 }
 
 export type ZoneFileState = 'parsed' | 'missing' | 'malformed' | 'too-large' | 'not-regular' | 'unreadable' | 'not-read'
@@ -180,19 +182,26 @@ export async function checkDnsZone(input: { run: ServiceDetailRun; zone: string;
   return state === 'unavailable' ? { zone, observedAt, state, records: null, errors: null, warnings: null, messages } : { zone, observedAt, state, records, errors, warnings, messages }
 }
 
-export async function readFtpServiceDetail(input: { host: ServiceDetailHost; readState: () => Promise<ServiceDetailState>; now?: () => Date }): Promise<FtpServiceDetail> {
+export async function readFtpServiceDetail(input: { host: ServiceDetailHost; readState: () => Promise<ServiceDetailState>; family?: 'debian' | 'rhel'; now?: () => Date }): Promise<FtpServiceDetail> {
   const { host } = input, observedAt = (input.now?.() ?? new Date()).toISOString()
   const service = await serviceRow(host.run, 'pure-ftpd'), settings: FtpSettingRow[] = []
-  for (const file of renderPureFtpdDaemonConfigs({})) {
-    const name = file.path.slice(file.path.lastIndexOf('/') + 1), desired = file.content.trim()
-    let content: string | null | undefined
-    try { content = await host.readFile(file.path) } catch { content = undefined }
+  let state: ServiceDetailState | null = null
+  try { state = await input.readState() } catch { state = null }
+  const policy = effectiveServerFtpSettings(state?.server?.settings), row = (name: string, desired: string, content: string | null | undefined): void => {
     const observed = typeof content === 'string' ? text(content, 256) : null
     settings.push({ name, desired, observed, state: content === undefined ? 'unreadable' : observed === null ? 'missing' : observed === desired ? 'match' : 'drift' })
   }
-  let ftpAccounts: number | null = null
-  try { ftpAccounts = (await input.readState()).serviceUsers.filter(user => user.services.ftp === true).length } catch { ftpAccounts = null }
-  return { kind: 'ftp', observedAt, service, confDir: DEFAULT_PURE_FTPD_CONF_DIR, settings, ftpAccounts }
+  if (input.family === 'rhel') {
+    let content: string | null | undefined
+    try { content = await host.readFile(FTP_CONF_FILE) } catch { content = undefined }
+    const parsed = typeof content === 'string' ? parsePureFtpdConfFile(content) : null
+    for (const [name, desired] of pureFtpdDirectives(policy)) row(name, desired, content === undefined ? undefined : parsed?.get(name) ?? null)
+  } else for (const file of renderPureFtpdDaemonConfigs({ settings: policy })) {
+    let content: string | null | undefined
+    try { content = await host.readFile(file.path) } catch { content = undefined }
+    row(file.path.slice(file.path.lastIndexOf('/') + 1), file.content.trim(), content)
+  }
+  return { kind: 'ftp', observedAt, service, confDir: input.family === 'rhel' ? FTP_CONF_FILE : DEFAULT_PURE_FTPD_CONF_DIR, settings, ftpAccounts: state ? state.serviceUsers.filter(user => user.services.ftp === true).length : null }
 }
 
 /** nginx server blocks that listen on `port`, with their ssl_certificate and ssl_certificate_key paths. */
@@ -273,7 +282,7 @@ async function readPanelEndpoint(host: ServiceDetailHost, hostname: string | nul
   return endpoint('observed', null, { ...located, certificate, warnings: warningsFor(certificate, keyPresent, now) })
 }
 
-/** xPanel renders TLS only for the management listeners. Mail and FTP daemons keep their distribution settings, which are not read here. */
+/** Only the management listeners are read here: mail daemons keep their distribution settings and the FTP certificate file holds its private key. */
 export async function readCertificatesServiceDetail(input: { host: ServiceDetailHost; readState: () => Promise<ServiceDetailState>; now?: () => Date }): Promise<CertificatesServiceDetail> {
   const now = input.now?.() ?? new Date()
   let hostname: string | null = null

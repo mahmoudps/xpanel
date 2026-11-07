@@ -23,10 +23,10 @@ const view = (patch: Record<string, unknown> = {}) => ({
     cache: [{ service: 'redis', available: true, version: '7.0.15', binary: '/usr/bin/redis-server', reason: null }, { service: 'memcached', available: false, version: null, binary: null, reason: 'not-installed' }],
     containers: { available: false, version: '4.9.3', reason: 'no-subordinate-ids' } },
   domains: [{ id: DOMAIN, name: 'alice-shop.com' }],
-  apps: [{ name: 'shop', runtime: 'node', root: 'apps/shop', startup: 'server.js', domainId: DOMAIN, path: '/api', env: [{ name: 'TOKEN', value: 'x' }], enabled: true, state: 'running', since: '2026-10-29T01:00:00.000Z', restarts: 0, health: 200, deps: 'succeeded', preflight: [], updatedAt: '2026-10-29T00:00:00.000Z' }],
+  apps: [{ project: null, pythonEnv: null, name: 'shop', runtime: 'node', root: 'apps/shop', startup: 'server.js', domainId: DOMAIN, path: '/api', env: [{ name: 'TOKEN', value: 'x' }], enabled: true, state: 'running', since: '2026-10-29T01:00:00.000Z', restarts: 0, health: 200, deps: 'succeeded', preflight: [], webapp: null, updatedAt: '2026-10-29T00:00:00.000Z' }],
   cache: [{ service: 'redis', enabled: false, memoryMb: null, socket: '/home/alice/.xpanel-cache/redis.sock', state: 'stopped', since: null, memoryBytes: null, updatedAt: null },
     { service: 'memcached', enabled: false, memoryMb: null, socket: '/home/alice/.xpanel-cache/memcached.sock', state: 'stopped', since: null, memoryBytes: null, updatedAt: null }],
-  imageCleanup: 'none', containers: [], ...patch,
+  imageCleanup: 'none', stacks: [], containers: [], ...patch,
 })
 const tick = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const boot = async (html: string, send: (method: string, path: string, body?: unknown) => Promise<unknown>, ask = vi.fn(async () => true)) => {
@@ -124,6 +124,13 @@ describe('account runtime client', () => {
     expect(document.querySelector('[data-runtime-preflight]')!.textContent).toBe('The Python environment .venv is missing. Run Install dependencies.')
   })
 
+  it('lists stacks from the administrator read-only, with a log per service', async () => {
+    const stacks = [{ name: 'shop', app: null, enabled: true, services: [{ name: 'web', image: 'docker.io/library/nginx:1.27', state: 'running', ports: ['127.0.0.1:8080->80/tcp'] }] }]
+    await boot(renderAccountContainersWorkspace({ lang: 'en', canManage: true }), async () => view({ stacks }))
+    const body = document.querySelector('[data-runtime-stacks]')!
+    expect(body.textContent).toContain('web: Running'); expect(body.textContent).toContain('127.0.0.1:8080->80/tcp')
+    expect([...body.querySelectorAll<HTMLElement>('button')].map(button => button.dataset.runtimeRow)).toEqual(['log:ctr'])
+  })
   it('reclaims image space after confirmation and shows the cleanup state', async () => {
     const send = vi.fn(async (method: string) => method === 'GET' ? view({ host: { ...view().host, containers: { available: true, version: '4.9.3', reason: null } }, imageCleanup: 'succeeded' }) : { op: 'container.prune', revision: '2'.repeat(64), changed: false })
     const ask = await boot(renderAccountContainersWorkspace({ lang: 'en', canManage: true }), send)

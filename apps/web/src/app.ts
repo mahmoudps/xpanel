@@ -35,8 +35,15 @@ import {
   type LiveEventState,
 } from './ws-client.ts'
 
-import { findUiThemeAsset, registeredUiThemeIds, resolveUiTheme } from './themes/registry.ts'
-export { findUiThemeAsset, registeredUiThemeIds, resolveUiTheme }
+import { builtInUiTheme, findUiThemeAsset, registerUiThemePackage, registeredUiThemeIds, resolveUiTheme, unregisterUiThemePackage } from './themes/registry.ts'
+import { cloneUiThemePackage, parseUiThemePackage, uiThemePackageTheme, type UiThemePackage } from './themes/packages.ts'
+import type { PersonalHomeFacts } from './account-notices.ts'
+export { builtInUiTheme, findUiThemeAsset, registeredUiThemeIds, resolveUiTheme, unregisterUiThemePackage as removeUiThemePackage }
+export { THEME_PACKAGE_LIMITS, type UiThemePackage } from './themes/packages.ts'
+/** Theme Manager uploads: the package rules check against the registry's built-in themes. */
+export const parseThemePackage = (raw: unknown): UiThemePackage => parseUiThemePackage(raw, builtInUiTheme)
+export const cloneThemePackage = (source: UiThemePackage | string, id: string, name: string): UiThemePackage => cloneUiThemePackage(source, id, name, builtInUiTheme)
+export const installThemePackage = (pkg: UiThemePackage): void => registerUiThemePackage(uiThemePackageTheme(pkg, builtInUiTheme(pkg.base)))
 import type { AuthPersonalSource, ThemePackageView, UnavailableProps, WorkspaceSummaryView } from './themes/contract.ts'
 
 export type WebSurfaceKind = 'login' | 'xwhm' | 'xpanel' | 'xmail'
@@ -52,6 +59,10 @@ export interface WorkspaceSummary {
 export interface WebAppRenderState {
   surface: WebSurfaceKind
   mfaRuntimeMode?: MfaRuntimeMode
+  /** Only the trusted host switch sets this; it shows the banner and opens nothing. */
+  qualificationMode?: boolean
+  /** Root opened this document to preview an installed theme; nothing was chosen or saved. */
+  themePreview?: string
   visibility?: VisibilityContext
   workspaceSummary?: WorkspaceSummary
   catalog?: readonly CatalogTool[]
@@ -59,6 +70,12 @@ export interface WebAppRenderState {
   theme?: ThemeMode
   /** A registry preference, resolved independently from light/dark mode. */
   uiTheme?: string
+  /** Where notices appear, from the signed-in user's saved preferences. */
+  noticePosition?: string
+  /** Saved mailbox preferences the mail clients read from the document root. */
+  mailDateFormat?: 'utc' | 'local'
+  mailReplyIdentity?: string
+  personal?: PersonalHomeFacts
   density?: TableDensity
   title?: string
   activeRoute?: string
@@ -137,7 +154,7 @@ export const workspacePageHeading = (surface: WebSurfaceKind, locale: Locale, ac
 }
 
 export const installedThemePackages = (locale: Locale): readonly ThemePackageView[] => Object.freeze(registeredUiThemeIds().map(id => Object.freeze({
-  id, label: id === 'classic' ? translator(locale)('Classic') : 'V2',
+  id, label: resolveUiTheme(id).label ?? (id === 'classic' ? translator(locale)('Classic') : 'V2'),
   surfaces: Object.freeze(['xpanel', 'xwhm', 'xmail'] as const), available: true,
 })))
 
@@ -215,7 +232,7 @@ export function renderWebApp(state: WebAppRenderState): string {
   const dir = localeDirection(locale)
   const theme: ThemeMode = state.theme === 'dark' ? 'dark' : 'light'
   const density: TableDensity = state.density === 'compact' ? 'compact' : 'comfortable'
-  const uiTheme = resolveUiTheme(state.uiTheme)
+  const uiTheme = resolveUiTheme(state.themePreview ?? state.uiTheme)
   const generationId = state.generationId ?? state.liveState?.reconcile?.generationId ?? 0
 
   const defaultLive = createInitialLiveEventState()
@@ -329,6 +346,7 @@ export function renderWebApp(state: WebAppRenderState): string {
         generationId,
         ...(state.actionState !== undefined && { actionState: state.actionState }),
         ...state.panel,
+        ...(state.personal ? { personal: state.personal } : {}),
         density,
         realtimeEnabled: hasVerifiedSurface && state.realtimeEnabled !== false,
         activeRoute,
@@ -368,6 +386,8 @@ export function renderWebApp(state: WebAppRenderState): string {
         principalKind: securityPrincipal,
         surface: state.surface,
         ...(state.impersonation ? { readOnly: true } : {}),
+        ...(hasVerifiedSurface ? { identityToolsAvailable: true } : {}),
+        ...(state.visibility?.disabledFeatures?.has('security-policy') ? { securityPolicyDisabled: true } : {}),
       },
     })
   }
@@ -397,6 +417,8 @@ export function renderWebApp(state: WebAppRenderState): string {
     locale,
     ...(state.branding ? { branding: state.branding } : {}),
     ...(state.surface !== 'login' && state.impersonation ? { impersonation: state.impersonation } : {}),
+    ...(state.qualificationMode ? { qualificationMode: true } : {}),
+    ...(state.themePreview ? { themePreviewName: uiTheme.label ?? uiTheme.id } : {}),
     handoffControls,
     surfaceHtml: surfaceBodyHtml,
     reconcileHtml: reconcileBannerHtml,
@@ -406,7 +428,7 @@ export function renderWebApp(state: WebAppRenderState): string {
   })
 
   const htmlAttributes = `lang="${locale}" dir="${dir}" data-theme="${theme}" data-density="${density}" data-surface="${state.error ? statusSurface : state.surface}" data-mfa-mode="${state.mfaRuntimeMode === 'disabled' ? 'disabled' : 'optional'}" data-realtime-enabled="${hasVerifiedSurface && state.realtimeEnabled !== false}"`
-  const htmlAttributeSuffix = `${state.error && isStatusCode(state.error.status) ? ` data-status="${state.error.status}"` : ''}${uiTheme.id === 'classic' ? '' : ` data-ui-theme="${escapeHtml(uiTheme.id)}"`}`
+  const htmlAttributeSuffix = `${state.error && isStatusCode(state.error.status) ? ` data-status="${state.error.status}"` : ''}${(uiTheme.baseId ?? uiTheme.id) === 'classic' ? '' : ` data-ui-theme="${escapeHtml(uiTheme.baseId ?? uiTheme.id)}"`}${state.noticePosition ? ` data-notice-position="${escapeHtml(state.noticePosition)}"` : ''}${state.mailDateFormat === 'local' ? ' data-mail-date-format="local"' : ''}${state.mailReplyIdentity ? ` data-mail-reply-identity="${escapeHtml(state.mailReplyIdentity)}"` : ''}`
   return uiTheme.renderDocument({
     viewKind: statusError ? 'status' : state.surface === 'login' ? 'login' : !hasVerifiedSurface ? 'unavailable' : 'workspace',
     ...(state.error ? {} : { route: activeRoute, surface: state.surface }),

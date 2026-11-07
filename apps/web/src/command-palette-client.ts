@@ -138,6 +138,10 @@ export const COMMAND_PALETTE_CLIENT_FUNCTIONS = String.raw`
     commandPalette = { modal: modal, input: input, results: results, empty: empty, status: status, items: items, matches: [], activeIndex: -1, scope: 'all', storageKey: 'xpanel.command-pages.v1.' + surface, history: { favorites: [], recent: [] } };
     loadCommandHistory(commandPalette);
     renderCommandHistory(commandPalette);
+    document.addEventListener('xpanel:favorites-loaded', function (event) {
+      commandPalette.history.favorites = event.detail.filter(function (path) { return items.some(function (item) { return commandPagePath(item) === path; }); });
+      saveCommandHistory(commandPalette); renderCommandHistory(commandPalette);
+    });
     input.addEventListener('input', filterCommandPalette);
     results.addEventListener('pointermove', function (event) {
       var link = event.target.closest ? event.target.closest('a[data-cmdk-item]') : null;
@@ -159,7 +163,9 @@ export const COMMAND_PALETTE_CLIENT_FUNCTIONS = String.raw`
         var found = commandPalette.history.favorites.indexOf(path);
         if (found >= 0) commandPalette.history.favorites.splice(found, 1);
         else commandPalette.history.favorites = commandPalette.history.favorites.concat(path).slice(-12);
-        saveCommandHistory(commandPalette); renderCommandHistory(commandPalette); return;
+        saveCommandHistory(commandPalette); renderCommandHistory(commandPalette);
+        document.dispatchEvent(new CustomEvent('xpanel:favorites-changed', { detail: commandPalette.history.favorites.slice() }));
+        return;
       }
       var link = event.target.closest ? event.target.closest('a[data-cmdk-item], a[data-cmdk-history-page]') : null;
       if (!link || !modal.contains(link)) return;

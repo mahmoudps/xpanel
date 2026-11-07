@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { disabledFunctions, fail, validatePhpFunctionExceptions } from '@xpanel/core'
-import type { Account, Domain, PhpFunctionException, PhpSettings, ServerSettings } from '@xpanel/core'
+import { DEFAULT_FPM, disabledFunctions, fail, validateFpm, validatePhpFunctionExceptions } from '@xpanel/core'
+import type { Account, Domain, Limit, PhpFunctionException, PhpSettings, ServerSettings } from '@xpanel/core'
 import type { AuthenticatedCaller } from './auth.ts'
 
 export interface PhpWorkspaceHelpers {
@@ -19,6 +19,8 @@ export interface PhpManageHelpers {
   agent: (caller: AuthenticatedCaller, path: '/host/php/manage' | '/host/php/manage/preview' | '/host/php/manage/apply', body?: Record<string, unknown>) => Promise<Response>
   listDomains: () => Promise<Domain[]>
   listAccounts: () => Promise<Account[]>
+  /** The PHP worker cap of a domain's plan. */
+  workerCap?: (accountId: string) => Promise<Limit>
   getServerSettings: () => Promise<ServerSettings | null>
   saveServerSettings: (settings: ServerSettings) => Promise<ServerSettings>
   /** Stores one domain's PHP settings; reconcile applies the batch once. */
@@ -44,7 +46,7 @@ export const phpLifecycle = (version: string, now: Date): { state: 'active' | 's
   return { state: day <= dates.activeUntil ? 'active' : day <= dates.securityUntil ? 'security' : 'end-of-life', ...dates }
 }
 
-const PHP_MANAGE_PATHS = ['/api/server/php/manage', '/api/server/php/manage/preview', '/api/server/php/manage/apply', '/api/server/php/default', '/api/server/php/assign', '/api/server/php/exceptions']
+const PHP_MANAGE_PATHS = ['/api/server/php/manage', '/api/server/php/manage/preview', '/api/server/php/manage/apply', '/api/server/php/default', '/api/server/php/assign', '/api/server/php/exceptions', '/api/server/php/domain']
 const EXCEPTION_ROUTE = /^\/api\/server\/php\/exceptions\/([a-z][a-z0-9]{0,15})$/
 /** Content identity of the saved exceptions; grants and revokes are bound to the list the caller read. */
 export const exceptionsRevision = (list: readonly PhpFunctionException[]): string => createHash('sha256').update(JSON.stringify(list)).digest('hex')
@@ -58,6 +60,7 @@ async function readJson(request: Request, fields: readonly string[]): Promise<Re
   return value as Record<string, unknown>
 }
 
+const sameFpm = (fpm: PhpSettings['fpm']): boolean => JSON.stringify(Object.entries(fpm).sort()) === JSON.stringify(Object.entries(DEFAULT_FPM).sort())
 type ManageView = { state: string; revision: string | null; versions: { version: string; fpmInstalled: boolean }[]; installable?: string[] }
 
 export async function handlePhpManageRoute(request: Request, url: URL, method: string, h: PhpManageHelpers): Promise<Response | null> {
@@ -87,7 +90,9 @@ export async function handlePhpManageRoute(request: Request, url: URL, method: s
     const { response, body } = await observe()
     if (!response.ok) return response
     const versions = body.versions.map(item => ({ ...item, lifecycle: phpLifecycle(item.version, now), domainCount: counted(item.version)?.domainCount ?? 0, accountCount: counted(item.version)?.accountCount ?? 0 }))
-    return Response.json({ ...body, versions, installableLifecycle: Object.fromEntries((body.installable ?? []).map(version => [version, phpLifecycle(version, now)])), defaultVersion, usage, exceptions: settings?.phpFunctionExceptions ?? [], exceptionsRevision: exceptionsRevision(settings?.phpFunctionExceptions ?? []) }, { headers: { 'cache-control': 'no-store' } })
+    const owners = new Map(accounts.map(account => [account.id, account.username]))
+    const domainRows = domains.filter(domain => domain.siteType === 'php').map(domain => ({ name: domain.name, account: owners.get(domain.accountId) ?? null, version: domain.php.version, handler: domain.php.handler, inherited: sameFpm(domain.php.fpm), fpm: domain.php.fpm })).sort((left, right) => left.name.localeCompare(right.name)).slice(0, 5000)
+    return Response.json({ ...body, domains: domainRows, versions, installableLifecycle: Object.fromEntries((body.installable ?? []).map(version => [version, phpLifecycle(version, now)])), defaultVersion, usage, exceptions: settings?.phpFunctionExceptions ?? [], exceptionsRevision: exceptionsRevision(settings?.phpFunctionExceptions ?? []) }, { headers: { 'cache-control': 'no-store' } })
   }
 
   if (url.pathname === '/api/server/php/default') {
@@ -131,6 +136,24 @@ export async function handlePhpManageRoute(request: Request, url: URL, method: s
     }
     await h.audit(caller, action, 'account:' + username, { ...preview, ...(granted ? { reason: granted.reason } : {}) })
     return Response.json({ ...preview, exceptions: next, exceptionsRevision: exceptionsRevision(next), stateChanged: true, reconcile: reconcile?.body ?? null }, { headers: { 'cache-control': 'no-store' } })
+  }
+
+  if (url.pathname === '/api/server/php/domain') {
+    const input = await readJson(request, ['domain', 'version', 'fpm', 'expectedRevision'])
+    const { response, body } = await observe()
+    if (!response.ok) return response
+    bound(body, input.expectedRevision)
+    const domain = domains.find(item => item.name === input.domain) ?? fail('NOT_FOUND', 'domain not found', { stateChanged: false })
+    if (domain.siteType !== 'php') return fail('PRECONDITION_FAILED', 'this domain does not run PHP', { stateChanged: false })
+    const version = typeof input.version === 'string' ? input.version : domain.php.version
+    if (!installed(body, version)) return fail('PRECONDITION_FAILED', 'install PHP-FPM for this version before assigning it', { stateChanged: false })
+    // null returns the domain to the server defaults; values outside php-fpm's or the plan's bounds are refused here.
+    const fpm = input.fpm === null ? { ...DEFAULT_FPM } : validateFpm(input.fpm, await h.workerCap?.(domain.accountId) ?? 'unlimited')
+    if (fpm.maxChildren < 1 || fpm.maxChildren > 10000) return fail('VALIDATION', 'max children must be from 1 to 10000', { stateChanged: false })
+    await h.updateDomainPhp(caller, domain, { ...domain.php, version, fpm })
+    const reconcile = await h.reconcile(caller)
+    await h.audit(caller, 'server.php.domain.changed', 'domain:' + domain.name, { version, inherited: input.fpm === null, reconcile: reconcile?.ok ?? null }, reconcile === null || reconcile.ok ? 'ok' : 'failed')
+    return Response.json({ domain: domain.name, version, inherited: input.fpm === null, fpm, stateChanged: true, reconcile: reconcile?.body ?? null }, { headers: { 'cache-control': 'no-store' } })
   }
 
   if (url.pathname === '/api/server/php/assign') {

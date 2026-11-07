@@ -19,7 +19,7 @@ describe('WHM security tools renderer', () => {
     const isolation = renderWhmSecurityToolsWorkspace({ page: 'isolation', locale: 'en', canRead: true, canManage: true })
     expect(isolation).toContain('data-whm-security-tools-rows="checks"')
     expect(isolation).toContain('href="/whm/monitoring/repair?lang=en"')
-    expect(isolation).toContain('This view is read-only.')
+    expect(isolation).toContain('This report compares the user')
     for (const page of pages) {
       const html = renderWhmSecurityToolsWorkspace({ page, locale: 'en', canRead: true, canManage: true })
       expect(html).toContain('dir="ltr"')

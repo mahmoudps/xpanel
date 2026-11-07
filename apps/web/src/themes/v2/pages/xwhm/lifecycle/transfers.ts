@@ -33,8 +33,11 @@ ${fields(input('transfer-host', msgid('Source host or HTTPS API URL'), 'text', '
     + select('transfer-credential', msgid('Stored credential'), 'credential', (props.canRead ? props.credentials ?? [] : []).map(credential => `<option value="${escapeHtml(credential.id)}" data-kind="${credential.kind}">${escapeHtml(credential.label)}</option>`).join(''))
     + input('transfer-port', msgid('SSH port'), 'number', ' min="1" max="65535" value="22"')
     + input('transfer-user', msgid('SSH user'), 'text', ' maxlength="16" value="root"')
-    + input('transfer-fingerprint', msgid('Pinned host key or TLS fingerprint'), 'text', ' maxlength="128"'))}
+    + input('transfer-fingerprint', msgid('Pinned host key or TLS fingerprint'), 'text', ' maxlength="128"')
+    + select('transfer-node', msgid('Linked server'), 'node'))}
+<label class="v2-lifecycle__choice"><input type="checkbox" data-transfer-live checked disabled> ${text(t, msgid('Live transfer: final sync, then cut over'))}</label>
 <p class="v2-muted">${text(t, msgid('Choose a named credential already stored on this server. Source passwords, private keys and raw API tokens are never entered or stored here.'))}</p>
+<p class="v2-muted">${text(t, msgid('A linked server needs no credential here. A live transfer suspends the source account for the final sync, then its sites and mail pass through to this server and its zones point here.'))}</p>
 ${actions(button('create', msgid('Save source review'), true))}
 `, { 'data-whm-detail-section': 'transfer-source' })
 
@@ -65,6 +68,10 @@ ${status(msgctxt('theme:v2', 'No transfer has been started.'), 'execution-note')
 ${status(msgctxt('theme:v2', 'No transfer progress has been read.'), 'progress-state')}
 ${lifecycleTable(t, msgctxt('theme:v2', 'Account transfer progress'), [msgid('Account'), msgid('Home'), msgid('Databases'), msgid('Mail'), msgid('DNS'), msgid('Apply')], { 'data-transfer-progress-rows': true }, msgctxt('theme:v2', 'No transfer progress has been read.'))}
 ${actions(button('run', msgid('Run reviewed transfer'), true) + button('stop', msgid('Stop after the current account')))}
+<h3>${text(t, msgid('Revert a cutover'))}</h3>
+${fields(select('transfer-revert-account', msgid('Moved account'), 'revert-account'))}
+<label class="v2-lifecycle__choice"><input type="checkbox" data-transfer-accept-loss disabled> ${text(t, msgid('Discard what changed here since the cutover'))}</label>
+${actions(button('revert', msgid('Revert cutover')))}
 `)
 
   const importDetails = (key: string, title: string): string => `<details data-transfer-import-part="${key}"><summary>${text(t, title)}</summary>${lifecycleTable(t, title, [msgid('Source'), msgid('Proposed'), msgid('Detail'), msgid('State')], { [`data-transfer-import-${key}`]: true }, msgid('No parsed archive review was returned.'))}</details>`

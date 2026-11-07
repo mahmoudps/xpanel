@@ -75,7 +75,7 @@ const fixture = async () => {
     caps: { addonDomains: 2, aliasDomains: 2, subdomains: 2, mailboxes: 2, forwarders: 2, mailingLists: 2, ftpAccounts: 2, databases: 2, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100,
   })
   await state.store.saveServerIp({ address: '192.0.2.42', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '' })
-  const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: HASH, acl: ['create-account', 'list-accounts', 'edit-account', 'suspend-account', 'terminate-account', 'change-plan'], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: ['192.0.2.42'] })
+  const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: HASH, acl: ['create-account', 'list-accounts', 'edit-account', 'suspend-account', 'terminate-account', 'change-plan'], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: ['192.0.2.42'] })
   const accountInput = { passwordHash: HASH, planId: plan.id, contactEmail: 'owner@example.test', ipv4: '192.0.2.42', shell: 'none' as const,
     php: { version: '8.3', handler: 'fpm' as const, fpm: { mode: 'ondemand' as const, maxChildren: 4, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 100, processIdleTimeoutSec: 10 }, ini: {} },
   }
@@ -313,6 +313,15 @@ describe('real HTTP account mutation security', () => {
     expect(Object.keys(body.serviceUser)).not.toContain('passwordHash')
     expect(Object.keys(body.serviceUser)).not.toContain('password')
     expect(await f.state.store.getServiceUserHash(serviceUser.id) === passwordHash).toBe(true)
+  })
+
+  it('audits a service-user change and the removal of a login without a mailbox', async () => {
+    const serviceUser = await f.state.store.createServiceUser({ accountId: f.account.id, login: 'disk@' + f.account.primaryDomain,
+      passwordHash: '{ARGON2ID}' + HASH, services: { email: false, ftp: false, webdisk: true }, mailboxQuotaMb: 1, ftpDir: 'public_html' })
+    expect((await f.request('PATCH', '/api/service-users/' + serviceUser.id, { webdiskReadOnly: true })).status).toBe(200)
+    expect((await f.request('DELETE', '/api/service-users/' + serviceUser.id)).status).toBe(200)
+    const actions = (await listAudit(f.database.db, { limit: 1000 })).filter(entry => entry.target === 'service-user:' + serviceUser.login).map(entry => entry.action)
+    expect(actions).toEqual(expect.arrayContaining(['service_user.updated', 'service_user.deleted']))
   })
 
   it.each(['missing-body', 'missing', 'empty', 'other-row', 'case-change', 'whitespace', 'wrong-type'])('refuses DELETE %s confirmation with zero lifecycle effects', async condition => {

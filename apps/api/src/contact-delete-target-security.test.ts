@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Account } from '@xpanel/core'
@@ -8,6 +8,8 @@ import type { TestDbHandle } from '@xpanel/db'
 import { createTestStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
 import { sealTotpSecret, sha256Hex } from './auth.ts'
+import { createMemoryDav } from './mail/dav-testkit.ts'
+import type { MemoryDav } from './mail/dav-testkit.ts'
 import { createApiApp, listenApiServer } from './server.ts'
 
 // Public independent Argon2 vector; only fixture API tokens are authenticated here.
@@ -30,15 +32,17 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
   let neighbor: Contact
   let ownerMailbox: string
   let supportMailbox: string
-  let metadataPath: string
+  let dav: MemoryDav
 
-  const request = (actor: Actor | null, path: string, method = 'DELETE', body?: unknown) => fetch(`${baseUrl}${path}`, {
+  // Each account has its own store, so an administrative caller names the mailbox; a mailbox session is the mailbox.
+  const scoped = (actor: Actor | null, path: string): string => !actor || actor === 'mailbox' || !ownerMailbox ? path : path + (path.includes('?') ? '&' : '?') + 'mailbox=' + encodeURIComponent(ownerMailbox)
+  const request = (actor: Actor | null, path: string, method = 'DELETE', body?: unknown) => fetch(`${baseUrl}${scoped(actor, path)}`, {
     method,
     headers: { ...(actor ? { authorization: `Bearer ${tokens[actor]}` } : {}), ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
   const snapshot = async () => {
-    const value = { metadata: await readFile(metadataPath, 'utf8'), state: await state.store.readSnapshot(), audit: await listAudit(db.db) }
+    const value = { metadata: dav.snapshot(), state: await state.store.readSnapshot(), audit: await listAudit(db.db) }
     // Optional private diagnostic capture; ordinary test/CI runs keep fixtures temporary.
     if (evidenceDir) {
       await mkdir(evidenceDir, { recursive: true })
@@ -54,10 +58,10 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
     listener = undefined
     db = await createTestDb()
     state = await createTestStateStore()
-    metadataPath = join(state.rootDir, 'extended/webmail/contacts.json')
+    dav = createMemoryDav({ defaults: true })
     const root = await createRootPrincipal(db.db, { username: 'root', passwordHash: PASSWORD_HASH, forcePasswordChange: false })
     await setTotpSecret(db.db, root.id, sealTotpSecret('JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP', SECRET), [])
-    const reseller = await state.store.createReseller({ username: 'contactreseller', passwordHash: PASSWORD_HASH, acl: ['list-accounts', 'edit-account'], maxAccounts: 5, totalDiskMb: 10000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] })
+    const reseller = await state.store.createReseller({ username: 'contactreseller', passwordHash: PASSWORD_HASH, acl: ['list-accounts', 'edit-account'], maxAccounts: 5, totalDiskMb: 10000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
     await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash: PASSWORD_HASH })
     const feature = await state.store.createFeatureList({ name: 'Contacts', ownerId: null, disabled: [] })
     const plan = await state.store.createPlan({ name: 'Contacts', ownerId: null, featureListId: feature.id,
@@ -81,7 +85,7 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
       return raw
     }
     tokens = { root: await token(root.id, ['*']), reseller: await token(reseller.id, ['webmail:*']), user: await token(user.id, ['webmail:*']), mailbox: await token(user.id, [`mailbox:${inbox.id}`, 'webmail:*']) }
-    listener = await listenApiServer(createApiApp({ db: db.db, store: state.store, serverSecret: SECRET }), { host: '127.0.0.1', port: 0 })
+    listener = await listenApiServer(createApiApp({ db: db.db, store: state.store, serverSecret: SECRET, davExchange: dav.exchange }), { host: '127.0.0.1', port: 0 })
     baseUrl = `http://127.0.0.1:${listener.port}`
     const createContact = async (owner: string, fullName: string): Promise<Contact> => {
       const response = await request('root', '/api/webmail/contacts', 'POST', { owner, fullName, email: `${fullName.toLowerCase()}@example.test` })
@@ -99,7 +103,7 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
     await db?.close()
   })
 
-  it.each(actors)('never deletes B through A export/vCard paths for authorized %s', async actor => {
+  it.each(actors)('never deletes B through A export/vCard paths for authorized %s', { tags: ['slow'] }, async actor => {
     const before = await snapshot()
     for (const suffix of ['export', 'vcard']) {
       for (const selector of ['query', 'body', 'matching', 'absent'] as const) {
@@ -113,7 +117,7 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
     }
   })
 
-  it.each(['reseller', 'user', 'mailbox'] as const)('keeps export/vCard neighbor and missing A private for %s even when B is owned', async actor => {
+  it.each(['reseller', 'user', 'mailbox'] as const)('keeps export/vCard neighbor and missing A private for %s even when B is owned', { tags: ['slow'] }, async actor => {
     const before = await snapshot()
     for (const target of [neighbor.id, randomUUID()]) {
       for (const suffix of ['export', 'vcard']) {
@@ -153,7 +157,7 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
     }
   })
 
-  it('rejects ambiguous, missing, empty and non-string selectors on supported DELETE collection/item routes', async () => {
+  it('rejects ambiguous, missing, empty and non-string selectors on supported DELETE collection/item routes', { tags: ['slow'] }, async () => {
     const before = await snapshot()
     const probes = [
       { path: `/api/webmail/contacts?id=${own.id}`, body: { id: sameAccount.id } },
@@ -173,13 +177,12 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
     }
   })
 
-  it.each(actors)('deletes rightful item A once for %s while preserving same-account B and the neighbor', async actor => {
+  it.each(actors)('deletes rightful item A once for %s while preserving same-account B and the neighbor', { tags: ['slow'] }, async actor => {
     const listed = actor === 'mailbox' ? await (await request(actor, '/api/webmail/contacts', 'GET')).json() as { contacts: Array<{ id: string; revision: string }> } : null
     const expectedRevision = listed?.contacts.find(contact => contact.id === own.id)?.revision
     const response = actor === 'mailbox' ? await request(actor, `/api/webmail/contacts/${own.id}`, 'DELETE', { expectedRevision }) : await request(actor, `/api/webmail/contacts/${own.id}?id=${own.id}`, 'DELETE', { id: own.id })
     expect(response.status).toBe(200)
-    const contacts = JSON.parse(await readFile(metadataPath, 'utf8')) as Contact[]
-    expect(contacts.map(contact => contact.id)).toEqual([sameAccount.id, neighbor.id])
+    expect(dav.contacts().map(contact => contact.id).sort()).toEqual([sameAccount.id, neighbor.id].sort())
     expect((await request(actor, `/api/webmail/contacts/${own.id}`, 'DELETE', actor === 'mailbox' ? { expectedRevision } : undefined)).status).toBe(404)
   })
 
@@ -191,7 +194,7 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
     await expectUnchanged(before)
   })
 
-  it.each(['reseller', 'user', 'mailbox'] as const)('keeps neighboring and nonexistent supported DELETE targets unchanged for %s', async actor => {
+  it.each(['reseller', 'user', 'mailbox'] as const)('keeps neighboring and nonexistent supported DELETE targets unchanged for %s', { tags: ['slow'] }, async actor => {
     const before = await snapshot()
     for (const id of [neighbor.id, randomUUID()]) {
       for (const path of [`/api/webmail/contacts/${id}`, `/api/webmail/contacts?id=${id}`]) {
@@ -202,7 +205,7 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
     }
   })
 
-  it('retains GET export/vCard aliases and the terminal DELETE share action without deleting the contact', async () => {
+  it('retains GET export/vCard aliases and the terminal DELETE share action without deleting the contact', { tags: ['slow'] }, async () => {
     const shared = await request('mailbox', `/api/webmail/contacts/${own.id}/share`, 'POST', { principal: supportMailbox, permission: 'read' })
     expect(shared.status).toBe(200)
     const before = await snapshot()
@@ -213,8 +216,8 @@ describe('contact metadata DELETE target contracts on real local HTTP', () => {
       await expectUnchanged(before)
     }
     expect((await request('mailbox', `/api/webmail/contacts/${own.id}/share`, 'DELETE', { principal: supportMailbox })).status).toBe(200)
-    const contacts = JSON.parse(await readFile(metadataPath, 'utf8')) as Contact[]
-    expect(contacts.map(contact => contact.id)).toEqual([own.id, sameAccount.id, neighbor.id])
-    expect(contacts.find(contact => contact.id === own.id)?.shares).toEqual([])
+    expect(dav.contacts().map(contact => contact.id).sort()).toEqual([own.id, sameAccount.id, neighbor.id].sort())
+    const listed = await (await request('mailbox', '/api/webmail/contacts', 'GET')).json() as { contacts: Contact[] }
+    expect(listed.contacts.find(contact => contact.id === own.id)?.shares).toEqual([])
   })
 })

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fail } from '@xpanel/core'
@@ -8,6 +9,9 @@ import { MAILX_RSPAMD_MILTER, MAILX_SPAMASS_MILTERS, MAILX_SPAMASS_MILTER_UNIT, 
 import type { MailxShowUnit } from '../../../packages/os/src/mailx-command.ts'
 import { isMailxInvalid, mailxMailboxEffects, mailxStatePath, readMailxMailboxSpam, readMailxStored } from './mailx-policy.ts'
 import type { MailxMailboxSpam, MailxRoutingMode } from './mailx-policy.ts'
+import { readBoxTrapperRender } from './boxtrapper-render.ts'
+import { LIST_POLICY_DEFAULTS, listGateHostReady, listGateProgram, listGateRules, listGated, parseListPolicy } from './list-moderation-policy.ts'
+import type { ListPolicy, ListPosting } from './list-moderation-policy.ts'
 
 /**
  * Mail policy inputs the reconciler renders: the spam filter milter in the Postfix main.cf block, one Dovecot
@@ -82,24 +86,47 @@ export async function readMailxMailboxRows(stateRoot: string): Promise<{ rows: M
   }
   return { rows, review }
 }
-export const admitMailxMailboxRows = (rows: readonly MailxMailboxSpam[], snapshot: MailxSnapshot): MailxMailboxSpam[] => rows.filter(row => {
+export const admitMailxMailboxRows = <Row extends Pick<MailxMailboxSpam, 'mailbox' | 'serviceUserId' | 'accountId'>>(rows: readonly Row[], snapshot: MailxSnapshot): Row[] => rows.filter(row => {
   const user = snapshot.serviceUsers.find(item => item.id === row.serviceUserId), account = snapshot.accounts.find(item => item.id === row.accountId)
   return !!user && !!account && account.status === 'active' && user.accountId === row.accountId && user.services.email && user.login.toLowerCase() === row.mailbox
 })
 const accountRef = (account: MailxSnapshot['accounts'][number]): services.AccountRef => ({ username: account.username, uid: account.uid ?? -1, gid: account.gid ?? -1, home: account.home })
 
-/** Sieve policy input for every admitted mailbox whose saved preference blocks senders or files spam into Junk. */
+/** Sieve policy input for every admitted mailbox whose saved preference blocks senders, files spam into Junk or deletes it. */
 export const mailfxSieveInputs = (rows: readonly MailxMailboxSpam[], snapshot: MailxSnapshot): services.MailboxPolicySieveInput[] =>
   admitMailxMailboxRows(rows, snapshot).flatMap(row => {
     const effects = mailxMailboxEffects(row), account = snapshot.accounts.find(item => item.id === row.accountId)!
-    return effects.blocklist || effects.spamBox ? [{ address: row.mailbox, account: accountRef(account), blockedSenders: [...row.blocklist], spamToJunk: effects.spamBox }] : []
+    return effects.blocklist || effects.spamBox || effects.autoDelete ? [{ address: row.mailbox, account: accountRef(account), blockedSenders: [...row.blocklist], spamToJunk: effects.spamBox, ...(effects.autoDelete ? { autoDeleteScore: row.autoDeleteScore } : {}) }] : []
   }).sort((a, b) => a.address.localeCompare(b.address))
+
+/** Plus addressing choice per mailbox from its settings file; foreign-bound or unreadable files render nothing. */
+export async function readMailxPlusFolders(stateRoot: string, snapshot: MailxSnapshot): Promise<Map<string, 'create' | 'existing'>> {
+  const dir = join(stateRoot, 'extended', 'webmail', 'mailbox-settings'), out = new Map<string, 'create' | 'existing'>()
+  const names = await readdir(dir).catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? [] : Promise.reject(error))
+  for (const name of names.filter(item => item.endsWith('.json')).slice(0, 100000)) {
+    const row = await readJsonIfExists<{ mailbox?: unknown; plusFolders?: unknown; ownerAuthority?: { accountId?: unknown; serviceUserId?: unknown } }>(join(dir, name)).catch(() => null)
+    const user = snapshot.serviceUsers.find(item => item.id === row?.ownerAuthority?.serviceUserId)
+    if (user?.services.email && user.accountId === row?.ownerAuthority?.accountId && user.login.toLowerCase() === row?.mailbox && (row.plusFolders === 'create' || row.plusFolders === 'existing')) out.set(row.mailbox, row.plusFolders)
+  }
+  return out
+}
+
+/** Spam policy rows plus plus-addressing choices: one Sieve input per mailbox. */
+export const mergeMailxPlusFolders = (inputs: services.MailboxPolicySieveInput[], plus: ReadonlyMap<string, 'create' | 'existing'>, snapshot: MailxSnapshot): services.MailboxPolicySieveInput[] => {
+  const out = new Map(inputs.map(input => [input.address, input]))
+  for (const [address, plusFolders] of plus) {
+    const user = snapshot.serviceUsers.find(item => item.login.toLowerCase() === address), account = snapshot.accounts.find(item => item.id === user?.accountId)
+    if (!account || account.status !== 'active') continue
+    out.set(address, { ...(out.get(address) ?? { address, account: accountRef(account), blockedSenders: [], spamToJunk: false }), plusFolders })
+  }
+  return [...out.values()].sort((a, b) => a.address.localeCompare(b.address))
+}
 
 /**
  * `routing`: domains the server routing policy sends to a backup or remote exchanger, kept out of local delivery.
  * `submissionTls`: the certificate the server policy chose for the mail-client SMTP ports; absent uses the hostname certificate.
  */
-export interface MailfxRenderInput { spamMilter: string | null; sieve: services.MailboxPolicySieveInput[]; routing?: ReadonlyMap<string, MailxRoutingMode>; submissionTls?: { certFile: string; keyFile: string } }
+export interface MailfxRenderInput { spamMilter: string | null; sieve: services.MailboxPolicySieveInput[]; boxTrapper?: services.BoxTrapperRenderInput; listGateProgram?: string; fts?: boolean; routing?: ReadonlyMap<string, MailxRoutingMode>; submissionTls?: { certFile: string; keyFile: string } }
 /** Saved routing and submission certificate; a policy that needs review is reported by the policy status and never fails a reconcile. */
 async function mailfxServerInput(stateRoot: string, snapshot: MailxSnapshot, now: Date): Promise<Pick<MailfxRenderInput, 'routing' | 'submissionTls'>> {
   const read = async <S extends 'server' | 'routing'>(section: S) => {
@@ -108,34 +135,37 @@ async function mailfxServerInput(stateRoot: string, snapshot: MailxSnapshot, now
   }
   const routing = await read('routing'), id = (await read('server'))?.certificates.submission ?? null
   const cert = id === null ? undefined : snapshot.certificates?.find(item => item.id === id && Date.parse(item.notAfter) > now.getTime())
-  return { ...(routing?.domains.length ? { routing: new Map(routing.domains.map(row => [row.domain, row.mode])) } : {}), ...(cert ? { submissionTls: mailxCertPaths(cert.id) } : {}) }
+  return { ...(routing?.domains.some(row => row.mode !== 'local') ? { routing: new Map(routing.domains.filter(row => row.mode !== 'local').map(row => [row.domain, row.mode])) } : {}), ...(cert ? { submissionTls: mailxCertPaths(cert.id) } : {}) }
 }
 /**
  * Read for each compile. `run` is null before the executor preflight, which keeps the milter off for that first
  * pass; without systemd answers the milter stays off and the Sieve scripts still render.
  */
+// Debian family, then EL; the plugin package may be absent, and Dovecot refuses a configuration that names a missing plugin.
+export const MAILFX_FTS_PLUGINS = ['/usr/lib/dovecot/modules/lib21_fts_xapian_plugin.so', '/usr/lib64/dovecot/lib21_fts_xapian_plugin.so'] as const
 export async function readMailfxRenderInput(stateRoot: string, snapshot: MailxSnapshot, family: OsFamily, run: MailfxRun | null, now = new Date()): Promise<MailfxRenderInput> {
-  return { spamMilter: run ? await mailfxSpamMilter(stateRoot, family, run) : null, sieve: mailfxSieveInputs((await readMailxMailboxRows(stateRoot)).rows, snapshot), ...await mailfxServerInput(stateRoot, snapshot, now) }
+  const spamMilter = run ? await mailfxSpamMilter(stateRoot, family, run) : null, boxTrapper = await readBoxTrapperRender(stateRoot, snapshot, family, spamMilter !== null)
+  return { spamMilter, sieve: mergeMailxPlusFolders(mailfxSieveInputs((await readMailxMailboxRows(stateRoot)).rows, snapshot), await readMailxPlusFolders(stateRoot, snapshot), snapshot), ...(boxTrapper ? { boxTrapper, listGateProgram: await listGateProgram() } : {}), ...(run !== null && MAILFX_FTS_PLUGINS.some(path => existsSync(path)) ? { fts: true } : {}), ...await mailfxServerInput(stateRoot, snapshot, now) }
 }
 
 // ---- mailing lists ------------------------------------------------------------------------
 
-/** Not delivered: `restricted` lists limit posting, which needs a list manager; `conflict` covers used addresses and loops. */
+/** Not delivered: `restricted` lists limit posting on a host without Pigeonhole's external programs; `conflict` covers used addresses and loops. */
 export type MailfxListState = 'pending' | 'disabled' | 'restricted' | 'empty' | 'review' | 'conflict'
 export interface MailfxListRow { id: string; accountId: string | null; address: string; members: number; state: MailfxListState }
-export interface MailfxDeliveredList { accountId: string; address: string; members: string[] }
+export interface MailfxDeliveredList { accountId: string; address: string; members: string[]; gate?: services.ListGateList }
 export interface MailfxForwarding {
   rejects?: readonly { accountId: string; sourceAddress: string; message: string }[]
   forwarders: readonly { accountId: string; sourceAddress: string; destinations: readonly string[] }[]
   domainForwarders: readonly { accountId: string; sourceDomain: string; targetDomain: string }[]
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-const LIST_KEYS = new Set(['id', 'accountId', 'name', 'domain', 'address', 'members', 'moderation', 'archiveEnabled', 'createdAt', 'selfSubscription', 'memberAuthorities'])
+const LIST_KEYS = new Set(['id', 'accountId', 'name', 'domain', 'address', 'members', 'moderation', 'archiveEnabled', 'createdAt', 'selfSubscription', 'memberAuthorities', 'policy'])
 // The tool id and the catalog feature key the plan editor may store (apps/api assertAccountFeatures).
 const LIST_FEATURES = ['mailing-lists', 'Mailing Lists']
 
 /** The saved mailing-list file as written by the list routes; a malformed file needs review before any reconcile. */
-async function readListFile(stateRoot: string): Promise<{ id: string; accountId: string | null; address: string; members: string[]; moderation: string }[]> {
+export async function readListFile(stateRoot: string): Promise<{ id: string; accountId: string | null; address: string; members: string[]; moderation: ListPosting; policy: ListPolicy }[]> {
   const raw = await readJsonIfExists<unknown>(join(stateRoot, 'extended', 'mail', 'mailing-lists.json'))
   if (raw === null) return []
   const bad = (): never => fail('PRECONDITION_FAILED', 'saved mailing lists require review', { stateChanged: false, reason: 'saved_lists_review' })
@@ -146,17 +176,19 @@ async function readListFile(stateRoot: string): Promise<{ id: string; accountId:
     if (typeof row.id !== 'string' || !UUID.test(row.id) || !(row.accountId === null || typeof row.accountId === 'string' && UUID.test(row.accountId)) || typeof row.address !== 'string' || row.address.length > 254
       || typeof row.domain !== 'string' || row.address.split('@')[1] !== row.domain || !Array.isArray(row.members) || row.members.length > 10000 || row.members.some(member => typeof member !== 'string' || member.length > 320)
       || !['open', 'members', 'moderated'].includes(String(row.moderation))) return bad()
-    return { id: row.id, accountId: row.accountId as string | null, address: row.address, members: row.members as string[], moderation: row.moderation as string }
+    let policy = LIST_POLICY_DEFAULTS
+    try { if (row.policy !== undefined) policy = parseListPolicy(row.policy) } catch { return bad() }
+    return { id: row.id, accountId: row.accountId as string | null, address: row.address, members: row.members as string[], moderation: row.moderation as ListPosting, policy }
   })
   return new Set(lists.map(list => list.id)).size === lists.length ? lists : bad()
 }
 
 /**
- * Admits lists in saved order: an open-posting list of an active plan feature, with valid members inside the
- * member limit, on a domain of its account, whose address is free and whose members close no forwarding loop.
+ * Admits lists in saved order: a list of an active plan feature whose posting rules this host can enforce, with valid
+ * members inside the member limit, on a domain of its account, whose address is free and whose members close no forwarding loop.
  * Domain inputs mirror the reconciler's mail section so admission and render agree.
  */
-export async function readMailfxLists(stateRoot: string, snapshot: MailxSnapshot, forwarding: MailfxForwarding): Promise<{ lists: MailfxDeliveredList[]; rows: MailfxListRow[] }> {
+export async function readMailfxLists(stateRoot: string, snapshot: MailxSnapshot, forwarding: MailfxForwarding, gateReady = listGateHostReady()): Promise<{ lists: MailfxDeliveredList[]; rows: MailfxListRow[] }> {
   const saved = await readListFile(stateRoot)
   if (!saved.length) return { lists: [], rows: [] }
   const live = snapshot.accounts.filter(account => account.status !== 'terminating')
@@ -177,7 +209,7 @@ export async function readMailfxLists(stateRoot: string, snapshot: MailxSnapshot
   }
   const rows: MailfxListRow[] = saved.map(list => {
     const owned = list.accountId !== null && live.some(account => account.id === list.accountId) && snapshot.domains.some(domain => domain.accountId === list.accountId && domain.name === list.address.split('@')[1])
-    const state: MailfxListState = !owned ? 'review' : !featureOn(list.accountId!) ? 'disabled' : list.moderation !== 'open' ? 'restricted' : !list.members.length ? 'empty' : 'pending'
+    const state: MailfxListState = !owned ? 'review' : !featureOn(list.accountId!) ? 'disabled' : listGated(list.moderation, list.policy) && !gateReady ? 'restricted' : !list.members.length ? 'empty' : 'pending'
     return { id: list.id, accountId: list.accountId, address: list.address, members: list.members.length, state }
   })
   const candidates = saved.filter((_, index) => rows[index]!.state === 'pending')
@@ -185,13 +217,15 @@ export async function readMailfxLists(stateRoot: string, snapshot: MailxSnapshot
   const lists: MailfxDeliveredList[] = []
   candidates.forEach((list, index) => {
     const row = rows.find(item => item.id === list.id)!, outcome = outcomes[index]
-    if (outcome === 'admitted') lists.push({ accountId: list.accountId!, address: list.address.toLowerCase(), members: services.mailingListTargets(list.members) })
-    else row.state = outcome === 'invalid' ? 'review' : 'conflict'
+    if (outcome !== 'admitted') { row.state = outcome === 'invalid' ? 'review' : 'conflict'; return }
+    const address = list.address.toLowerCase(), account = live.find(item => item.id === list.accountId)!
+    lists.push({ accountId: list.accountId!, address, members: services.mailingListTargets(list.members),
+      ...(listGated(list.moderation, list.policy) ? { gate: { gate: services.listGateAddress(account.id, address), account: accountRef(account), rules: listGateRules(list, account.home) } } : {}) })
   })
   return { lists, rows }
 }
 /** The exact virtual_aliases line the reconciler renders for an admitted list. */
-export const mailfxListAliasLine = (list: MailfxDeliveredList): string => `${list.address}\t${list.members.join(',')}`
+export const mailfxListAliasLine = (list: MailfxDeliveredList): string => `${list.address}\t${list.gate?.gate ?? list.members.join(',')}`
 
 // ---- forwarding configuration --------------------------------------------------------------
 
@@ -205,7 +239,7 @@ export interface MailForwardingConfiguration {
 }
 
 /** The API's extended records are not part of StateSnapshot; never silently omit invalid rows. */
-export const readMailForwardingConfiguration = async (root: string, snapshot: MailxSnapshot): Promise<MailForwardingConfiguration> => {
+export const readMailForwardingConfiguration = async (root: string, snapshot: MailxSnapshot, gateReady = listGateHostReady()): Promise<MailForwardingConfiguration> => {
   const domains = new Map(snapshot.domains.map(domain => [domain.name, domain.accountId]))
   const invalid = (): never => fail('PRECONDITION_FAILED', 'Saved mail forwarding configuration is invalid; review it before reconciliation')
   const list = async (name: string, keys: readonly string[], optional: readonly string[] = []): Promise<Record<string, unknown>[]> => {
@@ -255,6 +289,6 @@ export const readMailForwardingConfiguration = async (root: string, snapshot: Ma
     })
     if (new Set([...forwarders, ...rejects].map(item => item.sourceAddress)).size !== forwarders.length + rejects.length
       || new Set(domainForwarders.map(item => item.sourceDomain)).size !== domainForwarders.length) return invalid()
-    return { forwarders, rejects, domainForwarders, lists: (await readMailfxLists(root, snapshot, { forwarders, rejects, domainForwarders })).lists }
+    return { forwarders, rejects, domainForwarders, lists: (await readMailfxLists(root, snapshot, { forwarders, rejects, domainForwarders }, gateReady)).lists }
   } catch { return invalid() }
 }

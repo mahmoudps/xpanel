@@ -181,6 +181,8 @@ export interface NetworkToolsRouteDeps {
   currentPrincipal(): Promise<{ kind: string; id: string; username: string; accountId: string | null; disabled: boolean } | null>
   /** Absent off a native Linux host: diagnostics are reported unavailable, never synthesized. */
   host: NetworkToolsHost | null
+  /** Root's saved Traceroute setting; only an explicit save turns it off. */
+  traceRouteAllowed(): Promise<boolean>
   now?: () => Date
 }
 const NETWORK_TOOLS_ROUTE = /^\/accounts\/([a-z][a-z0-9]{0,15})\/network-tools\/(dns|ping|traceroute|port)$/
@@ -210,6 +212,7 @@ export async function handleNetworkToolsRoute(req: Request, url: URL, method: st
     return account
   }
   const account = await authorize()
+  if (tool === 'traceroute' && !await deps.traceRouteAllowed()) return fail('FORBIDDEN', 'trace route is turned off on this server', { stateChanged: false, reason: 'traceroute_disabled' })
   if (!deps.host) return fail('PRECONDITION_FAILED', 'network tools are unavailable on this host', { stateChanged: false })
   let outcome: NetworkToolOutcome
   try { outcome = await runNetworkTool(deps.host, request) }

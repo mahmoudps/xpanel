@@ -126,13 +126,15 @@ const pages = registeredThemeDocuments().map(page => {
     surface: page.surface, activeRoute: page.route, locale: 'en', theme: 'light', catalog: qualified, liveState: live,
     visibility: { principal: principals[page.surface], disabledFeatures: new Set() }, ...identity[page.surface],
     ...(['/security/ssl', '/email/forwarders'].includes(page.route) ? { panel: { ...identity.xpanel.panel, domains: [sslDomain] } } : {}),
+    ...(page.route === '/domains/site-settings' ? { panel: { ...identity.xpanel.panel, domains: [sslDomain], activeDomain: sslDomain.name, customConfig: { domainId: sslDomain.id, accountId: sslDomain.accountId, domainName: sslDomain.name, nginxInclude: '', apacheInclude: '', userIni: {}, customHeaders: {}, cacheBypassPaths: [], updatedAt: '', updatedBy: 'user' } } } : {}),
     ...(page.route === '/whm/email/outbound' ? { whm: { mailIpConfig: { mode: 'server-default', defaultIpv4: null, defaultIpv6: null, defaultHelo: null, domainOverrides: [] } } } : {}),
   }
   // Same ownership filter as extensions/account-pages.ts; never infer domains from primaryDomain.
   const accountDomains = (renderState.panel?.domains ?? []).filter(domain => domain.accountId === renderState.panel.account.id)
   const contextFacts = { 'account-domains': accountDomains.length ? 'present' : 'absent' }
   const html = renderWebApp(renderState)
-  const unavailable = html.includes('data-tool-availability="unverified"')
+  // The classic account page wraps its read-only native sections in the same marker; only a page-level marker means unavailable.
+  const unavailable = html.replaceAll('data-classic-native-security data-tool-availability="unverified"', '').includes('data-tool-availability="unverified"')
   const previous = previousRoutes[page.route]
   // A missing mandatory control cannot disappear merely because the renderer omitted it.
   const required = {

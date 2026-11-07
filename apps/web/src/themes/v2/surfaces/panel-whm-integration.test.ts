@@ -37,8 +37,8 @@ describe('complete v2 account surface dispatch', () => {
     expect(html.split(V2_SECURITY_SLOT).length - 1).toBe(activeRoute === '/security/account' ? 1 : 0)
   })
 
-  it.each(['/domains/site-settings', '/software/htaccess'])('preserves core denial for %s without a bounded owner tool', activeRoute => {
-    expect(renderPanel({ ...panel, catalog: catalog.filter(tool => tool.id !== 'domain-htaccess'), activeRoute })).toBe('<section data-core-panel-denied></section>')
+  it.each([['/domains/site-settings', 'manage-domain'], ['/software/htaccess', 'domain-htaccess']])('preserves core denial for %s without a bounded owner tool', (activeRoute, tool) => {
+    expect(renderPanel({ ...panel, catalog: catalog.filter(entry => entry.id !== tool), activeRoute })).toBe('<section data-core-panel-denied></section>')
   })
 
   it('forwards real denied inputs to core without leaking account facts', () => {

@@ -3,6 +3,7 @@ import { posix } from 'node:path'
 import { fail, isXpanelError } from '@xpanel/core'
 import type { Account, FeatureList, Plan } from '@xpanel/core'
 import type { HostJobPlan, HostJobView } from './host-job-contract.ts'
+import type { ScanScope } from '../../../packages/os/src/security-tools-command.ts'
 import { SCAN_FINDINGS_LIMIT, SCAN_JOB_KIND, buildAntivirusScanPlan, readAntivirus } from './security-tools-antivirus.ts'
 import type { AntivirusEngine, AntivirusJobs, ScanFinding, ScanResult, ScanSummary } from './security-tools-antivirus.ts'
 import type { BinaryPresent, SecurityToolsRun } from './security-tools-intrusion.ts'
@@ -70,6 +71,8 @@ export async function readAccountVirusScan(input: { account: Account; run: Secur
 }
 
 export interface AccountVirusScanRouteDeps {
+  /** Saved Antivirus Scanner Configuration for this user; absent scans the whole home. */
+  scanScope?: (home: string, username: string) => Promise<ScanScope | undefined>
   caller: AgentCallerIdentity
   store: { getAccountByUsername(username: string): Promise<Account | null>; withAccountLifecycleLease<T>(accountId: string, operation: (account: Account) => Promise<T>): Promise<T>
     getPlan(id: string): Promise<Plan | null>; getFeatureList(id: string): Promise<FeatureList | null> }
@@ -142,7 +145,8 @@ export async function handleAccountVirusScanRoute(req: Request, url: URL, method
       if (isScanTarget(resolved) && posix.basename(resolved) === fresh.username && facts?.type === 'directory' && facts.uid === fresh.uid) target = resolved
     } catch { target = null }
     if (!target) return fail('PRECONDITION_FAILED', 'the account home is not a directory owned by the account, so it was not scanned', { ...unchanged, reason: 'account_home_unverified' })
-    const plan: HostJobPlan = { ...buildAntivirusScanPlan({ accountId: fresh.id, username: fresh.username, target }), kind: accountScanKind(fresh.id), summary: 'Antivirus scan of account ' + fresh.username + ' requested by its owner' }
+    const scope = await deps.scanScope?.(target, fresh.username)
+    const plan: HostJobPlan = { ...buildAntivirusScanPlan({ accountId: fresh.id, username: fresh.username, target, ...(scope ? { scope } : {}) }), kind: accountScanKind(fresh.id), summary: 'Antivirus scan of account ' + fresh.username + ' requested by its owner' }
     await authorize(fresh)
     try { return await submitJob(plan, caller.actor) } catch (error) {
       if (isXpanelError(error)) throw error

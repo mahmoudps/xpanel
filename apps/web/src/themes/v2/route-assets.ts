@@ -14,6 +14,8 @@ import { PANEL_HTACCESS_CSS } from './pages/xpanel/software/htaccess.ts'
 import { PANEL_ADDITIONAL_CSS } from './pages/xpanel/email-tools/common.ts'
 import { PANEL_UTILITY_CLIENT_CSS } from './pages/xpanel/settings/utility-client-templates.ts'
 import { WHM_OVERVIEW_CSS } from './pages/xwhm/overview/index.ts'
+import { WHM_SERVER_OPS_CSS, WHM_SERVER_OPS_ROUTES } from './pages/xwhm/server/server-ops.ts'
+import { WHM_HOST_TOOLS_CSS, WHM_HOST_TOOLS_ROUTES } from './pages/xwhm/server/host-tools.ts'
 import { WHM_ACCOUNTS_CSS } from './pages/xwhm/accounts/list.ts'
 import { WHM_ACCOUNT_CREATE_CSS } from './pages/xwhm/accounts/create.ts'
 import { HOST_PAGES_CSS } from './pages/xwhm/host/common.ts'
@@ -24,13 +26,17 @@ import { WHM_PLANS_CSS } from './pages/xwhm/plans/common.ts'
 import { WHM_RESELLERS_CSS } from './pages/xwhm/resellers/styles.ts'
 import { WHM_NETWORK_CSS } from './pages/xwhm/domains/common.ts'
 import { WHM_MAIL_CSS } from './pages/xwhm/mail/common.ts'
+import { V2_MAIL_CARD_CSS } from './pages/mail-cards.ts'
 import { WHM_OBSERVATION_CSS } from './pages/xwhm/monitoring/common.ts'
+import { WHM_ACCOUNT_TOOLS_CSS } from './pages/xwhm/account-tools/common.ts'
 import { WHM_RECOVERY_TOOLS_CSS } from './pages/xwhm/recovery-tools/common.ts'
 import { WHM_DATA_COMMON_CSS } from './pages/xwhm/software/common.ts'
 import { WHM_WEB_SERVER_CSS } from './pages/xwhm/service-tools/web.ts'
 import { WHM_SERVER_CSS } from './pages/xwhm/server/styles.ts'
 import { WHM_PANEL_CSS } from './pages/xwhm/panel/styles.ts'
+import { TOOL_CARD_CSS } from './tool-card-view.ts'
 import { WHM_DIAGNOSTIC_CLIENT_CSS } from './pages/xwhm/whm-diagnostic-client-templates.ts'
+import { WHM_SVC_CSS, WHM_SVC_ROUTES } from './pages/xwhm/svc-panels.ts'
 import { V2_MAIL_CSS } from './pages/xmail/styles.ts'
 import { MAIL_WORKSPACES_CSS } from './pages/xmail/workspaces/common.ts'
 import { MAIL_ORGANIZER_CSS } from './pages/xmail/workspaces/organizer.ts'
@@ -57,7 +63,7 @@ const panelSettingsStylesheet = page('xpanel', 'panel-settings', [
   '/preferences', '/preferences/language', '/preferences/users', '/preferences/team',
   '/software/store', '/software/store/app', '/software/store/install', '/software/store/progress',
   '/software/store/installed', '/software/store/updates', '/software/store/error', '/files/web-disk', '/domains/site-settings',
-], PANEL_SETTINGS_CSS)
+], [PANEL_SETTINGS_CSS, TOOL_CARD_CSS])
 
 /** Branding/footer and document slots are shared by all actual views, including login and status. */
 export const v2SharedStylesheets = Object.freeze([createV2Stylesheet('shared-slots', [V2_SLOTS_CSS])])
@@ -70,13 +76,17 @@ export const v2ViewStylesheets = Object.freeze({
 
 /** Shared dynamic fragments load only where the exact selected document owns those fragments. */
 export const v2SupplementalStylesheets: readonly Readonly<V2RouteStylesheet>[] = Object.freeze([
+  page('xwhm', 'whm-server-ops', WHM_SERVER_OPS_ROUTES, WHM_SERVER_OPS_CSS),
+  page('xwhm', 'whm-host-tools', WHM_HOST_TOOLS_ROUTES, WHM_HOST_TOOLS_CSS),
   page('xwhm', 'whm-web-server', ['/whm/services/web'], WHM_WEB_SERVER_CSS),
+  page('xwhm', 'whm-svc-panels', WHM_SVC_ROUTES, WHM_SVC_CSS),
   page('xwhm', 'whm-services', ['/whm/services', '/whm/services/more'], WHM_SERVICES_CSS),
   page('xpanel', 'panel-virus-scan', ['/security/virus-scanner'], PANEL_UTILITY_CLIENT_CSS),
   page('xwhm', 'whm-diagnostics', [
     '/whm/monitoring/health', '/whm/monitoring/limits', '/whm/monitoring/alerts',
     '/whm/monitoring/repair', '/whm/accounts/health',
   ], WHM_DIAGNOSTIC_CLIENT_CSS),
+  page('xwhm', 'whm-account-admin', ['/whm', '/whm/plans/enhancements', '/whm/security/isolation', '/whm/panel/languages'], WHM_ACCOUNT_TOOLS_CSS),
 ])
 
 /** Explicit renderer coverage. A catalog alias alone does not establish an implemented page. */
@@ -84,7 +94,7 @@ export const v2RouteStylesheets: readonly Readonly<V2RouteStylesheet>[] = Object
   page('xpanel', 'panel-home', ['/home'], V2_PANEL_HOME_CSS),
   page('xpanel', 'panel-resources', ['/resources'], V2_PANEL_RESOURCES_CSS),
   page('xpanel', 'panel-email-accounts', ['/email/accounts'], EMAIL_ACCOUNTS_CSS),
-  page('xpanel', 'panel-email-routing', ['/email/forwarders'], EMAIL_ROUTING_CSS),
+  page('xpanel', 'panel-email-routing', ['/email/forwarders'], [EMAIL_ROUTING_CSS, V2_MAIL_CARD_CSS]),
   page('xpanel', 'panel-files', ['/files/manager', '/files/trash', '/files/directory-privacy'], V2_FILES_CSS),
   page('xpanel', 'panel-services', ['/domains/zone-editor', '/security/ssl', '/advanced/cron'], PANEL_SERVICES_CSS),
   page('xpanel', 'panel-databases', [
@@ -98,14 +108,14 @@ export const v2RouteStylesheets: readonly Readonly<V2RouteStylesheet>[] = Object
   page('xpanel', 'panel-operations', [
     '/files/backup', '/files/ftp', '/files/git', '/advanced/terminal',
     '/software/apps', '/software/containers', '/software/cache', '/software/packages',
-  ], PANEL_OPERATIONS_CSS),
+  ], [PANEL_OPERATIONS_CSS, TOOL_CARD_CSS]),
   panelSettingsStylesheet,
   page('xpanel', 'panel-htaccess', ['/software/htaccess'], PANEL_HTACCESS_CSS, [panelSettingsStylesheet.stylesheet]),
   page('xpanel', 'panel-email-observations', [
     '/email/mailing-lists', '/email/filters', '/email/deliverability', '/email/spam-filters',
     '/email/spam-quarantine', '/email/archive', '/email/encryption', '/email/calendars-contacts',
     '/health', '/server-information', '/metrics/traffic', '/metrics/logs', '/metrics/web-stats',
-  ], PANEL_ADDITIONAL_CSS),
+  ], [PANEL_ADDITIONAL_CSS, V2_MAIL_CARD_CSS]),
   page('xwhm', 'whm-overview', ['/whm'], WHM_OVERVIEW_CSS),
   page('xwhm', 'whm-accounts', ['/whm/accounts'], WHM_ACCOUNTS_CSS),
   page('xwhm', 'whm-account-create', ['/whm/accounts/new'], WHM_ACCOUNT_CREATE_CSS),
@@ -124,7 +134,7 @@ export const v2RouteStylesheets: readonly Readonly<V2RouteStylesheet>[] = Object
   page('xwhm', 'whm-mail', [
     '/whm/email/monitor', '/whm/email/queue', '/whm/email/delivery', '/whm/email/outbound', '/whm/email/spam', '/whm/email/quality',
     '/whm/email/routing', '/whm/email/relay', '/whm/email/server', '/whm/email/maintenance', '/whm/email/bcc', '/whm/email/marketing',
-  ], WHM_MAIL_CSS),
+  ], [WHM_MAIL_CSS, V2_MAIL_CARD_CSS]),
   page('xwhm', 'whm-observations', [
     '/whm/monitoring/health', '/whm/monitoring/alerts', '/whm/monitoring/repair', '/whm/monitoring/performance',
     '/whm/monitoring/traffic', '/whm/monitoring/io', '/whm/monitoring/limits', '/whm/monitoring/processes',
@@ -145,8 +155,8 @@ export const v2RouteStylesheets: readonly Readonly<V2RouteStylesheet>[] = Object
     '/whm/software/deployments', '/whm/software/application-projects', '/whm/software/composer',
     '/whm/software/store', '/whm/software/store/extensions', '/whm/software/store/activity',
     '/whm/services/web', '/whm/services/health', '/whm/services/ftp', '/whm/services/dns',
-    '/whm/services/certificates', '/whm/services/ftp-log-analysis', '/whm/services/default-index',
-  ], WHM_DATA_COMMON_CSS),
+    '/whm/services/certificates', '/whm/services/ftp-log-analysis', '/whm/services/default-index', '/whm/services/nginx-proxy',
+  ], [WHM_DATA_COMMON_CSS, TOOL_CARD_CSS]),
   page('xwhm', 'whm-server', [
     '/whm/server/terminal', '/whm/server/file-sharing', '/whm/server/setup', '/whm/server/networking',
     '/whm/server/ips', '/whm/server/trusted-proxies', '/whm/server/cron', '/whm/server/nodes', '/whm/server/role',
@@ -154,14 +164,14 @@ export const v2RouteStylesheets: readonly Readonly<V2RouteStylesheet>[] = Object
   page('xwhm', 'whm-panel', [
     '/whm/panel/settings', '/whm/panel/data', '/whm/panel/branding', '/whm/panel/languages', '/whm/panel/notifications',
     '/whm/panel/integrations', '/whm/panel/whmcs', '/whm/panel/api-tokens', '/whm/panel/developer', '/whm/preferences',
-  ], WHM_PANEL_CSS),
+  ], [WHM_PANEL_CSS, TOOL_CARD_CSS]),
   mailFolderStylesheet,
   page('xmail', 'mail-tools', [
     '/mail/search', '/mail/folders', '/mail/later', '/mail/calendar', '/mail/contacts', '/mail/settings/calendars',
     '/mail/settings/filters', '/mail/settings/spam', '/mail/settings/autoresponder', '/mail/settings/forwarders',
     '/mail/overview', '/mail/tools/disk-usage', '/mail/tools/connect-devices', '/mail/tools/track-delivery',
     '/mail/tools/mailing-lists', '/mail/settings/preferences', '/mail/settings/identities', '/mail/settings/security',
-  ], [MAIL_WORKSPACES_CSS, MAIL_ORGANIZER_CSS], [mailFolderStylesheet.stylesheet]),
+  ], [MAIL_WORKSPACES_CSS, MAIL_ORGANIZER_CSS, V2_MAIL_CARD_CSS], [mailFolderStylesheet.stylesheet]),
 ])
 
 const byRoute = new Map<string, Readonly<V2RouteStylesheet>>()

@@ -74,7 +74,7 @@ const account = { id: ACCOUNT, username: 'alice', uid: 1001, gid: 1001, home: '/
 const domain = { id: 'd', accountId: ACCOUNT, name: 'alice.test', kind: 'primary', parentId: null, docRoot: '/home/alice/public_html', siteType: 'php', upstream: null, redirect: null, php: { version: '8.3' }, wildcard: false, suspended: false } as Domain
 const plan = { id: 'basic', resources: { bandwidthMbMonth: 1 } } as unknown as Plan
 type Window = { since: string; until: string }
-const meter = (files: Record<string, { identity: string; text: string }>, clock = { at: NOW.getTime() }, journals: { mail?: (window: Window) => MailLogObservation; ftp?: (window: Window) => FtpLogObservation } = {}) => {
+const meter = (files: Record<string, { identity: string; text: string }>, clock = { at: NOW.getTime() }, journals: { mail?: (window: Window) => MailLogObservation; ftp?: (window: Window) => FtpLogObservation } = {}, intervalMs?: () => Promise<number>) => {
   let ledger: unknown = null
   const readFrom = vi.fn(async (path: string, offset: number, maxBytes: number): Promise<LogSlice> => {
     const file = files[path]
@@ -86,7 +86,7 @@ const meter = (files: Record<string, { identity: string; text: string }>, clock 
   const readMail = journals.mail ? vi.fn(async (since: string, until: string) => { mailWindows.push({ since, until }); return journals.mail!({ since, until }) }) : null
   const readFtp = journals.ftp ? vi.fn(async (since: string, until: string) => journals.ftp!({ since, until })) : null
   const writeLedger = vi.fn(async (value: BandwidthLedger) => { ledger = structuredClone(value) })
-  const instance = createBandwidthMeter({ onError: error => { throw error }, readState: async () => ({ accounts: [account], domains: [domain], plans: [plan] }), readFrom, readMail, readFtp, readLedger: async () => ledger, writeLedger, now: () => new Date(clock.at) })
+  const instance = createBandwidthMeter({ onError: error => { throw error }, readState: async () => ({ accounts: [account], domains: [domain], plans: [plan] }), readFrom, readMail, readFtp, readLedger: async () => ledger, writeLedger, ...(intervalMs ? { intervalMs } : {}), now: () => new Date(clock.at) })
   return { instance, readFrom, writeLedger, clock, mailWindows, ledger: () => ledger as BandwidthLedger | null }
 }
 
@@ -94,7 +94,20 @@ describe('bandwidth meter', () => {
   const path = edge.nginxAccessLog('alice.test')
   it('reports unavailable before the first collection, never zero', async () => {
     const { instance } = meter({})
-    expect(await instance.report()).toMatchObject({ state: 'unavailable', since: null, accounts: [{ username: 'alice', month: { web: null, mail: null, ftp: null }, totalBytes: null, limitState: 'unmeasured', enforced: false, limited: false }] })
+    expect(await instance.report()).toMatchObject({ state: 'unavailable', since: null, accounts: [{ username: 'alice', month: { web: null, mail: null, ftp: null }, totalBytes: null, limitState: 'unmeasured', enforced: false, limited: false, customLimit: false, reliefThrough: null }] })
+  })
+  it('spaces collections by the saved interval, keeps the shortest spacing over a backlog and survives an unreadable setting', async () => {
+    const saved = vi.fn(async () => 30 * 60_000)
+    const small = meter({ [path]: { identity: '1:10', text: line('2026-10-28T01:00:00Z', 1000) } }, undefined, {}, saved)
+    await small.instance.collect(); expect(small.writeLedger).toHaveBeenCalledTimes(1)
+    small.clock.at += BANDWIDTH_INTERVAL_MS; await small.instance.collect(); expect(small.writeLedger).toHaveBeenCalledTimes(1)
+    small.clock.at += 25 * 60_000; await small.instance.collect(); expect(small.writeLedger).toHaveBeenCalledTimes(2)
+    await small.instance.collect(true); expect(small.writeLedger).toHaveBeenCalledTimes(3)
+    const busy = meter({ [path]: { identity: '1:10', text: line('2026-10-28T01:00:00Z', 1000).repeat(Math.ceil(2 * BANDWIDTH_SITE_READ_BYTES / line('2026-10-28T01:00:00Z', 1000).length)) } }, undefined, {}, saved)
+    await busy.instance.collect(); expect(busy.ledger()!.pendingBytes).toBeGreaterThan(0)
+    busy.clock.at += BANDWIDTH_INTERVAL_MS; await busy.instance.collect(); expect(busy.writeLedger).toHaveBeenCalledTimes(2)
+    const unread = meter({}, undefined, {}, async () => { throw new Error('unreadable') })
+    await unread.instance.collect(); unread.clock.at += BANDWIDTH_INTERVAL_MS; await unread.instance.collect(); expect(unread.writeLedger).toHaveBeenCalledTimes(2)
   })
   it('counts incrementally, rate-limits collections and restarts a rotated log at zero', async () => {
     const files = { [path]: { identity: '1:10', text: line('2026-10-28T01:00:00Z', 1000) } }
@@ -152,6 +165,25 @@ describe('bandwidth meter', () => {
     expect(ledger()?.journals.mail).toMatchObject({ state: 'unavailable', since: null, next: null })
     expect(mailWindows).toHaveLength(2)
   })
+  it('counts the last lines of a rotated copy before the new file, so no line is lost or counted twice', async () => {
+    const files: Record<string, { identity: string; text: string }> = { [path]: { identity: '1:10', text: line('2026-10-28T01:00:00Z', 10) } }
+    const { instance, ledger } = meter(files)
+    await instance.collect(true)
+    // log-rotation.ts renamed the counted file; nginx wrote one more line to it, then reopened a new one
+    files[path + '.1'] = { identity: '1:10', text: files[path]!.text + line('2026-10-28T01:01:00Z', 20) }
+    delete files[path]
+    await instance.collect(true)
+    // the new file is not there yet: the cursor stays on the copy, so putting it back resumes, never restarts
+    expect(ledger()?.cursors[path]).toMatchObject({ identity: '1:10', offset: Buffer.byteLength(files[path + '.1']!.text) })
+    expect(web(ledger()!)?.sentBytes).toBe(30)
+    files[path] = { identity: '1:11', text: line('2026-10-28T01:02:00Z', 40) }
+    await instance.collect(true)
+    expect(web(ledger()!)).toMatchObject({ count: 3, sentBytes: 70 })
+    expect(ledger()?.cursors[path]).toMatchObject({ identity: '1:11' })
+    // a copy the cursor no longer follows is already counted and is never read again
+    await instance.collect(true)
+    expect(web(ledger()!)?.sentBytes).toBe(70)
+  })
   it('marks a missing site log unmeasured and drops months outside the kept window', async () => {
     const { instance, ledger } = meter({})
     await instance.collect()
@@ -172,7 +204,7 @@ describe('bandwidth meter', () => {
     const store = { data: null as unknown, broken: false, read: async () => store.data, write: async (value: unknown) => { if (store.broken) throw new Error('disk full'); store.data = structuredClone(value) } }
     const start = (engine: WebsiteAnalyticsEngine) => createBandwidthMeter({ onError: error => { throw error }, readState: async () => ({ accounts: [account], domains: [domain], plans: [plan] }), readMail: null, readFtp: null,
       now: () => new Date(clock.at), readLedger: async () => ledger, writeLedger: async value => { ledger = structuredClone(value) },
-      readFrom: async (file, offset, maxBytes) => { const all = Buffer.from(files[file]!.text), from = Math.min(offset, all.length); return { exists: true, identity: files[file]!.identity, sizeBytes: all.length, start: from, bytes: all.subarray(from, from + maxBytes) } },
+      readFrom: async (file, offset, maxBytes) => { if (!files[file]) return { exists: false, identity: null, sizeBytes: 0, start: 0, bytes: Buffer.alloc(0) }; const all = Buffer.from(files[file]!.text), from = Math.min(offset, all.length); return { exists: true, identity: files[file]!.identity, sizeBytes: all.length, start: from, bytes: all.subarray(from, from + maxBytes) } },
       webAnalytics: { load: () => engine.load(), save: day => engine.save(day), ingestSiteLog: chunk => { chunks.push(chunk); return engine.ingestSiteLog(chunk) } } })
     const hour = (engine: WebsiteAnalyticsEngine) => engine.queryDomainSnapshot(domain, { window: '1h', now: new Date(clock.at) }).totals
     const refused = (read: () => unknown): unknown => { try { read(); return null } catch (error) { return (error as { detail?: { reason?: unknown } }).detail?.reason } }
@@ -211,7 +243,7 @@ describe('bandwidth meter', () => {
 })
 
 describe('bandwidth enforcement', () => {
-  const ROW: Omit<BandwidthReport['accounts'][number], 'username'> = { domain: 'x.test', status: 'active', month: { web: null, mail: null, ftp: null }, totalBytes: 2000, limitBytes: 1000, usedPercent: 200, limitState: 'over', enforced: true, limited: false }
+  const ROW: Omit<BandwidthReport['accounts'][number], 'username'> = { domain: 'x.test', status: 'active', month: { web: null, mail: null, ftp: null }, totalBytes: 2000, limitBytes: 1000, usedPercent: 200, limitState: 'over', enforced: true, limited: false, customLimit: false, reliefThrough: null }
   const report = (rows: Partial<typeof ROW & { username: string }>[], month = '2026-10'): BandwidthReport => ({ state: 'partial', month, since: NOW.toISOString(), updatedAt: NOW.toISOString(),
     sources: { web: { state: 'read', since: null }, mail: { state: 'unavailable', since: null }, ftp: { state: 'unavailable', since: null } }, pendingBytes: 0, unavailableSites: 0, skippedLines: 0,
     accounts: rows.map(row => ({ ...ROW, username: 'alice', ...row })) })
@@ -241,6 +273,12 @@ describe('bandwidth enforcement', () => {
     expect((await run({ report: report([{ limitState: 'unlimited', limitBytes: null, usedPercent: null }]), account: thisMonth })).audit).toHaveBeenCalledWith(expect.objectContaining({ detail: expect.objectContaining({ reason: 'limit-raised' }) }))
     expect((await run({ report: report([{}]), account: thisMonth, enforce: false })).audit).toHaveBeenCalledWith(expect.objectContaining({ detail: expect.objectContaining({ reason: 'enforcement-off' }) }))
     expect((await run({ report: report([{ limitState: 'unmeasured', totalBytes: null, usedPercent: null }]), account: thisMonth })).setLimits).not.toHaveBeenCalled()
+  })
+  it('does not limit an account relieved through today and lifts a limit the relief covers', async () => {
+    expect((await run({ report: report([{}]), account: { bandwidthReliefDate: '2026-10-28' } })).setLimits).not.toHaveBeenCalled()
+    expect((await run({ report: report([{}]), account: { bandwidthReliefDate: '2026-10-27' } })).setLimits).toHaveBeenCalledWith([{ accountId: ACCOUNT, month: '2026-10' }], 7)
+    const lifted = await run({ report: report([{}]), account: { bandwidthReliefDate: '2026-10-28', bandwidthLimitedMonth: '2026-10' } })
+    expect(lifted.audit).toHaveBeenCalledWith(expect.objectContaining({ action: 'account.bandwidth_limit_lifted', detail: expect.objectContaining({ reason: 'relieved' }) }))
   })
   it('audits a failed revision-bound write and leaves the edge unchanged', async () => {
     const failed = await run({ report: report([{}]), failWrite: true })

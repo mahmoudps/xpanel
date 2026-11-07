@@ -26,13 +26,13 @@ export function preferenceFields(value: unknown): MailboxPreferenceFields {
   return { density: record.density as MailboxPreferenceFields['density'], messagesPerPage: record.messagesPerPage as MailboxPreferenceFields['messagesPerPage'], replyIdentityId: record.replyIdentityId as string | null, dateFormat: record.dateFormat as MailboxPreferenceFields['dateFormat'] }
 }
 
-/** Strict reader: the sealed mailbox's own record without ownership internals, saved-only application. */
+/** Strict reader: the sealed mailbox's own record without ownership internals; the next document applies it. */
 export function readMailboxPreferences(value: unknown, mailbox: string): MailboxPreferencesSnapshot {
   const bad = (): never => { throw new Error('invalid_mailbox_preferences') }
   const object = (item: unknown, keys: string[]): Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item) && Object.keys(item).length === keys.length && keys.every(key => key in item) ? item as Record<string, unknown> : bad()
   const record = object(value, Object.keys(value ?? {}).includes('stateChanged') ? ['context', 'preferences', 'revision', 'identities', 'plusAddressing', 'application', 'review', 'stateChanged'] : ['context', 'preferences', 'revision', 'identities', 'plusAddressing', 'application', 'review'])
   const context = object(record.context, ['mailbox']), application = object(record.application, ['status', 'applied']), plus = object(record.plusAddressing, ['state', 'delimiter', 'source'])
-  if (context.mailbox !== mailbox || typeof record.revision !== 'string' || !/^[0-9a-f]{64}$/.test(record.revision) || application.status !== 'saved_only' || application.applied !== false
+  if (context.mailbox !== mailbox || typeof record.revision !== 'string' || !/^[0-9a-f]{64}$/.test(record.revision) || application.status !== 'applied_on_next_load' || application.applied !== true
     || !(record.review === null || record.review === 'mailbox_metadata_binding_unverified') || !Array.isArray(record.identities) || record.identities.length > 200
     || plus.source !== 'rendered-postfix-local-delivery' || !['supported', 'not-supported', 'unknown'].includes(plus.state as string)
     || (plus.state === 'supported' ? typeof plus.delimiter !== 'string' || !/^[!-~]{1,8}$/.test(plus.delimiter) : plus.delimiter !== null)) return bad()

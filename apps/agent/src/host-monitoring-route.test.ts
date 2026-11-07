@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fail, isXpanelError } from '@xpanel/core'
-import { MONITORING_PS_ARGV } from '../../../packages/os/src/monitoring-command.ts'
+import { MONITORING_PS_ARGV, MONITORING_PS_UNIT_ARGV } from '../../../packages/os/src/monitoring-command.ts'
 import { handleHostMonitoringRoute } from './host-monitoring-route.ts'
 import type { HostMonitoringCaller, HostMonitoringRouteContext } from './host-monitoring-route.ts'
 
@@ -12,6 +12,7 @@ const context = (overrides: Partial<HostMonitoringRouteContext> = {}) => {
   let reads = 0
   const run = vi.fn(async (argv: string[]) => {
     if (argv.join(' ') === MONITORING_PS_ARGV.join(' ')) return { ok: true, stdout: reads++ ? PS.split('\n')[0]! : PS, stderr: '' }
+    if (argv.join(' ') === MONITORING_PS_UNIT_ARGV.join(' ')) return { ok: true, stdout: '', stderr: '' }
     if (argv[0] === '/usr/bin/kill' || argv[0] === '/usr/bin/journalctl') return { ok: true, stdout: '', stderr: '' }
     return { ok: false, stdout: '', stderr: '' }
   })
@@ -84,5 +85,24 @@ describe('host monitoring agent route', () => {
     const audit = vi.fn(async (entry: { action: string }) => { if (entry.action === 'host.process.signal') throw new Error('db') })
     const { ctx } = context({ audit })
     expect(await refusal(call('/host/monitoring/processes/signal', ctx, post(body)))).toEqual(['SERVICE_UNAVAILABLE', true])
+  })
+  it('sweeps one saved account under root only, audited before the first signal', async () => {
+    const sweep = { username: 'alice', killConfirmed: true }
+    const { ctx, run, audit } = context({ sleep: async () => {} })
+    const response = (await call('/host/monitoring/processes/kill-user', ctx, post(sweep)))!
+    expect(await response.json()).toMatchObject({ state: 'confirmed', username: 'alice', signalled: 1, remaining: 0 })
+    expect(audit.mock.calls.map(([entry]) => [entry.action, entry.outcome])).toEqual([['host.process.kill_user_requested', 'ok'], ['host.process.kill_user', 'ok']])
+    expect(run.mock.calls.filter(([argv]) => argv[0] === '/usr/bin/kill').map(([argv]) => argv.slice(2))).toEqual([['KILL', '4242']])
+    for (const username of ['root', 'www-data', 'xpanel']) {
+      const refused = context()
+      expect(await refusal(call('/host/monitoring/processes/kill-user', refused.ctx, post({ username, killConfirmed: true })))).toEqual(['FORBIDDEN', false])
+      expect(refused.run).not.toHaveBeenCalled(); expect(refused.audit).not.toHaveBeenCalled()
+    }
+    const demoted = context({ reauthenticate: async () => ({ ...root, role: 'user' }) })
+    expect(await refusal(call('/host/monitoring/processes/kill-user', demoted.ctx, post(sweep)))).toEqual(['FORBIDDEN', false])
+    expect(demoted.run.mock.calls.some(([argv]) => argv[0] === '/usr/bin/kill')).toBe(false)
+    expect(await refusal(call('/host/monitoring/processes/kill-user', context().ctx, post({ username: 'alice' })))).toEqual(['VALIDATION', false])
+    const { run: _run, ...bare } = context().ctx
+    expect(await refusal(call('/host/monitoring/processes/kill-user', bare, post(sweep)))).toEqual(['PRECONDITION_FAILED', false])
   })
 })

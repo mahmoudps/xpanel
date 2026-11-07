@@ -2,7 +2,7 @@
 // count quota, Pigeonhole Sieve). Mail is stored in the owning account's home and
 // written with the account uid, so the account's disk quota covers it.
 import type { Certificate, ConfigTest, HostAction, Limit, OsProfile, RenderedFile } from '@xpanel/core'
-import { MAX_ACCOUNT_UID, MIN_ACCOUNT_UID, isUnlimited } from '@xpanel/core'
+import { MAX_ACCOUNT_UID, MIN_ACCOUNT_UID, formatCidr, isUnlimited, parseCidr } from '@xpanel/core'
 import { DEFAULT_TTL, validateRecord, type ZoneRecord } from './dns.ts'
 import { certFiles, coversHost } from './tls.ts'
 import {
@@ -34,6 +34,8 @@ export interface MailboxInput {
   quotaMb: Limit
   /** passdb nologin: IMAP/POP/SMTP-AUTH refused, delivery continues */
   suspendLogin?: boolean
+  /** a live transfer moved the mailbox: logins pass through to this address with the same password, which replaces nologin */
+  proxyHost?: string
   /** RCPT rejected at SMTP time */
   suspendIncoming?: boolean
 }
@@ -61,11 +63,13 @@ export interface MailDomainInput {
   defaultAddress?: DefaultAddress
   /** cPanel domain forwarder: unmatched local parts go to the same local part at this domain; wins over defaultAddress */
   domainForward?: string
+  /** a live transfer moved the domain; see MailboxInput.proxyHost */
+  proxyHost?: string
   /** core suspensionEffects 'mail-login': 'denied' turns every mailbox of the domain to nologin */
   login?: 'allowed' | 'denied'
   /** core suspensionEffects 'mail-delivery': 'defer' answers 450 for the whole domain so senders retry */
   delivery?: 'accept' | 'defer'
-  /** Plain distribution lists: the list address fans out to every member through virtual_alias_maps. */
+  /** Distribution lists: the list address fans out to every member through virtual_alias_maps, or reaches its hidden gate user. */
   lists?: MailingListInput[]
   /** hidden autoresponder users (mail-autoreply.ts): delivered to only through aliases, smtpd refuses them from outside */
   internal?: boolean
@@ -74,6 +78,8 @@ export interface MailDomainInput {
 export interface MailingListInput {
   local: string
   members: string[]
+  /** hidden user that checks posts and fans out itself (list-gate.ts) */
+  gate?: string
 }
 
 export const MAX_FORWARD_TARGETS = 50
@@ -128,7 +134,8 @@ export const dovecotPasswdLine = (account: AccountRef, domain: string, m: Mailbo
   const local = normalizeMailboxLocal(m.local, 'mailbox')
   const hash = assertDovecotHash(m.passwordHash)
   const extra = [`userdb_mail=maildir:~/mail/${d}/${local}`, `userdb_quota_rule=*:storage=${quotaRuleValue(m.quotaMb)}`]
-  if (m.suspendLogin) extra.push('nologin=y', 'reason=suspended')
+  if (m.proxyHost) extra.push('proxy=y', `host=${canonicalIpv4(m.proxyHost, 'mail proxy host')}`, 'starttls=any-cert')
+  else if (m.suspendLogin) extra.push('nologin=y', 'reason=suspended')
   return `${local}@${d}:${hash}:${a.uid}:${a.gid}::${a.home}::${extra.join(' ')}`
 }
 
@@ -152,7 +159,7 @@ export const dovecotPasswdFile = (os: OsProfile, input: MailDomainInput, o: Dove
   if (login !== 'allowed' && login !== 'denied') return invalid('mail login state', login, 'must be allowed or denied')
   const seen = new Set<string>()
   const lines = input.mailboxes.map((m) => {
-    const line = dovecotPasswdLine(input.account, domain, login === 'denied' ? { ...m, suspendLogin: true } : m)
+    const line = dovecotPasswdLine(input.account, domain, { ...m, ...(login === 'denied' ? { suspendLogin: true } : {}), ...(input.proxyHost ? { proxyHost: input.proxyHost } : {}) })
     const user = line.slice(0, line.indexOf(':'))
     if (seen.has(user)) invalid('mailbox', user, 'is listed twice')
     seen.add(user)
@@ -275,7 +282,8 @@ const domainMaps = (input: MailDomainInput): DomainMaps => {
   for (const l of input.lists ?? []) {
     const src = `${normalizeMailboxLocal(l.local, 'mailing list')}@${domain}`
     if (mailboxes.has(src) || aliases.has(src) || access.has(src)) invalid('mailing list', src, 'uses an address that is already a mailbox or forwarder')
-    aliases.set(src, mailingListTargets(l.members).join(','))
+    const targets = mailingListTargets(l.members)
+    aliases.set(src, l.gate === undefined ? targets.join(',') : targetsOf(`mailing list ${src}`, [l.gate]).join(','))
     senders.set(src, owners.length ? owners.join(',') : NO_SENDER)
   }
   const def = input.defaultAddress ?? { kind: 'reject' }
@@ -411,6 +419,8 @@ export const renderPostfixMaps = (os: OsProfile, domains: MailDomainInput[], o: 
     new Map(all.flatMap((d) => [...pick(d).entries()]))
   const transport = new Map<string, string>()
   if (all.some((d) => d.discards)) transport.set(DISCARD_DOMAIN, 'discard:default-address')
+  // a moved domain stays hosted here for address checks, and its accepted mail goes straight to the destination without an MX lookup
+  for (const d of domains) if (d.proxyHost) transport.set(normalizeHostname(d.domain), `smtp:[${canonicalIpv4(d.proxyHost, 'mail proxy host')}]:25`)
   const group = assertGroupName(o.postfixGroup ?? 'postfix')
   const header = (what: string): string => `# managed by xPanel: ${what}\n`
   const file = (path: string, what: string, entries: Map<string, string>): RenderedFile => ({
@@ -451,6 +461,22 @@ export interface PostfixMainOptions extends PostfixOptions {
   outbound?: { senderMap: string; master: string }
   /** Spam filter milter listed after OpenDKIM, e.g. the rspamd proxy `inet:localhost:11332`; absent lists OpenDKIM only. */
   spamMilter?: string
+  /** Remote SMTP servers exempt from the connection and rate limits; mynetworks (relay permission) is unchanged. Absent leaves the Postfix default. */
+  limitExceptions?: readonly string[]
+  /** The Mail server policy page's own smtpd_client_event_limit_exceptions value, kept ahead of the remote servers. */
+  limitPolicy?: string
+  /** The saved server host name, Postfix's primary name (the distribution package freezes the install-time name in main.cf). */
+  hostname?: string
+}
+
+/**
+ * The one owner of smtpd_client_event_limit_exceptions: $mynetworks, then the mail policy's own entries, then the remote SMTP
+ * servers not already listed, each once in a stable order. Both the reconcile and the mail policy apply render it here.
+ */
+export const renderClientLimitExceptions = (policy: string | undefined, remote: readonly string[]): string => {
+  const listed = ['$mynetworks']
+  for (const item of [...(policy ?? '').split(/[\s,]+/), ...remote]) if (item && !listed.includes(item)) listed.push(item)
+  return listed.join(', ')
 }
 
 const OPENDKIM_MILTER = 'local:opendkim/opendkim.sock'
@@ -525,6 +551,11 @@ export const postfixMainSettings = (os: OsProfile, o: PostfixMainOptions = {}): 
     settings.smtpd_tls_auth_only = 'yes'
   }
   // texthash reads the rendered file itself, so no postmap run or DB library is needed for it
+  if (o.limitExceptions || o.limitPolicy !== undefined) {
+    const remote = (o.limitExceptions ?? []).map(item => { const cidr = parseCidr(item); if (!cidr) throw new Error('remote SMTP server must be an address or network'); return formatCidr(cidr) })
+    settings.smtpd_client_event_limit_exceptions = renderClientLimitExceptions(o.limitPolicy, remote)
+  }
+  if (o.hostname) settings.myhostname = assertNoControl('myhostname', o.hostname)
   if (o.outbound) settings.sender_dependent_default_transport_maps = `texthash:${assertAbsPath('sender transport map', o.outbound.senderMap)}`
   return settings
 }
@@ -629,7 +660,7 @@ export const replaceManagedBlock = (existing: string, body: string): string => {
  */
 export const localDeliveryMainBlock = (os: OsProfile, o: PostfixMainOptions = {}): string => {
   const settings: Record<string, string> = { ...postfixMainSettings(os, o), smtpd_sasl_auth_enable: 'no' }
-  const keys: string[] = [...LOCAL_DELIVERY_KEYS, ...(o.tls ? TLS_KEYS : []), ...(o.outbound ? ['sender_dependent_default_transport_maps'] : [])]
+  const keys: string[] = [...LOCAL_DELIVERY_KEYS, ...(o.hostname ? ['myhostname'] : []), ...(o.tls ? TLS_KEYS : []), ...(o.outbound ? ['sender_dependent_default_transport_maps'] : [])]
   return keys.map((key) => `${key} = ${settings[key]}`).join('\n')
 }
 
@@ -1309,6 +1340,15 @@ export const sieveFile = (account: AccountRef, address: string, script: string):
   }
 }
 
+export const BOXTRAPPER_BIN_DIR = '/usr/local/sbin/xpanel-sieve-execute'
+// Global only: a mailbox's own script cannot name these programs.
+const BOXTRAPPER_SIEVE_SETTINGS = `  sieve_plugins = sieve_extprograms
+  sieve_global_extensions = +vnd.dovecot.execute
+  sieve_execute_bin_dir = ${BOXTRAPPER_BIN_DIR}
+  sieve_execute_input_eol = lf
+  sieve_execute_exec_timeout = 30s
+`
+
 /** Root-owned before-scripts, one per mailbox: `<dovecotDir>/xpanel/sieve/<domain>/<local>.sieve`. */
 export const mailboxPolicySieveDir = (os: OsProfile): string => `${assertAbsPath('dovecot dir', os.paths.dovecotDir)}/xpanel/sieve`
 
@@ -1318,7 +1358,7 @@ export const mailboxPolicySieveDir = (os: OsProfile): string => `${assertAbsPath
  * has no before-script, which Pigeonhole skips. fileinto in the policy script cancels the implicit keep,
  * so spam and blocked senders end the sequence before the mailbox's filters or autoresponder run.
  */
-export const renderDovecotSieveConf = (os: OsProfile): RenderedFile => ({
+export const renderDovecotSieveConf = (os: OsProfile, execute = false): RenderedFile => ({
   path: `${assertAbsPath('dovecot dir', os.paths.dovecotDir)}/conf.d/95-xpanel-sieve.conf`,
   content: `# managed by xPanel: Sieve during delivery, mailbox spam policy before the mailbox's own filters
 protocol lmtp {
@@ -1328,12 +1368,13 @@ protocol lmtp {
 plugin {
   sieve = file:~/mail/%Ld/%Ln/sieve;active=~/mail/%Ld/%Ln/.dovecot.sieve
   sieve_before = ${mailboxPolicySieveDir(os)}/%Ld/%Ln.sieve
+  sieve_before2 = ${mailboxPolicySieveDir(os)}/%Ld/%Ln.boxtrapper.sieve
   sieve_extensions = +vacation-seconds
   sieve_max_script_size = 1M
   sieve_max_actions = 32
   sieve_max_redirects = ${MAX_SIEVE_REDIRECTS}
   sieve_vacation_min_period = 1h
-}
+${execute ? BOXTRAPPER_SIEVE_SETTINGS : ''}}
 `,
   mode: 0o644,
   owner: 'root',
@@ -1347,6 +1388,10 @@ export interface MailboxPolicySieveInput {
   blockedSenders: string[]
   /** file messages the spam filter flagged into Junk */
   spamToJunk: boolean
+  /** user+tag@domain into folder tag: create it when missing, or only when it exists */
+  plusFolders?: 'create' | 'existing'
+  /** discard mail at or above this whole score, 1 to 50 */
+  autoDeleteScore?: number | null
 }
 
 export const MAX_BLOCKED_SENDERS = 1000
@@ -1354,20 +1399,28 @@ export const MAX_BLOCKED_SENDERS = 1000
 const SPAM_HEADERS = ['X-Spam', 'X-Spam-Flag']
 
 /** The policy script for one mailbox; null when the mailbox has no Sieve effect. */
-export const renderMailboxPolicySieveScript = (input: Pick<MailboxPolicySieveInput, 'blockedSenders' | 'spamToJunk'>): string | null => {
+export const renderMailboxPolicySieveScript = (input: Pick<MailboxPolicySieveInput, 'blockedSenders' | 'spamToJunk' | 'plusFolders' | 'autoDeleteScore'>): string | null => {
   if (!Array.isArray(input.blockedSenders) || input.blockedSenders.length > MAX_BLOCKED_SENDERS) return invalid('blocked senders', input.blockedSenders, `allow at most ${MAX_BLOCKED_SENDERS} addresses`)
   const senders = [...new Set(input.blockedSenders.map((s) => {
     const v = assertLine('blocked sender', s, 254).toLowerCase()
     return /^[\x21-\x7e]+@[a-z0-9.-]+$/.test(v) ? v : invalid('blocked sender', v, 'must be one exact address')
   }))]
   if (typeof input.spamToJunk !== 'boolean') return invalid('spam to Junk', input.spamToJunk, 'must be a boolean')
-  if (!senders.length && !input.spamToJunk) return null
+  if (input.plusFolders !== undefined && input.plusFolders !== 'create' && input.plusFolders !== 'existing') return invalid('plus folders', input.plusFolders, 'must be create or existing')
+  const autoDelete = input.autoDeleteScore ?? null
+  if (autoDelete !== null && (!Number.isInteger(autoDelete) || autoDelete < 1 || autoDelete > 50)) return invalid('spam auto-delete score', autoDelete, 'must be a whole number from 1 through 50')
+  if (!senders.length && !input.spamToJunk && !input.plusFolders && autoDelete === null) return null
   const junk = ['  fileinto :create "Junk";', '  stop;', '}']
+  // Spam rules run first, so a tagged address is never a way past them; a tag cannot name a nested folder.
+  const plus = input.plusFolders ? ['if envelope :detail :regex "to" "^[A-Za-z0-9_-]{1,64}$" {', '  set :lower "tag" "${0}";', ...(input.plusFolders === 'existing' ? ['  if mailboxexists "${tag}" {', '    fileinto "${tag}";', '    stop;', '  }'] : ['  fileinto :create "${tag}";', '  stop;']), '}'] : []
   return [
     '# managed by xPanel: mailbox spam policy; the mailbox\'s own filters run after it',
-    'require ["fileinto", "mailbox"];',
+    `require [${input.plusFolders ? '"envelope", "fileinto", "mailbox", "regex", "subaddress", "variables"' : '"fileinto", "mailbox"'}];`,
+    // X-Spam-Level holds one star per whole score point, so N stars means a score of at least N.
+    ...(autoDelete === null ? [] : [`if header :contains "X-Spam-Level" ${sieveQuote('*'.repeat(autoDelete))} {`, '  discard;', '  stop;', '}']),
     ...(senders.length ? [`if address :all :is "from" [${senders.map(sieveQuote).join(', ')}] {`, ...junk] : []),
     ...(input.spamToJunk ? [`if header :is [${SPAM_HEADERS.map(sieveQuote).join(', ')}] "yes" {`, ...junk] : []),
+    ...plus,
     '',
   ].join('\n')
 }
@@ -1403,6 +1456,26 @@ export const renderMailboxPolicySieve = (os: OsProfile, inputs: readonly Mailbox
   ]
   return { files, preActions, postActions }
 }
+
+/**
+ * Full text search through fts-xapian: indexed when a search needs it, never during delivery, which keeps a small server's
+ * mail flow free of indexing work. A search then reads messages not yet indexed before it answers.
+ */
+export const renderDovecotFtsConf = (os: OsProfile): RenderedFile => ({
+  path: `${assertAbsPath('dovecot dir', os.paths.dovecotDir)}/conf.d/96-xpanel-fts.conf`,
+  content: `# managed by xPanel: full text search
+mail_plugins = $mail_plugins fts fts_xapian
+
+plugin {
+  fts = xapian
+  fts_xapian = partial=3 full=20
+  fts_autoindex = no
+}
+`,
+  mode: 0o644,
+  owner: 'root',
+  group: 'root',
+})
 
 // ---- DKIM -----------------------------------------------------------------------------------
 

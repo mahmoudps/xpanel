@@ -95,6 +95,7 @@ const domainProjection = (domain: Domain) => ({
   pathQuotaMb: domain.pathQuotaMb,
   ...(domain.indexFiles !== undefined ? { indexFiles: domain.indexFiles } : {}),
   ...(domain.proxy !== undefined ? { proxy: { websocket: domain.proxy.websocket, hostHeader: domain.proxy.hostHeader, headers: domain.proxy.headers.map(h => ({ name: h.name, value: h.value })) } } : {}),
+  ...(domain.site !== undefined ? { site: JSON.parse(JSON.stringify(domain.site)) as Domain['site'] } : {}),
   ipv4: domain.ipv4 ?? null,
   ipv6: domain.ipv6 ?? null,
 })

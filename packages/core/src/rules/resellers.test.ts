@@ -2,7 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { XpanelError } from '../errors.ts'
 import type { Limit, Plan, Principal, Reseller } from '../types.ts'
 import { defaultPlan } from './plans.ts'
-import { assertAcl, assertCanSeeAccount, assertResellerCapacity, canSeeAccount, hasAcl, visibleAccounts } from './resellers.ts'
+import {
+  assertAcl,
+  assertCanSeeAccount,
+  assertResellerCapacity,
+  assertResellerOversell,
+  assertResellerSharedIp,
+  canSeeAccount,
+  hasAcl,
+  validateResellerAclList,
+  validateResellerPackageLimits,
+  visibleAccounts,
+} from './resellers.ts'
 
 const code = (fn: () => unknown): string | null => {
   try {
@@ -25,7 +36,7 @@ const reseller = (over: Partial<Reseller> = {}): Reseller => ({
   maxAccounts: 3,
   totalDiskMb: 10_000,
   totalBandwidthMb: 100_000,
-  oversell: false,
+  oversell: { disk: false, bandwidth: false },
   nameservers: [],
   delegatedIps: [],
   ...over,
@@ -104,7 +115,7 @@ describe('assertResellerCapacity', () => {
 
   it('enforces maxAccounts even when overselling is on', () => {
     const full = [{ plan: plan(1) }, { plan: plan(1) }, { plan: plan(1) }]
-    expect(code(() => assertResellerCapacity({ reseller: reseller({ oversell: true }), ownedAccounts: full, newPlan: plan(1) }))).toBe(
+    expect(code(() => assertResellerCapacity({ reseller: reseller({ oversell: { disk: true, bandwidth: true } }), ownedAccounts: full, newPlan: plan(1) }))).toBe(
       'LIMIT_EXCEEDED',
     )
   })
@@ -143,13 +154,24 @@ describe('assertResellerCapacity', () => {
     const r = reseller({ totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited' })
     expect(() => assertResellerCapacity({ reseller: r, ownedAccounts: [], newPlan: plan('unlimited', 'unlimited') })).not.toThrow()
     expect(() =>
-      assertResellerCapacity({ reseller: reseller({ oversell: true }), ownedAccounts: [{ plan: plan(9000) }], newPlan: plan('unlimited') }),
+      assertResellerCapacity({ reseller: reseller({ oversell: { disk: true, bandwidth: true } }), ownedAccounts: [{ plan: plan(9000) }], newPlan: plan('unlimited') }),
     ).not.toThrow()
   })
 
   it('treats a non-boolean oversell flag as off', () => {
-    const r = reseller({ oversell: 'yes' as unknown as boolean })
+    const r = reseller({ oversell: { disk: 'yes', bandwidth: 'yes' } as unknown as Reseller['oversell'] })
     expect(code(() => assertResellerCapacity({ reseller: r, ownedAccounts: [], newPlan: plan(10_001) }))).toBe('OVERSELL_BLOCKED')
+    expect(code(() => assertResellerCapacity({ reseller: reseller({ oversell: true as unknown as Reseller['oversell'] }), ownedAccounts: [], newPlan: plan(10_001) }))).toBe('OVERSELL_BLOCKED')
+  })
+
+  it('oversells disk and bandwidth separately', () => {
+    const r = reseller({ totalBandwidthMb: 1000 })
+    const diskOnly = reseller({ totalBandwidthMb: 1000, oversell: { disk: true, bandwidth: false } })
+    expect(() => assertResellerCapacity({ reseller: diskOnly, ownedAccounts: [], newPlan: plan(10_001, 1000) })).not.toThrow()
+    expect(code(() => assertResellerCapacity({ reseller: diskOnly, ownedAccounts: [], newPlan: plan(10_001, 1001) }))).toBe('OVERSELL_BLOCKED')
+    const bandwidthOnly = { ...r, oversell: { disk: false, bandwidth: true } }
+    expect(() => assertResellerCapacity({ reseller: bandwidthOnly, ownedAccounts: [], newPlan: plan(10_000, 'unlimited') })).not.toThrow()
+    expect(code(() => assertResellerCapacity({ reseller: bandwidthOnly, ownedAccounts: [], newPlan: plan(10_001, 1) }))).toBe('OVERSELL_BLOCKED')
   })
 
   it('fails closed on malformed stored limits', () => {
@@ -178,5 +200,56 @@ describe('assertResellerCapacity', () => {
       'LIMIT_EXCEEDED',
     )
     expect(() => assertResellerCapacity({ reseller: reseller({ maxAccounts: 'unlimited' }), ownedAccounts: [], newPlan: plan(1) })).not.toThrow()
+  })
+})
+
+describe('reseller field validators', () => {
+  it('takes overselling as exactly two booleans', () => {
+    expect(assertResellerOversell({ disk: true, bandwidth: false })).toEqual({ disk: true, bandwidth: false })
+    for (const bad of [true, false, null, { disk: true }, { disk: true, bandwidth: 'no' }, { disk: true, bandwidth: true, cpu: true }]) {
+      expect(code(() => assertResellerOversell(bad))).toBe('VALIDATION')
+    }
+  })
+
+  it('normalizes package limits to one entry per plan', () => {
+    const a = '10000000-0000-4000-8000-00000000000A', b = '10000000-0000-4000-8000-000000000001'
+    expect(validateResellerPackageLimits([{ planId: a, maxAccounts: 2 }, { planId: b, maxAccounts: 'unlimited' }]))
+      .toEqual([{ planId: b, maxAccounts: 'unlimited' }, { planId: a.toLowerCase(), maxAccounts: 2 }])
+    expect(code(() => validateResellerPackageLimits([{ planId: a, maxAccounts: 1 }, { planId: a.toLowerCase(), maxAccounts: 2 }]))).toBe('VALIDATION')
+    expect(code(() => validateResellerPackageLimits([{ planId: 'basic', maxAccounts: 1 }]))).toBe('VALIDATION')
+    expect(code(() => validateResellerPackageLimits([{ planId: a, maxAccounts: -1 }]))).toBe('VALIDATION')
+    expect(code(() => validateResellerPackageLimits({}))).toBe('VALIDATION')
+  })
+
+  it('takes a canonical shared IP or null', () => {
+    expect(assertResellerSharedIp(null)).toBeNull()
+    expect(assertResellerSharedIp('2001:DB8::1')).toBe('2001:db8::1')
+    expect(code(() => assertResellerSharedIp('192.0.2.0/24'))).toBe('VALIDATION')
+  })
+
+  it('names an ACL list with a file-safe name and known privileges', () => {
+    expect(validateResellerAclList({ name: 'support-team', acl: ['list-accounts', 'create-account', 'list-accounts'] }))
+      .toEqual({ name: 'support-team', acl: ['create-account', 'list-accounts'] })
+    for (const name of ['', '../x', '.hidden', 'a b', 'x'.repeat(65)]) expect(code(() => validateResellerAclList({ name, acl: [] }))).toBe('VALIDATION')
+    expect(code(() => validateResellerAclList({ name: 'ok', acl: ['root-everything'] }))).toBe('VALIDATION')
+    expect(code(() => validateResellerAclList({ name: 'ok', acl: [], extra: 1 }))).toBe('VALIDATION')
+  })
+})
+
+describe('reseller package limits', () => {
+  const planA = '00000000-0000-4000-8000-0000000000a1', planB = '00000000-0000-4000-8000-0000000000b1'
+  const limited = reseller({ maxAccounts: 10, totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited', packageLimits: [{ planId: planA, maxAccounts: 2 }] })
+  const owned = (n: number) => Array.from({ length: n }, () => ({ plan: plan(100), accountPlanId: planA }))
+
+  it('refuses a third account on a package limited to two, and a package that is not listed', () => {
+    expect(code(() => assertResellerCapacity({ reseller: limited, ownedAccounts: owned(1), newPlan: plan(100), newPlanId: planA }))).toBeNull()
+    expect(code(() => assertResellerCapacity({ reseller: limited, ownedAccounts: owned(2), newPlan: plan(100), newPlanId: planA }))).toBe('LIMIT_EXCEEDED')
+    expect(code(() => assertResellerCapacity({ reseller: limited, ownedAccounts: owned(2), newPlan: plan(100), newPlanId: planB }))).toBe('FORBIDDEN')
+    expect(code(() => assertResellerCapacity({ reseller: limited, ownedAccounts: owned(2), newPlan: plan(100), newPlanId: planA, isNewAccount: false }))).toBe('LIMIT_EXCEEDED')
+  })
+
+  it('applies no package rule without package limits or without a package change', () => {
+    expect(code(() => assertResellerCapacity({ reseller: { ...limited, packageLimits: undefined }, ownedAccounts: owned(5), newPlan: plan(100), newPlanId: planB }))).toBeNull()
+    expect(code(() => assertResellerCapacity({ reseller: limited, ownedAccounts: owned(5), newPlan: plan(100), isNewAccount: false }))).toBeNull()
   })
 })

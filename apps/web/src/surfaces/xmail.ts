@@ -1,3 +1,4 @@
+import { mailHomeGroups } from '../mail-home-groups.ts'
 import { tools as defaultCatalog, visibleNavigation, visibleTools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { renderMailTrackDelivery } from '../board-port/xmail-track-delivery.ts'
 import { renderMailFolders } from '../board-port/xmail-folders.ts'
@@ -14,6 +15,7 @@ import {
   renderAsyncActionState, renderStatusBadge, renderThresholdMeter,
 } from '../tokens.ts'
 import { accountSecurityRoute, renderSecurityNavLink } from '../chrome.ts'
+import { renderMailboxPasswordCard } from './account-security.ts'
 import {
   getSurfaceNavigationLabel, getSurfacePageTitle, hasRoutePageTitle, normalizeSurfaceRoute,
   renderLiveUpdatesIndicator, renderPageSearchButton, renderMobileNavBackdrop, renderMobileNavClose,
@@ -216,11 +218,11 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
   // the mailbox owner's own rules through /api/webmail/filters, the same filter route and Sieve path as xPanel
   const filtersHtml = `<section class="xp-card" data-section="sieve-filters" aria-labelledby="sieve-rules-heading" style="display:grid;gap:var(--xp-space-group,24px)"><h2 id="sieve-rules-heading" style="margin:0">${text('Filters')}</h2>${mailbox ? renderFilterWorkspace({ lang: locale, canManage: qualifiedMailRoutes.has('/mail/settings/filters') && visibleMailToolIds.has('webmail-email-filters'), fixedMailbox: mailbox }) : `<p role="status">${text('Mailbox has not been read.')}</p>`}</section>`
   const mailboxCanManage = mailbox.length > 0
-  const content = activeRoute === '/mail/later' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailTools({ locale, mailbox, canManage: mailbox.length > 0, searchAvailable: canSearchMailbox, attachmentsAvailable: attachmentReadEnabled, quotaAvailable: visibleMailToolIds.has('webmail-disk-cleanup') })}`
-    : activeRoute === '/mail/settings/spam' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailSpam({ locale, mailbox, canManage: qualifiedMailRoutes.has(activeRoute) && visibleMailToolIds.has('webmail-spam-box') })}`
+  const content = activeRoute === '/mail/later' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailTools({ locale, mailbox, canManage: mailbox.length > 0, searchIndexAvailable: qualifiedMailRoutes.has(activeRoute) && visibleMailToolIds.has('webmail-search-index'), searchAvailable: canSearchMailbox, attachmentsAvailable: attachmentReadEnabled, quotaAvailable: visibleMailToolIds.has('webmail-disk-cleanup') })}`
+    : activeRoute === '/mail/settings/spam' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailSpam({ locale, mailbox, canManage: qualifiedMailRoutes.has(activeRoute) && visibleMailToolIds.has('webmail-spam-box'), boxTrapper: mailbox.length > 0 && visibleMailToolIds.has('webmail-boxtrapper') })}`
     : activeRoute === '/mail/tools/mailing-lists' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailMailingLists({ locale, mailbox, canManage: qualifiedMailRoutes.has(activeRoute) && visibleMailToolIds.has('webmail-mailing-lists') })}`
     : activeRoute === '/mail/search' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailSearchWorkspace({ locale, mailbox, available: canSearchMailbox, attachmentPanel: renderMailAttachments({ lang: locale, mailbox, canRead: canSearchMailbox && attachmentReadEnabled }) })}`
-    : activeRoute === '/mail/settings/calendars' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailCalendarWorkspace({ locale, mailbox, canManage: qualifiedMailRoutes.has(activeRoute) })}`
+    : activeRoute === '/mail/settings/calendars' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailCalendarWorkspace({ locale, mailbox, canManage: qualifiedMailRoutes.has(activeRoute), canReadDav: qualifiedMailRoutes.has(activeRoute) && visibleMailToolIds.has('webmail-dav-config') })}`
     : activeRoute === '/mail/calendar' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailCalendarView({ locale, mailbox, canManage: qualifiedMailRoutes.has(activeRoute) && visibleMailToolIds.has('webmail-calendar') })}`
     : activeRoute === '/mail/tools/track-delivery' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailTrackDelivery({ locale, mailbox, canRead: qualifiedMailRoutes.has(activeRoute) && visibleMailToolIds.has('webmail-track-delivery') })}`
     : activeRoute === '/mail/folders' ? `<h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1>${renderMailFolders({ locale, mailbox, canManage: qualifiedMailRoutes.has(activeRoute) && visibleMailToolIds.has('webmail-folders') })}`
@@ -234,8 +236,8 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
     : section === 'filters' ? filtersHtml
     : section === 'autoresponder' ? renderMailVacationWorkspace({ locale, mailbox, canManage: mailboxCanManage })
     : section === 'identities' ? renderMailIdentitiesWorkspace({ locale, mailbox, canManage: mailboxCanManage })
-    : section === 'overview' ? `<section class="xp-card" data-section="mail-overview" style="display:grid;gap:var(--xp-space-group,24px)"><h2 style="margin:0">${text('Mailbox quota')}</h2>${quota || `<p role="status">${text(msgctxt('xmail', 'Unavailable'))}</p>`}</section>`
-    : section === 'security' ? ''
+    : section === 'overview' ? `<section class="xp-card" data-section="mail-overview" style="display:grid;gap:var(--xp-space-group,24px)"><h2 style="margin:0">${text('Mailbox quota')}</h2>${quota || `<p role="status">${text(msgctxt('xmail', 'Unavailable'))}</p>`}${mailHomeGroups(qualifiedMailRoutes).map(group => `<div data-mail-home-group><h3 style="margin:0">${text(group.title)}</h3><ul style="margin:8px 0 0;display:grid;gap:8px;padding-inline-start:16px">${group.tiles.map(tile => `<li><a href="${tile.route}">${text(tile.label)}</a></li>`).join('')}</ul></div>`).join('')}</section>`
+    : section === 'security' ? renderMailboxPasswordCard(locale, qualifiedMailRoutes.has(activeRoute) && visibleMailToolIds.has('webmail-password'))
     : renderSurfaceUnavailable(locale, '/mail/inbox')
 
   const contentHasPageHeading = /<h1\b/.test(content)
@@ -261,7 +263,7 @@ export const renderUnavailableMailBody = (options: { route: string; locale: Loca
     const heading = search ? (translator(locale)('Search mail')) : (translator(locale)('Calendars and events'))
     const rendered = search
       ? renderMailSearchWorkspace({ locale, mailbox: '', available: false, attachmentPanel: renderMailAttachments({ lang: locale, mailbox: '', canRead: false }) })
-      : renderMailCalendarWorkspace({ locale, mailbox: '', canManage: false })
+      : renderMailCalendarWorkspace({ locale, mailbox: '', canManage: false, canReadDav: false })
     const readonly = rendered.replace(/<form\b/g, '<div style="display:flex;flex-direction:column;gap:16px;margin:0"').replace(/<\/form>/g, '</div>')
       .replace(/<(button|input|select|textarea)\b([^>]*)>/g, (_match, tag: string, attributes: string) => `<${tag}${/\bdisabled\b/.test(attributes) ? '' : ' disabled'}${attributes}>`)
     return `<div data-mail-read-only="true" data-mail-unavailable="${search ? 'search' : 'calendars'}"><h1 class="xp-page-title">${escapeHtml(heading)}</h1>${readonly}</div>`

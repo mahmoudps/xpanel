@@ -26,7 +26,7 @@ const fixture = async () => {
     php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
   const alice = await makeAccount('dnsa'), bob = await makeAccount('dnsb')
   const alicePrincipal = await createUserPrincipal(database.db, { username: alice.username, accountId: alice.id, passwordHash: HASH })
-  const reseller = await state.store.createReseller({ username: 'reselldns', passwordHash: HASH, acl: ['list-accounts', 'manage-dns'], maxAccounts: 5, totalDiskMb: 10000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] })
+  const reseller = await state.store.createReseller({ username: 'reselldns', passwordHash: HASH, acl: ['list-accounts', 'manage-dns'], maxAccounts: 5, totalDiskMb: 10000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
   await createResellerPrincipal(database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
   await state.store.changeOwner(alice.id, reseller.id)
   const token = async (principalId: string, scopes = ['*']) => {
@@ -132,7 +132,7 @@ describe('xWHM DNS revision-bound loopback HTTP acceptance', () => {
     expect((await f.request(path(), 'PUT', input, f.resellerToken)).status).toBe(403)
     expect(await f.bytes()).toBe(before)
   })
-  it('filters reseller/owner reads and refuses foreign mutation and unassigned ownership', async () => {
+  it('filters reseller/owner reads and refuses foreign mutation and unassigned ownership', { tags: ['slow'] }, async () => {
     await f.state.store.saveDnsZone({ ...f.zone, id: randomUUID(), accountId: f.bob.id, name: f.bob.primaryDomain })
     await f.state.store.saveDnsZone({ ...f.zone, id: randomUUID(), accountId: null, name: 'server.example.test' })
     for (const bearer of [f.ownerToken, f.resellerToken]) {

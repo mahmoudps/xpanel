@@ -80,11 +80,11 @@ function assertFullReadOnlyDocument(document: DocumentCase, html: string, locale
 }
 
 describe('complete registered V2 read-only document contract', () => {
-  it('binds all 217 role-admitted documents and every declared alias', () => {
-    expect(new Set(documents.map(page => page.route)).size).toBe(217)
-    expect(documents).toHaveLength(217)
+  it('binds all 218 role-admitted documents and every declared alias', () => {
+    expect(new Set(documents.map(page => page.route)).size).toBe(218)
+    expect(documents).toHaveLength(218)
     expect(documents.filter(page => page.surface === 'xpanel')).toHaveLength(75)
-    expect(documents.filter(page => page.surface === 'xwhm')).toHaveLength(119)
+    expect(documents.filter(page => page.surface === 'xwhm')).toHaveLength(120)
     expect(documents.filter(page => page.surface === 'xmail')).toHaveLength(23)
     expect(documents.filter(page => !canOpenRegisteredRoute(page.route, visibilityFor(page.surface))).map(page => page.route)).toEqual([])
     expect(documents.filter(page => page.route !== page.canonical)).toHaveLength(registeredDocumentAliases.length)
@@ -134,7 +134,7 @@ describe('read-only documents keep collection permission and tenant boundaries',
   })
   it('keeps reseller ACL and ownership independent from the supplied account collection', () => {
     const principal: Principal = { kind: 'reseller', id: 'reseller-contract', username: 'dealer' }
-    const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 1024, totalBandwidthMb: 1024, oversell: false, nameservers: [], delegatedIps: [] }
+    const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 1024, totalBandwidthMb: 1024, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
     const owned = { ...account, ownerId: principal.id }
     const visibility: VisibilityContext = { principal, reseller }
     const props = { ...whmFacts(true, visibility), activeRoute: '/whm/accounts', activeReseller: reseller, accounts: [owned, { ...account, id: 'foreign-account', username: 'foreignowner', ownerId: 'foreign-reseller' }] }

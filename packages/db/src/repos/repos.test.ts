@@ -226,7 +226,7 @@ describe('reindexFromState & FTS5 searchIndex', () => {
         maxAccounts: 20,
         totalDiskMb: 204_800,
         totalBandwidthMb: 'unlimited',
-        oversell: false,
+        oversell: { disk: false, bandwidth: false },
         nameservers: ['ns1.xpanel.test'],
         delegatedIps: ['192.0.2.10'],
       })

@@ -22,6 +22,8 @@ const REMOVABLE = new Set([
   '/etc/systemd/system/timers.target.wants/xpanel-management-tls.timer',
   '/etc/nginx/conf.d/xpanel-management.conf', '/etc/nginx/conf.d/xpanel-management-challenge.conf', '/etc/nginx/xpanel-management/ingress-secret.conf',
 ])
+// The agent rewrites it when WHM saves a TLS policy, so the receipt cannot pin it; uninstall removes it by path.
+const UNPINNED_REMOVABLE = Object.freeze(['/etc/nginx/xpanel-management/tls-policy.conf', '/etc/xpanel/management-access.json'])
 export const isRemovableControlPlanePath = path => typeof path === 'string' && REMOVABLE.has(path)
 
 /** Syntax only. A copied receipt is neither ownership proof nor authority to mutate the host. */
@@ -147,5 +149,5 @@ export async function assertOwnedFile(entry) {
 /** A finite preservation plan, not uninstall authorization or TLS handoff proof. */
 export function preservingUninstallPlan(receipt) {
   const parsed = parseInstallationReceipt(receipt); safe(parsed.status !== 'uninstalled', 'ALREADY_UNINSTALLED')
-  return freeze({ kind: 'uninstall', removal: parsed.files.map(entry => entry.path), stopUnits: [...OWNED_PANEL_UNITS], retain: ['/opt/xpanel', '/etc/xpanel', '/var/lib/xpanel', '/var/lib/xpanel-agent', '/var/lib/xpanel-lifecycle', '/var/lib/xpanel-management-tls', '/var/log/xpanel', '/etc/letsencrypt', '/home', '/var/mail', '/var/vmail', '/var/lib/mysql', '/var/lib/mariadb'], purge: false, restoreHistoricalAuthority: false })
+  return freeze({ kind: 'uninstall', removal: [...parsed.files.map(entry => entry.path), ...UNPINNED_REMOVABLE], stopUnits: [...OWNED_PANEL_UNITS], retain: ['/opt/xpanel', '/etc/xpanel', '/var/lib/xpanel', '/var/lib/xpanel-agent', '/var/lib/xpanel-lifecycle', '/var/lib/xpanel-management-tls', '/var/log/xpanel', '/etc/letsencrypt', '/home', '/var/mail', '/var/vmail', '/var/lib/mysql', '/var/lib/mariadb'], purge: false, restoreHistoricalAuthority: false })
 }

@@ -31,6 +31,8 @@ export interface PhpIsolationOptions {
   allowedFunctions?: readonly string[]
   /** add the distribution's shared PEAR/PHP library dir to open_basedir */
   includeSystemPhpLib?: boolean
+  /** the server PEAR library of this PHP version, when it has one */
+  pearLibrary?: string | null
 }
 
 export interface PhpIsolation {
@@ -46,6 +48,7 @@ export const phpIsolation = (account: Account, os: OsProfile, opts: PhpIsolation
   const tmpDir = `${account.home}/tmp`
   const dirs = [account.home, tmpDir]
   if (opts.includeSystemPhpLib) dirs.push(systemPhpLibDir(os))
+  if (opts.pearLibrary) dirs.push(opts.pearLibrary)
   const openBasedir = dirs.join(':')
   const disableFunctions = disabledFunctions(opts.allowedFunctions ?? []).join(',')
   return {

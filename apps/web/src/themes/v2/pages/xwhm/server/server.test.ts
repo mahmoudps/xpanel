@@ -78,7 +78,7 @@ describe('v2 server administration family', () => {
     const shares = render('/whm/server/file-sharing'), nodes = render('/whm/server/nodes')
     for (const hook of ['data-ops-shares-rows', 'data-ops-shares-editor', 'data-ops-shares-foreign-card', 'data-ops-shares-save']) expect(shares).toContain(hook)
     expect(shares).toContain('data-ops-shares-action="apply" disabled')
-    for (const hook of ['data-ops-nodes-rows', 'data-ops-nodes-single', 'data-ops-nodes-fingerprint', 'data-ops-nodes-save']) expect(nodes).toContain(hook)
+    for (const hook of ['data-ops-nodes-rows', 'data-ops-nodes-single', 'data-ops-nodes-code', 'data-ops-nodes-add', 'data-ops-nodes-invite-code', 'data-node-cluster-versions']) expect(nodes).toContain(hook)
     expect(nodes).toContain('No node registry has been read.')
   })
   it('keeps Arabic direction and ASCII digits without leaking settings to another principal', () => {

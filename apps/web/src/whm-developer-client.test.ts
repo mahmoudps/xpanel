@@ -126,7 +126,7 @@ describe('developer console read workflow', () => {
     expect(send.mock.calls).toEqual([['GET', '/api/server/panel/integrations'], ['POST', '/api/server/panel/integrations', { operation: 'tokens' }]])
     expect($('[data-dev-token-table]').hidden).toBe(false); expect($('[data-dev-token-rows]').textContent).toContain('inventory-reader')
     expect($('[data-developer-workspace]').getAttribute('dir')).toBe('rtl')
-    expect(document.body.textContent).toContain('الخطافات الموقّعة')
+    expect(document.body.textContent).toContain('WHMCS')
     expect([...document.querySelectorAll<HTMLButtonElement>('aside button')].every(button => button.disabled)).toBe(true)
     expect(document.body.textContent).not.toMatch(/private-fixture|tokenHash|csrfToken|principalId/)
   })

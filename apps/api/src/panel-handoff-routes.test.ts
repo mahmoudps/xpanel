@@ -29,7 +29,7 @@ beforeAll(async () => {
     secureCookies: true, requireOriginHeader: true, handoff: HANDOFF[entryPoint],
   })])) as Record<EntryPoint, ApiApp>
   const root = await createRootPrincipal(f.database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
-  const base = { passwordHash: HASH, maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 'unlimited' as const, oversell: false, nameservers: [], delegatedIps: ['192.0.2.10'] }
+  const base = { passwordHash: HASH, maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 'unlimited' as const, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: ['192.0.2.10'] }
   const reseller = await f.state.store.createReseller({ ...base, username: 'resellerone', acl: ['list-accounts', 'edit-account'] })
   const plain = await f.state.store.createReseller({ ...base, username: 'resellertwo', acl: ['list-accounts'] })
   for (const item of [reseller, plain]) await createResellerPrincipal(f.database.db, { id: item.id, username: item.username, passwordHash: HASH })

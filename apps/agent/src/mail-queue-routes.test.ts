@@ -44,6 +44,14 @@ describe('agent mail queue routes', () => {
     expect(events).toEqual(['root:mail.queue.manage', 'audit:mail.queue.change_requested', '/usr/sbin/postqueue -j', 'root:mail.queue.manage', '/usr/sbin/postsuper -d 4F2A1B3C9D deferred', '/usr/sbin/postqueue -j', 'audit:mail.queue.delete'])
     expect(ctx.audit).toHaveBeenLastCalledWith({ actor: 'root', action: 'mail.queue.delete', target: 'mail-queue:4F2A1B3C9D', outcome: 'ok', detail: { queue: 'deferred', outcome: 'confirmed', afterQueue: null } })
   })
+  it('drains named domains for root and refuses anything else', async () => {
+    const { ctx, events } = context([''])
+    const response = (await call(post({ domains: ['example.net'] }, '/host/mail/queue/drain'), ctx))!
+    expect(await response.json()).toEqual({ drained: true, remaining: 0 })
+    expect(events).toEqual(['root:mail.queue.manage', '/usr/sbin/postqueue -j'])
+    await expect(call(post({ domains: ['a@example.net'] }, '/host/mail/queue/drain'), ctx)).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(call(post({ domains: ['example.net'], extra: 1 }, '/host/mail/queue/drain'), ctx)).rejects.toMatchObject({ code: 'VALIDATION' })
+  })
   it('never runs postsuper when authority is lost after the pre-read', async () => {
     let calls = 0
     const { ctx, events } = context([deferred], { assertRoot: async () => { if (++calls > 1) throw new Error('authority changed'); return { actor: 'root' } } })
@@ -52,7 +60,7 @@ describe('agent mail queue routes', () => {
     expect(ctx.audit).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'mail.queue.delete', outcome: 'failed', detail: { queue: 'deferred', outcome: 'refused' } }))
   })
   it('returns a 409 conflict without mutation when the message moved', async () => {
-    const { ctx, events } = context([''])
+    const { ctx, events } = context([deferred.replace('"queue_name":"deferred"', '"queue_name":"hold"')])
     await expect(call(post(body), ctx)).rejects.toMatchObject({ code: 'CONFLICT', detail: { stateChanged: false } })
     expect(events.some(event => event.includes('postsuper'))).toBe(false)
     expect(ctx.audit).toHaveBeenLastCalledWith(expect.objectContaining({ outcome: 'failed', detail: { queue: 'deferred', outcome: 'refused' } }))
@@ -81,5 +89,28 @@ describe('agent mail queue routes', () => {
     let audits = 0
     const second = context([deferred, ''], { audit: async () => { if (++audits > 1) throw new Error('db down') } })
     await expect(call(post(body), second.ctx)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', detail: { verificationRequired: true, unknownOutcome: true } })
+  })
+})
+
+describe('held senders', { tags: ['unit'] }, () => {
+  const held = (id: string, sender: string) => JSON.stringify({ queue_name: 'hold', queue_id: id, arrival_time: 1793095200, message_size: 10, sender, recipients: [{ address: 'r@remote.test' }] })
+  const request = (senders: string[], action = 'release') => post({ senders, action }, '/host/mail/queue/held')
+  it('releases each message of a named sender and proves it by a fresh read', async () => {
+    const before = [held('4F2A1B3C9D', 'sales@alice.test'), held('4F2A1B3C9E', 'x@alice.test'), held('4F2A1B3C9F', 'y@bob.test')].join('\n')
+    const { ctx, events } = context([before, held('4F2A1B3C9F', 'y@bob.test')])
+    expect(await (await call(request(['alice.test']), ctx))!.json()).toEqual({ action: 'release', matched: 2, remaining: 0 })
+    expect(events).toContain('/usr/sbin/postsuper -H 4F2A1B3C9D hold')
+    expect(events.join()).not.toContain('4F2A1B3C9F hold')
+  })
+  it('deletes by exact address and reports what stays', async () => {
+    const message = held('4F2A1B3C9D', 'sales@alice.test'), { ctx, events } = context([message, message])
+    expect(await (await call(request(['sales@alice.test'], 'delete'), ctx))!.json()).toEqual({ action: 'delete', matched: 1, remaining: 1 })
+    expect(events).toContain('/usr/sbin/postsuper -d 4F2A1B3C9D hold')
+  })
+  it('refuses another action, no sender or an unsafe sender', async () => {
+    const { ctx } = context([])
+    await expect(call(request(['alice.test'], 'hold'), ctx)).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(call(request([]), ctx)).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(call(request(['a b']), ctx)).rejects.toMatchObject({ code: 'VALIDATION' })
   })
 })

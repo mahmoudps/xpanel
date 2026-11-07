@@ -11,6 +11,7 @@ import { profileFor } from '@xpanel/os'
 import { atomicWriteJson, StateStore } from '@xpanel/state'
 import { runtimeRegistryPath } from '../../agent/src/account-runtime.ts'
 import { CSRF_HEADER_NAME, hashPasswordArgon2id, parseCookies, SESSION_COOKIE_NAME } from './auth.ts'
+import { createMemoryDav } from './mail/dav-testkit.ts'
 import { startPanelServer } from './test-panel-server.ts'
 import { ExtendedFeaturesStore, type InstalledAppRecord } from './extended-routes.ts'
 import * as mailDocuments from './mail/document.ts'
@@ -125,6 +126,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
       homeBaseDir: join(tmpDir, 'host'),
     })
     const started = await startPanelServer({
+      davExchange: createMemoryDav({ defaults: true }).exchange,
       port: 0,
       host: '127.0.0.1',
       dbPath,
@@ -462,11 +464,8 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.equal(csvBody.summary.forwardersImported, 1)
     assert.equal(csvBody.summary.errorCount, 0)
 
-    const davRes = await root.request('/api/mail/caldav-carddav', {
-      method: 'PUT',
-      body: { enabled: true, autodiscoverSrv: true },
-    })
-    assert.equal(davRes.status, 200)
+    // Calendars and contacts connect through the per-account Radicale behind the edge; the saved URL record is gone.
+    assert.equal((await root.request('/api/mail/caldav-carddav', { method: 'PUT', body: { enabled: true } })).status, 404)
 
     // ---- Step C: xMail Webmail Deep Endpoints (/api/webmail/*) ----
     const idRes = await root.request('/api/webmail/identities', {
@@ -535,7 +534,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.equal(calRes.status, 201)
     const calId = ((await calRes.json()) as { calendar: { id: string } }).calendar.id
 
-    const shareRes = await root.request(`/api/webmail/calendars/${calId}/share`, {
+    const shareRes = await root.request(`/api/webmail/calendars/${calId}/share?mailbox=support%40nebula.test`, {
       method: 'POST',
       body: { principal: 'billing@nebula.test', permission: 'read-write' },
     })
@@ -729,13 +728,8 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     const hotlinkBody = (await hotlinkRes.json()) as { config: { compiledNginx: string } }
     assert.match(hotlinkBody.config.compiledNginx, /valid_referers/)
 
-    const webDiskRes = await root.request(`/api/web-features/${account.id}/web-disk`, {
-      method: 'PUT',
-      body: { enabled: true, rootPath: 'public_html', readOnly: false },
-    })
-    assert.equal(webDiskRes.status, 200)
-    const webDiskBody = (await webDiskRes.json()) as { config: { compiledConfig: string } }
-    assert.match(webDiskBody.config.compiledConfig, /dav_ext_methods PROPFIND OPTIONS/)
+    // Web Disk logins are User Manager users served by lighttpd as the account; the compiled nginx alias record is gone.
+    assert.equal((await root.request(`/api/web-features/${account.id}/web-disk`, { method: 'PUT', body: { enabled: true } })).status, 404)
 
     const extrasRes = await root.request(`/api/web-features/${account.id}/extras`, {
       method: 'PUT',
@@ -792,26 +786,9 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.equal(cacheBody.cache.memcached.socketPath, `/home/${account.username}/.xpanel-cache/memcached.sock`)
     assert.equal((await root.request(`/api/cache/${account.id}`, { method: 'PUT', body: { redis: { enabled: false } } })).status, 405)
 
-    // ---- Step H: Server Fine Settings, Containers, 1-Click Apps + Staging, Cluster, Branding, Languages, WHMCS ----
-    const fineRes = await root.request('/api/server/fine-settings', {
-      method: 'PUT',
-      body: {
-        limits: { maxMemoryPerProcessMb: 2048, maxProcessesPerAccount: 128, oomScoreAdj: 150 },
-        logRotation: { frequency: 'daily', retainDays: 30, compress: true, maxSizeMb: 200 },
-        mta: {
-          maxQueueLifetimeHours: 48,
-          maxMessageSizeMb: 75,
-          smarthost: { enabled: true, host: 'relay.mailchannels.net', port: 587, username: 'xpanel' },
-          rbls: ['zen.spamhaus.org'],
-        },
-      },
-    })
-    assert.equal(fineRes.status, 200)
-    const fineBody = (await fineRes.json()) as {
-      settings: { mta: { compiledPostfixMainCf: string }; logRotation: { compiledLogrotateConf: string } }
-    }
-    assert.match(fineBody.settings.mta.compiledPostfixMainCf, /relay\.mailchannels\.net/)
-    assert.match(fineBody.settings.logRotation.compiledLogrotateConf, /rotate 30/)
+    // ---- Step H: Containers, 1-Click Apps + Staging, Cluster, Branding, Languages, WHMCS ----
+    // The invented fine-settings store is gone: nothing answers there.
+    assert.equal((await root.request('/api/server/fine-settings')).status, 404)
 
     const containerRes = await root.request(`/api/containers/${account.id}`)
     assert.equal(containerRes.status, 200)
@@ -852,7 +829,7 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
       assert.equal(response.status, 412)
       const refusal = await response.json() as { code: string; details: { reason: string; stateChanged: boolean; nativeApplied: boolean } }
       assert.equal(refusal.code, 'PRECONDITION_FAILED')
-      assert.deepEqual(refusal.details, { reason: 'application_provider_unavailable', stateChanged: false, nativeApplied: false })
+      assert.deepEqual(refusal.details, { reason: 'application_route_replaced', stateChanged: false, nativeApplied: false })
     }
     const appListAfter = await root.request(`/api/apps/${account.id}`)
     assert.equal(appListAfter.status, 200)

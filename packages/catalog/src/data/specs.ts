@@ -21,7 +21,7 @@ export const specs: ToolSpec[] = [
       "Single-item actions (rename, edit, view) act on the first selected item when several are selected; unavailable actions are greyed out",
       "Warns against changing files inside a Git working tree that the panel manages"
     ],
-    "acceptance": "An upload or move whose resolved target (including via a symlink) lies outside the account home is rejected with PATH_OUTSIDE_HOME and nothing is written; a normal upload lands owned by the account UID with mode 0644, and re-uploading the same name without overwrite=1 fails with ALREADY_EXISTS.",
+    "acceptance": "An upload or move whose resolved target (including via a symlink) lies outside the account home is rejected with FORBIDDEN and nothing is written; a normal upload lands owned by the account UID with mode 0644, and re-uploading the same name without overwrite=1 fails with VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/files/file-manager/",
     "upstreamFeatureKey": "filemanager",
     "upstreamAcl": "",
@@ -94,7 +94,7 @@ export const specs: ToolSpec[] = [
       "Shows trash size and item count, and counts toward the account disk quota",
       "Permanent delete of a single trashed item"
     ],
-    "acceptance": "Deleting public_html/a.txt moves it into the trash and restoring it returns identical bytes to public_html/a.txt; restoring while public_html/a.txt already exists fails with TARGET_EXISTS and leaves both copies untouched.",
+    "acceptance": "Deleting public_html/a.txt moves it into the trash and restoring it returns identical bytes to public_html/a.txt; restoring while public_html/a.txt already exists fails with VALIDATION and leaves both copies untouched.",
     "source": "https://api.docs.cpanel.net/specifications/cpanel.openapi/manage-files/fileman-trash_file.md",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -121,7 +121,7 @@ export const specs: ToolSpec[] = [
       "Saves content transcoded from the editor encoding into the target encoding, with optional fallback to the default encoding or a hard error",
       "Saving an absent file creates an empty one"
     ],
-    "acceptance": "Opening a file over 1 MB for editing returns FILE_TOO_LARGE; saving text with to_charset=ISO-8859-1 and fallback=0 writes single-byte encoded bytes, and a character not representable in that charset fails with ENCODING_ERROR without modifying the file.",
+    "acceptance": "Opening a file over 1 MB for editing returns VALIDATION; saving text with to_charset=ISO-8859-1 and fallback=0 writes single-byte encoded bytes, and a character not representable in that charset fails with VALIDATION without modifying the file.",
     "source": "https://docs.cpanel.net/cpanel/files/file-manager/",
     "upstreamFeatureKey": "filemanager",
     "upstreamAcl": "",
@@ -247,7 +247,7 @@ export const specs: ToolSpec[] = [
       "Client configuration: server host and port; advise SFTP and that FTPS should use the server hostname because FTP has no SNI",
       "Counts against the plan's FTP account limit"
     ],
-    "acceptance": "Creating an FTP account with homedir '../x' is rejected with PATH_OUTSIDE_HOME; a valid account logged in over FTP sees only its folder as '/', and creating one more account than the plan's FTP limit returns LIMIT_EXCEEDED.",
+    "acceptance": "Creating an FTP account with homedir '../x' is rejected with VALIDATION; a valid account logged in over FTP sees only its folder as '/', and creating one more account than the plan's FTP limit returns LIMIT_EXCEEDED.",
     "source": "https://docs.cpanel.net/cpanel/files/ftp-accounts/",
     "upstreamFeatureKey": "ftpaccts",
     "upstreamAcl": "",
@@ -395,7 +395,7 @@ export const specs: ToolSpec[] = [
       "Push to the managed repo triggers deployment automatically through a post-receive hook",
       "Public web access to .git folders is blocked"
     ],
-    "acceptance": "Creating a repo with clone URL https://u:p@git.test/r.git is rejected with INVALID_CLONE_URL; with a dirty working tree, Deploy HEAD Commit fails with DEPLOY_DIRTY_TREE and runs no tasks; with a clean tree it runs the listed tasks in order as the account UID and records the deployed commit hash.",
+    "acceptance": "Creating a repo with clone URL https://u:p@git.test/r.git is rejected with VALIDATION; with a dirty working tree, Deploy HEAD Commit fails with CONFLICT and runs no tasks; with a clean tree it runs the listed tasks in order as the account UID and records the deployed commit hash.",
     "source": "https://docs.cpanel.net/cpanel/files/git-version-control/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -475,7 +475,7 @@ export const specs: ToolSpec[] = [
       "Delete a database permanently after confirmation",
       "Counts against the plan's database limit"
     ],
-    "acceptance": "Creating a database whose prefixed name exceeds 64 characters (underscores counted twice) fails with NAME_TOO_LONG; creating one more than the plan's database limit fails with LIMIT_EXCEEDED; renaming db1 to db2 preserves row counts and grants and leaves db1 absent.",
+    "acceptance": "Creating a database whose prefixed name exceeds 64 characters (underscores counted twice) fails with VALIDATION; creating one more than the plan's database limit fails with LIMIT_EXCEEDED; renaming db1 to db2 preserves row counts and grants and leaves db1 absent.",
     "source": "https://docs.cpanel.net/cpanel/databases/manage-my-databases/",
     "upstreamFeatureKey": "mysql",
     "upstreamAcl": "",
@@ -522,7 +522,7 @@ export const specs: ToolSpec[] = [
       "Change password, rename, delete user",
       "Users are separate from mail and panel logins"
     ],
-    "acceptance": "Granting user u only SELECT on db makes SHOW GRANTS list exactly SELECT on that database; an INSERT by u then fails with error 1142, and a username longer than the engine limit including prefix is rejected with NAME_TOO_LONG.",
+    "acceptance": "Granting user u only SELECT on db makes SHOW GRANTS list exactly SELECT on that database; an INSERT by u then fails with error 1142, and a username longer than the engine limit including prefix is rejected with VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/databases/manage-my-databases/",
     "upstreamFeatureKey": "mysql",
     "upstreamAcl": "",
@@ -552,7 +552,7 @@ export const specs: ToolSpec[] = [
       "List hosts and remove a host after confirmation, which revokes its access",
       "Hosts added by the server administrator may appear and cannot be removed by the user"
     ],
-    "acceptance": "Adding 203.0.113.0/24 lets a client at 203.0.113.7 authenticate as the account's DB user while 198.51.100.7 is refused; removing the entry makes the next connection from 203.0.113.7 fail, and a note longer than 255 characters is rejected with INVALID_NOTE.",
+    "acceptance": "Adding 203.0.113.0/24 lets a client at 203.0.113.7 authenticate as the account's DB user while 198.51.100.7 is refused; removing the entry makes the next connection from 203.0.113.7 fail, and a note longer than 255 characters is rejected with VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/databases/remote-database-access/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -739,7 +739,7 @@ export const specs: ToolSpec[] = [
       "Tries an existing certificate, else self-signed, then requests an automatic certificate when allowed",
       "Rejected when the plan limit for that domain type is reached"
     ],
-    "acceptance": "Creating an addon domain beyond the plan's addon limit is rejected with LIMIT_EXCEEDED; a document root of '../outside' or 'public_html/../etc' is rejected with DOCROOT_INVALID; a valid addon domain answers HTTP on its own vhost within one reconcile cycle.",
+    "acceptance": "Creating an addon domain beyond the plan's addon limit is rejected with LIMIT_EXCEEDED; a document root of '../outside' or 'public_html/../etc' is rejected with VALIDATION; a valid addon domain answers HTTP on its own vhost within one reconcile cycle.",
     "source": "https://docs.cpanel.net/cpanel/domains/domains/create-a-new-domain/",
     "upstreamFeatureKey": "addondomains",
     "upstreamAcl": "",
@@ -800,7 +800,7 @@ export const specs: ToolSpec[] = [
       "Remove domain: deletes vhost and DNS only, keeps files; main domain cannot be removed; mailboxes reappear if the domain is re-added",
       "Shortcuts to create email, edit zone and edit redirects"
     ],
-    "acceptance": "Removing addon domain shop.test deletes its vhost and DNS zone (Host: shop.test no longer matches) while every file in its document root remains byte-identical; removing the main domain returns MAIN_DOMAIN_PROTECTED.",
+    "acceptance": "Removing addon domain shop.test deletes its vhost and DNS zone (Host: shop.test no longer matches) while every file in its document root remains byte-identical; removing the main domain returns PRECONDITION_FAILED.",
     "source": "https://docs.cpanel.net/cpanel/domains/domains/manage-the-domain/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -851,7 +851,7 @@ export const specs: ToolSpec[] = [
       "Reset zone to server defaults after confirmation (custom records lost)",
       "Record types offered depend on enabled features; temporary domains cannot be edited"
     ],
-    "acceptance": "A batch edit submitted with a stale SOA serial is rejected with ZONE_SERIAL_MISMATCH and the zone is unchanged; a successful add of an A record raises the serial and the authoritative server answers the new record to dig within one reconcile cycle.",
+    "acceptance": "A batch edit submitted with a stale SOA serial is rejected with CONFLICT and the zone is unchanged; a successful add of an A record raises the serial and the authoritative server answers the new record to dig within one reconcile cycle.",
     "source": "https://docs.cpanel.net/cpanel/domains/zone-editor/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "edit-dns",
@@ -888,7 +888,7 @@ export const specs: ToolSpec[] = [
       "View the hostname's TLS certificate for device configuration",
       "Requires the account's zones to be served by the panel's nameservers"
     ],
-    "acceptance": "Calling the update URL from 203.0.113.9 sets the host's A record to 203.0.113.9 and bumps last update time; a second call from the same IP changes only last run time; after Recreate URL the old URL returns 404 and the record is unchanged.",
+    "acceptance": "Calling the update URL with myip=203.0.113.9 sets the host's A record to 203.0.113.9 and bumps last change time; a second call with the same address returns nochg and changes nothing; after rotating the secret the old secret returns badauth and the record is unchanged.",
     "source": "https://docs.cpanel.net/cpanel/domains/dynamic-dns/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -1018,7 +1018,7 @@ export const specs: ToolSpec[] = [
       "'Stay on this page' option to create several in a row",
       "Creates default calendar and address book for the mailbox"
     ],
-    "acceptance": "Creating local part 'cpanel' returns VALIDATION_ERROR; creating 'info' with quota 500 when the plan cap is 250 returns QUOTA_EXCEEDS_MAX; creating 'info' with quota 250 and a password scoring below the host minimum returns WEAK_PASSWORD; a valid request yields a mailbox that accepts IMAP login with the given password.",
+    "acceptance": "Creating local part 'cpanel' returns VALIDATION; creating 'info' with quota 500 when the plan cap is 250 returns LIMIT_EXCEEDED; creating 'info' with quota 250 and a password scoring below the host minimum returns VALIDATION; a valid request yields a mailbox that accepts IMAP login with the given password.",
     "source": "https://docs.cpanel.net/cpanel/email/create-an-email-account/",
     "upstreamFeatureKey": "popaccts (Email Accounts)",
     "upstreamAcl": "",
@@ -1029,7 +1029,6 @@ export const specs: ToolSpec[] = [
     "id": "email-account-manage",
     "behaviors": [
       "Change password (strength meter, generator); passwords are never retrievable, only replaceable",
-      "Optional link to external-authentication (OIDC) linking when the host enables it",
       "Shows current usage and edits allocated quota (whole numbers, max 4096 TB, or Unlimited if no cap); trash is excluded from quota; usage recalculated on login",
       "When the quota is full or set below usage, new mail bounces with a mailbox-full error",
       "Receiving: allow or suspend (reject incoming)",
@@ -1076,7 +1075,7 @@ export const specs: ToolSpec[] = [
       "Trace action shows the delivery route for the destination (local, remote, filtered, error)",
       "Wildcard redirects are not forwarders (use filters); catch-all is the Default Address tool"
     ],
-    "acceptance": "Creating a forwarder from sales@example.com to a@x.test,b@y.test delivers one copy to each target; creating a forwarder with fwdopt=pipe and a path outside the home directory returns VALIDATION_ERROR; exceeding the plan's forwarder limit returns LIMIT_EXCEEDED.",
+    "acceptance": "Creating a forwarder from sales@example.com to a@x.test,b@y.test delivers one copy to each target; creating a forwarder with fwdopt=pipe and a path outside the home directory returns VALIDATION; exceeding the plan's forwarder limit returns LIMIT_EXCEEDED.",
     "source": "https://docs.cpanel.net/cpanel/email/forwarders/",
     "upstreamFeatureKey": "Forwarder Manager",
     "upstreamAcl": "",
@@ -1138,7 +1137,7 @@ export const specs: ToolSpec[] = [
       "Messages with spam score 5 or higher get no auto-reply",
       "List per domain with search; edit and delete with confirmation"
     ],
-    "acceptance": "With interval=24, two messages from the same sender within an hour produce exactly one reply and both originals land in INBOX; creating a second autoresponder for the same address returns CONFLICT; stop earlier than start returns VALIDATION_ERROR.",
+    "acceptance": "With interval=24, two messages from the same sender within an hour produce exactly one reply and both originals land in INBOX; creating a second autoresponder for the same address returns CONFLICT; stop earlier than start returns VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/email/autoresponders/",
     "upstreamFeatureKey": "Autoresponders",
     "upstreamAcl": "",
@@ -1182,7 +1181,7 @@ export const specs: ToolSpec[] = [
       "Delete with confirmation",
       "Service only starts once at least one list exists; host must enable it"
     ],
-    "acceptance": "Creating list 'my list' returns VALIDATION_ERROR; a private list does not appear in the public list index; exceeding the plan's list limit returns LIMIT_EXCEEDED; a delegated mailbox can approve a held post.",
+    "acceptance": "Creating list 'my list' returns VALIDATION; a private list does not appear in the public list index; exceeding the plan's list limit returns LIMIT_EXCEEDED; a delegated mailbox can approve a held post.",
     "source": "https://docs.cpanel.net/cpanel/email/mailing-lists/",
     "upstreamFeatureKey": "Mailing Lists",
     "upstreamAcl": "",
@@ -1293,7 +1292,7 @@ export const specs: ToolSpec[] = [
       "Allow list and deny list of senders with * and ? wildcards and entry counts",
       "Per-test score overrides (up to 3 decimals; 0 disables a test)"
     ],
-    "acceptance": "With threshold 5 and spam box on, a GTUBE test message lands in the 'spam' folder; the same message from a sender on the allow list lands in INBOX; setting threshold 0 returns VALIDATION_ERROR.",
+    "acceptance": "With threshold 5 and spam box on, a GTUBE test message lands in the 'spam' folder; the same message from a sender on the allow list lands in INBOX; setting threshold 0 returns VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/email/spam-filters/",
     "upstreamFeatureKey": "spamassassin, spambox (Apache SpamAssassin, Spam Box)",
     "upstreamAcl": "",
@@ -1310,7 +1309,7 @@ export const specs: ToolSpec[] = [
       "Delete with confirmation; the private key must be removed before its public key",
       "Generation can be slow on low-entropy systems"
     ],
-    "acceptance": "Generating with keysize 3072 lists the key in both tables with matching fingerprint; keysize 512 returns VALIDATION_ERROR; deleting the public key while its private key exists returns CONFLICT.",
+    "acceptance": "Generating with keysize 3072 lists the key in both tables with matching fingerprint; keysize 512 returns VALIDATION; deleting the public key while its private key exists returns CONFLICT.",
     "source": "https://docs.cpanel.net/cpanel/email/encryption/",
     "upstreamFeatureKey": "Encryption (PGP/GPG)",
     "upstreamAcl": "",
@@ -1377,7 +1376,7 @@ export const specs: ToolSpec[] = [
       "Client notes for iOS, macOS, Thunderbird, Android/Outlook via third-party sync apps",
       "Self-signed certificates break some clients"
     ],
-    "acceptance": "For info@example.com the page returns an https URL with the DAV port and a /principals/ path containing the address; a PROPFIND on that principal URL with the mailbox credentials returns 207 and with a wrong password returns 401.",
+    "acceptance": "For info@example.com the page returns an https URL with the DAV port and the mailbox's principal path; a PROPFIND on that principal URL with the mailbox credentials returns 207 and with a wrong password returns 401.",
     "source": "https://docs.cpanel.net/knowledge-base/webmail/how-to-set-up-calendars-and-contacts/",
     "upstreamFeatureKey": "Calendars and Contacts",
     "upstreamAcl": "",
@@ -1425,7 +1424,7 @@ export const specs: ToolSpec[] = [
       "Permanent deletion confirmation",
       "Values may lag due to caching"
     ],
-    "acceptance": "Running the '30 MB or larger' preset on INBOX holding one 35 MB and one 1 MB message deletes only the 35 MB message and the folder size drops accordingly; an empty custom query returns VALIDATION_ERROR (prevents delete-all by accident).",
+    "acceptance": "Running the '30 MB or larger' preset on INBOX holding one 35 MB and one 1 MB message deletes only the 35 MB message and the folder size drops accordingly; an empty custom query returns VALIDATION (prevents delete-all by accident).",
     "source": "https://docs.cpanel.net/cpanel/email/email-disk-usage/",
     "upstreamFeatureKey": "email_disk_usage (Email Disk Usage)",
     "upstreamAcl": "",
@@ -1499,7 +1498,7 @@ export const specs: ToolSpec[] = [
       "Archived logs list with name, created date, download and delete",
       "Empty state when no archives"
     ],
-    "acceptance": "Downloading example.com's current log returns a valid gzip whose lines match the access log; with retention_days=7 an archive dated 8 days ago is removed on the next stats run; retention_days=-2 returns VALIDATION_ERROR.",
+    "acceptance": "Downloading example.com's current log returns a valid gzip whose lines match the access log; with retention_days=7 an archive dated 8 days ago is removed on the next stats run; retention_days=-2 returns VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/metrics/raw-access/",
     "upstreamFeatureKey": "Raw Access Logs",
     "upstreamAcl": "",
@@ -1638,7 +1637,7 @@ export const specs: ToolSpec[] = [
       "Reserved filenames refused: config, known_hosts, authorized_keys, environment, rc, identity, user",
       "Only available if the host grants shell access"
     ],
-    "acceptance": "Generating a key named 'authorized_keys' returns VALIDATION_ERROR; authorizing a generated public key appends exactly one line to ~/.ssh/authorized_keys and an SSH login with the private key succeeds; deauthorizing removes that line and login fails.",
+    "acceptance": "Generating a key named 'authorized_keys' returns VALIDATION; authorizing a generated public key appends exactly one line to ~/.ssh/authorized_keys and an SSH login with the private key succeeds; deauthorizing removes that line and login fails.",
     "source": "https://docs.cpanel.net/cpanel/security/ssh-access/",
     "upstreamFeatureKey": "SSH Access & Terminal",
     "upstreamAcl": "",
@@ -1654,7 +1653,7 @@ export const specs: ToolSpec[] = [
       "Blocks only the websites (not webmail/other services); server-wide blocking is an admin tool",
       "Rules written to the account's .htaccess; hand edits must use CIDR"
     ],
-    "acceptance": "Adding 10.5.3.3-40 stores CIDR blocks covering exactly 10.5.3.3 through 10.5.3.40; a request from 10.5.3.10 to the site returns 403 while a request from 10.5.3.41 returns 200; input 'abc' returns VALIDATION_ERROR.",
+    "acceptance": "Adding 10.5.3.3-40 stores CIDR blocks covering exactly 10.5.3.3 through 10.5.3.40; a request from 10.5.3.10 to the site returns 403 while a request from 10.5.3.41 returns 200; input 'abc' returns VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/security/ip-blocker/",
     "upstreamFeatureKey": "IP Blocker",
     "upstreamAcl": "",
@@ -1684,7 +1683,7 @@ export const specs: ToolSpec[] = [
       "Table: domains, created (UTC), description, actions",
       "View encoded/decoded, edit description, delete with confirmation"
     ],
-    "acceptance": "A CSR generated from key K for example.com and www.example.com has both names as SANs and its public key equals K's public key; a CSR without any domain returns VALIDATION_ERROR.",
+    "acceptance": "A CSR generated from key K for example.com and www.example.com has both names as SANs and its public key equals K's public key; a CSR without any domain returns VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/security/ssl-tls/",
     "upstreamFeatureKey": "SSL/TLS",
     "upstreamAcl": "",
@@ -1699,7 +1698,7 @@ export const specs: ToolSpec[] = [
       "Self-signed generation: pick key; domains, city, state, country, company required; meant for internal use",
       "View encoded/decoded, edit description, delete with confirmation"
     ],
-    "acceptance": "Generating a self-signed certificate without the country field returns VALIDATION_ERROR; with all required fields the stored certificate lists the given domains and is self-issued.",
+    "acceptance": "Generating a self-signed certificate without the country field returns VALIDATION; with all required fields the stored certificate lists the given domains and is self-issued.",
     "source": "https://docs.cpanel.net/cpanel/security/ssl-tls/",
     "upstreamFeatureKey": "SSL/TLS",
     "upstreamAcl": "",
@@ -1787,7 +1786,7 @@ export const specs: ToolSpec[] = [
       "Rename; revoke single or bulk with confirmation",
       "Tokens limited to the account's enabled features; used via an Authorization header of the form 'cpanel user:TOKEN'"
     ],
-    "acceptance": "Name 'my token' returns VALIDATION_ERROR; a created token's secret appears only in the create response and never in list output; a call with a revoked or expired token returns 401; a read-only token calling a write function returns 403.",
+    "acceptance": "Name 'my token' returns VALIDATION; a created token's secret appears only in the create response and never in list output; a call with a revoked or expired token returns 401; a read-only token calling a write function returns 403.",
     "source": "https://docs.cpanel.net/cpanel/security/manage-api-tokens-in-cpanel/",
     "upstreamFeatureKey": "apitokens (Manage API Tokens)",
     "upstreamAcl": "",
@@ -1864,7 +1863,7 @@ export const specs: ToolSpec[] = [
       "Recommendation to keep on and only disable during troubleshooting",
       "Requires the WAF module and the domain-manager feature"
     ],
-    "acceptance": "With WAF off for a.example and on for b.example, a request carrying a standard SQL-injection test payload reaches the app on a.example but gets 403 on b.example; enabling a domain not owned by the account returns FORBIDDEN.",
+    "acceptance": "With WAF off for a.example and on for b.example, a request carrying a standard SQL-injection test payload reaches the app on a.example but gets 403 on b.example; enabling a domain not owned by the account returns NOT_FOUND.",
     "source": "https://docs.cpanel.net/cpanel/security/modsecurity/",
     "upstreamFeatureKey": "ModSecurity Domain Manager",
     "upstreamAcl": "",
@@ -1882,7 +1881,7 @@ export const specs: ToolSpec[] = [
       "No self-service recovery; host can clear it",
       "Password-based API calls can bypass it unless the host enforces policy; tokens unaffected"
     ],
-    "acceptance": "Submitting a wrong 6-digit code during setup returns INVALID_TOTP and 2FA stays off; after setup, login with only the password is refused; after reconfigure, codes from the old secret fail and other active sessions are terminated.",
+    "acceptance": "Submitting a wrong 6-digit code during setup returns VALIDATION and 2FA stays off; after setup, login with only the password is refused; after reconfigure, codes from the old secret fail and other active sessions are terminated.",
     "source": "https://docs.cpanel.net/cpanel/security/two-factor-authentication-for-cpanel/",
     "upstreamFeatureKey": "Two-Factor Authentication",
     "upstreamAcl": "",
@@ -1910,7 +1909,7 @@ export const specs: ToolSpec[] = [
       "Separate read-only list of system-provided packages, which the user cannot remove",
       "Install and uninstall run as the account user and only write inside the account's home directory"
     ],
-    "acceptance": "Installing the PEAR package 'Config_Lite' puts it under the account's private PEAR path and it appears in the installed list; trying to uninstall a system-provided package returns SYSTEM_MODULE_PROTECTED; when the plan lacks modules-php-pear, every endpoint returns FEATURE_DISABLED.",
+    "acceptance": "Installing the PEAR package 'Config_Lite' puts it under the account's private PEAR path and it appears in the installed list; trying to uninstall a system-provided package returns FORBIDDEN; when the plan lacks modules-php-pear, every endpoint returns FORBIDDEN.",
     "source": "https://docs.cpanel.net/cpanel/software/php-pear-packages/",
     "upstreamFeatureKey": "modules-php-pear",
     "upstreamAcl": "",
@@ -1926,7 +1925,7 @@ export const specs: ToolSpec[] = [
       "Button that lists the system-installed Perl modules, which are read-only",
       "Modules must be installed before scripts can use them; installation is limited to the account's home directory"
     ],
-    "acceptance": "After installing 'JSON::Tiny', a CGI script that adds the shown include path loads the module without error, and the module appears in the installed list with its version; an install request for an empty or malformed module name returns VALIDATION_ERROR.",
+    "acceptance": "After installing 'JSON::Tiny', a CGI script that adds the shown include path loads the module without error, and the module appears in the installed list with its version; an install request for an empty or malformed module name returns VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/software/perl-modules/",
     "upstreamFeatureKey": "modules-perl",
     "upstreamAcl": "",
@@ -1942,7 +1941,7 @@ export const specs: ToolSpec[] = [
       "The page is hidden when the web server's compression module is not available",
       "Notes that PHP output compression is controlled separately in the PHP INI editor (zlib.output_compression)"
     ],
-    "acceptance": "With mode 'specified types' and 'text/html text/css', a GET for a .css file with Accept-Encoding: gzip returns Content-Encoding: gzip while a .png does not; a malformed token such as 'texthtml' is rejected with VALIDATION_ERROR; switching to 'disabled' removes the managed block.",
+    "acceptance": "With mode 'specified types' and 'text/html text/css', a GET for a .css file with Accept-Encoding: gzip returns Content-Encoding: gzip while a .png does not; a malformed token such as 'texthtml' is rejected with VALIDATION; switching to 'disabled' removes the managed block.",
     "source": "https://docs.cpanel.net/cpanel/software/optimize-website/",
     "upstreamFeatureKey": "optimizews",
     "upstreamAcl": "",
@@ -1959,7 +1958,7 @@ export const specs: ToolSpec[] = [
       "Basic name validation only; deleting the php.ini resets the target to defaults",
       "Shows the file path being edited"
     ],
-    "acceptance": "Saving memory_limit = 256M for example.com makes ini_get('memory_limit') on that domain return 256M while other domains keep their value; a directive named 'yes' or containing '{' is rejected with VALIDATION_ERROR; type=vhost without a vhost name returns MISSING_PARAMETER.",
+    "acceptance": "Saving memory_limit = 256M for example.com makes ini_get('memory_limit') on that domain return 256M while other domains keep their value; a directive named 'yes' or containing '{' is rejected with VALIDATION; type=vhost without a vhost name returns VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/software/multiphp-ini-editor-for-cpanel/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -1979,7 +1978,7 @@ export const specs: ToolSpec[] = [
       "Log locations: Node apps under <app>/logs/, Python apps in <app>/stderr.log",
       "Hidden unless the server has the app-server module and at least one runtime installed"
     ],
-    "acceptance": "Registering an app with an environment variable named '1TOKEN' returns VALIDATION_ERROR; a valid registration at example.com/app serves the app's response at that URL; unregistering it makes the URL stop routing to the app while the source directory still exists on disk.",
+    "acceptance": "Registering an app with an environment variable named '1TOKEN' returns VALIDATION; a valid registration at example.com/app serves the app's response at that URL; unregistering it makes the URL stop routing to the app while the source directory still exists on disk.",
     "source": "https://docs.cpanel.net/cpanel/software/application-manager/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -1997,7 +1996,7 @@ export const specs: ToolSpec[] = [
       "Start, stop, restart, redeploy, switch run mode (production/development) for server apps, fetch app or build logs (last N lines), delete",
       "Supersedes Application Manager for new apps; Application Manager remains for apps already registered there"
     ],
-    "acceptance": "Staging a Git source registers the app with status 'staged' and nothing served on its domain; deploy moves it to 'running' (or 'errored' with a failure category); calling set_mode on a static app returns INVALID_CATEGORY; sending both env and env_text returns VALIDATION_ERROR.",
+    "acceptance": "Staging a Git source registers the app with status 'staged' and nothing served on its domain; deploy moves it to 'running' (or 'errored' with a failure category); calling set_mode on a static app returns INVALID_CATEGORY; sending both env and env_text returns VALIDATION.",
     "source": "https://api.docs.cpanel.net/specifications/cpanel.openapi/web-apps/webapp-stage",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -2221,7 +2220,7 @@ export const specs: ToolSpec[] = [
       "Current jobs table with schedule and command; edit a line in place; delete with confirmation",
       "Interface warns about overlapping runs and destructive commands and suggests absolute paths; scripts need the execute bit"
     ],
-    "acceptance": "Adding a job with weekday '8', minute '61' or an empty command returns VALIDATION_ERROR; a valid job '*/5 * * * * /home/u/run.sh' appears exactly once in the account's crontab and in the list; deleting it removes the line; setting the cron email writes MAILTO for that user only.",
+    "acceptance": "Adding a job with weekday '8', minute '61' or an empty command returns VALIDATION; a valid job '*/5 * * * * /home/u/run.sh' appears exactly once in the account's crontab and in the list; deleting it removes the line; setting the cron email writes MAILTO for that user only.",
     "source": "https://docs.cpanel.net/cpanel/advanced/cron-jobs/",
     "upstreamFeatureKey": "cron",
     "upstreamAcl": "",
@@ -2235,7 +2234,7 @@ export const specs: ToolSpec[] = [
       "Trace route: one click runs a route trace between the server and the visitor's address and shows each hop with timing",
       "The admin can withhold trace route; then the page explains it is unavailable"
     ],
-    "acceptance": "Looking up 'example.com' returns arrays of A/AAAA and MX answers; input 'bad..name' or one longer than 253 characters returns VALIDATION_ERROR; when trace route is turned off by the admin, the trace endpoint returns FEATURE_DISABLED.",
+    "acceptance": "Looking up 'example.com' returns arrays of A/AAAA and MX answers; input 'bad..name' or one longer than 253 characters returns VALIDATION; when trace route is turned off by the admin, the trace endpoint returns FORBIDDEN.",
     "source": "https://docs.cpanel.net/cpanel/advanced/track-dns/",
     "upstreamFeatureKey": "nettools",
     "upstreamAcl": "",
@@ -2250,7 +2249,7 @@ export const specs: ToolSpec[] = [
       "Per-directory option: inherit from parent (or server default), no listing (visitors get forbidden), names only, or names with details such as size and type",
       "Current setting shown in an index type column for each directory"
     ],
-    "acceptance": "Setting 'disabled' on public_html/files makes GET /files/ (no index file present) return 403; setting 'fancy' returns a listing that includes file sizes; 'inherit' removes the managed directive; a path outside the account's home returns PATH_OUTSIDE_HOME.",
+    "acceptance": "Setting 'disabled' on public_html/files makes GET /files/ (no index file present) return 403; setting 'fancy' returns a listing that includes file sizes; 'inherit' removes the managed directive; a path outside the account's home returns VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/advanced/indexes/",
     "upstreamFeatureKey": "indexmanager",
     "upstreamAcl": "",
@@ -2266,7 +2265,7 @@ export const specs: ToolSpec[] = [
       "Save stores the page and wires it as that domain's handler for the code",
       "Default server pages are used for codes without a custom page"
     ],
-    "acceptance": "After saving a custom 404 page for example.com, GET https://example.com/does-not-exist returns status 404 with the custom body and the inserted requested-URL tag shows the real path; saving a code outside 400-599 returns VALIDATION_ERROR.",
+    "acceptance": "After saving a custom 404 page for example.com, GET https://example.com/does-not-exist returns status 404 with the custom body and the inserted requested-URL tag shows the real path; saving a code outside 400-599 returns VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/advanced/error-pages/",
     "upstreamFeatureKey": "errpgs",
     "upstreamAcl": "",
@@ -2294,7 +2293,7 @@ export const specs: ToolSpec[] = [
       "User-defined types table with delete and a confirmation step",
       "System MIME types table is read-only"
     ],
-    "acceptance": "Adding 'text/foo' for '.foo' makes GET /x.foo return Content-Type: text/foo; a type without a slash such as 'textfoo' returns VALIDATION_ERROR; deleting a system type returns FORBIDDEN.",
+    "acceptance": "Adding 'text/foo' for '.foo' makes GET /x.foo return Content-Type: text/foo; a type without a slash such as 'textfoo' returns VALIDATION; deleting a system type returns FORBIDDEN.",
     "source": "https://docs.cpanel.net/cpanel/advanced/mime-types/",
     "upstreamFeatureKey": "mime",
     "upstreamAcl": "",
@@ -2309,7 +2308,7 @@ export const specs: ToolSpec[] = [
       "Per infected file choose an action: delete, quarantine, ignore, or cleanse the mailbox (for mail hits); then track disinfection until done",
       "Hidden unless the server has the antivirus engine and its panel plugin installed"
     ],
-    "acceptance": "Scanning public_html that contains the EICAR test file lists that file as infected; choosing 'quarantine' moves it out of public_html into the account quarantine folder and disinfection status reaches 'done'; a scan_type outside the allowed set returns VALIDATION_ERROR.",
+    "acceptance": "Scanning public_html that contains the EICAR test file lists that file as infected; choosing 'quarantine' moves it out of public_html into the account quarantine folder and disinfection status reaches 'done'; a scan_type outside the allowed set returns VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/advanced/virus-scanner/",
     "upstreamFeatureKey": "clamavconnector_scan",
     "upstreamAcl": "",
@@ -2343,7 +2342,7 @@ export const specs: ToolSpec[] = [
       "Change password with a generator (length and character classes; generated passwords up to 18 characters)",
       "Each section appears only when the related feature is on for the plan"
     ],
-    "acceptance": "Changing the primary contact email with a wrong account password returns INVALID_PASSWORD and keeps the old address; setting notification position to 'bottom-left' persists across logout/login and is applied on every page.",
+    "acceptance": "Changing the primary contact email with a wrong account password returns UNAUTHENTICATED and keeps the old address; setting notification position to 'bottom-left' persists across logout/login and is applied on every page.",
     "source": "https://docs.cpanel.net/cpanel/preferences/account-preferences/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -2374,7 +2373,7 @@ export const specs: ToolSpec[] = [
       "External authentication tab (only when the admin configured providers): list linked OpenID Connect identities, link a new one through the provider's login, unlink one after confirmation",
       "Team users use the same page for their own password"
     ],
-    "acceptance": "A change with a wrong current password returns INVALID_PASSWORD; a new password scoring below the required strength returns WEAK_PASSWORD; after a successful change the old password no longer logs in and the new one does.",
+    "acceptance": "A change with a wrong current password returns UNAUTHENTICATED; a new password scoring below the required strength returns VALIDATION; after a successful change the old password no longer logs in and the new one does.",
     "source": "https://docs.cpanel.net/cpanel/preferences/password-and-security/",
     "upstreamFeatureKey": "password",
     "upstreamAcl": "",
@@ -2390,7 +2389,7 @@ export const specs: ToolSpec[] = [
       "Team users inherit the owner's language until they set their own",
       "Marked as deprecated in favour of Account Preferences"
     ],
-    "acceptance": "Setting locale 'ar' makes the next page render with dir=rtl and Arabic labels; an unknown locale code 'xx' returns VALIDATION_ERROR; a team user without their own setting shows the owner's locale.",
+    "acceptance": "Setting locale 'ar' makes the next page render with dir=rtl and Arabic labels; an unknown locale code 'xx' returns VALIDATION; a team user without their own setting shows the owner's locale.",
     "source": "https://docs.cpanel.net/cpanel/preferences/change-language/",
     "upstreamFeatureKey": "setlang",
     "upstreamAcl": "",
@@ -2407,7 +2406,7 @@ export const specs: ToolSpec[] = [
       "Edit name, contact email, password and services; delete removes the subaccount and all its services",
       "Email services are refused on temporary domains"
     ],
-    "acceptance": "Creating subaccount 'bob' on example.com with email and FTP creates mailbox bob@example.com and FTP login bob@example.com that both accept the same password; an email quota above the plan maximum returns LIMIT_EXCEEDED; a username with a space returns VALIDATION_ERROR; logging into the panel as bob is refused.",
+    "acceptance": "Creating subaccount 'bob' on example.com with email and FTP creates mailbox bob@example.com and FTP login bob@example.com that both accept the same password; an email quota above the plan maximum returns LIMIT_EXCEEDED; a username with a space returns VALIDATION; logging into the panel as bob is refused.",
     "source": "https://docs.cpanel.net/cpanel/preferences/user-manager/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -2457,7 +2456,7 @@ export const specs: ToolSpec[] = [
       "Accounts created on the newest theme may be locked to it (the admin can still move them)",
       "Legacy style picker offered several color styles with apply/current markers"
     ],
-    "acceptance": "With theme switching off in the plan, PUT /me/theme returns FEATURE_DISABLED; switching to an allowed theme changes the rendered theme on the next request; a theme name not in Themes::list returns VALIDATION_ERROR.",
+    "acceptance": "With theme switching off in the plan, PUT /me/theme returns FEATURE_DISABLED; switching to an allowed theme changes the rendered theme on the next request; a theme name not in Themes::list returns VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/the-cpanel-interface/the-cpanel-interface/",
     "upstreamFeatureKey": "style",
     "upstreamAcl": "",
@@ -2515,7 +2514,7 @@ export const specs: ToolSpec[] = [
       "Server-wide blocklist file of common/forbidden domains prevents users from parking them",
       "Resellers see only aliases on accounts they own (when the interface is enabled for them)"
     ],
-    "acceptance": "Unparking alias b.test from account u1 removes it from u1's domain list and deletes its zone; parking a domain present in the blocked-common-domains list is rejected with DOMAIN_BLOCKED.",
+    "acceptance": "Unparking alias b.test from account u1 removes it from u1's domain list and deletes its zone; parking a domain present in the blocked-common-domains list is rejected with FORBIDDEN.",
     "source": "https://docs.cpanel.net/whm/account-information/list-parked-domains/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -2599,7 +2598,7 @@ export const specs: ToolSpec[] = [
       "Enforces reseller limits (account count, disk/bandwidth totals unless overselling, per-package allow/number); resellers lacking edit-account must pick a package; nameservers must be configured server-wide first",
       "On success shows a summary and a link into the new user panel; skeleton files are copied into the new home"
     ],
-    "acceptance": "A reseller with account_limit=2 already owning 2 accounts gets 409 LIMIT_EXCEEDED on POST /xwhm/accounts; usernames '1abc' or 'testsite' get 422 USERNAME_INVALID; dmarc=1 with spf=0 is rejected with DMARC_REQUIRES_SPF_DKIM; a valid request creates the system user, home dir, vhost and DNS zone in one call.",
+    "acceptance": "A reseller with account_limit=2 already owning 2 accounts gets 409 LIMIT_EXCEEDED on POST /xwhm/accounts; usernames '1abc' or 'testsite' get VALIDATION; dmarc=1 with spf=0 is rejected with VALIDATION; a valid request creates the system user, home dir, vhost and DNS zone in one call.",
     "source": "https://docs.cpanel.net/whm/account-functions/create-a-new-account/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "create-acct",
@@ -2620,7 +2619,7 @@ export const specs: ToolSpec[] = [
       "On save, if values diverge from the assigned package, offer: switch to a matching package, create new package named <oldpackage>_<user>, update the package for all its accounts, detach from any package, or keep (discouraged)",
       "Optionally apply firewall changes during modification"
     ],
-    "acceptance": "Changing maxaddon on an account assigned to 'basic' returns PACKAGE_CONFLICT listing the five resolutions; choosing 'create' produces package 'basic_user1', assigns it to user1, and leaves other 'basic' accounts unchanged.",
+    "acceptance": "Changing maxaddon or any other package limit on an account assigned to 'basic' returns CONFLICT listing the five resolutions; choosing 'create' produces package 'basic_user1', assigns it to user1, and leaves other 'basic' accounts unchanged; 'keep' holds the value on the account; 'detach' is refused with PRECONDITION_FAILED because every account keeps a package.",
     "source": "https://docs.cpanel.net/whm/account-functions/modify-an-account/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "edit-account",
@@ -2651,7 +2650,7 @@ export const specs: ToolSpec[] = [
       "Optional Digest Authentication toggle for WebDAV clients",
       "Existing passwords are never displayed or recoverable"
     ],
-    "acceptance": "Changing u1's password with db_pass_update=1 lets u1 log in to the user panel and to MySQL with the new value; a password scoring below the configured minimum returns WEAK_PASSWORD.",
+    "acceptance": "Changing u1's password with db_pass_update=1 lets u1 log in to the user panel and to MySQL with the new value; a password scoring below the configured minimum returns VALIDATION.",
     "source": "https://docs.cpanel.net/whm/account-functions/password-modification/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "passwd",
@@ -2725,7 +2724,7 @@ export const specs: ToolSpec[] = [
       "Applying copies the package limits, feature list, shell/CGI and theme onto the account",
       "Does not change the account's IP address (use Change Site's IP)"
     ],
-    "acceptance": "Moving u1 from 'basic' to 'pro' makes every u1 limit equal to 'pro' and leaves its IP unchanged; a reseller picking a package not allowed for it returns FORBIDDEN_PACKAGE, and one whose per-package number is reached returns LIMIT_EXCEEDED.",
+    "acceptance": "Moving u1 from 'basic' to 'pro' makes every u1 limit equal to 'pro' and leaves its IP unchanged; a reseller picking a package not allowed for it returns FORBIDDEN, and one whose per-package number is reached returns LIMIT_EXCEEDED.",
     "source": "https://docs.cpanel.net/whm/account-functions/upgrade-downgrade-an-account/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "upgrade-account",
@@ -2741,7 +2740,7 @@ export const specs: ToolSpec[] = [
       "Effects: web traffic redirected to the suspended template, logins blocked by invalidating the stored password hash, password changes refused while suspended, inbound mail handled per server policy; suspending a team owner also suspends its team users",
       "Locked suspensions can be lifted only by root-level users"
     ],
-    "acceptance": "After suspending u1 with reason 'Nonpayment', HTTP requests to u1's domains return the suspended template, user-panel login fails, and a password change returns ACCOUNT_SUSPENDED; after unsuspend the original password works again.",
+    "acceptance": "After suspending u1 with reason 'Nonpayment', HTTP requests to u1's domains return the suspended template, user-panel login fails, and a password change returns FORBIDDEN; after unsuspend the original password works again.",
     "source": "https://docs.cpanel.net/whm/account-functions/manage-account-suspension/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "suspend-acct",
@@ -2757,7 +2756,7 @@ export const specs: ToolSpec[] = [
       "Explicit confirmation step before deletion",
       "Deletes home, databases, mail and team users; irreversible; existing backups are not deleted automatically"
     ],
-    "acceptance": "Terminating u1 with keepdns=1 removes the system user, home dir and databases while u1's zone still resolves; a delete request without the confirmation token returns CONFIRMATION_REQUIRED; u1's backups remain on disk.",
+    "acceptance": "Terminating u1 with keepdns=1 removes the system user, home dir and databases while u1's zone still resolves; a delete request without the confirmation token returns VALIDATION; u1's backups remain on disk.",
     "source": "https://docs.cpanel.net/whm/account-functions/terminate-accounts/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "kill-acct",
@@ -2993,7 +2992,7 @@ export const specs: ToolSpec[] = [
       "Package extensions section (only when installed); root can restrict extensions to root-owned plans",
       "Reseller privilege gates: unlimited values, unlimited disk/bandwidth, custom email limits, shell, dedicated IP, addon and alias domains"
     ],
-    "acceptance": "A reseller lacking allow-unlimited-disk-pkgs creating a plan with quota=unlimited gets FORBIDDEN_UNLIMITED; root creating 'gold' with maxaddon=0 yields accounts whose addon-domain creation is refused with LIMIT_EXCEEDED; creating a plan named 'extensions' returns NAME_RESERVED.",
+    "acceptance": "A reseller lacking allow-unlimited-disk-pkgs creating a plan with quota=unlimited gets FORBIDDEN; root creating 'gold' with maxaddon=0 yields accounts whose addon-domain creation is refused with LIMIT_EXCEEDED; creating a plan named 'extensions' returns VALIDATION.",
     "source": "https://docs.cpanel.net/whm/packages/add-a-package/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "add-pkg",
@@ -3021,7 +3020,7 @@ export const specs: ToolSpec[] = [
       "Root-only extensions appear disabled to resellers and are preserved on save",
       "Warn against assigning the 'disabled' feature list"
     ],
-    "acceptance": "Raising 'gold' maxpop from 10 to 20 makes every account on 'gold' report maxpop=20 on the next read; a request changing the plan name or IP flag returns IMMUTABLE_FIELD.",
+    "acceptance": "Raising 'gold' maxpop from 10 to 20 makes every account on 'gold' report maxpop=20 on the next read; a request changing the plan name or IP flag returns VALIDATION.",
     "source": "https://docs.cpanel.net/whm/packages/edit-a-package/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "edit-pkg",
@@ -3035,7 +3034,7 @@ export const specs: ToolSpec[] = [
       "Refused while any account is assigned to the plan",
       "Permanent; must be recreated to restore"
     ],
-    "acceptance": "Deleting a plan assigned to at least one account returns PACKAGE_IN_USE with the count; deleting an unused plan removes it from listpkgs.",
+    "acceptance": "Deleting a plan assigned to at least one account returns CONFLICT with the count; deleting an unused plan removes it from listpkgs.",
     "source": "https://docs.cpanel.net/whm/packages/delete-a-package/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "add-pkg",
@@ -3096,7 +3095,7 @@ export const specs: ToolSpec[] = [
       "Warnings on super and root-level privileges (they bypass package/resource limits; 'all' equals root)",
       "Only root or root-level resellers may change another reseller's privileges"
     ],
-    "acceptance": "Removing create-acct from reseller R makes R's POST /xwhm/accounts return FORBIDDEN_ACL while GET /xwhm/accounts (list-accts) still works; granting 'all' lets R list accounts it does not own.",
+    "acceptance": "Removing create-acct from reseller R makes R's POST /xwhm/accounts return FORBIDDEN while GET /xwhm/accounts (list-accts) still works; granting 'all' lets R list accounts it does not own.",
     "source": "https://docs.cpanel.net/whm/resellers/edit-reseller-nameservers-and-privileges/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3142,7 +3141,7 @@ export const specs: ToolSpec[] = [
       "Resource limits only count accounts that are on packages; super privileges let resellers bypass them",
       "Unlimited-disk/unlimited-bandwidth package privileges cannot be granted while resource limits are on"
     ],
-    "acceptance": "With disk limit 10000 MB and disk overselling off, R creating an account whose plan quota would raise R's allocated total to 10500 MB gets LIMIT_EXCEEDED; with overselling on the same request succeeds; with account_limit=5 the sixth account is refused.",
+    "acceptance": "With disk limit 10000 MB and disk overselling off, R creating an account whose plan quota would raise R's allocated total to 10500 MB gets OVERSELL_BLOCKED; with overselling on the same request succeeds; with account_limit=5 the sixth account is refused.",
     "source": "https://docs.cpanel.net/whm/resellers/edit-reseller-nameservers-and-privileges/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3157,7 +3156,7 @@ export const specs: ToolSpec[] = [
       "An explicit 'no limit' flag disables package restrictions",
       "Unlimited-quota accounts cannot be constrained by these limits"
     ],
-    "acceptance": "With 'gold' allowed and number=3, R's fourth account on 'gold' (via create or upgrade) returns LIMIT_EXCEEDED; using a package not marked allowed returns FORBIDDEN_PACKAGE.",
+    "acceptance": "With 'gold' allowed and number=3, R's fourth account on 'gold' (via create or upgrade) returns LIMIT_EXCEEDED; using a package not marked allowed returns FORBIDDEN.",
     "source": "https://docs.cpanel.net/whm/resellers/edit-reseller-nameservers-and-privileges/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3280,7 +3279,7 @@ export const specs: ToolSpec[] = [
       "Scan shows source summary, rescan option and destination free IPs (accounts with dedicated IPs fail if none are free)",
       "Requirements: ports 2087 and SSH open, IPv4 present, no updates running during transfer"
     ],
-    "acceptance": "Scanning a source with a wrong password returns AUTH_FAILED and creates no session; correct credentials return a session id plus the remote inventory of accounts and packages; transfer_threads=101 is rejected with VALIDATION_ERROR.",
+    "acceptance": "Scanning a source with a wrong password returns FORBIDDEN and creates no session; correct credentials return a session id plus the remote inventory of accounts and packages; transfer_threads=101 is rejected with VALIDATION.",
     "source": "https://docs.cpanel.net/whm/transfers/transfer-tool/prepare-a-source-server/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "rearrange-accts",
@@ -3354,7 +3353,7 @@ export const specs: ToolSpec[] = [
       "Summary of severe warnings: rejected log files, renamed databases and DB users, skipped grant tables, with rename actions",
       "Per-item status categories: success, altered, failed, dangerous, skipped, warning"
     ],
-    "acceptance": "get state always returns one of TRANSFER_PENDING, TRANSFER_INPROGRESS, RESTORE_PENDING, RESTORE_INPROGRESS, PENDING, COMPLETED, FAILED; pausing an in-progress session stops new items and starting it resumes; a DB renamed on clash appears in the summary with old and new names.",
+    "acceptance": "get state always returns one of created, connected, inventoried, selected, reviewed, applying, completed, failed, cancelled; pausing an in-progress session stops new items and starting it resumes; a DB renamed on clash appears in the summary with old and new names.",
     "source": "https://docs.cpanel.net/whm/transfers/account-transfer/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "rearrange-accts",
@@ -3373,7 +3372,7 @@ export const specs: ToolSpec[] = [
       "Accepted archive names (cpmove-USER[.tar[.gz]], USER.tar[.gz], dated backup-...USER.tar[.gz]) from allowed directories only",
       "Needs free disk of at least twice the archive size; 2FA settings are not carried over"
     ],
-    "acceptance": "Restoring /home/cpmove-u1.tar.gz with overwrite=0 while u1 exists returns ACCOUNT_EXISTS; an archive under /tmp is rejected with PATH_NOT_ALLOWED; remote mode with a wrong account password returns AUTH_FAILED.",
+    "acceptance": "Restoring /home/cpmove-u1.tar.gz with overwrite=0 while u1 exists returns CONFLICT; an archive under /tmp is rejected with VALIDATION; remote mode with a wrong account password returns FORBIDDEN.",
     "source": "https://docs.cpanel.net/whm/transfers/transfer-or-restore-a-cpanel-account/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "rearrange-accts",
@@ -3454,7 +3453,7 @@ export const specs: ToolSpec[] = [
       "Defaults: webmail theme, auto cgi-bin alias (yes), A-record TTL 14400 (0..2147483647), NS-record TTL 86400, access-log style combined or common",
       "Nameservers 1-4 with a lookup helper that resolves and sets their A/AAAA glue; account creation is blocked until nameservers are set"
     ],
-    "acceptance": "Saving TTL=-1 or a shared IPv6 inside an existing IPv6 range returns VALIDATION_ERROR, and createAccount returns NAMESERVERS_NOT_CONFIGURED while ns1/ns2 are empty.",
+    "acceptance": "Saving TTL=-1 or a shared IPv6 inside an existing IPv6 range returns VALIDATION, and createAccount returns PRECONDITION_FAILED while ns1/ns2 are empty.",
     "source": "https://docs.cpanel.net/whm/server-configuration/basic-webhost-manager-setup/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "basic-whm-functions",
@@ -3469,7 +3468,7 @@ export const specs: ToolSpec[] = [
       "Optional steps can be skipped; contact email, hostname and nameservers are mandatory",
       "Final step shows a summary of applied changes and links to each tool for later edits"
     ],
-    "acceptance": "On a fresh install every root admin route except the wizard and logout redirects to the wizard until it is completed; afterwards POST /wizard/complete returns ALREADY_COMPLETED.",
+    "acceptance": "On a fresh install every root admin route except the wizard and logout redirects to the wizard until it is completed; afterwards POST /wizard/complete returns CONFLICT.",
     "source": "https://docs.cpanel.net/installation-guide/customize-your-installation/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3484,7 +3483,7 @@ export const specs: ToolSpec[] = [
       "Changes only root; other accounts use their own password tools",
       "Visible only to root or full-privilege resellers"
     ],
-    "acceptance": "A password scoring below the configured minimum returns WEAK_PASSWORD, a mismatched confirmation returns VALIDATION_ERROR, and after success SSH password login (if enabled) works with the new value only.",
+    "acceptance": "A password scoring below the configured minimum is refused with the reason weak_password, a mismatched confirmation with confirmation_mismatch, and after success SSH password login (if enabled) works with the new value only.",
     "source": "https://docs.cpanel.net/whm/server-configuration/change-root-password/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3519,7 +3518,7 @@ export const specs: ToolSpec[] = [
       "Backup jobs exit immediately when their backup system is disabled",
       "UI warns when a job would run more than once per day"
     ],
-    "acceptance": "Saving minute=60 or weekday=7 returns VALIDATION_ERROR; saving '0 2 * * *' for the backup job writes exactly that schedule into the root crontab entry for the backup runner.",
+    "acceptance": "Saving minute=60 or weekday=7 returns VALIDATION; saving '0 2 * * *' for the backup job writes exactly that schedule into the root crontab entry for the backup runner.",
     "source": "https://docs.cpanel.net/whm/server-configuration/configure-cpanel-cron-jobs/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3604,7 +3603,7 @@ export const specs: ToolSpec[] = [
       "Log and bandwidth processing intervals in 0.25-hour steps (log interval of 24 h or more recommended)",
       "Blackout hours for log analysis (bandwidth still counted) and an option to never overlap with backups"
     ],
-    "acceptance": "An interval of 0.3 h returns VALIDATION_ERROR (must be a multiple of 0.25), and a stats job due during a blackout hour starts at the first allowed hour instead.",
+    "acceptance": "An interval of 0.3 h returns VALIDATION (must be a multiple of 0.25), and a stats job due during a blackout hour starts at the first allowed hour instead.",
     "source": "https://docs.cpanel.net/whm/server-configuration/statistics-software-configuration/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3644,7 +3643,7 @@ export const specs: ToolSpec[] = [
       "Staging directory picker with automatic fallback when space is insufficient",
       "Push the same preferences to configuration-cluster peers with per-server result"
     ],
-    "acceptance": "Setting an unknown tier returns VALIDATION_ERROR, and with security updates on the hourly job installs a newer patch of the same major version but never a new major version.",
+    "acceptance": "Setting an unknown tier returns VALIDATION, and with security updates on the hourly job installs a newer patch of the same major version but never a new major version.",
     "source": "https://docs.cpanel.net/whm/server-configuration/update-preferences/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3710,7 +3709,7 @@ export const specs: ToolSpec[] = [
       "Some settings hide when the server role profile is not full-stack",
       "Single-key get/set API for automation"
     ],
-    "acceptance": "GET of an unknown key returns NOT_FOUND, PUT with a value outside the declared range returns VALIDATION_ERROR, and a valid PUT is returned unchanged by the next GET.",
+    "acceptance": "GET of an unknown key returns NOT_FOUND, PUT with a value outside the declared range returns VALIDATION, and a valid PUT is returned unchanged by the next GET.",
     "source": "https://docs.cpanel.net/whm/server-configuration/tweak-settings/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3726,7 +3725,7 @@ export const specs: ToolSpec[] = [
       "Panel daemon: max handlers 200 (200-16384), max process memory 4096 MB, max HTTP upload size (1-10240 MB or unlimited), required free quota after upload 5 MB, listen on IPv6 (off)",
       "I/O priority (0-7) for bandwidth (6), stats (7), nightly backups (6), user backups (7), user actions (6), quota checks (6); default jailed shell (off); file-manager trash auto-empty days; do-not-touch-firewall toggles; reseller limit enforcement"
     ],
-    "acceptance": "Setting the monitor interval to 30 returns VALIDATION_ERROR (60-7200) and setting it to 600 makes consecutive service checks 600 s apart.",
+    "acceptance": "Setting the monitor interval to 30 returns VALIDATION (60-7200) and setting it to 600 makes consecutive service checks 600 s apart.",
     "source": "https://docs.cpanel.net/whm/server-configuration/tweak-settings/system/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3768,7 +3767,7 @@ export const specs: ToolSpec[] = [
       "Max POST size 55 MB (55-2047); max upload size 50 MB (50-2047)",
       "Optional bytecode loaders for bundled encoded apps"
     ],
-    "acceptance": "Setting memory limit to 64 returns VALIDATION_ERROR, and no customer php.ini changes after any save on this tab.",
+    "acceptance": "Setting memory limit to 64 returns VALIDATION, and no customer php.ini changes after any save on this tab.",
     "source": "https://docs.cpanel.net/whm/server-configuration/tweak-settings/php/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3840,7 +3839,7 @@ export const specs: ToolSpec[] = [
       "Panel log rotation size threshold 300 MB (min 10)",
       "Retention: mail stats 10 days (1-365000), WAF hits 7 days (0=forever), updater logs 45 days (3-999), web server logs forever unless 3-999 set"
     ],
-    "acceptance": "A rotation threshold of 5 returns VALIDATION_ERROR, and a panel log exceeding the threshold is compressed and truncated on the next rotation pass.",
+    "acceptance": "A rotation threshold of 5 returns VALIDATION, and a panel log exceeding the threshold is compressed and truncated on the next rotation pass.",
     "source": "https://docs.cpanel.net/whm/server-configuration/tweak-settings/stats-and-logs/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3854,7 +3853,7 @@ export const specs: ToolSpec[] = [
       "Auto-tune open_files_limit and max_allowed_packet (on); auto-size InnoDB buffer pool by RAM (off)",
       "Require username_ prefix on new databases and DB users (on); force 8-character prefix (off)"
     ],
-    "acceptance": "With prefix enforcement on, user alice creating database 'shop' returns VALIDATION_ERROR while 'alice_shop' succeeds.",
+    "acceptance": "With prefix enforcement on, user alice creating database 'shop' returns VALIDATION while 'alice_shop' succeeds.",
     "source": "https://docs.cpanel.net/whm/server-configuration/tweak-settings/sql/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3868,7 +3867,7 @@ export const specs: ToolSpec[] = [
       "Parallel compressor processes 1-128 (default CPU core count)",
       "Work-unit size 128-524288 KiB (4096)"
     ],
-    "acceptance": "Level 10 returns VALIDATION_ERROR; level 1 produces a backup archive that is larger than the same backup at level 9.",
+    "acceptance": "Level 10 returns VALIDATION; level 1 produces a backup archive that is larger than the same backup at level 9.",
     "source": "https://docs.cpanel.net/whm/server-configuration/tweak-settings/compression/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -3965,7 +3964,7 @@ export const specs: ToolSpec[] = [
       "Bandwidth 1048576 MB",
       "Each value capped at 4294967296 MB"
     ],
-    "acceptance": "A reseller without unlimited-disk privilege creating a plan without a disk value gets 10240 MB stored; a value above 4294967296 returns VALIDATION_ERROR.",
+    "acceptance": "A reseller without unlimited-disk privilege creating a plan without a disk value gets 10240 MB stored; a value above 4294967296 returns VALIDATION.",
     "source": "https://docs.cpanel.net/whm/server-configuration/tweak-settings/packages/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -4077,7 +4076,7 @@ export const specs: ToolSpec[] = [
       "Applies immediately and restarts services that embed the hostname; CalDAV/CardDAV briefly unavailable",
       "Prompts to add an A record for the new name; external auth redirect URIs must be updated"
     ],
-    "acceptance": "'www.example.com', '1host.example.com', 'host-' or a 61-character name return INVALID_HOSTNAME; a valid name is returned by the hostname API and used as the MTA primary hostname.",
+    "acceptance": "'www.example.com', '1host.example.com', 'host-' or a 61-character name return VALIDATION; a valid name is returned by the hostname API and used as the MTA primary hostname.",
     "source": "https://docs.cpanel.net/whm/networking-setup/change-hostname/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -4091,7 +4090,7 @@ export const specs: ToolSpec[] = [
       "Writes the system resolver config",
       "Warns that public open resolvers can break DNS blocklist lookups in the MTA"
     ],
-    "acceptance": "Saving one resolver returns VALIDATION_ERROR; saving three valid addresses writes exactly three nameserver lines in the given order.",
+    "acceptance": "Saving one resolver returns VALIDATION; saving three valid addresses writes exactly three nameserver lines in the given order.",
     "source": "https://docs.cpanel.net/whm/networking-setup/resolver-configuration/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -4196,11 +4195,11 @@ export const specs: ToolSpec[] = [
     "id": "external-authentication",
     "behaviors": [
       "Configure provider: client ID, client secret, redirect URI, button colours/icon",
-      "Per-service enable toggles (user panel, admin panel, webmail); buttons only on HTTPS login pages",
+      "Per-service enable toggles (user panel, admin panel); buttons only on HTTPS login pages",
       "Users may link several external identities; local 2FA still applies",
-      "Admins list and unlink a user's identities; removing a provider revokes all links; misconfigured providers auto-disable"
+      "Admins list and unlink a user's identities; removing a provider revokes all links; a provider that fails discovery is not saved"
     ],
-    "acceptance": "Disabling a provider for the admin panel removes its button from the admin login page and its callback returns PROVIDER_DISABLED.",
+    "acceptance": "Disabling a provider for the admin panel removes its button from the admin login page and its callback refuses with the reason provider_disabled.",
     "source": "https://docs.cpanel.net/whm/security-center/manage-external-authentications/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -4403,7 +4402,7 @@ export const specs: ToolSpec[] = [
       "Admins cannot enrol other users; clock skew causes 'invalid code' - NTP sync required",
       "Optional enforcement for admin API calls through the security policy extension"
     ],
-    "acceptance": "With 2FA enrolled, a correct password plus wrong code returns TOTP_INVALID, a code from the adjacent 30-second step is accepted, and an admin-disabled user can log in with password only.",
+    "acceptance": "With 2FA enrolled, a correct password plus wrong code returns UNAUTHENTICATED, a code from the adjacent 30-second step is accepted, and an admin-disabled user can log in with password only.",
     "source": "https://docs.cpanel.net/whm/security-center/two-factor-authentication-for-whm/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -4480,7 +4479,7 @@ export const specs: ToolSpec[] = [
       "Refuses if the service is stopped/disabled (use Service Manager)",
       "Failure output shown with link to logs"
     ],
-    "acceptance": "Restarting returns success and a new daemon PID; on a disabled service it returns SERVICE_DISABLED.",
+    "acceptance": "Restarting returns success and a new daemon PID; on a disabled service it returns PRECONDITION_FAILED.",
     "source": "https://docs.cpanel.net/whm/restart-services/restart-services/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "restart",
@@ -4493,7 +4492,7 @@ export const specs: ToolSpec[] = [
       "Confirm then restart",
       "Refuses when FTP is disabled"
     ],
-    "acceptance": "With FTP disabled the call returns SERVICE_DISABLED; otherwise port 21 accepts connections after the restart.",
+    "acceptance": "With FTP disabled the call returns PRECONDITION_FAILED; otherwise port 21 accepts connections after the restart.",
     "source": "https://docs.cpanel.net/whm/restart-services/restart-services/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "restart",
@@ -4584,7 +4583,7 @@ export const specs: ToolSpec[] = [
       "Hidden when PostgreSQL is not installed",
       "Confirm then restart"
     ],
-    "acceptance": "Without PostgreSQL installed the endpoint returns NOT_INSTALLED.",
+    "acceptance": "Without PostgreSQL installed the endpoint returns PRECONDITION_FAILED.",
     "source": "https://docs.cpanel.net/whm/restart-services/restart-services/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "restart",
@@ -4611,7 +4610,7 @@ export const specs: ToolSpec[] = [
       "Built from the matching zone template",
       "One zone per domain"
     ],
-    "acceptance": "Adding a zone for an existing zone's domain returns ZONE_EXISTS; a new zone contains SOA, NS records for configured nameservers and an A record for the given IP.",
+    "acceptance": "Adding a zone for an existing zone's domain returns CONFLICT; a new zone contains SOA, NS records for configured nameservers and an A record for the given IP.",
     "source": "https://docs.cpanel.net/whm/dns-functions/add-a-dns-zone/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "create-dns",
@@ -4654,7 +4653,7 @@ export const specs: ToolSpec[] = [
       "Reset zone to template (removes custom records); raw zone view",
       "DNSSEC: list keys (tag, ZSK/KSK/CSK, algorithm, created, status), quick or custom create, activate/deactivate, delete, show DS, export, import"
     ],
-    "acceptance": "Adding a CNAME where an A record exists returns RECORD_CONFLICT, adding or deleting SOA returns OPERATION_NOT_ALLOWED, and each successful edit increments the SOA serial.",
+    "acceptance": "Adding a CNAME where an A record exists returns CONFLICT, adding SOA returns VALIDATION, the SOA is rendered from the zone and is never a stored record, and each successful edit increments the SOA serial.",
     "source": "https://docs.cpanel.net/whm/dns-functions/dns-zone-manager/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "edit-dns",
@@ -4668,7 +4667,7 @@ export const specs: ToolSpec[] = [
       "Placeholders for domain, owner, IPv4/IPv6, FTP IP, nameservers and their IPs, glue names, mail host, contact email, TTL, NS TTL, serial, panel version",
       "Applies only to zones created after the change; reseller-owned templates take priority"
     ],
-    "acceptance": "Adding a TXT line to the shared-IP template makes it appear in the next new account's zone while existing zones stay unchanged; an unknown placeholder returns VALIDATION_ERROR.",
+    "acceptance": "Adding a TXT line to the shared-IP template makes it appear in the next new account's zone while existing zones stay unchanged; an unknown placeholder returns VALIDATION.",
     "source": "https://docs.cpanel.net/whm/dns-functions/edit-zone-templates/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -4774,7 +4773,7 @@ export const specs: ToolSpec[] = [
       "Changes all records including SOA and NS",
       "Option not to sync the change across the DNS cluster"
     ],
-    "acceptance": "TTL 300 on two zones sets every record (including SOA and NS) in both to 300, and TTL 0 or 1.5 returns VALIDATION_ERROR.",
+    "acceptance": "TTL 300 on two zones sets every record (including SOA and NS) in both to 300, and TTL 0 or 1.5 returns VALIDATION.",
     "source": "https://docs.cpanel.net/whm/dns-functions/set-zone-time-to-live/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "edit-dns",
@@ -4815,7 +4814,7 @@ export const specs: ToolSpec[] = [
       "Push action adds them to every account's remote-access list",
       "Users can hide but not permanently remove admin-added hosts"
     ],
-    "acceptance": "'DB.Example.com' returns VALIDATION_ERROR (lowercase required); after pushing 203.0.113.10, every MySQL user has a grant for that host.",
+    "acceptance": "'DB.Example.com' returns VALIDATION (lowercase required); after pushing 203.0.113.10, every MySQL user has a grant for that host.",
     "source": "https://docs.cpanel.net/whm/sql-services/additional-mysql-access-hosts/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -4868,7 +4867,7 @@ export const specs: ToolSpec[] = [
       "Rename with optional new password",
       "Length limits including prefix: MySQL 5.7+ 32, MariaDB 47, legacy MySQL 16"
     ],
-    "acceptance": "Renaming to a 33-character name on MySQL 8 returns VALIDATION_ERROR; a valid rename keeps all grants under the new name.",
+    "acceptance": "Renaming to a 33-character name on MySQL 8 returns VALIDATION; a valid rename keeps all grants under the new name.",
     "source": "https://docs.cpanel.net/whm/sql-services/manage-database-users/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -4901,7 +4900,7 @@ export const specs: ToolSpec[] = [
       "Rename keeps prefix rule; max 64 chars (63 with prefix), underscore counts double",
       "Rename = create new, copy data, recreate grants and routines, drop old; active connections are killed"
     ],
-    "acceptance": "Renaming alice_shop to shop2 with prefixing on returns VALIDATION_ERROR; renaming to alice_shop2 preserves tables, row counts and user grants.",
+    "acceptance": "Renaming alice_shop to shop2 with prefixing on returns VALIDATION; renaming to alice_shop2 preserves tables, row counts and user grants.",
     "source": "https://docs.cpanel.net/whm/sql-services/manage-databases/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -4965,7 +4964,7 @@ export const specs: ToolSpec[] = [
       "Unattended or interactive mode; streamed progress with autoscroll; final success/fix-needed message",
       "No downgrades; MySQL to MariaDB is one-way; log files kept per run"
     ],
-    "acceptance": "A target older than current returns DOWNGRADE_NOT_SUPPORTED, and starting without acknowledging every warning returns WARNINGS_NOT_ACKNOWLEDGED.",
+    "acceptance": "A target older than current returns VALIDATION, and starting without acknowledging every warning returns PRECONDITION_FAILED.",
     "source": "https://docs.cpanel.net/whm/sql-services/mysql-or-mariadb-upgrade/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -5006,7 +5005,7 @@ export const specs: ToolSpec[] = [
       "Added as aliases on the main interface and activated at boot",
       "Pool rebuilt after adding"
     ],
-    "acceptance": "Adding 192.0.2.128/25 with exclusion 192.0.2.130 adds 127 addresses to the pool, and a /23 returns VALIDATION_ERROR.",
+    "acceptance": "Adding 192.0.2.128/25 with exclusion 192.0.2.130 adds 127 addresses to the pool, and a /23 returns VALIDATION.",
     "source": "https://docs.cpanel.net/whm/ip-functions/add-a-new-ip-address/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -5073,7 +5072,7 @@ export const specs: ToolSpec[] = [
       "Must not contain the shared IPv6; reserve the gateway as /128 first",
       "Delete blocked while any address is assigned; requires panel IPv6 listening"
     ],
-    "acceptance": "Deleting a range with an assigned address returns IN_USE, and a range containing the shared IPv6 returns VALIDATION_ERROR.",
+    "acceptance": "Deleting a range with an assigned address returns IN_USE, and a range containing the shared IPv6 returns VALIDATION.",
     "source": "https://docs.cpanel.net/whm/ip-functions/ipv6-address-ranges/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -5112,7 +5111,7 @@ export const specs: ToolSpec[] = [
       "Delete only unused addresses",
       "NAT view: local IP, public IP or 'not routable', warnings; validate via external echo; edit mapping (public IP unique)"
     ],
-    "acceptance": "Deleting an IP used as any account's or the shared IP returns IN_USE, and mapping two local IPs to one public IP returns CONFLICT.",
+    "acceptance": "Deleting an IP used as any account's or the shared IP returns CONFLICT, and mapping two local IPs to one public IP returns CONFLICT.",
     "source": "https://docs.cpanel.net/whm/ip-functions/show-or-delete-current-ip-addresses/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -5256,7 +5255,7 @@ export const specs: ToolSpec[] = [
       "Saves to the version's own php.ini; reset by restoring the packaged default",
       "Format checks only; does not guarantee PHP runs"
     ],
-    "acceptance": "Setting memory_limit=256M for PHP 8.2 makes ini_get('memory_limit') return 256M on that version after reload, and a directive named 'true' returns VALIDATION_ERROR.",
+    "acceptance": "Setting memory_limit=256M for PHP 8.2 makes ini_get('memory_limit') return 256M on that version after reload, and a directive named 'true' returns VALIDATION.",
     "source": "https://docs.cpanel.net/whm/software/multiphp-ini-editor/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -5308,7 +5307,7 @@ export const specs: ToolSpec[] = [
       "Bulk: set version, set inherit, disable FPM",
       "Per-domain pool values and INI overrides each with a lock that makes them non-overridable"
     ],
-    "acceptance": "Enabling FPM on an inheriting domain returns FPM_UNAVAILABLE_FOR_INHERIT, and Max Children 0 or 10001 returns VALIDATION_ERROR (1-10000).",
+    "acceptance": "Enabling FPM on an inheriting domain returns FPM_UNAVAILABLE_FOR_INHERIT, and Max Children 0 or 10001 returns VALIDATION (1-10000).",
     "source": "https://docs.cpanel.net/whm/software/multiphp-manager-for-whm-user-domain-settings/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -5437,7 +5436,7 @@ export const specs: ToolSpec[] = [
       "Connections: KeepAlive (off), KeepAliveTimeout 5 s, MaxKeepAliveRequests 100 (0 = unlimited), Timeout 300 s; keep-alive values are mirrored to the reverse proxy",
       "Symlink race protection (off); save, then rebuild+restart; reset discards unsaved edits"
     ],
-    "acceptance": "Saving MaxRequestWorkers=300 with ServerLimit=256 returns VALIDATION_ERROR; saving KeepAlive=On regenerates the config, passes a config test and gracefully restarts the web server.",
+    "acceptance": "Saving MaxRequestWorkers=300 with ServerLimit=256 returns VALIDATION; saving KeepAlive=On regenerates the config, passes a config test and gracefully restarts the web server.",
     "source": "https://docs.cpanel.net/whm/service-configuration/global-configuration/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -5498,7 +5497,7 @@ export const specs: ToolSpec[] = [
       "Applies per process, not to the whole server",
       "Takes effect after rebuild and restart"
     ],
-    "acceptance": "A value of 1 or a non-integer returns VALIDATION_ERROR; a valid value appears as the memory rlimit directive in the generated config.",
+    "acceptance": "A value of 1 or a non-integer returns VALIDATION; a valid value appears as the memory rlimit directive in the generated config.",
     "source": "https://docs.cpanel.net/whm/service-configuration/memory-usage-restrictions/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -5552,7 +5551,7 @@ export const specs: ToolSpec[] = [
       "Cipher list and protocol list text fields",
       "Defaults allow only TLS 1.2+ with modern AEAD/ECDHE ciphers"
     ],
-    "acceptance": "A protocol list enabling TLS 1.0 returns VALIDATION_ERROR, and a TLS 1.1 handshake to the WebDAV port fails with defaults.",
+    "acceptance": "A protocol list enabling TLS 1.0 returns VALIDATION, and a TLS 1.1 handshake to the WebDAV port fails with defaults.",
     "source": "https://docs.cpanel.net/whm/service-configuration/cpanel-web-disk-configuration/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -5727,7 +5726,7 @@ export const specs: ToolSpec[] = [
       "Extra listening port for the MTA alternate-port service",
       "Background log tailers (mail stats, WAF log, mail health, bandwidth) toggled here"
     ],
-    "acceptance": "monitor=true on a disabled service returns VALIDATION_ERROR, and with monitoring on, killing the process leads to an automatic restart and a recovery notice within two check intervals.",
+    "acceptance": "monitor=true on a disabled service returns VALIDATION, and with monitoring on, killing the process leads to an automatic restart and a recovery notice within two check intervals.",
     "source": "https://docs.cpanel.net/whm/service-configuration/service-manager/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -5764,7 +5763,7 @@ export const specs: ToolSpec[] = [
       "Utilisation: pool count and how often pools hit Max Children",
       "Restart FPM masters for all versions"
     ],
-    "acceptance": "Setting system Max Requests to 500 regenerates pm.max_requests = 500 for domains without overrides and leaves overridden domains unchanged; Max Children 0 returns VALIDATION_ERROR.",
+    "acceptance": "Setting system Max Requests to 500 regenerates pm.max_requests = 500 for domains without overrides and leaves overridden domains unchanged; Max Children 0 returns VALIDATION.",
     "source": "https://docs.cpanel.net/whm/software/multiphp-manager-for-whm-system-settings/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -5777,7 +5776,7 @@ export const specs: ToolSpec[] = [
       "Fields: optional email, domains (one per line, wildcard allowed), key type (RSA-2048 default, RSA-4096, ECDSA P-256, P-384), city, state, country, organisation, division, optional challenge passphrase",
       "Outputs shown and stored in the server SSL store; optional email copy"
     ],
-    "acceptance": "Key type ECDSA P-256 yields a prime256v1 key and a CSR whose SAN list equals the submitted domains; an invalid country code returns VALIDATION_ERROR.",
+    "acceptance": "Key type ECDSA P-256 yields a prime256v1 key and a CSR whose SAN list equals the submitted domains; an invalid country code returns VALIDATION.",
     "source": "https://docs.cpanel.net/whm/ssl-tls/generate-an-ssl-certificate-and-signing-request/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "ssl-gencrt",
@@ -5890,7 +5889,7 @@ export const specs: ToolSpec[] = [
       "Databases: per-account dumps, whole data directory, or both; PostgreSQL optional",
       "Directories: backup dir /backup, staging dir rules, keep local copies, mount backup drive as needed"
     ],
-    "acceptance": "Saving with no schedule or with neither accounts nor system files returns VALIDATION_ERROR, staging dir '/home' or '/etc/x' returns INVALID_PATH, and retention 10000 returns VALIDATION_ERROR.",
+    "acceptance": "Saving with no schedule or with neither accounts nor system files returns VALIDATION, staging dir '/home' or '/etc/x' returns VALIDATION, and retention 10000 returns VALIDATION.",
     "source": "https://docs.cpanel.net/whm/backup/backup-configuration/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -5915,7 +5914,7 @@ export const specs: ToolSpec[] = [
       "Type-specific fields (see notes); key or password auth for SFTP/rsync",
       "Save, or save and validate; per-row validate; validation results tab"
     ],
-    "acceptance": "Validating an SFTP target with wrong credentials records status failed with an auth message without affecting other targets, and timeout 20 returns VALIDATION_ERROR.",
+    "acceptance": "Validating an SFTP target with wrong credentials records status failed with an auth message without affecting other targets, and timeout 20 returns VALIDATION.",
     "source": "https://docs.cpanel.net/whm/backup/backup-configuration/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -5997,7 +5996,7 @@ export const specs: ToolSpec[] = [
       "Secret shown once at creation; list with name, created, expires, IPs; yellow when expiring, red when expired (not auto-deleted)",
       "Edit, revoke one or all; deleting an account revokes its tokens; suspended accounts cannot create tokens"
     ],
-    "acceptance": "Requesting a privilege the creator lacks returns FORBIDDEN, a token limited to 198.51.100.0/24 used from 203.0.113.9 returns 403 TOKEN_IP_DENIED, and a revoked token returns 401.",
+    "acceptance": "Requesting a privilege the creator lacks returns FORBIDDEN, a token limited to 198.51.100.0/24 used from 203.0.113.9 returns FORBIDDEN, and a revoked token returns 401.",
     "source": "https://docs.cpanel.net/whm/development/manage-api-tokens-in-whm/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "manage-api-tokens",
@@ -6024,7 +6023,7 @@ export const specs: ToolSpec[] = [
       "Result as tree, table or raw (headers separated)",
       "Warns that calls act on live data"
     ],
-    "acceptance": "With the setting off the shell returns FEATURE_DISABLED; with it on, a list call with page size 10 returns at most 10 rows plus pagination metadata.",
+    "acceptance": "With the setting off the shell returns FORBIDDEN; with it on, a list call with page size 10 returns at most 10 rows plus pagination metadata.",
     "source": "https://docs.cpanel.net/whm/development/api-shell-for-whm/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -6051,7 +6050,7 @@ export const specs: ToolSpec[] = [
       "Plugin name: lowercase letters, digits, hyphens, underscores, unique",
       "Duplicate ID requires explicit overwrite; generates a downloadable archive"
     ],
-    "acceptance": "A 64x64 icon returns VALIDATION_ERROR, and a duplicate ID without overwrite=true returns CONFLICT.",
+    "acceptance": "A 64x64 icon returns VALIDATION, and a duplicate ID without overwrite=true returns CONFLICT.",
     "source": "https://docs.cpanel.net/whm/development/cpanel-plugin-file-generator/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "all",
@@ -6082,7 +6081,7 @@ export const specs: ToolSpec[] = [
       "Logout destroys the server-side session; idle sessions expire",
       "Suspended mailboxes, or mailboxes whose login is disabled, cannot sign in"
     ],
-    "acceptance": "POST /xmail/login with a correct address and password returns a session cookie; the same call for a suspended mailbox returns 403 ACCOUNT_SUSPENDED and sets no cookie; 5 bad passwords from one IP within 10 minutes returns 429 LOGIN_LOCKED.",
+    "acceptance": "POST /xmail/login with a correct address and password returns a session cookie; the same call for a suspended mailbox returns FORBIDDEN and sets no cookie; 5 bad passwords from one IP within 10 minutes returns LOCKED_OUT.",
     "source": "https://docs.cpanel.net/webmail/the-webmail-interface/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -6116,7 +6115,7 @@ export const specs: ToolSpec[] = [
       "Folder pane shows unread counts; Trash and Junk offer an Empty action",
       "Rename keeps messages and moves subfolders with the parent"
     ],
-    "acceptance": "Creating 'Projects' under parent Inbox creates IMAP folder INBOX.Projects visible via IMAP LIST; deleting or renaming Inbox, Sent, Drafts or Trash returns 409 PROTECTED_FOLDER; creating a duplicate name under the same parent returns 409 FOLDER_EXISTS.",
+    "acceptance": "Creating 'Projects' under parent Inbox creates IMAP folder INBOX.Projects visible via IMAP LIST; deleting or renaming Inbox, Sent, Drafts or Trash returns CONFLICT; creating a duplicate name under the same parent returns CONFLICT.",
     "source": "https://docs.cpanel.net/knowledge-base/webmail/how-to-manage-webmail-folders/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -6169,7 +6168,7 @@ export const specs: ToolSpec[] = [
       "Send goes through authenticated SMTP submission and stores a copy in Sent",
       "Plan outbound rate limits apply"
     ],
-    "acceptance": "Sending stores exactly one copy in Sent with Message-ID and Date headers and removes the draft; a send that exceeds the mailbox's hourly outbound limit returns 429 SEND_RATE_LIMITED and nothing is queued.",
+    "acceptance": "Sending stores exactly one copy in Sent with Message-ID and Date headers and removes the draft; a send that exceeds the mailbox's hourly outbound limit returns LIMIT_EXCEEDED and nothing is queued.",
     "source": "https://docs.cpanel.net/webmail/webmail-clients/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -6203,7 +6202,7 @@ export const specs: ToolSpec[] = [
       "Download all attachments of a message as one zip",
       "Non-ASCII file names encoded per RFC 2231"
     ],
-    "acceptance": "Adding files whose total exceeds the configured limit returns 413 ATTACHMENT_TOO_LARGE and the draft keeps its earlier attachments; downloading an attachment named with Arabic characters returns the same name and a SHA-256 identical to the uploaded file.",
+    "acceptance": "Adding files whose total exceeds the configured limit returns PRECONDITION_FAILED and the draft keeps its earlier attachments; downloading an attachment named with Arabic characters returns the same name and a SHA-256 identical to the uploaded file.",
     "source": "https://docs.cpanel.net/webmail/webmail-clients/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -6314,7 +6313,7 @@ export const specs: ToolSpec[] = [
       "Supports .well-known caldav/carddav redirects and SRV records",
       "Offers a downloadable device profile for one-tap setup"
     ],
-    "acceptance": "GET /.well-known/caldav on the mailbox domain redirects to the principal URL, and a CalDAV client logged in with the mailbox credentials discovers the default calendar.",
+    "acceptance": "GET /.well-known/caldav on the DAV port of the mailbox domain redirects to the server root, and a CalDAV client logged in with the mailbox credentials discovers the default calendar.",
     "source": "https://docs.cpanel.net/webmail/calendars-and-contacts-in-webmail/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -6364,7 +6363,7 @@ export const specs: ToolSpec[] = [
       "Filters run top to bottom; new ones are appended; drag to reorder",
       "Edit, rename and delete with confirmation"
     ],
-    "acceptance": "A filter 'Subject contains invoice' with action deliver to INBOX.Billing files a matching delivery there; conditions 'A or B and C' compile as A or (B and C); adding a pipe action on a plan without pipe permission returns 403 FEATURE_DISABLED.",
+    "acceptance": "A filter 'Subject contains invoice' with action deliver to INBOX.Billing files a matching delivery there; conditions 'A or B and C' compile as A or (B and C); adding a pipe action on a plan without pipe permission returns FORBIDDEN.",
     "source": "https://docs.cpanel.net/knowledge-base/email/how-to-configure-email-filters/",
     "upstreamFeatureKey": "blockers",
     "upstreamAcl": "",
@@ -6395,7 +6394,7 @@ export const specs: ToolSpec[] = [
       "Start immediately or at a set time; stop never or at a set time after the start",
       "No reply to mail scoring as spam (score 5 or higher), bounces, list mail or itself"
     ],
-    "acceptance": "With interval 24, two messages from one sender inside 24 hours produce exactly one reply; a stop time before the start returns 422 INVALID_SCHEDULE; creating a second autoresponder for the same address returns 409 AUTORESPONDER_EXISTS.",
+    "acceptance": "With interval 24, two messages from one sender inside 24 hours produce exactly one reply; a stop time before the start returns VALIDATION; creating a second autoresponder for the same address returns CONFLICT.",
     "source": "https://docs.cpanel.net/webmail/manage-your-inbox-in-webmail/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -6412,7 +6411,7 @@ export const specs: ToolSpec[] = [
       "Mailboxes using challenge-response manage forwarding inside that tool",
       "Loops and forwarding to itself are refused"
     ],
-    "acceptance": "After adding ext@example.org, a test delivery leaves one local copy and queues one outbound copy to ext@example.org; adding the mailbox's own address returns 422 FORWARD_LOOP.",
+    "acceptance": "After adding ext@example.org, a test delivery leaves one local copy and queues one outbound copy to ext@example.org; adding the mailbox's own address returns VALIDATION.",
     "source": "https://docs.cpanel.net/webmail/manage-your-inbox-in-webmail/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -6458,7 +6457,7 @@ export const specs: ToolSpec[] = [
       "One default identity; options to add the signature on new mail, replies and forwards, above or below the quote",
       "Create, edit, delete; the last identity cannot be deleted"
     ],
-    "acceptance": "Creating an identity with an address the mailbox does not control returns 403 IDENTITY_NOT_OWNED; switching identity in compose replaces the signature without duplicating it.",
+    "acceptance": "Creating an identity with an address the mailbox does not control returns FORBIDDEN; switching identity in compose replaces the signature without duplicating it.",
     "source": "https://docs.cpanel.net/knowledge-base/webmail/how-to-set-up-a-signature-in-webmail/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -6490,7 +6489,7 @@ export const specs: ToolSpec[] = [
       "Removal requires re-authentication",
       "Enrollment does not move with server transfers; users re-enroll"
     ],
-    "acceptance": "Confirming setup with a wrong code returns 422 INVALID_TOTP and 2FA stays off; once on, a login with only the password returns 401 TOTP_REQUIRED.",
+    "acceptance": "Confirming setup with a wrong code returns VALIDATION and 2FA stays off; once on, a login with only the password returns UNAUTHENTICATED.",
     "source": "https://docs.cpanel.net/webmail/edit-your-settings-in-webmail/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -6532,7 +6531,7 @@ export const specs: ToolSpec[] = [
       "Mail meeting or exceeding the threshold is deleted, not moved",
       "Per-mailbox value stays within limits set by the hosting account owner"
     ],
-    "acceptance": "Threshold 0 or 51 returns 422 OUT_OF_RANGE; with threshold 10 a delivery scored 12 is discarded and logged while one scored 9 is delivered.",
+    "acceptance": "Threshold 0 or 51 returns VALIDATION; with threshold 10 a delivery scored 12 is discarded and logged while one scored 9 is delivered.",
     "source": "https://docs.cpanel.net/webmail/fight-spam-in-webmail/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -6610,7 +6609,7 @@ export const specs: ToolSpec[] = [
       "Auto-setup: Apple profile, Thunderbird-style autoconfig XML, Outlook-style autodiscover",
       "Email the instructions to an address"
     ],
-    "acceptance": "GET /.well-known/autoconfig/mail/config-v1.1.xml?emailaddress=u@example.com returns IMAP 993 SSL and SMTP 465 SSL with username u@example.com; sending instructions to an invalid address returns 422 INVALID_EMAIL.",
+    "acceptance": "GET /.well-known/autoconfig/mail/config-v1.1.xml?emailaddress=u@example.com returns IMAP 993 SSL and SMTP 465 SSL with username u@example.com; sending instructions to an invalid address returns VALIDATION.",
     "source": "https://docs.cpanel.net/cpanel/email/set-up-mail-client/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -7289,7 +7288,7 @@ export const specs: ToolSpec[] = [
       "Offer a 'reset page settings' action that restores the default order",
       "Return to this page when the logo is clicked"
     ],
-    "acceptance": "A tool whose feature is disabled for the account is missing from the home page, and opening its route returns FEATURE_DISABLED. A custom group order survives logging out and back in. The reset action restores the default order.",
+    "acceptance": "A tool whose feature is disabled for the account is missing from the home page, and opening its route returns FORBIDDEN. A custom group order survives logging out and back in. The reset action restores the default order.",
     "source": "https://docs.cpanel.net/cpanel/the-cpanel-interface/the-cpanel-interface/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -7512,7 +7511,7 @@ export const specs: ToolSpec[] = [
       "Bulk actions: deliver or delete the selected messages, or all of them",
       "Unfreeze a frozen message, one at a time"
     ],
-    "acceptance": "Deleting message ID M removes it from the queue, and a second delete returns NOT_FOUND. Unfreezing a message that is not frozen returns NOT_FROZEN.",
+    "acceptance": "Deleting message ID M removes it from the queue, and a second delete returns NOT_FOUND. Unfreezing a message that is not frozen returns CONFLICT.",
     "source": "https://docs.cpanel.net/whm/email/mail-queue-manager/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -7579,7 +7578,7 @@ export const specs: ToolSpec[] = [
       "Maximum connections per child (default 200) and number of child processes (default 1)",
       "TCP timeout (default 30 s) and child timeout (default 300 s), where 0 turns the TCP timeout off"
     ],
-    "acceptance": "Saving 0 as the number of child processes is rejected with VALIDATION_ERROR. Saving valid values restarts the daemon with the new arguments.",
+    "acceptance": "Saving 0 as the number of child processes is rejected with VALIDATION. Saving valid values restarts the daemon with the new arguments.",
     "source": "https://docs.cpanel.net/whm/email/spamd-startup-configuration/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -7743,9 +7742,9 @@ export const specs: ToolSpec[] = [
     "behaviors": [
       "Upload a theme package for each surface",
       "Preview, clone under a new name, download or delete a theme",
-      "Reject a package that is missing the required password-change pages"
+      "Reject a package that is missing a required design token value"
     ],
-    "acceptance": "A package without the password-change templates is rejected with MISSING_REQUIRED_TEMPLATE. Cloning theme A as B creates B with identical files.",
+    "acceptance": "A package without a required token value is rejected with missing_required_token. Cloning theme A as B creates B with identical token values.",
     "source": "https://docs.cpanel.net/whm/themes/theme-manager/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -7807,7 +7806,7 @@ export const specs: ToolSpec[] = [
       "Delete custom locales",
       "Refuse to delete the default locale"
     ],
-    "acceptance": "Deleting the default locale is rejected with PROTECTED_LOCALE. Users who had the deleted locale fall back to the default.",
+    "acceptance": "Deleting the default locale is rejected with CONFLICT. Users who had the deleted locale fall back to the default.",
     "source": "https://docs.cpanel.net/whm/locales/delete-a-locale/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -7832,7 +7831,7 @@ export const specs: ToolSpec[] = [
       "Validate the file format before applying it",
       "Create or merge the locale"
     ],
-    "acceptance": "A malformed XML file is rejected with INVALID_FORMAT and the existing locale is unchanged.",
+    "acceptance": "A malformed XML file is rejected with VALIDATION and the existing locale is unchanged.",
     "source": "https://docs.cpanel.net/whm/locales/locale-xml-upload/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -7846,7 +7845,7 @@ export const specs: ToolSpec[] = [
       "Kill a single process or trace it",
       "Kill every process that belongs to a chosen user"
     ],
-    "acceptance": "'Kill all for user X' leaves no process owned by X. Choosing root or a system account is rejected with PROTECTED_USER.",
+    "acceptance": "'Kill all for user X' leaves no process owned by X at its last read, apart from helpers inside the panel's own units; a service may restart its workers afterwards. Choosing root or a system account is rejected with FORBIDDEN.",
     "source": "https://docs.cpanel.net/whm/system-health/process-manager/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -7896,7 +7895,7 @@ export const specs: ToolSpec[] = [
       "Forceful reboot that ignores errors, for use only when graceful fails",
       "Can be denied to resellers"
     ],
-    "acceptance": "A reseller without root access gets FORBIDDEN. A forceful reboot without an explicit confirmation flag is rejected with CONFIRMATION_REQUIRED.",
+    "acceptance": "A reseller without root access gets FORBIDDEN. A forceful reboot without an explicit confirmation flag is rejected with VALIDATION.",
     "source": "https://docs.cpanel.net/whm/system-reboot/system-reboot/",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -8023,7 +8022,7 @@ export const specs: ToolSpec[] = [
       "Bind a domain and map it to ports 80 and 443, and deploy SSL",
       "View the runtime log; deploying from source is not supported"
     ],
-    "acceptance": "Choosing a file without execute permission is rejected with NOT_EXECUTABLE. Turning on 'open firewall port' adds an allow rule for that port.",
+    "acceptance": "Choosing a file without execute permission is rejected with VALIDATION and reason NOT_EXECUTABLE. Turning on 'open firewall port' adds an allow rule for that port.",
     "source": "https://www.aapanel.com/docs/Function/go.html",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -8063,7 +8062,7 @@ export const specs: ToolSpec[] = [
       "JDK version manager",
       "Edit the service configuration file"
     ],
-    "acceptance": "A project configured with a JDK that is not installed is rejected with RUNTIME_MISSING.",
+    "acceptance": "A project configured with a JDK that is not installed is rejected with PRECONDITION_FAILED and reason RUNTIME_MISSING.",
     "source": "https://www.aapanel.com/docs/Function/Plug-ins.html",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -8313,7 +8312,7 @@ export const specs: ToolSpec[] = [
       "Start, stop, restart or update the images of a stack, delete it, read its combined logs, edit its YAML and env",
       "Template library: add, edit, pull images, delete, search"
     ],
-    "acceptance": "Invalid YAML is rejected with VALIDATION_ERROR before anything is created.",
+    "acceptance": "Invalid YAML is rejected with VALIDATION before anything is created.",
     "source": "https://www.aapanel.com/docs/Function/Docker.html",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -8456,10 +8455,10 @@ export const specs: ToolSpec[] = [
   {
     "id": "aapanel-file-share",
     "behaviors": [
-      "Create a share, optionally with an expiry or a code",
-      "List and revoke shares"
+      "Create a link to one file in an account, with a required expiry",
+      "List and revoke links; every create, use and revoke is audited"
     ],
-    "acceptance": "A revoked share link returns 404, and an expired link returns 410.",
+    "acceptance": "A revoked, an expired and an unknown link give the same 404, and a path through a symlink out of the account is refused.",
     "source": "https://www.aapanel.com/docs/Function/Files.html",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -8648,7 +8647,7 @@ export const specs: ToolSpec[] = [
       "Backup jobs keep the latest N copies, support exclusion rules and alert on failure",
       "Run now, view and clear logs, enable or disable, edit, delete"
     ],
-    "acceptance": "Creating a site-backup task with an every-N-seconds cycle is rejected with VALIDATION_ERROR. With retention 3, a fourth backup run deletes the oldest copy.",
+    "acceptance": "Creating a site-backup task with an every-N-seconds cycle is rejected with VALIDATION. With retention 3, a fourth backup run deletes the oldest copy.",
     "source": "https://www.aapanel.com/docs/Function/Cron.html",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",
@@ -8733,7 +8732,7 @@ export const specs: ToolSpec[] = [
       "Upload a package",
       "Validate it and install it"
     ],
-    "acceptance": "A package with a missing or invalid manifest is rejected with INVALID_PACKAGE.",
+    "acceptance": "A package with a missing or invalid manifest is rejected with VALIDATION and reason plugin_package_format.",
     "source": "https://www.aapanel.com/docs/Function/AppStore.html",
     "upstreamFeatureKey": "",
     "upstreamAcl": "",

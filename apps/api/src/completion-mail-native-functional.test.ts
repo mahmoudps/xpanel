@@ -144,7 +144,7 @@ describe('mounted sealed native mail functionality', () => {
   let f: Awaited<ReturnType<typeof fixture>>
   beforeEach(async () => { f = await fixture() })
   afterEach(async () => { vi.restoreAllMocks(); for (const close of cleanup.splice(0).reverse()) await close() })
-  it('uses declared actual IMAP data and never sealed metadata-search fallback', async () => {
+  it('uses declared actual IMAP data and never sealed metadata-search fallback', { tags: ['slow'] }, async () => {
     const session = await f.login(), response = await f.call('/api/webmail/search?q=NATIVE', 'GET', undefined, session)
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('private, no-store')
@@ -159,7 +159,7 @@ describe('mounted sealed native mail functionality', () => {
     { observed: true, messageValidity: 17, selectedValidity: 17, expected: true },
     { observed: false, messageValidity: 1, selectedValidity: 1, expected: false },
     { observed: true, messageValidity: 1, selectedValidity: 17, expected: false },
-  ])('projects only observed matching read UIDVALIDITY through actual HTTP: %j', async scenario => {
+  ])('projects only observed matching read UIDVALIDITY through actual HTTP: %j', { tags: ['slow'] }, async scenario => {
     const session = await f.login(), rawMime = 'From: sender@example.test\r\nTo: '+f.inbox.login+'\r\nSubject: Identity\r\n\r\nActual read body'
     await f.state.store.updateFeatureList(f.features.id,{disabled:['webmail-search']})
     vi.spyOn(ImapProtocolClient.prototype,'connect').mockResolvedValue('* OK declared read fixture')
@@ -179,7 +179,7 @@ describe('mounted sealed native mail functionality', () => {
     if(scenario.expected)expect(ImapProtocolClient.prototype.storeFlagsByUid).toHaveBeenCalledWith('INBOX',7,'add',['\\Seen'],f.inbox.login,17)
     else expect(ImapProtocolClient.prototype.storeFlagsByUid).not.toHaveBeenCalled()
   })
-  it('enforces actual search and attachment features without legacy native fallthrough or byte transport access', async()=>{
+  it('enforces actual search and attachment features without legacy native fallthrough or byte transport access', { tags: ['slow'] }, async()=>{
     const session=await f.login(), manifest=await f.call('/api/webmail/attachment-workspace?uid=7','GET',undefined,session)
     expect(manifest.status).toBe(200)
     const path=(await manifest.json() as {attachments:Array<{downloadPath:string}>}).attachments[0]!.downloadPath
@@ -194,7 +194,7 @@ describe('mounted sealed native mail functionality', () => {
     expect(f.downloads).toHaveLength(beforeDownloads)
     expect((await f.call('/api/webmail/search?q=NATIVE','GET',undefined,session)).status).toBe(200)
   })
-  it('rechecks feature authority after native search or attachment transport awaits', async()=>{
+  it('rechecks feature authority after native search or attachment transport awaits', { tags: ['slow'] }, async()=>{
     const session=await f.login()
     f.setSearchHook(async()=>{await f.state.store.updateFeatureList(f.features.id,{disabled:['webmail-search']})})
     expect((await f.call('/api/webmail/search?q=NATIVE','GET',undefined,session)).status).toBe(403);expect(f.reads).toEqual([])
@@ -202,7 +202,7 @@ describe('mounted sealed native mail functionality', () => {
     f.setAttachmentHook(async()=>{await f.state.store.updateFeatureList(f.features.id,{disabled:['webmail-attachments']})})
     expect((await f.call('/api/webmail/attachment-workspace?uid=7','GET',undefined,session)).status).toBe(403)
   })
-  it('refuses missing or reset namespaces before move/delete and uses only observed mapped destination for Undo', async()=>{
+  it('refuses missing or reset namespaces before move/delete and uses only observed mapped destination for Undo', { tags: ['slow'] }, async()=>{
     const session=await f.login()
     expect((await f.call('/api/webmail/inbox/7/move','POST',{from:'INBOX',folder:'Archive'},session)).status).toBe(422)
     expect((await f.call('/api/webmail/inbox/7?folder=Trash&confirm=delete','DELETE',{},session)).status).toBe(422)
@@ -240,7 +240,7 @@ describe('mounted sealed native mail functionality', () => {
     { name: 'unobserved RFC822.SIZE', patch: { rfc822SizeObserved: false } },
     { name: 'size and byte mismatch', patch: { sizeBytes: 1 } },
     { name: 'missing raw MIME bytes', patch: { rawMimeBytes: undefined } },
-  ])('refuses an incomplete native source before Seen or body exposure: $name', async ({ patch }) => {
+  ])('refuses an incomplete native source before Seen or body exposure: $name', { tags: ['slow'] }, async ({ patch }) => {
     const session=await f.login(),rawMime='From: sender@example.test\r\nTo: '+f.inbox.login+'\r\nSubject: Partial\r\n\r\nPRIVATE_PARTIAL_BODY'
     await f.state.store.updateFeatureList(f.features.id,{disabled:['webmail-search']})
     vi.spyOn(ImapProtocolClient.prototype,'connect').mockResolvedValue('* OK declared read fixture');vi.spyOn(ImapProtocolClient.prototype,'login').mockResolvedValue(undefined);vi.spyOn(ImapProtocolClient.prototype,'logout').mockResolvedValue(undefined)
@@ -285,7 +285,7 @@ describe('mounted sealed native mail functionality', () => {
     expect((await f.call('/api/webmail/send','POST',{...draft,to:'',cc:'',bcc:''},session)).status).toBe(422)
     expect(f.sent).toHaveLength(1)
   })
-  it('refuses forged headers, malformed bytes and stale/unbound identities before SMTP', async () => {
+  it('refuses forged headers, malformed bytes and stale/unbound identities before SMTP', { tags: ['slow'] }, async () => {
     const session = await f.login()
     for (const patch of [{from:'foreign@example.test'},{replyTo:'foreign@example.test'},{mailbox:f.sibling.login},{headers:{Bcc:'hidden@example.test'}}]) expect((await f.call('/api/webmail/send','POST',{...draft,...patch},session)).status).toBe(422)
     expect((await f.call('/api/webmail/send','POST',{...draft,attachments:[{filename:'x.bin',contentType:'application/octet-stream',contentBase64:'!!!='}]},session)).status).toBe(400)
@@ -295,7 +295,7 @@ describe('mounted sealed native mail functionality', () => {
     expect((await f.call('/api/webmail/send','POST',{...draft,...f.selected},session)).status).toBe(404)
     expect(f.sent).toEqual([])
   })
-  it('rechecks authority after identity read and before SMTP', async () => {
+  it('rechecks authority after identity read and before SMTP', { tags: ['slow'] }, async () => {
     const session = await f.login(), original = ExtendedFeaturesStore.prototype.readOrDefault
     let changed = false
     vi.spyOn(ExtendedFeaturesStore.prototype,'readOrDefault').mockImplementation(async function<T>(this: ExtendedFeaturesStore, key: string, fallback: T): Promise<T> {
@@ -317,7 +317,7 @@ describe('mounted sealed native mail functionality', () => {
     expect(f.retired).toHaveLength(1); expect(f.drafts.get(f.inbox.login)!.has(expectedDraft.uid)).toBe(false); expect(f.sent).toEqual([])
     expect((await f.call('/api/webmail/drafts','POST',{...draft,expectedDraft},session)).status).toBe(409)
   })
-  it('downloads exact bytes with session-bound references and refuses changed content', async () => {
+  it('downloads exact bytes with session-bound references and refuses changed content', { tags: ['slow'] }, async () => {
     const session = await f.login(), response = await f.call('/api/webmail/attachment-workspace?uid=7&folder=INBOX&uidValidity=17','GET',undefined,session)
     expect(response.status).toBe(200); const body = await response.json() as {attachments:Array<{downloadPath:string}>}, path=body.attachments[0]!.downloadPath
     const downloaded = await f.call(path,'GET',undefined,session)
@@ -326,13 +326,13 @@ describe('mounted sealed native mail functionality', () => {
     expect((await f.call(path,'GET',undefined,sibling)).status).toBe(404)
     f.setAttachmentBytes(Buffer.from([0,255,1,3])); expect((await f.call(path,'GET',undefined,session)).status).toBe(409)
   })
-  it('withholds search/download results if authorization changes during transport work', async () => {
+  it('withholds search/download results if authorization changes during transport work', { tags: ['slow'] }, async () => {
     const session = await f.login(); f.setSearchHook(async()=>{await f.state.store.suspendAccount(f.owner.id,'Declared search suspension')})
     expect((await f.call('/api/webmail/search?q=NATIVE','GET',undefined,session)).status).toBe(403); expect(f.reads).toEqual([])
     await f.state.store.unsuspendAccount(f.owner.id); f.setSearchHook(undefined); f.setAttachmentHook(async()=>{await f.state.store.suspendAccount(f.owner.id,'Declared byte-read suspension')})
     expect((await f.call('/api/webmail/attachment-workspace?uid=7','GET',undefined,session)).status).toBe(403)
   })
-  it('retains unknown-effect flags when authorization changes after SMTP actually accepted', async () => {
+  it('retains unknown-effect flags when authorization changes after SMTP actually accepted', { tags: ['slow'] }, async () => {
     const session = await f.login(), original=f.transport.send.bind(f.transport)
     vi.spyOn(f.transport,'send').mockImplementationOnce(async(...args)=>{const sent=await original(...args);await f.state.store.suspendAccount(f.owner.id,'Declared post-SMTP suspension');return sent})
     const response=await f.call('/api/webmail/send','POST',draft,session)

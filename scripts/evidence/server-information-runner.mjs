@@ -23,7 +23,7 @@ function observer(deadline) {
   return observed
 }
 
-function credentials(options) {
+export function credentials(options) {
   requireValue((options.credentialFile === undefined) !== (options.credentialFd === undefined), 'Select exactly one protected credential file or descriptor')
   const value = readProtectedJson({ ...(options.credentialFile === undefined ? { fd: options.credentialFd } : { file: options.credentialFile }), secret: true, maxBytes: 16 * 1024 })
   requireValue(isRecord(value) && typeof value.username === 'string' && value.username.length > 0 && value.username.length <= 253 && typeof value.password === 'string' && value.password.length > 0 && value.password.length <= 8192 && (value.totpCode === undefined || /^\d{6}$/.test(value.totpCode)), 'Protected root login credentials are incomplete')

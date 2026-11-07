@@ -107,7 +107,7 @@ describe('theme-neutral operator surface projection', () => {
 
   it('fences reseller accounts, associated plans, editor state and host-only observations', () => {
     const principal: Principal = { kind: 'reseller', id: 'reseller-a', username: 'dealer' }
-    const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['list-accounts', 'manage-plans'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 10000, oversell: false, nameservers: [], delegatedIps: [] }
+    const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['list-accounts', 'manage-plans'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 10000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
     const owned = { ...account, ownerId: principal.id }, foreignPlan = defaultPlan({ id: 'foreign-plan', name: 'Foreign', ownerId: 'reseller-b' })
     const view = projectWhmSurface(whm({ activeRoute: '/whm/plans', principal, visibility: { principal, reseller }, activeReseller: reseller,
       accounts: [owned, { ...account, id: 'foreign-account', username: 'bob', ownerId: 'reseller-b' }], plans: [plan, foreignPlan],

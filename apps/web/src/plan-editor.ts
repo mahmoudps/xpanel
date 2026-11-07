@@ -1,32 +1,15 @@
 /// <reference lib="dom" />
-import { defaultPlan, PLAN_CAP_RULES, RESOURCE_RULES, type FeatureList, type Limit, type Plan } from '@xpanel/core'
+import { defaultPlan, RESOURCE_RULES, type FeatureList, type Limit, type Plan } from '@xpanel/core'
 import { formatDisplayName } from './display-name.ts'
 import { escapeHtml } from './tokens.ts'
 import { translator, type MessageValues, type Locale } from './i18n.ts'
+import { ACCOUNT_PACKAGE_LIMIT_FIELDS, PLAN_CAP_FIELDS as planCapFields, PLAN_RESOURCE_FIELDS as planResourceFields, type Field } from './models/plan-fields.ts'
+export { ACCOUNT_PACKAGE_LIMIT_FIELDS }
+// Local names: the browser binding serializes functions that read these.
+export const PLAN_RESOURCE_FIELDS = planResourceFields, PLAN_CAP_FIELDS = planCapFields
 type Copy = string
-type Field = { key: string; id: string; label: Copy; min: number; max: number; scale: number }
 const PLAN_NAME_PATTERN = String.raw`[A-Za-z0-9](?:[A-Za-z0-9 _.\-]{0,62}[A-Za-z0-9_.\-])?`
 
-const resourceLabels: Record<keyof Plan['resources'], Copy> = {
-  diskMb: msgid('Disk (MiB)'), bandwidthMbMonth: msgid('Monthly bandwidth (MiB)'),
-  ioReadBps: msgid('Disk read (MiB/s)'), ioWriteBps: msgid('Disk write (MiB/s)'),
-  ioReadIops: msgid('Read operations per second'), ioWriteIops: msgid('Write operations per second'),
-  memoryMb: msgid('Memory (MiB)'), maxProcesses: msgid('Processes'), cpuPercent: msgid('CPU (%)'),
-}
-const capLabels: Record<keyof Plan['caps'], Copy> = {
-  addonDomains: msgid('Addon domains'), aliasDomains: msgid('Alias domains'),
-  subdomains: msgid('Subdomains'), mailboxes: msgid('Mailboxes'), forwarders: msgid('Forwarders'),
-  mailingLists: msgid('Mailing lists'), ftpAccounts: msgid('FTP accounts'), databases: msgid('Databases'),
-  phpWorkers: msgid('PHP workers'),
-}
-const ids: Record<string, string> = { cpuPercent: 'plan-cpu-quota', memoryMb: 'plan-memory-max', maxProcesses: 'plan-tasks-max' }
-export const PLAN_RESOURCE_FIELDS: readonly Field[] = Object.entries(RESOURCE_RULES).map(([key, rule]) => ({
-  key, id: ids[key] ?? `plan-${key}`, label: resourceLabels[key as keyof Plan['resources']], min: rule.min, max: rule.max,
-  scale: key === 'ioReadBps' || key === 'ioWriteBps' ? 1024 * 1024 : 1,
-}))
-export const PLAN_CAP_FIELDS: readonly Field[] = Object.entries(PLAN_CAP_RULES).map(([key, rule]) => ({
-  key, id: `plan-${key}`, label: capLabels[key as keyof Plan['caps']], min: rule.min, max: rule.max, scale: 1,
-}))
 const quotaRule = RESOURCE_RULES.diskMb
 export const PLAN_QUOTA_FIELD: Field = { key: 'defaultMailboxQuotaMb', id: 'plan-mailbox-quota', label: msgid('Default mailbox quota (MiB)'), min: quotaRule.min, max: quotaRule.max, scale: 1 }
 
@@ -102,14 +85,14 @@ export function renderPlanEditor(input: PlanEditorInput): string {
     ${disabled ? `<p class="xp-help">${(!input.canManage ? text('This plan is read only.') : text('The feature list is unavailable. Saving is disabled.'))}</p>` : ''}
     <fieldset class="xp-form-group" style="gap:var(--xp-space-card)"${disabled ? ' disabled' : ''}>
       <div class="xp-form-group" style="min-inline-size:0">
-      <div class="xp-field"><label class="xp-label" for="plan-name">${text('Plan Name')}</label><input id="plan-name" name="name" type="text" class="xp-input" required maxlength="64" pattern="${escapeHtml(PLAN_NAME_PATTERN)}" value="${input.plan ? escapeHtml(seed.name) : ''}" /></div>
+      <div class="xp-field"><label class="xp-label" for="plan-name">${text('Plan Name')}</label><input id="plan-name" name="name" type="text" class="xp-input" required maxlength="64" pattern="${escapeHtml(PLAN_NAME_PATTERN)}" value="${input.plan ? escapeHtml(seed.name) : ''}"${input.plan ? ' readonly' : ''} /></div>
       <div class="xp-field"><label class="xp-label" for="plan-feature-list">${text('Feature list')}</label><select id="plan-feature-list" name="featureListId" class="xp-select" required>${available ? '' : `<option value="" selected>${text('Unavailable')}</option>`}${input.featureLists.map(list => `<option value="${escapeHtml(list.id)}"${list.id === seed.featureListId ? ' selected' : ''}>${escapeHtml(formatDisplayName(list.name))}</option>`).join('')}</select></div>
       </div>
       ${group(msgid('Resources'), PLAN_RESOURCE_FIELDS, key => seed.resources[key as keyof Plan['resources']])}
       ${group(msgid('Service limits'), PLAN_CAP_FIELDS, key => seed.caps[key as keyof Plan['caps']])}
       <fieldset class="xp-card xp-form-group" aria-labelledby="plan-group-access">${heading('plan-group-access', translator(input.locale)('Access and mailbox defaults'))}
         <div class="xp-field"><label class="xp-label" for="plan-shell-toggle">${text('Jailed shell access')}</label><select id="plan-shell-toggle" name="shell" class="xp-select"><option value="none"${seed.shell === 'none' ? ' selected' : ''}>${text(msgctxt('plan-editor', 'Disabled'))}</option><option value="jailed"${seed.shell === 'jailed' ? ' selected' : ''}>${text('Jailed shell')}</option></select></div>
-        <label class="xp-plan-cap-option" for="plan-dedicated-ip"><input id="plan-dedicated-ip" name="dedicatedIp" type="checkbox"${seed.dedicatedIp ? ' checked' : ''} /><span>${text('Dedicated IPv4 required')}</span></label>
+        <label class="xp-plan-cap-option" for="plan-dedicated-ip"><input id="plan-dedicated-ip" name="dedicatedIp" type="checkbox"${seed.dedicatedIp ? ' checked' : ''}${input.plan ? ' disabled' : ''} /><span>${text('Dedicated IPv4 required')}</span></label>
         <label class="xp-plan-cap-option" for="plan-enforce-bandwidth"><input id="plan-enforce-bandwidth" name="enforceBandwidth" type="checkbox"${seed.enforceBandwidth ? ' checked' : ''} /><span>${text('Serve the bandwidth-exceeded page once the monthly bandwidth is used')}</span></label>
         ${number(PLAN_QUOTA_FIELD, seed.defaultMailboxQuotaMb)}
       </fieldset>

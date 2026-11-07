@@ -2,7 +2,8 @@
 // account (extUser/extGroup = account), one virtual host per site, a loopback listener.
 import { assertHandlerAvailable, fail, validateDomainIndexFiles } from '@xpanel/core'
 import type { Account, Domain, Limit, OsProfile, PhpSettings, RenderedFile, ServerSettings } from '@xpanel/core'
-import { lsphpBinary, XP_PATHS } from './paths.ts'
+import { accountPageDir } from './account-pages.ts'
+import { lsphpBinary } from './paths.ts'
 import { assertWorkers, iniEntries, phpIsolation, type PhpIsolationOptions } from './php.ts'
 import { olsValue } from './quote.ts'
 import { groupSites, siteMode, type RenderTime, type SiteGroup } from './sites.ts'
@@ -137,7 +138,7 @@ const phpOverride = (account: Account, php: PhpSettings, os: OsProfile, opts: Ol
   ])
 }
 
-type VhostOptions = OlsPhpOptions & { now?: RenderTime }
+type VhostOptions = OlsPhpOptions & { now?: RenderTime; pageScope?: string }
 
 const vhconfBody = (account: Account, g: SiteGroup, os: OsProfile, opts: VhostOptions): string[] => {
   const d = g.main
@@ -147,7 +148,7 @@ const vhconfBody = (account: Account, g: SiteGroup, os: OsProfile, opts: VhostOp
   if (aliases.length) names.push(kv('vhAliases', aliases.join(', ')))
   if (mode === 'suspended') {
     return [
-      kv('docRoot', XP_PATHS.suspendedDir),
+      kv('docRoot', accountPageDir('suspended', opts.pageScope)),
       ...names,
       ...block('rewrite', [kv('enable', 1), kv('autoLoadHtaccess', 0), 'rules                   <<<END_rules', 'RewriteRule ^(?!index\\.html$) /index.html [R=302,L]', 'END_rules']),
     ]
@@ -185,7 +186,7 @@ const renderGroup = (account: Account, g: SiteGroup, os: OsProfile, opts: VhostO
   // restrained=1 confines the vhost to vhRoot, so a suspended site's root is the suspended page
   const suspended = siteMode(account, g.main, opts.now) === 'suspended'
   const server = block(`virtualhost ${name}`, [
-    kv('vhRoot', suspended ? XP_PATHS.suspendedDir : account.home),
+    kv('vhRoot', suspended ? accountPageDir('suspended', opts.pageScope) : account.home),
     kv('configFile', confPath),
     kv('allowSymbolLink', 2),
     kv('enableScript', 1),

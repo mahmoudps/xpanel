@@ -106,3 +106,10 @@ describe('domainServingState', () => {
     expect(domainServingState({ status: 'active' }, { suspended: false, expiresAt: 'soon' }, now)).toBe('expired')
   })
 })
+
+describe('account home move', () => {
+  it('defers mail while the home moves, so nothing lands behind the copy', () => {
+    const fx = suspensionEffects({ ...acct('suspended'), homeMove: { to: '/home2/a', resumeStatus: 'active', resumeReason: null, resumeSuspendedAt: null } })
+    expect(fx.find(effect => effect.subsystem === 'mail-delivery')).toMatchObject({ state: 'defer' })
+  })
+})

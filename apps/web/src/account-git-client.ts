@@ -8,7 +8,7 @@ const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
 
-export interface GitClientView { revision: string; repositories: string[]; nativeAvailable: boolean; selected: { path: string; branch: string; head: string | null; dirty: boolean; changedFiles: number; remote: string | null; branches: { name: string; hash: string; current: boolean }[]; commits: { hash: string; at: string; subject: string }[] } | null }
+export interface GitClientView { revision: string; repositories: string[]; nativeAvailable: boolean; deployed: { commit: string; at: string } | null; selected: { path: string; branch: string; head: string | null; dirty: boolean; changedFiles: number; remote: string | null; branches: { name: string; hash: string; current: boolean }[]; commits: { hash: string; at: string; subject: string }[] } | null }
 const GIT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const GIT_PATH = /^[A-Za-z0-9_][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/
 function gitObject(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value) }
@@ -34,7 +34,9 @@ export function readGitClientView(raw: unknown, accountId: string, sent: Record<
     if ((sent.op === 'checkout' || sent.op === 'init') && selected.branch !== sent.branch || !['inspect'].includes(String(sent.op)) && selected.dirty) return bad()
   }
   if (['remove', 'init', 'clone'].includes(String(sent.op)) && raw.revision === sent.expectedRevision) return bad()
-  return { revision: raw.revision, repositories: raw.repositories as string[], nativeAvailable: raw.nativeAvailable, selected: selected as GitClientView['selected'] }
+  const deployed = raw.deployed ?? null
+  if (deployed !== null && (!gitObject(deployed) || !hash(deployed.commit) || typeof deployed.at !== 'string' || !Number.isFinite(Date.parse(deployed.at))) || sent.op === 'deploy' && (deployed as { commit?: unknown } | null)?.commit !== (selected as { head?: unknown } | null)?.head) return bad()
+  return { revision: raw.revision, repositories: raw.repositories as string[], nativeAvailable: raw.nativeAvailable, deployed: deployed as GitClientView['deployed'], selected: selected as GitClientView['selected'] }
 }
 function bindAccountGit(askDialog: ((input: Record<string, unknown>) => Promise<unknown>) | undefined): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
@@ -50,6 +52,8 @@ function bindAccountGit(askDialog: ((input: Record<string, unknown>) => Promise<
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const lock = (): void => {
       for (const control of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input,select')) control.disabled = !eligible() || busy
+      const deployButton = get<HTMLButtonElement>('deploy')
+      if (deployButton) deployButton.disabled = !eligible() || busy || uncertain || view?.nativeAvailable !== true || !view.selected || !view.selected.head || view.selected.dirty || view.selected.path !== repository.value
       for (const name of ['refresh', 'inspect', 'remove', 'init', 'clone', 'checkout', 'pull']) {
         const button = get<HTMLButtonElement>(name); if (!button) continue
         button.disabled = !eligible() || busy || name !== 'refresh' && (!view || uncertain) || ['inspect', 'remove'].includes(name) && !repository.value || ['init', 'clone', 'inspect', 'checkout', 'pull'].includes(name) && view?.nativeAvailable !== true || ['checkout', 'pull'].includes(name) && (!view?.selected?.head || view.selected.path !== repository.value || view.selected.dirty) || name === 'pull' && !view?.selected?.remote || name === 'checkout' && !branch.value
@@ -73,6 +77,7 @@ function bindAccountGit(askDialog: ((input: Record<string, unknown>) => Promise<
       if (next.repositories.includes(previous)) repository.value = previous
       const selected = next.selected
       get('selected').textContent = selected?.path ?? '-'; get('current').textContent = selected?.branch ?? '-'; get('origin').textContent = selected?.remote ?? '-'
+      const deployedFact = get('deployed'); if (deployedFact) { deployedFact.textContent = !selected ? t(msgctxt('account-git-client', 'Not read')) : next.deployed ? gitAscii(next.deployed.commit.slice(0, 12)) + ' ' + formatDisplayDateTime(next.deployed.at) : t('Not deployed') }
       get('tree').textContent = !selected ? t(msgctxt('account-git-client', 'Not read')) : selected.dirty ? t('{count} changed files', { count: selected.changedFiles }) : t('Clean')
       branch.textContent = ''; for (const item of selected?.branches ?? []) branch.add(new Option(item.name, item.name)); if (selected) branch.value = selected.branch
       history.textContent = ''
@@ -92,7 +97,7 @@ function bindAccountGit(askDialog: ((input: Record<string, unknown>) => Promise<
         if (!askDialog) { note('failed', t('Confirmation is unavailable. Nothing was sent.')); return }
         busy = true; lock()
         let confirmed = false
-        try { confirmed = await askDialog({ title: t('Confirm repository action'), body: String(sent.path) + '\n' + (sent.op === 'remove' ? t('Remove this entry only. Files will remain.') : t('Apply the selected Git action to this repository?')), confirm: t('Confirm'), danger: sent.op === 'remove' }) === true } catch { confirmed = false }
+        try { confirmed = await askDialog({ title: t('Confirm repository action'), body: String(sent.path) + '\n' + (sent.op === 'remove' ? t('Remove this entry only. Files will remain.') : sent.op === 'deploy' ? t('Run the tasks in .cpanel.yml at the current commit? They run as your account and can change your website.') : t('Apply the selected Git action to this repository?')), confirm: t('Confirm'), danger: sent.op === 'remove' }) === true } catch { confirmed = false }
         busy = false
         if (!confirmed || !eligible()) { lock(); return }
       }
@@ -101,7 +106,7 @@ function bindAccountGit(askDialog: ((input: Record<string, unknown>) => Promise<
       catch (error) {
         const record = gitObject(error) ? error : {}, detail = gitObject(record.details) ? record.details : gitObject(record.detail) ? record.detail : {}
         if (mutation && !(detail.stateChanged === false && detail.unknownOutcome !== true && detail.verificationRequired !== true)) uncertain = true
-        note('failed', uncertain ? t('The result needs review. Inspect the repository through your own Git access before retrying; read the list to unlock.') : record.code === 'CONFLICT' ? t('The repository changed or has uncommitted files. Read it again.') : t('The repository could not be read or changed. Check its path, configuration and permissions.'))
+        note('failed', uncertain ? t('The result needs review. Inspect the repository through your own Git access before retrying; read the list to unlock.') : record.code === 'CONFLICT' ? t('The repository changed or has uncommitted files. Read it again.') : sent.op === 'deploy' && record.code === 'FORBIDDEN' ? t('Deployment tasks need shell access on this account. Nothing was run.') : sent.op === 'deploy' && record.code === 'PRECONDITION_FAILED' ? t('This repository has no usable .cpanel.yml deployment file, or no commit yet. Nothing was run.') : t('The repository could not be read or changed. Check its path, configuration and permissions.'))
       } finally { busy = false; lock() }
     }
     const action = (op: string): void => {
@@ -116,7 +121,7 @@ function bindAccountGit(askDialog: ((input: Record<string, unknown>) => Promise<
       if (op === 'checkout' || op === 'pull') sent.expectedHead = view.selected?.head
       void perform(sent)
     }
-    for (const name of ['refresh', 'inspect', 'remove', 'init', 'clone', 'checkout', 'pull']) get<HTMLButtonElement>(name)?.addEventListener('click', () => action(name === 'refresh' ? 'list' : name))
+    for (const name of ['refresh', 'inspect', 'remove', 'init', 'clone', 'checkout', 'pull', 'deploy']) get<HTMLButtonElement>(name)?.addEventListener('click', () => action(name === 'refresh' ? 'list' : name))
     repository.addEventListener('change', () => { if (view) paint({ ...view, selected: null }); lock() }); branch.addEventListener('change', lock)
     if (!send || !eligible() || !GIT_ID.test(accountId)) { for (const control of root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button,input,select')) control.disabled = true; note('unavailable', t('Git is unavailable here. Nothing was read or changed.')); return }
     lock(); void perform({ op: 'list' })

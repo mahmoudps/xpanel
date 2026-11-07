@@ -88,7 +88,7 @@ describe('mailbox identities HTTP security acceptance', () => {
     expect((await f.auditRows('webmail.identity.created')).length).toBe(1)
   })
 
-  it('keeps exactly one default identity when a later identity requests default', async () => {
+  it('keeps exactly one default identity when a later identity requests default', { tags: ['slow'] }, async () => {
     const first = await (await f.request(f.base, 'POST', { email: f.inbox.login, displayName: 'First' })).json() as { identity: Identity }
     const second = await (await f.request(f.base, 'POST', { email: f.inbox.login, displayName: 'Second', isDefault: true })).json() as { identity: Identity }
     expect(second.identity.isDefault).toBe(true)
@@ -133,7 +133,7 @@ describe('mailbox identities HTTP security acceptance', () => {
     expect((await f.auditRows('webmail.identity.updated')).length).toBe(1)
   })
 
-  it('refuses invalid edits, mailbox/email changes and turning off the only default', async () => {
+  it('refuses invalid edits, mailbox/email changes and turning off the only default', { tags: ['slow'] }, async () => {
     const seed = [f.stored(f.inbox.login)]
     await f.seed(seed)
     const before = await f.bytes()
@@ -148,7 +148,7 @@ describe('mailbox identities HTTP security acceptance', () => {
     expect(await f.bytes()).toBe(before)
   })
 
-  it('deletes an identity, promotes a replacement default and audits the deletion', async () => {
+  it('deletes an identity, promotes a replacement default and audits the deletion', { tags: ['slow'] }, async () => {
     const seed = [f.stored(f.inbox.login, { displayName: 'Default' }), f.stored(f.inbox.login, { displayName: 'Next', isDefault: false })]
     await f.seed(seed)
     const response = await f.request(`${f.base}/${seed[0]!.id}`, 'DELETE')

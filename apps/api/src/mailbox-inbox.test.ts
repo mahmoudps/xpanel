@@ -555,15 +555,13 @@ describe('xMail mailbox inbox', () => {
       rules: [{ field: 'subject', operator: 'contains', value: 'invoice' }], action: 'folder', actionTarget: 'Orders', enabled: false,
     })
     await extended.provisionBatchEmailAuth(['alpha.example.test'], '192.0.2.10')
-    const { updatedAt: _updatedAt, ...settings } = await extended.getServerFineSettings()
-    await extended.saveServerFineSettings({ ...settings, mtaMaxMsgSizeMb: 25 })
     const after = await read()
     expect(after.vacationEnabled).toBe(true)
     expect(after.sieveRules).toEqual([expect.objectContaining({ name: 'Orders', condition: 'Subject contains invoice', action: 'File into Orders', enabled: false })])
     expect(after.identityDkim).toBe('Selector default is stored for alpha.example.test')
     expect(after.identitySpf).toContain('v=spf1 +a +mx +ip4:192.0.2.10 ~all')
     expect(after.identitySpf).toContain('v=DMARC1; p=quarantine')
-    expect(after.identitySize).toBe('25 MiB per message')
+    expect(after.identitySize).toBeUndefined()
   })
 
   it('keeps the stored quota when the mail server cannot be listed', async () => {

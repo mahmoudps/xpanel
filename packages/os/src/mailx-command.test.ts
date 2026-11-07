@@ -49,7 +49,12 @@ describe('mail policy learning grammar', () => {
     const { mailxLearnFolder, mailxLearnArgv, isMailxLearnJobCommand } = await import('./mailx-command.ts')
     const junk = mailxLearnFolder('/home/alice', 'info@shop.example', 'spam'), inbox = mailxLearnFolder('/home/alice', 'info@shop.example', 'ham')
     expect([junk, inbox]).toEqual(['/home/alice/mail/shop.example/info/.Junk/cur', '/home/alice/mail/shop.example/info/cur'])
-    for (const argv of [mailxLearnArgv('rspamd', 'spam', junk), mailxLearnArgv('spamassassin', 'ham', inbox)]) expect(isMailxLearnJobCommand(argv)).toBe(true)
+    const owner = { uid: 118, gid: 124, home: '/var/lib/spamass-milter' }
+    for (const argv of [mailxLearnArgv('rspamd', 'spam', junk), mailxLearnArgv('spamassassin', 'ham', inbox, owner)]) expect(isMailxLearnJobCommand(argv)).toBe(true)
+    expect(() => mailxLearnArgv('spamassassin', 'ham', inbox)).toThrow()
+    expect(() => mailxLearnArgv('spamassassin', 'ham', inbox, { ...owner, uid: 0 })).toThrow()
+    expect(isMailxLearnJobCommand(['/usr/bin/sa-learn', '--ham', inbox])).toBe(false)
+    expect(isMailxLearnJobCommand(mailxLearnArgv('spamassassin', 'ham', inbox, owner).map(value => value === inbox ? '/etc' : value))).toBe(false)
     for (const argv of [['/usr/bin/rspamc', 'learn_spam', inbox], ['/usr/bin/rspamc', 'learn_ham', junk], ['/usr/bin/sa-learn', '--spam', '/etc'], ['/usr/bin/rspamc', 'learn_spam', '/home/alice/mail/shop.example/../cur'],
       ['/usr/bin/sa-learn', '--forget', inbox], ['/usr/bin/rspamc', '-h', 'evil', 'learn_spam', junk]]) expect(isMailxLearnJobCommand(argv)).toBe(false)
     expect(() => mailxLearnFolder('/root', 'info@shop.example', 'spam')).toThrow()

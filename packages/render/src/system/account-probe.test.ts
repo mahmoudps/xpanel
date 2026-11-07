@@ -49,10 +49,10 @@ describe('immutable account probe renderer', { tags: ['unit'] }, () => {
     expect(content).not.toMatch(/SCRIPT_FILENAME|PHP_VALUE|PHP_ADMIN_VALUE|proxy_pass|127[.]0[.]0[.]1:[0-9]+/)
   })
   it('assembles the actual FPM vhost while preserving suspended and bandwidth denial', () => {
-    const actual = edgeAccount(), storedDomain = domain(), fpm: Domain = { ...storedDomain, php: { ...storedDomain.php, handler: 'fpm' } }
-    const content = renderNginxSite(actual, [fpm], settings(), cert(), { forceHttps: true })
+    const actual = edgeAccount(), storedDomain = domain(), fpm: Domain = { ...storedDomain, php: { ...storedDomain.php, handler: 'fpm' }, forceHttps: true }
+    const content = renderNginxSite(actual, [fpm], settings(), cert())
     expect(content).toContain('return 301 https://$host$request_uri;')
-    expect(renderNginxSite(actual, [fpm], settings(), [], { forceHttps: true })).not.toContain('return 301 https://$host$request_uri;')
+    expect(renderNginxSite(actual, [fpm], settings(), [])).not.toContain('return 301 https://$host$request_uri;')
     expect(() => assertAccountProbeIngress(content, actual)).not.toThrow()
     expect(renderNginxSite({ ...actual, status: 'suspended' }, [fpm], settings())).not.toContain(ACCOUNT_PROBE_ROUTE)
     expect(renderNginxSite({ ...actual, bandwidthLimitedMonth: '2026-10' }, [fpm], settings())).not.toContain(ACCOUNT_PROBE_ROUTE)

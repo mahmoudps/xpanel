@@ -30,6 +30,7 @@ import { createApiApp, listenApiServer } from './server.ts'
 import type { ApiApp } from './server.ts'
 import { preparedAccountFixture } from './testing/provisioning-preparation-fixture.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
+import { writeSignInLockout } from './testing/sign-in-policy-fixture.ts'
 
 const UBUNTU_OS: OsProfile = profileFor(
   ['ID=ubuntu', 'VERSION_ID="24.04"', 'VERSION_CODENAME=noble', 'NAME="Ubuntu"'].join('\n'),
@@ -152,6 +153,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
 
     await createRootPrincipal(dbHandle.db, { username: 'root', passwordHash: await hashPasswordArgon2id('RootPassword!2026'), forcePasswordChange: false })
 
+    await writeSignInLockout(stateHandle.store.rootDir, 3, 1)
     app = createApiApp({
       agentToken: TEST_AGENT_TOKEN,
       serverSecret: TEST_SERVER_SECRET,
@@ -159,8 +161,6 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
       store: stateHandle.store,
       ...preparedAccountFixture({ store: stateHandle.store, reconciler, executor, agentApp, agentToken: TEST_AGENT_TOKEN }),
       os: UBUNTU_OS,
-      lockoutThreshold: 3,
-      lockoutDurationMs: 60_000,
     })
   })
 
@@ -460,7 +460,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     assert.equal(upgradeForbidden.status, 403)
   })
 
-  it('4. File requests validate permissions and require a confined runner without filesystem effects or false success audits', async () => {
+  it('4. File requests validate permissions and require a confined runner without filesystem effects or false success audits', { tags: ['slow'] }, async () => {
     const { client: root } = await loginRoot()
     await root.request('/api/server/settings', { method: 'PUT', body: DEFAULT_SETTINGS })
 
@@ -542,7 +542,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     await assert.rejects(access(join(tmpDir, 'host', 'alice', 'public_html', 'huge.bin')), { code: 'ENOENT' })
   })
 
-  it('5. Multi-IPv4/IPv6 pool management and Mail Outbound IP Postfix transport rendering', async () => {
+  it('5. Multi-IPv4/IPv6 pool management and Mail Outbound IP Postfix transport rendering', { tags: ['slow'] }, async () => {
     const { client: root } = await loginRoot()
     await root.request('/api/server/settings', { method: 'PUT', body: DEFAULT_SETTINGS })
 
@@ -645,7 +645,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
     assert.match(masterOutbound.content, /smtp_helo_name=vip\.alice\.example\.com/)
   })
 
-  it('6. Smart & dynamic Domain Custom Config (userdata) + automatic rollback when nginx -t fails', async () => {
+  it('6. Smart & dynamic Domain Custom Config (userdata) + automatic rollback when nginx -t fails', { tags: ['slow'] }, async () => {
     const { client: root } = await loginRoot()
     await root.request('/api/server/settings', { method: 'PUT', body: DEFAULT_SETTINGS })
 

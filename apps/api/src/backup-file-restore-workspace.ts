@@ -2,7 +2,7 @@ import { fail } from '@xpanel/core'
 import type { Account } from '@xpanel/core'
 import type { AuthenticatedCaller } from './auth.ts'
 import { isMailboxPrincipal } from './authorization.ts'
-import { BACKUP_ARCHIVE_NAME, MAX_LISTED_ARCHIVES, MAX_RESTORE_FILES, parseBackupFileRequest, RESTORE_REVISION, restorePath } from '../../agent/src/backup-file-restore-request.ts'
+import { assertOwnerRestorable, BACKUP_ARCHIVE_NAME, MAX_LISTED_ARCHIVES, MAX_RESTORE_FILES, parseBackupFileRequest, RESTORE_REVISION, restorePath } from '../../agent/src/backup-file-restore-request.ts'
 import type { BackupFileRequest } from '../../agent/src/backup-file-restore-request.ts'
 
 export interface BackupFileRestoreWorkspacePorts {
@@ -108,6 +108,49 @@ export async function handleBackupFileRestoreWorkspaceRoute(req: Request, url: U
   const value = await readReply(response)
   if (!verified(op ?? 'list', value, first.account, request)) return request?.op === 'restore'
     ? fail('PRECONDITION_FAILED', 'the file restore outcome requires review; inspect the account home', { stateChanged: true, verificationRequired: true })
+    : fail('PRECONDITION_FAILED', 'the host backup response could not be verified', unchanged)
+  return json(value)
+}
+
+export interface OwnerFileRestorationPorts extends Pick<BackupFileRestoreWorkspacePorts, 'requireCaller' | 'assertCanAccessAccount' | 'callAgent'> {
+  getAccount(id: string): Promise<Account | null>
+  /** The account plan's feature policy for the signed-in owner. */
+  assertAccountFeatures(caller: AuthenticatedCaller, account: Account, toolIds: readonly string[]): Promise<void>
+}
+const OWNER_ROUTE = /^\/api\/account\/file-restoration(?:\/(browse|preview|restore))?$/
+
+/** /api/account/file-restoration[/browse|preview|restore]: the signed-in owner restores files of its own account from server backups. */
+export async function handleOwnerFileRestorationRoute(req: Request, url: URL, method: string, ports: OwnerFileRestorationPorts): Promise<Response | null> {
+  const match = OWNER_ROUTE.exec(url.pathname)
+  if (!match) return null
+  const op = match[1] as BackupFileRequest['op'] | undefined
+  if (method !== (op ? 'POST' : 'GET')) return new Response(null, { status: 405, headers: { allow: op ? 'POST' : 'GET' } })
+  if (url.search) return fail('VALIDATION', 'file restoration requests do not accept query selectors', unchanged)
+  const authorize = async (): Promise<{ caller: AuthenticatedCaller; account: Account }> => {
+    const caller = await ports.requireCaller(req)
+    if (isMailboxPrincipal(caller) || caller.principal.kind !== 'user') return fail('FORBIDDEN', 'file restoration requires the signed-in account owner', unchanged)
+    const account = await ports.getAccount(caller.principal.accountId)
+    if (!account || account.status !== 'active') return fail('NOT_FOUND', 'account is unavailable', unchanged)
+    await ports.assertCanAccessAccount(caller, account, 'backup.files.' + (op ?? 'list'))
+    await ports.assertAccountFeatures(caller, account, ['file-restoration'])
+    return { caller, account }
+  }
+  const first = await authorize()
+  const request = op ? parseBackupFileRequest(op, first.account.username, await readBody(req)) : null
+  if (request && request.op !== 'browse') assertOwnerRestorable(request.paths)
+  if (!ports.callAgent) return fail('PRECONDITION_FAILED', 'privileged host agent is not connected', unchanged)
+  let caller = first.caller
+  if (request?.op === 'restore') {
+    const fresh = await authorize()
+    if (fresh.account.id !== first.account.id || fresh.account.uid !== first.account.uid || fresh.account.home !== first.account.home || fresh.caller.principal.id !== first.caller.principal.id) return fail('CONFLICT', 'the account changed before the restore', unchanged)
+    caller = fresh.caller
+  }
+  const { op: _op, ...body } = request ?? { op: 'list' }
+  const response = await ports.callAgent('/accounts/' + first.account.username + '/backup-files' + (op ? '/' + op : ''), { caller, ...(op ? { method: 'POST', body } : {}) })
+  if (response.status !== 200) return response
+  const value = await readReply(response)
+  if (!verified(op ?? 'list', value, first.account, request)) return request?.op === 'restore'
+    ? fail('PRECONDITION_FAILED', 'the file restore outcome requires review; inspect your home folder', { stateChanged: true, verificationRequired: true })
     : fail('PRECONDITION_FAILED', 'the host backup response could not be verified', unchanged)
   return json(value)
 }

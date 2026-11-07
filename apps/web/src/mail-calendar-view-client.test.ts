@@ -18,7 +18,7 @@ type StoredEvent = { id: string; uid: string; summary: string; description: stri
 const event = (number: number, patch: Partial<StoredEvent> = {}): StoredEvent => ({ id: id(100 + number), uid: 'uid-' + number + '@example.test', summary: 'Event ' + number, description: '', location: '', dtstart: '20261102T090000', dtend: '20261102T110000', timezone: 'America/New_York', ...patch })
 const calendar = (patch: Record<string, unknown> = {}) => ({ id: id(1), owner: MAILBOX, name: 'Work', color: '#4f6bed', timezone: 'UTC', revision: rev(1), storedBytes: 300, canWrite: true, canManage: true,
   events: [event(1)], shares: [] as unknown[], createdAt: '2026-10-26T12:00:00Z', ...patch })
-const envelope = { context: { mailbox: MAILBOX }, application: { status: 'stored_configuration', nativeApplied: false, syncVerified: false } }
+const envelope = { context: { mailbox: MAILBOX }, application: { status: 'dav_store', nativeApplied: true, syncVerified: false } }
 
 /** In-memory model of the sealed event routes, including the API's expectedRevision 409 rule. */
 const server = (initial = [calendar()]) => {
@@ -139,7 +139,7 @@ describe('calendar event placement', () => {
   it('accepts only the sealed mailbox workspace', () => {
     const value = { ...envelope, calendars: [calendar()], revision: rev(10), limits: { calendars: 25, events: 1000, shares: 100, icsBytes: 262144, calendarBytes: 524288 } }
     expect(readCalendarViewWorkspace(value, MAILBOX).calendars[0]!.events).toHaveLength(1)
-    for (const bad of [{ ...value, context: { mailbox: 'other@example.test' } }, { ...value, application: { ...envelope.application, nativeApplied: true } }, { ...value, calendars: [calendar({ canManage: false })] }, { ...value, calendars: [calendar({ events: [event(1), event(1)] })] }, { ...value, unknownOutcome: true }])
+    for (const bad of [{ ...value, context: { mailbox: 'other@example.test' } }, { ...value, application: { ...envelope.application, nativeApplied: false } }, { ...value, calendars: [calendar({ canManage: false })] }, { ...value, calendars: [calendar({ events: [event(1), event(1)] })] }, { ...value, unknownOutcome: true }])
       expect(() => readCalendarViewWorkspace(bad, MAILBOX)).toThrow()
   })
 })

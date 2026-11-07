@@ -27,7 +27,7 @@ export function renderWhmLanguagesWorkspace(input: { locale: Locale; canManage: 
   <div class="xp-whm-detail-column">
     <section class="xp-whm-detail-card" data-whm-detail-section="languages-locales" aria-labelledby="whm-languages-locales-heading">
       <h2 id="whm-languages-locales-heading">${t('Locales in this release')}</h2>
-      <p class="xp-help">${t('From the locale registry built into this release. Locales are added by a release, not on this server.')}</p>
+      <p class="xp-help">${t('From the locale registry of this release and the copies saved on this server.')}</p>
       <p class="xp-whm-detail-status" data-whm-languages-status data-state="unread" role="status">${t('The server\'s language settings have not been read. No setting is assumed.')}</p>
       <div class="xp-whm-languages__loading" data-whm-languages-loading aria-label="${t('Loading language settings')}" hidden><span class="xp-skeleton-line"></span><span class="xp-skeleton-line xp-skeleton-line--short"></span></div>
       <div class="xp-whm-detail-scroll" role="region" tabindex="0" aria-label="${t('Locales in this release')}"><table class="xp-whm-detail-table xp-table"><thead><tr>${[t('Language'), t('Tag'), t('Direction'), t('Messages'), t('Server setting'), t('Actions')].map(text => `<th scope="col">${text}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>

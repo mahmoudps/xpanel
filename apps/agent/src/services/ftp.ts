@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { posix } from 'node:path'
-import { fail, isUnlimited, isXpanelError, suspensionEffects } from '@xpanel/core'
-import type { Account, Limit, OsProfile, Plan, RenderedFile } from '@xpanel/core'
+import { DEFAULT_SERVER_FTP_SETTINGS, effectivePlan, fail, isUnlimited, isXpanelError, suspensionEffects } from '@xpanel/core'
+import type { Account, Limit, OsProfile, Plan, RenderedFile, ServerFtpSettings } from '@xpanel/core'
 import { services, system } from '@xpanel/render'
 import type { AgentExecutor } from '../executor.ts'
 import { JailedFileManager } from '../file-manager.ts'
@@ -112,6 +112,33 @@ export const computeEffectiveFtpQuotaMb = (userQuotaMb: Limit | undefined, accou
 }
 
 /**
+ * One directive per Pure-FTPd setting. The daemon's own anonymous mode stays off: anonymous@domain logins reach it
+ * through ExtAuth, after PureDB, so each gets a per-account jail instead of the single `ftp` user home.
+ */
+export const pureFtpdDirectives = (settings: ServerFtpSettings, pdbFile: string = services.FTP_PDB_FILE, extAuthSocket: string | null = null): readonly (readonly [string, string])[] => [
+  ['ChrootEveryone', 'yes'],
+  ['NoAnonymous', 'yes'],
+  ['PAMAuthentication', 'no'],
+  ['UnixAuthentication', 'no'],
+  ['PureDB', pdbFile],
+  ...(extAuthSocket ? [['ExtAuth', extAuthSocket] as const] : []),
+  ['TLS', settings.tls === 'required' ? '2' : '1'],
+  ['TLSCipherSuite', settings.tlsCipherSuite],
+  ['PassivePortRange', `${settings.passivePorts.min} ${settings.passivePorts.max}`],
+  ['CreateHomeDir', 'no'],
+  ['CustomerProof', 'yes'],
+  ['MinUID', '1000'],
+  ['DontResolve', 'yes'],
+  ['MaxClientsNumber', String(settings.maxConnections)],
+  ['MaxClientsPerIP', String(settings.maxConnectionsPerIp)],
+  ['MaxIdleTime', String(settings.maxIdleMinutes)],
+  ['LimitRecursion', `${settings.listingLimit} 8`],
+  ['BrokenClientsCompatibility', settings.brokenClients ? 'yes' : 'no'],
+  // Anonymous uploads are not charged to any account, so the filesystem keeps its own ceiling.
+  ['MaxDiskUsage', '95'],
+]
+
+/**
  * Renders the hardened Pure-FTPd daemon configuration files (chroot confinement, PureDB path,
  * TLS enforcement, passive port range, and anonymous access prohibition).
  */
@@ -119,6 +146,8 @@ export const renderPureFtpdDaemonConfigs = (opts: {
   confDir?: string
   pdbFile?: string
   tlsPolicy?: PureFtpdTlsPolicy
+  settings?: ServerFtpSettings
+  extAuthSocket?: string | null
 }): RenderedFile[] => {
   const confDir = assertSafeUnixPath('confDir', opts.confDir ?? DEFAULT_PURE_FTPD_CONF_DIR)
   const pdbFile = assertSafeUnixPath('pdbFile', opts.pdbFile ?? services.FTP_PDB_FILE)
@@ -126,7 +155,6 @@ export const renderPureFtpdDaemonConfigs = (opts: {
   if (mode !== 'required' && mode !== 'optional') {
     fail('VALIDATION', 'Pure-FTPd TLS policy mode must be "required" or "optional"; plaintext-only FTP is forbidden')
   }
-  const tlsValue = mode === 'required' ? '2' : '1'
   const range = opts.tlsPolicy?.passivePortRange ?? DEFAULT_PASSIVE_PORT_RANGE
   const [minPort, maxPort] = range
   if (
@@ -147,17 +175,8 @@ export const renderPureFtpdDaemonConfigs = (opts: {
     group: 'root',
   })
 
-  return [
-    mkFile('ChrootEveryone', 'yes'),
-    mkFile('NoAnonymous', 'yes'),
-    mkFile('PAMAuthentication', 'no'),
-    mkFile('UnixAuthentication', 'no'),
-    mkFile('PureDB', pdbFile),
-    mkFile('TLS', tlsValue),
-    mkFile('PassivePortRange', `${minPort} ${maxPort}`),
-    mkFile('CreateHomeDir', 'no'),
-    mkFile('CustomerProof', 'yes'),
-  ]
+  const settings = opts.settings ?? { ...DEFAULT_SERVER_FTP_SETTINGS, tls: mode, passivePorts: { min: minPort, max: maxPort } }
+  return pureFtpdDirectives(settings, pdbFile, opts.extAuthSocket ?? null).map(([name, value]) => mkFile(name, value))
 }
 
 /**
@@ -239,7 +258,7 @@ export class PureFtpdServiceAdapter {
       }
 
       const plan = input.plansById.get(owningAccount.planId)
-      const accountDiskMb: Limit = plan?.resources.diskMb ?? 'unlimited'
+      const accountDiskMb: Limit = plan ? effectivePlan(plan, owningAccount).resources.diskMb : 'unlimited'
       const effectiveQuotaMb = computeEffectiveFtpQuotaMb(u.quotaMb, accountDiskMb)
 
       const effects = suspensionEffects(owningAccount)
@@ -327,7 +346,7 @@ export class PureFtpdServiceAdapter {
       if (acc.status === 'terminating') continue
       const plan = input.plansById.get(acc.planId)
       if (!plan) continue
-      const q = system.quotaBlocksKb(plan.resources.diskMb)
+      const q = system.quotaBlocksKb(effectivePlan(plan, acc).resources.diskMb)
       if (this.quotaFilesystem !== null) {
         await this.executor.runAction({
           kind: 'set-quota',

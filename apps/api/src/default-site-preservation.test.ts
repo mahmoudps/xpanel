@@ -32,6 +32,13 @@ describe('real HTTP legacy writers preserve dedicated default-site policy', () =
     expect(await response.json()).toMatchObject({ details: { stateChanged: false } })
     expect(await f.state.store.getServerSettings()).toEqual(before); expect(await f.state.store.getRevision()).toBe(revision)
   })
+  it('refuses an SSH port change: only the guarded workspace proves the new port before the old one closes', async () => {
+    const f = await fixture(false), revision = await f.state.store.getRevision()
+    const response = await f.request('/api/server/settings', 'PUT', { ...settings(), sshPort: 22022, markSetupComplete: false })
+    expect(response.status).toBe(422)
+    expect(await response.json()).toMatchObject({ details: { stateChanged: false } })
+    expect(await f.state.store.getRevision()).toBe(revision)
+  })
   it('cannot introduce a new policy through the legacy endpoint on an unqualified existing host', async () => {
     const f = await fixture(false), revision = await f.state.store.getRevision()
     expect((await f.request('/api/server/settings', 'PUT', { ...settings(), defaultSite: policy, markSetupComplete: false })).status).toBe(422)

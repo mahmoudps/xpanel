@@ -91,5 +91,18 @@ export const xwhm_services: readonly ComposedRoute[] = [
     "columns": [],
     "fields": [],
     "bind": "soon"
+  },
+  {
+    "route": "/whm/services/nginx-proxy",
+    "surface": "xwhm",
+    "section": "services",
+    "group": msgid('Services'),
+    "title": msgid('NGINX reverse proxy'),
+    "lede": msgid('No reverse proxy rules have been read. Rule and cache changes are unavailable.'),
+    "layout": "editor",
+    "action": null,
+    "columns": [],
+    "fields": [],
+    "bind": "soon"
   }
 ]

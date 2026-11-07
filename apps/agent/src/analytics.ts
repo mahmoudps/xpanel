@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { performance } from 'node:perf_hooks'
-import { assertResourceConfigurationBinding, fail, isUnlimited, parseResourceObservationSnapshot, RESOURCE_SAMPLE_INTERVAL_MS } from '@xpanel/core'
+import { assertResourceConfigurationBinding, effectivePlan, fail, isUnlimited, parseResourceObservationSnapshot, RESOURCE_SAMPLE_INTERVAL_MS } from '@xpanel/core'
 import type {
   Account,
   CanonicalIoAnalyticsUnavailable,
@@ -271,7 +271,7 @@ export class IoAnalyticsEngine {
     const plans = new Map(state.plans.map(plan => [plan.id, plan]))
     const ranks: AccountIoRank[] = []
     for (const account of active) {
-      const sample = byId.get(account.id), plan = plans.get(account.planId)
+      const sample = byId.get(account.id), stored = plans.get(account.planId), plan = stored && effectivePlan(stored, account)
       const prefix = 'accounts.' + account.username + '.'
       if (!sample || !plan) { reasons[prefix + 'identity'] = sample ? 'missing-plan' : 'missing'; continue }
       const fields = sample.fields
@@ -454,7 +454,7 @@ export class IoAnalyticsEngine {
       totalCpuPercent = Number((totalCpuPercent + cpuPercent).toFixed(1))
       totalMemoryBytes += rawMetrics.memoryCurrentBytes
 
-      const plan = plansById.get(acc.planId)
+      const stored = plansById.get(acc.planId), plan = stored && effectivePlan(stored, acc)
       const readCap = plan ? plan.resources.ioReadBps : ('unlimited' as const)
       const writeCap = plan ? plan.resources.ioWriteBps : ('unlimited' as const)
       const readIopsCap = plan ? plan.resources.ioReadIops : ('unlimited' as const)

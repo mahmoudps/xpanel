@@ -146,12 +146,15 @@ const restartFpmVersion = async (run: Run, id: string, version: PhpVersion, os: 
   return after ?? fail('SERVICE_UNAVAILABLE', `${label} was restarted but could not be read back`, { stateChanged: true, verificationRequired: true })
 }
 
-export const restartHostService = async (run: Run, id: string, os: XpanelOsProfile): Promise<HostServiceStatus> => {
+export const restartHostService = async (run: Run, id: string, os: XpanelOsProfile, disabledUnits: ReadonlySet<string> = new Set()): Promise<HostServiceStatus> => {
   const fpm = FPM_ID.exec(id), version = fpm ? `${fpm[1]}.${fpm[2]}` : null
   if (isPhpVersion(version)) return restartFpmVersion(run, id, version, os)
   const service = hostServiceById(id)
   const current = (await readHostServices(run)).find(row => row.id === service.id)
   if (!current?.unit) return fail('PRECONDITION_FAILED', `${service.label} ${current?.state === 'unchecked' ? 'was not checked on this server' : 'is not installed on this server'}`)
+  if (disabledUnits.has(current.unit)) return fail('PRECONDITION_FAILED', `${service.label} is disabled on this server`, { stateChanged: false, reason: 'service_role_disabled' })
+  // A restart would start it again, which is the Service Manager's decision.
+  if (current.state !== 'active' && ['disabled', 'masked'].includes((await readUnitInventory(run))?.find(row => row.unit === current.unit)?.boot ?? '')) return fail('PRECONDITION_FAILED', `${service.label} is disabled on this server`, { stateChanged: false, reason: 'service_disabled' })
   await testThenRestart(run, service.label, [current.unit], os)
   const after = (await readHostServices(run)).find(row => row.id === service.id)
   return after ?? current

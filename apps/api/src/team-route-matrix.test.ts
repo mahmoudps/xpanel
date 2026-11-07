@@ -44,7 +44,7 @@ describe('authorization route matrix', () => {
   it('records that a team session reaches only its identity, personal UI preference and sign-out among the auth routes', () => {
     const auth = matrix.routes.filter(row => row.surface === 'api' && row.path.startsWith('/api/auth/'))
     expect(auth.filter(row => row.allowedPrincipals.includes('team')).map(row => `${row.method} ${row.path}`).sort()).toEqual([
-      'GET /api/auth/me', 'GET /api/auth/ui-preferences', 'POST /api/auth/logout', 'PUT /api/auth/ui-preferences',
+      'GET /api/auth/me', 'GET /api/auth/personal-preferences', 'GET /api/auth/ui-preferences', 'POST /api/auth/logout', 'PUT /api/auth/personal-preferences', 'PUT /api/auth/ui-preferences',
     ])
   })
 })

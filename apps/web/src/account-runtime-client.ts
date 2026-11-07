@@ -21,7 +21,7 @@ function runtimeClientTemplates(root: HTMLElement, kind: string) {
   }
   const slots = kind === 'apps' ? ['name', 'runtime', 'address', 'state', 'health', 'actions']
     : kind === 'containers' ? ['name', 'image', 'state', 'since', 'ports', 'actions'] : ['name', 'state', 'version', 'socket', 'memory', 'actions']
-  return { row: locate(`runtime-${kind}-row`, 'tr', slots), empty: locate('runtime-empty-row', 'tr', ['message']),
+  return { stack: kind === 'containers' ? locate('runtime-stack-row', 'tr', ['name', 'services', 'ports', 'actions']) : null, row: locate(`runtime-${kind}-row`, 'tr', slots), empty: locate('runtime-empty-row', 'tr', ['message']),
     actions: locate('runtime-actions', 'div', []), action: locate('runtime-action', 'button', ['label']), chip: locate('runtime-chip', 'span', ['label']),
     env: locate('runtime-env-row', 'tr', ['name', 'value', 'remove']), envEmpty: locate('runtime-env-empty', 'tr', ['message']) }
 }
@@ -78,17 +78,31 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
         : code === 422 ? t('A plan limit was reached. Nothing was changed.') : code === 500 ? t('The change did not pass the server configuration tests and was undone.') : code === 404 ? t('It no longer exists. Read again.') : t('The change was refused. Nothing was changed.'))
       else note('uncertain', t('The outcome is unknown. Read again before retrying.'))
     }
+    const webStatus = (status: string): string => status === 'staging' ? t('Staging') : status === 'staged' ? t('Staged') : status === 'deploying' ? t('Deploying') : status === 'running' ? t('Running') : status === 'stopped' ? t('Stopped') : t('Failed')
+    const webFailure = (failure: string | null): string => failure === 'stage' ? t('Staging failed. Read the staging log.') : failure === 'build' ? t('The build failed. Read the deployment log.') : failure === 'start' ? t('The application did not start. Read the application log.') : ''
+    const webChip = (w: NonNullable<AccountRuntimeClientView['apps'][number]['webapp']>): HTMLElement => { const node = chip(webStatus(w.status), w.status === 'running' ? 'ok' : w.status === 'errored' ? 'problem' : 'unavailable'); if (w.failure) node.title = webFailure(w.failure); return node }
+    const webActions = (a: AccountRuntimeClientView['apps'][number]): HTMLButtonElement[] => {
+      const w = a.webapp!, working = w.status === 'staging' || w.status === 'deploying'
+      return [rowButton(t('Edit'), 'edit', a.name, !working), rowButton(w.deployedAt ? t('Redeploy') : t('Deploy'), w.deployedAt ? 'webapp.redeploy' : 'webapp.deploy', a.name, !working && (w.failure !== 'stage') && w.status !== 'staging'),
+        rowButton(a.enabled ? t('Stop') : t('Start'), a.enabled ? 'app.stop' : 'app.start', a.name, !working && !!w.deployedAt), rowButton(t('Restart'), 'app.restart', a.name, a.enabled && !working),
+        rowButton(w.mode === 'production' ? t('Development mode') : t('Production mode'), 'webapp.mode', a.name, w.category === 'server' && !working), rowButton(t('Log'), w.failure === 'stage' || !w.deployedAt ? 'log:stage' : 'log:deploy', a.name, true), rowButton(t('Remove'), 'app.remove', a.name, !working)]
+    }
+    let watching: ReturnType<typeof setTimeout> | null = null
     const paintApps = (v: AccountRuntimeClientView): void => {
       for (const r of v.host.runtimes) { const node = q<HTMLElement>('[data-runtime-version="' + r.kind + '"]'); if (node) node.textContent = r.available ? t('Version {version}', { version: r.version ?? '' }) : r.reason === 'bundler-missing' ? t('Bundler is not installed') : r.reason === 'proxy-unavailable' ? t('Unavailable: systemd socket proxy missing') : r.reason === 'venv-missing' ? t('Unavailable: python3-venv is not installed') : t('Not installed') }
       const body = q<HTMLElement>('[data-runtime-apps]')!, domains = new Map(v.domains.map(d => [d.id, d.name]))
       if (!v.apps.length) empty(body, v.plan.apps ? t('No application yet.') : t('Your plan does not include applications.'))
       else body.replaceChildren(...v.apps.map(a => row({ name: a.name, runtime: a.runtime === 'node' ? 'Node.js' : a.runtime === 'python' ? 'Python' : 'Ruby', address: (domains.get(a.domainId) ?? t('Domain removed')) + (a.path === '/' ? '' : a.path),
-        state: a.preflight?.length && !a.enabled ? chip(t('Needs setup'), 'problem') : stateChip(a.state),
+        state: a.webapp ? webChip(a.webapp) : a.preflight?.length && !a.enabled ? chip(t('Needs setup'), 'problem') : stateChip(a.state),
         health: a.health === null ? t('Not checked') : chip(String(a.health), a.health < 500 ? 'ok' : 'problem'),
-        actions: actions(rowButton(t('Edit'), 'edit', a.name, true), rowButton(a.enabled ? t('Stop') : t('Start'), a.enabled ? 'app.stop' : 'app.start', a.name, a.enabled || !a.preflight?.length), rowButton(t('Restart'), 'app.restart', a.name, a.enabled), rowButton(t('Remove'), 'app.remove', a.name, true)) })))
-      const domain = field<HTMLSelectElement>('domain'), keep = domain.value
-      domain.replaceChildren(...v.domains.map(d => { const o = make('option', d.name) as HTMLOptionElement; o.value = d.id; return o }))
-      if (v.domains.some(d => d.id === keep)) domain.value = keep
+        actions: a.webapp ? actions(...webActions(a)) : actions(rowButton(t('Edit'), 'edit', a.name, true), rowButton(a.enabled ? t('Stop') : t('Start'), a.enabled ? 'app.stop' : 'app.start', a.name, a.enabled || !a.preflight?.length), rowButton(t('Restart'), 'app.restart', a.name, a.enabled), rowButton(t('Remove'), 'app.remove', a.name, true)) })))
+      for (const key of ['domain', 'web-domain']) {
+        const domain = field<HTMLSelectElement>(key) as HTMLSelectElement | null, keep = domain?.value
+        domain?.replaceChildren(...v.domains.map(d => { const o = make('option', d.name) as HTMLOptionElement; o.value = d.id; return o }))
+        if (domain && v.domains.some(d => d.id === keep)) domain.value = keep!
+      }
+      if (watching) clearTimeout(watching)
+      watching = v.apps.some(a => a.webapp?.status === 'staging' || a.webapp?.status === 'deploying') ? setTimeout(() => { if (root.isConnected && !busy) void load() }, 5000) : null
       const current = v.apps.find(a => a.name === editing)
       const deps = q<HTMLElement>('[data-runtime-deps]')
       const ready = q<HTMLElement>('[data-runtime-preflight]')
@@ -114,6 +128,19 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
       else body.replaceChildren(...v.containers.map(c => row({ name: c.name, image: c.image, state: stateChip(c.state), since: c.since ? formatDisplayDateTime(c.since) : '—', ports: t('None published'),
         actions: actions(rowButton(c.enabled ? t('Stop') : t('Start'), c.enabled ? 'container.stop' : 'container.start', c.name, true), rowButton(t('Restart'), 'container.restart', c.name, c.enabled), rowButton(t('Log'), 'log:ctr', c.name, true), rowButton(t('Remove'), 'container.remove', c.name, true)) })))
     }
+    const paintStacks = (v: AccountRuntimeClientView): void => {
+      const body = q<HTMLElement>('[data-runtime-stacks]')
+      if (!body) return
+      if (!v.stacks.length) { empty(body, t('No stacks run under this account.')); return }
+      body.replaceChildren(...v.stacks.map(stack => {
+        const tr = templates.stack!()
+        clientTemplateSlot(tr, 'name').textContent = stack.name
+        clientTemplateSlot(tr, 'services').textContent = stack.enabled ? stack.services.map(service => service.name + ': ' + stateLabel(service.state)).join(', ') : t('Stopped by your administrator')
+        clientTemplateSlot(tr, 'ports').textContent = stack.services.flatMap(service => service.ports).join(', ') || t('None published')
+        clientTemplateSlot(tr, 'actions').replaceChildren(actions(...stack.services.map(service => rowButton(service.name, 'log:ctr', stack.name + '-' + service.name, true))))
+        return tr
+      }))
+    }
     const paintCache = (v: AccountRuntimeClientView): void => {
       const stat = (key: string, text: string): void => { const node = q<HTMLElement>('[data-runtime-stat="' + key + '"]'); if (node) node.textContent = text }
       for (const c of v.cache) stat(c.service, c.enabled ? stateLabel(c.state) : t('Disabled'))
@@ -138,7 +165,8 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
       const can = (key: string, allowed: boolean): void => { const b = action(key); if (b) b.disabled = !on || !allowed }
       const app = view?.apps.find(a => a.name === editing)
       can('app-new', !!view?.plan.apps && view.apps.length < view.plan.maxApps); can('app-save', !!view?.plan.apps && !!view?.domains.length); can('env-add', true)
-      can('app-deps', !!app); can('app-log', !!app); can('deps-log', !!app); can('ctr-run', !!view?.plan.containers && !!view?.host.containers.available && view.containers.length < view.plan.maxContainers); can('ctr-prune', !!view?.host.containers.available && view?.imageCleanup !== 'running')
+      can('web-stage', !!view?.plan.apps && !!view?.domains.length && view.apps.length < view.plan.maxApps)
+      can('app-deps', !!app && !app.webapp); can('app-log', !!app); can('deps-log', !!app); can('ctr-run', !!view?.plan.containers && !!view?.host.containers.available && view.containers.length < view.plan.maxContainers); can('ctr-prune', !!view?.host.containers.available && view?.imageCleanup !== 'running')
       const cache = view?.cache.find(c => c.service === (root.querySelector<HTMLSelectElement>('[data-runtime-input="service"]')?.value ?? ''))
       can('cache-save', !!view?.plan.cache); can('cache-flush', !!cache?.enabled)
       if (kind === 'apps' && editing !== null) field<HTMLInputElement>('name').disabled = true
@@ -152,7 +180,7 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
         const next = parse(await transport!('GET', '/api/account/runtime'))
         if (!admitted()) return
         view = next
-        if (kind === 'apps') paintApps(next); else if (kind === 'containers') paintContainers(next); else paintCache(next)
+        if (kind === 'apps') paintApps(next); else if (kind === 'containers') { paintContainers(next); paintStacks(next) } else paintCache(next)
         note('read', message ?? t('Read from the server.'))
       } catch { if (admitted()) note('failed', t('The services could not be read. Read again; nothing was changed.')) }
       finally { busy = false; lock() }
@@ -190,10 +218,14 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
         editing = a.name
         field<HTMLSelectElement>('runtime').value = a.runtime; field<HTMLInputElement>('name').value = a.name; field<HTMLInputElement>('root').value = a.root; field<HTMLInputElement>('startup').value = a.startup
         field<HTMLSelectElement>('domain').value = a.domainId; field<HTMLInputElement>('path').value = a.path; fillEnv(a.env)
+        paintWebSettings(a)
         const setup = q<HTMLElement>('[data-runtime-setup]'); if (setup) { setup.hidden = false; paintApps(view) }
         lock(); return
       }
       if (op === 'log:ctr') { void readLog('ctr:' + name); return }
+      if (op === 'log:stage' || op === 'log:deploy') { void readLog(op.slice(4) + ':' + name); return }
+      if (op === 'webapp.mode') { const w = view.apps.find(x => x.name === name)?.webapp; if (w) void send({ op, name, mode: w.mode === 'production' ? 'development' : 'production' }, t('The run mode changed.')); return }
+      if (op === 'webapp.deploy' || op === 'webapp.redeploy') { void send({ op, name }, t('The deployment started. Its state below updates by itself.')); return }
       if (op === 'log:cache') { void readLog('cache:' + name); return }
       if (op === 'cache.enable' || op === 'cache.disable') {
         const c = view.cache.find(x => x.service === name)!
@@ -234,8 +266,30 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
       })
     }
     action('env-add')?.addEventListener('click', () => envRow())
+    const webBox = q<HTMLElement>('[data-runtime-webapp]')
+    const paintWebSettings = (a: AccountRuntimeClientView['apps'][number] | null): void => {
+      if (!webBox) return
+      webBox.hidden = !a?.webapp
+      if (!a?.webapp) return
+      const w = a.webapp, d = w.deployedAt ? null : w.detected
+      field<HTMLSelectElement>('web-category').value = d?.category ?? w.category
+      field<HTMLInputElement>('web-framework').value = d?.framework ?? w.framework
+      field<HTMLInputElement>('web-build').value = (d ? d.buildCommand : w.buildCommand) ?? ''
+      field<HTMLInputElement>('web-start').value = (d ? d.startCommand : w.startCommand) ?? ''
+      field<HTMLInputElement>('web-output').value = (d ? d.outputDir : w.outputDir) ?? ''
+      if (d) { field<HTMLSelectElement>('runtime').value = d.runtime; field<HTMLInputElement>('startup').value = d.startup }
+      const note = q<HTMLElement>('[data-runtime-detected]')
+      if (note) note.textContent = !d ? t('Detection runs on a staged application that has not been deployed.') : d.confidence === 'high' ? t('Detected {framework}. The settings below are suggestions.', { framework: d.framework }) : d.confidence === 'medium' ? t('Probably {framework}. Check the settings below.', { framework: d.framework }) : t('Could not identify the framework with confidence. Check the settings below.')
+    }
+    action('web-stage')?.addEventListener('click', () => {
+      const kind = field<HTMLSelectElement>('web-kind').value, source = kind === 'git' ? { kind, url: field<HTMLInputElement>('web-url').value.trim(), branch: field<HTMLInputElement>('web-branch').value.trim() || null } : { kind, path: field<HTMLInputElement>('web-url').value.trim().replace(/^\/+/, '') }
+      const app = { name: field<HTMLInputElement>('web-name').value.trim(), source, subfolder: field<HTMLInputElement>('web-subfolder').value.trim().replace(/^\/+|\/+$/g, '') || null, domainId: field<HTMLSelectElement>('web-domain').value, path: field<HTMLInputElement>('web-path').value.trim() || '/' }
+      if (!/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(app.name) || !field<HTMLInputElement>('web-url').value.trim() || !app.domainId) { note('failed', t('Enter a name, a source and a domain. Nothing was staged.')); return }
+      void send({ op: 'webapp.stage', app }, t('Staging started. Nothing is served until you deploy it.'))
+    })
     action('app-new')?.addEventListener('click', () => {
       editing = null
+      paintWebSettings(null)
       for (const key of ['name', 'root', 'startup']) field<HTMLInputElement>(key).value = ''
       field<HTMLInputElement>('path').value = '/'; fillEnv([])
       const setup = q<HTMLElement>('[data-runtime-setup]'); if (setup) setup.hidden = false
@@ -244,6 +298,11 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
     action('app-save')?.addEventListener('click', () => {
       const app = { name: field<HTMLInputElement>('name').value.trim(), runtime: field<HTMLSelectElement>('runtime').value, root: field<HTMLInputElement>('root').value.trim().replace(/^\/+|\/+$/g, ''), startup: field<HTMLInputElement>('startup').value.trim(), domainId: field<HTMLSelectElement>('domain').value, path: field<HTMLInputElement>('path').value.trim().replace(/(.)\/+$/, '$1') || '/', env: envValue() }
       if (!/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(app.name) || !app.root || !app.startup || !app.domainId) { note('failed', t('Enter a name, an application root, a startup file and a domain. Nothing was saved.')); return }
+      if (view?.apps.find(a => a.name === editing)?.webapp) {
+        const text = (key: string): string | null => field<HTMLInputElement>(key).value.trim() || null
+        void send({ op: 'webapp.configure', name: app.name, config: { domainId: app.domainId, path: app.path, runtime: app.runtime, category: field<HTMLSelectElement>('web-category').value, framework: field<HTMLInputElement>('web-framework').value.trim() || 'unknown', startup: app.startup, startCommand: text('web-start'), buildCommand: text('web-build'), outputDir: text('web-output'), env: app.env } }, t('Saved. Deploy the application to apply the new settings.'))
+        return
+      }
       const saved = editing === null ? t('Saved stopped. Install its dependencies, then start it.') : t('Saved. A running application was restarted with the new settings.')
       void send({ op: 'app.save', app }, saved).then(() => { if (view?.apps.some(a => a.name === app.name)) { editing = app.name; paintApps(view); lock() } })
     })

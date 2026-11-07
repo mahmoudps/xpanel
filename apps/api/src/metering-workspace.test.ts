@@ -12,8 +12,8 @@ const bandwidth = () => ({ state: 'partial', month: '2026-10', since: '2026-10-2
   sources: { web: { state: 'partial', since: '2026-10-28T11:00:00.000Z' }, mail: { state: 'read', since: '2026-10-01T00:00:00Z' }, ftp: { state: 'unavailable', since: null } },
   pendingBytes: 0, unavailableSites: 0, skippedLines: 0,
   accounts: [
-    { username: 'alice', domain: 'alice.test', status: 'active', month: { web: totals(2, 200, 1024), mail: totals(1, 76, 0), ftp: null }, totalBytes: 1300, limitBytes: 1000, usedPercent: 130, limitState: 'over', enforced: true, limited: true },
-    { username: 'bob', domain: 'bob.test', status: 'suspended', month: { web: null, mail: null, ftp: null }, totalBytes: null, limitBytes: 1000, usedPercent: null, limitState: 'unmeasured', enforced: false, limited: false },
+    { username: 'alice', domain: 'alice.test', status: 'active', month: { web: totals(2, 200, 1024), mail: totals(1, 76, 0), ftp: null }, totalBytes: 1300, limitBytes: 1000, usedPercent: 130, limitState: 'over', enforced: true, limited: true, customLimit: true, reliefThrough: null },
+    { username: 'bob', domain: 'bob.test', status: 'suspended', month: { web: null, mail: null, ftp: null }, totalBytes: null, limitBytes: 1000, usedPercent: null, limitState: 'unmeasured', enforced: false, limited: false, customLimit: false, reliefThrough: null },
   ] })
 const root = { principal: { kind: 'root', id: 'r', username: 'root' } } as AuthenticatedCaller
 

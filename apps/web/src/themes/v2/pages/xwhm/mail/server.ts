@@ -75,7 +75,8 @@ ${status(t(msgid('The saved policy has not been read.')), { 'data-whm-mail-setti
 <p>${escapeHtml(t(msgid('Passwords, keys and lookup table contents are never read.')))}</p><p><a href="/whm/monitoring/repair">${escapeHtml(t(msgid('Repair center')))}</a> · <a href="/whm/panel/data">${escapeHtml(t(msgid('Configuration history')))}</a></p>`,
     button(t(msgid('Refresh')), { 'data-whm-mail-server-refresh': true }, !canRead))
   const observed = group(`${mode}-observed`, mode === 'outbound' ? t(msgid('Rate and size limits')) : t(msgid('Postfix and Dovecot settings')),
-    table(t, t(msgid('Settings')), [t(msgid('Source')), t(msgid('Setting')), ...compared], { 'data-whm-mail-server-settings': true }))
+    (mode === 'outbound' ? `<p>${escapeHtml(t(msgid('The remote SMTP servers saved in Remote service IPs are also included in smtpd_client_event_limit_exceptions; they are changed only there.')))} <a href="/whm/server/ips">${escapeHtml(t(msgid('Remote service IPs')))}</a></p>` : '')
+    + table(t, t(msgid('Settings')), [t(msgid('Source')), t(msgid('Setting')), ...compared], { 'data-whm-mail-server-settings': true }))
   const services = mode === 'routing' ? '' : group(`${mode}-services`, mode === 'server' ? t(msgid('Listening services (master.cf)')) : t(msgid('Submission services')),
     `<p>${escapeHtml(t(msgid('Only reviewed -o overrides are shown; other overrides are counted.')))}</p>${table(t, t(msgid('Services')), [t(msgid('Service')), t(msgid('Setting')), ...compared], { 'data-whm-mail-server-services': true })}`)
   const domains = mode !== 'routing' ? '' : group('routing-domains', t(msgid('Hosted mail domains')),

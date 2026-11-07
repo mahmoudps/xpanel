@@ -9,6 +9,14 @@ import { FileProvisioningPreparationStore, type ProvisioningPreparationStore } f
 
 export type { ProvisioningAuthorizationReference } from '@xpanel/core'
 
+export type MailAuthRecord = 'spf' | 'dmarc'
+/** The spf, dkim and dmarc creation options, each 0 or 1 and on by default. DMARC needs both others; the zone omits what is off. */
+export function parseMailAuthOptions(body: { spf?: unknown; dkim?: unknown; dmarc?: unknown }): MailAuthRecord[] {
+  const [spf, dkim, dmarc] = [body.spf, body.dkim, body.dmarc].map(value => value ?? 1)
+  if (![spf, dkim, dmarc].every(value => value === 0 || value === 1)) return fail('VALIDATION', 'spf, dkim and dmarc must be 0 or 1', { stateChanged: false })
+  if (dmarc === 1 && (spf === 0 || dkim === 0)) return fail('VALIDATION', 'DMARC requires SPF and DKIM', { stateChanged: false, reason: 'dmarc_requires_spf_dkim' })
+  return [...(spf === 0 ? ['spf' as const] : []), ...(dmarc === 0 ? ['dmarc' as const] : [])]
+}
 export interface PreparedAccountState {
   readonly account: Omit<NewAccount, 'passwordHash' | 'expectedRevision' | 'fencingToken'>
   readonly sourceRevision: number
@@ -17,6 +25,10 @@ export interface PreparedAccountState {
   readonly template: AccountTemplate | null
   readonly nameservers: readonly string[]
   readonly serial: number
+  /** Records the creation request turned off in the new zone. */
+  readonly omitMailAuth?: readonly MailAuthRecord[]
+  /** Tweak Settings for the default zone, pinned with the preparation. */
+  readonly zoneDefaults?: { serviceSubdomains: boolean; autodiscover: boolean; nameserverRecords: boolean }
   /** Legacy portable preparations omit this; the production Agent requires it before any effect. */
   readonly authorizationRef?: ProvisioningAuthorizationReference
 }
@@ -50,6 +62,8 @@ export async function prepareAccountProvisioning(deps: {
   preparePasswordHash: () => Promise<string>
   verifyCredentialIntent: (intent: string, passwordHash: string) => Promise<boolean>
   authorizationRef?: ProvisioningAuthorizationReference
+  omitMailAuth?: readonly MailAuthRecord[]
+  zoneDefaults?: { serviceSubdomains: boolean; autodiscover: boolean; nameserverRecords: boolean }
 }): Promise<{ preparationReference: string; requestIdentity: string }> {
   const operationKey = provisioningRequestKey(input.actor, input.idempotencyKey)
   const allowed = new Set(['username', 'primaryDomain', 'planId', 'ownerId', 'contactEmail', 'ipv4', 'ipAssignment', 'ipv6', 'extraIps', 'shell', 'homeBase', 'php', 'forcePasswordChange'])
@@ -73,6 +87,8 @@ export async function prepareAccountProvisioning(deps: {
       }
       const now = new Date(), serial = Number(now.toISOString().slice(0, 10).replaceAll('-', '') + '01')
       return { account: input.account, sourceRevision: await deps.store.getRevision(), operationKey: provisioningRequestKey(input.actor, input.idempotencyKey), planIdentity: canonicalProvisioningIdentity(plan), template, nameservers, serial,
+        ...(input.omitMailAuth?.length && { omitMailAuth: input.omitMailAuth }),
+        ...(input.zoneDefaults && { zoneDefaults: input.zoneDefaults }),
         ...(input.authorizationRef && { authorizationRef: input.authorizationRef }) }
     },
   })
@@ -123,8 +139,9 @@ export function preparedAccountZone(prepared: PreparedAccountRecord, account: Ac
     ? accountTemplateZoneRecords(d.template, account, d.nameservers)
     : services.defaultZoneRecords(account.primaryDomain, { ipv4: account.ipv4, ipv6: account.ipv6 ?? null,
       nameservers: [...(d.nameservers.length ? d.nameservers : ['ns1.xpanel.internal', 'ns2.xpanel.internal'])],
-      mailHost: `mail.${account.primaryDomain}`, adminEmail: account.contactEmail, serial: d.serial })
+      mailHost: `mail.${account.primaryDomain}`, adminEmail: account.contactEmail, serial: d.serial, ...d.zoneDefaults })
       .filter(r => r.type !== 'SOA').map(r => ({ zone: account.primaryDomain, name: r.name, type: r.type as Exclude<services.ZoneRecordType, 'SOA'>, ttl: r.ttl, content: r.content, priority: r.priority }))
+  const omitted = (r: Omit<DnsRecord, 'id'>): boolean => r.type === 'TXT' && (d.omitMailAuth?.includes('spf') === true && r.name === '@' && r.content.includes('v=spf1') || d.omitMailAuth?.includes('dmarc') === true && r.name === '_dmarc')
   return validateDnsZoneFile({ id: stableId(prepared.reference, 'zone'), name: account.primaryDomain, accountId: account.id, serial: d.serial,
-    records: records.map((r, i) => ({ id: stableId(prepared.reference, `record:${i}:${canonicalProvisioningIdentity(r)}`), ...r })) })
+    records: records.filter(r => !omitted(r)).map((r, i) => ({ id: stableId(prepared.reference, `record:${i}:${canonicalProvisioningIdentity(r)}`), ...r })) })
 }

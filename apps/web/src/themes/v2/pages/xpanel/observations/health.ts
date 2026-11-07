@@ -1,3 +1,4 @@
+import { v2ServerInformationCard } from '../operations/owner-tools.ts'
 import { siteHealthClientTemplates } from '../diagnostic-client-templates.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { actions, button, emailContext, esc, facts, header, missingAccount, page, section, state, table, technical, type PanelEmailAuthority } from '../email-tools/common.ts'
@@ -29,5 +30,5 @@ export function renderV2PanelServerInformation(props: PanelSurfaceProps, authori
     facts([{ label: t(msgid('Account')), valueHtml: technical((account?.username ?? '')) }, { label: t(msgid('Domain')), valueHtml: technical((account?.primaryDomain ?? '')) }, { label: t(msgid('Plan')), valueHtml: plan?.name != null ? esc(plan.name) : notRead }, { label: t(msgid('PHP version')), valueHtml: usage?.phpVersion ? technical(usage.phpVersion) : notRead }, { label: t(msgid('Disk usage')), valueHtml: value(usage?.diskBytes, ' B') }, { label: t(msgid('Memory')), valueHtml: value(usage?.memoryBytes, ' B') }, { label: t(msgid('Processes')), valueHtml: value(usage?.processCount) }, { label: t(msgid('Bandwidth')), valueHtml: esc(t(msgid('Not measured'))) }]))
   const limits = section('v2-server-information-scope', t(msgctxt('theme:v2', 'Observation scope')),
     `<p>${esc(t(msgid('Only explicitly read account information is shown. Missing measurements remain unavailable.')))}</p><p>${esc(t(msgctxt('theme:v2', 'The account view does not establish the operating system, global service health or host-wide resource use.')))}</p>`)
-  return page(locale, route, header(t, route, title, t(msgid('Only explicitly read account information is shown. Missing measurements remain unavailable.'))) + identity + limits)
+  return page(locale, route, header(t, route, title, t(msgid('Only explicitly read account information is shown. Missing measurements remain unavailable.'))) + identity + (account ? v2ServerInformationCard(t) : '') + limits)
 }

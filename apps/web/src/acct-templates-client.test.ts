@@ -7,7 +7,7 @@ const R1 = 'a'.repeat(64), R2 = 'b'.repeat(64)
 const T1 = '77777777-7777-4777-8777-000000000001', PLAN = '33333333-3333-4333-8333-333333333333'
 const page = { title: 'Welcome', body: 'Soon.' }
 const template = (overrides: Record<string, unknown> = {}) => ({ id: T1, name: 'Shared', records: [{ name: 'shop', ttl: 3600, type: 'CNAME', priority: null, content: 'www.%domain%.' }], zone: 'shop 3600 CNAME www.%domain%.', defaultPage: page, suspendedPage: page, planIds: [PLAN], updatedAt: '2026-10-27T10:00:00.000Z', updatedBy: 'root', preview: [{ name: 'shop', type: 'CNAME', ttl: 3600, priority: null, content: 'www.example.com.' }], ...overrides })
-const view = (overrides: Record<string, unknown> = {}) => ({ state: 'saved', revision: R1, templates: [template()], plans: [{ id: PLAN, name: 'Starter' }], placeholders: ['%domain%'], sample: {}, application: { appliedToNewAccounts: true, defaultPagePublished: false, suspendedPagePublished: false }, ...overrides })
+const view = (overrides: Record<string, unknown> = {}) => ({ state: 'saved', revision: R1, templates: [template()], plans: [{ id: PLAN, name: 'Starter' }], placeholders: ['%domain%'], sample: {}, application: { appliedToNewAccounts: true, defaultPagePublished: true, suspendedPagePublished: true }, ...overrides })
 type Send = (method: string, path: string, body?: unknown) => Promise<unknown>
 const flush = async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const boot = (send?: Send, locale: 'en' | 'ar' = 'en', canManage = true, ask?: (options: Record<string, unknown>) => Promise<unknown>) => {
@@ -25,7 +25,7 @@ afterEach(() => { document.body.innerHTML = ''; document.documentElement.lang = 
 describe('account templates parser', () => {
   it('accepts the server view and refuses claims of page publication', () => {
     expect(readWhmAccountTemplatesView(view()).templates[0]!.recordCount).toBe(1)
-    for (const bad of [view({ application: { appliedToNewAccounts: false, defaultPagePublished: false, suspendedPagePublished: false } }), view({ application: { appliedToNewAccounts: true, defaultPagePublished: false, suspendedPagePublished: true } }), view({ state: 'default' }), view({ templates: [template(), template()] }), view({ templates: [template({ planIds: ['x'] })] })])
+    for (const bad of [view({ application: { appliedToNewAccounts: false, defaultPagePublished: true, suspendedPagePublished: true } }), view({ application: { appliedToNewAccounts: true, defaultPagePublished: false, suspendedPagePublished: true } }), view({ state: 'default' }), view({ templates: [template(), template()] }), view({ templates: [template({ planIds: ['x'] })] })])
       expect(() => readWhmAccountTemplatesView(bad)).toThrow()
   })
 })
@@ -37,7 +37,7 @@ describe('account templates client', () => {
     await flush()
     expect($('[data-acct-templates-rows]').textContent).toContain('Starter')
     expect($('[data-acct-templates-application]').textContent).toContain('template records')
-    expect($('[data-acct-templates-pages]').dataset.state).toBe('unavailable')
+    expect($('[data-acct-templates-pages]').dataset.state).toBe('ready')
     $<HTMLButtonElement>('[data-action="edit"]').click()
     expect(input('zone').value).toBe('shop 3600 CNAME www.%domain%.')
     expect($('[data-acct-templates-preview]').textContent).toContain('www.example.com.')

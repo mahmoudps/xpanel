@@ -62,4 +62,28 @@ describe('xMail connect devices workspace', () => {
     boot(renderMailConnectDevices({ locale: 'ar', mailbox: MAILBOX, canManage: true }), vi.fn(async () => { throw Object.assign(new Error('forbidden'), { status: 403 }) }), true); await tick()
     expect(status().textContent).toBe('إعداد تطبيقات البريد غير متاح لهذا الصندوق. لا يُعرض شيء.')
   })
+  it('sends the instructions to one address and reports refusals without a false success', async () => {
+    const replies: unknown[] = [{ sent: true }, Object.assign(new Error('x'), { code: 'LIMIT_EXCEEDED', details: { stateChanged: false } }), Object.assign(new Error('x'), { code: 'VALIDATION', details: { stateChanged: false } }), Object.assign(new Error('x'), { details: { unknownOutcome: true } })]
+    const request = vi.fn(async (method: string, _path: string, _body?: unknown) => { if (method === 'GET') return view(); const next = replies.shift(); if (next instanceof Error) throw next; return next })
+    boot(renderMailConnectDevices({ locale: 'en', mailbox: MAILBOX, canManage: true }), request); await tick()
+    const email = document.querySelector<HTMLInputElement>('[data-mail-devices-send-email]')!, form = document.querySelector<HTMLFormElement>('[data-mail-devices-send-form]')!
+    const status = () => document.querySelector('[data-mail-devices-send-status]')!.textContent
+    const submit = async (value: string) => { email.value = value; form.dispatchEvent(new Event('submit', { cancelable: true })); await tick() }
+    expect(email.disabled).toBe(false)
+    await submit('')
+    expect(request).toHaveBeenCalledTimes(1); expect(status()).toContain('Enter an email address')
+    await submit(' bob@example.net ')
+    expect(request).toHaveBeenLastCalledWith('POST', '/api/webmail/connect-devices/send-instructions', { email: 'bob@example.net' })
+    expect(status()).toContain('Delivery is not confirmed')
+    await submit('bob@example.net'); expect(status()).toContain('At most 5')
+    await submit('nope'); expect(status()).toContain('valid email')
+    await submit('bob@example.net'); expect(status()).toContain('could not be confirmed')
+    expect(document.querySelector<HTMLButtonElement>('[data-mail-devices-send]')!.disabled).toBe(false)
+  })
+  it('keeps the send form closed without a saved hostname or admission', async () => {
+    boot(renderMailConnectDevices({ locale: 'en', mailbox: MAILBOX, canManage: true }), vi.fn(async () => view({ hostname: null, downloads: [] }))); await tick()
+    expect(document.querySelector<HTMLButtonElement>('[data-mail-devices-send]')!.disabled).toBe(true)
+    boot(renderMailConnectDevices({ locale: 'en', mailbox: MAILBOX, canManage: false }), vi.fn(async () => view())); await tick()
+    expect(document.querySelector<HTMLInputElement>('[data-mail-devices-send-email]')!.disabled).toBe(true)
+  })
 })

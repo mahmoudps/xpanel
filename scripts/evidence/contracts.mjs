@@ -56,9 +56,13 @@ export function validateRequirements(requirements) {
     requireValue(typeof item.acceptance === 'string' && item.acceptance.trim().length > 0 && isRecord(item.checks), 'An exact acceptance criterion and reviewed check inventory are required')
     requireValue(Object.keys(item.checks).length === ENVIRONMENTS.length && ENVIRONMENTS.every(environment => Object.hasOwn(item.checks, environment)), 'Every acceptance environment needs an explicit check inventory')
     for (const environment of ENVIRONMENTS) stringList(item.checks[environment], 'Expected acceptance checks must be nonempty and unique')
+    // A reviewed catalog profile exclusion narrows the profiles; it can never add one.
+    if (item.profiles !== undefined) requireValue(stringList(item.profiles, 'Requirement profiles must be nonempty and unique').every(profile => REQUIRED_PROFILES.includes(profile)) && item.profiles.length < REQUIRED_PROFILES.length, 'Requirement profiles must be a proper subset of the qualification profiles')
   }
   return requirements
 }
+
+export const requirementProfiles = (requirement, target) => requirement.profiles === undefined ? target.supportedProfiles : target.supportedProfiles.filter(profile => requirement.profiles.includes(profile))
 
 export function receiptKey(receipt) {
   return [receipt.toolId, receipt.stage, receipt.environment, receipt.profile].join(':')
@@ -69,7 +73,7 @@ export function validateReceipt(receipt, document, requirements) {
   const requirement = requirements.find(item => item.toolId === receipt.toolId)
   requireValue(requirement !== undefined && receipt.acceptance === requirement.acceptance && receipt.coverage === 'full-acceptance', 'Receipt does not cover the exact capability acceptance criterion')
   requireValue(STAGE_ENVIRONMENTS[receipt.stage]?.includes(receipt.environment), 'Invalid stage/environment pairing')
-  requireValue(document.target.supportedProfiles.includes(receipt.profile), 'Receipt profile is outside the target')
+  requireValue(requirementProfiles(requirement, document.target).includes(receipt.profile), 'Receipt profile is outside the target')
   requireValue(receipt.sourceAlgorithm === document.source.algorithm && receipt.sourceFingerprint === document.target.sourceFingerprint && receipt.artifactSha256 === document.target.artifactSha256 && receipt.sourceBefore === receipt.sourceFingerprint && receipt.sourceAfter === receipt.sourceFingerprint && receipt.commit === document.source.commit, 'Mixed or changed source/artifact identity')
   requireValue(receipt.result === 'passed' && (receipt.executor === 'real' || (receipt.environment === 'unit' && receipt.executor === 'fake')), 'Required acceptance must pass on a real executor')
   requireValue(validTime(receipt.startedAt) && validTime(receipt.finishedAt) && Date.parse(receipt.finishedAt) >= Date.parse(receipt.startedAt), 'Invalid receipt execution times')
@@ -90,7 +94,7 @@ export function assertCompleteEvidence(evidence, target, requirements) {
     requireValue(!keys.has(key), 'Duplicate capability stage/environment/profile evidence')
     keys.add(key)
   }
-  for (const item of requirements) for (const profile of target.supportedProfiles) for (const [stage, environments] of Object.entries(STAGE_ENVIRONMENTS)) for (const environment of environments) {
+  for (const item of requirements) for (const profile of requirementProfiles(item, target)) for (const [stage, environments] of Object.entries(STAGE_ENVIRONMENTS)) for (const environment of environments) {
     requireValue(keys.has(`${item.toolId}:${stage}:${environment}:${profile}`), `Missing acceptance evidence: ${item.toolId}/${profile}/${stage}/${environment}`)
   }
 }

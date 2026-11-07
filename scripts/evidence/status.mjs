@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { isMain, parseCommandArguments, runCli } from './cli.mjs'
-import { requireValue, STAGE_ENVIRONMENTS, validateRequirements, validateTargetDocument } from './contracts.mjs'
+import { requireValue, requirementProfiles, STAGE_ENVIRONMENTS, validateRequirements, validateTargetDocument } from './contracts.mjs'
 import { readBoundedFile } from './files.mjs'
 import { validateEvidenceBundle } from './runtime.mjs'
 import { REQUIRED_PROFILES, sha256 } from './shared.mjs'
@@ -111,7 +111,7 @@ export async function buildEvidenceStatus({ requirements, targetDocument, bundle
 
   const tools = reviewed.map(requirement => {
     const rows = rowsByTool.get(requirement.toolId) ?? []
-    const profileRows = profiles.map(profile => {
+    const profileRows = requirementProfiles(requirement, { supportedProfiles: profiles }).map(profile => {
       const values = rows.filter(row => row.profile === profile)
       const slotStates = Object.fromEntries(SLOT_ORDER.map(slot => {
         const slotRows = values.filter(row => slotOf(row) === slot)

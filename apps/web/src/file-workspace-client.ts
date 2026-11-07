@@ -54,12 +54,21 @@ export function workspaceBinary(value:unknown,path:string):Uint8Array{
   if(binary.length!==value.sizeBytes||binary.length>WORKSPACE_BINARY_BYTES||btoa(binary)!==value.contentBase64)throw new Error('invalid_binary_file')
   return Uint8Array.from(binary,character=>character.charCodeAt(0))
 }
+export function workspaceCharsetLimit(charset:string):number{return charset==='US-ASCII'?0x7f:0xff}
+/** Text of a single-byte file; a byte outside the charset refuses, because it would show the wrong character. */
+export function workspaceDecoded(value:unknown,path:string,charset:string):WorkspaceText{
+  const bytes=workspaceBinary(value,path),limit=workspaceCharsetLimit(charset)
+  if(bytes.some(byte=>byte>limit))throw new Error('charset_mismatch')
+  const content=Array.from(bytes,byte=>String.fromCharCode(byte)).join('')
+  return{path,content,sizeBytes:workspaceTextBytes(content),mtime:(value as {mtime:string}).mtime}
+}
 export function workspaceWriteUncertain(error:unknown):boolean{const failure=workspaceObject(error)?error:{},details=workspaceObject(failure.details)?failure.details:{};if(['unknownOutcome','verificationRequired','stateChanged','needsAttention'].some(key=>failure[key]===true||details[key]===true))return true;return !(failure.stateChanged===false||details.stateChanged===false)}
 
-export interface WorkspaceState{directory:string;hasListed:boolean;entries:WorkspaceEntry[];opened:WorkspaceText|null;draft:string;dirty:boolean;busy:boolean;loading:boolean;uncertain:boolean;notice:string;noticeKind:string}
+export interface WorkspaceState{directory:string;hasListed:boolean;entries:WorkspaceEntry[];opened:WorkspaceText|null;draft:string;dirty:boolean;busy:boolean;loading:boolean;uncertain:boolean;notice:string;noticeKind:string;charset:string;fallback:boolean}
 export function createFileWorkspace(options:{send:WorkspaceSend;confirm?:WorkspaceConfirm;changed?:(state:WorkspaceState)=>void}){
   const copy=(message:string,values?:MessageValues)=>xpT(message,values)
-  const state:WorkspaceState={directory:'',hasListed:false,entries:[],opened:null,draft:'',dirty:false,busy:false,loading:false,uncertain:false,notice:'',noticeKind:'idle'}
+  const state:WorkspaceState={directory:'',hasListed:false,entries:[],opened:null,draft:'',dirty:false,busy:false,loading:false,uncertain:false,notice:'',noticeKind:'idle',charset:'UTF-8',fallback:false}
+  const readFile=async(send:WorkspaceSend,path:string,charset=state.charset):Promise<WorkspaceText>=>charset==='UTF-8'?workspaceText(await send({op:'read',path}),path):workspaceDecoded(await send({op:'get-bytes',path}),path,charset)
   let directoryGeneration=0,fileGeneration=0,reviewPending:(()=>Promise<void>)|null=null
   const emit=()=>options.changed?.({...state,entries:state.entries,opened:state.opened?{...state.opened}:null})
   const note=(text:string,kind='read')=>{state.notice=text;state.noticeKind=kind;emit()}
@@ -91,8 +100,8 @@ export function createFileWorkspace(options:{send:WorkspaceSend;confirm?:Workspa
     if(state.busy||!await confirmDiscard())return false
     let path:string;try{path=workspacePath(value)}catch{note(copy('Invalid file path.'),'failed');return false}
     const token=++fileGeneration;++directoryGeneration;state.loading=true;emit()
-    try{const file=workspaceText(await options.send({op:'read',path}),path);if(token!==fileGeneration)return false;state.opened=file;state.draft=file.content;state.dirty=false;note(copy('File read.'));return true}
-    catch{if(token===fileGeneration)note(copy('File could not be verified. Your draft is kept.'),'failed');return false}
+    try{const file=await readFile(options.send,path);if(token!==fileGeneration)return false;state.opened=file;state.draft=file.content;state.dirty=false;note(copy('File read.'));return true}
+    catch(error){if(token===fileGeneration)note(error instanceof Error&&error.message==='charset_mismatch'?copy('This file has bytes outside {charset}. Choose another character set.',{charset:state.charset}):copy('File could not be verified. Your draft is kept.'),'failed');return false}
     finally{if(token===fileGeneration){state.loading=false;emit()}}
   }
   const edit=(content:string)=>{if(state.busy)return;fileGeneration++;state.loading=false;state.draft=content;state.dirty=state.opened?content!==state.opened.content:content!=='';emit()}
@@ -106,9 +115,11 @@ export function createFileWorkspace(options:{send:WorkspaceSend;confirm?:Workspa
     finally{state.busy=false;emit()}
   }
   const save=async()=>{
-    const baseline=state.opened?{...state.opened}:null,content=state.draft
+    const baseline=state.opened?{...state.opened}:null,content=state.draft,charset=state.charset,fallback=state.fallback
     if(!baseline||!state.dirty){note(copy('Open and edit a file first.'),'failed');return false}
-    return perform(async()=>{workspaceTextBytes(content);const current=workspaceText(await options.send({op:'read',path:baseline.path}),baseline.path);if(current.content!==baseline.content||current.mtime!==baseline.mtime)throw new Error('file_changed_before_save');return{op:'write',path:baseline.path,content,overwrite:true,mode:0o640}},async(send,body,reply)=>{const ack=workspaceEntry(reply,baseline.path);if(ack.kind!=='file'||ack.mode!==0o640||ack.sizeBytes!==workspaceTextBytes(content))throw new Error('invalid_write_ack');const observed=workspaceText(await send({op:'read',path:baseline.path}),baseline.path);if(observed.content!==content)throw new Error('write_readback_mismatch');state.opened=observed;state.draft=content;state.dirty=false},async(send)=>{workspaceText(await send({op:'read',path:baseline.path}),baseline.path)})
+    const fits=charset==='UTF-8'||[...content].every(character=>character.codePointAt(0)!<=workspaceCharsetLimit(charset)),kept=fits?charset:'UTF-8'
+    if(!fits&&!fallback){note(copy('A character in the draft does not exist in {charset}. Nothing was saved.',{charset}),'failed');return false}
+    return perform(async()=>{workspaceTextBytes(content);const current=await readFile(options.send,baseline.path);if(current.content!==baseline.content||current.mtime!==baseline.mtime)throw new Error('file_changed_before_save');return{op:'write',path:baseline.path,content,overwrite:true,mode:0o640,...(charset==='UTF-8'?{}:{to_charset:charset,fallback})}},async(send,body,reply)=>{const ack=workspaceEntry(reply,baseline.path);if(ack.kind!=='file'||ack.mode!==0o640||ack.sizeBytes!==(kept==='UTF-8'?workspaceTextBytes(content):content.length))throw new Error('invalid_write_ack');const observed=await readFile(send,baseline.path,kept);if(observed.content!==content)throw new Error('write_readback_mismatch');state.opened=observed;state.draft=content;state.dirty=false;state.charset=kept},async(send)=>{await readFile(send,baseline.path)})
   }
   const review=async()=>{
     if(state.busy||!state.uncertain||!reviewPending)return false
@@ -119,7 +130,8 @@ export function createFileWorkspace(options:{send:WorkspaceSend;confirm?:Workspa
   }
   const install=(file:WorkspaceText)=>{const verified=workspaceText(file,file.path);state.opened=verified;state.draft=verified.content;state.dirty=false;emit()}
   const readAction=async(work:(send:WorkspaceSend)=>Promise<void>)=>{if(state.busy)return false;const fileToken=fileGeneration,directoryToken=directoryGeneration;try{await work(options.send);return true}catch{if(fileToken===fileGeneration&&directoryToken===directoryGeneration)note(copy('The read operation could not be verified.'),'failed');return false}}
-  return{state,refresh,navigate,open,edit,save,perform,review,confirmDiscard,install,readAction}
+  const setCharset=(charset:string,fallback:boolean)=>{state.charset=charset;state.fallback=fallback;emit()}
+  return{state,refresh,navigate,open,edit,save,perform,review,confirmDiscard,install,readAction,setCharset}
 }
 
 export function workspaceTrash(value:unknown,path?:string):{id:string;originalPath:string;name:string;sizeBytes:number;deletedAt:string}{
@@ -274,6 +286,7 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
     root.dataset.fileWorkspaceBound='true'
     const copy=(message: string, values?: MessageValues) => xpT(message, values)
     const denied='[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable],[aria-disabled="true"],fieldset:disabled'
+    const charset=root.querySelector<HTMLSelectElement>('[data-editor-charset]'),fallback=root.querySelector<HTMLInputElement>('[data-editor-fallback]')
     const username=root.dataset.accountUsername??'',editor=root.querySelector<HTMLTextAreaElement>('#jailed-code-editor'),tbody=root.querySelector<HTMLTableSectionElement>('[data-file-manager-table] tbody'),status=root.querySelector<HTMLElement>('[data-file-status]')
     const transport=(window as Window&{xpanelSessionRequest?:(method:string,path:string,body:unknown)=>Promise<unknown>}).xpanelSessionRequest
     if(!editor||!tbody||!status)return
@@ -332,6 +345,8 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
       root.setAttribute('aria-busy',String(state.busy));root.dataset.fileLoading=String(state.loading);root.dataset.fileUncertain=String(state.uncertain);root.dataset.fileRead=String(state.hasListed)
       if(editor.value!==state.draft)editor.value=state.draft
       editor.readOnly=state.busy||!eligible();editor.dataset.editorPath=state.opened?.path??''
+      if(charset){charset.value=state.charset;charset.disabled=state.busy||!eligible()}
+      if(fallback){fallback.checked=state.fallback;fallback.disabled=state.busy||!eligible()||state.charset==='UTF-8'}
       if(current)current.textContent=state.directory||'.'
       if(selected)selected.textContent=state.opened?.path??copy('No file selected')
       if(renderedEntries!==state.entries||renderedRead!==state.hasListed){renderedEntries=state.entries;renderedRead=state.hasListed;paint(state.entries,state.hasListed)}
@@ -342,6 +357,8 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
     }
     const controller=createFileWorkspace({send,confirm:askDialog,changed:render})
     editor.addEventListener('input',()=>{if(eligible())controller.edit(editor.value)})
+    charset?.addEventListener('change',()=>{if(!eligible())return;controller.setCharset(charset.value,fallback?.checked===true);if(controller.state.opened&&!controller.state.dirty)void controller.open(controller.state.opened.path)})
+    fallback?.addEventListener('change',()=>{if(eligible())controller.setCharset(controller.state.charset,fallback.checked)})
     root.querySelector<HTMLButtonElement>('[data-action="save-file"]')?.addEventListener('click',()=>{if(eligible())void controller.save()})
     root.querySelector<HTMLButtonElement>('[data-action="refresh-files"]')?.addEventListener('click',()=>{if(eligible())void(controller.state.uncertain?controller.review():controller.refresh())})
     root.querySelector<HTMLButtonElement>('[data-action="reload-file"]')?.addEventListener('click',()=>{if(!eligible())return;if(controller.state.uncertain){void controller.review();return}if(controller.state.opened)void controller.open(controller.state.opened.path)})
@@ -387,6 +404,7 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
       const folder=async(request:WorkspaceSend,path:string)=>workspaceListing(await request({op:'list',path}),path)
       const parent=(path:string)=>path.split('/').slice(0,-1).join('/')
       let extracted=0
+      const bar=root.querySelector<HTMLProgressElement>('[data-file-archive-progress]')
       await controller.perform(async()=>{
         const raw=await askDialog?.(kind==='compress'
           ?{title:copy('Compress'),body:named+' — '+copy('Enter the archive path inside your home. Its ending sets the format: .zip, .tar, .tar.gz, .tar.bz2 or .tar.zst. An existing item is never replaced.'),input:true,label:copy('Archive path'),value:source+'.zip',preserveWhitespace:true,confirm:copy('Compress')}
@@ -395,6 +413,7 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
         // The location bar shows the home prefix, so a pasted absolute path inside the home is accepted.
         const relative=home.startsWith('/')&&(raw===home||raw.startsWith(home+'/'))?raw.slice(home.length+1):raw
         const destination=workspacePath(relative,kind==='extract')
+        if(bar)bar.hidden=false
         if(kind==='extract')return{op:kind,path:source,destination}
         if(sources.some(item=>destination===item||destination.startsWith(item+'/')))throw new Error('destination_inside_source')
         if(!/[.](?:zip|tar|tar[.]gz|tgz|tar[.]bz2|tbz2|tar[.]zst|tzst)$/i.test(destination))throw new Error('unsupported_archive_name')
@@ -413,7 +432,7 @@ function bindFileWorkspace(askDialog?:WorkspaceConfirm):void{
         pending:kind==='compress'?copy('Compressing. The archive is shown only after it is read back.'):copy('Extracting. The result is shown only after the folder is read back.'),
         success:body=>kind==='compress'?copy('Compressed into {path}. The folder was read back.',{path:String(body.destination)}):copy('Extracted {count, plural, one {# item} other {# items}} into {path}. The folder was read back.',{count:extracted,path:String(body.destination)||home}),
         refused:workspaceArchiveRefusal,
-      })
+      }).finally(()=>{if(bar)bar.hidden=true})
     }
     for(const button of relocators)button.addEventListener('click',event=>{event.stopPropagation();const action=button.dataset.fileSelectionAction;if(button.disabled||button.closest(denied)||!eligible())return;if(action==='compress'||action==='extract')void archive(action);else void relocate(action==='copy'?'copy':'move')})
     const picker=root.querySelector<HTMLInputElement>('[data-file-upload]');let uploadDirectory:string|null=null
@@ -532,4 +551,4 @@ function bindTrashWorkspace(askDialog?:WorkspaceConfirm):void{
   })
 }
 
-export const FILE_WORKSPACE_CLIENT_BINDING = `(function(askDialog) { const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WORKSPACE_EDIT_BYTES=${WORKSPACE_EDIT_BYTES};const WORKSPACE_BINARY_BYTES=${WORKSPACE_BINARY_BYTES};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${createFilePresentation.toString()};${fileWorkspaceTemplates.toString()};${workspaceObject.toString()};${workspacePath.toString()};${workspaceLeaf.toString()};${workspaceMode.toString()};${workspaceTextBytes.toString()};${workspaceTime.toString()};${workspaceEntry.toString()};${workspaceListing.toString()};${workspaceText.toString()};${workspaceBinary.toString()};${workspaceWriteUncertain.toString()};${createFileWorkspace.toString()};${workspaceTrash.toString()};${workspaceTrashList.toString()};${workspaceRelocateRefusal.toString()};${workspaceArchiveRefusal.toString()};(${bindFileWorkspace.toString()})(askDialog);(${bindTrashWorkspace.toString()})(askDialog); })`
+export const FILE_WORKSPACE_CLIENT_BINDING = `(function(askDialog) { const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WORKSPACE_EDIT_BYTES=${WORKSPACE_EDIT_BYTES};const WORKSPACE_BINARY_BYTES=${WORKSPACE_BINARY_BYTES};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${createFilePresentation.toString()};${fileWorkspaceTemplates.toString()};${workspaceObject.toString()};${workspacePath.toString()};${workspaceLeaf.toString()};${workspaceMode.toString()};${workspaceTextBytes.toString()};${workspaceTime.toString()};${workspaceEntry.toString()};${workspaceListing.toString()};${workspaceText.toString()};${workspaceBinary.toString()};${workspaceCharsetLimit.toString()};${workspaceDecoded.toString()};${workspaceWriteUncertain.toString()};${createFileWorkspace.toString()};${workspaceTrash.toString()};${workspaceTrashList.toString()};${workspaceRelocateRefusal.toString()};${workspaceArchiveRefusal.toString()};(${bindFileWorkspace.toString()})(askDialog);(${bindTrashWorkspace.toString()})(askDialog); })`

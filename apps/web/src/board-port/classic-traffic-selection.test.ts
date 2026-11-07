@@ -68,7 +68,6 @@ afterEach(() => { document.body.replaceChildren(); document.documentElement.lang
 describe('classic traffic domain and range navigation', () => {
   it.each([
     ['/metrics/traffic', 'en'], ['/metrics/traffic', 'ar'],
-    ['/metrics/web-stats', 'en'], ['/metrics/web-stats', 'ar'],
   ] as const)('submits owned domain and range GET controls on %s in %s without losing page context', (route, locale) => {
     const input = props(route, locale, { nativeHtml: '<section data-native-traffic><h1>Existing website traffic chart</h1><div data-chart-state="loaded"></div></section>' })
     const root = render(input)
@@ -129,7 +128,7 @@ describe('classic traffic domain and range navigation', () => {
   })
 
   it.each(['en', 'ar'] as const)('keeps unread rows human and selection usable without inventing observations in %s', locale => {
-    const root = render(props('/metrics/web-stats', locale, { websiteAnalytics: undefined, websiteAnalyticsUnavailable: true }))
+    const root = render(props('/metrics/traffic', locale, { websiteAnalytics: undefined, websiteAnalyticsUnavailable: true }))
     expect(selectionButtons(root).every(button => !button.disabled)).toBe(true)
     const unread = root.querySelector('[data-workspace-table="top-pages"] tbody td')!
     expect(unread.textContent).toBe(translator(locale)('These records have not been read.'))

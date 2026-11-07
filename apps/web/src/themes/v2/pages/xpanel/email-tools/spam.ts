@@ -1,6 +1,8 @@
+import { tools as defaultCatalog, visibleTools } from '@xpanel/catalog'
 import { v2MailToolsClientTemplates } from './mail-tools-client-templates.ts'
+import { v2BoxTrapperSection } from './boxtrapper.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
-import { actions, area, button, check, emailContext, esc, facts, field, fields, header, input, missingAccount, page, section, state, table, unread, type PanelEmailAuthority } from './common.ts'
+import { actions, area, button, check, emailContext, esc, facts, field, fields, header, input, missingAccount, page, panelMailCards, section, state, table, unread, type PanelEmailAuthority } from './common.ts'
 
 export function renderV2PanelSpamFilters(props: PanelSurfaceProps, authority?: PanelEmailAuthority): string {
   const { locale, t, account, canManage } = emailContext(props, authority)
@@ -25,12 +27,7 @@ export function renderV2PanelSpamFilters(props: PanelSurfaceProps, authority?: P
     + `<p>${esc(t(msgid('Training reads the messages in the mailbox Inbox (as not spam) or Junk folder (as spam) and teaches the server-wide filter. It runs as a host job.')))}</p><p data-mailx-tools-action-status role="status"></p>`
     + actions(button(t(msgid('Apply saved preferences')), { 'data-mailx-tools-apply': true }, true, true)) + v2MailToolsClientTemplates('spam'),
     { 'data-mailx-tools': true, 'data-mailx-tools-section': 'spam', 'data-mailx-can-manage': String(canManage) })
-  const challenge = section('v2-spam-boxtrapper', 'BoxTrapper',
-    `<p data-state="unavailable" role="status">${esc(t(msgid('BoxTrapper is unavailable on this server.')))}</p>`
-    + facts([{ label: t(msgid('Challenge-response verification')), valueHtml: esc(t(msgid('Unavailable'))) }, { label: t(msgid('Verification queue')), valueHtml: esc(t(msgid('Unavailable'))) }])
-    + check('mailx-boxtrapper-enabled', t(msgid('Ask unknown senders to verify before delivery')))
-    + field('mailx-boxtrapper-allow', t(msgid('Senders delivered without verification')), area('mailx-boxtrapper-allow', undefined, ' rows="3" dir="ltr"'))
-    + `<p>${esc(t(msgid('Missing native step: xPanel has no challenge-response provider for Postfix and Dovecot. Challenge mail sent to forged senders creates backscatter, so none is enabled. Use the spam filter and sender lists instead.')))}</p>`)
+  const challenge = v2BoxTrapperSection(t, { scope: 'owner', connected: canManage && props.visibility !== undefined && visibleTools(props.catalog ?? defaultCatalog, props.visibility).some(tool => tool.id === 'sender-verification') })
   const inert = !authority?.canRead || authority.presentation === 'read-only' || !account
-  return page(locale, route, header(t, route, title, t(msgctxt('theme:v2', 'Keep saved spam policy separate from the filter state observed on this server.'))) + saved + native + challenge, inert ? { 'data-readonly': 'true' } : undefined)
+  return page(locale, route, header(t, route, title, t(msgctxt('theme:v2', 'Keep saved spam policy separate from the filter state observed on this server.'))) + saved + native + challenge + panelMailCards(route, locale, t, !inert, canManage), inert ? { 'data-readonly': 'true' } : undefined)
 }

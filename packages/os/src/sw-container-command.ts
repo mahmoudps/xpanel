@@ -1,10 +1,11 @@
 /**
  * Reviewed container-engine grammar. Reads use the engines' documented machine formats; the only
- * mutation is start/stop/restart of one observed full container id. No image, registry, run or exec.
+ * mutation is start/stop/restart of one observed full container id. No image, registry, run or exec:
+ * those exist only in an account's rootless store, see the agent's ctr-command.
  * podman(1) subcommands document `--format json`; docker(1) documents `--format '{{json .}}'` (one JSON value per line).
  */
 export type SwContainerEngine = 'podman' | 'docker'
-export type SwContainerRead = 'version' | 'containers' | 'images' | 'networks' | 'volumes' | 'info'
+export type SwContainerRead = 'version' | 'containers' | 'images' | 'networks' | 'volumes' | 'info' | 'stats'
 export type SwContainerAction = 'start' | 'stop' | 'restart'
 export const SW_CONTAINER_ENGINES: readonly SwContainerEngine[] = ['podman', 'docker']
 export const SW_CONTAINER_BINARY: Readonly<Record<SwContainerEngine, string>> = Object.freeze({ podman: '/usr/bin/podman', docker: '/usr/bin/docker' })
@@ -13,8 +14,8 @@ export const SW_CONTAINER_ID = /^[0-9a-f]{64}$/
 export const SW_CONTAINER_STOP_SECONDS = 30
 const JSON_LINE = '{{json .}}'
 const READS: Readonly<Record<SwContainerEngine, Readonly<Record<SwContainerRead, readonly string[]>>>> = {
-  podman: { version: ['version', '--format', 'json'], containers: ['ps', '--all', '--format', 'json'], images: ['images', '--format', 'json'], networks: ['network', 'ls', '--format', 'json'], volumes: ['volume', 'ls', '--format', 'json'], info: ['info', '--format', 'json'] },
-  docker: { version: ['version', '--format', JSON_LINE], containers: ['ps', '--all', '--no-trunc', '--format', JSON_LINE], images: ['images', '--no-trunc', '--format', JSON_LINE], networks: ['network', 'ls', '--no-trunc', '--format', JSON_LINE], volumes: ['volume', 'ls', '--format', JSON_LINE], info: ['info', '--format', JSON_LINE] },
+  podman: { version: ['version', '--format', 'json'], containers: ['ps', '--all', '--format', 'json'], images: ['images', '--format', 'json'], networks: ['network', 'ls', '--format', 'json'], volumes: ['volume', 'ls', '--format', 'json'], info: ['info', '--format', 'json'], stats: ['stats', '--all', '--no-stream', '--format', 'json'] },
+  docker: { version: ['version', '--format', JSON_LINE], containers: ['ps', '--all', '--no-trunc', '--format', JSON_LINE], images: ['images', '--no-trunc', '--format', JSON_LINE], networks: ['network', 'ls', '--no-trunc', '--format', JSON_LINE], volumes: ['volume', 'ls', '--format', JSON_LINE], info: ['info', '--format', JSON_LINE], stats: ['stats', '--all', '--no-stream', '--format', JSON_LINE] },
 }
 const isEngine = (value: unknown): value is SwContainerEngine => value === 'podman' || value === 'docker'
 export const isSwContainerAction = (value: unknown): value is SwContainerAction => value === 'start' || value === 'stop' || value === 'restart'
@@ -27,6 +28,18 @@ export function swContainerActionArgv(engine: SwContainerEngine, action: SwConta
   if (!isEngine(engine) || !isSwContainerAction(action) || typeof id !== 'string' || !SW_CONTAINER_ID.test(id)) throw new Error('unsupported_container_action')
   return [SW_CONTAINER_BINARY[engine], action, ...(action === 'start' ? [] : ['--time', String(SW_CONTAINER_STOP_SECONDS)]), '--', id]
 }
+export function swContainerInspectArgv(engine: SwContainerEngine, id: string): string[] {
+  if (!isEngine(engine) || typeof id !== 'string' || !SW_CONTAINER_ID.test(id)) throw new Error('unsupported_container_read')
+  return [SW_CONTAINER_BINARY[engine], 'inspect', '--type', 'container', ...(engine === 'podman' ? ['--format', 'json'] : []), id]
+}
+export function swContainerLogsArgv(engine: SwContainerEngine, id: string): string[] {
+  if (!isEngine(engine) || typeof id !== 'string' || !SW_CONTAINER_ID.test(id)) throw new Error('unsupported_container_read')
+  return [SW_CONTAINER_BINARY[engine], 'logs', '--tail', '200', '--timestamps', id]
+}
+export function swContainerFollowArgv(engine: SwContainerEngine, id: string): string[] {
+  if (!isEngine(engine) || typeof id !== 'string' || !SW_CONTAINER_ID.test(id)) throw new Error('unsupported_container_read')
+  return [SW_CONTAINER_BINARY[engine], 'logs', '--follow', '--tail', '200', '--timestamps', id]
+}
 export function isSwContainerCommand(argv: readonly unknown[]): boolean {
   if (!Array.isArray(argv) || argv.length < 2 || argv.some(value => typeof value !== 'string')) return false
   const engine = SW_CONTAINER_ENGINES.find(item => SW_CONTAINER_BINARY[item] === argv[0])
@@ -34,7 +47,7 @@ export function isSwContainerCommand(argv: readonly unknown[]): boolean {
   const same = (expected: readonly string[]): boolean => expected.length === argv.length && expected.every((value, index) => value === argv[index])
   if ((Object.keys(READS[engine]) as SwContainerRead[]).some(read => same(swContainerReadArgv(engine, read)))) return true
   const id = argv.at(-1) as string
-  return SW_CONTAINER_ID.test(id) && (['start', 'stop', 'restart'] as const).some(action => same(swContainerActionArgv(engine, action, id)))
+  return SW_CONTAINER_ID.test(id) && (same(swContainerInspectArgv(engine, id)) || same(swContainerLogsArgv(engine, id)) || same(swContainerFollowArgv(engine, id)) || (['start', 'stop', 'restart'] as const).some(action => same(swContainerActionArgv(engine, action, id))))
 }
 
 export interface SwContainerRow { id: string; name: string; image: string; state: string; status: string; ports: string[] }

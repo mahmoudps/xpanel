@@ -190,6 +190,8 @@ describe('isAccountUnit', () => {
     expect(isAccountUnit('alice', 'xpanel-redis-bob.service')).toBe(false)
     expect(isAccountUnit('alice', 'xpanel-app-alice-api.socket')).toBe(false)
     expect(isAccountUnit('alice', 'xpanel-cron-alice-x.socket')).toBe(false)
+    expect(['xpanel-webdisk-alice-0123456789ab.socket', 'xpanel-webdisk-alice-0123456789ab.service', 'xpanel-webdiskd-alice-0123456789ab.socket', 'xpanel-webdiskd-alice-0123456789ab.service', 'xpanel-caldav-alice.socket', 'xpanel-caldav-alice.service'].every(u => isAccountUnit('alice', u))).toBe(true)
+    expect(['xpanel-webdisk-bob-0123456789ab.socket', 'xpanel-webdisk-alice-0123.socket', 'xpanel-caldav-bob.service', 'xpanel-caldav-alice.timer'].some(u => isAccountUnit('alice', u))).toBe(false)
   })
 })
 

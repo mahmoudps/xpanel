@@ -1,3 +1,5 @@
+import { configAsCodeCard, panelBackupsCard } from '../../../../../models/tool-cards.ts'
+import { renderV2ToolCard } from '../../../tool-card-view.ts'
 import { v2WhmClientTemplates } from '../../../whm-client-templates.ts'
 import type { Translate } from '../../../../../i18n.ts'
 import { formatDisplayDateTime } from '../../../../../display-format.ts'
@@ -13,6 +15,6 @@ export function renderV2WhmPanelData(t: Translate, props: WhmSurfaceProps, autho
     + h.status(msgid('Rollback stays disabled until the server confirms that a generation can be restored.'), { 'data-generations-status': true }) + h.actions(h.button(msgid('Rebuild index'), { 'data-action': 'rebuild-index' }))
     + `<p id="whm-rebuild-index-help">${h.text(msgid('The panel cannot rebuild the index. An administrator can run the reindex command on the server; nothing runs from this page.'))}</p>`)
   const recovery = h.section('v2-panel-data-recovery', msgctxt('theme:v2', 'How recovery works'), `<ol class="v2-admin-list"><li>${h.text(msgctxt('theme:v2', 'A configuration generation records the settings and managed files it represents.'))}</li><li>${h.text(msgctxt('theme:v2', 'Rollback requires a recoverable generation and the existing guarded server workflow.'))}</li><li>${h.text(msgctxt('theme:v2', 'Restoring configuration does not imply that account databases, mail or other live user data were restored.'))}</li></ol>`)
-  const tools = h.section('v2-panel-data-tools', msgctxt('theme:v2', 'Panel data'), h.status(msgctxt('theme:v2', 'Database export, arbitrary panel-state restore and destructive reset are not connected to this configuration-history page.')) + h.actions(h.button(msgctxt('theme:v2', 'Export panel data')) + h.button(msgctxt('theme:v2', 'Restore panel data')) + h.button(msgctxt('theme:v2', 'Reset panel state'), undefined, { danger: true })))
+  const tools = renderV2ToolCard(h.t, panelBackupsCard, h.canManage) + renderV2ToolCard(h.t, configAsCodeCard, h.canManage)
   return h.page(msgid('Panel data & recovery'), msgctxt('theme:v2', 'Review persisted generation history and keep configuration recovery separate from live user data.'), `<div class="v2-admin-columns" data-section="config-generations" data-whm-generations data-generations-editable="${h.canManage}">${v2WhmClientTemplates('panel-data')}<div>${history}</div><aside class="v2-admin-stack">${recovery}${tools}</aside></div>`)
 }

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { Resolver } from 'node:dns/promises'
 import { join } from 'node:path'
 import { fail, isXpanelError } from '@xpanel/core'
 import type { Account } from '@xpanel/core'
@@ -7,10 +8,14 @@ import type { StateStore } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
 import { assertAccountFeatures, isMailboxPrincipal } from './authorization.ts'
+import { detectMailRouting } from './mail/routing-detect.ts'
+import { mailLogRange } from './mail-log-workspace.ts'
+import { MAIL_QUALITY_MAX_CHECK, mailQualityTarget, ownedMailDomains, readMailQualityDomains, runMailQualityChecks } from './mail-quality-workspace.ts'
+import type { DkimMaterial, MailQualityResolver } from './mail-quality-workspace.ts'
 import {
-  MAILX_DEFAULTS, MAILX_PARSERS, MAILX_SECTIONS, renderMailxDovecot, renderMailxPostfix, isMailxInvalid, isMailxRelayPassword, isMailxSection, mailxCompositeRevision, mailxRevision, mailxStatePath, parseMailxArchive, readMailxArchiveStored, readMailxStored,
+  MAILX_DEFAULTS, MAILX_LIMITS, MAILX_PARSERS, MAILX_SECTIONS, renderMailxDovecot, renderMailxPostfix, isMailxInvalid, isMailxRelayPassword, isMailxSection, mailxCompositeRevision, mailxRevision, mailxStatePath, parseMailxArchive, readMailxArchiveStored, readMailxStored,
 } from '../../agent/src/mailx-policy.ts'
-import type { MailxArchivePolicy, MailxArchiveStored, MailxPolicies, MailxRelayPolicy, MailxRoutingPolicy, MailxSaved, MailxSection, MailxServerPolicy, MailxStored } from '../../agent/src/mailx-policy.ts'
+import type { MailxAdvancedPolicy, MailxArchivePolicy, MailxArchiveStored, MailxCountryPolicy, MailxGreylistPolicy, MailxPolicies, MailxRelayPolicy, MailxRoutingMode, MailxRoutingPolicy, MailxSaved, MailxSection, MailxServerPolicy, MailxStored } from '../../agent/src/mailx-policy.ts'
 import { mailxCertPaths } from '../../../packages/os/src/mailx-command.ts'
 import { readMailxSaved } from '../../agent/src/mailx-routes.ts'
 
@@ -18,6 +23,9 @@ export interface MailxWorkspaceHelpers extends Pick<ExtendedRouteHelpers, 'requi
   store: StateStore
   /** Authenticated agent transport for /host/mailx/*; absent when no host agent is connected. */
   callHost?: (caller: AuthenticatedCaller, path: string, body?: unknown) => Promise<unknown>
+  /** Verified OpenDKIM public material (/host/dkim-public); absent when no host agent is connected. */
+  readDkimPublicMaterial?: (caller: AuthenticatedCaller, domain: string) => Promise<DkimMaterial | null>
+  resolver?: MailQualityResolver
   now?: () => Date
 }
 type SectionState = 'not-saved' | 'applied' | 'pending' | 'unavailable'
@@ -25,11 +33,12 @@ export type MailxHost = 'connected' | 'not-connected' | 'unverified'
 export type MailxReconcile = 'applied' | 'unchanged' | 'failed' | 'unknown' | 'unavailable'
 /** `reconcile` is the generation that renders the spam milter, mailbox Sieve scripts and mailing lists. */
 /** `failedCheck` names the configuration test (postfix check or doveconf -n) that made the agent restore the previous settings. */
-export interface MailxApplication { outcome: 'applied' | 'rolled-back' | 'nothing' | 'refused' | 'unknown' | 'not-connected'; verificationRequired: boolean; spam: 'applied' | 'unavailable' | 'not-saved' | 'rolled-back' | null; mailboxes?: 'applied' | 'unavailable' | 'not-saved' | 'rolled-back' | null; reconcile?: MailxReconcile | null; failedCheck?: 'postfix' | 'dovecot' | null }
+export interface MailxApplication { outcome: 'applied' | 'rolled-back' | 'nothing' | 'refused' | 'unknown' | 'not-connected'; reason?: string; verificationRequired: boolean; spam: 'applied' | 'unavailable' | 'not-saved' | 'rolled-back' | null; mailboxes?: 'applied' | 'unavailable' | 'not-saved' | 'rolled-back' | null; reconcile?: MailxReconcile | null; failedCheck?: 'postfix' | 'dovecot' | null }
 export interface MailxHostStatus {
   observedAt: string; revision: string; postfix: 'read' | 'unavailable'
   engine: { engine: 'rspamd' | 'spamassassin' | null; units: Record<string, 'active' | 'inactive' | 'not-installed' | 'unknown'>; wiring: 'wired' | 'not-wired' | 'unknown' }
   sections: Record<MailxSection, SectionState>
+  geoip: { installed: boolean; month: string | null }
 }
 
 const unchanged = { stateChanged: false }
@@ -51,8 +60,10 @@ export function projectMailxHostStatus(value: unknown): MailxHostStatus {
     || !exact(units, ['rspamd.service', 'spamassassin.service', 'spamd.service']) || Object.values(units).some(item => !UNIT_STATES.includes(String(item)))) return invalidHost()
   const sections = value.sections as Record<string, unknown>
   if (!exact(sections, MAILX_SECTIONS) || Object.values(sections).some(item => !STATES.includes(String(item)))) return invalidHost()
+  const geoip = value.geoip
+  if (!object(geoip) || typeof geoip.installed !== 'boolean' || !(geoip.month === null || typeof geoip.month === 'string' && /^\d{4}-\d{2}$/.test(geoip.month))) return invalidHost()
   return { observedAt: value.observedAt, revision: value.revision, postfix: value.postfix as 'read', engine: { engine: engine.engine as 'rspamd' | null, units: { ...units } as MailxHostStatus['engine']['units'], wiring: engine.wiring as 'wired' },
-    sections: { ...sections } as MailxHostStatus['sections'] }
+    sections: { ...sections } as MailxHostStatus['sections'], geoip: { installed: geoip.installed, month: geoip.month as string | null } }
 }
 function projectApply(value: unknown): MailxApplication {
   if (!object(value) || !['applied', 'unknown', 'rolled-back', 'nothing'].includes(String(value.outcome)) || typeof value.verificationRequired !== 'boolean' || !['applied', 'unavailable', 'not-saved', 'rolled-back'].includes(String(value.spam))) return invalidHost()
@@ -121,12 +132,12 @@ export function createMailxWorkspaceRoutes(helpers: MailxWorkspaceHelpers) {
     if (!helpers.callHost) return { host: 'not-connected', status: null }
     try { return { host: 'connected', status: await helpers.callHost(caller, path) } } catch { return { host: 'unverified', status: null } }
   }
-  const apply = async (caller: AuthenticatedCaller, path: string): Promise<MailxApplication> => {
+  const apply = async (caller: AuthenticatedCaller, path: string, unset: readonly string[] = []): Promise<MailxApplication> => {
     if (!helpers.callHost) return { outcome: 'not-connected', verificationRequired: false, spam: null }
     let revision: string
     try { revision = mailxCompositeRevision(await readMailxSaved(helpers.store.rootDir)) } catch { return { outcome: 'refused', verificationRequired: false, spam: null } }
-    try { return projectApply(await helpers.callHost(caller, path, { revision })) } catch (error) {
-      return isXpanelError(error) && error.detail?.stateChanged === false ? { outcome: 'refused', verificationRequired: false, spam: null } : { outcome: 'unknown', verificationRequired: true, spam: null }
+    try { return projectApply(await helpers.callHost(caller, path, { revision, ...(unset.length ? { unset } : {}) })) } catch (error) {
+      return isXpanelError(error) && error.detail?.stateChanged === false ? { outcome: 'refused', verificationRequired: false, spam: null, ...(typeof error.detail.reason === 'string' ? { reason: error.detail.reason } : {}) } : { outcome: 'unknown', verificationRequired: true, spam: null }
     }
   }
   const audit = async (caller: AuthenticatedCaller, action: string, target: string, detail: Record<string, unknown>, failed = false): Promise<void> => {
@@ -138,7 +149,17 @@ export function createMailxWorkspaceRoutes(helpers: MailxWorkspaceHelpers) {
   /** Certificates the server section may name: issued or uploaded and unexpired. */
   const certificateChoices = async () => (await helpers.store.listCertificates()).filter(cert => cert.source !== 'self-signed' && Date.parse(cert.notAfter) > now().getTime()).slice(0, 500)
   /** Certificates must be saved, issued or uploaded and unexpired; routed domains must be hosted here. */
-  const admitChoices = async (section: MailxSection, policy: MailxPolicies[MailxSection]): Promise<void> => {
+  const admitChoices = async (section: MailxSection, policy: MailxPolicies[MailxSection], caller?: AuthenticatedCaller): Promise<void> => {
+    if (section === 'country' && (policy as MailxCountryPolicy).blocked.length) {
+      const observed = caller ? await status(caller, '/host/mailx/state') : null
+      let installed = false
+      if (observed?.status) try { installed = projectMailxHostStatus(observed.status).geoip.installed } catch { installed = false }
+      if (!installed) return fail('PRECONDITION_FAILED', 'the country database is not installed on this server, so nothing was changed', { ...unchanged, reason: 'geoip_unavailable' })
+    }
+    if (section === 'greylist') {
+      const hosted = new Set((await helpers.store.readSnapshot()).domains.map(domain => domain.name.toLowerCase()))
+      if ((policy as MailxGreylistPolicy).domains.some(domain => !hosted.has(domain))) return fail('VALIDATION', 'greylisting can only be set for domains hosted on this server', { ...unchanged, field: 'domains' })
+    }
     if (section !== 'server' && section !== 'routing') return
     const snapshot = await helpers.store.readSnapshot()
     if (section === 'server') for (const [name, id] of Object.entries((policy as MailxServerPolicy).certificates)) {
@@ -180,7 +201,8 @@ export function createMailxWorkspaceRoutes(helpers: MailxWorkspaceHelpers) {
       if (observed.status !== null) try { host = projectMailxHostStatus(observed.status) } catch { hostState = 'unverified' }
       return { section: target, saved: !!stored, revision: mailxRevision(target, stored), policy: publicPolicy(target, stored), defaults: publicPolicy(target, null),
         updatedAt: stored?.updatedAt ?? null, updatedBy: stored?.updatedBy ?? null, host: hostState, observedAt: host?.observedAt ?? null,
-        state: !stored ? 'not-saved' : host ? host.sections[target] : 'unavailable', engine: target === 'spam' && host ? host.engine : null, application,
+        state: !stored ? 'not-saved' : host ? host.sections[target] : 'unavailable', engine: ['spam', 'spamd', 'greylist'].includes(target) && host ? host.engine : null, application,
+        ...(target === 'country' ? { geoip: host?.geoip ?? { installed: false, month: null } } : {}),
         ...(target === 'server' ? { choices: { certificates: (await certificateChoices()).map(cert => ({ id: cert.id, names: cert.names.slice(0, 20), notAfter: cert.notAfter })) } } : {}) }
     }
     if (section === 'apply') {
@@ -194,16 +216,18 @@ export function createMailxWorkspaceRoutes(helpers: MailxWorkspaceHelpers) {
     if (method === 'GET') { const caller = await fresh(), body = await view(section, caller); await fresh(); return json({ ...body, compositeRevision: mailxCompositeRevision(await readMailxSaved(helpers.store.rootDir)) }) }
     const body = await boundedBody(req, section === 'relay' ? ['policy', 'expectedRevision', 'password'] : ['policy', 'expectedRevision'])
     const policy = parse(() => MAILX_PARSERS[section](body.policy)) as MailxPolicies[typeof section]
-    await admitChoices(section, policy)
+    await admitChoices(section, policy, initial)
     const changes = section === 'server' || section === 'routing' ? previewMailxChanges(await readMailxSaved(helpers.store.rootDir), section, policy as MailxPolicies['server' | 'routing']) : null
     if (section === 'relay' && body.password !== null && !isMailxRelayPassword(body.password)) return fail('VALIDATION', 'the relay password must be 1 to 256 printable characters without edge spaces', { ...unchanged, field: 'password' })
     const lease = await helpers.store.getWriterLock().acquire()
-    let wrote = false, same = false, caller = initial
+    let wrote = false, same = false, caller = initial, released: string[] = []
     const save = async (): Promise<void> => {
       let stored: MailxStored
       caller = await fresh(); await lease.assertFencingToken()
       const before = await loadSection(helpers.store, section)
       if (mailxRevision(section, before) !== body.expectedRevision) return fail('CONFLICT', 'mail policy changed; reload before saving', unchanged)
+      // A removed advanced option goes back to the Postfix default instead of staying in main.cf.
+      if (section === 'advanced') released = Object.keys((before?.policy as MailxAdvancedPolicy | undefined)?.postfix ?? {}).filter(key => !Object.hasOwn((policy as MailxAdvancedPolicy).postfix, key))
       const base = { section, policy, updatedAt: now().toISOString(), updatedBy: caller.principal.username }
       if (section === 'relay') {
         const relay = policy as MailxRelayPolicy, password = body.password as string | null
@@ -223,7 +247,7 @@ export function createMailxWorkspaceRoutes(helpers: MailxWorkspaceHelpers) {
       throw error
     } finally { await lease.release() }
     if (same) return json({ ...await view(section, await fresh()), stateChanged: false })
-    const application = await apply(await fresh(), '/host/mailx/apply')
+    const application = await apply(await fresh(), '/host/mailx/apply', released)
     await audit(caller, `server.mail_policy.${section}_saved`, 'server:mail-policy', { outcome: application.outcome, ...(section === 'relay' ? { passwordChanged: body.password !== null } : {}),
       ...(changes ? { changed: changes.slice(0, 100).map(change => change.target + ' ' + change.key) } : {}), ...(application.failedCheck ? { failedCheck: application.failedCheck } : {}) }, application.outcome === 'unknown' || application.outcome === 'rolled-back')
     return json({ ...await view(section, await fresh(), application), stateChanged: true })
@@ -312,7 +336,7 @@ export function createMailxWorkspaceRoutes(helpers: MailxWorkspaceHelpers) {
 
   /**
    * Owner mail tools: native state of each mailbox's spam preferences, filter training as a host job, the delivery
-   * state of each mailing list, and the capabilities this server cannot provide (BoxTrapper, list moderation).
+   * state of each mailing list, and whether this server can enforce list posting rules.
    */
   const MAIL_TOOLS = ['email-accounts', 'spam-filters']
   const MAILBOX_STATES = ['none', 'saved', 'review'], NATIVE_STATES = ['not-saved', 'applied', 'pending', 'unavailable']
@@ -323,7 +347,7 @@ export function createMailxWorkspaceRoutes(helpers: MailxWorkspaceHelpers) {
       const raw = observed.status
       if (!object(raw) || !iso(raw.observedAt) || !object(raw.engine) || ![null, 'rspamd', 'spamassassin'].includes(raw.engine.engine as string) || !['wired', 'not-wired', 'unknown'].includes(String(raw.engine.wiring))
         || typeof raw.jobsAvailable !== 'boolean' || !Array.isArray(raw.mailboxes) || raw.mailboxes.length > 1000) throw new Error()
-      const keys = ['allowlist', 'filtering', 'score', 'blocklist', 'spamBox']
+      const keys = ['allowlist', 'filtering', 'score', 'blocklist', 'spamBox', 'autoDelete']
       const mailboxes = raw.mailboxes.map(row => {
         if (!object(row) || typeof row.mailbox !== 'string' || row.mailbox.length > 254 || !MAILBOX_STATES.includes(String(row.preference)) || !NATIVE_STATES.includes(String(row.native))
           || !(row.effects === null || exact(row.effects, keys) && keys.every(key => typeof (row.effects as Record<string, unknown>)[key] === 'boolean')) || (row.preference === 'saved') !== (row.effects !== null)) throw new Error()
@@ -333,25 +357,25 @@ export function createMailxWorkspaceRoutes(helpers: MailxWorkspaceHelpers) {
     } catch { host = 'unverified' }
     return { context: { account: account.username }, host, observedAt: read?.observedAt ?? null, engine: read ? { engine: read.engine, wiring: read.wiring } : null,
       mailboxes: read?.mailboxes ?? [], compositeRevision: mailxCompositeRevision(await readMailxSaved(helpers.store.rootDir)),
-      capabilities: { learning: !!read?.engine && read.jobsAvailable, boxTrapper: false } }
+      capabilities: { learning: !!read?.engine && read.jobsAvailable } }
   }
   const LIST_TOOLS = ['email-accounts', 'mailing-lists']
   const LIST_STATES = ['delivering', 'pending', 'disabled', 'restricted', 'empty', 'review', 'conflict']
   /** Lists are observed by the agent: delivering only when the live alias table holds the rendered line. */
   const listsView = async (caller: AuthenticatedCaller, account: Account) => {
     const observed = await status(caller, '/host/mailx/accounts/' + account.username + '/lists')
-    let host: MailxHost = observed.host, read: { observedAt: string; aliases: string; lists: { address: string; members: number; state: string }[] } | null = null
+    let host: MailxHost = observed.host, read: { observedAt: string; aliases: string; moderation: boolean; lists: { address: string; members: number; state: string }[] } | null = null
     if (observed.status !== null) try {
       const raw = observed.status
-      if (!exact(raw, ['observedAt', 'aliases', 'lists']) || !iso(raw.observedAt) || !['read', 'unavailable'].includes(String(raw.aliases)) || !Array.isArray(raw.lists) || raw.lists.length > 1000) throw new Error()
+      if (!exact(raw, ['observedAt', 'aliases', 'moderation', 'lists']) || !iso(raw.observedAt) || !['read', 'unavailable'].includes(String(raw.aliases)) || typeof raw.moderation !== 'boolean' || !Array.isArray(raw.lists) || raw.lists.length > 1000) throw new Error()
       const lists = raw.lists.map(row => {
         if (!exact(row, ['address', 'members', 'state']) || typeof row.address !== 'string' || row.address.length > 254 || !Number.isSafeInteger(row.members) || (row.members as number) < 0 || (row.members as number) > 10000 || !LIST_STATES.includes(String(row.state))) throw new Error()
         return { address: row.address, members: row.members as number, state: row.state as string }
       })
-      read = { observedAt: raw.observedAt, aliases: String(raw.aliases), lists }
+      read = { observedAt: raw.observedAt, aliases: String(raw.aliases), moderation: raw.moderation, lists }
     } catch { host = 'unverified' }
     return { context: { account: account.username }, host, observedAt: read?.observedAt ?? null, aliases: read?.aliases ?? null, lists: read?.lists ?? [],
-      compositeRevision: mailxCompositeRevision(await readMailxSaved(helpers.store.rootDir)), capabilities: { moderation: false, archive: false } }
+      compositeRevision: mailxCompositeRevision(await readMailxSaved(helpers.store.rootDir)), capabilities: { moderation: read?.moderation ?? false, archive: false } }
   }
   const lists = async (req: Request, url: URL, method: string): Promise<Response> => {
     const initial = await ownerAuthorize(req, undefined, undefined, LIST_TOOLS)
@@ -392,7 +416,116 @@ export function createMailxWorkspaceRoutes(helpers: MailxWorkspaceHelpers) {
     return json({ job: { id: reply.job.id, status: reply.job.status } }, 202)
   }
 
+  const ownDomains = async (account: Account): Promise<string[]> => (await helpers.store.listDomains({ accountId: account.id })).filter(domain => domain.accountId === account.id).map(domain => domain.name.toLowerCase()).sort()
+  /** Owner edit of one server-wide section: the change touches only the owner's own domains, under the section revision. */
+  const ownerSection = async <S extends 'greylist' | 'routing'>(req: Request, initial: { caller: AuthenticatedCaller; account: Account }, tools: readonly string[], section: S, expectedRevision: unknown, change: (before: MailxPolicies[S]) => MailxPolicies[S]): Promise<{ application: MailxApplication; changed: boolean }> => {
+    const authorize = () => ownerAuthorize(req, initial.caller, undefined, tools)
+    const lease = await helpers.store.getWriterLock().acquire()
+    let wrote = false, changed = false
+    try {
+      const current = await authorize(), before = await loadSection(helpers.store, section)
+      if (mailxRevision(section, before) !== expectedRevision) return fail('CONFLICT', 'mail policy changed; reload before saving', unchanged)
+      const policy = parse(() => MAILX_PARSERS[section](change(before?.policy ?? MAILX_DEFAULTS[section])))
+      changed = JSON.stringify(policy) !== JSON.stringify(before?.policy ?? MAILX_DEFAULTS[section])
+      if (changed) {
+        const next = { section, policy, updatedAt: now().toISOString(), updatedBy: current.caller.principal.username } as MailxStored
+        await lease.assertFencingToken(); wrote = true
+        await atomicWriteJson(sectionPath(helpers.store, section), next, 0o640, () => lease.assertFencingToken())
+        if (JSON.stringify(await loadSection(helpers.store, section)) !== JSON.stringify(next)) throw new Error('mailx_readback_mismatch')
+      }
+    } catch (error) {
+      if (wrote) return fail('SERVICE_UNAVAILABLE', 'mail policy save outcome requires inspection', review)
+      throw error
+    } finally { await lease.release() }
+    return { changed, application: changed ? await apply((await authorize()).caller, '/host/mailx/accounts/' + initial.account.username + '/apply') : { outcome: 'nothing', verificationRequired: false, spam: null } }
+  }
+  const GREYLIST_TOOLS = ['email-accounts', 'greylisting'], ROUTING_TOOLS = ['email-accounts', 'email-routing']
+  const greylisting = async (req: Request, url: URL, method: string): Promise<Response> => {
+    const initial = await ownerAuthorize(req, undefined, undefined, GREYLIST_TOOLS)
+    if (method !== 'GET' && method !== 'PUT') return new Response(null, { status: 405, headers: { allow: 'GET, PUT' } })
+    if (url.search) return fail('VALIDATION', 'greylisting accepts no account or path selectors', unchanged)
+    const view = async (caller: AuthenticatedCaller, application: MailxApplication | null = null) => {
+      const stored = await loadSection(helpers.store, 'greylist'), own = await ownDomains(initial.account), observed = await status(caller, '/host/mailx/accounts/' + initial.account.username + '/mailboxes')
+      const raw = object(observed.status) ? observed.status : null, engine = object(raw?.engine) ? raw!.engine.engine : null
+      return { context: { account: initial.account.username }, revision: mailxRevision('greylist', stored), host: observed.host, observedAt: typeof raw?.observedAt === 'string' ? raw.observedAt : null,
+        engine: engine === 'rspamd' || engine === 'spamassassin' ? engine : null, state: !stored?.policy.domains.some(domain => own.includes(domain)) ? 'not-saved' : ['applied', 'pending', 'unavailable'].includes(String(raw?.greylist)) ? raw!.greylist : 'unavailable',
+        domains: own.slice(0, MAILX_LIMITS.greylistDomains).map(domain => ({ domain, enabled: stored?.policy.domains.includes(domain) ?? false })), application }
+    }
+    if (method === 'GET') { const body = await view(initial.caller); await ownerAuthorize(req, initial.caller, undefined, GREYLIST_TOOLS); return json(body) }
+    const body = await boundedBody(req, ['domains', 'expectedRevision'])
+    if (!Array.isArray(body.domains) || body.domains.some(domain => typeof domain !== 'string')) return fail('VALIDATION', 'domains must list the domains to greylist', unchanged)
+    const wanted = body.domains as string[], own = await ownDomains(initial.account)
+    if (wanted.some(domain => !own.includes(domain))) return fail('VALIDATION', 'greylisting can only be set for your own domains', { ...unchanged, field: 'domains' })
+    const { application, changed } = await ownerSection(req, initial, GREYLIST_TOOLS, 'greylist', body.expectedRevision, before => ({ domains: [...before.domains.filter(domain => !own.includes(domain)), ...wanted] }))
+    const caller = (await ownerAuthorize(req, initial.caller, undefined, GREYLIST_TOOLS)).caller
+    if (changed) await audit(caller, 'mail.greylisting.saved', 'account:' + initial.account.username, { domains: wanted.length, outcome: application.outcome }, application.outcome === 'unknown')
+    return json({ ...await view(caller, application), stateChanged: changed })
+  }
+  const routingRows = async (account: Account) => {
+    const snapshot = await helpers.store.readSnapshot(), own = await ownDomains(account), stored = await loadSection(helpers.store, 'routing')
+    const addresses = (snapshot.ipPool ?? []).map(ip => ip.address.toLowerCase())
+    return own.map(domain => {
+      const zone = [...snapshot.zones].sort((a, b) => b.name.length - a.name.length).find(item => domain === item.name.toLowerCase() || domain.endsWith('.' + item.name.toLowerCase()))
+      const detected = detectMailRouting(domain, zone, snapshot.server?.settings.hostname ?? null, addresses), row = stored?.policy.domains.find(item => item.domain === domain)
+      return { domain, mode: row?.mode ?? 'local', auto: row?.auto ?? false, detected: detected.mode, mx: detected.mx }
+    })
+  }
+  const routing = async (req: Request, url: URL, method: string): Promise<Response> => {
+    const initial = await ownerAuthorize(req, undefined, undefined, ROUTING_TOOLS)
+    if (method !== 'GET' && method !== 'PUT') return new Response(null, { status: 405, headers: { allow: 'GET, PUT' } })
+    if (url.search) return fail('VALIDATION', 'email routing accepts no account or path selectors', unchanged)
+    const view = async (application: MailxApplication | null = null) => ({ context: { account: initial.account.username }, revision: mailxRevision('routing', await loadSection(helpers.store, 'routing')), domains: (await routingRows(initial.account)).slice(0, MAILX_LIMITS.routingDomains), application })
+    if (method === 'GET') { const body = await view(); await ownerAuthorize(req, initial.caller, undefined, ROUTING_TOOLS); return json(body) }
+    const body = await boundedBody(req, ['domain', 'mode', 'expectedRevision'])
+    const row = (await routingRows(initial.account)).find(item => item.domain === body.domain)
+    if (!row) return fail('NOT_FOUND', 'domain not found', unchanged)
+    if (!['auto', 'local', 'backup', 'remote'].includes(String(body.mode))) return fail('VALIDATION', 'mode must be auto, local, backup or remote', { ...unchanged, field: 'mode' })
+    // The detection runs once, here, so a later MX change does not move the domain by itself.
+    if (body.mode === 'auto' && row.detected === null) return fail('PRECONDITION_FAILED', 'this domain has no MX record in a zone on this server, so its routing cannot be detected', { ...unchanged, reason: 'no_saved_mx' })
+    const auto = body.mode === 'auto', mode = (auto ? row.detected : body.mode) as MailxRoutingMode, domain = row.domain
+    const { application, changed } = await ownerSection(req, initial, ROUTING_TOOLS, 'routing', body.expectedRevision, before => ({ domains: [...before.domains.filter(item => item.domain !== domain), ...(mode === 'local' && !auto ? [] : [{ domain, mode, auto }])] }))
+    const caller = (await ownerAuthorize(req, initial.caller, undefined, ROUTING_TOOLS)).caller
+    if (changed) await audit(caller, 'mail.routing.saved', 'domain:' + domain, { mode, auto, outcome: application.outcome }, application.outcome === 'unknown' || application.outcome === 'rolled-back')
+    return json({ ...await view(application), stateChanged: changed })
+  }
+  const DELIVERABILITY_TOOLS = ['email-accounts', 'email-deliverability']
+  /** The checks root runs on Mail quality, limited to the owner's own domains; nothing is changed here. */
+  const deliverability = async (req: Request, url: URL, method: string): Promise<Response> => {
+    const initial = await ownerAuthorize(req, undefined, undefined, DELIVERABILITY_TOOLS)
+    if (method !== 'GET' && method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'GET, POST' } })
+    if (url.search) return fail('VALIDATION', 'deliverability accepts no account or path selectors', unchanged)
+    const saved = await helpers.store.readSnapshot(), rows = ownedMailDomains(saved, initial.account.username)
+    if (method === 'GET') {
+      await ownerAuthorize(req, initial.caller, undefined, DELIVERABILITY_TOOLS)
+      return json({ context: { account: initial.account.username }, domains: rows.map(({ domain, mailboxes, zone }) => ({ domain, mailboxes, zone })), maxCheck: MAIL_QUALITY_MAX_CHECK })
+    }
+    const requested = await readMailQualityDomains(req), chosen = requested.map(name => rows.find(row => row.domain === name))
+    if (chosen.some(row => !row)) return fail('VALIDATION', 'only your own domains can be checked', unchanged)
+    const run = await runMailQualityChecks({ targets: chosen.map(row => mailQualityTarget(saved, row!)), resolver: helpers.resolver ?? new Resolver({ timeout: 2000, tries: 2 }),
+      ...(helpers.readDkimPublicMaterial ? { material: (domain: string) => helpers.readDkimPublicMaterial!(initial.caller, domain) } : {}) })
+    await ownerAuthorize(req, initial.caller, undefined, DELIVERABILITY_TOOLS)
+    return json({ checkedAt: now().toISOString(), timedOut: run.timedOut, results: run.results })
+  }
+  const TRACK_TOOLS = ['email-accounts', 'track-delivery']
+  /** cPanel Track Delivery for the whole account. The agent filters to the account's own domains before anything leaves the host. */
+  const trackDelivery = async (req: Request, url: URL, method: string): Promise<Response> => {
+    const initial = await ownerAuthorize(req, undefined, undefined, TRACK_TOOLS)
+    if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
+    for (const key of new Set(url.searchParams.keys())) if (!['since', 'until', 'recipient', 'statuses'].includes(key) || url.searchParams.getAll(key).length !== 1) return fail('VALIDATION', 'unsupported or repeated delivery selector', unchanged)
+    if (!helpers.callHost) return fail('PRECONDITION_FAILED', 'no protected host agent is connected, so delivery events cannot be read', unchanged)
+    const range = mailLogRange(url, now), recipient = url.searchParams.get('recipient'), statuses = url.searchParams.get('statuses')
+    const query = new URLSearchParams({ ...range, ...(recipient === null ? {} : { recipient }), ...(statuses === null ? {} : { statuses }) }).toString()
+    const body = await helpers.callHost(initial.caller, '/host/mail/log/account/' + initial.account.username + '?' + query)
+    if (!object(body) || body.scope !== 'account' || body.account !== initial.account.username || !['read', 'unavailable'].includes(String(body.state)) || !Array.isArray(body.messages)) return fail('SERVICE_UNAVAILABLE', 'the delivery observation could not be verified', unchanged)
+    await ownerAuthorize(req, initial.caller, undefined, TRACK_TOOLS)
+    return json(body)
+  }
+
   return async (req: Request, url: URL, method: string): Promise<Response | null> => {
+    if (url.pathname === '/api/account/mailx/greylisting') return greylisting(req, url, method)
+    if (url.pathname === '/api/account/mailx/routing') return routing(req, url, method)
+    if (url.pathname === '/api/account/mailx/deliverability') return deliverability(req, url, method)
+    if (url.pathname === '/api/account/mailx/track-delivery') return trackDelivery(req, url, method)
     const match = /^\/api\/server\/mailx\/([a-z]+)(\/preview)?$/.exec(url.pathname)
     if (match && match[2]) return match[1] === 'server' || match[1] === 'routing' ? server(req, url, method, match[1], true) : null
     if (match) return isMailxSection(match[1]) || match[1] === 'apply' ? server(req, url, method, match[1] as MailxSection | 'apply') : null

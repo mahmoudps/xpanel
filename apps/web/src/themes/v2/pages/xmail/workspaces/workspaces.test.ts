@@ -114,12 +114,13 @@ describe('v2 sealed mailbox workspace pages', () => {
     expect(html).toContain('HTML is stored as source and is not rendered on this page.')
   })
 
-  it('does not imply persisted mailbox preferences already change inbox or compose behavior', () => {
+  it('says saved mailbox preferences apply to the inbox and compose pages on their next load', () => {
     const html = render('/mail/settings/preferences')
     expect(find(html, '[name="messagesPerPage"]')?.tag).toBe('select')
     expect(find(html, '[name="replyIdentityId"]')?.tag).toBe('select')
     expect(find(html, '[data-preferences-application]')).toBeDefined()
-    expect(html).toContain('The inbox and compose pages do not apply them yet.')
+    expect(html).toContain('Saved preferences apply to the inbox and compose pages the next time they load.')
+    expect(html).not.toContain('do not apply them yet')
   })
 
   it('preserves tracking privacy, cursor controls and independent selected message evidence', () => {

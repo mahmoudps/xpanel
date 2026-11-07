@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { navigation, tools } from '@xpanel/catalog'
 import { resolveSurfaceSection } from '../../../shell.ts'
-import { composedRouteSpecs, composedXwhmRoutes, nativeComposedRoutePaths } from '../all.ts'
+import { composedRouteSpecs, nativeComposedRoutePaths } from '../all.ts'
 import { renderComposedRoutes } from '../render.ts'
 import { renderWhmDetailPage } from '../../approved-xwhm.ts'
 import { xwhm_software } from './xwhm-software.ts'
@@ -14,7 +14,7 @@ import { xwhm_services } from './xwhm-services.ts'
 
 const families = [
   [xwhm_software, 11], [xwhm_server, 8], [xwhm_security, 7],
-  [xwhm_panel, 10], [xwhm_resellers, 3], [xwhm_plans, 1], [xwhm_services, 7],
+  [xwhm_panel, 10], [xwhm_resellers, 3], [xwhm_plans, 1], [xwhm_services, 8],
 ] as const
 const routes = families.flatMap(([items]) => [...items])
 const nativeRoutes = [
@@ -28,8 +28,8 @@ describe('xWHM administration route contracts', () => {
     const pages = navigation.find(surface => surface.surface === 'xwhm')!.sections.flatMap(section => section.pages)
     const knownTools = new Set(tools.map(tool => tool.id))
     for (const [items, count] of families) expect(items).toHaveLength(count)
-    expect(routes).toHaveLength(47)
-    expect(new Set(routes.map(spec => spec.route)).size).toBe(47)
+    expect(routes).toHaveLength(48)
+    expect(new Set(routes.map(spec => spec.route)).size).toBe(48)
     for (const spec of routes) {
       const page = pages.find(page => page.route === spec.route)
       expect(page, spec.route).toBeDefined()
@@ -50,7 +50,6 @@ describe('xWHM administration route contracts', () => {
     for (const [route, section] of nativeRoutes) {
       expect(routes.some(spec => spec.route === route), route).toBe(true)
       expect(nativeComposedRoutePaths.has(route), route).toBe(true)
-      expect(composedXwhmRoutes.some(spec => spec.route === route), route).toBe(false)
       expect(resolveSurfaceSection('xwhm', route)).toBe(section)
       expect(renderComposedRoutes(routes, { locale: 'en', route, principal: { kind: 'root', id: 'root-test', username: 'root' } })).toBeUndefined()
     }
@@ -58,7 +57,7 @@ describe('xWHM administration route contracts', () => {
 
   it('preserves unwired administration layouts without active command or mutation controls', () => {
     const unwired = routes.filter(spec => spec.bind === 'soon')
-    expect(unwired).toHaveLength(44)
+    expect(unwired).toHaveLength(45)
     const terminal = unwired.find(spec => spec.route === '/whm/server/terminal')!
     expect(terminal.layout).not.toBe('terminal')
     expect(terminal.lede).toContain('dedicated server session')

@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto'
 import { canonicalNavigationRoute } from '@xpanel/catalog'
 import { panelLabel, renderSecurityNavLink, renderSupportNotice, renderUserMenu } from '../../chrome.ts'
-import { HANDOFF_CONTROLS_CSS, renderImpersonationBanner } from '../../panel-handoff-controls.ts'
+import { HANDOFF_CONTROLS_CSS, renderImpersonationBanner, renderQualificationBanner, renderThemePreviewBanner } from '../../panel-handoff-controls.ts'
 import { brandingHeadStyle, brandingRootAttributes, renderBrandingFooter } from '../../branding.ts'
 import { translator, type Locale } from '../../i18n.ts'
 import { renderStatusBody } from '../../status-page.ts'
 import { renderDesignMain, renderDesignNav, renderDisabledScreen } from '../../design-board.ts'
 import { renderAccountSecurityCard } from '../../surfaces/account-security.ts'
+import { renderClassicIdentityCards } from '../../board-port/identity-workspaces.ts'
 import { renderLoginSurface } from '../../surfaces/login.ts'
 import { renderMailSurface, renderUnavailableMailBody } from '../../surfaces/xmail.ts'
 import { renderPanelSurface } from '../../surfaces/xpanel.ts'
@@ -23,7 +24,7 @@ import { escapeHtml } from '../../html.ts'
 import { renderReconcileBanner, type LiveEventState } from '../../ws-client.ts'
 import { loadThemeMessages } from '../../theme-messages.ts'
 import { URL as FileURL } from 'node:url'
-import type { DocumentProps, UiTheme, UnavailableProps, WorkspaceSummaryView, ThemeSurface } from '../contract.ts'
+import type { DocumentProps, ThemePackageTokens, UiTheme, UnavailableProps, WorkspaceSummaryView, ThemeSurface } from '../contract.ts'
 import { CLASSIC_PROMPT_CSS, CLASSIC_PROMPT_TEMPLATE } from './prompt.ts'
 
 const renderWorkspaceSummary = (view: WorkspaceSummaryView | undefined, surface: ThemeSurface): string => {
@@ -47,7 +48,7 @@ const renderUnavailable = (props: UnavailableProps): string => {
   const disabledRouteAttribute = panelSurface === 'xpanel' && path === '/domains/reverse-proxy'
     ? ' data-unqualified-route="/domains/reverse-proxy"' : ''
   const store = props.admitted && !securityPage && principal
-    ? renderStoreExtension({ locale, route: path, principal, ...(props.storeAccount ? { account: props.storeAccount } : {}) }) : undefined
+    ? renderStoreExtension({ locale, route: path, principal, readOnly: true, ...(props.storeAccount ? { account: props.storeAccount } : {}) }) : undefined
   const detailed = !securityPage && props.admitted
     ? store || (panelSurface === 'xpanel'
       ? renderApprovedXpanelWorkspace({ route: path, locale, readOnly: true })
@@ -56,8 +57,8 @@ const renderUnavailable = (props: UnavailableProps): string => {
         : renderUnavailableMailBody({ route: path, locale, theme }))
     : undefined
   const canonicalPath = canonicalNavigationRoute(path)
-  const composed = props.admitted && !securityPage && panelSurface !== 'xmail'
-    ? renderUnavailableComposedRoute(panelSurface, path, locale) : undefined
+  const composed = props.admitted && !securityPage && panelSurface === 'xpanel'
+    ? renderUnavailableComposedRoute(path, locale) : undefined
   const design = securityPage ? '' : (detailed || composed || renderDesignMain(path, locale)
     || (canonicalPath !== path ? renderDesignMain(canonicalPath, locale) : '')
     || renderDisabledScreen(pageHeading, locale))
@@ -121,6 +122,17 @@ const renderDocument = (props: DocumentProps): string => `<!doctype html>
 
 export const classicTheme: UiTheme = Object.freeze<UiTheme>({
   id: 'classic',
+  // Colors and radii an uploaded package may change; spacing, type and focus stay fixed by the standards.
+  packageTokens: Object.freeze<ThemePackageTokens>({
+    required: ['--xp-accent', '--xp-bg-canvas', '--xp-bg-surface', '--xp-text-primary'],
+    optional: ['--xp-accent-hover', '--xp-accent-soft', '--xp-bg-elevated', '--xp-bg-subtle', '--xp-border', '--xp-border-strong', '--xp-text-secondary', '--xp-text-muted', '--xp-radius-sm', '--xp-radius-md'],
+    radii: ['--xp-radius-sm', '--xp-radius-md'],
+    contrast: [['--xp-text-primary', '--xp-bg-surface'], ['--xp-text-primary', '--xp-bg-canvas']],
+    defaults: {
+      light: { '--xp-accent': '#1d5bd6', '--xp-bg-canvas': '#f5f6f8', '--xp-bg-surface': '#ffffff', '--xp-text-primary': '#101828' },
+      dark: { '--xp-accent': '#6ea0ff', '--xp-bg-canvas': '#0e1726', '--xp-bg-surface': '#152033', '--xp-text-primary': '#e6edf7' },
+    },
+  }),
   messages: loadThemeMessages('classic', new FileURL('./locales/', import.meta.url)),
   assets: Object.freeze([Object.freeze({
     path: '/assets/tokens.css' as const,
@@ -140,7 +152,7 @@ export const classicTheme: UiTheme = Object.freeze<UiTheme>({
     commandPalette: ({ surface, locale, entries }) => renderCommandPaletteEntries(surface, locale, entries),
     reconcileBanner: ({ live, locale }) => `<div class="xp-global-reconcile-wrap" style="padding: 12px var(--xp-space-card) 0;">${renderReconcileBanner(live, locale)}</div>`,
     accountSecurity: ({ bodyHtml, security }) => {
-      const card = renderAccountSecurityCard(security)
+      const card = renderAccountSecurityCard(security) + renderClassicIdentityCards(security)
       const nodes = parseMarkup(bodyHtml)
       const roots = nodes.flatMap((node, index) => node.attrs.has('data-auth-personal-security') ? [index] : [])
       const hosts = nodes.flatMap((node, index) => node.attrs.has('data-classic-account-security-factor-host') ? [index] : [])
@@ -173,8 +185,10 @@ export const classicTheme: UiTheme = Object.freeze<UiTheme>({
     },
     documentBody: props => {
       const impersonationHtml = props.impersonation ? renderImpersonationBanner(props.locale, props.impersonation) : ''
+      const qualificationHtml = (props.qualificationMode ? renderQualificationBanner(props.locale) : '') + (props.themePreviewName ? renderThemePreviewBanner(props.locale, props.themePreviewName) : '')
       return `
-  ${impersonationHtml || props.handoffControls ? `<style id="xpanel-handoff-controls">${HANDOFF_CONTROLS_CSS}</style>` : ''}
+  ${impersonationHtml || qualificationHtml || props.handoffControls ? `<style id="xpanel-handoff-controls">${HANDOFF_CONTROLS_CSS}</style>` : ''}
+  ${qualificationHtml}
   ${impersonationHtml}
   ${props.reconcileHtml}
   ${props.surfaceHtml}${renderBrandingFooter(props.branding, props.locale)}

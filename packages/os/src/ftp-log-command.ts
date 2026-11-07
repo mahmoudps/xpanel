@@ -23,6 +23,10 @@ export function ftpLogArgv(since: string, until: string, limit: number): string[
   return [JOURNALCTL, '--no-pager', '-o', 'json', FTP_LOG_OUTPUT_FIELDS, '--since', journalTime(since), '--until', journalTime(until), '-n', String(limit), '-t', FTP_LOG_IDENTIFIER]
 }
 
+// pure-ftpwho(8): -s prints one parseable line per session and -H keeps peer addresses numeric.
+export const FTP_WHO_ARGV: readonly string[] = ['/usr/sbin/pure-ftpwho', '-s', '-H']
+export const isFtpWhoCommand = (argv: readonly unknown[]): boolean => Array.isArray(argv) && argv.length === FTP_WHO_ARGV.length && FTP_WHO_ARGV.every((value, index) => value === argv[index])
+
 export function isFtpLogCommand(argv: readonly unknown[]): boolean {
   if (!Array.isArray(argv) || argv.length !== 13 || argv.some(value => typeof value !== 'string')) return false
   const since = JOURNAL_TIME.exec(argv[6] as string), until = JOURNAL_TIME.exec(argv[8] as string)

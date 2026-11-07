@@ -29,5 +29,17 @@ export function renderImpersonationBanner(locale: Locale, input: { target: strin
   return `<div class="xp-impersonation" role="region" aria-label="${escapeHtml(t('Handed-off session'))}" data-impersonation><p class="xp-impersonation__text">${sentence}</p><button type="button" class="xp-btn" data-action="logout" data-impersonation-end>${escapeHtml(t('End session'))}</button></div>`
 }
 
+/** Shown on every page while the host's qualification mode is on. */
+export function renderQualificationBanner(locale: Locale): string {
+  const t = translator(locale)
+  return `<div class="xp-impersonation" role="region" aria-label="${escapeHtml(t('Qualification mode'))}" data-qualification-mode><p class="xp-impersonation__text">${escapeHtml(t('Qualification mode is on. Unverified tools are open on this lab host and every operation is recorded in the audit log.'))}</p></div>`
+}
+
+/** Shown on the one document root opened to preview a theme. */
+export function renderThemePreviewBanner(locale: Locale, name: string): string {
+  const t = translator(locale)
+  return `<div class="xp-impersonation" role="status" data-theme-preview><p class="xp-impersonation__text">${escapeHtml(t('Preview of the theme {name}. It was not chosen or saved, and the next page uses your own theme.', { name }))}</p></div>`
+}
+
 /** Page-scoped styles, emitted once only on a page that renders a handoff control or the banner. */
 export const HANDOFF_CONTROLS_CSS = `.xp-handoff{display:inline-flex;flex-direction:column;align-items:flex-start;gap:var(--xp-space-label);min-inline-size:0}.xp-handoff [data-handoff-status]{margin:0;overflow-wrap:anywhere}.xp-handoff [data-handoff-status][data-state=refused],.xp-handoff [data-handoff-status][data-state=expired],.xp-handoff [data-handoff-status][data-state=failed]{color:var(--xp-status-critical-fg)}.xp-impersonation{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--xp-space-field);padding:var(--xp-space-field) var(--xp-space-card);border-block-end:1px solid var(--xp-status-warn-border);background:var(--xp-status-warn-bg);color:var(--xp-status-warn-fg)}.xp-impersonation__text{margin:0;min-inline-size:0;overflow-wrap:anywhere}.xp-impersonation .xp-btn{min-block-size:44px}@media(max-width:600px){.xp-impersonation{padding:var(--xp-space-field)}}`

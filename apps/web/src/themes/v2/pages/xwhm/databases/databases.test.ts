@@ -69,8 +69,9 @@ describe('V2 WHM database documents', () => {
     const html = render('/whm/databases/phpmyadmin')
     expect(node(html, 'data-db-action', 'open').attrs.has('disabled')).toBe(true)
     expect(node(html, 'data-db-checks').tag).toBe('ol')
-    expect(html).not.toMatch(/type="password"|sealedPassword|temporary-password/)
-    expect(html).toContain('phpPgAdmin has no supported single sign-on.')
+    // The access card's own extra password comes after every sign-on control.
+    expect(html.slice(0, html.indexOf('data-db-pma-access'))).not.toMatch(/type="password"|sealedPassword|temporary-password/)
+    expect(html).toContain('There is no server-wide phpPgAdmin sign-on.')
   })
 
   it('retains reviewed package and backup stages before the upgrade control', () => {
@@ -82,14 +83,16 @@ describe('V2 WHM database documents', () => {
     expect(node(html, 'data-db-job').attrs.has('hidden')).toBe(true)
   })
 
-  it('keeps Redis and MongoDB data browsing unavailable without credentials', () => {
+  it('keeps the Redis and MongoDB tools closed until the service tool is verified', () => {
     const redis = render('/whm/databases/redis'), mongo = render('/whm/databases/mongodb')
     expect(node(redis, 'data-db-fact', 'requirePass').tag).toBe('dd')
     expect(node(mongo, 'data-db-fact', 'authorization').tag).toBe('dd')
     for (const html of [redis, mongo]) {
-      expect(html).toContain('does not browse its data.')
-      expect(html).not.toMatch(/type="password"|data-db-action="(?:save|connect|delete)"/)
+      expect(html).toContain('data-can-manage="false"')
+      expect(html).not.toMatch(/data-db-action="(?:save|connect|delete)"/)
+      expect(html).not.toMatch(/<(?:input|select|textarea|button)\b(?![^>]*\bdisabled\b)[^>]*data-dbs-/)
     }
+    expect(render('/whm/databases/redis', { dataAuthority: { canRead: true, canManage: true, canDbService: true } })).toContain('data-db-service="redis" data-can-manage="true"')
   })
 
   it('presents tuning as observations and an advisory plan without settings mutations', () => {

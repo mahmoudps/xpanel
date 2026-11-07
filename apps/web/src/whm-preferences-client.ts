@@ -4,6 +4,8 @@ import { LOCALES, type Locale, type MessageValues } from './i18n.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 /** Registry tags a saved preference may name; the client binding receives the same list. */
 const PREFERENCE_LOCALES: readonly string[] = LOCALES.map(info => info.tag)
+// A locale copied on this server joins after this binding was built; the API holds the authoritative list.
+const PREFERENCE_LANGUAGE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/
 export interface AdminPreferenceFields { language: Locale; theme: 'light' | 'dark'; density: 'comfortable' | 'compact' }
 export interface AdminPreferencesView { state: 'default' | 'saved' | 'invalid'; preferences: AdminPreferenceFields | null; updatedAt: string | null; revision: string; application: 'next_navigation' }
 
@@ -16,7 +18,7 @@ export function readAdminPreferencesView(value: unknown): AdminPreferencesView {
     if (raw !== null || value.updatedAt !== null) throw new Error('invalid_preferences')
     return { state: 'invalid', preferences: null, updatedAt: null, revision: value.revision, application: 'next_navigation' }
   }
-  if (!object(raw) || Object.keys(raw).sort().join() !== 'density,language,theme' || !PREFERENCE_LOCALES.includes(raw.language as string)
+  if (!object(raw) || Object.keys(raw).sort().join() !== 'density,language,theme' || typeof raw.language !== 'string' || !PREFERENCE_LANGUAGE.test(raw.language)
     || (raw.theme !== 'light' && raw.theme !== 'dark') || (raw.density !== 'comfortable' && raw.density !== 'compact')) throw new Error('invalid_preferences')
   if (value.state === 'default' && (value.updatedAt !== null || raw.language !== PREFERENCE_LOCALES[0] || raw.theme !== 'light' || raw.density !== 'comfortable')) throw new Error('invalid_preferences')
   if (value.state === 'saved' && (typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt)) || new Date(value.updatedAt).toISOString() !== value.updatedAt)) throw new Error('invalid_preferences')
@@ -48,7 +50,7 @@ function bindWhmPreferences(): void {
     }
     const paint = (view: AdminPreferencesView): void => {
       revision = view.state === 'invalid' ? '' : view.revision; readable = view.preferences !== null
-      for (const key of ['language', 'theme', 'density'] as const) field(key, view.preferences ? labels[view.preferences[key]]! : t('Unavailable'))
+      for (const key of ['language', 'theme', 'density'] as const) field(key, view.preferences ? labels[view.preferences[key]] ?? view.preferences[key] : t('Unavailable'))
       if (view.preferences) { language.value = view.preferences.language; theme.value = view.preferences.theme; density.value = view.preferences.density }
       field('updatedAt', view.updatedAt ? formatDisplayDateTime(view.updatedAt) : t(msgctxt('whm-preferences-client', 'Never saved')), !!view.updatedAt)
       apply.hidden = view.state !== 'saved'; apply.setAttribute('href', '/whm/preferences')
@@ -78,7 +80,7 @@ function bindWhmPreferences(): void {
       event.preventDefault()
       if (busy || !readable || !revision || !admitted() || !request) return
       const desired = { language: language.value, theme: theme.value, density: density.value }
-      if (!PREFERENCE_LOCALES.includes(desired.language) || !['light', 'dark'].includes(desired.theme) || !['comfortable', 'compact'].includes(desired.density)) { note(saveStatus, 'failed', t('Choose a listed value for every preference.')); return }
+      if (!PREFERENCE_LANGUAGE.test(desired.language) || !['light', 'dark'].includes(desired.theme) || !['comfortable', 'compact'].includes(desired.density)) { note(saveStatus, 'failed', t('Choose a listed value for every preference.')); return }
       busy = true; lock(); apply.hidden = true; note(saveStatus, 'reading', t('Saving your preferences…'))
       try {
         const ack = readAdminPreferencesView(await request('PUT', '/api/admin/preferences', { ...desired, expectedRevision: revision }))
@@ -92,4 +94,4 @@ function bindWhmPreferences(): void {
     void load()
   })
 }
-export const WHM_PREFERENCES_CLIENT_BINDING = `(()=>{const PREFERENCE_LOCALES=${JSON.stringify(PREFERENCE_LOCALES)};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readAdminPreferencesView=${readAdminPreferencesView.toString()};return ${bindWhmPreferences.toString()};})()`
+export const WHM_PREFERENCES_CLIENT_BINDING = `(()=>{const PREFERENCE_LOCALES=${JSON.stringify(PREFERENCE_LOCALES)};const PREFERENCE_LANGUAGE=${PREFERENCE_LANGUAGE.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readAdminPreferencesView=${readAdminPreferencesView.toString()};return ${bindWhmPreferences.toString()};})()`

@@ -1,5 +1,6 @@
 import { localeDirection, translator, type Locale, type MessageValues } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
+import { renderWhmThemePackagesCard } from './whm-extend-workspace.ts'
 
 const styles = `<style>.xp-whm-branding :is(p,h2,h3,dl,dd){margin:0}.xp-whm-branding__layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:24px;align-items:start}.xp-whm-branding__block{display:flex;flex-direction:column;gap:16px;padding-block:16px;border-block-start:1px solid var(--xp-border)}.xp-whm-branding__block:first-of-type{border-block-start:0}.xp-whm-branding__block h3{font-size:var(--xp-type-body);font-weight:var(--xp-weight-semibold)}.xp-whm-branding__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.xp-whm-branding__asset{display:flex;gap:16px;align-items:center;flex-wrap:wrap}.xp-whm-branding__preview{inline-size:96px;block-size:56px;border:1px dashed var(--xp-border);border-radius:8px;display:grid;place-items:center;overflow:hidden}.xp-whm-branding__preview img{max-inline-size:100%;max-block-size:100%}.xp-whm-branding__check{display:flex;gap:8px;align-items:center}.xp-whm-branding [hidden]{display:none!important}@media(max-width:900px){.xp-whm-branding__layout,.xp-whm-branding__grid{grid-template-columns:minmax(0,1fr)}}</style>`
 
@@ -40,8 +41,8 @@ export function renderWhmPanelBrandingWorkspace(input: { locale: Locale; canMana
       <section class="xp-whm-detail-card" aria-labelledby="branding-themes-heading"><h2 id="branding-themes-heading">${t('Theme packages')}</h2><p>${t('The theme each interface uses.')}</p>
         <div class="xp-acct-tool__table" tabindex="0" role="region" aria-labelledby="branding-themes-heading"><table class="xp-table"><thead><tr><th scope="col">${t('Interface')}</th><th scope="col">${t('Theme')}</th><th scope="col">${t('Status')}</th></tr></thead><tbody>
           ${['xPanel', 'xWHM', 'xMail', t('Sign-in page')].map(name => `<tr><td><bdi dir="ltr">${name}</bdi></td><td>${t('Classic')}</td><td>${t('Built in')}</td></tr>`).join('')}</tbody></table></div>
-        <p class="xp-help">${t('Every theme applies the branding above. No other theme package is installed on this server.')}</p>
       </section>
+      ${renderWhmThemePackagesCard({ locale: input.locale, canManage: input.canManage })}
     </div>
     <aside class="xp-whm-detail-card" aria-labelledby="branding-about-heading"><h2 id="branding-about-heading">${t('About this page')}</h2>
       <dl class="xp-whm-detail-fields"><div class="xp-whm-detail-field"><dt>${t('Access')}</dt><dd>${t('Root only')}</dd></div>

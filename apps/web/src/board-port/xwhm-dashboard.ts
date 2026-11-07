@@ -1,6 +1,7 @@
 import { canOpenRegisteredRoute, type VisibilityContext } from '@xpanel/catalog'
 import type { Account, AuditEntry, Certificate, HostLimitObservation, Plan, ServerIpEntry } from '@xpanel/core'
 import { ARABIC_TYPE_CSS, isArabicSentence } from '../arabic-type.ts'
+import { renderClassicWhmHome } from './whm-account-admin.ts'
 import { isolateLtrRuns } from '../bidi-runs.ts'
 import { auditActionHtml, auditActionLabel, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../audit-labels.ts'
 import { LOCALES, localeDirection, translator, type Locale, type Translate } from '../i18n.ts'
@@ -611,6 +612,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
         ${canOpen(model, '/whm/accounts/new') ? `<a href="/whm/accounts/new" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid light-dark(#1D5BD6,var(--xp-border-focus,#1D5BD6)); background: #1D5BD6; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">${svg('<path d="M12 5v14M5 12h14"></path>', 18, false)}${show(model.createLabel, rtl)}</a>` : ''}
       </div>
       <section aria-label="Notices" style="display: flex; flex-wrap: wrap; gap: 16px">${model.notices.map(noticeHtml).join('')}</section>
+      ${renderClassicWhmHome(model.locale)}
       <div style="display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start">
         <div style="flex: 1.618 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 26px">
           <section aria-labelledby="rec-title" style="min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 24px; border-radius: 12px; background: light-dark(#FFFFFF,var(--xp-bg-surface,#FFFFFF)); border: 1px solid light-dark(#E2E6EC,var(--xp-border,#E2E6EC))">
@@ -621,7 +623,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
             <p style="margin: 0; font-size: 14px; color: light-dark(#344054,var(--xp-text-secondary,#344054)); line-height: 1.6; max-width: 68ch">${show(model.reconcilerLede, rtl)}</p>
             <dl style="margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px">${model.reconcilerTiles.map(item => tile(item.label, item.value, item.note, rtl, item.chip, item.monoLabel)).join('')}</dl>
             <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: auto">
-              ${canOpen(model, '/whm/audit') ? `<button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-border-strong,#D0D5DD)); background: light-dark(#FFFFFF,var(--xp-bg-surface,#FFFFFF)); color: light-dark(#101828,var(--xp-text-primary,#101828)); font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer">${show(model.driftButton, rtl)}</button>` : ''}
+              
               ${canOpen(model, '/whm/audit') ? `<a href="/whm/audit" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; font-size: 14px; font-weight: 600; color: light-dark(#1D5BD6,var(--xp-accent,#1D5BD6))">${show(model.driftLink, rtl)}</a>` : ''}
               <span role="status" style="font-size: 12px; font-weight: 500; color: light-dark(#0E7A4E,var(--xp-status-ok-fg,#0E7A4E))">${show(model.driftStatus, rtl)}</span>
             </div>

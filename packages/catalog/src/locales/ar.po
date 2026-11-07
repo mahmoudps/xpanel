@@ -739,6 +739,10 @@ msgstr "الموقع الافتراضي"
 msgid "Default index files"
 msgstr "ملفات الفهرس الافتراضية"
 
+#. nav.page.xwhm.nginx-proxy.name
+msgid "NGINX reverse proxy"
+msgstr "الوكيل العكسي NGINX"
+
 #. catalog.tool.delete-dns-zone.name
 msgid "Delete DNS Zones"
 msgstr "حذف مناطق DNS"

@@ -5,6 +5,7 @@ import type { Account, Plan } from '@xpanel/core'
 import { system } from '@xpanel/render'
 import type { AgentCallerIdentity } from './server.ts'
 import { hostHelperFiles, readInstalledHelperDigest } from './installed-helper-digest.ts'
+import { ctrExecArgv } from './ctr-command.ts'
 import type { HelperDigestFiles } from './installed-helper-digest.ts'
 
 export interface TerminalLimits {
@@ -35,7 +36,8 @@ const SAFE_ENV = { PATH: '/usr/bin:/bin', LC_ALL: 'C', SYSTEMD_PAGER: '', SYSTEM
 const ACCOUNT_SHELL = ['/bin/bash', '--norc', '--noprofile', '--restricted'] as const
 const ROOT_SHELL = ['/bin/bash', '-l'] as const
 
-export type TerminalTarget = { kind: 'root' } | { kind: 'account'; account: Pick<Account, 'id' | 'username' | 'uid' | 'gid' | 'home'> }
+export type TerminalTarget = { kind: 'root' } | { kind: 'account'; account: Pick<Account, 'id' | 'username' | 'uid' | 'gid' | 'home'>; forkBombLimits?: boolean }
+  | { kind: 'container'; account: Pick<Account, 'id' | 'username' | 'uid' | 'gid' | 'home'>; containerId: string; shell: 'sh' | 'bash'; asRoot: boolean }
 export type TerminalEndReason = 'exit' | 'idle' | 'absolute' | 'closed' | 'revoked' | 'error'
 export interface TerminalLaunch { id: string; target: TerminalTarget; cols: number; rows: number; absoluteTimeoutMs: number }
 /** The one seam between session policy and the host: a real systemd PTY or a test fake. */
@@ -98,7 +100,7 @@ export class TerminalSessionManager {
     const id = randomUUID()
     const pty = this.#spawn({ id, target, cols: width, rows: height, absoluteTimeoutMs: limits.absoluteTimeoutMs })
     const session: Session = {
-      id, principalId, accountId: target.kind === 'account' ? target.account.id : null, startedAt: new Date(this.#now()), pty, buffered: [], bufferedBytes: 0, reader: null, readerAttached: false,
+      id, principalId, accountId: target.kind === 'root' ? null : target.account.id, startedAt: new Date(this.#now()), pty, buffered: [], bufferedBytes: 0, reader: null, readerAttached: false,
       tokens: limits.outputBurstBytes, refilledAt: this.#now(), rateHold: null, paused: false,
       idle: null, absolute: setTimeout(() => this.#end(session, 'absolute'), limits.absoluteTimeoutMs), exitGrace: null,
       ending: null, ended: false, exitCode: null,
@@ -256,12 +258,19 @@ export function buildTerminalSystemdArgv(launch: TerminalLaunch, helperPath = DE
   if (!isUuid(launch.id)) return fail('VALIDATION', 'terminal session id is invalid')
   const unit = `--unit=xpanel-terminal-${launch.id}`
   const tail = ['--setenv=TERM=xterm-256color', '--', helperPath, String(launch.cols), String(launch.rows)]
+  if (launch.target.kind === 'container') {
+    // Rootless: --user 0 is root inside the container's user namespace, which is the account outside it.
+    const { sandbox, command } = ctrExecArgv(launch.target.account, launch.target.containerId, launch.target.shell, launch.target.asRoot)
+    return [SYSTEMD_RUN, '--pipe', '--wait', '--collect', '--quiet', unit, ...limitProperties(launch), '--property', 'TasksMax=64', ...sandbox, ...tail, ...command]
+  }
   if (launch.target.kind === 'account') {
     // The jail prefix comes from the shared account sandbox; the probe command only marks where it ends.
     const skeleton = system.buildJailedFileOpArgv(launch.target.account, ['/usr/bin/id'])
     const prefix = skeleton.slice(0, skeleton.lastIndexOf('--'))
     if (prefix[0] !== SYSTEMD_RUN || !prefix.includes(`User=${launch.target.account.username}`) || !prefix.includes(`Slice=xpanel-${launch.target.account.uid}.slice`)) return fail('PRECONDITION_FAILED', 'the account terminal jail could not be built')
-    return [...prefix, unit, ...limitProperties(launch), '--property', 'TasksMax=64', ...tail, ...ACCOUNT_SHELL]
+    // No PAM session starts here, so the Shell Fork Bomb Protection limits travel as unit properties.
+    const shellLimits = launch.target.forkBombLimits ? system.forkBombSystemdLimits().flatMap(property => ['--property', property]) : []
+    return [...prefix, unit, ...limitProperties(launch), '--property', 'TasksMax=64', ...shellLimits, ...tail, ...ACCOUNT_SHELL]
   }
   return [SYSTEMD_RUN, '--pipe', '--wait', '--collect', '--quiet', unit, '--working-directory=/root', ...limitProperties(launch),
     '--setenv=HOME=/root', '--setenv=USER=root', '--setenv=LOGNAME=root', '--setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', ...tail, ...ROOT_SHELL]
@@ -302,7 +311,11 @@ export interface TerminalRouteDeps {
   /** Absent until the PTY helper is verified on this host: every request reports unavailable. */
   terminals: TerminalSessionManager | null
   store: { getAccount(id: string): Promise<Account | null>; getPlan(id: string): Promise<Plan | null> }
+  /** Shell Fork Bomb Protection is on: account terminals carry its limits. */
+  forkBombLimits?: () => Promise<boolean>
   assertRootCaller(caller: AgentCallerIdentity, target: string): Promise<void>
+  /** The account whose store holds this container, after the agent read it there. */
+  containerTerminal?: (username: string, id: string) => Promise<Pick<Account, 'id' | 'username' | 'uid' | 'gid' | 'home'>>
 }
 
 const SESSION_ROUTE = /^\/terminal\/sessions\/([0-9a-f-]{36})(?:\/(output|input|resize))?$/
@@ -333,7 +346,7 @@ export async function handleTerminalRoute(req: Request, url: URL, method: string
   if (open) {
     if (method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } })
     const body = await objectBody(req)
-    exactKeys(body, ['kind', 'cols', 'rows'])
+    exactKeys(body, ['kind', 'cols', 'rows', 'account', 'containerId', 'shell', 'asRoot'])
     let target: TerminalTarget
     if (body.kind === 'root') {
       await deps.assertRootCaller(caller, 'server:terminal')
@@ -343,7 +356,12 @@ export async function handleTerminalRoute(req: Request, url: URL, method: string
       const account = await deps.store.getAccount(caller.accountId) ?? fail('FORBIDDEN', 'account is not available', { stateChanged: false })
       const plan = await deps.store.getPlan(account.planId) ?? fail('FORBIDDEN', 'account plan is not available', { stateChanged: false })
       assertJailedShellAllowed(account, plan)
-      target = { kind: 'account', account }
+      target = { kind: 'account', account, forkBombLimits: await deps.forkBombLimits?.() === true }
+    } else if (body.kind === 'container') {
+      await deps.assertRootCaller(caller, 'server:terminal')
+      if (!deps.containerTerminal) return fail('PRECONDITION_FAILED', 'container terminals are unavailable on this host', { stateChanged: false })
+      if (typeof body.account !== 'string' || typeof body.containerId !== 'string' || (body.shell !== 'sh' && body.shell !== 'bash') || typeof body.asRoot !== 'boolean') return fail('VALIDATION', 'a container terminal needs an account, a container and a shell', { stateChanged: false })
+      target = { kind: 'container', account: await deps.containerTerminal(body.account, body.containerId), containerId: body.containerId, shell: body.shell, asRoot: body.asRoot }
     } else return fail('VALIDATION', 'terminal kind must be account or root', { stateChanged: false })
     return json({ session: terminals.open(caller.principalId, target, body.cols, body.rows) }, 201)
   }

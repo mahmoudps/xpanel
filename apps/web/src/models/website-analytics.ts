@@ -41,7 +41,8 @@ const parseTopEntries = (value: unknown): WebsiteTopEntry[] | null => {
     if (!row || typeof row.key !== 'string' || row.key.length === 0 || row.key.length > 2048) return null
     if (!suppliedCount(row.requests) || !suppliedCount(row.bytes)) return null
     if (row.errors5xx !== undefined && !suppliedCount(row.errors5xx)) return null
-    entries.push({ key: row.key, requests: row.requests, bytes: row.bytes, ...(row.errors5xx !== undefined ? { errors5xx: row.errors5xx } : {}) })
+    if (row.country !== undefined && (typeof row.country !== 'string' || !/^[A-Z]{2}$/.test(row.country))) return null
+    entries.push({ key: row.key, requests: row.requests, bytes: row.bytes, ...(row.errors5xx !== undefined ? { errors5xx: row.errors5xx } : {}), ...(row.country !== undefined ? { country: row.country } : {}) })
   }
   return entries
 }
@@ -84,7 +85,7 @@ export const parseWebsiteAnalyticsSnapshot = (
   return {
     domain: row.domain, accountId: row.accountId as string | null, at: row.at,
     totals: Object.fromEntries(totalKeys.map(key => [key, totals[key]])) as WebsiteAnalyticsSnapshot['totals'],
-    series, topPaths, topReferrers, topClientIps,
+    series, topPaths, topReferrers, topClientIps, ...(row.analog === 'off' ? { analog: 'off' as const } : {}),
   }
 }
 

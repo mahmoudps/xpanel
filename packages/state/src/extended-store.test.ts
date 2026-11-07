@@ -419,30 +419,7 @@ describe('ExtendedFeaturesStore', () => {
   describe('7. Fine-Grained Server Settings & Deferred Capabilities', () => {
     const accId = 'acc-ops-01'
 
-    it('manages server fine settings, rootless containers, 1-click apps with staging/live push, cluster nodes, legacy traffic stats, branding, i18n, and WHMCS', async () => {
-      const fine = await store.saveServerFineSettings({
-        maxMemoryPerProcessMb: 1024,
-        maxProcessesPerAccount: 80,
-        compilerGroupEnabled: false,
-        logRotationDays: 14,
-        logCompress: true,
-        mtaSmarthost: 'relay.mailgun.org:587',
-        mtaMaxMsgSizeMb: 75,
-        mtaRateLimitPerHour: 1000,
-        mtaRblList: ['zen.spamhaus.org'],
-        mtaGreylisting: true,
-        webStack: {
-          http3Quic: true,
-          brotli: true,
-          wafOwaspCrs: true,
-          installedPhpVersions: ['8.1', '8.2', '8.3', '8.4'],
-          installedRuntimes: ['nodejs-22', 'python-3.12', 'go-1.23'],
-        },
-        installedPackages: ['git', 'redis-tools', 'ffmpeg'],
-      })
-      expect(fine.maxMemoryPerProcessMb).toBe(1024)
-      expect((await store.getServerFineSettings()).mtaSmarthost).toBe('relay.mailgun.org:587')
-
+    it('manages rootless containers, 1-click apps with staging/live push, cluster nodes, legacy traffic stats, branding, i18n, and WHMCS', async () => {
       const container = await store.saveContainer(accId, {
         name: 'meilisearch-prod',
         image: 'getmeili/meilisearch:v1.10',

@@ -4,6 +4,7 @@ import {
   assertAcl,
   assertCanSeeAccount,
   changePlanImpact,
+  effectivePlan,
   fail,
   isXpanelError,
   sliceUnit,
@@ -1017,7 +1018,8 @@ export class AccountLifecycleCoordinator {
       this.computeAccountUsage(account.id, opts.usageOverrides),
     ])
 
-    const oldPlan = currentPlan ?? fail('NOT_FOUND', `current plan ${account.planId} not found`)
+    // the account's current limits include its own overrides
+    const oldPlan = effectivePlan(currentPlan ?? fail('NOT_FOUND', `current plan ${account.planId} not found`), account)
     const newPlan = targetPlan ?? fail('NOT_FOUND', `target plan ${newPlanId} not found`)
 
     if (newPlan.ownerId !== null && newPlan.ownerId !== account.ownerId) {
@@ -1031,8 +1033,9 @@ export class AccountLifecycleCoordinator {
     if (account.ownerId !== null) {
       const reseller = await this.store.getReseller(account.ownerId)
       const usageSummary = await this.store.resellerUsage(account.ownerId)
-      if (reseller && !reseller.oversell) {
+      if (reseller) {
         if (
+          !reseller.oversell.disk &&
           reseller.totalDiskMb !== 'unlimited' &&
           (newPlan.resources.diskMb === 'unlimited' ||
             usageSummary.diskMb === 'unlimited' ||
@@ -1043,6 +1046,7 @@ export class AccountLifecycleCoordinator {
           resellerFits = false
         }
         if (
+          !reseller.oversell.bandwidth &&
           reseller.totalBandwidthMb !== 'unlimited' &&
           (newPlan.resources.bandwidthMbMonth === 'unlimited' ||
             usageSummary.bandwidthMb === 'unlimited' ||
@@ -1340,7 +1344,7 @@ export class AccountLifecycleCoordinator {
 
     await this.authorizeResellerOrRoot(input.actor, 'suspend-account', existing.ownerId)
 
-    const active = await this.store.unsuspendAccount(existing.id)
+    const active = await this.store.unsuspendAccount(existing.id, { allowLocked: input.actor.kind === 'root' })
     const effects = suspensionEffects(active)
 
     const principal = await findPrincipalByAccountId(this.db, active.id)

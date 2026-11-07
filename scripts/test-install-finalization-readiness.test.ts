@@ -187,10 +187,10 @@ const tlsCaptureDeclaration = (() => {
   return tail.slice(0, end.index + end[0].length).replace(/^export /, '')
 })()
 const tlsCapture = (state: () => unknown, servedReady: (...args: unknown[]) => Promise<unknown>) => new Function(
-  'readManagementTlsReadiness', 'validateConfig', 'readRootFile', 'PATHS', 'servedReady', 'fail',
+  'readManagementTlsReadiness', 'validateConfig', 'readRootFile', 'PATHS', 'servedReady', 'fail', 'withAccess', 'readAccess',
   tlsCaptureDeclaration + '\nreturn captureManagementTlsReadiness'
 )(state, (value: unknown) => value, () => ({ bytes: Buffer.from('{}') }), { config: '/fixed/config' }, servedReady,
-  (code: string) => { throw Object.assign(new Error(code), { code }) })
+  (code: string) => { throw Object.assign(new Error(code), { code }) }, (value: unknown) => value, () => null)
 
 describe('readonly TLS capture sequencing (isolated, no HTTP or CA)', () => {
   it('waits for the entire configured HTTPS check before returning a capture', async () => {

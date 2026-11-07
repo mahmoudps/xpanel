@@ -15,12 +15,12 @@ const settings: ServerSettings = {
   backendPort: 8080, backendTlsPort: 8444,
 }
 const pages = [
-  { route: '/whm/domains', marker: 'data-whm-domains-workspace', cards: ['domain-list', 'default-site', 'name-resolution'] },
-  { route: '/whm/ssl', marker: 'data-whm-ssl', cards: ['ssl-certificates', 'ssl-renewal-queue', 'ssl-renewal-log', 'autossl', 'panel-certificate'] },
-  { route: '/whm/security/ssh', marker: 'data-whm-ssh-keys', cards: ['ssh-signin', 'ssh-keys', 'ssh-effective', 'ssh-failures', 'ssh-autoban', 'ssh-banned'] },
-  { route: '/whm/security', marker: 'data-whm-security-evidence', cards: ['security-evidence', 'panel-access', 'panel-lockout', 'panel-ip-lockout', 'panel-tokens', 'panel-mfa', 'panel-waf', 'panel-dangerous-php', 'panel-compiler', 'panel-apply'] },
-  { route: '/whm/software/php', marker: 'data-whm-php-workspace', cards: ['php-versions', 'php-install', 'php-handlers', 'php-extensions', 'php-configure', 'php-functions'] },
-  { route: '/whm/services/web', marker: 'data-whm-web-readback', cards: ['web-flow', 'web-stack', 'web-comparison', 'web-backend', 'web-proxy', 'web-test-gate', 'web-pending', 'web-generations'] },
+  { route: '/whm/domains', marker: 'data-whm-domains-workspace', cards: ['domain-list', 'server-ops-domain-forwards', 'default-site', 'name-resolution'] },
+  { route: '/whm/ssl', marker: 'data-whm-ssl', cards: ['ssl-certificates', 'ssl-renewal-queue', 'ssl-renewal-log', 'ssl-storage', 'autossl', 'panel-certificate'] },
+  { route: '/whm/security/ssh', marker: 'data-whm-ssh-keys', cards: ['ssh-signin', 'ssh-service', 'ssh-alarm', 'ssh-keys', 'ssh-effective', 'ssh-failures', 'ssh-autoban', 'ssh-banned'] },
+  { route: '/whm/security', marker: 'data-whm-security-evidence', cards: ['security-evidence', 'panel-access', 'panel-lockout', 'panel-ip-lockout', 'panel-passwords', 'panel-tokens', 'panel-mfa', 'panel-waf', 'panel-dangerous-php', 'panel-compiler', 'panel-apply'] },
+  { route: '/whm/software/php', marker: 'data-whm-php-workspace', cards: ['php-versions', 'php-install', 'php-handlers', 'php-extensions', 'php-configure', 'php-functions', 'host-tool-php-guardian'] },
+  { route: '/whm/services/web', marker: 'data-whm-web-readback', cards: ['web-flow', 'web-stack', 'web-directives', 'web-comparison', 'web-backend', 'web-proxy', 'web-test-gate', 'web-pending', 'web-generations'] },
   { route: '/whm/transfers', marker: 'data-transfer-workspace', cards: ['transfer-source', 'transfer-identities', 'transfer-progress', 'transfer-import', 'transfer-plans'] },
 ]
 const documentFor = (html: string): Document => new DOMParser().parseFromString(html, 'text/html')
@@ -83,7 +83,7 @@ describe.each(pages)('saved-workspace mount $route', ({ route, marker, cards }) 
         expect(html).toMatch(/data-ssl-observations-refresh disabled/)
         expect(html).toMatch(/name="autossl-enabled"[^>]*disabled/)
       }
-      if (route === '/whm/security/ssh') { expect(count(html, 'data-server-settings-form')).toBe(1); expect(html).toMatch(/name="sshPort"[^>]*value="2222"/); expect(html).toContain('data-whm-ssh-manage="true"') }
+      if (route === '/whm/security/ssh') { expect(count(html, 'data-whm-ssh-policy')).toBe(1); expect(html).toMatch(/data-whm-ssh-port[^>]*value="2222"/); expect(html).toContain('data-whm-ssh-can-manage="true"'); expect(html).toContain('data-whm-ssh-manage="true"') }
       if (route === '/whm/security') expect(html).toContain(locale === 'en' ? 'Enrollment is optional.' : 'التسجيل اختياري.')
       if (route === '/whm/software/php') { expect(html).toContain('data-php-can-read="true"'); expect(html).toMatch(/name="php-install-request"[^>]*disabled/); expect(html).toMatch(/name="php-ini"[^>]*disabled/) }
       if (route === '/whm/services/web') {

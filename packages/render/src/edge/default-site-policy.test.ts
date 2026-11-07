@@ -11,6 +11,18 @@ describe('explicit default-site policy at the real Nginx renderer', () => {
     expect(proof.defaultCatchall.returns404).toBe(true)
     expect(proof.defaultCatchall).not.toHaveProperty('fixedRedirect')
   })
+  it('serves a chosen site through its own backend vhost with a fixed Host and sanitized headers', () => {
+    const source = { ...settings(), defaultSite: { response: 'site' as const, redirectTo: null, site: 'alpha.example.test', refuseHttps: false } }
+    const file = defaultSiteFile(debianOs, { settings: source })
+    expect(file.content).toContain(`proxy_pass http://127.0.0.1:${source.backendPort};`)
+    expect(file.content).toContain('proxy_set_header Host alpha.example.test;')
+    expect(file.content).not.toContain('proxy_set_header Host $host;')
+    expect(file.content).not.toContain('proxy_cache')
+    expect(file.content).toContain('/.well-known/acme-challenge/')
+    expect(file.content).not.toContain('return 404;')
+    expect(file.content).not.toContain('/home')
+    expect(verifyNginxEdgeIsolation(account(), [domain()], source, debianOs).defaultCatchall).toMatchObject({ returns404: false, fixedSite: 'alpha.example.test', noProxyPass: false, defaultServer80: true, defaultServer443: true })
+  })
   it('renders only an explicit fixed302 target while preserving ACME, log and zero-home/no-proxy boundaries', () => {
     const source = { ...settings(), defaultSite: { response: 'redirect' as const, redirectTo: 'https://landing.example.test/path?q=1', refuseHttps: false } }
     const file = defaultSiteFile(debianOs, { settings: source })

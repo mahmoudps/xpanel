@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { posix } from 'node:path'
-import { fail, isXpanelError } from '@xpanel/core'
+import { fail, isXpanelError, servedDocRoot } from '@xpanel/core'
 import type { Account, Domain, ServerSettings } from '@xpanel/core'
 import { extended } from '@xpanel/render'
 import type { FileEntry, FileText, JailedFileManager } from './file-manager.ts'
@@ -103,7 +103,7 @@ export const directoryPrivacyRevision = (accountId: string, path: string, state:
 /** Account-relative document roots of the active file-backed sites; Apache serves only these trees. */
 export function directoryPrivacyRoots(account: Pick<Account, 'id' | 'home'>, domains: readonly Domain[]): { domain: string; path: string }[] {
   return domains.filter(domain => domain.accountId === account.id && domain.kind !== 'alias' && !domain.suspended && (domain.siteType === 'php' || domain.siteType === 'static'))
-    .flatMap(domain => { const rel = posix.relative(account.home, domain.docRoot); return rel && !rel.startsWith('..') && !posix.isAbsolute(rel) ? [{ domain: domain.name, path: rel }] : [] })
+    .flatMap(domain => { const rel = posix.relative(account.home, servedDocRoot(domain)); return rel && !rel.startsWith('..') && !posix.isAbsolute(rel) ? [{ domain: domain.name, path: rel }] : [] })
     .sort((left, right) => right.path.length - left.path.length || left.domain.localeCompare(right.domain))
 }
 const servedAt = (roots: readonly { domain: string; path: string }[], path: string): DirectoryPrivacyDirectory['url'] => {
@@ -123,8 +123,7 @@ function project(account: Pick<Account, 'id' | 'username' | 'home'>, roots: read
     else { enabled = true; authName = name!; directives = lines }
   }
   // Require lines at the same level combine as RequireAny, so other access rules could open the folder.
-  const accessLine = document.accessRules || (document.blocks.get('ip-blocker')?.start ?? -1) + 1
-  if (!conflict && accessLine) conflict = { code: 'access_rules_present', line: accessLine }
+  if (!conflict && document.accessRules) conflict = { code: 'access_rules_present', line: document.accessRules }
   const entries = state.passwd ? extended.parseHtpasswd(state.passwd.content) : []
   if (!conflict && entries === null) conflict = { code: 'passwd_unrecognized' }
   const url = servedAt(roots, path)
@@ -151,6 +150,19 @@ async function protectedFolders(files: DirectoryPrivacyFiles): Promise<string[]>
   }
   if (found.length > DIRECTORY_PRIVACY_MAX_DIRECTORIES) return fail('LIMIT_EXCEEDED', `more than ${DIRECTORY_PRIVACY_MAX_DIRECTORIES} protected folders`, unchanged)
   return found.sort()
+}
+
+/** A home move carries the files, but `.htaccess` names the password file by its full path. */
+export async function moveDirectoryPrivacyHome(files: DirectoryPrivacyFiles, from: string, to: string): Promise<number> {
+  let rewritten = 0
+  for (const folder of await protectedFolders(files)) {
+    const path = folder + '/.htaccess'
+    const current = await files.readText(path).catch(() => null)
+    if (current === null || !current.content.includes(`AuthUserFile "${from}/`)) continue
+    await files.writeTextChecked(path, current.content.replaceAll(`AuthUserFile "${from}/`, `AuthUserFile "${to}/`), current)
+    rewritten++
+  }
+  return rewritten
 }
 
 export interface DirectoryPrivacyInput {

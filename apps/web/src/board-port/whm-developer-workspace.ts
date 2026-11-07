@@ -13,8 +13,9 @@ export function renderWhmDeveloperWorkspace(input: { locale: Locale; canRead: bo
   const prefix = 'developer-' + surface, off = input.canRead ? '' : ' disabled'
   const field = (key: string, message: string): string => `<div class="xp-dev__field"><dt>${t(message)}</dt><dd data-dev-fact="${key}">${t('Not read')}</dd></div>`
   const pending = surface === 'integrations'
-    ? [msgid('Billing and WHMCS'), msgid('Cloudflare and external DNS'), msgid('Backup storage and SMTP relay'), msgid('Notification delivery'), msgid('Signed webhooks')]
-    : [msgid('Hooks and callbacks'), msgid('Registered applications'), msgid('Plugin generator'), msgid('Metrics export and debug tools')]
+    ? [msgid('Billing and WHMCS'), msgid('Cloudflare and external DNS'), msgid('Backup storage and SMTP relay')]
+    : surface === 'account' ? [msgid('Hooks and callbacks'), msgid('Registered applications'), msgid('Plugin generator')]
+      : []
   return `${styles}<section class="xp-dev" data-developer-workspace data-developer-surface="${surface}" data-developer-enabled="${input.canRead}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${classicWhmClientTemplates('developer')}
   <div class="xp-dev__layout"><div class="xp-dev__column">
     <section class="xp-dev__card" aria-labelledby="${prefix}-request"><h2 id="${prefix}-request">${surface === 'integrations' ? t('Inspect this integration') : t('API request explorer')}</h2>
@@ -31,6 +32,6 @@ export function renderWhmDeveloperWorkspace(input: { locale: Locale; canRead: bo
       <div class="xp-dev__actions"><button type="button" class="xp-btn" data-dev-copy disabled>${t('Copy reviewed response')}</button></div><p data-dev-copy-status role="status" hidden></p>
     </section>
   </div><aside class="xp-dev__column"><section class="xp-dev__card"><h2>${t('Current authority')}</h2><p>${t('The account and principal come from this session. Every selected read repeats its normal API authentication and permissions. API tokens cannot operate this console.')}</p>${surface === 'integrations' ? `<a class="xp-btn" href="/whm/panel/api-tokens${input.locale === SOURCE_LOCALE ? '' : '?lang=' + input.locale}">${t('Manage your API tokens')}</a>` : ''}</section>
-    <section class="xp-dev__card"><h2>${t('Additional capabilities')}</h2><p>${t('These providers are not connected. No remote service or callback has been contacted or verified.')}</p><div class="xp-dev__group">${pending.map(label => `<div class="xp-dev__field"><h3>${t(label)}</h3><p>${t('Unavailable')}</p><div class="xp-dev__actions"><button class="xp-btn" type="button" disabled>${t(msgctxt('whm-developer-workspace', 'Configure'))}</button></div></div>`).join('')}</div></section>
+    ${pending.length ? `<section class="xp-dev__card"><h2>${t('Additional capabilities')}</h2><p>${t('These providers are not connected. No remote service or callback has been contacted or verified.')}</p><div class="xp-dev__group">${pending.map(label => `<div class="xp-dev__field"><h3>${t(label)}</h3><p>${t('Unavailable')}</p></div>`).join('')}</div></section>` : ''}
   </aside></div></section>`
 }

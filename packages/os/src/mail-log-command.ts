@@ -1,7 +1,7 @@
 /** Reviewed read-only journal grammar for Postfix delivery events. No caller-chosen flag, unit, path or field. */
 export const JOURNALCTL = '/usr/bin/journalctl'
 /** journalctl(1) -t matches SYSLOG_IDENTIFIER and may be repeated; Postfix daemons log as postfix/<service>. */
-export const MAIL_LOG_IDENTIFIERS = ['postfix/smtp', 'postfix/lmtp', 'postfix/local', 'postfix/qmgr', 'postfix/smtpd', 'postfix/cleanup', 'postfix/bounce', 'postfix/error', 'postfix/virtual', 'postfix/pipe'] as const
+export const MAIL_LOG_IDENTIFIERS = ['postfix/smtp', 'postfix/lmtp', 'postfix/local', 'postfix/qmgr', 'postfix/smtpd', 'postfix/cleanup', 'postfix/bounce', 'postfix/error', 'postfix/virtual', 'postfix/pipe', 'rspamd', 'spamd'] as const
 // journalctl(1) --output-fields: json still prints __CURSOR, __REALTIME_TIMESTAMP, __MONOTONIC_TIMESTAMP and _BOOT_ID; this keeps 20000 records near 12 MiB.
 // _EXE is a journald trusted field (systemd.journal-fields(7)); SYSLOG_IDENTIFIER is message text any local user can set with logger(1).
 export const MAIL_LOG_OUTPUT_FIELDS = '--output-fields=MESSAGE,SYSLOG_IDENTIFIER,_EXE'

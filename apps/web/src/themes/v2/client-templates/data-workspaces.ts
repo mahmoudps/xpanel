@@ -6,7 +6,7 @@ const action = (slot: string, label: string): string => `<button type="button" c
 const fact = (name: string): string => `<template data-xp-template="${name}"><div class="v2-db-fact"><dt data-xp-slot="label"></dt><dd><bdi dir="ltr" data-xp-slot="value"></bdi></dd></div></template>`
 
 export function databaseWorkspaceTemplates(t: (message: string) => string): string {
- return row('database-row', value('name',true)+value('size')+value('tables')+value('users',true)+value('collation')+value('last-write')+`<td><div class="v2-db-actions">${action('rename',t(msgctxt('database-workspace-client','Rename')))}${action('trash',t('Move to trash'))}</div></td>`)
+ return row('database-row', value('name',true)+value('size')+value('tables')+value('users',true)+value('collation')+value('last-write')+`<td><div class="v2-db-actions">${action('rename',t(msgctxt('database-workspace-client','Rename')))}${action('export',t('Export'))}${action('import',t('Import'))}${action('trash',t('Move to trash'))}</div></td>`)
   + row('database-user-row',value('name',true)+value('grants',true)+value('last-connection')+`<td><div class="v2-db-actions">${action('privileges',t('Privileges'))}${action('password',t('Change password'))}${action('delete',t('Delete'))}</div></td>`)
   + row('database-trash-row',value('name',true)+'<td><bdi dir="ltr" class="v2-mono"><time data-xp-slot="trashed"></time></bdi></td>'+value('retention')+`<td><div class="v2-db-actions">${action('restore',t('Restore'))}${action('drop',t(msgctxt('database-workspace-client','Drop permanently')))}</div></td>`)
   + empty('database-empty',7)+empty('database-user-empty',4)+empty('database-trash-empty',4)+fact('database-fact')+'<template data-xp-template="database-token"><bdi dir="ltr" class="v2-mono" data-xp-slot="value"></bdi></template>'
@@ -53,6 +53,7 @@ export function whmDatabaseTemplates(): string {
   +row('whm-db-users-row',value('user',true)+value('host',true)+value('account',true)+value('grants',true)+value('role')+`<td data-xp-slot="drift"></td>`)+empty('whm-db-users-empty',6)
   +row('whm-db-processes-row',value('connection',true)+value('user',true)+value('account',true)+value('host',true)+value('database',true)+value('command',true)+value('seconds',true)+value('state',true)+'<td data-xp-slot="actions"></td>')+empty('whm-db-processes-empty',9)
   +row('whm-db-engines-row',value('engine',true)+value('state')+value('unit',true)+value('version',true)+value('databases',true))+empty('whm-db-engines-empty',5)
+  +row('whm-db-maintenance-row',value('table',true)+value('engine',true)+value('result')+value('message'))+empty('whm-db-maintenance-empty',4)
   +'<template data-xp-template="whm-db-kill">'+action('label','')+'</template>'
   + [['in-sync','v2-pill v2-pill--ok'],['saved-only','v2-pill v2-pill--warn'],['server-only','v2-pill v2-pill--warn'],['system','v2-pill v2-pill--neutral'],['unverified','v2-pill v2-pill--neutral']].map(([state,classes])=>`<template data-xp-template="whm-db-drift-${state}"><span class="${classes}"><span class="v2-pill__dot" aria-hidden="true"></span><span data-xp-slot="label"></span></span></template>`).join('')
 }

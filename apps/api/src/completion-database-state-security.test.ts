@@ -133,7 +133,7 @@ describe('recoverable database state API with isolated SQLite and saved configur
     expect((await f.state.store.getDatabase(f.ownDb.id))!.trashedAt).not.toBeNull()
     expect((await dbApi.listAudit(f.database.db)).filter(row=>row.action==='database.trashed')).toHaveLength(0)
   })
-  it('restores the exact database file when a write fails before commit',async()=>{
+  it('restores the exact database file when a write fails before commit',{ tags: ['slow'] }, async()=>{
     const mutable=f.state.store as unknown as {writeStateJson:(...args:unknown[])=>Promise<void>}
     const original=mutable.writeStateJson.bind(mutable),before=await f.images()
     vi.spyOn(mutable,'writeStateJson').mockImplementationOnce(async(...args)=>{await original(...args);throw new Error('synthetic precommit write failure')})

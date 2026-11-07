@@ -26,6 +26,7 @@ vi.mock('../../web/src/index.ts', async importOriginal => {
 vi.mock('./host-catalog.ts', async () => {
   const { tools } = await import('@xpanel/catalog')
   return {
+    qualificationModeOn: () => false,
     loadQualifiedCatalog: async () => tools.map(tool => ({
       ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const },
     })),
@@ -65,7 +66,7 @@ describe('approved workspace hydration projection', () => {
   }
   const seedWorkspace = async (acl: ResellerAcl[] = ['list-accounts', 'manage-feature-lists']) => {
     await state.store.saveServerSettings(settings)
-    const resellerInput = { passwordHash: PUBLIC_VECTOR, maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] }
+    const resellerInput = { passwordHash: PUBLIC_VECTOR, maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
     const owner = await state.store.createReseller({ ...resellerInput, username: 'projectionowner', acl })
     const foreign = await state.store.createReseller({ ...resellerInput, username: 'projectionother', acl: ['list-accounts'] })
     const defaultFeatures = await state.store.createFeatureList({ name: 'Default projection features', ownerId: null, disabled: ['terminal'] })

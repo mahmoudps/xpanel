@@ -38,7 +38,7 @@ export async function requestContactPreferences(transport:(method:string,path:st
   return transport(method,'/api/account/preferences',body)
 }
 
-export function createAccountContactWorkspace(options:{accountId:string;request:(method:'GET'|'PATCH',body?:unknown)=>Promise<unknown>;changed?:(state:ContactWorkspaceState)=>void}) {
+export function createAccountContactWorkspace(options:{accountId:string;password?:()=>string;request:(method:'GET'|'PATCH',body?:unknown)=>Promise<unknown>;changed?:(state:ContactWorkspaceState)=>void}) {
   const state:ContactWorkspaceState={baseline:null,observed:null,draft:'',dirty:false,busy:false,reading:false,uncertain:false,status:'unread',message:''}
   let generation=0,editGeneration=0
   const publish=()=>options.changed?.({...state})
@@ -82,7 +82,7 @@ export function createAccountContactWorkspace(options:{accountId:string;request:
         state.observed=fresh
         if(fresh.revision!==baseline.revision||fresh.contactEmail!==baseline.contactEmail){status('stale','changed_elsewhere');return}
         dispatched=true
-        const accepted=readContactSnapshot(await options.request('PATCH',{contactEmail:raw,expectedRevision:baseline.revision}),options.accountId,true)
+        const accepted=readContactSnapshot(await options.request('PATCH',{contactEmail:raw,expectedRevision:baseline.revision,currentPassword:options.password?.()}),options.accountId,true)
         if(accepted.contactEmail!==intended)throw new Error('acknowledgement_mismatch')
         const observed=await snapshot();if(token!==generation)return
         if(observed.revision!==accepted.revision||observed.contactEmail!==accepted.contactEmail)throw new Error('readback_mismatch')
@@ -106,12 +106,16 @@ function bindAccountContact(askDialog:(options:Record<string,unknown>)=>Promise<
     const blocked=()=>!!root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
     const canManage=()=>root.dataset.contactManage==='true'&&!blocked()
     const messages:Record<ContactStatus,string>={unread:t('Saved contact details have not been read.'),reading:t('Reading saved contact details…'),read:t('Saved contact details read.'),stale:t('Saved details changed. Your draft is preserved. Reload explicitly before saving.'),saving:t('Saving contact email…'),saved:t('Contact email saved and read back.'),failed:t('Could not complete the request. Your draft is preserved.'),uncertain:t('The save outcome is unknown. Your draft is preserved. Reload saved details to review before another save.')}
-    const workspace=createAccountContactWorkspace({accountId,async request(method,body){
+    const password=root.querySelector<HTMLInputElement>('[name=currentPassword]')
+    const workspace=createAccountContactWorkspace({accountId,password:()=>password?.value??'',async request(method,body){
       if(!request)throw new Error('session_request_unavailable')
       return requestContactPreferences(request,canManage,method,body)
     },changed(state){
       if(saved){const value=document.createElement('bdi');value.textContent=state.observed?(state.observed.contactEmail||t('Not set')):t(msgctxt('account-contact-client', 'Not read'));value.dir=state.observed?.contactEmail?'ltr':'auto';saved.replaceChildren(value)}
+      if(password&&state.status==='saved')password.value=''
+      if(password)password.disabled=!canManage()||state.busy||state.uncertain||!state.baseline
       if(input){if(input.value!==state.draft)input.value=state.draft;input.disabled=!canManage()||state.busy||state.uncertain||!state.baseline}
+      if(password)password.disabled=!canManage()||state.busy||state.uncertain||!state.baseline
       if(refresh)refresh.disabled=blocked()||state.busy
       if(reload)reload.disabled=!canManage()||state.busy
       if(save)save.disabled=!canManage()||state.busy||state.reading||state.uncertain||!state.baseline||!state.dirty

@@ -113,10 +113,10 @@ export function calendarPlaceEvents<T>(entries: readonly { item: T; span: Calend
   }
   return days
 }
-/** Sealed calendar envelope: the session mailbox, stored-record application only, and no unknown outcome. */
+/** Sealed calendar envelope: the session mailbox, the DAV store, and no unknown outcome. */
 export function calendarViewContext(value: unknown, mailbox: string): Record<string, unknown> {
   const object = (item: unknown): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item)
-  if (!object(value) || !object(value.context) || value.context.mailbox !== mailbox || !object(value.application) || value.application.nativeApplied !== false || value.application.syncVerified !== false) throw new Error('calendar_context_mismatch')
+  if (!object(value) || !object(value.context) || value.context.mailbox !== mailbox || !object(value.application) || value.application.nativeApplied !== true || value.application.syncVerified !== false) throw new Error('calendar_context_mismatch')
   if (value.unknownOutcome === true || value.verificationRequired === true || object(value.details) && (value.details.unknownOutcome === true || value.details.verificationRequired === true)) throw new Error('calendar_unknown_ack')
   return value
 }
@@ -129,7 +129,7 @@ export function readCalendarViewCalendar(value: unknown, mailbox: string): Calen
   const instant = (item: unknown): item is string => typeof item === 'string' && Number.isFinite(Date.parse(item))
   if (!object(value) || typeof value.id !== 'string' || !id.test(value.id) || !email(value.owner) || !safe(value.name, 200) || !value.name.trim() || !safe(value.color, 80) || !safe(value.timezone, 100)
     || typeof value.revision !== 'string' || !/^[0-9a-f]{64}$/.test(value.revision) || typeof value.canWrite !== 'boolean' || typeof value.canManage !== 'boolean' || !instant(value.createdAt)
-    || !Array.isArray(value.events) || value.events.length > 10000 || !Array.isArray(value.shares) || value.shares.length > 1000 || typeof value.storedBytes !== 'number' || !Number.isSafeInteger(value.storedBytes) || value.storedBytes < 1) throw new Error('invalid_calendar')
+    || !Array.isArray(value.events) || value.events.length > 50000 || !Array.isArray(value.shares) || value.shares.length > 1000 || typeof value.storedBytes !== 'number' || !Number.isSafeInteger(value.storedBytes) || value.storedBytes < 1) throw new Error('invalid_calendar')
   // Only the session mailbox owns and manages; share details are disclosed to the owner alone.
   if (value.canManage !== (value.owner.toLowerCase() === mailbox.toLowerCase()) || value.canManage && !value.canWrite || !value.canManage && value.shares.length) throw new Error('invalid_calendar_scope')
   const events = value.events.map(raw => {
@@ -434,8 +434,8 @@ function bindMailCalendarView(askDialog: ((options: Record<string, unknown>) => 
         if ((dirty() || review) && !await confirm(t('Discard edits and read calendars?'), t('Unsaved edits are discarded only after a successful authorized read. A previous write is never retried.'), true)) return
         announce('reading', t('Reading saved calendar records…'))
         install(readCalendarViewWorkspace(await request('GET', '/api/webmail/calendars'), mailbox))
-        announce('read', t('Saved calendars read. Device synchronization remains unverified.'))
-      } catch { announce(review ? 'uncertain' : 'failed', t('Calendars could not be read. Your edits are kept and no change was sent.')) }
+        announce('read', t('Calendars read.'))
+      } catch (error) { announce(review ? 'uncertain' : 'failed', (error as { details?: { reason?: unknown } } | null)?.details?.reason === 'dav_store_too_large' ? t('This mailbox’s calendars and contacts are too large to open here. Nothing was changed, and your devices still have them.') : t('Calendars could not be read. Your edits are kept and no change was sent.')) }
       finally { busy = false; lock() }
     }
     const mutate = async (method: 'POST' | 'PATCH' | 'DELETE', target: CalendarViewCalendar, eventId: string | null, body: Record<string, string>): Promise<void> => {
@@ -463,7 +463,7 @@ function bindMailCalendarView(askDialog: ((options: Record<string, unknown>) => 
         install(observed)
         if (method === 'DELETE') openAgenda(focus)
         else { const key = acknowledged.id + ':' + changed, saved = lookup(key), span = saved ? spanOf(saved) : null; if (span) move(span.startDay); openEvent(key) }
-        announce(method === 'DELETE' ? 'deleted' : 'saved', method === 'DELETE' ? t('Event deleted and calendars read back. Device synchronization remains unverified.') : t('Event saved and read back. Device synchronization remains unverified.'))
+        announce(method === 'DELETE' ? 'deleted' : 'saved', method === 'DELETE' ? t('Event deleted and calendars read back. Devices receive the change on their next sync.') : t('Event saved and read back. Devices receive it on their next sync.'))
       } catch (error) {
         const failure = object(error) ? error : {}, detail = object(failure.details) ? failure.details : {}
         const noChange = detail.stateChanged === false || failure.stateChanged === false || typeof failure.status === 'number' && [400, 401, 403, 404, 412, 413, 422].includes(failure.status) && detail.stateChanged !== true && detail.unknownOutcome !== true && detail.verificationRequired !== true
@@ -506,7 +506,7 @@ function bindMailCalendarView(askDialog: ((options: Record<string, unknown>) => 
     button('delete').addEventListener('click', () => {
       const entry = panel?.kind === 'event' ? lookup(panel.key) : null
       if (button('delete').disabled || !entry?.calendar.canWrite) return
-      void confirm(t('Delete this event?'), entry.event.summary + '\n' + t('The saved event is removed from this calendar and the calendars are read back. Device synchronization remains unverified.'), true)
+      void confirm(t('Delete this event?'), entry.event.summary + '\n' + t('The event is removed from this calendar and from your devices on their next sync.'), true)
         .then(accepted => { if (accepted) return mutate('DELETE', entry.calendar, entry.event.id, { expectedRevision: entry.calendar.revision }) })
     })
     button('save').addEventListener('click', () => {

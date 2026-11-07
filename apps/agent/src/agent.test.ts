@@ -144,7 +144,7 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
     return { plan, account, fl }
   }
 
-  it('compiles desired state, renders symlink protection, jailshell, custom userdata includes, and multi-IP Postfix outbound transports', async () => {
+  it('compiles desired state, renders symlink protection, jailshell, custom userdata includes, and multi-IP Postfix outbound transports', { tags: ['slow'] }, async () => {
     const { account } = await seedServerAndAccount('jailed')
     const domains = await stateHandle.store.listDomains({ accountId: account.id })
     const primaryDomain = domains[0]!
@@ -226,7 +226,7 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
     assert.equal(noopRes.status, 'noop')
   })
 
-  it('renders a root-granted function exception into the account pool and keeps the rest disabled', async () => {
+  it('renders a root-granted function exception into the account pool and keeps the rest disabled', { tags: ['slow'] }, async () => {
     const { account } = await seedServerAndAccount('jailed')
     const settings = (await stateHandle.store.getServerSettings())!
     await stateHandle.store.saveServerSettings({ ...settings, phpFunctionExceptions: [{ account: account.username, functions: ['proc_open'], reason: 'queue worker', grantedAt: '2026-10-29T00:00:00.000Z', grantedBy: 'root' }] })
@@ -238,7 +238,7 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
     assert.equal(disabled.includes('exec'), true)
   })
 
-  it('moves running pools to the new socket root: daemon-reload, restart each FPM unit, then reload the web servers', async () => {
+  it('moves running pools to the new socket root: daemon-reload, restart each FPM unit, then reload the web servers', { tags: ['slow'] }, async () => {
     const { account } = await seedServerAndAccount('jailed')
     const reconciler = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os, onEvent: () => {} })
     assert.equal((await reconciler.reconcile({ actor: 'root' })).status, 'applied')
@@ -261,7 +261,7 @@ describe('@xpanel/agent — HostReconciler, JailedFileManager, IO/Website Analyt
     for (const reload of reloads) assert.ok(restart < reload, 'web servers reload only after the pool listens on the new socket')
   })
 
-  it('rolls back staged files and records failed generation when a service config test fails', async () => {
+  it('rolls back staged files and records failed generation when a service config test fails', { tags: ['slow'] }, async () => {
     await seedServerAndAccount('jailed')
     const reconciler = new HostReconciler({
       store: stateHandle.store,

@@ -17,6 +17,7 @@ import type { TestStateStoreHandle } from '@xpanel/state'
 import { hashPasswordArgon2id, sealTotpSecret, sha256Hex } from './auth.ts'
 import { policyForRequest } from './authorization.ts'
 import { entryPointAllowsApiRoute } from './entry-points.ts'
+import { createMemoryDav } from './mail/dav-testkit.ts'
 import { createApiApp } from './server.ts'
 import type { ApiApp } from './server.ts'
 
@@ -93,7 +94,7 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       maxAccounts: 10,
       totalDiskMb: 50000,
       totalBandwidthMb: 500000,
-      oversell: false,
+      oversell: { disk: false, bandwidth: false },
       nameservers: ['ns1.reseller.test'],
       delegatedIps: ['192.0.2.10'],
     })
@@ -111,7 +112,7 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       maxAccounts: 10,
       totalDiskMb: 50000,
       totalBandwidthMb: 500000,
-      oversell: false,
+      oversell: { disk: false, bandwidth: false },
       nameservers: [],
       delegatedIps: [],
     })
@@ -228,7 +229,7 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       ftpDir: 'public_html',
     })
 
-    app = createApiApp({ db: db.db, store: state.store, serverSecret: SERVER_SECRET })
+    app = createApiApp({ db: db.db, store: state.store, serverSecret: SERVER_SECRET, davExchange: createMemoryDav({ defaults: true }).exchange })
   })
 
   afterEach(async () => {
@@ -337,11 +338,9 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       { method: 'POST', path: '/api/server/hostname', body: { hostname: 'unauthorized.example.test' } },
       { method: 'POST', path: '/api/server/quotas/init', body: {} },
       { method: 'GET', path: '/api/server/settings' },
-      { method: 'GET', path: '/api/server/fine-settings' },
       { method: 'GET', path: '/api/firewall' },
       { method: 'GET', path: '/api/generations' },
       { method: 'GET', path: '/api/mail/ips' },
-      { method: 'GET', path: '/api/mail/caldav-carddav' },
       { method: 'GET', path: '/api/transfers/sessions' },
       { method: 'POST', path: '/api/lifecycle/cpanel-import', body: { username: 'rogueimport' } },
       { method: 'PUT', path: '/api/server/panel/branding', body: { companyName: 'Hijacked' } },
@@ -471,7 +470,9 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       // Folders live in the account files: past the entitlement, no host agent here is a truthful 412.
       { feature: 'directory-privacy', method: 'GET', path: `/api/web-features/${alice.id}/directory-privacy`, allowed: 412 },
       { feature: 'hotlink-protection', method: 'GET', path: `/api/web-features/${alice.id}/hotlink-protection` },
-      { feature: 'web-disk', method: 'GET', path: `/api/web-features/${alice.id}/web-disk` },
+      { feature: 'web-disk', method: 'GET', path: '/api/account/web-disk' },
+      { feature: 'perl-modules', method: 'GET', path: '/api/account/perl-modules/search', allowed: 422 },
+      { feature: 'calendars-contacts-config', method: 'GET', path: '/api/account/calendars-contacts/connection/apple.mobileconfig?principal=main', allowed: 404 },
       { feature: 'file-manager', method: 'GET', path: `/api/web-features/${alice.id}/extras` },
       { feature: 'account-cache-services', method: 'GET', path: `/api/cache/${alice.id}` },
       { feature: 'account-containers', method: 'GET', path: `/api/containers/${alice.id}` },

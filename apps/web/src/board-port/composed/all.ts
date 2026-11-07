@@ -24,6 +24,8 @@ import { xwhm_services } from './sections/xwhm-services.ts'
 /** Existing controllers always retain priority over additive route metadata. */
 export const nativeComposedRoutePaths: ReadonlySet<string> = new Set([
   '/whm/preferences',
+  '/whm/resellers/more', '/whm/resellers/ips-nameservers',
+  '/security/ssl/files',
   '/domains/reverse-proxy',
   '/whm/panel/settings', '/whm/panel/branding', '/whm/panel/languages', '/whm/panel/whmcs',
   '/whm/server/terminal',
@@ -35,6 +37,7 @@ export const nativeComposedRoutePaths: ReadonlySet<string> = new Set([
   '/whm/databases/tuning',
   '/whm/services/more',
   '/whm/services/default-index',
+  '/whm/services/nginx-proxy',
   '/whm/software/composer',
   '/whm/monitoring/benchmark',
   '/whm/monitoring/traffic',
@@ -42,6 +45,7 @@ export const nativeComposedRoutePaths: ReadonlySet<string> = new Set([
   '/domains/dynamic-dns',
   '/domains/site-publisher',
   '/files/git',
+  '/files/web-disk',
   '/email/encryption',
   "/home",
   "/panel",
@@ -195,4 +199,3 @@ export const composedRouteSpecs = [
 ] as const
 
 export const composedXpanelRoutes = composedRouteSpecs.filter(spec => spec.surface === 'xpanel' && !nativeComposedRoutePaths.has(spec.route))
-export const composedXwhmRoutes = composedRouteSpecs.filter(spec => spec.surface === 'xwhm' && !nativeComposedRoutePaths.has(spec.route))

@@ -1,8 +1,8 @@
 // Extended pure, deterministic host compilers and validators for xPanel, xWHM, and xMail:
 // 1. First-Run Setup, Hostname Change & Filesystem Quota Initialization
-// 2. Deep Mail (Domain Forwarders, Mailing Lists, Sieve Filters, CSV Address Importer, CalDAV/CardDAV)
+// 2. Deep Mail (Domain Forwarders, Mailing Lists, Sieve Filters, CSV Address Importer)
 // 3. Operational DNS (Zone Templates, Batch DKIM/SPF/DMARC, Zone Cleanup)
-// 4. Extended File & Web Isolation (Directory Privacy, Hotlink Protection, Web Disk, Git Push-to-Deploy)
+// 4. Extended File & Web Isolation (Directory Privacy, Hotlink Protection, Git Push-to-Deploy)
 // 5. Databases Beyond MariaDB (PostgreSQL, Remote Access Hosts, DB Repair, MongoDB, Redis, Memcached)
 // 6. Fine-Grained Server Settings, Containers, App Store & Web Stack Profiles
 
@@ -11,6 +11,8 @@ import { dbGrantPattern } from '@xpanel/core'
 import { assertPhpVersion } from '../system/validate.ts'
 import { accountSliceName } from '../system/slice.ts'
 import { assertRedirectUrl } from '../edge/validate.ts'
+import { XP_PATHS } from '../edge/paths.ts'
+import { fpmAccountLogDir } from '../system/units.ts'
 import {
   assertAbsPath,
   assertAccount,
@@ -128,52 +130,31 @@ export const renderQuotaInitActions = (filesystem: string): HostAction[] => {
 }
 
 /**
- * Renders `/etc/logrotate.d/xpanel` covering Nginx domain logs, Apache domain logs,
- * and xPanel daemon logs.
+ * Renders `/etc/logrotate.d/xpanel`: the nginx edge error logs, the Apache backend logs and each account's PHP-FPM
+ * error logs, which logrotate rotates as that account inside its own log directory. Site access logs are not listed:
+ * the agent rotates them only after the bandwidth meter has counted them (apps/agent/src/log-rotation.ts).
  */
-export const renderLogrotateConfig = (opts: {
-  rotateDays: number
-  maxSizeMb: number
-  compress: boolean
-}): RenderedFile => {
-  if (!opts || typeof opts !== 'object') {
-    return invalid('logrotate options', opts, 'is required')
-  }
-  const rotateDays = assertInt('rotateDays', opts.rotateDays, 1, 3650)
-  const maxSizeMb = assertInt('maxSizeMb', opts.maxSizeMb, 1, 10240)
-  if (typeof opts.compress !== 'boolean') {
-    return invalid('compress', opts.compress, 'must be a boolean')
-  }
-
-  const compressDirectives = opts.compress ? ['  compress', '  delaycompress'] : ['  nocompress']
+export const renderLogrotateConfig = (opts: { rotateDays: number; apacheService: string | null; fpmAccounts: readonly string[] }): RenderedFile => {
+  if (!opts || typeof opts !== 'object') return invalid('logrotate options', opts, 'is required')
+  const rotateDays = assertInt('rotateDays', opts.rotateDays, 1, 365)
+  const apache = opts.apacheService === null ? null : assertString('apacheService', opts.apacheService, 64)
+  if (apache !== null && !/^[a-z][a-z0-9-]{0,31}$/.test(apache)) return invalid('apacheService', apache, 'must be a unit name')
+  const keep = ['  daily', `  rotate ${rotateDays}`, '  maxsize 100M', '  missingok', '  notifempty', '  compress', '  delaycompress']
+  const reopen = (command: string): string[] => ['  sharedscripts', '  postrotate', `    ${command} >/dev/null 2>&1 || true`, '  endscript']
   const lines = [
-    '# Managed by xPanel',
-    '/var/log/nginx/domains/*.log /var/log/apache2/domains/*.log /var/log/xpanel/*.log {',
-    '  daily',
-    `  rotate ${rotateDays}`,
-    `  maxsize ${maxSizeMb}M`,
-    '  missingok',
-    '  notifempty',
-    ...compressDirectives,
-    '  sharedscripts',
-    '  postrotate',
-    '    /bin/systemctl reload nginx.service >/dev/null 2>&1 || true',
-    '    /bin/systemctl reload apache2.service >/dev/null 2>&1 || true',
-    '  endscript',
-    '}',
+    '# Managed by xPanel; site access logs are rotated by the xPanel agent after their traffic is counted.',
+    `${XP_PATHS.nginxLogDir}/*.error.log {`, ...keep, ...reopen('/usr/bin/systemctl kill --kill-whom=main --signal=USR1 nginx.service'), '}',
+    // libmodsecurity keeps this file open across nginx log reopen, so it is truncated in place.
+    `${XP_PATHS.nginxLogDir}/modsec_audit.log {`, ...keep, '  copytruncate', '}',
+    ...(apache ? [`${XP_PATHS.apacheLogDir}/*.log {`, ...keep, ...reopen(`/usr/bin/systemctl reload ${apache}.service`), '}'] : []),
+    // An FPM master keeps its error log open; copytruncate as the account avoids a root rename inside a directory it owns.
+    ...[...new Set(opts.fpmAccounts.map(user => assertUsername(user)))].sort().flatMap(user => [`${fpmAccountLogDir(user)}/*.log {`, `  su ${user} ${user}`, ...keep, '  copytruncate', '}']),
   ]
-
-  return {
-    path: '/etc/logrotate.d/xpanel',
-    content: `${lines.join('\n')}\n`,
-    mode: 0o644,
-    owner: 'root',
-    group: 'root',
-  }
+  return { path: '/etc/logrotate.d/xpanel', content: `${lines.join('\n')}\n`, mode: 0o644, owner: 'root', group: 'root' }
 }
 
 // ============================================================================
-// 2. Deep Mail (Domain Forwarders, Mailing Lists, Sieve, CSV Import, CalDAV/CardDAV)
+// 2. Deep Mail (Domain Forwarders, Mailing Lists, Sieve, CSV Import)
 // ============================================================================
 
 /**
@@ -484,23 +465,6 @@ export const parseAddressImportCsv = (
   return { mailboxes, forwarders, errors }
 }
 
-/**
- * Renders Nginx `.well-known/caldav` and `.well-known/carddav` discovery location blocks.
- */
-export const renderCalDavCardDavInclude = (domain: string): string => {
-  const d = normalizeHostname(domain, 'domain')
-  const lines = [
-    `# Managed by xPanel: CalDAV / CardDAV service discovery for ${d}`,
-    'location = /.well-known/caldav {',
-    `  return 301 https://${d}/dav/;`,
-    '}',
-    'location = /.well-known/carddav {',
-    `  return 301 https://${d}/dav/;`,
-    '}',
-  ]
-  return `${lines.join('\n')}\n`
-}
-
 // ============================================================================
 // 3. Operational DNS (Zone Templates, Batch DKIM/SPF/DMARC, Zone Cleanup)
 // ============================================================================
@@ -675,7 +639,7 @@ export const findOrphanDnsZones = (
 }
 
 // ============================================================================
-// 4. Extended File & Web Isolation (Directory Privacy, Hotlink, Web Disk, Git)
+// 4. Extended File & Web Isolation (Directory Privacy, Hotlink, Git)
 // ============================================================================
 
 const assertSafeRelativeSubpath = (what: string, relPath: string): string => {
@@ -696,7 +660,8 @@ export const HTPASSWDS_DIR = '.htpasswds'
 export const DIRECTORY_PRIVACY_MAX_USERS = 100
 export const HTPASSWD_USERNAME = /^[A-Za-z0-9._-]{1,64}$/
 // Hashes Apache verifies: bcrypt and apr1 natively, SHA-256/512-crypt and DES through crypt(3) on Linux, {SHA}.
-const HTPASSWD_HASH = /^(?:\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}|\$[56]\$(?:rounds=[0-9]{1,9}\$)?[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{43,86}|\$apr1\$[./A-Za-z0-9]{1,8}\$[./A-Za-z0-9]{22}|\{SHA\}[A-Za-z0-9+/]{27}=|[./A-Za-z0-9]{13})$/
+// A leading "!" is leech protection's disabled user: no password matches it until a new one is set.
+const HTPASSWD_HASH = /^!?(?:\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}|\$[56]\$(?:rounds=[0-9]{1,9}\$)?[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{43,86}|\$apr1\$[./A-Za-z0-9]{1,8}\$[./A-Za-z0-9]{22}|\{SHA\}[A-Za-z0-9+/]{27}=|[./A-Za-z0-9]{13})$/
 export interface HtpasswdEntry { username: string; passwordHash: string }
 export const isHtpasswdHash = (value: unknown): value is string => typeof value === 'string' && HTPASSWD_HASH.test(value)
 
@@ -823,49 +788,6 @@ export const renderHotlinkProtection = (config: {
   return {
     nginxSnippet,
     apacheSnippet: `${apacheLines.join('\n')}\n`,
-  }
-}
-
-/**
- * Renders Web Disk (WebDAV) per-account configuration.
- */
-export const renderWebDiskConfig = (
-  account: Pick<Account, 'username' | 'uid' | 'gid' | 'home'>,
-  enabled: boolean,
-  readOnly: boolean,
-): RenderedFile => {
-  const acc = assertAccount(account)
-  if (typeof enabled !== 'boolean' || typeof readOnly !== 'boolean') {
-    return invalid('webdisk flags', { enabled, readOnly }, 'enabled and readOnly must be booleans')
-  }
-
-  const lines = [
-    `# Managed by xPanel: Web Disk (WebDAV) for ${acc.username} (uid=${acc.uid}, gid=${acc.gid})`,
-    `location /webdisk/${acc.username}/ {`,
-    `  alias ${acc.home}/;`,
-  ]
-  if (!enabled) {
-    lines.push('  return 403;')
-  } else {
-    lines.push('  dav_ext_methods PROPFIND OPTIONS;')
-    if (readOnly) {
-      lines.push('  limit_except GET HEAD OPTIONS PROPFIND {')
-      lines.push('    deny all;')
-      lines.push('  }')
-    } else {
-      lines.push('  dav_methods PUT DELETE MKCOL COPY MOVE;')
-      lines.push('  create_full_put_path on;')
-      lines.push('  dav_access user:rw group:r;')
-    }
-  }
-  lines.push('}')
-
-  return {
-    path: `/etc/xpanel/webdav/${acc.username}.conf`,
-    content: `${lines.join('\n')}\n`,
-    mode: 0o644,
-    owner: 'root',
-    group: 'root',
   }
 }
 
@@ -1004,35 +926,6 @@ export const renderRemoteMysqlGrantsSql = (
     const host = assertDbHost(h)
     return `GRANT ALL PRIVILEGES ON \`${pattern}\`.* TO '${user}'@'${host}';`
   })
-}
-
-/**
- * Builds argv-only database check/repair/optimize command for MariaDB or PostgreSQL.
- */
-export const buildDatabaseRepairArgv = (
-  engine: 'mariadb' | 'postgresql',
-  dbName: string,
-  action: 'check' | 'repair' | 'optimize',
-): string[] => {
-  const db = assertPgIdent('dbName', dbName)
-  if (!['check', 'repair', 'optimize'].includes(action)) {
-    return invalid('repair action', action, 'must be check, repair, or optimize')
-  }
-
-  if (engine === 'mariadb') {
-    const flag =
-      action === 'check' ? '--check' : action === 'repair' ? '--repair' : '--optimize'
-    return ['/usr/bin/mysqlcheck', flag, '--databases', db]
-  }
-  if (engine === 'postgresql') {
-    if (action === 'repair') {
-      return ['/usr/bin/reindexdb', '--dbname', db]
-    }
-    const flag = action === 'check' ? '--analyze' : '--full'
-    return ['/usr/bin/vacuumdb', flag, '--dbname', db]
-  }
-
-  return invalid('database engine', engine, 'must be mariadb or postgresql')
 }
 
 /**
@@ -1503,54 +1396,5 @@ export const buildAppInstallManifest = (
         ],
         envVars,
       }
-  }
-}
-
-/**
- * Renders the server-wide web stack profile (`/etc/xpanel/web-stack.conf`).
- */
-export const renderWebStackProfile = (opts: {
-  engine: 'apache' | 'openlitespeed'
-  http3Quic: boolean
-  brotli: boolean
-  wafOwaspCrs: boolean
-  phpVersions: readonly string[]
-  maxMemoryPerProcessMb: number
-}): RenderedFile => {
-  if (!opts || typeof opts !== 'object') {
-    return invalid('webStackProfile', opts, 'is required')
-  }
-  if (opts.engine !== 'apache' && opts.engine !== 'openlitespeed') {
-    return invalid('engine', opts.engine, 'must be apache or openlitespeed')
-  }
-  if (
-    typeof opts.http3Quic !== 'boolean' ||
-    typeof opts.brotli !== 'boolean' ||
-    typeof opts.wafOwaspCrs !== 'boolean'
-  ) {
-    return invalid('webStackProfile flags', opts, 'http3Quic, brotli, and wafOwaspCrs must be booleans')
-  }
-  if (!Array.isArray(opts.phpVersions) || opts.phpVersions.length === 0) {
-    return invalid('phpVersions', opts.phpVersions, 'requires at least one PHP version')
-  }
-  const versions = [...new Set(opts.phpVersions.map((v) => assertPhpVersion(v)))].sort()
-  const maxMem = assertInt('maxMemoryPerProcessMb', opts.maxMemoryPerProcessMb, 32, 65536)
-
-  const lines = [
-    '# Managed by xPanel: Web Stack Profile',
-    `engine = ${opts.engine}`,
-    `http3_quic = ${opts.http3Quic ? 'enabled' : 'disabled'}`,
-    `brotli_compression = ${opts.brotli ? 'enabled' : 'disabled'}`,
-    `waf_owasp_crs = ${opts.wafOwaspCrs ? 'enabled' : 'disabled'}`,
-    `php_versions = ${versions.join(',')}`,
-    `max_memory_per_process_mb = ${maxMem}`,
-  ]
-
-  return {
-    path: '/etc/xpanel/web-stack.conf',
-    content: `${lines.join('\n')}\n`,
-    mode: 0o644,
-    owner: 'root',
-    group: 'root',
   }
 }

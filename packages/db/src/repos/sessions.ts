@@ -89,7 +89,8 @@ const prepareSession = (input: NewSession): SessionRecord => {
   const impersonatorPrincipalId = input.impersonator ? assertId(input.impersonator.principalId, 'impersonatorPrincipalId') : null
   const impersonatorLogin = input.impersonator ? assertLine(input.impersonator.login, 254, 'impersonatorLogin', { allowEmpty: false }) : null
   const impersonatorTeamMemberId = input.impersonator?.teamMemberId === undefined ? null : assertId(input.impersonator.teamMemberId, 'impersonatorTeamMemberId')
-  if (impersonatorPrincipalId === principalId) fail('VALIDATION', 'a session cannot impersonate its own principal')
+  // A temporary link opens a narrowed session of its issuer; a handoff always crosses identities.
+  if (impersonatorPrincipalId === principalId && !impersonatorLogin?.startsWith('temporary:')) fail('VALIDATION', 'a session cannot impersonate its own principal')
   return { id: randomUUID(), principalId, tokenHash, ip, userAgent, mfaVerified,
     createdAt: now, lastSeenAt: now, expiresAt, revokedAt: null, impersonatorPrincipalId, impersonatorLogin, impersonatorTeamMemberId }
 }

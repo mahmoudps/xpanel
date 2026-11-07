@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { cidrContains, fail, firewallRuleErrors, firewallRuleSetErrors, MANAGEMENT_PUBLIC_PORTS, parseCidr, PREFIX_LIST_NAME_RE, validatePrefixList } from '@xpanel/core'
+import { cidrContains, defaultFirewallRules, fail, firewallRuleErrors, firewallRuleSetErrors, hostingServiceFirewallRules, MANAGEMENT_PUBLIC_PORTS, parseCidr, PREFIX_LIST_NAME_RE, validatePrefixList } from '@xpanel/core'
 import { system } from '@xpanel/render'
 import type { FirewallRule, ServerSettings } from '@xpanel/core'
 import { firewallRevision } from '@xpanel/state'
@@ -17,7 +17,7 @@ const REVISION = /^[0-9a-f]{64}$/
 export interface FirewallWorkspaceStore {
   getFirewallState(): Promise<FirewallState>
   getFirewallPending(): Promise<FirewallPendingChange | null>
-  replaceFirewall(next: { rules: unknown; prefixLists: unknown }, guard: FirewallGuard, opts?: FirewallMutationOptions): Promise<FirewallState>
+  replaceFirewall(next: { rules: unknown; prefixLists: unknown; enabled?: boolean; blockPing?: boolean }, guard: FirewallGuard, opts?: FirewallMutationOptions): Promise<FirewallState>
   confirmFirewallChange(id: string): Promise<boolean>
   revertFirewallChange(id: string): Promise<'reverted' | 'superseded' | 'missing'>
   getServerSettings(): Promise<ServerSettings | null>
@@ -38,7 +38,7 @@ export interface FirewallWorkspaceHelpers {
   now?(): Date
 }
 
-type Change = { action: string; target: string; next: FirewallRule[]; prefixLists?: PrefixList[]; detail: Record<string, unknown>; ruleId?: string }
+type Change = { action: string; target: string; next: FirewallRule[]; prefixLists?: PrefixList[]; detail: Record<string, unknown>; ruleId?: string; policy?: { enabled: boolean; blockPing: boolean } }
 
 /** default-* rules keep sites and the panel reachable: they may be moved or narrowed by source, never deleted. */
 export const isSystemRule = (rule: Pick<FirewallRule, 'id'>): boolean => rule.id.startsWith('default-')
@@ -69,7 +69,7 @@ export function systemRuleErrors(current: readonly FirewallRule[], next: readonl
 }
 
 /** The project's versioned bundle (render system.exportRules): rules plus prefix-list entries; bans are never exported. */
-export const exportFirewall = (state: FirewallState, now: Date): string =>
+export const exportFirewall = (state: Pick<FirewallState, 'rules' | 'prefixLists'>, now: Date): string =>
   system.exportRules(state.rules, Object.fromEntries(state.prefixLists.map(list => [list.name, list.entries])), now.toISOString())
 
 /** Fully validated by system.importRules: format, version, rules and every list a rule names. */
@@ -115,7 +115,7 @@ export async function handleFirewallWorkspaceRoute(req: Request, url: URL, metho
   const path = url.pathname
   const rule = ruleRoute.exec(path)
   const list = listRoute.exec(path)
-  const known = ['/api/firewall', '/api/firewall/rules', '/api/firewall/export', '/api/firewall/import', '/api/firewall/confirm', '/api/firewall/bans', '/api/firewall/bans/unban'].includes(path) || rule !== null || list !== null
+  const known = ['/api/firewall', '/api/firewall/rules', '/api/firewall/export', '/api/firewall/import', '/api/firewall/confirm', '/api/firewall/policy', '/api/firewall/bans', '/api/firewall/bans/unban'].includes(path) || rule !== null || list !== null
   if (!known) return null
   const now = (): Date => h.now?.() ?? new Date()
   const caller = await h.requireCaller(req)
@@ -137,7 +137,7 @@ export async function handleFirewallWorkspaceRoute(req: Request, url: URL, metho
   const view = async (): Promise<Record<string, unknown>> => {
     const [state, pending] = await Promise.all([h.store.getFirewallState(), h.store.getFirewallPending()])
     return {
-      rules: state.rules, prefixLists: state.prefixLists, revision: firewallRevision(state),
+      rules: state.rules, prefixLists: state.prefixLists, revision: firewallRevision(state), enabled: state.enabled, blockPing: state.blockPing,
       session: { ip: h.clientIp(req) },
       pending: pending ? { id: pending.id, deadline: pending.deadline, actor: pending.actor } : null,
       confirmWindowSeconds: FIREWALL_CONFIRM_WINDOW_MS / 1000,
@@ -149,12 +149,12 @@ export async function handleFirewallWorkspaceRoute(req: Request, url: URL, metho
     const sessionIp = h.clientIp(req) ?? fail('PRECONDITION_FAILED', 'trusted transport peer is required for firewall changes', { stateChanged: false })
     const settings = await h.store.getServerSettings()
     const lists = change.prefixLists ?? state.prefixLists
-    const errors = [...systemRuleErrors(state.rules, change.next), ...change.next.flatMap((item, index) => firewallRuleErrors(item).map(error => `rule #${index + 1}: ${error}`))]
+    const errors = [...(state.rules.length ? systemRuleErrors(state.rules, change.next) : []), ...change.next.flatMap((item, index) => firewallRuleErrors(item).map(error => `rule #${index + 1}: ${error}`))]
     if (!errors.length && settings) errors.push(...firewallRuleSetErrors(change.next, { ...settings, managementPorts: MANAGEMENT_PUBLIC_PORTS, prefixLists: Object.fromEntries(lists.map(item => [item.name, item.entries])) }))
     if (errors.length) return fail('VALIDATION', errors[0]!, { stateChanged: false, errors: errors.slice(0, 32) })
     const guard: FirewallGuard = { lockout: { sessionIp, panelPort: settings?.panelPort ?? 2087, managementPorts: MANAGEMENT_PUBLIC_PORTS, sshPort: settings?.sshPort ?? 22 } }
     const id = randomUUID(), deadline = new Date(now().getTime() + FIREWALL_CONFIRM_WINDOW_MS)
-    const saved = await h.store.replaceFirewall({ rules: change.next, prefixLists: lists }, guard, {
+    const saved = await h.store.replaceFirewall({ rules: change.next, prefixLists: lists, ...change.policy }, guard, {
       ...(expectedRevision === undefined ? {} : { expectedFirewallRevision: expectedRevision }),
       confirmation: { id, deadline: deadline.toISOString(), actor: caller.principal.username, sessionIp },
     })
@@ -209,6 +209,17 @@ export async function handleFirewallWorkspaceRoute(req: Request, url: URL, metho
   await h.assertRoot(caller, path === '/api/firewall/rules' ? 'firewall.create' : 'firewall.modify')
   await expire()
   const state = await h.store.getFirewallState()
+
+  if (path === '/api/firewall/policy') {
+    const denied = allow('PUT'); if (denied) return denied
+    const body = await readBody(req, ['enabled', 'blockPing', 'expectedRevision'])
+    if (typeof body.enabled !== 'boolean' || typeof body.blockPing !== 'boolean') return fail('VALIDATION', 'enabled and blockPing must be booleans', { stateChanged: false })
+    const expectedRevision = revisionOf(body, true)
+    // A first switch-on writes the rules that keep the panel, SSH, sites and hosted services reachable; the session check runs on them.
+    const settings = body.enabled && !state.rules.length ? await h.store.getServerSettings() ?? fail('PRECONDITION_FAILED', 'save the server settings before turning the firewall on', { stateChanged: false }) : null
+    const next = settings ? [...defaultFirewallRules({ ...settings, managementPorts: MANAGEMENT_PUBLIC_PORTS }), ...hostingServiceFirewallRules()] : state.rules
+    return apply(state, expectedRevision, { action: 'firewall.policy.updated', target: 'firewall:policy', next, policy: { enabled: body.enabled, blockPing: body.blockPing }, detail: { enabled: body.enabled, blockPing: body.blockPing, seeded: next !== state.rules } })
+  }
 
   if (path === '/api/firewall/import') {
     const denied = allow('POST'); if (denied) return denied

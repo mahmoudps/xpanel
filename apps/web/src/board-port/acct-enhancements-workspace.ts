@@ -21,7 +21,7 @@ export function renderWhmAccountEnhancementsWorkspace(input: { locale: Locale; c
   return `${styles}<div class="xp-acct-enh" data-acct-enh-workspace data-enh-can-manage="${input.canManage}" data-capability-state="${input.canManage ? 'authorized' : 'unavailable'}" lang="${input.locale}" dir="${localeDirection(input.locale)}">
   <section class="xp-whm-detail-card" aria-labelledby="acct-enh-application-heading">
     <h2 id="acct-enh-application-heading">${t('What enhancements do')}</h2>
-    <p class="xp-whm-detail-status" role="status" data-acct-enh-application data-state="unavailable">${t('Enhancements are saved entitlements beyond the plan. No xPanel feature reads them yet, and resellers cannot assign them from their own screens. Saving here changes no account limit.')}</p>
+    <p class="xp-whm-detail-status" role="status" data-acct-enh-application data-state="unavailable">${t('Enhancements are saved entitlements beyond the plan. Lifecycle hooks receive them; the panel changes no account limit from them. A reseller assigns an enhancement on this page once it has a limit for it here.')}</p>
     <p class="xp-whm-detail-status" role="status" data-acct-enh-status data-state="unread">${t('Enhancements have not been read.')}</p>
     <div data-acct-enh-loading aria-busy="true" aria-label="${t('Loading enhancements')}" hidden><span class="xp-skeleton-line"></span><span class="xp-skeleton-line"></span></div>
     <div class="xp-whm-detail-actions"><button type="button" class="xp-btn" data-acct-enh-refresh${off}>${t('Refresh')}</button></div>

@@ -28,6 +28,11 @@ const SYSTEM_VAR_DIRS: ReadonlySet<string> = new Set(['cache', 'lib', 'lock', 'l
  * With `username`, the home must also be `<base>/<username>`, so a corrupted record can never
  * point one account's docroots into another account's home.
  */
+/** The home roots of this product: /home and /home0 to /home99, as the host renderers admit them. */
+export const HOME_ROOT_RE = /^\/home[1-9]?[0-9]?$/
+/** An account home sits directly under a home root; reviewed host commands rebuild their paths through this. */
+export const isAccountHome = (home: unknown, username: string): boolean => typeof home === 'string' && home.endsWith('/' + username) && HOME_ROOT_RE.test(home.slice(0, -(username.length + 1)))
+
 export const validateHome = (home: unknown, username?: string): string => {
   if (typeof home !== 'string' || !home.startsWith('/') || home.length > MAX_PATH) return invalid('home must be an absolute path')
   const segments = home.slice(1).split('/')

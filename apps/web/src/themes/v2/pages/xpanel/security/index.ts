@@ -4,6 +4,7 @@ import { NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/
 import { renderV2AccountSecurityPage } from './account.ts'
 import { renderV2CertificateFilesPage, renderV2CertificateIssuePage } from './certificates.ts'
 import { renderV2AccountSshPage, renderV2AccountWafPage, renderV2VirusScannerPage } from './tools.ts'
+import { renderV2IpBlockerPage } from './ip-blocker.ts'
 
 export { renderV2AccountSecurityPage, renderV2CertificateFilesPage, renderV2CertificateIssuePage, renderV2AccountSshPage, renderV2AccountWafPage, renderV2VirusScannerPage }
 export type { PanelSettingsAuthority } from '../settings/common.ts'
@@ -17,7 +18,7 @@ export function renderV2PanelSecurityPage(props: PanelSurfaceProps, authority: P
     case '/security/waf': return renderV2AccountWafPage(props, authority)
     case '/security/ssh': return renderV2AccountSshPage(props, authority)
     case '/security/virus-scanner': return renderV2VirusScannerPage(props, authority)
-    case '/security/ip-blocker': return renderV2WebDirectivePage(props, 'ip-blocker', authority)
+    case '/security/ip-blocker': return renderV2IpBlockerPage(props, authority)
     case '/security/hotlink': return renderV2WebDirectivePage(props, 'hotlink', authority)
     default: return undefined
   }

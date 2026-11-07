@@ -58,6 +58,17 @@ describe('API token successful-use recording', () => {
     expect(token.revokedAt).toBeNull()
   })
 
+  it('tells the caller when a live token came from an address outside its list', async () => {
+    const denied = randomBytes(32).toString('base64url')
+    await createApiToken(handle.db, { principalId, name: 'limited', tokenHash: sha256Hex(denied), scopes: ['*'], allowedIps: ['198.51.100.0/24'], expiresAt: new Date(Date.now() + 60_000).toISOString() })
+    let told = 0
+    const onTokenAddressDenied = () => { told += 1 }
+    expect(await authenticateRequest(handle.db, request(denied), { serverSecret: SERVER_SECRET, clientIp: '203.0.113.9', onTokenAddressDenied })).toBeNull()
+    expect(told).toBe(1)
+    expect(await authenticateRequest(handle.db, request(denied), { serverSecret: SERVER_SECRET, clientIp: '198.51.100.9', onTokenAddressDenied })).not.toBeNull()
+    expect(told).toBe(1)
+  })
+
   it.each([undefined, null, 'invalid-address'])('records use with unknown IP %s without trusting forwarded headers', async (clientIp) => {
     expect(await authenticateRequest(handle.db, request(), { serverSecret: SERVER_SECRET, clientIp })).not.toBeNull()
     const token = await stored()

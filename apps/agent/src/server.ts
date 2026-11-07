@@ -1,14 +1,14 @@
 import { lifecycleAdmissionResponse, withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { constants } from 'node:fs'
+import { constants, existsSync } from 'node:fs'
 import { lstat, mkdir, open, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
 import type { Server } from 'node:http'
 import { Socket } from 'node:net'
 import { dirname, isAbsolute, resolve } from 'node:path'
-import { fail, isUuid, isXpanelError, validateDomainName } from '@xpanel/core'
+import { effectivePlan, fail, isAccountHome, isUuid, isXpanelError, validateDomainName, statusLoadThreshold } from '@xpanel/core'
 import { profileFor } from '@xpanel/os'
 import { edge } from '@xpanel/render'
 import type { Account, ErrorCode, Id, LiveEvent, Principal } from '@xpanel/core'
@@ -18,12 +18,15 @@ import type { StateStore } from '@xpanel/state'
 import { parseGenerationRollbackRequest } from '@xpanel/state'
 import { type CanonicalIoResourcePipeline, type IoAnalyticsEngine, unavailableIoAnalytics, WebsiteAnalyticsEngine } from './analytics.ts'
 import { LinuxHostExecutor } from './executor.ts'
+import { createNativeFileSharingProvider } from './ops-file-sharing-native.ts'
 import type { AgentExecutor } from './executor.ts'
 import { JailedFileManager } from './file-manager.ts'
 import { HtaccessWorkspace, deriveHtaccessTarget } from './htaccess-workspace.ts'
 import { parseHtaccessRequest } from './htaccess-contract.ts'
 import { createNativeHtaccessValidator, probeHtaccessTarget } from './htaccess-native.ts'
-import { parseDirectoryPrivacyRequest, runDirectoryPrivacyRequest } from './directory-privacy.ts'
+import { moveDirectoryPrivacyHome, parseDirectoryPrivacyRequest, runDirectoryPrivacyRequest } from './directory-privacy.ts'
+import { handleLeechRoute, sendmailAlert, type LeechMonitor } from './leech-protection.ts'
+import { handleSiteQuotaRoute } from './site-quota.ts'
 import { AcmeCertificateServiceAdapter } from './services/acme.ts'
 import { createHttp01AcmeClient } from './services/acme-client.ts'
 import { computeLeafFingerprintSha256 } from './services/acme.ts'
@@ -39,6 +42,7 @@ import { assertAcl } from '@xpanel/core'
 import { probeAuditLog, probeHostCapabilities, readHostMeasurements } from './host-probes.ts'
 import { readAccountUsage } from './account-usage.ts'
 import { observeHostLimits, unavailableHostLimits } from './limit-gaps.ts'
+import { readQuotaUsage } from './quota-usage.ts'
 import { readPublicOriginSync } from './agent-origin.ts'
 import { readHostConfigChecks, readHostIdentity, readServedCertificatePem, PANEL_LISTENER_PORT } from './host-identity.ts'
 import { probeDkimOutcome } from './services/dkim-probe.ts'
@@ -64,35 +68,70 @@ import { initializeUserQuota, observeHomeUserQuota, validateQuotaFilesystem } fr
 import { handleAccountProvisioning, type AgentAccountProvisioningRuntime } from './account-provisioning-handler.ts'
 import type { HostJobRunner } from './host-jobs.ts'
 import { handleSoftwareCenterRoute } from './software-center-routes.ts'
+import { handleReleasePackagesRoute } from './release-packages.ts'
+import type { ReleasePackages } from './release-packages.ts'
 import { handlePhpManagerRoute } from './php-manager-routes.ts'
 import { PHP_STAGING_DIR } from './php-manager.ts'
 import { readBans, unbanAddresses, type BanRun } from './firewall-bans.ts'
 import { handleSwContainersRoute } from './sw-containers.ts'
+import { handleCtrRoute, resolveContainerTerminal } from './ctr-workspace.ts'
+import { createCtrCatalog } from './ctr-catalog.ts'
+import { createLogFollower } from './ctr-logs.ts'
 import { handleSwAddonServicesRoute } from './sw-addon-services.ts'
 import { handleSwDeploymentsRoute } from './sw-deployments.ts'
 import { handleSwOptimizeRoute } from './sw-optimize.ts'
 import { handleSwApplicationsRoute } from './sw-applications.ts'
+import { createApplicationDatabases, readAccountApplications } from './application-provider.ts'
+import type { StoredApplicationArtifacts } from './application-provider.ts'
+import { handleSiteSoftwareInstancesRoute } from './site-software-instances.ts'
 import { createRuntimeHost, handleAccountRuntimeRoute } from './account-runtime.ts'
+import { handleOwnerToolsRoute } from './owner-tools.ts'
+import { handleWebsiteBackupsRoute } from './website-backups.ts'
+import { handleDatabaseTransferRoute } from './account-database-transfer.ts'
+import { handleForwardCertificateRoute } from './domain-forward-certificate.ts'
+import type { DatabaseTransferEngine } from './account-database-transfer.ts'
+import type { WebsiteDatabases } from './website-backups.ts'
+import { createNodeSwApplicationCatalogFiles, SW_CATALOG_DIRECTORY } from './sw-application-catalog-store.ts'
 import type { SwApplicationCatalogSource } from './sw-application-catalog-store.ts'
-import type { ApplicationArtifactProvider } from './application-install.ts'
-import type { ComposerJobProvider } from './composer-job-provider.ts'
+import type { ApplicationArtifactProvider, ApplicationInstallCoordinator } from './application-install.ts'
 import type { HostJobPlan } from './host-job-contract.ts'
 import { handleMariadbAdminRoute, parseMariadbVersion } from './mariadb-admin.ts'
 import { handleDatabaseTuningRoute } from './database-tuning.ts'
+import { handleAccountDbMaintenanceRoute, handleDbMaintenanceRoute } from './db-maintenance.ts'
+import { handleDbAdminToolsRoute } from './db-admin-tools.ts'
+import type { HostAction } from '@xpanel/core'
 import { handleDbEnginesRoute } from './db-engines.ts'
 import { handleDbSignonRoute, nodeDbSignonFs } from './db-signon.ts'
+import { handlePgSignonRoute } from './db-pg-signon.ts'
 import { handleDbUpgradeRoute } from './db-upgrade.ts'
+import { handleDbServicesRoute } from './db-services.ts'
+import { handleDbQuotaRoute } from './db-quota.ts'
+import type { DbQuotaEnforcer } from './db-quota.ts'
+import { handlePhpMyAdminAccessRoute } from './phpmyadmin-access.ts'
 import { MARIADB_ADMIN_VERSION_SQL } from '../../../packages/os/src/mariadb-admin-command.ts'
 import { handleComposerWorkspaceRoute } from './composer-workspace.ts'
+import { handlePanelBackupsRoute } from './panel-backups.ts'
+import { defaultBackupArchiveRoot } from './acct-backup-runs.ts'
+import { handleApplicationProjectsRoute } from './application-projects.ts'
+import { runBackupCommand } from './backup-low-priority.ts'
 import { handleServiceManagerRoute } from './service-manager-routes.ts'
 import { createNativeBenchmarkStore, handleBenchmarkRoute } from './benchmark.ts'
+import { handleHomeMoveRoute, nativeHomeMoveHost } from './account-home-move.ts'
 import type { BenchmarkStore } from './benchmark.ts'
 import { handleTrafficMonitorRoute } from './traffic-monitor.ts'
 import { handleMeteringRoute, type BandwidthMeter } from './metering.ts'
+import type { LogRotation } from './log-rotation.ts'
+import { handleRawServerLogsRoute } from './raw-server-logs.ts'
+import { handleLogSecurityRoute } from './log-security-analysis.ts'
+import { handleFileShareLinkRoute, openShareFile } from './file-share-links.ts'
+import { handleAccountRepairRoute } from './account-repair.ts'
+import { handleEmailDiskUsageRoute } from './mailbox-disk-usage.ts'
+import { handleDatabaseLogRoute, readDatabaseLogTail } from './database-logs.ts'
+import { handleFtpRawLogRoute } from './ftp-raw-log.ts'
 import type { DiskLatency } from './host-metrics.ts'
 import { handleAccountGitRoute } from './account-git.ts'
-import { handleAccountPackagesRoute } from './account-packages.ts'
-import type { VerifiedPearCatalog } from './account-packages.ts'
+import { handleDavExchange } from './account-dav-exchange.ts'
+import { accountPearHost, handleAccountPackagesRoute, installedPhpVersions } from './account-packages.ts'
 import { handleDatabaseRemoteAccessRoute } from './database-remote-access.ts'
 import type { DatabaseRemoteAccessNative } from './database-remote-access.ts'
 import { handleTrustedProxiesRoute } from './trusted-proxies-routes.ts'
@@ -112,27 +151,53 @@ import { handleSitePublisherAgentRoute } from './site-publisher-routes.ts'
 import type { PgpRunner } from './account-pgp.ts'
 import type { MariadbAdminClient } from './mariadb-admin.ts'
 import { assertMailLogMailboxCaller, handleMailLogRoute, MAIL_LOG_MAX_OUTPUT_BYTES } from './mail-log.ts'
-import { FTP_LOG_MAX_OUTPUT_BYTES, handleFtpLogRoute } from './ftp-log.ts'
+import { FTP_LOG_MAX_OUTPUT_BYTES, handleFtpLogRoute, observeFtpLog } from './ftp-log.ts'
+import { anonymousFtpFiles, handleFtpAccountRoute } from './ftp-account.ts'
 import { handleUpgradeRoute } from './upgrade-routes.ts'
 import type { UpgradeCoordinator } from './upgrade-routes.ts'
 import { DurableUpgradeCoordinator } from './upgrade-coordinator.ts'
 import { handleHostMonitoringRoute } from './host-monitoring-route.ts'
 import { handleMailServerObservationRoute } from './mail-server-observation.ts'
-import { handleMailxRoute } from './mailx-routes.ts'
+import { handleMailxRoute, readMailxSaved } from './mailx-routes.ts'
+import type { MailxGeoipPort } from './mail-country-filter.ts'
+import { handleMailReportRoute } from './mail-log-reports.ts'
+import { handleMailTraceRoute, nodeMailTraceDns, smtpGreeting } from './mail-trace.ts'
+import { handleMailboxRepairRoute } from './mailbox-repair.ts'
+import { MAIL_REINDEX_JOB_KIND, handleMailMailboxActionRoute } from './mail-mailbox-actions.ts'
+import { handleBoxTrapperRoute } from './boxtrapper-routes.ts'
+import { handleListModerationRoute } from './list-moderation-routes.ts'
 import { handleMailboxMaintenanceRoute } from './mailbox-maintenance-routes.ts'
 import { handleServerObservationRoute } from './server-observation-routes.ts'
+import { disabledRoleUnits, handleServerOperationsRoute, readServerRoles } from './server-operations.ts'
 import { handleServerHealthRoute } from './server-health.ts'
 import { handleSupportRoute } from './support-bundle.ts'
 import { nodeUpgradeFs } from './upgrade-observation.ts'
 import { SERVER_CRON_DIRECTORY } from '../../../packages/os/src/server-observation-command.ts'
 import { handleServiceDetailRoute } from './service-detail-routes.ts'
 import { handleDnsToolsRoute } from './dns-tools-routes.ts'
+import { handleDnssecRoute } from './dnssec-routes.ts'
+import { dnsClusterSignedZone, handleDnsClusterHostRoute } from './dns-cluster-routes.ts'
+import { createDbProfiles, handleDbProfilesRoute } from './db-profiles.ts'
+import type { DnsClusterSync } from './dns-cluster-sync.ts'
 import { listHostDirectory, statHostPath } from './service-detail.ts'
 import { handleSecurityToolsRoute } from './security-tools-routes.ts'
+import { handleSshHostRoute } from './ssh-host.ts'
 import { handleSecRoute } from './sec-routes.ts'
+import { handlePanelAccessHostRoute } from './panel-access.ts'
+import { createSystemHookRunner, handleLifecycleHooksRoute } from './lifecycle-hooks.ts'
+import { handleSiteSoftwareHostRoute, readSiteSoftwareOffer } from './site-software.ts'
+import { handleRootIdentityRoute } from './root-identity.ts'
+import { handleSvcRoute } from './svc-routes.ts'
+import { handleHostToolsRoute } from './host-tools-routes.ts'
+import { readSavedTweakValues } from './tweak-values.ts'
+import { scanScopeFor, svcRouteContext } from './svc-agent.ts'
+import { readSvcPolicy } from './svc-reconcile.ts'
 import { secIngressProviderFor } from './sec-ingress-provider.ts'
 import { handleAccountSshRoute } from './account-ssh.ts'
-import { handleAccountLogsRoute, readProtectedLogTail } from './account-logs.ts'
+import { createSslStoreRun, handleRootSslStoreRoute, handleSslStoreRoute } from './ssl-store.ts'
+import { handleAccountLogsRoute, readProtectedLogFrom, readProtectedLogTail } from './account-logs.ts'
+import { handleWebStatsHostRoute, handleWebStatsRoute } from './web-stats-route.ts'
+import type { WebStats } from './web-stats.ts'
 import { handleTerminalRoute, revokeUnauthorizedTerminals } from './terminal-sessions.ts'
 import type { TerminalSessionManager } from './terminal-sessions.ts'
 import { handleAccountVirusScanRoute } from './account-virus-scan.ts'
@@ -171,6 +236,7 @@ import type {
   NativePeerIdentityAddon,
   PeerIdentityDecisionEvent,
 } from './peer-identity.ts'
+import { zonesExcludingTerminatingAccounts } from './reconciler.ts'
 import type { HostReconciler } from './reconciler.ts'
 import { readOsRelease } from './os-release.ts'
 
@@ -228,6 +294,7 @@ export const assertRootOwnedAgentPath = async (path: string): Promise<void> => {
 }
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
+  SERVICE_DISABLED: 409,
   VALIDATION: 422,
   NOT_FOUND: 404,
   CONFLICT: 409,
@@ -236,6 +303,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   FORBIDDEN: 403,
   UNAUTHENTICATED: 401,
   SELF_LOCKOUT: 422,
+  NO_AUTH_METHOD: 422,
   ENGINE_UNAVAILABLE: 422,
   SERVICE_UNAVAILABLE: 503,
   UNSUPPORTED_OS: 422,
@@ -250,6 +318,9 @@ export interface AgentCallerIdentity {
   accountId: Id | null
   resellerId: Id | null
 }
+
+const applicationDatabases = (deps: AgentServerDeps): ReturnType<typeof createApplicationDatabases> => createApplicationDatabases({ store: deps.store, db: deps.db,
+  reconcile: account => deps.reconciler.reconcile({ actor: 'application-installer', scope: { accountId: account.id, resellerId: account.ownerId } }) })
 
 export const agentCallerHeaders = (caller: {
   principalId: Id
@@ -317,6 +388,8 @@ const problemResponse = (err: unknown, instance: string): Response => {
 
 export interface AgentServerDeps {
   reconciler: HostReconciler
+  /** The local country database of the web statistics; absent keeps the mail country filter refused. */
+  mailGeoip?: MailxGeoipPort
   /** Absent until trusted startup supplies the account-provisioning runtime. Missing means the route refuses before effects. */
   accountProvisioning?: AgentAccountProvisioningRuntime
   store: StateStore
@@ -331,14 +404,18 @@ export interface AgentServerDeps {
   /** Independently qualified native quarantine admission; absence refuses every write. */
   quarantineQualification?: QuarantineServiceOptions['authorize']
   accountFileRunner?: AccountFileRunner
+  /** Leech Protection monitor; absent off a native Linux host. */
+  leechMonitor?: LeechMonitor
   /** Independently qualified account jail and Git egress adapter; absence keeps native Git unavailable. */
   accountGitRun?: AccountGitRun
   applicationCatalog?: SwApplicationCatalogSource | null
-  /** No implementation exists; stays null until native qualification. */
+  /** Present on a native Linux host with the worker's interpreter; absence refuses every application write. */
   applicationProvider?: ApplicationArtifactProvider | null
-  composerJobProvider?: ComposerJobProvider | null
-  accountPackageCatalog?: VerifiedPearCatalog
-  admitAccountPackageMutation?: (account: Account) => Promise<void>
+  /** The host job runner's dispatcher for application transactions. */
+  applicationCoordinator?: ApplicationInstallCoordinator | null
+  applicationArtifacts?: StoredApplicationArtifacts | null
+  /** Builds one control snapshot now; absent where the index database cannot be copied. */
+  panelSnapshot?: () => Promise<{ file: string; bytes: number }>
   databaseRemoteAccessNative?: DatabaseRemoteAccessNative
   trustedProxiesProvider?: TrustedProxyNativeProvider
   backupDestinationProvider?: BackupDestinationProbeProvider
@@ -350,12 +427,16 @@ export interface AgentServerDeps {
   backupCredentials?: BackupCredentialStore
   /** Low-priority logical restore of one account database from a staged dump with its expected SHA-256. */
   restoreBackupDatabase?: (account: Account, database: string, inputPath: string, sha256: string) => Promise<void>
+  websiteDatabases?: WebsiteDatabases
+  /** Per-database export, import and rename; absent off a native host with MariaDB. */
+  databaseTransfer?: DatabaseTransferEngine
   /** Independently qualified account keyring runner; absence keeps native OpenPGP unavailable. */
   pgpRunner?: PgpRunner
   benchmarkStore?: BenchmarkStore
   /** The one daemon-owned host job runner; absence keeps host jobs unavailable. */
   hostJobs?: HostJobRunner
-  /** Absent until exclusive cache snapshot/recovery and crash recovery are independently qualified. */
+  releasePackages?: ReleasePackages
+  /** The /var/cache/dnf snapshot provider (ops-package-recovery.ts nativeRhelCacheRecovery); supplied on EL profiles only. */
   rhelCacheRecovery?: RhelCacheRecovery
   /** The /var/lib/rpm snapshot provider (ops-package-recovery.ts nativeRpmDatabaseRecovery); supplied on EL profiles only. */
   rpmDatabaseRecovery?: RhelCacheRecovery
@@ -366,9 +447,12 @@ export interface AgentServerDeps {
   ioResourcePipeline?: CanonicalIoResourcePipeline
   /** Daemon-owned web bandwidth meter; absent off a native host. */
   bandwidthMeter?: BandwidthMeter
+  logRotation?: LogRotation
   /** Latest disk latency from the host metrics collector; absent off a native host. */
   readDiskLatency?: () => DiskLatency
   websiteAnalytics?: WebsiteAnalyticsEngine
+  /** Daemon-owned AWStats and Webalizer runs over the metered site logs; absent off a native host. */
+  webStats?: WebStats
   /** Native upgrade coordinator launcher. Absent: upgrade start is refused with upgrade-coordinator-unavailable. */
   upgradeCoordinator?: UpgradeCoordinator
   os: { id: string; versionId: string; family: string }
@@ -378,8 +462,11 @@ export interface AgentServerDeps {
   homeBaseDir?: string
   /** Provisioned local service credential; there is no unauthenticated mode. */
   agentToken: string
+  /** The one cluster engine, shared with the agent's minute tick. */
+  dnsCluster?: DnsClusterSync | null
   /** Protected MariaDB admin client (MariaDbServiceAdapter); absence reports database observations as unavailable. */
   mariadbAdmin?: MariadbAdminClient
+  dbQuota?: DbQuotaEnforcer
   /**
    * Expected unprivileged API service UID(s). When configured, every request
    * must carry verified kernel SO_PEERCRED identity matching an allowed UID;
@@ -412,6 +499,19 @@ const FILE_AUDIT_ACTIONS: Readonly<Record<string, string>> = {
   restore: 'file.restore',
   'empty-trash': 'file.empty_trash',
   'purge-trash': 'file.purge_trash',
+}
+
+/** One writer per agent: the service serializes changes, so it is built once for the host. */
+const dbProfileServices = new WeakMap<AgentServerDeps, ReturnType<typeof createDbProfiles>>()
+const dbProfilesFor = (deps: AgentServerDeps): ReturnType<typeof createDbProfiles> | null => {
+  const executor = deps.executor, mariadb = deps.mariadbAdmin
+  if (process.platform !== 'linux' || !(executor instanceof LinuxHostExecutor) || !(mariadb instanceof MariaDbServiceAdapter)) return null
+  const held = dbProfileServices.get(deps)
+  if (held) return held
+  const service = createDbProfiles({ host: executor, probeActive: async () => { await mariadb.query(['SELECT 1']) },
+    savedDatabases: async () => { const saved = await deps.store.readSnapshot(); return saved.databases.filter(item => item.engine === 'mariadb').length + saved.databaseUsers.length } })
+  dbProfileServices.set(deps, service)
+  return service
 }
 
 export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
@@ -704,6 +804,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
     }
   }
 
+  const containerLogs = createLogFollower(), containerCatalog = createCtrCatalog(createNodeSwApplicationCatalogFiles(SW_CATALOG_DIRECTORY, 'container-apps'))
   // Any applied change (suspend, terminate, purge) re-checks the owners of live terminals at once.
   if (deps.terminals) {
     const terminals = deps.terminals
@@ -913,7 +1014,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         await assertAccountCaller(caller, account, 'host.account-usage')
         if (!deps.executor) return jsonResponse({ available: false }, 404)
         let resources
-        try { resources = (await deps.store.getPlan(account.planId))?.resources }
+        try { const plan = await deps.store.getPlan(account.planId); resources = plan && effectivePlan(plan, account).resources }
         catch { /* An unread assigned plan leaves enforcement unknown, preserving usage measurements. */ }
         const usage = await readAccountUsage(deps.executor, { username: account.username, uid: account.uid, home: account.home, ...(resources ? { resources } : {}) })
         const metered = deps.bandwidthMeter ? await deps.bandwidthMeter.report().catch(() => null) : null
@@ -940,7 +1041,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           && Number.isInteger(uid)
           && uid >= 20_000
           && uid <= 60_000
-          && home === `/home/${username}`
+          && isAccountHome(home, username)
         if (!confirmed || !account) return jsonResponse({ purged: false, reason: 'target_refused' }, 409)
         const removed = await deps.executor.runCommand(['/usr/sbin/userdel', '-r', '--', username])
         const alreadyGone = /does not exist|no such user|unknown user/i.test(removed.stderr)
@@ -956,6 +1057,13 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if ([...url.searchParams.keys()].some(key => key !== 'path') || url.searchParams.getAll('path').length > 1) return fail('VALIDATION', 'quota observation accepts only one path', { stateChanged: false })
         const path = validateQuotaFilesystem(url.searchParams.get('path') ?? '/home')
         return jsonResponse(await observeHomeUserQuota(argv => deps.executor!.runCommand(argv), path))
+      }
+
+      if (method === 'GET' && pathname === '/host/quota/usage') {
+        await assertRootCaller(caller, 'host.quota.usage')
+        if (!(deps.executor instanceof LinuxHostExecutor)) return fail('PRECONDITION_FAILED', 'quota observation requires the native Linux host executor', { stateChanged: false })
+        if (url.search) return fail('VALIDATION', 'the quota usage read accepts no selector', { stateChanged: false })
+        return jsonResponse(await readQuotaUsage(deps.executor, '/home'))
       }
 
       if (method === 'POST' && pathname === '/host/quota/initialize') {
@@ -1226,6 +1334,42 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (backupRunsResponse) return backupRunsResponse
       const backupCredentialsResponse = await handleBackupCredentialsRoute(req, url, method, { authorize: freshRoot('backup credentials'), store: linuxHost ? deps.backupCredentials ?? null : null })
       if (backupCredentialsResponse) return backupCredentialsResponse
+      const rawServerLogs = await handleRawServerLogsRoute(req, url, method, { assertRoot: freshRoot('raw server logs'), available: linuxHost })
+      if (rawServerLogs) return rawServerLogs
+      if (pathname.startsWith('/host/accounts/repair/')) {
+        const repairExecutor = deps.executor instanceof LinuxHostExecutor ? new LinuxHostExecutor({ timeoutMs: 120_000 }) : null
+        const response = await handleAccountRepairRoute(req, url, method, { assertRoot: freshRoot('account repair'), readSnapshot: () => deps.store.readSnapshot(), run: repairExecutor ? argv => repairExecutor.runCommand(argv) : null,
+          submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null })
+        if (response) return response
+      }
+      if (pathname.startsWith('/host/file-sharing/links/')) {
+        const response = await handleFileShareLinkRoute(req, url, method, { assertRoot: freshRoot('file share link'), principalId: caller.principalId, rootDir: deps.store.rootDir, readAccounts: () => deps.store.listAccounts(), openFile: linuxHost ? openShareFile : null })
+        if (response) return response
+      }
+      const logSecurity = await handleLogSecurityRoute(req, url, method, { assertRoot: freshRoot('log analysis'), readState: () => deps.store.readSnapshot(), readLog: linuxHost ? readProtectedLogFrom : null })
+      if (logSecurity) return logSecurity
+      const databaseLog = await handleDatabaseLogRoute(req, url, method, { assertRoot: freshRoot('database logs'), mariadb: deps.mariadbAdmin ?? null, readTail: readDatabaseLogTail, run: linuxHost ? argv => deps.executor!.runCommand(argv) : null, unit: 'mariadb.service' })
+      if (databaseLog) return databaseLog
+      const applyHomeMove = async (actor: string): Promise<void> => { const applied = await deps.reconciler.reconcile({ actor }); if (applied.status !== 'applied' && applied.status !== 'noop') fail('SERVICE_UNAVAILABLE', 'the host did not apply the account', { stateChanged: true, verificationRequired: true }) }
+      const homeMove = await handleHomeMoveRoute(req, url, method, { assertRoot: freshRoot('rearrange'), host: linuxHost ? nativeHomeMoveHost() : null, getAccount: username => deps.store.getAccountByUsername(username),
+        selinux: linuxHost && deps.os.family === 'rhel',
+        begin: async (account, to, actor) => {
+          await deps.store.beginHomeMove(account.id, to)
+          try { await applyHomeMove(actor) }
+          catch (error) { await deps.store.cancelHomeMove(account.id); await applyHomeMove(actor).catch(() => undefined); throw error }
+        },
+        effects: (account, target, actor) => ({
+          finish: async () => { await deps.store.finishHomeMove(account.id); await applyHomeMove(actor) },
+          cancel: async () => { await deps.store.cancelHomeMove(account.id); await applyHomeMove(actor) },
+          remove: async path => { await deps.executor!.runAction({ kind: 'remove-path', path }) },
+          rewritePaths: async (from, to) => {
+            const plan = await deps.store.getPlan(account.planId)
+            await moveDirectoryPrivacyHome(new JailedFileManager(to, plan ? effectivePlan(plan, account).resources.diskMb : 'unlimited', { account: { ...account, home: to }, ...(deps.accountFileRunner && { runner: deps.accountFileRunner }) }), from, to)
+          },
+        }),
+        activeJobs: async () => deps.hostJobs ? [...await deps.hostJobs.list({ kindPrefix: 'account.rearrange', status: 'queued', limit: 100 }), ...await deps.hostJobs.list({ kindPrefix: 'account.rearrange', status: 'running', limit: 100 })] : [],
+        submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null })
+      if (homeMove) return homeMove
       if (pathname.startsWith('/host/monitoring/')) {
         const benchmark = await handleBenchmarkRoute(req, url, method, { assertRoot: freshRoot('benchmark'), store: benchmarkStore,
           submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null,
@@ -1238,7 +1382,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         const metering = await handleMeteringRoute(req, url, method, { assertRoot: freshRoot('metering'),
           readIo: deps.ioResourcePipeline ? async () => deps.ioResourcePipeline!.readAccounts(await deps.store.readSnapshot()) : null,
           readDiskLatency: deps.readDiskLatency ?? null,
-          bandwidth: deps.bandwidthMeter ?? null })
+          bandwidth: deps.bandwidthMeter ?? null, logRotation: deps.logRotation ?? null })
         if (metering) return metering
         const executor = deps.executor instanceof LinuxHostExecutor ? deps.executor : undefined
         const response = await handleHostMonitoringRoute(req, url, method, {
@@ -1257,10 +1401,13 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null,
         audit: entry => appendAudit(deps.db, { ...entry, principalId: caller.principalId }) })
       if (serviceManagerResponse) return serviceManagerResponse
+      const panelBackupsResponse = await handlePanelBackupsRoute(req, url, method, { assertRoot: freshRoot('panel backup'), stateDir: deps.store.rootDir, run: runBackupCommand, build: deps.panelSnapshot ?? null,
+        mutate: write => deps.store.restoreStateFiles(write), root: defaultBackupArchiveRoot(), reconcile: linuxHost ? actor => deps.reconciler.reconcile({ actor }) : null, audit: entry => appendAudit(deps.db, { ...entry, principalId: caller.principalId }) })
+      if (panelBackupsResponse) return panelBackupsResponse
       const composerResponse = await handleComposerWorkspaceRoute(req, url, method, { assertRoot: freshRoot('composer'), store: deps.store,
-        files: (account, plan) => linuxHost && deps.accountFileRunner ? new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, runner: deps.accountFileRunner }) : null,
+        files: (account, plan) => linuxHost && deps.accountFileRunner ? new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, runner: deps.accountFileRunner }) : null,
         run: linuxHost ? argv => deps.executor!.runCommand(argv) : null,
-        composerJobs: { provider: deps.composerJobProvider ?? null, family: linuxHost ? (deps.os.family === 'debian' ? 'debian' : deps.os.family === 'rhel' ? 'rhel' : null) : null,
+        composerJobs: { family: linuxHost ? (deps.os.family === 'debian' ? 'debian' : deps.os.family === 'rhel' ? 'rhel' : null) : null, phpVersions: () => installedPhpVersions(deps.os.family === 'debian' || deps.os.family === 'rhel' ? deps.os.family : null),
           submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null,
           audit: async entry => { await appendAudit(deps.db, { ...entry, principalId: caller.principalId }) } },
       })
@@ -1292,12 +1439,19 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         files: linuxHost ? { read: path => deps.executor!.readFile(path), write: file => deps.executor!.writeFile(file), remove: path => deps.executor!.removePath(path),
           ensureMapDir: () => deps.executor!.runAction({ kind: 'ensure-dir', path: '/etc/postfix/xpanel/mailx', mode: 0o750, owner: 'root', group: 'postfix' }) } : null,
         readSnapshot: () => deps.store.readSnapshot(),
+        geoip: deps.mailGeoip ?? null,
         submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null,
         // mailfx: the milter, mailbox Sieve scripts and mailing lists apply through a reconciler generation.
         reconcile: linuxHost ? actor => deps.reconciler.reconcile({ actor, scope: { accountId: caller.accountId, resellerId: caller.resellerId } }) : undefined,
         audit: entry => appendAudit(deps.db, { ...entry, principalId: caller.principalId }),
       })
       if (mailxResponse) return mailxResponse
+      const boxTrapperResponse = await handleBoxTrapperRoute(req, url, method, { family: deps.os.family, run: linuxHost ? argv => deps.executor!.runCommand(argv) : null, read: linuxHost ? path => deps.executor!.readFile(path) : null, readSnapshot: () => deps.store.readSnapshot(),
+        assertAccount: async username => { const account = await deps.store.getAccountByUsername(username); if (!account) return fail('NOT_FOUND', 'account not found', { stateChanged: false }); await assertAccountCaller(await authenticateCaller(req), account, 'mail.boxtrapper'); return account } })
+      if (boxTrapperResponse) return boxTrapperResponse
+      const listModerationResponse = await handleListModerationRoute(req, url, method, { stateRoot: deps.store.rootDir, run: linuxHost ? argv => deps.executor!.runCommand(argv) : null, read: linuxHost ? path => deps.executor!.readFile(path) : null, readSnapshot: () => deps.store.readSnapshot(),
+        assertAccount: async username => { const account = await deps.store.getAccountByUsername(username); if (!account) return fail('NOT_FOUND', 'account not found', { stateChanged: false }); await assertAccountCaller(await authenticateCaller(req), account, 'mail.list_moderation'); return account } })
+      if (listModerationResponse) return listModerationResponse
       const mailboxMaintenance = await handleMailboxMaintenanceRoute(req, url, method, {
         assertRoot: freshRoot('mailbox maintenance'),
         run: linuxHost ? argv => deps.executor!.runCommand(argv) : null,
@@ -1306,6 +1460,16 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         audit: entry => appendAudit(deps.db, { ...entry, principalId: caller.principalId }),
       })
       if (mailboxMaintenance) return mailboxMaintenance
+      const mailboxRepair = await handleMailboxRepairRoute(req, url, method, { assertRoot: freshRoot('mailbox repair'), readSnapshot: () => deps.store.readSnapshot(),
+        submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null, audit: entry => appendAudit(deps.db, { ...entry, principalId: caller.principalId }) })
+      if (mailboxRepair) return mailboxRepair
+      const mailTrace = await handleMailTraceRoute(req, url, method, { assertRoot: freshRoot('mail route trace'), dns: nodeMailTraceDns(), connect: smtpGreeting, stateRoot: deps.store.rootDir,
+        run: linuxHost ? argv => deps.executor!.runCommand(argv) : null, readSaved: () => readMailxSaved(deps.store.rootDir), readSnapshot: () => deps.store.readSnapshot() })
+      if (mailTrace) return mailTrace
+      const mailboxAction = await handleMailMailboxActionRoute(req, url, method, { authenticateCaller, run: linuxHost ? argv => deps.executor!.runCommand(argv) : null,
+        assertMailbox: (current, address, features) => assertMailLogMailboxCaller({ principal: id => getPrincipal(deps.db, id), store: deps.store }, current, address, features),
+        submitJob: deps.hostJobs ? (plan, actor) => deps.hostJobs!.submit(plan, actor) : null, listJobs: deps.hostJobs ? () => deps.hostJobs!.list({ kindPrefix: MAIL_REINDEX_JOB_KIND, limit: 100 }) : null })
+      if (mailboxAction) return mailboxAction
       const serverObservation = await handleServerObservationRoute(req, url, method, {
         assertRoot: freshRoot('server observation'),
         run: linuxHost ? argv => deps.executor!.runCommand(argv) : null,
@@ -1314,6 +1478,15 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         readCronDirectory: linuxHost ? () => readdir(SERVER_CRON_DIRECTORY, { withFileTypes: true }) : null,
       })
       if (serverObservation) return serverObservation
+      const serverOperations = await handleServerOperationsRoute(req, url, method, {
+        assertRoot: freshRoot('server operations'), host: linuxHost ? deps.executor! : null, family: linuxHost && (deps.os.family === 'debian' || deps.os.family === 'rhel') ? deps.os.family : null, rootDir: deps.store.rootDir,
+        savedZones: async () => { const saved = await deps.store.readSnapshot(); return zonesExcludingTerminatingAccounts(saved.zones, saved.domains, new Set(saved.accounts.filter(account => account.status === 'terminating').map(account => account.id))).map(zone => zone.name) },
+        listZoneFiles: listHostDirectory, submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null,
+        reconcile: async actor => { const result = await deps.reconciler.reconcile({ actor }); return { ok: result.status === 'applied' || result.status === 'noop', status: result.status } },
+      })
+      if (serverOperations) return serverOperations
+      const hostTools = await handleHostToolsRoute(req, url, method, { assertRoot: freshRoot('host tools'), host: linuxHost ? deps.executor! : null, rootDir: deps.store.rootDir, accounts: async () => (await deps.store.readSnapshot()).accounts, submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null })
+      if (hostTools) return hostTools
       const serverHealth = await handleServerHealthRoute(req, url, method, {
         assertRoot: freshRoot('server health'),
         executor: linuxHost ? deps.executor! : null,
@@ -1322,6 +1495,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         readSaved: () => deps.store.readSnapshot(),
         readResources: deps.ioResourcePipeline ? async () => deps.ioResourcePipeline!.read(await deps.store.readSnapshot()) : null,
         readBandwidth: deps.bandwidthMeter ? () => deps.bandwidthMeter!.report() : null,
+        readLoadThreshold: async () => statusLoadThreshold(await readSavedTweakValues(deps.store.rootDir)),
       })
       if (serverHealth) return serverHealth
       const support = await handleSupportRoute(req, url, method, {
@@ -1335,7 +1509,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       })
       if (support) return support
       const serviceDetailResponse = await handleServiceDetailRoute(req, url, method, {
-        assertRoot: freshRoot('service detail'),
+        assertRoot: freshRoot('service detail'), family: deps.os.family === 'rhel' ? 'rhel' : 'debian',
         host: linuxHost ? { run: argv => deps.executor!.runCommand(argv), readFile: path => deps.executor!.readFile(path), stat: statHostPath, listDirectory: listHostDirectory } : null,
         readState: () => deps.store.readSnapshot(),
       })
@@ -1349,6 +1523,14 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         audit: entry => appendAudit(deps.db, { ...entry, principalId: caller.principalId }),
       })
       if (dnsToolsResponse) return dnsToolsResponse
+      const dnssecResponse = await handleDnssecRoute(req, url, method, { caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), run: linuxHost ? argv => deps.executor!.runCommand(argv) : null, audit: entry => appendAudit(deps.db, entry) })
+      if (dnssecResponse) return dnssecResponse
+      const sshHost = await handleSshHostRoute(req, url, method, { assertRoot: freshRoot('SSH'), run: linuxHost ? argv => deps.executor!.runCommand([...argv]) : null,
+        os: async () => { const release = await readOsRelease(securityExecutor); return release ? profileFor(release) : fail('PRECONDITION_FAILED', 'SSH control requires a trusted supported host profile', { stateChanged: false }) },
+        rootKeys: async () => { const keys = (await (await protectedSecurityObservation()).observeSsh({})).keys; return keys.state === 'unavailable' ? null : keys.items.length + keys.opaqueEntries },
+        selinux: async () => await deps.executor!.readFile('/sys/fs/selinux/enforce') !== null,
+        audit: entry => appendAudit(deps.db, { ...entry, principalId: caller.principalId }), settle: () => new Promise(resolve => setTimeout(resolve, 500)) })
+      if (sshHost) return sshHost
       const securityTools = await handleSecurityToolsRoute(req, url, method, {
         assertRoot: freshRoot('security tools'),
         executor: linuxHost ? deps.executor! : null,
@@ -1356,8 +1538,11 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null,
         jobs: deps.hostJobs ?? null,
         audit: entry => appendAudit(deps.db, { ...entry, principalId: caller.principalId }),
+        scanScope: (home, username) => scanScopeFor(deps.store.rootDir, home, username),
       })
       if (securityTools) return securityTools
+      const webStatsHostResponse = await handleWebStatsHostRoute(req, url, method, { assertRoot: freshRoot('statistics'), store: deps.store, stats: deps.webStats ?? null, bandwidth: deps.bandwidthMeter ?? null })
+      if (webStatsHostResponse) return webStatsHostResponse
       const secProfile = url.pathname.startsWith('/host/sec/') ? secHostProfile() : null
       const secResponse = await handleSecRoute(req, url, method, {
         assertRoot: freshRoot('security'),
@@ -1370,6 +1555,26 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         audit: entry => appendAudit(deps.db, { ...entry, principalId: caller.principalId }),
       })
       if (secResponse) return secResponse
+      const dnsClusterResponse = await handleDnsClusterHostRoute(req, url, method, { assertRoot: freshRoot('dns cluster'), rootDir: deps.store.rootDir, sync: deps.dnsCluster ?? null, store: deps.store, ...(linuxHost ? { signedZone: dnsClusterSignedZone(argv => deps.executor!.runCommand(argv)) } : {}) })
+      if (dnsClusterResponse) return dnsClusterResponse
+      const panelAccessResponse = await handlePanelAccessHostRoute(req, url, method, { assertRoot: freshRoot('panel access'), executor: linuxHost ? deps.executor! : null }); if (panelAccessResponse) return panelAccessResponse
+      const hooksResponse = await handleLifecycleHooksRoute(req, url, method, { rootDir: deps.store.rootDir, runner: linuxHost ? createSystemHookRunner() : null,
+        authenticate: async () => { const fresh = await authenticateCaller(req); if (fresh.principalId !== caller.principalId) fail('FORBIDDEN', 'hook authority changed', { stateChanged: false }); return fresh },
+        audit: entry => appendAudit(deps.db, { ...entry, actor: caller.actor, principalId: caller.principalId }) })
+      if (hooksResponse) return hooksResponse
+      const siteSoftwareResponse = await handleSiteSoftwareHostRoute(req, url, method, { source: deps.applicationCatalog ?? null, artifacts: deps.applicationArtifacts ?? null, authenticate: () => authenticateCaller(req),
+        audit: entry => appendAudit(deps.db, { ...entry, actor: caller.actor, principalId: caller.principalId }) })
+      if (siteSoftwareResponse) return siteSoftwareResponse
+      const siteSoftwareInstances = await handleSiteSoftwareInstancesRoute(req, url, method, { authenticate: () => authenticateCaller(req), store: deps.store, source: deps.applicationCatalog ?? null, provider: deps.applicationProvider ?? null, database: applicationDatabases(deps), coordinator: deps.applicationCoordinator ?? null, artifacts: deps.applicationArtifacts ?? null, instances: readAccountApplications,
+        submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null, audit: entry => appendAudit(deps.db, { ...entry, actor: caller.actor, principalId: caller.principalId }) })
+      if (siteSoftwareInstances) return siteSoftwareInstances
+      const rootIdentity = await handleRootIdentityRoute(req, url, method, { assertRoot: freshRoot('root identity'), family: deps.os.family,
+        run: linuxHost ? argv => deps.executor!.runCommand(argv) : null, accounts: async () => (await deps.store.readSnapshot()).accounts })
+      if (rootIdentity) return rootIdentity
+      if (url.pathname.startsWith('/host/svc/')) {
+        const svcResponse = await handleSvcRoute(req, url, method, svcRouteContext(deps, freshRoot('services'), secHostProfile(), linuxHost, caller.principalId))
+        if (svcResponse) return svcResponse
+      }
       const systemUpdates = await handleSystemUpdatesRoute(req, url, method, {
         assertRoot: freshRoot('system update'),
         family: linuxHost ? (deps.os.family === 'debian' ? 'debian' : deps.os.family === 'rhel' ? 'rhel' : null) : null,
@@ -1385,8 +1590,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       const fileSharing = await handleFileSharingRoute(req, url, method, {
         assertRoot: freshRoot('file sharing'),
         store: deps.store,
-        // Native NFS exportfs/etab provider is not qualified on any host yet; observation and apply stay truthfully unavailable.
-        provider: null,
+        provider: linuxHost ? createNativeFileSharingProvider(argv => deps.executor!.runCommand(argv)) : null,
       })
       if (fileSharing) return fileSharing
       const phpOs = secHostProfile()
@@ -1411,15 +1615,20 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null,
       })
       if (softwareCenter) return softwareCenter
+      const releasePackages = await handleReleasePackagesRoute(req, url, method, { assertRoot: freshRoot('release packages'), packages: deps.releasePackages ?? null })
+      if (releasePackages) return releasePackages
       const swJobs = deps.hostJobs ? async (plan: HostJobPlan, actor: string) => (await deps.hostJobs!.submit(plan, actor)).job : null
       const swContainers = await handleSwContainersRoute(req, url, method, { assertRoot: freshRoot('containers'), run: linuxHost ? argv => deps.executor!.runCommand([...argv]) : null,
         binaryPresent: linuxHost ? path => stat(path).then(info => info.isFile(), () => false) : null, submitJob: swJobs, audit: async entry => { await appendAudit(deps.db, { ...entry, principalId: caller.principalId }) } })
       if (swContainers) return swContainers
+      const ctrWorkspace = await handleCtrRoute(req, url, method, { assertRoot: freshRoot('containers'), store: deps.store, host: linuxHost ? createRuntimeHost(deps.executor!) : null, catalog: containerCatalog, follow: linuxHost ? containerLogs : null, reconcile: linuxHost ? actor => deps.reconciler.reconcile({ actor }) : null, run: linuxHost ? argv => deps.executor!.runCommand([...argv]) : null,
+        binaryPresent: linuxHost ? path => stat(path).then(info => info.isFile(), () => false) : null, submitJob: swJobs, audit: async entry => { await appendAudit(deps.db, { ...entry, principalId: caller.principalId }) } })
+      if (ctrWorkspace) return ctrWorkspace
       const swAddons = await handleSwAddonServicesRoute(req, url, method, { assertRoot: freshRoot('add-on services'), run: linuxHost ? argv => deps.executor!.runCommand([...argv]) : null,
         submitJob: swJobs, audit: async entry => { await appendAudit(deps.db, { ...entry, principalId: caller.principalId }) } })
       if (swAddons) return swAddons
       const swDeployments = await handleSwDeploymentsRoute(req, url, method, { assertRoot: freshRoot('deployments'), store: deps.store, run: deps.accountGitRun ?? null,
-        files: linuxHost && deps.accountFileRunner ? (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, runner: deps.accountFileRunner! }) : null,
+        files: linuxHost && deps.accountFileRunner ? (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, runner: deps.accountFileRunner! }) : null,
         audit: async entry => { await appendAudit(deps.db, { ...entry, principalId: caller.principalId }) } })
       if (swDeployments) return swDeployments
       if (pathname === '/host/firewall/bans' || pathname === '/host/firewall/bans/unban') {
@@ -1459,6 +1668,22 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         })
         if (response) return response
       }
+      if (pathname === '/host/mail/log/report' || pathname === '/host/mail/log/outcomes' || pathname.startsWith('/host/mail/log/account/')) {
+        const reportExecutor = deps.executor instanceof LinuxHostExecutor ? new LinuxHostExecutor({ maxOutputBytes: MAIL_LOG_MAX_OUTPUT_BYTES }) : null
+        const response = await handleMailReportRoute(req, url, method, { authenticateCaller, assertRootCaller, readSnapshot: () => deps.store.readSnapshot(), run: reportExecutor ? argv => reportExecutor.runCommand(argv) : null,
+          assertAccount: async (current, username) => {
+            const account = await deps.store.getAccountByUsername(username)
+            if (!account) return fail('NOT_FOUND', 'account not found', { stateChanged: false })
+            await assertAccountCaller(current, account, 'mail.track_delivery')
+            return { domains: (await deps.store.listDomains({ accountId: account.id })).filter(domain => domain.accountId === account.id).map(domain => domain.name) }
+          } })
+        if (response) return response
+      }
+      if (pathname === '/host/ftp/log/raw') {
+        const ftpLogExecutor = deps.executor instanceof LinuxHostExecutor ? new LinuxHostExecutor({ maxOutputBytes: FTP_LOG_MAX_OUTPUT_BYTES }) : null
+        const response = await handleFtpRawLogRoute(req, url, method, { assertRoot: freshRoot('raw FTP log'), readState: () => deps.store.readSnapshot(), run: ftpLogExecutor ? argv => ftpLogExecutor.runCommand(argv) : null })
+        if (response) return response
+      }
       if (pathname === '/host/ftp/log') {
         // journalctl JSON for 20000 records exceeds the default 2 MiB executor buffer.
         const ftpLogExecutor = deps.executor instanceof LinuxHostExecutor ? new LinuxHostExecutor({ maxOutputBytes: FTP_LOG_MAX_OUTPUT_BYTES }) : null
@@ -1486,7 +1711,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         await assertRootCaller(caller, 'host.services.restart')
         if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
         const os = secHostProfile() ?? fail('PRECONDITION_FAILED', 'service restarts need a supported host profile for their configuration tests', { stateChanged: false })
-        const service = await restartHostService(argv => deps.executor!.runCommand(argv), serviceRestart[1]!, os)
+        const service = await restartHostService(argv => deps.executor!.runCommand(argv), serviceRestart[1]!, os, disabledRoleUnits(await readServerRoles(deps.store.rootDir)))
         return jsonResponse({ service })
       }
 
@@ -1498,6 +1723,10 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       })
       if (mariadbAdminResponse) return mariadbAdminResponse
 
+      const dbMaintenanceResponse = await handleDbMaintenanceRoute(req, url, method, { caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller, audit: entry => appendAudit(deps.db, entry), ...(deps.mariadbAdmin ? { mariadb: deps.mariadbAdmin } : {}), ...(deps.executor instanceof LinuxHostExecutor ? { host: deps.executor } : {}) })
+      if (dbMaintenanceResponse) return dbMaintenanceResponse
+      const dbAdminToolsResponse = await handleDbAdminToolsRoute(req, url, method, { caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller, audit: entry => appendAudit(deps.db, entry), store: deps.store, ...(deps.mariadbAdmin ? { mariadb: deps.mariadbAdmin } : {}), ...(deps.databaseRemoteAccessNative ? { native: deps.databaseRemoteAccessNative } : {}), ...(deps.executor instanceof LinuxHostExecutor ? { host: deps.executor, runAction: (action: HostAction) => deps.executor!.runAction(action) } : {}) })
+      if (dbAdminToolsResponse) return dbAdminToolsResponse
       const databaseTuningResponse = await handleDatabaseTuningRoute(req, url, method, {
         caller, reauthenticate: () => authenticateCaller(req), assertRoot: assertRootCaller,
         ...(deps.mariadbAdmin ? { mariadb: deps.mariadbAdmin } : {}),
@@ -1509,8 +1738,12 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       const dbEnginesResponse = await handleDbEnginesRoute(req, url, method, { ...dbAccount, assertRoot: freshRoot('database engines'), family: dbFamily, run: dbRun, readFile: linuxHost ? nodeDbSignonFs.readFile : null,
         runPostgresql: linuxHost ? statements => deps.executor!.runAction({ kind: 'sql', engine: 'postgresql', statements }) : null })
       if (dbEnginesResponse) return dbEnginesResponse
+      const dbProfilesResponse = await handleDbProfilesRoute(req, url, method, { assertRoot: freshRoot('database profiles'), audit: entry => appendAudit(deps.db, { ...entry, principalId: caller.principalId }), service: dbProfilesFor(deps) })
+      if (dbProfilesResponse) return dbProfilesResponse
       const dbSignonResponse = await handleDbSignonRoute(req, url, method, { ...dbAccount, assertRoot: freshRoot('database web clients'), family: dbFamily, run: dbRun, fs: linuxHost ? nodeDbSignonFs : null, sql: deps.mariadbAdmin ?? null, audit: entry => appendAudit(deps.db, entry) })
       if (dbSignonResponse) return dbSignonResponse
+      const pgSignonResponse = await handlePgSignonRoute(req, url, method, { ...dbAccount, family: dbFamily, run: dbRun, fs: linuxHost ? nodeDbSignonFs : null, script: linuxHost ? statements => deps.executor!.runAction({ kind: 'sql', engine: 'postgresql', statements }) : null, audit: entry => appendAudit(deps.db, entry) })
+      if (pgSignonResponse) return pgSignonResponse
       const dbUpgradeResponse = await handleDbUpgradeRoute(req, url, method, {
         assertRoot: freshRoot('database upgrade'), family: dbFamily, run: dbRun,
         sql: deps.mariadbAdmin ? { version: async () => parseMariadbVersion(await deps.mariadbAdmin!.query([MARIADB_ADMIN_VERSION_SQL])) } : null,
@@ -1518,6 +1751,13 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null,
       })
       if (dbUpgradeResponse) return dbUpgradeResponse
+      const dbServicesResponse = await handleDbServicesRoute(req, url, method, { assertRoot: freshRoot('database services'), family: dbFamily, run: dbRun, readFile: linuxHost ? nodeDbSignonFs.readFile : null, host: deps.executor instanceof LinuxHostExecutor ? deps.executor : null, stateRoot: deps.store.rootDir,
+        runPostgresql: linuxHost ? statements => deps.executor!.runAction({ kind: 'sql', engine: 'postgresql', statements }) : null, submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null })
+      if (dbServicesResponse) return dbServicesResponse
+      const dbQuotaResponse = await handleDbQuotaRoute(url, method, { assertRoot: freshRoot('database limits'), enforcer: deps.dbQuota ?? null })
+      if (dbQuotaResponse) return dbQuotaResponse
+      const phpMyAdminAccessResponse = await handlePhpMyAdminAccessRoute(url, method, { assertRoot: freshRoot('phpMyAdmin access'), run: dbRun, os: secHostProfile() })
+      if (phpMyAdminAccessResponse) return phpMyAdminAccessResponse
 
       const accountCronAdmission = /^\/accounts\/([a-z][a-z0-9]{0,15})\/cron\/admission$/.exec(pathname)
       if (accountCronAdmission) {
@@ -1594,6 +1834,14 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         }
       }
 
+      const davExchange = /^\/accounts\/([a-z][a-z0-9]{0,15})\/dav-exchange$/.exec(pathname)
+      if (davExchange && method === 'POST') {
+        const account = await deps.store.getAccountByUsername(davExchange[1]!)
+        if (!account) return fail('NOT_FOUND', 'account not found')
+        await assertAccountCaller(caller, account, 'dav.exchange')
+        return await handleDavExchange(req, { account, listServiceUsers: accountId => deps.store.listServiceUsers(accountId) })
+      }
+
       const accountBackupWorkspace = /^\/accounts\/([a-z][a-z0-9]{0,15})\/backup-workspace(?:\/|$)/.exec(pathname)
       if (accountBackupWorkspace) {
         if (caller.role !== 'user' || !caller.accountId) return fail('FORBIDDEN', 'account backups require the signed-in account owner')
@@ -1615,7 +1863,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (transferTaskResponse) return transferTaskResponse
       const convertAddonFilesResponse = await handleConvertAddonFilesRoute(req, url, method, {
         authorize: action => assertRootCaller(caller, action), store: deps.store, audit: entry => appendAudit(deps.db, entry), caller: { actor: caller.actor, principalId: caller.principalId },
-        files: deps.executor instanceof LinuxHostExecutor && deps.accountFileRunner ? (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, runner: deps.accountFileRunner! }) : null,
+        files: deps.executor instanceof LinuxHostExecutor && deps.accountFileRunner ? (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, runner: deps.accountFileRunner! }) : null,
       })
       if (convertAddonFilesResponse) return convertAddonFilesResponse
 
@@ -1737,7 +1985,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           resellerId: account.ownerId ?? null,
           onEvent: (ev) => deps.reconciler.emit(ev),
         })
-        return jsonResponse(snap)
+        return jsonResponse(await deps.webStats?.trafficView(snap, account, domain, deps.store) ?? snap)
       }
 
       const htaccessMatch = /^\/accounts\/([a-z][a-z0-9]{0,15})\/htaccess\/([0-9a-f-]{36})$/i.exec(pathname)
@@ -1769,7 +2017,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
               if (requestedUsername !== username || requestedDomainId !== domainId) return fail('FORBIDDEN', 'the .htaccess request target changed', { stateChanged: false })
               return resolveTarget()
             },
-            files: () => new JailedFileManager(resolveAccountHome(fresh.home, fresh.username), plan?.resources.diskMb ?? 'unlimited', { account: fresh,
+            files: () => new JailedFileManager(resolveAccountHome(fresh.home, fresh.username), plan ? effectivePlan(plan, fresh).resources.diskMb : 'unlimited', { account: fresh,
               ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
             ...(validator ? { validator } : {}), probe: probeHtaccessTarget })
           const result = await workspace.handle(username, domainId, body)
@@ -1800,7 +2048,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           }
           const plan = await authorize(), settings = await deps.store.getServerSettings()
           const result = await runDirectoryPrivacyRequest({ account: fresh, domains: await deps.store.listDomains({ accountId: fresh.id }), settings, request: body,
-            files: new JailedFileManager(resolveAccountHome(fresh.home, fresh.username), plan.resources.diskMb, { account: fresh, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
+            files: new JailedFileManager(resolveAccountHome(fresh.home, fresh.username), effectivePlan(plan, fresh).resources.diskMb, { account: fresh, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
             authorize: async () => { await authorize() },
             relabelPasswords: () => relabelAccountPaths(deps.executor!, deps.os.family, fresh.username, [fresh.home + '/.htpasswds']),
             ...(settings ? { probe: (domain: string, path: string) => probeHtaccessTarget({ engine: settings.engine, backendPort: settings.backendPort, domainName: domain }, path) } : {}) })
@@ -1813,14 +2061,44 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         })
       }
 
+      const siteQuotaResponse = await handleSiteQuotaRoute(url, method, { caller, store: deps.store, run: argv => deps.executor!.runCommand(argv) }); if (siteQuotaResponse) return siteQuotaResponse
+      const leechResponse = await handleLeechRoute(req, url, method, { caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), monitor: deps.leechMonitor ?? null, readBody: readObjectBody }); if (leechResponse) return leechResponse
+      const accountDbMaintenanceResponse = await handleAccountDbMaintenanceRoute(req, url, method, { caller, store: deps.store, assertAccount: assertAccountCaller, audit: entry => appendAudit(deps.db, entry), ...(deps.mariadbAdmin ? { mariadb: deps.mariadbAdmin } : {}) })
+      if (accountDbMaintenanceResponse) return accountDbMaintenanceResponse
       const accountSshResponse = await handleAccountSshRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), audit: entry => appendAudit(deps.db, entry),
-        files: (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
+        files: (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
       })
       if (accountSshResponse) return accountSshResponse
+      const sslStoreResponse = await handleSslStoreRoute(req, url, method, {
+        caller, store: deps.store, audit: entry => appendAudit(deps.db, entry),
+        authorizeCaller: async account => {
+          const principal = await getPrincipal(deps.db, caller.principalId)
+          if (!principal || principal.disabled || principal.id !== caller.principalId || principal.kind === 'user' && (principal.accountId !== account.id || principal.username !== account.username)) return fail('FORBIDDEN', 'the current account caller is unavailable', { stateChanged: false })
+          await assertAccountCaller({ principalId: principal.id, actor: principal.username, role: principal.kind, accountId: principal.accountId, resellerId: principal.kind === 'reseller' ? principal.id : null }, account, 'ssl-store')
+        },
+        files: (account, plan) => process.platform === 'linux' && deps.executor instanceof LinuxHostExecutor && deps.accountFileRunner ? new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, runner: deps.accountFileRunner }) : null,
+        run: process.platform === 'linux' && deps.executor instanceof LinuxHostExecutor ? createSslStoreRun(argv => deps.executor!.runCommand(argv)) : null,
+      })
+      if (sslStoreResponse) return sslStoreResponse
+      const rootSslStoreResponse = await handleRootSslStoreRoute(req, url, method, {
+        caller, audit: entry => appendAudit(deps.db, entry),
+        authorizeRoot: async () => {
+          const principal = await getPrincipal(deps.db, caller.principalId)
+          if (!principal || principal.disabled || principal.kind !== 'root' || principal.id !== caller.principalId) return fail('FORBIDDEN', 'root is required for the server SSL storage', { stateChanged: false })
+          await assertRootCaller(caller, 'ssl-store')
+        },
+        executor: process.platform === 'linux' && deps.executor instanceof LinuxHostExecutor ? deps.executor : null,
+        opensslAvailable: existsSync('/usr/bin/openssl'),
+        hostname: async () => (await deps.store.getServerSettings())?.hostname ?? null,
+      })
+      if (rootSslStoreResponse) return rootSslStoreResponse
+      const emailDiskUsage = await handleEmailDiskUsageRoute(req, url, method, { caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), audit: entry => appendAudit(deps.db, entry),
+        run: deps.executor instanceof LinuxHostExecutor ? argv => deps.executor!.runCommand(argv) : null })
+      if (emailDiskUsage) return emailDiskUsage
       const accountGitResponse = await handleAccountGitRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), audit: entry => appendAudit(deps.db, entry),
-        files: (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
+        files: (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
         run: deps.accountGitRun ?? null,
       })
       if (accountGitResponse) return accountGitResponse
@@ -1828,20 +2106,44 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         readEdgeMain: process.platform === 'linux' && deps.executor instanceof LinuxHostExecutor ? () => deps.executor!.readFile(profileFor('ID=' + deps.os.id + '\nVERSION_ID=' + deps.os.versionId).paths.nginxRoot + '/nginx.conf') : null })
       if (swOptimize) return swOptimize
       const swApplications = await handleSwApplicationsRoute(req, url, method, { caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId),
-        catalog: deps.applicationCatalog ?? null, provider: deps.applicationProvider ?? null,
+        catalog: deps.applicationCatalog ?? null, offered: () => readSiteSoftwareOffer(deps.store.rootDir), provider: deps.applicationProvider ?? null, database: applicationDatabases(deps), coordinator: deps.applicationCoordinator ?? null, instances: readAccountApplications,
         submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null, audit: entry => appendAudit(deps.db, entry) })
       if (swApplications) return swApplications
+      const applicationProjects = await handleApplicationProjectsRoute(req, url, method, { caller, assertRoot: freshRoot('application projects'), store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId),
+        os: profileFor('ID=' + deps.os.id + '\nVERSION_ID=' + deps.os.versionId), host: linuxHost ? createRuntimeHost(deps.executor!) : null,
+        files: linuxHost && deps.accountFileRunner ? (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, runner: deps.accountFileRunner! }) : null,
+        reconcile: linuxHost ? actor => deps.reconciler.reconcile({ actor }) : null, audit: entry => appendAudit(deps.db, entry) })
+      if (applicationProjects) return applicationProjects
       const accountRuntime = await handleAccountRuntimeRoute(req, url, method, { caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId),
         os: profileFor('ID=' + deps.os.id + '\nVERSION_ID=' + deps.os.versionId), host: linuxHost ? createRuntimeHost(deps.executor!) : null,
-        files: linuxHost && deps.accountFileRunner ? (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, runner: deps.accountFileRunner! }) : null,
+        files: linuxHost && deps.accountFileRunner ? (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, runner: deps.accountFileRunner! }) : null,
         reconcile: linuxHost ? actor => deps.reconciler.reconcile({ actor, scope: { accountId: caller.accountId, resellerId: caller.resellerId } }) : null,
         audit: entry => appendAudit(deps.db, entry) })
       if (accountRuntime) return accountRuntime
+      const ftpLogExecutor = deps.executor instanceof LinuxHostExecutor ? new LinuxHostExecutor({ maxOutputBytes: FTP_LOG_MAX_OUTPUT_BYTES }) : null
+      const ftpAccountResponse = await handleFtpAccountRoute(req, url, method, {
+        caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), now: () => new Date(),
+        run: deps.executor instanceof LinuxHostExecutor ? argv => deps.executor!.runCommand(argv) : null,
+        readLog: ftpLogExecutor ? (since, until) => observeFtpLog({ run: argv => ftpLogExecutor.runCommand(argv), readState: () => deps.store.readSnapshot(), since, until }) : null,
+        files: deps.executor instanceof LinuxHostExecutor && deps.accountFileRunner ? (account, plan) => anonymousFtpFiles(new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, runner: deps.accountFileRunner! }), action => deps.executor!.runAction(action), account.username) : null,
+        audit: async (account, action, detail) => { await appendAudit(deps.db, { actor: caller.actor, principalId: caller.principalId, action, target: 'account:' + account.username, detail, outcome: 'ok' }) },
+      })
+      if (ftpAccountResponse) return ftpAccountResponse
+      const ownerTools = await handleOwnerToolsRoute(req, url, method, { caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId),
+        os: profileFor('ID=' + deps.os.id + '\nVERSION_ID=' + deps.os.versionId), host: linuxHost ? createRuntimeHost(deps.executor!) : null,
+        files: linuxHost && deps.accountFileRunner ? (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, runner: deps.accountFileRunner! }) : null,
+        services: linuxHost ? () => readHostServices(argv => deps.executor!.runCommand(argv)) : null, panelVersion: process.env.XPANEL_VERSION ?? null, audit: entry => appendAudit(deps.db, entry) })
+      if (ownerTools) return ownerTools
+      const websiteBackups = await handleWebsiteBackupsRoute(req, url, method, { caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), databases: deps.websiteDatabases ?? null, linuxHost, audit: entry => appendAudit(deps.db, entry), sendEmail: async (to, subject, text) => { await sendmailAlert('xpanel@' + (await deps.store.getServerSettings())!.hostname, to, subject, text) } })
+      if (websiteBackups) return websiteBackups
+      const forwardCertificate = await handleForwardCertificateRoute(req, url, method, { executor: deps.executor instanceof LinuxHostExecutor ? deps.executor : null, rootDir: deps.store.rootDir, assertRoot: async () => { await assertRootCaller(await authenticateCaller(req), 'domain_forward.certificate') }, certificates: async () => (await deps.store.readSnapshot()).certificates })
+      if (forwardCertificate) return forwardCertificate
+      const databaseTransfer = await handleDatabaseTransferRoute(req, url, method, { caller, store: deps.store, engine: deps.databaseTransfer ?? null })
+      if (databaseTransfer) return databaseTransfer
       const accountPackagesResponse = await handleAccountPackagesRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), audit: entry => appendAudit(deps.db, entry),
-        files: (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
-        catalog: deps.accountPackageCatalog ?? null,
-        ...(deps.admitAccountPackageMutation ? { admitMutation: deps.admitAccountPackageMutation } : {}),
+        files: (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
+        host: linuxHost && (deps.os.family === 'debian' || deps.os.family === 'rhel') ? accountPearHost(deps.executor!, deps.os.family) : null,
       })
       if (accountPackagesResponse) return accountPackagesResponse
       const remoteDatabaseResponse = await handleDatabaseRemoteAccessRoute(req, url, method, {
@@ -1852,17 +2154,18 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (remoteDatabaseResponse) return remoteDatabaseResponse
       const accountPgpResponse = await handleAccountPgpRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), audit: entry => appendAudit(deps.db, entry),
-        files: (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
+        files: (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
         runner: deps.pgpRunner ?? null,
       })
       if (accountPgpResponse) return accountPgpResponse
       const sitePublisherResponse = await handleSitePublisherAgentRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), audit: entry => appendAudit(deps.db, entry),
-        files: (account, plan) => deps.accountFileRunner ? new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, runner: deps.accountFileRunner }) : null,
+        files: (account, plan) => deps.accountFileRunner ? new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, runner: deps.accountFileRunner }) : null,
       })
       if (sitePublisherResponse) return sitePublisherResponse
       const terminalResponse = await handleTerminalRoute(req, url, method, {
-        caller, terminals: deps.terminals ?? null, store: deps.store, assertRootCaller,
+        forkBombLimits: async () => (await readSvcPolicy(deps.store.rootDir, 'fork-bomb'))?.enabled === true,
+        caller, terminals: deps.terminals ?? null, store: deps.store, assertRootCaller, ...(linuxHost ? { containerTerminal: (username: string, id: string) => resolveContainerTerminal({ store: deps.store, host: createRuntimeHost(deps.executor!) }, username, id) } : {}),
       })
       if (terminalResponse) return terminalResponse
       const accountLogsResponse = await handleAccountLogsRoute(req, url, method, {
@@ -1870,7 +2173,10 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         readTail: process.platform === 'linux' && deps.executor instanceof LinuxHostExecutor ? readProtectedLogTail : null,
       })
       if (accountLogsResponse) return accountLogsResponse
+      const webStatsResponse = await handleWebStatsRoute(req, url, method, { caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), stats: deps.webStats ?? null })
+      if (webStatsResponse) return webStatsResponse
       const accountVirusScanResponse = await handleAccountVirusScanRoute(req, url, method, {
+        scanScope: (home, username) => scanScopeFor(deps.store.rootDir, home, username),
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), audit: entry => appendAudit(deps.db, entry),
         run: process.platform === 'linux' && deps.executor instanceof LinuxHostExecutor ? argv => deps.executor!.runCommand(argv) : null,
         jobs: deps.hostJobs ?? null, submitJob: deps.hostJobs ? async (plan, actor) => (await deps.hostJobs!.submit(plan, actor)).job : null,
@@ -1878,13 +2184,14 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (accountVirusScanResponse) return accountVirusScanResponse
       const networkToolsResponse = await handleNetworkToolsRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId),
+        traceRouteAllowed: async () => (await readSvcPolicy(deps.store.rootDir, 'traceroute'))?.allowed !== false,
         host: process.platform === 'linux' && deps.executor instanceof LinuxHostExecutor ? systemNetworkToolsHost(argv => deps.executor!.runCommand(argv)) : null,
       })
       if (networkToolsResponse) return networkToolsResponse
       const backupFilesResponse = await handleBackupFileRestoreRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), audit: entry => appendAudit(deps.db, entry),
         root: deps.executor instanceof LinuxHostExecutor ? process.env.XPANEL_BACKUP_DIR || DEFAULT_BACKUP_DIR : null,
-        files: (account, plan) => deps.accountFileRunner ? new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, runner: deps.accountFileRunner }) : null,
+        files: (account, plan) => deps.accountFileRunner ? new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, runner: deps.accountFileRunner }) : null,
       })
       if (backupFilesResponse) return backupFilesResponse
       const backupComponentsResponse = await handleComponentRestoreRoute(req, url, method, {
@@ -1895,12 +2202,12 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           if (result.status === 'failed') fail('CONFIG_TEST_FAILED', 'the restored zones could not be applied')
         },
         root: deps.executor instanceof LinuxHostExecutor ? process.env.XPANEL_BACKUP_DIR || DEFAULT_BACKUP_DIR : null,
-        files: (account, plan) => deps.accountFileRunner ? new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, runner: deps.accountFileRunner }) : null,
+        files: (account, plan) => deps.accountFileRunner ? new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, runner: deps.accountFileRunner }) : null,
       })
       if (backupComponentsResponse) return backupComponentsResponse
       const stagingResponse = await handleStagingRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), audit: entry => appendAudit(deps.db, entry),
-        files: (account, plan) => deps.executor instanceof LinuxHostExecutor && deps.accountFileRunner ? new JailedFileManager(resolveAccountHome(account.home, account.username), plan.resources.diskMb, { account, runner: deps.accountFileRunner }) : null,
+        files: (account, plan) => deps.executor instanceof LinuxHostExecutor && deps.accountFileRunner ? new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, runner: deps.accountFileRunner }) : null,
       })
       if (stagingResponse) return stagingResponse
       const accountDatabaseInsightsResponse = await handleAccountDatabaseInsightsRoute(req, url, method, {
@@ -1918,7 +2225,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         await assertAccountCaller(caller, account, 'files')
         const plan = await deps.store.getPlan(account.planId)
         const homeRoot = resolveAccountHome(account.home, account.username)
-        const fm = new JailedFileManager(homeRoot, plan?.resources.diskMb ?? 'unlimited', {
+        const fm = new JailedFileManager(homeRoot, plan ? effectivePlan(plan, account).resources.diskMb : 'unlimited', {
           account,
           ...(deps.accountFileRunner && { runner: deps.accountFileRunner }),
         })
@@ -2255,7 +2562,7 @@ export const listenAgentSocket = async (
       res.once('close', () => abort.abort())
       req.once('aborted', () => abort.abort())
       // Long-lived output streams: the event feed and a terminal session's output.
-      const isEventsStream = (req.url ?? '').startsWith('/internal/events') || /^\/terminal\/sessions\/[0-9a-f-]{36}\/output$/.test(req.url ?? '')
+      const isEventsStream = (req.url ?? '').startsWith('/internal/events') || /^\/terminal\/sessions\/[0-9a-f-]{36}\/output$/.test(req.url ?? '') || (req.url ?? '').startsWith('/host/software/containers/log-stream?')
       if (!isEventsStream) {
         inFlightRequests += 1
       }

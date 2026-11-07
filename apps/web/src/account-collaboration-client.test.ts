@@ -4,7 +4,7 @@ import { renderAccountCollaborationWorkspace } from './board-port/account-collab
 import { ACCOUNT_COLLABORATION_CLIENT_BINDING, readAccountCollaboration } from './account-collaboration-client.ts'
 
 const mailbox = 'inbox@owner.example.test', sibling = 'sibling@owner.example.test'
-const initial = () => ({ context: { account: 'owner' }, source: 'saved-mailbox-metadata', mailboxes: [{ mailbox, revision: 'a'.repeat(64), canCreateCalendar: true, contacts: { count: 2, groupCount: 1 }, calendars: [{ name: 'Work', color: '#4f6bed', timezone: 'UTC', eventCount: 1, shares: [{ mailbox: sibling, permission: 'read' }] }] }, { mailbox: sibling, revision: 'c'.repeat(64), canCreateCalendar: true, contacts: { count: 0, groupCount: 0 }, calendars: [] }], capabilities: { createCalendar: true, caldav: false, carddav: false, addressBookCollections: false, taskLists: false, protectedDefaults: false }, application: { status: 'saved_metadata', nativeApplied: false, syncVerified: false } })
+const initial = () => ({ context: { account: 'owner' }, source: 'dav-store', mailboxes: [{ mailbox, revision: 'a'.repeat(64), canCreateCalendar: true, contacts: { count: 2, groupCount: 1 }, calendars: [{ name: 'Work', color: '#4f6bed', timezone: 'UTC', eventCount: 1, shares: [{ mailbox: sibling, permission: 'read' }] }] }, { mailbox: sibling, revision: 'c'.repeat(64), canCreateCalendar: true, contacts: { count: 0, groupCount: 0 }, calendars: [] }], capabilities: { createCalendar: true, caldav: true, carddav: true, addressBookCollections: true, taskLists: true, protectedDefaults: true }, application: { status: 'dav_store', nativeApplied: true, syncVerified: false } })
 const clone = <T>(raw: T): T => JSON.parse(JSON.stringify(raw)) as T
 const tick = () => new Promise(resolve => setTimeout(resolve, 0))
 const control = <T extends HTMLElement = HTMLElement>(key: string): T => document.querySelector<T>('[data-collaboration-' + key + ']')!
@@ -42,7 +42,7 @@ describe('account collaboration metadata and actual create request binding', () 
     expect(readAccountCollaboration(initial())?.mailboxes).toHaveLength(2)
     const foreign = initial(); foreign.mailboxes[0]!.calendars[0]!.shares[0]!.mailbox = 'foreign@other.example.test'
     expect(readAccountCollaboration(foreign)).toBeNull()
-    expect(readAccountCollaboration({ ...initial(), application: { status: 'saved_metadata', nativeApplied: false, syncVerified: true } })).toBeNull()
+    expect(readAccountCollaboration({ ...initial(), application: { status: 'dav_store', nativeApplied: true, syncVerified: true } })).toBeNull()
     expect(ACCOUNT_COLLABORATION_CLIENT_BINDING).not.toMatch(/fetch\(|innerHTML/)
     expect(() => new Function('return ' + ACCOUNT_COLLABORATION_CLIENT_BINDING)()).not.toThrow()
   })
@@ -51,6 +51,18 @@ describe('account collaboration metadata and actual create request binding', () 
     await f.boot()
     expect(control('collections').textContent).toContain('<img src=x onerror=alert(1)>'); expect(document.querySelector('img')).toBeNull()
     expect(control('shares').textContent).toContain('Read only'); expect(control('collections').querySelector('bdi[dir=ltr]')).not.toBeNull()
+  })
+  it('shows the oversized mailbox as refused beside the rows it could read', async () => {
+    const f = fixture(), refused = { mailbox: sibling, refused: 'dav_store_too_large' }
+    f.source().mailboxes.splice(1, 1, refused as never)
+    expect(readAccountCollaboration(f.source())?.mailboxes).toHaveLength(2)
+    expect(readAccountCollaboration({ ...f.source(), mailboxes: [{ mailbox: sibling, refused: 'other' }] })).toBeNull()
+    await f.boot()
+    expect(control('collections').textContent).toContain('Work'); expect(control('collections').textContent).toContain(sibling + '\u2069: This mailbox’s calendars and contacts are too large to open here.')
+    expect(control('status').dataset.state).toBe('failed'); expect(control('status').textContent).toContain(sibling)
+    expect(control<HTMLSelectElement>('mailbox').querySelector<HTMLOptionElement>('option[value="' + sibling + '"]')!.disabled).toBe(true)
+    expect(control<HTMLSelectElement>('mailbox').value).toBe(mailbox)
+    edit(); expect(control<HTMLButtonElement>('create').disabled).toBe(false)
   })
   it('keeps unavailable components visible and sends no session request', async () => {
     document.body.innerHTML = '<section data-capability-state="unavailable">' + renderAccountCollaborationWorkspace({ locale: 'ar', canManage: false }) + '</section>'

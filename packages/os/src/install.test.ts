@@ -227,6 +227,14 @@ describe('RHEL install plan', () => {
     expect(new Set(pkgs).size).toBe(pkgs.length)
   })
 
+  it('installs the build inputs of the Dovecot search index plugin on EL only', () => {
+    const inputs = ['dovecot-devel', 'xapian-core-devel', 'libicu-devel', 'sqlite-devel', 'gcc-c++', 'autoconf', 'automake', 'libtool']
+    const el = execs(installPlan(centos9, { ...full, apacheMpm: 'prefork' })).find(a => a.includes('httpd'))!
+    for (const p of inputs) expect(el).toContain(p)
+    const deb = installed(installPlan(ubuntu24, full))
+    for (const p of inputs) expect(deb).not.toContain(p)
+  })
+
   it('initialises PostgreSQL once, guarded, before starting it', () => {
     const plan = installPlan(centos9, { ...full, apacheMpm: 'prefork' })
     const initdb = indexOf(plan, execWith('/usr/bin/postgresql-setup', '--initdb'))
@@ -286,7 +294,7 @@ describe('optional services and engines', () => {
   it('installs several PHP versions side by side', () => {
     const plan = installPlan(ubuntu24, { ...full, phpVersions: ['7.4', '8.1', '8.4'] })
     for (const p of ['php7.4-fpm', 'php7.4-json', 'php8.1-fpm', 'php8.4-fpm']) expect(installed(plan)).toContain(p)
-    expect(unitsFor(plan, 'disable')).toEqual(['php7.4-fpm', 'php8.1-fpm', 'php8.4-fpm'])
+    expect(unitsFor(plan, 'disable')).toEqual(['php7.4-fpm', 'php8.1-fpm', 'php8.4-fpm', 'lighttpd'])
   })
 
   it('reports OpenLiteSpeed as unavailable on both families', () => {
@@ -418,6 +426,7 @@ describe('install files and warnings', () => {
       '/etc/httpd/conf/httpd.conf',
       '/etc/httpd/conf.d/ssl.conf',
       '/etc/httpd/conf.d/welcome.conf',
+      '/etc/httpd/conf.d/awstats.conf',
     ])
     for (const f of files) {
       expect(f.content).not.toMatch(LISTEN)
@@ -442,10 +451,11 @@ describe('install files and warnings', () => {
     expect(files[2]!.content).toContain('SSLSessionCache shmcb:/run/httpd/sslcache(512000)')
   })
 
-  it('writes the same file set on every EL release', () => {
+  it('writes the same file set on every EL release, plus the AWStats stub where EPEL ships AWStats', () => {
     for (const p of EL) {
       expect(installFiles(p, { ...full, apacheMpm: 'prefork' }).map(f => f.path)).toEqual([
         `${p.paths.apacheModulesConf}/00-mpm.conf`, p.paths.apacheMainConf, p.paths.apacheSslConf, p.paths.apacheWelcomeConf,
+        ...(p.major === 9 ? ['/etc/httpd/conf.d/awstats.conf'] : []),
       ])
     }
   })
@@ -456,6 +466,14 @@ describe('install files and warnings', () => {
     // comments only: no LocationMatch, Alias or ErrorDocument survives
     for (const line of welcome.content.trimEnd().split('\n')) expect(line).toMatch(/^# /)
     expect(installFiles(ubuntu24, full).some(f => f.path.endsWith('welcome.conf'))).toBe(false)
+  })
+
+  it('keeps the EPEL AWStats CGI alias unpublished, since every proxied visitor reaches Apache from loopback', () => {
+    const stub = installFiles(centos9, { ...full, apacheMpm: 'prefork' }).find(f => f.path === '/etc/httpd/conf.d/awstats.conf')!
+    expect([stub.mode, stub.owner, stub.group]).toEqual([0o644, 'root', 'root'])
+    for (const line of stub.content.trimEnd().split('\n')) expect(line).toMatch(/^# /)
+    expect(installFiles(centos10, { ...full, apacheMpm: 'prefork' }).some(f => f.path.endsWith('awstats.conf'))).toBe(false)
+    expect(installFiles(ubuntu24, full).some(f => f.path.endsWith('awstats.conf'))).toBe(false)
   })
 
   it('refuses a forged Apache user in the main config', () => {
@@ -483,7 +501,7 @@ describe('install files and warnings', () => {
     const b = installBundle(centos9, { ...full, apacheMpm: 'prefork' })
     expect(b.actions).toEqual(installPlan(centos9, { ...full, apacheMpm: 'prefork' }))
     expect(b.files).toEqual(installFiles(centos9, { ...full, apacheMpm: 'prefork' }))
-    expect(b.files).toHaveLength(4)
+    expect(b.files).toHaveLength(5)
     expect(b.warnings.length).toBeGreaterThan(0)
   })
 })
@@ -504,7 +522,18 @@ describe('service state after install', () => {
 
   it('only stops what was installed', () => {
     const plan = installPlan(ubuntu24, { ...full, withMail: false, withFtp: false })
-    expect(unitsFor(plan, 'stop')).toEqual(['nginx', 'apache2', 'pdns', 'php8.3-fpm'])
+    expect(unitsFor(plan, 'stop')).toEqual(['nginx', 'apache2', 'pdns', 'php8.3-fpm', 'lighttpd'])
+  })
+
+  it('installs the Web Disk and calendar servers everywhere and keeps the distribution lighttpd daemon off', () => {
+    for (const [profile, webdav, caldav] of [[ubuntu24, 'lighttpd-mod-webdav', 'python3-radicale'], [centos9, 'lighttpd-mod_webdav', 'python3-radicale3']] as const) {
+      const plan = installPlan(profile, { ...full, apacheMpm: profile.family === 'rhel' ? 'prefork' : 'itk' })
+      for (const name of ['lighttpd', webdav, caldav]) expect(installed(plan)).toContain(name)
+      const lastInstall = plan.reduce((at, a, i) => (a.kind === 'exec' && a.argv.includes('install') ? i : at), -1)
+      expect(indexOf(plan, unitAction('stop', 'lighttpd'))).toBeGreaterThan(lastInstall)
+      expect(indexOf(plan, unitAction('disable', 'lighttpd'))).toBeGreaterThan(indexOf(plan, unitAction('stop', 'lighttpd')))
+      expect(unitsFor(plan, 'enable')).not.toContain('lighttpd')
+    }
   })
 
   it('leaves the same units running on both families', () => {
@@ -538,7 +567,7 @@ describe('Debian web-server identities and modules', () => {
 
   it('enables every module the edge renderer can require', () => {
     const a2enmod = execs(plan).find(a => a[0] === '/usr/sbin/a2enmod' && a.includes('proxy_fcgi'))!
-    for (const m of ['actions', 'cgi', 'suexec', 'fcgid', 'proxy', 'proxy_fcgi', 'remoteip', 'setenvif', 'rewrite', 'headers', 'alias', 'dir', 'mime', 'authz_core', 'authz_host', 'auth_basic', 'authn_core', 'authn_file', 'authz_user']) {
+    for (const m of ['actions', 'cgi', 'suexec', 'fcgid', 'proxy', 'proxy_fcgi', 'remoteip', 'setenvif', 'rewrite', 'headers', 'alias', 'dir', 'mime', 'authz_core', 'authz_host', 'auth_basic', 'authn_core', 'authn_file', 'authz_user', 'include', 'negotiation']) {
       expect(a2enmod).toContain(m)
     }
     expect(a2enmod).not.toContain('mpm_event')

@@ -18,13 +18,13 @@ export type AlertResultView = {
 }
 export type AlertEvaluationView = { evaluatedAt: string; observedAt: string; host: 'read' | 'unavailable'; rulesRevision: string; quiet: boolean; results: AlertResultView[] }
 export type AlertDeliveryLogView = {
-  at: string; noticeId: string; kind: 'firing' | 'resolved' | 'test'; ruleId: string | null; channel: 'email' | 'webhook' | null; result: 'sent' | 'failed' | 'gave_up' | 'no_channel'
+  at: string; noticeId: string; kind: 'firing' | 'resolved' | 'test' | 'login'; ruleId: string | null; channel: 'email' | 'webhook' | null; result: 'sent' | 'failed' | 'gave_up' | 'no_channel'
   attempt: number; error: 'unreachable' | 'timed_out' | 'refused' | 'rejected_status' | 'address_not_public' | 'no_signing_key' | null; status: number | null
 }
 export type AlertDeliveryView = {
   scheduler: { everyMinutes: number; lastRun: { at: string; result: 'evaluated' | 'host_unavailable' | 'rules_invalid' } | null }; state: 'none' | 'read' | 'invalid'
   channels: { alerts: boolean; email: number; webhook: boolean; active: ('email' | 'webhook')[] }
-  pending: { noticeId: string; kind: 'firing' | 'resolved' | 'test'; ruleId: string | null; channel: 'email' | 'webhook'; attempts: number; nextAt: string }[]; log: AlertDeliveryLogView[]
+  pending: { noticeId: string; kind: 'firing' | 'resolved' | 'test' | 'login'; ruleId: string | null; channel: 'email' | 'webhook'; attempts: number; nextAt: string }[]; log: AlertDeliveryLogView[]
 }
 export type MonitoringAlertsView = {
   state: 'default' | 'saved' | 'invalid'; rules: AlertRuleView[]; quiet: { start: string; end: string } | null; updatedAt: string | null; updatedBy: string | null
@@ -45,7 +45,7 @@ export function readMonitoringAlertsView(value: unknown): MonitoringAlertsView {
   const list = (item: unknown): unknown[] => Array.isArray(item) && item.length === IDS.length ? item : bad()
   const time = (item: unknown): string => typeof item === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(item) ? item : bad()
   if (!object(value) || !object(value.bounds) || Object.keys(value.bounds).length !== IDS.length || !object(value.delivery)) return bad()
-  const KINDS = ['firing', 'resolved', 'test'] as const, CHANNELS = ['email', 'webhook'] as const
+  const KINDS = ['firing', 'resolved', 'test', 'login'] as const, CHANNELS = ['email', 'webhook'] as const
   const ruleRef = (item: unknown, kind: string): string | null => kind === 'test' ? (item === null ? null : bad()) : IDS.includes(item as string) ? item as string : bad()
   const count = (item: unknown, max: number): number => Number.isInteger(item) && (item as number) >= 0 && (item as number) <= max ? item as number : bad()
   const notice = (item: unknown): string => typeof item === 'string' && /^aln_[0-9a-f]{24}$/.test(item) ? item : bad()
@@ -170,7 +170,7 @@ function bindWhmMonitoringAlerts(): void {
           : t('The saved rules file could not be verified, so the defaults are shown and evaluation is unavailable. Saving here replaces it.'))
     }
     const channelName = (channel: string | null): string => channel === 'email' ? t('Email') : channel === 'webhook' ? t('Webhook') : t('No channel')
-    const kindName = (kind: string): string => kind === 'firing' ? t('Firing') : kind === 'resolved' ? t('Resolved') : t('Test')
+    const kindName = (kind: string): string => kind === 'firing' ? t('Firing') : kind === 'resolved' ? t('Resolved') : kind === 'login' ? t('SSH sign-in') : t('Test')
     const resultText = (entry: AlertDeliveryLogView): string => {
       const reason = entry.error === 'rejected_status' ? t('the receiver answered with status {status}', { status: entry.status ?? '-' })
         : entry.error === 'refused' ? (entry.status === null ? t('the mail server refused the message') : t('the mail server refused the message ({status})', { status: entry.status }))

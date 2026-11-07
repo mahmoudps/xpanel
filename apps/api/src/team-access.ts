@@ -7,7 +7,7 @@ export const TEAM_ROLES = ['administrator', 'database', 'email', 'web'] as const
 
 // Groups follow the catalog spec: administrator is everything except collaboration pages, User Manager and the team itself.
 const ROLE_GROUPS: Readonly<Record<Exclude<TeamRole, 'administrator'>, readonly string[]>> = { database: ['databases'], email: ['email'], web: ['files', 'domains', 'software'] }
-const ADMINISTRATOR_EXCLUDED = new Set(['user-manager', 'calendars-contacts-management', 'calendars-contacts-sharing', 'calendars-contacts-config'])
+const ADMINISTRATOR_EXCLUDED = new Set(['team-audit-log', 'user-manager', 'calendars-contacts-management', 'calendars-contacts-sharing', 'calendars-contacts-config'])
 // A team session carries the owner's account authority, so the owner's own sign-in identity (password, two-factor,
 // API tokens, contact and interface preferences, the team itself) is never delegated to any role.
 // The bounded account rewrite workflow preserves the legacy endpoint's owner-only authority.
@@ -26,7 +26,7 @@ export const teamToolIds = (roles: readonly TeamRole[]): string[] => tools.filte
 
 // These routes act only on the member's own identity/display preference, sign-out or the static catalog.
 const TEAM_ROUTES_WITHOUT_TOOL = new Set(['GET /api/auth/me', 'POST /api/auth/logout', 'GET /api/catalog',
-  'GET /api/auth/ui-preferences', 'PUT /api/auth/ui-preferences'])
+  'GET /api/auth/ui-preferences', 'PUT /api/auth/ui-preferences', 'GET /api/auth/personal-preferences', 'PUT /api/auth/personal-preferences'])
 
 /**
  * Checked for every request a team session authenticates. The route's declared policy must be account-scoped and

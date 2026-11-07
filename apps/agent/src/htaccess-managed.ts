@@ -1,21 +1,23 @@
-import { BlockList, isIPv4, isIPv6 } from 'node:net'
 import { fail, validateDomainName } from '@xpanel/core'
 import { inspectHtaccess } from './htaccess-policy.ts'
 
 /** xPanel-owned marked blocks inside the checked domain .htaccess; every other byte stays untouched. */
-export const WEB_DIRECTIVE_FEATURES = ['error-pages', 'indexes', 'mime-types', 'hotlink', 'ip-blocker', 'redirects'] as const
+export const WEB_DIRECTIVE_FEATURES = ['error-pages', 'indexes', 'mime-types', 'handlers', 'hotlink', 'redirects'] as const
 export type WebDirectiveFeature = typeof WEB_DIRECTIVE_FEATURES[number]
-/** Every marked block name; directory privacy owns per-directory blocks through its own workspace. */
-export const MANAGED_HTACCESS_BLOCKS = [...WEB_DIRECTIVE_FEATURES, 'directory-privacy'] as const
+/** Every marked block name; directory privacy and leech protection own per-directory blocks through their own workspaces. */
+export const MANAGED_HTACCESS_BLOCKS = [...WEB_DIRECTIVE_FEATURES, 'directory-privacy', 'leech-protection'] as const
 export type ManagedHtaccessBlock = typeof MANAGED_HTACCESS_BLOCKS[number]
 export const ERROR_PAGE_CODES = [400, 401, 403, 404, 500, 502, 503] as const
 export interface ErrorPagesModel { entries: { code: number; path: string }[] }
 export interface IndexesModel { listing: 'inherit' | 'enabled' | 'disabled' }
 export interface MimeTypesModel { entries: { type: string; extensions: string[] }[] }
 export interface HotlinkModel { enabled: boolean; allowedHosts: string[]; extensions: string[]; allowEmptyReferrer: boolean; redirectUrl: string | null }
-export interface IpBlockerModel { entries: string[] }
+/** Apache built-in handlers (cPanel's list) whose module this product loads; cgi-script also needs the per-account mpm-itk identity. */
+export const APACHE_HANDLERS = ['cgi-script', 'default-handler', 'server-parsed', 'type-map'] as const
+export type ApacheHandler = typeof APACHE_HANDLERS[number]
+export interface HandlersModel { entries: { handler: ApacheHandler; extensions: string[] }[] }
 export interface RedirectsModel { entries: { status: 301 | 302; path: string; target: string }[] }
-export interface WebDirectiveModels { 'error-pages': ErrorPagesModel; indexes: IndexesModel; 'mime-types': MimeTypesModel; hotlink: HotlinkModel; 'ip-blocker': IpBlockerModel; redirects: RedirectsModel }
+export interface WebDirectiveModels { 'error-pages': ErrorPagesModel; indexes: IndexesModel; 'mime-types': MimeTypesModel; handlers: HandlersModel; hotlink: HotlinkModel; redirects: RedirectsModel }
 export interface WebDirectiveContext { domainName: string }
 export interface WebDirectiveFieldIssue { field: string; code: string }
 export interface WebDirectiveConflict { code: string; line: number }
@@ -24,7 +26,7 @@ export interface ManagedHtaccessDocument {
   records: Rec[]; eol: string; blocks: Map<ManagedHtaccessBlock, { start: number; end: number }>
   conflict: WebDirectiveConflict | null; unmanagedLines: number; accessRules: number; rewriteDisabled: number
 }
-export const WEB_DIRECTIVE_LIMITS = { 'error-pages': ERROR_PAGE_CODES.length, 'mime-types': 100, hotlinkHosts: 32, hotlinkExtensions: 32, 'ip-blocker': 500, redirects: 200 } as const
+export const WEB_DIRECTIVE_LIMITS = { 'error-pages': ERROR_PAGE_CODES.length, 'mime-types': 100, hotlinkHosts: 32, hotlinkExtensions: 32, handlers: 50, redirects: 200 } as const
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const exact = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => object(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))
@@ -37,11 +39,14 @@ const MIME = /^([a-z0-9][a-z0-9!#$&^_.+-]{0,126})\/([a-z0-9][a-z0-9!#$&^_.+-]{0,
 const MIME_TOP = new Set(['application', 'audio', 'font', 'image', 'message', 'model', 'multipart', 'text', 'video'])
 const EXECUTABLE_TYPE = /(?:x-httpd|cgi|php|perl|python|ruby)/i
 const EXECUTABLE_EXTENSION = /^(?:php[0-9]*|phtml|phar|pht|phps|cgi|fcgi|pl|py|rb|sh|shtml|asp|aspx|jsp|htaccess|htpasswd|ini)$/
-const LOOPBACK = new BlockList(); LOOPBACK.addSubnet('127.0.0.0', 8, 'ipv4'); LOOPBACK.addAddress('::1', 'ipv6')
+// The domain PHP handler and the denied server files stay with the server configuration.
+export const SYSTEM_HANDLER_EXTENSION = /^(?:php[0-9]*|phtml|phar|pht|phps|htaccess|htpasswd|ini)$/
+// server-info and server-status disclose every tenant's configuration and live requests; the other two modules are not loaded.
+const REFUSED_HANDLERS: Readonly<Record<string, string>> = { 'server-info': 'handler_not_permitted', 'server-status': 'handler_not_permitted', 'send-as-is': 'handler_unavailable', 'imap-file': 'handler_unavailable' }
 const MARKER_LIKE = /^\s*#\s*(?:BEGIN|END)\s+xpanel\b/i
 const ACCESS_RULE = /^(?:require|order|allow|deny|satisfy|auth[a-z]*)\b/i
 
-function absoluteUrl(value: unknown, rewrite: boolean): string | null {
+export function absoluteUrl(value: unknown, rewrite: boolean): string | null {
   const allowed = /^[A-Za-z0-9._~:/?#@!&*+,;=%-]+$/
   if (typeof value !== 'string' || value.length > 2048 || !allowed.test(value)) return null
   let url: URL
@@ -51,17 +56,6 @@ function absoluteUrl(value: unknown, rewrite: boolean): string | null {
   // RewriteRule substitutions expand "%N" and "$N"; mod_alias targets keep only well-formed escapes.
   if (url.href.length > 2048 || !allowed.test(url.href) || (rewrite ? url.href.includes('%') : /%(?![0-9A-Fa-f]{2})/.test(url.href))) return null
   return url.href
-}
-function address(value: unknown): { canonical: string; protectedRange: boolean } | null {
-  if (typeof value !== 'string' || value.length > 64) return null
-  const [ip = '', prefix, extra] = value.split('/')
-  const family = isIPv4(ip) ? 'ipv4' : isIPv6(ip) && !ip.includes('%') ? 'ipv6' : null
-  if (!family || extra !== undefined || prefix !== undefined && (!/^(?:0|[1-9][0-9]{0,2})$/.test(prefix) || Number(prefix) > (family === 'ipv4' ? 32 : 128))) return null
-  const range = new BlockList()
-  if (prefix === undefined) range.addAddress(ip, family); else range.addSubnet(ip, Number(prefix), family)
-  // Apache sees the edge proxy on loopback; a blocked loopback range takes the whole site down.
-  const protectedRange = LOOPBACK.check(ip, family) || range.check('127.0.0.1', 'ipv4') || range.check('::1', 'ipv6')
-  return { canonical: (family === 'ipv6' ? ip.toLowerCase() : ip) + (prefix === undefined ? '' : '/' + prefix), protectedRange }
 }
 const extension = (value: unknown, dotted: boolean): string | null => {
   const match = typeof value === 'string' ? (dotted ? /^\.?([A-Za-z0-9][A-Za-z0-9_-]{0,15})$/ : /^\.?([A-Za-z0-9]{1,10})$/).exec(value) : null
@@ -144,14 +138,27 @@ export function parseWebDirectiveModel<F extends WebDirectiveFeature>(feature: F
       if (valid) { entries.push({ type, extensions }); seen.push(...extensions) }
     })
     model = { entries }
-  } else if (feature === 'ip-blocker') {
-    const entries: string[] = []
-    list(raw.entries, 'entries', WEB_DIRECTIVE_LIMITS['ip-blocker']).forEach((value, index) => {
-      const parsed = address(value)
-      if (!parsed) issue('entries.' + index, 'address'); else if (parsed.protectedRange) issue('entries.' + index, 'protected_address')
-      else if (entries.includes(parsed.canonical)) issue('entries.' + index, 'duplicate'); else entries.push(parsed.canonical)
+  } else if (feature === 'handlers') {
+    const entries: HandlersModel['entries'] = [], seen: string[] = []
+    list(raw.entries, 'entries', WEB_DIRECTIVE_LIMITS.handlers).forEach((entry, index) => {
+      const at = 'entries.' + index
+      if (!exact(entry, ['handler', 'extensions'])) { issue(at, 'type'); return }
+      const handler = APACHE_HANDLERS.find(name => name === entry.handler)
+      let valid = !!handler
+      if (!handler) issue(at + '.handler', typeof entry.handler === 'string' && REFUSED_HANDLERS[entry.handler] || 'handler')
+      else if (entries.some(item => item.handler === handler)) { issue(at + '.handler', 'duplicate'); valid = false }
+      const extensions: string[] = []
+      if (Array.isArray(entry.extensions) && !entry.extensions.length) { issue(at + '.extensions', 'required'); valid = false }
+      list(entry.extensions, at + '.extensions', 16).forEach((value, position) => {
+        const name = extension(value, true), field = at + '.extensions.' + position
+        if (!name) { issue(field, 'extension'); valid = false }
+        else if (SYSTEM_HANDLER_EXTENSION.test(name.slice(1))) { issue(field, 'system_extension'); valid = false }
+        else if (seen.includes(name) || extensions.includes(name)) { issue(field, 'duplicate'); valid = false }
+        else extensions.push(name)
+      })
+      if (valid && handler) { entries.push({ handler, extensions }); seen.push(...extensions) }
     })
-    model = { entries }
+    model = { entries: entries.sort((left, right) => left.handler < right.handler ? -1 : 1) }
   } else {
     const entries: RedirectsModel['entries'] = []
     list(raw.entries, 'entries', WEB_DIRECTIVE_LIMITS.redirects).forEach((entry, index) => {
@@ -174,7 +181,7 @@ export function parseWebDirectiveModel<F extends WebDirectiveFeature>(feature: F
 
 export function defaultWebDirectiveModel<F extends WebDirectiveFeature>(feature: F, context: WebDirectiveContext): WebDirectiveModels[F] {
   const domain = context.domainName.toLowerCase()
-  const models: WebDirectiveModels = { 'error-pages': { entries: [] }, indexes: { listing: 'inherit' }, 'mime-types': { entries: [] }, 'ip-blocker': { entries: [] }, redirects: { entries: [] },
+  const models: WebDirectiveModels = { 'error-pages': { entries: [] }, indexes: { listing: 'inherit' }, 'mime-types': { entries: [] }, handlers: { entries: [] }, redirects: { entries: [] },
     hotlink: { enabled: false, allowedHosts: domain.startsWith('www.') ? [domain] : [domain, 'www.' + domain], extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'], allowEmptyReferrer: true, redirectUrl: null } }
   return models[feature]
 }
@@ -185,7 +192,11 @@ export function renderWebDirectiveBody<F extends WebDirectiveFeature>(feature: F
   if (feature === 'error-pages') return (model as ErrorPagesModel).entries.map(entry => `ErrorDocument ${entry.code} ${entry.path}`)
   if (feature === 'indexes') { const listing = (model as IndexesModel).listing; return listing === 'inherit' ? [] : [listing === 'enabled' ? 'Options +Indexes' : 'Options -Indexes'] }
   if (feature === 'mime-types') return (model as MimeTypesModel).entries.map(entry => `AddType ${entry.type} ${entry.extensions.join(' ')}`)
-  if (feature === 'ip-blocker') { const entries = (model as IpBlockerModel).entries; return entries.length ? ['<RequireAll>', 'Require all granted', ...entries.map(entry => 'Require not ip ' + entry), '</RequireAll>'] : [] }
+  if (feature === 'handlers') {
+    const entries = (model as HandlersModel).entries, uses = (name: ApacheHandler): boolean => entries.some(entry => entry.handler === name)
+    // mod_cgi runs a mapped file only with ExecCGI; IncludesNOEXEC keeps #exec off for server-side includes.
+    return [...(uses('cgi-script') ? ['Options +ExecCGI'] : []), ...(uses('server-parsed') ? ['Options +IncludesNOEXEC'] : []), ...entries.map(entry => `AddHandler ${entry.handler} ${entry.extensions.join(' ')}`)]
+  }
   if (feature === 'redirects') return (model as RedirectsModel).entries.map(entry => `Redirect ${entry.status} ${entry.path} ${entry.target}`)
   const hotlink = model as HotlinkModel
   if (!hotlink.enabled) return []
@@ -199,8 +210,8 @@ function bodyToRaw(feature: WebDirectiveFeature, lines: string[]): unknown {
   if (feature === 'indexes') return lines.length === 1 && /^Options [+-]Indexes$/.test(lines[0]!) ? { listing: lines[0]![8] === '+' ? 'enabled' : 'disabled' } : null
   if (feature === 'mime-types') { const entries = all(/^AddType (\S+) (\S+(?: \S+)*)$/, match => ({ type: match[1], extensions: match[2]!.split(' ') })); return entries && { entries } }
   if (feature === 'redirects') { const entries = all(/^Redirect (301|302) (\S+) (\S+)$/, match => ({ status: Number(match[1]), path: match[2], target: match[3] })); return entries && { entries } }
-  // The canonical re-render below proves the RequireAll wrapper lines.
-  if (feature === 'ip-blocker') { const inner = lines.slice(2, -1).map(line => /^Require not ip (\S+)$/.exec(line)?.[1]); return lines.length > 3 && inner.every(Boolean) ? { entries: inner } : null }
+  // The canonical re-render below proves the Options lines.
+  if (feature === 'handlers') { const entries = all(/^(?:Options \+(?:ExecCGI|IncludesNOEXEC)|AddHandler (\S+) (\S+(?: \S+)*))$/, match => match[1] ? { handler: match[1], extensions: match[2]!.split(' ') } : null); return entries && { entries: entries.filter(Boolean) } }
   const rule = /^RewriteRule \\\.\(\?:([a-z0-9|]+)\)\$ (\S+) \[(?:F,NC|R=302,NC,L)\]$/.exec(lines.at(-1) ?? '')
   if (!rule) return null
   const hosts = lines.flatMap(line => { const match = /^RewriteCond %\{HTTP_REFERER\} !\^https\?:\/\/(\S+?)\(\?::\[0-9\]\+\)\?\(\?:\/\|\$\) \[NC\]$/.exec(line); return match ? [match[1]!.replace(/\\\./g, '.')] : [] })
@@ -240,9 +251,7 @@ export function parseManagedHtaccess(content: string): ManagedHtaccessDocument {
 
 export function readWebDirective<F extends WebDirectiveFeature>(document: ManagedHtaccessDocument, feature: F, context: WebDirectiveContext): { model: WebDirectiveModels[F]; managed: boolean; conflict: WebDirectiveConflict | null } {
   const empty = defaultWebDirectiveModel(feature, context), block = document.conflict ? undefined : document.blocks.get(feature)
-  // Same-level Require lines combine as RequireAny, so a directory-privacy block would open the blocker.
-  const accessRules = document.accessRules || (document.blocks.get('directory-privacy')?.start ?? -1) + 1
-  const environment = document.conflict ?? (feature === 'ip-blocker' && accessRules ? { code: 'access_rules_present', line: accessRules } : feature === 'hotlink' && document.rewriteDisabled ? { code: 'rewrite_disabled', line: document.rewriteDisabled } : null)
+  const environment = document.conflict ?? (feature === 'hotlink' && document.rewriteDisabled ? { code: 'rewrite_disabled', line: document.rewriteDisabled } : null)
   if (!block) return { model: empty, managed: false, conflict: environment }
   const lines = document.records.slice(block.start + 1, block.end).map(record => record.text)
   try {
@@ -269,6 +278,6 @@ export function replaceManagedBlock(content: string, document: ManagedHtaccessDo
 }
 
 const POLICY_SAMPLES: WebDirectiveModels = { 'error-pages': { entries: [{ code: 404, path: '/404.html' }] }, indexes: { listing: 'disabled' }, 'mime-types': { entries: [{ type: 'text/markdown', extensions: ['.md'] }] },
-  hotlink: { enabled: true, allowedHosts: ['example.com'], extensions: ['png'], allowEmptyReferrer: true, redirectUrl: 'https://example.com/' }, 'ip-blocker': { entries: ['192.0.2.1'] }, redirects: { entries: [{ status: 301, path: '/a', target: 'https://example.com/' }] } }
+  hotlink: { enabled: true, allowedHosts: ['example.com'], extensions: ['png'], allowEmptyReferrer: true, redirectUrl: 'https://example.com/' }, handlers: { entries: [{ handler: 'cgi-script', extensions: ['.pl'] }, { handler: 'server-parsed', extensions: ['.shtml'] }] }, redirects: { entries: [{ status: 301, path: '/a', target: 'https://example.com/' }] } }
 /** The reviewed account policy decides availability; a feature it refuses is never offered as saveable. */
 export const webDirectivePolicyAllows = (feature: WebDirectiveFeature): boolean => inspectHtaccess(['# BEGIN xPanel ' + feature, ...renderWebDirectiveBody(feature, POLICY_SAMPLES[feature]), '# END xPanel ' + feature, ''].join('\n')).valid

@@ -5,6 +5,10 @@ export const GIT_BINARY = '/usr/bin/git'
 /** git --exec-path: the HTTPS transport helpers ship here (Debian/Ubuntu git, EL git-core). */
 export const GIT_CORE_DIR: Readonly<Record<OsFamily, string>> = { debian: '/usr/lib/git-core', rhel: '/usr/libexec/git-core' }
 export const GIT_LIMITS = { repositories: 20, branches: 100, commits: 20, outputBytes: 262144, timeoutSeconds: 60 } as const
+/** One shell runs every task of the deployment file, so an exported variable carries over and the first failure stops it. */
+export const GIT_DEPLOY_SHELL = ['/bin/sh', '-ec'] as const
+export const GIT_DEPLOY_FILE = '.cpanel.yml'
+export const GIT_DEPLOY_LIMITS = { fileBytes: 8192, scriptBytes: 8192, tasks: 64 } as const
 export const GIT_CONFIG = [
   'credential.helper=', 'credential.interactive=false', 'core.hooksPath=/dev/null', 'core.fsmonitor=false',
   'core.pager=cat', 'core.attributesFile=/dev/null', 'core.quotePath=true', 'gc.auto=0', 'maintenance.auto=false',

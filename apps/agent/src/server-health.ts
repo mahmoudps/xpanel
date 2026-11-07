@@ -60,6 +60,8 @@ export interface ServerHealthRouteContext {
   readResources: (() => Promise<CanonicalIoAnalyticsRead>) | null
   /** The bandwidth meter's monthly report; null when no meter runs on this host. */
   readBandwidth?: (() => Promise<BandwidthReport>) | null
+  /** Tweak Settings status.loadThreshold; absent or null grades load per processor. */
+  readLoadThreshold?: (() => Promise<number | null>) | null
   now?: () => Date
 }
 
@@ -80,14 +82,16 @@ function aggregate(id: ServerHealthCheckId, prefix: string, items: ServerHealthI
 }
 const readText = async (executor: ServerLimitsExecutor, path: string): Promise<string | null> => { try { return await executor.readFile(path) } catch { return null } }
 
-async function loadCheck(executor: ServerLimitsExecutor): Promise<ServerHealthCheck> {
+async function loadCheck(executor: ServerLimitsExecutor, threshold: number | null): Promise<ServerHealthCheck> {
   const [loadText, cpuText] = await Promise.all([readText(executor, '/proc/loadavg'), readText(executor, '/proc/cpuinfo')])
   let load: ReturnType<typeof parseLoadavg> | null = null
   try { load = loadText ? parseLoadavg(loadText) : null } catch { load = null }
   const cpu = cpuText ? parseCpuinfo(cpuText) : null
   if (!load || !cpu) return check('load', 'unavailable', 'load_unread', !load ? '/proc/loadavg could not be read' : '/proc/cpuinfo listed no processors')
-  const perCore = round(load.load5 / cpu.cores), state = above(perCore, SERVER_HEALTH_THRESHOLDS.loadPerCore)
-  return check('load', state, state === 'ok' ? 'load_ok' : state === 'warning' ? 'load_high' : 'load_overloaded', `load average 1m=${load.load1} 5m=${load.load5} 15m=${load.load15}; processors=${cpu.cores}; 5m per processor=${perCore}`)
+  const perCore = round(load.load5 / cpu.cores)
+  // Tweak Settings status.loadThreshold: a fixed 1-minute level replaces the per-processor grading.
+  const state = threshold === null ? above(perCore, SERVER_HEALTH_THRESHOLDS.loadPerCore) : above(load.load1, { warning: threshold / 2, problem: threshold })
+  return check('load', state, state === 'ok' ? 'load_ok' : state === 'warning' ? 'load_high' : 'load_overloaded', `load average 1m=${load.load1} 5m=${load.load5} 15m=${load.load15}; processors=${cpu.cores}; 5m per processor=${perCore}` + (threshold === null ? '' : `; fixed threshold=${threshold}`))
 }
 
 // proc(5): /proc/meminfo reports SwapTotal and SwapFree in kB.
@@ -197,12 +201,12 @@ export async function bandwidthCheck(read: (() => Promise<BandwidthReport>) | nu
 }
 
 /** One read-only summary of fixed checks. Every host read is independent; a failed read is unavailable, never ok. */
-export async function evaluateServerHealth(input: { executor: ServerLimitsExecutor | null; family: ServerHealthRouteContext['family']; readDrift: ServerHealthRouteContext['readDrift']; saved: ServerHealthSaved; readBandwidth?: ServerHealthRouteContext['readBandwidth']; now?: () => Date }): Promise<ServerHealthReport> {
+export async function evaluateServerHealth(input: { loadThreshold?: number | null; executor: ServerLimitsExecutor | null; family: ServerHealthRouteContext['family']; readDrift: ServerHealthRouteContext['readDrift']; saved: ServerHealthSaved; readBandwidth?: ServerHealthRouteContext['readBandwidth']; now?: () => Date }): Promise<ServerHealthReport> {
   const observed = (input.now ?? (() => new Date()))()
   const { executor } = input
   const none = (id: ServerHealthCheckId): ServerHealthCheck => check(id, 'unavailable', 'host_unavailable', 'native host observation is unavailable')
   type Checks = [ServerHealthCheck, ServerHealthCheck[], ServerHealthCheck[], ServerHealthCheck, ServerHealthCheck, ServerHealthCheck]
-  const [load, memory, disk, services, drift, reboot]: Checks = executor ? await Promise.all([loadCheck(executor), memoryChecks(executor), diskChecks(executor), servicesCheck(executor),
+  const [load, memory, disk, services, drift, reboot]: Checks = executor ? await Promise.all([loadCheck(executor, input.loadThreshold ?? null), memoryChecks(executor), diskChecks(executor), servicesCheck(executor),
     input.readDrift ? driftCheck(input.readDrift) : Promise.resolve(none('drift')), rebootCheck(executor, input.family)])
     : [none('load'), [none('memory'), none('swap')], [none('disk-space'), none('disk-inodes')], none('services'), none('drift'), none('reboot')]
   const checks = [load, ...memory, ...disk, services, drift, certificatesCheck(input.saved, observed.getTime()), reboot, await bandwidthCheck(input.readBandwidth)]
@@ -234,7 +238,7 @@ export async function handleServerHealthRoute(req: Request, url: URL, method: st
   let body: unknown
   if (url.pathname === '/host/server-health') {
     if (url.search) return fail('VALIDATION', 'server health does not accept selectors', unchanged)
-    body = await evaluateServerHealth({ executor: ctx.executor, family: ctx.family, readDrift: ctx.readDrift, saved: await ctx.readSaved(), readBandwidth: ctx.readBandwidth ?? null, ...(ctx.now ? { now: ctx.now } : {}) })
+    body = await evaluateServerHealth({ loadThreshold: await ctx.readLoadThreshold?.().catch(() => null) ?? null, executor: ctx.executor, family: ctx.family, readDrift: ctx.readDrift, saved: await ctx.readSaved(), readBandwidth: ctx.readBandwidth ?? null, ...(ctx.now ? { now: ctx.now } : {}) })
   } else {
     const usernames = readLimitUsernames(url), saved = await ctx.readSaved()
     const accounts = usernames.map(name => saved.accounts.find(account => account.username === name) ?? fail('NOT_FOUND', 'account not found', unchanged))

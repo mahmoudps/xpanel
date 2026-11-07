@@ -138,7 +138,7 @@ function bindSwContainers(askDialog: Ask | undefined, parseList: typeof readSwCo
         const view = parseEngine(await transport!('GET', '/api/server/software/containers/engine'))
         if (!admitted()) return
         paint(view)
-        note(view.state === 'read' ? 'read' : 'unavailable', view.state === 'read' ? t('Engine facts, images, registries, networks and volumes read. All engine changes are unavailable here.') : unavailableText(view.reason))
+        note(view.state === 'read' ? 'read' : 'unavailable', view.state === 'read' ? t('Engine facts, images, registries, networks and volumes of the host engines read. Changes apply to the rootless stores below.') : unavailableText(view.reason))
       } catch { if (admitted()) { paint(null); note('failed', t('The container engine could not be verified. Read again; nothing was changed.')) } }
       finally { busy = false; refresh.disabled = !admitted() }
     }

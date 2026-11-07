@@ -30,7 +30,7 @@ const first: Account = {
 const second: Account = { ...first, id: 'private-account-two', username: 'account8', primaryDomain: 'account8.example.test' }
 const foreign: Account = { ...first, id: 'private-account-foreign', username: 'foreign7', primaryDomain: 'foreign7.example.test', planId: otherPlan.id, ownerId: 'other-key' }
 const base = (): WhmSurfaceProps => ({ principal: root, catalog, locale: 'en', plans: [owned, otherPlan], accounts: [first, second, foreign] })
-const reseller = (acl: ResellerAcl[]): WhmSurfaceProps => ({ ...base(), principal: { kind: 'reseller', id: 'owner-key', username: 'provider7' }, activeReseller: { id: 'owner-key', username: 'provider7', acl, maxAccounts: 10, totalDiskMb: 1024, totalBandwidthMb: 1024, oversell: false, nameservers: [], delegatedIps: [] } satisfies Reseller })
+const reseller = (acl: ResellerAcl[]): WhmSurfaceProps => ({ ...base(), principal: { kind: 'reseller', id: 'owner-key', username: 'provider7' }, activeReseller: { id: 'owner-key', username: 'provider7', acl, maxAccounts: 10, totalDiskMb: 1024, totalBandwidthMb: 1024, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] } satisfies Reseller })
 const featureBase = (): WhmSurfaceProps => ({ ...base(), featureLists: [
   { id: 'private-list-own', name: 'Owned source7', ownerId: 'owner-key', disabled: ['SSL/TLS', 'popaccts (Email Accounts)', 'SSL/TLS', 'Email Filtering Manager'] },
   { id: 'private-list-shared', name: 'Shared source7', ownerId: null, disabled: [] },
@@ -88,9 +88,8 @@ describe('approved plan impact and draft components', () => {
 
   it('keeps every missing summary component without claiming an unsent draft matches saved state', () => {
     const html = renderApprovedWhmPlanSupplement(base())
-    for (const label of ['Impact', 'Unsaved changes', 'Discard changes', 'How saving applies']) expect(html).toContain(label)
+    for (const label of ['Impact', 'Unsaved changes', 'How saving applies']) expect(html).toContain(label)
     expect(html).toContain('No browser draft comparison is available')
-    expect(html).toMatch(/<button[^>]*disabled>Discard changes/)
     expect(html).not.toMatch(/Nothing to save|Sites.*keep running|All slices updated|<h1|<form/)
   })
 })

@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import type { MailboxMetadataAuthority } from '@xpanel/core'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApiToken, createTestDb, createUserPrincipal, revokeAllApiTokensForPrincipal } from '@xpanel/db'
-import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
+import { createTestStateStore } from '@xpanel/state'
 import { sha256Hex } from './auth.ts'
+import { createMemoryDav } from './mail/dav-testkit.ts'
 import { createApiApp } from './server.ts'
 
 // Public independent Argon2 fixture vector; these requests authenticate synthetic temporary API tokens only.
@@ -50,7 +49,8 @@ const fixture = async () => {
   const credential = await token([`mailbox:${inbox.id}`, 'webmail:read', 'webmail:write'])
   const readOnly = await token([`mailbox:${inbox.id}`, 'webmail:read'])
   const foreignCredential = await token([`mailbox:${foreign.id}`, 'webmail:read', 'webmail:write'], foreignPrincipal.id)
-  const app = createApiApp({ db: database.db, store: state.store, serverSecret: 'contacts-synthetic-server-secret-at-least-32-bytes' })
+  const dav = createMemoryDav({ defaults: true })
+  const app = createApiApp({ db: database.db, store: state.store, serverSecret: 'contacts-synthetic-server-secret-at-least-32-bytes', davExchange: dav.exchange })
   const request = (path: string, method = 'GET', body?: unknown, raw: string | null = credential) => app.fetch(new Request(`http://localhost${path}`, { method,
     headers: { ...(raw ? { authorization: `Bearer ${raw}` } : {}), ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }))
@@ -62,53 +62,10 @@ const fixture = async () => {
   const own = record(inbox.login), siblingOnly = record(sibling.login, { fullName: 'SIBLING_PRIVATE' })
   const shared = record(sibling.login, { fullName: 'Shared read only', shares: [{ principal: inbox.login, permission: 'read', sharedAt: '2026-01-01T00:00:00.000Z' }] })
   const neighbor = record(foreign.login, { fullName: 'FOREIGN_PRIVATE' })
-  const path = join(state.rootDir, 'extended', 'webmail', 'contacts.json')
-  await atomicWriteJson(path, [own, siblingOnly, shared, neighbor])
-  const bytes = () => readFile(path, 'utf8')
-  return { database, state, features, owner, other, inbox, sibling, foreign, principal, token, credential, readOnly, foreignCredential, request, record, own, siblingOnly, shared, neighbor, path, bytes }
-}
-
-
-// Block only the ACTUAL mutation acquisition, after HTTP recovery/initial auth.
-// Both blocker and contender are genuine OS writer acquisitions, never fake leases.
-const queueNextMutationWriter = (store: Awaited<ReturnType<typeof fixture>>['state']['store']) => {
-  const lock = store.getWriterLock(), acquire = lock.acquire.bind(lock)
-  type Lease = Awaited<ReturnType<typeof acquire>>
-  type Arrival = { lease?: Lease; error?: unknown }
-  let notify: () => void = () => undefined, resume: () => void = () => undefined
-  const reached = new Promise<void>(resolve => { notify = resolve }), gate = new Promise<void>(resolve => { resume = resolve })
-  let blocker: Lease | undefined, phase = '', contenderAcquired = false
-  const spy = vi.spyOn(lock, 'acquire').mockImplementationOnce(async (...args) => {
-    phase = new Error('actual mail mutation writer admission').stack ?? ''
-    const held = await acquire(...args); blocker = held
-    const waiting = acquire(...args).then<Arrival, Arrival>(lease => { contenderAcquired = true; return { lease } }, error => ({ error }))
-    notify()
-    let releaseFailed = false, releaseFailure: unknown
-    try { await gate } finally { try { await held.release() } catch (error) { releaseFailed = true; releaseFailure = error } }
-    const arrival = await waiting
-    if (releaseFailed) { await arrival.lease?.release(); throw releaseFailure }
-    if (!arrival.lease) throw arrival.error
-    return arrival.lease
-  })
-  return {
-    release: () => resume(), restore: () => spy.mockRestore(),
-    wait: async (pending: Promise<unknown>) => {
-      let timer: ReturnType<typeof setTimeout> | undefined
-      try {
-        await Promise.race([reached,
-          pending.then(() => { throw new Error('mail request completed before the intended mutation writer queue') }),
-          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('mail request did not reach its mutation writer queue')), 5000) }),
-        ])
-        // The call frame must be a mail handler, not global recovery/snapshot work.
-        if (!phase.includes('extended-routes.ts') && !phase.includes('/mail/')) throw new Error('mail mutation queue phase is unqualified')
-        if (/recoverAccountContactProjection|readSnapshot|readAuthorityAtBarrier|waitForUnlocked/.test(phase)) throw new Error('queue was placed before initial mail authorization')
-        const held = blocker
-        if (!held) throw new Error('real queue blocker is missing')
-        await held.assertFencingToken()
-        if (contenderAcquired) throw new Error('the mutation writer did not queue behind its blocker')
-      } finally { if (timer) clearTimeout(timer) }
-    },
-  }
+  const seed = (records: Contact[]) => dav.seedContacts(records as never, accountId => accountId === owner.id ? owner.username : other.username)
+  seed([own, siblingOnly, shared, neighbor])
+  const bytes = async () => dav.snapshot()
+  return { database, state, features, owner, other, inbox, sibling, foreign, principal, token, credential, readOnly, foreignCredential, request, record, own, siblingOnly, shared, neighbor, dav, seed, bytes }
 }
 
 describe('sealed mailbox Contacts list/create/edit HTTP security acceptance', () => {
@@ -134,11 +91,11 @@ describe('sealed mailbox Contacts list/create/edit HTTP security acceptance', ()
     return contact!
   }
   const update = (contact: Contact, patch: Record<string, unknown> = {}, raw = f.credential) => f.request(`${route}/${contact.id}`, 'PATCH', { ...fields(contact), expectedRevision: contact.revision, ...patch }, raw)
-  const persisted = async () => JSON.parse(await f.bytes()) as Contact[]
+  const persisted = async () => f.dav.contacts()
 
   it('lists only bound-mailbox owned and same-account shared records without allocating state', async () => {
     const before = await f.bytes(), first = await view(), second = await view()
-    expect(first.contacts.map(item => item.id)).toEqual([f.own.id, f.shared.id])
+    expect(first.contacts.map(item => item.id).sort()).toEqual([f.own.id, f.shared.id].sort())
     expect(first).toEqual(second)
     expect(JSON.stringify(first)).not.toMatch(/SIBLING_PRIVATE|FOREIGN_PRIVATE/)
     expect(await f.bytes()).toBe(before)
@@ -146,9 +103,9 @@ describe('sealed mailbox Contacts list/create/edit HTTP security acceptance', ()
   })
 
   it('does not expose a corrupt cross-account share to a trusted mailbox', async () => {
-    await atomicWriteJson(f.path, [f.own, { ...f.neighbor, shares: [{ principal: f.inbox.login, permission: 'read', sharedAt: f.neighbor.createdAt }] }])
+    f.seed([{ ...f.neighbor, shares: [{ principal: f.inbox.login, permission: 'read', sharedAt: f.neighbor.createdAt }] }])
     const before = await f.bytes(), result = await view()
-    expect(result.contacts.map(item => item.id)).toEqual([f.own.id])
+    expect(result.contacts.map(item => item.id).sort()).toEqual([f.own.id, f.shared.id].sort())
     expect(JSON.stringify(result)).not.toContain('FOREIGN_PRIVATE')
     expect(await f.bytes()).toBe(before)
   })
@@ -161,7 +118,7 @@ describe('sealed mailbox Contacts list/create/edit HTTP security acceptance', ()
     expect(result).toMatchObject({ context: { mailbox: f.inbox.login }, stateChanged: true, contact: { ...draft(), owner: f.inbox.login, groups: [], shares: [] } })
     expect(result.contact.id).toMatch(/^[0-9a-f-]{36}$/)
     expect(result.contact.revision).toMatch(/^[0-9a-f]{64}$/)
-    expect(result.contact.vcard).toBe('BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Alex Example\r\nEMAIL;TYPE=INTERNET:alex@example.test\r\nTEL;TYPE=CELL:+123456789\r\nORG:Example Team\r\nTITLE:Coordinator\r\nEND:VCARD')
+    expect(result.contact.vcard).toBe(`BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Alex Example\r\nEMAIL;TYPE=INTERNET:alex@example.test\r\nTEL;TYPE=CELL:+123456789\r\nORG:Example Team\r\nTITLE:Coordinator\r\nUID:${result.contact.id}\r\nEND:VCARD`)
     expect((await view()).contacts.find(item => item.id === result.contact.id)).toEqual(result.contact)
     expect((await persisted()).filter(item => item.id !== result.contact.id)).toEqual(original)
     expect((await persisted()).find(item => item.id === result.contact.id)).not.toHaveProperty('revision')
@@ -207,7 +164,7 @@ describe('sealed mailbox Contacts list/create/edit HTTP security acceptance', ()
   })
 
   it('retains existing read-write-share API permission without changing owner or sharing', async () => {
-    await atomicWriteJson(f.path, [f.own, { ...f.shared, shares: [{ ...f.shared.shares[0]!, permission: 'read-write' }] }, f.neighbor])
+    f.seed([{ ...f.shared, shares: [{ ...f.shared.shares[0]!, permission: 'read-write' }] }])
     const initial = await selected(f.shared.id)
     const response = await update(initial, { title: 'Authorized shared edit' })
     expect(response.status).toBe(200)
@@ -256,7 +213,7 @@ describe('sealed mailbox Contacts list/create/edit HTTP security acceptance', ()
     expect(await f.bytes()).toBe(before)
   })
 
-  it('requires all five primitive fields, a nonblank name and a valid email', async () => {
+  it('requires all five primitive fields, a nonblank name and a valid email', { tags: ['slow'] }, async () => {
     const initial = await selected(), before = await f.bytes()
     const invalid: Record<string, unknown>[] = [
       { fullName: '   ' }, { fullName: false }, { email: 'two@@example.test' }, { email: 'bad address@example.test' },
@@ -272,6 +229,26 @@ describe('sealed mailbox Contacts list/create/edit HTTP security acceptance', ()
       expect((await f.request(`${route}/${initial.id}`, 'PATCH', { ...body, expectedRevision: initial.revision })).status).toBe(422)
     }
     expect(await f.bytes()).toBe(before)
+  })
+
+  it('refuses reads and writes of a store it cannot read whole, without touching it', async () => {
+    const initial = await selected()
+    f.dav.omit(1)
+    const before = await f.bytes()
+    for (const response of [await f.request(route), await f.request(route, 'POST', draft()), await update(initial, { title: 'Refused' })]) {
+      expect(response.status).toBe(412)
+      expect(await response.json()).toMatchObject({ details: { reason: 'dav_store_too_large', stateChanged: false } })
+    }
+    expect(await f.bytes()).toBe(before)
+  })
+
+  it('saves a contact without an address, as a phone can', async () => {
+    const response = await f.request(route, 'POST', draft({ email: '' }))
+    expect(response.status).toBe(201)
+    const saved = (await response.json() as Ack).contact
+    expect(saved.email).toBe('')
+    expect(saved.vcard).not.toContain('EMAIL')
+    expect((await update(saved, { title: 'Edited' })).status).toBe(200)
   })
 
   it('requires an exact captured record revision before editing', async () => {
@@ -295,7 +272,7 @@ describe('sealed mailbox Contacts list/create/edit HTTP security acceptance', ()
 
   it('binds the captured revision to the exact target rather than another owned contact', async () => {
     const extra = f.record(f.inbox.login, { fullName: 'Other owned contact' })
-    await atomicWriteJson(f.path, [f.own, extra, f.shared, f.neighbor])
+    f.seed([extra])
     const first = await selected(), second = await selected(extra.id), before = await f.bytes()
     expect(second.revision).not.toBe(first.revision)
     const response = await update(second, { expectedRevision: first.revision, fullName: 'Wrong target revision' })
@@ -306,7 +283,7 @@ describe('sealed mailbox Contacts list/create/edit HTTP security acceptance', ()
 
   it('does not invalidate an owned edit merely because an unrelated contact changed', async () => {
     const extra = f.record(f.inbox.login, { fullName: 'Unrelated editor' })
-    await atomicWriteJson(f.path, [f.own, extra, f.shared, f.neighbor])
+    f.seed([extra])
     const first = await selected(), second = await selected(extra.id)
     expect((await update(second, { title: 'Changed neighbor' })).status).toBe(200)
     expect((await update(first, { title: 'Still current target' })).status).toBe(200)
@@ -339,17 +316,19 @@ describe('sealed mailbox Contacts list/create/edit HTTP security acceptance', ()
     expect((await view()).contacts.filter(item => ids.has(item.id))).toHaveLength(2)
   })
 
-  it('revalidates a queued mailbox token after acquiring the existing writer lease', async () => {
-    const initial = await selected(), before = await f.bytes()
-    const queue = queueNextMutationWriter(f.state.store)
-    const pending = update(initial, { title: 'Denied queued edit' })
+  it('revalidates a queued mailbox token after waiting for the mailbox lock', async () => {
+    const initial = await selected(), second = await selected(f.own.id)
+    const hold = f.dav.pauseNextWrite(), holder = update(initial, { title: 'Holds the lock' })
+    await hold.reached
+    const reads = f.dav.requests.length, pending = update(second, { title: 'Denied queued edit' })
     try {
-      await queue.wait(pending)
+      await vi.waitFor(() => expect(f.dav.requests.length).toBeGreaterThan(reads))
       await revokeAllApiTokensForPrincipal(f.database.db, f.principal.id)
-      queue.release()
+      hold.release()
       expect((await pending).status).toBe(401)
-      expect(await f.bytes()).toBe(before)
-    } finally { queue.release(); await pending.catch(() => undefined); queue.restore() }
+      expect((await holder).status).toBe(200)
+      expect(f.dav.contacts().find(item => item.id === initial.id)?.title).toBe('Holds the lock')
+    } finally { hold.release(); await pending.catch(() => undefined); await holder.catch(() => undefined) }
   })
 
   it('admits only one concurrent edit using the same captured current value', async () => {

@@ -1,6 +1,8 @@
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { kpiCard, stepper } from '../../../components/index.ts'
 import { escapeHtml, xpTemplate } from '../../../html.ts'
+import { renderV2FileRestorationSection } from './file-restoration.ts'
+import { v2WebsiteBackupsCard } from './owner-tools.ts'
 import { deniedOperationAuthority, operationButton, operationCard, operationContext, operationFacts, operationField, operationPage, operationTable, technical, unreadRow, type PanelOperationAuthority } from './common.ts'
 
 /** The archive table owns all six approved columns; core fills its semantic row template. */
@@ -12,7 +14,7 @@ function archiveTemplates(t: ReturnType<typeof operationContext>['t']): string {
 
 /** Actual account-home archive actions; database/mail providers remain separate. */
 export function renderV2AccountBackupPage(props: PanelSurfaceProps, authority: PanelOperationAuthority = deniedOperationAuthority): string {
-  const { t, canManage, account } = operationContext(props, authority, '/files/backup')
+  const { t, canManage, canRead, account } = operationContext(props, authority, '/files/backup')
   props = { ...props, account }
   const unknown = t(msgid('Not read'))
   const summary = `<div class="v2-kpi-row">${[
@@ -42,7 +44,7 @@ ${operationTable('v2-account-backup-diff', t(msgid('Restore differences')), [t(m
 <label class="v2-panel-operation-check"><input type="checkbox" data-account-backup-ack disabled><span>${escapeHtml(t(msgid('I reviewed the actual archive and the proposed changes.')))}</span></label>
 <div class="v2-panel-operation-actions">${operationButton(t(msgid('Restore reviewed home files')), { 'data-account-backup-restore': true }, true, true)}</div>`)
   const aside = operationCard('v2-backup-scope', t(msgctxt('theme:v2', 'Backup scope and safeguards')),
-    `${operationFacts([{ label: t(msgid('Account')), valueHtml: technical(account?.username ?? t(msgid('Not read'))) }, { label: t(msgid('Home')), valueHtml: technical(account?.home ?? t(msgid('Not read'))) }])}<p>${escapeHtml(t(msgctxt('theme:v2', 'Database, mailbox and server restore points require their own qualified providers. They are not included in the home-file archive.')))}</p><div class="v2-panel-operation-actions">${operationButton(t(msgctxt('theme:v2', 'Server restore points')))}${operationButton(t(msgctxt('theme:v2', 'Upload archive')))}</div>`)
+    `${operationFacts([{ label: t(msgid('Account')), valueHtml: technical(account?.username ?? t(msgid('Not read'))) }, { label: t(msgid('Home')), valueHtml: technical(account?.home ?? t(msgid('Not read'))) }])}<p>${escapeHtml(t(msgctxt('theme:v2', 'Database, mailbox and server restore points require their own qualified providers. They are not included in the home-file archive.')))}</p><div class="v2-panel-operation-actions"></div>`)
   return operationPage(props, '/files/backup', t(msgid('Backup wizard')), t(msgctxt('theme:v2', 'Create account archives, compare real home-file differences and restore only the reviewed changes.')),
-    `<div data-account-backup data-account-backup-account="${escapeHtml(account?.id ?? '')}" data-account-backup-username="${escapeHtml(account?.username ?? '')}" data-account-backup-manage="${canManage}">${summary}<div class="v2-panel-operation-columns"><div class="v2-panel-operation-stack">${archiveList}${create}${differences}${restore}</div><aside class="v2-panel-operation-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Backup information')))}">${aside}</aside></div><p role="status" data-account-backup-status data-state="unread">${escapeHtml(t(msgid('Account archives have not been read.')))}</p></div>`, undefined, authority)
+    `<div data-account-backup data-account-backup-account="${escapeHtml(account?.id ?? '')}" data-account-backup-username="${escapeHtml(account?.username ?? '')}" data-account-backup-manage="${canManage}">${summary}<div class="v2-panel-operation-columns"><div class="v2-panel-operation-stack">${archiveList}${create}${differences}${restore}${account ? v2WebsiteBackupsCard(t) : ''}${account ? renderV2FileRestorationSection(t, { username: account.username, canRead: canRead && account.status === 'active', canRestore: props.catalog?.some(tool => tool.id === 'file-restoration' && tool.status === 'verified') === true }) : ''}</div><aside class="v2-panel-operation-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Backup information')))}">${aside}</aside></div><p role="status" data-account-backup-status data-state="unread">${escapeHtml(t(msgid('Account archives have not been read.')))}</p></div>`, undefined, authority)
 }

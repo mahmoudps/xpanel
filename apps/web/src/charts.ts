@@ -137,7 +137,7 @@ function renderTopEntriesTable(
                 : renderStatusBadge('ok', '0 5xx')
             return (
               `<tr>` +
-              `<td class="xp-mono xp-tabular">${renderLtrValue(item.key, 'xp-chart-technical-value')}</td>` +
+              `<td class="xp-mono xp-tabular">${renderLtrValue(item.country ? `${item.key} ${item.country}` : item.key, 'xp-chart-technical-value')}</td>` +
               `<td data-numeric="true" class="xp-tabular">${item.requests.toLocaleString('en-US')}</td>` +
               `<td data-numeric="true" class="xp-tabular">${renderLtrValue(formatBytes(item.bytes), 'xp-chart-technical-value')}</td>` +
               `<td data-numeric="true" class="xp-tabular">${errBadge}</td>` +

@@ -133,7 +133,7 @@ describe('resumed workflows through real API and agent mounts', () => {
 
   it('permits reseller own preferences with empty ACL while preserving administrative page denial', async () => {
     const f = await fixture(), reseller = await f.state.store.createReseller({ username: 'prefreseller', passwordHash: HASH, acl: [], maxAccounts: 10,
-      totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
+      totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
     const principal = await db.createResellerPrincipal(f.database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
     const s = await f.session(principal.id, 'xwhm', true), initial = await s.request('/api/admin/preferences')
     expect(initial.status).toBe(200)
@@ -152,7 +152,7 @@ describe('resumed workflows through real API and agent mounts', () => {
     let principalId = f.root.id
     if (role === 'reseller') {
       const reseller = await f.state.store.createReseller({ username: 'indexreseller', passwordHash: HASH, acl: ['list-accounts', 'edit-account'], maxAccounts: 10,
-        totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
+        totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
       await f.state.store.changeOwner(f.account.id, reseller.id)
       principalId = (await db.createResellerPrincipal(f.database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })).id
     }

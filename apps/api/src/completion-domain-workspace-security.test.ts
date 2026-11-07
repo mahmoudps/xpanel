@@ -522,7 +522,7 @@ describe('conditional domain workspace API with isolated real SQLite and desired
     expect(response.status).toBe(201)
     expect(await response.json()).toMatchObject({ domain: { accountId: f.other.id, name: 'admin.example.test' } })
     const reseller = await f.state.store.createReseller({ username: 'domainseller', passwordHash: HASH, acl: ['list-accounts', 'edit-account'], maxAccounts: 5,
-      totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
+      totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
     await f.state.store.changeOwner(f.owner.id, reseller.id)
     const principal = await dbApi.createResellerPrincipal(f.database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
     const raw = await f.token(['domains:read', 'domains:write'], principal.id)

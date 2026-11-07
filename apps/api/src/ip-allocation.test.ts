@@ -31,7 +31,7 @@ const fixture = async () => {
     caps: { addonDomains: 2, aliasDomains: 2, subdomains: 2, mailboxes: 2, forwarders: 2, mailingLists: 2, ftpAccounts: 2, databases: 2, phpWorkers: 2 }, dedicatedIp: true, shell: 'none' as const, defaultMailboxQuotaMb: 128 }
   const plan = await state.store.createPlan(planInput)
   const noDedicated = await state.store.createPlan({ ...planInput, name: 'Shared-only plan', dedicatedIp: false })
-  const resellerInput = { passwordHash: HASH, acl: ['create-account', 'list-accounts'] as ('create-account' | 'list-accounts')[], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 'unlimited' as const, oversell: false, nameservers: [], delegatedIps: [] }
+  const resellerInput = { passwordHash: HASH, acl: ['create-account', 'list-accounts'] as ('create-account' | 'list-accounts')[], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 'unlimited' as const, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
   const reseller = await state.store.createReseller({ ...resellerInput, username: 'resellerip' })
   const neighbor = await state.store.createReseller({ ...resellerInput, username: 'neighborip' })
   const neighborPlan = await state.store.createPlan({ ...planInput, name: 'Neighbor plan', ownerId: neighbor.id })
@@ -91,7 +91,7 @@ const fixture = async () => {
 }
 
 describe('IP API router and desired-state allocation diagnostics', () => {
-  it('passes a specific dedicated selection to the leased allocator instead of silently using shared IPv4', async () => {
+  it('passes a specific dedicated selection to the leased allocator instead of silently using shared IPv4', { tags: ['slow'] }, async () => {
     const f = await fixture()
     const response = await f.request('POST', '/api/accounts', f.input('specificip', { ipAssignment: { mode: 'dedicated', poolId: f.dedicated.id } }))
     expect(response.status, await response.clone().text()).toBe(201)
@@ -101,7 +101,7 @@ describe('IP API router and desired-state allocation diagnostics', () => {
     expect(f.calls()).toBe(1)
   })
 
-  it.each([undefined, { mode: 'shared' }])('uses the persisted shared default for %j', async ipAssignment => {
+  it.each([undefined, { mode: 'shared' }])('uses the persisted shared default for %j', { tags: ['slow'] }, async ipAssignment => {
     const f = await fixture()
     const response = await f.request('POST', '/api/accounts', f.input('sharedip', ipAssignment === undefined ? {} : { ipAssignment }))
     expect(response.status).toBe(201)
@@ -111,7 +111,7 @@ describe('IP API router and desired-state allocation diagnostics', () => {
     expect((await f.state.store.listDomains({ accountId: body.account.id }))[0]?.accountId).toBe(body.account.id)
   })
 
-  it('selects an unallocated dedicated IPv4 without an API-side primary fallback', async () => {
+  it('selects an unallocated dedicated IPv4 without an API-side primary fallback', { tags: ['slow'] }, async () => {
     const f = await fixture()
     const response = await f.request('POST', '/api/accounts', f.input('automaticip', { ipAssignment: { mode: 'dedicated' } }))
     expect(response.status).toBe(201)
@@ -153,14 +153,14 @@ describe('IP API router and desired-state allocation diagnostics', () => {
     expect(await f.effects()).toEqual(before)
   })
 
-  it('forces the reseller owner even when the request supplies another owner', async () => {
+  it('forces the reseller owner even when the request supplies another owner', { tags: ['slow'] }, async () => {
     const f = await fixture()
     const response = await f.request('POST', '/api/accounts', f.input('reselleripone', { ownerId: f.neighbor.id, ipAssignment: { mode: 'dedicated', poolId: f.ownDedicated.id } }), { session: f.resellerSession })
     expect(response.status).toBe(201)
     expect((await response.json() as { account: { ownerId: string; ipv4: string } }).account).toMatchObject({ ownerId: f.reseller.id, ipv4: f.ownDedicated.address })
   })
 
-  it('returns 409 for an already reserved dedicated selection without creating another account', async () => {
+  it('returns 409 for an already reserved dedicated selection without creating another account', { tags: ['slow'] }, async () => {
     const f = await fixture()
     expect((await f.request('POST', '/api/accounts', f.input('firstip', { ipAssignment: { mode: 'dedicated', poolId: f.dedicated.id } }))).status).toBe(201)
     const before = await f.effects()
@@ -168,7 +168,7 @@ describe('IP API router and desired-state allocation diagnostics', () => {
     expect(await f.effects()).toEqual(before)
   })
 
-  it('keeps exactly one account reservation when two API creates race for one dedicated entry', async () => {
+  it('keeps exactly one account reservation when two API creates race for one dedicated entry', { tags: ['slow'] }, async () => {
     const f = await fixture()
     const responses = await Promise.all(['raceipone', 'raceiptwo'].map(username => f.request('POST', '/api/accounts', f.input(username, { ipAssignment: { mode: 'dedicated', poolId: f.dedicated.id } }))))
     expect(responses.map(response => response.status).sort()).toEqual([201, 409])
@@ -218,7 +218,7 @@ describe('IP API router and desired-state allocation diagnostics', () => {
     expect(await f.effects()).toEqual(before)
   })
 
-  it('denies account-owner and mailbox-scoped bearer administration through real authorization', async () => {
+  it('denies account-owner and mailbox-scoped bearer administration through real authorization', { tags: ['slow'] }, async () => {
     const f = await fixture()
     const created = await f.request('POST', '/api/accounts', f.input('tenantbase'))
     expect(created.status).toBe(201)
@@ -245,7 +245,7 @@ describe('IP API router and desired-state allocation diagnostics', () => {
     expect(f.calls()).toBe(2)
   })
 
-  it('refuses deleting a reserved pool address and preserves state and success audit', async () => {
+  it('refuses deleting a reserved pool address and preserves state and success audit', { tags: ['slow'] }, async () => {
     const f = await fixture()
     expect((await f.request('POST', '/api/accounts', f.input('boundip', { ipAssignment: { mode: 'dedicated', poolId: f.dedicated.id } }))).status).toBe(201)
     const before = await f.effects()
@@ -288,7 +288,7 @@ describe('IP API router and desired-state allocation diagnostics', () => {
     expect(await f.fingerprint()).toEqual(before)
   })
 
-  it('validates root-selected preview owner and plan and reflects a completed reservation', async () => {
+  it('validates root-selected preview owner and plan and reflects a completed reservation', { tags: ['slow'] }, async () => {
     const f = await fixture(), before = await f.fingerprint()
     const scoped = await f.request('GET', '/api/ips?view=allocation&planId=' + f.plan.id + '&ownerId=' + f.reseller.id)
     expect(scoped.status).toBe(200)

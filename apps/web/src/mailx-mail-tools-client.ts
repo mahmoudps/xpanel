@@ -27,13 +27,13 @@ export type MailxListDeliveryView = {
 type Ask = (options: { title: string; body: string; confirm: string; danger?: boolean }) => Promise<unknown>
 type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
 
-/** Strict reader for GET /api/account/mailx/mail-tools/lists; moderation and archives must stay unavailable. */
+/** Strict reader for GET /api/account/mailx/mail-tools/lists; archives must stay unavailable. */
 export function readMailxListDelivery(value: unknown): MailxListDeliveryView {
   const object = (item: unknown): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item)
   const bad = (): never => { throw new Error('invalid_mailx_list_delivery_view') }
   const iso = (item: unknown): item is string => typeof item === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(item) && Number.isFinite(Date.parse(item))
   if (!object(value) || !['connected', 'not-connected', 'unverified'].includes(String(value.host)) || !(value.observedAt === null || iso(value.observedAt)) || ![null, 'read', 'unavailable'].includes(value.aliases as string)
-    || typeof value.compositeRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.compositeRevision) || !object(value.capabilities) || value.capabilities.moderation !== false || value.capabilities.archive !== false
+    || typeof value.compositeRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.compositeRevision) || !object(value.capabilities) || typeof value.capabilities.moderation !== 'boolean' || value.capabilities.archive !== false
     || !Array.isArray(value.lists) || value.lists.length > 1000 || (value.host === 'connected') !== (value.observedAt !== null) || (value.observedAt === null) !== (value.aliases === null)) return bad()
   const lists = value.lists.map(raw => object(raw) && typeof raw.address === 'string' && raw.address.length <= 254 && Number.isSafeInteger(raw.members) && (raw.members as number) >= 0 && (raw.members as number) <= 10000
     && ['delivering', 'pending', 'disabled', 'restricted', 'empty', 'review', 'conflict'].includes(String(raw.state)) && !(raw.state === 'delivering' && value.aliases !== 'read')
@@ -41,13 +41,13 @@ export function readMailxListDelivery(value: unknown): MailxListDeliveryView {
   return { host: value.host as 'connected', observedAt: value.observedAt as string | null, aliases: value.aliases as 'read' | null, compositeRevision: value.compositeRevision, lists }
 }
 
-/** Strict reader for GET /api/account/mailx/mail-tools; BoxTrapper must stay unavailable. */
+/** Strict reader for GET /api/account/mailx/mail-tools. */
 export function readMailxMailTools(value: unknown): MailxMailToolsView {
   const object = (item: unknown): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item)
   const bad = (): never => { throw new Error('invalid_mailx_mail_tools_view') }
   const iso = (item: unknown): item is string => typeof item === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(item) && Number.isFinite(Date.parse(item))
   if (!object(value) || !['connected', 'not-connected', 'unverified'].includes(String(value.host)) || !(value.observedAt === null || iso(value.observedAt)) || typeof value.compositeRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.compositeRevision)
-    || !object(value.capabilities) || typeof value.capabilities.learning !== 'boolean' || value.capabilities.boxTrapper !== false || !Array.isArray(value.mailboxes) || value.mailboxes.length > 1000) return bad()
+    || !object(value.capabilities) || typeof value.capabilities.learning !== 'boolean' || !Array.isArray(value.mailboxes) || value.mailboxes.length > 1000) return bad()
   const engine = value.engine === null ? null : object(value.engine) && [null, 'rspamd', 'spamassassin'].includes(value.engine.engine as string) && ['wired', 'not-wired', 'unknown'].includes(String(value.engine.wiring)) ? { engine: value.engine.engine as 'rspamd' | null, wiring: value.engine.wiring as 'wired' } : bad()
   const keys = ['allowlist', 'filtering', 'score', 'blocklist', 'spamBox'] as const
   const mailboxes = value.mailboxes.map(raw => {
@@ -91,7 +91,7 @@ function bindMailxMailTools(askDialog: Ask | undefined): void {
     const fact = (key: string, value: string): void => { const cell = root.querySelector<HTMLElement>('[data-mailx-tools-fact="' + key + '"]'); if (cell) cell.textContent = value }
     const controls = (): void => { refresh.disabled = busy || !admitted(); apply.disabled = busy || !admitted() || view?.host !== 'connected' }
     const labels: Record<MailxListState, string> = { delivering: t('Delivering to members'), pending: t('Not applied yet'), disabled: t('Turned off by the account plan'),
-      restricted: t('Not delivered: posting is limited to members or moderated, which needs a list manager'), empty: t('Not delivered: the list has no members'),
+      restricted: t('Not delivered: its posting rules need the external programs module, which this server lacks'), empty: t('Not delivered: the list has no members'),
       review: t('Not delivered: the saved list needs review'), conflict: t('Not delivered: the address is already in use or its members forward back to it') }
     const paint = (next: MailxListDeliveryView): void => {
       view = next

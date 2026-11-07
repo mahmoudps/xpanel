@@ -83,11 +83,20 @@ describe('renderSshdDropin', () => {
       { kind: 'systemd', verb: 'restart', unit: 'ssh.socket' },
       { kind: 'systemd', verb: 'restart', unit: 'ssh' },
     ])
-    expect(sshdApplyActions({ ...debianOs, versionId: '22.04' })).toEqual([
-      { kind: 'systemd-daemon-reload' },
-      { kind: 'systemd', verb: 'restart', unit: 'ssh' },
-    ])
-    expect(sshdApplyActions(rhelOs).map((a) => (a.kind === 'systemd' ? a.unit : a.kind))).toEqual(['systemd-daemon-reload', 'sshd'])
+    expect(sshdApplyActions({ ...debianOs, versionId: '22.04' })).toEqual([{ kind: 'systemd', verb: 'reload', unit: 'ssh' }])
+    expect(sshdApplyActions(rhelOs)).toEqual([{ kind: 'systemd', verb: 'reload', unit: 'sshd' }])
+  })
+
+  it('renders both sign-in switches, the forced-command root policy and both ports during a change', () => {
+    const file = renderSshdDropin({ port: 22022, previousPort: 22, passwordAuth: true, pubkeyAuth: false, rootLogin: 'forced-commands-only' }, debianOs)
+    expect(file.content).toContain('Port 22022\nPort 22\nPubkeyAuthentication no\nPasswordAuthentication yes\n')
+    expect(file.content).toContain('PermitRootLogin forced-commands-only\n')
+    expect(verifySshdEffective('port 22\nport 22022\npasswordauthentication yes\npubkeyauthentication no\npermitrootlogin forced-commands-only\n', { port: 22022, previousPort: 22, passwordAuth: true, pubkeyAuth: false, rootLogin: 'forced-commands-only' })).toEqual([])
+    expect(verifySshdEffective('port 22\npasswordauthentication yes\npubkeyauthentication yes\npermitrootlogin no\n', { port: 22022, previousPort: 22, passwordAuth: true, pubkeyAuth: false, rootLogin: 'no' })).toHaveLength(2)
+  })
+
+  it('refuses a daemon with no sign-in method', () => {
+    expect(() => renderSshdDropin({ port: 22, passwordAuth: false, pubkeyAuth: false, rootLogin: 'no' }, debianOs)).toThrow(/cannot both be off/)
   })
 })
 

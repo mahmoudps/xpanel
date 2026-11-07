@@ -23,8 +23,9 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
     codename: '',
     packageManager: 'dnf',
     // semanage sets the SELinux port types and file contexts xPanel needs while SELinux stays enforcing; zstd writes Zstandard backup archives;
-    // EL 9 and 10 both ship dnf 4, whose post-transaction-actions plugin re-applies Compiler Access after compiler updates
-    bootstrapPackages: ['dnf-plugins-core', 'acl', 'policycoreutils-python-utils', 'openssl', 'zstd', 'python3-dnf-plugin-post-transaction-actions'],
+    // EL 9 and 10 both ship dnf 4, whose post-transaction-actions plugin re-applies Compiler Access after compiler updates;
+    // logrotate rotates the server logs listed in /etc/logrotate.d/xpanel
+    bootstrapPackages: ['dnf-plugins-core', 'acl', 'policycoreutils-python-utils', 'openssl', 'zstd', 'python3-dnf-plugin-post-transaction-actions', 'logrotate'],
     // the nginx and httpd packages create their own users
     extraSystemUsers: [],
     packages: {
@@ -36,12 +37,14 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
       postfix: ['postfix'],
       // EPEL; the agent signs outgoing mail through the OpenDKIM milter and renders its configuration
       opendkim: ['opendkim'],
-      dovecot: ['dovecot', 'dovecot-pigeonhole'],
+      // No EL repository ships dovecot-fts-xapian: install.sh builds the pinned upstream release from these inputs, the two -devel packages of Dovecot and Xapian from CRB.
+      dovecot: ['dovecot', 'dovecot-pigeonhole', 'dovecot-devel', 'xapian-core-devel', 'libicu-devel', 'sqlite-devel', 'gcc-c++', 'make', 'autoconf', 'automake', 'libtool'],
       // EPEL pdns includes libbindbackend.so; named-checkzone/dig are in these BIND tools.
       powerdns: ['pdns', 'bind-utils'],
       redis: [redis],
       ftp: ['pure-ftpd'],
-      sshd: ['openssh-server'],
+      // sudo carries the one rule that lets a login shell enter its private view
+      sshd: ['openssh-server', 'sudo'],
       nftables: ['nftables'],
       // EL and EPEL ship no mpm-itk: install.sh builds the pinned upstream release with apxs from these inputs.
       'apache-itk': ['httpd-devel', 'libcap-devel', 'redhat-rpm-config', 'make'],
@@ -51,6 +54,14 @@ export const dnfProfile = (release: OsRelease): XpanelOsProfile => {
       quota: ['quota'],
       acme: ['certbot'],
       modsecurity: ['mod_security', 'mod_security_crs'],
+      // No EL release ships Webalizer and EPEL ships AWStats only for EL 9: install.sh builds them from these inputs, pinned by SHA-256.
+      // The GeoIP2 Perl module lets the AWStats country plugin read the DB-IP database.
+      'web-stats': ['perl-GeoIP2', 'gd-devel', 'libpng-devel', 'zlib-devel', 'make', ...(os.major === 9 ? ['awstats']
+        : ['perl-interpreter', 'perl-vars', 'perl-Time-Local', 'perl-Socket', 'perl-Encode', 'perl-PathTools', 'perl-JSON-XS', 'perl-Try-Tiny'])],
+      // EPEL
+      webdav: ['lighttpd', 'lighttpd-mod_webdav'],
+      // EPEL; the library only: radicale3 would add its own system daemon and user
+      caldav: ['python3-radicale3'],
     },
     services: {
       nginx: 'nginx',

@@ -106,8 +106,8 @@ describe('v2 stylesheet asset', () => {
     const registered = [...canonical, ...registeredDocumentAliases.map(alias => ({ route: alias.route, surface: byCanonicalRoute.get(alias.parentRoute)! }))]
     const actual = v2RouteStylesheets.flatMap(entry => entry.routes.map(route => ({ route, surface: entry.surface })))
     const byRoute = (a: { route: string }, b: { route: string }): number => a.route.localeCompare(b.route)
-    expect(registered).toHaveLength(217)
-    expect(actual).toHaveLength(217)
+    expect(registered).toHaveLength(218)
+    expect(actual).toHaveLength(218)
     expect(actual.toSorted(byRoute)).toEqual(registered.toSorted(byRoute))
     expect(new Set(actual.map(document => document.route)).size).toBe(actual.length)
     for (const document of actual) {

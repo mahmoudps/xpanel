@@ -4,9 +4,11 @@ import { v2Messages } from '../../../messages.ts'
 import { escapeHtml, hookAttrs, type HookAttributes } from '../../../html.ts'
 import { card } from '../../../components/card.ts'
 import { pageHeader } from '../../../components/page-header.ts'
+import { mailCardsFor } from '../../../../../mail-cards.ts'
+import { renderV2MailCards } from '../../mail-cards.ts'
 
 /** Core has already authorized the listener, principal and specific mail capability. */
-export interface WhmMailAuthority { readonly canRead: boolean; readonly canManage: boolean }
+export interface WhmMailAuthority { readonly canRead: boolean; readonly canManage: boolean; readonly qualifiedTools?: ReadonlySet<string> }
 export interface WhmMailPageInput extends WhmSurfaceProps { readonly mailAuthority?: WhmMailAuthority }
 
 export function mailContext(input: WhmMailPageInput) {
@@ -33,11 +35,12 @@ export function table(t: Translate, title: string, headers: readonly string[], h
 }
 
 export function page(input: WhmMailPageInput, route: string, title: string, description: string, body: string): string {
-  const { t, canRead } = mailContext(input)
+  const { t, canRead, canManage, locale } = mailContext(input)
+  const cards = renderV2MailCards(mailCardsFor(route, t, { canRead, canAct: tool => canManage && input.mailAuthority?.qualifiedTools?.has(tool) === true }), locale)
   const head = pageHeader(t, { route, title, description, breadcrumb: [
     { label: t(msgid('Home')), href: '/whm' }, { label: t(msgid('Email')) }, { label: title },
   ] })
-  return `<section class="v2-whm-mail" data-whm-detail-route="${escapeHtml(route)}" data-capability-state="${canRead ? 'authorized' : 'unavailable'}">${head}${body}</section>`
+  return `<section class="v2-whm-mail" data-whm-detail-route="${escapeHtml(route)}" data-capability-state="${canRead ? 'authorized' : 'unavailable'}">${head}${body}${cards}</section>`
 }
 
 export const WHM_MAIL_CSS = `.v2-whm-mail,.v2-whm-mail__stack{display:flex;flex-direction:column;gap:var(--space-4);min-inline-size:0}

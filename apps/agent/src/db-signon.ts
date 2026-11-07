@@ -4,6 +4,7 @@ import { lstat, open, readdir, rename, unlink } from 'node:fs/promises'
 import { dbGrantPattern, fail, isXpanelError } from '@xpanel/core'
 import type { NewAuditEntry } from '@xpanel/db'
 import { services } from '@xpanel/render'
+import { assertLocalDatabaseServer } from './db-profiles.ts'
 import { parseMariadbBatch } from './mariadb-admin.ts'
 import { parseShowGrantLine } from './services/mariadb.ts'
 import { authorizeDbAccount, dbJson, readDbPackages } from './db-engines.ts'
@@ -23,22 +24,24 @@ const SSO_USER = /^xpsso-([0-9]{10})-([0-9a-f]{12})$/
 const TICKET_FILE = /^[0-9a-f]{64}$/
 const MAX_SSO_USERS = 1000
 
+export const SIGNON_DIRECTORY = /^\/(?:(?:var\/lib|run)\/xpanel\/[a-z0-9-]{1,64}|var\/lib\/xpanel-phpmyadmin)$/
+export const SIGNON_GROUP = /^[a-z_][a-z0-9_-]{0,31}$/
 export interface DbSignonConfig { signonUrl: string; returnUrl: string; ticketDirectory: string; ticketGroup: string; bridgePath: string; configPath: string }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const exact = (value: Record<string, unknown>, keys: readonly string[]): boolean => Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))
-const httpsUrl = (value: unknown, query: boolean): string => {
+export const httpsUrl = (value: unknown, query: boolean): string => {
   if (typeof value !== 'string' || value.length > 512) throw new Error('invalid_signon_url')
   const url = new URL(value)
   if (url.protocol !== 'https:' || url.username || url.password || url.hash || !query && url.search || url.href !== value) throw new Error('invalid_signon_url')
   return value
 }
-const phpPath = (value: unknown): string => typeof value === 'string' && /^\/[A-Za-z0-9._/-]{1,255}\.php$/.test(value) && !value.split('/').some(part => part === '..' || part === '.') ? value : (() => { throw new Error('invalid_signon_path') })()
+export const phpPath = (value: unknown): string => typeof value === 'string' && /^\/[A-Za-z0-9._/-]{1,255}\.php$/.test(value) && !value.split('/').some(part => part === '..' || part === '.') ? value : (() => { throw new Error('invalid_signon_path') })()
 /** Installer-written root configuration; anything unexpected keeps sign-on unavailable. */
 export function parseDbSignonConfig(text: string): DbSignonConfig {
   const raw: unknown = JSON.parse(text)
   const pma = object(raw) && exact(raw, ['phpmyadmin']) ? raw.phpmyadmin : null
   if (!object(pma) || !exact(pma, ['signonUrl', 'returnUrl', 'ticketDirectory', 'ticketGroup', 'bridgePath', 'configPath'])) throw new Error('invalid_signon_config')
-  if (typeof pma.ticketDirectory !== 'string' || !/^\/(?:var\/lib|run)\/xpanel\/[a-z0-9-]{1,64}$/.test(pma.ticketDirectory) || typeof pma.ticketGroup !== 'string' || !/^[a-z_][a-z0-9_-]{0,31}$/.test(pma.ticketGroup) || pma.ticketGroup === 'root') throw new Error('invalid_signon_config')
+  if (typeof pma.ticketDirectory !== 'string' || !SIGNON_DIRECTORY.test(pma.ticketDirectory) || typeof pma.ticketGroup !== 'string' || !SIGNON_GROUP.test(pma.ticketGroup) || pma.ticketGroup === 'root') throw new Error('invalid_signon_config')
   return { signonUrl: httpsUrl(pma.signonUrl, false), returnUrl: httpsUrl(pma.returnUrl, true), ticketDirectory: pma.ticketDirectory, ticketGroup: pma.ticketGroup, bridgePath: phpPath(pma.bridgePath), configPath: phpPath(pma.configPath) }
 }
 const phpString = (value: string): string => "'" + value.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"
@@ -79,7 +82,7 @@ $cfg['Servers'][1]['SignonSession'] = ${phpString(DB_SIGNON_SESSION_NAME)};
 $cfg['Servers'][1]['SignonCookieParams'] = ['lifetime' => 0, 'path' => '/', 'domain' => '', 'secure' => true, 'httponly' => true, 'samesite' => 'Lax'];
 $cfg['Servers'][1]['SignonURL'] = ${phpString(config.returnUrl)};
 $cfg['Servers'][1]['LogoutURL'] = ${phpString(config.returnUrl)};
-`
+${config.configPath === '/etc/phpMyAdmin/config.inc.php' ? "$cfg['TempDir'] = '/var/lib/phpMyAdmin/temp';\n" : ''}`
 
 export interface DbSignonStat { isDirectory: boolean; isSymbolicLink: boolean; uid: number; gid: number; mode: number }
 export interface DbSignonFs {
@@ -115,7 +118,7 @@ export const nodeDbSignonFs: DbSignonFs = {
   },
   async removeTicket(directory, name) { if (name.includes('/')) throw new Error('invalid_ticket_name'); await unlink(directory + '/' + name).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }) },
 }
-export interface DbSignonSql { query(statements: readonly string[]): Promise<string> }
+export interface DbSignonSql { query(statements: readonly string[]): Promise<string>; isRemote?(): Promise<boolean> }
 export type DbSignonReason = 'packages-unread' | 'package-missing' | 'config-missing' | 'config-invalid' | 'bridge-missing' | 'bridge-modified' | 'phpmyadmin-config-missing' | 'phpmyadmin-config-modified' | 'ticket-directory-unsafe' | 'database-admin-unavailable'
 export type DbSignonStatus = { state: 'ready'; reason: null; config: DbSignonConfig; gid: number } | { state: 'not-installed' | 'not-configured' | 'unavailable'; reason: DbSignonReason; config: null; gid: null }
 const sha = (text: string): string => createHash('sha256').update(text).digest('hex')
@@ -164,16 +167,28 @@ export async function reapDbSignon(input: { sql: DbSignonSql; fs: DbSignonFs; co
   if (rows.length > MAX_SSO_USERS) return fail('LIMIT_EXCEEDED', 'too many phpMyAdmin session users are pending removal', { stateChanged: false })
   const expired = rows.map(row => row[0]!).filter(user => { const match = SSO_USER.exec(user); return !!match && Number(match[1]) <= now })
   for (const user of expired) await input.sql.query([`DROP USER IF EXISTS ${sqlUser(user)}`])
+  return { users: expired.length, tickets: await reapSignonTickets(input.fs, input.config.ticketDirectory, now) }
+}
+/** Removes tickets past their expiry, or by age when a file does not read as a ticket. */
+export async function reapSignonTickets(fs: DbSignonFs, directory: string, now: number): Promise<number> {
   let tickets = 0
-  for (const entry of await input.fs.listTickets(input.config.ticketDirectory)) {
+  for (const entry of await fs.listTickets(directory)) {
     let expiresAt: number | null = null
     if (TICKET_FILE.test(entry.name)) {
-      try { const data: unknown = JSON.parse((await input.fs.readFile(input.config.ticketDirectory + '/' + entry.name)) ?? ''); expiresAt = object(data) && Number.isSafeInteger(data.expiresAt) ? data.expiresAt as number : null } catch { expiresAt = null }
+      try { const data: unknown = JSON.parse((await fs.readFile(directory + '/' + entry.name)) ?? ''); expiresAt = object(data) && Number.isSafeInteger(data.expiresAt) ? data.expiresAt as number : null } catch { expiresAt = null }
     }
     const stale = expiresAt !== null ? expiresAt < now : entry.mtimeMs / 1000 + DB_SIGNON_TICKET_SECONDS < now
-    if (stale) { await input.fs.removeTicket(input.config.ticketDirectory, entry.name); tickets++ }
+    if (stale) { await fs.removeTicket(directory, entry.name); tickets++ }
   }
-  return { users: expired.length, tickets }
+  return tickets
+}
+/** Sign-on takes an empty JSON object, and nothing else reaches authorization. */
+export async function readSignonBody(req: Request): Promise<void> {
+  if (req.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return fail('VALIDATION', 'JSON is required', { stateChanged: false })
+  const text = await req.text()
+  let body: unknown
+  try { body = text.length <= 64 ? JSON.parse(text) : null } catch { body = null }
+  if (!object(body) || Object.keys(body).length !== 0) return fail('VALIDATION', 'sign-on takes an empty JSON object', { stateChanged: false })
 }
 
 export type DbSignonScope = { kind: 'account'; username: string; databases: readonly string[] } | { kind: 'root' }
@@ -220,23 +235,17 @@ export interface DbSignonRouteDeps extends DbAccountDeps {
   random?: (bytes: number) => Buffer
 }
 const ROOT_SIGNON = '/host/databases/web-clients/phpmyadmin/sign-on'
-const ACCOUNT = /^\/accounts\/([a-z][a-z0-9]{0,15})\/database-engines\/(phpmyadmin|phppgadmin)(\/sign-on)?$/
+const ACCOUNT = /^\/accounts\/([a-z][a-z0-9]{0,15})\/database-engines\/phpmyadmin(\/sign-on)?$/
 const publicStatus = (status: DbSignonStatus) => ({ state: status.state, reason: status.reason })
 
 export async function handleDbSignonRoute(req: Request, url: URL, method: string, deps: DbSignonRouteDeps): Promise<Response | null> {
   const account = ACCOUNT.exec(url.pathname), root = url.pathname === ROOT_SIGNON || url.pathname === '/host/databases/web-clients'
-  if (!account && !root || account?.[2] === 'phppgadmin' && account[3]) return null
-  const issue = url.pathname === ROOT_SIGNON || !!account?.[3]
+  if (!account && !root) return null
+  const issue = url.pathname === ROOT_SIGNON || !!account?.[2]
   if (method !== (issue ? 'POST' : 'GET')) return new Response(null, { status: 405, headers: { allow: issue ? 'POST' : 'GET' } })
   if (url.search) return fail('VALIDATION', 'database web clients do not accept selectors', { stateChanged: false })
-  if (issue) {
-    if (req.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return fail('VALIDATION', 'JSON is required', { stateChanged: false })
-    const text = await req.text()
-    let body: unknown
-    try { body = text.length <= 64 ? JSON.parse(text) : null } catch { body = null }
-    if (!object(body) || Object.keys(body).length !== 0) return fail('VALIDATION', 'sign-on takes an empty JSON object', { stateChanged: false })
-  }
-  const toolId = account?.[2] ?? 'phpmyadmin', now = deps.now ?? (() => new Date())
+  if (issue) await readSignonBody(req)
+  const toolId = 'phpmyadmin', now = deps.now ?? (() => new Date())
   const owner = account ? await authorizeDbAccount(deps, account[1]!, toolId) : null
   const actor = owner ? null : (await deps.assertRoot(issue ? 'host.databases.signon' : 'host.databases.web-clients')).actor
   const packages = await readDbPackages(deps)
@@ -249,11 +258,11 @@ export async function handleDbSignonRoute(req: Request, url: URL, method: string
   if (!issue) {
     await fresh()
     const context = owner ? { context: { accountId: owner.id, username: owner.username } } : {}
-    if (toolId === 'phppgadmin') return dbJson({ ...context, client: 'phppgadmin', installed: installed('phppgadmin'), signon: { state: 'unsupported', reason: 'no-documented-signon' }, postgresql: packages.state === 'read' ? packages.products.postgresql.installed : null })
     const databases = owner ? (await deps.store.readDatabaseRemoteAccess(owner.id)).databases.filter(row => row.trashedAt === null).length : null
     return dbJson({ ...context, client: 'phpmyadmin', installed: installed('phpmyadmin'), signon: publicStatus(status), databases, ticketSeconds: DB_SIGNON_TICKET_SECONDS, sessionSeconds: DB_SIGNON_SESSION_SECONDS, ...(owner ? {} : { phppgadmin: installed('phppgadmin') }) })
   }
   if (status.state !== 'ready' || !deps.fs || !deps.sql) return fail('PRECONDITION_FAILED', 'phpMyAdmin sign-on is not available on this server; nothing was created', { stateChanged: false, reason: status.reason })
+  await assertLocalDatabaseServer(deps.sql)
   try { await reapDbSignon({ sql: deps.sql, fs: deps.fs, config: status.config, now }) } catch { /* expired users are retried on the next sign-on */ }
   const scope: Parameters<typeof issueDbSignon>[0]['scope'] = owner ? { kind: 'account', username: owner.username, databases: (await deps.store.readDatabaseRemoteAccess(owner.id)).databases.filter(row => row.trashedAt === null && row.accountId === owner.id).map(row => row.name) } : { kind: 'root' }
   const entry = { actor: owner ? deps.caller.actor : actor!, principalId: deps.caller.principalId, action: 'database.phpmyadmin.sign_on', target: owner ? 'account:' + owner.username : 'server' }

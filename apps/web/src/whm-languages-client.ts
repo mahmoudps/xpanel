@@ -12,7 +12,7 @@ export interface LanguageRowView {
   override: { uploadedAt: string; uploadedBy: string; sha256: string; entries: number } | null
   overrideState: 'none' | 'saved' | 'invalid'; runtime: 'applied' | 'restart_required' | 'rejected'
 }
-export interface PanelLanguagesView { locales: LanguageRowView[]; defaultLocale: string; policyState: 'default' | 'saved' | 'invalid'; updatedAt: string | null; revision: string }
+export interface PanelLanguagesView { locales: LanguageRowView[]; defaultLocale: string; policyState: 'default' | 'saved' | 'invalid'; updatedAt: string | null; revision: string; copies: unknown[] }
 
 export function readPanelLanguagesView(value: unknown): PanelLanguagesView {
   const bad = (): never => { throw new Error('invalid_languages') }
@@ -20,11 +20,11 @@ export function readPanelLanguagesView(value: unknown): PanelLanguagesView {
   const exact = (item: Record<string, unknown>, keys: string): boolean => Object.keys(item).sort().join() === keys
   const iso = (item: unknown): string => typeof item === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(item) ? item : bad()
   const count = (item: unknown): number => Number.isSafeInteger(item) && (item as number) >= 0 ? item as number : bad()
-  if (!object(value) || !exact(value, 'defaultLocale,locales,policyState,revision,updatedAt') || typeof value.revision !== 'string' || !/^[0-9a-f]{64}$/.test(value.revision)
-    || !['default', 'saved', 'invalid'].includes(value.policyState as string) || !Array.isArray(value.locales) || value.locales.length !== LANGUAGE_TAGS.length
-    || !LANGUAGE_TAGS.includes(value.defaultLocale as string) || (value.policyState === 'saved') !== (value.updatedAt !== null)) return bad()
+  if (!object(value) || !exact(value, 'copies,defaultLocale,locales,policyState,revision,updatedAt') || typeof value.revision !== 'string' || !/^[0-9a-f]{64}$/.test(value.revision)
+    || !['default', 'saved', 'invalid'].includes(value.policyState as string) || !Array.isArray(value.locales) || value.locales.length < LANGUAGE_TAGS.length || !Array.isArray(value.copies)
+    || !value.locales.some(row => object(row) && row.tag === value.defaultLocale) || (value.policyState === 'saved') !== (value.updatedAt !== null)) return bad()
   const locales = value.locales.map((row, index): LanguageRowView => {
-    if (!object(row) || !exact(row, 'dir,messages,name,nativeName,offered,override,overrideState,runtime,source,tag') || row.tag !== LANGUAGE_TAGS[index] || row.source !== (row.tag === SOURCE_TAG)
+    if (!object(row) || !exact(row, 'dir,messages,name,nativeName,offered,override,overrideState,runtime,source,tag') || typeof row.tag !== 'string' || index < LANGUAGE_TAGS.length && row.tag !== LANGUAGE_TAGS[index] || row.source !== (row.tag === SOURCE_TAG)
       || typeof row.name !== 'string' || typeof row.nativeName !== 'string' || (row.dir !== 'ltr' && row.dir !== 'rtl') || typeof row.offered !== 'boolean'
       || !['none', 'saved', 'invalid'].includes(row.overrideState as string) || !['applied', 'restart_required', 'rejected'].includes(row.runtime as string)
       || (row.overrideState === 'saved') !== (row.override !== null)) return bad()
@@ -35,7 +35,7 @@ export function readPanelLanguagesView(value: unknown): PanelLanguagesView {
       override, overrideState: row.overrideState as LanguageRowView['overrideState'], runtime: row.runtime as LanguageRowView['runtime'] }
   })
   if (!locales.some(row => row.offered) || !locales.find(row => row.tag === value.defaultLocale)!.offered) return bad()
-  return { locales, defaultLocale: value.defaultLocale as string, policyState: value.policyState as PanelLanguagesView['policyState'], updatedAt: value.updatedAt === null ? null : iso(value.updatedAt), revision: value.revision }
+  return { locales, defaultLocale: value.defaultLocale as string, policyState: value.policyState as PanelLanguagesView['policyState'], updatedAt: value.updatedAt === null ? null : iso(value.updatedAt), revision: value.revision, copies: value.copies as unknown[] }
 }
 
 function bindWhmLanguages(askDialog?: (options: Record<string, unknown>) => Promise<unknown>): void {
@@ -158,7 +158,7 @@ function bindWhmLanguages(askDialog?: (options: Record<string, unknown>) => Prom
     })
     for (const button of all<HTMLButtonElement>('[data-whm-languages-download]')) button.addEventListener('click', async () => {
       const tag = button.dataset.whmLanguagesDownload ?? ''
-      if (!ready() || !LANGUAGE_TAGS.includes(tag)) return
+      if (!ready() || !view?.locales.some(row => row.tag === tag)) return
       busy = true; lock(); errors.hidden = true; note(catalogStatus, 'reading', t('Preparing the {language} catalog…', { language: languageOf(tag) }))
       try {
         const file = await request!('GET', '/api/server/panel/languages/' + tag + '/catalog') as { locale?: unknown; filename?: unknown; catalog?: unknown }
@@ -191,7 +191,7 @@ function bindWhmLanguages(askDialog?: (options: Record<string, unknown>) => Prom
     }
     for (const button of all<HTMLButtonElement>('[data-whm-languages-remove]')) button.addEventListener('click', async () => {
       const tag = button.dataset.whmLanguagesRemove ?? ''
-      if (!ready() || !view || !LANGUAGE_TAGS.includes(tag)) return
+      if (!ready() || !view || !view.locales.some(row => row.tag === tag)) return
       errors.hidden = true
       if (!await confirm(t('Remove the uploaded {language} catalog?', { language: languageOf(tag) }), t('The release catalog is used again when the panel next starts. Download the catalog first to keep a copy.'), true)) return
       if (!ready() || !view) return

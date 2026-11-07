@@ -107,7 +107,7 @@ function bindAccountSsl(askDialog: ((options: Record<string, unknown>) => Promis
       chip.textContent = scheduled ? t('AutoSSL on') : t('AutoSSL not connected')
       chip.dataset.state = scheduled ? 'on' : 'off'
       autossl.textContent = scheduled
-        ? t('AutoSSL renews issued certificates 30 days before they expire.')
+        ? t('AutoSSL renews issued certificates {days} days before they expire.', { days: sslObject(value) && sslObject(value.renewalScheduler) ? Number(value.renewalScheduler.renewDays) : 0 })
         : t('Automatic renewal is not scheduled on this server yet. Renew a Let’s Encrypt certificate with Renew now before it expires.')
       const previous = domain.value; domain.textContent = ''
       for (const item of workspace.domains) { const option = document.createElement('option'); option.value = item.name; option.textContent = item.name; domain.append(option) }

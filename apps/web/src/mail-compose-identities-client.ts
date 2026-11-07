@@ -139,7 +139,7 @@ function bindComposeIdentities(_askDialog: unknown, runtime: IdentityRuntime): v
           missing.textContent = t('Saved identity unavailable — choose a sender'); select.prepend(missing); select.value = missing.value
           selected = null
           setStatus('stale', t('The selected identity is no longer available. Your message is kept. Choose a sender before sending.'))
-        } else choose(identities.find(identity => identity.id === previous) ?? (!loaded ? identities.find(identity => identity.isDefault) : undefined) ?? null)
+        } else choose(identities.find(identity => identity.id === previous) ?? (!loaded ? identities.find(identity => identity.id === document.documentElement.dataset.mailReplyIdentity) ?? identities.find(identity => identity.isDefault) : undefined) ?? null)
         loaded = true
       } catch {
         knownCollection = false; ownershipReview = false; identities = []; mailboxFallback()

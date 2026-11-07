@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING, createWebDirectivesController, readWebDirectivesView } from './account-web-directives-client.ts'
-import { ACCOUNT_WEB_DIRECTIVE_ROUTES, renderAccountErrorPagesWorkspace, renderAccountHandlersWorkspace, renderAccountHotlinkWorkspace, renderAccountIndexesWorkspace, renderAccountIpBlockerWorkspace, renderAccountMimeTypesWorkspace, renderAccountRedirectsWorkspace, renderAccountWebDirectivePage } from './board-port/account-web-directives-workspace.ts'
+import { ACCOUNT_WEB_DIRECTIVE_ROUTES, renderAccountErrorPagesWorkspace, renderAccountHandlersWorkspace, renderAccountHotlinkWorkspace, renderAccountIndexesWorkspace, renderAccountMimeTypesWorkspace, renderAccountRedirectsWorkspace, renderAccountWebDirectivePage } from './board-port/account-web-directives-workspace.ts'
 
 const accountId = '11111111-1111-4111-8111-111111111111', domainId = '22222222-2222-4222-8222-222222222222'
 const input = (locale: 'en' | 'ar' = 'en', canManage = true) => ({ locale, accountId, domains: [{ id: domainId, accountId, name: 'example.test' }, { id: '33333333-3333-4333-8333-333333333333', accountId: '44444444-4444-4444-8444-444444444444', name: 'other.test' }], canManage })
 const view = (feature: string, model: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ feature, context: { accountId, domainId, domainName: 'example.test', path: 'public_html/.htaccess', engine: 'apache' },
   document: { exists: true, revision: 'a'.repeat(64), sizeBytes: 40, unmanagedLines: 2, managedFeatures: [] }, managed: false, model, conflict: null, capabilities: { canSave: true, reason: null },
-  application: { status: 'read', syntaxChecked: false, httpStatus: null, nativeQualified: false }, ...(feature === 'error-pages' ? { existence: 'not-checked' } : {}), ...extra })
+  application: { status: 'read', syntaxChecked: false, httpStatus: null, nativeQualified: false }, ...(feature === 'error-pages' ? { existence: 'not-checked' } : {}), ...(feature === 'handlers' ? { system: [{ handler: 'php-fpm', extensions: ['.php'] }] } : {}), ...extra })
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
 const listeners: EventListener[] = []
 afterEach(() => { for (const listener of listeners.splice(0)) window.removeEventListener('beforeunload', listener); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest; document.body.replaceChildren(); vi.restoreAllMocks() })
@@ -21,16 +21,16 @@ function bind(html: string, request: (method: string, path: string, body?: unkno
 const $ = <T extends Element>(selector: string): T => document.querySelector<T>(selector)!
 
 describe('account web directive pages', () => {
-  it('renders seven bilingual pages that keep technical values isolated and ASCII digits', () => {
-    const renderers = [renderAccountErrorPagesWorkspace, renderAccountIndexesWorkspace, renderAccountMimeTypesWorkspace, renderAccountHandlersWorkspace, renderAccountHotlinkWorkspace, renderAccountIpBlockerWorkspace, renderAccountRedirectsWorkspace]
-    expect(Object.keys(ACCOUNT_WEB_DIRECTIVE_ROUTES).sort()).toEqual(['/advanced/error-pages', '/advanced/handlers', '/advanced/indexes', '/advanced/mime-types', '/domains/redirects', '/security/hotlink', '/security/ip-blocker'])
+  it('renders six bilingual pages that keep technical values isolated and ASCII digits', () => {
+    const renderers = [renderAccountErrorPagesWorkspace, renderAccountIndexesWorkspace, renderAccountMimeTypesWorkspace, renderAccountHandlersWorkspace, renderAccountHotlinkWorkspace, renderAccountRedirectsWorkspace]
+    expect(Object.keys(ACCOUNT_WEB_DIRECTIVE_ROUTES).sort()).toEqual(['/advanced/error-pages', '/advanced/handlers', '/advanced/indexes', '/advanced/mime-types', '/domains/redirects', '/security/hotlink'])
     for (const locale of ['en', 'ar'] as const) for (const render of renderers) {
       const html = render(input(locale))
       expect(html).not.toMatch(/[٠-٩۰-۹]/); expect(html).toContain(`dir="${locale === 'ar' ? 'rtl' : 'ltr'}"`); expect(html).not.toContain('other.test')
-      if (render === renderAccountHandlersWorkspace) { expect(html).toContain('data-web-directives-unavailable="handlers"'); expect(html).not.toMatch(/<(?:input|button|select)/); continue }
+      expect(html.includes('data-wd-system'), render.name).toBe(render === renderAccountHandlersWorkspace)
       for (const part of ['data-wd-domain', 'data-wd-rows', 'data-wd-save', 'data-wd-refresh', 'data-wd-discard', 'data-wd-notice', 'data-wd-issues', 'data-wd-error-for', '<bdi dir="ltr" data-wd-path>']) expect(html).toContain(part)
     }
-    expect(renderAccountWebDirectivePage('ip-blocker', input('ar'))).toContain('حظر عناوين الشبكة')
+    expect(renderAccountWebDirectivePage('handlers', input('ar'))).toContain('معالجات Apache')
     expect(renderAccountRedirectsWorkspace(input('en', false))).toContain('data-wd-manage="false"')
     expect(ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING).not.toContain('innerHTML'); expect(() => new Function('return ' + ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING)).not.toThrow()
   })
@@ -39,27 +39,28 @@ describe('account web directive pages', () => {
     expect(readWebDirectivesView(clone(good), 'redirects', domainId, accountId).model).toEqual(good.model)
     for (const bad of [{ ...good, context: { ...good.context, accountId: '55555555-5555-4555-8555-555555555555' } }, { ...good, feature: 'hotlink' }, { ...good, model: { entries: [{ status: 307, path: '/a', target: 'x' }] } },
       { ...good, model: { entries: [], extra: true } }, { ...good, capabilities: { canSave: true, reason: 'policy' } }, { ...good, context: { ...good.context, path: '../.htaccess' } }, { ...good, existence: 'not-checked' },
-      { ...good, conflict: { code: 'Not A Code', line: 1 } }, { ...good, application: { ...good.application, nativeQualified: true } }, { ...good, document: { ...good.document, managedFeatures: ['handlers'] } }])
+      { ...good, conflict: { code: 'Not A Code', line: 1 } }, { ...good, application: { ...good.application, nativeQualified: true } }, { ...good, document: { ...good.document, managedFeatures: ['ip-blocker'] } }, { ...good, system: [] }])
       expect(() => readWebDirectivesView(clone(bad), 'redirects', domainId, accountId)).toThrow()
     expect(() => readWebDirectivesView(view('error-pages', { entries: [] }, { existence: undefined }), 'error-pages', domainId, accountId)).toThrow()
   })
   it('saves the draft with the captured revision, requires matching readback and keeps drafts on refusal', async () => {
-    let current = view('ip-blocker', { entries: [] })
+    const entry = { handler: 'cgi-script', extensions: ['.pl'] }
+    let current = view('handlers', { entries: [] })
     const request = vi.fn(async (method: string, path: string, body?: unknown) => {
-      expect(path).toBe('/api/domains/' + domainId + '/web-directives/ip-blocker')
-      if (method === 'PUT') { expect(body).toEqual({ expectedRevision: 'a'.repeat(64), model: { entries: ['192.0.2.1'] } }); current = view('ip-blocker', { entries: ['192.0.2.1'] }, { managed: true, document: { ...current.document, revision: 'b'.repeat(64) } }); return { ...clone(current), application: { status: 'saved', syntaxChecked: true, httpStatus: 200, nativeQualified: false } } }
+      expect(path).toBe('/api/domains/' + domainId + '/web-directives/handlers')
+      if (method === 'PUT') { expect(body).toEqual({ expectedRevision: 'a'.repeat(64), model: { entries: [entry] } }); current = view('handlers', { entries: [entry] }, { managed: true, document: { ...current.document, revision: 'b'.repeat(64) } }); return { ...clone(current), application: { status: 'saved', syntaxChecked: true, httpStatus: 200, nativeQualified: false } } }
       return clone(current)
     })
-    const controller = createWebDirectivesController({ feature: 'ip-blocker', domainId, accountId, request, admitted: () => true, confirm: async () => true })
-    await controller.load(); controller.edit({ entries: ['192.0.2.1'] }); expect(controller.state.dirty).toBe(true); await controller.save()
+    const controller = createWebDirectivesController({ feature: 'handlers', domainId, accountId, request, admitted: () => true, confirm: async () => true })
+    await controller.load(); controller.edit({ entries: [entry] }); expect(controller.state.dirty).toBe(true); await controller.save()
     expect(request.mock.calls.map(call => call[0])).toEqual(['GET', 'PUT', 'GET']); expect(controller.state).toMatchObject({ status: 'saved', dirty: false, review: false }); expect(controller.state.view?.application.httpStatus).toBe(200)
-    const refused = vi.fn(async (method: string) => { if (method === 'PUT') throw Object.assign(new Error('refused'), { status: 422, details: { stateChanged: false, fields: [{ field: 'entries.0', code: 'protected_address' }] } }); return clone(view('ip-blocker', { entries: [] })) })
-    const second = createWebDirectivesController({ feature: 'ip-blocker', domainId, accountId, request: refused, admitted: () => true, confirm: async () => true })
-    await second.load(); second.edit({ entries: ['127.0.0.1'] }); await second.save()
-    expect(second.state).toMatchObject({ status: 'fields', review: false, dirty: true, fields: [{ field: 'entries.0', code: 'protected_address' }] }); expect(second.state.draft).toEqual({ entries: ['127.0.0.1'] })
-    const canceled = vi.fn(async () => clone(view('ip-blocker', { entries: [] })))
-    const third = createWebDirectivesController({ feature: 'ip-blocker', domainId, accountId, request: canceled, admitted: () => true, confirm: async () => false })
-    await third.load(); third.edit({ entries: ['192.0.2.9'] }); await third.save(); expect(canceled).toHaveBeenCalledTimes(1); expect(third.state.dirty).toBe(true)
+    const refused = vi.fn(async (method: string) => { if (method === 'PUT') throw Object.assign(new Error('refused'), { status: 422, details: { stateChanged: false, fields: [{ field: 'entries.0.handler', code: 'handler_requires_itk' }] } }); return clone(view('handlers', { entries: [] })) })
+    const second = createWebDirectivesController({ feature: 'handlers', domainId, accountId, request: refused, admitted: () => true, confirm: async () => true })
+    await second.load(); second.edit({ entries: [entry] }); await second.save()
+    expect(second.state).toMatchObject({ status: 'fields', review: false, dirty: true, fields: [{ field: 'entries.0.handler', code: 'handler_requires_itk' }] }); expect(second.state.draft).toEqual({ entries: [entry] })
+    const canceled = vi.fn(async () => clone(view('handlers', { entries: [] })))
+    const third = createWebDirectivesController({ feature: 'handlers', domainId, accountId, request: canceled, admitted: () => true, confirm: async () => false })
+    await third.load(); third.edit({ entries: [entry] }); await third.save(); expect(canceled).toHaveBeenCalledTimes(1); expect(third.state.dirty).toBe(true)
   })
   it('locks after unknown outcomes and reports rollback and Apache refusals truthfully', async () => {
     const unknown = vi.fn(async (method: string) => { if (method === 'PUT') throw { status: 503, details: { stateChanged: true, unknownOutcome: true } }; return clone(view('indexes', { listing: 'inherit' })) })
@@ -100,16 +101,18 @@ describe('account web directive pages', () => {
   it('binds settings pages and keeps policy-refused pages read-only', async () => {
     const request = vi.fn(async (_method: string, path: string) => path.endsWith('/hotlink')
       ? clone(view('hotlink', { enabled: false, allowedHosts: ['example.test'], extensions: ['png'], allowEmptyReferrer: true, redirectUrl: null }))
-      : clone(view('ip-blocker', { entries: [] }, { capabilities: { canSave: false, reason: 'policy' } })))
-    bind(renderAccountHotlinkWorkspace(input()) + renderAccountIpBlockerWorkspace(input()), request)
+      : clone(view('handlers', { entries: [] }, { capabilities: { canSave: false, reason: 'policy' } })))
+    bind(renderAccountHotlinkWorkspace(input()) + renderAccountHandlersWorkspace(input()), request)
     await vi.waitFor(() => expect($<HTMLInputElement>('#wd-hotlink-enabled').disabled).toBe(false))
     expect($<HTMLTextAreaElement>('#wd-hotlink-allowedHosts').value).toBe('example.test')
     const enabled = $<HTMLInputElement>('#wd-hotlink-enabled'); enabled.checked = true; enabled.dispatchEvent(new Event('change'))
     const action = $<HTMLSelectElement>('#wd-hotlink-action'); action.value = 'redirect'; action.dispatchEvent(new Event('change'))
     expect($('[data-wd-error-for="redirectUrl"]').textContent).toBe('This value is required.')
     expect($<HTMLButtonElement>('[data-web-directives="hotlink"] [data-wd-save]').disabled).toBe(false)
-    await vi.waitFor(() => expect($('[data-web-directives="ip-blocker"] [data-wd-notice]').textContent).toContain('does not permit these directives'))
-    expect($<HTMLButtonElement>('[data-web-directives="ip-blocker"] [data-wd-add]').disabled).toBe(true); expect($<HTMLInputElement>('#wd-ip-blocker-address').disabled).toBe(true)
+    await vi.waitFor(() => expect($('[data-web-directives="handlers"] [data-wd-notice]').textContent).toContain('does not permit these directives'))
+    expect($<HTMLButtonElement>('[data-web-directives="handlers"] [data-wd-add]').disabled).toBe(true); expect($<HTMLSelectElement>('#wd-handlers-handler').disabled).toBe(true)
+    // The server's own .php mapping is listed read-only beside the account rules.
+    expect($('[data-wd-system]').textContent).toContain('php-fpm'); expect($('[data-wd-system]').textContent).toContain('.php')
     expect(request.mock.calls.every(call => call[0] === 'GET')).toBe(true)
   })
   it('stays unavailable without management admission and sends nothing', () => {

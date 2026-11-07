@@ -30,9 +30,12 @@ import { ACCOUNT_SESSIONS_CLIENT_BINDING } from './account-sessions-client.ts'
 import { ACCOUNT_API_TOKENS_CLIENT_BINDING } from './account-api-tokens-client.ts'
 import { ACCOUNT_PASSWORD_CLIENT_BINDING } from './account-password-client.ts'
 import { ACCOUNT_SSL_CLIENT_BINDING } from './account-ssl-client.ts'
+import { SSL_STORE_CLIENT_BINDING } from './ssl-store-client.ts'
 import { ACCOUNT_CONTACT_CLIENT_BINDING } from './account-contact-client.ts'
 import { DOMAIN_WORKSPACE_CLIENT_BINDING } from './domain-workspace-client.ts'
 import { ACCOUNT_REVERSE_PROXY_CLIENT_BINDING } from './account-reverse-proxy-client.ts'
+import { ACCOUNT_SITE_SETTINGS_CLIENT_BINDING } from './account-site-settings-client.ts'
+import { WHM_DOMAIN_BULK_CLIENT_BINDING } from './whm-domain-bulk-client.ts'
 import { DATABASE_WORKSPACE_CLIENT_BINDING } from './database-workspace-client.ts'
 import { MAIL_FOLDER_WORKSPACE_CLIENT_BINDING } from './mail-folder-workspace-client.ts'
 import { MAIL_CONTACTS_WORKSPACE_CLIENT_BINDING } from './mail-contacts-workspace-client.ts'
@@ -61,10 +64,13 @@ import { WHM_SSL_CLIENT_BINDING } from './whm-ssl-client.ts'
 import { WHM_SSL_INSTALL_CLIENT_BINDING } from './whm-ssl-install-client.ts'
 import { WHM_SECURITY_CLIENT_BINDING } from './whm-security-client.ts'
 import { WHM_SSH_CLIENT_BINDING } from './whm-ssh-client.ts'
+import { WHM_SSH_POLICY_CLIENT_BINDING } from './whm-ssh-policy-client.ts'
 import { WHM_PHP_CLIENT_BINDING } from './whm-php-client.ts'
 import { WHM_FIREWALL_CLIENT_BINDING } from './whm-firewall-client.ts'
 import { WHM_MAIL_QUEUE_CLIENT_BINDING } from './whm-mail-queue-client.ts'
 import { WHM_ACCOUNT_BULK_CLIENT_BINDING } from './whm-account-bulk-client.ts'
+import { WHM_ACCOUNT_ADMIN_CLIENT_BINDING } from './whm-account-admin-client.ts'
+import { WHM_HOME_CLIENT_BINDING } from './whm-home-client.ts'
 import { WHM_UPDATES_CLIENT_BINDING } from './whm-updates-client.ts'
 import { WHM_REPAIR_CLIENT_BINDING } from './whm-repair-client.ts'
 import { WHM_ACCOUNT_HEALTH_CLIENT_BINDING } from './whm-account-health-client.ts'
@@ -84,6 +90,7 @@ import { WHM_ENHANCEMENTS_CLIENT_BINDING } from './acct-enhancements-client.ts'
 import { ACCOUNT_ANNOUNCEMENTS_CLIENT_BINDING } from './board-port/account-announcements-banner-client.ts'
 import { WHM_SOFTWARE_CENTER_CLIENT_BINDING } from './whm-software-center-client.ts'
 import { WHM_DATABASES_CLIENT_BINDING } from './whm-databases-client.ts'
+import { DB_FTP_CLIENT_BINDINGS } from './db-ftp-client-bindings.ts'
 import { WHM_DATABASE_TUNING_CLIENT_BINDING } from './whm-database-tuning-client.ts'
 import { WHM_PREFERENCES_CLIENT_BINDING } from './whm-preferences-client.ts'
 import { UI_THEME_CLIENT_BINDING } from './ui-theme-client.ts'
@@ -93,11 +100,12 @@ import { WHM_LANGUAGES_CLIENT_BINDING } from './whm-languages-client.ts'
 import { WHM_WHMCS_CLIENT_BINDING } from './whm-whmcs-client.ts'
 import { WHM_SERVICE_MANAGER_CLIENT_BINDING } from './whm-service-manager-client.ts'
 import { WHM_CONFIGURATION_HEALTH_CLIENT_BINDING } from './whm-configuration-health-client.ts'
-import { ACCOUNT_PACKAGES_CLIENT_BINDING } from './account-packages-client.ts'
 import { ACCOUNT_DATABASE_REMOTE_CLIENT_BINDING } from './account-database-remote-client.ts'
 import { DB_ENGINES_CLIENT_BINDING } from './db-engines-client.ts'
 import { ACCOUNT_COLLABORATION_CLIENT_BINDING } from './account-collaboration-client.ts'
 import { WHM_DEVELOPER_CLIENT_BINDING } from './whm-developer-client.ts'
+import { WHM_EXTEND_CLIENT_BINDING } from './whm-extend-client.ts'
+import { PANEL_TOOLS_CLIENT_BINDING } from './panel-tools-client.ts'
 import { WHM_TRUSTED_PROXIES_CLIENT_BINDING } from './whm-trusted-proxies-client.ts'
 import { WHM_BACKUP_DESTINATIONS_CLIENT_BINDING } from './whm-backup-destinations-client.ts'
 import { MAIL_TOOLS_CLIENT_BINDING } from './mail-tools-client.ts'
@@ -106,18 +114,36 @@ import { MAIL_MAILING_LISTS_CLIENT_BINDING } from './mail-mailing-lists-client.t
 import { WHM_BENCHMARK_CLIENT_BINDING } from './whm-benchmark-client.ts'
 import { WHM_TRAFFIC_CLIENT_BINDING } from './whm-traffic-client.ts'
 import { WHM_METERING_CLIENT_BINDING } from './whm-metering-client.ts'
+import { WHM_LOG_TOOLS_CLIENT_BINDING } from './whm-log-tools-client.ts'
 import { WHM_DEFAULT_INDEX_CLIENT_BINDING } from './whm-default-index-client.ts'
+import { WHM_NGINX_PROXY_CLIENT_BINDING } from './whm-nginx-proxy-client.ts'
+import { WEB_STATS_CLIENT_BINDING } from './web-stats-client.ts'
 import { WHM_COMPOSER_CLIENT_BINDING } from './whm-composer-client.ts'
 import { SW_CONTAINERS_CLIENT_BINDING } from './sw-containers-client.ts'
+import { CTR_CLIENT_BINDING } from './ctr-client.ts'
 import { SW_ADDON_SERVICES_CLIENT_BINDING } from './sw-addon-services-client.ts'
 import { SW_DEPLOYMENTS_CLIENT_BINDING } from './sw-deployments-client.ts'
 import { SW_APP_PROJECTS_CLIENT_BINDING } from './sw-app-projects-client.ts'
 import { SW_OPTIMIZE_CLIENT_BINDING } from './sw-optimize-client.ts'
+import { ACCOUNT_EDGE_CLIENT_BINDING } from './account-edge-client.ts'
+import { ACCOUNT_LEECH_CLIENT_BINDING } from './account-leech-client.ts'
 import { SW_APPLICATIONS_CLIENT_BINDING } from './sw-applications-client.ts'
+import { SITE_INSTANCES_CLIENT_BINDING } from './site-software-instances-client.ts'
 import { ACCOUNT_RUNTIME_CLIENT_BINDING } from './account-runtime-client.ts'
 import { ACCOUNT_DYNAMIC_DNS_CLIENT_BINDING } from './account-dynamic-dns-client.ts'
 import { ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING } from './account-site-publisher-client.ts'
+import { PERSONAL_PREFERENCES_CLIENT_BINDING } from './personal-preferences-client.ts'
+import { MAILBOX_SETTINGS_CLIENT_BINDING } from './mail-mailbox-settings-client.ts'
+import { TEAM_AUDIT_CLIENT_BINDING } from './account-team-audit-client.ts'
+import { ACCOUNT_OWNER_TOOLS_CLIENT_BINDING } from './account-owner-tools-client.ts'
+import { WEBSITE_BACKUPS_CLIENT_BINDING } from './account-website-backups-client.ts'
 import { ACCOUNT_GIT_CLIENT_BINDING } from './account-git-client.ts'
+import { SERVICE_USERS_CLIENT_BINDING } from './service-users-client.ts'
+import { FILE_SHARE_LINKS_CLIENT_BINDING } from './file-share-links-client.ts'
+import { WHM_ACCOUNT_REPAIR_CLIENT_BINDING } from './whm-account-repair-client.ts'
+import { EMAIL_DISK_USAGE_CLIENT_BINDING } from './email-disk-usage-client.ts'
+import { ACCOUNT_GITWEB_CLIENT_BINDING } from './account-gitweb-client.ts'
+import { ACCOUNT_DAV_CLIENT_BINDING } from './account-dav-client.ts'
 import { ACCOUNT_PGP_CLIENT_BINDING } from './account-pgp-client.ts'
 import { ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING } from './account-web-directives-client.ts'
 import { ACCOUNT_SSH_CLIENT_BINDING } from './account-ssh-client.ts'
@@ -134,6 +160,7 @@ import { MAILX_ARCHIVE_CLIENT_BINDING } from './mailx-archive-client.ts'
 import { MAILX_COLLECTIONS_CLIENT_BINDING } from './mailx-collections-client.ts'
 import { MAILX_MAIL_TOOLS_CLIENT_BINDING } from './mailx-mail-tools-client.ts'
 import { WHM_MAIL_QUALITY_CLIENT_BINDING } from './whm-mail-quality-client.ts'
+import { MAIL_CARDS_CLIENT_BINDING } from './mail-cards-client.ts'
 import { WHM_MAILBOX_MAINTENANCE_CLIENT_BINDING } from './whm-mailbox-maintenance-client.ts'
 import { MAIL_TRACK_DELIVERY_CLIENT_BINDING } from './mail-track-delivery-client.ts'
 import { MAIL_FOLDERS_CLIENT_BINDING } from './mail-folders-client.ts'
@@ -145,8 +172,15 @@ import { WHM_UPGRADE_CLIENT_BINDING } from './whm-upgrade-client.ts'
 import { WHM_MONITORING_CLIENT_BINDING } from './whm-monitoring-client.ts'
 import { WHM_SERVER_OBSERVATION_CLIENT_BINDING } from './whm-server-observation-client.ts'
 import { OPS_FILE_SHARING_CLIENT_BINDING } from './ops-file-sharing-client.ts'
+import { SERVER_SETTINGS_SUGGEST_CLIENT_BINDING } from './server-settings-suggest-client.ts'
+import { ACCOUNT_FTP_REMOVE_CLIENT_BINDING } from './account-ftp-remove-client.ts'
+import { WHM_DNS_FILE_CLIENT_BINDING } from './whm-dns-file-client.ts'
+import { MAIL_BULK_CLIENT_BINDING } from './mail-bulk-client.ts'
+import { DATABASE_ROW_ACTIONS_CLIENT_BINDING } from './database-row-actions-client.ts'
+import { WHM_RESELLER_SUSPEND_CLIENT_BINDING } from './whm-reseller-suspend-client.ts'
 import { OPS_TERMINAL_CLIENT_BINDING } from './ops-terminal-client.ts'
 import { OPS_NODES_CLIENT_BINDING } from './ops-nodes-client.ts'
+import { NODE_CLUSTER_CLIENT_BINDING } from './node-cluster-client.ts'
 import { OPS_INTEGRATIONS_CLIENT_BINDING } from './ops-integrations-client.ts'
 import { WHM_SERVER_HEALTH_CLIENT_BINDING } from './whm-server-health-client.ts'
 import { WHM_SUPPORT_CLIENT_BINDING } from './whm-support-client.ts'
@@ -155,14 +189,27 @@ import { WHM_SERVICE_DETAIL_CLIENT_BINDING } from './whm-service-detail-client.t
 import { WHM_DNS_TOOLS_CLIENT_BINDING } from './whm-dns-tools-client.ts'
 import { WHM_SECURITY_TOOLS_CLIENT_BINDING } from './whm-security-tools-client.ts'
 import { SEC_SECURITY_CLIENT_BINDING } from './sec-security-client.ts'
+import { PANEL_ACCESS_CLIENT_BINDING } from './panel-access-client.ts'
+import { SVC_PANELS_CLIENT_BINDING } from './svc-panels-client.ts'
 import { SEC_DNS_CLIENT_BINDING } from './sec-dns-client.ts'
+import { IDENTITY_CLIENT_BINDING } from './identity-client.ts'
 import { WHM_WEB_SERVER_CLIENT_BINDING } from './whm-web-server-client.ts'
+import { WHM_WEB_DIRECTIVES_CLIENT_BINDING } from './whm-web-directives-client.ts'
+import { WHM_TWEAK_SETTINGS_CLIENT_BINDING } from './whm-tweak-settings-client.ts'
+import { WHM_SERVER_OPS_CLIENT_BINDING } from './whm-server-ops-client.ts'
+import { WHM_HOST_TOOLS_CLIENT_BINDING } from './whm-host-tools-client.ts'
+import { SIGN_IN_POLICY_CLIENT_BINDING } from './sign-in-policy-client.ts'
 import { WHM_SERVER_INFO_CLIENT_BINDING } from './whm-server-info-client.ts'
 import { WHM_IPS_CLIENT_BINDING } from './whm-ips-client.ts'
+import { WHM_NETWORK_CLIENT_BINDING } from './whm-network-client.ts'
 import { WHM_PANEL_DATA_CLIENT_BINDING } from './whm-panel-data-client.ts'
 import { WHM_TRANSFER_CLIENT_BINDING } from './whm-transfer-client.ts'
 import { ZONE_EDITOR_CLIENT_BINDING } from './zone-editor-client.ts'
 import { DIRECTORY_PRIVACY_CLIENT_BINDING } from './directory-privacy-client.ts'
+import { DNSSEC_CLIENT_BINDING } from './dnssec-client.ts'
+import { MAILING_LIST_ADMIN_CLIENT_BINDING } from './mailing-list-admin-client.ts'
+import { LIST_MODERATION_CLIENT_BINDING } from './list-moderation-client.ts'
+import { BOXTRAPPER_CLIENT_BINDING } from './boxtrapper-client.ts'
 import { PASSWORD_GENERATOR_CLIENT_BINDING } from './password-generate-client.ts'
 import { APPROVED_HOST_SERVICES_CLIENT } from './approved-host-services-client.ts'
 import { APPROVED_WHM_OPERATIONS_TABS_CLIENT } from './board-port/approved-whm-operations-components.ts'
@@ -799,6 +846,13 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       region.style.cssText = 'position:fixed;inset-block-end:20px;inset-inline-end:20px;z-index:95;display:flex;flex-direction:column;gap:10px;max-inline-size:420px;';
       document.body.appendChild(region);
     }
+    var noticePosition = document.documentElement.getAttribute('data-notice-position');
+    if (noticePosition) {
+      var noticeTop = noticePosition.indexOf('top') === 0, noticeCenter = noticePosition === 'center', noticeStart = noticePosition.indexOf('left') > 0;
+      region.style.insetBlock = noticeCenter ? '40% auto' : noticeTop ? '20px auto' : 'auto 20px';
+      region.style.insetInline = noticeCenter ? '0' : noticeStart ? '20px auto' : 'auto 20px';
+      region.style.marginInline = noticeCenter ? 'auto' : '';
+    }
     var toast = document.createElement('div');
     toast.className = 'xp-card xp-toast';
     toast.setAttribute('data-toast-level', level || 'ok');
@@ -1208,6 +1262,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       dialog.querySelector('[data-account-dialog-domain]').textContent = domain;
       dialog.querySelector('[data-account-confirm-field]').hidden = !deleting;
       dialog.querySelector('[data-account-reason-field]').hidden = !suspending;
+      var lockField = dialog.querySelector('[data-account-lock-field]');
+      if (lockField) { lockField.hidden = !suspending; lockField.querySelector('[name="lock"]').checked = false; }
       confirmation.required = deleting;
       submission.textContent = deleting ? copy('Delete account') : suspending ? copy('Suspend') : copy('Unsuspend');
       submission.classList.toggle('xp-accounts__delete', deleting);
@@ -1222,7 +1278,8 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       var deleting = selected.action === 'terminate-account';
       var verb = selected.action === 'suspend-account' ? 'suspend' : 'unsuspend';
       var endpoint = '/api/accounts/' + encodeURIComponent(selected.id) + (deleting ? '' : '/' + verb);
-      var body = deleting ? { confirmUsername: confirmation.value } : verb === 'suspend' ? { reason: reason.value.trim() } : {};
+      var lockBox = dialog.querySelector('[data-account-lock-field] [name="lock"]');
+      var body = deleting ? { confirmUsername: confirmation.value } : verb === 'suspend' ? Object.assign({ reason: reason.value.trim() }, lockBox && lockBox.checked ? { lock: true } : {}) : {};
       busy = true; cancel.disabled = true; confirmation.readOnly = true; reason.readOnly = true; form.setAttribute('aria-busy', 'true'); validate();
       status(copy('Submitting…'), 'loading');
       Promise.resolve().then(function () { return window.xpanelSessionRequest(deleting ? 'DELETE' : 'POST', endpoint, body); }).then(function (result) {
@@ -1535,6 +1592,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${ACCOUNT_PASSWORD_CLIENT_BINDING})();
     (${ACCOUNT_API_TOKENS_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_SSL_CLIENT_BINDING})(askDialog);
+    (${SSL_STORE_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_CONTACT_CLIENT_BINDING})(askDialog, rtl);
     (${ACCOUNT_BACKUP_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_CRON_CLIENT_BINDING})(askDialog);
@@ -1545,7 +1603,9 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${ACCOUNT_LOGS_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_VIRUS_SCAN_CLIENT_BINDING})(askDialog);
     (${SEC_SECURITY_CLIENT_BINDING})(askDialog);
+    (${PANEL_ACCESS_CLIENT_BINDING})(askDialog);
     (${SEC_DNS_CLIENT_BINDING})(askDialog);
+    (${IDENTITY_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_NETWORK_TOOLS_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_DATABASE_INSIGHTS_CLIENT_BINDING})(askDialog);
     (${SITE_HEALTH_CLIENT_BINDING})(askDialog);
@@ -1554,6 +1614,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${ACCOUNT_QUARANTINE_CLIENT_BINDING})(askDialog);
     (${DOMAIN_WORKSPACE_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_REVERSE_PROXY_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_SITE_SETTINGS_CLIENT_BINDING})(askDialog);
     (${DATABASE_WORKSPACE_CLIENT_BINDING})(askDialog);
     (${MAIL_FOLDER_WORKSPACE_CLIENT_BINDING})(askDialog, rtl);
     (${MAIL_CONTACTS_WORKSPACE_CLIENT_BINDING})(askDialog);
@@ -1611,6 +1672,10 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${MAIL_DRAFT_CLIENT_BINDING})();
     (${ZONE_EDITOR_CLIENT_BINDING})(askDialog);
     (${DIRECTORY_PRIVACY_CLIENT_BINDING})(askDialog);
+    (${DNSSEC_CLIENT_BINDING})(askDialog);
+    (${MAILING_LIST_ADMIN_CLIENT_BINDING})();
+    (${LIST_MODERATION_CLIENT_BINDING})(askDialog);
+    (${BOXTRAPPER_CLIENT_BINDING})(askDialog);
     function note(el, message) { if (!el) return; el.hidden = false; el.textContent = message; }
     function dialogInput(selector, name) {
       var dialog = document.querySelector(selector);
@@ -1884,11 +1949,13 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
           maxAccounts: Number(form.querySelector('[name="maxAccounts"]').value),
           totalDiskMb: Number(form.querySelector('[name="totalDiskMb"]').value),
           totalBandwidthMb: Number(form.querySelector('[name="totalBandwidthMb"]').value),
-          oversell: !!form.querySelector('[name="oversell"]').checked,
+          oversell: { disk: !!form.querySelector('[name="oversellDisk"]').checked, bandwidth: !!form.querySelector('[name="oversellBandwidth"]').checked },
           nameservers: [],
           delegatedIps: [],
           acl: acl,
         };
+        var contact = form.querySelector('[name="contactEmail"]');
+        if (contact && contact.value.trim()) body.contactEmail = contact.value.trim();
         form.querySelector('[name="password"]').value = '';
         window.xpanelSessionRequest('${xwhmPageAdapters.resellers.create.method}', '${xwhmPageAdapters.resellers.create.path}', body).then(reload).catch(function (error) { note(status, failText(error)); });
       });
@@ -1901,15 +1968,20 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${WHM_SSL_INSTALL_CLIENT_BINDING})(askDialog);
     (${WHM_SECURITY_CLIENT_BINDING})();
     (${WHM_SSH_CLIENT_BINDING})(askDialog);
+    (${WHM_SSH_POLICY_CLIENT_BINDING})(askDialog);
     (${WHM_PHP_CLIENT_BINDING})(askDialog);
     (${WHM_FIREWALL_CLIENT_BINDING})(askDialog);
     (${WHM_MAIL_QUEUE_CLIENT_BINDING})(askDialog);
     (${WHM_ACCOUNT_BULK_CLIENT_BINDING})(askDialog);
+    (${WHM_DOMAIN_BULK_CLIENT_BINDING})(askDialog);
     (${WHM_SERVICE_DETAIL_CLIENT_BINDING})(askDialog);
     (${WHM_DNS_TOOLS_CLIENT_BINDING})(askDialog);
     (${WHM_SECURITY_TOOLS_CLIENT_BINDING})(askDialog);
     (${SEC_SECURITY_CLIENT_BINDING})(askDialog);
+    (${PANEL_ACCESS_CLIENT_BINDING})(askDialog);
+    (${SVC_PANELS_CLIENT_BINDING})(askDialog);
     (${SEC_DNS_CLIENT_BINDING})(askDialog);
+    (${IDENTITY_CLIENT_BINDING})(askDialog);
     (${WHM_UPDATES_CLIENT_BINDING})(askDialog);
     (${WHM_REPAIR_CLIENT_BINDING})(askDialog);
     (${WHM_ACCOUNT_HEALTH_CLIENT_BINDING})();
@@ -1926,6 +1998,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${WHM_ENHANCEMENTS_CLIENT_BINDING})(askDialog);
     (${WHM_SOFTWARE_CENTER_CLIENT_BINDING})(askDialog);
     (${WHM_DATABASES_CLIENT_BINDING})(askDialog);
+    (${DB_FTP_CLIENT_BINDINGS})(askDialog);
     (${WHM_DATABASE_TUNING_CLIENT_BINDING})();
     (${WHM_PREFERENCES_CLIENT_BINDING})();
     (${UI_THEME_CLIENT_BINDING})();
@@ -1935,11 +2008,12 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${WHM_WHMCS_CLIENT_BINDING})(askDialog);
     (${WHM_SERVICE_MANAGER_CLIENT_BINDING})(askDialog);
     (${WHM_CONFIGURATION_HEALTH_CLIENT_BINDING})(askDialog);
-    (${ACCOUNT_PACKAGES_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_DATABASE_REMOTE_CLIENT_BINDING})(askDialog);
     (${DB_ENGINES_CLIENT_BINDING})(askDialog, rtl);
     (${ACCOUNT_COLLABORATION_CLIENT_BINDING})(askDialog);
     (${WHM_DEVELOPER_CLIENT_BINDING})();
+    (${WHM_EXTEND_CLIENT_BINDING})(askDialog);
+    (${PANEL_TOOLS_CLIENT_BINDING})(askDialog);
     (${WHM_TRUSTED_PROXIES_CLIENT_BINDING})();
     (${WHM_BACKUP_DESTINATIONS_CLIENT_BINDING})(askDialog);
     (${MAIL_TOOLS_CLIENT_BINDING})(askDialog);
@@ -1947,19 +2021,37 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${MAIL_MAILING_LISTS_CLIENT_BINDING})(askDialog);
     (${WHM_BENCHMARK_CLIENT_BINDING})();
     (${WHM_TRAFFIC_CLIENT_BINDING})();
-    (${WHM_METERING_CLIENT_BINDING})();
+    (${WHM_METERING_CLIENT_BINDING})(askDialog);
+    (${WHM_LOG_TOOLS_CLIENT_BINDING})();
     (${WHM_DEFAULT_INDEX_CLIENT_BINDING})(askDialog);
+    (${WHM_NGINX_PROXY_CLIENT_BINDING})(askDialog);
+    (${WEB_STATS_CLIENT_BINDING})();
     (${WHM_COMPOSER_CLIENT_BINDING})(askDialog);
     (${SW_CONTAINERS_CLIENT_BINDING})(askDialog);
+    (${CTR_CLIENT_BINDING})(askDialog);
     (${SW_ADDON_SERVICES_CLIENT_BINDING})(askDialog);
     (${SW_DEPLOYMENTS_CLIENT_BINDING})(askDialog);
     (${SW_APP_PROJECTS_CLIENT_BINDING})();
     (${SW_OPTIMIZE_CLIENT_BINDING})();
+    (${ACCOUNT_EDGE_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_LEECH_CLIENT_BINDING})(askDialog);
     (${SW_APPLICATIONS_CLIENT_BINDING})(askDialog);
+    (${SITE_INSTANCES_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_RUNTIME_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_DYNAMIC_DNS_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING})(askDialog);
+    (${PERSONAL_PREFERENCES_CLIENT_BINDING})();
+    (${MAILBOX_SETTINGS_CLIENT_BINDING})();
+    (${TEAM_AUDIT_CLIENT_BINDING})();
+    (${ACCOUNT_OWNER_TOOLS_CLIENT_BINDING})(askDialog);
+    (${WEBSITE_BACKUPS_CLIENT_BINDING})();
     (${ACCOUNT_GIT_CLIENT_BINDING})(askDialog);
+    (${SERVICE_USERS_CLIENT_BINDING})(askDialog);
+    (${FILE_SHARE_LINKS_CLIENT_BINDING})(askDialog);
+    (${WHM_ACCOUNT_REPAIR_CLIENT_BINDING})(askDialog);
+    (${EMAIL_DISK_USAGE_CLIENT_BINDING})(askDialog);
+    (${ACCOUNT_GITWEB_CLIENT_BINDING})();
+    (${ACCOUNT_DAV_CLIENT_BINDING})(askDialog);
     (${ACCOUNT_PGP_CLIENT_BINDING})(askDialog);
     (${WHM_MAIL_LOG_CLIENT_BINDING})();
     (${WHM_FTP_LOG_CLIENT_BINDING})();
@@ -1969,22 +2061,38 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
     (${MAILX_COLLECTIONS_CLIENT_BINDING})(askDialog);
     (${MAILX_MAIL_TOOLS_CLIENT_BINDING})(askDialog);
     (${WHM_MAIL_QUALITY_CLIENT_BINDING})();
+    (${MAIL_CARDS_CLIENT_BINDING})(askDialog);
     (${WHM_MAILBOX_MAINTENANCE_CLIENT_BINDING})(askDialog);
     (${WHM_UPGRADE_CLIENT_BINDING})();
     (${WHM_MONITORING_CLIENT_BINDING})(askDialog);
     (${WHM_SERVER_OBSERVATION_CLIENT_BINDING})();
     (${OPS_FILE_SHARING_CLIENT_BINDING})(askDialog);
+    ${SERVER_SETTINGS_SUGGEST_CLIENT_BINDING}
+    (${ACCOUNT_FTP_REMOVE_CLIENT_BINDING})(askDialog);
+    (${WHM_DNS_FILE_CLIENT_BINDING})(askDialog);
+    (${MAIL_BULK_CLIENT_BINDING})(askDialog);
+    (${DATABASE_ROW_ACTIONS_CLIENT_BINDING})(askDialog);
+    (${WHM_RESELLER_SUSPEND_CLIENT_BINDING})(askDialog);
     (${OPS_TERMINAL_CLIENT_BINDING})();
-    (${OPS_NODES_CLIENT_BINDING})();
+    (${OPS_NODES_CLIENT_BINDING})(askDialog);
+    (${NODE_CLUSTER_CLIENT_BINDING})(askDialog);
     (${OPS_INTEGRATIONS_CLIENT_BINDING})();
     (${WHM_SERVER_HEALTH_CLIENT_BINDING})();
     (${WHM_SUPPORT_CLIENT_BINDING})();
     (${WHM_MONITORING_ALERTS_CLIENT_BINDING})();
     (${WHM_WEB_SERVER_CLIENT_BINDING})(askDialog);
+    (${WHM_WEB_DIRECTIVES_CLIENT_BINDING})();
+    (${WHM_TWEAK_SETTINGS_CLIENT_BINDING})();
+    (${WHM_SERVER_OPS_CLIENT_BINDING})(askDialog);
+    (${WHM_HOST_TOOLS_CLIENT_BINDING})(askDialog);
+    (${SIGN_IN_POLICY_CLIENT_BINDING})(askDialog);
     (${WHM_TRANSFER_CLIENT_BINDING})(askDialog);
     (${APPROVED_HOST_SERVICES_CLIENT})(askDialog);
     (${WHM_SERVER_INFO_CLIENT_BINDING})();
     (${WHM_IPS_CLIENT_BINDING})(askDialog);
+    (${WHM_NETWORK_CLIENT_BINDING})(askDialog);
+    (${WHM_ACCOUNT_ADMIN_CLIENT_BINDING})(askDialog);
+    (${WHM_HOME_CLIENT_BINDING})();
     (${WHM_PANEL_DATA_CLIENT_BINDING})(askDialog);
     (${WHM_LOCAL_ARCHIVES_CLIENT_BINDING})();
   }

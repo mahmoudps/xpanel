@@ -7,6 +7,7 @@ import { authenticateRequest, hashPasswordArgon2id, sealTotpSecret, sha256Hex } 
 import { createApiApp, listenApiServer } from './server.ts'
 import { createDefaultWebRenderer } from './main.ts'
 import WebSocket from 'ws'
+import { writeSignInLockout } from './testing/sign-in-policy-fixture.ts'
 
 const SERVER_SECRET = 'development-policy-synthetic-server-secret-at-least-32-bytes'
 const PASSWORD = 'SyntheticDevelopmentPassword!'
@@ -18,10 +19,10 @@ beforeAll(async () => { passwordHash = await hashPasswordArgon2id(PASSWORD) })
 describe('trusted development MFA runtime policy', () => {
   let db: TestDbHandle
   let state: TestStateStoreHandle
-  beforeEach(async () => { db = await createTestDb(); state = await createTestStateStore() })
+  beforeEach(async () => { db = await createTestDb(); state = await createTestStateStore(); await writeSignInLockout(state.store.rootDir, 2) })
   afterEach(async () => { vi.unstubAllEnvs(); await state.close(); await db.close() })
 
-  const app = () => createApiApp({ db: db.db, store: state.store, serverSecret: SERVER_SECRET, allowedOrigins: [ORIGIN], lockoutThreshold: 2 })
+  const app = () => createApiApp({ db: db.db, store: state.store, serverSecret: SERVER_SECRET, allowedOrigins: [ORIGIN] })
   const login = (api: ReturnType<typeof app>, username: string, extra: Record<string, unknown> = {}) => api.fetch(new Request(ORIGIN + '/api/auth/login', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password: PASSWORD, ...extra }),
   }))
@@ -30,7 +31,7 @@ describe('trusted development MFA runtime policy', () => {
     let principal
     if (kind === 'root') principal = await createRootPrincipal(db.db, { username, passwordHash, forcePasswordChange: false })
     else if (kind === 'reseller') {
-      const reseller = await state.store.createReseller({ username, passwordHash, acl: ['list-accounts'], maxAccounts: 10, totalDiskMb: 1000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
+      const reseller = await state.store.createReseller({ username, passwordHash, acl: ['list-accounts'], maxAccounts: 10, totalDiskMb: 1000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
       principal = await createResellerPrincipal(db.db, { id: reseller.id, username, passwordHash })
     } else {
       const features = await state.store.createFeatureList({ name: 'Synthetic features', ownerId: null, disabled: [] })

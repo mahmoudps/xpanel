@@ -7,7 +7,7 @@ import { renderV2WhmResellers, type WhmResellerAuthority } from './index.ts'
 import { renderV2WhmResellerRecords } from './records.ts'
 
 const operator = { kind: 'root' as const, id: '10000000-0000-4000-8000-000000000001', username: 'operator' }
-const reseller: Reseller = { id: '20000000-0000-4000-8000-000000000001', username: 'provider', acl: ['list-accounts', 'manage-dns'], maxAccounts: 4, totalDiskMb: 10240, totalBandwidthMb: 'unlimited', oversell: false, nameservers: ['ns1.provider.example.test'], delegatedIps: ['192.0.2.9'] }
+const reseller: Reseller = { id: '20000000-0000-4000-8000-000000000001', username: 'provider', acl: ['list-accounts', 'manage-dns'], maxAccounts: 4, totalDiskMb: 10240, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: ['ns1.provider.example.test'], delegatedIps: ['192.0.2.9'] }
 const plan = defaultPlan({ id: '30000000-0000-4000-8000-000000000001', ownerId: reseller.id, name: 'Provider plan' })
 const account: Account = { id: '40000000-0000-4000-8000-000000000001', username: 'alice', uid: 1001, gid: 1001, home: '/home/alice', primaryDomain: 'alice.example.test', planId: plan.id, ownerId: reseller.id, status: 'active', suspendReason: null, contactEmail: 'alice@example.test', ipv4: '192.0.2.1', shell: 'none', createdAt: '2026-01-01T00:00:00Z' }
 const catalog = tools.map(tool => ({ ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } }))
@@ -60,7 +60,7 @@ describe('v2 reseller family', () => {
     const html = renderV2WhmResellers(t, props(), authority)
     expect(html).toContain('Sign-in state not read')
     expect(html).toContain('Suspend reseller</button>')
-    expect(html).toMatch(/type="button" disabled>Suspend reseller<\/button>/)
+    expect(html).toMatch(/data-reseller-suspended="false"[^>]*>Suspend reseller<\/button>/)
   })
   it('supports the privileges document with the same real controls and escaped stored values', () => {
     const html = renderV2WhmResellers(t, props({ activeRoute: '/whm/resellers/privileges', resellers: [{ ...reseller, username: '<script>bad()</script>' }] }), authority)
@@ -69,13 +69,21 @@ describe('v2 reseller family', () => {
     expect(html).not.toContain('<script>bad()')
     expect(html).toContain('data-reseller-update-form')
   })
-  it.each(['/whm/resellers/more', '/whm/resellers/ips-nameservers'])('renders %s as a stored-record document without inventing mutation controls', route => {
-    const html = renderV2WhmResellerRecords(t, props({ activeRoute: route }), authority)!
-    expect(html).toContain('provider')
+  it('connects reseller IPs, shared IP and nameservers for root, and keeps them read-only without management', () => {
+    const html = renderV2WhmResellerRecords(t, props({ activeRoute: '/whm/resellers/ips-nameservers' }), authority)!
     expect(html).toContain('ns1.provider.example.test')
-    expect(html).toContain('data-wiring="unavailable"')
-    expect(html).not.toContain('<form')
-    expect(html).not.toContain('192.0.2.9')
+    expect(html).toContain(`data-reseller-update-form data-reseller-id="${reseller.id}"`)
+    expect(html).toContain('name="sharedIp"')
+    const readOnly = renderV2WhmResellerRecords(t, props({ activeRoute: '/whm/resellers/ips-nameservers' }), { ...authority, canManage: false })!
+    expect(readOnly).not.toContain('<form')
+    expect(readOnly).toContain('data-readonly="true"')
+  })
+  it('shows measured reseller usage and Email All Resellers on the more tools document', () => {
+    const html = renderV2WhmResellerRecords(t, props({ activeRoute: '/whm/resellers/more', resellerUsage: { [reseller.id]: { accounts: 1, disk: { state: 'read', bytes: 1048576, observedAt: '2026-11-07T10:00:00.000Z', unmeasured: 0 }, traffic: { state: 'unavailable', bytes: null, observedAt: null, unmeasured: 1, month: '2026-11' } } } }), authority)!
+    expect(html).toContain('1.0 MiB, observed 2026-11-07 10:00 UTC')
+    expect(html).toContain('Unavailable on this host')
+    expect(html).toContain('data-reseller-email-form')
+    expect(renderV2WhmResellerRecords(t, props({ activeRoute: '/whm/resellers/more' }), { ...authority, canManage: false })).toContain('data-network-editable="false"')
   })
   it('keeps unrelated reseller rows outside a delegated reader snapshot', () => {
     const foreign = { ...reseller, id: '20000000-0000-4000-8000-000000000002', username: 'foreign-owner' }

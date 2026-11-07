@@ -11,6 +11,7 @@ import { FakeHostExecutor } from '../../agent/src/executor.ts'
 import { deriveCsrfToken, sha256Hex as dbTokenHash } from './auth.ts'
 import { sessionCookieName, sessionTokenHash } from './entry-points.ts'
 import type { EntryPoint } from './entry-points.ts'
+import { createMemoryDav } from './mail/dav-testkit.ts'
 import { createApiApp } from './server.ts'
 import type { ApiServerDeps } from './server.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
@@ -168,7 +169,7 @@ describe('mounted configuration health', () => {
 
   it('requires root for configuration health despite an interactive reseller listener session', async () => {
     const f = await fixture(), reseller = await f.state.store.createReseller({ username: 'mounthealth', passwordHash: HASH, acl: ['list-accounts', 'edit-account'], maxAccounts: 10,
-      totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
+      totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
     const principal = await db.createResellerPrincipal(f.database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH }), s = await f.session(principal.id)
     expect((await s.request('/api/server/configuration-health')).status).toBe(403)
     expect((await s.request('/api/server/configuration-health/repair', 'POST', repairIntent)).status).toBe(403)
@@ -177,32 +178,31 @@ describe('mounted configuration health', () => {
 })
 
 async function collaborationFixture() {
-  const f = await fixture()
+  const dav = createMemoryDav()
+  const f = await fixture({ api: { davExchange: dav.exchange } })
   const mailbox = (accountId: string, login: string) => f.state.store.createServiceUser({ accountId, login, passwordHash: HASH,
     services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
   const own = await mailbox(f.account.id, 'inbox@' + f.account.primaryDomain), sibling = await mailbox(f.account.id, 'support@' + f.account.primaryDomain), foreign = await mailbox(f.other.id, 'private@' + f.other.primaryDomain)
-  const calendarsPath = join(f.state.store.rootDir, 'extended', 'webmail', 'calendars.json')
-  const contactsPath = join(f.state.store.rootDir, 'extended', 'webmail', 'contacts.json')
+  const usernameOf = (accountId: string) => accountId === f.account.id ? f.account.username : f.other.username
   const authority = (service: typeof own) => ({ accountId: service.accountId, serviceUserId: service.id, mailbox: service.login })
   const calendar = (service: typeof own, name: string) => ({ id: randomUUID(), owner: service.login, ownerAuthority: authority(service), name, color: '#123456', timezone: 'UTC', shares: [], events: [], createdAt: new Date().toISOString() })
-  await atomicWriteJson(calendarsPath, [])
-  await atomicWriteJson(contactsPath, [])
-  return { ...f, own, sibling, foreign, authority, calendar, calendarsPath, contactsPath }
+  return { ...f, own, sibling, foreign, authority, calendar, dav, usernameOf }
 }
 describe('mounted account collaboration', () => {
   it('projects only current own mailbox metadata from the canonical calendar/contact collections', async () => {
     const f = await collaborationFixture(), s = await f.session(f.owner.id, 'xpanel')
     const ownCalendar = f.calendar(f.own, 'Operations'), foreignCalendar = f.calendar(f.foreign, 'FOREIGN_CALENDAR_MARKER')
-    await atomicWriteJson(f.calendarsPath, [ownCalendar, foreignCalendar, { ...f.calendar(f.own, 'UNBOUND_OLD_MARKER'), ownerAuthority: undefined }])
-    await atomicWriteJson(f.contactsPath, [{ id: randomUUID(), owner: f.own.login, ownerAuthority: f.authority(f.own), fullName: 'OWN_CONTACT_CONTENT_MARKER', groups: ['Work'] }, { id: randomUUID(), owner: f.foreign.login, ownerAuthority: f.authority(f.foreign), fullName: 'FOREIGN_CONTACT_MARKER', groups: [] }])
+    f.dav.seedCalendars([ownCalendar, foreignCalendar], f.usernameOf)
+    const card = (name: string, groups = '') => ({ id: randomUUID(), shares: [], vcard: 'BEGIN:VCARD\r\nVERSION:3.0\r\nFN:' + name + '\r\n' + groups + 'END:VCARD' })
+    f.dav.seedContacts([{ ...card('OWN_CONTACT_CONTENT_MARKER', 'CATEGORIES:Work\r\n'), ownerAuthority: f.authority(f.own) }, { ...card('FOREIGN_CONTACT_MARKER'), ownerAuthority: f.authority(f.foreign) }] as never, f.usernameOf)
     const response = await s.request('/api/account/collaboration')
     expect(response.status).toBe(200)
     const view = await response.json()
-    expect(view).toMatchObject({ context: { account: f.account.username }, source: 'saved-mailbox-metadata', application: { nativeApplied: false, syncVerified: false } })
+    expect(view).toMatchObject({ context: { account: f.account.username }, source: 'dav-store', application: { nativeApplied: true, syncVerified: false } })
     expect(view.mailboxes.map((row: { mailbox: string }) => row.mailbox).sort()).toEqual([f.own.login, f.sibling.login].sort())
     expect(view.mailboxes.find((row: { mailbox: string }) => row.mailbox === f.own.login)).toMatchObject({ calendars: [{ name: 'Operations' }], contacts: { count: 1, groupCount: 1 } })
     const serialized = JSON.stringify(view)
-    for (const value of ['FOREIGN_CALENDAR_MARKER', 'FOREIGN_CONTACT_MARKER', 'OWN_CONTACT_CONTENT_MARKER', 'UNBOUND_OLD_MARKER', f.foreign.login, f.account.id, f.own.id, ownCalendar.id]) expect(serialized).not.toContain(value)
+    for (const value of ['FOREIGN_CALENDAR_MARKER', 'FOREIGN_CONTACT_MARKER', 'OWN_CONTACT_CONTENT_MARKER', f.foreign.login, f.account.id, f.own.id, ownCalendar.id]) expect(serialized).not.toContain(value)
     expect(f.hostCalls).toHaveLength(0)
   })
 
@@ -211,11 +211,11 @@ describe('mounted account collaboration', () => {
     const selected = before.mailboxes.find((row: { mailbox: string }) => row.mailbox === f.own.login)
     const body = { mailbox: f.own.login, name: 'Operations', color: '#123456', timezone: 'UTC', expectedRevision: selected.revision }
     const response = await s.request('/api/account/collaboration/calendars', 'POST', body)
-    expect(response.status).toBe(201); expect(await response.json()).toMatchObject({ stateChanged: true, created: { mailbox: f.own.login, name: 'Operations' }, application: { nativeApplied: false } })
-    const rows = JSON.parse(await readFile(f.calendarsPath, 'utf8'))
-    expect(rows).toHaveLength(1); expect(rows[0]).toMatchObject({ owner: f.own.login, ownerAuthority: f.authority(f.own), name: 'Operations', shares: [], events: [] })
+    expect(response.status).toBe(201); expect(await response.json()).toMatchObject({ stateChanged: true, created: { mailbox: f.own.login, name: 'Operations' }, application: { nativeApplied: true } })
+    const rows = f.dav.snapshot()
+    expect(rows).toContain('Operations'); expect(f.dav.collections(f.account.username, f.own.id)).toHaveLength(2)
     expect((await s.request('/api/account/collaboration/calendars', 'POST', body)).status).toBe(409)
-    expect(JSON.parse(await readFile(f.calendarsPath, 'utf8'))).toEqual(rows)
+    expect(f.dav.snapshot()).toBe(rows)
     expect(f.hostCalls).toHaveLength(0)
   })
 
@@ -225,7 +225,7 @@ describe('mounted account collaboration', () => {
     expect((await s.request('/api/account/collaboration/calendars', 'POST', body)).status).toBe(404)
     expect((await s.request('/api/account/collaboration/calendars', 'POST', { ...body, accountId: f.other.id })).status).toBe(422)
     expect((await s.request('/api/account/collaboration?mailbox=' + f.foreign.login)).status).toBe(422)
-    expect(JSON.parse(await readFile(f.calendarsPath, 'utf8'))).toEqual([])
+    expect(f.dav.snapshot()).toBe('[]')
   })
 
   it('rechecks the real owner session after awaiting the canonical collaboration lifecycle lease', async () => {
@@ -233,7 +233,20 @@ describe('mounted account collaboration', () => {
     vi.spyOn(lock, 'acquire').mockImplementationOnce(async (...args) => { await db.revokeSession(f.database.db, s.record.id); return acquire(...args) })
     const response = await s.request('/api/account/collaboration')
     expect(response.status).toBe(401); expect(await response.text()).not.toContain(f.own.login)
-    expect(JSON.parse(await readFile(f.calendarsPath, 'utf8'))).toEqual([])
+    expect(f.dav.snapshot()).toBe('[]')
+  })
+
+  it('reaches the store through the real agent route and names a stopped store', async () => {
+    const f = await fixture()
+    await f.state.store.createServiceUser({ accountId: f.account.id, login: 'inbox@' + f.account.primaryDomain, passwordHash: HASH, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
+    const s = await f.session(f.owner.id, 'xpanel'), response = await s.request('/api/account/collaboration')
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({ details: { reason: 'dav_store_unavailable', stateChanged: false } })
+    // the real agent admitted the caller and failed at the missing socket, not at its own routing
+    const sent = f.hostCalls.find(call => new URL(call.url).pathname.endsWith('/dav-exchange'))!
+    const reply = await f.agent.fetch(sent.clone())
+    expect(reply.status).toBe(503)
+    expect(await reply.text()).toContain('dav_store_unavailable')
   })
 
   it('checks current collaboration features before the existing calendar writer runs', async () => {
@@ -241,7 +254,7 @@ describe('mounted account collaboration', () => {
     await f.state.store.updateFeatureList(f.features.id, { disabled: ['calendars-contacts-management'] })
     expect((await s.request('/api/account/collaboration')).status).toBe(403)
     expect((await s.request('/api/account/collaboration/calendars', 'POST', { mailbox: f.own.login, name: 'Blocked', color: '#123456', timezone: 'UTC', expectedRevision: view.mailboxes[0].revision })).status).toBe(403)
-    expect(JSON.parse(await readFile(f.calendarsPath, 'utf8'))).toEqual([])
+    expect(f.dav.snapshot()).toBe('[]')
   })
 })
 
@@ -252,7 +265,7 @@ describe('mounted owner package and remote database boundaries', () => {
     const response = await s.request('/api/account/packages')
     expect(response.status).toBe(200)
     const view = await response.json()
-    expect(view).toMatchObject({ context: { accountId: f.account.id, username: f.account.username }, ecosystem: 'pear', packages: [], available: [], catalogRevision: null, capabilities: { install: false, remove: false, recover: false } })
+    expect(view).toMatchObject({ context: { accountId: f.account.id, username: f.account.username }, ecosystem: 'pear', packages: [], results: [], engine: false })
     expect((await s.request('/api/account/packages', 'POST', { op: 'install', name: 'HTTP_Request2', expectedRevision: view.revision })).status).toBe(412)
     expect(files.mock.calls.every(([, request]) => request.op === 'list')).toBe(true)
     expect(f.nativeRun).not.toHaveBeenCalled()
@@ -428,7 +441,7 @@ async function sealedToolsFixture() {
   return { ...f, sealed }
 }
 describe('mounted sealed mailbox tools', () => {
-  const spamFields = { inherit: false, enabled: true, addHeaderScore: 6, spamBoxEnabled: true, allowlist: ['safe@example.test'], blocklist: [] }
+  const spamFields = { inherit: false, enabled: true, addHeaderScore: 6, spamBoxEnabled: true, autoDeleteScore: null, allowlist: ['safe@example.test'], blocklist: [] }
   it('saves mailbox spam preferences with CAS without changing account policy or claiming native application', async () => {
     const f = await sealedToolsFixture(), accountPath = join(f.state.store.rootDir, 'extended', 'mail', 'accounts', f.account.id, 'spam-settings.json')
     await atomicWriteJson(accountPath, { enabled: true, addHeaderScore: 5, spamBoxEnabled: true, allowlist: ['private-account-list@example.test'], blocklist: [] })
@@ -436,7 +449,7 @@ describe('mounted sealed mailbox tools', () => {
     expect(JSON.stringify(initial)).not.toContain('private-account-list@example.test')
     const response = await f.sealed.request('/api/webmail/spam-preferences', 'PUT', { ...spamFields, expectedRevision: initial.revision })
     expect(response.status).toBe(200)
-    expect(await response.json()).toMatchObject({ context: { mailbox: f.own.login }, preferences: spamFields, capabilities: { mta: 'unverified', sieve: 'unverified', boxTrapper: false }, application: { status: 'saved_only', applied: false }, stateChanged: true, nativeApplied: false })
+    expect(await response.json()).toMatchObject({ context: { mailbox: f.own.login }, preferences: spamFields, capabilities: { mta: 'unverified', sieve: 'unverified' }, application: { status: 'saved_only', applied: false }, stateChanged: true, nativeApplied: false })
     expect((await f.sealed.request('/api/webmail/spam-preferences', 'PUT', { ...spamFields, expectedRevision: initial.revision })).status).toBe(409)
     // the save asks the host to reconcile once; this fixture's agent cannot apply, so nothing is claimed
     expect(await readFile(accountPath, 'utf8')).toBe(before); expect(f.hostCalls.map(call => new URL(call.url).pathname)).toEqual(['/state/apply'])

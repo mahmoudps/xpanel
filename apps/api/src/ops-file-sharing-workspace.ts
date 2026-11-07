@@ -11,6 +11,8 @@ export interface FileSharingWorkspaceHelpers extends Pick<ExtendedRouteHelpers, 
   writeSaved: (value: unknown) => Promise<unknown>
   /** Protected agent transport; a body sends the apply POST. */
   callHost: (caller: AuthenticatedCaller, path: '/host/file-sharing' | '/host/file-sharing/apply', body?: Record<string, unknown>) => Promise<unknown>
+  /** Re-renders the firewall, which opens TCP/2049 for the clients of the applied exports only. */
+  reconcile?: (caller: AuthenticatedCaller) => Promise<unknown>
 }
 
 const ROUTE = '/api/server/file-sharing', APPLY = '/api/server/file-sharing/apply'
@@ -65,6 +67,7 @@ export async function handleFileSharingWorkspaceRoute(request: Request, url: URL
     catch (error) { if (isXpanelError(error) && error.detail.stateChanged === false) throw error; return fail('SERVICE_UNAVAILABLE', 'the export change outcome could not be verified', { stateChanged: true, unknownOutcome: true, verificationRequired: true }) }
     if (!object(result) || !object(result.active)) return fail('SERVICE_UNAVAILABLE', 'the applied export state could not be verified', { stateChanged: true, verificationRequired: true })
     await fresh(true)
+    await helpers.reconcile?.(caller)
     return json(200, { active: projectShareObservation(result.active), appliedRevision: typeof result.appliedRevision === 'string' && /^[0-9a-f]{64}$/.test(result.appliedRevision) ? result.appliedRevision : unverified() })
   }
 

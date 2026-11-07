@@ -116,7 +116,31 @@ export function workspaceResellerPatch(current: unknown, values: FormValues, edi
     else if (values[key] !== undefined) patch[key] = workspaceFieldValue(values[key]!, 'integer')
     else if (values[key + 'Unlimited'] === false) throw new Error(key)
   }
-  if (values.oversell !== undefined) patch.oversell = workspaceFieldValue(values.oversell, 'boolean')
+  // Disk and bandwidth overselling are separate switches; one without the other is a malformed form.
+  if (values.oversellDisk !== undefined || values.oversellBandwidth !== undefined) {
+    if (values.oversellDisk === undefined || values.oversellBandwidth === undefined) throw new Error('oversell')
+    patch.oversell = { disk: workspaceFieldValue(values.oversellDisk, 'boolean'), bandwidth: workspaceFieldValue(values.oversellBandwidth, 'boolean') }
+  }
+  // Package limits: off clears the list (every visible package); on keeps each package with a count or unlimited.
+  if (values.packageLimitsEnabled === false) patch.packageLimits = null
+  else if (values.packageLimitsEnabled === true) {
+    const limits: JsonRecord[] = []
+    for (const [key, raw] of Object.entries(values)) {
+      const match = /^packageLimit:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(key)
+      if (!match) continue
+      const planId = match[1]!.toLowerCase()
+      if (values['packageLimitUnlimited:' + match[1]] === true) limits.push({ planId, maxAccounts: 'unlimited' })
+      else if (typeof raw === 'string' && raw.trim() !== '') limits.push({ planId, maxAccounts: workspaceFieldValue(raw, 'integer') })
+    }
+    patch.packageLimits = limits.sort((a, b) => String(a.planId).localeCompare(String(b.planId)))
+  }
+  // An empty contact or main shared IP clears it (null); the API validates the address.
+  for (const key of ['contactEmail', 'sharedIp']) {
+    const raw = values[key]
+    if (raw === undefined) continue
+    if (typeof raw !== 'string' || raw.trim().length > 254 || /[\s\0]/.test(raw.trim())) throw new Error(key)
+    patch[key] = raw.trim() || null
+  }
   for (const key of ['nameservers', 'delegatedIps']) {
     const raw = values[key]
     if (raw === undefined) continue
@@ -332,7 +356,9 @@ function bindApprovedWorkspaceForms(confirmDelete?: ConfirmDelete): void {
           const saved = workspaceRecord(readback) && Array.isArray(readback.resellers) ? readback.resellers.find(item => workspaceRecord(item) && item.id === id) : undefined
           const { acl: expectedAcl, ...expectedFields } = payload
           const observedAcl = workspaceRecord(saved) && Array.isArray(saved.acl) ? saved.acl : undefined
-          verified = workspaceValuesMatch(expectedFields, saved) && (expectedAcl === undefined || (Array.isArray(expectedAcl) && observedAcl !== undefined && new Set(expectedAcl).size === new Set(observedAcl).size && expectedAcl.every(value => observedAcl.includes(value))))
+          const cleared = Object.keys(expectedFields).filter(key => expectedFields[key] === null)
+          for (const key of cleared) delete expectedFields[key]
+          verified = workspaceValuesMatch(expectedFields, saved) && workspaceRecord(saved) && cleared.every(key => saved[key] === undefined || saved[key] === null) && (expectedAcl === undefined || (Array.isArray(expectedAcl) && observedAcl !== undefined && new Set(expectedAcl).size === new Set(observedAcl).size && expectedAcl.every(value => observedAcl.includes(value))))
           savedMessage = copy('The reseller privileges and limits were stored and read back. Reload to read updated state.')
         } else if (form.hasAttribute('data-reseller-owner-form')) {
           const username = form.dataset.accountUsername

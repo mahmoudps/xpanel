@@ -11,7 +11,7 @@ import { adminContext } from './server/common.ts'
 
 const root = { kind: 'root' as const, id: 'root', username: 'operator' }
 const account: Account = { id: 'account', username: 'privateaccount', uid: 20001, gid: 20001, home: '/home/privateaccount', primaryDomain: 'private.test', planId: 'plan', ownerId: 'dealer', status: 'active', suspendReason: null, contactEmail: 'owner@example.test', ipv4: '192.0.2.1', shell: 'jailed', createdAt: '2026-10-30T00:00:00Z' }
-const reseller: Reseller = { id: 'dealer', username: 'storeddealer', acl: ['list-accounts', 'manage-dns'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 10000, oversell: false, nameservers: ['ns.example.test'], delegatedIps: [] }
+const reseller: Reseller = { id: 'dealer', username: 'storeddealer', acl: ['list-accounts', 'manage-dns'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 10000, oversell: { disk: false, bandwidth: false }, nameservers: ['ns.example.test'], delegatedIps: [] }
 const props = (activeRoute: string, extra: Partial<WhmSurfaceProps> = {}): WhmSurfaceProps => ({ principal: root, visibility: { principal: root }, catalog: tools, activeRoute, ...extra })
 const fact = (...ids: string[]): WhmNetworkAuthority => ({ presentation: 'read-only', canReadFacts: true, authorizedTools: new Set(ids), canRead: true, canManage: true })
 

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { fail, isXpanelError } from '@xpanel/core'
+import { effectivePlan, fail, isXpanelError } from '@xpanel/core'
 import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
 import type { StateStore, WriterLease } from '@xpanel/state'
 import type { DomainForwarder, EmailForwarder } from '../extended-routes.ts'
@@ -148,7 +148,7 @@ export async function handleMailboxForwardersRoute(request: Request, url: URL, m
     const own = scoped.own
     if ((own?.destinations ?? []).join('\n') === input.destinations.join('\n')) return mailboxJson({ ...view(mailbox, accountId, list, await ports.routing.status()), stateChanged: false })
     if (!own) {
-      const plan = await ports.store.getPlan(account.planId), cap = plan?.caps.forwarders
+      const plan = await ports.store.getPlan(account.planId), cap = plan ? effectivePlan(plan, account).caps.forwarders : undefined
       if (cap === undefined) return fail('PRECONDITION_FAILED', 'the account plan is unavailable', unchanged)
       if (cap !== 'unlimited' && list.filter(item => item.accountId === accountId).length >= cap) return fail('CONFLICT', 'the account forwarder limit has been reached', { ...unchanged, reason: 'account_forwarder_limit' })
     }

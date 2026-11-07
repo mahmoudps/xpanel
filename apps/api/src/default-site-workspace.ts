@@ -9,7 +9,7 @@ import type { DefaultSiteObservation } from '../../agent/src/default-site-observ
 
 type AuditInput = Parameters<ExtendedRouteHelpers['emitAudit']>[0]
 export interface DefaultSiteWorkspaceHelpers {
-  store: Pick<StateStore, 'getServerSettings' | 'getRevision' | 'saveServerSettings'>
+  store: Pick<StateStore, 'getServerSettings' | 'getRevision' | 'saveServerSettings' | 'listDomains'>
   serverSecret: string
   requireCaller: (req: Request, options?: { deferDeniedAudit?: (input: AuditInput) => void }) => Promise<AuthenticatedCaller>
   assertRoot: ExtendedRouteHelpers['assertRoot']
@@ -99,6 +99,7 @@ export function createDefaultSiteWorkspaceRoutes(helpers: DefaultSiteWorkspaceHe
     try { raw = JSON.parse(bytes) } catch { return fail('VALIDATION', 'default-site request is not valid JSON', { stateChanged: false }) }
     if (!object(raw) || Object.keys(raw).some(key => !['policy', 'expectedRevision'].includes(key)) || !hexRevision(raw.expectedRevision)) return fail('VALIDATION', 'default-site policy and saved revision are required', { stateChanged: false })
     const policy: DefaultSitePolicy = validateDefaultSitePolicy(raw.policy), expectedRevision = raw.expectedRevision
+    if (policy.response === 'site' && !(await helpers.store.listDomains()).some(domain => domain.name === policy.site)) return fail('VALIDATION', 'the default site must be a hosted domain', { stateChanged: false })
     const current = await capture()
     if (current.revision !== expectedRevision) return fail('CONFLICT', 'default-site configuration changed; explicitly reload before retrying', { stateChanged: false })
     await helpers.assertMutationQualified(caller)

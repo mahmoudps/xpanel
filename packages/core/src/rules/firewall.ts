@@ -302,6 +302,8 @@ export const validatePrefixList = (name: unknown, entries: unknown): { name: str
 /** Fixed HTTPS entry points and their private loopback listeners. Never tenant upstreams. */
 export const MANAGEMENT_PUBLIC_PORTS: readonly number[] = [2083, 2087, 2096]
 export const MANAGEMENT_BACKEND_PORTS: readonly number[] = [12083, 12087, 12096]
+/** Web Disk (WebDAV) and calendars and contacts (CalDAV/CardDAV) over TLS at the edge, cPanel's SSL ports. */
+export const DAV_PUBLIC_PORTS: readonly number[] = [2078, 2080]
 
 type PortSettings = Pick<ServerSettings, 'panelPort' | 'sshPort' | 'backendPort' | 'backendTlsPort'> & {
   /** Explicit public management ports; defaults to the fixed HTTPS entry points. */
@@ -332,6 +334,7 @@ const portSettingsErrors = (settings: PortSettings): string[] => {
   if (management.some((p) => WEB_PORTS.includes(p) || p === sshPort || p === backendPort || p === backendTlsPort || MANAGEMENT_BACKEND_PORTS.includes(p))) errors.push('management ports must differ from SSH, web and private backend ports')
   if ([panelPort, sshPort, backendPort, backendTlsPort].some((p) => MANAGEMENT_BACKEND_PORTS.includes(p))) errors.push('server ports must not take a private management listener')
   if ([backendPort, backendTlsPort].some((p) => MANAGEMENT_PUBLIC_PORTS.includes(p))) errors.push('web backend ports must not take management entry points')
+  if ([panelPort, sshPort, backendPort, backendTlsPort, ...management].some((p) => DAV_PUBLIC_PORTS.includes(p))) errors.push('server ports must not take the Web Disk or calendar ports 2078 and 2080')
   return errors
 }
 
@@ -369,11 +372,24 @@ export const defaultFirewallRules = (settings: PortSettings): FirewallRule[] => 
     rule('default-http', { port: '80', comment: 'HTTP' }),
     rule('default-https', { port: '443', comment: 'HTTPS' }),
     rule('default-panel', { port: String(panelPort), comment: 'xPanel' }),
+    rule('default-webdisk', { port: '2078', comment: 'Web Disk' }),
+    rule('default-caldav', { port: '2080', comment: 'calendars and contacts' }),
     ...managementPorts(panelPort, settings.managementPorts).filter((p) => p !== panelPort).map((p) =>
       rule(`default-management-${p}`, { port: String(p), comment: 'management HTTPS' })),
     rule('default-icmp', { kind: 'icmp', protocol: null, comment: 'ping' }),
   ]
 }
+
+/** Hosted mail, DNS and FTP stay reachable on a first switch-on. Ordinary rules: the operator may narrow or delete them. */
+export const hostingServiceFirewallRules = (): FirewallRule[] => [
+  rule('service-dns', { protocol: 'both', port: '53', comment: 'DNS' }),
+  rule('service-ftp', { port: '21', comment: 'FTP' }),
+  ...([['smtp', '25', 'SMTP'], ['submissions', '465', 'SMTP over TLS'], ['submission', '587', 'mail submission'], ['pop3', '110', 'POP3'], ['pop3s', '995', 'POP3 over TLS'], ['imap', '143', 'IMAP'], ['imaps', '993', 'IMAP over TLS']] as const)
+    .map(([id, port, comment]) => rule(`service-${id}`, { port, comment })),
+]
+/** Accept rules of panel ports that moved off the fixed ones; generated at render, so no saved list can drop them. */
+export const managementPortRules = (ports: readonly number[]): FirewallRule[] =>
+  ports.filter((p) => !MANAGEMENT_PUBLIC_PORTS.includes(p)).map((p) => rule(`panel-access-${p}`, { port: String(p), comment: 'management HTTPS' }))
 
 // ---- rule sets -----------------------------------------------------------------------
 
@@ -405,7 +421,7 @@ export const firewallRuleSetErrors = (rules: readonly FirewallRule[], ctx: Firew
   if (errors.length > 0) return errors
   if (!isRecord(ctx.prefixLists)) return ['prefixLists must be an object of list name to CIDRs']
   const backendPorts = [ctx.backendPort, ctx.backendTlsPort, ...MANAGEMENT_BACKEND_PORTS]
-  const reservedPorts = [...managementPorts(ctx.panelPort, ctx.managementPorts), ...MANAGEMENT_PUBLIC_PORTS, ctx.sshPort, ...WEB_PORTS, ...backendPorts]
+  const reservedPorts = [...managementPorts(ctx.panelPort, ctx.managementPorts), ...MANAGEMENT_PUBLIC_PORTS, ...DAV_PUBLIC_PORTS, ctx.sshPort, ...WEB_PORTS, ...backendPorts]
   for (const r of rules) {
     const range = r.port === null ? null : parsePortSpec(r.port)
     const source = r.source === null ? null : parseCidr(r.source)

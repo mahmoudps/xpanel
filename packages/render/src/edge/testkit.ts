@@ -19,7 +19,7 @@ const services: Record<ServiceRole, string> = {
 
 const packages = Object.fromEntries(
   ['nginx', 'apache', 'openlitespeed', 'mariadb', 'postgresql', 'postfix', 'dovecot', 'opendkim', 'powerdns', 'redis', 'ftp', 'sshd',
-    'nftables', 'apache-itk', 'apache-suexec', 'apache-fcgi', 'quota', 'acme', 'modsecurity'].map((r) => [r, [r]]),
+    'nftables', 'apache-itk', 'apache-suexec', 'apache-fcgi', 'quota', 'acme', 'modsecurity', 'web-stats', 'webdav', 'caldav'].map((r) => [r, [r]]),
 ) as Record<PackageRole, string[]>
 
 export const debianOs: OsProfile = {

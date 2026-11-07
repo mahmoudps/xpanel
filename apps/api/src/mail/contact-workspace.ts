@@ -44,7 +44,7 @@ export const parseContactVcardGroups = (value: string): string[] => {
 
 export const contactVcardCategories = (groups: readonly string[]): string => 'CATEGORIES:' + groups.map(value => value.replaceAll('\\', '\\\\').replaceAll(';', '\\;').replaceAll(',', '\\,')).join(',')
 
-/** Call under the existing contact writer lease before create/import publication. */
+/** Call under the mailbox lock before create/import publication. */
 export const assertContactCapacity = (contacts: readonly WebmailContact[], owner: string, addedCount: number): void => {
   if (!Number.isSafeInteger(addedCount) || addedCount < 0) return fail('VALIDATION', 'invalid contact count', { stateChanged: false })
   const count = contacts.filter(contact => contact.owner.toLowerCase() === owner.toLowerCase()).length
@@ -75,7 +75,8 @@ export const parseContactWorkspaceRequest = (value: unknown, editing: boolean,
   }
   const result = Object.fromEntries(fields.map(key => [key, normalize(body[key], key)])) as unknown as ContactWorkspaceFields
   result.email = result.email.toLowerCase()
-  if (!result.fullName || !/^[^\s@/\\]+@[^\s@/\\]+$/.test(result.email)) return fail('VALIDATION', 'fullName and a valid email are required', { stateChanged: false })
+  // A phone's contact may have no address at all.
+  if (!result.fullName || result.email && !/^[^\s@/\\]+@[^\s@/\\]+$/.test(result.email)) return fail('VALIDATION', 'fullName and a valid email are required', { stateChanged: false })
   return { ...result, ...(editing ? { expectedRevision: body.expectedRevision as string } : {}) }
 }
 
@@ -83,7 +84,7 @@ const contactVcard = (contact: ContactWorkspaceFields, groups: readonly string[]
   if (groups.some(name => normalizeContactGroupName(name) !== name)) return fail('PRECONDITION_FAILED', 'stored contact groups require review', { stateChanged: false })
   normalizeContactGroups([...groups], groups)
   const escape = (value: string) => value.replaceAll('\\', '\\\\').replaceAll(';', '\\;').replaceAll(',', '\\,')
-  return ['BEGIN:VCARD', 'VERSION:3.0', 'FN:' + escape(contact.fullName), 'EMAIL;TYPE=INTERNET:' + escape(contact.email),
+  return ['BEGIN:VCARD', 'VERSION:3.0', 'FN:' + escape(contact.fullName), ...(contact.email ? ['EMAIL;TYPE=INTERNET:' + escape(contact.email)] : []),
     ...(contact.phone ? ['TEL;TYPE=CELL:' + escape(contact.phone)] : []),
     ...(contact.organization ? ['ORG:' + escape(contact.organization)] : []),
     ...(contact.title ? ['TITLE:' + escape(contact.title)] : []),

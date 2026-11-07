@@ -48,7 +48,6 @@ export function renderV2CronPage(props: PanelSurfaceProps, authority: PanelServi
   const lastOutput = card({
     title: t(msgctxt('theme:v2', 'Last output')), titleId: 'v2-cron-last-output-heading',
     description: t(msgctxt('theme:v2', 'The selected job journal has not been read. No output or delivery result is assumed.')),
-    actionsHtml: serviceButton(t(msgctxt('theme:v2', 'Copy output')), undefined, true),
     bodyHtml: `<pre class="v2-panel-service__technical v2-mono" dir="ltr" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Last output')))}"></pre>`,
   })
   const how = card({
@@ -57,7 +56,7 @@ export function renderV2CronPage(props: PanelSurfaceProps, authority: PanelServi
   })
   const output = card({
     title: t('Output email'), titleId: 'v2-cron-output-heading',
-    bodyHtml: `${serviceField('v2-cron-mailto', t('Send job output to'), '<input id="v2-cron-mailto" type="email" dir="ltr" disabled>')}<div class="v2-panel-service__actions">${serviceButton(t('Save address'), undefined, true)}</div><p>${escapeHtml(t('No output-mail transport is connected. No address or delivery result has been invented.'))}</p>`,
+    bodyHtml: `${serviceField('v2-cron-mailto', t('Send job output to'), '<input id="v2-cron-mailto" type="email" dir="ltr" disabled>')}<p>${escapeHtml(t('No output-mail transport is connected. No address or delivery result has been invented.'))}</p>`,
   })
   return `<section class="v2-panel-service"${readOnly || !account ? ' data-readonly="true"' : ''} data-v2-panel-service="cron" data-account-cron data-account="${escapeHtml((account?.id ?? ''))}" data-cron-manage="${!!account && !readOnly && authority.canManage}">${serviceHeader(t, '/advanced/cron', t('Cron jobs'), t(msgctxt('theme:v2', 'Run a command on a schedule. Each job becomes a systemd timer that runs as your account, inside your account slice.')))}${summaries}${jobs}${lastOutput}<div class="v2-panel-service__columns"><div class="v2-panel-service__main">${editor}</div><aside class="v2-panel-service__aside" aria-label="${escapeHtml(t('Workspace information'))}">${preview}${how}${output}</aside></div>${accountCronTemplates()}</section>`
 }

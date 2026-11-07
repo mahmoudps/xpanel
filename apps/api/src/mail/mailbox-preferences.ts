@@ -29,8 +29,8 @@ export interface MailboxPreferencesView {
   revision: string
   identities: { id: string; displayName: string; email: string }[]
   plusAddressing: PlusAddressingView
-  /** Saved for this mailbox only; no inbox or compose consumer reads these preferences yet. */
-  application: { status: 'saved_only'; applied: false }
+  /** The next inbox and compose documents apply them. */
+  application: { status: 'applied_on_next_load'; applied: true }
   review: 'mailbox_metadata_binding_unverified' | null
 }
 export interface MailboxPreferencesPorts {
@@ -44,7 +44,7 @@ export interface MailboxPreferencesPorts {
 }
 
 const KEYS = ['density', 'messagesPerPage', 'replyIdentityId', 'dateFormat', 'expectedRevision'] as const
-const APPLICATION = Object.freeze({ status: 'saved_only' as const, applied: false as const })
+const APPLICATION = Object.freeze({ status: 'applied_on_next_load' as const, applied: true as const })
 const unchanged = { stateChanged: false }
 const SOURCE = 'rendered-postfix-local-delivery' as const
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -70,6 +70,14 @@ const project = (stored: Record<string, unknown>): MailboxPreferencesProjection 
 /** Current-value identity (including absence), intentionally not a monotonic counter. */
 export const mailboxPreferencesRevision = (authority: MailboxMetadataAuthority | null, preferences: MailboxPreferencesProjection | null): string => createHash('sha256')
   .update(JSON.stringify({ namespace: 'xpanel-mailbox-preferences:v1', ownerAuthority: authority, preferences })).digest('hex')
+
+/** For document rendering; a record bound to another mailbox lifetime or a damaged one applies nothing. */
+export async function readMailboxPreferenceValues(store: MailboxPreferencesPorts['store'], mailbox: string): Promise<MailboxPreferenceFields | null> {
+  try {
+    const authority = await captureMailboxMetadataAuthority(store, mailbox), stored = await readJsonIfExists<unknown>(path(store, mailbox))
+    return object(stored) && assessMailboxMetadataAuthority(stored.mailbox, stored.ownerAuthority, authority) === 'match' ? parseMailboxPreferenceFields(stored) : null
+  } catch { return null }
+}
 
 /** postconf(5) recipient_delimiter separates user from extension (user+tag@domain); empty means no extensions. */
 export function plusAddressingFromMain(main: ReadonlyMap<string, string> | null): PlusAddressingView {

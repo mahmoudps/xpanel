@@ -195,7 +195,9 @@ export interface MailWorkspaceView extends MailPageFacts {
   readonly activeFolder: string
   readonly attachmentsAvailable: boolean
   readonly searchAvailable: boolean
+  readonly searchIndexAvailable: boolean
   readonly quotaAvailable: boolean
+  readonly boxTrapperAvailable: boolean
   readonly authorizedRoutes: ReadonlySet<string>
   readonly quotaUsedMb?: number
   readonly quotaUsedBytes?: number
@@ -347,7 +349,7 @@ export function projectMailSurfaceView(props: MailSurfaceProps): MailSurfaceView
   return {
     ...common, kind: 'workspace', route, canRead: true, canManage: true, activeFolder: folder,
     attachmentsAvailable: access.tools.has('webmail-message-read') && access.tools.has('webmail-attachments'),
-    searchAvailable: access.tools.has('webmail-search'), quotaAvailable: access.tools.has('webmail-disk-cleanup'), authorizedRoutes,
+    searchAvailable: access.tools.has('webmail-search'), searchIndexAvailable: access.tools.has('webmail-search-index'), quotaAvailable: access.tools.has('webmail-disk-cleanup'), boxTrapperAvailable: access.tools.has('webmail-boxtrapper'), authorizedRoutes,
     ...(props.quotaUsedMb === undefined ? {} : { quotaUsedMb: props.quotaUsedMb }),
     ...(props.quotaUsedBytes === undefined ? {} : { quotaUsedBytes: props.quotaUsedBytes }),
     ...(props.quotaLimitMb === undefined ? {} : { quotaLimitMb: props.quotaLimitMb }),
@@ -407,7 +409,7 @@ export function projectReadOnlyMailSurfaceView(props: MailSurfaceProps, authorit
   const title = route === '/mail/search' ? translator(locale)('Search mail') : page ? catalogText(locale, 'nav.page.xmail.' + page.id + '.name', page.name) : ''
   const common = mailPageFacts(scoped, access, { route, folder: props.activeFolder || 'INBOX', compose: false, observed: false, messages: [], title, folderCurrent: false })
   return { ...common, ...flags, kind: 'workspace', route: route as MailWorkspaceRoute,
-    activeFolder: props.activeFolder || 'INBOX', attachmentsAvailable: false, searchAvailable: false, quotaAvailable: false, authorizedRoutes: routes,
+    activeFolder: props.activeFolder || 'INBOX', attachmentsAvailable: false, searchAvailable: false, searchIndexAvailable: false, quotaAvailable: false, boxTrapperAvailable: false, authorizedRoutes: routes,
     ...(scoped.quotaUsedMb === undefined ? {} : { quotaUsedMb: scoped.quotaUsedMb }),
     ...(scoped.quotaUsedBytes === undefined ? {} : { quotaUsedBytes: scoped.quotaUsedBytes }),
     ...(scoped.quotaLimitMb === undefined ? {} : { quotaLimitMb: scoped.quotaLimitMb }),

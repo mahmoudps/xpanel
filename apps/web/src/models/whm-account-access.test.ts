@@ -13,7 +13,7 @@ const props = (changes: Partial<WhmSurfaceProps> = {}): WhmSurfaceProps => ({ pr
 type FactAuthority = Pick<SurfaceAuthority, 'presentation' | 'canReadFacts' | 'authorizedTools'>
 const facts = (changes: Partial<FactAuthority> = {}): FactAuthority => ({ presentation: 'read-only', canReadFacts: true, authorizedTools: new Set(['list-accounts']), ...changes })
 const principal: Principal = { kind: 'reseller', id: 'dealer-own', username: 'dealer' }
-const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['list-accounts'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 10000, oversell: false, nameservers: [], delegatedIps: [] }
+const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['list-accounts'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 10000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
 
 describe('operator account stored-fact access', () => {
   it('keeps the normal qualified read and account lookup unchanged', () => {

@@ -111,7 +111,7 @@ describe('database web client routes', () => {
     await expect(call('/accounts/alice/database-engines/phpmyadmin/sign-on', failing, 'POST', '{}')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
     expect((failing.sql as ReturnType<typeof fakeSql>).statements.some(s => s.startsWith('CREATE USER'))).toBe(false)
     expect(await call('/accounts/alice/database-engines/phppgadmin/sign-on', deps(), 'POST', '{}')).toBeNull()
-    expect(await (await call('/accounts/alice/database-engines/phppgadmin', deps()))!.json()).toMatchObject({ client: 'phppgadmin', installed: false, signon: { state: 'unsupported' } })
+    expect(await call('/accounts/alice/database-engines/phppgadmin', deps())).toBeNull()
     await expect(call('/accounts/alice/database-engines/phpmyadmin', deps({ caller: { principalId: 'p2', actor: 'bob', role: 'user', accountId: 'other', resellerId: null } }))).rejects.toMatchObject({ code: 'FORBIDDEN' })
   })
   it('requires fresh root for the server sign-on', async () => {

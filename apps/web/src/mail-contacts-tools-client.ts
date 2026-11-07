@@ -8,8 +8,8 @@ import type { MessageValues } from './i18n.ts'
 /**
  * Mailbox Contacts tools: vCard import, vCard export and same-account sharing.
  * All transports go through window.xpanelSessionRequest to the real contacts routes.
- * Nothing here claims delivery, synchronisation or CardDAV; imported/shared rows are
- * stored contact configuration and are verified by re-reading the contacts list.
+ * Imported and shared rows are the mailbox's address book, the one devices sync, and are
+ * verified by re-reading the contacts list.
  */
 
 const contactToolsUnsafe = /<script\b|javascript:|vbscript:|data:text\/html|on[a-z]+\s*=|\0/i
@@ -205,7 +205,7 @@ function bindContactsTools(askDialog: ((options: Record<string, unknown>) => Pro
         window.dispatchEvent(new CustomEvent('xpanel:contacts-changed', { detail: { source: 'contact-tools', mailbox } }))
         importText.value = ''; pendingVcard = ''
         setStatus(importPreview, copy('No vCard content has been read.'), 'idle')
-        setStatus(importStatus, copy('{length} card(s) were stored and read back. Synchronisation is not claimed.', { length: ids.length }), 'saved')
+        setStatus(importStatus, copy('{length} card(s) were stored and read back.', { length: ids.length }), 'saved')
       }, importStatus)
     }
     const exportContacts = async (): Promise<void> => {
@@ -277,7 +277,7 @@ function bindContactsTools(askDialog: ((options: Record<string, unknown>) => Pro
     shareAdd?.addEventListener('click', event => { event.preventDefault(); void addShare() })
     contactSelect?.addEventListener('change', paintShares)
     lock()
-    void loadContacts().catch(() => setStatus(shareStatus, copy('Owned contacts could not be read; sharing stays unavailable.'), 'failed'))
+    void loadContacts().catch(error => setStatus(shareStatus, (error as { details?: { reason?: unknown } } | null)?.details?.reason === 'dav_store_too_large' ? copy('This mailbox’s calendars and contacts are too large to open here. Nothing was changed, and your devices still have them.') : copy('Owned contacts could not be read; sharing stays unavailable.'), 'failed'))
   })
 }
 

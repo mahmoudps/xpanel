@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { lstat, realpath } from 'node:fs/promises'
-import { fail, type Account, type Domain } from '@xpanel/core'
+import { setTimeout as settle } from 'node:timers/promises'
+import { fail, isXpanelError, type Account, type Domain } from '@xpanel/core'
 import { latestActive, withReobservedReadonlyOperationDatabase, getReadonlyOperationDatabaseOrigin, assertReadonlyOperationDatabaseCurrent, withVisibleReadonlyOperationDatabase, type ReadonlyOperationDatabase } from '@xpanel/db'
 import { StateStore, type StateSnapshot } from '@xpanel/state'
 import { detectOs } from '@xpanel/os'
@@ -25,6 +26,8 @@ const refuse = (): never => fail('PRECONDITION_FAILED', 'native hosted UID quali
 const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const DATABASE = '/var/lib/xpanel/control.db'
 const STATE = '/var/lib/xpanel/state'
+// A package update restarts nginx or a pool in about a second; the second exchange shares the 60 s observation deadline.
+const TRANSPORT_RETRY_DELAY_MS = 5000
 const STATE_PROPERTIES = ['Id', 'LoadState', 'ActiveState', 'SubState', 'ActiveEnterTimestampMonotonic', 'MemoryCurrent', 'CPUUsageNSec', 'NRestarts']
 const eligibleAccounts = (accounts: readonly Account[], domains: readonly Domain[]): Account[] => accounts.filter(account => {
   const primary = domains.filter(domain => domain.accountId === account.id && domain.kind === 'primary' && domain.name === account.primaryDomain)
@@ -174,26 +177,36 @@ async function collectHostedObservation(ownership: CoordinatorOwnershipCapabilit
           const os = detectOs(path => path === '/etc/os-release' ? osText : null)
           return withTrustedFile('/usr/bin/systemctl', { maxBytes: 16 * 1024 * 1024 }, async tool => {
             const executor = readonlyExecutor(tool, guard, system.fpmUnitName(account.username, domain.php.version)), context: HostEffectAuthority = { readOnly: true, signal, assertAuthority: guard }
-            const exchange = createNativeHeldAccountHttp({ ...('held' in database ? { db: database.held } : { databaseReader: { withReadonlyDatabase: read } }),
-              store: { listDomains: async () => { await guard(); return source.domains } }, reconciler: { journal }, executor, os, addon })
             const binding = digest({ purpose: 'xpanel-upgrade-pre-admission-hosted-uid-v1', request, coordinatorReceipt: owner.receiptSha256,
               sourceChecksum, currentDesiredChecksum: currentSnapshot.checksum, authority: observation.authority, databaseOrigin: origin, account, generationId: generation.id, filesChecksum: generation.checksum })
-            const challenge = randomBytes(32).toString('hex')
-            await guard(); await exchange.assertAvailable(account, context); await guard()
-            const held = await exchange.open({ account, sourceChecksum, binding, challenge }, context)
-            let closed = false
-            try {
-              await guard(); await held.assertCurrent(); await guard()
-              const observed = held.observedProcess
-              assertProvisioningProcessBinding(observed, account, held.unit, held.mainPid)
-              if (held.requestBinding !== binding || held.challenge !== challenge || held.status !== 200 || held.pid !== observed.pid
-                || observed.uids[0] !== account.uid || observed.cgroup.split('/').at(-2) !== system.accountSliceName(account.uid)) return refuse()
-              if (retainProcess) { process = await openNativeProvisioningProcess(observed.pid); await readPinnedProcess(process, observed, account, held.unit, held.mainPid) }
-              const proof = Object.freeze({ digest: digest({ binding, challenge, observed, unit: held.unit, mainPid: held.mainPid }), observedAt: new Date().toISOString() })
-              const observedMonotonic = performance.now()
-              await held.close(); closed = true; await guard()
-              return { proof, observedMonotonic, account, unit: held.unit, mainPid: held.mainPid, observed, ...(process ? { process } : {}) }
-            } finally { if (!closed) await held.close() }
+            const exchangeOnce = async (): Promise<Capture> => {
+              const exchange = createNativeHeldAccountHttp({ ...('held' in database ? { db: database.held } : { databaseReader: { withReadonlyDatabase: read } }),
+                store: { listDomains: async () => { await guard(); return source.domains } }, reconciler: { journal }, executor, os, addon })
+              const challenge = randomBytes(32).toString('hex')
+              await guard(); await exchange.assertAvailable(account, context); await guard()
+              const held = await exchange.open({ account, sourceChecksum, binding, challenge }, context)
+              let closed = false
+              try {
+                await guard(); await held.assertCurrent(); await guard()
+                const observed = held.observedProcess
+                assertProvisioningProcessBinding(observed, account, held.unit, held.mainPid)
+                if (held.requestBinding !== binding || held.challenge !== challenge || held.status !== 200 || held.pid !== observed.pid
+                  || observed.uids[0] !== account.uid || observed.cgroup.split('/').at(-2) !== system.accountSliceName(account.uid)) return refuse()
+                if (retainProcess) { process = await openNativeProvisioningProcess(observed.pid); await readPinnedProcess(process, observed, account, held.unit, held.mainPid) }
+                const proof = Object.freeze({ digest: digest({ binding, challenge, observed, unit: held.unit, mainPid: held.mainPid }), observedAt: new Date().toISOString() })
+                const observedMonotonic = performance.now()
+                await held.close(); closed = true; await guard()
+                return { proof, observedMonotonic, account, unit: held.unit, mainPid: held.mainPid, observed, ...(process ? { process } : {}) }
+              } finally { if (!closed) await held.close() }
+            }
+            try { return await exchangeOnce() }
+            catch (error) {
+              if (retainProcess || !isXpanelError(error) || error.detail.transportReset !== true) throw error
+              await settle(TRANSPORT_RETRY_DELAY_MS, undefined, { signal }).catch(() => { throw error })
+              // guard() proves what the binding covers has not moved, so the second exchange observes the same request.
+              await guard()
+              return await exchangeOnce()
+            }
           })
         })
       })

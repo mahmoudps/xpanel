@@ -39,7 +39,7 @@ describe('v2 account list', () => {
 
   it('never exposes a neighboring reseller plan cap even when its id matches the account', () => {
     const principal: Principal = { kind: 'reseller', id: 'internal-reseller', username: 'partner' }
-    const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] }
+    const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
     const scoped: WhmSurfaceProps = { ...props, principal, visibility: { principal, reseller }, activeReseller: reseller, accounts: [{ ...account, ownerId: principal.id }] }
     const cell = (input: WhmSurfaceProps) => renderV2WhmAccountList(t, input).match(/<td data-account-table-value="io-write">([\s\S]*?)<\/td>/)?.[1] ?? ''
     for (const ownerId of [null, principal.id]) {
@@ -80,7 +80,7 @@ describe('v2 account list', () => {
 
   it('filters reseller rows and metadata before rendering without showing neighboring accounts', () => {
     const principal: Principal = { kind: 'reseller', id: 'internal-reseller', username: 'partner' }
-    const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] }
+    const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
     const html = renderV2WhmAccountList(t, { ...props, principal, visibility: { principal, reseller: { acl: reseller.acl } }, activeReseller: reseller, accounts: [{ ...account, ownerId: principal.id }, { ...account, id: 'neighbor', username: 'neighbor', ownerId: 'other', primaryDomain: 'secret.example.test' }] })
     expect(html).toContain('alice.example.test')
     expect(html).not.toContain('secret.example.test')
@@ -115,7 +115,7 @@ describe('v2 native create account', () => {
     expect(html).toContain('Account creation is not qualified for this host or caller.')
     expect(html).toContain('type="submit" class="v2-btn v2-btn--primary" disabled')
     const principal: Principal = { kind: 'reseller', id: 'partner', username: 'partner' }
-    const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['create-account'], maxAccounts: 5, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] }
+    const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['create-account'], maxAccounts: 5, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
     const own = renderV2WhmAccountCreate(t, { ...props, principal, visibility: { principal, reseller: { acl: reseller.acl } }, activeReseller: reseller, plans: [plan, { ...plan, id: 'neighbor', ownerId: 'other', name: 'Hidden neighbor plan' }] })
     expect(own).not.toContain('Hidden neighbor plan')
     expect(own).toContain('value="partner" checked')
@@ -151,7 +151,7 @@ describe('v2 stored account facts without provider qualification', () => {
   })
   it('never displays a neighboring reseller account from the supplied snapshot', () => {
     const principal: Principal = { kind: 'reseller', id: 'partner', username: 'partner' }
-    const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] }
+    const reseller: Reseller = { id: principal.id, username: principal.username, acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
     const view = projectReadOnlyWhmSurface({ ...props, principal, visibility: { principal, reseller }, activeReseller: reseller, activeRoute: '/whm/accounts', capabilityUnavailable: true, catalog: unqualified, accounts: [{ ...account, ownerId: principal.id }, { ...account, id: 'neighbor', username: 'neighbor', ownerId: 'other', primaryDomain: 'secret.example.test' }] })!
     const html = renderV2WhmAccountList(t, view.props, view.authority)
     expect(html).toContain('alice.example.test')

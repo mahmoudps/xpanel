@@ -22,6 +22,8 @@ export interface TerminalWorkspaceHelpers extends Pick<ExtendedRouteHelpers, 're
   readExecution: (caller: AuthenticatedCaller) => Promise<TerminalExecution>
   tickets: TerminalTickets
   registry: TerminalRegistry
+  /** Active account of a container terminal; the agent still checks the container is in that account's store. */
+  activeAccount?: (username: string) => Promise<{ id: string; username: string } | null>
 }
 
 const ROUTE = '/api/server/terminal'
@@ -60,7 +62,9 @@ export async function handleTerminalWorkspaceRoute(request: Request, url: URL, m
   let body: unknown
   try { body = JSON.parse(text) } catch { return fail('VALIDATION', 'request body is not valid JSON', unchanged) }
   const fields = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : null
-  if (!fields || Object.keys(fields).some(key => key !== 'password' && key !== 'totpCode') || typeof fields.password !== 'string' || !fields.password
+  const container = fields?.container as { account?: unknown; id?: unknown; shell?: unknown; asRoot?: unknown } | undefined
+  if (container !== undefined && (!container || typeof container !== 'object' || Object.keys(container).sort().join() !== 'account,asRoot,id,shell' || typeof container.account !== 'string' || typeof container.id !== 'string' || !/^[0-9a-f]{64}$/.test(container.id) || (container.shell !== 'sh' && container.shell !== 'bash') || typeof container.asRoot !== 'boolean')) return fail('VALIDATION', 'a container terminal needs an account, a container and a shell', unchanged)
+  if (!fields || Object.keys(fields).some(key => key !== 'password' && key !== 'totpCode' && key !== 'container') || typeof fields.password !== 'string' || !fields.password
     || (fields.totpCode !== undefined && (typeof fields.totpCode !== 'string' || !/^[0-9]{6}$/.test(fields.totpCode)))) return fail('VALIDATION', 'the current password is required to open a server terminal', unchanged)
   const password = fields.password, totpCode = fields.totpCode as string | undefined
 
@@ -85,6 +89,8 @@ export async function handleTerminalWorkspaceRoute(request: Request, url: URL, m
   const after = await helpers.requireCaller(request)
   await helpers.assertRoot(after, action)
   if (after.principal.id !== fresh.principal.id || after.sessionId !== fresh.sessionId) return fail('FORBIDDEN', 'the terminal session authority changed', unchanged)
-  const ticket = helpers.tickets.issue({ kind: 'root', principalId: after.principal.id, actor: after.principal.username, panelSessionId: after.sessionId!, origin, accountId: null, accountUsername: null })
+  const target = container ? await helpers.activeAccount?.(container.account as string) ?? fail('NOT_FOUND', 'the account has no active container store', unchanged) : null
+  const ticket = helpers.tickets.issue({ kind: target ? 'container' : 'root', principalId: after.principal.id, actor: after.principal.username, panelSessionId: after.sessionId!, origin, accountId: target?.id ?? null, accountUsername: target?.username ?? null,
+    ...(target ? { container: { id: container!.id as string, shell: container!.shell as 'sh' | 'bash', asRoot: container!.asRoot as boolean } } : {}) })
   return json(201, { ticket, execution })
 }

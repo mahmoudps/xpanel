@@ -1,6 +1,7 @@
 import type { Translate } from '../../../../../i18n.ts'
 import type { WhmSurfaceProps } from '../../../../contract.ts'
 import { adminContext, DENIED_ADMIN_AUTHORITY, type WhmAdminAuthority } from './common.ts'
+import { renderV2HostTools } from './host-tools.ts'
 
 /** Root terminal admission and optional second-factor policy remain server decisions. */
 export function renderV2WhmTerminal(t: Translate, props: WhmSurfaceProps, authority: WhmAdminAuthority = DENIED_ADMIN_AUTHORITY): string {
@@ -17,7 +18,7 @@ export function renderV2WhmTerminal(t: Translate, props: WhmSurfaceProps, author
   const safety = h.section('v2-root-terminal-how', msgid('How it works'), `<div class="v2-admin-subgroup" role="status" data-terminal-unavailable hidden><strong>${h.text(msgid('Command execution unavailable'))}</strong><span>${h.text(msgid('This server has no verified terminal helper, so no command can be run from this page.'))} <bdi dir="ltr" data-terminal-reason></bdi></span></div>`
     + h.facts([{ label: msgid('Re-authentication'), value: t(msgid('Required')) }, fact('second-factor', msgid('Two-factor code')), { label: msgid('Audit'), value: t(msgid('Enabled')) }, fact('execution', msgid('Command execution')), fact('idle', msgid('Idle timeout')), fact('absolute', msgid('Session limit'))])
     + `<ul class="v2-admin-list">${[msgid('Only root, in the signed-in interactive session. API tokens cannot open a terminal.'), msgid('Failed passwords count toward the sign-in lockout and are recorded in the audit log.'), msgid('If the session cannot be audited, it is not opened.'), msgid('One session at a time. It closes when idle, at its time limit, or when you close it.')].map(message => `<li>${h.text(message)}</li>`).join('')}</ul>`)
-  const extra = h.section('v2-root-terminal-extra', msgid('Additional capabilities'), h.status(msgctxt('theme:v2', 'Saved terminal transcripts, session replay and file transfer are unavailable in this terminal workspace.')) + h.actions(h.button(msgctxt('theme:v2', 'Replay a session')) + h.button(msgctxt('theme:v2', 'Transfer a file'))))
+  const extra = h.section('v2-root-terminal-extra', msgid('Additional capabilities'), h.status(msgctxt('theme:v2', 'Saved terminal transcripts, session replay and file transfer are unavailable in this terminal workspace.')))
   const pills = `<div class="v2-admin-actions"><span data-terminal-pill>${h.text(canUse ? msgid('No session') : msgid('Unavailable'))}</span><span data-terminal-exec-pill>${h.text(msgid('Not read'))}</span></div>`
-  return h.page(msgid('Terminal'), msgctxt('theme:v2', 'Open an audited root shell only after fresh authentication and actual host-helper verification.'), `<div data-terminal-workspace data-terminal-kind="root" data-terminal-can-use="${canUse}" class="v2-admin-stack">${pills}<div class="v2-admin-columns"><div class="v2-admin-stack">${auth}${session}${empty}</div><aside class="v2-admin-stack">${safety}${extra}</aside></div></div>`)
+  return h.page(msgid('Terminal'), msgctxt('theme:v2', 'Open an audited root shell only after fresh authentication and actual host-helper verification.'), `<div data-terminal-workspace data-terminal-kind="root" data-terminal-can-use="${canUse}" class="v2-admin-stack">${pills}<div class="v2-admin-columns"><div class="v2-admin-stack">${auth}${session}${empty}</div><aside class="v2-admin-stack">${safety}${h.canManage ? renderV2HostTools(t, ['saved-commands'], canUse) : ''}${extra}</aside></div></div>`)
 }
