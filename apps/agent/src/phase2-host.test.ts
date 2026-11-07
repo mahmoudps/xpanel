@@ -287,6 +287,18 @@ describe('account backups', () => {
     expect(executor.executedActions.some(action => action.kind === 'exec' && action.argv[0] === '/usr/bin/cp' && action.argv.at(-1)?.startsWith('/home/alice/'))).toBe(false)
   })
 
+  it('relabels the restored home on EL after the extraction, and only there', async () => {
+    const restored = async (family: string) => {
+      const executor = new FakeHostExecutor()
+      executor.files.set('/sys/fs/selinux/enforce', { path: '/sys/fs/selinux/enforce', content: '1', mode: 0o644 })
+      executor.failCommand('/usr/bin/tar', 0, '', 'public_html/index.html\n')
+      await restoreAccountBackup({ executor, account, file: archiveName, family, inspectSource: async () => {} })
+      return executor.executedCommands.filter(argv => argv.includes('/usr/sbin/restorecon'))
+    }
+    expect(await restored('rhel')).toEqual([['/usr/sbin/runuser', '-u', 'alice', '--', '/usr/sbin/restorecon', '-R', '-F', '-i', '/home/alice']])
+    expect(await restored('debian')).toEqual([])
+  })
+
   it('lists only regular archives named for that account', async () => {
     const root = await mkdtemp(join(tmpdir(), 'xpanel-backup-'))
     roots.push(root)

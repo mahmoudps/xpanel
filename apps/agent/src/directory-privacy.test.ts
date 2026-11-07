@@ -47,8 +47,8 @@ function memoryFiles(initial: Record<string, string> = {}, dirs: string[] = ['pu
   }
   return { api, files, folders, order }
 }
-const run = (files: DirectoryPrivacyFiles, request: DirectoryPrivacyRequest, extra: { settings?: ServerSettings | null; probe?: (domain: string, path: string) => Promise<number>; authorize?: () => Promise<void> } = {}) =>
-  runDirectoryPrivacyRequest({ account, domains, settings: extra.settings === undefined ? settings : extra.settings, files, request, authorize: extra.authorize ?? (async () => undefined), ...(extra.probe ? { probe: extra.probe } : {}) })
+const run = (files: DirectoryPrivacyFiles, request: DirectoryPrivacyRequest, extra: { settings?: ServerSettings | null; probe?: (domain: string, path: string) => Promise<number>; authorize?: () => Promise<void>; relabelPasswords?: () => Promise<void> } = {}) =>
+  runDirectoryPrivacyRequest({ account, domains, settings: extra.settings === undefined ? settings : extra.settings, files, request, authorize: extra.authorize ?? (async () => undefined), ...(extra.probe ? { probe: extra.probe } : {}), ...(extra.relabelPasswords ? { relabelPasswords: extra.relabelPasswords } : {}) })
 const readOne = async (files: DirectoryPrivacyFiles, path = 'public_html/private') => (await run(files, { op: 'read', path })).directories[0]!
 const save = (revision: string, patch: Partial<Extract<DirectoryPrivacyRequest, { op: 'save' }>> = {}): DirectoryPrivacyRequest =>
   ({ op: 'save', path: 'public_html/private', expectedRevision: revision, enabled: true, authName: 'Members only', users: [{ username: 'bob', passwordHash: HASH }], ...patch })
@@ -88,6 +88,16 @@ describe('directory privacy over the confined account files', { tags: ['unit'] }
     expect((await run(t.api, { op: 'read', path: null })).directories.map(item => item.path)).toEqual(['public_html/private'])
   })
 
+  it('relabels the password tree before Apache is told to read it, and reports a failed relabel', async () => {
+    const t = memoryFiles()
+    const relabelPasswords = vi.fn(async () => { t.order.push('relabel') })
+    await run(t.api, save((await readOne(t.api)).revision), { relabelPasswords })
+    expect(t.order.slice(-3)).toEqual(['write .htpasswds/public_html/private/passwd', 'relabel', 'write public_html/private/.htaccess'])
+    const failed = memoryFiles()
+    await expect(run(failed.api, save((await readOne(failed.api)).revision), { relabelPasswords: async () => { throw new Error('refused') } }))
+      .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', detail: { verificationRequired: true } })
+    expect(failed.files.has('public_html/private/.htaccess')).toBe(false)
+  })
   it('keeps existing hashes, adds and removes users, and reports a folder the server did not protect', async () => {
     const t = memoryFiles()
     await run(t.api, save((await readOne(t.api)).revision, { users: [{ username: 'bob', passwordHash: HASH }, { username: 'carol', passwordHash: HASH }] }))

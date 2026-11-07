@@ -143,6 +143,7 @@ import { listAccountBackups, restoreAccountBackup, DEFAULT_BACKUP_DIR } from './
 import type { AccountFileRunner } from './file-manager.ts'
 import { handleAccountBackupAgentRequest } from './account-backup-workspace.ts'
 import { createTransferTaskController, handleTransferTaskRoute, spawnTransferCommand } from './lifecycle-transfer-tasks.ts'
+import { relabelAccountPaths } from './selinux-homes.ts'
 import type { TransferTaskController } from './lifecycle-transfer-tasks.ts'
 import { MariaDbServiceAdapter } from './services/mariadb.ts'
 import { handleConvertAddonFilesRoute } from './lifecycle-convert-addon-files.ts'
@@ -427,6 +428,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
     const executor = deps.executor, mariadb = deps.mariadbAdmin
     transferTaskController = process.platform === 'linux' && executor instanceof LinuxHostExecutor && mariadb instanceof MariaDbServiceAdapter ? createTransferTaskController({
       stateRoot: deps.store.rootDir, store: deps.store, run: spawnTransferCommand(), mariadb,
+      relabelHome: account => relabelAccountPaths(executor, deps.os.family, account.username, [account.home]),
       installCertificate: async (account, domain, fullchainPem, privateKeyPem) => installManualCertificate({ executor, accountId: account.id, domains: (await deps.store.readSnapshot()).domains, body: { domain, fullchainPem, privateKeyPem } }),
     }) : null
     return transferTaskController
@@ -1599,7 +1601,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         if (!account || account.username !== accountBackupWorkspace[1] || caller.actor !== account.username) return fail('FORBIDDEN', 'the backup account does not match the signed-in hosting owner')
         if (!(deps.executor instanceof LinuxHostExecutor)) return jsonResponse({ available: false }, 404)
         return await handleAccountBackupAgentRequest(req, {
-          executor: deps.executor, account, root: process.env.XPANEL_BACKUP_DIR || DEFAULT_BACKUP_DIR,
+          executor: deps.executor, account, root: process.env.XPANEL_BACKUP_DIR || DEFAULT_BACKUP_DIR, family: deps.os.family,
           withAccountLease: operation => deps.store.withAccountLifecycleLease(account.id, async fresh => {
             // Resolve the principal directly; no public snapshot/self-RPC is allowed in this lease.
             const principal = await getPrincipal(deps.db, caller.principalId)
@@ -1636,7 +1638,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
         }
         if (body.op === 'restore') {
           if (typeof body.file !== 'string') return fail('VALIDATION', 'backup file is required')
-          return jsonResponse({ backup: await restoreAccountBackup({ executor: deps.executor, root, account: target, file: body.file }) })
+          return jsonResponse({ backup: await restoreAccountBackup({ executor: deps.executor, root, account: target, file: body.file, family: deps.os.family }) })
         }
         return fail('VALIDATION', 'backup operation must be create or restore')
       }
@@ -1800,6 +1802,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           const result = await runDirectoryPrivacyRequest({ account: fresh, domains: await deps.store.listDomains({ accountId: fresh.id }), settings, request: body,
             files: new JailedFileManager(resolveAccountHome(fresh.home, fresh.username), plan.resources.diskMb, { account: fresh, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
             authorize: async () => { await authorize() },
+            relabelPasswords: () => relabelAccountPaths(deps.executor!, deps.os.family, fresh.username, [fresh.home + '/.htpasswds']),
             ...(settings ? { probe: (domain: string, path: string) => probeHtaccessTarget({ engine: settings.engine, backendPort: settings.backendPort, domainName: domain }, path) } : {}) })
           if (body.op === 'save') {
             try { await appendAudit(deps.db, { actor: caller.actor, action: 'account.directory_privacy.saved', target: 'account:' + fresh.username,

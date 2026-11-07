@@ -161,7 +161,7 @@ export async function downloadAccountBackup(input: { root?: string; account: Bac
     'content-disposition': `attachment; filename="${input.file}"`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-accel-buffering': 'no' } })
 }
 
-export async function restoreAccountBackupWithRecovery(input: { executor: AgentExecutor; root?: string; account: AccountBackupIdentity; file: string; expectedRevision: string; confirmation: string;
+export async function restoreAccountBackupWithRecovery(input: { executor: AgentExecutor; root?: string; family?: string; account: AccountBackupIdentity; file: string; expectedRevision: string; confirmation: string;
   readCurrent?: (account: AccountBackupIdentity, paths: ReadonlySet<string>) => Promise<AccountHomeEntry[]>;
   /** Trusted fixture/recovery port; never deserialized by the dispatcher. */
   createRecovery?: () => Promise<BackupArchive> }): Promise<{ file: string; recovery: BackupArchive; scope: 'home'; mailPreserved: true; contentReadback: 'matched' }> {
@@ -206,7 +206,7 @@ const agentBody = async (req: Request, allowed: readonly string[]): Promise<Reco
 }
 
 /** The dispatcher must resolve the current account and authorize the trusted principal first. */
-async function handleLockedAccountBackupRequest(req: Request, input: { executor: AgentExecutor; account: AccountBackupIdentity; root?: string }): Promise<Response> {
+async function handleLockedAccountBackupRequest(req: Request, input: { executor: AgentExecutor; account: AccountBackupIdentity; root?: string; family?: string }): Promise<Response> {
   const url = new URL(req.url), base = '/accounts/' + input.account.username + '/backup-workspace'
   if (!url.pathname.startsWith(base)) return fail('NOT_FOUND', 'account backup route not found')
   const suffix = url.pathname.slice(base.length), storageRoot = input.root ?? DEFAULT_BACKUP_DIR
@@ -247,7 +247,7 @@ async function handleLockedAccountBackupRequest(req: Request, input: { executor:
 }
 
 export interface AccountBackupAgentContext {
-  executor: AgentExecutor; account: AccountBackupIdentity; root?: string
+  executor: AgentExecutor; account: AccountBackupIdentity; root?: string; family?: string
   /** Hold the existing state/lifecycle lease through fresh authorization and the operation. */
   withAccountLease<T>(operation: (current: AccountBackupIdentity) => Promise<T>): Promise<T>
 }
