@@ -35,6 +35,7 @@ export function withNativeLifecycleRecoveryObservation<T>(callback: (scope: Read
 
 /** Pure diagnostic only; no capture or authority is minted. */
 export function isSettledControlPlaneProjection(value: unknown): boolean
+export function queueWriterRestart(run: (path: string, args: string[]) => Promise<{ code: number | null }>): Promise<void>
 
 export interface NativeDatabaseAdmission { readonly db: Db; readonly principal: Readonly<{id:string;username:string;kind:'root'}> }
 export interface NativeClosedRecoveryObservation {
