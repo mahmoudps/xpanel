@@ -124,14 +124,14 @@ export async function startNativeUpgradeIpcServer() {
       qualifying = true
       void withVerifiedCoordinatorOwnership(async ownership => {
         const request = parseUpgradeIpcRequest(decodeUpgradeIpcFrame(bytes)), peer = kernelPeer(socket, addon)
-        const actual = await observeLauncher(ownership), agent = await unitProperties('xpanel-agent.service', actual.receipt.systemctlSha256)
+        const actual = await observeLauncher(ownership), agent = await unitProperties('xpanel-agent.service')
         if (actual.identity.pid !== process.pid || JSON.stringify(actual.identity) !== JSON.stringify(initial.identity)
           || peer.uid !== 0 || peer.gid !== 0 || agent.Id !== 'xpanel-agent.service' || agent.LoadState !== 'loaded' || agent.ActiveState !== 'active' || Number(agent.MainPID) !== peer.pid
           || agent.ControlPID !== '0' || agent.FragmentPath !== '/etc/systemd/system/xpanel-agent.service' || agent.DropInPaths) return refuse()
         const agentBefore = await processFacts(peer.pid, 'xpanel-agent.service')
         const qualification = await withNativeHostedUidQualification(ownership, request, async proof => proof)
         if (socket.destroyed || operation) return refuse()
-        if (JSON.stringify(agentBefore) !== JSON.stringify(await processFacts(peer.pid, 'xpanel-agent.service')) || Number((await unitProperties('xpanel-agent.service', actual.receipt.systemctlSha256)).MainPID) !== peer.pid) return refuse()
+        if (JSON.stringify(agentBefore) !== JSON.stringify(await processFacts(peer.pid, 'xpanel-agent.service')) || Number((await unitProperties('xpanel-agent.service')).MainPID) !== peer.pid) return refuse()
         await assertCoordinatorOwnershipCurrent(ownership)
         return withTrustedFile(PRIVATE_KEY, { maxBytes: 4096, exactMode: 0o600 }, async privateFile => {
           const keys = parseLauncherKeyPair(privateFile.bytes, actual.publicBytes), identity: UpgradeLauncherIdentity = { workerId, ...actual.identity }

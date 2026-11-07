@@ -14,7 +14,7 @@ const activeSource = () => ({ generation: { id: 3, status: 'active', checksum: '
 const observed = () => ({ pid: 42, parentPid: 41, startTime: '123', state: 'S', uids: [seams.observedUid, seams.observedUid, seams.observedUid, seams.observedUid],
   gids: [1001, 1001, 1001, 1001], cgroup: '/xpanel.slice/xpanel-1001.slice/xpanel-php-fpm-alice-8.3.service' })
 vi.mock('../../../scripts/coordinator-ownership.mjs', () => ({
-  coordinatorOwnershipInfo: () => ({ receiptSha256: 'a'.repeat(64), systemctlSha256: 'b'.repeat(64), helper: { archiveSha256: 'e'.repeat(64) } }),
+  coordinatorOwnershipInfo: () => ({ receiptSha256: 'a'.repeat(64), helper: { archiveSha256: 'e'.repeat(64) } }),
   assertCoordinatorOwnershipCurrent: seams.owned,
   withVisibleCoordinatorOwnership: async (_capability: unknown, work: () => unknown) => work(),
 }))

@@ -1,6 +1,6 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { assertFreshInstallReleaseControls, parseBootstrapArgs, parseBootstrapKeys, parseBootstrapTrust, prepareNewInstallation, resumePreparedInstallation, runBootstrapCli, verifyBootstrapPublisher, verifyNewInstallation } from './install-bootstrap.mjs'
+import { assertFreshInstallReleaseControls, parseBootstrapArgs, parseBootstrapKeys, parseBootstrapTrust, prepareNewInstallation, resumableInstallReceipt, resumePreparedInstallation, runBootstrapCli, verifyBootstrapPublisher, verifyNewInstallation } from './install-bootstrap.mjs'
 
 const options = ['--artifact=/root/releases/xpanel-release-0.1.0.tar.gz', `--artifact-sha256=${'a'.repeat(64)}`, '--release-trust-file=/root/protected/archive-trust.json', '--release-keys-file=/root/protected/publisher-keys.json']
 const archiveTrust = () => ({ keyId: 'archive-anchor', packageManagerPath: '/opt/tools/pnpm', packageManagerSha256: 'b'.repeat(64), signingKeyPath: '/root/protected/archive-hmac' })
@@ -111,5 +111,19 @@ describe('native publisher wire binding before staging', () => {
     for (const manifest of [{ ...signed(), note: 'unsigned' }, { ...signed(), signature: 'a'.repeat(64) }, { ...signed(), version: '0.1.0-beta' }, { ...signed(), schemaVersion: 0 }]) {
       expect(() => verifyBootstrapPublisher(manifest, report(), keys())).toThrow('INSTALL_PUBLISHER_MANIFEST_INVALID')
     }
+  })
+})
+
+describe('retry of an interrupted install', () => {
+  const receipt = { status: 'bootstrap_pending', createdAt: '2026-11-07T06:00:00.000Z', source: { version: '0.1.1' }, runtime: { nodePath: '/opt/node/bin/node', nodeSha256: 'n', systemctlSha256: 's', nginxSha256: 'x' } }
+
+  it('accepts a package update of systemctl or nginx between attempts', () => {
+    const updated = { ...receipt, createdAt: '2026-11-07T07:00:00.000Z', runtime: { ...receipt.runtime, systemctlSha256: 't', nginxSha256: 'y' } }
+    expect(resumableInstallReceipt(updated)).toBe(resumableInstallReceipt(receipt))
+  })
+
+  it('still refuses a changed Node binary or release', () => {
+    expect(resumableInstallReceipt({ ...receipt, runtime: { ...receipt.runtime, nodeSha256: 'm' } })).not.toBe(resumableInstallReceipt(receipt))
+    expect(resumableInstallReceipt({ ...receipt, source: { version: '0.1.2' } })).not.toBe(resumableInstallReceipt(receipt))
   })
 })

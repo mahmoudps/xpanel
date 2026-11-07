@@ -38,6 +38,7 @@ export function verifyNewInstallation(inputs: Omit<NewInstallInputs, 'phase'> & 
 export function resumePreparedInstallation(inputs: Omit<NewInstallInputs, 'phase'> & { phase?: 'resume' }): Promise<Readonly<{ status: 'prepared'; version: string; releaseRoot: string; currentLink: string; dependencyReceiptSha256: string; installationReceipt: 'pending'; resumed: true }>>
 export function prepareNewInstallation(inputs: Omit<NewInstallInputs, 'phase'> & { phase?: 'prepare' }): Promise<Readonly<{ status: 'prepared'; version: string; releaseRoot: string; currentLink: string; dependencyReceiptSha256: string; installationReceipt: 'pending' }>>
 export function establishInstallAdmission(): Promise<Readonly<{ status: 'admission_ready'; version: string; releaseRoot: string; installationReceipt: 'pending' }>>
+export function resumableInstallReceipt(receipt: Readonly<Record<string, unknown> & { runtime: object }>): string
 export function captureInstallOwnership(): Promise<Readonly<{ status: 'bootstrap_pending'; version: string; releaseRoot: string; installationReceipt: 'captured'; active: false }>>
 export function runBootstrapCli(argv: readonly string[], streams?: { stdout: { write(value: string): unknown }; stderr: { write(value: string): unknown } }): Promise<number>
 

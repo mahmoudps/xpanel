@@ -937,6 +937,9 @@ const OWNED_PATHS = Object.freeze(['/usr/local/bin/xpanel-ctl', '/opt/xpanel/bin
   '/etc/systemd/system/multi-user.target.wants/xpanel-api.service', '/etc/systemd/system/multi-user.target.wants/xpanel-agent.service', '/etc/systemd/system/timers.target.wants/xpanel-management-tls.timer',
   '/etc/nginx/conf.d/xpanel-management.conf', '/etc/nginx/conf.d/xpanel-management-challenge.conf', '/etc/nginx/xpanel-management/ingress-secret.conf'])
 
+// A package update may replace systemctl or nginx between install attempts, so their observed hashes do not identify the attempt.
+export const resumableInstallReceipt = receipt => JSON.stringify({ ...receipt, createdAt: null, runtime: { ...receipt.runtime, systemctlSha256: null, nginxSha256: null } })
+
 /** Capture is observation, not activation: every mandatory owned file must actually exist. */
 export async function captureInstallOwnership() {
   const runtime = await nativeContext(), bootstrap = await preparedBootstrap(runtime), files = []
@@ -961,7 +964,7 @@ export async function captureInstallOwnership() {
   const path = LIFECYCLE + '/installation.json'
   if (await exists(path)) {
     const old = parseInstallationReceipt(parseJson((await readTrustedFile(path, { exactMode: 0o600, maxBytes: 64 * 1024 })).bytes))
-    check(old.status === 'bootstrap_pending' && JSON.stringify({ ...old, createdAt: null }) === JSON.stringify({ ...receipt, createdAt: null }), 'INSTALL_RECEIPT_EXISTS')
+    check(old.status === 'bootstrap_pending' && resumableInstallReceipt(old) === resumableInstallReceipt(receipt), 'INSTALL_RECEIPT_EXISTS')
   } else await writeNewJson(path, receipt)
   await replaceBootstrap({ ...bootstrap, status: 'bootstrap_pending' })
   return freeze({ status: 'bootstrap_pending', version: bootstrap.version, releaseRoot: bootstrap.releaseRoot, installationReceipt: 'captured', active: false })

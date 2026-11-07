@@ -32,6 +32,7 @@ export function parseInstallationReceipt(value) {
   safe(typeof value.createdAt === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value.createdAt) && Number.isFinite(Date.parse(value.createdAt)), 'INSTALLATION_RECEIPT_INVALID')
   object(value.source, ['root', 'version', 'archiveSha256', 'manifestSha256', 'dependencyReceiptSha256', 'controlDbSchemaVersion'], 'INSTALLATION_SOURCE_INVALID')
   safe(value.source.root === '/opt/xpanel' && typeof value.source.version === 'string' && VERSION.test(value.source.version) && [value.source.archiveSha256, value.source.manifestSha256, value.source.dependencyReceiptSha256].every(v => typeof v === 'string' && SHA.test(v)) && Number.isSafeInteger(value.source.controlDbSchemaVersion) && value.source.controlDbSchemaVersion >= 1, 'INSTALLATION_SOURCE_INVALID')
+  // systemctlSha256 and nginxSha256 are install-time observations. Package updates replace those files, so nothing compares them.
   object(value.runtime, ['nodePath', 'nodeVersion', 'nodeSha256', 'systemctlSha256', 'nginxSha256'], 'INSTALLATION_RUNTIME_INVALID')
   safe(canonical(value.runtime.nodePath) && !/^\/(?:home(?:\d+)?|tmp|var\/tmp)(?:\/|$)/.test(value.runtime.nodePath) && value.runtime.nodeVersion === '26.12.1' && [value.runtime.nodeSha256, value.runtime.systemctlSha256, value.runtime.nginxSha256].every(hash => typeof hash === 'string' && SHA.test(hash)), 'INSTALLATION_RUNTIME_INVALID')
   safe(value.writerProtocol === 'lifecycle-admission-v1', 'INSTALLATION_WRITERS_UNQUALIFIED')

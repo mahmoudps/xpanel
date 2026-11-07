@@ -75,7 +75,7 @@ async function assertImages(scope) {
 
 async function command(scope, args) {
   await scope.assertAuthority()
-  return withTrustedFile('/usr/bin/systemctl', { sha256: scope.oldReceipt.runtime.systemctlSha256, maxBytes: 16 * 1024 * 1024 }, async pin => {
+  return withTrustedFile('/usr/bin/systemctl', { maxBytes: 16 * 1024 * 1024 }, async pin => {
     const result = await new Promise((resolve, reject) => {
       const child = spawn('/proc/self/fd/3', ['--system', '--no-ask-password', '--no-pager', ...args], { cwd: '/', shell: false,
         stdio: ['ignore', 'pipe', 'pipe', pin.fd], env: { PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C', SYSTEMD_PAGERSECURE: '1' } })
