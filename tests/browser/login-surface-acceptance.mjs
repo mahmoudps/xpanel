@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { serveWebUi } from '../../apps/web/src/index.ts'
 import { assertAppliedFont } from './applied-font-contract.mjs'
+import { recordCspViolations } from './csp-violations.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const audiences = { xpanel: 'xPanel', xwhm: 'xWHM', xmail: 'xMail' }
@@ -117,9 +118,10 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
   const browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() })
   try {
     for (const state of matrix) {
-      const outcome = { ...state, synthetic: true, status: 'running', page_errors: [], console_errors: [], failed_requests: [], mutations: [], observations: [] }
+      const outcome = { ...state, synthetic: true, status: 'running', page_errors: [], console_errors: [], csp_violations: [], failed_requests: [], mutations: [], observations: [] }
       const context = await browser.newContext({ viewport: { width: state.width, height: state.width === 1440 ? 900 : state.width === 768 ? 1024 : state.width === 320 ? 740 : 800 }, colorScheme: state.theme, reducedMotion: 'reduce' })
       const page = await context.newPage(); page.setDefaultTimeout(6000)
+      await recordCspViolations(page, outcome.csp_violations)
       page.on('pageerror', error => outcome.page_errors.push(String(error.message)))
       page.on('console', message => { if (message.type() === 'error') outcome.console_errors.push({ text: message.text(), url: message.location().url }) })
       page.on('requestfailed', request => outcome.failed_requests.push({ url: request.url(), error: request.failure()?.errorText }))
@@ -245,6 +247,7 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         outcome.console_classification = { expected_unauthenticated_lookup: outcome.console_errors.filter(error => /\/api\/auth\/me$/.test(error.url)), unexpected: outcome.console_errors.filter(error => !/\/api\/auth\/me$/.test(error.url)) }
         assert.deepEqual(outcome.console_classification.unexpected, [], 'No unexpected application console errors')
         assert.deepEqual(outcome.page_errors, [])
+        assert.deepEqual(outcome.csp_violations, [], 'No Content-Security-Policy violation')
         assert.deepEqual(outcome.mutations, [])
         outcome.status = 'passed'
       } catch (error) { outcome.status = 'failed'; outcome.failure = { name: error.name, message: String(error.message).split('\n')[0] } }

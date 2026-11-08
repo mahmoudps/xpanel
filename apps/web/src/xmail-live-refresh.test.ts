@@ -2,6 +2,7 @@ import { existsSync, statfsSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import playwright from '@playwright/test'
 import { renderInbox, xmailInboxFromProps, type XmailInboxMessageInput } from './board-port/xmail-inbox.ts'
+import { inlinePageScripts } from './page-scripts.ts'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
 import { clientI18nAsset } from './i18n.ts'
 import { DESIGN_TOKENS_CSS } from './tokens.ts'
@@ -37,7 +38,7 @@ const documentFor = (locale: 'en' | 'ar', fresh = false, moved = false, empty = 
   const messages = empty ? [] : fresh ? [message(9, 'New Keep'), ...(moved ? [] : [message(7, 'Keep selected')]), message(8, 'Other')] : [message(7, 'Keep selected'), message(8, 'Other')]
   if (fresh) for (const item of messages) { item.body = ''; item.bodyPending = true }
   const model = xmailInboxFromProps({ locale, mailbox, activeFolder: 'Archive', selectedUid: 7, messages, folderCounts: [{ folder: 'Archive', total: messages.length, unread: fresh ? 1 : 0 }, { folder: 'INBOX', total: fresh ? 2 : 0, unread: fresh ? 2 : 0 }] })
-  return `<!doctype html><html lang="${locale}" dir="${locale === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>${DESIGN_TOKENS_CSS}</style><script>${clientI18nAsset(locale)}</script></head><body>${renderInbox(model)}</body></html>`
+  return `<!doctype html><html lang="${locale}" dir="${locale === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>${DESIGN_TOKENS_CSS}</style><script>${clientI18nAsset(locale)}</script></head><body>${inlinePageScripts(renderInbox(model))}</body></html>`
 }
 
 const emit = (page: Page, kind = 'mail.changed', target = mailbox) => page.evaluate(({ kind, target }) => { (window as unknown as FixtureWindow).fixtureEmit(kind, target) }, { kind, target })

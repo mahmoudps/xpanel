@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/source-snapshot.mjs'
 import { createVisualFixture } from './visual-fixture.mjs'
 import { assertAppliedFont } from './applied-font-contract.mjs'
+import { recordCspViolations } from './csp-violations.mjs'
 
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const focusable = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]'
@@ -1078,9 +1079,10 @@ export async function runNavigationAcceptance({ output, filter } = {}) {
   const started = Date.now()
   try {
     for (const state of selected) {
-      const outcome = { ...state, status: 'running', observations: [], page_errors: [], console_errors: [], mutations: [], websockets: [], external_requests: [] }
+      const outcome = { ...state, status: 'running', observations: [], page_errors: [], console_errors: [], csp_violations: [], mutations: [], websockets: [], external_requests: [] }
       const context = await browser.newContext({ viewport: { width: state.width, height: state.height ?? (state.width < 960 ? 800 : 900) }, colorScheme: 'light', reducedMotion: state.kind === 'motion' ? 'reduce' : 'no-preference' })
       const page = await context.newPage()
+      await recordCspViolations(page, outcome.csp_violations)
       const networkDiagnostics = failureNetworkDiagnostics(page)
       page.setDefaultTimeout(8000)
       await context.route('**/*', async route => {
@@ -1173,6 +1175,7 @@ export async function runNavigationAcceptance({ output, filter } = {}) {
         const unexpected = outcome.console_errors.filter(error => !/\/api\/auth\/me(?:\?|$)/.test(error.url) && !(state.kind === 'unavailable' && /\/no-such-navigation-document$/.test(error.url)))
         assert.deepEqual(unexpected, [], 'No unexpected application console errors')
         assert.deepEqual(outcome.page_errors, [])
+        assert.deepEqual(outcome.csp_violations, [], 'No Content-Security-Policy violation')
         assert.deepEqual(outcome.mutations, [])
         assert.deepEqual(outcome.websockets, [])
         assert.deepEqual(outcome.external_requests, [], 'The page must make no request to any external origin')

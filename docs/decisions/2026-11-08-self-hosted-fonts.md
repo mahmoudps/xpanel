@@ -17,5 +17,5 @@ Both themes loaded IBM Plex Sans and Mono from `fonts.googleapis.com` and `fonts
 
 ## Not changed
 
-- The panel sends no Content-Security-Policy for its pages, so no `font-src` or `style-src` change was needed.
+- The panel sent no Content-Security-Policy then. Its later policy ([2026-11-08-content-security-policy.md](2026-11-08-content-security-policy.md)) allows these fonts with `font-src 'self'`.
 - The design board fixtures (`apps/web/src/board-port/*.fixture.ts`) mirror the approved artboards and are not served as product pages, so they still name the font service. They are excluded from releases.

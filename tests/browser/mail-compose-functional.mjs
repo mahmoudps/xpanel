@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import playwright from '../../node_modules/@playwright/test/index.js'
 import { renderCompose, xmailComposeFromProps } from '../../apps/web/src/board-port/xmail-compose.ts'
+import { inlinePageScripts } from '../../apps/web/src/page-scripts.ts'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const sourcePath = 'apps/web/src/board-port/xmail-compose.ts'
@@ -28,7 +29,7 @@ try {
   await page.route('**/*', route => { requests.push(route.request().url()); return route.abort() })
 
   const reset = async (body = 'Alpha beta gamma') => {
-    const html = renderCompose(xmailComposeFromProps({ mailbox: 'owner@example.test', draft: { body } }))
+    const html = inlinePageScripts(renderCompose(xmailComposeFromProps({ mailbox: 'owner@example.test', draft: { body } })))
     await page.setContent(`<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><p id="outside-editor">Outside text</p>${html}</body></html>`, { waitUntil: 'domcontentloaded' })
     assert.equal(await page.locator('#compose-body[contenteditable="true"]').count(), 1)
   }

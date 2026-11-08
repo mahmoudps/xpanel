@@ -10,6 +10,7 @@ import { renderFidelityDocument as renderComposeFidelity, renderLiveDocument as 
 import { renderMailSurface } from './surfaces/xmail.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
 import { DESIGN_TOKENS_CSS } from './tokens.ts'
+import { inlinePageScripts } from './page-scripts.ts'
 import playwright from '../../../node_modules/@playwright/test/index.js'
 
 interface Browser {
@@ -274,7 +275,7 @@ const liveDashboard = (locale: 'ar' | 'en' = 'ar'): string => {
 
 const productDocument = (body: string, locale: 'ar' | 'en' = 'ar'): string => {
   const ar = locale === 'ar'
-  return `<!doctype html><html lang="${ar ? 'ar' : 'en'}" dir="${ar ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>${DESIGN_TOKENS_CSS}</style></head><body>${body}</body></html>`
+  return `<!doctype html><html lang="${ar ? 'ar' : 'en'}" dir="${ar ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><style>${DESIGN_TOKENS_CSS}</style></head><body>${inlinePageScripts(body)}</body></html>`
 }
 
 const pageScroll = (): { scroll: number; inner: number } => {

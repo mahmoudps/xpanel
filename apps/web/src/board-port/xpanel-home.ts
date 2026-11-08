@@ -6,6 +6,7 @@ import { formatDisplayName } from '../display-name.ts'
 import { escapeHtml, formatAsciiBytes, formatUtcClock } from '../tokens.ts'
 import { renderLiveUpdatesIndicator, renderPageSearchButton } from '../shell.ts'
 import { HOME_TOOL_MATCHING_FUNCTIONS } from '../home-tools-client.ts'
+import { pageScript, pageScriptTag } from '../page-scripts.ts'
 
 
 // Preserve the approved light swatches; dark paint uses the existing semantic theme roles.
@@ -1077,7 +1078,7 @@ export const renderPhone = (model: HomePhoneModel): string => {
 </div>`
 }
 
-export const HOME_SCRIPT = `<script>
+export const HOME_SOURCE = `
 (function () {
   ${HOME_TOOL_MATCHING_FUNCTIONS}
   var wireFilter = function (inputId, countId, rootSel, phone, peerId) {
@@ -1331,7 +1332,8 @@ export const HOME_SCRIPT = `<script>
     if (action === 'close-menu') closeHomeMenu(true)
   })
 })()
-</script>`
+`
+export const HOME_SCRIPT = pageScriptTag(pageScript('xpanel-home', HOME_SOURCE), 'xpanel-home-client')
 
 const RESPONSIVE_CSS = `.xp-home-phone-only{display:none}.xp-home-phone-only > [data-home-phone]{width:100% !important;min-inline-size:0;max-inline-size:100%}@media (max-width:800px){.xp-home-desk-only{display:none}.xp-home-phone-only{display:block}}`
 

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MAIL_COMPOSE_IDENTITIES_CLIENT_BINDING } from './mail-compose-identities-client.ts'
 import { MAIL_SEND_CLIENT_BINDING, readMailBodyHtml, readMailSendPayload } from './mail-send-client.ts'
 import { renderCompose, xmailComposeFromProps, type ComposeModel } from './board-port/xmail-compose.ts'
+import { inlinePageScripts } from './page-scripts.ts'
 
 const mailbox = 'sender@example.test'
 const id = (n: number) => 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(n).padStart(12, '0')
@@ -211,7 +212,7 @@ describe('compose saved sender identities and managed signatures', () => {
     expect(document.getElementById('mail-send-status')!.textContent).toContain('newer draft')
   })
   it.each(['cc', 'bcc'])('the actual renderer script sends a valid %s-only envelope without inventing To', async field => {
-    document.body.innerHTML = renderCompose(xmailComposeFromProps({ mailbox, canSend: true, draft: { body: 'Private message body' } }))
+    document.body.innerHTML = inlinePageScripts(renderCompose(xmailComposeFromProps({ mailbox, canSend: true, draft: { body: 'Private message body' } })))
     const request = vi.fn<Transport>(async () => ({ mailbox, messageId: '<accepted@example.test>', savedToSent: true }))
     ;(window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest = request
     root().dataset.composeIdentitiesState = 'ready'; select().options[0]!.value = ''; select().value = ''

@@ -14,6 +14,8 @@ import { emailAccountsRouteSpec } from '../../apps/web/src/board-port/extensions
 import { accountPageRouteSpecs } from '../../apps/web/src/board-port/extensions/account-pages.ts'
 import { storeRouteSpecs } from '../../apps/web/src/board-port/extensions/store.ts'
 import { assertAppliedFont } from './applied-font-contract.mjs'
+import { injectTestScript, recordCspViolations } from './csp-violations.mjs'
+import { documentSecurityHeaders } from '../../apps/web/src/content-security-policy.ts'
 
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const ownPath = 'tests/browser/extensions-acceptance.mjs'
@@ -129,7 +131,7 @@ async function fixture() {
       panel: { account, plan, domains: [domain], serviceUsers: [serviceUser] },
       whm: { principal: administrator, plans: [plan] },
     }).replace('<html ', '<html data-extensions-fixture="synthetic-qualified-presentation" ')
-    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); response.end(html)
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...documentSecurityHeaders(html) }); response.end(html)
   })
   await new Promise((done, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', done) })
   return { requests, baseUrl: `http://127.0.0.1:${server.address().port}`, close: () => new Promise(done => { server.closeIdleConnections(); server.close(done) }) }
@@ -235,7 +237,7 @@ async function verifyWorkspaceRoute(page, spec, axeSource) {
   assert.equal(await page.locator('h1:visible').count(), 1, 'There is one visible page heading')
   const overflow = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, width: document.documentElement.clientWidth }))
   assert.ok(overflow.scroll <= overflow.width, 'No document overflow')
-  await page.addScriptTag({ content: axeSource })
+  await injectTestScript(page, axeSource)
   const accessibility = await page.evaluate(async () => (await axe.run('main.xp-main', { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } })).violations.map(violation => ({ id: violation.id, targets: violation.nodes.map(node => node.target) })))
   assert.deepEqual(accessibility, [])
   return { workspace: spec.route, ...overflow, accessibility }
@@ -331,6 +333,8 @@ export async function runExtensionsAcceptance({ output, filter } = {}) {
       const theme = width === 360 ? 'dark' : 'light'
       const context = await browser.newContext({ viewport: { width, height: 900 }, locale: locale === 'ar' ? 'ar-EG' : 'en-US', reducedMotion: 'reduce' })
       const page = await context.newPage()
+      const cspViolations = []
+      await recordCspViolations(page, cspViolations)
       await page.route('**/*', route => {
         const url = new URL(route.request().url())
         if (url.origin === host.baseUrl) return route.continue()
@@ -339,11 +343,13 @@ export async function runExtensionsAcceptance({ output, filter } = {}) {
       for (const spec of selected) {
         requireBrowserDiskHeadroom(root, 256, destination)
         const result = { route: spec.route, surface: spec.surface, family: spec.family, locale, width, theme, synthetic_presentation_only: true }
+        const cspBefore = cspViolations.length
         try {
           const response = await page.goto(host.baseUrl + spec.route + '?lang=' + locale + '&theme=' + theme, { waitUntil: 'networkidle' })
           assert.equal(response.status(), 200)
           if (workspaceRoutes.has(spec.route)) {
             result.replaced_by_workspace = await verifyWorkspaceRoute(page, spec, axeSource)
+            assert.deepEqual(cspViolations.slice(cspBefore), [], 'No Content-Security-Policy violation')
             result.passed = true; results.push(result)
             writeFileSync(join(destination, 'results.json'), JSON.stringify({ complete: false, synthetic_presentation_only: true, results }, null, 2) + '\n')
             continue
@@ -374,7 +380,7 @@ export async function runExtensionsAcceptance({ output, filter } = {}) {
             result.applied_fonts.push({ ...font, semantic_role: human.role, exact_role_checked: human.role !== null })
           }
           assert.ok(result.applied_fonts.length > 0, 'Actual human glyph fonts must be observed')
-          await page.addScriptTag({ content: axeSource })
+          await injectTestScript(page, axeSource)
           result.accessibility = await page.evaluate(async () => {
             const checks = list => list.map(check => ({ id: check.id, impact: check.impact, message: check.message, data: check.data, related_nodes: (check.relatedNodes ?? []).map(node => ({ target: node.target, html: node.html })) }))
             const computed = element => {
@@ -405,6 +411,7 @@ export async function runExtensionsAcceptance({ output, filter } = {}) {
             const name = `representative-${screenshots++}-${locale}-${width}.png`
             await page.screenshot({ path: join(destination, 'screenshots', name), fullPage: false }); result.screenshot = name
           }
+          assert.deepEqual(cspViolations.slice(cspBefore), [], 'No Content-Security-Policy violation')
           result.passed = true
         } catch (error) {
           result.passed = false; result.error = String(error.stack || error)

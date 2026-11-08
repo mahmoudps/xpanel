@@ -5,7 +5,8 @@ import {
   renderXpanelHome, totalCount, xpanelHomeFromProps,
   type Hint, type HomeChange, type HomeDesktopModel, type HomeMeter, type HomePhoneModel, type ToolDef,
 } from './xpanel-home.ts'
-import { inlineScriptMessageKeys, localeDirection, localeInfo, renderClientI18nScript, translator, type Locale } from '../i18n.ts'
+import { scriptMessageKeys, localeDirection, localeInfo, renderClientI18nScript, translator, type Locale } from '../i18n.ts'
+import { inlinePageScripts } from '../page-scripts.ts'
 const sampleHints = (locale: Locale, phone: boolean) => {
   const t = translator(locale)
   const dir = localeDirection(locale)
@@ -156,7 +157,7 @@ export const xpanelHomeFixturePhone = (): HomePhoneModel => {
 }
 
 const documentShell = (body: string, locale: Locale, title: string): string => {
-  return `<!doctype html>
+  return inlinePageScripts(`<!doctype html>
 <html lang="${locale}" dir="${localeDirection(locale)}">
 <head>
 <meta charset="utf-8">
@@ -169,12 +170,12 @@ body{margin:0;background:#F5F6F8;color:#101828;font-family:'IBM Plex Sans',sans-
 a{color:#1D5BD6}a:hover{color:#1546A8}
 :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
 </style>
-${renderClientI18nScript(locale, inlineScriptMessageKeys(body))}
+${renderClientI18nScript(locale, scriptMessageKeys(body))}
 </head>
 <body>
 ${body}
 </body>
-</html>`
+</html>`)
 }
 
 export const renderFidelityDocument = (kind: 'ltr' | 'ar' | 'phone' = 'ltr'): string => {

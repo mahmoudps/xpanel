@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { arabicFileCount, xmailComposeFromProps } from './board-port/xmail-compose.ts'
 import { xmailInboxFromProps, renderInbox } from './board-port/xmail-inbox.ts'
+import { inlinePageScripts } from './page-scripts.ts'
 import { whmDashboardFromProps } from './board-port/xwhm-dashboard.ts'
 import { xpanelHomeFromProps } from './board-port/xpanel-home.ts'
 import { auditActionHtml, auditActionLabel, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from './audit-labels.ts'
@@ -35,7 +36,7 @@ describe('live truth surfaces', () => {
       ],
       vacationEnabled: false,
     })
-    const html = renderInbox(model)
+    const html = inlinePageScripts(renderInbox(model))
     assert.match(html, /data-product="true"/)
     assert.match(html, /data-mail-count="Drafts"/)
     assert.match(html, />1</)

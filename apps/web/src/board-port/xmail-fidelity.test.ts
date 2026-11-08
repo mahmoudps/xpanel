@@ -4,9 +4,10 @@ import { describe, it } from 'vitest'
 import { renderCompose, xmailComposeFromProps } from './xmail-compose.ts'
 import { renderInbox, xmailInboxFromProps } from './xmail-inbox.ts'
 import { renderUnavailableMailBody } from '../surfaces/xmail.ts'
+import { inlinePageScripts } from '../page-scripts.ts'
 
 const scriptOf = (html: string, name: string): string => {
-  const script = html.match(new RegExp('<script id="' + name + '">([\\s\\S]*?)</script>'))?.[1]
+  const script = inlinePageScripts(html).match(new RegExp('<script id="' + name + '">([\\s\\S]*?)</script>'))?.[1]
   assert.ok(script, `${name} is present`)
   return script
 }

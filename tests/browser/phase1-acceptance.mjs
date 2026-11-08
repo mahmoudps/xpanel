@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectSnapshotFiles, computeSourceDigest, EXCLUDED_NAMES } from '../../scripts/vm/source-snapshot.mjs'
 import { createVisualFixture } from './visual-fixture.mjs'
+import { recordCspViolations } from './csp-violations.mjs'
 
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const matrix = [
@@ -287,9 +288,10 @@ export async function runPhase1Acceptance({ output } = {}) {
   const outcomes = [], started = Date.now()
   try {
     for (const state of matrix) {
-      const outcome = { ...state, status: 'running', observations: [], breadcrumbs: ['load'], page_errors: [], console_errors: [], failed_requests: [], error_responses: [], font_responses: [], mutations: [], websockets: [] }
+      const outcome = { ...state, status: 'running', observations: [], breadcrumbs: ['load'], page_errors: [], console_errors: [], csp_violations: [], failed_requests: [], error_responses: [], font_responses: [], mutations: [], websockets: [] }
       const context = await browser.newContext({ viewport: { width: state.width, height: state.height }, colorScheme: state.theme })
       const page = await context.newPage()
+      await recordCspViolations(page, outcome.csp_violations)
       page.setDefaultTimeout(8000)
       page.setDefaultNavigationTimeout(15000)
       let step = 'load'
@@ -365,6 +367,7 @@ export async function runPhase1Acceptance({ output } = {}) {
         }
         assert.deepEqual(outcome.console_error_classification.unexpected_application, [], 'No unexpected application console errors')
         assert.deepEqual(outcome.page_errors, [], 'No JavaScript page exceptions')
+        assert.deepEqual(outcome.csp_violations, [], 'No Content-Security-Policy violation')
         assert.deepEqual(outcome.mutations, [], 'Visual acceptance must not submit mutations')
         assert.deepEqual(outcome.websockets, [], 'Disabled synthetic transport must not connect')
         outcome.status = 'passed'

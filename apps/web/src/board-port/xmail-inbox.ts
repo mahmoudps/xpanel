@@ -1,5 +1,6 @@
 import { classicMailClientTemplates, CLASSIC_MAIL_FOLDER_STATE_CSS } from './mail-client-templates.ts'
 import { LOCALES, localeDirection, translator, type Locale } from '../i18n.ts'
+import { pageScript, pageScriptTag } from '../page-scripts.ts'
 import { DISPLAY_DATETIME_BINDING, escapeHtml, renderAsyncActionState, type AsyncActionBannerProps } from '../tokens.ts'
 import { renderLiveUpdatesIndicator, renderPageSearchButton, renderMobileNavToggle, renderMobileNavClose, renderMobileNavBackdrop } from '../shell.ts'
 import { formatAttachmentBytes, formatMailboxQuota, formatMailStamp } from './mail-truth.ts'
@@ -235,7 +236,7 @@ const readingInner = (card: MailCard, model: InboxModel): string => {
   return hooked.replace('data-mail-action="delete"', `data-mail-action="${action}"`).replace(`${ICONS.trash}${translator(model.locale)('Delete')}`, `${ICONS.trash}${label}`).replace('<span style="flex: 1 1 0"></span>', `${report}<span style="flex: 1 1 0"></span>`)
 }
 
-const INBOX_SCRIPT = `<script id="xmail-inbox-client">
+const INBOX_SOURCE = `
 (function () {
   var root = document.querySelector('[data-board-port="xmail-inbox"]')
   if (!root) return
@@ -857,7 +858,8 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
   // Product rows stay unread until an actual server read observes them as read.
   if (opened && opened.parentNode.style.display !== 'none' && root.getAttribute('data-product') !== 'true') markRead(opened)
 })()
-</script>`
+`
+const INBOX_SCRIPT = pageScriptTag(pageScript('xmail-inbox', INBOX_SOURCE), 'xmail-inbox-client')
 
 const classicBulk = (model: { activeFolder?: string; locale?: Locale; readOnly?: boolean }): string => {
   const folder = model.activeFolder ?? '', t = translator(model.locale ?? 'en'), button = (action: string, label: string): string => `<button type="button" class="xp-btn" data-mail-bulk-action="${action}" disabled>${escapeHtml(t(label))}</button>`

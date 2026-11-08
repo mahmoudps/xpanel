@@ -17,6 +17,7 @@ const { tools } = await import('../packages/catalog/src/index.ts')
 const { renderWebApp, serveStaticAsset } = await import('../apps/web/src/app.ts')
 const { createInitialLiveEventState } = await import('../apps/web/src/ws-client.ts')
 const { parseMarkup } = await import('../apps/web/src/themes/markup.ts')
+const { pageScriptBodies } = await import('../apps/web/src/page-scripts.ts')
 const { checkConformance, controllerContractsForRoute, loginContract, registeredThemeDocuments } = await import('../apps/web/src/themes/contract.ts')
 const { ROUTE_HOOKS: previousRoutes, SURFACE_HOOKS: previousSurfaces } = await import('../apps/web/src/themes/route-hooks.ts')
 const { defaultPlan } = await import('../packages/core/src/index.ts')
@@ -72,7 +73,8 @@ function controllerReferences(js) {
   return { names, pairs, ids }
 }
 
-const inlineScripts = html => [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map(m => m[1]).join('\n')
+// A page's own scripts: inline bodies and the same-origin page scripts it loads.
+const inlineScripts = html => [...[...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map(m => m[1]), ...pageScriptBodies(html)].join('\n')
 const sorted = values => [...values].sort()
 
 function templateContracts(nodes, scope) {

@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ThemeCatalogOverlay } from './theme-messages.ts'
+import { pageScript, pageScriptBodies, pageScriptTag } from './page-scripts.ts'
 import { CATALOG_LOCALE_DIR } from '@xpanel/catalog'
 import {
   LOCALES,
@@ -310,9 +311,9 @@ export function clientMessageKeys(script: string): readonly string[] {
   return result
 }
 
-/** Message keys used by the inline scripts of an HTML fragment. */
-export const inlineScriptMessageKeys = (html: string): string[] =>
-  [...html.matchAll(SCRIPT_BLOCK)].flatMap(match => clientMessageKeys(match[1] ?? ''))
+/** Message keys used by the scripts of an HTML fragment: inline bodies and the page scripts it loads. */
+export const scriptMessageKeys = (html: string): string[] =>
+  [...[...html.matchAll(SCRIPT_BLOCK)].map(match => match[1] ?? ''), ...pageScriptBodies(html)].flatMap(clientMessageKeys)
 
 function installClientI18n(messages: Record<string, string>, locale: string): void {
   const scope = globalThis as unknown as { xpI18n?: { messages: Record<string, string> }; xpT?: unknown; msgid?: unknown; msgctxt?: unknown }
@@ -338,7 +339,7 @@ const CLIENT_RUNTIME = `const parseMessage=${parseMessage.toString()};const comp
 
 const scriptJson = (value: unknown): string => JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 
-/** Inline script that installs the client translator with the messages the given keys need. */
+/** The client translator with the messages the given keys need: a JSON block and the cached runtime that installs it. */
 export function renderClientI18nScript(locale: Locale, keys: Iterable<string>, overlay?: ThemeCatalogOverlay): string {
   const messages = pickMessages(catalogFor(locale), keys)
   if (overlay) {
@@ -349,8 +350,11 @@ export function renderClientI18nScript(locale: Locale, keys: Iterable<string>, o
       messages[key] = value
     }
   }
-  return `<script id="xpanel-i18n">(()=>{${CLIENT_RUNTIME}(${scriptJson(messages)},${scriptJson(locale)})})()</script>`
+  return `<script type="application/json" id="xpanel-i18n-messages">${scriptJson({ locale, messages })}</script>${pageScriptTag(I18N_RUNTIME, 'xpanel-i18n')}`
 }
+// Reads the page's own message subset from the JSON block above it, so the page carries no inline script.
+const I18N_RUNTIME = pageScript('i18n-runtime', `(()=>{const page=JSON.parse(document.getElementById('xpanel-i18n-messages').textContent);${CLIENT_RUNTIME}(page.messages,page.locale)})();
+`)
 
 /**
  * Cached per-locale script with the whole UI catalog. It loads before the realtime client, so messages that

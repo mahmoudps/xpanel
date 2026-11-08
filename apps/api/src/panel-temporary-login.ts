@@ -11,6 +11,7 @@ import type { AuthenticatedCaller } from './auth.ts'
 import { sessionTokenHash } from './entry-points.ts'
 import { issueGateCookie, TEMPORARY_LOGIN_PATH } from './panel-gate.ts'
 import { cachedSecRecord } from './sec-panel-access.ts'
+import { DOCUMENT_CSP } from '../../web/src/content-security-policy.ts'
 import { readSecRaw, writeSecRecord } from './sec-workspace.ts'
 
 const MARK = 'temporary:'
@@ -100,7 +101,7 @@ export interface TemporaryLoginRouteDeps {
 }
 
 // no-referrer would turn the form's Origin into null, and the POST below requires the real one.
-const html = (status: number, body: string): Response => new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><body style="font-family:sans-serif;max-inline-size:32rem;margin:32px auto;padding-inline:16px">${body}</body>`, { status, headers: { ...PRIVATE, 'referrer-policy': 'same-origin', 'content-type': 'text/html; charset=utf-8' } })
+const html = (status: number, body: string): Response => new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><body style="font-family:sans-serif;max-inline-size:32rem;margin:32px auto;padding-inline:16px">${body}</body>`, { status, headers: { ...PRIVATE, 'referrer-policy': 'same-origin', 'content-security-policy': DOCUMENT_CSP, 'content-type': 'text/html; charset=utf-8' } })
 
 export function createTemporaryLoginRoutes(deps: TemporaryLoginRouteDeps) {
   const REFUSED = { revoked: 'LINK_REVOKED', used: 'LINK_USED', expired: 'LINK_EXPIRED' } as const

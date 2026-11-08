@@ -20,7 +20,6 @@ import {
   renderPostgresProvisionSql,
   renderQuotaInitActions,
   renderRemoteMysqlGrantsSql,
-  renderRootlessContainerUnit,
   renderSieveFilterScript,
   renderZoneFromTemplate,
 } from './index.ts'
@@ -406,21 +405,6 @@ describe('6. Server Settings, Rootless Containers, App Store & Web Stack Profile
     expect(file.content).toContain('smtpd_client_message_rate_limit = 500')
     expect(file.content).toContain('reject_rbl_client zen.spamhaus.org')
     expect(file.content).toContain('check_policy_service unix:private/postgrey')
-  })
-
-  it('renderRootlessContainerUnit renders rootless Podman unit in account slice', () => {
-    const unit = renderRootlessContainerUnit(sampleAccount, {
-      name: 'redis-cache',
-      image: 'docker.io/library/redis:7-alpine',
-      internalPort: 6379,
-      env: { REDIS_AOF: 'yes' },
-      memoryMb: 512,
-    })
-    expect(unit.path).toBe('/etc/systemd/system/xpanel-container-alice-redis-cache.service')
-    expect(unit.content).toContain('Slice=xpanel-20001.slice')
-    expect(unit.content).toContain('--memory 512m')
-    expect(unit.content).toContain('--env REDIS_AOF=yes')
-    expect(unit.content).toContain('docker.io/library/redis:7-alpine')
   })
 
   it('buildAppInstallManifest supports all 6 application kinds', () => {

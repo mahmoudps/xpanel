@@ -3,7 +3,7 @@
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
 import { Script } from 'node:vm'
 import { describe, expect, it } from 'vitest'
-import { renderWebApp } from './app.ts'
+import { renderWebApp, serveStaticAsset } from './app.ts'
 import { renderMailSurface } from './surfaces/xmail.ts'
 import { renderPanelSurface } from './surfaces/xpanel.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
@@ -489,13 +489,15 @@ describe('parsed native form admission', () => {
   })
 })
 describe('emitted browser JavaScript syntax', () => {
-  it('parses the complete emitted script rather than the TypeScript template source', () => {
+  it('parses the complete emitted script rather than the TypeScript template source', async () => {
     expect(() => new Script(BROWSER_REALTIME_SCRIPT, { filename: 'xpanel-realtime-client.js' })).not.toThrow()
     expect(() => new Script(LOGIN_CLIENT_SCRIPT, { filename: 'xpanel-login-client.js' })).not.toThrow()
     const html = renderWebApp({ surface: 'login' })
-    const emitted = /<script id="xpanel-login-client">([\s\S]*?)<\/script>/.exec(html)?.[1]
-    expect(emitted).toBeTruthy()
-    expect(() => new Script(emitted!, { filename: 'xpanel-emitted.js' })).not.toThrow()
+    const src = /<script id="xpanel-login-client" src="([^"]+)"><\/script>/.exec(html)?.[1]
+    expect(src).toMatch(/^\/assets\/login-client\.js\?v=[0-9a-f]{16}$/)
+    const emitted = await serveStaticAsset(new URL(src!, 'https://panel.example.test').pathname)!.text()
+    expect(emitted).toBe(LOGIN_CLIENT_SCRIPT)
+    expect(() => new Script(emitted, { filename: 'xpanel-emitted.js' })).not.toThrow()
   })
 })
 

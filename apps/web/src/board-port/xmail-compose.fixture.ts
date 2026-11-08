@@ -1,6 +1,7 @@
 // Board sample data for tests and the local fidelity script only.
 // Product code must not import this module.
 import type { Locale } from '../i18n.ts'
+import { inlinePageScripts } from '../page-scripts.ts'
 import { MONO, type FolderLink, type ComposeModel, renderCompose, xmailComposeFromProps } from './xmail-compose.ts'
 
 const FIXTURE_BODY = `<p style="margin: 0; max-width: 68ch">Hi Layla,</p><p style="margin: 0; max-width: 68ch">Thanks, the staging checkout looks good. Karim and I went through the test plan this morning and everything passed except two points:</p><ol style="margin: 0; padding-inline-start: 22px; max-width: 68ch; display: flex; flex-direction: column; gap: 4px"><li>On phones, the coupon field hides the <strong>Pay</strong> button while the keyboard is open.</li><li>The shipping estimate shows the price without VAT; it should include it.</li></ol><p style="margin: 0; max-width: 68ch">Once both are fixed, go ahead with the switch on 2026-10-26 at 07:00 UTC. Karim's annotated screenshot is attached.</p><p style="margin: 0; max-width: 68ch">Best,<br>Alice</p><p style="margin: 0; color: #475467; font-size: 13px">--<br>Alice Shop · alice-shop.com</p><blockquote style="margin: 4px 0 0; padding-inline-start: 14px; border-inline-start: 3px solid #D0D5DD; color: #475467; font-size: 13px; max-width: 68ch"><p style="margin: 0 0 6px">On 2026-10-22 13:48 UTC, Layla Haddad &lt;layla@nour.dev&gt; wrote:</p><p style="margin: 0">The new checkout is live on staging.alice-shop.com. It sits behind the Staging preview password you set up, so only the team can open it.</p></blockquote>`
@@ -75,7 +76,7 @@ const fixtureModel = (): ComposeModel => ({
   routeAttr: '',
 })
 
-const documentShell = (body: string): string => `<!doctype html>
+const documentShell = (body: string): string => inlinePageScripts(`<!doctype html>
 <html lang="en" dir="ltr">
 <head>
 <meta charset="utf-8">
@@ -92,7 +93,7 @@ a{color:#1D5BD6}a:hover{color:#1546A8}
 <body>
 ${body}
 </body>
-</html>`
+</html>`)
 
 
 export const renderFidelityDocument = (): string => documentShell(renderCompose(fixtureModel()))

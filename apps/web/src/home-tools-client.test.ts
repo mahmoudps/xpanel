@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { HOME_SCRIPT } from './board-port/xpanel-home.ts'
+import { HOME_SOURCE } from './board-port/xpanel-home.ts'
 import { HOME_TOOL_MATCHING_FUNCTIONS, HOME_TOOLS_CLIENT_BINDING, homeToolMatches, normalizeHomeToolQuery } from './home-tools-client.ts'
 
 const markup = `<main data-panel-home><label for="tool-filter">Tools</label><input id="tool-filter" type="search" data-home-filter><span id="tool-filter-count" role="status" data-rest="5 tools in 3 groups">5 tools in 3 groups</span><div data-tool-section>
@@ -200,7 +200,7 @@ describe('classic home shared matcher integration', () => {
     }
     document.body.innerHTML = '<div data-home-desktop dir="ltr"><input id="tool-filter"><input id="home-header-search"><span id="tool-filter-count" data-rest="2 tools in 1 group"></span><section data-tool-section><div data-tool-group data-size="2" data-group-label="Files" data-show="grid"><span data-group-count data-rest="2 tools"></span><a data-tool data-tool-keys="manager">Manager</a><a data-tool data-tool-keys="trash">Trash</a></div></section></div>'
     try {
-      new Function(HOME_SCRIPT.replace(/^<script>\s*/, '').replace(/\s*<\/script>$/, ''))()
+      new Function(HOME_SOURCE)()
       const input = document.querySelector<HTMLInputElement>('#tool-filter')!
       input.value = '  FILES '; input.dispatchEvent(new Event('input'))
       expect([...document.querySelectorAll<HTMLElement>('[data-tool]')].every(tool => !tool.hidden)).toBe(true)

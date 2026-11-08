@@ -11,6 +11,7 @@ import { renderWebApp, serveStaticAsset } from '../../apps/web/src/app.ts'
 import { composedXpanelRoutes as routes } from '../../apps/web/src/board-port/composed/all.ts'
 import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/source-snapshot.mjs'
 import { assertAppliedFont } from './applied-font-contract.mjs'
+import { injectTestScript } from './csp-violations.mjs'
 
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const plan = defaultPlan({ id: 'synthetic-plan', name: 'Standard', featureListId: 'synthetic-features' })
@@ -184,7 +185,7 @@ export async function runComposedAcceptance({ output, filter } = {}) {
           assert.equal(geometry.ascii_digits, true)
           assert.equal(geometry.mutations, 0)
           result.applied_font = await assertAppliedFont(page, '[data-composed-route] h1', locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
-          await page.addScriptTag({ content: axeSource })
+          await injectTestScript(page, axeSource)
           result.accessibility = await page.evaluate(async () => (await axe.run('[data-composed-route]', { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } })).violations.map(violation => ({ id: violation.id, impact: violation.impact, targets: violation.nodes.map(node => node.target) })))
           assert.deepEqual(result.accessibility, [])
           const region = page.locator('.xp-composed-scroll')

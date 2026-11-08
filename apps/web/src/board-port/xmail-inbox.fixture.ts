@@ -1,6 +1,7 @@
 // Board sample data for tests and the local fidelity script only.
 // Product code must not import this module.
-import { SOURCE_LOCALE, inlineScriptMessageKeys, localeDirection, renderClientI18nScript, type Locale } from '../i18n.ts'
+import { SOURCE_LOCALE, scriptMessageKeys, localeDirection, renderClientI18nScript, type Locale } from '../i18n.ts'
+import { inlinePageScripts } from '../page-scripts.ts'
 import { type FolderLink, type MailCard, type InboxModel, renderInbox, block, xmailInboxFromProps } from './xmail-inbox.ts'
 
 const FIXTURE_MESSAGES: MailCard[] = [
@@ -77,7 +78,7 @@ const fixtureModel = (): InboxModel => ({
 })
 
 
-const documentShell = (body: string, locale: Locale = SOURCE_LOCALE): string => `<!doctype html>
+const documentShell = (body: string, locale: Locale = SOURCE_LOCALE): string => inlinePageScripts(`<!doctype html>
 <html lang="${locale}" dir="${localeDirection(locale)}">
 <head>
 <meta charset="utf-8">
@@ -90,12 +91,12 @@ body{margin:0;background:#F5F6F8;color:#101828;font-family:'IBM Plex Sans',sans-
 a{color:#1D5BD6}a:hover{color:#1546A8}
 :focus-visible{outline:2px solid #1D5BD6;outline-offset:2px}
 </style>
-${renderClientI18nScript(locale, inlineScriptMessageKeys(body))}
+${renderClientI18nScript(locale, scriptMessageKeys(body))}
 </head>
 <body>
 ${body}
 </body>
-</html>`
+</html>`)
 
 export const renderFidelityDocument = (): string => documentShell(renderInbox(fixtureModel()))
 

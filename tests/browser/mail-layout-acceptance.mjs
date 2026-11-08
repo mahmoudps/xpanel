@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/source-snapshot.mjs'
 import { createVisualFixture } from './visual-fixture.mjs'
 import { assertAppliedFont } from './applied-font-contract.mjs'
+import { recordCspViolations } from './csp-violations.mjs'
 
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const states = ['en', 'ar'].flatMap(locale => ['light', 'dark'].flatMap(theme => [360, 768, 1440].flatMap(width => ['inbox', 'compose'].map(screen => ({
@@ -328,9 +329,10 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
   try {
     browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath(), timeout: 20000 })
     for (const state of selected) {
-      const outcome = { ...state, status: 'running', page_errors: [], console_errors: [], mutations: [], websockets: [] }
+      const outcome = { ...state, status: 'running', page_errors: [], console_errors: [], csp_violations: [], mutations: [], websockets: [] }
       const context = await browser.newContext({ viewport: { width: state.width, height: 900 }, colorScheme: state.theme, locale: state.locale, reducedMotion: 'reduce' })
       const page = await context.newPage()
+      await recordCspViolations(page, outcome.csp_violations)
       page.setDefaultTimeout(8000)
       await context.route('**/*', async route => {
         const method = route.request().method()
@@ -402,6 +404,7 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         outcome.unexpected_console = outcome.console_errors.filter(error => !/\/api\/auth\/me(?:\?|$)/.test(error.url))
         assert.deepEqual(outcome.unexpected_console, [])
         assert.deepEqual(outcome.page_errors, [])
+        assert.deepEqual(outcome.csp_violations, [], 'No Content-Security-Policy violation')
         assert.deepEqual(outcome.mutations, [], 'No delivery or other mutation request is attempted')
         assert.deepEqual(outcome.websockets, [])
         outcome.status = 'passed'

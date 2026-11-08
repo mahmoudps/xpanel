@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { controlPlaneUnitSettled, parseCgroupProcesses, parseControlPlaneUnitInventory, parseSystemctlJobs, parseSystemctlProperties, parseFileWorkerUnit, parseFileWorkerIncident, projectOwnedControlPlaneObservation, quiescentControlPlaneFailures, stopAndDrainOwnedControlPlaneUnits } from './lifecycle-services.mjs'
+import { controlPlaneUnitSettled, parseCgroupProcesses, parseControlPlaneUnitInventory, parseSystemctlJobs, parseSystemctlProperties, parseFileWorkerUnit, parseFileWorkerIncident, projectOwnedControlPlaneObservation, quiescentControlPlaneFailures, rejectUnknownUnits, stopAndDrainOwnedControlPlaneUnits } from './lifecycle-services.mjs'
 
 const properties = (unit = 'xpanel-api.service') => ({
   Id: unit, LoadState: 'loaded', ActiveState: 'active', SubState: 'running',
@@ -110,5 +110,32 @@ describe('control-plane quiescence decision', () => {
   })
   it.each(['activating', 'deactivating', 'active', 'reloading'])('refuses a %s unit', state => {
     expect(() => quiescentControlPlaneFailures(observation(stopped('xpanel-agent.service', state)))).toThrow('CONTROL_PLANE_NOT_QUIESCENT')
+  })
+})
+
+describe('unit inventory gate', () => {
+  const inventory = (...lines: string[]) => parseControlPlaneUnitInventory(lines.map(line => `${line} Description\n`).join(''))
+  const controlPlane = ['xpanel-api.service loaded active running', 'xpanel-agent.service loaded active running', 'xpanel-management-tls.service loaded inactive dead', 'xpanel-management-tls.timer loaded active waiting']
+  it('accepts the account and host units a release reconcile creates, as after the 0.1.24 to 0.1.37 upgrade', () => {
+    expect(() => rejectUnknownUnits(inventory(...controlPlane,
+      'xpanel-caldav-qa1.service loaded inactive dead', 'xpanel-caldav-qa1.socket loaded active listening', 'xpanel-caldav-qa2.service loaded active running', 'xpanel-caldav-qa2.socket loaded active listening',
+      'xpanel.slice loaded active active', 'xpanel-20000.slice loaded active active', 'xpanel-php-fpm-qa1-8.3.service loaded active running', 'xpanel-cron-qa1-2.timer loaded active waiting',
+      'xpanel-webdiskd-qa1-0123456789ab.socket loaded active listening', 'xpanel-redis-qa1.service loaded active running', 'xpanel-ctr-qa2-web.service loaded failed failed',
+      'xpanel-task-a1b2c3d4e5f6.timer loaded active waiting', 'xpanel-daemon-worker.service loaded active running', 'xpanel-ftp-anonymous-auth.service loaded inactive dead',
+      'xpanel-phpmyadmin-fpm.service loaded active running', 'xpanel-frps.service loaded inactive dead'))).not.toThrow()
+  })
+  it.each(['xpanel-metrics.service', 'xpanel-caldav-Qa1.service', 'xpanel-caldav-qa1.timer', 'xpanel-999.slice'])('refuses a loaded %s outside every registered grammar', unit => {
+    expect(() => rejectUnknownUnits(inventory(...controlPlane, `${unit} loaded active running`))).toThrow('UNKNOWN_CONTROL_PLANE_UNIT_REQUIRES_INSPECTION')
+    expect(() => rejectUnknownUnits(inventory(...controlPlane, `${unit} not-found inactive dead`))).not.toThrow()
+  })
+  it('accepts a coordinator only as the current one', () => {
+    expect(() => rejectUnknownUnits(inventory(...controlPlane, 'xpanel-lifecycle.service loaded active running'), 'xpanel-lifecycle.service')).not.toThrow()
+    expect(() => rejectUnknownUnits(inventory(...controlPlane, 'xpanel-lifecycle.service loaded active running'))).toThrow('UNKNOWN_CONTROL_PLANE_UNIT_REQUIRES_INSPECTION')
+    expect(() => rejectUnknownUnits(inventory(...controlPlane, 'xpanel-upgrade.service loaded inactive dead'), 'xpanel-lifecycle.service')).toThrow('UNKNOWN_CONTROL_PLANE_UNIT_REQUIRES_INSPECTION')
+  })
+  it('reads a host with hundreds of accounts, up to 4096 units', () => {
+    const accounts = Array.from({ length: 1000 }, (_, index) => `xpanel-caldav-u${index}.socket loaded active listening`)
+    expect(inventory(...controlPlane, ...accounts)).toHaveLength(1004)
+    expect(() => inventory(...Array.from({ length: 4097 }, (_, index) => `xpanel-${1000 + index}.slice loaded active active`))).toThrow('SERVICE_INVENTORY_INVALID')
   })
 })

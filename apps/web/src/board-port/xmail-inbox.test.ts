@@ -2,6 +2,7 @@
 import { formatMailStamp } from './mail-truth.ts'
 import {describe,expect,it} from 'vitest'
 import {renderInbox,xmailInboxFromProps} from './xmail-inbox.ts'
+import { inlinePageScripts } from '../page-scripts.ts'
 
 describe('shared Inbox renderer folder workspace',()=>{
   it('preserves default Inbox integration and query-folder links',()=>{const model=xmailInboxFromProps({mailbox:'owner@tenant.test',messages:[]});const html=renderInbox(model);expect(model.activeFolder).toBe('INBOX');expect(model.folderWorkspace).toBe(false);const doc=new DOMParser().parseFromString(html,'text/html');expect(doc.querySelector('[data-mail-folder-workspace]')).toBeNull();expect(doc.querySelector('#xmail-inbox-client')).not.toBeNull();expect(model.folders.find(f=>f.id==='Sent')?.href).toBe('/mail/inbox?folder=Sent')})
@@ -40,7 +41,7 @@ describe('reachable metadata datetime', () => {
     const fetched = { uid: 17, from: 'sender@example.test', to: mailbox, subject: 'Original fetched subject', receivedAt, body, unread: false, sizeBytes: 80, attachments: [], uidValidityObserved: true, uidValidity: 11 }
     const seed = { ...fetched, folder, preview: 'Pending preview', receivedAt: '2026-10-26T00:00:00.000Z', body: '', bodyPending: true }
     const calls: Array<{ method: string; path: string }> = []
-    document.body.innerHTML = renderInbox(xmailInboxFromProps({ locale, mailbox, activeFolder: folder, messages: [seed] }))
+    document.body.innerHTML = inlinePageScripts(renderInbox(xmailInboxFromProps({ locale, mailbox, activeFolder: folder, messages: [seed] })))
     ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = async (method: string, path: string) => { calls.push({ method, path }); return { mailbox, folder, message: fetched } }
     try {
       new Function(document.querySelector<HTMLScriptElement>('#xmail-inbox-client')!.textContent!)()
@@ -69,7 +70,7 @@ describe('reachable metadata datetime external sources', () => {
     const fetched = { uid: 17, from: 'sender@example.test', to: mailbox, subject: 'Original subject', receivedAt, body: 'Original body DTSTART:20261027T123456Z', unread: false, sizeBytes: 80, attachments: [], uidValidityObserved: true, uidValidity: 11 }
     const seed = { ...fetched, folder, preview: '', body: '', bodyPending: true }
     const calls: Array<{ method: string; path: string }> = []
-    document.body.innerHTML = renderInbox(xmailInboxFromProps({ locale, mailbox, activeFolder: folder, messages: [seed] }))
+    document.body.innerHTML = inlinePageScripts(renderInbox(xmailInboxFromProps({ locale, mailbox, activeFolder: folder, messages: [seed] })))
     ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = async (method: string, path: string) => { calls.push({ method, path }); return { mailbox, folder, message: fetched } }
     try {
       new Function(document.querySelector<HTMLScriptElement>('#xmail-inbox-client')!.textContent!)()
