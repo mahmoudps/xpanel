@@ -1,5 +1,5 @@
 import { fail, isUuid } from '@xpanel/core'
-import { AGENT_ROUTE_TIMEOUT_MS, type AgentApp } from '@xpanel/agent'
+import type { AgentApp } from '@xpanel/agent'
 import { assertProvisioningReply, canonicalProvisioningIdentity, type ProvisioningReconcilePort, type ProvisioningReconcileReply } from './account-provisioning-port.ts'
 
 /**
@@ -16,7 +16,8 @@ export function createAuthenticatedProvisioningPort(source: { fetch: AgentApp['f
       const principalId = request.authority.actor?.id
       if (!isUuid(principalId)) fail('UNAUTHENTICATED', 'an authenticated principal is required', { stateChanged: false })
       await context.assertAuthority()
-      const timeout = AbortSignal.timeout(AGENT_ROUTE_TIMEOUT_MS.get('/host/account-provisioning')!)
+      // No total deadline: a slow host is still working while the agent's keepalive arrives within the agent client's
+      // idle budget, and the lease signal ends the request when the job loses its lease.
       let reply: ProvisioningReconcileReply
       try {
         const response = await source.fetch(new Request('http://agent.local/host/account-provisioning', {
@@ -25,7 +26,7 @@ export function createAuthenticatedProvisioningPort(source: { fetch: AgentApp['f
             'x-xpanel-principal-id': principalId,
             'content-type': 'application/json',
           },
-          body: JSON.stringify(request), signal: AbortSignal.any([context.signal, timeout]),
+          body: JSON.stringify(request), signal: context.signal,
         }))
         if (!response.ok || !response.body) throw new Error('unacknowledged reply')
         const reader = response.body.getReader(), chunks: Uint8Array[] = []

@@ -2,7 +2,7 @@ import { withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admissi
 import { randomUUID } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
-import { canonicalIp, servedDocRoot, cronJobUnitId, effectivePlan, effectiveServerFtpSettings, effectiveServerRoles, effectiveServerSshSettings, fail, isXpanelError, MANAGEMENT_PUBLIC_PORTS, managementPortRules, natPublicAddresses, redirectionValues, refusePrefork, suspensionEffects } from '@xpanel/core'
+import { canonicalIp, servedDocRoot, cronJobUnitId, effectivePlan, effectiveServerFtpSettings, effectiveServerRoles, effectiveServerSshSettings, fail, isXpanelError, MANAGEMENT_PUBLIC_PORTS, managementPortRules, natPublicAddresses, redirectionValues, refusePrefork, suspensionEffects, unitFamily } from '@xpanel/core'
 import type {
   Account,
   ConfigTest,
@@ -1143,21 +1143,38 @@ const isMissingAtomicTemp = (err: unknown): boolean => {
   return err.message.includes('.tmp') || err.message.includes('.slice.d')
 }
 
+/** The service an xPanel socket starts on demand (Web Disk, calendars, app proxies): its family owns both units. */
+export const onDemandService = (unit: string): string | null => {
+  const base = /^(.+)\.(?:service|socket)$/.exec(unit)?.[1]
+  const family = base === undefined ? null : unitFamily(`${base}.socket`)
+  return family && family === unitFamily(`${base}.service`) ? `${base}.service` : null
+}
+
 /**
  * PowerDNS units on this host reject `systemctl reload`. `reload-or-restart`
  * restarts when the unit has no ExecReload. Other units keep their previous verb.
+ * Run after the daemon reload that applied the restored unit files.
  */
-export const rollbackReloadAction = (unit: string): HostAction => {
+export const rollbackReloadActions = (unit: string): HostAction[] => {
   if (unit === 'pdns.service' || unit === 'pdns') {
-    return { kind: 'exec', argv: ['/usr/bin/systemctl', 'reload-or-restart', unit] }
+    return [{ kind: 'exec', argv: ['/usr/bin/systemctl', 'reload-or-restart', unit] }]
   }
   // sshd exits when a reload cannot bind its port: the restored file needs a daemon started again, not signalled.
-  if (unit === 'ssh' || unit === 'sshd') return { kind: 'systemd', verb: 'restart', unit }
+  if (unit === 'ssh' || unit === 'sshd') return [{ kind: 'systemd', verb: 'restart', unit }]
   // Slice units have no reload job; restoring their file needs only a daemon reload.
   // `systemctl reload xpanel-<uid>.slice` fails and would strand the rollback.
-  if (unit.endsWith('.slice')) return { kind: 'systemd-daemon-reload' }
-  const verb = /^xpanel-(?:php-fpm-|daemon-|frp[sc]\.)/.test(unit) ? 'restart' : unit.endsWith('.timer') ? 'start' : 'reload'
-  return { kind: 'systemd', verb, unit }
+  if (unit.endsWith('.slice')) return [{ kind: 'systemd-daemon-reload' }]
+  // Sockets and the services they start have no reload job ("Job type reload is not applicable"). A socket stops
+  // with its service and starts again on its restored definition; the stopped service starts on the next request.
+  const service = onDemandService(unit)
+  if (service === unit) return [{ kind: 'systemd', verb: 'stop', unit }]
+  if (unit.endsWith('.socket')) {
+    return service ? [{ kind: 'systemd', verb: 'stop', unit: service }, { kind: 'systemd', verb: 'stop', unit }, { kind: 'systemd', verb: 'start', unit }]
+      : [{ kind: 'systemd', verb: 'restart', unit }]
+  }
+  // xPanel daemons other than PHP-FPM have no ExecReload either; a restart applies the restored definition.
+  const verb = /^xpanel-(?:php-fpm-|daemon-|frp[sc]\.|app-|ctr-|redis-|memcached-)/.test(unit) ? 'restart' : unit.endsWith('.timer') ? 'start' : 'reload'
+  return [{ kind: 'systemd', verb, unit }]
 }
 
 class StageFailureError extends Error {
@@ -1456,7 +1473,13 @@ export class HostReconciler {
             .map(entry => entry.path.slice(restoredZoneDir.length + 1, -'.zone'.length))
           for (const action of powerDnsReloadActions(restoredZones)) await this.deps.executor.runAction(action)
         } else {
-          await this.deps.executor.runAction(rollbackReloadAction(unit))
+          const actions = rollbackReloadActions(unit)
+          for (const action of actions) await this.deps.executor.runAction(action)
+          // An on-demand service stays stopped until its socket starts it; it has no health to probe.
+          if (actions.every(action => action.kind === 'systemd' && action.verb === 'stop')) {
+            stoppedNewUnits.push(unit)
+            continue
+          }
         }
         reloadedUnits.push(unit)
       }

@@ -71,8 +71,11 @@ export interface ProvisioningJobView {
 export interface AccountProvisioningReadPorts {
   getPrincipal(id: string): Promise<ProvisioningPrincipalView | null>
   getDurableJob(id: string): Promise<ProvisioningJobView | null>
-  getAccount(id: string): Promise<Account | null>
+  /** The username is a lookup hint; the store still binds the account by its id. */
+  getAccount(id: string, username: string): Promise<Account | null>
   readSnapshot(): Promise<{ readonly checksum: string; readonly revision?: number }>
+  /** The committed desired-state revision and writer fence: every state write changes one of them. */
+  readStateAuthority(): Promise<{ readonly revision: number; readonly fencingToken: number }>
   getDnsZone(name: string): Promise<unknown>
   getPlan(id: string): Promise<Plan | null>
   getReseller(id: string): Promise<Reseller | null>
@@ -165,7 +168,8 @@ export async function handleAccountProvisioning(input: AccountProvisioningHandle
   if (url.search) closed('VALIDATION', 'account provisioning does not accept query selectors')
   if (input.request.signal.aborted) closed('PRECONDITION_FAILED', 'account provisioning was cancelled before host effects')
   const request = parseProvisioningReconcileRequest(await readBody(input.request))
-  const loaded = await bind(input.ports, principalId, request)
+  const source: VerifiedSource = { marker: null }
+  const loaded = await bind(input.ports, principalId, request, source)
   const flight = `${loaded.job.id}:${loaded.job.fencingToken}`
   if (activeHostEffects.has(flight)) {
     fail('CONFLICT', 'account provisioning host execution is already bound to this fence', { stateChanged: false })
@@ -174,7 +178,7 @@ export async function handleAccountProvisioning(input: AccountProvisioningHandle
   const assertAuthority = async (): Promise<void> => {
     let current: BoundProvisioning
     try {
-      current = await bind(input.ports, principalId, request)
+      current = await bind(input.ports, principalId, request, source)
       await bindPreparation(input.ports, runtime, current, request)
     } catch (error) {
       if (started && isXpanelError(error)) {
@@ -232,7 +236,10 @@ interface BoundProvisioning {
   readonly snapshotChecksum: string
 }
 
-const bind = async (ports: AccountProvisioningReadPorts, principalId: string, request: ProvisioningReconcileRequest): Promise<BoundProvisioning> => {
+/** The state authority at which this request's full desired-state snapshot last matched its claim. */
+interface VerifiedSource { marker: string | null }
+
+const bind = async (ports: AccountProvisioningReadPorts, principalId: string, request: ProvisioningReconcileRequest, source: VerifiedSource): Promise<BoundProvisioning> => {
   const principal = await ports.getPrincipal(principalId)
   if (!principal || principal.disabled || principal.id !== principalId) closed('UNAUTHENTICATED', 'an enabled authenticated principal is required')
   const claim = request.authority.actor
@@ -243,7 +250,7 @@ const bind = async (ports: AccountProvisioningReadPorts, principalId: string, re
   if (principal.kind !== 'root' && principal.kind !== 'reseller') closed('FORBIDDEN', 'account provisioning requires a privileged actor')
   const privilegedPrincipal = { id: principal.id, kind: principal.kind, username: principal.username, disabled: principal.disabled }
   const claimed = request.authority.account
-  const account = await ports.getAccount(claimed.id)
+  const account = await ports.getAccount(claimed.id, claimed.username)
   if (!account) closed('NOT_FOUND', 'provisioning account was not found')
   if (account.status !== 'active') closed('FORBIDDEN', 'account is not active')
   if (account.id !== claimed.id || account.username !== claimed.username || account.ownerId !== claimed.ownerId
@@ -255,10 +262,19 @@ const bind = async (ports: AccountProvisioningReadPorts, principalId: string, re
     if (account.ownerId !== principal.id) closed('FORBIDDEN', 'account belongs to another reseller')
     assertAcl({ id: principal.id, kind: 'reseller', username: principal.username }, await ports.getReseller(principal.id), 'create-account')
   }
-  const snapshot = await ports.readSnapshot()
   const desired = request.authority.desired
-  if (snapshot.revision !== desired.revision || snapshot.checksum !== desired.checksum) {
-    closed('CONFLICT', 'the saved source revision does not match the provisioning request')
+  // Authority is checked around every host primitive. A full snapshot read each time made one account
+  // quadratic in the number of accounts; an unchanged revision and fence is the snapshot already verified.
+  const before = await ports.readStateAuthority()
+  const marker = `${before.revision}:${before.fencingToken}`
+  if (before.revision !== desired.revision) closed('CONFLICT', 'the saved source revision does not match the provisioning request')
+  if (source.marker !== marker) {
+    const snapshot = await ports.readSnapshot()
+    if (snapshot.revision !== desired.revision || snapshot.checksum !== desired.checksum) {
+      closed('CONFLICT', 'the saved source revision does not match the provisioning request')
+    }
+    const after = await ports.readStateAuthority()
+    source.marker = after.revision === before.revision && after.fencingToken === before.fencingToken ? marker : null
   }
   const job = await ports.getDurableJob(request.authority.operation.id)
   if (!job || job.kind !== 'account.provision' || job.status !== 'running' || job.cancelRequested || job.needsAttention) {

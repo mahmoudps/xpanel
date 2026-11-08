@@ -22,7 +22,7 @@ export interface ConfigurationRepairPorts {
   removeFile: (path: string) => Promise<void>
   /** Every reviewed server configuration test; true only when all pass. */
   runTests: () => Promise<boolean>
-  /** executor.runAction(rollbackReloadAction(unit)) followed by the reconciler unit health check. */
+  /** executor.runAction over rollbackReloadActions(unit), then the reconciler unit health check. */
   reloadUnit: (unit: string) => Promise<boolean>
   /** Root-only directory for durable preimage records (0700). */
   recoveryDir: string

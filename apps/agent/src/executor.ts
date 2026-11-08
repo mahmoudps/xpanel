@@ -271,6 +271,8 @@ export class FakeHostExecutor implements AgentExecutor {
       case 'systemd-daemon-reload':
         return
       case 'systemd': {
+        // As systemd: a socket unit has no reload job.
+        if (action.verb === 'reload' && action.unit.endsWith('.socket')) fail('CONFIG_TEST_FAILED', `systemctl reload ${action.unit} failed: Job type reload is not applicable for unit ${action.unit}.`)
         const cur = this.units.get(action.unit) ?? { enabled: false, active: false, properties: {} }
         if (action.verb === 'enable') cur.enabled = true
         else if (action.verb === 'disable') cur.enabled = false
