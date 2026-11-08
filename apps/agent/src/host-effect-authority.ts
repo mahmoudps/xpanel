@@ -101,5 +101,14 @@ export function authorizedHostEffect<T>(executor: AgentExecutor, work: () => Pro
   return tracked
 }
 
+/** Refusal reason of an admitted operation stopped before any host primitive started: nothing to verify, retryable. */
+export const HOST_EFFECT_NOT_STARTED = 'host_effect_not_started'
+
+/** Whether an admitted host primitive started in this executor's context; null outside an admitted context. */
+export const hostEffectsStarted = (executor: AgentExecutor): boolean | null => {
+  const current = admitted.getStore()
+  return current?.executor === executor ? current.changed : null
+}
+
 /** Operator recovery must acquire its own admission, outside an expired request context. */
 export const hasHostEffectAuthority = (executor: AgentExecutor): boolean => admitted.getStore()?.executor === executor

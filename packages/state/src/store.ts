@@ -332,6 +332,11 @@ export class StateStore {
     return this.mutex.run(() => this.runOperation(() => this.writerLock.readUnderRecoveryLock(read)))
   }
 
+  /** Background writes (backgroundStateWrite) defer while this probe reports a live host operation. */
+  registerHostOperationProbe(probe: () => Promise<boolean>): void {
+    this.writerLock.registerHostOperationProbe(probe)
+  }
+
   setHooks(hooks: StateStoreHooks): void {
     this.hooks = hooks
   }

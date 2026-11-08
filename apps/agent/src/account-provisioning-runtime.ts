@@ -1,11 +1,11 @@
 import { fail, isXpanelError, type Account, type MfaRuntimePolicy } from '@xpanel/core'
-import { getDurableJob, latestActive, type Db } from '@xpanel/db'
+import { getDurableJob, getGeneration, latestActive, type Db } from '@xpanel/db'
 import { assertProvisioningReply, canonicalProvisioningIdentity, parseProvisioningCheckpointObservation, parseProvisioningReconcileRequest, type AccountExecutionObservation, type ProvisioningReconcileRequest, type ProvisioningReconcileReply } from '../../../packages/core/src/account-provisioning-contract.ts'
 import { assertProvisioningAuthorization, type ProvisioningAuthorizationReadPorts } from './account-provisioning-authorization.ts'
 import type { AgentAccountProvisioningRuntime } from './account-provisioning-handler.ts'
 import { AccountProvisioningPreparationReader } from './account-provisioning-preparation.ts'
 import { LinuxHostExecutor } from './executor.ts'
-import { assertHostEffectAuthority, withHostEffectAuthority, type HostEffectAuthority } from './host-effect-authority.ts'
+import { assertHostEffectAuthority, HOST_EFFECT_NOT_STARTED, withHostEffectAuthority, type HostEffectAuthority } from './host-effect-authority.ts'
 import type { HostReconciler, ReconcileResult } from './reconciler.ts'
 
 type Manifest = NonNullable<Awaited<ReturnType<HostReconciler['journal']['readManifest']>>>
@@ -35,6 +35,19 @@ export interface AccountProvisioningRuntimeOptions {
   readonly policy: MfaRuntimePolicy
   /** Only trusted startup code can supply an independently qualified native observer. */
   readonly observer?: AccountProvisioningObservationProvider
+}
+
+/**
+ * The reconciler proved that no host primitive started (reconciler.ts) and failed its generation: a known failure
+ * without an effect. The API records it as such, so the same request may run again without operator recovery.
+ */
+export async function noEffectFailure(db: Db, request: ProvisioningReconcileRequest, error: unknown): Promise<ProvisioningReconcileReply<ReconcileResult> | null> {
+  if (!isXpanelError(error) || error.detail.reason !== HOST_EFFECT_NOT_STARTED || error.detail.stateChanged !== false) return null
+  const generation = await getGeneration(db, Number(error.detail.generationId))
+  if (!generation || generation.status !== 'failed') return null
+  const failed = { binding: request.binding, outcome: 'known' as const, reconciliation: { status: 'failed' as const, generation, failedTest: 'host-operation-authority', error: error.message, stateChanged: false } }
+  assertProvisioningReply(request, failed)
+  return failed
 }
 
 const unavailable = (): never => fail('SERVICE_UNAVAILABLE', 'account provisioning requires an independent native workload observer', {
@@ -95,8 +108,14 @@ export function createAccountProvisioningRuntime(options: AccountProvisioningRun
             execution: saved.execution })
         } else {
           attempted = true
-          reconciliation = await options.reconciler.reconcile({ actor: input.actor.kind + ':' + input.actor.username,
-            scope: input.scope, expectedState: { revision: request.authority.desired.revision, checksum: request.authority.desired.checksum }, effectAuthority: authority })
+          try {
+            reconciliation = await options.reconciler.reconcile({ actor: input.actor.kind + ':' + input.actor.username,
+              scope: input.scope, expectedState: { revision: request.authority.desired.revision, checksum: request.authority.desired.checksum }, effectAuthority: authority })
+          } catch (error) {
+            const failed = await noEffectFailure(options.db, request, error)
+            if (failed) return failed
+            throw error
+          }
         }
         await authority.assertAuthority()
         if (reconciliation.status === 'failed') {

@@ -15,7 +15,7 @@ import { parseWebStatsView, type WebStatsView } from '../../web/src/models/web-s
 import { publicContactEmail } from '../../web/src/display-name.ts'
 import { isOfferedLocale, requestLocale, type Locale } from '../../web/src/i18n.ts'
 import type { WebAppRenderState } from '../../web/src/app.ts'
-import { assertNoActiveDatabaseTransaction, createDb, getMailboxSession, initializeOperationalMetadata, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, syncAccountContactIndex, type AuditQuery, type Db } from '@xpanel/db'
+import { assertNoActiveDatabaseTransaction, createDb, getMailboxSession, hostOperationInFlight, initializeOperationalMetadata, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, syncAccountContactIndex, type AuditQuery, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { resellerPolicy, StateStore } from '@xpanel/state'
 import { protectInstalledStateParent } from '../../../packages/state/src/ownership.ts'
@@ -1195,6 +1195,7 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
     })
     const store = new StateStore(stateDir)
     store.registerAccountContactIndexRecovery(account => syncAccountContactIndex(handle.db, account))
+    store.registerHostOperationProbe(() => hostOperationInFlight(handle.db))
     await withLifecycleWriterAdmission(async () => {
       assertNoActiveDatabaseTransaction()
       await store.getWriterLock().waitForUnlocked()

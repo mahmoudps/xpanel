@@ -344,6 +344,15 @@ export const listJobs = async (
   return rows.map(fromRow)
 }
 
+/** A running operation bound to a desired-state source revision under a live lease: an account provisioning or a job with a target revision. */
+export const hostOperationInFlight = async (db: Db): Promise<boolean> => {
+  for (const job of await listJobs(db, { status: 'running', limit: 500 })) {
+    const held = await getDurableJob(db, job.id)
+    if (held && (held.kind === 'account.provision' || held.targetRevision !== null) && held.leaseExpiresAt && Date.parse(held.leaseExpiresAt) > Date.now()) return true
+  }
+  return false
+}
+
 export interface EnqueueDurableJobInput {
   id?: Id
   kind: string

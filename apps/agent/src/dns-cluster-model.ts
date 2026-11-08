@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { canonicalIp, fail, validateDomainName } from '@xpanel/core'
 import type { DnsRecord } from '@xpanel/core'
-import type { DnsZoneState, StateStore } from '@xpanel/state'
+import { backgroundStateWrite, type DnsZoneState, type StateStore } from '@xpanel/state'
 import { services } from '@xpanel/render'
 import { secSerialBehind } from './sec-dns-cluster.ts'
 
@@ -150,7 +150,7 @@ export async function applyDnsZoneCopy(store: Pick<StateStore, 'getDnsZone' | 's
   const next: DnsZoneState = { id: held?.id ?? input.id, accountId: null, name: copy.zone, serial: copy.serial, records: copy.records.map(record => ({ ...record, id: input.recordId() })), replica: { peer, digest: copy.digest, at: input.at } }
   const stop = new Error('dns_cluster_zone_decided')
   try {
-    await store.saveDnsZone(next, { dnsGuard: async current => { decision = decideDnsZone(current, incoming, input.force); if (decision.action !== 'write') throw stop } })
+    await backgroundStateWrite(() => store.saveDnsZone(next, { dnsGuard: async current => { decision = decideDnsZone(current, incoming, input.force); if (decision.action !== 'write') throw stop } }))
   } catch (error) { if (error !== stop) throw error }
   return decision
 }
@@ -159,7 +159,7 @@ export async function removeDnsZoneCopy(store: Pick<StateStore, 'getDnsZone' | '
   let decision = decideDnsZoneRemoval(await store.getDnsZone(zone), peer)
   if (decision.action !== 'write') return decision
   const stop = new Error('dns_cluster_zone_decided')
-  try { await store.deleteDnsZone(zone, { dnsGuard: async current => { decision = decideDnsZoneRemoval(current, peer); if (decision.action !== 'write') throw stop } }) }
+  try { await backgroundStateWrite(() => store.deleteDnsZone(zone, { dnsGuard: async current => { decision = decideDnsZoneRemoval(current, peer); if (decision.action !== 'write') throw stop } })) }
   catch (error) { if (error !== stop) throw error }
   return decision
 }

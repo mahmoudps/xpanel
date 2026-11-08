@@ -32,10 +32,10 @@ import type { ConfigGeneration, Db } from '@xpanel/db'
 import { edge, extended, services, system } from '@xpanel/render'
 import { siteQuotaActions } from './site-quota.ts'
 import type { StateSnapshot, StateStore } from '@xpanel/state'
-import { assertGenerationRollbackPreconditions, firewallPolicy, generationSourceIsLinked, isStateDirectoryDurabilityError, parseGenerationRollbackRequest, withGenerationReconciliationLease } from '@xpanel/state'
+import { assertGenerationRollbackPreconditions, backgroundStateWrite, firewallPolicy, generationSourceIsLinked, isStateDirectoryDurabilityError, parseGenerationRollbackRequest, withGenerationReconciliationLease } from '@xpanel/state'
 import type { GenerationRollbackRequest } from '@xpanel/state'
 import type { AgentExecutor } from './executor.ts'
-import { assertHostEffectAuthority, withHostEffectAuthority, withoutHostEffectAuthority, type HostEffectAuthority } from './host-effect-authority.ts'
+import { assertHostEffectAuthority, HOST_EFFECT_NOT_STARTED, hostEffectsStarted, withHostEffectAuthority, withoutHostEffectAuthority, type HostEffectAuthority } from './host-effect-authority.ts'
 import { applyPostfixLocalDelivery, localMailNeedsUpdate, retirePostfixLocalDelivery } from './services/local-mail.ts'
 import { ensureOpenDkimSigning, mailAuthZoneAdditions, type OpenDkimSigning } from './services/opendkim-live.ts'
 import { removedMaildirPaths } from './services/mail.ts'
@@ -1821,7 +1821,7 @@ export class HostReconciler {
       if (!interfaces) return
       const bound = new Set(interfaces.flatMap(item => item.addresses.map(address => canonicalIp(address.address).address)))
       const holds = releasableHolds(pool, snapshot, bound)
-      if (holds.length) await this.deps.store.clearIpReleasing(holds)
+      if (holds.length) await backgroundStateWrite(() => this.deps.store.clearIpReleasing(holds))
     } catch (error) {
       console.error('xpanel-agent IP release check failed:', error instanceof Error ? error.message.split('\n')[0]!.slice(0, 300) : 'unexpected failure')
     }
@@ -2569,6 +2569,18 @@ export class HostReconciler {
     } catch (err) {
       if (err instanceof SimulatedProcessCrashWrapper) {
         throw err.originalError
+      }
+      // An admitted operation whose authority stopped it before any host primitive started applied nothing:
+      // the journaled action never ran, so the generation fails cleanly and the next reconcile proceeds.
+      if (journalRecord.phase === 'test' && hasUnverifiedPreActions(journalRecord) && hostEffectsStarted(this.deps.executor) === false) {
+        delete journalRecord.pendingPreAction
+        journalRecord.preActionsNeedVerification = false
+        journalRecord.phase = 'failed'
+        journalRecord.error = `stopped before any host effect: ${err instanceof Error ? err.message : String(err)}`.slice(0, 2000)
+        await this.journal.cleanupStagingDir(pendingGen.id)
+        await this.journal.saveJournal(journalRecord)
+        await markFailed(this.deps.db, pendingGen.id, journalRecord.error)
+        return fail('PRECONDITION_FAILED', journalRecord.error, { generationId: pendingGen.id, stateChanged: false, reason: HOST_EFFECT_NOT_STARTED })
       }
       if (journalRecord.phase === 'test' && hasUnverifiedPreActions(journalRecord)) {
         journalRecord.phase = 'needs_attention'

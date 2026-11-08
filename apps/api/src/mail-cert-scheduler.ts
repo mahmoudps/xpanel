@@ -1,6 +1,6 @@
 import { agentCallerHeaders } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
-import { appendAudit, findPrincipalByUsername, listAudit } from '@xpanel/db'
+import { appendAudit, findPrincipalByUsername, hostOperationInFlight, listAudit } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
 import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
 import type { StateStore } from '@xpanel/state'
@@ -112,7 +112,7 @@ export function startMailCertScheduler(input: MailCertInput): { stop: () => Prom
     const audit = async (entry: { action: string; target: string; outcome: 'ok' | 'failed'; detail: Record<string, unknown> }, actor: string): Promise<void> => { await appendAudit(input.db, { actor, ...entry }) }
     const delivery = { store: input.store, email: transports.email }
     if (now.getTime() - lastForwardRenewal >= FORWARD_RENEWAL_INTERVAL_MS) { lastForwardRenewal = now.getTime(); await part('forward-certificates', () => renewForwardCertificates(input.store, (path, options) => call(path, options), now)) }
-    await part('autossl', () => runAutoSslTick({ store: input.store, call, seed: transports.serverName,
+    await part('autossl', () => runAutoSslTick({ store: input.store, call, seed: transports.serverName, hostOperation: () => hostOperationInFlight(input.db),
       ...(input.caa ? { caa: input.caa } : {}), ...(input.resolves ? { resolves: input.resolves } : {}),
       reconcile: async () => { const response = await call('/state/apply', { method: 'POST', body: { force: false } }), body = await response.json().catch(() => null) as { status?: string } | null; return response.ok && ['applied', 'noop'].includes(String(body?.status)) },
       audit: entry => audit(entry, 'system:autossl'),
