@@ -1,5 +1,6 @@
 import type { DocumentProps, ThemeSurface } from '../contract.ts'
 import { createV2Stylesheet, type V2Stylesheet } from './stylesheet.ts'
+import { V2_PHONE_TABLE_ROWS_CSS } from './base.ts'
 import { V2_PANEL_HOME_CSS } from './pages/xpanel/home.ts'
 import { V2_PANEL_RESOURCES_CSS } from './pages/xpanel/resources.ts'
 import { EMAIL_ACCOUNTS_CSS } from './pages/xpanel/email/accounts.ts'
@@ -52,8 +53,11 @@ export interface V2RouteStylesheet {
   readonly dependencies: readonly Readonly<V2Stylesheet>[]
 }
 
-const page = (surface: ThemeSurface, name: string, routes: readonly string[], css: string | readonly string[], dependencies: readonly Readonly<V2Stylesheet>[] = []): Readonly<V2RouteStylesheet> =>
-  Object.freeze({ surface, routes: Object.freeze([...routes]), stylesheet: createV2Stylesheet(name, typeof css === 'string' ? [css] : css), dependencies: Object.freeze([...dependencies]) })
+// A page stylesheet also carries the phone table rows, which stay out of the shared foundation every document loads.
+const page = (surface: ThemeSurface, name: string, routes: readonly string[], css: string | readonly string[], dependencies: readonly Readonly<V2Stylesheet>[] = [], phoneRows = true): Readonly<V2RouteStylesheet> =>
+  Object.freeze({ surface, routes: Object.freeze([...routes]), stylesheet: createV2Stylesheet(name, [...(typeof css === 'string' ? [css] : css), ...(phoneRows ? [V2_PHONE_TABLE_ROWS_CSS] : [])]), dependencies: Object.freeze([...dependencies]) })
+/** A supplement loads beside its page stylesheet, which already carries the phone rows. */
+const supplement = (surface: ThemeSurface, name: string, routes: readonly string[], css: string | readonly string[]): Readonly<V2RouteStylesheet> => page(surface, name, routes, css, [], false)
 
 const mailFolderStylesheet = page('xmail', 'mail-workspace', ['/mail/inbox', '/mail/sent', '/mail/drafts', '/mail/trash', '/mail/compose'], V2_MAIL_CSS)
 const panelSettingsStylesheet = page('xpanel', 'panel-settings', [
@@ -76,17 +80,17 @@ export const v2ViewStylesheets = Object.freeze({
 
 /** Shared dynamic fragments load only where the exact selected document owns those fragments. */
 export const v2SupplementalStylesheets: readonly Readonly<V2RouteStylesheet>[] = Object.freeze([
-  page('xwhm', 'whm-server-ops', WHM_SERVER_OPS_ROUTES, WHM_SERVER_OPS_CSS),
-  page('xwhm', 'whm-host-tools', WHM_HOST_TOOLS_ROUTES, WHM_HOST_TOOLS_CSS),
-  page('xwhm', 'whm-web-server', ['/whm/services/web'], WHM_WEB_SERVER_CSS),
-  page('xwhm', 'whm-svc-panels', WHM_SVC_ROUTES, WHM_SVC_CSS),
-  page('xwhm', 'whm-services', ['/whm/services', '/whm/services/more'], WHM_SERVICES_CSS),
-  page('xpanel', 'panel-virus-scan', ['/security/virus-scanner'], PANEL_UTILITY_CLIENT_CSS),
-  page('xwhm', 'whm-diagnostics', [
+  supplement('xwhm', 'whm-server-ops', WHM_SERVER_OPS_ROUTES, WHM_SERVER_OPS_CSS),
+  supplement('xwhm', 'whm-host-tools', WHM_HOST_TOOLS_ROUTES, WHM_HOST_TOOLS_CSS),
+  supplement('xwhm', 'whm-web-server', ['/whm/services/web'], WHM_WEB_SERVER_CSS),
+  supplement('xwhm', 'whm-svc-panels', WHM_SVC_ROUTES, WHM_SVC_CSS),
+  supplement('xwhm', 'whm-services', ['/whm/services', '/whm/services/more'], WHM_SERVICES_CSS),
+  supplement('xpanel', 'panel-virus-scan', ['/security/virus-scanner'], PANEL_UTILITY_CLIENT_CSS),
+  supplement('xwhm', 'whm-diagnostics', [
     '/whm/monitoring/health', '/whm/monitoring/limits', '/whm/monitoring/alerts',
     '/whm/monitoring/repair', '/whm/accounts/health',
   ], WHM_DIAGNOSTIC_CLIENT_CSS),
-  page('xwhm', 'whm-account-admin', ['/whm', '/whm/plans/enhancements', '/whm/security/isolation', '/whm/panel/languages'], WHM_ACCOUNT_TOOLS_CSS),
+  supplement('xwhm', 'whm-account-admin', ['/whm', '/whm/plans/enhancements', '/whm/security/isolation', '/whm/panel/languages'], WHM_ACCOUNT_TOOLS_CSS),
 ])
 
 /** Explicit renderer coverage. A catalog alias alone does not establish an implemented page. */

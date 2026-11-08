@@ -4805,24 +4805,6 @@
       "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
     },
     {
-      "method": "POST",
-      "path": "/api/accounts/:username/shell",
-      "surface": "api",
-      "resource": "shell",
-      "requiredScope": "shell:write",
-      "resellerAcl": "edit-account",
-      "featureEntitlement": [
-        "ssh-access"
-      ],
-      "ownershipSource": "store.accounts(username -> id, ownerId)",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
-    },
-    {
       "method": "GET",
       "path": "/api/accounts",
       "surface": "api",
@@ -8754,39 +8736,41 @@
     },
     {
       "method": "GET",
-      "path": "/api/web-features/:account/hotlink-protection",
+      "path": "/api/domains/:domainId/web-directives/hotlink",
       "surface": "api",
       "resource": "files",
       "requiredScope": "files:read",
-      "resellerAcl": "edit-account",
+      "resellerAcl": "list-accounts",
       "featureEntitlement": [
+        "aapanel-url-rewrite",
         "hotlink-protection"
       ],
-      "ownershipSource": "store.accounts(:account)",
+      "ownershipSource": "store.domains(:domainId) -> store.accounts(domain.accountId)",
       "allowedPrincipals": [
         "root",
         "reseller",
         "user"
       ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/web-directives-workspace.ts (assertCanAccessAccount, assertAccountFeatures)"
     },
     {
       "method": "PUT",
-      "path": "/api/web-features/:account/hotlink-protection",
+      "path": "/api/domains/:domainId/web-directives/hotlink",
       "surface": "api",
       "resource": "files",
       "requiredScope": "files:write",
       "resellerAcl": "edit-account",
       "featureEntitlement": [
+        "aapanel-url-rewrite",
         "hotlink-protection"
       ],
-      "ownershipSource": "store.accounts(:account)",
+      "ownershipSource": "store.domains(:domainId) -> store.accounts(domain.accountId)",
       "allowedPrincipals": [
         "root",
         "reseller",
         "user"
       ],
-      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + assertAccountAuthorized"
+      "enforcementPoint": "apps/api/src/authorization.ts:assertRequestAuthorized + apps/api/src/web-directives-workspace.ts (assertCanAccessAccount, assertAccountFeatures)"
     },
     {
       "method": "GET",
@@ -9403,24 +9387,6 @@
       "resellerAcl": null,
       "featureEntitlement": [],
       "ownershipSource": "store.domains(:domainId).accountId -> assertAccountCaller",
-      "allowedPrincipals": [
-        "root",
-        "reseller",
-        "user"
-      ],
-      "enforcementPoint": "apps/agent/src/server.ts:authenticateService + authenticateCaller + assertAccountCaller"
-    },
-    {
-      "method": "POST",
-      "path": "/accounts/:username/shell",
-      "surface": "agent",
-      "resource": "agent.shell",
-      "requiredScope": "x-xpanel-agent-token + x-xpanel-principal-id",
-      "resellerAcl": null,
-      "featureEntitlement": [
-        "ssh-access"
-      ],
-      "ownershipSource": "store.accounts(:username) -> assertAccountCaller",
       "allowedPrincipals": [
         "root",
         "reseller",

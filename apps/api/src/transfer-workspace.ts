@@ -6,6 +6,9 @@ import { fail, isUuid, isXpanelError } from '@xpanel/core'
 import { atomicWriteJson, isStateDirectoryDurabilityError, readJsonIfExists } from '@xpanel/state'
 import { buildReview, countActiveTransfers, createTransferSession, parseTransferAuth, reviewDigest, transition } from '@xpanel/lifecycle'
 import type { AccountProgress, ImportWarning, TransferAuth, TransferEvent, TransferReview, TransferSession } from '@xpanel/lifecycle'
+import { LEECH_MAX_FOLDERS, parseLeechFolder } from '../../agent/src/leech-protection.ts'
+import type { LeechFolder } from '../../agent/src/leech-protection.ts'
+import type { AccountEdgeState } from '../../agent/src/account-edge.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 
@@ -32,7 +35,22 @@ export interface TransferAccountResult {
   createdAccountId?: string
   /** The source may be frozen: restart recovery releases it. */
   liveFrozen?: boolean
-  live?: { cutoverAt: string; zones: number; revertedAt: string | null }
+  /** zoneSerials: this server's zone serials at the cutover; lost: after a revert, what changed here since the cutover and went with the copy. */
+  live?: { cutoverAt: string; zones: number; revertedAt: string | null; zoneSerials?: Record<string, number>; lost?: RevertLoss }
+}
+/**
+ * What a revert of a cutover drops, observed on this server: each category is a count or 'unknown', never a guessed zero.
+ * digest binds a confirmation to exactly this observation.
+ */
+export interface RevertLoss {
+  account: string
+  cutoverAt: string
+  mail: { mailbox: string; messages: number }[] | 'unknown'
+  files: number | 'unknown'
+  databases: { onCopy: number; changes: 'unknown' }
+  zones: { changed: number; total: number } | 'unknown'
+  edgeNotCarriedBack: (keyof AccountEdgeState)[] | 'unknown'
+  digest: string
 }
 export interface StoredTransferWorkspace {
   id: string
@@ -99,8 +117,10 @@ export interface TransferWorkspacePorts {
     run: (caller: AuthenticatedCaller, session: TransferSession, review: TransferReview, emit: (event: TransferProgressEvent, result?: Partial<TransferAccountResult>) => Promise<void>, shouldStop: () => Promise<boolean>) => Promise<void>
     /** Rolls back the account this run created (result.createdAccountId) when the API stopped mid-account; true when it was removed. */
     recover: (caller: AuthenticatedCaller, progress: AccountProgress, result: Partial<TransferAccountResult> | undefined, session: TransferSession) => Promise<boolean>
-    /** Takes a cut-over account back to its source and removes the copy here; refuses when the copy changed unless the loss is accepted. */
-    revert?: (caller: AuthenticatedCaller, session: TransferSession, source: string, result: Partial<TransferAccountResult>, acceptLoss: boolean) => Promise<NonNullable<TransferAccountResult['live']>>
+    /** What reverting this cut-over account would drop here, observed now. */
+    previewRevert?: (caller: AuthenticatedCaller, session: TransferSession, source: string, result: Partial<TransferAccountResult>) => Promise<RevertLoss>
+    /** Takes a cut-over account back to its source and removes the copy here, only with the digest of a preview that still matches. */
+    revert?: (caller: AuthenticatedCaller, session: TransferSession, source: string, result: Partial<TransferAccountResult>, confirmation: string) => Promise<NonNullable<TransferAccountResult['live']>>
   }
   /** The source reference of a linked server; absent, a live transfer cannot start. */
   nodeAuth?: (id: string) => Promise<TransferAuth>
@@ -178,12 +198,38 @@ const stringList = (value: unknown): string[] => {
 const plainError = (error: unknown, fallback: string): string => isXpanelError(error) && error.message.length <= 400 ? error.message : fallback
 
 const UNMAPPED_TAG: Record<string, CpanelUnmappedItem['tag']> = { 'cron-paused': 'paused', 'password-not-kept': 'reset', 'main-inbox-not-imported': 'partial', 'filters-not-imported': 'partial' }
+const LEECH_REFUSALS: Record<string, readonly [code: string, reason: string]> = {
+  path: ['leech-protection-path-unsupported', 'the folder is not a canonical folder inside the home'],
+  maxLogins: ['leech-protection-limit-unsupported', 'the login limit is outside 1 to 1000'],
+  redirectUrl: ['leech-protection-redirect-unsupported', 'the redirect is not an absolute http or https URL'],
+  alertEmail: ['leech-protection-email-unsupported', 'the alert address is not a valid email address'],
+  folders: ['leech-protection-folder-limit', 'an account keeps at most ' + LEECH_MAX_FOLDERS + ' Leech Protection folders'],
+  settings: ['leech-protection-unreadable', 'its settings are incomplete'],
+}
+/** The archive's Leech Protection folders, checked by the rules the Leech Protection page saves with: what xPanel enforces, and one refusal per other folder. */
+export const cpanelLeechFolders = (plan: Record<string, unknown>): { folders: LeechFolder[]; refused: CpanelUnmappedItem[] } => {
+  const folders: LeechFolder[] = [], refused: CpanelUnmappedItem[] = []
+  for (const raw of Array.isArray(plan.leechProtection) ? plan.leechProtection.filter(object) : []) {
+    try {
+      if (folders.length >= LEECH_MAX_FOLDERS) fail('VALIDATION', 'too many Leech Protection folders', { fields: [{ field: 'folders', code: 'limit' }] })
+      folders.push(parseLeechFolder(raw))
+    } catch (error) {
+      if (!isXpanelError(error)) throw error
+      const field = (error.detail.fields as { field: string }[] | undefined)?.[0]?.field ?? 'settings'
+      const [code, reason] = LEECH_REFUSALS[field] ?? LEECH_REFUSALS.settings!
+      refused.push({ tag: 'skipped', code, message: 'Leech Protection on ' + String(raw.path).slice(0, 200) + ' was not imported: ' + reason + '; set it again after the import', path: String(raw.path).slice(0, 512) })
+    }
+  }
+  return { folders, refused }
+}
+
 /** Every archive warning, tagged for the review list; forwarders are listed because this release does not write them. */
 export const cpanelUnmapped = (plan: Record<string, unknown>): CpanelUnmappedItem[] => {
   const warnings = Array.isArray(plan.warnings) ? plan.warnings.filter(object) as unknown as ImportWarning[] : []
   const forwarders = Array.isArray(plan.mail) ? plan.mail.filter(object).reduce((sum, domain) => sum + (Array.isArray(domain.forwarders) ? domain.forwarders.length : 0), 0) : 0
   return [...warnings.map(warning => ({ tag: UNMAPPED_TAG[warning.code] ?? 'skipped' as const, code: warning.code, message: warning.message, ...(warning.path ? { path: warning.path } : {}) })),
-    ...(forwarders ? [{ tag: 'skipped' as const, code: 'forwarders-not-imported', message: forwarders + ' forwarders are listed in the review but not written; recreate them after the import', path: 'va/' }] : [])]
+    ...(forwarders ? [{ tag: 'skipped' as const, code: 'forwarders-not-imported', message: forwarders + ' forwarders are listed in the review but not written; recreate them after the import', path: 'va/' }] : []),
+    ...cpanelLeechFolders(plan).refused]
 }
 
 /** Durable transfer metadata over the existing reducer; native facts never come from UI events. */
@@ -512,10 +558,10 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
     if (method === 'PATCH' && match) {
       const id = match[1]!.toLowerCase()
       if (!isUuid(id)) return fail('NOT_FOUND', 'transfer session not found', { stateChanged: false })
-      const body = exact(await requestBody(req), ['expectedRevision', 'action', 'accounts', 'plans', 'conflictId', 'resolution', 'digest', 'account', 'acceptLoss'])
+      const body = exact(await requestBody(req), ['expectedRevision', 'action', 'accounts', 'plans', 'conflictId', 'resolution', 'digest', 'account', 'confirmation'])
       const revision = expected(body)
-      if (!['discover', 'select', 'resolve', 'review', 'cancel', 'run', 'stop', 'revert'].includes(String(body.action))) return fail('VALIDATION', 'unsupported transfer workspace action', { stateChanged: false })
-      const actionFields: Record<string, string[]> = { discover: [], select: ['accounts', 'plans'], resolve: ['conflictId', 'resolution'], review: [], cancel: [], run: ['digest'], stop: [], revert: ['account', 'acceptLoss'] }
+      if (!['discover', 'select', 'resolve', 'review', 'cancel', 'run', 'stop', 'revert-preview', 'revert'].includes(String(body.action))) return fail('VALIDATION', 'unsupported transfer workspace action', { stateChanged: false })
+      const actionFields: Record<string, string[]> = { discover: [], select: ['accounts', 'plans'], resolve: ['conflictId', 'resolution'], review: [], cancel: [], run: ['digest'], stop: [], 'revert-preview': ['account'], revert: ['account', 'confirmation'] }
       exact(body, ['expectedRevision', 'action', ...actionFields[String(body.action)]!])
       const owned = async (): Promise<StoredTransferWorkspace> => {
         const record = (await readDocument(path)).sessions.find(session => session.id === id)
@@ -559,17 +605,21 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
         runSession(id, caller)
         return json({ ...prepared, running: true, capabilities }, 202)
       }
-      if (body.action === 'revert') {
-        const revert = ports.execution?.revert ?? fail('PRECONDITION_FAILED', 'native transfer execution requires the host agent', { stateChanged: false })
-        if (typeof body.account !== 'string' || typeof body.acceptLoss !== 'boolean') return fail('VALIDATION', 'an account and acceptLoss are required', { stateChanged: false })
+      if (body.action === 'revert-preview' || body.action === 'revert') {
+        const execution = ports.execution, revert = execution?.revert, previewRevert = execution?.previewRevert
+        if (!revert || !previewRevert) return fail('PRECONDITION_FAILED', 'native transfer execution requires the host agent', { stateChanged: false })
+        if (typeof body.account !== 'string') return fail('VALIDATION', 'an account is required', { stateChanged: false })
+        // The operator confirms the observed loss itself, never a generic warning.
+        if (body.action === 'revert' && (typeof body.confirmation !== 'string' || !/^[0-9a-f]{64}$/.test(body.confirmation))) return fail('PRECONDITION_FAILED', 'preview what the revert drops and confirm that preview first', { stateChanged: false, reason: 'revert_preview_required' })
         if (running.size) return fail('CONFLICT', 'another transfer or import is running; wait for it to finish', { stateChanged: false })
         const account = body.account, candidate = await owned(), result = candidate.results?.[account]
         if (!result || !candidate.live || !Object.hasOwn(replay(candidate).progress, account)) return fail('NOT_FOUND', 'this account was not moved live', { stateChanged: false })
+        if (body.action === 'revert-preview') return json({ preview: await previewRevert(caller, replay(candidate), account, result) })
         running.add(id)
         try {
-          const live = await revert(caller, replay(candidate), account, result, body.acceptLoss)
+          const live = await revert(caller, replay(candidate), account, result, body.confirmation as string)
           const updated = await updateSession(id, null, async current => ({ ...current, results: { ...current.results, [account]: { ...current.results?.[account], live } } }))
-          await audit(caller, 'transfer.execution.reverted', 'transfer:' + id, { account, acceptLoss: body.acceptLoss })
+          await audit(caller, 'transfer.execution.reverted', 'transfer:' + id, { account, confirmation: body.confirmation })
           return json({ ...updated, capabilities })
         } finally { running.delete(id) }
       }

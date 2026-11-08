@@ -25,12 +25,16 @@ describe('renderFpmPool', () => {
     expect(c).not.toContain('listen.acl_users')
   })
 
-  it('grants the shared Apache user socket access under prefork only', () => {
-    expect(valueOf(renderFpmPool(a, php(), debianOs, { apacheMpm: 'prefork' }).content, 'listen.acl_users')).toBe('www-data')
-    expect(valueOf(renderFpmPool(a, php(), rhelOs, { apacheMpm: 'prefork' }).content, 'listen.acl_users')).toBe('apache')
+  it('refuses prefork: no pool socket grants the shared Apache user', () => {
+    expect(codeOf(() => renderFpmPool(a, php(), debianOs, { apacheMpm: 'prefork' }))).toBe('ENGINE_UNAVAILABLE')
     expect(codeOf(() => renderFpmPool(a, php(), debianOs, { apacheMpm: 'event' as 'itk' }))).toBe('VALIDATION')
-    const hostile = { ...debianOs, paths: { ...debianOs.paths, apacheUser: 'www-data\nlisten = 0.0.0.0:9000' } }
-    expect(codeOf(() => renderFpmPool(a, php(), hostile, { apacheMpm: 'prefork' }))).toBe('VALIDATION')
+  })
+
+  it('answers liveness with a fixed word and serves no status page', () => {
+    // An .htaccess handler can route any name to the account's own pool.
+    const c = renderFpmPool(a, php(), debianOs).content
+    expect(c).not.toMatch(/^pm\.status_(path|listen)\b/m)
+    expect(valueOf(c, 'ping.path')).toBe('/xpanel-fpm-ping')
   })
 
   it('renders the pm mode and all worker fields', () => {
@@ -42,6 +46,14 @@ describe('renderFpmPool', () => {
     expect(valueOf(c, 'pm.max_spare_servers')).toBe('6')
     expect(valueOf(c, 'pm.max_requests')).toBe('1000')
     expect(valueOf(c, 'pm.process_idle_timeout')).toBe('30s')
+  })
+
+  it('confines a reached pool to the account: open_basedir is an admin value and only .php runs', () => {
+    // Even if a request reaches this pool, these two refuse a script or a path outside the account before PHP runs it.
+    const c = renderFpmPool(a, php(), debianOs).content
+    expect(c).toContain('php_admin_value[open_basedir] = ')
+    expect(c).not.toMatch(/^php_value\[open_basedir\]/m)
+    expect(valueOf(c, 'security.limit_extensions')).toBe('.php')
   })
 
   it('confines open_basedir to the home and its tmp only', () => {

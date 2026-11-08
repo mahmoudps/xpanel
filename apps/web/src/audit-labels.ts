@@ -669,7 +669,6 @@ export const AUDIT_LABELS: Readonly<Record<string, string>> = {
   'upgrade.succeeded': msgid('Finished an upgrade'),
   'web_features.directory_privacy.updated': msgid('Updated directory privacy'),
   'web_features.extras.updated': msgid('Updated web extras'),
-  'web_features.hotlink_protection.updated': msgid('Updated hotlink protection'),
   'webmail.calendar.share_revoked': msgid('Revoked a calendar share'),
   'webmail.calendar.shared': msgid('Shared a calendar'),
   'webmail.identity.created': msgid('Created a mail identity'),

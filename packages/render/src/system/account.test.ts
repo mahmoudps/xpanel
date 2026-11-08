@@ -40,6 +40,8 @@ describe('accountProvisionActions', () => {
       ['/home/alice/mail', '700'],
     ])
     for (const d of dirs) expect([d.owner, d.group]).toEqual(['alice', 'alice'])
+    // No account dir grants any 'other' bit, so one account's uid cannot read another's home or docroot.
+    for (const d of dirs) expect(d.mode & 0o007).toBe(0)
     expect(actions.at(-1)).toEqual({ kind: 'set-quota', user: 'alice', blockSoftKb: 10485760, blockHardKb: 10485760, filesystem: '/home' })
   })
 

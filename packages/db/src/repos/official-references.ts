@@ -4,7 +4,8 @@ import type { Db } from '../client.ts'
 import { loadMigrations } from '../migrate.ts'
 import { assertDatabaseTransaction, assertNoActiveDatabaseTransaction, assertRegisteredDatabaseRunner, assertStrictDurableTransaction } from '../sql-runner.ts'
 import { lexSql } from '../sql-lexer.ts'
-import { isReviewedOperationalMigrationSet, matchesReviewedOperationalMigrations, OPERATIONAL_IDENTITY_MIGRATIONS_JSON, OPERATIONAL_SCHEMA_VERSION } from '../schema.ts'
+import { isReviewedOperationalMigrationSet, matchesReviewedOperationalMigrations, OPERATIONAL_IDENTITY_MIGRATIONS_JSON, OPERATIONAL_SCHEMA_VERSION, type OperationalMigrationMode } from '../schema.ts'
+import { markOperationalMigrationsApplied, migrationModeOf } from '../migration-mode.ts'
 import { withSqliteErrors } from '../sqlite-errors.ts'
 import { assertOperationIntentReceipt } from './operation-audit-authority.ts'
 
@@ -43,7 +44,7 @@ export const initializeOperationalMetadata = (db: Db): Promise<{ issuerId: strin
     assertNoActiveDatabaseTransaction()
     const migrations = await loadMigrations()
     const expected = migrations.map(({ version, name, checksum }) => ({ version, name, checksum }))
-    if (!isReviewedOperationalMigrationSet(expected)) return fail('PRECONDITION_FAILED', 'this operational implementation supports only the reviewed migration set')
+    if (!isReviewedOperationalMigrationSet(expected, 'complete')) return fail('PRECONDITION_FAILED', 'this operational implementation supports only the reviewed migration set')
     const expectedJson = JSON.stringify(expected)
     const sql = migrations.find(m => m.version === OPERATIONAL_SCHEMA_VERSION)?.sql
     const expectedRuntime = sql?.match(/CREATE TABLE IF NOT EXISTS job_runtime_leases\s*\([\s\S]*?\) STRICT;/)?.[0]
@@ -55,7 +56,7 @@ export const initializeOperationalMetadata = (db: Db): Promise<{ issuerId: strin
       if (!runtime || normalizedSql(runtime.sql) !== normalizedSql(expectedRuntime)) fail('PRECONDITION_FAILED', 'existing job runtime schema requires explicit compatibility review')
       const existing = await tx.query<IdentityRow>('SELECT issuer_id,schema_version,migration_checksums_json FROM operational_identity WHERE singleton=1')
       if (existing[0]) {
-        if (existing[0].schema_version !== OPERATIONAL_SCHEMA_VERSION || !matchesReviewedOperationalMigrations(existing[0].migration_checksums_json, expected)) fail('PRECONDITION_FAILED', 'unsupported operational metadata version or migration receipt')
+        if (existing[0].schema_version !== OPERATIONAL_SCHEMA_VERSION || !matchesReviewedOperationalMigrations(existing[0].migration_checksums_json, expected, 'complete')) fail('PRECONDITION_FAILED', 'unsupported operational metadata version or migration receipt')
         return { issuerId: assertId(existing[0].issuer_id), imported: 0 }
       }
       const rows = await tx.query<{ job_id: string; reference_code: string; updated_at: string }>('SELECT job_id,reference_code,updated_at FROM job_runtime_leases ORDER BY job_id')
@@ -85,14 +86,25 @@ export const initializeOperationalMetadata = (db: Db): Promise<{ issuerId: strin
     })
   })
 
-/** Read-only readiness assertion. Missing initialization never triggers repair or DDL. */
-export const requireOperationalIdentity = async (db: Db): Promise<string> => {
+/** Read-only readiness assertion under the migration mode its connection opened with. Missing initialization never triggers repair or DDL. */
+export const requireOperationalIdentity = (db: Db): Promise<string> => requireIdentity(db, migrationModeOf(db))
+
+const requireIdentity = async (db: Db, migrations: OperationalMigrationMode): Promise<string> => {
   const table = await db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name='operational_identity'")
   if (table.length !== 1) fail('PRECONDITION_FAILED', 'operational database migration and explicit startup initialization are required')
   const [identity] = await db.query<IdentityRow>('SELECT issuer_id,schema_version,migration_checksums_json FROM operational_identity WHERE singleton=1')
   if (!identity || identity.schema_version !== OPERATIONAL_SCHEMA_VERSION) return fail('PRECONDITION_FAILED', 'explicit operational database startup initialization is required')
-  if (!matchesReviewedOperationalMigrations(identity.migration_checksums_json, await appliedMigrations(db))) return fail('PRECONDITION_FAILED', 'operational schema differs from the reviewed initialized migration set')
+  if (!matchesReviewedOperationalMigrations(identity.migration_checksums_json, await appliedMigrations(db), migrations)) return fail('PRECONDITION_FAILED', 'operational schema differs from the reviewed initialized migration set')
   return assertId(identity.issuer_id, 'issuerId')
+}
+
+/** Ends this build's migrate phase on a `pre-migration` connection: prove the complete reviewed set, then require it for every read in this process. */
+export const completeOperationalMigrations = async (db: Db): Promise<void> => {
+  assertRegisteredDatabaseRunner(db)
+  // A complete connection already requires the whole reviewed set on every read.
+  if (migrationModeOf(db) === 'complete') return
+  await db.transaction(tx => requireIdentity(tx, 'complete'))
+  markOperationalMigrationsApplied()
 }
 
 /** Internal transaction-only allocator. It never derives numbers from internal IDs or rowids. */

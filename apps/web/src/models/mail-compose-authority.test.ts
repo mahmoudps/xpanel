@@ -55,3 +55,37 @@ describe('mail compose independent capability authority', () => {
     expect(projectMailView({ ...base, visibility: { ...visibility, disabledFeatures: new Set(['webmail-compose']) } })).toBeUndefined()
   })
 })
+
+describe('compose filter controls', () => {
+  // link text to href, so a renamed or redirected control fails by name
+  const links = (html: string): Record<string, string> => Object.fromEntries([...html.matchAll(/<a\b[^>]*\bhref="([^"]*)"[^>]*>(?:<svg\b[\s\S]*?<\/svg>)?(Add filter|Manage filters)<\/a>/g)].map(match => [match[2], match[1]]))
+  const themes = (props: MailSurfaceProps) => [renderMailSurface(props), renderV2MailCompose(v2Messages.translator('en'), compose(props))]
+
+  it('leads Add filter to a new rule and Manage filters to the mailbox filter page in both themes', () => {
+    expect(compose(base).canManageFilters).toBe(true)
+    for (const html of themes(base)) {
+      expect(links(html)).toEqual({ 'Add filter': '/mail/settings/filters#new-filter', 'Manage filters': '/mail/settings/filters' })
+      expect(html).not.toContain('Filters are not available for this mailbox.')
+    }
+  })
+
+  it.each([
+    ['team allowlist', { ...base, visibility: { ...visibility, allowedToolIds: new Set(['webmail-compose']) } }],
+    ['unqualified delivery', { ...base, catalog: restrict(['webmail-email-filters']) }],
+  ] as const)('shows the unavailable state instead of either control: %s', (_name, props) => {
+    expect(compose(props).canManageFilters).toBe(false)
+    for (const html of themes(props)) {
+      expect(links(html)).toEqual({})
+      expect(html).toContain('Filters are not available for this mailbox.')
+    }
+  })
+})
+
+describe('classic compose quota companion', () => {
+  it('leads to disk usage only when the mailbox may manage it', () => {
+    expect(renderMailSurface(base)).toMatch(/<a href="\/mail\/tools\/disk-usage"[^>]*>Manage disk usage<\/a>/)
+    const denied = renderMailSurface({ ...base, catalog: restrict(['webmail-disk-cleanup']) })
+    expect(denied).not.toContain('href="/mail/tools/disk-usage"')
+    expect(denied).toContain('Disk usage tools are not available for this mailbox.')
+  })
+})

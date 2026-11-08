@@ -26,18 +26,18 @@ describe('renderApacheMpm', () => {
     expect(c).not.toMatch(/<IfModule mpm_itk_module>/)
   })
 
-  it('renders prefork and refuses a stray itk module', () => {
-    const c = renderApacheMpm(prefork)
-    expect(c).toContain('MaxRequestWorkers 150')
-    expect(c).toContain('<IfModule mpm_itk_module>')
-    expect(c).not.toContain('<IfModule !mpm_itk_module>')
+  it('refuses prefork everywhere with the installer code', () => {
+    // The installer refuses prefork, so no Apache file, vhost or wrapper is ever rendered for it.
+    expect(codeOf(() => renderApacheMpm(prefork))).toBe('ENGINE_UNAVAILABLE')
+    expect(codeOf(() => renderApacheBase(prefork, debianOs))).toBe('ENGINE_UNAVAILABLE')
+    expect(codeOf(() => renderApacheVhost(account(), domain(), prefork, debianOs))).toBe('ENGINE_UNAVAILABLE')
+    expect(codeOf(() => requiredApacheModules(prefork, [domain()]))).toBe('ENGINE_UNAVAILABLE')
   })
 
   it('adds itk UID/GID ranges on request only', () => {
     const c = renderApacheMpm(settings(), { uidRange: [1000, 60000], gidRange: [1000, 60000] })
     expect(c).toContain('LimitUIDRange 1000 60000')
     expect(c).toContain('LimitGIDRange 1000 60000')
-    expect(codeOf(() => renderApacheMpm(prefork, { uidRange: [1000, 2000] }))).toBe('VALIDATION')
     expect(codeOf(() => renderApacheMpm(settings(), { uidRange: [2000, 1000] }))).toBe('VALIDATION')
   })
 
@@ -93,6 +93,13 @@ describe('renderApacheBase', () => {
     expect(f.content).toContain(String.raw`<FilesMatch "^(\.ht.*|\.user\.ini|php\.ini)$">`)
     expect(f.content).toContain('DocumentRoot "/usr/share/xpanel/default"')
     expect(f.content).toContain('UserDir disabled')
+  })
+
+  it('strips tenant PHP_VALUE and PHP_ADMIN_VALUE before every FastCGI call', () => {
+    const c = renderApacheBase(settings(), debianOs).content
+    expect(c).toContain('<IfModule proxy_fcgi_module>')
+    expect(c).toContain('ProxyFCGISetEnvIf "true" !PHP_VALUE')
+    expect(c).toContain('ProxyFCGISetEnvIf "true" !PHP_ADMIN_VALUE')
   })
 
   it('rejects bad ports and hostnames', () => {
@@ -155,28 +162,12 @@ describe('renderApacheVhost', () => {
     expect(c).not.toContain('SuexecUserGroup')
   })
 
-  it('wires CGI under prefork through suexec + mod_fcgid', () => {
-    const c = renderApacheVhost(a, domain({ php: php({ handler: 'cgi' }) }), prefork, rhelOs).content
-    expect(c).toContain('SuexecUserGroup alice alice')
-    expect(c).toContain('FcgidWrapper "/var/www/xpanel-cgi/alice/php8.3.fcgi" .php')
-    expect(c).toContain('SetHandler fcgid-script')
-    expect(c).toContain('Options -Indexes +SymLinksIfOwnerMatch +ExecCGI')
-    expect(c).not.toContain('AssignUserId')
-  })
-
-  it('implements suPHP with suexec and a php-cgi wrapper when itk is off', () => {
-    const c = renderApacheVhost(a, domain({ php: php({ handler: 'suphp' }) }), prefork, debianOs).content
-    expect(c).toContain('SuexecUserGroup alice alice')
-    expect(c).toContain('Action xpanel-php83 /.xpanel-php/php8.3.cgi')
-    expect(c).not.toMatch(/suPHP_|mod_suphp/)
-  })
-
   it('throws ENGINE_UNAVAILABLE for suPHP with itk and lsphp on Apache', () => {
     expect(codeOf(() => renderApacheVhost(a, domain({ php: php({ handler: 'suphp' }) }), settings(), debianOs))).toBe('ENGINE_UNAVAILABLE')
     expect(codeOf(() => renderApacheVhost(a, domain({ php: php({ handler: 'lsphp' }) }), settings(), debianOs))).toBe('ENGINE_UNAVAILABLE')
     expect(codeOf(() => renderApacheVhost(a, domain(), settings({ engine: 'openlitespeed' }), debianOs))).toBe('ENGINE_UNAVAILABLE')
     expect(codeOf(() => phpWiring('suphp', 'itk'))).toBe('ENGINE_UNAVAILABLE')
-    expect(phpWiring('suphp', 'prefork')).toBe('suphp-action')
+    expect(codeOf(() => phpWiring('cgi', 'prefork'))).toBe('ENGINE_UNAVAILABLE')
   })
 
   it('redirects suspended sites to the static suspended page without touching the home', () => {
@@ -297,28 +288,6 @@ describe('renderPhpCgiWrapper', () => {
     expect(f.content.trimEnd().endsWith('\\')).toBe(false)
   })
 
-  it('is account-owned for suexec under prefork and uses fcgid env', () => {
-    const f = renderPhpCgiWrapper(a, domain({ php: php({ handler: 'cgi' }) }), prefork, rhelOs)
-    expect(f.path).toBe('/var/www/xpanel-cgi/alice/php8.3.fcgi')
-    expect(f.owner).toBe('alice')
-    expect(f.group).toBe('alice')
-    expect(f.content).toContain("exec '/opt/remi/php83/root/usr/bin/php-cgi' \\")
-    expect(f.content).toContain('export PHP_FCGI_CHILDREN=0')
-    expect(f.content).toContain('export PHP_FCGI_MAX_REQUESTS=500')
-    expect(f.content).not.toContain('cgi.force_redirect')
-  })
-
-  it('applies suPHP rules: ownership, no group/other write, per-directory php.ini', () => {
-    const c = renderPhpCgiWrapper(a, domain({ php: php({ handler: 'suphp' }) }), prefork, debianOs).content
-    expect(c.startsWith('#!/bin/bash\n')).toBe(true)
-    expect(c).toContain(`home='/home/alice'`)
-    expect(c).toContain('case "$script" in "$home"/*) ;; *) deny ;; esac')
-    expect(c).toContain('[ -O "$script" ]')
-    expect(c).toContain('-perm /022')
-    expect(c).toContain('export PHPRC="$dir"')
-    expect(c).toContain('Status: 403 Forbidden')
-  })
-
   it('refuses FPM, suPHP under itk and hostile ini values', () => {
     expect(codeOf(() => renderPhpCgiWrapper(a, domain(), settings(), debianOs))).toBe('VALIDATION')
     expect(codeOf(() => renderPhpCgiWrapper(a, domain({ php: php({ handler: 'suphp' }) }), settings(), debianOs))).toBe('ENGINE_UNAVAILABLE')
@@ -329,12 +298,11 @@ describe('renderPhpCgiWrapper', () => {
     expect(codeOf(() => renderPhpCgiWrapper(a, domain({ php: php({ handler: 'cgi', ini: { open_basedir: '/' } }) }), settings(), debianOs))).toBe('VALIDATION')
   })
 
-  it('creates wrapper directories with suexec-compatible ownership', () => {
-    expect(cgiWrapperDirs(a, prefork, debianOs)).toEqual([
+  it('creates root-owned wrapper directories', () => {
+    expect(cgiWrapperDirs(a, settings(), debianOs)).toEqual([
       { kind: 'ensure-dir', path: '/var/www/xpanel-cgi', mode: 0o755, owner: 'root', group: 'root' },
-      { kind: 'ensure-dir', path: '/var/www/xpanel-cgi/alice', mode: 0o755, owner: 'alice', group: 'alice' },
+      { kind: 'ensure-dir', path: '/var/www/xpanel-cgi/alice', mode: 0o755, owner: 'root', group: 'root' },
     ])
-    expect(cgiWrapperDirs(a, settings(), debianOs)[1]).toMatchObject({ owner: 'root' })
   })
 })
 
@@ -343,8 +311,6 @@ describe('requiredApacheModules', () => {
     const itk = requiredApacheModules(settings(), [domain(), domain({ id: 'd2', name: 'b.example', php: php({ handler: 'cgi' }) })])
     expect(itk).toEqual(expect.arrayContaining(['mpm_itk', 'mpm_prefork', 'remoteip', 'proxy_fcgi', 'actions', 'cgi', 'auth_basic', 'authn_file', 'authz_user']))
     expect(itk).not.toContain('suexec')
-    const pf = requiredApacheModules(prefork, [domain({ php: php({ handler: 'suphp' }) })])
-    expect(pf).toEqual(expect.arrayContaining(['suexec', 'actions', 'cgi']))
-    expect(pf).not.toContain('mpm_itk')
+    expect(itk).not.toContain('fcgid')
   })
 })

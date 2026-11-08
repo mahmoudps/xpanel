@@ -69,6 +69,18 @@ describe('Apache module check of the installer', () => {
     const missing = spawnSync(bash, ['-euo', 'pipefail', '-c', script(false)], { encoding: 'utf8', timeout: 10_000 })
     expect(missing.stdout.trim()).toBe('DIE Apache did not load mpm-itk.')
   })
+
+  it('reads mpm-itk from the module list, as real hosts print it, whatever "Server MPM" says', () => {
+    const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
+    const start = source.indexOf('  local apachectl=apache2ctl modules')
+    const block = source.slice(start, source.indexOf('\n}\n', start))
+    // Stage and the EL guests: itk is a module on top of prefork, so -V still names prefork.
+    const version = 'Server version: Apache/2.4.62 (AlmaLinux)\nServer MPM:     prefork\n  threaded:     no\n    forked:     yes (variable process count)'
+    const host = (modules: string[]) => `httpd() { case "$1" in -t) return 0 ;; -V) printf '%s\n' '${version.replaceAll('\n', "' '")}' ;; -M) printf '%s\n' 'Loaded Modules:' ' core_module (static)' ${modules.map(item => `' ${item}'`).join(' ')} ' status_module (shared)' ;; esac; }`
+    const run = (modules: string[]) => spawnSync(bash, ['-euo', 'pipefail', '-c', `die() { echo "DIE $*"; exit 1; }\n${host(modules)}\ncheck() {\n${block}\n}\nOS_FAMILY=rhel APACHE_MPM=itk check && echo PASS\n`], { encoding: 'utf8', timeout: 10_000 })
+    for (const order of [['mpm_prefork_module (shared)', 'mpm_itk_module (shared)'], ['mpm_itk_module (shared)', 'mpm_prefork_module (shared)']]) expect(run(order).stdout.trim(), order.join()).toBe('PASS')
+    expect(run(['mpm_prefork_module (shared)']).stdout.trim()).toBe('DIE Apache did not load mpm-itk.')
+  })
 })
 
 describe('statistics engines the EL repositories lack', () => {

@@ -107,5 +107,5 @@ export const PANEL_ADDITIONAL_CSS = `.v2-panel-extra{display:flex;flex-direction
 .v2-panel-extra [role=status][data-state]:is([data-state=failed],[data-state=uncertain]){padding:var(--space-2);border:1px solid var(--warn-line);background:var(--warn-soft);border-radius:var(--radius-control)}
 .v2-panel-extra [hidden]{display:none}
 @media(max-width:900px){.v2-panel-extra__split{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:600px){.v2-panel-extra__fields{grid-template-columns:minmax(0,1fr)}.v2-panel-extra__actions>button{flex:1 1 auto}}
+@media(max-width:600px){.v2-panel-extra__fields{grid-template-columns:minmax(0,1fr)}.v2-panel-extra__actions>button{flex:1 1 auto}.v2-panel-extra__groups[data-account-quarantine] .v2-panel-extra__actions>button{max-inline-size:100%;white-space:normal}}
 `

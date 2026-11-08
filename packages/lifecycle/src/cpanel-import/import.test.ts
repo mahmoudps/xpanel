@@ -4,6 +4,7 @@ import type { Body } from '../archive/reader.ts'
 import type { ImportSink, SinkItem } from '../archive/sink.ts'
 import { parseMailConfig } from '../backup/mail-config.ts'
 import { cpmoveEntries } from '../testing/cpanel-fixture.ts'
+import { leechEntries } from '../testing/cpanel-leech-fixture.ts'
 import { buildTar, chunked } from '../testing/tar.ts'
 import type { TestEntry } from '../testing/tar.ts'
 import { services } from '@xpanel/render'
@@ -167,6 +168,21 @@ describe('readCpanelArchive: plan', async () => {
     expect(renamed.cronJobs).toEqual([{ schedule: '15 3 * * *', command: '/home/robert/backup.sh --full' }, { schedule: '@daily', command: 'php /home/robert/public_html/cron.php' }])
     expect(codes(renamed)).toEqual(expect.arrayContaining(['cron-variable-skipped', 'cron-line-skipped', 'cron-paused']))
     expect(renamed.warnings.filter((w) => w.code === 'mailing-list-skipped')).toEqual([{ code: 'mailing-list-skipped', message: 'mailing list bob-news_bob.example is not imported; recreate it', path: 'mm/bob-news_bob.example' }])
+  })
+
+  it('turns cPanel Leech Protection into folder settings and takes its RewriteMap lines out of the copied .htaccess', async () => {
+    const { plan: leech, sink: copied } = await run([...cpmoveEntries(), ...leechEntries()])
+    expect(leech.leechProtection).toEqual([
+      { path: 'public_html/members', maxLogins: 4, redirectUrl: 'https://bob.example/shared.html', alertEmail: 'bob@bob.example', disableUsers: true },
+      { path: 'public_html/vip', maxLogins: 3, redirectUrl: '/', alertEmail: null, disableUsers: false },
+    ])
+    expect(copied.items.find((i) => i.item.path === 'public_html/members/.htaccess')?.data).toBe('\r\nAuthType Basic\r\nAuthName "members"\r\nAuthUserFile "/home/bob/.htpasswds/public_html/members/passwd"\r\nrequire valid-user\r\n\r\nRewriteEngine on\r\n')
+    expect(copied.items.find((i) => i.item.path === 'public_html/members/.htaccess')?.item.size).toBe(142)
+    expect(copied.paths('home').filter((p) => p.endsWith('.leechprotect-conf'))).toEqual([])
+    // a form the layout does not describe is reported and copied as it is
+    expect(leech.warnings.filter((w) => w.code === 'leech-protection-unreadable').map((w) => w.path)).toEqual(['cpmove-bob/homedir/public_html/odd/.htaccess'])
+    expect(copied.items.find((i) => i.item.path === 'public_html/odd/.htaccess')?.data).toContain('LeechProtect')
+    expect((await run(cpmoveEntries())).plan.leechProtection).toEqual([])
   })
 })
 

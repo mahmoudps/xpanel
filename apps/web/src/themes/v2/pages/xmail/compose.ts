@@ -3,6 +3,7 @@ import { msgctxt, msgid } from '@xpanel/core'
 import type { Translate } from '../../../../i18n.ts'
 import { card } from '../../components/card.ts'
 import { escapeHtml, hookAttrs } from '../../html.ts'
+import { icon } from '../../icons.ts'
 import { mailIcon, type MailIcon } from './icons.ts'
 import { renderV2MailVacation } from './vacation.ts'
 import type { MailComposeView } from './types.ts'
@@ -27,12 +28,15 @@ function identity(t: Translate, view: MailComposeView): string {
 
 function rules(t: Translate, view: MailComposeView): string {
   const body = view.rules === null ? `<p role="status">${escapeHtml(t('Saved record not read.'))}</p>` : view.rules.length === 0 ? `<p role="status">${escapeHtml(t(msgctxt('theme:v2', 'No Sieve rules configured.')))}</p>` : `<ul class="v2-mail-rules">${view.rules.map(rule => `<li><h3>${escapeHtml(rule.name)}</h3><dl class="v2-mail-facts">${fact(t(msgctxt('theme:v2', 'Condition')), rule.condition)}${fact(t('Action'), rule.action)}${fact(t('Status'), t(rule.enabled ? 'Enabled' : 'Disabled'))}</dl></li>`).join('')}</ul>`
-  return card({ id: 'filters', title: t('Filters'), titleId: 'v2-mail-filter-title', bodyHtml: body })
+  // the filter page reads and writes the rules; compose only leads there
+  const unavailable = view.canManageFilters ? '' : `<p role="status">${escapeHtml(t('Filters are not available for this mailbox.'))}</p>`
+  const links = view.canManageFilters ? `<a class="v2-btn v2-btn--ghost" href="/mail/settings/filters#new-filter">${icon('plus', 16)}${escapeHtml(t('Add filter'))}</a><a class="v2-btn" href="/mail/settings/filters">${escapeHtml(t('Manage filters'))}</a>` : ''
+  return card({ id: 'filters', title: t('Filters'), titleId: 'v2-mail-filter-title', bodyHtml: body + unavailable, footerHtml: links })
 }
 
 /** Real send/draft/identity/attachment controllers decide readiness; no renderer claims submission or persistence. */
 export function renderV2MailCompose(t: Translate, view: MailComposeView & { readonly readOnly?: boolean }): string {
-  if (view.readOnly === true) view = { ...view, canSend: false, canSaveDraft: false, canUseAttachments: false, canManageVacation: false }
+  if (view.readOnly === true) view = { ...view, canSend: false, canSaveDraft: false, canUseAttachments: false, canManageVacation: false, canManageFilters: false }
   const format = FORMAT.map(item => `<button type="button" class="v2-btn v2-btn--icon" data-mail-format="${item.key}" data-mail-format-action="${item.action === true}" aria-label="${escapeHtml(t(item.label))}"${item.action ? '' : ' aria-pressed="false"'}${view.readOnly === true ? ' disabled' : ''}>${mailIcon(item.key)}</button>`).join('')
   const fields = `<div class="v2-field"><label for="compose-from">${escapeHtml(t('From'))}</label><select id="compose-from" dir="auto" disabled aria-describedby="compose-identities-status"><option value="" data-addr="${escapeHtml(view.mailbox)}">${escapeHtml(view.mailbox || t(msgctxt('xmail-compose', 'Not read')))}</option></select></div><div class="v2-mail-identity-tools" data-compose-identities-tools><div class="v2-mail-actions"><button type="button" class="v2-btn" data-compose-identities-refresh disabled>${escapeHtml(t('Read sender identities'))}</button><button type="button" class="v2-btn" data-compose-signature-insert disabled>${escapeHtml(t('Insert signature'))}</button></div><p id="compose-identities-status" data-compose-identities-status role="status">${escapeHtml(t('Saved sender identities have not been read.'))}</p></div>${recipient(t, 'to', t('To'), view.draft.to, view.readOnly === true)}${recipient(t, 'cc', t('Cc'), view.draft.cc, view.readOnly === true)}${recipient(t, 'bcc', t('Bcc'), view.draft.bcc, view.readOnly === true)}<p id="recips-help" class="v2-muted">${escapeHtml(t('Press Enter or type a comma after each address. Bcc recipients are hidden from everyone else.'))}</p><div class="v2-field"><label for="compose-subject">${escapeHtml(t('Subject'))}</label><input id="compose-subject" name="subject" dir="auto" value="${escapeHtml(view.draft.subject)}"${view.readOnly === true ? ' disabled' : ''}></div>`
   const attachments = `<section class="v2-mail-compose-attachments" data-compose-attachments data-compose-attachment-enabled="${view.canUseAttachments}" aria-labelledby="v2-compose-attachments-title">${v2MailClientTemplates('compose-attachments')}<div class="v2-mail-card-head"><h2 id="v2-compose-attachments-title">${escapeHtml(t('Attachments'))} <span class="v2-num" data-compose-attachment-summary></span></h2><button type="button" class="v2-btn" data-compose-attachment-open aria-controls="compose-file-input" aria-describedby="compose-attachment-status" disabled>${mailIcon('attach')}${escapeHtml(t('Attach files'))}</button></div><input id="compose-file-input" data-compose-attachment-input type="file" multiple hidden disabled><ul data-compose-attachment-list></ul><p id="compose-attachment-status" data-compose-attachment-status role="status">${escapeHtml(t('Choose up to 10 files, with a combined limit of 512 KiB. Files have not been read.'))}</p></section>`

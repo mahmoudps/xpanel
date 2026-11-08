@@ -37,7 +37,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     const button = (name: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>('[data-transfer-' + name + ']')!
     const sessionSelect = root.querySelector<HTMLSelectElement>('[data-transfer-session]')!
     const credential = root.querySelector<HTMLSelectElement>('[data-transfer-credential]')!
-    const nodeSelect = root.querySelector<HTMLSelectElement>('[data-transfer-node]')!, liveBox = root.querySelector<HTMLInputElement>('[data-transfer-live]')!, revertAccount = root.querySelector<HTMLSelectElement>('[data-transfer-revert-account]')!, acceptLoss = root.querySelector<HTMLInputElement>('[data-transfer-accept-loss]')!
+    const nodeSelect = root.querySelector<HTMLSelectElement>('[data-transfer-node]')!, liveBox = root.querySelector<HTMLInputElement>('[data-transfer-live]')!, revertAccount = root.querySelector<HTMLSelectElement>('[data-transfer-revert-account]')!, lossBox = root.querySelector<HTMLElement>('[data-transfer-revert-loss]')!
     const conflict = root.querySelector<HTMLSelectElement>('[data-transfer-conflict]')!
     const resolution = root.querySelector<HTMLSelectElement>('[data-transfer-resolution]')!
     const status = root.querySelector<HTMLElement>('[data-transfer-status]')!
@@ -48,7 +48,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     const importSelect = root.querySelector<HTMLSelectElement>('[data-transfer-import]')!
     const importPlan = root.querySelector<HTMLSelectElement>('[data-transfer-import-plan]')!
     const keyBox = root.querySelector<HTMLElement>('[data-transfer-ssh-key-value]')!
-    if (!sessionSelect || !credential || !nodeSelect || !liveBox || !revertAccount || !acceptLoss || !conflict || !resolution || !status || !accounts || !plans || !reviewBox || !archiveBox || !importSelect || !importPlan || !keyBox) {
+    if (!sessionSelect || !credential || !nodeSelect || !liveBox || !revertAccount || !lossBox || !conflict || !resolution || !status || !accounts || !plans || !reviewBox || !archiveBox || !importSelect || !importPlan || !keyBox) {
       root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
       if (status) { status.dataset.state = 'unavailable'; status.textContent = t('Unavailable') }
       return
@@ -81,6 +81,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       'transfer-archive-summary': ['part', 'count'],
       'transfer-archive-conflicts': ['kind', 'value'],
       'transfer-archive-unmapped': ['state', 'detail', 'path'],
+      'transfer-revert-loss': ['item', 'observed'],
     }
     const records: Record<string, RecordSpec> = { 'transfer-choice': { tag: 'label', slots: { name: 'bdi' }, actions: { select: 'input' } } }
     for (const [name, fields] of Object.entries(recordRows)) {
@@ -90,7 +91,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       records[name + '-row'] = { tag: 'tr', slots, columns, ...(name === 'transfer-inventory' && comparison ? { actions: { select: 'input', resolve: 'button' } as const } : {}) }
       records[name + '-empty'] = { tag: 'tr', slots: { message: 'td' }, columns }
     }
-    for (const name of ['transfer-review', 'transfer-archive-summary', 'transfer-archive-conflicts', 'transfer-archive-unmapped']) records[name + '-table'] = { tag: 'div', slots: { rows: 'tbody' } }
+    for (const name of ['transfer-review', 'transfer-archive-summary', 'transfer-archive-conflicts', 'transfer-archive-unmapped', 'transfer-revert-loss']) records[name + '-table'] = { tag: 'div', slots: { rows: 'tbody' } }
     const disableNative = (): void => { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }) }
     const verifyTemplates = (): boolean => {
       if (!admitted()) { disableNative(); if (!['uncertain', 'stale'].includes(status.dataset.state ?? '')) announce('unavailable', t('Unavailable')); return false }
@@ -155,7 +156,6 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       liveBox.disabled = locked || !nodeSelect.value
       button('create').disabled = locked || !credential.options.length && !nodeSelect.value
       revertAccount.disabled = locked || !revertAccount.options.length
-      acceptLoss.disabled = locked || !revertAccount.options.length
       button('revert').disabled = locked || !revertAccount.value
       button('discover').disabled = locked || !capabilities.discover || state !== 'created'
       button('select').disabled = locked || !['inventoried', 'selected', 'reviewed'].includes(state)
@@ -254,6 +254,30 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       fillBody(clientTemplateSlot(wrapper, 'rows', 'tbody'), name, rows, t('No reviewed records were returned.'))
       container.append(wrapper)
     }
+    /** What a revert drops, as the server observed it; a category it could not read stays 'unknown', never zero. */
+    type Loss = { digest: string; mail: { mailbox: string; messages: number }[] | 'unknown'; files: number | 'unknown'; databases: { onCopy: number }; zones: { changed: number; total: number } | 'unknown'; edgeNotCarriedBack: string[] | 'unknown' }
+    const whole = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0
+    const parseLoss = (value: unknown): Loss | null => {
+      if (!object(value) || typeof value.digest !== 'string' || !/^[0-9a-f]{64}$/.test(value.digest) || !object(value.databases) || !whole(value.databases.onCopy)) return null
+      const mail = value.mail === 'unknown' ? 'unknown' : Array.isArray(value.mail) && value.mail.every(item => object(item) && typeof item.mailbox === 'string' && whole(item.messages)) ? value.mail as { mailbox: string; messages: number }[] : null
+      const files = value.files === 'unknown' || whole(value.files) ? value.files : null
+      const zones = value.zones === 'unknown' ? 'unknown' : object(value.zones) && whole(value.zones.changed) && whole(value.zones.total) ? { changed: value.zones.changed, total: value.zones.total } : null
+      const edge = value.edgeNotCarriedBack === 'unknown' ? 'unknown' : Array.isArray(value.edgeNotCarriedBack) && value.edgeNotCarriedBack.every(item => typeof item === 'string') ? value.edgeNotCarriedBack as string[] : null
+      return mail === null || files === null || zones === null || edge === null ? null : { digest: value.digest, mail, files, databases: { onCopy: value.databases.onCopy }, zones, edgeNotCarriedBack: edge }
+    }
+    const lossRows = (loss: Loss): TransferRow[] => {
+      const unknown = t('Unknown'), messages = (value: number): string => t('{count, plural, one {# message} other {# messages}}', { count: value })
+      const edgeNames: Record<string, string> = { ipBlocker: msgid('IP blocker'), cache: msgid('Cache'), proxyRules: msgid('Proxy rules'), leech: msgid('Leech protection') }
+      return [
+        { item: t('Mail written since the cutover'), observed: loss.mail === 'unknown' ? unknown : messages(loss.mail.reduce((sum, box) => sum + box.messages, 0)) },
+        ...(loss.mail === 'unknown' ? [] : loss.mail.map(box => ({ item: box.mailbox, observed: messages(box.messages) }))),
+        { item: t('Files changed since the cutover'), observed: loss.files === 'unknown' ? unknown : t('{count, plural, one {# file} other {# files}}', { count: loss.files }) },
+        { item: t('Database changes since the cutover'), observed: t('Unknown; {count, plural, one {# database is} other {# databases are}} removed with the copy', { count: loss.databases.onCopy }) },
+        { item: t('DNS zones changed since the cutover'), observed: loss.zones === 'unknown' ? unknown : t('{changed} of {total} zones', loss.zones) },
+        { item: t('Edge settings saved since the cutover'), observed: loss.edgeNotCarriedBack === 'unknown' ? unknown : loss.edgeNotCarriedBack.length ? loss.edgeNotCarriedBack.map(name => edgeNames[name] ? t(edgeNames[name]!) : name).join(', ') : t('None') },
+      ]
+    }
+    const paintLoss = (loss: Loss | null): void => { if (loss) table(lossBox, 'transfer-revert-loss', lossRows(loss)); else lossBox.replaceChildren() }
     const paintArchive = (value: unknown): void => {
       archiveBox.textContent = ''
       const approved = pageRoot.querySelector<HTMLElement>('[data-whm-detail-section="transfer-import"]')
@@ -377,6 +401,9 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
         const moved = Object.entries(results).filter(([, value]) => object(value) && object(value.live) && !value.live.revertedAt).map(([name]) => name)
         revertAccount.textContent = ''
         for (const name of moved) { const option = document.createElement('option'); option.value = name; option.textContent = name; revertAccount.append(option) }
+        // the most recent revert keeps showing what it did not carry back
+        const reverted = Object.values(results).flatMap(value => object(value) && object(value.live) && typeof value.live.revertedAt === 'string' ? [value.live] : []).sort((left, right) => String(right.revertedAt).localeCompare(String(left.revertedAt)))[0]
+        paintLoss(reverted ? parseLoss(reverted.lost) : null)
         const waiting = t(msgctxt('whm-transfer-client', 'Waiting'))
         fillApproved('transfer-progress', progressRows.map(([name, value]) => {
           const result = object(results[name]) ? results[name] as Record<string, unknown> : {}, done = object(value) && value.phase === 'done'
@@ -387,7 +414,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
         }))
         const note = pageRoot.querySelector<HTMLElement>('[data-transfer-progress-state]')
         if (note) { note.dataset.transferProgressState = 'read'; note.textContent = selected?.stopRequested && selected.session.state === 'applying' ? t('The transfer stops after the current account.') : selected?.session.live === true ? t('Each account is copied while it stays live. The source is then suspended for the final sync, and its sites and mail pass through to this server.') : t('Accounts are copied one at a time. The source is only read; a failed account is removed again.') }
-      }
+      } else paintLoss(null)
       root.querySelector<HTMLElement>('[data-transfer-execution-note]')!.textContent = capabilities.execute ? t('Accounts are copied one at a time. The source is only read; a failed account is removed again.') : t('Transfers are unavailable here: they need the host agent on this server.')
       root.querySelector<HTMLElement>('[data-transfer-archive-limit]')!.textContent = capabilities.cpanelImport ? t('Maximum archive size: {bytes} bytes', { bytes: capabilities.cpanelUploadMaxBytes }) : t('cPanel import is unavailable here: it needs the host agent on this server.')
       controls()
@@ -450,7 +477,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       if (!create && !previous) return
       busy = true; controls(); let submitted = false
       try {
-        if (!await ask(action === 'revert' ? t('Revert the cutover?') : action === 'run' ? t('Start transfer?') : t('Confirm transfer review action'), (previous ? sourceLabel(previous.session) + '\n' : '') + (action === 'revert' ? t('The source serves this account again and its zones point back there. The copy here is removed, with any database changes made here since the cutover.') : action === 'run' && previous?.session.live === true ? t('Each account is copied while it stays live. The source is then suspended for the final sync, and its sites and mail pass through to this server.') : action === 'run' ? t('Each reviewed account is rebuilt here one at a time. Shared services are only reloaded.') : t('The server verifies the current saved revision and permissions.')), action === 'cancel' || action === 'run' || action === 'stop')) return
+        if (action !== 'revert' && !await ask(action === 'run' ? t('Start transfer?') : t('Confirm transfer review action'), (previous ? sourceLabel(previous.session) + '\n' : '') + (action === 'run' && previous?.session.live === true ? t('Each account is copied while it stays live. The source is then suspended for the final sync, and its sites and mail pass through to this server.') : action === 'run' ? t('Each reviewed account is rebuilt here one at a time. Shared services are only reloaded.') : t('The server verifies the current saved revision and permissions.')), action === 'cancel' || action === 'run' || action === 'stop')) return
         submitted = true
         const value = await request(create ? 'POST' : 'PATCH', create ? '/api/transfers/sessions' : '/api/transfers/sessions/' + encodeURIComponent(previousId), create ? body : { ...body, action, expectedRevision: previous!.revision })
         const acknowledged = parseEntry(value)
@@ -460,15 +487,37 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
         // a started run keeps writing progress, so only its identity is read back
         if (!found || action !== 'run' && (found.revision !== acknowledged.revision || JSON.stringify(found.session) !== JSON.stringify(acknowledged.session))) throw new Error('transfer_readback_mismatch')
         await read(String(acknowledged.session.id), observed)
-        announce('saved', action === 'run' ? t('The transfer started. Progress appears below as each account moves.') : action === 'stop' ? t('The transfer stops after the current account.') : t('Transfer review state was saved and read back.'))
+        announce('saved', action === 'run' ? t('The transfer started. Progress appears below as each account moves.') : action === 'revert' ? t('The cutover was reverted. What changed here since the cutover was not carried back; it is listed below.') : action === 'stop' ? t('The transfer stops after the current account.') : t('Transfer review state was saved and read back.'))
       } catch (error) {
         const details = object(error) && object(error.details) ? error.details : {}
+        // the confirmed list no longer matches what the server sees: show the new one, nothing was reverted
+        if (details.reason === 'revert_preview_stale') { paintLoss(parseLoss(details.preview)); announce('stale', t('What the revert drops changed since the preview. Nothing was reverted; review the new list and confirm again.')); return }
         const knownRefusal = object(error) && (error.stateChanged === false || details.stateChanged === false || typeof error.status === 'number' && error.status >= 400 && error.status < 500 && details.stateChanged !== true && details.unknownOutcome !== true)
         reviewRequired = submitted && !knownRefusal
         if (object(error) && error.status === 409) reviewRequired = true
         const stale = object(error) && error.status === 409
         announce(stale ? 'stale' : reviewRequired ? 'uncertain' : 'failed', stale ? t('The saved session changed. Your edits are kept. Read saved state before continuing.') : reviewRequired ? t('The outcome requires review. Your edits are kept; no retry was sent. Read saved state before continuing.') : t('The request was refused. Your edits are kept and no retry was sent.'))
       } finally { busy = false; controls() }
+    }
+    /** Reads what the revert drops, shows it, and reverts only after the operator types the account name over that list. */
+    const revertCutover = async (): Promise<void> => {
+      const previous = selected, account = revertAccount.value
+      if (busy || reviewRequired || !loaded || !previous || !account || !verifyTemplates()) return
+      busy = true; controls()
+      let loss: Loss | null = null
+      try { const value = await request('PATCH', '/api/transfers/sessions/' + encodeURIComponent(String(previous.session.id)), { action: 'revert-preview', account, expectedRevision: previous.revision }); loss = parseLoss(object(value) ? value.preview : null) }
+      catch { loss = null }
+      finally { busy = false; controls() }
+      paintLoss(loss)
+      if (!loss) { announce('failed', t('What the revert drops could not be read. Nothing was reverted.')); return }
+      if (!askDialog) { announce('failed', t('Confirmation is unavailable. Nothing was sent.')); return }
+      const seen: Loss = loss, boxes = seen.mail === 'unknown' ? [] : seen.mail.map(box => box.mailbox)
+      const summary = lossRows(seen).filter(row => !boxes.includes(String(row.item))).map(row => row.item + ': ' + row.observed).join('; ')
+      const typed = await askDialog({ title: t('Revert the cutover?'), body: t('The source serves this account again and its zones point back there. The copy here is removed, and nothing changed here since the cutover is carried back: {summary}.', { summary }),
+        input: true, value: '', preserveWhitespace: true, label: t('Type the account name to confirm'), confirm: t('Revert cutover'), danger: true })
+      if (!verifyTemplates() || selected !== previous) return
+      if (typed !== account) { announce('failed', typed === null ? t('The revert was not confirmed. Nothing was sent.') : t('The account name did not match. Nothing was sent.')); return }
+      await perform('revert', { account, confirmation: seen.digest })
     }
     /** Plans on this server for an imported account; read once, kept across refreshes. */
     const fillPlans = async (): Promise<void> => {
@@ -560,7 +609,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     sessionSelect.addEventListener('change', () => { const id = sessionSelect.value; sessionSelect.value = String(selected?.session.id ?? ''); void refresh(id) })
     nodeSelect.addEventListener('change', controls)
     revertAccount.addEventListener('change', controls)
-    button('revert').addEventListener('click', () => { if (!button('revert').disabled) void perform('revert', { account: revertAccount.value, acceptLoss: acceptLoss.checked }) })
+    button('revert').addEventListener('click', () => { if (!button('revert').disabled) void revertCutover() })
     button('create').addEventListener('click', () => {
       if (nodeSelect.value) { void perform('create', { node: nodeSelect.value, live: liveBox.checked }, true); return }
       const option = credential.selectedOptions[0]

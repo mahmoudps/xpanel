@@ -130,9 +130,10 @@ export interface UpgradeSafetyPort {
   /** Mandatory WAL-safe index backup written to `${snapshotPath}.control.db`, distinct from the state tar. */
   snapshotControlPlane(snapshotPath: string): Promise<void>
   /**
-   * Rewind only, writers fenced: bring the index back to this snapshot. Derived rows are rebuilt from
-   * the restored state files; identity, session, job and audit rows never rewind, and the expand-only
-   * schema stays. Idempotent.
+   * Rollback only, writers fenced since the snapshot: return the control database to this snapshot's
+   * pre-migration copy, bound to its recorded hash, so the previous release reads its own reviewed
+   * migrations. Refuses LIFECYCLE_DATABASE_SNAPSHOT_MISSING or _CHANGED. Issued references, execution
+   * epochs, ids and audit history carry forward; derived rows follow the restored state. Idempotent.
    */
   restoreControlPlane(snapshotPath: string): Promise<void>
   /** fsync the named regular file or directory; callers also sync containing directories. */

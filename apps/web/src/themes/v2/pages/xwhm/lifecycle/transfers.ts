@@ -70,7 +70,8 @@ ${lifecycleTable(t, msgctxt('theme:v2', 'Account transfer progress'), [msgid('Ac
 ${actions(button('run', msgid('Run reviewed transfer'), true) + button('stop', msgid('Stop after the current account')))}
 <h3>${text(t, msgid('Revert a cutover'))}</h3>
 ${fields(select('transfer-revert-account', msgid('Moved account'), 'revert-account'))}
-<label class="v2-lifecycle__choice"><input type="checkbox" data-transfer-accept-loss disabled> ${text(t, msgid('Discard what changed here since the cutover'))}</label>
+<p>${text(t, msgid('Revert first reads what changed here since the cutover and asks you to confirm that list. None of it is carried back to the source.'))}</p>
+<div data-transfer-revert-loss></div>
 ${actions(button('revert', msgid('Revert cutover')))}
 `)
 

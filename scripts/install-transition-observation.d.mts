@@ -19,4 +19,4 @@ export function inspectNoSourceChangeInstallation(input: unknown): Readonly<{
 }>;
 export function withActiveInstallationObservation<T>(bootstrapBytes: string, callback: (observation: Readonly<{
   bootstrap: import('./install-bootstrap.mjs').PreparedInstallBootstrap; assertCurrent(): Promise<void>
-}>) => Promise<T>): Promise<T>;
+}>) => Promise<T>, migrations?: import('../packages/db/src/index.ts').OperationalMigrationMode): Promise<T>;

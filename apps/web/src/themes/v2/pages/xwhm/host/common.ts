@@ -28,9 +28,9 @@ export function hostCard(key: string, title: string, bodyHtml: string, hooks?: H
   return card({ title, titleId: `v2-host-${key}-heading`, bodyHtml, hooks, ...(actionsHtml ? { actionsHtml } : {}) })
 }
 
-export function hostTable(t: Translate, id: string, caption: string, headings: readonly string[], rows: readonly DataTableRow[], emptyText: string, hooks?: HookAttributes): string {
+export function hostTable(t: Translate, id: string, caption: string, headings: readonly string[], rows: readonly DataTableRow[], emptyText: string, hooks?: HookAttributes, phoneValueColumn?: 3): string {
   return dataTable(t, { id: `v2-host-${id}`, caption, columns: headings.map(label => ({ label })), rows, emptyText,
-    ...(hooks ? { bodyHooks: hooks } : {}) })
+    ...(hooks ? { bodyHooks: hooks } : {}), ...(phoneValueColumn ? { phoneValueColumn } : {}) })
 }
 
 export function hostFacts(rows: readonly { label: string; valueHtml: string; hooks?: HookAttributes }[]): string {

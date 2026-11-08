@@ -72,6 +72,16 @@ export interface ImportCertificate {
   key: FileRef | null
 }
 
+/** cPanel Leech Protection of one folder, in the xPanel record shape; the importer checks it against xPanel's rules. */
+export interface ImportLeechFolder {
+  /** the folder relative to the new home */
+  path: string
+  maxLogins: number
+  redirectUrl: string
+  alertEmail: string | null
+  disableUsers: boolean
+}
+
 /** A crontab line of the account; imported paused until the owner reviews it. */
 export interface ImportCronJob {
   schedule: string
@@ -93,6 +103,7 @@ export interface ImportPlan {
   mail: DomainMail[]
   certificates: ImportCertificate[]
   cronJobs: ImportCronJob[]
+  leechProtection: ImportLeechFolder[]
   home: { files: number; directories: number; symlinks: number; bytes: number; skipped: number }
   warnings: ImportWarning[]
 }

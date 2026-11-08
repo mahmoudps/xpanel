@@ -150,7 +150,7 @@ const whmSsl = (locale: Locale): string => region('/whm/ssl', locale, [
 
 const web = (locale: Locale): string => region('/whm/services/web', locale, [
   card('web-engine',locale,msgid('Engine'),`${radios('web-engine',locale,[msgid('Apache with mpm-itk'),'OpenLiteSpeed'])}<p class="xp-help">${h(tx(locale,msgid('The engine and its installed package state have not been read. An engine change applies to every site.')))}</p>`),
-  card('web-mpm',locale,'Apache MPM',`${radios('web-mpm',locale,['itk','prefork'])}${empty(locale,msgid('The active MPM has not been read.'))}`),
+  card('web-mpm',locale,'Apache MPM',`${radios('web-mpm',locale,['itk',msgid('prefork · refused: no account isolation')])}${empty(locale,msgid('The active MPM has not been read.'))}`),
   card('web-backend',locale,msgid('Backend connection'),`${fields(locale,'web-backend',[msgid('Backend address'),msgid('Backend port')])}${code('')}`),
   card('web-edge',locale,msgid('Nginx edge'),`${soonBtn(locale,msgid('Use suggested values'),true)}${legend(locale,msgid('Workers'),fields(locale,'web-nginx',['worker_processes','worker_connections','worker_rlimit_nofile']))}${legend(locale,msgid('Requests and cache'),fields(locale,'web-request',['keepalive_timeout','client_max_body_size']))}`),
   card('web-workers',locale,msgid('Apache workers'),`${legend(locale,msgid('Spare children'),fields(locale,'web-apache-spare',['StartServers','MinSpareServers','MaxSpareServers']))}${legend(locale,msgid('Limits'),fields(locale,'web-apache-limit',['MaxRequestWorkers','ServerLimit','MaxConnectionsPerChild']))}`),

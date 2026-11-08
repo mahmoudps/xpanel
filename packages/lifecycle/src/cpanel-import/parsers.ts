@@ -145,6 +145,27 @@ export const parseMailPasswd = (text: string): { locals: string[]; rejected: str
   return { locals, rejected }
 }
 
+/** A folder .htaccess that cPanel Leech Protection wrote, with its condition and redirect rule taken out. */
+export interface LeechHtaccess { maxLogins: number; redirectUrl: string; content: string }
+// cPanel writes the condition and the rule on the next line; newer versions add a key after the login limit.
+const LEECH_COND = /^\s*RewriteCond\s+\$\{LeechProtect:[^:}]+:%\{REMOTE_USER\}:%\{REMOTE_ADDR\}:([0-9]{1,6})(?::[^}\s]*)?\}\s+leech\s*$/
+const LEECH_RULE = /^\s*RewriteRule\s+\.\*\s+(\S+)(?:\s+\[[A-Za-z0-9=,]*\])?\s*$/
+
+/** null without a LeechProtect line; 'unreadable' for one this layout does not describe, which stays untouched. */
+export const parseLeechHtaccess = (text: string): LeechHtaccess | 'unreadable' | null => {
+  if (!text.includes('LeechProtect')) return null
+  const lines = text.split('\n'), at = lines.findIndex(line => line.includes('LeechProtect'))
+  const cond = LEECH_COND.exec(lines[at] ?? ''), rule = LEECH_RULE.exec(lines[at + 1] ?? '')
+  if (!cond || !rule || lines.slice(at + 1).some(line => line.includes('LeechProtect'))) return 'unreadable'
+  return { maxLogins: Number(cond[1]), redirectUrl: rule[1] as string, content: [...lines.slice(0, at), ...lines.slice(at + 2)].join('\n') }
+}
+
+/** <folder>/.leechprotect-conf: email=, kill=, url= and numhits= lines; the .htaccess rule holds the enforced limit and URL. */
+export const parseLeechConf = (text: string): { alertEmail: string | null; disableUsers: boolean } => {
+  const value = (key: string): string => text.split(/\r?\n/).find(line => line.startsWith(key + '='))?.slice(key.length + 1).trim() ?? ''
+  return { alertEmail: value('email') || null, disableUsers: value('kill') === '1' }
+}
+
 /** homedir/etc/<domain>/quota: local:bytes. */
 export const parseMailQuota = (text: string): Map<string, number> => {
   const m = new Map<string, number>()

@@ -14,7 +14,7 @@ import { disabledRoleUnits, readSaved, readServerRoles } from './server-operatio
 import { writeSvcState } from './svc-reconcile.ts'
 
 export const HOST_WATCH_PATH = '/var/lib/xpanel/svc/host-watch.json'
-export const FPM_STATUS_PATH = edge.FPM_STATUS_PATH
+export const FPM_PING_PATH = edge.FPM_PING_PATH
 const EVENTS_KEPT = 200
 const PROBE_TIMEOUT_MS = 3000
 const HOUR_MS = 3_600_000
@@ -59,14 +59,14 @@ const fcgiRecord = (type: number, content: Buffer): Buffer => {
   return Buffer.concat([header, content])
 }
 const fcgiParams = (params: Readonly<Record<string, string>>): Buffer => Buffer.concat(Object.entries(params).map(([key, value]) => Buffer.concat([Buffer.from([key.length, value.length]), Buffer.from(key + value)])))
-/** A minimal FastCGI status request: a worker that takes the request and writes anything back is alive. */
+/** A minimal FastCGI ping request: a worker that takes the request and writes anything back is alive. */
 export const pingFpmPool = (socketPath: string, timeoutMs: number): Promise<boolean> => new Promise(resolve => {
   const socket = net.connect({ path: socketPath }), done = (ok: boolean): void => { socket.destroy(); resolve(ok) }
   socket.setTimeout(timeoutMs, () => done(false))
   socket.once('error', () => done(false))
   socket.once('connect', () => socket.write(Buffer.concat([
     fcgiRecord(1, Buffer.from([0, 1, 0, 0, 0, 0, 0, 0])),
-    fcgiRecord(4, fcgiParams({ REQUEST_METHOD: 'GET', SCRIPT_NAME: FPM_STATUS_PATH, SCRIPT_FILENAME: FPM_STATUS_PATH, QUERY_STRING: '' })), fcgiRecord(4, Buffer.alloc(0)), fcgiRecord(5, Buffer.alloc(0)),
+    fcgiRecord(4, fcgiParams({ REQUEST_METHOD: 'GET', SCRIPT_NAME: FPM_PING_PATH, SCRIPT_FILENAME: FPM_PING_PATH, QUERY_STRING: '' })), fcgiRecord(4, Buffer.alloc(0)), fcgiRecord(5, Buffer.alloc(0)),
   ])))
   socket.once('data', chunk => done(chunk[1] === 6))
 })

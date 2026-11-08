@@ -65,7 +65,7 @@ async function absent(path) {
 }
 
 /** Read-only completed publication proof. Never repairs audit history, opens a writer or grants admission. */
-async function withCompletedInstallationObservation(bootstrapBytes, callback, historicalHeadBytes) {
+async function withCompletedInstallationObservation(bootstrapBytes, callback, historicalHeadBytes, migrations) {
   requireLinuxRoot(); check(typeof callback === 'function', 'INSTALL_TRANSITION_CALLBACK_REQUIRED')
   const bootstrap = json(bootstrapBytes), operationId = bootstrap.installationTransition?.operationId
   check(UUID.test(operationId), 'INSTALL_TRANSITION_POINTER_INVALID')
@@ -124,7 +124,7 @@ async function withCompletedInstallationObservation(bootstrapBytes, callback, hi
             try { await assertCurrent(); const value = await callback(Object.freeze({ bootstrap: projection.bootstrap, assertCurrent })); await assertCurrent(); return value }
             finally { live = false }
           })
-      })
+      }, migrations)
     })
   })
 }
@@ -192,7 +192,7 @@ export function inspectNoSourceChangeInstallation(input) {
 }
 
 /** Native proof follows only protected no-change baselines; historical HEAD is never written back. */
-export async function withActiveInstallationObservation(bootstrapBytes, callback) {
+export async function withActiveInstallationObservation(bootstrapBytes, callback, migrations = 'complete') {
   requireLinuxRoot(); check(typeof callback === 'function', 'INSTALL_TRANSITION_CALLBACK_REQUIRED')
   return withTrustedFile(ROOT + '/bootstrap.json', { exactMode: 0o600, maxBytes: 16 * 1024, sha256: hash(bootstrapBytes) }, bootstrapPin =>
     withTrustedFile(ROOT + '/installation.json', { exactMode: 0o600, maxBytes: 64 * 1024 }, receiptPin =>
@@ -212,7 +212,7 @@ export async function withActiveInstallationObservation(bootstrapBytes, callback
             check(UUID.test(head.operationId) && head.phase === 'retired' && ['upgrade', 'recover'].includes(head.kind), 'INSTALL_TRANSITION_NOT_RETIRED')
             return withTrustedFile(ROOT + '/terminal/' + head.operationId + '.json', { exactMode: 0o600, maxBytes: 128 * 1024 }, async terminalPin => {
               const terminal = json(terminalPin.bytes.toString('utf8'))
-              if (terminal.installation?.noSourceChange !== true) return withCompletedInstallationObservation(bootstrapBytes, callback, headBytes)
+              if (terminal.installation?.noSourceChange !== true) return withCompletedInstallationObservation(bootstrapBytes, callback, headBytes, migrations)
               const operationId = terminal.installation?.operationId
               check(UUID.test(operationId), 'INSTALL_TRANSITION_BASELINE_INVALID')
               return withTrustedFile(ROOT + '/admission-' + operationId + '.json', { exactMode: 0o600, maxBytes: 1024 * 1024 }, async admissionPin => {
@@ -245,7 +245,7 @@ export async function withActiveInstallationObservation(bootstrapBytes, callback
                       }
                       await current()
                     })
-                })
+                }, migrations)
                 // Keep metadata FDs pinned, but retire DB/audit scopes before following historical authority.
                 // Reopen and revalidate this immutable completed operation after the parent proof returns.
                 await verifyAuthority()

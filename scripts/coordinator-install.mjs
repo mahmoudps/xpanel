@@ -17,8 +17,8 @@ const fail = code => { throw Object.assign(new Error(code), { code }) }
 const json = value => Buffer.from(JSON.stringify(value) + '\n')
 
 /** Keep the physical lock across systemctl and file effects, with a fresh root observation at each boundary. */
-export async function withCoordinatorDatabaseAuthority(callback) {
-  return withLifecycleWriterAdmission(() => withReopenedReadonlyHostOperationGuard(DATABASE, {}, async (guard, binding) => {
+export async function withCoordinatorDatabaseAuthority(migrations, callback) {
+  return withLifecycleWriterAdmission(() => withReopenedReadonlyHostOperationGuard(DATABASE, { migrations }, async (guard, binding) => {
     const origin = Object.freeze({ file: binding.databaseFile, device: binding.databaseDevice, inode: binding.databaseInode, issuerId: binding.issuerId })
     const anchorPath = '/var/lib/xpanel-agent/operation-audit/operation-audit-authority.json'
     const anchorOptions = { exactMode: 0o600, maxBytes: 16384 }
@@ -33,7 +33,7 @@ export async function withCoordinatorDatabaseAuthority(callback) {
       if (!root || root.disabled || root.forcePasswordChange || root.kind !== 'root') fail('COORDINATOR_ROOT_REQUIRED')
       await assertReadonlyOperationDatabaseCurrent(reader)
       return root.id
-    })
+    }, migrations)
     const rootId = await readRoot()
     const assertDatabaseAuthority = async () => {
       await assertHostOperationGuardHeld(guard, binding)
@@ -45,7 +45,7 @@ export async function withCoordinatorDatabaseAuthority(callback) {
 }
 
 async function withExistingRegistrationGuard(prepared, callback) {
-  return withCoordinatorDatabaseAuthority(async ({ origin, assertDatabaseAuthority }) => {
+  return withCoordinatorDatabaseAuthority('complete', async ({ origin, assertDatabaseAuthority }) => {
     const baseline = await readTrustedFile('/var/lib/xpanel-lifecycle/HEAD', { exactMode: 0o600, maxBytes: 16384 })
     const head = JSON.parse(baseline.bytes), installed = await readInstallationReceipt()
     if (!['idle', 'retired'].includes(head.phase) || head.issuerId !== origin.issuerId || installed.receipt.status !== 'active') fail('COORDINATOR_RETAINED_ATTENTION')
@@ -126,7 +126,7 @@ export async function installPreparedCoordinator(prepared) {
   try {
     const database = await databasePin.stat({ bigint: true })
     if (!database.isFile() || database.nlink !== 1n) fail('COORDINATOR_DATABASE_UNSAFE')
-    return await withCoordinatorDatabaseAuthority(async ({ origin, assertDatabaseAuthority }) => {
+    return await withCoordinatorDatabaseAuthority('complete', async ({ origin, assertDatabaseAuthority }) => {
       if (origin.file !== DATABASE || origin.device !== String(database.dev) || origin.inode !== String(database.ino)) fail('COORDINATOR_DATABASE_CHANGED')
       const installed = await readInstallationReceipt()
       if (installed.receipt.status !== 'active') fail('COORDINATOR_INSTALLATION_REQUIRED')

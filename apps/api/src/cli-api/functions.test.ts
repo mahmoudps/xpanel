@@ -36,6 +36,16 @@ describe('xuapi / xwhmapi function catalog', { tags: ['unit'] }, () => {
     }
   })
 
+  it('serves per-account shell access through the account update, not an orphaned /shell route', () => {
+    const matrix = JSON.parse(readFileSync(join(process.cwd(), 'docs/planning/authorization-route-matrix.json'), 'utf8')) as { routes: { method: string; path: string }[] }
+    // Manage Shell Access is the `shell` field of PATCH /api/accounts/:id; the per-account /shell route had no handler.
+    expect(matrix.routes.some(route => route.method === 'PATCH' && route.path === '/api/accounts/:id')).toBe(true)
+    expect(matrix.routes.some(route => /\/accounts\/(?::username|\{username\})\/shell$/.test(route.path))).toBe(false)
+    for (const functions of Object.values(CLI_API_FUNCTIONS)) {
+      expect(functions.some(([, , , path]) => /\/accounts\/\{username\}\/shell$/.test(path))).toBe(false)
+    }
+  })
+
   it('lists every route of the authorization matrix that each listener admits', () => {
     const matrix = JSON.parse(readFileSync(join(process.cwd(), 'docs/planning/authorization-route-matrix.json'), 'utf8')) as { routes: { method: string; path: string; surface: string }[] }
     for (const [command, audience] of Object.entries(AUDIENCE) as [keyof typeof AUDIENCE, 'xpanel' | 'xwhm'][]) {

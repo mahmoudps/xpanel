@@ -38,6 +38,22 @@ const TLS_FINGERPRINT = /^[0-9A-F]{2}(?::[0-9A-F]{2}){31}$/
 const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 /** Written by the panel and the web server themselves; a change there is not the customer's data. */
 const VOLATILE_HOME_DIRS = ['logs', 'tmp', '.cache']
+/** A Maildir message file: cur/ or new/ of a mailbox or of one of its folders. Index, uidlist and tmp files are not mail. */
+const MAILDIR_MESSAGE = /^mail\/([^/]+)\/([^/]+)\/(?:\.[^/]+\/)?(?:cur|new)\/[^/]+$/
+export type HomeChanges = { files: number; mail: { mailbox: string; messages: number }[] }
+/** find -printf '%P\0' output: messages written per mailbox, and other changed files; Dovecot bookkeeping under mail/ counts as neither. */
+export async function summarizeHomeChanges(source: AsyncIterable<Buffer | string>): Promise<HomeChanges> {
+  const mail = new Map<string, number>()
+  let files = 0, rest = ''
+  const take = (path: string): void => {
+    const message = MAILDIR_MESSAGE.exec(path)
+    if (message) { const mailbox = message[2]!.toLowerCase() + '@' + message[1]!.toLowerCase(); mail.set(mailbox, (mail.get(mailbox) ?? 0) + 1) }
+    else if (path && !path.startsWith('mail/')) files++
+  }
+  for await (const chunk of source) { const parts = (rest + chunk.toString()).split('\0'); rest = parts.pop()!; parts.forEach(take) }
+  take(rest)
+  return { files, mail: [...mail].sort(([a], [b]) => a < b ? -1 : 1).map(([mailbox, messages]) => ({ mailbox, messages })) }
+}
 
 export type TransferTaskKind = 'package' | 'fetch' | 'restore' | 'cpanel-fetch' | 'cpanel-inspect' | 'cpanel-restore' | 'home-changes'
 export type TransferTaskState = 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted'
@@ -302,8 +318,11 @@ export function createTransferTaskController(deps: TransferTaskDeps) {
   const homeChanged = async (task: TransferTask, since: string): Promise<Record<string, unknown>> => {
     const account = await accountOf(task.username)
     const prune = VOLATILE_HOME_DIRS.flatMap((name, index) => [...(index ? ['-o'] : []), '-path', posix.join(account.home, name)])
-    const found = ok(await deps.run({ asUser: account.username, argv: ['/usr/bin/find', account.home, '-xdev', '(', ...prune, ')', '-prune', '-o', '-type', 'f', '-newermt', since, '-print', '-quit'] }), 'reading the home', [0, 1])
-    return { changed: found.stdout.trim().length > 0 }
+    const dir = await taskDir('changes', task.id), list = posix.join(dir, 'changed')
+    try {
+      ok(await deps.run({ asUser: account.username, argv: ['/usr/bin/find', account.home, '-xdev', '(', ...prune, ')', '-prune', '-o', '-type', 'f', '-newermt', since, '-printf', '%P\\0'], stdoutFile: list }), 'reading the home', [0, 1])
+      return await summarizeHomeChanges(createReadStream(list))
+    } finally { await rm(dir, { recursive: true, force: true }) }
   }
 
   /** Source: the home (mail included) as the account user, each MariaDB database and each account certificate. */

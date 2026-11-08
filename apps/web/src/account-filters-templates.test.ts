@@ -131,3 +131,21 @@ describe.each(['classic', 'v2'] as const)('%s selected filter templates', theme 
     expect(q('[data-filter-status]').getAttribute('data-state')).toBe('failed')
   })
 })
+
+describe('arrival from the compose Add filter control', () => {
+  beforeEach(() => { window.location.hash = 'new-filter' })
+  it.each(['classic', 'v2-mail'] as const)('opens the new-filter editor after a verified read: %s', async theme => {
+    mount(theme); await idle()
+    await vi.waitFor(() => expect(q<HTMLFormElement>('[data-filter-editor]').hidden).toBe(false))
+    expect(q('[data-filter-editor-title]').textContent).toBe('Create filter configuration')
+  })
+  it('keeps the editor closed while the saved rules are not verified', async () => {
+    mount('v2-mail', { blocked: true, rows: [{ ...record(), name: null, conditions: null, actions: null } as unknown as FilterRecord] }); await idle()
+    expect(q<HTMLFormElement>('[data-filter-editor]').hidden).toBe(true)
+  })
+  it('keeps the editor closed without the fragment', async () => {
+    window.location.hash = ''
+    mount('v2-mail'); await idle()
+    expect(q<HTMLFormElement>('[data-filter-editor]').hidden).toBe(true)
+  })
+})

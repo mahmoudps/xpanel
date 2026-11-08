@@ -9,6 +9,8 @@ import type { AuthenticatedCaller } from './auth.ts'
 import { bindCertificates, runHostTask } from './lifecycle-transfer-execution.ts'
 import type { TransferAgentCall, TransferExecutionDeps } from './lifecycle-transfer-execution.ts'
 import { readReply } from './backup-file-restore-workspace.ts'
+import { writeAccountEdgeState } from '../../agent/src/account-edge.ts'
+import { cpanelLeechFolders } from './transfer-workspace.ts'
 import type { CpanelImportPorts, CpanelImportRecord } from './transfer-workspace.ts'
 
 export interface CpanelImportDeps extends Pick<TransferExecutionDeps, 'store' | 'agent' | 'createAccount' | 'applyAccount' | 'removeAccount' | 'defaultPhp' | 'audit' | 'pollMs'> {
@@ -92,6 +94,12 @@ async function applyPlan(deps: CpanelImportDeps, caller: AuthenticatedCaller, re
   }
   const cron = records(plan.cronJobs)
   await deps.store.saveCronJobs(account.id, cron.map(job => ({ id: randomUUID(), accountId: account.id, schedule: String(job.schedule), command: String(job.command), comment: 'Imported from cPanel; review before enabling', enabled: false })))
+  // The review listed every folder refused here; the rest become the account's Leech Protection record.
+  const leech = cpanelLeechFolders(plan).folders
+  if (leech.length) {
+    const lease = await deps.store.getWriterLock().acquire()
+    try { await writeAccountEdgeState(deps.store.rootDir, account.id, { leech: { version: 1, folders: leech, updatedAt: new Date().toISOString() } }, async () => { await lease.assertFencingToken() }) } finally { await lease.release() }
+  }
   await deps.applyAccount(caller, (await deps.store.getAccountByUsername(username)) ?? account)
   const certificates = records(plan.certificates).flatMap((cert, index) => {
     const names = Array.isArray(cert.names) ? cert.names.map(String) : []
@@ -102,7 +110,7 @@ async function applyPlan(deps: CpanelImportDeps, caller: AuthenticatedCaller, re
   const bound = await bindCertificates(deps.store, account, restored.result.certificates)
   if (bound) await deps.applyAccount(caller, (await deps.store.getAccountByUsername(username)) ?? account)
   return { username, domains: [...domains.keys()].sort(), databases: [...databases.keys()], databaseUsers: records(plan.dbUsers).length, mailboxes: mailboxes.length, zones: zones.map(zone => String(zone.zone)),
-    cronJobsPaused: cron.length, certificates: bound, home: restored.result.home ?? null, passwordResetRequired: true }
+    cronJobsPaused: cron.length, leechProtection: leech.length, certificates: bound, home: restored.result.home ?? null, passwordResetRequired: true }
 }
 
 /** Removes only the account this import created (by id); an account that merely shares the username is never touched. */

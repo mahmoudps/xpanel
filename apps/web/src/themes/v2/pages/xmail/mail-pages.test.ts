@@ -19,7 +19,7 @@ const inbox = (changes: Partial<MailInboxView> = {}): MailInboxView => ({
 const compose = (changes: Partial<MailComposeView> = {}): MailComposeView => ({
   ...common, route: '/mail/compose', title: 'New message', kind: 'compose',
   draft: { to: '', cc: '', bcc: '', subject: '', body: '' },
-  canSend: false, canSaveDraft: false, canUseAttachments: false, canManageVacation: false, identity: {}, vacation: null, rules: null,
+  canSend: false, canSaveDraft: false, canUseAttachments: false, canManageVacation: false, canManageFilters: false, identity: {}, vacation: null, rules: null,
   ...changes,
 })
 const t = v2Messages.translator('en')

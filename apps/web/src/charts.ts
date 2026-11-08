@@ -151,7 +151,7 @@ function renderTopEntriesTable(
     `<div class="xp-card">` +
     `<div class="xp-card__header"><strong>${escapeHtml(title)}</strong></div>` +
     `<div class="xp-table-wrap">` +
-    `<table class="xp-table xp-table--compact">` +
+    `<table class="xp-table xp-table--compact xp-table--columns">` +
     `<thead>` +
     `<tr>` +
     `<th>${escapeHtml(translator(locale)('Resource / Identifier'))}</th>` +

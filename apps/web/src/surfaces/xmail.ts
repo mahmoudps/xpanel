@@ -182,6 +182,8 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
       ...(props.actionState ? { actionState: props.actionState } : {}),
       ...(props.vacationEnabled !== undefined ? { vacationEnabled: props.vacationEnabled } : {}),
       vacationCanManage: visibleMailToolIds.has('webmail-autoresponder'),
+      filtersCanManage: qualifiedMailRoutes.has('/mail/settings/filters') && visibleMailToolIds.has('webmail-email-filters'),
+      diskUsageCanManage: qualifiedMailRoutes.has('/mail/tools/disk-usage') && visibleMailToolIds.has('webmail-disk-cleanup'),
       ...(props.sieveRules ? { sieveRules: props.sieveRules.map(rule => ({ name: rule.name, condition: rule.condition, action: rule.action, enabled: rule.enabled })) } : {}),
       ...(props.identityDkim ? { identityDkim: props.identityDkim } : {}),
       ...(props.identitySpf ? { identitySpf: props.identitySpf } : {}),

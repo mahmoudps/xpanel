@@ -102,6 +102,9 @@ describe('profile lifecycle', () => {
     expect(await profiles.activate('remote1')).toMatchObject({ active: 'remote1', profiles: [{ validation: { state: 'passed', clientHost: '198.51.100.7' } }] })
     expect(memory.files.get(DEFAULT_MARIADB_ADMIN_CNF)).toMatchObject({ mode: 0o600, owner: 'root', group: 'root' })
     expect(memory.files.get(DEFAULT_MARIADB_ADMIN_CNF)!.content).toContain('host=192.0.2.50')
+    // The live client file carries the server's identity check, against the saved CA, not only TLS.
+    expect(memory.files.get(DEFAULT_MARIADB_ADMIN_CNF)!.content).toContain('\nssl-ca=/etc/xpanel/db-profile-remote1.pem\nssl-verify-server-cert\n')
+    expect(memory.files.get('/etc/xpanel/db-profile-remote1.pem')).toMatchObject({ content: CA, mode: 0o600, owner: 'root' })
     expect(memory.files.get(dbProfileOptionFile('localhost'))!.content).toBe('[client]\nuser=root\n')
     expect(await profiles.activate('localhost')).toMatchObject({ active: 'localhost' })
     expect(memory.files.get(DEFAULT_MARIADB_ADMIN_CNF)!.content).toBe('[client]\nuser=root\n')

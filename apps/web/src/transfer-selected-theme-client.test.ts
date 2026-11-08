@@ -208,7 +208,7 @@ describe('approved transfer comparison and finite records', () => {
   it.each(['classic', 'v2'] as const)('validates every finite %s record, its typed slots and its owner before any startup GET', { tags: ['slow'] }, theme => {
     const html = transferHtml(theme)
     mount(html); const names = [...document.querySelectorAll<HTMLTemplateElement>('[data-transfer-workspace] template[data-xp-template]')].map(template => template.dataset.xpTemplate!)
-    expect(names).toHaveLength(23)
+    expect(names).toHaveLength(26)
     for (const name of names) for (const corruption of ['missing', 'duplicate', 'tag', 'borrowed'] as const) {
       mount(html); const template = transferTemplate(name)
       if (corruption === 'missing') template.remove()

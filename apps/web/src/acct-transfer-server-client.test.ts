@@ -56,18 +56,37 @@ describe('live transfer from a linked server', () => {
     boot(model(session(), false)); await tick(); await tick()
     expect(q<HTMLSelectElement>('[data-transfer-node]').disabled).toBe(true)
   })
-  it('lists what was cut over and reverts it with the loss choice', async () => {
+  const preview = { account: 'alice', cutoverAt: '2026-11-07T10:00:00.000Z', mail: [{ mailbox: 'info@alice.example.test', messages: 3 }], files: 2, databases: { onCopy: 1, changes: 'unknown' }, zones: 'unknown', edgeNotCarriedBack: ['ipBlocker'], digest: 'd'.repeat(64) }
+  const lossRows = () => [...document.querySelectorAll('[data-transfer-revert-loss] tbody tr')].map(row => [...row.querySelectorAll('td')].map(cell => cell.textContent))
+  const shown = [['Mail written since the cutover', '3 messages'], ['info@alice.example.test', '3 messages'], ['Files changed since the cutover', '2 files'],
+    ['Database changes since the cutover', 'Unknown; 1 database is removed with the copy'], ['DNS zones changed since the cutover', 'Unknown'], ['Edge settings saved since the cutover', 'IP blocker']]
+  it('shows what a revert drops and reverts only when the account name is typed over that list', async () => {
     const live = { cutoverAt: '2026-11-07T10:00:00.000Z', zones: 1, revertedAt: null }
-    const send = model(liveSession({ alice: { live } })); boot(send); await tick(); await tick()
+    const base = model(liveSession({ alice: { live } }))
+    const send = vi.fn(async (method: string, path: string, body?: unknown) => method === 'PATCH' && (body as { action: string }).action === 'revert-preview' ? { preview } : base(method, path, body))
+    const ask = vi.fn(async (_options: Record<string, unknown>): Promise<unknown> => 'bob')
+    boot(send, true, ask as never); await tick(); await tick()
     expect(q<HTMLSelectElement>('[data-transfer-revert-account]').value).toBe('alice')
-    q<HTMLInputElement>('[data-transfer-accept-loss]').checked = true
+    expect(document.querySelector('[data-transfer-accept-loss]')).toBeNull()
     q<HTMLButtonElement>('[data-transfer-revert]').click(); await tick()
-    expect(send.mock.calls.find(call => call[0] === 'PATCH')?.[2]).toMatchObject({ action: 'revert', account: 'alice', acceptLoss: true })
+    expect(send.mock.calls.find(call => call[0] === 'PATCH')?.[2]).toEqual({ action: 'revert-preview', account: 'alice', expectedRevision: '1'.repeat(64) })
+    expect(lossRows()).toEqual(shown)
+    const dialog = ask.mock.calls.at(-1)![0]
+    expect(dialog).toMatchObject({ input: true, danger: true, label: 'Type the account name to confirm' })
+    expect(String(dialog.body)).toContain('Mail written since the cutover: 3 messages; Files changed since the cutover: 2 files')
+    expect(String(dialog.body)).not.toContain('info@alice.example.test')
+    // the wrong name sends nothing
+    expect(send.mock.calls.some(call => call[0] === 'PATCH' && (call[2] as { action: string }).action === 'revert')).toBe(false)
+    expect(q('[data-transfer-status]').textContent).toBe('The account name did not match. Nothing was sent.')
+    ask.mockResolvedValueOnce('alice')
+    q<HTMLButtonElement>('[data-transfer-revert]').click(); await tick(); await tick()
+    expect(send.mock.calls.find(call => call[0] === 'PATCH' && (call[2] as { action: string }).action === 'revert')?.[2]).toEqual({ action: 'revert', account: 'alice', confirmation: 'd'.repeat(64), expectedRevision: '1'.repeat(64) })
   })
-  it('offers nothing to revert once it was reverted', async () => {
-    boot(model(liveSession({ alice: { live: { cutoverAt: '2026-11-07T10:00:00.000Z', zones: 1, revertedAt: '2026-11-07T11:00:00.000Z' } } }))); await tick(); await tick()
+  it('offers nothing to revert once it was reverted, and shows what it did not carry back', async () => {
+    boot(model(liveSession({ alice: { live: { cutoverAt: '2026-11-07T10:00:00.000Z', zones: 1, revertedAt: '2026-11-07T11:00:00.000Z', lost: preview } } }))); await tick(); await tick()
     expect(q<HTMLSelectElement>('[data-transfer-revert-account]').options).toHaveLength(0)
     expect(q<HTMLButtonElement>('[data-transfer-revert]').disabled).toBe(true)
+    expect(lossRows()).toEqual(shown)
   })
 })
 

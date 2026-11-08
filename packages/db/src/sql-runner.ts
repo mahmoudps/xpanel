@@ -4,7 +4,8 @@ import { lstatSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { assertId, fail } from '@xpanel/core'
 import { lexSql } from './sql-lexer.ts'
-import { matchesReviewedOperationalMigrations, OPERATIONAL_SCHEMA_VERSION } from './schema.ts'
+import { matchesReviewedOperationalMigrations, OPERATIONAL_SCHEMA_VERSION, type OperationalMigrationMode } from './schema.ts'
+import { assertMigrationMode, bindMigrationMode, migrationModeOf } from './migration-mode.ts'
 
 export type Row = Record<string, unknown>
 
@@ -45,7 +46,7 @@ const strictOrigins = new WeakMap<SqlRunner, () => StrictOperationDatabaseOrigin
 const activeTransactions = new WeakMap<SqlRunner, () => void>()
 interface Scheduler { tail: Promise<void>; pending: number; references: number; owner: symbol }
 const fileSchedulers = new Map<string, Scheduler>()
-const registeredRunners = new WeakMap<DatabaseSync, { runner: SqlRunner; strict: boolean }>()
+const registeredRunners = new WeakMap<DatabaseSync, { runner: SqlRunner; strict: boolean; migrations: OperationalMigrationMode }>()
 const runnerClosers = new WeakMap<SqlRunner, () => Promise<void>>()
 const publicRunnerRegistrations = new WeakMap<object, () => void>()
 const physicalKey = (identity: StrictDatabaseIdentity): string => `${identity.device}:${identity.inode}`
@@ -173,11 +174,13 @@ const runQuery = <T extends Row = Row>(db: DatabaseSync, text: string, params: r
   return []
 }
 
-export const sqliteRunner = (db: DatabaseSync, opts: { strictDurability?: boolean } = {}): SqlRunner => {
+export const sqliteRunner = (db: DatabaseSync, opts: { strictDurability?: boolean; migrations?: OperationalMigrationMode } = {}): SqlRunner => {
   const strictDurability = opts.strictDurability === true
+  const migrations = assertMigrationMode(opts.migrations ?? 'complete')
   const registered = registeredRunners.get(db)
   if (registered) {
     if (registered.strict !== strictDurability) return fail('PRECONDITION_FAILED', 'database connection already has a different registered durability policy')
+    if (registered.migrations !== migrations) return fail('PRECONDITION_FAILED', 'database connection already has a different registered migration mode')
     return registered.runner
   }
   let main: Row | undefined
@@ -241,13 +244,14 @@ export const sqliteRunner = (db: DatabaseSync, opts: { strictDurability?: boolea
       transaction: nested,
     }
     activeTransactions.set(transactionRunner, assertActive)
+    bindMigrationMode(transactionRunner, migrations)
     if (strictDurability) {
       strictTransactions.set(transactionRunner, () => { assertActive(); return verifyStrictConnection(db, identity) })
       strictOrigins.set(transactionRunner, () => {
         assertActive()
         const physical = verifyStrictConnection(db, identity)
         const issuer = runQuery(db, 'SELECT issuer_id,schema_version,migration_checksums_json FROM operational_identity WHERE singleton=1')[0]
-        if (!issuer || issuer.schema_version !== OPERATIONAL_SCHEMA_VERSION || !matchesReviewedOperationalMigrations(issuer.migration_checksums_json, runQuery(db, 'SELECT version,name,checksum FROM xpanel_schema_migrations ORDER BY version'))) return fail('PRECONDITION_FAILED', 'reviewed operational database initialization and migration set are required')
+        if (!issuer || issuer.schema_version !== OPERATIONAL_SCHEMA_VERSION || !matchesReviewedOperationalMigrations(issuer.migration_checksums_json, runQuery(db, 'SELECT version,name,checksum FROM xpanel_schema_migrations ORDER BY version'), migrationModeOf(transactionRunner))) return fail('PRECONDITION_FAILED', 'reviewed operational database initialization and migration set are required')
         return Object.freeze({ ...physical, issuerId: assertId(issuer.issuer_id, 'issuerId') })
       })
     }
@@ -291,7 +295,8 @@ export const sqliteRunner = (db: DatabaseSync, opts: { strictDurability?: boolea
       })
     },
   }
-  registeredRunners.set(db, { runner: publicRunner, strict: strictDurability })
+  registeredRunners.set(db, { runner: publicRunner, strict: strictDurability, migrations })
+  bindMigrationMode(publicRunner, migrations)
   publicRunnerRegistrations.set(publicRunner, () => {
     if (closing) fail('PRECONDITION_FAILED', 'database connection is closing or closed')
   })

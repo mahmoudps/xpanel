@@ -47,6 +47,8 @@ describe('root installation receipt syntax and preserving uninstall plan; not op
     expect(plan.retain).toEqual(expect.arrayContaining(['/opt/xpanel', '/var/lib/xpanel', '/etc/xpanel', '/var/vmail', '/var/lib/mysql', '/etc/letsencrypt']))
     expect(plan.removal).not.toContain('/var/lib/xpanel-lifecycle')
     expect(plan.removal).toContain('/etc/nginx/xpanel-management/tls-policy.conf')
+    // Unpinned paths join the plan only: the receipt an earlier release wrote still parses as it did.
+    expect(plan.removal).toContain('/etc/xpanel/management-access.json')
     // This plan is intentionally not a complete-uninstall readiness proof. The runtime must
     // additionally demand the full TLS/ingress surface adapter before creating any marker.
   })

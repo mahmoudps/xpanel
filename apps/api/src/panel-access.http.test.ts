@@ -9,7 +9,7 @@ import { PANEL_GATE_DEFAULT } from '../../agent/src/panel-gate-policy.ts'
 import type { PanelGatePolicy } from '../../agent/src/panel-gate-policy.ts'
 import { SEC_STATE_PATHS, secRevision } from '../../agent/src/sec-policy.ts'
 import { deriveCsrfToken, passwordHashFromInput } from './auth.ts'
-import { sessionCookieName, sessionTokenHash } from './entry-points.ts'
+import { entryPointAllowsApiRoute, sessionCookieName, sessionTokenHash } from './entry-points.ts'
 import { panelGate } from './panel-gate.ts'
 import { temporaryRefusal } from './panel-temporary-login.ts'
 import { createApiApp } from './server.ts'
@@ -236,10 +236,38 @@ describe('temporary sign-in links', () => {
     for (const path of ['/api/server/root-password', '/api/server/databases/root-password', '/api/transfers/credentials', '/api/transfers/ssh-key', '/api/server/ssl/keys/x', '/api/accounts/x/ssl/keys/y']) expect(temporaryRefusal(path, 'GET')).toBe('temporary_session_no_access')
   })
 
+  const matrixWrites = () => (JSON.parse(readFileSync(resolve(import.meta.dirname, '../../../docs/planning/authorization-route-matrix.json'), 'utf8')) as { routes: { method: string; path: string; surface: string }[] })
+    .routes.filter(route => !['GET', 'HEAD', 'OPTIONS'].includes(route.method) && route.path !== '/api/auth/logout')
+
   it('refuses every write route of the authorization matrix, logout aside', () => {
-    const { routes } = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../../docs/planning/authorization-route-matrix.json'), 'utf8')) as { routes: { method: string; path: string }[] }
-    const writes = routes.filter(route => !['GET', 'HEAD', 'OPTIONS'].includes(route.method) && route.path !== '/api/auth/logout')
+    const writes = matrixWrites()
     expect(writes.length).toBeGreaterThan(100)
     for (const route of writes) expect(temporaryRefusal(route.path, route.method), route.path).toBe('temporary_session_read_only')
+  })
+
+  it('refuses every API write route of the matrix when a real temporary session sends it', { tags: ['slow'] }, async () => {
+    // A valid CSRF proof, so only the temporary check can refuse.
+    // Its token is bound to WHM, so a route that listener does not serve stops at the listener.
+    const helper = sessionOf(await open((await create()).url)), raw = helper.slice(helper.indexOf('=') + 1)
+    const headers = { cookie: helper, origin: ORIGIN, 'x-csrf-token': deriveCsrfToken(raw, SECRET, 'xwhm'), 'content-type': 'application/json' }
+    const ids: [string, string][] = [['/api/server/file-sharing/', 'fsl_0123456789abcdef'], ['/api/server/themes/', 'sample'], ['/api/server/nodes/', 'node_0123456789abcdef'], ['/api/generations/', '1']]
+    const sample: Record<string, string> = { account: 'alice', username: 'alice', mailbox: 'info@example.test', domain: 'example.test', zoneName: 'example.test', number: '1', uid: '20001', section: 'spam', kind: 'default', domainId: '11111111-1111-4111-8111-111111111111' }
+    const value = (route: string, name: string): string => name === 'id' ? ids.find(([prefix]) => route.startsWith(prefix))?.[1] ?? '11111111-1111-4111-8111-111111111111' : sample[name] ?? 'sample'
+    // Sign-in and the team password link carry their own credential, not a temporary session cookie.
+    const unsessioned = new Set(['/api/auth/login', '/api/auth/team/password'])
+    const accepted: string[] = []
+    let served = 0
+    const check = async (route: { method: string; path: string }): Promise<void> => {
+      const path = route.path.replace(/:([A-Za-z]+)/g, (_, name: string) => encodeURIComponent(value(route.path, name)))
+      const response = await app.fetch(new Request(ORIGIN + path, { method: route.method, headers, body: '{}' }), IP)
+      const body = await response.json().catch(() => null) as { details?: { reason?: string; impersonated?: boolean } } | null
+      if (!entryPointAllowsApiRoute('xwhm', path, route.method)) { if (response.status !== 404) accepted.push(`${route.method} ${route.path} ${response.status}`); return }
+      served += 1
+      if (response.status !== 403 || body?.details?.reason !== 'temporary_session_read_only' && body?.details?.impersonated !== true) accepted.push(`${route.method} ${route.path} ${response.status}`)
+    }
+    const queue = matrixWrites().filter(item => item.surface === 'api' && !unsessioned.has(item.path))
+    await Promise.all(queue.map(check))
+    expect(served).toBeGreaterThan(300)
+    expect(accepted).toEqual([])
   })
 })

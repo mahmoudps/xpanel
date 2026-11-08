@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { join, sep } from 'node:path'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as dbApi from '@xpanel/db'
 import { domainWorkspaceRevision, type Domain, type Limit } from '@xpanel/core'
 import { createTestStateStore } from '@xpanel/state'
@@ -23,29 +23,46 @@ interface DomainView {
   application: { status: string; targetVerified: boolean }
 }
 type AgentMode = 'none' | 'applied' | 'rejected' | 'malformed' | 'transport'
+const token = async (db: dbApi.Db, scopes: string[], principalId: string) => {
+  const raw = 'xp_' + randomUUID()
+  await dbApi.createApiToken(db, { principalId, name: 'Synthetic domain workspace', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 600000).toISOString() })
+  return raw
+}
+/** Migrated SQLite, both accounts, their index and the owner credential, built once per file. */
+const buildTemplate = async () => {
+  const database = await dbApi.createTestDb()
+  const state = await createTestStateStore()
+  try {
+    const feature = await state.store.createFeatureList({ name: 'Domain workspace policy', ownerId: null, disabled: [] })
+    const plan = await state.store.createPlan({ name: 'Domain workspace plan', ownerId: null, featureListId: feature.id,
+      resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+      caps: { addonDomains: 3, aliasDomains: 3, subdomains: 3, mailboxes: 4, forwarders: 4, mailingLists: 4, ftpAccounts: 4, databases: 4, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
+    await state.store.saveServerIp({ address: '192.0.2.72', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const account = async (username: string) => state.store.createAccount({ username, passwordHash: HASH, primaryDomain: username + '.example.test', planId: plan.id, ownerId: null,
+      contactEmail: 'owner@' + username + '.example.test', ipv4: '192.0.2.72', shell: 'none',
+      php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
+    const owner = await account('domaina'), other = await account('domainb')
+    const primary = (await state.store.getDomainByName(owner.primaryDomain))!, otherPrimary = (await state.store.getDomainByName(other.primaryDomain))!
+    const principal = await dbApi.createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: HASH })
+    const neighbor = await dbApi.createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: HASH })
+    await dbApi.reindexFromState(database.db, await state.store.readSnapshot())
+    const credential = await token(database.db, ['domains:read', 'domains:write'], principal.id)
+    return { sqlite: database.sqlite.serialize(), baseline: state, feature, plan, owner, other, primary, otherPrimary, principal, neighbor, credential }
+  } catch (error) { await state.close(); throw error } finally { await database.close() }
+}
+let template: Awaited<ReturnType<typeof buildTemplate>>
+/** Every case gets its own SQLite image and desired-state copy, without the writer mutex or its lock. */
 const fixture = async () => {
-  const database = await dbApi.createTestDb(); cleanup.push(() => database.close())
+  const database = dbApi.createDb(':memory:'); cleanup.push(() => database.close())
+  database.sqlite.deserialize(template.sqlite)
+  expect(await database.query('PRAGMA foreign_keys')).toEqual([{ foreign_keys: 1 }])
   const state = await createTestStateStore(); cleanup.push(() => state.close())
-  const feature = await state.store.createFeatureList({ name: 'Domain workspace policy', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Domain workspace plan', ownerId: null, featureListId: feature.id,
-    resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
-    caps: { addonDomains: 3, aliasDomains: 3, subdomains: 3, mailboxes: 4, forwarders: 4, mailingLists: 4, ftpAccounts: 4, databases: 4, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
-  await state.store.saveServerIp({ address: '192.0.2.72', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const account = async (username: string) => state.store.createAccount({ username, passwordHash: HASH, primaryDomain: username + '.example.test', planId: plan.id, ownerId: null,
-    contactEmail: 'owner@' + username + '.example.test', ipv4: '192.0.2.72', shell: 'none',
-    php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
-  const owner = await account('domaina'), other = await account('domainb')
-  const primary = (await state.store.getDomainByName(owner.primaryDomain))!, otherPrimary = (await state.store.getDomainByName(other.primaryDomain))!
-  const principal = await dbApi.createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: HASH })
-  const neighbor = await dbApi.createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: HASH })
+  const lock = template.baseline.store.getWriterLock()
+  await cp(template.baseline.rootDir, state.rootDir, { recursive: true, filter: source =>
+    source !== lock.mutexFilePath && !source.startsWith(lock.mutexFilePath + '-') && source !== lock.lockDirPath && !source.startsWith(lock.lockDirPath + sep) })
+  const { feature, plan, owner, other, primary, otherPrimary, principal, neighbor, credential } = template
   const seedIndex = async () => dbApi.reindexFromState(database.db, await state.store.readSnapshot())
-  await seedIndex()
-  const token = async (scopes: string[], principalId = principal.id) => {
-    const raw = 'xp_' + randomUUID()
-    await dbApi.createApiToken(database.db, { principalId, name: 'Synthetic domain workspace', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 60000).toISOString() })
-    return raw
-  }
-  const credential = await token(['domains:read', 'domains:write'])
+  const issue = (scopes: string[], principalId = principal.id) => token(database.db, scopes, principalId)
   const calls: Array<{ path: string; method: string; principalId: string | null }> = []
   const makeApp = (mode: AgentMode = 'none') => {
     const agent: AgentApp = { subscribe: () => () => {}, fetch: async req => {
@@ -102,7 +119,7 @@ const fixture = async () => {
   }
   const mailbox = (login = 'inbox@' + owner.primaryDomain) => state.store.createServiceUser({ accountId: owner.id, login, passwordHash: HASH,
     services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
-  return { database, state, feature, plan, owner, other, primary, otherPrimary, principal, neighbor, token, credential, calls, makeApp, request, view, images, tree, legacy, corrupt, mailbox }
+  return { database, state, feature, plan, owner, other, primary, otherPrimary, principal, neighbor, token: issue, credential, calls, makeApp, request, view, images, tree, legacy, corrupt, mailbox }
 }
 
 describe('domain workspace policy resource', () => {
@@ -113,6 +130,8 @@ describe('domain workspace policy resource', () => {
 
 describe('conditional domain workspace API with isolated real SQLite and desired state', () => {
   let f: Awaited<ReturnType<typeof fixture>>
+  beforeAll(async () => { template = await buildTemplate() })
+  afterAll(async () => { await template?.baseline.close() })
   beforeEach(async () => { f = await fixture() })
   afterEach(async () => {
     vi.restoreAllMocks()

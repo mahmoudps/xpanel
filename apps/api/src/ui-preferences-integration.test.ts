@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto'
-import { cp } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { cp, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   createApiToken, createRootPrincipal, createResellerPrincipal, createSession, createTestDb, createUserPrincipal, saveMailboxSession, setTotpSecret,
 } from '@xpanel/db'
 import type { Db, PrincipalRecord, Row, TestDbHandle } from '@xpanel/db'
-import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
+import { atomicWriteJson, createStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
 import { captureMfaRuntimePolicy, type Account, type Reseller, type ServiceUser } from '@xpanel/core'
 import { deriveCsrfToken } from './auth.ts'
@@ -25,7 +27,8 @@ import { roleLabel } from '../../web/src/chrome.ts'
 import { registeredThemeDocuments } from '../../web/src/themes/contract.ts'
 import { canonicalNavigationRoute, registeredDocumentAliases } from '@xpanel/catalog'
 
-interface DocumentObservation { uiTheme: string | undefined; nativeFacts: boolean; qualified: boolean; factorKnown: boolean }
+// produced is the provider state exactly as its JSON response would carry it.
+interface DocumentObservation { uiTheme: string | undefined; nativeFacts: boolean; qualified: boolean; factorKnown: boolean; produced: any }
 const documentFlow = vi.hoisted(() => {
   const observations: DocumentObservation[] = []
   return { real: false, observations }
@@ -38,12 +41,21 @@ vi.mock('../../web/src/index.ts', async importOriginal => {
     if (documentFlow.real) return actual.serveWebUi(request, provider ? async (url: URL, req: Request) => {
       const state = await provider(url, req)
       documentFlow.observations.push({ uiTheme: state.uiTheme, nativeFacts: state.panel !== undefined || state.whm !== undefined || state.mail !== undefined,
-        qualified: state.catalog?.some(tool => tool.status === 'verified' && tool.delivery.status === 'verified') ?? false, factorKnown: typeof state.security?.totpEnabled === 'boolean' })
+        qualified: state.catalog?.some(tool => tool.status === 'verified' && tool.delivery.status === 'verified') ?? false, factorKnown: typeof state.security?.totpEnabled === 'boolean',
+        produced: JSON.parse(JSON.stringify(state)) })
       return state
     } : undefined)
     return new Response(JSON.stringify(provider ? await provider(new URL(request.url), request) : {}), { headers: { 'content-type': 'application/json' } })
   } }
 })
+
+// Every owner document read takes a real writer lease with fsynced lock files. These cases test
+// authorization and rendering, not durability, so their state lives in RAM where the host has it.
+const STATE_PARENT = existsSync('/dev/shm') ? '/dev/shm' : tmpdir()
+async function createTestStateStore(): Promise<TestStateStoreHandle> {
+  const rootDir = await mkdtemp(join(STATE_PARENT, 'xpanel-state-'))
+  return { store: createStateStore(rootDir), rootDir, close: () => rm(rootDir, { recursive: true, force: true }) }
+}
 
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const SECRET = 'ui-preference-integration-fixture-secret'
@@ -106,25 +118,18 @@ afterAll(async () => {
 
 /**
  * Prepare state and SQLite once, then reset the actual mutable authentication rows
- * in one transaction after every case. Audit history remains append-only; each
- * case captures its cursor and verifies that its old prefix stays unchanged.
+ * in one transaction when a fixture closes. Audit history remains append-only; each
+ * fixture captures its cursor and verifies that its old prefix stays unchanged.
  * Actual HTTP requests must run outside SQL transactions: request admission takes
  * the permanent state mutex before SQL, and recovery opens its own transaction.
- * Every case gets fresh state without the mutex, its sidecars or recovery intent.
+ * Every fixture gets fresh state without the mutex, its sidecars or recovery intent.
  */
-async function withFixture(run: (fixture: { db: Db; state: TestStateStoreHandle }) => Promise<void>): Promise<void> {
+interface Fixture { db: Db; state: TestStateStoreHandle; close: () => Promise<void> }
+async function openFixture(): Promise<Fixture> {
   const auditBefore = await database.db.query('SELECT * FROM audit_log ORDER BY id')
   const auditCursor = Number(auditBefore.at(-1)?.id ?? 0)
   const state = await createTestStateStore()
-  try {
-    const mutex = baseline.store.getWriterLock().mutexFilePath
-    const lockDirectory = baseline.store.getWriterLock().lockDirPath
-    await cp(baseline.rootDir, state.rootDir, { recursive: true, filter: source =>
-      source !== mutex && !source.startsWith(mutex + '-')
-      && source !== lockDirectory && !source.startsWith(lockDirectory + sep),
-    })
-    await run({ db: database.db, state })
-  } finally {
+  const close = async () => {
     try {
       await database.db.transaction(async db => {
         const principals = mutableSnapshot[0]!
@@ -149,11 +154,24 @@ async function withFixture(run: (fixture: { db: Db; state: TestStateStoreHandle 
       })
     } finally { await state.close() }
   }
+  try {
+    const mutex = baseline.store.getWriterLock().mutexFilePath
+    const lockDirectory = baseline.store.getWriterLock().lockDirPath
+    await cp(baseline.rootDir, state.rootDir, { recursive: true, filter: source =>
+      source !== mutex && !source.startsWith(mutex + '-')
+      && source !== lockDirectory && !source.startsWith(lockDirectory + sep),
+    })
+  } catch (error) { await close(); throw error }
+  return { db: database.db, state, close }
+}
+async function withFixture(run: (fixture: { db: Db; state: TestStateStoreHandle }) => Promise<void>): Promise<void> {
+  const fixture = await openFixture()
+  try { await run(fixture) } finally { await fixture.close() }
 }
 
 async function session(db: Db, principal: PrincipalRecord, surface?: EntryPoint, options: { mfaVerified?: boolean; mailbox?: ServiceUser; impersonated?: boolean } = {}) {
   const raw = `preference-${randomUUID()}`
-  const saved = await createSession(db, { principalId: principal.id, tokenHash: sessionTokenHash(raw, surface), expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  const saved = await createSession(db, { principalId: principal.id, tokenHash: sessionTokenHash(raw, surface), expiresAt: new Date(Date.now() + 600_000).toISOString(),
     mfaVerified: options.mfaVerified ?? true, ...(options.impersonated ? { impersonator: { principalId: root.id, login: root.username } } : {}) })
   if (options.mailbox) await saveMailboxSession(db, { sessionId: saved.id, mailbox: options.mailbox.login, accountId: account.id,
     serviceUserId: options.mailbox.id, sealedPassword: new Uint8Array(32) })
@@ -176,6 +194,31 @@ const read = async (application: ReturnType<typeof app>, surface: EntryPoint, au
 }
 const save = (application: ReturnType<typeof app>, surface: EntryPoint, auth: { cookie: string; csrf: string }, view: UiPreferencesView) =>
   request(application, surface, auth, { method: 'PUT', body: { uiTheme: 'classic', expectedRevision: view.revision } })
+
+/** One fixture, renderer, session and normally saved theme shared by a route matrix; afterAll closes it. */
+interface DocumentGroup extends Fixture { application: ReturnType<typeof app>; auth: Awaited<ReturnType<typeof session>> }
+async function openDocumentGroup(surface: EntryPoint, actor: PrincipalRecord, uiTheme: 'classic' | 'v2', options: Parameters<typeof session>[3] = {}): Promise<DocumentGroup> {
+  const fixture = await openFixture()
+  try {
+    const renderer = await createDefaultWebRenderer({ db: fixture.db, store: fixture.state.store, serverSecret: SECRET, entryPoint: surface, publicOrigin: ORIGIN[surface] })
+    const application = app(fixture.db, fixture.state, surface, { webRenderer: renderer })
+    const auth = await session(fixture.db, actor, surface, options)
+    const preference = await read(application, surface, auth)
+    expect((await request(application, surface, auth, { method: 'PUT', body: { uiTheme, expectedRevision: preference.revision } })).status).toBe(200)
+    expect(await read(application, surface, auth)).toMatchObject({ state: 'saved', uiTheme })
+    return { ...fixture, application, auth }
+  } catch (error) { await fixture.close(); throw error }
+}
+/** One real document request: the observed producer state and the HTML rendered from it. */
+async function renderDocument(application: ReturnType<typeof app>, surface: EntryPoint, auth: { cookie: string; csrf: string }, path: string) {
+  expect(documentFlow.real).toBe(false)
+  documentFlow.observations.length = 0
+  documentFlow.real = true
+  try {
+    const response = await request(application, surface, auth, { path })
+    return { response, body: await response.text(), observations: [...documentFlow.observations] }
+  } finally { documentFlow.real = false; documentFlow.observations.length = 0 }
+}
 
 describe('personal UI preference request integration', () => {
   it('uses only registered choices and the normal authenticated CSRF and Origin boundary', () => withFixture(async ({ db, state }) => {
@@ -574,7 +617,7 @@ describe('normal saved V2 owner Resources without host qualification', () => {
 describe('normal registered owner documents with stored facts and unqualified native capabilities', () => {
   const routes = registeredThemeDocuments().filter(document => document.surface === 'xpanel').map(document => document.route).sort()
   const aliases = registeredDocumentAliases.filter(alias => routes.includes(alias.route))
-  const cases = (['en', 'ar'] as const).flatMap(locale => (['classic', 'v2'] as const).flatMap(uiTheme => routes.map(route => ({ locale, uiTheme, route }))))
+  const cases = (['en', 'ar'] as const).flatMap(locale => routes.map(route => ({ locale, route })))
 
   it('pins the actual75 owner documents and the seven installer aliases without adding policy routes', () => {
     expect(routes).toHaveLength(75)
@@ -588,31 +631,26 @@ describe('normal registered owner documents with stored facts and unqualified na
     }
   })
 
-  it.each(cases)('renders $uiTheme $locale $route from the real authorized producer without a native grant', { tags: ['feature'] }, ({ locale, uiTheme, route }) => withFixture(async ({ db, state }) => {
-    const renderer = await createDefaultWebRenderer({ db, store: state.store, serverSecret: SECRET, entryPoint: 'xpanel', publicOrigin: ORIGIN.xpanel })
-    const application = app(db, state, 'xpanel', { webRenderer: renderer })
-    const auth = await session(db, owner, 'xpanel', { mfaVerified: false })
-    const preference = await read(application, 'xpanel', auth)
-    expect((await request(application, 'xpanel', auth, { method: 'PUT', body: { uiTheme, expectedRevision: preference.revision } })).status).toBe(200)
-    const documentPath = route + '?lang=' + locale + '&theme=light&density=comfortable'
-    expect(documentFlow.real).toBe(false)
-    const source = await request(application, 'xpanel', auth, { path: documentPath })
-    expect(source.status).toBe(200)
-    const produced = await source.json()
-    expect(produced).toMatchObject({ surface: 'xpanel', activeRoute: route, uiTheme, panel: {
-      account: { id: account.id, planId: account.planId, status: 'active' }, plan: { id: account.planId },
-    } })
-    expect(produced).not.toHaveProperty('accountId')
-    expect(produced.panel).not.toHaveProperty('usage')
-    expect(produced.catalog.some((tool: { status: string; delivery: { status: string } }) => tool.status === 'verified' && tool.delivery.status === 'verified')).toBe(false)
-    // Existing Home may supply authorized stored collections. Other unqualified documents receive only account/plan.
-    if (route !== '/home') for (const key of ['domains', 'databases', 'databaseUsers', 'serviceUsers', 'certificates', 'dnsRecords', 'files', 'recentAudit']) expect(produced.panel).not.toHaveProperty(key)
-    documentFlow.observations.length = 0
-    documentFlow.real = true
-    try {
-      const response = await request(application, 'xpanel', auth, { path: documentPath })
+  describe.each(['classic', 'v2'] as const)('with a saved %s theme', uiTheme => {
+    let group: DocumentGroup
+    beforeAll(async () => { group = await openDocumentGroup('xpanel', owner, uiTheme, { mfaVerified: false }) })
+    afterAll(async () => { await group?.close() })
+
+    it.each(cases)('renders ' + uiTheme + ' $locale $route from the real authorized producer without a native grant', { tags: ['feature'] }, async ({ locale, route }) => {
+      const documentPath = route + '?lang=' + locale + '&theme=light&density=comfortable'
+      const { response, body, observations } = await renderDocument(group.application, 'xpanel', group.auth, documentPath)
+      expect(observations).toHaveLength(1)
+      const produced = observations[0]?.produced
+      expect(produced).toMatchObject({ surface: 'xpanel', activeRoute: route, uiTheme, panel: {
+        account: { id: account.id, planId: account.planId, status: 'active' }, plan: { id: account.planId },
+      } })
+      expect(produced).not.toHaveProperty('accountId')
+      expect(produced.panel).not.toHaveProperty('usage')
+      expect(produced.catalog.some((tool: { status: string; delivery: { status: string } }) => tool.status === 'verified' && tool.delivery.status === 'verified')).toBe(false)
+      // Existing Home may supply authorized stored collections. Other unqualified documents receive only account/plan.
+      if (route !== '/home') for (const key of ['domains', 'databases', 'databaseUsers', 'serviceUsers', 'certificates', 'dnsRecords', 'files', 'recentAudit']) expect(produced.panel).not.toHaveProperty(key)
       expect(response.status).toBe(200)
-      const body = await response.text(), nodes = parseMarkup(body)
+      const nodes = parseMarkup(body)
       const html = nodes.find(node => node.namespace === 'html' && node.template < 0 && node.tag === 'html')
       expect(html?.attrs.get('lang')).toBe(locale)
       expect(html?.attrs.get('dir')).toBe(locale === 'ar' ? 'rtl' : 'ltr')
@@ -623,10 +661,9 @@ describe('normal registered owner documents with stored facts and unqualified na
         const href = new URL(value, ORIGIN.xpanel)
         if (href.origin === new URL(ORIGIN.xpanel).origin) expect(href.searchParams.has('accountId')).toBe(false)
       }
-      expect(documentFlow.observations).toHaveLength(1)
-      expect(documentFlow.observations[0]?.qualified).toBe(false)
-    } finally { documentFlow.real = false; documentFlow.observations.length = 0 }
-  }))
+      expect(observations[0]?.qualified).toBe(false)
+    })
+  })
 })
 
 
@@ -636,9 +673,7 @@ describe('normal registered operator and mailbox documents with stored identity 
     xwhm: documents.filter(document => document.surface === 'xwhm').map(document => document.route).sort(),
     xmail: documents.filter(document => document.surface === 'xmail').map(document => document.route).sort(),
   }
-  const cases = (['xwhm', 'xmail'] as const).flatMap(surface =>
-    (['en', 'ar'] as const).flatMap(locale => (['classic', 'v2'] as const).flatMap(uiTheme =>
-      routes[surface].map(route => ({ surface, locale, uiTheme, route })))))
+  const groups = (['xwhm', 'xmail'] as const).flatMap(surface => (['classic', 'v2'] as const).map(uiTheme => ({ surface, uiTheme })))
 
   it('pins the actual120 operator and23 mailbox documents with their existing aliases', () => {
     expect(routes.xwhm).toHaveLength(120)
@@ -660,60 +695,55 @@ describe('normal registered operator and mailbox documents with stored identity 
     expect(routes.xmail).toEqual(expect.arrayContaining(['/mail/search', '/mail/settings/security']))
   })
 
-  it.each(cases)('renders $surface $uiTheme $locale $route without provider observations', { tags: ['feature'] }, ({ surface, locale, uiTheme, route }) => withFixture(async ({ db, state }) => {
-    const renderer = await createDefaultWebRenderer({ db, store: state.store, serverSecret: SECRET, entryPoint: surface, publicOrigin: ORIGIN[surface] })
-    const application = app(db, state, surface, { webRenderer: renderer })
-    const actor = surface === 'xwhm' ? root : mailboxPrincipal
-    const auth = await session(db, actor, surface, surface === 'xmail' ? { mailbox, mfaVerified: false } : {})
-    const preference = await read(application, surface, auth)
-    expect((await request(application, surface, auth, { method: 'PUT', body: { uiTheme, expectedRevision: preference.revision } })).status).toBe(200)
-    expect(await read(application, surface, auth)).toMatchObject({ state: 'saved', uiTheme })
-    const snapshot = vi.spyOn(state.store, 'readSnapshot')
-    const nativeMail = vi.spyOn(mailDocuments, 'loadMailDocument').mockImplementation(async () => { throw new Error('unexpected mail provider document load') })
-    const path = route + '?lang=' + locale + '&theme=light&density=comfortable'
-    try {
-      expect(documentFlow.real).toBe(false)
-      const sourceResponse = await request(application, surface, auth, { path })
-      expect(sourceResponse.status).toBe(200)
-      const produced = await sourceResponse.json()
-      expect(produced).toMatchObject({ surface, uiTheme, activeRoute: route })
-      expect(produced).not.toHaveProperty('accountId')
-      expect(produced).not.toHaveProperty('generationId')
-      expect(produced.catalog.some((tool: { status: string; delivery: { status: string } }) => tool.status === 'verified' && tool.delivery.status === 'verified')).toBe(false)
-      if (surface === 'xwhm') {
-        expect(Object.keys(produced.whm).sort()).toEqual(['activeReseller', 'principal'])
-        expect(produced.whm).toMatchObject({ principal: { kind: 'root', id: root.id }, activeReseller: null })
-        expect(produced).not.toHaveProperty('mail')
-      } else {
-        expect(produced.mail).toEqual({ mailbox: mailbox.login })
-        expect(produced).not.toHaveProperty('whm')
+  describe.each(groups)('$surface with a saved $uiTheme theme', ({ surface, uiTheme }) => {
+    let group: DocumentGroup
+    beforeAll(async () => {
+      group = await openDocumentGroup(surface, surface === 'xwhm' ? root : mailboxPrincipal, uiTheme, surface === 'xmail' ? { mailbox, mfaVerified: false } : {})
+    })
+    afterAll(async () => { await group?.close() })
+    const cases = (['en', 'ar'] as const).flatMap(locale => routes[surface].map(route => ({ locale, route })))
+
+    it.each(cases)('renders ' + surface + ' ' + uiTheme + ' $locale $route without provider observations', { tags: ['feature'] }, async ({ locale, route }) => {
+      const snapshot = vi.spyOn(group.state.store, 'readSnapshot')
+      const nativeMail = vi.spyOn(mailDocuments, 'loadMailDocument').mockImplementation(async () => { throw new Error('unexpected mail provider document load') })
+      const path = route + '?lang=' + locale + '&theme=light&density=comfortable'
+      try {
+        const { response, body, observations } = await renderDocument(group.application, surface, group.auth, path)
+        expect(observations).toHaveLength(1)
+        const produced = observations[0]?.produced
+        expect(produced).toMatchObject({ surface, uiTheme, activeRoute: route })
+        expect(produced).not.toHaveProperty('accountId')
+        expect(produced).not.toHaveProperty('generationId')
+        expect(produced.catalog.some((tool: { status: string; delivery: { status: string } }) => tool.status === 'verified' && tool.delivery.status === 'verified')).toBe(false)
+        if (surface === 'xwhm') {
+          expect(Object.keys(produced.whm).sort()).toEqual(['activeReseller', 'principal'])
+          expect(produced.whm).toMatchObject({ principal: { kind: 'root', id: root.id }, activeReseller: null })
+          expect(produced).not.toHaveProperty('mail')
+        } else {
+          expect(produced.mail).toEqual({ mailbox: mailbox.login })
+          expect(produced).not.toHaveProperty('whm')
+        }
+        expect(response.status).toBe(200)
+        const nodes = parseMarkup(body)
+        const html = nodes.find(node => node.namespace === 'html' && node.template < 0 && node.tag === 'html')
+        expect(html?.attrs.get('lang')).toBe(locale)
+        expect(html?.attrs.get('dir')).toBe(locale === 'ar' ? 'rtl' : 'ltr')
+        expect(html?.attrs.get('data-ui-theme') ?? 'classic').toBe(uiTheme)
+        for (const anchor of nodes.filter(node => node.namespace === 'html' && node.template < 0 && node.tag === 'a' && node.attrs.has('href'))) {
+          const value = anchor.attrs.get('href')
+          if (value === undefined) throw new Error('missing normal realm document link')
+          const href = new URL(value, ORIGIN[surface])
+          if (href.origin === new URL(ORIGIN[surface]).origin) expect(href.searchParams.has('accountId')).toBe(false)
+        }
+        expect(observations[0]?.qualified).toBe(false)
+        expect(snapshot).not.toHaveBeenCalled()
+        expect(nativeMail).not.toHaveBeenCalled()
+      } finally {
+        snapshot.mockRestore()
+        nativeMail.mockRestore()
       }
-      documentFlow.observations.length = 0
-      documentFlow.real = true
-      const response = await request(application, surface, auth, { path })
-      expect(response.status).toBe(200)
-      const nodes = parseMarkup(await response.text())
-      const html = nodes.find(node => node.namespace === 'html' && node.template < 0 && node.tag === 'html')
-      expect(html?.attrs.get('lang')).toBe(locale)
-      expect(html?.attrs.get('dir')).toBe(locale === 'ar' ? 'rtl' : 'ltr')
-      expect(html?.attrs.get('data-ui-theme') ?? 'classic').toBe(uiTheme)
-      for (const anchor of nodes.filter(node => node.namespace === 'html' && node.template < 0 && node.tag === 'a' && node.attrs.has('href'))) {
-        const value = anchor.attrs.get('href')
-        if (value === undefined) throw new Error('missing normal realm document link')
-        const href = new URL(value, ORIGIN[surface])
-        if (href.origin === new URL(ORIGIN[surface]).origin) expect(href.searchParams.has('accountId')).toBe(false)
-      }
-      expect(documentFlow.observations).toHaveLength(1)
-      expect(documentFlow.observations[0]?.qualified).toBe(false)
-      expect(snapshot).not.toHaveBeenCalled()
-      expect(nativeMail).not.toHaveBeenCalled()
-    } finally {
-      documentFlow.real = false
-      documentFlow.observations.length = 0
-      snapshot.mockRestore()
-      nativeMail.mockRestore()
-    }
-  }))
+    })
+  })
 
   const denied = async (application: ReturnType<typeof app>, surface: 'xwhm' | 'xmail', auth: Awaited<ReturnType<typeof session>>, path: string, status: 403 | 404 = 403): Promise<void> => {
     // Observation mode exposes the real producer model; real mode checks the actual HTML status.

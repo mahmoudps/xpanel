@@ -71,6 +71,20 @@ describe('web directives over the checked .htaccess workspace', () => {
     const pages = await (await t.route('error-pages', 'PUT', { expectedRevision: removed.document.revision, model: { entries: [{ code: 404, path: '/missing.html' }] } }))!.json()
     expect(pages).toMatchObject({ existence: 'not-checked', model: { entries: [{ code: 404, path: '/missing.html' }] } })
   })
+  it('writes saved Hotlink Protection into the domain .htaccess as referrer rewrite rules', async () => {
+    const t = await fixture()
+    const before = await t.readJson('hotlink')
+    expect(before).toMatchObject({ feature: 'hotlink', managed: false, model: { enabled: false }, capabilities: { canSave: true } })
+    const model = { enabled: true, allowedHosts: ['example.test', 'cdn.example.test'], extensions: ['png', 'jpg'], allowEmptyReferrer: true, redirectUrl: 'https://example.test/blocked.html' }
+    const saved = await (await t.route('hotlink', 'PUT', { expectedRevision: before.document.revision, model }))!.json()
+    expect(saved).toMatchObject({ managed: true, model, application: { status: 'saved', syntaxChecked: true }, document: { managedFeatures: ['hotlink'] } })
+    expect(t.file()!.content).toBe(['# BEGIN xPanel hotlink', 'RewriteEngine On', 'RewriteCond %{HTTP_REFERER} !^$',
+      'RewriteCond %{HTTP_REFERER} !^https?://example\\.test(?::[0-9]+)?(?:/|$) [NC]', 'RewriteCond %{HTTP_REFERER} !^https?://cdn\\.example\\.test(?::[0-9]+)?(?:/|$) [NC]',
+      'RewriteRule \\.(?:png|jpg)$ https://example.test/blocked.html [R=302,NC,L]', '# END xPanel hotlink', ''].join('\r\n') + original)
+    expect(t.access).toHaveBeenCalledWith(root, account, 'domain.web-directives.hotlink')
+    const off = await (await t.route('hotlink', 'PUT', { expectedRevision: saved.document.revision, model: { ...model, enabled: false } }))!.json()
+    expect(off).toMatchObject({ managed: false, application: { status: 'saved' } }); expect(t.file()!.content).toBe(original)
+  })
   it('creates the file when it does not exist and reports a guarded rollback truthfully', async () => {
     const created = await fixture({ content: null })
     const empty = await created.readJson('indexes')

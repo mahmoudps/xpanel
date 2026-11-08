@@ -17,6 +17,7 @@ export function classicTransferClientTemplates(locale: Locale): string {
     + row('transfer-archive-summary', ['part', 'count']) + grid('transfer-archive-summary', [msgctxt('whm-transfer-client', 'Part'), msgid('Count')])
     + row('transfer-archive-conflicts', ['kind', 'value']) + grid('transfer-archive-conflicts', [msgid('Conflict'), msgid('Value')])
     + row('transfer-archive-unmapped', ['state', 'detail', 'path']) + grid('transfer-archive-unmapped', [msgid('Not imported or changed'), msgid('Detail'), msgid('Path')])
+    + row('transfer-revert-loss', ['item', 'observed']) + grid('transfer-revert-loss', [msgid('Item'), msgid('Observed here since the cutover')])
 }
 
 export const classicTransferCredentialTemplates = (): string => `<template data-xp-template="transfer-credential-row"><tr><td><bdi dir="auto" data-xp-slot="label"></bdi></td><td><bdi dir="ltr" data-xp-slot="fingerprint"></bdi></td><td><bdi dir="ltr" data-xp-slot="created"></bdi></td><td><bdi dir="ltr" data-xp-slot="actor"></bdi></td><td><button type="button" class="xp-btn" data-xp-action="remove" disabled><span data-xp-slot="remove-label"></span></button></td></tr></template>`

@@ -65,7 +65,7 @@ export const movedZoneRecords = (records: readonly ZoneRecord[], from: string, t
 
 /** The desired state the first copy was built from; a change during the copy means the destination copy is not the account. */
 export const liveStateDigest = (bundle: TransferAccountBundle): string =>
-  createHash('sha256').update(JSON.stringify({ domains: bundle.domains, databases: bundle.databases.map(db => db.name), databaseUsers: bundle.databaseUsers, mailboxes: bundle.mailboxes, zones: bundle.zones, cron: bundle.cron })).digest('hex')
+  createHash('sha256').update(JSON.stringify({ domains: bundle.domains, databases: bundle.databases.map(db => db.name), databaseUsers: bundle.databaseUsers, mailboxes: bundle.mailboxes, zones: bundle.zones, cron: bundle.cron, edge: bundle.edge ?? null })).digest('hex')
 
 export async function handleLiveSourceRoute(request: Request, url: URL, method: string, ports: LiveSourcePorts): Promise<Response | null> {
   const match = ROUTE.exec(url.pathname)

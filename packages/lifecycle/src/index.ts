@@ -129,6 +129,7 @@ export type {
   ImportDatabase,
   ImportDbUser,
   ImportDomain,
+  ImportLeechFolder,
   ImportMailbox,
   ImportPlan,
   ImportWarning,

@@ -6,7 +6,8 @@ import { fail } from '@xpanel/core'
 import type { Account } from '@xpanel/core'
 import { buildReview, createTransferSession, transition } from '@xpanel/lifecycle'
 import type { TransferEvent, TransferSession } from '@xpanel/lifecycle'
-import { movedStatePath } from '../../agent/src/account-edge.ts'
+import { movedStatePath, writeAccountEdgeState } from '../../agent/src/account-edge.ts'
+import type { AccountEdgeState } from '../../agent/src/account-edge.ts'
 import { handleTransferSourcePackageRoute, parsePackageRequest } from './acct-transfer-source.ts'
 import { createTransferExecution } from './lifecycle-transfer-execution.ts'
 import type { TransferExecutionDeps } from './lifecycle-transfer-execution.ts'
@@ -24,7 +25,7 @@ const PLAN = { name: 'gold', resources: { diskMb: 1000, bandwidthMbMonth: 10000,
   caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 4, forwarders: 4, mailingLists: 5, ftpAccounts: 5, databases: 5, phpWorkers: 5 }, dedicatedIp: false, shell: 'jailed', defaultMailboxQuotaMb: 100 } as never
 const PHP = { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } as never
 let network: FakeNetwork, source: FakeServer, destination: FakeServer
-let sourceTasks: Map<string, Record<string, unknown>>, packages: Record<string, unknown>[], applied: string[], suspensions: string[], drained: string[], queued: { drained: boolean; remaining: number | null }
+let sourceTasks: Map<string, Record<string, unknown>>, packages: Record<string, unknown>[], applied: string[], suspensions: string[], drained: string[], queued: { drained: boolean; remaining: number | null }, edge: AccountEdgeState
 
 const account = (store: FakeServer['store'], username: string, ipv4: string, planId: string) => store.createAccount({ username, passwordHash: HASH, primaryDomain: username + '.example.test', planId, ownerId: null, contactEmail: 'owner@example.test', ipv4, shell: 'jailed', php: PHP } as never)
 const sourceAgent = async (_caller: AuthenticatedCaller, path: string, init: { method?: string; body?: unknown } = {}): Promise<Response> => {
@@ -39,7 +40,7 @@ const sourceAgent = async (_caller: AuthenticatedCaller, path: string, init: { m
 }
 
 beforeEach(async () => {
-  sourceTasks = new Map(); packages = []; applied = []; suspensions = []; drained = []; queued = { drained: true, remaining: 0 }
+  sourceTasks = new Map(); packages = []; applied = []; suspensions = []; drained = []; queued = { drained: true, remaining: 0 }; edge = {}
   network = createFakeNetwork()
   source = await addFakeServer(network, 'source', { routes: server => [
     (request, url, method) => handleLiveSourceRoute(request, url, method, { ...server.guards, store: server.store, link: server.link,
@@ -49,7 +50,7 @@ beforeEach(async () => {
         else await server.store.unsuspendAccount(target.id, { allowLocked: true } as never)
       }, applyAccount: async (_caller, target) => { applied.push(target.username) },
       drainMail: async (_caller, domains) => { drained.push(...domains); return queued } }),
-    (request, url, method) => handleTransferSourcePackageRoute(request, url, method, { ...server.guards, readSnapshot: async () => ({ ...await server.store.readSnapshot(), server: { settings: { hostname: SOURCE_HOST } } }) as never, readEdge: async () => ({}), agent: sourceAgent }),
+    (request, url, method) => handleTransferSourcePackageRoute(request, url, method, { ...server.guards, readSnapshot: async () => ({ ...await server.store.readSnapshot(), server: { settings: { hostname: SOURCE_HOST } } }) as never, readEdge: async () => edge, agent: sourceAgent }),
   ] })
   destination = await addFakeServer(network, 'destination')
   await linkServers(destination, source)
@@ -87,7 +88,7 @@ const execution = (options: { failOn?: (body: Record<string, unknown>) => boolea
         const body = init.body as Record<string, unknown>, id = randomUUID(), failed = options.failOn?.(body) ?? false
         hostTasks.push(body)
         if (body.kind === 'fetch' && options.midway) await options.midway()
-        tasks.set(id, { id, kind: body.kind, state: failed ? 'failed' : 'succeeded', error: failed ? 'synthetic failure' : null, result: body.kind === 'home-changes' ? { changed: options.changed ?? false } : { home: { compared: true }, databases: [], certificates: [] } })
+        tasks.set(id, { id, kind: body.kind, state: failed ? 'failed' : 'succeeded', error: failed ? 'synthetic failure' : null, result: body.kind === 'home-changes' ? { files: options.changed ? 1 : 0, mail: options.changed ? [{ mailbox: 'info@alice.example.test', messages: 2 }] : [] } : { home: { compared: true }, databases: [], certificates: [] } })
         return Response.json({ task: { id } }, { status: 202 })
       }
       if (init.method === 'DELETE') return Response.json({ discarded: true })
@@ -174,6 +175,16 @@ describe('live transfer', () => {
     expect(await source.store.getAccountByUsername('alice')).toMatchObject({ status: 'active' })
     expect(await destination.store.getAccountByUsername('alice')).toBeNull()
   })
+  it('refuses the cutover when Leech Protection changed during the first copy', async () => {
+    const folder = { path: 'public_html/members', maxLogins: 3, redirectUrl: 'https://alice.example.test/', alertEmail: null, disableUsers: false }
+    edge = { leech: { version: 1, folders: [folder], updatedAt: '2026-11-07T09:00:00.000Z' } }
+    const ports = execution({ midway: async () => { edge = { leech: { version: 1, folders: [{ ...folder, maxLogins: 5 }], updatedAt: '2026-11-07T10:00:00.000Z' } } } })
+    const outcome = await run(ports, await session())
+    const last = outcome.events.at(-1) as Extract<TransferEvent, { type: 'progress' }>
+    expect(last).toMatchObject({ phase: 'failed', error: expect.stringContaining('changed on the source during the copy') })
+    expect(await source.store.getAccountByUsername('alice')).toMatchObject({ status: 'active' })
+    expect(await destination.store.getAccountByUsername('alice')).toBeNull()
+  })
   it('says so when the source cannot be released', async () => {
     const ports = execution({ failOn: body => { if (body.incremental !== true) return false; source.reachable = false; return true } })
     const outcome = await run(ports, await session())
@@ -188,19 +199,38 @@ describe('live transfer', () => {
     expect(await ports.execution.recover(destination.caller, s.progress.alice!, { liveFrozen: true }, s)).toBe(false)
     expect(await source.store.getAccountByUsername('alice')).toMatchObject({ status: 'active' })
   })
-  it('takes a cut-over account back, and asks first when the copy changed', { tags: ['slow'] }, async () => {
+  it('takes a cut-over account back only with the digest of a preview of what it drops', { tags: ['slow'] }, async () => {
     const ports = execution({ changed: true }), s = await session()
     const { results } = await run(ports, s)
-    const refused = await ports.execution.revert!(destination.caller, s, 'alice', results.alice!, false).catch(error => error)
-    expect(refused).toMatchObject({ code: 'CONFLICT', detail: { reason: 'post_cutover_writes' } })
+    const preview = await ports.execution.previewRevert!(destination.caller, s, 'alice', results.alice!)
+    expect(preview).toMatchObject({ account: 'alice', mail: [{ mailbox: 'info@alice.example.test', messages: 2 }], files: 1, databases: { onCopy: 1, changes: 'unknown' }, zones: { changed: 0, total: 1 }, edgeNotCarriedBack: [] })
+    await expect(ports.execution.revert!(destination.caller, s, 'alice', results.alice!, '')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { reason: 'revert_preview_required' } })
+    const refused = await ports.execution.revert!(destination.caller, s, 'alice', results.alice!, 'f'.repeat(64)).catch(error => error)
+    expect(refused).toMatchObject({ code: 'CONFLICT', detail: { reason: 'revert_preview_stale', preview: { digest: preview.digest } } })
     expect(await source.store.getAccountByUsername('alice')).toMatchObject({ status: 'suspended' })
-    const live = await ports.execution.revert!(destination.caller, s, 'alice', results.alice!, true)
-    expect(live.revertedAt).toEqual(expect.any(String))
+    const live = await ports.execution.revert!(destination.caller, s, 'alice', results.alice!, preview.digest)
+    expect(live).toMatchObject({ revertedAt: expect.any(String), lost: preview })
+    expect(live).not.toHaveProperty('zoneSerials')
     expect(await source.store.getAccountByUsername('alice')).toMatchObject({ status: 'active' })
     await expect(movedFile()).rejects.toThrow()
     expect((await zone()).records.find(record => record.name === '@' && record.type === 'A')).toMatchObject({ content: SOURCE_IP, ttl: 14400 })
     expect(await destination.store.getAccountByUsername('alice')).toBeNull()
-    await expect(ports.execution.revert!(destination.caller, s, 'alice', { ...results.alice!, live: { ...results.alice!.live as object, revertedAt: 'x' } as never }, true)).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(ports.execution.revert!(destination.caller, s, 'alice', { ...results.alice!, live: { ...results.alice!.live as object, revertedAt: 'x' } as never }, preview.digest)).rejects.toMatchObject({ code: 'CONFLICT' })
+  })
+  it('refuses a confirmation older than an edge setting saved here, then lists that setting as not carried back', async () => {
+    const ports = execution(), s = await session()
+    const { results } = await run(ports, s)
+    const before = await ports.execution.previewRevert!(destination.caller, s, 'alice', results.alice!)
+    expect(before).toMatchObject({ mail: [], files: 0, edgeNotCarriedBack: [] })
+    const copy = String(results.alice!.createdAccountId), later = new Date(Date.parse(String((results.alice!.live as { cutoverAt: string }).cutoverAt)) + 1000).toISOString()
+    await writeAccountEdgeState(destination.store.rootDir, copy, { ipBlocker: { version: 1, entries: ['198.51.100.7'], updatedAt: later },
+      cache: { version: 1, enabled: true, epoch: null, purgedAt: null, updatedAt: '2026-10-29T00:00:00.000Z' } }, async () => undefined)
+    const stale = await ports.execution.revert!(destination.caller, s, 'alice', results.alice!, before.digest).catch(error => error)
+    expect(stale).toMatchObject({ code: 'CONFLICT', detail: { reason: 'revert_preview_stale', preview: { edgeNotCarriedBack: ['ipBlocker'] } } })
+    const live = await ports.execution.revert!(destination.caller, s, 'alice', results.alice!, stale.detail.preview.digest)
+    expect(live).toMatchObject({ revertedAt: expect.any(String), lost: { edgeNotCarriedBack: ['ipBlocker'] } })
+    expect(destination.audits.find(entry => entry.action === 'transfer.account.live_reverted')).toBeDefined()
+    expect(await source.store.getAccountByUsername('alice')).toMatchObject({ status: 'active' })
   })
   it('needs a linked server as its source', async () => {
     const s = createTransferSession({ id: randomUUID(), actor: 'root', now: '2026-11-07T10:00:00.000Z', auth: { kind: 'api-token', url: 'https://source.example.test', tokenId: randomUUID(), tlsFingerprint: null }, live: true })

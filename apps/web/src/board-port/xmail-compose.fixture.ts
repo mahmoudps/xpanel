@@ -66,6 +66,7 @@ const fixtureModel = (): ComposeModel => ({
   vacationStatus: 'Off',
   vacationOn: false,
   vacationOpenLabel: 'Set up responder',
+  filtersCanManage: true,
   filterCount: '3 Sieve rules · run in order',
   filterRules: FIXTURE_RULES,
   wsHtml: '',

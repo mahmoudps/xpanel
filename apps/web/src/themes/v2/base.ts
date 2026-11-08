@@ -7,6 +7,25 @@ const R = '[data-ui-theme="v2"]'
 const W = `:where(${R})`
 const CONTROL = 'input:not([type=checkbox],[type=radio],[type=range],[type=file],[type=hidden],[type=color])'
 
+// A matrix, or a table whose later columns hold checkboxes, only makes sense under its headers.
+// A table keeps its columns when a later cell holds a checkbox (a matrix) or when it lays out its own phone rows.
+const PT = `${W} :where(table:not(.v2-matrix,.v2-whm-quotas__table,:has(*+td [type=checkbox]),:is(.v2-identity-rows,.v2-boxtrapper,[data-leech-protection]) *))`
+const CB = 'tr:has(>:first-child [type=checkbox])'
+/**
+ * Phone rows keep two columns: the item name with its other facts under it, opposite the second cell (value or status).
+ * A leading checkbox sits beside the name. The headers show only while the table has no cells. Zero specificity lets
+ * page rules shape their own rows; only the desktop widths and cell spacing are forced.
+ */
+export const V2_PHONE_TABLE_ROWS_CSS = `@media(max-width:600px){${PT}{position:relative;min-width:0!important}
+${PT}:has(td)>thead{position:absolute;top:0;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+${PT} tr{display:grid;grid-template-columns:minmax(0,1fr) fit-content(50%);gap:8px 16px;padding:8px 16px}
+${PT} tr>*{grid-column:1;padding:0!important;border:0;min-width:0!important;white-space:normal}
+${PT} tr>:nth-child(2):not([colspan]),${PT} ${CB}>:nth-child(3){grid-column:2;grid-row:1;justify-self:end;text-align:end}
+${PT} tr>:is([colspan],:nth-child(n+3):has(button,input,select)){grid-column:1/-1}
+${PT} ${CB}{position:relative;padding-inline-start:48px}
+${PT} ${CB}>:first-child{position:absolute;top:8px;inset-inline-start:16px}
+${PT} ${CB}>:nth-child(2){grid-column:1;grid-row:1;justify-self:start;text-align:start}}`
+
 export const V2_BASE_CSS = `${R}{--v2-panel-padding:var(--space-3);--v2-control-align:start}
 ${R}:dir(rtl){--v2-control-align:end}
 ${R} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--font-sans);-webkit-font-smoothing:antialiased;text-size-adjust:100%}

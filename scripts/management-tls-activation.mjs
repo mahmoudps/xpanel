@@ -137,7 +137,7 @@ export function observeManagementActivation(nginxState, paths, certificateSha256
   const sourceRoot = dirname(dirname(realpathSync(fileURLToPath(import.meta.url))))
   const sourceInputs = ['scripts/management-tls.mjs', 'scripts/management-tls-activation.mjs'].map(path => ({ ...trustedFile(join(sourceRoot, path), 1024 * 1024), relativePath: path }))
   const files = { managementConfigSha256: trustedFile(paths.config, 16384).sha256, ingressSha256: trustedFile(paths.ingress, 1024 * 1024).sha256,
-    includeSha256: trustedFile(paths.include, 16384).sha256 }
+    includeSha256: trustedFile(paths.include, 16384).sha256, challengeSha256: trustedFile(paths.challenge, 1024 * 1024).sha256 }
   const bootId = readBounded('/proc/sys/kernel/random/boot_id', 64).toString('utf8').trim()
   check(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(bootId), 'ACTIVATION_BOOT_INVALID')
   return { bootId, sourceInputs, files, certificateSha256, invocationId: nginxState.InvocationID,

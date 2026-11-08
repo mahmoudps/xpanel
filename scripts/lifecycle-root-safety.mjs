@@ -6,7 +6,7 @@ import { constants } from 'node:fs'
 import { lstat, open, readFile, readlink, realpath, rename, unlink, readdir } from 'node:fs/promises'
 import { basename, dirname, join, posix } from 'node:path'
 import { ReconcilerJournal } from '../apps/agent/src/reconciler-journal.ts'
-import { withHostOperationGuard, assertHostOperationGuardHeld, assertHostOperationGuardActive, getStrictOperationDatabaseOrigin, createRootOperationAuditAuthority, withReadonlyOperationDatabase, withReadonlyLifecycleIntentObservation, assertOperationIntentReceipt, getPrincipal, getDurableJob, createJob, finishJob, finishUpgrade, currentSchemaVersion, latestUpgrade, reindexFromState } from '../packages/db/src/index.ts'
+import { withHostOperationGuard, assertHostOperationGuardHeld, assertHostOperationGuardActive, getStrictOperationDatabaseOrigin, createRootOperationAuditAuthority, withReadonlyOperationDatabase, withReadonlyLifecycleIntentObservation, assertOperationIntentReceipt, getPrincipal, getDurableJob, createJob, finishJob, finishUpgrade, currentSchemaVersion, latestUpgrade, reindexFromState, restoreOperationalDatabaseSnapshot } from '../packages/db/src/index.ts'
 import { StateStore, generationSourceIsLinked } from '../packages/state/src/index.ts'
 import { normalizeDependencyModes, offlineDependencyInstallArguments, withAuthenticatedReleaseArchive, stageAuthenticatedReleaseArchive, verifyAuthenticatedReleaseArchive } from './release-verifier.mjs'
 import { readInstallationReceipt, parseInstallationReceipt, assertOwnedFile, withTrustedFile, withTrustedDirectory, requireLinuxRoot, OWNED_PANEL_UNITS } from './lifecycle-ownership.mjs'
@@ -357,7 +357,8 @@ async function withBootstrapWriter(scope, callback) {
     })
   }
   // All read-only SQLite/audit scopes have ended. EX and the native DB/source descriptors remain held.
-  const handle = createDb(DATABASE, { durability: 'strict' })
+  // This signed helper reads the host database before its own migrate phase applies this build's migrations.
+  const handle = createDb(DATABASE, { durability: 'strict', migrations: 'pre-migration' })
   scope.dbHandle = handle; scope.phase = 'writable'
   try {
     const actual = await handle.db.transaction(tx => getStrictOperationDatabaseOrigin(tx))
@@ -392,12 +393,12 @@ export async function withNativeLifecycleDatabaseAdmission(operation, callback, 
       await withTrustedFile(dependency.root + '/release-manifest.json', { maxBytes: 16 * 1024 * 1024, sha256: source.manifestSha256 }, async () => {})
     }
     await verifyInstalledSource()
-    const preflight = await withReadonlyOperationDatabase(DATABASE, reader => readBootstrapDatabase(reader, scope))
+    const preflight = await withReadonlyOperationDatabase(DATABASE, reader => readBootstrapDatabase(reader, scope), 'pre-migration')
     const admission = await import('./lifecycle-admission.mjs')
     return admission.withLifecycleBootstrapExclusiveAdmission(scope.capability, async () => {
       scope.phase = 'exclusive'
       await verifyInstalledSource()
-      scope.dbProof = await withReadonlyOperationDatabase(DATABASE, reader => readBootstrapDatabase(reader, scope))
+      scope.dbProof = await withReadonlyOperationDatabase(DATABASE, reader => readBootstrapDatabase(reader, scope), 'pre-migration')
       if (JSON.stringify(preflight.principal) !== JSON.stringify(scope.dbProof.principal)) fail('LIFECYCLE_BOOTSTRAP_PRINCIPAL_CHANGED')
       scope.phase = 'admitted'
       return withBootstrapWriter(scope, callback)
@@ -507,7 +508,7 @@ async function observeClosedRecoveryDatabase(scope, dispatch, observeHosted, iss
       const held = readerStorage.getStore()
       if (held) return work(held)
       const observeReader = reader => readerStorage.run(reader, () => work(reader))
-      return mode === 'closed' ? withReadonlyClosedOperationDatabase(scope.capability, observeReader) : withReadonlyOperationDatabase(DATABASE, observeReader)
+      return mode === 'closed' ? withReadonlyClosedOperationDatabase(scope.capability, observeReader, 'pre-migration') : withReadonlyOperationDatabase(DATABASE, observeReader, 'pre-migration')
     }
     const assertCurrent = async () => {
       await assertRecoveryDrained(scope)
@@ -585,7 +586,7 @@ async function repairIssuedAudit(scope) {
     // The full readonly prior-index/job/root proof, EX, native source and stop-only admission already hold.
     // This connection is confined to the issued audit repair; no general lifecycle writer is exposed.
     await assertLifecycleIssuedAuditRepairHeld(capability)
-    const handle = createDb(DATABASE, { durability: 'strict' })
+    const handle = createDb(DATABASE, { durability: 'strict', migrations: 'pre-migration' })
     try {
       const actual = await handle.db.transaction(tx => getStrictOperationDatabaseOrigin(tx))
       if (!originEqual(actual, scope.origin)) fail('LIFECYCLE_ISSUED_DATABASE_CHANGED')
@@ -676,7 +677,7 @@ async function accountLifetimeHash() {
 }
 const lifetimeDigest = accounts => sha(JSON.stringify(accounts.map(account => Object.fromEntries(['id', 'username', 'uid', 'gid', 'home', 'createdAt', 'primaryDomain', 'ownerId', 'planId'].map(key => [key, account[key]]))).sort((a, b) => a.id.localeCompare(b.id))))
 
-async function observeRecoveryGenerationSource(scope, withReader = work => withReadonlyOperationDatabase(DATABASE, work)) {
+async function observeRecoveryGenerationSource(scope, withReader = work => withReadonlyOperationDatabase(DATABASE, work, 'pre-migration')) {
   return withReader(async reader => {
     const rows = await reader.query("SELECT id,status,checksum FROM config_generations WHERE status='active' ORDER BY id")
     const generation = rows[0]
@@ -1360,12 +1361,19 @@ export async function createNativeUpgradeSafety(options) {
       await withTrustedFile(databaseCopy, { maxBytes: 256 * 1024 * 1024 }, async backup => { await backup.verify(); scope.backup = { path: databaseCopy, sha256: backup.sha256, schema } })
       await safety.syncPath(databaseCopy); await safety.syncPath(dirname(databaseCopy))
     },
-    // Rewind: the engine matched this copy to the snapshot receipt. Derived idx_* rows are rebuilt from
-    // the restored state files; identity, session, job and audit authority never rewinds (A25).
+    // Rollback: the database returns to this upgrade's pre-migration copy, bound to the hash this scope
+    // recorded, so the previous release reads its own reviewed migrations. Writers stayed fenced since the
+    // snapshot; issued references, epochs, ids and audit history carry forward. Derived idx_* rows follow state.
     async restoreControlPlane(snapshotPath) {
-      await current(); await safety.assertWritersQuiescent()
+      const scope = await current(); await safety.assertWritersQuiescent()
       if (!snapshotPath.startsWith(ROOT + '/backups/')) fail('LIFECYCLE_BACKUP_PATH_INVALID')
-      await withTrustedFile(snapshotPath + '.control.db', { maxBytes: 256 * 1024 * 1024 }, async copy => { await copy.verify() })
+      if (scope.backup?.path !== snapshotPath + '.control.db' || !SHA.test(scope.backup?.sha256)) fail('LIFECYCLE_DATABASE_SNAPSHOT_UNBOUND')
+      try { await restoreOperationalDatabaseSnapshot(db, { path: scope.backup.path, sha256: scope.backup.sha256 }) } catch (error) {
+        const reason = error?.detail?.reason
+        if (reason === 'database_snapshot_missing') fail('LIFECYCLE_DATABASE_SNAPSHOT_MISSING')
+        if (reason === 'database_snapshot_changed') fail('LIFECYCLE_DATABASE_SNAPSHOT_CHANGED')
+        throw error
+      }
       await reindexFromState(db, await new StateStore('/var/lib/xpanel/state').readSnapshot())
       await current()
     },

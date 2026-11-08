@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, open, realpath, readlink } from 'node:fs/promises'
 import { dirname, posix } from 'node:path'
+import { ACTIVATION_KIND, ACTIVATION_PATH } from './management-tls-activation.mjs'
 
 export const INSTALLATION_RECEIPT = '/var/lib/xpanel-lifecycle/installation.json'
 export const OWNED_PANEL_UNITS = Object.freeze(['xpanel-api.service', 'xpanel-agent.service', 'xpanel-management-tls.service', 'xpanel-management-tls.timer'])
@@ -25,6 +26,10 @@ const REMOVABLE = new Set([
 // The agent rewrites it when WHM saves a TLS policy, so the receipt cannot pin it; uninstall removes it by path.
 const UNPINNED_REMOVABLE = Object.freeze(['/etc/nginx/xpanel-management/tls-policy.conf', '/etc/xpanel/management-access.json'])
 export const isRemovableControlPlanePath = path => typeof path === 'string' && REMOVABLE.has(path)
+// management-tls rewrites these on renewal, rebind, ingress repair and rollback. Its activation record names their bytes;
+// the receipt's inode, size and hash stay install-time observations.
+const TLS_REWRITTEN = Object.freeze({ '/etc/nginx/conf.d/xpanel-management.conf': 'ingressSha256', '/etc/nginx/xpanel-management/ingress-secret.conf': 'includeSha256', '/etc/nginx/conf.d/xpanel-management-challenge.conf': 'challengeSha256' })
+const tlsRewritten = entry => Object.hasOwn(TLS_REWRITTEN, entry.path) && entry.kind === 'file'
 
 /** Syntax only. A copied receipt is neither ownership proof nor authority to mutate the host. */
 export function parseInstallationReceipt(value) {
@@ -124,8 +129,8 @@ export async function readInstallationReceipt() {
 /** Pure: the first recorded identity field that the named inode no longer matches, or null. */
 export function ownedFileDriftField(entry, named) {
   if (String(named.dev) !== entry.device) return 'device'
-  if (String(named.ino) !== entry.inode) return 'inode'
-  if (Number(named.size) !== entry.size) return 'size'
+  if (!tlsRewritten(entry) && String(named.ino) !== entry.inode) return 'inode'
+  if (!tlsRewritten(entry) && Number(named.size) !== entry.size) return 'size'
   if (Number(named.mode & 0o7777n) !== entry.mode) return 'mode'
   if (named.uid !== 0n || named.gid !== 0n) return 'owner'
   if (entry.kind !== 'symlink' && (!named.isFile() || named.isSymbolicLink() || named.nlink !== 1n)) return 'kind'
@@ -140,10 +145,22 @@ export async function assertOwnedFile(entry) {
   const field = ownedFileDriftField(entry, named)
   if (field) throw ownedFileDrift(entry, field)
   if (entry.kind === 'symlink') safe(named.isSymbolicLink() && await readlink(entry.path) === entry.target && await realpath(entry.path) === await realpath(entry.target), 'OWNED_LINK_DRIFT')
+  else if (tlsRewritten(entry)) await readTrustedFile(entry.path, { maxBytes: 1024 * 1024, exactMode: entry.mode, sha256: await activationSha256(entry) })
   else {
     const opened = await readTrustedFile(entry.path, { maxBytes: 1024 * 1024, sha256: entry.sha256 })
     if (String(opened.info.dev) !== entry.device || String(opened.info.ino) !== entry.inode) throw ownedFileDrift(entry, 'inode')
   }
+}
+
+/** The bytes the last settled management TLS lifecycle served at this path. */
+async function activationSha256(entry) {
+  let record = null
+  try { record = JSON.parse((await readTrustedFile(ACTIVATION_PATH, { maxBytes: 1024 * 1024, exactMode: 0o600 })).bytes.toString('utf8')) } catch { /* refused below */ }
+  safe(record?.schemaVersion === 1 && record.kind === ACTIVATION_KIND && record.files && typeof record.files === 'object', 'OWNED_ACTIVATION_RECORD_INVALID')
+  // Records written before challengeSha256 existed leave the challenge bound to its install-time bytes.
+  const sha256 = Object.hasOwn(record.files, TLS_REWRITTEN[entry.path]) ? record.files[TLS_REWRITTEN[entry.path]] : entry.sha256
+  safe(typeof sha256 === 'string' && SHA.test(sha256), 'OWNED_ACTIVATION_RECORD_INVALID')
+  return sha256
 }
 
 /** A finite preservation plan, not uninstall authorization or TLS handoff proof. */

@@ -41,13 +41,12 @@ describe('availableHandlers', () => {
     expect(code(() => availableHandlers({ engine: 'apache', mpm: 'itk', itkAvailable: 'yes' as unknown as boolean }))).toBe('ENGINE_UNAVAILABLE')
   })
 
-  it('Apache + prefork: suphp appears, flagged as shared identity', () => {
-    const m = availableHandlers({ engine: 'apache', mpm: 'prefork', itkAvailable: false })
-    expect(avail(m)).toEqual(['fpm', 'cgi', 'suphp'])
-    expect(m.defaultHandler).toBe('fpm')
-    expect(m.sharedIdentity).toBe(true)
-    expect(m.handlers.find((h) => h.handler === 'suphp')).toMatchObject({ available: true, sharedIdentity: true })
-    expect(m.warnings.length).toBeGreaterThan(0)
+  it('Apache + prefork: refused with the installer code, and suPHP is reported as unable to run', () => {
+    expect(code(() => availableHandlers({ engine: 'apache', mpm: 'prefork', itkAvailable: true }))).toBe('ENGINE_UNAVAILABLE')
+    const suphp = availableHandlers({ engine: 'apache', mpm: 'itk', itkAvailable: true }).handlers.find((h) => h.handler === 'suphp')!
+    expect(suphp.available).toBe(false)
+    expect(suphp.reason).toMatch(/cannot run/)
+    expect(suphp.reason).not.toMatch(/switch Apache to prefork/)
   })
 
   it('OpenLiteSpeed: lsphp only, Apache handlers unavailable', () => {

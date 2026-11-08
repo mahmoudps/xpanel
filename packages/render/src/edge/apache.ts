@@ -1,6 +1,6 @@
 // One shared Apache on a loopback port behind Nginx. With mpm_itk the child serving a vhost
 // drops to the account UID (AssignUserId); handlers then run as that same UID.
-import { assertHandlerAvailable, fail, validateApacheWorkers, validateDomainIndexFiles } from '@xpanel/core'
+import { assertHandlerAvailable, fail, refusePrefork, validateApacheWorkers, validateDomainIndexFiles } from '@xpanel/core'
 import type { Account, ApacheMpm, ConfigTest, Domain, HostAction, OsProfile, PhpHandler, RenderedFile, ServerSettings } from '@xpanel/core'
 import {
   cgiWrapperDir,
@@ -22,14 +22,13 @@ import { assertWebDirectives, includeLines } from './web-directives.ts'
 const indent = (lines: string[], n = 1): string[] => lines.map((l) => (l === '' ? l : `${'    '.repeat(n)}${l}`))
 const section = (open: string, close: string, body: string[]): string[] => [`<${open}>`, ...indent(body), `</${close}>`]
 
-export const assertApacheEngine = (settings: ServerSettings): ApacheMpm => {
+export const assertApacheEngine = (settings: ServerSettings): 'itk' => {
   if (settings.engine !== 'apache') {
     return fail('ENGINE_UNAVAILABLE', 'Apache configuration requested while OpenLiteSpeed is the engine', { engine: settings.engine })
   }
-  if (settings.apacheMpm !== 'itk' && settings.apacheMpm !== 'prefork') {
-    return invalid('apacheMpm', settings.apacheMpm, 'must be itk or prefork')
-  }
-  return settings.apacheMpm
+  if (settings.apacheMpm === 'prefork') return refusePrefork()
+  if (settings.apacheMpm !== 'itk') return invalid('apacheMpm', settings.apacheMpm, 'must be itk')
+  return 'itk'
 }
 
 // ---- MPM ----------------------------------------------------------------------------------
@@ -58,47 +57,27 @@ const idRange = (what: string, r: [number, number] | undefined): string | null =
  * never a silent fallback to serving accounts as the shared Apache user.
  */
 export const renderApacheMpm = (settings: ServerSettings, opts: ApacheMpmOptions = {}): string => {
-  const mpm = assertApacheEngine(settings)
+  assertApacheEngine(settings)
   const a = assertApacheTuning(settings)
   const lines = [
-    `# Managed by xPanel: Apache MPM (${mpm === 'itk' ? 'mpm_itk on prefork' : 'prefork'})`,
-    ...section('IfModule !mpm_prefork_module', 'IfModule', [
-      `Error "xPanel: the prefork MPM must be loaded${mpm === 'itk' ? ' (mpm_itk runs on top of it)' : ''}"`,
+    '# Managed by xPanel: Apache MPM (mpm_itk on prefork)',
+    ...section('IfModule !mpm_prefork_module', 'IfModule', ['Error "xPanel: the prefork MPM must be loaded (mpm_itk runs on top of it)"']),
+    ...section('IfModule !mpm_itk_module', 'IfModule', [
+      'Error "xPanel: mpm_itk is selected but not loaded; refusing to serve accounts as the shared Apache user"',
     ]),
-  ]
-  if (mpm === 'itk') {
-    lines.push(
-      ...section('IfModule !mpm_itk_module', 'IfModule', [
-        'Error "xPanel: mpm_itk is selected but not loaded; refusing to serve accounts as the shared Apache user"',
-      ]),
-    )
-  } else {
-    lines.push(
-      ...section('IfModule mpm_itk_module', 'IfModule', [
-        'Error "xPanel: mpm_itk is loaded but prefork is selected; disable mpm_itk to keep handler identities consistent"',
-      ]),
-    )
-  }
-  lines.push(
     `StartServers ${a.startServers}`,
     `MinSpareServers ${a.minSpareServers}`,
     `MaxSpareServers ${a.maxSpareServers}`,
     `ServerLimit ${a.serverLimit}`,
     `MaxRequestWorkers ${a.maxRequestWorkers}`,
     `MaxConnectionsPerChild ${a.maxConnectionsPerChild}`,
-  )
-  if (mpm === 'itk') {
-    const uid = idRange('LimitUIDRange', opts.uidRange)
-    const gid = idRange('LimitGIDRange', opts.gidRange)
-    if (uid) lines.push(`LimitUIDRange ${uid}`)
-    if (gid) lines.push(`LimitGIDRange ${gid}`)
-    if (opts.maxClientsVHost !== undefined) {
-      lines.push(`MaxClientsVHost ${assertInt('MaxClientsVHost', opts.maxClientsVHost, 1, a.maxRequestWorkers)}`)
-    }
-  } else if (opts.uidRange || opts.gidRange) {
-    invalid('LimitUIDRange', opts.uidRange, 'only applies to mpm_itk')
-  } else if (opts.maxClientsVHost !== undefined) {
-    invalid('MaxClientsVHost', opts.maxClientsVHost, 'only applies to mpm_itk')
+  ]
+  const uid = idRange('LimitUIDRange', opts.uidRange)
+  const gid = idRange('LimitGIDRange', opts.gidRange)
+  if (uid) lines.push(`LimitUIDRange ${uid}`)
+  if (gid) lines.push(`LimitGIDRange ${gid}`)
+  if (opts.maxClientsVHost !== undefined) {
+    lines.push(`MaxClientsVHost ${assertInt('MaxClientsVHost', opts.maxClientsVHost, 1, a.maxRequestWorkers)}`)
   }
   return `${lines.join('\n')}\n`
 }
@@ -154,6 +133,10 @@ export const renderApacheBase = (settings: ServerSettings, os: OsProfile): Rende
     `DirectoryIndex ${w.directoryIndex.join(' ')}`,
     ...section('FilesMatch "^(\\.ht.*|\\.user\\.ini|php\\.ini)$"', 'FilesMatch', ['Require all denied']),
     ...section('IfModule mod_userdir.c', 'IfModule', ['UserDir disabled']),
+    // A tenant's SetEnv PHP_VALUE / PHP_ADMIN_VALUE reaches PHP-FPM as a FastCGI param and would
+    // override pool settings such as open_basedir or auto_prepend_file. Strip both before every
+    // proxy_fcgi call; .htaccess cannot use ProxyFCGISetEnvIf, so this server-config rule stands.
+    ...section('IfModule proxy_fcgi_module', 'IfModule', ['ProxyFCGISetEnvIf "true" !PHP_VALUE', 'ProxyFCGISetEnvIf "true" !PHP_ADMIN_VALUE']),
     '',
     ...includeLines('pre-vhost', w.includes.apachePreVhost),
     '# first vhost on the address: answers Host headers no account has bound',
@@ -187,21 +170,17 @@ export const apacheLogDirs = (): HostAction[] => [
 
 // ---- handlers -----------------------------------------------------------------------------
 
-export type ApachePhpWiring = 'fpm' | 'cgi-action' | 'fcgid' | 'suphp-action'
+export type ApachePhpWiring = 'fpm' | 'cgi-action'
 
 /**
- * How a handler runs under the selected MPM:
+ * How a handler runs under mpm_itk, the only MPM xPanel serves accounts with:
  * - fpm: proxy_fcgi to the account's own FPM master
- * - cgi + itk: mod_cgi via Action; the itk child is already the account (suexec would refuse it)
- * - cgi + prefork: mod_fcgid through suexec
- * - suphp: suexec + php-cgi wrapper with suPHP's per-directory php.ini rule; never with itk
+ * - cgi: mod_cgi via Action; the itk child is already the account (suexec would refuse it)
  */
 export const phpWiring = (handler: PhpHandler, mpm: ApacheMpm): ApachePhpWiring => {
   // the MPM file's Error guard fails configtest when itk is selected but missing
   assertHandlerAvailable(handler, { engine: 'apache', mpm, itkAvailable: true })
-  if (handler === 'fpm') return 'fpm'
-  if (handler === 'cgi') return mpm === 'itk' ? 'cgi-action' : 'fcgid'
-  return 'suphp-action'
+  return handler === 'fpm' ? 'fpm' : 'cgi-action'
 }
 
 const ACTION_PREFIX = '/.xpanel-php/'
@@ -271,15 +250,10 @@ const vhostBody = (
   const d = g.main
   const user = account.username
   const names = serverNameLines(g)
-  const identity: string[] = []
-  if (mpm === 'itk') {
-    identity.push(`AssignUserId ${user} ${user}`)
-    if (opts.maxClientsVHost !== undefined) {
-      const a = assertApacheTuning(settings)
-      identity.push(`MaxClientsVHost ${assertInt('MaxClientsVHost', opts.maxClientsVHost, 1, a.maxRequestWorkers)}`)
-    }
-  } else if (opts.maxClientsVHost !== undefined) {
-    return invalid('MaxClientsVHost', opts.maxClientsVHost, 'only applies to mpm_itk')
+  const identity: string[] = [`AssignUserId ${user} ${user}`]
+  if (opts.maxClientsVHost !== undefined) {
+    const a = assertApacheTuning(settings)
+    identity.push(`MaxClientsVHost ${assertInt('MaxClientsVHost', opts.maxClientsVHost, 1, a.maxRequestWorkers)}`)
   }
   const wiring = d.siteType === 'php' ? phpWiring(d.php.handler, mpm) : null
   const mode = siteMode(account, d, opts.now)
@@ -312,16 +286,7 @@ const vhostBody = (
       ]),
     ]
   }
-  if (wiring === 'fcgid') {
-    return [
-      ...head,
-      `SuexecUserGroup ${user} ${user}`,
-      ...docDirectory(d.docRoot, [`FcgidWrapper ${apacheQuote(cgiWrapperPath(user, version, 'fcgi', os))} .php`], true, page.index),
-      ...section('FilesMatch "\\.php$"', 'FilesMatch', ['SetHandler fcgid-script']),
-    ]
-  }
-  const suexec = wiring === 'suphp-action' ? [`SuexecUserGroup ${user} ${user}`] : []
-  return [...head, ...suexec, ...docDirectory(d.docRoot, [], false, page.index), ...actionBlock(account, version, os)]
+  return [...head, ...docDirectory(d.docRoot, [], false, page.index), ...actionBlock(account, version, os)]
 }
 
 /** Deepest base name first; more labels than any legal name could have keeps the prefix positive. */
@@ -394,18 +359,13 @@ export const renderApacheVhosts = (
 
 // ---- CGI wrappers -------------------------------------------------------------------------
 
-const wrapperKind = (w: ApachePhpWiring): 'cgi' | 'fcgi' => (w === 'fcgid' ? 'fcgi' : 'cgi')
-
-/** Wrappers run through suexec under prefork (then suexec demands the account owns them). */
-const wrapperOwner = (account: Account, mpm: ApacheMpm): string => (mpm === 'prefork' ? account.username : 'root')
-
 /** `-d key=value` lines; values are already in INI syntax because php-cgi parses them as INI. */
 const phpArgs = (pairs: [string, string][]): string[] => pairs.map(([k, v]) => `    -d ${shQuote(`${k}=${v}`)} \\`)
 
 /**
- * php-cgi wrapper for the cgi and suphp handlers. Isolation values and the account's panel
- * settings are passed with -d, which php-cgi applies after every php.ini (so a per-directory
- * php.ini cannot undo them) and .user.ini can only tighten open_basedir.
+ * php-cgi wrapper for the cgi handler, root-owned because the itk child already is the account.
+ * Isolation values and the account's panel settings are passed with -d, which php-cgi applies after
+ * every php.ini (so a per-directory php.ini cannot undo them) and .user.ini can only tighten open_basedir.
  */
 export const renderPhpCgiWrapper = (
   account: Account,
@@ -420,64 +380,29 @@ export const renderPhpCgiWrapper = (
   const wiring = phpWiring(domain.php.handler, mpm)
   if (wiring === 'fpm') return invalid('PHP handler', domain.php.handler, 'PHP-FPM does not use a CGI wrapper')
   const version = domain.php.version
-  const kind = wrapperKind(wiring)
   const iso = phpIsolation(account, os, opts)
   const bin = phpCgiBinary(os, version)
-  const admin: [string, string][] = [...iso.admin]
-  if (kind === 'cgi') admin.push(['cgi.force_redirect', '1'])
+  const admin: [string, string][] = [...iso.admin, ['cgi.force_redirect', '1']]
   const ini = iniEntries(domain.php.ini)
   const args = phpArgs([...ini.user, ...ini.pool, ...admin.map(([k, v]): [string, string] => [k, iniValue(v, k)])])
   const last = args.length - 1
   args[last] = (args[last] ?? '').replace(/ \\$/, '')
-
-  const head = [
-    wiring === 'suphp-action' ? '#!/bin/bash' : '#!/bin/sh',
+  const lines = [
+    '#!/bin/sh',
     `# Managed by xPanel: PHP ${version} (${wiring}) for ${account.username}. Regenerated on every config generation.`,
+    `export TMPDIR=${shQuote(iso.tmpDir)}`,
+    `exec ${shQuote(bin)} \\`,
+    ...args,
   ]
-  const env = [`export TMPDIR=${shQuote(iso.tmpDir)}`]
-  if (kind === 'fcgi') {
-    env.push('export PHP_FCGI_CHILDREN=0', `export PHP_FCGI_MAX_REQUESTS=${assertInt('pm.max_requests', domain.php.fpm.maxRequests, 0, 1_000_000)}`)
-  }
-  const guard =
-    wiring === 'suphp-action'
-      ? [
-          `home=${shQuote(account.home)}`,
-          'script="${PATH_TRANSLATED:-}"',
-          'deny() { printf \'Status: 403 Forbidden\\r\\nContent-Type: text/plain\\r\\n\\r\\nForbidden\\n\'; exit 0; }',
-          'case "$script" in "$home"/*) ;; *) deny ;; esac',
-          '[ -f "$script" ] && [ -O "$script" ] || deny',
-          '# suPHP rules: the script and its directory must not be writable by group or others',
-          '[ -z "$(find -H "$script" -maxdepth 0 -perm /022 2>/dev/null)" ] || deny',
-          'dir="${script%/*}"',
-          '[ -z "$(find -H "$dir" -maxdepth 0 -perm /022 2>/dev/null)" ] || deny',
-          '# per-directory php.ini, as suPHP did, when the account owns it',
-          'if [ -f "$dir/php.ini" ] && [ -O "$dir/php.ini" ]; then export PHPRC="$dir"; else unset PHPRC; fi',
-        ]
-      : []
-  const lines = [...head, ...guard, ...env, `exec ${shQuote(bin)} \\`, ...args]
-  const owner = wrapperOwner(account, mpm)
-  return {
-    path: cgiWrapperPath(account.username, version, kind, os),
-    content: `${lines.join('\n')}\n`,
-    mode: 0o755,
-    owner,
-    group: owner === 'root' ? 'root' : account.username,
-  }
+  return { path: cgiWrapperPath(account.username, version, 'cgi', os), content: `${lines.join('\n')}\n`, mode: 0o755, owner: 'root', group: 'root' }
 }
 
-/** suexec checks: directory under its docroot, owned by the target user, not group/other-writable. */
+/** Root-owned wrapper directories: under itk no suexec ownership rule applies. */
 export const cgiWrapperDirs = (account: Account, settings: ServerSettings, os: OsProfile): HostAction[] => {
-  const mpm = assertApacheEngine(settings)
-  const owner = wrapperOwner(account, mpm)
+  assertApacheEngine(settings)
   return [
     { kind: 'ensure-dir', path: cgiWrapperRoot(os), mode: 0o755, owner: 'root', group: 'root' },
-    {
-      kind: 'ensure-dir',
-      path: cgiWrapperDir(account.username, os),
-      mode: 0o755,
-      owner,
-      group: owner === 'root' ? 'root' : account.username,
-    },
+    { kind: 'ensure-dir', path: cgiWrapperDir(account.username, os), mode: 0o755, owner: 'root', group: 'root' },
   ]
 }
 
@@ -486,14 +411,12 @@ export const requiredApacheModules = (settings: ServerSettings, domains: Domain[
   const mpm = assertApacheEngine(settings)
   // auth_basic, authn_core, authn_file and authz_user serve Directory Privacy's per-folder Basic auth.
   const mods = new Set(['mpm_prefork', 'remoteip', 'setenvif', 'alias', 'dir', 'mime', 'authz_core', 'authz_host', 'rewrite', 'headers', 'auth_basic', 'authn_core', 'authn_file', 'authz_user', 'status'])
-  if (mpm === 'itk') mods.add('mpm_itk')
+  mods.add('mpm_itk')
   for (const d of domains) {
     if (d.siteType !== 'php') continue
     const w = phpWiring(d.php.handler, mpm)
     if (w === 'fpm') ['proxy', 'proxy_fcgi'].forEach((m) => mods.add(m))
     if (w === 'cgi-action') ['actions', 'cgi'].forEach((m) => mods.add(m))
-    if (w === 'fcgid') ['fcgid', 'suexec'].forEach((m) => mods.add(m))
-    if (w === 'suphp-action') ['actions', 'cgi', 'suexec'].forEach((m) => mods.add(m))
   }
   return [...mods]
 }

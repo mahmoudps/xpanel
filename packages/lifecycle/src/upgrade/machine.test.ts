@@ -251,8 +251,9 @@ const world = (over: { free?: number; os?: OsRelease; transfers?: number } = {})
         const copy = await fs.readFile(`${path}.control.db`)
         if (copy === null) throw new Error('control-plane copy missing')
         w.events.push('restore index')
-        // Derived index rows come back; the expand-only schema and the journal rows stay.
-        w.db.data = (JSON.parse(copy) as ControlState).data
+        // The pre-migration database comes back: schema, applied migrations and data; upgrade history rows stay.
+        const restored = JSON.parse(copy) as ControlState
+        Object.assign(w.db, { schema: restored.schema, applied: restored.applied, data: restored.data })
       },
       syncPath: async () => {},
     },
@@ -539,8 +540,8 @@ describe('lifecycle safety regression oracles (portable ports, not native qualif
     expect(await w.fs.exists('/var/lib/xpanel/state/accounts/carol.yaml')).toBe(false)
     // The replaced tree is kept beside the live one as evidence, never deleted.
     expect(await w.fs.readFile(`${STATE_ASIDE}/accounts/carol.yaml`)).toBe('uid: 1003\n')
-    // Derived index data rewinds; the expand-only schema stays, as the old release reads it.
-    expect(w.db).toMatchObject({ schema: 6, data: 'desired-state-v4', applied: ['0001', '0002', '0003', '0004', '0005_accounts_note.sql', '0006_backfill_note.sql'] })
+    // The database returns to its pre-migration snapshot: the old release reads only its own migrations.
+    expect(w.db).toMatchObject({ schema: 4, data: 'desired-state-v4', applied: ['0001', '0002', '0003', '0004'] })
     expect(w.gen.activated).toEqual([41])
     expect(w.gen.current).toBe(41)
     expect(r.newGeneration).toBe(41)
@@ -572,8 +573,9 @@ describe('lifecycle safety regression oracles (portable ports, not native qualif
     const compat: Parameters<UpgradePorts['safety']['assertCompatibility']>[0][] = []
     v.ports.safety.assertCompatibility = async input => { compat.push(input) }
     expect((await runUpgrade(v.ports, plan())).hostOutcome).toBe('failed')
-    // A failed migration restarts the old release on the partly expanded schema only through the same snapshot.
-    expect(compat.at(-1)).toMatchObject({ direction: 'rollback', currentSchema: 5, targetSchema: 4, snapshot: { recordId: 'up-1', path: SNAPSHOT } })
+    // A failed migration restarts the old release only after the same snapshot restored its own schema.
+    expect(compat.at(-1)).toMatchObject({ direction: 'rollback', currentSchema: 4, targetSchema: 4, snapshot: { recordId: 'up-1', path: SNAPSHOT } })
+    expect(v.events).toContain('restore index')
   })
 
   it('never restores StateStore leases, locks or hot mutex journals from the snapshot', async () => {
@@ -638,7 +640,8 @@ describe('lifecycle safety regression oracles (portable ports, not native qualif
   it('refuses a corrupted or foreign snapshot and restores nothing', async () => {
     const tamper: [string, (w: World) => void, RegExp][] = [
       ['state archive', w => w.fs.file(SNAPSHOT, '[["state/accounts/alice.yaml","uid: 0\\n"]]'), /20261022T013500Z\.tar\.gz does not match its receipt checksum/],
-      ['index copy', w => w.fs.file(CONTROL_COPY, '{"schema":1}'), /control\.db does not match its receipt checksum/],
+      ['index copy', w => w.fs.file(CONTROL_COPY, '{"schema":1}'), /LIFECYCLE_DATABASE_SNAPSHOT_CHANGED/],
+      ['missing index copy', w => w.fs.nodes.delete(CONTROL_COPY), /LIFECYCLE_DATABASE_SNAPSHOT_MISSING/],
       ['receipt identity', w => w.fs.file(RECEIPT, (w.fs.nodes.get(RECEIPT) as { content: string }).content.replace('"recordId":"up-1"', '"recordId":"up-9"')), /receipt does not belong to this upgrade/],
       ['missing receipt', w => w.fs.nodes.delete(RECEIPT), /receipt is missing or malformed/],
       ['safety without index restore', w => { Reflect.deleteProperty(w.ports.safety, 'restoreControlPlane') }, /index restore is not available/],
@@ -910,7 +913,7 @@ describe('runUpgrade: rollback after the switch', () => {
     expect(r).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
     expect(r.reason).toMatch(/canary alice served by uid 33 instead of 1001/)
     expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
-    expect(w.db).toMatchObject({ schema: 6, data: 'desired-state-v4' })
+    expect(w.db).toMatchObject({ schema: 4, data: 'desired-state-v4', applied: ['0001', '0002', '0003', '0004'] })
     expect(w.gen.activated).toEqual([41])
     expect(w.gen.current).toBe(41)
     expect(await w.fs.exists('/opt/xpanel/releases/1.1.0')).toBe(false)
@@ -1124,7 +1127,7 @@ describe('automatic rewind: crash inside every step, then resume', () => {
     expect(await v.fs.readFile(STATE_FILE)).toBe('uid: 1001\n')
     expect(await v.fs.exists('/var/lib/xpanel/state/accounts/carol.yaml')).toBe(false)
     expect(await v.fs.readFile(`${STATE_ASIDE}/accounts/carol.yaml`)).toBe('uid: 1003\n')
-    expect(v.db).toMatchObject({ schema: 6, data: 'desired-state-v4' })
+    expect(v.db).toMatchObject({ schema: 4, data: 'desired-state-v4', applied: ['0001', '0002', '0003', '0004'] })
     expect(v.gen.current).toBe(41)
     // Journaled data steps are not repeated; source bindings and writer startup are revalidated.
     expect(v.host.actions.filter(a => a.kind === 'exec' && isStateRestoreTar(a.argv)).length).toBe(done.has('state-extract') ? 0 : 1)
@@ -1236,7 +1239,10 @@ describe('runUpgrade: failures before the switch', () => {
     expect(r.reason).toMatch(/0006_backfill_note.sql failed/)
     expect(w.fs.writes).not.toContain('/opt/xpanel/current')
     expect(await w.fs.readlink('/opt/xpanel/current')).toBe('/opt/xpanel/releases/1.0.0')
-    expect(w.db.schema).toBe(5)
+    // 0005 ran before 0006 failed: the current release starts only on its restored pre-migration database.
+    expect(w.db).toMatchObject({ schema: 4, applied: ['0001', '0002', '0003', '0004'] })
+    expect(w.events.indexOf('restore index')).toBeGreaterThan(-1)
+    expect(w.events.indexOf('restore index')).toBeLessThan(w.events.indexOf('start xpanel-api.service'))
     expect(w.host.actions.some((a) => a.kind === 'exec' && isStateRestoreTar(a.argv))).toBe(false)
     expect(w.gen.reconciled).toBe(0)
     expect(w.host.systemd()).toEqual([
@@ -1254,7 +1260,7 @@ describe('runUpgrade: failures before the switch', () => {
     w.host.actions.length = 0
     expect((await runUpgrade(w.ports, plan())).outcome).toBe('refused')
     expect(w.host.actions).toEqual([])
-    expect(w.db.applied.at(-1)).toBe('0005_accounts_note.sql')
+    expect(w.db.applied.at(-1)).toBe('0004')
   })
 
   it('a contract migration is rejected before anything is applied', async () => {
@@ -1352,6 +1358,46 @@ describe('runUpgrade: failures before the switch', () => {
     expect(w.gen.activated).toEqual([])
     expect(w.host.systemd().some(action => action.verb === 'start' || action.verb === 'restart')).toBe(false)
     for (const marker of [LOCK, MAINTENANCE, RETIREMENT]) expect(await w.fs.exists(marker)).toBe(true)
+  })
+})
+
+describe('rollback after the migrate phase returns the database to its snapshot', () => {
+  const restored = { schema: 4, applied: ['0001', '0002', '0003', '0004'] }
+
+  it('a switch failure rewinds onto the pre-migration database', async () => {
+    const w = world()
+    let failures = 0
+    w.fs.failWhen = (op, p) => op === 'rename' && p === '/opt/xpanel/current' && failures++ === 0
+    const r = await runUpgrade(w.ports, plan())
+    expect(r).toMatchObject({ hostOutcome: 'rolled_back', rewind: { state: 'rewind-verified' } })
+    expect(w.db).toMatchObject(restored)
+    expect(w.events.indexOf('restore index')).toBeLessThan(w.events.indexOf('start xpanel-api.service'))
+  })
+
+  it('a check after a complete migration restores the database before the panel starts', async () => {
+    const w = world()
+    const apply = w.ports.migrator.apply
+    w.ports.migrator.apply = async dir => { await apply(dir); throw new Error('post-migration check failed') }
+    const r = await runUpgrade(w.ports, plan())
+    expect(r).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'failed' })
+    expect(w.db).toMatchObject(restored)
+    expect(w.events.indexOf('restore index')).toBeLessThan(w.events.indexOf('start xpanel-api.service'))
+  })
+
+  it.each([
+    ['changed', (w: World) => w.fs.file(CONTROL_COPY, '{"schema":1}'), 'LIFECYCLE_DATABASE_SNAPSHOT_CHANGED'],
+    ['missing', (w: World) => { w.fs.nodes.delete(CONTROL_COPY) }, 'LIFECYCLE_DATABASE_SNAPSHOT_MISSING'],
+  ])('refuses a %s database snapshot and never starts the panel on the migrated database', async (_what, corrupt, code) => {
+    const w = world()
+    const apply = w.ports.migrator.apply
+    w.ports.migrator.apply = async dir => { await apply(dir); corrupt(w); throw new Error('post-migration check failed') }
+    const r = await runUpgrade(w.ports, plan())
+    expect(r.outcome).toBe('rollback_failed')
+    expect(r.rollbackErrors.join()).toContain(code)
+    expect(w.db.schema).toBe(6)
+    expect(w.events).not.toContain('restore index')
+    expect(w.host.systemd().some(action => action.verb === 'start' || action.verb === 'restart')).toBe(false)
+    expect((await readLock(w.fs, LOCK))?.state).toBe('rollback-failed')
   })
 })
 

@@ -99,7 +99,6 @@ const assertMpmAvailable = (p: XpanelOsProfile, mpm: ApacheMpm): void => {
       engine: 'apache',
       apacheMpm: 'itk',
       os: `${p.id} ${p.versionId}`,
-      alternatives: ['apacheMpm: prefork (Apache children keep the shared apache identity)'],
     })
   }
 }

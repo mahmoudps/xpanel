@@ -162,11 +162,9 @@ describe('H05: End-to-end hosting process topology & UID/GID isolation (A31, A35
     expect(nginxToAlice.allowed).toBe(false)
     expect(nginxToAlice.errno).toBe('EACCES')
 
-    // Under prefork only, the distribution's apacheUser gets explicit POSIX ACL access
-    const preforkFpm = verifyFpmPoolIsolation(alice, aliceDomain.php, rhelOs, { apacheMpm: 'prefork' })
-    expect(preforkFpm.aclUsers).toEqual(['apache'])
-    expect(canIdentityConnectFpmSocket(preforkFpm, { username: 'apache', uid: 48, gid: 48 }).allowed).toBe(true)
-    expect(canIdentityConnectFpmSocket(preforkFpm, { username: 'bob', uid: 1002, gid: 1002 }).errno).toBe('EACCES')
+    // Prefork would give the shared Apache user an ACL on every pool; it is refused, so no pool carries one.
+    expect(codeOf(() => verifyFpmPoolIsolation(alice, aliceDomain.php, rhelOs, { apacheMpm: 'prefork' }))).toBe('ENGINE_UNAVAILABLE')
+    expect(aliceFpm.aclUsers).toEqual([])
   })
 
   it('rejects cross-tenant FPM socket bindings, ProxyPass, RewriteRule [P], and identity directives in .htaccess', () => {
@@ -230,10 +228,10 @@ describe('H05: Backend bypass, forged Host/SNI, and Nginx edge isolation (A31, A
     expect(vhostContent).toContain('AssignUserId alice alice')
     expect(vhostContent).toContain('MaxClientsVHost 20')
 
-    // Rejects MaxClientsVHost under prefork or above MaxRequestWorkers
+    // Refuses prefork outright, and MaxClientsVHost above MaxRequestWorkers
     const preforkSettings = settings({ apacheMpm: 'prefork' })
-    expect(codeOf(() => renderApacheMpm(preforkSettings, { maxClientsVHost: 20 }))).toBe('VALIDATION')
-    expect(codeOf(() => renderApacheVhost(alice, aliceDomain, preforkSettings, debianOs, { maxClientsVHost: 20 }))).toBe('VALIDATION')
+    expect(codeOf(() => renderApacheMpm(preforkSettings, { maxClientsVHost: 20 }))).toBe('ENGINE_UNAVAILABLE')
+    expect(codeOf(() => renderApacheVhost(alice, aliceDomain, preforkSettings, debianOs, { maxClientsVHost: 20 }))).toBe('ENGINE_UNAVAILABLE')
     expect(codeOf(() => renderApacheMpm(settings(), { maxClientsVHost: 999 }))).toBe('VALIDATION')
     expect(codeOf(() => renderApacheVhost(alice, aliceDomain, settings(), debianOs, { maxClientsVHost: 0 }))).toBe('VALIDATION')
   })

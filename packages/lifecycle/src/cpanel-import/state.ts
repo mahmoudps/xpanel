@@ -25,6 +25,9 @@ export interface ReadState {
   quota: string | null
   /** the account crontab (cron/<user>) */
   cron: string | null
+  /** Leech Protection per folder (relative to the home): the .htaccess rule and the .leechprotect-conf settings */
+  leechRules: Map<string, { maxLogins: number; redirectUrl: string }>
+  leechConf: Map<string, { alertEmail: string | null; disableUsers: boolean }>
   /** homedir paths (relative to it) that were not stored: a hardlink to one is skipped too */
   unstored: Set<string>
   home: ImportPlan['home']
@@ -38,7 +41,7 @@ const MAX_WARNINGS = 1000
 export const newReadState = (): ReadState => ({
   top: null, format: null, sourceUser: null, target: null, cp: null, main: null, userdata: new Map(), zones: new Map(), grants: null,
   sql: new Map(), mailPasswd: new Map(), mailQuota: new Map(), maildirs: new Set(), valiases: new Map(), vfilters: new Map(),
-  certs: new Map(), keys: new Map(), quota: null, cron: null, unstored: new Set(),
+  certs: new Map(), keys: new Map(), quota: null, cron: null, leechRules: new Map(), leechConf: new Map(), unstored: new Set(),
   home: { files: 0, directories: 0, symlinks: 0, bytes: 0, skipped: 0 },
   warnings: [], warningCount: 0, reportedOnce: new Set(),
 })

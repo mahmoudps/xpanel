@@ -1926,6 +1926,10 @@ msgstr "إضافة نقطة نهاية"
 msgid "Add exception"
 msgstr "إضافة استثناء"
 
+#: apps/web/src/board-port/xmail-compose.ts apps/web/src/themes/v2/pages/xmail/compose.ts
+msgid "Add filter"
+msgstr "إضافة فلتر"
+
 #: apps/web/src/board-port/approved-xpanel-pages.ts
 msgid "Add forwarder"
 msgstr "إضافة إعادة توجيه"
@@ -6921,11 +6925,6 @@ msgctxt "design-board"
 msgid "Coming soon"
 msgstr "قيد التفعيل"
 
-#: apps/web/src/board-port/xmail-compose.ts
-msgctxt "xmail-compose"
-msgid "Coming soon"
-msgstr "قيد التفعيل"
-
 #: apps/web/src/board-port/xpanel-home.ts
 msgctxt "xpanel-home"
 msgid "Coming soon"
@@ -11323,6 +11322,10 @@ msgstr "استخدام المساحة غير متاح لهذا الصندوق. �
 msgid "Disk usage is unavailable for this mailbox session. Nothing was read."
 msgstr "استخدام المساحة غير متاح لجلسة صندوق البريد هذه. لم يُقرأ شيء."
 
+#: apps/web/src/board-port/xmail-compose.ts
+msgid "Disk usage tools are not available for this mailbox."
+msgstr "أدوات استخدام المساحة غير متاحة لهذا الصندوق."
+
 #: apps/web/src/mail-disk-usage-client.ts
 msgid "Disk usage read for folders: {count}"
 msgstr "قُرئ استخدام المساحة للمجلدات: {count}"
@@ -14310,6 +14313,10 @@ msgstr "التصفية متوقفة"
 #: apps/web/src/board-port/xmail-compose.ts apps/web/src/board-port/xmail-inbox.ts apps/web/src/board-port/xmail-mailbox-preferences.ts apps/web/src/board-port/xpanel-home.ts apps/web/src/mail-home-groups.ts apps/web/src/surfaces/xmail.ts
 msgid "Filters"
 msgstr "الفلاتر"
+
+#: apps/web/src/board-port/xmail-compose.ts apps/web/src/themes/v2/pages/xmail/compose.ts
+msgid "Filters are not available for this mailbox."
+msgstr "الفلاتر غير متاحة لهذا الصندوق."
 
 #: apps/web/src/account-filters-client.ts
 msgid "Filters read from the server."
@@ -19463,6 +19470,10 @@ msgstr "إدارة استخدام القرص"
 #: apps/web/src/surfaces/xpanel.ts
 msgid "Manage domains, document roots, IP addresses, PHP settings and certificates."
 msgstr "إدارة النطاقات والمجلدات وعناوين IP وإعدادات PHP والشهادات."
+
+#: apps/web/src/board-port/xmail-compose.ts apps/web/src/themes/v2/pages/xmail/compose.ts
+msgid "Manage filters"
+msgstr "إدارة الفلاتر"
 
 #: apps/web/src/board-port/approved-xpanel-pages.ts
 msgid "Manage forwarder"
@@ -48239,10 +48250,6 @@ msgid "Updated fine settings"
 msgstr "حدّث الإعدادات الدقيقة"
 
 #: apps/web/src/audit-labels.ts
-msgid "Updated hotlink protection"
-msgstr "حدّث حماية الروابط المباشرة"
-
-#: apps/web/src/audit-labels.ts
 msgid "Updated mail addresses"
 msgstr "حدّث عناوين البريد"
 
@@ -50876,9 +50883,9 @@ msgstr "دخول phpPgAdmin غير متاح."
 msgid "plans"
 msgstr "خطة"
 
-#: apps/web/src/board-port/approved-xwhm.ts
-msgid "prefork · shared workers"
-msgstr "prefork · عمليات مشتركة"
+#: apps/web/src/board-canvas.ts apps/web/src/board-port/approved-xwhm.ts apps/web/src/themes/v2/pages/xwhm/server/setup.ts apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
+msgid "prefork · refused: no account isolation"
+msgstr "prefork · مرفوض: لا عزل للحسابات"
 
 msgctxt "domain-kind"
 msgid "primary"
@@ -60355,9 +60362,6 @@ msgstr "إلغاء تحويل"
 msgid "Moved account"
 msgstr "الحساب المنقول"
 
-msgid "Discard what changed here since the cutover"
-msgstr "تجاهل ما تغيّر هنا منذ التحويل"
-
 msgid "Revert cutover"
 msgstr "إلغاء التحويل"
 
@@ -60555,9 +60559,6 @@ msgstr "جارٍ التحويل"
 
 msgid "Revert the cutover?"
 msgstr "هل تلغي التحويل؟"
-
-msgid "The source serves this account again and its zones point back there. The copy here is removed, with any database changes made here since the cutover."
-msgstr "يعود المصدر إلى خدمة هذا الحساب وتشير مناطقه إليه مجددًا. تُزال النسخة الموجودة هنا مع أي تغييرات على قواعد البيانات جرت هنا منذ التحويل."
 
 msgid "Each account is copied while it stays live. The source is then suspended for the final sync, and its sites and mail pass through to this server."
 msgstr "يُنسخ كل حساب وهو يعمل. ثم يُعلَّق المصدر أثناء المزامنة الأخيرة، وتمر مواقعه وبريده إلى هذا الخادم."
@@ -66798,3 +66799,51 @@ msgstr "غير مسلَّمة: تحتاج قواعد النشر فيها إلى 
 
 msgid "Save registry"
 msgstr "حفظ السجل"
+
+msgid "Observed here since the cutover"
+msgstr "ما رُصد هنا منذ التحويل"
+
+msgid "Mail written since the cutover"
+msgstr "البريد المكتوب منذ التحويل"
+
+msgid "Files changed since the cutover"
+msgstr "الملفات المتغيرة منذ التحويل"
+
+msgid "Database changes since the cutover"
+msgstr "تغييرات قواعد البيانات منذ التحويل"
+
+msgid "Unknown; {count, plural, one {# database is} other {# databases are}} removed with the copy"
+msgstr "غير معروفة؛ {count, plural, one {تُزال قاعدة بيانات واحدة} two {تُزال قاعدتا بيانات} few {تُزال # قواعد بيانات} many {تُزال # قاعدة بيانات} other {تُزال # قاعدة بيانات}} مع النسخة"
+
+msgid "DNS zones changed since the cutover"
+msgstr "مناطق DNS المتغيرة منذ التحويل"
+
+msgid "{changed} of {total} zones"
+msgstr "{changed} من {total} منطقة"
+
+msgid "Edge settings saved since the cutover"
+msgstr "إعدادات الحافة المحفوظة منذ التحويل"
+
+msgid "Proxy rules"
+msgstr "قواعد الوكيل"
+
+msgid "The source serves this account again and its zones point back there. The copy here is removed, and nothing changed here since the cutover is carried back: {summary}."
+msgstr "يعود المصدر إلى خدمة هذا الحساب وتشير مناطقه إليه مجددًا. تُزال النسخة الموجودة هنا، ولا يُنقل إلى المصدر شيء مما تغيّر هنا منذ التحويل: {summary}."
+
+msgid "The revert was not confirmed. Nothing was sent."
+msgstr "لم يُؤكَّد التراجع. لم يُرسَل شيء."
+
+msgid "The account name did not match. Nothing was sent."
+msgstr "اسم الحساب غير مطابق. لم يُرسَل شيء."
+
+msgid "What the revert drops could not be read. Nothing was reverted."
+msgstr "تعذّرت قراءة ما يُسقطه التراجع. لم يُتراجَع عن شيء."
+
+msgid "The cutover was reverted. What changed here since the cutover was not carried back; it is listed below."
+msgstr "تم التراجع عن التحويل. ما تغيّر هنا منذ التحويل لم يُنقل إلى المصدر، وهو مدرج أدناه."
+
+msgid "What the revert drops changed since the preview. Nothing was reverted; review the new list and confirm again."
+msgstr "تغيّر ما يُسقطه التراجع منذ المعاينة. لم يُتراجَع عن شيء؛ راجع القائمة الجديدة وأكّد مجددًا."
+
+msgid "Revert first reads what changed here since the cutover and asks you to confirm that list. None of it is carried back to the source."
+msgstr "يقرأ التراجع أولًا ما تغيّر هنا منذ التحويل ويطلب منك تأكيد تلك القائمة. لا يُنقل شيء منه إلى المصدر."

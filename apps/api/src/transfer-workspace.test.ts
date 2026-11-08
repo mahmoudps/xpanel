@@ -49,7 +49,9 @@ const cpanelPorts = () => {
 }
 const fixture = async (ports: TransferWorkspacePorts = {}) => {
   const state = await createTestStateStore(); cleanup.push(() => state.close())
-  const audits: string[] = []
+  const audits: string[] = [], waiters: { actions: readonly string[]; done: (action: string) => void }[] = []
+  /** Resolves when the workspace records one of these audit actions: the last step of a background run before it leaves `running`. */
+  const audited = (...actions: string[]): Promise<string> => new Promise(done => { waiters.push({ actions, done }) })
   let revokeNext = false
   const helpers = {
     store: state.store,
@@ -59,7 +61,7 @@ const fixture = async (ports: TransferWorkspacePorts = {}) => {
       return { principal: { kind: token === 'Bearer owner' ? 'user' : 'root', id: 'synthetic-principal', username: 'synthetic-root', accountId: 'synthetic-account' } } as unknown as AuthenticatedCaller
     },
     assertRoot: async (caller: AuthenticatedCaller) => { if (caller.principal.kind !== 'root') fail('FORBIDDEN', 'root required') },
-    emitAudit: async (input: { action: string }) => { audits.push(input.action) },
+    emitAudit: async (input: { action: string }) => { audits.push(input.action); for (const waiter of waiters.filter(item => item.actions.includes(input.action))) waiter.done(input.action) },
   } as Pick<ExtendedRouteHelpers, 'store' | 'requireCaller' | 'assertRoot' | 'emitAudit'>
   let handle = createTransferWorkspaceRoutes(helpers, ports)
   const server = createServer(async (incoming, outgoing) => {
@@ -100,7 +102,7 @@ const fixture = async (ports: TransferWorkspacePorts = {}) => {
   type Saved = { session: Record<string, unknown> & { id: string; state: string; progress: Record<string, unknown>; selection: unknown; local: unknown }; revision: string; digest: string | null; results: Record<string, unknown>; running: boolean }
   const until = (id: string, done: (value: Saved) => boolean) => poll(async () => await (await request('/api/transfers/sessions/' + id)).json() as Saved, done)
   const untilImport = (id: string, done: (value: Record<string, unknown>) => boolean) => poll(async () => ((await (await request()).json()) as { cpanelImports: Record<string, unknown>[] }).cpanelImports.find(item => item.id === id)!, done)
-  return { state, audits, request, bytes, create, patch, step, upload, until, untilImport, restart: () => { handle = createTransferWorkspaceRoutes(helpers, ports) }, revoke: () => { revokeNext = true } }
+  return { state, audits, audited, request, bytes, create, patch, step, upload, until, untilImport, restart: () => { handle = createTransferWorkspaceRoutes(helpers, ports) }, revoke: () => { revokeNext = true } }
 }
 
 describe('strict persisted transfer workspace loopback boundary', () => {
@@ -201,20 +203,33 @@ describe('strict persisted transfer workspace loopback boundary', () => {
     expect(current).toMatchObject({ review: { live: true } })
   })
   it('reverts a cut-over account once, and only one the session moved live', async () => {
-    const revert = vi.fn(async () => ({ cutoverAt: '2026-11-07T10:00:00.000Z', zones: 1, revertedAt: '2026-11-07T11:00:00.000Z' }))
+    const preview = { account: 'alice', cutoverAt: '2026-11-07T10:00:00.000Z', mail: 'unknown' as const, files: 3, databases: { onCopy: 1, changes: 'unknown' as const }, zones: 'unknown' as const, edgeNotCarriedBack: [], digest: 'e'.repeat(64) }
+    const previewRevert = vi.fn(async () => preview)
+    const revert = vi.fn(async () => ({ cutoverAt: '2026-11-07T10:00:00.000Z', zones: 1, revertedAt: '2026-11-07T11:00:00.000Z', lost: preview }))
     const nodeAuth = async (id: string) => ({ kind: 'api-token' as const, url: 'https://whm.source.example.test:2087', tokenId: id, tlsFingerprint: null })
-    f = await fixture({ ...background, discover: async () => discovered(), nodeAuth, execution: { admit: async () => undefined, recover: async () => false, revert,
+    f = await fixture({ ...background, discover: async () => discovered(), nodeAuth, execution: { admit: async () => undefined, recover: async () => false, revert, previewRevert,
       run: async (_caller, _session, _review, emit) => { await emit({ type: 'progress', account: 'alice', phase: 'exporting' }); await emit({ type: 'progress', account: 'alice', phase: 'done' }, { createdAccountId: 'x', live: { cutoverAt: '2026-11-07T10:00:00.000Z', zones: 1, revertedAt: null } }) } } })
     let current = await (await f.request('/api/transfers/sessions', 'POST', { node: 'node_' + 'a'.repeat(16), live: true })).json() as Awaited<ReturnType<typeof f.create>>
     current = await f.step(current, 'discover'); current = await f.step(current, 'select', { accounts: ['alice'], plans: ['gold'] }); current = await f.step(current, 'review')
+    // The run's last audit is followed only by synchronous bookkeeping, so the next request sees it finished.
+    const finished = f.audited('transfer.execution.completed', 'transfer.execution.stopped', 'transfer.execution.failed')
     expect((await f.patch(current, 'run', { digest: current.digest })).status).toBe(202)
-    await vi.waitFor(async () => { current = await (await f.request('/api/transfers/sessions/' + current.session.id)).json() as typeof current; expect(current).toMatchObject({ session: { state: 'completed' }, running: false }) })
-    expect((await f.patch(current, 'revert', { account: 'nobody', acceptLoss: false })).status).toBe(404)
-    expect((await f.patch(current, 'revert', { account: 'alice', acceptLoss: 'yes' })).status).toBe(422)
-    const reverted = await f.patch(current, 'revert', { account: 'alice', acceptLoss: true })
+    expect(await finished).toBe('transfer.execution.completed')
+    current = await (await f.request('/api/transfers/sessions/' + current.session.id)).json() as typeof current
+    expect(current).toMatchObject({ session: { state: 'completed' }, running: false })
+    expect((await f.patch(current, 'revert-preview', { account: 'nobody' })).status).toBe(404)
+    // a revert without the digest of a preview it saw never reaches the host
+    for (const confirmation of [undefined, 'yes']) {
+      const refused = await f.patch(current, 'revert', { account: 'alice', ...(confirmation === undefined ? {} : { confirmation }) })
+      expect(refused.status).toBe(412); expect(await refused.json()).toMatchObject({ details: { reason: 'revert_preview_required' } })
+    }
+    expect(revert).not.toHaveBeenCalled()
+    const read = await f.patch(current, 'revert-preview', { account: 'alice' })
+    expect(read.status).toBe(200); expect(await read.json()).toEqual({ preview })
+    const reverted = await f.patch(current, 'revert', { account: 'alice', confirmation: preview.digest })
     expect(reverted.status).toBe(200)
-    expect(revert).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: current.session.id }), 'alice', expect.objectContaining({ createdAccountId: 'x' }), true)
-    expect(await reverted.json()).toMatchObject({ results: { alice: { live: { revertedAt: '2026-11-07T11:00:00.000Z' } } } })
+    expect(revert).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: current.session.id }), 'alice', expect.objectContaining({ createdAccountId: 'x' }), preview.digest)
+    expect(await reverted.json()).toMatchObject({ results: { alice: { live: { revertedAt: '2026-11-07T11:00:00.000Z', lost: preview } } } })
   })
   it('leaves reviewed state unchanged when native admission rejects execution', async () => {
     let runCalls = 0

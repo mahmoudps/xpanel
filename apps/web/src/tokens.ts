@@ -251,6 +251,39 @@ export function ensureAccessibleSurfaceHtml(html: string, locale: Locale = 'en')
   return normalizeAsciiDigits(withScopedHeaders)
 }
 
+// Every table, weighted as one class by :is(), except one that keeps its columns: a matrix, whose later columns
+// hold checkboxes or marks that only make sense under their headers, or a table marked --columns.
+const PHONE_COLUMNS = '.xp-table--columns,.xp-file-view-permissions,:has(> tbody > tr > td:nth-child(n+2) input[type="checkbox"])'
+// These tables already lay their rows out for a phone, and their acceptance measures that layout.
+const PHONE_OWN = '.xp-accounts__table,.xp-whm-quotas__table,.xp-composed-table,[data-section="audit-log"] *,.xp-boxtrapper *,.xp-identity__rows *,.xp-whm-dns *,[data-leech-protection] *'
+const PHONE_MATRIX = `:is(table,.xp-table):is(${PHONE_COLUMNS}):not(${PHONE_OWN})`
+const PHONE_TABLE = `:is(table,.xp-table):not(${PHONE_COLUMNS}):not(${PHONE_OWN})`
+const PHONE_TABLE_CHECKBOX_ROW = 'tr:not([hidden]):has(> :first-child input[type="checkbox"])'
+/**
+ * Phone rows keep two columns: the item name with its other facts under it, opposite the value or status
+ * (the second cell, or the third with --value-3). The headers show only while the table has no rows.
+ * A leading checkbox stays beside the name, and a cell's data-phone-label names its fact on the same line.
+ * The :not(:has()) above also outranks the page rules that pin a desktop table width.
+ * A table that keeps its columns scrolls inside its region, with its first column frozen.
+ */
+export const PHONE_TABLE_ROWS_CSS = /* css */ `@media (max-width: 600px) {
+  ${PHONE_TABLE} { position: relative; inline-size: 100% !important; min-inline-size: 0 !important; min-width: 0 !important; }
+  ${PHONE_TABLE}:has(> tbody > tr:not([hidden])) > thead:not(:has(button, a, input, select)) { position: absolute; inset-block-start: 0; inset-inline-start: 0; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  ${PHONE_TABLE} tr:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(50%); gap: var(--xp-space-label) var(--xp-space-field); padding: var(--xp-space-label) var(--xp-space-field); border-block-end: 1px solid var(--xp-border); }
+  ${PHONE_TABLE} tr > * { grid-column: 1 !important; block-size: auto !important; height: auto !important; min-block-size: 0 !important; padding: 0 !important; border: 0 !important; min-inline-size: 0 !important; min-width: 0 !important; white-space: normal !important; text-align: start !important; }
+  ${PHONE_TABLE}:not(.xp-table--value-3) tr > :nth-child(2):not([colspan]), ${PHONE_TABLE}.xp-table--value-3 tr > :nth-child(3):not([colspan]) { grid-column: 2 !important; grid-row: 1; justify-self: end; text-align: end !important; }
+  ${PHONE_TABLE} tr > :is([colspan], :nth-child(n+3):has(button, input, select, textarea)) { grid-column: 1 / -1 !important; }
+  ${PHONE_TABLE} ${PHONE_TABLE_CHECKBOX_ROW} { grid-template-columns: auto minmax(0, 1fr) fit-content(45%); }
+  ${PHONE_TABLE} ${PHONE_TABLE_CHECKBOX_ROW} > * { grid-column: 2 !important; }
+  ${PHONE_TABLE} ${PHONE_TABLE_CHECKBOX_ROW} > :first-child { grid-column: 1 !important; grid-row: 1; }
+  ${PHONE_TABLE} ${PHONE_TABLE_CHECKBOX_ROW} > :nth-child(2) { grid-column: 2 !important; grid-row: 1; justify-self: stretch; text-align: start !important; }
+  ${PHONE_TABLE} ${PHONE_TABLE_CHECKBOX_ROW} > :nth-child(3):not([colspan]) { grid-column: 3 !important; grid-row: 1; justify-self: end; text-align: end !important; }
+  ${PHONE_TABLE} ${PHONE_TABLE_CHECKBOX_ROW} > :is([colspan], :nth-child(n+4):has(button, input, select, textarea)) { grid-column: 2 / -1 !important; }
+  ${PHONE_TABLE} tr > [data-phone-label]::before { content: attr(data-phone-label) " "; color: var(--xp-text-muted); }
+  ${PHONE_MATRIX} tr > :first-child { position: sticky; inset-inline-start: 0; z-index: 1; }
+  ${PHONE_MATRIX} :is(tbody, tfoot) > tr > :first-child { background-color: var(--xp-bg-surface); }
+}`
+
 /**
  * Shared stylesheet for xPanel, xWHM, and xMail.
  * Colour roles follow the dedicated design: a light canvas with the navy rail ink,
@@ -2313,6 +2346,7 @@ html[dir="rtl"] .xp-field-value[dir="ltr"] {
 
 .xp-table tbody tr:last-child > td { border-block-end: 0; }
 .xp-table tbody tr:hover { background-color: var(--xp-bg-elevated); }
+${PHONE_TABLE_ROWS_CSS}
 
 /* Status pills with mandatory SVG icon + text label */
 .xp-badge {

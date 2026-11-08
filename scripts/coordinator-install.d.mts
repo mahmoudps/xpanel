@@ -1,7 +1,7 @@
 import type { PreparedReleaseCapability } from './prepared-release.mjs'
-import type { StrictOperationDatabaseOrigin } from '../packages/db/src/index.ts'
+import type { OperationalMigrationMode, StrictOperationDatabaseOrigin } from '../packages/db/src/index.ts'
 
-export function withCoordinatorDatabaseAuthority<T>(callback: (authority: Readonly<{
+export function withCoordinatorDatabaseAuthority<T>(migrations: OperationalMigrationMode, callback: (authority: Readonly<{
   origin: StrictOperationDatabaseOrigin
   rootId: string
   assertDatabaseAuthority(): Promise<void>
