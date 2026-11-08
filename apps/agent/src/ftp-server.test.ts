@@ -5,11 +5,14 @@ import { join } from 'node:path'
 import { DEFAULT_SERVER_FTP_SETTINGS, validateServerFtpSettings } from '@xpanel/core'
 import type { HostAction, OsProfile } from '@xpanel/core'
 import { describe, expect, it } from 'vitest'
-import { anonymousFtpLogins, compileFtpServer, FTP_ANONYMOUS_MAP, ftpRestartActions, parseAnonymousFtpState, parsePureFtpdConfFile, renderPureFtpdConfFile } from './ftp-server.ts'
+import { anonymousFtpLogins, type AnonymousFtpState, compileFtpServer, FTP_ANONYMOUS_MAP, ftpRestartActions, parseAnonymousFtpState, parsePureFtpdConfFile, renderPureFtpdConfFile } from './ftp-server.ts'
 import { createProductionHostTargetMatcher } from './executor.ts'
+import { buildGenerationManifest, diffManifests } from './reconciler-journal.ts'
+import { profileFor } from '@xpanel/os'
 
 const debian = { family: 'debian', paths: { systemdDir: '/etc/systemd/system' }, services: { ftp: 'pure-ftpd' } } as unknown as OsProfile
 const rhel = { ...debian, family: 'rhel' } as OsProfile
+const ubuntu = profileFor('ID=ubuntu\nVERSION_ID="24.04"\n')
 const id = '11111111-1111-4111-8111-111111111111'
 const account = { id, username: 'alice', home: '/home/alice', status: 'active' }
 const snapshot = (ftp = DEFAULT_SERVER_FTP_SETTINGS, accounts: unknown[] = [account]) => ({
@@ -85,9 +88,20 @@ describe('Anonymous FTP host effect', () => {
     expect(readOnly.files.find(file => file.path === FTP_ANONYMOUS_MAP)?.content).toBe('anonymous@example.test\t/run/xpanelftp/ro/home/alice/public_ftp/./\nanonymous@shop.example.test\t/run/xpanelftp/ro/home/alice/public_ftp/./\n')
     const writable = compileFtpServer(snapshot(open), { os: debian, certPresent: true, anonymous: { [id]: { enabled: true, uploads: true } } })
     expect(writable.files.some(file => file.path.endsWith('run-xpanelftp-rw-home.mount'))).toBe(true)
-    expect(writable.postActions).toContainEqual({ kind: 'systemd', verb: 'stop', unit: 'run-xpanelftp-ro-home.mount' })
+    // The view the previous generation started is released through the manifest's removed units.
+    const manifest = (id: number, postActions: HostAction[]) => buildGenerationManifest({ generationId: id, stateChecksum: 'a'.repeat(64), filesChecksum: 'b'.repeat(64), actor: 'root', files: [], postActions, os: ubuntu })
+    expect(diffManifests(manifest(1, readOnly.postActions), manifest(2, writable.postActions)).removedUnits).toEqual(['run-xpanelftp-ro-home.mount'])
     const closed = compileFtpServer(snapshot({ ...open, anonymousUploads: false }), { os: debian, certPresent: true, anonymous: { [id]: { enabled: true, uploads: true } } })
     expect(closed.files.some(file => file.path.endsWith('run-xpanelftp-rw-home.mount'))).toBe(false)
+  })
+  it('names no view or sign-in unit it does not render, so a host that never had them has nothing to stop', () => {
+    // Guest 9102, upgrade 0.1.24 to 0.1.36: accounts under /home, anonymous FTP never configured.
+    const units = (actions: HostAction[]) => actions.flatMap(action => action.kind === 'systemd' ? [action.unit] : [])
+    for (const anonymous of [{}, { [id]: { enabled: false, uploads: false } }] as AnonymousFtpState[]) {
+      const { postActions } = compileFtpServer(snapshot(open), { os: debian, certPresent: true, anonymous })
+      expect(units(postActions)).toEqual(['pure-ftpd', 'pure-ftpd'])
+    }
+    expect(units(compileFtpServer(snapshot(open), { os: debian, certPresent: true, anonymous: state }).postActions)).not.toContain('run-xpanelftp-rw-home.mount')
   })
   it('touches no account home in a generation, starts sign-in before the wrapper check and tries PureDB before ExtAuth', () => {
     const { postActions, files } = compileFtpServer(snapshot(open), { os: debian, certPresent: true, anonymous: state })

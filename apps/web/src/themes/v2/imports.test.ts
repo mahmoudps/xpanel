@@ -10,6 +10,8 @@ const CORE_MODULES = new Set([
   'models/tool-cards.ts', 'html.ts', 'i18n.ts', 'theme-messages.ts', 'branding.ts', 'display-format.ts', 'audit-labels.ts', 'mail-cards.ts',
   'models/ftp-removal.ts', 'models/account-list.ts', 'models/db-services.ts', 'models/plan-fields.ts', 'models/whm-account-access.ts', 'models/website-analytics.ts', 'models/mail.ts',
   'models/action-state.ts', 'models/status-page.ts', 'models/svc-panels.ts', 'models/web-stats.ts', 'models/dnssec.ts', 'models/reseller-allocation.ts', 'models/reseller-usage.ts', 'models/theme-surface.ts', 'models/dav-client-guide.ts', 'display-name.ts', 'account-notices.ts', 'mail-home-groups.ts',
+  // Theme-agnostic self-hosted font faces: both themes load the same IBM Plex stylesheet.
+  'vendor/plex.ts'
 ])
 const TYPE_ONLY_CORE_MODULES = new Set(['themes/contract.ts'])
 const TEST_CORE_MODULES = new Set(['themes/markup.ts', '../../../tests/fixtures/web-stats-view.ts'])

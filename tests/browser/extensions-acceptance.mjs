@@ -333,7 +333,7 @@ export async function runExtensionsAcceptance({ output, filter } = {}) {
       const page = await context.newPage()
       await page.route('**/*', route => {
         const url = new URL(route.request().url())
-        if (url.origin === host.baseUrl || ['fonts.googleapis.com', 'fonts.gstatic.com'].includes(url.hostname)) return route.continue()
+        if (url.origin === host.baseUrl) return route.continue()
         failures.push({ type: 'unexpected_external_request', origin: url.origin, path: url.pathname }); return route.abort()
       })
       for (const spec of selected) {

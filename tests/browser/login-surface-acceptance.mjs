@@ -28,8 +28,9 @@ async function createLoginFixture(audience) {
         surface: 'login', realtimeEnabled: false,
         login: { audience, targetSurface: audience, username: longError ? 'synthetic-account-with-a-long-name' : '', errorMessage: longError ? (url.searchParams.get('lang') === 'ar' ? 'هذه رسالة خطأ مصطنعة طويلة لاختبار التفاف النص والمحاذاة. تعذر إكمال تسجيل الدخول، تواصل مع مدير الاستضافة إذا استمرت المشكلة.' : 'This is a long synthetic error message to exercise wrapping and alignment. Sign-in could not be completed. Contact your hosting administrator if this continues.') : undefined },
       }))
-      let body = await response.text()
-      if (response.headers.get('content-type')?.startsWith('text/html')) body = body.replace('<html ', '<html data-login-visual-fixture="synthetic" ').replace('<body>', '<body><div data-synthetic-watermark role="note" style="padding:6px 12px;background:#f1f3f5;color:#25313f;text-align:center;font:12px/1.5 sans-serif" dir="ltr">Synthetic login visual fixture</div>')
+      const html = response.headers.get('content-type')?.startsWith('text/html')
+      let body = html ? await response.text() : Buffer.from(await response.arrayBuffer())
+      if (html) body = body.replace('<html ', '<html data-login-visual-fixture="synthetic" ').replace('<body>', '<body><div data-synthetic-watermark role="note" style="padding:6px 12px;background:#f1f3f5;color:#25313f;text-align:center;font:12px/1.5 sans-serif" dir="ltr">Synthetic login visual fixture</div>')
       outgoing.writeHead(response.status, { ...Object.fromEntries(response.headers), 'cache-control': 'no-store', 'x-visual-fixture': 'synthetic' })
       outgoing.end(incoming.method === 'HEAD' ? undefined : body)
     } catch { outgoing.writeHead(500); outgoing.end('Synthetic login fixture failed.'); }
@@ -241,7 +242,7 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
           await page.goBack({ waitUntil: 'domcontentloaded' }); await expect(page.locator('html')).toHaveAttribute('data-theme', state.theme)
           outcome.observations.push({ language_navigation: true, theme_navigation: true, history_back_restores_context: true, listener_audience_preserved: true })
         }
-        outcome.console_classification = { expected_unauthenticated_lookup: outcome.console_errors.filter(error => /\/api\/auth\/me$/.test(error.url)), external_fonts: outcome.console_errors.filter(error => /fonts\.(?:googleapis|gstatic)\.com/.test(error.url)), unexpected: outcome.console_errors.filter(error => !/\/api\/auth\/me$/.test(error.url) && !/fonts\.(?:googleapis|gstatic)\.com/.test(error.url)) }
+        outcome.console_classification = { expected_unauthenticated_lookup: outcome.console_errors.filter(error => /\/api\/auth\/me$/.test(error.url)), unexpected: outcome.console_errors.filter(error => !/\/api\/auth\/me$/.test(error.url)) }
         assert.deepEqual(outcome.console_classification.unexpected, [], 'No unexpected application console errors')
         assert.deepEqual(outcome.page_errors, [])
         assert.deepEqual(outcome.mutations, [])

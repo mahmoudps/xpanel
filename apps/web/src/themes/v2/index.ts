@@ -1,7 +1,7 @@
 // v2 UI theme: the foundation (assets, document frame, shell and component kit) and the page layouts.
 // Surface renderers and their controller contracts are required before this foundation becomes a registered UiTheme.
 
-export { v2Assets, v2Stylesheet, v2FontsHref } from './assets.ts'
+export { v2Assets, v2Stylesheet } from './assets.ts'
 export { renderV2Document, type V2DocumentProps } from './document.ts'
 export { v2Messages } from './messages.ts'
 export { renderV2Shell, type NavContext, type V2ShellProps } from './shell/shell.ts'

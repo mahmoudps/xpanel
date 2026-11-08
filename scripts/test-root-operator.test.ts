@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { currentRootOperatorBinding, parseRootOperatorRequest } from './root-operator.mjs'
+import { currentRootOperatorBinding, parseRootOperatorRequest, rootOperatorAttentionLine } from './root-operator.mjs'
 
 const request = () => ({ operationId: '12345678-1234-1234-1234-123456789abc', kind: 'upgrade', expectedArchiveSha256: 'a'.repeat(64) })
 describe('distinct root operator request syntax; no peer or native acceptance claim', () => {
@@ -12,6 +12,14 @@ describe('distinct root operator request syntax; no peer or native acceptance cl
   })
   it.each([null, {}, { ...request(), kind: 'uninstall' }, { ...request(), expectedArchiveSha256: Object('a'.repeat(64)) }, { ...request(), operationId: '../other' }])('rejects malformed identity', value => {
     expect(() => parseRootOperatorRequest(value)).toThrow('ROOT_OPERATOR_REQUEST_INVALID')
+  })
+  it('journals the failed step and a bounded one-line reason beside the stable code', () => {
+    const details = { phase: 'retirement_pending', qualified: false, step: 'rewind:units', reason: 'generation 5 requires operator attention:\nline two' }
+    expect(rootOperatorAttentionLine('upgrade', { code: 'LIFECYCLE_ROLLBACK_FAILED', details }))
+      .toBe('xpanel-root-operator-attention kind=upgrade code=LIFECYCLE_ROLLBACK_FAILED step=rewind:units reason="generation 5 requires operator attention: line two"\n')
+    expect(rootOperatorAttentionLine('upgrade', { code: 'LIFECYCLE_ROLLBACK_FAILED', details: { ...details, reason: 'x'.repeat(900) } }))
+      .toBe(`xpanel-root-operator-attention kind=upgrade code=LIFECYCLE_ROLLBACK_FAILED step=rewind:units reason="${'x'.repeat(400)}"\n`)
+    expect(rootOperatorAttentionLine('recover', { code: 'bad code', details: { step: 'Rewind units', reason: 'r' } })).toBe('xpanel-root-operator-attention kind=recover code=UNSTABLE\n')
   })
   it('does not invoke accessors or expose a binding outside the live native scope', async () => {
     const value = request(); let touched = false

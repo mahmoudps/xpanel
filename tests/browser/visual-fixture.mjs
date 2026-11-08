@@ -155,7 +155,7 @@ export async function createVisualFixture({ port = 0, host = '127.0.0.1', qualif
         return projected
       } : undefined)
       const html = response.headers.get('content-type')?.startsWith('text/html')
-      const body = html ? markVisualDocument(await response.text(), component) : await response.text()
+      const body = html ? markVisualDocument(await response.text(), component) : Buffer.from(await response.arrayBuffer())
       outgoing.writeHead(response.status, { ...Object.fromEntries(response.headers), 'cache-control': 'no-store', 'x-visual-fixture': 'synthetic', ...(component ? { 'x-visual-fixture-scope': 'component' } : {}) })
       outgoing.end(incoming.method === 'HEAD' ? undefined : body)
     } catch {

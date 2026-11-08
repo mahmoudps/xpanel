@@ -110,6 +110,8 @@ export interface ReconcileJournalRecord {
   pendingPreAction?: { index: number; kind: HostAction['kind']; sha256: string }
   /** File rollback cannot establish that users, groups, directories or quotas were restored. */
   preActionsNeedVerification?: boolean
+  /** This generation's own host rollback stopped part way: its live files and units are not proven restored. */
+  rollbackFailed?: true
   switchedFilePaths: string[]
   removedFilePaths: string[]
   stoppedObsoleteUnits: string[]

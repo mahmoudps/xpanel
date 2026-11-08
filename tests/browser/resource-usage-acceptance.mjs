@@ -68,7 +68,7 @@ try {
     const check = (name, condition, observed) => outcome.checks.push({ name, passed: Boolean(condition), observed })
     await context.route('**/*', route => {
       const request = route.request(), url = new URL(request.url())
-      if (!['GET', 'HEAD'].includes(request.method()) || ![new URL(origin).host, 'fonts.googleapis.com', 'fonts.gstatic.com'].includes(url.host)) return route.abort()
+      if (!['GET', 'HEAD'].includes(request.method()) || url.host !== new URL(origin).host) return route.abort()
       return route.continue()
     })
     try {
@@ -121,7 +121,7 @@ try {
     const check = (name, condition, observed) => outcome.checks.push({ name, passed: Boolean(condition), observed })
     await context.route('**/*', route => {
       const request = route.request(), url = new URL(request.url())
-      if (!['GET', 'HEAD'].includes(request.method()) || ![new URL(origin).host, 'fonts.googleapis.com', 'fonts.gstatic.com'].includes(url.host)) return route.abort()
+      if (!['GET', 'HEAD'].includes(request.method()) || url.host !== new URL(origin).host) return route.abort()
       return route.continue()
     })
     try {

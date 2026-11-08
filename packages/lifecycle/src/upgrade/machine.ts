@@ -753,14 +753,17 @@ const rewind = async (c: Ctx, resumed: RewindJournal | null): Promise<RewindJour
   }
   // Admission just stopped the panel, so a start journaled before a crash no longer holds.
   j.done = j.done.filter(s => s !== 'start-panel')
+  // Units run after release, state and index are restored: when they fail, the previous release still starts and serves.
+  const failedUnits: string[] = []
   for (const step of REWIND_STEPS) {
     if (j.done.includes(step)) continue
     try {
       await rewindStep(c, receipt, step)
     } catch (e) {
+      if (step === 'units') { failedUnits.push(`rewind:units: ${errorMessage(e)}`); continue }
       if (step === 'start-panel' && JSON.stringify(j.done) === JSON.stringify(REWIND_STEPS.filter(value => value !== 'start-panel'))
         && Number.isSafeInteger(j.generation) && j.generation! > 0) j.retryAdmission = 'restart-owned-control-plane'
-      return endRewind(c, j, 'rewind-failed', [`rewind:${step}: ${errorMessage(e)}`, `restored only: ${j.done.join(', ') || 'nothing'}`])
+      return endRewind(c, j, 'rewind-failed', [...failedUnits, `rewind:${step}: ${errorMessage(e)}`, `restored only: ${j.done.join(', ') || 'nothing'}`])
     }
     // Checkpoints describe completed steps, while host/filesystem actions retain their execution trace.
     // A reselected release must not make a later start-only retry lose its exact completion proof.
@@ -771,9 +774,10 @@ const rewind = async (c: Ctx, resumed: RewindJournal | null): Promise<RewindJour
       j.updatedAt = nowIso(c)
       await saveJournal(c.ports, c.fs, c.plan.layout, j)
     } catch (e) {
-      return endRewind(c, j, 'rewind-unknown', [`rewind journal after ${step}: ${errorMessage(e)}`])
+      return endRewind(c, j, 'rewind-unknown', [...failedUnits, `rewind journal after ${step}: ${errorMessage(e)}`])
     }
   }
+  if (failedUnits.length) return endRewind(c, j, 'rewind-failed', [...failedUnits, `restored only: ${j.done.join(', ')}`])
   const problems: string[] = []
   const link = await probe(() => c.fs.readlink(c.plan.layout.currentLink), 'release link', problems)
   if (link !== undefined && link !== receipt.previousTarget) problems.push(`current link points to ${String(link)}, expected ${receipt.previousTarget}`)

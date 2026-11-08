@@ -1487,6 +1487,7 @@ export class HostReconciler {
       }
     } catch (rollbackErr) {
       journalRecord.phase = 'needs_attention'
+      journalRecord.rollbackFailed = true
       const rollbackDetail = isXpanelError(rollbackErr) && rollbackErr.detail && Object.keys(rollbackErr.detail).length
         ? ` ${JSON.stringify(rollbackErr.detail).slice(0, 400)}` : ''
       journalRecord.error = `rollback failed after ${errorMsg}: ${(rollbackErr as Error).message}${rollbackDetail}`
@@ -1840,6 +1841,35 @@ export class HostReconciler {
     return opts.effectAuthority ? withHostEffectAuthority(this.deps.executor, opts.effectAuthority, run) : run()
   }
 
+  /**
+   * Upgrade rewind only: reconciles the restored desired state of `generationId`, which the restored index holds as
+   * active. An attention journal belongs to the rewound upgrade when its generation was built on `generationId` and is
+   * absent from the restored index; it is superseded, with an audit entry, unless that generation's own host rollback
+   * stopped part way. Any other attention refuses with its generation and error.
+   */
+  async reconcileRewound(generationId: number, actor: string): Promise<ReconcileResult> {
+    return withLifecycleWriterAdmission(() => withGenerationReconciliationLease(this.deps.store.rootDir, async () => {
+      await assertHostEffectAuthority(this.deps.executor)
+      const journal = await this.journal.readActiveJournal()
+      if (journal?.phase === 'needs_attention') {
+        const [active, recorded] = await Promise.all([latestActive(this.deps.db), getGeneration(this.deps.db, journal.generationId)])
+        const ours = journal.previousActiveGenerationId === generationId && active?.id === generationId && recorded === null
+        const error = (journal.error ?? 'no error was recorded').slice(0, 1500)
+        if (!ours || journal.rollbackFailed) {
+          return fail('PRECONDITION_FAILED', `generation ${journal.generationId} requires operator attention${ours ? ', its own rollback did not finish' : ', and the rewound upgrade did not create it'}: ${error}`, {
+            generationId: journal.generationId, restoredGenerationId: generationId, stateChanged: false,
+          })
+        }
+        journal.phase = 'failed'
+        journal.error = `superseded by the upgrade rewind to generation ${generationId}: ${error}`
+        await this.journal.saveJournal(journal)
+        await appendAudit(this.deps.db, { actor, action: 'reconcile.attention_resolved', target: `generation:${journal.generationId}`,
+          detail: { generationId: journal.generationId, previousGenerationId: generationId, supersededByRewind: true, error }, outcome: 'ok' })
+      }
+      return this.reconcileAdmitted({ force: true, actor })
+    }))
+  }
+
   private async reconcileAdmitted(opts: ReconcileOptions = {}): Promise<ReconcileResult> {
     const startMs = Date.now()
     const scope: LiveEventScope = opts.scope ?? { accountId: null, resellerId: null }
@@ -1853,7 +1883,7 @@ export class HostReconciler {
         stateChanged: false, verificationRequired: true, generationId: existingJournal.generationId,
       })
       if (existingJournal.phase === 'needs_attention') {
-        fail('PRECONDITION_FAILED', 'previous reconciliation rollback failed and requires operator attention', {
+        fail('PRECONDITION_FAILED', `previous reconciliation of generation ${existingJournal.generationId} requires operator attention`, {
           generationId: existingJournal.generationId,
           error: existingJournal.error,
           ...(hasUnverifiedPreActions(existingJournal) && { stateChanged: true, verificationRequired: true }),

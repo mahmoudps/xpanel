@@ -7,7 +7,7 @@ import { effectivePlan } from '@xpanel/core'
 import type { HostAction, Principal } from '@xpanel/core'
 import { createDb, getDurableJob, getGeneration, getPrincipal, getStrictOperationDatabaseOrigin, latestActive, loadMigrations } from '@xpanel/db'
 import { limitRequirementMet, recoverUpgrade, runUpgrade } from '@xpanel/lifecycle'
-import type { FsPort, HostPort, ReleaseInfo, UpgradePorts, UpgradeSafetyPort } from '@xpanel/lifecycle'
+import type { FsPort, HostPort, ReleaseInfo, UpgradePorts, UpgradeResult, UpgradeSafetyPort } from '@xpanel/lifecycle'
 import { detectOs, parseOsRelease } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from '../executor.ts'
@@ -160,9 +160,27 @@ const nativeFilesystem = (owner: Owner, boundArtifactPath: string | null): FsPor
   }
 }
 
+/**
+ * A stop or disable of a unit systemd has no file for and does not run is already done; any other nonzero exit,
+ * and an absent unit for start, restart, reload or enable, stays a failure.
+ */
+export const runLifecycleSystemdAction = async (run: (argv: string[]) => Promise<{ code: number | null; stdout: string }>, action: Extract<HostAction, { kind: 'systemd' }>): Promise<void> => {
+  if ((await run(['/usr/bin/systemctl', action.verb, action.unit])).code === 0) return
+  if (action.verb === 'stop' || action.verb === 'disable') {
+    const shown = await run(['/usr/bin/systemctl', 'show', '-p', 'LoadState', '-p', 'ActiveState', '--value', '--', action.unit])
+    if (shown.code === 0 && shown.stdout.trim().split('\n').join(' ') === 'not-found inactive') return
+  }
+  return deny('LIFECYCLE_SERVICE_COMMAND_FAILED')
+}
+
+/** The stable code first, then the unit and error the failed generation recorded, for the step log and attention record. */
+const reconcileFailed = (result: { status: string; failedTest?: string; error?: string }): never => {
+  throw Object.assign(new Error(result.status === 'failed' ? `LIFECYCLE_RECONCILE_FAILED ${result.failedTest}: ${result.error}`.slice(0, 600) : 'LIFECYCLE_RECONCILE_FAILED'), { code: 'LIFECYCLE_RECONCILE_FAILED' })
+}
+
 const guardedExecutor = (executor: LinuxHostExecutor): AgentExecutor => {
   const effect = async <T>(callback: () => Promise<T>, kind: 'filesystem.write' | 'service.observe' = 'filesystem.write'): Promise<T> => { await assertCurrentLifecycleEffect(kind); const value = await callback(); await assertCurrentLifecycleEffect(kind); return value }
-  return { preflight: plan => effect(() => executor.preflight(plan), 'service.observe'), writeFile: file => effect(() => executor.writeFile(file)), readFile: path => effect(() => executor.readFile(path), 'service.observe'), removePath: path => effect(() => executor.removePath(path)), runTest: test => effect(() => executor.runTest(test)), runAction: action => effect(async () => { if (action.kind === 'systemd') { const result = await executor.runCommand(['/usr/bin/systemctl', action.verb, action.unit]); if (result.code !== 0) return deny('LIFECYCLE_SERVICE_COMMAND_FAILED'); return } await executor.runAction(action) }), runCommand: argv => effect(() => executor.runCommand(argv)), readSliceMetrics: uid => effect(() => executor.readSliceMetrics(uid), 'service.observe') }
+  return { preflight: plan => effect(() => executor.preflight(plan), 'service.observe'), writeFile: file => effect(() => executor.writeFile(file)), readFile: path => effect(() => executor.readFile(path), 'service.observe'), removePath: path => effect(() => executor.removePath(path)), runTest: test => effect(() => executor.runTest(test)), runAction: action => effect(async () => { if (action.kind === 'systemd') return runLifecycleSystemdAction(argv => executor.runCommand(argv), action); await executor.runAction(action) }), runCommand: argv => effect(() => executor.runCommand(argv)), readSliceMetrics: uid => effect(() => executor.readSliceMetrics(uid), 'service.observe') }
 }
 
 const composition = async (db: ReturnType<typeof createDb>['db'], actor: Principal, owner: Owner, boundArtifactPath: string | null): Promise<{ ports: UpgradePorts; store: StateStore; os: Awaited<ReturnType<typeof detectOs>>; releaseKeys: readonly ReleaseVerificationKey[]; canaries: ReturnType<typeof createNativeLifecycleCanary> }> => {
@@ -203,7 +221,7 @@ const composition = async (db: ReturnType<typeof createDb>['db'], actor: Princip
     probeCanaryHttp: target => canaries.observe(target),
     reconciler: {
       currentGeneration: async () => { const active = await latestActive(db); if (!active) return deny('LIFECYCLE_ACTIVE_GENERATION_REQUIRED'); return active.id },
-      reconcile: async () => { await assertCurrentLifecycleEffect('filesystem.write'); const result = await reconciler.reconcile({ force: true, actor: actor.username }); if (result.status === 'failed' || !result.generation) return deny('LIFECYCLE_RECONCILE_FAILED'); return { generationId: result.generation.id, units: [] } },
+      reconcile: async () => { await assertCurrentLifecycleEffect('filesystem.write'); const result = await reconciler.reconcile({ force: true, actor: actor.username }); if (result.status === 'failed' || !result.generation) return reconcileFailed(result); return { generationId: result.generation.id, units: [] } },
       // Rewind only: the restored state files must be the exact source of that generation; this coordinator
       // (the pre-upgrade release) rebuilds and applies them. Any other historical replay stays denied.
       activate: async generationId => {
@@ -211,8 +229,8 @@ const composition = async (db: ReturnType<typeof createDb>['db'], actor: Princip
         const [target, snapshot] = await Promise.all([getGeneration(db, generationId), store.readSnapshot()])
         const manifest = target ? await reconciler.journal.readManifest(generationId) : null
         if (!manifest || manifest.stateChecksum !== snapshot.checksum) return deny('LIFECYCLE_HISTORICAL_AUTHORITY_REPLAY_DENIED')
-        const result = await reconciler.reconcile({ force: true, actor: actor.username })
-        if (result.status === 'failed' || !result.generation) return deny('LIFECYCLE_RECONCILE_FAILED')
+        const result = await reconciler.reconcileRewound(generationId, actor.username)
+        if (result.status === 'failed' || !result.generation) return reconcileFailed(result)
         return { generationId: result.generation.id, units: [] }
       },
       status: async () => { const [drift, active, snapshot] = await Promise.all([reconciler.checkDrift(), latestActive(db), store.readSnapshot()]); const manifest = active ? await reconciler.journal.readManifest(active.id) : null; const problems = drift.items.map(item => item.path); if (!manifest || manifest.stateChecksum !== snapshot.checksum) problems.push('current desired state is not the active generation'); if (drift.manifestMissing) problems.push('active generation manifest is unavailable'); return { converged: !drift.hasDrift && problems.length === 0, drift: problems } },
@@ -283,6 +301,14 @@ export const runNativeLifecycleCommand = async (input: unknown, processBinding?:
     return result.outcome === 'succeeded'
       ? { exitCode: 0, code: 'LIFECYCLE_NATIVE_COMMITTED', outcome: 'committed', details: { currentVersion: release.version, changed: true, upgradeId: result.recordId } }
       : result.outcome === 'rolled_back' ? { exitCode: 5, code: 'LIFECYCLE_NATIVE_ROLLED_BACK', outcome: 'rolled_back', details: { phase: 'rolled_back', qualified: true, upgradeId: result.recordId } }
-      : { exitCode: result.outcome === 'refused' ? 3 : 6, code: result.outcome === 'refused' ? 'LIFECYCLE_UPGRADE_REFUSED' : result.outcome === 'rollback_failed' ? 'LIFECYCLE_ROLLBACK_FAILED' : 'LIFECYCLE_RETIREMENT_PENDING', outcome: result.outcome === 'refused' ? 'blocked' : 'attention', details: { phase: 'retirement_pending', qualified: false } }
+      : { exitCode: result.outcome === 'refused' ? 3 : 6, code: result.outcome === 'refused' ? 'LIFECYCLE_UPGRADE_REFUSED' : result.outcome === 'rollback_failed' ? 'LIFECYCLE_ROLLBACK_FAILED' : 'LIFECYCLE_RETIREMENT_PENDING', outcome: result.outcome === 'refused' ? 'blocked' : 'attention', details: { phase: 'retirement_pending', qualified: false, ...upgradeAttentionStep(result) } }
   })
+}
+
+/** The step an operator starts from: a failed rewind step first, else the last failed upgrade step, with its reason. */
+export const upgradeAttentionStep = (result: Pick<UpgradeResult, 'rewind' | 'steps'>): { step: string; reason: string } | Record<string, never> => {
+  const rewound = /^(rewind:[a-z-]+): ([^]*)$/.exec(result.rewind?.problems[0] ?? '')
+  if (rewound) return { step: rewound[1]!, reason: rewound[2]! }
+  const failed = result.steps.findLast(step => !step.ok)
+  return failed ? { step: failed.step, reason: failed.detail } : {}
 }

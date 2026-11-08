@@ -9,7 +9,8 @@ const reportedFamily = name => {
   const normalized = name.trim().replace(/\s+/g, ' ')
   // Chromium reports some font weights as part of familyName. Match the whole
   // family and a known style suffix, so Sans Arabic never passes as Sans.
-  const match = /^(IBM Plex Sans Arabic|IBM Plex Sans|IBM Plex Mono|Noto Sans Arabic)(?: (?:Thin|Extra ?Light|Light|Regular|Text|Medium|Semi ?Bold|Bold|Extra ?Bold)(?: Italic)?| Italic)?$/i.exec(normalized)
+  // IBM's release files name some styles in the abbreviated legacy form (Medm, SmBld).
+  const match = /^(IBM Plex Sans Arabic|IBM Plex Sans|IBM Plex Mono|Noto Sans Arabic)(?: (?:Thin|Extra ?Light|Light|Regular|Text|Medium|Medm|Semi ?Bold|SmBld|Bold|Extra ?Bold)(?: Italic)?| Italic)?$/i.exec(normalized)
   if (!match) return normalized
   return ['IBM Plex Sans Arabic', 'IBM Plex Sans', 'IBM Plex Mono', 'Noto Sans Arabic'].find(family => family.toLowerCase() === match[1].toLowerCase())
 }
