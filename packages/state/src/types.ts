@@ -48,9 +48,18 @@ export interface PrefixList {
   entries: string[]
 }
 
-export interface FirewallState {
+/** firewall.json as stored: a policy field the file never held stays absent, so the state checksum is the one its writer recorded. */
+export interface StoredFirewallState {
   rules: FirewallRule[]
   prefixLists: PrefixList[]
+  enabled?: boolean
+  blockPing?: boolean
+}
+
+/** A reseller file as stored: a release before per-resource overselling saved one boolean for both. */
+export type StoredReseller = Omit<Reseller, 'oversell'> & { oversell: Reseller['oversell'] | boolean }
+
+export interface FirewallState extends StoredFirewallState {
   /** false leaves the rule list out of the kernel: nothing is filtered but the fixed guards */
   enabled: boolean
   /** the server ignores ping, with the firewall on or off */
@@ -372,11 +381,11 @@ export interface StateSnapshot {
   checksum: string
   revision?: number
   server: StoredServerSettings | null
-  firewall: FirewallState
+  firewall: StoredFirewallState
   uidAllocator: UidAllocatorState
   featureLists: FeatureList[]
   plans: Plan[]
-  resellers: Reseller[]
+  resellers: StoredReseller[]
   accounts: StoredAccount[]
   domains: Domain[]
   serviceUsers: StoredServiceUser[]

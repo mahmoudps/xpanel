@@ -15,7 +15,7 @@ import type { Account, ErrorCode, Id, LiveEvent, Principal } from '@xpanel/core'
 import { appendAudit, getDurableJob, getPrincipal, latestActive } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
 import type { StateStore } from '@xpanel/state'
-import { parseGenerationRollbackRequest } from '@xpanel/state'
+import { parseGenerationRollbackRequest, resellerPolicy } from '@xpanel/state'
 import { type CanonicalIoResourcePipeline, type IoAnalyticsEngine, unavailableIoAnalytics, WebsiteAnalyticsEngine } from './analytics.ts'
 import { LinuxHostExecutor } from './executor.ts'
 import { createNativeFileSharingProvider } from './ops-file-sharing-native.ts'
@@ -1232,7 +1232,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       if (pathname === '/host/accounts/health') {
         const response = await handleAccountHealthRoute(req, url, method, {
           authenticate: () => authenticateCaller(req),
-          readState: () => deps.store.readSnapshot(),
+          readState: async () => { const snapshot = await deps.store.readSnapshot(); return { ...snapshot, resellers: snapshot.resellers.map(resellerPolicy) } },
           host: deps.executor instanceof LinuxHostExecutor ? nativeAccountHealthHost(deps.executor) : null,
         })
         if (response) return response

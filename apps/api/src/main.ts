@@ -17,7 +17,7 @@ import { isOfferedLocale, requestLocale, type Locale } from '../../web/src/i18n.
 import type { WebAppRenderState } from '../../web/src/app.ts'
 import { assertNoActiveDatabaseTransaction, createDb, getMailboxSession, initializeOperationalMetadata, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, syncAccountContactIndex, type AuditQuery, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
-import { StateStore } from '@xpanel/state'
+import { resellerPolicy, StateStore } from '@xpanel/state'
 import { protectInstalledStateParent } from '../../../packages/state/src/ownership.ts'
 import { runCli } from './cli.ts'
 import { CLI_COMMAND } from './cli-api/identity.ts'
@@ -680,7 +680,7 @@ export const createDefaultWebRenderer = async (deps: {
     const visibleDomains = snap.domains.filter(domain => listedAccountIds.has(domain.accountId))
     const listedPlanIds = new Set(listedAccounts.map((a) => a.planId))
     const visiblePlans = snap.plans.filter((p) => principal.kind === 'root' || p.ownerId === principal.id || listedPlanIds.has(p.id))
-    const visibleResellers = snap.resellers.filter((r) => principal.kind === 'root' || r.id === principal.id)
+    const visibleResellers = snap.resellers.filter((r) => principal.kind === 'root' || r.id === principal.id).map(resellerPolicy)
     const visibleFeatureLists = snap.featureLists
       .filter(item => principal.kind === 'root' || (principal.kind === 'reseller' && (item.ownerId === null || item.ownerId === principal.id)))
       .map(({ id, name, disabled, ownerId }) => ({ id, name, disabled, ownerId }))

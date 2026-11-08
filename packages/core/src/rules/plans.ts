@@ -102,14 +102,23 @@ const fieldErrors = <K extends string>(
 
 const PLAN_KEYS: readonly string[] = ['id', 'name', 'ownerId', 'featureListId', 'resources', 'caps', 'dedicatedIp', 'shell', 'defaultMailboxQuotaMb', 'enforceBandwidth']
 
+/** A name no new plan may take; a plan saved under it before it was reserved stays readable. */
+export const isReservedPlanName = (name: string): boolean => RESERVED_PLAN_NAMES.includes(name.toLowerCase())
+
 /** Structural problems only; no authorization. Empty array means the plan is well-formed. */
 export const planErrors = (plan: unknown): string[] => {
+  const errors = storedPlanErrors(plan)
+  return isRecord(plan) && typeof plan.name === 'string' && PLAN_NAME_RE.test(plan.name) && isReservedPlanName(plan.name) ? [...errors, `"${plan.name}" is a reserved plan name`] : errors
+}
+
+/** The structural problems of a saved plan file: planErrors without the reserved-name rule. */
+export const storedPlanErrors = (plan: unknown): string[] => {
   if (!isRecord(plan)) return ['plan must be an object']
   const errors = Object.keys(plan).filter((k) => !PLAN_KEYS.includes(k)).map((k) => `${k.slice(0, 64)} is not a known field`)
   if (typeof plan.id !== 'string' || plan.id.length === 0 || plan.id.length > 128) errors.push('id is required')
   if (typeof plan.name !== 'string' || !PLAN_NAME_RE.test(plan.name)) {
     errors.push('name must be 1-64 characters of letters, digits, space, "_", "." or "-"')
-  } else if (RESERVED_PLAN_NAMES.includes(plan.name.toLowerCase())) errors.push(`"${plan.name}" is a reserved plan name`)
+  }
   if (plan.ownerId !== null && (typeof plan.ownerId !== 'string' || plan.ownerId.length === 0)) {
     errors.push('ownerId must be a reseller id or null')
   }

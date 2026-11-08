@@ -1,5 +1,6 @@
 // Pure refusal rules for the native root-operator IPC. No filesystem, process,
 // socket or authority: callers own transport and must remain fail closed.
+import { isXpanelError } from '@xpanel/core'
 
 /** Same stable machine-code grammar as the wire protocol. */
 export const ROOT_OPERATOR_MACHINE_CODE = /^[A-Z][A-Z0-9_]{0,79}$/
@@ -62,12 +63,38 @@ export const ownedFileDriftDetail = (error: unknown): string => {
   return ''
 }
 
+// Plain words and short acronyms only: digits, quotes, '=', '@' and mixed-case tokens, where values and secrets live, become '?'.
+const MESSAGE_WORD = /^\(?(?:[A-Z]?[a-z-]{1,31}|[A-Z]{1,8})[.,;:)]{0,2}$/
+const REASON = /^[a-z][a-z0-9_]{0,63}$/
+const DETAIL_LIMIT = 160
+/** Root-journal detail of a generic refusal: the product-authored message and reason identifier, never sent to the client. */
+export const productRefusalDetail = (error: unknown): string => {
+  let current: unknown = error
+  for (let depth = 0; current && depth < 6; depth += 1) {
+    if (isXpanelError(current)) {
+      const reason = typeof current.detail.reason === 'string' && REASON.test(current.detail.reason) ? ` reason=${current.detail.reason}` : ''
+      const owned = (token: string) => token.length <= 255 && OWNED_PATH.test(token) && !token.split('/').includes('..')
+      let text = ''
+      for (const token of current.message.split('\n')[0]!.split(' ').filter(Boolean).map(word => MESSAGE_WORD.test(word) || owned(word) ? word : '?')) {
+        const next = text ? text + ' ' + token : token
+        if (` detail="${next}"${reason}`.length > DETAIL_LIMIT) break
+        text = next
+      }
+      return ` detail="${text}"${reason}`
+    }
+    current = typeof current === 'object' ? (current as { cause?: unknown }).cause : undefined
+  }
+  return ''
+}
+const GENERIC_CODES = new Set(['PRECONDITION_FAILED', REVIEW_REQUIRED])
+
 export interface RootOperatorServerRefusal { readonly code: string; readonly frame: Buffer; readonly journalLine: string }
 
 /** The single server-side refusal payload; callers may only write its frame and journal line. */
 export function rootOperatorServerRefusal(error: unknown): RootOperatorServerRefusal {
   const code = rootOperatorServerRefusalCode(error)
-  return Object.freeze({ code, frame: encodeRootOperatorRefusal(code), journalLine: rootOperatorRefusalJournalLine(code, ownedFileDriftDetail(error)) })
+  const detail = ownedFileDriftDetail(error) + (GENERIC_CODES.has(code) ? productRefusalDetail(error) : '')
+  return Object.freeze({ code, frame: encodeRootOperatorRefusal(code), journalLine: rootOperatorRefusalJournalLine(code, detail) })
 }
 
 /** Client parser for exactly one single-key refusal frame; anything else is not a refusal. */

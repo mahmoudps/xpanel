@@ -2,7 +2,7 @@ import { withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admissi
 import { randomUUID } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
-import { canonicalIp, servedDocRoot, cronJobUnitId, effectivePlan, effectiveServerFtpSettings, effectiveServerRoles, effectiveServerSshSettings, fail, isXpanelError, MANAGEMENT_PUBLIC_PORTS, managementPortRules, natPublicAddresses, redirectionValues, suspensionEffects } from '@xpanel/core'
+import { canonicalIp, servedDocRoot, cronJobUnitId, effectivePlan, effectiveServerFtpSettings, effectiveServerRoles, effectiveServerSshSettings, fail, isXpanelError, MANAGEMENT_PUBLIC_PORTS, managementPortRules, natPublicAddresses, redirectionValues, refusePrefork, suspensionEffects } from '@xpanel/core'
 import type {
   Account,
   ConfigTest,
@@ -32,7 +32,7 @@ import type { ConfigGeneration, Db } from '@xpanel/db'
 import { edge, extended, services, system } from '@xpanel/render'
 import { siteQuotaActions } from './site-quota.ts'
 import type { StateSnapshot, StateStore } from '@xpanel/state'
-import { assertGenerationRollbackPreconditions, generationSourceIsLinked, isStateDirectoryDurabilityError, parseGenerationRollbackRequest, withGenerationReconciliationLease } from '@xpanel/state'
+import { assertGenerationRollbackPreconditions, firewallPolicy, generationSourceIsLinked, isStateDirectoryDurabilityError, parseGenerationRollbackRequest, withGenerationReconciliationLease } from '@xpanel/state'
 import type { GenerationRollbackRequest } from '@xpanel/state'
 import type { AgentExecutor } from './executor.ts'
 import { assertHostEffectAuthority, withHostEffectAuthority, withoutHostEffectAuthority, type HostEffectAuthority } from './host-effect-authority.ts'
@@ -384,6 +384,8 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       fpmAccounts: snapshot.accounts.filter(account => account.status !== 'terminating').map(account => account.username) }))
 
     if (settings.engine === 'apache') {
+      // A saved prefork setting reads as saved; it is never served.
+      if (settings.apacheMpm === 'prefork') refusePrefork()
       preActions.push(...edge.apacheLogDirs())
       files.push(
         edge.apacheMpmFile(settings, os, {
@@ -410,8 +412,9 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     }
 
     // Firewall: nothing to render until a rule or the ping block exists; the switch and the ping block live in the same table
-    if (snapshot.firewall.rules.length > 0 || snapshot.firewall.blockPing) {
-      const prefixLists = Object.fromEntries(snapshot.firewall.prefixLists.map((l) => [l.name, l.entries]))
+    const firewall = firewallPolicy(snapshot.firewall)
+    if (firewall.rules.length > 0 || firewall.blockPing) {
+      const prefixLists = Object.fromEntries(firewall.prefixLists.map((l) => [l.name, l.entries]))
       const nftSettings = system.nftSettingsFromServer(settings, {
         prefixLists,
         banTimeoutSec: 3600,
@@ -419,20 +422,20 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
         flood: opts.secEdge?.flood ?? null, // sec: flood limits
         ...(opts.ftpServer && opts.ftpServer.roleEnabled !== false && effectiveServerFtpSettings(settings).enabled ? { ftpPassivePorts: effectiveServerFtpSettings(settings).passivePorts } : {}),
         smtpRestricted: opts.svcHost?.smtpRestricted === true,
-        enabled: snapshot.firewall.enabled,
-        blockPing: snapshot.firewall.blockPing,
+        enabled: firewall.enabled,
+        blockPing: firewall.blockPing,
         nfsClients: opts.nfsClients ?? [],
         ...(opts.managementPorts ? { managementPorts: [...new Set([...MANAGEMENT_PUBLIC_PORTS, ...opts.managementPorts])] } : {}),
         ...(opts.serverOperations?.hostTools?.frp.server.enabled ? { frpPorts: opts.serverOperations.hostTools.frp.server } : {}),
         webClientPorts: phpMyAdminPorts(opts.phpMyAdminAccess),
         appPorts: runtimeAppPorts(snapshot.accounts, opts.runtime),
       })
-      const nftFile = system.renderNftables([...snapshot.firewall.rules, ...managementPortRules(opts.managementPorts ?? [])], nftSettings, os)
+      const nftFile = system.renderNftables([...firewall.rules, ...managementPortRules(opts.managementPorts ?? [])], nftSettings, os)
       files.push(nftFile)
       addTest(system.nftConfigTest(nftFile.path))
       postActions.push(...system.nftApplyActions(os))
 
-      const sysctlFile = system.renderForwardingSysctl(snapshot.firewall.enabled ? snapshot.firewall.rules : [])
+      const sysctlFile = system.renderForwardingSysctl(firewall.enabled ? firewall.rules : [])
       if (sysctlFile) {
         files.push(sysctlFile)
         postActions.push(...system.sysctlApplyActions(sysctlFile))
