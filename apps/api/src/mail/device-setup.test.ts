@@ -7,7 +7,7 @@ import type { DeviceSetupPorts } from './device-setup.ts'
 const MAILBOX = 'alice@example.test', HOST = 'server1.example.test'
 const call = async (path: string, ports: Partial<DeviceSetupPorts> = {}, method = 'GET') => {
   const request = new Request('http://xpanel.test' + path, { method })
-  return (await handleMailDeviceSetupRoute(request, new URL(request.url), method, { open: async () => ({ mailbox: MAILBOX }), readHostname: async () => HOST, ...ports }))!
+  return (await handleMailDeviceSetupRoute(request, new URL(request.url), method, { open: async () => ({ mailbox: MAILBOX }), readHostname: async () => HOST, sendEmail: async () => undefined, ...ports }))!
 }
 
 describe('mail client settings from trusted configuration', () => {
@@ -76,5 +76,27 @@ describe('generated setup files', () => {
   it('escapes XML text from configuration', () => {
     expect(renderMailAutoconfig("o'neil&<x>@b.test", 'h.test')).toContain('<username>o&apos;neil&amp;&lt;x&gt;@b.test</username>')
     expect(renderAppleMailProfile('a"b@b.test', 'h.test')).toContain('<string>Mail: a&quot;b@b.test</string>')
+  })
+})
+
+describe('mail client instructions by email', () => {
+  const route = (body: unknown, mailbox: string, sendEmail: (message: unknown) => Promise<void>, hostname: string | null = 'mail.example.test') => {
+    const url = new URL('https://mail.example.test/api/webmail/connect-devices/send-instructions')
+    return handleMailDeviceSetupRoute(new Request(url, { method: 'POST', body: JSON.stringify(body) }), url, 'POST', { open: async () => ({ mailbox }), readHostname: async () => hostname, sendEmail })
+  }
+  it('refuses an invalid address and sends nothing', async () => {
+    const sent: unknown[] = []
+    await expect(route({ email: 'not-an-address' }, 'a@example.test', async message => { sent.push(message) })).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(route({ email: 'a@example.test', note: 'x' }, 'a@example.test', async message => { sent.push(message) })).rejects.toMatchObject({ code: 'VALIDATION' })
+    expect(sent).toEqual([])
+  })
+  it('sends fixed settings without any password and limits one mailbox per hour', async () => {
+    const sent: { to: string[]; subject: string; text: string }[] = [], send = async (message: unknown) => { sent.push(message as never) }
+    for (let index = 0; index < 5; index++) expect((await route({ email: 'me@else.test' }, 'limited@example.test', send))!.status).toBe(200)
+    expect(sent[0]).toMatchObject({ to: ['me@else.test'], subject: 'Mail client settings for limited@example.test' })
+    expect(sent[0]!.text).toContain('port 993')
+    expect(sent[0]!.text).toContain('your mailbox password')
+    await expect(route({ email: 'me@else.test' }, 'limited@example.test', send)).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' })
+    expect(sent).toHaveLength(5)
   })
 })

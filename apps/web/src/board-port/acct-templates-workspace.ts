@@ -17,7 +17,7 @@ export function renderWhmAccountTemplatesWorkspace(input: { locale: Locale; canM
   <section class="xp-whm-detail-card" aria-labelledby="acct-templates-application-heading">
     <h2 id="acct-templates-application-heading">${t('Where templates apply')}</h2>
     <p class="xp-whm-detail-status" role="status" data-acct-templates-application data-state="ready">${t('A new account whose plan uses a template gets the default zone plus the template records. Existing accounts and zones do not change.')}</p>
-    <p class="xp-whm-detail-status" role="status" data-acct-templates-pages data-state="unavailable">${t('The default and suspended page text is saved only. The web server still shows its shipped pages, because this server has no publisher for those pages yet.')}</p>
+    <p class="xp-whm-detail-status" role="status" data-acct-templates-pages data-state="ready">${t('The page text of a template replaces the owner page for accounts on its plans.')}</p>
   </section>
   <section class="xp-whm-detail-card" aria-labelledby="acct-templates-list-heading">
     <h2 id="acct-templates-list-heading">${t('Saved templates')}</h2>

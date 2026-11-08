@@ -1,0 +1,9 @@
+import { localeDirection, translator, type Locale } from '../i18n.ts'
+import { escapeHtml } from '../tokens.ts'
+
+const styles = `<style>.xp-account-plugins{display:flex;flex-direction:column;gap:24px;min-inline-size:0}.xp-account-plugins[hidden],.xp-account-plugins [hidden]{display:none}.xp-account-plugins [data-account-plugins-list]{display:flex;flex-direction:column;gap:24px;min-inline-size:0}.xp-account-plugins__group{display:flex;flex-direction:column;gap:8px;min-inline-size:0}.xp-account-plugins__group h2{margin:0;font-size:var(--xp-type-body);font-weight:var(--xp-weight-semibold)}.xp-account-plugins__list{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px;margin:0;padding:0;list-style:none}.xp-account-plugins__link{display:flex;align-items:center;gap:8px;min-inline-size:0;color:inherit;overflow-wrap:anywhere}.xp-account-plugins__link img{flex:none;inline-size:48px;block-size:48px}</style>`
+
+/** xPanel home plugin icons: hidden until the client binding has read items for this account. */
+export function renderAccountPlugins(input: { locale: Locale }): string {
+  return `${styles}<section class="xp-account-plugins" data-account-plugins data-state="unread" lang="${input.locale}" dir="${localeDirection(input.locale)}" aria-label="${escapeHtml(translator(input.locale)('Plugins'))}" hidden><template data-xp-template="account-plugin-group"><section class="xp-account-plugins__group"><h2 data-xp-slot="title"></h2><ul class="xp-account-plugins__list" data-xp-slot="items"></ul></section></template><template data-xp-template="account-plugin-link"><li><a class="xp-account-plugins__link" data-xp-slot="link"><img data-xp-slot="icon" alt="" width="48" height="48"><span data-xp-slot="name"></span></a></li></template><div data-account-plugins-list></div><p class="xp-whm-detail-status" data-account-plugins-status role="status" hidden></p></section>`
+}

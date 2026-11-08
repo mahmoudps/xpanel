@@ -53,7 +53,7 @@ describe('database readable trash metadata',()=>{
       expect(document.querySelector('[data-dbu-rows] [data-database-id="'+userId+'"] td:nth-child(2)')!.textContent).toBe(lang==='ar'?'alice_old [في السلة]: SELECT':'alice_old [trashed]: SELECT')
       const restore=row.querySelector<HTMLButtonElement>('[data-db-restore-action]')!
       expect(restore.disabled).toBe(false)
-      expect(row.querySelectorAll<HTMLButtonElement>('button')[1]!.disabled).toBe(true)
+      expect(row.querySelectorAll<HTMLButtonElement>('button')[1]!.dataset.dbRowAction).toBe('drop')
       restore.click()
       await vi.waitFor(()=>expect(confirm).toHaveBeenCalledTimes(1))
       await vi.waitFor(()=>expect(document.querySelector<HTMLButtonElement>('[data-db-restore-action="'+trashId+'"]')!.disabled).toBe(false))

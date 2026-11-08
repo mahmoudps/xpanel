@@ -49,8 +49,91 @@ export function filterAccountLogEntries(view: AccountLogsClientView, filter: Acc
   }).reverse()
 }
 
+export interface RawAccessSettings { archive: boolean; removePreviousMonthArchive: boolean; retentionDays: number | null }
+export interface RawAccessArchive { name: string; day: string; sizeBytes: number }
+/** Archives the server holds because their copy into ~/logs failed: stable code archive_pending, count, size, oldest and the last failure. */
+export interface RawAccessPending { code: 'archive_pending'; count: number; bytes: number; oldest: string; reason: string }
+/** GET/PUT /api/account/logs/settings, pinned to the signed-in account. */
+export function readRawAccessSettings(value: unknown, accountId: string): { settings: RawAccessSettings; source: 'account' | 'server' } {
+  const valid = (v: unknown): v is RawAccessSettings => logsObject(v) && typeof v.archive === 'boolean' && typeof v.removePreviousMonthArchive === 'boolean' && (v.retentionDays === null || typeof v.retentionDays === 'number' && Number.isSafeInteger(v.retentionDays) && v.retentionDays >= 1 && v.retentionDays <= 3650)
+  if (!logsObject(value) || !logsObject(value.context) || value.context.accountId !== accountId || !valid(value.settings) || !valid(value.serverDefaults) || !['account', 'server'].includes(String(value.source))) throw new Error('invalid_raw_access_settings')
+  return { settings: { archive: value.settings.archive, removePreviousMonthArchive: value.settings.removePreviousMonthArchive, retentionDays: value.settings.retentionDays }, source: value.source as 'account' | 'server' }
+}
+/** GET /api/account/logs/archives: archives null when the account has no ~/logs directory the agent can read. */
+export function readRawAccessArchives(value: unknown, accountId: string): { archives: RawAccessArchive[] | null; pending: RawAccessPending | null } {
+  if (!logsObject(value) || !logsObject(value.context) || value.context.accountId !== accountId || typeof value.available !== 'boolean' || !Array.isArray(value.archives) || value.archives.length > 2000) throw new Error('invalid_raw_access_archives')
+  const archives = value.archives.map(v => {
+    if (!logsObject(v) || typeof v.name !== 'string' || !/^[a-z0-9][a-z0-9.-]{0,252}-\d{4}-\d{2}-\d{2}(?:-[2-9])?\.gz$/.test(v.name) || typeof v.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v.day) || typeof v.sizeBytes !== 'number' || !Number.isSafeInteger(v.sizeBytes) || v.sizeBytes < 0) throw new Error('invalid_raw_access_archive')
+    return { name: v.name, day: v.day, sizeBytes: v.sizeBytes }
+  })
+  const held = value.pending
+  if (held !== null && (!logsObject(held) || held.code !== 'archive_pending' || typeof held.count !== 'number' || !Number.isSafeInteger(held.count) || held.count < 1 || typeof held.bytes !== 'number' || !Number.isSafeInteger(held.bytes) || held.bytes < 0
+    || typeof held.oldest !== 'string' || !Number.isFinite(Date.parse(held.oldest)) || typeof held.reason !== 'string' || !/^[a-z_]{1,40}$/.test(held.reason))) throw new Error('invalid_raw_access_pending')
+  return { archives: value.available ? archives : null, pending: held === null ? null : { code: 'archive_pending', count: held.count as number, bytes: held.bytes as number, oldest: held.oldest as string, reason: held.reason as string } }
+}
+
 function bindAccountLogs(_askDialog: unknown): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
+  // cPanel Raw Access: archive settings and the archives the agent keeps in ~/logs.
+  document.querySelectorAll<HTMLElement>('[data-account-raw-access]').forEach(root => {
+    if (root.dataset.rawAccessBound === 'true') return
+    root.dataset.rawAccessBound = 'true'
+    const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const accountId = root.dataset.account ?? '', form = root.querySelector<HTMLElement>('[data-raw-access-form]'), saveButton = root.querySelector<HTMLButtonElement>('[data-raw-access-save]')
+    const archive = root.querySelector<HTMLInputElement>('[data-raw-access="archive"]'), previous = root.querySelector<HTMLInputElement>('[data-raw-access="removePreviousMonthArchive"]'), days = root.querySelector<HTMLInputElement>('[data-raw-access="retentionDays"]')
+    const source = root.querySelector<HTMLElement>('[data-raw-access-source]'), status = root.querySelector<HTMLElement>('[data-raw-access-status]')
+    const rows = root.querySelector<HTMLElement>('[data-raw-access-rows]'), listStatus = root.querySelector<HTMLElement>('[data-raw-access-list-status]'), defaults = root.querySelector<HTMLButtonElement>('[data-raw-access-defaults]')
+    const pendingStatus = root.querySelector<HTMLElement>('[data-raw-access-pending]')
+    const controls = [...root.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input,button')]
+    const say = (node: HTMLElement | null, state: string, message: string): void => { if (!node) return; node.hidden = false; node.dataset.state = state; node.textContent = message; node.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
+    if (!send || root.dataset.rawAccessManage !== 'true' || !LOGS_ID.test(accountId) || !form || !saveButton || !archive || !previous || !days || !rows || root.closest('[data-readonly="true"],[data-wiring="unavailable"],[data-capability-unavailable="true"],fieldset:disabled')) {
+      for (const control of controls) control.disabled = true
+      say(status, 'unavailable', t('Raw access archives are unavailable here. Nothing was read.')); return
+    }
+    const show = (view: { settings: RawAccessSettings; source: 'account' | 'server' }): void => {
+      archive.checked = view.settings.archive; previous.checked = view.settings.removePreviousMonthArchive; days.value = view.settings.retentionDays === null ? '' : String(view.settings.retentionDays)
+      if (source) source.textContent = view.source === 'account' ? t('These are your own settings.') : t('These are the server defaults; saving makes them your own settings.')
+    }
+    const size = (value: number): string => value >= 1048576 ? (value / 1048576).toFixed(1) + ' MiB' : value >= 1024 ? (value / 1024).toFixed(1) + ' KiB' : value + ' B'
+    const list = async (): Promise<void> => {
+      say(listStatus, 'reading', t('Reading archives…'))
+      try {
+        const { archives, pending } = readRawAccessArchives(await send('GET', '/api/account/logs/archives'), accountId)
+        const reasons: Record<string, string> = { archive_quota_exceeded: t('the account is over its disk quota'), archive_home_unavailable: t('the home directory is unavailable'), archive_unverified: t('the copy could not be verified') }
+        if (pending) say(pendingStatus, 'failed', t('{count, plural, one {# archive waits} other {# archives wait}} on the server to be copied into ~/logs ({size}, oldest from {oldest}): {reason}. Each daily rotation tries again.', { count: pending.count, size: size(pending.bytes), oldest: formatDisplayDateTime(pending.oldest), reason: reasons[pending.reason] ?? t('the copy failed') }))
+        else if (pendingStatus) pendingStatus.hidden = true
+        rows.replaceChildren()
+        const columns = rows.closest('table')?.querySelectorAll('thead th').length ?? 1
+        if (!archives?.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = columns; td.textContent = archives ? t('No archives yet. A site log is archived after its first daily rotation.') : t('There is no ~/logs directory yet. It is created with the first archive.'); row.append(td); rows.append(row) }
+        for (const item of archives ?? []) {
+          const row = document.createElement('tr')
+          for (const value of [item.name, item.day, size(item.sizeBytes)]) { const td = document.createElement('td'), bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; td.append(bdi); row.append(td) }
+          const cell = document.createElement('td'), link = document.createElement('a')
+          link.href = '/api/account/logs/archives/' + encodeURIComponent(item.name); link.setAttribute('download', item.name); link.textContent = t('Download'); link.className = 'xp-btn v2-btn'
+          cell.append(link); row.append(cell); rows.append(row)
+        }
+        say(listStatus, 'read', t('{count, plural, one {# archive in ~/logs.} other {# archives in ~/logs.}}', { count: archives?.length ?? 0 }))
+      } catch { say(listStatus, 'failed', t('The archives could not be read. Nothing was changed.')) }
+    }
+    const save = async (settings: RawAccessSettings | null): Promise<void> => {
+      for (const control of controls) control.disabled = true
+      say(status, 'reading', t('Saving…'))
+      try { show(readRawAccessSettings(await send('PUT', '/api/account/logs/settings', { settings }), accountId)); say(status, 'read', settings ? t('Settings saved. They apply from the next daily rotation.') : t('The server defaults apply from the next daily rotation.')) }
+      catch { say(status, 'failed', t('The settings were not saved. Reload the page before retrying.')) }
+      finally { for (const control of controls) control.disabled = false; days.disabled = false }
+    }
+    saveButton.addEventListener('click', () => {
+      const text = days.value.trim()
+      if (text && !/^[1-9][0-9]{0,3}$/.test(text) || Number(text) > 3650) { say(status, 'failed', t('Enter 1 to 3650 days, or leave it empty to keep archives until you remove them.')); return }
+      void save({ archive: archive.checked, removePreviousMonthArchive: previous.checked, retentionDays: text ? Number(text) : null })
+    })
+    defaults?.addEventListener('click', () => { void save(null) })
+    void (async () => {
+      try { show(readRawAccessSettings(await send('GET', '/api/account/logs/settings'), accountId)); say(status, 'read', t('Settings read.')) }
+      catch { say(status, 'failed', t('The settings could not be read. Nothing was changed.')); for (const control of controls) control.disabled = true }
+      await list()
+    })()
+  })
   document.querySelectorAll<HTMLElement>('[data-account-logs]').forEach(root => {
     if (root.dataset.logsBound === 'true') return
     root.dataset.logsBound = 'true'
@@ -117,4 +200,4 @@ function bindAccountLogs(_askDialog: unknown): void {
   })
 }
 
-export const ACCOUNT_LOGS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const LOGS_ID=${LOGS_ID.toString()};const LOG_LEVELS=${JSON.stringify(LOG_LEVELS)};const logsObject=${logsObject.toString()};const logsText=${logsText.toString()};const readAccountLogsView=${readAccountLogsView.toString()};const filterAccountLogEntries=${filterAccountLogEntries.toString()};return ${bindAccountLogs.toString()};})()`
+export const ACCOUNT_LOGS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const LOGS_ID=${LOGS_ID.toString()};const LOG_LEVELS=${JSON.stringify(LOG_LEVELS)};const logsObject=${logsObject.toString()};const logsText=${logsText.toString()};const readAccountLogsView=${readAccountLogsView.toString()};const filterAccountLogEntries=${filterAccountLogEntries.toString()};const readRawAccessSettings=${readRawAccessSettings.toString()};const readRawAccessArchives=${readRawAccessArchives.toString()};return ${bindAccountLogs.toString()};})()`

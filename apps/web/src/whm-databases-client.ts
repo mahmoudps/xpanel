@@ -19,6 +19,8 @@ export type WhmDatabasesView =
   | { kind: 'processes'; observed: ObservedState; processes: WhmDatabaseProcess[] | null }
   | { kind: 'servers'; engine: { savedDatabases: number; service: { state: string; unit: string | null } | null; configuration: { protocol: string; socket: string | null } | null; observed: ObservedState & { version: string | null; variables: { port: number; socket: string; bind_address: string; skip_networking: string; max_connections: number } | null } } }
 export type WhmDatabaseKillRequest = { id: number; mode: 'query' | 'connection'; user: string; db: string | null }
+export type WhmDatabaseMaintenanceRequest = { database: string; action: 'check' | 'repair' }
+export type WhmDatabaseTableResult = { name: string; engine: string | null; result: 'ok' | 'repaired' | 'corrupt' | 'not-supported' | 'failed'; message: string | null }
 
 /** Strict reader for the four root database workspace replies; anything unexpected is refused, never painted. */
 export function readWhmDatabasesView(kind: string, value: unknown): WhmDatabasesView {
@@ -113,6 +115,18 @@ export function readWhmDatabaseKillOutcome(value: unknown, request: WhmDatabaseK
   return { outcome: item.outcome as 'confirmed' | 'attempted', after: item.after as string }
 }
 
+/** Only the echoed database and action with bounded per-table rows are painted. */
+export function readWhmDatabaseMaintenance(value: unknown, request: WhmDatabaseMaintenanceRequest): { observedAt: string; tables: WhmDatabaseTableResult[] } {
+  const bad = (): never => { throw new Error('invalid_whm_database_maintenance') }
+  const object = (item: unknown): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item)
+  const unsafe = /[\u0000-\u001f\u007f-\u009f\u2028-\u202e\u2066-\u2069\ufeff]/u
+  const text = (item: unknown, max: number): string => typeof item === 'string' && item.length >= 1 && item.length <= max && item.isWellFormed() && !unsafe.test(item) ? item : bad()
+  if (!object(value) || value.database !== request.database || value.action !== request.action || typeof value.observedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.observedAt) || !Array.isArray(value.tables) || value.tables.length > 1000) return bad()
+  const tables = value.tables.map(raw => object(raw) ? { name: text(raw.name, 64), engine: raw.engine === null ? null : text(raw.engine, 64), result: ['ok', 'repaired', 'corrupt', 'not-supported', 'failed'].includes(String(raw.result)) ? raw.result as WhmDatabaseTableResult['result'] : bad(), message: raw.message === null ? null : text(raw.message, 256) } : bad())
+  if (new Set(tables.map(table => table.name)).size !== tables.length) return bad()
+  return { observedAt: value.observedAt, tables }
+}
+
 function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Promise<unknown>) | undefined): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
   document.querySelectorAll<HTMLElement>('[data-whm-databases]').forEach(root => {
@@ -126,6 +140,8 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     const admitted = (): boolean => root.isConnected && root.dataset.dbCanRead === 'true' && !root.closest(denied)
     const killable = (): boolean => admitted() && root.dataset.dbCanKill === 'true' && typeof askDialog === 'function'
+    const maintDatabase = root.querySelector<HTMLSelectElement>('[data-whm-db-maint-database]'), maintAction = root.querySelector<HTMLSelectElement>('[data-whm-db-maint-action]'), maintRun = root.querySelector<HTMLButtonElement>('[data-whm-db-maint-run]'), maintStatus = root.querySelector<HTMLElement>('[data-whm-db-maint-status]')
+    const repairable = (): boolean => admitted() && root.dataset.dbCanRepair === 'true' && typeof askDialog === 'function' && !!maintDatabase && !!maintDatabase.value
     const notObserved = t('Not observed')
     let busy = false, confirming = false, readState = 'unread'
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'uncertain'].includes(state) ? 'alert' : 'status') }
@@ -134,6 +150,9 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
       if (search) search.disabled = !admitted() || readState === 'unread'
       if (driftFilter) driftFilter.disabled = !admitted() || readState === 'unread'
       root.querySelectorAll<HTMLButtonElement>('[data-whm-db-kill]').forEach(button => { button.disabled = busy || confirming || !killable() })
+      if (maintDatabase) maintDatabase.disabled = busy || confirming || !admitted() || root.dataset.dbCanRepair !== 'true' || maintDatabase.options.length < 2
+      if (maintAction) maintAction.disabled = !!maintDatabase?.disabled
+      if (maintRun) maintRun.disabled = busy || confirming || !repairable()
       root.setAttribute('aria-busy', String(busy || confirming))
     }
     const fact = (key: string, value: string | null, technical = false): void => {
@@ -145,7 +164,7 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
       node.textContent = value ?? notObserved; target.append(node)
     }
     const tbody=(name:string):HTMLElement|null=>root.querySelector<HTMLElement>('[data-whm-db-rows="'+name+'"]')
-    const rowSlots:Readonly<Record<string,readonly string[]>>={accounts:['account','owner','status','databases','trash','users','grants','size'],databases:['name','account','state','size','tables','drift'],users:['user','host','account','grants','role','drift'],processes:['connection','user','account','host','database','command','seconds','state','actions'],engines:['engine','state','unit','version','databases']}
+    const rowSlots:Readonly<Record<string,readonly string[]>>={maintenance:['table','engine','result','message'],accounts:['account','owner','status','databases','trash','users','grants','size'],databases:['name','account','state','size','tables','drift'],users:['user','host','account','grants','role','drift'],processes:['connection','user','account','host','database','command','seconds','state','actions'],engines:['engine','state','unit','version','databases']}
     const templates=new Map([...root.querySelectorAll<HTMLElement>('[data-whm-db-rows]')].map(body=>{const name=body.dataset.whmDbRows!,slots=rowSlots[name];if(!slots)throw new Error('unknown_whm_database_table');const row=clientTemplate(root,'whm-db-'+name+'-row'),empty=clientTemplate(root,'whm-db-'+name+'-empty');cloneClientTemplate(row,'tr',slots);cloneClientTemplate(empty,'tr',['message']);return[name,{body,slots,row,empty}] as const}))
     const killTemplate=clientTemplate(root,'whm-db-kill');cloneClientTemplate(killTemplate,'button',['label'])
     const driftLabels:Record<string,string>={'in-sync':t('In sync'),'saved-only':t('Saved only'),'server-only':t('Server only'),system:t(msgctxt('whm-databases-client','System')),unverified:t(msgctxt('whm-databases-client','Not verified'))}
@@ -200,6 +219,12 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
         fill('accounts', view.saved.accounts, t('No hosting accounts are saved.'), '', item => {
           return paintRow('accounts',{account:item.account,owner:item.owner??'root',status:accountStatus[item.status]??item.status,databases:String(item.databases),trash:String(item.trashedDatabases),users:String(item.users),grants:String(item.grants),size:bytes(item.observedSizeBytes)})
         })
+        if (maintDatabase) {
+          const current = maintDatabase.value, names = view.databases.filter(item => item.drift !== 'system' && item.sizeBytes !== null).map(item => item.name)
+          const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = names.length ? t('Choose a database') : t('No databases were observed on the server.')
+          maintDatabase.replaceChildren(placeholder, ...names.map(name => { const option = document.createElement('option'); option.value = name; option.textContent = name; return option }))
+          maintDatabase.value = names.includes(current) ? current : ''
+        }
         fill('databases', view.databases, t('No databases are saved or observed.'), '', item => {
           return paintRow('databases',{name:item.name,account:item.account??t(msgctxt('whm-databases-client','Not attributed')),state:item.trashed===null?t(msgctxt('whm-databases-client','Not saved')):item.trashed?t('In trash'):t(msgctxt('whm-databases-client','Live')),size:bytes(item.sizeBytes),tables:amount(item.tables)},item.name+' '+(item.account??''),item.drift)
         })
@@ -273,6 +298,32 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
       await load()
       note(result[0], result[1])
     }
+    const resultLabels: Record<string, string> = { ok: t('OK'), repaired: t('Repaired'), corrupt: t('Corrupt'), 'not-supported': t('Not supported by the storage engine'), failed: t(msgctxt('whm-databases-client', 'Failed')) }
+    const maintNote = (state: string, message: string): void => { if (!maintStatus) return; maintStatus.dataset.state = state; maintStatus.textContent = message; maintStatus.setAttribute('role', ['failed', 'uncertain'].includes(state) ? 'alert' : 'status') }
+    async function maintain(): Promise<void> {
+      if (busy || confirming || !repairable() || !transport || !maintDatabase || !maintAction) return
+      const request: WhmDatabaseMaintenanceRequest = { database: maintDatabase.value, action: maintAction.value === 'repair' ? 'repair' : 'check' }
+      confirming = true; lock()
+      let confirmed = false
+      try {
+        confirmed = await askDialog!({ title: request.action === 'repair' ? t('Repair every table of {database}?', { database: request.database }) : t('Check every table of {database}?', { database: request.database }),
+          body: t('Each table is locked while it is checked or repaired, so sites using this database may wait until it finishes.'), danger: request.action === 'repair', confirm: request.action === 'repair' ? t('Repair tables') : t('Check tables') }) === true
+      } catch { confirmed = false } finally { confirming = false; lock() }
+      if (!confirmed || busy || !repairable()) return
+      busy = true; lock(); maintNote('reading', t('Running on the server…'))
+      try {
+        const report = readWhmDatabaseMaintenance(await transport('POST', '/api/server/databases/maintenance', request), request)
+        fill('maintenance', report.tables, t('The database has no tables.'), '', item => paintRow('maintenance', { table: item.name, engine: item.engine ?? notObserved, result: resultLabels[item.result]!, message: item.message ?? '-' }))
+        const bad = report.tables.filter(item => item.result === 'failed' || item.result === 'corrupt').length
+        maintNote(bad ? 'failed' : 'read', bad ? t('{count} tables need attention. Read the results below.', { count: bad }) : t('Finished at {time} for {count} tables.', { time: displayDateTime(report.observedAt), count: report.tables.length }))
+      } catch (error) {
+        const value = error && typeof error === 'object' ? error as Record<string, unknown> : {}, details = value.details && typeof value.details === 'object' ? value.details as Record<string, unknown> : {}
+        if (value.status === 409) maintNote('failed', t('Another maintenance run is in progress. Nothing was run.'))
+        else if (details.stateChanged === false) maintNote('failed', t('The tables could not be read, so nothing was run.'))
+        else maintNote('uncertain', t('The result is unknown. Check the tables before repairing again.'))
+      } finally { busy = false; lock() }
+    }
+    maintDatabase?.addEventListener('change', lock); maintRun?.addEventListener('click', () => { void maintain() })
     search?.addEventListener('input', applyFilter); driftFilter?.addEventListener('change', applyFilter)
     refresh.addEventListener('click', () => { void load() })
     if (!transport || !admitted()) { lock(); refresh.disabled = true; note('unavailable', t('Database information is unavailable here. Nothing was read or changed.')); return }
@@ -280,4 +331,4 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
   })
 }
 
-export const WHM_DATABASES_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmDatabasesView=${readWhmDatabasesView.toString()};const readWhmDatabaseKillOutcome=${readWhmDatabaseKillOutcome.toString()};return ${bindWhmDatabases.toString()};})()`
+export const WHM_DATABASES_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmDatabasesView=${readWhmDatabasesView.toString()};const readWhmDatabaseKillOutcome=${readWhmDatabaseKillOutcome.toString()};const readWhmDatabaseMaintenance=${readWhmDatabaseMaintenance.toString()};return ${bindWhmDatabases.toString()};})()`

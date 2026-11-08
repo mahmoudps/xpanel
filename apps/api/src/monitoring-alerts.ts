@@ -4,7 +4,7 @@ import { sha256Hex } from './auth.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
 import { projectServerHealth } from './server-health-workspace.ts'
-import { ALERT_SCHEDULE_MINUTES, configuredChannels, dispatchAlertNotices, EMPTY_DELIVERY_STATE, planAlertNotices, readSavedDeliveryState, serialDelivery } from './alert-delivery.ts'
+import { configuredChannels, dispatchAlertNotices, EMPTY_DELIVERY_STATE, planAlertNotices, readSavedDeliveryState, serialDelivery } from './alert-delivery.ts'
 import type { DeliveryChannels, DeliveryState, DeliveryTransports, ScheduledRunResult } from './alert-delivery.ts'
 
 /** State files and transports shared by the root routes and the API's scheduled run (alert-runtime.ts). */
@@ -23,6 +23,8 @@ export interface AlertCycleHelpers {
   writeDelivery: (value: unknown) => Promise<unknown>
   /** Saved notification channels (panel-notifications.ts) with the webhook signing key; null when none are saved or they cannot be verified. */
   readChannels: () => Promise<DeliveryChannels | null>
+  /** Tweak Settings server.healthCheckMinutes: the minutes between scheduled checks */
+  readEveryMinutes: () => Promise<number>
   transports: DeliveryTransports
   now?: () => Date
 }
@@ -185,10 +187,10 @@ export function evaluateAlertRules(report: ServerHealthReport, settings: { rules
 }
 
 /** Delivery as recorded: the schedule and its last run, where alerts go (counts only, never the signing key), queued retries and the latest log. */
-const deliveryOf = (rawDelivery: unknown, channels: DeliveryChannels | null) => {
+const deliveryOf = (rawDelivery: unknown, channels: DeliveryChannels | null, everyMinutes: number) => {
   const saved = rawDelivery === null ? null : readSavedDeliveryState(rawDelivery)
   return {
-    scheduler: { everyMinutes: ALERT_SCHEDULE_MINUTES, lastRun: saved?.lastRun ?? null }, state: rawDelivery === null ? 'none' : saved ? 'read' : 'invalid',
+    scheduler: { everyMinutes, lastRun: saved?.lastRun ?? null }, state: rawDelivery === null ? 'none' : saved ? 'read' : 'invalid',
     channels: { alerts: !!channels?.alerts, email: channels?.recipients.length ?? 0, webhook: !!channels?.webhook, active: configuredChannels(channels) },
     pending: (saved?.outbox ?? []).map(item => ({ noticeId: item.notice.id, kind: item.notice.kind, ruleId: item.notice.ruleId, channel: item.channel, attempts: item.attempts, nextAt: item.nextAt })),
     log: (saved?.log ?? []).slice(0, LOG_VIEW_LIMIT),
@@ -200,7 +202,7 @@ const viewOf = async (rawRules: unknown, rawState: unknown, helpers: AlertCycleH
   return {
     state: rawRules === null ? 'default' : saved ? 'saved' : 'invalid', rules: saved?.rules ?? DEFAULT_ALERT_RULES, quiet: saved?.quiet ?? null,
     updatedAt: saved?.updatedAt ?? null, updatedBy: saved?.updatedBy ?? null, revision: revisionOf(rawRules), bounds: ALERT_BOUNDS,
-    delivery: deliveryOf(await helpers.readDelivery(), await helpers.readChannels()), evaluationState: rawState === null ? 'none' : evaluation ? 'read' : 'invalid', evaluation,
+    delivery: deliveryOf(await helpers.readDelivery(), await helpers.readChannels(), await helpers.readEveryMinutes()), evaluationState: rawState === null ? 'none' : evaluation ? 'read' : 'invalid', evaluation,
   }
 }
 
@@ -226,7 +228,7 @@ async function recordEvaluation(report: ServerHealthReport, rawRules: unknown, s
 }
 
 /**
- * One scheduled cycle (alert-runtime.ts runs it every ALERT_SCHEDULE_MINUTES): evaluate with the saved rules, then deliver.
+ * One scheduled cycle (alert-runtime.ts runs it every server.healthCheckMinutes): evaluate with the saved rules, then deliver.
  * When the rules cannot be verified or the host cannot be read nothing is evaluated, but queued retries still run and the reason is recorded.
  */
 export async function runScheduledAlertCycle(helpers: AlertCycleHelpers & { readHost: () => Promise<unknown> }): Promise<ScheduledRunResult> {

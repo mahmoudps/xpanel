@@ -1,4 +1,5 @@
 import { classicMailClientTemplates } from './mail-client-templates.ts'
+import { renderPersonalPreferencesCard } from './personal-preferences-card.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -13,7 +14,7 @@ export function renderMailPreferences(input: { locale: Locale; mailbox: string; 
       <h2 id="mail-preferences-heading">${t('Mailbox preferences')}</h2>
       <p class="xp-help">${escapeHtml(introBefore)}<bdi dir="ltr">${escapeHtml(input.mailbox)}</bdi>${escapeHtml(introAfter)}</p>
       <p class="xp-help" data-preferences-status data-state="unread" role="status">${input.canManage ? t('Preferences have not been read.') : t('Preferences are unavailable for this mailbox session. Nothing was read.')}</p>
-      <p class="xp-help" data-preferences-application role="note">${t('Saved preferences are stored for this mailbox. The inbox and compose pages do not apply them yet.')}</p>
+      <p class="xp-help" data-preferences-application role="note">${t('Saved preferences apply to the inbox and compose pages the next time they load.')}</p>
     </div>
     <div class="xp-mail-preferences__group" data-preferences-form role="group" aria-labelledby="mail-preferences-heading">
       <div class="xp-mail-preferences__fields">
@@ -29,5 +30,16 @@ export function renderMailPreferences(input: { locale: Locale; mailbox: string; 
       <h3 id="mail-preferences-plus-heading">${t('Plus addressing')}</h3>
       <p class="xp-help" data-preferences-plus data-state="unread">${t('Plus addressing support has not been read.')}</p>
     </section>
+    <section class="xp-mail-preferences__group" aria-labelledby="mail-settings-heading" data-mailbox-settings="${escapeHtml(input.mailbox)}">
+      <h3 id="mail-settings-heading">${t('Contact information and delivery')}</h3>
+      <div class="xp-mail-preferences__fields">
+        <div class="xp-field"><label for="mail-settings-plus">${t('Tagged mail')}</label><select id="mail-settings-plus" class="xp-select" data-mailbox-settings-plus disabled><option value="off">${t('Deliver to the inbox')}</option><option value="create">${t('Deliver to a folder named after the tag, creating it if missing')}</option><option value="existing">${t('Deliver to the tag folder only when it exists')}</option></select></div>
+        <div class="xp-field"><label for="mail-settings-addresses">${t('Notification addresses')}</label><textarea id="mail-settings-addresses" class="xp-input" dir="ltr" rows="3" data-mailbox-settings-addresses disabled></textarea><p class="xp-help">${t('One address per line, up to 5.')}</p><p class="xp-help" data-mailbox-settings-warning role="note" hidden>${t('Use an address outside this server. A problem here would also stop notices sent here.')}</p></div>
+        <div class="xp-field"><label><input type="checkbox" data-mailbox-settings-alerts disabled> ${t('Send a notice when someone signs in from a new address')}</label><label><input type="checkbox" data-mailbox-settings-ranges disabled> ${t('Also alert for new addresses in a network already used')}</label></div>
+      </div>
+      <p class="xp-help" data-mailbox-settings-status data-state="unread" role="status">${t('Settings have not been read.')}</p>
+      <div class="xp-mail-preferences__actions"><button type="button" class="xp-btn xp-btn--primary" data-mailbox-settings-save disabled>${t('Save settings')}</button></div>
+    </section>
+    ${renderPersonalPreferencesCard(input.locale, ['language'])}
   </section>`
 }

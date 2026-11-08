@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import type { RenderedFile } from '@xpanel/core'
+import type { edge } from '@xpanel/render'
 import type { AgentExecutor } from './executor.ts'
 
 const ORIGIN_KEYS = ['XPANEL_WHM_PUBLIC_ORIGIN', 'XPANEL_PANEL_PUBLIC_ORIGIN', 'XPANEL_MAIL_PUBLIC_ORIGIN'] as const
@@ -63,6 +64,16 @@ export const mergeOriginIntoRuntime = (runtime: string, api: string): string | n
   if (!changed) return null
   const text = next.join('\n')
   return text.endsWith('\n') ? text : `${text}\n`
+}
+
+/** The panel paths of account sites from the public management origins in api.env; a missing origin contributes none. */
+export const readPanelRedirects = async (executor: Pick<AgentExecutor, 'readFile'>): Promise<edge.PanelRedirect[]> => {
+  const api = await executor.readFile(API_ENV_PATH)
+  if (api === null) return []
+  const rows = parseEnvAssignments(api)
+  return ([['/whm', 'XPANEL_WHM_PUBLIC_ORIGIN'], ['/xpanel', 'XPANEL_PANEL_PUBLIC_ORIGIN'], ['/webmail', 'XPANEL_MAIL_PUBLIC_ORIGIN']] as const).flatMap(([path, key]) => {
+    try { const origin = new URL(rows.get(key) ?? '').origin; return origin.startsWith('https://') ? [{ path, origin }] : [] } catch { return [] }
+  })
 }
 
 /**

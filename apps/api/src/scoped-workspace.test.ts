@@ -42,7 +42,7 @@ const fixture = async () => {
   const mailbox = await createUserPrincipal(database.db, { username: mailboxPrincipalUsername(inbox.login), accountId: account.id, passwordHash: HASH })
   const root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
   await setTotpSecret(database.db, root.id, new Uint8Array(32))
-  const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: HASH, acl: ['list-accounts'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
+  const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: HASH, acl: ['list-accounts'], maxAccounts: 10, totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
   const resellerPrincipal = await createResellerPrincipal(database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
   const sessions = new Map<EntryPoint, { cookie: string; id: string }>()
   const servers = new Map<EntryPoint, Awaited<ReturnType<typeof listenApiServer>>>()

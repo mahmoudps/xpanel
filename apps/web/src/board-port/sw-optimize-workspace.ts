@@ -1,9 +1,11 @@
+import { renderSiteCompressionCard } from './account-owner-tools-cards.ts'
 import { classicSoftwareOperationTemplates } from './software-operation-client-templates.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
+import { renderAccountEdgeCacheCard } from './account-edge-workspace.ts'
 
 /** /software/optimize: the observed edge compression and response-cache policy for the account's sites. */
-export function renderSwOptimizeWorkspace(input: { lang: Locale; canRead: boolean }): string {
+export function renderSwOptimizeWorkspace(input: { lang: Locale; canRead: boolean; accountId: string; canManageCache: boolean }): string {
   const t = (message: string, values?: MessageValues): string => translator(input.lang)(message, values)
   const fact = (key: string, label: string): string => `<div><dt>${label}</dt><dd><bdi dir="ltr" data-human data-sw-optimize-${key}>${t('Not read')}</bdi></dd></div>`
   return `<div class="xp-acct-tool" data-sw-optimize data-sw-can-read="${input.canRead}" lang="${input.lang}" dir="${localeDirection(input.lang)}">${ACCOUNT_TOOL_STYLE}<style>[data-sw-optimize] .xp-acct-tool__table table{min-inline-size:32rem}[data-sw-optimize] bdi:not([data-human]){font-family:var(--xp-font-mono);font-size:var(--xp-type-label);line-height:var(--xp-leading-label)}[data-sw-optimize] .xp-acct-tool__table:focus-visible{outline:var(--xp-focus-width) solid var(--xp-border-focus);outline-offset:var(--xp-focus-offset)}@media(min-width:601px){[data-sw-optimize] .xp-acct-tool__card{padding:var(--xp-space-card)}}</style>
@@ -18,9 +20,6 @@ export function renderSwOptimizeWorkspace(input: { lang: Locale; canRead: boolea
     <div class="xp-acct-tool__table" role="region" tabindex="0" aria-label="${t('Your sites')}"><table class="xp-table"><thead><tr><th scope="col">${t('Domain')}</th><th scope="col">${t('Compression')}</th><th scope="col">${t('Response cache')}</th></tr></thead><tbody data-sw-optimize-domains><tr><td colspan="3">${t('Not read.')}</td></tr></tbody></table></div>
     <p class="xp-help">${t('The cache stores GET and HEAD responses that carry no cookies or authorization. Redirected and suspended domains are not cached.')}</p>
   </section>
-  <section class="xp-acct-tool__card" aria-labelledby="sw-optimize-controls"><h2 id="sw-optimize-controls">${t('Per-site rules and cache purge')}</h2>
-    <p>${t('Per-site compression choices, cache rules and purging cached pages are unavailable: no reviewed per-site edge setting or confined purge operation is connected. Nothing is changed here.')}</p>
-    <div class="xp-acct-tool__actions"><button type="button" class="xp-btn xp-btn--primary" disabled>${t('Review & apply')}</button><button type="button" class="xp-btn" disabled>${t('Purge cache')}</button></div>
-  </section>
-${classicSoftwareOperationTemplates('optimize')}</div>`
+  ${renderAccountEdgeCacheCard({ lang: input.lang, accountId: input.accountId, canManage: input.canManageCache })}
+${renderSiteCompressionCard(input.lang)}${classicSoftwareOperationTemplates('optimize')}</div>`
 }

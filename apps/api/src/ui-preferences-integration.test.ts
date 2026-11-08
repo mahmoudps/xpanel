@@ -82,7 +82,7 @@ beforeAll(async () => {
     services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
   mailboxPrincipal = await createUserPrincipal(database.db, { username: mailboxPrincipalUsername(mailbox.login), accountId: account.id, passwordHash: HASH })
   realmReseller = await baseline.store.createReseller({ username: 'realmreader', passwordHash: HASH, acl: ['list-accounts', 'manage-feature-lists'],
-    maxAccounts: 4, totalDiskMb: 8000, totalBandwidthMb: 20000, oversell: false, nameservers: ['ns1.example.test'], delegatedIps: [] })
+    maxAccounts: 4, totalDiskMb: 8000, totalBandwidthMb: 20000, oversell: { disk: false, bandwidth: false }, nameservers: ['ns1.example.test'], delegatedIps: [] })
   realmResellerPrincipal = await createResellerPrincipal(database.db, { id: realmReseller.id, username: realmReseller.username, passwordHash: HASH, forcePasswordChange: false })
   const now = new Date().toISOString()
   const members: TeamMember[] = MEMBERS.map((id, index) => ({ id, username: `member${index + 1}`, roles: ['web'], contactEmail: `member${index + 1}@example.test`, notes: '',
@@ -534,8 +534,8 @@ describe('normal saved V2 owner Resources without host qualification', () => {
       const owned = nodes.filter((node, index) => node.namespace === 'html' && node.template < 0 && within(index))
       expect(owned.filter(node => node.tag === 'form')).toHaveLength(0)
       const controls = owned.filter(node => ['input', 'select', 'textarea', 'button'].includes(node.tag))
-      expect(controls.length).toBeGreaterThan(0)
-      for (const control of controls) expect(control.attrs.has('disabled')).toBe(true)
+      // No reader, so no control can act: no refresh is drawn, and the approved IO direction stays disabled.
+      expect(controls.map(node => [node.tag, node.attrs.has('disabled')])).toEqual([['button', true], ['button', true]])
       const readings = owned.filter(node => node.attrs.has('data-resource-state'))
       expect(readings.length).toBeGreaterThan(0)
       expect(readings.some(node => node.attrs.get('data-resource-state') === 'measured')).toBe(false)
@@ -640,10 +640,10 @@ describe('normal registered operator and mailbox documents with stored identity 
     (['en', 'ar'] as const).flatMap(locale => (['classic', 'v2'] as const).flatMap(uiTheme =>
       routes[surface].map(route => ({ surface, locale, uiTheme, route })))))
 
-  it('pins the actual119 operator and23 mailbox documents with their existing aliases', () => {
-    expect(routes.xwhm).toHaveLength(119)
+  it('pins the actual120 operator and23 mailbox documents with their existing aliases', () => {
+    expect(routes.xwhm).toHaveLength(120)
     expect(routes.xmail).toHaveLength(23)
-    expect(new Set(routes.xwhm).size).toBe(119)
+    expect(new Set(routes.xwhm).size).toBe(120)
     expect(new Set(routes.xmail).size).toBe(23)
     const whmAliases = registeredDocumentAliases.filter(alias => routes.xwhm.includes(alias.route))
     const mailAliases = registeredDocumentAliases.filter(alias => routes.xmail.includes(alias.route))

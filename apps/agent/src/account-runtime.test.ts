@@ -119,7 +119,7 @@ describe('applyRuntimeOp', () => {
 describe('host facts', () => {
   it('reads installed versions and reports what is missing truthfully', async () => {
     const f = await facts()
-    expect(f.runtimes).toEqual([
+    expect(f.runtimes.slice(0, 3)).toEqual([
       { kind: 'node', available: true, version: '18.19.1', reason: null },
       { kind: 'python', available: true, version: '3.12.3', reason: null },
       { kind: 'ruby', available: false, version: null, reason: 'not-installed' },
@@ -183,6 +183,15 @@ describe('account runtime route', () => {
   const call = (ctx: Parameters<typeof handleAccountRuntimeRoute>[3], method: string, path: string, body?: unknown) =>
     handleAccountRuntimeRoute(new Request('http://agent' + path, { method, ...(body ? { body: JSON.stringify(body) } : {}) }), new URL('http://agent' + path), method, ctx)
 
+  it('shows the owner the stacks root deployed, without their env or compose text', async () => {
+    const yaml = 'services:\n  web:\n    image: docker.io/library/nginx:1.27\n    environment:\n      TOKEN: ${SECRET}\n    ports: ["8080:80"]\n'
+    await atomicWriteJson(runtimeRegistryPath(root, ACCOUNT_ID), { ...registry, stacks: [{ name: 'shop', yaml, env: 'SECRET=hidden\n', notes: 'root note', app: null, enabled: true, updatedAt: '2026-11-07T00:00:00.000Z', restart: {}, networks: [], limits: { memoryMb: null, cpuPercent: null } }] }, 0o600)
+    const text = await (await call(context().ctx, 'GET', '/accounts/alice/runtime'))!.text(), view = readAccountRuntimeView(JSON.parse(text))
+    expect(view.stacks).toEqual([{ name: 'shop', app: null, enabled: true, services: [{ name: 'web', image: 'docker.io/library/nginx:1.27', state: 'stopped', ports: ['127.0.0.1:8080->80/tcp'] }] }])
+    expect(text).not.toContain('hidden'); expect(text).not.toContain('root note')
+    const log = await call(context().ctx, 'GET', '/accounts/alice/runtime/log?target=ctr:shop-web')
+    expect(log!.status).toBe(200)
+  })
   it('reads a view the shared grammar accepts, without secrets of other accounts', async () => {
     await atomicWriteJson(runtimeRegistryPath(root, ACCOUNT_ID), registry, 0o600)
     const res = await call(context().ctx, 'GET', '/accounts/alice/runtime')
@@ -356,7 +365,7 @@ describe('runtime registries through the real reconciler', () => {
   const redis = { ...EMPTY_RUNTIME, cache: { redis: { enabled: true, memoryMb: 32, binary: '/usr/bin/redis-server', updatedAt: app.updatedAt }, memcached: null } }
   const memcached = { ...EMPTY_RUNTIME, cache: { redis: null, memcached: { enabled: true, memoryMb: 16, binary: '/usr/bin/memcached', updatedAt: app.updatedAt } } }
 
-  it('restores the registries of the target generation on rollback', async () => {
+  it('restores the registries of the target generation on rollback', { tags: ['slow'] }, async () => {
     const f = await setup()
     await f.save(redis)
     const target = await f.reconciler.reconcile({ force: true, actor: 'root', mailAuth: null })

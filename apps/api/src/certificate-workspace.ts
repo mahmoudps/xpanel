@@ -4,6 +4,8 @@ import type { StateStore, StoredCertificate } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
 import { ownedAccounts } from './authorization.ts'
 import { services } from '@xpanel/render'
+import { SSL_STORE_ID } from '../../agent/src/ssl-store.ts'
+import { readAutoSslScheduler } from './autossl.ts'
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export interface CertificateWorkspaceInstall {
@@ -22,6 +24,8 @@ export interface CertificateWorkspaceHelpers {
   assertAccountCaller?: (caller: AuthenticatedCaller, account: Account, method: string) => Promise<void>
   /** Trusted mutation port enforces fresh authorization/CAS under the writer lease, audit and reconcile. */
   removeCertificate: (input: { request: Request; caller: AuthenticatedCaller; certificate: StoredCertificate; expectedRevision: number; scope: CertificateRouteScope }) => Promise<unknown>
+  /** The account's ~/ssl certificate and its matching key, read on the trusted API-to-agent boundary for install from the store. */
+  readStoreMaterial?: (input: { caller: AuthenticatedCaller; account: Account; certificateId: string }) => Promise<{ certificatePem: string; privateKeyPem: string }>
   /** Agent material must remain on the trusted API-to-agent boundary; never echo PEM to HTTP. */
   installCertificate?: (input: { request: Request; caller: AuthenticatedCaller; account: Account; domain: Domain; body: CertificateWorkspaceInstall; scope: CertificateRouteScope }) => Promise<{ certificate: StoredCertificate; reconcile?: unknown }>
 }
@@ -93,8 +97,7 @@ export function createCertificateWorkspaceRouter(helpers: CertificateWorkspaceHe
       certificates: certificates.map(project),
       capabilities: { issue: helpers.issueAvailable === true, renew: helpers.issueAvailable === true, install: !!helpers.installCertificate, remove: helpers.removeAvailable !== false },
       application: { scope: 'stored_configuration', servedTlsVerified: false },
-      // No daily AutoSSL job is wired to certsForAutoRenew yet; the page must not promise automatic renewal.
-      renewalScheduler: { state: 'unavailable', nextRunAt: null, reason: 'site_scheduler_not_connected' },
+      renewalScheduler: await readAutoSslScheduler(helpers.store),
     })
     if (match[1] && ID.test(match[1]) && method === 'DELETE') {
       const body = await readWorkspaceBody(request)
@@ -118,17 +121,27 @@ export function createCertificateWorkspaceRouter(helpers: CertificateWorkspaceHe
         if (Object.hasOwn(body, 'username')) return fail('VALIDATION', 'unsupported manual certificate field', { stateChanged: false })
         body.username = accounts[0]!.username
       }
-      if (Object.keys(body).some(key => !['username', 'domain', 'expectedRevision', 'fullchainPem', 'privateKeyPem', 'requiredNames'].includes(key))) return fail('VALIDATION', 'unsupported manual certificate field', { stateChanged: false })
+      if (Object.keys(body).some(key => !['username', 'domain', 'expectedRevision', 'fullchainPem', 'privateKeyPem', 'requiredNames', 'storeCertificateId', 'caBundlePem'].includes(key))) return fail('VALIDATION', 'unsupported manual certificate field', { stateChanged: false })
       if (body.requiredNames !== undefined && (!Array.isArray(body.requiredNames) || body.requiredNames.length > 20 || body.requiredNames.some(name => typeof name !== 'string'))) return fail('VALIDATION', 'requiredNames must be a list of at most 20 host names', { stateChanged: false })
       const expectedRevision = certificateWorkspaceRevision(body.expectedRevision)
-      if (typeof body.username !== 'string' || typeof body.domain !== 'string' || typeof body.fullchainPem !== 'string' || typeof body.privateKeyPem !== 'string') return fail('VALIDATION', 'account, domain, certificate chain and private key are required', { stateChanged: false })
-      if (!body.fullchainPem || Buffer.byteLength(body.fullchainPem, 'utf8') > 256 * 1024 || !body.privateKeyPem || Buffer.byteLength(body.privateKeyPem, 'utf8') > 32 * 1024) return fail('VALIDATION', 'certificate or private key is missing or exceeds its size limit', { stateChanged: false })
+      // Install from the store names a ~/ssl certificate; its key is found by public key, never pasted.
+      const fromStore = Object.hasOwn(body, 'storeCertificateId')
+      if (fromStore ? typeof body.storeCertificateId !== 'string' || !SSL_STORE_ID.test(body.storeCertificateId) || Object.hasOwn(body, 'fullchainPem') || Object.hasOwn(body, 'privateKeyPem')
+        || body.caBundlePem !== undefined && (typeof body.caBundlePem !== 'string' || Buffer.byteLength(body.caBundlePem, 'utf8') > 224 * 1024) : Object.hasOwn(body, 'caBundlePem')) return fail('VALIDATION', 'choose a stored certificate with an optional CA bundle, or paste the certificate chain and key', { stateChanged: false })
+      if (typeof body.username !== 'string' || typeof body.domain !== 'string' || !fromStore && (typeof body.fullchainPem !== 'string' || typeof body.privateKeyPem !== 'string')) return fail('VALIDATION', 'account, domain, certificate chain and private key are required', { stateChanged: false })
+      if (!fromStore && (!body.fullchainPem || Buffer.byteLength(body.fullchainPem as string, 'utf8') > 256 * 1024 || !body.privateKeyPem || Buffer.byteLength(body.privateKeyPem as string, 'utf8') > 32 * 1024)) return fail('VALIDATION', 'certificate or private key is missing or exceeds its size limit', { stateChanged: false })
       if (expectedRevision !== revision) return fail('CONFLICT', 'certificate workspace changed; reload before retrying', { stateChanged: false })
       const account = accounts.find(account => account.username === body.username)
       const domain = account && domains.find(domain => domain.accountId === account.id && domain.name === body.domain)
       if (!account || !domain) return fail('NOT_FOUND', 'domain not found', { stateChanged: false })
       await helpers.assertCanWriteAccount(caller, account)
-      const result = await helpers.installCertificate({ request, caller, account, domain, body: { username: body.username, domain: domain.name, expectedRevision, fullchainPem: body.fullchainPem, privateKeyPem: body.privateKeyPem, ...(body.requiredNames !== undefined ? { requiredNames: body.requiredNames as string[] } : {}) }, scope })
+      let material = { fullchainPem: body.fullchainPem as string, privateKeyPem: body.privateKeyPem as string }
+      if (fromStore) {
+        if (!helpers.readStoreMaterial) return fail('PRECONDITION_FAILED', 'stored certificates are not connected', { stateChanged: false })
+        const stored = await helpers.readStoreMaterial({ caller, account, certificateId: body.storeCertificateId as string })
+        material = { fullchainPem: stored.certificatePem + ((body.caBundlePem as string | undefined) ?? ''), privateKeyPem: stored.privateKeyPem }
+      }
+      const result = await helpers.installCertificate({ request, caller, account, domain, body: { username: body.username, domain: domain.name, expectedRevision, ...material, ...(body.requiredNames !== undefined ? { requiredNames: body.requiredNames as string[] } : {}) }, scope })
       if (result.certificate.accountId !== account.id || !services.coversHost(result.certificate.names, domain.name)) return fail('SERVICE_UNAVAILABLE', 'certificate installation result requires verification', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
       const after = await helpers.store.readSnapshot()
       const persisted = after.certificates.find(certificate => certificate.id === result.certificate.id)

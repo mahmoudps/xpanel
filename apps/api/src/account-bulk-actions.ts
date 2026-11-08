@@ -8,16 +8,16 @@ import type { AuthenticatedCaller } from './auth.ts'
 /** One request changes at most this many accounts; the browser selection is held to the same bound. */
 export const ACCOUNT_BULK_LIMIT = 25
 const LEASE_MS = 600_000
-const ROUTE = /^\/api\/accounts\/bulk-actions(?:\/(suspend|unsuspend|plan|owner))?$/
+const ROUTE = /^\/api\/accounts\/bulk-actions(?:\/(suspend|unsuspend|plan|owner|shell))?$/
 const REASON = /^[a-z][a-z0-9_]{0,63}$/
 const REFUSALS = new Set(['VALIDATION', 'NOT_FOUND', 'FORBIDDEN', 'UNAUTHENTICATED', 'CONFLICT', 'LIMIT_EXCEEDED', 'OVERSELL_BLOCKED', 'SELF_LOCKOUT', 'PRECONDITION_FAILED'])
 const unchanged = { stateChanged: false }
 
-export type AccountBulkAction = 'suspend' | 'unsuspend' | 'change-plan' | 'change-owner' | 'terminate'
+export type AccountBulkAction = 'suspend' | 'unsuspend' | 'change-plan' | 'change-owner' | 'change-shell' | 'terminate'
 export type AccountBulkOutcome = 'applied' | 'refused' | 'review-required' | 'not-attempted'
 export interface AccountBulkResult { accountId: Id; outcome: AccountBulkOutcome; code: string | null; reason: string | null }
 interface Target { id: Id; confirmUsername?: string }
-interface Params { reason?: string; planId?: Id; ownerId?: Id | null }
+interface Params { reason?: string; planId?: Id; ownerId?: Id | null; shell?: 'none' | 'jailed' }
 
 export interface AccountBulkPorts {
   db: Db
@@ -27,17 +27,17 @@ export interface AccountBulkPorts {
   assertCanAccessAccount: (caller: AuthenticatedCaller, account: Account, action: string, opts: { allowUserSelf: false }) => Promise<void>
   /** The single-account use cases; each keeps its own authorization, reseller ACL, tenant and audit checks. */
   setSuspension: (caller: AuthenticatedCaller, account: Account, verb: 'suspend' | 'unsuspend', reason?: string) => Promise<unknown>
-  update: (caller: AuthenticatedCaller, account: Account, patch: { planId?: Id; ownerId?: Id | null }) => Promise<unknown>
+  update: (caller: AuthenticatedCaller, account: Account, patch: { planId?: Id; ownerId?: Id | null; shell?: 'none' | 'jailed' }) => Promise<unknown>
   terminate: (caller: AuthenticatedCaller, account: Account, confirmUsername: string) => Promise<unknown>
 }
 
-const ACCESS: Record<AccountBulkAction, string> = { suspend: 'account.suspend', unsuspend: 'account.unsuspend', 'change-plan': 'account.update', 'change-owner': 'account.update', terminate: 'account.delete' }
+const ACCESS: Record<AccountBulkAction, string> = { suspend: 'account.suspend', unsuspend: 'account.unsuspend', 'change-plan': 'account.update', 'change-owner': 'account.update', 'change-shell': 'account.update', terminate: 'account.delete' }
 const json = (body: unknown): Response => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
 const uuid = (value: unknown, name: string): Id => typeof value === 'string' && isUuid(value) && value === value.toLowerCase() ? value : fail('VALIDATION', `${name} must be a lowercase UUID`, unchanged)
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 
 function parse(action: AccountBulkAction, body: Record<string, unknown>): { operationId: Id; targets: Target[]; params: Params } {
-  const required = ['operationId', 'accounts', ...(action === 'change-plan' ? ['planId'] : action === 'change-owner' ? ['ownerId'] : [])]
+  const required = ['operationId', 'accounts', ...(action === 'change-plan' ? ['planId'] : action === 'change-owner' ? ['ownerId'] : action === 'change-shell' ? ['shell'] : [])]
   const allowed = [...required, ...(action === 'suspend' ? ['reason'] : [])]
   if (required.some(key => !Object.hasOwn(body, key)) || Object.keys(body).some(key => !allowed.includes(key))) return fail('VALIDATION', 'unsupported or missing bulk account field', unchanged)
   if (!Array.isArray(body.accounts) || body.accounts.length < 1 || body.accounts.length > ACCOUNT_BULK_LIMIT) return fail('VALIDATION', `1..${ACCOUNT_BULK_LIMIT} accounts are required`, unchanged)
@@ -51,6 +51,7 @@ function parse(action: AccountBulkAction, body: Record<string, unknown>): { oper
   let params: Params = {}
   if (action === 'change-plan') params = { planId: uuid(body.planId, 'planId') }
   if (action === 'change-owner') params = { ownerId: body.ownerId === null ? null : uuid(body.ownerId, 'ownerId') }
+  if (action === 'change-shell') params = { shell: body.shell === 'none' || body.shell === 'jailed' ? body.shell : fail('VALIDATION', 'shell must be none or jailed', unchanged) }
   if (action === 'suspend' && body.reason !== undefined) {
     try { params = { reason: assertLine(body.reason, 512, 'suspend reason', { allowEmpty: false }) } }
     catch { return fail('VALIDATION', 'the suspension reason must be one line of at most 512 characters', unchanged) }
@@ -59,7 +60,7 @@ function parse(action: AccountBulkAction, body: Record<string, unknown>): { oper
 }
 
 /** A refusal changed nothing; anything else may have changed desired or host state and needs review. */
-const classify = (accountId: Id, error: unknown): AccountBulkResult => {
+export const classify = (accountId: Id, error: unknown): AccountBulkResult => {
   if (!isXpanelError(error)) {
     console.error('[xpanel-api] bulk account action failed unexpectedly', error)
     return { accountId, outcome: 'review-required', code: 'SERVICE_UNAVAILABLE', reason: 'unexpected_failure' }
@@ -79,6 +80,7 @@ async function runOne(ports: AccountBulkPorts, caller: AuthenticatedCaller, acti
       if (target.confirmUsername !== account.username) fail('VALIDATION', 'confirmation must match the account username', unchanged)
       await ports.terminate(caller, account, account.username)
     } else if (action === 'suspend' || action === 'unsuspend') await ports.setSuspension(caller, account, action, params.reason)
+    else if (action === 'change-shell') { if (account.shell !== params.shell) await ports.update(caller, account, { shell: params.shell! }) }
     else await ports.update(caller, account, action === 'change-plan' ? { planId: params.planId! } : { ownerId: params.ownerId ?? null })
     return { accountId: target.id, outcome: 'applied', code: null, reason: null }
   } catch (error) { return classify(target.id, error) }
@@ -107,7 +109,7 @@ export async function handleAccountBulkActionsRoute(request: Request, url: URL, 
   if (!match) return null
   const allow = match[1] ? 'POST' : 'DELETE'
   if (method !== allow) return new Response(null, { status: 405, headers: { allow } })
-  const action: AccountBulkAction = match[1] === undefined ? 'terminate' : match[1] === 'plan' ? 'change-plan' : match[1] === 'owner' ? 'change-owner' : match[1] as 'suspend' | 'unsuspend'
+  const action: AccountBulkAction = match[1] === undefined ? 'terminate' : match[1] === 'plan' ? 'change-plan' : match[1] === 'owner' ? 'change-owner' : match[1] === 'shell' ? 'change-shell' : match[1] as 'suspend' | 'unsuspend'
   const caller = await ports.requireCaller(request)
   if (caller.principal.kind !== 'root' && caller.principal.kind !== 'reseller') return fail('FORBIDDEN', 'hosting administrator permission is required', unchanged)
   const { operationId, targets, params } = parse(action, await ports.readJsonBody(request))

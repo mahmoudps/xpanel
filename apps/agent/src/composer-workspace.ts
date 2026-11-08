@@ -1,10 +1,10 @@
-import { fail } from '@xpanel/core'
+import { fail, isAccountHome } from '@xpanel/core'
 import type { Account, Domain, Plan } from '@xpanel/core'
 import { COMPOSER_VERSION_ARGV } from '../../../packages/os/src/composer-command.ts'
 import { readComposerWorkspaceView } from '../../../packages/os/src/composer-command-view.ts'
 import type { ComposerPackageView, ComposerProjectTarget, ComposerProjectView, ComposerWorkspaceView } from '../../../packages/os/src/composer-command-view.ts'
 import type { JailedFileManager } from './file-manager.ts'
-import { handleComposerJobRoute, isComposerJobProviderQualified } from './composer-job.ts'
+import { handleComposerJobRoute } from './composer-job.ts'
 import type { ComposerJobServices } from './composer-job.ts'
 
 type ComposerFiles = Pick<JailedFileManager, 'list' | 'readText'>
@@ -16,7 +16,6 @@ export interface ComposerWorkspaceContext {
   /** null without a qualified Linux executor; only the fixed version command is used. */
   run: ((argv: string[]) => Promise<{ ok: boolean; code?: number | null; stdout: string; stderr: string }>) | null
   now?: () => Date
-  /** Absent until the descriptor-confined transaction provider passes native qualification. */
   composerJobs?: ComposerJobServices | null
 }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -75,7 +74,7 @@ export function parseComposerDocuments(manifestText: string, lockText: string | 
 }
 
 async function inspectProject(target: ComposerProjectTarget, files: ComposerFiles): Promise<ComposerProjectView> {
-  const relative = target.directory.slice(('/home/' + target.account + '/').length)
+  const relative = target.directory.split('/').slice(3).join('/')
   const parts = relative.split('/'); let parent = ''
   const documents = new Map<string, string>()
   const read = async (path: string): Promise<string | null> => {
@@ -130,7 +129,7 @@ export async function handleComposerWorkspaceRoute(_request: Request, url: URL, 
   const projects: ComposerProjectTarget[] = []
   for (const domain of domains) {
     const account = owners.get(domain.accountId)
-    if (!account || account.status !== 'active' || domain.suspended || domain.siteType !== 'php' || account.home !== '/home/' + account.username || !domain.docRoot.startsWith(account.home + '/') || !/^\/home\/[a-z][a-z0-9]{0,15}\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/.test(domain.docRoot) || domain.docRoot.split('/').some(part => part === '.' || part === '..')) continue
+    if (!account || account.status !== 'active' || domain.suspended || domain.siteType !== 'php' || !isAccountHome(account.home, account.username) || !domain.docRoot.startsWith(account.home + '/') || !/^\/home[1-9]?[0-9]?\/[a-z][a-z0-9]{0,15}\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/.test(domain.docRoot) || domain.docRoot.split('/').some(part => part === '.' || part === '..')) continue
     projects.push({ selector: domain.id, domain: domain.name, account: account.username, directory: domain.docRoot, phpVersion: domain.php.version })
   }
   projects.sort((a, b) => a.domain.localeCompare(b.domain, 'en'))
@@ -151,14 +150,14 @@ export async function handleComposerWorkspaceRoute(_request: Request, url: URL, 
     selected = await ctx.store.withAccountLifecycleLease(owner.id, async account => {
       await fresh()
       const current = (await ctx.store.listDomains()).find(item => item.id === target.selector), plan = await ctx.store.getPlan(account.planId)
-      if (!current || account.status !== 'active' || current.suspended || current.accountId !== account.id || current.docRoot !== target.directory || current.siteType !== 'php' || current.php.version !== target.phpVersion || account.username !== target.account || account.home !== '/home/' + target.account) return fail('CONFLICT', 'the selected site changed; read targets again', { stateChanged: false })
+      if (!current || account.status !== 'active' || current.suspended || current.accountId !== account.id || current.docRoot !== target.directory || current.siteType !== 'php' || current.php.version !== target.phpVersion || account.username !== target.account || !isAccountHome(account.home, target.account)) return fail('CONFLICT', 'the selected site changed; read targets again', { stateChanged: false })
       const files = plan ? ctx.files(account, plan) : null
       const view = files ? await inspectProject(target, files) : unavailable(target.selector, 'project-read-unavailable')
       await fresh(); return view
     })
   }
   await fresh()
-  const jobs = ctx.composerJobs, runnable = !!jobs && !!jobs.family && !!jobs.submitJob && isComposerJobProviderQualified(jobs.provider)
-  const view = readComposerWorkspaceView({ scope: 'saved-site-document-roots', observedAt: (ctx.now?.() ?? new Date()).toISOString(), binary, projects, selected, actions: runnable ? { install: true, update: true, mirror: false, reason: null } : { install: false, update: false, mirror: false, reason: 'isolated-composer-runner-unavailable' } })
+  const jobs = ctx.composerJobs, runnable = !!jobs && !!jobs.family && !!jobs.submitJob && binary.state === 'read'
+  const view = readComposerWorkspaceView({ scope: 'saved-site-document-roots', observedAt: (ctx.now?.() ?? new Date()).toISOString(), binary, projects, selected, actions: runnable ? { install: true, update: true, mirror: true, reason: null } : { install: false, update: false, mirror: false, reason: 'isolated-composer-runner-unavailable' } })
   return Response.json(view, { headers: { 'cache-control': 'no-store' } })
 }

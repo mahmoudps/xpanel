@@ -5,7 +5,7 @@ import { type Locale, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
 type Copy = string
-export type AccountWebDirectivePage = 'error-pages' | 'indexes' | 'mime-types' | 'handlers' | 'hotlink' | 'ip-blocker' | 'redirects'
+export type AccountWebDirectivePage = 'error-pages' | 'indexes' | 'mime-types' | 'handlers' | 'hotlink' | 'redirects'
 export interface AccountWebDirectivesInput { locale: Locale; accountId: string; domains: readonly Pick<Domain, 'id' | 'accountId' | 'name'>[]; selectedDomainId?: string; canManage: boolean }
 interface Field { name: string; label: Copy; kind: 'text' | 'select' | 'checkbox' | 'textarea'; options?: readonly (readonly [string, Copy])[]; technical?: boolean; help?: Copy; max?: number }
 interface Page { route: string; title: Copy; lede: Copy; columns: Copy[]; list: boolean; formTitle: Copy; fields: Field[]; notes: Copy[] }
@@ -26,8 +26,11 @@ const PAGES: Readonly<Record<AccountWebDirectivePage, Page>> = {
     fields: [{ name: 'type', label: msgid('MIME type'), kind: 'text', technical: true, max: 255, help: msgid('type/subtype, for example text/markdown.') },
       { name: 'extensions', label: msgid('Extensions'), kind: 'text', technical: true, max: 512, help: msgid('Separate with spaces, for example .md .markdown.') }],
     notes: [msgid('Executable content types and script extensions are refused. PHP stays with the reviewed domain PHP handler.')] },
-  handlers: { route: '/advanced/handlers', title: msgid('Apache handlers'), lede: msgid('Handler mappings decide which Apache module processes a file extension.'), columns: [], list: false, formTitle: '', fields: [],
-    notes: [msgid("Handler mappings are unavailable. The reviewed account .htaccess policy does not permit AddHandler, and executable handlers stay with the server's reviewed PHP-FPM setup. Nothing was read or changed."), msgid('Use MIME types to change how browsers treat an extension.')] },
+  handlers: { route: '/advanced/handlers', title: msgid('Apache handlers'), lede: msgid('Handler mappings decide which Apache module processes a file extension on this domain. xPanel writes Apache AddHandler rules into its marked block in the domain .htaccess file.'),
+    columns: [msgid('Handler'), msgid('Extensions'), ACTIONS], list: true, formTitle: msgid('Add or update a handler'),
+    fields: [{ name: 'handler', label: msgid('Handler'), kind: 'select', technical: true, options: [['cgi-script', msgid('cgi-script · run as a CGI program')], ['default-handler', msgid('default-handler · send as a static file')], ['server-parsed', msgid('server-parsed · server-side includes')], ['type-map', msgid('type-map · content negotiation map')]] },
+      { name: 'extensions', label: msgid('Extensions'), kind: 'text', technical: true, max: 512, help: msgid('Separate with spaces, for example .pl .cgi.') }],
+    notes: [msgid('Only the built-in handlers listed here are accepted. Custom handler names, server-status and server-info are refused.'), msgid('cgi-script needs the per-account Apache identity (mpm-itk). Server-side includes run without #exec.'), msgid('The domain PHP handler owns .php and is listed as a system mapping; it cannot be changed here.')] },
   hotlink: { route: '/security/hotlink', title: msgid('Hotlink protection'), lede: msgid('Stop other sites from embedding your files. xPanel writes Apache rewrite rules that check the referring site.'),
     columns: [SETTING, VALUE], list: false, formTitle: msgid('Hotlink rules'),
     fields: [{ name: 'enabled', label: msgid('Enable hotlink protection'), kind: 'checkbox' },
@@ -37,10 +40,6 @@ const PAGES: Readonly<Record<AccountWebDirectivePage, Page>> = {
       { name: 'action', label: msgid('Blocked requests'), kind: 'select', options: [['forbid', msgid('Refuse with HTTP 403')], ['redirect', msgid('Redirect to a URL')]] },
       { name: 'redirectUrl', label: msgid('Redirect URL'), kind: 'text', technical: true, max: 2048, help: msgid('Used only for redirects. It must not end in a protected file type.') }],
     notes: [msgid('Rewriting must stay on for this file. A RewriteEngine Off line elsewhere in the file blocks this page.'), msgid('Browsers may omit the referrer; allowing empty referrers keeps direct visits working.')] },
-  'ip-blocker': { route: '/security/ip-blocker', title: msgid('IP blocker'), lede: msgid('Refuse requests from specific addresses or ranges on this domain with Apache access rules.'),
-    columns: [msgid('Address or range'), ACTIONS], list: true, formTitle: msgid('Block an address'),
-    fields: [{ name: 'address', label: msgid('Address or range'), kind: 'text', technical: true, max: 64, help: msgid('IPv4 or IPv6 address, or a CIDR range such as 192.0.2.0/24.') }],
-    notes: [msgid('At most 500 entries. Loopback addresses used by the local proxy are refused.'), msgid('Other access rules in the same file would combine with these rules, so the page refuses to edit while they exist.')] },
   redirects: { route: '/domains/redirects', title: msgid('Redirects'), lede: msgid('Send visitors from a path on this domain to another address with a permanent or temporary redirect.'),
     columns: [msgid('Type'), msgid('From path'), msgid('To URL'), ACTIONS], list: true, formTitle: msgid('Add or update a redirect'),
     fields: [{ name: 'status', label: msgid('Type'), kind: 'select', options: [['301', msgid('301 · Permanent')], ['302', msgid('302 · Temporary')]] },
@@ -58,7 +57,6 @@ function render(page: AccountWebDirectivePage, input: AccountWebDirectivesInput)
   const head = `<div class="xp-wd__card"><h1>${t(spec.title)}</h1><p>${t(spec.lede)}</p>`
   const notes = `<section class="xp-wd__card" role="note" aria-labelledby="${id}-notes"><h2 id="${id}-notes">${t(msgid('Limits of this page'))}</h2><ul>${spec.notes.map(note => `<li>${t(note)}</li>`).join('')}</ul></section>`
   const root = `lang="${input.locale}" dir="${localeDirection(input.locale)}"`
-  if (page === 'handlers') return `<section class="xp-wd" data-web-directives-unavailable="handlers" ${root}>${STYLE}${head}</div><p data-wd-status role="status" data-state="unavailable">${t(msgid('Apache handler mappings are unavailable for account files.'))}</p>${notes}</section>`
   const field = (item: Field): string => {
     const control = id + '-' + item.name, describe = `${item.help ? control + '-help ' : ''}${control}-error`, technical = item.technical ? ' dir="ltr"' : ''
     const help = item.help ? `<p class="xp-help" id="${control}-help">${t(item.help)}</p>` : '', error = `<p class="xp-wd__error" id="${control}-error" data-wd-error-for="${item.name}" hidden></p>`
@@ -74,6 +72,7 @@ function render(page: AccountWebDirectivePage, input: AccountWebDirectivesInput)
     <p data-wd-status role="status" data-state="unread">${t(msgid('The current rules have not been read.'))}</p>
     <div class="xp-wd__notice" data-wd-notice role="note" hidden></div>
     <section class="xp-wd__card" aria-labelledby="${id}-current"><h2 id="${id}-current">${t(msgid('Current rules'))}</h2><div class="xp-wd__table" role="region" tabindex="0" aria-labelledby="${id}-current"><table class="xp-table"><thead><tr>${spec.columns.map(column => `<th scope="col">${t(column)}</th>`).join('')}</tr></thead><tbody data-wd-rows><tr><td colspan="${spec.columns.length}">${t(msgid('The current rules have not been read.'))}</td></tr></tbody></table></div></section>
+    ${page === 'handlers' ? `<section class="xp-wd__card" aria-labelledby="${id}-system"><h2 id="${id}-system">${t(msgid('System handlers'))}</h2><p>${t(msgid('Mappings the server configuration sets for this domain. They are read-only.'))}</p><div class="xp-wd__table" role="region" tabindex="0" aria-labelledby="${id}-system"><table class="xp-table"><thead><tr><th scope="col">${t(msgid('Handler'))}</th><th scope="col">${t(msgid('Extensions'))}</th></tr></thead><tbody data-wd-system><tr><td colspan="2">${t(msgid('The current rules have not been read.'))}</td></tr></tbody></table></div></section>` : ''}
     <section class="xp-wd__card" aria-labelledby="${id}-form"><h2 id="${id}-form">${t(spec.formTitle)}</h2><div class="xp-wd__fields">${spec.fields.map(field).join('')}</div>${spec.list ? `<div class="xp-wd__actions"><button type="button" class="xp-btn" data-wd-add disabled>${t(msgid('Add or update in draft'))}</button><button type="button" class="xp-btn" data-wd-clear disabled>${t(msgid('Clear form'))}</button></div>` : ''}</section>
     <section class="xp-wd__card" aria-labelledby="${id}-save"><h2 id="${id}-save">${t(msgid('Save changes'))}</h2><ol><li>${t(msgid('Re-reads the current file and its revision.'))}</li><li>${t(msgid('Replaces only the xPanel block for this page; other lines stay byte-for-byte.'))}</li><li>${t(msgid('Keeps the previous file, validates with the protected Apache parser and checks the site locally. A failed check restores the kept file.'))}</li></ol>
       <div class="xp-wd__actions"><button type="button" class="xp-btn" data-wd-refresh disabled>${t(msgid('Read saved rules'))}</button><button type="button" class="xp-btn" data-wd-discard disabled>${t(msgid('Discard draft'))}</button><button type="button" class="xp-btn xp-btn--primary" data-wd-save disabled>${t(msgid('Save and check site'))}</button></div>
@@ -86,6 +85,5 @@ export const renderAccountIndexesWorkspace = (input: AccountWebDirectivesInput):
 export const renderAccountMimeTypesWorkspace = (input: AccountWebDirectivesInput): string => render('mime-types', input)
 export const renderAccountHandlersWorkspace = (input: AccountWebDirectivesInput): string => render('handlers', input)
 export const renderAccountHotlinkWorkspace = (input: AccountWebDirectivesInput): string => render('hotlink', input)
-export const renderAccountIpBlockerWorkspace = (input: AccountWebDirectivesInput): string => render('ip-blocker', input)
 export const renderAccountRedirectsWorkspace = (input: AccountWebDirectivesInput): string => render('redirects', input)
 export const renderAccountWebDirectivePage = (page: AccountWebDirectivePage, input: AccountWebDirectivesInput): string => render(page, input)

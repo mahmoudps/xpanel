@@ -3,7 +3,7 @@ import { localeDirection, translator, type Locale } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 import { MONITORING_LOG_DEFAULT_LINES, MONITORING_LOG_MAX_LINES, MONITORING_LOG_UNITS } from '../../../../packages/os/src/monitoring-command.ts'
 
-export interface WhmMonitoringPageInput { locale: Locale; canRead: boolean }
+export interface WhmMonitoringPageInput { locale: Locale; canRead: boolean; webStatsEnginesEnabled?: boolean }
 type Copy = string
 
 const STYLE = `<style>.xp-whm-monitoring{display:flex;flex-direction:column;gap:32px;min-inline-size:0}.xp-whm-monitoring :is(h2,h3,p,dl,dd,figure){margin:0}.xp-whm-monitoring td[data-numeric],.xp-whm-monitoring th[data-numeric]{text-align:end;font-variant-numeric:tabular-nums;white-space:nowrap}.xp-whm-monitoring [data-whm-monitoring-message]{white-space:pre-wrap;overflow-wrap:anywhere}.xp-whm-monitoring[dir="ltr"] [data-whm-monitoring-unit]{text-align:left}.xp-whm-monitoring[dir="rtl"] [data-whm-monitoring-unit]{text-align:right}.xp-whm-monitoring__charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:16px}.xp-whm-monitoring__chart{display:flex;flex-direction:column;gap:8px;min-inline-size:0;padding:16px;border:1px solid var(--xp-border,#e2e6ec);border-radius:8px}.xp-whm-monitoring__chart svg{display:block;inline-size:100%;block-size:120px;color:var(--xp-accent,#1d4ed8)}</style>`
@@ -37,8 +37,8 @@ export function renderWhmMonitoringProcesses(input: WhmMonitoringPageInput & { c
     + h.facts([['observed-at', msgid('Observed at (UTC)'), true], ['total', msgid('Processes on the host'), true], ['shown', msgid('Rows shown'), true]])
     + `<div class="xp-whm-detail-fields">${h.field('whm-monitoring-process-search', msgid('Search PID, user or command'), `<input id="whm-monitoring-process-search" type="search" dir="ltr" data-whm-monitoring-search disabled>`)}${h.field('whm-monitoring-process-account', msgid('Account'), h.select('whm-monitoring-process-account', 'account', [['', msgid('All processes')], ['-', msgid('Not an account')]], false))}${h.field('whm-monitoring-process-sort', msgid('Sort'), h.select('whm-monitoring-process-sort', 'sort', sorts, false))}</div>`
     + h.table(msgid('Running processes'), 'rows', [['PID', true], [msgid('User')], [msgid('Account')], [msgid('CPU %'), true], [msgid('Memory %'), true], [msgid('Resident memory'), true], [msgid('Running time'), true], [msgid('State')], [msgid('Command')], [msgid('Action')]], msgid('No processes have been read.')))
-    + h.card('process-accounts', msgid('By account'), h.help(msgid('Processes are grouped by the numeric user id of each saved account.'))
-      + h.table(msgid('Processes by account'), 'account-rows', [[msgid('Account')], [msgid('Processes'), true], [msgid('CPU %'), true], [msgid('Resident memory'), true]], msgid('No account processes have been read.'))),
+    + h.card('process-accounts', msgid('By account'), h.help(msgid('Processes are grouped by the numeric user id of each saved account. Kill all sends KILL to one account only; root, service and panel users cannot be chosen.'))
+      + h.table(msgid('Processes by account'), 'account-rows', [[msgid('Account')], [msgid('Processes'), true], [msgid('CPU %'), true], [msgid('Resident memory'), true], [msgid('Action')]], msgid('No account processes have been read.'))),
   ` data-monitoring-can-signal="${input.canRead && input.canSignal}"`)
 }
 
@@ -57,6 +57,25 @@ export function renderWhmMonitoringDisk(input: WhmMonitoringPageInput): string {
       + h.table(msgid('Account home usage'), 'quota-rows', [[msgid('Account')], [msgid('Used'), true], [msgid('Quota limit'), true], [msgid('Use'), true]], msgid('No account usage has been read.'))))
 }
 
+/** WHM Statistics Software Configuration inside Logs; web-stats-client.ts reads and saves it. */
+const webStatsEnginesCard = (input: WhmMonitoringPageInput, h: ReturnType<typeof helpers>): string => {
+  const tr = translator(input.locale), text = (copy: Copy): string => escapeHtml(tr(copy))
+  const check = (name: string, label: Copy): string => `<label class="xp-whm-detail-field" for="whm-web-stats-${name.replace('.', '-')}"><span><input id="whm-web-stats-${name.replace('.', '-')}" type="checkbox" data-web-stats-policy="${name}" disabled> ${text(label)}</span></label>`
+  const entry = (id: string, name: string, label: Copy, extra: string, hint?: Copy): string => h.field(id, label, `<input id="${id}" data-web-stats-policy="${name}" dir="ltr" autocomplete="off"${extra} disabled>${hint ? h.help(hint) : ''}`)
+  return `<section class="xp-whm-detail-card" data-web-stats-engines data-web-stats-enabled="${input.canRead && (input.webStatsEnginesEnabled ?? false)}" aria-labelledby="whm-web-stats-engines"><h2 id="whm-web-stats-engines">${text(msgid('Web statistics engines'))}</h2>`
+    + h.help(msgid('Choose which engines exist for users, who may change them, and when logs and bandwidth are processed. Analog is the traffic report on the account Traffic page, so turning it off keeps totals and bandwidth and withholds its lists.'))
+    + `<p class="xp-whm-detail-status" data-web-stats-status data-state="unread" role="status">${text(msgid('The statistics configuration has not been read.'))}</p><p data-web-stats-summary>${text(msgid('Not read'))}</p>`
+    + `<div class="xp-whm-detail-fields">${check('analog.available', msgid('Analog is available to users'))}${check('analog.byDefault', msgid('Analog is on by default'))}${check('awstats.available', msgid('AWStats is available to users'))}${check('awstats.byDefault', msgid('AWStats is on by default'))}${check('webalizer.available', msgid('Webalizer is available to users'))}${check('webalizer.byDefault', msgid('Webalizer is on by default'))}${check('allowInclude', msgid('Allow an AWStats include file in each account'))}${check('reverseDns', msgid('Resolve visitor addresses with reverse DNS'))}${check('avoidBackups', msgid('Never start a run during a backup'))}</div>`
+    + `<div class="xp-whm-detail-fields">${h.field('whm-web-stats-users', msgid('Who may change engines'), `<select id="whm-web-stats-users" data-web-stats-policy="users" disabled><option value="all">${text(msgid('All users'))}</option><option value="listed">${text(msgid('Only the users listed here'))}</option></select>`)}`
+    + entry('whm-web-stats-interval', 'intervalHours', msgid('Log processing interval (hours)'), ' type="number" min="0.25" max="168" step="0.25" inputmode="decimal"', msgid('In steps of 0.25 hours; 24 or more is recommended.'))
+    + entry('whm-web-stats-bandwidth', 'bandwidthIntervalMinutes', msgid('Bandwidth processing interval (minutes)'), ' type="number" min="5" max="360" step="5" inputmode="numeric"', msgid('In steps of 5 minutes, up to 360. The bandwidth meter reads this value. Limits are enforced and logs rotate after each collection, so a longer interval delays both.'))
+    + entry('whm-web-stats-blackout', 'blackoutHours', msgid('Blackout hours (UTC)'), ' inputmode="numeric"', msgid('Comma-separated hours from 0 to 23. A run due in one of these hours starts at the first free hour.'))
+    + h.field('whm-web-stats-allowed', msgid('Allowed users and engines'), `<textarea id="whm-web-stats-allowed" data-web-stats-policy="allowed" dir="ltr" rows="3" disabled></textarea>${h.help(msgid('One user per line: username, then any of analog, awstats and webalizer.'))}`)
+    + `</div><div class="xp-whm-detail-actions"><button type="button" class="xp-btn xp-btn--primary" data-web-stats-save disabled>${text(msgid('Save'))}</button></div>`
+    + `<h3>${text(msgid('Accounts behind schedule'))}</h3><div class="xp-whm-detail-scroll" role="region" tabindex="0" aria-label="${text(msgid('Accounts behind schedule'))}"><table class="xp-whm-detail-table xp-table"><caption class="xp-sr-only">${text(msgid('Accounts behind schedule'))}</caption><thead><tr><th scope="col">${text(msgid('Account'))}</th><th scope="col">${text(msgid('Minutes behind'))}</th><th scope="col">${text(msgid('Bytes waiting'))}</th></tr></thead><tbody data-web-stats-behind><tr><td colspan="3">${text(msgid('Nothing has been read.'))}</td></tr></tbody></table></div>`
+    + `<div class="xp-whm-detail-fields">${entry('whm-web-stats-process-user', '', msgid('Account'), '').replace(' data-web-stats-policy=""', ' data-web-stats-process-user')}</div><div class="xp-whm-detail-actions"><button type="button" class="xp-btn" data-web-stats-process disabled>${text(msgid('Process now'))}</button></div></section>`
+}
+
 /** /whm/monitoring/logs: bounded journal read for a fixed unit allowlist. */
 export function renderWhmMonitoringLogs(input: WhmMonitoringPageInput): string {
   const h = helpers(input.locale), on = input.canRead
@@ -68,7 +87,7 @@ export function renderWhmMonitoringLogs(input: WhmMonitoringPageInput): string {
     + h.refresh(msgid('Read logs'), on)
     + h.status(msgid('Choose a unit and read its logs. Nothing has been read.'))
     + h.facts([['observed-at', msgid('Observed at (UTC)'), true], ['shown', msgid('Entries returned'), true]])
-    + h.table(msgid('Journal entries, newest first'), 'rows', [[msgid('Time (UTC)')], [msgid('Priority'), true], [msgid('Unit')], ['PID', true], [msgid('Message')]], msgid('No log entries have been read.'))))
+    + h.table(msgid('Journal entries, newest first'), 'rows', [[msgid('Time (UTC)')], [msgid('Priority'), true], [msgid('Unit')], ['PID', true], [msgid('Message')]], msgid('No log entries have been read.'))) + webStatsEnginesCard(input, h))
 }
 
 /** /whm/monitoring/performance: downsampled host-scope metrics history. */

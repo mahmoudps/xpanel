@@ -181,7 +181,7 @@ describe('R01 — state, identity & recovery authority (A18, A25, A58)', () => {
     await h.close()
   })
 
-  it('serializes multi-process child_process account creations, enforces domain uniqueness & reseller caps, and never reuses UIDs', async () => {
+  it('serializes multi-process child_process account creations, enforces domain uniqueness & reseller caps, and never reuses UIDs', { tags: ['slow'], timeout: 30000 }, async () => {
     const reseller = await h.store.createReseller({
       username: 'rescap',
       passwordHash: ARGON2,
@@ -189,7 +189,7 @@ describe('R01 — state, identity & recovery authority (A18, A25, A58)', () => {
       maxAccounts: 2,
       totalDiskMb: 50000,
       totalBandwidthMb: 500000,
-      oversell: false,
+      oversell: { disk: false, bandwidth: false },
       nameservers: ['ns1.example.test'],
       delegatedIps: ['192.0.2.50'],
     })
@@ -243,7 +243,7 @@ describe('R01 — state, identity & recovery authority (A18, A25, A58)', () => {
     const snap = await h.store.readSnapshot()
     expect(snap.accounts).toHaveLength(3)
     expect(snap.domains.filter((d) => d.name === 'contended-domain.example.test')).toHaveLength(1)
-  }, 30000)
+  })
 
   it('enforces fencing tokens, monotonic revisions, and expectedRevision CAS conflict detection', async () => {
     const auth0 = await h.store.getAuthorityMetadata()

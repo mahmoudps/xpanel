@@ -182,7 +182,7 @@ const NATIVE: NativeTool[] = [
       'Exposed ports compared with the firewall policy',
       'Score with critical / warning / passed counts and a history',
     ],
-    acceptance: 'With /home above 95% used the disk check reports critical with the filesystem, used and free values, and returns to passed once usage drops below 80%.',
+    acceptance: 'With /home above 95% used the disk check reports critical with the filesystem, used and free values, and returns to ok once usage drops below 80%.',
   },
   {
     tool: whm('account-health', 'whm-system-health', 'Account health', 'health-check',

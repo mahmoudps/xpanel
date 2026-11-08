@@ -1,4 +1,5 @@
 import { classicSecClientTemplates } from './sec-client-templates.ts'
+import { classicPanelAccessSections } from './panel-access-sections.ts'
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
 
@@ -55,7 +56,7 @@ export function renderSecWorkspace({ page, locale, canRead, canManage }: SecWork
       <p class="xp-help">${t('Allowlists are checked on every request before sign-in, using the socket address or the address from a trusted proxy. An empty list allows every address.')}</p>`, refresh)
       + card('lists', t('IP allowlists'), `<div class="xp-sec__fields xp-sec__fields--wide">${field('xpanel', t('xPanel (port 2083)'), area('xpanel', 5, 30000), t('One address or network per line. Text after # is kept as a note.'))}${field('xwhm', t('xWHM (port 2087)'), area('xwhm', 5, 30000), t('Root and reseller sign-in. A save that removes your current address is refused.'))}${field('xmail', t('xMail (port 2096)'), area('xmail', 5, 30000), t('Webmail sign-in for mailbox users.'))}</div>
       ${rootOnly}${actions(button('save', t('Save allowlists'), true))}${result}`)
-      + card('other', t('Other access settings'), `<p class="xp-help">${t('Panel port, secret entrance path, unauthenticated response, basic authentication and temporary sign-in links are not available here. The panel port is shown under Panel security.')}</p>`),
+      + classicPanelAccessSections({ t, card, facts, field, text, number, check, select, button, table, actions }, canRead, manage),
     'dns-providers': card('accounts', t('Provider accounts'), `${status}${table('accounts', t('Provider accounts'), [t('Name'), t('Provider'), t('Token ID'), t('Verified (UTC)'), t('Actions')], t('No provider accounts have been read.'))}
       <h3>${t('Connect provider')}</h3><div class="xp-sec__fields">${field('label', t('Name'), `<input id="sec-label" class="xp-input" type="text" maxlength="64" autocomplete="off" data-sec-input="label"${off}>`)}${field('token', t('Cloudflare API token'), text('token', 40, 'password'), t('The token is checked with Cloudflare before it is saved. It is stored only on this server and is never shown again.'))}</div>
       <p class="xp-help">${t('Only Cloudflare is supported. Other DNS providers are not available.')}</p>${rootOnly}${actions(button('connect', t('Connect provider'), true))}${result}`, refresh)

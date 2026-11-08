@@ -13,7 +13,7 @@ const samples: { [F in WebDirectiveFeature]: WebDirectiveModels[F] } = {
   indexes: { listing: 'disabled' },
   'mime-types': { entries: [{ type: 'text/markdown', extensions: ['.md', '.markdown'] }] },
   hotlink: { enabled: true, allowedHosts: ['example.test', 'www.example.test'], extensions: ['jpg', 'png'], allowEmptyReferrer: true, redirectUrl: null },
-  'ip-blocker': { entries: ['192.0.2.7', '2001:db8::/32'] },
+  handlers: { entries: [{ handler: 'cgi-script', extensions: ['.pl', '.cgi'] }, { handler: 'server-parsed', extensions: ['.shtml'] }, { handler: 'type-map', extensions: ['.var'] }] },
   redirects: { entries: [{ status: 301, path: '/old/page', target: 'https://example.org/new' }, { status: 302, path: '/old', target: 'https://example.org/' }] },
 }
 const unmanaged = '# keep me\r\n<IfModule mod_rewrite.c>\r\nRewriteEngine On\r\nRewriteRule ^index\\.php$ - [L]\r\n</IfModule>\r\n\r\n# BEGIN WordPress\r\n# END WordPress'
@@ -26,7 +26,7 @@ describe('xPanel-managed .htaccess blocks', () => {
       expect(inserted.slice(0, -unmanaged.length)).toBe(['# BEGIN xPanel ' + feature, ...renderWebDirectiveBody(feature, samples[feature]), '# END xPanel ' + feature].join('\r\n') + '\r\n')
       expect(readWebDirective(parseManagedHtaccess(inserted), feature, context)).toMatchObject({ managed: true, model: samples[feature] })
       expect(mergeWebDirective(inserted, feature, samples[feature], context)).toBe(inserted)
-      const empty = { 'error-pages': { entries: [] }, indexes: { listing: 'inherit' }, 'mime-types': { entries: [] }, hotlink: { ...samples.hotlink, enabled: false }, 'ip-blocker': { entries: [] }, redirects: { entries: [] } }[feature] as WebDirectiveModels[typeof feature]
+      const empty = { 'error-pages': { entries: [] }, indexes: { listing: 'inherit' }, 'mime-types': { entries: [] }, hotlink: { ...samples.hotlink, enabled: false }, handlers: { entries: [] }, redirects: { entries: [] } }[feature] as WebDirectiveModels[typeof feature]
       expect(mergeWebDirective(inserted, feature, empty, context)).toBe(unmanaged)
     }
     const middle = 'A\n# BEGIN xPanel indexes\nOptions -Indexes\n# END xPanel indexes\nB'
@@ -59,23 +59,27 @@ describe('xPanel-managed .htaccess blocks', () => {
       expect(mergeWebDirective(edited, feature === 'mime-types' ? 'hotlink' : 'mime-types', samples['mime-types'] as never, context).endsWith(edited)).toBe(feature !== 'mime-types')
     }
   })
-  it('detects access rules and disabled rewriting that would change managed semantics', () => {
-    expect(readWebDirective(parseManagedHtaccess('<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n'), 'ip-blocker', context).conflict).toEqual({ code: 'access_rules_present', line: 2 })
-    expect(readWebDirective(parseManagedHtaccess('<FilesMatch "^private$">\nRequire all denied\n</FilesMatch>\n'), 'ip-blocker', context).conflict).toBeNull()
+  it('detects disabled rewriting that would change managed semantics', () => {
     expect(readWebDirective(parseManagedHtaccess('# a\nRewriteEngine off\n'), 'hotlink', context).conflict).toEqual({ code: 'rewrite_disabled', line: 2 })
     expect(readWebDirective(parseManagedHtaccess('RewriteEngine Off\n'), 'redirects', context).conflict).toBeNull()
   })
   it('keeps the account policy as the availability authority', () => {
     for (const feature of WEB_DIRECTIVE_FEATURES) {
       const content = mergeWebDirective('', feature, samples[feature], context)
-      expect(inspectHtaccess(content).valid, feature).toBe(feature !== 'ip-blocker')
-      expect(webDirectivePolicyAllows(feature), feature).toBe(feature !== 'ip-blocker')
+      expect(inspectHtaccess(content).valid, feature).toBe(true)
+      expect(webDirectivePolicyAllows(feature), feature).toBe(true)
     }
+    // The handlers exception holds only inside its block and only for reviewed lines.
+    expect(renderWebDirectiveBody('handlers', samples.handlers)).toEqual(['Options +ExecCGI', 'Options +IncludesNOEXEC', 'AddHandler cgi-script .pl .cgi', 'AddHandler server-parsed .shtml', 'AddHandler type-map .var'])
+    expect(inspectHtaccess('AddHandler cgi-script .pl\n').issues.map(issue => issue.code)).toEqual(['directive'])
+    expect(inspectHtaccess('Options +ExecCGI\n').issues.map(issue => issue.code)).toEqual(['options'])
+    for (const line of ['AddHandler server-status .x', 'AddHandler cgi-script .php', 'AddHandler cgi-script .pl .phtml', 'Options +Includes', 'Options +ExecCGI +FollowSymLinks', 'SetHandler cgi-script', 'AddHandler cgi-script'])
+      expect(inspectHtaccess('# BEGIN xPanel handlers\n' + line + '\n# END xPanel handlers\n').issues.map(issue => issue.code), line).toEqual(['apache_handlers'])
     expect(inspectHtaccess(mergeWebDirective('', 'hotlink', { ...samples.hotlink, allowEmptyReferrer: false, redirectUrl: 'https://example.org/blocked.txt' }, context)).valid).toBe(true)
   })
   it('accepts canonical grammar and normalizes only safe spellings', () => {
     expect(parseWebDirectiveModel('mime-types', { entries: [{ type: 'Text/X-Markdown', extensions: ['MD', '.mkd'] }] }, context)).toEqual({ entries: [{ type: 'text/x-markdown', extensions: ['.md', '.mkd'] }] })
-    expect(parseWebDirectiveModel('ip-blocker', { entries: ['198.51.100.0/24', '2001:DB8::1', '0.0.0.1/32'] }, context)).toEqual({ entries: ['198.51.100.0/24', '2001:db8::1', '0.0.0.1/32'] })
+    expect(parseWebDirectiveModel('handlers', { entries: [{ handler: 'server-parsed', extensions: ['HTML', '.shtml'] }, { handler: 'cgi-script', extensions: ['.PL'] }] }, context)).toEqual({ entries: [{ handler: 'cgi-script', extensions: ['.pl'] }, { handler: 'server-parsed', extensions: ['.html', '.shtml'] }] })
     expect(parseWebDirectiveModel('redirects', { entries: [{ status: 302, path: '/', target: 'https://Example.org' }, { status: 301, path: '/shop/', target: 'http://example.org/a%20b?x=1' }] }, context).entries.map(entry => entry.path + ' ' + entry.target)).toEqual(['/shop/ http://example.org/a%20b?x=1', '/ https://example.org/'])
     expect(parseWebDirectiveModel('hotlink', { enabled: true, allowedHosts: ['Example.test'], extensions: ['.JPG'], allowEmptyReferrer: false, redirectUrl: 'https://cdn.example.org/denied.html' }, context)).toEqual({ enabled: true, allowedHosts: ['example.test'], extensions: ['jpg'], allowEmptyReferrer: false, redirectUrl: 'https://cdn.example.org/denied.html' })
     expect(parseWebDirectiveModel('error-pages', { entries: [{ code: 503, path: '/e/503.html' }, { code: 400, path: '/e/400.html' }] }, context).entries.map(entry => entry.code)).toEqual([400, 503])
@@ -92,9 +96,14 @@ describe('xPanel-managed .htaccess blocks', () => {
     expect(fields(() => parseWebDirectiveModel('indexes', { listing: 'Options +ExecCGI' }, context))).toEqual([{ field: 'listing', code: 'listing' }])
     expect(fields(() => parseWebDirectiveModel('mime-types', { entries: [{ type: 'application/x-httpd-php', extensions: ['.txt'] }, { type: 'text/plain\nAddHandler cgi-script', extensions: ['.a'] }, { type: 'text/plain', extensions: ['.php7', '.ok', 'a b', '.ok'] }, { type: 'nope/plain', extensions: [] }] }, context)))
       .toEqual([{ field: 'entries.0.type', code: 'executable_type' }, { field: 'entries.1.type', code: 'mime_type' }, { field: 'entries.2.extensions.0', code: 'executable_extension' }, { field: 'entries.2.extensions.2', code: 'extension' }, { field: 'entries.2.extensions.3', code: 'duplicate' }, { field: 'entries.3.type', code: 'mime_type' }, { field: 'entries.3.extensions', code: 'required' }])
-    expect(fields(() => parseWebDirectiveModel('ip-blocker', { entries: ['127.0.0.1', '10.0.0.0/33', '::1', '0.0.0.0/0', '::/0', '::ffff:127.0.0.9', 'fe80::1%eth0', '01.2.3.4', '192.0.2.1 192.0.2.2', '192.0.2.1', '192.0.2.1', '1.2.3.4/024'] }, context)))
-      .toEqual([{ field: 'entries.0', code: 'protected_address' }, { field: 'entries.1', code: 'address' }, { field: 'entries.2', code: 'protected_address' }, { field: 'entries.3', code: 'protected_address' }, { field: 'entries.4', code: 'protected_address' }, { field: 'entries.5', code: 'protected_address' }, { field: 'entries.6', code: 'address' }, { field: 'entries.7', code: 'address' }, { field: 'entries.8', code: 'address' }, { field: 'entries.10', code: 'duplicate' }, { field: 'entries.11', code: 'address' }])
-    expect(fields(() => parseWebDirectiveModel('ip-blocker', { entries: Array.from({ length: 501 }, (_value, index) => '10.0.' + Math.floor(index / 250) + '.' + (index % 250)) }, context))).toEqual([{ field: 'entries', code: 'too_many' }])
+    // cPanel refuses custom handler names (INVALID_HANDLER); the status handlers expose every tenant and two modules are not loaded.
+    expect(fields(() => parseWebDirectiveModel('handlers', { entries: [{ handler: 'my-handler', extensions: ['.x'] }, { handler: 'server-status', extensions: ['.y'] }, { handler: 'server-info', extensions: ['.z'] }, { handler: 'send-as-is', extensions: ['.asis'] }, { handler: 'imap-file', extensions: ['.map'] }, { handler: 'cgi-script\nSetHandler x', extensions: ['.q'] }] }, context)))
+      .toEqual([{ field: 'entries.0.handler', code: 'handler' }, { field: 'entries.1.handler', code: 'handler_not_permitted' }, { field: 'entries.2.handler', code: 'handler_not_permitted' }, { field: 'entries.3.handler', code: 'handler_unavailable' }, { field: 'entries.4.handler', code: 'handler_unavailable' }, { field: 'entries.5.handler', code: 'handler' }])
+    expect(fields(() => parseWebDirectiveModel('handlers', { entries: [{ handler: 'cgi-script', extensions: ['.php', '.PHTML', '.htaccess', 'pl', 'a b', '.pl'] }, { handler: 'default-handler', extensions: [] }] }, context)))
+      .toEqual([{ field: 'entries.0.extensions.0', code: 'system_extension' }, { field: 'entries.0.extensions.1', code: 'system_extension' }, { field: 'entries.0.extensions.2', code: 'system_extension' }, { field: 'entries.0.extensions.4', code: 'extension' }, { field: 'entries.0.extensions.5', code: 'duplicate' }, { field: 'entries.1.extensions', code: 'required' }])
+    expect(fields(() => parseWebDirectiveModel('handlers', { entries: [{ handler: 'cgi-script', extensions: ['.pl'] }, { handler: 'cgi-script', extensions: ['.cgi'] }, { handler: 'type-map', extensions: ['.PL'] }] }, context)))
+      .toEqual([{ field: 'entries.1.handler', code: 'duplicate' }, { field: 'entries.2.extensions.0', code: 'duplicate' }])
+    expect(fields(() => parseWebDirectiveModel('handlers', { entries: Array.from({ length: 51 }, () => ({ handler: 'default-handler', extensions: ['.a'] })) }, context))).toEqual([{ field: 'entries', code: 'too_many' }])
     for (const target of ['javascript:alert(1)', 'ftp://example.org/', 'https://user:pw@example.org/', 'https://example.org/$1', "https://example.org/a'b", 'https://example.org/a"b', 'https://example.org/(x)', 'https://[::1]/', 'https://localhost/', 'https://example.org/%zz', 'https://example.org/<x>'])
       expect(fields(() => parseWebDirectiveModel('redirects', { entries: [{ status: 301, path: '/a', target }] }, context)), target).toEqual([{ field: 'entries.0.target', code: 'url' }])
     expect(fields(() => parseWebDirectiveModel('redirects', { entries: [{ status: 307, path: '/a', target: 'https://example.test/a/b' }, { status: 301, path: '/', target: 'https://www.example.test/x' }, { status: 301, path: '/a', target: 'https://example.test/ab' }, { status: 301, path: '/a', target: 'https://example.org/' }] }, context)))

@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { constants, createReadStream, createWriteStream } from 'node:fs'
-import { lstat, open, rename, rm } from 'node:fs/promises'
+import { lstat, open, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, posix } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { DB_NAME_MAX, dbGrantPattern, fail, isXpanelError } from '@xpanel/core'
@@ -450,6 +450,8 @@ export class MariaDbServiceAdapter {
   readonly dumpTimeoutMs: number
   private readonly commandRunner: MariaDbCommandRunner
   private readonly adminConfigInspector: AdminConfigInspector
+  /** Set by each verification: a `host=` in the option file is an active remote profile (db-profiles.ts). */
+  private remote = false
 
   constructor(opts: MariaDbAdapterOptions = {}) {
     this.adminDefaultsFile = assertCanonicalUnixPath(
@@ -504,13 +506,24 @@ export class MariaDbServiceAdapter {
     if (meta.content !== undefined && !/^\s*\[(client|mariadb|mysql)\]/im.test(meta.content)) {
       fail('PRECONDITION_FAILED', 'MariaDB admin credential file is missing a [client] configuration header')
     }
+    this.remote = meta.content !== undefined && /^\s*host\s*=/im.test(meta.content)
+  }
+
+  /** True while a remote profile is active, read from the option file itself. */
+  async isRemote(): Promise<boolean> {
+    await this.verifyAdminConfig()
+    return this.remote
+  }
+
+  private connectionArgv(): string[] {
+    return this.remote ? ['--protocol=TCP'] : this.socketPath ? ['--protocol=SOCKET', `--socket=${this.socketPath}`] : []
   }
 
   private buildClientArgv(extraArgs: string[] = []): string[] {
     const argv = [
       this.mariadbBinary,
       `--defaults-extra-file=${this.adminDefaultsFile}`,
-      ...(this.socketPath ? ['--protocol=SOCKET', `--socket=${this.socketPath}`] : []),
+      ...this.connectionArgv(),
       '--batch',
       '--skip-column-names',
       '--default-character-set=utf8mb4',
@@ -524,7 +537,7 @@ export class MariaDbServiceAdapter {
     const argv = [
       this.mariadbDumpBinary,
       `--defaults-extra-file=${this.adminDefaultsFile}`,
-      ...(this.socketPath ? ['--protocol=SOCKET', `--socket=${this.socketPath}`] : []),
+      ...this.connectionArgv(),
       '--single-transaction',
       '--routines',
       '--triggers',
@@ -903,6 +916,26 @@ export class MariaDbServiceAdapter {
   /**
    * Inspects tables, row counts, checksums, routines, triggers, and events in an account-owned database.
    */
+  /** Runs an account's own dump as a temporary user limited to its database: the administrator never executes it. */
+  async importUntrustedDump(input: { database: string; username: string; inputPath: string; timeoutMs?: number }): Promise<void> {
+    const database = services.assertDatabaseName(input.database, input.username)
+    const user = `${input.username}_imp${randomBytes(3).toString('hex')}`, password = randomBytes(24).toString('hex'), hosts = ['localhost']
+    const defaults = join(dirname(input.inputPath), `.${randomUUID()}.cnf`)
+    await this.verifyAdminConfig()
+    await this.executeStatements([...services.createUser(user, input.username, hosts, { plugin: 'mysql_native_password', hash: services.mysqlNativePasswordHash(password) }), ...services.grantPrivileges(user, input.username, hosts, database, ['ALL PRIVILEGES'])])
+    try {
+      await writeFile(defaults, `[client]\nuser=${user}\npassword=${password}\n`, { mode: 0o600, flag: 'wx' })
+      const res = await this.commandRunner({
+        argv: [this.mariadbBinary, `--defaults-extra-file=${defaults}`, ...(this.socketPath ? ['--protocol=SOCKET', `--socket=${this.socketPath}`] : []), '--default-character-set=utf8mb4', '--database', database],
+        stdinFilePath: input.inputPath, timeoutMs: input.timeoutMs ?? this.dumpTimeoutMs, maxStdoutBytes: MAX_SQL_STDOUT_BYTES, maxStderrBytes: MAX_SQL_STDERR_BYTES,
+      })
+      if (!res.ok) fail('CONFIG_TEST_FAILED', `the dump did not import into ${database}: ${redactSqlSecrets(res.stderr || 'mariadb failed').trim().slice(0, 400)}`, { database, reason: 'dump_refused' })
+    } finally {
+      await rm(defaults, { force: true })
+      await this.executeStatements(services.dropUser(user, input.username, hosts))
+    }
+  }
+
   async verifyDatabaseObjects(database: string, username: string): Promise<DatabaseObjectsSummary> {
     const validDb = services.assertDatabaseName(database, username)
     const dbLit = services.quoteString(validDb)

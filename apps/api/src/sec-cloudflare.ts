@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createHash } from 'node:crypto'
+import { isIP } from 'node:net'
 import { join } from 'node:path'
 import { fail, isXpanelError, validateDomainName } from '@xpanel/core'
 import type { Account } from '@xpanel/core'
@@ -8,6 +9,9 @@ import type { StateStore } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
 import { authorizeAccountOwner, workspaceJson } from './account-ssh-workspace.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
+import { readSecRaw } from './sec-workspace.ts'
+import { readSecRecord, SEC_DEFAULTS } from '../../agent/src/sec-policy.ts'
+import { isPublicAddress } from '../../../packages/os/src/network-tools-command.ts'
 
 /** Provider credentials live only in this 0600 state file; no view, audit entry or error ever carries a token. */
 export const SEC_DNS_PROVIDERS_STATE = 'extended/dns/sec-providers.json'
@@ -52,7 +56,7 @@ export const providersRevision = (raw: unknown): string => {
 const publicAccount = (item: ProviderAccount) => ({ id: item.id, provider: item.provider, label: item.label, tokenId: item.tokenId, createdAt: item.createdAt, verifiedAt: item.verifiedAt })
 
 /** One call to the documented v4 API: Bearer token, JSON envelope {success, errors, result}; bounded time and size. */
-export async function cloudflareCall(fetcher: typeof fetch, token: string, path: string, init: { method?: 'GET' | 'POST'; body?: unknown } = {}): Promise<unknown> {
+export async function cloudflareCall(fetcher: typeof fetch, token: string, path: string, init: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown } = {}): Promise<unknown> {
   let response: Response
   try {
     response = await fetcher(CLOUDFLARE_API + path, { method: init.method ?? 'GET', headers: { authorization: 'Bearer ' + token, accept: 'application/json', ...(init.body === undefined ? {} : { 'content-type': 'application/json' }) },
@@ -114,11 +118,11 @@ async function readZone(helpers: SecCloudflareHelpers, account: ProviderAccount,
     localZone: local !== null, records: compareCloudflareRecords(link.domain, local ?? [], remote), truncated, observedAt: (helpers.now ?? (() => new Date()))().toISOString() }
 }
 
-const bodyOf = async (request: Request, keys: readonly string[]): Promise<Record<string, unknown>> => {
+const bodyOf = async (request: Request, keys: readonly string[], max = 2048): Promise<Record<string, unknown>> => {
   if (request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return invalid('JSON is required')
   const raw = await request.text()
   let value: unknown
-  try { value = raw.length <= 2048 ? JSON.parse(raw) : null } catch { value = null }
+  try { value = raw.length <= max ? JSON.parse(raw) : null } catch { value = null }
   if (!object(value) || Object.keys(value).sort().join() !== [...keys].sort().join()) return invalid('unsupported request fields')
   return value
 }
@@ -155,22 +159,25 @@ export async function handleSecCloudflareRoute(request: Request, url: URL, metho
   const p = url.pathname
   if (p.startsWith('/api/account/sec/cloudflare')) return accountRoute(request, url, method, helpers)
   if (!p.startsWith('/api/server/sec/dns-providers')) return null
-  const ROUTES: Record<string, string> = { '/api/server/sec/dns-providers': 'GET', '/api/server/sec/dns-providers/zone': 'GET', '/api/server/sec/dns-providers/accounts': 'POST', '/api/server/sec/dns-providers/accounts/remove': 'POST', '/api/server/sec/dns-providers/links': 'POST', '/api/server/sec/dns-providers/links/remove': 'POST', '/api/server/sec/dns-providers/purge': 'POST' }
+  const ROUTES: Record<string, string> = { '/api/server/sec/dns-providers': 'GET', '/api/server/sec/dns-providers/zone': 'GET', '/api/server/sec/dns-providers/accounts': 'POST', '/api/server/sec/dns-providers/accounts/remove': 'POST', '/api/server/sec/dns-providers/links': 'POST', '/api/server/sec/dns-providers/links/remove': 'POST', '/api/server/sec/dns-providers/purge': 'POST', '/api/server/sec/dns-providers/records': 'GET', '/api/server/sec/dns-providers/records/create': 'POST', '/api/server/sec/dns-providers/records/update': 'POST', '/api/server/sec/dns-providers/records/remove': 'POST' }
   if (!Object.hasOwn(ROUTES, p)) return null
   const action = 'server.sec.dns-providers.' + (ROUTES[p] === 'GET' ? 'read' : p.split('/').slice(5).join('.'))
   const caller = await helpers.requireCaller(request)
   await helpers.assertRoot(caller, action)
   if (method !== ROUTES[p]) return new Response(null, { status: 405, headers: { allow: ROUTES[p]! } })
   const fresh = async (): Promise<AuthenticatedCaller> => { const current = await helpers.requireCaller(request); await helpers.assertRoot(current, action); return same(caller, current) ? current : fail('FORBIDDEN', 'root authorization changed', unchanged) }
-  const zone = p === '/api/server/sec/dns-providers/zone', query = [...url.searchParams]
+  const zone = p === '/api/server/sec/dns-providers/zone' || p === '/api/server/sec/dns-providers/records', query = [...url.searchParams]
+  if (p.endsWith('/dns-providers/records') && !query.length) { await fresh(); return workspaceJson({ domain: null, zoneId: null, records: [], truncated: false }) }
   if (zone ? query.length !== 1 || query[0]![0] !== 'domain' : url.search) return invalid(zone ? 'exactly one domain is required' : 'provider routes accept no query selectors')
   const now = () => (helpers.now ?? (() => new Date()))().toISOString()
   const audit = async (actor: AuthenticatedCaller, name: string, target: string, detail: Record<string, unknown> = {}) => { try { await helpers.emitAudit({ actor: actor.principal.username, action: 'server.sec.dns-providers.' + name, target, principalId: actor.principal.id, outcome: 'ok', detail }) } catch { fail('SERVICE_UNAVAILABLE', 'the change was saved but its audit record requires review', { stateChanged: true, verificationRequired: true }) } }
   if (p === '/api/server/sec/dns-providers') { const { raw, file } = await readFile(helpers.store); const view = await serverView(helpers, raw, file); await fresh(); return workspaceJson(view) }
+  if (p.startsWith('/api/server/sec/dns-providers/records/')) return workspaceJson(await writeRecord(helpers, request, p.slice(p.lastIndexOf('/') + 1) as 'create' | 'update' | 'remove', fresh, audit))
   if (zone || p === '/api/server/sec/dns-providers/purge') {
     const domain = domainOf(zone ? query[0]![1] : (await bodyOf(request, ['domain'])).domain)
     const { file } = await readFile(helpers.store), link = file.links.find(item => item.domain === domain), account = link && file.accounts.find(item => item.id === link.accountId)
     if (!link || !account) return fail('NOT_FOUND', 'the domain is not linked to a Cloudflare zone', unchanged)
+    if (p.endsWith('/records')) { const read = await listRecords(helpers, account, link.zoneId); return workspaceJson({ domain, zoneId: link.zoneId, records: read.records.map(rowOf), truncated: read.truncated }) }
     if (zone) return workspaceJson(await readZone(helpers, account, link))
     return workspaceJson(await purge(helpers, await fresh(), account, link, audit))
   }
@@ -210,6 +217,105 @@ export async function handleSecCloudflareRoute(request: Request, url: URL, metho
   const next = await write(helpers, revisionOf(body.expectedRevision), file => file.links.some(item => item.domain === domain) ? { ...file, links: file.links.filter(item => item.domain !== domain) } : fail('NOT_FOUND', 'the domain is not linked', unchanged), fresh)
   await audit(actor, 'domain_unlinked', 'domain:' + domain)
   return workspaceJson(await serverView(helpers, next, next))
+}
+
+export const PROVIDER_RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'TXT', 'MX'] as const
+export interface ProviderRecord { id: string; type: string; name: string; content: string; ttl: number; proxied: boolean; proxiable: boolean; priority: number | null; comment: string }
+const RECORD_ID = /^[0-9a-f]{32}$/, unknownOutcome = { stateChanged: true, verificationRequired: true, unknownOutcome: true }
+const readRecord = (row: unknown): ProviderRecord | null => object(row) && typeof row.id === 'string' && RECORD_ID.test(row.id) && typeof row.type === 'string' && typeof row.name === 'string' && typeof row.content === 'string' && row.content.length <= 4096 && Number.isSafeInteger(row.ttl)
+  ? { id: row.id, type: row.type, name: row.name, content: row.content, ttl: row.ttl as number, proxied: row.proxied === true, proxiable: row.proxiable === true, priority: Number.isSafeInteger(row.priority) ? row.priority as number : null, comment: typeof row.comment === 'string' ? row.comment : '' } : null
+async function listRecords(helpers: SecCloudflareHelpers, account: ProviderAccount, zoneId: string): Promise<{ records: ProviderRecord[]; truncated: boolean }> {
+  const records: ProviderRecord[] = []
+  for (let page = 1; page <= 5; page++) {
+    const rows = await cloudflareCall(helpers.fetch, account.token, `/zones/${zoneId}/dns_records?per_page=100&page=${page}`)
+    if (!Array.isArray(rows)) return fail('SERVICE_UNAVAILABLE', 'Cloudflare returned an unrecognized response', { stateChanged: false, reason: 'provider_response_invalid' })
+    for (const row of rows) { const record = readRecord(row); if (record && (PROVIDER_RECORD_TYPES as readonly string[]).includes(record.type)) records.push(record) }
+    if (rows.length < 100) return { records, truncated: false }
+  }
+  return { records, truncated: true }
+}
+/** The fields Cloudflare stores for a record, checked against the zone; a proxied record has the automatic TTL. */
+export function parseProviderRecord(value: Record<string, unknown>, zone: string) {
+  const type = value.type as string
+  if (!(PROVIDER_RECORD_TYPES as readonly unknown[]).includes(type)) return invalid('the record type must be A, AAAA, CNAME, TXT or MX')
+  const name = domainOf(value.name)
+  if (name !== zone && !name.endsWith('.' + zone)) return invalid('the record name must be inside the zone')
+  const proxied = value.proxied === true
+  if (typeof value.proxied !== 'boolean' || proxied && !['A', 'AAAA', 'CNAME'].includes(type)) return invalid('only A, AAAA and CNAME records can be proxied')
+  const content = typeof value.content === 'string' ? value.content.trim() : ''
+  const valid = type === 'A' ? isIP(content) === 4 : type === 'AAAA' ? isIP(content) === 6 : type === 'TXT' ? content.length >= 1 && content.length <= 2048 && !/[\u0000-\u001f\u007f]/.test(content) : /^(?=.{1,253}$)[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9])?(?:\.[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9])?)+$/.test(content)
+  if (!valid) return invalid('the record value does not fit its type')
+  const ttl = value.ttl
+  if (!Number.isSafeInteger(ttl) || ttl !== 1 && ((ttl as number) < 60 || (ttl as number) > 86400)) return invalid('the TTL must be 1 (automatic) or from 60 to 86400 seconds')
+  const priority = value.priority === null || value.priority === undefined ? null : value.priority
+  if (type === 'MX' ? !Number.isSafeInteger(priority) || (priority as number) < 0 || (priority as number) > 65535 : priority !== null) return invalid(type === 'MX' ? 'an MX record needs a priority from 0 to 65535' : 'only MX records take a priority')
+  const comment = typeof value.comment === 'string' ? value.comment.trim() : ''
+  if (comment.length > 100 || /[\u0000-\u001f\u007f]/.test(comment)) return invalid('the remark must be one line of at most 100 characters')
+  return { type, name, content, ttl: proxied ? 1 : ttl as number, proxied, ...(priority === null ? {} : { priority }), comment }
+}
+/** The page names a record by `recordId` and `host`, the fields of its write form. */
+const rowOf = (record: ProviderRecord) => ({ ...record, recordId: record.id, host: record.name })
+const sameRecord = (record: ProviderRecord | null, wanted: { type: string; name: string; content: string; ttl: number; proxied: boolean }): boolean => !!record && record.type === wanted.type && record.name === wanted.name && record.content === wanted.content && record.ttl === wanted.ttl && record.proxied === wanted.proxied
+/** A write that did not read back as sent is reported as unverified: Cloudflare may hold either version. */
+async function sendRecord(helpers: SecCloudflareHelpers, account: ProviderAccount, zoneId: string, path: string, method: 'POST' | 'PUT', record: ReturnType<typeof parseProviderRecord>): Promise<ProviderRecord> {
+  let result: unknown
+  try { result = await cloudflareCall(helpers.fetch, account.token, path, { method, body: record }) }
+  catch (error) { if (isXpanelError(error) && error.detail.reason !== 'provider_unreachable') throw error; return fail('SERVICE_UNAVAILABLE', 'the record outcome is unknown; check the Cloudflare dashboard before retrying', unknownOutcome) }
+  const sent = readRecord(result)
+  if (!sent) return fail('SERVICE_UNAVAILABLE', 'the record outcome is unknown; check the Cloudflare dashboard before retrying', unknownOutcome)
+  const back = readRecord(await cloudflareCall(helpers.fetch, account.token, `/zones/${zoneId}/dns_records/${sent.id}`).catch(() => null))
+  return sameRecord(back, record) ? back! : fail('SERVICE_UNAVAILABLE', 'Cloudflare did not read the record back as sent', unknownOutcome)
+}
+async function writeRecord(helpers: SecCloudflareHelpers, request: Request, op: 'create' | 'update' | 'remove', fresh: () => Promise<AuthenticatedCaller>, audit: (actor: AuthenticatedCaller, name: string, target: string, detail?: Record<string, unknown>) => Promise<void>) {
+  const fields = op === 'remove' ? ['domain', 'recordId'] : ['domain', 'recordId', 'type', 'host', 'content', 'ttl', 'proxied', 'priority', 'comment']
+  const body = await bodyOf(request, fields, 8192), domain = domainOf(body.domain)
+  const { file } = await readFile(helpers.store), link = file.links.find(item => item.domain === domain), account = link && file.accounts.find(item => item.id === link.accountId)
+  if (!link || !account) return fail('NOT_FOUND', 'the domain is not linked to a Cloudflare zone', unchanged)
+  if (op !== 'create' && (typeof body.recordId !== 'string' || !RECORD_ID.test(body.recordId))) return invalid('a Cloudflare record id is required')
+  const base = `/zones/${link.zoneId}/dns_records`, actor = await fresh()
+  if (op === 'remove') {
+    let result: unknown
+    try { result = await cloudflareCall(helpers.fetch, account.token, `${base}/${body.recordId}`, { method: 'DELETE' }) }
+    catch (error) { if (isXpanelError(error) && error.detail.reason !== 'provider_unreachable') throw error; return fail('SERVICE_UNAVAILABLE', 'the record outcome is unknown; check the Cloudflare dashboard before retrying', unknownOutcome) }
+    if (!object(result) || result.id !== body.recordId) return fail('SERVICE_UNAVAILABLE', 'the record outcome is unknown; check the Cloudflare dashboard before retrying', unknownOutcome)
+    await audit(actor, 'record_removed', 'domain:' + domain, { recordId: body.recordId })
+    return { domain, removed: body.recordId }
+  }
+  const record = parseProviderRecord({ ...body, name: body.host }, link.zoneName)
+  const saved = await sendRecord(helpers, account, link.zoneId, op === 'create' ? base : `${base}/${body.recordId}`, op === 'create' ? 'POST' : 'PUT', record)
+  await audit(actor, op === 'create' ? 'record_created' : 'record_updated', 'domain:' + domain, { recordId: saved.id, type: saved.type, name: saved.name })
+  return { domain, record: rowOf(saved) }
+}
+
+/** Why no record was written is reported, never raised: the site itself was already created. */
+export type SiteRecordResult = { state: 'created' | 'exists'; name: string; address: string } | { state: 'skipped' | 'failed'; reason: string }
+/**
+ * The record of a site created with "add a record automatically": an A record to the address the site is served from,
+ * in the Cloudflare zone that holds the name. The address must be public, and a record that already points elsewhere is
+ * left for the administrator.
+ */
+export async function publishSiteRecord(helpers: Pick<SecCloudflareHelpers, 'store' | 'fetch'>, site: { domain: string; ipv4: string | null; ownDomains: readonly string[]; root: boolean }): Promise<SiteRecordResult> {
+  const raw = await readSecRaw(helpers.store, 'auto-dns').catch(() => null), policy = raw === null ? SEC_DEFAULTS['auto-dns'] : readSecRecord('auto-dns', raw)?.policy
+  if (!policy?.enabled) return { state: 'skipped', reason: 'auto_dns_disabled' }
+  if (!site.ipv4 || isIP(site.ipv4) !== 4 || !isPublicAddress(site.ipv4)) return { state: 'skipped', reason: 'server_ip_not_public' }
+  try {
+    const { file } = await readFile(helpers.store)
+    // A customer may write only into a zone of its own domains: a subdomain of a neighbour's zone would be a takeover.
+    const link = file.links.filter(item => (site.domain === item.domain || site.domain.endsWith('.' + item.domain)) && (site.root || site.ownDomains.includes(item.domain))).sort((a, b) => b.domain.length - a.domain.length)[0]
+    let zone = link ? { id: link.zoneId, name: link.zoneName, account: file.accounts.find(item => item.id === link.accountId)! } : null
+    if (!zone && site.root) for (const account of file.accounts) {
+      zone = await findZone(helpers.fetch, account.token, site.domain).then(found => ({ ...found, account })).catch(() => null)
+      if (zone) break
+    }
+    if (!zone) return { state: 'skipped', reason: 'no_provider_zone' }
+    const query = new URLSearchParams({ type: 'A', name: site.domain }).toString(), found = await cloudflareCall(helpers.fetch, zone.account.token, `/zones/${zone.id}/dns_records?${query}`)
+    const rows = Array.isArray(found) ? found.flatMap(item => { const record = readRecord(item); return record ? [record] : [] }) : null
+    if (!rows) return { state: 'failed', reason: 'provider_response_invalid' }
+    if (rows.some(row => row.content === site.ipv4)) return { state: 'exists', name: site.domain, address: site.ipv4 }
+    if (rows.length) return { state: 'skipped', reason: 'record_differs' }
+    await sendRecord(helpers as SecCloudflareHelpers, zone.account, zone.id, `/zones/${zone.id}/dns_records`, 'POST', parseProviderRecord({ type: 'A', name: site.domain, content: site.ipv4, ttl: policy.ttl, proxied: policy.proxied, priority: null, comment: '' }, zone.name))
+    return { state: 'created', name: site.domain, address: site.ipv4 }
+  } catch (error) { return { state: 'failed', reason: isXpanelError(error) ? String(error.detail.reason ?? error.code).toLowerCase() : 'provider_unreachable' } }
 }
 
 async function purge(helpers: SecCloudflareHelpers, actor: AuthenticatedCaller, account: ProviderAccount, link: ProviderLink, audit: (actor: AuthenticatedCaller, name: string, target: string, detail?: Record<string, unknown>) => Promise<void>) {

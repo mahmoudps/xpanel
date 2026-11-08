@@ -7,7 +7,7 @@ import type { PanelLanguagesView } from './whm-languages-client.ts'
 const R1 = 'a'.repeat(64), R2 = 'b'.repeat(64), SHA = 'c'.repeat(64), STAMP = '2026-10-29T12:13:14.567Z'
 const row = (tag: 'en' | 'ar', extra: Partial<PanelLanguagesView['locales'][number]> = {}) => ({ tag, name: tag === 'en' ? 'English' : 'Arabic', nativeName: tag === 'en' ? 'English' : 'Arabic native',
   dir: tag === 'en' ? 'ltr' : 'rtl', source: tag === 'en', offered: true, messages: 4000, override: null, overrideState: 'none', runtime: 'applied', ...extra }) as PanelLanguagesView['locales'][number]
-const defaults = (): PanelLanguagesView => ({ locales: [row('en'), row('ar')], defaultLocale: 'en', policyState: 'default', updatedAt: null, revision: R1 })
+const defaults = (): PanelLanguagesView => ({ locales: [row('en'), row('ar')], defaultLocale: 'en', policyState: 'default', updatedAt: null, revision: R1, copies: [] })
 const uploaded = (): PanelLanguagesView => ({ ...defaults(), revision: R2, locales: [row('en'), row('ar', { override: { uploadedAt: STAMP, uploadedBy: 'root', sha256: SHA, entries: 3 }, overrideState: 'saved', runtime: 'restart_required' })] })
 type Requester = (method: string, path: string, body?: unknown) => Promise<unknown>
 const flush = async () => { for (let index = 0; index < 10; index++) await new Promise(resolve => setTimeout(resolve, 0)) }

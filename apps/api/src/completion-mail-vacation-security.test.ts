@@ -317,7 +317,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(await f.snapshot()).toEqual(before)
   })
 
-  it('saves exactly the seven editable fields with the captured revision and reads the stored rule back exactly', async () => {
+  it('saves exactly the seven editable fields with the captured revision and reads the stored rule back exactly', { tags: ['slow'] }, async () => {
     const session = await f.open()
     const absence = await f.view(session)
     const patch = {
@@ -352,7 +352,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect((await f.view(session))).toMatchObject({ vacation: later.vacation, revision: later.revision })
   })
 
-  it('rejects bodies that are not exactly the seven editable fields plus expectedRevision', async () => {
+  it('rejects bodies that are not exactly the seven editable fields plus expectedRevision', { tags: ['slow'] }, async () => {
     const session = await f.open()
     await f.saveValid(session)
     const current = (await f.view(session)).revision
@@ -386,7 +386,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect((await f.view(session)).revision).toBe(current.revision)
   })
 
-  it('rejects a stale revision without overwriting the saved configuration', async () => {
+  it('rejects a stale revision without overwriting the saved configuration', { tags: ['slow'] }, async () => {
     const session = await f.open()
     const absence = await f.view(session)
     const first = await f.saveValid(session)
@@ -400,7 +400,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(absence.revision).not.toBe(second.revision)
   })
 
-  it('creates from the known absence revision and treats that revision as stale after the first save', async () => {
+  it('creates from the known absence revision and treats that revision as stale after the first save', { tags: ['slow'] }, async () => {
     const session = await f.open()
     const absence = await f.view(session)
     expect(absence.vacation).toBeNull()
@@ -412,7 +412,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(await f.stored()).toEqual({ ...created.vacation, ownerAuthority: f.authorityFor(f.inbox) })
   })
 
-  it('rejects malformed schedules, intervals, header controls, oversized messages and invalid enabled states', async () => {
+  it('rejects malformed schedules, intervals, header controls, oversized messages and invalid enabled states', { tags: ['slow'] }, async () => {
     const session = await f.open()
     await f.saveValid(session)
     const current = (await f.view(session)).revision
@@ -454,7 +454,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(await f.snapshot()).toEqual(before)
   })
 
-  it('permits a disabled empty configuration and an enabled HTML-only message', async () => {
+  it('permits a disabled empty configuration and an enabled HTML-only message', { tags: ['slow'] }, async () => {
     const session = await f.open()
     const disabled = await f.saveValid(session, { enabled: false, subject: '', body: '', htmlBody: '' })
     expect(disabled.vacation).toMatchObject({ enabled: false, subject: '', body: '', htmlBody: '', startDate: null, endDate: null, replyIntervalHours: 24 })
@@ -469,7 +469,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(await f.snapshot()).toEqual(before)
   })
 
-  it('projects the stored record without stored metadata and keeps its current-value revision', async () => {
+  it('projects the stored record without stored metadata and keeps its current-value revision', { tags: ['slow'] }, async () => {
     const record = {
       mailbox: f.inbox.login, enabled: true, subject: 'Seeded', body: 'Seeded body', htmlBody: '',
       startDate: null, endDate: null, replyIntervalHours: 24, compiledSieve: 'require ["vacation"];\n', updatedAt: '2026-01-01T00:00:00.000Z',
@@ -499,7 +499,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(replaced.compiledSieve).toContain(':subject "Replaced"')
   })
 
-  it('serializes a queued save behind the current writer lease', async () => {
+  it('serializes a queued save behind the current writer lease', { tags: ['slow'] }, async () => {
     const session = await f.open(), current = await f.view(session)
     const queue = queueNextMutationWriter(f.state.store)
     let settled = false
@@ -515,7 +515,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     } finally { queue.release(); await pending.catch(() => undefined); queue.restore() }
   })
 
-  it('admits only one concurrent save for the same captured revision', async () => {
+  it('admits only one concurrent save for the same captured revision', { tags: ['slow'] }, async () => {
     const session = await f.open()
     const current = await f.view(session)
     const responses = await Promise.all([
@@ -546,7 +546,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     } finally { queue.release(); await pending.catch(() => undefined); queue.restore() }
   })
 
-  it('binds a second account sealed mailbox to its own record and refuses mailbox injection', async () => {
+  it('binds a second account sealed mailbox to its own record and refuses mailbox injection', { tags: ['slow'] }, async () => {
     const ownerSession = await f.open(f.inbox.login)
     const foreignSession = await f.open(f.foreign.login)
     const ownerAbsence = await f.view(ownerSession)
@@ -607,7 +607,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(await f.readBytes(f.inbox.login)).toBeNull()
   })
 
-  it('keeps the non-mailbox administrator path legacy-shaped and still validates its writes', async () => {
+  it('keeps the non-mailbox administrator path legacy-shaped and still validates its writes', { tags: ['slow'] }, async () => {
     const ownerSession = await f.open()
     const absentResponse = await f.legacyCall(`${route}?mailbox=${encodeURIComponent(f.inbox.login)}`)
     expect(absentResponse.status).toBe(200)
@@ -640,7 +640,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     await refuse(await f.legacyCall(route, 'PUT', { mailbox: f.inbox.login, enabled: false }, f.readOnly), 403, 'FORBIDDEN', 'legacy read-only write scope')
   })
 
-  it('joins exactly one account-bound audit entry per successful save and none for refusals', async () => {
+  it('joins exactly one account-bound audit entry per successful save and none for refusals', { tags: ['slow'] }, async () => {
     const session = await f.open()
     expect(await f.audits()).toHaveLength(0)
     const current = await f.view(session)
@@ -666,7 +666,7 @@ describe('sealed mailbox vacation responder configuration HTTP security acceptan
     expect(await f.audits()).toHaveLength(2)
   })
 
-  it('applies the saved responder as the mailbox Sieve script through the host agent', async () => {
+  it('applies the saved responder as the mailbox Sieve script through the host agent', { tags: ['slow'] }, async () => {
     const session = await f.open()
     const before = await f.snapshot()
     expect(before.agentCalls).toBe(0)

@@ -12,7 +12,7 @@ export function renderV2PanelSoftwarePage(props: PanelSurfaceProps, authority: P
   switch (props.activeRoute) {
     case '/software/php': return renderV2PanelPhpPage(props, authority)
     case '/software/htaccess': return renderV2PanelHtaccessPage(props, authority)
-    case '/software/optimize': return renderV2OptimizePage(props, authority)
+    case '/software/optimize': return renderV2OptimizePage(props, authority, { ...authority, canManage: authority.canManage && authority.qualifiedTools?.has('nginx-cache-control') === true })
     case '/software/installer': return renderV2PanelStorePage(props, authority)
     default: return undefined
   }

@@ -31,6 +31,46 @@ describe('source token view', () => {
   })
 })
 
+describe('live transfer from a linked server', () => {
+  const nodes = { config: { nodes: [{ id: 'node_' + 'a'.repeat(16), label: 'Old server', hostname: 'whm.old.example.test' }] } }
+  const liveSession = (results: unknown = {}) => { const entry = session(); return { ...entry, session: { ...entry.session, state: 'completed', live: true, progress: { alice: { targetUsername: 'alice', phase: 'done', bytes: 1, totalBytes: 1, error: null } } }, results } }
+  const model = (entry: unknown, live = true) => vi.fn(async (method: string, path: string, body?: unknown) => {
+    if (path === '/api/transfers/credentials') return listView([])
+    if (path === '/api/server/nodes') return nodes
+    if (path === '/api/transfers/sessions' && method === 'GET') return { sessions: [entry], cpanelImports: [], capabilities: { discover: true, execute: true, live, cpanelImport: false, cpanelUploadMaxBytes: 0 } }
+    if (path === '/api/transfers/sessions' && method === 'POST') return { ...session(), session: { ...session().session, live: (body as { live: boolean }).live } }
+    if (method === 'PATCH') return entry
+    throw { status: 404 }
+  })
+  it('offers linked servers by id and starts a live session without any credential', async () => {
+    const send = model(session()); boot(send); await tick(); await tick()
+    const node = q<HTMLSelectElement>('[data-transfer-node]')
+    expect([...node.options].map(option => option.textContent)).toEqual(['None', 'Old server · whm.old.example.test'])
+    expect(q<HTMLButtonElement>('[data-transfer-create]').disabled).toBe(true)
+    node.value = 'node_' + 'a'.repeat(16); node.dispatchEvent(new Event('change'))
+    expect(q<HTMLButtonElement>('[data-transfer-create]').disabled).toBe(false)
+    q<HTMLButtonElement>('[data-transfer-create]').click(); await tick()
+    expect(send.mock.calls.find(call => call[0] === 'POST')?.[2]).toEqual({ node: 'node_' + 'a'.repeat(16), live: true })
+  })
+  it('keeps the linked server choice closed where a live transfer cannot run', async () => {
+    boot(model(session(), false)); await tick(); await tick()
+    expect(q<HTMLSelectElement>('[data-transfer-node]').disabled).toBe(true)
+  })
+  it('lists what was cut over and reverts it with the loss choice', async () => {
+    const live = { cutoverAt: '2026-11-07T10:00:00.000Z', zones: 1, revertedAt: null }
+    const send = model(liveSession({ alice: { live } })); boot(send); await tick(); await tick()
+    expect(q<HTMLSelectElement>('[data-transfer-revert-account]').value).toBe('alice')
+    q<HTMLInputElement>('[data-transfer-accept-loss]').checked = true
+    q<HTMLButtonElement>('[data-transfer-revert]').click(); await tick()
+    expect(send.mock.calls.find(call => call[0] === 'PATCH')?.[2]).toMatchObject({ action: 'revert', account: 'alice', acceptLoss: true })
+  })
+  it('offers nothing to revert once it was reverted', async () => {
+    boot(model(liveSession({ alice: { live: { cutoverAt: '2026-11-07T10:00:00.000Z', zones: 1, revertedAt: '2026-11-07T11:00:00.000Z' } } }))); await tick(); await tick()
+    expect(q<HTMLSelectElement>('[data-transfer-revert-account]').options).toHaveLength(0)
+    expect(q<HTMLButtonElement>('[data-transfer-revert]').disabled).toBe(true)
+  })
+})
+
 describe('whole-server migration page', () => {
   const model = () => {
     let items: unknown[] = [credential(2)]

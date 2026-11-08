@@ -145,7 +145,7 @@ const context = (overrides: Partial<ServerHealthRouteContext> = {}) => {
 
 describe('bandwidth health check', () => {
   const row = (username: string, totalBytes: number | null, limitBytes: number | null) => ({ username, domain: username + '.test', status: 'active' as const, month: { web: null, mail: null, ftp: null },
-    totalBytes, limitBytes, usedPercent: totalBytes !== null && limitBytes ? Math.round(totalBytes / limitBytes * 1000) / 10 : null, limitState: 'within' as const, enforced: username === 'over', limited: username === 'over' })
+    totalBytes, limitBytes, usedPercent: totalBytes !== null && limitBytes ? Math.round(totalBytes / limitBytes * 1000) / 10 : null, limitState: 'within' as const, enforced: username === 'over', limited: username === 'over', customLimit: false, reliefThrough: null })
   const report = (accounts: ReturnType<typeof row>[], state: BandwidthReport['state'] = 'partial'): BandwidthReport => ({ state, month: '2026-10', since: at, updatedAt: at,
     sources: { web: { state: 'read', since: at }, mail: { state: 'unavailable', since: null }, ftp: { state: 'unavailable', since: null } }, pendingBytes: 0, unavailableSites: 0, skippedLines: 0, accounts })
   it('grades accounts against their plan limit with alert-readable evidence and never grades unlimited plans', async () => {

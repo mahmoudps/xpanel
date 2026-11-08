@@ -552,7 +552,7 @@ describe('host job lifecycle callbacks', () => {
 })
 
 describe('host job log', () => {
-  it('caps the log at 4 MiB with a truncation marker and pages it by byte offset', async () => {
+  it('caps the log at 4 MiB with a truncation marker and pages it by byte offset', { tags: ['slow'] }, async () => {
     const big = 'x'.repeat(3 * 1024 * 1024)
     const { runner, logDir } = await setup(async () => ok(big))
     const { job } = await runner.submit(plan(), 'root')

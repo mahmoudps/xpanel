@@ -115,6 +115,13 @@ describe('panel language catalogs', () => {
     expect((await h.read()).locales[1]!.overrideState).toBe('none')
     expect(h.helpers.emitAudit).not.toHaveBeenCalled()
   })
+  it('refuses deleting the default language, with or without an upload', async () => {
+    const h = harness()
+    await expect(h.send('DELETE', '/api/server/panel/languages/en/catalog', { expectedRevision: (await h.read()).revision })).rejects.toMatchObject({ code: 'CONFLICT', detail: { reason: 'protected_locale' } })
+    await h.upload(GOOD)
+    await h.send('PUT', '/api/server/panel/languages', { offered: ['en', 'ar'], defaultLocale: 'ar', expectedRevision: (await h.read()).revision })
+    await expect(h.send('DELETE', '/api/server/panel/languages/ar/catalog', { expectedRevision: (await h.read()).revision })).rejects.toMatchObject({ code: 'CONFLICT' })
+  })
   it('removes an upload bound to the observed revision', async () => {
     const h = harness()
     await h.upload(GOOD)
@@ -135,5 +142,46 @@ describe('panel language catalogs', () => {
     expect(await installSavedLanguages(root)).toMatchObject({ applied: [], rejected: ['ar'] })
     expect((await h.read()).locales[1]!.runtime).toBe('rejected')
     expect(translator('ar')('(sent to {address})', { address: 'x' })).not.toContain('delivered')
+  })
+})
+
+describe('Copy a Locale', () => {
+  const copy = async (h: ReturnType<typeof harness>, tag: string, source = 'ar') => (await h.send('POST', '/api/server/panel/languages/copies', { source, tag, expectedRevision: (await h.read()).revision }))!.json() as Promise<PanelLanguagesView>
+  it('keeps every string of the source, as an inactive copy until the next start', async () => {
+    const h = harness(), view = await copy(h, 'ar-EG')
+    expect(view.copies).toEqual([expect.objectContaining({ tag: 'ar-EG', source: 'ar', active: false })])
+    expect(view.copies[0]!.messages).toBeGreaterThanOrEqual(view.locales.find(row => row.tag === 'ar')!.messages)
+    expect(h.helpers.emitAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'panel.languages.copied', target: 'locale:ar-EG' }))
+  })
+  it('gives a copy of the source language a translation for every string', async () => {
+    const view = await copy(harness(), 'fr', 'en')
+    expect(view.copies[0]!.messages).toBeGreaterThan(100)
+  })
+  it('refuses an existing code, a bad code and an unknown source', async () => {
+    const h = harness()
+    await copy(h, 'fr')
+    await expect(copy(h, 'fr')).rejects.toMatchObject({ code: 'CONFLICT', detail: { reason: 'locale_exists' } })
+    await expect(copy(h, 'ar')).rejects.toMatchObject({ code: 'CONFLICT', detail: { reason: 'locale_exists' } })
+    await expect(copy(h, 'Not A Tag')).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(copy(h, 'de', 'xx')).rejects.toMatchObject({ code: 'VALIDATION' })
+  })
+  it('joins the registry at panel start and deletes cleanly', async () => {
+    const h = harness()
+    await copy(h, 'ar-EG')
+    expect(await installSavedLanguages(root)).toMatchObject({ rejected: [] })
+    const started = await h.read()
+    expect(started.copies[0]!.active).toBe(true)
+    expect(started.locales.map(row => row.tag as string)).toContain('ar-EG')
+    expect(translator('ar-EG' as 'ar')('Domains')).toBe(translator('ar')('Domains'))
+    const gone = await (await h.send('DELETE', '/api/server/panel/languages/copies/ar-EG', { expectedRevision: started.revision }))!.json() as PanelLanguagesView
+    expect(gone.copies).toEqual([])
+  })
+  it('never deletes the default language', async () => {
+    const h = harness()
+    await copy(h, 'fr')
+    await installSavedLanguages(root)
+    const view = await h.read()
+    const saved = await (await h.send('PUT', '/api/server/panel/languages', { offered: ['en', 'fr'], defaultLocale: 'fr', expectedRevision: view.revision }))!.json() as PanelLanguagesView
+    await expect(h.send('DELETE', '/api/server/panel/languages/copies/fr', { expectedRevision: saved.revision })).rejects.toMatchObject({ code: 'CONFLICT', detail: { reason: 'protected_locale' } })
   })
 })

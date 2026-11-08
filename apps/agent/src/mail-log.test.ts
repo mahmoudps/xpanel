@@ -277,3 +277,22 @@ describe('sealed mailbox caller authority', () => {
     await expect(assertMailLogMailboxCaller(port, who as AgentCallerIdentity, target as string)).rejects.toMatchObject({ code: 'FORBIDDEN' })
   })
 })
+
+describe('scanner verdicts', () => {
+  const record = (identifier: string, exe: string, message: string) => JSON.stringify({ MESSAGE: message, SYSLOG_IDENTIFIER: identifier, _EXE: exe, __REALTIME_TIMESTAMP: String(Date.parse('2026-10-27T10:00:00Z') * 1000) })
+  const message = (id: string, queue: string) => [record('postfix/cleanup', '/usr/lib/postfix/sbin/cleanup', `${queue}: message-id=${id}`)]
+  it('joins an rspamd score by queue id and a spamd score by message id', async () => {
+    const queue = 'ABCDEF12345'
+    const rspamd = await observe([...message('<a@x>', queue), record('rspamd', '/usr/bin/rspamd', `rspamd_task_write_log: id: <a@x>, qid: <${queue}>, ip: 192.0.2.1, (default: F (no action): [1.20/15.00] [SYMBOL])`)])
+    expect(rspamd.messages[0]!.spamScore).toBe(1.2)
+    const spamd = await observe([...message('<b@x>', queue), record('spamd', '/usr/bin/perl', 'spamd: result: . 3 - BAYES_50 scantime=0.1,size=10,mid=<b@x>,autolearn=no')])
+    expect(spamd.messages[0]!.spamScore).toBe(3)
+  })
+  it('ignores a verdict line from another program', async () => {
+    const lines = [...message('<c@x>', 'ABCDEF12346'), record('rspamd', '/usr/bin/logger', 'qid: <ABCDEF12346>, x: [9.00/15.00]')]
+    const view = await observe(lines)
+    expect(view.messages[0]!.spamScore).toBeNull()
+    expect(view.counts.untrusted).toBe(1)
+  })
+})
+

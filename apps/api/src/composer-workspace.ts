@@ -24,7 +24,7 @@ async function handleComposerJobs(request: Request, url: URL, method: string, he
   const text = await request.text()
   let body: unknown
   try { body = text.length <= 2048 ? JSON.parse(text) : null } catch { body = null }
-  const fields = apply ? 'action,domainId,expectedRevision,reviewFingerprint' : 'action,domainId'
+  const fields = apply ? 'action,domainId,expectedRevision,mirror,phpVersion,reviewFingerprint' : 'action,domainId,mirror,phpVersion'
   if (!object(body) || Object.keys(body).sort().join() !== fields || !['install', 'update'].includes(String(body.action)) || typeof body.domainId !== 'string' || !UUID.test(body.domainId)
     || apply && (typeof body.expectedRevision !== 'string' || !HASH.test(body.expectedRevision) || typeof body.reviewFingerprint !== 'string' || !HASH.test(body.reviewFingerprint))) return fail('VALIDATION', 'choose install or update and a saved site with the exact current review; paths, URLs, environments and extra fields are refused', { stateChanged: false })
   const fresh = async (mutation: boolean): Promise<AuthenticatedCaller> => {

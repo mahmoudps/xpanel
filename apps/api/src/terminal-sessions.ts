@@ -12,7 +12,8 @@ export const TERMINAL_OPEN_DEADLINE_MS = 10_000
 /** Output waits while the browser socket holds more than this. */
 export const TERMINAL_MAX_SOCKET_BUFFER_BYTES = 512 * 1024
 
-export type TerminalKind = 'root' | 'account'
+export type TerminalKind = 'root' | 'account' | 'container'
+export interface TerminalContainer { id: string; shell: 'sh' | 'bash'; asRoot: boolean }
 export interface TerminalGrant {
   kind: TerminalKind
   principalId: string
@@ -23,6 +24,8 @@ export interface TerminalGrant {
   origin: string
   accountId: string | null
   accountUsername: string | null
+  /** The container of a `container` grant; the agent re-reads it in the account's own store. */
+  container?: TerminalContainer
 }
 export interface TerminalPresenter { principalId: string; panelSessionId: string; origin: string | null }
 

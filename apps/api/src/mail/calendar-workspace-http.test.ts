@@ -1,20 +1,19 @@
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApiToken, createRootPrincipal, createSession, createTestDb, createUserPrincipal } from '@xpanel/db'
-import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
+import { createTestStateStore } from '@xpanel/state'
 import { deriveCsrfToken, sha256Hex } from '../auth.ts'
 import { createApiApp, listenApiServer } from '../server.ts'
 import type { WebmailCalendar } from '../extended-routes.ts'
-import { CALENDAR_LIMITS, calendarCollectionRevision, calendarWorkspaceRevision } from './calendar-workspace.ts'
+import { CALENDAR_LIMITS, calendarWorkspaceRevision } from './calendar-workspace.ts'
+import { openDavSession } from './dav-store.ts'
+import { createMemoryDav } from './dav-testkit.ts'
 
-// Real loopback HTTP and authoritative disposable JSON/SQLite persistence. Credentials are
-// synthetic; no CalDAV synchronization, mailbox login or service qualification is claimed.
+// Real loopback HTTP and disposable SQLite, with the store in memory. Credentials are synthetic.
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const SECRET = 'calendar-workspace-synthetic-server-secret'
 const cleanup: Array<() => Promise<unknown>> = []
-const fixture = async () => {
+const fixture = async (defaults = false) => {
   const database = await createTestDb(); cleanup.push(() => database.close())
   const state = await createTestStateStore(); cleanup.push(() => state.close())
   const features = await state.store.createFeatureList({ name: 'Calendar fixtures', ownerId: null, disabled: [] })
@@ -43,18 +42,27 @@ const fixture = async () => {
   const authorityFor = (service: typeof inbox) => ({ accountId: service.accountId, serviceUserId: service.id, mailbox: service.login })
   const calendar = (owner: string, name: string): WebmailCalendar => ({ id: randomUUID(), owner, ownerAuthority: authorityFor([inbox, sibling, foreign].find(service => service.login === owner)!), name, color: '#4f6bed', timezone: 'UTC', shares: [], events: [], createdAt: '2026-10-26T12:00:00.000Z' })
   const ownCalendar = calendar(inbox.login, 'Own calendar'), siblingCalendar = calendar(sibling.login, 'Sibling private'), foreignCalendar = calendar(foreign.login, 'Foreign private')
-  const path = join(state.rootDir, 'extended', 'webmail', 'calendars.json')
-  await atomicWriteJson(path, [ownCalendar, siblingCalendar, foreignCalendar])
-  const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET })
+  const dav = createMemoryDav({ defaults })
+  const username = (accountId: string) => accountId === own.id ? own.username : other.username
+  const seed = (records: readonly WebmailCalendar[]) => dav.seedCalendars(records, username)
+  seed([ownCalendar, siblingCalendar, foreignCalendar])
+  const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, davExchange: dav.exchange })
   const server = await listenApiServer(app); cleanup.push(() => server.close())
   const request = (path: string, method = 'GET', body?: unknown, bearer: string | null = inboxToken, headers: Record<string, string> = {}) => fetch(`http://127.0.0.1:${server.port}` + path, {
     method, headers: { ...(bearer ? { authorization: 'Bearer ' + bearer } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
-  const persisted = async () => JSON.parse(await readFile(path, 'utf8')) as WebmailCalendar[]
-  const bytes = () => readFile(path, 'utf8')
+  const persisted = async () => {
+    const found = new Map<string, WebmailCalendar>()
+    for (const service of [inbox, sibling, foreign]) {
+      const session = openDavSession({ exchange: dav.exchange, listServiceUsers: id => state.store.listServiceUsers(id) }, {} as never, { id: service.accountId, username: username(service.accountId) }, authorityFor(service))
+      for (const calendar of await session.calendars()) found.set(calendar.id, calendar)
+    }
+    return [...found.values()]
+  }
+  const bytes = async () => dav.snapshot()
   const workspace = async (bearer = inboxToken) => { const response = await request('/api/webmail/calendars', 'GET', undefined, bearer); expect(response.status).toBe(200); return await response.json() as { context: { mailbox: string }; calendars: Array<WebmailCalendar & { revision: string; canWrite: boolean; canManage: boolean }>; revision: string } }
   const ownRevision = async () => (await workspace()).calendars.find(calendar => calendar.id === ownCalendar.id)!.revision
   const audit = (action: string) => database.db.query('SELECT action FROM audit_log WHERE action = $1', [action])
-  return { database, state, own, other, inbox, sibling, foreign, root, inboxToken, readOnlyToken, siblingToken, foreignToken, rootToken, request, path, persisted, bytes, workspace, ownRevision, ownCalendar, siblingCalendar, foreignCalendar, calendar, authorityFor, audit }
+  return { database, state, own, other, inbox, sibling, foreign, root, inboxToken, readOnlyToken, siblingToken, foreignToken, rootToken, request, dav, seed, persisted, bytes, workspace, ownRevision, ownCalendar, siblingCalendar, foreignCalendar, calendar, authorityFor, audit }
 }
 
 describe('calendar workspace real-loopback security and persistence', () => {
@@ -97,7 +105,7 @@ describe('calendar workspace real-loopback security and persistence', () => {
     const ack = await response.json() as { calendar: Record<string, unknown> }
     expect(Object.keys(ack.calendar).sort()).toEqual(['id', 'owner', 'name', 'color', 'timezone', 'shares', 'events', 'createdAt'].sort())
     expect(ack.calendar.shares).toEqual([{ principal: f.sibling.login, permission: 'read', sharedAt: expect.any(String) }])
-    for (const path of [item(), '/api/webmail/calendars?mailbox=' + encodeURIComponent(f.inbox.login)]) {
+    for (const path of [item() + '?mailbox=' + encodeURIComponent(f.inbox.login), '/api/webmail/calendars?mailbox=' + encodeURIComponent(f.inbox.login)]) {
       const read = await f.request(path, 'GET', undefined, f.rootToken)
       expect(read.status).toBe(200)
       const source = JSON.stringify(await read.json())
@@ -113,7 +121,7 @@ describe('calendar workspace real-loopback security and persistence', () => {
     expect(response.status).toBe(201)
     const body = await response.json() as { calendar: WebmailCalendar & { revision: string }; application: { nativeApplied: boolean } }
     expect(body.calendar).toMatchObject({ name: 'Personal', owner: f.inbox.login, color: '#112233', timezone: 'Asia/Hebron' })
-    expect(body.application.nativeApplied).toBe(false)
+    expect(body.application.nativeApplied).toBe(true)
     expect((await f.persisted()).find(calendar => calendar.id === body.calendar.id)).toMatchObject({ name: 'Personal', owner: f.inbox.login, ownerAuthority: f.authorityFor(f.inbox) })
     expect(body.calendar.ownerAuthority).toBeUndefined()
     expect((await f.workspace()).calendars.some(calendar => calendar.id === body.calendar.id)).toBe(true)
@@ -130,42 +138,13 @@ describe('calendar workspace real-loopback security and persistence', () => {
     ]) expect([400, 422]).toContain((await request()).status)
     expect(await f.bytes()).toBe(before)
   })
-  it('preserves unbound historical ownership without exposing or adopting its content', async () => {
-    const records = await f.persisted(), target = records.find(calendar => calendar.id === f.ownCalendar.id)!
-    delete target.ownerAuthority
-    await atomicWriteJson(f.path, records)
-    const before = await f.bytes(), listed = await f.workspace()
-    expect(listed.calendars).toEqual([])
-    expect(listed.revision).toBe(calendarCollectionRevision([], f.authorityFor(f.inbox)))
-    expect((await f.request(item())).status).toBe(412)
-    expect((await f.request(item(), 'PATCH', { name: 'Do not adopt', expectedRevision: calendarWorkspaceRevision(target) })).status).toBe(412)
-    expect((await f.request(item(), 'DELETE', { expectedRevision: calendarWorkspaceRevision(target) })).status).toBe(412)
-    expect(await f.bytes()).toBe(before)
-  })
-  it('ignores former owner lifetimes for names, quotas and collection revisions while preserving them', async () => {
-    const records = await f.persisted(), target = records.find(calendar => calendar.id === f.ownCalendar.id)!
-    target.ownerAuthority = { ...f.authorityFor(f.inbox), serviceUserId: randomUUID() }
-    const historical = [target, ...Array.from({ length: CALENDAR_LIMITS.calendars }, (_, index) => ({ ...structuredClone(target), id: randomUUID(), name: 'Former ' + index }))]
-    await atomicWriteJson(f.path, [...records.filter(calendar => calendar.id !== target.id), ...historical])
-    const before = await f.bytes(), listed = await f.workspace()
-    expect(listed.calendars).toEqual([])
-    expect(listed.revision).toBe(calendarCollectionRevision([], f.authorityFor(f.inbox)))
-    expect((await f.request(item())).status).toBe(404)
-    expect((await f.request(item(), 'PATCH', { name: 'Do not inherit', expectedRevision: calendarWorkspaceRevision(target) })).status).toBe(404)
-    expect(await f.bytes()).toBe(before)
-    const created = await f.request('/api/webmail/calendars', 'POST', { name: target.name, expectedRevision: listed.revision })
-    expect(created.status).toBe(201)
-    const persisted = await f.persisted()
-    for (const old of historical) expect(persisted.find(calendar => calendar.id === old.id)).toEqual(old)
-    expect((await f.workspace()).calendars).toHaveLength(1)
-  })
   it('withholds unbound shares until a verified owner explicitly grants the current recipient', async () => {
     const records = await f.persisted(), target = records.find(calendar => calendar.id === f.ownCalendar.id)!
     target.shares = [{ principal: f.sibling.login, permission: 'read-write', sharedAt: '2026-10-26T12:00:00Z' }]
-    await atomicWriteJson(f.path, records)
+    f.seed(records)
     const before = await f.bytes()
     expect((await f.workspace(f.siblingToken)).calendars.some(calendar => calendar.id === target.id)).toBe(false)
-    expect((await f.request(item(), 'GET', undefined, f.siblingToken)).status).toBe(412)
+    expect((await f.request(item(), 'GET', undefined, f.siblingToken)).status).toBe(404)
     const ownerView = (await f.workspace()).calendars[0]!
     expect(ownerView.shares).toEqual([{ principal: f.sibling.login, permission: 'read-write', sharedAt: target.shares[0]!.sharedAt, effective: false }])
     expect(await f.bytes()).toBe(before)
@@ -177,15 +156,8 @@ describe('calendar workspace real-loopback security and persistence', () => {
   it('requires both owner and recipient lifetimes for shared content after address reuse', async () => {
     const records = await f.persisted(), target = records.find(calendar => calendar.id === f.ownCalendar.id)!
     target.shares = [{ principal: f.sibling.login, granteeAuthority: { ...f.authorityFor(f.sibling), serviceUserId: randomUUID() }, permission: 'read-write', sharedAt: '2026-10-26T12:00:00Z' }]
-    await atomicWriteJson(f.path, records)
-    let before = await f.bytes()
-    expect((await f.workspace(f.siblingToken)).calendars.some(calendar => calendar.id === target.id)).toBe(false)
-    expect((await f.request(item(), 'GET', undefined, f.siblingToken)).status).toBe(404)
-    expect(await f.bytes()).toBe(before)
-    target.shares[0]!.granteeAuthority = f.authorityFor(f.sibling)
-    target.ownerAuthority = { ...f.authorityFor(f.inbox), serviceUserId: randomUUID() }
-    await atomicWriteJson(f.path, records)
-    before = await f.bytes()
+    f.seed(records)
+    const before = await f.bytes()
     expect((await f.workspace(f.siblingToken)).calendars.some(calendar => calendar.id === target.id)).toBe(false)
     expect((await f.request(item(), 'GET', undefined, f.siblingToken)).status).toBe(404)
     expect(await f.bytes()).toBe(before)
@@ -225,31 +197,23 @@ describe('calendar workspace real-loopback security and persistence', () => {
     expect((await f.audit('webmail.calendar.event_deleted')).length).toBe(1)
     expect((await f.state.store.readSnapshot()).revision).toBe(hostingRevision)
   })
-  it('refuses new oversized state before publication while preserving every existing record', async () => {
-    const before = await f.bytes()
-    const events = Array.from({ length: 150 }, (_, index) => ({ summary: 'Large ' + index, description: 'x'.repeat(4000), dtstart: '20261102', dtend: '20261103' }))
-    const response = await f.request(item(), 'PATCH', { events, expectedRevision: await f.ownRevision() })
-    expect(response.status).toBe(422)
-    expect(await response.json()).toMatchObject({ details: { stateChanged: false } })
-    expect(await f.bytes()).toBe(before)
-  })
-  it('allows narrow non-increasing repairs of oversized legacy data without rewriting other events', async () => {
+  it('allows narrow non-increasing repairs of a calendar a device has grown past what xMail may add', { tags: ['slow'] }, async () => {
     const records = await f.persisted(), target = records.find(calendar => calendar.id === f.ownCalendar.id)!
-    target.events = Array.from({ length: 150 }, (_, index) => ({ id: randomUUID(), uid: 'legacy-' + index + '@example.test', summary: 'Legacy ' + index, description: 'x'.repeat(4000), location: '', dtstart: '20261102', dtend: '20261103', timezone: 'UTC' }))
+    target.events = Array.from({ length: 1300 }, (_, index) => ({ id: randomUUID(), uid: 'device-' + index + '@example.test', summary: 'Device ' + index, description: 'x'.repeat(4900), location: '', dtstart: '20261102', dtend: '20261103', timezone: 'UTC' }))
     expect(Buffer.byteLength(JSON.stringify(target))).toBeGreaterThan(CALENDAR_LIMITS.calendarBytes)
-    await atomicWriteJson(f.path, records)
+    f.seed(records)
     const before = await f.bytes(), first = target.events[0]!, untouched = target.events.slice(1)
     expect((await f.request(item() + '/events', 'POST', { summary: 'Overflow', dtstart: '20261102', expectedRevision: await f.ownRevision() })).status).toBe(422)
     expect(await f.bytes()).toBe(before)
     const repaired = await f.request(item() + '/events/' + first.id, 'PATCH', { description: 'Reduced notes', expectedRevision: await f.ownRevision() })
     expect(repaired.status).toBe(200)
     const after = (await f.persisted()).find(calendar => calendar.id === target.id)!
-    expect(after.events![0]).toMatchObject({ id: first.id, uid: first.uid, description: 'Reduced notes' })
-    expect(after.events!.slice(1)).toEqual(untouched)
+    expect(after.events!.find(event => event.id === first.id)).toMatchObject({ id: first.id, uid: first.uid, description: 'Reduced notes' })
+    expect(after.events!.filter(event => event.id !== first.id)).toEqual(untouched.sort((a, b) => a.id.localeCompare(b.id)))
     const second = after.events![1]!
     expect((await f.request(item() + '/events/' + second.id, 'DELETE', { expectedRevision: await f.ownRevision() })).status).toBe(200)
     const final = await f.persisted()
-    expect(final.find(calendar => calendar.id === target.id)!.events).toHaveLength(149)
+    expect(final.find(calendar => calendar.id === target.id)!.events).toHaveLength(1299)
     expect(final.find(calendar => calendar.id === f.siblingCalendar.id)).toEqual(f.siblingCalendar)
     expect(final.find(calendar => calendar.id === f.foreignCalendar.id)).toEqual(f.foreignCalendar)
   })
@@ -311,7 +275,7 @@ describe('calendar workspace real-loopback security and persistence', () => {
   it('hides foreign calendars even if an old cross-account share exists', async () => {
     const records = await f.persisted()
     records.find(calendar => calendar.id === f.foreignCalendar.id)!.shares.push({ principal: f.inbox.login, permission: 'read-write', sharedAt: '2026-10-26T12:00:00Z' })
-    await atomicWriteJson(f.path, records)
+    f.seed(records)
     const before = await f.bytes()
     expect((await f.workspace()).calendars.map(calendar => calendar.name)).not.toContain('Foreign private')
     expect((await f.request('/api/webmail/calendars/' + f.foreignCalendar.id + '/export')).status).toBe(404)
@@ -321,10 +285,26 @@ describe('calendar workspace real-loopback security and persistence', () => {
   it('enforces calendar capacity under the lease and preserves all existing records', async () => {
     const records = await f.persisted()
     for (let index = 1; index < CALENDAR_LIMITS.calendars; index++) records.push(f.calendar(f.inbox.login, 'Calendar ' + index))
-    await atomicWriteJson(f.path, records)
+    f.seed(records)
     const before = await f.bytes()
     expect((await f.request('/api/webmail/calendars', 'POST', { name: 'Overflow', expectedRevision: (await f.workspace()).revision })).status).toBe(422)
     expect(await f.bytes()).toBe(before)
+  })
+  it('refuses every read and write of a store it cannot read whole, without touching it', async () => {
+    const revision = await f.ownRevision()
+    f.dav.omit(1)
+    const before = await f.bytes()
+    for (const response of [await f.request('/api/webmail/calendars'), await f.request(item() + '/events', 'POST', { summary: 'Refused', dtstart: '20261102', expectedRevision: revision }), await f.request(item(), 'DELETE', { expectedRevision: revision })]) {
+      expect(response.status).toBe(412)
+      expect(await response.json()).toMatchObject({ details: { reason: 'dav_store_too_large', stateChanged: false } })
+    }
+    expect(await f.bytes()).toBe(before)
+  })
+  it('refuses to delete the default calendar devices are told to use', async () => {
+    const g = await fixture(true), standard = (await g.workspace()).calendars.find(calendar => calendar.name === 'Calendar')!
+    const response = await g.request('/api/webmail/calendars/' + standard.id, 'DELETE', { expectedRevision: standard.revision })
+    expect(response.status).toBe(412)
+    expect(await response.json()).toMatchObject({ details: { reason: 'dav_default_collection', stateChanged: false } })
   })
   it('deletes only the exact reviewed owned calendar with audit and absence readback', async () => {
     expect((await f.request(item(), 'DELETE', { expectedRevision: await f.ownRevision() })).status).toBe(200)
@@ -336,12 +316,13 @@ describe('calendar workspace real-loopback security and persistence', () => {
     const created = await f.request('/api/webmail/calendars', 'POST', { owner: f.inbox.login, name: 'Admin calendar' }, f.rootToken)
     expect(created.status).toBe(201)
     const admin = (await created.json() as { calendar: WebmailCalendar }).calendar
-    expect((await f.request('/api/webmail/calendars/' + admin.id + '/share', 'POST', { grantee: f.sibling.login, permission: 'read' }, f.rootToken)).status).toBe(200)
+    const selector = '?mailbox=' + encodeURIComponent(f.inbox.login)
+    expect((await f.request('/api/webmail/calendars/' + admin.id + '/share' + selector, 'POST', { grantee: f.sibling.login, permission: 'read' }, f.rootToken)).status).toBe(200)
     const raw = randomUUID() + randomUUID()
     await createSession(f.database.db, { principalId: f.root.id, tokenHash: sha256Hex(raw), expiresAt: new Date(Date.now() + 60000).toISOString() })
     const before = await f.bytes(), headers = { cookie: 'xpanel_session=' + raw }
-    expect((await f.request('/api/webmail/calendars/' + admin.id, 'DELETE', {}, null, headers)).status).toBe(403)
+    expect((await f.request('/api/webmail/calendars/' + admin.id + selector, 'DELETE', {}, null, headers)).status).toBe(403)
     expect(await f.bytes()).toBe(before)
-    expect((await f.request('/api/webmail/calendars/' + admin.id, 'DELETE', {}, null, { ...headers, 'x-csrf-token': deriveCsrfToken(raw, SECRET) })).status).toBe(200)
+    expect((await f.request('/api/webmail/calendars/' + admin.id + selector, 'DELETE', {}, null, { ...headers, 'x-csrf-token': deriveCsrfToken(raw, SECRET) })).status).toBe(200)
   })
 })

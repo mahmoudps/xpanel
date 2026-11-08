@@ -2,9 +2,11 @@ import { existsSync } from 'node:fs'
 import { acmeTraverseProbeArgv } from '@xpanel/os'
 import { parseLoadavg, parseMeminfo } from './host-info.ts'
 import { parseTrafficCounters } from './traffic-monitor.ts'
+import { AWSTATS_BINARIES, WEBALIZER_BINARY, WEBALIZER_CHECK_ARGV, awstatsCheckArgv } from './web-stats-format.ts'
 
 export type AgentHostProbe = 'linux-account' | 'apache' | 'mariadb' | 'mail' | 'files' | 'acme' | 'pdns' | 'backups' | 'systemd' | 'host-info' | 'audit_log'
-  | 'host-jobs' | 'packages' | 'mail-queue' | 'journal' | 'procps' | 'mail-config' | 'iproute' | 'mariadb-admin' | 'fail2ban' | 'clamav' | 'getent' | 'iputils' | 'benchmark' | 'network-counters'
+  | 'host-jobs' | 'packages' | 'mail-queue' | 'journal' | 'procps' | 'mail-config' | 'iproute' | 'mariadb-admin' | 'fail2ban' | 'clamav' | 'getent' | 'iputils' | 'benchmark' | 'network-counters' | 'openssl'
+  | 'awstats' | 'webalizer' | 'web-stats' | 'dav'
 export type AgentHostProbeResult = 'passed' | 'failed'
 
 export interface HostMeasurementEvidence {
@@ -23,11 +25,13 @@ export interface HostMeasurementEvidence {
   hostJobs?: boolean
   /** Trusted startup OS profile family; the package probe checks only that family's tools. */
   packageFamily?: string
+  /** False for an installed engine that no longer runs. Omitted leaves the path checks alone. */
+  statsEngines?: { awstats: boolean; webalizer: boolean }
 }
 
 export interface HostMeasurementReader {
   readFile(path: string): Promise<string | null>
-  runCommand(argv: string[]): Promise<{ ok: boolean }>
+  runCommand(argv: string[]): Promise<{ ok: boolean; stdout?: string }>
 }
 
 const ANY = (present: (path: string) => boolean, paths: readonly string[]): boolean => paths.some(present)
@@ -37,6 +41,11 @@ const PACKAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   debian: ['/usr/bin/apt-get', '/usr/bin/apt-mark', '/usr/bin/apt-cache', '/usr/bin/dpkg', '/usr/bin/dpkg-query'],
   rhel: ['/usr/bin/dnf', '/usr/bin/rpm'],
 }
+
+const STATS_RUNNER = ['/usr/bin/nice', '/usr/bin/ionice', '/usr/sbin/runuser', '/usr/bin/mkdir', '/usr/bin/touch', '/usr/bin/cat']
+const DAV_MODULES = ['/usr/lib/lighttpd/mod_webdav.so', '/usr/lib64/lighttpd/mod_webdav.so']
+// Debian's python3-radicale and EPEL's python3-radicale3 for the EL 9 (3.9) and EL 10 (3.12) system Python
+const RADICALE_PACKAGES = ['/usr/lib/python3/dist-packages/radicale/__init__.py', '/usr/lib/python3.9/site-packages/radicale/__init__.py', '/usr/lib/python3.12/site-packages/radicale/__init__.py']
 
 /** Pure classification so tests can prove a missing binary does not pass. */
 export const classifyHostBinaries = (
@@ -71,6 +80,13 @@ export const classifyHostBinaries = (
   iputils: present('/usr/bin/ping') ? 'passed' : 'failed',
   benchmark: ALL(present, ['/usr/bin/nice', '/usr/bin/ionice', '/usr/bin/openssl', '/usr/bin/dd', '/usr/bin/rm']) ? 'passed' : 'failed',
   'network-counters': measurements.networkCounters === true ? 'passed' : 'failed',
+  openssl: present('/usr/bin/openssl') ? 'passed' : 'failed',
+  // The statistics run drops to the account at low priority (backup-low-priority.ts) before it starts the engine.
+  awstats: ANY(present, AWSTATS_BINARIES) && present('/usr/bin/perl') && measurements.statsEngines?.awstats !== false && ALL(present, STATS_RUNNER) ? 'passed' : 'failed',
+  webalizer: present(WEBALIZER_BINARY) && measurements.statsEngines?.webalizer !== false && ALL(present, STATS_RUNNER) ? 'passed' : 'failed',
+  'web-stats': (ANY(present, AWSTATS_BINARIES) && present('/usr/bin/perl') && measurements.statsEngines?.awstats !== false || present(WEBALIZER_BINARY) && measurements.statsEngines?.webalizer !== false) && ALL(present, STATS_RUNNER) ? 'passed' : 'failed',
+  // Web Disk and calendars (packages/render/src/system/dav.ts): lighttpd with its WebDAV module, the Radicale library and the socket proxy
+  dav: ALL(present, ['/usr/sbin/lighttpd', '/usr/bin/python3', '/usr/lib/systemd/systemd-socket-proxyd']) && ANY(present, DAV_MODULES) && ANY(present, RADICALE_PACKAGES) ? 'passed' : 'failed',
 })
 
 /**
@@ -80,6 +96,7 @@ export const classifyHostBinaries = (
 export const readHostMeasurements = async (
   reader: HostMeasurementReader,
   nginxUser = 'nginx',
+  present: (path: string) => boolean = existsSync,
 ): Promise<HostMeasurementEvidence> => {
   let hostInfo = false
   try {
@@ -107,7 +124,13 @@ export const readHostMeasurements = async (
   }
   let networkCounters = false
   try { const raw = await reader.readFile('/proc/net/dev'); networkCounters = raw !== null && parseTrafficCounters(raw) !== null } catch { networkCounters = false }
-  return { hostInfo, acmeReachable, networkCounters }
+  const awstats = AWSTATS_BINARIES.find(present)
+  const statsEngines = {
+    awstats: awstats === undefined || await reader.runCommand(awstatsCheckArgv(awstats)).then(result => result.ok, () => false),
+    // -V exits 1 by design, so only its output proves the binary loads.
+    webalizer: !present(WEBALIZER_BINARY) || await reader.runCommand([...WEBALIZER_CHECK_ARGV]).then(result => result.stdout?.startsWith('Webalizer V') === true, () => false),
+  }
+  return { hostInfo, acmeReachable, networkCounters, statsEngines }
 }
 
 /** The audit log is readable when a query against it returns, including an empty log. */

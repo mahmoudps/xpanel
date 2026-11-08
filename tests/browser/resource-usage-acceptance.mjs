@@ -40,8 +40,8 @@ const html = (locale, theme, density, surface = '/') => {
     const common = { locale, theme, realtimeEnabled: false, visibility: { principal, disabledFeatures: new Set() }, catalog: syntheticCatalog }
     const markup = surface === '/resellers'
       ? renderWhmSurface({ ...common, principal, activeRoute: '/whm/resellers', hostname: 'fixture.example.test', resellers: [
-        { id: 'fixture-reseller-1', username: 'fixture-one', acl: [], maxAccounts: 5, totalDiskMb: 10240, totalBandwidthMb: 102400, oversell: false, nameservers: [], delegatedIps: [] },
-        { id: 'fixture-reseller-2', username: 'fixture-two', acl: [], maxAccounts: 'unlimited', totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] },
+        { id: 'fixture-reseller-1', username: 'fixture-one', acl: [], maxAccounts: 5, totalDiskMb: 10240, totalBandwidthMb: 102400, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] },
+        { id: 'fixture-reseller-2', username: 'fixture-two', acl: [], maxAccounts: 'unlimited', totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] },
       ] })
       : renderMailSurface({ ...common, mailbox: 'fixture-owner@example.test', quotaUsedMb: 7, activeRoute: '/mail/overview', messages: [] })
     return base.slice(0, base.indexOf('<body>')).replace('data-surface="login"', `data-surface="${surface === '/resellers' ? 'xwhm' : 'xmail'}"`) + `<body data-visual-fixture="synthetic"><div role="note" class="xp-help" style="padding:8px 16px;text-align:center" dir="ltr">Synthetic resource surface fixture</div>${markup}</body></html>`

@@ -43,7 +43,7 @@ describe('v2 mailbox organizer workspaces', () => {
     expect(find(html, '[data-contacts-import-text]')?.attrs.get('spellcheck')).toBe('false')
     expect(find(html, '[data-contacts-share-principal]')?.attrs.get('dir')).toBe('ltr')
     expect(html).toContain('Nothing is imported until you confirm.')
-    expect(html).toContain('CardDAV are not claimed.')
+    expect(html).toContain('the same ones your devices sync.')
   })
 
   it('requires independent read and manage decisions before mounting mutable mailbox families', () => {
@@ -66,7 +66,7 @@ describe('v2 mailbox organizer workspaces', () => {
     expect(find(html, '[data-calendar-exported]')?.attrs.has('readonly')).toBe(true)
     expect(find(html, '[data-calendar-status]')?.attrs.get('data-state')).toBe('unread')
     expect(html).toContain('importing the same UID updates that event without duplicating it')
-    expect(html).toContain('synchronization is unavailable here')
+    expect(find(html, '[data-dav-connection]')?.attrs.get('data-dav-mailbox')).toBe('owner@example.test')
   })
 
   it('retains accessible calendar modes, date fields and hidden event/agenda/editor states', () => {

@@ -9,7 +9,7 @@ import type { HostServiceStatus } from './host-services.ts'
 import type { AgentCallerIdentity } from './server.ts'
 
 /** The existing protected admin client (MariaDbServiceAdapter); its credential file never leaves the agent. */
-export interface MariadbAdminClient { query(statements: readonly string[]): Promise<string>; socketPath: string | null }
+export interface MariadbAdminClient { query(statements: readonly string[], opts?: { timeoutMs?: number }): Promise<string>; socketPath: string | null; isRemote?(): Promise<boolean> }
 export type MariadbAdminSql = (statement: string) => Promise<string>
 export type MariadbStatusName = typeof MARIADB_ADMIN_STATUS_NAMES[number]
 export interface MariadbSchemaObservation { name: string; sizeBytes: number; tables: number }

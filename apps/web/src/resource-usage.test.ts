@@ -122,7 +122,7 @@ describe('truthful resource usage rendering', () => {
   })
 
   it('uses real configured reseller caps without inventing usage from row order or incomplete account lists', () => {
-    const resellers = [1, 2].map(id => ({ id: `reseller-${id}`, username: `reseller${id}`, acl: [], maxAccounts: 5, totalDiskMb: 10240, totalBandwidthMb: 102400, oversell: false, nameservers: [], delegatedIps: [] }))
+    const resellers = [1, 2].map(id => ({ id: `reseller-${id}`, username: `reseller${id}`, acl: [], maxAccounts: 5, totalDiskMb: 10240, totalBandwidthMb: 102400, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }))
     const catalog = qualifiedControlPlaneFixture(['reseller-center', 'list-accounts'])
     const render = (rows: typeof resellers) => renderWhmSurface({ principal: { kind: 'root', id: 'root', username: 'root' }, activeRoute: '/whm/resellers', catalog, resellers: rows })
     const forward = render(resellers), reversed = render([...resellers].reverse())

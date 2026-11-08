@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { defaultPlan, type Account, type Domain, type WebsiteAnalyticsSnapshot, type WebsiteTrafficBucket } from '@xpanel/core'
 import { parseMarkup } from '../../../../markup.ts'
 import { v2Messages } from '../../../messages.ts'
+import { WEB_STATS_FIXTURE } from '../../../../../../../../tests/fixtures/web-stats-view.ts'
 import { renderV2PanelObservation, renderV2PanelSiteHealth, renderV2PanelServerInformation, renderV2PanelLogs, renderV2PanelTraffic, renderV2PanelWebStatistics, V2_PANEL_OBSERVATION_ROUTES } from './index.ts'
 
 const account: Account = {
@@ -174,7 +175,6 @@ describe('v2 account observations', () => {
     const enabled = renderV2PanelTraffic(base, { ...authority, domainSelectionAvailable: true })
     expect(enabled).toContain('<form method="get" action="/metrics/traffic"')
     expect(enabled).toContain('name="window" value="30d"')
-    expect(renderV2PanelWebStatistics(base, { ...authority, domainSelectionAvailable: true })).toContain('action="/metrics/web-stats"')
   })
 
   it('links raw logs only when that related route is admitted and never invents an archive download', () => {
@@ -183,7 +183,7 @@ describe('v2 account observations', () => {
     const html = renderV2PanelTraffic(props, { ...authority, relatedRoutes: new Set(['/metrics/logs']) })
     expect(html).toContain('href="/metrics/logs?')
     expect(html).toContain('Archived log downloads have not been qualified.')
-    expect(html).toContain('disabled>Download logs</button>')
+    expect(html).not.toContain('Download logs</button>')
   })
 
   it('keeps server information account-scoped, matching-plan bound and explicit about unknown observations', () => {
@@ -196,5 +196,40 @@ describe('v2 account observations', () => {
     expect(measured).toContain('>0 B</bdi>')
     expect(measured).toContain('>8.3</bdi>')
     expect(measured).toContain('does not establish the operating system')
+  })
+})
+
+describe('V2 web statistics', () => {
+  const { account: owner, view } = WEB_STATS_FIXTURE
+  const shown = (over: Record<string, unknown> = {}, rights: Record<string, unknown> = authority) => renderV2PanelWebStatistics({ account: owner, webStats: view, ...over }, rights as typeof authority)
+
+  it.each(['en', 'ar'] as const)('shows the AWStats month of the selection with every report section (%s)', locale => {
+    const html = shown({ locale })
+    expect(html).toContain('data-chart-state="loaded"')
+    for (const value of ['/shop/', 'firefox131', 'linuxubuntu', 'googlebot', 'https://search.example/', '2026-11-06', '81.9 KB', '2026-10']) expect(html, value).toContain(value)
+    expect(html).toContain('data-web-stats-metrics')
+    expect(html).toContain('data-web-stats-metrics-save')
+    expect(html).toContain(`data-web-stats-revision="${WEB_STATS_FIXTURE.view.choice.revision}"`)
+    expect(html).toContain('data-engine="webalizer" data-locked="false"')
+    expect(html).toContain('<form method="get" action="/metrics/web-stats"')
+    expect(html).toContain('name="scheme"')
+    expect(html).toContain('href="https://db-ip.com"')
+    expect(html).not.toMatch(/[٠-٩]/)
+  })
+
+  it('opens the Webalizer report only for an entry whose last Webalizer run updated it', () => {
+    expect(shown()).toContain('href="/api/account/web-stats/webalizer/http/alice.example/index.html" target="_blank" rel="noopener noreferrer"')
+    const https = shown({ webStats: { ...view, selection: { ...view.selection!, scheme: 'https' }, report: null, months: [] } })
+    expect(https).not.toContain('/api/account/web-stats/webalizer/')
+    expect(https).toContain('data-chart-state="empty"')
+    expect(https).toContain('Last run failed')
+  })
+
+  it('shows no totals for an unavailable, foreign or unauthorized read', () => {
+    expect(shown({ webStats: undefined, webStatsUnavailable: true })).toContain('data-chart-state="unavailable"')
+    expect(shown({ webStats: { ...view, context: { ...view.context, accountId: 'other' } } })).toContain('data-chart-state="unavailable"')
+    const unauthorized = shown({}, { canRead: true, canManage: false, presentation: 'read-only', authorizedTools: new Set() })
+    expect(unauthorized).toContain('data-chart-state="unread"')
+    expect(unauthorized).not.toContain('/shop/')
   })
 })

@@ -45,7 +45,7 @@ describe('short username agent dispatch retains target and privilege authority',
   beforeAll(async () => {
     db = await createTestDb(); state = await createTestStateStore(); executor = new FakeHostExecutor()
     rootId = (await createRootPrincipal(db.db, { username: 'root', passwordHash: hash, forcePasswordChange: false })).id
-    const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: hash, acl: ['list-accounts', 'edit-account', 'manage-ssl', 'transfer'], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] })
+    const reseller = await state.store.createReseller({ username: 'reseller7', passwordHash: hash, acl: ['list-accounts', 'edit-account', 'manage-ssl', 'transfer'], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
     resellerId = (await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash: hash })).id
     const feature = await state.store.createFeatureList({ name: 'Short agent tools', ownerId: null, disabled: [] })
     const { id: _id, ...seed } = defaultPlan({ name: 'Short agent plan', featureListId: feature.id })

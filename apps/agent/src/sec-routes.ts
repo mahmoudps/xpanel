@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { fail } from '@xpanel/core'
 import type { AgentExecutor } from './executor.ts'
 import { applySecDnsCluster, observeSecDnsCluster, secQuerySoa, verifySecDnsPeer } from './sec-dns-cluster.ts'
+import { readRemoteServiceIps } from './remote-service-ips.ts'
 import type { SecListDir, SecQuerySoa } from './sec-dns-cluster.ts'
 import { observeSecFlood } from './sec-flood.ts'
 import { observeCompilerAccess } from './compiler-access.ts'
@@ -92,7 +93,7 @@ export async function handleSecRoute(req: Request, url: URL, method: string, ctx
   const target = 'dns:cluster'
   await ctx.audit?.({ actor, action: 'dns.cluster.apply_requested', target, outcome: 'ok', detail: { peers: peers.length } })
   try {
-    const result = await applySecDnsCluster(peers, { family: ctx.os.family, powerdnsUnit: ctx.os.powerdnsUnit, readText, ...dir,
+    const result = await applySecDnsCluster(peers, { family: ctx.os.family, powerdnsUnit: ctx.os.powerdnsUnit, readText, ...dir, remoteNameservers: (await readRemoteServiceIps(ctx.rootDir))?.nameservers ?? [],
       writeFile: file => executor.writeFile(file), removePath: path => executor.removePath(path), runAction: action => executor.runAction(action),
       probe: async () => zones.length ? 'serial' in await soa('127.0.0.1', zones[0]!) : null, authorize: confirm })
     await ctx.audit?.({ actor, action: 'dns.cluster.applied', target, outcome: 'ok', detail: { outcome: result.outcome, peers: peers.length } }).catch(() => {})

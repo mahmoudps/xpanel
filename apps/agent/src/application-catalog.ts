@@ -11,7 +11,7 @@ export interface ApplicationCatalog { readonly schemaVersion: 1; readonly sequen
 export interface VerifiedApplicationCatalog extends ApplicationCatalog { readonly revision: string; readonly keyId: string }
 /** Bootstrap configuration only; request bodies and remote catalog fields cannot supply trust anchors. */
 export interface ApplicationCatalogKey { readonly keyId: string; readonly publicKeyPem: string }
-export interface ApplicationCatalogPolicy { readonly now: Date; readonly minimumSequence: number; readonly panelVersion: string }
+export interface ApplicationCatalogPolicy { readonly now: Date; readonly minimumSequence: number; readonly panelVersion: string; /** Removal only: it reads nothing from the catalog, so age must not strand an installed application. */ readonly allowExpired?: boolean }
 const verified = new WeakSet<object>()
 const invalid = (): never => fail('VALIDATION', 'the signed application catalog is malformed or not current', { stateChanged: false })
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -51,7 +51,7 @@ export function parseApplicationCatalog(value: unknown): ApplicationCatalog {
 const assertTime = (catalog: ApplicationCatalog, policy: ApplicationCatalogPolicy): void => {
   if (!(policy.now instanceof Date) || !Number.isFinite(policy.now.getTime()) || !Number.isSafeInteger(policy.minimumSequence) || policy.minimumSequence < 0 || !isApplicationVersion(policy.panelVersion)
     || catalog.sequence < policy.minimumSequence || Date.parse(catalog.issuedAt) > policy.now.getTime() + APPLICATION_CATALOG_LIMITS.futureSkewMs
-    || Date.parse(catalog.expiresAt) <= policy.now.getTime() || Date.parse(catalog.expiresAt) <= Date.parse(catalog.issuedAt)
+    || !policy.allowExpired && Date.parse(catalog.expiresAt) <= policy.now.getTime() || Date.parse(catalog.expiresAt) <= Date.parse(catalog.issuedAt)
     || Date.parse(catalog.expiresAt) - Date.parse(catalog.issuedAt) > APPLICATION_CATALOG_LIMITS.lifetimeMs) return invalid()
 }
 

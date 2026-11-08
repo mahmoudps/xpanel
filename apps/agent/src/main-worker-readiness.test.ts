@@ -29,8 +29,11 @@ const harness = vi.hoisted(() => ({
 // chmod joined the isolated boundary when the runtime directory became traverse-only 0711 (fa7748a).
 vi.mock('node:fs/promises', async (importOriginal) => ({ ...await importOriginal<typeof import('node:fs/promises')>(), mkdir: async () => undefined, chown: async () => undefined, chmod: async (path: string, mode: number) => { harness.chmods.push([path, mode]) } }))
 vi.mock('@xpanel/db', () => ({ createDb: () => ({ db: {}, runner: {}, close: harness.dbClose }), migrate: async () => undefined, initializeOperationalMetadata: async () => undefined, recordHostMetricsSample: harness.recordMetrics }))
-vi.mock('@xpanel/os', () => ({ XPANEL_FPM_SOCKET_DIR: '/run/xpanel-fpm', detectOs: async () => ({ id: 'ubuntu', versionId: '24.04', family: 'debian', paths: { nginxUser: 'nginx' } }) }))
-vi.mock('@xpanel/state', () => ({ StateStore: class {} }))
+vi.mock('@xpanel/os', async importOriginal => {
+  const actual = await importOriginal<typeof import('@xpanel/os')>(), { UBUNTU_2404 } = await import('../../../packages/os/src/fixtures.ts'), profile = actual.profileFor(UBUNTU_2404)
+  return { ...actual, detectOs: async () => ({ ...profile, paths: { ...profile.paths, nginxUser: 'nginx' } }) }
+})
+vi.mock('@xpanel/state', () => ({ StateStore: class { rootDir = '/var/lib/xpanel/state' } }))
 vi.mock('./production-file-runner.ts', () => ({
   DEFAULT_FILE_WORKER_INCIDENT_DIR: '/var/lib/xpanel-agent/file-worker-incidents',
   createProductionAccountFileRunner: async (_binaryPath: string, options: NonNullable<typeof harness.options>) => {
@@ -62,7 +65,8 @@ vi.mock('../../../scripts/lifecycle-admission.mjs', () => ({
   startLifecycleWriterParticipant: async (_role: string, options: { onFence: () => Promise<void> }) => { harness.onFence = options.onFence; return { close: harness.participantClose } },
   withLifecycleWriterAdmission: async <T>(callback: () => Promise<T>): Promise<T> => { harness.writerEntries++; return callback() },
 }))
-vi.mock('./agent-origin.ts', () => ({ syncRuntimePublicOrigin: async () => undefined, readManagementHosts: async () => [] }))
+vi.mock('./agent-origin.ts', () => ({ syncRuntimePublicOrigin: async () => undefined, readManagementHosts: async () => [], readPanelRedirects: async () => [] }))
+vi.mock('./account-dav.ts', async (importOriginal) => ({ ...await importOriginal<typeof import('./account-dav.ts')>(), readDavIngress: async () => null }))
 vi.mock('./host-access.ts', () => ({ ensureAcmeWebRoot: async () => undefined }))
 vi.mock('./services/local-mail.ts', () => ({ ensureInstalledMail: async () => undefined }))
 vi.mock('./services/mail-websocket.ts', () => ({ enableMailWebsocketProxy: async () => undefined }))
@@ -117,7 +121,7 @@ import { AGENT_SHUTDOWN_TIMEOUT_MS, attachAgentProcessLifecycle, shutdownFailure
 const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
 const originalGetuid = Object.getOwnPropertyDescriptor(process, 'getuid')
 const deferred = () => { let resolve!: () => void; let reject!: (error: unknown) => void; const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej }); return { promise, resolve, reject } }
-const flush = async () => { for (let index = 0; index < 8; index++) await Promise.resolve() }
+const flush = async () => { for (let index = 0; index < 32; index++) await Promise.resolve() }
 const start = (incidentDir?: string) => startAgentDaemon({ dbPath: ':memory:', stateDir: '/lab/shared/state', socketPath: '/lab/run/agent.sock', socketGid: 42000, ...(incidentDir ? { fileWorkerIncidentDir: incidentDir } : {}) })
 
 beforeEach(() => {

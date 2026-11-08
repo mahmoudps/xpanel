@@ -63,6 +63,8 @@ const WORKSPACE_CORE_TOOLS: Readonly<Record<string, string>> = {
   '/whm/panel/whmcs': 'whmcs-integration',
   // The owner proxy switch is a domain workspace write; the page's other aaPanel proxy tools stay unqualified.
   '/domains/reverse-proxy': 'domains',
+  // The owner edits one site's settings; the page's aaPanel tools are root-only catalog entries, so manage-domain opens it.
+  '/domains/site-settings': 'manage-domain',
   // Only the bounded Apache account file workflow; server/Nginx rewrite tooling stays unqualified.
   '/software/htaccess': 'domain-htaccess',
   '/email/calendars-contacts': 'calendars-contacts-management',
@@ -82,7 +84,7 @@ const WORKSPACE_CORE_TOOLS: Readonly<Record<string, string>> = {
   '/whm/accounts/announcements': 'panel-news',
   // Root-only facts and redacted bundle; tweak-support stays unqualified.
   '/whm/support': 'support-center',
-  // Root-only zone checks and bulk TTL; hostname A record and DNS cleanup stay unqualified.
+  // Root-only zone checks and bulk TTL, with the hostname A record and the DNS cleanup.
   '/whm/dns/more': 'zone-ttl-bulk',
   '/whm/monitoring/processes': 'process-manager',
   '/whm/monitoring/logs': 'aapanel-os-log-audit',
@@ -138,6 +140,8 @@ export const visibleNavigation = (
     }
     if (page.route === '/software/php') return allowed.has('domain-php-settings')
     if (page.route === '/domains/zone-editor') return allowed.has('dns-zone-records')
+    // Force HTTPS is one switch on this page; the API refuses it until that tool is qualified.
+    if (page.route === '/domains') return allowed.has('domains') && allowed.has('create-domain')
     const core = WORKSPACE_CORE_TOOLS[page.route]
     return core !== undefined && allowed.has(core)
   }

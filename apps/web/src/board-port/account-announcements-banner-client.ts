@@ -89,6 +89,14 @@ export function buildAccountAnnouncementNotice(root: HTMLElement, notice: Accoun
   return item
 }
 
+/** The Home unread marker counts server-rendered warnings plus unread announcements. */
+function syncNoticeCount(unread: number): void {
+  for (const marker of document.querySelectorAll<HTMLElement>('[data-account-notices-count]')) {
+    const total = Number(marker.dataset.accountNoticesBase ?? 0) + unread
+    marker.textContent = String(total); marker.hidden = total === 0
+  }
+}
+
 function bindAccountAnnouncements(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
   const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
@@ -140,6 +148,7 @@ function bindAccountAnnouncements(): void {
       if (!result || result.dismissed !== id) throw new Error('unverified')
       confirmed = true
       paint(readAccountAnnouncements({ announcements: result.announcements }))
+      syncNoticeCount((result.announcements as unknown[]).length)
       if (focused) root.querySelector<HTMLButtonElement>('[data-account-announcement-dismiss]')?.focus()
     } catch {
       for (const control of buttons()) control.disabled = confirmed || disabledBefore.get(control) === true || !control.isConnected || !!control.closest(denied)
@@ -150,7 +159,7 @@ function bindAccountAnnouncements(): void {
   })
   void (async () => {
     // A failed read preserves existing notice facts and shows a failure status; it is never a successful empty read.
-    try { paint(readAccountAnnouncements(await request('GET', '/api/account/announcements'))) }
+    try { const read = readAccountAnnouncements(await request('GET', '/api/account/announcements')); paint(read); syncNoticeCount(read.length) }
     catch {
       for (const root of live) {
         if (!root.isConnected || root.closest(denied)) continue
@@ -169,4 +178,4 @@ function bindAccountAnnouncements(): void {
 }
 
 export const ACCOUNT_ANNOUNCEMENT_NOTICE_HELPERS_BINDING = `const accountAnnouncementNoticeTemplate=${accountAnnouncementNoticeTemplate.toString()};const requireAccountAnnouncementTemplates=${requireAccountAnnouncementTemplates.toString()};const readAccountAnnouncementLabels=${readAccountAnnouncementLabels.toString()};`
-export const ACCOUNT_ANNOUNCEMENTS_CLIENT_BINDING = `(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${ACCOUNT_ANNOUNCEMENT_NOTICE_HELPERS_BINDING}const readAccountAnnouncements=${readAccountAnnouncements.toString()};const buildAccountAnnouncementNotice=${buildAccountAnnouncementNotice.toString()};return ${bindAccountAnnouncements.toString()};})()`
+export const ACCOUNT_ANNOUNCEMENTS_CLIENT_BINDING = `(()=>{const syncNoticeCount=${syncNoticeCount.toString()};const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${ACCOUNT_ANNOUNCEMENT_NOTICE_HELPERS_BINDING}const readAccountAnnouncements=${readAccountAnnouncements.toString()};const buildAccountAnnouncementNotice=${buildAccountAnnouncementNotice.toString()};return ${bindAccountAnnouncements.toString()};})()`

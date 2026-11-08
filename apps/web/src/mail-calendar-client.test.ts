@@ -26,7 +26,7 @@ afterEach(() => { for (const listener of unload) window.removeEventListener('bef
 
 const model = () => {
   let records = [calendar()], serial = 1, mode = 'normal', contextMailbox = mailbox
-  const application = { status: 'stored_configuration', nativeApplied: false, syncVerified: false }
+  const application = { status: 'dav_store', nativeApplied: true, syncVerified: false }
   const envelope = () => ({ context: { mailbox: contextMailbox }, application })
   const send = vi.fn(async (method: string, path: string, body?: unknown) => {
     if (method === 'GET' && path === '/api/webmail/calendars') return { ...envelope(), calendars: clone(records), revision: String(serial).padStart(64, '0'), limits: { calendars: 25, events: 1000, shares: 100, icsBytes: 262144, calendarBytes: 524288 } }
@@ -84,7 +84,7 @@ describe('mail calendar workspace browser binding', () => {
     const f = model()
     f.setRecords([calendar({ shares: [{ principal: 'sibling@example.test', permission: 'read-write', sharedAt: '2026-10-26T12:00:00Z', effective: false }] })])
     f.boot(); await tick()
-    expect(document.querySelector('[data-calendar-authority-guidance]')?.textContent).toContain('Older records without verified mailbox ownership are preserved')
+    expect(document.querySelector('[data-calendar-authority-guidance]')?.textContent).toContain('A saved share grants access only to its verified current recipient')
     expect(document.querySelector('[data-calendar-shares]')?.textContent).toContain('Access withheld')
     expect(f.writes()).toEqual([])
     set('share-principal', 'sibling@example.test')

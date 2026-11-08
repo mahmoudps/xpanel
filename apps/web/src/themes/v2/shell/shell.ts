@@ -98,7 +98,8 @@ function sidebarNavigation(t: Translate, props: V2ShellProps): string {
     return `<li data-nav-section="${escapeHtml(section.id)}"><details${open ? ' open' : ''}><summary>${icon(catalogIcon(section.icon))}<span>${escapeHtml(name)}</span>${icon('chevRight', 16).replace('class="v2-icon', 'class="v2-icon v2-nav__chev')}</summary><ul aria-label="${escapeHtml(name)}">${pages}</ul></details></li>`
   }).join('')
   const empty = sections ? '' : `<p class="v2-nav__empty" data-navigation-empty="true">${escapeHtml(t('These tools are not available on this server yet.'))}</p>`
-  return `<nav class="v2-nav" aria-label="${escapeHtml(t('Hosting tools'))}">${empty}<ul>${sections}</ul></nav>`
+  const favorites = props.surface === 'xwhm' ? `<div class="v2-nav" data-whm-favorites-nav hidden><h2 class="v2-nav__label">${escapeHtml(t('Favorites'))}</h2><ul></ul></div>` : ''
+  return `${favorites}<nav class="v2-nav" aria-label="${escapeHtml(t('Hosting tools'))}">${empty}<ul>${sections}</ul></nav>`
 }
 
 function contextCard(context: NavContext): string {
@@ -159,7 +160,7 @@ function topbar(t: Translate, props: V2ShellProps): string {
 <a class="v2-top__brand" href="${escapeHtml(props.homeHref)}">${escapeHtml(brandingProductName(props.branding, PRODUCT[props.surface]))}</a>
 <details class="v2-tools" open data-xp-toolbar-options><summary class="v2-btn">${escapeHtml(t('Search & account'))}</summary><div class="v2-tools__content">
 ${props.searchHtml ?? `<button type="button" class="v2-search" data-action="open-cmdk" aria-keyshortcuts="Control+K Meta+K" aria-label="${escapeHtml(`${searchLabel} Ctrl K`)}">${icon('search')}<span>${escapeHtml(searchLabel)}</span><kbd aria-hidden="true">Ctrl K</kbd></button>`}
-<span class="v2-top__spacer"></span>${liveIndicator(t, props.realtimeEnabled)}${server}${languages}${scheme}${bell}${accountMenu(t, props)}
+<span class="v2-top__spacer"></span>${liveIndicator(t, props.realtimeEnabled)}${server}${languages}${scheme}${bell}${props.surface === 'xwhm' ? `<a class="v2-btn v2-btn--icon v2-top__bell" href="/whm#whm-inbox-heading" data-whm-bell data-unread="false" aria-label="${escapeHtml(t('Notifications'))}">${icon('inbox')}<span class="v2-top__count v2-num" data-whm-bell-count aria-hidden="true" hidden></span></a>` : ''}${accountMenu(t, props)}
 </div></details>
 </header>`
 }
@@ -240,7 +241,7 @@ ${SIDE}__foot a:hover{background:var(--nav-2);color:var(--nav-strong)}
 .v2-tools>summary::-webkit-details-marker{display:none}
 .v2-tools__content{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
 .v2-top__spacer{flex:1 1 auto}
-.v2-search{flex:1 1 280px;max-width:520px;display:flex;align-items:center;gap:12px;min-height:var(--target);padding-inline:14px 10px;border-radius:var(--radius-control);border:1px solid var(--line);background:var(--subtle);color:var(--muted);font-size:14px;text-align:start;cursor:pointer}
+.v2-search{flex:1 1 280px;min-width:0;max-width:520px;display:flex;align-items:center;gap:12px;min-height:var(--target);padding-inline:14px 10px;border-radius:var(--radius-control);border:1px solid var(--line);background:var(--subtle);color:var(--muted);font-size:14px;text-align:start;cursor:pointer}
 .v2-search:hover{border-color:var(--line-strong)}
 .v2-search>span{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .v2-search>kbd{flex:none;display:flex;align-items:center;height:22px;padding:0 var(--space-1);border-radius:6px;border:1px solid var(--line-strong);background:var(--surface);font-size:11px}
@@ -257,7 +258,7 @@ ${SIDE}__foot a:hover{background:var(--nav-2);color:var(--nav-strong)}
 .v2-top__lang{padding:0 12px;font-size:13px}
 .v2-top__lang>.v2-icon{color:var(--muted)}
 .v2-top__bell{position:relative}
-.v2-top__badge{position:absolute;top:6px;inset-inline-end:6px;min-width:18px;height:18px;padding:0 5px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-pill);background:var(--bad);color:var(--on-accent);font-size:11px;font-weight:700}
+.v2-top__badge,.v2-top__count{position:absolute;top:6px;inset-inline-end:6px;min-width:18px;height:18px;padding:0 5px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-pill);background:var(--bad);color:var(--on-accent);font-size:11px;font-weight:700}
 .v2-account{position:relative}
 .v2-account__summary{gap:10px;padding:0 var(--space-1);padding-inline-end:12px;list-style:none}
 .v2-account__summary::-webkit-details-marker{display:none}

@@ -72,11 +72,19 @@ it('qualifies actual Vitest collection, forbidden focus and nonpassing census wi
     XPANEL_LANE_INTEGRATION_FIXTURE: 'selection', XPANEL_TEST_LANE: 'fast', XPANEL_TEST_LAYER: 'portable', XPANEL_TEST_PHASE: 'complete',
   })
   expect(filtered.signal).toBeNull()
-  expect(filtered.exitCode).toBe(1) // The real null budget must fail closed, even in this tiny fixture.
+  expect(filtered.exitCode, filtered.stdout).toBe(0)
   const filteredPolicy = policy(filtered)
-  expect(filteredPolicy).toMatchObject({ status: 'failed', expandedCases: 4,
-    results: { passed: 1, failed: 0, skipped: 3 }, budget: { status: 'blocked', maximum: null, observed: 3 } })
-  expect(filteredPolicy.violations).toContainEqual(expect.objectContaining({ kind: 'slow-budget-unestablished' }))
+  expect(filteredPolicy).toMatchObject({ status: 'passed', expandedCases: 4, violations: [],
+    results: { passed: 1, failed: 0, skipped: 3 }, budget: { status: 'passed', maximum: 192, observed: 3 } })
+
+  const unestablished = await runChild(fixtureArgs(['--tags-filter', '!slow']), {
+    XPANEL_LANE_INTEGRATION_FIXTURE: 'selection', XPANEL_TEST_LANE: 'fast', XPANEL_TEST_LAYER: 'linux', XPANEL_TEST_PHASE: 'complete',
+  })
+  expect(unestablished.signal).toBeNull()
+  expect(unestablished.exitCode).toBe(1) // The real null native budget must fail closed, even in this tiny fixture.
+  const unestablishedPolicy = policy(unestablished)
+  expect(unestablishedPolicy).toMatchObject({ status: 'failed', budget: { status: 'blocked', maximum: null, observed: 3 } })
+  expect(unestablishedPolicy.violations).toContainEqual(expect.objectContaining({ kind: 'slow-budget-unestablished' }))
 
   const focused = await runChild(fixtureArgs(), {
     XPANEL_LANE_INTEGRATION_FIXTURE: 'focused', XPANEL_TEST_LANE: 'fast', XPANEL_TEST_LAYER: 'portable', XPANEL_TEST_PHASE: 'complete',

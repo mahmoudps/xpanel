@@ -133,6 +133,16 @@ describe('persistent username and source-IP login throttling', () => {
     expect(await failLogin(handle, { now: at(1) })).toEqual({ usernameFailures: 2, ipFailures: 1, lockedUntil: null })
   })
 
+  it('locks the address on its own limits when they differ from the username limits', async () => {
+    const handle = await setup()
+    const ipLimits = { threshold: 2, windowMs: 10_000, lockoutDurationMs: 5_000 }
+    await failLogin(handle, { username: 'alice', ipLimits })
+    expect(await failLogin(handle, { username: 'bob', ipLimits, now: at(1) })).toEqual({ usernameFailures: 1, ipFailures: 2, lockedUntil: at(5_001) })
+    expect((await lockouts.checkLockout(handle.db, { ip: '198.51.100.1' }, at(2)))?.lockedUntil).toBe(at(5_001))
+    expect(await lockouts.checkLockout(handle.db, { username: 'alice' }, at(2))).toBeNull()
+    await expect(failLogin(handle, { ipLimits: { ...ipLimits, threshold: 0 }, now: at(3) })).rejects.toMatchObject({ code: 'VALIDATION' })
+  })
+
   it('rejects invalid policy or identity without recording a partial failure', async () => {
     const handle = await setup()
     for (const input of [{ threshold: 0 }, { windowMs: 0 }, { lockoutDurationMs: -1 }, { ip: 'not-an-ip' }, { username: ' ' }, { now: 'invalid' }]) {

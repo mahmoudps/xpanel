@@ -42,10 +42,10 @@ function dbReadReply(kind: string, raw: unknown, accountId: string, username: st
     return raw
   }
   if (kind === 'account-phppgadmin') {
-    shape(raw, ['context', 'client', 'installed', 'signon', 'postgresql']); context(raw)
+    shape(raw, ['context', 'client', 'installed', 'signon', 'postgresql', 'databases', 'ticketSeconds', 'sessionSeconds']); context(raw)
     const signon = shape(raw.signon, ['state', 'reason'])
-    if (raw.client !== 'phppgadmin' || signon.state !== 'unsupported' || signon.reason !== 'no-documented-signon') bad()
-    nullable(raw.installed, bool); nullable(raw.postgresql, bool)
+    if (raw.client !== 'phppgadmin' || raw.ticketSeconds !== 60 || raw.sessionSeconds !== 1800 || !['ready', 'not-installed', 'no-package', 'not-configured', 'unavailable'].includes(signon.state as string) || (signon.state === 'ready') !== (signon.reason === null) || signon.reason !== null && !/^[a-z-]{1,40}$/.test(String(signon.reason))) bad()
+    nullable(raw.installed, bool); nullable(raw.postgresql, bool); nullable(raw.databases, count)
     return raw
   }
   const owned = (name: unknown): string => { const value = text(name, 63); return value === username || value.startsWith(username + '_') ? value : bad() }
@@ -76,10 +76,10 @@ function dbReadReply(kind: string, raw: unknown, accountId: string, username: st
     if (bool(raw.canApply) && (raw.state !== 'read' || raw.reason !== null || !(raw.packages as unknown[]).length || (raw.blocked as unknown[]).length)) bad()
     return raw
   }
-  if (kind === 'signon') {
+  if (kind === 'signon' || kind === 'pg-signon') {
     shape(raw, ['client', 'action', 'ticket', 'expiresAt', 'sessionExpiresAt']); stamp(raw.expiresAt); stamp(raw.sessionExpiresAt)
     const action = new URL(text(raw.action, 512))
-    if (raw.client !== 'phpmyadmin' || action.protocol !== 'https:' || action.username || action.password || action.search || action.hash || typeof raw.ticket !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(raw.ticket)) bad()
+    if (raw.client !== (kind === 'signon' ? 'phpmyadmin' : 'phppgadmin') || action.protocol !== 'https:' || action.username || action.password || action.search || action.hash || typeof raw.ticket !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(raw.ticket)) bad()
     return raw
   }
   if (kind === 'job') {
@@ -108,7 +108,7 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
     const note = (message: string, state: string): void => { status.textContent = message; status.dataset.state = state; status.setAttribute('role', state === 'error' ? 'alert' : 'status') }
     const lock = (): void => {
       if (refresh) refresh.disabled = !eligible() || busy
-      if (open) open.disabled = !eligible() || busy || !ready
+      if (open) open.disabled = !eligible() || busy || !ready || page === 'account-phppgadmin' && root.dataset.dbCanManage !== 'true'
       if (upgrade) upgrade.disabled = !eligible() || busy || !ready || uncertain || root.dataset.dbCanManage !== 'true'
       // PostgreSQL changes need a running server; database and password forms also need a saved user.
       root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('[data-db-pg-form] input, [data-db-pg-form] select, [data-db-pg-form] button, [data-db-pg-act]').forEach(control => {
@@ -130,13 +130,20 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
     const bytes = (value: number): string => { const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']; let size = value, unit = 0; while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++ } return (unit === 0 ? String(size) : size.toFixed(1)) + ' ' + units[unit] }
     const serviceState = (active: string): string => ({ active: t(msgctxt('db-engines-client', 'Running')), inactive: t(msgctxt('db-engines-client', 'Stopped')), failed: t(msgctxt('db-engines-client', 'Failed')), activating: t('Starting'), deactivating: t('Stopping') } as Record<string, string>)[active] ?? active
     const bootState = (enabled: string): string => ({ enabled: t(msgctxt('db-engines-client', 'Yes')), disabled: t(msgctxt('db-engines-client', 'No')), static: t(msgctxt('db-engines-client', 'Static')), masked: t('Masked') } as Record<string, string>)[enabled] ?? enabled
-    const signonState = (state: unknown): string => ({ ready: t('Ready'), 'not-installed': t('Not installed'), 'not-configured': t('Not configured'), unavailable: t(msgctxt('db-engines-client', 'Unavailable')) } as Record<string, string>)[String(state)] ?? unknown()
+    const signonState = (state: unknown): string => ({ ready: t('Ready'), 'not-installed': t('Not installed'), 'no-package': t('No package for this operating system'), 'not-configured': t('Not configured'), unavailable: t(msgctxt('db-engines-client', 'Unavailable')) } as Record<string, string>)[String(state)] ?? unknown()
     const REASONS: Record<string, string> = {
       'packages-unread': t('The package database could not be read.'), 'package-missing': t('phpMyAdmin is not installed on this server.'),
       'config-missing': t('The sign-on configuration file is missing.'), 'config-invalid': t('The sign-on configuration file is not valid.'),
       'bridge-missing': t('The reviewed sign-on bridge is not installed.'), 'bridge-modified': t('The sign-on bridge differs from the reviewed file.'),
       'phpmyadmin-config-missing': t('The phpMyAdmin sign-on configuration is not installed.'), 'phpmyadmin-config-modified': t('The phpMyAdmin sign-on configuration differs from the reviewed file.'),
       'ticket-directory-unsafe': t('The sign-on ticket directory is missing or has unsafe ownership or permissions.'), 'database-admin-unavailable': t('MariaDB administration is not connected.'),
+      'no-distribution-package': t('This operating system has no phpPgAdmin package in its enabled repositories.'), 'client-config-missing': t('The phpPgAdmin configuration file is missing.'), 'client-config-unscoped': t('phpPgAdmin is not set to list owned databases only.'), 'postgresql-unavailable': t('The PostgreSQL server is not running or could not be read.'),
+    }
+    const paintChecks = (steps: readonly (readonly [readonly string[], string])[], reason: string | null): void => {
+      const checks = root.querySelector<HTMLElement>('[data-db-checks]')
+      if (!checks) return
+      const failed = reason === null ? steps.length : steps.findIndex(([reasons]) => reasons.includes(reason))
+      checks.replaceChildren(...steps.map(([, label], index) => { const li = document.createElement('li'); li.textContent = label + ': ' + (index < failed ? t('Passed') : index === failed ? t(msgctxt('db-engines-client', 'Failed')) : t('Not checked')); return li }))
     }
     const paintSignon = (view: Record<string, unknown>): void => {
       const signon = view.signon as { state: string; reason: string | null }
@@ -145,11 +152,9 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
       fact('session', t('{n, plural, one {# minute} other {# minutes}}', { n: 30 })); fact('ticket', t('{n, plural, one {# second} other {# seconds}}', { n: 60 }))
       if (account) fact('databases', String(view.databases))
       else fact('phppgadmin', view.phppgadmin === null ? unknown() : yes(view.phppgadmin as boolean))
-      const checks = root.querySelector<HTMLElement>('[data-db-checks]')
-      if (checks) {
+      {
         const steps: [string[], string][] = [[['packages-unread', 'package-missing'], t('phpMyAdmin package installed')], [['config-missing', 'config-invalid'], t('Sign-on configuration file is valid')], [['bridge-missing', 'bridge-modified'], t('Reviewed sign-on bridge installed')], [['phpmyadmin-config-missing', 'phpmyadmin-config-modified'], t('phpMyAdmin sign-on configuration installed')], [['ticket-directory-unsafe'], t('Ticket directory owned by root with mode 0730')], [['database-admin-unavailable'], t('MariaDB administration connected')]]
-        const failed = signon.reason === null ? steps.length : steps.findIndex(([reasons]) => reasons.includes(signon.reason!))
-        checks.replaceChildren(...steps.map(([, label], index) => { const li = document.createElement('li'); li.textContent = label + ': ' + (index < failed ? t('Passed') : index === failed ? t(msgctxt('db-engines-client', 'Failed')) : t('Not checked')); return li }))
+        paintChecks(steps, signon.reason)
       }
       note(ready ? t('phpMyAdmin sign-on is ready.') : REASONS[signon.reason ?? ''] ?? t('phpMyAdmin sign-on is unavailable.'), ready ? 'ready' : 'unavailable')
     }
@@ -217,8 +222,12 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
     }
     const paintPhpPgAdmin = (view: Record<string, unknown>): void => {
       fact('installed', view.installed === null ? unknown() : yes(view.installed as boolean)); fact('postgresql', view.postgresql === null ? unknown() : view.postgresql ? t(msgctxt('db-engines-client', 'Installed')) : t('Not installed'))
-      fact('signon', t('Unavailable: no documented sign-on method'))
-      note(view.installed ? t('phpPgAdmin is installed, but it cannot be opened without a password, so it stays unavailable.') : t('phpPgAdmin is not available on this server.'), 'unavailable')
+      const signon = view.signon as { state: string; reason: string | null }, empty = view.databases === 0
+      ready = signon.state === 'ready' && !empty
+      fact('signon', signonState(signon.state)); fact('databases', view.databases === null ? unknown() : String(view.databases))
+      fact('session', t('{n, plural, one {# minute} other {# minutes}}', { n: 30 })); fact('ticket', t('{n, plural, one {# second} other {# seconds}}', { n: 60 }))
+      paintChecks([[['packages-unread', 'package-missing', 'no-distribution-package'], t('phpPgAdmin package installed')], [['config-missing', 'config-invalid'], t('Sign-on configuration file is valid')], [['bridge-missing', 'bridge-modified'], t('Reviewed sign-on bridge installed')], [['client-config-missing', 'client-config-unscoped'], t('phpPgAdmin lists owned databases only')], [['ticket-directory-unsafe'], t('Ticket directory has safe ownership and permissions')], [['postgresql-unavailable'], t('PostgreSQL server is running')]], signon.reason)
+      note(ready ? t('phpPgAdmin sign-on is ready.') : signon.state === 'ready' ? t('Create a PostgreSQL database first. A sign-on opens only your own databases.') : REASONS[signon.reason ?? ''] ?? t('phpPgAdmin sign-on is unavailable.'), ready ? 'ready' : 'unavailable')
     }
     const read = async (): Promise<boolean> => {
       if (!eligible() || busy || !send) return false
@@ -244,13 +253,14 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
       if (!eligible() || busy || !ready || !send) return
       busy = true; lock(); note(t('Preparing a single-use sign-on…'), 'loading')
       try {
-        const issued = dbReadReply('signon', await send('POST', account ? '/api/account/database-engines/phpmyadmin/sign-on' : '/api/server/databases/web-clients/phpmyadmin/sign-on', {}), accountId, username) as { action: string; ticket: string }
+        const postgres = page === 'account-phppgadmin'
+        const issued = dbReadReply(postgres ? 'pg-signon' : 'signon', await send('POST', postgres ? '/api/account/database-engines/phppgadmin/sign-on' : account ? '/api/account/database-engines/phpmyadmin/sign-on' : '/api/server/databases/web-clients/phpmyadmin/sign-on', {}), accountId, username) as { action: string; ticket: string }
         // A form POST keeps the ticket out of the address bar, history and Referer.
         const form = document.createElement('form'), field = document.createElement('input')
         form.method = 'post'; form.action = issued.action; form.target = '_blank'; form.rel = 'noopener noreferrer'; form.hidden = true
         field.type = 'hidden'; field.name = 'ticket'; field.value = issued.ticket; form.append(field); document.body.append(form)
         try { form.submit() } finally { form.remove() }
-        note(t('phpMyAdmin opened in a new tab. The sign-on link works once and expires in 60 seconds.'), 'ready')
+        note(postgres ? t('phpPgAdmin opened in a new tab. The sign-on link works once and expires in 60 seconds.') : t('phpMyAdmin opened in a new tab. The sign-on link works once and expires in 60 seconds.'), 'ready')
       } catch { note(t('The sign-on could not be prepared. No password was shown. Read again before retrying.'), 'error') }
       finally { busy = false; lock() }
     })
@@ -261,7 +271,7 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
       if (!eligible() || busy || revision !== expected) return
       busy = true; lock(); note(t('Submitting the upgrade job…'), 'loading')
       try {
-        const reply = dbReadReply('job', await send('POST', '/api/server/databases/upgrade/apply', { expectedRevision: expected }), accountId, username) as { job: { id: string; referenceCode: string | null } }
+        const reply = dbReadReply('job', await send('POST', '/api/server/databases/upgrade/apply', { expectedRevision: expected, acknowledgedWarnings: ['service-restart', 'no-downgrade'] }), accountId, username) as { job: { id: string; referenceCode: string | null } }
         uncertain = true
         const job = root.querySelector<HTMLElement>('[data-db-job]')
         if (job) { job.hidden = false; job.replaceChildren(t('Upgrade job {job} was submitted. Follow its progress on', { job: reply.job.referenceCode ?? reply.job.id }) + ' ', technical('/whm/jobs')) }

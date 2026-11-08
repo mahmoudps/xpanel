@@ -25,6 +25,13 @@ export const pgAccountRolesSql = (username: string): string => {
   if (!ACCOUNT.test(username)) throw new Error('invalid_account_username')
   return `SELECT r.rolname, r.rolcanlogin FROM pg_catalog.pg_roles r WHERE r.rolname = '${username}' OR r.rolname LIKE '${username}\\_%' ORDER BY r.rolname LIMIT ${DB_PG_MAX_ROWS + 1}`
 }
+/** phpPgAdmin session roles: every login, and the one's privilege flags, connection limit and role memberships. */
+export const PG_SSO_ROLES_SQL = `SELECT r.rolname FROM pg_catalog.pg_roles r WHERE r.rolname LIKE 'xpsso-%' ORDER BY r.rolname LIMIT ${DB_PG_MAX_ROWS + 1}`
+const PG_SSO_ROLE = /^xpsso-[0-9]{10}-[0-9a-f]{12}$/
+export const pgSsoRoleProofSql = (role: string): string => {
+  if (!PG_SSO_ROLE.test(role)) throw new Error('invalid_signon_role')
+  return `SELECT r.rolsuper, r.rolcreatedb, r.rolcreaterole, r.rolreplication, r.rolbypassrls, r.rolconnlimit, pg_catalog.array_to_string(ARRAY(SELECT m.rolname FROM pg_catalog.pg_auth_members a JOIN pg_catalog.pg_roles m ON m.oid = a.roleid WHERE a.member = r.oid ORDER BY m.rolname), ' ') FROM pg_catalog.pg_roles r WHERE r.rolname = '${role}'`
+}
 export const postgresqlQueryArgv = (sql: string): string[] => [...PSQL_PREFIX, sql]
 /**
  * psql(1) running a reviewed statement script from stdin (`-f -`, needed for \gexec); VERBOSITY=terse keeps statement
@@ -57,7 +64,9 @@ export function isDatabaseEngineCommand(argv: readonly unknown[]): boolean {
   if (dump && same(argv, mariadbUpgradeDumpArgv(dump[1]!))) return true
   if (argv.length !== PSQL_PREFIX.length + 1 || !PSQL_PREFIX.every((value, index) => argv[index] === value)) return false
   const sql = argv.at(-1) as string
-  if (sql === PG_VERSION_SQL) return true
+  if (sql === PG_VERSION_SQL || sql === PG_SSO_ROLES_SQL) return true
+  const ssoRole = /r\.rolname = '(xpsso-[0-9]{10}-[0-9a-f]{12})'$/.exec(sql)?.[1]
+  if (ssoRole && sql === pgSsoRoleProofSql(ssoRole)) return true
   const account = /^SELECT (?:d\.datname|r\.rolname)[^']*'([a-z][a-z0-9]{0,15})(?:\\_%)?'/.exec(sql)?.[1]
   return !!account && (sql === pgAccountDatabasesSql(account) || sql === pgAccountRolesSql(account))
 }

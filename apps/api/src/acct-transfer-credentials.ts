@@ -4,6 +4,7 @@ import { fail } from '@xpanel/core'
 import { atomicWriteJson, isStateDirectoryDurabilityError, readJsonIfExists } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
+import { isNodeId, readNodeToken } from './node-link.ts'
 
 type Helpers = Pick<ExtendedRouteHelpers, 'store' | 'requireCaller' | 'assertRoot' | 'emitAudit'>
 /** Source API tokens are written once and only ever leave this module as an outbound Authorization header. */
@@ -54,7 +55,7 @@ const view = (document: CredentialDocument) => {
 
 /** Trusted-reference lookup for the discovery adapter; null when the reference no longer exists. */
 export const readTransferCredentialToken = async (store: { readonly rootDir: string }, id: string): Promise<string | null> =>
-  (await readDocument(store)).credentials.find(item => item.id === id)?.token ?? null
+  isNodeId(id) ? readNodeToken(store, id) : (await readDocument(store)).credentials.find(item => item.id === id)?.token ?? null
 
 const readBody = async (req: Request): Promise<Record<string, unknown>> => {
   if (req.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') return invalid('JSON is required')

@@ -48,15 +48,21 @@ describe('account-as-IP-reservation state contract; diagnostic desired state, no
     await expect(f.store.deleteServerIp(f.dedicated.id)).rejects.toMatchObject({ code: 'CONFLICT' })
     await expect(f.store.saveServerIp({ ...f.dedicated, role: 'shared' })).rejects.toMatchObject({ code: 'CONFLICT' })
   })
-  it('retains a terminating dedicated reservation until qualified release exists', async () => {
+  it('holds a terminated account dedicated address until the agent clears the hold, then frees it', async () => {
     const f = await fixture(), account = await f.store.createAccount(f.input('endingone', { ipv4: f.dedicated.address }))
     await f.store.markTerminating(account.id)
-    await expect(f.store.deleteAccount(account.id)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
-    expect(await f.store.getAccount(account.id)).not.toBeNull()
+    expect(await f.store.deleteAccount(account.id)).toBe(true)
+    const held = (await f.store.listServerIps()).find(ip => ip.id === f.dedicated.id)!
+    expect(held.releasing).toEqual({ accountId: account.id, since: expect.any(String) })
+    await expect(f.store.createAccount(f.input('nexttenant', { ipv4: f.dedicated.address }))).rejects.toMatchObject({ code: 'CONFLICT', detail: { reason: 'ip_releasing' } })
+    await expect(f.store.deleteServerIp(f.dedicated.id)).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(await f.store.clearIpReleasing([{ id: f.dedicated.id, since: '2000-01-01T00:00:00.000Z' }])).toEqual([])
+    expect(await f.store.clearIpReleasing([{ id: f.dedicated.id, since: held.releasing!.since }])).toEqual([f.dedicated.address])
+    expect((await f.store.createAccount(f.input('nexttenant', { ipv4: f.dedicated.address }))).ipv4).toBe(f.dedicated.address)
   })
-  it('does not release a dedicated address through an ordinary account IP edit', async () => {
+  it('keeps account addresses out of the ordinary account edit', async () => {
     const f = await fixture(), account = await f.store.createAccount(f.input('changeone', { ipv4: f.dedicated.address }))
-    await expect(f.store.updateAccount(account.id, { ipv4: f.shared.address })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    await expect(f.store.updateAccount(account.id, { ipv4: f.shared.address } as never)).rejects.toMatchObject({ code: 'VALIDATION' })
     expect((await f.store.getAccount(account.id))?.ipv4).toBe(f.dedicated.address)
   })
   it('selects dedicated inventory by mode and reports exhaustion without UID or principal effects', async () => {
@@ -120,7 +126,7 @@ describe('account-as-IP-reservation state contract; diagnostic desired state, no
     expect(await f.store.getAccount(account.id)).not.toBeNull()
   })
   it('keeps a reseller delegation needed by an existing dedicated account', async () => {
-    const f = await fixture(), reseller = await f.store.createReseller({ username: 'ipreseller', passwordHash: ARGON2, acl: ['create-account'], maxAccounts: 10, totalDiskMb: 102400, totalBandwidthMb: 102400, oversell: false, nameservers: ['ns1.example.test', 'ns2.example.test'], delegatedIps: [f.dedicated.address] })
+    const f = await fixture(), reseller = await f.store.createReseller({ username: 'ipreseller', passwordHash: ARGON2, acl: ['create-account'], maxAccounts: 10, totalDiskMb: 102400, totalBandwidthMb: 102400, oversell: { disk: false, bandwidth: false }, nameservers: ['ns1.example.test', 'ns2.example.test'], delegatedIps: [f.dedicated.address] })
     const account = await f.store.createAccount(f.input('resellerheld', { ownerId: reseller.id, ipAssignment: { mode: 'dedicated' } }))
     await expect(f.store.updateReseller(reseller.id, { delegatedIps: [] })).rejects.toMatchObject({ code: 'FORBIDDEN' })
     expect((await f.store.getReseller(reseller.id))?.delegatedIps).toEqual([f.dedicated.address])
@@ -144,7 +150,7 @@ describe('account-as-IP-reservation state contract; diagnostic desired state, no
     await expect(f.store.saveMailIpConfig({ ...config, defaultIpv4: '192.0.2.99' })).rejects.toMatchObject({ code: 'FORBIDDEN' })
     expect((await f.store.getMailIpConfig())?.defaultIpv4).toBe(f.dedicated.address)
   })
-  it.each((['clear-domain', 'delete-domain', 'delete-account'] as const).flatMap(operation => ['192.0.2.11', '192.0.2.99'].map(address => [operation, address] as const)))('retains a legacy orphan override during %s for %s until verified deprovisioning', async (operation, address) => {
+  it.each([...(['clear-domain', 'delete-domain'] as const).flatMap(operation => ['192.0.2.11', '192.0.2.99'].map(address => [operation, address] as const)), ['delete-account', '192.0.2.99'] as const])('retains a legacy orphan override during %s for %s until verified deprovisioning', async (operation, address) => {
       const f = await fixture(), account = await f.store.createAccount(f.input('legacyheld'))
       const { id: _id, ...primary } = (await f.store.listDomains({ accountId: account.id }))[0]!
       const addon = await f.store.createDomain({ ...primary, name: 'legacy.example.test', kind: 'addon', parentId: null, docRoot: `${account.home}/legacy` })
@@ -156,6 +162,15 @@ describe('account-as-IP-reservation state contract; diagnostic desired state, no
       await expect(mutation).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { reason: 'ip_release_unverified' } })
       expect(JSON.parse(await readFile(path, 'utf8')).ipv4).toBe(address)
       expect(await f.store.getAccount(account.id)).not.toBeNull()
+  })
+  it('holds a dedicated legacy domain override when its account is deleted', async () => {
+    const f = await fixture(), account = await f.store.createAccount(f.input('legacyheld'))
+    const { id: _id, ...primary } = (await f.store.listDomains({ accountId: account.id }))[0]!
+    const addon = await f.store.createDomain({ ...primary, name: 'legacy.example.test', kind: 'addon', parentId: null, docRoot: `${account.home}/legacy` })
+    await writeFile(join(f.rootDir, 'accounts', account.username, 'domains', `${addon.name}.json`), JSON.stringify({ ...addon, ipv4: f.dedicated.address }))
+    await f.store.markTerminating(account.id)
+    expect(await f.store.deleteAccount(account.id)).toBe(true)
+    expect((await f.store.listServerIps()).find(ip => ip.id === f.dedicated.id)?.releasing?.accountId).toBe(account.id)
   })
   it('permits removing a domain override while its account keeps the dedicated reservation', async () => {
     const f = await fixture(), account = await f.store.createAccount(f.input('retainedowner', { ipAssignment: { mode: 'dedicated' } }))
@@ -186,5 +201,121 @@ describe('account-as-IP-reservation state contract; diagnostic desired state, no
     await f.store.markTerminating(account.id)
     expect(await f.store.deleteAccount(account.id)).toBe(true)
     expect(await f.store.getAccount(account.id)).toBeNull()
+  })
+
+  describe("Change a Site's IP Address and the IP Migration Wizard", () => {
+    const zone = (account: { id: string }, name: string, ip: string) => ({ id: randomUUID(), accountId: account.id, name, serial: 2026110601, records: [
+      { id: randomUUID(), zone: name, name: '@', type: 'A' as const, ttl: 300, content: ip, priority: null },
+      { id: randomUUID(), zone: name, name: 'www', type: 'A' as const, ttl: 300, content: ip, priority: null },
+      { id: randomUUID(), zone: name, name: '@', type: 'MX' as const, ttl: 300, content: 'mail.' + name, priority: 10 },
+    ] })
+    it('moves the site, its A records, domain and mail overrides in one change and holds the old address', async () => {
+      const f = await fixture(), account = await f.store.createAccount(f.input('moveone', { ipv4: f.dedicated.address }))
+      await f.store.saveDnsZone(zone(account, 'moveone.example.test', f.dedicated.address))
+      const other = await f.store.createAccount(f.input('bystander'))
+      await f.store.saveDnsZone(zone(other, 'bystander.example.test', f.dedicated.address))
+      await f.store.saveMailIpConfig({ mode: 'custom-map', defaultIpv4: null, defaultIpv6: null, defaultHelo: null, domainOverrides: [{ domainName: 'moveone.example.test', ipv4: f.dedicated.address, ipv6: null, heloHostname: null }] })
+      const result = await f.store.changeAccountIp(account.id, { ipv4: f.shared.address })
+      expect(result).toEqual({ account: expect.objectContaining({ ipv4: f.shared.address }), held: [f.dedicated.address] })
+      const moved = await f.store.getDnsZone('moveone.example.test')
+      expect(moved?.records.filter(r => r.type === 'A').map(r => r.content)).toEqual([f.shared.address, f.shared.address])
+      expect(moved?.records.find(r => r.type === 'MX')?.content).toBe('mail.moveone.example.test')
+      expect((await f.store.getDnsZone('bystander.example.test'))?.records.filter(r => r.type === 'A').map(r => r.content)).toEqual([f.dedicated.address, f.dedicated.address])
+      expect((await f.store.getMailIpConfig())?.domainOverrides).toEqual([{ domainName: 'moveone.example.test', ipv4: f.shared.address, ipv6: null, heloHostname: null }])
+      await expect(f.store.createAccount(f.input('taker', { ipv4: f.dedicated.address }))).rejects.toMatchObject({ code: 'CONFLICT', detail: { reason: 'ip_releasing' } })
+      // Moving back before the agent verified the move cancels the hold.
+      expect((await f.store.changeAccountIp(account.id, { ipv4: f.dedicated.address })).held).toEqual([])
+      expect((await f.store.listServerIps()).find(ip => ip.id === f.dedicated.id)?.releasing).toBeUndefined()
+    })
+    it('refuses a reserved or foreign address and an unchanged move without writing', async () => {
+      const f = await fixture(), account = await f.store.createAccount(f.input('stayone'))
+      await f.store.updateServerIp(f.dedicated.id, { reserved: true, ptrHostname: 'mail.example.test' })
+      expect((await f.store.listServerIps()).find(ip => ip.id === f.dedicated.id)).toMatchObject({ reserved: true, ptrHostname: 'mail.example.test' })
+      await expect(f.store.changeAccountIp(account.id, { ipv4: f.dedicated.address })).rejects.toMatchObject({ code: 'FORBIDDEN', detail: { reason: 'ip_reserved' } })
+      await expect(f.store.changeAccountIp(account.id, { ipv4: '192.0.2.99' })).rejects.toMatchObject({ code: 'FORBIDDEN' })
+      await expect(f.store.updateServerIp(f.shared.id, { reserved: true })).rejects.toMatchObject({ code: 'VALIDATION' })
+      const before = await f.store.readSnapshot()
+      expect(await f.store.changeAccountIp(account.id, { ipv4: f.shared.address })).toEqual({ account: expect.objectContaining({ ipv4: f.shared.address }), held: [] })
+      expect((await f.store.readSnapshot()).checksum).toBe(before.checksum)
+    })
+    it('moves every reference of an old address to its new one and hands over the role', async () => {
+      const f = await fixture(), account = await f.store.createAccount(f.input('wizardone', { ipv4: f.dedicated.address }))
+      await f.store.saveDnsZone(zone(account, 'wizardone.example.test', f.dedicated.address))
+      const fresh = await f.store.saveServerIp({ address: '192.0.2.20', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '' })
+      const result = await f.store.migrateIps([{ from: f.dedicated.address, to: fresh.address }])
+      expect(result).toEqual({ moved: [{ from: f.dedicated.address, to: fresh.address }], held: [f.dedicated.address] })
+      expect((await f.store.getAccount(account.id))?.ipv4).toBe(fresh.address)
+      expect((await f.store.getDnsZone('wizardone.example.test'))?.records.filter(r => r.type === 'A').every(r => r.content === fresh.address)).toBe(true)
+      expect((await f.store.listServerIps()).find(ip => ip.id === fresh.id)).toMatchObject({ role: 'dedicated', isPrimary: false })
+      await expect(f.store.migrateIps([{ from: f.shared.address, to: f.dedicated.address }])).rejects.toMatchObject({ code: 'CONFLICT' })
+      await expect(f.store.migrateIps([{ from: f.shared.address, to: '2001:db8::1' }])).rejects.toMatchObject({ code: 'VALIDATION' })
+    })
+    it("moves several sites in one change, and refuses the whole batch at the account that cannot move", async () => {
+      const f = await fixture(), one = await f.store.createAccount(f.input('batchone', { ipv4: f.dedicated.address })), two = await f.store.createAccount(f.input('batchtwo'))
+      const results = await f.store.changeAccountIps([{ accountId: one.id, ipv4: f.shared.address }, { accountId: two.id, ipv4: f.shared.address }])
+      expect(results.map(r => [r.accountId, r.account.ipv4, r.held])).toEqual([[one.id, f.shared.address, [f.dedicated.address]], [two.id, f.shared.address, []]])
+      const before = await f.store.readSnapshot()
+      // The second move would take an address the first move only just released: it stays held, so nothing is written.
+      await expect(f.store.changeAccountIps([{ accountId: one.id, ipv4: f.shared.address }, { accountId: two.id, ipv4: f.dedicated.address }])).rejects.toMatchObject({ code: 'CONFLICT', detail: { reason: 'ip_releasing', accountId: two.id } })
+      expect((await f.store.readSnapshot()).checksum).toBe(before.checksum)
+      await expect(f.store.changeAccountIps([{ accountId: one.id, ipv4: f.shared.address }, { accountId: one.id, ipv4: f.shared.address }])).rejects.toMatchObject({ code: 'VALIDATION' })
+    })
+    it('adds observed hosting addresses the pool lacks and skips the rest', async () => {
+      const f = await fixture()
+      const { added } = await f.store.rebuildIpPool([{ address: '192.0.2.10', prefixLength: 24, interfaceName: 'test0' }, { address: '192.0.2.30', prefixLength: 24, interfaceName: 'test0' },
+        { address: 'fe80::1', prefixLength: 64, interfaceName: 'test0' }, { address: '127.0.0.1', prefixLength: 8, interfaceName: 'lo' }])
+      expect(added.map(ip => [ip.address, ip.role, ip.ownerKind, ip.isPrimary])).toEqual([['192.0.2.30', 'dedicated', 'root', false]])
+      expect((await f.store.rebuildIpPool([{ address: '192.0.2.30', prefixLength: 24, interfaceName: 'test0' }])).added).toEqual([])
+    })
+    it('assigns the next address of an IPv6 range with AAAA records beside the A records', async () => {
+      const f = await fixture(), account = await f.store.createAccount(f.input('sixone'))
+      await f.store.saveDnsZone(zone(account, 'sixone.example.test', f.shared.address))
+      const [range] = await f.store.saveIpv6Ranges([{ id: randomUUID(), cidr: '2001:db8:0:1::/64', ownerKind: 'root', ownerId: null, notes: '' }])
+      const result = await f.store.assignAccountIpv6FromRange(account.id, range!.id)
+      expect(result.ip).toMatchObject({ address: '2001:db8:0:1::1', version: 6, prefixLength: 128, interfaceName: 'test0', role: 'dedicated', ownerKind: 'account', ownerId: account.id })
+      expect(result.account.ipv6).toBe('2001:db8:0:1::1')
+      expect((await f.store.getDnsZone('sixone.example.test'))?.records.filter(r => r.type === 'AAAA').map(r => [r.name, r.content])).toEqual([['@', '2001:db8:0:1::1'], ['www', '2001:db8:0:1::1']])
+      const second = await f.store.createAccount(f.input('sixtwo'))
+      expect((await f.store.assignAccountIpv6FromRange(second.id, range!.id)).ip.address).toBe('2001:db8:0:1::2')
+    })
+  })
+
+  describe('reseller package limits, shared IP, saved privilege lists and suspension lock', () => {
+    const reseller = (f: Awaited<ReturnType<typeof fixture>>, over: Record<string, unknown> = {}) => f.store.createReseller({ username: 'pkgreseller', passwordHash: ARGON2, acl: ['create-account'], maxAccounts: 10,
+      totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: ['ns1.example.test', 'ns2.example.test'], delegatedIps: [], ...over } as never)
+    it('refuses a third account on a package limited to two', async () => {
+      const f = await fixture(), r = await reseller(f)
+      await f.store.updateReseller(r.id, { packageLimits: [{ planId: f.plan.id, maxAccounts: 2 }] })
+      await f.store.createAccount(f.input('pkgone', { ownerId: r.id }))
+      await f.store.createAccount(f.input('pkgtwo', { ownerId: r.id }))
+      await expect(f.store.createAccount(f.input('pkgthree', { ownerId: r.id }))).rejects.toMatchObject({ code: 'LIMIT_EXCEEDED' })
+      await f.store.updateReseller(r.id, { packageLimits: null } as never)
+      expect((await f.store.getReseller(r.id))?.packageLimits).toBeUndefined()
+      expect((await f.store.createAccount(f.input('pkgthree', { ownerId: r.id }))).ownerId).toBe(r.id)
+    })
+    it('gives new reseller accounts its main shared IP and refuses an address it may not use', async () => {
+      const f = await fixture(), other = await f.store.saveServerIp({ address: '192.0.2.21', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '' })
+      const r = await reseller(f)
+      await expect(f.store.updateReseller(r.id, { sharedIp: other.address })).rejects.toMatchObject({ code: 'FORBIDDEN', detail: { reason: 'reseller_shared_ip_unavailable' } })
+      await f.store.updateReseller(r.id, { delegatedIps: [other.address], sharedIp: other.address })
+      expect((await f.store.createAccount(f.input('sharedres', { ownerId: r.id }))).ipv4).toBe(other.address)
+    })
+    it('applies a saved privilege list to many resellers at once', async () => {
+      const f = await fixture(), one = await reseller(f), two = await reseller(f, { username: 'pkgsecond' })
+      await f.store.saveAclList({ name: 'basic', acl: ['list-accounts', 'suspend-account'] })
+      expect(await f.store.listAclLists()).toEqual([{ name: 'basic', acl: ['list-accounts', 'suspend-account'] }])
+      const applied = await f.store.applyAclList('basic', [one.id, two.id])
+      expect(applied.map(item => item.acl)).toEqual([['list-accounts', 'suspend-account'], ['list-accounts', 'suspend-account']])
+      expect((await f.store.getReseller(two.id))?.acl).toEqual(['list-accounts', 'suspend-account'])
+      await expect(f.store.applyAclList('missing', [one.id])).rejects.toMatchObject({ code: 'NOT_FOUND' })
+      expect(await f.store.deleteAclList('basic')).toBe(true)
+    })
+    it('keeps a locked suspension until root lifts it', async () => {
+      const f = await fixture(), account = await f.store.createAccount(f.input('lockedone'))
+      expect((await f.store.suspendAccount(account.id, 'abuse', { lock: true })).suspendLocked).toBe(true)
+      await expect(f.store.unsuspendAccount(account.id)).rejects.toMatchObject({ code: 'FORBIDDEN', detail: { reason: 'suspension_locked' } })
+      const active = await f.store.unsuspendAccount(account.id, { allowLocked: true })
+      expect(active.status).toBe('active'); expect(active.suspendLocked).toBeUndefined()
+    })
   })
 })

@@ -9,6 +9,8 @@ import type { ThemeCatalogOverlay } from './theme-messages.ts'
 import { CATALOG_LOCALE_DIR } from '@xpanel/catalog'
 import {
   LOCALES,
+  isLocale,
+  registerLocale,
   SOURCE_LOCALE,
   catalogFromEntries,
   catalogKey,
@@ -59,7 +61,9 @@ const CATALOGS = new Map<Locale, Catalog>(LOCALES.map(info => [info.tag, readCat
 const ASCII_DIGITS = (text: string): string => text.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, digit => String((digit.charCodeAt(0) & 0xf)))
 const asciiTranslator = (base: Translate): Translate => Object.assign((message: string, values?: MessageValues) => ASCII_DIGITS(base(message, values)), { locale: base.locale })
 const TRANSLATORS = new Map<Locale, Translate>(LOCALES.map(info => [info.tag, asciiTranslator(createTranslator(info.tag, CATALOGS.get(info.tag)))]))
-const TOOL_CATALOGS: ReadonlyMap<Locale, Catalog> = new Map(LOCALES.map(info => [info.tag, readCatalog(CATALOG_LOCALE_DIR, info.tag)]))
+const TOOL_CATALOGS = new Map<Locale, Catalog>(LOCALES.map(info => [info.tag, readCatalog(CATALOG_LOCALE_DIR, info.tag)]))
+// Text of the runtime locales this process installed, read where the release file would be.
+const RUNTIME_PO = new Map<Locale, string>()
 
 /** Which registry locales the panels offer and which one answers a request that names none of them. */
 export interface LocalePolicy { readonly offered: readonly Locale[]; readonly defaultLocale: Locale }
@@ -109,7 +113,7 @@ export interface CatalogProblem {
 export interface CatalogValidation { readonly entries: readonly PoEntry[]; readonly problems: readonly CatalogProblem[]; readonly problemCount: number }
 
 /** The release's own catalog file for a translated locale (read on demand: uploads and downloads are rare). */
-const shippedPo = (locale: Locale): PoCatalog => parsePo(readFileSync(join(WEB_CATALOG_DIR, `${locale}.po`), 'utf8'))
+const shippedPo = (locale: Locale): PoCatalog => parsePo(RUNTIME_PO.get(locale) ?? readFileSync(join(WEB_CATALOG_DIR, `${locale}.po`), 'utf8'))
 const translatedLocales = (): Locale[] => LOCALES.map(info => info.tag).filter(tag => tag !== SOURCE_LOCALE)
 const NON_ASCII_DIGIT = /(?![0-9])\p{Nd}/u
 const REPORTED_PROBLEMS = 20
@@ -193,6 +197,23 @@ export function installLocaleOverrides(overrides: Partial<Record<Locale, string>
     TRANSLATORS.set(tag, asciiTranslator(createTranslator(tag, catalog)))
   }
   return { applied, rejected }
+}
+
+/** Adds a saved copy of a locale to this process. Call at panel start, before installLocaleOverrides and the first page. */
+export function installRuntimeLocale(info: LocaleInfo & { base: Locale }, po: string): boolean {
+  let entries: readonly PoEntry[]
+  try { const parsed = parsePo(po); if (parsed.header.Language !== info.tag || !isLocale(info.base)) return false; entries = parsed.entries } catch { return false }
+  registerLocale(info)
+  const tag = info.tag as Locale, catalog = new Map(catalogFromEntries(entries))
+  RUNTIME_PO.set(tag, po); CATALOGS.set(tag, catalog); TOOL_CATALOGS.set(tag, TOOL_CATALOGS.get(info.base)!); TRANSLATORS.set(tag, asciiTranslator(createTranslator(tag, catalog)))
+  return true
+}
+
+/** A new PO catalog for `tag` with every string of `source`; the source locale's strings translate to themselves. */
+export function copiedLocalePo(source: Locale, tag: string, overrideText?: string): { po: string; messages: number } {
+  const catalog = parsePo(localeCatalogPo(source, overrideText))
+  const entries = catalog.entries.map(entry => ({ ...entry, translation: entry.translation || entry.id }))
+  return { po: formatPo({ header: { ...catalog.header, Language: tag }, entries }), messages: entries.length }
 }
 
 let sourceCount: number | undefined

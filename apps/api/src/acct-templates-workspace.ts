@@ -153,8 +153,8 @@ const view = (raw: unknown, plans: { id: string; name: string }[]) => {
     state: raw === null ? 'default' : list ? 'saved' : 'invalid', revision: revisionOf(raw),
     templates: (list ?? []).map(template => ({ ...template, zone: formatZoneTemplate(template.records), preview: previewTemplateZone(template.records).map(({ name, type, ttl, priority, content }) => ({ name, type, ttl, priority, content })) })),
     plans, placeholders: [...TEMPLATE_PLACEHOLDERS], sample: TEMPLATE_SAMPLE,
-    // Account creation adds the zone records. No publisher for default or suspended pages exists: the web server serves its shipped pages.
-    application: { appliedToNewAccounts: true, defaultPagePublished: false, suspendedPagePublished: false },
+    // Account creation adds the zone records; the host publishes the page text (apps/agent/src/account-pages.ts).
+    application: { appliedToNewAccounts: true, defaultPagePublished: true, suspendedPagePublished: true },
   }
 }
 const readJson = async (request: Request): Promise<unknown> => {

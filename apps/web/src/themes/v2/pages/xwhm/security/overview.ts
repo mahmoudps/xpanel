@@ -11,18 +11,38 @@ export function renderV2WhmSecurityOverview(input: WhmObservationInput): string 
   const compilerFacts = ([['restriction', msgid('Compilers')], ['host-state', msgid('Host state')], ['commands', msgid('Restricted commands')], ['group', msgid('Compiler group')], ['hook', msgid('Re-apply after package updates')], ['updated', msgid('Last saved (UTC)')], ['reconcile', msgid('Last apply request')], ['observed-at', msgid('Observed at (UTC)')]] as const)
     .map(([key, label]) => `<div><dt>${esc(t(label))}</dt><dd><bdi data-sec-field="${key}">${esc(t(msgid('Not read')))}</bdi></dd></div>`).join('')
   const notConnected = help(t, msgid('This setting has no connected host operation. No changes have been applied.'))
+  const policyField = (key: string, label: string, extra = ' min="1" dir="ltr"'): string => {
+    const id = `v2-sign-in-${key.replaceAll('.', '-')}`
+    return field(t, id, label, inputControl(id, { 'data-sign-in-field': key }, false, extra, 'number'))
+  }
   const body = summaries + section(t, 'security-evidence', msgctxt('theme:v2', 'Advisor findings'), evidence)
-    + section(t, 'security-access', msgid('Access'), fields(field(t, 'v2-security-panel-port', msgid('Panel port'), inputControl('v2-security-panel-port', {}, false, ` dir="ltr"${canRead && input.serverSettings ? ` value="${esc(input.serverSettings.panelPort)}"` : ''}`, 'number'))
-      + field(t, 'v2-security-entrance', msgctxt('approved-xwhm', 'Secret entrance path'), inputControl('v2-security-entrance', {}, false, ' autocomplete="off" dir="ltr"')))
-      + check(t, msgid('Enable secret entrance path'), {}) + actions(button(t, msgid('Regenerate entrance path')))
+    + section(t, 'security-access', msgid('Access'), fields(field(t, 'v2-security-entrance', msgctxt('approved-xwhm', 'Secret entrance path'), inputControl('v2-security-entrance', {}, false, ' autocomplete="off" dir="ltr"')))
+      + check(t, msgid('Enable secret entrance path'), {}) + actions(link(t, msgid('Regenerate entrance path'), '/whm/security/panel-access'))
       + fields(field(t, 'v2-security-allowlist', msgctxt('approved-xwhm', 'Addresses and ranges, one per line'), area('v2-security-allowlist', {}, ' rows="5" dir="ltr"')))
-      + actions(link(t, msgid('IP allowlists'), '/whm/security/panel-access')) + notConnected)
+      + actions(link(t, msgid('IP allowlists'), '/whm/security/panel-access')) + help(t, msgid('Panel access changes these settings. The fields here are read-only.')))
     + section(t, 'security-mfa', msgid('Two-factor for root'), help(t, msgid('Enrollment is optional. Existing authentication factors are preserved; development does not force enrollment.'))
       + actions(link(t, msgid('Password and authenticator'), '/whm/security/sign-in')))
-    + section(t, 'security-lockout', msgid('Sign-in lockout'), fields(field(t, 'v2-lockout-attempts', msgid('Failed attempts'), inputControl('v2-lockout-attempts', {}, false, ' min="1" dir="ltr"', 'number'))
-      + field(t, 'v2-lockout-window', msgid('Within, minutes'), inputControl('v2-lockout-window', {}, false, ' min="1" dir="ltr"', 'number')) + field(t, 'v2-lockout-duration', msgid('Lock the username for'), inputControl('v2-lockout-duration', {})))
-      + table(t, msgctxt('approved-xwhm', 'Locked right now'), [msgid('Username or address'), msgid('Until'), msgid('Action')], { 'data-v2-security-lockouts': true })
-      + actions(button(t, msgid('Unlock username')) + button(t, msgid('Unblock address'))) + notConnected)
+    // WHM cPHulk, Password Strength Configuration and session lifetimes, painted by the sign-in policy client from GET /api/server/sec/sign-in.
+    + `<div class="v2-observation" data-sign-in-policy data-sign-in-can-read="${canRead}" data-sign-in-can-manage="${canManage}">`
+    + section(t, 'security-lockout', msgid('Sign-in lockout'), help(t, msgid('Counts reset after a successful sign-in. A lock never ends a session that is already open.'))
+      + `<h3>${esc(t(msgid('By username')))}</h3>` + fields(policyField('lockout.username.attempts', msgid('Failed attempts')) + policyField('lockout.username.windowMin', msgid('Within, minutes')) + policyField('lockout.username.durationMin', msgid('Lock the username for, minutes')))
+      + `<h3>${esc(t(msgid('By IP address')))}</h3>` + fields(policyField('lockout.ip.attempts', msgid('Failed attempts')) + policyField('lockout.ip.windowMin', msgid('Within, minutes')) + policyField('lockout.ip.durationMin', msgid('Block the address for, minutes')))
+      + fields(field(t, 'v2-sign-in-ip-allow', msgid('Addresses never locked, one per line'), area('v2-sign-in-ip-allow', { 'data-sign-in-field': 'lockout.ipAllow' }, ' rows="4" dir="ltr"'))
+        + field(t, 'v2-sign-in-ip-deny', msgid('Addresses always refused, one per line'), area('v2-sign-in-ip-deny', { 'data-sign-in-field': 'lockout.ipDeny' }, ' rows="4" dir="ltr"')))
+      + help(t, msgid('Addresses on the never-locked list are not counted or locked. A locked or refused address is turned away by the panel sign-in; it is not added to the firewall.'))
+      + table(t, msgctxt('approved-xwhm', 'Locked right now'), [msgid('Username or address'), msgid('Failed attempts'), msgid('Until (UTC)')], { 'data-sign-in-lockouts': true })
+      + field(t, 'v2-sign-in-unlock-target', msgid('Lock to lift'), select(t, 'v2-sign-in-unlock-target', { 'data-sign-in-unlock-target': true }, []))
+      + actions(button(t, msgid('Unlock username'), { 'data-sign-in-unlock': 'username' }) + button(t, msgid('Unblock address'), { 'data-sign-in-unlock': 'ip' }))
+      + help(t, msgid('Every lock and unlock is written to the audit log.')))
+    + section(t, 'security-passwords', msgid('Password strength and sessions'), help(t, msgid('A new password must reach the required strength, from 0 to 100; values round up to a multiple of 5. Leave a service empty to use the default. Existing passwords are not checked.'))
+      + fields(policyField('passwordStrength.default', msgid('Default required strength'), ' min="0" max="100" dir="ltr"')
+        + ([['panel', msgid('Panel sign-in')], ['mail', msgid('Email accounts')], ['ftp', msgid('FTP accounts')], ['database', msgid('Database users')], ['webdisk', msgid('Web Disk')], ['directory', msgid('Protected directories')]] as const)
+          .map(([service, label]) => policyField(`passwordStrength.perService.${service}`, label, ' min="0" max="100" dir="ltr"')).join(''))
+      + `<h3>${esc(t(msgid('Sessions')))}</h3>` + fields(policyField('session.idleMin', msgid('Idle timeout, minutes'), ' min="1" max="30" dir="ltr"') + policyField('session.absoluteHours', msgid('Session lifetime, hours'), ' min="1" max="24" dir="ltr"'))
+      + help(t, msgid('Sessions end after at most 30 idle minutes and 24 hours in any case; shorter values apply to every panel sign-in.'))
+      + actions(button(t, msgid('Save sign-in policy'), { 'data-sign-in-save': true }, false, true) + button(t, msgid('Refresh'), { 'data-sign-in-refresh': true }, canRead))
+      + status(t, canRead ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-sign-in-status': true }, canRead ? 'unread' : 'unavailable'))
+    + '</div>'
     + section(t, 'security-tokens', msgctxt('approved-xwhm', 'API tokens'), fields(field(t, 'v2-security-token-name', msgid('Name'), inputControl('v2-security-token-name', {}))
       + field(t, 'v2-security-token-addresses', msgid('Allowed addresses'), area('v2-security-token-addresses', {}, ' dir="ltr"'))
       + field(t, 'v2-security-token-expiry', msgctxt('approved-xwhm', 'Expires'), inputControl('v2-security-token-expiry', {}, false, ' dir="ltr"', 'date')))
@@ -38,7 +58,7 @@ export function renderV2WhmSecurityOverview(input: WhmObservationInput): string 
       + actions(link(t, msgid('Web application firewall'), '/whm/security/waf')))
     + section(t, 'security-php-functions', msgid('Dangerous PHP functions'), help(t, msgid('Global function policy and per-account exceptions have not been read. A listed function is not a verified prohibition.'))
       + fields(['exec', 'shell_exec', 'system', 'passthru', 'proc_open', 'popen'].map(name => check(t, name, {})).join(''))
-      + table(t, msgid('PHP function exceptions'), [msgid('Account'), msgid('Functions'), msgid('Reason')], { 'data-v2-security-php-exceptions': true }) + actions(button(t, msgid('Add exception'))) + notConnected)
+      + table(t, msgid('PHP function exceptions'), [msgid('Account'), msgid('Functions'), msgid('Reason')], { 'data-v2-security-php-exceptions': true }) + actions(link(t, msgid('Add exception'), '/whm/software/php')) + notConnected)
     // cPanel WHM Compiler Access, painted by the sec client from GET /api/server/sec/compiler-access.
     + section(t, 'security-compiler', msgctxt('approved-xwhm', 'Compiler lock'), check(t, msgid('Restrict compiler access'), { 'data-sec-input': 'restricted' })
       + `<dl class="v2-observation__facts">${compilerFacts}</dl>`
@@ -48,8 +68,6 @@ export function renderV2WhmSecurityOverview(input: WhmObservationInput): string 
       + status(t, canRead ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-sec-status': true }, canRead ? 'unread' : 'unavailable')
       + status(t, '', { 'data-sec-result': true }, 'unread', true),
       { 'data-sec-workspace': true, 'data-sec-page': 'compiler-access', 'data-sec-can-read': String(canRead), 'data-sec-can-manage': String(canManage) })
-    + section(t, 'security-review', msgid('Review policy changes'), actions(button(t, msgid('Discard')) + button(t, msgid('Save and apply'), {}, false, true))
-      + help(t, msgid('No global host-policy write or reviewed draft is connected here. Existing password and optional-factor settings use their own authenticated workflow.')))
   return page(input, '/whm/security', msgctxt('theme:v2', 'Security advisor'), msgid('Access policy, optional multi-factor authentication and host protections.'), body)
 }
 

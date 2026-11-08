@@ -436,7 +436,7 @@ try{
     assert.equal(await page.locator('[data-domain-primary-rename]').count(),1)
     assert.ok((await page.locator('[data-domain-advanced-unavailable]').textContent()).trim().length>0)
     assert.equal(await page.locator('[data-domain-primary-rename]').evaluate(card=>{const controls=[...card.querySelectorAll('input,select,button')];return controls.length>=3&&controls.every(control=>control.disabled||control.readOnly)}),true,'Primary rename components remain explicitly unavailable')
-    assert.equal(await page.locator('[data-domain-native-options]').evaluate(card=>{const controls=[...card.querySelectorAll('input,select,button')];return controls.length>=2&&controls.every(control=>control.disabled||control.readOnly)}),true,'Advanced native options stay unavailable')
+    assert.equal(await page.locator('[data-domain-native-options]').evaluate(card=>{const controls=[...card.querySelectorAll('input,select,button')];const unavailable=controls.filter(control=>control.name!=='autoDns');return controls.length>=2&&unavailable.length>0&&unavailable.every(control=>control.disabled||control.readOnly)}),true,'Native options without a handler stay unavailable')
     assert.equal(await remove(page,primaryId).count()===0||await remove(page,primaryId).isDisabled(),true)
     assert.equal(await remove(page,'mail-domain').count()===0||await remove(page,'mail-domain').isDisabled(),true)
     checkpoint=lang+'-'+width+':geometry'
@@ -452,7 +452,7 @@ try{
     checkpoint=lang+'-'+width+':create-subdomain'
     await create(page,{name:'docs.'+primaryName,kind:'subdomain',parentId:primaryId,docRoot:'sites/docs',siteType:'static'});await state(page,'saved')
     const sub=[...model.records.values()].find(row=>row.name==='docs.'+primaryName);assert.equal(sub.parentId,primaryId);assert.equal(sub.docRoot,home+'/sites/docs');assert.equal(sub.siteType,'static')
-    assert.equal((await page.locator('[data-domain-id="'+sub.id+'"] td').nth(5).textContent()).trim(),lang==='ar'?'غير مستخدم':'Not used');assert.deepEqual(sub.php,php,'Static mode retains dormant PHP configuration without claiming it is active')
+    assert.equal((await page.locator('[data-domain-id="'+sub.id+'"] td').nth(6).textContent()).trim(),lang==='ar'?'غير مستخدم':'Not used');assert.deepEqual(sub.php,php,'Static mode retains dormant PHP configuration without claiming it is active')
     checkpoint=lang+'-'+width+':create-alias'
     await create(page,{name:'ALIAS.MIXED.EXAMPLE.TEST',kind:'alias',parentId:addon.id});await state(page,'saved')
     const alias=[...model.records.values()].find(row=>row.name==='alias.mixed.example.test');assert.equal(alias.parentId,addon.id);assert.equal(alias.docRoot,addon.docRoot);assert.deepEqual(alias.php,addon.php)

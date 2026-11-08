@@ -162,6 +162,7 @@ const setup = (overrides: Partial<MonitoringAlertsHelpers> = {}, initial: { rule
   const helpers: MonitoringAlertsHelpers = {
     readDelivery: vi.fn(async () => clone(files.delivery)), writeDelivery: vi.fn(async (value: unknown) => { files.delivery = clone(value); return value }),
     readChannels: vi.fn(async () => initial.channels === undefined ? CHANNELS : initial.channels),
+    readEveryMinutes: vi.fn(async () => 5),
     transports: { serverName: 'srv1.example.test', email: vi.fn(async message => { mail.push(message) }), webhook: vi.fn(async request => { hooks.push(request); return { status: 200 } }) },
     requireCaller: vi.fn(async () => root),
     assertRoot: vi.fn(async (caller: AuthenticatedCaller) => { if (caller.principal.kind !== 'root') fail('FORBIDDEN', 'root role is required for this operation') }),

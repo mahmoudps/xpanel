@@ -56,6 +56,34 @@ describe('phpMyAdmin sign-on client', () => {
     expect(checks[1]).toContain('Passed'); expect(checks[2]).toContain('Failed'); expect(checks[3]).toContain('Not checked')
     expect(q('[data-db-status]').textContent).toBe('The sign-on bridge differs from the reviewed file.')
   })
+  const pgClient = (state: string, reason: string | null, databases: number | null = 2) => ({ context: { accountId, username: 'alice' }, client: 'phppgadmin', installed: state !== 'no-package', postgresql: true, signon: { state, reason }, databases, ticketSeconds: 60, sessionSeconds: 1800 })
+  it('opens phpPgAdmin through its own sign-on once the server reports ready', async () => {
+    const submitted: HTMLFormElement[] = []
+    vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(function (this: HTMLFormElement) { submitted.push(this.cloneNode(true) as HTMLFormElement) })
+    const send = vi.fn(async (method: unknown) => method === 'GET' ? pgClient('ready', null) : { ...signon, client: 'phppgadmin' })
+    await bind(renderAccountDbEngineWorkspace({ page: 'phppgadmin', lang: 'en', accountId, username: 'alice', canManage: true }), send)
+    expect(q('[data-db-fact="databases"]').textContent).toBe('2'); const open = q<HTMLButtonElement>('[data-db-action="open"]'); expect(open.disabled).toBe(false)
+    open.click(); await tick()
+    expect(send).toHaveBeenLastCalledWith('POST', '/api/account/database-engines/phppgadmin/sign-on', {})
+    expect(submitted).toHaveLength(1); expect(submitted[0]!.action).toBe(signon.action)
+    expect(q('[data-db-status]').textContent).toContain('phpPgAdmin opened in a new tab')
+    expect(document.body.textContent).not.toContain(signon.ticket)
+  })
+  it('refuses a phpMyAdmin reply on the phpPgAdmin page', async () => {
+    const send = vi.fn(async (method: unknown) => method === 'GET' ? pgClient('ready', null) : signon)
+    await bind(renderAccountDbEngineWorkspace({ page: 'phppgadmin', lang: 'en', accountId, username: 'alice', canManage: true }), send)
+    q<HTMLButtonElement>('[data-db-action="open"]').click(); await tick()
+    expect(q('[data-db-status]').textContent).toContain('could not be prepared')
+  })
+  it.each([
+    ['no-package', 'no-distribution-package', 2, 'This operating system has no phpPgAdmin package in its enabled repositories.'],
+    ['not-configured', 'client-config-unscoped', 2, 'phpPgAdmin is not set to list owned databases only.'],
+    ['ready', null, 0, 'Create a PostgreSQL database first. A sign-on opens only your own databases.'],
+  ])('keeps phpPgAdmin closed for %s %s', async (state, reason, databases, text) => {
+    await bind(renderAccountDbEngineWorkspace({ page: 'phppgadmin', lang: 'en', accountId, username: 'alice', canManage: true }), vi.fn(async () => pgClient(state, reason, databases)))
+    expect(q<HTMLButtonElement>('[data-db-action="open"]').disabled).toBe(true)
+    expect(q('[data-db-status]').textContent).toBe(text)
+  })
   it('sends nothing on an unavailable page', async () => {
     const send = vi.fn(async () => webClient())
     await bind(renderAccountDbEngineWorkspace({ page: 'phpmyadmin', lang: 'en', accountId, username: 'alice', canManage: false }), send)
@@ -73,7 +101,7 @@ describe('MariaDB upgrade client', () => {
     const start = q<HTMLButtonElement>('[data-db-action="upgrade"]'); start.click(); await tick()
     expect(send).toHaveBeenCalledTimes(1)
     answer = true; start.click(); await tick()
-    expect(send).toHaveBeenLastCalledWith('POST', '/api/server/databases/upgrade/apply', { expectedRevision: 'a'.repeat(64) })
+    expect(send).toHaveBeenLastCalledWith('POST', '/api/server/databases/upgrade/apply', { expectedRevision: 'a'.repeat(64), acknowledgedWarnings: ['service-restart', 'no-downgrade'] })
     expect(q('[data-db-job]').textContent).toContain('J-1001'); expect(start.disabled).toBe(true)
   })
   it('explains a current server and keeps the action disabled', async () => {

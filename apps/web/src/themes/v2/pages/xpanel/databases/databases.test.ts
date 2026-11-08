@@ -49,7 +49,7 @@ describe('v2 account database family', () => {
       expect(nodes.filter(node => node.tag === 'button').every(node => node.attrs.has('disabled'))).toBe(true)
     }
     const main = renderV2MariaDbPage({}, write)
-    for (const title of ['Create a database', 'Database users', 'Privileges', 'Remote access', 'Import and export']) expect(main).toContain(title)
+    for (const title of ['Create a database', 'Database users', 'Privileges', 'Remote access']) expect(main).toContain(title)
     expect(main).toContain('data-db-username=""')
     expect(main).not.toContain('No saved databases.')
   })
@@ -58,7 +58,7 @@ describe('v2 account database family', () => {
     const html = renderV2MariaDbPage({ account, databases: [database] })
     expect(html).toContain('data-db-manage="false" data-capability-unavailable="true"')
     expect(html).not.toContain('alice_shop')
-    for (const heading of ['Create a database', 'Database users', 'Privileges', 'Remote access', 'Import and export']) expect(html).toContain(heading)
+    for (const heading of ['Create a database', 'Database users', 'Privileges', 'Remote access']) expect(html).toContain(heading)
     const nodes = parseMarkup(html)
     expect(by(nodes, 'data-db-refresh')?.attrs.has('disabled')).toBe(true)
   })
@@ -174,12 +174,12 @@ describe('v2 account database family', () => {
   it('retains unsupported approved controls without claiming or enabling native effects', () => {
     const html = renderV2MariaDbPage({ account }, write)
     const nodes = parseMarkup(html)
-    for (const id of ['v2-db-rename-name', 'v2-dbu-reset-password', 'v2-db-import-file', 'v2-db-import-target']) expect(by(nodes, 'id', id)?.attrs.has('disabled')).toBe(true)
-    expect(html).toContain('No database has been renamed.')
-    expect(html).toContain('No dump has been read, imported or exported.')
+    expect(by(nodes, 'id', 'v2-dbu-reset-password')?.attrs.has('disabled')).toBe(true)
+    for (const id of ['v2-db-rename-name', 'v2-db-import-file', 'v2-db-import-target']) expect(by(nodes, 'id', id)).toBeUndefined()
+    expect(html).not.toContain('No dump has been read')
     expect(by(nodes, 'data-db-overview-database')?.attrs.has('disabled')).toBe(true)
     expect(by(nodes, 'data-db-overview-rows')?.tag).toBe('tbody')
-    expect(nodes.filter(node => node.attrs.has('data-v2-db-sql-preview'))).toHaveLength(2)
+    expect(nodes.filter(node => node.attrs.has('data-v2-db-sql-preview'))).toHaveLength(1)
     expect(html).toContain('No generated SQL preview has been read.')
     const matrix = by(nodes, 'id', 'v2-db-privilege-overview')!
     const headers = childrenOf(nodes, matrix).filter(node => node.tag === 'th')
@@ -276,12 +276,14 @@ describe('v2 account database family', () => {
     expect(by(parseMarkup(html), 'data-db-pg-form', 'database')?.tag).toBe('div')
   })
 
-  it('keeps phpPgAdmin explicitly unsupported without a fake sign-on endpoint', () => {
+  it('renders the phpPgAdmin launch closed until the server reports sign-on ready', () => {
     const html = renderV2PhpPgAdminPage({ account }, write)
     const nodes = parseMarkup(html)
-    expect(html).toContain('no documented single sign-on method')
-    expect(by(nodes, 'data-db-action', 'open')).toBeUndefined()
-    expect(nodes.filter(node => node.tag === 'button').every(node => node.attrs.has('disabled') || node.attrs.get('data-db-action') === 'refresh')).toBe(true)
+    expect(by(nodes, 'data-db-engine', 'account-phppgadmin')).toBeDefined()
+    expect(by(nodes, 'data-db-action', 'open')?.attrs.has('disabled')).toBe(true)
+    for (const key of ['installed', 'postgresql', 'databases', 'signon', 'session', 'ticket']) expect(by(nodes, 'data-db-fact', key)).toBeDefined()
+    expect(html).toContain('data-db-checks')
+    expect(html).toContain('Create databases and users on the PostgreSQL databases page')
   })
 
   it('keeps every rendered field label linked to one control and every table header aligned structurally', () => {

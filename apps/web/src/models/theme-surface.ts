@@ -5,6 +5,7 @@ import { serviceHealthPresentation } from '../service-area.ts'
 import { isHtmlElement, parseMarkup, type MarkupNode } from '../themes/markup.ts'
 import type { AuthPersonalView, MailSurfaceProps, PanelSurfaceProps, ThemeViewProps, WhmSurfaceProps } from '../themes/contract.ts'
 import { parseWebsiteAnalyticsSnapshot } from './website-analytics.ts'
+import { parseWebStatsView } from './web-stats.ts'
 import { MONITORING_LOG_DEFAULT_LINES, MONITORING_LOG_MAX_LINES, MONITORING_LOG_UNITS } from '../../../../packages/os/src/monitoring-command.ts'
 
 const closedAuthPersonal = (state: 'denied' | 'unavailable'): AuthPersonalView => Object.freeze({
@@ -152,6 +153,7 @@ function scopePanelFacts(props: PanelSurfaceProps & ThemeViewProps, account: Acc
     dnsRecords: domains === undefined ? undefined : props.dnsRecords?.filter(record => names.has(record.zone)),
     activeDomain: selected?.name ?? account.primaryDomain, customConfig, websiteAnalytics,
     ...(props.websiteAnalytics !== undefined && websiteAnalytics === undefined ? { websiteAnalyticsUnavailable: true } : {}),
+    ...(props.webStats !== undefined ? parseWebStatsView(props.webStats, { accountId: account.id }) ? {} : { webStats: undefined, webStatsUnavailable: true } : {}),
   }
   return scoped
 }

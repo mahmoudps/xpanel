@@ -7,9 +7,10 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
 // Source diagnostics only. These tests do not issue a certificate or emulate a trusted CA.
-import { ACME_DIRECTORY, PATHS, assertIsolatedDefaultConfig, awaitReadiness, certbotArguments, mergeApiEnvironment, parseConfigArguments, renderChallenge, renderIngress, renderRenewalUnits, renewalObservation, requiredEnvironment, sameFileVersion, validateConfig } from './management-tls.mjs'
-import { ACTIVATION_KIND, ACTIVATION_PATH } from './management-tls-activation.mjs'
+import { ACME_DIRECTORY, DEFAULT_ACCESS, PATHS, assertIsolatedDefaultConfig, gatedListeners, validateAccess, withAccess, awaitReadiness, certbotArguments, mergeApiEnvironment, parseConfigArguments, renderChallenge, renderIngress, renderRenewalUnits, renewalObservation, requiredEnvironment, sameFileVersion, validateConfig } from './management-tls.mjs'
+import { ACTIVATION_KIND, ACTIVATION_PATH, activationCommandEvidence } from './management-tls-activation.mjs'
 import { NGINX_HTTP2_STYLES, nginxHttp2Style } from './nginx-http2.mjs'
+import { SEC_STATE_PATHS } from '../apps/agent/src/sec-policy.ts'
 import { renderDefaultSite, renderNginxSite } from '../packages/render/src/edge/nginx.ts'
 import { account, cert, domain, serverBlocks, settings } from '../packages/render/src/edge/testkit.ts'
 
@@ -67,21 +68,36 @@ const modelFilesystem = () => {
 }
 const transactionBindings = (fs: ReturnType<typeof modelFilesystem>) => ({ ...fs, constants, PATHS, sha: digest, fail: codedFailure, sameFileVersion, stamp: () => String(Math.random()).slice(2), command: async (_operation: string, _executable: string, args: string[]) => { const original = fs.get(args[2])!; fs.put(args[3], original.bytes, original.st.mode & 0o777, original.st.gid) } })
 
-const lifecycleModel = (options: { expired?: boolean; rejectCandidate?: boolean; rejectActivation?: boolean; rejectStatus?: boolean; mutate?: 'api' | 'secret' | 'config' | 'timer'; http2?: 'listen' | 'directive' } = {}) => {
-  const fs = modelFilesystem(), value = config(), operations: string[] = [], statuses: any[] = []
-  const oldFingerprint = 'a'.repeat(64), newFingerprint = 'b'.repeat(64)
+const OLD_CERTIFICATE = 'old certificate bytes'
+// As releases up to 0.1.23 wrote it: fc2b082f added the HTTP/2 styles, bf326620 the TLS policy include.
+const oldStyleIngress = (value: ReturnType<typeof config>, generation: string) => renderIngress(value, generation, 'directive').replace(/    # These paths carry a credential[^\n]*\n    location ~ [^\n]*\n[^}]*\n    \}\n/g, '').replaceAll('\n    http2 on;', '').replaceAll(`include ${PATHS.tlsPolicy};`, 'ssl_protocols TLSv1.2 TLSv1.3;')
+const accountVhost = (http2: 'listen' | 'directive') => renderNginxSite(account(), [domain()], { ...settings(), edge: { http2 } }, cert())
+const INGRESS_DEPRECATION = `nginx: [warn] the "listen ... http2" directive is deprecated, use the "http2" directive instead in ${PATHS.ingress}:4\n`
+const PROTOCOLS_REDEFINED = 'nginx: [warn] protocol options redefined for 0.0.0.0:443 in /etc/nginx/sites-enabled/account.conf:3\n'
+
+const lifecycleModel = (options: { expired?: boolean; rejectCandidate?: boolean; rejectActivation?: boolean; rejectStatus?: boolean; mutate?: 'api' | 'secret' | 'config' | 'timer'; http2?: 'listen' | 'directive'; ingress?: (value: ReturnType<typeof config>, generation: string) => string; account?: string; warning?: string; notDue?: boolean } = {}) => {
+  const fs = modelFilesystem(), value = config(), operations: string[] = [], statuses: any[] = [], testedIngress: string[] = []
+  const oldFingerprint = digest(OLD_CERTIFICATE), newFingerprint = 'b'.repeat(64)
   fs.put(PATHS.config, JSON.stringify(value), 0o600)
   fs.put(PATHS.secret, '1'.repeat(64) + '\n', 0o640, 100)
   fs.put(PATHS.apiEnv, Object.entries(requiredEnvironment(value)).map(([key, item]) => `${key}=${item}\n`).join(''), 0o640, 100)
   fs.put(PATHS.challenge, renderChallenge(value), 0o644)
-  fs.put(PATHS.ingress, renderIngress(value, oldFingerprint, 'listen'), 0o644)
+  fs.put(PATHS.ingress, (options.ingress ?? ((selected, generation) => renderIngress(selected, generation, 'listen')))(value, oldFingerprint), 0o644)
+  fs.put(`${PATHS.certs}/${oldFingerprint}/fullchain.pem`, OLD_CERTIFICATE)
   fs.put(PATHS.include, '# Managed by xPanel management TLS lifecycle v1.\ninclude\n', 0o600)
   fs.put(PATHS.service, '# Managed by xPanel management TLS lifecycle v1.\nservice\n', 0o644)
   fs.put(PATHS.timer, '# Managed by xPanel management TLS lifecycle v1.\ntimer\n', 0o644)
   let timer = { LoadState: 'loaded', ActiveState: 'active', SubState: 'waiting', UnitFileState: 'enabled', InvocationID: '1'.repeat(32), FragmentPath: PATHS.timer, DropInPaths: '' }
   const timerRead = async () => ({ ...timer, references: new Map([[PATHS.timer, fs.get(PATHS.timer)], [PATHS.service, fs.get(PATHS.service)]]) })
+  // nginx compares the protocol options of every server on one socket, as parsed from the files on disk at that moment.
+  const nginxWarnings = () => {
+    const ingress = fs.get(PATHS.ingress)!.bytes.toString()
+    const seen = new Set([ingress, options.account ?? ''].flatMap(text => [...text.matchAll(/^ *listen 443((?: [a-z0-9_]+)*);$/gm)].map(match => match[1]!.replace(' default_server', ''))))
+    return (seen.size > 1 ? PROTOCOLS_REDEFINED : '') + (options.http2 === 'directive' && ingress.includes('listen 443 ssl http2;') ? INGRESS_DEPRECATION : '') + (options.warning ?? '')
+  }
   const command = async (operation: string, _executable: string, args: string[]) => {
     operations.push(operation)
+    if (operation === 'nginx-config-test') testedIngress.push(fs.get(PATHS.ingress)!.bytes.toString())
     if (operation === 'backup-managed-file') { const original = fs.get(args[2])!; fs.put(args[3], original.bytes, original.st.mode & 0o777, original.st.gid) }
     if (operation === 'certbot-management-issuance-or-renewal') {
       if (options.mutate === 'api') fs.put(PATHS.apiEnv, fs.get(PATHS.apiEnv)!.bytes.toString() + 'OPERATOR_CHANGED=preserve\n', 0o640, 100)
@@ -89,16 +105,16 @@ const lifecycleModel = (options: { expired?: boolean; rejectCandidate?: boolean;
       if (options.mutate === 'config') fs.put(PATHS.config, JSON.stringify({ ...value, acmeEmail: 'changed@example.org' }))
       if (options.mutate === 'timer') timer = { ...timer, InvocationID: '2'.repeat(32) }
     }
-    return { stdout: operation === 'read-api-reader-group' ? 'xpanel:x:100:\n' : '', stderr: '', exitCode: 0 }
+    return { stdout: operation === 'read-api-reader-group' ? 'xpanel:x:100:\n' : '', stderr: ['nginx-config-test', 'read-nginx-configuration-digest'].includes(operation) ? nginxWarnings() : '', exitCode: 0 }
   }
   const bindings = {
-    ...transactionBindings(fs), command, MARKER: '# Managed by xPanel management TLS lifecycle v1.\n', validateConfig, mergeApiEnvironment, certbotArguments,
-    renewalTimerState: timerRead, nginxState: async () => ({ LoadState: 'loaded', ActiveState: 'active', SubState: 'running', InvocationID: 'a'.repeat(32), MainPID: '10' }), nginxConfigurationDigest: async () => 'configuration-hash', dnsPreflight: async () => {},
-    preflightUnusedListeners: async () => {}, assertNginxInvocation: async () => {}, nginxReload: async () => {}, assertNoCertbotHooks: () => {},
+    ...transactionBindings(fs), command, MARKER: '# Managed by xPanel management TLS lifecycle v1.\n', validateConfig, mergeApiEnvironment, certbotArguments, baseConfig: (selected: unknown) => selected,
+    renewalTimerState: timerRead, nginxState: async () => ({ LoadState: 'loaded', ActiveState: 'active', SubState: 'running', InvocationID: 'a'.repeat(32), MainPID: '10' }), dnsPreflight: async () => {},
+    preflightUnusedListeners: async () => {}, assertNginxInvocation: async () => {}, activationCommandEvidence, assertNoCertbotHooks: () => {},
     observeNginxHttp2: async () => options.http2 ?? 'listen',
-    installedCertificate: () => ({ generation: oldFingerprint }),
+    X509Certificate: class { raw: Buffer; constructor(bytes: Buffer) { this.raw = bytes } }, NGINX_HTTP2_STYLES,
     servedReady: async (_config: unknown, certificate: { generation: string }) => { if (options.expired && certificate.generation === oldFingerprint) codedFailure('CERT_HAS_EXPIRED'); if (options.rejectCandidate && certificate.generation === newFingerprint) codedFailure('CANDIDATE_NOT_TRUSTED'); return { attempts: 1 } },
-    readCertificate: () => ({ generation: newFingerprint, fullchain: 'diagnostic bytes', key: 'diagnostic bytes', expiresAt: '2030-01-01T00:00:00.000Z' }),
+    readCertificate: () => ({ generation: options.notDue ? oldFingerprint : newFingerprint, fullchain: options.notDue ? OLD_CERTIFICATE : 'diagnostic bytes', key: 'diagnostic bytes', expiresAt: '2030-01-01T00:00:00.000Z' }),
     rootDirectory: () => {}, renderChallenge, renderIngress, renderRenewalUnits: () => ({ service: '# Managed by xPanel management TLS lifecycle v1.\nservice\n', timer: '# Managed by xPanel management TLS lifecycle v1.\ntimer\n' }),
     randomBytes, awaitReadiness: options.rejectActivation ? async (probe: () => Promise<unknown>) => { try { return { attempts: 1, result: await probe() } } catch { return codedFailure('SERVED_READINESS_FAILED') } } : awaitReadiness,
     request: async (_address: string, _point: unknown, path: string) => ({ status: 200, body: fs.get(PATHS.webroot + path)!.bytes.toString() }),
@@ -107,8 +123,8 @@ const lifecycleModel = (options: { expired?: boolean; rejectCandidate?: boolean;
     observeManagementActivation: () => ({ files: {} }),
     completeManagementActivation: () => { if (options.rejectActivation) codedFailure('ACTIVATION_NEW_WORKERS_UNOBSERVED'); return { kind: ACTIVATION_KIND, diagnosticModelOnly: true } },
   }
-  const loaded = loadDeclarations(['OwnedTransaction', 'assertOriginalReferences', 'assertTimerSnapshot', 'lifecycle'], bindings)
-  return { fs, value, statuses, operations, invoke: (phase = 'prepare') => loaded.lifecycle(value, phase, fs.get(PATHS.config)), oldFingerprint }
+  const loaded = loadDeclarations(['OwnedTransaction', 'assertOriginalReferences', 'assertTimerSnapshot', 'lifecycle', 'nginxRefuses', 'nginxReload', 'nginxConfigurationDigest', 'installedCertificate', 'releasedIngress', 'managedIngress'], bindings)
+  return { fs, value, statuses, operations, testedIngress, invoke: (phase = 'prepare') => loaded.lifecycle(value, phase, fs.get(PATHS.config)), oldFingerprint }
 }
 
 describe('management TLS source diagnostics (not public CA or installed-host qualification)', () => {
@@ -155,8 +171,9 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
   })
   it('lets a synchronous account provisioning answer through every management entry point', () => {
     const rendered = renderIngress(config(), 'a'.repeat(64), 'listen')
-    expect(rendered.match(/proxy_pass http:\/\/127\.0\.0\.1:120(83|87|96);/g)).toHaveLength(3)
-    expect(rendered.match(/^ {8}proxy_read_timeout 300s;$/gm)).toHaveLength(3)
+    expect(rendered.match(/proxy_pass http:\/\/127\.0\.0\.1:120(83|87|96);/g)).toHaveLength(6)
+    expect(rendered.match(/^ {8}proxy_read_timeout 300s;$/gm)).toHaveLength(6)
+    expect(rendered.match(/^ {8}access_log off;$/gm)).toHaveLength(3)
   })
   it('keeps every managed directory under root-only ancestors, never the group-writable /var/log', () => {
     for (const path of [PATHS.webroot, PATHS.acme, PATHS.logs, PATHS.certs]) expect(path.startsWith('/var/log/')).toBe(false)
@@ -260,9 +277,9 @@ describe('management TLS source diagnostics (not public CA or installed-host qua
     expect(text.match(/^ {4}listen 443 ssl;$/gm)).toHaveLength(3)
     expect(text.match(/^ {4}http2 on;$/gm)).toHaveLength(3)
     expect(text).not.toContain('192.0.2.10:443')
-    expect(text.match(/include \/etc\/nginx\/xpanel-management\/ingress-secret.conf;/g)).toHaveLength(3)
-    expect(text.match(/proxy_set_header Upgrade \$http_upgrade;/g)).toHaveLength(3)
-    expect(text.match(/proxy_set_header Connection \$xpanel_management_connection_upgrade;/g)).toHaveLength(3)
+    expect(text.match(/include \/etc\/nginx\/xpanel-management\/ingress-secret.conf;/g)).toHaveLength(6)
+    expect(text.match(/proxy_set_header Upgrade \$http_upgrade;/g)).toHaveLength(6)
+    expect(text.match(/proxy_set_header Connection \$xpanel_management_connection_upgrade;/g)).toHaveLength(6)
     expect(text).toContain('if ($http_host != "panel.example.org:2083") { return 421; }')
     expect(text).toContain('proxy_set_header Forwarded "";')
     expect(text).toContain('proxy_set_header X-Forwarded-For $remote_addr;')
@@ -395,6 +412,75 @@ describe('management TLS retained-failure control-flow diagnostics (modeled kern
     const model = lifecycleModel({ http2: 'directive' })
     await model.invoke('renew')
     expect(model.fs.get(PATHS.ingress)!.bytes.toString()).toBe(renderIngress(model.value, 'b'.repeat(64), 'directive'))
+  })
+  it('renews an old-style ingress beside an http2 account vhost by rewriting it before the first reload', async () => {
+    const model = lifecycleModel({ ingress: oldStyleIngress, account: accountVhost('listen') })
+    await model.invoke('renew')
+    expect(model.testedIngress[0]).toBe(renderIngress(model.value, model.oldFingerprint, 'listen'))
+    expect(model.operations.indexOf('nginx-config-test')).toBeLessThan(model.operations.indexOf('certbot-management-issuance-or-renewal'))
+    expect(model.fs.get(PATHS.ingress)!.bytes.toString()).toBe(renderIngress(model.value, 'b'.repeat(64), 'listen'))
+    expect(model.fs.get(PATHS.tlsPolicy)!.bytes.toString()).toContain('ssl_protocols TLSv1.2 TLSv1.3;')
+    expect(model.statuses.at(-1)).toMatchObject({ status: 'tls-ready', priorReadiness: 'trusted-observed' })
+    const backups = [...model.fs.files.keys()].filter(path => path.startsWith(`${PATHS.ingress}.bak.`))
+    expect(backups.map(path => model.fs.get(path)!.bytes.toString())).toEqual([oldStyleIngress(model.value, model.oldFingerprint)])
+  })
+  it('keeps the rewritten ingress when certbot finds the certificate not yet due', async () => {
+    const model = lifecycleModel({ ingress: oldStyleIngress, account: accountVhost('listen'), notDue: true })
+    await model.invoke('renew')
+    expect(model.fs.get(PATHS.ingress)!.bytes.toString()).toBe(renderIngress(model.value, model.oldFingerprint, 'listen'))
+    expect(model.statuses.at(-1).status).toBe('tls-ready')
+  })
+  it('moves an ingress in the listen style to the directive style of a newer nginx', async () => {
+    const model = lifecycleModel({ http2: 'directive', account: accountVhost('directive') })
+    await model.invoke('renew')
+    expect(model.testedIngress[0]).toBe(renderIngress(model.value, model.oldFingerprint, 'directive'))
+    expect(model.statuses.at(-1).status).toBe('tls-ready')
+  })
+  it('restores the old-style ingress when a later step fails, and accepts its known warning on that reload', async () => {
+    const model = lifecycleModel({ ingress: oldStyleIngress, account: accountVhost('listen'), rejectCandidate: true })
+    await expect(model.invoke('renew')).rejects.toThrow('CANDIDATE_NOT_TRUSTED')
+    expect(model.fs.get(PATHS.ingress)!.bytes.toString()).toBe(oldStyleIngress(model.value, model.oldFingerprint))
+    expect(model.fs.get(PATHS.tlsPolicy)).toBeNull()
+    expect(model.testedIngress.at(-1)).toBe(oldStyleIngress(model.value, model.oldFingerprint))
+    expect(model.statuses.at(-1)).toMatchObject({ status: 'failed', reason: 'CANDIDATE_NOT_TRUSTED', rollback: 'owned-files-restored' })
+    expect(model.fs.get(`${PATHS.state}/active-transition.json`)).toBeNull()
+  })
+  it('refuses the rewritten ingress when the account sites still disagree, then restores it', async () => {
+    const model = lifecycleModel({ ingress: oldStyleIngress, account: `${accountVhost('listen')}\nlisten 443 ssl;\n` })
+    await expect(model.invoke('renew')).rejects.toThrow('NGINX_CONFIG_CONFLICT')
+    expect(model.operations).not.toContain('certbot-management-issuance-or-renewal')
+    expect(model.fs.get(PATHS.ingress)!.bytes.toString()).toBe(oldStyleIngress(model.value, model.oldFingerprint))
+    expect(model.statuses.at(-1)).toMatchObject({ status: 'failed', reason: 'NGINX_CONFIG_CONFLICT', rollback: 'owned-files-restored' })
+  })
+  it.each([
+    ['a current ingress with a protocol warning', { account: 'listen 443 ssl;\n' }],
+    ['a current ingress with any other warning', { warning: 'nginx: [warn] could not build optimal types_hash\n' }],
+    ['an old-style ingress with any other warning', { ingress: oldStyleIngress, account: accountVhost('listen'), warning: 'nginx: [warn] could not build optimal types_hash\n' }],
+  ])('keeps refusing %s before it changes a file', async (_name, options) => {
+    const model = lifecycleModel(options)
+    const original = model.fs.get(PATHS.ingress)!.bytes.toString()
+    await expect(model.invoke('renew')).rejects.toThrow('NGINX_CONFIG_CONFLICT')
+    expect(model.fs.get(PATHS.ingress)!.bytes.toString()).toBe(original)
+    expect([...model.fs.files.keys()].some(path => path.includes('.bak.'))).toBe(false)
+    expect(model.operations).not.toContain('nginx-reload')
+  })
+  it.each([
+    ['edited text under the marker', (value: ReturnType<typeof config>, generation: string) => `${oldStyleIngress(value, generation)}# edited\n`, 'MANAGED_INGRESS_EXPLICIT_MIGRATION_REQUIRED'],
+    ['a file without the marker', (value: ReturnType<typeof config>, generation: string) => oldStyleIngress(value, generation).replace('# Managed by xPanel management TLS lifecycle v1.\n', ''), 'UNMANAGED_FILE_MIGRATION_REQUIRED'],
+  ])('keeps refusing %s', async (_name, ingress, code) => {
+    const model = lifecycleModel({ ingress, account: accountVhost('listen') })
+    const original = model.fs.get(PATHS.ingress)!.bytes.toString()
+    await expect(model.invoke('renew')).rejects.toThrow(code)
+    expect(model.fs.get(PATHS.ingress)!.bytes.toString()).toBe(original)
+  })
+  it('reads the warnings nginx prints for a stale ingress and nothing else as tolerable', () => {
+    const { nginxRefuses } = loadDeclarations(['nginxRefuses'], {})
+    expect(nginxRefuses(PROTOCOLS_REDEFINED, true)).toBe(false)
+    expect(nginxRefuses(PROTOCOLS_REDEFINED + INGRESS_DEPRECATION, true)).toBe(false)
+    expect(nginxRefuses(PROTOCOLS_REDEFINED)).toBe(true)
+    expect(nginxRefuses(PROTOCOLS_REDEFINED.replace(':443', ':2083'), true)).toBe(true)
+    expect(nginxRefuses(INGRESS_DEPRECATION.replace(PATHS.ingress, '/etc/nginx/sites-enabled/account.conf'), true)).toBe(true)
+    expect(nginxRefuses(`${PROTOCOLS_REDEFINED}nginx: [emerg] host not found\n`, true)).toBe(true)
   })
   it('permits an expired installed baseline to reach repair and never labels it previously observed', async () => {
     const model = lifecycleModel({ expired: true })
@@ -533,5 +619,56 @@ describe('management TLS retained-failure control-flow diagnostics (modeled kern
       expect(model.signals).toEqual([])
       expect(model.fs.files.has(`${PATHS.state}/active-command.json`)).toBe(true)
     } finally { vi.useRealTimers() }
+  })
+})
+
+describe('panel access binding', () => {
+  it('excuses /login only for an entry point the saved gate hides', () => {
+    expect(PATHS.gate.endsWith(SEC_STATE_PATHS['panel-gate'])).toBe(true)
+    expect(gatedListeners(JSON.stringify({ version: 1, policy: { entrance: { path: 'x', listeners: ['xwhm'] }, response: {}, basicAuth: { listeners: ['xpanel'] }, stopped: ['xmail'] } }))).toEqual(['xwhm', 'xpanel', 'xmail'])
+    expect(gatedListeners(JSON.stringify({ version: 1, policy: { entrance: null, basicAuth: null, stopped: [] } }))).toEqual([])
+    expect(gatedListeners('not json')).toEqual([])
+    expect(gatedListeners(null)).toEqual([])
+  })
+
+  const moved = (ports = {}, hosts = {}) => validateAccess({ schemaVersion: 1, ports: { xpanel: 2083, xwhm: 2087, xmail: 2096, ...ports }, hosts: { xpanel: null, xwhm: null, xmail: null, ...hosts } })
+
+  it('accepts only the grammar the agent writes', () => {
+    expect(moved({ xwhm: 18888 }).ports.xwhm).toBe(18888)
+    expect(validateAccess(DEFAULT_ACCESS).ports.xwhm).toBe(2087)
+    for (const bad of [{ xwhm: 0 }, { xwhm: 65536 }, { xwhm: 443 }, { xwhm: 12087 }, { xwhm: 2083 }]) expect(() => moved(bad)).toThrow()
+    expect(() => moved({}, { xwhm: 'not a host' })).toThrow()
+    expect(() => moved({}, { xwhm: 'a.example.com', xmail: 'a.example.com' })).toThrow()
+  })
+
+  it('moves the listener, the host check and the 443 redirect together and answers 403 for a bound name', () => {
+    const value = withAccess(config(), moved({ xwhm: 18888 }, { xwhm: 'admin.example.com' }))
+    const text = renderIngress(value, 'a'.repeat(64), 'listen')
+    expect(text).toContain(':18888 ssl;')
+    expect(text).not.toContain(':2087 ssl;')
+    expect(text).toContain('if ($http_host != "admin.example.com:18888") { return 403; }')
+    expect(text).toContain('return 308 https://admin.example.com:18888$request_uri;')
+    expect(text).toContain('proxy_pass http://127.0.0.1:12087;')
+    expect(renderIngress(config(), 'a'.repeat(64), 'listen')).not.toContain('return 403')
+  })
+
+  it('leaves the default ingress byte for byte unchanged', () => {
+    expect(renderIngress(withAccess(config(), moved()), 'a'.repeat(64), 'listen')).toBe(renderIngress(config(), 'a'.repeat(64), 'listen'))
+  })
+
+  it('moves the origins only for a rebind and leaves every other value alone', () => {
+    const value = withAccess(config(), moved({ xwhm: 18888 }))
+    const current = Object.entries(requiredEnvironment(config())).map(([key, item]) => `${key}=${item}\n`).join('') + 'OTHER=kept\n'
+    expect(() => mergeApiEnvironment(current, value)).toThrow('API_ENV_EXPLICIT_MIGRATION_REQUIRED')
+    const merged = mergeApiEnvironment(current, value, true)
+    expect(merged).toContain(`XPANEL_WHM_PUBLIC_ORIGIN=https://whm.${config().hostname}:18888\n`)
+    expect(merged).toContain('OTHER=kept\n')
+  })
+
+  it('asks certbot for new names only on a rebind', () => {
+    expect(certbotArguments(config())).not.toContain('--renew-with-new-domains')
+    const args = certbotArguments(withAccess(config(), moved({}, { xwhm: 'admin.example.com' })), true)
+    expect(args).toContain('--renew-with-new-domains')
+    expect(args).toContain('admin.example.com')
   })
 })

@@ -10,7 +10,8 @@ export const BACKUP_ARCHIVE_NAME = /^xpanel-backup-[a-z][a-z0-9]{0,15}-([0-9]{8}
 export const RESTORE_REVISION = /^[0-9a-f]{64}$/
 const unchanged = { stateChanged: false }
 
-export type RestoreDestination = 'new-folder' | 'in-place'
+/** in-place keeps existing files; replace overwrites them (cPanel File and Directory Restoration). */
+export type RestoreDestination = 'new-folder' | 'in-place' | 'replace'
 export type RestoreRefusal = 'too-large' | 'path-too-long' | 'mail-preserved' | 'reserved'
 export type RestoreResult = 'restored' | 'skipped-exists' | 'failed' | 'not-attempted'
 export type BackupFileRequest =
@@ -28,6 +29,13 @@ export const restorePath = (value: unknown): string => {
   return value
 }
 
+/** Mail, panel settings and the trash come back only with a full account restore, as in cPanel. */
+export const OWNER_UNRESTORABLE = ['mail', 'etc', '.xpanel', '.trash'] as const
+export const assertOwnerRestorable = (paths: readonly string[]): void => {
+  const refused = paths.find(path => OWNER_UNRESTORABLE.some(name => path === name || path.startsWith(name + '/')))
+  if (refused !== undefined) fail('VALIDATION', 'mail, panel settings and the trash can be restored only with a full account restore', { ...unchanged, reason: 'path_not_restorable', path: refused })
+}
+
 /** Shared by the API boundary and the agent: exact keys, archive names of this account only, bounded selections. */
 export function parseBackupFileRequest(op: BackupFileRequest['op'], username: string, body: unknown): BackupFileRequest {
   const keys = op === 'browse' ? ['file'] : op === 'preview' ? ['file', 'paths', 'destination'] : ['file', 'paths', 'destination', 'expectedRevision']
@@ -38,7 +46,7 @@ export function parseBackupFileRequest(op: BackupFileRequest['op'], username: st
   if (!Array.isArray(body.paths) || body.paths.length === 0 || body.paths.length > MAX_RESTORE_SELECTION) return fail('VALIDATION', `select 1 to ${MAX_RESTORE_SELECTION} files or folders`, unchanged)
   const paths = body.paths.map(restorePath)
   if (new Set(paths).size !== paths.length) return fail('VALIDATION', 'a selected path is repeated', unchanged)
-  if (body.destination !== 'new-folder' && body.destination !== 'in-place') return fail('VALIDATION', 'the destination must be new-folder or in-place', unchanged)
+  if (body.destination !== 'new-folder' && body.destination !== 'in-place' && body.destination !== 'replace') return fail('VALIDATION', 'the destination must be new-folder, in-place or replace', unchanged)
   if (op === 'preview') return { op, file, paths, destination: body.destination }
   if (typeof body.expectedRevision !== 'string' || !RESTORE_REVISION.test(body.expectedRevision)) return fail('VALIDATION', 'the reviewed restore revision is required', unchanged)
   return { op, file, paths, destination: body.destination, expectedRevision: body.expectedRevision }

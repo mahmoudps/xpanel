@@ -102,7 +102,7 @@ describe('forwarder configuration security acceptance with synthetic state', () 
 
   it('enforces the account plan cap without removing existing forwarders', async () => {
     for (const local of ['first', 'second']) expect((await create({ sourceAddress: `${local}@${f.owner.primaryDomain}`, destinations: ['out@example.test'] })).status).toBe(201)
-    expect((await create({ sourceAddress: `third@${f.owner.primaryDomain}`, destinations: ['out@example.test'] })).status).toBe(409)
+    expect((await create({ sourceAddress: `third@${f.owner.primaryDomain}`, destinations: ['out@example.test'] })).status).toBe(422)
     expect(await records()).toHaveLength(2)
   })
 
@@ -115,7 +115,7 @@ describe('forwarder configuration security acceptance with synthetic state', () 
   it('rechecks the remaining plan capacity inside concurrent configuration mutations', async () => {
     expect((await create({ sourceAddress: source(), destinations: ['out@example.test'] })).status).toBe(201)
     const responses = await Promise.all(['first', 'second'].map(local => create({ sourceAddress: `${local}@${f.owner.primaryDomain}`, destinations: ['out@example.test'] })))
-    expect(responses.map(response => response.status).sort()).toEqual([201, 409])
+    expect(responses.map(response => response.status).sort()).toEqual([201, 422])
     expect(await records()).toHaveLength(2)
   })
 
@@ -190,6 +190,40 @@ describe('forwarder configuration security acceptance with synthetic state', () 
     const saved = await f.request(credential, '/api/mail/import-csv', 'POST', { kind: 'mailboxes', accountId: f.owner.id, csv })
     expect(saved.status).toBe(200)
     expect(await saved.json()).toMatchObject({ summary: { mailboxesImported: 1, errorCount: 0 }, nativeApplied: false })
+  })
+
+  it('imports the strong rows of a table and reports the weak one by code', async () => {
+    const domain = f.owner.primaryDomain
+    const response = await f.request(credential, '/api/mail/import-csv', 'POST', { kind: 'mailboxes', accountId: f.owner.id,
+      rows: [[`one@${domain}`, 'Synthetic,Mailbox,Password!2026', '100'], [`two@${domain}`, 'SyntheticMailboxPassword!2026', '100'], [`three@${domain}`, 'weak', '100']] })
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body).toMatchObject({ summary: { mailboxesImported: 2, errorCount: 1 }, errors: [{ row: 3, code: 'WEAK_PASSWORD' }] })
+    expect((await f.state.store.getServiceUserByLogin(`three@${domain}`))).toBeNull()
+  })
+
+  it('fails only the row of a domain outside the account', async () => {
+    const domain = f.owner.primaryDomain
+    const response = await f.request(credential, '/api/mail/import-csv', 'POST', { kind: 'mailboxes', accountId: f.owner.id,
+      rows: [[`kept@${domain}`, 'SyntheticMailboxPassword!2026', '100'], ['outside@elsewhere.example.test', 'SyntheticMailboxPassword!2026', '100']] })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ summary: { mailboxesImported: 1, errorCount: 1 }, errors: [{ row: 2, code: 'INVALID_ADDRESS' }] })
+    expect(await f.state.store.getServiceUserByLogin('outside@elsewhere.example.test')).toBeNull()
+  })
+
+  it('stops at the plan mailbox limit and reports every remaining row', { tags: ['slow'] }, async () => {
+    const domain = f.owner.primaryDomain, rows = Array.from({ length: 3 }, (_, index) => [`box${index}@${domain}`, 'SyntheticMailboxPassword!2026', '10'])
+    // The plan allows 10. Nine are seeded with a prebuilt hash, so only one row pays for hashing a password.
+    for (let index = 0; index < 9; index++) await f.state.store.createServiceUser({ accountId: f.owner.id, login: `seeded${index}@${domain}`, passwordHash: HASH, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 10, ftpDir: 'public_html' })
+    const response = await f.request(credential, '/api/mail/import-csv', 'POST', { kind: 'mailboxes', accountId: f.owner.id, rows })
+    const body = await response.json()
+    expect(body.summary).toMatchObject({ mailboxesImported: 1, errorCount: 2 })
+    expect(body.errors.map((error: { row: number; code: string }) => [error.row, error.code])).toEqual([[2, 'LIMIT_EXCEEDED'], [3, 'LIMIT_EXCEEDED']])
+  })
+
+  it('refuses a table without a chosen import type', async () => {
+    const response = await f.request(credential, '/api/mail/import-csv', 'POST', { accountId: f.owner.id, rows: [['a@b.test', 'x']] })
+    expect(response.status).toBe(422)
   })
 
   it('applies a saved mailbox-only CSV import on the host in one reconcile', { tags: ['feature'] }, async () => {

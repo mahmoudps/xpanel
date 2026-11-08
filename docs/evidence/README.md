@@ -51,7 +51,52 @@ node --test scripts/evidence/status.test.mjs
 
 `deliveryEvidence` must stay `[]` and `deliveryTarget` must stay `null` unless a genuinely valid full acceptance bundle exists for the exact artifact and source. Build, backup, acquisition, rotation, upgrade and postflight records, health probes and rendered pages show that an operation happened; they prove nothing about a catalog tool's acceptance (the roadmap explicitly says pure health probes never create `verified` evidence). They have no `toolId`, acceptance criterion, `stage`/`environment` slot, `executor`, profile-bound OS observation, independent observer, semantic check inventory or cleanup confirmation, so they cannot be submitted as `EvidenceBundle` receipts and are rejected by the bundle validator.
 
-The only path to `deliveryEvidence` remains: complete detached bundle for the exact source and artifact, all five declared profiles, real-executor linux + browser + external acceptance per tool, reviewed requirements and pins, then a separate reviewed change that publishes those exact rows. Until then `delivery.ts` stays empty and `assessDelivery` keeps every in-scope tool `researched`.
+The only path to `deliveryEvidence` remains: complete detached bundle for the exact source and artifact, all five declared profiles (or the reviewed subset of a catalog profile exclusion), real-executor linux + browser + external acceptance per tool, reviewed requirements and pins, then a separate reviewed commit whose only change is the `delivery.ts` that `scripts/qualification-aggregate.mjs` renders from those exact rows. Until then `delivery.ts` stays empty and `assessDelivery` keeps every in-scope tool `researched`.
+
+## Native qualification runs
+
+The runner, drivers and publication step are described in [docs/decisions/qualification.md](../decisions/qualification.md). Run every slot as root with the pinned Node, from a root-owned checkout of the exact target commit after a frozen install. All files named below are root-owned operator files; credentials are a `0600` JSON file (`username`, `password`, optional `totpCode`) and never a command-line value. Run IDs must not name hosts.
+
+Check the inputs first. A dry run validates the target, detects the profile and lists the tools, their checks and the missing options; it sends no request and writes nothing:
+
+```text
+node scripts/qualification-runner.mjs --slot=host --target=<target.json> --run-id=<run> --dry-run
+```
+
+The dry run also names `withoutReadiness`: tools without a `PHASE1_TOOL_PROBES` entry, whose published evidence host readiness would demote on every host. A tool needs an entry before it is worth qualifying.
+
+First qualification target. The 2026-11-07 re-audit counted 168 tools at level 3 or higher that already have readiness probes, so only acceptance evidence is missing ("gate only"), per work slice:
+
+| Slice | s1 | s2 | s3 | s4 | s5 | s6 | s7 | s8 | s9 | s10 | Total |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Gate only | 21 | 11 | 8 | 17 | 19 | 19 | 16 | 17 | 23 | 17 | 168 |
+
+It also counted 37 tools at level 3 or higher without probes. Two of them (`tweak-system`, `apache-global-config`) already had entries on this branch, and 28 now have entries (26 with scope notes; the two Tweak Settings sections still being built have none). The other 7 (`distro-packages`, `web-stack-builder`, `nameserver-report`, `raw-ftp-log-download`, `email-disk-usage`, `connect-devices`, `gitweb`) have no implementation on their own page, so they stay without probes. Qualify the 168 first, then the 30 with entries. Every one of them still needs a reviewed driver in `scripts/qualification-plan.mjs`; today only `audit-log` has one.
+
+On each profile guest, with the release installed and its binding pinned:
+
+```text
+node scripts/qualification-runner.mjs --slot=unit --target=<target.json> --target-sha256=<pin> --run-id=<run> --output=<evidence-dir>
+node scripts/qualification-runner.mjs --slot=host --target=<target.json> --target-sha256=<pin> --binding=<binding.json> --binding-sha256=<pin> --artifact=<archive> --origin=<https-origin> --address=<installed-address> --credential-file=<login.json> --run-id=<run> --output=<evidence-dir>
+node scripts/qualification-runner.mjs --slot=browser --target=<target.json> --target-sha256=<pin> --binding=<binding.json> --binding-sha256=<pin> --artifact=<archive> --origin=<https-origin> --address=<installed-address> --credential-file=<login.json> --run-id=<run> --output=<evidence-dir>
+```
+
+Tools marked `requires_qualification_admission` in the plan need qualification mode on the guest, and tools marked `shared` run last with a proved restore; see `docs/decisions/qualification.md`. Write tools that open no gate of their own run without it, and the runner records the mode in each report. `--fixture-domain-suffix=<domain>` names the suffix of the run-scoped account's domain (default `example.net`).
+
+`--slot=host` reads the audit store at `/var/lib/xpanel/control.db` unless `--db=<path>` names the configured one. `--ca-file=<pem>` adds an operator CA for the HTTPS client only. `--tools=<id,...>` narrows the plan; the default is every in-scope tool, and tools without a driver are listed as not run. On the outside observer, with the guest's pinned passed host report:
+
+```text
+node scripts/qualification-runner.mjs --slot=external --target=<target.json> --target-sha256=<pin> --binding=<binding.json> --binding-sha256=<pin> --origin=<https-origin> --credential-file=<login.json> --observer=<observer-name> --host-report=<host.report.json> --host-report-sha256=<pin> --run-id=<run> --output=<evidence-dir>
+```
+
+Each run writes one report per tool and, only when it passed with confirmed cleanup, one receipt plus its own report copy per backed slot. Exit status `2` means at least one tool did not pass. Copy every `*.receipt.json` and `*.report.json` into one evidence directory, record and verify the bundle as above, then publish from a clean checkout of the candidate:
+
+```text
+node scripts/qualification-aggregate.mjs --root=<checkout> --target=<target.json> --bundle=<bundle.json> [--bundle=<more.json>] --evidence-root=<evidence-dir> --output=packages/catalog/src/data/delivery.ts
+node scripts/qualification-aggregate.mjs --root=<checkout> --target=<target.json> --bundle=<bundle.json> --evidence-root=<evidence-dir> --check
+```
+
+The aggregator publishes only tools complete on every profile they require and lists the others with their missing slots; it refuses another target, a fake executor, a failed result, a duplicate slot, unreviewed requirements and a checkout that differs from the qualified source beyond `delivery.ts`. That publication commit also updates the assertion in `scripts/evidence/status.test.mjs` that pins today's empty publication.
 
 ## Remaining real evidence required before any tool is verified
 
@@ -61,6 +106,6 @@ None of the following exists today; until it does, no tool can be `verified` and
 2. A reviewed requirements inventory for the tool being qualified with exact acceptance text and unique check IDs for unit, http, browser, linux and external (the in-repo `server-information` inventory is the only reviewed example; the others do not exist yet).
 3. Real per-profile acceptance on all five declared profiles (`ubuntu-22.04`, `ubuntu-24.04`, `almalinux-9`, `rocky-9`, `centos-stream-9`), with the actual installed artifact and browser and external observations. Current browser fixtures declare a fake host executor and incomplete source binding; they cannot be relabeled.
 4. Real executor receipts for every environment. The current `server-information` runner covers only the integrated/http and verified/linux slots (two of six) and its receipts record the missing slots as `notRunSlots`; it cannot produce a complete bundle.
-5. A separately reviewed delivery publication of the exact accepted rows. This tooling must never populate `deliveryEvidence`; that file stays `[]` with `deliveryTarget = null` in this change.
+5. A separately reviewed delivery publication of the exact accepted rows, rendered by `scripts/qualification-aggregate.mjs`. The recorder, verifier and status tools never write `delivery.ts`; that file stays `[]` with `deliveryTarget = null` until such a publication.
 
 What is not verified by this document or by the tooling it describes: no catalog tool is accepted, no host, browser, external or per-profile qualification is established, no upgrade or recovery proof is established, and no production readiness claim follows.

@@ -28,7 +28,7 @@ describe('PHP and Composer visual structure regressions', () => {
     semanticTables()
     const page = document.querySelector('[data-whm-detail-route="/whm/software/php"]')!
     expect(page.querySelectorAll('h1')).toHaveLength(1); expect(page.querySelector('aside')).toBeNull()
-    expect([...page.querySelectorAll<HTMLElement>('[data-whm-detail-section]')].map(section => section.dataset.whmDetailSection)).toEqual(['php-versions', 'php-install', 'php-handlers', 'php-extensions', 'php-configure', 'php-functions'])
+    expect([...page.querySelectorAll<HTMLElement>('[data-whm-detail-section]')].map(section => section.dataset.whmDetailSection)).toEqual(['php-versions', 'php-install', 'php-handlers', 'php-extensions', 'php-configure', 'php-functions', 'host-tool-php-guardian'])
     const handlers = page.querySelector<HTMLTableElement>('[data-whm-detail-section="php-handlers"] table')!
     expect([...handlers.tBodies[0]!.rows].map(row => row.cells[0]!.textContent)).toEqual(['PHP-FPM', 'CGI / suexec', 'suPHP', 'lsphp'])
     for (const row of handlers.tBodies[0]!.rows) { expect(row.cells).toHaveLength(6); for (const cell of [...row.cells].slice(3)) expect(cell.textContent).toBe(locale === 'ar' ? 'غير مقروء' : 'Not read') }

@@ -5,6 +5,8 @@ import { SUPPORTED_PHP_VERSIONS } from './php.ts'
 // procps ps(1): a trailing `=` suppresses each header. No args/cmd column: arguments can carry secrets.
 // `uid` is numeric because `user` falls back to a decimal id when the name exceeds the column width.
 export const MONITORING_PS_ARGV = ['/usr/bin/ps', '-eo', 'pid=,ppid=,uid=,user=,pcpu=,pmem=,rss=,etimes=,stat=,comm='] as const
+// `unit` names the systemd unit holding each process, so panel helpers under an account uid are told apart by cgroup, not by a name the account chooses.
+export const MONITORING_PS_UNIT_ARGV = ['/usr/bin/ps', '-eo', 'pid=,unit='] as const
 export const MONITORING_DF_SPACE_ARGV = ['/usr/bin/df', '-B1', '-P', '-T'] as const
 export const MONITORING_DF_INODE_ARGV = ['/usr/bin/df', '-i', '-P'] as const
 export const MONITORING_LOG_MAX_LINES = 500
@@ -22,6 +24,8 @@ export const MONITORING_LOG_UNITS: readonly string[] = Object.freeze([
 
 export interface MonitoringLogQuery { unit: string; lines: number; since: string | null; priority: number | null }
 export interface MonitoringSignalRequest { pid: number; uid: number; comm: string; startedAt: string; signal: MonitoringSignal }
+
+export interface MonitoringUserKillRequest { username: string }
 
 const refuse = (message: string): never => fail('VALIDATION', message, { stateChanged: false })
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -80,6 +84,12 @@ export function parseMonitoringSignalRequest(value: unknown): MonitoringSignalRe
   return { pid: Number(value.pid), uid: Number(value.uid), comm: value.comm, startedAt: value.startedAt, signal: value.signal as MonitoringSignal }
 }
 
+/** Exactly one login name plus the same explicit confirmation a single KILL needs. Who may be swept is the host's decision. */
+export function parseMonitoringUserKillRequest(value: unknown): MonitoringUserKillRequest {
+  if (!object(value) || Object.keys(value).length !== 2 || value.killConfirmed !== true || typeof value.username !== 'string' || !/^[a-z_][a-z0-9_-]{0,31}$/.test(value.username)) return refuse('a user name and the KILL confirmation are required')
+  return { username: value.username }
+}
+
 const isJournalArgv = (argv: readonly string[]): boolean => {
   if (argv.length < 9 || !same(JOURNAL_PREFIX, argv.slice(0, 6)) || argv[7] !== '-u') return false
   const params = new URLSearchParams({ unit: argv[8]!, lines: argv[6]! })
@@ -98,7 +108,7 @@ const isJournalArgv = (argv: readonly string[]): boolean => {
 export function isMonitoringCommand(argv: readonly unknown[]): boolean {
   if (!Array.isArray(argv) || argv.some(value => typeof value !== 'string')) return false
   const values = argv as readonly string[]
-  if ([MONITORING_PS_ARGV, MONITORING_DF_SPACE_ARGV, MONITORING_DF_INODE_ARGV].some(expected => same(expected, values))) return true
+  if ([MONITORING_PS_ARGV, MONITORING_PS_UNIT_ARGV, MONITORING_DF_SPACE_ARGV, MONITORING_DF_INODE_ARGV].some(expected => same(expected, values))) return true
   if (values.length === 4 && values[0] === '/usr/bin/kill' && values[1] === '-s' && /^[1-9][0-9]{0,6}$/.test(values[3]!)) {
     try { return same(monitoringKillArgv(Number(values[3]), values[2] as MonitoringSignal), values) } catch { return false }
   }

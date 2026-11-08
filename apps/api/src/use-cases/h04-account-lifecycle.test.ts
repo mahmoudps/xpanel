@@ -180,7 +180,7 @@ async function createTestHarness() {
 // ---------------------------------------------------------------------------
 
 describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Suspension, Termination)', () => {
-  it('provisions a full account end-to-end with 0750 home dir, cgroup slice, quota, PHP-FPM, vhosts, DNS zone, and idempotent job state', async () => {
+  it('provisions a full account end-to-end with 0750 home dir, cgroup slice, quota, PHP-FPM, vhosts, DNS zone, and idempotent job state', { tags: ['slow'] }, async () => {
     const h = await createTestHarness()
     try {
       const result = await h.coordinator.provisionAccount({
@@ -272,7 +272,7 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
     }
   })
 
-  it('handles mid-create failures without orphaned state, releases the reserved UID, and resumes checkpointed jobs', async () => {
+  it('handles mid-create failures without orphaned state, releases the reserved UID, and resumes checkpointed jobs', { tags: ['slow'] }, async () => {
     const h = await createTestHarness()
     try {
       // Case A: Failure mid-create inside StateStore after UID 20000 is allocated
@@ -364,7 +364,7 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
     }
   })
 
-  it('previews plan change impact, blocks downgrades below current usage, and applies live upgrades to slice/quota/FPM/shell', async () => {
+  it('previews plan change impact, blocks downgrades below current usage, and applies live upgrades to slice/quota/FPM/shell', { tags: ['slow'] }, async () => {
     const h = await createTestHarness()
     try {
       const microPlan = await h.store.createPlan({
@@ -528,7 +528,7 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
         maxAccounts: 2,
         totalDiskMb: 20480,
         totalBandwidthMb: 204800,
-        oversell: false,
+        oversell: { disk: false, bandwidth: false },
         nameservers: ['ns1.xpanel.test', 'ns2.xpanel.test'],
         delegatedIps: ['203.0.113.20'],
         passwordHash: TEST_ARGON2_HASH,
@@ -547,7 +547,7 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
         maxAccounts: 5,
         totalDiskMb: 51200,
         totalBandwidthMb: 512000,
-        oversell: false,
+        oversell: { disk: false, bandwidth: false },
         nameservers: ['ns1.xpanel.test', 'ns2.xpanel.test'],
         delegatedIps: ['203.0.113.20', '203.0.113.21'],
         passwordHash: TEST_ARGON2_HASH,
@@ -686,7 +686,7 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
     }
   })
 
-  it('suspends and unsuspends an account across all 10 control-plane and host surfaces (A34)', async () => {
+  it('suspends and unsuspends an account across all 10 control-plane and host surfaces (A34)', { tags: ['slow'] }, async () => {
     const h = await createTestHarness()
     try {
       const provisioned = await h.coordinator.provisionAccount({
@@ -878,7 +878,7 @@ describe('H04 Account Lifecycle Coordinator (Plans, Resellers, Provisioning, Sus
     }
   })
 
-  it('terminates an account completely across all surfaces without UID reuse or neighbor collateral (A22)', async () => {
+  it('terminates an account completely across all surfaces without UID reuse or neighbor collateral (A22)', { tags: ['slow'] }, async () => {
     const h = await createTestHarness()
     try {
       // Provision neighbor account (keepme) and target account (killme)

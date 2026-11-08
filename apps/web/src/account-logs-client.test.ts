@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ACCOUNT_LOGS_CLIENT_BINDING, filterAccountLogEntries, readAccountLogsView } from './account-logs-client.ts'
+import { ACCOUNT_LOGS_CLIENT_BINDING, filterAccountLogEntries, readAccountLogsView, readRawAccessArchives, readRawAccessSettings } from './account-logs-client.ts'
 import { renderAccountLogsWorkspace } from './board-port/account-logs-workspace.ts'
 
 const accountId = '11111111-1111-4111-8111-111111111111', domainId = '22222222-2222-4222-8222-222222222222', otherId = '33333333-3333-4333-8333-333333333333'
@@ -101,4 +101,32 @@ describe('readable date closure account logs', () => {
       expect(send.mock.calls).toEqual([['GET', '/api/account/logs/' + domainId + '/error']])
     })
   }
+  it('saves raw access settings and lists the archives with their downloads', async () => {
+    const settings = (value: unknown, source = 'server') => ({ context: { accountId }, settings: value, source, serverDefaults: { archive: true, removePreviousMonthArchive: false, retentionDays: null } })
+    const calls: unknown[][] = []
+    await bind(renderAccountLogsWorkspace({ lang: 'en', accountId, domains, kinds: ['access'], rawAccess: true }), async (method: string, path: string, body?: unknown) => {
+      calls.push([method, path, body])
+      if (path === '/api/account/logs/archives') return { context: { accountId, username: 'alice' }, available: true, observedAt: '2026-10-27T02:00:00.000Z', archives: [{ name: 'example.test-2026-10-26.gz', site: 'example.test', day: '2026-10-26', sizeBytes: 2048, mtime: '2026-10-27T00:05:00.000Z' }],
+        pending: { code: 'archive_pending', count: 2, bytes: 4096, oldest: '2026-10-25T00:05:00.000Z', reason: 'archive_quota_exceeded' } }
+      return method === 'PUT' ? settings((body as { settings: unknown }).settings ?? { archive: true, removePreviousMonthArchive: false, retentionDays: null }, (body as { settings: unknown }).settings ? 'account' : 'server') : settings({ archive: true, removePreviousMonthArchive: false, retentionDays: null })
+    })
+    await settle(); await settle()
+    expect($<HTMLAnchorElement>('[data-raw-access-current] a').getAttribute('href')).toBe('/api/account/logs/' + domainId + '/access/download')
+    expect(document.querySelectorAll('[data-raw-access-current] tr')).toHaveLength(1)
+    const link = $<HTMLAnchorElement>('[data-raw-access-rows] a')
+    expect(link.getAttribute('href')).toBe('/api/account/logs/archives/example.test-2026-10-26.gz')
+    expect($('[data-raw-access-source]').textContent).toContain('server defaults')
+    expect($('[data-raw-access-pending]').textContent).toBe('2 archives wait on the server to be copied into ~/logs (4.0 KiB, oldest from 2026-10-25 00:05 UTC): the account is over its disk quota. Each daily rotation tries again.')
+    $<HTMLInputElement>('[data-raw-access="retentionDays"]').value = '7'
+    $<HTMLButtonElement>('[data-raw-access-save]').click(); await settle()
+    expect(calls).toContainEqual(['PUT', '/api/account/logs/settings', { settings: { archive: true, removePreviousMonthArchive: false, retentionDays: 7 } }])
+    expect($('[data-raw-access-source]').textContent).toContain('your own settings')
+    $<HTMLInputElement>('[data-raw-access="retentionDays"]').value = '0'
+    $<HTMLButtonElement>('[data-raw-access-save]').click(); await settle()
+    expect(calls.filter(call => call[0] === 'PUT')).toHaveLength(1)
+    expect(() => readRawAccessSettings(settings({ archive: 'yes' }), accountId)).toThrow()
+    expect(readRawAccessArchives({ context: { accountId }, available: false, archives: [], pending: null }, accountId)).toEqual({ archives: null, pending: null })
+    expect(() => readRawAccessArchives({ context: { accountId }, available: true, archives: [{ name: '../shadow.gz', day: '2026-10-26', sizeBytes: 1 }], pending: null }, accountId)).toThrow()
+    expect(() => readRawAccessArchives({ context: { accountId }, available: true, archives: [], pending: { code: 'other', count: 1 } }, accountId)).toThrow()
+  })
 })

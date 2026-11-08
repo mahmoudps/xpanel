@@ -3,16 +3,15 @@ import { admitTrustedProxyRenderPolicy } from '../../../core/src/trusted-proxies
 import type { TrustedProxyRenderAuthority } from '../../../core/src/trusted-proxies.ts'
 import {
   assertNginxEdgeHeaderSanitization,
+  assertNginxZeroHomeAccess,
   defaultSiteFile,
-  nginxConfigTest,
-  nginxEdgeDirs,
   nginxSiteFile,
   renderDefaultSite,
-  renderNginxMain,
   renderNginxSite,
   BANDWIDTH_LIMIT_PAGE,
   type EdgeSettings,
 } from './nginx.ts'
+import { nginxConfigTest, nginxEdgeDirs, renderNginxMain } from './nginx-main.ts'
 import { nginxHttp2Style } from '../../../../scripts/nginx-http2.mjs'
 import { account, blockOf, cert, codeOf, debianOs, domain, rhelOs, serverBlocks, settings } from './testkit.ts'
 
@@ -73,7 +72,7 @@ describe('renderNginxMain', () => {
   it('logs metrics as JSON with host, status, bytes and request time to xPanel log dir', () => {
     const c = renderNginxMain(settings(), debianOs).content
     expect(c).toContain('log_format xpanel_metrics escape=json')
-    for (const v of ['$host', '$status', '$body_bytes_sent', '$bytes_sent', '$request_time', '$upstream_cache_status']) {
+    for (const v of ['$host', '$status', '$body_bytes_sent', '$bytes_sent', '$request_time', '$upstream_cache_status', '"scheme":"$scheme"', '"protocol":"$server_protocol"']) {
       expect(c).toContain(v)
     }
     expect(c).toContain('access_log /var/log/xpanel/nginx/access.log xpanel_metrics;')
@@ -189,7 +188,7 @@ describe('renderNginxSite', () => {
       domain({ id: 'd6', name: 'app.example', kind: 'addon', docRoot: '/home/alice/app', siteType: 'node', upstream: 'http://127.0.0.1:3000' }),
     ]
     for (const acc of [a, account({ status: 'suspended' })]) {
-      const c = renderNginxSite(acc, doms, settings(), cert(), { forceHttps: true })
+      const c = renderNginxSite(acc, doms.map(d => ({ ...d, forceHttps: true })), settings(), cert())
       expect(c).not.toMatch(/\b(root|alias)\s+\/home/)
       expect(c).not.toContain(acc.home)
       expect(c).not.toContain('/home/')
@@ -337,10 +336,9 @@ describe('renderNginxSite', () => {
   it('forces HTTPS only for names that have a certificate', () => {
     const c = renderNginxSite(
       a,
-      [domain(), domain({ id: 'd2', name: 'example.org', kind: 'alias', parentId: 'd1' })],
+      [domain({ forceHttps: true }), domain({ id: 'd2', name: 'example.org', kind: 'alias', parentId: 'd1' })],
       settings(),
       cert(),
-      { forceHttps: true },
     )
     const http = serverBlocks(c).filter((b) => b.includes('listen 80;'))
     expect(http).toHaveLength(2)
@@ -362,8 +360,25 @@ describe('renderNginxSite', () => {
     expect(c).not.toContain('[::]')
   })
 
+  it('roots the suspended page in the owner page set and keeps nginx out of every home', () => {
+    const c = renderNginxSite(account({ status: 'suspended' }), [domain()], settings(), cert(), { pageScope: 'r-abc' })
+    expect(c).toContain('root /usr/share/xpanel/suspended/r-abc;')
+    expect(() => assertNginxZeroHomeAccess(c)).not.toThrow()
+  })
+
+  it('answers panel paths with the panel origin, never on a suspended or redirecting site', () => {
+    const panelRedirects = [{ path: '/whm', origin: 'https://panel.example.test:2087' }] as const
+    expect(renderNginxSite(a, [domain()], settings(), cert())).not.toContain('location = /whm')
+    const c = renderNginxSite(a, [domain()], settings(), cert(), { panelRedirects })
+    expect(serverBlocks(c).every(b => b.includes('location = /whm {') && b.includes('return 302 "https://panel.example.test:2087/";'))).toBe(true)
+    expect(renderNginxSite(account({ status: 'suspended' }), [domain()], settings(), cert(), { panelRedirects })).not.toContain('location = /whm')
+    expect(renderNginxSite(a, [domain({ redirect: { to: 'https://example.com/', code: 301 } })], settings(), cert(), { panelRedirects })).not.toContain('location = /whm')
+    expect(codeOf(() => renderNginxSite(a, [domain()], settings(), cert(), { panelRedirects: [{ path: '/whm', origin: 'http://x;' }] }))).toBe('VALIDATION')
+  })
+
   it('forces HTTPS while keeping ACME on port 80', () => {
-    const c = renderNginxSite(a, [domain()], settings(), cert(), { forceHttps: true })
+    expect(renderNginxSite(a, [domain()], settings(), cert())).not.toContain('return 301 https://')
+    const c = renderNginxSite(a, [domain({ forceHttps: true })], settings(), cert())
     const [http] = serverBlocks(c)
     expect(http).toContain('listen 80;')
     expect(http).toContain('return 301 https://$host$request_uri;')
@@ -404,7 +419,7 @@ describe('renderNginxSite', () => {
   it('caches responses only, keyed by host, bypassing cookies, POST and auth', () => {
     const c = renderNginxSite(a, [domain()], settings())
     expect(c).toContain('proxy_cache xpanel_cache;')
-    expect(c).toContain('proxy_cache_key $scheme$host$request_uri;')
+    expect(c).toContain('proxy_cache_key $xpanel_cache_epoch$scheme$host$request_uri;')
     expect(c).toContain('proxy_cache_bypass $xpanel_nocache_method $xpanel_nocache_cookie $http_authorization;')
     expect(c).toContain('$upstream_http_set_cookie')
     expect(c).not.toContain('proxy_ignore_headers')
@@ -593,7 +608,7 @@ describe('nginxHttp2Style', () => {
 
 describe('forwarded identity sanitization', () => {
   it('overwrites every emitted proxy location and rejects forged alternate forwarding chains', () => {
-    const c = renderNginxSite(account(), [domain()], settings(), cert(), { forceHttps: true })
+    const c = renderNginxSite(account(), [domain({ forceHttps: true })], settings(), cert())
     const proxyCount = [...c.matchAll(/proxy_pass /g)].length
     expect(proxyCount).toBeGreaterThan(0)
     expect([...c.matchAll(/proxy_set_header X-Forwarded-For \$remote_addr;/g)]).toHaveLength(proxyCount)
@@ -602,5 +617,24 @@ describe('forwarded identity sanitization', () => {
     expect(codeOf(() => assertNginxEdgeHeaderSanitization(c.replace('X-Forwarded-For $remote_addr;', 'X-Forwarded-For $proxy_add_x_forwarded_for;')))).toBe('VALIDATION')
     expect(codeOf(() => assertNginxEdgeHeaderSanitization(c + '\nproxy_set_header Forwarded $http_forwarded;'))).toBe('VALIDATION')
     expect(codeOf(() => assertNginxEdgeHeaderSanitization(c + '\nproxy_set_header x-forwarded-for $http_x_forwarded_for;'))).toBe('VALIDATION')
+  })
+})
+describe('sites on a dedicated address', () => {
+  const dedicated = new Set(['203.0.113.10', '2001:db8::10'])
+  it('listen on that address only, with the primary site as its default server', () => {
+    const addon = domain({ id: 'd2', name: 'addon.test', kind: 'addon', docRoot: '/home/alice/addon' })
+    const c = renderNginxSite(account({ ipv6: '2001:db8::10' }), [addon, domain()], settings(), cert(), { dedicatedAddresses: dedicated })
+    expect(c).not.toMatch(/listen 80[ ;]/)
+    expect(blockOf(c.slice(c.indexOf('# site example.com')), 'server')).toContain('listen 203.0.113.10:80 default_server;')
+    expect(blockOf(c.slice(c.indexOf('# site example.com')), 'server')).toContain('listen [2001:db8::10]:80 default_server;')
+    expect(blockOf(c.slice(c.indexOf('# site addon.test')), 'server')).toContain('listen 203.0.113.10:80;')
+    expect([...c.matchAll(/listen 203\.0\.113\.10:443 ssl http2 default_server;/g)]).toHaveLength(1)
+    expect([...c.matchAll(/default_server/g)]).toHaveLength(4)
+  })
+  it('keep the shared sockets for a shared address', () => {
+    const c = renderNginxSite(account(), [domain()], settings(), null, { dedicatedAddresses: new Set(['203.0.113.99']) })
+    expect(c).toContain('listen 80;')
+    expect(c).toContain('listen [::]:80;')
+    expect(c).not.toContain('default_server')
   })
 })

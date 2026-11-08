@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FirewallRule } from '@xpanel/core'
-import { defaultFirewallRules, evaluateFirewall, parseIp, XpanelError, MANAGEMENT_PUBLIC_PORTS, MANAGEMENT_BACKEND_PORTS } from '@xpanel/core'
+import { defaultFirewallRules, evaluateFirewall, managementPortRules, parseIp, XpanelError, MANAGEMENT_PUBLIC_PORTS, MANAGEMENT_BACKEND_PORTS } from '@xpanel/core'
 import {
   banSetActions,
   exportRules,
@@ -64,6 +64,33 @@ const admin: FirewallRule[] = [
 ]
 const rules: FirewallRule[] = [...admin, ...defaults]
 
+describe('firewall switch and ping block', () => {
+  it('leaves the list out with the switch off and keeps the guards', () => {
+    const { content } = renderNftables(defaults, { ...settings, enabled: false }, debianOs)
+    expect(content).toContain('type filter hook input priority filter; policy accept;')
+    expect(content).not.toContain('tcp dport 2087 accept')
+    expect(content).toContain('"xpanel: backend is loopback-only"')
+    expect(content).toContain('tcp dport 3306 drop comment "xpanel: remote database access"')
+    expect(content).toContain('ip saddr @xpanel_banned')
+  })
+
+  it('needs no accept for the panel while off, and still refuses a list that locks it out while on', () => {
+    expect(() => renderNftables([], { ...settings, enabled: false }, debianOs)).not.toThrow()
+    expect(codeOf(() => renderNftables([], settings, debianOs))).toBe('SELF_LOCKOUT')
+  })
+
+  it('drops ping ahead of the list on both families, with the switch on or off, and keeps the ICMP errors', () => {
+    for (const enabled of [true, false]) {
+      const { content } = renderNftables(defaults, { ...settings, enabled, blockPing: true }, debianOs)
+      expect(content).toContain('icmp type echo-request drop comment "xpanel: ping blocked"')
+      expect(content).toContain('icmpv6 type echo-request drop comment "xpanel: ping blocked"')
+      expect(content).toContain('icmp type { destination-unreachable, time-exceeded, parameter-problem } accept')
+      if (enabled) expect(content.indexOf('ping blocked')).toBeLessThan(content.indexOf('icmp type echo-request accept'))
+    }
+    expect(renderNftables(defaults, settings, debianOs).content).not.toContain('ping blocked')
+  })
+})
+
 describe('renderNftables', () => {
   const file = renderNftables(rules, settings, debianOs)
   const chain = inputChain(file.content)
@@ -99,11 +126,18 @@ describe('renderNftables', () => {
     expect(chain.some((l) => l.includes('xpanel: web') || l.includes('xpanel: panel') || l.includes('xpanel: ssh'))).toBe(false)
   })
 
+  it('opens the FTP passive range only while FTP runs, after the operator list', () => {
+    const passive = 'tcp dport 30000-35000 accept comment "xpanel: ftp passive data"'
+    expect(render(rules, { ...settings, ftpPassivePorts: { min: 30000, max: 35000 } }).content).toContain(passive)
+    expect(render(rules).content).not.toContain('ftp passive')
+    expect(() => render(rules, { ...settings, ftpPassivePorts: { min: 80, max: 90 } })).toThrow()
+  })
+
   it('accepts no remote port other than the enabled rules open', () => {
     const accepted = chain
       .filter((l) => l.includes(' accept') && /dport/.test(l) && !/saddr (127\.|::1 )/.test(l))
       .flatMap((l) => [...(/dport (\{[^}]*\}|\S+)/.exec(l)?.[1] ?? '').matchAll(/\d+(?:-\d+)?/g)].map((m) => m[0]))
-    expect(new Set(accepted)).toEqual(new Set(['546', '3306', '10000-10100', '9000', '22', '80', '443', '2083', '2087', '2096']))
+    expect(new Set(accepted)).toEqual(new Set(['546', '3306', '10000-10100', '9000', '22', '80', '443', '2078', '2080', '2083', '2087', '2096']))
     expect(chain).toContain('ip6 daddr fe80::/64 udp dport 546 accept comment "xpanel: dhcpv6 client"')
   })
 
@@ -489,5 +523,40 @@ describe('helpers', () => {
     expect(sysctlApplyActions({ path: '/etc/sysctl.d/90-xpanel-forward.conf' })).toEqual([
       { kind: 'exec', argv: ['/usr/sbin/sysctl', '-p', '/etc/sysctl.d/90-xpanel-forward.conf'] },
     ])
+  })
+})
+
+describe('NFS clients', () => {
+  const base = { panelPort: 2087, sshPort: 22, backendPorts: [8080, 8443], banTimeoutSec: 3600 }
+  const rules = defaultFirewallRules({ panelPort: 2087, sshPort: 22, backendPort: 8080, backendTlsPort: 8443 })
+  const rendered = (nfsClients?: readonly string[]) => renderNftables(rules, { ...base, ...(nfsClients ? { nfsClients } : {}) }, debianOs).content
+  it('keeps TCP 2049 closed until an export names a client', () => {
+    expect(rendered()).not.toContain('2049')
+    expect(rendered([])).not.toContain('2049')
+    expect(rendered(['10.0.0.0/24', '192.0.2.5', 'host.example.test'])).toContain('ip saddr { 10.0.0.0/24, 192.0.2.5 } tcp dport 2049 accept')
+    expect(rendered(['*'])).toContain('tcp dport 2049 accept')
+    expect(rendered(['*'])).not.toContain('ip saddr {')
+  })
+})
+
+describe('a panel port moved by Panel access', () => {
+  const defaults = defaultFirewallRules({ panelPort: 2087, sshPort: 22, backendPort: 8080, backendTlsPort: 8443 })
+  const moved = { ...settings, managementPorts: [...MANAGEMENT_PUBLIC_PORTS, 18888] }
+
+  it('is opened by a generated rule, which keeps the self-lockout check honest', () => {
+    expect(codeOf(() => renderNftables(defaults, moved, debianOs))).toBe('SELF_LOCKOUT')
+    expect(renderNftables([...defaults, ...managementPortRules([...MANAGEMENT_PUBLIC_PORTS, 18888])], moved, debianOs).content).toContain('18888')
+  })
+
+  it('adds nothing for the fixed ports, which keep their saved rules', () => {
+    expect(managementPortRules(MANAGEMENT_PUBLIC_PORTS)).toEqual([])
+  })
+})
+
+describe('database web client ports', () => {
+  it('accepts them only when given and refuses an invalid port', () => {
+    expect(render([], { ...settings, webClientPorts: [8008, 8009] }).content).toContain('tcp dport { 8008, 8009 } accept comment "xpanel: database web client"')
+    expect(render([]).content).not.toContain('database web client')
+    expect(() => render([], { ...settings, webClientPorts: [0] })).toThrow()
   })
 })

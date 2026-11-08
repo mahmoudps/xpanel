@@ -1,3 +1,5 @@
+import { apiShellCard } from '../../../../../models/tool-cards.ts'
+import { renderV2ToolCard } from '../../../tool-card-view.ts'
 import { networkDiagnosticClientTemplates } from '../diagnostic-client-templates.ts'
 import { v2WhmClientTemplates } from '../../../whm-client-templates.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
@@ -19,7 +21,7 @@ export function renderV2NetworkToolsPage(props: PanelSurfaceProps, authority: Pa
 }
 
 export function renderV2AccountApiExplorerPage(props: PanelSurfaceProps, authority: PanelSettingsAuthority = NO_SETTINGS_AUTHORITY): string {
-  const c = settingsContext(props, authority), { t } = c, title = t(msgid('API explorer')), description = t(msgid('Run supported API reads with your current account session.'))
+  const c = settingsContext(props, authority), { t } = c, title = t(msgid('API explorer')), description = t(msgid('Run API functions and supported reads with your current account session.'))
   const fact = (key: string, label: string) => ({ label, valueHtml: `<span data-dev-fact="${key}">${esc(t(msgid('Not read')))}</span>` })
   const request = section('v2-api-request', t(msgid('API request explorer')), note(t(msgid('Read live data using your current signed-in session. Choose a supported operation; its method and route are fixed. No server setting is changed.')))
     + `<form data-dev-form>${field('v2-api-operation', t(msgid('Operation')), select('v2-api-operation', '', [['', t(msgid('Read supported operations first'))]], ' data-dev-operation'))}${facts([fact('method', t(msgid('Method'))), fact('path', t(msgid('API route')))])}${actions(`<button type="submit" class="v2-btn v2-btn--primary" data-dev-run disabled>${esc(t(msgid('Run read request')))}</button>` + button(t(msgid('Read supported operations')), { 'data-dev-refresh': true }, !c.readable))}</form>`
@@ -31,6 +33,6 @@ export function renderV2AccountApiExplorerPage(props: PanelSurfaceProps, authori
     + actions(button(t(msgid('Copy reviewed response')), { 'data-dev-copy': true })) + '<p data-dev-copy-status role="status" hidden></p>')
   const authorityCard = section('v2-api-authority', t(msgid('Current authority')), note(t(msgid('The account and principal come from this session. Every selected read repeats its normal API authentication and permissions. API tokens cannot operate this console.'))))
   const additional = section('v2-api-additional', t(msgid('Additional capabilities')), note(t(msgid('These providers are not connected. No remote service or callback has been contacted or verified.')))
-    + [msgid('Hooks and callbacks'), msgid('Registered applications'), msgid('Plugin generator'), msgid('Metrics export and debug tools')].map(label => `<div class="v2-panel-settings__groups"><h3>${esc(t(label))}</h3><p>${esc(t(msgid('Unavailable')))}</p>${actions(button(t(msgid('Configure'))))}</div>`).join(''))
-  return page(props, authority, '/advanced/api-shell', title, description, v2WhmClientTemplates('developer') + split(request + response, authorityCard + additional), { 'data-developer-workspace': true, 'data-developer-surface': 'account', 'data-developer-enabled': String(c.readable) })
+    + [msgid('Hooks and callbacks'), msgid('Registered applications'), msgid('Plugin generator')].map(label => `<div class="v2-panel-settings__groups"><h3>${esc(t(label))}</h3><p>${esc(t(msgid('Unavailable')))}</p></div>`).join(''))
+  return page(props, authority, '/advanced/api-shell', title, description, v2WhmClientTemplates('developer') + split(request + response + renderV2ToolCard(t, apiShellCard('account'), c.editable), authorityCard + additional), { 'data-developer-workspace': true, 'data-developer-surface': 'account', 'data-developer-enabled': String(c.readable) })
 }

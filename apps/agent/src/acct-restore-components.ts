@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile, rm } from 'node:fs/promises'
 import { posix } from 'node:path'
-import { fail } from '@xpanel/core'
+import { effectivePlan, fail } from '@xpanel/core'
 import type { Account, Plan, ServiceUser } from '@xpanel/core'
 import { listAccountBackups } from './account-backup.ts'
 import { backupPartOf, extractBackupPart, MAX_BACKUP_ZONE_BYTES } from './acct-backup-archive.ts'
@@ -133,7 +133,8 @@ export async function handleComponentRestoreRoute(req: Request, url: URL, method
     const exists = files ? await observeDestinations(files, all, expired) : new Map<string, 'unchecked'>()
     const open = all.filter(row => row.action === 'restore' && exists.get(row.path) !== 'yes'), rows = open.slice(0, MAX_RESTORE_FILES)
     const plannedBytes = rows.reduce((sum, row) => sum + row.bytes, 0)
-    const quota = { limitMb: plan.resources.diskMb, plannedBytes, fits: plan.resources.diskMb === 'unlimited' || plannedBytes <= plan.resources.diskMb * 1024 * 1024 }
+    const { diskMb } = effectivePlan(plan, account).resources
+    const quota = { limitMb: diskMb, plannedBytes, fits: diskMb === 'unlimited' || plannedBytes <= diskMb * 1024 * 1024 }
     const counts = { messages: all.length, present: all.filter(row => exists.get(row.path) === 'yes').length, batch: rows.length, remaining: open.length - rows.length, refused: all.filter(row => row.action === 'refuse').length }
     const revision = sha(JSON.stringify({ accountId: account.id, username: account.username, uid: account.uid, file: inventory.file, bytes: inventory.bytes, archiveSha256: inventory.sha256, mailboxes: [...mailboxes].sort(),
       rows: rows.map(row => [row.path, row.bytes, row.mode, row.sha256]) }))

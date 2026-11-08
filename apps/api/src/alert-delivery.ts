@@ -18,14 +18,13 @@ import type { AlertEvaluation } from './monitoring-alerts.ts'
  * Transports are injected so tests never reach a real network.
  */
 export type DeliveryChannel = 'email' | 'webhook'
-export type NoticeKind = 'firing' | 'resolved' | 'test'
+export type NoticeKind = 'firing' | 'resolved' | 'test' | 'login'
 export type DeliveryResult = 'sent' | 'failed' | 'gave_up' | 'no_channel'
 export const DELIVERY_ERRORS = ['unreachable', 'timed_out', 'refused', 'rejected_status', 'address_not_public', 'no_signing_key'] as const
 export type DeliveryError = typeof DELIVERY_ERRORS[number]
 export const DELIVERY_CHANNELS: readonly DeliveryChannel[] = ['email', 'webhook']
 /** The notification event key that selects alert delivery on the notifications page. */
 export const ALERT_NOTIFICATION_EVENT = 'monitoring.alert'
-export const ALERT_SCHEDULE_MINUTES = 5
 export const DELIVERY_LOG_LIMIT = 200
 const OUTBOX_LIMIT = 50, SENDS_PER_CYCLE = 20
 
@@ -41,7 +40,7 @@ export interface DeliveryState { told: Partial<Record<ServerHealthCheckId, strin
 export const EMPTY_DELIVERY_STATE: DeliveryState = { told: {}, outbox: [], log: [], lastRun: null }
 /** Channels as saved on the notifications page. alerts: the alert event is selected. A webhook without a signing key fails every attempt. */
 export interface DeliveryChannels { alerts: boolean; recipients: string[]; webhook: { url: string; key: string | null } | null }
-export type EmailSender = (input: { to: string[]; subject: string; text: string }) => Promise<void>
+export type EmailSender = (input: { to: string[]; subject: string; text: string; from?: { address: string; name: string }; html?: string; messageId?: string; headers?: Readonly<Record<string, string>> }) => Promise<void>
 export interface DeliveryTransports { email: EmailSender; webhook: WebhookSender; serverName: string }
 
 export class DeliveryFailure extends Error {
@@ -51,6 +50,7 @@ export class DeliveryFailure extends Error {
 }
 
 const IDS = MONITORING_ALERT_ROWS.map(row => row.id)
+const NOTICE_KINDS: readonly NoticeKind[] = ['firing', 'resolved', 'test', 'login']
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const keys = (value: Record<string, unknown>): string => Object.keys(value).sort().join()
@@ -58,12 +58,12 @@ const iso = (value: unknown): value is string => typeof value === 'string' && IS
 const rule = (value: unknown): boolean => value === null || IDS.includes(value as string)
 const count = (value: unknown, max: number): boolean => Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= max
 const noticeOk = (raw: unknown): boolean => object(raw) && keys(raw) === 'evaluatedAt,evidence,firstFiredAt,id,kind,matches,ruleId,severity,threshold,value'
-  && typeof raw.id === 'string' && /^aln_[0-9a-f]{24}$/.test(raw.id) && ['firing', 'resolved', 'test'].includes(raw.kind as string) && rule(raw.ruleId) && (raw.kind === 'test') === (raw.ruleId === null)
+  && typeof raw.id === 'string' && /^aln_[0-9a-f]{24}$/.test(raw.id) && NOTICE_KINDS.includes(raw.kind as NoticeKind) && rule(raw.ruleId) && (raw.kind === 'test' || raw.kind === 'login') === (raw.ruleId === null)
   && [null, 'critical', 'warning'].includes(raw.severity as string) && (raw.firstFiredAt === null || iso(raw.firstFiredAt)) && iso(raw.evaluatedAt)
   && [raw.value, raw.threshold].every(item => item === null || typeof item === 'number' && Number.isFinite(item))
   && Array.isArray(raw.matches) && raw.matches.length <= 25 && raw.matches.every(item => typeof item === 'string' && item.length <= 512) && typeof raw.evidence === 'string' && raw.evidence.length <= 1024
 const logOk = (raw: unknown): boolean => object(raw) && keys(raw) === 'at,attempt,channel,error,kind,noticeId,result,ruleId,status' && iso(raw.at) && typeof raw.noticeId === 'string' && /^aln_[0-9a-f]{24}$/.test(raw.noticeId)
-  && ['firing', 'resolved', 'test'].includes(raw.kind as string) && rule(raw.ruleId) && (raw.channel === null || DELIVERY_CHANNELS.includes(raw.channel as DeliveryChannel))
+  && NOTICE_KINDS.includes(raw.kind as NoticeKind) && rule(raw.ruleId) && (raw.channel === null || DELIVERY_CHANNELS.includes(raw.channel as DeliveryChannel))
   && ['sent', 'failed', 'gave_up', 'no_channel'].includes(raw.result as string) && count(raw.attempt, MAX_WEBHOOK_ATTEMPTS)
   && (raw.error === null || DELIVERY_ERRORS.includes(raw.error as DeliveryError)) && (raw.status === null || count(raw.status, 999))
 
@@ -98,13 +98,21 @@ export function planAlertNotices(evaluation: AlertEvaluation, told: DeliveryStat
   return { notices, told: next }
 }
 
+/** matches holds user, address, port and method in this order. */
+export const loginNotice = (login: { id: string; at: string; address: string; port: number; username: string; method: string }, now: Date): AlertNotice => ({ id: noticeId('login', login.id), kind: 'login', ruleId: null, severity: null, firstFiredAt: login.at, evaluatedAt: now.toISOString(),
+  value: null, threshold: null, matches: [login.username, login.address, String(login.port), login.method], evidence: '' })
+
 const titleOf = (id: string | null): string => MONITORING_ALERT_ROWS.find(row => row.id === id)?.title ?? 'Alert'
 const stamp = (at: string): string => at.slice(0, 16).replace('T', ' ') + ' UTC'
-const eventOf = (notice: AlertNotice): string => ALERT_NOTIFICATION_EVENT + '.' + notice.kind
+const eventOf = (notice: AlertNotice): string => notice.kind === 'login' ? 'ssh.login' : ALERT_NOTIFICATION_EVENT + '.' + notice.kind
 
 /** Plain-text English system mail; the subject names the state, rule and server. */
 export function alertMessage(notice: AlertNotice, server: string): { subject: string; text: string } {
   if (notice.kind === 'test') return { subject: `[xPanel] Test notification from ${server}`, text: `This is a test message from xPanel on ${server}, sent ${stamp(notice.evaluatedAt)}.\nAlert notifications for this server are delivered to this address.\n` }
+  if (notice.kind === 'login') {
+    const [user, address, port, method] = notice.matches
+    return { subject: `[xPanel] SSH sign-in: ${user} from ${address} on ${server}`, text: `SSH sign-in on ${server}\nUser: ${user}\nFrom: ${address} port ${port}\nMethod: ${method}\nTime: ${stamp(notice.firstFiredAt!)}\n` }
+  }
   const title = titleOf(notice.ruleId), label = notice.kind === 'resolved' ? 'Resolved' : notice.severity === 'critical' ? 'Critical' : 'Warning'
   const lines = [`Alert: ${title}`, `State: ${notice.kind === 'resolved' ? 'resolved' : 'firing (' + (notice.severity ?? 'warning') + ')'}`, `Server: ${server}`,
     `${notice.kind === 'resolved' ? 'Fired at' : 'Firing since'}: ${stamp(notice.firstFiredAt!)}`, `Evaluated: ${stamp(notice.evaluatedAt)}`,
@@ -114,7 +122,8 @@ export function alertMessage(notice: AlertNotice, server: string): { subject: st
 }
 export const alertPayload = (notice: AlertNotice, server: string) => ({
   id: notice.id, event: eventOf(notice), server,
-  alert: notice.kind === 'test' ? null : { rule: notice.ruleId, title: titleOf(notice.ruleId), severity: notice.severity, firstFiredAt: notice.firstFiredAt, evaluatedAt: notice.evaluatedAt, value: notice.value, threshold: notice.threshold, matches: notice.matches, evidence: notice.evidence },
+  ...(notice.kind === 'login' ? { login: { user: notice.matches[0], address: notice.matches[1], port: Number(notice.matches[2]), method: notice.matches[3], at: notice.firstFiredAt } } : {}),
+  alert: notice.kind === 'test' || notice.kind === 'login' ? null : { rule: notice.ruleId, title: titleOf(notice.ruleId), severity: notice.severity, firstFiredAt: notice.firstFiredAt, evaluatedAt: notice.evaluatedAt, value: notice.value, threshold: notice.threshold, matches: notice.matches, evidence: notice.evidence },
 })
 
 const configured = (channels: DeliveryChannels | null, channel: DeliveryChannel, test: boolean): boolean =>
@@ -146,7 +155,7 @@ const prepend = (log: DeliveryLogEntry[], added: DeliveryLogEntry[]): DeliveryLo
 export async function dispatchAlertNotices(input: { state: DeliveryState; notices: AlertNotice[]; channels: DeliveryChannels | null; transports: DeliveryTransports; now: Date; quiet: boolean }): Promise<DeliveryState> {
   const at = input.now.toISOString(), added: DeliveryLogEntry[] = [], queue = [...input.state.outbox]
   for (const notice of input.notices) {
-    const targets = configuredChannels(input.channels)
+    const targets = configuredChannels(input.channels, notice.kind === 'login')
     if (!targets.length) added.push(entry(at, notice, null, 'no_channel', 0))
     for (const channel of targets) queue.push({ notice, channel, attempts: 0, nextAt: at })
   }
@@ -154,8 +163,8 @@ export async function dispatchAlertNotices(input: { state: DeliveryState; notice
   const kept: OutboxEntry[] = []
   let budget = SENDS_PER_CYCLE
   for (const item of queue) {
-    if (input.quiet || Date.parse(item.nextAt) > input.now.getTime() || budget <= 0) { kept.push(item); continue }
-    if (!configured(input.channels, item.channel, false)) { added.push(entry(at, item.notice, item.channel, 'no_channel', item.attempts)); continue }
+    if (input.quiet && item.notice.kind !== 'login' || Date.parse(item.nextAt) > input.now.getTime() || budget <= 0) { kept.push(item); continue }
+    if (!configured(input.channels, item.channel, item.notice.kind === 'login')) { added.push(entry(at, item.notice, item.channel, 'no_channel', item.attempts)); continue }
     budget--
     const sent = await sendNotice(item.notice, item.channel, input.channels!, input.transports, input.now), attempt = item.attempts + 1
     if (!sent.error) added.push(entry(at, item.notice, item.channel, 'sent', attempt, sent))
@@ -179,8 +188,9 @@ export const serialDelivery = <T>(task: () => Promise<T>): Promise<T> => { const
 /** Local MTA submission over loopback SMTP (Postfix permits relaying from mynetworks); no credentials are used. */
 export function createLocalMtaEmailSender(options: { from: string; helo: string; host?: string; port?: number; timeoutMs?: number }): EmailSender {
   const host = options.host ?? '127.0.0.1', port = options.port ?? 25, timeoutMs = options.timeoutMs ?? 15_000, { from: address, helo } = options
-  return async ({ to, subject, text }) => {
-    const { rawMime } = new MimeCodecAndSanitizer().buildMimeMessage({ from: address, fromName: 'xPanel', to, subject, textBody: text, extraHeaders: { 'Auto-Submitted': 'auto-generated' } })
+  return async ({ to, subject, text, from, html, messageId, headers }) => {
+    const sender = from?.address ?? address
+    const { rawMime } = new MimeCodecAndSanitizer().buildMimeMessage({ from: sender, fromName: from?.name ?? 'xPanel', to, subject, textBody: text, ...(html ? { htmlBody: html } : {}), ...(messageId ? { messageId } : {}), extraHeaders: { 'Auto-Submitted': 'auto-generated', ...headers } })
     const socket = net.connect({ host, port })
     const lines: string[] = []
     let buffer = '', failure: DeliveryFailure | null = null, wake: (() => void) | null = null
@@ -213,7 +223,7 @@ export function createLocalMtaEmailSender(options: { from: string; helo: string;
     try {
       await step(null, code => code === 220)
       await step('EHLO ' + helo, code => code === 250)
-      await step('MAIL FROM:<' + address + '>', code => code === 250)
+      await step('MAIL FROM:<' + sender + '>', code => code === 250)
       let accepted = 0, rejected: number | null = null
       for (const recipient of to) { socket.write('RCPT TO:<' + recipient + '>\r\n'); const code = await reply(); if (code === 250 || code === 251) accepted++; else rejected = code }
       if (!accepted) throw new DeliveryFailure('refused', rejected)

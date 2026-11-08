@@ -5,7 +5,7 @@ import { renderWhmSurface, type WhmSurfaceProps } from '../surfaces/xwhm.ts'
 import { translator } from '../i18n.ts'
 import { renderApprovedWhmAccountActions, renderApprovedWhmAccountBulkControls, renderApprovedWhmAccountCreateFields, renderApprovedWhmAccountCreateStatus, renderApprovedWhmAccountSelection, renderApprovedWhmAccountTableCells } from './approved-whm-account-components.ts'
 
-const reseller: Reseller = { id: '10000000-0000-4000-8000-000000000001', username: 'provider7', acl: ['list-accounts', 'create-account', 'edit-account', 'change-plan'], maxAccounts: 5, totalDiskMb: 4096, totalBandwidthMb: 16384, oversell: false, nameservers: [], delegatedIps: [] }
+const reseller: Reseller = { id: '10000000-0000-4000-8000-000000000001', username: 'provider7', acl: ['list-accounts', 'create-account', 'edit-account', 'change-plan'], maxAccounts: 5, totalDiskMb: 4096, totalBandwidthMb: 16384, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
 const foreign: Reseller = { ...reseller, id: '10000000-0000-4000-8000-000000000002', username: 'foreignProvider' }
 const account: Account = { id: '20000000-0000-4000-8000-000000000001', username: 'owner7', uid: 1007, gid: 1007, home: '/home/owner7', primaryDomain: 'owner7.example.test', planId: '30000000-0000-4000-8000-000000000001', ownerId: reseller.id, status: 'active', suspendReason: null, contactEmail: 'owner7@example.test', ipv4: '192.0.2.7', shell: 'none', createdAt: '2026-10-25T00:00:00.000Z' }
 const plan: Plan = { id: account.planId, name: 'Configured plan7', ownerId: reseller.id, featureListId: '40000000-0000-4000-8000-000000000001', resources: { diskMb: 512, bandwidthMbMonth: 2048, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 10, ioWriteIops: 10, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 }, caps: { addonDomains: 1, aliasDomains: 1, subdomains: 1, mailboxes: 1, forwarders: 1, mailingLists: 1, ftpAccounts: 1, databases: 1, phpWorkers: 1 }, dedicatedIp: false, shell: 'jailed', defaultMailboxQuotaMb: 128 }
@@ -151,8 +151,10 @@ describe('approved account list components', () => {
     expect(html).toContain('data-reseller-owner-form="true" data-account-username="owner7"')
     expect(html).toContain('data-reseller-owner-status')
     expect(html).toContain(`value="${reseller.id}" selected`)
-    expect(html.match(/<form\b/g)).toHaveLength(2)
-    expect(html.match(/<\/form>/g)).toHaveLength(2)
+    expect(html.match(/<form\b/g)).toHaveLength(3)
+    expect(html.match(/<\/form>/g)).toHaveLength(3)
+    expect(html).toContain('data-account-limit="addonDomains" data-account-limit-group="caps"')
+    expect(html).toContain('<option value="detach" disabled>')
     expect(html).not.toMatch(/<h1\b|active host limits\.<\/p>\s*<[^>]*role="status"[^>]*>Success/)
   })
 

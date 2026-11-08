@@ -5,12 +5,15 @@ import { normalizeAsciiDigits } from '../../../../../display-format.ts'
 import { card, notice, pageHeader } from '../../../components/index.ts'
 import { escapeHtml, hookAttrs, type HookAttributes } from '../../../html.ts'
 import { v2Messages } from '../../../messages.ts'
+import { IDENTITY_ROWS_CSS } from '../../identity.ts'
 
 /** Current core decisions, separate from theme choice and saved presentation preferences. */
 export interface PanelSettingsAuthority {
   readonly presentation?: 'live' | 'read-only'
   readonly canReadFacts?: boolean
   readonly authorizedTools?: ReadonlySet<string>
+  /** verified tools of the session; a page with several tools gates each control by its own tool */
+  readonly qualifiedTools?: ReadonlySet<string>
   readonly canRead: boolean
   readonly canManage: boolean
   readonly relatedRoutes?: ReadonlySet<string>
@@ -82,7 +85,8 @@ export function deniedPage(props: PanelSurfaceProps, authority: PanelSettingsAut
   return page(props, authority, route, title, description, section('v2-settings-unavailable', title, notice(t, { tone: 'warn', lead: t(msgid('Unavailable')), text: t(msgctxt('theme:v2', 'An authorized account has not been read. Nothing was read or changed.')) })))
 }
 
-export const PANEL_SETTINGS_CSS = `.v2-panel-settings{display:flex;flex-direction:column;gap:var(--space-4);min-inline-size:0;text-align:start}
+export const PANEL_SETTINGS_CSS = `${IDENTITY_ROWS_CSS}
+.v2-panel-settings{display:flex;flex-direction:column;gap:var(--space-4);min-inline-size:0;text-align:start}
 .v2-panel-settings :is(h2,h3,h4,p,dl,dd,ul,ol,pre,fieldset){margin:0}
 .v2-panel-settings .v2-card{gap:var(--space-3)}
 .v2-panel-settings .v2-card__body,.v2-panel-settings__groups,.v2-panel-settings form{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}

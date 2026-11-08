@@ -29,8 +29,10 @@ export function bindAccountPassword(navigate: (href: string) => void = href => w
     const confirm = unique(form, 'input[name="confirmPassword"]')
     const submit = unique(form, 'button[data-account-password-submit]')
     const show = unique(root, 'input[data-account-password-show]')
+    // The xMail page changes the mailbox password through its own route; nothing else is accepted.
+    const action = form.getAttribute('action')
     if ((root.parentElement?.closest('[data-account-password]') ?? null) !== null
-      || form.method !== 'post' || form.getAttribute('action') !== '/api/auth/change-password'
+      || form.method !== 'post' || (action !== '/api/auth/change-password' && action !== '/api/webmail/security/password')
       || !(current instanceof HTMLInputElement) || !(next instanceof HTMLInputElement) || !(confirm instanceof HTMLInputElement)
       || !(submit instanceof HTMLButtonElement) || submit.type !== 'submit'
       || [current, next, confirm].some(field => field.type !== 'password' || !field.required)
@@ -39,7 +41,7 @@ export function bindAccountPassword(navigate: (href: string) => void = href => w
     const currentOwnership = (): boolean => document.contains(root)
       && (root.parentElement?.closest('[data-account-password]') ?? null) === null
       && unique(root, 'form[data-account-password-form]') === form
-      && form.method === 'post' && form.getAttribute('action') === '/api/auth/change-password'
+      && form.method === 'post' && form.getAttribute('action') === action
       && unique(form, 'input[name="currentPassword"]') === current && current.form === form
       && unique(form, 'input[name="newPassword"]') === next && next.form === form
       && unique(form, 'input[name="confirmPassword"]') === confirm && confirm.form === form
@@ -125,7 +127,7 @@ export function bindAccountPassword(navigate: (href: string) => void = href => w
       busy = true; lock(); note('pending', copy('Verifying…'))
       let redirect = false
       try {
-        const reply = await transport('POST', '/api/auth/change-password', body)
+        const reply = await transport('POST', action as string, body)
         if (!object(reply) || reply.ok !== true || reply.reauthenticationRequired !== true) throw new Error('unverified_password_change')
         completed = true; clear(); note('saved', copy('Password changed. Sign in again.')); redirect = true
       } catch (error) {

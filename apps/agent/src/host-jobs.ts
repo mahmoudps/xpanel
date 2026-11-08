@@ -216,6 +216,18 @@ export class HostJobRunner {
     return views
   }
 
+  /** Nightly retention: removes the logs of finished jobs of these kinds; the job records stay. */
+  async pruneLogs(kindPrefixes: readonly string[], before: Date): Promise<number> {
+    let removed = 0
+    for (const prefix of kindPrefixes) {
+      const rows = await this.db.query<{ id: string }>(
+        `SELECT j.id FROM jobs j WHERE json_extract(j.detail, '$.hostJob.v') = 1 AND substr(j.kind, 1, length($1)) = $1
+         AND j.status IN ('succeeded', 'failed', 'cancelled') AND j.created_at < $2 LIMIT 1000`, [prefix, before.toISOString()])
+      for (const { id } of rows) if (await unlink(this.logPath(id)).then(() => true, () => false)) removed++
+    }
+    return removed
+  }
+
   /** Cancellation is recorded durably and honoured only between steps; a running step is never killed. */
   async cancel(id: string, actor: string, beforeWrite?: () => Promise<void>): Promise<HostJobView> {
     const current = await this.get(id)

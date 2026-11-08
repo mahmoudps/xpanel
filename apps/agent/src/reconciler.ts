@@ -2,8 +2,9 @@ import { withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admissi
 import { randomUUID } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
-import { cronJobUnitId, fail, isXpanelError, suspensionEffects } from '@xpanel/core'
+import { canonicalIp, servedDocRoot, cronJobUnitId, effectivePlan, effectiveServerFtpSettings, effectiveServerRoles, effectiveServerSshSettings, fail, isXpanelError, MANAGEMENT_PUBLIC_PORTS, managementPortRules, natPublicAddresses, redirectionValues, suspensionEffects } from '@xpanel/core'
 import type {
+  Account,
   ConfigTest,
   HostAction,
   Id,
@@ -29,6 +30,7 @@ import {
 } from '@xpanel/db'
 import type { ConfigGeneration, Db } from '@xpanel/db'
 import { edge, extended, services, system } from '@xpanel/render'
+import { siteQuotaActions } from './site-quota.ts'
 import type { StateSnapshot, StateStore } from '@xpanel/state'
 import { assertGenerationRollbackPreconditions, generationSourceIsLinked, isStateDirectoryDurabilityError, parseGenerationRollbackRequest, withGenerationReconciliationLease } from '@xpanel/state'
 import type { GenerationRollbackRequest } from '@xpanel/state'
@@ -41,13 +43,30 @@ import type { DnsReconcileProvider } from './services/dns-native.ts'
 import { chooseZoneSerial, stampZoneContent } from './zone-serial.ts'
 import { resolveAccountIoDevices } from './io-device.ts'
 import { SELINUX_ENFORCE_PATH } from './selinux-homes.ts'
+import { readDbClientHost } from './db-profiles.ts'
 import { databaseUserRemoteSqlHosts, databaseUserSqlHosts } from './db-remote-provider.ts'
+import { compileFtpServer, ftpRestartActions, observeFtpHost, type FtpHostObservation } from './ftp-server.ts'
+import { sshdObservedRunning, sshdPolicyOf, sshdReloadActions, sshdStateArgv } from './ssh-reconcile.ts'
+import { compileMariadbServerConfig, mariadbRestartActions, observeMariadbHost, type MariadbHostObservation } from './db-server-config.ts'
+import { dbQuotaPrivileges, readDbQuotaLocks } from './db-quota.ts'
+import { compilePhpMyAdminAccess, observePhpMyAdminHost, phpMyAdminPorts, phpMyAdminRestartActions, type PhpMyAdminHostObservation } from './phpmyadmin-access.ts'
 import { postgresqlAccountStatements, postgresqlSqlAction } from './pg-sql.ts'
 import { readSecEdgeConfiguration } from './sec-waf.ts'
-import { compilerAccessInput } from './compiler-access.ts'
+import { compilerAccessHookAvailable, compilerAccessInput } from './compiler-access.ts'
+import { effectiveFpm, fpmIniDefaults } from './svc-policy.ts'
+import { readSvcHostInput, renderSvcHost } from './svc-reconcile.ts'
+import { containerLoopbackPorts } from './ctr-compose.ts'
+import { CTR_REGISTRIES_DIR, readCtrPolicy, renderRegistriesConf } from './ctr-policy.ts'
+import type { SvcHostInput } from './svc-reconcile.ts'
+import { readLogTweaks } from './log-rotation.ts'
+import { accountEdgeSiteOptions, readAccountEdge, removeAccountEdgeState, type AccountEdgeInput } from './account-edge.ts'
+import { readSavedTweakValues } from './tweak-values.ts'
+import { readAccountPages, type AccountPages } from './account-pages.ts'
+import { observeHomeUserQuota } from './services/quota.ts'
 import { readMailForwardingConfiguration, readMailfxRenderInput, type MailForwardingConfiguration, type MailfxRenderInput } from './mailfx-render.ts'
-import { compileAccountRuntime, EMPTY_RUNTIME, readRuntimeGeneration, readRuntimeRegistries, removeRuntimeRegistry, restoreRuntimeRegistries, runtimeUnitNames, saveRuntimeGeneration, savedRuntimes, type RuntimeRegistry } from './account-runtime.ts'
+import { compileAccountRuntime, EMPTY_RUNTIME, runtimeAppPorts, readRuntimeGeneration, readRuntimeRegistries, removeRuntimeRegistry, restoreRuntimeRegistries, runtimeUnitNames, saveRuntimeGeneration, savedRuntimes, type RuntimeRegistry } from './account-runtime.ts'
 import type { SecEdgeConfiguration } from './sec-waf.ts'
+import { compileAccountDav, davUnitNames, davZoneAdditions, type DavIngress } from './account-dav.ts'
 import { secIngressRenderAuthorityNative } from './sec-ingress-provider.ts'
 import type { TrustedProxyRenderAuthority } from '../../../packages/core/src/trusted-proxies.ts'
 import {
@@ -69,6 +88,18 @@ import type {
   ReconcileJournalRecord,
 } from './reconciler-journal.ts'
 import { hostEffectsChecksum } from './host-effects-checksum.ts'
+import { IP_ALIASES_UNIT_PATH, parseManagedAliases, planIpAliases, releasableHolds, type IpAlias } from './ip-aliases.ts'
+import { readServerInterfaces } from './server-observation.ts'
+import { readRemoteServiceIps } from './remote-service-ips.ts'
+import { applyServerOperations, readServerOperations, renderZoneCatalog, type ServerOperationsInput } from './server-operations.ts'
+import { applyHostTools, readHostTools } from './host-tools.ts'
+import { readAppliedNfsClients } from './ops-file-sharing-native.ts'
+import { readMailxSaved } from './mailx-routes.ts'
+import { renderMailxRspamdHeaders, renderMailxRspamdLogging } from './mailx-policy.ts'
+import { MAILX_RSPAMD_MILTER } from '../../../packages/os/src/mailx-command.ts'
+import type { RemoteServiceIps } from '@xpanel/core'
+import type { ServerInterface } from './server-observation.ts'
+import { mailAutoconfigOption } from './mail-autoconfig.ts'
 
 export * from './reconciler-journal.ts'
 
@@ -214,8 +245,20 @@ export interface CompileOptions {
   trustedProxyAuthority?: TrustedProxyRenderAuthority
   /** Saved runtime apps, caches and containers per account id (account-runtime.ts). Absent renders none. */
   runtime?: ReadonlyMap<string, RuntimeRegistry>
+  /** Pull mirrors of the container trust policy; null renders no file. */
+  containerRegistries?: RenderedFile | null
   /** Hosts the management TLS ingress serves on the shared 80/443 sockets (agent-origin.ts readManagementHosts). */
   managementHosts?: readonly string[]
+  /** Public panel ports of this host (panel-access.ts); a moved port gets its accept rule here, never in the saved list. */
+  managementPorts?: readonly number[]
+  /** Panel host the edge verifies Web Disk and calendar sign-ins with (account-dav.ts readDavIngress); absent renders neither. */
+  davIngress?: DavIngress | null
+  /** Panel paths of account sites; absent while Tweak Settings turns them off. */
+  panelRedirects?: readonly edge.PanelRedirect[]
+  /** Web Template Editor pages per scope and the scope of each account (account-pages.ts). */
+  accountPages?: AccountPages
+  /** Quota mount of each home root other than the one above; null where that root has no quota. */
+  quotaFilesystems?: ReadonlyMap<string, string | null>
   /** HTTP/2 style of the installed nginx, read after preflight; the management ingress renders the same one. */
   nginxHttp2?: edge.NginxHttp2Style
   /** Live /etc/hosts read after preflight; its unrelated lines are kept. Absent renders only the managed lines. */
@@ -226,8 +269,36 @@ export interface CompileOptions {
   selinux?: boolean
   /** Saved Compiler Access (compiler-access.ts); absent or null leaves the compiler permissions untouched. */
   compilerAccess?: system.CompilerAccessInput | null
+  /** EL with the dnf post-transaction-actions plugin: the hook that reports package updates to the source builds. */
+  sourceBuildHook?: boolean
+  /** Saved services and security centre tools (svc-reconcile.ts); absent renders none of them. */
+  svcHost?: SvcHostInput
+  /** Clients of the applied NFS exports; TCP/2049 stays closed without them. */
+  nfsClients?: readonly string[]
   /** Recorded user-removal progress of terminating accounts (ReconcilerJournal.readRetirements). */
   retirements?: ReadonlyMap<string, AccountRetirementRecord['user']>
+  /** Days logrotate keeps the server logs (Tweak Settings logs.panelRotateDays); absent keeps its default. */
+  panelLogRotateDays?: number
+  /** The Mail server policy page's own smtpd_client_event_limit_exceptions, kept in the one rendered value. */
+  mailLimitPolicy?: string
+  /** Saved Remote Service IPs; absent leaves the Postfix limit exceptions at their default. */
+  remoteServiceIps?: RemoteServiceIps | null
+  /** Saved server roles, domain forwards, system mail forwards and panel TLS policy (server-operations.ts). Absent changes nothing. */
+  serverOperations?: ServerOperationsInput
+  /** Observed interfaces (null: unreadable) and the aliases the live unit binds. Absent renders no alias change. */
+  ipAliases?: { interfaces: readonly ServerInterface[] | null; managed: readonly IpAlias[] }
+  /** Saved IP Blocker lists and cache settings per account id (account-edge.ts). Absent renders none. */
+  accountEdge?: ReadonlyMap<string, AccountEdgeInput>
+  /** Present only on a host with pure-ftpd; its daemon files, service and passive ports are then part of the generation. */
+  ftpServer?: FtpHostObservation
+  /** Present only on a host with MariaDB; the Tweak Settings drop-in is then part of the generation. */
+  mariadbServer?: MariadbHostObservation
+  /** How the server of the active remote profile sees this panel; absent on the local server. */
+  databaseClientHost?: string
+  /** Present only on a host with phpMyAdmin; its nginx server and PHP-FPM pool are then part of the generation. */
+  phpMyAdminAccess?: PhpMyAdminHostObservation
+  /** Databases over their size limit; their grants keep only what db-quota.ts allows. */
+  dbQuotaLocks?: ReadonlySet<string>
 }
 
 const DEFAULT_ZONE_DIR = '/var/lib/powerdns/zones'
@@ -248,6 +319,11 @@ const newDocRootContextActions = (snapshot: StateSnapshot, applied: StateSnapsho
 export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileOptions): CompiledGeneration => {
   const { os } = opts
   const quotaFilesystem = opts.quotaFilesystem ?? null
+  // Quota lives on a mount: an account on another home root is limited on that filesystem or, without quota there, not at all.
+  const quotaFor = (account: Pick<Account, 'home'>): string | null => {
+    const base = dirname(account.home)
+    return opts.quotaFilesystems?.has(base) ? opts.quotaFilesystems.get(base)! : quotaFilesystem
+  }
   const ioDevices = opts.ioDevices ?? []
   const zoneDir = opts.zoneDir ?? DEFAULT_ZONE_DIR
   const now = opts.now ?? new Date()
@@ -277,6 +353,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     files.push(system.renderAccountProbeAsset())
   }
   const plansById = new Map(snapshot.plans.map((p) => [p.id, p]))
+  const dedicatedAddresses = new Set((snapshot.ipPool ?? []).filter(entry => entry.role === 'dedicated').map(entry => entry.address))
   const certs = snapshot.certificates
   // sec: saved WAF edge input. Every server on the shared 443 socket must carry the same protocol options.
   const edgeSettings = (settings: ServerSettings): ServerSettings =>
@@ -285,18 +362,26 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   // 1. Server-level edge, backend, SSH, symlink protection, jailed shell, and firewall
   if (snapshot.server) {
     const settings = snapshot.server.settings
-    preActions.push(...system.homeBaseProtectionActions(['/home']))
-    files.push(system.renderJailShellBinary())
+    preActions.push(...system.homeBaseProtectionActions(['/home', ...snapshot.accounts.map(account => dirname(account.home))]))
+    const shellJail = system.renderShellJail(effectiveServerSshSettings(settings).jail, ['/home', ...snapshot.accounts.map(account => dirname(account.home))])
+    files.push(system.renderJailShellBinary(undefined, shellJail.active), ...shellJail.files)
+    shellJail.tests.forEach(addTest)
     const symlinkSysctl = system.renderSymlinkProtectionSysctl()
     files.push(symlinkSysctl)
     postActions.push(...system.symlinkProtectionActions())
 
     preActions.push(...edge.nginxEdgeDirs(os))
+    if (opts.accountPages) {
+      const pages = edge.accountPageFiles(opts.accountPages.scopes)
+      preActions.push(...pages.dirs); files.push(...pages.files)
+    }
     // sec: WAF edge input and trusted-proxy authority
     files.push(edge.renderNginxMain(edgeSettings(settings), os, opts.trustedProxyAuthority))
     if (opts.secEdge?.edge.modsecurity) files.push(edge.renderModsecurityMain(opts.secEdge.edge.modsecurity))
     files.push(edge.defaultSiteFile(os, { settings: edgeSettings(settings), ...(opts.managementHosts ? { excludedNames: opts.managementHosts } : {}) }))
     addTest(edge.nginxConfigTest(os))
+    files.push(extended.renderLogrotateConfig({ rotateDays: opts.panelLogRotateDays ?? 14, apacheService: settings.engine === 'apache' ? os.services.apache : null,
+      fpmAccounts: snapshot.accounts.filter(account => account.status !== 'terminating').map(account => account.username) }))
 
     if (settings.engine === 'apache') {
       preActions.push(...edge.apacheLogDirs())
@@ -307,24 +392,47 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
         }),
       )
       files.push(edge.renderApacheBase(settings, os))
+      const postVhost = edge.renderApachePostVhostInclude(settings, os)
+      if (postVhost) files.push(postVhost)
       addTest(edge.apacheConfigTest(os))
     }
 
-    // Firewall (only rendered when rules include an enabled panel rule)
-    if (snapshot.firewall.rules.length > 0) {
+    if (opts.containerRegistries) {
+      preActions.push({ kind: 'ensure-dir', path: CTR_REGISTRIES_DIR, mode: 0o755, owner: 'root', group: 'root' })
+      files.push(opts.containerRegistries)
+    }
+
+    const containerGuard = system.renderContainerGuard(containerLoopbackPorts(snapshot.accounts, opts.runtime), os)
+    if (containerGuard) {
+      files.push(containerGuard.rules, containerGuard.unit)
+      addTest(system.nftConfigTest(containerGuard.rules.path))
+      postActions.push(...containerGuard.actions)
+    }
+
+    // Firewall: nothing to render until a rule or the ping block exists; the switch and the ping block live in the same table
+    if (snapshot.firewall.rules.length > 0 || snapshot.firewall.blockPing) {
       const prefixLists = Object.fromEntries(snapshot.firewall.prefixLists.map((l) => [l.name, l.entries]))
       const nftSettings = system.nftSettingsFromServer(settings, {
         prefixLists,
         banTimeoutSec: 3600,
         databaseRemoteSources: snapshot.accounts.filter((a) => a.status === 'active').flatMap((a) => (a.databaseRemoteAccess ?? []).map((e) => e.host)),
         flood: opts.secEdge?.flood ?? null, // sec: flood limits
+        ...(opts.ftpServer && opts.ftpServer.roleEnabled !== false && effectiveServerFtpSettings(settings).enabled ? { ftpPassivePorts: effectiveServerFtpSettings(settings).passivePorts } : {}),
+        smtpRestricted: opts.svcHost?.smtpRestricted === true,
+        enabled: snapshot.firewall.enabled,
+        blockPing: snapshot.firewall.blockPing,
+        nfsClients: opts.nfsClients ?? [],
+        ...(opts.managementPorts ? { managementPorts: [...new Set([...MANAGEMENT_PUBLIC_PORTS, ...opts.managementPorts])] } : {}),
+        ...(opts.serverOperations?.hostTools?.frp.server.enabled ? { frpPorts: opts.serverOperations.hostTools.frp.server } : {}),
+        webClientPorts: phpMyAdminPorts(opts.phpMyAdminAccess),
+        appPorts: runtimeAppPorts(snapshot.accounts, opts.runtime),
       })
-      const nftFile = system.renderNftables(snapshot.firewall.rules, nftSettings, os)
+      const nftFile = system.renderNftables([...snapshot.firewall.rules, ...managementPortRules(opts.managementPorts ?? [])], nftSettings, os)
       files.push(nftFile)
       addTest(system.nftConfigTest(nftFile.path))
       postActions.push(...system.nftApplyActions(os))
 
-      const sysctlFile = system.renderForwardingSysctl(snapshot.firewall.rules)
+      const sysctlFile = system.renderForwardingSysctl(snapshot.firewall.enabled ? snapshot.firewall.rules : [])
       if (sysctlFile) {
         files.push(sysctlFile)
         postActions.push(...system.sysctlApplyActions(sysctlFile))
@@ -332,16 +440,16 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     }
 
     // SSHD drop-in
-    const sshFile = system.renderSshdDropin(
-      {
-        port: settings.sshPort,
-        passwordAuth: false,
-        rootLogin: 'prohibit-password',
-      },
-      os,
-    )
+    const sshFile = system.renderSshdDropin(sshdPolicyOf(settings), os)
     files.push(sshFile)
     addTest(system.sshdConfigTest(os))
+
+    if (opts.ipAliases) {
+      // Bound before any service reloads, so a mail transport bound to an alias finds it.
+      const aliases = planIpAliases(snapshot.ipPool ?? [], opts.ipAliases.interfaces, opts.ipAliases.managed)
+      if (aliases.file) files.push(aliases.file)
+      postActions.push(...aliases.actions)
+    }
 
     const primaryIp = (version: 4 | 6): string | null => snapshot.ipPool?.find((entry) => entry.version === version && entry.isPrimary)?.address ?? null
     const host = extended.renderHostnameChange(settings.hostname, primaryIp(4) ?? '127.0.1.1', primaryIp(6), opts.etcHosts ?? null)
@@ -366,6 +474,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   )
   const sqlStatements: string[] = []
   let needsDaemonReload = false
+  const calDavNames: string[] = []
 
   for (const account of snapshot.accounts) {
     const accountDomains = snapshot.domains.filter((d) => d.accountId === account.id)
@@ -389,11 +498,12 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
           return [names.timer, names.service]
         }),
         ...runtimeUnitNames(account, opts.runtime?.get(account.id) ?? EMPTY_RUNTIME),
+        ...davUnitNames(account, accountUsers),
       ]
       const plan = system.accountTerminateActions(account, os, {
         confirmUsername: account.username,
         units,
-        quotaFilesystem,
+        quotaFilesystem: quotaFor(account),
       })
       // Stopping units and removing their files stays in the generation, which can still roll back. From the
       // quota clear on (user deletion, home and database removal) nothing can be restored.
@@ -407,12 +517,12 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
         return [{ step: 'home', action }]
       })
       // Podman keeps its per-account runtime directory across container restarts; the units above are stopped.
-      if ((opts.runtime?.get(account.id)?.containers.length ?? 0) > 0) {
+      if ((opts.runtime?.get(account.id)?.containers.length ?? 0) > 0 || (opts.runtime?.get(account.id)?.stacks?.length ?? 0) > 0) {
         retire.push({ step: 'container-runtime', action: { kind: 'remove-path', path: system.containerRuntimeDir(account.username) } })
       }
       const drops = [
         ...accountDbs.flatMap(db => services.dropDatabase(db.name, account.username)),
-        ...accountDbUsers.flatMap(dbu => ['localhost', ...databaseUserRemoteSqlHosts(account)].flatMap(host => services.dropUser(dbu.name, account.username, [host]))),
+        ...accountDbUsers.flatMap(dbu => ['localhost', ...databaseUserRemoteSqlHosts(account), ...(opts.databaseClientHost ? [opts.databaseClientHost] : [])].flatMap(host => services.dropUser(dbu.name, account.username, [host]))),
       ]
       if (drops.length > 0) retire.push({ step: 'mariadb', action: services.sqlAction(drops) })
       const pgUsers = (snapshot.postgresqlUsers ?? []).filter(user => user.accountId === account.id)
@@ -423,12 +533,12 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       continue
     }
 
-    const plan =
+    const plan = effectivePlan(
       plansById.get(account.planId) ??
-      fail('NOT_FOUND', `plan ${account.planId} not found for account ${account.username}`)
+      fail('NOT_FOUND', `plan ${account.planId} not found for account ${account.username}`), account)
 
     // Provision Linux group, user, 0750 home dirs, and filesystem quota
-    preActions.push(...system.accountProvisionActions(account, plan, os, { quotaFilesystem }))
+    preActions.push(...system.accountProvisionActions(account, plan, os, { quotaFilesystem: quotaFor(account) }))
     // Directories created under /home inherit its home_root_t, which Apache and PHP-FPM may not read.
     if (os.family === 'rhel' && opts.selinux) {
       preActions.push(system.accountContextAction(account.username, [...new Set([...system.accountDirPaths(account.home), ...accountDomains.map(domain => domain.docRoot)])]))
@@ -471,34 +581,42 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       files.push(...runtimeRender.files)
       preActions.push(...runtimeRender.preActions)
       postActions.push(...runtimeRender.postActions)
-      if (runtimeRender.python && !files.some((f) => f.path === system.WSGI_LAUNCHER_PATH)) files.push(system.renderWsgiLauncher())
+      if (runtimeRender.python && !files.some((f) => f.path === system.WSGI_LAUNCHER_PATH)) files.push(system.renderWsgiLauncher(), system.renderStaticWsgi())
     }
+
+    // Web Disk and calendars and contacts: units in the slice, nginx on 2078/2080; the launcher and default servers once
+    const dav = compileAccountDav({ account, domains: accountDomains, users: accountUsers, certs, os, ingress: opts.davIngress ?? null, ...(opts.svcHost?.webdiskTls ? { tls: opts.svcHost.webdiskTls } : {}),
+      disabled: snapshot.featureLists.find((f) => f.id === plan.featureListId)?.disabled ?? [] })
+    files.push(...dav.files.filter((file) => !files.some((f) => f.path === file.path)))
+    calDavNames.push(...dav.calDavNames)
+    preActions.push(...dav.preActions)
+    postActions.push(...dav.postActions)
 
     // Edge & backend vhosts + PHP-FPM pools
     if (snapshot.server && accountDomains.length > 0) {
       const settings = snapshot.server.settings
       // sec: per-site WAF limits and ModSecurity switches
-      files.push(edge.nginxSiteFile(account, accountDomains, edgeSettings(settings), os, certs, { now, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}), ...(runtimeRender ? { appRoutes: runtimeRender.routes } : {}) }))
+      files.push(edge.nginxSiteFile(account, accountDomains, edgeSettings(settings), os, certs, { now, dedicatedAddresses, ...(opts.secEdge ? { waf: opts.secEdge.sites } : {}), ...(runtimeRender ? { appRoutes: runtimeRender.routes, ...(runtimeRender.compression ? { compression: runtimeRender.compression } : {}) } : {}), ...accountEdgeSiteOptions(opts.accountEdge, account.id), mailAutoconfig: mailAutoconfigOption(snapshot, account.id), calDavNames: dav.calDavNames, ...(opts.panelRedirects ? { panelRedirects: opts.panelRedirects } : {}), ...(opts.accountPages ? { pageScope: opts.accountPages.scopeOf.get(account.id) ?? '' } : {}) }))
 
       // Per-domain custom configuration drop-in files (cPanel userdata style) + .user.ini
-      if (snapshot.domainCustomConfigs && snapshot.domainCustomConfigs.length > 0) {
-        const customByDomain = new Map(
-          snapshot.domainCustomConfigs
-            .filter((c) => c.accountId === account.id)
-            .map((c) => [c.domainId, c]),
-        )
-        for (const dom of accountDomains) {
-          const customCfg = customByDomain.get(dom.id)
-          if (customCfg) {
-            files.push(...system.renderDomainCustomIncludes(account, dom.docRoot, customCfg, os))
-          }
+      const customByDomain = new Map(
+        (snapshot.domainCustomConfigs ?? [])
+          .filter((c) => c.accountId === account.id)
+          .map((c) => [c.domainId, c]),
+      )
+      for (const dom of accountDomains) {
+        const customCfg = customByDomain.get(dom.id), basedir = dom.site?.isolated ? edge.siteOpenBasedir(account, dom) : undefined
+        if (customCfg) {
+          files.push(...system.renderDomainCustomIncludes(account, servedDocRoot(dom), customCfg, os, basedir))
+        } else if (basedir) {
+          files.push(system.renderSiteIsolationIni(account, servedDocRoot(dom), dom.name, basedir))
         }
       }
 
       // root-granted disable_functions exceptions follow the account on every handler and version
       const allowedFunctions = settings.phpFunctionExceptions?.find(item => item.account === account.username)?.functions ?? []
       if (settings.engine === 'apache') {
-        files.push(...edge.renderApacheVhosts(account, accountDomains, settings, os, { now }))
+        files.push(...edge.renderApacheVhosts(account, edge.servedDomains(accountDomains), settings, os, { now, ...(opts.accountPages ? { pageScope: opts.accountPages.scopeOf.get(account.id) ?? '' } : {}) }))
         for (const dom of accountDomains) {
           if (dom.siteType === 'php' && dom.php.handler !== 'fpm') {
             preActions.push(...edge.cgiWrapperDirs(account, settings, os))
@@ -506,10 +624,11 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
           }
         }
       } else {
-        const olsAcc = edge.renderOlsAccount(account, accountDomains, settings, os, {
+        const olsAcc = edge.renderOlsAccount(account, edge.servedDomains(accountDomains), settings, os, {
           workerCap: plan.caps.phpWorkers,
           allowedFunctions,
           now,
+          ...(opts.accountPages ? { pageScope: opts.accountPages.scopeOf.get(account.id) ?? '' } : {}),
         })
         olsAccountRenders.push(olsAcc)
         files.push(...olsAcc.vhconfs)
@@ -525,11 +644,14 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
       for (const [version, phpSettings] of fpmByVersion) {
         preActions.push(...edge.fpmInstanceDirs(account, version))
         files.push(
-          edge.renderFpmPool(account, phpSettings, os, {
+          edge.renderFpmPool(account, { ...phpSettings, fpm: effectiveFpm(phpSettings.fpm, opts.svcHost?.phpFpm ?? null, plan.caps.phpWorkers) }, os, {
             workerCap: plan.caps.phpWorkers,
             maxMemoryMb: plan.resources.memoryMb,
             apacheMpm: settings.apacheMpm,
             allowedFunctions,
+            narrowableBasedir: accountDomains.some(dom => dom.site?.isolated && dom.php.version === version),
+            iniDefaults: fpmIniDefaults(opts.svcHost?.phpFpm ?? null),
+            pearLibrary: opts.svcHost?.pearLibraries[version] ?? null,
           }),
         )
         files.push(edge.renderFpmMaster(account, version, os))
@@ -578,7 +700,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
         .map(item => ({ local: item.sourceAddress.slice(0, item.sourceAddress.lastIndexOf('@')), to: item.destinations }))
       const domainForward = mailForwarding.domainForwarders.find(item => item.accountId === account.id && item.sourceDomain === dom.name)?.targetDomain
       const lists = mailForwarding.lists.filter(item => item.accountId === account.id && item.address.endsWith(`@${dom.name}`))
-        .map(item => ({ local: item.address.slice(0, item.address.lastIndexOf('@')), members: item.members }))
+        .map(item => ({ local: item.address.slice(0, item.address.lastIndexOf('@')), members: item.members, ...(item.gate ? { gate: item.gate.gate } : {}) }))
       const rejects = mailForwarding.rejects.filter(item => item.accountId === account.id && item.sourceAddress.endsWith(`@${dom.name}`))
         .map(item => ({ local: item.sourceAddress.slice(0, item.sourceAddress.lastIndexOf('@')), message: item.message }))
       // an autoresponder address also delivers to its hidden user; a list or rejection keeps its address to itself
@@ -597,11 +719,15 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
           quotaMb: u.mailboxQuotaMb,
           suspendLogin: mailLogin === 'denied',
         }))
+        // Suspension alone keeps delivering, and a message landing here after the final sync would be lost: a frozen account defers.
+        // Once it has moved, mail and logins pass through to the destination instead.
+        const movedTo = account.status === 'suspended' ? opts.accountEdge?.get(account.id)?.policy.movedTo : undefined
         const domainInput: services.MailDomainInput = {
           domain: dom.name,
           account,
           login: mailLogin,
-          delivery: mailDelivery,
+          delivery: movedTo ? 'accept' : movedTo === null ? 'defer' : mailDelivery,
+          ...(movedTo ? { proxyHost: movedTo } : {}),
           mailboxes,
           forwarders,
           rejects,
@@ -619,9 +745,11 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     // hidden autoresponder users of this account, one per address that some alias now reaches
     const hidden = mailRouting.autoreplies.filter(item => item.accountId === account.id
       && mailDomains.some(input => input.domain === item.domain && input.forwarders?.some(forwarder => forwarder.local === item.local && forwarder.to.includes(item.target))))
-    if (hidden.length > 0) {
+    const gated = mailForwarding.lists.flatMap(item => item.gate && item.accountId === account.id ? [item.gate.gate] : [])
+    if (hidden.length > 0 || gated.length > 0) {
       const internal: services.MailDomainInput = { domain: services.autoreplyDomain(account.id), account, internal: true,
-        mailboxes: hidden.map(item => ({ local: item.target.slice(0, item.target.indexOf('@')), passwordHash: services.LOCKED_MAILBOX_HASH, quotaMb: 1, suspendLogin: true })) }
+        mailboxes: [...hidden.map(item => ({ local: item.target.slice(0, item.target.indexOf('@')), passwordHash: services.LOCKED_MAILBOX_HASH, quotaMb: 1, suspendLogin: true })),
+          ...gated.map(gate => ({ local: gate.slice(0, gate.indexOf('@')), passwordHash: services.LOCKED_MAILBOX_HASH, quotaMb: services.LIST_GATE_QUOTA_MB, suspendLogin: true }))] }
       files.push(services.dovecotPasswdFile(os, internal))
       mailDomains.push(internal)
     }
@@ -658,7 +786,7 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     }
     const dbsById = new Map(accountDbs.map((d) => [d.id, d]))
     // One host per statement builder call: MAX_DB_HOSTS is 20 while an account may save 100 remote hosts.
-    const dbHosts = databaseUserSqlHosts(account)
+    const dbHosts = [...databaseUserSqlHosts(account), ...(opts.databaseClientHost ? [opts.databaseClientHost] : [])]
     for (const dbu of accountDbUsers) {
       // Suspension keeps the saved remote policy but closes its SQL accounts until reactivation.
       if (account.status !== 'active') for (const host of databaseUserRemoteSqlHosts(account)) sqlStatements.push(...services.dropUser(dbu.name, account.username, [host]))
@@ -666,7 +794,8 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
         sqlStatements.push(...services.createUser(dbu.name, account.username, [host], { plugin: dbu.authPlugin, hash: dbu.authString }))
         for (const grant of dbu.grants) {
           const targetDb = dbsById.get(grant.databaseId)
-          if (targetDb && targetDb.trashedAt === null) sqlStatements.push(...services.grantPrivileges(dbu.name, account.username, [host], targetDb.name, grant.privileges))
+          const privileges = targetDb ? dbQuotaPrivileges(grant.privileges, opts.dbQuotaLocks?.has(targetDb.name) === true) : []
+          if (targetDb && targetDb.trashedAt === null && privileges.length) sqlStatements.push(...services.grantPrivileges(dbu.name, account.username, [host], targetDb.name, privileges))
         }
       }
     }
@@ -713,18 +842,33 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     postActions.push(...maps.actions.filter((action) => action.kind !== 'ensure-dir'))
     // mailfx: Sieve during delivery and each mailbox's spam policy script; sievec failures fail the generation.
     const sieve = services.renderMailboxPolicySieve(os, opts.mailFx?.sieve ?? [])
-    files.push(services.renderDovecotSieveConf(os), ...sieve.files)
-    preActions.push(...sieve.preActions)
-    postActions.push(...sieve.postActions)
+    const trap = services.renderBoxTrapper(os, opts.mailFx?.boxTrapper)
+    const listGate = services.renderListGate(os, opts.mailFx?.listGateProgram ? { program: opts.mailFx.listGateProgram, lists: mailForwarding.lists.flatMap(item => item.gate ? [item.gate] : []) } : undefined)
+    files.push(services.renderDovecotSieveConf(os, trap.execute || listGate.execute), ...sieve.files, ...trap.files, ...listGate.files, ...(opts.mailFx?.fts ? [services.renderDovecotFtsConf(os)] : []))
+    preActions.push(...sieve.preActions, ...trap.preActions, ...listGate.preActions)
+    postActions.push(...sieve.postActions, ...trap.postActions, ...listGate.postActions)
     postActions.push(...startAndReload(os.services.dovecot))
     localMail = true
   }
 
   // Pure-FTPd passwd + mkdb
-  if (ftpUsers.length > 0) {
+  // On a pure-ftpd host an empty list still runs mkdb, so the last deleted login leaves the PureDB file.
+  if (ftpUsers.length > 0 || opts.ftpServer) {
     const ftpRendered = services.renderFtpPasswd(ftpUsers)
     files.push(ftpRendered.file)
     postActions.push(...ftpRendered.actions)
+  }
+  if (opts.ftpServer && snapshot.server) {
+    const ftp = compileFtpServer(snapshot, { os, ...opts.ftpServer })
+    files.push(...ftp.files); preActions.push(...ftp.preActions); postActions.push(...ftp.postActions)
+  }
+  if (opts.mariadbServer) {
+    const mariadb = compileMariadbServerConfig(os, opts.mariadbServer)
+    files.push(...mariadb.files); postActions.push(...mariadb.postActions)
+  }
+  if (opts.phpMyAdminAccess) {
+    const phpMyAdmin = compilePhpMyAdminAccess(os, opts.phpMyAdminAccess)
+    files.push(...phpMyAdmin.files); preActions.push(...phpMyAdmin.preActions); postActions.push(...phpMyAdmin.postActions)
   }
 
   // Postfix outbound multi-IPv4/IPv6 transport maps & master.cf transports
@@ -763,6 +907,13 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     if (tls) localMailOptions.tls = tls
     // mailfx: the spam filter milter follows OpenDKIM in the managed main.cf block.
     if (opts.mailFx?.spamMilter) localMailOptions.spamMilter = opts.mailFx.spamMilter
+    if (opts.mailFx?.spamMilter === MAILX_RSPAMD_MILTER) {
+      files.push(renderMailxRspamdHeaders(), renderMailxRspamdLogging())
+      postActions.push(...startAndReload('rspamd.service'))
+    }
+    if (opts.remoteServiceIps) localMailOptions.limitExceptions = opts.remoteServiceIps.smtp
+    if (snapshot.server) localMailOptions.hostname = snapshot.server.settings.hostname
+    if (opts.mailLimitPolicy !== undefined) localMailOptions.limitPolicy = opts.mailLimitPolicy
     // These owned fragments bind merged main/master behavior to the generation checksum.
     for (const [name, content] of [
       ['main.cf.fragment', services.localDeliveryMainBlock(os, localMailOptions)],
@@ -779,6 +930,8 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   // PowerDNS BIND zone files
   const terminatingAccountIds = new Set(snapshot.accounts.filter(account => account.status === 'terminating').map(account => account.id))
   const renderedZones = zonesExcludingTerminatingAccounts(snapshot.zones, snapshot.domains, terminatingAccountIds)
+  // 1:1 NAT: zones keep the local address in state; DNS answers with its public mapping.
+  const natPublic = natPublicAddresses(snapshot.ipPool ?? [])
   for (const zone of renderedZones) {
     const primaryNs = snapshot.server?.settings.nameservers[0] ?? `ns1.${zone.name}`
     const rname = `hostmaster.${zone.name}.`
@@ -797,14 +950,16 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
         name: r.name,
         type: r.type,
         ttl: r.ttl,
-        content: r.content,
+        content: (r.type === 'A' || r.type === 'AAAA') ? natPublic.get(r.content) ?? r.content : r.content,
         priority: r.priority,
       })),
-      ...(opts.mailAuth ? mailAuthZoneAdditions(zone.name, zone.records, opts.mailAuth) : []),
+      ...(opts.mailAuth && !zone.replica ? mailAuthZoneAdditions(zone.name, zone.records, opts.mailAuth) : []),
+      ...(zone.replica ? [] : davZoneAdditions(zone.name, zone.records, calDavNames)),
     ])
     const drafted = renderZone(zone.serial)
     const previous = opts.previousZones ? (opts.previousZones.get(path) ?? null) : null
-    const serial = chooseZoneSerial(zone.serial, previous, drafted, now)
+    // A cluster copy answers with the serial its source published, so members compare equal.
+    const serial = zone.replica ? zone.serial : chooseZoneSerial(zone.serial, previous, drafted, now)
     const content = stampZoneContent(serial === zone.serial ? drafted : renderZone(serial))
     files.push({
       path,
@@ -815,16 +970,9 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
     })
   }
   if (snapshot.zones.length > 0) {
-    const namedConfLines = [
-      '// Managed by xPanel: PowerDNS BIND zone catalog',
-      ...renderedZones.map(
-        (zone) => `zone "${zone.name}" {\n  type master;\n  file "${zoneDir}/${zone.name}.zone";\n};`,
-      ),
-      '',
-    ]
     files.push({
       path: '/etc/powerdns/named.conf.xpanel-zones',
-      content: namedConfLines.join('\n'),
+      content: renderZoneCatalog(renderedZones.map(zone => zone.name), zoneDir),
       mode: 0o644,
       owner: 'root',
       group: 'root',
@@ -854,11 +1002,20 @@ export const compileDesiredGeneration = (snapshot: StateSnapshot, opts: CompileO
   if (postgresqlStatements.length > 0) postActions.push(postgresqlSqlAction(postgresqlStatements))
 
   // After account provisioning: gpasswd -M names only users that already exist.
+  if (opts.svcHost) {
+    const svc = renderSvcHost(os, opts.svcHost, snapshot.server?.settings.engine === 'apache')
+    files.push(...svc.files)
+    postActions.push(...svc.actions)
+  }
   if (opts.compilerAccess) {
     const compilers = system.renderCompilerAccess(os, opts.compilerAccess)
     files.push(...compilers.files)
     postActions.push(...compilers.actions)
   }
+  if (opts.sourceBuildHook) files.push(system.renderSourceBuildHook())
+
+  if (opts.serverOperations) applyServerOperations(files, postActions, opts.serverOperations, os, opts.selinux === true, snapshot.certificates)
+  if (opts.serverOperations?.hostTools) applyHostTools(files, preActions, postActions, opts.serverOperations.hostTools, os, snapshot)
 
   files.sort((a, b) => a.path.localeCompare(b.path))
   return {
@@ -933,6 +1090,8 @@ export interface ReconciliationRecoveryResult {
 }
 
 export interface ReconcilerDeps {
+  /** Native hosts render the Web Server Status files; the token lives in root-only state. */
+  webStatus?: boolean
   store: StateStore
   db: Db
   executor: AgentExecutor
@@ -942,6 +1101,12 @@ export interface ReconcilerDeps {
   zoneDir?: string
   /** Hosts of the management TLS ingress, read once at agent start: nothing touches the host before preflight. */
   managementHosts?: readonly string[]
+  /** Read on every reconcile: Panel access opens a new port before the listener moves. */
+  managementPorts?: () => Promise<readonly number[]>
+  /** Panel host for the Web Disk and calendar edge, read once at agent start (account-dav.ts readDavIngress). */
+  davIngress?: DavIngress | null
+  /** agent-origin.ts readPanelRedirects, read once at agent start like the hosts above. */
+  panelRedirects?: readonly edge.PanelRedirect[]
   onEvent?: (event: LiveEvent) => void
   /** Optional health verification probe run against each service unit after reload and after rollback. */
   healthProbe?: (unit: string, generationId: number) => Promise<{ ok: boolean; error?: string }>
@@ -983,10 +1148,12 @@ export const rollbackReloadAction = (unit: string): HostAction => {
   if (unit === 'pdns.service' || unit === 'pdns') {
     return { kind: 'exec', argv: ['/usr/bin/systemctl', 'reload-or-restart', unit] }
   }
+  // sshd exits when a reload cannot bind its port: the restored file needs a daemon started again, not signalled.
+  if (unit === 'ssh' || unit === 'sshd') return { kind: 'systemd', verb: 'restart', unit }
   // Slice units have no reload job; restoring their file needs only a daemon reload.
   // `systemctl reload xpanel-<uid>.slice` fails and would strand the rollback.
   if (unit.endsWith('.slice')) return { kind: 'systemd-daemon-reload' }
-  const verb = unit.startsWith('xpanel-php-fpm-') ? 'restart' : unit.endsWith('.timer') ? 'start' : 'reload'
+  const verb = /^xpanel-(?:php-fpm-|daemon-|frp[sc]\.)/.test(unit) ? 'restart' : unit.endsWith('.timer') ? 'start' : 'reload'
   return { kind: 'systemd', verb, unit }
 }
 
@@ -1003,6 +1170,9 @@ export class HostReconciler {
   private readonly deps: ReconcilerDeps
   private readonly listeners = new Set<(event: LiveEvent) => void>()
   readonly journal: ReconcilerJournal
+  /** False while the DNS role is off: PowerDNS is stopped, so a generation neither validates against it nor observes it. */
+  private dnsRoleEnabled = true
+  private get dnsPublication(): DnsReconcileProvider | undefined { return this.dnsRoleEnabled ? this.deps.dnsPublication : { validate: async () => {}, verify: async () => {} } as unknown as DnsReconcileProvider }
 
   constructor(deps: ReconcilerDeps) {
     this.deps = deps
@@ -1301,7 +1471,7 @@ export class HostReconciler {
           )
         }
       }
-      await runGenerationDnsHook({ phase: 'verify', native, provider: this.deps.dnsPublication, files: previousFiles, removedPaths: absentPaths, zoneDir })
+      await runGenerationDnsHook({ phase: 'verify', native, provider: this.dnsPublication, files: previousFiles, removedPaths: absentPaths, zoneDir })
       // A generation that may have run hostnamectl sets the kernel name back and proves it.
       const previous = journalRecord.previousKernelHostname
       if (previous !== undefined) {
@@ -1629,9 +1799,28 @@ export class HostReconciler {
       }
       await this.deps.store.deleteAccount(account.id)
       await removeRuntimeRegistry(this.deps.store.rootDir, account.id)
+      await removeAccountEdgeState(this.deps.store.rootDir, account.id)
       await this.journal.clearRetirement(account.id)
     }
     return incomplete
+  }
+
+  /**
+   * Clears the release holds that the active generation, compiled from `snapshot`, makes safe; the account's new
+   * addresses must be observed on the host. A failure leaves the holds for a later reconcile.
+   */
+  private async releaseVerifiedIps(snapshot: StateSnapshot): Promise<void> {
+    try {
+      const pool = await this.deps.store.listServerIps()
+      if (!pool.some(entry => entry.releasing)) return
+      const interfaces = await readServerInterfaces(argv => this.deps.executor.runCommand(argv))
+      if (!interfaces) return
+      const bound = new Set(interfaces.flatMap(item => item.addresses.map(address => canonicalIp(address.address).address)))
+      const holds = releasableHolds(pool, snapshot, bound)
+      if (holds.length) await this.deps.store.clearIpReleasing(holds)
+    } catch (error) {
+      console.error('xpanel-agent IP release check failed:', error instanceof Error ? error.message.split('\n')[0]!.slice(0, 300) : 'unexpected failure')
+    }
   }
 
   /**
@@ -1681,12 +1870,33 @@ export class HostReconciler {
     }
     await assertHostEffectAuthority(this.deps.executor)
     const mailForwarding = await readMailForwardingConfiguration(this.deps.store.rootDir, snapshot)
+    const remoteServiceIps = await readRemoteServiceIps(this.deps.store.rootDir)
+    const serverOperations = await readServerOperations(this.deps.store.rootDir)
+    serverOperations.hostTools = await readHostTools(this.deps.store.rootDir)
+    this.dnsRoleEnabled = effectiveServerRoles(serverOperations.roles).has('dns')
+    const ftpRoleEnabled = effectiveServerRoles(serverOperations.roles).has('ftp')
+    const mailLimitPolicy = (await readMailxSaved(this.deps.store.rootDir)).sections.server?.policy.postfix.smtpd_client_event_limit_exceptions
     // mailfx: Sieve inputs come from saved files; the milter needs systemd answers, read after preflight.
     let mailFx = await readMailfxRenderInput(this.deps.store.rootDir, snapshot, this.deps.os.family, null)
     // sec: saved WAF/flood edge input and the activated trusted-proxy authority
     const secEdge = await readSecEdgeConfiguration(this.deps.store.rootDir, { family: this.deps.os.family, domains: snapshot.domains })
     const compilerAccess = await compilerAccessInput(this.deps.store.rootDir, this.deps.os.family, snapshot)
+    const sourceBuildHook = this.deps.os.family === 'rhel' && await compilerAccessHookAvailable('rhel')
+    const svcHost = await readSvcHostInput(this.deps.store.rootDir, snapshot, this.deps.webStatus === true)
+    const nfsClients = await readAppliedNfsClients()
+    const { panelRotateDays } = await readLogTweaks(this.deps.store.rootDir)
+    const redirection = redirectionValues(await readSavedTweakValues(this.deps.store.rootDir))
+    const quotaFilesystems = new Map<string, string | null>()
+    for (const base of new Set(snapshot.accounts.map(account => dirname(account.home)))) {
+      if (base === '/home' || this.deps.quotaFilesystem === null) continue
+      const run = (argv: readonly string[]) => this.deps.executor.runCommand([...argv])
+      const observed = await observeHomeUserQuota(run, base).catch(() => null)
+      quotaFilesystems.set(base, observed?.status === 'enabled' ? observed.filesystem : null)
+    }
+    const accountPages = snapshot.server ? await readAccountPages(this.deps.store.rootDir, { accounts: snapshot.accounts, resellers: snapshot.resellers, settings: snapshot.server.settings }) : null
     const runtime = await readRuntimeRegistries(this.deps.store.rootDir, snapshot.accounts)
+    const containerRegistries = renderRegistriesConf(await readCtrPolicy(this.deps.store.rootDir))
+    const accountEdge = await readAccountEdge(this.deps.store.rootDir, snapshot.accounts)
     const retirements = await this.journal.readRetirements(snapshot.accounts.filter(account => account.status === 'terminating'))
     const runtimeText = JSON.stringify(savedRuntimes(runtime))
     if (opts.expectedRestoredRuntime && runtimeText !== JSON.stringify(savedRuntimes(opts.expectedRestoredRuntime))) {
@@ -1721,13 +1931,26 @@ export class HostReconciler {
     let etcHosts: string | null | undefined
     let observedHostname: string | null | undefined
     let selinux: boolean | undefined
+    let sshdRunning = true
     let nginxHttp2: edge.NginxHttp2Style | undefined
+    let ipAliases: CompileOptions['ipAliases']
+    let ftpServer: FtpHostObservation | undefined
+    let mariadbServer: MariadbHostObservation | undefined
+    let databaseClientHost: string | null = null
+    let phpMyAdminAccess: PhpMyAdminHostObservation | undefined
+    let dbQuotaLocks: ReadonlySet<string> | undefined
     let kernelHostname: string | null | undefined
     const observedKernel = () => (kernelHostname !== undefined ? { kernelHostname } : {})
+    const managementPorts = await this.deps.managementPorts?.()
     const compileMail = (mailAuth: OpenDkimSigning | null, previousZones?: ReadonlyMap<string, string>) => {
       const next = compileDesiredGeneration(snapshot, {
         os: this.deps.os,
         ...(this.deps.managementHosts ? { managementHosts: this.deps.managementHosts } : {}),
+        ...(managementPorts ? { managementPorts } : {}),
+        ...(this.deps.davIngress ? { davIngress: this.deps.davIngress } : {}),
+        ...(this.deps.panelRedirects && redirection.panelPaths ? { panelRedirects: this.deps.panelRedirects } : {}),
+        ...(accountPages ? { accountPages } : {}),
+        quotaFilesystems,
         quotaFilesystem: this.deps.quotaFilesystem ?? null,
         ...(this.deps.ioDevices && { ioDevices: this.deps.ioDevices }),
         ...(accountIoDevices ? { ioDevicesByAccount: accountIoDevices } : {}),
@@ -1739,15 +1962,34 @@ export class HostReconciler {
         ...(mailTls !== undefined ? { mailTls } : {}),
         secEdge,
         compilerAccess,
+        sourceBuildHook,
+        svcHost,
+        nfsClients,
+        panelLogRotateDays: panelRotateDays,
         ...(trustedProxyAuthority ? { trustedProxyAuthority } : {}),
         runtime,
+        containerRegistries,
         retirements,
+        accountEdge,
         ...(etcHosts !== undefined ? { etcHosts } : {}),
         ...(observedHostname !== undefined ? { observedHostname } : {}),
         ...(selinux !== undefined ? { selinux } : {}),
         ...(nginxHttp2 && { nginxHttp2 }),
+        ...(ipAliases && { ipAliases }),
+        remoteServiceIps,
+        serverOperations,
+        ...(mailLimitPolicy !== undefined && { mailLimitPolicy }),
+        ...(ftpServer && { ftpServer: { ...ftpServer, roleEnabled: ftpRoleEnabled } }),
+        ...(mariadbServer && { mariadbServer }),
+        ...(databaseClientHost && { databaseClientHost }),
+        ...(phpMyAdminAccess && { phpMyAdminAccess }),
+        ...(dbQuotaLocks && { dbQuotaLocks }),
         now: new Date(),
       })
+      if (ftpServer) next.postActions.push(...ftpRestartActions(this.deps.os, next.files, previousManifest?.files, sha256Text, ftpRoleEnabled && effectiveServerFtpSettings(snapshot.server?.settings).enabled))
+      if (mariadbServer) next.postActions.push(...mariadbRestartActions(this.deps.os, next.files, previousManifest?.files, sha256Text))
+      next.postActions.push(...sshdReloadActions(this.deps.os, next.files, previousManifest?.files, sha256Text, sshdRunning))
+      if (phpMyAdminAccess) next.postActions.push(...phpMyAdminRestartActions(next.files, previousManifest?.files, sha256Text))
       if (appliedSnapshot) {
         for (const path of removedMaildirPaths(appliedSnapshot, snapshot)) {
           next.postActions.push({ kind: 'remove-path', path })
@@ -1800,7 +2042,7 @@ export class HostReconciler {
         removedPaths: removedPaths.filter(path => isManagedDnsPath(path, zoneDir)),
       }))
       if (digest === validatedDnsDigest) return
-      await runGenerationDnsHook({ phase: 'validate', native: isRealLinuxExecutor, provider: this.deps.dnsPublication, files: compiled.files, removedPaths, zoneDir })
+      await runGenerationDnsHook({ phase: 'validate', native: isRealLinuxExecutor, provider: this.dnsPublication, files: compiled.files, removedPaths, zoneDir })
       validatedDnsDigest = digest
     }
     await validateDnsCandidate()
@@ -1832,18 +2074,26 @@ export class HostReconciler {
       } catch { /* An unreadable zone file keeps the serial already in state. */ }
     }
     if (snapshot.server) {
+      if (isRealLinuxExecutor) ftpServer = await observeFtpHost(this.deps.executor, this.deps.os, this.deps.store.rootDir)
+      if (isRealLinuxExecutor) mariadbServer = await observeMariadbHost(this.deps.executor, this.deps.store.rootDir)
+      if (isRealLinuxExecutor) databaseClientHost = await readDbClientHost(path => this.deps.executor.readFile(path))
+      if (isRealLinuxExecutor) phpMyAdminAccess = await observePhpMyAdminHost(this.deps.executor, this.deps.os, this.deps.store.rootDir, snapshot.server.settings)
+      if (isRealLinuxExecutor) dbQuotaLocks = await readDbQuotaLocks(this.deps.store.rootDir)
       etcHosts = await this.deps.executor.readFile('/etc/hosts')
+      if (serverOperations.systemMail) serverOperations.etcAliases = await this.deps.executor.readFile(system.SYSTEM_ALIASES_PATH)
       observedHostname = await this.deps.executor.readFile(KERNEL_HOSTNAME_PATH)
       kernelHostname = observedHostname?.trim() ?? null
       if (this.deps.os.family === 'rhel') selinux = await this.deps.executor.readFile(SELINUX_ENFORCE_PATH) !== null
+      if (isRealLinuxExecutor) sshdRunning = sshdObservedRunning((await this.deps.executor.runCommand(sshdStateArgv(this.deps.os))).stdout)
       // The binary that runs the config test reports its release on stderr.
       const version = await this.deps.executor.runCommand([edge.nginxBinary(this.deps.os), '-v'])
       nginxHttp2 = (version.ok ? edge.nginxHttp2Style(version.stderr) : null)
         ?? fail('PRECONDITION_FAILED', 'the installed nginx version could not be observed', { stateChanged: false })
+      ipAliases = { interfaces: await readServerInterfaces(argv => this.deps.executor.runCommand(argv)), managed: parseManagedAliases(await this.deps.executor.readFile(IP_ALIASES_UNIT_PATH)) }
     }
     const refreshed = compileMail(mailAuth, previousZones)
     const nextChecksum = computeFilesChecksum(refreshed.files)
-    // An observed fact such as SELinux can change the actions alone.
+    // Observations can change only the actions (an alias to unbind, SELinux), so both are compared.
     const actionsChanged = hostEffectsChecksum([...refreshed.preActions, ...refreshed.postActions]) !== hostEffectsChecksum([...compiled.preActions, ...compiled.postActions])
     if (nextChecksum !== filesChecksum || actionsChanged) {
       compiled = refreshed
@@ -1868,7 +2118,8 @@ export class HostReconciler {
       const mailDrift = compiled.localMail && await localMailNeedsUpdate(this.deps.executor, this.deps.os, compiled.localMailOptions)
       await assertMailForwardingUnchanged()
       if (!drift.hasDrift && !drift.manifestMissing && !mailDrift) {
-        await runGenerationDnsHook({ phase: 'verify', native: isRealLinuxExecutor, provider: this.deps.dnsPublication, files: compiled.files, removedPaths: removedPathsFor(compiled.files), zoneDir: this.deps.zoneDir })
+        await runGenerationDnsHook({ phase: 'verify', native: isRealLinuxExecutor, provider: this.dnsPublication, files: compiled.files, removedPaths: removedPathsFor(compiled.files), zoneDir: this.deps.zoneDir })
+        await this.releaseVerifiedIps(snapshot)
         return { status: 'noop', generation: currentGen, stateChecksum: snapshot.checksum, ...observedKernel() }
       }
       repairedDriftCount = drift.items.length + (mailDrift ? 1 : 0)
@@ -1876,6 +2127,7 @@ export class HostReconciler {
 
     // Once per new document root, so it stays out of the effects checksum that decides a no-op.
     if (selinux) compiled.preActions.push(...newDocRootContextActions(snapshot, appliedSnapshot))
+    compiled.postActions.push(...siteQuotaActions(snapshot.domains, appliedSnapshot?.domains ?? []))
 
     await assertHostEffectAuthority(this.deps.executor)
     const pendingGen = await createGeneration(this.deps.db, {
@@ -2121,6 +2373,12 @@ export class HostReconciler {
           journalRecord.removedFilePaths.push(obsolete.path)
         }
 
+        // The tests before the switch read the live tree; the switched web server files are tested here, before any reload.
+        for (const test of compiled.tests.filter(item => item.name === 'nginx' || item.name === 'apache')) {
+          const res = await this.deps.executor.runTest(test)
+          if (!res.ok) throw new StageFailureError(test.name, `${test.name} failed (exit ${res.code}): ${res.stderr || res.stdout}`.slice(0, 2000))
+        }
+
         await this.journal.saveJournal(journalRecord)
         await this.invokePhaseHook('activate', journalRecord)
         this.emitStage(pendingGen.id, 'switch', 'passed', scope)
@@ -2188,7 +2446,7 @@ export class HostReconciler {
           kernelHostname = observed
           if (observed !== compiled.hostname) throw new StageFailureError('hostname', `the system host name was not applied: expected ${compiled.hostname}, observed ${observed ?? 'none'}`)
         }
-        await runGenerationDnsHook({ phase: 'verify', native: isRealLinuxExecutor, provider: this.deps.dnsPublication, files: verifiedStagedFiles,
+        await runGenerationDnsHook({ phase: 'verify', native: isRealLinuxExecutor, provider: this.dnsPublication, files: verifiedStagedFiles,
           removedPaths: manifestDiff.removed.map(file => file.path), zoneDir: this.deps.zoneDir })
 
         await this.journal.saveJournal(journalRecord)
@@ -2230,6 +2488,7 @@ export class HostReconciler {
       await this.journal.cleanupStagingDir(pendingGen.id)
 
       const incompleteRetirements = await this.retireAccounts(compiled.terminatingAccounts)
+      await this.releaseVerifiedIps(snapshot)
       const finalSnapshot =
         compiled.terminatingAccounts.length > 0 ? await this.deps.store.readSnapshot() : snapshot
       await reindexFromState(this.deps.db, finalSnapshot)

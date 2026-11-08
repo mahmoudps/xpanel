@@ -555,6 +555,15 @@ export const recordLogin = (db: Db, id: Id): Promise<void> =>
     await db.query(`UPDATE principals SET last_login_at = $1, updated_at = $2 WHERE id = $3`, [now, now, pid])
   })
 
+/** Forcing also ends the principal's sessions, so the next sign-in meets the change screen. */
+export const setPrincipalForcePasswordChange = (db: Db, id: Id, force: boolean): Promise<void> =>
+  withSqliteErrors(() => db.transaction(async (tx) => {
+    const pid = assertId(id, 'id')
+    const rows = await tx.query<{ id: string }>('UPDATE principals SET force_password_change = $1, updated_at = $2 WHERE id = $3 RETURNING id', [assertBool(force, 'force') ? 1 : 0, nowIso(), pid])
+    mustExist(rows[0], 'principal', id)
+    if (force) await revokeAllSessionsForPrincipal(tx, pid)
+  }))
+
 export const setPrincipalDisabled = (db: Db, id: Id, disabled: boolean): Promise<void> =>
   withSqliteErrors(() =>
     db.transaction(async (tx) => {

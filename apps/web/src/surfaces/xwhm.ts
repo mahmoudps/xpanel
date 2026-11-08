@@ -1,4 +1,6 @@
 import { classicWhmClientTemplates, classicWhmGenerationCurrent } from '../board-port/whm-client-templates.ts'
+import { renderToolCard } from '../board-port/tool-card-view.ts'
+import { configAsCodeCard, panelBackupsCard } from '../models/tool-cards.ts'
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import type {
   Account,
@@ -14,9 +16,14 @@ import type {
   Reseller,
   ResellerAcl,
   ServerIpEntry,
+  Ipv6Range,
+  RemoteServiceIps,
+  ResellerAclList,
 } from '@xpanel/core'
 import { canManagePlan } from '@xpanel/core'
 import { renderPlanEditor } from '../plan-editor.ts'
+import { renderClassicWhmIpTools } from '../board-port/whm-ip-tools.ts'
+import type { AccountUsageObservation, ResellerUsageObservation } from '../models/reseller-usage.ts'
 import { accountListModel, accountListRowAttributes, accountPlanPreviewModel, renderAccountListControls, renderAccountPlanPreview } from '../account-list.ts'
 import { formatDisplayName } from '../display-name.ts'
 import { roleLabel } from '../chrome.ts'
@@ -46,8 +53,6 @@ import { auditActionHtml, auditActorLabel, auditOutcomeLabel, auditTargetLabel }
 import { isArabicSentence } from '../arabic-type.ts'
 import { renderWhmDashboard, whmDashboardFromProps, type DashboardHostSample } from '../board-port/xwhm-dashboard.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
-import { renderComposedXwhm } from '../board-port/composed/render.ts'
-import { composedRouteSpecs } from '../board-port/composed/all.ts'
 import { copyOf } from '../board-port/composed/types.ts'
 import { renderStoreExtension, storeRouteSpecs } from '../board-port/extensions/store.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderLiveUpdatesIndicator, renderPageSearchButton, renderSurfaceToolbar } from '../shell.ts'
@@ -80,6 +85,8 @@ export interface WhmConfigGenerationRow {
 export interface WhmSurfaceProps {
   visibility?: VisibilityContext
   catalog?: readonly CatalogTool[]
+  /** Feature Manager rows for the keys installed plugin packages add. */
+  pluginFeatures?: readonly { key: string; label: string }[]
   locale?: Locale
   theme?: 'dark' | 'light'
   density?: 'comfortable' | 'compact'
@@ -103,6 +110,14 @@ export interface WhmSurfaceProps {
   accounts?: Account[]
   resellers?: Reseller[]
   ipPool?: ServerIpEntry[]
+  /** Root only: saved IPv6 ranges and reseller privilege lists. */
+  ipv6Ranges?: Ipv6Range[]
+  remoteServiceIps?: RemoteServiceIps
+  aclLists?: ResellerAclList[]
+  /** Root reseller pages: measured totals per reseller id from the quota report and the bandwidth meter. */
+  resellerUsage?: Record<string, ResellerUsageObservation>
+  /** Root reseller pages: each reseller-owned account's measured disk and traffic, by account id. */
+  accountUsage?: Record<string, AccountUsageObservation>
   mailIpConfig?: MailIpConfig
   firewallRules?: FirewallRule[]
   generations?: WhmConfigGenerationRow[]
@@ -160,16 +175,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   const section = resolveSurfaceSection('xwhm', activeRoute)
   const storeSpec = storeRouteSpecs.find(row => row.route === activeRoute) ?? (activeRoute === '/whm/software/site-software' ? storeRouteSpecs.find(row => row.route === '/whm/software/store') : undefined)
   const extensionHtml = storeSpec ? renderStoreExtension({ locale, route: activeRoute, principal, ...(props.plans !== undefined ? { plans: { state: 'read', items: props.plans } } : {}) }) : undefined
-  const composedResellerAcl = props.visibility?.reseller?.acl
-    ?? (principal.kind === 'reseller' && props.activeReseller?.id === principal.id ? props.activeReseller.acl : undefined)
-  const composedHtml = renderComposedXwhm({
-    locale, route: activeRoute, principal,
-    ...(principal.kind === 'reseller' && composedResellerAcl ? { reseller: { id: principal.id, acl: composedResellerAcl } } : {}),
-    ...(props.accounts !== undefined ? { accounts: props.accounts } : {}),
-    ...(props.resellers !== undefined ? { resellers: props.resellers } : {}),
-  })
-  const composedSpec = composedHtml !== undefined ? composedRouteSpecs.find(row => row.surface === 'xwhm' && row.route === activeRoute) : undefined
-  const pageTitle = storeSpec ? copyOf(storeSpec.title, locale) : composedSpec ? copyOf(composedSpec.title, locale) : getSurfacePageTitle('xwhm', section, locale, activeRoute)
+  const pageTitle = storeSpec ? copyOf(storeSpec.title, locale) : getSurfacePageTitle('xwhm', section, locale, activeRoute)
   const hostname = props.hostname ?? (translator(locale)('Server'))
   const version = props.version ?? (translator(locale)('Unavailable'))
   const availableVersion = props.availableVersion ?? (translator(locale)('Unavailable'))
@@ -242,7 +248,7 @@ export const renderWhmSurface = (props: WhmSurfaceProps = {}): string => {
   })), locale)
 
   const detailHtml = renderWhmDetailPage({ ...props, activeRoute, locale })
-  const nativeContent = detailHtml !== undefined ? actionBannerHtml + detailHtml : extensionHtml !== undefined ? actionBannerHtml + extensionHtml : composedHtml !== undefined ? actionBannerHtml + composedHtml : `      ${actionBannerHtml}
+  const nativeContent = detailHtml !== undefined ? actionBannerHtml + detailHtml : extensionHtml !== undefined ? actionBannerHtml + extensionHtml : `      ${actionBannerHtml}
 ${section === 'overview' ? `      <section class="xp-card" data-section="overview-attention">
         <div class="xp-card__header"><div><h1 class="xp-page-title">${escapeHtml(pageTitle)}</h1><p class="xp-prose"><bdi dir="ltr">${escapeHtml(hostname)}</bdi></p></div></div>
         <div class="xp-kpi-grid" data-section="whm-kpi-cards">
@@ -458,6 +464,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
           <label class="xp-label" for="account-suspend-reason">${translator(locale)('Suspension reason')}</label>
           <textarea id="account-suspend-reason" name="reason" class="xp-textarea" rows="2" maxlength="500"></textarea>
           </div>
+            ${isRoot ? `<label class="xp-plan-cap-option" data-account-lock-field hidden><input type="checkbox" name="lock" /><span>${translator(locale)('Prevent resellers from unsuspending this account')}</span></label>` : ''}
             <p class="xp-account-dialog__status" data-account-action-status role="status" aria-live="polite" tabindex="-1" hidden>
           </p>
             <div class="xp-account-dialog__footer">
@@ -617,7 +624,7 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
                   <td><strong class="xp-mono"><bdi dir="ltr">${escapeHtml(res.username)}</bdi></strong></td>
                   <td>${renderThresholdMeter(undefined, res.maxAccounts, { locale, unit: translator(locale)('accounts'), label: translator(locale)('Reseller accounts'), configuredLimit: true })}</td>
                   <td>${renderThresholdMeter(undefined, res.totalDiskMb === 'unlimited' ? res.totalDiskMb : Number.isSafeInteger(res.totalDiskMb) ? res.totalDiskMb / 1024 : undefined, { locale, unit: 'GiB', label: translator(locale)(msgctxt('xwhm', 'Disk allocation')), configuredLimit: true })}</td>
-                  <td>${renderStatusBadge(res.oversell ? 'warn' : 'ok', res.oversell ? (translator(locale)('Oversell on')) : (translator(locale)('Oversell off')))}</td>
+                  <td>${renderStatusBadge(res.oversell.disk || res.oversell.bandwidth ? 'warn' : 'ok', res.oversell.disk || res.oversell.bandwidth ? (translator(locale)('Oversell on')) : (translator(locale)('Oversell off')))}</td>
                   <td class="xp-mono"><bdi dir="ltr">${escapeHtml(res.delegatedIps.join(', '))}</bdi></td>
                   <td class="xp-mono"><bdi dir="ltr">${escapeHtml(res.nameservers.join(', '))}</bdi></td>
                   <td><a class="xp-btn" href="#${resellerDetailAnchor(res.id)}" data-reseller-open="${resellerDetailAnchor(res.id)}" aria-label="${escapeHtml(translator(locale)('Open {name}', { name: res.username }))}">${translator(locale)(msgctxt('xwhm', 'Open'))}</a><span data-reseller-viewing="${resellerDetailAnchor(res.id)}">${renderStatusBadge('ok', translator(locale)('Open below'))}</span></td>
@@ -648,9 +655,11 @@ ${section === 'overview' ? `      <section class="xp-card" data-section="overvie
             <div class="xp-field"><label class="xp-label" for="reseller-accounts">${translator(locale)('Account limit')}</label><input id="reseller-accounts" name="maxAccounts" type="number" class="xp-input xp-mono" min="0" value="10" required /></div>
             <div class="xp-field"><label class="xp-label" for="reseller-disk">${translator(locale)('Disk limit (MiB)')}</label><input id="reseller-disk" name="totalDiskMb" type="number" class="xp-input xp-mono" min="1" value="10240" required /></div>
             <div class="xp-field"><label class="xp-label" for="reseller-bandwidth">${translator(locale)('Bandwidth limit (MiB)')}</label><input id="reseller-bandwidth" name="totalBandwidthMb" type="number" class="xp-input xp-mono" min="1" value="102400" required /></div>
+            <div class="xp-field"><label class="xp-label" for="reseller-contact">${translator(locale)('Contact email')}</label><input id="reseller-contact" name="contactEmail" type="email" class="xp-input xp-mono" dir="ltr" maxlength="254" autocomplete="off" /></div>
           </div>
           <div style="display:grid;gap:var(--xp-space-field,16px);min-inline-size:0">
-          <label class="xp-plan-cap-option"><input type="checkbox" name="oversell" /><span>${translator(locale)('Allow overselling')}</span></label>
+          <label class="xp-plan-cap-option"><input type="checkbox" name="oversellDisk" /><span>${translator(locale)('Allow disk overselling')}</span></label>
+          <label class="xp-plan-cap-option"><input type="checkbox" name="oversellBandwidth" /><span>${translator(locale)('Allow bandwidth overselling')}</span></label>
           <fieldset class="xp-field" data-reseller-acl-choices="true"><legend class="xp-label">${translator(locale)('Permissions')}</legend>
             <div style="display: flex; flex-wrap: wrap; gap: 8px;">
               ${ALL_RESELLER_ACLS.map(acl => `<label class="xp-plan-cap-option"><input type="checkbox" name="acl" value="${escapeHtml(acl)}" /><span class="xp-mono" dir="ltr">${escapeHtml(acl)}</span></label>`).join('')}
@@ -793,6 +802,7 @@ ${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-fo
             <button type="submit" class="xp-btn xp-btn--primary" style="margin-block-start:calc(var(--xp-space-group,24px) - var(--xp-space-field,16px))" disabled>${escapeHtml(translator(locale)('Add IPv4 / IPv6 Address'))}</button>
           </form>` : ''}
         </div>
+        ${section === 'ips' && isRoot ? renderClassicWhmIpTools(props, true) : ''}
       </section>
 
       <!-- Firewall (nftables) + Self-Lockout Protection + 60s Dead-Man's Switch -->
@@ -852,6 +862,7 @@ ${section === 'mail-ips' && mailIpConfig ? `          <form class="xp-card xp-fo
       </section>
 
 ` : ''}
+      ${section === 'generations' ? renderToolCard({ locale: props.locale ?? 'en', canManage: isRoot }, panelBackupsCard) + renderToolCard({ locale: props.locale ?? 'en', canManage: isRoot }, configAsCodeCard) : ''}
       ${section === 'generations' ? `        <section class="xp-card" data-section="config-generations" data-whm-generations data-generations-editable="${isRoot ? 'true' : 'false'}" aria-labelledby="whm-generations-heading" style="display:flex;flex-direction:column;gap:var(--xp-space-group,24px)">${classicWhmClientTemplates('panel-data')}
           <style>[data-section="config-generations"] .xp-table th{white-space:nowrap;overflow-wrap:normal;word-break:normal}[data-section="config-generations"] .xp-table td{overflow-wrap:normal;word-break:normal}</style>
           <div class="xp-card__header" style="margin-block-end:0">

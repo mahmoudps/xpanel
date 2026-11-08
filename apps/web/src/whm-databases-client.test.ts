@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmDatabasesWorkspace } from './board-port/whm-databases-workspace.ts'
 import type { WhmDatabasesKind } from './board-port/whm-databases-workspace.ts'
-import { readWhmDatabaseKillOutcome, readWhmDatabasesView, WHM_DATABASES_CLIENT_BINDING } from './whm-databases-client.ts'
+import { readWhmDatabaseKillOutcome, readWhmDatabaseMaintenance, readWhmDatabasesView, WHM_DATABASES_CLIENT_BINDING } from './whm-databases-client.ts'
 
 const at = '2026-10-27T10:00:00.000Z'
 const status = { Uptime: 3600, Threads_connected: 3, Threads_running: 1, Connections: 120, Max_used_connections: 9, Aborted_connects: 0, Questions: 5000, Slow_queries: 2 }
@@ -18,7 +18,7 @@ const processRow = (id: number, user: string, db: string | null, extra: Record<s
 const processes = (rows = [processRow(5, 'alpha_app', 'alpha_wp'), processRow(7, 'root', null, { protected: true, protectedReason: 'system-account' })]) => ({ scope: { observed: 'host-observation' }, observed: { state: 'read', observedAt: at }, queryText: 'not-read', processes: rows })
 const servers = () => ({ engines: [{ engine: 'mariadb', label: 'MariaDB', savedDatabases: 3, service: { state: 'active', unit: 'mariadb.service' }, configuration: { source: 'agent-client-configuration', protocol: 'socket', socket: '/run/mysqld/mysqld.sock' }, observed: { state: 'read', observedAt: at, version: '10.11.6-MariaDB', variables: { port: 3306, socket: '/run/mysqld/mysqld.sock', bind_address: '127.0.0.1', skip_networking: 'OFF', max_connections: 151 } } }] })
 const tick = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
-const mount = (kind: WhmDatabasesKind, options: { canRead?: boolean; canKill?: boolean } = {}) => { document.body.innerHTML = `<section data-whm-detail-route="/whm/databases" data-capability-state="authorized">${renderWhmDatabasesWorkspace({ kind, locale: 'en', canRead: options.canRead ?? true, canKill: options.canKill ?? true })}</section>` }
+const mount = (kind: WhmDatabasesKind, options: { canRead?: boolean; canKill?: boolean; canRepair?: boolean } = {}) => { document.body.innerHTML = `<section data-whm-detail-route="/whm/databases" data-capability-state="authorized">${renderWhmDatabasesWorkspace({ kind, locale: 'en', canRead: options.canRead ?? true, canKill: options.canKill ?? true, canRepair: options.canRepair ?? true })}</section>` }
 const boot = (request?: (method: string, path: string, body?: unknown) => Promise<unknown>, ask?: (options: Record<string, unknown>) => Promise<unknown>) => { if (request) (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = request; new Function('return ' + WHM_DATABASES_CLIENT_BINDING)()(ask) }
 const statusOf = () => document.querySelector<HTMLElement>('[data-whm-db-status]')!
 beforeEach(() => { delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
@@ -110,6 +110,25 @@ describe('WHM database client binding', () => {
     expect(send.mock.calls.filter(call => call[0] === 'POST')).toEqual([['POST', '/api/server/databases/processes/kill', { id: 5, mode: 'query', user: 'alpha_app', db: 'alpha_wp' }]])
     expect(send.mock.calls.filter(call => call[0] === 'GET')).toHaveLength(2)
     expect(statusOf().dataset.state).toBe('read'); expect(statusOf().textContent).toContain('confirmed by a fresh read')
+  })
+  it('offers only observed non-system databases for maintenance and paints each table result', async () => {
+    mount('overview')
+    const report = { database: 'stray_db', action: 'repair', observedAt: at, tables: [{ name: 'posts', engine: 'MyISAM', result: 'repaired', message: 'OK' }, { name: 'users', engine: 'InnoDB', result: 'not-supported', message: "The storage engine for the table doesn't support repair" }] }
+    const send = vi.fn(async (method: string) => method === 'POST' ? report : overview()), ask = vi.fn(async () => true)
+    boot(send, ask); await tick()
+    const select = document.querySelector<HTMLSelectElement>('[data-whm-db-maint-database]')!, run = document.querySelector<HTMLButtonElement>('[data-whm-db-maint-run]')!
+    expect([...select.options].map(option => option.value)).toEqual(['', 'alpha_wp', 'stray_db'])
+    expect(run.disabled).toBe(true)
+    select.value = 'stray_db'; select.dispatchEvent(new Event('change')); document.querySelector<HTMLSelectElement>('[data-whm-db-maint-action]')!.value = 'repair'
+    expect(run.disabled).toBe(false); run.click(); await tick()
+    expect(ask).toHaveBeenCalledTimes(1)
+    expect(send.mock.calls.filter(call => call[0] === 'POST')).toEqual([['POST', '/api/server/databases/maintenance', { database: 'stray_db', action: 'repair' }]])
+    const rows = document.querySelectorAll('[data-whm-db-rows="maintenance"] tr')
+    expect(rows).toHaveLength(2); expect(rows[0]!.textContent).toContain('Repaired'); expect(rows[1]!.textContent).toContain('Not supported by the storage engine')
+    expect(document.querySelector<HTMLElement>('[data-whm-db-maint-status]')!.dataset.state).toBe('read')
+    expect(() => readWhmDatabaseMaintenance({ ...report, database: 'alpha_wp' }, { database: 'stray_db', action: 'repair' })).toThrow()
+    mount('overview', { canRepair: false }); boot(async () => overview(), async () => true); await tick()
+    expect(document.querySelector<HTMLSelectElement>('[data-whm-db-maint-database]')!.disabled).toBe(true)
   })
   it('sends nothing when cancelled and reports 409 or uncertain outcomes truthfully', async () => {
     mount('processes'); const send = vi.fn(async (_method: string, _path: string) => processes()); boot(send, async () => false); await tick()

@@ -277,7 +277,7 @@ export const writeOpenDkimPublished = async (executor: AgentExecutor, stamp: str
   await writeOwned(executor, { path: PUBLISHED_PATH, content: `${stamp}\n`, mode: 0o644, owner: 'root', group: 'root' })
 }
 
-const ownerName = (name: string, zone: string): string => {
+export const ownerName = (name: string, zone: string): string => {
   const raw = name.trim().toLowerCase().replace(/\.$/, '')
   if (raw === '@' || raw === '' || raw === zone) return '@'
   return raw.endsWith(`.${zone}`) ? raw.slice(0, -(zone.length + 1)) : raw

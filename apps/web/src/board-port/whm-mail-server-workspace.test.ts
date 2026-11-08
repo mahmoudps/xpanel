@@ -46,6 +46,8 @@ describe('WHM mail server workspace renderer', () => {
     expect(routing).toContain('not from live DNS lookups'); expect(routing).toContain('data-whm-mail-server-truncated hidden')
     const outbound = renderWhmMailServerWorkspace({ locale: 'en', page: 'outbound', canRead: true })
     expect(outbound).toContain('Rate and size limits'); expect(outbound).toContain('Submission services'); expect(outbound).toContain('uses the Postfix default')
+    expect(outbound).toContain('included in smtpd_client_event_limit_exceptions'); expect(outbound).toContain('<a href="/whm/server/ips">Remote service IPs</a>')
+    expect(routing).not.toContain('/whm/server/ips')
     expect(outbound).not.toContain('data-whm-mail-server-fact="dovecot"')
     for (const page of ['server', 'routing', 'outbound'] as const) {
       const ids = [...renderWhmMailServerWorkspace({ locale: 'en', page, canRead: true }).matchAll(/ id="([^"]+)"/g)].map(match => match[1]!)

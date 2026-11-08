@@ -1,3 +1,4 @@
+import { effectivePlan } from '@xpanel/core'
 import type { Account, AccountLimitGap, HostLimitObservation, Plan, ResourceLimits } from '@xpanel/core'
 import type { AgentExecutor } from './executor.ts'
 import { accountIoTarget, ioMountForTarget, resolveAccountIoDevices } from './io-device.ts'
@@ -106,7 +107,7 @@ export const observeHostLimits = async (executor: AgentExecutor, accounts: reado
       const slice = await executor.readSliceMetrics(account.uid)
       if (slice) observed = { memoryMax: slice.memoryMax ?? null, pidsMax: slice.pidsMax ?? null, cpuMax: slice.cpuMax ?? null, ioMax: slice.ioMax ?? null, diskQuotaHardKb: mount ? quotaReports.get(mount.mountPoint)?.get(account.username) ?? null : null, ioDevices: devices?.get(account.id) ?? null }
     } catch { /* Each account's unread evidence stays unavailable. */ }
-    const comparison = compareAccountLimits(plan.resources, observed)
+    const comparison = compareAccountLimits(effectivePlan(plan, account).resources, observed)
     comparison.gaps.forEach(gap => allGaps.add(gap))
     if (comparison.unavailable) unavailableAccounts++
     else checkedAccounts++

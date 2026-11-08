@@ -11,7 +11,7 @@ const formatMailDateTime = formatDisplayDateTime
 type TrackStatus = 'sent' | 'deferred' | 'bounced' | 'expired' | 'rejected' | 'queued'
 type TrackRecipient = { address: string; status: Exclude<TrackStatus, 'queued'>; dsn: string | null; relay: string | null; response: string | null; at: string; attempts: number }
 type TrackEvent = { at: string; kind: string; status: TrackStatus | null; dsn: string | null }
-export type TrackDeliveryMessage = { queueId: string | null; role: 'sender' | 'recipient' | 'both'; firstSeen: string; lastSeen: string; sender: string | null; size: number | null; status: TrackStatus; dsn: string | null; recipients: TrackRecipient[]; otherRecipients: number; events: TrackEvent[]; eventsOmitted: number }
+export type TrackDeliveryMessage = { queueId: string | null; role: 'sender' | 'recipient' | 'both'; firstSeen: string; lastSeen: string; sender: string | null; size: number | null; spamScore: number | null; status: TrackStatus; dsn: string | null; recipients: TrackRecipient[]; otherRecipients: number; events: TrackEvent[]; eventsOmitted: number }
 export type TrackDeliveryView = { state: 'read' | 'unavailable'; reason: string | null; observedAt: string; window: { since: string; until: string }; complete: boolean; omittedMessages: number; messages: TrackDeliveryMessage[] }
 
 /** Strict reader: every disclosed address must be the sealed mailbox, except the sender of mail it received. */
@@ -40,7 +40,7 @@ export function readTrackDeliveryView(value: unknown, mailbox: string): TrackDel
       if (!object(item) || !kinds.includes(item.kind as string) || item.status !== undefined && !statuses.includes(item.status as string)) throw new Error('invalid_track_event')
       return { at: instant(item.at), kind: item.kind as string, status: (item.status ?? null) as TrackStatus | null, dsn: item.dsn === undefined ? null : dsn(item.dsn) }
     })
-    return { queueId: raw.queueId as string | null, role, firstSeen: instant(raw.firstSeen), lastSeen: instant(raw.lastSeen), sender, size: raw.size === null ? null : count(raw.size, Number.MAX_SAFE_INTEGER), status: raw.status as TrackStatus, dsn: dsn(raw.dsn), recipients, otherRecipients: count(raw.otherRecipients, 20000), events, eventsOmitted: count(raw.eventsOmitted, 20000) }
+    return { queueId: raw.queueId as string | null, role, firstSeen: instant(raw.firstSeen), lastSeen: instant(raw.lastSeen), sender, spamScore: typeof raw.spamScore === 'number' && Number.isFinite(raw.spamScore) ? raw.spamScore : null, size: raw.size === null ? null : count(raw.size, Number.MAX_SAFE_INTEGER), status: raw.status as TrackStatus, dsn: dsn(raw.dsn), recipients, otherRecipients: count(raw.otherRecipients, 20000), events, eventsOmitted: count(raw.eventsOmitted, 20000) }
   })
   return { state: value.state as TrackDeliveryView['state'], reason: reason as string | null, observedAt: instant(value.observedAt), window: { since: instant(value.window.since), until: instant(value.window.until) }, complete: value.complete, omittedMessages: count(value.omittedMessages, 20000), messages }
 }
@@ -80,7 +80,7 @@ function bindMailTrackDelivery(): void {
       const facts = detail.querySelector<HTMLElement>('[data-mail-track-detail-facts]')!, recipients = detail.querySelector<HTMLElement>('[data-mail-track-detail-recipients]')!, events = detail.querySelector<HTMLElement>('[data-mail-track-detail-events]')!
       const notLogged = t('Not logged')
       facts.textContent = ''
-      for (const [label, value, technical] of [[t('Queue ID'), message.queueId ?? t('None (rejected before queueing)'), !!message.queueId], [t('Direction'), direction[message.role]!, false], [t('Sender'), message.sender === null ? notLogged : message.sender || t('Null sender (bounce)'), !!message.sender], [t('Status'), statusLabel[message.status]!, false], [t('DSN'), message.dsn ?? notLogged, !!message.dsn], [t('First seen (UTC)'), time(message.firstSeen), true], [t('Last seen (UTC)'), time(message.lastSeen), true], [t('Size (bytes)'), message.size === null ? notLogged : String(message.size), message.size !== null], [t('Other recipients'), String(message.otherRecipients), true]] as const) {
+      for (const [label, value, technical] of [[t('Queue ID'), message.queueId ?? t('None (rejected before queueing)'), !!message.queueId], [t('Spam score'), message.spamScore === null ? t('Not read') : String(message.spamScore), true], [t('Direction'), direction[message.role]!, false], [t('Sender'), message.sender === null ? notLogged : message.sender || t('Null sender (bounce)'), !!message.sender], [t('Status'), statusLabel[message.status]!, false], [t('DSN'), message.dsn ?? notLogged, !!message.dsn], [t('First seen (UTC)'), time(message.firstSeen), true], [t('Last seen (UTC)'), time(message.lastSeen), true], [t('Size (bytes)'), message.size === null ? notLogged : String(message.size), message.size !== null], [t('Other recipients'), String(message.otherRecipients), true]] as const) {
         const item = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.append(technical ? bdi(value) : value); item.append(dt, dd); facts.append(item)
       }
       recipients.textContent = ''

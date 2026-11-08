@@ -51,4 +51,11 @@ describe('trusted signed application catalog', () => {
     expect(compareApplicationVersions('1.10.0', '1.9.9')).toBe(1)
     expect(() => compareApplicationVersions('1.02.0', '1.2.0')).toThrow()
   })
+  it('accepts an expired signed catalog only for a removal, and never a forged one', () => {
+    const late = { ...policy, now: new Date('2026-12-01T00:00:00.000Z') }
+    expect(() => verifyApplicationCatalog(signed(), keys, late)).toThrow()
+    expect(verifyApplicationCatalog(signed(), keys, { ...late, allowExpired: true }).sequence).toBe(7)
+    expect(() => verifyApplicationCatalog({ ...signed(), signature: '0'.repeat(128) }, keys, { ...late, allowExpired: true })).toThrow()
+    expect(() => verifyApplicationCatalog(signed(), keys, { ...late, allowExpired: true, minimumSequence: 8 })).toThrow()
+  })
 })

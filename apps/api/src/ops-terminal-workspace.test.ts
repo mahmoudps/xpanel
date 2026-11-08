@@ -52,6 +52,15 @@ describe('server terminal API workspace', () => {
     const again = await call(h.value, 'POST', { password: 'correct-horse' }), second = await again!.json() as typeof body
     expect(h.tickets.consume(second.ticket.ticket, { principalId: 'fixture-root', panelSessionId: 'sess', origin: ORIGIN })).toMatchObject({ kind: 'root', accountId: null })
   })
+  it('issues a container grant for an active account after the same re-authentication', async () => {
+    const id = 'a'.repeat(64), container = { account: 'alice', id, shell: 'sh', asRoot: false }
+    const h = helpers({ activeAccount: async username => username === 'alice' ? { id: 'acct-1', username } : null })
+    await expect(call(h.value, 'POST', { password: 'wrong', container })).rejects.toMatchObject({ code: 'UNAUTHENTICATED' })
+    await expect(call(h.value, 'POST', { password: 'correct-horse', container: { ...container, shell: 'zsh' } })).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(call(h.value, 'POST', { password: 'correct-horse', container: { ...container, account: 'bob' } })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    const { ticket } = await (await call(h.value, 'POST', { password: 'correct-horse', container }))!.json()
+    expect(h.tickets.consume(ticket.ticket, { principalId: 'fixture-root', panelSessionId: 'sess', origin: ORIGIN })).toMatchObject({ kind: 'container', accountId: 'acct-1', accountUsername: 'alice', container: { id, shell: 'sh', asRoot: false } })
+  })
   it('requires the enrolled second factor and records a wrong code as a failed re-authentication', async () => {
     const recordFailure = vi.fn(async () => {})
     const h = helpers({ secondFactorEnrolled: () => true, recordFailure })

@@ -1,7 +1,8 @@
+import { classicTheme } from './classic/index.ts'
 import { readFileSync, readdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, join, relative, resolve } from 'node:path'
-import { expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { lexJavaScriptSource, sourceLiteral } from '../../../../scripts/i18n-catalog.mjs'
 import { findUiThemeAsset, registeredUiThemeIds, resolveUiTheme } from './registry.ts'
 import { escapeHtml } from '../html.ts'
@@ -152,4 +153,21 @@ it('accepts the sole registry seam and ignores import text inside comments and s
   expect(boundaryIssues('themes/registry.ts', "export { classicTheme } from './classic/index.ts'")).toEqual([])
   expect(boundaryIssues('themes/classic/index.ts', "import { escapeHtml } from '../../html.ts'")).toEqual([])
   expect(boundaryIssues('app.ts', "const text = \"export * from './themes/classic/index.ts'\"; // import('../themes/v2/index.ts')")).toEqual([])
+})
+
+describe('classic qualification mode banner', () => {
+  it('shows only when the host switch is on and keeps the handoff controls', () => {
+    const base = { locale: 'en', handoffControls: false, surfaceHtml: '<main>surface</main>', reconcileHtml: '', paletteHtml: '', activityHtml: '', clientScriptsHtml: '' } as const
+    expect(classicTheme.slots.documentBody(base)).not.toContain('data-qualification-mode')
+    const html = classicTheme.slots.documentBody({ ...base, qualificationMode: true })
+    expect(html.match(/data-qualification-mode/g)).toHaveLength(1)
+    expect(html).toContain('Qualification mode is on.')
+    expect(html.indexOf('data-qualification-mode')).toBeLessThan(html.indexOf('surface'))
+    expect(html).toContain('id="xpanel-handoff-controls"')
+  })
+  it('says a previewed theme was not chosen', () => {
+    const base = { locale: 'en', handoffControls: false, surfaceHtml: '<main>surface</main>', reconcileHtml: '', paletteHtml: '', activityHtml: '', clientScriptsHtml: '' } as const
+    expect(classicTheme.slots.documentBody(base)).not.toContain('data-theme-preview')
+    expect(classicTheme.slots.documentBody({ ...base, themePreviewName: 'A & B' })).toContain('Preview of the theme A &amp; B.')
+  })
 })

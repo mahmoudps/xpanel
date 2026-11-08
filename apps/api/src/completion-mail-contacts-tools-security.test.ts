@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import type { MailboxMetadataAuthority } from '@xpanel/core'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApiToken, createTestDb, createUserPrincipal } from '@xpanel/db'
-import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
+import { createTestStateStore } from '@xpanel/state'
 import { sha256Hex } from './auth.ts'
+import { createMemoryDav } from './mail/dav-testkit.ts'
 import { createApiApp } from './server.ts'
 
 // Real-loopback acceptance for the mailbox Contacts tools that the browser page now uses:
@@ -52,7 +51,8 @@ const fixture = async () => {
   const inboxCredential = await token([`mailbox:${inbox.id}`, 'webmail:read', 'webmail:write'])
   const siblingCredential = await token([`mailbox:${sibling.id}`, 'webmail:read', 'webmail:write'])
   const foreignCredential = await token([`mailbox:${foreign.id}`, 'webmail:read', 'webmail:write'], foreignPrincipal.id)
-  const app = createApiApp({ db: database.db, store: state.store, serverSecret: 'contacts-tools-synthetic-server-secret-32b' })
+  const dav = createMemoryDav({ defaults: true })
+  const app = createApiApp({ db: database.db, store: state.store, serverSecret: 'contacts-tools-synthetic-server-secret-32b', davExchange: dav.exchange })
   const request = (path: string, method = 'GET', body?: unknown, raw: string | null = inboxCredential) => app.fetch(new Request('http://localhost' + path, { method,
     headers: { ...(raw ? { authorization: 'Bearer ' + raw } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }) }))
@@ -62,11 +62,11 @@ const fixture = async () => {
   const sharedToSibling = boundContact(inbox.login, { fullName: 'Shared to sibling', shares: [{ principal: sibling.login, permission: 'read', sharedAt: '2026-01-01T00:00:00.000Z' }] })
   const siblingPrivate = boundContact(sibling.login, { fullName: 'Sibling private' })
   const foreignContact = boundContact(foreign.login, { fullName: 'Foreign private' })
-  const path = join(state.rootDir, 'extended', 'webmail', 'contacts.json')
-  await atomicWriteJson(path, [own, sharedToSibling, siblingPrivate, foreignContact])
-  const bytes = () => readFile(path, 'utf8')
-  const persisted = async () => JSON.parse(await bytes()) as Contact[]
-  return { database, state, owner, other, inbox, sibling, foreign, principal, inboxCredential, siblingCredential, foreignCredential, request, own, sharedToSibling, siblingPrivate, foreignContact, path, bytes, persisted }
+  dav.seedContacts([own, sharedToSibling, siblingPrivate, foreignContact] as never, accountId => accountId === owner.id ? owner.username : other.username)
+  const bytes = async () => dav.snapshot()
+  const logins = new Map([inbox, sibling, foreign].map(service => [service.id, service.login]))
+  const persisted = async () => dav.contacts().map(contact => ({ ...contact, owner: logins.get(contact.principal) }))
+  return { database, state, owner, other, inbox, sibling, foreign, principal, inboxCredential, siblingCredential, foreignCredential, request, own, sharedToSibling, siblingPrivate, foreignContact, bytes, persisted }
 }
 
 describe('mailbox Contacts import/export/share HTTP security acceptance', () => {
@@ -105,7 +105,7 @@ describe('mailbox Contacts import/export/share HTTP security acceptance', () => 
     expect(shared.status).toBe(200)
   })
 
-  it('imports valid vCards under the sealed mailbox owner and verifies persisted readback', async () => {
+  it('imports valid vCards under the sealed mailbox owner and verifies persisted readback', { tags: ['slow'] }, async () => {
     const cards = [vcardFor('Imported One', 'one@example.test'), vcardFor('Imported Two', 'two@example.test')].join('\r\n')
     const response = await f.request('/api/webmail/contacts/import', 'POST', { vcard: cards })
     expect(response.status).toBe(201)
@@ -170,7 +170,7 @@ describe('mailbox Contacts import/export/share HTTP security acceptance', () => 
     expect(response.status).toBe(200)
     const body = await response.json() as { contact: Contact }
     expect(body.contact.shares).toEqual([])
-    const stored = (await f.persisted()).find(entry => entry.id === f.sharedToSibling.id)
+    const stored = (await (await f.request('/api/webmail/contacts')).json() as { contacts: Contact[] }).contacts.find(entry => entry.id === f.sharedToSibling.id)
     expect(stored!.shares).toEqual([])
     const siblingList = await f.request('/api/webmail/contacts', 'GET', undefined, f.siblingCredential)
     const ids = (await siblingList.json() as { contacts: Contact[] }).contacts.map(entry => entry.id)

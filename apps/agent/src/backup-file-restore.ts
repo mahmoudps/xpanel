@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { FileHandle } from 'node:fs/promises'
-import { assertAcl, fail, isXpanelError } from '@xpanel/core'
+import { assertAcl, effectivePlan, fail, isXpanelError } from '@xpanel/core'
 import type { Account, FeatureList, Plan, Reseller } from '@xpanel/core'
 import { walkTar } from '@xpanel/lifecycle'
 import { BACKUP_CODECS, backupCodecOf, listAccountBackups, MAX_BACKUP_BYTES, openAccountBackupArchive } from './account-backup.ts'
@@ -11,7 +11,7 @@ import type { AccountArchiveInventory } from './account-backup-workspace.ts'
 import { MAX_BINARY_BYTES, MAX_DIR_MODE, MAX_FILE_MODE } from './file-manager.ts'
 import type { JailedFileManager } from './file-manager.ts'
 import type { AgentCallerIdentity } from './server.ts'
-import { archiveCreatedAt, MAX_LISTED_ARCHIVES, MAX_RESTORE_FILES, MAX_RESTORE_PATH_BYTES, MAX_RESTORE_SELECTION, parseBackupFileRequest, restoreFolderName } from './backup-file-restore-request.ts'
+import { archiveCreatedAt, assertOwnerRestorable, MAX_LISTED_ARCHIVES, MAX_RESTORE_FILES, MAX_RESTORE_PATH_BYTES, MAX_RESTORE_SELECTION, parseBackupFileRequest, restoreFolderName } from './backup-file-restore-request.ts'
 import type { BackupFileRequest, RestoreDestination, RestoreRefusal, RestoreResult } from './backup-file-restore-request.ts'
 
 export { parseBackupFileRequest } from './backup-file-restore-request.ts'
@@ -42,7 +42,7 @@ export function planBackupFileRestore(inventory: AccountArchiveInventory, paths:
   return [...chosen.values()].sort((a, b) => a.path.localeCompare(b.path)).map(file => {
     const target = destination === 'new-folder' ? folder + '/' + file.path : file.path
     const reason: RestoreRefusal | null = file.bytes > MAX_BINARY_BYTES ? 'too-large' : Buffer.byteLength(target, 'utf8') > MAX_RESTORE_PATH_BYTES ? 'path-too-long'
-      : destination === 'in-place' && mailPath(file.path) ? 'mail-preserved' : destination === 'in-place' && (file.path === '.trash' || file.path.startsWith('.trash/')) ? 'reserved' : null
+      : destination !== 'new-folder' && mailPath(file.path) ? 'mail-preserved' : destination !== 'new-folder' && (file.path === '.trash' || file.path.startsWith('.trash/')) ? 'reserved' : null
     // The confined writer accepts regular files up to 0640; group/other execute and write bits are never restored.
     return { path: file.path, destination: target, bytes: file.bytes, mode: (file.mode & MAX_FILE_MODE) || 0o600, sha256: file.sha256, action: reason ? 'refuse' : 'restore', reason }
   })
@@ -111,7 +111,7 @@ const writerRefusal = (error: unknown): string | null => {
 }
 
 export interface RestoreRun { results: RestoreFileResult[]; createdDirectories: number; complete: boolean }
-export async function writePlannedFiles(input: { root: string; target: BackupAccountTarget; inventory: AccountArchiveInventory; rows: readonly RestorePlanRow[]; files: BackupRestoreFiles; expired: () => boolean; authorize: () => Promise<unknown> }): Promise<RestoreRun> {
+export async function writePlannedFiles(input: { root: string; target: BackupAccountTarget; inventory: AccountArchiveInventory; rows: readonly RestorePlanRow[]; files: BackupRestoreFiles; expired: () => boolean; authorize: () => Promise<unknown>; overwrite?: boolean }): Promise<RestoreRun> {
   const results = new Map<string, RestoreFileResult>(), pending = new Map<string, RestorePlanRow>()
   const record = (row: RestorePlanRow, result: RestoreResult, reason: string | null, verificationRequired = false): void => { results.set(row.path, { path: row.path, destination: row.destination, bytes: row.bytes, result, reason, verificationRequired }) }
   for (const row of input.rows) { if (row.action === 'restore') pending.set(row.path, row); else record(row, 'failed', row.reason) }
@@ -132,7 +132,7 @@ export async function writePlannedFiles(input: { root: string; target: BackupAcc
       catch (error) { if (!isXpanelError(error) || error.code !== 'CONFLICT') { const reason = writerRefusal(error); return record(row, 'failed', reason ?? 'directory-unknown', reason === null) } }
       ensured.add(directory)
     }
-    try { await input.files.putBytes(row.destination, bytes.toString('base64'), { overwrite: false, mode: row.mode }) }
+    try { await input.files.putBytes(row.destination, bytes.toString('base64'), { overwrite: input.overwrite === true, mode: row.mode }) }
     catch (error) {
       // The helper publishes with RENAME_NOREPLACE: EEXIST/EISDIR mean the existing entry was left untouched.
       if (isXpanelError(error) && error.code === 'CONFLICT' && ['EEXIST', 'EISDIR'].includes(String(error.detail?.errnoName))) return record(row, 'skipped-exists', null)
@@ -176,7 +176,7 @@ export interface BackupFileRestoreRouteDeps {
   store: { getAccountByUsername(username: string): Promise<Account | null>; withAccountLifecycleLease<T>(accountId: string, operation: (account: Account) => Promise<T>): Promise<T>
     getPlan(id: string): Promise<Plan | null>; getFeatureList(id: string): Promise<FeatureList | null>; getReseller(id: string): Promise<Reseller | null> }
   /** Direct local principal read; no API self-RPC inside the lease. */
-  currentPrincipal(): Promise<{ kind: string; id: string; username: string; disabled: boolean } | null>
+  currentPrincipal(): Promise<{ kind: string; id: string; username: string; disabled: boolean; accountId?: string | null } | null>
   /** Confined account writer, or null when the native file runner is not installed. */
   files(account: Account, plan: Plan): BackupRestoreFiles | null
   audit(entry: { actor: string; action: string; target: string; detail: Record<string, unknown>; outcome: 'ok' | 'failed'; principalId: string }): Promise<unknown>
@@ -198,10 +198,10 @@ const readBody = async (req: Request): Promise<unknown> => {
 }
 const rejectedReason = (code: string): 'unsafe' | 'changed' | 'size' | 'file' => code === 'VALIDATION' ? 'unsafe' : code === 'CONFLICT' ? 'changed' : code === 'LIMIT_EXCEEDED' ? 'size' : 'file'
 
-/** Fresh restore authority: the same active principal, the selected active account, its plan and, for a reseller, ownership, ACL and the file-restore feature. */
+/** Fresh restore authority: the same active principal, the selected active account, its plan and, for a reseller, ownership, ACL and the file-restore feature; an owner only for its own account with file-restoration. */
 export async function authorizeBackupRestore(deps: Pick<BackupFileRestoreRouteDeps, 'caller' | 'store' | 'currentPrincipal'>, username: string, account: Account, acl: 'list-accounts' | 'edit-account'): Promise<Plan> {
   const caller = deps.caller, principal = await deps.currentPrincipal()
-  if (caller.role !== 'root' && caller.role !== 'reseller') return fail('FORBIDDEN', 'file restore requires root or a reseller', unchanged)
+  if (caller.role !== 'root' && caller.role !== 'reseller' && caller.role !== 'user') return fail('FORBIDDEN', 'file restore requires root, a reseller or the account owner', unchanged)
   if (!principal || principal.disabled || principal.id !== caller.principalId || principal.kind !== caller.role) return fail('FORBIDDEN', 'the current administrator is no longer authorized', unchanged)
   if (account.username !== username || account.status !== 'active') return fail('FORBIDDEN', 'file restore requires the active selected account', unchanged)
   const plan = await deps.store.getPlan(account.planId), features = plan ? await deps.store.getFeatureList(plan.featureListId) : null
@@ -211,10 +211,14 @@ export async function authorizeBackupRestore(deps: Pick<BackupFileRestoreRouteDe
     assertAcl({ kind: 'reseller', id: principal.id, username: principal.username }, await deps.store.getReseller(principal.id), acl)
     if (features.disabled.includes('file-restore')) return fail('FORBIDDEN', 'file restore is disabled by the account plan', unchanged)
   }
-  return plan
+  if (principal.kind === 'user') {
+    if (caller.accountId !== account.id || principal.accountId !== account.id) return fail('FORBIDDEN', 'an owner restores only its own account', unchanged)
+    if (features.disabled.includes('file-restoration')) return fail('FORBIDDEN', 'file restoration is disabled by the account plan', unchanged)
+  }
+  return effectivePlan(plan, account)
 }
 
-/** Root, or a reseller for its own active accounts (list-accounts to read, edit-account to restore). */
+/** Root, a reseller for its own active accounts (list-accounts to read, edit-account to restore), or the owner for its own account. */
 export async function handleBackupFileRestoreRoute(req: Request, url: URL, method: string, deps: BackupFileRestoreRouteDeps): Promise<Response | null> {
   const match = ROUTE.exec(url.pathname)
   if (!match) return null
@@ -222,8 +226,9 @@ export async function handleBackupFileRestoreRoute(req: Request, url: URL, metho
   if (method !== (op ? 'POST' : 'GET')) return new Response(null, { status: 405, headers: { allow: op ? 'POST' : 'GET' } })
   if (url.search) return fail('VALIDATION', 'file restore requests do not accept query selectors', unchanged)
   const caller = deps.caller
-  if (caller.role !== 'root' && caller.role !== 'reseller') return fail('FORBIDDEN', 'file restore requires root or a reseller', unchanged)
+  if (caller.role !== 'root' && caller.role !== 'reseller' && caller.role !== 'user') return fail('FORBIDDEN', 'file restore requires root, a reseller or the account owner', unchanged)
   const request = op ? parseBackupFileRequest(op, username, await readBody(req)) : null
+  if (caller.role === 'user' && request && request.op !== 'browse') assertOwnerRestorable(request.paths)
   const root = deps.root
   if (root === null) return fail('PRECONDITION_FAILED', 'host backup storage is unavailable on this server', unchanged)
   const now = deps.now ?? Date.now, deadline = now() + RESTORE_TIME_BUDGET_MS, expired = (): boolean => now() > deadline
@@ -298,7 +303,7 @@ export async function handleBackupFileRestoreRoute(req: Request, url: URL, metho
     if (!review.rows.some(row => row.action === 'restore')) return fail('PRECONDITION_FAILED', 'no selected file can be restored', unchanged)
     const files = deps.files(fresh, plan)
     if (!files) return fail('PRECONDITION_FAILED', 'the confined account file writer is not installed', unchanged)
-    const run = await writePlannedFiles({ root, target: targetOf(fresh), inventory: review.inventory, rows: review.rows, files, expired, authorize: () => authorize(fresh, 'edit-account') })
+    const run = await writePlannedFiles({ root, target: targetOf(fresh), inventory: review.inventory, rows: review.rows, files, expired, authorize: () => authorize(fresh, 'edit-account'), overwrite: request.destination === 'replace' })
     const counts: Record<RestoreResult, number> = { restored: 0, 'skipped-exists': 0, failed: 0, 'not-attempted': 0 }
     for (const row of run.results) counts[row.result]++
     const verificationRequired = run.results.some(row => row.verificationRequired)

@@ -1,6 +1,8 @@
 import { roleLabel, type UserMenuModel } from '../chrome.ts'
-import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
+import { tools as defaultCatalog, visibleNavigation, visibleTools, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { renderAccountAnnouncementsBanner } from '../board-port/account-announcements-banner.ts'
+import { renderAccountPlugins } from '../board-port/account-plugins-home.ts'
+import { renderFtpAccountTools } from '../board-port/ftp-tools-workspace.ts'
 import type {
   Account,
   Database,
@@ -14,6 +16,7 @@ import type {
   Certificate,
 } from '@xpanel/core'
 import { parseWebsiteAnalyticsSnapshot, renderWebsiteAnalyticsChart, type WebsiteAnalyticsWindow } from '../charts.ts'
+import type { WebStatsView } from '../models/web-stats.ts'
 import { auditActionLabel, auditTargetLabel } from '../audit-labels.ts'
 import { formatDisplayName } from '../display-name.ts'
 import { localeDirection, translator, type Locale } from '../i18n.ts'
@@ -29,6 +32,9 @@ import {
 } from '../tokens.ts'
 import { renderAccountResources, resourceRowsFromPlan } from '../board-canvas.ts'
 import { renderXpanelHome, xpanelHomeFromProps } from '../board-port/xpanel-home.ts'
+import { renderHomeNotices } from '../board-port/personal-preferences-card.ts'
+import { renderServerInformationCard } from '../board-port/account-owner-tools-cards.ts'
+import type { PersonalHomeFacts } from '../account-notices.ts'
 import { renderDesignMain, renderDesignNav } from '../design-board.ts'
 import { renderApprovedXpanelWorkspace } from '../board-port/approved-xpanel-workspaces.ts'
 import { renderComposedXpanel } from '../board-port/composed/render.ts'
@@ -41,6 +47,7 @@ import { renderAccountPagesExtension, accountPageRouteSpecs } from '../board-por
 import { renderStoreExtension, storeRouteSpecs } from '../board-port/extensions/store.ts'
 import { renderResourcesBoard } from '../board-port/extensions/resources-board.ts'
 import { renderAccountDomains } from '../board-port/extensions/account-domains.ts'
+import { ftpRemovalHooks } from '../models/ftp-removal.ts'
 import { renderAccountDatabases } from '../board-port/extensions/account-databases.ts'
 import { renderSurfaceShell, renderSurfaceUnavailable, resolveSurfaceSection, renderUnavailableSurfaceShell, getSurfacePageTitle, normalizeSurfaceRoute, renderPageSearchButton, renderSurfaceToolbarEnd } from '../shell.ts'
 
@@ -56,6 +63,7 @@ export interface JailedFileEntry {
 }
 
 export interface PanelSurfaceProps {
+  personal?: PersonalHomeFacts
   visibility?: VisibilityContext
   catalog?: readonly CatalogTool[]
   locale?: Locale
@@ -76,6 +84,10 @@ export interface PanelSurfaceProps {
   websiteAnalyticsDomainSelectionAvailable?: boolean
   /** The account-scoped traffic read failed or was unavailable; no empty result is assumed. */
   websiteAnalyticsUnavailable?: boolean
+  /** The owner's AWStats and Webalizer statistics for the selected site, scheme and month. */
+  webStats?: WebStatsView
+  /** The statistics read failed or was unavailable; nothing is assumed. */
+  webStatsUnavailable?: boolean
   /** Account certificates read from stored state; served TLS is never inferred from them. */
   certificates?: Certificate[]
   files?: JailedFileEntry[]
@@ -147,20 +159,21 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
     }) : accountExtensionSpec ? renderAccountPagesExtension({ locale, route: activeRoute, principal: composedPrincipal, account,
       ...(plan ? { plan } : {}), theme, ...scopedCollections,
       mutationsQualified: visibleNavigation(props.visibility, props.catalog).some(surface => surface.sections.some(group => group.pages.some(page => page.route === activeRoute))),
+      boxTrapperQualified: props.visibility !== undefined && visibleTools(props.catalog ?? defaultCatalog, props.visibility).some(tool => tool.id === 'sender-verification'),
     }) : storeExtensionSpec ? renderStoreExtension({ locale, route: activeRoute, principal: composedPrincipal, account,
       ...(scopedCollections.domains ? { domains: scopedCollections.domains } : {}),
     }) : undefined : undefined
   const extensionSpec = activeRoute === '/email/accounts' ? emailAccountsRouteSpec : accountExtensionSpec ?? storeExtensionSpec
-  const composedHtml = renderComposedXpanel({
+  const composedBase = renderComposedXpanel({
     locale, route: activeRoute, account,
     ...(composedPrincipal ? { principal: composedPrincipal } : {}),
     ...(composedPrincipal?.kind === 'reseller' && props.visibility?.reseller
       ? { reseller: { id: composedPrincipal.id, acl: props.visibility.reseller.acl } } : {}),
     ...(props.plan !== undefined ? { plan: props.plan } : {}),
-    ...(props.domains !== undefined ? { domains: props.domains } : {}),
     ...(props.serviceUsers !== undefined ? { serviceUsers: props.serviceUsers } : {}),
     ...(props.usage !== undefined ? { usage: props.usage } : {}),
   })
+  const composedHtml = composedBase !== undefined && activeRoute === '/server-information' ? composedBase + renderServerInformationCard(locale) : composedBase
   const composedSpec = composedHtml !== undefined ? composedRouteSpecs.find(row => row.surface === 'xpanel' && row.route === activeRoute) : undefined
   const pageTitle = extensionSpec ? copyOf(extensionSpec.title, locale) : composedSpec ? copyOf(composedSpec.title, locale) : getSurfacePageTitle('xpanel', section, locale, activeRoute)
   const activeDomain = props.activeDomain ?? account.primaryDomain
@@ -179,6 +192,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
   const serviceUsers = (props.serviceUsers ?? []).filter(user => activeRoute === '/files/ftp' ? user.services.ftp : user.services.email)
   const dnsRecords = props.dnsRecords ?? []
 
+  const verifiedTool = (id: string): boolean => props.catalog?.some(tool => tool.id === id && tool.status === 'verified' && tool.delivery.status === 'verified') === true
   const shellEnabled = plan?.shell === 'jailed' && account.shell === 'jailed' && account.status === 'active'
   const visibility = props.visibility?.principal.kind === 'user' && props.visibility.principal.accountId === account.id ? props.visibility : undefined
   const xpanelNav = visibleNavigation(visibility, props.catalog).find((n) => n.surface === 'xpanel')
@@ -220,7 +234,7 @@ export const renderPanelSurface = (props: PanelSurfaceProps = {}): string => {
       files: props.files ?? [],
       dnsRecords,
       ...(generationId !== undefined ? { generationId } : {}),
-      actionHtml: actionBannerHtml + renderAccountAnnouncementsBanner({ locale, announcements: [] }),
+      actionHtml: actionBannerHtml + renderHomeNotices({ locale, usage: props.usage, plan: homePlan, personal: props.personal, qualifiedRoutes: accountRoutes }) + (props.personal?.notifications.announcements === false ? '' : renderAccountAnnouncementsBanner({ locale, announcements: [] })) + renderAccountPlugins({ locale }),
       ...(accountRoutes ? { qualifiedRoutes: accountRoutes } : {}),
       ...(props.usage ? { usage: props.usage } : {}),
       ...(props.lastSignInAt ? { lastSignInAt: props.lastSignInAt } : {}),
@@ -433,7 +447,7 @@ ${section === 'resources' ? `<div style="display:grid;gap:32px;min-inline-size:0
             <button type="button" class="xp-btn" data-action="empty-trash">${translator(locale)('Empty trash')}</button>
           </div>
         </div>
-        <p class="xp-help" data-file-status role="status" aria-live="polite" hidden></p>${renderClassicFilePresentation(locale, 'controls')}
+        <p class="xp-help" data-file-status role="status" aria-live="polite" hidden></p><progress data-file-archive-progress aria-label="${escapeHtml(translator(locale)('Archive in progress'))}" hidden></progress>${renderClassicFilePresentation(locale, 'controls')}
 
         <div class="xp-table-wrap" data-file-table-wrap role="region" tabindex="0" aria-label="${translator(locale)('Account files')}">
           <table class="xp-table" data-file-manager-table="true">
@@ -493,6 +507,12 @@ ${section === 'resources' ? `<div style="display:grid;gap:32px;min-inline-size:0
               <div class="xp-field">
                 <label class="xp-label" for="jailed-code-editor">${translator(locale)('File contents')}</label>
                 <textarea id="jailed-code-editor" rows="8" class="xp-textarea xp-mono" dir="ltr" wrap="off" spellcheck="false" data-editor-path=""></textarea>
+              </div>
+              <div class="xp-field">
+                <label class="xp-label" for="jailed-editor-charset">${translator(locale)('Character set')}</label>
+                <select id="jailed-editor-charset" class="xp-select" dir="ltr" data-editor-charset>${['UTF-8', 'ISO-8859-1', 'US-ASCII'].map(value => `<option value="${value}">${value}</option>`).join('')}</select>
+                <label style="display:flex;align-items:center;gap:8px;min-block-size:44px"><input type="checkbox" data-editor-fallback disabled> ${translator(locale)('Keep UTF-8 if a character does not fit')}</label>
+                <p class="xp-help">${translator(locale)('Choose the encoding the file uses before you edit it. A wrong choice can corrupt the text.')}</p>
               </div>
               <div style="display:flex;flex-wrap:wrap;gap:var(--xp-space-field)">
                 <button type="button" class="xp-btn xp-btn--primary" data-action="save-file" disabled>${translator(locale)('Save text')}</button>
@@ -634,7 +654,7 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
                       <td>
                         <button type="button" class="xp-btn" data-mailbox-password="${escapeHtml(u.id)}">${translator(locale)('Password')}</button>
                         <button type="button" class="xp-btn" data-mailbox-quota="${escapeHtml(u.id)}" data-mailbox-quota-value="${escapeHtml(String(u.mailboxQuotaMb))}">${translator(locale)('Quota')}</button>
-                        <button type="button" class="xp-btn" data-remove-mailbox="${escapeHtml(u.id)}">${translator(locale)('Delete')}</button>
+                        ${activeRoute === '/files/ftp' ? `<button type="button" class="xp-btn" ${Object.entries(ftpRemovalHooks(u)).map(([name, value]) => `${name}="${escapeHtml(value)}"`).join(' ')}>${translator(locale)('Delete')}</button>` : `<button type="button" class="xp-btn" data-remove-mailbox="${escapeHtml(u.id)}">${translator(locale)('Delete')}</button>`}
                       </td>
                     </tr>
                   `,
@@ -643,6 +663,7 @@ ${section === 'databases' ? `        <section class="xp-card" data-section="mari
                 </tbody>
               </table>
             </div>
+            ${activeRoute === '/files/ftp' ? `<div class="xp-form-group"><div data-ftp-create class="xp-form-group"><div class="xp-field"><label class="xp-label" for="ftp-login">${translator(locale)('Login')}</label><input id="ftp-login" name="login" type="text" class="xp-input xp-mono" dir="ltr" autocomplete="off"></div><div class="xp-field"><label class="xp-label" for="ftp-password">${translator(locale)('Password')}</label><input id="ftp-password" name="password" type="password" class="xp-input" dir="ltr" autocomplete="new-password" minlength="8"></div><div class="xp-field"><label class="xp-label" for="ftp-directory">${translator(locale)('Directory')}</label><input id="ftp-directory" name="ftpDir" type="text" class="xp-input xp-mono" dir="ltr" autocomplete="off" spellcheck="false"></div></div><button type="button" class="xp-btn xp-btn--primary" data-ftp-create-submit>${translator(locale)('Create FTP login')}</button><p class="xp-help" role="status" data-ftp-remove-status hidden></p></div>${renderFtpAccountTools(locale, { canConnections: verifiedTool('ftp-connections'), canAnonymous: verifiedTool('anonymous-ftp') })}` : ''}
             ${activeRoute === '/email/accounts' ? `<form class="xp-form-group" data-mailbox-form="true">
               <div class="xp-field">
                 <label class="xp-label" for="mailbox-local">${translator(locale)('Name')}</label>

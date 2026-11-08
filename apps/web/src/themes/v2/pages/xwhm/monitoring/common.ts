@@ -4,6 +4,7 @@ import { card } from '../../../components/card.ts'
 import { pageHeader } from '../../../components/page-header.ts'
 import { escapeHtml, hookAttrs, type HookAttributes } from '../../../html.ts'
 import { v2Messages } from '../../../messages.ts'
+import { IDENTITY_ROWS_CSS } from '../../identity.ts'
 
 /** Core supplies independent read and mutation decisions after catalog and principal admission. */
 export interface ObservationAuthority { readonly canRead: boolean; readonly canManage: boolean }
@@ -51,7 +52,8 @@ export function page(input: WhmObservationInput, route: string, title: string, d
 }
 
 /** Shared only by these diagnostic, security and activity bodies; no global component overrides. */
-export const WHM_OBSERVATION_CSS = `.v2-observation{display:flex;flex-direction:column;gap:32px;min-inline-size:0}
+export const WHM_OBSERVATION_CSS = `${IDENTITY_ROWS_CSS}
+.v2-observation{display:flex;flex-direction:column;gap:32px;min-inline-size:0}
 .v2-observation :is(h2,h3,p,dl,dd,pre,fieldset,ul,ol){margin:0}
 .v2-observation .v2-card__body{gap:24px}
 .v2-observation__groups{display:flex;flex-direction:column;gap:24px;min-inline-size:0}

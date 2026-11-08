@@ -5,6 +5,9 @@ import { renderLoginSurface, type LoginSurfaceProps } from './surfaces/login.ts'
 const origins = { xpanel: 'https://panel.example.test:2083', xwhm: 'https://whm.example.test:2087', xmail: 'https://mail.example.test:2096' } as const
 
 describe('approved sign-in composition with real authentication boundaries', () => {
+  it('lets the public host wrap, because the top bar cannot wrap on a phone', () => {
+    assert.ok(renderLoginSurface({ audience: 'xpanel', publicOrigin: origins.xpanel }).includes('[data-login-design="approved"] :is(.xp-brand__sub,.xp-login-footer .xp-mono) { min-inline-size:0; overflow-wrap:anywhere; }'))
+  })
   for (const audience of ['xpanel', 'xwhm', 'xmail'] as const) {
     for (const locale of ['en', 'ar'] as const) {
       it(`shows only its own panel and keeps the contextual layout for ${audience}/${locale}`, () => {

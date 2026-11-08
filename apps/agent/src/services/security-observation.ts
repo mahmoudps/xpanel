@@ -128,7 +128,7 @@ export function parseSshFailedLogins(stdout: string, unit: string): SshFailedLog
     try { record = JSON.parse(line) } catch { return fail('PRECONDITION_FAILED', 'SSH journal output is not structured JSON') }
     if (!record || typeof record !== 'object' || Array.isArray(record)) continue
     const entry = record as Record<string, unknown>
-    if (entry._UID !== '0' || entry._SYSTEMD_UNIT !== unit || !['sshd', 'sshd-session'].includes(String(entry._COMM)) || !['/usr/sbin/sshd', '/usr/lib/openssh/sshd-session'].includes(String(entry._EXE))) continue
+    if (entry._UID !== '0' || entry._SYSTEMD_UNIT !== unit || !['sshd', 'sshd-session'].includes(String(entry._COMM)) || !['/usr/sbin/sshd', '/usr/lib/openssh/sshd-session', '/usr/libexec/openssh/sshd-session'].includes(String(entry._EXE))) continue
     if (!printable(entry.MESSAGE, 2048) || typeof entry.__REALTIME_TIMESTAMP !== 'string' || !/^\d{10,20}$/.test(entry.__REALTIME_TIMESTAMP)) continue
     const match = /^Failed ([a-zA-Z0-9@/_-]{1,64}) for (?:invalid user )?(.{1,64}?) from ([0-9a-fA-F:.]+) port \d{1,5}(?: ssh2)?(?: \[preauth\])?$/.exec(entry.MESSAGE)
     if (!match || !isIP(match[3]!) || !printable(match[2], 64)) continue

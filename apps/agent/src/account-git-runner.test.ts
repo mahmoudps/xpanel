@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildAccountGitCommand, createAccountGitRun, isAccountGitCommand } from './account-git-runner.ts'
+import { buildAccountDeployCommand, buildAccountGitCommand, createAccountGitRun, isAccountDeployCommand, isAccountGitCommand } from './account-git-runner.ts'
 import { FakeHostExecutor } from './executor.ts'
 
 const account = { username: 'alice', uid: 1001, gid: 1002, home: '/home/alice' }
@@ -36,5 +36,20 @@ describe('exact account Git sandbox admission', () => {
     await expect(git(target, 'repo', { op: 'status' })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false } })
     await expect(git({ ...target, username: 'zz9missing', home: '/home/zz9missing' }, 'repo', { op: 'status' })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
     expect(run).not.toHaveBeenCalled()
+  })
+})
+
+describe('account deployment command', () => {
+  const account = { username: 'alice', uid: 20001, gid: 20001, home: '/home/alice' }
+  it('keeps the account jail, lifts only the executable restriction and admits exactly itself', () => {
+    const argv = buildAccountDeployCommand(account, 'site', 'cp a b\ncp c d', 'debian')
+    expect(argv.slice(-3)).toEqual(['/bin/sh', '-ec', 'cp a b\ncp c d'])
+    expect(argv).toContain('User=20001')
+    expect(argv.some(value => /^(?:No)?ExecPaths=/.test(value))).toBe(false)
+    expect(argv.includes('InaccessiblePaths=-/home/alice/.ssh -/home/alice/.netrc -/home/alice/.git-credentials')).toBe(true)
+    expect(isAccountDeployCommand(argv)).toBe(true)
+    expect(isAccountGitCommand(argv)).toBe(false)
+    expect(isAccountDeployCommand(argv.map(value => value === 'User=20001' ? 'User=0' : value))).toBe(false)
+    expect(isAccountDeployCommand([...argv.slice(0, -3), '/bin/bash', '-ec', 'id'])).toBe(false)
   })
 })

@@ -62,6 +62,7 @@ describe('transfer source inventory', () => {
 
 describe('signed transfer package source', () => {
   const TOKEN = 'xp_' + 'a'.repeat(43), ID = '0f0f0f0f-0000-4000-8000-000000000001'
+  const EDGE = { ipBlocker: { version: 1 as const, entries: ['203.0.113.7'], updatedAt: '2026-10-29T00:00:00.000Z' } }
   const full = () => {
     const base = snapshot()
     return { ...base,
@@ -83,6 +84,7 @@ describe('signed transfer package source', () => {
       requireCaller: async () => ({ principal: { kind: 'root', id: 'p' }, sessionId: null, apiTokenId: 't' }) as unknown as AuthenticatedCaller,
       assertRoot: async (caller: AuthenticatedCaller) => { if (caller.principal.kind !== 'root') fail('FORBIDDEN', 'root required') },
       readSnapshot: async () => full(),
+      readEdge: async () => EDGE,
       agent: async (_caller: AuthenticatedCaller, path: string, init: { method?: string; body?: unknown } = {}) => {
         calls.push((init.method ?? 'GET') + ' ' + path + (init.body ? ' ' + JSON.stringify(init.body) : ''))
         if (path === '/transfers/tasks') return Response.json({ task: { id: ID } }, { status: 202 })
@@ -103,10 +105,13 @@ describe('signed transfer package source', () => {
     expect(value.manifest.bundle).toMatchObject({ account: { username: 'alice', home: '/home/alice', ipv4: '192.0.2.5' }, plan: { name: 'silver' }, databaseUsers: [{ name: 'alice_wpuser', authString: '*HASH', grants: [{ database: 'alice_wp', privileges: ['ALL'] }] }],
       mailboxes: [{ login: 'info@alice.example.test', passwordHash: '{ARGON2ID}$x' }], zones: [{ name: 'alice.example.test' }], cron: [{ schedule: '@daily' }], databases: [{ name: 'alice_wp', artifact: 'db-alice_wp.sql' }] })
     expect(value.manifest.bundle.plan).not.toHaveProperty('id')
+    expect(value.manifest.bundle.edge).toEqual(EDGE)
     expect(value.signature).toBe(signTransferManifest(TOKEN, value.manifest))
     expect(verifyTransferManifest(value, TOKEN, { source: 'source.example.test', username: 'alice', package: ID })).toMatchObject({ package: ID })
     for (const [raw, token, user] of [[{ ...value, signature: '0'.repeat(64) }, TOKEN, 'alice'], [value, 'xp_' + 'b'.repeat(43), 'alice'], [value, TOKEN, 'bob'], [{ ...value, manifest: { ...value.manifest, artifacts: [] } }, TOKEN, 'alice'], [{ ...value, extra: 1 }, TOKEN, 'alice']] as const)
       expect(() => verifyTransferManifest(raw, token, { source: 'source.example.test', username: user, package: ID })).toThrow(/invalid or unsigned package manifest/)
+    const tampered = { ...value.manifest, bundle: { ...value.manifest.bundle, edge: { ipBlocker: { version: 1, entries: ['not an address'], updatedAt: '2026-10-29T00:00:00.000Z' } } } }
+    expect(() => verifyTransferManifest({ ...value, manifest: tampered, signature: signTransferManifest(TOKEN, tampered) }, TOKEN, { source: 'source.example.test', username: 'alice', package: ID })).toThrow(/invalid or unsigned package manifest/)
   })
   it('reports running and failed packaging without a manifest', async () => {
     expect(await (await call('/api/transfers/source/accounts/alice/package/' + ID, 'GET', ports({}, 'running').ports))!.json()).toEqual({ state: 'running' })

@@ -184,6 +184,7 @@ describe('candidate V2 full-document controller conformance', () => {
       '/whm/services',
       '/whm/services/certificates',
       '/whm/services/default-index',
+      '/whm/services/nginx-proxy',
       '/whm/services/dns',
       '/whm/services/ftp',
       '/whm/services/ftp-log-analysis',
@@ -243,13 +244,13 @@ describe('candidate V2 full-document controller conformance', () => {
 
   beforeAll(() => {
     const expectedDocuments = Object.entries(expectedRoutes).flatMap(([surface, routes]) => routes.map(route => `${surface} ${route}`))
-    expect(documents).toHaveLength(217)
-    expect(new Set(documents.map(document => document.route)).size).toBe(217)
+    expect(documents).toHaveLength(218)
+    expect(new Set(documents.map(document => document.route)).size).toBe(218)
     expect(documents.map(document => `${document.surface} ${document.route}`).sort()).toEqual(expectedDocuments.sort())
     const caseIdentities = locales.flatMap(locale => documents.map(document => `${locale} ${document.surface} ${document.route}`))
-    expect(caseIdentities).toHaveLength(434)
-    expect(new Set(caseIdentities).size).toBe(434)
-    expect(Object.fromEntries(locales.map(locale => [locale, documents.length]))).toEqual({ en: 217, ar: 217 })
+    expect(caseIdentities).toHaveLength(436)
+    expect(new Set(caseIdentities).size).toBe(436)
+    expect(Object.fromEntries(locales.map(locale => [locale, documents.length]))).toEqual({ en: 218, ar: 218 })
   })
 
   const catalog: CatalogTool[] = tools.map(tool => tool.status === 'out-of-scope' ? tool : ({
@@ -277,7 +278,7 @@ describe('candidate V2 full-document controller conformance', () => {
     const identity = document.surface === 'xwhm'
       ? { visibility: visibility({ kind: 'root', id: '33333333-3333-4333-8333-333333333333', username: 'contractroot' }), ...(document.route === '/whm/email/outbound' ? { whm: { mailIpConfig: mailIpConfig } } : {}) }
       : document.surface === 'xpanel'
-        ? { visibility: visibility(user), panel: { account, plan: defaultPlan({ id: '22222222-2222-4222-8222-222222222222', name: 'Basic' }), ...(['/security/ssl', '/email/forwarders'].includes(document.route) ? { domains: [sslDomain] } : {}) } }
+        ? { visibility: visibility(user), panel: { account, plan: defaultPlan({ id: '22222222-2222-4222-8222-222222222222', name: 'Basic' }), ...(document.route === '/domains/site-settings' ? { domains: [sslDomain], activeDomain: sslDomain.name, customConfig: { domainId: sslDomain.id, accountId: sslDomain.accountId, domainName: sslDomain.name, nginxInclude: '', apacheInclude: '', userIni: {}, customHeaders: {}, cacheBypassPaths: [], updatedAt: '', updatedBy: 'user' as const } } : {}), ...(['/security/ssl', '/email/forwarders'].includes(document.route) ? { domains: [sslDomain] } : {}) } }
         : { visibility: visibility(user), mail: { mailbox: 'contractuser@example.test', domain: 'example.test' } }
     const securityFixture = document.route === '/security/account' ? { security: { totpEnabled: false }, mfaRuntimeMode: 'disabled' as const } : {}
     const html = renderWebApp({ ...identity, ...securityFixture, surface: document.surface, activeRoute: document.route, locale, uiTheme: 'v2', theme: 'dark', catalog, liveState: live })

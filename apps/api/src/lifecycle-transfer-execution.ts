@@ -4,10 +4,13 @@ import type { Account, DnsRecordType, Domain, Id, PhpSettings } from '@xpanel/co
 import { isPhpVersion } from '@xpanel/os'
 import type { StateStore } from '@xpanel/state'
 import type { ReviewAccount, TransferReview, TransferSession } from '@xpanel/lifecycle'
+import { writeAccountEdgeState } from '../../agent/src/account-edge.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import { httpsTransferSourceTransport } from './acct-transfer-discovery.ts'
 import type { TransferSourceTransport } from './acct-transfer-discovery.ts'
 import { transferSourcePackagePath, verifyTransferManifest } from './acct-transfer-source.ts'
+import { liveStateDigest, livePeerPath } from './live-transfer.ts'
+import { isNodeId } from './node-link.ts'
 import type { TransferAccountBundle, TransferPackageManifest } from './acct-transfer-source.ts'
 import { readReply } from './backup-file-restore-workspace.ts'
 import type { TransferAccountResult, TransferProgressEvent, TransferWorkspacePorts } from './transfer-workspace.ts'
@@ -17,7 +20,7 @@ export type TransferAgentCall = (caller: AuthenticatedCaller, path: string, init
 
 export interface TransferExecutionDeps {
   store: Pick<StateStore, 'listAccounts' | 'listDomains' | 'listPlans' | 'listFeatureLists' | 'getAccount' | 'getAccountByUsername' |'getServerSettings' | 'getDnsZone' | 'createPlan' | 'createDomain' | 'updateDomain'
-    | 'createDatabase' | 'createDatabaseUser' | 'setGrant' | 'createServiceUser' | 'saveDnsZone' | 'saveCronJobs' | 'saveCertificateBinding'>
+    | 'createDatabase' | 'createDatabaseUser' | 'setGrant' | 'createServiceUser' | 'saveDnsZone' | 'saveCronJobs' | 'saveCertificateBinding' | 'setAccountLimits' | 'setAccountLogSettings' | 'rootDir' | 'getWriterLock'>
   readToken: (id: string) => Promise<string | null>
   transport?: TransferSourceTransport
   agent: TransferAgentCall
@@ -102,11 +105,18 @@ async function applyBundle(deps: TransferExecutionDeps, account: Account, bundle
   const wanted = bundle.domains.filter(domain => !dropped.has(domain.name))
   const primary = wanted.find(domain => domain.name === account.primaryDomain) ?? precondition('the primary domain is not in the transfer package')
   const primaryRecord = domains.get(primary.name) ?? precondition('the new account has no primary domain')
-  await deps.store.updateDomain(primaryRecord.id, { docRoot: rebaseHome(primary.docRoot, bundle.account.home, account.home), siteType: primary.siteType, upstream: primary.upstream, redirect: primary.redirect, php: php(primary.php), wildcard: primary.wildcard, ...(primary.indexFiles ? { indexFiles: primary.indexFiles } : {}) })
+  // The account's own limits first, so mailbox and path quotas above the package disk still fit; the store validates both.
+  if (bundle.account.limits) await deps.store.setAccountLimits(account.id, bundle.account.limits)
+  if (bundle.account.logs) await deps.store.setAccountLogSettings(account.id, bundle.account.logs)
+  if (bundle.edge) {
+    const lease = await deps.store.getWriterLock().acquire()
+    try { await writeAccountEdgeState(deps.store.rootDir, account.id, bundle.edge, async () => { await lease.assertFencingToken() }) } finally { await lease.release() }
+  }
+  await deps.store.updateDomain(primaryRecord.id, { docRoot: rebaseHome(primary.docRoot, bundle.account.home, account.home), siteType: primary.siteType, upstream: primary.upstream, redirect: primary.redirect, php: php(primary.php), wildcard: primary.wildcard, ...(primary.indexFiles ? { indexFiles: primary.indexFiles } : {}), ...(primary.site ? { site: primary.site } : {}) })
   for (const domain of parentsFirst(wanted.filter(item => item.name !== primary.name), new Set([primary.name]))) {
     const created = await deps.store.createDomain({ accountId: account.id, name: domain.name, kind: domain.kind, parentId: domain.parent ? domains.get(domain.parent)?.id ?? precondition('the parent of ' + domain.name + ' is missing') : null,
       docRoot: rebaseHome(domain.docRoot, bundle.account.home, account.home), siteType: domain.siteType, upstream: domain.upstream, redirect: domain.redirect, php: php(domain.php), wildcard: domain.wildcard,
-      certificateId: null, suspended: false, expiresAt: null, pathQuotaMb: 'unlimited', ...(domain.indexFiles ? { indexFiles: domain.indexFiles } : {}) })
+      certificateId: null, suspended: false, expiresAt: null, pathQuotaMb: 'unlimited', ...(domain.indexFiles ? { indexFiles: domain.indexFiles } : {}), ...(domain.site ? { site: domain.site } : {}) })
     domains.set(created.name, created)
   }
   const databases = new Map<string, Id>()
@@ -117,7 +127,7 @@ async function applyBundle(deps: TransferExecutionDeps, account: Account, bundle
     for (const grant of user.grants) if (databases.has(grant.database)) await deps.store.setGrant({ databaseUserId: created.id, databaseId: databases.get(grant.database)!, privileges: grant.privileges })
   }
   const mailboxes = bundle.mailboxes.filter(box => domains.has(box.login.split('@')[1] ?? ''))
-  for (const box of mailboxes) await deps.store.createServiceUser({ accountId: account.id, login: box.login, services: box.services, mailboxQuotaMb: box.mailboxQuotaMb, ftpDir: box.ftpDir, passwordHash: box.passwordHash })
+  for (const box of mailboxes) await deps.store.createServiceUser({ id: box.id, accountId: account.id, login: box.login, services: box.services, mailboxQuotaMb: box.mailboxQuotaMb, ftpDir: box.ftpDir, passwordHash: box.passwordHash })
   const nameservers = (await deps.store.getServerSettings())?.nameservers ?? []
   const zones = bundle.zones.filter(zone => domains.has(zone.name))
   for (const zone of zones) {
@@ -162,6 +172,9 @@ async function planFor(deps: TransferExecutionDeps, review: TransferReview, acco
  * every artifact and checks its signed size and SHA-256, the account is rebuilt here, then the home is restored and
  * compared, the databases are loaded and the certificates installed. A failure after the account exists removes it.
  */
+/** The source username of an account of this session, by the target name progress keeps. */
+const sourceOf = (session: TransferSession, target: string): string => Object.entries(session.progress).find(([, item]) => item.targetUsername === target)?.[0] ?? precondition('the account is not part of this transfer')
+
 export function createTransferExecution(deps: TransferExecutionDeps): NonNullable<TransferWorkspacePorts['execution']> {
   const transport = deps.transport ?? httpsTransferSourceTransport
   const pollMs = deps.pollMs ?? 3000
@@ -171,14 +184,34 @@ export function createTransferExecution(deps: TransferExecutionDeps): NonNullabl
     if (!token) return precondition('the stored source credential no longer exists')
     return { url: session.auth.url, token, tlsFingerprint: session.auth.tlsFingerprint }
   }
-  const sourceJson = async (source: Awaited<ReturnType<typeof channel>>, path: string, method: 'GET' | 'POST' = 'GET'): Promise<unknown> => {
+  const sourceJson = async (source: Awaited<ReturnType<typeof channel>>, path: string, method: 'GET' | 'POST' = 'GET', body: unknown = {}, timeoutMs = 120_000): Promise<unknown> => {
     let reply
-    try { reply = await transport({ ...source, url: source.url + path, method, ...(method === 'POST' ? { body: '{}' } : {}), timeoutMs: 120_000, maxBytes: 64 * 1024 * 1024 }) }
+    try { reply = await transport({ ...source, url: source.url + path, method, ...(method === 'POST' ? { body: JSON.stringify(body) } : {}), timeoutMs, maxBytes: 64 * 1024 * 1024 }) }
     catch { return precondition('the source could not be reached over the authenticated HTTPS channel') }
     if (![200, 202].includes(reply.status) || reply.contentType?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') return precondition('the source refused the package request (' + reply.status + ')')
     try { return JSON.parse(reply.body) } catch { return precondition('the source reply was not JSON') }
   }
   const audit = (caller: AuthenticatedCaller, action: string, target: string, detail: Record<string, unknown>, outcome: 'ok' | 'failed' = 'ok') => deps.audit?.(caller, action, target, detail, outcome).catch(() => undefined)
+
+  /** Starts a package on the source and waits for its signed manifest. */
+  const packageOnSource = async (source: Awaited<ReturnType<typeof channel>>, hostname: string, username: string, request: Record<string, unknown>): Promise<{ id: string; manifest: TransferPackageManifest }> => {
+    const started = await sourceJson(source, transferSourcePackagePath(username), 'POST', request) as { package?: unknown }
+    const id = typeof started?.package === 'string' && /^[0-9a-f-]{36}$/.test(started.package) ? started.package : precondition('the source did not start a package')
+    for (const deadline = Date.now() + TRANSFER_STEP_TIMEOUT_MS; ;) {
+      const polled = await sourceJson(source, transferSourcePackagePath(username, id)) as Record<string, unknown>
+      if (polled?.state === 'ready') return { id, manifest: verifyTransferManifest(polled, source.token, { source: hostname, username, package: id }) }
+      if (polled?.state === 'failed') precondition('the source could not package the account: ' + String(polled.error).slice(0, 200))
+      if (Date.now() > deadline) precondition('the source did not finish packaging in time')
+      await sleep(pollMs)
+    }
+  }
+  const discardPackage = (source: Awaited<ReturnType<typeof channel>>, username: string, id: string): Promise<unknown> =>
+    transport({ ...source, url: source.url + transferSourcePackagePath(username, id), method: 'DELETE', timeoutMs: 30_000, maxBytes: 64 * 1024 }).catch(() => undefined)
+  /** Undoes the source side of a live transfer; the steps there are repeatable and read their own saved record. */
+  const revertSource = async (session: TransferSession, username: string): Promise<boolean> => {
+    await sourceJson(await channel(session), livePeerPath(username, 'revert'), 'POST', { session: session.id }, TRANSFER_STEP_TIMEOUT_MS)
+    return true
+  }
 
   /** Removes only the account this run created (by id); an account that merely shares the target username is never touched. */
   const removeCreated = async (caller: AuthenticatedCaller, accountId: string | null | undefined): Promise<boolean> => {
@@ -192,11 +225,27 @@ export function createTransferExecution(deps: TransferExecutionDeps): NonNullabl
     admit: async (caller, session, review) => {
       if (caller.principal.kind !== 'root') fail('FORBIDDEN', 'root access is required', { stateChanged: false })
       await channel(session)
+      if (session.live && (session.auth.kind !== 'api-token' || !isNodeId(session.auth.tokenId))) precondition('a live transfer needs a linked server as its source')
       const local = new Set((await deps.store.listPlans()).map(plan => plan.name))
       for (const account of review.accounts) if (!local.has(account.plan) && !review.plans.some(plan => plan.target === account.plan && plan.action !== 'map')) precondition('plan ' + account.plan + ' of ' + account.source + ' does not exist here')
     },
     /** Rollback of an account that was in flight when the API stopped: the partial account this run created is removed. */
-    recover: async (caller, _account, result) => removeCreated(caller, result?.createdAccountId),
+    recover: async (caller, account, result, session) => {
+      if (result?.liveFrozen) await revertSource(session, sourceOf(session, account.targetUsername))
+      return removeCreated(caller, result?.createdAccountId)
+    },
+    /** Takes a finished live transfer back: the source serves again and the copy here is removed. */
+    revert: async (caller, session, username, result, acceptLoss) => {
+      const cutoverAt = result.live?.cutoverAt ?? precondition('this account has not been cut over')
+      if (result.live?.revertedAt) fail('CONFLICT', 'this cutover has already been reverted', { stateChanged: false })
+      const target = (result.createdAccountId ? await deps.store.getAccount(result.createdAccountId) : null) ?? precondition('the transferred account is no longer here')
+      const changes = await runHostTask(deps.agent, caller, { kind: 'home-changes', username: target.username, since: cutoverAt }, deps.pollMs ?? 3000)
+      if (changes.result.changed === true && !acceptLoss) fail('CONFLICT', 'the account changed here after the cutover; confirm that those changes are lost', { stateChanged: false, reason: 'post_cutover_writes' })
+      await revertSource(session, username)
+      await removeCreated(caller, target.id)
+      await audit(caller, 'transfer.account.live_reverted', 'account:' + target.username, { source: username, acceptLoss })
+      return { ...result.live!, revertedAt: new Date().toISOString() }
+    },
     run: async (caller, session, review, emit, shouldStop) => {
       const hostname = session.source?.hostname ?? precondition('the transfer source is not connected')
       for (const account of review.accounts) {
@@ -205,21 +254,14 @@ export function createTransferExecution(deps: TransferExecutionDeps): NonNullabl
         if (await shouldStop()) return
         const target = 'account:' + account.target
         const progress = (phase: TransferProgressEvent['phase'], extra: Pick<TransferProgressEvent, 'bytes' | 'error'> = {}, result?: TransferAccountResult): Promise<void> => emit({ type: 'progress', account: account.source, phase, ...extra }, result)
-        let packageId: string | null = null, fetchId: string | null = null, source: Awaited<ReturnType<typeof channel>> | null = null, createdId: string | null = null
+        let packageId: string | null = null, finalPackageId: string | null = null, fetchId: string | null = null, source: Awaited<ReturnType<typeof channel>> | null = null, createdId: string | null = null, frozen = false
         try {
           if (await deps.store.getAccountByUsername(account.target)) precondition('this server already has an account named ' + account.target + '; nothing was changed')
           source = await channel(session)
           await progress('exporting')
-          const started = await sourceJson(source, transferSourcePackagePath(account.source), 'POST') as { package?: unknown }
-          packageId = typeof started?.package === 'string' && /^[0-9a-f-]{36}$/.test(started.package) ? started.package : precondition('the source did not start a package')
-          let manifest: TransferPackageManifest | null = null
-          for (const deadline = Date.now() + TRANSFER_STEP_TIMEOUT_MS; !manifest;) {
-            const polled = await sourceJson(source, transferSourcePackagePath(account.source, packageId)) as Record<string, unknown>
-            if (polled?.state === 'ready') manifest = verifyTransferManifest(polled, source.token, { source: hostname, username: account.source, package: packageId })
-            else if (polled?.state === 'failed') precondition('the source could not package the account: ' + String(polled.error).slice(0, 200))
-            else if (Date.now() > deadline) precondition('the source did not finish packaging in time')
-            else await sleep(pollMs)
-          }
+          const first = await packageOnSource(source, hostname, account.source, session.live ? { live: true } : {})
+          const manifest = first.manifest
+          packageId = first.id
           await audit(caller, 'transfer.account.exported', target, { source: account.source, artifacts: manifest.artifacts.length })
           await progress('copying')
           const bytes = manifest.artifacts.reduce((sum, artifact) => sum + artifact.bytes, 0)
@@ -247,19 +289,41 @@ export function createTransferExecution(deps: TransferExecutionDeps): NonNullabl
           if (certificates) await deps.applyAccount(caller, (await deps.store.getAccountByUsername(account.target)) ?? local)
           const result: TransferAccountResult = { ...applied, home: { bytes: manifest.artifacts.find(artifact => artifact.name === 'home.tar.gz')!.bytes, compared: true }, certificates, rolledBack: false,
             databases: (restored.result.databases as { name: string; tables: number }[] | undefined)?.map(db => db.name) ?? applied.databases }
+          if (session.live) {
+            // the phase and the flag are saved first, so a restart from here on reverts the source too
+            await progress('syncing', {}, { createdAccountId: local.id, liveFrozen: true } as TransferAccountResult)
+            frozen = true
+            await sourceJson(source, livePeerPath(account.source, 'freeze'), 'POST', { session: session.id }, TRANSFER_STEP_TIMEOUT_MS)
+            await audit(caller, 'transfer.account.frozen', target, { source: account.source })
+            const final = await packageOnSource(source, hostname, account.source, { live: true, base: packageId })
+            finalPackageId = final.id
+            if (liveStateDigest(final.manifest.bundle) !== liveStateDigest(bundle)) precondition('the account changed on the source during the copy; run the transfer again')
+            const delta = await runHostTask(deps.agent, caller, { kind: 'fetch', username: account.target, url: source.url + transferSourcePackagePath(account.source, final.id), token: source.token, tlsFingerprint: source.tlsFingerprint, artifacts: final.manifest.artifacts.filter(artifact => !/^(?:cert|key)-/.test(artifact.name)) }, pollMs)
+            fetchId = delta.id
+            await runHostTask(deps.agent, caller, { kind: 'restore', username: account.target, fetch: delta.id, databases: final.manifest.bundle.databases.map(db => ({ artifact: db.artifact, target: renamePrefixed(db.name, account.source, account.target) })), certificates: [], incremental: true }, pollMs)
+            fetchId = null
+            await audit(caller, 'transfer.account.synced', target, { source: account.source, bytes: final.manifest.artifacts.reduce((sum, artifact) => sum + artifact.bytes, 0) })
+            await progress('cutover')
+            const cut = await sourceJson(source, livePeerPath(account.source, 'cutover'), 'POST', { session: session.id, ipv4: local.ipv4 }, TRANSFER_STEP_TIMEOUT_MS) as { zones?: unknown }
+            result.createdAccountId = local.id
+            result.live = { cutoverAt: new Date().toISOString(), zones: typeof cut?.zones === 'number' ? cut.zones : 0, revertedAt: null }
+            await audit(caller, 'transfer.account.cutover', target, { source: account.source, zones: result.live.zones })
+          }
           await audit(caller, 'transfer.account.imported', target, { source: account.source, ...result })
           await progress('done', { bytes }, result)
         } catch (error) {
-          let rolledBack = false, rollbackFailed = false
+          let rolledBack = false, rollbackFailed = false, sourceHeld = false
+          if (frozen) try { await revertSource(session, account.source) } catch { sourceHeld = true }
           try { rolledBack = await removeCreated(caller, createdId) } catch { rollbackFailed = true }
           const why = transferReason(error, 'the account could not be transferred')
-          const message = rollbackFailed ? why + '. The partial account could not be removed; review ' + account.target + ' before retrying.'
+          const message = sourceHeld ? why + '. The source could not be released; its account stays suspended until it is reviewed there.'
+            : rollbackFailed ? why + '. The partial account could not be removed; review ' + account.target + ' before retrying.'
             : rolledBack ? why + '. The partial account was removed; nothing of it remains here.' : why + '. Nothing was changed here.'
-          await audit(caller, rolledBack ? 'transfer.account.rolled_back' : 'transfer.account.failed', target, { source: account.source, stateChanged: rollbackFailed, verificationRequired: rollbackFailed }, 'failed')
-          await progress('failed', { error: message }, { rolledBack, rollbackFailed } as TransferAccountResult)
+          await audit(caller, rolledBack ? 'transfer.account.rolled_back' : 'transfer.account.failed', target, { source: account.source, stateChanged: rollbackFailed || sourceHeld, verificationRequired: rollbackFailed || sourceHeld }, 'failed')
+          await progress('failed', { error: message }, { rolledBack, rollbackFailed: rollbackFailed || sourceHeld } as TransferAccountResult)
         } finally {
           if (fetchId) await deps.agent(caller, '/transfers/tasks/' + fetchId, { method: 'DELETE' }).then(response => response.body?.cancel()).catch(() => undefined)
-          if (source && packageId) await transport({ ...source, url: source.url + transferSourcePackagePath(account.source, packageId), method: 'DELETE', timeoutMs: 30_000, maxBytes: 64 * 1024 }).catch(() => undefined)
+          if (source) for (const id of [packageId, finalPackageId]) if (id) await discardPackage(source, account.source, id)
         }
       }
     },

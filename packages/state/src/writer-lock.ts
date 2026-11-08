@@ -15,7 +15,7 @@ export const LOCK_DIR = '.lock'
 export const LOCK_OWNER_FILE = 'owner.json'
 export const LOCK_INTENT_FILE = 'intent.json'
 const PROTOCOL = 'sqlite-v1'
-const RESTORE_ENTRIES = ['feature-lists', 'plans', 'resellers', 'accounts', 'certificates', 'zones', 'server.json', 'firewall.json', 'uid-allocator.json', 'ip-pool.json', 'mail-ips.json',
+const RESTORE_ENTRIES = ['feature-lists', 'plans', 'resellers', 'accounts', 'certificates', 'zones', 'server.json', 'firewall.json', 'uid-allocator.json', 'ip-pool.json', 'mail-ips.json', 'acl-lists', 'ip-ranges.json',
   // saved mail routing (StateStore MAIL_ROUTING_FILES) and mailbox autoresponders, below extended/
   'extended/mail/forwarders.json', 'extended/mail/domain-forwarders.json', 'extended/mail/default-addresses.json', 'extended/mail/filters.json', 'extended/mail/autoresponders.json', 'extended/webmail/vacation'] as const
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

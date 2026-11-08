@@ -1,4 +1,4 @@
-import { tools } from '@xpanel/catalog'
+import { shownFeatureKeys, tools } from '@xpanel/catalog'
 import { canManagePlan, type Account, type Plan, type ResellerAcl } from '@xpanel/core'
 import type { WhmSurfaceProps } from '../surfaces/xwhm.ts'
 import { escapeHtml, normalizeAsciiDigits, renderLtrValue } from '../tokens.ts'
@@ -29,7 +29,6 @@ const admitted = (props: WhmSurfaceProps, acl: ResellerAcl): boolean => {
 const qualified = (props: WhmSurfaceProps, ids: readonly string[]): boolean => props.capabilityUnavailable !== true && props.catalog?.some(tool => ids.includes(tool.id) && tool.status === 'verified' && tool.delivery.status === 'verified') === true
 const card = (props: WhmSurfaceProps, key: string, title: Copy, body: string): string => `<section class="xp-whm-plan-card" data-whm-plan-component="${key}" aria-labelledby="whm-plan-${key}"><h2 id="whm-plan-${key}">${text(props, title)}</h2>${body}</section>`
 const note = (props: WhmSurfaceProps, copy: Copy): string => `<p class="xp-help" role="status">${text(props, copy)}</p>`
-const disabledButton = (props: WhmSurfaceProps, copy: Copy): string => `<button type="button" class="xp-btn" disabled>${text(props, copy)}</button>`
 const table = (props: WhmSurfaceProps, title: Copy, columns: readonly Copy[], rows: readonly (readonly string[])[], empty: Copy): string => `<div class="xp-whm-plan-scroll" role="region" tabindex="0" aria-label="${text(props, title)}"><table class="xp-whm-plan-table"><caption class="xp-sr-only">${text(props, title)}</caption><thead><tr>${columns.map(column => `<th scope="col">${text(props, column)}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.map(row => `<tr>${row.map(cell => `<td>${cell}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${columns.length}">${text(props, empty)}</td></tr>`}</tbody></table></div>`
 
 /** Counts only authorized assignments in the supplied snapshot; no resource use is inferred. */
@@ -61,7 +60,6 @@ export const renderApprovedWhmPlanSupplement = (props: WhmSurfaceProps): string 
     + table(props, msgid('Assigned accounts'), [msgid('Plan'), msgid('Account'), msgid('Primary domain')], affected, impact.accountsRead ? msgid('No assigned accounts were returned in this snapshot.') : msgid('Account assignments have not been read.'))
   const unsaved = table(props, msgid('Unsaved plan changes'), [msgid('Field'), msgctxt('approved-whm-plan-components', 'Saved'), msgid('Draft')], [], msgid('No browser draft comparison is available in this server-rendered summary.'))
     + note(props, msgid('Review the existing plan editor before saving. This summary does not assert that its current browser values match the saved plan; discarding a draft from here is unavailable.'))
-    + `<div class="xp-whm-plan-actions">${disabledButton(props, msgid('Discard changes'))}</div>`
   const applying = `<p>${text(props, msgid('Saving records desired plan state and an audit event. Changes to host resource limits require the reconciler and host evidence; a stored plan alone does not establish that slices were updated.'))}</p><p>${text(props, msgid('Caps govern later create requests. Lowering a cap must not remove existing files, sites, mailboxes or databases. A saved limit is separate from measured consumption.'))}</p>`
   return `${style}<div class="xp-whm-plan-supplement" data-approved-whm-plan-supplement>${card(props, 'impact', msgid('Impact'), impactHtml)}${card(props, 'unsaved', msgid('Unsaved changes'), unsaved)}${card(props, 'saving', msgid('How saving applies'), applying)}</div>`
 }
@@ -74,7 +72,7 @@ export const renderApprovedWhmFeatureListSupplement = (props: WhmSurfaceProps): 
   const lists = ready ? (props.featureLists ?? []).filter(list => principal?.kind === 'root' || list.ownerId === null || list.ownerId === principal?.id) : []
   const knownKeys = new Set(tools.flatMap(tool => tool.featureKey ? [tool.featureKey] : []))
   const duplicates = lists.map((list, index) => {
-    const keys = list.disabled === undefined ? undefined : [...new Set(list.disabled)]
+    const keys = list.disabled === undefined ? undefined : [...new Set(shownFeatureKeys(list.disabled))]
     const supported = keys !== undefined && keys.every(key => knownKeys.has(key))
     const disabled = supported ? '' : ' disabled'
     const prefix = `whm-feature-duplicate-${index}`
@@ -84,7 +82,6 @@ export const renderApprovedWhmFeatureListSupplement = (props: WhmSurfaceProps): 
   }).join('')
   const duplicateBody = duplicates || note(props, ready && props.featureLists !== undefined ? msgid('No accessible source list was returned. Create a list with the existing form before duplicating it.') : msgid('Accessible feature lists and membership have not been read. Copying is unavailable until the authorized operation and saved list are available.'))
   const unsaved = table(props, msgid('Unsaved feature-list changes'), [msgid('List'), msgid('Feature'), msgctxt('approved-whm-plan-components', 'Saved'), msgid('Draft')], [], msgid('A comparison with current browser edits has not been calculated. Review and save each list in its existing form.'))
-    + `<div class="xp-whm-plan-actions">${disabledButton(props, msgid('Discard'))}</div>`
     + note(props, msgid('Global draft discard is unavailable. The reset control in a duplicate form discards only that unsent copy draft and does not change saved lists.'))
   return `${style}<div class="xp-whm-plan-supplement" data-approved-whm-feature-supplement>${card(props, 'feature-duplicate', msgctxt('approved-whm-plan-components', 'Duplicate a list'), duplicateBody)}${card(props, 'feature-unsaved', msgid('Unsaved changes'), unsaved)}</div>`
 }

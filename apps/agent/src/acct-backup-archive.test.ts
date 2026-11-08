@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BACKUP_COMPRESSOR, backupPartOf, buildControlSnapshot, buildServerBackupArchive, extractBackupPart, listControlSnapshot, listServerBackupArchive, readBackupArchiveListing, readBackupDataManifest } from './acct-backup-archive.ts'
+import { backupCompressorArgv, backupPartOf, buildControlSnapshot, buildServerBackupArchive, extractBackupPart, listControlSnapshot, listServerBackupArchive, readBackupArchiveListing, readBackupDataManifest } from './acct-backup-archive.ts'
 import type { BackupCommand, BackupCommandResult } from './backup-low-priority.ts'
 import { BACKUP_LOW_PRIORITY, lowPriorityArgv, runBackupCommand, zstdDecompressed } from './backup-low-priority.ts'
 
@@ -26,7 +26,7 @@ describe('server backup archive build', () => {
   it('streams the home as the account, appends root-written dumps and zones with a manifest and publishes only the complete gzip', async () => {
     const root = await temp(), run = fakeRun()
     const dump = vi.fn(async (_account: unknown, name: string, path: string) => { await writeFile(path, 'dump of ' + name, { flag: 'wx' }); return { bytes: 12, sha256: SHA } })
-    const built = await buildServerBackupArchive({ root, account, databases: ['alice_wp', 'alice_shop', 'alice_wp'], zones: [zone], excludeMail: true, compression: 'gzip', now: new Date('2026-10-28T02:00:00.000Z'), deps: { run, dump } })
+    const built = await buildServerBackupArchive({ root, account, databases: ['alice_wp', 'alice_shop', 'alice_wp'], zones: [zone], excludeMail: true, compression: 'gzip', level: 6, now: new Date('2026-10-28T02:00:00.000Z'), deps: { run, dump } })
     expect(built).toEqual({ file: FILE, bytes: 2, databases: ['alice_shop', 'alice_wp'], zones: ['alice.example.test'] })
     expect(await readdir(join(root, 'alice'))).toEqual([built.file])
     expect(await readFile(join(root, 'alice', built.file), 'utf8')).toBe('gz')
@@ -39,17 +39,27 @@ describe('server backup archive build', () => {
   })
   it('writes a Zstandard schedule as one .tar.zst through zstd level 3, one thread, with the frame checksum', async () => {
     const root = await temp(), run = fakeRun(), dump = vi.fn(async () => ({ bytes: 1, sha256: SHA }))
-    const built = await buildServerBackupArchive({ root, account, databases: [], zones: [], excludeMail: false, compression: 'zstd', now: new Date('2026-10-28T02:00:00.000Z'), deps: { run, dump } })
+    const built = await buildServerBackupArchive({ root, account, databases: [], zones: [], excludeMail: false, compression: 'zstd', level: 3, now: new Date('2026-10-28T02:00:00.000Z'), deps: { run, dump } })
     expect(built.file).toBe(ZST)
     expect(await readdir(join(root, 'alice'))).toEqual([ZST])
     expect(run.mock.calls.at(-1)![0]).toMatchObject({ argv: ['/usr/bin/zstd', '-q', '-c', '-3', '--check', '--single-thread'], maxStdoutBytes: 2 * 1024 * 1024 * 1024 })
     expect(run.mock.calls.at(-1)![0].stdinPath).toMatch(/\/home\.tar$/)
-    const control = await buildControlSnapshot({ root, stateDir: '/var/lib/xpanel/state', copyDatabase: async path => { await writeFile(path, 'sqlite', { flag: 'wx' }) }, run: fakeRun(), compression: 'zstd', now: new Date('2026-10-28T02:00:00.000Z') })
+    const control = await buildControlSnapshot({ root, stateDir: '/var/lib/xpanel/state', copyDatabase: async path => { await writeFile(path, 'sqlite', { flag: 'wx' }) }, run: fakeRun(), compression: 'zstd', level: 3, now: new Date('2026-10-28T02:00:00.000Z') })
     expect(control.file).toBe('xpanel-control-20261028T020000Z.tar.zst')
+  })
+  it('compresses at the saved Tweak Settings level of each codec and refuses a level outside its range', async () => {
+    expect(backupCompressorArgv('gzip', 1)).toEqual(['/usr/bin/gzip', '-c', '-n', '-1'])
+    expect(backupCompressorArgv('zstd', 19)).toEqual(['/usr/bin/zstd', '-q', '-c', '-19', '--check', '--single-thread'])
+    for (const [codec, level] of [['gzip', 0], ['gzip', 10], ['zstd', 20], ['zstd', 2.5], ['gzip', -6]] as const) expect(() => backupCompressorArgv(codec, level)).toThrow(/outside its codec range/)
+    const root = await temp(), run = fakeRun(), dump = vi.fn(async () => ({ bytes: 1, sha256: SHA }))
+    await buildServerBackupArchive({ root, account, databases: [], zones: [], excludeMail: false, compression: 'gzip', level: 9, now: new Date('2026-10-28T02:00:00.000Z'), deps: { run, dump } })
+    expect(run.mock.calls.at(-1)![0].argv).toEqual(['/usr/bin/gzip', '-c', '-n', '-9'])
+    await expect(buildServerBackupArchive({ root, account, databases: [], zones: [], excludeMail: false, compression: 'zstd', level: 22, deps: { run: fakeRun(), dump } })).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(buildControlSnapshot({ root, stateDir: '/var/lib/xpanel/state', copyDatabase: async () => undefined, run: fakeRun(), compression: 'gzip', level: 0 })).rejects.toMatchObject({ code: 'VALIDATION' })
   })
   it('refuses foreign parts, keeps no partial archive on failure and never overwrites an archive', async () => {
     const root = await temp(), dump = vi.fn(async () => ({ bytes: 1, sha256: SHA }))
-    const base = { root, account, zones: [], excludeMail: false, compression: 'gzip' as const }
+    const base = { root, account, zones: [], excludeMail: false, compression: 'gzip' as const, level: 6 }
     await expect(buildServerBackupArchive({ ...base, databases: ['bob_wp'], deps: { run: fakeRun(), dump } })).rejects.toMatchObject({ code: 'VALIDATION' })
     await expect(buildServerBackupArchive({ ...base, databases: [], zones: [{ name: '../etc', content: '{}' }], deps: { run: fakeRun(), dump } })).rejects.toMatchObject({ code: 'VALIDATION' })
     await expect(buildServerBackupArchive({ ...base, databases: [], deps: { run: fakeRun({ create: { ...ok(), ok: false, code: 2, stderr: 'tar: /home/alice: Cannot open' } }), dump } })).rejects.toMatchObject({ code: 'CONFIG_TEST_FAILED', message: expect.stringContaining('Cannot open') })
@@ -62,7 +72,7 @@ describe('server backup archive build', () => {
   })
   it('takes the control snapshot from the state directory plus a database copy, outside every account directory', async () => {
     const root = await temp(), run = fakeRun(), copyDatabase = vi.fn(async (path: string) => { await writeFile(path, 'sqlite', { flag: 'wx' }) })
-    const built = await buildControlSnapshot({ root, stateDir: '/var/lib/xpanel/state', copyDatabase, run, compression: 'gzip', now: new Date('2026-10-28T02:00:00.000Z') })
+    const built = await buildControlSnapshot({ root, stateDir: '/var/lib/xpanel/state', copyDatabase, run, compression: 'gzip', level: 6, now: new Date('2026-10-28T02:00:00.000Z') })
     expect(built).toEqual({ file: 'xpanel-control-20261028T020000Z.tar.gz', bytes: 2 })
     expect(await readdir(join(root, '_control'))).toEqual([built.file])
     expect(run.mock.calls[0]![0]).toMatchObject({ argv: ['/usr/bin/tar', '--create', '--file=-', '--directory=/var/lib/xpanel/state', '--', '.'] })
@@ -136,7 +146,7 @@ describe('archive listing and manifest', () => {
     const root = await temp(), home = join(root, 'home'), dir = join(root, 'alice')
     await mkdir(home); await mkdir(dir); await writeFile(join(home, 'index.php'), '<?php echo "hello";\n'.repeat(200))
     expect(await runBackupCommand({ argv: ['/usr/bin/tar', '--create', '--file=-', `--directory=${home}`, '--', '.'], stdoutPath: join(root, 'home.tar'), maxStdoutBytes: 1 << 20 })).toMatchObject({ ok: true })
-    expect(await runBackupCommand({ argv: BACKUP_COMPRESSOR.zstd, stdinPath: join(root, 'home.tar'), stdoutPath: join(dir, ZST), maxStdoutBytes: 1 << 20 })).toMatchObject({ ok: true })
+    expect(await runBackupCommand({ argv: backupCompressorArgv('zstd', 3), stdinPath: join(root, 'home.tar'), stdoutPath: join(dir, ZST), maxStdoutBytes: 1 << 20 })).toMatchObject({ ok: true })
     expect(await listServerBackupArchive({ root, account, file: ZST, run: runBackupCommand })).toMatchObject({ members: 2, manifest: false })
     const bytes = await readFile(join(dir, ZST)), tar = await readFile(join(root, 'home.tar'))
     const read = async (): Promise<Buffer> => { const parts: Buffer[] = []; for await (const chunk of zstdDecompressed((async function* () { yield bytes })())) parts.push(chunk); return Buffer.concat(parts) }

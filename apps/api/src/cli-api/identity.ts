@@ -22,7 +22,8 @@ export const CLI_COMMAND: Readonly<Record<'xpanel' | 'xwhm', string>> = Object.f
 export const cliApiAllowsRoute = (pathname: string, method: string): boolean => {
   if (!pathname.startsWith('/api/')) return false
   if (pathname.startsWith('/api/auth/')) return pathname === '/api/auth/me' && method === 'GET'
-  return !/^\/api\/(?:handoff|integrations)(?:\/|$)/.test(pathname)
+  // the edge's Web Disk and calendar verifier answers the management ingress only
+  return !/^\/api\/(?:handoff|integrations|dav)(?:\/|$)/.test(pathname)
 }
 
 const enabledPrincipal = (record: PrincipalRecord | null, kind: PrincipalRecord['kind']): PrincipalRecord => {

@@ -12,7 +12,7 @@ const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 const status = { observedAt: '2026-10-28T10:00:00.000Z', revision: 'a'.repeat(64), postfix: 'read',
   engine: { engine: 'rspamd', unit: 'rspamd.service', spamAssassinDir: null, wiring: 'not-wired', units: { 'rspamd.service': 'active', 'spamassassin.service': 'not-installed', 'spamd.service': 'not-installed' } },
-  sections: { spam: 'applied', relay: 'applied', bcc: 'not-saved', marketing: 'not-saved', server: 'not-saved', routing: 'not-saved' }, archive: { accounts: 0, state: 'not-saved', conflicts: [] } }
+  sections: { spam: 'applied', relay: 'applied', bcc: 'not-saved', marketing: 'not-saved', server: 'not-saved', routing: 'not-saved', spamd: 'not-saved', country: 'not-saved', advanced: 'not-saved', greylist: 'not-saved', outbound: 'not-saved' }, archive: { accounts: 0, state: 'not-saved', conflicts: [] }, geoip: { installed: false, month: null } }
 
 async function fixture(options: { host?: boolean; lists?: unknown; reconcile?: string; apply?: Record<string, unknown> } = {}) {
   const state = await createTestStateStore(); cleanup.push(() => state.close())
@@ -35,8 +35,8 @@ async function fixture(options: { host?: boolean; lists?: unknown; reconcile?: s
     if (path.endsWith('/archive')) return { observedAt: status.observedAt, revision: 'a'.repeat(64), postfix: 'read', state: 'applied', jobsAvailable: true, domains: [{ domain: 'archown.example.test', admission: 'eligible', conflicts: [] }] }
     if (path.endsWith('/retention')) return { job: { id: 'job-1', kind: 'mail.archive.retention', status: 'queued' } }
     if (path.endsWith('/mailboxes')) return { observedAt: status.observedAt, engine: { engine: 'rspamd', wiring: 'wired' }, jobsAvailable: true,
-      mailboxes: [{ mailbox: 'archive@archown.example.test', preference: 'saved', native: 'pending', effects: { allowlist: true, filtering: false, score: false, blocklist: true, spamBox: false } }] }
-    if (path.endsWith('/lists')) return options.lists ?? { observedAt: status.observedAt, aliases: 'read', lists: [{ address: 'team@archown.example.test', members: 2, state: 'delivering' }, { address: 'mods@archown.example.test', members: 1, state: 'restricted' }] }
+      mailboxes: [{ mailbox: 'archive@archown.example.test', preference: 'saved', native: 'pending', effects: { allowlist: true, filtering: false, score: false, blocklist: true, spamBox: false, autoDelete: false } }] }
+    if (path.endsWith('/lists')) return options.lists ?? { observedAt: status.observedAt, aliases: 'read', moderation: true, lists: [{ address: 'team@archown.example.test', members: 2, state: 'delivering' }, { address: 'mods@archown.example.test', members: 1, state: 'restricted' }] }
     if (path.endsWith('/learn')) return { job: { id: 'job-3', kind: 'mail.spam.learn', status: 'queued' } }
     expect(body).toMatchObject({ revision: expect.stringMatching(/^[0-9a-f]{64}$/) })
     return { outcome: 'applied', revision: (body as { revision: string }).revision, verificationRequired: false, spam: 'not-saved', mailboxes: 'not-saved', reloads: ['postfix'], reconcile: options.reconcile ?? 'applied', ...options.apply }
@@ -166,7 +166,7 @@ describe('account mail tools workspace', () => {
     const f = await fixture()
     f.as(f.caller('user'))
     const view = await f.call('/api/account/mailx/mail-tools')
-    expect(view.body).toMatchObject({ host: 'connected', engine: { engine: 'rspamd' }, capabilities: { learning: true, boxTrapper: false },
+    expect(view.body).toMatchObject({ host: 'connected', engine: { engine: 'rspamd' }, capabilities: { learning: true },
       mailboxes: [{ mailbox: 'archive@archown.example.test', native: 'pending', effects: { blocklist: true } }] })
     const learn = await f.call('/api/account/mailx/mail-tools/learn', 'POST', { mailbox: 'archive@archown.example.test', direction: 'ham', expectedRevision: view.body.compositeRevision })
     expect(learn).toMatchObject({ status: 202, body: { job: { id: 'job-3' } } })
@@ -180,7 +180,7 @@ describe('account mail tools workspace', () => {
     const f = await fixture()
     f.as(f.caller('user'))
     const view = await f.call('/api/account/mailx/mail-tools/lists')
-    expect(view.body).toMatchObject({ host: 'connected', aliases: 'read', capabilities: { moderation: false, archive: false },
+    expect(view.body).toMatchObject({ host: 'connected', aliases: 'read', capabilities: { moderation: true, archive: false },
       lists: [{ address: 'team@archown.example.test', members: 2, state: 'delivering' }, { address: 'mods@archown.example.test', state: 'restricted' }] })
     const applied = await f.call('/api/account/mailx/mail-tools/lists', 'POST', { expectedRevision: view.body.compositeRevision })
     expect(applied.body).toMatchObject({ application: { outcome: 'applied', reconcile: 'applied' }, lists: [{ state: 'delivering' }, { state: 'restricted' }] })

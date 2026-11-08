@@ -14,7 +14,7 @@ function runtimeTemplates(kind: Kind): string {
   const slots = kind === 'apps' ? `${technical('name')}${plain('runtime')}${technical('address')}${plain('state')}${plain('health')}`
     : kind === 'containers' ? `${technical('name')}${technical('image')}${plain('state')}${plain('since')}${plain('ports')}`
       : `${plain('name')}${plain('state')}${plain('version')}${technical('socket')}${plain('memory')}`
-  return `<template data-xp-template="runtime-${kind}-row"><tr>${slots}${plain('actions')}</tr></template><template data-xp-template="runtime-empty-row"><tr><td colspan="6" data-xp-slot="message"></td></tr></template><template data-xp-template="runtime-actions"><div class="xp-acct-tool__actions"></div></template><template data-xp-template="runtime-action"><button type="button" class="xp-btn xp-btn--ghost" data-xp-slot="label" disabled></button></template><template data-xp-template="runtime-chip"><span data-state-chip="unavailable" data-xp-slot="label"></span></template><template data-xp-template="runtime-env-row"><tr><td><input class="xp-input" dir="ltr" maxlength="64" data-xp-slot="name"></td><td><input class="xp-input" dir="ltr" maxlength="1024" data-xp-slot="value"></td><td><button type="button" class="xp-btn xp-btn--ghost" data-xp-slot="remove"></button></td></tr></template><template data-xp-template="runtime-env-empty"><tr><td colspan="3" data-xp-slot="message"></td></tr></template>`
+  return `<template data-xp-template="runtime-${kind}-row"><tr>${slots}${plain('actions')}</tr></template>${kind === 'containers' ? `<template data-xp-template="runtime-stack-row"><tr>${technical('name')}${plain('services')}${technical('ports')}${plain('actions')}</tr></template>` : ''}<template data-xp-template="runtime-empty-row"><tr><td colspan="6" data-xp-slot="message"></td></tr></template><template data-xp-template="runtime-actions"><div class="xp-acct-tool__actions"></div></template><template data-xp-template="runtime-action"><button type="button" class="xp-btn xp-btn--ghost" data-xp-slot="label" disabled></button></template><template data-xp-template="runtime-chip"><span data-state-chip="unavailable" data-xp-slot="label"></span></template><template data-xp-template="runtime-env-row"><tr><td><input class="xp-input" dir="ltr" maxlength="64" data-xp-slot="name"></td><td><input class="xp-input" dir="ltr" maxlength="1024" data-xp-slot="value"></td><td><button type="button" class="xp-btn xp-btn--ghost" data-xp-slot="remove"></button></td></tr></template><template data-xp-template="runtime-env-empty"><tr><td colspan="3" data-xp-slot="message"></td></tr></template>`
 }
 const status = (text: string): string => `<p data-runtime-status role="status" data-state="unread">${text}</p>`
 const table = (heads: string[], key: string, empty: string): string => `<div class="xp-acct-tool__table"><table><thead><tr>${heads.map(h => `<th scope="col">${h}</th>`).join('')}</tr></thead><tbody data-runtime-${key}><tr><td colspan="${heads.length}">${empty}</td></tr></tbody></table></div>`
@@ -34,6 +34,19 @@ export function renderRuntimeAppsSection(input: { lang: Locale; canManage: boole
     ${table([t('Application'), t('Runtime'), t('Served at'), t('State'), t('Health'), t('Actions')], 'apps', t('No application has been read.'))}
     <div class="xp-acct-tool__actions"><button type="button" class="xp-btn" data-runtime-refresh${input.canManage ? '' : ' disabled'}>${t('Read applications')}</button>${button('app-new', t('Create application'), true)}</div>
   </section>
+  <section class="xp-acct-tool__card" aria-labelledby="runtime-web-heading"><h2 id="runtime-web-heading">${t('Web app from a source')}</h2>
+    <p>${t('Stage a Git repository or an archive from your home directory into apps/name. Staging serves nothing: review the detected settings, then deploy.')}</p>
+    <div class="xp-acct-tool__fields">
+      ${field('runtime-web-name', t('Application name'), textInput('runtime-web-name', 'web-name', ' maxlength="32"'), t('A name already in use gets a number added.'))}
+      ${field('runtime-web-kind', t('Source'), `<select id="runtime-web-kind" class="xp-select" data-runtime-input="web-kind" disabled><option value="git">${t('Git repository')}</option><option value="archive">${t('Archive in my home directory')}</option></select>`)}
+      ${field('runtime-web-url', t('Repository URL or archive path'), textInput('runtime-web-url', 'web-url', ' maxlength="512"'), t('https:// or ssh://. Private repositories use your account SSH key; a URL cannot carry a password.'))}
+      ${field('runtime-web-branch', t('Branch'), textInput('runtime-web-branch', 'web-branch', ' maxlength="128"'), t('Optional. The default branch is used when empty.'))}
+      ${field('runtime-web-subfolder', t('App subfolder'), textInput('runtime-web-subfolder', 'web-subfolder', ' maxlength="255"'), t('Optional, for a repository that holds several projects.'))}
+      ${field('runtime-web-domain', t('Domain'), '<select id="runtime-web-domain" class="xp-select" data-runtime-input="web-domain" disabled></select>')}
+      ${field('runtime-web-path', t('URL path'), textInput('runtime-web-path', 'web-path', ' maxlength="255" value="/"'))}
+    </div>
+    <div class="xp-acct-tool__actions">${button('web-stage', t('Stage application'), true)}</div>
+  </section>
   <section class="xp-acct-tool__card" aria-labelledby="runtime-setup-heading" data-runtime-setup hidden><h2 id="runtime-setup-heading">${t('Application setup')}</h2>
     <div role="tablist" aria-label="${t('Application setup')}">${[['settings', t('Settings')], ['variables', t('Variables')], ['deploy', t('Deployment')], ['logs', t('Logs')]].map(([key, label], i) => `<button type="button" role="tab" class="xp-btn xp-btn--ghost" id="runtime-tab-${key}" aria-controls="runtime-panel-${key}" aria-selected="${i === 0}" data-runtime-tab="${key}">${label}</button>`).join('')}</div>
     <div role="tabpanel" id="runtime-panel-settings" aria-labelledby="runtime-tab-settings" data-runtime-panel="settings"><div class="xp-acct-tool__fields">
@@ -43,7 +56,14 @@ export function renderRuntimeAppsSection(input: { lang: Locale; canManage: boole
       ${field('runtime-startup', t('Startup file'), textInput('runtime-startup', 'startup', ' maxlength="255"'), t('Node.js: the file that listens on PORT. Python: a file that defines application. Ruby: config.ru with puma in the Gemfile.'))}
       ${field('runtime-domain', t('Domain'), '<select id="runtime-domain" class="xp-select" data-runtime-input="domain" disabled></select>')}
       ${field('runtime-path', t('URL path'), textInput('runtime-path', 'path', ' maxlength="255" value="/"'), t('/ serves the whole site; a path such as /api serves only that path.'))}
-    </div><p class="xp-help">${t('The app runs as your account and counts toward your plan limits. A new application is saved stopped: install its dependencies, then start it.')}</p>
+    </div><div data-runtime-webapp hidden><p class="xp-help" data-runtime-detected role="status"></p><div class="xp-acct-tool__fields">
+      ${field('runtime-web-category', t('Category'), `<select id="runtime-web-category" class="xp-select" data-runtime-input="web-category" disabled><option value="server">${t('Server application')}</option><option value="static">${t('Static site')}</option></select>`)}
+      ${field('runtime-web-framework', t('Framework'), textInput('runtime-web-framework', 'web-framework', ' maxlength="32"'))}
+      ${field('runtime-web-build', t('Build command'), textInput('runtime-web-build', 'web-build', ' maxlength="1024"'), t('Runs as your account after dependencies are installed.'))}
+      ${field('runtime-web-start', t('Start command'), textInput('runtime-web-start', 'web-start', ' maxlength="1024"'), t('Node.js only. It must listen on the path in PORT.'))}
+      ${field('runtime-web-output', t('Output directory'), textInput('runtime-web-output', 'web-output', ' maxlength="255"'), t('Static sites only. Relative to the application root; . means the root itself.'))}
+    </div></div>
+<p class="xp-help">${t('The app runs as your account and counts toward your plan limits. A new application is saved stopped: install its dependencies, then start it.')}</p>
     <div class="xp-acct-tool__actions">${button('app-save', t('Save changes'), true)}</div></div>
     <div role="tabpanel" id="runtime-panel-variables" aria-labelledby="runtime-tab-variables" data-runtime-panel="variables" hidden><p>${t('Passed to the application process when it starts. Save the application to apply them.')}</p>${envEditor([t('Name'), t('Value'), t('Actions')], t('No variables.'), t('Add variable'))}</div>
     <div role="tabpanel" id="runtime-panel-deploy" aria-labelledby="runtime-tab-deploy" data-runtime-panel="deploy" hidden><p>${t('Installed in the application root as your account with the runtime’s own tool: npm install, pip install -r requirements.txt into .venv, or bundle install.')}</p>
@@ -72,7 +92,11 @@ export function renderAccountContainersWorkspace(input: { lang: Locale; canManag
       ${field('runtime-ctr-image', t('Image'), textInput('runtime-ctr-image', 'image', ' maxlength="255" placeholder="docker.io/library/redis:7"'), t('From docker.io, quay.io or ghcr.io, with a tag or digest.'))}</div>
     ${envEditor([t('Name'), t('Value'), t('Actions')], t('No variables.'), t('Add variable'))}
     <div class="xp-acct-tool__actions">${button('ctr-run', t('Run container'), true)}</div>
-    <p class="xp-help">${t('Compose stacks, one-click container apps and publishing a container on a domain are unavailable. Nothing else is created here.')}</p>
+    <p class="xp-help">${t('Compose stacks and one-click container apps are deployed by the server administrator.')}</p>
+  </section>
+  <section class="xp-acct-tool__card" aria-labelledby="runtime-stacks-heading"><h2 id="runtime-stacks-heading">${t('Stacks from your administrator')}</h2>
+    ${table([t('Stack'), t('Services'), t('Ports'), t('Logs')], 'stacks', t('No stacks have been read.'))}
+    <p class="xp-help">${t('These run as your account and count toward its limits. Only the server administrator can change them; their logs are available here.')}</p>
   </section>
   <section class="xp-acct-tool__card" aria-labelledby="runtime-ctr-log-heading"><h2 id="runtime-ctr-log-heading">${t('Container log')}</h2><pre data-runtime-log dir="ltr">${t('No log has been read.')}</pre></section>`)
 }

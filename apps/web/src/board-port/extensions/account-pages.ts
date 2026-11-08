@@ -1,12 +1,18 @@
+import { renderServiceUsersManager } from '../service-users-workspace.ts'
+import { renderEmailDiskUsageCard } from '../email-disk-usage-workspace.ts'
 import type { Account, Domain, Plan, Principal, ServiceUser } from '@xpanel/core'
 import { translator, type Locale } from '../../i18n.ts'
 import { renderAccountForwarders } from './account-forwarders.ts'
 import { renderAccountFilters } from './account-filters.ts'
 import { renderAccountMailingLists } from './account-mailing-lists.ts'
+import { renderClassicListModerationSection } from '../list-moderation-section.ts'
 import { renderAccountSpamSettings } from './account-spam.ts'
 import { renderAccountQuarantine } from './account-quarantine.ts'
 import { renderAccountContact } from './account-contact.ts'
+import { renderPersonalPreferencesCard } from '../personal-preferences-card.ts'
 import { renderMailxMailToolsWorkspace } from '../mailx-mail-tools-workspace.ts'
+import { renderClassicMailCards } from '../mail-cards.ts'
+import { mailCardsFor } from '../../mail-cards.ts'
 import { extensionCard, extensionCollection, extensionDisabled, extensionFact, extensionFrame, extensionText, type ExtensionRouteSpec, type ReadCollection } from './shared.ts'
 
 export const accountPageRouteSpecs: readonly ExtensionRouteSpec[] = [
@@ -41,6 +47,7 @@ export interface AccountPagesExtensionInput {
   plan?: Pick<Plan, 'id' | 'caps'>
   theme?: 'light' | 'dark'
   mutationsQualified?: boolean
+  boxTrapperQualified?: boolean
   domains?: ReadCollection<Pick<Domain, 'accountId' | 'name'>>
   users?: ReadCollection<Pick<ServiceUser, 'accountId' | 'login' | 'services'>>
   collections?: Readonly<Partial<Record<string, ReadCollection<AccountCollectionEntry>>>>
@@ -55,19 +62,21 @@ export const renderAccountPagesExtension = (input: AccountPagesExtensionInput): 
   if (!spec || principal.kind !== 'user' || principal.accountId !== account.id || account.status !== 'active') return ''
   const plan = input.plan?.id === account.planId ? input.plan : undefined
   let body: string
+  const mailCards = (): string => renderClassicMailCards(mailCardsFor(route, translator(locale), { canRead: true, canAct: () => input.mutationsQualified === true, domains: input.domains?.state === 'read' ? input.domains.items.filter(domain => domain.accountId === account.id).map(domain => domain.name) : [] }), locale)
+  if (route === '/email/deliverability') return extensionFrame(locale, spec.title, mailCards())
   if (route === '/email/forwarders') {
     const domains = input.domains?.state === 'read' ? input.domains.items.filter(domain => domain.accountId === account.id) : []
     const summary = extensionCard(locale, msgid('Account plan'), `<dl class="xp-extension__facts">${extensionFact(locale, msgid('Plan limit'), plan?.caps.forwarders === undefined ? undefined : String(plan.caps.forwarders), true)}</dl>`)
     const mailboxes = input.users?.state === 'read' ? input.users.items.filter(user => user.accountId === account.id && user.services.email).map(user => user.login) : undefined
     return extensionFrame(locale, spec.title, `${summary}${renderAccountForwarders({ lang: locale, domains, canManage: input.mutationsQualified === true && input.domains?.state === 'read',
-      ...(mailboxes !== undefined ? { mailboxes } : {}) })}`)
+      ...(mailboxes !== undefined ? { mailboxes } : {}) })}${mailCards()}`)
   } else if (route === '/email/filters') {
     const mailboxes = input.users?.state === 'read' ? input.users.items.filter(user => user.accountId === account.id && user.services.email).map(user => ({ login: user.login })) : undefined
     return extensionFrame(locale, spec.title, renderAccountFilters({ lang: locale, expectedAccountId: account.id,
       canManage: input.mutationsQualified === true, ...(mailboxes !== undefined ? { mailboxes } : {}),
-    }))
+    }) + renderEmailDiskUsageCard({ locale, canManage: input.mutationsQualified === true, mailboxes: mailboxes?.map(mailbox => mailbox.login) ?? [] }) + mailCards())
   } else if (route === '/email/spam-filters') {
-    return extensionFrame(locale, spec.title, renderAccountSpamSettings({ lang: locale, expectedAccountId: account.id, canManage: input.mutationsQualified === true }) + renderMailxMailToolsWorkspace({ locale, section: 'spam', canManage: input.mutationsQualified === true }))
+    return extensionFrame(locale, spec.title, renderAccountSpamSettings({ lang: locale, expectedAccountId: account.id, canManage: input.mutationsQualified === true }) + renderMailxMailToolsWorkspace({ locale, section: 'spam', canManage: input.mutationsQualified === true, boxTrapper: input.boxTrapperQualified === true }) + mailCards())
   } else if (route === '/email/spam-quarantine') {
     const mailboxes = input.users?.state === 'read' ? input.users.items.filter(user => user.accountId === account.id && user.services.email).map(user => user.login) : undefined
     return extensionFrame(locale, spec.title, renderAccountQuarantine({ lang: locale, expectedAccountId: account.id,
@@ -75,16 +84,15 @@ export const renderAccountPagesExtension = (input: AccountPagesExtensionInput): 
     }))
   } else if (route === '/email/mailing-lists') {
     const domains = input.domains?.state === 'read' ? input.domains.items.filter(domain => domain.accountId === account.id).map(domain => domain.name) : []
-    return extensionFrame(locale, spec.title, renderAccountMailingLists({ lang: locale, expectedAccountId: account.id, canManage: input.mutationsQualified === true && input.domains?.state === 'read', domains }) + renderMailxMailToolsWorkspace({ locale, section: 'lists', canManage: input.mutationsQualified === true }))
+    return extensionFrame(locale, spec.title, renderAccountMailingLists({ lang: locale, expectedAccountId: account.id, canManage: input.mutationsQualified === true && input.domains?.state === 'read', domains }) + renderMailxMailToolsWorkspace({ locale, section: 'lists', canManage: input.mutationsQualified === true }) + renderClassicListModerationSection(locale, input.mutationsQualified === true))
   } else if (route === '/preferences') {
     const appearance = extensionCard(locale, msgid('Appearance'), `<dl class="xp-extension__facts">${extensionFact(locale, msgid('Appearance'), input.theme === undefined ? undefined : extensionText(locale, input.theme === 'dark' ? msgid('Dark') : msgid('Light')))}</dl>`)
-    return extensionFrame(locale, spec.title, `${renderAccountContact({ lang: locale, expectedAccountId: account.id, canManage: input.mutationsQualified === true })}${appearance}`)
+    return extensionFrame(locale, spec.title, `${renderAccountContact({ lang: locale, expectedAccountId: account.id, canManage: input.mutationsQualified === true })}${renderPersonalPreferencesCard(locale, ['position', 'notifications'])}${appearance}`)
   } else if (route === '/preferences/language') {
-    body = `<dl class="xp-extension__facts">${extensionFact(locale, msgid('Current language'), translator(locale)(msgctxt('account-pages', 'English')))}${extensionFact(locale, msgid('Digits'), '0-9', true)}</dl><p>${extensionText(locale, msgid('Use the workspace language control to change the interface language.'))}</p>`
+    body = `<dl class="xp-extension__facts">${extensionFact(locale, msgid('Current language'), translator(locale)(msgctxt('account-pages', 'English')))}${extensionFact(locale, msgid('Digits'), '0-9', true)}</dl>${renderPersonalPreferencesCard(locale, ['language'])}<p>${extensionText(locale, msgid('Use the workspace language control to change the interface language.'))}</p>`
   } else if (route === '/preferences/users') {
-    const users = input.users?.state === 'read' ? { state: 'read' as const, items: input.users.items.filter(user => user.accountId === account.id) } : undefined
-    body = extensionCollection(locale, users, msgid('The read returned no service users.'), user => `<dl class="xp-extension__facts">${extensionFact(locale, msgid('Login'), user.login, true)}${extensionFact(locale, msgid('Email enabled'), extensionText(locale, user.services.email ? msgid('Yes') : msgid('No')))}</dl>`)
-  } else if (route === '/health' || route === '/email/deliverability') {
+    body = renderServiceUsersManager({ locale, canManage: input.mutationsQualified === true, owner: input.principal.username })
+  } else if (route === '/health') {
     const domains = input.domains?.state === 'read' ? { state: 'read' as const, items: input.domains.items.filter(domain => domain.accountId === account.id) } : undefined
     body = `<p data-check-state="unread">${extensionText(locale, msgid('Service check results have not been read. Domain records do not establish DNS, TLS, SMTP or delivery health.'))}</p>${extensionCollection(locale, domains, msgid('The read returned no domains.'), domain => `<dl class="xp-extension__facts">${extensionFact(locale, msgid('Domain'), domain.name, true)}${extensionFact(locale, 'SPF / DKIM / DMARC', extensionText(locale, msgctxt('account-pages', 'Not read')))}${extensionFact(locale, msgid('Service health'), extensionText(locale, msgctxt('account-pages', 'Not read')))}</dl>`)}${extensionDisabled(locale, msgid('Run checks'))}`
   } else {

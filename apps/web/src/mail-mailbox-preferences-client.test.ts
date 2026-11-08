@@ -7,7 +7,7 @@ const MAILBOX = 'alice@example.com', R1 = 'a'.repeat(64), R2 = 'b'.repeat(64), I
 const tick = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const saved = { mailbox: MAILBOX, density: 'compact', messagesPerPage: 100, replyIdentityId: ID, dateFormat: 'local', updatedAt: '2026-10-27T12:00:00.000Z' }
 const view = (over: Record<string, unknown> = {}) => ({ context: { mailbox: MAILBOX }, preferences: null, revision: R1, identities: [{ id: ID, displayName: 'Alice Sales', email: 'sales@example.com' }],
-  plusAddressing: { state: 'not-supported', delimiter: null, source: 'rendered-postfix-local-delivery' }, application: { status: 'saved_only', applied: false }, review: null, ...over })
+  plusAddressing: { state: 'not-supported', delimiter: null, source: 'rendered-postfix-local-delivery' }, application: { status: 'applied_on_next_load', applied: true }, review: null, ...over })
 const boot = (html: string, request?: (method: string, path: string, body?: unknown) => Promise<unknown>, ask = vi.fn(async () => true), ar = false) => {
   document.documentElement.lang = ar ? 'ar' : 'en'; document.documentElement.dir = ar ? 'rtl' : 'ltr'
   document.body.innerHTML = html

@@ -45,6 +45,10 @@ describe('extended routes never invent host data or success', { tags: ['unit'] }
     ['POST', '/api/git/alice/repos'],
     ['POST', '/api/git/alice/repos/storefront/deploy'],
     ['DELETE', '/api/git/alice/repos/storefront'],
+    ['GET', `/api/web-features/${account.id}/web-disk`],
+    ['PUT', `/api/web-features/${account.id}/web-disk`],
+    ['GET', '/api/mail/caldav-carddav'],
+    ['PUT', '/api/mail/caldav-carddav'],
   ])('serves no fabricated %s %s', async (method, path) => {
     const host = fixture()
     expect(await host.request(method, path, method === 'GET' ? undefined : {})).toBeNull()
@@ -61,40 +65,6 @@ describe('extended routes never invent host data or success', { tags: ['unit'] }
     expect(host.emitAudit).not.toHaveBeenCalled()
     expect(host.writes).not.toHaveBeenCalled()
   })
-})
-
-describe('web disk input reaches the WebDAV alias line only after strict validation', { tags: ['unit'] }, () => {
-  const path = `/api/web-features/${account.id}/web-disk`
-
-  it('compiles a validated relative root and a read-only method set', async () => {
-    const host = fixture()
-    const response = await host.request('PUT', path, { enabled: true, rootPath: 'public_html/dav', readOnly: true })
-    const { config } = await response!.json() as { config: { compiledConfig: string; rootPath: string } }
-    expect(config.rootPath).toBe('public_html/dav')
-    expect(config.compiledConfig).toContain('  alias /home/alice/public_html/dav/;')
-    expect(config.compiledConfig).toContain('  dav_methods off;')
-    expect(host.writes).toHaveBeenCalledOnce()
-  })
-
-  it.each([
-    ['newline', { rootPath: 'public_html;\n}\nlocation / {' }],
-    ['carriage return', { rootPath: 'public_html\r' }],
-    ['double quote', { rootPath: 'public_html"' }],
-    ['single quote', { rootPath: "public_html'" }],
-    ['parent traversal', { rootPath: '../root' }],
-    ['nested traversal', { rootPath: 'public_html/../../etc' }],
-    ['absolute path', { rootPath: '/etc' }],
-    ['hidden directory', { rootPath: '.ssh' }],
-    ['control character', { rootPath: 'public\u0007html' }],
-    ['NUL byte', { rootPath: 'public_html\u0000' }],
-    ['space and semicolon', { rootPath: 'public_html; deny all' }],
-    ['non-string root', { rootPath: ['public_html'] }],
-    ['non-boolean flag', { readOnly: 'yes' }],
-    ['server-derived port', { port: 80 }],
-    ['server-derived endpoint', { endpointUrl: 'https://evil.example' }],
-    ['compiled text', { compiledConfig: 'location / {}' }],
-    ['foreign account id', { accountId: '00000000-0000-4000-8000-000000000002' }],
-  ])('rejects %s without writing', rejectsWithoutWriting(path))
 })
 
 describe('hotlink protection input reaches nginx and Apache lines only after strict validation', { tags: ['unit'] }, () => {

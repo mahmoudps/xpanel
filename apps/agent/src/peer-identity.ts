@@ -16,11 +16,22 @@ export const AGENT_ROUTE_TIMEOUT_MS: ReadonlyMap<string, number> = new Map([
   ['/host/account-provisioning', 180_000],
   // The agent bounds the quota accounting scan at 240 s; this leaves room for remount and verification.
   ['/host/quota/initialize', 300_000],
+  // db-maintenance.ts bounds CHECK/REPAIR TABLE at 150 s.
+  ['/host/databases/maintenance', 180_000],
+  // db-admin-tools.ts stops starting accounts at 240 s; one started account still finishes.
+  ['/host/databases/access-hosts/push', 300_000],
+  // mail-trace.ts: up to six bounded DNS rounds and three bounded SMTP greetings.
+  ['/host/mail/trace', 60_000],
+  // dns-cluster-sync.ts: one bounded pass per member, each ending in a reload on the member.
+  ['/host/dns-cluster/sync', 300_000],
+  // db-profiles.ts: a connect timeout, then the live client check.
+  ['/host/db-profiles/activate', 60_000],
 ])
 const ACCOUNT_FILES_ROUTE = /^\/accounts\/[a-z][a-z0-9]{0,15}\/files$/
+const ACCOUNT_DB_MAINTENANCE_ROUTE = /^\/accounts\/[a-z][a-z0-9]{0,15}\/databases\/maintenance$/
 /** Account file requests include archive operations, whose confined worker may run 120 s before it answers. */
 export const agentRouteTimeoutMs = (pathname: string): number | undefined =>
-  AGENT_ROUTE_TIMEOUT_MS.get(pathname) ?? (ACCOUNT_FILES_ROUTE.test(pathname) ? 150_000 : undefined)
+  AGENT_ROUTE_TIMEOUT_MS.get(pathname) ?? (ACCOUNT_FILES_ROUTE.test(pathname) ? 150_000 : ACCOUNT_DB_MAINTENANCE_ROUTE.test(pathname) ? 180_000 : undefined)
 
 export interface KernelPeerCredentials {
   readonly uid: number

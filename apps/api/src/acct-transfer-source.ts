@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { fail } from '@xpanel/core'
 import type { Account, Domain, Plan, ServiceUser } from '@xpanel/core'
 import type { StateSnapshot } from '@xpanel/state'
+import { parseAccountEdgeState, type AccountEdgeState } from '../../agent/src/account-edge.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
 import { projectDisk } from './monitoring-workspace.ts'
@@ -76,22 +77,25 @@ export interface TransferArtifact { name: string; bytes: number; sha256: string 
  * sent once over the pinned channel and never journaled on either side.
  */
 export interface TransferAccountBundle {
-  account: { username: string; home: string; primaryDomain: string; contactEmail: string; shell: Account['shell']; ipv4: string }
+  /** limits and logs are the account's own overrides and archive settings; absent keeps the package values and server defaults. */
+  account: { username: string; home: string; primaryDomain: string; contactEmail: string; shell: Account['shell']; ipv4: string; limits?: Account['limits']; logs?: Account['logs'] }
   plan: Omit<Plan, 'id' | 'ownerId' | 'featureListId'>
-  domains: { name: string; kind: Domain['kind']; parent: string | null; docRoot: string; siteType: Domain['siteType']; upstream: string | null; redirect: Domain['redirect']; php: Domain['php']; wildcard: boolean; indexFiles?: string[] }[]
+  domains: { name: string; kind: Domain['kind']; parent: string | null; docRoot: string; siteType: Domain['siteType']; upstream: string | null; redirect: Domain['redirect']; php: Domain['php']; wildcard: boolean; site?: Domain['site']; indexFiles?: string[] }[]
   databases: { name: string; artifact: string }[]
   databaseUsers: { name: string; authPlugin: 'mysql_native_password' | 'ed25519'; authString: string; grants: { database: string; privileges: string[] }[] }[]
-  mailboxes: { login: string; services: ServiceUser['services']; mailboxQuotaMb: ServiceUser['mailboxQuotaMb']; ftpDir: string; passwordHash: string }[]
+  mailboxes: { id: string; login: string; services: ServiceUser['services']; mailboxQuotaMb: ServiceUser['mailboxQuotaMb']; ftpDir: string; passwordHash: string }[]
   zones: { name: string; records: { name: string; type: string; ttl: number; content: string; priority: number | null }[] }[]
   cron: { schedule: string; command: string; comment: string; enabled: boolean; maxRuntimeSec?: number }[]
   certificates: { names: string[]; cert: string; key: string }[]
+  /** IP Blocker, cache and Leech Protection files, keyed by account id on each server; absent when nothing is saved. */
+  edge?: AccountEdgeState
 }
 export interface TransferPackageManifest { source: string; username: string; package: string; createdAt: string; artifacts: TransferArtifact[]; bundle: TransferAccountBundle }
 
 /** HMAC-SHA256 under the API token both servers hold, over the manifest's JSON text as sent. */
 export const signTransferManifest = (token: string, manifest: unknown): string => createHmac('sha256', token).update(JSON.stringify(manifest)).digest('hex')
 
-export function buildTransferAccountBundle(snapshot: TransferPackageSnapshot, username: string, result: { databases: { name: string; artifact: string }[]; certificates: { names: string[]; cert: string; key: string }[] }): TransferAccountBundle {
+export function buildTransferAccountBundle(snapshot: TransferPackageSnapshot, username: string, result: { databases: { name: string; artifact: string }[]; certificates: { names: string[]; cert: string; key: string }[] }, edge: AccountEdgeState = {}): TransferAccountBundle {
   const account = snapshot.accounts.find(item => item.username === username) ?? unavailable('the account is no longer on this source')
   const plan = snapshot.plans.find(item => item.id === account.planId) ?? unavailable('the account plan is not saved here')
   const domains = snapshot.domains.filter(domain => domain.accountId === account.id)
@@ -99,16 +103,18 @@ export function buildTransferAccountBundle(snapshot: TransferPackageSnapshot, us
   const databases = new Map(snapshot.databases.filter(db => db.accountId === account.id).map(db => [db.id, db.name]))
   const { id: _id, ownerId: _owner, featureListId: _features, ...planFields } = plan
   return {
-    account: { username, home: account.home, primaryDomain: account.primaryDomain, contactEmail: account.contactEmail, shell: account.shell, ipv4: account.ipv4 },
+    account: { username, home: account.home, primaryDomain: account.primaryDomain, contactEmail: account.contactEmail, shell: account.shell, ipv4: account.ipv4,
+      ...(account.limits && { limits: account.limits }), ...(account.logs && { logs: account.logs }) },
     plan: planFields,
-    domains: domains.map(domain => ({ name: domain.name, kind: domain.kind, parent: domain.parentId ? byId.get(domain.parentId) ?? null : null, docRoot: domain.docRoot, siteType: domain.siteType, upstream: domain.upstream, redirect: domain.redirect, php: domain.php, wildcard: domain.wildcard, ...(domain.indexFiles ? { indexFiles: domain.indexFiles } : {}) })),
+    domains: domains.map(domain => ({ name: domain.name, kind: domain.kind, parent: domain.parentId ? byId.get(domain.parentId) ?? null : null, docRoot: domain.docRoot, siteType: domain.siteType, upstream: domain.upstream, redirect: domain.redirect, php: domain.php, wildcard: domain.wildcard, ...(domain.indexFiles ? { indexFiles: domain.indexFiles } : {}), ...(domain.site ? { site: domain.site } : {}) })),
     databases: result.databases,
     databaseUsers: snapshot.databaseUsers.filter(user => user.accountId === account.id).map(user => ({ name: user.name, authPlugin: user.authPlugin, authString: user.authString,
       grants: user.grants.flatMap(grant => databases.has(grant.databaseId) ? [{ database: databases.get(grant.databaseId)!, privileges: [...grant.privileges] }] : []) })),
-    mailboxes: snapshot.serviceUsers.filter(user => user.accountId === account.id).map(user => ({ login: user.login, services: user.services, mailboxQuotaMb: user.mailboxQuotaMb, ftpDir: user.ftpDir, passwordHash: user.passwordHash })),
+    mailboxes: snapshot.serviceUsers.filter(user => user.accountId === account.id).map(user => ({ id: user.id, login: user.login, services: user.services, mailboxQuotaMb: user.mailboxQuotaMb, ftpDir: user.ftpDir, passwordHash: user.passwordHash })),
     zones: snapshot.zones.filter(zone => zone.accountId === account.id).map(zone => ({ name: zone.name, records: zone.records.map(record => ({ name: record.name, type: record.type, ttl: record.ttl, content: record.content, priority: record.priority })) })),
     cron: snapshot.cronJobs.filter(job => job.accountId === account.id).map(job => ({ schedule: job.schedule, command: job.command, comment: job.comment, enabled: job.enabled, ...(job.maxRuntimeSec === undefined ? {} : { maxRuntimeSec: job.maxRuntimeSec }) })),
     certificates: result.certificates.map(cert => ({ names: cert.names, cert: cert.cert, key: cert.key })),
+    ...(Object.keys(edge).length ? { edge } : {}),
   }
 }
 
@@ -127,11 +133,24 @@ export function verifyTransferManifest(raw: unknown, token: string, expected: { 
   const names = new Set(artifacts.map(item => item.name))
   if (!names.has('home.tar.gz') || !object(b.account) || b.account.username !== expected.username || !object(b.plan) || !list(b.domains, 5000) || !list(b.databases, 10_000) || !list(b.databaseUsers, 10_000) || !list(b.mailboxes, 100_000) || !list(b.zones, 5000) || !list(b.cron, 1000) || !list(b.certificates, 1000)) return bad()
   if (!b.databases.every(db => object(db) && typeof db.artifact === 'string' && names.has(db.artifact)) || !b.certificates.every(cert => object(cert) && typeof cert.cert === 'string' && names.has(cert.cert) && typeof cert.key === 'string' && names.has(cert.key))) return bad()
+  if (b.edge !== undefined && !parseAccountEdgeState(b.edge)) return bad()
   return { source: m.source as string, username: m.username as string, package: m.package as string, createdAt: m.createdAt, artifacts, bundle: b as unknown as TransferAccountBundle }
+}
+
+/** {} for a whole copy; a live transfer asks for {"live":true}, then {"live":true,"base":"<first package>"} for the final sync. */
+export const parsePackageRequest = (text: string): { live?: true; base?: string } => {
+  let body: unknown
+  try { body = JSON.parse(text) } catch { body = null }
+  const object = !!body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : null, keys = object ? Object.keys(object).sort().join() : null
+  if (keys === '') return {}
+  if (keys === 'live' && object!.live === true) return { live: true }
+  if (keys === 'base,live' && object!.live === true && typeof object!.base === 'string' && /^[0-9a-f-]{36}$/.test(object!.base)) return { live: true, base: object!.base }
+  return fail('VALIDATION', 'the package request body is exactly {}', { stateChanged: false })
 }
 
 export interface TransferSourcePackagePorts extends Pick<ExtendedRouteHelpers, 'requireCaller' | 'assertRoot'> {
   readSnapshot: () => Promise<TransferPackageSnapshot>
+  readEdge: (accountId: string) => Promise<AccountEdgeState>
   /** callAgent: /transfers/tasks and /transfers/packages on this server's agent. */
   agent: (caller: AuthenticatedCaller, path: string, init?: { method?: string; body?: unknown }) => Promise<Response>
 }
@@ -162,8 +181,9 @@ export async function handleTransferSourcePackageRoute(req: Request, url: URL, m
     if (current.principal.id !== caller.principal.id || current.apiTokenId !== caller.apiTokenId) fail('FORBIDDEN', 'source package authority changed', { stateChanged: false })
   }
   if (id === undefined) {
-    if (req.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json' || (await req.text()).trim() !== '{}') return fail('VALIDATION', 'the package request body is exactly {}', { stateChanged: false })
-    const started = await ports.agent(caller, '/transfers/tasks', { method: 'POST', body: { kind: 'package', username } })
+    if (req.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') return fail('VALIDATION', 'the package request body is exactly {}', { stateChanged: false })
+    const requested = parsePackageRequest(await req.text())
+    const started = await ports.agent(caller, '/transfers/tasks', { method: 'POST', body: { kind: 'package', username, ...requested } })
     const reply = started.status === 202 ? await readReply(started) as { task?: { id?: unknown } } | null : (await started.body?.cancel().catch(() => undefined), null)
     if (typeof reply?.task?.id !== 'string') return unavailable('the account package could not be started on this source')
     return Response.json({ package: reply.task.id }, { status: 202, headers: { 'cache-control': 'no-store' } })
@@ -191,7 +211,7 @@ export async function handleTransferSourcePackageRoute(req: Request, url: URL, m
   if (task.state !== 'succeeded') return Response.json({ state: 'failed', error: typeof task.error === 'string' ? task.error : 'the package could not be created' }, { headers: { 'cache-control': 'no-store' } })
   const result = task.result as { artifacts: TransferArtifact[]; databases: { name: string; artifact: string }[]; certificates: { names: string[]; cert: string; key: string }[] }
   const manifest: TransferPackageManifest = { source, username, package: id, createdAt: typeof task.updatedAt === 'string' ? task.updatedAt : new Date().toISOString(), artifacts: result.artifacts,
-    bundle: buildTransferAccountBundle(await ports.readSnapshot(), username, result) }
+    bundle: buildTransferAccountBundle(await ports.readSnapshot(), username, result, await ports.readEdge(account.id)) }
   await fresh()
   return Response.json({ state: 'ready', manifest, signature: signTransferManifest(token, manifest) }, { headers: { 'cache-control': 'no-store' } })
 }

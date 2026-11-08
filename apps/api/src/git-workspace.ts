@@ -3,10 +3,12 @@ import type { Account } from '@xpanel/core'
 import { authorizeAccountOwner, workspaceJson } from './account-ssh-workspace.ts'
 import type { AccountSshPorts } from './account-ssh-workspace.ts'
 import { parseGitRequest, GIT_FEATURE } from '../../agent/src/account-git.ts'
+import { parseGitViewRequest } from '../../agent/src/account-git-view.ts'
 import type { AccountGitView, GitRepositoryView, GitRequest } from '../../agent/src/account-git.ts'
 import { isGitPath, isGitBranch, isGitHttpsUrl, GIT_LIMITS } from '../../../packages/os/src/git-command.ts'
 
 export const GIT_WORKSPACE_PATH = '/api/account/git'
+export const GIT_VIEW_PATH = '/api/account/git/view'
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const hash = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(value)
 const cleanText = (value: unknown): value is string => typeof value === 'string' && value.length <= 500 && !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(value)
@@ -27,10 +29,18 @@ export function projectGitView(raw: unknown, account: Pick<Account, 'id' | 'user
   }
   if (request.op === 'list' || request.op === 'remove' ? selected !== null : !selected || selected.path !== request.path) return bad()
   if (request.op === 'remove' && raw.repositories.includes(request.path) || (request.op === 'init' || request.op === 'clone') && !raw.repositories.includes(request.path) || (request.op === 'init' || request.op === 'checkout') && selected?.branch !== request.branch || !['list', 'inspect', 'remove'].includes(request.op) && selected?.dirty) return bad()
+  const deployment = (raw.deployed ?? null) as Record<string, unknown> | null
+  if (deployment !== null && (!object(deployment) || !hash(deployment.commit) || typeof deployment.at !== 'string' || !Number.isFinite(Date.parse(deployment.at)) || request.op === 'list') || request.op === 'deploy' && deployment === null) return bad()
   if (selected && !raw.nativeAvailable || ['remove', 'init', 'clone'].includes(request.op) && 'expectedRevision' in request && raw.revision === request.expectedRevision) return bad()
-  return { context: { accountId: account.id, username: account.username }, revision: raw.revision, repositories: [...raw.repositories] as string[], selected, nativeAvailable: raw.nativeAvailable, application: { op: request.op, state: ['list', 'inspect'].includes(request.op) ? 'read' : 'verified', verificationRequired: false } }
+  return { context: { accountId: account.id, username: account.username }, revision: raw.revision, repositories: [...raw.repositories] as string[], selected, deployed: deployment === null ? null : { commit: deployment.commit as string, at: deployment.at as string }, nativeAvailable: raw.nativeAvailable, application: { op: request.op, state: ['list', 'inspect'].includes(request.op) ? 'read' : 'verified', verificationRequired: false } }
 }
 export async function handleGitWorkspaceRoute(req: Request, url: URL, method: string, ports: AccountSshPorts): Promise<Response | null> {
+  if (url.pathname === GIT_VIEW_PATH) {
+    if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
+    parseGitViewRequest(url.searchParams)
+    const { caller, account } = await authorizeAccountOwner(ports, req, ['gitweb'], 'Git')
+    return workspaceJson(await ports.readAgent(caller, '/accounts/' + account.username + '/git/view' + url.search, undefined, false, 'GET'))
+  }
   if (url.pathname !== GIT_WORKSPACE_PATH) return null
   if (!['GET', 'POST'].includes(method)) return new Response(null, { status: 405, headers: { allow: 'GET, POST' } })
   if (url.search) return fail('VALIDATION', 'Git requests do not accept selectors', { stateChanged: false })

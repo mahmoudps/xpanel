@@ -1,5 +1,8 @@
+import { renderV2HostTools } from '../server/host-tools.ts'
 import { v2WhmClientTemplates } from '../../../whm-client-templates.ts'
-import { actions, button, context, field, fields, help, inputControl, markerFacts, page, section, select, status, table, esc, type WhmObservationInput } from './common.ts'
+import { actions, button, context, facts, field, fields, help, inputControl, markerFacts, page, section, select, status, table, esc, type WhmObservationInput } from './common.ts'
+import { renderV2WhmWebStatsEngines } from './web-stats-engines.ts'
+import { renderV2WhmLogTools } from './log-tools.ts'
 
 export function renderV2WhmProcesses(input: WhmObservationInput): string {
   const { t, canRead, canManage } = context(input)
@@ -11,8 +14,8 @@ export function renderV2WhmProcesses(input: WhmObservationInput): string {
     + status(t, msgid('Processes have not been read.'), { 'data-whm-monitoring-status': true })
     + markerFacts(t, [['observed-at', msgid('Observed at (UTC)')], ['total', msgid('Processes on the host')], ['shown', msgid('Rows shown')]], 'whm-monitoring') + controls
     + table(t, msgid('Running processes'), ['PID', msgid('User'), msgid('Account'), msgid('CPU %'), msgid('Memory %'), msgid('Resident memory'), msgid('Running time'), msgid('State'), msgid('Command'), msgid('Action')], { 'data-whm-monitoring-rows': true }, msgid('No processes have been read.'), [0, 3, 4, 5, 6]))
-    + section(t, 'process-accounts', msgid('By account'), help(t, msgid('Processes are grouped by the numeric user id of each saved account.'))
-      + table(t, msgid('Processes by account'), [msgid('Account'), msgid('Processes'), msgid('CPU %'), msgid('Resident memory')], { 'data-whm-monitoring-account-rows': true }, msgid('No account processes have been read.'), [1, 2, 3]))
+    + section(t, 'process-accounts', msgid('By account'), help(t, msgid('Processes are grouped by the numeric user id of each saved account. Kill all sends KILL to one account only; root, service and panel users cannot be chosen.'))
+      + table(t, msgid('Processes by account'), [msgid('Account'), msgid('Processes'), msgid('CPU %'), msgid('Resident memory'), msgid('Action')], { 'data-whm-monitoring-account-rows': true }, msgid('No account processes have been read.'), [1, 2, 3]))
   return page(input, '/whm/monitoring/processes', msgid('Processes'), msgctxt('theme:v2', 'Read a bounded process snapshot; each signal requires a fresh process identity check.'), v2WhmClientTemplates('processes') + body, { 'data-whm-monitoring': 'processes', 'data-monitoring-can-read': String(canRead), 'data-monitoring-can-signal': String(canManage) })
 }
 
@@ -46,6 +49,23 @@ export function renderV2WhmLogs(input: WhmObservationInput): string {
     + status(t, msgid('Choose a unit and read its logs. Nothing has been read.'), { 'data-whm-monitoring-status': true })
     + markerFacts(t, [['observed-at', msgid('Observed at (UTC)')], ['shown', msgid('Entries returned')]], 'whm-monitoring')
     + table(t, msgid('Journal entries, newest first'), [msgid('Time (UTC)'), msgid('Priority'), msgid('Unit'), 'PID', msgid('Message')], { 'data-whm-monitoring-rows': true }, msgid('No log entries have been read.'), [1, 3]))
+    + section(t, 'log-retention', msgid('Web log retention'), help(t, msgid('Each site access log is rotated once per UTC day after its traffic is counted, then kept as a gzip archive in the account ~/logs or deleted, as each account chooses on its Raw Access page or by the server default. Server error and backend logs rotate through logrotate.'))
+      + actions(button(t, msgid('Read log retention'), { 'data-whm-metering-refresh': true }, canRead))
+      + status(t, canRead ? msgid('Log retention has not been read.') : msgid('Log retention requires an authorized root administrator.'), { 'data-whm-metering-status': true }, canRead ? 'unread' : 'unavailable')
+      + facts(t, [['defaults', msgid('Server default')], ['panel', msgid('Server logs kept')], ['last-run', msgid('Last rotation (UTC)')], ['last-result', msgid('Last rotation result')], ['held', msgid('Undelivered archives')]], 'data-whm-metering-fact')
+      + table(t, msgid('Archives waiting to be copied into ~/logs'), [msgid('Account'), msgid('Archives'), msgid('Size'), msgid('Oldest (UTC)'), msgid('Reason')], { 'data-whm-metering-rows': 'pending' }, msgid('Log retention has not been read.'), [1, 2])
+      + table(t, msgid('Archive retention per account'), [msgid('Account'), msgid('Domain'), msgid('Archive retention'), msgid('Source')], { 'data-whm-metering-rows': 'retention' }, msgid('Log retention has not been read.'))
+      + table(t, msgid('Rotation failures'), [msgid('Time (UTC)'), msgid('Account'), msgid('Site'), msgid('Reason')], { 'data-whm-metering-rows': 'rotation-failures' }, msgid('Log retention has not been read.')),
+      { 'data-whm-metering': 'log-retention', 'data-metering-can-read': String(canRead) })
+    + section(t, 'raw-server-logs', msgid('Raw web server logs'), help(t, msgid("The web servers' own access and error logs, current and rotated, downloaded exactly as stored. Only the fixed log directories are read; files above the size bound are listed but not downloaded."))
+      + fields(field(t, 'v2-raw-logs-server', msgid('Web server'), select(t, 'v2-raw-logs-server', { 'data-raw-logs-server': true }, [['nginx', 'nginx'], ['apache', 'Apache']], canRead)))
+      + actions(button(t, msgid('Read log list'), { 'data-raw-logs-refresh': true }, canRead))
+      + status(t, canRead ? msgid('The log list has not been read.') : msgid('Raw web server logs require an authorized root administrator.'), { 'data-raw-logs-status': true }, canRead ? 'unread' : 'unavailable')
+      + table(t, msgid('Raw web server logs'), [msgid('File'), msgid('Size'), msgid('Modified (UTC)'), msgid('Download')], { 'data-raw-logs-rows': true }, msgid('The log list has not been read.'), [1]),
+      { 'data-whm-raw-logs': true, 'data-raw-logs-can-read': String(canRead) })
+    + renderV2WhmWebStatsEngines(t, canRead, input.catalog?.some(tool => tool.id === 'web-stats-engines' && tool.status === 'verified' && tool.delivery.status === 'verified') === true)
+    + renderV2WhmLogTools(t, canRead)
+    + (canRead ? renderV2HostTools(t, ['log-cleanup'], canRead) : '')
   return page(input, '/whm/monitoring/logs', msgid('Logs'), msgctxt('theme:v2', 'Read a reviewed service journal with an explicit time and priority bound.'), body, { 'data-whm-monitoring': 'logs', 'data-monitoring-can-read': String(enabled) })
 }
 

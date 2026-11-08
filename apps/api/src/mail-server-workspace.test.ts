@@ -133,9 +133,9 @@ describe('API mail server workspace', () => {
   })
   it('compares the saved server mail policy and shows each domain route, or no rendered column when the policy needs review', async () => {
     const at = { updatedAt: '2026-10-28T09:00:00.000Z', updatedBy: 'root' }
-    const none = { spam: null, relay: null, bcc: null, marketing: null, server: null, routing: null }
+    const none = { spam: null, relay: null, bcc: null, marketing: null, server: null, routing: null, spamd: null, country: null, advanced: null, greylist: null, outbound: null }
     const policy = { sections: { ...none, server: { section: 'server' as const, ...at, policy: { postfix: { myhostname: 'host.example.test', message_size_limit: '104857600' }, dovecot: { ssl_min_protocol: 'TLSv1.3' }, rbl: ['zen.spamhaus.org'], certificates: { smtp: 'c1', submission: null, imap: null } } },
-      routing: { section: 'routing' as const, ...at, policy: { domains: [{ domain: 'nozone.test', mode: 'remote' as const }] } } }, archives: [] }
+      routing: { section: 'routing' as const, ...at, policy: { domains: [{ domain: 'nozone.test', mode: 'remote' as const, auto: false }] } } }, archives: [] }
     const server = await (await call('/api/server/mail-server/server', helpers({ readMailPolicy: async () => policy }).value))!.json()
     expect(row(server, 'myhostname')).toMatchObject({ observed: 'host.example.test', desired: 'host.example.test', state: 'match' })
     expect(row(server, 'smtpd_client_restrictions')).toMatchObject({ observed: null, desired: 'permit_mynetworks, permit_sasl_authenticated, reject_rbl_client zen.spamhaus.org', state: 'drift' })

@@ -1,24 +1,29 @@
 import { readdir } from 'node:fs/promises'
+import { listGateHostReady } from './list-moderation-policy.ts'
+import { readRemoteServiceIps } from './remote-service-ips.ts'
 import { join } from 'node:path'
 import { fail, isXpanelError, msgid } from '@xpanel/core'
 import { services } from '@xpanel/render'
 import { readJsonIfExists } from '@xpanel/state'
 import type { HostJobPlan, HostJobView } from './host-job-contract.ts'
 import { parsePostconfMain } from './mail-server-observation.ts'
+import { readSpamStoreOwner } from './mail-mailbox-actions.ts'
 import {
   MAILX_DOVECONF_CHECK_ARGV, MAILX_DOVECOT_DIALECT_ARGV, MAILX_DOVECOT_RELOAD_ARGV, MAILX_MASTER_KEYS, MAILX_MASTER_UNSET_ARGV, MAILX_POSTCONF_MASTER_PARAMS_ARGV, mailxCertPaths, mailxMasterSetArgv,
-  MAILX_ENGINE_UNITS, MAILX_MAPS, MAILX_POSTCONF_MAIN_ARGV, MAILX_POSTFIX_CHECK_ARGV, MAILX_POSTFIX_RELOAD_ARGV, MAILX_RSPAMD_TEST_ARGV,
+  MAILX_COUNTRY_CHECK, MAILX_DAEMON_RELOAD_ARGV, MAILX_ENGINE_UNITS, MAILX_MAPS, MAILX_POSTCONF_DEFAULTS_ARGV, MAILX_POSTCONF_MAIN_ARGV, MAILX_POSTFIX_CHECK_ARGV, MAILX_POSTFIX_RELOAD_ARGV, MAILX_RSPAMD_TEST_ARGV, isMailxAdvancedKey, isMailxPostconfKey, mailxEngineRestartArgv, mailxRblZones,
   MAILX_SIEVE_DIR, MAILX_SPAMASSASSIN_TEST_ARGV, MAILX_VIRTUAL_ALIASES, isMailxLearnJobCommand, isMailxRetentionJobCommand, mailxArchiveExpungeArgv, mailxLearnArgv, mailxLearnFolder, mailxEngineReloadArgv, mailxPostconfSetArgv, mailxPostconfUnsetArgv,
 } from '../../../packages/os/src/mailx-command.ts'
 import type { MailxEngineUnit } from '../../../packages/os/src/mailx-command.ts'
 import {
-  MAILX_RSPAMD_SETTINGS, MAILX_SECTIONS, MAILX_SPAMASSASSIN_DIRS, isMailxInvalid, mailxMailboxEffects, renderMailxMailboxSettings, isMailxManagedText, mailxCompositeRevision, mailxStatePath, readMailxArchiveStored, readMailxStored, renderMailxDovecot, renderMailxPostfix, renderMailxSpam,
+  MAILX_RSPAMD_SETTINGS, MAILX_SECTIONS, MAILX_SPAMASSASSIN_DIRS, isMailxInvalid, mailxCountryHeader, mailxCountryMapHeader, mailxMailboxEffects, renderMailxMailboxSettings, renderMailxRspamdHeaders, renderMailxSpamd, isMailxManagedText, mailxCompositeRevision, mailxStatePath, readMailxArchiveStored, readMailxStored, renderMailxDovecot, renderMailxPostfix, renderMailxSpam,
 } from './mailx-policy.ts'
 import type { MailxArchiveStored, MailxDovecotDialect, MailxEngine, MailxFile, MailxMailboxSpam, MailxSaved, MailxSection } from './mailx-policy.ts'
 import {
   MAILFX_MILTERS, admitMailxMailboxRows, mailfxListAliasLine, mailfxMilterListed, mailfxSieveInputs, mailxStdout, mailxUnitState, readMailForwardingConfiguration, readMailfxLists, readMailxMailboxRows,
 } from './mailfx-render.ts'
 import type { MailxEngineState, MailxSnapshot } from './mailfx-render.ts'
+import { buildMailxCountryMap } from './mail-country-filter.ts'
+import type { MailxGeoipPort } from './mail-country-filter.ts'
 
 export interface MailxCommandResult { ok: boolean; code: number | null; stdout: string; stderr: string }
 export type MailxRun = (argv: string[]) => Promise<MailxCommandResult>
@@ -29,14 +34,19 @@ export interface MailxRouteContext {
   /** Fresh authority of the active account's owner (or root), by username. */
   assertAccount: (username: string, action: string) => Promise<{ actor: string; accountId: string }>
   stateRoot: string
+  /** Absent reads the host: whether it has the module that list posting rules need. */
+  listGateReady?: () => boolean
   /** Native Linux host executor only; null keeps every route unavailable instead of simulating Postfix. */
   run: MailxRun | null
   files: MailxHostFiles | null
   readSnapshot: () => Promise<MailxSnapshot>
   submitJob: ((plan: HostJobPlan, actor: string) => Promise<HostJobView>) | null
+  readSpamStoreOwner?: typeof readSpamStoreOwner
   /** The host reconciler: renders the spam milter, mailbox Sieve policy scripts and mailing lists. Absent reports `unavailable`. */
   reconcile?: (actor: string) => Promise<{ status: 'noop' | 'applied' | 'failed' }>
   audit?: (entry: MailxAuditEntry) => Promise<unknown>
+  /** The local country database; null until its source is connected, which keeps the country filter refused. */
+  geoip?: MailxGeoipPort | null
   now?: () => Date
 }
 
@@ -152,28 +162,34 @@ export interface MailxStatus {
   engine: MailxEngineObservation
   sections: Record<MailxSection, MailxSectionState>
   archive: { accounts: number; state: MailxSectionState; conflicts: ReturnType<typeof renderMailxPostfix>['conflicts'] }
+  geoip: { installed: boolean; month: string | null }
 }
 async function spamFiles(saved: MailxSaved, engine: MailxEngineObservation): Promise<MailxFile[] | null> {
   const spam = saved.sections.spam
   if (!spam) return []
   if (!engine.engine || engine.engine === 'spamassassin' && !engine.spamAssassinDir) return null
-  return renderMailxSpam(spam.policy, engine.engine, engine.spamAssassinDir ?? undefined)
+  return renderMailxSpam(spam.policy, engine.engine, engine.spamAssassinDir ?? undefined, saved.sections.greylist?.policy.domains.length ?? 0)
+}
+/** Scanner startup files for the running engine; null when no engine runs, so the section is unavailable rather than pending. */
+const spamdFiles = (saved: MailxSaved, engine: MailxEngineObservation): MailxFile[] | null => {
+  const spamd = saved.sections.spamd
+  return !spamd ? [] : engine.engine && engine.unit ? renderMailxSpamd(spamd.policy, engine.engine, engine.unit) : null
 }
 /** rspamd settings for mailbox preferences; written only on rspamd, and kept managed (possibly empty) once xPanel wrote it. */
-async function mailboxFile(engine: MailxEngineObservation, files: MailxHostFiles, rows: readonly MailxMailboxSpam[]): Promise<MailxFile | null> {
+async function mailboxFile(engine: MailxEngineObservation, files: MailxHostFiles, rows: readonly MailxMailboxSpam[], greylist: readonly string[] = []): Promise<MailxFile | null> {
   if (engine.engine !== 'rspamd') return null
   const current = await files.read(MAILX_RSPAMD_SETTINGS).catch(() => null)
-  return rows.length || current !== null && isMailxManagedText(current) ? renderMailxMailboxSettings(rows) : null
+  return rows.length || greylist.length || current !== null && isMailxManagedText(current) ? renderMailxMailboxSettings(rows, greylist) : null
 }
 const filesMatch = async (files: MailxHostFiles, wanted: readonly MailxFile[]): Promise<boolean> => {
   for (const file of wanted) if (await files.read(file.path).catch(() => null) !== file.content) return false
   return true
 }
 /** Observed host effect per section: applied only when every rendered parameter and file reads back exactly. */
-export async function observeMailx(run: MailxRun, files: MailxHostFiles, saved: MailxSaved, snapshot: MailxSnapshot, now: Date, recipients: ReadonlyMap<string, readonly string[]> = new Map()): Promise<MailxStatus> {
+export async function observeMailx(run: MailxRun, files: MailxHostFiles, saved: MailxSaved, snapshot: MailxSnapshot, now: Date, recipients: ReadonlyMap<string, readonly string[]> = new Map(), remoteSmtp: readonly string[] = [], mailboxRows: readonly MailxMailboxSpam[] = [], geoip: MailxGeoipPort | null = null): Promise<MailxStatus> {
   const main = await postconf(run), engine = await observeEngine(run, files, main)
   const admitted = { ...saved, archives: admitMailxArchives(saved.archives, snapshot).archives }
-  const plan = renderMailxPostfix(admitted, recipients), spam = await spamFiles(saved, engine)
+  const plan = renderMailxPostfix(admitted, recipients, remoteSmtp), spam = await spamFiles(saved, engine)
   const keysFor: Record<string, string[]> = { relay: ['relayhost', 'smtp_sasl_auth_enable', 'smtp_sasl_password_maps', 'smtp_sasl_security_options', 'smtp_sasl_tls_security_options', 'smtp_tls_policy_maps'],
     bcc: ['always_bcc', 'recipient_bcc_maps', 'sender_bcc_maps'], marketing: ['smtpd_client_message_rate_limit', 'smtpd_client_recipient_rate_limit', 'smtpd_recipient_limit', 'default_destination_rate_delay', 'default_destination_concurrency_limit', 'anvil_rate_time_unit'] }
   const filesFor: Record<string, string[]> = { relay: [MAILX_MAPS.relaySasl, MAILX_MAPS.relayTls], bcc: [MAILX_MAPS.recipientBcc, MAILX_MAPS.senderBcc] }
@@ -191,13 +207,30 @@ export async function observeMailx(run: MailxRun, files: MailxHostFiles, saved: 
     const dovecot = renderMailxDovecot(saved, await dovecotDialect(run)), master = plan.master === undefined ? null : await masterTls(run)
     return (plan.master === undefined || master?.state === 'read' && master.id === plan.master) && (!dovecot || await filesMatch(files, [dovecot])) ? 'applied' : 'pending'
   }
+  keysFor.advanced = Object.keys(saved.sections.advanced?.policy.postfix ?? {})
+  const startup = spamdFiles(saved, engine), database = await geoip?.status().catch(() => null) ?? null, greylist = saved.sections.greylist?.policy.domains ?? []
+  const countryState = async (): Promise<MailxSectionState> => {
+    const blocked = saved.sections.country!.policy.blocked, filtering = main?.get('smtpd_client_restrictions')?.includes(MAILX_COUNTRY_CHECK) ?? false
+    if (main === null) return 'unavailable'
+    if (!blocked.length) return filtering ? 'pending' : 'applied'
+    if (!database?.installed || !database.month) return 'unavailable'
+    return filtering && mailxCountryMapHeader(await files.read(MAILX_MAPS.countryBlock).catch(() => null)) === mailxCountryHeader(blocked, database.month) ? 'applied' : 'pending'
+  }
+  const greylistState = async (): Promise<MailxSectionState> => {
+    if (engine.engine !== 'rspamd') return 'unavailable'
+    const box = await mailboxFile(engine, files, admitMailxMailboxRows(mailboxRows, snapshot), greylist)
+    return !box || await filesMatch(files, [box]) ? 'applied' : 'pending'
+  }
   const sections = {} as Record<MailxSection, MailxSectionState>
   for (const section of MAILX_SECTIONS) sections[section] = !saved.sections[section] ? 'not-saved'
     : section === 'spam' ? spam === null ? 'unavailable' : await filesMatch(files, spam) ? 'applied' : 'pending'
-      : section === 'server' ? await serverState() : await state(keysFor[section]!, filesFor[section] ?? [])
+      : section === 'spamd' ? startup === null ? 'unavailable' : await filesMatch(files, startup) ? 'applied' : 'pending'
+        : section === 'country' ? await countryState()
+          : section === 'greylist' ? await greylistState()
+            : section === 'server' ? await serverState() : await state(keysFor[section]!, filesFor[section] ?? [])
   const archiveRows = admitted.archives.some(item => item.policy.domains.some(row => row.incoming || row.outgoing))
   return { observedAt: now.toISOString(), revision: mailxCompositeRevision(saved), postfix: main === null ? 'unavailable' : 'read', engine,
-    sections, archive: { accounts: saved.archives.length, state: !archiveRows ? 'not-saved' : await state(['recipient_bcc_maps', 'sender_bcc_maps'], filesFor.bcc!), conflicts: plan.conflicts } }
+    sections, archive: { accounts: saved.archives.length, state: !archiveRows ? 'not-saved' : await state(['recipient_bcc_maps', 'sender_bcc_maps'], filesFor.bcc!), conflicts: plan.conflicts }, geoip: { installed: database?.installed === true, month: database?.month ?? null } }
 }
 
 export type MailxReconcileOutcome = 'applied' | 'unchanged' | 'failed' | 'unknown' | 'unavailable'
@@ -224,13 +257,25 @@ async function admitCertificates(files: MailxHostFiles, saved: MailxSaved, snaps
  * and file before anything is reloaded. The result is `applied` only when a re-read proves it.
  */
 export async function applyMailx(run: MailxRun, files: MailxHostFiles, saved: MailxSaved, snapshot: MailxSnapshot, confirm: () => Promise<void>, mailboxRows: readonly MailxMailboxSpam[] = [], now = new Date(),
-  recipients: ReadonlyMap<string, readonly string[]> = new Map()): Promise<MailxApplyResult> {
+  recipients: ReadonlyMap<string, readonly string[]> = new Map(), remoteSmtp: readonly string[] = [], extra: { countryMap?: MailxFile | null; unset?: readonly string[] } = {}): Promise<MailxApplyResult> {
   const revision = mailxCompositeRevision(saved)
-  const plan = renderMailxPostfix({ ...saved, archives: admitMailxArchives(saved.archives, snapshot).archives }, recipients), dovecot = renderMailxDovecot(saved, await dovecotDialect(run))
+  const plan = renderMailxPostfix({ ...saved, archives: admitMailxArchives(saved.archives, snapshot).archives }, recipients, remoteSmtp), dovecot = renderMailxDovecot(saved, await dovecotDialect(run))
+  if (extra.countryMap) plan.files.push(extra.countryMap)
   const before = await postconf(run)
   if (before === null) return fail('PRECONDITION_FAILED', 'Postfix parameters could not be read, so nothing was changed', { ...unchanged, reason: 'postconf_unavailable' })
-  const engine = await observeEngine(run, files, before), section = await spamFiles(saved, engine) ?? [], ownRows = admitMailxMailboxRows(mailboxRows, snapshot), box = await mailboxFile(engine, files, ownRows)
-  const spam = [...section, ...(box ? [box] : [])]
+  // The saved country and advanced sections take over a parameter an administrator may have set by hand.
+  if (saved.sections.country && !saved.sections.server?.policy.rbl && before.get('smtpd_client_restrictions') && mailxRblZones(before.get('smtpd_client_restrictions')!) === null) return fail('CONFLICT', 'smtpd_client_restrictions holds rules not managed by xPanel; merge them by hand first', { ...unchanged, reason: 'unmanaged_client_restrictions' })
+  const overrides = Object.keys(saved.sections.advanced?.policy.postfix ?? {})
+  if (overrides.length) {
+    const defaults = await mailxStdout(run, MAILX_POSTCONF_DEFAULTS_ARGV), known = defaults === null ? null : new Set(defaults.split('\n').map(line => line.slice(0, line.indexOf(' ='))))
+    if (known === null) return fail('PRECONDITION_FAILED', 'Postfix parameters could not be read, so nothing was changed', { ...unchanged, reason: 'postconf_unavailable' })
+    const unknown = overrides.filter(key => !known.has(key))
+    if (unknown.length) return fail('PRECONDITION_FAILED', 'an advanced option is not a parameter of this Postfix release, so nothing was changed', { ...unchanged, reason: 'unknown_postfix_parameter', keys: unknown.slice(0, 20) })
+  }
+  const engine = await observeEngine(run, files, before), section = await spamFiles(saved, engine) ?? [], ownRows = admitMailxMailboxRows(mailboxRows, snapshot), box = await mailboxFile(engine, files, ownRows, saved.sections.greylist?.policy.domains ?? [])
+  const startup = spamdFiles(saved, engine) ?? []
+  const scoreHeader = engine.engine === 'rspamd' && !section.length && ownRows.some(row => mailxMailboxEffects(row).autoDelete) ? [renderMailxRspamdHeaders()] : []
+  const spam = [...section, ...(box ? [box] : []), ...startup, ...scoreHeader]
   const spamState: MailxApplyResult['spam'] = !saved.sections.spam ? 'not-saved' : section.length ? 'applied' : 'unavailable'
   const mailboxes: MailxApplyResult['mailboxes'] = box ? 'applied' : ownRows.length ? 'unavailable' : 'not-saved'
   if (!Object.keys(plan.settings).length && !plan.files.length && !spam.length && !dovecot && plan.master === undefined) return { outcome: 'nothing', revision, verificationRequired: false, spam: spamState, mailboxes, reloads: [] }
@@ -253,6 +298,7 @@ export async function applyMailx(run: MailxRun, files: MailxHostFiles, saved: Ma
   if (dovecotChanged && !await succeeded(run, MAILX_DOVECONF_CHECK_ARGV)) return fail('PRECONDITION_FAILED', 'doveconf already fails on this host, so nothing was changed', { ...unchanged, reason: 'dovecot_check_failed' })
   await confirm()
   const keys = Object.keys(plan.settings), absent = keys.filter(key => !before.has(key)), reloads: string[] = []
+  const removed = (extra.unset ?? []).filter(key => before.has(key) && !keys.includes(key)), startupChanged = startup.some(file => previous.get(file.path) !== file.content)
   const restore = async (paths: readonly MailxFile[]): Promise<void> => {
     for (const file of paths) { const old = previous.get(file.path) ?? null; if (old === null) await files.remove(file.path); else await files.write({ ...file, content: old }) }
   }
@@ -260,7 +306,7 @@ export async function applyMailx(run: MailxRun, files: MailxHostFiles, saved: Ma
   const rollback = async (): Promise<boolean> => {
     try {
       await restore(plan.files)
-      const kept = Object.fromEntries(keys.filter(key => before.has(key)).map(key => [key, before.get(key)!]))
+      const kept = Object.fromEntries([...keys, ...removed].filter(key => before.has(key)).map(key => [key, before.get(key)!]))
       if (Object.keys(kept).length && !await succeeded(run, mailxPostconfSetArgv(kept))) return false
       if (absent.length && !await succeeded(run, mailxPostconfUnsetArgv(absent))) return false
       if (masterChanged && !await setMaster(masterBefore)) return false
@@ -274,6 +320,7 @@ export async function applyMailx(run: MailxRun, files: MailxHostFiles, saved: Ma
     if (plan.files.length) await files.ensureMapDir()
     for (const file of plan.files) await files.write(file)
     if (keys.length && !await succeeded(run, mailxPostconfSetArgv(plan.settings))) return await rolledBack('postfix', 'Postfix parameters were not set and the rollback could not be verified')
+    if (removed.length && !await succeeded(run, mailxPostconfUnsetArgv(removed))) return await rolledBack('postfix', 'Postfix parameters were not removed and the rollback could not be verified')
     if (masterChanged && !await setMaster(plan.master!)) return await rolledBack('postfix', 'the port 25 certificate was not set and the rollback could not be verified')
     if (!await succeeded(run, MAILX_POSTFIX_CHECK_ARGV)) return await rolledBack('postfix', 'postfix check failed and the rollback could not be verified')
     if (dovecotChanged) {
@@ -290,11 +337,14 @@ export async function applyMailx(run: MailxRun, files: MailxHostFiles, saved: Ma
     if (spam.length && engine.unit) {
       for (const file of spam) await files.write(file)
       if (!await succeeded(run, engine.engine === 'rspamd' ? MAILX_RSPAMD_TEST_ARGV : MAILX_SPAMASSASSIN_TEST_ARGV)) { await restore(spam); rolledSpam = true; if (section.length) spamResult = 'rolled-back'; if (box) mailboxResult = 'rolled-back' }
-      else if (await succeeded(run, mailxEngineReloadArgv(engine.unit))) reloads.push(engine.engine!)
+      else if (startupChanged) {
+        if (engine.engine === 'spamassassin' && !await succeeded(run, MAILX_DAEMON_RELOAD_ARGV) || !await succeeded(run, mailxEngineRestartArgv(engine.unit))) return fail('SERVICE_UNAVAILABLE', 'the spam filter did not confirm the restart; inspect the service', unknown)
+        reloads.push(engine.engine!)
+      } else if (await succeeded(run, mailxEngineReloadArgv(engine.unit))) reloads.push(engine.engine!)
       else return fail('SERVICE_UNAVAILABLE', 'the spam filter did not confirm the reload; inspect the service', unknown)
     }
     const after = await postconf(run), master = plan.master === undefined ? null : await masterTls(run)
-    const verified = after !== null && keys.every(key => after.get(key) === plan.settings[key]) && await filesMatch(files, plan.files) && (rolledSpam || await filesMatch(files, spam))
+    const verified = after !== null && keys.every(key => after.get(key) === plan.settings[key]) && removed.every(key => !after.has(key)) && await filesMatch(files, plan.files) && (rolledSpam || await filesMatch(files, spam))
       && (plan.master === undefined || master?.state === 'read' && master.id === plan.master) && (!dovecot || await filesMatch(files, [dovecot]))
     return { outcome: verified ? 'applied' : 'unknown', revision, verificationRequired: !verified, spam: spamResult, mailboxes: mailboxResult, reloads }
   } catch (error) {
@@ -310,14 +360,14 @@ async function reconcileMail(ctx: MailxRouteContext, actor: string): Promise<Mai
 }
 
 const ROUTE = /^\/host\/mailx\/(?:(state|apply)|accounts\/([a-z][a-z0-9]{0,15})\/(archive|apply|retention|mailboxes|lists|learn))$/
-const MAX_BODY = 4096
-async function readBody(req: Request, keys: readonly string[]): Promise<Record<string, unknown>> {
+const MAX_BODY = 16_384
+async function readBody(req: Request, keys: readonly string[], optional: readonly string[] = []): Promise<Record<string, unknown>> {
   if (req.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return fail('VALIDATION', 'application/json is required', unchanged)
   const text = await req.text()
   if (text.length > MAX_BODY) return fail('VALIDATION', 'mail policy request exceeds its bound', unchanged)
   let body: unknown
   try { body = JSON.parse(text) } catch { return fail('VALIDATION', 'request body must be valid JSON', unchanged) }
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== keys.length || keys.some(key => !Object.hasOwn(body, key))) return fail('VALIDATION', 'unsupported mail policy request field', unchanged)
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !keys.includes(key) && !optional.includes(key)) || keys.some(key => !Object.hasOwn(body, key))) return fail('VALIDATION', 'unsupported mail policy request field', unchanged)
   const record = body as Record<string, unknown>
   if (keys.includes('revision') && (typeof record.revision !== 'string' || !/^[0-9a-f]{64}$/.test(record.revision))) return fail('VALIDATION', 'the saved policy revision is required', unchanged)
   return record
@@ -334,8 +384,11 @@ export async function handleMailxRoute(req: Request, url: URL, method: string, c
   const reading = op === 'state' || op === 'archive' || op === 'mailboxes' || op === 'lists'
   if (method !== (reading ? 'GET' : 'POST')) return new Response(null, { status: 405, headers: { allow: reading ? 'GET' : 'POST' } })
   if (url.search) return fail('VALIDATION', 'mail policy routes accept no selectors', unchanged)
-  const body = reading ? null : await readBody(req, op === 'retention' ? ['revision', 'domain'] : op === 'learn' ? ['mailbox', 'direction'] : ['revision'])
+  const body = reading ? null : await readBody(req, op === 'retention' ? ['revision', 'domain'] : op === 'learn' ? ['mailbox', 'direction'] : ['revision'], op === 'apply' && !username ? ['unset'] : [])
   if (op === 'learn' && (typeof body!.mailbox !== 'string' || body!.mailbox.length > 254 || !['spam', 'ham'].includes(String(body!.direction)))) return fail('VALIDATION', 'a mailbox and the spam or ham direction are required', unchanged)
+  const unset = body?.unset ?? []
+  // Keys the caller stopped managing: a reset or a removed advanced option hands them back to the Postfix default.
+  if (!Array.isArray(unset) || unset.length > 256 || unset.some(key => !isMailxPostconfKey(key) && !isMailxAdvancedKey(key))) return fail('VALIDATION', 'unsupported Postfix parameter to remove', unchanged)
   if (!ctx.run || !ctx.files) return fail('PRECONDITION_FAILED', 'mail policy requires the native Linux host executor', unchanged)
   const run = ctx.run, files = ctx.files, now = ctx.now ?? (() => new Date())
   const confirm = async (): Promise<string> => {
@@ -344,8 +397,8 @@ export async function handleMailxRoute(req: Request, url: URL, method: string, c
   }
   if (op === 'mailboxes') {
     const snapshot = await ctx.readSnapshot(), { rows, review } = await readMailxMailboxRows(ctx.stateRoot)
-    const main = await postconf(run), engine = await observeEngine(run, files, main), admitted = admitMailxMailboxRows(rows, snapshot)
-    const box = await mailboxFile(engine, files, admitted), applied = box !== null && await filesMatch(files, [box])
+    const main = await postconf(run), engine = await observeEngine(run, files, main), admitted = admitMailxMailboxRows(rows, snapshot), greylist = (await readMailxSaved(ctx.stateRoot)).sections.greylist?.policy.domains ?? []
+    const box = await mailboxFile(engine, files, admitted, greylist), applied = box !== null && await filesMatch(files, [box])
     const own = snapshot.serviceUsers.filter(user => user.accountId === first.accountId && user.services.email).map(user => user.login.toLowerCase()).sort().slice(0, 1000)
     const sieve = new Map(mailfxSieveInputs(admitted.filter(row => own.includes(row.mailbox)), snapshot).map(input => [input.address, input]))
     const sieveApplied = new Map<string, boolean>()
@@ -361,19 +414,19 @@ export async function handleMailxRoute(req: Request, url: URL, method: string, c
       if (sieve.has(row.mailbox)) parts.push(sieveApplied.get(row.mailbox) ? 'applied' : 'pending')
       return !parts.length ? 'not-saved' : parts.includes('pending') ? 'pending' : parts.includes('unavailable') ? 'unavailable' : 'applied'
     }
-    return json({ observedAt: now().toISOString(), engine: { engine: engine.engine, wiring: engine.wiring }, jobsAvailable: !!ctx.submitJob,
+    return json({ observedAt: now().toISOString(), engine: { engine: engine.engine, wiring: engine.wiring }, jobsAvailable: !!ctx.submitJob, greylist: !greylist.length ? 'not-saved' : engine.engine !== 'rspamd' ? 'unavailable' : applied ? 'applied' : 'pending',
       mailboxes: own.map(mailbox => {
         const row = admitted.find(item => item.mailbox === mailbox), foreign = !row && (review.includes(mailbox) || rows.some(item => item.mailbox === mailbox))
         return { mailbox, preference: foreign ? 'review' : row ? 'saved' : 'none', effects: row ? mailxMailboxEffects(row) : null, native: row ? native(row) : 'not-saved' }
       }) })
   }
   if (op === 'lists') {
-    const snapshot = await ctx.readSnapshot(), forwarding = await readMailForwardingConfiguration(ctx.stateRoot, snapshot)
-    const { lists, rows } = await readMailfxLists(ctx.stateRoot, snapshot, forwarding)
+    const gateReady = (ctx.listGateReady ?? listGateHostReady)(), snapshot = await ctx.readSnapshot(), forwarding = await readMailForwardingConfiguration(ctx.stateRoot, snapshot, gateReady)
+    const { lists, rows } = await readMailfxLists(ctx.stateRoot, snapshot, forwarding, gateReady)
     const aliases = await files.read(MAILX_VIRTUAL_ALIASES).catch(() => null), live = aliases === null ? null : new Set(aliases.split('\n'))
     await confirm()
     // Delivering only when the live alias table holds the exact rendered line for the list.
-    return json({ observedAt: now().toISOString(), aliases: live === null ? 'unavailable' : 'read',
+    return json({ observedAt: now().toISOString(), aliases: live === null ? 'unavailable' : 'read', moderation: gateReady,
       lists: rows.filter(row => row.accountId === first.accountId).slice(0, 1000).map(row => {
         const delivered = lists.find(item => item.address === row.address.toLowerCase())
         return { address: row.address, members: row.members, state: row.state === 'pending' && delivered && live?.has(mailfxListAliasLine(delivered)) ? 'delivering' : row.state }
@@ -381,7 +434,7 @@ export async function handleMailxRoute(req: Request, url: URL, method: string, c
   }
   if (reading) {
     const saved = await readMailxSaved(ctx.stateRoot), snapshot = await ctx.readSnapshot()
-    const status = await observeMailx(run, files, saved, snapshot, now(), await mailxRoutingRecipients(ctx.stateRoot, saved, snapshot))
+    const status = await observeMailx(run, files, saved, snapshot, now(), await mailxRoutingRecipients(ctx.stateRoot, saved, snapshot), (await readRemoteServiceIps(ctx.stateRoot))?.smtp ?? [], (await readMailxMailboxRows(ctx.stateRoot)).rows, ctx.geoip ?? null)
     await confirm()
     if (!username) return json(status)
     const own = saved.archives.find(item => item.accountId === first.accountId), rows = admitMailxArchives(saved.archives, snapshot).rows
@@ -399,8 +452,10 @@ export async function handleMailxRoute(req: Request, url: URL, method: string, c
     const account = await admitted(), engine = await observeEngine(run, files, await postconf(run))
     if (!engine.engine) return fail('PRECONDITION_FAILED', 'no supported spam filter is running, so nothing was trained', { ...unchanged, reason: 'no_spam_filter' })
     if (!ctx.submitJob) return fail('PRECONDITION_FAILED', 'the host job runner is unavailable, so nothing was started', unchanged)
+    const owner = engine.engine === 'spamassassin' ? await (ctx.readSpamStoreOwner ?? readSpamStoreOwner)() : null
+    if (engine.engine === 'spamassassin' && !owner) return fail('PRECONDITION_FAILED', 'the account that owns the spam filter store was not found, so nothing was trained', { ...unchanged, reason: 'no_store_owner' })
     let argv: string[]
-    try { argv = mailxLearnArgv(engine.engine, direction, mailxLearnFolder(account.home, mailbox, direction)) } catch { return fail('PRECONDITION_FAILED', 'this mailbox has no reviewed Maildir location', { ...unchanged, reason: 'maildir_unsupported' }) }
+    try { argv = mailxLearnArgv(engine.engine, direction, mailxLearnFolder(account.home, mailbox, direction), owner) } catch { return fail('PRECONDITION_FAILED', 'this mailbox has no reviewed Maildir location', { ...unchanged, reason: 'maildir_unsupported' }) }
     const plan: HostJobPlan = { kind: 'mail.spam.learn', summary: `Spam filter training from ${mailbox}`, accountId: first.accountId,
       fingerprint: { mailbox, direction, engine: engine.engine }, detail: { mailbox, direction, engine: engine.engine },
       steps: [{ id: 'learn', title: direction === 'spam' ? msgid('Train the spam filter with the Junk folder of {mailbox}') : msgid('Train the spam filter with the Inbox of {mailbox}'), titleValues: { mailbox }, argv, timeoutMs: 1_800_000, mutates: true }],
@@ -434,7 +489,8 @@ export async function handleMailxRoute(req: Request, url: URL, method: string, c
       return json({ job: { id: job.id, kind: job.kind, status: job.status } }, 202)
     }
     let actor = first.actor
-    const applied = await applyMailx(run, files, saved, snapshot, async () => { actor = await confirm() }, (await readMailxMailboxRows(ctx.stateRoot)).rows, now(), await mailxRoutingRecipients(ctx.stateRoot, saved, snapshot))
+    const blocked = saved.sections.country?.policy.blocked ?? [], countryMap = blocked.length ? await buildMailxCountryMap(ctx.geoip, blocked) : null
+    const applied = await applyMailx(run, files, saved, snapshot, async () => { actor = await confirm() }, (await readMailxMailboxRows(ctx.stateRoot)).rows, now(), await mailxRoutingRecipients(ctx.stateRoot, saved, snapshot), (await readRemoteServiceIps(ctx.stateRoot))?.smtp ?? [], { countryMap, unset: unset as string[] })
     // The milter, mailbox Sieve scripts and lists live in reconciler-owned renders, so they apply through a generation.
     const reconcile = await reconcileMail(ctx, await confirm())
     const result: MailxApplyResult = reconcile === 'unknown' ? { ...applied, outcome: 'unknown', verificationRequired: true, reconcile } : { ...applied, reconcile }

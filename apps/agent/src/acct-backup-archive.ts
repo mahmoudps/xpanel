@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { link, lstat, mkdir, open, rm, writeFile } from 'node:fs/promises'
 import { dirname, posix } from 'node:path'
-import { fail } from '@xpanel/core'
+import { COMPRESSION_LEVEL_KEY, fail, TWEAKS } from '@xpanel/core'
 import { assertBackupAccountTarget, BACKUP_CODECS, backupCodecOf, backupFileName, backupReadFailed, DEFAULT_BACKUP_DIR, MAX_BACKUP_BYTES } from './account-backup.ts'
 import type { BackupAccountTarget, BackupCompression } from './account-backup.ts'
 import { BACKUP_CONTROL, isBackupZoneName } from './acct-backup-plan.ts'
@@ -23,10 +23,14 @@ export const MAX_BACKUP_TAR_BYTES = 16 * 1024 * 1024 * 1024
 /** A saved zone is small JSON; larger means it is not ours. */
 export const MAX_BACKUP_ZONE_BYTES = 1024 * 1024
 const MAX_LISTING_BYTES = 32 * 1024 * 1024
-/** Compressor argv per codec, staged tar on stdin; zstd level 3 on one thread is measured in docs/decisions/2026-11-06-zstd-backups.md. */
-export const BACKUP_COMPRESSOR: Readonly<Record<BackupCompression, readonly string[]>> = {
-  gzip: ['/usr/bin/gzip', '-c', '-n', '-6'],
-  zstd: [ZSTD, '-q', '-c', '-3', '--check', '--single-thread'],
+/**
+ * Compressor argv of a codec at the Tweak Settings level (Compression section), staged tar on stdin; zstd stays on one
+ * thread as measured in docs/decisions/2026-11-06-zstd-backups.md. A level outside the codec's definition is refused.
+ */
+export const backupCompressorArgv = (compression: BackupCompression, level: number): string[] => {
+  const definition = TWEAKS.find(item => item.key === COMPRESSION_LEVEL_KEY[compression])
+  if (definition?.kind !== 'integer' || !Number.isSafeInteger(level) || level < definition.min || level > definition.max) return fail('VALIDATION', 'the compression level is outside its codec range', { compression })
+  return compression === 'gzip' ? ['/usr/bin/gzip', '-c', '-n', `-${level}`] : [ZSTD, '-q', '-c', `-${level}`, '--check', '--single-thread']
 }
 const DATABASE = /^[a-z][a-z0-9]{0,15}_[a-z0-9_]{1,47}$/
 const MEMBER = /^\.xpanel-backup-data\/(?:(databases)\/([a-z][a-z0-9]{0,15}_[a-z0-9_]{1,47})\.sql|(dns)\/([a-z0-9.-]{1,253})\.json)$/
@@ -101,10 +105,10 @@ const ensureRootDirectory = async (path: string): Promise<void> => {
 const commandFailed = (what: string, stderr: string): never => fail('CONFIG_TEST_FAILED', `${what} failed: ${stderr.trim().slice(0, 500)}`, { stateChanged: false })
 const stampOf = (date: Date): string => date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
 
-/** Compresses a staged tar at low priority with the codec of `compression` and links the complete file at `destination`, never over an existing one. */
-const publish = async (run: BackupCommandRunner, tarPath: string, stage: string, destination: string, compression: BackupCompression): Promise<number> => {
+/** Compresses a staged tar at low priority with the codec of `compression` at `level` and links the complete file at `destination`, never over an existing one. */
+const publish = async (run: BackupCommandRunner, tarPath: string, stage: string, destination: string, compression: BackupCompression, level: number): Promise<number> => {
   const archivePath = posix.join(stage, 'archive' + BACKUP_CODECS[compression].suffix)
-  const compressed = await run({ argv: BACKUP_COMPRESSOR[compression], stdinPath: tarPath, stdoutPath: archivePath, maxStdoutBytes: MAX_BACKUP_BYTES })
+  const compressed = await run({ argv: backupCompressorArgv(compression, level), stdinPath: tarPath, stdoutPath: archivePath, maxStdoutBytes: MAX_BACKUP_BYTES })
   if (compressed.killed === 'output limit') fail('LIMIT_EXCEEDED', 'the backup archive is larger than 2 GiB')
   if (!compressed.ok) await backupReadFailed(destination, () => commandFailed('archive compression', compressed.killed ?? compressed.stderr))
   await rm(tarPath, { force: true })
@@ -125,9 +129,10 @@ const withStage = async <T>(directory: string, task: (stage: string) => Promise<
  * Builds one archive at low priority without staging anything in the account home: tar runs as the account and streams to a
  * root-only build directory, dumps and zones are appended by root, gzip or zstd compresses, and only the complete file is linked.
  */
-export async function buildServerBackupArchive(input: { root?: string; account: BackupAccountTarget; databases: readonly string[]; zones: readonly { name: string; content: string }[]; excludeMail: boolean; compression: BackupCompression; now?: Date; nonce?: string; deps: BackupArchiveBuildDeps }): Promise<BuiltBackupArchive> {
+export async function buildServerBackupArchive(input: { root?: string; account: BackupAccountTarget; databases: readonly string[]; zones: readonly { name: string; content: string }[]; excludeMail: boolean; compression: BackupCompression; level: number; now?: Date; nonce?: string; deps: BackupArchiveBuildDeps }): Promise<BuiltBackupArchive> {
   const { account, deps } = input
   assertBackupAccountTarget(account)
+  backupCompressorArgv(input.compression, input.level)
   const databases = [...new Set(input.databases)].sort(), zones = [...input.zones].sort((a, b) => a.name < b.name ? -1 : 1)
   if (databases.some(name => !DATABASE.test(name) || !name.startsWith(account.username + '_'))) fail('VALIDATION', 'a backup database does not belong to the account')
   if (zones.some(zone => !isBackupZoneName(zone.name) || Buffer.byteLength(zone.content) > MAX_BACKUP_ZONE_BYTES) || new Set(zones.map(zone => zone.name)).size !== zones.length) fail('VALIDATION', 'a backup zone is invalid')
@@ -154,7 +159,7 @@ export async function buildServerBackupArchive(input: { root?: string; account: 
       const appended = await deps.run({ argv: ['/usr/bin/tar', '--append', `--file=${tarPath}`, `--directory=${extra}`, '--owner=0', '--group=0', '--numeric-owner', '--', BACKUP_DATA_DIR], maxStdoutBytes: 64 * 1024 })
       if (!appended.ok) commandFailed('backup data archive', appended.killed ?? appended.stderr)
     }
-    const bytes = await publish(deps.run, tarPath, stage, posix.join(directory, file), input.compression)
+    const bytes = await publish(deps.run, tarPath, stage, posix.join(directory, file), input.compression, input.level)
     return { file, bytes, databases, zones: zones.map(zone => zone.name) }
   })
 }
@@ -164,7 +169,8 @@ export const controlSnapshotName = (date: Date, compression: BackupCompression, 
  * Once-per-run snapshot of the control state for disaster recovery and upgrade rollback: the desired-state directory plus a
  * consistent copy of the index database (`control.db`), into `<root>/_control/`. It is never restored per account.
  */
-export async function buildControlSnapshot(input: { root?: string; stateDir: string; copyDatabase(outputPath: string): Promise<void>; run: BackupCommandRunner; compression: BackupCompression; now?: Date }): Promise<{ file: string; bytes: number }> {
+export async function buildControlSnapshot(input: { root?: string; stateDir: string; copyDatabase(outputPath: string): Promise<void>; run: BackupCommandRunner; compression: BackupCompression; level: number; now?: Date }): Promise<{ file: string; bytes: number }> {
+  backupCompressorArgv(input.compression, input.level)
   const root = input.root ?? DEFAULT_BACKUP_DIR, directory = posix.join(root, BACKUP_CONTROL), file = controlSnapshotName(input.now ?? new Date(), input.compression)
   await ensureRootDirectory(root); await ensureRootDirectory(directory)
   return withStage(directory, async stage => {
@@ -175,7 +181,7 @@ export async function buildControlSnapshot(input: { root?: string; stateDir: str
     await input.copyDatabase(posix.join(extra, 'control.db'))
     const appended = await input.run({ argv: ['/usr/bin/tar', '--append', `--file=${tarPath}`, `--directory=${extra}`, '--owner=0', '--group=0', '--numeric-owner', '--', 'control.db'], maxStdoutBytes: 64 * 1024 })
     if (!appended.ok) commandFailed('control database archive', appended.killed ?? appended.stderr)
-    return { file, bytes: await publish(input.run, tarPath, stage, posix.join(directory, file), input.compression) }
+    return { file, bytes: await publish(input.run, tarPath, stage, posix.join(directory, file), input.compression, input.level) }
   })
 }
 

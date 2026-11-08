@@ -7,6 +7,7 @@ import { workspaceJson, type ReadAgent } from './account-ssh-workspace.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
 import { sha512Crypt } from '../../agent/src/directory-privacy.ts'
 import type { DirectoryPrivacyView } from '../../agent/src/directory-privacy.ts'
+import { assertPasswordAllowed } from './password-policy.ts'
 
 export const DIRECTORY_PRIVACY_ROUTE = /^\/api\/web-features\/([^/]+)\/directory-privacy$/
 export interface DirectoryPrivacyPorts extends Pick<ExtendedRouteHelpers, 'requireCaller' | 'assertCanAccessAccount' | 'resolveAccountParam' | 'emitAudit'> {
@@ -84,7 +85,8 @@ export async function handleDirectoryPrivacyRoute(req: Request, url: URL, method
     if (seen.has(user.username)) return field('each user is listed once', `users.${index}.username`, 'duplicate')
     seen.add(user.username)
     if (user.password === undefined) return { username: user.username, passwordHash: null }
-    if (typeof user.password !== 'string' || !user.password.isWellFormed() || UNSAFE.test(user.password) || user.password.length < 8 || Buffer.byteLength(user.password, 'utf8') > 1024) return field('passwords are 8 to 1024 bytes on one line', `users.${index}.password`, 'password')
+    if (typeof user.password !== 'string' || !user.password.isWellFormed() || UNSAFE.test(user.password) || Buffer.byteLength(user.password, 'utf8') > 1024) return field('passwords are 8 to 1024 bytes on one line', `users.${index}.password`, 'password')
+    assertPasswordAllowed(user.password, 'directory')
     return { username: user.username, passwordHash: sha512Crypt(user.password) }
   })
   // Fresh authority immediately before the mutation; the agent re-checks again inside the account lease.

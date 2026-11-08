@@ -95,5 +95,6 @@ html[dir="rtl"] .xp-login-shell[data-login-design="approved"] :is(.xp-login-cont
 .xp-login-shell[data-login-design="approved"][data-auth-state="authenticated"] .xp-login-success { display:flex; }
 .xp-login-shell[data-login-design="approved"][data-auth-state="authenticated"] [data-login-form] { display:none; }
 .xp-login-shell[data-login-design="approved"] .xp-login-footer { inline-size:100%; max-inline-size:1080px; margin-inline:auto; padding:var(--xp-space-field) var(--xp-space-card); gap:var(--xp-space-label) var(--xp-space-group); justify-content:center; }
+.xp-login-shell[data-login-design="approved"] :is(.xp-brand__sub,.xp-login-footer .xp-mono) { min-inline-size:0; overflow-wrap:anywhere; }
 @media (max-width:600px) { .xp-login-shell[data-login-design="approved"] .xp-login-topbar, .xp-login-shell[data-login-design="approved"] .xp-login-main, .xp-login-shell[data-login-design="approved"] .xp-login-footer { padding-inline:var(--xp-space-field); } .xp-login-shell[data-login-design="approved"] .xp-login-card, .xp-login-shell[data-login-design="approved"] .xp-login-context-card { padding:var(--xp-space-field); } }
 `

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, Domain } from '@xpanel/core'
 import { renderV2PanelTraffic } from './v2/pages/xpanel/observations/traffic.ts'
+import { renderV2PanelWebStatistics } from './v2/pages/xpanel/observations/web-stats.ts'
+import { WEB_STATS_FIXTURE } from '../../../../tests/fixtures/web-stats-view.ts'
 import { routeContracts, checkConformance, parseMarkup } from './contract.ts'
 import { checkControllerDeclarations } from './controller-conformance.ts'
-import { V2_STATEFUL_OBSERVATION_COUNTERPARTS, V2_HOME_OBSERVATION_HOOKS, V2_OBSERVATION_COUNTERPARTS, V2_SHARED_CHROME_REQUIREMENTS, checkV2Conformance, v2RouteContracts } from './v2-semantics.ts'
+import { V2_STATEFUL_OBSERVATION_COUNTERPARTS, V2_HOME_OBSERVATION_HOOKS, V2_OBSERVATION_COUNTERPARTS, V2_SHARED_CHROME_REQUIREMENTS, V2_WEB_STATS_REQUIREMENT, checkV2Conformance, v2RouteContracts } from './v2-semantics.ts'
 import { renderV2Shell } from './v2/shell/shell.ts'
 import { v2Messages } from './v2/messages.ts'
 import { v2ConformanceCopy } from './v2/conformance-copy.ts'
@@ -89,15 +91,24 @@ describe('explicit V2 semantic counterparts', () => {
     expect(check(html.replace('data-installer-state="unavailable"', 'data-wiring="unavailable"')).length).toBeGreaterThan(0)
     expect(check(html.replace(' disabled', '')).length).toBeGreaterThan(0)
   })
+  it.each(['en', 'ar'] as const)('binds the web statistics selection, days and engines and keeps the report selection GET-only (%s)', locale => {
+    const route = '/metrics/web-stats'
+    const html = renderV2PanelWebStatistics({ locale, account: WEB_STATS_FIXTURE.account, webStats: WEB_STATS_FIXTURE.view }, { canRead: true, canManage: false })
+    const check = (value: string) => checkControllerDeclarations(parseMarkup(value), [V2_WEB_STATS_REQUIREMENT], { route, surface: 'xpanel', qualified: true })
+    expect(check(html)).toEqual([])
+    expect(html).toContain('data-chart-state="loaded"')
+    for (const name of ['selection', 'days', 'engines']) expect(check(html.replace(`id="v2-web-stats-${name}-heading"`, 'id="missing"'))).not.toEqual([])
+    expect(check(html.replace('method="get"', 'method="post"'))).not.toEqual([])
+    expect(check(html.replace('data-chart-state="loaded"', 'data-chart-state="verified"'))).not.toEqual([])
+  })
   it.each([
     { route: '/metrics/traffic', locale: 'en' }, { route: '/metrics/traffic', locale: 'ar' },
-    { route: '/metrics/web-stats', locale: 'en' }, { route: '/metrics/web-stats', locale: 'ar' },
   ] as const)('binds the real labelled analytics cards and GET-only selection for $route ($locale)', ({ route, locale }) => {
     const counterpart = V2_OBSERVATION_COUNTERPARTS.find(item => item.route === route)
     if (!counterpart) throw new Error('Missing analytics counterpart')
     const account: Account = { id: 'analytics-account', username: 'alice', uid: 20014, gid: 20014, home: '/home/alice', primaryDomain: 'alice.example', planId: 'plan', ownerId: null, status: 'active', suspendReason: null, contactEmail: '', ipv4: '192.0.2.10', shell: 'none', createdAt: '2026-10-29T00:00:00Z' }
     const domain: Domain = { id: 'analytics-domain', accountId: account.id, name: account.primaryDomain, kind: 'primary', parentId: null, docRoot: '/home/alice/public_html', siteType: 'php', upstream: null, redirect: null, php: { version: '8.3', handler: 'fpm', ini: {}, fpm: { mode: 'ondemand', maxChildren: 4, startServers: 1, minSpareServers: 1, maxSpareServers: 2, maxRequests: 0, processIdleTimeoutSec: 10 } }, wildcard: false, certificateId: null, suspended: false, expiresAt: null, pathQuotaMb: 'unlimited' }
-    const html = renderV2PanelTraffic({ locale, account, domains: [domain] }, { canRead: true, canManage: false, domainSelectionAvailable: true }, route)
+    const html = renderV2PanelTraffic({ locale, account, domains: [domain] }, { canRead: true, canManage: false, domainSelectionAvailable: true })
     const check = (value: string) => checkControllerDeclarations(parseMarkup(value), [counterpart.requirement], { route, surface: 'xpanel', qualified: true })
     expect(check(html)).toEqual([])
     expect(html).toContain(`method="get" action="${route}"`)

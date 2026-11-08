@@ -6,7 +6,7 @@ import { renderWhmSurface } from './surfaces/xwhm.ts'
 import { ACCOUNT_LIST_CLIENT_SCRIPT, accountListModel, accountListRowAttributes, accountPlanPreviewModel, renderAccountListControls, renderAccountPlanPreview } from './account-list.ts'
 
 const root = { kind: 'root' as const, id: 'root', username: 'operator' }
-const reseller: Reseller = { id: 'owner-one', username: 'Owner One', acl: ['list-accounts'], maxAccounts: 100, totalDiskMb: 1000000, totalBandwidthMb: 1000000, oversell: false, nameservers: [], delegatedIps: [] }
+const reseller: Reseller = { id: 'owner-one', username: 'Owner One', acl: ['list-accounts'], maxAccounts: 100, totalDiskMb: 1000000, totalBandwidthMb: 1000000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
 const plan = defaultPlan({ id: 'plan-one', name: 'FirstPlan', featureListId: 'features-one' })
 const row = (n: number, patch: Partial<Account> = {}): Account => ({ id: 'internal-' + n, username: 'user' + n, uid: 20000 + n, gid: 20000 + n, home: '/home/user' + n, primaryDomain: 'user' + n + '.example.test', planId: plan.id, ownerId: reseller.id, status: 'active', suspendReason: null, contactEmail: 'owner@example.test', ipv4: '192.0.2.10', shell: 'none', createdAt: '2026-10-23T00:00:00Z', ...patch })
 afterEach(() => { document.body.replaceChildren(); document.documentElement.lang = 'en' })

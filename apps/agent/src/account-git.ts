@@ -1,27 +1,30 @@
 import { createHash } from 'node:crypto'
 import { fail, isXpanelError } from '@xpanel/core'
 import type { Account, Plan, FeatureList } from '@xpanel/core'
-import { GIT_LIMITS, isGitPath, isGitBranch, isGitHttpsUrl } from '../../../packages/os/src/git-command.ts'
+import { GIT_DEPLOY_FILE, GIT_DEPLOY_LIMITS, GIT_LIMITS, isGitPath, isGitBranch, isGitHttpsUrl } from '../../../packages/os/src/git-command.ts'
 import type { GitOperation } from '../../../packages/os/src/git-command.ts'
 import type { AccountGitRun } from './account-git-runner.ts'
 import type { FileText, JailedFileManager } from './file-manager.ts'
 import type { AgentCallerIdentity } from './server.ts'
+import { parseGitViewRequest, runGitView } from './account-git-view.ts'
 
 export const GIT_REGISTRY = '.xpanel-git-repositories.json'
+export const GIT_DEPLOY_LOG = '.xpanel-git-deployments.json'
 export const GIT_FEATURE = 'git-version-control'
 const REVISION = /^[0-9a-f]{64}$/
 const HASH = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
 const unchanged = { stateChanged: false }
-export type GitRequest = { op: 'list' } | { op: 'inspect'; path: string } | { op: 'init'; path: string; branch: string; expectedRevision: string } | { op: 'clone'; path: string; url: string; expectedRevision: string } | { op: 'remove'; path: string; expectedRevision: string } | { op: 'checkout'; path: string; branch: string; expectedHead: string; expectedRevision: string } | { op: 'pull'; path: string; expectedHead: string; expectedRevision: string }
+export type GitRequest = { op: 'list' } | { op: 'inspect'; path: string } | { op: 'init'; path: string; branch: string; expectedRevision: string } | { op: 'clone'; path: string; url: string; expectedRevision: string } | { op: 'remove'; path: string; expectedRevision: string } | { op: 'deploy'; path: string; expectedRevision: string } | { op: 'checkout'; path: string; branch: string; expectedHead: string; expectedRevision: string } | { op: 'pull'; path: string; expectedHead: string; expectedRevision: string }
 export interface GitRepositoryView { path: string; branch: string; head: string | null; dirty: boolean; changedFiles: number; branches: { name: string; hash: string; current: boolean }[]; commits: { hash: string; at: string; subject: string }[]; remote: string | null }
-export interface AccountGitView { context: { accountId: string; username: string }; revision: string; repositories: string[]; selected: GitRepositoryView | null; nativeAvailable: boolean; application: { op: GitRequest['op']; state: 'read' | 'verified'; verificationRequired: false } }
+export interface GitDeployment { commit: string; at: string }
+export interface AccountGitView { context: { accountId: string; username: string }; revision: string; repositories: string[]; selected: GitRepositoryView | null; deployed: GitDeployment | null; nativeAvailable: boolean; application: { op: GitRequest['op']; state: 'read' | 'verified'; verificationRequired: false } }
 type GitFiles = Pick<JailedFileManager, 'list' | 'readText' | 'writeTextChecked' | 'mkdir'>
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 export function parseGitRequest(method: string, raw?: unknown): GitRequest {
   if (method === 'GET') return { op: 'list' }
   if (method !== 'POST') return fail('VALIDATION', 'unsupported Git method', unchanged)
   if (!object(raw) || typeof raw.op !== 'string') return fail('VALIDATION', 'a Git operation is required', unchanged)
-  const keys: Record<string, string[]> = { inspect: ['op', 'path'], init: ['op', 'path', 'branch', 'expectedRevision'], clone: ['op', 'path', 'url', 'expectedRevision'], remove: ['op', 'path', 'expectedRevision'], checkout: ['op', 'path', 'branch', 'expectedHead', 'expectedRevision'], pull: ['op', 'path', 'expectedHead', 'expectedRevision'] }
+  const keys: Record<string, string[]> = { inspect: ['op', 'path'], init: ['op', 'path', 'branch', 'expectedRevision'], clone: ['op', 'path', 'url', 'expectedRevision'], remove: ['op', 'path', 'expectedRevision'], checkout: ['op', 'path', 'branch', 'expectedHead', 'expectedRevision'], pull: ['op', 'path', 'expectedHead', 'expectedRevision'], deploy: ['op', 'path', 'expectedRevision'] }
   const expected = keys[raw.op]
   if (!expected || Object.keys(raw).length !== expected.length || expected.some(key => !Object.hasOwn(raw, key)) || !isGitPath(raw.path)) return fail('VALIDATION', 'invalid Git request fields or repository path', unchanged)
   if (raw.op !== 'inspect' && (typeof raw.expectedRevision !== 'string' || !REVISION.test(raw.expectedRevision))) return fail('VALIDATION', 'a current repository list revision is required', unchanged)
@@ -63,6 +66,43 @@ export function parseGitHistory(text: string): GitRepositoryView['commits'] {
     if (first < 0 || second < 0 || !HASH.test(hash) || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/.test(at) || !Number.isFinite(Date.parse(at)) || subject.length > 500 || /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(subject)) return fail('PRECONDITION_FAILED', 'Git returned malformed history', unchanged)
     return { hash, at, subject }
   })
+}
+/** The deployment.tasks list of the deployment file: a shell line per item, nothing else of YAML is read. */
+export function parseGitDeployTasks(text: string): string[] {
+  const unsupported = (): never => fail('PRECONDITION_FAILED', 'the deployment file needs a deployment: section with a tasks: list', unchanged)
+  if (Buffer.byteLength(text) > GIT_DEPLOY_LIMITS.fileBytes) return unsupported()
+  const lines = text.split('\n').map(line => line.trimEnd()).filter(line => line && line !== '---' && !line.trimStart().startsWith('#'))
+  if (lines[0] !== 'deployment:' || !/^\s+tasks:$/.test(lines[1] ?? '')) return unsupported()
+  const tasks = lines.slice(2).map(line => /^\s+- (.+)$/.exec(line)?.[1] ?? unsupported())
+  return tasks.length && tasks.length <= GIT_DEPLOY_LIMITS.tasks ? tasks : unsupported()
+}
+async function deployLog(files: GitFiles): Promise<{ document: FileText | null; deployments: Record<string, GitDeployment> }> {
+  const entry = (await files.list('', { showHidden: true })).find(item => item.name === GIT_DEPLOY_LOG)
+  if (entry && (entry.kind !== 'file' || entry.sizeBytes > 8192)) return fail('PRECONDITION_FAILED', 'deployment record is not a regular bounded file', unchanged)
+  const document = entry ? await files.readText(GIT_DEPLOY_LOG) : null
+  try { const value: unknown = document ? JSON.parse(document.content) : {}; return { document, deployments: object(value) ? value as Record<string, GitDeployment> : {} } }
+  catch { return fail('PRECONDITION_FAILED', 'deployment record is malformed', unchanged) }
+}
+const validDeployment = (value: GitDeployment | undefined): GitDeployment | null => value && HASH.test(value.commit) && typeof value.at === 'string' && Number.isFinite(Date.parse(value.at)) ? { commit: value.commit, at: value.at } : null
+async function deployHead(input: { account: Account; files: GitFiles; run: AccountGitRun; path: string; authorize(): Promise<void>; now?: () => Date }): Promise<{ selected: GitRepositoryView; deployed: GitDeployment }> {
+  const { account, files, run, path } = input
+  const selected = await inspect(account, path, files, run)
+  if (selected.dirty) return fail('CONFLICT', 'commit or discard the working tree changes before deploying', { ...unchanged, reason: 'dirty_tree' })
+  if (!selected.head) return fail('PRECONDITION_FAILED', 'deployment needs a branch with at least one commit', unchanged)
+  if (account.shell === 'none') return fail('FORBIDDEN', 'deployment tasks need shell access on the account', unchanged)
+  const entry = (await files.list(path, { showHidden: true })).find(item => item.name === GIT_DEPLOY_FILE)
+  if (entry?.kind !== 'file') return fail('PRECONDITION_FAILED', 'this repository has no ' + GIT_DEPLOY_FILE + ' deployment file', unchanged)
+  const tasks = parseGitDeployTasks((await files.readText(path + '/' + GIT_DEPLOY_FILE)).content), log = await deployLog(files)
+  await input.authorize()
+  let finished = false
+  try {
+    const result = await run(account, path, { op: 'deploy', script: tasks.join('\n') })
+    finished = result.ok && result.code === 0
+  } catch { /* the outcome stays unverified below */ }
+  if (!finished) return fail('SERVICE_UNAVAILABLE', 'a deployment task failed or was not verified; review the site before retrying', { stateChanged: true, unknownOutcome: true, verificationRequired: true, path })
+  const deployed = { commit: selected.head, at: (input.now ?? (() => new Date()))().toISOString() }
+  await input.authorize(); await files.writeTextChecked(GIT_DEPLOY_LOG, JSON.stringify({ ...log.deployments, [path]: deployed }) + '\n', log.document, 0o600)
+  return { selected, deployed }
 }
 async function registry(files: GitFiles): Promise<{ document: FileText | null; paths: string[]; revision: string }> {
   const entry = (await files.list('', { showHidden: true })).find(item => item.name === GIT_REGISTRY)
@@ -119,14 +159,19 @@ export async function runGitRequest(input: { account: Account; files: GitFiles; 
   const { account, files, request, run } = input
   await input.authorize()
   const before = await registry(files)
-  const view = (data: typeof before, selected: GitRepositoryView | null): AccountGitView => ({ context: { accountId: account.id, username: account.username }, revision: data.revision, repositories: data.paths, selected, nativeAvailable: !!run, application: { op: request.op, state: request.op === 'list' || request.op === 'inspect' ? 'read' : 'verified', verificationRequired: false } })
+  const view = (data: typeof before, selected: GitRepositoryView | null, deployed: GitDeployment | null = null): AccountGitView => ({ context: { accountId: account.id, username: account.username }, revision: data.revision, repositories: data.paths, selected, deployed, nativeAvailable: !!run, application: { op: request.op, state: request.op === 'list' || request.op === 'inspect' ? 'read' : 'verified', verificationRequired: false } })
   if (request.op === 'list') { await input.authorize(); return view(before, null) }
   if (request.op === 'inspect') {
     if (!before.paths.includes(request.path)) return fail('NOT_FOUND', 'repository is not registered', unchanged)
     if (!run) return fail('PRECONDITION_FAILED', 'the isolated Git runner is unavailable', unchanged)
-    const selected = await inspect(account, request.path, files, run); await input.authorize(); return view(before, selected)
+    const selected = await inspect(account, request.path, files, run), deployed = validDeployment((await deployLog(files)).deployments[request.path]); await input.authorize(); return view(before, selected, deployed)
   }
   if (request.expectedRevision !== before.revision) return fail('CONFLICT', 'repository list changed; read it again', unchanged)
+  if (request.op === 'deploy') {
+    if (!before.paths.includes(request.path)) return fail('NOT_FOUND', 'repository is not registered', unchanged)
+    if (!run) return fail('PRECONDITION_FAILED', 'the isolated Git runner is unavailable', unchanged)
+    const done = await deployHead({ account, files, run, path: request.path, authorize: input.authorize }); await input.authorize(); return view(before, done.selected, done.deployed)
+  }
   if (request.op === 'remove') {
     if (!before.paths.includes(request.path)) return fail('NOT_FOUND', 'repository is not registered', unchanged)
     await input.authorize()
@@ -190,15 +235,17 @@ export interface AccountGitRouteDeps {
   audit(entry: { actor: string; action: string; target: string; detail: Record<string, unknown>; outcome: 'ok' | 'failed'; principalId: string }): Promise<unknown>
 }
 export async function handleAccountGitRoute(req: Request, url: URL, method: string, deps: AccountGitRouteDeps): Promise<Response | null> {
-  const match = /^\/accounts\/([a-z][a-z0-9]{0,15})\/git$/.exec(url.pathname)
+  const match = /^\/accounts\/([a-z][a-z0-9]{0,15})\/git(\/view)?$/.exec(url.pathname)
   if (!match) return null
+  if (match[2] && method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
   if (!['GET', 'POST'].includes(method)) return new Response(null, { status: 405, headers: { allow: 'GET, POST' } })
-  if (url.search) return fail('VALIDATION', 'Git requests do not accept query selectors', unchanged)
+  if (url.search && !match[2]) return fail('VALIDATION', 'Git requests do not accept query selectors', unchanged)
   const caller = deps.caller
   if (caller.role !== 'user' || !caller.accountId) return fail('FORBIDDEN', 'Git requires the signed-in account owner', unchanged)
   let raw: unknown
   if (method === 'POST') { const text = await req.text(); if (text.length > 2048) return fail('VALIDATION', 'Git request is too large', unchanged); try { raw = JSON.parse(text) } catch { return fail('VALIDATION', 'Git request must be JSON', unchanged) } }
-  const request = parseGitRequest(method, raw), account = await deps.store.getAccountByUsername(match[1]!)
+  const viewRequest = match[2] ? parseGitViewRequest(url.searchParams) : null
+  const request = viewRequest ? { op: 'inspect' as const, path: viewRequest.path } : parseGitRequest(method, raw), account = await deps.store.getAccountByUsername(match[1]!)
   if (!account || account.id !== caller.accountId) return fail('FORBIDDEN', 'Git account does not match the current owner', unchanged)
   return deps.store.withAccountLifecycleLease(account.id, async fresh => {
     const authorize = async (): Promise<Plan> => {
@@ -207,6 +254,15 @@ export async function handleAccountGitRoute(req: Request, url: URL, method: stri
       return plan
     }
     const plan = await authorize(), mutation = !['list', 'inspect'].includes(request.op)
+    if (viewRequest) {
+      const files = deps.files(fresh, plan)
+      if (!(await registry(files)).paths.includes(viewRequest.path)) return fail('NOT_FOUND', 'repository is not registered', unchanged)
+      if (!deps.run) return fail('PRECONDITION_FAILED', 'the isolated Git runner is unavailable', unchanged)
+      await repositoryShape(files, viewRequest.path)
+      const result = await runGitView(fresh, viewRequest, deps.run)
+      await authorize()
+      return new Response(JSON.stringify(result), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
+    }
     let result: AccountGitView
     try { result = await runGitRequest({ account: fresh, files: deps.files(fresh, plan), run: deps.run, request, authorize: async () => { await authorize() } }) }
     catch (error) { if (mutation) await deps.audit({ actor: caller.actor, principalId: caller.principalId, action: 'account.git.' + request.op, target: 'account:' + fresh.username, outcome: 'failed', detail: { verificationRequired: isXpanelError(error) && error.detail?.verificationRequired === true } }).catch(() => {}); throw error }

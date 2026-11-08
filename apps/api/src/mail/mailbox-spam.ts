@@ -9,16 +9,16 @@ import { assertMailboxMetadataAuthority } from './metadata-authority.ts'
 import { freshMailboxTool, mailboxToolBody, mailboxToolFile, mailboxToolObject, mailboxToolRevision, openMailboxTool, MAILBOX_TOOL_UNCHANGED } from './mailbox-spam-authority.ts'
 import type { BoundMailboxTool, MailboxToolsPorts } from './mailbox-spam-authority.ts'
 
-export interface MailboxSpamFields extends Pick<SpamSettingsState, 'enabled' | 'addHeaderScore' | 'spamBoxEnabled' | 'allowlist' | 'blocklist'> { inherit: boolean }
+export interface MailboxSpamFields extends Pick<SpamSettingsState, 'enabled' | 'addHeaderScore' | 'spamBoxEnabled' | 'allowlist' | 'blocklist'> { inherit: boolean; autoDeleteScore: number | null }
 interface MailboxSpamRecord extends MailboxSpamFields { mailbox: string; ownerAuthority: MailboxMetadataAuthority; updatedAt: string }
 export interface MailboxSpamView {
   context: { mailbox: string }
   revision: string
-  inherited: { source: 'account' | 'default'; enabled: boolean; addHeaderScore: number; spamBoxEnabled: boolean }
+  inherited: { source: 'account' | 'default'; enabled: boolean; addHeaderScore: number; spamBoxEnabled: boolean; autoDeleteFloor: number | null }
   preferences: (MailboxSpamFields & { updatedAt: string }) | null
   effective: { enabled: boolean; addHeaderScore: number; spamBoxEnabled: boolean; source: 'account' | 'mailbox' }
   review: 'mailbox_metadata_binding_unverified' | null
-  capabilities: { canSave: boolean; mta: 'unverified'; sieve: 'unverified'; boxTrapper: false }
+  capabilities: { canSave: boolean; mta: 'unverified'; sieve: 'unverified' }
   application: { status: 'saved_only'; applied: false }
 }
 /** The mailbox Sieve policy is rendered by the host reconcile, like the other mail routing writes. */
@@ -27,16 +27,17 @@ export interface MailboxSpamRouting {
   /** a failed configuration test restores `restore.previous` and throws */
   apply: (request: Request, revision: number, restore: { path: string; previous: unknown }) => Promise<{ nativeApplied: boolean }>
 }
-const FIELDS = ['inherit', 'enabled', 'addHeaderScore', 'spamBoxEnabled', 'allowlist', 'blocklist'] as const
+const FIELDS = ['inherit', 'enabled', 'addHeaderScore', 'spamBoxEnabled', 'autoDeleteScore', 'allowlist', 'blocklist'] as const
 const application = { status: 'saved_only' as const, applied: false as const }
 const review = (): never => fail('PRECONDITION_FAILED', 'saved spam preferences require provider review', MAILBOX_TOOL_UNCHANGED)
 const ownPath = (ports: MailboxToolsPorts, selected: BoundMailboxTool) => mailboxToolFile(ports, 'webmail', 'spam-preferences', encodeURIComponent(selected.authority.mailbox) + '.json')
 function inheritedSpam(raw: unknown): MailboxSpamView['inherited'] {
-  if (raw === null) return { source: 'default', enabled: true, addHeaderScore: 5, spamBoxEnabled: true }
+  if (raw === null) return { source: 'default', enabled: true, addHeaderScore: 5, spamBoxEnabled: true, autoDeleteFloor: null }
   if (!mailboxToolObject(raw)) return review()
   const { enabled, spamBoxEnabled, addHeaderScore } = raw
   if (typeof enabled !== 'boolean' || typeof spamBoxEnabled !== 'boolean' || typeof addHeaderScore !== 'number' || !Number.isFinite(addHeaderScore) || addHeaderScore < 0 || addHeaderScore > 100) return review()
-  return { source: 'account', enabled, addHeaderScore, spamBoxEnabled }
+  // An owner who turned auto-delete on for the account sets the lowest score a mailbox may delete at.
+  return { source: 'account', enabled, addHeaderScore, spamBoxEnabled, autoDeleteFloor: raw.autoDeleteSpam === true && typeof raw.autoDeleteScore === 'number' ? raw.autoDeleteScore : null }
 }
 function addresses(value: unknown): string[] {
   if (!Array.isArray(value) || value.length > 100) return fail('VALIDATION', 'sender lists permit at most 100 exact addresses', MAILBOX_TOOL_UNCHANGED)
@@ -46,9 +47,11 @@ function addresses(value: unknown): string[] {
 }
 export function parseMailboxSpamFields(value: Record<string, unknown>): MailboxSpamFields {
   if (typeof value.inherit !== 'boolean' || typeof value.enabled !== 'boolean' || typeof value.spamBoxEnabled !== 'boolean' || typeof value.addHeaderScore !== 'number' || !Number.isFinite(value.addHeaderScore) || value.addHeaderScore < 0 || value.addHeaderScore > 100) return fail('VALIDATION', 'spam preferences require booleans and a score from 0 through 100', MAILBOX_TOOL_UNCHANGED)
+  const autoDeleteScore = value.autoDeleteScore ?? null
+  if (autoDeleteScore !== null && (!Number.isInteger(autoDeleteScore) || (autoDeleteScore as number) < 1 || (autoDeleteScore as number) > 50)) return fail('VALIDATION', 'the spam auto-delete threshold must be a whole number from 1 through 50', { ...MAILBOX_TOOL_UNCHANGED, reason: 'OUT_OF_RANGE' })
   const allowlist = addresses(value.allowlist), blocklist = addresses(value.blocklist)
   if (allowlist.some(address => blocklist.includes(address))) return fail('VALIDATION', 'an address cannot appear in both sender lists', MAILBOX_TOOL_UNCHANGED)
-  return { inherit: value.inherit, enabled: value.enabled, addHeaderScore: value.addHeaderScore, spamBoxEnabled: value.spamBoxEnabled, allowlist, blocklist }
+  return { inherit: value.inherit, enabled: value.enabled, addHeaderScore: value.addHeaderScore, spamBoxEnabled: value.spamBoxEnabled, autoDeleteScore: autoDeleteScore as number | null, allowlist, blocklist }
 }
 async function readMailboxSpam(ports: MailboxToolsPorts, selected: BoundMailboxTool): Promise<{ view: MailboxSpamView; stored: Record<string, unknown> | null }> {
   const authority = selected.authority, raw = await readJsonIfExists<unknown>(mailboxToolFile(ports, 'mail', 'accounts', authority.accountId, 'spam-settings.json'))
@@ -63,7 +66,7 @@ async function readMailboxSpam(ports: MailboxToolsPorts, selected: BoundMailboxT
   }
   const custom = !!preferences && !preferences.inherit, effective = { enabled: inherited.enabled && (custom ? preferences!.enabled : true), addHeaderScore: custom ? preferences!.addHeaderScore : inherited.addHeaderScore, spamBoxEnabled: custom ? preferences!.spamBoxEnabled : inherited.spamBoxEnabled, source: custom ? 'mailbox' as const : 'account' as const }
   const revision = createHash('sha256').update(JSON.stringify({ namespace: 'mailbox-spam:v1', authority, inherited, preferences, review: stored !== null && !matched })).digest('hex')
-  return { stored, view: { context: { mailbox: authority.mailbox }, revision, inherited, preferences, effective, review: stored !== null && !matched ? 'mailbox_metadata_binding_unverified' : null, capabilities: { canSave: stored === null || matched, mta: 'unverified', sieve: 'unverified', boxTrapper: false }, application } }
+  return { stored, view: { context: { mailbox: authority.mailbox }, revision, inherited, preferences, effective, review: stored !== null && !matched ? 'mailbox_metadata_binding_unverified' : null, capabilities: { canSave: stored === null || matched, mta: 'unverified', sieve: 'unverified' }, application } }
 }
 /** Mailbox overrides share the existing account policy; a save is reconciled on the host, while MTA/Sieve delivery stays unclaimed here. */
 export async function handleMailboxSpamRoute(request: Request, url: URL, method: string, ports: MailboxToolsPorts & { routing: MailboxSpamRouting }): Promise<Response | null> {
@@ -81,6 +84,8 @@ export async function handleMailboxSpamRoute(request: Request, url: URL, method:
     if (!body) { await freshMailboxTool(request, ports, selected); return mailboxJson(before.view) }
     if (before.stored) assertMailboxMetadataAuthority(before.stored.mailbox, before.stored.ownerAuthority, selected.authority)
     if (body.expectedRevision !== before.view.revision) return fail('CONFLICT', 'spam policy changed; reload before saving', MAILBOX_TOOL_UNCHANGED)
+    const floor = before.view.inherited.autoDeleteFloor
+    if (fields!.autoDeleteScore !== null && floor !== null && fields!.autoDeleteScore < floor) return fail('VALIDATION', 'the spam auto-delete threshold is below the limit the account owner set', { ...MAILBOX_TOOL_UNCHANGED, reason: 'below_account_limit' })
     const currentFields = before.view.preferences ? Object.fromEntries(FIELDS.map(key => [key, before.view.preferences![key]])) : null
     if (JSON.stringify(currentFields) === JSON.stringify(fields)) return mailboxJson({ ...before.view, stateChanged: false })
     const record: MailboxSpamRecord = { ...fields!, mailbox: selected.authority.mailbox, ownerAuthority: selected.authority, updatedAt: (ports.now ?? (() => new Date()))().toISOString() }

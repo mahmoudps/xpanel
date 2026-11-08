@@ -11,10 +11,13 @@ import {
   phpCgiBinary,
   XP_PATHS,
 } from './paths.ts'
+import { ACCOUNT_PAGE_ALIAS, accountPageDir } from './account-pages.ts'
 import { phpIsolation, iniEntries, type PhpIsolationOptions } from './php.ts'
 import { apacheQuote, iniValue, shQuote } from './quote.ts'
+import { renderApacheAuthLog } from './apache-auth-log.ts'
 import { groupSites, siteMode, type RenderTime, type SiteGroup } from './sites.ts'
 import { assertAccount, assertBackendPort, assertDomainName, assertInt, assertSafeAbsPath, assertSystemUser, invalid } from './validate.ts'
+import { assertWebDirectives, includeLines } from './web-directives.ts'
 
 const indent = (lines: string[], n = 1): string[] => lines.map((l) => (l === '' ? l : `${'    '.repeat(n)}${l}`))
 const section = (open: string, close: string, body: string[]): string[] => [`<${open}>`, ...indent(body), `</${close}>`]
@@ -123,8 +126,10 @@ export const renderApacheBase = (settings: ServerSettings, os: OsProfile): Rende
   const hostname = assertDomainName(settings.hostname, 'hostname')
   assertSystemUser(os.paths.apacheUser, 'Apache user')
   const addr = `127.0.0.1:${port}`
+  const w = assertWebDirectives(settings)
   const lines = [
     '# Managed by xPanel: Apache behind the Nginx edge',
+    ...includeLines('pre-main', w.includes.apachePreMain),
     `Listen ${addr}`,
     `ServerName ${hostname}`,
     'ServerTokens Prod',
@@ -133,19 +138,24 @@ export const renderApacheBase = (settings: ServerSettings, os: OsProfile): Rende
     'HostnameLookups Off',
     // itk children cannot switch identity on a reused connection; Nginx opens one per request
     'KeepAlive Off',
-    'Timeout 300',
+    `Timeout ${w.timeoutSec}`,
+    // per process started by Apache (CGI, suPHP); PHP-FPM pools take their limits from the account slice
+    ...(w.rlimitMemMb === null ? [] : [`RLimitMEM ${w.rlimitMemMb * 1_048_576}`]),
+    ...(w.rlimitCpuSec === null ? [] : [`RLimitCPU ${w.rlimitCpuSec}`]),
     '',
     'RemoteIPHeader X-Real-IP',
     'RemoteIPInternalProxy 127.0.0.1 ::1',
     'SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on',
     'LogFormat "%a %v %l %u %t \\"%r\\" %>s %O %D \\"%{Referer}i\\" \\"%{User-Agent}i\\"" xpanel_vhost',
     `CustomLog ${apacheQuote(`${XP_PATHS.apacheLogDir}/access.log`)} xpanel_vhost`,
+    ...renderApacheAuthLog(),
     `ErrorLog ${apacheQuote(`${XP_PATHS.apacheLogDir}/error.log`)}`,
     '',
-    'DirectoryIndex index.php index.html index.htm',
+    `DirectoryIndex ${w.directoryIndex.join(' ')}`,
     ...section('FilesMatch "^(\\.ht.*|\\.user\\.ini|php\\.ini)$"', 'FilesMatch', ['Require all denied']),
     ...section('IfModule mod_userdir.c', 'IfModule', ['UserDir disabled']),
     '',
+    ...includeLines('pre-vhost', w.includes.apachePreVhost),
     '# first vhost on the address: answers Host headers no account has bound',
     ...section(`VirtualHost ${addr}`, 'VirtualHost', [
       `ServerName ${hostname}`,
@@ -158,6 +168,12 @@ export const renderApacheBase = (settings: ServerSettings, os: OsProfile): Rende
     ]),
   ]
   return { path: `${vhostDir(os)}/000-xpanel-base.conf`, content: `${lines.join('\n')}\n`, mode: 0o644, owner: 'root', group: 'root' }
+}
+
+/** Include Editor post-vhost text, in a file Apache reads after every account vhost (they are named xpanel-*). */
+export const renderApachePostVhostInclude = (settings: ServerSettings, os: OsProfile): RenderedFile | null => {
+  const lines = includeLines('post-vhost', assertWebDirectives(settings).includes.apachePostVhost)
+  return lines.length ? { path: `${vhostDir(os)}/zzz-xpanel-post-vhost.conf`, content: ['# Managed by xPanel: Include Editor post-vhost text', ...lines].join('\n'), mode: 0o644, owner: 'root', group: 'root' } : null
 }
 
 export const apacheConfigTest = (os: OsProfile): ConfigTest => ({
@@ -212,7 +228,11 @@ export interface ApacheVhostOptions {
   now?: RenderTime
   /** optional mpm-itk per-vhost concurrency limit (MaxClientsVHost) */
   maxClientsVHost?: number
+  /** the account's Web Template Editor page set; absent keeps the web server's own answer for a site with no index */
+  pageScope?: string
 }
+
+interface DefaultPage { scope: string | undefined; fallbackIndex: string[] }
 
 /** Apache reads config lines of at most 8 KiB (MAX_STRING_LEN); keep each ServerAlias well below. */
 const ALIASES_PER_LINE = 16
@@ -224,13 +244,19 @@ const serverNameLines = (g: SiteGroup): string[] => {
   return lines
 }
 
+/** cPanel's default page for a site with no index: the last index entry is a root-owned page outside the document root. */
+const defaultPage = (page: DefaultPage | undefined, indexFiles: string[] | undefined): { lines: string[]; index: string[] | undefined } => !page ? { lines: [], index: indexFiles === undefined ? undefined : validateDomainIndexFiles(indexFiles) } : {
+  lines: [`Alias ${ACCOUNT_PAGE_ALIAS} ${apacheQuote(accountPageDir('default', page.scope))}`, ...section(`Directory ${apacheQuote(accountPageDir('default', page.scope))}`, 'Directory', ['AllowOverride None', 'Options None', 'Require all granted'])],
+  index: [...(indexFiles === undefined ? page.fallbackIndex : validateDomainIndexFiles(indexFiles)), `${ACCOUNT_PAGE_ALIAS}/index.html`],
+}
+
 const docDirectory = (docRoot: string, extra: string[], execCgi: boolean, indexFiles?: string[]): string[] =>
   section(`Directory ${apacheQuote(docRoot)}`, 'Directory', [
     'AllowOverride All',
     `Options -Indexes +SymLinksIfOwnerMatch${execCgi ? ' +ExecCGI' : ''}`,
     'Require all granted',
     // mod_dir DirectoryIndex adds within a context; reset before replacing (https://httpd.apache.org/docs/2.4/mod/mod_dir.html).
-    ...(indexFiles === undefined ? [] : ['DirectoryIndex disabled', `DirectoryIndex ${validateDomainIndexFiles(indexFiles).join(' ')}`]),
+    ...(indexFiles === undefined ? [] : ['DirectoryIndex disabled', `DirectoryIndex ${indexFiles.join(' ')}`]),
     ...extra,
   ])
 
@@ -240,7 +266,7 @@ const vhostBody = (
   os: OsProfile,
   mpm: ApacheMpm,
   settings: ServerSettings,
-  opts: { now?: RenderTime; maxClientsVHost?: number } = {},
+  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string } = {},
 ): string[] => {
   const d = g.main
   const user = account.username
@@ -261,25 +287,26 @@ const vhostBody = (
   if (mode === 'suspended') {
     return [
       ...names,
-      `DocumentRoot ${apacheQuote(XP_PATHS.suspendedDir)}`,
+      `DocumentRoot ${apacheQuote(accountPageDir('suspended', opts.pageScope))}`,
       ...identity,
-      ...section(`Directory ${apacheQuote(XP_PATHS.suspendedDir)}`, 'Directory', ['AllowOverride None', 'Options None', 'Require all granted']),
+      ...section(`Directory ${apacheQuote(accountPageDir('suspended', opts.pageScope))}`, 'Directory', ['AllowOverride None', 'Options None', 'Require all granted']),
       'RedirectMatch 302 "^/(?!index\\.html$)" "/index.html"',
     ]
   }
-  const head = [...names, `DocumentRoot ${apacheQuote(d.docRoot)}`, ...identity]
+  const page = defaultPage(opts.pageScope === undefined ? undefined : { scope: opts.pageScope, fallbackIndex: assertWebDirectives(settings).directoryIndex }, d.indexFiles)
+  const head = [...names, `DocumentRoot ${apacheQuote(d.docRoot)}`, ...identity, ...page.lines]
   if (mode === 'redirect' && d.redirect) {
     return [...head, `RedirectMatch ${d.redirect.code} "^/" ${apacheQuote(d.redirect.to)}`]
   }
   if (mode === 'upstream' || wiring === null) {
     const note = mode === 'upstream' ? [`# ${d.siteType} site: Nginx proxies it to its app upstream directly`] : []
-    return [...head, ...note, ...docDirectory(d.docRoot, [], false, mode === 'upstream' ? undefined : d.indexFiles), ...DENY_PHP]
+    return [...head, ...note, ...docDirectory(d.docRoot, [], false, mode === 'upstream' ? undefined : page.index), ...DENY_PHP]
   }
   const version = d.php.version
   if (wiring === 'fpm') {
     return [
       ...head,
-      ...docDirectory(d.docRoot, [], false, d.indexFiles),
+      ...docDirectory(d.docRoot, [], false, page.index),
       ...section('FilesMatch "\\.php$"', 'FilesMatch', [
         `SetHandler ${apacheQuote(`proxy:unix:${fpmSocketPath(user, version)}|fcgi://localhost`)}`,
       ]),
@@ -289,12 +316,12 @@ const vhostBody = (
     return [
       ...head,
       `SuexecUserGroup ${user} ${user}`,
-      ...docDirectory(d.docRoot, [`FcgidWrapper ${apacheQuote(cgiWrapperPath(user, version, 'fcgi', os))} .php`], true, d.indexFiles),
+      ...docDirectory(d.docRoot, [`FcgidWrapper ${apacheQuote(cgiWrapperPath(user, version, 'fcgi', os))} .php`], true, page.index),
       ...section('FilesMatch "\\.php$"', 'FilesMatch', ['SetHandler fcgid-script']),
     ]
   }
   const suexec = wiring === 'suphp-action' ? [`SuexecUserGroup ${user} ${user}`] : []
-  return [...head, ...suexec, ...docDirectory(d.docRoot, [], false, d.indexFiles), ...actionBlock(account, version, os)]
+  return [...head, ...suexec, ...docDirectory(d.docRoot, [], false, page.index), ...actionBlock(account, version, os)]
 }
 
 /** Deepest base name first; more labels than any legal name could have keeps the prefix positive. */
@@ -317,7 +344,7 @@ const renderGroupVhost = (
   g: SiteGroup,
   settings: ServerSettings,
   os: OsProfile,
-  opts: { now?: RenderTime; maxClientsVHost?: number } = {},
+  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string } = {},
 ): RenderedFile => {
   const mpm = assertApacheEngine(settings)
   const addr = `127.0.0.1:${assertBackendPort(settings)}`
@@ -349,6 +376,7 @@ export const renderApacheVhost = (
   return renderGroupVhost(account, g, settings, os, {
     ...(opts.now !== undefined && { now: opts.now }),
     ...(opts.maxClientsVHost !== undefined && { maxClientsVHost: opts.maxClientsVHost }),
+    ...(opts.pageScope !== undefined && { pageScope: opts.pageScope }),
   })
 }
 
@@ -358,7 +386,7 @@ export const renderApacheVhosts = (
   domains: Domain[],
   settings: ServerSettings,
   os: OsProfile,
-  opts: { now?: RenderTime; maxClientsVHost?: number } = {},
+  opts: { now?: RenderTime; maxClientsVHost?: number; pageScope?: string } = {},
 ): RenderedFile[] => {
   assertApacheEngine(settings)
   return groupSites(account, domains).map((g) => renderGroupVhost(account, g, settings, os, opts))
@@ -457,7 +485,7 @@ export const cgiWrapperDirs = (account: Account, settings: ServerSettings, os: O
 export const requiredApacheModules = (settings: ServerSettings, domains: Domain[] = []): string[] => {
   const mpm = assertApacheEngine(settings)
   // auth_basic, authn_core, authn_file and authz_user serve Directory Privacy's per-folder Basic auth.
-  const mods = new Set(['mpm_prefork', 'remoteip', 'setenvif', 'alias', 'dir', 'mime', 'authz_core', 'authz_host', 'rewrite', 'headers', 'auth_basic', 'authn_core', 'authn_file', 'authz_user'])
+  const mods = new Set(['mpm_prefork', 'remoteip', 'setenvif', 'alias', 'dir', 'mime', 'authz_core', 'authz_host', 'rewrite', 'headers', 'auth_basic', 'authn_core', 'authn_file', 'authz_user', 'status'])
   if (mpm === 'itk') mods.add('mpm_itk')
   for (const d of domains) {
     if (d.siteType !== 'php') continue

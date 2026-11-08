@@ -227,7 +227,7 @@ export function comparePackageVersions(family: SystemUpdateFamily, left: string,
 const UPGRADE_CHUNK = 200
 const UPGRADE_TITLE = msgid('Upgrade selected packages')
 const REFRESH_TITLE = msgid('Refresh package lists')
-const refreshStep = (family: SystemUpdateFamily): HostJobCommandStep => ({ id: 'refresh-lists', title: REFRESH_TITLE, argv: [...(family === 'debian' ? APT_UPDATE_ARGV : DNF_MAKECACHE_ARGV)], timeoutMs: 600_000, mutates: true })
+export const refreshStep = (family: SystemUpdateFamily): HostJobCommandStep => ({ id: 'refresh-lists', title: REFRESH_TITLE, argv: [...(family === 'debian' ? APT_UPDATE_ARGV : DNF_MAKECACHE_ARGV)], timeoutMs: 600_000, mutates: true })
 const verificationRun = (run: HostJobRun): SystemUpdateRun => argv => run(argv, { env: { LC_ALL: 'C' }, timeoutMs: 300_000 })
 
 /** DNF4 --assumeno transaction table: admit only install/upgrade sections and matching summary totals; any other shape is unavailable. */

@@ -270,7 +270,6 @@ export const renderAccountResources = (locale: Locale, uid: number, rows: readon
         <h1 id="xpanel-resources-heading" class="xp-page-title">${h(tx(locale, msgid('Resources & quotas')))}</h1>
         <p class="xp-prose xp-design-page__lede">${h(tx(locale, msgid('What this plan allows, what this host applies to the slice, and what is in use right now.')))}</p>
       </div>
-      ${soonBtn(locale, msgid('Refresh live values'), true)}
     </header>
     <p class="xp-prose" id="xp-board-unavailable-reason" role="status" data-resource-metrics="unavailable">${h(tx(locale, msgid('Resource measurements are not available yet. The plan limits below are still the stored values.')))}</p>
     <section class="xp-board-section" aria-labelledby="slice-title">

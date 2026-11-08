@@ -74,7 +74,7 @@ function bindMailxWhm(): void {
     const controls = (): void => {
       const writable = manage() && !!view && !busy
       refresh.disabled = busy || !admitted(); save.disabled = !writable; again.disabled = !writable || !view?.saved || view?.compositeRevision === null || view?.host !== 'connected'
-      form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('[data-mailx-field]').forEach(input => { if (input.dataset.mailxField !== 'countries') input.disabled = !writable })
+      form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('[data-mailx-field]').forEach(input => { input.disabled = !writable })
     }
     const fact = (key: string, content: string | Node): void => { const cell = root.querySelector<HTMLElement>('[data-mailx-fact="' + key + '"]'); if (cell) { cell.textContent = ''; cell.append(content) } }
     const technical = (value: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; return bdi }

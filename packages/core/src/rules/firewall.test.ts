@@ -6,6 +6,7 @@ import {
   cidrContains,
   defaultFirewallRules,
   MANAGEMENT_PUBLIC_PORTS,
+  DAV_PUBLIC_PORTS,
   MANAGEMENT_BACKEND_PORTS,
   evaluateFirewall,
   formatCidr,
@@ -204,7 +205,7 @@ describe('defaultFirewallRules', () => {
   it('is valid and opens management HTTPS, 80, 443 and SSH to the world', () => {
     expect(validateFirewallRules(rules)).toEqual(rules)
     const world = parseIp('198.51.100.7')!
-    for (const port of [22, 80, 443, ...MANAGEMENT_PUBLIC_PORTS]) expect(evaluateFirewall(rules, { ip: world, protocol: 'tcp', port }).action).toBe('accept')
+    for (const port of [22, 80, 443, ...MANAGEMENT_PUBLIC_PORTS, ...DAV_PUBLIC_PORTS]) expect(evaluateFirewall(rules, { ip: world, protocol: 'tcp', port }).action).toBe('accept')
     for (const port of [21, 25, 3306, 5432, 6379, 8080, 8443, ...MANAGEMENT_BACKEND_PORTS]) {
       expect(evaluateFirewall(rules, { ip: world, protocol: 'tcp', port }).action).toBe('drop')
     }
@@ -230,6 +231,8 @@ describe('defaultFirewallRules', () => {
     { ...settings, backendPort: 2087 },
     { ...settings, backendTlsPort: 8080 },
     { ...settings, panelPort: 0 },
+    { ...settings, panelPort: 2078 },
+    { ...settings, backendPort: 2080 },
     { ...settings, sshPort: 70000 },
   ])('rejects conflicting ports %o', (s) => {
     expect(code(() => defaultFirewallRules(s))).toBe('VALIDATION')
@@ -241,6 +244,10 @@ describe('management entry-point firewall boundaries', () => {
   const group = { ...settings, managementPorts: MANAGEMENT_PUBLIC_PORTS }
   const base = defaultFirewallRules(group)
   it.each(ports)('rejects tenant forwarding takeover of reserved management port %s', (port) => {
+    const forward = r('takeover', { kind: 'forward', port: String(port), forwardTo: '10.0.0.5:9000' })
+    expect(code(() => validateFirewallRuleSet([forward, ...base], { ...group, prefixLists: {} }))).toBe('VALIDATION')
+  })
+  it.each(DAV_PUBLIC_PORTS)('rejects tenant forwarding takeover of the DAV port %s', (port) => {
     const forward = r('takeover', { kind: 'forward', port: String(port), forwardTo: '10.0.0.5:9000' })
     expect(code(() => validateFirewallRuleSet([forward, ...base], { ...group, prefixLists: {} }))).toBe('VALIDATION')
   })

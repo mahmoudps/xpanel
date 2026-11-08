@@ -116,7 +116,7 @@ describe('account certificate lifecycle: upload, list and remove', () => {
     expect(executor.files.size).toBe(before)
   })
 
-  it('installs an owner upload as a manual-renewal certificate bound to the domain, without echoing key material', async () => {
+  it('installs an owner upload as a manual-renewal certificate bound to the domain, without echoing key material', { tags: ['slow'] }, async () => {
     const response = await alice('POST', '/api/accounts/alice/certificates/install', { domain: 'alice.example.test', expectedRevision: await revision(alice, 'alice'), ...upload })
     const text = await response.text()
     expect(response.status, text).toBe(200)
@@ -129,13 +129,10 @@ describe('account certificate lifecycle: upload, list and remove', () => {
     expect((await state.store.listDomains()).find(domain => domain.name === 'alice.example.test')?.certificateId).toBe(installedId)
   })
 
-  it('refuses removal by another tenant and of a foreign certificate id', async () => {
+  it('refuses removal by another tenant, then removes the owner certificate and reverts the domain to its fallback', { tags: ['slow'] }, async () => {
     expect((await bobby('DELETE', '/api/accounts/alice/certificates/' + installedId, { expectedRevision: await revision(alice, 'alice') })).status).toBe(404)
     expect((await bobby('DELETE', '/api/accounts/bobby/certificates/' + installedId, { expectedRevision: await revision(bobby, 'bobby') })).status).toBe(404)
     expect((await state.store.listCertificates()).map(certificate => certificate.id)).toEqual([installedId])
-  })
-
-  it('removes the owner certificate and reverts the domain to its fallback', async () => {
     const response = await alice('DELETE', '/api/accounts/alice/certificates/' + installedId, { expectedRevision: await revision(alice, 'alice') })
     const text = await response.text()
     expect(response.status, text).toBe(200)

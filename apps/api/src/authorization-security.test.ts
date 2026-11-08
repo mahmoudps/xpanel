@@ -7,6 +7,7 @@ import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
 import type { TestStateStoreHandle } from '@xpanel/state'
 import { join } from 'node:path'
 import { hashPasswordArgon2id, sha256Hex, sealTotpSecret } from './auth.ts'
+import { createMemoryDav } from './mail/dav-testkit.ts'
 import { createApiApp, listenApiServer } from './server.ts'
 import type { ApiApp } from './server.ts'
 
@@ -37,7 +38,7 @@ describe('HTTP authorization security regressions', () => {
     bob = await state.store.createAccount({ username: 'bobby', passwordHash, primaryDomain: 'bob.example.test', planId: plan.id, ownerId: null, contactEmail: 'owner@bob.example.test', ipv4: '192.0.2.10', shell: 'none', php })
     aliceId = (await createUserPrincipal(db.db, { username: alice.username, accountId: alice.id, passwordHash })).id
     for (const account of [alice, bob]) await state.store.createServiceUser({ accountId: account.id, login: `inbox@${account.primaryDomain}`, passwordHash: `{ARGON2ID}${passwordHash}`, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
-    app = createApiApp({ db: db.db, store: state.store, serverSecret: SERVER_SECRET })
+    app = createApiApp({ db: db.db, store: state.store, serverSecret: SERVER_SECRET, davExchange: createMemoryDav().exchange })
   })
 
   afterEach(async () => { await state.close(); await db.close() })
@@ -160,7 +161,7 @@ describe('HTTP authorization security regressions', () => {
   })
 
   it('reseller and user password sessions are not held for missing two-factor enrollment', async () => {
-    const reseller = await state.store.createReseller({ username: 'resell', passwordHash, acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 10000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] })
+    const reseller = await state.store.createReseller({ username: 'resell', passwordHash, acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 10000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
     await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash })
     const resellerLogin = await login('resell')
     expect(resellerLogin.status).toBe(200)
@@ -224,7 +225,7 @@ describe('HTTP authorization security regressions', () => {
   })
 
   it('owned resources remain protected by reseller ACL and account feature policy', async () => {
-    const reseller = await state.store.createReseller({ username: 'resell', passwordHash, acl: [], maxAccounts: 5, totalDiskMb: 10000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] })
+    const reseller = await state.store.createReseller({ username: 'resell', passwordHash, acl: [], maxAccounts: 5, totalDiskMb: 10000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
     await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash })
     await state.store.changeOwner(alice.id, reseller.id)
     const resellerToken = await tokenFor(reseller.id, ['*'])
@@ -361,7 +362,7 @@ describe('HTTP authorization security regressions', () => {
   })
 
   it('reseller target-account features constrain mail writes even when edit-account ACL is granted', async () => {
-    const reseller = await state.store.createReseller({ username: 'reseller', passwordHash, acl: ['edit-account'], maxAccounts: 5, totalDiskMb: 10000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] })
+    const reseller = await state.store.createReseller({ username: 'reseller', passwordHash, acl: ['edit-account'], maxAccounts: 5, totalDiskMb: 10000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
     await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash })
     await state.store.changeOwner(alice.id, reseller.id)
     await state.store.updateFeatureList(featureListId, { disabled: ['forwarders'] })
@@ -476,7 +477,7 @@ describe('HTTP authorization security regressions', () => {
     expect((await request(siblingMailboxToken, '/api/webmail/messages')).status).toBe(403)
   })
 
-  it('A46 calendar and contact sharing, revocation, and ICS/vCard import/export enforce permissions and reject malicious payloads', async () => {
+  it('A46 calendar and contact sharing, revocation, and ICS/vCard import/export enforce permissions and reject malicious payloads', { tags: ['slow'] }, async () => {
     const inboxLogin = `inbox@${alice.primaryDomain}`
     const siblingLogin = `support@${alice.primaryDomain}`
     const foreignLogin = `inbox@${bob.primaryDomain}`
@@ -672,7 +673,7 @@ describe('HTTP authorization security regressions', () => {
       maxAccounts: 5,
       totalDiskMb: 10000,
       totalBandwidthMb: 100000,
-      oversell: false,
+      oversell: { disk: false, bandwidth: false },
       nameservers: [],
       delegatedIps: [],
     })

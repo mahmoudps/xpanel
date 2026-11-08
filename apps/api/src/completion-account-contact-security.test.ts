@@ -4,12 +4,13 @@ import * as dbApi from '@xpanel/db'
 import { accountContactRevision } from '@xpanel/core'
 import { createTestStateStore } from '@xpanel/state'
 import type { AgentApp } from '@xpanel/agent'
-import { deriveCsrfToken, sha256Hex } from './auth.ts'
+import { deriveCsrfToken, hashPasswordArgon2id, sha256Hex } from './auth.ts'
 import { policyForRequest } from './authorization.ts'
 import { entryPointAllowsApiRoute, sessionCookieName, sessionTokenHash } from './entry-points.ts'
 import { createApiApp } from './server.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 
+const PASSWORD = 'Contact-Password-1'
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const endpoint = '/api/account/preferences'
 const changedEmail = 'Case+contact@example.test'
@@ -29,7 +30,7 @@ const fixture = async () => {
     php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
   // This valid hosting username also exercises audit attribution's mailbox-like prefix.
   const owner = await account('mbxdeadbeef'), other = await account('contactother')
-  const principal = await dbApi.createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: HASH })
+  const principal = await dbApi.createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: await hashPasswordArgon2id(PASSWORD) })
   const neighbor = await dbApi.createUserPrincipal(database.db, { username: other.username, accountId: other.id, passwordHash: HASH })
   const mailbox = await state.store.createServiceUser({ accountId: owner.id, login: 'inbox@' + owner.primaryDomain, passwordHash: HASH,
     services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
@@ -101,7 +102,7 @@ describe('trusted-self contact metadata API with real synthetic SQLite', () => {
     const beforeImages = await f.images()
     const initial = await f.view({ application })
     expect(initial).toEqual({ context: { accountId: f.owner.id }, preferences: { contactEmail: before.contactEmail }, revision: accountContactRevision(before) })
-    const response = await f.request('PATCH', { contactEmail: 'Case+contact@EXAMPLE.TEST', expectedRevision: initial.revision }, { application })
+    const response = await f.request('PATCH', { contactEmail: 'Case+contact@EXAMPLE.TEST', expectedRevision: initial.revision, currentPassword: PASSWORD }, { application })
     expect(response.status).toBe(200)
     const saved = await response.json() as ContactView & { ok: boolean; stateChanged: boolean }
     const current = (await f.state.store.getAccount(f.owner.id))!
@@ -117,7 +118,7 @@ describe('trusted-self contact metadata API with real synthetic SQLite', () => {
     expect(search).toHaveLength(1)
     expect(search[0]!.keywords).toContain(changedEmail)
     expect(search[0]!.keywords).not.toContain(before.contactEmail)
-    expect(await dbApi.findPrincipalByUsername(f.database.db, f.owner.username)).toMatchObject({ id: f.principal.id, accountId: f.owner.id, passwordHash: HASH })
+    expect(await dbApi.findPrincipalByUsername(f.database.db, f.owner.username)).toMatchObject({ id: f.principal.id, accountId: f.owner.id, passwordHash: f.principal.passwordHash })
     const audits = await dbApi.listAudit(f.database.db)
     expect(audits.filter(row => row.action === 'account.contact.updated')).toHaveLength(1)
     const audit = audits.find(row => row.action === 'account.contact.updated')!
@@ -173,7 +174,7 @@ describe('trusted-self contact metadata API with real synthetic SQLite', () => {
 
   it('keeps a reseller out of the trusted-self endpoint for an account it owns', async () => {
     const reseller = await f.state.store.createReseller({ username: 'contactseller', passwordHash: HASH, acl: ['list-accounts', 'edit-account'], maxAccounts: 5,
-      totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
+      totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
     await f.state.store.changeOwner(f.owner.id, reseller.id)
     const principal = await dbApi.createResellerPrincipal(f.database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
     const raw = await f.token(['account-preferences:read', 'account-preferences:write'], principal.id), before = await f.images()
@@ -200,7 +201,7 @@ describe('trusted-self contact metadata API with real synthetic SQLite', () => {
       await dbApi.deletePrincipal(f.database.db, f.principal.id)
       return update(...args)
     })
-    expect((await f.request('PATCH', { contactEmail: changedEmail, expectedRevision: current.revision })).status).toBe(401)
+    expect((await f.request('PATCH', { contactEmail: changedEmail, expectedRevision: current.revision, currentPassword: PASSWORD })).status).toBe(401)
     expect(mutation).toHaveBeenCalledTimes(1)
     await unchanged(before)
   })
@@ -251,11 +252,20 @@ describe('trusted-self contact metadata API with real synthetic SQLite', () => {
     await unchanged(before)
   })
 
+  it('requires the account password to change the address and keeps the old one when it is wrong', async () => {
+    const initial = await f.view(), before = await f.images()
+    const wrong = await f.request('PATCH', { contactEmail: 'changed-by-thief@example.test', expectedRevision: initial.revision, currentPassword: 'Wrong-Password-0' })
+    expect(wrong.status).toBe(401)
+    expect(await wrong.json()).toMatchObject({ code: 'UNAUTHENTICATED' })
+    expect((await f.request('PATCH', { contactEmail: 'changed-by-thief@example.test', expectedRevision: initial.revision })).status).toBe(422)
+    await unchanged(before)
+  })
+
   it('refuses a stale representation without changing account, index or search rows', async () => {
     const initial = await f.view()
-    expect((await f.request('PATCH', { contactEmail: 'first@example.test', expectedRevision: initial.revision })).status).toBe(200)
+    expect((await f.request('PATCH', { contactEmail: 'first@example.test', expectedRevision: initial.revision, currentPassword: PASSWORD })).status).toBe(200)
     const before = await f.images()
-    expect((await f.request('PATCH', { contactEmail: 'stale@example.test', expectedRevision: initial.revision })).status).toBe(409)
+    expect((await f.request('PATCH', { contactEmail: 'stale@example.test', expectedRevision: initial.revision, currentPassword: PASSWORD })).status).toBe(409)
     await unchanged(before)
   })
 
@@ -263,18 +273,18 @@ describe('trusted-self contact metadata API with real synthetic SQLite', () => {
     const initial = await f.view()
     const other = await f.state.store.updateAccount(f.other.id, { contactEmail: 'neighbor-changed@example.test' })
     await dbApi.syncAccountContactIndex(f.database.db, other)
-    expect((await f.request('PATCH', { contactEmail: changedEmail, expectedRevision: initial.revision })).status).toBe(200)
+    expect((await f.request('PATCH', { contactEmail: changedEmail, expectedRevision: initial.revision, currentPassword: PASSWORD })).status).toBe(200)
     expect((await f.state.store.getAccount(f.other.id))!.contactEmail).toBe(other.contactEmail)
     expect(f.agentCalls()).toBe(0)
   })
 
-  it('intentionally accepts an identical current representation after A to B to A', async () => {
+  it('intentionally accepts an identical current representation after A to B to A', { tags: ['slow'] }, async () => {
     const initial = await f.view()
-    expect((await f.request('PATCH', { contactEmail: 'temporary@example.test', expectedRevision: initial.revision })).status).toBe(200)
+    expect((await f.request('PATCH', { contactEmail: 'temporary@example.test', expectedRevision: initial.revision, currentPassword: PASSWORD })).status).toBe(200)
     const temporary = await f.view()
-    expect((await f.request('PATCH', { contactEmail: initial.preferences.contactEmail, expectedRevision: temporary.revision })).status).toBe(200)
+    expect((await f.request('PATCH', { contactEmail: initial.preferences.contactEmail, expectedRevision: temporary.revision, currentPassword: PASSWORD })).status).toBe(200)
     expect((await f.view()).revision).toBe(initial.revision)
-    expect((await f.request('PATCH', { contactEmail: changedEmail, expectedRevision: initial.revision })).status).toBe(200)
+    expect((await f.request('PATCH', { contactEmail: changedEmail, expectedRevision: initial.revision, currentPassword: PASSWORD })).status).toBe(200)
     expect(f.agentCalls()).toBe(0)
   })
 
@@ -301,7 +311,7 @@ describe('trusted-self contact metadata API with real synthetic SQLite', () => {
     }
     const current = await f.view(), before = await f.images(), original = dbApi.syncAccountContactIndex
     vi.spyOn(dbApi, 'syncAccountContactIndex').mockImplementationOnce(async (...args: Parameters<typeof original>) => { await original(...args); throw new Error('Synthetic post-index outage') })
-    const response = await f.request('PATCH', { contactEmail: changedEmail, expectedRevision: current.revision })
+    const response = await f.request('PATCH', { contactEmail: changedEmail, expectedRevision: current.revision, currentPassword: PASSWORD })
     expect(response.status).toBe(503)
     expect(await response.json()).toMatchObject({ details: { reason: 'contact_index_failed', verificationRequired: true, stateChanged: false } })
     await unchanged(before)
@@ -321,7 +331,7 @@ describe('trusted-self contact metadata API with real synthetic SQLite', () => {
   it('reports a post-commit audit failure as changed and unverified', async () => {
     const current = await f.view()
     vi.spyOn(dbApi, 'appendAudit').mockRejectedValueOnce(new Error('Synthetic contact audit outage'))
-    const response = await f.request('PATCH', { contactEmail: changedEmail, expectedRevision: current.revision })
+    const response = await f.request('PATCH', { contactEmail: changedEmail, expectedRevision: current.revision, currentPassword: PASSWORD })
     expect(response.status).toBe(503)
     expect(await response.json()).toMatchObject({ details: { reason: 'contact_audit_failed', stateChanged: true, verificationRequired: true, unknownOutcome: true } })
     expect((await f.state.store.getAccount(f.owner.id))!.contactEmail).toBe(changedEmail)
@@ -335,7 +345,7 @@ describe('trusted-self contact metadata API with real synthetic SQLite', () => {
     await dbApi.createSession(f.database.db, { principalId: f.principal.id, tokenHash: sessionTokenHash(raw, 'xpanel'), expiresAt: new Date(Date.now() + 60000).toISOString(), mfaVerified: true })
     const application = createApiApp({ db: f.database.db, store: f.state.store, serverSecret: TEST_SERVER_SECRET, entryPoint: 'xpanel', publicOrigin: origin, allowedOrigins: [origin], secureCookies: true, requireOriginHeader: true })
     const request = new Request(origin + endpoint, { method: 'PATCH', headers: { origin, cookie: sessionCookieName('xpanel', true) + '=' + raw,
-      'x-csrf-token': deriveCsrfToken(raw, TEST_SERVER_SECRET, 'xpanel'), 'content-type': 'application/json' }, body: JSON.stringify({ contactEmail: changedEmail, expectedRevision: current.revision }) })
+      'x-csrf-token': deriveCsrfToken(raw, TEST_SERVER_SECRET, 'xpanel'), 'content-type': 'application/json' }, body: JSON.stringify({ contactEmail: changedEmail, expectedRevision: current.revision, currentPassword: PASSWORD }) })
     const update = f.state.store.updateAccountContactEmail.bind(f.state.store)
     const mutation = vi.spyOn(f.state.store, 'updateAccountContactEmail').mockImplementationOnce((...args: Parameters<typeof update>) => {
       request.headers.set(kind === 'origin' ? 'origin' : 'x-csrf-token', kind === 'origin' ? 'https://hostile.example.test' : 'synthetic-invalid-csrf')

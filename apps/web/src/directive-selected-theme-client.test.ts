@@ -4,7 +4,7 @@ import { builtinEnvironments, type EnvironmentReturn } from 'vitest/runtime'
 import { ACCOUNT_HTACCESS_CLIENT_BINDING, type HtaccessClientView } from './account-htaccess-client.ts'
 import { ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING } from './account-web-directives-client.ts'
 import { renderAccountHtaccessWorkspace } from './board-port/account-htaccess-workspace.ts'
-import { renderAccountIpBlockerWorkspace } from './board-port/account-web-directives-workspace.ts'
+import { renderAccountHandlersWorkspace } from './board-port/account-web-directives-workspace.ts'
 import * as classic from './board-port/account-directive-client-templates.ts'
 import * as v2 from './themes/v2/pages/xpanel/advanced/directive-client-templates.ts'
 
@@ -17,12 +17,12 @@ afterEach(async () => { await environment.teardown(globalThis); vi.restoreAllMoc
 const accountId = '11111111-1111-4111-8111-111111111111', domainId = '22222222-2222-4222-8222-222222222222'
 const input = { locale: 'en' as const, accountId, domains: [{ id: domainId, accountId, name: 'example.test' }], canManage: true }
 const saved: HtaccessClientView = { context: { accountId, domainId, domainName: 'example.test', path: 'public_html/.htaccess', engine: 'apache', phpHandler: 'fpm' }, document: { exists: true, content: 'php_value memory_limit 128M', sizeBytes: 27, mtime: '2026-10-26T12:00:00.000Z', revision: 'a'.repeat(64) }, versions: [{ id: '44444444-4444-4444-8444-444444444444', at: '2026-10-26T12:00:00.000Z', actor: '<literal reviewer>', sizeBytes: 27, revision: 'a'.repeat(64), state: 'kept', current: true, canRestore: false }], capabilities: { canValidate: true, canSave: true, canRestore: false, canMigrate: false, reason: null }, application: { status: 'read', nativeQualified: false, syntaxChecked: false, httpStatus: null }, policy: { valid: true, issues: [], phpLines: [] }, reviewRequired: false }
-const directives = { feature: 'ip-blocker', context: { accountId, domainId, domainName: 'example.test', path: 'public_html/.htaccess', engine: 'apache' }, document: { exists: true, revision: 'a'.repeat(64), sizeBytes: 40, unmanagedLines: 2, managedFeatures: ['ip-blocker'] }, managed: true, model: { entries: ['192.0.2.1'] }, conflict: null, capabilities: { canSave: true, reason: null }, application: { status: 'read', syntaxChecked: false, httpStatus: null, nativeQualified: false } }
+const directives = { feature: 'handlers', context: { accountId, domainId, domainName: 'example.test', path: 'public_html/.htaccess', engine: 'apache' }, document: { exists: true, revision: 'a'.repeat(64), sizeBytes: 40, unmanagedLines: 2, managedFeatures: ['handlers'] }, managed: true, model: { entries: [{ handler: 'cgi-script', extensions: ['.pl'] }] }, conflict: null, capabilities: { canSave: true, reason: null }, application: { status: 'read', syntaxChecked: false, httpStatus: null, nativeQualified: false }, system: [] }
 
 // The workspace is the existing controller contract; the selected theme supplies every dynamic node.
 for (const [theme, factory] of [['classic', classic], ['v2', v2]] as const) describe(theme + ' protected file controller templates', () => {
   function mount(kind: 'htaccess' | 'directives', corrupt?: 'missing' | 'duplicate' | 'slot', denied = false) {
-    document.body.innerHTML = kind === 'htaccess' ? renderAccountHtaccessWorkspace(input) : renderAccountIpBlockerWorkspace(input)
+    document.body.innerHTML = kind === 'htaccess' ? renderAccountHtaccessWorkspace(input) : renderAccountHandlersWorkspace(input)
     const root = document.querySelector<HTMLElement>(kind === 'htaccess' ? '[data-htaccess-workspace]' : '[data-web-directives]')!
     root.querySelectorAll('template').forEach(template => template.remove())
     root.insertAdjacentHTML('beforeend', kind === 'htaccess' ? factory.htaccessClientTemplates() : factory.webDirectiveClientTemplates())
@@ -58,10 +58,10 @@ for (const [theme, factory] of [['classic', classic], ['v2', v2]] as const) desc
     const { root, request } = mount('directives')
     await vi.waitFor(() => expect(root.querySelector('[data-wd-status]')?.getAttribute('data-state')).toBe('read'))
     const row = root.querySelector('[data-wd-rows] tr')!
-    expect(row.textContent).toContain('192.0.2.1')
+    expect(row.textContent).toContain('cgi-script')
     expect(row.querySelector('button')?.classList.contains(theme === 'classic' ? 'xp-btn' : 'v2-btn')).toBe(true)
     row.querySelector<HTMLButtonElement>('button')!.click()
-    expect(root.querySelector<HTMLInputElement>('[data-wd-field="address"]')?.value).toBe('192.0.2.1')
+    expect(root.querySelector<HTMLInputElement>('[data-wd-field="extensions"]')?.value).toBe('.pl')
     expect(request.mock.calls).toHaveLength(1)
   })
   for (const kind of ['htaccess', 'directives'] as const) {

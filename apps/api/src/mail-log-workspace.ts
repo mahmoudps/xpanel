@@ -24,7 +24,7 @@ const selectors = (url: URL, allowed: readonly string[]): void => {
   for (const key of new Set(url.searchParams.keys())) if (!allowed.includes(key) || url.searchParams.getAll(key).length !== 1) fail('VALIDATION', 'unsupported or repeated mail log selector', { stateChanged: false })
 }
 /** Both bounds, or neither for the latest 24 hours; at most 7 days, whole UTC seconds. */
-const window = (url: URL, now: () => Date): { since: string; until: string } => {
+export const mailLogRange = (url: URL, now: () => Date): { since: string; until: string } => {
   const since = url.searchParams.get('since'), until = url.searchParams.get('until')
   if (since === null && until === null) {
     const end = Math.floor(now().getTime() / 1000) * 1000, iso = (ms: number): string => new Date(ms).toISOString().slice(0, 19) + 'Z'
@@ -44,7 +44,7 @@ export async function handleMailLogWorkspaceRoute(request: Request, url: URL, me
   if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
   const delivery = url.pathname.endsWith('/delivery')
   selectors(url, delivery ? ['since', 'until', 'sender', 'recipient', 'domain', 'status', 'dsn'] : ['since', 'until'])
-  const range = window(url, helpers.now ?? (() => new Date()))
+  const range = mailLogRange(url, helpers.now ?? (() => new Date()))
   let filters: Record<string, string> = {}
   try { if (delivery) filters = { ...parseMailLogFilters(key => url.searchParams.get(key)) } } catch { return fail('VALIDATION', 'unsupported mail log filter', { stateChanged: false }) }
   const { summary, messages, matched, omittedMessages, filters: applied, ...view } = observed(await helpers.readServerLog(caller, new URLSearchParams({ ...range, ...filters }).toString()), 'server')
@@ -57,7 +57,7 @@ export async function handleMailTrackDeliveryRoute(request: Request, url: URL, m
   const opened = await helpers.openMailbox(request), mailbox = opened.mailbox.toLowerCase()
   if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
   selectors(url, ['since', 'until'])
-  const range = window(url, helpers.now ?? (() => new Date()))
+  const range = mailLogRange(url, helpers.now ?? (() => new Date()))
   const body = observed(await helpers.readMailboxLog(opened.caller, new URLSearchParams({ address: mailbox, ...range }).toString()), 'mailbox')
   if (body.mailbox !== mailbox) return fail('SERVICE_UNAVAILABLE', 'the delivery observation scope could not be verified', { stateChanged: false })
   const fresh = await helpers.openMailbox(request)

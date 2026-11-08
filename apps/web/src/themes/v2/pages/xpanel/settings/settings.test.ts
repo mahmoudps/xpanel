@@ -149,7 +149,7 @@ describe('v2 remaining account workspaces', () => {
     expect(virus).not.toContain('48,213')
   })
 
-  it.each(['/advanced/error-pages', '/advanced/indexes', '/advanced/mime-types', '/security/ip-blocker', '/security/hotlink'])('retains revision-dependent draft controls disabled until an authorized fresh read: %s', route => {
+  it.each(['/advanced/error-pages', '/advanced/indexes', '/advanced/mime-types', '/advanced/handlers', '/security/hotlink'])('retains revision-dependent draft controls disabled until an authorized fresh read: %s', route => {
     const html = render(route)
     expect(nodes(html, '[data-web-directives]')[0]!.attrs.get('data-wd-account')).toBe(account.id)
     expect(nodes(html, '[data-wd-domain]')[0]!.attrs.has('disabled')).toBe(true)
@@ -159,12 +159,17 @@ describe('v2 remaining account workspaces', () => {
     expect(html).not.toContain('Test passed')
   })
 
-  it('does not activate an executable handler editor', () => {
+  it('lists the reviewed handlers only and keeps the server mapping read-only', () => {
     const html = render('/advanced/handlers')
-    expect(html).toContain('data-web-directives-unavailable="handlers"')
-    expect(html).not.toContain('data-web-directives="handlers"')
-    expect(html).not.toContain('data-wd-save')
+    expect(parseMarkup(html).filter(node => node.tag === 'option' && node.attrs.get('value') !== domain.id).map(node => node.attrs.get('value'))).toEqual(['cgi-script', 'default-handler', 'server-parsed', 'type-map'])
+    expect(nodes(html, '[data-wd-system]')).toHaveLength(1)
     expect(liveControls(html).every(node => node.attrs.has('disabled'))).toBe(true)
+  })
+  it('renders the account IP blocker with its controls disabled until the list is read', () => {
+    const html = render('/security/ip-blocker')
+    expect(nodes(html, '[data-ip-blocker]')[0]!.attrs.get('data-ipb-account')).toBe(account.id)
+    for (const hook of ['[data-ipb-input]', '[data-ipb-add]'] as const) expect(nodes(html, hook)[0]!.attrs.has('disabled')).toBe(true)
+    expect(html).toContain('ip-blocker-row')
   })
 
   it('keeps network diagnostics finite and the API explorer read-only with fixed operation discovery', () => {
@@ -237,17 +242,17 @@ describe('v2 remaining account workspaces', () => {
     expect(html).not.toContain('https://')
   })
 
-  it('filters service users and Web Disk directories by the owned account and distinguishes unread from empty', () => {
+  it('filters service users by the owned account and leaves Web Disk rows to the authorized read', () => {
     const foreign = { ...user, accountId: 'foreign', login: 'foreign@example.test', ftpDir: 'foreign-directory' }
-    for (const route of ['/preferences/users', '/files/web-disk']) {
-      const html = render(route, allowed, { serviceUsers: [user, foreign] })
-      expect(html).toContain(user.login)
-      expect(html).not.toContain(foreign.login)
-      expect(html).not.toContain(foreign.ftpDir)
-      expect(html).not.toContain(`>${user.id}<`)
-    }
-    expect(render('/files/web-disk', allowed, { serviceUsers: undefined })).toContain('Web Disk logins have not been read.')
-    expect(render('/files/web-disk', allowed, { serviceUsers: [] })).toContain('No Web Disk logins were returned.')
+    const html = render('/preferences/users', allowed, { serviceUsers: [user, foreign] })
+    expect(html).toContain(user.login)
+    expect(html).not.toContain(foreign.login)
+    expect(html).not.toContain(foreign.ftpDir)
+    expect(html).not.toContain(`>${user.id}<`)
+    const disk = render('/files/web-disk', allowed, { serviceUsers: [user, foreign] })
+    expect(disk).toContain('Web Disk logins have not been read.')
+    expect(disk).not.toContain(user.login)
+    expect(disk).not.toContain(foreign.login)
   })
 
   it('does not admit another domain’s saved custom configuration in the combined read-only site editor', () => {
@@ -265,10 +270,22 @@ describe('v2 remaining account workspaces', () => {
     expect(html).toContain('Headers to the upstream')
     expect(html).toContain('X-Upstream-Test')
     expect(html).toContain('request-value')
-    expect(nodes(html, '#v2-site-proxy-ttl')[0]!.attrs.get('type')).toBe('number')
+    expect(nodes(html, '#v2-site-expiry')[0]!.attrs.get('type')).toBe('date')
     expect(nodes(html, '#v2-site-review-ack')[0]!.attrs.has('disabled')).toBe(true)
-    expect(html).toContain('Configuration tests and local site checks have not run.')
+    expect(html).toContain('The web server configuration test runs before any reload.')
     expect(liveControls(html).every(node => node.attrs.has('disabled'))).toBe(true)
+  })
+
+  it('connects the site editor for the owner and removes every control without a handler', () => {
+    const config = { domainId: domain.id, accountId: account.id, domainName: domain.name, nginxInclude: '', apacheInclude: '', userIni: {}, customHeaders: { 'X-Site': 'one' }, cacheBypassPaths: [], updatedAt: '', updatedBy: 'user' as const }
+    const html = render('/domains/site-settings', { ...allowed, qualifiedTools: new Set(['manage-domain']), canManage: true }, { customConfig: config })
+    const root = parseMarkup(html).find(node => node.attrs.has('data-site-settings'))!
+    expect(root.attrs.get('data-site-manage')).toBe('true')
+    expect(root.attrs.get('data-site-domain')).toBe(domain.id)
+    expect(html).not.toContain('data-wiring="soon"')
+    for (const hook of ['data-site-stop', 'data-site-start', 'data-site-save', 'data-site-deny-add', 'data-site-traffic-rate', 'data-site-isolated', 'data-site-run-directory', 'data-userdata-form']) expect(html).toContain(hook)
+    for (const label of ['Bind name', 'Add redirect', 'Protect folder', 'Block address', 'Unblock', 'Remove header']) expect(html).not.toContain(label)
+    expect(html).toContain('X-Site: one')
   })
 
   it.each(['/software/installer', '/software/store', '/software/store/app', '/software/store/install', '/software/store/progress', '/software/store/installed', '/software/store/updates', '/software/store/error'])('preserves an honest signed-catalog and installer state on its distinct route: %s', route => {

@@ -58,7 +58,7 @@ describe('permanent job reference consolidation', () => {
       const session = { id: legacy!.id }
       const mailbox = await saveMailboxSession(handle.db, { sessionId: session.id, mailbox: 'owner@example.test', serviceUserId: randomUUID(), accountId: randomUUID(), sealedPassword: new Uint8Array(32).fill(7) })
       const result = await migrate(handle.db)
-      expect(result.applied).toEqual(['0003_job_references_reconcile.sql', '0004_host_metrics_observations.sql', '0005_team_sign_in.sql', '0006_panel_handoffs.sql'])
+      expect(result.applied).toEqual(['0003_job_references_reconcile.sql', '0004_host_metrics_observations.sql', '0005_team_sign_in.sql', '0006_panel_handoffs.sql', '0007_reseller_oversell.sql', '0008_identity_factors.sql'])
       const first = await initializeOperationalMetadata(handle.db)
       expect(await initializeOperationalMetadata(handle.db)).toEqual({ issuerId: first.issuerId, imported: 0 })
       expect(await handle.db.query('SELECT * FROM xpanel_schema_migrations WHERE version<=2 ORDER BY version')).toEqual(beforeMigrations)

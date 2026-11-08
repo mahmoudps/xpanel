@@ -39,6 +39,7 @@ export interface TerminalBridgeDeps {
 
 const auditNames = (grant: TerminalGrant) => grant.kind === 'root'
   ? { opened: 'server.terminal.session_opened', closed: 'server.terminal.session_closed', target: 'server:terminal' }
+  : grant.kind === 'container' ? { opened: 'server.container.terminal_opened', closed: 'server.container.terminal_closed', target: `account:${grant.accountUsername}` }
   : { opened: 'account.terminal.session_opened', closed: 'account.terminal.session_closed', target: `account:${grant.accountUsername}` }
 
 /**

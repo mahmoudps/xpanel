@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { link, open, readdir, statfs, unlink } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { dirname, join, posix } from 'node:path'
-import { fail } from '@xpanel/core'
+import { COMPRESSION_LEVEL_KEY, fail } from '@xpanel/core'
 import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
 import { backupDestinationProofCurrent, backupDestinationTargetDigest, backupScheduleDue, isBackupCredentialRef, nextBackupCronRun, parseBackupCron, readBackupCredentialProfiles, readBackupDestinationProof } from '../../../packages/core/src/backup-destination.ts'
 import type { BackupCredentialProfile, BackupCron, BackupDestinationProof, BackupDestinationTarget } from '../../../packages/core/src/backup-destination.ts'
@@ -15,6 +15,7 @@ import type { BackupCommandRunner } from './backup-low-priority.ts'
 import type { BackupAccountTarget, BackupCompression } from './account-backup.ts'
 import type { AgentExecutor } from './executor.ts'
 import { withPinnedHostTargetParent } from './host-target-parent.ts'
+import { readSavedTweakValues } from './tweak-values.ts'
 import { BACKUP_CONTROL, BACKUP_RUN_LIMITS, backupArchiveName, backupRunDetail, backupRunLedgerRevision, parseBackupArchiveName, planBackupRetention, readBackupRunLedger } from './acct-backup-plan.ts'
 import type { BackupPartRestore, BackupPartRestoreItem, BackupRecovery, BackupRemoteArchive, BackupRetentionKeep, BackupRetentionRow, BackupRun, BackupRunArchive, BackupRunEntry, BackupRunLedger, BackupRunsView, BackupStorageSpace } from './acct-backup-plan.ts'
 import { BACKUP_TRANSFER_KINDS } from './acct-backup-s3.ts'
@@ -463,6 +464,7 @@ export function createBackupRunController(deps: BackupRunDeps) {
     },
     /** Test and shutdown hook: resolves when the current background operation settles. */
     idle: async (): Promise<void> => { await active?.done },
+    busy: (): boolean => active !== null,
   }
 }
 export type BackupRunController = ReturnType<typeof createBackupRunController>
@@ -478,8 +480,10 @@ export function createHostBackupRunController(input: { executor: AgentExecutor |
   const root = input.root ?? defaultBackupArchiveRoot(), executor = input.executor, run = input.run ?? runBackupCommand, databases = input.databases
   const noDump: BackupArchiveBuildDeps['dump'] = () => fail('PRECONDITION_FAILED', 'database dumps are unavailable on this host', { stateChanged: false })
   const controlDir = posix.join(root, BACKUP_CONTROL), copyControlDatabase = input.copyControlDatabase
+  // Tweak Settings > Compression, read when each archive is built
+  const savedLevel = async (compression: BackupCompression): Promise<number> => (await readSavedTweakValues(input.stateRoot))[COMPRESSION_LEVEL_KEY[compression]] as number
   return createBackupRunController({ readConfig: readBackupConfigFiles(input.stateRoot), provider: input.provider, listAccounts: input.listAccounts, ...backupLedgerFile(input.ledgerPath), zstdInstalled,
-    createBackup: executor ? async (account, options) => buildServerBackupArchive({ root, account, excludeMail: options.excludeMail, compression: options.compression,
+    createBackup: executor ? async (account, options) => buildServerBackupArchive({ root, account, excludeMail: options.excludeMail, compression: options.compression, level: await savedLevel(options.compression),
       databases: options.includeDatabases && databases ? await databases.list(account) : [], zones: options.includeDns && input.zones ? await input.zones.list(account) : [], deps: { run, dump: databases?.dump ?? noDump } }) : null,
     verifyArchive: (account, file) => listServerBackupArchive({ root, account, file, run }),
     readLocalArchive: (account, file) => localBackupArchiveSource(root, account, file),
@@ -489,7 +493,7 @@ export function createHostBackupRunController(input: { executor: AgentExecutor |
     }),
     deleteLocalArchive: (account, file) => withPinnedHostTargetParent(posix.join(root, ...backupArchiveName(account.username, file).split('/')), pinned => unlink(pinned)),
     control: executor && copyControlDatabase ? {
-      build: compression => buildControlSnapshot({ root, stateDir: input.stateRoot, copyDatabase: copyControlDatabase, run, compression }),
+      build: async compression => buildControlSnapshot({ root, stateDir: input.stateRoot, copyDatabase: copyControlDatabase, run, compression, level: await savedLevel(compression) }),
       verify: file => listControlSnapshot({ root, file, run }),
       read: file => localFileSource(posix.join(controlDir, backupArchiveName(BACKUP_CONTROL, file).split('/')[1]!)),
       list: async () => {

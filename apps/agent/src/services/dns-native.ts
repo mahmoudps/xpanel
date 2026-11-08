@@ -38,6 +38,7 @@ const canonicalRrsets = (records: readonly services.ZoneRecord[]): string[] => {
   }
   return records.map(record => canonicalRecord({ ...record, ttl: ttl.get(`${record.name}:${record.type}`)! })).sort()
 }
+const DNSSEC_TRANSFER_TYPES = new Set(['DNSKEY', 'RRSIG', 'NSEC', 'NSEC3', 'NSEC3PARAM', 'CDS', 'CDNSKEY'])
 export const MAX_DNS_OBSERVATION_BYTES = 4 * 1024 * 1024
 export const MAX_DNS_OBSERVATION_RECORDS = 50_000
 const OBSERVATION_BUDGET_MS = 60_000
@@ -148,7 +149,9 @@ export const parseObservedAxfr = (stdout: string, zone: string): services.ZoneRe
       canonicalRecord(opening.records[0]) !== canonicalRecord(closing.records[0])) {
     fail('CONFIG_TEST_FAILED', 'DNS transfer does not have a complete matching SOA envelope')
   }
-  const parsed = services.parseBindZone(lines.slice(0, -1).join('\n') + '\n', { origin: zone })
+  // PowerDNS signs a DNSSEC zone live, so its transfer adds the signing records that no zone file holds.
+  const unsigned = lines.slice(0, -1).filter(line => !DNSSEC_TRANSFER_TYPES.has(line.split(/\s+/)[3]?.toUpperCase() ?? ''))
+  const parsed = services.parseBindZone(unsigned.join('\n') + '\n', { origin: zone })
   if (parsed.skipped.length > 0) fail('CONFIG_TEST_FAILED', 'DNS transfer contains unrecognized records')
   return parsed.records
 }

@@ -71,7 +71,7 @@ describe('v2 account operations', () => {
     expect(renderV2AccountBackupPage(props())).toContain('data-account-backup-manage="false"')
     expect(renderV2AccountGitPage(props())).toContain('data-git-manage="false"')
     expect(renderV2AccountRuntimePage(props(), 'apps')).toContain('data-runtime-can-manage="false"')
-    expect(renderV2AccountPackagesPage(props())).toContain('data-packages-manage="false"')
+    expect(renderV2AccountPackagesPage(props())).toContain('data-tool-can-manage="false"')
     expect(renderV2AccountBackupPage(props({ account: { ...account, status: 'suspended' } }), allowed)).toContain('data-account-backup-manage="false"')
   })
 
@@ -103,7 +103,9 @@ describe('v2 account operations', () => {
     expect(elements(html, '[data-git-current]')[0]?.tag).toBe('bdi')
     expect(elements(html, '[data-git-history]')[0]?.tag).toBe('tbody')
     expect(html).toContain('History has not been read.')
-    expect(html).toContain('Deployment tasks and Git web access are unavailable.')
+    expect(elements(html, '[data-git-deploy]')[0]?.tag).toBe('button')
+    expect(elements(html, '[data-git-deployed]')[0]?.tag).toBe('bdi')
+    expect(html).toContain('Git web access is unavailable.')
   })
 
   it('requires explicit terminal admission plus the current active jailed account and matching plan', () => {
@@ -171,8 +173,7 @@ describe('v2 account operations', () => {
   it('keeps installed and reviewed package inventories separate without inventing packages', () => {
     const html = renderV2AccountPackagesPage(props(), allowed)
     expect(elements(html, '[data-packages-installed]')[0]?.tag).toBe('tbody')
-    expect(elements(html, '[data-packages-available]')[0]?.tag).toBe('tbody')
-    expect(html).toContain('data-packages-recover disabled')
+    expect(elements(html, '[data-packages-results]')[0]?.tag).toBe('tbody')
     expect(html).toContain('Packages have not been read.')
     expect(html).not.toContain('data-package-name=')
   })

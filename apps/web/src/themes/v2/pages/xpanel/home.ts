@@ -8,6 +8,8 @@ import { card, dataTable, emptyState, errorState, kpiCard, meter, notice, pageHe
 import { escapeHtml, type Tone } from '../../html.ts'
 import { icon, type IconName } from '../../icons.ts'
 import { renderV2AccountAnnouncementsBanner, V2_HOME_ANNOUNCEMENTS_CSS } from '../../components/account-announcements.ts'
+import { renderV2AccountPlugins, V2_HOME_PLUGINS_CSS } from '../../components/account-plugins.ts'
+import { renderV2HomeNotices, V2_HOME_NOTICES_CSS } from './home-notices.ts'
 import { v2Messages } from '../../messages.ts'
 
 import type { SurfaceAuthority } from '../../../../models/theme-surface.ts'
@@ -328,12 +330,13 @@ export function renderV2PanelHome(props: PanelPageProps, authority?: SurfaceAuth
 ${pageHeader(t, { breadcrumb: [{ label: t('Home') }], route: '/home', title: t(msgctxt('theme:v2', 'Welcome back, {username}'), { username: account?.username ?? t('Not read') }),
     description: t(msgctxt('theme:v2', 'Your sites, tools and account resources.')),
     actionsHtml: `<div class="v2-home-page-actions"><p class="v2-home-selected-domain"><span>${escapeHtml(t('Selected domain'))}</span><bdi dir="ltr" class="v2-mono">${escapeHtml(domain)}</bdi></p>${routes.has('/domains') ? `<a class="v2-btn v2-btn--primary" href="/domains">${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</a>` : domainsAuthorized ? `<button type="button" class="v2-btn" disabled>${icon('plus', 18)}${escapeHtml(t(msgid('Add domain')))}</button>` : ''}</div>` })}
-${renderV2AccountAnnouncementsBanner(t, canReadAnnouncements)}${bandwidthNotice}<section class="v2-kpi-row" aria-label="${escapeHtml(t('Account summary'))}">${summary.map(item => kpiCard({ headingLevel: 2, ...item })).join('')}</section>
+${renderV2HomeNotices(props, t, routes)}${props.personal?.notifications.announcements === false ? '' : renderV2AccountAnnouncementsBanner(t, canReadAnnouncements)}${bandwidthNotice}<section class="v2-kpi-row" aria-label="${escapeHtml(t('Account summary'))}">${summary.map(item => kpiCard({ headingLevel: 2, ...item })).join('')}</section>
 ${sites(props, t, routes)}<div class="v2-home-columns">${tools(props, t, traffic?.totals.uniqueVisitors)}<aside class="v2-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Account information')))}">${resourceCard}${information(props, t)}${recentChanges(props, t)}</aside></div>
+${renderV2AccountPlugins(t, canReadAnnouncements)}
 </div>`
 }
 
-export const V2_PANEL_HOME_CSS = V2_HOME_ANNOUNCEMENTS_CSS + '\n' + `.v2-panel-home .v2-home-columns{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:flex-start}
+export const V2_PANEL_HOME_CSS = V2_HOME_ANNOUNCEMENTS_CSS + V2_HOME_PLUGINS_CSS + '\n' + V2_HOME_NOTICES_CSS + '\n' + `.v2-panel-home .v2-home-columns{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:flex-start}
 .v2-panel-home .v2-home-page-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
 .v2-panel-home .v2-home-columns>.v2-home-tools{flex:1.75 1 560px;min-inline-size:0}
 .v2-panel-home .v2-home-columns>aside{flex:1 1 300px;min-inline-size:0;gap:var(--space-3)}

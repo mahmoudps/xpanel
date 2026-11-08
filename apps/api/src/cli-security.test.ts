@@ -17,6 +17,8 @@ import {
   findPrincipalByUsername,
   getDurableJob,
   listAudit,
+  listSecurityQuestions,
+  replaceSecurityQuestions,
   saveJobCheckpoint,
   setTotpSecret,
 } from '@xpanel/db'
@@ -220,6 +222,17 @@ describe('CLI: explicit one-time root provisioning', () => {
       assert.match(result.stderr, /NOT_FOUND/)
       assert.equal(reads, 0)
       assert.equal(await findPrincipalByUsername(db, 'root'), null)
+    })
+  })
+
+  it('removes security questions on reset-password so forgotten answers cannot keep a user out', async () => {
+    await withCli(async (db, store) => {
+      const root = await createRootPrincipal(db, { username: 'root', passwordHash: PUBLIC_HASH, forcePasswordChange: false })
+      await replaceSecurityQuestions(db, root.id, [{ question: 'First pet name?', answerHash: PUBLIC_HASH }, { question: 'City of birth?', answerHash: PUBLIC_HASH }])
+      const result = await runCli(['reset-password', 'root', '--password-stdin'], { db, store, readPassword: async () => PASSWORD })
+      assert.equal(result.code, 0)
+      assert.match(result.stdout, /Security questions were removed/)
+      assert.deepEqual(await listSecurityQuestions(db, root.id), [])
     })
   })
 

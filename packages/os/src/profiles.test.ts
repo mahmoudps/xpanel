@@ -21,7 +21,7 @@ const code = (fn: () => unknown): string | undefined => {
 
 const PACKAGE_ROLES: PackageRole[] = [
   'nginx', 'apache', 'openlitespeed', 'mariadb', 'postgresql', 'postfix', 'dovecot', 'powerdns', 'redis', 'ftp', 'sshd',
-  'nftables', 'apache-itk', 'apache-suexec', 'apache-fcgi', 'quota', 'acme', 'modsecurity',
+  'nftables', 'apache-itk', 'apache-suexec', 'apache-fcgi', 'quota', 'acme', 'modsecurity', 'web-stats', 'webdav', 'caldav',
 ]
 const SERVICE_ROLES: ServiceRole[] = [
   'nginx', 'apache', 'openlitespeed', 'mariadb', 'postgresql', 'postfix', 'dovecot', 'powerdns', 'redis', 'ftp', 'sshd', 'nftables',
@@ -58,6 +58,8 @@ describe('apt profile (Ubuntu)', () => {
     expect(ubuntu24.packages.dovecot).toEqual(expect.arrayContaining(['dovecot-imapd', 'dovecot-pop3d', 'dovecot-lmtpd']))
     expect(ubuntu24.packages.acme).toEqual(['certbot'])
     expect(ubuntu24.packages.modsecurity).toContain('libapache2-mod-security2')
+    expect(ubuntu24.packages.webdav).toEqual(['lighttpd', 'lighttpd-mod-webdav'])
+    expect(ubuntu22.packages.caldav).toEqual(['python3-radicale'])
     expect(itkAvailable(ubuntu24)).toBe(true)
   })
 
@@ -134,6 +136,8 @@ describe('dnf profile (CentOS Stream / Alma / Rocky)', () => {
     expect(centos9.packages.powerdns).toEqual(['pdns', 'bind-utils'])
     expect(centos9.packages['apache-fcgi']).toEqual(['mod_fcgid'])
     expect(centos9.packages.modsecurity).toContain('mod_security')
+    expect(centos10.packages.webdav).toEqual(['lighttpd', 'lighttpd-mod_webdav'])
+    expect(centos9.packages.caldav).toEqual(['python3-radicale3'])
   })
 
   it('provides mpm_itk on EL through its pinned source build inputs', () => {
@@ -211,6 +215,15 @@ describe('every supported profile', () => {
       }
       for (const role of SERVICE_ROLES) expect(assertUnitName(p.services[role])).toBe(p.services[role])
       for (const n of p.bootstrapPackages) expect(assertPackageName(p.family, n)).toBe(n)
+    })
+
+    it(`${name}: installs the statistics engines or the inputs of their pinned source builds`, () => {
+      const stats = p.packages['web-stats']
+      if (p.family === 'debian') return expect(stats).toEqual(['awstats', 'webalizer', 'libgeoip2-perl'])
+      expect(stats).toEqual(expect.arrayContaining(['perl-GeoIP2', 'gd-devel', 'libpng-devel', 'zlib-devel', 'make']))
+      // A distribution package always wins over a source build: EPEL ships AWStats for EL 9 only.
+      expect(stats.includes('awstats')).toBe(p.major === 9)
+      expect(stats.includes('perl-JSON-XS')).toBe(p.major >= 10)
     })
 
     it(`${name}: uses only absolute paths`, () => {

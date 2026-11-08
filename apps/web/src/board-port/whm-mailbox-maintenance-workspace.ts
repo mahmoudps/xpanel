@@ -44,7 +44,7 @@ export function renderWhmMailboxMaintenanceWorkspace({ locale, canRead, canManag
         <li>${t('Update search index runs doveadm index on INBOX and is available only when Dovecot full text search is configured.')}</li>
       </ul>
       <p class="xp-help" data-whm-mailbox-maintenance-fts-note hidden>${t('Full text search is not configured in Dovecot, so the search index cannot be updated.')}</p>
-      <p class="xp-help">${t('Each job runs one step per mailbox on the host and then reads every mailbox again to confirm the result. Repairing maildir ownership or permissions is not available here.')}</p>
+      <p class="xp-help">${t('Each job runs one step per mailbox on the host and then reads every mailbox again to confirm the result.')}</p>
       ${rootOnly}<p class="xp-whm-detail-status" data-whm-mailbox-maintenance-result role="status" hidden></p>`)}
   </section>`
 }

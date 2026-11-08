@@ -5,6 +5,7 @@ import type { TeamMemberResolver } from './auth.ts'
 import { assertAccountPlanFeatures } from './authorization.ts'
 import { isMailboxPrincipalUsername } from './entry-points.ts'
 import { teamToolIds } from './team-access.ts'
+import { isTemporaryLogin, temporaryLoginActive } from './panel-temporary-login.ts'
 
 export interface HandoffAuthorityDeps {
   db: Db
@@ -54,6 +55,7 @@ export const handoffAuthority = async (
 /** Per-request check of a handed-off session; false ends that session. */
 export const createHandoffSessionCheck = (deps: HandoffAuthorityDeps) => async (session: SessionRecord, principal: PrincipalRecord): Promise<boolean> => {
   if (session.impersonatorPrincipalId === null) return true
+  if (isTemporaryLogin(session.impersonatorLogin)) return temporaryLoginActive(deps.store.rootDir, session.impersonatorLogin!)
   if (principal.kind !== 'user' || !principal.accountId) return false
   const issuer = { principalId: session.impersonatorPrincipalId, ...(session.impersonatorTeamMemberId ? { teamMemberId: session.impersonatorTeamMemberId } : {}) }
   if (!isMailboxPrincipalUsername(principal.username)) {

@@ -135,7 +135,7 @@ const watchedNames = (family: SoftwareCenterFamily): string[] => {
   return [...names].sort()
 }
 
-async function readPackages(family: SoftwareCenterFamily, run: SoftwareCenterRun, names: readonly string[]): Promise<Map<string, PackageObservation> | 'unavailable' | 'invalid'> {
+export async function readPackages(family: SoftwareCenterFamily, run: SoftwareCenterRun, names: readonly string[]): Promise<Map<string, PackageObservation> | 'unavailable' | 'invalid'> {
   if (family === 'debian') {
     const result = await invoke(run, SOFTWARE_CENTER_DPKG_LIST_ARGV)
     if (!result.ok) return 'unavailable'

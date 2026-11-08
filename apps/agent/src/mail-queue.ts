@@ -100,6 +100,28 @@ export async function readMailQueue(input: { run: MailQueueRun; now?: () => Date
   return { state: 'read', observedAt, revision: createHash('sha256').update(identity).digest('hex'), truncated, counts, messages }
 }
 
+/**
+ * Asks Postfix to deliver the deferred mail of these domains, one queue id at a time, and waits until nothing queued for
+ * them remains, so a message accepted before a freeze lands before the final sync reads the mailboxes.
+ */
+export async function drainMailQueue(input: { run: MailQueueRun; domains: readonly string[]; timeoutMs?: number; pauseMs?: number; sleep?: (ms: number) => Promise<void>; clock?: () => number }): Promise<{ drained: boolean; remaining: number | null }> {
+  const { run, domains } = input, wanted = new Set(domains), clock = input.clock ?? Date.now, sleep = input.sleep ?? (ms => new Promise<void>(done => setTimeout(done, ms)))
+  const waiting = async (): Promise<MailQueueMessage[] | null> => {
+    const view = await readMailQueue({ run, maxMessages: MAIL_QUEUE_SCAN_LIMIT, maxBytes: Number.POSITIVE_INFINITY }).catch(() => null)
+    if (view?.state !== 'read' || view.truncated) return null
+    return view.messages.filter(message => message.recipients.some(item => wanted.has(item.address.slice(item.address.lastIndexOf('@') + 1).toLowerCase())))
+  }
+  const deadline = clock() + (input.timeoutMs ?? 30_000)
+  let messages = await waiting()
+  for (const message of messages ?? []) if (message.queue === 'deferred') await Promise.resolve().then(() => run(mailQueueActionArgv('deliver', message.queueId, 'deferred'))).catch(() => undefined)
+  for (;;) {
+    if (messages?.length === 0) return { drained: true, remaining: 0 }
+    if (clock() >= deadline) return { drained: false, remaining: messages?.length ?? null }
+    await sleep(input.pauseMs ?? 1000)
+    messages = await waiting()
+  }
+}
+
 const eligible = (action: MailQueueAction, queue: MailQueueActionQueue): boolean =>
   action === 'deliver' ? queue === 'deferred' : action === 'release' ? queue === 'hold' : action === 'hold' ? queue !== 'hold' : true
 
@@ -117,6 +139,7 @@ export async function applyMailQueueAction(input: {
     : view.messages.find(item => item.queueId === queueId)?.queue ?? (view.truncated ? undefined : null)
   const before = locate(await read())
   if (before === undefined) return fail('PRECONDITION_FAILED', 'the mail queue could not be read before the action', { stateChanged: false })
+  if (before === null && action === 'delete') return fail('NOT_FOUND', 'the message is not in the mail queue', { stateChanged: false })
   // The whole-queue revision churns on a live MTA; the precondition is this id in the queue the operator saw.
   if (before !== expectedQueue) return fail('CONFLICT', 'the message is no longer in the expected queue; reload before retrying', { stateChanged: false, current: { present: before !== null, queue: before } })
   await input.authorize?.()

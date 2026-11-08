@@ -1,9 +1,12 @@
-import { constants } from 'node:fs'
-import { lstat, open } from 'node:fs/promises'
+import { constants, type Stats } from 'node:fs'
+import { lstat, open, type FileHandle } from 'node:fs/promises'
 import { posix } from 'node:path'
 import { fail, isUuid, isXpanelError } from '@xpanel/core'
 import type { Account, Domain, FeatureList, Plan } from '@xpanel/core'
+import { Readable } from 'node:stream'
+import { createGzip } from 'node:zlib'
 import { edge } from '@xpanel/render'
+import { listAccountLogArchives, openAccountLogArchive, readHeldPending, type LogArchive, type LogRotationPending } from './log-rotation.ts'
 import type { AgentCallerIdentity } from './server.ts'
 
 export const LOG_TAIL_MAX_BYTES = 256 * 1024
@@ -65,9 +68,14 @@ export const readProtectedLogFrom = async (path: string, offset: number, maxByte
   return { exists, identity, sizeBytes, start, bytes }
 }
 
-const readProtectedLog = async (path: string, maxBytes: number, startAt: (size: number) => number): Promise<LogSlice & { mtime: string | null }> => {
+/** The current edge log as the account downloads it: at most this many bytes, gzip-compressed while streamed. */
+export const LOG_DOWNLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024
+type OpenedLog = { handle: FileHandle; metadata: Stats }
+
+/** Opens an edge log under the protected directory; null when it does not exist. The caller closes the handle. */
+const openProtectedLog = async (path: string): Promise<OpenedLog | null> => {
   const directory = edge.XP_PATHS.nginxLogDir, owned = [directory, posix.dirname(directory)]
-  if (posix.normalize(path) !== path || posix.dirname(path) !== directory || !/^[a-z0-9.-]+\.(?:access|error)\.log$/.test(posix.basename(path))) return fail('PRECONDITION_FAILED', 'the log path is not an xPanel edge log', { stateChanged: false })
+  if (posix.normalize(path) !== path || posix.dirname(path) !== directory || !/^[a-z0-9.-]+\.(?:access\.log(?:\.1)?|error\.log)$/.test(posix.basename(path))) return fail('PRECONDITION_FAILED', 'the log path is not an xPanel edge log', { stateChanged: false })
   const ancestors = async (): Promise<string> => {
     const identity: string[] = []
     for (let current: string = directory; current !== '/'; current = posix.dirname(current)) {
@@ -80,10 +88,19 @@ const readProtectedLog = async (path: string, maxBytes: number, startAt: (size: 
   const before = await ancestors()
   let handle
   try { handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK) }
-  catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return { exists: false, identity: null, sizeBytes: 0, start: 0, bytes: Buffer.alloc(0), mtime: null }; return fail('PRECONDITION_FAILED', 'the log file could not be opened safely', { stateChanged: false }) }
+  catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null; return fail('PRECONDITION_FAILED', 'the log file could not be opened safely', { stateChanged: false }) }
   try {
     const metadata = await handle.stat(), named = await lstat(path)
     if (!metadata.isFile() || named.dev !== metadata.dev || named.ino !== metadata.ino || await ancestors() !== before) return fail('PRECONDITION_FAILED', 'the log is not a stable regular file', { stateChanged: false })
+    return { handle, metadata }
+  } catch (error) { await handle.close(); throw error }
+}
+
+const readProtectedLog = async (path: string, maxBytes: number, startAt: (size: number) => number): Promise<LogSlice & { mtime: string | null }> => {
+  const opened = await openProtectedLog(path)
+  if (!opened) return { exists: false, identity: null, sizeBytes: 0, start: 0, bytes: Buffer.alloc(0), mtime: null }
+  const { handle, metadata } = opened
+  try {
     const start = startAt(metadata.size), buffer = Buffer.alloc(Math.min(maxBytes, metadata.size - start))
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, start)
     return { exists: true, identity: metadata.dev + ':' + metadata.ino, sizeBytes: metadata.size, start, bytes: buffer.subarray(0, bytesRead), mtime: metadata.mtime.toISOString() }
@@ -99,15 +116,18 @@ export interface AccountLogsRouteDeps {
   now?: () => Date
 }
 const LOG_ROUTE = /^\/accounts\/([a-z][a-z0-9]{0,15})\/logs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(access|error)$/
+const DOWNLOAD_ROUTE = /^\/accounts\/([a-z][a-z0-9]{0,15})\/logs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/access\/download$/
+const ARCHIVE_ROUTE = /^\/accounts\/([a-z][a-z0-9]{0,15})\/logs\/archives(?:\/([a-z0-9.-]{1,280}\.gz))?$/
+export interface AccountLogArchivesView { context: { accountId: string; username: string }; available: boolean; archives: LogArchive[]; pending: LogRotationPending | null; observedAt: string }
 
-/** Account owner reads the edge log of one owned domain; the path comes from saved state only. */
+/** Account owner reads the edge log of one owned domain, or the raw access log archives in ~/logs; paths come from saved state only. */
 export async function handleAccountLogsRoute(req: Request, url: URL, method: string, deps: AccountLogsRouteDeps): Promise<Response | null> {
-  const match = LOG_ROUTE.exec(url.pathname)
-  if (!match) return null
+  const download = DOWNLOAD_ROUTE.exec(url.pathname), archiveMatch = download ? null : ARCHIVE_ROUTE.exec(url.pathname), match = download ? [download[0], download[1], download[2], 'access'] as const : archiveMatch ? null : LOG_ROUTE.exec(url.pathname)
+  if (!match && !archiveMatch) return null
   if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
   if (url.search) return fail('VALIDATION', 'log reads do not accept query selectors', { stateChanged: false })
-  const username = match[1]!, domainId = match[2]!, kind = match[3] as AccountLogKind, caller = deps.caller
-  if (caller.role !== 'user' || !caller.accountId || !isUuid(domainId)) return fail('FORBIDDEN', 'site logs are read by the signed-in account owner', { stateChanged: false })
+  const username = (match ?? archiveMatch)![1]!, domainId = match?.[2] ?? '', kind: AccountLogKind = match ? match[3] as AccountLogKind : 'access', caller = deps.caller
+  if (caller.role !== 'user' || !caller.accountId || match && !isUuid(domainId)) return fail('FORBIDDEN', 'site logs are read by the signed-in account owner', { stateChanged: false })
   const authorize = async (): Promise<Account> => {
     const account = await deps.store.getAccountByUsername(username), principal = await deps.currentPrincipal()
     if (!account || account.id !== caller.accountId || account.status !== 'active' || !principal || principal.disabled || principal.kind !== 'user' || principal.id !== caller.principalId || principal.accountId !== account.id || principal.username !== account.username) return fail('FORBIDDEN', 'the current account owner is not authorized', { stateChanged: false })
@@ -116,8 +136,30 @@ export async function handleAccountLogsRoute(req: Request, url: URL, method: str
     return account
   }
   const account = await authorize()
+  if (archiveMatch) {
+    // A native host reads ~/logs; elsewhere archives are unavailable, never listed as empty.
+    if (!deps.readTail) return fail('PRECONDITION_FAILED', 'log archives are unavailable on this host', { stateChanged: false })
+    const name = archiveMatch[2]
+    if (!name) {
+      const [archives, pending] = await Promise.all([listAccountLogArchives(account), readHeldPending(account.username)])
+      const view: AccountLogArchivesView = { context: { accountId: account.id, username: account.username }, available: archives !== null, archives: archives ?? [], pending, observedAt: (deps.now?.() ?? new Date()).toISOString() }
+      return new Response(JSON.stringify(view), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
+    }
+    const { handle, sizeBytes } = await openAccountLogArchive(account, name)
+    return new Response(Readable.toWeb(handle.createReadStream()) as ReadableStream<Uint8Array>, { headers: { 'content-type': 'application/gzip', 'content-length': String(sizeBytes), 'content-disposition': `attachment; filename="${name}"`, 'cache-control': 'no-store' } })
+  }
   const target = resolveAccountLogPath(account, await deps.store.listDomains({ accountId: account.id }), domainId, kind)
   if (!deps.readTail) return fail('PRECONDITION_FAILED', 'site logs are unavailable on this host', { stateChanged: false })
+  if (download) {
+    // The protected edge log, never a file in the home: read up to its size at open and compressed as it streams, with no copy.
+    const opened = await openProtectedLog(target.path)
+    if (!opened) return fail('NOT_FOUND', 'the site has not written this log yet', { stateChanged: false })
+    const size = Math.min(opened.metadata.size, LOG_DOWNLOAD_MAX_BYTES)
+    const body = size === 0 ? Readable.from([]) : opened.handle.createReadStream({ start: 0, end: size - 1 })
+    if (size === 0) await opened.handle.close()
+    const stream = body.pipe(createGzip({ level: 6 }))
+    return new Response(Readable.toWeb(stream) as ReadableStream<Uint8Array>, { headers: { 'content-type': 'application/gzip', 'content-disposition': `attachment; filename="${target.site}.access.log.gz"`, 'cache-control': 'no-store', 'x-xpanel-log-bytes': String(size), 'x-xpanel-log-truncated': String(opened.metadata.size > size) } })
+  }
   let tail: LogTail
   try { tail = await deps.readTail(target.path, LOG_TAIL_MAX_BYTES) }
   catch (error) { if (isXpanelError(error)) throw error; return fail('PRECONDITION_FAILED', 'the site log could not be read', { stateChanged: false }) }

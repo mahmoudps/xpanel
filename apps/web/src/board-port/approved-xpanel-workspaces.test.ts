@@ -277,6 +277,8 @@ describe('account workspace structures and native binding boundaries', () => {
             ...base, catalog: qualify('directory-privacy')
         })!;
         assert.match(html, /data-directory-privacy data-account-username="owner"/);
+        assert.match(html, /data-leech-protection data-lp-username="owner" data-lp-manage="false"/);
+        assert.match(renderApprovedXpanelWorkspace({ ...base, catalog: qualify('directory-privacy', 'leech-protection') })!, /data-lp-manage="true"/);
         const parsed = new DOMParser().parseFromString(html, 'text/html');
         assert.equal(parsed.querySelectorAll('[data-directory-privacy]').length, 1);
         assert.equal(parsed.querySelector('[data-directory-privacy]')!.getAttribute('data-account-username'), account.username);

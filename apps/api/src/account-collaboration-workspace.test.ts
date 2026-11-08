@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fail } from '@xpanel/core'
 import { createApiToken, createRootPrincipal, createTestDb, createUserPrincipal } from '@xpanel/db'
-import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
+import { createTestStateStore } from '@xpanel/state'
 import { authenticateRequest, sha256Hex } from './auth.ts'
 import { assertAccountAuthorized, assertRequestAuthorized, isMailboxPrincipal } from './authorization.ts'
-import { ExtendedFeaturesStore, type WebmailCalendar, type WebmailContact } from './extended-routes.ts'
+import type { WebmailCalendar, WebmailContact } from './extended-routes.ts'
 import { createCalendarWorkspaceRoutes } from './mail/calendar-workspace.ts'
 import { parseCalendarWorkspaceIcs, renderCalendarWorkspaceIcs } from './mail/calendar-ics.ts'
+import { createMailboxLocks, davStoreTooLarge, openDavSession } from './mail/dav-store.ts'
+import { createMemoryDav } from './mail/dav-testkit.ts'
 import { createAccountCollaborationRoutes, type AccountCollaborationHelpers } from './account-collaboration-workspace.ts'
 import { TEST_SERVER_SECRET } from './testing.ts'
 
@@ -32,23 +33,24 @@ const fixture = async () => {
   const calendar = (service = inbox, name = 'Work'): WebmailCalendar => ({ id: randomUUID(), owner: service.login, ownerAuthority: authority(service), name, color: '#4f6bed', timezone: 'UTC', events: [], shares: [], createdAt: '2026-10-27T00:00:00Z' })
   const ownCalendar = calendar(), siblingCalendar = calendar(sibling, 'Sibling'), foreignCalendar = calendar(foreign, 'Foreign secret')
   ownCalendar.shares = [{ principal: sibling.login, granteeAuthority: authority(sibling), permission: 'read', sharedAt: '2026-10-27T00:00:00Z' }, { principal: foreign.login, granteeAuthority: authority(foreign), permission: 'read-write', sharedAt: '2026-10-27T00:00:00Z' }]
-  const legacy = { ...calendar(), ownerAuthority: undefined, name: 'Legacy secret' }, oldLifetime = { ...calendar(), ownerAuthority: { ...authority(), serviceUserId: randomUUID() }, name: 'Old lifetime secret' }
-  const contact: WebmailContact = { id: randomUUID(), owner: inbox.login, ownerAuthority: authority(), fullName: 'Contact private details', email: 'private@example.test', phone: '', organization: '', title: '', groups: ['Team'], shares: [], vcard: 'BEGIN:VCARD\r\nEND:VCARD', createdAt: '2026-10-27T00:00:00Z' }
-  const ext = new ExtendedFeaturesStore(state.rootDir)
-  await ext.write('webmail/calendars.json', [ownCalendar, siblingCalendar, foreignCalendar, legacy, oldLifetime]); await ext.write('webmail/contacts.json', [contact, { ...contact, id: randomUUID(), ownerAuthority: undefined }, { ...contact, id: randomUUID(), owner: foreign.login, ownerAuthority: authority(foreign) }])
+  const contact: WebmailContact = { id: randomUUID(), owner: inbox.login, ownerAuthority: authority(), fullName: 'Contact private details', email: 'private@example.test', phone: '', organization: '', title: '', groups: ['Team'], shares: [], vcard: 'BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Contact private details\r\nEMAIL:private@example.test\r\nCATEGORIES:Team\r\nEND:VCARD', createdAt: '2026-10-27T00:00:00Z' }
+  const dav = createMemoryDav(), usernameOf = (accountId: string) => accountId === own.id ? own.username : other.username
+  dav.seedCalendars([ownCalendar, siblingCalendar, foreignCalendar], usernameOf)
+  dav.seedContacts([contact, { ...contact, id: randomUUID(), ownerAuthority: authority(foreign), owner: foreign.login }], usernameOf)
   const principal = await createUserPrincipal(database.db, { username: own.username, accountId: own.id, passwordHash: HASH }), root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
   const token = async (principalId: string, scopes: string[]) => { const raw = 'xp_' + randomUUID(); await createApiToken(database.db, { principalId, name: 'Synthetic collaboration', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 60000).toISOString() }); return raw }
   const ownerToken = await token(principal.id, ['webmail:read', 'webmail:write']), sealedToken = await token(principal.id, ['webmail:read', 'webmail:write', 'mailbox:' + inbox.id]), rootToken = await token(root.id, ['*'])
   const requireCaller: AccountCollaborationHelpers['requireCaller'] = async req => { const caller = await authenticateRequest(database.db, req, { serverSecret: TEST_SERVER_SECRET }); if (!caller) return fail('UNAUTHENTICATED', 'authentication required'); await assertRequestAuthorized(state.store, caller, req); return caller }
   const shared = { store: state.store, requireCaller, assertCanAccessAccount: (caller: Parameters<typeof assertAccountAuthorized>[1], account: typeof own, action: string) => assertAccountAuthorized(state.store, caller, account, action), emitAudit: vi.fn(async () => {}) }
-  const readCalendars = () => ext.readOrDefault<WebmailCalendar[]>('webmail/calendars.json', [])
-  const nativeRoute = createCalendarWorkspaceRoutes({ helpers: shared, readRecords: readCalendars, publishRecords: (records, lease) => atomicWriteJson(join(ext.baseDir, 'webmail', 'calendars.json'), records, 0o640, () => lease.assertFencingToken()), parseIcs: parseCalendarWorkspaceIcs, renderIcs: renderCalendarWorkspaceIcs })
-  const helpers: AccountCollaborationHelpers = { ...shared, serverSecret: TEST_SERVER_SECRET, readCalendars, readContacts: () => ext.readOrDefault<WebmailContact[]>('webmail/contacts.json', []), calendarRoute: vi.fn(async (req, url, method) => { expect(new URL(req.url).pathname).toMatch(/^\/api\/account\/collaboration\/calendars(?:\/[0-9a-f]{32})?$/); expect(isMailboxPrincipal((await authenticateRequest(database.db, req, { serverSecret: TEST_SERVER_SECRET }))!)).toBe(false); return nativeRoute(req, url, method) }) }
+  const davPorts = { open: (caller: Parameters<typeof openDavSession>[1], account: Parameters<typeof openDavSession>[2], mailbox: Parameters<typeof openDavSession>[3]) => openDavSession({ exchange: dav.exchange, listServiceUsers: id => state.store.listServiceUsers(id) }, caller, account, mailbox), lock: createMailboxLocks() }
+  const readCalendars = () => davPorts.open({} as never, own, authority()).calendars()
+  const nativeRoute = createCalendarWorkspaceRoutes({ helpers: shared, dav: davPorts, parseIcs: parseCalendarWorkspaceIcs, renderIcs: renderCalendarWorkspaceIcs })
+  const helpers: AccountCollaborationHelpers = { ...shared, serverSecret: TEST_SERVER_SECRET, dav: davPorts, calendarRoute: vi.fn(async (req, url, method) => { expect(new URL(req.url).pathname).toMatch(/^\/api\/account\/collaboration\/calendars(?:\/[0-9a-f]{32})?$/); expect(isMailboxPrincipal((await authenticateRequest(database.db, req, { serverSecret: TEST_SERVER_SECRET }))!)).toBe(false); return nativeRoute(req, url, method) }) }
   const route = createAccountCollaborationRoutes(helpers)
   const request = (method = 'GET', body?: unknown, bearer = ownerToken, path = '/api/account/collaboration') => { const url = new URL('http://localhost' + path); return route(new Request(url, { method, headers: { authorization: 'Bearer ' + bearer, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }), url, method) }
   const view = async () => await (await request())!.json() as { context: { account: string }; mailboxes: Array<{ mailbox: string; revision: string; calendars: Array<{ name: string; shares: Array<{ mailbox: string; permission: string }> }>; contacts: { count: number; groupCount: number } }> }
   const createBody = async (name = 'Created') => ({ mailbox: inbox.login, expectedRevision: (await view()).mailboxes.find(item => item.mailbox === inbox.login)!.revision, name, color: '#4f6bed', timezone: 'UTC' })
-  return { database, state, helpers, ext, own, inbox, sibling, foreign, ownCalendar, calendar, readCalendars, request, view, createBody, ownerToken, sealedToken, rootToken, feature, principal }
+  return { database, state, helpers, dav, usernameOf, own, inbox, sibling, foreign, ownCalendar, calendar, readCalendars, request, view, createBody, ownerToken, sealedToken, rootToken, feature, principal }
 }
 
 describe('account collaboration using actual authority and existing calendar writer', () => {
@@ -82,7 +84,7 @@ describe('account collaboration using actual authority and existing calendar wri
   })
   it('creates through the real guarded handler as the original account actor and verifies canonical readback', async () => {
     const f = await fixture(), response = await f.request('POST', await f.createBody(), f.ownerToken, '/api/account/collaboration/calendars')
-    expect(response!.status).toBe(201); expect(await response!.json()).toMatchObject({ stateChanged: true, created: { mailbox: f.inbox.login, name: 'Created' }, application: { syncVerified: false, nativeApplied: false } })
+    expect(response!.status).toBe(201); expect(await response!.json()).toMatchObject({ stateChanged: true, created: { mailbox: f.inbox.login, name: 'Created' }, application: { syncVerified: false, nativeApplied: true } })
     const created = (await f.readCalendars()).find(calendar => calendar.name === 'Created')!
     expect(created.ownerAuthority).toEqual({ accountId: f.own.id, serviceUserId: f.inbox.id, mailbox: f.inbox.login }); expect(f.helpers.calendarRoute).toHaveBeenCalledOnce()
   })
@@ -97,10 +99,26 @@ describe('account collaboration using actual authority and existing calendar wri
     expect(f.helpers.calendarRoute).not.toHaveBeenCalled()
   })
   it('refuses stale collection revisions and preserves concurrent canonical calendar records', async () => {
-    const f = await fixture(), body = await f.createBody(), records = await f.readCalendars()
-    records.push(f.calendar(f.inbox, 'Concurrent')); await f.ext.write('webmail/calendars.json', records)
+    const f = await fixture(), body = await f.createBody()
+    f.dav.seedCalendars([f.calendar(f.inbox, 'Concurrent')], f.usernameOf)
     await expect(f.request('POST', body, f.ownerToken, '/api/account/collaboration/calendars')).rejects.toMatchObject({ code: 'CONFLICT', detail: { stateChanged: false } })
     expect(f.helpers.calendarRoute).not.toHaveBeenCalled(); expect((await f.readCalendars()).some(calendar => calendar.name === 'Concurrent')).toBe(true)
+  })
+  it('refuses only the oversized mailbox, whose partial read stays hidden, and keeps the others readable and writable', async () => {
+    const f = await fixture(), open = f.helpers.dav.open, body = await f.createBody()
+    vi.spyOn(f.helpers.dav, 'open').mockImplementation((caller, account, authority) => { const session = open(caller, account, authority); return authority.mailbox === f.sibling.login ? { ...session, contacts: davStoreTooLarge } : session })
+    const current = await f.view()
+    expect(current.mailboxes.find(item => item.mailbox === f.sibling.login)).toEqual({ mailbox: f.sibling.login, refused: 'dav_store_too_large' })
+    expect(current.mailboxes.find(item => item.mailbox === f.inbox.login)!.calendars.map(item => item.name)).toEqual(['Work'])
+    expect(JSON.stringify(current)).not.toContain('Sibling')
+    await expect(f.request('POST', { ...body, mailbox: f.sibling.login }, f.ownerToken, '/api/account/collaboration/calendars')).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { reason: 'dav_store_too_large', stateChanged: false } })
+    expect(f.helpers.calendarRoute).not.toHaveBeenCalled()
+    expect((await f.request('POST', body, f.ownerToken, '/api/account/collaboration/calendars'))!.status).toBe(201)
+  })
+  it('still refuses the whole overview when a store is unavailable', async () => {
+    const f = await fixture(), open = f.helpers.dav.open
+    vi.spyOn(f.helpers.dav, 'open').mockImplementation((caller, account, authority) => ({ ...open(caller, account, authority), contacts: () => fail('SERVICE_UNAVAILABLE', 'the calendar store is not available', { stateChanged: false, reason: 'dav_store_unavailable' }) }))
+    await expect(f.request()).rejects.toMatchObject({ detail: { reason: 'dav_store_unavailable' } })
   })
   it('rechecks actual feature policy before overview and create without revealing rows', async () => {
     const f = await fixture(), body = await f.createBody()

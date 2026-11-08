@@ -5,6 +5,8 @@ import { card, notice, pageHeader } from '../../../components/index.ts'
 import { escapeHtml, hookAttrs, type HookAttributes } from '../../../html.ts'
 import { icon } from '../../../icons.ts'
 import { v2Messages } from '../../../messages.ts'
+import { mailCardsFor } from '../../../../../mail-cards.ts'
+import { renderV2MailCards } from '../../mail-cards.ts'
 
 /** Core resolves route admission and the current account before calling these renderers. */
 export interface PanelEmailAuthority {
@@ -16,6 +18,8 @@ export interface PanelEmailAuthority {
 }
 
 export const NO_EMAIL_AUTHORITY: PanelEmailAuthority = Object.freeze({ canRead: false, canManage: false })
+/** The mail tool cards of one account page; read-only documents keep them inert. */
+export const panelMailCards = (route: string, locale: Locale, t: Translate, canRead: boolean, canManage: boolean, domains: readonly string[] = []): string => renderV2MailCards(mailCardsFor(route, t, { canRead, canAct: () => canManage, domains }), locale)
 export const esc = escapeHtml
 export const technical = (value: string | number): string => `<bdi dir="ltr" class="v2-mono">${esc(normalizeAsciiDigits(value))}</bdi>`
 export function emailContext(props: PanelSurfaceProps, authority: PanelEmailAuthority = NO_EMAIL_AUTHORITY) {

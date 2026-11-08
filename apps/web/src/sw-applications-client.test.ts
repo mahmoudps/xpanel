@@ -8,8 +8,8 @@ const tick = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve
 const accountId = '11111111-1111-4111-8111-111111111111', domainId = '22222222-2222-4222-8222-222222222222', H = (c: string) => c.repeat(64)
 const view = (selected: unknown = null, catalogState: 'read' | 'unavailable' = 'read') => ({ context: { accountId, username: 'alice' },
   catalog: catalogState === 'read' ? { state: 'read', reason: null, revision: H('c'), sequence: 7, expiresAt: '2026-10-29T12:00:00.000Z', applications: [{ id: 'sample', name: 'Sample', versions: ['1.2.3', '1.2.4'] }] } : { state: 'unavailable', reason: 'not-configured', revision: null, sequence: null, expiresAt: null, applications: [] },
-  domains: [{ id: domainId, name: 'a.example' }], selected })
-const readable = (installation: unknown = null, writesAvailable = true) => ({ domainId, state: 'read', reason: null, revision: H('b'), installation, recoveryRequired: false, writesAvailable })
+  domains: [{ id: domainId, name: 'a.example' }], instances: [], selected })
+const readable = (installation: unknown = null, writesAvailable = true) => ({ domainId, path: '', state: 'read', reason: null, revision: H('b'), installation, recoveryRequired: false, modified: false, writesAvailable })
 const boot = (send: (method: string, path: string, body?: unknown) => Promise<unknown>, ask?: () => Promise<boolean>) => { (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send; new Function('return ' + SW_APPLICATIONS_CLIENT_BINDING)()(ask) }
 const pick = async (selector: string, value: string) => { const node = document.querySelector<HTMLSelectElement>(selector)!; node.value = value; node.dispatchEvent(new Event('change')); await tick() }
 beforeEach(() => { document.body.innerHTML = renderSwApplicationsWorkspace({ lang: 'en', canManage: true }); delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
@@ -24,7 +24,7 @@ describe('applications workspace', () => {
     }
   })
   it('keeps installs disabled while the provider is unavailable and never shows an installed app', async () => {
-    boot(vi.fn(async (_m: string, path: string) => view(path.includes('?') ? { domainId, state: 'unavailable', reason: 'application_provider_unavailable', revision: null, installation: null, recoveryRequired: null, writesAvailable: false } : null)), async () => true); await tick()
+    boot(vi.fn(async (_m: string, path: string) => view(path.includes('?') ? { domainId, path: '', state: 'unavailable', reason: 'application_provider_unavailable', revision: null, installation: null, recoveryRequired: null, modified: null, writesAvailable: false } : null)), async () => true); await tick()
     await pick('[data-sw-apps-domain-select]', domainId); await pick('[data-sw-apps-app-select]', 'sample'); await pick('[data-sw-apps-version-select]', '1.2.3')
     expect(document.querySelector('[data-sw-apps-installed]')!.textContent).toBe('Unavailable')
     expect(document.querySelector<HTMLButtonElement>('[data-sw-apps-action="install"]')!.disabled).toBe(true)
@@ -36,8 +36,33 @@ describe('applications workspace', () => {
     const install = document.querySelector<HTMLButtonElement>('[data-sw-apps-action="install"]')!
     expect(install.disabled).toBe(false); expect(document.querySelector<HTMLButtonElement>('[data-sw-apps-action="remove"]')!.disabled).toBe(true)
     install.click(); await tick()
-    expect(send).toHaveBeenLastCalledWith('POST', '/api/account/applications/jobs', { domainId, action: 'install', appId: 'sample', version: '1.2.4', expectedRevision: H('b'), expectedCatalogRevision: H('c') })
+    expect(send).toHaveBeenLastCalledWith('POST', '/api/account/applications/jobs', { domainId, path: '', action: 'install', appId: 'sample', version: '1.2.4', expectedRevision: H('b'), expectedCatalogRevision: H('c') })
     expect(document.querySelector('[data-sw-apps-status]')!.textContent).toContain('job-5'); expect(install.disabled).toBe(true)
+  })
+  it('reads and installs under a directory, lists installations and opens one for management', async () => {
+    const installed = { domainId, domain: 'a.example', path: 'blog', appId: 'sample', version: '1.2.3', previousVersion: null, database: 'alice_app1', updatedAt: '2026-11-07T12:00:00.000Z' }
+    const send = vi.fn(async (method: string, path: string, _body?: unknown) => method === 'POST' ? { job: { id: 'job-8', kind: 'application.remove' } } : { ...view(path.includes('?') ? { ...readable({ appId: 'sample', version: '1.2.3', previousVersion: null }), path: 'blog', modified: true } : null), instances: [installed] })
+    boot(send, async () => true); await tick()
+    expect(document.querySelector('[data-sw-apps-instances]')!.textContent).toContain('a.example/blog')
+    await pick('[data-sw-apps-instance-select]', domainId + '|blog')
+    expect(send).toHaveBeenLastCalledWith('GET', '/api/account/applications?domainId=' + domainId + '&path=blog')
+    expect(document.querySelector('[data-sw-apps-recovery]')!.textContent).toBe('Files changed outside this tool')
+    await pick('[data-sw-apps-app-select]', 'sample'); await pick('[data-sw-apps-version-select]', '1.2.4')
+    expect(document.querySelector<HTMLButtonElement>('[data-sw-apps-action="update"]')!.disabled).toBe(true)
+    const remove = document.querySelector<HTMLButtonElement>('[data-sw-apps-action="remove"]')!
+    expect(remove.disabled).toBe(false)
+    remove.click(); await tick()
+    expect(send).toHaveBeenLastCalledWith('POST', '/api/account/applications/jobs', { domainId, path: 'blog', action: 'remove', appId: 'sample', expectedRevision: H('b'), expectedCatalogRevision: H('c') })
+  })
+  it('offers Recover only for a stranded change and reads again after it', async () => {
+    const send = vi.fn(async (method: string, path: string, _body?: unknown) => method === 'POST' ? { results: [] } : view(path.includes('?') ? { ...readable({ appId: 'sample', version: '1.2.3', previousVersion: null }, true), recoveryRequired: true } : null))
+    boot(send, async () => true); await tick()
+    await pick('[data-sw-apps-domain-select]', domainId)
+    const recover = document.querySelector<HTMLButtonElement>('[data-sw-apps-action="recover"]')!
+    expect(recover.disabled).toBe(false); expect(document.querySelector<HTMLButtonElement>('[data-sw-apps-action="remove"]')!.disabled).toBe(true)
+    recover.click(); await tick()
+    expect(send).toHaveBeenCalledWith('POST', '/api/account/applications/recover', { domainId, path: '' })
+    expect(document.querySelector('[data-sw-apps-status]')!.textContent).toContain('Recovery finished')
   })
   it('the API validates the change grammar before the agent and pins the job to the account', async () => {
     const account = { id: accountId, username: 'alice', status: 'active', planId: 'p' }
@@ -47,7 +72,7 @@ describe('applications workspace', () => {
     const post = (body: unknown) => handleSwApplicationsWorkspaceRoute(new Request(url, { method: 'POST', body: JSON.stringify(body) }), url, 'POST', ports)
     const body = { domainId, action: 'install', appId: 'sample', version: '1.2.4', expectedRevision: H('b'), expectedCatalogRevision: H('c') }
     expect((await post(body))!.status).toBe(202)
-    expect(readAgent).toHaveBeenCalledWith(expect.anything(), '/accounts/alice/applications/jobs', body, true)
+    expect(readAgent).toHaveBeenCalledWith(expect.anything(), '/accounts/alice/applications/jobs', { ...body, path: '' }, true)
     await expect(post({ ...body, path: '/home/alice' })).rejects.toMatchObject({ code: 'VALIDATION' }); await expect(post({ ...body, action: 'remove' })).rejects.toMatchObject({ code: 'VALIDATION' })
     readAgent.mockResolvedValueOnce({ job: { id: 'job-6', kind: 'application.install', accountId: 'other' } })
     await expect(post(body)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', detail: { unknownOutcome: true } })

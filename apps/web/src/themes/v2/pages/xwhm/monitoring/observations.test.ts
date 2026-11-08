@@ -121,11 +121,11 @@ describe('v2 WHM diagnostic, security and activity bodies', () => {
     expect(one('/whm/security/panel-access', 'data-sec-action').attrs.has('disabled')).toBe(false)
   })
 
-  it('retains protected root SSH keys and does not invent editable password policy', () => {
+  it('retains protected root SSH keys and shows the sign-in policy through its controller', () => {
     const html = render('/whm/security/ssh', { ...admitted, serverSettings: { sshPort: 22 } as WhmObservationInput['serverSettings'] })
     expect(html).toContain('Existing and fleet keys are protected.')
-    expect(html).toContain('Password policy and root-login changes have not been connected.')
-    expect(html).toContain('name="sshPort"')
+    expect(html).toContain('A policy that would leave no way to sign in is refused.')
+    expect(html).toContain('data-whm-ssh-port')
     expect(html).toContain('value="22"')
     expect(one('/whm/security/ssh', 'data-whm-ssh-add').attrs.has('disabled')).toBe(true)
   })

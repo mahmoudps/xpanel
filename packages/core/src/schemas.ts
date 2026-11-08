@@ -6,6 +6,9 @@ import { cidrContains, formatCidr, parseCidr, parseIp } from './rules/firewall.t
 import { validateDomainName } from './rules/naming.ts'
 import { PHP_HANDLERS, sanitizePhpIni, validateFpm } from './rules/php.ts'
 import { validateApacheWorkers, validateNginxWorkers } from './rules/workers.ts'
+import { validateServerWebSettings } from './server-web-settings.ts'
+import { validateServerFtpSettings } from './server-ftp-settings.ts'
+import { validateServerSshSettings } from './server-ssh-settings.ts'
 import { PHP_EXCEPTION_FUNCTIONS } from './types.ts'
 import type { ApacheMpm, DefaultSitePolicy, Engine, Limit, PhpFunctionException, PhpSettings, ProxyOptions, ResellerAcl, ServerSettings } from './types.ts'
 
@@ -286,9 +289,14 @@ const port = (v: unknown, what: string): number => assertInt(v, 1, 65535, what)
 export const validateDefaultSitePolicy = (raw: unknown): DefaultSitePolicy => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail('VALIDATION', 'default site policy must be an object')
   const input = raw as Record<string, unknown>
-  if (Object.keys(input).some(key => !['response', 'redirectTo', 'refuseHttps'].includes(key))) return fail('VALIDATION', 'unsupported default site policy fields')
-  if (input.response !== 'reject' && input.response !== 'redirect') return fail('VALIDATION', 'invalid default site response')
+  if (Object.keys(input).some(key => !['response', 'redirectTo', 'site', 'refuseHttps'].includes(key))) return fail('VALIDATION', 'unsupported default site policy fields')
+  if (input.response !== 'reject' && input.response !== 'redirect' && input.response !== 'site') return fail('VALIDATION', 'invalid default site response')
   if (typeof input.refuseHttps !== 'boolean') return fail('VALIDATION', 'default site HTTPS refusal must be a boolean')
+  if (input.response === 'site') {
+    if (input.redirectTo !== undefined && input.redirectTo !== null) return fail('VALIDATION', 'a default site has no redirect target')
+    return { response: 'site', redirectTo: null, site: validateDomainName(input.site), refuseHttps: input.refuseHttps }
+  }
+  if (input.site !== undefined) return fail('VALIDATION', 'only the site response names a site')
   if (input.response === 'reject') {
     if (input.redirectTo !== undefined && input.redirectTo !== null) return fail('VALIDATION', 'a rejecting default site has no redirect target')
     return { response: 'reject', redirectTo: null, refuseHttps: input.refuseHttps }
@@ -344,6 +352,9 @@ export const validateServerSettings = (s: ServerSettings): ServerSettings => {
     ...(s.defaultSite !== undefined ? { defaultSite: validateDefaultSitePolicy(s.defaultSite) } : {}),
     ...(s.phpFunctionExceptions !== undefined ? { phpFunctionExceptions: validatePhpFunctionExceptions(s.phpFunctionExceptions) } : {}),
     ...(s.defaultPhpVersion !== undefined ? { defaultPhpVersion: typeof s.defaultPhpVersion === 'string' && PHP_VERSION_RE.test(s.defaultPhpVersion) ? s.defaultPhpVersion : bad('defaultPhpVersion', s.defaultPhpVersion, 'like 8.3') } : {}),
+    ...(s.web !== undefined ? { web: validateServerWebSettings(s.web) } : {}),
+    ...(s.ftp !== undefined ? { ftp: validateServerFtpSettings(s.ftp) } : {}),
+    ...(s.ssh !== undefined ? { ssh: validateServerSshSettings(s.ssh) } : {}),
   }
 }
 

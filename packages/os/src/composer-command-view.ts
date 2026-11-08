@@ -10,7 +10,7 @@ export interface ComposerWorkspaceView {
   binary: { state: 'read' | 'unavailable'; executable: '/usr/bin/composer'; version: string | null }
   projects: ComposerProjectTarget[]; selected: ComposerProjectView | null
   /** install/update are true only when the agent holds a qualified confined transaction provider and the job runner. */
-  actions: { install: boolean; update: boolean; mirror: false; reason: 'isolated-composer-runner-unavailable' | null }
+  actions: { install: boolean; update: boolean; mirror: boolean; reason: 'isolated-composer-runner-unavailable' | null }
 }
 
 /** Whitelisted projection shared by API and browser; raw manifests, URLs, config and logs never cross it. */
@@ -20,12 +20,12 @@ export function readComposerWorkspaceView(value: unknown): ComposerWorkspaceView
   const selector = (item: unknown): item is string => typeof item === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(item)
   const version = (item: unknown): item is string => text(item, 128) && /^[A-Za-z0-9.+_~^*<>=!|, /:-]{1,128}$/.test(item) && !item.includes('://') && !item.includes('@')
   const bad = (): never => { throw new Error('invalid_composer_workspace') }
-  if (!object(value) || value.scope !== 'saved-site-document-roots' || typeof value.observedAt !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(value.observedAt) || !Number.isFinite(Date.parse(value.observedAt)) || !object(value.binary) || !['read', 'unavailable'].includes(String(value.binary.state)) || value.binary.executable !== '/usr/bin/composer' || !object(value.actions) || typeof value.actions.install !== 'boolean' || value.actions.update !== value.actions.install || value.actions.mirror !== false || value.actions.reason !== (value.actions.install ? null : 'isolated-composer-runner-unavailable') || !Array.isArray(value.projects) || value.projects.length > 1000) return bad()
+  if (!object(value) || value.scope !== 'saved-site-document-roots' || typeof value.observedAt !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(value.observedAt) || !Number.isFinite(Date.parse(value.observedAt)) || !object(value.binary) || !['read', 'unavailable'].includes(String(value.binary.state)) || value.binary.executable !== '/usr/bin/composer' || !object(value.actions) || typeof value.actions.install !== 'boolean' || value.actions.update !== value.actions.install || value.actions.mirror !== value.actions.install || value.actions.reason !== (value.actions.install ? null : 'isolated-composer-runner-unavailable') || !Array.isArray(value.projects) || value.projects.length > 1000) return bad()
   const binary = value.binary
   if (binary.state === 'read' ? typeof binary.version !== 'string' || !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(binary.version) : binary.version !== null) return bad()
   const seen = new Set<string>()
   const projects: ComposerProjectTarget[] = value.projects.map(raw => {
-    if (!object(raw) || !selector(raw.selector) || seen.has(raw.selector) || typeof raw.domain !== 'string' || !/^[a-z0-9][a-z0-9.-]{0,252}$/.test(raw.domain) || typeof raw.account !== 'string' || !/^[a-z][a-z0-9]{0,15}$/.test(raw.account) || !text(raw.directory, 1024) || !raw.directory.startsWith('/home/' + raw.account + '/') || !/^\/home\/[a-z][a-z0-9]{0,15}\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/.test(raw.directory) || raw.directory.split('/').some(part => part === '.' || part === '..') || typeof raw.phpVersion !== 'string' || !/^[5-9]\.[0-9]{1,2}$/.test(raw.phpVersion)) return bad()
+    if (!object(raw) || !selector(raw.selector) || seen.has(raw.selector) || typeof raw.domain !== 'string' || !/^[a-z0-9][a-z0-9.-]{0,252}$/.test(raw.domain) || typeof raw.account !== 'string' || !/^[a-z][a-z0-9]{0,15}$/.test(raw.account) || !text(raw.directory, 1024) || raw.directory.split('/')[2] !== raw.account || !/^\/home[1-9]?[0-9]?\/[a-z][a-z0-9]{0,15}\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/.test(raw.directory) || raw.directory.split('/').some(part => part === '.' || part === '..') || typeof raw.phpVersion !== 'string' || !/^[5-9]\.[0-9]{1,2}$/.test(raw.phpVersion)) return bad()
     seen.add(raw.selector)
     return { selector: raw.selector, domain: raw.domain, account: raw.account, directory: raw.directory, phpVersion: raw.phpVersion }
   })
@@ -41,7 +41,7 @@ export function readComposerWorkspaceView(value: unknown): ComposerWorkspaceView
     })
     selected = { selector: raw.selector, state: raw.state as ComposerProjectView['state'], reason: raw.reason as ComposerProjectView['reason'], manifest: raw.manifest as ComposerProjectView['manifest'], lock: raw.lock as ComposerProjectView['lock'], vendor: raw.vendor as ComposerProjectView['vendor'], lockMatch: raw.lockMatch as ComposerProjectView['lockMatch'], lockFreshness: 'not-verified', packages }
   }
-  return { scope: 'saved-site-document-roots', observedAt: value.observedAt, binary: { state: binary.state as 'read' | 'unavailable', executable: '/usr/bin/composer', version: binary.version as string | null }, projects, selected, actions: value.actions.install ? { install: true, update: true, mirror: false, reason: null } : { install: false, update: false, mirror: false, reason: 'isolated-composer-runner-unavailable' } }
+  return { scope: 'saved-site-document-roots', observedAt: value.observedAt, binary: { state: binary.state as 'read' | 'unavailable', executable: '/usr/bin/composer', version: binary.version as string | null }, projects, selected, actions: value.actions.install ? { install: true, update: true, mirror: true, reason: null } : { install: false, update: false, mirror: false, reason: 'isolated-composer-runner-unavailable' } }
 }
 
 export interface ComposerJobReviewView {

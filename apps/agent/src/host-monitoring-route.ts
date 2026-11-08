@@ -1,6 +1,6 @@
 import { fail, isXpanelError } from '@xpanel/core'
-import { parseMonitoringLogQuery, parseMonitoringSignalRequest } from '../../../packages/os/src/monitoring-command.ts'
-import { readDisk, readLogs, readProcesses, signalProcess } from './host-monitoring.ts'
+import { parseMonitoringLogQuery, parseMonitoringSignalRequest, parseMonitoringUserKillRequest } from '../../../packages/os/src/monitoring-command.ts'
+import { killAccountProcesses, readDisk, readLogs, readProcesses, signalProcess, sweepTarget } from './host-monitoring.ts'
 import type { MonitoringAccount, MonitoringRun } from './host-monitoring.ts'
 
 export interface HostMonitoringCaller { principalId: string; actor: string; role: string }
@@ -24,12 +24,35 @@ const ROUTES: Readonly<Record<string, { method: 'GET' | 'POST'; target: string }
   '/host/monitoring/disk': { method: 'GET', target: 'host.monitoring.disk' },
   '/host/monitoring/logs': { method: 'GET', target: 'host.monitoring.logs' },
   '/host/monitoring/processes/signal': { method: 'POST', target: 'host.monitoring.processes.signal' },
+  '/host/monitoring/processes/kill-user': { method: 'POST', target: 'host.monitoring.processes.kill_user' },
 }
 const json = (body: unknown): Response => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
 const observedNow = (ctx: { now?: () => Date }): string => (ctx.now ?? (() => new Date()))().toISOString()
 /** An authority refusal happens before any host effect; say so for the API's mutation mapping. */
 const beforeEffect = async <T>(check: () => Promise<T>): Promise<T> => {
   try { return await check() } catch (error) { if (isXpanelError(error)) return fail(error.code, error.message, { ...error.detail, stateChanged: false }); throw error }
+}
+
+/** WHM "Kill all for user": audited before the first signal, with authority re-read at that moment. */
+async function killUserRoute<C extends HostMonitoringCaller>(body: unknown, route: string, ctx: HostMonitoringRouteContext<C>): Promise<Response> {
+  const request = parseMonitoringUserKillRequest(body)
+  if (!ctx.run) return fail('PRECONDITION_FAILED', 'process signals require the native Linux host executor', { stateChanged: false })
+  const account = sweepTarget(await ctx.listAccounts(), request.username), target = 'account:' + account.username
+  let actor = ctx.caller
+  const outcome = await killAccountProcesses(ctx.run, account, {
+    ...(ctx.now ? { now: ctx.now } : {}), ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
+    beforeDispatch: async () => {
+      const fresh = await beforeEffect(() => ctx.reauthenticate())
+      if (fresh.principalId !== ctx.caller.principalId || fresh.actor !== ctx.caller.actor) return fail('FORBIDDEN', 'process signal authority changed', { stateChanged: false })
+      await beforeEffect(() => ctx.assertRoot(fresh, route))
+      actor = fresh
+      try { await ctx.audit({ actor: fresh.actor, principalId: fresh.principalId, action: 'host.process.kill_user_requested', target, detail: { username: account.username, uid: account.uid }, outcome: 'ok' }) }
+      catch { return fail('PRECONDITION_FAILED', 'the process sweep could not be audited before dispatch', { stateChanged: false }) }
+    },
+  })
+  try { await ctx.audit({ actor: actor.actor, principalId: actor.principalId, action: 'host.process.kill_user', target, detail: { username: account.username, uid: account.uid, state: outcome.state, signalled: outcome.signalled, remaining: outcome.remaining, exempt: outcome.exempt }, outcome: outcome.state === 'confirmed' ? 'ok' : 'failed' }) }
+  catch { return fail('SERVICE_UNAVAILABLE', 'the process sweep outcome requires audit review', { stateChanged: true, unknownOutcome: true, verificationRequired: true }) }
+  return json(outcome)
 }
 
 /** Root-only host monitoring reads and one identity-bound process signal. Returns null for other paths. */
@@ -56,6 +79,7 @@ export async function handleHostMonitoringRoute<C extends HostMonitoringCaller>(
   if (req.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return fail('VALIDATION', 'JSON is required', { stateChanged: false })
   let body: unknown
   try { body = await req.json() } catch { return fail('VALIDATION', 'request body must be valid JSON', { stateChanged: false }) }
+  if (url.pathname === '/host/monitoring/processes/kill-user') return killUserRoute(body, route.target, ctx)
   const request = parseMonitoringSignalRequest(body)
   if (!ctx.run) return fail('PRECONDITION_FAILED', 'process signals require the native Linux host executor', { stateChanged: false })
   const target = 'process:' + String(request.pid)

@@ -1,3 +1,4 @@
+import { renderV2WhmHome } from '../accounts/admin.ts'
 import { canOpenRegisteredRoute } from '@xpanel/catalog'
 import type { Translate } from '../../../../../i18n.ts'
 import { auditActionLabel, auditActorLabel, auditOutcomeLabel, auditTargetLabel } from '../../../../../audit-labels.ts'
@@ -112,7 +113,6 @@ export function renderV2WhmOverview(t: Translate, props: WhmSurfaceProps): strin
   const open = (route: string): boolean => canOpenRegisteredRoute(route, props.visibility)
   const actions = `${open('/whm/audit') ? `<a class="v2-btn" href="/whm/audit">${escapeHtml(t('Audit log'))}</a>` : ''}${open('/whm/accounts/new') ? `<a class="v2-btn v2-btn--primary" href="/whm/accounts/new">${escapeHtml(t('Create account'))}</a>` : ''}`
   const missingHistory = card({ title: t(msgctxt('theme:v2', 'CPU and memory, last 24 hours')), titleId: 'v2-whm-history',
-    actionsHtml: `<div class="v2-whm-overview__ranges" role="group" aria-label="${escapeHtml(t('Time range'))}">${['1h', '24h', '7d'].map(range => `<button class="v2-btn" type="button" disabled aria-pressed="${range === '24h'}">${range}</button>`).join('')}</div>`,
     bodyHtml: `<div class="v2-whm-overview__chart" role="status">${escapeHtml(t('Performance history has not been read.'))}</div>`,
     footerHtml: open('/whm/monitoring/performance') ? `<a href="/whm/monitoring/performance">${escapeHtml(t('Performance history'))}</a>` : undefined,
   })
@@ -126,7 +126,7 @@ export function renderV2WhmOverview(t: Translate, props: WhmSurfaceProps): strin
     footerHtml: open('/whm/jobs') ? `<a href="/whm/jobs">${escapeHtml(t(msgctxt('theme:v2', 'View jobs')))}</a>` : undefined,
   })
   const audit = open('/whm/audit') ? auditEvents(t, props) : ''
-  return `<div class="v2-layout v2-whm-overview" data-whm-overview>${pageHeader(t, { breadcrumb: [{ label: t('Home') }, { label: t('Dashboard') }], route: '/whm', title: t('Server dashboard'), description: t(msgctxt('theme:v2', 'The reconciler, accounts, resources and services.')), actionsHtml: actions })}${resources(t, props)}<div class="v2-whm-overview__primary">${missingHistory}${reconciler(t, props)}</div><div class="v2-whm-overview__secondary">${open('/whm/services') ? services(t, props) : ''}<div class="v2-stack">${open('/whm/accounts') ? nearLimits : ''}${jobs}</div></div><div class="v2-whm-overview__primary">${audit}${hostFacts(t, props)}</div></div>`
+  return `<div class="v2-layout v2-whm-overview" data-whm-overview>${pageHeader(t, { breadcrumb: [{ label: t('Home') }, { label: t('Dashboard') }], route: '/whm', title: t('Server dashboard'), description: t(msgctxt('theme:v2', 'The reconciler, accounts, resources and services.')), actionsHtml: actions })}${renderV2WhmHome(t)}${resources(t, props)}<div class="v2-whm-overview__primary">${missingHistory}${reconciler(t, props)}</div><div class="v2-whm-overview__secondary">${open('/whm/services') ? services(t, props) : ''}<div class="v2-stack">${open('/whm/accounts') ? nearLimits : ''}${jobs}</div></div><div class="v2-whm-overview__primary">${audit}${hostFacts(t, props)}</div></div>`
 }
 
 export const WHM_OVERVIEW_CSS = `.v2-whm-overview__primary{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:var(--space-3)}

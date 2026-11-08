@@ -17,6 +17,13 @@ const node = (html: string, name: string, value?: string) => {
 }
 
 describe('V2 WHM service-tool documents', () => {
+  it('keeps every reverse proxy control closed until the controller reads', () => {
+    const html = render('/whm/services/nginx-proxy')
+    expect(node(html, 'data-nginx-proxy').attrs.get('data-np-manage')).toBe('true')
+    expect(node(html, 'data-np-status').attrs.get('data-state')).toBe('unread')
+    for (const hook of ['domain', 'path', 'target', 'host', 'websocket', 'add', 'refresh', 'filter', 'all-enable', 'all-disable', 'all-purge']) expect(node(html, `data-np-${hook}`).attrs.has('disabled')).toBe(true)
+    expect(parseMarkup(render('/whm/services/nginx-proxy', { dataAuthority: { canRead: true, canManage: false } })).find(item => item.attrs.has('data-nginx-proxy'))?.attrs.get('data-np-manage')).toBe('false')
+  })
 
 
   it.each(['en', 'ar'] as const)('restores the Web Server flow, proxy and saved comparison in %s without inventing runtime evidence', locale => {
@@ -95,8 +102,8 @@ describe('V2 WHM service-tool documents', () => {
     expect(WHM_WEB_SERVER_CSS).not.toMatch(/text-align:(?:left|right)|margin-(?:left|right)/)
   })
 
-  it('maps exactly seven service-tool documents without claiming the existing service manager', () => {
-    expect(new Set(V2_WHM_SERVICE_TOOL_ROUTES).size).toBe(7)
+  it('maps exactly eight service-tool documents without claiming the existing service manager', () => {
+    expect(new Set(V2_WHM_SERVICE_TOOL_ROUTES).size).toBe(8)
     for (const route of V2_WHM_SERVICE_TOOL_ROUTES) {
       const html = render(route)
       expect(html).toContain(`data-whm-detail-route="${route}"`)

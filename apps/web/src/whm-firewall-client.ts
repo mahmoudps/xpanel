@@ -275,7 +275,7 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
     })
 
     void loadBans()
-    void request('GET', '/api/firewall').then(value => { view = readFirewallView(value); paint(); if (!view.pending) note('read', view.sessionIp ? t('Your session {ip} is checked before every save.', { ip: view.sessionIp }) : t('Rules read.')) }, error => note('failed', failure(error)))
+    void request('GET', '/api/firewall').then(value => { view = readFirewallView(value); paint(); if (!view.pending) note('read', view.sessionIp ? t('Your session {ip} is checked before every save.', { ip: view.sessionIp }) : t('Rules read.')) }).catch(error => note('failed', failure(error)))
   })
 }
 

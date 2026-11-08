@@ -1,7 +1,7 @@
 import { fail } from '@xpanel/core'
-import { applyMailQueueAction, readMailQueue } from './mail-queue.ts'
+import { applyMailQueueAction, drainMailQueue, MAIL_QUEUE_SCAN_LIMIT, readMailQueue } from './mail-queue.ts'
 import type { MailQueueActionResult, MailQueueRun } from './mail-queue.ts'
-import { isMailQueueAction, isMailQueueActionQueue, isMailQueueId } from '../../../packages/os/src/mail-queue-command.ts'
+import { isMailQueueAction, isMailQueueActionQueue, isMailQueueId, mailQueueActionArgv } from '../../../packages/os/src/mail-queue-command.ts'
 
 export interface MailQueueAuditEntry { actor: string; action: string; target: string; outcome: 'ok' | 'failed'; detail: Record<string, unknown> }
 export interface MailQueueRouteContext {
@@ -16,14 +16,14 @@ export interface MailQueueRouteContext {
 const FIELDS = ['action', 'queueId', 'queue', 'expectedRevision']
 const json = (body: unknown): Response => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
 const unavailable = (): never => fail('PRECONDITION_FAILED', 'the mail queue requires the native Linux host executor', { stateChanged: false })
-async function readBody(req: Request): Promise<Record<string, unknown>> {
+async function readBody(req: Request, max = 4096): Promise<Record<string, unknown>> {
   if (req.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return fail('VALIDATION', 'application/json is required', { stateChanged: false })
   const chunks: Uint8Array[] = [], reader = req.body?.getReader()
   let length = 0
   if (reader) try {
     for (let part = await reader.read(); !part.done; part = await reader.read()) {
       length += part.value.byteLength
-      if (length > 4096) { await reader.cancel().catch(() => {}); return fail('VALIDATION', 'mail queue request exceeds the bounded body size', { stateChanged: false }) }
+      if (length > max) { await reader.cancel().catch(() => {}); return fail('VALIDATION', 'mail queue request exceeds the bounded body size', { stateChanged: false }) }
       chunks.push(part.value)
     }
   } finally { reader.releaseLock() }
@@ -33,10 +33,37 @@ async function readBody(req: Request): Promise<Record<string, unknown>> {
   return body as Record<string, unknown>
 }
 
+const HELD_SENDER = /^(?:[a-z0-9._+-]{1,64}@)?[a-z0-9.-]{1,253}$/
+/** Releases or deletes the hold-queue messages of named senders (an address, or a domain for all its addresses), one queue id at a time, and reports what a fresh read still finds. */
+async function heldMessages(req: Request, method: string, ctx: MailQueueRouteContext): Promise<Response> {
+  const { actor } = await ctx.assertRoot('mail.queue.manage')
+  if (method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } })
+  const run = ctx.run ?? unavailable(), body = await readBody(req, 128 * 1024)
+  if (Object.keys(body).sort().join() !== 'action,senders' || (body.action !== 'release' && body.action !== 'delete') || !Array.isArray(body.senders) || !body.senders.length || body.senders.length > 2000 || body.senders.some(item => typeof item !== 'string' || !HELD_SENDER.test(item))) return fail('VALIDATION', 'named senders and release or delete are required', { stateChanged: false })
+  const senders = new Set(body.senders as string[]), action = body.action
+  const scan = async () => { const view = await readMailQueue({ run, maxMessages: MAIL_QUEUE_SCAN_LIMIT, maxBytes: Number.POSITIVE_INFINITY }); return view.state === 'read' ? view.messages.filter(item => { const sender = item.sender.toLowerCase(); return item.queue === 'hold' && (senders.has(sender) || senders.has(sender.slice(sender.lastIndexOf('@') + 1))) }) : null }
+  const matched = await scan()
+  if (!matched) return fail('PRECONDITION_FAILED', 'the mail queue could not be read before the action', { stateChanged: false })
+  for (const message of matched) await run(mailQueueActionArgv(action, message.queueId, 'hold')).catch(() => undefined)
+  const left = await scan()
+  await ctx.audit?.({ actor, action: 'mail.queue.held_' + action, target: 'mail-queue:hold', outcome: left?.length === 0 ? 'ok' : 'failed', detail: { matched: matched.length, remaining: left?.length ?? null } }).catch(() => {})
+  return json({ action, matched: matched.length, remaining: left?.length ?? null })
+}
+
+async function drainRoute(req: Request, method: string, ctx: MailQueueRouteContext): Promise<Response> {
+  await ctx.assertRoot('mail.queue.manage')
+  if (method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } })
+  const run = ctx.run ?? unavailable(), body = await readBody(req, 128 * 1024), domains = body.domains
+  if (Object.keys(body).join() !== 'domains' || !Array.isArray(domains) || domains.length > 2000 || domains.some(item => typeof item !== 'string' || !HELD_SENDER.test(item) || item.includes('@'))) return fail('VALIDATION', 'domains are required', { stateChanged: false })
+  return json(await drainMailQueue({ run, domains: domains as string[] }))
+}
+
 /** Root-only Postfix queue host routes. No message content, headers or bulk selector reaches Postfix. */
 export async function handleMailQueueRoute(req: Request, url: URL, method: string, ctx: MailQueueRouteContext): Promise<Response | null> {
-  const listing = url.pathname === '/host/mail/queue'
-  if (!listing && url.pathname !== '/host/mail/queue/action') return null
+  const listing = url.pathname === '/host/mail/queue', held = url.pathname === '/host/mail/queue/held'
+  if (url.pathname === '/host/mail/queue/drain') return drainRoute(req, method, ctx)
+  if (!listing && !held && url.pathname !== '/host/mail/queue/action') return null
+  if (held) return heldMessages(req, method, ctx)
   const { actor } = await ctx.assertRoot(listing ? 'mail.queue.read' : 'mail.queue.manage')
   const allowed = listing ? 'GET' : 'POST'
   if (method !== allowed) return new Response(null, { status: 405, headers: { allow: allowed } })

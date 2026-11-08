@@ -29,6 +29,8 @@ export const PANEL_TOKEN_SCOPE_LABELS: Readonly<Record<string, string>> = {
   jobs: msgid('Host jobs'),
   languages: msgid('Languages'),
   lifecycle: msgid('Transfers and lifecycle'),
+  metrics: msgid('Metrics scraping'),
+  nodes: msgid('Linked servers'),
   mail: msgid('Email'),
   plans: msgid('Plans'),
   reconcile: msgid('Reconciliation'),

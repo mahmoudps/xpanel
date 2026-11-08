@@ -56,7 +56,7 @@ interface ResellerView {
   maxAccounts: Limit
   totalDiskMb: Limit
   totalBandwidthMb: Limit
-  oversell: boolean
+  oversell: { disk: boolean; bandwidth: boolean }
   nameservers: string[]
   delegatedIps: string[]
 }
@@ -97,7 +97,7 @@ const resellerDraft = (username: string, patch: Record<string, unknown> = {}): R
   maxAccounts: 4,
   totalDiskMb: 8000,
   totalBandwidthMb: 20000,
-  oversell: false,
+  oversell: { disk: false, bandwidth: false },
   nameservers: ['ns1.example.test'],
   delegatedIps: ['192.0.2.42'],
   ...patch,
@@ -257,7 +257,7 @@ describe('real HTTP reseller administration security', () => {
       maxAccounts: 4,
       totalDiskMb: 8000,
       totalBandwidthMb: 20000,
-      oversell: false,
+      oversell: { disk: false, bandwidth: false },
       nameservers: ['ns1.example.test'],
       delegatedIps: ['192.0.2.42'],
     })
@@ -294,7 +294,7 @@ describe('real HTTP reseller administration security', () => {
       maxAccounts: 6,
       totalDiskMb: 'unlimited' as const,
       totalBandwidthMb: 30000,
-      oversell: true,
+      oversell: { disk: true, bandwidth: true },
       nameservers: ['ns1.example.test', 'ns2.example.test'],
       delegatedIps: [],
     }
@@ -312,7 +312,7 @@ describe('real HTTP reseller administration security', () => {
     expect(audits[0]).toMatchObject({ actor: 'root', principal_id: f.root.id, target: 'reseller:edita', outcome: 'ok' })
   })
 
-  it('refuses invalid reseller bodies and unknown ids without changing stored resellers or audits', async () => {
+  it('refuses invalid reseller bodies and unknown ids without changing stored resellers or audits', { tags: ['slow'] }, async () => {
     const created = await f.createReseller('valida')
     const before = await f.state.store.listResellers()
     const createdAudits = (await f.auditRows('reseller.created')).length
@@ -457,7 +457,7 @@ describe('real HTTP reseller-owned account scope', () => {
   let f: Awaited<ReturnType<typeof fixture>>
   beforeEach(async () => { f = await fixture() })
 
-  it('scopes GET /api/accounts to each reseller current ownership', async () => {
+  it('scopes GET /api/accounts to each reseller current ownership', { tags: ['slow'] }, async () => {
     const a = await f.createReseller('scopea')
     const b = await f.createReseller('scopeb')
     const aOwned = await f.seedAccount('scopea1', a.id)
@@ -477,7 +477,7 @@ describe('real HTTP reseller-owned account scope', () => {
     expect((await f.state.store.listAccounts({ ownerId: b.id })).map(item => item.id)).toEqual([bOwned.id])
   })
 
-  it('hides foreign reseller-owned accounts behind NOT_FOUND and refuses their mutation', async () => {
+  it('hides foreign reseller-owned accounts behind NOT_FOUND and refuses their mutation', { tags: ['slow'] }, async () => {
     const a = await f.createReseller('foreigna')
     const b = await f.createReseller('foreignb')
     const own = await f.seedAccount('foreigna1', a.id)
@@ -501,7 +501,7 @@ describe('real HTTP reseller-owned account scope', () => {
     expect((await f.state.store.getAccount(own.id))?.ownerId).toBe(a.id)
   })
 
-  it('binds a reseller-created account to the reseller and ignores a foreign ownerId', async () => {
+  it('binds a reseller-created account to the reseller and ignores a foreign ownerId', { tags: ['slow'] }, async () => {
     const reseller = await f.createReseller('spawna', { acl: ['list-accounts', 'create-account'] })
     const session = await f.login('spawna')
     const response = await f.call('/api/accounts', 'POST', f.accountDraft('spawna1', { ownerId: null }), session)
@@ -520,7 +520,7 @@ describe('real HTTP reseller-owned account scope', () => {
     expect(await f.auditRows('account.desired.created')).toHaveLength(1)
   })
 
-  it('refuses account creation over the reseller account cap without creating state', async () => {
+  it('refuses account creation over the reseller account cap without creating state', { tags: ['slow'] }, async () => {
     const reseller = await f.createReseller('capa', { maxAccounts: 1 })
     await f.seedAccount('capa1', reseller.id)
     const session = await f.login('capa')
@@ -549,7 +549,7 @@ describe('real HTTP reseller-owned account scope', () => {
     expect(await f.auditRows('account.desired.created')).toEqual([])
   })
 
-  it('refuses a plan that another reseller owns', async () => {
+  it('refuses a plan that another reseller owns', { tags: ['slow'] }, async () => {
     const a = await f.createReseller('plana')
     const b = await f.createReseller('planb')
     const foreignPlan = await f.createPlan('Plan B owned', b.id)
@@ -563,7 +563,7 @@ describe('real HTTP reseller-owned account scope', () => {
     expect(await f.state.store.listAccounts()).toEqual(accountsBefore)
   })
 
-  it('re-applies root ACL changes so a reseller gains and then loses account creation', async () => {
+  it('re-applies root ACL changes so a reseller gains and then loses account creation', { tags: ['slow'] }, async () => {
     const reseller = await f.createReseller('acla', { acl: ['list-accounts'] })
     const session = await f.login('acla')
     const denied = await f.call('/api/accounts', 'POST', f.accountDraft('acla1'), session)
@@ -591,7 +591,7 @@ describe('real HTTP reseller-owned account scope', () => {
     expect((await f.auditRows('reseller.updated')).length).toBe(2)
   })
 
-  it('refuses a root-only account owner change by a reseller and records the denial', async () => {
+  it('refuses a root-only account owner change by a reseller and records the denial', { tags: ['slow'] }, async () => {
     const reseller = await f.createReseller('owna')
     const owned = await f.seedAccount('owna1', reseller.id)
     const session = await f.login('owna')
@@ -608,7 +608,7 @@ describe('real HTTP reseller-owned account scope', () => {
     expect((await f.auditRows('account.desired.updated')).length).toBe(updatedBefore)
   })
 
-  it('refuses a foreign or undelegated IPv4 and in-use delegated IP removal', async () => {
+  it('refuses a foreign or undelegated IPv4 and in-use delegated IP removal', { tags: ['slow'] }, async () => {
     const reseller = await f.createReseller('ipa', { delegatedIps: ['192.0.2.42'] })
     const owned = await f.seedAccount('ipa1', reseller.id, { ipv4: '192.0.2.42' })
     const session = await f.login('ipa')
@@ -627,7 +627,7 @@ describe('real HTTP reseller-owned account scope', () => {
     expect((await f.state.store.getAccount(owned.id))?.ipv4).toBe('192.0.2.42')
   })
 
-  it('refuses plan upgrades beyond the reseller allocation and without the change-plan ACL', async () => {
+  it('refuses plan upgrades beyond the reseller allocation and without the change-plan ACL', { tags: ['slow'] }, async () => {
     const reseller = await f.createReseller('planup', { acl: ['list-accounts', 'edit-account'], totalDiskMb: 1500, totalBandwidthMb: 20000 })
     const owned = await f.seedAccount('planup1', reseller.id)
     const biggerPlan = await f.createPlan('Bigger plan', null, { diskMb: 2000 })

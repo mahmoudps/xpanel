@@ -37,6 +37,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     const button = (name: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>('[data-transfer-' + name + ']')!
     const sessionSelect = root.querySelector<HTMLSelectElement>('[data-transfer-session]')!
     const credential = root.querySelector<HTMLSelectElement>('[data-transfer-credential]')!
+    const nodeSelect = root.querySelector<HTMLSelectElement>('[data-transfer-node]')!, liveBox = root.querySelector<HTMLInputElement>('[data-transfer-live]')!, revertAccount = root.querySelector<HTMLSelectElement>('[data-transfer-revert-account]')!, acceptLoss = root.querySelector<HTMLInputElement>('[data-transfer-accept-loss]')!
     const conflict = root.querySelector<HTMLSelectElement>('[data-transfer-conflict]')!
     const resolution = root.querySelector<HTMLSelectElement>('[data-transfer-resolution]')!
     const status = root.querySelector<HTMLElement>('[data-transfer-status]')!
@@ -47,13 +48,13 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     const importSelect = root.querySelector<HTMLSelectElement>('[data-transfer-import]')!
     const importPlan = root.querySelector<HTMLSelectElement>('[data-transfer-import-plan]')!
     const keyBox = root.querySelector<HTMLElement>('[data-transfer-ssh-key-value]')!
-    if (!sessionSelect || !credential || !conflict || !resolution || !status || !accounts || !plans || !reviewBox || !archiveBox || !importSelect || !importPlan || !keyBox) {
+    if (!sessionSelect || !credential || !nodeSelect || !liveBox || !revertAccount || !acceptLoss || !conflict || !resolution || !status || !accounts || !plans || !reviewBox || !archiveBox || !importSelect || !importPlan || !keyBox) {
       root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
       if (status) { status.dataset.state = 'unavailable'; status.textContent = t('Unavailable') }
       return
     }
     let entries: Entry[] = [], selected: Entry | null = null, loaded = false, busy = false, dirty = false, reviewRequired = false
-    let capabilities = { discover: false, execute: false, cpanelImport: false, cpanelUploadMaxBytes: 0 }
+    let capabilities = { discover: false, execute: false, live: false, cpanelImport: false, cpanelUploadMaxBytes: 0 }
     let imports: Record<string, unknown>[] = [], poller: ReturnType<typeof setTimeout> | null = null
     // Whole-server migration: every source account and plan is selected and the choice is not editable.
     const wholeServer = root.dataset.transferScope === 'server'
@@ -150,7 +151,12 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       button('refresh').disabled = busy || !admitted()
       sessionSelect.disabled = busy || !loaded || !admitted()
       credential.disabled = locked || !credential.options.length
-      button('create').disabled = locked || !credential.options.length
+      nodeSelect.disabled = locked || !capabilities.live
+      liveBox.disabled = locked || !nodeSelect.value
+      button('create').disabled = locked || !credential.options.length && !nodeSelect.value
+      revertAccount.disabled = locked || !revertAccount.options.length
+      acceptLoss.disabled = locked || !revertAccount.options.length
+      button('revert').disabled = locked || !revertAccount.value
       button('discover').disabled = locked || !capabilities.discover || state !== 'created'
       button('select').disabled = locked || !['inventoried', 'selected', 'reviewed'].includes(state)
       button('resolve').disabled = locked || selectionChanged() || !['selected', 'reviewed'].includes(state) || !conflict.options.length
@@ -366,8 +372,11 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       const progress = object(selected?.session.progress) ? selected.session.progress : {}
       const progressRows = Object.entries(progress).filter(([, value]) => object(value))
       if (progressRows.length) {
-        const phases: Record<string, string> = { pending: t(msgctxt('whm-transfer-client', 'Pending')), exporting: t('Exporting'), copying: t('Copying'), importing: t('Importing'), reconciling: t('Reconciling'), done: t(msgctxt('whm-transfer-client', 'Done')), failed: t('Failed'), skipped: t('Skipped') }
+        const phases: Record<string, string> = { pending: t(msgctxt('whm-transfer-client', 'Pending')), exporting: t('Exporting'), copying: t('Copying'), importing: t('Importing'), reconciling: t('Reconciling'), syncing: t('Final sync'), cutover: t('Cutting over'), done: t(msgctxt('whm-transfer-client', 'Done')), failed: t('Failed'), skipped: t('Skipped') }
         const results = selected?.results ?? {}
+        const moved = Object.entries(results).filter(([, value]) => object(value) && object(value.live) && !value.live.revertedAt).map(([name]) => name)
+        revertAccount.textContent = ''
+        for (const name of moved) { const option = document.createElement('option'); option.value = name; option.textContent = name; revertAccount.append(option) }
         const waiting = t(msgctxt('whm-transfer-client', 'Waiting'))
         fillApproved('transfer-progress', progressRows.map(([name, value]) => {
           const result = object(results[name]) ? results[name] as Record<string, unknown> : {}, done = object(value) && value.phase === 'done'
@@ -377,7 +386,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
             state: (object(value) ? (phases[String(value.phase)] ?? t(msgctxt('whm-transfer-client', 'Not read'))) + ' · ' + String(value.bytes) + ' / ' + String(value.totalBytes) : '') + (object(value) && typeof value.error === 'string' ? ' · ' + value.error : '') }
         }))
         const note = pageRoot.querySelector<HTMLElement>('[data-transfer-progress-state]')
-        if (note) { note.dataset.transferProgressState = 'read'; note.textContent = selected?.stopRequested && selected.session.state === 'applying' ? t('The transfer stops after the current account.') : t('Accounts are copied one at a time. The source is only read; a failed account is removed again.') }
+        if (note) { note.dataset.transferProgressState = 'read'; note.textContent = selected?.stopRequested && selected.session.state === 'applying' ? t('The transfer stops after the current account.') : selected?.session.live === true ? t('Each account is copied while it stays live. The source is then suspended for the final sync, and its sites and mail pass through to this server.') : t('Accounts are copied one at a time. The source is only read; a failed account is removed again.') }
       }
       root.querySelector<HTMLElement>('[data-transfer-execution-note]')!.textContent = capabilities.execute ? t('Accounts are copied one at a time. The source is only read; a failed account is removed again.') : t('Transfers are unavailable here: they need the host agent on this server.')
       root.querySelector<HTMLElement>('[data-transfer-archive-limit]')!.textContent = capabilities.cpanelImport ? t('Maximum archive size: {bytes} bytes', { bytes: capabilities.cpanelUploadMaxBytes }) : t('cPanel import is unavailable here: it needs the host agent on this server.')
@@ -397,15 +406,28 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       for (const item of list ?? []) { const option = document.createElement('option'); option.value = item.id!; option.dataset.kind = 'api-token'; option.textContent = item.label + ' · ' + item.fingerprint; credential.append(option) }
       if ([...credential.options].some(option => option.value === previous)) credential.value = previous
     }
+    /** Linked servers by id only; the credential of a link never reaches this page. */
+    const fillNodes = async (): Promise<void> => {
+      if (!capabilities.live) return
+      const previous = nodeSelect.value
+      let value: unknown
+      try { value = await request('GET', '/api/server/nodes') } catch { value = null }
+      const nodes = object(value) && object(value.config) && Array.isArray(value.config.nodes) ? value.config.nodes.filter(object) : []
+      nodeSelect.textContent = ''
+      const none = document.createElement('option'); none.value = ''; none.textContent = t('None'); nodeSelect.append(none)
+      for (const node of nodes) { const option = document.createElement('option'); option.value = String(node.id); option.textContent = String(node.label) + ' · ' + String(node.hostname); nodeSelect.append(option) }
+      if ([...nodeSelect.options].some(option => option.value === previous)) nodeSelect.value = previous
+    }
     const read = async (target: string, preloaded?: unknown): Promise<Record<string, unknown>> => {
       if (!verifyTemplates()) throw { stateChanged: false }
       const value = preloaded ?? await request('GET', '/api/transfers/sessions')
       if (!object(value) || !Array.isArray(value.sessions) || !object(value.capabilities) || !Number.isSafeInteger(value.capabilities.cpanelUploadMaxBytes) || (value.capabilities.cpanelUploadMaxBytes as number) < 0) throw new Error('invalid_transfer_workspace')
       entries = value.sessions.map(parseEntry)
       if (new Set(entries.map(entry => entry.session.id)).size !== entries.length) throw new Error('duplicate_transfer_sessions')
-      capabilities = { discover: value.capabilities.discover === true, execute: value.capabilities.execute === true, cpanelImport: value.capabilities.cpanelImport === true, cpanelUploadMaxBytes: value.capabilities.cpanelUploadMaxBytes as number }
+      capabilities = { discover: value.capabilities.discover === true, execute: value.capabilities.execute === true, live: value.capabilities.live === true, cpanelImport: value.capabilities.cpanelImport === true, cpanelUploadMaxBytes: value.capabilities.cpanelUploadMaxBytes as number }
       imports = Array.isArray(value.cpanelImports) ? value.cpanelImports.filter(object).filter(item => typeof item.id === 'string' && uuid.test(item.id)) : []
       await fillCredentials()
+      await fillNodes()
       if (!verifyTemplates()) throw { stateChanged: true, unknownOutcome: true }
       loaded = true; reviewRequired = false; dirty = false; paint(target)
       if (capabilities.cpanelImport) await fillPlans()
@@ -428,7 +450,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       if (!create && !previous) return
       busy = true; controls(); let submitted = false
       try {
-        if (!await ask(action === 'run' ? t('Start transfer?') : t('Confirm transfer review action'), (previous ? sourceLabel(previous.session) + '\n' : '') + (action === 'run' ? t('Each reviewed account is rebuilt here one at a time. Shared services are only reloaded.') : t('The server verifies the current saved revision and permissions.')), action === 'cancel' || action === 'run' || action === 'stop')) return
+        if (!await ask(action === 'revert' ? t('Revert the cutover?') : action === 'run' ? t('Start transfer?') : t('Confirm transfer review action'), (previous ? sourceLabel(previous.session) + '\n' : '') + (action === 'revert' ? t('The source serves this account again and its zones point back there. The copy here is removed, with any database changes made here since the cutover.') : action === 'run' && previous?.session.live === true ? t('Each account is copied while it stays live. The source is then suspended for the final sync, and its sites and mail pass through to this server.') : action === 'run' ? t('Each reviewed account is rebuilt here one at a time. Shared services are only reloaded.') : t('The server verifies the current saved revision and permissions.')), action === 'cancel' || action === 'run' || action === 'stop')) return
         submitted = true
         const value = await request(create ? 'POST' : 'PATCH', create ? '/api/transfers/sessions' : '/api/transfers/sessions/' + encodeURIComponent(previousId), create ? body : { ...body, action, expectedRevision: previous!.revision })
         const acknowledged = parseEntry(value)
@@ -536,7 +558,11 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     })
     button('refresh').addEventListener('click', () => { void refresh() })
     sessionSelect.addEventListener('change', () => { const id = sessionSelect.value; sessionSelect.value = String(selected?.session.id ?? ''); void refresh(id) })
+    nodeSelect.addEventListener('change', controls)
+    revertAccount.addEventListener('change', controls)
+    button('revert').addEventListener('click', () => { if (!button('revert').disabled) void perform('revert', { account: revertAccount.value, acceptLoss: acceptLoss.checked }) })
     button('create').addEventListener('click', () => {
+      if (nodeSelect.value) { void perform('create', { node: nodeSelect.value, live: liveBox.checked }, true); return }
       const option = credential.selectedOptions[0]
       if (!option) return
       const auth = option.dataset.kind === 'api-token' ? { kind: 'api-token', url: field('transfer-host').value.trim(), tokenId: option.value, tlsFingerprint: field('transfer-fingerprint').value.trim() || null } : { kind: 'ssh-key', host: field('transfer-host').value.trim(), port: Number(field('transfer-port').value), user: field('transfer-user').value.trim(), keyId: option.value, hostKeyFingerprint: field('transfer-fingerprint').value.trim() }

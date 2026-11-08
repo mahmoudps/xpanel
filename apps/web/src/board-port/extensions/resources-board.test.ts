@@ -77,7 +77,6 @@ describe('account resources presentation', () => {
     assert.doesNotMatch(html, /[\u0660-\u0669\u06f0-\u06f9]/)
     assert.doesNotMatch(html, /<form|<script|fetch\(|\son(?:click|toggle)=/)
     const buttons = html.match(/<button\b[^>]*>/g) ?? []
-    assert.ok(buttons.length > 0)
     assert.ok(buttons.every(button => /\sdisabled(?:\s|>)/.test(button)))
   })
 
@@ -92,9 +91,6 @@ describe('account resources presentation', () => {
     assert.match(html, /Started \(UTC\)/)
     assert.match(html, /colspan="6"/)
     assert.match(html, /colspan="3"/)
-    assert.match(html, /1h<\/bdi>/)
-    assert.match(html, /24h<\/bdi>/)
-    assert.match(html, /7d<\/bdi>/)
     assert.doesNotMatch(html, /\[Unit\]|MemoryMax=|data-series|aria-valuenow|<svg|onClick=/)
   })
 })

@@ -1,3 +1,4 @@
+import { renderV2ServerOps } from '../server/server-ops.ts'
 import { localeDirection } from '../../../../../i18n.ts'
 import { v2Messages } from '../../../messages.ts'
 import { escapeHtml } from '../../../html.ts'
@@ -79,6 +80,6 @@ ${actions(button('cancel-pending', msgid('Cancel pending upgrade')))}
 ${lifecycleHeader(t, msgid('Upgrade'), '/whm/server/upgrade', msgctxt('theme:v2', 'Review a verified release, run host preflight and confirm before changing the control plane.'))}
 <div class="v2-lifecycle__column" data-whm-upgrade-workspace data-upgrade-can-manage="${props.canRead && props.canManage}">
 ${status('banner', props.canRead ? msgid('Release state has not been read. Nothing has changed.') : msgctxt('theme:v2', 'Upgrade state is unavailable to this account. Nothing has changed.'))}
-<div class="v2-lifecycle__grid"><div class="v2-lifecycle__column">${release}${preflight}${progress}${history}</div><aside class="v2-lifecycle__column" aria-label="${text(t, msgctxt('theme:v2', 'Upgrade behavior and recovery'))}">${boundaries}${health}${process}</aside></div>
+<div class="v2-lifecycle__grid"><div class="v2-lifecycle__column">${release}${preflight}${progress}${history}${renderV2ServerOps(t, ['updates'], props.canRead && props.canManage)}</div><aside class="v2-lifecycle__column" aria-label="${text(t, msgctxt('theme:v2', 'Upgrade behavior and recovery'))}">${boundaries}${health}${process}</aside></div>
 </div></div>`
 }

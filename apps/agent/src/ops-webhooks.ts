@@ -65,17 +65,18 @@ export interface WebhookAttempt { attempt: number; at: string; outcome: 'deliver
 export interface WebhookDeliveryRecord { id: string; endpointId: string; event: WebhookEvent; createdAt: string; state: 'delivered' | 'failed' | 'exhausted'; attempts: WebhookAttempt[] }
 
 /** One delivery run: attempts up to MAX_WEBHOOK_ATTEMPTS with the backoff schedule, signing every request. Returns the log record. */
-export async function deliverWebhook(input: { endpoint: WebhookEndpoint; secret: string; delivery: WebhookDelivery; send: WebhookSender; now?: () => Date; sleep?: (ms: number) => Promise<void> }): Promise<WebhookDeliveryRecord> {
+export async function deliverWebhook(input: { endpoint: WebhookEndpoint; secret: string; delivery: WebhookDelivery; send: WebhookSender; now?: () => Date; sleep?: (ms: number) => Promise<void>; maxAttempts?: number }): Promise<WebhookDeliveryRecord> {
   const now = input.now ?? (() => new Date())
   const record: WebhookDeliveryRecord = { id: input.delivery.id, endpointId: input.endpoint.id, event: input.delivery.event, createdAt: now().toISOString(), state: 'exhausted', attempts: [] }
-  for (let attempt = 0; attempt < MAX_WEBHOOK_ATTEMPTS; attempt++) {
+  const attempts = input.maxAttempts ?? MAX_WEBHOOK_ATTEMPTS
+  for (let attempt = 0; attempt < attempts; attempt++) {
     if (attempt > 0 && input.sleep) await input.sleep(WEBHOOK_BACKOFF_SEC[attempt]! * 1000)
     const timestamp = Math.floor(now().getTime() / 1000)
     const headers = { 'content-type': 'application/json', [WEBHOOK_SIGNATURE_HEADER]: webhookSignature(input.secret, timestamp, input.delivery.payload), 'x-xpanel-event': input.delivery.event, 'x-xpanel-delivery': input.delivery.id }
     let status: number | null = null
     try { const response = await input.send({ url: input.endpoint.url, body: input.delivery.payload, headers }); status = Number.isInteger(response?.status) ? response.status : null } catch { status = null }
     const delivered = status !== null && status >= 200 && status < 300
-    const last = attempt === MAX_WEBHOOK_ATTEMPTS - 1
+    const last = attempt === attempts - 1
     const nextAttemptAt = delivered || last ? null : new Date(now().getTime() + WEBHOOK_BACKOFF_SEC[attempt + 1]! * 1000).toISOString()
     record.attempts.push({ attempt: attempt + 1, at: now().toISOString(), outcome: delivered ? 'delivered' : 'failed', status, nextAttemptAt })
     if (delivered) { record.state = 'delivered'; return record }

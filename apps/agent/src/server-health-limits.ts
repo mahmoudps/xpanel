@@ -1,3 +1,4 @@
+import { effectivePlan } from '@xpanel/core'
 import type { Account, Plan, ResourceLimits } from '@xpanel/core'
 import type { CanonicalIoAnalyticsRead } from './analytics.ts'
 import type { AccountSliceMetrics, AgentExecutor } from './executor.ts'
@@ -96,7 +97,7 @@ export async function readServerLimits(input: {
   const quota = executor ? quotaReader(executor) : null
   const accounts: AccountLimits[] = []
   for (const account of input.accounts) {
-    const plan = input.plans.find(entry => entry.id === account.planId) ?? null
+    const stored = input.plans.find(entry => entry.id === account.planId), plan = stored ? effectivePlan(stored, account) : null
     let slice: AccountSliceMetrics | null | undefined
     if (executor) try { slice = await executor.readSliceMetrics(account.uid) } catch { slice = undefined }
     let disk: QuotaRow = null

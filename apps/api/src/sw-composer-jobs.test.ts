@@ -15,17 +15,17 @@ const post = (helpers: ComposerWorkspaceHelpers, path: string, body: unknown) =>
 describe('Composer job API binding', () => {
   it('previews through the agent and returns only the verified review grammar', async () => {
     const f = fixture({ review: { ...review } })
-    const body = await (await post(f, 'preview', { action: 'install', domainId }))!.json()
-    expect(f.callHost).toHaveBeenCalledWith(caller, '/host/composer/jobs/preview', { action: 'install', domainId }, false)
+    const body = await (await post(f, 'preview', { action: 'install', domainId, phpVersion: null, mirror: null }))!.json()
+    expect(f.callHost).toHaveBeenCalledWith(caller, '/host/composer/jobs/preview', { action: 'install', domainId, phpVersion: null, mirror: null }, false)
     expect(body.review.packages).toEqual(review.packages); expect(f.emitAudit).not.toHaveBeenCalled()
-    await expect(post(fixture({ review: { ...review, action: 'update' } }), 'preview', { action: 'install', domainId })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
-    await expect(post(fixture({ review: { ...review, script: 'post-install' } }), 'preview', { action: 'install', domainId })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    await expect(post(fixture({ review: { ...review, action: 'update' } }), 'preview', { action: 'install', domainId, phpVersion: null, mirror: null })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    await expect(post(fixture({ review: { ...review, script: 'post-install' } }), 'preview', { action: 'install', domainId, phpVersion: null, mirror: null })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
   })
-  it.each([{ action: 'install', domainId, path: '/home/alpha' }, { action: 'require', domainId }, { action: 'install', domainId: 'site-a' }])('refuses extra fields, unknown actions and non-id targets %#', async input => {
+  it.each([{ action: 'install', domainId, path: '/home/alpha' }, { action: 'require', domainId, phpVersion: null, mirror: null }, { action: 'install', domainId: 'site-a', phpVersion: null, mirror: null }])('refuses extra fields, unknown actions and non-id targets %#', async input => {
     const f = fixture({ review }); await expect(post(f, 'preview', input)).rejects.toMatchObject({ code: 'VALIDATION' }); expect(f.callHost).not.toHaveBeenCalled()
   })
   it('audits intent and submission around a verified 202 job and marks unverifiable replies unknown', async () => {
-    const input = { action: 'install', domainId, expectedRevision: H('a'), reviewFingerprint: H('b') }
+    const input = { action: 'install', domainId, phpVersion: null, mirror: null, expectedRevision: H('a'), reviewFingerprint: H('b') }
     const f = fixture({ job: { id: jobId, kind: 'composer.dependencies.install' } })
     const response = await post(f, 'apply', input)
     expect(response!.status).toBe(202); expect(f.emitAudit).toHaveBeenCalledTimes(2); expect(f.callHost).toHaveBeenCalledWith(caller, '/host/composer/jobs/apply', input, true)

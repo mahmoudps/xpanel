@@ -51,7 +51,7 @@ const unavailableBanner = (t: Text): string => `<div class="xp-term__banner" rol
       </div>`
 
 /** Root server terminal for /whm/server/terminal. A session needs fresh re-authentication; execution is read from the host. */
-export function renderOpsTerminalWorkspace(input: { locale: Locale; canUse: boolean }): string {
+export function renderOpsTerminalWorkspace(input: { locale: Locale; canUse: boolean; savedCommands?: string }): string {
   const t = (message: string, values?: MessageValues): string => translator(input.locale)(message, values)
   return `<div class="xp-term" data-terminal-workspace data-terminal-kind="root" data-terminal-can-use="${input.canUse}" lang="${input.locale}" dir="${localeDirection(input.locale)}">
     ${TERMINAL_CSS}
@@ -119,6 +119,7 @@ export function renderOpsTerminalWorkspace(input: { locale: Locale; canUse: bool
         </section>
       </aside>
     </div>
+    ${input.savedCommands ?? ''}
   </div>`
 }
 

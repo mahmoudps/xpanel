@@ -2,6 +2,7 @@ import type { Translate } from '../../../../../i18n.ts'
 import type { WhmSurfaceProps } from '../../../../contract.ts'
 import { adminContext, DENIED_ADMIN_AUTHORITY, type WhmAdminAuthority } from './common.ts'
 import { renderV2WhmIpClientTemplates } from './ip-client-templates.ts'
+import { renderV2WhmIpTools } from './ip-tools.ts'
 
 export function renderV2WhmServerIps(t: Translate, props: WhmSurfaceProps, authority: WhmAdminAuthority = DENIED_ADMIN_AUTHORITY): string {
   const h = adminContext(t, props, authority, '/whm/server/ips', 'server'), pool = h.canRead ? props.ipPool : undefined
@@ -19,7 +20,6 @@ export function renderV2WhmServerIps(t: Translate, props: WhmSurfaceProps, autho
     + h.field('add-ip-owner', msgid('Delegated Owner'), ownerControl)
     + h.field('add-ip-ptr', msgid('Reverse DNS (PTR / HELO)'), h.input('add-ip-ptr', { name: 'ptrHostname', dir: 'ltr', maxLength: 253, disabled: !h.canManage })))
     + h.status(msgid('Not read'), { 'data-add-ip-status': true }, true) + `<p>${h.text(msgid('This form adds server-wide addresses only. Choose root as the owner; nothing was sent.'))}</p>` + h.actions(h.button(msgid('Add IPv4 / IPv6 Address'), undefined, { type: h.canManage ? 'submit' : 'button', primary: true }))))
-  const tools = h.section('v2-server-ip-other', msgctxt('theme:v2', 'Other IP tools'), h.status(msgctxt('theme:v2', 'Moving accounts between addresses, changing delegation and editing reverse DNS are not connected to this add/remove workflow.')) + h.actions(h.button(msgctxt('theme:v2', 'Change account IP')) + h.button(msgctxt('theme:v2', 'Edit reverse DNS'))))
   const related = h.section('v2-server-ip-related', msgctxt('theme:v2', 'Related pages'), `<ul class="v2-admin-list"><li><a href="/whm/server/networking">${h.text(msgid('Networking'))}</a></li><li><a href="/whm/email/outbound">${h.text(msgid('Outbound mail routing'))}</a></li><li><a href="/whm/resellers/ips-nameservers">${h.text(msgctxt('theme:v2', 'IP addresses and nameservers'))}</a></li></ul>`)
-  return h.page(msgid('IP addresses'), msgctxt('theme:v2', 'Read saved pool ownership and protect the primary management address when adding or removing entries.'), `<div class="v2-admin-stack" data-whm-ip-pool data-ip-editable="${h.canManage}">${poolCard}<div class="v2-admin-columns"><div>${add}</div><aside class="v2-admin-stack">${tools}${related}</aside></div>${renderV2WhmIpClientTemplates()}</div>`)
+  return h.page(msgid('IP addresses'), msgctxt('theme:v2', 'Read saved pool ownership and protect the primary management address when adding or removing entries.'), `<div class="v2-admin-stack" data-whm-ip-pool data-ip-editable="${h.canManage}">${poolCard}<div class="v2-admin-columns"><div>${add}</div><aside class="v2-admin-stack">${related}</aside></div>${renderV2WhmIpTools(h, props)}${renderV2WhmIpClientTemplates()}</div>`)
 }

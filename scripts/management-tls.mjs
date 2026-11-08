@@ -11,29 +11,47 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
 import { renderManagedUnits, renderManagedUnitPlan } from './managed-units.mjs'
-import { ACTIVATION_KIND, ACTIVATION_PATH, activationCommandEvidence, observeManagementActivation, completeManagementActivation } from './management-tls-activation.mjs'
+import { ACTIVATION_KIND, ACTIVATION_PATH, activationCommandEvidence, managementProfiles, observeManagementActivation, completeManagementActivation } from './management-tls-activation.mjs'
 import { NGINX_HTTP2_STYLES, nginxHttp2Style } from './nginx-http2.mjs'
 
 export const ACME_DIRECTORY = 'https://acme-v02.api.letsencrypt.org/directory'
 export const MARKER = '# Managed by xPanel management TLS lifecycle v1.\n'
 export const PATHS = Object.freeze({
-  config: '/etc/xpanel/management-tls.json', apiEnv: '/etc/xpanel/api.env', secret: '/etc/xpanel/ingress.secret',
+  gate: '/var/lib/xpanel/state/extended/server/sec-panel-gate.json', config: '/etc/xpanel/management-tls.json', access: '/etc/xpanel/management-access.json', accessNext: '/etc/xpanel/management-access.next.json', apiEnv: '/etc/xpanel/api.env', secret: '/etc/xpanel/ingress.secret',
   state: '/var/lib/xpanel-management-tls', webroot: '/var/lib/xpanel-management-tls/challenge',
   // Logs stay under the root-only state directory: Ubuntu's /var/log is root:syslog 0775, which no trusted ancestor walk admits.
   acme: '/etc/xpanel/management-acme', logs: '/var/lib/xpanel-management-tls/logs',
   challenge: '/etc/nginx/conf.d/xpanel-management-challenge.conf', ingress: '/etc/nginx/conf.d/xpanel-management.conf',
-  include: '/etc/nginx/xpanel-management/ingress-secret.conf', certs: '/etc/xpanel/management-certificates',
+  include: '/etc/nginx/xpanel-management/ingress-secret.conf', tlsPolicy: '/etc/nginx/xpanel-management/tls-policy.conf', certs: '/etc/xpanel/management-certificates',
   service: '/etc/systemd/system/xpanel-management-tls.service', timer: '/etc/systemd/system/xpanel-management-tls.timer',
 })
 const fail = code => { const error = new Error(code); error.code = code; throw error }
 const sha = data => createHash('sha256').update(data).digest('hex')
 const delay = ms => new Promise(resolveDelay => setTimeout(resolveDelay, ms))
 const stamp = () => new Date().toISOString().replaceAll(/[-:.]/g, '') + '-' + randomBytes(6).toString('hex')
-const profiles = config => [
-  { name: 'xpanel', host: config.hostname, port: 2083, backend: 12083 },
-  { name: 'xwhm', host: `whm.${config.hostname}`, port: 2087, backend: 12087 },
-  { name: 'xmail', host: `mail.${config.hostname}`, port: 2096, backend: 12096 },
-]
+const profiles = managementProfiles
+const ENTRY_POINTS = ['xpanel', 'xwhm', 'xmail']
+const RESERVED_PORTS = [80, 443, 2078, 2080, 12083, 12087, 12096]
+const HOST_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+export const DEFAULT_ACCESS = Object.freeze({ schemaVersion: 1, ports: Object.freeze({ xpanel: 2083, xwhm: 2087, xmail: 2096 }), hosts: Object.freeze({ xpanel: null, xwhm: null, xmail: null }), open: Object.freeze([]), trial: null })
+
+/** The root gate over what the agent wrote; the same grammar as apps/agent/src/panel-gate-policy.ts parsePanelBinding. */
+export function validateAccess(input) {
+  if (!input || typeof input !== 'object' || input.schemaVersion !== 1 || !input.ports || !input.hosts) fail('ACCESS_INVALID')
+  const ports = {}, hosts = {}
+  for (const name of ENTRY_POINTS) {
+    const port = input.ports[name], host = input.hosts[name]
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535 || RESERVED_PORTS.includes(port)) fail('ACCESS_PORT_INVALID')
+    if (host !== null && (typeof host !== 'string' || host.length > 248 || !host.includes('.') || !host.split('.').every(label => HOST_LABEL.test(label)))) fail('ACCESS_HOST_INVALID')
+    ports[name] = port; hosts[name] = host
+  }
+  const named = Object.values(hosts).filter(Boolean)
+  if (new Set(Object.values(ports)).size !== 3 || new Set(named).size !== named.length) fail('ACCESS_NOT_DISTINCT')
+  return Object.freeze({ ports: Object.freeze(ports), hosts: Object.freeze(hosts) })
+}
+export const withAccess = (config, access) => access ? Object.freeze({ ...config, access }) : config
+const baseConfig = ({ access, ...config }) => config
+const readAccess = path => existsSync(path) ? validateAccess(JSON.parse(readRootFile(path, 16 * 1024, true).bytes.toString('utf8'))) : null
 
 /** No shell expansion, wildcard, apex inference, URL, or caller-selected certificate path. */
 export function validateConfig(input) {
@@ -69,13 +87,13 @@ export function requiredEnvironment(config) {
   const points = profiles(config)
   return {
     XPANEL_HOST: '127.0.0.1', XPANEL_PANEL_PORT: '12083', XPANEL_WHM_PORT: '12087', XPANEL_MAIL_PORT: '12096',
-    XPANEL_PANEL_PUBLIC_ORIGIN: `https://${points[0].host}:2083`, XPANEL_WHM_PUBLIC_ORIGIN: `https://${points[1].host}:2087`, XPANEL_MAIL_PUBLIC_ORIGIN: `https://${points[2].host}:2096`,
+    XPANEL_PANEL_PUBLIC_ORIGIN: `https://${points[0].host}:${points[0].port}`, XPANEL_WHM_PUBLIC_ORIGIN: `https://${points[1].host}:${points[1].port}`, XPANEL_MAIL_PUBLIC_ORIGIN: `https://${points[2].host}:${points[2].port}`,
     XPANEL_SERVER_SECRET_FILE: '/etc/xpanel/server.secret', XPANEL_INGRESS_SECRET_FILE: PATHS.secret,
   }
 }
 
-/** Existing nonempty settings are never silently migrated, and unrelated lines survive byte-for-byte. */
-export function mergeApiEnvironment(content, config) {
+/** Existing nonempty settings are never silently migrated, and unrelated lines survive byte-for-byte. Only a rebind moves the origins. */
+export function mergeApiEnvironment(content, config, moveOrigins = false) {
   const required = requiredEnvironment(config)
   // EnvironmentFile supports quoting, whitespace and continuation rules. Refuse
   // ambiguous spellings rather than silently appending a higher-precedence key.
@@ -91,7 +109,7 @@ export function mergeApiEnvironment(content, config) {
     const [, key, value, ending = ''] = match
     if (seen.has(key)) fail('API_ENV_DUPLICATE_SETTING')
     seen.add(key)
-    if (value !== '' && value !== required[key]) fail('API_ENV_EXPLICIT_MIGRATION_REQUIRED')
+    if (value !== '' && value !== required[key] && !(moveOrigins && key.endsWith('_PUBLIC_ORIGIN'))) fail('API_ENV_EXPLICIT_MIGRATION_REQUIRED')
     return `${key}=${required[key]}${ending}`
   }).join('')
   const missing = Object.entries(required).filter(([key]) => !seen.has(key)).map(([key, value]) => `${key}=${value}\n`).join('')
@@ -124,22 +142,8 @@ export function renderIngress(config, generation, http2) {
   if (!NGINX_HTTP2_STYLES.includes(http2)) fail('NGINX_HTTP2_STYLE_INVALID')
   const shared443 = sharedListen(config, 443, http2 === 'listen' ? ' ssl http2' : ' ssl') + (http2 === 'directive' ? '\n    http2 on;' : '')
   const certificate = `${PATHS.certs}/${generation}`
-  const tls = `    ssl_certificate ${certificate}/fullchain.pem;\n    ssl_certificate_key ${certificate}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;`
-  return MARKER + `map $http_upgrade $xpanel_management_connection_upgrade { default upgrade; '' close; }\n\n` + profiles(config).map(point => `server {
-${shared443}
-    server_name ${point.host};
-${tls}
-    if ($host != "${point.host}") { return 421; }
-    return 308 https://${point.host}:${point.port}$request_uri;
-}
-server {
-${listen(config, point.port, true)}
-    server_name ${point.host};
-${tls}
-    if ($http_host != "${point.host}:${point.port}") { return 421; }
-    add_header X-Content-Type-Options nosniff always;
-    location / {
-        proxy_pass http://127.0.0.1:${point.backend};
+  const tls = `    ssl_certificate ${certificate}/fullchain.pem;\n    ssl_certificate_key ${certificate}/privkey.pem;\n    include ${PATHS.tlsPolicy};`
+  const proxy = point => `        proxy_pass http://127.0.0.1:${point.backend};
         include ${PATHS.include};
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
@@ -151,7 +155,27 @@ ${tls}
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $xpanel_management_connection_upgrade;
         # Account provisioning answers synchronously within its 180 s host deadline; nginx's 60 s default cut it off.
-        proxy_read_timeout 300s;
+        proxy_read_timeout 300s;`
+  return MARKER + `map $http_upgrade $xpanel_management_connection_upgrade { default upgrade; '' close; }\n\n` + profiles(config).map(point => `server {
+${shared443}
+    server_name ${point.host};
+${tls}
+    if ($host != "${point.host}") { return 421; }
+    return 308 https://${point.host}:${point.port}$request_uri;
+}
+server {
+${listen(config, point.port, true)}
+    server_name ${point.host};
+${tls}
+    if ($http_host != "${point.host}:${point.port}") { return ${point.bound ? 403 : 421}; }
+    add_header X-Content-Type-Options nosniff always;
+    location / {
+${proxy(point)}
+    }
+    # These paths carry a credential, so no access log may keep them.
+    location ~ ^/(?:share|login/temporary)/ {
+        access_log off;
+${proxy(point)}
     }
 }
 `).join('\n')
@@ -166,10 +190,10 @@ export function renderRenewalUnits(nodePath, layout = 'flat') {
   return { service: units['xpanel-management-tls.service'], timer: units['xpanel-management-tls.timer'] }
 }
 
-export function certbotArguments(config) {
+export function certbotArguments(config, newNames = false) {
   return ['certonly', '--config', `${PATHS.acme}/cli.ini`, '--config-dir', PATHS.acme, '--work-dir', `${PATHS.state}/acme-work`, '--logs-dir', PATHS.logs, '--max-log-backups', '10',
     '--server', ACME_DIRECTORY, '--non-interactive', '--agree-tos', '--email', config.acmeEmail, '--no-directory-hooks',
-    '--webroot', '--webroot-path', PATHS.webroot, '--preferred-challenges', 'http-01', '--cert-name', 'xpanel-management', '--keep-until-expiring',
+    '--webroot', '--webroot-path', PATHS.webroot, '--preferred-challenges', 'http-01', '--cert-name', 'xpanel-management', '--keep-until-expiring', '--reuse-key', ...(newNames ? ['--renew-with-new-domains'] : []),
     ...profiles(config).flatMap(point => ['-d', point.host])]
 }
 
@@ -364,6 +388,16 @@ class OwnedTransaction {
     if (!sameFileVersion(current, before)) fail('CONCURRENT_CONFIG_DRIFT')
     replaceFile(path, bytes, mode, gid, observation => { entry.published = observation; this.record() })
   }
+  /** Publishes a path this transaction already changed again; rollback still restores that entry's backup. */
+  rewrite(path, bytes) {
+    const entry = this.entries.find(item => item.path === path)
+    if (!entry?.published) fail('TRANSACTION_ENTRY_MISSING')
+    if (entry.after === sha(bytes)) return
+    if (!sameFileVersion(existing(path), entry.published)) fail('CONCURRENT_CONFIG_DRIFT')
+    entry.after = sha(bytes)
+    this.record()
+    replaceFile(path, bytes, entry.mode, entry.gid, observation => { entry.published = observation; this.record() })
+  }
   async rollback() {
     this.assertJournal()
     for (const entry of [...this.entries].reverse()) {
@@ -388,14 +422,27 @@ function managedIngress(text, config, generation) {
   return NGINX_HTTP2_STYLES.some(http2 => text === renderIngress(config, generation, http2))
 }
 
+// Every ingress a release wrote: a plain 443 listen before the HTTP/2 styles, inline protocols before the TLS policy file.
+function releasedIngress(text, config, generation) {
+  const shapes = [...NGINX_HTTP2_STYLES.map(http2 => renderIngress(config, generation, http2)), renderIngress(config, generation, 'directive').replaceAll('\n    http2 on;', '')]
+  return shapes.flatMap(shape => [shape, shape.replaceAll(`include ${PATHS.tlsPolicy};`, 'ssl_protocols TLSv1.2 TLSv1.3;')]).flatMap(shape => [shape, shape.replace(/    # These paths carry a credential[^\n]*\n    location ~ [^\n]*\n[^}]*\n    \}\n/g, '')]).includes(text)
+}
+
 async function observeNginxHttp2() {
   const result = await command('read-nginx-version', '/usr/sbin/nginx', ['-v'], 5_000)
   return nginxHttp2Style(result.stderr) ?? fail('NGINX_VERSION_UNOBSERVED')
 }
 
-async function nginxReload() {
+// An ingress in another HTTP/2 style makes nginx warn about the shared 443 socket. Only a baseline that holds such an
+// ingress passes `staleIngress`: a configuration this lifecycle is about to activate gets no tolerance.
+function nginxRefuses(stderr, staleIngress = false) {
+  const remaining = staleIngress ? stderr.replace(/^nginx: \[warn\] (?:protocol options redefined for \S+:443 in \S+|the "listen \.\.\. http2" directive is deprecated, use the "http2" directive instead in \/etc\/nginx\/conf\.d\/xpanel-management\.conf:\d+)$/gm, '') : stderr
+  return /conflicting server name|duplicate listen|emerg|warn/i.test(remaining)
+}
+
+async function nginxReload(staleIngress) {
   const result = await command('nginx-config-test', '/usr/sbin/nginx', ['-t'])
-  if (/conflicting server name|duplicate listen|emerg|warn/i.test(result.stderr)) fail('NGINX_CONFIG_CONFLICT')
+  if (nginxRefuses(result.stderr, staleIngress)) fail('NGINX_CONFIG_CONFLICT')
   const reloaded = await command('nginx-reload', '/usr/bin/systemctl', ['reload', 'nginx.service'])
   return { ...reloaded, configurationTest: activationCommandEvidence(result) }
 }
@@ -444,11 +491,11 @@ function assertTimerSnapshot(original, current, expectedFiles, afterOwnReload = 
   } else for (const key of ['LoadState', 'ActiveState', 'SubState', 'UnitFileState', 'InvocationID', 'FragmentPath', 'DropInPaths']) if (original[key] !== current[key]) fail('RENEWAL_TIMER_CONCURRENT_DRIFT')
 }
 
-async function nginxConfigurationDigest() {
+async function nginxConfigurationDigest(staleIngress) {
   // nginx -T includes protected directives. Retain only the digest in memory;
   // stdout/stderr never enters a report or the terminal.
   const result = await command('read-nginx-configuration-digest', '/usr/sbin/nginx', ['-T'])
-  if (/conflicting server name|duplicate listen|emerg|warn/i.test(result.stderr)) fail('NGINX_CONFIG_CONFLICT')
+  if (nginxRefuses(result.stderr, staleIngress)) fail('NGINX_CONFIG_CONFLICT')
   return sha(result.stdout)
 }
 
@@ -460,7 +507,7 @@ async function preflightUnusedListeners(config) {
   // An exclusive real bind refuses Apache, legacy APIs and wildcard listeners.
   // No other service is stopped and no firewall/default vhost is rewritten.
   // 80 and 443 are shared with the account edge; only the management ports are bound exclusively.
-  for (const address of config.addresses) for (const port of [2083, 2087, 2096]) {
+  for (const address of config.addresses) for (const { port } of profiles(config)) {
     await new Promise((resolveProbe, reject) => {
       const server = createServer(socket => socket.destroy())
       const timer = setTimeout(() => { server.close(); reject(Object.assign(new Error('INGRESS_BOOTSTRAP_BLOCKED_LISTENER'), { code: 'INGRESS_BOOTSTRAP_BLOCKED_LISTENER' })) }, 2_000)
@@ -533,7 +580,7 @@ function installedCertificate(config) {
   if (!ingress) return null
   const text = ingress.bytes.toString('utf8')
   const generation = /ssl_certificate \/etc\/xpanel\/management-certificates\/([a-f0-9]{64})\/fullchain\.pem;/.exec(text)?.[1]
-  if (!generation || !managedIngress(text, config, generation)) fail('MANAGED_INGRESS_EXPLICIT_MIGRATION_REQUIRED')
+  if (!generation || !releasedIngress(text, config, generation)) fail('MANAGED_INGRESS_EXPLICIT_MIGRATION_REQUIRED')
   const certificate = new X509Certificate(readRootFile(`${PATHS.certs}/${generation}/fullchain.pem`, 128 * 1024, true).bytes)
   if (sha(certificate.raw) !== generation) fail('INSTALLED_CERTIFICATE_DRIFT')
   return { generation }
@@ -571,13 +618,23 @@ function saveStatus(value) {
   replaceFile(`${PATHS.state}/status.json`, bytes, 0o600)
 }
 
+/** Entry points whose /login the panel gate hides on purpose. An unreadable gate closes the listener, so nothing is excused. */
+export function gatedListeners(text) {
+  try {
+    const { policy } = JSON.parse(text ?? '{}')
+    return policy ? [...policy.entrance?.listeners ?? [], ...policy.basicAuth?.listeners ?? [], ...policy.stopped ?? []] : []
+  } catch { return [] }
+}
+
 async function servedReady(config, certificate, verifyApplication) {
+  const gated = verifyApplication === true && existsSync(PATHS.gate) ? gatedListeners(readFileSync(PATHS.gate, 'utf8')) : []
   return awaitReadiness(async ({ deadline }) => {
     for (const address of config.addresses) for (const point of profiles(config)) {
       const redirect = await request(address, point, '/login', true, 443, certificate.generation, deadline)
       if (redirect.status !== 308 || redirect.headers.location !== `https://${point.host}:${point.port}/login`) fail('CANONICAL_REDIRECT_INVALID')
       const login = await request(address, point, '/login', true, point.port, certificate.generation, deadline)
-      if (verifyApplication && (login.status !== 200 || !login.headers['content-type']?.startsWith('text/html') || !login.body.includes(`data-login-audience="${point.name}"`))) fail('APPLICATION_LOGIN_NOT_READY')
+      // A rebind checks health only, as does a gated entry point: /api/health stays outside the gate.
+      if (verifyApplication === true && !gated.includes(point.name) && (login.status !== 200 || !login.headers['content-type']?.startsWith('text/html') || !login.body.includes(`data-login-audience="${point.name}"`))) fail('APPLICATION_LOGIN_NOT_READY')
       // TLS preparation explicitly permits an unavailable backend; it never reports application health.
       if (verifyApplication) {
         const health = await request(address, point, '/api/health', true, point.port, certificate.generation, deadline)
@@ -588,20 +645,20 @@ async function servedReady(config, certificate, verifyApplication) {
   })
 }
 
-async function lifecycle(config, phase, configReference, layout = 'flat') {
+async function lifecycle(config, phase, configReference, layout = 'flat', served = config, nextAccess = null) {
   const transaction = new OwnedTransaction()
   let configChanged = false
   let initialNginx, startedNginx, initialConfiguration, listenerInventorySha256
-  let startAttempted = false, priorCertificate
+  let startAttempted = false, priorCertificate, staleIngress = false
   let initialTimer, enabledTimer, timerEnableAttempted = false
   const managedReferences = new Map()
   let originalReferences = []
   let priorObservation = { state: 'not-serving', installedFingerprint: null, observedFingerprint: null }
-  let activationOriginal
+  let activationOriginal, servicesRestarted = false
   try {
-    if (!configReference || JSON.stringify(validateConfig(JSON.parse(configReference.bytes.toString('utf8')))) !== JSON.stringify(config)) fail('MANAGEMENT_CONFIG_REFERENCE_REQUIRED')
+    if (!configReference || JSON.stringify(validateConfig(JSON.parse(configReference.bytes.toString('utf8')))) !== JSON.stringify(baseConfig(config))) fail('MANAGEMENT_CONFIG_REFERENCE_REQUIRED')
     assertOriginalReferences([[PATHS.config, configReference]])
-    for (const path of [PATHS.challenge, PATHS.ingress, PATHS.include, PATHS.service, PATHS.timer]) {
+    for (const path of [PATHS.challenge, PATHS.ingress, PATHS.include, PATHS.tlsPolicy, PATHS.service, PATHS.timer]) {
       const old = existing(path)
       managedReferences.set(path, old)
       if (old && !old.bytes.toString('utf8').startsWith(MARKER)) fail('UNMANAGED_FILE_MIGRATION_REQUIRED')
@@ -610,7 +667,11 @@ async function lifecycle(config, phase, configReference, layout = 'flat') {
     initialTimer = await renewalTimerState()
     initialNginx = await nginxState()
     if (phase !== 'prepare' && initialNginx.ActiveState !== 'active') fail('INGRESS_BOOTSTRAP_BLOCKED_INACTIVE_NGINX')
-    initialConfiguration = await nginxConfigurationDigest()
+    // Read before the first nginx -T: that test prints the same warning the reload refuses.
+    const http2 = phase === 'verify' ? null : await observeNginxHttp2()
+    if (phase !== 'verify') priorCertificate = installedCertificate(served)
+    staleIngress = Boolean(priorCertificate) && managedReferences.get(PATHS.ingress).bytes.toString('utf8') !== renderIngress(served, priorCertificate.generation, http2)
+    initialConfiguration = await nginxConfigurationDigest(staleIngress)
     if (initialNginx.ActiveState === 'inactive') listenerInventorySha256 = await preflightUnusedListeners(config)
     await dnsPreflight(config)
     const group = await command('read-api-reader-group', '/usr/bin/getent', ['group', 'xpanel'], 5_000)
@@ -620,7 +681,7 @@ async function lifecycle(config, phase, configReference, layout = 'flat') {
     if ((secret.st.mode & 0o777) !== 0o640 || secret.st.gid !== Number(readerGid) || !/^[a-f0-9]{64}\n?$/.test(secret.bytes.toString('utf8'))) fail('INGRESS_SECRET_INVALID')
     const api = readRootFile(PATHS.apiEnv)
     if (![0o600, 0o640].includes(api.st.mode & 0o777) || api.st.gid !== secret.st.gid) fail('API_ENV_READER_INVALID')
-    const merged = mergeApiEnvironment(api.bytes.toString('utf8'), config)
+    const merged = mergeApiEnvironment(api.bytes.toString('utf8'), config, phase === 'rebind')
     activationOriginal = existing(ACTIVATION_PATH)
     if (activationOriginal && ((activationOriginal.st.mode & 0o7777) !== 0o600 || JSON.parse(activationOriginal.bytes.toString('utf8')).kind !== ACTIVATION_KIND)) fail('ACTIVATION_RECORD_UNMANAGED')
     originalReferences = [[PATHS.config, configReference], [PATHS.secret, secret], [PATHS.apiEnv, api], [ACTIVATION_PATH, activationOriginal]]
@@ -633,21 +694,22 @@ async function lifecycle(config, phase, configReference, layout = 'flat') {
       saveStatus({ phase, status: 'ingress-observed-ready', fingerprint: certificate.generation, expiresAt: certificate.expiresAt, applicationBootstrap: 'identity-and-optional-MFA-remain-independent', attempts: result.attempts })
       return
     }
-    const http2 = await observeNginxHttp2()
-    priorCertificate = installedCertificate(config)
     priorObservation.installedFingerprint = priorCertificate?.generation ?? null
     if (priorCertificate && initialNginx.ActiveState === 'active') {
       try {
-        await servedReady(config, priorCertificate, false)
+        await servedReady(served, priorCertificate, false)
         priorObservation = { ...priorObservation, state: 'trusted-observed', observedFingerprint: priorCertificate.generation }
       } catch { priorObservation = { ...priorObservation, state: 'baseline-unhealthy' } }
     }
-    if (phase === 'renew' && !priorCertificate) fail('MANAGED_INGRESS_NOT_PREPARED')
+    if (phase !== 'prepare' && !priorCertificate) fail('MANAGED_INGRESS_NOT_PREPARED')
     assertNoCertbotHooks()
     assertOriginalReferences([...originalReferences, ...managedReferences])
     transaction.begin({ phase, startedAt: new Date().toISOString(), managementConfigSha256: sha(JSON.stringify(config)), initialNginx, initialTimer: Object.fromEntries(Object.entries(initialTimer).filter(([key]) => key !== 'references')), initialConfiguration })
     await transaction.write(PATHS.challenge, renderChallenge(config), 0o644, 0, false, managedReferences.get(PATHS.challenge))
     configChanged = true
+    // The agent owns this file once WHM saves a policy; the lifecycle only supplies the default. Every current ingress includes it.
+    if (!managedReferences.get(PATHS.tlsPolicy)) await transaction.write(PATHS.tlsPolicy, MARKER + 'ssl_protocols TLSv1.2 TLSv1.3;\n', 0o644, 0, false, null)
+    if (staleIngress) await transaction.write(PATHS.ingress, renderIngress(served, priorCertificate.generation, http2), 0o644, 0, false, managedReferences.get(PATHS.ingress))
     if (initialNginx.ActiveState === 'active') { await assertNginxInvocation(initialNginx); await nginxReload() }
     else {
       const tested = await command('nginx-start-config-test', '/usr/sbin/nginx', ['-t'])
@@ -672,7 +734,7 @@ async function lifecycle(config, phase, configReference, layout = 'flat') {
         }
       })
     } finally { if (sha(readRootFile(tokenPath).bytes) !== sha(nonce)) fail('CHALLENGE_CONCURRENT_DRIFT'); unlinkSync(tokenPath); syncParent(tokenPath) }
-    await command('certbot-management-issuance-or-renewal', '/usr/bin/certbot', certbotArguments(config), 600_000)
+    await command('certbot-management-issuance-or-renewal', '/usr/bin/certbot', certbotArguments(config, phase === 'rebind'), 600_000)
     assertOriginalReferences([...originalReferences, ...[...managedReferences].map(([path, original]) => [path, transaction.expectedVersion(path, original)])])
     const certificate = readCertificate(config), generation = `${PATHS.certs}/${certificate.generation}`
     rootDirectory(generation)
@@ -683,7 +745,10 @@ async function lifecycle(config, phase, configReference, layout = 'flat') {
     }
     await transaction.write(PATHS.include, MARKER + `proxy_set_header X-XPanel-Ingress-Secret "${secret.bytes.toString('utf8').trim()}";\n`, 0o600, 0, false, managedReferences.get(PATHS.include))
     await transaction.write(PATHS.apiEnv, merged, api.st.mode & 0o777, api.st.gid, true, api)
-    await transaction.write(PATHS.ingress, renderIngress(config, certificate.generation, http2), 0o644, 0, false, managedReferences.get(PATHS.ingress))
+    if (nextAccess) await transaction.write(PATHS.access, nextAccess.bytes, 0o600, 0, true)
+    const ingress = renderIngress(config, certificate.generation, http2)
+    if (staleIngress) transaction.rewrite(PATHS.ingress, ingress)
+    else await transaction.write(PATHS.ingress, ingress, 0o644, 0, false, managedReferences.get(PATHS.ingress))
     if (phase === 'prepare') {
       const beforeUnitWrite = await renewalTimerState()
       assertTimerSnapshot(initialTimer, beforeUnitWrite, initialTimer.references)
@@ -727,6 +792,12 @@ async function lifecycle(config, phase, configReference, layout = 'flat') {
     const activation = await finishActivation()
     const activationBytes = JSON.stringify(activation, null, 2) + '\n'
     await transaction.write(ACTIVATION_PATH, activationBytes, 0o600, 0, true, activationOriginal)
+    if (phase === 'rebind') {
+      // The agent reads the management hosts at start, and the API requires it: both take the new address here.
+      servicesRestarted = true
+      await command('restart-panel-services', '/usr/bin/systemctl', ['restart', 'xpanel-agent.service', 'xpanel-api.service'], 60_000)
+      await servedReady(config, certificate, 'health')
+    }
     saveStatus({ phase, status: 'tls-ready', fingerprint: certificate.generation, previousInstalledFingerprint: priorObservation.installedFingerprint, previousServedFingerprint: priorObservation.observedFingerprint, priorReadiness: priorObservation.state, certificateObservation: renewalObservation(priorObservation.installedFingerprint, certificate.generation, priorObservation.state === 'trusted-observed'), expiresAt: certificate.expiresAt, applicationBootstrap: 'pending', renewal: 'timer-active-not-renewal-qualified', attempts: result.attempts, ingressStartedByTransaction: Boolean(startedNginx), listenerInventorySha256: listenerInventorySha256 ?? null, activationRecordSha256: sha(activationBytes) })
     transaction.retire()
   } catch (error) {
@@ -739,15 +810,16 @@ async function lifecycle(config, phase, configReference, layout = 'flat') {
       await transaction.rollback()
       if (startedNginx) {
         const observed = await nginxState()
-        if (observed.InvocationID !== startedNginx.InvocationID || observed.MainPID !== startedNginx.MainPID || await nginxConfigurationDigest() !== initialConfiguration) fail('NGINX_ROLLBACK_OWNERSHIP_DRIFT')
+        if (observed.InvocationID !== startedNginx.InvocationID || observed.MainPID !== startedNginx.MainPID || await nginxConfigurationDigest(staleIngress) !== initialConfiguration) fail('NGINX_ROLLBACK_OWNERSHIP_DRIFT')
         await command('stop-only-owned-nginx-invocation', '/usr/bin/systemctl', ['stop', 'nginx.service'])
         const stopped = await nginxState()
         if (stopped.ActiveState !== 'inactive') fail('NGINX_STOP_NOT_OBSERVED')
       } else if (configChanged && initialNginx?.ActiveState === 'active') {
         await assertNginxInvocation(initialNginx)
-        await nginxReload()
-        if (priorObservation.state === 'trusted-observed') await servedReady(config, priorCertificate, false)
+        await nginxReload(staleIngress)
+        if (priorObservation.state === 'trusted-observed') await servedReady(served, priorCertificate, false)
       }
+      if (servicesRestarted) await command('restart-panel-services', '/usr/bin/systemctl', ['restart', 'xpanel-agent.service', 'xpanel-api.service'], 60_000)
       if (transaction.entries.some(entry => [PATHS.service, PATHS.timer].includes(entry.path))) await command('rollback-systemd-daemon-reload', '/usr/bin/systemctl', ['daemon-reload'])
       rollback = priorObservation.state === 'baseline-unhealthy' ? 'owned-files-restored-prior-baseline-unhealthy' : 'owned-files-restored'
     } catch { rollback = 'blocked-preserve-concurrent-state' }
@@ -768,7 +840,7 @@ const programLayout = () => {
 async function main(args) {
   const [phase, ...options] = args
   if (phase === 'plan') { const config = parseConfigArguments(options); process.stdout.write(JSON.stringify({ config, origins: requiredEnvironment(config), applicationBootstrap: 'pending' }, null, 2) + '\n'); return }
-  if (!['configure', 'prepare', 'verify', 'renew'].includes(phase) || (phase !== 'configure' && options.length)) fail('USAGE_INVALID')
+  if (!['configure', 'prepare', 'verify', 'renew', 'reset-access'].includes(phase) || (phase !== 'configure' && options.length)) fail('USAGE_INVALID')
   const desiredConfig = phase === 'configure' ? parseConfigArguments(options) : null
   if (process.platform !== 'linux' || process.getuid?.() !== 0) fail('ROOT_LINUX_REQUIRED')
   process.umask(0o077)
@@ -795,7 +867,9 @@ async function main(args) {
       return
     }
     const configReference = readRootFile(PATHS.config, 16 * 1024, true)
-    const config = validateConfig(JSON.parse(configReference.bytes.toString('utf8')))
+    if (phase === 'reset-access') replaceFile(PATHS.accessNext, JSON.stringify(DEFAULT_ACCESS, null, 2) + '\n', 0o600)
+    const rebind = phase === 'reset-access' || phase === 'renew' && existsSync(PATHS.accessNext)
+    const base = validateConfig(JSON.parse(configReference.bytes.toString('utf8'))), served = withAccess(base, readAccess(PATHS.access))
     for (const [path, mode] of [[PATHS.webroot, 0o755], [`${PATHS.webroot}/.well-known`, 0o755], [`${PATHS.webroot}/.well-known/acme-challenge`, 0o755], [PATHS.acme, 0o700], [PATHS.logs, 0o700], [`${PATHS.state}/acme-work`, 0o700], [PATHS.certs, 0o700], ['/etc/nginx/xpanel-management', 0o700]]) {
       if (phase === 'verify') trustedDirectory(path)
       else rootDirectory(path, mode)
@@ -803,7 +877,13 @@ async function main(args) {
     const cli = `${PATHS.acme}/cli.ini`
     if (!existsSync(cli) && phase !== 'verify') replaceFile(cli, '# Dedicated management ACME scope.\n', 0o600)
     else if (readRootFile(cli, 256, true).bytes.toString('utf8') !== '# Dedicated management ACME scope.\n') fail('ACME_CONFIG_DRIFT')
-    await lifecycle(config, phase, configReference, layout)
+    if (rebind) {
+      // One attempt per request: the file never outlives it, so a refused change cannot retry on the renewal timer.
+      try {
+        const next = readRootFile(PATHS.accessNext, 16 * 1024, true)
+        await lifecycle(withAccess(base, validateAccess(JSON.parse(next.bytes.toString('utf8')))), 'rebind', configReference, layout, served, next)
+      } finally { unlinkSync(PATHS.accessNext); syncParent(PATHS.accessNext) }
+    } else await lifecycle(served, phase, configReference, layout)
     process.stdout.write(phase === 'verify' ? 'Management ingress observed ready; identity and service qualification remain separate.\n' : 'Management TLS ready; application bootstrap pending.\n')
   } finally { closeSync(lock) }
 }
@@ -832,7 +912,7 @@ export function readManagementTlsReadiness() {
       return bytes
     } finally { closeSync(fd) }
   }
-  const configBytes = read(PATHS.config, 16 * 1024, true), config = validateConfig(JSON.parse(configBytes.toString('utf8')))
+  const configBytes = read(PATHS.config, 16 * 1024, true), config = withAccess(validateConfig(JSON.parse(configBytes.toString('utf8'))), readAccess(PATHS.access))
   const group = read('/etc/group', 1024 * 1024).toString('utf8').split('\n').filter(line => line.startsWith('xpanel:'))
   const gid = group.length === 1 && /^[1-9][0-9]*$/.test(group[0].split(':')[2]) ? Number(group[0].split(':')[2]) : null
   if (gid === null || !Number.isSafeInteger(gid)) fail('API_READER_GROUP_INVALID')
@@ -857,7 +937,7 @@ export function readManagementTlsReadiness() {
 /** All configured HTTPS/login/health audiences are observed before the caller leaves SH. */
 export async function captureManagementTlsReadiness() {
   const before = readManagementTlsReadiness()
-  const config = validateConfig(JSON.parse(readRootFile(PATHS.config, 16 * 1024, true).bytes.toString('utf8')))
+  const config = withAccess(validateConfig(JSON.parse(readRootFile(PATHS.config, 16 * 1024, true).bytes.toString('utf8'))), readAccess(PATHS.access))
   await servedReady(config, { generation: before.certificateSha256 }, true)
   const after = readManagementTlsReadiness()
   if (JSON.stringify(before) !== JSON.stringify(after)) fail('INSTALL_READINESS_TLS_CHANGED')

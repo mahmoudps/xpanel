@@ -1,7 +1,9 @@
-import type { Account, Limit, Plan, Principal, Reseller, ResellerAcl } from '../types.ts'
+import type { Account, Limit, Plan, Principal, Reseller, ResellerAcl, ResellerAclList } from '../types.ts'
 import { fail } from '../errors.ts'
 import { assertFits, isUnlimited } from '../limits.ts'
+import { assertResellerAcl, isUuid } from '../schemas.ts'
 import { invalid, isLimit, isRecord } from './check.ts'
+import { canonicalIp } from './ip-pool.ts'
 
 /** Root sees every account, a reseller only accounts it owns, a user only its own. */
 export const canSeeAccount = (principal: Principal, account: Pick<Account, 'id' | 'ownerId'>): boolean => {
@@ -50,8 +52,10 @@ export const hasAcl = (principal: Principal, reseller: Reseller | null | undefin
 export interface ResellerCapacityInput {
   reseller: Reseller
   /** every account the reseller owns now (suspended ones included: they still hold resources) */
-  ownedAccounts: readonly { plan: Pick<Plan, 'resources'> }[]
+  ownedAccounts: readonly { plan: Pick<Plan, 'resources'>; accountPlanId?: string }[]
   newPlan: Pick<Plan, 'resources'>
+  /** the package the account takes; set when an account is created, changes package or moves to the reseller */
+  newPlanId?: string
   /**
    * false when an existing account changes plan: the caller leaves that account out of
    * `ownedAccounts` and the account count is not checked again.
@@ -89,18 +93,55 @@ const assertTotalFits = (
 }
 
 /**
- * Account count always applies (LIMIT_EXCEEDED). With overselling off, the disk and
- * bandwidth of every owned plan plus the new one must fit the reseller totals
+ * Account count always applies (LIMIT_EXCEEDED). For each of disk and bandwidth with overselling off,
+ * that limit of every owned plan plus the new one must fit the reseller total
  * (OVERSELL_BLOCKED); an unlimited plan never fits a finite total.
  */
-export const assertResellerCapacity = ({ reseller, ownedAccounts, newPlan, isNewAccount = true }: ResellerCapacityInput): void => {
+export const assertResellerCapacity = ({ reseller, ownedAccounts, newPlan, newPlanId, isNewAccount = true }: ResellerCapacityInput): void => {
   if (!isRecord(reseller) || !isLimit(reseller.maxAccounts)) invalid('reseller maxAccounts is malformed')
   if (!Array.isArray(ownedAccounts)) invalid('ownedAccounts must list every account the reseller owns', { resellerId: reseller.id })
   if (isNewAccount !== true && isNewAccount !== false) invalid('isNewAccount must be a boolean')
   if (isNewAccount) assertFits('reseller accounts', reseller.maxAccounts, ownedAccounts.length, 1)
-  if (reseller.oversell === true) return
+  if (newPlanId !== undefined && reseller.packageLimits !== undefined) {
+    const limit = reseller.packageLimits.find((entry) => entry.planId === newPlanId)
+    if (!limit) fail('FORBIDDEN', 'the reseller may not assign this package', { reason: 'reseller_package_not_allowed', resellerId: reseller.id, planId: newPlanId })
+    assertFits('reseller package accounts', limit!.maxAccounts, ownedAccounts.filter((a) => a.accountPlanId === newPlanId).length, 1)
+  }
+  const oversell: Partial<Reseller['oversell']> = isRecord(reseller.oversell) ? reseller.oversell : {}
+  if (oversell.disk === true && oversell.bandwidth === true) return
   const plans = [...ownedAccounts.map((a) => (isRecord(a) ? a.plan : undefined)), newPlan]
   const resources = plans.map((p) => (isRecord(p) && isRecord(p.resources) ? p.resources : invalid('a plan without resources cannot be counted', { resellerId: reseller.id })))
-  assertTotalFits('disk', reseller.totalDiskMb, resources.map((r) => r.diskMb), reseller)
-  assertTotalFits('bandwidth', reseller.totalBandwidthMb, resources.map((r) => r.bandwidthMbMonth), reseller)
+  if (oversell.disk !== true) assertTotalFits('disk', reseller.totalDiskMb, resources.map((r) => r.diskMb), reseller)
+  if (oversell.bandwidth !== true) assertTotalFits('bandwidth', reseller.totalBandwidthMb, resources.map((r) => r.bandwidthMbMonth), reseller)
+}
+
+export const assertResellerOversell = (v: unknown): Reseller['oversell'] => {
+  if (!isRecord(v) || Object.keys(v).some((k) => k !== 'disk' && k !== 'bandwidth') || typeof v.disk !== 'boolean' || typeof v.bandwidth !== 'boolean') {
+    return invalid('oversell must be { disk, bandwidth } booleans')
+  }
+  return { disk: v.disk, bandwidth: v.bandwidth }
+}
+
+/** One entry per package, at most 4096. */
+export const validateResellerPackageLimits = (v: unknown): NonNullable<Reseller['packageLimits']> => {
+  if (!Array.isArray(v) || v.length > 4096) return invalid('packageLimits must be a list of at most 4096 packages')
+  const seen = new Set<string>()
+  return v.map((entry: unknown) => {
+    if (!isRecord(entry) || Object.keys(entry).some((k) => k !== 'planId' && k !== 'maxAccounts')) return invalid('a package limit is { planId, maxAccounts }')
+    if (typeof entry.planId !== 'string' || !isUuid(entry.planId) || seen.has(entry.planId.toLowerCase())) return invalid('each package limit names one distinct plan id')
+    if (!isLimit(entry.maxAccounts)) return invalid('package maxAccounts must be a non-negative integer or "unlimited"')
+    seen.add(entry.planId.toLowerCase())
+    return { planId: entry.planId.toLowerCase(), maxAccounts: entry.maxAccounts }
+  }).sort((a, b) => a.planId.localeCompare(b.planId))
+}
+
+export const assertResellerSharedIp = (v: unknown): string | null => (v === null ? null : canonicalIp(v, 'sharedIp').address)
+
+const ACL_LIST_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+
+/** The name is also the file name: letters, digits, "_" and "-". */
+export const validateResellerAclList = (v: unknown): ResellerAclList => {
+  if (!isRecord(v) || Object.keys(v).some((k) => k !== 'name' && k !== 'acl')) return invalid('an ACL list is { name, acl }')
+  if (typeof v.name !== 'string' || !ACL_LIST_NAME_RE.test(v.name)) return invalid('ACL list name must be 1-64 letters, digits, "_" or "-"')
+  return { name: v.name, acl: assertResellerAcl(v.acl) }
 }

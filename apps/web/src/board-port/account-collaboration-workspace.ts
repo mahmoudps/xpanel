@@ -14,7 +14,7 @@ export function renderAccountCollaborationWorkspace(input: { locale: Locale; can
       <div class="xp-collaboration__actions"><button class="xp-btn" type="button" data-collaboration-refresh${input.canManage ? '' : ' disabled'}>${t('Read saved collections')}</button></div>
       <p data-collaboration-status data-state="unread" role="status">${empty}</p>
       <div class="xp-collaboration__scroll" role="region" tabindex="0" aria-label="${t('Saved mailbox collections')}"><table class="xp-table"><thead><tr>${[t('Mailbox'), t('Name'), t('Type'), t('Saved items'), t('Settings')].map(label => `<th scope="col">${label}</th>`).join('')}</tr></thead><tbody data-collaboration-collections><tr><td colspan="5">${empty}</td></tr></tbody></table></div>
-      <p class="xp-help">${t('This account overview includes only current owned mailbox metadata. Event bodies and contact details are managed in an independently authenticated xMail session. Unverified legacy ownership is withheld without exposing its records or counts.')}</p>
+      <p class="xp-help">${t('This account overview includes only current owned mailbox metadata. Event bodies and contact details are managed in an independently authenticated xMail session.')}</p>
     </section>
     <section class="xp-collaboration__card" aria-labelledby="collaboration-create-heading"><h2 id="collaboration-create-heading">${t('Create a calendar')}</h2>
       <div class="xp-collaboration__fields">
@@ -29,13 +29,12 @@ export function renderAccountCollaborationWorkspace(input: { locale: Locale; can
     </section>
     <section class="xp-collaboration__card" aria-labelledby="collaboration-sharing-heading"><h2 id="collaboration-sharing-heading">${t('Current calendar sharing')}</h2>
       <div class="xp-collaboration__scroll" role="region" tabindex="0" aria-label="${t('Current same-account sharing')}"><table class="xp-table"><thead><tr>${[t('Owner'), t('Calendar'), t('Recipient'), t(msgctxt('account-collaboration-workspace', 'Permission'))].map(label => `<th scope="col">${label}</th>`).join('')}</tr></thead><tbody data-collaboration-shares><tr><td colspan="4">${empty}</td></tr></tbody></table></div>
-      <div class="xp-collaboration__actions"><button class="xp-btn" type="button" disabled>${t('Share collection')}</button><button class="xp-btn" type="button" disabled>${t('Change permission')}</button><button class="xp-btn" type="button" disabled>${t('Revoke share')}</button></div>
       <p class="xp-help">${t('Only currently bound grants between mailboxes in this account appear here. Sharing changes require the existing xMail owner workflow; this portal does not change its permissions.')}</p>
     </section>
     <section class="xp-collaboration__card" aria-labelledby="collaboration-clients-heading"><h2 id="collaboration-clients-heading">${t('xMail and device setup')}</h2>
       <div class="xp-collaboration__actions">${mailHandoff('calendar', msgid('Open xMail calendars'))}${mailHandoff('contacts', msgid('Open xMail contacts'))}</div>
       <p class="xp-help">${t('Opens the selected mailbox in xMail in a new tab with a sign-in link that works once. The account session and password are not transferred; reading messages there still requires the mailbox password.')}</p>
-      <p class="xp-help">${t('CalDAV/CardDAV service URLs, principal paths, direct DAV collection URLs, synchronization and device discovery have not been qualified. No DAV port or credential endpoint is assumed. iOS, macOS, Thunderbird and third-party Android/Outlook sync setup remain unavailable until a verified DAV provider supplies those settings.')}</p>
+      <p class="xp-help">${t('Calendar and contact apps sync these same collections. Connect them with the details under Calendar and contact sync.')}</p>
     </section>
   ${accountCollaborationClientTemplates()}</div>`
 }

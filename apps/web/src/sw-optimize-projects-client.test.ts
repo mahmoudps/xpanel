@@ -7,14 +7,14 @@ import { readSwProjectRuntimes, SW_APP_PROJECTS_CLIENT_BINDING } from './sw-app-
 import { handleSwOptimizeWorkspaceRoute } from '../../api/src/sw-optimize-workspace.ts'
 
 const tick = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
-const optimize = (state: 'read' | 'unavailable' = 'read') => ({ context: { accountId: 'acc-1', username: 'alice' }, state, reason: state === 'read' ? null : 'edge-config-unavailable', policy: state === 'read' ? { compression: 'on', types: ['text/html', 'text/css'], minLength: 1024, proxied: ['any'], cache: { configured: true, maxSize: '1024m' } } : null, domains: [{ name: 'a.example', redirect: false, suspended: false }, { name: 'b.example', redirect: true, suspended: false }], actions: { siteCompression: false, siteCache: false, purge: false } })
+const optimize = (state: 'read' | 'unavailable' = 'read') => ({ context: { accountId: 'acc-1', username: 'alice' }, state, reason: state === 'read' ? null : 'edge-config-unavailable', policy: state === 'read' ? { compression: 'on', types: ['text/html', 'text/css'], minLength: 1024, proxied: ['any'], cache: { configured: true, maxSize: '1024m' } } : null, domains: [{ name: 'a.example', redirect: false, suspended: false }, { name: 'b.example', redirect: true, suspended: false }], actions: { siteCompression: false } })
 const runtimes = { page: 'runtime', state: 'read', components: [{ id: 'golang', state: 'installed', installed: [{ name: 'golang-go', versions: ['2:1.22~2'] }] }, { id: 'openjdk-17', state: 'absent', installed: [] }, { id: 'nodejs', state: 'installed', installed: [] }] }
 const boot = (binding: string, send: (method: string, path: string) => Promise<unknown>) => { (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send; new Function('return ' + binding)()() }
 beforeEach(() => { delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 
 describe('website optimization workspace', () => {
   it('paints the observed policy per site and keeps per-site rules and purge disabled', async () => {
-    document.body.innerHTML = renderSwOptimizeWorkspace({ lang: 'en', canRead: true })
+    document.body.innerHTML = renderSwOptimizeWorkspace({ lang: 'en', canRead: true, accountId: '', canManageCache: false })
     const send = vi.fn(async () => optimize()); boot(SW_OPTIMIZE_CLIENT_BINDING, send); await tick()
     expect(send).toHaveBeenCalledWith('GET', '/api/account/optimize')
     expect(document.querySelector('[data-sw-optimize-cache]')!.textContent).toBe('On, up to 1024m')
@@ -23,7 +23,7 @@ describe('website optimization workspace', () => {
     expect([...document.querySelectorAll<HTMLButtonElement>('button:not([data-sw-optimize-refresh])')].every(button => button.disabled)).toBe(true)
   })
   it('states unavailable edge configuration truthfully and renders RTL with ASCII digits', async () => {
-    document.body.innerHTML = renderSwOptimizeWorkspace({ lang: 'ar', canRead: true })
+    document.body.innerHTML = renderSwOptimizeWorkspace({ lang: 'ar', canRead: true, accountId: '', canManageCache: false })
     expect(document.querySelector<HTMLElement>('[data-sw-optimize]')!.dir).toBe('rtl')
     boot(SW_OPTIMIZE_CLIENT_BINDING, vi.fn(async () => optimize('unavailable'))); await tick()
     expect(document.querySelector('[data-sw-optimize-status]')!.getAttribute('data-state')).toBe('unavailable')
@@ -46,7 +46,7 @@ describe('Go and Java projects workspace', () => {
     expect(send).toHaveBeenCalledWith('GET', '/api/server/software-center?page=runtime')
     const rows = [...document.querySelectorAll('[data-sw-projects-runtimes] tr')].map(row => [...row.children].map(cell => cell.textContent))
     expect(rows).toEqual([['Go', 'Installed', '2:1.22~2'], ['OpenJDK 17', 'Not installed', 'None']])
-    expect(document.querySelectorAll('button:disabled').length).toBe(3)
+    expect(document.querySelector<HTMLButtonElement>('[data-sw-project-save]')!.disabled).toBe(true)
     expect(() => readSwProjectRuntimes({ ...runtimes, page: 'catalog' })).toThrow()
   })
   it('never echoes transport errors', async () => {

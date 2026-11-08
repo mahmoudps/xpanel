@@ -1,18 +1,14 @@
 import { randomUUID } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fail } from '@xpanel/core'
 import { createApiToken, createTestDb, createUserPrincipal } from '@xpanel/db'
-import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
-import { authenticateRequest, sha256Hex } from './auth.ts'
-import { assertRequestAuthorized } from './authorization.ts'
+import { createTestStateStore } from '@xpanel/state'
+import { sha256Hex } from './auth.ts'
 import { createApiApp, listenApiServer } from './server.ts'
-import { createContactToolsRoutes } from './mail/contact-tools-routes.ts'
+import { createMemoryDav } from './mail/dav-testkit.ts'
 import { CONTACTS_PER_MAILBOX_MAX, contactWorkspaceRevision, createWorkspaceContact } from './mail/contact-workspace.ts'
 import type { WebmailContact } from './extended-routes.ts'
 
-// Real loopback HTTP + disposable database/state. Contact metadata only; no CardDAV or native sync.
+// Real loopback HTTP + disposable database/state, with the store in memory.
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const SECRET = randomUUID() + randomUUID()
 const cleanup: Array<() => Promise<unknown>> = []
@@ -42,13 +38,14 @@ const fixture = async () => {
     return raw
   }
   const credential = await token(inbox.id), siblingCredential = await token(sibling.id), foreignCredential = await token(foreign.id, foreignPrincipal.id)
-  const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET })
+  const dav = createMemoryDav({ defaults: true })
+  const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, davExchange: dav.exchange })
   const server = await listenApiServer(app); cleanup.push(() => server.close())
   const request = (path: string, method = 'GET', body?: unknown, raw: string | null = credential) => fetch(`http://127.0.0.1:${server.port}` + path, { method,
     headers: { ...(raw ? { authorization: 'Bearer ' + raw } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
   const authority = (service: typeof inbox) => ({ accountId: service.accountId, serviceUserId: service.id, mailbox: service.login })
   const boundContact = (service: typeof inbox, fields: typeof contactFields) => {
-    const row = { ...createWorkspaceContact(service.login, fields), ownerAuthority: authority(service) }
+    const row = { ...createWorkspaceContact(service.login, fields), ownerAuthority: authority(service), createdAt: '1970-01-01T00:00:00.000Z' }
     row.vcard = row.vcard.replace('END:VCARD', 'UID:urn:uuid:' + row.id + '\r\nNOTE:Preserved opaque note\r\n continued text\r\nX-ORIGINAL:unchanged\r\nEND:VCARD')
     return row
   }
@@ -56,25 +53,19 @@ const fixture = async () => {
   const shared = { ...boundContact(inbox, { ...contactFields, fullName: 'Shared contact' }), shares: [{ principal: sibling.login, permission: 'read-write' as const, granteeAuthority: authority(sibling), sharedAt: '2026-01-01T00:00:00.000Z' }] }
   const siblingPrivate = boundContact(sibling, { ...contactFields, fullName: 'Sibling private' })
   const foreignContact = boundContact(foreign, { ...contactFields, fullName: 'Foreign private' })
-  const contactsPath = join(state.rootDir, 'extended', 'webmail', 'contacts.json'), groupsPath = join(state.rootDir, 'extended', 'webmail', 'contact-groups.json')
-  await atomicWriteJson(contactsPath, [own, shared, siblingPrivate, foreignContact])
-  const bytes = () => readFile(contactsPath, 'utf8')
-  const groupBytes = () => readFile(groupsPath, 'utf8').catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
-  const contacts = async () => JSON.parse(await bytes()) as WebmailContact[]
+  const seed = (records: readonly (typeof own)[]) => dav.seedContacts(records as never, accountId => accountId === owner.id ? owner.username : foreignOwner.username)
+  seed([own, shared, siblingPrivate, foreignContact])
+  const bytes = async () => dav.snapshot()
+  const groupBytes = async () => dav.groups(owner.username, inbox.id)
+  const logins = new Map([inbox, sibling, foreign].map(service => [service.id, service.login]))
+  const contacts = async () => dav.contacts().map(contact => ({ ...contact, owner: logins.get(contact.principal) }))
   const list = async (raw = credential): Promise<Listing> => { const response = await request('/api/webmail/contact-groups', 'GET', undefined, raw); expect(response.status).toBe(200); return response.json() as Promise<Listing> }
   const createGroup = async (name: string, contactIds: string[] = []) => {
     const current = await list(), response = await request('/api/webmail/contact-groups', 'POST', { name, contactIds, expectedRevision: current.revision })
     expect(response.status).toBe(201)
     return (await response.json() as { group: Group; revision: string }).group
   }
-  const rawRequest = (path: string, method: string, body: unknown) => new Request('http://localhost' + path, { method, headers: { authorization: 'Bearer ' + credential, 'content-type': 'application/json' }, body: JSON.stringify(body) })
-  const requireCaller = async (req: Request) => {
-    const caller = await authenticateRequest(database.db, req, { serverSecret: SECRET })
-    if (!caller) return fail('UNAUTHENTICATED', 'authentication required')
-    await assertRequestAuthorized(state.store, caller, req)
-    return caller
-  }
-  return { database, state, owner, inbox, sibling, foreign, authority, principal, credential, siblingCredential, foreignCredential, token, request, own, shared, siblingPrivate, foreignContact, contactsPath, groupsPath, bytes, groupBytes, contacts, list, createGroup, rawRequest, requireCaller }
+  return { database, state, owner, inbox, sibling, foreign, authority, principal, credential, siblingCredential, foreignCredential, token, request, own, shared, siblingPrivate, foreignContact, dav, seed, bytes, groupBytes, contacts, list, createGroup }
 }
 
 describe('mailbox contact groups/deletion/capacity loopback acceptance', () => {
@@ -97,8 +88,8 @@ describe('mailbox contact groups/deletion/capacity loopback acceptance', () => {
     expect(listing.capacity).toEqual({ ownedContacts: 2, maxContacts: 10000, groups: 0, maxGroups: 256, maxGroupsPerContact: 32 })
     expect(await f.bytes()).toBe(before); expect(await f.groupBytes()).toBeNull()
   })
-  it('projects legacy group membership without inventing IDs or writing definitions', async () => {
-    await atomicWriteJson(f.contactsPath, [{ ...f.own, groups: ['Existing group'] }, f.shared, f.siblingPrivate, f.foreignContact])
+  it('projects a category set on a device as a group without writing definitions', async () => {
+    f.seed([{ ...f.own, vcard: f.own.vcard.replace('END:VCARD', 'CATEGORIES:Existing group\r\nEND:VCARD') }])
     const before = await f.bytes(), listing = await f.list()
     expect(listing.groups).toEqual([{ name: 'Existing group', contactIds: [f.own.id], revision: expect.stringMatching(/^[0-9a-f]{64}$/) }])
     expect(await f.groupBytes()).toBeNull(); expect(await f.bytes()).toBe(before)
@@ -107,7 +98,7 @@ describe('mailbox contact groups/deletion/capacity loopback acceptance', () => {
     const group = await f.createGroup('Friends')
     expect(group.contactIds).toEqual([])
     expect((await f.list()).groups).toEqual([group])
-    expect(JSON.parse((await f.groupBytes())!)).toContainEqual({ owner: f.inbox.login, ownerAuthority: f.authority(f.inbox), name: 'Friends', createdAt: expect.any(String) })
+    expect(JSON.parse((await f.groupBytes())!)).toContainEqual({ name: 'Friends', createdAt: expect.any(String) })
     expect((await f.database.db.query('SELECT action FROM audit_log WHERE action = $1', ['webmail.contact_group.created'])).length).toBe(1)
   })
   it('renames a group and replaces exact owned memberships without changing contact fields or foreign rows', async () => {
@@ -142,13 +133,13 @@ describe('mailbox contact groups/deletion/capacity loopback acceptance', () => {
   })
   it('requires owner-only current-revision deletion and preserves empty groups', async () => {
     await f.createGroup('Friends', [f.own.id])
-    const current = (await f.contacts()).find(contact => contact.id === f.own.id)!
+    const current = (await f.list()).contacts.find(contact => contact.id === f.own.id)!
     const stale = await f.request(`/api/webmail/contacts/${current.id}`, 'DELETE', { expectedRevision: contactWorkspaceRevision(f.own) })
     expect(stale.status).toBe(409)
     const before = await f.bytes()
     const sharedDelete = await f.request(`/api/webmail/contacts/${f.shared.id}`, 'DELETE', { expectedRevision: contactWorkspaceRevision(f.shared) }, f.siblingCredential)
     expect(sharedDelete.status).toBe(403); expect(await f.bytes()).toBe(before)
-    const response = await f.request(`/api/webmail/contacts/${current.id}`, 'DELETE', { expectedRevision: contactWorkspaceRevision(current) })
+    const response = await f.request(`/api/webmail/contacts/${current.id}`, 'DELETE', { expectedRevision: current.revision })
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ context: { mailbox: f.inbox.login }, deletedContactId: current.id, stateChanged: true })
     expect((await f.contacts()).some(contact => contact.id === current.id)).toBe(false)
@@ -188,15 +179,14 @@ describe('mailbox contact groups/deletion/capacity loopback acceptance', () => {
   })
   it('refuses unknown group assignment and enforces mailbox group bounds', async () => {
     expect((await f.request(`/api/webmail/contacts/${f.own.id}/groups`, 'PUT', { groups: ['Missing'], expectedRevision: contactWorkspaceRevision(f.own) })).status).toBe(404)
-    await atomicWriteJson(f.groupsPath, Array.from({ length: 256 }, (_, index) => ({ owner: f.inbox.login, ownerAuthority: f.authority(f.inbox), name: 'Group ' + index, createdAt: null })))
+    f.dav.seedGroups(f.owner.username, f.inbox.id, Array.from({ length: 256 }, (_, index) => ({ name: 'Group ' + index, createdAt: null })))
     const before = await f.groupBytes(), listing = await f.list()
     expect((await f.request('/api/webmail/contact-groups', 'POST', { name: 'Overflow', contactIds: [], expectedRevision: listing.revision })).status).toBe(422)
     expect(await f.groupBytes()).toBe(before)
     expect((await f.request(`/api/webmail/contacts/${f.own.id}/groups`, 'PUT', { groups: Array.from({ length: 33 }, (_, index) => 'Group ' + index), expectedRevision: contactWorkspaceRevision(f.own) })).status).toBe(422)
   })
-  it('bounds both create and import through the existing contact lease', async () => {
-    const full = Array.from({ length: CONTACTS_PER_MAILBOX_MAX }, (_, index) => ({ ...f.own, id: randomUUID(), fullName: 'Contact ' + index }))
-    await atomicWriteJson(f.contactsPath, [...full, f.siblingPrivate, f.foreignContact])
+  it('bounds both create and import through the existing contact lease', { tags: ['slow'] }, async () => {
+    f.seed(Array.from({ length: CONTACTS_PER_MAILBOX_MAX - 2 }, (_, index) => ({ ...f.own, id: randomUUID(), fullName: 'Contact ' + index })))
     const before = await f.bytes()
     expect((await f.request('/api/webmail/contacts', 'POST', contactFields)).status).toBe(422)
     const card = 'BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Overflow\r\nEMAIL:overflow@example.test\r\nEND:VCARD'
@@ -214,7 +204,7 @@ describe('mailbox contact groups/deletion/capacity loopback acceptance', () => {
     expect((await f.list()).groups.map(group => group.name).sort()).toEqual(['Friends, team', 'Semi;colon'])
   })
   it('refuses an over-budget group catalog explicitly while preserving independent contact deletion', async () => {
-    await atomicWriteJson(f.groupsPath, Array.from({ length: 4097 }, (_, index) => ({ owner: f.inbox.login, ownerAuthority: f.authority(f.inbox), name: 'Legacy ' + index, createdAt: null })))
+    f.dav.seedGroups(f.owner.username, f.inbox.id, Array.from({ length: 4097 }, (_, index) => ({ name: 'Group ' + index, createdAt: null })))
     const before = await f.bytes(), metadata = await f.groupBytes()
     const response = await f.request('/api/webmail/contact-groups')
     expect(response.status).toBe(412)
@@ -231,44 +221,26 @@ describe('mailbox contact groups/deletion/capacity loopback acceptance', () => {
     expect((await f.request('/api/webmail/contact-groups?mailbox=' + encodeURIComponent(f.foreign.login))).status).toBe(422)
     expect((await f.request('/api/webmail/contact-groups', 'GET', undefined, await f.token(null))).status).toBe(403)
   })
-  it('rechecks suspended account authority after the writer lease wait', async () => {
-    const listing = await f.list(), lock = f.state.store.getWriterLock(), acquire = lock.acquire.bind(lock)
-    vi.spyOn(lock, 'acquire').mockImplementationOnce(async () => { await f.state.store.suspendAccount(f.owner.id, 'Synthetic concurrent suspension'); return acquire() })
-    const before = await f.bytes()
-    expect((await f.request('/api/webmail/contact-groups', 'POST', { name: 'Refused', contactIds: [], expectedRevision: listing.revision })).status).toBe(403)
-    expect(await f.bytes()).toBe(before); expect(await f.groupBytes()).toBeNull()
+  it('rechecks suspended account authority after waiting for the mailbox lock', async () => {
+    const listing = await f.list(), hold = f.dav.pauseNextWrite()
+    const holder = f.request('/api/webmail/contact-groups', 'POST', { name: 'Holder', contactIds: [f.own.id], expectedRevision: listing.revision })
+    await hold.reached
+    const pending = f.request('/api/webmail/contact-groups', 'POST', { name: 'Refused', contactIds: [], expectedRevision: listing.revision })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    await f.state.store.suspendAccount(f.owner.id, 'Synthetic concurrent suspension')
+    hold.release()
+    expect((await pending).status).toBe(403)
+    await holder
+    expect(await f.groupBytes() ?? '').not.toContain('Refused')
   })
-  it('restores exact byte preimages after the second canonical publication fails', async () => {
-    await writeFile(f.contactsPath, JSON.stringify(await f.contacts(), null, 4) + '\n\n')
-    const before = await f.bytes(), listing = await f.list()
-    let writes = 0
-    const handler = createContactToolsRoutes({ store: f.state.store, requireCaller: f.requireCaller, emitAudit: vi.fn(), writeJson: async (...args) => {
-      await atomicWriteJson(...args)
-      if (++writes === 2) throw Object.assign(new Error('Synthetic second-file publication failure'), { code: 'EIO' })
-    } })
-    const req = f.rawRequest('/api/webmail/contact-groups', 'POST', { name: 'Recovered', contactIds: [f.own.id], expectedRevision: listing.revision })
-    await expect(handler(req, new URL(req.url))).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', detail: { stateChanged: false } })
-    expect(await f.bytes()).toBe(before); expect(await f.groupBytes()).toBeNull()
-    expect((await f.list()).groups).toEqual([])
+  it('reports an unknown outcome when the group definition cannot be written after the contacts changed', async () => {
+    const listing = await f.list()
+    f.dav.failNext(503, 'PROPPATCH')
+    const response = await f.request('/api/webmail/contact-groups', 'POST', { name: 'Unknown', contactIds: [f.own.id], expectedRevision: listing.revision })
+    expect(response.status).toBe(503)
+    expect(await response.json()).toMatchObject({ details: { stateChanged: true, verificationRequired: true, unknownOutcome: true } })
   })
-  it('preserves unbound history without exposing content, names, quotas or revision changes', async () => {
-    const { ownerAuthority: _binding, ...unbound } = f.own
-    const beforeListing = await f.list()
-    await atomicWriteJson(f.contactsPath, [f.shared, f.siblingPrivate, f.foreignContact])
-    const baseline = await f.list()
-    await atomicWriteJson(f.contactsPath, [unbound, f.shared, f.siblingPrivate, f.foreignContact])
-    await atomicWriteJson(f.groupsPath, [{ owner: f.inbox.login, name: 'Hidden old group', createdAt: null }])
-    const before = await f.bytes(), groups = await f.groupBytes(), listing = await f.list()
-    expect(listing).toEqual(baseline)
-    expect(listing.capacity.ownedContacts).toBe(beforeListing.capacity.ownedContacts - 1)
-    expect(JSON.stringify(listing)).not.toContain('Hidden old group')
-    const main = await (await f.request('/api/webmail/contacts')).json() as { contacts: WebmailContact[] }
-    expect(main.contacts.some(contact => contact.id === unbound.id)).toBe(false)
-    const refused = await f.request('/api/webmail/contacts/' + unbound.id, 'DELETE', { expectedRevision: contactWorkspaceRevision(unbound) })
-    expect(refused.status).toBe(412)
-    expect(await f.bytes()).toBe(before); expect(await f.groupBytes()).toBe(groups)
-  })
-  it('refuses old contact/group ownership after actual mailbox retirement and address recreation', async () => {
+  it('refuses old contact/group ownership after actual mailbox retirement and address recreation', { tags: ['slow'] }, async () => {
     await f.createGroup('Old lifetime', [f.own.id])
     const before = await f.bytes(), groups = await f.groupBytes()
     await f.state.store.deleteServiceUser(f.inbox.id)
@@ -281,11 +253,10 @@ describe('mailbox contact groups/deletion/capacity loopback acceptance', () => {
     expect(await f.bytes()).toBe(before); expect(await f.groupBytes()).toBe(groups)
     const created = await f.request('/api/webmail/contacts', 'POST', contactFields, credential)
     expect(created.status).toBe(201)
-    const stored = await f.contacts(), latest = stored.at(-1)!
-    expect(latest.ownerAuthority).toEqual({ accountId: recreated.accountId, serviceUserId: recreated.id, mailbox: recreated.login })
-    expect(stored.slice(0,-1)).toEqual(JSON.parse(before))
+    expect((await f.contacts()).filter(contact => contact.principal === recreated.id).map(contact => contact.fullName)).toEqual([contactFields.fullName])
+    expect((await f.contacts()).filter(contact => contact.principal === f.inbox.id)).toHaveLength(2)
   })
-  it('requires current owner and grantee lifetimes for shared contact access', async () => {
+  it('requires current owner and grantee lifetimes for shared contact access', { tags: ['slow'] }, async () => {
     const before = await f.bytes()
     await f.state.store.deleteServiceUser(f.inbox.id)
     await f.state.store.createServiceUser({ accountId: f.owner.id, login: f.inbox.login, passwordHash: HASH, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
@@ -293,7 +264,7 @@ describe('mailbox contact groups/deletion/capacity loopback acceptance', () => {
     expect(response.status).toBe(404); expect(await f.bytes()).toBe(before)
   })
 
-  it('refuses a historical share after actual recipient address recreation', async () => {
+  it('refuses a historical share after actual recipient address recreation', { tags: ['slow'] }, async () => {
     const before = await f.bytes()
     await f.state.store.deleteServiceUser(f.sibling.id)
     const recreated = await f.state.store.createServiceUser({ accountId: f.owner.id, login: f.sibling.login, passwordHash: HASH, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })

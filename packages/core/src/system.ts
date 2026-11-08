@@ -25,6 +25,11 @@ export type PackageRole =
   | 'quota'
   | 'acme'
   | 'modsecurity'
+  | 'web-stats'
+  /** Web Disk: lighttpd and its WebDAV module, one instance per Web Disk login */
+  | 'webdav'
+  /** calendars and contacts: the Radicale library, loaded per account by the xPanel launcher */
+  | 'caldav'
 
 /** Everything distribution-specific, resolved once from /etc/os-release. */
 export interface OsProfile {
@@ -87,6 +92,7 @@ export type HostAction =
   | { kind: 'ensure-dir'; path: string; mode: number; owner: string; group: string }
   | { kind: 'remove-path'; path: string }
   | { kind: 'set-quota'; user: string; blockSoftKb: number; blockHardKb: number; filesystem: string }
+  | { kind: 'site-quota'; path: string; projectId: number; limitMb: number }
   | { kind: 'systemd-daemon-reload' }
   | { kind: 'systemd'; verb: 'start' | 'stop' | 'restart' | 'reload' | 'enable' | 'disable'; unit: string }
   | { kind: 'systemd-set-property'; unit: string; properties: Record<string, string> }

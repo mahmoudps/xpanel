@@ -184,3 +184,18 @@ describe('strict operation-bound file workspace replies', () => {
     throw new Error('Expected malformed acknowledgement rejection')
   })
 })
+
+describe('text save in a chosen character set', () => {
+  const write = (content: string, extra: Record<string, unknown>) => validateFileWorkspaceRequest({ op: 'write', path: 'public_html/a.txt', content, ...extra })
+  it('writes single-byte text as bytes and keeps UTF-8 as the plain text write', () => {
+    expect(write('caf\u00e9', { to_charset: 'ISO-8859-1', fallback: false })).toMatchObject({ op: 'put-bytes', contentBase64: Buffer.from([0x63, 0x61, 0x66, 0xe9]).toString('base64') })
+    expect(write('caf\u00e9', { to_charset: 'UTF-8' })).toMatchObject({ op: 'write', content: 'caf\u00e9' })
+    expect(write('caf\u00e9', {})).toMatchObject({ op: 'write' })
+  })
+  it('refuses a character the charset lacks, unless fallback keeps UTF-8', () => {
+    expect(() => write('x\u20ac', { to_charset: 'ISO-8859-1', fallback: false })).toThrow(expect.objectContaining({ code: 'VALIDATION' }))
+    expect(() => write('caf\u00e9', { to_charset: 'US-ASCII' })).toThrow(expect.objectContaining({ code: 'VALIDATION' }))
+    expect(write('x\u20ac', { to_charset: 'ISO-8859-1', fallback: true })).toMatchObject({ op: 'write' })
+    expect(() => write('x', { to_charset: 'KOI8-R' })).toThrow(expect.objectContaining({ code: 'VALIDATION' }))
+  })
+})

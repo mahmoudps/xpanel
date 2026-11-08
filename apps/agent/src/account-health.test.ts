@@ -7,7 +7,7 @@ import type { AccountHealthCaller, AccountHealthHost, AccountHealthState, Health
 const NOW = new Date('2026-10-27T10:00:00.000Z')
 const plan = defaultPlan({ id: 'plan-1', name: 'Standard', featureListId: 'features-1' })
 const features: FeatureList = { id: 'features-1', name: 'Default', ownerId: null, disabled: [] }
-const reseller: Reseller = { id: 'reseller-1', username: 'resell', acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited', oversell: true, nameservers: [], delegatedIps: [] }
+const reseller: Reseller = { id: 'reseller-1', username: 'resell', acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited', oversell: { disk: true, bandwidth: true }, nameservers: [], delegatedIps: [] }
 const account = (username: string, overrides: Partial<Account> = {}): Account => ({ id: 'id-' + username, username, uid: 20001, gid: 20001, home: '/home/' + username, primaryDomain: username + '.example.test', planId: plan.id,
   ownerId: 'reseller-1', status: 'active', suspendReason: null, contactEmail: 'owner@example.test', ipv4: '192.0.2.10', shell: 'none', createdAt: '2026-01-01T00:00:00.000Z', ...overrides })
 const domain = (owner: Account, overrides: Partial<Domain> = {}): Domain => ({ id: 'domain-' + owner.username, accountId: owner.id, name: owner.primaryDomain, kind: 'primary', parentId: null, docRoot: owner.home + '/public_html', siteType: 'php',

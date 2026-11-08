@@ -57,7 +57,15 @@ export const WHM_ACCOUNT_TOOLS_CSS = V2_ACCOUNT_ANNOUNCEMENT_CSS + `.v2-account-
 .v2-account-tools fieldset{display:flex;flex-direction:column;gap:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);padding:var(--space-2);min-inline-size:0}
 .v2-account-tools legend{padding-inline:var(--space-1);font-weight:600}
 .v2-account-tool__previews{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);min-inline-size:0}
+.v2-account-tools [data-web-template-preview]{inline-size:100%;block-size:320px;border:1px solid var(--line);border-radius:var(--radius-control)}
 .v2-account-tool__preview{padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);min-inline-size:0}
 .v2-account-tools [hidden]{display:none}
+.v2-whm-quotas__table{min-inline-size:720px}
+.v2-whm-quotas__table td small{display:block;color:var(--muted)}
+.v2-whm-quotas__sort{all:unset;cursor:pointer;font-weight:600;min-block-size:var(--target)}
+.v2-whm-quotas__sort:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.v2-whm-quotas__table td[data-quota-cell=change]{display:flex;flex-wrap:wrap;gap:var(--space-1);align-items:center}
+.v2-whm-quotas__table td[data-quota-cell=change] input[type=text]{inline-size:8rem;min-block-size:var(--target)}
+@media(max-width:600px){.v2-whm-quotas__table{min-inline-size:0}.v2-whm-quotas__table thead{display:none}.v2-whm-quotas__table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-1) var(--space-2);padding-block:var(--space-2)}.v2-whm-quotas__table td{padding:0}.v2-whm-quotas__table td[data-quota-cell=account]{grid-row:span 2}.v2-whm-quotas__table td[data-quota-cell=owner]{display:none}.v2-whm-quotas__table td[data-quota-cell=change]{grid-column:1/-1}}
 @media(max-width:800px){.v2-account-tool__previews{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:600px){.v2-account-tool__fields,.v2-account-tool__facts{grid-template-columns:minmax(0,1fr)}}`

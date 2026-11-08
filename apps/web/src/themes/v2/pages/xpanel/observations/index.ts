@@ -1,7 +1,8 @@
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { renderV2PanelSiteHealth, renderV2PanelServerInformation } from './health.ts'
 import { renderV2PanelLogs } from './logs.ts'
-import { renderV2PanelTraffic, renderV2PanelWebStatistics } from './traffic.ts'
+import { renderV2PanelTraffic } from './traffic.ts'
+import { renderV2PanelWebStatistics } from './web-stats.ts'
 import type { PanelObservationAuthority } from './common.ts'
 
 export { renderV2PanelSiteHealth, renderV2PanelServerInformation, renderV2PanelLogs, renderV2PanelTraffic, renderV2PanelWebStatistics }

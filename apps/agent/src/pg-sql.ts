@@ -75,7 +75,7 @@ export function postgresqlScript(statements: readonly string[]): string {
 export type PgScriptRun = (argv: readonly string[], stdin: string) => Promise<{ code: number | null; stderr: string }>
 const redact = (text: string): string => text.replace(/SCRAM-SHA-256\$[^\s']*/g, '[REDACTED]').replace(/PASSWORD\s+'[^']*'/gi, "PASSWORD '[REDACTED]'").slice(0, 2000).trim()
 const spawnScript: PgScriptRun = (argv, stdin) => new Promise((resolve, reject) => {
-  const child = spawn(argv[0]!, argv.slice(1), { cwd: '/', stdio: ['pipe', 'ignore', 'pipe'], env: { PATH: '/usr/bin:/bin', LC_ALL: 'C.UTF-8' }, windowsHide: true })
+  const child = spawn(argv[0]!, argv.slice(1), { cwd: '/', stdio: ['pipe', 'ignore', 'pipe'], env: { PATH: '/usr/bin:/bin', LC_ALL: 'C.UTF-8', ...(process.env.PGPORT ? { PGPORT: process.env.PGPORT } : {}) }, windowsHide: true })
   let stderr = ''
   const timer = setTimeout(() => child.kill('SIGKILL'), 120_000)
   child.stderr.setEncoding('utf8').on('data', (chunk: string) => { if (stderr.length < 65_536) stderr += chunk })

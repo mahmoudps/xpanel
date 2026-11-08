@@ -54,11 +54,6 @@ msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
-msgid "A confined account service runner with resource limits and reverse-proxy binding is not connected. No project can be created or started."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
-msgctxt "theme:v2"
 msgid "A deployment fast-forwards the saved HTTPS origin as the account user. Root never runs Git inside the account home."
 msgstr ""
 
@@ -92,11 +87,6 @@ msgctxt "theme:v2"
 msgid "A reboot disconnects active sessions and stops hosted services temporarily. After reconnecting, read the server boot time to confirm that it changed."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
-msgctxt "theme:v2"
-msgid "A restart can interrupt active connections. Review the selected service and confirm before the request is sent."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/lifecycle/destinations.ts
 msgctxt "theme:v2"
 msgid "A run counts copies only after their bytes and SHA-256 have been verified. Read the returned parts and failure details before treating a run as complete."
@@ -110,11 +100,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/resources.ts
 msgctxt "theme:v2"
 msgid "A service-unit readback was not supplied. The saved configuration does not establish a running worker or its unit file."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
-msgctxt "theme:v2"
-msgid "A signed catalog and installer are not connected. Installation, update and rollback stay unavailable; no job state has been read."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
@@ -147,11 +132,6 @@ msgctxt "theme:v2"
 msgid "Access control"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/files/web-disk.ts
-msgctxt "theme:v2"
-msgid "Access mode"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
 msgctxt "theme:v2"
 msgid "Account archive storage"
@@ -180,11 +160,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
 msgid "Account file runner"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
-msgctxt "theme:v2"
-msgid "Account handler mappings are unavailable. The reviewed file policy does not permit AddHandler. Executable handlers stay with the server PHP setup."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/lifecycle/upgrade.ts
@@ -267,11 +242,6 @@ msgctxt "theme:v2"
 msgid "Active configuration checksum"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/operations/ftp.ts
-msgctxt "theme:v2"
-msgid "Active FTP sessions have not been read."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
 msgctxt "theme:v2"
 msgid "Active generation"
@@ -302,34 +272,9 @@ msgctxt "theme:v2"
 msgid "Actual disk use"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/panel/notifications.ts
-msgctxt "theme:v2"
-msgid "Add another delivery channel"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/files/privacy.ts
 msgctxt "theme:v2"
 msgid "Add folder"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
-msgctxt "theme:v2"
-msgid "Add handler"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Add registry"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/server/observations.ts
-msgctxt "theme:v2"
-msgid "Add route"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
-msgctxt "theme:v2"
-msgid "Add source"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
@@ -387,11 +332,6 @@ msgctxt "theme:v2"
 msgid "All zones"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/operations/ftp.ts
-msgctxt "theme:v2"
-msgid "Allow anonymous access"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/security/account.ts
 msgctxt "theme:v2"
 msgid "Allowed addresses (optional)"
@@ -432,24 +372,9 @@ msgctxt "theme:v2"
 msgid "An authorized account has not been read. Nothing was read or changed."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/files/web-disk.ts
-msgctxt "theme:v2"
-msgid "An enabled service flag is a saved setting. It does not establish that a WebDAV listener, TLS or a client connection was verified."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/resources.ts
 msgctxt "theme:v2"
 msgid "An on-demand account resource reader is unavailable."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/operations/ftp.ts
-msgctxt "theme:v2"
-msgid "Anonymous access and its server policy have not been read. These controls do not enable access."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/operations/ftp.ts
-msgctxt "theme:v2"
-msgid "Anonymous FTP"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/domains/index.ts
@@ -465,11 +390,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/software/htaccess.ts
 msgctxt "theme:v2"
 msgid "Apache configuration test output"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "Apache user"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
@@ -550,11 +470,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/plans/plans.ts
 msgctxt "theme:v2"
 msgid "Assignments are desired state. Current usage and over-cap accounts have not been observed."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
-msgctxt "theme:v2"
-msgid "At most 500 entries. Loopback addresses used by the local proxy are refused."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/activity/audit.ts
@@ -682,11 +597,6 @@ msgctxt "theme:v2"
 msgid "Backup information"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts
-msgctxt "theme:v2"
-msgid "Backup pages"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
 msgctxt "theme:v2"
 msgid "Backup scope and safeguards"
@@ -715,11 +625,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Bind address"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "Blocked addresses have not been read."
 msgstr ""
 
 #: apps/web/src/themes/v2/components/bulk-bar.ts
@@ -827,16 +732,6 @@ msgctxt "theme:v2"
 msgid "Cgroup version"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/server/ips.ts
-msgctxt "theme:v2"
-msgid "Change account IP"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/server/observations.ts
-msgctxt "theme:v2"
-msgid "Change hostname"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgctxt "theme:v2"
 msgid "Change preview"
@@ -900,11 +795,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
 msgctxt "theme:v2"
 msgid "Choose a user to inspect sign-ins, transfers and clients."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
-msgctxt "theme:v2"
-msgid "Choose an expiry"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/panel/locales-preferences.ts
@@ -997,11 +887,6 @@ msgctxt "theme:v2"
 msgid "Components"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Compose stacks and container apps"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
 msgid "Composer and project state have not been read."
@@ -1049,7 +934,7 @@ msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
-msgid "Configuration is read only. Unset settings retain server defaults and secrets are never read."
+msgid "Unset settings retain server defaults and secrets are never read."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xpanel/software/php.ts
@@ -1072,24 +957,9 @@ msgctxt "theme:v2"
 msgid "Configuration test"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "Configuration tests and local site checks have not run."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts
-msgctxt "theme:v2"
-msgid "Configure"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts
 msgctxt "theme:v2"
 msgid "Configure copies, review actual run evidence and restore only the selected account and parts."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/server/observations.ts
-msgctxt "theme:v2"
-msgid "Configure resolvers"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
@@ -1125,11 +995,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Connection"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/files/web-disk.ts
-msgctxt "theme:v2"
-msgid "Connection address"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
@@ -1187,11 +1052,6 @@ msgctxt "theme:v2"
 msgid "Copy {name}"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/services/cron.ts
-msgctxt "theme:v2"
-msgid "Copy output"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/software/htaccess.ts
 msgctxt "theme:v2"
 msgid "Copy test output"
@@ -1242,36 +1102,6 @@ msgctxt "theme:v2"
 msgid "Create and revoke tokens in their dedicated authenticated workspace. Token values are not read here."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Create container"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/operations/ftp.ts
-msgctxt "theme:v2"
-msgid "Create FTP login"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Create network"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
-msgctxt "theme:v2"
-msgid "Create project"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/server/observations.ts
-msgctxt "theme:v2"
-msgid "Create scheduled task"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Create volume"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/files/web-disk.ts
 msgctxt "theme:v2"
 msgid "Create Web Disk account"
@@ -1285,11 +1115,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/panel/tokens.ts
 msgctxt "theme:v2"
 msgid "Cron jobs"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/server/sharing-nodes.ts
-msgctxt "theme:v2"
-msgid "Cross-node transfers, coordinated role changes and remote service controls are not admitted by this registry editor."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
@@ -1312,11 +1137,6 @@ msgctxt "theme:v2"
 msgid "Current configuration tests"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/operations/ftp.ts
-msgctxt "theme:v2"
-msgid "Current FTP connections"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/host/firewall.ts
 msgctxt "theme:v2"
 msgid "Current ruleset"
@@ -1337,11 +1157,6 @@ msgctxt "theme:v2"
 msgid "Daemon settings"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Daemon settings are read only until a reviewed writer and restart check are connected."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Data and index size"
@@ -1360,11 +1175,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Database engines"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/panel/data.ts
-msgctxt "theme:v2"
-msgid "Database export, arbitrary panel-state restore and destructive reset are not connected to this configuration-history page."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
@@ -1467,11 +1277,6 @@ msgctxt "theme:v2"
 msgid "Deploy a registered account repository through its isolated Git runner."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Deploy compose stack"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
 msgid "Deploy latest from origin"
@@ -1512,11 +1317,6 @@ msgctxt "theme:v2"
 msgid "Difference"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/security/certificates.ts
-msgctxt "theme:v2"
-msgid "Direct key generation, CSR creation and certificate-file installation are not connected to this view. No key or request was generated."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
 msgid "Directive preview"
@@ -1550,11 +1350,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgctxt "theme:v2"
 msgid "Discard preview"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/operations/ftp.ts
-msgctxt "theme:v2"
-msgid "Disconnect session"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/resellers/index.ts
@@ -1622,11 +1417,6 @@ msgctxt "theme:v2"
 msgid "Domain and file"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/email-tools/archive-deliverability.ts
-msgctxt "theme:v2"
-msgid "Domain delivery checks"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/domains/index.ts
 msgctxt "theme:v2"
 msgid "Domain serving details"
@@ -1635,11 +1425,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgctxt "theme:v2"
 msgid "Download (simulated)"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/files/web-disk.ts
-msgctxt "theme:v2"
-msgid "Download connection settings"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
@@ -1672,34 +1457,14 @@ msgctxt "theme:v2"
 msgid "Driver"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/databases/mariadb.ts
-msgctxt "theme:v2"
-msgid "Dump file"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/host/php.ts
 msgctxt "theme:v2"
-msgid "Each account pool runs inside its account slice. Global pool defaults and effective worker counts have not been read."
+msgid "Each account pool runs inside its account slice. The server pool defaults are further down this page."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts
 msgctxt "theme:v2"
 msgid "Each integration uses its own authorized workspace and qualification. This explorer does not establish its connection or delivery state."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Edit configuration"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Edit daemon settings"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/server/ips.ts
-msgctxt "theme:v2"
-msgid "Edit reverse DNS"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/host/php.ts
@@ -1715,11 +1480,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/plans/features.ts
 msgctxt "theme:v2"
 msgid "Enabled"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
-msgctxt "theme:v2"
-msgid "Enabled at boot"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
@@ -1832,16 +1592,6 @@ msgctxt "theme:v2"
 msgid "Explicit temporary load with bounded resources and verified cleanup."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/databases/mariadb.ts
-msgctxt "theme:v2"
-msgid "Export a database"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/panel/data.ts
-msgctxt "theme:v2"
-msgid "Export panel data"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgctxt "theme:v2"
 msgid "Extensions"
@@ -1917,11 +1667,6 @@ msgctxt "theme:v2"
 msgid "First (UTC)"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts
-msgctxt "theme:v2"
-msgid "First user"
-msgstr ""
-
 #: apps/web/src/themes/v2/layouts/log-page.ts
 msgctxt "theme:v2"
 msgid "Follow"
@@ -1970,16 +1715,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
 msgctxt "theme:v2"
 msgid "FTP activity has not been read."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/operations/ftp.ts
-msgctxt "theme:v2"
-msgid "FTP creation needs its own verified client operation. The mailbox creation form is not an FTP action."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/operations/ftp.ts
-msgctxt "theme:v2"
-msgid "FTP deletion is unavailable until its service-user confirmation is connected. No mailbox deletion action is reused here."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
@@ -2095,11 +1830,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/host/php.ts
 msgctxt "theme:v2"
 msgid "Handler availability has not been read. A saved assignment does not establish runtime compatibility."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
-msgctxt "theme:v2"
-msgid "Handler mappings choose which server module processes a file extension."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
@@ -2254,27 +1984,12 @@ msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
-msgid "Image pulls and removal require a reviewed registry trust policy and host job."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
 msgid "Images"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/plans/plans.ts
 msgctxt "theme:v2"
 msgid "Impact of changes"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/databases/mariadb.ts
-msgctxt "theme:v2"
-msgid "Import a dump"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/databases/mariadb.ts
-msgctxt "theme:v2"
-msgid "Import and export"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
@@ -2342,29 +2057,14 @@ msgctxt "theme:v2"
 msgid "Install a certificate"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/panel/configuration.ts
-msgctxt "theme:v2"
-msgid "Install a theme package"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
 msgid "Install an engine"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
-msgctxt "theme:v2"
-msgid "Install extension"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
 msgid "Install service"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
-msgctxt "theme:v2"
-msgid "Install, update and custom mirrors require a reviewed account-isolated job with script restrictions, resource limits and ownership checks. That provider is unavailable."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xpanel/services/tls.ts
@@ -2512,11 +2212,6 @@ msgctxt "theme:v2"
 msgid "Kernel packages"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
-msgctxt "theme:v2"
-msgid "Keys"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/domains/index.ts
 msgctxt "theme:v2"
 msgid "Kind and wildcard"
@@ -2545,16 +2240,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
 msgctxt "theme:v2"
 msgid "Last 7 days"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
-msgctxt "theme:v2"
-msgid "Last check"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/email-tools/archive-deliverability.ts
-msgctxt "theme:v2"
-msgid "Last delivery check"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
@@ -2677,11 +2362,6 @@ msgctxt "theme:v2"
 msgid "Lowercase letters and digits, starting with a letter."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/email-tools/archive-deliverability.ts
-msgctxt "theme:v2"
-msgid "Mail routing"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
 msgctxt "theme:v2"
 msgid "Mailbox files kept"
@@ -2717,11 +2397,6 @@ msgctxt "theme:v2"
 msgid "Manage forwarding destinations for the signed-in mailbox."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/operations/packages.ts
-msgctxt "theme:v2"
-msgid "Manage only reviewed account-private package files and preserve recovery evidence."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
 msgid "Manage runtimes"
@@ -2735,11 +2410,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/email-tools/mailing-lists.ts
 msgctxt "theme:v2"
 msgid "Manage saved membership, posting policy and the observed delivery state of your account lists."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts
-msgctxt "theme:v2"
-msgid "Manage service users"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
@@ -2877,11 +2547,6 @@ msgctxt "theme:v2"
 msgid "Move accounts from a verified source or inspect a cPanel archive before importing."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/server/ips.ts
-msgctxt "theme:v2"
-msgid "Moving accounts between addresses, changing delegation and editing reverse DNS are not connected to this add/remove workflow."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/server/sharing-nodes.ts
 msgctxt "theme:v2"
 msgid "Multi-server tools"
@@ -2922,19 +2587,9 @@ msgctxt "theme:v2"
 msgid "Network and nameservers"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/server/observations.ts
-msgctxt "theme:v2"
-msgid "Network changes"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
 msgid "Network identifier"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Network writes are unavailable."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
@@ -2945,16 +2600,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
 msgid "Networks"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts
-msgctxt "theme:v2"
-msgid "New and changed destinations stay inactive. Verify the transport before activation; a saved destination does not prove a remote copy."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "New containers and compose stacks require a reviewed runner and catalog, which are not connected. Nothing is created."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/ftp-log.ts
@@ -2990,11 +2635,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/domains/common.ts
 msgctxt "theme:v2"
 msgid "No account is available."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/resources.ts
-msgctxt "theme:v2"
-msgid "No account limit-event counters or history were supplied."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
@@ -3172,11 +2812,6 @@ msgctxt "theme:v2"
 msgid "No proposed ruleset has been read. No change is presented as tested or applied."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "No protection state was read for this site. Folder credentials are not generated by this combined editor."
-msgstr ""
-
 #: apps/web/src/themes/v2/surfaces/slots.ts
 msgctxt "theme:v2"
 msgid "No recent audit observations were supplied."
@@ -3230,11 +2865,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/databases/mariadb.ts
 msgctxt "theme:v2"
 msgid "No saved databases. Create a database configuration to begin."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
-msgctxt "theme:v2"
-msgid "No service is selected."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
@@ -3292,11 +2922,6 @@ msgctxt "theme:v2"
 msgid "No update plan has been read. Nothing has been changed."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/files/web-disk.ts
-msgctxt "theme:v2"
-msgid "No Web Disk logins were returned."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/panel/integrations-developer.ts
 msgctxt "theme:v2"
 msgid "No webhook delivery log has been read."
@@ -3350,11 +2975,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/observations/health.ts
 msgctxt "theme:v2"
 msgid "Observation scope"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
-msgctxt "theme:v2"
-msgid "Observe installed runtimes and the availability of an isolated project runner."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/server/observations.ts
@@ -3474,11 +3094,6 @@ msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/host/services.ts
 msgctxt "theme:v2"
-msgid "Only observed service state is shown."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
-msgctxt "theme:v2"
 msgid "Only reviewed auxiliary units allow boot changes. Panel, SSH, networking, web, database, mail and DNS services stay protected."
 msgstr ""
 
@@ -3577,29 +3192,9 @@ msgctxt "theme:v2"
 msgid "Other"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
-msgctxt "theme:v2"
-msgid "Other access rules in the same file must be resolved before this managed block can be changed."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/server/ips.ts
-msgctxt "theme:v2"
-msgid "Other IP tools"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/software/updates.ts
 msgctxt "theme:v2"
 msgid "Other package managers running"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/server/observations.ts
-msgctxt "theme:v2"
-msgid "Other scheduling tools"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/email-tools/archive-deliverability.ts
-msgctxt "theme:v2"
-msgid "Outbound address"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/server/ips.ts
@@ -3657,24 +3252,9 @@ msgctxt "theme:v2"
 msgid "Panel client configuration"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/panel/data.ts
-msgctxt "theme:v2"
-msgid "Panel data"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
 msgid "Passive ports: policy / host"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/security/account.ts
-msgctxt "theme:v2"
-msgid "Password changes are not connected to this workspace. These fields remain disabled."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts apps/web/src/themes/v2/pages/xpanel/security/account.ts
-msgctxt "theme:v2"
-msgid "Password for this user"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
@@ -3774,11 +3354,6 @@ msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
-msgid "phpPgAdmin has no supported single sign-on. Database passwords are never placed in the browser."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
-msgctxt "theme:v2"
 msgid "phpPgAdmin package"
 msgstr ""
 
@@ -3825,11 +3400,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
 msgid "Policy is rendered desired configuration. Host files are read separately; running daemon flags are not observed here."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "Pool socket"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts apps/web/src/themes/v2/pages/xwhm/software/containers.ts
@@ -3894,17 +3464,7 @@ msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
-msgid "Project"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
-msgctxt "theme:v2"
 msgid "Project dependencies"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
-msgctxt "theme:v2"
-msgid "Project state has not been read."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
@@ -3922,24 +3482,9 @@ msgctxt "theme:v2"
 msgid "Proposed rules"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "Protected folders have not been read."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Protected mode"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "Protection"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "Protection state has not been read."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
@@ -3960,11 +3505,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/services/dns.ts
 msgctxt "theme:v2"
 msgid "Public SPF, DKIM, DMARC and reverse DNS have not been checked by this page."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Pull image"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
@@ -4055,11 +3595,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
 msgid "Read containers"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
-msgctxt "theme:v2"
-msgid "Read dependency metadata for saved PHP sites through the confined account file provider."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
@@ -4212,24 +3747,9 @@ msgctxt "theme:v2"
 msgid "Recent commits"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/databases/mariadb.ts
-msgctxt "theme:v2"
-msgid "Recent imports and exports"
-msgstr ""
-
 #: apps/web/src/themes/v2/surfaces/slots.ts
 msgctxt "theme:v2"
 msgid "Recent jobs"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
-msgctxt "theme:v2"
-msgid "Recent log"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
-msgctxt "theme:v2"
-msgid "Recent service log lines have not been read."
 msgstr ""
 
 #: apps/web/src/themes/v2/shell/overlays.ts
@@ -4262,14 +3782,9 @@ msgctxt "theme:v2"
 msgid "Refresh package lists"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
-msgctxt "theme:v2"
-msgid "Refuse website requests from selected addresses and ranges."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/server/sharing-nodes.ts
 msgctxt "theme:v2"
-msgid "Register managed peers without treating saved enrollment as a verified channel."
+msgid "Link servers and push settings between them, with every link proved both ways."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
@@ -4285,11 +3800,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
 msgid "Registry"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Registry writes are unavailable."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/server/ips.ts
@@ -4315,11 +3825,6 @@ msgstr ""
 #: apps/web/src/themes/v2/layouts/editor-page.ts
 msgctxt "theme:v2"
 msgid "Removed line:"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/databases/mariadb.ts
-msgctxt "theme:v2"
-msgid "Renaming is unavailable in the current saved-configuration workflow. No database has been renamed."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
@@ -4357,11 +3862,6 @@ msgctxt "theme:v2"
 msgid "Replace or renew in SSL/TLS"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/server/terminal.ts
-msgctxt "theme:v2"
-msgid "Replay a session"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
 msgctxt "theme:v2"
 msgid "Repository"
@@ -4392,16 +3892,6 @@ msgctxt "theme:v2"
 msgid "Reseller delegation unavailable here"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/resellers/index.ts
-msgctxt "theme:v2"
-msgid "Reseller suspension is unavailable. No suspension request has been sent."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/panel/data.ts
-msgctxt "theme:v2"
-msgid "Reset panel state"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
 msgid "Reset to defaults"
@@ -4427,11 +3917,6 @@ msgctxt "theme:v2"
 msgid "Resource unit"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
-msgctxt "theme:v2"
-msgid "Restart impact"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
 msgid "Restart PowerDNS"
@@ -4445,11 +3930,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
 msgctxt "theme:v2"
 msgid "Restore approval"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/panel/data.ts
-msgctxt "theme:v2"
-msgid "Restore panel data"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
@@ -4577,11 +4057,6 @@ msgctxt "theme:v2"
 msgid "Review single sign-on availability for this account on the phpMyAdmin page. No database password is exposed here."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/files/web-disk.ts
-msgctxt "theme:v2"
-msgid "Review stored Web Disk logins and directories without assuming that remote access is active."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Review the installed server"
@@ -4600,11 +4075,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
 msgctxt "theme:v2"
 msgid "Rewrite"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "Rewrite rules"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
@@ -4630,11 +4100,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
 msgid "Rootless"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/email-tools/archive-deliverability.ts
-msgctxt "theme:v2"
-msgid "Routing and sender identity"
 msgstr ""
 
 #: apps/web/src/themes/v2/components/pagination.ts
@@ -4682,11 +4147,6 @@ msgctxt "theme:v2"
 msgid "Run transfer"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/software/projects.ts
-msgctxt "theme:v2"
-msgid "Runner unavailable"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Running threads"
@@ -4720,11 +4180,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts apps/web/src/themes/v2/pages/xwhm/lifecycle/destinations.ts
 msgctxt "theme:v2"
 msgid "S3"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
-msgctxt "theme:v2"
-msgid "Save feature keys"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/lifecycle/destinations.ts
@@ -5057,11 +4512,6 @@ msgctxt "theme:v2"
 msgid "Server only"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
-msgctxt "theme:v2"
-msgid "Server restore points"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
 msgctxt "theme:v2"
 msgid "Server uptime (seconds)"
@@ -5072,16 +4522,6 @@ msgctxt "theme:v2"
 msgid "Server-only schemas are not attributed to an account."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts
-msgctxt "theme:v2"
-msgid "Service access"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
-msgctxt "theme:v2"
-msgid "Service actions"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
 msgctxt "theme:v2"
 msgid "Service certificates"
@@ -5090,16 +4530,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
 msgid "Service configuration"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
-msgctxt "theme:v2"
-msgid "Service dependencies have not been read."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
-msgctxt "theme:v2"
-msgid "Service details"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/details.ts
@@ -5130,11 +4560,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/panel/tokens.ts
 msgctxt "theme:v2"
 msgid "Service users"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts
-msgctxt "theme:v2"
-msgid "Service users are separate from the account team. Use the email and service-user workspace to review credentials and access changes."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xpanel/settings/preferences.ts
@@ -5327,11 +4752,6 @@ msgctxt "theme:v2"
 msgid "Spam settings have not been read."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/databases/mariadb.ts
-msgctxt "theme:v2"
-msgid "SQL import and export are not connected to this saved-configuration workspace. No dump has been read, imported or exported."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/software/htaccess.ts
 msgctxt "theme:v2"
 msgid "Stack"
@@ -5517,11 +4937,6 @@ msgctxt "theme:v2"
 msgid "Tested"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
-msgctxt "theme:v2"
-msgid "Tested before reload"
-msgstr ""
-
 #: apps/web/src/themes/v2/components/change-review.ts
 msgctxt "theme:v2"
 msgid "Tests run before the switch"
@@ -5622,11 +5037,6 @@ msgctxt "theme:v2"
 msgid "The current draft has not been tested."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "The current site and a proposed change have not been compared."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/server/trusted-proxies.ts
 msgctxt "theme:v2"
 msgid "The dedicated ingress verifies recovery and management access independently of saved settings."
@@ -5667,11 +5077,6 @@ msgctxt "theme:v2"
 msgid "The observation window was not supplied."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/databases/index.ts
-msgctxt "theme:v2"
-msgid "The panel holds no database credentials for this service and does not browse its data."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
 msgctxt "theme:v2"
 msgid "The panel stack is managed by server setup and cannot be removed from the software center."
@@ -5700,11 +5105,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/overview/index.ts
 msgctxt "theme:v2"
 msgid "The reconciler, accounts, resources and services."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
-msgctxt "theme:v2"
-msgid "The request-body limit is outside the connected settings contract."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/catalog.ts
@@ -5777,11 +5177,6 @@ msgctxt "theme:v2"
 msgid "The server validates engine support when setup is submitted. A selected engine does not prove installed packages or account isolation."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "The site rewrite file has not been read. Response headers and virtual-host includes are not presented as rewrite-file content."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xwhm/lifecycle/transfers.ts
 msgctxt "theme:v2"
 msgid "The source plans and their destination mappings have not been read."
@@ -5797,19 +5192,9 @@ msgctxt "theme:v2"
 msgid "These saved display settings belong to the current signed-in administrator or reseller. Server defaults are managed on their own pages."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/email-tools/archive-deliverability.ts
-msgctxt "theme:v2"
-msgid "These values require an authorized service observation. Stored domain names are shown for selection only."
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/operations/ftp.ts
 msgctxt "theme:v2"
 msgid "This changes mailbox storage only. It is not an FTP disk quota."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "This combined site editor is not qualified for changes. Stored facts remain visible, and every operation stays disabled."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/resellers/records.ts
@@ -5932,11 +5317,6 @@ msgctxt "theme:v2"
 msgid "Top users"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/host/services.ts
-msgctxt "theme:v2"
-msgid "Total services"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/observations/traffic.ts
 msgctxt "theme:v2"
 msgid "Totals for the selection"
@@ -5950,11 +5330,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xpanel/home.ts
 msgctxt "theme:v2"
 msgid "Traffic window not reported"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/server/terminal.ts
-msgctxt "theme:v2"
-msgid "Transfer a file"
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/server/sharing-nodes.ts
@@ -6057,11 +5432,6 @@ msgctxt "theme:v2"
 msgid "Upgrade steps"
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xpanel/operations/backup.ts
-msgctxt "theme:v2"
-msgid "Upload archive"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
 msgctxt "theme:v2"
 msgid "Upload the page with the file manager. Saving these rules does not prove that the page file exists."
@@ -6095,11 +5465,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/accounts/create.ts
 msgctxt "theme:v2"
 msgid "Use an address outside this account for quota, suspension and certificate notices."
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
-msgctxt "theme:v2"
-msgid "Use an IPv4 or IPv6 address, or a CIDR range such as 192.0.2.0/24."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/service-tools/web.ts
@@ -6147,19 +5512,9 @@ msgctxt "theme:v2"
 msgid "Validate hosted names, certificate chain and matching private key before guarded installation."
 msgstr ""
 
-#: apps/web/src/themes/v2/pages/xwhm/lifecycle/backups.ts
-msgctxt "theme:v2"
-msgid "Verify and activate destinations"
-msgstr ""
-
 #: apps/web/src/themes/v2/pages/xpanel/store/index.ts
 msgctxt "theme:v2"
 msgid "Verify package"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
-msgctxt "theme:v2"
-msgid "Version and handler are stored domain settings. The pool socket, serving user and running restrictions have not been observed."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/host/php.ts
@@ -6190,11 +5545,6 @@ msgstr ""
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
 msgctxt "theme:v2"
 msgid "Volume"
-msgstr ""
-
-#: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
-msgctxt "theme:v2"
-msgid "Volume writes are unavailable."
 msgstr ""
 
 #: apps/web/src/themes/v2/pages/xwhm/software/containers.ts
@@ -6520,4 +5870,49 @@ msgstr ""
 
 msgctxt "theme:v2"
 msgid "Read the actual reconcile result and resulting generation."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
+msgctxt "theme:v2"
+msgid "Choose which Apache module processes a file extension on this domain. Changes replace only the managed block."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/advanced/directives.ts
+msgctxt "theme:v2"
+msgid "Separate extensions with spaces, such as .pl .cgi."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
+msgctxt "theme:v2"
+msgid "Version and handler are stored domain settings."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
+msgctxt "theme:v2"
+msgid "Protect a folder, or the whole document root, on the Directory privacy page."
+msgstr ""
+
+#: apps/web/src/themes/v2/pages/xpanel/domains/site-settings.ts
+msgctxt "theme:v2"
+msgid "Blocked addresses apply to every site of the account."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Composer runs as the account of the site, in its slice, with project scripts and plugins off."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Install PEAR packages and Perl modules into your own account libraries."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "PHP of the site"
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Read dependency metadata and run Composer as the account of a saved PHP site."
+msgstr ""
+
+msgctxt "theme:v2"
+msgid "Run a built Go executable or Java archive as one isolated service of an account."
 msgstr ""

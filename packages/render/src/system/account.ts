@@ -106,10 +106,14 @@ export const accountProvisionActions = (account: Account, plan: Plan, os: OsProf
 
 const ACCOUNT_UNIT_RE = /^xpanel-(php-fpm|app|appproxy|ctr|cron)-([a-z][a-z0-9]{0,15})-([a-z0-9][a-z0-9.-]{0,40})\.(service|timer|socket)$/
 const CACHE_UNIT_RE = /^xpanel-(?:redis|memcached)-([a-z][a-z0-9]{0,15})\.service$/
+// Web Disk logins (dav.ts webDiskPaths) and the account's calendar server (calDavPaths)
+const DAV_UNIT_RE = /^xpanel-(?:webdiskd?-([a-z][a-z0-9]{0,15})-[0-9a-f]{12}|caldav-([a-z][a-z0-9]{0,15}))\.(?:service|socket)$/
 const SHORT_NAME_RE = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/
 
 export const isAccountUnit = (username: string, unit: string): boolean => {
   if (CACHE_UNIT_RE.exec(unit)?.[1] === username) return true
+  const dav = DAV_UNIT_RE.exec(unit)
+  if (dav) return (dav[1] ?? dav[2]) === username
   const m = ACCOUNT_UNIT_RE.exec(unit)
   if (!m || m[2] !== username) return false
   const rest = m[3] ?? ''

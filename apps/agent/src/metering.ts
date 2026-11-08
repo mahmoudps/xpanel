@@ -1,4 +1,4 @@
-import { fail } from '@xpanel/core'
+import { effectivePlan, fail } from '@xpanel/core'
 import type { Account, Domain, Plan } from '@xpanel/core'
 import { edge } from '@xpanel/render'
 import type { LogSlice } from './account-logs.ts'
@@ -8,7 +8,7 @@ import { UNAVAILABLE_DISK_LATENCY, type DiskLatency } from './host-metrics.ts'
 import type { MailLogObservation } from './mail-log.ts'
 
 export const BANDWIDTH_LEDGER_PATH = '/var/lib/xpanel/bandwidth.json'
-/** Minimum spacing of collections; the caller's timer may tick more often. */
+/** Default and shortest spacing of collections; the caller's timer may tick more often. */
 export const BANDWIDTH_INTERVAL_MS = 300_000
 /** The current and the previous UTC month, so lines read just after a month boundary still count. */
 export const BANDWIDTH_MONTHS_KEPT = 2
@@ -17,6 +17,8 @@ export const BANDWIDTH_TICK_READ_BYTES = 8 * 1024 * 1024
 export const BANDWIDTH_MAX_SITES = 512
 /** Longest journal window read per collection; a longer gap is caught up over later collections. */
 export const BANDWIDTH_JOURNAL_WINDOW_MS = 6 * 3_600_000
+/** A longer spacing would read the journals slower than they are written. */
+export const BANDWIDTH_INTERVAL_MAX_MS = BANDWIDTH_JOURNAL_WINDOW_MS
 /** Queue ids whose size was logged in an earlier window than their delivery. */
 export const BANDWIDTH_MAIL_QUEUE_MAX = 5_000
 const MAIL_QUEUE_MAX_AGE_MS = 7 * 86_400_000
@@ -46,6 +48,14 @@ export interface BandwidthLedger {
   /** 'YYYY-MM' (UTC) to account id to per-source totals. */
   months: Record<string, Record<string, BandwidthMonth>>
 }
+/** What one recorded collection read: each listed site log and the cursor the ledger now holds for it. */
+export interface BandwidthCollection {
+  at: Date
+  sites: { path: string; accountId: string; site: string }[]
+  cursors: BandwidthLedger['cursors']
+}
+/** The name a site log has while its last lines are counted before it is archived (log-rotation.ts renames it). */
+export const rotatedLogPath = (path: string): string => path + '.1'
 export type BandwidthLimitState = 'within' | 'near' | 'over' | 'unlimited' | 'unmeasured'
 export interface BandwidthAccountRow {
   username: string; domain: string; status: Account['status']
@@ -54,6 +64,10 @@ export interface BandwidthAccountRow {
   totalBytes: number | null; limitBytes: number | null; usedPercent: number | null; limitState: BandwidthLimitState
   /** The plan's enforcement switch, and whether the websites serve the bandwidth-exceeded page this month. */
   enforced: boolean; limited: boolean
+  /** The limit is the account's own override rather than its package value. */
+  customLimit: boolean
+  /** UTC day through which root relieved the account from enforcement; null when no relief is in force. */
+  reliefThrough: string | null
 }
 export interface BandwidthSourceState { state: 'read' | 'partial' | 'unavailable'; since: string | null }
 export interface BandwidthReport {
@@ -73,8 +87,10 @@ export interface BandwidthMeterOptions {
   readFtp: ((since: string, until: string) => Promise<FtpLogObservation>) | null
   readLedger: () => Promise<unknown>
   writeLedger: (ledger: BandwidthLedger) => Promise<void>
-  /** Runs after each recorded collection (plan enforcement); its failure is reported through onError. */
-  afterCollect?: () => Promise<void>
+  /** The saved spacing of collections; absent means the default. */
+  intervalMs?: () => Promise<number>
+  /** Runs after each recorded collection (plan enforcement, log rotation) with the recorded site cursors; its failure is reported through onError. */
+  afterCollect?: (collected: BandwidthCollection) => Promise<void>
   /** Website analytics from the same site log reads. Saved before the ledger, so a lost save shows as a gap and a lost ledger write as a re-read it skips. */
   webAnalytics?: WebsiteAnalyticsFeed
   now?: () => Date
@@ -179,10 +195,10 @@ export function addFtpObservation(ledger: BandwidthLedger, observation: FtpLogOb
 }
 
 /** Site logs per account; an account whose saved sites cannot be grouped is listed in failed, not skipped silently. */
-const sitesOf = (saved: { accounts: readonly Account[]; domains: readonly Domain[] }): { sites: { accountId: string; path: string; owners: ReadonlyMap<string, Domain> }[]; failed: Set<string> } => {
-  const seen = new Map<string, { accountId: string; owners: ReadonlyMap<string, Domain> }>(), failed = new Set<string>()
+const sitesOf = (saved: { accounts: readonly Account[]; domains: readonly Domain[] }): { sites: { accountId: string; path: string; site: string; owners: ReadonlyMap<string, Domain> }[]; failed: Set<string> } => {
+  const seen = new Map<string, { accountId: string; site: string; owners: ReadonlyMap<string, Domain> }>(), failed = new Set<string>()
   for (const account of saved.accounts) {
-    try { for (const group of edge.groupSites(account, saved.domains.filter(domain => domain.accountId === account.id))) seen.set(edge.nginxAccessLog(group.main.name), { accountId: account.id, owners: group.owners }) }
+    try { for (const group of edge.groupSites(account, saved.domains.filter(domain => domain.accountId === account.id))) seen.set(edge.nginxAccessLog(group.main.name), { accountId: account.id, site: group.main.name, owners: group.owners }) }
     catch { failed.add(account.id) }
   }
   return { sites: [...seen].map(([path, site]) => ({ path, ...site })).sort((a, b) => a.path.localeCompare(b.path)), failed }
@@ -191,7 +207,7 @@ const sitesOf = (saved: { accounts: readonly Account[]; domains: readonly Domain
 /** Incremental per-account bandwidth from the saved site access logs and the mail and FTP journals. One collection at a time. */
 export function createBandwidthMeter(options: BandwidthMeterOptions) {
   const now = options.now ?? (() => new Date())
-  let active: Promise<void> | undefined, lastRun = -Infinity, stopped = false
+  let active: Promise<void> | undefined, lastRun = -Infinity, stopped = false, backlog = false
   const readJournal = async <T extends { state: 'read' | 'unavailable'; lineLimitReached: boolean }>(cursor: JournalCursor, at: Date, read: ((since: string, until: string) => Promise<T>) | null, apply: (observation: T) => void): Promise<void> => {
     if (!read) return
     // Whole seconds: journalctl --since and --until are inclusive, so the next window starts one second later.
@@ -221,11 +237,29 @@ export function createBandwidthMeter(options: BandwidthMeterOptions) {
     for (const site of order) {
       if (budget <= 0) starvedFrom ??= site.path
       const previous = ledger.cursors[site.path]
-      const known = previous?.accountId === site.accountId ? previous : undefined
+      let known = previous?.accountId === site.accountId ? previous : undefined
       try {
         const max = Math.min(BANDWIDTH_SITE_READ_BYTES, Math.max(1, budget))
+        if (known) {
+          // A rotated copy with the cursor's identity is the file this cursor was reading: count its last lines first.
+          const rotated = await options.readFrom(rotatedLogPath(site.path), known.offset, max)
+          if (rotated.exists && rotated.identity === known.identity) {
+            const reading = budget > 0
+            let consumed = reading ? addLogLines(ledger, site.accountId, rotated.bytes, rotated.bytes.length === max, keep) : 0
+            budget -= rotated.bytes.length
+            // nginx writes whole lines; an unterminated tail of a file it no longer writes is skipped, not waited on.
+            if (reading && rotated.start + rotated.bytes.length >= rotated.sizeBytes && consumed < rotated.bytes.length) { ledger.skippedLines++; consumed = rotated.bytes.length }
+            const chunk: SiteLogChunk = { path: site.path, accountId: site.accountId, owners: site.owners, identity: known.identity, start: rotated.start, sizeBytes: rotated.sizeBytes,
+              bytes: rotated.bytes.subarray(0, consumed), readAt: at.toISOString(), since: ledger.updatedAt ?? at.toISOString(), caughtUp: false }
+            try { options.webAnalytics?.ingestSiteLog(chunk) } catch { /* Analytics cannot stop metering. */ }
+            // Kept until the new file is read, so a missing new file never restarts this one at zero.
+            cursors[site.path] = { accountId: site.accountId, identity: known.identity, offset: rotated.start + consumed }
+            if (!reading || rotated.start + consumed < rotated.sizeBytes) { ledger.pendingBytes += rotated.sizeBytes - (rotated.start + consumed); continue }
+            known = undefined
+          }
+        }
         let slice = await options.readFrom(site.path, known?.offset ?? 0, max)
-        // shortcut: a rotated file restarts at 0; lines written to it after the last read are not counted.
+        // A file this cursor did not read starts at zero; log-rotation.ts renames a counted file before nginx reopens it.
         if (slice.exists && known && (slice.identity !== known.identity || slice.sizeBytes < known.offset)) slice = await options.readFrom(site.path, 0, max)
         if (!slice.exists || slice.identity === null) { ledger.unavailableSites++; continue }
         const consumed = budget > 0 ? addLogLines(ledger, site.accountId, slice.bytes, slice.bytes.length === max, keep) : 0
@@ -237,7 +271,7 @@ export function createBandwidthMeter(options: BandwidthMeterOptions) {
         const chunk: SiteLogChunk = { path: site.path, accountId: site.accountId, owners: site.owners, identity: slice.identity, start: slice.start, sizeBytes: slice.sizeBytes,
           bytes: slice.bytes.subarray(0, consumed), readAt: at.toISOString(), since: known ? ledger.updatedAt ?? at.toISOString() : at.toISOString(), caughtUp }
         try { options.webAnalytics?.ingestSiteLog(chunk) } catch { /* Analytics cannot stop metering. */ }
-      } catch { ledger.unavailableSites++; if (known) cursors[site.path] = known }
+      } catch { ledger.unavailableSites++; if (known) cursors[site.path] ??= known }
     }
     ledger.cursors = cursors
     ledger.resumeAt = starvedFrom
@@ -250,20 +284,25 @@ export function createBandwidthMeter(options: BandwidthMeterOptions) {
     if (stopped) return
     await options.webAnalytics?.save(at).catch(() => undefined)
     await options.writeLedger(ledger)
-    if (!stopped && options.afterCollect) await options.afterCollect()
+    backlog = ledger.pendingBytes > 0
+    if (!stopped && options.afterCollect) await options.afterCollect({ at, sites: listed.map(({ path, accountId, site }) => ({ path, accountId, site })), cursors: ledger.cursors })
   }
   const collect = (force = false): Promise<void> => {
     if (stopped) return Promise.resolve()
     if (active) return active
-    if (!force && now().getTime() - lastRun < BANDWIDTH_INTERVAL_MS) return Promise.resolve()
-    lastRun = now().getTime()
-    active = collectOnce().catch(error => { try { options.onError?.(error) } catch { /* Diagnostics cannot stop metering. */ } }).finally(() => { active = undefined })
+    active = (async () => {
+      // One collection reads a bounded amount, so a backlog keeps the shortest spacing until the logs are caught up.
+      const spacing = force || backlog || !options.intervalMs ? BANDWIDTH_INTERVAL_MS : await options.intervalMs().catch(() => BANDWIDTH_INTERVAL_MS)
+      if (!force && now().getTime() - lastRun < spacing) return
+      lastRun = now().getTime()
+      await collectOnce()
+    })().catch(error => { try { options.onError?.(error) } catch { /* Diagnostics cannot stop metering. */ } }).finally(() => { active = undefined })
     return active
   }
   return {
     collect,
     async report(): Promise<BandwidthReport> {
-      const month = monthOf(now()), monthStart = month + '-01T00:00:00Z', saved = await options.readState()
+      const month = monthOf(now()), today = now().toISOString().slice(0, 10), monthStart = month + '-01T00:00:00Z', saved = await options.readState()
       const ledger = parseBandwidthLedger(await options.readLedger())
       const plans = new Map(saved.plans.map(plan => [plan.id, plan]))
       const unread: Record<BandwidthSource, BandwidthSourceState> = { web: { state: 'unavailable', since: null }, mail: { state: 'unavailable', since: null }, ftp: { state: 'unavailable', since: null } }
@@ -271,12 +310,13 @@ export function createBandwidthMeter(options: BandwidthMeterOptions) {
       const row = (account: Account, month: BandwidthAccountRow['month']): BandwidthAccountRow => {
         const measured = BANDWIDTH_SOURCES.filter(source => month[source] !== null)
         const totalBytes = measured.length ? measured.reduce((sum, source) => sum + month[source]!.receivedBytes + month[source]!.sentBytes, 0) : null
-        const limit = plans.get(account.planId)?.resources.bandwidthMbMonth
+        const plan = plans.get(account.planId)
+        const limit = plan && effectivePlan(plan, account).resources.bandwidthMbMonth
         const limitBytes = typeof limit === 'number' ? limit * 1024 * 1024 : null
         const usedPercent = totalBytes !== null && limitBytes ? Math.round(totalBytes / limitBytes * 1000) / 10 : null
         const limitState: BandwidthLimitState = totalBytes === null ? 'unmeasured' : limitBytes === null ? 'unlimited' : usedPercent! >= 100 ? 'over' : usedPercent! >= BANDWIDTH_NEAR_PERCENT ? 'near' : 'within'
-        const plan = plans.get(account.planId)
-        return { username: account.username, domain: account.primaryDomain, status: account.status, month, totalBytes, limitBytes, usedPercent, limitState, enforced: plan?.enforceBandwidth === true, limited: account.bandwidthLimitedMonth !== undefined }
+        return { username: account.username, domain: account.primaryDomain, status: account.status, month, totalBytes, limitBytes, usedPercent, limitState, enforced: plan?.enforceBandwidth === true, limited: account.bandwidthLimitedMonth !== undefined,
+          customLimit: account.limits?.resources?.bandwidthMbMonth !== undefined, reliefThrough: relievedThrough(account, today) }
       }
       if (!ledger || ledger.updatedAt === null) return { ...base, state: 'unavailable', since: null, updatedAt: null, sources: unread, pendingBytes: 0, unavailableSites: 0, skippedLines: 0, accounts: saved.accounts.map(account => row(account, { web: null, mail: null, ftp: null })).sort((a, b) => a.username.localeCompare(b.username)) }
       const { sites, failed } = sitesOf(saved)
@@ -307,23 +347,28 @@ export interface BandwidthEnforcementDeps {
   /** One reconcile after a committed change, so the edge serves or stops serving the limit page. */
   reconcile: () => Promise<unknown>
 }
-export type BandwidthLiftReason = 'month-rollover' | 'limit-raised' | 'enforcement-off' | 'account-inactive'
+export type BandwidthLiftReason = 'month-rollover' | 'limit-raised' | 'enforcement-off' | 'account-inactive' | 'relieved'
+/** Relief lasts through its UTC day: from 00:00 UTC of the next day the account is evaluated again (WHM Unsuspend Bandwidth Exceeders). */
+const relievedThrough = (account: Pick<Account, 'bandwidthReliefDate'>, today: string): string | null =>
+  account.bandwidthReliefDate !== undefined && account.bandwidthReliefDate >= today ? account.bandwidthReliefDate : null
 
-/** Applies each plan's enforcement switch to the measured month. A limit is set only on proven use over the plan limit and is
- * never lifted on missing data; it is lifted when the month rolls over, the limit is raised or made unlimited, enforcement is
- * switched off or the account is no longer active. Every transition is audited. A revision conflict changes nothing; the next
- * collection decides again on fresh state. */
+/** Applies each plan's enforcement switch to the measured month. A limit is set only on proven use over the account's effective
+ * limit and is never lifted on missing data; it is lifted when the month rolls over, the limit is raised or made unlimited,
+ * enforcement is switched off, the account is no longer active or root relieved it for the day. Every transition is audited.
+ * A revision conflict changes nothing; the next collection decides again on fresh state. */
 export async function enforceBandwidthLimits(report: BandwidthReport, saved: { revision?: number; accounts: readonly Account[]; plans: readonly Plan[] }, deps: BandwidthEnforcementDeps): Promise<{ limited: string[]; lifted: string[] }> {
   const rows = new Map(report.accounts.map(row => [row.username, row])), plans = new Map(saved.plans.map(plan => [plan.id, plan]))
+  const today = (report.updatedAt ?? '').slice(0, 10)
   const decisions: { account: Account; change: BandwidthLimitChange; detail: Record<string, unknown> }[] = []
   for (const account of saved.accounts) {
     const row = rows.get(account.username), enforced = plans.get(account.planId)?.enforceBandwidth === true
     const current = account.bandwidthLimitedMonth ?? null
-    const over = enforced && account.status === 'active' && report.state !== 'unavailable' && row?.limitState === 'over'
+    const relieved = relievedThrough(account, today) !== null
+    const over = enforced && account.status === 'active' && report.state !== 'unavailable' && row?.limitState === 'over' && !relieved
     let next = current, reason: BandwidthLiftReason | null = null
     if (over) next = report.month
     else if (current !== null) {
-      reason = current !== report.month ? 'month-rollover' : !enforced ? 'enforcement-off' : account.status !== 'active' ? 'account-inactive'
+      reason = current !== report.month ? 'month-rollover' : !enforced ? 'enforcement-off' : account.status !== 'active' ? 'account-inactive' : relieved ? 'relieved'
         : row && (row.limitState === 'within' || row.limitState === 'near' || row.limitState === 'unlimited') ? 'limit-raised' : null
       if (reason !== null) next = null
     }
@@ -351,6 +396,8 @@ export interface MeteringRouteContext {
   /** The host collector's latest /proc/diskstats interval; null off a native host. */
   readDiskLatency: (() => DiskLatency) | null
   bandwidth: BandwidthMeter | null
+  /** The daily raw access log rotation (log-rotation.ts); null off a native host. */
+  logRotation?: { status(): Promise<unknown> } | null
 }
 export type IoMeteringView = IoAccountsView & { disk: DiskLatency }
 
@@ -362,18 +409,19 @@ export function withDiskLatency(view: IoAccountsView, disk: DiskLatency): IoMete
   return { ...view, host, disk, state: view.unmeasuredAccounts > 0 || missing ? 'partial' : 'read' }
 }
 
-/** GET /host/monitoring/io and /host/monitoring/bandwidth: cached reads only, no caller-chosen paths or accounts. */
+/** GET /host/monitoring/io, /host/monitoring/bandwidth and /host/monitoring/log-rotation: cached reads only, no caller-chosen paths or accounts. */
 export async function handleMeteringRoute(req: Request, url: URL, method: string, ctx: MeteringRouteContext): Promise<Response | null> {
-  const io = url.pathname === '/host/monitoring/io'
-  if (!io && url.pathname !== '/host/monitoring/bandwidth') return null
-  const action = io ? 'server.io.read' : 'server.bandwidth.read'
+  const io = url.pathname === '/host/monitoring/io', rotation = url.pathname === '/host/monitoring/log-rotation'
+  if (!io && !rotation && url.pathname !== '/host/monitoring/bandwidth') return null
+  const action = io ? 'server.io.read' : rotation ? 'server.logs.retention.read' : 'server.bandwidth.read'
   await ctx.assertRoot(action)
   if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
   if (url.search || req.body !== null) return fail('VALIDATION', 'metering reads accept no selectors or body', { stateChanged: false })
-  const body: IoMeteringView | BandwidthReport | null = io
+  const body: unknown = io
     ? withDiskLatency(ctx.readIo ? await ctx.readIo() : { state: 'unavailable', reason: 'not-sampled', observedAt: null, host: null, accounts: [], unmeasuredAccounts: 0 }, ctx.readDiskLatency?.() ?? UNAVAILABLE_DISK_LATENCY)
-    : ctx.bandwidth ? await ctx.bandwidth.report() : null
-  if (body === null) return fail('SERVICE_UNAVAILABLE', 'bandwidth metering is not running on this host', { stateChanged: false })
+    : rotation ? ctx.logRotation ? await ctx.logRotation.status() : null
+      : ctx.bandwidth ? await ctx.bandwidth.report() : null
+  if (body === null) return fail('SERVICE_UNAVAILABLE', rotation ? 'log rotation is not running on this host' : 'bandwidth metering is not running on this host', { stateChanged: false })
   await ctx.assertRoot(action)
   return Response.json(body, { headers: { 'cache-control': 'no-store' } })
 }

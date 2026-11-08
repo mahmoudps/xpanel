@@ -10,6 +10,7 @@ export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 unset NODE_OPTIONS NODE_PATH
 
 DRY_RUN=0
+EL_SOURCE_BUILD=""
 OS_RELEASE_FILE="${XPANEL_OS_RELEASE:-/etc/os-release}"
 ENGINE="apache"
 PHP_VERSION="8.3"
@@ -42,6 +43,9 @@ for arg in "$@"; do
   case "$arg" in
     --dry-run)
       DRY_RUN=1
+      ;;
+    --el-source-build=*)
+      EL_SOURCE_BUILD="${arg#*=}"
       ;;
     --new-install)
       [[ "$NEW_INSTALL" -eq 0 ]] || { echo "ERROR: Select exactly one installation mode." >&2; exit 1; }
@@ -196,7 +200,7 @@ fi
 
 PHP_COMPACT="${PHP_VERSION//./}"
 if [[ "$OS_FAMILY" == "debian" ]]; then
-  BOOTSTRAP_PACKAGES=(software-properties-common ca-certificates curl gnupg adduser acl openssl zstd)
+  BOOTSTRAP_PACKAGES=(software-properties-common ca-certificates curl gnupg adduser acl openssl zstd logrotate python3)
   REPOSITORY_SOURCES=(universe ppa:ondrej/php)
   REPOSITORY_PACKAGES=()
   PHP_JSON_PACKAGE="php7.4-json"
@@ -210,9 +214,13 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
     postgresql
     redis-server
     openssh-server
+    sudo
     nftables
     quota
     certbot
+    lighttpd
+    lighttpd-mod-webdav
+    python3-radicale
     gcc
     libc6-dev
     "php${PHP_VERSION}-fpm"
@@ -232,15 +240,18 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
     "php${PHP_VERSION}-zip"
     "php${PHP_VERSION}-readline"
     "php${PHP_VERSION}-sqlite3"
+    awstats
+    webalizer
+    libgeoip2-perl
   )
   [[ "$WITH_MARIADB" -eq 1 ]] && PACKAGES+=(mariadb-server)
-  [[ "$WITH_MAIL" -eq 1 ]] && PACKAGES+=(postfix opendkim dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sieve dovecot-managesieved)
+  [[ "$WITH_MAIL" -eq 1 ]] && PACKAGES+=(postfix opendkim dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sieve dovecot-managesieved dovecot-fts-xapian)
   [[ "$WITH_DNS" -eq 1 ]] && PACKAGES+=(pdns-server pdns-backend-bind bind9-utils dnsutils)
   [[ "$WITH_FTP" -eq 1 ]] && PACKAGES+=(pure-ftpd)
   [[ "$WITH_MODSECURITY" -eq 1 ]] && PACKAGES+=(libapache2-mod-security2 modsecurity-crs)
 else
   # EL 9 and 10 ship dnf 4; its post-transaction-actions plugin re-applies Compiler Access after compiler updates.
-  BOOTSTRAP_PACKAGES=(dnf-plugins-core acl policycoreutils-python-utils openssl zstd python3-dnf-plugin-post-transaction-actions)
+  BOOTSTRAP_PACKAGES=(dnf-plugins-core acl policycoreutils-python-utils openssl zstd python3-dnf-plugin-post-transaction-actions logrotate)
   REPOSITORY_SOURCES=(crb)
   EPEL_PACKAGES=(epel-release)
   if [[ "$OS_ID" == "centos" ]]; then
@@ -279,14 +290,27 @@ else
     postgresql-server
     "$REDIS_PKG"
     openssh-server
+    sudo
     nftables
     quota
     certbot
+    lighttpd
+    lighttpd-mod_webdav
+    python3-radicale3
     gcc
     glibc-devel
   )
+  # No EL release ships Webalizer and EPEL ships AWStats only for EL 9: install_el_webalizer and install_el_awstats build them from these inputs.
+  PACKAGES+=(perl-GeoIP2 gd-devel libpng-devel zlib-devel make)
+  if [[ "$OS_MAJOR" -eq 9 ]]; then
+    PACKAGES+=(awstats)
+  else
+    PACKAGES+=(perl-interpreter perl-vars perl-Time-Local perl-Socket perl-Encode perl-PathTools perl-JSON-XS perl-Try-Tiny)
+  fi
   [[ "$WITH_MARIADB" -eq 1 ]] && PACKAGES+=(mariadb-server)
   [[ "$WITH_MAIL" -eq 1 ]] && PACKAGES+=(postfix opendkim dovecot dovecot-pigeonhole)
+  # No EL repository ships dovecot-fts-xapian: install_el_fts_xapian builds it from these inputs, the two -devel packages of Dovecot and Xapian from CRB.
+  [[ "$WITH_MAIL" -eq 1 ]] && PACKAGES+=(dovecot-devel xapian-core-devel libicu-devel sqlite-devel gcc-c++ make autoconf automake libtool)
   # EPEL pdns contains the BIND backend; no separate pdns-backend-bind RPM exists.
   [[ "$WITH_DNS" -eq 1 ]] && PACKAGES+=(pdns bind-utils)
   [[ "$WITH_FTP" -eq 1 ]] && PACKAGES+=(pure-ftpd)
@@ -323,6 +347,7 @@ API_UNIT="/etc/systemd/system/xpanel-api.service"
 RUNTIME_ENV="/etc/xpanel/runtime.env"
 API_ENV="/etc/xpanel/api.env"
 TMPFILES_CONF="/etc/tmpfiles.d/xpanel.conf"
+PDNS_DNSSEC_DB="/var/lib/powerdns/dnssec/bind-dnssec-db.sqlite3"
 
 die() {
   echo "ERROR: $*" >&2
@@ -436,6 +461,28 @@ setuid=pdns
 setgid=pdns
 security-poll-suffix=
 EOF
+  # The BIND backend keeps DNSSEC keys in this SQLite store; it exists only when pdnsutil could create it.
+  if [[ -s "$PDNS_DNSSEC_DB" ]]; then printf 'bind-dnssec-db=%s
+' "$PDNS_DNSSEC_DB"; fi
+}
+
+# A minimal configuration lets pdnsutil create the store before xPanel's own pdns.conf exists. A build without
+# SQLite support cannot create it; DNSSEC then reports the missing key store instead of breaking the daemon.
+create_pdns_dnssec_db() {
+  local scratch
+  install -d -o pdns -g pdns -m 0750 "${PDNS_DNSSEC_DB%/*}"
+  if [[ ! -e "$PDNS_DNSSEC_DB" && ! -L "$PDNS_DNSSEC_DB" ]]; then
+    scratch="$(mktemp -d)"
+    printf 'launch=
+' > "$scratch/pdns.conf"
+    if ! pdnsutil --config-dir="$scratch" create-bind-db "$PDNS_DNSSEC_DB" > /dev/null 2>&1; then
+      rm -f -- "$PDNS_DNSSEC_DB"
+      echo "WARNING: PowerDNS cannot create its DNSSEC key store; DNSSEC stays unavailable." >&2
+    fi
+    rm -rf -- "$scratch"
+  fi
+  [[ ! -L "$PDNS_DNSSEC_DB" ]] || die "The DNSSEC key store is a symbolic link; preserved for review."
+  if [[ -e "$PDNS_DNSSEC_DB" ]]; then chown pdns:pdns "$PDNS_DNSSEC_DB"; chmod 0640 "$PDNS_DNSSEC_DB"; fi
 }
 
 # Byte-identical to the agent's empty catalog (apps/agent/src/services/dns.ts renderNamedZonesConfig([])), which
@@ -495,6 +542,7 @@ provision_fresh_dns() {
   if [[ "$RESUME_PREPARED" -eq 1 ]]; then verify_resumed_dns quiesce; fi
   verify_fresh_pdns_vendor "$config"
   install -d -o root -g root -m 0755 /etc/powerdns /var/lib/powerdns /var/lib/powerdns/zones
+  create_pdns_dnssec_db
   # configure_selinux made /var/lib/powerdns equivalent to EL's /var/lib/pdns; zone files the agent adds inherit it.
   if selinuxenabled 2> /dev/null; then restorecon -R /var/lib/powerdns; fi
   write_config "$config" render_fresh_pdns 0644 root
@@ -766,25 +814,9 @@ kernel.kptr_restrict = 2
 EOF
 }
 
-# Upstream mpm-itk 2.4.7-04 as archived by Debian (orig tarball); the pin is the SHA-256 in Debian's signed source metadata.
-EL_MPM_ITK_URL="https://deb.debian.org/debian/pool/main/m/mpm-itk/mpm-itk_2.4.7-04.orig.tar.gz"
-EL_MPM_ITK_SHA256="609f83e8995416c5491348e07139f26046a579db20cf8488ebf75d314668efcf"
-EL_MPM_ITK_MODULE="/usr/lib64/httpd/modules/mpm_itk.so"
-
-# 00-mpm.conf, which loads the module on prefork, comes from the OS profile configuration (apply_os_configuration).
-install_el_mpm_itk() {
-  local build
-  build="$(mktemp -d)"
-  if ! curl -fsS --proto =https --max-time 120 -o "$build/mpm-itk.tar.gz" "$EL_MPM_ITK_URL" \
-    || ! printf '%s  %s\n' "$EL_MPM_ITK_SHA256" "$build/mpm-itk.tar.gz" | sha256sum -c --quiet \
-    || ! tar -xzf "$build/mpm-itk.tar.gz" -C "$build" --no-same-owner \
-    || ! (cd "$build"/mpm-itk-2.4.7-04 && ./configure --with-apxs=/usr/bin/apxs > /dev/null && make > /dev/null); then
-    rm -rf -- "$build"
-    die "Apache mpm-itk could not be fetched, verified or built."
-  fi
-  install -o root -g root -m 0755 -- "$build"/mpm-itk-2.4.7-04/.libs/mpm_itk.so "$EL_MPM_ITK_MODULE"
-  rm -rf -- "$build"
-}
+# Pins and builds of what EL repositories lack; the agent runs the same file to rebuild them after a distribution update.
+# shellcheck source=scripts/el-source-builds.sh
+source "$SCRIPT_DIR/el-source-builds.sh"
 
 # SELinux stays enforcing on EL. These are the settings xPanel's own services need beyond the distribution
 # policy: nginx binds the management ports and proxies to local backends, and OpenDKIM keeps its milter
@@ -1070,6 +1102,18 @@ render_api_service() {
   render_managed_unit xpanel-api.service
 }
 
+# An upgraded EL host gets a component that came after its install; nothing else of the installer runs.
+if [[ -n "$EL_SOURCE_BUILD" ]]; then
+  [[ "$OS_FAMILY" == "rhel" && "$(id -u)" -eq 0 ]] || die "Source builds run as root on EL only."
+  case "$EL_SOURCE_BUILD" in
+    webalizer) install_el_webalizer ;;
+    awstats) install_el_awstats ;;
+    fts-xapian) install_el_fts_xapian ;;
+    *) die "Unknown source build: $EL_SOURCE_BUILD" ;;
+  esac
+  exit 0
+fi
+
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "=== xPanel Installer Dry-Run ==="
   echo "Rendering only; package availability, services and host permissions are not certified."
@@ -1267,6 +1311,7 @@ install -d -o root -g xpanel -m 0751 /etc/xpanel
 install -d -o root -g root -m 0750 /etc/xpanel/userdata
 install -d -o root -g xpanel-agent -m 0750 /run/xpanel
 install -d -o root -g root -m 0755 /opt/xpanel/bin
+install -d -o root -g root -m 0755 /usr/local/libexec/xpanel/hooks
 provision_credential /etc/xpanel/agent.token
 provision_credential /etc/xpanel/server.secret
 provision_credential /etc/xpanel/ingress.secret
@@ -1302,6 +1347,21 @@ fi
 if [[ "$OS_FAMILY" == "rhel" && "$APACHE_MPM" == "itk" ]]; then
   echo "[2a/6] Building Apache mpm-itk from its pinned upstream release..."
   install_el_mpm_itk
+  record_el_source_build mpm-itk httpd
+fi
+if [[ "$OS_FAMILY" == "rhel" ]]; then
+  echo "[2a/6] Building the statistics engines EL repositories lack from their pinned upstream releases..."
+  install_el_webalizer
+  record_el_source_build webalizer
+  if [[ "$OS_MAJOR" -ge 10 ]]; then
+    install_el_awstats
+    record_el_source_build awstats
+  fi
+fi
+if [[ "$OS_FAMILY" == "rhel" && "$WITH_MAIL" -eq 1 ]]; then
+  echo "[2a/6] Building the Dovecot search index plugin from its pinned upstream release..."
+  install_el_fts_xapian
+  record_el_source_build fts-xapian dovecot
 fi
 echo "[2/6] Ensuring every bootable kernel carries the quota format modules..."
 assert_bootable_kernel_quota_format

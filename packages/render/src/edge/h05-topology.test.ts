@@ -30,11 +30,11 @@ import {
   assertNginxZeroHomeAccess,
   defaultSiteFile,
   renderDefaultSite,
-  renderNginxMain,
   renderNginxSite,
   verifyNginxEdgeIsolation,
   type EdgeSettings,
 } from './nginx.ts'
+import { renderNginxMain } from './nginx-main.ts'
 import {
   canIdentityConnectFpmSocket,
   renderFpmMaster,

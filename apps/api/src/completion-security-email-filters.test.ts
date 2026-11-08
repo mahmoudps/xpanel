@@ -299,7 +299,7 @@ describe('mail-filter configuration HTTP security acceptance with disposable sta
 
   it('rechecks reseller ACL after a permitted account-scoped write', async () => {
     const reseller = await f.state.store.createReseller({ username: 'reseller8', passwordHash: HASH, acl: ['list-accounts', 'edit-account'], maxAccounts: 10,
-      totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
+      totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
     await f.state.store.changeOwner(f.owner.id, reseller.id)
     const principal = await createResellerPrincipal(f.database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
     const raw = await f.token(['mail:read', 'mail:write'], principal.id)

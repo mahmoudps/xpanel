@@ -2,6 +2,7 @@ import { type Locale, type MessageValues, translator, localeDirection } from '..
 import { escapeHtml } from '../tokens.ts'
 import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
 import { gitHistoryClientTemplates } from './account-utility-client-templates.ts'
+import { renderAccountGitwebCard } from './account-gitweb-workspace.ts'
 
 /** Account Git follows the approved Files table, field and action hierarchy. */
 export function renderAccountGitWorkspace(input: { lang: Locale; accountId: string; canManage: boolean }): string {
@@ -25,6 +26,7 @@ export function renderAccountGitWorkspace(input: { lang: Locale; accountId: stri
       <div class="xp-acct-tool__actions">${button('checkout', 'Switch branch')}${button('pull', 'Pull fast-forward only')}</div>
       <p class="xp-help">${t('Switching and pulling require a clean working tree. Commit or discard your changes through your own Git workflow first.')}</p>
       <div class="xp-acct-tool__table" role="region" tabindex="0" aria-label="${t('Recent commits')}"><table class="xp-table"><thead><tr><th scope="col">${t('Commit')}</th><th scope="col">${t('Date')}</th><th scope="col">${t('Message')}</th></tr></thead><tbody data-git-history><tr><td colspan="3">${t('History has not been read.')}</td></tr></tbody></table></div></section>
-    <section class="xp-acct-tool__card" aria-labelledby="git-deployment"><h2 id="git-deployment">${t('Deployment tasks')}</h2><p>${t('Deployment tasks and Git web access are unavailable. Repository actions do not publish your website.')}</p><div class="xp-acct-tool__actions"><button class="xp-btn" type="button" disabled>${t('Deploy')}</button></div></section>
+    ${renderAccountGitwebCard(input.lang, input.canManage)}
+    <section class="xp-acct-tool__card" aria-labelledby="git-deployment"><h2 id="git-deployment">${t('Deployment tasks')}</h2><p>${t('Deploy runs the deployment.tasks of .cpanel.yml at the current commit, inside your account jail. It needs shell access, a clean working tree and at least one commit.')}</p><dl class="xp-acct-tool__facts"><div><dt>${t('Last deployed')}</dt><dd><bdi dir="ltr" data-git-deployed>${t(msgctxt('account-git-workspace', 'Not read'))}</bdi></dd></div></dl><div class="xp-acct-tool__actions">${button('deploy', 'Deploy')}</div></section>
   </div>`
 }

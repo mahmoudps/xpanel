@@ -2,6 +2,7 @@ import type { ApprovedXpanelWorkspaceProps } from './approved-xpanel-workspaces.
 import { formatBytes } from '../tokens.ts';
 import { translator } from '../i18n.ts'
 import { parseWebsiteAnalyticsSnapshot, WEBSITE_ANALYTICS_WINDOWS } from '../models/website-analytics.ts'
+import { parseWebStatsView, webStatsRunLabel, WEB_STATS_SCHEMES, type WebStatsRun } from '../models/web-stats.ts'
 type Copy = string;
 export interface PanelWorkspaceField {
     label: Copy;
@@ -734,17 +735,57 @@ export const buildApprovedPanelPage = (p: ApprovedXpanelWorkspaceProps): PanelWo
                 f(msgid('Zone'), domain?.name), f(msgid('Records read'), p.dnsRecords?.length)
             ]), d('dns-change', msgid('How a change is applied'), msgid('Saving a record is separate from public DNS propagation and mail-delivery checks.'))
         ]);
-        case '/metrics/traffic':
         case '/metrics/web-stats': {
+            const tr = translator(p.locale);
+            const w = a && p.webStatsUnavailable !== true && p.webStats !== undefined ? parseWebStatsView(p.webStats, { accountId: a.id }) ?? undefined : undefined;
+            const r = w?.report ?? undefined, sel = w?.selection ?? undefined;
+            const entry = sel ? w!.sites.find(row => row.site === sel.site)?.schemes[sel.scheme] : undefined;
+            const scheme = (value: string) => tr(value === 'https' ? msgid('SSL (https)') : msgid('Non-SSL (http)'));
+            const when = (value: string | null | undefined) => value ? value.slice(0, 16).replace('T', ' ') + ' UTC' : tr(msgid('Not yet'));
+            const run = (value: WebStatsRun | null) => tr(webStatsRunLabel(value));
+            const engine = (name: 'awstats' | 'webalizer') => !w ? [tr(notRead), ''] : !w.engines[name].entitled ? [tr(msgid('Not included in your plan')), ''] : !w.engines[name].installed ? [tr(msgid('Not installed on this server')), ''] : [run(entry?.[name] ?? null), entry?.[name] ? when(entry[name]!.at) : ''];
+            const n = (value: number) => String(value);
+            return page(msgid('Web statistics'), msgid('AWStats and Webalizer reports for your sites, generated daily from the Nginx access logs.'), [
+                s('web-stats-scope', msgid('Report selection'), [
+                    f(msgid('Domain'), sel?.site, undefined, (w?.sites ?? []).map(row => row.site), { technicalChoices: true }), f(msgid('Entry'), sel ? scheme(sel.scheme) : undefined), f(msgid('Month'), sel?.month)
+                ]),
+                d('web-stats-status', msgid('AWStats report'), !w ? msgid('The web statistics have not been read. No report or total is shown.') : r ? msgid('AWStats report generated from the Nginx access logs of this site. Today is complete only after the next daily run.')
+                    : msgid('No AWStats report exists for this month and entry yet. Reports are generated once a day from the Nginx access logs; the next run is shown under Schedule.')),
+                t('web-stats-days', msgid('Days of month'), [msgid('Day'), msgid('Visits'), msgid('Pages'), msgid('Hits'), msgid('Bandwidth')], r?.days.map(([day, pages, hits, size, visits]) => [day, n(visits), n(pages), n(hits), formatBytes(size)]), r !== undefined),
+                t('web-stats-history', msgid('Monthly history'), [msgid('Month'), msgid('Unique visitors'), msgid('Visits'), msgid('Pages'), msgid('Hits'), msgid('Bandwidth')], w?.months.map(row => [row.month, n(row.unique), n(row.visits), n(row.pages), n(row.hits), formatBytes(row.bytes)]), w !== undefined),
+                t('web-stats-hours', msgid('Hours (UTC)'), [msgid('Hour'), msgid('Pages'), msgid('Hits'), msgid('Bandwidth')], r?.hours.map(([hour, pages, hits, size]) => [String(hour).padStart(2, '0') + ':00', n(pages), n(hits), formatBytes(size)]), r !== undefined),
+                t('web-stats-countries', msgid('Countries'), [msgid('Country'), msgid('Pages'), msgid('Hits'), msgid('Bandwidth')], r?.countries.map(([code, pages, hits, size]) => [code, n(pages), n(hits), formatBytes(size)]), r !== undefined),
+                t('web-stats-browsers', msgid('Browsers'), [msgid('Browser'), msgid('Hits')], r?.browsers.map(([code, hits]) => [code, n(hits)]), r !== undefined),
+                t('web-stats-os', msgid('Operating systems'), [msgid('Operating system'), msgid('Hits')], r?.os.map(([code, hits]) => [code, n(hits)]), r !== undefined),
+                t('web-stats-codes', msgid('HTTP status codes'), [msgid('Status'), msgid('Hits'), msgid('Bandwidth')], r?.status.map(([code, hits, size]) => [code, n(hits), formatBytes(size)]), r !== undefined),
+                t('web-stats-pages', msgid('Pages and URLs'), [msgid('Path'), msgid('Pages'), msgid('Bandwidth'), msgid('Entry'), msgid('Exit')], r?.urls.map(([url, pages, size, entries, exits]) => [url, n(pages), formatBytes(size), n(entries), n(exits)]), r !== undefined),
+                t('web-stats-referrers', msgid('Referring pages'), [msgid('Referrer'), msgid('Pages'), msgid('Hits')], r?.referrers.map(([url, pages, hits]) => [url, n(pages), n(hits)]), r !== undefined),
+                t('web-stats-robots', msgid('Robots and spiders'), [msgid('Robot'), msgid('Hits'), msgid('Bandwidth')], r?.robots.map(([code, hits, size]) => [code, n(hits), formatBytes(size)]), r !== undefined),
+            ], [
+                s('web-stats-month', msgid('Month summary'), [
+                    f(msgid('Unique visitors'), r?.unique), f(msgid('Visits'), r?.visits), f(msgid('Pages'), r?.pages), f(msgid('Hits'), r?.hits), f(msgid('Bandwidth'), r ? formatBytes(r.bytes) : undefined)
+                ]),
+                t('web-stats-engines', msgid('Statistics engines'), [msgid('Engine'), msgid('State'), msgid('Updated')], w ? [['Analog', tr(!w.engines.analog.entitled ? msgid('Not included in your plan') : w.sites.find(row => row.site === w.selection?.site)?.selected.includes('analog') === false ? msgid('Turned off for this site') : msgid('Shown on the Traffic page')), ''], ['AWStats', ...engine('awstats')], ['Webalizer', ...engine('webalizer')],
+                    [tr(msgid('Location database')), w.geoip.installed ? w.geoip.source : tr(msgid('Not installed; countries are not resolved')), w.geoip.month ?? '']] : undefined, w !== undefined),
+                s('web-stats-schedule', msgid('Schedule'), [
+                    f(msgid('Processing interval (hours)'), w?.schedule.intervalHours ?? undefined), f(msgid('Last run'), w ? when(w.schedule.lastRunAt) : undefined), f(msgid('Next run'), w ? when(w.schedule.nextRunAt) : undefined),
+                    f(msgid('Waiting for the next run'), entry ? formatBytes(entry.pendingBytes) : undefined), f(msgid('Lines not processed'), entry?.droppedLines), f(msgid('Log not read'), entry ? formatBytes(entry.lostBytes) : undefined)
+                ]),
+                t('web-stats-sites', msgid('Sites'), [msgid('Domain'), msgid('Entry'), 'AWStats', 'Webalizer'], w?.sites.flatMap(row => WEB_STATS_SCHEMES.map(value => [row.site, scheme(value), run(row.schemes[value].awstats), run(row.schemes[value].webalizer)])), w !== undefined),
+            ]);
+        }
+        case '/metrics/traffic': {
             const trafficDomain = p.activeDomain !== undefined
                 ? domains?.find(row => row.name === p.activeDomain)
                 : domains?.find(row => row.name === a?.primaryDomain) ?? domains?.find(row => row.kind === 'primary') ?? domains?.[0];
             const x = p.websiteAnalyticsUnavailable !== true && trafficDomain && a
                 ? parseWebsiteAnalyticsSnapshot(p.websiteAnalytics, { accountId: a.id, domain: trafficDomain.name }) ?? undefined
                 : undefined;
+            // The Analog switch withholds these lists, so they read as not read rather than empty.
+            const report = x?.analog === 'off' ? undefined : x;
             const rangeLabels = { '1h': msgid('Last hour'), '24h': msgid('Last 24 hours'), '7d': msgid('Last 7 days'), '30d': msgid('Last 30 days') };
             const window = p.websiteAnalyticsWindow && WEBSITE_ANALYTICS_WINDOWS.includes(p.websiteAnalyticsWindow) ? p.websiteAnalyticsWindow : undefined;
-            return page(p.route === '/metrics/web-stats' ? msgid('Web statistics') : msgid('Metrics'), msgid('Traffic, response status and bandwidth from log observations.'), [
+            return page(msgid('Metrics'), msgid('Traffic, response status and bandwidth from log observations.'), [
                 s('metrics-scope', msgid('Traffic selection'), [
                     f(msgid('Domain'), trafficDomain?.name, undefined, (domains ?? []).map(row => row.name), { technicalChoices: true }),
                     f(msgid('Range'), window ? rangeLabels[window] : undefined, undefined, WEBSITE_ANALYTICS_WINDOWS.map(value => rangeLabels[value]))
@@ -756,17 +797,17 @@ export const buildApprovedPanelPage = (p: ApprovedXpanelWorkspaceProps): PanelWo
                 },
                 t('top-pages', msgid('Top pages'), [
                     msgid('Path'), msgid('Requests'), msgid('Transferred')
-                ], x?.topPaths.map(row => [
+                ], report?.topPaths.map(row => [
                     row.key, String(row.requests), formatBytes(row.bytes)
-                ]), x !== undefined),
+                ]), report !== undefined),
                 s('response-status', msgid('Responses by status'), [
                     f('2xx', x?.totals.status2xx), f('3xx', x?.totals.status3xx), f('4xx', x?.totals.status4xx), f('5xx', x?.totals.status5xx)
                 ]),
                 t('error-paths', msgid('Errors by path'), [
                     msgid('Path'), msgid('Errors')
-                ], x?.topPaths.filter(row => (row.errors5xx ?? 0) > 0).map(row => [
+                ], report?.topPaths.filter(row => (row.errors5xx ?? 0) > 0).map(row => [
                     row.key, String(row.errors5xx)
-                ]), x !== undefined)
+                ]), report !== undefined)
             ], [
                 s('bandwidth', msgid('Bandwidth by domain'), [
                     f(msgid('Domain'), trafficDomain?.name), f(msgid('Transferred'), x ? formatBytes(x.totals.bytes) : undefined)

@@ -122,6 +122,29 @@ describe('capability delivery evidence', () => {
     expect(assess(completeEvidence(), { ...target, artifactSha256: 'invalid' }).status).toBe('researched')
   })
 
+  it('qualifies a tool on the profile subset of a reviewed exclusion and on no other evidence', () => {
+    const profiles = ['fixture-profile', 'other-profile']
+    const multiTarget = { ...target, supportedProfiles: profiles }
+    const subset = completeEvidence()
+    const exclusion = { profiles: ['other-profile'], reason: 'The service has no package on this distribution.' }
+    const exclusions = { [tool.id]: exclusion }
+    expect(assessDelivery(tool, spec, subset, multiTarget, exclusions).status).toBe('verified')
+    expect(assessDelivery(tool, spec, subset, multiTarget, {}).status).toBe('researched')
+    expect(assessDelivery(tool, spec, subset, multiTarget, { other: exclusion }).status).toBe('researched')
+    const extra = [...subset, proof({ profile: 'other-profile', stage: 'verified', environment: 'linux', result: 'failed' })]
+    expect(assessDelivery(tool, spec, extra, multiTarget, exclusions).evidence.some(item => item.profile === 'other-profile')).toBe(false)
+  })
+
+  it('fails closed on an exclusion without a reason, outside the target or covering every profile', () => {
+    const multiTarget = { ...target, supportedProfiles: ['fixture-profile', 'other-profile'] }
+    for (const exclusion of [
+      { profiles: ['other-profile'], reason: ' ' },
+      { profiles: ['unknown-profile'], reason: 'Not packaged.' },
+      { profiles: ['fixture-profile', 'other-profile'], reason: 'Not packaged.' },
+      { profiles: [], reason: 'Not packaged.' },
+    ]) expect(assessDelivery(tool, spec, completeEvidence(), multiTarget, { [tool.id]: exclusion }).status).toBe('researched')
+  })
+
   it('does not let observation ordering hide a failure at the same timestamp', () => {
     const failed = proof({ stage: 'verified', environment: 'linux', result: 'failed' })
     expect(assess([failed, ...completeEvidence()]).status).toBe('integrated')

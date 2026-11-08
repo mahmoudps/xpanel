@@ -1,6 +1,6 @@
 import type {
   CapabilityDelivery, CapabilityEvidence, DeliveryStage, EvidenceEnvironment,
-  ToolDefinition, ToolSpec, VerificationTarget,
+  ProfileExclusion, ToolDefinition, ToolSpec, VerificationTarget,
 } from './types.ts'
 
 const sha256 = /^[a-f0-9]{64}$/
@@ -19,6 +19,24 @@ const validTarget = (target: VerificationTarget): boolean => {
     && new Set(target.supportedProfiles).size === target.supportedProfiles.length
 }
 
+/** Owner decision 9: every tool needs all target profiles unless a reviewed entry here proves it cannot exist on one. */
+export const PROFILE_EXCLUSIONS: Readonly<Record<string, ProfileExclusion>> = {
+  'wheel-group-users': { profiles: ['ubuntu-22.04', 'ubuntu-24.04'], reason: 'Ubuntu grants administrator rights through the sudo group; there is no wheel group to manage.' },
+  'sudo-group-users': { profiles: ['almalinux-9', 'rocky-9', 'centos-stream-9'], reason: 'Enterprise Linux grants administrator rights through the wheel group; there is no sudo group to manage.' },
+}
+
+/** Profiles a tool must be proven on; empty (never verified) when its exclusion is malformed or leaves nothing. */
+export const requiredProfiles = (
+  toolId: string, target: VerificationTarget, exclusions: Readonly<Record<string, ProfileExclusion>> = PROFILE_EXCLUSIONS,
+): readonly string[] => {
+  const exclusion = Object.hasOwn(exclusions, toolId) ? exclusions[toolId] : undefined
+  if (exclusion === undefined) return target.supportedProfiles
+  const valid = typeof exclusion.reason === 'string' && exclusion.reason.trim().length > 0 && Array.isArray(exclusion.profiles)
+    && exclusion.profiles.length > 0 && new Set(exclusion.profiles).size === exclusion.profiles.length
+    && exclusion.profiles.every(profile => target.supportedProfiles.includes(profile))
+  return valid ? target.supportedProfiles.filter(profile => !exclusion.profiles.includes(profile)) : []
+}
+
 const matchesTarget = (proof: CapabilityEvidence, spec: ToolSpec, target: VerificationTarget): boolean => {
   if (typeof proof !== 'object' || proof === null) return false
   if (proof.toolId !== spec.id || proof.acceptance !== spec.acceptance || !stages.includes(proof.stage)) return false
@@ -35,7 +53,7 @@ const matchesTarget = (proof: CapabilityEvidence, spec: ToolSpec, target: Verifi
 /** Each tier requires its own results. HTTP with a fake executor cannot prove a live service. */
 export const assessDelivery = (
   tool: ToolDefinition, spec: ToolSpec, observations: readonly CapabilityEvidence[],
-  target: VerificationTarget | null,
+  target: VerificationTarget | null, exclusions: Readonly<Record<string, ProfileExclusion>> = PROFILE_EXCLUSIONS,
 ): CapabilityDelivery => {
   if (tool.status === 'out-of-scope') {
     return { status: 'out-of-scope', reason: tool.outOfScopeReason ?? 'Outside the product scope.', evidence: [] }
@@ -43,8 +61,12 @@ export const assessDelivery = (
   if (target === null || !validTarget(target) || tool.id !== spec.id || !spec.acceptance.trim()) {
     return { status: 'researched', reason: 'No source and release target with supported acceptance evidence.', evidence: [] }
   }
+  const profiles = requiredProfiles(tool.id, target, exclusions)
+  if (profiles.length === 0) {
+    return { status: 'researched', reason: 'The reviewed profile exclusion for this capability is invalid.', evidence: [] }
+  }
   const latest = new Map<string, CapabilityEvidence>()
-  for (const proof of observations.filter(proof => matchesTarget(proof, spec, target))) {
+  for (const proof of observations.filter(proof => matchesTarget(proof, spec, target) && profiles.includes(proof.profile))) {
     const key = `${proof.stage}:${proof.environment}:${proof.profile}`
     const previous = latest.get(key)
     if (previous === undefined || Date.parse(proof.observedAt) > Date.parse(previous.observedAt)
@@ -57,7 +79,7 @@ export const assessDelivery = (
     if (results.some(proof => proof.result !== 'passed')) break
     // Every declared profile must supply its own complete tier. Evidence from
     // different distributions cannot fill each other's missing observations.
-    if (!target.supportedProfiles.every(profile => {
+    if (!profiles.every(profile => {
       const environments = new Set(results.filter(proof => proof.profile === profile).map(proof => proof.environment))
       return requiredEnvironments[stage].every(environment => environments.has(environment))
     })) break

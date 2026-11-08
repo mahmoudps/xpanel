@@ -9,11 +9,12 @@ const AUDIENCE = { xuapi: 'xpanel', xwhmapi: 'xwhm' } as const
 const SAMPLE: Record<string, string> = {
   calendarId: '0123456789abcdef0123456789abcdef', ddnsId: 'ddns_ABCDEFGHIJKLMNOPQRSTUV', fingerprint: '0123456789ABCDEF0123456789ABCDEF01234567',
   backup: 'b1', section: 'general', zoneName: 'example.test', domain: 'example.test', filename: 'a.txt', artifact: 'manifest', username: 'alice', account: 'alice',
+  archive: 'example.test-2026-11-05.gz', server: 'nginx', file: 'access.log.1',
 }
 const sample = (path: string): string => path.replace(/\{(\w+)\}/g, (_, name: string) => SAMPLE[name] ?? '00000000-0000-4000-8000-000000000000')
 // Credential, sign-in and interactive-only routes a command-line caller never reaches.
 const unlisted = (method: string, path: string): boolean => !cliApiAllowsRoute(sample(path), method)
-  || /^\/api\/(?:health|ws)(?:\/|$)/.test(path) || /^\/api\/(?:account|server)\/(?:terminal|developer)(?:\/|$)/.test(path) || path === '/api/server/panel/developer'
+  || /^\/api\/(?:health|ws)(?:\/|$)/.test(path) || /^\/api\/(?:account|server)\/(?:terminal|developer|root-password)(?:\/|$)/.test(path) || path.startsWith('/api/server/panel/developer')
 
 describe('xuapi / xwhmapi function catalog', { tags: ['unit'] }, () => {
   it('lists only routes admitted on the listener of each command and reachable from the command line', () => {

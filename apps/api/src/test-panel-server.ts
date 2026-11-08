@@ -69,6 +69,7 @@ export const startPanelServer = async (opts: PanelServerOptions = {}) => {
     })
     const app = createLifecycleBackgroundResources(() => createApiApp({
       db: handle.db, store, agentApp, agentToken, os, webRenderer, serverSecret, mfaRuntimePolicy,
+      ...(opts.davExchange ? { davExchange: opts.davExchange } : {}),
       secureCookies: !opts.agentApp,
       allowedOrigins: opts.allowedOrigins ?? (process.env.XPANEL_ALLOWED_ORIGINS?.split(',').filter(Boolean) ?? []),
       trustedProxyAddresses: opts.trustedProxyAddresses ?? (process.env.XPANEL_TRUSTED_PROXIES?.split(',').filter(Boolean) ?? []),

@@ -49,7 +49,7 @@ const setup = async () => {
   const report = await evaluateServerHealth({ executor: null, family: null, readDrift: null, now: () => new Date(at),
     saved: { certificates: [{ names: ['old.example.test'], notAfter: '2026-10-20T00:00:00.000Z', autoRenew: true, source: 'acme' }], accounts: [], plans: [] } })
   const agentApp = { fetch: async (request: Request) => { callers.push(request.headers.get('x-xpanel-principal-id') ?? ''); expect(new URL(request.url).pathname).toBe('/host/server-health'); return Response.json(report) }, subscribe: () => () => undefined } as unknown as AgentApp
-  return { db: database.db, root, rootDir, store, agentApp, callers, files: alertStateFiles({ rootDir }) }
+  return { db: database.db, root, rootDir, store, agentApp, callers, files: alertStateFiles(store) }
 }
 
 describe('alert runtime', () => {

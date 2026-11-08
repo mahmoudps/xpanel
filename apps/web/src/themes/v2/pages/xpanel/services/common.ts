@@ -10,6 +10,8 @@ export interface PanelServiceAuthority {
   readonly presentation?: 'live' | 'read-only'
   readonly canReadFacts?: boolean
   readonly authorizedTools?: ReadonlySet<string>
+  /** Verified tools the principal may use; a section connects only when its tool is here. */
+  readonly qualifiedTools?: ReadonlySet<string>
 }
 
 export const latinDigits = (value: string): string => value.replace(/[\u0660-\u0669\u06f0-\u06f9]/gu,

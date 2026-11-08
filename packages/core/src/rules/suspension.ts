@@ -40,7 +40,7 @@ export const isSuspended = (account: Pick<Account, 'status'>): boolean => accoun
  * apply it: suspending cuts access first and stops processes before swapping the vhost;
  * reactivating starts processes before the site and logins come back.
  */
-export const suspensionEffects = (account: Pick<Account, 'status' | 'uid'>): SuspensionEffect[] => {
+export const suspensionEffects = (account: Pick<Account, 'status' | 'uid' | 'homeMove'>): SuspensionEffect[] => {
   if (!isRecord(account)) return invalid('account must be an object')
   const unit = sliceUnit(account.uid)
   if (account.status !== 'active' && account.status !== 'suspended' && account.status !== 'terminating') {
@@ -60,7 +60,8 @@ export const suspensionEffects = (account: Pick<Account, 'status' | 'uid'>): Sus
     { subsystem: 'cron', state: 'disabled' },
     { subsystem: 'slice', unit, state: 'stopped' },
     { subsystem: 'vhost', state: 'suspended-page' },
-    { subsystem: 'mail-delivery', state: account.status === 'terminating' ? 'defer' : 'accept' },
+    // A home on the move cannot take mail: a message delivered behind the copy would be lost with the old directory.
+    { subsystem: 'mail-delivery', state: account.status === 'terminating' || account.homeMove ? 'defer' : 'accept' },
   ]
 }
 

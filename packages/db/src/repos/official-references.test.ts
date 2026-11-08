@@ -105,7 +105,8 @@ describe('permanent official reference ledger and explicit operational initializ
 
   it('refuses an unknown future migration in startup, reads and genuine operation origin admission', async () => {
     const h = await fresh()
-    await h.db.query('INSERT INTO xpanel_schema_migrations(version,name,checksum,applied_at) VALUES(7,$1,$2,$3)', ['0007_future.sql', 'f'.repeat(64), new Date().toISOString()])
+    const next = Math.max(...(await loadMigrations()).map(row => row.version)) + 1
+    await h.db.query('INSERT INTO xpanel_schema_migrations(version,name,checksum,applied_at) VALUES($1,$2,$3,$4)', [next, `${String(next).padStart(4, '0')}_future.sql`, 'f'.repeat(64), new Date().toISOString()])
     await expect(initializeOperationalMetadata(h.db)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
     await expect(getJob(h.db, randomUUID())).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
     await expect(h.db.transaction(async tx => getStrictOperationDatabaseOrigin(tx))).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })

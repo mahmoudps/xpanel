@@ -20,15 +20,12 @@ export const xpanel_files: readonly ComposedRoute[] = [
     "section": "files",
     "group": msgid('Files'),
     "title": msgid('Web Disk'),
-    "lede": msgid('Stored WebDisk logins and directories are shown only after an authorized read. Access changes are unavailable.'),
-    "layout": "files",
+    "lede": msgid('Use the existing authorized account screen. This route does not create a second operation controller.'),
+    "layout": "settings",
     "action": null,
-    "columns": [
-      msgid('Login'),
-      msgid('Directory')
-    ],
+    "columns": [],
     "fields": [],
-    "bind": "webdisk"
+    "bind": "soon"
   },
   {
     "route": "/files/ftp",

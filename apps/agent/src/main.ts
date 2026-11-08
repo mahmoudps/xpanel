@@ -8,15 +8,16 @@ import { chmod, chown, mkdir, readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { captureMfaRuntimePolicy, fail } from '@xpanel/core'
-import type { OsProfile } from '@xpanel/core'
 import { appendAudit, createDb, initializeOperationalMetadata, migrate, pruneMetricsHistory, recordHostMetricsSample } from '@xpanel/db'
 import { detectOs, XPANEL_FPM_SOCKET_DIR } from '@xpanel/os'
+import type { XpanelOsProfile } from '@xpanel/os'
 import { StateStore, atomicWriteJson, readJsonIfExists } from '@xpanel/state'
 import { createProductionAccountFileRunner, DEFAULT_FILE_WORKER_INCIDENT_DIR } from './production-file-runner.ts'
 import { CanonicalIoResourcePipeline, IoAnalyticsEngine, readWebsiteAnalyticsStore, WEBSITE_ANALYTICS_PATH, WebsiteAnalyticsEngine } from './analytics.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
 import { ensureAcmeWebRoot } from './host-access.ts'
 import { ACCOUNT_RELABEL_TIMEOUT_MS, ensureAccountHomeContexts } from './selinux-homes.ts'
+import { createSourceBuilds, SOURCE_BUILD_TIMEOUT_MS } from './source-builds.ts'
 import { syncRuntimePublicOrigin } from './agent-origin.ts'
 import { ensureInstalledMail } from './services/local-mail.ts'
 import { enableMailWebsocketProxy } from './services/mail-websocket.ts'
@@ -28,22 +29,44 @@ import { AccountProvisioningPreparationReader } from './account-provisioning-pre
 import { provisioningAuthorizationPorts } from './account-provisioning-authorization.ts'
 import { createAccountProvisioningRuntime } from './account-provisioning-runtime.ts'
 import { HostJobRunner } from './host-jobs.ts'
+import { system } from '@xpanel/render'
+import { ApplicationInstallCoordinator, isApplicationInstallCommand } from './application-install.ts'
+import { createApplicationArtifactStore, createApplicationProvider } from './application-provider.ts'
+import { createNativeApplicationWorkerRun } from './application-worker.ts'
 import { DATABASE_REMOTE_ACCESS_JOURNAL_DIR, pendingDatabaseRemoteAccessJournals, qualifyDatabaseRemoteAccessNative, recoverPendingDatabaseRemoteAccess } from './db-remote-provider.ts'
 import { createHostJobRun } from './host-job-exec.ts'
 import { createHostMetricsCollector } from './host-metrics.ts'
 import { createBackupTransportProvider } from './acct-backup-sftp.ts'
 import { hostBackupCredentialStore } from './acct-backup-credentials.ts'
 import { defaultBackupArchiveRoot } from './acct-backup-runs.ts'
+import { buildControlSnapshot } from './acct-backup-archive.ts'
 import { DatabaseSync } from 'node:sqlite'
-import { BACKUP_LOW_PRIORITY } from './backup-low-priority.ts'
-import { BANDWIDTH_LEDGER_PATH, createBandwidthMeter, enforceBandwidthLimits, type BandwidthMeter } from './metering.ts'
+import { BACKUP_LOW_PRIORITY, runBackupCommand } from './backup-low-priority.ts'
+import { createGeoipSource } from './geoip.ts'
+import { GEOIP2_PERL_MODULES, WEB_STATS_ROOT, createWebStats, type WebStats } from './web-stats.ts'
+import { AWSTATS_BINARIES, WEBALIZER_BINARY } from './web-stats-format.ts'
+import { WEB_STATS_CONFIG_STATE, parseWebStatsConfig } from './web-stats-config.ts'
+import { BANDWIDTH_INTERVAL_MS, BANDWIDTH_LEDGER_PATH, createBandwidthMeter, enforceBandwidthLimits, type BandwidthMeter } from './metering.ts'
+import { createLogRotation, LOG_ROTATION_STATE_PATH, nativeLogRotationDeps, readLogTweaks } from './log-rotation.ts'
+import { createSvcBackground } from './svc-agent.ts'
+import { createNativeReleasePackages } from './release-packages.ts'
+import { createNativeHostWatch } from './host-watch.ts'
 import { readProtectedLogFrom } from './account-logs.ts'
+import { createNativeLeechMonitor, sendmailAlert, type LeechMonitor } from './leech-protection.ts'
+import { createSiteExpiryMonitor } from './site-expiry.ts'
 import { MAIL_LOG_MAX_OUTPUT_BYTES, observeMailLog } from './mail-log.ts'
 import { observeFtpLog } from './ftp-log.ts'
 import { createHostBackupRunController, readBackupConfigFiles, readSavedBackupDestination } from './acct-backup-runs.ts'
+import { createHostDnsClusterSync } from './dns-cluster-routes.ts'
 import { createAgentApp, listenAgentSocket, loadAgentCredentialFile } from './server.ts'
+import { revertExpiredPanelTrial } from './panel-access.ts'
+import { createDbQuotaEnforcer } from './db-quota.ts'
+import { loadPostgresqlPort } from './db-postgresql-service.ts'
+import { createNodeSwApplicationCatalogFiles, createSwApplicationCatalogSource, readInstalledPanelVersion } from './sw-application-catalog-store.ts'
+import { createSystemPgpRunner } from './account-pgp.ts'
 import { createProvisioningDatabaseReaderPort } from './account-provisioning-database-reader.ts'
 import { createNativeCronQualification } from './cron-qualification.ts'
+import { createUpdater } from './update-policy.ts'
 import { createSystemdPtySpawner, DEFAULT_TERMINAL_PTY_HELPER, TerminalSessionManager, verifyTerminalPtyHelper } from './terminal-sessions.ts'
 import type { AgentApp } from './server.ts'
 import { awaitLifecycleWriterDrain, createLifecycleBackgroundResources, isLifecycleManaged, readLifecyclePublicStatus, startLifecycleWriterParticipant, withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
@@ -51,7 +74,7 @@ import { createMariaDbSqlRunner, DEFAULT_MARIADB_ADMIN_CNF, defaultCommandRunner
 import { withPostgresqlSqlRunner } from './pg-sql.ts'
 import { createAccountGitRun } from './account-git-runner.ts'
 import { GIT_BINARY, GIT_LIMITS } from '../../../packages/os/src/git-command.ts'
-import { nativeRpmDatabaseRecovery } from './ops-package-recovery.ts'
+import { nativeRhelCacheRecovery, nativeRpmDatabaseRecovery } from './ops-package-recovery.ts'
 
 export interface AgentDaemonOptions {
   dbPath?: string
@@ -68,7 +91,7 @@ export interface AgentDaemonOptions {
   terminalPtyBinaryPath?: string
 }
 
-const detectHostOsProfile = async (): Promise<OsProfile> => detectOs((p) => readFileSync(p, 'utf8'))
+const detectHostOsProfile = async (): Promise<XpanelOsProfile> => detectOs((p) => readFileSync(p, 'utf8'))
 
 /** A failed shutdown step keeps its cause; diagnostics print the step and a stable code, never the message. */
 class ShutdownStepError extends Error {
@@ -148,14 +171,17 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
   let ioResourcePipeline: CanonicalIoResourcePipeline | undefined
   let hostMetrics: ReturnType<typeof createHostMetricsCollector> | undefined
   let bandwidthMeter: BandwidthMeter | undefined
+  let webStats: WebStats | undefined
   let backupRuns: ReturnType<typeof createHostBackupRunController> | undefined
+  let copyControlDatabase: ((outputPath: string) => Promise<void>) | undefined
   let backupTimer: ReturnType<typeof setInterval> | undefined
+  let leechMonitor: LeechMonitor | undefined
   let resourcesFenced = false
   let closeDaemon: (() => Promise<void>) | undefined
   const participant = managed ? await startLifecycleWriterParticipant('agent', {
     // A fenced pipeline stays paused until an inspected process restart. This callback
     // does not establish native host quiescence or authorize barrier retirement.
-    onFence: async () => { resourcesFenced = true; clearInterval(backupTimer); await hostMetrics?.stop(); await bandwidthMeter?.stop(); await ioResourcePipeline?.pause() },
+    onFence: async () => { resourcesFenced = true; clearInterval(backupTimer); await hostMetrics?.stop(); await bandwidthMeter?.stop(); await webStats?.stop(); await ioResourcePipeline?.pause() },
   }) : undefined
   let participantClosing: Promise<void> | undefined
   const closeParticipant = (): Promise<void> => participantClosing ??= participant?.close() ?? Promise.resolve()
@@ -212,6 +238,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         try { terminals?.closeAll() } catch (error) { errors.push(new ShutdownStepError('terminals.closeAll', error)) }
         try { await hostMetrics?.stop() } catch (error) { errors.push(new ShutdownStepError('hostMetrics.stop', error)) }
         try { await bandwidthMeter?.stop() } catch (error) { errors.push(new ShutdownStepError('bandwidthMeter.stop', error)) }
+        try { await webStats?.stop() } catch (error) { errors.push(new ShutdownStepError('webStats.stop', error)) }
         try { clearInterval(backupTimer); await backupRuns?.idle() } catch (error) { errors.push(new ShutdownStepError('backupRuns.idle', error)) }
         try { await ioResourcePipeline?.stop() } catch (error) { errors.push(new ShutdownStepError('ioResourcePipeline.stop', error)) }
         try { await accountFileRunner?.close() } catch (error) { errors.push(new ShutdownStepError('accountFileRunner.close', error)) }
@@ -244,6 +271,8 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         }
         const mariadbAdmin = new MariaDbServiceAdapter(mariaDbOptions)
         const sqlRunner = withPostgresqlSqlRunner(createMariaDbSqlRunner(mariadbAdmin))
+        await loadPostgresqlPort(store.rootDir)
+        const dbQuota = createDbQuotaEnforcer({ store, sql: mariadbAdmin, audit: entry => withLifecycleWriterAdmission(() => appendAudit(dbHandle.db, entry)) })
         const executor = new LinuxHostExecutor({
           trustedHostTargetMatcher: createProductionHostTargetMatcher(),
           sqlRunner,
@@ -251,6 +280,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         // Account Git runs in the account jail; this bound outlasts its RuntimeMaxSec so systemd ends the unit first.
         const gitExecutor = existsSync(GIT_BINARY) ? new LinuxHostExecutor({ timeoutMs: (GIT_LIMITS.timeoutSeconds + 15) * 1000, maxOutputBytes: GIT_LIMITS.outputBytes + 1 }) : null
         const rpmDatabaseRecovery = nativeRpmDatabaseRecovery(os.family, argv => executor.runCommand(argv))
+        const rhelCacheRecovery = nativeRhelCacheRecovery(os.family, argv => executor.runCommand(argv))
         const quotaFilesystem = configuredQuotaFilesystem !== undefined ? configuredQuotaFilesystem
           : await resolveHomeQuotaFilesystem(argv => executor.runCommand(argv)).catch(() => {
             process.stderr.write('xpanel-agent quota: the mount holding /home could not be observed; using /home\n')
@@ -260,14 +290,15 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         const backupDestinationProvider = createBackupTransportProvider({ readDestination: readBackupDestination, archiveRoot: defaultBackupArchiveRoot() })
         // Backup dumps run at the same low priority as the archive build, with the hour-long bound of a large database.
         const backupDumps = new MariaDbServiceAdapter({ ...mariaDbOptions, dumpTimeoutMs: 3_600_000, commandRunner: input => mariadbCommandRunner({ ...input, argv: [...BACKUP_LOW_PRIORITY, ...input.argv] }) })
+        // VACUUM INTO writes a consistent copy of the WAL database from a separate read-only connection.
+        copyControlDatabase = dbPath === ':memory:' ? undefined : async (outputPath: string) => { const copy = new DatabaseSync(dbPath, { readOnly: true }); try { copy.prepare('VACUUM INTO ?').run(outputPath) } finally { copy.close() } }
         backupRuns = createHostBackupRunController({ executor, stateRoot: stateDir, provider: backupDestinationProvider, listAccounts: async () => (await store.listAccounts()).map(a => ({ id: a.id, username: a.username, home: a.home, uid: a.uid, status: a.status })),
           databases: {
             list: async account => (await store.listDatabases(account.id)).filter(database => database.engine === 'mariadb' && !database.trashedAt).map(database => database.name),
             dump: async (account, database, outputPath) => { const dumped = await backupDumps.streamLogicalDump({ database, username: account.username, outputPath }); return { bytes: dumped.sizeBytes, sha256: dumped.sha256 } },
           },
           zones: { list: async account => (await store.listDnsZones(account.id)).filter(zone => zone.accountId === account.id).map(zone => ({ name: zone.name, content: JSON.stringify(zone) })) },
-          // VACUUM INTO writes a consistent copy of the WAL database from a separate read-only connection.
-          ...(dbPath === ':memory:' ? {} : { copyControlDatabase: async (outputPath: string) => { const copy = new DatabaseSync(dbPath, { readOnly: true }); try { copy.prepare('VACUUM INTO ?').run(outputPath) } finally { copy.close() } } }),
+          ...(copyControlDatabase ? { copyControlDatabase } : {}),
         })
         hostMetrics = createHostMetricsCollector({ reader: { readFile: path => executor.readFile(path), runCommand: argv => executor.runCommand(argv), listDirectory: path => readdir(path) },
           write: (observation, at) => withLifecycleWriterAdmission(() => recordHostMetricsSample(dbHandle.db, { at, observation })),
@@ -277,20 +308,36 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         // Same bounded journal reader as /host/mail/log and /host/ftp/log (16 MiB output cap).
         const journalExecutor = process.platform === 'linux' ? new LinuxHostExecutor({ maxOutputBytes: MAIL_LOG_MAX_OUTPUT_BYTES }) : null
         const websiteAnalytics = new WebsiteAnalyticsEngine({ store: { read: () => readWebsiteAnalyticsStore(), write: data => withLifecycleWriterAdmission(() => atomicWriteJson(WEBSITE_ANALYTICS_PATH, data, 0o600)) } })
+        const logRotation = createLogRotation(nativeLogRotationDeps({ readState: () => store.readSnapshot(), readTweaks: () => readLogTweaks(stateDir), runCommand: argv => executor.runCommand(argv),
+          readRotation: () => readJsonIfExists<unknown>(LOG_ROTATION_STATE_PATH), writeRotation: state => withLifecycleWriterAdmission(() => atomicWriteJson(LOG_ROTATION_STATE_PATH, state, 0o600)) }))
+        // Engines are distribution packages, or the installer's pinned builds on EL; a host without them spools nothing and reports them unavailable.
+        const statsGeoip = createGeoipSource({ dir: WEB_STATS_ROOT + '/geoip', admit: work => withLifecycleWriterAdmission(work) })
+        const statsEngines = { awstats: AWSTATS_BINARIES.find(path => existsSync(path)) ?? null, webalizer: existsSync(WEBALIZER_BINARY) ? WEBALIZER_BINARY : null }
+        const readStatsConfig = () => readJsonIfExists(join(stateDir, WEB_STATS_CONFIG_STATE)).then(parseWebStatsConfig, () => null)
+        if (process.platform === 'linux') webStats = createWebStats({ readState: () => store.readSnapshot(), run: runBackupCommand, backupBusy: () => backupRuns?.busy() ?? false,
+          readConfig: readStatsConfig, engines: () => statsEngines, geoip: statsGeoip,
+          geoipReady: () => GEOIP2_PERL_MODULES.some(path => existsSync(path)) && existsSync(statsGeoip.path), admit: work => withLifecycleWriterAdmission(work),
+          onError: () => { process.stderr.write('xpanel-agent web statistics: run could not be completed\n') } })
         bandwidthMeter = createBandwidthMeter({ readState: () => store.readSnapshot(), readFrom: readProtectedLogFrom,
           readMail: journalExecutor ? (since, until) => observeMailLog({ run: argv => journalExecutor.runCommand(argv), since, until }) : null,
           readFtp: journalExecutor ? (since, until) => observeFtpLog({ run: argv => journalExecutor.runCommand(argv), readState: () => store.readSnapshot(), since, until }) : null,
           readLedger: () => readJsonIfExists<unknown>(BANDWIDTH_LEDGER_PATH),
           writeLedger: ledger => withLifecycleWriterAdmission(() => atomicWriteJson(BANDWIDTH_LEDGER_PATH, ledger, 0o600)),
-          afterCollect: async () => {
-            await enforceBandwidthLimits(await bandwidthMeter!.report(), await store.readSnapshot(), {
-              setLimits: (changes, expectedRevision) => withLifecycleWriterAdmission(() => store.setBandwidthLimits(changes, expectedRevision === undefined ? {} : { expectedRevision })),
-              audit: entry => withLifecycleWriterAdmission(() => appendAudit(dbHandle.db, entry)),
-              reconcile: () => reconciler.reconcile({ actor: 'agent' }),
-            })
+          intervalMs: async () => { const config = await readStatsConfig(); return config ? config.policy.bandwidthIntervalMinutes * 60_000 : BANDWIDTH_INTERVAL_MS },
+          afterCollect: async collected => {
+            try {
+              await enforceBandwidthLimits(await bandwidthMeter!.report(), await store.readSnapshot(), {
+                setLimits: (changes, expectedRevision) => withLifecycleWriterAdmission(() => store.setBandwidthLimits(changes, expectedRevision === undefined ? {} : { expectedRevision })),
+                audit: entry => withLifecycleWriterAdmission(() => appendAudit(dbHandle.db, entry)),
+                reconcile: () => reconciler.reconcile({ actor: 'agent' }),
+              })
+            } finally {
+              // Raw access logs rotate only after the collection that counted them was recorded, whatever enforcement did.
+              await withLifecycleWriterAdmission(() => logRotation.run(collected))
+            }
           },
           onError: () => { process.stderr.write('xpanel-agent bandwidth: collection could not be recorded\n') },
-          webAnalytics: websiteAnalytics,
+          webAnalytics: webStats ? webStats.tee(websiteAnalytics) : websiteAnalytics,
         })
         const ioAnalytics = new IoAnalyticsEngine()
 
@@ -311,6 +358,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           onRecoveryRequired,
         })
         if (recoveryDetected) fail('PRECONDITION_FAILED', 'privileged file worker recovery is required before agent startup')
+        if (process.platform === 'linux') leechMonitor = createNativeLeechMonitor({ store, runner: accountFileRunner!, audit: entry => withLifecycleWriterAdmission(() => appendAudit(dbHandle.db, entry)) })
         // Terminal sessions exist only with a verified root-owned PTY helper; otherwise they stay unavailable.
         const terminalHelperPath = opts.terminalPtyBinaryPath ?? process.env.XPANEL_TERMINAL_PTY_BINARY ?? DEFAULT_TERMINAL_PTY_HELPER
         if (await verifyTerminalPtyHelper(terminalHelperPath)) terminals = new TerminalSessionManager(createSystemdPtySpawner(terminalHelperPath))
@@ -323,7 +371,8 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           process.stderr.write(`xpanel-agent mail websocket: ${error instanceof Error ? error.message : String(error)}\n`)
         })
         await reconciler.recoverInterruptedReconciliation().catch(() => undefined)
-        hostJobs = new HostJobRunner({ db: dbHandle.db, run: createHostJobRun() })
+        const hostJobRun = createHostJobRun(), applicationCoordinator = new ApplicationInstallCoordinator()
+        hostJobs = new HostJobRunner({ db: dbHandle.db, run: (argv, options) => isApplicationInstallCommand(argv) ? applicationCoordinator.run(argv, options) : hostJobRun(argv, options) })
         await hostJobs.recoverInterrupted().catch((error: unknown) => {
           process.stderr.write(`xpanel-agent host jobs: ${error instanceof Error ? error.message : String(error)}\n`)
         })
@@ -388,33 +437,60 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           policy: captureMfaRuntimePolicy(),
           observer: createReadonlyAccountProvisioningObserver({ executor, store, dns: dnsPublication, ...nativeAccountHttp }),
         })
+        const panelVersion = await readInstalledPanelVersion()
+        const upgradeCoordinator = new DurableUpgradeCoordinator({ db: dbHandle.db, provider: createUpgradeLauncherProvider(nativeUpgradeLauncherPorts()) })
+        const updater = createUpdater({ rootDir: store.rootDir, db: dbHandle.db, coordinator: upgradeCoordinator })
+        const releasePackages = createNativeReleasePackages({ version: panelVersion, os, executor, hostJobs, reconcile: () => reconciler.reconcile({ actor: 'system:release-packages' }), audit: entry => appendAudit(dbHandle.db, entry) })
+        const dnsCluster = process.platform === 'linux' ? createHostDnsClusterSync({ rootDir: store.rootDir, store, run: argv => executor.runCommand(argv), reconcile: async () => (await reconciler.reconcile({ actor: 'system:dns-cluster' })).status !== 'failed', audit: entry => withLifecycleWriterAdmission(() => appendAudit(dbHandle.db, { ...entry, actor: 'system:dns-cluster' })) }) : null
         const app = createAgentApp({
+          dnsCluster,
+          mailGeoip: statsGeoip,
+          pgpRunner: createSystemPgpRunner(),
           reconciler,
+          ...(panelVersion ? { applicationCatalog: createSwApplicationCatalogSource(createNodeSwApplicationCatalogFiles(), panelVersion), applicationArtifacts: createApplicationArtifactStore() } : {}),
+          ...(panelVersion && process.platform === 'linux' && existsSync(system.RUNTIME_BINARIES.python) ? { applicationProvider: createApplicationProvider({ worker: createNativeApplicationWorkerRun() }), applicationCoordinator } : {}),
           accountProvisioning,
-          upgradeCoordinator: new DurableUpgradeCoordinator({ db: dbHandle.db, provider: createUpgradeLauncherProvider(nativeUpgradeLauncherPorts()) }),
+          upgradeCoordinator,
           store,
           db: dbHandle.db,
           executor,
           cronQualification: createNativeCronQualification({ isActive: async unit => (await executor.runCommand(['/usr/bin/systemctl', 'is-active', unit])).code === 0 }),
           ...(accountFileRunner ? { accountFileRunner } : {}),
+          ...(leechMonitor ? { leechMonitor } : {}),
           ...(gitExecutor ? { accountGitRun: createAccountGitRun(argv => gitExecutor.runCommand(argv), os.family) } : {}),
           ...(rpmDatabaseRecovery ? { rpmDatabaseRecovery } : {}),
+          ...(rhelCacheRecovery ? { rhelCacheRecovery } : {}),
           ...(hostJobs ? { hostJobs } : {}),
+          releasePackages,
           terminals,
           ioAnalytics,
           ioResourcePipeline,
-          ...(process.platform === 'linux' ? { bandwidthMeter, readDiskLatency: () => hostMetrics!.latestDiskLatency() } : {}),
+          ...(process.platform === 'linux' ? { bandwidthMeter, logRotation, readDiskLatency: () => hostMetrics!.latestDiskLatency() } : {}),
           websiteAnalytics,
+          ...(webStats ? { webStats } : {}),
           os: { id: os.id, versionId: os.versionId, family: os.family },
           nginxUser: os.paths.nginxUser,
           agentToken,
           mariadbAdmin,
+          dbQuota,
           backupCredentials: hostBackupCredentialStore(),
           restoreBackupDatabase: async (account, database, inputPath, sha256) => { await backupDumps.streamLogicalRestore({ targetDatabase: database, username: account.username, inputPath, expectedSha256: sha256 }) },
+          databaseTransfer: {
+            dump: async (account, database, outputPath) => { const dumped = await backupDumps.streamLogicalDump({ database, username: account.username, outputPath }); return { bytes: dumped.sizeBytes, sha256: dumped.sha256 } },
+            restore: async (account, database, inputPath, sha256) => { await backupDumps.streamLogicalRestore({ targetDatabase: database, username: account.username, inputPath, expectedSha256: sha256 }) },
+            importUntrusted: (account, database, inputPath) => backupDumps.importUntrustedDump({ database, username: account.username, inputPath }),
+            drop: (account, database) => backupDumps.dropDatabase(database, account.username, { requireBackupVerified: false }),
+          },
+          websiteDatabases: {
+            list: async account => (await store.listDatabases(account.id)).filter(database => database.engine === 'mariadb' && !database.trashedAt).map(database => database.name),
+            dump: async (account, database, outputPath) => { const dumped = await backupDumps.streamLogicalDump({ database, username: account.username, outputPath }); return { bytes: dumped.sizeBytes, sha256: dumped.sha256 } },
+            restore: async (account, database, inputPath, sha256) => { await backupDumps.streamLogicalRestore({ targetDatabase: database, username: account.username, inputPath, expectedSha256: sha256 }) },
+          },
           ...(databaseRemoteAccessNative ? { databaseRemoteAccessNative } : {}),
           readBackupDestination,
           backupDestinationProvider,
           backupRuns,
+          ...(copyControlDatabase ? { panelSnapshot: () => buildControlSnapshot({ root: defaultBackupArchiveRoot(), stateDir, copyDatabase: copyControlDatabase!, run: runBackupCommand, compression: 'gzip', level: 6 }) } : {}),
         })
 
         listener = await createLifecycleBackgroundResources(() => listenAgentSocket(app, socketPath, { gid: socketGid }))
@@ -427,7 +503,18 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           .then(snapshot => ensureAccountHomeContexts(new LinuxHostExecutor({ timeoutMs: ACCOUNT_RELABEL_TIMEOUT_MS, trustedHostTargetMatcher: createProductionHostTargetMatcher() }), os.family, snapshot.accounts))
           .catch((error: unknown) => { process.stderr.write(`xpanel-agent SELinux account homes: ${error instanceof Error ? error.message : String(error)}\n`) })
         if (!resourcesFenced) createLifecycleBackgroundResources(() => hostMetrics!.start())
-        if (!resourcesFenced) { backupTimer = setInterval(() => { void backupRuns!.tick(); if (process.platform === 'linux') void bandwidthMeter!.collect() }, 60_000); backupTimer.unref() }
+        if (!resourcesFenced) webStats?.start()
+        const releaseRoot = fileURLToPath(new URL('../../../', import.meta.url))
+        const svcBackground = process.platform === 'linux' ? createSvcBackground({ store, executor, hostJobs: hostJobs ?? null, releaseRoot: existsSync(join(releaseRoot, 'release-manifest.json')) ? releaseRoot : null,
+          readDbProcesses: async () => (await mariadbAdmin.query(['SELECT USER, COUNT(*) FROM information_schema.PROCESSLIST GROUP BY USER'])).split('\n').flatMap(line => { const [user, count] = line.split('\t'); return user && /^\d+$/.test(count ?? '') ? [{ user, count: Number(count) }] : [] }),
+          reconcile: () => reconciler.reconcile({ actor: 'system:nightly' }) }) : null
+        const sourceBuildHost = process.platform === 'linux' && os.family === 'rhel' ? new LinuxHostExecutor({ timeoutMs: SOURCE_BUILD_TIMEOUT_MS }) : null
+        const sourceBuilds = sourceBuildHost ? createSourceBuilds({ run: argv => sourceBuildHost.runCommand(argv), reconcile: () => reconciler.reconcile({ actor: 'system:source-builds' }),
+          audit: entry => withLifecycleWriterAdmission(() => appendAudit(dbHandle.db, entry)), admit: work => withLifecycleWriterAdmission(work),
+          onError: error => { process.stderr.write(`xpanel-agent source builds: ${error instanceof Error ? error.message : String(error)}\n`) } }) : null
+        const hostWatch = process.platform === 'linux' ? createNativeHostWatch({ store, executor, os }) : null
+        const siteExpiry = createSiteExpiryMonitor({ root: store.rootDir, listDomains: () => store.listDomains(), reconcile: () => reconciler.reconcile({ actor: 'system:site-expiry' }), sendAlert: async (to, subject, text) => { await sendmailAlert('xpanel@' + (await store.getServerSettings())!.hostname, to, subject, text) } })
+        if (!resourcesFenced) { backupTimer = setInterval(() => { void backupRuns!.tick(); void updater.tick(); void releasePackages.tick(); void sourceBuilds?.tick(); if (process.platform === 'linux') { void bandwidthMeter!.collect(); void svcBackground!.tick(); void dnsCluster!.tick().catch(() => undefined); void revertExpiredPanelTrial(executor).catch(() => undefined); void siteExpiry.tick().catch(() => undefined) }; if (hostWatch) void withLifecycleWriterAdmission(() => hostWatch.tick()).catch(() => undefined); if (leechMonitor) void withLifecycleWriterAdmission(() => leechMonitor!.tick()).catch(() => undefined) ; void withLifecycleWriterAdmission(() => dbQuota.tick()).catch(() => undefined) }, 60_000); backupTimer.unref() }
         return { app, socketPath, close: closeNormal, recoveryRequired, quarantined: false as const }
       } catch (error) {
         try { await closeResources() } catch (cleanup) { throw new AggregateError([error, cleanup], 'agent startup cleanup requires inspection') }

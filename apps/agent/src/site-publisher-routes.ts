@@ -8,7 +8,7 @@ export interface SitePublisherAgentDeps {
   caller: AgentCallerIdentity
   store: { getAccountByUsername(username: string): Promise<Account | null>; getDomain(id: string): Promise<Domain | null>; getPlan(id: string): Promise<Plan | null>; getFeatureList(id: string): Promise<FeatureList | null>; withAccountLifecycleLease<T>(id: string, operation: (account: Account) => Promise<T>): Promise<T> }
   currentPrincipal(): Promise<{ kind: string; id: string; username: string; accountId: string | null; disabled: boolean } | null>
-  files(account: Account, plan: Plan): Pick<JailedFileManager, 'list' | 'readText' | 'writeTextChecked' | 'mkdir'> | null
+  files(account: Account, plan: Plan): Pick<JailedFileManager, 'list' | 'readText' | 'writeTextChecked' | 'mkdir' | 'compress' | 'moveToTrash' | 'purgeTrash'> | null
   audit(entry: { actor: string; action: string; target: string; outcome: 'ok'; detail: Record<string, unknown>; principalId: string }): Promise<unknown>
 }
 const ROUTE = /^\/accounts\/([a-z][a-z0-9]{0,15})\/site-publisher\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(preview|publish|rollback))?$/

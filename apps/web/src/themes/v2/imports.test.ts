@@ -7,12 +7,12 @@ import { describe, expect, it } from 'vitest'
 const THEME = dirname(fileURLToPath(import.meta.url))
 const WEB_SRC = resolve(THEME, '../..')
 const CORE_MODULES = new Set([
-  'html.ts', 'i18n.ts', 'theme-messages.ts', 'branding.ts', 'display-format.ts', 'audit-labels.ts',
-  'models/account-list.ts', 'models/whm-account-access.ts', 'models/website-analytics.ts', 'models/mail.ts',
-  'models/action-state.ts', 'models/status-page.ts', 'models/reseller-allocation.ts', 'models/theme-surface.ts', 'display-name.ts',
+  'models/tool-cards.ts', 'html.ts', 'i18n.ts', 'theme-messages.ts', 'branding.ts', 'display-format.ts', 'audit-labels.ts', 'mail-cards.ts',
+  'models/ftp-removal.ts', 'models/account-list.ts', 'models/db-services.ts', 'models/plan-fields.ts', 'models/whm-account-access.ts', 'models/website-analytics.ts', 'models/mail.ts',
+  'models/action-state.ts', 'models/status-page.ts', 'models/svc-panels.ts', 'models/web-stats.ts', 'models/dnssec.ts', 'models/reseller-allocation.ts', 'models/reseller-usage.ts', 'models/theme-surface.ts', 'models/dav-client-guide.ts', 'display-name.ts', 'account-notices.ts', 'mail-home-groups.ts',
 ])
 const TYPE_ONLY_CORE_MODULES = new Set(['themes/contract.ts'])
-const TEST_CORE_MODULES = new Set(['themes/markup.ts'])
+const TEST_CORE_MODULES = new Set(['themes/markup.ts', '../../../tests/fixtures/web-stats-view.ts'])
 const PACKAGES = /^@xpanel\/(?:catalog|core)$/
 const TEST_ONLY = /^(?:vitest|node:(?:fs|path|url|zlib|crypto))$/
 const RUNTIME_BUILTINS = new Set(['node:crypto'])

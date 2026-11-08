@@ -25,7 +25,7 @@ const fixture = async () => {
     caps: { addonDomains: 3, aliasDomains: 3, subdomains: 3, mailboxes: 4, forwarders: 4, mailingLists: 4, ftpAccounts: 4, databases: 4, phpWorkers: 4 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
   await state.store.saveServerIp({ address: '192.0.2.73', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
   const seller = await state.store.createReseller({ username: 'whmdomainseller', passwordHash: HASH, acl: ['list-accounts', 'edit-account'], maxAccounts: 5,
-    totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
+    totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
   const account = (username: string, ownerId: string | null) => state.store.createAccount({ username, ownerId, passwordHash: HASH, primaryDomain: username + '.example.test', planId: plan.id,
     contactEmail: 'owner@' + username + '.example.test', ipv4: '192.0.2.73', shell: 'none',
     php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
@@ -107,7 +107,7 @@ describe('account-pinned WHM domain workspace over real state and SQLite', () =>
     expect(await f.images()).toEqual(before)
   })
 
-  it.each(['root', 'reseller'] as const)('creates, updates with alias fanout and removes a confirmed %s leaf', async role => {
+  it.each(['root', 'reseller'] as const)('creates, updates with alias fanout and removes a confirmed %s leaf', { tags: ['slow'] }, async role => {
     const token = role === 'root' ? f.rootToken.raw : f.resellerToken.raw
     const neighbor = (await f.images()).domains.filter(domain => domain.accountId === f.other.id)
     const parent = await f.create('parent.example.test', { siteType: 'static', docRoot: 'parent-root' }, token)
@@ -143,7 +143,7 @@ describe('account-pinned WHM domain workspace over real state and SQLite', () =>
     expect((await f.request('POST', { accountId: f.owner.id, name: 'legacy.example.test', kind: 'addon' })).status).toBe(201)
   })
 
-  it('enforces exact confirmation and dependencies for guarded administrative deletion', async () => {
+  it('enforces exact confirmation and dependencies for guarded administrative deletion', { tags: ['slow'] }, async () => {
     const parent = await f.create('parent.example.test')
     const alias = await f.create('alias.example.test', { kind: 'alias', parentId: parent.domain.id })
     const current = await f.view(), before = await f.images()

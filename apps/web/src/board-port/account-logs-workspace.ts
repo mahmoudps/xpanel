@@ -6,7 +6,7 @@ import { ACCOUNT_TOOL_STYLE } from './account-ssh-workspace.ts'
 
 export type AccountLogPageKind = 'access' | 'error'
 /** Bounded edge log tails for the owner's domains; filters run in the page over the read tail. */
-export function renderAccountLogsWorkspace(input: { lang: Locale; accountId: string; domains: readonly Pick<Domain, 'id' | 'accountId' | 'name'>[]; selectedDomainId?: string; kinds: readonly AccountLogPageKind[] }): string {
+export function renderAccountLogsWorkspace(input: { lang: Locale; accountId: string; domains: readonly Pick<Domain, 'id' | 'accountId' | 'name'>[]; selectedDomainId?: string; kinds: readonly AccountLogPageKind[]; rawAccess?: boolean }): string {
   const t = (message: string, values?: MessageValues): string => translator(input.lang)(message, values)
   const domains = input.domains.filter(domain => domain.accountId === input.accountId), kinds = (['access', 'error'] as const).filter(kind => input.kinds.includes(kind))
   const off = kinds.length && domains.length ? '' : ' disabled'
@@ -24,5 +24,20 @@ export function renderAccountLogsWorkspace(input: { lang: Locale; accountId: str
       <p class="xp-help" data-logs-summary>${t('No log has been read.')}</p>
       <div class="xp-acct-tool__table" tabindex="0" role="region" aria-label="${t('Log entries')}"><table class="xp-table"><thead data-logs-head><tr><th scope="col">${t('Entries')}</th></tr></thead><tbody data-logs-rows><tr><td>${t('No log has been read.')}</td></tr></tbody></table></div>
       <p data-logs-status role="status" data-state="unread">${kinds.length ? domains.length ? t('Choose a domain and read its log.') : t('This account has no domains to read logs for.') : t('Site logs are unavailable here. Nothing was read.')}</p></section>
+    <section class="xp-acct-tool__card" aria-labelledby="account-raw-access" data-account-raw-access data-account="${escapeHtml(input.accountId)}" data-raw-access-manage="${input.rawAccess}"><h2 id="account-raw-access">${t('Raw access archives')}</h2>
+      <p class="xp-help">${t('Each site access log is rotated once per UTC day after its traffic is counted. With archiving on it is kept in ~/logs as a gzip file named after the site and day; otherwise it is deleted.')}</p>
+      <div class="xp-acct-tool__fields" data-raw-access-form>
+        <label class="xp-field"><span><input type="checkbox" data-raw-access="archive"${input.rawAccess ? '' : ' disabled'}> ${t('Archive logs in ~/logs after their traffic is counted')}</span></label>
+        <label class="xp-field"><span><input type="checkbox" data-raw-access="removePreviousMonthArchive"${input.rawAccess ? '' : ' disabled'}> ${t("Remove the previous month's archives when a new UTC month starts")}</span></label>
+        <div class="xp-field"><label for="account-raw-access-days">${t('Keep archives (days)')}</label><input id="account-raw-access-days" class="xp-input" type="text" inputmode="numeric" dir="ltr" autocomplete="off" data-raw-access="retentionDays" placeholder="${t('Until removed')}"${input.rawAccess ? '' : ' disabled'}></div>
+        <p class="xp-help" data-raw-access-source>${t('Settings have not been read.')}</p>
+        <div class="xp-acct-tool__actions"><button type="button" class="xp-btn xp-btn--primary" data-raw-access-save${input.rawAccess ? '' : ' disabled'}>${t('Save settings')}</button><button type="button" class="xp-btn" data-raw-access-defaults${input.rawAccess ? '' : ' disabled'}>${t('Use server defaults')}</button></div>
+        <p data-raw-access-status role="status" data-state="unread">${input.rawAccess ? t('Settings have not been read.') : t('Raw access archives are unavailable here. Nothing was read.')}</p>
+      </div>
+      <div class="xp-acct-tool__table" tabindex="0" role="region" aria-label="${t('Current access logs')}"><table class="xp-table"><thead><tr><th scope="col">${t('Domain')}</th><th scope="col">${t('Current access log')}</th></tr></thead><tbody data-raw-access-current>${domains.map(domain => `<tr><td><bdi dir="ltr">${escapeHtml(domain.name)}</bdi></td><td>${input.rawAccess ? `<a class="xp-btn" href="/api/account/logs/${escapeHtml(domain.id)}/access/download" download>${t('Download as gzip')}</a>` : t('Unavailable')}</td></tr>`).join('') || `<tr><td colspan="2">${t('This account has no domains to read logs for.')}</td></tr>`}</tbody></table></div>
+      <p class="xp-help">${t('The current log is the part not yet rotated today. It is compressed while it downloads; an alias shares its main site\'s log.')}</p>
+      <div class="xp-acct-tool__table" tabindex="0" role="region" aria-label="${t('Archives in ~/logs')}"><table class="xp-table"><thead><tr><th scope="col">${t('Archive')}</th><th scope="col">${t('Day (UTC)')}</th><th scope="col">${t('Size')}</th><th scope="col">${t('Download')}</th></tr></thead><tbody data-raw-access-rows><tr><td colspan="4">${t('Archives have not been read.')}</td></tr></tbody></table></div>
+      <p data-raw-access-list-status role="status" data-state="unread" hidden></p>
+      <p data-raw-access-pending role="status" data-state="unread" hidden></p></section>
 ${logsClientTemplates(t)}  </div>`
 }

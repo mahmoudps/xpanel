@@ -10,6 +10,8 @@ export interface LocaleInfo {
   readonly dir: 'ltr' | 'rtl'
   /** ISO 15924 script, which selects the type layer (for example Arabic-script typography). */
   readonly script: string
+  /** A locale copied at runtime: the shipped locale its theme and tool strings come from. */
+  readonly base?: string
 }
 
 export const LOCALES = [
@@ -27,6 +29,13 @@ const BY_TAG = new Map<string, LocaleInfo>(LOCALES.map(info => [info.tag.toLower
 export const isLocale = (value: unknown): value is Locale => typeof value === 'string' && LOCALES.some(info => info.tag === value)
 
 export const localeInfo = (tag: Locale): LocaleInfo => BY_TAG.get(tag.toLowerCase())!
+
+/** A saved runtime locale joins the registry once, at panel start, before any page renders. */
+export const registerLocale = (info: LocaleInfo): void => {
+  if (BY_TAG.has(info.tag.toLowerCase())) return
+  BY_TAG.set(info.tag.toLowerCase(), info);
+  (LOCALES as unknown as LocaleInfo[]).push(info)
+}
 
 export const localeDirection = (tag: Locale): 'ltr' | 'rtl' => localeInfo(tag).dir
 

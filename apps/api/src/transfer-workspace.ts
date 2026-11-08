@@ -30,12 +30,16 @@ export interface TransferAccountResult {
   rollbackFailed?: boolean
   /** Set once this run created the account here; restart recovery removes only this identity. */
   createdAccountId?: string
+  /** The source may be frozen: restart recovery releases it. */
+  liveFrozen?: boolean
+  live?: { cutoverAt: string; zones: number; revertedAt: string | null }
 }
 export interface StoredTransferWorkspace {
   id: string
   actor: string
   createdAt: string
   auth: TransferAuth
+  live?: boolean
   events: EventEnvelope[]
   /** principal that started the run; background work and restart recovery act as this root user */
   runBy?: string
@@ -94,8 +98,12 @@ export interface TransferWorkspacePorts {
     admit: (caller: AuthenticatedCaller, session: TransferSession, review: TransferReview) => Promise<void>
     run: (caller: AuthenticatedCaller, session: TransferSession, review: TransferReview, emit: (event: TransferProgressEvent, result?: Partial<TransferAccountResult>) => Promise<void>, shouldStop: () => Promise<boolean>) => Promise<void>
     /** Rolls back the account this run created (result.createdAccountId) when the API stopped mid-account; true when it was removed. */
-    recover: (caller: AuthenticatedCaller, progress: AccountProgress, result: Partial<TransferAccountResult> | undefined) => Promise<boolean>
+    recover: (caller: AuthenticatedCaller, progress: AccountProgress, result: Partial<TransferAccountResult> | undefined, session: TransferSession) => Promise<boolean>
+    /** Takes a cut-over account back to its source and removes the copy here; refuses when the copy changed unless the loss is accepted. */
+    revert?: (caller: AuthenticatedCaller, session: TransferSession, source: string, result: Partial<TransferAccountResult>, acceptLoss: boolean) => Promise<NonNullable<TransferAccountResult['live']>>
   }
+  /** The source reference of a linked server; absent, a live transfer cannot start. */
+  nodeAuth?: (id: string) => Promise<TransferAuth>
   /** Root principal by id, for background work after the request that started it has ended. */
   callerFor?: (principalId: string) => Promise<AuthenticatedCaller | null>
   cpanel?: CpanelImportPorts
@@ -107,7 +115,7 @@ const MAX_EVENTS = 5000
 const MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
 /** One upload chunk (raw bytes; base64 in JSON stays under the 8 MiB body limit of its route) for a slow link within the request timeout. */
 export const CPANEL_UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024
-const IN_FLIGHT: ReadonlySet<AccountProgress['phase']> = new Set(['exporting', 'copying', 'importing', 'reconciling'])
+const IN_FLIGHT: ReadonlySet<AccountProgress['phase']> = new Set(['exporting', 'copying', 'importing', 'reconciling', 'syncing', 'cutover'])
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const exact = (value: unknown, keys: readonly string[]): Record<string, unknown> => {
@@ -122,7 +130,7 @@ const requestBody = async (req: Request): Promise<Record<string, unknown>> => {
 }
 const replay = (record: StoredTransferWorkspace): TransferSession => {
   if (!object(record) || !Array.isArray(record.events) || record.events.length > MAX_EVENTS) return fail('PRECONDITION_FAILED', 'stored transfer event log requires inspection', { stateChanged: false })
-  let session = createTransferSession({ id: record.id, actor: record.actor, now: record.createdAt, auth: record.auth })
+  let session = createTransferSession({ id: record.id, actor: record.actor, now: record.createdAt, auth: record.auth, live: record.live === true })
   for (const envelope of record.events) {
     if (!object(envelope) || typeof envelope.at !== 'string' || !object(envelope.event)) return fail('PRECONDITION_FAILED', 'stored transfer event log requires inspection', { stateChanged: false })
     session = transition(session, envelope.event as TransferEvent, envelope.at)
@@ -181,7 +189,7 @@ export const cpanelUnmapped = (plan: Record<string, unknown>): CpanelUnmappedIte
 /** Durable transfer metadata over the existing reducer; native facts never come from UI events. */
 export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferWorkspacePorts = {}) {
   const path = workspacePath(helpers.store)
-  const capabilities = { discover: !!ports.discover, execute: !!ports.execution && !!ports.callerFor, cpanelImport: !!ports.cpanel && !!ports.callerFor, cpanelUploadMaxBytes: ports.cpanel?.maxBytes ?? 0, nativeQualification: 'unchanged' }
+  const capabilities = { discover: !!ports.discover, execute: !!ports.execution && !!ports.callerFor, live: !!ports.execution && !!ports.callerFor && !!ports.nodeAuth, cpanelImport: !!ports.cpanel && !!ports.callerFor, cpanelUploadMaxBytes: ports.cpanel?.maxBytes ?? 0, nativeQualification: 'unchanged' }
   /** Sessions and imports this process is working on right now. */
   const running = new Set<string>()
   let recovered: Promise<void> | null = null
@@ -278,7 +286,7 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
         for (const [source, progress] of Object.entries(session.progress)) {
           if (!IN_FLIGHT.has(progress.phase)) continue
           let removed = false, failed = false
-          try { removed = await ports.execution.recover(caller, progress, record.results?.[source]) } catch { failed = true }
+          try { removed = await ports.execution.recover(caller, progress, record.results?.[source], session) } catch { failed = true }
           const error = failed ? 'Interrupted by a restart; the partial account could not be removed. Review ' + progress.targetUsername + ' before retrying.' : removed ? 'Interrupted by a restart; the partial account was removed.' : 'Interrupted by a restart before anything was created here.'
           await updateSession(record.id, null, async current => ({ ...append(current, { type: 'progress', account: source, phase: 'failed', error }), results: { ...current.results, [source]: { rolledBack: removed, rollbackFailed: failed } } }))
           await audit(caller, removed ? 'transfer.account.rolled_back' : 'transfer.account.failed', 'account:' + progress.targetUsername, { interrupted: true }, 'failed')
@@ -373,12 +381,14 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
     }
     const item = /^\/api\/transfers\/cpanel-imports\/([0-9a-f-]{36})$/i.exec(url.pathname)
     if (url.pathname === '/api/transfers/cpanel-imports' && method === 'POST') {
-      const body = exact(await requestBody(req), ['filename', 'bytes', 'targetUsername'])
+      const body = exact(await requestBody(req), ['filename', 'bytes', 'targetUsername', 'overwrite'])
+      if (body.overwrite !== undefined && body.overwrite !== 0) return fail('VALIDATION', 'an import never overwrites an account', { stateChanged: false })
       const filename = body.filename
       if (typeof filename !== 'string' || !filename || filename.length > 255 || /[\u0000-\u001f\u007f/\\]/.test(filename)) return fail('VALIDATION', 'a bounded archive filename is required', { stateChanged: false })
       if (!Number.isSafeInteger(body.bytes) || (body.bytes as number) <= 0) return fail('VALIDATION', 'the archive size is required', { stateChanged: false })
       if ((body.bytes as number) > cpanel.maxBytes) return fail('LIMIT_EXCEEDED', 'the archive is larger than the import limit', { stateChanged: false })
       if (body.targetUsername !== undefined && (typeof body.targetUsername !== 'string' || !/^[a-z][a-z0-9]{0,15}$/.test(body.targetUsername))) return fail('VALIDATION', 'the destination username is invalid', { stateChanged: false })
+      if (body.targetUsername !== undefined && (await inventory(helpers)).usernames.includes(body.targetUsername)) return fail('CONFLICT', 'an account with this username exists here; choose another destination username', { stateChanged: false })
       const record = await mutate(req, async document => {
         if (document.cpanelImports.length >= MAX_IMPORTS) return fail('VALIDATION', 'cPanel import capacity reached; discard old imports first', { stateChanged: false })
         const now = new Date().toISOString()
@@ -476,23 +486,36 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
       return json({ sessions: document.sessions.map(project), cpanelImports: document.cpanelImports.map(projectImport), capabilities })
     }
     if (method === 'POST' && !match) {
-      const body = exact(await requestBody(req), ['auth'])
-      const auth = parseTransferAuth(body.auth)
+      const body = exact(await requestBody(req), ['auth', 'node', 'live'])
+      if (body.live !== undefined && typeof body.live !== 'boolean' || body.live === true && body.node === undefined || (body.auth === undefined) === (body.node === undefined)) return fail('VALIDATION', 'a transfer takes a source credential, or a linked server for a live transfer', { stateChanged: false })
+      if (body.node !== undefined && !ports.nodeAuth) return fail('PRECONDITION_FAILED', 'linked server transfers require the host agent', { stateChanged: false })
+      const auth = body.node !== undefined ? await ports.nodeAuth!(String(body.node)) : parseTransferAuth(body.auth)
       const result = await mutate(req, async (document, fresh) => {
         if (document.sessions.length >= MAX_SESSIONS) return fail('VALIDATION', 'transfer session capacity reached', { stateChanged: false })
-        const record: StoredTransferWorkspace = { id: randomUUID(), actor: fresh.principal.username, createdAt: new Date().toISOString(), auth, events: [] }
+        const record: StoredTransferWorkspace = { id: randomUUID(), actor: fresh.principal.username, createdAt: new Date().toISOString(), auth, ...(body.live === true ? { live: true } : {}), events: [] }
         const value = project(record); document.sessions.push(record); return value
       })
       await audit(caller, 'transfer.session.created')
       return json({ ...result, capabilities }, 201)
     }
+    if (method === 'DELETE' && match) {
+      const id = match[1]!.toLowerCase()
+      await mutate(req, async document => {
+        const index = document.sessions.findIndex(session => session.id === id)
+        if (index < 0) return fail('NOT_FOUND', 'transfer session not found', { stateChanged: false })
+        if (project(document.sessions[index]!).session.state !== 'cancelled') return fail('CONFLICT', 'only a cancelled transfer session can be removed', { stateChanged: false })
+        document.sessions.splice(index, 1)
+      })
+      await audit(caller, 'transfer.session.deleted')
+      return json({ deleted: true })
+    }
     if (method === 'PATCH' && match) {
       const id = match[1]!.toLowerCase()
       if (!isUuid(id)) return fail('NOT_FOUND', 'transfer session not found', { stateChanged: false })
-      const body = exact(await requestBody(req), ['expectedRevision', 'action', 'accounts', 'plans', 'conflictId', 'resolution', 'digest'])
+      const body = exact(await requestBody(req), ['expectedRevision', 'action', 'accounts', 'plans', 'conflictId', 'resolution', 'digest', 'account', 'acceptLoss'])
       const revision = expected(body)
-      if (!['discover', 'select', 'resolve', 'review', 'cancel', 'run', 'stop'].includes(String(body.action))) return fail('VALIDATION', 'unsupported transfer workspace action', { stateChanged: false })
-      const actionFields: Record<string, string[]> = { discover: [], select: ['accounts', 'plans'], resolve: ['conflictId', 'resolution'], review: [], cancel: [], run: ['digest'], stop: [] }
+      if (!['discover', 'select', 'resolve', 'review', 'cancel', 'run', 'stop', 'revert'].includes(String(body.action))) return fail('VALIDATION', 'unsupported transfer workspace action', { stateChanged: false })
+      const actionFields: Record<string, string[]> = { discover: [], select: ['accounts', 'plans'], resolve: ['conflictId', 'resolution'], review: [], cancel: [], run: ['digest'], stop: [], revert: ['account', 'acceptLoss'] }
       exact(body, ['expectedRevision', 'action', ...actionFields[String(body.action)]!])
       const owned = async (): Promise<StoredTransferWorkspace> => {
         const record = (await readDocument(path)).sessions.find(session => session.id === id)
@@ -535,6 +558,20 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
         await audit(caller, 'transfer.execution.started', 'transfer:' + id, { accounts: prepared.review?.accounts.map(account => account.source + '->' + account.target) ?? [] })
         runSession(id, caller)
         return json({ ...prepared, running: true, capabilities }, 202)
+      }
+      if (body.action === 'revert') {
+        const revert = ports.execution?.revert ?? fail('PRECONDITION_FAILED', 'native transfer execution requires the host agent', { stateChanged: false })
+        if (typeof body.account !== 'string' || typeof body.acceptLoss !== 'boolean') return fail('VALIDATION', 'an account and acceptLoss are required', { stateChanged: false })
+        if (running.size) return fail('CONFLICT', 'another transfer or import is running; wait for it to finish', { stateChanged: false })
+        const account = body.account, candidate = await owned(), result = candidate.results?.[account]
+        if (!result || !candidate.live || !Object.hasOwn(replay(candidate).progress, account)) return fail('NOT_FOUND', 'this account was not moved live', { stateChanged: false })
+        running.add(id)
+        try {
+          const live = await revert(caller, replay(candidate), account, result, body.acceptLoss)
+          const updated = await updateSession(id, null, async current => ({ ...current, results: { ...current.results, [account]: { ...current.results?.[account], live } } }))
+          await audit(caller, 'transfer.execution.reverted', 'transfer:' + id, { account, acceptLoss: body.acceptLoss })
+          return json({ ...updated, capabilities })
+        } finally { running.delete(id) }
       }
       if (body.action === 'stop') {
         const result = await mutate(req, async document => {

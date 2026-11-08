@@ -234,6 +234,13 @@ export const nativeRpmDatabaseRecovery = (family: OsFamily, run: PackageRecovery
     safety: () => observePackageSafety('rhel', nativePackageSafetyPorts(run)), isProcessAlive,
   })
 
+/** The metadata snapshot provider exists only on EL profiles; Debian/Ubuntu have no dnf cache repair. */
+export const nativeRhelCacheRecovery = (family: OsFamily, run: PackageRecoveryPorts['run'], recoveryDir = PACKAGE_RECOVERY_DIR): RhelCacheRecovery | undefined =>
+  family !== 'rhel' ? undefined : createRhelCacheRecovery({
+    recoveryDir, sourceDir: '/var/cache/dnf', configFiles: nativeDnfConfigFiles, run,
+    safety: () => observePackageSafety('rhel', nativePackageSafetyPorts(run)), isProcessAlive,
+  })
+
 export const nativeDnfConfigFiles = async (): Promise<string[]> => {
   let repos: string[] = []
   try { repos = (await readdir('/etc/yum.repos.d')).filter(name => /^[A-Za-z0-9._-]{1,128}\.repo$/.test(name)).map(name => '/etc/yum.repos.d/' + name) } catch { repos = [] }

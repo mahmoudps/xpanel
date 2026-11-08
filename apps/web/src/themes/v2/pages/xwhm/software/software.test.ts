@@ -55,11 +55,13 @@ describe('V2 WHM software documents', () => {
     expect(html).not.toMatch(/name="(?:catalogUrl|signingKey|password)"/)
   })
 
-  it('preserves host container inventory and keeps creation and compose unavailable', () => {
+  it('preserves host container inventory and offers creation through account stacks', () => {
     const html = render('/whm/software/containers')
     expect(node(html, 'data-sw-filter-engine').attrs.has('disabled')).toBe(true)
     expect(parseMarkup(html).find(item => item.tag === 'tbody' && item.attrs.has('data-sw-containers'))?.attrs.get('data-columns')).toBe('7')
-    expect(node(html, 'data-container-create-state').attrs.get('data-container-create-state')).toBe('unavailable')
+    expect(html).not.toContain('data-container-create-state')
+    expect(node(html, 'data-ctr-do', 'stack-save').attrs.has('disabled')).toBe(true)
+    expect(node(html, 'data-ctr-rows', 'stacks').tag).toBe('tbody')
     expect(html).toContain('Account rootless containers')
   })
 
@@ -87,8 +89,8 @@ describe('V2 WHM software documents', () => {
 
   it('does not present an absent project provider as a successful empty project list', () => {
     const html = render('/whm/software/application-projects')
-    expect(node(html, 'data-project-runner-state').attrs.get('data-project-runner-state')).toBe('unavailable')
-    expect(html).toContain('Project state has not been read.')
+    expect(html).toContain('data-sw-projects-manager')
+    expect(html).toContain('Nothing has been read yet.')
     expect(html).not.toContain('No projects exist.')
     expect(node(html, 'data-sw-projects-runtimes').tag).toBe('tbody')
   })

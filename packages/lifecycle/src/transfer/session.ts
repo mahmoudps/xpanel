@@ -57,7 +57,8 @@ export interface Conflict {
 }
 
 export type SessionState = 'created' | 'connected' | 'inventoried' | 'selected' | 'reviewed' | 'applying' | 'completed' | 'failed' | 'cancelled'
-export type AccountPhase = 'pending' | 'exporting' | 'copying' | 'importing' | 'reconciling' | 'done' | 'failed' | 'skipped'
+/** syncing and cutover run on a live transfer only, after the first copy is complete here. */
+export type AccountPhase = 'pending' | 'exporting' | 'copying' | 'importing' | 'reconciling' | 'syncing' | 'cutover' | 'done' | 'failed' | 'skipped'
 
 export interface AccountProgress {
   targetUsername: string
@@ -74,6 +75,8 @@ export interface TransferSession {
   updatedAt: string
   state: SessionState
   auth: TransferAuth
+  /** a final sync and a cutover follow the copy; only a linked server can be the source */
+  live: boolean
   source: { hostname: string; version: string } | null
   inventory: { accounts: SourceAccount[]; plans: SourcePlan[] } | null
   local: LocalInventory | null
@@ -100,7 +103,9 @@ export type TransferEvent =
 
 const TERMINAL: ReadonlySet<SessionState> = new Set(['completed', 'failed', 'cancelled'])
 const FINISHED_PHASES: ReadonlySet<AccountPhase> = new Set(['done', 'failed', 'skipped'])
-const PHASE_ORDER: readonly AccountPhase[] = ['pending', 'exporting', 'copying', 'importing', 'reconciling', 'done']
+const PHASE_ORDER: readonly AccountPhase[] = ['pending', 'exporting', 'copying', 'importing', 'reconciling', 'syncing', 'cutover', 'done']
+const COPY_PHASES: readonly AccountPhase[] = PHASE_ORDER.filter(phase => phase !== 'syncing' && phase !== 'cutover')
+const LIVE_PERCENT: Partial<Record<AccountPhase, number>> = { syncing: 90, cutover: 95 }
 /** Field names that would carry a password or raw secret; the session stores ids of stored keys only. */
 const SECRET_KEY = /pass(word|wd|phrase)?$|^pwd$|secret|^token$|private.?key|^key$|credential/i
 const SSH_FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}=?$/
@@ -160,13 +165,14 @@ export const parseTransferAuth = (raw: unknown): TransferAuth => {
 
 const assertNow = (now: unknown): string => (isIsoDate(now) ? now : fail('VALIDATION', 'now must be an RFC 3339 UTC timestamp'))
 
-export const createTransferSession = (input: { id: string; actor: string; now: string; auth: unknown }): TransferSession => ({
+export const createTransferSession = (input: { id: string; actor: string; now: string; auth: unknown; live?: boolean }): TransferSession => ({
   id: assertId(input.id, 'session id'),
   actor: assertText(input.actor, 'actor', 128),
   createdAt: assertNow(input.now),
   updatedAt: input.now,
   state: 'created',
   auth: parseTransferAuth(input.auth),
+  live: input.live === true,
   source: null,
   inventory: null,
   local: null,
@@ -347,6 +353,8 @@ export interface TransferReview {
   skipped: string[]
   plans: { source: string; action: 'create' | 'map' | 'rename'; target: string }[]
   sharedServices: 'reload-only'
+  /** present on a live transfer: the digest root confirms covers the cutover */
+  live?: true
 }
 
 export const buildReview = (s: TransferSession): TransferReview => {
@@ -380,7 +388,7 @@ export const buildReview = (s: TransferSession): TransferReview => {
     if (r?.action === 'skip') return []
     return [{ source: p, action: r?.action === 'map-plan' ? 'map' as const : r?.action === 'rename' ? 'rename' as const : 'create' as const, target: planTarget(p) }]
   })
-  return { source: s.source as { hostname: string; version: string }, accounts, skipped: [...skipped].sort(), plans, sharedServices: 'reload-only' }
+  return { source: s.source as { hostname: string; version: string }, accounts, skipped: [...skipped].sort(), plans, sharedServices: 'reload-only', ...(s.live ? { live: true as const } : {}) }
 }
 
 export const reviewDigest = (r: TransferReview): string => createHash('sha256').update(JSON.stringify(r)).digest('hex')
@@ -571,7 +579,9 @@ export const itemStatus = (p: Pick<AccountProgress, 'phase'>): TransferItemStatu
 /** 0..100 for transfer_items.progress: bytes copied when known, else the phase reached. */
 export const itemPercent = (p: AccountProgress): number => {
   if (p.phase === 'done' || p.phase === 'skipped') return 100
-  const byPhase = Math.round((Math.max(0, PHASE_ORDER.indexOf(p.phase)) / (PHASE_ORDER.length - 1)) * 100)
+  const live = LIVE_PERCENT[p.phase]
+  if (live !== undefined) return live
+  const byPhase = Math.round((Math.max(0, COPY_PHASES.indexOf(p.phase)) / (COPY_PHASES.length - 1)) * 100)
   if (p.phase === 'copying' && p.totalBytes > 0) return Math.min(99, Math.max(byPhase, Math.floor((p.bytes / p.totalBytes) * 100)))
   return Math.min(99, byPhase)
 }

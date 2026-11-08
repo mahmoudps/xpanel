@@ -47,6 +47,12 @@ export function readProcessesView(value: unknown): MonitoringProcessesView {
   return { state: value.state as 'read' | 'unavailable', observedAt: value.observedAt, total: value.total, truncated: value.truncated, items, accounts }
 }
 
+export function readUserKillOutcome(value: unknown, username: string): { state: 'confirmed' | 'attempted' | 'unknown'; signalled: number; remaining: number | null; exempt: number } {
+  if (!monitoringObject(value) || !['confirmed', 'attempted', 'unknown'].includes(String(value.state)) || value.username !== username || !monitoringCount(value.signalled) || !monitoringCount(value.exempt) || !monitoringIso(value.observedAt)
+    || (value.state === 'unknown' ? value.remaining !== null : !monitoringCount(value.remaining) || (value.remaining === 0) !== (value.state === 'confirmed')) || value.verificationRequired !== (value.state !== 'confirmed')) throw new Error('invalid_sweep_outcome')
+  return { state: value.state as 'confirmed' | 'attempted' | 'unknown', signalled: value.signalled, remaining: value.remaining as number | null, exempt: value.exempt }
+}
+
 export function readSignalOutcome(value: unknown, body: MonitoringSignalBody): MonitoringSignalView {
   if (!monitoringObject(value) || !['confirmed', 'attempted', 'unknown'].includes(String(value.state)) || value.pid !== body.pid || value.signal !== body.signal || typeof value.commandOk !== 'boolean' || !monitoringIso(value.observedAt) || value.verificationRequired !== (value.state !== 'confirmed')) throw new Error('invalid_signal_outcome')
   return { state: value.state as MonitoringSignalView['state'], commandOk: value.commandOk, observedAt: value.observedAt }
@@ -121,6 +127,7 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
       ['whm-process-actions', 'div', { 'content': 'div' }],
       ['whm-process-term', 'button', { 'content': 'button' }],
       ['whm-process-kill', 'button', { 'content': 'button' }],
+      ['whm-process-kill-user', 'button', { 'content': 'button' }],
     ] as const
     const verifyWhmTemplates = (): void => {
       if (kind !== 'processes') return
@@ -156,7 +163,7 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
       return reply
     }
     let busy = false
-    const lock = (on: boolean): void => { busy = on; root.setAttribute('aria-busy', String(on)); refresh.disabled = on || !admitted() }
+    const lock = (on: boolean): void => { busy = on; root.setAttribute('aria-busy', String(on)); refresh.disabled = on || !admitted(); root.querySelectorAll<HTMLButtonElement>('[data-whm-monitoring-kill-user]').forEach(button => { button.disabled = on }) }
     if (!admitted()) {
       root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
       note('unavailable', t('Host monitoring is unavailable here. Nothing was read or changed.'))
@@ -215,7 +222,13 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
           for (const control of [search, account, sort]) if (control) control.disabled = next.state !== 'read'
           if (accountRows) {
             accountRows.replaceChildren()
-            for (const summary of next.accounts) { const row = document.createElement('tr'); cell(row, summary.username, { technical: true }); cell(row, String(summary.processes), { technical: true, numeric: true }); cell(row, fixed(summary.cpuPercent), { technical: true, numeric: true }); cell(row, bytes(summary.rssBytes), { technical: true, numeric: true }); accountRows.append(row) }
+            for (const summary of next.accounts) {
+              const row = document.createElement('tr'); cell(row, summary.username, { technical: true }); cell(row, String(summary.processes), { technical: true, numeric: true }); cell(row, fixed(summary.cpuPercent), { technical: true, numeric: true }); cell(row, bytes(summary.rssBytes), { technical: true, numeric: true })
+              const action = document.createElement('td')
+              if (canSignal) { const button = whmClientNode(root, 'whm-process-kill-user', 'button'); button.dataset.whmMonitoringKillUser = summary.username; button.textContent = t('Kill all'); button.addEventListener('click', () => { if (!button.disabled) void sweep(summary.username) }); action.append(button) }
+              else action.textContent = t('Signals unavailable')
+              row.append(action); accountRows.append(row)
+            }
             if (!next.accounts.length) placeholder(accountRows, next.state === 'read' ? t('No running process belongs to a saved account.') : t('Account grouping is unavailable.'))
           }
           if (!keepNote) note(next.state === 'read' ? 'read' : 'unavailable', next.state !== 'read' ? t('The host process list is unavailable. Nothing was signalled.') : next.truncated ? t('Only the first 4000 processes were returned; more exist on the host.') : t('Process list read. Command arguments are not shown.'))
@@ -245,6 +258,24 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
           const problem = monitoringObject(error) ? error : {}, details = monitoringObject(problem.details) ? problem.details : {}
           const refused = details.stateChanged === false && details.unknownOutcome !== true && details.verificationRequired !== true
           note(refused && problem.status === 409 ? 'stale' : refused ? 'failed' : 'uncertain', refused && problem.status === 409 ? t('The process changed or exited before the signal. Nothing was sent; read the list again.') : refused ? t('The signal was refused. Nothing was sent.') : t('The signal outcome requires review. No retry was sent; read the process list before acting again.'))
+        } finally { lock(false) }
+        await load(true)
+      }
+      const sweep = async (username: string): Promise<void> => {
+        if (busy || !canSignal || !admitted() || !askDialog) return
+        let confirmed = false
+        try { confirmed = await askDialog({ title: t('Kill all processes of {user}?', { user: username }), body: t('Every process of this account gets KILL at once. Unsaved work is lost and open site requests fail. Services restart their own workers, and panel helpers are left running.'), confirm: t('Kill all'), danger: true }) === true } catch { confirmed = false }
+        if (!confirmed || busy || !admitted()) return
+        lock(true); paint()
+        try {
+          const outcome = readUserKillOutcome(await checkedRequest('POST', '/api/server/monitoring/processes/kill-user', { username, killConfirmed: true }), username)
+          if (outcome.state === 'confirmed') note('saved', t('No process of {user} remains; {count} were signalled.', { user: username, count: String(outcome.signalled) }) + (outcome.exempt ? ' ' + t('{count} panel helpers were left running.', { count: String(outcome.exempt) }) : ''))
+          else if (outcome.state === 'attempted') note('uncertain', t('{count} processes of {user} are still present. A service may have started them again; read the list before acting again.', { user: username, count: String(outcome.remaining) }))
+          else note('uncertain', t('The signal outcome could not be verified. No retry was sent; read the process list before acting again.'))
+        } catch (error) {
+          const problem = monitoringObject(error) ? error : {}, details = monitoringObject(problem.details) ? problem.details : {}
+          const refused = details.stateChanged === false && details.unknownOutcome !== true && details.verificationRequired !== true
+          note(refused ? 'failed' : 'uncertain', refused ? t('The signal was refused. Nothing was sent.') : t('The signal outcome requires review. No retry was sent; read the process list before acting again.'))
         } finally { lock(false) }
         await load(true)
       }
@@ -384,4 +415,4 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
   })
 }
 
-export const WHM_MONITORING_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[monitoringObject, monitoringText, monitoringIso, monitoringCount, monitoringNumber, monitoringAccount].map(helper => helper.toString()).join(';')};const readProcessesView=${readProcessesView.toString()};const readSignalOutcome=${readSignalOutcome.toString()};const readDiskView=${readDiskView.toString()};const readLogsView=${readLogsView.toString()};const readPerformanceView=${readPerformanceView.toString()};return ${bindWhmMonitoring.toString()};})()`
+export const WHM_MONITORING_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[monitoringObject, monitoringText, monitoringIso, monitoringCount, monitoringNumber, monitoringAccount].map(helper => helper.toString()).join(';')};const readProcessesView=${readProcessesView.toString()};const readSignalOutcome=${readSignalOutcome.toString()};const readUserKillOutcome=${readUserKillOutcome.toString()};const readDiskView=${readDiskView.toString()};const readLogsView=${readLogsView.toString()};const readPerformanceView=${readPerformanceView.toString()};return ${bindWhmMonitoring.toString()};})()`

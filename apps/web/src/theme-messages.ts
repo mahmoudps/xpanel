@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { URL as FileURL } from 'node:url'
-import { LOCALES, SOURCE_LOCALE, catalogFromEntries, catalogKey, createTranslator, isLocale, messageArguments, parsePo, type Catalog, type Locale, type MessageValues, type PoCatalog, type Translate } from '@xpanel/core'
+import { LOCALES, SOURCE_LOCALE, catalogFromEntries, catalogKey, createTranslator, isLocale, localeInfo, messageArguments, parsePo, type Catalog, type Locale, type MessageValues, type PoCatalog, type Translate } from '@xpanel/core'
 import { translator } from './i18n.ts'
 
 /** Only these owned keys may be added to one document's client translator. */
@@ -57,26 +57,30 @@ export function createThemeMessages(themeId: string, sourcePo: string, translati
     catalogs.set(tag, parsed ? catalogFromEntries(parsed.entries) : new Map())
   }
   const prefix = 'theme:' + themeId + SEPARATOR
-  const ownTranslators = new Map(LOCALES.map(({ tag }) => [tag, createTranslator(tag, catalogs.get(tag))]))
   const wrapped = new Map<Locale, Translate>()
-  for (const { tag } of LOCALES) {
+  // A copied locale reads the theme strings of the locale it was copied from.
+  const catalogOf = (tag: Locale): Catalog => catalogs.get(tag) ?? catalogs.get(localeInfo(tag).base as Locale) ?? new Map()
+  const wrap = (tag: Locale): Translate => {
+    const own = createTranslator(tag, catalogOf(tag))
     const translate = (message: string, values?: MessageValues): string => {
       const context = message.slice(0, message.indexOf(SEPARATOR))
       if (message.includes(SEPARATOR) && context.startsWith('theme:') && !message.startsWith(prefix))
         throw new Error('theme_message_scope')
-      return asciiDigits(message.startsWith(prefix) ? ownTranslators.get(tag)!(message, values) : translator(tag)(message, values))
+      return asciiDigits(message.startsWith(prefix) ? own(message, values) : translator(tag)(message, values))
     }
-    wrapped.set(tag, Object.assign(translate, { locale: tag }))
+    const bound = Object.assign(translate, { locale: tag })
+    wrapped.set(tag, bound)
+    return bound
   }
   return Object.freeze({
     themeId,
     translator(locale: Locale): Translate {
       if (!isLocale(locale)) throw new Error('theme_message_locale')
-      return wrapped.get(locale)!
+      return wrapped.get(locale) ?? wrap(locale)
     },
     forClient(locale: Locale): ThemeCatalogOverlay {
       if (!isLocale(locale)) throw new Error('theme_message_locale')
-      return Object.freeze({ themeId, locale, messages: new Map(catalogs.get(locale)) })
+      return Object.freeze({ themeId, locale, messages: new Map(catalogOf(locale)) })
     },
   })
 }

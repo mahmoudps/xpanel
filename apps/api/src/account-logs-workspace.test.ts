@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Account, Domain, Plan } from '@xpanel/core'
 import type { StateStore } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
-import { handleAccountLogsRoute } from './account-logs-workspace.ts'
+import { handleAccountLogsRoute, projectLogArchives, projectRawServerLogs } from './account-logs-workspace.ts'
 import type { ReadAgent } from './account-ssh-workspace.ts'
 import { handleAccountLogsRoute as handleAgentLogs } from '../../agent/src/account-logs.ts'
 import type { LogTail } from '../../agent/src/account-logs.ts'
@@ -26,10 +26,18 @@ function setup(options: { disabled?: string[]; caller?: AuthenticatedCaller; tex
     const value = await response!.json() as Record<string, unknown>
     return options.reply ? options.reply(value) : value
   })
-  const store = { getAccount: async (id: string) => id === ACCOUNT ? account : null, getDomain: async (id: string) => id === MAIN ? main : id === FOREIGN ? foreign : null, getPlan: async () => ({ featureListId: 'list' }), getFeatureList: async () => ({ id: 'list', name: 'f', ownerId: null, disabled: options.disabled ?? [] }) } as unknown as StateStore
-  const ports = { store, requireCaller: async () => options.caller ?? owner, readAgent: readAgent as unknown as ReadAgent }
-  const route = (path: string, method = 'GET') => { const url = new URL('http://panel.test' + path); return handleAccountLogsRoute(new Request(url, { method }), url, method, ports) }
-  return { route, readAgent, readTail }
+  const setAccountLogSettings = vi.fn(async (_id: string, settings: Account['logs'] | null) => ({ ...account, ...(settings ? { logs: settings } : {}) }))
+  const store = { rootDir: '/nonexistent-state', getAccount: async (id: string) => id === ACCOUNT ? account : null, getDomain: async (id: string) => id === MAIN ? main : id === FOREIGN ? foreign : null, getPlan: async () => ({ featureListId: 'list' }), getFeatureList: async () => ({ id: 'list', name: 'f', ownerId: null, disabled: options.disabled ?? [] }), setAccountLogSettings } as unknown as StateStore
+  const emitAudit = vi.fn(async () => undefined)
+  const agentCalls: string[] = []
+  const callAgent = async (_caller: AuthenticatedCaller, path: string): Promise<Response> => {
+    agentCalls.push(path)
+    return path.endsWith('/access/download') || path.startsWith('/host/logs/raw/') ? new Response(new Uint8Array([31, 139, 8, 0]), { headers: { 'content-type': 'application/gzip', 'content-disposition': 'attachment; filename="example.test.access.log.gz"' } }) : new Response(null, { status: 404 })
+  }
+  const assertRoot = async (caller: AuthenticatedCaller) => { if (caller.principal.kind !== 'root') throw Object.assign(new Error('root role is required'), { code: 'FORBIDDEN' }) }
+  const ports = { store, requireCaller: async () => options.caller ?? owner, readAgent: readAgent as unknown as ReadAgent, assertRoot, emitAudit, callAgent }
+  const route = (path: string, method = 'GET', body?: unknown) => { const url = new URL('http://panel.test' + path); return handleAccountLogsRoute(new Request(url, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }), url, method, ports) }
+  return { route, readAgent, readTail, setAccountLogSettings, emitAudit, agentCalls }
 }
 
 describe('account site logs workspace', () => {
@@ -58,5 +66,49 @@ describe('account site logs workspace', () => {
     for (const reply of [(v: Record<string, unknown>) => ({ ...v, context: { ...(v.context as object), domainId: FOREIGN } }), (v: Record<string, unknown>) => ({ ...v, lines: ['a\nb'] }),
       (v: Record<string, unknown>) => ({ ...v, lines: Array.from({ length: 2001 }, () => 'x') }), (v: Record<string, unknown>) => ({ ...v, limits: { ...(v.limits as object), maxBytes: 1 << 30 } }), (v: Record<string, unknown>) => ({ ...v, file: { exists: false, sizeBytes: 0, mtime: null, truncated: false } })])
       await expect(setup({ reply }).route('/api/account/logs/' + MAIN + '/access')).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', detail: { stateChanged: false } })
+  })
+  it('saves raw access archive settings for the owner, or returns the account to the server defaults', async () => {
+    const t = setup()
+    expect(await (await t.route('/api/account/logs/settings'))!.json()).toEqual({ context: { accountId: ACCOUNT }, settings: { archive: true, removePreviousMonthArchive: false, retentionDays: null }, source: 'server', serverDefaults: { archive: true, removePreviousMonthArchive: false, retentionDays: null } })
+    const saved = await (await t.route('/api/account/logs/settings', 'PUT', { settings: { archive: true, removePreviousMonthArchive: true, retentionDays: 7 } }))!.json() as Record<string, any>
+    expect(saved).toMatchObject({ source: 'account', settings: { retentionDays: 7 } })
+    expect(t.emitAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'account.logs.settings.updated', target: 'account:alice' }), expect.anything())
+    expect(await (await t.route('/api/account/logs/settings', 'PUT', { settings: null }))!.json()).toMatchObject({ source: 'server' })
+    await expect(t.route('/api/account/logs/settings', 'PUT', { settings: { archive: 'yes' } })).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(t.route('/api/account/logs/settings', 'PUT', { archive: true })).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(setup({ disabled: ['raw-access'] }).route('/api/account/logs/settings')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(t.setAccountLogSettings).toHaveBeenCalledTimes(2)
+  })
+  it('lists archives through the agent and refuses a foreign or malformed listing', async () => {
+    const t = setup()
+    // no ~/logs directory on this host: truthfully unavailable, not an empty archive
+    expect(await (await t.route('/api/account/logs/archives'))!.json()).toMatchObject({ context: { accountId: ACCOUNT, username: 'alice' }, available: false, archives: [] })
+    const listed = { context: { accountId: ACCOUNT, username: 'alice' }, available: true, observedAt: '2026-11-06T00:00:00.000Z', archives: [{ name: 'example.test-2026-11-05.gz', site: 'example.test', day: '2026-11-05', sizeBytes: 10, mtime: '2026-11-06T00:05:00.000Z' }] }
+    expect(projectLogArchives(listed, account).archives).toHaveLength(1)
+    for (const bad of [{ ...listed, context: { accountId: FOREIGN, username: 'alice' } }, { ...listed, archives: [{ ...listed.archives[0]!, name: '../../etc/shadow.gz' }] }, { ...listed, available: false }])
+      expect(() => projectLogArchives(bad, account)).toThrow()
+    await expect(t.route('/api/account/logs/archives/example.test-2026-11-05.gz')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(t.route('/api/account/logs/archives?all=1')).rejects.toMatchObject({ code: 'VALIDATION' })
+  })
+  it('streams the current access log of an owned domain from the agent and nothing for another domain', async () => {
+    const t = setup()
+    const response = (await t.route('/api/account/logs/' + MAIN + '/access/download'))!
+    expect(response.headers.get('content-type')).toBe('application/gzip')
+    expect(response.headers.get('content-disposition')).toBe('attachment; filename="example.test.access.log.gz"')
+    expect(t.agentCalls).toEqual(['/accounts/alice/logs/' + MAIN + '/access/download'])
+    await expect(t.route('/api/account/logs/' + FOREIGN + '/access/download')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(setup({ disabled: ['raw-access'] }).route('/api/account/logs/' + MAIN + '/access/download')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect((await t.route('/api/account/logs/' + MAIN + '/access/download', 'POST'))!.status).toBe(405)
+  })
+  it('lets only root list and download the web servers own logs by their fixed names', async () => {
+    const root = setup({ caller: { ...owner, principal: { kind: 'root', id: 'root', username: 'root' } } as unknown as AuthenticatedCaller })
+    const file = (await root.route('/api/server/logs/raw/nginx/access.log.2.gz'))!
+    expect(file.headers.get('content-disposition')).toBe('attachment; filename="nginx-access.log.2.gz"')
+    expect(root.agentCalls).toEqual(['/host/logs/raw/nginx/access.log.2.gz'])
+    for (const bad of ['/api/server/logs/raw/nginx/shadow', '/api/server/logs/raw/nginx/..%2Faccess.log', '/api/server/logs/raw/mysql/access.log']) await expect(root.route(bad)).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(setup().route('/api/server/logs/raw/nginx')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    const listed = { server: 'nginx', state: 'read', files: [{ name: 'error.log', sizeBytes: 10, mtime: '2026-11-06T00:00:00.000Z', compressed: false, downloadable: true }], maxBytes: 1 << 30, observedAt: '2026-11-06T00:00:00.000Z' }
+    expect(projectRawServerLogs(listed, 'nginx').files).toHaveLength(1)
+    for (const bad of [{ ...listed, server: 'apache' }, { ...listed, files: [{ ...listed.files[0]!, name: '../../etc/shadow' }] }, { ...listed, state: 'unavailable' }]) expect(() => projectRawServerLogs(bad, 'nginx')).toThrow()
   })
 })

@@ -108,6 +108,7 @@ describe('Portable Ubuntu and RHEL configuration plans (no host or browser proof
       const rawSnapshot = await stateHandle.store.readSnapshot()
       const snapshot = {
         ...rawSnapshot,
+        firewall: { ...rawSnapshot.firewall, enabled: true },
         accounts: rawSnapshot.accounts.map((a) =>
           a.username === 'xpalice' ? { ...a, uid: 29101, gid: 29101 } : a,
         ),
@@ -158,7 +159,7 @@ describe('Portable Ubuntu and RHEL configuration plans (no host or browser proof
 
   }, 30_000)
 
-  it('renders CentOS Stream, AlmaLinux and Rocky Linux plans with safe argv vectors', async () => {
+  it('renders CentOS Stream, AlmaLinux and Rocky Linux plans with safe argv vectors', { tags: ['slow'], timeout: 30_000 }, async () => {
     const rhelReleases = [
       {
         label: 'CentOS Stream 9',
@@ -350,5 +351,5 @@ describe('Portable Ubuntu and RHEL configuration plans (no host or browser proof
       }
     }
 
-  }, 30_000)
+  })
 })

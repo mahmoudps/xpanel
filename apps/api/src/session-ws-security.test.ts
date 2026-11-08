@@ -20,6 +20,7 @@ import {
 } from './auth.ts'
 import { createApiApp, listenApiServer } from './server.ts'
 import { LiveEventHub, type EventSubscriber } from './ws.ts'
+import { writeSignInLockout } from './testing/sign-in-policy-fixture.ts'
 
 const ROOT: EventSubscriber = { kind: 'root', username: 'root' }
 const cleanup: Array<() => Promise<void> | void> = []
@@ -480,7 +481,8 @@ describe('WebSocket authentication against real API and SQLite authority', () =>
     const response = await fetch(`http://127.0.0.1:${fixture.port}/api/events/recent`, {
       headers: { ...token.headers, 'X-Forwarded-For': '198.51.100.10', 'X-Real-IP': '198.51.100.10' },
     })
-    assert.equal(response.status, 401)
+    assert.equal(response.status, 403)
+    assert.equal(((await response.json()) as { code: string }).code, 'FORBIDDEN')
   })
 
   it('rejects an unauthorized Origin even when the bearer token is valid', async () => {
@@ -622,7 +624,7 @@ describe('WebSocket authentication against real API and SQLite authority', () =>
         }),
         { remoteAddress: mappedPeer },
       )
-      assert.equal(httpRes.status, 401)
+      assert.equal(httpRes.status, 403)
 
       // WS upgrade with spoofed X-Forwarded-For from IPv4-mapped loopback must be rejected
       const fakeUpgrade = {
@@ -677,14 +679,13 @@ describe('WebSocket authentication against real API and SQLite authority', () =>
     })
     await setTotpSecret(database.db, principal.id, sealTotpSecret(totpSecret, SERVER_SECRET))
 
+    await writeSignInLockout(state.store.rootDir, 2, 1)
     const app = createApiApp({
       db: database.db,
       store: state.store,
       serverSecret: SERVER_SECRET,
       allowedOrigins: [ALLOWED_ORIGIN],
       requireSecureCookies: true,
-      lockoutThreshold: 2,
-      lockoutDurationMs: 60_000,
     })
     // A closed transport can still have an already-started authorization waiting
     // for the state mutex. Retire those real operations before deleting SQLite.
@@ -930,7 +931,7 @@ describe('WebSocket authentication against real API and SQLite authority', () =>
       maxAccounts: 10,
       totalDiskMb: 10240,
       totalBandwidthMb: 102400,
-      oversell: false,
+      oversell: { disk: false, bandwidth: false },
       nameservers: ['ns1.example.test'],
       delegatedIps: [],
     })
@@ -941,7 +942,7 @@ describe('WebSocket authentication against real API and SQLite authority', () =>
       maxAccounts: 10,
       totalDiskMb: 10240,
       totalBandwidthMb: 102400,
-      oversell: false,
+      oversell: { disk: false, bandwidth: false },
       nameservers: ['ns1.example.test'],
       delegatedIps: [],
     })

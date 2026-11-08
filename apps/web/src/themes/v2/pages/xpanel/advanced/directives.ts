@@ -2,7 +2,7 @@ import { webDirectiveClientTemplates } from './directive-client-templates.ts'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { actions, area, button, check, deniedPage, esc, facts, field, fields, input, note, page, section, select, settingsContext, split, status, table, technical, unreadRow, NO_SETTINGS_AUTHORITY, type PanelSettingsAuthority } from '../settings/common.ts'
 
-type DirectiveKind = 'error-pages' | 'indexes' | 'mime-types' | 'handlers' | 'hotlink' | 'ip-blocker'
+type DirectiveKind = 'error-pages' | 'indexes' | 'mime-types' | 'handlers' | 'hotlink'
 interface DirectiveField { key: string; label: string; kind?: 'select' | 'textarea' | 'checkbox'; options?: readonly (readonly [string, string])[]; maxlength?: number; help?: string; technical?: boolean }
 interface DirectiveSpec { route: string; title: string; description: string; columns: readonly string[]; formTitle: string; fields: readonly DirectiveField[]; notes: readonly string[]; list?: boolean }
 
@@ -19,15 +19,12 @@ const SPECS: Readonly<Record<DirectiveKind, DirectiveSpec>> = {
     columns: [msgid('MIME type'), msgid('Extensions'), msgid('Actions')], formTitle: msgid('Add or update a MIME type'), list: true,
     fields: [{ key: 'type', label: msgid('MIME type'), technical: true, maxlength: 255, help: msgctxt('theme:v2', 'Use type/subtype, such as text/markdown.') }, { key: 'extensions', label: msgid('Extensions'), technical: true, maxlength: 512, help: msgctxt('theme:v2', 'Separate extensions with spaces, such as .md .markdown.') }],
     notes: [msgctxt('theme:v2', 'Executable content types and script extensions are refused. PHP stays with the reviewed domain handler.')] },
-  handlers: { route: '/advanced/handlers', title: msgid('Apache handlers'), description: msgctxt('theme:v2', 'Handler mappings choose which server module processes a file extension.'), columns: [msgid('Handler'), msgid('Extensions'), msgid('Actions')], formTitle: msgctxt('theme:v2', 'Add handler'),
-    fields: [{ key: 'handler', label: msgid('Handler'), technical: true }, { key: 'extensions', label: msgid('Extensions'), technical: true }],
-    notes: [msgctxt('theme:v2', 'Account handler mappings are unavailable. The reviewed file policy does not permit AddHandler. Executable handlers stay with the server PHP setup.')] },
+  handlers: { route: '/advanced/handlers', title: msgid('Apache handlers'), description: msgctxt('theme:v2', 'Choose which Apache module processes a file extension on this domain. Changes replace only the managed block.'), columns: [msgid('Handler'), msgid('Extensions'), msgid('Actions')], formTitle: msgid('Add or update a handler'), list: true,
+    fields: [{ key: 'handler', label: msgid('Handler'), kind: 'select', technical: true, options: [['cgi-script', msgid('cgi-script · run as a CGI program')], ['default-handler', msgid('default-handler · send as a static file')], ['server-parsed', msgid('server-parsed · server-side includes')], ['type-map', msgid('type-map · content negotiation map')]] }, { key: 'extensions', label: msgid('Extensions'), technical: true, maxlength: 512, help: msgctxt('theme:v2', 'Separate extensions with spaces, such as .pl .cgi.') }],
+    notes: [msgid('Only the built-in handlers listed here are accepted. Custom handler names, server-status and server-info are refused.'), msgid('cgi-script needs the per-account Apache identity (mpm-itk). Server-side includes run without #exec.'), msgid('The domain PHP handler owns .php and is listed as a system mapping; it cannot be changed here.')] },
   hotlink: { route: '/security/hotlink', title: msgid('Hotlink protection'), description: msgctxt('theme:v2', 'Control which referring sites may embed this domain’s files.'), columns: [msgid('Setting'), msgid('Value')], formTitle: msgid('Hotlink rules'),
     fields: [{ key: 'enabled', label: msgid('Enable hotlink protection'), kind: 'checkbox' }, { key: 'allowedHosts', label: msgid('Sites allowed to embed'), kind: 'textarea', technical: true, maxlength: 8192, help: msgctxt('theme:v2', 'One host name per line.') }, { key: 'extensions', label: msgid('File types'), technical: true, maxlength: 512 }, { key: 'allowEmptyReferrer', label: msgid('Allow requests with no referrer'), kind: 'checkbox' }, { key: 'action', label: msgid('Blocked requests'), kind: 'select', options: [['forbid', msgid('Refuse with HTTP 403')], ['redirect', msgid('Redirect to a URL')]] }, { key: 'redirectUrl', label: msgid('Redirect URL'), technical: true, maxlength: 2048 }],
     notes: [msgctxt('theme:v2', 'Allowing empty referrers keeps direct visits and privacy-minded browsers working.'), msgctxt('theme:v2', 'Rewriting must remain on. Redirects must not end in a protected file type.')] },
-  'ip-blocker': { route: '/security/ip-blocker', title: msgid('IP blocker'), description: msgctxt('theme:v2', 'Refuse website requests from selected addresses and ranges.'), columns: [msgid('Address or range'), msgid('Actions')], formTitle: msgid('Block an address'), list: true,
-    fields: [{ key: 'address', label: msgid('Address or range'), technical: true, maxlength: 64, help: msgctxt('theme:v2', 'Use an IPv4 or IPv6 address, or a CIDR range such as 192.0.2.0/24.') }],
-    notes: [msgctxt('theme:v2', 'At most 500 entries. Loopback addresses used by the local proxy are refused.'), msgctxt('theme:v2', 'Other access rules in the same file must be resolved before this managed block can be changed.')] },
 }
 
 /** Controls stay disabled until the existing controller has read the file revision. */
@@ -52,10 +49,8 @@ export function renderV2WebDirectivePage(props: PanelSurfaceProps, kind: Directi
     + actions(button(t(msgid('Read saved rules')), { 'data-wd-refresh': true }) + button(t(msgid('Discard draft')), { 'data-wd-discard': true }) + button(t(msgid('Save and check site')), { 'data-wd-save': true }, true, true))
     + `<ul data-wd-issues><li>${esc(t(msgid('Diagnostics have not been read.')))}</li></ul>`)
   const limits = section(`${id}-limits`, t(msgid('Limits of this page')), `<ul>${spec.notes.map(copy => `<li>${esc(t(copy))}</li>`).join('')}</ul>`)
-  if (kind === 'handlers') {
-    return page(props, authority, spec.route, title, description, split(current + draft + editor, limits + status(t(msgid('Apache handler mappings are unavailable for account files.')), { 'data-wd-status': true })), { 'data-web-directives-unavailable': kind })
-  }
-  return page(props, authority, spec.route, title, description, split(current + draft + editor + save, limits) + webDirectiveClientTemplates(), { 'data-web-directives': kind, 'data-wd-account': (c.account?.id ?? ''), 'data-wd-manage': String(c.editable) })
+  const system = kind === 'handlers' ? section(`${id}-system`, t(msgid('System handlers')), note(t(msgid('Mappings the server configuration sets for this domain. They are read-only.'))) + table(`${id}-system-table`, t(msgid('System handlers')), [t(msgid('Handler')), t(msgid('Extensions'))], unreadRow(2, t(msgid('The current rules have not been read.'))), { 'data-wd-system': true })) : ''
+  return page(props, authority, spec.route, title, description, split(current + draft + system + editor + save, limits) + webDirectiveClientTemplates(), { 'data-web-directives': kind, 'data-wd-account': (c.account?.id ?? ''), 'data-wd-manage': String(c.editable) })
 }
 
 export const V2_WEB_DIRECTIVE_ROUTES: Readonly<Record<string, DirectiveKind>> = Object.freeze(Object.fromEntries(Object.entries(SPECS).map(([kind, spec]) => [spec.route, kind as DirectiveKind])))

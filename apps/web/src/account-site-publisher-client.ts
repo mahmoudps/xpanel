@@ -33,7 +33,7 @@ export function readSitePublisherView(raw: unknown, accountId: string, domainId:
   if (!sitepubExact(context, ['accountId', 'domainId', 'domainName', 'path']) || context.accountId !== accountId || context.domainId !== domainId || !sitepubText(context.domainName, 253) || !context.domainName || !sitepubText(context.path, 4096) || !context.path || context.path.startsWith('/') || context.path.includes('\\') || context.path.split('/').some(part => !part || ['.', '..', '.xpanel', '.trash'].includes(part)) || typeof raw.revision !== 'string' || !SITEPUB_HASH.test(raw.revision)) return bad()
   if (!Array.isArray(raw.files) || raw.files.length !== 3 || raw.files.some((file, index) => !sitepubExact(file, ['name', 'exists', 'hash', 'sizeBytes']) || file.name !== SITEPUB_NAMES[index] || typeof file.exists !== 'boolean' || typeof file.sizeBytes !== 'number' || !Number.isSafeInteger(file.sizeBytes) || file.sizeBytes < 0 || file.sizeBytes > 1048576 || (file.exists ? typeof file.hash !== 'string' || !SITEPUB_HASH.test(file.hash) : file.hash !== null || file.sizeBytes !== 0))) return bad()
   if (!sitepubExact(recovery, ['status', 'createdAt']) || !['none', 'prepared', 'published', 'restored'].includes(recovery.status as string) || !(recovery.createdAt === null || sitepubTime(recovery.createdAt)) || (recovery.status === 'none') !== (recovery.createdAt === null)) return bad()
-  if (!sitepubExact(capabilities, ['canPublish', 'canRollback']) || capabilities.canPublish !== false || typeof capabilities.canRollback !== 'boolean' || !sitepubExact(application, ['status', 'nativeQualified']) || application.status !== status || application.nativeQualified !== false) return bad()
+  if (!sitepubExact(capabilities, ['canPublish', 'canRollback']) || typeof capabilities.canPublish !== 'boolean' || typeof capabilities.canRollback !== 'boolean' || !sitepubExact(application, ['status', 'nativeQualified']) || application.status !== status || application.nativeQualified !== false) return bad()
   if (recovery.status === 'prepared' && capabilities.canPublish || recovery.status === 'none' && capabilities.canRollback || recovery.status === 'restored' && capabilities.canRollback) return bad()
   if (status === 'published' && (recovery.status !== 'published' || !(raw.files[0] as { exists: boolean }).exists) || status === 'rolled_back' && recovery.status !== 'restored') return bad()
   return raw as unknown as SitePublisherView
@@ -94,7 +94,7 @@ function bindAccountSitePublisher(askDialog: ((options: Record<string, unknown>)
         for (const [slot, text] of [['name', file.name], ['state', file.exists ? t('Present') : t('Absent')], ['size', String(file.sizeBytes)]] as const) clientTemplateSlot(row, slot).textContent = text
         files.append(row)
       }
-      if (view && !view.capabilities.canPublish && status.dataset.state === 'read') note('read', t('Current files were read. Preview is available; publishing requires verified complete-site backup and recovery.'))
+      if (view && !view.capabilities.canPublish && status.dataset.state === 'read') note('read', t('A previous operation stopped. Restore its backup before publishing again.'))
       lock()
     }
     const request = (method: string, suffix = '', body?: unknown): Promise<unknown> => !send || !eligible() || !SITEPUB_ID.test(domain.value) ? Promise.reject({ stateChanged: false }) : body === undefined ? send(method, '/api/domains/' + domain.value + '/site-publisher' + suffix) : send(method, '/api/domains/' + domain.value + '/site-publisher' + suffix, body)

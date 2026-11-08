@@ -6,8 +6,11 @@ import { createHandoffSessionCheck } from './panel-handoff-authority.ts'
 import { parseAuditFilters } from './audit-filters.ts'
 import { createAccountBackupWorkspace } from './account-backup-workspace.ts'
 import { createCertificateRuntimeRouter } from './certificate-runtime.ts'
+import { handleSslStoreWorkspaceRoute, readSslStoreMaterial, type SslStorePorts } from './ssl-store-workspace.ts'
 import { assertCronHostAdmissionReply, createCronWorkspaceRoutes, type CronWorkspacePorts } from './cron-workspace.ts'
 import { createMailxWorkspaceRoutes } from './mailx-workspace.ts'
+import { createMailxConfigRoutes } from './mailx-config-workspace.ts'
+import { MAIL_REPORT_ROUTE, handleMailReportsWorkspaceRoute } from './mail-reports-workspace.ts'
 import { createMailxCollectionsRoutes } from './mailx-collections.ts'
 import { handlePhpManageRoute, handlePhpWorkspaceRoute } from './php-workspace.ts'
 import { handleFirewallWorkspaceRoute } from './firewall-workspace.ts'
@@ -23,21 +26,31 @@ import { TerminalRegistry, TerminalTickets } from './terminal-sessions.ts'
 import type { TerminalGrant } from './terminal-sessions.ts'
 import type { Duplex } from 'node:stream'
 import { handleNodesWorkspaceRoute } from './ops-nodes-workspace.ts'
+import { handleClusterRoute, pushSectionsToCluster } from './config-cluster.ts'
+import { handleLiveSourceRoute } from './live-transfer.ts'
+import { createNodeLink, NODE_PIN_WATCH_MS, nodePackageVersion } from './node-link.ts'
 import { handleIntegrationsWorkspaceRoute } from './ops-integrations-workspace.ts'
 import { atomicWriteJson as opsAtomicWriteJson } from '@xpanel/state'
 import { join as opsJoin } from 'node:path'
 import { handleRepairWorkspaceRoute } from './repair-workspace.ts'
 import { handleConfigurationHealthWorkspaceRoute } from './configuration-health-workspace.ts'
 import { handleAccountHealthWorkspaceRoute } from './account-health-workspace.ts'
-import { handleBackupFileRestoreWorkspaceRoute } from './backup-file-restore-workspace.ts'
+import { handleAccountRepairWorkspaceRoute } from './account-repair-workspace.ts'
+import { handleBackupFileRestoreWorkspaceRoute, handleOwnerFileRestorationRoute } from './backup-file-restore-workspace.ts'
 import { handleJobsWorkspaceRoute } from './jobs-workspace.ts'
 import { handlePanelTokensWorkspaceRoute } from './panel-tokens-workspace.ts'
 import { handleOwnerApiTokensWorkspaceRoute } from './owner-api-tokens-workspace.ts'
 import { assertAuthPersonalOwner } from './auth-personal.ts'
 import { handlePanelNotificationsRoute } from './panel-notifications.ts'
 import { handleAnnouncementsRoute } from './announcements-workspace.ts'
+import { handleEmailAllUsersRoute } from './email-all-users.ts'
+import { handleWhmHomeRoute } from './whm-home-workspace.ts'
+import { handleWebTemplatesRoute } from './web-templates-workspace.ts'
+import { copySkeleton, handleSkeletonRoute, readSkeleton } from './skeleton-workspace.ts'
+import { auditActionLabel } from '../../web/src/audit-labels.ts'
 import { handleTransferCredentialsRoute, readTransferCredentialToken } from './acct-transfer-credentials.ts'
 import { handleTransferSourceInventoryRoute, handleTransferSourcePackageRoute } from './acct-transfer-source.ts'
+import { clearAccountMoved, readAccountEdgeState } from '../../agent/src/account-edge.ts'
 import { createCpanelImportPorts } from './lifecycle-cpanel-import.ts'
 import { CPANEL_UPLOAD_CHUNK_BYTES } from './transfer-workspace.ts'
 import { executeAddonConversion } from './lifecycle-convert-addon.ts'
@@ -52,28 +65,42 @@ import { findActiveTeamSession, revokeTeamSession } from './team-store.ts'
 import { handleAccountTemplatesRoute } from './acct-templates-workspace.ts'
 import { AccountLifecycleCoordinator, isFreshProvisioningHostEffect } from './use-cases/account-lifecycle.ts'
 import { createAuthenticatedProvisioningPort } from './use-cases/account-provisioning-transport.ts'
-import { createProvisioningPreparationAuthority, prepareAccountProvisioning, type PreparedAccountState, type ProvisioningAuthorizationReference } from './use-cases/account-provisioning-prepared.ts'
+import { createProvisioningPreparationAuthority, parseMailAuthOptions, prepareAccountProvisioning, type PreparedAccountState, type ProvisioningAuthorizationReference } from './use-cases/account-provisioning-prepared.ts'
 import type { ProvisioningPreparationStore } from './use-cases/provisioning-preparation.ts'
-import { handleAccountEnhancementsRoute } from './acct-enhancements-workspace.ts'
+import { handleAccountEnhancementsRoute, handleEnhancementAssignmentRoute } from './acct-enhancements-workspace.ts'
 import { handleSoftwareCenterWorkspaceRoute } from './software-center-workspace.ts'
 import { handleWhmDatabasesWorkspaceRoute } from './whm-databases-workspace.ts'
+import { handleWhmDbAdminRoute } from './whm-db-admin-workspace.ts'
+import { handleWhmDbToolsRoute } from './whm-db-tools-workspace.ts'
+import { handleWhmDbServicesRoute } from './whm-db-services-workspace.ts'
+import { handleFtpWorkspaceRoute } from './ftp-workspace.ts'
 import { handleDatabaseTuningWorkspaceRoute } from './database-tuning-workspace.ts'
 import { createDefaultIndexWorkspaceRoutes } from './default-index-workspace.ts'
 import { handleComposerWorkspaceRoute } from './composer-workspace.ts'
+import { handlePanelToolsRoute, PANEL_TOOL_ROUTE } from './panel-tools-routes.ts'
+import { createErrorReporter, isReportableError, keepErrorBody } from './error-reporting.ts'
 import { handleSwContainersWorkspaceRoute } from './sw-containers-workspace.ts'
 import { handleSwAddonServicesWorkspaceRoute } from './sw-addon-services-workspace.ts'
 import { handleSwDeploymentsWorkspaceRoute } from './sw-deployments-workspace.ts'
 import { handleSwOptimizeWorkspaceRoute } from './sw-optimize-workspace.ts'
 import { handleSwApplicationsWorkspaceRoute } from './sw-applications-workspace.ts'
 import { handleAccountRuntimeWorkspaceRoute } from './account-runtime-workspace.ts'
+import { handleAccountOwnerToolsRoute } from './account-owner-tools-workspace.ts'
 import { handleAdminPreferencesRoute } from './admin-preferences.ts'
 import { handleUiPreferencesRoute } from './ui-preferences.ts'
-import { registeredUiThemeIds, resolveUiTheme } from '../../web/src/index.ts'
+import { handlePersonalPreferencesRoute } from './personal-preferences.ts'
+import { handleTeamAuditRoute } from './account-team-audit.ts'
+import type { UiPreferenceAuthority } from './ui-preferences.ts'
+import { localePolicy, registeredUiThemeIds, resolveUiTheme } from '../../web/src/index.ts'
 import { handlePanelBrandingRoute, panelBrandingFile } from './panel-branding.ts'
 import { handlePanelLanguagesRoute } from './panel-languages.ts'
 import { handlePanelSettingsRoute, panelOfflineAdmits, panelSettingsFile } from './panel-settings.ts'
 import { handleReverseProxyRoute } from './reverse-proxy-workspace.ts'
 import { handleWhmcsRoute, readSavedWhmcs } from './whmcs-integration.ts'
+import { DNS_CLUSTER_PEER_PREFIX } from '../../agent/src/dns-cluster-model.ts'
+import { handleDnsClusterPeerRoute } from './dns-cluster-peer.ts'
+import { handleDnsClusterWorkspaceRoute } from './dns-cluster-workspace.ts'
+import { handleDbProfilesWorkspaceRoute } from './db-profiles-workspace.ts'
 import type { WhmcsProvisionPorts, WhmcsRouteHelpers } from './whmcs-integration.ts'
 import { WHMCS_PROVISION_PATH } from './whmcs-module.ts'
 import { handleServiceManagerWorkspaceRoute } from './service-manager-workspace.ts'
@@ -81,20 +108,39 @@ import { handleBenchmarkWorkspaceRoute } from './benchmark-workspace.ts'
 import { handleTrafficWorkspaceRoute } from './traffic-workspace.ts'
 import { handleMeteringWorkspaceRoute } from './metering-workspace.ts'
 import { handleGitWorkspaceRoute } from './git-workspace.ts'
+import { handleEmailDiskUsageWorkspaceRoute } from './email-disk-usage-workspace.ts'
 import { handlePgpWorkspace } from './pgp-workspace.ts'
 import { createDynamicDnsRoutes } from './dynamic-dns.ts'
 import { handleWebDirectivesRoute } from './web-directives-workspace.ts'
+import { handleAccountEdgeRoute } from './account-edge-workspace.ts'
+import { handleNginxProxyRoute } from './nginx-proxy-workspace.ts'
+import { handleLeechProtectionRoute } from './leech-protection-workspace.ts'
 import { handleDirectoryPrivacyRoute } from './directory-privacy-workspace.ts'
+import { handleDnssecRoute } from './dnssec-workspace.ts'
+import { handleDnsZoneFileRoute } from './dns-zone-file.ts'
+import { handleDatabaseTransferRoute } from './database-transfer-workspace.ts'
+import { handleResellerSuspensionRoute } from './reseller-suspension.ts'
 import { handleAccountBulkActionsRoute } from './account-bulk-actions.ts'
+import { changeAccountPackageLimit, handleAccountLimitsRoute, isPackageLimitPatch, saveAccountLimits } from './account-limits-workspace.ts'
+import { handleForceHttpsRoute } from './domain-force-https.ts'
+import { handleAccountAdminRoute } from './account-admin-workspace.ts'
 import { handleMailLogWorkspaceRoute, handleMailTrackDeliveryRoute } from './mail-log-workspace.ts'
+import { handleMailboxEngineRoute } from './mail/mailbox-engine-routes.ts'
 import { handleFtpLogWorkspaceRoute } from './ftp-log-workspace.ts'
 import { handleUpgradeWorkspaceRoute } from './upgrade-workspace.ts'
+import { handleReleasePackagesWorkspaceRoute } from './release-packages-workspace.ts'
 import { handleMonitoringWorkspaceRoute } from './monitoring-workspace.ts'
 import { handleMailServerWorkspaceRoute } from './mail-server-workspace.ts'
 import { readMailxSaved } from '../../agent/src/mailx-routes.ts'
 import { handleMailQualityWorkspaceRoute } from './mail-quality-workspace.ts'
 import { handleMailboxMaintenanceWorkspaceRoute } from './mailbox-maintenance-workspace.ts'
 import { handleServerObservationWorkspaceRoute } from './server-observation-workspace.ts'
+import { handleIpNetworkRoute } from './ip-network-workspace.ts'
+import { handleRemoteServiceIpsRoute } from './remote-service-ips-workspace.ts'
+import { handleServerOperationsRoute } from './server-operations-workspace.ts'
+import { handleHostToolsRoute, handleInboundHook } from './host-tools-workspace.ts'
+import { ddnsRootReconcile, runDdnsCycle } from './host-ddns.ts'
+import { handleResellerWorkspaceRoute } from './reseller-workspace.ts'
 import { handleServerHealthWorkspaceRoute } from './server-health-workspace.ts'
 import { handleSupportWorkspaceRoute } from './support-workspace.ts'
 import { handleMonitoringAlertsRoute } from './monitoring-alerts.ts'
@@ -102,24 +148,42 @@ import { alertStateFiles, alertTransports } from './alert-runtime.ts'
 import { handleServiceDetailWorkspaceRoute } from './service-detail-workspace.ts'
 import { handleDnsToolsWorkspaceRoute } from './dns-tools-workspace.ts'
 import { handleSecurityToolsWorkspaceRoute } from './security-tools-workspace.ts'
+import { handleSshWorkspaceRoute } from './ssh-workspace.ts'
 import { handleSecWorkspaceRoute } from './sec-workspace.ts'
+import { createExternalAuth } from './external-auth.ts'
+import { checkSecurityQuestions, handleSecurityQuestionsRoute } from './security-questions.ts'
+import { handleRootIdentityWorkspaceRoute } from './root-identity-workspace.ts'
+import type { RootIdentityHelpers } from './root-identity-workspace.ts'
 import type { SecWorkspaceHelpers } from './sec-workspace.ts'
-import { handleSecCloudflareRoute } from './sec-cloudflare.ts'
+import { handleSecCloudflareRoute, publishSiteRecord } from './sec-cloudflare.ts'
+import { handleMailCertRoutes, readMailCertExtra } from './mail-cert-scheduler.ts'
+import { handleUnsubscribeRoute, UNSUBSCRIBE_PATH } from './mail-marketing.ts'
 import { secPanelAccessGate } from './sec-panel-access.ts'
+import { panelGate } from './panel-gate.ts'
+import { handlePanelAccessRoute } from './panel-access-workspace.ts'
+import { admitTemporaryRequest, createTemporaryLoginRoutes, isTemporaryLogin } from './panel-temporary-login.ts'
 import { authorizeAccountOwner, handleAccountSshRoute } from './account-ssh-workspace.ts'
 import { SITE_PUBLISHER_DOMAIN_ROUTE, executeSitePublisherWorkspaceRequest, parseSitePublisherHttpRequest } from './site-publisher-workspace.ts'
 import { readSitePublisherBody } from '../../agent/src/site-publisher-routes.ts'
 import { handleAccountLogsRoute } from './account-logs-workspace.ts'
+import { stateConfigFile } from './panel-config-file.ts'
+import { handleWhmLogToolsRoute } from './whm-log-tools-workspace.ts'
+import { FILE_SHARE_LINKS_NAMESPACE, createShareMissLimiter, SHARE_USE_LIMIT, handleFileShareDownload, handleFileShareLinksRoute } from './file-share-links-workspace.ts'
+import { FILE_SHARE_LINKS_STATE_PATH, parseShareLinks } from '../../agent/src/file-share-links.ts'
+import type { FileShareLinks } from '../../agent/src/file-share-links.ts'
+import { handleWebStatsServerRoute, handleWebStatsWorkspaceRoute } from './web-stats-workspace.ts'
 import { handleAccountVirusScanRoute } from './account-virus-scan-workspace.ts'
 import { createNetworkToolsGate, handleNetworkToolsRoute } from './network-tools-workspace.ts'
 import { handleAccountDatabaseInsightsRoute } from './account-database-insights-workspace.ts'
 import { handleSiteHealthRoute, systemSiteHealthDns } from './site-health-workspace.ts'
+import { handleExtendRoute } from './extend-routes.ts'
+import { createLifecycleHooks } from './hooks-workspace.ts'
 import { probeHtaccessTarget } from '../../agent/src/htaccess-native.ts'
 import { readGenerationWorkspace } from './generation-workspace.ts'
 import { createDefaultSiteWorkspaceRoutes } from './default-site-workspace.ts'
 import { parseGenerationRollbackRequest } from '@xpanel/state'
 import { createSecurityWorkspaceRoutes } from './security-workspace.ts'
-import type { CronJobIntent, CronJobObservationReceipt } from '@xpanel/core'
+import type { CookieIpMode, CronJobIntent, CronJobObservationReceipt } from '@xpanel/core'
 import { HTACCESS_DOMAIN_ROUTE, executeHtaccessWorkspaceRequest, parseHtaccessHttpRequest } from './htaccess-workspace.ts'
 import { createQuarantineRoutes, type QuarantineGateway } from './mail/quarantine-routes.ts'
 import { assertDnsZoneRevision, dnsExpectedRevision, dnsZoneRevision } from './dns-workspace.ts'
@@ -130,12 +194,17 @@ import type { IncomingMessage, Server } from 'node:http'
 import { networkInterfaces } from 'node:os'
 import { ACCOUNT_RETIREMENT_STEPS, agentCallerHeaders } from '@xpanel/agent'
 import type { AccountRetirementStep, AgentApp } from '@xpanel/agent'
-import { groups, visibleTools, visibleNavigation } from '@xpanel/catalog'
+import { groups, savedFeatureKeys, shownFeatureKeys, visibleTools, visibleNavigation } from '@xpanel/catalog'
 import {
+  assertPackageValues,
+  packageDefaults,
+  redirectionValues,
   bindMfaRuntimePolicy,
   SESSION_ABSOLUTE_TIMEOUT_MS,
   SESSION_IDLE_TIMEOUT_MS,
   fail,
+  cookieIpMode,
+  DEFAULT_FPM,
   isXpanelError,
   isUuid,
   assertAcl,
@@ -248,17 +317,30 @@ import {
   principalRecordToPrincipal,
 } from './auth.ts'
 import type { AuthenticatedCaller } from './auth.ts'
+import { assertPasswordAllowed, servicePasswordKinds, usePasswordStrengthPolicy } from './password-policy.ts'
+import { handleSignInPolicyRoute, lockoutLimits, sessionLimits as signInSessionLimits, signInAddressRule, signInPolicyFile } from './sign-in-policy.ts'
+import { handleSvcWorkspaceRoute } from './svc-workspace.ts'
+import { handleTweakSettingsRoute, tweakSettingsFile, tweakValue } from './tweak-settings-workspace.ts'
+import { assertDomainTweaks, zoneDefaultsFromTweaks } from '@xpanel/core'
+import { handleDomainBulkRoute, handleSiteSettingsRoute } from './site-settings-workspace.ts'
+import { observeDomainResolution } from './domain-resolution.ts'
 import { createExtendedApiRouter, ExtendedFeaturesStore } from './extended-routes.ts'
-import type { WebmailIdentity } from './extended-routes.ts'
+import type { WebmailDavPorts, WebmailIdentity } from './extended-routes.ts'
 import { createMailSearchWorkspace } from './mail/search-workspace.ts'
 import { handleMailFolderAdminRoute } from './mail/folder-admin.ts'
 import { handleMailboxUsageRoute } from './mail/mailbox-usage.ts'
+import { createMailboxSendLimiter } from './mail/send-limit.ts'
 import { handleMailDeviceSetupRoute } from './mail/device-setup.ts'
 import { handleMailboxForwardersRoute } from './mail/mailbox-forwarders.ts'
 import { applyMailRoutingChange, commitRoutingRevision, readMailRoutingStatus } from './mail/routing-application.ts'
 import { handleMailboxPreferencesRoute } from './mail/mailbox-preferences.ts'
+import { handleMailboxSecurityRoute } from './mail/mailbox-security.ts'
 import { handleMailboxSpamRoute } from './mail/mailbox-spam.ts'
 import { handleMailboxMailingListsRoute } from './mail/mailbox-mailing-lists.ts'
+import { handleMailboxListAdminRoute, handleMailingListAdminRoute } from './mail/mailing-list-admin.ts'
+import { handleListModerationRoute, handleMailboxListModerationRoute } from './mail/list-moderation.ts'
+import { handleMailboxBoxTrapperRoute, handleOwnerBoxTrapperRoute } from './mail/boxtrapper.ts'
+import { handleMailboxSettingsRoute, noteMailboxLogin } from './mail/mailbox-settings.ts'
 import { handleAccountPackagesWorkspaceRoute } from './account-packages-workspace.ts'
 import { handleDatabaseRemoteAccessWorkspaceRoute } from './database-remote-access-workspace.ts'
 import { handleDbWorkspaceRoute } from './db-workspace.ts'
@@ -277,26 +359,31 @@ import type { DraftContent, DraftTransport } from './mail/draft-workspace.ts'
 import { sanitizeEmailHtml } from './mail/mime.ts'
 import { validateFileWorkspaceRequest } from './file-workspace-validation.ts'
 import { executeFileWorkspaceRequest } from './file-workspace-proxy.ts'
-import { assertAccountAuthorized, assertAccountFeatures, assertApiScope, assertRequestAuthorized, isMailboxPrincipal, requireDomainAccount, ownedAccounts } from './authorization.ts'
+import { assertAccountAuthorized, assertAccountFeatures, assertApiScope, assertRequestAuthorized, isMailboxPrincipal, requireDomainAccount, ownedAccounts, serverRoleFeatures } from './authorization.ts'
 import { LiveEventHub, WS_AUTHORIZATION_UNAVAILABLE } from './ws.ts'
 import type { EventSubscriber, UpgradeAuthorization } from './ws.ts'
 import { renderWebApp } from '../../web/src/app.ts'
-import { requestLocale } from '../../web/src/i18n.ts'
+import { requestLocale, translator } from '../../web/src/i18n.ts'
 import { requestPrefersHtml } from '../../web/src/status-page.ts'
 import { ENTRY_POINTS, entryPointAdmitsPrincipal, entryPointAllowsApiRoute, isMailboxPrincipalUsername, sessionTokenHash } from './entry-points.ts'
+import { createDavAuthorizeRoute, DAV_AUTHORIZE_PATH } from './dav-authorize.ts'
+import { createMailboxLocks, openDavSession } from './mail/dav-store.ts'
+import type { DavExchange } from './mail/dav-store.ts'
+import { handleDavWorkspaceRoute, handleWebmailDavConfigRoute, WEBMAIL_DAV_CONFIG_PATH, WEBMAIL_DAV_PROFILE_PATH } from './dav-workspace.ts'
 import { authenticateCliPeer, cliApiAllowsRoute, type CliPeer } from './cli-api/identity.ts'
 import type { EntryPoint } from './entry-points.ts'
-import { loadQualifiedCatalog, type HostCatalogSource, type QualifiedCatalogProvider } from './host-catalog.ts'
+import { loadQualifiedCatalog, qualificationModeOn, type HostCatalogSource, type QualifiedCatalogProvider } from './host-catalog.ts'
 import { renderTotpQrSvg } from './totp-qr.ts'
 import { authorizeMailboxSessionBinding, createLocalMailboxTransport, establishMailboxSession, mailFolderName, mailboxAddressIndex, mailboxSessionPassword, openAuthorizedMailboxSession, parseMailboxSend, retireMailboxServiceUser, rewriteMailboxIds } from './mail/inbox.ts'
 import { listMailboxFolder, readMailboxFolder, moveMailboxFolder, mailboxFolderUid, mailboxUidValidity } from './mail/folder-workspace.ts'
 import type { FolderWorkspaceAuthorization } from './mail/folder-workspace.ts'
 import { imapDialPlan, mailboxLiveEvent, watchMailboxIdle } from './mail/idle.ts'
 import type { MailboxTransport } from './mail/inbox.ts'
-import { deleteMailboxSession } from '@xpanel/db'
+import { deleteMailboxSession, listJobs, setPrincipalDisabled, setPrincipalForcePasswordChange } from '@xpanel/db'
 
 // Public PHC fixture used only to equalize unknown-user password work; never an account credential.
 
+const shownFeatureList = <T extends { disabled: readonly string[] }>(list: T): T => ({ ...list, disabled: shownFeatureKeys(list.disabled) })
 export const INGRESS_SECRET_HEADER = 'x-xpanel-ingress-secret'
 
 export interface TransportContext {
@@ -329,19 +416,12 @@ const trustedIngressRequests = new WeakSet<IncomingMessage>()
 const defaultPhp = (version: PhpSettings['version'] = '8.3'): PhpSettings => ({
   version,
   handler: 'fpm',
-  fpm: {
-    mode: 'ondemand',
-    maxChildren: 4,
-    startServers: 2,
-    minSpareServers: 1,
-    maxSpareServers: 3,
-    maxRequests: 500,
-    processIdleTimeoutSec: 10,
-  },
+  fpm: { ...DEFAULT_FPM },
   ini: {},
 })
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
+  SERVICE_DISABLED: 409,
   VALIDATION: 422,
   NOT_FOUND: 404,
   CONFLICT: 409,
@@ -350,6 +430,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   FORBIDDEN: 403,
   UNAUTHENTICATED: 401,
   SELF_LOCKOUT: 422,
+  NO_AUTH_METHOD: 422,
   ENGINE_UNAVAILABLE: 422,
   UNSUPPORTED_OS: 422,
   CONFIG_TEST_FAILED: 422,
@@ -423,6 +504,8 @@ export interface ApiServerDeps {
   db: Db
   store: StateStore
   agentApp?: AgentApp
+  /** The account calendar store; absent, it goes through the agent. A test passes an in-memory one. */
+  davExchange?: DavExchange
   agentToken?: string
   /** Trusted startup/test authority only; no request may select a preparation store or directory. */
   provisioningPreparations?: ProvisioningPreparationStore
@@ -437,8 +520,6 @@ export interface ApiServerDeps {
   hub?: LiveEventHub
   os?: OsProfile
   secureCookies?: boolean
-  lockoutThreshold?: number
-  lockoutDurationMs?: number
   homeBaseDir?: string
   mailboxTransport?: MailboxTransport
   /** Trusted native mail ports. Requests never provide transport or session selectors. */
@@ -498,9 +579,13 @@ const isLocalProxyAddress = (address: string): boolean => {
   }))
 }
 
+// Shared by the entry points of one process: xPanel and xMail write to the same mailboxes.
+const mailboxLocks = createMailboxLocks()
+
 export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   const catalogSource: HostCatalogSource | null = deps.agentApp && deps.agentToken ? { fetch: deps.agentApp.fetch, token: deps.agentToken, identity: deps.agentApp } : null
   const loadCatalog = () => deps.catalogProvider ? deps.catalogProvider.load(catalogSource) : loadQualifiedCatalog(catalogSource)
+  const qualificationMode = () => deps.catalogProvider ? deps.catalogProvider.qualificationMode() : qualificationModeOn()
   deps.store.registerAccountContactIndexRecovery(account => syncAccountContactIndex(deps.db, account))
   // Callers resolve authorization before entering this bounded leaf-read scope.
   // No snapshot, mutation, audit, agent call or nested state guard may run in it.
@@ -554,6 +639,10 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   const handoffTargetOrigin = handoffOrigin(deps.handoff?.targetOrigin)
   const handoffIssuerOrigin = handoffOrigin(deps.handoff?.issuerOrigin)
   const statusSurface: EntryPoint = entryPoint ?? 'xpanel'
+  // Linked servers reach each other on the xWHM listener only.
+  const nodeLink = createNodeLink({ store: deps.store, db: deps.db, serverSecret, publicOrigin: entryPoint === 'xwhm' ? publicOrigin ?? null : null, version: nodePackageVersion,
+    audit: (action, target, detail, outcome) => emitAudit({ actor: 'system', action, target, detail, outcome }) })
+  if (entryPoint === 'xwhm') setInterval(() => { void nodeLink.announcePin().catch(() => undefined) }, NODE_PIN_WATCH_MS).unref()
   const prefersDocumentHtml = (request: Request, pathname: string, method: string): boolean =>
     (method === 'GET' || method === 'HEAD') && !pathname.startsWith('/api/') && requestPrefersHtml(request)
   const renderTransportStatus = (request: Request, status: 403 | 421 | 500 | 503): Response => {
@@ -656,6 +745,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   }
 
   const hub = deps.hub ?? new LiveEventHub()
+  const errorReporter = createErrorReporter({ store: deps.store, db: deps.db, send: async () => (await alertTransports(deps.store)).webhook })
   const mailInput = deps.mailboxEnvironment ?? process.env
   const mailboxEnvironment: NodeJS.ProcessEnv = Object.freeze(Object.fromEntries([
     'XPANEL_IMAP_HOST', 'XPANEL_IMAP_PORT', 'XPANEL_IMAP_TLS', 'XPANEL_IMAP_TIMEOUT_MS',
@@ -669,8 +759,15 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     ? Object.freeze({ host: idleHost, port: idlePort, tls: idlePlan.tls, timeoutMs: idleTimeout }) : null
   const pendingIdle = new WeakMap<IncomingMessage, { mailbox: string; password: string; accountId: string }>()
   const idleWatching = new WeakSet<IncomingMessage>()
-  const lockoutThreshold = deps.lockoutThreshold ?? 5
-  const lockoutDurationMs = deps.lockoutDurationMs ?? 15 * 60_000
+  // The saved sign-in policy (state in files) sets lockout limits, address rules, password strength and session lifetimes.
+  // Session address validation is read with the sign-in policy, which every session check reads first.
+  let sessionIpMode: CookieIpMode = 'strict', blankOriginRefused = false, apiCallsLogged = false
+  const signInPolicy = async () => {
+    const tweaks = await tweakSettingsFile(deps.store).current()
+    sessionIpMode = cookieIpMode(tweaks); blankOriginRefused = tweaks['security.rejectBlankOrigin'] === true; apiCallsLogged = tweaks['logging.apiCalls'] === true
+    return signInPolicyFile(deps.store).current()
+  }
+  const sessionLimits = (policy: Awaited<ReturnType<typeof signInPolicy>>) => ({ ...signInSessionLimits(policy), ipMode: sessionIpMode })
 
   if (deps.agentApp) {
     deps.agentApp.subscribe((event) => {
@@ -679,7 +776,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   }
 
 
-  const auditScope = new AsyncLocalStorage<{ impersonator?: Readonly<{ principalId: string; login: string }> }>()
+  const auditScope = new AsyncLocalStorage<{ impersonator?: Readonly<{ principalId: string; login: string }>; team?: string }>()
   const emitAudit = async (
     input: {
       actor: string
@@ -705,8 +802,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       } catch { /* The row keeps the id when the address cannot be read. */ }
     }
     // Every entry written for a handed-off session names the issuing identity beside the acting principal.
-    const impersonator = auditScope.getStore()?.impersonator
-    const detail = impersonator && !Object.hasOwn(input.detail ?? {}, 'impersonator') ? { ...input.detail, impersonator } : input.detail
+    const impersonator = auditScope.getStore()?.impersonator, team = auditScope.getStore()?.team
+    const scoped = team && !Object.hasOwn(input.detail ?? {}, 'team') ? { ...input.detail, team } : input.detail
+    const detail = impersonator && !Object.hasOwn(input.detail ?? {}, 'impersonator') ? { ...scoped, impersonator } : scoped
     const entry = await appendAudit(deps.db, { ...input, actor, target, ...(detail ? { detail } : {}) })
     const event: LiveEvent = {
       id: randomUUID(),
@@ -779,7 +877,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (deps.requireSecureCookies && !isVerifiedHttps(webReq) && (entryPoint || (!deps.secureCookies && !headers.has('authorization')))) {
         return null
       }
-      const caller = await authenticateRequest(deps.db, webReq, { serverSecret, clientIp: extractClientIp(webReq), touchSession: false, entryPoint, mfaRuntimePolicy, handoffAuthority })
+      const caller = await authenticateRequest(deps.db, webReq, { serverSecret, clientIp: extractClientIp(webReq), touchSession: false, entryPoint, mfaRuntimePolicy, handoffAuthority, sessionLimits: sessionLimits(await signInPolicy()) })
       if (!caller || !caller.mfaVerified) return null
       if (caller.apiTokenId !== null) assertApiScope(caller, 'events:read')
       const mailboxIdentity = isMailboxPrincipal(caller)
@@ -823,9 +921,17 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (opts?.deferDeniedAudit) opts.deferDeniedAudit(input)
       else await emitAudit(input)
     }
-    const caller = await authenticateTransport(deps.db, req, { serverSecret, clientIp, entryPoint, mfaRuntimePolicy, teamMember, handoffAuthority })
+    const policy = await signInPolicy()
+    usePasswordStrengthPolicy(policy.passwordStrength)
+    let addressChanged = false, tokenAddressDenied = false
+    const caller = await authenticateTransport(deps.db, req, { serverSecret, clientIp, entryPoint, mfaRuntimePolicy, teamMember, handoffAuthority, sessionLimits: sessionLimits(policy), onSessionAddressMismatch: () => { addressChanged = true }, onTokenAddressDenied: () => { tokenAddressDenied = true } })
     if (!caller) {
-      return fail('UNAUTHENTICATED', 'authentication required')
+      if (tokenAddressDenied) return fail('FORBIDDEN', 'this API token may not be used from this address', { reason: 'token_address_denied' })
+      return addressChanged ? fail('UNAUTHENTICATED', 'this session was opened from another address', { reason: 'SESSION_IP_MISMATCH' }) : fail('UNAUTHENTICATED', 'authentication required')
+    }
+    if (apiCallsLogged && caller.apiTokenId !== null) {
+      const { pathname } = new URL(req.url, 'http://localhost')
+      await emitAudit({ actor: caller.principal.username, action: 'api.call', target: `${req.method.toUpperCase()} ${pathname}`, outcome: 'ok', principalId: caller.principal.id, ip: clientIp }).catch(() => undefined)
     }
     if (
       deps.requireSecureCookies &&
@@ -849,7 +955,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       const secFetchSite = req.headers.get('sec-fetch-site')?.trim().toLowerCase() ?? null
       if (
         (origin !== null && !isOriginPermitted(origin, req)) ||
-        (origin === null && (secFetchSite === 'cross-site' || deps.requireOriginHeader === true))
+        (origin === null && (secFetchSite === 'cross-site' || deps.requireOriginHeader === true || blankOriginRefused))
       ) {
         await auditDenied({
           actor: caller.principal.username,
@@ -885,10 +991,12 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       && caller.principal.kind === 'user' && isMailboxPrincipalUsername(caller.principal.username)
     // xMail serves mailbox identities only; an owner, reseller or root session never acts there.
     if (entryPoint === 'xmail' && !nativeMailboxSession) return fail('FORBIDDEN', 'xMail accepts mailbox sign-in only')
+    if (caller.team) { const scope = auditScope.getStore(); if (scope) scope.team = caller.team.login }
     if (caller.impersonator) {
       const scope = auditScope.getStore()
       if (scope) scope.impersonator = caller.impersonator
       if (impersonationForbidsRoute(pathname, method)) return fail('FORBIDDEN', 'a handed-off session cannot change the sign-in identity of the account it opened', { stateChanged: false, impersonated: true })
+      if (isTemporaryLogin(caller.impersonator.login)) await admitTemporaryRequest({ caller, pathname, method, ip: clientIp, emitAudit })
     }
     // Native address sign-in is a mailbox identity, even though its persisted
     // principal belongs to a hosting account. Bind only from the sealed session;
@@ -1006,6 +1114,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     return { state: 'unavailable', reason: 'host_agent_unavailable' }
   }
 
+  const shareLinksFile = stateConfigFile<FileShareLinks>(deps.store, FILE_SHARE_LINKS_STATE_PATH, FILE_SHARE_LINKS_NAMESPACE, parseShareLinks, () => ({ links: [] }))
+  const shareMisses = createShareMissLimiter(), shareUses = createShareMissLimiter(Date.now, SHARE_USE_LIMIT)
   const callAgent = async (
     pathAndQuery: string,
     opts: {
@@ -1037,6 +1147,16 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
       }),
     )
+  }
+
+  const davExchange: DavExchange = deps.davExchange ?? (async (caller, account, input) => {
+    const response = await callAgent('/accounts/' + account.username + '/dav-exchange', { method: 'POST', caller, body: input })
+    if (!response.ok) return fail('SERVICE_UNAVAILABLE', 'the calendar store is not available', { stateChanged: false, reason: 'dav_store_unavailable' })
+    return { status: Number(response.headers.get('x-xpanel-dav-status')), etag: response.headers.get('x-xpanel-dav-etag'), body: await response.text() }
+  })
+  const dav: WebmailDavPorts = {
+    open: (caller, account, authority) => openDavSession({ exchange: davExchange, listServiceUsers: accountId => deps.store.listServiceUsers(accountId) }, caller, account, authority),
+    lock: mailboxLocks,
   }
 
   /** New domains start on the root-chosen default; existing domains keep their version. */
@@ -1448,7 +1568,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   }
 
   const mysqlNativePasswordHash = (password: string): string => {
-    if (password.length < 8 || password.length > 256) return fail('VALIDATION', 'database password must be 8 to 256 characters')
+    if (password.length > 256) return fail('VALIDATION', 'database password must be 8 to 256 characters')
+    assertPasswordAllowed(password, 'database')
     return `*${createHash('sha1').update(createHash('sha1').update(password).digest()).digest('hex').toUpperCase()}`
   }
 
@@ -1458,13 +1579,23 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     reason: string,
     principalId?: Id | null,
   ): Promise<void> => {
-    const failure = await recordLoginFailure(deps.db, { username, ip, reason, surface: 'panel', threshold: lockoutThreshold, windowMs: lockoutDurationMs, lockoutDurationMs })
+    const policy = await signInPolicy()
+    if (signInAddressRule(policy, ip) === 'allowed') {
+      await recordLoginAttempt(deps.db, { surface: 'panel', username, ip, success: false, reason })
+      return
+    }
+    const failure = await recordLoginFailure(deps.db, { username, ip, reason, surface: 'panel', ...lockoutLimits(policy) })
     if (failure.lockedUntil) {
       const failures = Math.max(failure.usernameFailures, failure.ipFailures)
       await emitAudit({ actor: username, action: 'auth.lockout', target: 'authentication', detail: { failures, lockedUntil: failure.lockedUntil }, outcome: 'denied', principalId: principalId ?? null, ip })
       return fail('FORBIDDEN', 'too many failed authentication attempts', { lockedOut: true, failures, lockedUntil: failure.lockedUntil })
     }
   }
+
+  /** An allowed address is never locked out, even while its username is. */
+  const activeLockout = async (username: string, ip: string): Promise<{ lockedUntil: string } | null> =>
+    signInAddressRule(await signInPolicy(), ip) === 'allowed' ? null : checkLockout(deps.db, { username, ip })
+  const davAuthorize = createDavAuthorizeRoute({ store: deps.store, db: deps.db, recordFailure: (login, ip) => recordFailedLoginAndMaybeLock(login, ip, 'dav_invalid_credentials') })
 
   const readDkimPublicMaterial = async (caller: AuthenticatedCaller, domain: string): Promise<{ selector: string; publicKeyPem: string } | null> => {
     if (!deps.agentApp || !deps.agentToken) return null
@@ -1484,11 +1615,17 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   const extendedRouter = createExtendedApiRouter({
     db: deps.db,
     store: deps.store,
+    dav,
     serverSecret,
+    ...(deps.agentApp && deps.agentToken ? { maintainDatabase: (caller: AuthenticatedCaller, account: Account, body: { database: string; action: string }) => readNativeWorkspace(caller, `/accounts/${account.username}/databases/maintenance`, body, body.action === 'repair') } : {}),
     ...(deps.agentApp && deps.agentToken ? { readQuotaState: (caller: AuthenticatedCaller, path: string) =>
       readNativeWorkspace(caller, '/host/quota?path=' + encodeURIComponent(path), undefined, false, 'GET'),
     initializeQuota: (caller: AuthenticatedCaller, path: string) =>
       readNativeWorkspace(caller, '/host/quota/initialize', { path }, true, 'POST', null, true) } : {}),
+    ...(deps.agentApp && deps.agentToken ? { purgeListQueue: async (caller: AuthenticatedCaller, accountId: string, address: string) => {
+      const account = await deps.store.getAccount(accountId)
+      if (account) await readNativeWorkspace(caller, `/host/mailx/accounts/${account.username}/list-moderation`, { address, call: { op: 'purge' } }, true)
+    } } : {}),
     backupDestinationHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined),
     ...(deps.agentApp && deps.agentToken ? { transferPorts: (() => {
       const agent = (caller: AuthenticatedCaller, path: string, init: { method?: string; body?: unknown } = {}) => callAgent(path, { caller, ...init })
@@ -1499,7 +1636,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       const shared = { store: deps.store, agent, createAccount, applyAccount, removeAccount: purgeAccount, defaultPhp: serverDefaultPhp, audit }
       return {
         execution: createTransferExecution({ ...shared, readToken: id => readTransferCredentialToken(deps.store, id) }),
-        cpanel: createCpanelImportPorts({ ...shared, uploadDir: opsJoin(deps.store.rootDir, 'extended', 'transfers', 'cpanel'), maxBytes: 50 * 1024 ** 3, serviceHash: password => passwordHashFromInput({ password }, { service: true }) }),
+        nodeAuth: nodeLink.transferAuth,
+        cpanel: createCpanelImportPorts({ ...shared, uploadDir: opsJoin(deps.store.rootDir, 'extended', 'transfers', 'cpanel'), maxBytes: 50 * 1024 ** 3, serviceHash: password => passwordHashFromInput({ password }, { service: ['mail'] }) }),
         // background work acts as the root user who started it, re-read from the principal store each time
         callerFor: async (principalId: string): Promise<AuthenticatedCaller | null> => {
           const record = await getPrincipal(deps.db, principalId)
@@ -1570,15 +1708,29 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       const knownUnchanged = detail.stateChanged === false && detail.unknownOutcome !== true && detail.verificationRequired !== true
       const relayed = relayRefusal ? (['VALIDATION', 'SERVICE_UNAVAILABLE', 'CONFIG_TEST_FAILED'] as const).find(known => known === problem.code) : undefined
       const code: ErrorCode = relayed ?? (response.status === 401 ? 'UNAUTHENTICATED' : response.status === 403 ? 'FORBIDDEN' : response.status === 404 ? 'NOT_FOUND' : response.status === 409 ? 'CONFLICT' : response.status === 422 ? 'VALIDATION' : 'PRECONDITION_FAILED')
-      return fail(code, relayRefusal && typeof problem.detail === 'string' ? problem.detail : 'the protected host request was refused', { ...(relayRefusal ? detail : {}), stateChanged: mutation && !knownUnchanged, ...(mutation && !knownUnchanged ? { unknownOutcome: true, verificationRequired: true } : {}) })
+      return fail(code, relayRefusal && typeof problem.detail === 'string' ? problem.detail : 'the protected host request was refused', { ...(relayRefusal ? detail : {}), stateChanged: mutation && !knownUnchanged, ...(mutation && !knownUnchanged ? { unknownOutcome: true, verificationRequired: true } : {}), ...(typeof detail.reason === 'string' && /^[A-Za-z_]{1,64}$/.test(detail.reason) ? { reason: detail.reason } : {}) })
     }
     return body as T
   }
   // sec: WAF, flood, panel access and DNS cluster workspaces; panelAccessEnforced is true because the request gate below is installed.
-  const secHelpers = (): SecWorkspaceHelpers => ({ requireCaller, assertRoot, emitAudit, triggerReconcile, store: deps.store, panelAccessEnforced: true,
+  const secHelpers = (): SecWorkspaceHelpers => ({ requireCaller, assertRoot, emitAudit, triggerReconcile, store: deps.store, panelAccessEnforced: true, readExtra: kind => readMailCertExtra(deps.store, kind),
     readClient: request => { let address: string | null = null; try { address = extractClientIp(request) } catch { address = null }; return { listener: entryPoint ?? null, address } },
     ...(deps.agentApp && deps.agentToken ? { callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined) } : {}),
   })
+  const extendHost = deps.agentApp && deps.agentToken ? { callHost: (caller: AuthenticatedCaller, path: string, body?: unknown) => readNativeWorkspace(caller, path, body, body !== undefined) } : {}
+  const lifecycleHooks = createLifecycleHooks({ store: deps.store, emitAudit, ...extendHost })
+  // Security questions, external sign-in and root identity (security-questions.ts, external-auth.ts, root-identity-workspace.ts).
+  const identityHelpers: RootIdentityHelpers & { db: Db; store: StateStore; clientIp: (request: Request) => string | null } = { requireCaller, assertRoot, emitAudit, db: deps.db, store: deps.store, clientIp: request => extractClientIp(request),
+    verifyPassword: (caller, password) => verifyPasswordArgon2id(password, caller.principalRecord.passwordHash),
+    checkLockout: async (caller, request) => (await checkLockout(deps.db, { username: caller.principal.username, ip: extractClientIp(request) ?? '127.0.0.1' }))?.lockedUntil ?? null,
+    recordFailure: (caller, reason, request) => recordFailedLoginAndMaybeLock(caller.principal.username, extractClientIp(request) ?? '127.0.0.1', reason, caller.principal.id),
+    secondFactorEnrolled: caller => mfaRuntimePolicy.mode !== 'disabled' && caller.principalRecord.totpEnabled && Boolean(caller.principalRecord.totpSecretEnc),
+    verifySecondFactor: async (caller, code) => { const sealed = caller.principalRecord.totpSecretEnc; const step = sealed ? verifyTotpStep(unsealTotpSecret(sealed, serverSecret), code) : null; return step !== null && await consumeTotpStep(deps.db, caller.principal.id, step, sealed!) },
+    ...(deps.agentApp && deps.agentToken ? { callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined) } : {}) }
+  const externalAuth = createExternalAuth({ ...identityHelpers, entryPoint, publicOrigin, secureCookies: useSecureCookies, fetch: (input, init) => globalThis.fetch(input, init),
+    otherOrigins: { ...(entryPoint === 'xwhm' && handoffTargetOrigin ? { xpanel: handoffTargetOrigin } : {}), ...(entryPoint === 'xpanel' && handoffIssuerOrigin ? { xwhm: handoffIssuerOrigin } : {}) } })
+  const identityRoutes = async (request: Request, url: URL, method: string): Promise<Response | null> => await externalAuth.handle(request, url, method)
+    ?? await handleSecurityQuestionsRoute(request, url, method, identityHelpers) ?? await handleRootIdentityWorkspaceRoute(request, url, method, identityHelpers)
   const cronHost = async (caller: AuthenticatedCaller, intent: CronJobIntent, operation: 'status' | 'run'): Promise<CronJobObservationReceipt> => {
     const account = await deps.store.getAccount(intent.accountId)
     if (!account || account.status !== 'active' || caller.principal.kind !== 'user' || isMailboxPrincipal(caller) || caller.principal.accountId !== account.id) return fail('FORBIDDEN', 'cron account is unavailable', { stateChanged: false })
@@ -1586,6 +1738,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   }
   const siteHealthDns = systemSiteHealthDns()
   const networkToolsGate = createNetworkToolsGate()
+  const mailboxSendLimiter = createMailboxSendLimiter()
   // Trusted host admission for cron mutations: the agent qualifies the host scheduler primitive for this
   // account. Without it a saved schedule could be acknowledged while the host cannot execute it.
   const admitCronHostFromAgent = async (caller: AuthenticatedCaller, account: Account, _action: 'save' | 'run'): Promise<void> => {
@@ -1602,10 +1755,14 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     observeCronStatus: (caller, intent) => cronHost(caller, intent, 'status'),
   })
 
+  const sslStorePorts: SslStorePorts = { store: deps.store, requireCaller, assertCanAccessAccount, callAgent: deps.agentApp && deps.agentToken ? callAgent : null,
+    reconcile: caller => triggerReconcile(caller),
+    audit: async (caller, action, target, detail) => { await emitAudit({ actor: caller.principal.username, action, target, detail, outcome: 'ok', principalId: caller.principal.id }) } }
   const certificateRuntimeRouter = createCertificateRuntimeRouter({
     store: deps.store, hostAvailable: Boolean(deps.agentApp && deps.agentToken), requireCaller, assertCanAccessAccount,
     assertCanBindCertificate, resolveResellerForCaller, callAgent, triggerReconcile, emitAudit,
     requireHostAgent: requireAccountHostAgent, readJsonBody, jsonResponse,
+    readStoreMaterial: ({ caller, account, certificateId }) => readSslStoreMaterial(sslStorePorts, caller, account, certificateId),
   })
 
   const dynamicDns = createDynamicDnsRoutes({
@@ -1644,6 +1801,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     },
   })
 
+  const temporaryLoginRoutes = createTemporaryLoginRoutes({ db: deps.db, store: deps.store, ...(publicOrigin ? { publicOrigin } : {}), serverSecret, emitAudit, clientIp: request => extractClientIp(request) ?? '127.0.0.1', secureCookies: useSecureCookies, text: (request, message) => translator(requestLocale(new URL(request.url), request))(message) })
   const handoffRoutes = createHandoffRoutes({
     db: deps.db, store: deps.store, ...(entryPoint ? { entryPoint } : {}),
     ...(handoffTargetOrigin ? { targetOrigin: handoffTargetOrigin } : {}), ...(handoffIssuerOrigin ? { issuerOrigin: handoffIssuerOrigin } : {}),
@@ -1652,7 +1810,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   })
 
   // Account lifecycle operations shared by the HTTP routes and the WHMCS provisioning ports.
-  type CreateAccountBody = Partial<NewAccount> & { username: string; primaryDomain: string; planId: Id; password?: string; idempotencyKey?: string }
+  type CreateAccountBody = Partial<NewAccount> & { spf?: unknown; dkim?: unknown; dmarc?: unknown; username: string; primaryDomain: string; planId: Id; password?: string; idempotencyKey?: string }
   const provisioningPreparations = deps.provisioningPreparations ?? createProvisioningPreparationAuthority({ store: deps.store,
     directory: opsJoin(deps.store.rootDir, 'private', 'account-provisioning') })
   const provisioningPort = deps.agentApp && deps.agentToken ? createAuthenticatedProvisioningPort({
@@ -1671,8 +1829,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     requireAccountHostAgent()
     if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => ![
       'username', 'primaryDomain', 'planId', 'password', 'passwordHash', 'ownerId', 'contactEmail', 'ipv4', 'ipAssignment',
-      'ipv6', 'extraIps', 'shell', 'php', 'homeBase', 'forcePasswordChange', 'idempotencyKey',
+      'ipv6', 'extraIps', 'shell', 'php', 'homeBase', 'forcePasswordChange', 'idempotencyKey', 'spf', 'dkim', 'dmarc',
     ].includes(key))) return fail('VALIDATION', 'unsupported account creation fields', { stateChanged: false })
+    const omitMailAuth = parseMailAuthOptions(body)
     if (caller.principal.kind !== 'root' && caller.principal.kind !== 'reseller') return fail('FORBIDDEN', 'a privileged actor is required')
     const username = validateUsername(body.username)
     const primaryDomain = validateDomainName(body.primaryDomain)
@@ -1682,10 +1841,10 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     // Reject invalid credential input before reserving an immutable preparation. Hash only on its first admitted write.
     if (body.password !== undefined && body.passwordHash !== undefined) return fail('VALIDATION', 'supply a password or passwordHash, not both', { stateChanged: false })
     const credentialIntent = body.passwordHash !== undefined ? assertPasswordHashArgon2id(body.passwordHash) : body.password
-    if (typeof credentialIntent !== 'string' || (body.passwordHash === undefined && (credentialIntent.length < 8
-      || Buffer.byteLength(credentialIntent, 'utf8') > 1024 || /[\r\n\0]/.test(credentialIntent)))) {
+    if (typeof credentialIntent !== 'string' || (body.passwordHash === undefined && (Buffer.byteLength(credentialIntent, 'utf8') > 1024 || /[\r\n\0]/.test(credentialIntent)))) {
       return fail('VALIDATION', 'a single-line password of 8..1024 UTF-8 bytes is required', { stateChanged: false })
     }
+    if (body.passwordHash === undefined) assertPasswordAllowed(credentialIntent, 'panel')
     const explicitKey = authority.idempotencyKey ?? body.idempotencyKey
     if (authority.idempotencyKey !== undefined && body.idempotencyKey !== undefined && authority.idempotencyKey !== body.idempotencyKey) {
       return fail('VALIDATION', 'the account request keys do not match', { stateChanged: false })
@@ -1698,6 +1857,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     if (caller.principal.kind === 'reseller') assertAcl(caller.principal, reseller, 'create-account')
     const ownerId = caller.principal.kind === 'reseller' ? reseller!.id : body.ownerId ?? null
     const requestedPlan = await deps.store.getPlan(body.planId) ?? fail('NOT_FOUND', 'the account plan is unavailable', { stateChanged: false })
+    if ((await deps.store.getServerSettings())?.nameservers.filter(Boolean).length === 0) return fail('PRECONDITION_FAILED', 'set the server nameservers before creating an account', { stateChanged: false, reason: 'nameservers_not_configured' })
     const accountInput: PreparedAccountState['account'] = { username, primaryDomain, planId: body.planId,
       ownerId, contactEmail: body.contactEmail ?? `${username}@${primaryDomain}`,
       ...(body.ipv4 !== undefined && { ipv4: body.ipv4 }), ...(body.ipAssignment !== undefined && { ipAssignment: body.ipAssignment }),
@@ -1726,7 +1886,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     const prepared = await prepareAccountProvisioning({ store: deps.store, preparations: provisioningPreparations, authorizeFresh, readTemplates: readAccountTemplates,
       assertIdentityAvailable: async account => { if (await findPrincipalByUsername(deps.db, account.username)) return fail('CONFLICT', 'the account username is already reserved', { stateChanged: false }) },
     }, {
-      actor: caller.principal, idempotencyKey, account: accountInput, credentialIntent, authorizationRef: authority.reference,
+      actor: caller.principal, idempotencyKey, account: accountInput, credentialIntent, authorizationRef: authority.reference, omitMailAuth, zoneDefaults: zoneDefaultsFromTweaks(await tweakSettingsFile(deps.store).current()),
       preparePasswordHash: () => passwordHashFromInput(body), verifyCredentialIntent: body.passwordHash === undefined
         ? (intent, hash) => verifyPasswordArgon2id(intent, hash)
         : async (intent, hash) => { const left = Buffer.from(intent), right = Buffer.from(hash); return left.length === right.length && timingSafeEqual(left, right) },
@@ -1766,13 +1926,22 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         stateChanged: true, verificationRequired: true, reason: 'account_provisioning_acknowledgment_unverified',
       })
     }
+    if (!result.completedReplay) lifecycleHooks.after('account.create', account, caller)
     try { await authorizeFresh({ actor: caller.principal, accountId: account.id, ownerId }) }
     catch { return fail('FORBIDDEN', 'account provisioning authorization changed before acknowledgment', { stateChanged: true, verificationRequired: true }) }
-    return { account, primaryDomain: primaryDomains[0] ?? null, reconcile: result.reconciliation, execution,
+    // cPanel copies the skeleton at creation only: a replayed request finds it copied, or its owner's edits, in place.
+    const skeleton = result.completedReplay === true ? { copied: 0, failed: [] } : await copySkeleton({
+      readFiles: async () => readSkeleton(await new ExtendedFeaturesStore(deps.store.rootDir).readOrDefault<unknown>(`accounts/skeletons/${ownerId ?? 'root'}.json`, null)),
+      op: async body => (await callAgent('/accounts/' + account.username + '/files', { caller, method: 'POST', body })).ok,
+    })
+    if (skeleton.copied || skeleton.failed.length) await emitAudit({ actor: caller.principal.username, action: 'account.skeleton.copied', target: 'account:' + account.username, detail: { copied: skeleton.copied, failed: skeleton.failed.length }, outcome: skeleton.failed.length ? 'failed' : 'ok', principalId: caller.principal.id }, { accountId: account.id, resellerId: account.ownerId })
+    return { account, skeleton, primaryDomain: primaryDomains[0] ?? null, reconcile: result.reconciliation, execution,
       operation: { status: result.job.status, reference: result.job.referenceCode, resumedFromStep: result.resumedFromStep, freshExecution, completedReplay: result.completedReplay === true } }
   }
-  const setAccountSuspensionAs = async (caller: AuthenticatedCaller, target: Account, verb: 'suspend' | 'unsuspend', reason?: string) => {
+  const setAccountSuspensionAs = async (caller: AuthenticatedCaller, target: Account, verb: 'suspend' | 'unsuspend', reason?: string, lock?: boolean) => {
     requireAccountHostAgent()
+    if (lock !== undefined && (verb !== 'suspend' || typeof lock !== 'boolean')) fail('VALIDATION', 'lock applies to a suspension and is a boolean', { stateChanged: false })
+    if (lock) await assertRoot(caller, 'account.suspend.lock')
     const captured = await captureAccountMutation(caller, target.id, 'account.' + verb, account => {
       const expected = verb === 'suspend' ? 'active' : 'suspended'
       if (account.status !== expected) fail('CONFLICT', 'account is not in the expected state for this transition')
@@ -1781,9 +1950,11 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       try { await revokeAccountSessionsAndTokens(deps.db, account.id) }
       catch { fail('SERVICE_UNAVAILABLE', 'account access cleanup requires verification', { reason: 'access_revocation_failed', verificationRequired: true, stateChanged: false }) }
     } : undefined)
+    await lifecycleHooks.before(verb === 'suspend' ? 'account.suspend' : 'account.unsuspend', captured.account, caller)
     const updated = verb === 'suspend'
-      ? await deps.store.suspendAccount(captured.account.id, reason || 'Suspended by administrator', { expectedRevision: captured.expectedRevision })
-      : await deps.store.unsuspendAccount(captured.account.id, { expectedRevision: captured.expectedRevision })
+      ? await deps.store.suspendAccount(captured.account.id, reason || 'Suspended by administrator', { expectedRevision: captured.expectedRevision, ...(lock && { lock }) })
+      : await deps.store.unsuspendAccount(captured.account.id, { expectedRevision: captured.expectedRevision, allowLocked: caller.principal.kind === 'root' })
+    if (verb === 'unsuspend') await clearAccountMoved(deps.store.rootDir, updated.id)
     if (verb === 'suspend') {
       terminalRegistry.revoke({ accountId: updated.id })
       try { await revokeAccountSessionsAndTokens(deps.db, updated.id) }
@@ -1793,9 +1964,10 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     await emitAudit({ actor: caller.principal.username, action: 'account.desired.' + (verb === 'suspend' ? 'suspended' : 'unsuspended'),
       target: 'account:' + updated.username, detail: { accountStatus: updated.status, reason: updated.suspendReason, execution: accountExecution() }, outcome: 'ok', principalId: caller.principal.id,
     }, { accountId: updated.id, resellerId: updated.ownerId })
+    lifecycleHooks.after(verb === 'suspend' ? 'account.suspend' : 'account.unsuspend', updated, caller)
     return { account: updated, reconcile, execution: accountExecution() }
   }
-  const updateAccountAs = async (caller: AuthenticatedCaller, target: Account, patch: { planId?: Id; ownerId?: Id | null; contactEmail?: string; ipv4?: string; ipv6?: string | null; shell?: 'none' | 'jailed' }) => {
+  const updateAccountAs = async (caller: AuthenticatedCaller, target: Account, patch: { planId?: Id; ownerId?: Id | null; contactEmail?: string; shell?: 'none' | 'jailed' }) => {
     requireAccountHostAgent()
     const captured = await captureAccountMutation(caller, target.id, 'account.update', async account => {
       if (patch.planId && patch.planId !== account.planId && caller.principal.kind === 'reseller') assertAcl(caller.principal, await resolveResellerForCaller(caller), 'change-plan')
@@ -1806,8 +1978,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     let expectedRevision = captured.expectedRevision
     if (patch.planId && patch.planId !== updated.planId) { updated = await deps.store.changePlan(updated.id, patch.planId, { expectedRevision }); expectedRevision++ }
     if (patch.ownerId !== undefined && patch.ownerId !== updated.ownerId) { updated = await deps.store.changeOwner(updated.id, patch.ownerId, { expectedRevision }); expectedRevision++ }
-    if (patch.contactEmail !== undefined || patch.ipv4 !== undefined || patch.ipv6 !== undefined || patch.shell !== undefined) {
-      updated = await deps.store.updateAccount(updated.id, patch, { expectedRevision }); expectedRevision++
+    if (patch.contactEmail !== undefined || patch.shell !== undefined) {
+      updated = await deps.store.updateAccount(updated.id, { ...(patch.contactEmail !== undefined && { contactEmail: patch.contactEmail }), ...(patch.shell !== undefined && { shell: patch.shell }) }, { expectedRevision }); expectedRevision++
     }
     const reconcile = await applyAccountConfiguration(caller, updated, 'update', expectedRevision)
     await emitAudit({ actor: caller.principal.username, action: 'account.desired.updated', target: 'account:' + updated.username,
@@ -1821,7 +1993,10 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     if (!current) return fail('NOT_FOUND', 'account not found')
     await assertCanAccessAccount(caller, current, 'account.delete', { allowUserSelf: false })
     if (confirmUsername !== current.username) return fail('CONFLICT', 'account confirmation is no longer current')
+    // A retried termination is already past its point of no return, and a transfer rollback purges without these hooks.
+    if (current.status !== 'terminating') await lifecycleHooks.before('account.terminate', current, caller)
     await purgeAccount(caller, current)
+    lifecycleHooks.after('account.terminate', current, caller)
     return { ok: true as const, purged: true as const }
   }
 
@@ -1857,6 +2032,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   const whmcsHelpers: WhmcsRouteHelpers = { store: deps.store, requireCaller, assertRoot, emitAudit, clientIp: extractClientIp, ports: whmcsPorts }
 
   const routeRequest = async (req: Request, context?: TransportContext): Promise<Response> => {
+    const reportedBody = await keepErrorBody(req, errorReporter)
     if (context) {
       let peer: string | null = null
       if (context.remoteAddress !== undefined) {
@@ -1887,11 +2063,19 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (cliPeer && !cliApiAllowsRoute(pathname, method)) return transportProblem(404, 'NOT_FOUND', 'route is unavailable to the command-line API', pathname)
       if (entryPoint && pathname.startsWith('/api/') && !entryPointAllowsApiRoute(entryPoint, pathname, method)) return transportProblem(404, 'NOT_FOUND', 'route is unavailable on this entry point', pathname)
       if (entryPoint && pathname !== '/api/health' && deps.requireSecureCookies && !isVerifiedHttps(req)) return transportProblem(403, 'FORBIDDEN', 'verified HTTPS ingress is required for this entry point', pathname)
+      // An unsubscribe link must work from any address: the recipient is not a panel user.
+      if (pathname === UNSUBSCRIBE_PATH) return (await handleUnsubscribeRoute(req, url, method, deps.store))!
       // sec: saved panel-access allowlist for this entry point, checked before sign-in on the socket or trusted-ingress address.
       // It filters network clients; the local command-line socket has no network peer.
       if (entryPoint && pathname !== '/api/health' && !cliPeer && !await secPanelAccessGate(deps.store.rootDir, entryPoint, () => extractClientIp(req))) {
         if (prefersDocumentHtml(req, pathname, method)) return renderTransportStatus(req, 403)
         return transportProblem(403, 'FORBIDDEN', 'this address is not allowed on this entry point', pathname)
+      }
+      if (entryPoint && !cliPeer) { const gated = await panelGate({ rootDir: deps.store.rootDir, listener: entryPoint, request: req, pathname, search: url.search, method, secret: serverSecret, secure: useSecureCookies(req), client: () => extractClientIp(req) ?? '127.0.0.1', hasSession: async () => !!await authenticateTransport(deps.db, req, { serverSecret, clientIp: extractClientIp(req), touchSession: false, entryPoint, mfaRuntimePolicy, teamMember, handoffAuthority }).catch(() => null) }); if (gated) return gated }
+      // Dynamic DNS changes state on GET. A failed row leaves this try, so no operation runs unrecorded.
+      if ((!['GET', 'HEAD', 'OPTIONS'].includes(method) || pathname === '/nic/update') && qualificationMode()) {
+        const caller = await authenticateTransport(deps.db, req, { serverSecret, clientIp: extractClientIp(req), touchSession: false, entryPoint, mfaRuntimePolicy, teamMember, handoffAuthority }).catch(() => null)
+        await emitAudit({ actor: caller?.principal.username ?? 'anonymous', principalId: caller?.principal.id ?? null, action: 'qualification.operation', target: `${method} ${pathname}`.slice(0, 256), outcome: 'ok', ip: extractClientIp(req) })
       }
       if (pathname === '/nic/update') {
         if (entryPoint !== 'xpanel') return transportProblem(404, 'NOT_FOUND', 'route is unavailable on this entry point', pathname)
@@ -1899,16 +2083,43 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         // Socket peer only: forwarded client headers never select the DDNS source address.
         return (await dynamicDns.update(req, url, transportPeers.get(req)?.socketRemoteAddress ?? null))!
       }
+      if (pathname.startsWith('/hook/')) {
+        if (entryPoint !== 'xpanel') return transportProblem(404, 'NOT_FOUND', 'route is unavailable on this entry point', pathname)
+        if (!publicOrigin || url.host !== new URL(publicOrigin).host || !isVerifiedHttps(req)) return transportProblem(403, 'FORBIDDEN', 'verified HTTPS ingress and the configured host are required', pathname)
+        return handleInboundHook(req, url, transportPeers.get(req)?.socketRemoteAddress ?? null, { store: deps.store, emitAudit, start: async id => {
+          if (!deps.agentApp || !deps.agentToken) return false
+          const root = await findPrincipalByUsername(deps.db, 'root')
+          if (!root || root.disabled || root.kind !== 'root') return false
+          const response = await deps.agentApp.fetch(new Request(`http://agent.local/host/host-tools/run/${id}`, { method: 'POST', headers: { ...agentCallerHeaders({ principalId: root.id, token: deps.agentToken }), 'content-type': 'application/json' }, body: '{}' }))
+          await response.body?.cancel()
+          return response.status === 202
+        } })
+      }
+      // A public download: the token is the whole authority, so it stays on the account listener and verified HTTPS.
+      if (pathname.startsWith('/share/')) {
+        if (entryPoint !== 'xpanel' || !isVerifiedHttps(req)) return transportProblem(404, 'NOT_FOUND', 'route is unavailable on this entry point', pathname)
+        return await handleFileShareDownload(req, url, method, { limiter: shareMisses, uses: shareUses, clientAddress: () => { try { return extractClientIp(req) } catch { return null } }, emitAudit,
+          readLinks: async () => (await shareLinksFile.read()).value?.links ?? [],
+          openFile: link => callAgent('/host/file-sharing/links/' + link.tokenHash + '/content', { caller: { principal: { id: link.createdById } } as AuthenticatedCaller }) })
+      }
+      // The edge's Web Disk and calendar verification; only the management ingress may name the account (dav-authorize.ts).
+      if (pathname === DAV_AUTHORIZE_PATH) return entryPoint === 'xpanel' && method === 'GET' && isVerifiedHttps(req) ? davAuthorize(req, extractClientIp(req) ?? '') : transportProblem(404, 'NOT_FOUND', 'route is unavailable on this entry point', pathname)
       // ---- Health --------------------------------------------------------------------
       if (method === 'GET' && pathname === '/api/health') {
         return jsonResponse({ ok: true })
       }
       // WHMCS authenticates with its scoped token and address allowlist, not a session.
       if (pathname === WHMCS_PROVISION_PATH) return (await handleWhmcsRoute(req, url, method, whmcsHelpers))!
+      // Cluster members authenticate with their per-member token and address, not a session.
+      if (pathname.startsWith(DNS_CLUSTER_PEER_PREFIX)) return isVerifiedHttps(req) ? handleDnsClusterPeerRoute(req, url, method, { store: deps.store, clientAddress: request => { try { return extractClientIp(request) } catch { return null } }, issuer: whmcsCaller, callHost: (caller, path) => readNativeWorkspace(caller, path), reconcile: caller => triggerReconcile(caller), audit: entry => emitAudit(entry) }) : transportProblem(403, 'FORBIDDEN', 'verified HTTPS ingress is required', pathname)
 
+      if (entryPoint === 'xwhm') { const temporary = await temporaryLoginRoutes(req, pathname, method); if (temporary) return temporary }
       // ---- One-time panel handoff ------------------------------------------------------
       const handedOff = await handoffRoutes(req, pathname, method)
       if (handedOff) return handedOff
+
+      const identityResponse = await identityRoutes(req, url, method)
+      if (identityResponse) return identityResponse
 
       // ---- Authentication & 2FA ------------------------------------------------------
       if (method === 'POST' && pathname === '/api/auth/login') {
@@ -1937,15 +2148,25 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           password?: string
           totpCode?: string
           recoveryCode?: string
+          external?: boolean
+          securityAnswers?: unknown
         }>(req)
-        const username = typeof body.username === 'string' ? body.username.trim().toLowerCase() : ''
+        // A provider sign-in this browser completed names the linked principal in place of a password.
+        const external = body.external === undefined ? null : body.external === true && body.username === undefined && body.password === undefined
+          ? await externalAuth.redeemSignIn(req) : fail('VALIDATION', 'an external sign-in carries no username or password')
+        const username = external?.username ?? (typeof body.username === 'string' ? body.username.trim().toLowerCase() : '')
         const password = typeof body.password === 'string' ? body.password : ''
-        if (!username || !password) {
+        if (!username || (!password && !external)) {
           return fail('VALIDATION', 'username and password are required')
         }
 
-        const activeLockout = await checkLockout(deps.db, { username, ip })
-        if (activeLockout) {
+        if (signInAddressRule(await signInPolicy(), ip) === 'denied') {
+          await recordLoginAttempt(deps.db, { surface: 'panel', username, ip, success: false, reason: 'address_denied' })
+          await emitAudit({ actor: username, action: 'auth.login_denied_address', target: `principal:${username}`, outcome: 'denied', ip })
+          return fail('FORBIDDEN', 'sign-in is not allowed from this address', { reason: 'address_denied' })
+        }
+        const lockout = await activeLockout(username, ip)
+        if (lockout) {
           await recordLoginAttempt(deps.db, {
             surface: 'panel',
             username,
@@ -1957,13 +2178,13 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             actor: username,
             action: 'auth.login_locked',
             target: `principal:${username}`,
-            detail: { lockedUntil: activeLockout.lockedUntil },
+            detail: { lockedUntil: lockout.lockedUntil },
             outcome: 'denied',
             ip,
           })
-          return fail('FORBIDDEN', `too many failed login attempts; locked until ${activeLockout.lockedUntil}`, {
+          return fail('FORBIDDEN', `too many failed login attempts; locked until ${lockout.lockedUntil}`, {
             lockedOut: true,
-            lockedUntil: activeLockout.lockedUntil,
+            lockedUntil: lockout.lockedUntil,
           })
         }
 
@@ -1985,27 +2206,34 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
               entryPoint,
               mailbox: username,
               password,
+              totpCode: body.totpCode,
+              recoveryCode: body.recoveryCode,
+              mfaMode: mfaRuntimePolicy.mode,
               ip,
               userAgent: req.headers.get('user-agent') ?? 'xpanel-client',
             })
           } catch (err) {
+            // The password was accepted: ask for the second factor without counting a failure, like the panel sign-in.
+            if (isXpanelError(err) && err.code === 'UNAUTHENTICATED' && err.detail.mfaRequired === true) return fail('UNAUTHENTICATED', 'two-factor authentication code required', { mfaRequired: true })
             if (isXpanelError(err) && err.code === 'UNAUTHENTICATED') {
+              const reason = err.detail.reason === 'invalid_totp' || err.detail.reason === 'invalid_recovery_code' ? err.detail.reason : 'invalid_credentials'
               await emitAudit({
                 actor: username,
                 action: 'auth.login_failed',
                 target: `mailbox:${username}`,
-                detail: { reason: 'invalid_credentials' },
+                detail: { reason },
                 outcome: 'denied',
                 ip,
               })
-              await recordFailedLoginAndMaybeLock(username, ip, 'invalid_credentials', null)
-              return fail('UNAUTHENTICATED', 'invalid username or password')
+              await recordFailedLoginAndMaybeLock(username, ip, reason, null)
+              return fail('UNAUTHENTICATED', reason === 'invalid_totp' ? 'invalid two-factor authentication code' : reason === 'invalid_recovery_code' ? 'invalid recovery code' : 'invalid username or password', reason === 'invalid_credentials' ? undefined : { reason })
             }
             throw err
           }
           await clearLockout(deps.db, { username })
           await recordLoginAttempt(deps.db, { surface: 'panel', username, ip, success: true })
           await recordLogin(deps.db, established.principal.id)
+          void alertTransports(deps.store).then(transports => noteMailboxLogin({ rootDir: deps.store.rootDir, store: deps.store, mailbox: established.mailbox, ip, email: transports.email, serverName: transports.serverName })).catch(() => undefined)
           const mailboxCsrf = deriveCsrfToken(established.rawToken, serverSecret, entryPoint)
           const mailboxCookie = formatSessionCookie(established.rawToken, {
             entryPoint,
@@ -2036,7 +2264,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
         const principalRecord = await findPrincipalByUsername(deps.db, username)
         const passwordMatches = await verifyPasswordArgon2id(password, principalRecord?.passwordHash ?? DUMMY_PASSWORD_HASH)
-        const passwordValid = principalRecord !== null && !principalRecord.disabled && passwordMatches
+        const passwordValid = principalRecord !== null && !principalRecord.disabled && (external ? external.principalId === principalRecord.id : passwordMatches)
 
         if (!principalRecord || !passwordValid || (entryPoint && !entryPointAdmitsPrincipal(entryPoint, principalRecord))) {
           await emitAudit({
@@ -2088,10 +2316,13 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             return fail('UNAUTHENTICATED', 'two-factor authentication code required', { mfaRequired: true })
           }
         }
+        await checkSecurityQuestions(identityHelpers, { principalId: principalRecord.id, username, ip, answers: body.securityAnswers, external: external !== null,
+          secondFactorVerified: mfaRuntimePolicy.mode !== 'disabled' && principalRecord.totpEnabled, recordFailure: reason => recordFailedLoginAndMaybeLock(username, ip, reason, principalRecord.id) })
 
         const rawToken = randomBytes(32).toString('hex')
         const tokenHash = sessionTokenHash(rawToken, entryPoint)
-        const expiresAt = new Date(Date.now() + 24 * 3600_000).toISOString()
+        const { absoluteMs } = sessionLimits(await signInPolicy())
+        const expiresAt = new Date(Date.now() + absoluteMs).toISOString()
         const session = await createAuthenticatedSession(deps.db, {
           principalId: principalRecord.id,
           tokenHash,
@@ -2118,7 +2349,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const cookie = formatSessionCookie(rawToken, {
           entryPoint,
           secure: useSecureCookies(req),
-          maxAgeSec: 86_400,
+          maxAgeSec: absoluteMs / 1000,
         })
 
         const principal =
@@ -2138,7 +2369,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             actor: principal.username,
             action: 'auth.login',
             target: `principal:${principal.username}`,
-            detail: { sessionId: session.id, mfa: session.mfaVerified, mfaMode: mfaRuntimePolicy.mode },
+            detail: { sessionId: session.id, mfa: session.mfaVerified, mfaMode: mfaRuntimePolicy.mode, ...(external ? { externalProvider: external.providerId } : {}) },
             outcome: 'ok',
             principalId: principal.id,
             ip,
@@ -2190,7 +2421,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           principalId: caller.principal.id,
           ip: extractClientIp(req),
         })
-        return jsonResponse({ ok: true }, 200, {
+        return jsonResponse({ ok: true, redirect: redirectionValues(await tweakSettingsFile(deps.store).current()).logoutUrl }, 200, {
           'set-cookie': clearSessionCookie({ secure: useSecureCookies(req), entryPoint }),
         })
       }
@@ -2282,8 +2513,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         if (typeof body.currentPassword !== 'string' || !body.currentPassword || typeof body.newPassword !== 'string') return fail('VALIDATION', 'current and new passwords are required')
         if (body.currentPassword === body.newPassword) return fail('VALIDATION', 'new password must differ from the current password')
         const ip = extractClientIp(req) ?? '127.0.0.1'
-        const activeLockout = await checkLockout(deps.db, { username: caller.principal.username, ip })
-        if (activeLockout) return fail('FORBIDDEN', 'too many failed authentication attempts', { lockedOut: true, lockedUntil: activeLockout.lockedUntil })
+        const lockout = await activeLockout(caller.principal.username, ip)
+        if (lockout) return fail('FORBIDDEN', 'too many failed authentication attempts', { lockedOut: true, lockedUntil: lockout.lockedUntil })
         if (!await verifyPasswordArgon2id(body.currentPassword, caller.principalRecord.passwordHash)) {
           await recordFailedLoginAndMaybeLock(caller.principal.username, ip, 'invalid_password_change_reauthentication', caller.principal.id)
           return fail('UNAUTHENTICATED', 'current password is incorrect')
@@ -2404,7 +2635,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           const plan = account ? await deps.store.getPlan(account.planId) : null
           const featureList = plan ? await deps.store.getFeatureList(plan.featureListId) : null
           if (!featureList) return fail('PRECONDITION_FAILED', 'account feature policy is unavailable')
-          context.disabledFeatures = new Set(featureList.disabled)
+          context.disabledFeatures = new Set([...featureList.disabled, ...await serverRoleFeatures(deps.store)])
         } else if (caller.principal.kind === 'reseller') {
           const reseller = await resolveResellerForCaller(caller)
           if (!reseller) return fail('FORBIDDEN', 'reseller authorization is unavailable')
@@ -2465,6 +2696,11 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const next = { ...body }
         if (policy === undefined) delete next.defaultSite
         else next.defaultSite = policy
+        if (current?.ftp) next.ftp = current.ftp
+        else delete next.ftp
+        if (current?.ssh) next.ssh = current.ssh
+        else delete next.ssh
+        if (current && body.sshPort !== undefined && body.sshPort !== current.sshPort) return fail('VALIDATION', 'use the guarded SSH workspace to change the SSH port', { stateChanged: false })
         const deferred: Parameters<typeof emitAudit>[0][] = []
         let currentCaller = caller, settings: ServerSettings
         try {
@@ -2479,6 +2715,16 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           await deps.store.markSetupComplete()
         }
         const reconcile = await triggerReconcile(currentCaller)
+        const failedTest = reconcile?.body.status === 'failed' && reconcile.body.verificationRequired !== true && typeof reconcile.body.failedTest === 'string' ? reconcile.body.failedTest : null
+        if (current && failedTest && JSON.stringify(current.web) !== JSON.stringify(settings.web)) {
+          // Web directives the web server refuses are not kept: the previous ones stay saved, as they stay running.
+          await deps.store.saveServerSettings(current, { settingsGuard: async fresh => {
+            if (JSON.stringify(fresh) !== JSON.stringify(settings)) fail('CONFLICT', 'server settings changed again before the refused directives were restored', { stateChanged: true, verificationRequired: true })
+          } })
+          const error = typeof reconcile!.body.error === 'string' ? reconcile!.body.error.slice(0, 2000) : null
+          await emitAudit({ actor: currentCaller.principal.username, action: 'server.settings.web_refused', target: 'server:settings', detail: { failedTest }, outcome: 'failed', principalId: currentCaller.principal.id })
+          return fail('CONFIG_TEST_FAILED', 'the web server refused the new directives; the previous directives stay saved and running', { stateChanged: false, failedTest, error })
+        }
         await emitAudit({
           actor: currentCaller.principal.username,
           action: 'server.settings.updated',
@@ -2494,13 +2740,13 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (method === 'GET' && pathname === '/api/feature-lists') {
         const caller = await requireCaller(req)
         if (caller.principal.kind === 'root') {
-          return jsonResponse({ featureLists: await deps.store.listFeatureLists() })
+          return jsonResponse({ featureLists: (await deps.store.listFeatureLists()).map(shownFeatureList) })
         }
         if (caller.principal.kind === 'reseller') {
           const resellerId = await resolveResellerId(caller)
           const all = await deps.store.listFeatureLists()
           return jsonResponse({
-            featureLists: all.filter((f) => f.ownerId === null || f.ownerId === resellerId),
+            featureLists: all.filter((f) => f.ownerId === null || f.ownerId === resellerId).map(shownFeatureList),
           })
         }
         return fail('FORBIDDEN', 'user accounts cannot list feature lists')
@@ -2515,7 +2761,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const featureList = await deps.store.createFeatureList({
           name: body.name,
           ownerId,
-          disabled: body.disabled ?? [],
+          disabled: savedFeatureKeys(body.disabled ?? []),
         })
         await emitAudit({
           actor: caller.principal.username,
@@ -2525,7 +2771,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           outcome: 'ok',
           principalId: caller.principal.id,
         })
-        return jsonResponse({ featureList }, 201)
+        return jsonResponse({ featureList: shownFeatureList(featureList) }, 201)
       }
 
       const featureListIdMatch = /^\/api\/feature-lists\/([0-9a-f-]{36})$/i.exec(pathname)
@@ -2542,8 +2788,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         }
         if (method === 'PATCH') {
           const patch = await readJsonBody<{ name?: string; disabled?: string[] }>(req)
-          const featureList = await deps.store.updateFeatureList(flId, patch)
-          return jsonResponse({ featureList })
+          const featureList = await deps.store.updateFeatureList(flId, patch.disabled === undefined ? patch : { ...patch, disabled: savedFeatureKeys(patch.disabled) })
+          return jsonResponse({ featureList: shownFeatureList(featureList) })
         }
         if (method === 'DELETE') {
           await deps.store.deleteFeatureList(flId)
@@ -2588,9 +2834,10 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           }
         }
 
-        const resources = body.resources ?? {
-          diskMb: 10_240,
-          bandwidthMbMonth: 102_400,
+        const packageValues = packageDefaults(await tweakSettingsFile(deps.store).current())
+        const resources = {
+          diskMb: packageValues.diskMb,
+          bandwidthMbMonth: packageValues.bandwidthMbMonth,
           ioReadBps: 50_000_000,
           ioWriteBps: 50_000_000,
           ioReadIops: 2000,
@@ -2598,10 +2845,12 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           memoryMb: 1024,
           maxProcesses: 64,
           cpuPercent: 200,
+          ...body.resources,
         }
         const defaultMailboxQuotaMb =
           body.defaultMailboxQuotaMb ??
-          (typeof resources.diskMb === 'number' ? Math.min(1024, Math.max(1, resources.diskMb)) : 1024)
+          (typeof resources.diskMb === 'number' ? Math.min(packageValues.mailboxQuotaMb, Math.max(1, resources.diskMb)) : packageValues.mailboxQuotaMb)
+        assertPackageValues({ resources, defaultMailboxQuotaMb })
 
         const plan = await deps.store.createPlan({
           name: body.name,
@@ -2651,6 +2900,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         }
         if (method === 'PATCH') {
           const patch = await readJsonBody<PlanPatch>(req)
+          if (patch.name !== undefined && patch.name !== existing.name) return fail('VALIDATION', 'a plan name is permanent', { stateChanged: false })
+          if (patch.dedicatedIp !== undefined && patch.dedicatedIp !== existing.dedicatedIp) return fail('VALIDATION', 'a plan keeps its dedicated IP option', { stateChanged: false })
+          assertPackageValues(patch)
           const plan = await deps.store.updatePlan(planId, patch)
           const reconcile = await triggerReconcile(caller)
           await emitAudit({
@@ -2679,6 +2931,11 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       }
 
       // ---- Resellers -----------------------------------------------------------------
+      if (pathname.startsWith('/api/resellers/acl-lists') || pathname === '/api/resellers/email') {
+        const response = await handleResellerWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit, store: deps.store,
+          email: (await alertTransports(deps.store)).email, reindex: async () => { await reindexFromState(deps.db, await deps.store.readSnapshot()) } })
+        if (response) return response
+      }
       if (method === 'GET' && pathname === '/api/resellers') {
         const caller = await requireCaller(req)
         if (caller.principal.kind === 'reseller') {
@@ -2719,6 +2976,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         return jsonResponse({ reseller }, 201)
       }
 
+      const resellerSuspension = await handleResellerSuspensionRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit, setSuspension: setAccountSuspensionAs, setLoginDisabled: (id, disabled) => setPrincipalDisabled(deps.db, id, disabled) })
+      if (resellerSuspension) return resellerSuspension
       const resellerIdMatch = /^\/api\/resellers\/([0-9a-f-]{36})$/i.exec(pathname)
       if (resellerIdMatch) {
         const caller = await requireCaller(req)
@@ -2782,6 +3041,16 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         })
         if (response) return response
       }
+      if (pathname === '/api/webmail/search-index' || /^\/api\/webmail\/inbox\/[1-9]\d*\/report$/.test(pathname)) {
+        const response = await handleMailboxEngineRoute(req, url, method, {
+          open: async (request, tool) => { const { caller, opened } = await authorizeNativeMailboxRequest(request, [tool]); return { caller, mailbox: opened.record.mailbox.toLowerCase() } },
+          callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined),
+          move: async (caller, uid, body) => await moveMailboxFolder(await mailboxFolderDependencies(req, caller, mailboxTransport), uid, body) as unknown as Record<string, unknown>,
+          readBody: request => readJsonBody(request),
+          audit: async (session, action, detail) => { await emitAudit({ actor: session.caller.principal.username, principalId: session.caller.principal.id, action, target: 'mailbox:' + session.mailbox, outcome: 'ok', detail }) },
+        })
+        if (response) return response
+      }
       const sealedImapPorts = (toolId: string) => ({ env: mailboxEnvironment,
         open: async (request: Request) => (await authorizeNativeMailboxRequest(request, [toolId])).opened,
         ...(deps.mailboxTransport ? { clientFactory: () => fail('PRECONDITION_FAILED', 'a native mailbox IMAP adapter has not been configured', { stateChanged: false }) } : {}),
@@ -2809,7 +3078,15 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const response = await handleMailDeviceSetupRoute(req, url, method, {
           open: async request => ({ mailbox: (await authorizeNativeMailboxRequest(request, ['webmail-mail-client-setup'])).opened.record.mailbox }),
           readHostname: async () => (await deps.store.getServerSettings())?.hostname ?? null,
+          sendEmail: async message => { await (await alertTransports(deps.store)).email(message) },
         })
+        if (response) return response
+      }
+      if (pathname === WEBMAIL_DAV_CONFIG_PATH || pathname === WEBMAIL_DAV_PROFILE_PATH) {
+        const response = await handleWebmailDavConfigRoute(req, url, method, { store: deps.store, open: async request => {
+          const { opened } = await authorizeNativeMailboxRequest(request, ['webmail-dav-config'])
+          return { mailbox: opened.record.mailbox, accountId: opened.record.accountId, serviceUserId: opened.record.serviceUserId }
+        } })
         if (response) return response
       }
       if (pathname === '/api/webmail/forwarders') {
@@ -2829,8 +3106,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           } })
         if (response) return response
       }
-      if (pathname === '/api/webmail/spam-preferences' || pathname === '/api/webmail/mailing-lists' || pathname.startsWith('/api/webmail/mailing-lists/')) {
-        const ids = pathname === '/api/webmail/spam-preferences' ? ['webmail-spam-box', 'webmail-spam-autodelete'] : ['webmail-mailing-lists']
+      if (pathname === '/api/webmail/spam-preferences' || pathname === '/api/webmail/mailing-lists' || pathname.startsWith('/api/webmail/mailing-lists/') || pathname === '/api/webmail/boxtrapper' || pathname === '/api/webmail/boxtrapper/queue') {
+        const trap = pathname.startsWith('/api/webmail/boxtrapper')
+        const ids = pathname === '/api/webmail/spam-preferences' ? ['webmail-spam-box', 'webmail-spam-autodelete'] : trap ? ['webmail-boxtrapper'] : ['webmail-mailing-lists']
         const ports = { store: deps.store, open: async (request: Request) => (await authorizeNativeMailboxRequest(request, ids)).opened, audit: sealedImapPorts(ids[0]!).audit }
         const routing = { commit: commitRoutingRevision, apply: async (request: Request, revision: number, restore: { path: string; previous: unknown }) => {
           const { caller } = await authorizeNativeMailboxRequest(request, ids)
@@ -2838,13 +3116,37 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             audit: reason => emitAudit({ actor: caller.principal.username, action: 'mail.routing.rolled_back', target: 'mail-routing:webmail/spam-preferences',
               detail: { reason }, outcome: 'failed', principalId: caller.principal.id }) }, revision, restore)
         } }
-        const response = pathname === '/api/webmail/spam-preferences' ? await handleMailboxSpamRoute(req, url, method, { ...ports, routing }) : await handleMailboxMailingListsRoute(req, url, method, ports)
+        const response = pathname === '/api/webmail/spam-preferences' ? await handleMailboxSpamRoute(req, url, method, { ...ports, routing })
+          : trap ? await handleMailboxBoxTrapperRoute(req, url, method, { ...ports, routing, callHost: deps.agentApp && deps.agentToken ? async (request, username, body, mutation) => readNativeWorkspace((await authorizeNativeMailboxRequest(request, ids)).caller, `/host/mailx/accounts/${username}/boxtrapper`, body, mutation) : null })
+            : await handleMailboxListAdminRoute(req, url, method, { ...ports, routing }) ?? await handleMailboxListModerationRoute(req, url, method, { ...ports, callHost: deps.agentApp && deps.agentToken ? async (request, username, body, mutation) => readNativeWorkspace((await authorizeNativeMailboxRequest(request, ids)).caller, `/host/mailx/accounts/${username}/list-moderation`, body, mutation) : null }) ?? await handleMailboxMailingListsRoute(req, url, method, ports)
+        if (response) return response
+      }
+      if (pathname === '/api/webmail/security' || pathname.startsWith('/api/webmail/security/')) {
+        const response = await handleMailboxSecurityRoute(req, url, method, { db: deps.db, serverSecret, mfaMode: mfaRuntimePolicy.mode, store: deps.store,
+          transport: deps.mailboxTransport ?? createLocalMailboxTransport(mailboxEnvironment),
+          requireCaller: request => requireCaller(request), open: (request, toolIds) => authorizeNativeMailboxRequest(request, toolIds),
+          hashPassword: (password, services) => passwordHashFromInput({ password }, { service: servicePasswordKinds(services) }),
+          reconcile: caller => triggerReconcile(caller),
+          audit: async (caller, action, mailbox, detail) => {
+            const account = await deps.store.getAccount(caller.principal.kind === 'user' ? caller.principal.accountId : '')
+            await emitAudit({ actor: mailbox, action, target: 'mailbox:' + mailbox, outcome: 'ok', principalId: caller.principal.id, ...(detail ? { detail } : {}) }, { accountId: account?.id ?? null, resellerId: account?.ownerId ?? null })
+          },
+          lockedUntil: async (mailbox, request) => (await checkLockout(deps.db, { username: mailbox, ip: extractClientIp(request) ?? '127.0.0.1' }))?.lockedUntil ?? null,
+          recordFailure: (mailbox, request, reason, principalId) => recordFailedLoginAndMaybeLock(mailbox, extractClientIp(request) ?? '127.0.0.1', reason, principalId),
+          clearCookie: request => clearSessionCookie({ secure: useSecureCookies(request), entryPoint }),
+        })
         if (response) return response
       }
       if (pathname === '/api/webmail/preferences') {
         const response = await handleMailboxPreferencesRoute(req, url, method, { store: deps.store,
           open: async request => (await authorizeNativeMailboxRequest(request, ['webmail-preferences'])).opened,
           audit: sealedImapPorts('webmail-preferences').audit, ...(deps.os ? { os: deps.os } : {}) })
+        if (response) return response
+      }
+      if (pathname === '/api/webmail/mailbox-settings') {
+        const response = await handleMailboxSettingsRoute(req, url, method, { store: deps.store, open: async request => (await authorizeNativeMailboxRequest(request, ['webmail-preferences'])).opened,
+          audit: sealedImapPorts('webmail-preferences').audit, email: (await alertTransports(deps.store)).email,
+          reconcile: async () => { await triggerReconcile((await authorizeNativeMailboxRequest(req, ['webmail-preferences'])).caller); return true } })
         if (response) return response
       }
       if (pathname === '/api/webmail/attachment-workspace' || pathname.startsWith('/api/webmail/attachment-download/')) {
@@ -2941,6 +3243,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const input = parseMailboxSend(body)
         await resolveNativeComposeIdentity(req, body)
         const { caller, opened, identity } = await resolveNativeComposeIdentity(req, body)
+        const hourlySends = await tweakValue(deps.store, 'security.mailboxSendsPerHour')
+        if (typeof hourlySends === 'number') mailboxSendLimiter.assertAvailable(opened.record.mailbox, hourlySends)
         const signSent = deps.agentApp && deps.agentToken
           ? async (mailbox: string, rawMime: string): Promise<string | null> => {
               const response = await deps.agentApp!.fetch(new Request('http://agent.local/host/dkim-sign', {
@@ -3010,6 +3314,11 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         })
         if (response) return response
       }
+      if (pathname.startsWith('/api/account/file-restoration')) {
+        const response = await handleOwnerFileRestorationRoute(req, url, method, { requireCaller, getAccount: id => deps.store.getAccount(id), assertCanAccessAccount: (caller, account, action) => assertCanAccessAccount(caller, account, action),
+          assertAccountFeatures: (caller, account, toolIds) => assertAccountFeatures(deps.store, caller, account, toolIds), ...(deps.agentApp && deps.agentToken ? { callAgent: (path, options) => callAgent(path, options) } : {}) })
+        if (response) return response
+      }
       if (pathname.startsWith('/api/backups/components/')) {
         const response = await handleComponentRestoreWorkspaceRoute(req, url, method, { requireCaller,
           getAccountByUsername: username => deps.store.getAccountByUsername(username),
@@ -3060,6 +3369,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (accountSshResponse) return accountSshResponse
       const dynamicDnsResponse = await dynamicDns.manage(req, url, method)
       if (dynamicDnsResponse) return dynamicDnsResponse
+      const emailDiskUsage = await handleEmailDiskUsageWorkspaceRoute(req, url, method, accountToolPorts)
+      if (emailDiskUsage) return emailDiskUsage
       const accountGitResponse = await handleGitWorkspaceRoute(req, url, method, accountToolPorts)
       if (accountGitResponse) return accountGitResponse
       const accountPackagesResponse = await handleAccountPackagesWorkspaceRoute(req, url, method, accountToolPorts)
@@ -3068,10 +3379,14 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (swOptimizeResponse) return swOptimizeResponse
       const swApplicationsResponse = await handleSwApplicationsWorkspaceRoute(req, url, method, accountToolPorts)
       if (swApplicationsResponse) return swApplicationsResponse
+      const ownerToolsResponse = await handleAccountOwnerToolsRoute(req, url, method, accountToolPorts)
+      if (ownerToolsResponse) return ownerToolsResponse
       const accountRuntimeResponse = await handleAccountRuntimeWorkspaceRoute(req, url, method, accountToolPorts)
       if (accountRuntimeResponse) return accountRuntimeResponse
       const remoteDatabaseResponse = await handleDatabaseRemoteAccessWorkspaceRoute(req, url, method, accountToolPorts)
       if (remoteDatabaseResponse) return remoteDatabaseResponse
+      const ftpWorkspaceResponse = await handleFtpWorkspaceRoute(req, url, method, { ...accountToolPorts, assertRoot, emitAudit, triggerReconcile })
+      if (ftpWorkspaceResponse) return ftpWorkspaceResponse
       const dbEngineAccountResponse = await handleDbWorkspaceRoute(req, url, method, { ...accountToolPorts, assertRoot, mutateDatabase: mutateDatabaseWorkspace })
       if (dbEngineAccountResponse) return dbEngineAccountResponse
       const accountPgpResponse = await handlePgpWorkspace(req, url, method, accountToolPorts)
@@ -3103,12 +3418,21 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const response = await handleSecWorkspaceRoute(req, url, method, secHelpers())
         if (response) return response
       }
+      const accountEdgeResponse = await handleAccountEdgeRoute(req, url, method, { store: deps.store, requireCaller, emitAudit, triggerReconcile }); if (accountEdgeResponse) return accountEdgeResponse
+      const nginxProxyResponse = await handleNginxProxyRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit, triggerReconcile }); if (nginxProxyResponse) return nginxProxyResponse
+      const leechResponse = await handleLeechProtectionRoute(req, url, method, { store: deps.store, requireCaller, emitAudit, readAgent: deps.agentApp && deps.agentToken ? readNativeWorkspace : null }); if (leechResponse) return leechResponse
       if (pathname.startsWith('/api/account/sec/cloudflare')) {
         const response = await handleSecCloudflareRoute(req, url, method, { requireCaller, assertRoot, emitAudit, store: deps.store, fetch: globalThis.fetch })
         if (response) return response
       }
-      const accountLogsResponse = await handleAccountLogsRoute(req, url, method, accountToolPorts)
+      const logTools = await handleWhmLogToolsRoute(req, url, method, { requireCaller, assertRoot, emitAudit, readHost: (caller, path) => readNativeWorkspace(caller, path, undefined, false, 'GET'), callAgent: (caller, path) => callAgent(path, { caller }) })
+      if (logTools) return logTools
+      const accountLogsResponse = await handleAccountLogsRoute(req, url, method, { ...accountToolPorts, assertRoot, emitAudit,
+        callAgent: (caller, path) => callAgent(path, { caller, method: 'GET' }) })
       if (accountLogsResponse) return accountLogsResponse
+      const webStatsPorts = { ...accountToolPorts, assertRoot, emitAudit, toolQualified: async (id: string) => (await loadCatalog()).some(tool => tool.id === id && tool.status === 'verified' && tool.delivery.status === 'verified') }
+      const webStatsResponse = await handleWebStatsWorkspaceRoute(req, url, method, webStatsPorts) ?? await handleWebStatsServerRoute(req, url, method, webStatsPorts)
+      if (webStatsResponse) return webStatsResponse
       const accountVirusScanResponse = await handleAccountVirusScanRoute(req, url, method, accountToolPorts)
       if (accountVirusScanResponse) return accountVirusScanResponse
       const networkToolsResponse = await handleNetworkToolsRoute(req, url, method, { ...accountToolPorts, networkToolsGate })
@@ -3117,9 +3441,11 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (accountDatabaseInsightsResponse) return accountDatabaseInsightsResponse
       const siteHealthResponse = await handleSiteHealthRoute(req, url, method, { store: deps.store, requireCaller, dns: siteHealthDns, probe: probeHtaccessTarget })
       if (siteHealthResponse) return siteHealthResponse
+      const davWorkspaceResponse = await handleDavWorkspaceRoute(req, url, method, { store: deps.store, requireCaller })
+      if (davWorkspaceResponse) return davWorkspaceResponse
       if (pathname === '/api/server/composer' || pathname.startsWith('/api/server/composer/jobs/')) {
         const response = await handleComposerWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit,
-          callHost: (caller, path, body, mutation = false) => readNativeWorkspace(caller, path, body, mutation) })
+          callHost: (caller, path, body, mutation = false) => readNativeWorkspace(caller, path, body, mutation, 'POST', null, true) })
         if (response) return response
       }
       if (pathname === '/api/server/default-index' || pathname.startsWith('/api/server/default-index/')) {
@@ -3197,6 +3523,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         if (response) return response
       }
       if (pathname === '/api/server/upgrade' || pathname.startsWith('/api/server/upgrade/')) {
+        const releasePackages = await handleReleasePackagesWorkspaceRoute(req, url, method, { requireCaller, assertRoot, readHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined) })
+        if (releasePackages) return releasePackages
         const response = await handleUpgradeWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit, callAgent })
         if (response) return response
       }
@@ -3217,7 +3545,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             // Only this admitted runner reads the original session and principal after any DB queue.
             // Team/handoff resolvers are deliberately absent: neither may become an original owner.
             const current = await authenticateRequest(tx, request, { serverSecret, clientIp: extractClientIp(request), entryPoint,
-              touchSession: false, mfaRuntimePolicy })
+              touchSession: false, mfaRuntimePolicy, sessionLimits: sessionLimits(await signInPolicy()) })
             if (!current) return fail('FORBIDDEN', 'the original owner session is no longer authenticated', { stateChanged: false })
             assertAuthPersonalOwner(current, entryPoint)
             if (request.method !== 'GET' && !current.csrfValid) return fail('FORBIDDEN', 'the original owner CSRF proof changed', { stateChanged: false })
@@ -3230,25 +3558,26 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         })
         if (response) return response
       }
-      if (pathname === '/api/server/panel/api-tokens' || pathname.startsWith('/api/server/panel/api-tokens/')) {
-        const response = await handlePanelTokensWorkspaceRoute(req, url, method, { db: deps.db, requireCaller, assertRoot, emitAudit,
-          authorizeIssuance: async (tx, caller) => {
-            if (caller.principal.kind !== 'root' || caller.apiTokenId !== null || !caller.sessionId || !caller.sessionToken
-              || caller.team || caller.impersonator || (entryPoint !== undefined && entryPoint !== 'xwhm')) {
-              return fail('FORBIDDEN', 'token issuance requires the original interactive root session', { stateChanged: false })
-            }
-            await assertPrivilegedSessionAuthorization({
-              reference: { kind: 'session', principalId: caller.principal.id, sessionId: caller.sessionId,
-                tokenHash: sessionTokenHash(caller.sessionToken, entryPoint), entryPoint: entryPoint ?? null },
-              actor: caller.principal, policy: mfaRuntimePolicy,
-              ports: { principal: id => getPrincipal(tx, id), session: tokenHash => findActiveSessionByTokenHash(tx, tokenHash) },
-            })
-          },
+      const authorizeTokenIssuance = async (tx: Db, caller: AuthenticatedCaller): Promise<void> => {
+        if (caller.principal.kind !== 'root' || caller.apiTokenId !== null || !caller.sessionId || !caller.sessionToken
+          || caller.team || caller.impersonator || (entryPoint !== undefined && entryPoint !== 'xwhm')) {
+          return fail('FORBIDDEN', 'token issuance requires the original interactive root session', { stateChanged: false })
+        }
+        await assertPrivilegedSessionAuthorization({
+          reference: { kind: 'session', principalId: caller.principal.id, sessionId: caller.sessionId,
+            tokenHash: sessionTokenHash(caller.sessionToken, entryPoint), entryPoint: entryPoint ?? null },
+          actor: caller.principal, policy: mfaRuntimePolicy,
+          ports: { principal: id => getPrincipal(tx, id), session: tokenHash => findActiveSessionByTokenHash(tx, tokenHash) },
         })
+      }
+      if (pathname === '/api/server/panel/api-tokens' || pathname.startsWith('/api/server/panel/api-tokens/')) {
+        const response = await handlePanelTokensWorkspaceRoute(req, url, method, { db: deps.db, requireCaller, assertRoot, emitAudit, authorizeIssuance: authorizeTokenIssuance })
         if (response) return response
       }
       if (/^\/api\/(?:server|account)\/announcements(?:\/|$)/.test(pathname)) {
         const extended = new ExtendedFeaturesStore(deps.store.rootDir)
+        const emailResponse = pathname === '/api/server/announcements/email' ? await handleEmailAllUsersRoute(req, url, method, { requireCaller, assertRoot, emitAudit, readJsonBody, listAccounts: () => deps.store.listAccounts(), email: (await alertTransports(deps.store)).email }) : null
+        if (emailResponse) return emailResponse
         const response = await handleAnnouncementsRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit,
           readSaved: () => extended.readOrDefault<unknown>('accounts/announcements.json', null),
           writeSaved: value => extended.write('accounts/announcements.json', value),
@@ -3281,30 +3610,48 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
               readSaved: () => extended.readOrDefault<unknown>('plans/enhancements.json', null), writeSaved: value => extended.write('plans/enhancements.json', value) })
         if (response) return response
       }
+      if (pathname === '/api/admin/favorites' || pathname.startsWith('/api/admin/notifications')) {
+        const extended = new ExtendedFeaturesStore(deps.store.rootDir)
+        const response = await handleWhmHomeRoute(req, url, method, { requireCaller, readJsonBody, read: path => extended.readOrDefault<unknown>(path, null), write: (path, value) => extended.write(path, value),
+          failedJobs: () => listJobs(deps.db, { status: 'failed', limit: 100 }), failedAudit: () => listAudit(deps.db, { outcome: 'failed', limit: 100 }),
+          backupRuns: async caller => (await readNativeWorkspace<{ runs?: { id: string; startedAt: string; finishedAt: string | null; state: string }[] }>(caller, '/host/backups/runs')).runs ?? [],
+          actionLabel: (action, request) => auditActionLabel(action, requestLocale(new URL(request.url), request)) })
+        if (response) return response
+      }
       if (pathname === '/api/server/panel/notifications' || pathname.startsWith('/api/server/panel/notifications/')) {
         const response = await handlePanelNotificationsRoute(req, url, method, { requireCaller, assertRoot, emitAudit, ...alertStateFiles(deps.store), transports: await alertTransports(deps.store) })
         if (response) return response
       }
+      const openPersonalAuthority = async (request: Request): Promise<UiPreferenceAuthority> => {
+        const caller = await requireCaller(request)
+        const surface = entryPoint ?? (isMailboxPrincipalUsername(caller.principal.username) ? 'xmail' : caller.principal.kind === 'user' ? 'xpanel' : 'xwhm')
+        if (surface !== 'xmail') return { caller, surface }
+        const record = await authorizeMailboxSessionBinding(deps.db, deps.store, caller)
+        const current = await captureMailboxMetadataAuthority(deps.store, record.mailbox)
+        if (current.accountId !== record.accountId || current.serviceUserId !== record.serviceUserId) return fail('FORBIDDEN', 'mailbox lifetime changed; sign in again', { stateChanged: false })
+        return { caller, surface, mailbox: { ...current, sessionId: record.sessionId } }
+      }
+      const teamAuditResponse = await handleTeamAuditRoute(req, url, method, { store: deps.store, requireCaller, db: deps.db })
+      if (teamAuditResponse) return teamAuditResponse
       const uiPreferencesResponse = await handleUiPreferencesRoute(req, url, method, { store: deps.store, emitAudit,
-        choices: registeredUiThemeIds(), defaultUiTheme: resolveUiTheme().id,
-        open: async request => {
-          const caller = await requireCaller(request)
-          const surface = entryPoint ?? (isMailboxPrincipalUsername(caller.principal.username) ? 'xmail' : caller.principal.kind === 'user' ? 'xpanel' : 'xwhm')
-          if (surface !== 'xmail') return { caller, surface }
-          const record = await authorizeMailboxSessionBinding(deps.db, deps.store, caller)
-          const current = await captureMailboxMetadataAuthority(deps.store, record.mailbox)
-          if (current.accountId !== record.accountId || current.serviceUserId !== record.serviceUserId) return fail('FORBIDDEN', 'mailbox lifetime changed; sign in again', { stateChanged: false })
-          return { caller, surface, mailbox: { ...current, sessionId: record.sessionId } }
-        },
-      })
+        choices: registeredUiThemeIds(), defaultUiTheme: resolveUiTheme().id, open: openPersonalAuthority })
       if (uiPreferencesResponse) return uiPreferencesResponse
+      const personalPreferencesResponse = await handlePersonalPreferencesRoute(req, url, method, { store: deps.store, emitAudit, open: openPersonalAuthority, locales: () => localePolicy().offered })
+      if (personalPreferencesResponse) return personalPreferencesResponse
       const adminPreferencesResponse = await handleAdminPreferencesRoute(req, url, method, { store: deps.store, requireCaller, emitAudit })
       if (adminPreferencesResponse) return adminPreferencesResponse
+      const signInPolicyResponse = await handleSignInPolicyRoute(req, url, method, { store: deps.store, db: deps.db, requireCaller, assertRoot, emitAudit,
+        clientIp: extractClientIp, applied: policy => usePasswordStrengthPolicy(policy.passwordStrength) })
+      if (signInPolicyResponse) return signInPolicyResponse
+      const tweakSettingsResponse = await handleTweakSettingsRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit })
+      if (tweakSettingsResponse) return tweakSettingsResponse
       const panelConfigResponse = await handlePanelSettingsRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit })
         ?? await handlePanelBrandingRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit })
         ?? await handleWhmcsRoute(req, url, method, whmcsHelpers)
         ?? await handlePanelLanguagesRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit })
       if (panelConfigResponse) return panelConfigResponse
+      const extendResponse = await handleExtendRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit, ...extendHost })
+      if (extendResponse) return extendResponse
       const serviceManagerResponse = await handleServiceManagerWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit,
         callHost: (caller, path, body, mutation = false) => readNativeWorkspace(caller, path, body, mutation) })
       if (serviceManagerResponse) return serviceManagerResponse
@@ -3315,7 +3662,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       }
       if (pathname.startsWith('/api/server/software/')) {
         const callHost = (caller: AuthenticatedCaller, path: string, body?: unknown, mutation = false) => readNativeWorkspace(caller, path, body, mutation)
-        const response = await handleSwContainersWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit, callHost })
+        const response = await handleSwContainersWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit, callHost, streamHost: (caller, path) => callAgent(path, { caller }) })
           ?? await handleSwAddonServicesWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit, callHost })
           ?? await handleSwDeploymentsWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit, callHost, getAccountByUsername: name => deps.store.getAccountByUsername(name) })
         if (response) return response
@@ -3326,6 +3673,12 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const tuning = await handleDatabaseTuningWorkspaceRoute(req, url, method, { requireCaller, assertRoot,
           readHost: (caller, path) => readNativeWorkspace(caller, path, undefined, false, 'GET') })
         if (tuning) return tuning
+        const dbAdmin = await handleWhmDbAdminRoute(req, url, method, { requireCaller, assertRoot, callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, true), readHost: (caller, path) => readNativeWorkspace(caller, path, undefined, false, 'GET') })
+        if (dbAdmin) return dbAdmin
+        const dbTools = await handleWhmDbToolsRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit, triggerReconcile, callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, true), readHost: (caller, path) => readNativeWorkspace(caller, path, undefined, false, 'GET') })
+        if (dbTools) return dbTools
+        const dbServices = await handleWhmDbServicesRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit, triggerReconcile, callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, true), readHost: (caller, path) => readNativeWorkspace(caller, path, undefined, false, 'GET') })
+        if (dbServices) return dbServices
         const response = await handleWhmDatabasesWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit,
           readSaved: () => deps.store.readSnapshot(),
           readHost: (caller, path) => readNativeWorkspace(caller, path, undefined, false, 'GET'),
@@ -3333,12 +3686,16 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         })
         if (response) return response
       }
+      if (pathname === '/api/server/file-sharing/links' || pathname.startsWith('/api/server/file-sharing/links/')) {
+        const response = await handleFileShareLinksRoute(req, url, method, { requireCaller, assertRoot, emitAudit, file: shareLinksFile, inspect: (caller, path) => readNativeWorkspace(caller, '/host/file-sharing/links/inspect', { path }) })
+        if (response) return response
+      }
       if (pathname === '/api/server/file-sharing' || pathname === '/api/server/file-sharing/apply') {
         const extended = new ExtendedFeaturesStore(deps.store.rootDir)
         const response = await handleFileSharingWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit,
           readSaved: () => extended.readOrDefault<unknown>('file-sharing/shares.json', null),
           writeSaved: value => extended.write('file-sharing/shares.json', value),
-          callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined, body === undefined ? 'GET' : 'POST') })
+          callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined, body === undefined ? 'GET' : 'POST'), reconcile: caller => triggerReconcile(caller) })
         if (response) return response
       }
       if (pathname === '/api/account/terminal') {
@@ -3349,6 +3706,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const ip = extractClientIp(req) ?? '127.0.0.1'
         const response = await handleTerminalWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit,
           readExecution: readTerminalExecution, tickets: terminalTickets, registry: terminalRegistry,
+          activeAccount: async username => { const account = await deps.store.getAccountByUsername(username); return account?.status === 'active' ? account : null },
           secondFactorEnrolled: caller => mfaRuntimePolicy.mode !== 'disabled' && caller.principalRecord.totpEnabled && Boolean(caller.principalRecord.totpSecretEnc),
           verifySecondFactor: async (caller, code) => {
             const sealed = caller.principalRecord.totpSecretEnc
@@ -3357,18 +3715,18 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             return step !== null && await consumeTotpStep(deps.db, caller.principal.id, step, sealed)
           },
           verifyPassword: (caller, password) => verifyPasswordArgon2id(password, caller.principalRecord.passwordHash),
-          checkLockout: async caller => { const lockout = await checkLockout(deps.db, { username: caller.principal.username, ip }); return lockout ? lockout.lockedUntil : null },
+          checkLockout: async caller => { const lockout = await activeLockout(caller.principal.username, ip); return lockout ? lockout.lockedUntil : null },
           recordFailure: caller => recordFailedLoginAndMaybeLock(caller.principal.username, ip, 'invalid_terminal_reauthentication', caller.principal.id) })
         if (response) return response
       }
-      if (pathname === '/api/server/nodes' || pathname === '/api/server/nodes/verify') {
-        const extended = new ExtendedFeaturesStore(deps.store.rootDir)
-        const response = await handleNodesWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit,
-          readSaved: () => extended.readOrDefault<unknown>('server/managed-nodes.json', null),
-          writeSaved: value => extended.write('server/managed-nodes.json', value),
-          readHostname: async () => { const wizard = await extended.readOrDefault<{ hostname?: unknown } | null>('setup-wizard.json', null); return wizard && typeof wizard.hostname === 'string' ? wizard.hostname : null },
-          // verifyChannel stays absent until an authenticated, fingerprint-pinned node channel is qualified.
-        })
+      if (/^\/api\/server\/(?:nodes|cluster)(?:\/|$)/.test(pathname)) {
+        const extended = new ExtendedFeaturesStore(deps.store.rootDir), guards = { requireCaller, assertRoot, emitAudit, link: nodeLink }
+        const response = await handleNodesWorkspaceRoute(req, url, method, { ...guards, db: deps.db, authorizeIssuance: authorizeTokenIssuance,
+          readHostname: async () => { const wizard = await extended.readOrDefault<{ hostname?: unknown } | null>('setup-wizard.json', null); return wizard && typeof wizard.hostname === 'string' ? wizard.hostname : null } })
+          ?? await handleClusterRoute(req, url, method, { ...guards, store: deps.store })
+          ?? await handleLiveSourceRoute(req, url, method, { ...guards, store: deps.store, setSuspension: setAccountSuspensionAs,
+            applyAccount: async (caller, account) => applyAccountConfiguration(caller, account, 'update', await deps.store.getRevision()),
+            drainMail: (caller, domains) => readNativeWorkspace(caller, '/host/mail/queue/drain', { domains }, true) })
         if (response) return response
       }
       if (pathname === '/api/server/integrations' || pathname === '/api/server/integrations/test') {
@@ -3381,13 +3739,16 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           writeSecrets: value => opsAtomicWriteJson(opsJoin(deps.store.rootDir, 'extended', 'integrations', 'secrets.json'), value, 0o600),
           readLog: () => extended.readOrDefault('integrations/deliveries.json', []),
           writeLog: value => extended.write('integrations/deliveries.json', value),
-          // No reviewed outbound webhook egress exists yet; test deliveries report unavailable and nothing is sent.
-          sender: null })
+          sender: (await alertTransports(deps.store)).webhook })
         if (response) return response
       }
       if (pathname.startsWith('/api/server/updates/')) {
         const response = await handleSystemUpdatesWorkspaceRoute(req, url, method, { requireCaller, assertRoot,
           callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined) })
+        if (response) return response
+      }
+      if (pathname.startsWith('/api/accounts/repair/')) {
+        const response = await handleAccountRepairWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit, callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, path.endsWith('/run')), rerender: caller => triggerReconcile(caller, { force: true }) })
         if (response) return response
       }
       if (pathname === '/api/accounts/health') {
@@ -3405,8 +3766,15 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         })
         if (response) return response
       }
+      if (PANEL_TOOL_ROUTE.test(pathname)) {
+        const response = await handlePanelToolsRoute(req, url, method, { store: deps.store, db: deps.db, requireCaller, assertRoot, emitAudit, clientIp: extractClientIp, reporter: errorReporter, dispatchRead: (selected: Request) => fetchInner(selected, context),
+          apiShellEnabled: async () => await tweakValue(deps.store, 'security.apiShell') !== false, reconcile: caller => triggerReconcile(caller),
+          callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined, 'POST', null, true), streamHost: (caller, path) => callAgent(path, { caller }) })
+        if (response) return response
+      }
       if (['/api/server/panel/developer', '/api/server/panel/integrations', '/api/account/developer'].includes(pathname)) {
-        const ports = { store: deps.store, requireCaller, assertRoot, emitAudit, dispatchRead: (selected: Request) => fetchInner(selected, context) }
+        const ports = { store: deps.store, requireCaller, assertRoot, emitAudit, dispatchRead: (selected: Request) => fetchInner(selected, context),
+          apiShellEnabled: async () => await tweakValue(deps.store, 'security.apiShell') !== false }
         const response = pathname === '/api/server/panel/integrations' ? await handleIntegrationWorkspaceRoute(req, url, method, ports) : await handleDeveloperWorkspaceRoute(req, url, method, ports)
         if (response) return response
       }
@@ -3440,8 +3808,21 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const response = await handleSecCloudflareRoute(req, url, method, { requireCaller, assertRoot, emitAudit, store: deps.store, fetch: globalThis.fetch })
         if (response) return response
       }
-      if (pathname.startsWith('/api/server/sec/')) {
+      if (pathname.startsWith('/api/server/notification-templates') || pathname.startsWith('/api/server/mail/marketing') || pathname.startsWith('/api/server/mail/outbound/') || pathname === '/api/server/ssl/autossl/run') {
+        const response = await handleMailCertRoutes(req, url, method, { requireCaller, assertRoot, emitAudit, store: deps.store, publicOrigin: publicOrigin ?? null, call: deps.agentApp && deps.agentToken ? caller => (path, options) => callAgent(path, { ...options, caller }) : null })
+        if (response) return response
+      }
+      if (pathname.startsWith('/api/server/panel-access')) { const response = await handlePanelAccessRoute(req, url, method, { ...secHelpers(), db: deps.db, serverSecret, ...(publicOrigin ? { publicOrigin } : {}), secureCookies: useSecureCookies, ...(deps.agentApp && deps.agentToken ? { callHostRelay: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined, 'POST', null, true) } : {}) }); if (response) return response }
+      if (pathname.startsWith('/api/server/sec/') || pathname.startsWith('/api/server/services/')) {
+        const svcResponse = await handleSvcWorkspaceRoute(req, url, method, secHelpers())
+        if (svcResponse) return svcResponse
         const response = await handleSecWorkspaceRoute(req, url, method, secHelpers())
+        if (response) return response
+      }
+      if (pathname.startsWith('/api/server/ssh') || pathname.startsWith('/api/server/security-tools/isolation/')) {
+        const response = await handleSshWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit, store: deps.store, clientIp: extractClientIp, reconcile: caller => triggerReconcile(caller), readChannels: alertStateFiles(deps.store).readChannels,
+          writeAlarmState: (file, value) => opsAtomicWriteJson(opsJoin(deps.store.rootDir, 'extended', file), value),
+          ...(deps.agentApp && deps.agentToken ? { callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined) } : {}) })
         if (response) return response
       }
       if (pathname.startsWith('/api/server/security-tools/')) {
@@ -3471,6 +3852,31 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         })
         if (response) return response
       }
+      if (pathname === '/api/server/db-profiles' || pathname.startsWith('/api/server/db-profiles/')) {
+        const response = await handleDbProfilesWorkspaceRoute(req, url, method, { requireCaller, assertRoot, ...(deps.agentApp && deps.agentToken ? { callHost: (caller: AuthenticatedCaller, path: string, body?: unknown) => readNativeWorkspace(caller, path, body, body !== undefined, 'POST', null, true) } : {}) })
+        if (response) return response
+      }
+      if (pathname === '/api/server/dns-cluster' || pathname.startsWith('/api/server/dns-cluster/')) {
+        const response = await handleDnsClusterWorkspaceRoute(req, url, method, { requireCaller, assertRoot, emitAudit, store: deps.store, ...(deps.agentApp && deps.agentToken ? { callHost: (caller: AuthenticatedCaller, path: string, body?: Record<string, unknown>) => readNativeWorkspace(caller, path, body, body !== undefined, 'POST', null, true) } : {}) })
+        if (response) return response
+      }
+      if (pathname === '/api/server/remote-service-ips') {
+        const response = await handleRemoteServiceIpsRoute(req, url, method, { requireCaller, assertRoot, emitAudit, store: deps.store, reconcile: caller => triggerReconcile(caller),
+          ...(deps.agentApp && deps.agentToken ? { applyDns: (caller: AuthenticatedCaller, expectedRevision: string) => readNativeWorkspace(caller, '/host/sec/dns-cluster/apply', { expectedRevision }, true) } : {}) })
+        if (response) return response
+      }
+      if (/^\/api\/server\/(?:resolvers|domain-forwards|role-profile|service-selection|system-mail|panel-tls|maintenance-schedule|update-preferences|dns-ops)(?:\/|$)/.test(pathname)) {
+        const response = await handleServerOperationsRoute(req, url, method, { requireCaller, assertRoot, emitAudit, triggerReconcile, store: deps.store, db: deps.db,
+          sendToCluster: (sections, note, caller) => pushSectionsToCluster({ requireCaller, assertRoot, emitAudit, store: deps.store, link: nodeLink }, sections, note, caller),
+          ...(deps.agentApp && deps.agentToken ? { callHost: (caller: AuthenticatedCaller, path: string, body?: Record<string, unknown>) => readNativeWorkspace(caller, path, body, body !== undefined) } : {}) })
+        if (response) return response
+      }
+      if (pathname.startsWith('/api/server/host-tools/')) {
+        const hookOrigin = entryPoint === 'xpanel' ? publicOrigin : handoffTargetOrigin
+        const response = await handleHostToolsRoute(req, url, method, { ...identityHelpers, triggerReconcile, ...(hookOrigin ? { hookOrigin } : {}),
+          ...(deps.agentApp && deps.agentToken ? { checkDdns: () => runDdnsCycle({ store: deps.store, fetcher: globalThis.fetch, reconcile: () => ddnsRootReconcile({ db: deps.db, agentApp: deps.agentApp!, agentToken: deps.agentToken! }) }, { force: true }) } : {}) })
+        if (response) return response
+      }
       if (pathname.startsWith('/api/server/server-observation/')) {
         const response = await handleServerObservationWorkspaceRoute(req, url, method, { requireCaller, assertRoot,
           readSaved: () => deps.store.readSnapshot(),
@@ -3490,11 +3896,21 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         if (response) return response
       }
       if (pathname === '/api/account/mailx/collections') {
-        const response = await createMailxCollectionsRoutes({ store: deps.store, serverSecret, requireCaller, assertCanAccessAccount, emitAudit })(req, url, method)
+        const response = await createMailxCollectionsRoutes({ store: deps.store, serverSecret, requireCaller, assertCanAccessAccount, emitAudit, dav })(req, url, method)
         if (response) return response
       }
-      if (pathname.startsWith('/api/server/mailx/') || pathname === '/api/account/mailx/archive' || pathname === '/api/account/mailx/archive/retention' || pathname.startsWith('/api/account/mailx/mail-tools')) {
-        const response = await createMailxWorkspaceRoutes({ store: deps.store, requireCaller, assertRoot, assertCanAccessAccount, emitAudit,
+      if (pathname.startsWith('/api/server/mailx-config/')) {
+        const response = await createMailxConfigRoutes({ store: deps.store, requireCaller, assertRoot, emitAudit,
+          ...(deps.agentApp && deps.agentToken ? { callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined) } : {}) })(req, url, method)
+        if (response) return response
+      }
+      if (MAIL_REPORT_ROUTE.test(pathname)) {
+        const response = await handleMailReportsWorkspaceRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, emitAudit,
+          ...(deps.agentApp && deps.agentToken ? { callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined) } : {}) })
+        if (response) return response
+      }
+      if (pathname.startsWith('/api/server/mailx/') || pathname === '/api/account/mailx/archive' || pathname === '/api/account/mailx/archive/retention' || pathname.startsWith('/api/account/mailx/mail-tools') || ['greylisting', 'routing', 'deliverability', 'track-delivery'].some(tool => pathname === '/api/account/mailx/' + tool)) {
+        const response = await createMailxWorkspaceRoutes({ store: deps.store, requireCaller, assertRoot, assertCanAccessAccount, emitAudit, readDkimPublicMaterial,
           ...(deps.agentApp && deps.agentToken ? { callHost: (caller, path, body) => readNativeWorkspace(caller, path, body, body !== undefined) } : {}) })(req, url, method)
         if (response) return response
       }
@@ -3523,6 +3939,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           getServerSettings: () => deps.store.getServerSettings(),
           saveServerSettings: settings => deps.store.saveServerSettings(settings),
           updateDomainPhp: async (_caller, domain, php) => { await deps.store.updateDomain(domain.id, { php }) },
+          workerCap: async accountId => { const account = await deps.store.getAccount(accountId); return (account ? await deps.store.getPlan(account.planId) : null)?.caps.phpWorkers ?? 'unlimited' },
           reconcile: caller => triggerReconcile(caller),
           audit: async (caller, action, target, detail, outcome = 'ok') => { await emitAudit({ actor: caller.principal.username, action, target, detail, outcome, principalId: caller.principal.id }) },
         })
@@ -3570,12 +3987,75 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       const directoryPrivacyResponse = await handleDirectoryPrivacyRoute(req, url, method, { store: deps.store, requireCaller, assertCanAccessAccount, resolveAccountParam, emitAudit,
         readAgent: deps.agentApp && deps.agentToken ? readNativeWorkspace : null })
       if (directoryPrivacyResponse) return directoryPrivacyResponse
+      const dnssecResponse = await handleDnssecRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, assertCanAccessAccount, callAgent: deps.agentApp && deps.agentToken ? (path, options) => callAgent(path, options) : null })
+      if (dnssecResponse) return dnssecResponse
+      const zoneFileResponse = await handleDnsZoneFileRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, assertCanAccessAccount })
+      if (zoneFileResponse) return zoneFileResponse
+      const listAdminResponse = await handleMailingListAdminRoute(req, url, method, { store: deps.store, requireCaller, assertRoot, assertCanAccessAccount, emitAudit, callAgent: deps.agentApp && deps.agentToken ? (path, options) => callAgent(path, options) : null })
+      if (listAdminResponse) return listAdminResponse
+      const listModerationResponse = await handleListModerationRoute(req, url, method, { store: deps.store, requireCaller, assertCanAccessAccount, emitAudit,
+        callHost: deps.agentApp && deps.agentToken ? (caller, username, body, mutation) => readNativeWorkspace(caller, `/host/mailx/accounts/${username}/list-moderation`, body, mutation) : null,
+        routing: { commit: commitRoutingRevision, apply: async (request, revision, restore) => {
+          const caller = await requireCaller(request)
+          return applyMailRoutingChange({ store: deps.store, db: deps.db, reconcile: () => triggerReconcile(caller), audit: reason => emitAudit({ actor: caller.principal.username, action: 'mail.routing.rolled_back', target: 'mail-routing:mail/mailing-lists.json', detail: { reason }, outcome: 'failed', principalId: caller.principal.id }) }, revision, restore)
+        } } })
+      if (listModerationResponse) return listModerationResponse
+      const boxTrapperResponse = await handleOwnerBoxTrapperRoute(req, url, method, { store: deps.store, requireCaller, assertCanAccessAccount, emitAudit,
+        callHost: deps.agentApp && deps.agentToken ? (caller, username, body, mutation) => readNativeWorkspace(caller, `/host/mailx/accounts/${username}/boxtrapper`, body, mutation) : null,
+        routing: { commit: commitRoutingRevision, apply: async (request, revision, restore) => {
+          const caller = await requireCaller(request)
+          return applyMailRoutingChange({ store: deps.store, db: deps.db, reconcile: () => triggerReconcile(caller), audit: reason => emitAudit({ actor: caller.principal.username, action: 'mail.routing.rolled_back', target: 'mail-routing:mail/boxtrapper', detail: { reason }, outcome: 'failed', principalId: caller.principal.id }) }, revision, restore)
+        } } })
+      if (boxTrapperResponse) return boxTrapperResponse
 
+      const sslStoreResponse = await handleSslStoreWorkspaceRoute(req, url, method, sslStorePorts)
+      if (sslStoreResponse) return sslStoreResponse
       const certificateResponse = await certificateRuntimeRouter(req, url, method)
       if (certificateResponse) return certificateResponse
 
       const accountBulkResponse = await handleAccountBulkActionsRoute(req, url, method, { db: deps.db, requireCaller, readJsonBody, getAccount: id => deps.store.getAccount(id), assertCanAccessAccount, setSuspension: setAccountSuspensionAs, update: updateAccountAs, terminate: terminateAccountAs })
       if (accountBulkResponse) return accountBulkResponse
+      // The owner, by name: an account can also hold mailbox principals.
+      const accountOwnerPrincipal = async (account: Account) => { const owner = await findPrincipalByUsername(deps.db, account.username); return owner?.kind === 'user' && owner.accountId === account.id ? owner : null }
+      const accountAdminResponse = await handleAccountAdminRoute(req, url, method, { requireCaller, readJsonBody, getPlan: id => deps.store.getPlan(id),
+        listAccounts: async caller => { if (caller.principal.kind === 'root') return deps.store.listAccounts(); const ownerId = await resolveResellerId(caller); return ownerId ? deps.store.listAccounts({ ownerId }) : [] },
+        assertCanModify: (caller, account) => assertCanAccessAccount(caller, account, 'account.update', { allowUserSelf: false }),
+        readForcedPassword: async account => (await accountOwnerPrincipal(account))?.forcePasswordChange ?? null,
+        setForcedPassword: async (account, forced) => { const owner = await accountOwnerPrincipal(account); if (owner) await setPrincipalForcePasswordChange(deps.db, owner.id, forced) },
+        audit: async (caller, account, forced) => { await emitAudit({ actor: caller.principal.username, action: forced ? 'account.password_change.forced' : 'account.password_change.cleared', target: 'account:' + account.username, outcome: 'ok', principalId: caller.principal.id }, { accountId: account.id, resellerId: account.ownerId }) },
+        rearrange: async (caller, account, root) => {
+          await assertCanAccessAccount(caller, account, 'account.update', { allowUserSelf: false })
+          const reply = await readNativeWorkspace<Record<string, unknown>>(caller, `/host/accounts/${account.username}/rearrange`, { root }, true)
+          await emitAudit({ actor: caller.principal.username, action: 'account.rearrange.started', target: 'account:' + account.username, detail: { root }, outcome: 'ok', principalId: caller.principal.id }, { accountId: account.id, resellerId: account.ownerId })
+          return reply
+        },
+        recoverRearrange: async (caller, account) => {
+          await assertCanAccessAccount(caller, account, 'account.update', { allowUserSelf: false })
+          const reply = await readNativeWorkspace<{ outcome?: unknown }>(caller, `/host/accounts/${account.username}/rearrange`, {}, true, 'DELETE')
+          await emitAudit({ actor: caller.principal.username, action: 'account.rearrange.recovered', target: 'account:' + account.username, detail: { outcome: reply.outcome }, outcome: 'ok', principalId: caller.principal.id }, { accountId: account.id, resellerId: account.ownerId })
+          return reply
+        } }, async caller => ({ homeRoots: caller.principal.kind === 'root' && deps.agentApp && deps.agentToken ? await readNativeWorkspace<{ roots: unknown[] }>(caller, '/host/home-roots', undefined, false, 'GET').then(view => view.roots, () => null) : null }))
+      if (accountAdminResponse) return accountAdminResponse
+      if (pathname.startsWith('/api/accounts/web-templates') || pathname.startsWith('/api/accounts/skeleton')) {
+        const extended = new ExtendedFeaturesStore(deps.store.rootDir)
+        const scoped = { requireCaller, readJsonBody, resellerOf: async (caller: AuthenticatedCaller) => caller.principal.kind === 'root' ? null : await resolveResellerId(caller) ?? fail('FORBIDDEN', 'reseller authorization is unavailable', { stateChanged: false }) }
+        const auditFor = async (caller: AuthenticatedCaller, action: string, target: string): Promise<void> => { await emitAudit({ actor: caller.principal.username, action, target, outcome: 'ok', principalId: caller.principal.id }) }
+        const response = await handleWebTemplatesRoute(req, url, method, { ...scoped, read: scope => extended.readOrDefault<unknown>(`accounts/web-templates/${scope}.json`, null), write: (scope, value) => extended.write(`accounts/web-templates/${scope}.json`, value),
+          apply: caller => triggerReconcile(caller), audit: (caller, kind, action) => auditFor(caller, `server.web_template.${action}`, 'web-template:' + kind) })
+          ?? await handleSkeletonRoute(req, url, method, { ...scoped, read: scope => extended.readOrDefault<unknown>(`accounts/skeletons/${scope}.json`, null), write: (scope, value) => extended.write(`accounts/skeletons/${scope}.json`, value),
+            audit: (caller, action, path) => auditFor(caller, `server.skeleton.${action}`, 'skeleton:' + path) })
+        if (response) return response
+      }
+      if (pathname === '/api/accounts/enhancements' || pathname.endsWith('/enhancements')) {
+        const extended = new ExtendedFeaturesStore(deps.store.rootDir)
+        const response = await handleEnhancementAssignmentRoute(req, url, method, { store: deps.store, requireCaller, emitAudit, readSaved: () => extended.readOrDefault<unknown>('plans/enhancements.json', null), writeSaved: value => extended.write('plans/enhancements.json', value),
+          resellerOf: async caller => caller.principal.kind === 'root' ? null : await resolveResellerId(caller) ?? fail('FORBIDDEN', 'reseller authorization is unavailable', { stateChanged: false }),
+          assertCanModify: (caller, account) => assertCanAccessAccount(caller, account, 'account.update', { allowUserSelf: false }) })
+        if (response) return response
+      }
+      const accountLimitsResponse = await handleAccountLimitsRoute(req, url, method, { store: deps.store, requireCaller, readJsonBody, resolveAccountParam, assertCanAccessAccount, assertRoot, resolveReseller: resolveResellerForCaller, captureAccountMutation: (caller, id, action) => captureAccountMutation(caller, id, action), requireHostAgent: requireAccountHostAgent, applyAccountConfiguration, emitAudit, execution: accountExecution,
+        ...(deps.agentApp && deps.agentToken ? { readDisk: (caller: AuthenticatedCaller) => readNativeWorkspace(caller, '/host/monitoring/disk') } : {}) })
+      if (accountLimitsResponse) return accountLimitsResponse
 
       // ---- Accounts CRUD & Lifecycle -------------------------------------------------
       if (method === 'GET' && pathname === '/api/accounts') {
@@ -3606,9 +4086,19 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         let account = target
         if (method === 'PATCH') {
           const body = await readJsonBody<Record<string, unknown>>(req)
-          if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 2
+          if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['contactEmail', 'expectedRevision', 'currentPassword'].includes(key))
             || !Object.hasOwn(body, 'contactEmail') || !Object.hasOwn(body, 'expectedRevision') || typeof body.expectedRevision !== 'string') {
-            return fail('VALIDATION', 'contactEmail and expectedRevision are required; other settings are not accepted')
+            return fail('VALIDATION', 'contactEmail, expectedRevision and currentPassword are required; other settings are not accepted')
+          }
+          if (body.contactEmail !== target.contactEmail) {
+            if (typeof body.currentPassword !== 'string' || !body.currentPassword) return fail('VALIDATION', 'the account password is required to change the contact email')
+            const ip = extractClientIp(req) ?? '127.0.0.1'
+            const lockout = await activeLockout(caller.principal.username, ip)
+            if (lockout) return fail('FORBIDDEN', 'too many failed authentication attempts', { lockedOut: true, lockedUntil: lockout.lockedUntil })
+            if (!await verifyPasswordArgon2id(body.currentPassword, caller.principalRecord.passwordHash)) {
+              await recordFailedLoginAndMaybeLock(caller.principal.username, ip, 'invalid_contact_change_reauthentication', caller.principal.id)
+              return fail('UNAUTHENTICATED', 'the account password is incorrect')
+            }
           }
           account = await updateContactMetadata(req, caller, target, body.contactEmail, body.expectedRevision, true)
         } else if (method !== 'GET') return fail('FORBIDDEN', 'unsupported account preferences method')
@@ -3641,8 +4131,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const target = await resolveAccountParam(accountSuspendMatch[1]!)
         const verb = accountSuspendMatch[2]!
         await assertCanAccessAccount(caller, target, 'account.' + verb, { allowUserSelf: false })
-        const body = await readJsonBody<{ reason?: string }>(req)
-        return jsonResponse(await setAccountSuspensionAs(caller, target, verb as 'suspend' | 'unsuspend', body.reason))
+        const body = await readJsonBody<{ reason?: string; lock?: boolean }>(req)
+        if (Object.keys(body).some(key => key !== 'reason' && key !== 'lock')) return fail('VALIDATION', 'a suspension accepts reason and lock', { stateChanged: false })
+        return jsonResponse(await setAccountSuspensionAs(caller, target, verb as 'suspend' | 'unsuspend', body.reason, body.lock))
       }
 
       const accountItemMatch = /^\/api\/accounts\/([^/]+)$/.exec(pathname)
@@ -3657,8 +4148,12 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         }
         if (method === 'PATCH') {
           await assertCanAccessAccount(caller, target, 'account.update', { allowUserSelf: false })
-          const patch = await readJsonBody<{ planId?: Id; ownerId?: Id | null; contactEmail?: string; ipv4?: string; ipv6?: string | null; shell?: 'none' | 'jailed' }>(req)
-          if (Object.keys(patch).some(key => !['planId', 'ownerId', 'contactEmail', 'ipv4', 'ipv6', 'shell'].includes(key))) return fail('VALIDATION', 'unsupported account setting')
+          const patch = await readJsonBody<{ planId?: Id; ownerId?: Id | null; contactEmail?: string; shell?: 'none' | 'jailed' }>(req)
+          if (isPackageLimitPatch(patch)) return jsonResponse(await changeAccountPackageLimit(target, patch as Record<string, unknown>, { store: deps.store, principal: caller.principal, reconcileAll: () => triggerReconcile(caller),
+            changePlan: planId => updateAccountAs(caller, target, { planId }), saveLimits: limits => saveAccountLimits(caller, target, limits, { store: deps.store, resolveReseller: resolveResellerForCaller, captureAccountMutation: (actor, id, action) => captureAccountMutation(actor, id, action), requireHostAgent: requireAccountHostAgent, applyAccountConfiguration, emitAudit, execution: accountExecution }),
+            assertUnlimitedAllowed: async () => { if (caller.principal.kind === 'reseller') assertAcl(caller.principal, await resolveResellerForCaller(caller), 'allow-unlimited-plans') },
+            audit: (action, plan) => emitAudit({ actor: caller.principal.username, action, target: `plan:${plan.id}`, detail: { name: plan.name, account: target.username }, outcome: 'ok', principalId: caller.principal.id }) }))
+          if (Object.keys(patch).some(key => !['planId', 'ownerId', 'contactEmail', 'shell'].includes(key))) return fail('VALIDATION', "unsupported account setting; addresses change through POST /api/accounts/:id/ip")
           const metadataOnly = Object.keys(patch).length === 1 && Object.hasOwn(patch, 'contactEmail')
           if (metadataOnly) {
             const updated = await updateContactMetadata(req, caller, target, patch.contactEmail, accountContactRevision(target), false)
@@ -3699,6 +4194,12 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       }
 
       // ---- Multi-IPv4 / IPv6 Pool Management -----------------------------------------
+      if (pathname.startsWith('/api/ips/') || /^\/api\/accounts\/[^/]+\/(?:ip|ipv6)$/.test(pathname)) {
+        const response = await handleIpNetworkRoute(req, url, method, { requireCaller, assertRoot, emitAudit, resolveAccountParam, store: deps.store,
+          reconcile: caller => triggerReconcile(caller),
+          ...(deps.agentApp && deps.agentToken ? { readNetwork: (caller: AuthenticatedCaller) => readNativeWorkspace(caller, '/host/server/network') } : {}) })
+        if (response) return response
+      }
       if (method === 'GET' && pathname === '/api/ips') {
         const caller = await requireCaller(req)
         if (url.searchParams.size > 0) {
@@ -3920,6 +4421,14 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         readAllowedRemoteHosts: async () => (await panelSettingsFile(deps.store).current()).reverseProxyAllowedHosts })
       if (reverseProxyResponse) return reverseProxyResponse
 
+      const forceHttpsResponse = await handleForceHttpsRoute(req, url, method, { requireCaller, readJsonBody, getDomain: id => deps.store.getDomain(id), getAccount: id => deps.store.getAccount(id),
+        listCertificates: async account => (await deps.store.listCertificates()).filter(item => item.accountId === null || item.accountId === account.id),
+        assertCanModify: async (caller, account) => { await assertCanAccessAccount(caller, account, 'domain.modify'); await assertAccountFeatures(deps.store, caller, account, ['domains', 'force-https-redirect']) },
+        mutate: (request, caller, account, expected, change) => mutateDomainWorkspace(request, caller, account, expected, 'domain.updated', change), setForceHttps: (accountId, ids, enabled, options) => deps.store.setDomainsForceHttps(accountId, ids, enabled, options) })
+      if (forceHttpsResponse) return forceHttpsResponse
+      const sitePorts = { store: deps.store, requireCaller, assertCanAccessAccount, assertFeatures: (caller: AuthenticatedCaller, account: Account, features: readonly string[]) => assertAccountFeatures(deps.store, caller, account, [...features]), readJsonBody: (request: Request) => readJsonBody<Record<string, unknown>>(request), readAgent: deps.agentApp && deps.agentToken ? readNativeWorkspace : null, mutateDomainWorkspace }
+      const siteSettingsResponse = await handleSiteSettingsRoute(req, url, method, sitePorts) ?? await handleDomainBulkRoute(req, url, method, sitePorts)
+      if (siteSettingsResponse) return siteSettingsResponse
       if (method === 'GET' && pathname === '/api/domains') {
         const caller = await requireCaller(req)
         if (caller.principal.kind === 'user') {
@@ -3963,7 +4472,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const self = caller.principal.kind === 'user'
         const guarded = self || body.expectedRevision !== undefined
         if (guarded) {
-          if (url.searchParams.size || Object.keys(body).some(key => !['name', 'kind', 'parentId', 'docRoot', 'siteType', 'expectedRevision', ...(!self ? ['accountId'] : [])].includes(key))) return fail('VALIDATION', 'unsupported domain workspace fields', { stateChanged: false })
+          if (url.searchParams.size || Object.keys(body).some(key => !['name', 'kind', 'parentId', 'docRoot', 'siteType', 'expectedRevision', 'autoDns', ...(!self ? ['accountId'] : [])].includes(key))) return fail('VALIDATION', 'unsupported domain workspace fields', { stateChanged: false })
           if (typeof body.kind !== 'string' || !['addon', 'alias', 'subdomain'].includes(body.kind)) return fail('VALIDATION', 'domain kind is required', { stateChanged: false })
           if (body.siteType !== undefined && !['php', 'static'].includes(body.siteType)) return fail('VALIDATION', 'unsupported site type', { stateChanged: false })
           if (body.kind === 'alias' && (Object.hasOwn(body, 'docRoot') || Object.hasOwn(body, 'siteType'))) return fail('VALIDATION', 'alias settings are derived from the parent', { stateChanged: false })
@@ -3984,6 +4493,10 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         if (guarded && (body.kind === 'alias' || body.kind === 'subdomain') && (!parent || parent.kind === 'alias')) return fail('VALIDATION', 'an owned non-alias parent is required', { stateChanged: false })
         const alias = guarded && body.kind === 'alias' ? parent : undefined
         const newDomainPhp = alias?.php ?? body.php ?? primaryDomain?.php ?? await serverDefaultPhp()
+        const domainTweaks = await tweakSettingsFile(deps.store).current()
+        assertDomainTweaks({ values: domainTweaks, privileged: caller.principal.kind === 'root', name, accountId: account.id, home: account.home, docRoot: alias ? undefined : body.docRoot,
+          ...(caller.principal.kind !== 'root' && (domainTweaks['domains.allowRemote'] === false || domainTweaks['domains.allowUnregistered'] === false) ? { resolution: await observeDomainResolution(name, [account.ipv4, ...(await deps.store.readSnapshot()).ipPool?.map(ip => ip.address) ?? []]) } : {}),
+          defaultDocRoot: `${account.home}/domains/${name}/public_html`, hostname: (await deps.store.getServerSettings())?.hostname ?? null, others: await deps.store.listDomains() })
         const result = await mutateDomainWorkspace(req, caller, account, body.expectedRevision, 'domain.created', options => deps.store.createDomain({
           accountId: account.id,
           name,
@@ -4002,7 +4515,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           ...(body.ipv4 !== undefined && { ipv4: body.ipv4 }),
           ...(body.ipv6 !== undefined && { ipv6: body.ipv6 }),
         }, options), Boolean(body.certificateId))
-        return jsonResponse({ domain: result.value, stateChanged: true, ...result.view, reconcile: result.reconcile }, 201)
+        const providerDns = (body as { autoDns?: unknown }).autoDns === true ? await publishSiteRecord({ store: deps.store, fetch: globalThis.fetch }, { domain: name, ipv4: result.value.ipv4 ?? account.ipv4 ?? null, ownDomains: existingDomains.map(domain => domain.name), root: caller.principal.kind === 'root' }) : undefined
+        return jsonResponse({ domain: result.value, stateChanged: true, ...result.view, reconcile: result.reconcile, ...(providerDns ? { providerDns } : {}) }, 201)
       }
 
       const domainIdMatch = /^\/api\/domains\/([0-9a-f-]{36})$/i.exec(pathname)
@@ -4118,6 +4632,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           stateChanged: true, reconcile: result.reconcile })
       }
 
+      const databaseTransfer = await handleDatabaseTransferRoute(req, url, method, { store: deps.store, requireCaller, assertCanAccessAccount, callAgent, mutateDatabase: mutateDatabaseWorkspace, emitAudit,
+        reconcile: (caller, account) => triggerReconcile(caller, { scope: { accountId: account.id, resellerId: account.ownerId } }), ownedName: ownedDatabaseName, reindex: async () => { await reindexFromState(deps.db, await deps.store.readSnapshot()) }, passwordHash: mysqlNativePasswordHash, assertPassword: password => { if (typeof password !== 'string' || password.length < 8 || password.length > 256) fail('VALIDATION', 'the password must be 8 to 256 characters', { stateChanged: false }) } })
+      if (databaseTransfer) return databaseTransfer
       const dbDeleteMatch = /^\/api\/databases\/([0-9a-f-]{36})$/i.exec(pathname)
       if (method === 'DELETE' && dbDeleteMatch) {
         const caller = await requireCaller(req)
@@ -4268,7 +4785,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         }
         if (!login) return fail('VALIDATION', 'login (or localPart + domainId) is required')
 
-        const passwordHash = await passwordHashFromInput(body, { service: true })
+        const passwordHash = await passwordHashFromInput(body, { service: servicePasswordKinds(body.services) })
 
         const serviceUser = await deps.store.createServiceUser({
           accountId: account.id,
@@ -4277,6 +4794,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           services: body.services,
           mailboxQuotaMb: body.mailboxQuotaMb ?? 1024,
           ftpDir: body.ftpDir ?? 'public_html',
+          ...(body.webdiskReadOnly !== undefined && { webdiskReadOnly: body.webdiskReadOnly }),
         })
         const reconcile = await triggerReconcile(caller, {
           scope: { accountId: account.id, resellerId: account.ownerId },
@@ -4302,13 +4820,13 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         // explicitly authenticated retry of the SAME durable retirement intent.
         if (method === 'DELETE') {
           const credentialRequest = withTransportOf(req, new Request(req.url, { method: req.method, headers: new Headers(req.headers) }))
-          const clientIp = extractClientIp(req)
+          const clientIp = extractClientIp(req), limits = sessionLimits(await signInPolicy())
           try {
             await retireMailboxServiceUser({
               db: deps.db, store: deps.store, serviceUserId: suId, actor: caller.principal,
               authorize: async (tx, source) => {
                 const current = await authenticateTransport(tx, credentialRequest, {
-                  serverSecret, clientIp, entryPoint, mfaRuntimePolicy, touchSession: false, teamMember,
+                  serverSecret, clientIp, entryPoint, mfaRuntimePolicy, touchSession: false, teamMember, sessionLimits: limits,
                   handoffAuthority: createHandoffSessionCheck({ db: tx, store: deps.store, teamMember }),
                 })
                 if (!current || !current.mfaVerified || current.principalRecord.forcePasswordChange
@@ -4334,7 +4852,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
                 const sessionDeadline = (session: { expiresAt: string; createdAt: string; lastSeenAt: string }): number => {
                   const expiresAt = Date.parse(session.expiresAt), createdAt = Date.parse(session.createdAt), lastSeenAt = Date.parse(session.lastSeenAt)
                   if (![expiresAt, createdAt, lastSeenAt].every(Number.isFinite)) return fail('UNAUTHENTICATED', 'the retirement credential time is unavailable', { stateChanged: false })
-                  return Math.min(expiresAt, createdAt + SESSION_ABSOLUTE_TIMEOUT_MS, lastSeenAt + SESSION_IDLE_TIMEOUT_MS)
+                  return Math.min(expiresAt, createdAt + Math.min(SESSION_ABSOLUTE_TIMEOUT_MS, limits.absoluteMs), lastSeenAt + Math.min(SESSION_IDLE_TIMEOUT_MS, limits.idleMs))
                 }
                 let deadline: number
                 if (current.apiTokenId !== null) {
@@ -4392,7 +4910,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
               // Rejection rolls back the admitted transaction. Preserve the normal
               // authenticator's session/team revocation outside that transaction.
               try { await authenticateTransport(deps.db, credentialRequest, { serverSecret, clientIp, entryPoint,
-                mfaRuntimePolicy, touchSession: false, teamMember, handoffAuthority }) }
+                mfaRuntimePolicy, touchSession: false, teamMember, handoffAuthority, sessionLimits: limits }) }
               catch { return fail('SERVICE_UNAVAILABLE', 'retirement credential rejection requires review', {
                 stateChanged: true, verificationRequired: true, unknownOutcome: true,
               }) }
@@ -4415,13 +4933,15 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           const resolvedPatch: ServiceUserPatch = {
             ...patch,
             ...(patch.password !== undefined || patch.passwordHash !== undefined
-              ? { passwordHash: await passwordHashFromInput(patch, { service: true }) }
+              ? { passwordHash: await passwordHashFromInput(patch, { service: servicePasswordKinds(services) }) }
               : {}),
           }
           const serviceUser = await deps.store.updateServiceUser(suId, resolvedPatch)
           const reconcile = await triggerReconcile(caller, {
             scope: { accountId: account.id, resellerId: account.ownerId },
           })
+          await emitAudit({ actor: caller.principal.username, action: 'service_user.updated', target: `service-user:${serviceUser.login}`, outcome: 'ok', principalId: caller.principal.id },
+            { accountId: account.id, resellerId: account.ownerId })
           return jsonResponse({ serviceUser: publicServiceUser(serviceUser), reconcile: reconcile?.body ?? null })
         }
         if (method === 'DELETE') {
@@ -4429,6 +4949,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           const reconcile = await triggerReconcile(caller, {
             scope: { accountId: account.id, resellerId: account.ownerId },
           })
+          await emitAudit({ actor: caller.principal.username, action: 'service_user.deleted', target: `service-user:${existing.login}`, outcome: 'ok', principalId: caller.principal.id },
+            { accountId: account.id, resellerId: account.ownerId })
           return jsonResponse({ ok: true, reconcile: reconcile?.body ?? null })
         }
       }
@@ -4685,6 +5207,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           ?? await handleTransferSourceInventoryRoute(req, url, method, { requireCaller, assertRoot, readSnapshot: () => deps.store.readSnapshot(),
             readDisk: caller => readNativeWorkspace(caller, '/host/monitoring/disk', undefined, false, 'GET') })
           ?? await handleTransferSourcePackageRoute(req, url, method, { requireCaller, assertRoot, readSnapshot: () => deps.store.readSnapshot(),
+            readEdge: accountId => readAccountEdgeState(deps.store.rootDir, accountId),
             agent: (caller, path, init = {}) => callAgent(path, { caller, ...init }) })
           ?? await handleConvertAddonRoute(req, url, method, { requireCaller, assertRoot, emitAudit, readSnapshot: () => deps.store.readSnapshot(), readJournal,
             usernameTaken: async username => !!await findPrincipalByUsername(deps.db, username) || !!await deps.store.getAccountByUsername(username),
@@ -4727,6 +5250,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       const status = isXpanelError(err)
         ? (err.detail.lockedOut === true ? 429 : (STATUS_BY_CODE[err.code] ?? 400))
         : 500
+      if (isReportableError(err)) void reportedBody().then(body => errorReporter.capture(err, { component: pathname.startsWith('/api/') ? (err instanceof Error && /agent/i.test(err.message) ? 'agent' : 'api') : 'web', method, path: pathname, ...(body === undefined ? {} : { body }) })).catch(() => undefined)
       if ((status === 500 || status === 503) && prefersDocumentHtml(req, pathname, method)) {
         try { return renderTransportStatus(req, status) } catch { /* keep the problem document */ }
       }
@@ -4798,7 +5322,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     return response
   }
   const terminalAgent: TerminalAgentPort = {
-    open: async (grant, cols, rows) => ((await (await terminalAgentCall(grant, '/terminal/sessions', 'POST', { kind: grant.kind, cols, rows })).json()) as { session: AgentTerminalSession }).session,
+    open: async (grant, cols, rows) => ((await (await terminalAgentCall(grant, '/terminal/sessions', 'POST', { kind: grant.kind, cols, rows, ...(grant.container ? { account: grant.accountUsername, containerId: grant.container.id, shell: grant.container.shell, asRoot: grant.container.asRoot } : {}) })).json()) as { session: AgentTerminalSession }).session,
     output: async (grant, id) => (await terminalAgentCall(grant, `/terminal/sessions/${id}/output`, 'GET')).body ?? fail('SERVICE_UNAVAILABLE', 'the terminal output stream is unavailable'),
     input: async (grant, id, data) => { await terminalAgentCall(grant, `/terminal/sessions/${id}/input`, 'POST', { data }) },
     resize: async (grant, id, cols, rows) => { await terminalAgentCall(grant, `/terminal/sessions/${id}/resize`, 'POST', { cols, rows }) },
@@ -4821,7 +5345,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
       if (await lifecycleAdmissionResponse(webReq)) return null
       return withLifecycleWriterAdmission(async () => {
         await recoverAccountContactProjection()
-        const caller = await authenticateRequest(deps.db, webReq, { serverSecret, clientIp: extractClientIp(webReq), touchSession: false, entryPoint, mfaRuntimePolicy, teamMember, handoffAuthority })
+        const caller = await authenticateRequest(deps.db, webReq, { serverSecret, clientIp: extractClientIp(webReq), touchSession: false, entryPoint, mfaRuntimePolicy, teamMember, handoffAuthority, sessionLimits: sessionLimits(await signInPolicy()) })
         if (!caller || !caller.mfaVerified || caller.sessionId === null || caller.apiTokenId !== null || caller.team || caller.impersonator) return null
         if (entryPoint && !entryPointAdmitsPrincipal(entryPoint, caller.principal)) return null
         return { principalId: caller.principal.id, actor: caller.principal.username, panelSessionId: caller.sessionId, clientIp: extractClientIp(webReq) }
@@ -4896,7 +5420,7 @@ export const listenApiServer = async (
       const requestPath = (req.url ?? '/').split('?')[0] ?? '/'
       const accountFileWrite = req.method === 'POST' && /^\/api\/accounts\/[a-z][a-z0-9]{0,15}\/files$/.test(requestPath)
       // a cPanel archive arrives in 4 MiB base64 chunks, each its own request
-      const archiveChunk = req.method === 'PUT' && /^\/api\/transfers\/cpanel-imports\/[0-9a-f-]{36}$/.test(requestPath)
+      const archiveChunk = req.method === 'PUT' && /^\/api\/(?:transfers\/cpanel-imports|server\/databases\/services\/mongodb\/import)\/[0-9a-f-]{36}$/.test(requestPath)
       // A language catalog upload is a whole PO file (the Arabic release catalog is about 2 MB).
       const languageCatalogWrite = req.method === 'PUT' && /^\/api\/server\/panel\/languages\/[A-Za-z0-9-]{1,35}\/catalog$/.test(requestPath)
       const maxBodyBytes = archiveChunk ? 2 * CPANEL_UPLOAD_CHUNK_BYTES : accountFileWrite ? 3 * 1024 * 1024 : languageCatalogWrite ? 4 * 1024 * 1024 : 1024 * 1024

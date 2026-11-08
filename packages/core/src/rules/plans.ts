@@ -1,4 +1,4 @@
-import type { Limit, Plan, PlanCapKey, Principal, Reseller, ResourceLimits } from '../types.ts'
+import type { Account, AccountLimits, Limit, Plan, PlanCapKey, Principal, Reseller, ResourceLimits } from '../types.ts'
 import { fail } from '../errors.ts'
 import { assertFits, isUnlimited, limitLte } from '../limits.ts'
 import { invalid, isInt, isLimit, isRecord, throwIfErrors } from './check.ts'
@@ -42,6 +42,7 @@ export const RESOURCE_KEYS = Object.keys(RESOURCE_RULES) as (keyof ResourceLimit
 export const PLAN_CAP_KEYS = Object.keys(PLAN_CAP_RULES) as PlanCapKey[]
 
 const PLAN_NAME_RE = /^[A-Za-z0-9](?:[A-Za-z0-9 _.-]{0,62}[A-Za-z0-9_.-])?$/
+const RESERVED_PLAN_NAMES: readonly string[] = ['extensions']
 
 /** A conservative finite plan; a fresh object on every call. */
 export const defaultPlan = (
@@ -108,7 +109,7 @@ export const planErrors = (plan: unknown): string[] => {
   if (typeof plan.id !== 'string' || plan.id.length === 0 || plan.id.length > 128) errors.push('id is required')
   if (typeof plan.name !== 'string' || !PLAN_NAME_RE.test(plan.name)) {
     errors.push('name must be 1-64 characters of letters, digits, space, "_", "." or "-"')
-  }
+  } else if (RESERVED_PLAN_NAMES.includes(plan.name.toLowerCase())) errors.push(`"${plan.name}" is a reserved plan name`)
   if (plan.ownerId !== null && (typeof plan.ownerId !== 'string' || plan.ownerId.length === 0)) {
     errors.push('ownerId must be a reseller id or null')
   }
@@ -127,6 +128,51 @@ export const planErrors = (plan: unknown): string[] => {
     errors.push('defaultMailboxQuotaMb may not exceed the disk quota')
   }
   return errors
+}
+
+const overrideErrors = <K extends string>(scope: string, rules: Readonly<Record<K, FieldRule>>, value: unknown): string[] => {
+  if (!isRecord(value)) return [`${scope} must be an object`]
+  return Object.entries(value).flatMap(([key, v]): string[] => {
+    if (!Object.hasOwn(rules, key)) return [`${scope}.${key.slice(0, 64)} is not a known field`]
+    const rule = rules[key as K]
+    if (v === null) return []
+    if (!isLimit(v)) return [`${scope}.${key} must be a non-negative integer, "unlimited" or null`]
+    return !isUnlimited(v) && (v < rule.min || v > rule.max) ? [`${scope}.${key} (${rule.label}) must be between ${rule.min} and ${rule.max}`] : []
+  })
+}
+
+/** Structural problems of per-account overrides; each field follows the plan field's bounds, null means the package value. */
+export const accountLimitsErrors = (limits: unknown): string[] => {
+  if (!isRecord(limits)) return ['limits must be an object']
+  return [
+    ...Object.keys(limits).filter((k) => k !== 'resources' && k !== 'caps').map((k) => `limits.${k.slice(0, 64)} is not a known field`),
+    ...(limits.resources === undefined ? [] : overrideErrors('limits.resources', RESOURCE_RULES, limits.resources)),
+    ...(limits.caps === undefined ? [] : overrideErrors('limits.caps', PLAN_CAP_RULES, limits.caps)),
+  ]
+}
+
+const setFields = <T extends object>(group: T | undefined): T | undefined => {
+  const kept = Object.entries(group ?? {}).filter(([, v]) => v !== null)
+  return kept.length > 0 ? (Object.fromEntries(kept) as T) : undefined
+}
+
+/** A validated copy without null fields or empty groups; undefined when the account overrides nothing. */
+export const validateAccountLimits = (limits: unknown): AccountLimits | undefined => {
+  throwIfErrors('account limits', accountLimitsErrors(limits))
+  const resources = setFields((limits as AccountLimits).resources), caps = setFields((limits as AccountLimits).caps)
+  return resources || caps ? { ...(resources && { resources }), ...(caps && { caps }) } : undefined
+}
+
+const overridden = <T extends object>(base: T, over: Partial<Record<keyof T, Limit | null>> | undefined): T =>
+  over ? { ...base, ...Object.fromEntries(Object.entries(over).filter(([k, v]) => v != null && Object.hasOwn(base, k))) } : base
+
+/**
+ * The package limits with the account's own overrides applied field by field; every limit consumer reads this.
+ * Returns `plan` itself when the account overrides nothing.
+ */
+export const effectivePlan = (plan: Plan, account: Pick<Account, 'limits'>): Plan => {
+  const { resources, caps } = account.limits ?? {}
+  return resources || caps ? { ...plan, resources: overridden(plan.resources, resources), caps: overridden(plan.caps, caps) } : plan
 }
 
 /** Dotted paths of every field set to unlimited. */

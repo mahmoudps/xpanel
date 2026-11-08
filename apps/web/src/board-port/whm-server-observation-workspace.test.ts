@@ -28,7 +28,7 @@ describe('WHM server observation renderers', () => {
   it('states read-only scope truthfully and offers no host action', () => {
     document.body.innerHTML = pages('en', true).map(([, html]) => html).join('')
     const text = document.body.textContent ?? ''
-    expect(text).toContain('Running, creating or changing system timers is not available here.')
+    expect(text).toContain('Server tasks you create below run as their own timers and appear in this list.')
     expect(text).toContain('Changing the server role is not available.')
     expect(text).toContain('File contents are never read.')
     expect(document.querySelector<HTMLAnchorElement>('[data-whm-server-observation-accounts]')!.getAttribute('href')).toBe('/whm/accounts')

@@ -34,6 +34,29 @@ export const FRESHCLAM_UPDATE_ARGV = [FRESHCLAM, '--quiet'] as const
  */
 export const clamscanHomeArgv = (target: string): string[] => isScanTarget(target)
   ? [NICE, '-n', '19', CLAMSCAN, '--recursive', '--infected', '--follow-dir-symlinks=0', '--follow-file-symlinks=0', '--max-filesize=100M', '--max-scansize=400M', target] : invalid()
+/** Antivirus Scanner Configuration: what a scan of one home may read. */
+export interface ScanScope { home: boolean; mail: boolean; publicFtp: boolean; publicWeb: boolean }
+const SCAN_AREAS = [['mail', 'mail'], ['publicFtp', 'public_ftp'], ['publicWeb', 'public_html']] as const
+/** The whole home minus the areas switched off, or only the areas switched on. Every option is fixed; only the validated home varies. */
+export const clamscanScopedArgv = (target: string, scope: ScanScope): string[] => {
+  const base = clamscanHomeArgv(target).slice(0, -1)
+  if (scope.home) return [...base, ...SCAN_AREAS.filter(([key]) => !scope[key]).map(([, folder]) => `--exclude-dir=^${target}/${folder}(/|$)`), target]
+  const areas = SCAN_AREAS.filter(([key]) => scope[key]).map(([, folder]) => `${target}/${folder}`)
+  return areas.length ? [...base, ...areas] : invalid()
+}
+/** Reads the scope and home back from one logged or submitted argv tail; null when it is not exactly what clamscanScopedArgv builds. */
+export const readScopedScan = (tail: readonly string[]): { target: string; scope: ScanScope } | null => {
+  const excluded = tail.filter(item => item.startsWith('--exclude-dir=')), paths = tail.filter(item => !item.startsWith('--exclude-dir='))
+  // An area is tried first: <home>/mail also reads as a home named "mail".
+  const candidates = [...(paths[0] ? [{ target: posix.dirname(paths[0]), whole: false }] : []), ...(paths.length === 1 ? [{ target: paths[0]!, whole: true }] : [])]
+  for (const { target, whole } of candidates) {
+    if (!isScanTarget(target)) continue
+    const has = (folder: string): boolean => whole ? !excluded.includes(`--exclude-dir=^${target}/${folder}(/|$)`) : paths.includes(`${target}/${folder}`)
+    const scope = { home: whole, mail: has('mail'), publicFtp: has('public_ftp'), publicWeb: has('public_html') }
+    try { if (same([...tail], clamscanScopedArgv(target, scope).slice(clamscanHomeArgv(target).length - 1))) return { target, scope } } catch { /* the other reading may still fit */ }
+  }
+  return null
+}
 export const SLICE_SHOW_PROPERTIES = '--property=LoadState,ActiveState'
 export const FPM_SHOW_PROPERTIES = '--property=LoadState,ActiveState,User,Group,Slice'
 export const accountSliceShowArgv = (uid: number): string[] => isUid(uid) ? [SYSTEMCTL, 'show', `xpanel-${uid}.slice`, SLICE_SHOW_PROPERTIES] : invalid()
@@ -63,6 +86,6 @@ export function isSecurityToolsCommand(argv: readonly unknown[]): boolean {
 export function isAntivirusJobCommand(argv: readonly unknown[]): boolean {
   if (!strings(argv)) return false
   if (same(argv, FRESHCLAM_UPDATE_ARGV)) return true
-  const target = argv.at(-1)
-  return isScanTarget(target) && same(argv, clamscanHomeArgv(target))
+  const prefix = clamscanHomeArgv('/home/xpanel').slice(0, -1)
+  return same(argv.slice(0, prefix.length), prefix) && readScopedScan(argv.slice(prefix.length)) !== null
 }

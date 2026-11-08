@@ -4,8 +4,8 @@ import type { AgentCallerIdentity } from './server.ts'
 
 /**
  * Account view of the edge response policy that actually serves its sites: compression and the proxy
- * response cache, read from the managed Nginx main configuration. Per-site toggles and cache purge have
- * no reviewed renderer or confined purge provider, so they are reported unavailable rather than simulated.
+ * response cache, read from the managed Nginx main configuration. Per-site compression has no reviewed renderer, so it
+ * is reported unavailable rather than simulated; the account's cache switch and purge are saved edge state (account-edge.ts).
  */
 export const OPTIMIZE_FEATURE = 'optimize-website'
 export interface SwEdgePolicy { compression: 'on' | 'off'; types: string[]; minLength: number | null; proxied: string[]; cache: { configured: boolean; maxSize: string | null } }
@@ -14,7 +14,7 @@ export interface SwOptimizeView {
   state: 'read' | 'unavailable'; reason: null | 'edge-config-unavailable' | 'unmanaged-edge-config' | 'invalid-edge-config'
   policy: SwEdgePolicy | null
   domains: { name: string; redirect: boolean; suspended: boolean }[]
-  actions: { siteCompression: false; siteCache: false; purge: false }
+  actions: { siteCompression: false }
 }
 export interface SwOptimizeContext {
   caller: AgentCallerIdentity
@@ -75,7 +75,7 @@ export async function handleSwOptimizeRoute(_req: Request, url: URL, method: str
     await authorize()
     const view: SwOptimizeView = { context: { accountId: account.id, username: account.username }, state, reason, policy,
       domains: domains.map(domain => ({ name: domain.name, redirect: !!domain.redirect, suspended: !!domain.suspended })).sort((a, b) => a.name.localeCompare(b.name, 'en')),
-      actions: { siteCompression: false, siteCache: false, purge: false } }
+      actions: { siteCompression: false } }
     return new Response(JSON.stringify(view), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } })
   })
 }

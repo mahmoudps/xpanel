@@ -1,3 +1,5 @@
+import { v2BoxTrapperSection } from '../../xpanel/email-tools/boxtrapper.ts'
+import { languageName, LOCALES } from '../../../../../i18n.ts'
 import { actions, area, button, check, ctx, esc, facts, field, fields, input, page, section, select, table, technical, unreadRow, type MailWorkspaceInput } from './common.ts'
 import { filterClientTemplates } from '../../../components/filter-templates.ts'
 
@@ -10,9 +12,17 @@ export function renderMailPreferencesPage(value: MailWorkspaceInput): string {
     optionField('replyIdentityId', t(msgid('Default reply identity')), [['', t(msgid('This mailbox address'))]], t(msgid('Choose from your saved identities.'))),
     optionField('dateFormat', t(msgid('Date format')), [['utc', t(msgid('UTC, the same for everyone'))], ['local', t(msgid('Local time of this browser'))]]),
   ].join(''))}<p data-preferences-record>${esc(t(msgid('Saved record not read.')))}</p>${actions(button(t(msgid('Reload saved preferences')), { 'data-preferences-refresh': true }) + button(t(msgid('Discard changes')), { 'data-preferences-discard': true }) + button(t(msgid('Save preferences')), { 'data-preferences-save': true }, true, true))}</div>`
-  return page(value, t(msgid('Preferences')), t(msgid('Saved preferences are stored for this mailbox. The inbox and compose pages do not apply them yet.')),
-    section('v2-mail-preferences', t(msgid('Mailbox preferences')), `<p data-preferences-status data-state="unread" role="status">${esc(t(editable ? msgid('Preferences have not been read.') : msgid('Preferences are unavailable for this mailbox session. Nothing was read.')))}</p><p data-preferences-application role="note">${esc(t(msgid('Saved preferences are stored for this mailbox. The inbox and compose pages do not apply them yet.')))}</p>${form}`)
-    + section('v2-mail-plus', t(msgid('Plus addressing')), `<p data-preferences-plus data-state="unread">${esc(t(msgid('Plus addressing support has not been read.')))}</p>`),
+  return page(value, t(msgid('Preferences')), t(msgid('Saved preferences apply to the inbox and compose pages the next time they load.')),
+    section('v2-mail-preferences', t(msgid('Mailbox preferences')), `<p data-preferences-status data-state="unread" role="status">${esc(t(editable ? msgid('Preferences have not been read.') : msgid('Preferences are unavailable for this mailbox session. Nothing was read.')))}</p><p data-preferences-application role="note">${esc(t(msgid('Saved preferences apply to the inbox and compose pages the next time they load.')))}</p>${form}`)
+    + section('v2-mail-plus', t(msgid('Plus addressing')), `<p data-preferences-plus data-state="unread">${esc(t(msgid('Plus addressing support has not been read.')))}</p>`)
+    + `<div data-mailbox-settings="${esc(value.mailbox)}">${section('v2-mail-settings', t(msgid('Contact information and delivery')), fields([
+      field('mail-settings-plus', t(msgid('Tagged mail')), `<select id="mail-settings-plus" data-mailbox-settings-plus disabled><option value="off">${esc(t(msgid('Deliver to the inbox')))}</option><option value="create">${esc(t(msgid('Deliver to a folder named after the tag, creating it if missing')))}</option><option value="existing">${esc(t(msgid('Deliver to the tag folder only when it exists')))}</option></select>`),
+      field('mail-settings-addresses', t(msgid('Notification addresses')), '<textarea id="mail-settings-addresses" dir="ltr" rows="3" data-mailbox-settings-addresses disabled></textarea>', t(msgid('One address per line, up to 5.'))),
+      `<p data-mailbox-settings-warning role="note" hidden>${esc(t(msgid('Use an address outside this server. A problem here would also stop notices sent here.')))}</p>`,
+      `<label><input type="checkbox" data-mailbox-settings-alerts disabled> ${esc(t(msgid('Send a notice when someone signs in from a new address')))}</label>`,
+      `<label><input type="checkbox" data-mailbox-settings-ranges disabled> ${esc(t(msgid('Also alert for new addresses in a network already used')))}</label>`,
+    ].join('')) + `<p data-mailbox-settings-status data-state="unread" role="status">${esc(t(msgid('Settings have not been read.')))}</p><button type="button" class="v2-btn v2-btn--primary" data-mailbox-settings-save disabled>${esc(t(msgid('Save settings')))}</button>`)}</div>`
+    + `<div data-personal-preferences>${section('v2-mail-language', t(msgid('Personal preferences')), fields(field('mail-personal-locale', t(msgid('Interface language')), `<select id="mail-personal-locale" data-personal-locale disabled><option value="">${esc(t(msgid('Browser default')))}</option>${LOCALES.map(info => `<option value="${info.tag}">${esc(languageName(info.tag, info.tag))}</option>`).join('')}</select>`)) + `<p data-personal-status data-state="unread" role="status">${esc(t(msgid('Preferences have not been read.')))}</p><button type="button" class="v2-btn v2-btn--primary" data-personal-save disabled>${esc(t(msgid('Save')))}</button>`)}</div>`,
     { 'data-mail-preferences': true, 'data-preferences-mailbox': value.mailbox, 'data-preferences-can-manage': String(editable) })
 }
 
@@ -56,7 +66,8 @@ export function renderMailSpamPage(value: MailWorkspaceInput): string {
   return page(value, t(msgid('Spam filters')), t(msgctxt('theme:v2', 'Mailbox preferences and inherited policy are separate from mail-server application.')),
     section('v2-mail-spam-policy', t(msgid('Spam preferences')), `${policy}<p role="note">${esc(t(msgid('These are saved preferences only. MTA and Sieve activation have not been verified; saving does not confirm that delivery or filtering changes.')))}</p><p data-spam-status data-state="unread" role="status">${esc(t(msgid('Read the current preferences before editing.')))}</p>`)
     + section('v2-mail-spam-editor', t(msgid('This mailbox')), editor)
-    + section('v2-mail-spam-delivery', t(msgid('Delivery protections')), `${check('', t(msgid('Automatically delete high-scoring spam')))}${field('mail-spam-delete-score', t(msgid('Automatic deletion score (1-50)')), input('mail-spam-delete-score', '', 'number', ' dir="ltr" min="1" max="50"'))}${check('', 'BoxTrapper')}<p>${esc(t(msgid('Automatic deletion and sender challenges are unavailable. No delivery rule or challenge message is created by this page.')))}</p>`),
+    + section('v2-mail-spam-delivery', t(msgid('Delivery protections')), `${field('mail-spam-delete-score', t(msgid('Automatic deletion score (1-50)')), input('mail-spam-delete-score', 'autoDeleteScore', 'number', ' dir="ltr" min="1" max="50" step="1"'))}<p>${esc(t(msgid('Mail at or above this whole score is deleted, not moved to Junk. Leave empty to keep all mail. 15 or higher is suggested.')))}</p>`)
+    + v2BoxTrapperSection(t, { scope: 'mailbox', connected: value.boxTrapperAvailable === true && value.mailbox.length > 0 }),
     { 'data-mail-spam': true, 'data-spam-mailbox': value.mailbox, 'data-spam-manage': String(editable) })
 }
 

@@ -2,16 +2,18 @@ import { execFile, spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import type { DavExchange } from './mail/dav-store.ts'
 import type { Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { agentCallerHeaders, loadAgentCredentialFile, loadInstalledPeerIdentityAddon } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
-import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, fail, hasAcl, isXpanelError, validateDomainName, type AuditEntry, type Domain, type MfaRuntimePolicy, type OsProfile, type WebsiteAnalyticsSnapshot } from '@xpanel/core'
+import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, effectivePlan, fail, hasAcl, isXpanelError, validateDomainName, type AuditEntry, type Domain, type MfaRuntimePolicy, type OsProfile, type WebsiteAnalyticsSnapshot } from '@xpanel/core'
 import { canOpenRegisteredRoute, canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { mapAgentHostInfo, mapAgentServices } from '../../web/src/board-port/xwhm-dashboard.ts'
 import { parseWebsiteAnalyticsSnapshot, type WebsiteAnalyticsWindow } from '../../web/src/charts.ts'
+import { parseWebStatsView, type WebStatsView } from '../../web/src/models/web-stats.ts'
 import { publicContactEmail } from '../../web/src/display-name.ts'
-import { isOfferedLocale, requestLocale } from '../../web/src/i18n.ts'
+import { isOfferedLocale, requestLocale, type Locale } from '../../web/src/i18n.ts'
 import type { WebAppRenderState } from '../../web/src/app.ts'
 import { assertNoActiveDatabaseTransaction, createDb, getMailboxSession, initializeOperationalMetadata, latestActive, listAudit, listSessionsForPrincipal, migrate, previousGeneration, syncAccountContactIndex, type AuditQuery, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
@@ -20,9 +22,10 @@ import { protectInstalledStateParent } from '../../../packages/state/src/ownersh
 import { runCli } from './cli.ts'
 import { CLI_COMMAND } from './cli-api/identity.ts'
 import { listenCliApiSocket } from './cli-api/socket.ts'
-import { createQualifiedCatalogProvider, loadQualifiedCatalog, type HostCatalogSource, type QualifiedCatalogProvider, type TrustedAcceptanceOptions } from './host-catalog.ts'
+import { createQualifiedCatalogProvider, loadQualifiedCatalog, qualificationModeOn, type HostCatalogSource, type QualifiedCatalogProvider, type TrustedAcceptanceOptions } from './host-catalog.ts'
 import { loadTrustedAcceptanceConfig } from '../../../scripts/evidence/runtime.mjs'
 import { parseAuditFilters } from './audit-filters.ts'
+import { readMailboxPreferenceValues, type MailboxPreferenceFields } from './mail/mailbox-preferences.ts'
 import { loadMailDocument, messageSizeLimitBytes, messageSizeLimitFromPostconf, type MailDocument } from './mail/document.ts'
 import { auditActorQuery, auditTargetQuery, authorizeMailboxSessionBinding, createLocalMailboxTransport, mailFolderName, mailboxAddressIndex, rewriteMailboxIds } from './mail/inbox.ts'
 import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
@@ -34,18 +37,27 @@ import { teamFileReader, teamMemberResolver } from './team-session.ts'
 import { createHandoffSessionCheck } from './panel-handoff-authority.ts'
 import { readAdminPreferenceValues } from './admin-preferences.ts'
 import { readUiPreferenceValue, type UiPreferenceAuthority } from './ui-preferences.ts'
+import { DEFAULT_PERSONAL_PREFERENCES, readPersonalPreferenceValues, type PersonalPreferenceFields } from './personal-preferences.ts'
 import { captureMailboxMetadataAuthority } from './mail/metadata-authority.ts'
 import { brandingForDocuments, panelBrandingFile, servePanelBrandingAsset } from './panel-branding.ts'
 import { panelSettingsFile } from './panel-settings.ts'
+import { enabledProvidersFor } from './external-auth.ts'
 import { installSavedLanguages } from './panel-languages.ts'
-import { requireMailboxPrincipalAccess } from './authorization.ts'
+import { pluginFeatures } from './plugin-packages.ts'
+import { installSavedThemePackages, withThemePreview } from './theme-packages.ts'
+import { requireMailboxPrincipalAccess, serverRoleFeatures } from './authorization.ts'
 import { createAgentClient } from './agent-client.ts'
 import { startAlertScheduler } from './alert-runtime.ts'
+import { startMailCertScheduler } from './mail-cert-scheduler.ts'
+import { startDdnsScheduler } from './host-ddns.ts'
 import { classifyCliInvocation, xpanelServiceUid } from './cli-privilege.ts'
 import { ENTRY_POINTS, entryPointAdmitsPrincipal, isMailboxPrincipalUsername, type EntryPoint } from './entry-points.ts'
 import { assertStateWritable } from './state-access.ts'
 import { LiveEventHub, WS_AUTHORIZATION_UNAVAILABLE } from './ws.ts'
 import type { ApiApp } from './server.ts'
+import { projectBandwidthReport } from './metering-workspace.ts'
+import { accountUsage, readQuotaUsageReply, resellerUsage } from './reseller-usage.ts'
+import { readRemoteServiceIps } from '../../agent/src/remote-service-ips.ts'
 import {
   awaitLifecycleWriterDrain,
   createLifecycleBackgroundResources,
@@ -103,6 +115,8 @@ export const closeApiLifecycleParticipant = async (participant?: ApiLifecyclePar
 }
 
 export interface PanelServerOptions {
+  /** A test's in-memory calendar store; production goes through the agent. */
+  davExchange?: DavExchange
   /** Protected operator startup configuration; never taken from a request. */
   acceptance?: TrustedAcceptanceOptions
   port?: number
@@ -164,7 +178,10 @@ export const createDefaultWebRenderer = async (deps: {
 }): Promise<(req: Request) => Promise<Response> | Response> => {
   const mfaRuntimePolicy = bindMfaRuntimePolicy(deps.mfaRuntimePolicy)
   const loadCatalog = (source: HostCatalogSource | null) => deps.catalogProvider ? deps.catalogProvider.load(source) : loadQualifiedCatalog(source)
-  const { serveWebUi, resolveWebDocumentRoute, registeredUiThemeIds, resolveUiTheme } = await import('../../web/src/index.ts')
+  const { serveWebUi: renderWebUi, resolveWebDocumentRoute, registeredUiThemeIds, resolveUiTheme } = await import('../../web/src/index.ts')
+  const qualificationMode = () => deps.catalogProvider ? deps.catalogProvider.qualificationMode() : qualificationModeOn()
+  // Every document passes here, so no page of a host in qualification mode can miss the banner.
+  const serveWebUi: typeof renderWebUi = (request, state) => renderWebUi(request, state && (async (url, req) => withThemePreview(new URL(request.url), { ...await state(url, req), ...(qualificationMode() ? { qualificationMode: true } : {}) })))
   const publicOrigin = (() => {
     if (!deps.publicOrigin) return undefined
     try { const url = new URL(deps.publicOrigin); return url.protocol === 'https:' && url.origin === deps.publicOrigin ? url.origin : undefined } catch { return undefined }
@@ -229,12 +246,26 @@ export const createDefaultWebRenderer = async (deps: {
       return null
     }
   }
+  /** The owner's web statistics, the agent read behind GET /api/account/web-stats; a failed or foreign reply is no observation. */
+  const readWebStats = async (principalId: string, account: { id: string; username: string }, query: URLSearchParams): Promise<WebStatsView | null> => {
+    if (!deps.agent) return null
+    try {
+      const response = await deps.agent.fetch(new Request(`http://agent.local/accounts/${encodeURIComponent(account.username)}/web-stats?${query}`, {
+        headers: agentCallerHeaders({ principalId, token: deps.agent.token }),
+      }))
+      return response.ok ? parseWebStatsView(await response.json(), { accountId: account.id, username: account.username }) : null
+    } catch {
+      return null
+    }
+  }
   return async (req) => {
     const url = new URL(req.url)
     const headers = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }
     // Every authenticated document of a handed-off session carries the identity banner.
     let impersonation: { target: string; issuer: string } | undefined
     let personalUiTheme: string | undefined
+    let personalValues: PersonalPreferenceFields | null = null
+    let mailPreferences: MailboxPreferenceFields | null = null
     // Assigned only after the existing current session/service/account lifetime checks.
     let documentMailbox: UiPreferenceAuthority['mailbox']
     // Saved branding, default appearance and the live-updates switch reach every rendered document; page state still wins.
@@ -246,7 +277,10 @@ export const createDefaultWebRenderer = async (deps: {
     }
     const serve = (request: Request, state?: () => Promise<WebAppRenderState>) =>
       serveWebUi(request, state && (async () => ({ ...await panelDocumentState(), ...await state(),
-        ...(personalUiTheme ? { uiTheme: personalUiTheme } : {}), ...(impersonation ? { impersonation } : {}) })))
+        ...(personalUiTheme ? { uiTheme: personalUiTheme } : {}), ...(impersonation ? { impersonation } : {}),
+        ...(personalValues ? { noticePosition: personalValues.noticePosition, personal: { notifications: personalValues.notifications, onboardingDismissed: personalValues.onboardingDismissed },
+          ...(personalValues.locale && isOfferedLocale(personalValues.locale as Locale) ? { locale: personalValues.locale as Locale } : {}) } : {}),
+        ...(mailPreferences ? { density: mailPreferences.density, mailDateFormat: mailPreferences.dateFormat, ...(mailPreferences.replyIdentityId ? { mailReplyIdentity: mailPreferences.replyIdentityId } : {}) } : {}) })))
     let resolvedContact: string | undefined | null = null
     const supportEmail = async (): Promise<string | undefined> => {
       if (resolvedContact !== null) return resolvedContact || undefined
@@ -327,6 +361,7 @@ export const createDefaultWebRenderer = async (deps: {
           ...(deps.entryPoint ? { audience: deps.entryPoint, targetSurface: deps.entryPoint } : {}),
           ...(email ? { supportEmail: email } : {}),
           ...(publicOrigin ? { publicOrigin } : {}),
+          ...(publicOrigin ? { externalProviders: await enabledProvidersFor(deps.store.rootDir, deps.entryPoint) } : {}),
           // A failed handoff lands here with one generic message; the reason is only in the audit trail.
           ...(url.searchParams.get('handoff') === 'failed' ? { handoffFailed: true } : {}),
         },
@@ -361,6 +396,8 @@ export const createDefaultWebRenderer = async (deps: {
         }
         personalUiTheme = await readUiPreferenceValue(deps.store.rootDir, authority,
           { choices: registeredUiThemeIds(), defaultUiTheme: resolveUiTheme().id }) ?? undefined
+        // A user who never saved anything still gets defaults, so a new account sees Getting Started.
+        personalValues = await readPersonalPreferenceValues(deps.store.rootDir, authority) ?? DEFAULT_PERSONAL_PREFERENCES
       } catch {
         // A missing or unreadable personal choice uses the registry default; document admission remains below.
         personalUiTheme = undefined
@@ -472,13 +509,13 @@ export const createDefaultWebRenderer = async (deps: {
     if (principal.kind === 'user' && (!scoped?.account || scoped.account.status !== 'active' || !scoped.plan || !scoped.featureList)) {
       return documentStatus(403, {
         surface,
-        visibility: { principal, disabledFeatures: new Set(scoped?.featureList?.disabled ?? []) },
+        visibility: { principal, disabledFeatures: new Set([...scoped?.featureList?.disabled ?? [], ...await serverRoleFeatures(deps.store)]) },
       })
     }
     const scopedVisibility = {
       principal,
       ...(reseller ? { reseller } : {}),
-      disabledFeatures: new Set(scoped?.featureList?.disabled ?? []),
+      disabledFeatures: new Set([...scoped?.featureList?.disabled ?? [], ...await serverRoleFeatures(deps.store)]),
       ...(caller.team ? { allowedToolIds: new Set(teamToolIds(caller.team.roles)) } : {}),
     }
     if (!canOpenRegisteredRoute(documentRoute.activeRoute, scopedVisibility)) {
@@ -624,18 +661,19 @@ export const createDefaultWebRenderer = async (deps: {
         visibility: { principal, disabledFeatures: new Set() },
       })
     }
-    const plan = account ? snap.plans.find((p) => p.id === account.planId) : undefined
+    const storedPlan = account ? snap.plans.find((p) => p.id === account.planId) : undefined
+    const plan = account && storedPlan ? effectivePlan(storedPlan, account) : undefined
     const featureList = plan ? snap.featureLists.find((f) => f.id === plan.featureListId) : undefined
     if (principal.kind === 'user' && (!plan || !featureList)) {
       return documentStatus(403, {
         surface,
-        visibility: { principal, disabledFeatures: new Set(featureList?.disabled ?? []) },
+        visibility: { principal, disabledFeatures: new Set([...featureList?.disabled ?? [], ...await serverRoleFeatures(deps.store)]) },
       })
     }
     const visibility = {
       principal,
       ...(reseller ? { reseller } : {}),
-      disabledFeatures: new Set(featureList?.disabled ?? []),
+      disabledFeatures: new Set([...featureList?.disabled ?? [], ...await serverRoleFeatures(deps.store)]),
     }
     const listedAccounts = principal.kind === 'reseller' && !hasAcl(principal, reseller, 'list-accounts') ? [] : ownedAccounts
     const listedAccountIds = new Set(listedAccounts.map(account => account.id))
@@ -651,6 +689,22 @@ export const createDefaultWebRenderer = async (deps: {
     const planEditorState = requestedPlanId === null ? { kind: 'create' as const }
       : selectedEditPlan ? { kind: 'edit' as const, plan: selectedEditPlan } : { kind: 'unavailable' as const }
     const visibleIpPool = principal.kind === 'root' ? snap.ipPool ?? [] : []
+    // Measured reseller totals for the root reseller pages: one quota report and one bandwidth meter read.
+    const resellerUsageRoute = principal.kind === 'root' && ['/whm/resellers', '/whm/resellers/privileges', '/whm/resellers/more'].includes(documentRoute.activeRoute)
+    const readResellerSource = async (path: string): Promise<unknown> => {
+      if (!deps.agent) return null
+      try {
+        const response = await deps.agent.fetch(new Request('http://agent.local' + path, { headers: agentCallerHeaders({ principalId: principal.id, token: deps.agent.token }) }))
+        return response.ok ? await response.json() : null
+      } catch { return null }
+    }
+    const resellerUsageObservations = resellerUsageRoute ? await (async () => {
+      const [quotaRaw, bandwidthRaw] = await Promise.all([readResellerSource('/host/quota/usage'), readResellerSource('/host/monitoring/bandwidth')])
+      let bandwidth: ReturnType<typeof projectBandwidthReport> | null = null
+      try { bandwidth = bandwidthRaw === null ? null : projectBandwidthReport(bandwidthRaw) } catch { bandwidth = null }
+      const quota = readQuotaUsageReply(quotaRaw)
+      return { resellers: resellerUsage(visibleResellers, snap.accounts, quota, bandwidth), accounts: accountUsage(snap.accounts.filter(account => account.ownerId !== null), quota, bandwidth) }
+    })() : undefined
     const visibleFirewall = principal.kind === 'root' ? snap.firewall.rules : []
     const accountDomains = snap.domains.filter((d) => d.accountId === account?.id)
     const accountDatabases = snap.databases.filter((d) => d.accountId === account?.id)
@@ -682,7 +736,10 @@ export const createDefaultWebRenderer = async (deps: {
     // A missing agent, failed read or invalid reply leaves no prop, so the page keeps its
     // explicit unavailable state instead of fabricating a sample.
     const resourcesRoute = surface === 'xpanel' && documentRoute.activeRoute === '/resources'
-    const trafficRoute = surface === 'xpanel' && ['/metrics/traffic', '/metrics/web-stats'].includes(documentRoute.activeRoute)
+    const trafficRoute = surface === 'xpanel' && documentRoute.activeRoute === '/metrics/traffic'
+    const webStatsRoute = surface === 'xpanel' && documentRoute.activeRoute === '/metrics/web-stats'
+    // The agent validates each selector against the owner's saved sites; only these three names are passed on.
+    const webStatsQuery = new URLSearchParams([...url.searchParams].filter(([name]) => ['site', 'scheme', 'month'].includes(name)))
     const requestedWindow = url.searchParams.get('window')
     const trafficWindow: WebsiteAnalyticsWindow = isWebsiteAnalyticsWindow(requestedWindow) ? requestedWindow : '24h'
     const requestedTrafficDomains = trafficRoute ? url.searchParams.getAll('domain') : []
@@ -706,9 +763,10 @@ export const createDefaultWebRenderer = async (deps: {
     if (requestedTrafficDomain !== undefined && !trafficDomain) {
       return documentStatus(404, { surface, visibility, catalog, ...(account ? { accountId: account.id } : {}) })
     }
-    const [resourceUsage, trafficAnalytics] = await Promise.all([
+    const [resourceUsage, trafficAnalytics, webStats] = await Promise.all([
       resourcesRoute && account ? readAccountUsageObservation(principal.id, account.username) : null,
       trafficDomain ? readWebsiteTraffic(principal.id, trafficDomain, trafficWindow) : null,
+      webStatsRoute && account ? readWebStats(principal.id, account, webStatsQuery) : null,
     ])
     const active = await latestActive(deps.db)
     const dashboardRoute = surface === 'xwhm' && documentRoute.activeRoute === '/whm' && principal.kind === 'root'
@@ -802,8 +860,9 @@ export const createDefaultWebRenderer = async (deps: {
       : []
     const numericCap = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
     const nearLimits = listedAccounts.flatMap(accountRow => {
-      const accountPlan = snap.plans.find(item => item.id === accountRow.planId)
-      if (!accountPlan) return []
+      const storedPlan = snap.plans.find(item => item.id === accountRow.planId)
+      if (!storedPlan) return []
+      const accountPlan = effectivePlan(storedPlan, accountRow)
       const checks: Array<[string, number, number | null]> = [
         ['mailboxes', snap.serviceUsers.filter(user => user.accountId === accountRow.id && user.services.email).length, numericCap(accountPlan.caps.mailboxes)],
         ['addon domains', snap.domains.filter(domain => domain.accountId === accountRow.id && domain.kind === 'addon').length, numericCap(accountPlan.caps.addonDomains)],
@@ -828,10 +887,13 @@ export const createDefaultWebRenderer = async (deps: {
         domains: visibleDomains,
         plans: visiblePlans,
         featureLists: visibleFeatureLists,
+        ...(documentRoute.activeRoute === '/whm/plans/features' ? { pluginFeatures: await pluginFeatures(deps.store.rootDir).catch(() => []) } : {}),
         planEditorState,
         resellers: visibleResellers,
         ...(principal.kind === 'root' && snap.mailIpConfig ? { mailIpConfig: snap.mailIpConfig } : {}),
         ipPool: visibleIpPool,
+        ...(principal.kind === 'root' ? { ipv6Ranges: snap.ipv6Ranges ?? [], aclLists: snap.aclLists ?? [], ...(documentRoute.activeRoute === '/whm/server/ips' ? { remoteServiceIps: await readRemoteServiceIps(deps.store.rootDir).catch(() => null) ?? { smtp: [], nameservers: [] } } : {}) } : {}),
+        ...(resellerUsageObservations ? { resellerUsage: resellerUsageObservations.resellers, accountUsage: resellerUsageObservations.accounts } : {}),
         firewallRules: visibleFirewall,
         ...(principal.kind === 'root' && snap.server ? {
           serverSettings: snap.server.settings,
@@ -875,8 +937,10 @@ export const createDefaultWebRenderer = async (deps: {
           websiteAnalyticsDomainSelectionAvailable: Boolean(account),
           websiteAnalyticsWindow: trafficWindow,
           ...(trafficDomain ? { activeDomain: trafficDomain.name } : {}),
+          ...(selectedSiteDomain ? { activeDomain: selectedSiteDomain.name } : {}),
           ...(trafficAnalytics ? { websiteAnalytics: trafficAnalytics } : { websiteAnalyticsUnavailable: true }),
         } : {}),
+        ...(webStatsRoute ? webStats ? { webStats } : { webStatsUnavailable: true } : {}),
         databases: accountDatabases,
         databaseUsers: accountDatabaseUsers,
         serviceUsers: accountServiceUsers,
@@ -932,6 +996,7 @@ export const createDefaultWebRenderer = async (deps: {
         const replyUid = Number(url.searchParams.get('uid'))
         const replyMode = mode === 'reply' || mode === 'reply-all' || mode === 'forward' ? mode : null
         const managedFolder = (documentRoute.activeRoute === '/mail/inbox' || routeFolder !== undefined) && ['INBOX', 'Sent', 'Drafts', 'Trash'].includes(folder)
+        mailPreferences = documentMailbox ? await readMailboxPreferenceValues(deps.store, documentMailbox.mailbox) : null
         const loaded = await loadMailDocument({
           readFirst: !managedFolder && req.headers.get('x-xpanel-mail-refresh') !== 'list',
           db: deps.db,
@@ -958,7 +1023,7 @@ export const createDefaultWebRenderer = async (deps: {
           ...(loaded.quotaUsedMb !== undefined ? { quotaUsedMb: loaded.quotaUsedMb } : {}),
           ...(loaded.quotaUsedBytes !== undefined ? { quotaUsedBytes: loaded.quotaUsedBytes } : {}),
           ...(loaded.quotaLimitMb !== undefined ? { quotaLimitMb: loaded.quotaLimitMb } : {}),
-          ...(loaded.messages !== undefined ? { messages: loaded.messages } : {}),
+          ...(loaded.messages !== undefined ? { messages: mailPreferences ? loaded.messages.slice(0, mailPreferences.messagesPerPage) : loaded.messages } : {}),
           ...(loaded.folderCounts ? { folderCounts: loaded.folderCounts } : {}),
           ...(loaded.mailListFailed ? { mailListFailed: true } : {}),
           ...(loaded.vacationEnabled !== undefined ? { vacationEnabled: loaded.vacationEnabled } : {}),
@@ -1037,8 +1102,9 @@ export const resolvePanelEntrypoints = (
     const publicOrigin = explicit?.publicOrigin ?? env[config.origin] ?? fail('PRECONDITION_FAILED', 'each entrypoint requires an exact HTTPS origin')
     let parsed: URL
     try { parsed = new URL(publicOrigin ?? '') } catch { return fail('PRECONDITION_FAILED', `${config.origin} must be an exact HTTPS origin`) }
-    if (parsed.protocol !== 'https:' || parsed.origin !== publicOrigin || parsed.port !== String(ENTRY_POINTS[entryPoint].port)) {
-      fail('PRECONDITION_FAILED', `${config.origin} must be an exact HTTPS origin on port ${ENTRY_POINTS[entryPoint].port}`)
+    // Panel access may move a listener, so the port is whatever the management lifecycle wrote; it is always explicit.
+    if (parsed.protocol !== 'https:' || parsed.origin !== publicOrigin || !parsed.port) {
+      fail('PRECONDITION_FAILED', `${config.origin} must be an exact HTTPS origin with an explicit port`)
     }
     entryPoints[entryPoint] = Object.freeze({ publicOrigin, port })
   }
@@ -1071,6 +1137,8 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
   let dbHandle: ReturnType<typeof createDb> | undefined
   let client: ReturnType<typeof createAgentClient> | undefined
   let alerts: ReturnType<typeof startAlertScheduler> | undefined
+  let mailCerts: ReturnType<typeof startMailCertScheduler> | undefined
+  let ddns: ReturnType<typeof startDdnsScheduler> | undefined
   const listeners: Awaited<ReturnType<typeof listenApiServer>>[] = []
   const cliSockets: Awaited<ReturnType<typeof listenCliApiSocket>>[] = []
   const agentSubscriptions: (() => void)[] = []
@@ -1081,7 +1149,7 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
     closePromise ??= (async () => {
       // HTTP closeAllConnections does not include upgraded WebSocket connections.
       for (const socket of sockets) socket.destroy()
-      const alertResults = await Promise.allSettled([Promise.resolve().then(() => alerts?.stop())])
+      const alertResults = await Promise.allSettled([Promise.resolve().then(() => alerts?.stop()), Promise.resolve().then(() => mailCerts?.stop()), Promise.resolve().then(() => ddns?.stop())])
       const listenerResults = await Promise.allSettled([...listeners, ...cliSockets].map(listener => listener.close()))
       const subscriptionResults = await Promise.allSettled(agentSubscriptions.map(async unsubscribe => unsubscribe()))
       const clientResults = await Promise.allSettled([Promise.resolve().then(() => client?.close())])
@@ -1134,6 +1202,8 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
     // Saved locale policy and uploaded catalogs apply from panel start; invalid saved state keeps the release catalogs.
     const languages = await installSavedLanguages(store.rootDir)
     if (languages.policy === 'invalid' || languages.rejected.length) console.warn(`languages: saved policy ${languages.policy}; catalogs not applied: ${languages.rejected.join(', ') || 'none'}`)
+    const themePackages = await installSavedThemePackages(store.rootDir)
+    if (themePackages.rejected.length) console.warn(`theme packages not installed: ${themePackages.rejected.join(', ')}`)
     if (!opts.agentApp) client = createLifecycleBackgroundResources(() => createAgentClient({ socketPath: opts.agentSocket ?? process.env.XPANEL_AGENT_SOCKET ?? '/run/xpanel/agent.sock', token: agentToken }))
     const sharedAgent = opts.agentApp ?? client!
     const agentApp: AgentApp = {
@@ -1175,6 +1245,9 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
     }
     alerts = createLifecycleBackgroundResources(() => startAlertScheduler({ db: handle.db, store, agentApp, agentToken, admit: withLifecycleWriterAdmission,
       onError: () => process.stderr.write('xpanel-api: a scheduled alert check did not complete\n') }))
+    mailCerts = createLifecycleBackgroundResources(() => startMailCertScheduler({ db: handle.db, store, agentApp, agentToken, publicOrigin: entryPoints.xpanel.publicOrigin, admit: withLifecycleWriterAdmission,
+      onError: part => process.stderr.write(`xpanel-api: scheduled ${part} work did not complete\n`) }))
+    ddns = createLifecycleBackgroundResources(() => startDdnsScheduler({ db: handle.db, store, agentApp, agentToken, admit: withLifecycleWriterAdmission }))
     return {
       quarantined: false as const, apps: Object.freeze(apps), host, entryPoints, db: handle.db, store,
       listeners: Object.freeze(Object.fromEntries(ENTRY_POINT_ORDER.map((name, index) => [name, {
@@ -1188,7 +1261,7 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
   }
 }
 
-const CLI_VERBS = new Set(['status', 'reconcile', 'rollback', 'reindex', 'init-root', 'reset-password', 'disable-2fa', 'recover-provisioning', 'init-quotas', 'repair-state-ownership', 'help', '--help', '-h'])
+const CLI_VERBS = new Set(['status', 'reconcile', 'rollback', 'reindex', 'init-root', 'reset-password', 'disable-2fa', 'recover-provisioning', 'init-quotas', 'panel-access', 'repair-state-ownership', 'help', '--help', '-h'])
 
 const readPasswordInput = async (): Promise<string> => {
   if (process.stdin.isTTY) {

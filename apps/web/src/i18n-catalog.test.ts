@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { CATALOG_LOCALE_DIR } from '@xpanel/catalog'
-import { LOCALES, SOURCE_LOCALE, catalogKey, messageArguments, parseMessage, parsePo } from '@xpanel/core'
+import { LOCALES, SOURCE_LOCALE, TWEAKS, catalogKey, messageArguments, parseMessage, parsePo } from '@xpanel/core'
 import { collectMessages, sourceFiles, WEB_CATALOG_DIR } from '../../../scripts/i18n-catalog.mjs'
 
 const translated = LOCALES.filter(info => info.tag !== SOURCE_LOCALE)
@@ -51,6 +51,10 @@ describe('translation catalogs', () => {
       const missing = [...used].filter(([key]) => !keys.has(key)).map(([key, message]) => `${JSON.stringify(key)} (${[...message.files].join(', ')})`)
       expect(missing, info.tag).toEqual([])
     }
+  })
+
+  it('extract every Tweak Settings label and help text', () => {
+    expect(TWEAKS.flatMap(tweak => [tweak.label, tweak.help]).filter(message => !used.has(catalogKey(message)))).toEqual([])
   })
 
   it('carry no message the product code no longer uses', () => {

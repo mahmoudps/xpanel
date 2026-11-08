@@ -94,6 +94,7 @@ function bindWhmDomains(askDialog: ((options: Record<string, unknown>) => Promis
         name.dataset.status = row.suspended ? 'suspended' : 'active'; name.dataset.search = row.name + ' ' + account.username
         isolated.dir = 'ltr'; isolated.textContent = row.name; name.append(isolated)
         const nameCell = document.createElement('td'); nameCell.append(name); tr.append(nameCell)
+        if (page!.querySelector('[data-domain-bulk]')) { const box = document.createElement('input'); box.type = 'checkbox'; box.dataset.domainSelect = row.id; box.dataset.domainName = row.name; box.setAttribute('aria-label', t('Select {name}', { name: row.name })); nameCell.prepend(box, ' ') }
         const values: [string, boolean][] = [[account.username, false], [row.kind, false], [row.siteType, false], [row.docRoot, true], [domainPhpLabel(row), row.siteType === 'php'], [row.wildcard ? t('Yes') : t('No'), false], [row.certificateId ? t('Assigned') : t('Unassigned'), false], [row.suspended ? t('Suspended') : t('Active desired state'), false]]
         for (const [value, technical] of values) { const td = document.createElement('td'); if (technical) { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; td.append(bdi) } else td.textContent = value; tr.append(td) }
         body.append(tr)

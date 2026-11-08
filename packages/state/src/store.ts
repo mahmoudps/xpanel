@@ -25,8 +25,6 @@ import {
   assertId,
   assertIdOrNull,
   assertInt,
-  assertIpv4,
-  assertIpv6,
   assertIpAssignableToDomain,
   assertLine,
   assertName,
@@ -51,7 +49,7 @@ import {
   validateFirewallRule,
   validateFirewallRules,
   validateHome,
-  validateIpList,
+  isAccountHome,
   validateMailIpConfig,
   validatePrefixList,
   validateServerIpEntry,
@@ -61,11 +59,22 @@ import {
   resolveAccountIpAssignment,
   validateServerIpPool,
   projectAccountIpAvailability,
+  effectivePlan,
+  validateIpv6Ranges,
+  validateResellerAclList,
+  validateAccountLimits,
+  validateAccountLogSettings,
+  assertUtcDay,
+  limitLte,
+  nextRangeAddress,
 } from '@xpanel/core'
 import type {
   Account,
+  AccountLimits,
+  AccountLogSettings,
   AccountStatus,
   Database,
+  DnsRecord,
   DatabaseUser,
   DatabaseRemoteAccessEntry,
   DatabaseRemoteAccessSnapshot,
@@ -78,11 +87,13 @@ import type {
   FeatureList,
   FirewallRule,
   Id,
+  Ipv6Range,
   Limit,
   MailIpConfig,
   Plan,
   PlanCapKey,
   Reseller,
+  ResellerAclList,
   ServerIpEntry,
   ServerSettings,
   ServiceUser,
@@ -183,6 +194,14 @@ interface MutationJournal {
 const mustExist = <T>(row: T | null | undefined, what: string, id: unknown): T =>
   row ?? fail('NOT_FOUND', `${what} not found`, { what, id: String(id).slice(0, 128) })
 
+/** 1..1000 distinct account ids, the bound of one root bandwidth action. */
+const uniqueAccountIds = (ids: readonly Id[]): Id[] => {
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > 1000) fail('VALIDATION', 'list 1 to 1000 accounts', { stateChanged: false })
+  const out = ids.map((id) => assertId(id, 'accountId'))
+  if (new Set(out).size !== out.length) fail('VALIDATION', 'each account may be listed once', { stateChanged: false })
+  return out
+}
+
 const toPublicAccount = (a: StoredAccount): Account => ({
   id: a.id,
   username: a.username,
@@ -202,6 +221,11 @@ const toPublicAccount = (a: StoredAccount): Account => ({
   shell: a.shell,
   createdAt: a.createdAt,
   ...(a.bandwidthLimitedMonth !== undefined && { bandwidthLimitedMonth: a.bandwidthLimitedMonth }),
+  ...(a.limits !== undefined && { limits: structuredClone(a.limits) }),
+  ...(a.bandwidthReliefDate !== undefined && { bandwidthReliefDate: a.bandwidthReliefDate }),
+  ...(a.logs !== undefined && { logs: { ...a.logs } }),
+  ...(a.suspendLocked !== undefined && { suspendLocked: a.suspendLocked }),
+  ...(a.homeMove !== undefined && { homeMove: { ...a.homeMove } }),
 })
 
 const pinnedAccountPreimage = async (path: string): Promise<{ bytes: Buffer; identity: string }> => {
@@ -226,6 +250,7 @@ const toPublicServiceUser = (u: StoredServiceUser): ServiceUser => ({
   services: { ...u.services },
   mailboxQuotaMb: u.mailboxQuotaMb,
   ftpDir: u.ftpDir,
+  ...(u.webdiskReadOnly ? { webdiskReadOnly: true } : {}),
 })
 
 const toPublicDatabaseUser = (u: StoredDatabaseUser): DatabaseUser => ({
@@ -245,6 +270,7 @@ export const MAIL_ROUTING_FILES = {
 } as const
 
 const restoreEntries = ['feature-lists', 'plans', 'resellers', 'accounts', 'certificates', 'zones', 'server.json', 'firewall.json', 'uid-allocator.json', 'ip-pool.json', 'mail-ips.json',
+  'acl-lists', 'ip-ranges.json',
   ...Object.values(MAIL_ROUTING_FILES).map((rel) => ['extended', ...rel].join('/')), 'extended/webmail/vacation'] as const
 
 const restoreIndex = <T>(values: readonly T[], key: (value: T) => string, kind: string): Map<string, T> => {
@@ -266,7 +292,10 @@ const restorePathExists = async (path: string): Promise<boolean> => {
 
 /** Content identity of the rule set; firewall writes are bound to the revision the caller read. */
 export const firewallRevision = (state: FirewallState): string =>
-  createHash('sha256').update(JSON.stringify({ rules: state.rules, prefixLists: state.prefixLists })).digest('hex')
+  createHash('sha256').update(JSON.stringify({ rules: state.rules, prefixLists: state.prefixLists, enabled: state.enabled, blockPing: state.blockPing })).digest('hex')
+
+/** In-memory state an IP change is planned against. */
+interface IpChangeState { plans: Plan[]; accounts: StoredAccount[]; domains: Domain[]; mail: MailIpConfig | null; resellers: Reseller[]; zones: DnsZoneState[]; pool: ServerIpEntry[] }
 
 export class StateStore {
   readonly rootDir: string
@@ -444,7 +473,7 @@ export class StateStore {
 
   private async readFirewallFile(): Promise<FirewallState> {
     const raw = await readJsonIfExists<unknown>(this.path('firewall.json'))
-    return raw === null ? { rules: [], prefixLists: [] } : validateFirewallState(raw)
+    return raw === null ? { rules: [], prefixLists: [], enabled: false, blockPing: false } : validateFirewallState(raw)
   }
 
   private async readUidAllocatorFile(): Promise<UidAllocatorState> {
@@ -490,6 +519,20 @@ export class StateStore {
     return validateIpPoolFile(raw)
   }
 
+  private async readAclListFiles(): Promise<ResellerAclList[]> {
+    const files = await listJsonFiles(this.path('acl-lists'))
+    const lists = await Promise.all(files.map(async (f) => {
+      const list = validateResellerAclList(await readJsonIfExists(f))
+      return basename(f) === `${list.name}.json` ? list : fail('VALIDATION', 'an ACL list file must be named after its list', { file: basename(f) })
+    }))
+    return lists.sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  private async readIpv6RangesFile(): Promise<Ipv6Range[]> {
+    const raw = await readJsonIfExists<unknown>(this.path('ip-ranges.json'))
+    return raw === null ? [] : validateIpv6Ranges(raw)
+  }
+
   private async readMailIpConfigFile(): Promise<MailIpConfig | null> {
     const raw = await readJsonIfExists<unknown>(this.path('mail-ips.json'))
     return raw === null ? null : validateMailIpConfig(raw)
@@ -520,7 +563,7 @@ export class StateStore {
   }
 
   private async readSnapshotUnlocked(overrideRevision?: number): Promise<StateSnapshot> {
-    const [authority, server, firewall, uidAllocator, featureLists, plans, resellers, certificates, zones, ipPool, mailIpConfig, mailRouting] =
+    const [authority, server, firewall, uidAllocator, featureLists, plans, resellers, certificates, zones, ipPool, mailIpConfig, mailRouting, aclLists, ipv6Ranges] =
       await Promise.all([
         overrideRevision === undefined ? this.writerLock.readAuthority() : Promise.resolve(null),
         this.readServerFile(),
@@ -534,6 +577,8 @@ export class StateStore {
         this.readIpPoolFile(),
         this.readMailIpConfigFile(),
         this.readMailRouting(),
+        this.readAclListFiles(),
+        this.readIpv6RangesFile(),
       ])
     const revision = overrideRevision ?? authority?.revision ?? 0
     const plansById = new Map(plans.map((p) => [p.id, p]))
@@ -558,7 +603,7 @@ export class StateStore {
       if (account.username !== username) {
         fail('VALIDATION', `account directory "${username}" does not match account.username "${account.username}"`)
       }
-      const plan = mustExist(plansById.get(account.planId), 'plan', account.planId)
+      const plan = effectivePlan(mustExist(plansById.get(account.planId), 'plan', account.planId), account)
       accounts.push(account)
 
       const domFiles = await listJsonFiles(join(this.accountDir(username), 'domains'))
@@ -635,6 +680,8 @@ export class StateStore {
       cronJobs,
       ...(domainCustomConfigs.length > 0 ? { domainCustomConfigs } : {}),
       ...(ipPool.length > 0 ? { ipPool } : {}),
+      ...(ipv6Ranges.length > 0 ? { ipv6Ranges } : {}),
+      ...(aclLists.length > 0 ? { aclLists } : {}),
       ...(mailIpConfig !== null ? { mailIpConfig } : {}),
       ...(mailRouting !== null ? { mailRouting } : {}),
       ...(postgresqlUsers.length > 0 ? { postgresqlDatabases, postgresqlUsers } : {}),
@@ -748,6 +795,11 @@ export class StateStore {
     })
   }
 
+  /** Whole-file restore from a control snapshot: one revision step, so the next reconcile sees it. */
+  restoreStateFiles(write: (assertFencing: () => Promise<void>) => Promise<void>, opts?: MutationOptions): Promise<void> {
+    return this.withMutationLock(opts, async lease => { await write(async () => { await lease.assertFencingToken() }) })
+  }
+
   // ---------------------------------------------------------------- server settings
 
   async getServerSettings(): Promise<ServerSettings | null> {
@@ -760,9 +812,12 @@ export class StateStore {
       const validated = validateServerSettings(s)
       const current = await this.readServerFile()
       await opts?.settingsGuard?.(current?.settings ?? null)
-      const settings = validated.defaultSite === undefined && current?.settings.defaultSite !== undefined
-        ? { ...validated, defaultSite: current.settings.defaultSite }
-        : validated
+      const settings = {
+        ...validated,
+        ...(validated.defaultSite === undefined && current?.settings.defaultSite !== undefined ? { defaultSite: current.settings.defaultSite } : {}),
+        // Whole-settings writers such as the host name route do not carry the SSH block.
+        ...(validated.ssh === undefined && current?.settings.ssh !== undefined ? { ssh: current.settings.ssh } : {}),
+      }
       const next: StoredServerSettings = {
         settings,
         setupCompletedAt: current?.setupCompletedAt ?? null,
@@ -964,7 +1019,6 @@ export class StateStore {
         acl: assertResellerAcl(input.acl),
         nameservers: assertResellerNameservers(input.nameservers),
         delegatedIps: assertDelegatedIps(input.delegatedIps),
-        oversell: assertBool(input.oversell, 'oversell'),
       })
       const [resellers, accounts] = await Promise.all([this.readResellerFiles(), this.readAllAccountsUnlocked()])
       if (
@@ -999,20 +1053,70 @@ export class StateStore {
   updateReseller(id: Id, patch: ResellerPatch, opts?: MutationOptions): Promise<Reseller> {
     return this.withMutationLock(opts, async (lease) => {
       const current = mustExist(await this.getResellerUnlocked(id), 'reseller', id)
+      // null clears the package list (every visible package), the main shared IP (the server default) and the contact
+      const { packageLimits: _packages, sharedIp: _shared, contactEmail: _contact, ...kept } = current
+      const raw = patch as Record<string, unknown>
       const next = validateResellerFile({
-        ...current,
+        ...kept,
         ...patch,
+        ...(raw.contactEmail === undefined ? current.contactEmail !== undefined && { contactEmail: current.contactEmail } : raw.contactEmail === null ? { contactEmail: undefined } : {}),
+        ...(raw.packageLimits === undefined ? current.packageLimits !== undefined && { packageLimits: current.packageLimits } : raw.packageLimits === null ? { packageLimits: undefined } : {}),
+        ...(raw.sharedIp === undefined ? current.sharedIp !== undefined && { sharedIp: current.sharedIp } : raw.sharedIp === null ? { sharedIp: undefined } : {}),
         id: current.id,
         username: current.username,
         acl: patch.acl === undefined ? current.acl : assertResellerAcl(patch.acl),
         nameservers: patch.nameservers === undefined ? current.nameservers : assertResellerNameservers(patch.nameservers),
         delegatedIps: patch.delegatedIps === undefined ? current.delegatedIps : assertDelegatedIps(patch.delegatedIps),
-        oversell: patch.oversell === undefined ? current.oversell : assertBool(patch.oversell, 'oversell'),
       })
+      if (next.packageLimits && JSON.stringify(next.packageLimits) !== JSON.stringify(current.packageLimits)) {
+        const plans = await this.readPlanFiles()
+        for (const limit of next.packageLimits) this.assertPlanUsable(mustExist(plans.find(plan => plan.id === limit.planId), 'plan', limit.planId), current.id)
+      }
+      if (next.sharedIp && next.sharedIp !== current.sharedIp) {
+        const entry = (await this.readIpPoolFile()).find(ip => ip.address === next.sharedIp)
+        if (!entry || entry.version !== 4 || entry.role !== 'shared' || entry.reserved
+          || !(entry.ownerKind === 'reseller' ? entry.ownerId === current.id : entry.ownerKind === 'root' && (entry.isPrimary || next.delegatedIps.includes(entry.address)))) {
+          fail('FORBIDDEN', 'the main shared IP must be a shared IPv4 of the pool that the reseller owns or was delegated', { reason: 'reseller_shared_ip_unavailable', stateChanged: false })
+        }
+      }
       if (JSON.stringify(next.delegatedIps) !== JSON.stringify(current.delegatedIps)) {
         await this.assertAccountIpAssignments((await this.readAllAccountsUnlocked()).filter(account => account.ownerId === current.id), { reseller: next })
       }
       await this.writeStateJson(lease, this.path('resellers', `${current.id}.json`), next)
+      return next
+    })
+  }
+
+  listAclLists(): Promise<ResellerAclList[]> {
+    return this.readAclListFiles()
+  }
+
+  /** Saved privilege list, stored as acl-lists/<name>.json. */
+  saveAclList(input: unknown, opts?: MutationOptions): Promise<ResellerAclList> {
+    return this.withMutationLock(opts, async (lease) => {
+      const list = validateResellerAclList(input)
+      await this.writeStateJson(lease, this.path('acl-lists', `${list.name}.json`), list)
+      return list
+    })
+  }
+
+  deleteAclList(name: string, opts?: MutationOptions): Promise<boolean> {
+    return this.withMutationLock(opts, async (lease) => {
+      const list = (await this.readAclListFiles()).find(item => item.name === name)
+      return list ? this.removeStatePath(lease, this.path('acl-lists', `${list.name}.json`)) : false
+    })
+  }
+
+  /** Reset Resellers: every listed reseller takes exactly the privileges of the saved list, in one journaled change. */
+  applyAclList(name: string, resellerIds: readonly Id[], opts?: MutationOptions): Promise<Reseller[]> {
+    return this.withMutationLock(opts, async (lease) => {
+      if (!Array.isArray(resellerIds) || resellerIds.length === 0 || resellerIds.length > 4096) fail('VALIDATION', 'list 1 to 4096 resellers', { stateChanged: false })
+      const list = (await this.readAclListFiles()).find(item => item.name === name) ?? fail('NOT_FOUND', 'privilege list not found', { stateChanged: false })
+      const ids = [...new Set(resellerIds.map(rid => assertId(rid, 'resellerId')))]
+      const resellers = await this.readResellerFiles()
+      const next = ids.map(rid => ({ ...mustExist(resellers.find(r => r.id === rid), 'reseller', rid), acl: [...list.acl] }))
+      const writes = next.map((reseller): [string, unknown] => [this.path('resellers', `${reseller.id}.json`), validateResellerFile(reseller)])
+      await this.journaledFileSet(lease, 'applyAclList', [], writes.map(([file]) => file), async () => ({ writes, removes: [] }))
       return next
     })
   }
@@ -1052,8 +1156,9 @@ export class StateStore {
     for (const a of owned) {
       const p = plansById.get(a.planId)
       if (p) {
-        disks.push(p.resources.diskMb)
-        bws.push(p.resources.bandwidthMbMonth)
+        const { resources } = effectivePlan(p, a)
+        disks.push(resources.diskMb)
+        bws.push(resources.bandwidthMbMonth)
       }
     }
     return {
@@ -1073,8 +1178,8 @@ export class StateStore {
     const plansById = new Map(plans.map((p) => [p.id, p]))
     const owned = accounts
       .filter((a) => a.ownerId === resellerId && a.id !== opts.exceptAccountId)
-      .map((a) => ({ accountPlanId: a.planId, plan: mustExist(plansById.get(a.planId), 'plan', a.planId) }))
-    assertResellerCapacity({ reseller, ownedAccounts: owned, newPlan: plan, isNewAccount: opts.isNewAccount })
+      .map((a) => ({ accountPlanId: a.planId, plan: effectivePlan(mustExist(plansById.get(a.planId), 'plan', a.planId), a) }))
+    assertResellerCapacity({ reseller, ownedAccounts: owned, newPlan: plan, newPlanId: plan.id, isNewAccount: opts.isNewAccount })
   }
 
   private async assertResellersStillFit(plan: Plan): Promise<void> {
@@ -1086,10 +1191,10 @@ export class StateStore {
       const reseller = mustExist(await this.getResellerUnlocked(ownerId), 'reseller', ownerId)
       const owned = accounts
         .filter((a) => a.ownerId === ownerId)
-        .map((a) => ({ accountPlanId: a.planId, plan: mustExist(plansById.get(a.planId), 'plan', a.planId) }))
+        .map((a) => ({ accountPlanId: a.planId, plan: effectivePlan(mustExist(plansById.get(a.planId), 'plan', a.planId), a) }))
       const standIn = owned.findIndex((o) => o.accountPlanId === plan.id)
       const others = owned.filter((_, i) => i !== standIn)
-      assertResellerCapacity({ reseller, ownedAccounts: others, newPlan: plan, isNewAccount: false })
+      assertResellerCapacity({ reseller, ownedAccounts: others, newPlan: owned[standIn]!.plan, isNewAccount: false })
     }
   }
 
@@ -1200,7 +1305,7 @@ export class StateStore {
     )
     const out: Domain[] = []
     for (const account of accounts) {
-      const plan = mustExist(plansById.get(account.planId), 'plan', account.planId)
+      const plan = effectivePlan(mustExist(plansById.get(account.planId), 'plan', account.planId), account)
       const files = await listJsonFiles(join(this.accountDir(account.username), 'domains'))
       for (const f of files) {
         out.push(validateDomainFile(await readJsonIfExists(f), { account, plan, reservedLoopbackPorts: reserved }))
@@ -1371,7 +1476,7 @@ export class StateStore {
         await lease.assertFencingToken()
         const account = await this.getAccount(id, hint)
         const candidatePlan = account ? await this.getPlan(account.planId) : null
-        const plan = candidatePlan?.id === account?.planId ? candidatePlan : null
+        const plan = account && candidatePlan?.id === account.planId ? effectivePlan(candidatePlan, account) : null
         const candidateList = plan ? await this.getFeatureList(plan.featureListId) : null
         const featureList = candidateList?.id === plan?.featureListId ? candidateList : null
         await lease.assertFencingToken()
@@ -1410,28 +1515,74 @@ export class StateStore {
     return this.filterAccounts(await this.readAllAccountsUnlocked(), f).length
   }
 
-  suspendAccount(id: Id, reason: string, opts?: MutationOptions): Promise<Account> {
+  /** `lock` keeps the suspension until root lifts it (cPanel "Prevent resellers from unsuspending"). */
+  suspendAccount(id: Id, reason: string, opts?: MutationOptions & { lock?: boolean }): Promise<Account> {
     return this.withMutationLock(opts, async (lease) => {
       const aid = assertId(id, 'id')
       const r = assertLine(reason, 512, 'suspend reason', { allowEmpty: false })
+      if (opts?.lock !== undefined && typeof opts.lock !== 'boolean') fail('VALIDATION', 'lock must be a boolean')
       const current = mustExist(await this.findStoredAccountById(aid), 'account', id)
       if (current.status === 'terminating') {
         fail('PRECONDITION_FAILED', `cannot suspend an account that is ${current.status}`, { id, status: current.status })
       }
-      const next: StoredAccount = { ...current, status: 'suspended', suspendReason: r, suspendedAt: new Date().toISOString() }
+      const { suspendLocked: _lock, ...rest } = current
+      const next: StoredAccount = { ...rest, status: 'suspended', suspendReason: r, suspendedAt: new Date().toISOString(), ...(opts?.lock && { suspendLocked: true }) }
       await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
       return toPublicAccount(next)
     })
   }
 
-  unsuspendAccount(id: Id, opts?: MutationOptions): Promise<Account> {
+  /** A locked suspension is lifted only with `allowLocked`, which root callers pass. */
+  unsuspendAccount(id: Id, opts?: MutationOptions & { allowLocked?: boolean }): Promise<Account> {
     return this.withMutationLock(opts, async (lease) => {
       const aid = assertId(id, 'id')
       const current = mustExist(await this.findStoredAccountById(aid), 'account', id)
       if (current.status !== 'suspended') {
         fail('PRECONDITION_FAILED', `cannot unsuspend an account that is ${current.status}`, { id, status: current.status })
       }
-      const next: StoredAccount = { ...current, status: 'active', suspendReason: null, suspendedAt: null }
+      if (current.suspendLocked && opts?.allowLocked !== true) fail('FORBIDDEN', 'only root can unsuspend an account whose suspension is locked', { reason: 'suspension_locked', stateChanged: false })
+      const { suspendLocked: _lock, ...rest } = current
+      const next: StoredAccount = { ...rest, status: 'active', suspendReason: null, suspendedAt: null }
+      await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
+      return toPublicAccount(next)
+    })
+  }
+
+  /** Rearrange an Account starts: the account stops like a suspension and its mail waits, whatever state it was in. */
+  beginHomeMove(id: Id, to: string, opts?: MutationOptions): Promise<Account> {
+    return this.withMutationLock(opts, async (lease) => {
+      const current = mustExist(await this.findStoredAccountById(assertId(id, 'id')), 'account', id)
+      if (current.status === 'terminating' || current.homeMove) fail('PRECONDITION_FAILED', 'the account cannot move now', { stateChanged: false, reason: 'account_busy' })
+      if (!isAccountHome(to, current.username) || to === current.home) fail('VALIDATION', 'the new home must be another home root', { stateChanged: false, reason: 'invalid_home_root' })
+      const next: StoredAccount = { ...current, status: 'suspended', suspendReason: current.suspendReason ?? 'Moving to another home directory', suspendedAt: current.suspendedAt ?? new Date().toISOString(),
+        homeMove: { to: validateHome(to, current.username), resumeStatus: current.status === 'active' ? 'active' : 'suspended', resumeReason: current.suspendReason, resumeSuspendedAt: current.suspendedAt } }
+      await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
+      return toPublicAccount(next)
+    })
+  }
+
+  /** The files arrived: the account takes its new home, its sites follow, and it returns to the state it was in. */
+  finishHomeMove(id: Id, opts?: MutationOptions): Promise<Account> {
+    return this.withMutationLock(opts, async (lease) => {
+      const current = mustExist(await this.findStoredAccountById(assertId(id, 'id')), 'account', id)
+      const { homeMove, ...rest } = current
+      if (!homeMove) return fail('PRECONDITION_FAILED', 'the account is not moving', { stateChanged: false })
+      const next: StoredAccount = { ...rest, home: homeMove.to, status: homeMove.resumeStatus, suspendReason: homeMove.resumeReason, suspendedAt: homeMove.resumeSuspendedAt }
+      for (const domain of (await this.readAllDomainsUnlocked()).filter(item => item.accountId === current.id && item.docRoot.startsWith(current.home + '/'))) {
+        await this.writeStateJson(lease, join(this.accountDir(current.username), 'domains', `${domain.name}.json`), { ...domain, docRoot: homeMove.to + domain.docRoot.slice(current.home.length) })
+      }
+      await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
+      return toPublicAccount(next)
+    })
+  }
+
+  /** The move failed before the state changed: the account returns as it was, in its old home. */
+  cancelHomeMove(id: Id, opts?: MutationOptions): Promise<Account> {
+    return this.withMutationLock(opts, async (lease) => {
+      const current = mustExist(await this.findStoredAccountById(assertId(id, 'id')), 'account', id)
+      const { homeMove, ...rest } = current
+      if (!homeMove) return toPublicAccount(current)
+      const next: StoredAccount = { ...rest, status: homeMove.resumeStatus, suspendReason: homeMove.resumeReason, suspendedAt: homeMove.resumeSuspendedAt }
       await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
       return toPublicAccount(next)
     })
@@ -1457,6 +1608,82 @@ export class StateStore {
     })
   }
 
+  /** The overrides `patch` leaves (a null field returns to the package value), refused when a saved quota, PHP setting or the reseller's capacity no longer fits. */
+  private async nextAccountLimits(current: StoredAccount, patch: AccountLimits): Promise<StoredAccount> {
+    const limits = validateAccountLimits({
+      ...(patch.resources !== undefined || current.limits?.resources ? { resources: { ...current.limits?.resources, ...patch.resources } } : {}),
+      ...(patch.caps !== undefined || current.limits?.caps ? { caps: { ...current.limits?.caps, ...patch.caps } } : {}),
+    })
+    const plan = effectivePlan(mustExist(await this.getPlan(current.planId), 'plan', current.planId), { limits })
+    const refuse = (reason: string, message: string): never => fail('PRECONDITION_FAILED', message, { reason, stateChanged: false })
+    const disk = plan.resources.diskMb
+    for (const domain of (await this.readAllDomainsUnlocked()).filter((d) => d.accountId === current.id)) {
+      try { assertPhpSettings(domain.php, { phpWorkers: plan.caps.phpWorkers, memoryMb: plan.resources.memoryMb }) }
+      catch { refuse('limits_below_php_settings', 'a domain PHP setting needs more workers or memory than these limits allow') }
+      if (domain.pathQuotaMb !== 'unlimited' && !limitLte(domain.pathQuotaMb, disk)) refuse('disk_below_path_quota', 'a domain path quota is larger than this disk limit')
+    }
+    const users = await listJsonFiles(join(this.accountDir(current.username), 'users'))
+    for (const file of users) {
+      const quota = (await readJsonIfExists<{ mailboxQuotaMb?: Limit }>(file))?.mailboxQuotaMb
+      if (quota !== undefined && quota !== 'unlimited' && !limitLte(quota, disk)) refuse('disk_below_mailbox_quota', 'a mailbox quota is larger than this disk limit')
+    }
+    if (current.ownerId !== null) await this.assertResellerHasRoom(current.ownerId, plan, { isNewAccount: false, exceptAccountId: current.id })
+    const { limits: _previous, ...rest } = current
+    return limits ? { ...rest, limits } : rest
+  }
+
+  /** Saves per-account limit overrides field by field (WHM Modify Account, Quota Modification, Limit Bandwidth Usage); null returns a field to its package value. */
+  setAccountLimits(id: Id, patch: AccountLimits, opts?: MutationOptions): Promise<Account> {
+    return this.withMutationLock(opts, async (lease) => {
+      const current = await this.lockStoredAccount(id)
+      const next = await this.nextAccountLimits(current, patch)
+      await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
+      return toPublicAccount(next)
+    })
+  }
+
+  /** Returns each listed account's custom monthly bandwidth limit to its package value (WHM Reset Account Bandwidth Limit). */
+  resetBandwidthLimits(accountIds: readonly Id[], opts?: MutationOptions): Promise<Account[]> {
+    return this.withMutationLock(opts, async (lease) => {
+      const written: Account[] = []
+      for (const aid of uniqueAccountIds(accountIds)) {
+        const current = await this.lockStoredAccount(aid)
+        if (current.limits?.resources?.bandwidthMbMonth === undefined) fail('CONFLICT', 'the account has no custom bandwidth limit', { reason: 'bandwidth_limit_not_custom', stateChanged: false })
+        const next = await this.nextAccountLimits(current, { resources: { bandwidthMbMonth: null } })
+        await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
+        written.push(toPublicAccount(next))
+      }
+      return written
+    })
+  }
+
+  /** Lifts the bandwidth limit of each listed limited account through UTC `day`; the agent does not set it again before the next day (WHM Unsuspend Bandwidth Exceeders). */
+  relieveBandwidthLimits(accountIds: readonly Id[], day: string, opts?: MutationOptions): Promise<Account[]> {
+    return this.withMutationLock(opts, async (lease) => {
+      const through = assertUtcDay(day, 'relief day'), written: Account[] = []
+      for (const aid of uniqueAccountIds(accountIds)) {
+        const current = await this.lockStoredAccount(aid)
+        if (current.bandwidthLimitedMonth === undefined) fail('CONFLICT', 'the account is not limited for bandwidth', { reason: 'bandwidth_not_limited', stateChanged: false })
+        const { bandwidthLimitedMonth: _lifted, ...rest } = current
+        const next: StoredAccount = { ...rest, bandwidthReliefDate: through }
+        await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
+        written.push(toPublicAccount(next))
+      }
+      return written
+    })
+  }
+
+  /** The account's raw access log archive settings (cPanel Raw Access); null returns the account to the server defaults. */
+  setAccountLogSettings(id: Id, settings: AccountLogSettings | null, opts?: MutationOptions): Promise<Account> {
+    return this.withMutationLock(opts, async (lease) => {
+      const current = await this.lockStoredAccount(id)
+      const { logs: _previous, ...rest } = current
+      const next: StoredAccount = settings === null ? rest : { ...rest, logs: validateAccountLogSettings(settings) }
+      await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
+      return toPublicAccount(next)
+    })
+  }
+
   markTerminating(id: Id, opts?: MutationOptions): Promise<Account> {
     return this.withMutationLock(opts, async (lease) => {
       const aid = assertId(id, 'id')
@@ -1475,12 +1702,22 @@ export class StateStore {
       if (current.status !== 'terminating') {
         fail('PRECONDITION_FAILED', 'only a terminating account can be deleted', { id, status: current.status })
       }
-      const pool = await this.readIpPoolFile()
-      if ([current.ipv4, ...(current.ipv6 ? [current.ipv6] : []), ...(current.extraIps ?? [])]
-        .some(address => pool.find(entry => entry.address === canonicalIp(address).address)?.role !== 'shared')) {
-        fail('PRECONDITION_FAILED', 'dedicated IP release requires verified target-bound deprovisioning', { reason: 'ip_release_unverified', stateChanged: false })
+      // A dedicated address the account or its domains used is held until the agent verifies a generation without the
+      // account's sites. An address the pool no longer lists cannot be held, so the deletion is refused.
+      const [pool, domains, mail] = await Promise.all([this.readIpPoolFile(), this.readAllDomainsUnlocked(), this.readMailIpConfigFile()])
+      const own = domains.filter(domain => domain.accountId === current.id)
+      const used = new Set([current.ipv4, current.ipv6, ...(current.extraIps ?? []), ...own.flatMap(domain => [domain.ipv4, domain.ipv6])]
+        .filter((value): value is string => value != null).map(value => canonicalIp(value).address))
+      const since = new Date().toISOString()
+      const nextPool = pool.map(entry => used.has(entry.address) && entry.role !== 'shared' ? { ...entry, releasing: { accountId: current.id, since } } : entry)
+      if ([...used].some(address => !pool.some(entry => entry.address === address))) {
+        fail('PRECONDITION_FAILED', 'an address of the account is missing from the IP pool, so its release cannot be verified', { reason: 'ip_release_unverified', stateChanged: false })
       }
-      for (const domain of (await this.readAllDomainsUnlocked()).filter(domain => domain.accountId === current.id)) this.assertDomainIpRelease(domain, current, pool, false)
+      if (JSON.stringify(nextPool) !== JSON.stringify(pool)) await this.writeStateJson(lease, this.path('ip-pool.json'), validateServerIpPool(nextPool))
+      const names = new Set(own.map(domain => domain.name))
+      if (mail?.domainOverrides.some(override => names.has(override.domainName))) {
+        await this.writeStateJson(lease, this.path('mail-ips.json'), validateMailIpConfig({ ...mail, domainOverrides: mail.domainOverrides.filter(override => !names.has(override.domainName)) }))
+      }
       // Remove account certificates and zones
       const certs = await this.readCertificateFiles()
       for (const c of certs.filter((x) => x.accountId === current.id)) {
@@ -1504,7 +1741,7 @@ export class StateStore {
       this.assertPlanUsable(plan, account.ownerId)
       const pool = await this.readIpPoolFile()
       if (!plan.dedicatedIp && pool.some(entry => entry.role === 'dedicated' && [account.ipv4, account.ipv6, ...(account.extraIps ?? [])].some(value => value != null && canonicalIp(value).address === entry.address))) {
-        fail('PRECONDITION_FAILED', 'plan change requires a verified dedicated IP transition', { reason: 'ip_transition_unverified', stateChanged: false })
+        fail('PRECONDITION_FAILED', "move the account to a shared address with Change a Site's IP Address before taking a package without a dedicated IP", { reason: 'dedicated_ip_change_required', stateChanged: false })
       }
       await this.assertAccountIpAssignments([account], { plan })
       const allDomains = (await this.readAllDomainsUnlocked()).filter((d) => d.accountId === account.id)
@@ -1514,7 +1751,9 @@ export class StateStore {
       if (account.ownerId !== null) {
         await this.assertResellerHasRoom(account.ownerId, plan, { isNewAccount: false, exceptAccountId: account.id })
       }
-      const next: StoredAccount = { ...account, planId: plan.id }
+      // A new package replaces the account's own limit overrides (WHM change package).
+      const { limits: _overrides, ...kept } = account
+      const next: StoredAccount = { ...kept, planId: plan.id }
       await this.writeStateJson(lease, join(this.accountDir(account.username), 'account.json'), next)
       return toPublicAccount(next)
     })
@@ -1525,7 +1764,7 @@ export class StateStore {
       const account = await this.lockStoredAccount(id)
       const nextOwner = assertIdOrNull(ownerId, 'ownerId')
       if (nextOwner === account.ownerId) return toPublicAccount(account)
-      const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+      const plan = effectivePlan(mustExist(await this.getPlan(account.planId), 'plan', account.planId), account)
       this.assertPlanUsable(plan, nextOwner)
       const [pool, accounts, domains, mailIpConfig, resellers] = await Promise.all([this.readIpPoolFile(), this.readAllAccountsUnlocked(), this.readAllDomainsUnlocked(), this.readMailIpConfigFile(), this.readResellerFiles()])
       resolveAccountIpAssignment(account, { accountId: account.id, ownerId: nextOwner, planDedicatedIp: plan.dedicatedIp, pool, allAccounts: accounts, domains, mailIpConfig,
@@ -1541,23 +1780,16 @@ export class StateStore {
 
   updateAccount(
     id: Id,
-    patch: { contactEmail?: string; ipv4?: string; ipv6?: string | null; extraIps?: string[]; shell?: ShellAccess },
+    patch: { contactEmail?: string; shell?: ShellAccess },
     opts?: MutationOptions,
   ): Promise<Account> {
     return this.withMutationLock(opts, async (lease) => {
       const aid = assertId(id, 'id')
       const current = mustExist(await this.findStoredAccountById(aid), 'account', id)
-      if ((patch.ipv4 !== undefined && canonicalIp(patch.ipv4).address !== current.ipv4)
-        || (patch.ipv6 !== undefined && (patch.ipv6 === null ? null : canonicalIp(patch.ipv6).address) !== (current.ipv6 ?? null))
-        || (patch.extraIps !== undefined && JSON.stringify(validateIpList(patch.extraIps).sort()) !== JSON.stringify([...(current.extraIps ?? [])].sort()))) {
-        fail('PRECONDITION_FAILED', 'IP changes require a verified reserve/apply/release transition', { reason: 'ip_transition_unverified', stateChanged: false })
-      }
+      if (Object.keys(patch).some(key => key !== 'contactEmail' && key !== 'shell')) fail('VALIDATION', "account addresses change through Change a Site's IP Address", { stateChanged: false })
       const next: StoredAccount = {
         ...current,
         ...(patch.contactEmail !== undefined && { contactEmail: assertEmail(patch.contactEmail, 'contactEmail') }),
-        ...(patch.ipv4 !== undefined && { ipv4: assertIpv4(patch.ipv4) }),
-        ...(patch.ipv6 !== undefined && { ipv6: patch.ipv6 === null ? null : assertIpv6(patch.ipv6, 'ipv6') }),
-        ...(patch.extraIps !== undefined && { extraIps: validateIpList(patch.extraIps, 'extraIps') }),
         ...(patch.shell !== undefined && { shell: oneOf(patch.shell, SHELLS, 'shell') }),
       }
       await this.writeStateJson(lease, join(this.accountDir(current.username), 'account.json'), next)
@@ -1641,7 +1873,7 @@ export class StateStore {
 
   private async domainWorkspaceUnlocked(accountId: Id): Promise<DomainWorkspaceRead> {
     const account = mustExist(await this.findStoredAccountById(accountId), 'account', accountId)
-    const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+    const plan = effectivePlan(mustExist(await this.getPlan(account.planId), 'plan', account.planId), account)
     const features = mustExist(await this.getFeatureList(plan.featureListId), 'feature list', plan.featureListId)
     const allDomains = await this.readAllDomainsUnlocked()
     assertAccountDomainGraph(allDomains, account.id)
@@ -1804,7 +2036,7 @@ export class StateStore {
 
       const account = await this.lockStoredAccount(input.accountId)
       await this.authorizeDomainMutation(opts, account, null)
-      const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+      const plan = effectivePlan(mustExist(await this.getPlan(account.planId), 'plan', account.planId), account)
       const counts = await this.countDomainsByKind(account.id)
       assertCapAvailable(plan, { [capKey]: counts[kind] }, capKey)
 
@@ -1887,7 +2119,7 @@ export class StateStore {
       const current = mustExist(allDomains.find((d) => d.id === did), 'domain', id)
       const account = await this.lockStoredAccount(current.accountId)
       await this.authorizeDomainMutation(opts, account, current)
-      const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+      const plan = effectivePlan(mustExist(await this.getPlan(account.planId), 'plan', account.planId), account)
       if (patch.docRoot !== undefined && current.kind === 'alias') {
         fail('VALIDATION', 'an alias uses the document root of the domain it points at')
       }
@@ -1926,6 +2158,23 @@ export class StateStore {
           await this.writeStateJson(lease, join(this.accountDir(account.username), 'domains', `${alias.name}.json`), updatedAlias)
         }
       }
+      await applyProjection?.()
+      return next
+    })
+  }
+
+  /** One state write, so one reconcile, for any number of the account's sites; an alias follows its parent. */
+  setDomainsForceHttps(accountId: Id, ids: readonly Id[], enabled: boolean, opts?: DomainMutationOptions): Promise<Domain[]> {
+    return this.withDomainMutation(opts, async (lease, journal) => {
+      const aid = assertId(accountId, 'accountId')
+      const allDomains = await this.readAllDomainsUnlocked()
+      const account = await this.lockStoredAccount(aid)
+      const current = ids.map(id => mustExist(allDomains.find(d => d.id === assertId(id, 'id') && d.accountId === aid), 'domain', id))
+      if (current.some(d => d.kind === 'alias')) fail('VALIDATION', 'an alias follows the domain it points at', { stateChanged: false })
+      await this.authorizeDomainMutation(opts, account, current[0]!)
+      const next = current.map(({ forceHttps: _old, ...domain }): Domain => enabled ? { ...domain, forceHttps: true } : domain)
+      const applyProjection = await this.prepareDomainMutation(lease, journal, opts, account, current, next)
+      for (const domain of next) await this.writeStateJson(lease, join(this.accountDir(account.username), 'domains', `${domain.name}.json`), domain)
       await applyProjection?.()
       return next
     })
@@ -1988,7 +2237,7 @@ export class StateStore {
           return [d.id, mv ? { ...d, name: mv.to } : d]
         }),
       )
-      const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+      const plan = effectivePlan(mustExist(await this.getPlan(account.planId), 'plan', account.planId), account)
       const userFiles = await listJsonFiles(join(this.accountDir(account.username), 'users'))
       for (const uf of userFiles) {
         const u = validateServiceUserFile(await readJsonIfExists(uf), { account, plan, domainsById })
@@ -2059,7 +2308,7 @@ export class StateStore {
     const domainsById = new Map(domains.map((d) => [d.id, d]))
     const out: StoredServiceUser[] = []
     for (const account of accounts) {
-      const plan = mustExist(plansById.get(account.planId), 'plan', account.planId)
+      const plan = effectivePlan(mustExist(plansById.get(account.planId), 'plan', account.planId), account)
       const files = await listJsonFiles(join(this.accountDir(account.username), 'users'))
       for (const f of files) {
         out.push(validateServiceUserFile(await readJsonIfExists(f), { account, plan, domainsById }))
@@ -2092,19 +2341,21 @@ export class StateStore {
       const passwordHash = assertServiceHash(input.passwordHash)
       const ftpDir = assertRelPath(input.ftpDir, 'ftpDir')
       const account = await this.lockStoredAccount(input.accountId)
-      const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+      const plan = effectivePlan(mustExist(await this.getPlan(account.planId), 'plan', account.planId), account)
       const allDomains = (await this.readAllDomainsUnlocked()).filter((d) => d.accountId === account.id)
       const domain = allDomains.find((d) => d.name.toLowerCase() === domainName)
       if (!domain) return fail('VALIDATION', 'login domain is not a domain of this account', { domain: domainName })
 
-      const existing = (await this.readAllServiceUsersUnlocked()).filter((u) => u.accountId === account.id)
+      const allUsers = await this.readAllServiceUsersUnlocked()
+      const existing = allUsers.filter((u) => u.accountId === account.id)
       if (existing.some((u) => u.domainId === domain.id && u.localPart === local)) {
         fail('CONFLICT', `service user "${local}@${domain.name}" already exists`, { login: `${local}@${domain.name}` })
       }
       const domainsById = new Map(allDomains.map((d) => [d.id, d]))
       const stored = validateServiceUserFile(
         {
-          id: randomUUID(),
+          // A transfer keeps the id: the mailbox's calendars arrive in the home under it.
+          id: input.id && !allUsers.some((u) => u.id === input.id) ? input.id : randomUUID(),
           accountId: account.id,
           domainId: domain.id,
           localPart: local,
@@ -2113,6 +2364,7 @@ export class StateStore {
           services: input.services,
           mailboxQuotaMb: input.mailboxQuotaMb,
           ftpDir,
+          webdiskReadOnly: input.webdiskReadOnly,
         },
         { account, plan, domainsById },
       )
@@ -2162,8 +2414,9 @@ export class StateStore {
       const rawAcc = await readJsonIfExists<unknown>(join(this.accountDir(username), 'account.json'))
       if (rawAcc === null) return []
       const account = validateAccountFile(rawAcc)
-      const plan = await this.getPlan(account.planId)
-      if (!plan) return []
+      const stored = await this.getPlan(account.planId)
+      if (!stored) return []
+      const plan = effectivePlan(stored, account)
       const server = await this.readServerFile()
       const reservedPorts = new Set<number>(server
         ? [server.settings.panelPort, server.settings.sshPort, server.settings.backendPort, server.settings.backendTlsPort]
@@ -2192,7 +2445,7 @@ export class StateStore {
       const allUsers = await this.readAllServiceUsersUnlocked()
       const current = mustExist(allUsers.find((u) => u.id === uid), 'service user', id)
       const account = await this.lockStoredAccount(current.accountId)
-      const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+      const plan = effectivePlan(mustExist(await this.getPlan(account.planId), 'plan', account.planId), account)
       const allDomains = (await this.readAllDomainsUnlocked()).filter((d) => d.accountId === account.id)
       const domainsById = new Map(allDomains.map((d) => [d.id, d]))
       const next = validateServiceUserFile(
@@ -2201,6 +2454,7 @@ export class StateStore {
           ...(patch.services !== undefined && { services: patch.services }),
           ...(patch.mailboxQuotaMb !== undefined && { mailboxQuotaMb: patch.mailboxQuotaMb }),
           ...(patch.ftpDir !== undefined && { ftpDir: patch.ftpDir }),
+          ...(patch.webdiskReadOnly !== undefined && { webdiskReadOnly: patch.webdiskReadOnly }),
           ...(patch.passwordHash !== undefined && { passwordHash: patch.passwordHash }),
         },
         { account, plan, domainsById },
@@ -2273,7 +2527,7 @@ export class StateStore {
       const account = await this.lockStoredAccount(input.accountId)
       await opts?.authorize?.(toPublicAccount(account))
       const name = assertDbNameOwned(account.username, input.name)
-      const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+      const plan = effectivePlan(mustExist(await this.getPlan(account.planId), 'plan', account.planId), account)
       const allDbs = await this.readAllDatabasesUnlocked()
       if (allDbs.some((x) => x.db.name === name)) {
         fail('CONFLICT', `database "${name}" already exists`, { name })
@@ -2483,7 +2737,7 @@ export class StateStore {
       }
       if (action === 'trash' ? entry.db.trashedAt !== null : entry.db.trashedAt === null) return entry.db
       if (action === 'restore') {
-        const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+        const plan = effectivePlan(mustExist(await this.getPlan(account.planId), 'plan', account.planId), account)
         const liveCount = allDbs.filter(x => x.db.accountId === account.id && x.db.trashedAt === null).length
         assertCapAvailable(plan, { databases: liveCount + await this.livePostgresqlDatabases(account) }, 'databases')
       }
@@ -2514,6 +2768,22 @@ export class StateStore {
 
   restoreDatabase(id: Id, opts?: DatabaseMutationOptions): Promise<Database> {
     return this.changeDatabaseTrashState(id, 'restore', opts)
+  }
+
+  /** Moves the saved record to a new owned name. Grants follow, because they name the database by id. */
+  renameDatabase(id: Id, name: string, opts?: DatabaseMutationOptions): Promise<Database> {
+    return this.withDatabaseMutation(opts, async (lease) => {
+      const did = assertId(id, 'id')
+      const entry = mustExist((await this.readAllDatabasesUnlocked()).find((x) => x.db.id === did), 'database', id)
+      const account = await this.lockStoredAccount(entry.db.accountId)
+      await opts?.authorize?.(toPublicAccount(account))
+      const next = assertDbNameOwned(account.username, name)
+      if ((await this.readAllDatabasesUnlocked()).some((x) => x.db.name === next)) fail('CONFLICT', `database "${next}" already exists`, { name: next })
+      const renamed: Database = { ...entry.db, name: next }
+      await this.writeStateJson(lease, join(this.accountDir(account.username), 'databases', `${next}.json`), renamed)
+      await this.removeStatePath(lease, join(this.accountDir(account.username), 'databases', `${entry.db.name}.json`))
+      return renamed
+    })
   }
 
   async listTrashedDatabasesBefore(cutoff: Date): Promise<Database[]> {
@@ -2783,7 +3053,7 @@ export class StateStore {
       const database = validatePostgresqlDatabaseFile({ id: randomUUID(), accountId: account.id, engine: 'postgresql', name: input.name, owner: input.owner, trashedAt: null },
         account, new Set(users.map((user) => user.name)))
       if (databases.some((item) => item.name === database.name)) fail('CONFLICT', `PostgreSQL database "${database.name}" already exists`, { name: database.name, stateChanged: false })
-      const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+      const plan = effectivePlan(mustExist(await this.getPlan(account.planId), 'plan', account.planId), account)
       assertCapAvailable(plan, { databases: databases.filter((item) => item.trashedAt === null).length + await this.liveMariadbDatabases(account) }, 'databases')
       await this.commitPostgresqlFile(lease, journal, opts, this.postgresqlPath(account, 'databases', database.name), 'absent', database)
       return database
@@ -2800,7 +3070,7 @@ export class StateStore {
       }
       if (input.action === 'trash' ? database.trashedAt !== null : database.trashedAt === null) return database
       if (input.action === 'restore') {
-        const plan = mustExist(await this.getPlan(account.planId), 'plan', account.planId)
+        const plan = effectivePlan(mustExist(await this.getPlan(account.planId), 'plan', account.planId), account)
         assertCapAvailable(plan, { databases: databases.filter((item) => item.trashedAt === null).length + await this.liveMariadbDatabases(account) }, 'databases')
       }
       const next: Database = { ...database, trashedAt: input.action === 'trash' ? new Date().toISOString() : null }
@@ -2945,6 +3215,8 @@ export class StateStore {
   saveDnsZone(zone: DnsZoneState, opts?: DnsZoneMutationOptions): Promise<DnsZoneState> {
     return this.withMutationLock(opts, async (lease) => {
       const validated = validateDnsZoneFile(zone)
+      const cnames = new Set(validated.records.filter((r) => r.type === 'CNAME').map((r) => r.name.toLowerCase()))
+      if (validated.records.some((r) => r.type !== 'CNAME' && cnames.has(r.name.toLowerCase()))) fail('CONFLICT', 'a CNAME cannot share its name with another record', { stateChanged: false })
       await opts?.dnsGuard?.(await this.getDnsZone(validated.name))
       if (validated.accountId !== null) mustExist(await this.findStoredAccountById(validated.accountId), 'account', validated.accountId)
       await this.writeStateJson(lease, this.path('zones', `${validated.name}.json`), validated)
@@ -3111,9 +3383,15 @@ export class StateStore {
     return this.withMutationLock(opts, async (lease) => {
       if (typeof input !== 'object' || input === null) fail('VALIDATION', 'server IP entry must be an object')
       const current = await this.readIpPoolFile()
+      const previousEntry = input.id === undefined ? undefined : current.find(ip => ip.id === input.id?.toLowerCase())
+      // A release hold is the agent's record and the reservation has its own edit; saving an entry keeps both.
+      const { releasing: _hold, reserved: _reserved, publicAddress: _public, ...fields } = input as ServerIpEntry
       const entry = validateServerIpEntry({
-        ...input,
+        ...fields,
         id: input.id ?? randomUUID(),
+        ...(previousEntry?.reserved !== undefined && { reserved: previousEntry.reserved }),
+        ...(previousEntry?.releasing && { releasing: previousEntry.releasing }),
+        ...(previousEntry?.publicAddress && { publicAddress: previousEntry.publicAddress }),
       })
       const existingByAddr = current.find((e) => e.address === entry.address && e.id !== entry.id)
       if (existingByAddr) {
@@ -3137,9 +3415,310 @@ export class StateStore {
       const entry = current.find((e) => e.id === targetId)
       if (!entry) return false
       if (entry.isPrimary || await this.ipHasReferences(entry.address)) fail('CONFLICT', 'default or referenced IP cannot be removed')
+      if (entry.releasing) fail('CONFLICT', 'the address is held until its previous site has left it', { reason: 'ip_releasing', stateChanged: false })
       const next = current.filter((e) => e.id !== targetId)
       await this.writeStateJson(lease, this.path('ip-pool.json'), next)
       return true
+    })
+  }
+
+  /** Edits that never strand an assignment: the reservation, the reverse DNS name and the notes. */
+  updateServerIp(id: Id, patch: { reserved?: boolean; ptrHostname?: string | null; notes?: string; publicAddress?: string | null }, opts?: MutationOptions): Promise<ServerIpEntry> {
+    return this.withMutationLock(opts, async (lease) => {
+      if (typeof patch !== 'object' || patch === null || Object.keys(patch).length === 0 || Object.keys(patch).some(key => !['reserved', 'ptrHostname', 'notes', 'publicAddress'].includes(key))) {
+        fail('VALIDATION', 'an IP edit changes reserved, ptrHostname, notes or publicAddress', { stateChanged: false })
+      }
+      if (patch.reserved !== undefined && typeof patch.reserved !== 'boolean') fail('VALIDATION', 'reserved must be a boolean', { stateChanged: false })
+      if (patch.notes !== undefined && (typeof patch.notes !== 'string' || patch.notes.length > 255 || /[\r\n\0]/.test(patch.notes))) fail('VALIDATION', 'notes must be one line of at most 255 characters', { stateChanged: false })
+      const current = await this.readIpPoolFile()
+      const entry = mustExist(current.find(ip => ip.id === assertId(id, 'id')), 'IP pool entry', id)
+      const { reserved: _reserved, publicAddress: _public, ...rest } = entry
+      const reserved = patch.reserved ?? entry.reserved === true
+      const publicAddress = patch.publicAddress === undefined ? entry.publicAddress : patch.publicAddress
+      const next = validateServerIpEntry({ ...rest, ...(patch.ptrHostname !== undefined && { ptrHostname: patch.ptrHostname }), ...(patch.notes !== undefined && { notes: patch.notes }), ...(reserved && { reserved: true }), ...(publicAddress && { publicAddress }) })
+      await this.writeStateJson(lease, this.path('ip-pool.json'), validateServerIpPool(current.map(ip => ip.id === next.id ? next : ip)))
+      return next
+    })
+  }
+
+  /**
+   * Clears release holds the agent verified: the active generation no longer serves the address for the account that
+   * left it and that account's new addresses are bound. A hold that changed after it was evaluated stays.
+   */
+  clearIpReleasing(holds: readonly { id: Id; since: string }[], opts?: MutationOptions): Promise<string[]> {
+    return this.withMutationLock(opts, async (lease) => {
+      if (!Array.isArray(holds) || holds.length > 4096) fail('VALIDATION', 'release holds must be a list')
+      const current = await this.readIpPoolFile(), cleared: string[] = []
+      const next = current.map(entry => {
+        if (!entry.releasing || !holds.some(hold => hold.id === entry.id && hold.since === entry.releasing!.since)) return entry
+        cleared.push(entry.address)
+        const { releasing: _done, ...free } = entry
+        return free
+      })
+      if (cleared.length) await this.writeStateJson(lease, this.path('ip-pool.json'), next)
+      return cleared
+    })
+  }
+
+  /**
+   * Rebuild the IP Address Pool: hosting addresses the host reports on its interfaces that the pool lacks are added as
+   * free root-owned dedicated addresses. Existing entries, holds and the default addresses are not changed here.
+   */
+  rebuildIpPool(observed: readonly { address: string; prefixLength: number; interfaceName: string }[], opts?: MutationOptions): Promise<{ added: ServerIpEntry[] }> {
+    return this.withMutationLock(opts, async (lease) => {
+      if (!Array.isArray(observed) || observed.length > 4096) fail('VALIDATION', 'observed addresses must be a list')
+      const current = await this.readIpPoolFile(), known = new Set(current.map(entry => entry.address)), added: ServerIpEntry[] = []
+      for (const item of observed) {
+        let entry: ServerIpEntry
+        try {
+          entry = validateServerIpEntry({ id: randomUUID(), address: item.address, prefixLength: item.prefixLength, interfaceName: item.interfaceName, role: 'dedicated', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: false, notes: '' })
+          validateServerIpPool([entry])
+        } catch { continue } // link-local, loopback and other non-hosting addresses are not pool material
+        if (known.has(entry.address)) continue
+        known.add(entry.address)
+        added.push(entry)
+      }
+      if (added.length) await this.writeStateJson(lease, this.path('ip-pool.json'), validateServerIpPool([...current, ...added]))
+      return { added }
+    })
+  }
+
+  /**
+   * Change a Site's IP Address. One state change moves the account and the A/AAAA records, domain overrides and mail
+   * overrides of its old address. A dedicated address the account leaves is held until the agent verifies the new
+   * binding. Enabling IPv6 adds an AAAA record beside each A record of the account address.
+   */
+  changeAccountIp(id: Id, input: { ipv4?: string; ipv6?: string | null }, opts?: MutationOptions): Promise<{ account: Account; held: string[] }> {
+    return this.withMutationLock(opts, async (lease) => {
+      if (typeof input !== 'object' || input === null || Object.keys(input).length === 0 || Object.keys(input).some(key => key !== 'ipv4' && key !== 'ipv6')) {
+        fail('VALIDATION', 'an IP change sets ipv4 and/or ipv6', { stateChanged: false })
+      }
+      return this.applyAccountIpChange(lease, await this.lockStoredAccount(id), input, await this.readIpPoolFile())
+    })
+  }
+
+  private async applyAccountIpChange(lease: WriterLease, account: StoredAccount, input: { ipv4?: string; ipv6?: string | null }, pool: ServerIpEntry[]): Promise<{ account: Account; held: string[] }> {
+    const state = await this.readIpChangeState(pool)
+    const planned = await this.planAccountIpChange(state, account, input)
+    if (planned.writes.length) await this.journaledFileSet(lease, 'changeAccountIp', [], planned.writes.map(([file]) => file), async () => ({ writes: planned.writes, removes: [] }))
+    return { account: planned.account, held: planned.held }
+  }
+
+  private async readIpChangeState(pool: ServerIpEntry[]): Promise<IpChangeState> {
+    const [plans, accounts, domains, mail, resellers, zones] = await Promise.all([this.readPlanFiles(), this.readAllAccountsUnlocked(), this.readAllDomainsUnlocked(),
+      this.readMailIpConfigFile(), this.readResellerFiles(), this.readZoneFiles()])
+    return { plans, accounts, domains, mail, resellers, zones, pool }
+  }
+
+  /** Plans one account's move against `state` and updates `state` in place, so a batch sees its own earlier moves. */
+  private async planAccountIpChange(state: IpChangeState, account: StoredAccount, input: { ipv4?: string; ipv6?: string | null }): Promise<{ account: Account; held: string[]; writes: [string, unknown][] }> {
+    const { plans, accounts, domains, mail, resellers, zones, pool } = state
+    const plan = effectivePlan(mustExist(plans.find(p => p.id === account.planId), 'plan', account.planId), account)
+    const reseller = account.ownerId === null ? null : resellers.find(r => r.id === account.ownerId) ?? null
+    const ipv6 = input.ipv6 !== undefined ? input.ipv6 : account.ipv6
+    const next = resolveAccountIpAssignment({ ipv4: input.ipv4 ?? account.ipv4, ...(ipv6 !== undefined && { ipv6 }), ...(account.extraIps !== undefined && { extraIps: account.extraIps }) },
+      { accountId: account.id, ownerId: account.ownerId, planDedicatedIp: plan.dedicatedIp, reseller, pool, allAccounts: accounts, domains, mailIpConfig: mail })
+    const oldV6 = account.ipv6 ?? null, newV6 = next.ipv6 === undefined ? oldV6 : next.ipv6
+    const map = new Map<string, string | null>()
+    if (next.ipv4 !== account.ipv4) map.set(account.ipv4, next.ipv4)
+    if (oldV6 !== null && oldV6 !== newV6) map.set(oldV6, newV6)
+    if (map.size === 0 && (oldV6 !== null || newV6 === null)) return { account: toPublicAccount(account), held: [], writes: [] }
+    const nextAccount: StoredAccount = { ...account, ipv4: next.ipv4, ...(next.ipv6 !== undefined && { ipv6: next.ipv6 }) }
+    const own = domains.filter(d => d.accountId === account.id)
+    const writes = await this.ipRemapWrites(map, { zones: zones.filter(z => z.accountId === account.id), accounts: [{ account: nextAccount, plan, domains: own }],
+      mail, mailDomains: new Set(own.map(d => d.name)), addAaaa: oldV6 === null && newV6 !== null ? { ipv4: nextAccount.ipv4, ipv6: newV6 } : null })
+    const before = new Set([account.ipv4, ...(account.ipv6 ? [account.ipv6] : []), ...(account.extraIps ?? [])])
+    const after = new Set([nextAccount.ipv4, ...(nextAccount.ipv6 ? [nextAccount.ipv6] : []), ...(nextAccount.extraIps ?? [])])
+    const since = new Date().toISOString(), held: string[] = []
+    const nextPool = validateServerIpPool(pool.map(entry => {
+      if (before.has(entry.address) && !after.has(entry.address) && entry.role !== 'shared') { held.push(entry.address); return { ...entry, releasing: { accountId: account.id, since } } }
+      if (after.has(entry.address) && entry.releasing?.accountId === account.id) { const { releasing: _back, ...rest } = entry; return rest }
+      return entry
+    }))
+    writes.push([join(this.accountDir(account.username), 'account.json'), nextAccount], [this.path('ip-pool.json'), nextPool])
+    // The batch's later moves see this one: the account, its pool holds, zones, domain overrides and mail overrides.
+    state.accounts = accounts.map(a => a.id === account.id ? nextAccount : a)
+    state.pool = nextPool
+    for (const [, value] of writes) {
+      const v = value as Record<string, unknown>
+      if (Array.isArray(v.records)) state.zones = state.zones.map(z => z.name === v.name ? v as unknown as DnsZoneState : z)
+      else if (typeof v.docRoot === 'string') state.domains = state.domains.map(d => d.id === v.id ? v as unknown as Domain : d)
+      else if (Array.isArray(v.domainOverrides)) state.mail = v as unknown as MailIpConfig
+    }
+    return { account: toPublicAccount(nextAccount), held, writes }
+  }
+
+  /**
+   * Change Multiple Sites' IP Addresses: every listed account moves in one journaled state change with the same holds
+   * as a single move. Any refusal refuses the whole batch and names the account it stopped at.
+   */
+  changeAccountIps(changes: readonly { accountId: Id; ipv4?: string; ipv6?: string | null }[], opts?: MutationOptions): Promise<{ accountId: Id; account: Account; held: string[] }[]> {
+    return this.withMutationLock(opts, async (lease) => {
+      if (!Array.isArray(changes) || changes.length === 0 || changes.length > 256) fail('VALIDATION', 'list 1 to 256 account IP changes', { stateChanged: false })
+      const ids = changes.map(change => typeof change === 'object' && change !== null && Object.keys(change).every(key => ['accountId', 'ipv4', 'ipv6'].includes(key)) && (change.ipv4 !== undefined || change.ipv6 !== undefined)
+        ? assertId(change.accountId, 'accountId') : fail('VALIDATION', 'each change names an account and its ipv4 and/or ipv6', { stateChanged: false }))
+      if (new Set(ids).size !== ids.length) fail('VALIDATION', 'an account appears once per batch', { stateChanged: false })
+      const state = await this.readIpChangeState(await this.readIpPoolFile())
+      const results: { accountId: Id; account: Account; held: string[] }[] = [], files = new Map<string, unknown>()
+      for (const [index, change] of changes.entries()) {
+        const account = await this.lockStoredAccount(ids[index]!)
+        try {
+          const planned = await this.planAccountIpChange(state, account, { ...(change.ipv4 !== undefined && { ipv4: change.ipv4 }), ...(change.ipv6 !== undefined && { ipv6: change.ipv6 }) })
+          for (const [file, value] of planned.writes) files.set(file, value)
+          results.push({ accountId: account.id, account: planned.account, held: planned.held })
+        } catch (error) {
+          if (isXpanelError(error)) fail(error.code, error.message, { ...error.detail, accountId: account.id, username: account.username, stateChanged: false })
+          throw error
+        }
+      }
+      const writes = [...files]
+      if (writes.length) await this.journaledFileSet(lease, 'changeAccountIps', [], writes.map(([file]) => file), async () => ({ writes, removes: [] }))
+      return results
+    })
+  }
+
+  /**
+   * IP Migration Wizard: every reference to each old address (accounts, domain and mail overrides, all zones' A/AAAA
+   * records, reseller delegations and shared IPs) moves to its new address, which takes over the old entry's role,
+   * owner and default flag. An old dedicated address an account used is held until the agent verifies the new binding.
+   */
+  migrateIps(mappings: readonly { from: string; to: string }[], opts?: MutationOptions): Promise<{ moved: { from: string; to: string }[]; held: string[] }> {
+    return this.withMutationLock(opts, async (lease) => {
+      if (!Array.isArray(mappings) || mappings.length === 0 || mappings.length > 256) fail('VALIDATION', 'an IP migration lists 1 to 256 address pairs', { stateChanged: false })
+      const [plans, pool, accounts, domains, mail, resellers, zones] = await Promise.all([this.readPlanFiles(), this.readIpPoolFile(), this.readAllAccountsUnlocked(), this.readAllDomainsUnlocked(),
+        this.readMailIpConfigFile(), this.readResellerFiles(), this.readZoneFiles()])
+      const pairs = mappings.map(pair => {
+        if (typeof pair !== 'object' || pair === null || Object.keys(pair).some(key => key !== 'from' && key !== 'to')) return fail('VALIDATION', 'each migration pair is { from, to }', { stateChanged: false })
+        const from = canonicalIp(pair.from, 'from'), to = canonicalIp(pair.to, 'to')
+        if (from.version !== to.version || from.address === to.address) fail('VALIDATION', 'each pair moves an address to a different address of the same family', { stateChanged: false })
+        const source = pool.find(entry => entry.address === from.address) ?? fail('NOT_FOUND', `IP ${from.address} is not in the pool`, { stateChanged: false })
+        const target = pool.find(entry => entry.address === to.address) ?? fail('NOT_FOUND', `IP ${to.address} is not in the pool`, { stateChanged: false })
+        if (target.reserved || target.releasing) fail('CONFLICT', `IP ${to.address} is reserved or held`, { reason: 'ip_unavailable', stateChanged: false })
+        return { source, target }
+      })
+      const sources = new Set(pairs.map(p => p.source.address)), targets = new Set(pairs.map(p => p.target.address))
+      if (sources.size !== pairs.length || targets.size !== pairs.length || [...targets].some(address => sources.has(address))) fail('VALIDATION', 'each address appears once and a new address is not also moved', { stateChanged: false })
+      for (const { target } of pairs) if (await this.ipHasReferences(target.address)) fail('CONFLICT', `IP ${target.address} is already in use`, { reason: 'ip_in_use', stateChanged: false })
+      const map = new Map<string, string | null>(pairs.map(p => [p.source.address, p.target.address]))
+      const swap = (raw: string | null | undefined): string | null | undefined => raw == null ? raw : map.get(canonicalIp(raw).address) ?? raw
+      const since = new Date().toISOString(), held: string[] = []
+      const nextPool = pool.map(entry => {
+        const pair = pairs.find(p => p.target.id === entry.id)
+        if (pair) return { ...entry, role: pair.source.role, ownerKind: pair.source.ownerKind, ownerId: pair.source.ownerId, isPrimary: pair.source.isPrimary }
+        if (!pairs.some(p => p.source.id === entry.id)) return entry
+        const user = entry.role === 'dedicated' ? accounts.find(a => [a.ipv4, a.ipv6, ...(a.extraIps ?? [])].some(raw => raw != null && canonicalIp(raw).address === entry.address)) : undefined
+        if (user) held.push(entry.address)
+        return { ...entry, ownerKind: 'root' as const, ownerId: null, isPrimary: false, ...(user && { releasing: { accountId: user.id, since } }) }
+      })
+      const nextAccounts = accounts.map(a => ({ ...a, ipv4: swap(a.ipv4)!, ...(a.ipv6 !== undefined && { ipv6: swap(a.ipv6) ?? null }), ...(a.extraIps !== undefined && { extraIps: a.extraIps.map(raw => swap(raw)!) }) }))
+      const planOf = (account: StoredAccount): Plan => effectivePlan(mustExist(plans.find(p => p.id === account.planId), 'plan', account.planId), account)
+      const writes = await this.ipRemapWrites(map, { zones, accounts: nextAccounts.map(account => ({ account, plan: planOf(account), domains: domains.filter(d => d.accountId === account.id) })), mail, mailDomains: null, addAaaa: null })
+      for (const [index, account] of nextAccounts.entries()) {
+        if (JSON.stringify(account) !== JSON.stringify(accounts[index])) writes.push([join(this.accountDir(account.username), 'account.json'), account])
+      }
+      const nextResellers = resellers.map(r => validateResellerFile({ ...r, delegatedIps: r.delegatedIps.map(raw => swap(raw)!), ...(r.sharedIp !== undefined && { sharedIp: swap(r.sharedIp) ?? null }) }))
+      for (const [index, reseller] of nextResellers.entries()) {
+        if (JSON.stringify(reseller) !== JSON.stringify(resellers[index])) writes.push([this.path('resellers', `${reseller.id}.json`), reseller])
+      }
+      writes.push([this.path('ip-pool.json'), validateServerIpPool(nextPool)])
+      // The moved references must satisfy the policy a new assignment would.
+      const nextDomains = domains.map(d => ({ ...d, ipv4: swap(d.ipv4) ?? null, ipv6: swap(d.ipv6) ?? null }))
+      const nextMail = (writes.find(([file]) => file === this.path('mail-ips.json'))?.[1] as MailIpConfig | undefined) ?? mail
+      for (const account of nextAccounts) {
+        resolveAccountIpAssignment(account, { accountId: account.id, ownerId: account.ownerId, planDedicatedIp: planOf(account).dedicatedIp,
+          reseller: account.ownerId === null ? null : nextResellers.find(r => r.id === account.ownerId) ?? null, pool: nextPool, allAccounts: nextAccounts, domains: nextDomains, mailIpConfig: nextMail })
+      }
+      await this.journaledFileSet(lease, 'migrateIps', [], writes.map(([file]) => file), async () => ({ writes, removes: [] }))
+      return { moved: pairs.map(p => ({ from: p.source.address, to: p.target.address })), held }
+    })
+  }
+
+  /** Zone, domain and mail file rewrites of one address map; unchanged files are not written. */
+  private async ipRemapWrites(map: ReadonlyMap<string, string | null>, input: {
+    zones: readonly DnsZoneState[]
+    accounts: readonly { account: StoredAccount; plan: Plan; domains: readonly Domain[] }[]
+    mail: MailIpConfig | null
+    /** limits mail override rewrites to these domains; null also moves the server-wide mail defaults */
+    mailDomains: ReadonlySet<string> | null
+    /** a newly enabled IPv6 address: each A record of the account IPv4 gains an AAAA record */
+    addAaaa: { ipv4: string; ipv6: string } | null
+  }): Promise<[string, unknown][]> {
+    const swap = (raw: string | null | undefined): string | null | undefined => raw == null ? raw : map.has(canonicalIp(raw).address) ? map.get(canonicalIp(raw).address)! : raw
+    const writes: [string, unknown][] = []
+    for (const zone of input.zones) {
+      const records: DnsRecord[] = []
+      for (const record of zone.records) {
+        if (record.type !== 'A' && record.type !== 'AAAA') { records.push(record); continue }
+        const content = swap(record.content)
+        if (content != null) records.push({ ...record, content })
+      }
+      const enable = input.addAaaa
+      if (enable) {
+        for (const record of records.filter(r => r.type === 'A' && r.content === enable.ipv4)) {
+          if (!records.some(r => r.type === 'AAAA' && r.name === record.name)) records.push({ ...record, id: randomUUID(), type: 'AAAA', content: enable.ipv6 })
+        }
+      }
+      if (JSON.stringify(records) !== JSON.stringify(zone.records)) writes.push([this.path('zones', `${zone.name}.json`), validateDnsZoneFile({ ...zone, records })])
+    }
+    if (input.accounts.some(item => item.domains.length)) {
+      const server = await this.readServerFile()
+      const reserved = new Set<number>(server ? [server.settings.panelPort, server.settings.sshPort, server.settings.backendPort, server.settings.backendTlsPort] : [])
+      for (const { account, plan, domains } of input.accounts) {
+        for (const domain of domains) {
+          const next = { ...domain, ipv4: swap(domain.ipv4) ?? null, ipv6: swap(domain.ipv6) ?? null }
+          if (next.ipv4 === domain.ipv4 && next.ipv6 === domain.ipv6) continue
+          writes.push([join(this.accountDir(account.username), 'domains', `${domain.name}.json`), validateDomainFile(next, { account, plan, reservedLoopbackPorts: reserved })])
+        }
+      }
+    }
+    if (input.mail) {
+      const scope = input.mailDomains
+      const overrides = input.mail.domainOverrides.flatMap(override => {
+        if (scope && !scope.has(override.domainName)) return [override]
+        const next = { ...override, ipv4: swap(override.ipv4) ?? null, ipv6: swap(override.ipv6) ?? null }
+        return next.ipv4 || next.ipv6 || next.heloHostname ? [next] : []
+      })
+      const next = { ...input.mail, ...(scope === null && { defaultIpv4: swap(input.mail.defaultIpv4) ?? null, defaultIpv6: swap(input.mail.defaultIpv6) ?? null }), domainOverrides: overrides }
+      if (JSON.stringify(next) !== JSON.stringify(input.mail)) writes.push([this.path('mail-ips.json'), validateMailIpConfig(next)])
+    }
+    return writes
+  }
+
+  listIpv6Ranges(): Promise<Ipv6Range[]> {
+    return this.readIpv6RangesFile()
+  }
+
+  /** IPv6 Ranges: the whole list is saved at once; each owner must exist. */
+  saveIpv6Ranges(input: unknown, opts?: MutationOptions): Promise<Ipv6Range[]> {
+    return this.withMutationLock(opts, async (lease) => {
+      const ranges = validateIpv6Ranges(input)
+      const [accounts, resellers] = await Promise.all([this.readAllAccountsUnlocked(), this.readResellerFiles()])
+      for (const range of ranges) {
+        if (range.ownerKind === 'reseller' && !resellers.some(r => r.id === range.ownerId)) fail('NOT_FOUND', 'reseller not found', { ownerId: range.ownerId, stateChanged: false })
+        if (range.ownerKind === 'account' && !accounts.some(a => a.id === range.ownerId)) fail('NOT_FOUND', 'account not found', { ownerId: range.ownerId, stateChanged: false })
+      }
+      if (ranges.length) await this.writeStateJson(lease, this.path('ip-ranges.json'), ranges)
+      else await this.removeStatePath(lease, this.path('ip-ranges.json'))
+      return ranges
+    })
+  }
+
+  /**
+   * Assign IPv6 to an account from a range: the next unused address becomes an account-owned dedicated pool entry on the
+   * interface of the default address and the account's IPv6, with AAAA records beside its A records.
+   */
+  assignAccountIpv6FromRange(accountId: Id, rangeId: Id, opts?: MutationOptions): Promise<{ account: Account; held: string[]; ip: ServerIpEntry }> {
+    return this.withMutationLock(opts, async (lease) => {
+      const account = await this.lockStoredAccount(accountId)
+      const [ranges, pool, accounts] = await Promise.all([this.readIpv6RangesFile(), this.readIpPoolFile(), this.readAllAccountsUnlocked()])
+      const range = mustExist(ranges.find(r => r.id === assertId(rangeId, 'rangeId')), 'IPv6 range', rangeId)
+      if (range.ownerKind === 'reseller' ? range.ownerId !== account.ownerId : range.ownerKind === 'account' && range.ownerId !== account.id) fail('FORBIDDEN', 'the IPv6 range belongs to another owner', { stateChanged: false })
+      const base = pool.find(entry => entry.isPrimary && entry.version === 6) ?? pool.find(entry => entry.isPrimary && entry.version === 4)
+      if (!base) return fail('PRECONDITION_FAILED', 'no default address names the interface for the IPv6 range', { reason: 'ip_interface_unknown', stateChanged: false })
+      const used = new Set([...pool.map(entry => entry.address), ...accounts.flatMap(a => [a.ipv6, ...(a.extraIps ?? [])].filter((raw): raw is string => raw != null).map(raw => canonicalIp(raw).address))])
+      const address = nextRangeAddress(range, used) ?? fail('PRECONDITION_FAILED', 'the IPv6 range has no free address', { reason: 'ipv6_range_full', stateChanged: false })
+      const ip = validateServerIpEntry({ id: randomUUID(), address, prefixLength: 128, interfaceName: base.interfaceName, role: 'dedicated', ownerKind: 'account', ownerId: account.id, ptrHostname: null, isPrimary: false, notes: `IPv6 range ${range.cidr}` })
+      return { ...await this.applyAccountIpChange(lease, account, { ipv6: ip.address }, [...pool, ip]), ip }
     })
   }
 
@@ -3244,7 +3823,7 @@ export class StateStore {
     for (const r of state.rules) {
       if (r.list !== null && !names.has(r.list)) fail('VALIDATION', `prefix list "${r.list}" does not exist`, { list: r.list, ruleId: r.id })
     }
-    if (guard.lockout === null) return
+    if (guard.lockout === null || !state.enabled) return
     const prefixLists = Object.fromEntries(state.prefixLists.map((l) => [l.name, l.entries]))
     assertNoSelfLockout(state.rules, { ...guard.lockout, prefixLists })
   }
@@ -3262,7 +3841,7 @@ export class StateStore {
       }
       const { next, result } = await fn(current, g)
       if (result !== false) {
-        const written: FirewallState = { rules: next.rules, prefixLists: next.prefixLists }
+        const written: FirewallState = { rules: next.rules, prefixLists: next.prefixLists, enabled: next.enabled, blockPing: next.blockPing }
         if (opts?.confirmation) {
           // an unconfirmed earlier change keeps its baseline: a revert always lands on confirmed rules
           const baseline = (await this.readFirewallPendingFile())?.previous ?? current
@@ -3376,14 +3955,17 @@ export class StateStore {
     )
   }
 
-  replaceFirewall(nextInput: { rules: unknown; prefixLists: unknown }, guard: FirewallGuard, opts?: FirewallMutationOptions): Promise<FirewallState> {
+  replaceFirewall(nextInput: { rules: unknown; prefixLists: unknown; enabled?: boolean; blockPing?: boolean }, guard: FirewallGuard, opts?: FirewallMutationOptions): Promise<FirewallState> {
     return this.changeFirewall(
       guard,
-      async (_state, g) => {
+      async (state, g) => {
         if (typeof nextInput !== 'object' || nextInput === null) fail('VALIDATION', 'firewall import must be { rules, prefixLists }')
         const next: FirewallState = {
           rules: validateFirewallRules(nextInput.rules),
           prefixLists: validatePrefixLists(nextInput.prefixLists),
+          // The first rules of a host that never chose take effect at once, as saved rules always have.
+          enabled: nextInput.enabled ?? (state.rules.length > 0 ? state.enabled : Array.isArray(nextInput.rules) && nextInput.rules.length > 0),
+          blockPing: nextInput.blockPing ?? state.blockPing,
         }
         this.assertFirewallSafe(next, g)
         return { next, result: next }
@@ -3538,14 +4120,14 @@ export class StateStore {
     const reservedPorts = new Set(server ? [server.settings.panelPort, server.settings.sshPort, server.settings.backendPort, server.settings.backendTlsPort] : [])
     const domains = collection('domains').map((value) => {
       const account = accountFor(value)
-      return validateDomainFile(value, { account, plan: plansById.get(account.planId)!, reservedLoopbackPorts: reservedPorts })
+      return validateDomainFile(value, { account, plan: effectivePlan(plansById.get(account.planId)!, account), reservedLoopbackPorts: reservedPorts })
     })
     restoreIndex(domains, (value) => value.id, 'domain')
     restoreIndex(domains, (value) => value.name, 'domain name')
     const domainsFor = (account: StoredAccount) => new Map(domains.filter((domain) => domain.accountId === account.id).map((domain) => [domain.id, domain]))
     const serviceUsers = collection('serviceUsers').map((value) => {
       const account = accountFor(value)
-      return validateServiceUserFile(value, { account, plan: plansById.get(account.planId)!, domainsById: domainsFor(account) })
+      return validateServiceUserFile(value, { account, plan: effectivePlan(plansById.get(account.planId)!, account), domainsById: domainsFor(account) })
     })
     restoreIndex(serviceUsers, (value) => value.id, 'service user')
     restoreIndex(serviceUsers, (value) => value.login, 'service login')
@@ -3576,6 +4158,9 @@ export class StateStore {
     })
     restoreIndex(domainCustomConfigs, (value) => value.domainId, 'domain custom configuration')
     const ipPool = input.ipPool === undefined ? [] : validateIpPoolFile(input.ipPool)
+    const ipv6Ranges = input.ipv6Ranges === undefined ? [] : validateIpv6Ranges(input.ipv6Ranges)
+    const aclLists = collection('aclLists', true).map(validateResellerAclList)
+    restoreIndex(aclLists, (list) => list.name, 'reseller ACL list')
     const mailIpConfig = input.mailIpConfig == null ? null : validateMailIpConfig(input.mailIpConfig)
     // routing records stay raw; the renderer checks each one
     const routing = input.mailRouting === undefined ? null : input.mailRouting as Record<string, unknown> | null
@@ -3610,6 +4195,7 @@ export class StateStore {
       databaseUsers: databaseUsers.sort((a, b) => a.name.localeCompare(b.name)),
       cronJobs: cronJobs.sort((a, b) => a.id.localeCompare(b.id)),
       ...(domainCustomConfigs.length ? { domainCustomConfigs } : {}), ...(ipPool.length ? { ipPool } : {}), ...(mailIpConfig ? { mailIpConfig } : {}),
+      ...(ipv6Ranges.length ? { ipv6Ranges } : {}), ...(aclLists.length ? { aclLists: aclLists.sort((a, b) => a.name.localeCompare(b.name)) } : {}),
       ...(mailRouting ? { mailRouting } : {}),
       ...(postgresqlUsers.length ? {
         postgresqlDatabases: postgresqlDatabases.sort((a, b) => a.name.localeCompare(b.name)),
@@ -3645,6 +4231,8 @@ export class StateStore {
     }
     for (const config of snap.domainCustomConfigs ?? []) await this.writeStateJson(lease, accountPath(config.accountId, 'userdata', `${config.domainId}.json`), config)
     if (snap.ipPool?.length) await this.writeStateJson(lease, path('ip-pool.json'), snap.ipPool)
+    if (snap.ipv6Ranges?.length) await this.writeStateJson(lease, path('ip-ranges.json'), snap.ipv6Ranges)
+    for (const list of snap.aclLists ?? []) await this.writeStateJson(lease, path('acl-lists', `${list.name}.json`), list)
     if (snap.mailIpConfig) await this.writeStateJson(lease, path('mail-ips.json'), snap.mailIpConfig)
     const routing = snap.mailRouting
     if (!routing) return
@@ -3778,7 +4366,7 @@ export class StateStore {
   revertAddonConversion(input: { accountId: Id; sourceAccountId: Id; domains: readonly Domain[] }, opts?: MutationOptions): Promise<{ domains: string[] }> {
     return this.withMutationLock(opts, async (lease) => {
       const target = await this.lockStoredAccount(input.accountId), source = await this.lockStoredAccount(input.sourceAccountId)
-      const plan = mustExist(await this.getPlan(source.planId), 'plan', source.planId)
+      const plan = effectivePlan(mustExist(await this.getPlan(source.planId), 'plan', source.planId), source)
       const [domains, users, zones, certificates, server] = await Promise.all([this.readAllDomainsUnlocked(), this.readAllServiceUsersUnlocked(), this.readZoneFiles(), this.readCertificateFiles(), this.readServerFile()])
       const current = domains.filter(d => d.accountId === target.id), ids = new Set(input.domains.map(d => d.id))
       if (current.length !== ids.size || current.some(d => !ids.has(d.id))) fail('CONFLICT', 'the converted account changed; it cannot be reverted automatically', { stateChanged: false })

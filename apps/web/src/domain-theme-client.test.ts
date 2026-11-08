@@ -53,7 +53,7 @@ describe.each(['classic', 'v2'] as const)('%s authenticated domain row updates',
     await settle(); boot(async () => true); await settle()
     expect(send).toHaveBeenCalledTimes(1)
     const row = document.querySelector('[data-domain-rows] tr')!
-    expect(row.children).toHaveLength(v2 ? 7 : 8)
+    expect(row.children).toHaveLength(v2 ? 7 : 9)
     expect(row.querySelector('[data-xp-slot="name"]')?.textContent).toBe(account.primaryDomain)
     expect(row.querySelector('[data-xp-slot="root"]')?.textContent).toBe(domain.docRoot)
     expect(row.querySelector<HTMLButtonElement>('[data-xp-slot="remove"]')?.disabled).toBe(true)
@@ -70,7 +70,7 @@ describe.each(['classic', 'v2'] as const)('%s authenticated domain row updates',
     } else expect(label.querySelectorAll('.xp-extension__fact')).toHaveLength(3)
     current = { ...domainView([]), revision: 'b'.repeat(64) }
     document.querySelector<HTMLButtonElement>('[data-domain-refresh]')!.click(); await settle()
-    expect(document.querySelector('[data-domain-rows] td')?.getAttribute('colspan')).toBe(v2 ? '7' : '8')
+    expect(document.querySelector('[data-domain-rows] td')?.getAttribute('colspan')).toBe(v2 ? '7' : '9')
     expect(document.querySelector('[data-domain-count]')?.textContent).toBe('0 saved names')
     if (v2) expect(label.querySelectorAll('[data-domain-limit-kind]')).toHaveLength(4)
   })
@@ -166,6 +166,27 @@ describe.each(['classic', 'v2'] as const)('%s authenticated domain row updates',
     expect(document.querySelector('[data-wd-rows] td')?.getAttribute('colspan')).toBe('4')
     expect(document.querySelector<HTMLButtonElement>('[data-wd-save]')!.disabled).toBe(false)
     expect(send.mock.calls).toHaveLength(1)
+  })
+
+  it('switches Force HTTPS on a certified site and leaves a site without a certificate alone', async () => {
+    const certified = { ...domain, certificateId: '44444444-4444-4444-8444-444444444444' }
+    let current = domainView([certified, addon])
+    const send = vi.fn(async (method: string, _path: string, body?: unknown) => {
+      if (method === 'GET') return clone(current)
+      current = { ...domainView([{ ...certified, forceHttps: (body as { enabled: boolean }).enabled }, addon]), revision: 'b'.repeat(64) }
+      return { ...clone(current), stateChanged: true, reconcile: null }
+    })
+    const html = themed(renderV2DomainsPage(props, authority), renderAccountDomains({ lang: 'en', expectedAccountId: accountId, home: account.home, canManage: true }))
+    const { document, dom } = mount(html, DOMAIN_WORKSPACE_CLIENT_BINDING, send)
+    await settle()
+    const box = (id: string) => document.querySelector<HTMLInputElement>(`[data-domain-force-https="${id}"]`)!
+    expect(box(addon.id).disabled).toBe(true)
+    expect(box(domainId).disabled).toBe(false)
+    box(domainId).checked = true
+    box(domainId).dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+    await settle(); await settle()
+    expect(send).toHaveBeenCalledWith('POST', '/api/domains/force-https', { domainIds: [domainId], enabled: true, expectedRevision: revision })
+    expect(box(domainId).checked).toBe(true)
   })
 
   it('refuses missing or duplicate row templates before dispatching a domain read', () => {

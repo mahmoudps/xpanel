@@ -1,4 +1,5 @@
 import type { AgentExecutor } from './executor.ts'
+import { isAccountHome } from '@xpanel/core'
 import type { ResourceLimits } from '@xpanel/core'
 import { compareAccountLimits } from './limit-gaps.ts'
 import { ioDiskForMount } from './io-device.ts'
@@ -46,7 +47,7 @@ export const readAccountUsage = async (
     bandwidth: 'unmeasured',
     ioEnforced: null,
   }
-  if (!USERNAME.test(input.username) || input.home !== `/home/${input.username}`) return sample
+  if (!USERNAME.test(input.username) || !isAccountHome(input.home, input.username)) return sample
   for (const version of PHP_VERSIONS) {
     const unit = `xpanel-php-fpm-${input.username}-${version}.service`
     if (await activeUnit(executor, unit)) {

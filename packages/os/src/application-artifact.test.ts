@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { applicationDigest, isApplicationArtifactPath, isVerifiedApplicationArtifact, verifyApplicationArtifact } from './application-artifact.ts'
 
-const file = (path: string, content = '<?php echo "ok";') => ({ path, sha256: applicationDigest(content), bytes: Buffer.byteLength(content), mode: '0644', contentBase64: Buffer.from(content).toString('base64') })
-const bundle = (files = [file('index.php')], extra: Record<string, unknown> = {}) => Buffer.from(JSON.stringify({ schemaVersion: 1, appId: 'sample', version: '1.2.3', files, ...extra }))
+const file = (path: string, content = '<?php echo "ok";') => ({ path, sha256: applicationDigest(content), bytes: Buffer.byteLength(content), mode: '0644', content })
+const bundle = (files: Record<string, unknown>[] = [file('index.php')], extra: Record<string, unknown> = {}) => Buffer.from(JSON.stringify({ schemaVersion: 1, appId: 'sample', version: '1.2.3', setup: { database: false, config: null }, files: files.map(({ content: _content, ...row }) => row), ...extra }) + '\n' + files.map(row => row.content ?? '').join(''))
 const read = (bytes: Buffer) => verifyApplicationArtifact(bytes, { format: 'xpanel-files-v1', sha256: applicationDigest(bytes), bytes: bytes.length }, 'sample', '1.2.3')
 
 describe('content-addressed application file artifacts', () => {
@@ -20,15 +20,23 @@ describe('content-addressed application file artifacts', () => {
     expect(() => read(bundle([file(path)]))).toThrow()
   })
   it('refuses aliases, directory/file conflicts, unsigned modes/types, extra fields and ambiguous JSON', () => {
-    for (const files of [[file('a'), file('a')], [file('A'), file('a')], [file('a'), file('a/b')], [file('b'), file('a')], [{ ...file('index.php'), mode: '0755' }], [{ ...file('index.php'), type: 'symlink', target: '/root' }]]) expect(() => read(bundle(files))).toThrow()
+    for (const files of [[file('a'), file('a')], [file('A'), file('a')], [file('a'), file('a/b')], [file('b'), file('a')], [{ ...file('index.php'), mode: '0755' }], [{ ...file('index.php'), type: 'symlink', target: '/root' }]] as Record<string, unknown>[][]) expect(() => read(bundle(files))).toThrow()
     expect(() => read(bundle(undefined, { url: 'https://untrusted.invalid/app.tgz' }))).toThrow()
     expect(() => read(Buffer.from(bundle().toString().replace('"schemaVersion":1', '"schemaVersion":0,"schemaVersion":1')))).toThrow()
     expect(() => read(Buffer.from(' ' + bundle().toString()))).toThrow()
   })
-  it('rejects wrong total/file digest, size, identity, noncanonical base64 and malformed UTF-8', () => {
+  it('reads the setup and refuses a config that is managed or a template that is absent or oversized', () => {
+    const setup = (config: unknown) => ({ setup: { database: true, config } })
+    expect(read(bundle([file('a.sample')], setup({ path: 'a.php', template: 'a.sample' }))).setup).toEqual({ database: true, config: { path: 'a.php', template: 'a.sample' } })
+    for (const config of [{ path: 'a.sample', template: 'a.sample' }, { path: 'a.php', template: 'missing' }, { path: 'a.sample/x', template: 'a.sample' }, { path: '../a.php', template: 'a.sample' }]) expect(() => read(bundle([file('a.sample')], setup(config)))).toThrow()
+    expect(() => read(bundle([file('big', 'x'.repeat(64 * 1024 + 1))], setup({ path: 'a.php', template: 'big' })))).toThrow()
+    expect(() => read(bundle(undefined, { setup: { database: 'yes', config: null } }))).toThrow()
+  })
+  it('rejects wrong total/file digest, size, identity, trailing bytes and malformed UTF-8', () => {
     const bytes = bundle()
     for (const descriptor of [{ format: 'xpanel-files-v1' as const, sha256: '0'.repeat(64), bytes: bytes.length }, { format: 'xpanel-files-v1' as const, sha256: applicationDigest(bytes), bytes: bytes.length + 1 }]) expect(() => verifyApplicationArtifact(bytes, descriptor, 'sample', '1.2.3')).toThrow()
-    for (const files of [[{ ...file('a'), sha256: '0'.repeat(64) }], [{ ...file('a'), bytes: 999 }], [{ ...file('a'), contentBase64: 'YQ' }]]) expect(() => read(bundle(files))).toThrow()
+    for (const files of [[{ ...file('a'), sha256: '0'.repeat(64) }], [{ ...file('a'), bytes: 999 }], [{ ...file('a'), content: 'short' }]]) expect(() => read(bundle(files))).toThrow()
+    expect(() => read(Buffer.concat([bundle(), Buffer.from('x')]))).toThrow()
     expect(() => read(bundle(undefined, { appId: 'other' }))).toThrow()
     expect(() => read(Buffer.from([0xff]))).toThrow()
     expect(() => read(bundle([]))).toThrow()

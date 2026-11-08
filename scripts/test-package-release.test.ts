@@ -154,7 +154,7 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
     const legacy = signedReleaseFixture!
     await expect(verifyReleaseArchive(legacy.archivePath!, { signingKey: fixtureSigningKey, requireSignature: true })).resolves.toBeDefined()
     expect(JSON.parse(readFileSync(join(legacy.stagingDir, 'release-manifest.json'), 'utf8')).files.some((file: { path: string }) => file.path === path)).toBe(false)
-    const sourceRoot = makeSourceFixture(), helpers = [path, 'scripts/install-kernel-package.mjs', 'scripts/selinux-account-homes.sh']
+    const sourceRoot = makeSourceFixture(), helpers = [path, 'scripts/install-kernel-package.mjs', 'scripts/selinux-account-homes.sh', 'scripts/el-source-builds.sh']
     const content = new Map(helpers.map(helper => [helper, readFileSync(join(resolve(import.meta.dirname, '..'), helper))]))
     for (const [helper, bytes] of content) writeSourceFile(sourceRoot, helper, bytes)
     const built = await buildReleaseArtifact({ sourceRoot, outputDir: makeTempDir(), version: '0.1.2', signingKey: fixtureSigningKey, keyId: 'release-key-1' })

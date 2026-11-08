@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
 import { cidrContains, fail, formatCidr, parseCidr, parseIp, validateDomainName } from '@xpanel/core'
+import { SVC_DEFAULTS, SVC_PARSERS, SVC_STATE_PATHS } from './svc-policy.ts'
+import type { SvcKind } from './svc-policy.ts'
+import { PANEL_GATE_DEFAULT, PANEL_GATE_STATE, PANEL_TEMPORARY_LOGINS_DEFAULT, PANEL_TEMPORARY_LOGINS_STATE, parsePanelGatePolicy, parsePanelTemporaryLogins } from './panel-gate-policy.ts'
 
 /** Desired-state files under the StateStore root. The API writes them; the agent and reconciler only read them. */
 export const SEC_WAF_STATE = 'extended/server/sec-waf.json'
@@ -41,9 +44,12 @@ export interface SecWafSites { sites: Record<string, { accountId: string; modsec
 /** cPanel WHM Compiler Access: restricted = root and the granted accounts only; false = enabled for all users. */
 export interface SecCompilerAccessPolicy { restricted: boolean; accountIds: string[] }
 export interface SecRecord<T> { version: 1; policy: T; updatedAt: string }
-export type SecKind = 'waf' | 'flood' | 'panel-access' | 'dns-cluster' | 'waf-sites' | 'compiler-access'
+export type SecKind = 'waf' | 'flood' | 'panel-access' | 'panel-gate' | 'panel-temporary-logins' | 'dns-cluster' | 'waf-sites' | 'compiler-access' | SvcKind
 
-export const SEC_DEFAULTS: { waf: SecWafPolicy; flood: SecFloodPolicy; 'panel-access': SecPanelAccessPolicy; 'dns-cluster': SecDnsClusterConfig; 'waf-sites': SecWafSites; 'compiler-access': SecCompilerAccessPolicy } = {
+export const SEC_DEFAULTS: { waf: SecWafPolicy; flood: SecFloodPolicy; 'panel-access': SecPanelAccessPolicy; 'panel-gate': typeof PANEL_GATE_DEFAULT; 'panel-temporary-logins': typeof PANEL_TEMPORARY_LOGINS_DEFAULT; 'dns-cluster': SecDnsClusterConfig; 'waf-sites': SecWafSites; 'compiler-access': SecCompilerAccessPolicy } & typeof SVC_DEFAULTS = {
+  ...SVC_DEFAULTS,
+  'panel-gate': PANEL_GATE_DEFAULT,
+  'panel-temporary-logins': PANEL_TEMPORARY_LOGINS_DEFAULT,
   waf: { requestsPerSecond: null, burst: null, maxBodyMb: 128, deniedResponse: 403, denyIps: [], denyPaths: [], denyUserAgents: [], modsecurity: true },
   flood: { enabled: false, connectionsPerAddress: null, newConnectionsPerSecond: null, newConnectionsBurst: null, pingPerSecond: null, webConnectionsPerAddress: null },
   'panel-access': { listeners: { xpanel: [], xwhm: [], xmail: [] } },
@@ -51,7 +57,7 @@ export const SEC_DEFAULTS: { waf: SecWafPolicy; flood: SecFloodPolicy; 'panel-ac
   'waf-sites': { sites: {} },
   'compiler-access': { restricted: false, accountIds: [] },
 }
-export const SEC_STATE_PATHS: Readonly<Record<SecKind, string>> = { waf: SEC_WAF_STATE, flood: SEC_FLOOD_STATE, 'panel-access': SEC_PANEL_ACCESS_STATE, 'dns-cluster': SEC_DNS_CLUSTER_STATE, 'waf-sites': SEC_WAF_SITES_STATE, 'compiler-access': SEC_COMPILER_ACCESS_STATE }
+export const SEC_STATE_PATHS: Readonly<Record<SecKind, string>> = { ...SVC_STATE_PATHS, waf: SEC_WAF_STATE, flood: SEC_FLOOD_STATE, 'panel-access': SEC_PANEL_ACCESS_STATE, 'panel-gate': PANEL_GATE_STATE, 'panel-temporary-logins': PANEL_TEMPORARY_LOGINS_STATE, 'dns-cluster': SEC_DNS_CLUSTER_STATE, 'waf-sites': SEC_WAF_SITES_STATE, 'compiler-access': SEC_COMPILER_ACCESS_STATE }
 
 const unchanged = { stateChanged: false }
 const invalid = (message: string): never => fail('VALIDATION', message, unchanged)
@@ -153,7 +159,7 @@ export function parseSecCompilerAccessPolicy(value: unknown): SecCompilerAccessP
   return { restricted: value.restricted, accountIds: [...accountIds].sort() }
 }
 
-const PARSERS: Readonly<Record<SecKind, (value: unknown) => unknown>> = { waf: parseSecWafPolicy, flood: parseSecFloodPolicy, 'panel-access': parseSecPanelAccessPolicy, 'dns-cluster': parseSecDnsClusterConfig, 'waf-sites': parseSecWafSites, 'compiler-access': parseSecCompilerAccessPolicy }
+const PARSERS: Readonly<Record<SecKind, (value: unknown) => unknown>> = { ...SVC_PARSERS, waf: parseSecWafPolicy, flood: parseSecFloodPolicy, 'panel-access': parseSecPanelAccessPolicy, 'panel-gate': parsePanelGatePolicy, 'panel-temporary-logins': parsePanelTemporaryLogins, 'dns-cluster': parseSecDnsClusterConfig, 'waf-sites': parseSecWafSites, 'compiler-access': parseSecCompilerAccessPolicy }
 export const parseSecPolicy = <K extends SecKind>(kind: K, value: unknown): typeof SEC_DEFAULTS[K] => PARSERS[kind](value) as typeof SEC_DEFAULTS[K]
 /** A saved record is accepted only when it round-trips exactly through its grammar. */
 export function readSecRecord<K extends SecKind>(kind: K, value: unknown): SecRecord<typeof SEC_DEFAULTS[K]> | null {

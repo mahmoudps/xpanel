@@ -19,7 +19,6 @@ export function renderSwAddonServicesWorkspace(input: { locale: Locale; canRead:
   </section>
   <section class="xp-whm-detail-card" aria-labelledby="sw-addons-config"><h2 id="sw-addons-config">${t('Service configuration')}</h2>
     <p class="xp-whm-detail-status" role="status">${t('Memory limits, listeners and users are not edited here: a reviewed configuration writer with a restart check is not connected. Nothing is changed.')}</p>
-    <div class="xp-whm-detail-actions"><button type="button" class="xp-btn" disabled>${t('Edit configuration')}</button></div>
   </section>
 ${classicSoftwareClientTemplates('addons')}
 </div>`

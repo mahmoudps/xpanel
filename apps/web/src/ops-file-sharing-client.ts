@@ -99,7 +99,7 @@ function bindOpsFileSharing(askDialog: ((options: Record<string, unknown>) => Pr
       if (foreign && foreignCard) { foreign.textContent = ''; foreignCard.hidden = value.observed.foreignExports.length === 0; for (const path of value.observed.foreignExports) foreign.append(cloneViewRecord(root, 'ops-share-foreign', 'li', { path })) }
       paint()
       if (value.invalid) note('conflict', t('The saved share configuration could not be read and is shown as empty. Saving will replace it.'))
-      else if (value.observed.state !== 'read') note('unavailable', value.observed.reason === 'nfs_server_unavailable' ? t('The NFS server is not available on this host, so shares cannot be exported. Configuration can still be saved.') : t('The export table could not be read. Nothing was changed.'))
+      else if (value.observed.state !== 'read') note('unavailable', value.observed.reason === 'nfs_server_unavailable' ? t('The NFS server is not installed on this host, so shares cannot be exported. Install it from the Software center. Configuration can still be saved.') : t('The export table could not be read. Nothing was changed.'))
       else note('read', t('Share configuration read. Review it before applying; nothing has been changed.'))
       lock()
     }

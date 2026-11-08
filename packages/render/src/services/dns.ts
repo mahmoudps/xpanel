@@ -323,9 +323,16 @@ export interface ZoneDefaultsOptions {
   today?: Date
   serial?: number
   dmarcPolicy?: 'none' | 'quarantine' | 'reject'
+  /** adds the panel service names (Tweak Settings); off by default */
+  serviceSubdomains?: boolean
+  /** false leaves out autoconfig, autodiscover and its SRV record */
+  autodiscover?: boolean
+  /** false leaves out addresses for nameservers inside the zone */
+  nameserverRecords?: boolean
 }
 
 const HOST_LABELS = ['@', 'www', 'mail', 'ftp', 'autoconfig', 'autodiscover'] as const
+const SERVICE_LABELS = ['webmail', 'cpanel', 'whm', 'webdisk', 'cpcalendars', 'cpcontacts'] as const
 
 const relativeIn = (fqdn: string, zone: string): string | null =>
   fqdn === zone ? '@' : fqdn.endsWith(`.${zone}`) ? fqdn.slice(0, -(zone.length + 1)) : null
@@ -382,7 +389,8 @@ export const defaultZoneRecords = (domain: string, o: ZoneDefaultsOptions): Zone
   const t = SOA_TIMERS
   add('@', 'SOA', `${ns[0]}. ${soaRname(o.adminEmail)} ${serial} ${t.refresh} ${t.retry} ${t.expire} ${t.minimum}`)
   for (const n of ns) add('@', 'NS', `${n}.`)
-  const hosts: string[] = [...HOST_LABELS]
+  const hosts: string[] = HOST_LABELS.filter(label => o.autodiscover !== false || !label.startsWith('auto'))
+  if (o.serviceSubdomains) hosts.push(...SERVICE_LABELS)
   const mailRel = relativeIn(mailHost, zone)
   if (mailRel !== null && !hosts.includes(mailRel)) hosts.push(mailRel)
   if (o.wildcard) hosts.push('*')
@@ -392,14 +400,14 @@ export const defaultZoneRecords = (domain: string, o: ZoneDefaultsOptions): Zone
     add(h, 'A', ipv4)
     if (ipv6) add(h, 'AAAA', ipv6)
   }
-  for (const [h, a] of glue) {
+  for (const [h, a] of o.nameserverRecords === false ? [] : glue) {
     add(h, 'A', a.ipv4)
     if (a.ipv6) add(h, 'AAAA', a.ipv6)
   }
   add('@', 'MX', `${mailHost}.`, 10)
   add('@', 'TXT', `v=spf1 a mx ip4:${ipv4}${ipv6 ? ` ip6:${ipv6}` : ''} ~all`)
   add('_dmarc', 'TXT', `v=DMARC1; p=${policy}`)
-  add('_autodiscover._tcp', 'SRV', `0 443 autodiscover.${zone}.`, 0)
+  if (o.autodiscover !== false) add('_autodiscover._tcp', 'SRV', `0 443 autodiscover.${zone}.`, 0)
   return validateZone(recs)
 }
 

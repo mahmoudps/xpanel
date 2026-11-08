@@ -12,7 +12,7 @@ type MailLogBaseView = { state: 'read' | 'unavailable'; reason: 'journal_unavail
 type MailLogCountsView = { records: number; events: number; skipped: number; unparsed: number; untrusted: number }
 type MailLogRecipientView = { address: string; originalAddress: string | null; status: Exclude<MailLogStatusView, 'queued'>; dsn: string | null; relay: string | null; response: string | null; at: string; attempts: number }
 type MailLogEventView = { at: string; source: string; kind: string; text: string }
-export type MailLogMessageView = { queueId: string | null; firstSeen: string; lastSeen: string; sender: string | null; size: number | null; recipientCount: number | null; messageId: string | null; client: string | null; saslUsername: string | null; status: MailLogStatusView; dsn: string | null; recipients: MailLogRecipientView[]; recipientsOmitted: number; events: MailLogEventView[]; eventsOmitted: number }
+export type MailLogMessageView = { queueId: string | null; firstSeen: string; lastSeen: string; sender: string | null; size: number | null; spamScore: number | null; recipientCount: number | null; messageId: string | null; client: string | null; saslUsername: string | null; status: MailLogStatusView; dsn: string | null; recipients: MailLogRecipientView[]; recipientsOmitted: number; events: MailLogEventView[]; eventsOmitted: number }
 export type MailDeliveryView = MailLogBaseView & { counts: MailLogCountsView; lineLimitReached: boolean; matched: number; omittedMessages: number; messages: MailLogMessageView[] }
 export type MailMonitorView = MailLogBaseView & { counts: MailLogCountsView; lineLimitReached: boolean; summary: { messages: number; statuses: Record<MailLogStatusView, number>; topSenders: { address: string; messages: number }[]; topRecipientDomains: { domain: string; recipients: number }[]; deferralReasons: { dsn: string | null; reason: string; count: number }[] } }
 
@@ -66,7 +66,7 @@ export function readMailLogMessage(raw: unknown): MailLogMessageView {
   })
   const firstSeen = mailLogInstant(raw.firstSeen), lastSeen = mailLogInstant(raw.lastSeen)
   if (Date.parse(firstSeen) > Date.parse(lastSeen)) throw new Error('invalid_mail_log_message')
-  return { queueId: raw.queueId as string | null, firstSeen, lastSeen, sender: mailLogNullable(raw.sender, 254), size: nullableCount(raw.size), recipientCount: nullableCount(raw.recipientCount), messageId: mailLogNullable(raw.messageId, 998), client: mailLogNullable(raw.client, 300), saslUsername: mailLogNullable(raw.saslUsername, 254), status: raw.status as MailLogStatusView, dsn: mailLogDsn(raw.dsn), recipients, recipientsOmitted: mailLogCount(raw.recipientsOmitted, 20000), events, eventsOmitted: mailLogCount(raw.eventsOmitted, 20000) }
+  return { queueId: raw.queueId as string | null, firstSeen, lastSeen, sender: mailLogNullable(raw.sender, 254), size: nullableCount(raw.size), spamScore: typeof raw.spamScore === 'number' && Number.isFinite(raw.spamScore) ? raw.spamScore : null, recipientCount: nullableCount(raw.recipientCount), messageId: mailLogNullable(raw.messageId, 998), client: mailLogNullable(raw.client, 300), saslUsername: mailLogNullable(raw.saslUsername, 254), status: raw.status as MailLogStatusView, dsn: mailLogDsn(raw.dsn), recipients, recipientsOmitted: mailLogCount(raw.recipientsOmitted, 20000), events, eventsOmitted: mailLogCount(raw.eventsOmitted, 20000) }
 }
 
 export function readMailDeliveryView(value: unknown): MailDeliveryView {
@@ -173,7 +173,7 @@ function bindWhmMailLog(): void {
       const facts = detail.querySelector<HTMLElement>('[data-mail-log-detail-facts]')!, recipients = detail.querySelector<HTMLElement>('[data-mail-log-detail-recipients]')!, events = detail.querySelector<HTMLElement>('[data-mail-log-detail-events]')!
       facts.textContent = ''
       const notLogged = t('Not logged')
-      for (const [label, value, technical] of [[t('Queue ID'), message.queueId ?? t('None (rejected before queueing)'), !!message.queueId], [t('Sender'), message.sender === null ? notLogged : message.sender || t('Null sender (bounce)'), !!message.sender], [t('Status'), statusLabel[message.status]!, false], [t('First seen (UTC)'), time(message.firstSeen), true], [t('Last seen (UTC)'), time(message.lastSeen), true], [t('Size (bytes)'), message.size === null ? notLogged : String(message.size), message.size !== null], [t('Message-ID'), message.messageId ?? notLogged, message.messageId !== null], [t('Client'), message.client ?? notLogged, message.client !== null], [t('Authenticated user'), message.saslUsername ?? notLogged, message.saslUsername !== null]] as const) {
+      for (const [label, value, technical] of [[t('Queue ID'), message.queueId ?? t('None (rejected before queueing)'), !!message.queueId], [t('Spam score'), message.spamScore === null ? t('Not read') : String(message.spamScore), true], [t('Sender'), message.sender === null ? notLogged : message.sender || t('Null sender (bounce)'), !!message.sender], [t('Status'), statusLabel[message.status]!, false], [t('First seen (UTC)'), time(message.firstSeen), true], [t('Last seen (UTC)'), time(message.lastSeen), true], [t('Size (bytes)'), message.size === null ? notLogged : String(message.size), message.size !== null], [t('Message-ID'), message.messageId ?? notLogged, message.messageId !== null], [t('Client'), message.client ?? notLogged, message.client !== null], [t('Authenticated user'), message.saslUsername ?? notLogged, message.saslUsername !== null]] as const) {
         const item = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.append(technical ? bdi(value) : value); item.append(dt, dd); facts.append(item)
       }
       recipients.textContent = ''
@@ -223,6 +223,8 @@ function bindWhmMailLog(): void {
       fill('domains', (summary?.topRecipientDomains ?? []).map(item => [[item.domain, true], [String(item.recipients), true]] as const), 2)
       fill('deferrals', (summary?.deferralReasons ?? []).map(item => [[item.dsn ?? '-', true], [item.reason || t('No reason logged'), !!item.reason], [String(item.count), true]] as const), 3)
     }
+    // Links from the relayer and sent summary reports open with their filter applied.
+    if (delivery && admitted()) for (const name of ['sender', 'domain']) { const value = new URLSearchParams(location.search).get(name), input = form.elements.namedItem(name) as HTMLInputElement | null; if (value && input) input.value = value }
     const load = async (): Promise<void> => {
       if (busy || !admitted() || !send) return
       const selected = windowQuery()

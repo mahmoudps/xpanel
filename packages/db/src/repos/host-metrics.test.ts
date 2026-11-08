@@ -95,7 +95,8 @@ describe('additive host migration preserves immutable operational identity', () 
   it('refuses unknown and tampered additive migration evidence with the unchanged schema3 receipt', async () => {
     handle = await createTestDb()
     const before = await handle.db.query('SELECT * FROM operational_identity')
-    await handle.db.query("INSERT INTO xpanel_schema_migrations(version,name,checksum) VALUES(7,'0007_unknown.sql',$1)", ['a'.repeat(64)])
+    const next = Math.max(...(await loadMigrations()).map(row => row.version)) + 1
+    await handle.db.query('INSERT INTO xpanel_schema_migrations(version,name,checksum) VALUES($1,$2,$3)', [next, `${String(next).padStart(4, '0')}_unknown.sql`, 'a'.repeat(64)])
     await expect(requireOperationalIdentity(handle.db)).rejects.toThrow(/differs/)
     await expect(initializeOperationalMetadata(handle.db)).rejects.toThrow(/require review/)
     await handle.db.query('DELETE FROM xpanel_schema_migrations WHERE version=5')

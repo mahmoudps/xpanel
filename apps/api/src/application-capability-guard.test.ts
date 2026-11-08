@@ -22,7 +22,7 @@ const php: PhpSettings = {
 let passwordHash: string
 beforeAll(async () => { passwordHash = await hashPasswordArgon2id('ApplicationFixturePassword!2026') })
 
-describe('application lifecycle requires a qualified native provider', () => {
+describe('legacy application routes stay refused', () => {
   let db: TestDbHandle
   let state: TestStateStoreHandle
   let app: ApiApp
@@ -65,14 +65,14 @@ describe('application lifecycle requires a qualified native provider', () => {
   }
   const assertUnavailable = async (response: Response) => {
     expect(response.status).toBe(412)
-    expect(await response.json()).toMatchObject({ code: 'PRECONDITION_FAILED', details: { reason: 'application_provider_unavailable', stateChanged: false, nativeApplied: false } })
+    expect(await response.json()).toMatchObject({ code: 'PRECONDITION_FAILED', details: { reason: 'application_route_replaced', stateChanged: false, nativeApplied: false } })
   }
 
   beforeEach(async () => {
     db = await createTestDb()
     state = await createTestStateStore()
     rootId = (await createRootPrincipal(db.db, { username: 'root', passwordHash, forcePasswordChange: false })).id
-    const resellerInput = { passwordHash, maxAccounts: 10, totalDiskMb: 50_000, totalBandwidthMb: 500_000, oversell: false, nameservers: [], delegatedIps: [] }
+    const resellerInput = { passwordHash, maxAccounts: 10, totalDiskMb: 50_000, totalBandwidthMb: 500_000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }
     const reseller = await state.store.createReseller({ ...resellerInput, username: 'appreseller', acl: ['list-accounts', 'edit-account'] })
     resellerId = reseller.id
     await createResellerPrincipal(db.db, { id: reseller.id, username: reseller.username, passwordHash })

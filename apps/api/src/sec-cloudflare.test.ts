@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fail } from '@xpanel/core'
 import type { AuthenticatedCaller } from './auth.ts'
-import { CLOUDFLARE_API, compareCloudflareRecords, handleSecCloudflareRoute, providersRevision, SEC_DNS_PROVIDERS_STATE } from './sec-cloudflare.ts'
+import { CLOUDFLARE_API, compareCloudflareRecords, handleSecCloudflareRoute, parseProviderRecord, providersRevision, publishSiteRecord, SEC_DNS_PROVIDERS_STATE } from './sec-cloudflare.ts'
+import { atomicWriteJson } from '@xpanel/state'
 import type { SecCloudflareHelpers } from './sec-cloudflare.ts'
 
 const ROOT = { principal: { kind: 'root', id: '11111111-1111-4111-8111-111111111111', username: 'root' }, sessionId: 'one', apiTokenId: null, scopes: [], principalRecord: {} } as unknown as AuthenticatedCaller
@@ -100,5 +101,92 @@ describe('sec Cloudflare for account owners', () => {
   })
   it('compares records by name, type and normalized content', () => {
     expect(compareCloudflareRecords('a.test', [{ name: 'www', type: 'CNAME', content: 'A.test.', priority: null }, { name: '@', type: 'MX', content: 'mx.a.test.', priority: 10 }], [{ name: 'www.a.test', type: 'CNAME', content: 'a.test', proxied: false, priority: null }, { name: 'a.test', type: 'MX', content: 'mx.a.test', proxied: null, priority: 20 }, { name: 'x.a.test', type: 'NS', content: 'n', proxied: null, priority: null }]).map(row => row.state)).toEqual(['differs', 'match'])
+  })
+})
+
+describe('provider DNS records', { tags: ['unit'] }, () => {
+  const RECORD = 'f'.repeat(32), row = { id: RECORD, type: 'A', name: 'www.alice.test', content: '203.0.113.5', ttl: 300, proxied: false, proxiable: true, comment: 'web' }
+  const linked = async (fetcher: ReturnType<typeof vi.fn>) => {
+    const h = harness(fetcher as never)
+    const empty = await (await h.send('/api/server/sec/dns-providers'))!.json() as { revision: string }
+    const account = await (await h.send('/api/server/sec/dns-providers/accounts', 'POST', { label: 'Main', token: TOKEN, expectedRevision: empty.revision }))!.json() as { revision: string; accounts: { id: string }[] }
+    await h.send('/api/server/sec/dns-providers/links', 'POST', { domain: 'alice.test', accountId: account.accounts[0]!.id, expectedRevision: account.revision })
+    return h
+  }
+  const body = { domain: 'alice.test', recordId: '', type: 'A', host: 'www.alice.test', content: '203.0.113.5', ttl: 300, proxied: false, priority: null, comment: 'web' }
+  it('creates a record and reads it back with the same value and TTL', async () => {
+    const fetcher = cloudflare({ [`/zones/${ZONE}/dns_records/${RECORD}`]: () => envelope(row) })
+    const base = fetcher.getMockImplementation()!
+    fetcher.mockImplementation(async (input, init) => String(input).endsWith(`/zones/${ZONE}/dns_records`) && init?.method === 'POST' ? envelope(row) : base(input, init))
+    const h = await linked(fetcher)
+    const saved = await (await h.send('/api/server/sec/dns-providers/records/create', 'POST', body))!.json() as { record: { recordId: string; ttl: number; content: string } }
+    expect(saved.record).toMatchObject({ recordId: RECORD, ttl: 300, content: '203.0.113.5' })
+    expect(h.helpers.emitAudit).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'server.sec.dns-providers.record_created' }))
+  })
+  it('reports a record that does not read back as sent', async () => {
+    const fetcher = cloudflare({ [`/zones/${ZONE}/dns_records/${RECORD}`]: () => envelope({ ...row, content: '203.0.113.6' }) })
+    const base = fetcher.getMockImplementation()!
+    fetcher.mockImplementation(async (input, init) => String(input).endsWith(`/zones/${ZONE}/dns_records`) && init?.method === 'POST' ? envelope(row) : base(input, init))
+    const h = await linked(fetcher)
+    await expect(h.send('/api/server/sec/dns-providers/records/create', 'POST', body)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', detail: expect.objectContaining({ verificationRequired: true }) })
+  })
+  it('removes a record and refuses a domain that is not linked', async () => {
+    const fetcher = cloudflare({ [`/zones/${ZONE}/dns_records/${RECORD}`]: () => envelope({ id: RECORD }) })
+    const h = await linked(fetcher)
+    expect(await (await h.send('/api/server/sec/dns-providers/records/remove', 'POST', { domain: 'alice.test', recordId: RECORD }))!.json()).toEqual({ domain: 'alice.test', removed: RECORD })
+    await expect(h.send('/api/server/sec/dns-providers/records/remove', 'POST', { domain: 'bob.test', recordId: RECORD })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+  it('lists nothing until a domain is named', async () => {
+    const h = harness()
+    expect(await (await h.send('/api/server/sec/dns-providers/records'))!.json()).toEqual({ domain: null, zoneId: null, records: [], truncated: false })
+  })
+  it.each([
+    [{ type: 'NS' }, 'type'], [{ name: 'www.other.test' }, 'zone'], [{ content: 'not-an-ip' }, 'value'], [{ ttl: 30 }, 'TTL'], [{ type: 'TXT', proxied: true, content: 'x' }, 'proxied'], [{ type: 'MX', content: 'mx.alice.test' }, 'priority'], [{ comment: 'x'.repeat(101) }, 'remark'],
+  ])('refuses %j', (change, word) => {
+    expect(() => parseProviderRecord({ type: 'A', name: 'www.alice.test', content: '203.0.113.5', ttl: 300, proxied: false, priority: null, comment: '', ...change }, 'alice.test')).toThrow(new RegExp(word))
+  })
+  it('gives a proxied record the automatic TTL', () => {
+    expect(parseProviderRecord({ type: 'A', name: 'alice.test', content: '203.0.113.5', ttl: 300, proxied: true, priority: null, comment: '' }, 'alice.test').ttl).toBe(1)
+  })
+})
+
+describe('automatic record for a new site', { tags: ['unit'] }, () => {
+  const on = () => atomicWriteJson(join(root, 'extended/dns/auto-dns.json'), { version: 1, policy: { enabled: true, ttl: 3600, proxied: false }, updatedAt: '2026-11-07T00:00:00.000Z' })
+  const saved = (name: string) => ({ id: 'f'.repeat(32), type: 'A', name, content: '1.1.1.1', ttl: 3600, proxied: false })
+  const provider = async (fetcher: ReturnType<typeof vi.fn>) => {
+    await atomicWriteJson(join(root, SEC_DNS_PROVIDERS_STATE), { version: 1, accounts: [{ id: '44444444-4444-4444-8444-444444444444', provider: 'cloudflare', label: 'Main', token: TOKEN, tokenId: TOKEN_ID, createdAt: '2026-11-07T00:00:00.000Z', verifiedAt: '2026-11-07T00:00:00.000Z' }], links: [{ domain: 'alice.test', accountId: '44444444-4444-4444-8444-444444444444', zoneId: ZONE, zoneName: 'alice.test', linkedAt: '2026-11-07T00:00:00.000Z' }] })
+    return { store: { rootDir: root }, fetch: fetcher } as never
+  }
+  it('does nothing while the option is off, and refuses a private address', async () => {
+    const fetcher = vi.fn()
+    expect(await publishSiteRecord(await provider(fetcher), { domain: 'blog.alice.test', ipv4: '1.1.1.1', ownDomains: ['alice.test'], root: false })).toEqual({ state: 'skipped', reason: 'auto_dns_disabled' })
+    await on()
+    expect(await publishSiteRecord(await provider(fetcher), { domain: 'blog.alice.test', ipv4: '10.0.0.5', ownDomains: ['alice.test'], root: false })).toEqual({ state: 'skipped', reason: 'server_ip_not_public' })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+  it('creates an A record to the server address in the zone that holds the name', async () => {
+    await on()
+    const sent: unknown[] = [], fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === 'POST') { sent.push(JSON.parse(String(init.body))); return envelope(saved('blog.alice.test')) }
+      return String(input).includes('type=A') ? envelope([]) : envelope(saved('blog.alice.test'))
+    })
+    expect(await publishSiteRecord(await provider(fetcher), { domain: 'blog.alice.test', ipv4: '1.1.1.1', ownDomains: ['alice.test'], root: false })).toEqual({ state: 'created', name: 'blog.alice.test', address: '1.1.1.1' })
+    expect(sent).toEqual([expect.objectContaining({ type: 'A', name: 'blog.alice.test', content: '1.1.1.1', ttl: 3600, proxied: false })])
+  })
+  it('leaves a record that points elsewhere, and reports a record already right', async () => {
+    await on()
+    const answer = (content: string) => vi.fn(async () => envelope([{ ...saved('blog.alice.test'), content }]))
+    expect(await publishSiteRecord(await provider(answer('9.9.9.9')), { domain: 'blog.alice.test', ipv4: '1.1.1.1', ownDomains: ['alice.test'], root: false })).toEqual({ state: 'skipped', reason: 'record_differs' })
+    expect(await publishSiteRecord(await provider(answer('1.1.1.1')), { domain: 'blog.alice.test', ipv4: '1.1.1.1', ownDomains: ['alice.test'], root: false })).toMatchObject({ state: 'exists' })
+  })
+  it('refuses a customer a subdomain in the zone of another account', async () => {
+    await on()
+    const fetcher = vi.fn()
+    expect(await publishSiteRecord(await provider(fetcher), { domain: 'blog.alice.test', ipv4: '1.1.1.1', ownDomains: ['mallory.test'], root: false })).toEqual({ state: 'skipped', reason: 'no_provider_zone' })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+  it('reports a provider failure without throwing', async () => {
+    await on()
+    expect(await publishSiteRecord(await provider(vi.fn(async () => { throw new Error('offline') })), { domain: 'blog.alice.test', ipv4: '1.1.1.1', ownDomains: ['alice.test'], root: false })).toEqual({ state: 'failed', reason: 'provider_unreachable' })
   })
 })

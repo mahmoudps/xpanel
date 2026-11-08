@@ -65,6 +65,55 @@ describe('firewall rule-set rules', () => {
   })
 })
 
+describe('firewall switch and ping block', () => {
+  const policy = async (patch: Record<string, unknown>) => ({ enabled: true, blockPing: false, expectedRevision: await revision(), ...patch })
+
+  it('reads the switch beside the rules', async () => {
+    expect((await call('GET', '/api/firewall')).body).toMatchObject({ enabled: true, blockPing: false })
+  })
+
+  it('turns off through a generation, keeps the rules and waits for confirmation', async () => {
+    const { body } = await call('PUT', '/api/firewall/policy', await policy({ enabled: false }))
+    expect(body).toMatchObject({ enabled: false, blockPing: false })
+    expect(body!.confirmation.id).toBeTruthy()
+    expect(await h.store.getFirewallState()).toMatchObject({ enabled: false })
+    expect((await h.store.getFirewallState()).rules).toHaveLength(base.length + 1)
+    expect(audits).toContainEqual({ action: 'firewall.policy.updated', outcome: 'ok' })
+  })
+
+  it('restores the switch when the change is not confirmed, or the host refuses it', async () => {
+    await call('PUT', '/api/firewall/policy', await policy({ blockPing: true }))
+    clock = new Date(clock.getTime() + FIREWALL_CONFIRM_WINDOW_MS)
+    await timers[0]!.run()
+    expect(await h.store.getFirewallState()).toMatchObject({ blockPing: false })
+    reconcileOk = false
+    await expect(async () => call('PUT', '/api/firewall/policy', await policy({ enabled: false }))).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' })
+    expect(await h.store.getFirewallState()).toMatchObject({ enabled: true })
+  })
+
+  it('writes the safe rules on a first switch-on, hosted services included', async () => {
+    const h2 = await createTestStateStore()
+    const use = { ...helpers(), store: Object.assign(Object.create(h2.store), { getServerSettings: async () => settings }) as typeof h2.store }
+    const { body } = await call('PUT', '/api/firewall/policy', { enabled: true, blockPing: false, expectedRevision: firewallRevision(await h2.store.getFirewallState()) }, use)
+    const ids = (body!.rules as FirewallRule[]).map(rule => rule.id)
+    for (const id of ['default-ssh', 'default-http', 'default-https', 'default-panel', 'service-dns', 'service-smtp', 'service-imaps', 'service-ftp']) expect(ids).toContain(id)
+    expect((body!.rules as FirewallRule[]).find(rule => rule.id === 'service-dns')).toMatchObject({ protocol: 'both', port: '53' })
+    expect(body!.enabled).toBe(true)
+    await h2.close()
+  })
+
+  it('refuses an enable that would block the saving session', async () => {
+    await h.store.replaceFirewall({ rules: base.map(rule => rule.id.startsWith('default-') && rule.kind === 'port' && rule.action === 'accept' && rule.source === null && rule.port === '22' ? { ...rule, source: '192.0.2.0/24' } : rule), prefixLists: [], enabled: false }, { lockout: null })
+    await expect(async () => call('PUT', '/api/firewall/policy', await policy({ enabled: true }))).rejects.toMatchObject({ code: 'SELF_LOCKOUT' })
+    expect(await h.store.getFirewallState()).toMatchObject({ enabled: false })
+  })
+
+  it('requires the reviewed revision and booleans', async () => {
+    await expect(call('PUT', '/api/firewall/policy', { enabled: true, blockPing: false, expectedRevision: 'a'.repeat(64) })).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(async () => call('PUT', '/api/firewall/policy', await policy({ enabled: 'yes' }))).rejects.toMatchObject({ code: 'VALIDATION' })
+  })
+})
+
 describe('firewall workspace safe apply', () => {
   it('reads the rules with their revision and the trusted session address', async () => {
     const { body } = await call('GET', '/api/firewall')

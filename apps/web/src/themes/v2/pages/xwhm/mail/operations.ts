@@ -1,7 +1,11 @@
+import { renderV2ServerOps } from '../server/server-ops.ts'
 import { v2WhmClientTemplates } from '../../../whm-client-templates.ts'
 import { formField } from '../../../components/form-field.ts'
 import { escapeHtml } from '../../../html.ts'
 import { button, facts, group, mailContext, page, status, table, type WhmMailPageInput } from './common.ts'
+import { v2ListResetSection } from '../../xpanel/email-tools/list-admin.ts'
+
+const listToolReady = (input: WhmMailPageInput, id: string): boolean => (input.catalog ?? []).some(tool => tool.id === id && tool.status === 'verified')
 
 export function renderV2WhmMailQueue(input: WhmMailPageInput): string {
   const { t, locale, dir, canRead, canManage } = mailContext(input)
@@ -34,7 +38,7 @@ ${status('', { 'data-whm-mail-queue-result': true }, true)}<ol class="v2-whm-mai
 }
 
 export function renderV2WhmMailQuality(input: WhmMailPageInput): string {
-  const { t, locale, dir, canRead } = mailContext(input)
+  const { t, locale, dir, canRead, canManage } = mailContext(input)
   const summary = group('quality-summary', t(msgid('Sending identity')),
     `${status(t(msgid('Hosted mail domains have not been read.')), { 'data-whm-mail-quality-status': true })}${facts(t, [
       ['hostname', msgid('Server hostname')], ['helo', msgid('HELO name')], ['addresses', msgid('Sending addresses')], ['checked', msgid('Domains checked')],
@@ -48,7 +52,7 @@ export function renderV2WhmMailQuality(input: WhmMailPageInput): string {
 <p>${escapeHtml(t(msgid('Up to 50 domains per check, 5 at a time, within a bounded time limit.')))}</p>${status('', { 'data-whm-mail-quality-result': true }, true)}<p data-whm-mail-quality-truncated hidden>${escapeHtml(t(msgid('Only the first 2000 domains are listed.')))}</p>
 <div class="v2-whm-mail__scroll" role="region" tabindex="0" aria-label="${escapeHtml(t(msgid('Hosted mail domains')))}"><table class="v2-whm-mail__table"><caption class="v2-sr">${escapeHtml(t(msgid('Hosted mail domains')))}</caption><thead><tr><th scope="col"><input type="checkbox" data-whm-mail-quality-select-all aria-label="${escapeHtml(t(msgid('Select the first 50 domains')))}" disabled></th>${[t(msgid('Domain')), t(msgid('Account')), 'MX', 'SPF', 'DKIM', 'DMARC', t(msgid('Reverse DNS')), t(msgid('Checked (UTC)'))].map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody data-whm-mail-quality-rows><tr><td colspan="9">${escapeHtml(t(msgid('No domains have been read.')))}</td></tr></tbody></table></div>`)
   return page(input, '/whm/email/quality', t(msgid('Mail quality')), t(msgid('Live DNS checks of MX, SPF, DKIM, DMARC and reverse DNS for each hosted mail domain. Read-only.')),
-    `<div class="v2-whm-mail__stack" data-whm-mail-quality-workspace data-mail-quality-can-read="${canRead}" lang="${locale}" dir="${dir}">${v2WhmClientTemplates('mail-quality')}${summary}${domains}</div>`)
+    `<div class="v2-whm-mail__stack" data-whm-mail-quality-workspace data-mail-quality-can-read="${canRead}" lang="${locale}" dir="${dir}">${v2WhmClientTemplates('mail-quality')}${summary}${domains}${renderV2ServerOps(t, ['mail-auth'], canManage)}</div>`)
 }
 
 export function renderV2WhmMailboxMaintenance(input: WhmMailPageInput): string {
@@ -78,8 +82,8 @@ ${button(t(msgid('Recalculate quota')), { 'data-whm-mailbox-maintenance-run': 'q
 <li>${escapeHtml(t(msgid('Rebuild indexes runs doveadm force-resync on every folder to fix broken mailbox indexes. Mail clients may resynchronize afterwards.')))}</li>
 <li>${escapeHtml(t(msgid('Update search index runs doveadm index on INBOX and is available only when Dovecot full text search is configured.')))}</li></ul>
 <p data-whm-mailbox-maintenance-fts-note hidden>${escapeHtml(t(msgid('Full text search is not configured in Dovecot, so the search index cannot be updated.')))}</p>
-<p>${escapeHtml(t(msgid('Each job runs one step per mailbox on the host and then reads every mailbox again to confirm the result. Repairing maildir ownership or permissions is not available here.')))}</p>
+<p>${escapeHtml(t(msgid('Each job runs one step per mailbox on the host and then reads every mailbox again to confirm the result.')))}</p>
 ${status('', { 'data-whm-mailbox-maintenance-result': true }, true)}`)
   return page(input, '/whm/email/maintenance', t(msgid('Mailbox maintenance')), t(msgid('Per-mailbox quota and folder usage from Dovecot, with quota recalculation, index rebuilds and search indexing that run as verified host jobs.')),
-    `<div class="v2-whm-mail__stack" data-whm-mailbox-maintenance-workspace data-mailbox-maintenance-can-read="${canRead}" data-mailbox-maintenance-can-manage="${canManage}" lang="${locale}" dir="${dir}">${v2WhmClientTemplates('mailbox-maintenance')}${mailboxes}${usage}${actions}</div>`)
+    `<div class="v2-whm-mail__stack" data-whm-mailbox-maintenance-workspace data-mailbox-maintenance-can-read="${canRead}" data-mailbox-maintenance-can-manage="${canManage}" lang="${locale}" dir="${dir}">${v2WhmClientTemplates('mailbox-maintenance')}${mailboxes}${usage}${actions}</div>` + v2ListResetSection(t, { reset: canManage && listToolReady(input, 'mailing-list-password-reset'), restart: canManage && listToolReady(input, 'restart-mailing-lists') }))
 }

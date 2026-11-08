@@ -42,7 +42,7 @@ describe('GET /api/catalog', () => {
   })
 
   const open = (agent: AgentApp | undefined, token = 'b'.repeat(64), syntheticAcceptance = false): ApiApp => createApiApp({
-    ...(syntheticAcceptance ? { catalogProvider: { acceptanceIdentity: 'synthetic-unit-acceptance', reset: () => {}, load: async () => {
+    ...(syntheticAcceptance ? { catalogProvider: { acceptanceIdentity: 'synthetic-unit-acceptance', reset: () => {}, qualificationMode: () => false, load: async () => {
       const response = await agent!.fetch(new Request('http://agent.local/health'))
       return qualifyHostTools(tools.map(tool => ({ ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const } })), await response.json() as HostQualificationReport, true)
     } } } : {}),

@@ -45,5 +45,5 @@ export async function handleAccountRuntimeWorkspaceRoute(req: Request, url: URL,
   const reply = await ports.readAgent<Record<string, unknown>>(first.caller, path, op, true, 'POST')
   if (!reply || reply.op !== op.op || typeof reply.revision !== 'string' || !/^[0-9a-f]{64}$/.test(reply.revision) || typeof reply.changed !== 'boolean') return fail('SERVICE_UNAVAILABLE', 'the runtime change could not be verified; read again before retrying', unverified)
   try { await again() } catch { return fail('SERVICE_UNAVAILABLE', 'account authority changed after the change; read again before retrying', unverified) }
-  return workspaceJson({ op: reply.op, revision: reply.revision, changed: reply.changed }, op.op === 'app.deps' ? 202 : 200)
+  return workspaceJson({ op: reply.op, revision: reply.revision, changed: reply.changed }, op.op === 'app.deps' || op.op === 'webapp.stage' || op.op === 'webapp.deploy' || op.op === 'webapp.redeploy' ? 202 : 200)
 }

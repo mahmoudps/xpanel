@@ -14,7 +14,7 @@ function harness(initial = ROOT) {
   const store = { getAccount: vi.fn(async () => ({ id: USER.principal.kind === 'user' ? USER.principal.accountId : '', username: 'alice', status: active ? 'active' : 'suspended', planId: 'plan' })),
     getPlan: vi.fn(async () => ({ featureListId: 'features' })), getFeatureList: vi.fn(async () => ({ disabled })) }
   const helpers = { store, requireCaller: vi.fn(async () => caller), assertRoot: vi.fn(async (c: AuthenticatedCaller) => { if (c.principal.kind !== 'root') fail('FORBIDDEN', 'root required') }), emitAudit: vi.fn(async () => undefined),
-    dispatchRead: vi.fn(async () => Response.json(identity(caller))), now: () => new Date(STAMP) } as unknown as DeveloperWorkspaceHelpers & { dispatchRead: ReturnType<typeof vi.fn> }
+    dispatchRead: vi.fn(async () => Response.json(identity(caller))), now: () => new Date(STAMP), apiShellEnabled: vi.fn(async () => true) } as unknown as DeveloperWorkspaceHelpers & { dispatchRead: ReturnType<typeof vi.fn> }
   const send = (method = 'GET', body?: unknown, path = BASE, contentType = 'application/json') => {
     const url = new URL('https://panel.test' + path), req = new Request(url, { method, headers: { cookie: 'synthetic-sealed-session', 'x-csrf-token': 'synthetic-csrf', origin: 'https://panel.test', 'content-type': contentType }, ...(body === undefined ? {} : { body: typeof body === 'string' ? body : JSON.stringify(body) }) })
     return path.startsWith('/api/server/panel/integrations') ? handleIntegrationWorkspaceRoute(req, url, method, helpers) : handleDeveloperWorkspaceRoute(req, url, method, helpers)
@@ -23,6 +23,11 @@ function harness(initial = ROOT) {
 }
 
 describe('finite interactive API explorer', () => {
+  it('refuses both explorer surfaces while root keeps the switch off', async () => {
+    const h = harness()
+    h.helpers.apiShellEnabled = async () => false
+    await expect(h.send()).rejects.toMatchObject({ code: 'FORBIDDEN', detail: { reason: 'api_shell_disabled' } })
+  })
   it('ignores unrelated paths, lists only fixed GET operations and rejects every selector/body extension', async () => {
     const h = harness()
     expect(await h.send('GET', undefined, '/api/server/panel/developer/other')).toBeNull()

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { XpanelError } from '@xpanel/core'
 const seams = vi.hoisted(() => ({
-  owned: vi.fn(), shared: vi.fn(), current: vi.fn(), dbClose: vi.fn(), dbOpen: vi.fn(), heldClose: vi.fn(), heldCurrent: vi.fn(), open: vi.fn(),
+  settle: vi.fn(), openFailures: [] as unknown[], owned: vi.fn(), shared: vi.fn(), current: vi.fn(), dbClose: vi.fn(), dbOpen: vi.fn(), heldClose: vi.fn(), heldCurrent: vi.fn(), open: vi.fn(),
   normal: vi.fn(), recovery: vi.fn(), closedHeld: vi.fn(), dispatchHeld: vi.fn(), procClose: vi.fn(), procCurrent: vi.fn(),
   account: { id: '11111111-1111-4111-8111-111111111111', username: 'alice', uid: 1001, gid: 1001, home: '/home/alice', primaryDomain: 'alice.example.test', status: 'active' },
   empty: false, observedUid: 1001, currentChecksum: 'd'.repeat(64), activeChecksum: 'd'.repeat(64), dbActive: false,
@@ -33,6 +34,7 @@ vi.mock('../../../scripts/lifecycle-ownership.mjs', () => ({
 vi.mock('../../../scripts/install-finalization-native.mjs', () => ({ withInstallFinalizationStateDirectories: (_uid: number, _gid: number, callback: (pin: unknown) => unknown) => callback({ verify: vi.fn() }) }))
 vi.mock('node:fs/promises', () => ({ realpath: async (path: string) => path, lstat: async () => ({ dev: 1n, ino: 2n, uid: 992n, gid: 992n,
   mode: 0o100660n, nlink: 1n, isFile: () => true, isSymbolicLink: () => false }) }))
+vi.mock('node:timers/promises', () => ({ setTimeout: seams.settle }))
 vi.mock('node:child_process', () => ({ spawn: () => {
   const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: vi.fn() })
   queueMicrotask(() => {
@@ -65,6 +67,8 @@ vi.mock('./account-provisioning-observer.ts', () => ({ assertProvisioningProcess
 }))
 vi.mock('./account-provisioning-http.ts', () => ({ createNativeHeldAccountHttp: () => ({ assertAvailable: vi.fn(), open: async (input: { binding: string; challenge: string }) => {
   seams.open(input)
+  const failure = seams.openFailures.shift()
+  if (failure) throw failure
   return { requestBinding: input.binding, challenge: input.challenge, status: 200, pid: 42, unit: 'xpanel-php-fpm-alice-8.3.service', mainPid: 41,
     observedProcess: observed(), close: seams.heldClose, assertCurrent: seams.heldCurrent }
 } }) }))
@@ -78,6 +82,7 @@ const closedScope = () => ({ signal: AbortSignal.timeout(60000), assertCurrent: 
   withReadonlyDatabase: <T>(work: (db: ReadonlyOperationDatabase) => Promise<T>) => withReadonlyOperationDatabase('/var/lib/xpanel/control.db', work) })
 beforeEach(() => {
   vi.clearAllMocks(); seams.owned.mockReset(); seams.shared.mockReset(); seams.current.mockReset(); seams.closedHeld.mockReset(); seams.dispatchHeld.mockReset();
+  seams.settle.mockImplementation(async () => undefined); seams.openFailures = []
   seams.empty = false; seams.observedUid = 1001; seams.currentChecksum = 'd'.repeat(64); seams.activeChecksum = 'd'.repeat(64); seams.dbActive = false
 })
 afterEach(() => vi.restoreAllMocks())
@@ -142,5 +147,57 @@ describe('fixed native hosted UID composition', () => {
     const future = performance.now() + 60001; vi.spyOn(performance, 'now').mockReturnValue(future)
     await expect(consumeNativeHostedUidQualification(proof, dispatch)).rejects.toThrow()
     await retireNativeHostedUidQualification(proof); expect(seams.procClose).toHaveBeenCalledOnce()
+  })
+})
+
+describe('pre-switch canary across a transport reset', () => {
+  const held = (detail: Record<string, unknown>) => new XpanelError('PRECONDITION_FAILED', 'the held account HTTP request did not verify', { verificationRequired: true, reason: 'held_http_correlation_not_verified', ...detail })
+  const reset = () => held({ transportReset: true })
+  const hello = () => withNativeHostedUidQualification(capability, { kind: 'hello', nonce: randomUUID() }, async proof => proof)
+  const opened = () => seams.open.mock.calls.map(([input]) => input as { binding: string; challenge: string })
+
+  it('retries once after the delay, with the same binding and a new challenge', async () => {
+    seams.openFailures = [reset()]
+    await expect(hello()).resolves.toMatchObject({ digest: expect.stringMatching(/^[a-f0-9]{64}$/) })
+    const [first, second] = opened()
+    expect(opened()).toHaveLength(2); expect(second!.binding).toBe(first!.binding); expect(second!.challenge).not.toBe(first!.challenge)
+    expect(seams.settle).toHaveBeenCalledExactlyOnceWith(5000, undefined, { signal: expect.any(AbortSignal) })
+    expect(seams.heldClose).toHaveBeenCalledOnce()
+  })
+  it('refuses when the retry is reset as well', async () => {
+    seams.openFailures = [reset(), reset()]
+    await expect(hello()).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { reason: 'held_http_correlation_not_verified' } })
+    expect(opened()).toHaveLength(2)
+  })
+  it.each([[{}], [{ transportReset: false }], [{ reason: 'held_http_release_not_verified' }]])('keeps any other refusal %j without a retry', async detail => {
+    const failure = held(detail)
+    seams.openFailures = [failure]
+    await expect(hello()).rejects.toBe(failure)
+    expect(opened()).toHaveLength(1); expect(seams.settle).not.toHaveBeenCalled()
+  })
+  it('does not retry a plain socket error that never became a verified refusal', async () => {
+    const failure = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })
+    seams.openFailures = [failure]
+    await expect(hello()).rejects.toBe(failure)
+    expect(opened()).toHaveLength(1)
+  })
+  it('refuses without a second exchange when the observation moved during the delay', async () => {
+    seams.openFailures = [reset()]
+    seams.settle.mockImplementationOnce(async () => { seams.owned.mockRejectedValueOnce(new Error('ownership changed')) })
+    await expect(hello()).rejects.toThrow('ownership changed')
+    expect(opened()).toHaveLength(1)
+  })
+  it('keeps the original refusal when the deadline ends the delay', async () => {
+    const failure = reset()
+    seams.openFailures = [failure]
+    seams.settle.mockRejectedValueOnce(new DOMException('aborted', 'AbortError'))
+    await expect(hello()).rejects.toBe(failure)
+    expect(opened()).toHaveLength(1)
+  })
+  it('never retries inside closed recovery, which retains a worker pin', async () => {
+    const failure = reset()
+    seams.openFailures = [failure]
+    await expect(createNativeClosedRecoveryHostedUidQualification(capability, dispatch, closedScope() as never)).rejects.toBe(failure)
+    expect(opened()).toHaveLength(1); expect(seams.settle).not.toHaveBeenCalled()
   })
 })

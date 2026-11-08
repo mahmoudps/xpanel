@@ -15,7 +15,13 @@ describe('site publisher protected API boundary', () => {
   })
   it('pins every reply to the selected account/domain and refuses unqualified publish claims', () => {
     expect(validateSitePublisherWorkspaceReply(target, view())).toEqual(view())
-    for (const change of [{ context: { ...view().context, accountId: target.domainId } }, { context: { ...view().context, path: '/etc/passwd' } }, { capabilities: { canPublish: true, canRollback: false } }, { application: { status: 'read', nativeQualified: true } }, { recovery: { status: 'none', createdAt: '2026-10-27T00:00:00.000Z' } }]) expect(() => validateSitePublisherWorkspaceReply(target, { ...view(), ...change })).toThrow()
+    for (const change of [{ context: { ...view().context, accountId: target.domainId } }, { context: { ...view().context, path: '/etc/passwd' } }, { capabilities: { canPublish: 'yes', canRollback: false } }, { recovery: { status: 'prepared', createdAt: '2026-10-27T00:00:00.000Z' }, capabilities: { canPublish: true, canRollback: false } }, { application: { status: 'read', nativeQualified: true } }, { recovery: { status: 'none', createdAt: '2026-10-27T00:00:00.000Z' } }]) expect(() => validateSitePublisherWorkspaceReply(target, { ...view(), ...change })).toThrow()
+  })
+  it('accepts a verified publication reply only with a published recovery and index', () => {
+    const published = { ...view(), files: view().files.map((file, i) => i === 0 ? { ...file, exists: true, hash: 'b'.repeat(64), sizeBytes: 10 } : file), recovery: { status: 'published', createdAt: '2026-11-07T10:00:00.000Z' }, capabilities: { canPublish: true, canRollback: true }, application: { status: 'published', nativeQualified: false } }
+    expect(validateSitePublisherWorkspaceReply(target, published, 'publish')).toEqual(published)
+    expect(() => validateSitePublisherWorkspaceReply(target, { ...published, recovery: { status: 'restored', createdAt: '2026-11-07T10:00:00.000Z' }, capabilities: { canPublish: true, canRollback: false } }, 'publish')).toThrow()
+    expect(() => validateSitePublisherWorkspaceReply(target, { ...published, files: view().files }, 'publish')).toThrow()
   })
   it('checks preview bytes against their digest and blocks active content', () => {
     const preview = renderSitePublisherDraft(draft)

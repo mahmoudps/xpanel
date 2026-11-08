@@ -96,7 +96,8 @@ export const renderSurfaceToolbarEnd = (props: SurfaceToolbarProps): string => {
   const generation = Number.isSafeInteger(props.generationId) && props.generationId! > 0
     ? `<span data-generation-chip="${props.generationId}">${renderStatusBadge('ok', translator(props.locale ?? SOURCE_LOCALE)('Generation {generationId}', { generationId: props.generationId! }))}</span>` : ''
   const version = props.version ? `<span class="xp-toolbar-version xp-mono"><bdi dir="ltr">${escapeHtml(normalizeAsciiDigits(props.version))}</bdi></span>` : ''
-  return `<div class="xp-topbar__end">${renderLiveUpdatesIndicator(props.locale, props.realtimeEnabled === true)}${generation}${version}${languageLinks}${renderUserMenu(props)}</div>`
+  const bell = props.surface === 'xwhm' ? `<a class="xp-btn xp-btn--quiet" href="/whm#whm-inbox-heading" data-whm-bell data-unread="false">${escapeHtml(translator(props.locale ?? SOURCE_LOCALE)('Notifications'))} <span class="xp-mono" style="color:#fff;background:#b3261e;border-radius:8px;padding-inline:8px" data-whm-bell-count hidden></span></a>` : ''
+  return `<div class="xp-topbar__end">${renderLiveUpdatesIndicator(props.locale, props.realtimeEnabled === true)}${generation}${version}${languageLinks}${bell}${renderUserMenu(props)}</div>`
 }
 
 export const renderSurfaceToolbar = (props: SurfaceToolbarProps & { leadingHtml?: string }): string =>
@@ -168,6 +169,7 @@ export const renderSurfaceShell = (props: SurfaceShellProps): string => `
   <a class="xp-skip-link" href="#main-content">${translator(props.locale)('Skip to content')}</a>
   <aside class="xp-sidebar" id="xp-sidebar" data-xp-sidebar tabindex="-1" aria-label="${props.surface === 'xwhm' ? 'xWHM' : props.surface === 'xmail' ? 'xMail' : 'xPanel'} ${translator(props.locale)('navigation')}">
     ${renderMobileNavClose(props.locale)}
+    ${props.surface === 'xwhm' ? `<nav data-whm-favorites-nav hidden aria-label="${translator(props.locale)('Favorites')}"><ul></ul></nav>` : ''}
     ${props.sidebar}
   </aside>
   ${renderMobileNavBackdrop(props.locale)}

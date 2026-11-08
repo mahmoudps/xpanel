@@ -39,6 +39,11 @@ describe('trusted acceptance catalog provider', () => {
     expect(status(await provider.load(source()))).toBe('researched')
     expect(loader).not.toHaveBeenCalled()
   })
+  it('never honours the qualification switch on a host with operator acceptance', async () => {
+    const provider = createQualifiedCatalogProvider(options, () => true)
+    expect(provider.qualificationMode()).toBe(false)
+    expect((await provider.load(source())).some(tool => tool.delivery.admission)).toBe(false)
+  })
   it('loads the separately pinned target and requirements once and freezes the accepted snapshot', async () => {
     const provider = createQualifiedCatalogProvider(options)
     const result = await provider.load(source())

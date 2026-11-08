@@ -87,6 +87,14 @@ describe('WHM delivery report binding', () => {
     expect(send).toHaveBeenCalledTimes(2)
     expect(document.querySelector<HTMLElement>('[data-mail-log-status]')!.dataset.state).toBe('failed')
   })
+  it('opens with the filter a report link carries', async () => {
+    window.history.pushState({}, '', '/whm/email/delivery?sender=a%40b.test&domain=b.test')
+    const send = vi.fn(async (_method: string, _path: string) => delivery([]))
+    boot(renderWhmMailDelivery({ locale: 'en', canRead: true }), send); await tick()
+    window.history.pushState({}, '', '/')
+    expect(send.mock.calls[0]![1]).toContain('sender=a%40b.test')
+    expect(send.mock.calls[0]![1]).toContain('domain=b.test')
+  })
   it('shows a truthful unavailable journal and a refused request without stale rows', async () => {
     const send = vi.fn(async () => ({ ...base(), state: 'unavailable', reason: 'journal_unavailable', counts: { records: 0, events: 0, skipped: 0, unparsed: 0, untrusted: 0 }, matched: 0, messages: [], omittedMessages: 0 }))
     boot(renderWhmMailDelivery({ locale: 'ar', canRead: true }), send, true); await tick()

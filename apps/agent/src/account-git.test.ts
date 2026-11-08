@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { fail } from '@xpanel/core'
 import type { Account, Plan } from '@xpanel/core'
 import type { FileEntry, FileText } from './file-manager.ts'
-import { GIT_REGISTRY, handleAccountGitRoute, parseGitBranches, parseGitHistory, parseGitRequest, parseSafeGitConfig, runGitRequest } from './account-git.ts'
+import { GIT_REGISTRY, handleAccountGitRoute, parseGitBranches, parseGitDeployTasks, parseGitHistory, parseGitRequest, parseSafeGitConfig, runGitRequest } from './account-git.ts'
 import type { AccountGitRouteDeps, GitRequest } from './account-git.ts'
 import type { AccountGitRun } from './account-git-runner.ts'
 
@@ -92,5 +92,23 @@ describe('protected account Git workspace', () => {
     disabled = ['git-version-control']; await expect(route()).rejects.toMatchObject({ code: 'FORBIDDEN' })
     disabled = []; principal.disabled = true; await expect(route()).rejects.toMatchObject({ code: 'FORBIDDEN' })
     principal.disabled = false; principal.accountId = 'foreign'; await expect(route()).rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+  it('opens the history viewer only for listed repositories and refuses every mutating method', async () => {
+    const t = setup(), principal = { kind: 'user', id: 'principal', accountId: account.id, username: 'alice', disabled: false }, run = vi.fn()
+    const deps: AccountGitRouteDeps = { caller: { role: 'user', actor: 'user:alice', principalId: 'principal', accountId: account.id, resellerId: null },
+      store: { getAccountByUsername: async () => account, getPlan: async () => ({ id: 'plan', featureListId: 'features' }) as Plan, getFeatureList: async () => ({ id: 'features', name: 'features', ownerId: null, disabled: [] }), withAccountLifecycleLease: async (_id, action) => action(account) },
+      currentPrincipal: async () => principal, files: () => t.files, run, audit: vi.fn(async () => undefined) }
+    const route = (query: string, method = 'GET') => { const url = new URL('http://agent/accounts/alice/git/view' + query); return handleAccountGitRoute(new Request(url, { method }), url, method, deps) }
+    await expect(route('?view=refs&path=not-listed')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(route('?view=refs&path=../outside')).rejects.toMatchObject({ code: 'VALIDATION' })
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) expect((await route('?view=refs&path=site', method))!.status).toBe(405)
+    expect(run).not.toHaveBeenCalled()
+  })
+})
+
+describe('deployment tasks of a repository', () => {
+  it('reads only the task list of the deployment file', () => {
+    expect(parseGitDeployTasks('---\ndeployment:\n  tasks:\n    - export DEPLOYPATH=/home/alice/public_html/\n    - /bin/cp index.html $DEPLOYPATH\n')).toEqual(['export DEPLOYPATH=/home/alice/public_html/', '/bin/cp index.html $DEPLOYPATH'])
+    for (const text of ['', 'deployment:\n', 'deployment:\n  tasks:\n', 'other:\n  tasks:\n    - a\n', 'deployment:\n  tasks:\n    - a\n  extra: b\n']) expect(() => parseGitDeployTasks(text)).toThrow(expect.objectContaining({ code: 'PRECONDITION_FAILED' }))
   })
 })

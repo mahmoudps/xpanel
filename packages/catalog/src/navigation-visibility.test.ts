@@ -193,7 +193,7 @@ describe('verified navigation policy', () => {
   })
 
   it('keeps site settings and legacy-only rewrite unavailable without their bounded owner contract', () => {
-    const fixtures = qualifiedToolFixtures(productionTools.filter(entry => entry.status !== 'out-of-scope' && entry.id !== 'domain-htaccess').map(entry => entry.id))
+    const fixtures = qualifiedToolFixtures(productionTools.filter(entry => entry.status !== 'out-of-scope' && entry.id !== 'domain-htaccess' && entry.id !== 'manage-domain').map(entry => entry.id))
     // The reverse-proxy switch is a domain workspace write, so the owner's domains tool opens that page.
     expect(routesOf(visibleNavigation(ownerContext, fixtures))).toContain('/domains/reverse-proxy')
     for (const route of ['/domains/site-settings', '/software/htaccess']) {

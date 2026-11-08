@@ -11,6 +11,7 @@ export const STATE_CLI_COMMANDS = new Set([
   'disable-2fa',
   'recover-provisioning',
   'init-quotas',
+  'panel-access',
 ])
 
 export type CliInvocation = 'help' | 'drop-to-xpanel' | 'repair-as-root' | 'run' | 'refuse'

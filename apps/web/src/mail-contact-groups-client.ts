@@ -66,7 +66,7 @@ function bindMailContactGroups(askDialog: ((options: Record<string, unknown>) =>
     }
     const candidate = (value: unknown): GroupContact => {
       if (!contactObject(value) || typeof value.id !== 'string' || !uuid.test(value.id) || value.owner !== mailbox || !revision(value.revision) || !Array.isArray(value.groups) || !value.groups.every(groupName)) throw new Error('invalid_group_contact')
-      for (const key of ['fullName', 'email'] as const) if (typeof value[key] !== 'string' || !(value[key] as string).isWellFormed() || !(value[key] as string).trim() || value[key] !== (value[key] as string).trim() || /[\r\n\u0000]/u.test(value[key] as string)) throw new Error('invalid_group_contact_text')
+      for (const key of ['fullName', 'email'] as const) if (typeof value[key] !== 'string' || !(value[key] as string).isWellFormed() || key === 'fullName' && !(value[key] as string).trim() || value[key] !== (value[key] as string).trim() || /[\r\n\u0000]/u.test(value[key] as string)) throw new Error('invalid_group_contact_text')
       if ((value.email as string).toLowerCase() !== value.email) throw new Error('invalid_group_contact_email')
       return { id: value.id, owner: mailbox, fullName: value.fullName as string, email: value.email as string, groups: [...value.groups] as string[], revision: value.revision }
     }
@@ -128,8 +128,8 @@ function bindMailContactGroups(askDialog: ((options: Record<string, unknown>) =>
       if (explicit && !await discard()) return
       if (busy || confirming || !admitted()) return
       busy = true; lock(); announce('reading', t('Reading saved groups, contacts and capacity…'))
-      try { install(await read(), group, contact); announce('read', t('Saved groups and capacity read. Shared contacts remain read-only; synchronization is unverified.')) }
-      catch (error) { if (exceedsBudget(error)) { review = true; announce('unavailable', budgetMessage()) } else announce('failed', t('Saved groups could not be read coherently. Drafts are preserved; nothing was changed.')) }
+      try { install(await read(), group, contact); announce('read', t('Saved groups and capacity read. Shared contacts remain read-only.')) }
+      catch (error) { if (exceedsBudget(error)) { review = true; announce('unavailable', budgetMessage()) } else announce('failed', (error as { details?: { reason?: unknown } } | null)?.details?.reason === 'dav_store_too_large' ? t('This mailbox’s calendars and contacts are too large to open here. Nothing was changed, and your devices still have them.') : t('Saved groups could not be read coherently. Drafts are preserved; nothing was changed.')) }
       finally { busy = false; lock(); if (externalPending) { externalPending = false; externalRefresh() } }
     }
     const mutate = async (kind: 'group' | 'delete' | 'membership'): Promise<void> => {
@@ -151,7 +151,7 @@ function bindMailContactGroups(askDialog: ((options: Record<string, unknown>) =>
       } catch { announce('failed', t('Check the group name, membership and server capacity limits. Nothing was sent.')); return }
       const label = kind === 'membership' ? contact!.fullName : kind === 'delete' ? original!.name : proposedName
       const losingDraft = kind === 'membership' ? groupDirty() : membershipDirty() || kind === 'delete' && groupDirty()
-      const hint = (kind === 'delete' ? t('This removes the group from its contacts. The contacts are kept.') : t('The exact reviewed group membership will be saved. No mail is sent or synchronized.')) + (losingDraft ? '\n' + t('Other unsaved group or membership edits will be discarded.') : '')
+      const hint = (kind === 'delete' ? t('This removes the group from its contacts. The contacts are kept.') : t('The exact reviewed group membership will be saved. No mail is sent.')) + (losingDraft ? '\n' + t('Other unsaved group or membership edits will be discarded.') : '')
       if (!await confirm(kind === 'delete' ? t('Delete contact group?') : t('Save contact groups?'), label + '\n' + hint, kind === 'delete')) return
       if (!admitted() || busy) return
       busy = true; lock(); let dispatched = false
@@ -191,7 +191,7 @@ function bindMailContactGroups(askDialog: ((options: Record<string, unknown>) =>
           }
         }
         install(after, kind === 'delete' ? '' : kind === 'group' ? proposedName : selectedGroup, kind === 'membership' ? contact!.id : selectedContact)
-        announce('saved', t('The reviewed groups were stored and read back. Contacts are preserved; no mail was sent or synchronized.'))
+        announce('saved', t('The reviewed groups were stored and read back. Contacts are preserved; no mail was sent.'))
         window.dispatchEvent(new CustomEvent('xpanel:contacts-changed', { detail: { source: 'contact-groups', mailbox } }))
       } catch (error) {
         if (exceedsBudget(error)) { review = true; announce('unavailable', budgetMessage()); return }

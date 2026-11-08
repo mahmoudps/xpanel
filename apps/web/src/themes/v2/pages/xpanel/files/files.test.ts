@@ -67,6 +67,9 @@ describe('v2 account files pages', () => {
     const html = renderV2DirectoryPrivacyPage(t, { surface: { account }, canManage: true })
     for (const hook of ['data-directory-privacy', 'data-account-username="alice"', 'data-directory-privacy-path', 'data-directory-privacy-prompt', 'data-directory-privacy-username', 'data-directory-privacy-password', 'data-directory-privacy-add', 'data-directory-privacy-save', 'data-directory-privacy-status', 'data-directory-privacy-rows', 'data-directory-privacy-preview-wrap', 'data-directory-privacy-preview']) expect(html).toContain(hook)
     expect(html).toContain('Protected folders have not been read.')
+    // Leech protection has its own tool: an unqualified host shows the section without opening it.
+    expect(html).toContain('data-leech-protection data-lp-username="alice" data-lp-manage="false"')
+    expect(html).toContain('data-lp-save disabled')
     expect(html).toContain('A folder counts as protected only after the web server asked for a password.')
     expect(html).toContain('Leave a password empty to keep the current password of that user.')
     expect(html).not.toContain('Saved rules read.')

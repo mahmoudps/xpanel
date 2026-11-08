@@ -33,6 +33,7 @@ export const V2_FILES_CSS = `.v2-files{display:flex;flex-direction:column;gap:va
 .v2-directory-privacy [data-directory-privacy-preview]{display:block;direction:ltr;white-space:pre;overflow:auto;text-align:match-parent}
 @media(max-width:1000px){.v2-file-browser,.v2-file-details{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:600px){.v2-file-fields{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:600px){.v2-files[data-leech-protection] tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.v2-files[data-leech-protection] tr>:last-child{grid-column:1/-1}.v2-files[data-leech-protection] th:last-child{display:none}}
 .v2-files[data-file-manager] .v2-file-view-controls,.v2-files[data-file-manager] .v2-file-view-details,.v2-files[data-file-manager] .v2-file-view-uploads,.v2-files[data-file-manager] .v2-file-view-side{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}
 .v2-files[data-file-manager] .v2-file-view-controls>label{display:flex;flex-direction:column;gap:var(--space-1)}
 .v2-files[data-file-manager] .v2-file-view-controls>div,.v2-files[data-file-manager] .v2-file-view-details>div{display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-2)}

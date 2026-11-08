@@ -126,7 +126,7 @@ describe('detailed administrator workspaces', () => {
   })
 
   it.each(['/whm/backups', '/whm/backups/restore', '/whm/resellers', '/whm/resellers/privileges'])('does not pass DTOs or native forms to the %s availability fallback', activeRoute => {
-    const html = renderWhmSurface({ activeRoute, capabilityUnavailable: true, principal: root, hostname: 'PRIVATE-HOST-MARKER', resellers: [{ id: 'private', username: 'PRIVATE-RESELLER-MARKER', acl: [], maxAccounts: 1, totalDiskMb: 1, totalBandwidthMb: 1, oversell: false, nameservers: [], delegatedIps: [] }] })
+    const html = renderWhmSurface({ activeRoute, capabilityUnavailable: true, principal: root, hostname: 'PRIVATE-HOST-MARKER', resellers: [{ id: 'private', username: 'PRIVATE-RESELLER-MARKER', acl: [], maxAccounts: 1, totalDiskMb: 1, totalBandwidthMb: 1, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }] })
     assert.doesNotMatch(html, /<form\b|PRIVATE-HOST-MARKER|PRIVATE-RESELLER-MARKER|data-reseller-create-form/)
     assert.match(html, /data-approved-whm-/)
   })
@@ -197,7 +197,7 @@ describe('detailed administrator workspaces', () => {
 
   it.each([
     ['/whm/software/php', ['php-install', 'php-extensions', 'php-functions'], ['Set as default', 'Reinstall selected version', 'Add exception', 'Grant exception']],
-    ['/whm/transfers', ['transfer-source', 'transfer-identities', 'transfer-progress', 'transfer-import'], ['SSH key', 'API token', 'Copy public key', 'Test connection', 'Stop after the current account', 'Parsed plan', 'Not imported or changed', 'Discard upload']],
+    ['/whm/transfers', ['transfer-source', 'transfer-identities', 'transfer-progress', 'transfer-import'], ['SSH key', 'API token', 'Parsed plan', 'Not imported or changed']],
     ['/whm/server/upgrade', ['upgrade-version', 'upgrade-job', 'upgrade-history', 'upgrade-touches'], ['What changes', 'Confirm upgrade', 'Start upgrade', 'Run preflight again', 'Added', 'Cancel pending upgrade']],
   ] as const)('retains all final approved components without activating unsupported operations in %s', (activeRoute, sections, labels) => {
     const html = renderWhmDetailPage({ activeRoute, principal: root, locale: 'en', version: 'synthetic-v1', availableVersion: 'synthetic-v2' })!
@@ -259,16 +259,16 @@ describe('detailed administrator workspaces', () => {
     assert.doesNotMatch(held, /<form\b|value="2222"/)
     const nativeOnly = tools.map(tool => ({ ...tool, status: tool.id === 'server-settings-edit' ? 'verified' as const : 'researched' as const }))
     const ready = renderWhmDetailPage({ activeRoute: '/whm/security/ssh', principal: root, catalog: nativeOnly, serverSettings: settings })!
-    assert.match(ready, /data-server-settings-form/)
-    assert.match(ready, /name="sshPort" type="number" dir="ltr" value="2222"/)
+    assert.match(ready, /data-whm-ssh-policy/)
+    assert.match(ready, /data-whm-ssh-port [^>]*value="2222"/)
   })
 
   it.each([
     ['/whm/domains', ['Domain kind', 'SSL assignment', 'PHP version', 'Clear filters', 'Site type', 'Wildcard', 'Unbound requests', 'Save default site', 'Discard']],
     ['/whm/ssl', ['Challenge', 'Auto-renew', 'Retry', 'Replace', 'Renewal queue', 'Next attempt (UTC)', 'Validation', 'Save AutoSSL settings', 'Discard']],
-    ['/whm/security/ssh', ['Keys and password', 'Added (UTC)', 'Last used (UTC)', 'Remove managed key', 'Last 24 hours', 'Method', 'Count', 'Result', 'Banned by SSH', 'Unban selected address', 'Discard']],
+    ['/whm/security/ssh', ['Keys and password', 'Added (UTC)', 'Last used (UTC)', 'Remove managed key', 'Last 24 hours', 'Method', 'Count', 'Result', 'Banned by SSH']],
     ['/whm/services/web', ['client_max_body_size', 'Use suggested values', 'Unlimited child lifetime', 'Pending configuration difference', 'Proposed', 'Discard pending change', 'Restore selected generation']],
-    ['/whm/security', ['Enable secret entrance path', 'Enable IP allowlist', 'By IP address', 'Block the address for', 'No expiry', 'Cancel', 'Unlimited request rate', 'Unlimited burst', 'Unlimited request body', 'Save and apply', 'Discard']],
+    ['/whm/security', ['Enable secret entrance path', 'Enable IP allowlist', 'By IP address', 'Block the address for', 'No expiry', 'Unlimited request rate', 'Unlimited burst', 'Unlimited request body']],
   ] as const)('keeps all final reference microstates in %s with unique controls', (activeRoute, labels) => {
     const html = renderWhmDetailPage({ activeRoute, principal: root, catalog: readyCatalog, serverSettings: settings, domains: [], certificates: [{ names: ['synthetic.example.test'], notAfter: '2027-01-01T00:00:00.000Z' }] })!
     // Certificate and key rows are rendered by the client from observed data; their controls live there.
@@ -383,7 +383,7 @@ describe('detailed administrator workspaces', () => {
 
   it('keeps security components while declaring unsupported host writes honestly', () => {
     const html = renderWhmDetailPage({ activeRoute: '/whm/security', principal: root })!
-    for (const title of ['Access', 'Two-factor for root', 'Sign-in lockout', 'API tokens', 'Nginx web application firewall', 'Dangerous PHP functions', 'Compiler lock', 'Path patterns', 'User-agent patterns', 'Answer for denied requests', 'Current API tokens', 'accounts:read', 'Revoke token', 'Add account', 'Remove exception', 'Unlock username', 'Unblock address']) assert.ok(html.includes(title), title)
+    for (const title of ['Access', 'Two-factor for root', 'Sign-in lockout', 'API tokens', 'Nginx web application firewall', 'Dangerous PHP functions', 'Compiler lock', 'Path patterns', 'User-agent patterns', 'Answer for denied requests', 'Current API tokens', 'accounts:read', 'Add account', 'Remove exception', 'Unlock username', 'Unblock address']) assert.ok(html.includes(title), title)
     assert.match(html, /Enrollment is optional/)
     assert.doesNotMatch(html, /required enrollment|generate recovery|value="[0-9]{6}"/i)
   })

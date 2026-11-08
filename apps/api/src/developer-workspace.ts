@@ -11,6 +11,8 @@ export interface DeveloperWorkspaceHelpers extends Pick<ExtendedRouteHelpers, 'r
   /** Re-enter the normal API dispatcher with its ORIGINAL trusted transport context. Never a network fetch or a privileged synthetic caller. */
   dispatchRead?: (request: Request) => Promise<Response>
   now?: () => Date
+  /** Root's API explorer switch; the integrations surface does not depend on it. */
+  apiShellEnabled(): Promise<boolean>
 }
 export interface DeveloperReadDescriptor { operation: DeveloperOperation; method: 'GET'; path: string }
 export interface DeveloperManifest { surface: DeveloperSurface; available: boolean; operations: DeveloperReadDescriptor[]; writes: false; rawResponses: false }
@@ -85,6 +87,7 @@ export async function handleDeveloperRequest(req: Request, url: URL, method: str
     const caller = surface === 'account' ? (await authorizeAccountOwner(helpers, req, ['api-shell'], 'API explorer')).caller : await helpers.requireCaller(req)
     if (surface !== 'account') await helpers.assertRoot(caller, 'developer.explorer.read')
     if (caller.sessionId === null || caller.apiTokenId !== null) return fail('FORBIDDEN', 'the API explorer requires the signed-in interactive session', unchanged)
+    if (surface !== 'integrations' && !await helpers.apiShellEnabled()) return fail('FORBIDDEN', 'the API explorer is turned off on this server', { ...unchanged, reason: 'api_shell_disabled' })
     return caller
   }
   const first = await authorize()

@@ -64,8 +64,7 @@ describe('trusted read-only theme composition', () => {
     expect(html).not.toContain(account.primaryDomain)
     expect(html).not.toContain(plan.name)
     expect(html).not.toContain('xpanel-' + account.uid + '.slice')
-    const refresh = nodes.find(node => node.tag === 'button' && node.attrs.get('aria-describedby') === 'v2-resource-refresh-note')!
-    expect(refresh.attrs.has('disabled')).toBe(true)
+    expect(nodes.some(node => node.tag === 'button' && node.attrs.get('aria-describedby') === 'v2-resource-refresh-note')).toBe(false)
     expect(nodes.some(node => node.attrs.get('data-readonly') === 'true' && node.attrs.get('data-qualified') === 'false')).toBe(true)
   })
 

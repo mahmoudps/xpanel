@@ -121,7 +121,7 @@ describe('navigation', () => {
 
   it('represents separated administrator actions as root-only metadata without a task screen or action', () => {
     const routes = ['/whm/email/bcc', '/whm/email/marketing', '/whm/services/ftp-log-analysis',
-      '/whm/software/deployments', '/whm/software/application-projects', '/whm/software/composer', '/whm/services/default-index']
+      '/whm/software/deployments', '/whm/software/application-projects', '/whm/software/composer', '/whm/services/default-index', '/whm/services/nginx-proxy']
     for (const route of routes) {
       const entry = pages.find(({ page }) => page.route === route)!
       expect(entry.surface).toBe('xwhm')

@@ -67,6 +67,19 @@ test('missing profile evidence cannot be filled by a different profile', () => {
   assert.throws(() => assertCompleteEvidence(bundle.evidence, bundle.target, requirements), /Missing acceptance evidence/)
 })
 
+test('a reviewed requirement profile subset needs every remaining profile and admits no excluded one', () => {
+  const { bundle } = fixture()
+  const subset = [{ ...structuredClone(requirements[0]), profiles: REQUIRED_PROFILES.slice(0, 4) }]
+  const kept = entries => entries.filter(entry => (entry.receipt?.profile ?? entry.profile) !== 'centos-stream-9')
+  const narrowed = { ...bundle, requirements: subset, receipts: kept(bundle.receipts), evidence: kept(bundle.evidence) }
+  assert.equal(verifyEvidenceBundle(narrowed, { expectedTarget: bundle.target, expectedRequirements: subset }).evidence.length, 24)
+  assert.throws(() => verifyEvidenceBundle({ ...narrowed, receipts: narrowed.receipts.slice(1), evidence: narrowed.evidence.slice(1) }, { expectedTarget: bundle.target, expectedRequirements: subset }), /Missing acceptance evidence/)
+  assert.throws(() => verifyEvidenceBundle({ ...bundle, requirements: subset }, { expectedTarget: bundle.target, expectedRequirements: subset }), /outside the target/)
+  for (const profiles of [[], [...REQUIRED_PROFILES], ['debian-12'], ['rocky-9', 'rocky-9']]) {
+    assert.throws(() => verifyEvidenceBundle(narrowed, { expectedTarget: bundle.target, expectedRequirements: [{ ...subset[0], profiles }] }))
+  }
+})
+
 test('target requires all five declared profiles', () => {
   const { document } = fixture()
   document.target.supportedProfiles.pop()

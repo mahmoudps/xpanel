@@ -296,3 +296,28 @@ describe('file restore authorization', () => {
     expect(writes(f.home)).toEqual([])
   })
 })
+
+describe('owner file and directory restoration', () => {
+  const ownerCaller: AgentCallerIdentity = { principalId: '44444444-4444-4444-8444-444444444444', actor: 'alice', role: 'user', accountId: account.id, resellerId: null }
+  const asOwner = (f: Awaited<ReturnType<typeof setup>>) => { f.principal.current = { kind: 'user', id: ownerCaller.principalId, username: 'alice', disabled: false, accountId: account.id } as typeof f.principal.current; return f.deps(ownerCaller) }
+  it('replaces the current file with the archived bytes at its original path', async () => {
+    const f = await setup()
+    f.home.file('public_html/index.html', 'current site')
+    const body = await restore(asOwner(f), ['public_html/index.html'], 'replace')
+    expect(body.counts).toEqual({ restored: 1, 'skipped-exists': 0, failed: 0, 'not-attempted': 0 })
+    expect(f.home.text('public_html/index.html')).toBe('<h1>archived</h1>')
+    expect(f.audit).toHaveBeenCalledWith(expect.objectContaining({ action: 'backup.files_restored', target: 'account:alice', principalId: ownerCaller.principalId }))
+  })
+  it('refuses mail and panel paths with path_not_restorable before reading the archive', async () => {
+    const f = await setup()
+    await expect(call(asOwner(f), '/preview', { file: FILE, paths: ['mail/alice.example.test/info/cur/1'], destination: 'new-folder' })).rejects.toMatchObject({ code: 'VALIDATION', detail: { reason: 'path_not_restorable' } })
+    expect(writes(f.home)).toEqual([])
+  })
+  it('refuses another account owner and a plan without file restoration', async () => {
+    const f = await setup({ disabled: ['file-restoration'] })
+    await expect(call(asOwner(f))).rejects.toMatchObject({ code: 'FORBIDDEN', message: /disabled by the account plan/ })
+    const g = await setup()
+    g.principal.current = { kind: 'user', id: ownerCaller.principalId, username: 'alice', disabled: false, accountId: '55555555-5555-4555-8555-555555555555' } as typeof g.principal.current
+    await expect(call(g.deps(ownerCaller))).rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+})

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { fail } from '@xpanel/core'
 import { handleMailboxSpamRoute, parseMailboxSpamFields } from './mailbox-spam.ts'
 import { cleanupMailboxToolsFixtures, mailboxToolsFixture, toolsAuthority, TOOLS_ACCOUNT, TOOLS_MAILBOX, TOOLS_OTHER } from './mailbox-spam-fixture.ts'
-const fields = { inherit: false, enabled: true, addHeaderScore: 8, spamBoxEnabled: true, allowlist: ['safe@example.test'], blocklist: ['bad@example.test'] }
+const fields = { inherit: false, enabled: true, addHeaderScore: 8, spamBoxEnabled: true, autoDeleteScore: null as number | null, allowlist: ['safe@example.test'], blocklist: ['bad@example.test'] }
 afterEach(cleanupMailboxToolsFixtures)
 async function harness() {
   const f = await mailboxToolsFixture()
@@ -39,6 +39,16 @@ describe('sealed mailbox spam preferences', () => {
     await h.write(['webmail', 'spam-preferences', encodeURIComponent(TOOLS_MAILBOX) + '.json'], { ...fields, mailbox: TOOLS_MAILBOX, ownerAuthority: { ...toolsAuthority, serviceUserId: TOOLS_OTHER }, updatedAt: '2026-10-27T12:00:00.000Z' })
     const view = await h.view(); expect(view).toMatchObject({ preferences: null, review: 'mailbox_metadata_binding_unverified', capabilities: { canSave: false } }); expect(JSON.stringify(view)).not.toContain('safe@example.test')
     await expect(h.send('PUT', { ...fields, expectedRevision: view.revision })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+  it('takes a whole auto-delete threshold from 1 through 50, within the account limit', async () => {
+    const h = await harness(), view = await h.view()
+    for (const autoDeleteScore of [0, 51, 1.5, 'high']) await expect(h.send('PUT', { ...fields, autoDeleteScore, expectedRevision: view.revision })).rejects.toMatchObject({ code: 'VALIDATION', detail: { reason: 'OUT_OF_RANGE' } })
+    const saved: any = await (await h.send('PUT', { ...fields, autoDeleteScore: 15, expectedRevision: view.revision }))!.json()
+    expect(saved.preferences.autoDeleteScore).toBe(15)
+    await h.write(['mail', 'accounts', TOOLS_ACCOUNT, 'spam-settings.json'], { enabled: true, addHeaderScore: 5, spamBoxEnabled: true, autoDeleteSpam: true, autoDeleteScore: 20 })
+    const limited = await h.view()
+    expect(limited.inherited.autoDeleteFloor).toBe(20)
+    await expect(h.send('PUT', { ...fields, autoDeleteScore: 19, expectedRevision: limited.revision })).rejects.toMatchObject({ code: 'VALIDATION', detail: { reason: 'below_account_limit' } })
   })
   it('refuses selectors, unknown fields, invalid scores and contradictory sender lists', async () => {
     const h = await harness()

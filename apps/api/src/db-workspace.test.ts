@@ -75,11 +75,13 @@ describe('database workspace routes', () => {
   })
   it('submits the reviewed upgrade revision only and maps an unverifiable job reply to review', async () => {
     const ctx = setup('root'); ctx.readAgent.mockResolvedValue({ job: { id: 'job-1', kind: 'database.mariadb.upgrade', status: 'queued' } })
-    const response = await ctx.send('/api/server/databases/upgrade/apply', 'POST', { expectedRevision: 'a'.repeat(64) })
-    expect(response!.status).toBe(202); expect(ctx.readAgent).toHaveBeenCalledWith(ctx.root, '/host/databases/upgrade/apply', { expectedRevision: 'a'.repeat(64) }, true, 'POST')
+    const acknowledged = { expectedRevision: 'a'.repeat(64), acknowledgedWarnings: ['service-restart', 'no-downgrade'] }
+    const response = await ctx.send('/api/server/databases/upgrade/apply', 'POST', acknowledged)
+    expect(response!.status).toBe(202); expect(ctx.readAgent).toHaveBeenCalledWith(ctx.root, '/host/databases/upgrade/apply', acknowledged, true, 'POST')
     await expect(ctx.send('/api/server/databases/upgrade/apply', 'POST', { expectedRevision: 'a'.repeat(64), force: true })).rejects.toMatchObject({ code: 'VALIDATION' })
+    await expect(ctx.send('/api/server/databases/upgrade/apply', 'POST', { expectedRevision: 'a'.repeat(64), targetVersion: '0.0.1' })).rejects.toMatchObject({ code: 'VALIDATION' })
     ctx.readAgent.mockResolvedValue({ job: { id: 'job-1', kind: 'system.packages.upgrade' } })
-    await expect(ctx.send('/api/server/databases/upgrade/apply', 'POST', { expectedRevision: 'a'.repeat(64) })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', detail: expect.objectContaining({ unknownOutcome: true }) })
+    await expect(ctx.send('/api/server/databases/upgrade/apply', 'POST', acknowledged)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', detail: expect.objectContaining({ unknownOutcome: true }) })
   })
   it('scopes account reads and sign-on to the session owner and its plan feature', async () => {
     const ctx = setup('user'); ctx.readAgent.mockResolvedValue(signon)
@@ -88,9 +90,23 @@ describe('database workspace routes', () => {
     await expect(ctx.send('/api/account/database-engines/phpmyadmin/sign-on', 'POST', { accountId: id })).rejects.toMatchObject({ code: 'VALIDATION' })
     ctx.store.getFeatureList.mockResolvedValue({ disabled: ['phpmyadmin'] })
     await expect(ctx.send('/api/account/database-engines/phpmyadmin')).rejects.toMatchObject({ code: 'FORBIDDEN' })
-    expect(await ctx.send('/api/account/database-engines/phppgadmin/sign-on', 'POST', {})).toBeNull()
     const rootCaller = setup('root')
     await expect(rootCaller.send('/api/account/database-engines/postgresql')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+  it('passes the phpPgAdmin status and sign-on through the same owner checks', async () => {
+    const ctx = setup('user')
+    const status = { context: { accountId: id, username: 'alice' }, client: 'phppgadmin', installed: false, postgresql: true, signon: { state: 'no-package', reason: 'no-distribution-package' }, databases: 1, ticketSeconds: 60, sessionSeconds: 1800 }
+    ctx.readAgent.mockResolvedValue(status)
+    expect(await (await ctx.send('/api/account/database-engines/phppgadmin'))!.json()).toMatchObject({ signon: status.signon })
+    ctx.readAgent.mockResolvedValue({ ...status, signon: { state: 'no-package', reason: 'made-up' } })
+    await expect(ctx.send('/api/account/database-engines/phppgadmin')).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' })
+    ctx.readAgent.mockResolvedValue({ ...signon, client: 'phppgadmin' })
+    expect(await (await ctx.send('/api/account/database-engines/phppgadmin/sign-on', 'POST', {}))!.json()).toMatchObject({ client: 'phppgadmin' })
+    expect(ctx.readAgent).toHaveBeenLastCalledWith(expect.anything(), '/accounts/alice/database-engines/phppgadmin/sign-on', {}, true, 'POST')
+    ctx.readAgent.mockResolvedValue(signon)
+    await expect(ctx.send('/api/account/database-engines/phppgadmin/sign-on', 'POST', {})).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' })
+    ctx.store.getFeatureList.mockResolvedValue({ disabled: ['phppgadmin'] })
+    await expect(ctx.send('/api/account/database-engines/phppgadmin/sign-on', 'POST', {})).rejects.toMatchObject({ code: 'FORBIDDEN' })
   })
   it('serves the saved PostgreSQL objects with the server reading and the shared database limit', async () => {
     const ctx = pgSetup()

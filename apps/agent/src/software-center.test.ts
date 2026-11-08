@@ -207,7 +207,7 @@ describe('software center previews', () => {
   it('reports truthful refusals for unknown, unavailable, no-op and failed simulations', async () => {
     const { fake, observed } = await debian({
       'install ffmpeg': { ok: false, code: 100, stdout: '', stderr: 'E: Unable to locate package ffmpeg' },
-      'install htop': { ok: false, code: 100, stdout: '', stderr: 'E: Unable to correct problems, you have held broken packages.' },
+      'install ghostscript': { ok: false, code: 100, stdout: '', stderr: 'E: Unable to correct problems, you have held broken packages.' },
       'install supervisor': { ok: false, code: null, stdout: '', stderr: '' },
       'install sqlite3': { stdout: 'Purg sqlite3 [1]\n' },
     })
@@ -216,7 +216,7 @@ describe('software center previews', () => {
     expect(await preview('install', 'git')).toMatchObject({ state: 'refused', reason: 'nothing-to-do' })
     expect(await preview('remove', 'memcached')).toMatchObject({ state: 'refused', reason: 'nothing-to-do' })
     expect(await preview('install', 'ffmpeg')).toMatchObject({ state: 'refused', reason: 'package-not-found' })
-    expect(await preview('install', 'htop')).toMatchObject({ state: 'refused', reason: 'dependency-problem' })
+    expect(await preview('install', 'ghostscript')).toMatchObject({ state: 'refused', reason: 'dependency-problem' })
     expect(await preview('install', 'supervisor')).toMatchObject({ state: 'unavailable', reason: 'simulation-unavailable' })
     expect(await preview('install', 'sqlite')).toMatchObject({ state: 'unavailable', reason: 'invalid-simulation' })
     await expect(previewComponentChange({ action: 'install', componentIds: ['git', 'git'], family: 'debian', run: fake.run, observed })).rejects.toMatchObject({ code: 'VALIDATION' })

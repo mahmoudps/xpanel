@@ -28,7 +28,7 @@ export function readDeviceSetupView(value: unknown, mailbox: string): DeviceSetu
 function bindMailConnectDevices(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
   const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
+  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const bdi = (value: string): HTMLElement => { const item = document.createElement('bdi'); item.dir = 'ltr'; item.textContent = value; return item }
   document.querySelectorAll<HTMLElement>('[data-mail-connect-devices]').forEach(root => {
     if (root.dataset.devicesBound === 'true') return
@@ -44,6 +44,23 @@ function bindMailConnectDevices(): void {
       else { link.removeAttribute('href'); link.hidden = true; link.setAttribute('aria-disabled', 'true') }
     })
     const empty = (message: string): void => { rows.textContent = ''; const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = 5; cell.textContent = message; row.append(cell); rows.append(row) }
+    const sendForm = root.querySelector<HTMLFormElement>('[data-mail-devices-send-form]'), sendEmail = root.querySelector<HTMLInputElement>('[data-mail-devices-send-email]'), sendButton = root.querySelector<HTMLButtonElement>('[data-mail-devices-send]'), sendStatus = root.querySelector<HTMLElement>('[data-mail-devices-send-status]')
+    const sendable = (open: boolean): void => { if (sendEmail) sendEmail.disabled = !open; if (sendButton) sendButton.disabled = !open }
+    const sendNote = (state: string, message: string): void => { if (!sendStatus) return; sendStatus.hidden = false; sendStatus.dataset.state = state; sendStatus.textContent = message; sendStatus.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
+    sendForm?.addEventListener('submit', event => {
+      event.preventDefault()
+      if (!admitted() || !send || !sendEmail || sendEmail.disabled) return
+      const email = sendEmail.value.trim()
+      if (!email) { sendNote('failed', t('Enter an email address.')); return }
+      sendable(false); sendNote('reading', t('Sending…'))
+      void send('POST', '/api/webmail/connect-devices/send-instructions', { email }).then(reply => {
+        if ((reply as { sent?: unknown } | null)?.sent !== true) throw new Error('invalid_send_reply')
+        sendNote('read', t('Instructions sent to {address}. Delivery is not confirmed.', { address: email }))
+      }).catch((error: { code?: string; details?: { stateChanged?: boolean } }) => {
+        sendNote('failed', error?.code === 'LIMIT_EXCEEDED' ? t('At most 5 instruction messages can be sent per hour. Nothing was sent.') : error?.code === 'VALIDATION' ? t('Enter a valid email address. Nothing was sent.')
+          : error?.details?.stateChanged === false ? t('The instructions were refused. Nothing was sent.') : t('The result could not be confirmed. Check the mailbox before sending again.'))
+      }).finally(() => { sendable(admitted()) })
+    })
     const paint = (view: DeviceSetupView): void => {
       const host = root.querySelector<HTMLElement>('[data-mail-devices-fact="hostname"]')
       if (host) host.textContent = view.hostname ?? t('Server hostname not saved')
@@ -56,6 +73,7 @@ function bindMailConnectDevices(): void {
       const pop = document.createElement('tr'), name = document.createElement('td'), state = document.createElement('td')
       name.textContent = t('POP3'); state.colSpan = 4; state.textContent = t('Not offered by this server'); pop.append(name, state); rows.append(pop)
       links(view)
+      sendable(!!view.hostname)
       downloadNote.textContent = view.hostname ? t('Files contain the server, ports and username only. Your password is never included.')
         : t('Setup files need a saved server hostname. Ask your provider to save it.')
     }

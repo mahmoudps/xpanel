@@ -199,6 +199,21 @@ describe('v2 shared security and document slots', () => {
     expect(html.match(/id="xp-reconcile-banner"/g)).toHaveLength(1)
   })
 
+  it('says a previewed theme was not chosen', () => {
+    const base = { locale: 'en', handoffControls: false, surfaceHtml: '<main>surface</main>', reconcileHtml: '', paletteHtml: '', activityHtml: '', clientScriptsHtml: '' } as const
+    expect(renderV2DocumentBody(base)).not.toContain('data-theme-preview')
+    expect(renderV2DocumentBody({ ...base, themePreviewName: 'A & B' })).toContain('Preview of the theme A &amp; B.')
+  })
+
+  it('shows the qualification mode banner only when the host switch is on', () => {
+    const base = { locale: 'en', handoffControls: false, surfaceHtml: '<main>surface</main>', reconcileHtml: '', paletteHtml: '', activityHtml: '', clientScriptsHtml: '' } as const
+    expect(renderV2DocumentBody(base)).not.toContain('data-qualification-mode')
+    const html = renderV2DocumentBody({ ...base, qualificationMode: true })
+    expect(html.match(/data-qualification-mode/g)).toHaveLength(1)
+    expect(html).toContain('Qualification mode is on.')
+    expect(html.indexOf('data-qualification-mode')).toBeLessThan(html.indexOf('surface'))
+  })
+
   it('emits supplied fragments and branded footer once, preserving the handoff sign-out control', () => {
     const html = renderV2DocumentBody({ locale: 'en', handoffControls: true, impersonation: { target: '<account>', issuer: 'operator' }, surfaceHtml: '<main>surface</main>', reconcileHtml: '<div id="reconcile-sentinel"></div>', paletteHtml: '<div id="palette-sentinel"></div>', activityHtml: '<div id="activity-sentinel"></div>', clientScriptsHtml: '<script id="client-sentinel"></script>', branding: { companyName: '<company>', productName: 'Host', footerText: '<footer text>', hidePoweredBy: false, primaryColor: '', accentColor: '', supportUrl: 'https://support.example.test', supportEmail: 'help@example.test', logoUrl: null, faviconUrl: null } })
     for (const sentinel of ['reconcile-sentinel', 'palette-sentinel', 'activity-sentinel', 'client-sentinel']) expect(html.match(new RegExp(sentinel, 'g'))).toHaveLength(1)

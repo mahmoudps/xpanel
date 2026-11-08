@@ -153,7 +153,7 @@ describe('file workspace API boundary with explicitly fake agent transport', () 
 
   it('separates reseller listing permission from edit permission and observes ACL revocation', async () => {
     const reseller = await f.state.store.createReseller({ username: 'fileseller', passwordHash: HASH, acl: ['list-accounts'], maxAccounts: 5,
-      totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
+      totalDiskMb: 10000, totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
     await f.state.store.changeOwner(f.owner.id, reseller.id)
     const principal = await createResellerPrincipal(f.database.db, { id: reseller.id, username: reseller.username, passwordHash: HASH })
     const raw = await f.token(['files:read', 'files:write'], principal.id)

@@ -16,10 +16,15 @@ export function renderSwApplicationsWorkspace(input: { lang: Locale; canManage: 
     <div class="xp-acct-tool__actions"><button type="button" class="xp-btn" data-sw-apps-refresh${input.canManage ? '' : ' disabled'}>${t('Read applications')}</button></div>
   </section>
   <section class="xp-acct-tool__card" aria-labelledby="sw-apps-install"><h2 id="sw-apps-install">${t('Applications on a domain')}</h2>
-    <div class="xp-acct-tool__fields">${select('domain', t('Domain'), t('Read applications first'))}${select('app', t('Application'), t('Choose an application'))}${select('version', t('Version'), t('Choose a version'))}</div>
+    <div class="xp-acct-tool__fields">${select('domain', t('Domain'), t('Read applications first'))}<div class="xp-field"><label class="xp-label" for="sw-apps-path">${t('Directory')}</label><input id="sw-apps-path" class="xp-input" dir="ltr" maxlength="240" autocomplete="off" aria-describedby="sw-apps-path-help" data-sw-apps-path-input disabled><p class="xp-help" id="sw-apps-path-help">${t('Leave empty to use the document root of the domain.')}</p></div>${select('app', t('Application'), t('Choose an application'))}${select('version', t('Version'), t('Choose a version'))}</div>
     <dl class="xp-acct-tool__facts">${fact('installed', t('Installed application'))}${fact('version', t('Installed version'))}${fact('previous', t('Previous version'))}${fact('recovery', t('Recovery state'))}</dl>
-    <div class="xp-acct-tool__actions">${action('install', t('Install'), true)}${action('update', t('Update'))}${action('rollback', t('Roll back'))}${action('remove', t('Remove'))}</div>
+    <div class="xp-acct-tool__actions">${action('install', t('Install'), true)}${action('update', t('Update'))}${action('rollback', t('Roll back'))}${action('remove', t('Remove'))}${action('recover', t('Recover'))}</div>
     <p class="xp-help" data-sw-apps-capability>${t('Writes need an admitted descriptor-confined artifact provider for account files. Until one is connected, nothing can be installed and nothing is reported as installed.')}</p>
+  </section>
+  <section class="xp-acct-tool__card" aria-labelledby="sw-apps-installed"><h2 id="sw-apps-installed">${t('Installed applications')}</h2>
+    <div class="xp-acct-tool__table" role="region" tabindex="0" aria-label="${t('Installed applications')}"><table class="xp-table"><caption class="xp-sr-only">${t('Installed applications')}</caption><thead><tr>${[t('Application'), t('Site'), t('Version'), t('Database'), t('Updated (UTC)')].map(header => `<th scope="col">${header}</th>`).join('')}</tr></thead><tbody data-sw-apps-instances><tr><td colspan="5">${t('Not read')}</td></tr></tbody></table></div>
+    <div class="xp-acct-tool__fields">${select('instance', t('Manage an installation'), t('Choose an installation'))}</div>
+    <p class="xp-help">${t('Files and databases of installed applications are part of the account backup. Finish the setup of a new installation by opening its site.')}</p>
   </section>
   ${renderRuntimeAppsSection({ lang: input.lang, canManage: input.canManage })}
 </div>`

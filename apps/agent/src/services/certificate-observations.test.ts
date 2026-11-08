@@ -33,8 +33,7 @@ describe('bounded real-provider certificate observations; portable injected read
     })
     const result = await readAccountAcmeOrders({ account, certificates, domains, readFile: reader, now })
     expect(result.rows.map(row => row.state)).toEqual(['observed', 'missing', 'invalid', 'unavailable'])
-    expect(result).toMatchObject({ scope: 'authorized_saved_certificate_ids', inventoryComplete: false, truncated: false,
-      scheduler: { state: 'unavailable', nextRunAt: null, reason: 'site_scheduler_not_connected' } })
+    expect(result).toMatchObject({ scope: 'authorized_saved_certificate_ids', inventoryComplete: false, truncated: false })
     expect(JSON.stringify(result)).not.toContain('PRIVATE-')
     expect(reader.mock.calls[0]![0]).toBe(CERTIFICATE_ORDER_DIRECTORY + '/' + certificate.id + '.json')
     await expect(readAccountAcmeOrders({ account, certificates: [{ ...certificate, accountId: id(9) }], domains, readFile: reader })).rejects.toMatchObject({ code: 'FORBIDDEN', detail: { stateChanged: false } })

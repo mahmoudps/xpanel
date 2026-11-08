@@ -89,8 +89,8 @@ describe('route registry', () => {
   it('has one entry per registered page and no stale entries', () => {
     const canonical = navigation.flatMap(surface => surface.sections.flatMap(section => section.pages.map(page => page.route)))
     const routes = [...canonical, ...registeredDocumentAliases.map(alias => alias.route)]
-    expect(canonical).toHaveLength(203)
-    expect(routes).toHaveLength(217)
+    expect(canonical).toHaveLength(204)
+    expect(routes).toHaveLength(218)
     expect(Object.keys(ROUTE_HOOKS).sort()).toEqual([...routes].sort())
     expect(routeContracts().map(contract => contract.route)).toEqual(routes)
   })
@@ -98,7 +98,7 @@ describe('route registry', () => {
   it('adds the surface hooks to operational pages only', () => {
     const contracts = routeContracts()
     const unavailable = contracts.filter(contract => contract.unavailable)
-    expect(unavailable.length).toBeGreaterThan(0)
+    expect(unavailable).toEqual([])
     for (const contract of unavailable) expect(contract.hooks).toEqual(ROUTE_HOOKS[contract.route]!.hooks)
     const logs = contracts.find(contract => contract.route === '/whm/monitoring/logs')!
     expect(logs).toMatchObject({ surface: 'xwhm', template: 'log' })
@@ -163,7 +163,7 @@ describe('classic conforms to every registered document contract', () => {
     const identity = document.surface === 'xwhm'
       ? { visibility: visibility({ kind: 'root', id: '33333333-3333-4333-8333-333333333333', username: 'contractroot' }), ...(document.route === '/whm/email/outbound' ? { whm: { mailIpConfig: mailIpConfig } } : {}) }
       : document.surface === 'xpanel'
-        ? { visibility: visibility(user), panel: { account, plan: defaultPlan({ id: '22222222-2222-4222-8222-222222222222', name: 'Basic' }), ...(['/security/ssl', '/email/forwarders'].includes(document.route) ? { domains: [sslDomain] } : {}) } }
+        ? { visibility: visibility(user), panel: { account, plan: defaultPlan({ id: '22222222-2222-4222-8222-222222222222', name: 'Basic' }), ...(document.route === '/domains/site-settings' ? { domains: [sslDomain], activeDomain: sslDomain.name, customConfig: { domainId: sslDomain.id, accountId: sslDomain.accountId, domainName: sslDomain.name, nginxInclude: '', apacheInclude: '', userIni: {}, customHeaders: {}, cacheBypassPaths: [], updatedAt: '', updatedBy: 'user' as const } } : {}), ...(['/security/ssl', '/email/forwarders'].includes(document.route) ? { domains: [sslDomain] } : {}) } }
         : { visibility: visibility(user), mail: { mailbox: 'contractuser@example.test', domain: 'example.test' } }
     const html = renderWebApp({ ...identity, surface: document.surface, activeRoute: document.route, locale: 'ar', theme: 'dark', catalog, liveState: live })
     const contract = routeContracts().find(item => item.route === document.route)!

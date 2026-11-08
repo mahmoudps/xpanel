@@ -1,8 +1,11 @@
 import { createHash, createPublicKey, randomUUID } from 'node:crypto'
+import { handleAccountDbMaintenanceRoute } from './account-db-maintenance-workspace.ts'
+import type { AccountDbMaintenanceHost } from './account-db-maintenance-workspace.ts'
 import { isIP } from 'node:net'
 import { services as mailServices, system } from '@xpanel/render'
 import { join } from 'node:path'
 import {
+  effectivePlan,
   fail,
   assertBool,
   assertCidr,
@@ -14,6 +17,7 @@ import {
   isXpanelError,
   suggestServerSettings,
   validateDomainName,
+  validateServerHostname,
   validateServerIpEntry,
   validateServerIpPool,
   canonicalIp,
@@ -38,6 +42,8 @@ import { assertMailboxMetadataAuthority, captureMailboxMetadataAuthority, readBo
 import { createIdentityMetadataRoutes } from './mail/identity-routes.ts'
 import { readContactVcards } from './mail/contact-vcard.ts'
 import { createCalendarWorkspaceRoutes } from './mail/calendar-workspace.ts'
+import type { DavSession } from './mail/dav-store.ts'
+import { sameContacts } from './mail/dav-store.ts'
 import { createAccountCollaborationRoutes } from './account-collaboration-workspace.ts'
 import { parseCalendarWorkspaceIcs, renderCalendarWorkspaceIcs } from './mail/calendar-ics.ts'
 import { createWhmBackupWorkspaceRoutes } from './backup-workspace.ts'
@@ -46,8 +52,11 @@ import type { TransferWorkspacePorts } from './transfer-workspace.ts'
 import { createTransferSourceDiscovery } from './acct-transfer-discovery.ts'
 import { readTransferCredentialToken } from './acct-transfer-credentials.ts'
 import { canonicalForwarderAddress, validateForwarderInput, type ForwarderAction } from './mail/forwarder-validation.ts'
+import type { ListPolicy } from '../../agent/src/list-moderation-policy.ts'
 import { applyMailRoutingChange, commitRoutingRevision, readMailRoutingStatus, reconcileApplied, type MailRoutingRecordState, type MailRoutingStatusView } from './mail/routing-application.ts'
 import { createFilterRoutes } from './mail/filter-routes.ts'
+import { handleWebAppsRoute } from './web-apps-routes.ts'
+import { handleAddressImport } from './mail/address-import.ts'
 import { assertDnsZoneRevision, dnsZoneRevision } from './dns-workspace.ts'
 import { createAutoresponderRoutes } from './mail/autoresponder-routes.ts'
 import { contactWorkspaceRevision, projectContactWorkspace, parseContactWorkspaceRequest,
@@ -63,19 +72,30 @@ import {
   requireMailboxPrincipalAccess,
 } from './authorization.ts'
 
+/** The account's calendar store (mail/dav-store.ts): one session per request, one writer per mailbox. */
+export interface WebmailDavPorts {
+  open: (caller: AuthenticatedCaller, account: Pick<Account, 'id' | 'username'>, authority: MailboxMetadataAuthority) => DavSession
+  lock: (key: string) => Promise<() => void>
+}
+
 export interface ExtendedRouteHelpers {
   db: Db
   store: StateStore
+  dav: WebmailDavPorts
   homeBaseDir?: string
   serverSecret?: string
   /** Fresh read-only enforcement observation from the protected native agent; never a saved setup flag. */
   readQuotaState?: (caller: AuthenticatedCaller, path: string) => Promise<unknown>
+  /** The agent's account database check and repair; absent without the host agent. */
+  maintainDatabase?: AccountDbMaintenanceHost
+  /** Removes a deleted list's held posts as its account; absent without the host agent. */
+  purgeListQueue?: (caller: AuthenticatedCaller, accountId: Id, address: string) => Promise<unknown>
   /** Root quota setup on the protected native agent; a refusal carries the agent's own code, text and details. */
   initializeQuota?: (caller: AuthenticatedCaller, path: string) => Promise<Record<string, unknown>>
   backupDestinationHost?: (caller: AuthenticatedCaller, path: string, body?: unknown) => Promise<unknown>
   /** Server-to-server transfer execution (apps/api/src/lifecycle-transfer-execution.ts); absent without the host agent. */
   /** Native transfer execution, background caller and cPanel import; absent without the host agent. */
-  transferPorts?: Pick<TransferWorkspacePorts, 'execution' | 'callerFor' | 'cpanel'>
+  transferPorts?: Pick<TransferWorkspacePorts, 'execution' | 'callerFor' | 'cpanel' | 'nodeAuth'>
   /** Authenticated agent result. Private key material must never cross this boundary. */
   readDkimPublicMaterial?: (caller: AuthenticatedCaller, domain: string) => Promise<{ selector: string; publicKeyPem: string } | null>
   requireCaller: (req: Request, opts?: { allowUnverifiedMfa?: boolean; deferDeniedAudit?: (input: Parameters<ExtendedRouteHelpers['emitAudit']>[0]) => void }) => Promise<AuthenticatedCaller>
@@ -150,6 +170,8 @@ export interface MailingListRecord {
   createdAt: string
   selfSubscription?: 'open' | 'closed'
   memberAuthorities?: Record<string, MailboxMetadataAuthority>
+  /** Posting rules beyond `moderation`; set from list moderation. */
+  policy?: ListPolicy
 }
 
 export interface SpamSettingsState {
@@ -163,16 +185,6 @@ export interface SpamSettingsState {
   autoDeleteScore: number
   allowlist: string[]
   blocklist: string[]
-  updatedAt: string
-}
-
-export interface CalDavCardDavConfig {
-  enabled: boolean
-  caldavUrl: string
-  carddavUrl: string
-  autodiscoverSrv: boolean
-  wellKnownRedirects: boolean
-  syncPrincipals: string[]
   updatedAt: string
 }
 
@@ -338,19 +350,6 @@ export interface HotlinkProtectionConfig {
   updatedAt: string
 }
 
-export interface WebDiskConfig {
-  accountId: Id
-  enabled: boolean
-  rootPath: string
-  readOnly: boolean
-  requireTls: boolean
-  port: number
-  digestAuth: boolean
-  endpointUrl: string
-  compiledConfig: string
-  updatedAt: string
-}
-
 export interface WebExtrasConfig {
   accountId: Id
   errorPages: Record<string, string>
@@ -368,39 +367,6 @@ export interface RemoteDatabaseHostsConfig {
   hosts: { address: string; engine: 'mariadb' | 'postgresql' | 'both'; comment: string }[]
   compiledPgHba: string
   compiledMariaDbGrants: string
-  updatedAt: string
-}
-
-export interface ServerFineSettingsState {
-  limits: {
-    maxMemoryPerProcessMb: number
-    maxProcessesPerAccount: number
-    oomScoreAdj: number
-  }
-  logRotation: {
-    frequency: 'daily' | 'weekly'
-    retainDays: number
-    compress: boolean
-    maxSizeMb: number
-    compiledLogrotateConf: string
-  }
-  mta: {
-    maxQueueLifetimeHours: number
-    maxMessageSizeMb: number
-    smarthost: { enabled: boolean; host: string; port: number; username: string | null } | null
-    rbls: string[]
-    compiledPostfixMainCf: string
-  }
-  packages: {
-    installedPackages: string[]
-    lastUpdatedAt: string
-  }
-  webStack: {
-    modules: string[]
-    brotliEnabled: boolean
-    http3Enabled: boolean
-    modSecurityEnabled: boolean
-  }
   updatedAt: string
 }
 
@@ -672,16 +638,13 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
   })
   const handleCalendarWorkspaceRoute = createCalendarWorkspaceRoutes({
     helpers,
-    readRecords: () => ext.readOrDefault<WebmailCalendar[]>('webmail/calendars.json', []),
-    publishRecords: (records, lease) => atomicWriteJson(join(ext.baseDir, 'webmail', 'calendars.json'), records, 0o640, () => lease.assertFencingToken()),
+    dav: helpers.dav,
     parseIcs: parseCalendarWorkspaceIcs, renderIcs: renderCalendarWorkspaceIcs,
   })
   const handleAccountCollaborationRoute = helpers.serverSecret ? createAccountCollaborationRoutes({
     store: helpers.store, serverSecret: helpers.serverSecret, requireCaller: helpers.requireCaller,
     assertCanAccessAccount: helpers.assertCanAccessAccount, emitAudit: helpers.emitAudit,
-    readCalendars: () => ext.readOrDefault<WebmailCalendar[]>('webmail/calendars.json', []),
-    readContacts: () => ext.readOrDefault<WebmailContact[]>('webmail/contacts.json', []),
-    calendarRoute: handleCalendarWorkspaceRoute,
+    dav: helpers.dav, calendarRoute: handleCalendarWorkspaceRoute,
   }) : async (_req: Request, url: URL, _method: string): Promise<Response | null> => /^\/api\/account\/collaboration(?:\/|$)/.test(url.pathname) ? fail('PRECONDITION_FAILED', 'collaboration authority is unavailable', { stateChanged: false }) : null
   const handleBackupWorkspaceRoute = createWhmBackupWorkspaceRoutes({
     store: helpers.store, requireCaller: helpers.requireCaller, assertRoot: helpers.assertRoot, emitAudit: helpers.emitAudit,
@@ -703,6 +666,17 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     // =========================================================================
     // 1. First-Run Setup Wizard, Hostname & Quota Init
     // =========================================================================
+    if (pathname === '/api/setup/wizard/complete') {
+      if (method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } })
+      const caller = await helpers.requireCaller(req)
+      await helpers.assertRoot(caller, 'setup.wizard')
+      if (await helpers.store.isSetupComplete()) return fail('CONFLICT', 'setup is already complete', { stateChanged: false })
+      const settings = await helpers.store.getServerSettings()
+      if (!settings) return fail('PRECONDITION_FAILED', 'save the server settings before completing setup', { stateChanged: false })
+      await helpers.store.markSetupComplete()
+      await helpers.emitAudit({ actor: caller.principal.username, action: 'setup.wizard.completed', target: `server:${settings.hostname}`, outcome: 'ok', principalId: caller.principal.id })
+      return jsonResponse({ ok: true, setupComplete: true })
+    }
     if (pathname === '/api/setup/wizard') {
       const caller = await helpers.requireCaller(req)
       await helpers.assertRoot(caller, 'setup.wizard')
@@ -744,6 +718,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
 
         const suggested = suggestServerSettings({ cores: 4, memoryMb: 8192 })
         const existingSettings = await helpers.store.getServerSettings()
+        if (existingSettings && body.sshPort !== undefined && body.sshPort !== existingSettings.sshPort) return fail('VALIDATION', 'use the guarded SSH workspace to change the SSH port', { stateChanged: false })
         const existingIps = await helpers.store.listServerIps()
         const configuredIpv4 = existingIps.find(ip => ip.version === 4 && ip.isPrimary)
         const primaryIpv4 = body.primaryIpv4 === undefined
@@ -763,6 +738,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const engine = body.engine ?? existingSettings?.engine ?? 'apache'
         const apacheMpm = body.apacheMpm ?? existingSettings?.apacheMpm ?? 'itk'
 
+        if (body.panelPort !== undefined && body.panelPort !== (existingSettings?.panelPort ?? 2087)) return fail('VALIDATION', 'the panel port moves on the Panel access page', { stateChanged: false, reason: 'panel_port_moves_on_panel_access' })
         const settingsInput: ServerSettings = {
           hostname,
           nameservers,
@@ -852,8 +828,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       await helpers.assertRoot(caller, 'server.hostname_change')
       const body = await readJsonBody<{ hostname?: string }>(req)
       if (!body.hostname) return fail('VALIDATION', 'hostname is required')
-      const hostname = validateDomainName(body.hostname)
-      if (hostname.length > 64) return fail('VALIDATION', 'the server host name must be at most 64 characters', { stateChanged: false })
+      const hostname = validateServerHostname(body.hostname, (await helpers.store.listDomains()).map(domain => domain.name))
       const current = await helpers.store.getServerSettings()
       const suggested = suggestServerSettings({ cores: 4, memoryMb: 8192 })
       const previousHostname = current?.hostname ?? null
@@ -1011,8 +986,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
             }
             const plan = await helpers.store.getPlan(account.planId)
             if (!plan) return fail('CONFLICT', 'The account plan is unavailable')
-            const cap = plan.caps.forwarders
-            if (cap !== 'unlimited' && accountRecords.length >= cap) return fail('CONFLICT', 'The account forwarder limit has been reached')
+            const cap = effectivePlan(plan, account).caps.forwarders
+            if (cap !== 'unlimited' && accountRecords.length >= cap) return fail('LIMIT_EXCEEDED', 'The account forwarder limit has been reached')
             record = {
               id: randomUUID(),
               accountId: account.id,
@@ -1202,11 +1177,12 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const revision = await commitRoutingRevision(lease!)
         await lease!.release(); lease = null
         const { nativeApplied } = await applyMailRouting(caller, revision, { relPath: 'mail/mailing-lists.json', previous })
+        const queuePurged = selected?.accountId && helpers.purgeListQueue ? await helpers.purgeListQueue(caller, selected.accountId, selected.address).then(() => true, () => false) : false
         await helpers.emitAudit({
           actor: caller.principal.username,
           action: 'mail.mailing_list.deleted',
           target: `mailing-list:${String(targetId)}`,
-          detail: { revision, nativeApplied },
+          detail: { revision, nativeApplied, queuePurged },
           outcome: 'ok',
           principalId: caller.principal.id,
         })
@@ -1326,189 +1302,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       }
     }
 
-    if (method === 'POST' && pathname === '/api/mail/import-csv') {
-      const caller = await helpers.requireCaller(req)
-      const body = await readJsonBody<{
-        csv?: string
-        accountId?: Id
-        kind?: 'mailboxes' | 'forwarders' | 'auto'
-      }>(req)
-      if (typeof body !== 'object' || body === null || Array.isArray(body) || typeof body.csv !== 'string') return fail('VALIDATION', 'csv must be a string')
-      if (body.kind !== undefined && !['mailboxes', 'forwarders', 'auto'].includes(body.kind)) return fail('VALIDATION', 'kind must be mailboxes, forwarders or auto')
-      if (body.accountId !== undefined && (typeof body.accountId !== 'string' || !body.accountId.trim())) return fail('VALIDATION', 'accountId must be a nonempty string')
-      const csvText = body.csv.trim()
-      if (!csvText) return fail('VALIDATION', 'csv content is required')
-
-      const accountId = await requireAccountId(caller, body.accountId, 'mail.import_csv')
-
-      const lines = csvText
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0 && !l.startsWith('#'))
-
-      const importedMailboxes: { email: string; quotaMb: number }[] = []
-      const importedForwarders: { sourceAddress: string; destination: string }[] = []
-      let importRevision: number | null = null
-      const errors: { row: number; error: string }[] = []
-      const includesForwarders = body.kind === 'forwarders' || lines.some((line, i) => {
-        if (i === 0 && /^(email|address|username|source)\b/i.test(line)) return false
-        const cols = line.split(',').map(column => column.trim())
-        return body.kind !== 'mailboxes' && (cols[1] ?? '').includes('@') && !cols[2]
-      })
-      if (includesForwarders) {
-        const account = await helpers.store.getAccount(accountId)
-        if (!account) return fail('NOT_FOUND', 'mail account not found')
-        await assertAccountFeatures(helpers.store, caller, account, ['forwarders'])
-      }
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]!
-        // Skip header row if it looks like "email,password,quota" or "source,destination"
-        if (i === 0 && /^(email|address|username|source)\b/i.test(line)) continue
-        const cols = line.split(',').map((c) => c.trim())
-        const col0 = (cols[0] ?? '').toLowerCase()
-        const col1 = cols[1] ?? ''
-        const col2 = cols[2] ?? ''
-
-        const isForwarder =
-          body.kind === 'forwarders' || (body.kind !== 'mailboxes' && col1.includes('@') && !col2)
-        let forwarderInput: ReturnType<typeof validateForwarderInput> | null = null
-        if (isForwarder) {
-          try { forwarderInput = validateForwarderInput({ sourceAddress: col0, destination: col1 }) }
-          catch { errors.push({ row: i + 1, error: 'Invalid forwarder source or destination address' }); continue }
-        }
-        if (!col0.includes('@')) {
-          errors.push({ row: i + 1, error: 'Invalid email address in column 1' })
-          continue
-        }
-
-        const mailboxDomain = col0.split('@')[1]!
-        const sourceAccount = await requireDomainAccount(helpers.store, caller, mailboxDomain, 'mail.import_csv', accountId)
-        if (sourceAccount.id !== accountId) return fail('NOT_FOUND', 'mail domain not found')
-
-        if (isForwarder && forwarderInput) {
-          const lease = await helpers.store.getWriterLock().acquire()
-          try {
-            const forwarderAccount = await requireDomainAccount(helpers.store, caller, mailboxDomain, 'mail.import_csv', accountId)
-            await assertAccountFeatures(helpers.store, caller, forwarderAccount, ['forwarders'])
-            const forwarders = await ext.readOrDefault<EmailForwarder[]>('mail/forwarders.json', [])
-            const accountForwarders = forwarders.filter(item => item.accountId === accountId)
-            if (accountForwarders.some(item => item.sourceAddress.toLowerCase() === forwarderInput.sourceAddress)) {
-              errors.push({ row: i + 1, error: 'A forwarder for this source already exists' }); continue
-            }
-            const plan = await helpers.store.getPlan(forwarderAccount.planId)
-            if (!plan || plan.caps.forwarders !== 'unlimited' && accountForwarders.length >= plan.caps.forwarders) {
-              errors.push({ row: i + 1, error: 'The account forwarder limit has been reached' }); continue
-            }
-            forwarders.push({
-              id: randomUUID(),
-              accountId,
-              sourceAddress: forwarderInput.sourceAddress,
-              destinations: forwarderInput.destinations,
-              createdAt: new Date().toISOString(),
-            })
-            await lease.assertFencingToken()
-            await ext.write('mail/forwarders.json', forwarders)
-            importRevision = await commitRoutingRevision(lease)
-            importedForwarders.push({ sourceAddress: forwarderInput.sourceAddress, destination: forwarderInput.destinations[0]! })
-          } finally { await lease.release() }
-        } else {
-          const quotaMb = Number(col2) > 0 ? Number(col2) : 1024
-          try {
-            await helpers.store.createServiceUser({
-              accountId,
-              login: col0,
-              passwordHash: await passwordHashFromInput({ password: col1 }, { service: true }),
-              services: { email: true, ftp: false, webdisk: false },
-              mailboxQuotaMb: quotaMb,
-              ftpDir: 'public_html',
-            })
-          } catch {
-            errors.push({ row: i + 1, error: 'Mailbox could not be created; check credentials, domain and account limits' })
-            continue
-          }
-          importedMailboxes.push({ email: col0, quotaMb })
-        }
-      }
-
-      // one apply for the whole import; a failed test is reported, the imported rows stay saved for review
-      let application: { state: string; reason: string | null; revision: number } | undefined
-      let nativeApplied = false
-      if (importRevision !== null || importedMailboxes.length > 0) {
-        let failedApply: string | null = null
-        try {
-          const reconcile = await helpers.triggerReconcile(caller)
-          if (reconcile?.body.status === 'failed') failedApply = String(reconcile.body.error ?? 'mail configuration test failed').slice(0, 500)
-          nativeApplied = reconcileApplied(reconcile)
-        } catch { /* the status read below reports the host state */ }
-        if (importRevision !== null) {
-          const status = await readMailRoutingStatus(helpers.store, helpers.db, failedApply)
-          application = { ...status.record('forwarder', '', { domain: importedForwarders[0]!.sourceAddress.split('@')[1]! }), revision: importRevision }
-        }
-      }
-      await helpers.emitAudit({
-        actor: caller.principal.username,
-        action: 'mail.import_csv',
-        target: 'mail:csv-import',
-        detail: {
-          mailboxesCount: importedMailboxes.length,
-          forwardersCount: importedForwarders.length,
-          ...(application ? { application } : {}),
-          nativeApplied,
-          errorsCount: errors.length,
-        },
-        outcome: 'ok',
-        principalId: caller.principal.id,
-      })
-      return jsonResponse({
-        ok: true,
-        importedMailboxes,
-        importedForwarders,
-        ...(application ? { application } : {}),
-        nativeApplied,
-        errors,
-        summary: {
-          mailboxesImported: importedMailboxes.length,
-          forwardersImported: importedForwarders.length,
-          errorCount: errors.length,
-        },
-      })
-    }
-
-    if (pathname === '/api/mail/caldav-carddav') {
-      const caller = await helpers.requireCaller(req)
-      await helpers.assertRoot(caller, 'mail.caldav_carddav')
-      const defaultDav: CalDavCardDavConfig = {
-        enabled: true,
-        caldavUrl: 'https://mail.xpanel.internal/dav/calendars/',
-        carddavUrl: 'https://mail.xpanel.internal/dav/addressbooks/',
-        autodiscoverSrv: true,
-        wellKnownRedirects: true,
-        syncPrincipals: [],
-        updatedAt: new Date().toISOString(),
-      }
-      if (method === 'GET') {
-        return jsonResponse({ config: await ext.readOrDefault('mail/caldav-carddav.json', defaultDav) })
-      }
-      if (method === 'PUT') {
-        const body = await readJsonBody<Partial<CalDavCardDavConfig>>(req)
-        const current = await ext.readOrDefault('mail/caldav-carddav.json', defaultDav)
-        const config: CalDavCardDavConfig = {
-          ...current,
-          ...body,
-          updatedAt: new Date().toISOString(),
-        }
-        await ext.write('mail/caldav-carddav.json', config)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'mail.caldav_carddav.updated',
-          target: 'mail:caldav-carddav',
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ config })
-      }
-    }
+    if (method === 'POST' && pathname === '/api/mail/import-csv') return handleAddressImport(req, { helpers, ext, requireAccountId, readJsonBody, jsonResponse })
 
     // =========================================================================
     // 3. xMail Webmail Deep Endpoints (/api/webmail/*)
@@ -1755,15 +1549,24 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       contactDeleteMatch
     ) {
       const caller = await helpers.requireCaller(req)
-      const contacts = await ext.readOrDefault<WebmailContact[]>('webmail/contacts.json', [])
-      if (!Array.isArray(contacts)) return fail('PRECONDITION_FAILED', 'contact collection requires review', { stateChanged: false })
+      // Each account has its own store, so a request names its mailbox before any record is read.
+      const sentBody = !isMailboxPrincipal(caller) && ['POST', 'PATCH', 'PUT'].includes(method) ? await req.clone().json().catch(() => null) as { owner?: unknown; mailbox?: unknown } | null : null
+      const scopeSelector = isMailboxPrincipal(caller) ? undefined : sentBody?.owner ?? sentBody?.mailbox ?? url.searchParams.get('mailbox')
+      if (scopeSelector !== undefined && scopeSelector !== null && typeof scopeSelector !== 'string') return fail('VALIDATION', 'mailbox selector must be text', { stateChanged: false })
+      const scopeMailbox = await requireMailbox(helpers.store, caller, scopeSelector)
+      const scopeAuthority = await captureMailboxMetadataAuthority(helpers.store, scopeMailbox)
+      const scopeAccount = await helpers.store.getAccount(scopeAuthority.accountId)
+      if (!scopeAccount) return fail('NOT_FOUND', 'mailbox not found', { stateChanged: false })
+      const session = helpers.dav.open(caller, scopeAccount, scopeAuthority)
+      const contacts = await session.contacts()
       const collectionRevision = (values: readonly WebmailContact[]) => createHash('sha256').update(JSON.stringify(values)).digest('hex')
       const originalCollectionRevision = collectionRevision(contacts)
       const mutateContacts = async <T>(mailbox: string, operation: (fresh: AuthenticatedCaller, current: WebmailContact[],
-        persist: (values: WebmailContact[]) => Promise<void>) => Promise<T>): Promise<T> => {
+        persist: (values: WebmailContact[]) => Promise<WebmailContact[]>) => Promise<T>): Promise<T> => {
+        if (mailbox !== scopeMailbox) return fail('NOT_FOUND', 'mailbox not found', { stateChanged: false })
         const selected = await helpers.store.getServiceUserByLogin(mailbox)
         if (!selected) return fail('NOT_FOUND', 'mailbox not found', { stateChanged: false })
-        const lease = await helpers.store.getWriterLock().acquire()
+        const release = await helpers.dav.lock(selected.id)
         let writeAttempted = false
         try {
           const fresh = await helpers.requireCaller(req)
@@ -1780,8 +1583,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
             await helpers.assertCanAccessAccount(fresh, account, 'mailbox.access')
             await assertAccountFeatures(helpers.store, fresh, account, ['email-accounts'])
           }
-          const current = await ext.readOrDefault<WebmailContact[]>('webmail/contacts.json', [])
-          if (!Array.isArray(current)) return fail('PRECONDITION_FAILED', 'contact collection requires review')
+          const current = await session.contacts()
           const authority = await captureMailboxMetadataAuthority(helpers.store, mailbox)
           const access = createContactMetadataAccess(helpers.store, authority)
           const persist = async (values: WebmailContact[]) => {
@@ -1808,16 +1610,16 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
               if (contact.owner.toLowerCase() !== mailbox) return fail('FORBIDDEN', 'only the contact owner may delete the contact')
               assertMailboxMetadataAuthority(contact.owner, contact.ownerAuthority, authority)
             }
-            await assertContactMutationCapacity(helpers.store, current, values, mailbox)
-            await lease.assertFencingToken()
+            await assertContactMutationCapacity(helpers.store, current, values, mailbox, async owner => owner === mailbox ? session.groups() : [])
             writeAttempted = true
-            await atomicWriteJson(join(ext.baseDir, 'webmail', 'contacts.json'), values, 0o640, () => lease.assertFencingToken())
-            if (collectionRevision(await ext.readOrDefault<WebmailContact[]>('webmail/contacts.json', [])) !== collectionRevision(values)) throw new Error('contact publication readback mismatch')
-            await lease.commitAuthority({ incrementRevision: false })
+            await session.publishContacts(values)
+            const persisted = await session.contacts()
+            if (!sameContacts(persisted, values)) throw new Error('contact publication readback mismatch')
             const account = await helpers.store.getAccount(authority.accountId)
             if (!account) throw new Error('contact audit account unavailable')
             await helpers.emitAudit({ actor: fresh.principal.username, action: 'webmail.contact.metadata_written', target: 'mailbox:' + mailbox,
               detail: { operation: method }, outcome: 'ok', principalId: fresh.principal.id }, { accountId: account.id, resellerId: account.ownerId })
+            return persisted
           }
           return await operation(fresh, current, persist)
         } catch (error) {
@@ -1826,12 +1628,14 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
           })
           if (isXpanelError(error)) return fail(error.code, error.message, { ...error.detail, stateChanged: false })
           throw error
-        } finally { await lease.release() }
+        } finally { release() }
       }
       const persistLegacyContacts = (values: WebmailContact[], mailbox: string) => mutateContacts(mailbox, async (_fresh, current, persist) => {
         if (collectionRevision(current) !== originalCollectionRevision) return fail('CONFLICT', 'contacts changed; reload before saving', { stateChanged: false })
-        await persist(values)
+        return await persist(values)
       })
+      // A reply carries what the store holds: its revision is the one the next save must present.
+      const storedContact = (records: readonly WebmailContact[], contact: WebmailContact): WebmailContact => records.find(record => record.id === contact.id) ?? contact
       const isCollectionCreate = method === 'POST' && pathname === '/api/webmail/contacts'
       const isItemEdit = Boolean(contactDeleteMatch) && (method === 'PATCH' || method === 'PUT')
       if (isMailboxPrincipal(caller) && (isCollectionCreate || isItemEdit)) {
@@ -1855,12 +1659,10 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
             }
             if (contactWorkspaceRevision(target) !== fields.expectedRevision) return fail('CONFLICT', 'contact changed; reload before saving', { stateChanged: false })
             next = updateWorkspaceContact(target, fields)
-            await persist(current.map(value => value.id === targetId ? next : value))
-          } else {
-            next = createWorkspaceContact(mailbox, fields)
-            await persist([...current, next])
+            return { contact: storedContact(await persist(current.map(value => value.id === targetId ? next : value)), next), account: bound.account }
           }
-          return { contact: next, account: bound.account }
+          next = createWorkspaceContact(mailbox, fields)
+          return { contact: storedContact(await persist([...current, next]), next), account: bound.account }
         })
         const contact = saved.contact
         try {
@@ -1878,7 +1680,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const mailbox = await requireMailbox(
           helpers.store,
           caller,
-          requestedMailbox ?? (isMailboxPrincipal(caller) ? undefined : contact.owner),
+          requestedMailbox ?? (isMailboxPrincipal(caller) ? undefined : scopeMailbox),
         )
         const authority = await captureMailboxMetadataAuthority(helpers.store, mailbox)
         if (contact.owner.toLowerCase() === mailbox) assertMailboxMetadataAuthority(contact.owner, contact.ownerAuthority, authority)
@@ -1923,8 +1725,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         )
         const imported = parseAndValidateVcards(body.vcard ?? '', owner)
         contacts.push(...imported)
-        await persistLegacyContacts(contacts, owner)
-        return jsonResponse({ contacts: imported.map(projectContactWorkspace), importedCount: imported.length }, 201)
+        const stored = await persistLegacyContacts(contacts, owner)
+        return jsonResponse({ contacts: imported.map(contact => projectContactWorkspace(storedContact(stored, contact))), importedCount: imported.length }, 201)
       }
       if (contactShareMatch && (method === 'POST' || method === 'DELETE')) {
         const contactId = contactShareMatch[1]!
@@ -1954,8 +1756,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         contact.shares = contact.shares ?? []
         if (method === 'DELETE' || body.revoke === true || body.permission === 'none' || body.permission === 'revoke') {
           contact.shares = contact.shares.filter((s) => s.principal.toLowerCase() !== targetPrincipal)
-          await persistLegacyContacts(contacts, callerMailbox)
-          return jsonResponse({ contact: projectContactWorkspace(contact) })
+          return jsonResponse({ contact: projectContactWorkspace(storedContact(await persistLegacyContacts(contacts, callerMailbox), contact)) })
         }
         const allUsers = (await helpers.store.readSnapshot()).serviceUsers
         const ownerUser = allUsers.find((u) => u.services.email && u.login.toLowerCase() === ownerMailbox)
@@ -1972,8 +1773,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const idx = contact.shares.findIndex((s) => s.principal.toLowerCase() === targetPrincipal)
         if (idx >= 0) contact.shares[idx] = shareEntry
         else contact.shares.push(shareEntry)
-        await persistLegacyContacts(contacts, callerMailbox)
-        return jsonResponse({ contact: projectContactWorkspace(contact) })
+        return jsonResponse({ contact: projectContactWorkspace(storedContact(await persistLegacyContacts(contacts, callerMailbox), contact)) })
       }
       if (method === 'GET' && pathname === '/api/webmail/contacts') {
         if (isMailboxPrincipal(caller) && url.searchParams.size) return fail('VALIDATION', 'contact workspace does not accept mailbox selectors', { stateChanged: false })
@@ -1999,8 +1799,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const groups = normalizeContactGroups(body.groups ?? [])
         const contact = updateWorkspaceContactGroups(createWorkspaceContact(owner, { fullName, email, phone, organization, title }), groups)
         contacts.push(contact)
-        await persistLegacyContacts(contacts, owner)
-        return jsonResponse({ contact: projectContactWorkspace(contact) }, 201)
+        return jsonResponse({ contact: projectContactWorkspace(storedContact(await persistLegacyContacts(contacts, owner), contact)) }, 201)
       }
       if (contactDeleteMatch && (method === 'PATCH' || method === 'PUT')) {
         const targetId = contactDeleteMatch[1]!
@@ -2021,8 +1820,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const groups = body.groups === undefined ? target.groups : normalizeContactGroups(body.groups, original.groups)
         Object.assign(target, updateWorkspaceContact(original, target))
         if (JSON.stringify(groups) !== JSON.stringify(original.groups)) Object.assign(target, updateWorkspaceContactGroups(target, groups))
-        await persistLegacyContacts(contacts, mailbox)
-        return jsonResponse({ contact: projectContactWorkspace(target) })
+        return jsonResponse({ contact: projectContactWorkspace(storedContact(await persistLegacyContacts(contacts, mailbox), target)) })
       }
       if (method === 'DELETE') {
         const body = await readJsonBody<{ id?: unknown }>(req)
@@ -2346,7 +2144,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     // =========================================================================
     // 6. Extended File Isolation & Web Extras (/api/web-features/*)
     // =========================================================================
-    const webFeatMatch = /^\/api\/web-features\/([^/]+)\/(hotlink-protection|web-disk|extras)$/.exec(
+    const webFeatMatch = /^\/api\/web-features\/([^/]+)\/(hotlink-protection|extras)$/.exec(
       pathname,
     )
     if (webFeatMatch) {
@@ -2409,61 +2207,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
             action: 'web_features.hotlink_protection.updated',
             target: `account:${account.username}`,
             detail: { enabled: config.enabled },
-            outcome: 'ok',
-            principalId: caller.principal.id,
-          })
-          return jsonResponse({ config })
-        }
-      }
-
-      if (featureKind === 'web-disk') {
-        const fileKey = `web-features/${account.id}/web-disk.json`
-        const defaultCfg: WebDiskConfig = {
-          accountId: account.id,
-          enabled: false,
-          rootPath: 'public_html',
-          readOnly: false,
-          requireTls: true,
-          port: 2078,
-          digestAuth: true,
-          endpointUrl: `https://${account.primaryDomain}:2078/${account.username}`,
-          compiledConfig: '',
-          updatedAt: new Date().toISOString(),
-        }
-        if (method === 'GET') {
-          return jsonResponse({ config: await ext.readOrDefault(fileKey, defaultCfg) })
-        }
-        if (method === 'PUT') {
-          // Port, endpoint and compiled text are server-derived; only these owner choices are writable.
-          const flags = ['enabled', 'readOnly', 'requireTls', 'digestAuth'] as const
-          const body = writableFields(await readJsonBody(req), ['rootPath', ...flags], 'web disk')
-          const merged = { ...await ext.readOrDefault(fileKey, defaultCfg), ...body } as WebDiskConfig
-          // rootPath becomes an nginx alias line: a config-safe relative path, no traversal, quotes or control characters.
-          assertRelPath(merged.rootPath, 'rootPath')
-          for (const flag of flags) assertBool(merged[flag], flag)
-          const compiledConfig = [
-            `# Isolated WebDAV jail for ${account.username} (UID ${account.uid})`,
-            `location /webdav/${account.username}/ {`,
-            `  alias ${account.home}/${merged.rootPath}/;`,
-            `  dav_methods ${merged.readOnly ? 'off' : 'PUT DELETE MKCOL COPY MOVE'};`,
-            `  dav_ext_methods PROPFIND OPTIONS;`,
-            `  create_full_put_path on;`,
-            `  dav_access user:rw group:r;`,
-            `}`,
-          ].join('\n')
-          const config: WebDiskConfig = {
-            ...merged,
-            accountId: account.id,
-            compiledConfig,
-            updatedAt: new Date().toISOString(),
-          }
-          await helpers.assertCanAccessAccount(caller, account, `web_features.${featureKind}`)
-          await ext.write(fileKey, config)
-          await helpers.emitAudit({
-            actor: caller.principal.username,
-            action: 'web_features.web_disk.updated',
-            target: `account:${account.username}`,
-            detail: { enabled: config.enabled, rootPath: config.rootPath },
             outcome: 'ok',
             principalId: caller.principal.id,
           })
@@ -2612,27 +2355,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       }
     }
 
-    const dbMaintMatch = /^\/api\/databases\/([^/]+)\/maintenance$/.exec(pathname)
-    if (method === 'POST' && (dbMaintMatch || pathname === '/api/databases/repair')) {
-      const caller = await helpers.requireCaller(req)
-      const body = await readJsonBody<{ accountId?: Id; database?: unknown }>(req)
-      const account = await requireResolvedAccount(
-        caller,
-        dbMaintMatch?.[1] ?? body.accountId,
-        'database.maintenance',
-      )
-      if (dbMaintMatch?.[1] && body.accountId && body.accountId !== account.id && body.accountId !== account.username) {
-        return fail('NOT_FOUND', `account "${body.accountId}" not found`)
-      }
-      const database = body.database
-      if (database !== undefined && (typeof database !== 'string' || (database !== account.username && !database.startsWith(`${account.username}_`)))) {
-        return fail('FORBIDDEN', `database is outside account "${account.username}" namespace`)
-      }
-      // No agent executor runs CHECK/REPAIR/OPTIMIZE yet; refuse rather than report a result nobody produced.
-      return fail('PRECONDITION_FAILED', 'database maintenance requires a connected host executor; nothing was run', {
-        reason: 'database_maintenance_unavailable', stateChanged: false, nativeApplied: false,
-      })
-    }
+    const databaseMaintenance = await handleAccountDbMaintenanceRoute(req, url, method, helpers)
+    if (databaseMaintenance) return databaseMaintenance
 
     // Read-only projection of the saved runtime registry; the account owner changes it through /api/account/runtime,
     // where the agent checks the plan and the host. One source for the socket paths: system.cachePaths.
@@ -2650,100 +2374,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       return jsonResponse({ cache: { accountId: account.id, username: account.username, slice: system.accountSliceName(account.uid), redis: { ...service('redis'), evictionPolicy: 'allkeys-lru' }, memcached: service('memcached') } })
     }
 
-    // =========================================================================
-    // 8. Server Fine Settings & Deferred Modules
-    // =========================================================================
-    if (pathname === '/api/server/fine-settings') {
-      const caller = await helpers.requireCaller(req)
-      await helpers.assertRoot(caller, 'server.fine_settings')
-      const defaultFine: ServerFineSettingsState = {
-        limits: {
-          maxMemoryPerProcessMb: 1024,
-          maxProcessesPerAccount: 64,
-          oomScoreAdj: 200,
-        },
-        logRotation: {
-          frequency: 'daily',
-          retainDays: 14,
-          compress: true,
-          maxSizeMb: 100,
-          compiledLogrotateConf: '/var/log/xpanel/*.log /var/log/nginx/*.log {\n  daily\n  rotate 14\n  compress\n  delaycompress\n  missingok\n  notifempty\n}\n',
-        },
-        mta: {
-          maxQueueLifetimeHours: 72,
-          maxMessageSizeMb: 50,
-          smarthost: null,
-          rbls: ['zen.spamhaus.org', 'bl.spamcop.net'],
-          compiledPostfixMainCf: 'maximal_queue_lifetime = 72h\nmessage_size_limit = 52428800\n',
-        },
-        packages: {
-          installedPackages: ['nginx', 'dovecot-core', 'postfix', 'mariadb-server', 'pdns-server', 'rspamd'],
-          lastUpdatedAt: new Date().toISOString(),
-        },
-        webStack: {
-          modules: ['http_v2', 'http_v3', 'ssl', 'gzip', 'brotli', 'headers_more'],
-          brotliEnabled: true,
-          http3Enabled: true,
-          modSecurityEnabled: true,
-        },
-        updatedAt: new Date().toISOString(),
-      }
-      if (method === 'GET') {
-        return jsonResponse({ settings: await ext.readOrDefault('server/fine-settings.json', defaultFine) })
-      }
-      if (method === 'PUT') {
-        const body = await readJsonBody<Partial<ServerFineSettingsState>>(req)
-        const current = await ext.readOrDefault('server/fine-settings.json', defaultFine)
-        const limits = { ...current.limits, ...(body.limits ?? {}) }
-        const logRotBase = { ...current.logRotation, ...(body.logRotation ?? {}) }
-        const compiledLogrotateConf = [
-          '/var/log/xpanel/*.log /var/log/nginx/*.log /var/log/apache2/*.log {',
-          `  ${logRotBase.frequency}`,
-          `  rotate ${logRotBase.retainDays}`,
-          `  maxsize ${logRotBase.maxSizeMb}M`,
-          ...(logRotBase.compress ? ['  compress', '  delaycompress'] : []),
-          '  missingok',
-          '  notifempty',
-          '}',
-          '',
-        ].join('\n')
-        const mtaBase = { ...current.mta, ...(body.mta ?? {}) }
-        const relayhostLine =
-          mtaBase.smarthost && mtaBase.smarthost.enabled
-            ? `relayhost = [${mtaBase.smarthost.host}]:${mtaBase.smarthost.port}`
-            : 'relayhost ='
-        const rblLines = mtaBase.rbls.map((r) => `reject_rbl_client ${r}`).join(', ')
-        const compiledPostfixMainCf = [
-          `maximal_queue_lifetime = ${mtaBase.maxQueueLifetimeHours}h`,
-          `message_size_limit = ${mtaBase.maxMessageSizeMb * 1024 * 1024}`,
-          relayhostLine,
-          `smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination${rblLines ? `, ${rblLines}` : ''}`,
-          '',
-        ].join('\n')
-
-        const updated: ServerFineSettingsState = {
-          limits,
-          logRotation: { ...logRotBase, compiledLogrotateConf },
-          mta: { ...mtaBase, compiledPostfixMainCf },
-          packages: {
-            installedPackages: body.packages?.installedPackages ?? current.packages.installedPackages,
-            lastUpdatedAt: new Date().toISOString(),
-          },
-          webStack: { ...current.webStack, ...(body.webStack ?? {}) },
-          updatedAt: new Date().toISOString(),
-        }
-        await ext.write('server/fine-settings.json', updated)
-        await helpers.emitAudit({
-          actor: caller.principal.username,
-          action: 'server.fine_settings.updated',
-          target: 'server:fine-settings',
-          outcome: 'ok',
-          principalId: caller.principal.id,
-        })
-        return jsonResponse({ settings: updated })
-      }
-    }
-
     // Read-only projection of the saved runtime registry: containers publish no port and run only through the agent.
     const containerListMatch = /^\/api\/containers\/([^/]+)$/.exec(pathname)
     if (containerListMatch) {
@@ -2755,56 +2385,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       return jsonResponse({ containers: registry.containers.map(c => ({ name: c.name, image: c.image, enabled: c.enabled, envKeys: Object.keys(c.env), systemdUnit: system.containerUnitName(account.username, c.name),
         slice: system.accountSliceName(account.uid), publishedPorts: [], updatedAt: c.updatedAt })) })
     }
-    const appStagingMatch = /^\/api\/apps\/([^/]+)\/([^/]+)\/(staging-clone|staging-push)$/.exec(pathname)
-    const appItemMatch = /^\/api\/apps\/([^/]+)\/([^/]+)$/.exec(pathname)
-    const appListMatch = /^\/api\/apps\/([^/]+)$/.exec(pathname)
-    if (appStagingMatch || appItemMatch || appListMatch) {
-      const caller = await helpers.requireCaller(req)
-      const accountParam = (appStagingMatch?.[1] ?? appItemMatch?.[1] ?? appListMatch?.[1])!
-      const account = await helpers.resolveAccountParam(accountParam)
-      await helpers.assertCanAccessAccount(caller, account, 'apps.manage')
-      const fileKey = `apps/${account.id}.json`
-      const apps = await ext.readOrDefault<InstalledAppRecord[]>(fileKey, [])
-      const applicationChangesUnavailable = (): never => fail('PRECONDITION_FAILED', 'application changes require a qualified native installation workflow', {
-        reason: 'application_provider_unavailable', stateChanged: false, nativeApplied: false,
-      })
-
-      if (appListMatch && method === 'GET') {
-        return jsonResponse({ apps })
-      }
-      if (appListMatch && method === 'POST') {
-        const body = await readJsonBody<Partial<InstalledAppRecord>>(req)
-        const domain = validateDomainName(body.domain ?? account.primaryDomain)
-        if (domain !== account.primaryDomain) {
-          await requireDomainAccount(helpers.store, caller, domain, 'apps.manage', account.id)
-        }
-        await helpers.assertCanAccessAccount(caller, account, 'apps.manage')
-        return applicationChangesUnavailable()
-      }
-      if (appStagingMatch && method === 'POST') {
-        const appId = appStagingMatch[2]!
-        const verb = appStagingMatch[3]!
-        const targetApp = apps.find(app => app.id === appId)
-        if (!targetApp) return fail('NOT_FOUND', `installed app "${appId}" not found`)
-        if (verb === 'staging-clone') {
-          const body = await readJsonBody<{ stagingDomain?: string; stagingPath?: string }>(req)
-          const stagingDomain = body.stagingDomain ? validateDomainName(body.stagingDomain) : `staging.${targetApp.domain}`
-          if (body.stagingDomain && stagingDomain !== account.primaryDomain && stagingDomain !== `staging.${targetApp.domain}`) {
-            await requireDomainAccount(helpers.store, caller, stagingDomain, 'apps.manage', account.id)
-          }
-        }
-        await helpers.assertCanAccessAccount(caller, account, 'apps.manage')
-        return applicationChangesUnavailable()
-      }
-      if (method === 'DELETE' && !appStagingMatch) {
-        const body = await readJsonBody<{ id?: string }>(req)
-        const targetId = appItemMatch?.[2] ?? url.searchParams.get('id') ?? body.id
-        if (!apps.some(app => app.id === targetId)) return fail('NOT_FOUND', `installed app "${targetId ?? ''}" not found`)
-        await helpers.assertCanAccessAccount(caller, account, 'apps.manage')
-        return applicationChangesUnavailable()
-      }
-    }
-
+    const webAppsResponse = await handleWebAppsRoute(req, url, method, { ...helpers, readApps: accountId => ext.readOrDefault<InstalledAppRecord[]>(`apps/${accountId}.json`, []) })
+    if (webAppsResponse !== null) return webAppsResponse
     return null
   }
 

@@ -1,10 +1,13 @@
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { isXpanelError } from '@xpanel/core'
 import { mailfxSpamMilter, readMailForwardingConfiguration, readMailfxRenderInput } from './mailfx-render.ts'
 import type { MailfxRun, MailxSnapshot } from './mailfx-render.ts'
+
+// The real reader asks the host for Pigeonhole's module; these cases stay independent of the machine.
+vi.mock('./boxtrapper-render.ts', async importOriginal => ({ ...await importOriginal<typeof import('./boxtrapper-render.ts')>(), readBoxTrapperRender: async () => null }))
 
 const ACCOUNT = '00000000-0000-4000-8000-000000000002'
 const snapshot: MailxSnapshot = {
@@ -67,7 +70,7 @@ describe('reconciler mail inputs', () => {
     const list = (n: number, extra: Record<string, unknown> = {}) => ({ id: `00000000-0000-4000-8000-00000000010${n}`, accountId: ACCOUNT, name: 'l', domain: 'shop.example', address: `l${n}@shop.example`,
       members: ['Info@shop.example', 'x@remote.example'], moderation: 'open', archiveEnabled: true, createdAt: '2026-10-28T09:00:00.000Z', selfSubscription: 'closed', ...extra })
     await put(['extended', 'mail', 'mailing-lists.json'], [list(1), list(2, { address: 'team@shop.example', members: ['sales@shop.example'] }), list(3, { moderation: 'moderated' })])
-    const forwarding = await readMailForwardingConfiguration(root, snapshot)
+    const forwarding = await readMailForwardingConfiguration(root, snapshot, false)
     expect(forwarding.lists).toEqual([{ accountId: ACCOUNT, address: 'l1@shop.example', members: ['info@shop.example', 'x@remote.example'] }])
     await put(['extended', 'mail', 'mailing-lists.json'], { lists: [] })
     const error = await readMailForwardingConfiguration(root, snapshot).then(() => null, (caught: unknown) => caught)

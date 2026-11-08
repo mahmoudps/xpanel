@@ -1,10 +1,11 @@
-import { assertDbNameOwned, fail, isXpanelError, parseOwnerDatabaseStateRequest } from '@xpanel/core'
+import { assertDbNameOwned, effectivePlan, fail, isXpanelError, parseOwnerDatabaseStateRequest } from '@xpanel/core'
 import type { Account } from '@xpanel/core'
 import type { DatabaseMutationOptions } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
 import { authorizeAccountOwner, workspaceJson } from './account-ssh-workspace.ts'
 import type { AccountSshPorts } from './account-ssh-workspace.ts'
 import { assertPostgresqlPassword, assertPostgresqlRoleName, postgresqlScramVerifier } from '../../../packages/state/src/pg-state.ts'
+import { assertPasswordAllowed } from './password-policy.ts'
 
 /**
  * Database engine, web-client sign-on and MariaDB upgrade workspaces. Every agent reply is rebuilt from
@@ -57,23 +58,22 @@ const context = (raw: Record<string, unknown>, account: Account | null) => {
   if (!account) return raw.context === undefined ? {} : bad()
   return object(raw.context) && exact(raw.context, ['accountId', 'username']) && raw.context.accountId === account.id && raw.context.username === account.username ? { context: { accountId: account.id, username: account.username } } : bad()
 }
-const REASONS = ['packages-unread', 'package-missing', 'config-missing', 'config-invalid', 'bridge-missing', 'bridge-modified', 'phpmyadmin-config-missing', 'phpmyadmin-config-modified', 'ticket-directory-unsafe', 'database-admin-unavailable'] as const
+const REASONS = ['packages-unread', 'package-missing', 'no-distribution-package', 'postgresql-unavailable', 'client-config-missing', 'client-config-unscoped', 'config-missing', 'config-invalid', 'bridge-missing', 'bridge-modified', 'phpmyadmin-config-missing', 'phpmyadmin-config-modified', 'ticket-directory-unsafe', 'database-admin-unavailable'] as const
 export function validateDbWebClient(raw: unknown, account: Account | null, client: 'phpmyadmin' | 'phppgadmin') {
-  const keys = client === 'phppgadmin' ? ['client', 'installed', 'signon', 'postgresql'] : ['client', 'installed', 'signon', 'databases', 'ticketSeconds', 'sessionSeconds', ...(account ? [] : ['phppgadmin'])]
+  const keys = client === 'phppgadmin' ? ['client', 'installed', 'signon', 'postgresql', 'databases', 'ticketSeconds', 'sessionSeconds'] : ['client', 'installed', 'signon', 'databases', 'ticketSeconds', 'sessionSeconds', ...(account ? [] : ['phppgadmin'])]
   if (!object(raw) || !exact(raw, account ? [...keys, 'context'] : keys) || raw.client !== client || !object(raw.signon) || !exact(raw.signon, ['state', 'reason'])) return bad()
   const base = { ...context(raw, account), client, installed: nullable(raw.installed, flag) }
-  if (client === 'phppgadmin') return raw.signon.state === 'unsupported' && raw.signon.reason === 'no-documented-signon' ? { ...base, signon: { state: 'unsupported' as const, reason: 'no-documented-signon' as const }, postgresql: nullable(raw.postgresql, flag) } : bad()
-  const state = oneOf(raw.signon.state, ['ready', 'not-installed', 'not-configured', 'unavailable'] as const), reason = state === 'ready' ? (raw.signon.reason === null ? null : bad()) : oneOf(raw.signon.reason, REASONS)
+  const state = oneOf(raw.signon.state, ['ready', 'not-installed', 'no-package', 'not-configured', 'unavailable'] as const), reason = state === 'ready' ? (raw.signon.reason === null ? null : bad()) : oneOf(raw.signon.reason, REASONS)
   if (raw.ticketSeconds !== 60 || raw.sessionSeconds !== 1800) return bad()
   const databases = account ? count(raw.databases, 10000) : raw.databases === null ? null : bad()
   return { ...base, signon: { state, reason }, databases, ticketSeconds: 60, sessionSeconds: 1800, ...(account ? {} : { phppgadmin: nullable(raw.phppgadmin, flag) }) }
 }
-export function validateDbSignon(raw: unknown) {
-  if (!object(raw) || !exact(raw, ['client', 'action', 'ticket', 'expiresAt', 'sessionExpiresAt']) || raw.client !== 'phpmyadmin' || typeof raw.ticket !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(raw.ticket)) return bad()
+export function validateDbSignon(raw: unknown, client: 'phpmyadmin' | 'phppgadmin' = 'phpmyadmin') {
+  if (!object(raw) || !exact(raw, ['client', 'action', 'ticket', 'expiresAt', 'sessionExpiresAt']) || raw.client !== client || typeof raw.ticket !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(raw.ticket)) return bad()
   const action = new URL(text(raw.action, 512))
   if (action.protocol !== 'https:' || action.username || action.password || action.search || action.hash || action.href !== raw.action) return bad()
   const expiresAt = stamp(raw.expiresAt), sessionExpiresAt = stamp(raw.sessionExpiresAt)
-  return Date.parse(sessionExpiresAt) > Date.parse(expiresAt) ? { client: 'phpmyadmin' as const, action: action.href, ticket: raw.ticket, expiresAt, sessionExpiresAt } : bad()
+  return Date.parse(sessionExpiresAt) > Date.parse(expiresAt) ? { client, action: action.href, ticket: raw.ticket, expiresAt, sessionExpiresAt } : bad()
 }
 export function validateDbAccountPostgresql(raw: unknown, account: Account) {
   if (!object(raw) || !exact(raw, ['context', 'observedAt', 'version', 'databases', 'roles', 'provisioning', 'state'])) return bad()
@@ -111,7 +111,7 @@ const ROOT: Readonly<Record<string, { agent: string; method: 'GET' | 'POST'; val
   '/api/server/databases/web-clients': { agent: '/host/databases/web-clients', method: 'GET', validate: raw => validateDbWebClient(raw, null, 'phpmyadmin') },
   '/api/server/databases/web-clients/phpmyadmin/sign-on': { agent: '/host/databases/web-clients/phpmyadmin/sign-on', method: 'POST', validate: validateDbSignon, body: [] },
   '/api/server/databases/upgrade': { agent: '/host/databases/upgrade', method: 'GET', validate: validateDbUpgrade },
-  '/api/server/databases/upgrade/apply': { agent: '/host/databases/upgrade/apply', method: 'POST', validate: validateJob, body: ['expectedRevision'] },
+  '/api/server/databases/upgrade/apply': { agent: '/host/databases/upgrade/apply', method: 'POST', validate: validateJob, body: ['expectedRevision', 'acknowledgedWarnings'] },
 }
 const ACCOUNT = /^\/api\/account\/database-engines\/(phpmyadmin|phppgadmin)(\/sign-on)?$/
 const TOOLS = { phpmyadmin: 'phpmyadmin', phppgadmin: 'phppgadmin' } as const
@@ -136,10 +136,11 @@ async function readPostgresqlView(ports: DbWorkspacePorts, owner: PgOwner) {
   const host = await readPostgresqlHost(ports, owner)
   const saved = await ports.store.readAccountPostgresql(owner.account.id), mariadb = await ports.store.listDatabases(owner.account.id), plan = await ports.store.getPlan(owner.account.planId)
   if (!plan) return fail('NOT_FOUND', 'plan not found', { stateChanged: false })
+  const cap = effectivePlan(plan, owner.account).caps.databases
   return { ...host, saved: {
     databases: saved.databases.map(row => ({ id: row.id, name: row.name, owner: row.owner ?? bad(), trashedAt: row.trashedAt })),
     users: saved.users.map(row => ({ id: row.id, name: row.name })),
-    limit: { used: mariadb.length + saved.databases.filter(row => row.trashedAt === null).length, max: plan.caps.databases === 'unlimited' ? null : plan.caps.databases },
+    limit: { used: mariadb.length + saved.databases.filter(row => row.trashedAt === null).length, max: cap === 'unlimited' ? null : cap },
   } }
 }
 
@@ -159,7 +160,7 @@ async function handlePostgresqlRoute(req: Request, url: URL, method: string, mat
   const name = !id ? (kind === 'users' ? assertPostgresqlRoleName(account.username, body.name) : assertDbNameOwned(account.username, body.name)) : null
   const owner = !id && kind === 'databases' ? assertPostgresqlRoleName(account.username, body.owner) : null
   // The password stops here: only its SCRAM-SHA-256 verifier is saved and sent to the server.
-  const authString = kind === 'users' && (!id || verb === 'password') ? postgresqlScramVerifier(assertPostgresqlPassword(body.password)) : null
+  const authString = kind === 'users' && (!id || verb === 'password') ? postgresqlScramVerifier(assertPasswordAllowed(assertPostgresqlPassword(body.password), 'database')) : null
   const stateGuard = verb === 'trash' || verb === 'restore' ? parseOwnerDatabaseStateRequest(body, verb) : undefined
   const mutate = ports.mutateDatabase ?? fail('SERVICE_UNAVAILABLE', 'PostgreSQL changes are unavailable here', { stateChanged: false })
   if ((await readPostgresqlHost(ports, first)).provisioning !== 'available') return fail('PRECONDITION_FAILED', 'PostgreSQL is not running on this server; nothing was changed', { stateChanged: false })
@@ -191,7 +192,7 @@ export async function handleDbWorkspaceRoute(req: Request, url: URL, method: str
   const postgresql = PG_ROUTE.exec(url.pathname)
   if (postgresql) return handlePostgresqlRoute(req, url, method, postgresql, ports)
   const root = ROOT[url.pathname], account = ACCOUNT.exec(url.pathname)
-  if (!root && (!account || account[2] && account[1] !== 'phpmyadmin')) return null
+  if (!root && !account) return null
   const expected = root?.method ?? (account![2] ? 'POST' : 'GET'), mutation = expected === 'POST'
   if (method !== expected) return new Response(null, { status: 405, headers: { allow: expected } })
   if (url.search) return fail('VALIDATION', 'database workspaces do not accept selectors', { stateChanged: false })
@@ -220,6 +221,6 @@ export async function handleDbWorkspaceRoute(req: Request, url: URL, method: str
     if (mutation) return fail('FORBIDDEN', 'the account binding changed; the sign-on was withheld', { stateChanged: false })
     throw error
   }
-  try { return workspaceJson(mutation ? validateDbSignon(raw) : validateDbWebClient(raw, fresh.account, client)) }
+  try { return workspaceJson(mutation ? validateDbSignon(raw, client) : validateDbWebClient(raw, fresh.account, client)) }
   catch { return fail('SERVICE_UNAVAILABLE', 'the protected database reply could not be verified', { stateChanged: false, verificationRequired: mutation }) }
 }

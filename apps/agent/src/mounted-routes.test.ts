@@ -34,7 +34,7 @@ async function fixture(extra: Partial<AgentServerDeps> = {}) {
   const state = await createTestStateStore(); cleanup.push(() => state.close())
   const root = await createRootPrincipal(database.db, { username: 'root', passwordHash: HASH, forcePasswordChange: false })
   const owner = await createUserPrincipal(database.db, { username: 'mountowner', accountId: randomUUID(), passwordHash: HASH })
-  const resellerState = await state.store.createReseller({ username: 'mountreseller', passwordHash: HASH, acl: [], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: false, nameservers: [], delegatedIps: [] })
+  const resellerState = await state.store.createReseller({ username: 'mountreseller', passwordHash: HASH, acl: [], maxAccounts: 10, totalDiskMb: 100000, totalBandwidthMb: 100000, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
   const reseller = await createResellerPrincipal(database.db, { id: resellerState.id, username: resellerState.username, passwordHash: HASH })
   const executor = new FakeHostExecutor(), run = vi.spyOn(executor, 'runCommand'), read = vi.spyOn(executor, 'readFile')
   const app = createAgentApp({ db: database.db, store: state.store, executor, os: profileFor('ID=ubuntu\nVERSION_ID="24.04"\n'), agentToken: TOKEN, reconciler: subscriptionOnlyReconciler(), ...extra })
@@ -125,8 +125,8 @@ async function boundAccount(f: Awaited<ReturnType<typeof fixture>>) {
   return { account, principal, features, plan }
 }
 describe('mounted agent native provider holds and account binding', () => {
-  it.each(['preview', 'apply'])('keeps Composer %s jobs unavailable without the qualified helper/provider', async action => {
-    const f = await fixture(), response = await f.request('/host/composer/jobs/' + action, { method: 'POST', body: { action: 'install', domainId: randomUUID(), ...(action === 'apply' ? { expectedRevision: 'a'.repeat(64), reviewFingerprint: 'b'.repeat(64) } : {}) } })
+  it.each(['preview', 'apply'])('keeps Composer %s jobs unavailable without the host job runner', async action => {
+    const f = await fixture(), response = await f.request('/host/composer/jobs/' + action, { method: 'POST', body: { action: 'install', domainId: randomUUID(), phpVersion: null, mirror: null, ...(action === 'apply' ? { expectedRevision: 'a'.repeat(64), reviewFingerprint: 'b'.repeat(64) } : {}) } })
     expect(response.status).toBe(412); expect(await response.json()).toMatchObject({ details: { stateChanged: false } })
     expect(f.run).not.toHaveBeenCalled(); expect(f.read).not.toHaveBeenCalled()
   })
@@ -137,13 +137,13 @@ describe('mounted agent native provider holds and account binding', () => {
     expect(f.run).not.toHaveBeenCalled()
   })
 
-  it('reads only managed private package metadata and keeps mutation admission absent', async () => {
+  it('reads the PEAR library of the owner and refuses a change off a Linux host', async () => {
     const files = vi.fn(async (_context: unknown, request: { op: string }) => { if (request.op === 'list') return []; throw new Error('Unexpected file effect: ' + request.op) })
     const f = await fixture({ accountFileRunner: { run: files } }), bound = await boundAccount(f), path = '/accounts/' + bound.account.username + '/packages'
     const response = await f.request(path, { principalId: bound.principal.id })
     expect(response.status).toBe(200)
     const view = await revisionResponse(response)
-    expect(view).toMatchObject({ context: { accountId: bound.account.id }, packages: [], available: [], capabilities: { install: false, remove: false, recover: false } })
+    expect(view).toMatchObject({ context: { accountId: bound.account.id }, packages: [], results: [], engine: false })
     expect((await f.request(path, { principalId: bound.principal.id, method: 'POST', body: { op: 'install', name: 'HTTP_Request2', expectedRevision: view.revision } })).status).toBe(412)
     expect(files.mock.calls.every(([, request]) => request.op === 'list')).toBe(true); expect(f.run).not.toHaveBeenCalled()
   })

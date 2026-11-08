@@ -121,7 +121,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     return { plan, account, fl }
   }
 
-  it('mail composition applies saved forwarding changes and repairs merged-file drift', async () => {
+  it('mail composition applies saved forwarding changes and repairs merged-file drift', { tags: ['slow'] }, async () => {
     const { account } = await seedEnvironment()
     const directory = join(stateHandle.store.rootDir, 'extended', 'mail')
     await mkdir(directory, { recursive: true })
@@ -151,7 +151,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     assert.match(executor.files.get(master.path)!.content, /# unrelated service configuration/)
   })
 
-  it('mail composition rejects historical restore when current forwarding differs from target map checksums', async () => {
+  it('mail composition rejects historical restore when current forwarding differs from target map checksums', { tags: ['slow'] }, async () => {
     const { account } = await seedEnvironment()
     const directory = join(stateHandle.store.rootDir, 'extended', 'mail')
     await mkdir(directory, { recursive: true })
@@ -174,7 +174,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     assert.equal(JSON.stringify([...executor.files]), host)
   })
 
-  it('mail composition restores all merged files and lookup maps after a failed mail reload', async () => {
+  it('mail composition restores all merged files and lookup maps after a failed mail reload', { tags: ['slow'] }, async () => {
     const { account } = await seedEnvironment()
     const directory = join(stateHandle.store.rootDir, 'extended', 'mail')
     await mkdir(directory, { recursive: true })
@@ -245,7 +245,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     assert.match(compileDesiredGeneration(snapshot, { os, mailTls: null }).files.find(file => file.path.endsWith('/master.cf.fragment'))!.content, /^127.0.0.1:587 inet/m)
   })
 
-  it('refuses a stale compiled snapshot before live activation and records the pending generation as failed', async () => {
+  it('refuses a stale compiled snapshot before live activation and records the pending generation as failed', { tags: ['slow'] }, async () => {
     await seedEnvironment()
     const reconciler = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os })
     const initial = await reconciler.reconcile({ actor: 'root', mailAuth: null })
@@ -283,7 +283,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     assert.equal(executor.executedTests.length, configTestCount)
   })
 
-  it('bumps a stamped zone after body drift, then remains stable without changing TTLs', async () => {
+  it('bumps a stamped zone after body drift, then remains stable without changing TTLs', { tags: ['slow'] }, async () => {
     const { account } = await seedEnvironment()
     await stateHandle.store.saveDnsZone({ id: randomUUID(), accountId: account.id, name: 'alice.example.com', serial: 2026102400, records: [{ id: randomUUID(), zone: 'alice.example.com', name: 'www', type: 'A', ttl: 300, content: '192.0.2.10', priority: null }] })
     const reconciler = new HostReconciler({ store: stateHandle.store, db: dbHandle.db, executor, os })
@@ -301,7 +301,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     assert.equal(executor.files.get(path)!.content, repaired)
   })
 
-  it('uses per-account IO devices without falling back to a global device, while retaining explicit overrides', async () => {
+  it('uses per-account IO devices without falling back to a global device, while retaining explicit overrides', { tags: ['slow'] }, async () => {
     const { account } = await seedEnvironment()
     const snapshot = await stateHandle.store.readSnapshot()
     const mapped = compileDesiredGeneration(snapshot, { os, ioDevices: ['/dev/block/8:1'], ioDevicesByAccount: new Map([[account.id, []]]) })
@@ -319,7 +319,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     assert.ok(executor.files.get(slice.path)!.content.includes('/dev/block/8:3'))
   })
 
-  it('A19: validates candidate configs in isolated staging before touching live paths; syntax failure never writes broken config to live targets', async () => {
+  it('A19: validates candidate configs in isolated staging before touching live paths; syntax failure never writes broken config to live targets', { tags: ['slow'] }, async () => {
     await seedEnvironment()
     const reconciler = new HostReconciler({
       store: stateHandle.store,
@@ -365,7 +365,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     assert.equal((await latestActive(dbHandle.db))?.id, 1)
   })
 
-  it('A22: removes ONLY obsolete owned files and stops obsolete units when the last mailbox, FTP user, or cron job is deleted, preserving unmanaged neighbor files', async () => {
+  it('A22: removes ONLY obsolete owned files and stops obsolete units when the last mailbox, FTP user, or cron job is deleted, preserving unmanaged neighbor files', { tags: ['slow'] }, async () => {
     const { account } = await seedEnvironment()
 
     // Create a mailbox + FTP user and a cron job on alice
@@ -460,7 +460,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     )
   })
 
-  it('A22: detects and repairs out-of-band host drift even when desired state checksum is unchanged and force is false (including after restart)', async () => {
+  it('A22: detects and repairs out-of-band host drift even when desired state checksum is unchanged and force is false (including after restart)', { tags: ['slow'] }, async () => {
     await seedEnvironment()
     const reconciler1 = new HostReconciler({
       store: stateHandle.store,
@@ -506,7 +506,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     assert.equal(executor.files.has('/opt/xpanel/bin/jailshell'), true)
   })
 
-  it('A20: rolls back files/metadata, reloads affected services in reverse order, and verifies health when reload or health probe fails on the 2nd service', async () => {
+  it('A20: rolls back files/metadata, reloads affected services in reverse order, and verifies health when reload or health probe fails on the 2nd service', { tags: ['slow'] }, async () => {
     await seedEnvironment()
     let failNginxHealthForGen: number | null = null
 
@@ -573,7 +573,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     assert.deepEqual(executor.files.get('/etc/ssh/sshd_config.d/60-xpanel.conf'), gen1Ssh)
   })
 
-  it('A20: rolls back partially written files when ENOSPC or chown/write failure occurs mid-activation', async () => {
+  it('A20: rolls back partially written files when ENOSPC or chown/write failure occurs mid-activation', { tags: ['slow'] }, async () => {
     await seedEnvironment()
     const reconciler = new HostReconciler({
       store: stateHandle.store,
@@ -622,7 +622,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
 
   it.each(['stage', 'test', 'activate', 'reload', 'verify'] as const)(
     'A21: recovers deterministically from a simulated process kill at phase "%s" with zero partial state or false active rows',
-    async (crashPhase: ReconcileJournalPhase) => {
+    { tags: ['slow'] }, async (crashPhase: ReconcileJournalPhase) => {
       await seedEnvironment()
       const baseReconciler = new HostReconciler({
         store: stateHandle.store,
@@ -696,7 +696,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     },
   )
 
-  it('reloads PowerDNS with reload-or-restart and tolerates a missing slice drop-in temp', async () => {
+  it('reloads PowerDNS with reload-or-restart and tolerates a missing slice drop-in temp', { tags: ['slow'] }, async () => {
     assert.deepEqual(rollbackReloadAction('pdns.service'), {
       kind: 'exec',
       argv: ['/usr/bin/systemctl', 'reload-or-restart', 'pdns.service'],
@@ -748,7 +748,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     assert.equal((await latestActive(dbHandle.db))?.id, 1)
   })
 
-  it('resolve-failed checks the disk, audits the clear, and lets reconcile continue', async () => {
+  it('resolve-failed checks the disk, audits the clear, and lets reconcile continue', { tags: ['slow'] }, async () => {
     await seedEnvironment()
     const reconciler = new HostReconciler({
       store: stateHandle.store,
@@ -838,7 +838,7 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
     assert.equal(continued.status, 'noop')
   })
 
-  it('resolve-failed clears unverified prerequisites only with an explicit audited attestation', async () => {
+  it('resolve-failed clears unverified prerequisites only with an explicit audited attestation', { tags: ['slow'] }, async () => {
     await seedEnvironment()
     const reconciler = new HostReconciler({
       store: stateHandle.store,

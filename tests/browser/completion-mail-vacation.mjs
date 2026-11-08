@@ -33,20 +33,21 @@ const isRevision = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(v
 const messages = {
   unread: { en: 'Responder configuration has not been read.', ar: 'لم تُقرأ إعدادات الرد التلقائي.' },
   reading: { en: 'Reading saved responder configuration…', ar: 'جارٍ قراءة إعداد الرد المحفوظ…' },
-  read: { en: 'Saved configuration read. Activation remains unverified.', ar: 'تمت قراءة الإعداد المحفوظ. التفعيل غير متحقق منه.' },
-  saved: { en: 'Requested configuration saved and read back. Activation remains unverified.', ar: 'حُفظ الإعداد المطلوب وتأكدت قراءته. التفعيل غير متحقق منه.' },
+  read: { en: 'Saved configuration read.', ar: 'تمت قراءة الإعداد المحفوظ.' },
+  saved: { en: 'Saved and read back.', ar: 'حُفظ وتأكدت قراءته.' },
   stale: { en: 'Saved configuration changed. Refresh preserves this draft and lock; explicitly discard and reload before another save.', ar: 'تغيّر الإعداد المحفوظ. التحديث يحفظ المسودة والقفل؛ تجاهلها وأعد التحميل صراحة قبل حفظ آخر.' },
   uncertain: { en: 'The write outcome requires review. Do not retry. Refresh keeps this lock; explicitly reload to continue.', ar: 'نتيجة الكتابة تتطلب مراجعة. لا تكرر الطلب. التحديث يبقي القفل؛ أعد التحميل صراحة للمتابعة.' },
 }
 const chip = {
-  on: { en: 'Requested on; activation unverified', ar: 'طلب التشغيل؛ التفعيل غير متحقق منه' },
-  notRead: { en: 'Not read; activation unverified', ar: 'لم تُقرأ البيانات؛ التفعيل غير متحقق منه' },
+  on: { en: 'On · saved, not applied yet', ar: 'يعمل · محفوظ، لم يُطبّق بعد' },
+  notRead: { en: 'Not read', ar: 'غير مقروء' },
 }
 const dialog = {
   title: { en: 'Discard responder draft?', ar: 'تجاهل مسودة الرد التلقائي؟' },
   confirm: { en: 'Discard and continue', ar: 'تجاهل ومتابعة' },
 }
-const recordText = (lang, updatedAt) => lang === 'ar' ? 'إعداد الرد المحفوظ للصندوق ' + mailbox + ' · ' + updatedAt : 'Saved responder configuration for ' + mailbox + ' · ' + updatedAt
+const shownTime = value => value.slice(0, 16).replace('T', ' ') + ' UTC'
+const recordText = (lang, updatedAt) => (lang === 'ar' ? 'إعداد الرد المحفوظ للصندوق ' : 'Saved responder configuration for ') + mailbox + ' · ' + shownTime(updatedAt)
 
 // Mirrors the documented server compiler (apps/api/src/mail/vacation-workspace.ts) so the mocked
 // compiledSieve payload is the same source-only shape the real GET/PUT contract returns.
@@ -138,7 +139,7 @@ class VacationModel {
     assert.ok(['GET', 'PUT'].includes(method), 'Only GET/PUT vacation transport is mocked')
     const body = method === 'GET' ? null : request.postDataJSON()
     this.calls.push({ method, path: url.pathname, ...(body === null ? {} : { body: clone(body) }) })
-    const application = { status: 'configuration_only', nativeApplied: false }
+    const application = { state: 'pending', reason: null }
     if (method === 'GET') {
       const gate = this.gates.find(gate => !gate.started)
       if (gate) { gate.started = true; gate.enter(); await gate.promise }
@@ -500,7 +501,7 @@ async function saveJourney(page, model, lang, deep) {
   assert.equal(submitted.expectedRevision, expectedRevision, 'The PUT captures the revision read before saving')
   assert.equal(await statusText(page), messages.saved[lang])
   assert.equal(await chipText(page), chip.on[lang])
-  assert.ok((await statusText(page)).includes(lang === 'ar' ? 'غير متحقق' : 'unverified'))
+  assert.equal(await statusText(page), messages.saved[lang])
   assert.equal(await control(page, 'subject').inputValue(), 'Out of office: autumn', 'Canonical readback trims the subject')
   assert.equal(await control(page, 'body').inputValue(), draft.body)
   assert.equal(await control(page, 'htmlBody').inputValue(), draft.htmlBody)
@@ -712,6 +713,8 @@ async function composeCase({ browser, fixture }) {
   try {
     await mockSession(page, model)
     checkpoint = 'compose-read'
+    // Compose reads the saved sender identities before Send opens; the card itself adds no other transport.
+    await page.route('**/api/webmail/identities', route => route.fulfill({ json: { identities: [] } }))
     await page.goto(fixture.baseUrl + url('/mail/compose', 'en'), { waitUntil: 'load' })
     await state(page, 'read')
     const root = page.locator(rootSelector)
@@ -762,7 +765,7 @@ async function composeCase({ browser, fixture }) {
     })
     assert.equal(await statusText(page), messages.saved.en)
     assert.equal(await chipText(page), chip.on.en, 'After save the chip only requests activation and stays unverified')
-    assert.ok((await statusText(page)).includes('unverified'))
+    assert.equal(await statusText(page), messages.saved.en)
     assert.equal(await page.locator('[data-vacation-open]').evaluate(node => document.activeElement === node), true, 'Collapsing returns focus to the collapsed card trigger')
     assert.equal(await control(page, 'subject').inputValue(), 'Compact responder draft', 'The saved readback is canonical')
     assert.equal(await control(page, 'htmlBody').inputValue(), xss, 'HTML source stays literal text')
@@ -805,7 +808,7 @@ async function composeCase({ browser, fixture }) {
     assert.equal(card.direction, 'ltr')
     result.geometry = card
     check('compose-desktop-card-padding-and-overflow')
-    for (const request of observed.apiRequests) {
+    for (const request of observed.apiRequests.filter(request => !(request.method === 'GET' && request.path === '/api/webmail/identities'))) {
       assert.equal(request.path, api, 'Only the vacation endpoint may be called: ' + request.method + ' ' + request.path)
       assert.equal(request.search, '')
     }

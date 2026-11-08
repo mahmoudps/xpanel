@@ -28,7 +28,7 @@ export interface FileWorkspaceReplyMap {
 }
 export type FileWorkspaceReply<T extends FileWorkspaceRequest = FileWorkspaceRequest> = FileWorkspaceReplyMap[T['op']]
 const fields = {
-  list: ['path', 'showHidden'], read: ['path'], write: ['path', 'content', 'overwrite', 'mode'],
+  list: ['path', 'showHidden'], read: ['path'], write: ['path', 'content', 'overwrite', 'mode', 'to_charset', 'fallback'],
   'put-bytes': ['path', 'contentBase64', 'overwrite', 'mode'], 'get-bytes': ['path'],
   mkdir: ['path', 'mode'], chmod: ['path', 'mode'], move: ['path', 'destination'], copy: ['path', 'destination'], compress: ['paths', 'destination'], extract: ['path', 'destination'], trash: ['path'], 'list-trash': [],
   restore: ['trashId', 'overwrite'], 'empty-trash': ['olderThanDays'], 'purge-trash': ['trashId', 'originalPath', 'deletedAt'],
@@ -59,6 +59,15 @@ const base64 = (value: unknown): Buffer | null => {
   return decoded.length <= FILE_WORKSPACE_LIMITS.binaryBytes && decoded.toString('base64') === value ? decoded : null
 }
 
+const SINGLE_BYTE_CHARSETS: Readonly<Record<string, number>> = { 'ISO-8859-1': 0xff, 'US-ASCII': 0x7f }
+/** Bytes to save for a non-UTF-8 target; null keeps the UTF-8 text write. A character the charset lacks refuses unless fallback keeps UTF-8. */
+function transcodeText(content: string, charset: unknown, fallback: boolean): Buffer | null {
+  if (charset === undefined || charset === 'UTF-8') return null
+  const highest = typeof charset === 'string' && Object.hasOwn(SINGLE_BYTE_CHARSETS, charset) ? SINGLE_BYTE_CHARSETS[charset]! : badRequest('Unsupported target character set')
+  if ([...content].every(character => character.codePointAt(0)! <= highest)) return Buffer.from(content, 'latin1')
+  return fallback ? null : fail('VALIDATION', 'a character cannot be represented in the target character set', { stateChanged: false, reason: 'unrepresentable_character' })
+}
+
 export function validateFileWorkspaceRequest(input: unknown): FileWorkspaceRequest {
   if (!object(input) || typeof input.op !== 'string' || !own(fields, input.op)) return badRequest('Unsupported file workspace request')
   const op = input.op as FileWorkspaceRequest['op']
@@ -69,6 +78,8 @@ export function validateFileWorkspaceRequest(input: unknown): FileWorkspaceReque
     case 'write': {
       if (typeof input.content !== 'string' || !input.content.isWellFormed()) return badRequest('Explicit well-formed UTF8 content is required')
       if (Buffer.byteLength(input.content, 'utf8') > FILE_WORKSPACE_LIMITS.textBytes) return fail('LIMIT_EXCEEDED', 'content exceeds the 1 MiB editor limit', { stateChanged: false })
+      const encoded = transcodeText(input.content, input.to_charset, option(input, 'fallback', false))
+      if (encoded) return { op: 'put-bytes', path: path(input.path), contentBase64: encoded.toString('base64'), overwrite: option(input, 'overwrite', true), mode: mode(own(input, 'mode') ? input.mode : FILE_WORKSPACE_LIMITS.fileMode, FILE_WORKSPACE_LIMITS.fileMode) }
       return { op, path: path(input.path), content: input.content, overwrite: option(input, 'overwrite', true), mode: mode(own(input, 'mode') ? input.mode : FILE_WORKSPACE_LIMITS.fileMode, FILE_WORKSPACE_LIMITS.fileMode) }
     }
     case 'put-bytes': {

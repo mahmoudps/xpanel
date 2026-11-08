@@ -91,6 +91,9 @@ export const REQUIRED_ROOT_FILES = Object.freeze([
   'helpers/terminal-pty/xpanel-terminal-pty.c',
   'helpers/peer-identity/build.mjs',
   'apps/agent/src/peer-identity-source.ts',
+  'apps/agent/src/boxtrapper-program.cjs',
+  'apps/agent/src/host-task-program.cjs',
+  'apps/agent/src/list-gate-program.cjs',
   'bin/xuapi',
   'bin/xwhmapi',
   'apps/web/src/vendor/xterm/LICENSE',
@@ -296,6 +299,7 @@ const isIncludedRuntimeSource = (relPath) => {
     'scripts/install-kernel-quotas.sh',
     'scripts/install-kernel-package.mjs',
     'scripts/selinux-account-homes.sh',
+    'scripts/el-source-builds.sh',
   ].includes(relPath)) return true
   if (REQUIRED_SYSTEMD_UNITS.includes(relPath)) return true
   if (/^(?:apps|packages)\/[^/]+\/package\.json$/.test(relPath)) return true

@@ -133,7 +133,7 @@ describe('approved native operations component supplement', () => {
     const workspace = renderApprovedWhmServicesContent({ activeRoute: '/whm/services', principal: root, catalog: serviceCatalog })
     assert.match(workspace, /Restart confirmation/)
     assert.equal([...workspace.matchAll(/data-host-service-rows/g)].length, 1)
-    for (const title of ['Optional services', 'OpenLiteSpeed', 'ModSecurity with OWASP CRS', 'Install OpenLiteSpeed', 'Install ModSecurity', 'Installation state', 'Not read']) assert.ok(html.includes(title), title)
+    for (const title of ['Optional services', 'OpenLiteSpeed', 'ModSecurity with OWASP CRS', 'Installation state', 'Not read']) assert.ok(html.includes(title), title)
     assert.match(html, /href="\/whm\/services\/web\?lang=en&amp;theme=dark&amp;density=comfortable"/)
     assert.match(html, /href="\/whm\/security\?lang=en&amp;theme=dark&amp;density=comfortable"/)
     assert.doesNotMatch(html, /<form\b|data-service-restart|synthetic-service|private-unit|private-version|>Installing<|>Not installed<|>Queued<|4\.1 GB|12 of 12/)

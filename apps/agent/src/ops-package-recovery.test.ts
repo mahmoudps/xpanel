@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RPM_INSTALLED_IDENTITY_ARGV, RPMDB_REBUILD_ARGV, isOpsPackageRecoveryCommand } from '../../../packages/os/src/ops-package-recovery-command.ts'
 import { RPMDB_VERIFY_ARGV } from '../../../packages/os/src/repair-command.ts'
-import { beginPackageSnapshot, createRhelCacheRecovery, nativeRpmDatabaseRecovery, readInstalledIdentity, readRetainedPackageSnapshot } from './ops-package-recovery.ts'
+import { beginPackageSnapshot, createRhelCacheRecovery, nativeRhelCacheRecovery, nativeRpmDatabaseRecovery, readInstalledIdentity, readRetainedPackageSnapshot } from './ops-package-recovery.ts'
 import { FakeHostExecutor } from './executor.ts'
 import type { PackageRecoveryPorts } from './ops-package-recovery.ts'
 
@@ -124,6 +124,8 @@ describe('native rpm database recovery wiring', () => {
   it('exists only on EL profiles and refuses a snapshot it cannot identify without changing state', async () => {
     const run = vi.fn(async (_argv: string[]) => ({ ok: false, code: 1, stdout: '', stderr: 'rpm unavailable' }))
     expect(nativeRpmDatabaseRecovery('debian', run, join(base, 'recovery'))).toBeUndefined()
+    expect(nativeRhelCacheRecovery('debian', run, join(base, 'recovery'))).toBeUndefined()
+    expect(nativeRhelCacheRecovery('rhel', run, join(base, 'recovery'))).toBeDefined()
     const recovery = nativeRpmDatabaseRecovery('rhel', run, join(base, 'recovery'))!
     await expect(recovery.begin(input)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false } })
     expect(run.mock.calls[0]![0]).toEqual([...RPMDB_VERIFY_ARGV])

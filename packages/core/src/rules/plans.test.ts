@@ -2,13 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { XpanelError } from '../errors.ts'
 import type { Plan, Principal, Reseller } from '../types.ts'
 import {
+  accountLimitsErrors,
   assertCanManagePlan,
   assertCapAvailable,
   canManagePlan,
   changePlanImpact,
   defaultPlan,
+  effectivePlan,
   planErrors,
   unlimitedFields,
+  validateAccountLimits,
   validatePlan,
 } from './plans.ts'
 import type { PlanUsage } from './plans.ts'
@@ -35,7 +38,7 @@ const reseller = (acl: Reseller['acl'] = ['manage-plans']): Reseller => ({
   maxAccounts: 10,
   totalDiskMb: 100_000,
   totalBandwidthMb: 1_000_000,
-  oversell: false,
+  oversell: { disk: false, bandwidth: false },
   nameservers: [],
   delegatedIps: [],
 })
@@ -58,6 +61,9 @@ describe('defaultPlan', () => {
 })
 
 describe('validatePlan', () => {
+  it('refuses the reserved plan name in any case', () => {
+    for (const name of ['extensions', 'Extensions']) expect(planErrors({ ...defaultPlan({ featureListId: 'f', ownerId: null }), id: 'p', name })).toEqual([`"${name}" is a reserved plan name`])
+  })
   it('lets root create anything including unlimited', () => {
     const p = withChanges(defaultPlan(), (p) => {
       p.resources.diskMb = 'unlimited'
@@ -290,5 +296,64 @@ describe('canManagePlan', () => {
     expect(() => assertCanManagePlan(resellerP, own)).not.toThrow()
     // the submitted copy alone would pass: the stored plan is what decides
     expect(validatePlan({ ...foreign, ownerId: 'rs1' }, resellerP, reseller()).ownerId).toBe('rs1')
+  })
+})
+
+describe('effectivePlan', () => {
+  it('is the package itself while the account overrides nothing', () => {
+    const p = defaultPlan()
+    expect(effectivePlan(p, {})).toBe(p)
+    expect(effectivePlan(p, { limits: {} })).toBe(p)
+  })
+
+  it('merges overrides field by field and leaves the package untouched', () => {
+    const p = defaultPlan()
+    const e = effectivePlan(p, { limits: { resources: { diskMb: 20480, bandwidthMbMonth: 'unlimited' }, caps: { databases: 3 } } })
+    expect(e.resources).toEqual({ ...p.resources, diskMb: 20480, bandwidthMbMonth: 'unlimited' })
+    expect(e.caps).toEqual({ ...p.caps, databases: 3 })
+    expect({ ...e, resources: p.resources, caps: p.caps }).toEqual(p)
+    expect(p).toEqual(defaultPlan())
+  })
+
+  it('reads a null or absent field as the package value', () => {
+    const p = defaultPlan()
+    const e = effectivePlan(p, { limits: { resources: { diskMb: null, memoryMb: 2048 }, caps: { mailboxes: null } } })
+    expect(e.resources).toEqual({ ...p.resources, memoryMb: 2048 })
+    expect(e.caps).toEqual(p.caps)
+  })
+
+  it('never adds a field the package does not have', () => {
+    const limits = { resources: { swapMb: 1 } } as unknown as Parameters<typeof effectivePlan>[1]['limits']
+    expect(Object.keys(effectivePlan(defaultPlan(), { limits }).resources)).toEqual(Object.keys(defaultPlan().resources))
+  })
+})
+
+describe('account limit overrides', () => {
+  it('accept package bounds, unlimited and null', () => {
+    expect(accountLimitsErrors({})).toEqual([])
+    expect(accountLimitsErrors({ resources: { diskMb: 1, cpuPercent: 'unlimited', memoryMb: null }, caps: { phpWorkers: 1024, databases: 0 } })).toEqual([])
+  })
+
+  it('refuse values outside the package field bounds', () => {
+    expect(accountLimitsErrors({ resources: { diskMb: 0 } })).toHaveLength(1)
+    expect(accountLimitsErrors({ resources: { diskMb: MAX_DISK_MB + 1 } })).toHaveLength(1)
+    expect(accountLimitsErrors({ resources: { memoryMb: 63 } })).toHaveLength(1)
+    expect(accountLimitsErrors({ caps: { phpWorkers: 0 } })).toHaveLength(1)
+    expect(accountLimitsErrors({ caps: { phpWorkers: 1025 } })).toHaveLength(1)
+    expect(accountLimitsErrors({ caps: { databases: -1 } })).toHaveLength(1)
+    expect(accountLimitsErrors({ resources: { diskMb: '10' } })).toHaveLength(1)
+  })
+
+  it('refuse unknown fields and non-objects', () => {
+    expect(accountLimitsErrors({ resources: { swapMb: 1 } })).toHaveLength(1)
+    expect(accountLimitsErrors({ shell: 'jailed' })).toHaveLength(1)
+    expect(accountLimitsErrors({ caps: [] })).toHaveLength(1)
+    expect(accountLimitsErrors(null)).toHaveLength(1)
+  })
+
+  it('validate to a copy without null fields, or nothing', () => {
+    expect(validateAccountLimits({ resources: { diskMb: null }, caps: {} })).toBeUndefined()
+    expect(validateAccountLimits({ resources: { diskMb: 2048, memoryMb: null } })).toEqual({ resources: { diskMb: 2048 } })
+    expect(code(() => validateAccountLimits({ resources: { diskMb: 0 } }))).toBe('VALIDATION')
   })
 })

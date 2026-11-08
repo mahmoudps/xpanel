@@ -84,7 +84,7 @@ describe('directory privacy over the confined account files', { tags: ['unit'] }
     // the user editor's policy still accepts the file and the web directives stay editable
     expect(inspectHtaccess(htaccess).valid).toBe(true)
     expect(readWebDirective(parseManagedHtaccess(htaccess), 'redirects', { domainName: 'alice.example.test' }).conflict).toBeNull()
-    expect(readWebDirective(parseManagedHtaccess(htaccess), 'ip-blocker', { domainName: 'alice.example.test' }).conflict).toMatchObject({ code: 'access_rules_present' })
+    expect(readWebDirective(parseManagedHtaccess(htaccess), 'handlers', { domainName: 'alice.example.test' }).conflict).toBeNull()
     expect((await run(t.api, { op: 'read', path: null })).directories.map(item => item.path)).toEqual(['public_html/private'])
   })
 

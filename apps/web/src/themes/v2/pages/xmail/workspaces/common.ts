@@ -20,7 +20,9 @@ export interface MailWorkspaceInput extends Pick<MailSurfaceProps, 'quotaUsedMb'
   readonly activeFolder?: string
   readonly attachmentsAvailable?: boolean
   readonly searchAvailable?: boolean
+  readonly searchIndexAvailable?: boolean
   readonly quotaAvailable?: boolean
+  readonly boxTrapperAvailable?: boolean
   readonly authorizedRoutes?: ReadonlySet<string>
   /** Trusted output from UiTheme.slots.accountSecurity; never request or stored-message HTML. */
   readonly securityHtml?: string

@@ -11,11 +11,12 @@ it('counts expanded records including skipped cases and duplicate labels', { tag
   expect(() => assertSlowBudget(cases, -1)).toThrow(/Invalid/)
 })
 
-it('blocks unestablished production budgets without turning a test fixture cap into approval', { tags: ['unit'] }, () => {
-  expect(MAX_EXPANDED_PORTABLE_SLOW_CASES).toBeNull()
+it('pins the approved portable ceiling and blocks the unestablished native budget', { tags: ['unit'] }, () => {
+  expect(MAX_EXPANDED_PORTABLE_SLOW_CASES).toBe(192)
+  expect(slowBudgetCheck([])).toMatchObject({ status: 'passed', maximum: 192, observed: 0 })
   expect(MAX_EXPANDED_NATIVE_SLOW_CASES).toBeNull()
-  expect(slowBudgetCheck([])).toMatchObject({ status: 'blocked', maximum: null, observed: 0 })
-  expect(() => assertSlowBudget([])).toThrow(/not established/)
+  expect(slowBudgetCheck([], MAX_EXPANDED_NATIVE_SLOW_CASES)).toMatchObject({ status: 'blocked', maximum: null, observed: 0 })
+  expect(() => assertSlowBudget([], MAX_EXPANDED_NATIVE_SLOW_CASES)).toThrow(/not established/)
 })
 
 it('fails at the slow threshold and keeps layer meanings distinct', { tags: ['unit'] }, () => {
@@ -60,12 +61,23 @@ function reportFixture(states: string[], tags: string[][], reason: 'passed' | 'f
   }
 }
 
-it('counts fast-filtered expanded cases and blocks an unestablished real runtime budget', { tags: ['unit'] }, () => {
-  const count = 4
-  const result = reportFixture(Array.from({ length: count }, () => 'skipped'), Array.from({ length: count }, () => ['slow']), 'passed')
-  expect(result.report.status).toBe('failed')
-  expect(result.report.budget).toMatchObject({ status: 'blocked', maximum: null, observed: count })
-  expect(result.capturedErrors).toHaveLength(1)
+it('counts fast-filtered expanded cases against the real runtime budget', { tags: ['unit'] }, () => {
+  const slow = (count: number) => reportFixture(Array.from({ length: count }, () => 'skipped'), Array.from({ length: count }, () => ['slow']), 'passed')
+  const within = slow(192)
+  expect(within.report.status).toBe('passed')
+  expect(within.report.budget).toMatchObject({ status: 'passed', maximum: 192, observed: 192 })
+  expect(within.capturedErrors).toEqual([])
+  const over = slow(193)
+  expect(over.report.status).toBe('failed')
+  expect(over.report.budget).toMatchObject({ status: 'failed', maximum: 192, observed: 193 })
+  expect(over.capturedErrors).toHaveLength(1)
+  vi.stubEnv('XPANEL_TEST_LAYER', 'linux')
+  try {
+    const native = slow(4)
+    expect(native.report.status).toBe('failed')
+    expect(native.report.budget).toMatchObject({ status: 'blocked', maximum: null, observed: 4 })
+    expect(native.capturedErrors).toHaveLength(1)
+  } finally { vi.unstubAllEnvs() }
 })
 
 it('never labels failed or interrupted framework runs as passed', { tags: ['unit'] }, () => {

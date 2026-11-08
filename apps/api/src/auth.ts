@@ -11,7 +11,7 @@ import {
   parseCidr,
   parseIp,
 } from '@xpanel/core'
-import type { MfaRuntimePolicy, Principal, TeamPrincipal, TeamRole } from '@xpanel/core'
+import type { CookieIpMode, MfaRuntimePolicy, Principal, TeamPrincipal, TeamRole } from '@xpanel/core'
 import {
   findActiveApiTokenByHash,
   findActiveSessionByTokenHash,
@@ -23,6 +23,7 @@ import {
 import type { Db, PrincipalRecord, SessionRecord } from '@xpanel/db'
 import { entryPointAdmitsPrincipal, sessionCookieName, sessionTokenHash } from './entry-points.ts'
 import type { EntryPoint } from './entry-points.ts'
+import { assertPasswordAllowed, type PasswordService } from './password-policy.ts'
 import { assertTeamRequestAllowed } from './team-access.ts'
 import { findActiveTeamSession, revokeTeamSession, touchTeamSession } from './team-store.ts'
 
@@ -166,7 +167,8 @@ export const assertPasswordHashArgon2id = (encodedHash: unknown): string => {
 /** Provisions exactly the supplied credential; missing passwords never acquire a shared default. */
 export const passwordHashFromInput = async (
   input: { password?: unknown; passwordHash?: unknown },
-  opts: { service?: boolean } = {},
+  /** service: what a mail, FTP or Web Disk user's password signs in to; absent means a panel password */
+  opts: { service?: readonly PasswordService[] } = {},
 ): Promise<string> => {
   if (input.password !== undefined && input.passwordHash !== undefined) {
     fail('VALIDATION', 'supply a password or passwordHash, not both')
@@ -183,9 +185,10 @@ export const passwordHashFromInput = async (
       hash = assertPasswordHashArgon2id(encoded)
     }
   } else {
-    if (typeof input.password !== 'string' || input.password.length < 8) {
-      return fail('VALIDATION', 'password must contain at least 8 characters')
-    }
+    if (typeof input.password !== 'string') return fail('VALIDATION', 'password must contain at least 8 characters')
+    const services = opts.service ?? ['panel']
+    if (services.length === 0) return fail('VALIDATION', 'a service password needs at least one service')
+    for (const service of services) assertPasswordAllowed(input.password, service)
     if (
       input.password.includes('\0') ||
       /[\r\n]/.test(input.password) ||
@@ -466,6 +469,20 @@ const isClientIpAllowed = (allowedIps: readonly string[], clientIp: string | nul
   return false
 }
 
+export interface SessionLimits { idleMs: number; absoluteMs: number; ipMode?: CookieIpMode }
+/** Tweak Settings session address validation; an address that is not known on either side is not compared. */
+export const sessionAddressAdmitted = (mode: CookieIpMode | undefined, saved: string | null | undefined, client: string | null | undefined): boolean => {
+  if (!mode || mode === 'disabled' || !saved || !client) return true
+  const left = parseIp(saved), right = parseIp(client)
+  if (!left || !right) return true
+  if (left.version !== right.version) return false
+  return cidrContains({ ...left, prefix: mode === 'strict' ? (left.version === 4 ? 32 : 128) : (left.version === 4 ? 24 : 64) }, right)
+}
+const sessionExpired = (createdAt: number, lastSeenAt: number, now: number, limits?: SessionLimits): boolean =>
+  !Number.isFinite(createdAt) || !Number.isFinite(lastSeenAt)
+  || now - createdAt >= Math.min(SESSION_ABSOLUTE_TIMEOUT_MS, limits?.absoluteMs ?? Infinity)
+  || now - lastSeenAt >= Math.min(SESSION_IDLE_TIMEOUT_MS, limits?.idleMs ?? Infinity)
+
 /**
  * Authenticates an incoming HTTP `Request` via either:
  * - Bearer API token (`Authorization: Bearer xp_...`)
@@ -476,12 +493,19 @@ export const authenticateRequest = async (
   req: Request,
   opts: {
     serverSecret: string; clientIp?: string | null; touchSession?: boolean; entryPoint?: EntryPoint; mfaRuntimePolicy?: MfaRuntimePolicy; teamMember?: TeamMemberResolver
+    /** Saved sign-in policy lifetimes; the product ceilings apply when absent and always bound them. */
+    sessionLimits?: SessionLimits
+    /** Told when a live session was refused only because its address changed. */
+    onSessionAddressMismatch?: () => void
+    /** Told when a live API token was refused only because of the address it came from. */
+    onTokenAddressDenied?: () => void
     /** Current issuer authority over a handed-off session's target. Without it such a session never authenticates. */
     handoffAuthority?: (session: SessionRecord, principal: PrincipalRecord) => Promise<boolean>
   },
 ): Promise<AuthenticatedCaller | null> => {
   const authHeader = req.headers.get('authorization')
-  if (authHeader) {
+  // A browser repeats panel basic authentication on every request; it never names the signed-in person.
+  if (authHeader && !(opts.entryPoint && /^basic\s/i.test(authHeader))) {
     // Interactive listeners have no audience-scoped API token contract yet.
     if (opts.entryPoint) return null
     const bearerMatch = /^Bearer\s+(\S+)$/i.exec(authHeader.trim())
@@ -491,6 +515,7 @@ export const authenticateRequest = async (
     const apiToken = await findActiveApiTokenByHash(db, tokenHash)
     if (!apiToken) return null
     if (!isClientIpAllowed(apiToken.allowedIps, opts.clientIp ?? null)) {
+      opts.onTokenAddressDenied?.()
       return null
     }
     const principalRecord = await getPrincipal(db, apiToken.principalId)
@@ -521,8 +546,8 @@ export const authenticateRequest = async (
   const now = Date.now()
   const createdAt = Date.parse(session.createdAt)
   const lastSeenAt = Date.parse(session.lastSeenAt)
-  if (!Number.isFinite(createdAt) || !Number.isFinite(lastSeenAt) ||
-      now - createdAt >= SESSION_ABSOLUTE_TIMEOUT_MS || now - lastSeenAt >= SESSION_IDLE_TIMEOUT_MS) return null
+  if (sessionExpired(createdAt, lastSeenAt, now, opts.sessionLimits)) return null
+  if (!sessionAddressAdmitted(opts.sessionLimits?.ipMode, session.ip, opts.clientIp)) { opts.onSessionAddressMismatch?.(); return null }
 
   const principalRecord = await getPrincipal(db, session.principalId)
   if (!principalRecord || principalRecord.disabled) return null
@@ -567,15 +592,15 @@ export const authenticateRequest = async (
  */
 const authenticateTeamSession = async (
   db: Db, req: Request, sessionToken: string, tokenHash: string, resolve: TeamMemberResolver,
-  opts: { serverSecret: string; touchSession?: boolean; entryPoint?: EntryPoint },
+  opts: { serverSecret: string; touchSession?: boolean; entryPoint?: EntryPoint; sessionLimits?: SessionLimits; clientIp?: string | null; onSessionAddressMismatch?: () => void },
 ): Promise<AuthenticatedCaller | null> => {
   if (opts.entryPoint !== undefined && opts.entryPoint !== 'xpanel') return null
   const now = new Date()
   const session = await findActiveTeamSession(db, tokenHash, now)
   if (!session) return null
   const createdAt = Date.parse(session.createdAt), lastSeenAt = Date.parse(session.lastSeenAt)
-  if (!Number.isFinite(createdAt) || !Number.isFinite(lastSeenAt) ||
-      now.getTime() - createdAt >= SESSION_ABSOLUTE_TIMEOUT_MS || now.getTime() - lastSeenAt >= SESSION_IDLE_TIMEOUT_MS) return null
+  if (sessionExpired(createdAt, lastSeenAt, now.getTime(), opts.sessionLimits)) return null
+  if (!sessionAddressAdmitted(opts.sessionLimits?.ipMode, session.ip, opts.clientIp)) { opts.onSessionAddressMismatch?.(); return null }
   let member: Awaited<ReturnType<TeamMemberResolver>>
   try { member = await resolve(session.accountId, session.memberId) } catch { return null }
   const owner = await getPrincipal(db, session.ownerPrincipalId)

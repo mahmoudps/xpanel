@@ -56,9 +56,43 @@ export interface ModsecuritySettings {
   engineConf: string
   /** OWASP CRS directory containing crs-setup.conf and rules/ */
   crsDir: string | null
+  /** SecRuleEngine set after the engine config; null keeps the distribution's value */
+  ruleEngine?: 'On' | 'DetectionOnly' | null
+  /** rules/*.conf file names left active; null includes the whole directory */
+  crsFiles?: readonly string[] | null
+  /** third-party rule files below the vendor directory, each already validated */
+  vendorFiles?: readonly { vendor: string; file: string }[]
+  /** deployed custom rules; written to their own file, included last */
+  customRules?: readonly string[]
 }
 
+export const modsecCustomRulesPath = `${XP_PATHS.modsecDir}/custom-rules.conf`
+export const modsecVendorDir = `${XP_PATHS.modsecDir}/vendors`
+export const MODSEC_AUDIT_LOG = `${XP_PATHS.nginxLogDir}/modsec_audit.log`
+
+// Directives that run programs, read other paths or move the engine's own files have no place in a rule file.
+const MODSEC_FORBIDDEN = /\bexec:|@inspectFile\b|\bSec(?:RuleScript|RemoteRules\w*|AuditLog\w*|DebugLog\w*|DataDir|TmpDir|UploadDir|GeoLookupDb|GsbLookupDb|Unicode\w*|ChrootDir|Guardian\w*)\b|^\s*Include\b/im
+const MODSEC_DIRECTIVE = /^Sec(?:Rule|Action|Marker|ComponentSignature|DefaultAction|CollectionTimeout|RuleRemoveBy(?:Id|Tag|Msg)|RuleUpdate(?:ActionById|TargetBy(?:Id|Tag|Msg)))(?:\s|$)/
+const MODSEC_CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/
+
+/** The reason a rule file may not be loaded, or null. Comments and continuation lines of an accepted directive pass. */
+export const modsecRuleProblem = (text: string): string | null => {
+  if (typeof text !== 'string' || MODSEC_CONTROL.test(text.replaceAll('\r\n', '\n'))) return 'control_characters'
+  if (MODSEC_FORBIDDEN.test(text)) return 'forbidden_directive'
+  let continued = false
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (!continued && line !== '' && !line.startsWith('#') && !MODSEC_DIRECTIVE.test(line)) return 'unsupported_directive'
+    continued = line.endsWith('\\')
+  }
+  return null
+}
+
+/** The `id:` of each SecRule or SecAction in one rule text. */
+export const modsecRuleIds = (text: string): number[] => [...text.matchAll(/\bid:'?(\d{1,9})/g)].map(match => Number(match[1]))
+
 const MAX_LIST = 5000
+const safeRuleFile = (name: string): string => /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name) ? name : invalid('ModSecurity rule file', name, 'must be one file name')
 
 const list = <T>(what: string, v: T[] | undefined, each: (x: unknown) => T): T[] => {
   if (v === undefined || v === null) return []
@@ -114,10 +148,24 @@ const assertModsec = (m: ModsecuritySettings): ModsecuritySettings => {
 export const renderModsecurityMain = (modsec: ModsecuritySettings): RenderedFile => {
   const m = assertModsec(modsec)
   const lines = ['# Managed by xPanel: ModSecurity rules for Nginx', `Include ${m.engineConf}`]
+  if (m.ruleEngine === 'On' || m.ruleEngine === 'DetectionOnly') lines.push(`SecRuleEngine ${m.ruleEngine}`)
+  // Hits are read from this file (apps/agent/src/svc-waf.ts); serial JSON keeps one transaction per line.
+  lines.push('SecAuditEngine RelevantOnly', 'SecAuditLogType Serial', 'SecAuditLogFormat JSON', 'SecAuditLogParts ABHZ', `SecAuditLog ${MODSEC_AUDIT_LOG}`)
   if (m.crsDir) {
-    lines.push(`Include ${assertIncludeGlob(`${m.crsDir}/crs-setup.conf`)}`, `Include ${assertIncludeGlob(`${m.crsDir}/rules/*.conf`)}`)
+    lines.push(`Include ${assertIncludeGlob(`${m.crsDir}/crs-setup.conf`)}`)
+    if (m.crsFiles) lines.push(...m.crsFiles.map(name => `Include ${assertIncludeGlob(`${m.crsDir}/rules/${safeRuleFile(name)}`)}`))
+    else lines.push(`Include ${assertIncludeGlob(`${m.crsDir}/rules/*.conf`)}`)
   }
+  for (const { vendor, file } of m.vendorFiles ?? []) lines.push(`Include ${assertIncludeGlob(`${modsecVendorDir}/${safeRuleFile(vendor)}/${safeRuleFile(file)}`)}`)
+  if (m.customRules?.length) lines.push(`Include ${modsecCustomRulesPath}`)
   return { path: modsecMainPath, content: `${lines.join('\n')}\n`, mode: 0o644, owner: 'root', group: 'root' }
+}
+
+/** Deployed custom rules, or null when there are none. A rule refused here never reaches nginx -t. */
+export const renderModsecurityCustomRules = (rules: readonly string[]): RenderedFile | null => {
+  if (!rules.length) return null
+  for (const rule of rules) { const problem = modsecRuleProblem(rule); if (problem) invalid('ModSecurity rule', problem, 'is not accepted') }
+  return { path: modsecCustomRulesPath, content: ['# Managed by xPanel: deployed custom rules', ...rules, ''].join('\n'), mode: 0o644, owner: 'root', group: 'root' }
 }
 
 /** Stable short id for per-site zone names. */

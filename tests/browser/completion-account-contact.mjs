@@ -15,6 +15,9 @@ const copy = value => JSON.parse(JSON.stringify(value))
 const apiPath = '/api/account/preferences'
 const rootSelector = '[data-account-contact]'
 const input = page => page.locator(rootSelector + ' [name=contactEmail]')
+const password = page => page.locator(rootSelector + ' [name=currentPassword]')
+const syntheticPassword = 'synthetic-current-password'
+const submit = async page => { await password(page).fill(syntheticPassword);await action(page,'save').click() }
 const action = (page, name) => page.locator(rootSelector + ' [data-contact-' + name + ']')
 const patchCount = model => model.calls.filter(call => call.method === 'PATCH').length
 
@@ -46,7 +49,8 @@ class MockPreferences {
       if(this.mode==='malformed-read')result.preferences.contactEmail=42
       if(this.nextReadContact!==null){result.preferences.contactEmail=this.nextReadContact;this.nextReadContact=null}
     }else{
-      assert.deepEqual(Object.keys(body).sort(),['contactEmail','expectedRevision'])
+      assert.deepEqual(Object.keys(body).sort(),['contactEmail','currentPassword','expectedRevision'])
+      assert.equal(body.currentPassword,syntheticPassword)
       assert.equal(typeof body.contactEmail,'string');assert.equal(body.expectedRevision.length,64);assert.match(body.expectedRevision,/^[0-9a-f]{64}$/)
       if(this.race){this.race=false;this.external('racing-writer@example.test')}
       if(body.expectedRevision!==this.revision){status=409;result={error:'stale_revision',stateChanged:false}}
@@ -117,7 +121,7 @@ async function reload(page) {
   await (await response).finished()
   await state(page,'read')
 }
-async function save(page,value) { await input(page).fill(value);await action(page,'save').click() }
+async function save(page,value) { await input(page).fill(value);await submit(page) }
 async function geometry(page) {
   await page.evaluate(()=>document.fonts.ready)
   return page.locator(rootSelector).evaluate(root=>{
@@ -174,13 +178,14 @@ try {
     await input(page).fill('Mixed.Local@EXAMPLE.TEST');measured=await geometry(page);assertGeometry(measured,lang,width)
     await page.screenshot({path:output+'/'+lang+'-'+width+'.png',fullPage:true})
     checkpoint=lang+'-'+width+':canonical-success'
-    const firstRevision=model.revision;await action(page,'save').click();await state(page,'saved')
+    const firstRevision=model.revision;await submit(page);await state(page,'saved')
+    assert.equal(await password(page).inputValue(),'','The password does not outlive its save')
     assert.equal(model.contact,'Mixed.Local@example.test');assert.equal(await input(page).inputValue(),model.contact)
     assert.equal(model.calls.find(call=>call.method==='PATCH').body.expectedRevision,firstRevision)
     assert.ok((await action(page,'saved').textContent()).includes(model.contact))
     checkpoint=lang+'-'+width+':raw-refusal'
     for(const value of [' leading@example.test','trailing@example.test ','control\u2028@example.test']){
-      const count=model.calls.length;await input(page).fill(value);await action(page,'save').click();await state(page,'failed')
+      const count=model.calls.length;await input(page).fill(value);await submit(page);await state(page,'failed')
       assert.equal(await input(page).inputValue(),value);assert.equal(model.calls.length,count,'Raw invalid contact makes no request')
     }
     await reload(page)
@@ -194,7 +199,7 @@ try {
     checkpoint=lang+'-'+width+':dirty-refresh-no-rebase'
     const patches=patchCount(model);model.external('external@example.test');await action(page,'refresh').click();await state(page,'stale')
     assert.equal(await input(page).inputValue(),'typed-during-refresh@example.test')
-    await action(page,'save').click();await state(page,'stale');assert.equal(patchCount(model),patches,'Fresh conflict must not PATCH')
+    await submit(page);await state(page,'stale');assert.equal(patchCount(model),patches,'Fresh conflict must not PATCH')
     const count=model.calls.length;await action(page,'reload').click();await page.locator('[data-xp-prompt-confirm]').waitFor({state:'visible'})
     assert.equal(await input(page).isEditable(),false);assert.equal(await action(page,'save').isDisabled(),true)
     await confirmation(page,false);assert.equal(await input(page).inputValue(),'typed-during-refresh@example.test');assert.equal(model.calls.length,count)
@@ -223,7 +228,7 @@ try {
     }
     checkpoint=lang+'-'+width+':midflight-qualification'
     const blockedCount=patchCount(model),blockedRead=model.hold('GET')
-    await input(page).fill('qualification-draft@example.test');await action(page,'save').click();await entered(blockedRead)
+    await input(page).fill('qualification-draft@example.test');await submit(page);await entered(blockedRead)
     await page.locator(rootSelector).evaluate(node=>node.setAttribute('data-capability-unavailable','true'))
     await releaseReply(page,blockedRead)
     await page.waitForFunction(()=>!['saving','reading'].includes(document.querySelector('[data-contact-status]')?.getAttribute('data-state')))

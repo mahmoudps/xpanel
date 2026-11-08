@@ -309,7 +309,7 @@ describe('database workspace API using isolated desired state and real SQLite', 
   })
 
   it('retains reseller ownership and method-sensitive ACL checks', async () => {
-    const reseller=await f.state.store.createReseller({username:'dbresell',passwordHash:ARGON2,acl:['list-accounts'],maxAccounts:5,totalDiskMb:10000,totalBandwidthMb:100000,oversell:false,nameservers:[],delegatedIps:[]})
+    const reseller=await f.state.store.createReseller({username:'dbresell',passwordHash:ARGON2,acl:['list-accounts'],maxAccounts:5,totalDiskMb:10000,totalBandwidthMb:100000,oversell:{disk:false,bandwidth:false},nameservers:[],delegatedIps:[]})
     await dbApi.createResellerPrincipal(f.database.db,{id:reseller.id,username:reseller.username,passwordHash:ARGON2})
     await f.state.store.changeOwner(f.owner.id,reseller.id); await f.seedIndex()
     const credential=await f.token(['databases:read','databases:write'],reseller.id),before=await f.images()

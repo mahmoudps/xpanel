@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
+import { isIP } from 'node:net'
+import { services } from '@xpanel/render'
 import {
-  MAILX_DOVECOT_SERVER_CONF, MAILX_MAPS, MAILX_RECIPIENT_KEY, MAILX_POSTCONF_KEYS, MAILX_RBL_MAX, MAILX_RETENTION_MAX_DAYS, MAILX_TLS_PROTOCOLS, isMailxAddress, isMailxHost, mailxCertPaths, mailxRblRestrictions,
+  MAILX_DOVECOT_SERVER_CONF, MAILX_MAPS, MAILX_OUTBOUND_RESTRICTION, MAILX_RECIPIENT_KEY, MAILX_POSTCONF_KEYS, MAILX_RBL_MAX, MAILX_RETENTION_MAX_DAYS, MAILX_RSPAMD_WORKER, MAILX_TLS_PROTOCOLS, isMailxAddress, isMailxAdvancedKey, isMailxAdvancedValue, isMailxCidr, isMailxHost, mailxCertPaths, mailxRblRestrictions, mailxSpamdDropIn,
 } from '../../../packages/os/src/mailx-command.ts'
 
 /**
@@ -8,7 +10,7 @@ import {
  * Desired state lives in files under <state>/extended/mailx; a section without a file is not managed and its
  * Postfix parameters are never touched.
  */
-export const MAILX_SECTIONS = ['spam', 'relay', 'bcc', 'marketing', 'server', 'routing'] as const
+export const MAILX_SECTIONS = ['spam', 'relay', 'bcc', 'marketing', 'server', 'routing', 'spamd', 'country', 'advanced', 'greylist', 'outbound'] as const
 export type MailxSection = typeof MAILX_SECTIONS[number]
 export const isMailxSection = (value: unknown): value is MailxSection => (MAILX_SECTIONS as readonly unknown[]).includes(value)
 export interface MailxSpamPolicy { enabled: boolean; rejectScore: number; headerScore: number; greylistScore: number | null; blockedDomains: string[] }
@@ -31,14 +33,26 @@ export interface MailxServerPolicy {
 }
 /** local: delivered here (default); backup: this server is a lower-priority MX and relays to the primary; remote: mail goes to the domain's MX. */
 export type MailxRoutingMode = 'local' | 'backup' | 'remote'
-export interface MailxRoutingPolicy { domains: { domain: string; mode: Exclude<MailxRoutingMode, 'local'> }[] }
-export interface MailxPolicies { spam: MailxSpamPolicy; relay: MailxRelayPolicy; bcc: MailxBccPolicy; marketing: MailxMarketingPolicy; server: MailxServerPolicy; routing: MailxRoutingPolicy }
+/** `auto` records that the mode was detected once from the domain's saved zone; it is not re-evaluated when MX records change. */
+export interface MailxRoutingRow { domain: string; mode: MailxRoutingMode; auto: boolean }
+export interface MailxRoutingPolicy { domains: MailxRoutingRow[] }
+/** SpamAssassin spamd command line, or the matching rspamd scanner worker settings. An empty allowedIps list admits any address. */
+export interface MailxSpamdPolicy { allowedIps: string[]; maxConnPerChild: number; children: number; timeoutTcp: number; timeoutChild: number }
+/** ISO 3166-1 alpha-2 codes whose SMTP clients are refused on port 25. */
+export interface MailxCountryPolicy { blocked: string[] }
+/** Extra main.cf parameters, applied after every other section. */
+export interface MailxAdvancedPolicy { postfix: Record<string, string> }
+/** Hosted domains on which every unknown sender triplet is greylisted (rspamd). */
+export interface MailxGreylistPolicy { domains: string[] }
+/** Senders held by outbound spam protection: addresses and domains for SMTP, account UIDs for local sendmail. */
+export interface MailxOutboundPolicy { senders: string[]; uids: number[] }
+export interface MailxPolicies { outbound: MailxOutboundPolicy; spam: MailxSpamPolicy; relay: MailxRelayPolicy; bcc: MailxBccPolicy; marketing: MailxMarketingPolicy; server: MailxServerPolicy; routing: MailxRoutingPolicy; spamd: MailxSpamdPolicy; country: MailxCountryPolicy; advanced: MailxAdvancedPolicy; greylist: MailxGreylistPolicy }
 /** Relay credentials stay in the saved file (mode 0600) and in the 0600 Postfix map only; views carry `passwordSet`. */
 export interface MailxRelaySecret { password: string; version: string }
 export interface MailxStored<S extends MailxSection = MailxSection> { section: S; policy: MailxPolicies[S]; secret?: MailxRelaySecret | null; updatedAt: string; updatedBy: string }
 export interface MailxArchiveStored { accountId: string; policy: MailxArchivePolicy; updatedAt: string; updatedBy: string }
 
-export const MAILX_LIMITS = { blockedDomains: 500, bccRules: 500, archiveDomains: 200, routingDomains: 2000 } as const
+export const MAILX_LIMITS = { blockedDomains: 500, bccRules: 500, archiveDomains: 200, routingDomains: 2000, allowedIps: 32, advancedKeys: 64, countries: 249, greylistDomains: 5000, outboundSenders: 5000 } as const
 export const MAILX_DEFAULTS: MailxPolicies = {
   spam: { enabled: true, rejectScore: 15, headerScore: 6, greylistScore: 4, blockedDomains: [] },
   relay: { enabled: false, host: null, port: 587, username: null },
@@ -47,6 +61,12 @@ export const MAILX_DEFAULTS: MailxPolicies = {
   marketing: { messageRateLimit: 0, recipientRateLimit: 0, recipientsPerMessage: 1000, destinationRateDelay: 0, destinationConcurrency: 20, rateWindow: 60 },
   server: { postfix: {}, dovecot: {}, rbl: null, certificates: { smtp: null, submission: null, imap: null } },
   routing: { domains: [] },
+  // spamd(1) defaults as cPanel presents them: loopback only, one child, 200 connections per child, 30 s TCP and 300 s child timeouts.
+  spamd: { allowedIps: ['127.0.0.1', '::1'], maxConnPerChild: 200, children: 1, timeoutTcp: 30, timeoutChild: 300 },
+  country: { blocked: [] },
+  advanced: { postfix: {} },
+  greylist: { domains: [] },
+  outbound: { senders: [], uids: [] },
 }
 export const mailxStatePath = (...parts: string[]): string[] => ['extended', 'mailx', ...parts]
 export const MAILX_MARKER = '# Managed by xPanel mail policy. Changes here are replaced on the next apply.'
@@ -158,15 +178,41 @@ export function parseMailxServer(value: unknown): MailxServerPolicy {
 export function parseMailxRouting(value: unknown): MailxRoutingPolicy {
   const raw = exact(value, ['domains'], 'routing')
   const domains = list(raw.domains, MAILX_LIMITS.routingDomains, 'domains').map(item => {
-    const row = exact(item, ['domain', 'mode'], 'domain')
-    return { domain: isMailxHost(row.domain) ? row.domain : bad('domain'), mode: row.mode === 'backup' || row.mode === 'remote' ? row.mode as 'backup' | 'remote' : bad('mode') }
+    const row = exact(item, object(item) && Object.hasOwn(item, 'auto') ? ['domain', 'mode', 'auto'] : ['domain', 'mode'], 'domain'), mode = row.mode === 'backup' || row.mode === 'remote' || row.mode === 'local' ? row.mode as MailxRoutingMode : bad('mode'), auto = flag(row.auto ?? false, 'auto')
+    // A local row without auto is the default, so it is never stored.
+    if (mode === 'local' && !auto) bad('mode')
+    return { domain: isMailxHost(row.domain) ? row.domain : bad('domain'), mode, auto }
   })
   return { domains: unique(domains, row => row.domain, 'domain').sort((a, b) => a.domain.localeCompare(b.domain)) }
 }
-/** Domain to routing mode for the saved routing section; absent domains are delivered locally. */
+/** Domain to routing mode for the saved routing section; absent domains and detected-local domains are delivered locally. */
 export const mailxRoutingModes = (saved: Pick<MailxSaved, 'sections'>): Map<string, Exclude<MailxRoutingMode, 'local'>> =>
-  new Map((saved.sections.routing?.policy.domains ?? []).map(row => [row.domain, row.mode]))
-export const MAILX_PARSERS: { [S in MailxSection]: (value: unknown) => MailxPolicies[S] } = { spam: parseMailxSpam, relay: parseMailxRelay, bcc: parseMailxBcc, marketing: parseMailxMarketing, server: parseMailxServer, routing: parseMailxRouting }
+  new Map((saved.sections.routing?.policy.domains ?? []).flatMap(row => row.mode === 'local' ? [] : [[row.domain, row.mode] as [string, Exclude<MailxRoutingMode, 'local'>]]))
+export function parseMailxSpamd(value: unknown): MailxSpamdPolicy {
+  const raw = exact(value, ['allowedIps', 'maxConnPerChild', 'children', 'timeoutTcp', 'timeoutChild'], 'spamd')
+  const allowedIps = unique(list(raw.allowedIps, MAILX_LIMITS.allowedIps, 'allowedIps').map(item => typeof item === 'string' && (isIP(item) !== 0 || isMailxCidr(item.includes(':') ? '[' + item.replace('/', ']/') : item)) ? item : bad('allowedIps')), item => item, 'allowedIps')
+  return { allowedIps, maxConnPerChild: int(raw.maxConnPerChild, 1, 100000, 'maxConnPerChild'), children: int(raw.children, 1, 64, 'children'), timeoutTcp: int(raw.timeoutTcp, 0, 3600, 'timeoutTcp'), timeoutChild: int(raw.timeoutChild, 1, 86400, 'timeoutChild') }
+}
+export function parseMailxCountry(value: unknown): MailxCountryPolicy {
+  const raw = exact(value, ['blocked'], 'country')
+  return { blocked: unique(list(raw.blocked, MAILX_LIMITS.countries, 'blocked').map(item => typeof item === 'string' && /^[A-Z]{2}$/.test(item) ? item : bad('blocked')), item => item, 'blocked').sort() }
+}
+export function parseMailxOutbound(value: unknown): MailxOutboundPolicy {
+  const raw = exact(value, ['senders', 'uids'], 'outbound')
+  const senders = unique(list(raw.senders, MAILX_LIMITS.outboundSenders, 'senders').map(item => isMailxAddress(item) || isMailxHost(item) ? item : bad('senders')), item => item, 'senders').sort()
+  return { senders, uids: unique(list(raw.uids, MAILX_LIMITS.outboundSenders, 'uids').map(item => int(item, 1000, 2147483647, 'uids')), String, 'uids').sort((a, b) => a - b) }
+}
+export function parseMailxAdvanced(value: unknown): MailxAdvancedPolicy {
+  const raw = exact(value, ['postfix'], 'advanced')
+  if (!object(raw.postfix) || Object.keys(raw.postfix).length > MAILX_LIMITS.advancedKeys) bad('postfix')
+  const postfix = raw.postfix as Record<string, unknown>
+  return { postfix: Object.fromEntries(Object.keys(postfix).sort().map(key => [isMailxAdvancedKey(key) ? key : bad('key'), isMailxAdvancedValue(postfix[key]) ? postfix[key] as string : bad('value')])) }
+}
+export function parseMailxGreylist(value: unknown): MailxGreylistPolicy {
+  const raw = exact(value, ['domains'], 'greylist')
+  return { domains: unique(list(raw.domains, MAILX_LIMITS.greylistDomains, 'domains').map(item => isMailxHost(item) ? item : bad('domains')), item => item, 'domains').sort() }
+}
+export const MAILX_PARSERS: { [S in MailxSection]: (value: unknown) => MailxPolicies[S] } = { outbound: parseMailxOutbound, spam: parseMailxSpam, relay: parseMailxRelay, bcc: parseMailxBcc, marketing: parseMailxMarketing, server: parseMailxServer, routing: parseMailxRouting, spamd: parseMailxSpamd, country: parseMailxCountry, advanced: parseMailxAdvanced, greylist: parseMailxGreylist }
 
 const iso = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value
 const actor = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9._@-]{1,128}$/.test(value)
@@ -212,7 +258,7 @@ const map = (path: string, lines: string[], mode = 0o640, group: MailxFile['grou
  * `recipients` holds the known recipients of each backup MX domain (full addresses, or `@domain` when a domain forwarder
  * accepts every address); a backup domain without an entry accepts no recipient.
  */
-export function renderMailxPostfix(saved: MailxSaved, recipients: ReadonlyMap<string, readonly string[]> = new Map()): MailxPostfixPlan {
+export function renderMailxPostfix(saved: MailxSaved, recipients: ReadonlyMap<string, readonly string[]> = new Map(), remoteSmtp: readonly string[] = []): MailxPostfixPlan {
   const settings: Record<string, string> = {}, files: MailxFile[] = [], conflicts: MailxPostfixPlan['conflicts'] = []
   const relay = saved.sections.relay
   if (relay) {
@@ -248,12 +294,22 @@ export function renderMailxPostfix(saved: MailxSaved, recipients: ReadonlyMap<st
     smtpd_recipient_limit: String(marketing.recipientsPerMessage), default_destination_rate_delay: `${marketing.destinationRateDelay}s`,
     default_destination_concurrency_limit: String(marketing.destinationConcurrency), anvil_rate_time_unit: `${marketing.rateWindow}s`,
   })
+  const outbound = saved.sections.outbound?.policy
+  if (outbound) {
+    settings.smtpd_data_restrictions = MAILX_OUTBOUND_RESTRICTION
+    settings.header_checks = `regexp:${MAILX_MAPS.outboundHoldLocal}`
+    // pickup(8) adds this Received line, so mail a script hands to sendmail is held by its account UID, which a sender cannot choose.
+    files.push(map(MAILX_MAPS.outboundHold, outbound.senders.map(sender => `${sender} HOLD`)), map(MAILX_MAPS.outboundHoldLocal, outbound.uids.map(uid => `/^Received: by [^ ]+ \\(Postfix, from userid ${uid}\\)/ HOLD`)))
+  }
   const server = saved.sections.server?.policy
   if (server) {
     Object.assign(settings, server.postfix)
     if (server.postfix.message_size_limit) settings.mailbox_size_limit = '0'
     if (server.rbl) settings.smtpd_client_restrictions = mailxRblRestrictions(server.rbl)
   }
+  const country = saved.sections.country?.policy
+  if (country) settings.smtpd_client_restrictions = mailxRblRestrictions(server?.rbl ?? [], country.blocked.length > 0)
+  if (server?.postfix.smtpd_client_event_limit_exceptions !== undefined || remoteSmtp.length) settings.smtpd_client_event_limit_exceptions = services.renderClientLimitExceptions(server?.postfix.smtpd_client_event_limit_exceptions, remoteSmtp)
   const routing = saved.sections.routing?.policy
   if (routing) {
     const backup = routing.domains.filter(row => row.mode === 'backup').map(row => row.domain)
@@ -262,6 +318,7 @@ export function renderMailxPostfix(saved: MailxSaved, recipients: ReadonlyMap<st
     files.push(map(MAILX_MAPS.relayDomains, backup.map(domain => `${domain} OK`)))
     files.push(map(MAILX_MAPS.relayRecipients, backup.flatMap(domain => (recipients.get(domain) ?? []).filter(key => MAILX_RECIPIENT_KEY(key, domain)).map(key => `${key} OK`))))
   }
+  Object.assign(settings, saved.sections.advanced?.policy.postfix ?? {})
   return { settings, files, conflicts, ...(server ? { master: server.certificates.smtp } : {}) }
 }
 
@@ -281,11 +338,19 @@ export function renderMailxDovecot(saved: Pick<MailxSaved, 'sections'>, dialect:
 }
 
 export type MailxEngine = 'rspamd' | 'spamassassin'
-export const MAILX_RSPAMD_FILES = { actions: '/etc/rspamd/local.d/actions.conf', greylist: '/etc/rspamd/local.d/greylist.conf', multimap: '/etc/rspamd/local.d/multimap.conf', blocked: '/etc/rspamd/local.d/xpanel_blocked_domains.map' } as const
+export const MAILX_RSPAMD_FILES = { logging: '/etc/rspamd/local.d/logging.inc', actions: '/etc/rspamd/local.d/actions.conf', greylist: '/etc/rspamd/local.d/greylist.conf', multimap: '/etc/rspamd/local.d/multimap.conf', blocked: '/etc/rspamd/local.d/xpanel_blocked_domains.map', headers: '/etc/rspamd/local.d/milter_headers.conf' } as const
 export const MAILX_SPAMASSASSIN_DIRS = ['/etc/spamassassin', '/etc/mail/spamassassin'] as const
 const half = (value: number): string => Number.isInteger(value) ? value.toFixed(1) : String(value)
+/**
+ * Score headers rspamd replaces: the BoxTrapper bypass reads the filter's value and never a sender's, and mailbox
+ * auto-delete reads the stars SpamAssassin adds by default. The reconciler renders it too: a host with a policy saved
+ * before this file gains it without a new save.
+ */
+/** Verdicts go to the journal, where Track Delivery reads them beside the Postfix lines. */
+export const renderMailxRspamdLogging = (): MailxFile => map(MAILX_RSPAMD_FILES.logging, ['type = "syslog";', 'facility = "mail";'], 0o644, 'root')
+export const renderMailxRspamdHeaders = (): MailxFile => map(MAILX_RSPAMD_FILES.headers, ['use = ["x-spam-status", "x-spam-level"];'], 0o644, 'root')
 /** rspamd local.d overrides (actions: a null action is disabled) or one SpamAssassin site file; reject/greylist have no SpamAssassin equivalent. */
-export function renderMailxSpam(policy: MailxSpamPolicy, engine: MailxEngine, spamAssassinDir?: string): MailxFile[] {
+export function renderMailxSpam(policy: MailxSpamPolicy, engine: MailxEngine, spamAssassinDir?: string, greylistDomains = 0): MailxFile[] {
   if (engine === 'spamassassin') {
     if (!spamAssassinDir || !(MAILX_SPAMASSASSIN_DIRS as readonly string[]).includes(spamAssassinDir)) return bad('spamAssassinDir')
     // Mail Assassin Conf: required_score marks spam; blacklist_from (an alias of 4.x blocklist_from) adds a large score.
@@ -294,11 +359,30 @@ export function renderMailxSpam(policy: MailxSpamPolicy, engine: MailxEngine, sp
   const action = (value: number | null): string => policy.enabled && value !== null ? half(value) : 'null'
   return [
     map(MAILX_RSPAMD_FILES.actions, [`reject = ${action(policy.rejectScore)};`, `add_header = ${action(policy.headerScore)};`, `greylist = ${action(policy.greylistScore)};`], 0o644, 'root'),
-    map(MAILX_RSPAMD_FILES.greylist, [`enabled = ${policy.enabled && policy.greylistScore !== null};`], 0o644, 'root'),
+    map(MAILX_RSPAMD_FILES.greylist, [`enabled = ${policy.enabled && (policy.greylistScore !== null || greylistDomains > 0)};`], 0o644, 'root'),
     map(MAILX_RSPAMD_FILES.blocked, policy.enabled ? policy.blockedDomains : [], 0o644, 'root'),
+    renderMailxRspamdHeaders(),
+    renderMailxRspamdLogging(),
     map(MAILX_RSPAMD_FILES.multimap, ['XPANEL_BLOCKED_SENDER_DOMAIN {', '  type = "from";', '  filter = "email:domain";', `  map = "${MAILX_RSPAMD_FILES.blocked}";`, '  prefilter = true;', '  action = "reject";', '  description = "Sender domains blocked by the server administrator";', '}'], 0o644, 'root'),
   ]
 }
+/** The scanner's startup settings: spamd arguments through an environment drop-in, or the rspamd worker override. Timeouts and addresses rspamd has no setting for stay off the file. */
+export function renderMailxSpamd(policy: MailxSpamdPolicy, engine: MailxEngine, unit: 'spamassassin.service' | 'spamd.service' | 'rspamd.service'): MailxFile[] {
+  if (engine === 'rspamd') return [map(MAILX_RSPAMD_WORKER, [`count = ${policy.children};`, `max_tasks = ${policy.maxConnPerChild};`, `task_timeout = ${policy.timeoutChild}s;`], 0o644, 'root')]
+  if (unit === 'rspamd.service') return bad('unit')
+  // spamd(1): without --allowed-ips only 127.0.0.1 may connect, so an empty list names every address.
+  const allowed = policy.allowedIps.length ? policy.allowedIps.join(',') : '0.0.0.0/0,::/0'
+  const options = `--create-prefs --helper-home-dir --max-children=${policy.children} --max-conn-per-child=${policy.maxConnPerChild} --timeout-tcp=${policy.timeoutTcp} --timeout-child=${policy.timeoutChild} --allowed-ips=${allowed}`
+  const { conf, env } = mailxSpamdDropIn(unit)
+  return [map(env, [`OPTIONS="${options}"`, `SPAMDOPTIONS="${options}"`], 0o644, 'root'), map(conf, ['[Service]', `EnvironmentFile=-${env}`], 0o644, 'root')]
+}
+const COUNTRY_HEADER = '# xpanel-country'
+const COUNTRY_REJECT = 'REJECT 5.7.1 Mail from this network location is not accepted here'
+/** The first line names the blocked countries and the database month, so a status read compares it without a tree walk. */
+export const mailxCountryHeader = (blocked: readonly string[], month: string): string => `${COUNTRY_HEADER} ${month} ${blocked.join(',')}`
+export const renderMailxCountryMap = (blocked: readonly string[], month: string, cidrs: readonly string[]): MailxFile =>
+  map(MAILX_MAPS.countryBlock, [mailxCountryHeader(blocked, month), ...cidrs.map(cidr => `${cidr} ${COUNTRY_REJECT}`)])
+export const mailxCountryMapHeader = (content: string | null): string | null => content?.split('\n', 2)[1] ?? null
 export const isMailxManagedText = (content: string | null): boolean => content === null || content.startsWith(MAILX_MARKER + '\n')
 export const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex')
 
@@ -307,38 +391,41 @@ export const sha256 = (text: string): string => createHash('sha256').update(text
  * mailbox's own on/off and header score go to the rspamd settings file; blocked senders and moving flagged
  * mail to Junk go to the mailbox's Sieve policy script, which the reconciler renders before its own filters.
  */
-export interface MailxMailboxSpam { mailbox: string; accountId: string; serviceUserId: string; inherit: boolean; enabled: boolean; addHeaderScore: number; allowlist: string[]; blocklist: string[]; spamBoxEnabled: boolean }
+export interface MailxMailboxSpam { mailbox: string; accountId: string; serviceUserId: string; inherit: boolean; enabled: boolean; addHeaderScore: number; allowlist: string[]; blocklist: string[]; spamBoxEnabled: boolean; autoDeleteScore: number | null }
 // The same exact-address grammar the preference route accepts; `"` and `\` can never reach the rendered UCL string.
 const SENDER = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,63}$/
 const senders = (value: unknown, field: string): string[] => unique(list(value, 100, field).map(item => typeof item === 'string' && item.length <= 254 && SENDER.test(item) ? item : bad(field)), item => item, field)
 export function readMailxMailboxSpam(raw: unknown): MailxMailboxSpam {
-  const value = exact(raw, ['inherit', 'enabled', 'addHeaderScore', 'spamBoxEnabled', 'allowlist', 'blocklist', 'mailbox', 'ownerAuthority', 'updatedAt'], 'mailboxSpam')
+  const value = exact(raw, ['inherit', 'enabled', 'addHeaderScore', 'spamBoxEnabled', 'allowlist', 'blocklist', 'mailbox', 'ownerAuthority', 'updatedAt', ...(object(raw) && Object.hasOwn(raw, 'autoDeleteScore') ? ['autoDeleteScore'] : [])], 'mailboxSpam')
   const owner = exact(value.ownerAuthority, ['accountId', 'serviceUserId', 'mailbox'], 'ownerAuthority')
   const mailbox = address(value.mailbox, 'mailbox')
   if (owner.mailbox !== mailbox || typeof owner.accountId !== 'string' || typeof owner.serviceUserId !== 'string' || !iso(value.updatedAt)) bad('ownerAuthority')
   const score = value.addHeaderScore
   if (typeof score !== 'number' || !Number.isFinite(score) || score < 0 || score > 100) bad('addHeaderScore')
   return { mailbox, accountId: owner.accountId as string, serviceUserId: owner.serviceUserId as string, inherit: flag(value.inherit, 'inherit'), enabled: flag(value.enabled, 'enabled'),
-    addHeaderScore: score as number, allowlist: senders(value.allowlist, 'allowlist'), blocklist: senders(value.blocklist, 'blocklist'), spamBoxEnabled: flag(value.spamBoxEnabled, 'spamBoxEnabled') }
+    addHeaderScore: score as number, allowlist: senders(value.allowlist, 'allowlist'), blocklist: senders(value.blocklist, 'blocklist'), spamBoxEnabled: flag(value.spamBoxEnabled, 'spamBoxEnabled'), autoDeleteScore: value.autoDeleteScore === undefined || value.autoDeleteScore === null ? null : int(value.autoDeleteScore, 1, 50, 'autoDeleteScore') }
 }
 export const MAILX_RSPAMD_SETTINGS = '/etc/rspamd/local.d/settings.conf'
 const ucl = (text: string): string => `"${text}"`
 /**
  * rspamd settings module rules keyed by recipient: `want_spam = yes` skips spam checks (allowlisted senders, or a
  * mailbox that turned filtering off); `apply { actions { add_header } }` replaces the header score for that recipient.
+ * rspamd applies only the highest-priority matching rule, so a mailbox score rule repeats its domain's greylist action.
+ * A negative action score greylists every message, the cPanel triplet behaviour, whatever its spam score.
  */
-export function renderMailxMailboxSettings(rows: readonly MailxMailboxSpam[]): MailxFile {
-  const lines: string[] = []
+export function renderMailxMailboxSettings(rows: readonly MailxMailboxSpam[], greylistDomains: readonly string[] = []): MailxFile {
+  const lines: string[] = [], greylisted = new Set(greylistDomains), GREYLIST_ALL = 'greylist = -100.0;'
   ;[...rows].sort((a, b) => a.mailbox.localeCompare(b.mailbox)).forEach((row, index) => {
     const name = `xpanel_mailbox_${index + 1}`, custom = !row.inherit
     if (row.allowlist.length) lines.push(`${name}_allow {`, '  priority = high;', `  rcpt = ${ucl(row.mailbox)};`, `  from = [${row.allowlist.map(ucl).join(', ')}];`, '  want_spam = yes;', '}')
     if (custom && !row.enabled) lines.push(`${name}_off {`, '  priority = medium;', `  rcpt = ${ucl(row.mailbox)};`, '  want_spam = yes;', '}')
-    else if (custom && row.addHeaderScore > 0 && Number.isInteger(row.addHeaderScore * 2)) lines.push(`${name}_score {`, '  priority = low;', `  rcpt = ${ucl(row.mailbox)};`, `  apply { actions { add_header = ${half(row.addHeaderScore)}; } }`, '}')
+    else if (custom && row.addHeaderScore > 0 && Number.isInteger(row.addHeaderScore * 2)) lines.push(`${name}_score {`, '  priority = medium;', `  rcpt = ${ucl(row.mailbox)};`, `  apply { actions { add_header = ${half(row.addHeaderScore)};${greylisted.has(row.mailbox.slice(row.mailbox.indexOf('@') + 1)) ? ' ' + GREYLIST_ALL : ''} } }`, '}')
   })
+  ;[...greylisted].sort().forEach((domain, index) => lines.push(`xpanel_greylist_${index + 1} {`, '  priority = low;', `  rcpt = ${ucl('@' + domain)};`, `  apply { actions { ${GREYLIST_ALL} } }`, '}'))
   return map(MAILX_RSPAMD_SETTINGS, lines, 0o644, 'root')
 }
-export type MailxMailboxEffect = 'allowlist' | 'filtering' | 'score' | 'blocklist' | 'spamBox'
+export type MailxMailboxEffect = 'allowlist' | 'filtering' | 'score' | 'blocklist' | 'spamBox' | 'autoDelete'
 /** What a mailbox preference changes natively. An inherited preference keeps only its sender lists: the account policy has no native writer. */
 export const mailxMailboxEffects = (row: MailxMailboxSpam): Record<MailxMailboxEffect, boolean> => ({
   allowlist: row.allowlist.length > 0, filtering: !row.inherit && !row.enabled, score: !row.inherit && row.enabled && row.addHeaderScore > 0 && Number.isInteger(row.addHeaderScore * 2),
-  blocklist: row.blocklist.length > 0, spamBox: !row.inherit && row.enabled && row.spamBoxEnabled })
+  blocklist: row.blocklist.length > 0, spamBox: !row.inherit && row.enabled && row.spamBoxEnabled, autoDelete: !row.inherit && row.enabled && row.autoDeleteScore !== null })

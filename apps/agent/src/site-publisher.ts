@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { posix } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { catalogFromEntries, createTranslator, fail, isLocale, isUuid, isXpanelError, localeDirection, msgid, parsePo, SOURCE_LOCALE, validateDomainName, type Locale, type Translate } from '@xpanel/core'
+import { catalogFromEntries, servedDocRoot, createTranslator, fail, isLocale, isUuid, isXpanelError, localeDirection, msgid, parsePo, SOURCE_LOCALE, validateDomainName, type Locale, type Translate } from '@xpanel/core'
 import type { Account, Domain } from '@xpanel/core'
 import type { FileEntry, FileText, JailedFileManager } from './file-manager.ts'
 
@@ -17,7 +17,11 @@ export interface SitePublisherView {
   capabilities: { canPublish: boolean; canRollback: boolean }
   application: { status: 'read' | 'published' | 'rolled_back'; nativeQualified: false }
 }
-type Files = Pick<JailedFileManager, 'list' | 'readText' | 'writeTextChecked' | 'mkdir'>
+type Files = Pick<JailedFileManager, 'list' | 'readText' | 'writeTextChecked' | 'mkdir' | 'compress' | 'moveToTrash' | 'purgeTrash'>
+/** cPanel keeps Site Publisher document-root archives for 30 days. */
+export const SITE_PUBLISHER_RETENTION_DAYS = 30
+export const SITE_PUBLISHER_ARCHIVE = 'document-root.tar.zst'
+const BACKUP_ID = /^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)(\d{3})Z-[0-9a-f]{16}$/
 type Original = { name: typeof SITE_PUBLISHER_INDEXES[number]; exists: boolean; hash: string | null; sizeBytes: number; mode: number }
 type Journal = { version: 1; accountId: string; domainId: string; path: string; id: string; createdAt: string; status: 'prepared' | 'published' | 'restored'; publishedHash: string; originals: Original[] }
 type Snapshot = { files: (FileText | null)[]; entries: FileEntry[]; journal: Journal | null; journalFile: FileText | null; revision: string }
@@ -57,7 +61,7 @@ export function renderSitePublisherDraft(value: unknown): { html: string; hash: 
 export function deriveSitePublisherTarget(account: Account, domain: Domain): SitePublisherTarget {
   if (!isUuid(account.id) || !isUuid(domain.id) || domain.accountId !== account.id) return fail('NOT_FOUND', 'domain not found', unchanged)
   if (account.status !== 'active' || domain.suspended || domain.kind === 'alias' || !['static', 'php'].includes(domain.siteType) || domain.redirect || domain.upstream) return fail('PRECONDITION_FAILED', 'choose an active file-backed domain', unchanged)
-  const home = account.home, docRoot = domain.docRoot
+  const home = account.home, docRoot = servedDocRoot(domain)
   if (!posix.isAbsolute(home) || !posix.isAbsolute(docRoot) || posix.normalize(home) !== home || posix.normalize(docRoot) !== docRoot || /[\\\u0000-\u001f\u007f]/.test(home + docRoot)) return fail('PRECONDITION_FAILED', 'domain document root is not canonical', unchanged)
   const path = posix.relative(home, docRoot)
   if (!path || path === '..' || path.startsWith('../') || posix.isAbsolute(path) || path.split('/').some(part => !part || ['.', '..', '.trash', '.xpanel'].includes(part))) return fail('PRECONDITION_FAILED', 'document root must be a separate directory inside the account home', unchanged)
@@ -103,10 +107,27 @@ export class SitePublisherWorkspace {
   private view(snapshot: Snapshot, status: SitePublisherView['application']['status']): SitePublisherView {
     const journal = snapshot.journal, recoverable = this.recoverable(snapshot)
     const published = journal?.status === 'published' && snapshot.files.every((file, i) => i === 0 ? !!file && sitePublisherHash(file.content) === journal.publishedHash : file === null)
-    return { context: this.target, revision: snapshot.revision, files: snapshot.files.map((file, i) => ({ name: SITE_PUBLISHER_INDEXES[i]!, exists: file !== null, hash: file ? sitePublisherHash(file.content) : null, sizeBytes: file?.sizeBytes ?? 0 })), recovery: { status: journal?.status ?? 'none', createdAt: journal?.createdAt ?? null }, capabilities: { canPublish: this.documentRootRecoveryAvailable() && (!journal || journal.status === 'restored' || published), canRollback: recoverable }, application: { status, nativeQualified: false } }
+    return { context: this.target, revision: snapshot.revision, files: snapshot.files.map((file, i) => ({ name: SITE_PUBLISHER_INDEXES[i]!, exists: file !== null, hash: file ? sitePublisherHash(file.content) : null, sizeBytes: file?.sizeBytes ?? 0 })), recovery: { status: journal?.status ?? 'none', createdAt: journal?.createdAt ?? null }, capabilities: { canPublish: !journal || journal.status === 'restored' || published, canRollback: recoverable }, application: { status, nativeQualified: false } }
   }
-  // Index preimages cannot establish complete document-root recovery or 30-day retention.
-  private documentRootRecoveryAvailable(): boolean { return false }
+  /** Archives the whole document root as the account before any live write; a failure leaves the root untouched. */
+  private async archive(id: string): Promise<void> {
+    await this.authorize()
+    try { await this.files.compress([this.target.path], this.root + '/' + id + '/' + SITE_PUBLISHER_ARCHIVE) }
+    catch { return fail('PRECONDITION_FAILED', 'the document root could not be archived (for example the disk quota is full); nothing was published', { reason: 'backup_failed', stateChanged: false }) }
+  }
+  /** Removes publication backups older than the retention window; the current journal's backup always stays. */
+  private async prune(keep: string, now: Date): Promise<void> {
+    const cutoff = now.getTime() - SITE_PUBLISHER_RETENTION_DAYS * 86_400_000
+    for (const entry of await this.files.list(this.root, { showHidden: true })) {
+      const parts = BACKUP_ID.exec(entry.name)
+      if (!parts || entry.name === keep || entry.kind !== 'directory') continue
+      const [, y, mo, d, h, mi, se, ms] = parts
+      if (Date.UTC(+y!, +mo! - 1, +d!, +h!, +mi!, +se!, +ms!) >= cutoff) continue
+      await this.authorize()
+      const trashed = await this.files.moveToTrash(this.root + '/' + entry.name)
+      await this.files.purgeTrash(trashed.id, { originalPath: trashed.originalPath, deletedAt: trashed.deletedAt })
+    }
+  }
   async inspect(): Promise<SitePublisherView> { const snapshot = await this.snapshot(); await this.authorize(); return this.view(snapshot, 'read') }
   private async checked(path: string, content: string | null, before: FileText | null, mode = 0o640): Promise<FileText | null> {
     await this.authorize()
@@ -140,12 +161,12 @@ export class SitePublisherWorkspace {
   }
   async publish(expectedRevision: string, draft: SitePublisherDraft, now = new Date()): Promise<SitePublisherView> {
     await this.authorize()
-    if (!this.documentRootRecoveryAvailable()) return fail('PRECONDITION_FAILED', 'publishing requires verified complete document-root backup and recovery with 30-day retention outside the document root', unchanged)
     const generated = renderSitePublisherDraft(draft), before = await this.snapshot()
     if (before.revision !== expectedRevision) return fail('CONFLICT', 'index files changed; reload before publishing', unchanged)
     if (!this.view(before, 'read').capabilities.canPublish) return fail('PRECONDITION_FAILED', 'recover the prior publication before publishing again', unchanged)
     const id = now.toISOString().replace(/[-:.]/g, '') + '-' + randomBytes(8).toString('hex')
     await this.directories(this.root + '/' + id)
+    await this.archive(id)
     const originals: Original[] = []
     for (const [i, name] of SITE_PUBLISHER_INDEXES.entries()) {
       const file = before.files[i]!, mode = before.entries.find(entry => entry.name === name)?.mode ?? 0o640
@@ -163,6 +184,8 @@ export class SitePublisherWorkspace {
       await this.checked(this.statePath, JSON.stringify({ ...journal, status: 'published' }), written.journalFile)
       const after = await this.snapshot(); await this.authorize()
       if (!this.view(after, 'read').capabilities.canPublish || after.journal?.status !== 'published') return fail('SERVICE_UNAVAILABLE', 'publication verification was lost')
+      // Retention never undoes a verified publication; a failed cleanup is retried by the next one.
+      await this.prune(id, now).catch(() => undefined)
       return this.view(after, 'published')
     } catch (error) {
       try { await this.restore(await this.snapshot()) } catch { return fail('SERVICE_UNAVAILABLE', 'publication outcome requires inspection; retained backups may be recovered after reload', { stateChanged: true, unknownOutcome: true, verificationRequired: true }) }

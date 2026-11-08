@@ -35,7 +35,7 @@ vi.mock('node:fs', async original => {
 })
 vi.mock('./host-catalog.ts', async () => {
   const { tools } = await import('@xpanel/catalog')
-  return { loadQualifiedCatalog: async () => tools.map(tool => ({ ...tool, status: 'verified', delivery: { ...tool.delivery, status: 'verified' } })) }
+  return { qualificationModeOn: () => false, loadQualifiedCatalog: async () => tools.map(tool => ({ ...tool, status: 'verified', delivery: { ...tool.delivery, status: 'verified' } })) }
 })
 vi.mock('../../web/src/index.ts', async original => {
   const actual = await original<typeof import('../../web/src/index.ts')>()

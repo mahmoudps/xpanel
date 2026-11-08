@@ -164,7 +164,7 @@ describe('account mailing lists HTTP security acceptance', () => {
     expect((await f.auditRows('mail.mailing_list.deleted')).length).toBe(1)
   })
 
-  it('applies each saved list change on the host once and restores the saved lists when the host refuses', { tags: ['feature'] }, async () => {
+  it('applies each saved list change on the host once and restores the saved lists when the host refuses', { tags: ['slow', 'feature'] }, async () => {
     const created = await f.request('POST', { address: 'news@mlista.example.test', members: ['one@example.test'], moderation: 'open' }, f.credential, undefined, f.hosted)
     expect(created.status).toBe(201)
     const receipt = await created.json() as { mailingList: MailingList; revision: number; nativeApplied: boolean }

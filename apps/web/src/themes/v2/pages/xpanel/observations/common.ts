@@ -7,5 +7,7 @@ export interface PanelObservationAuthority extends PanelEmailAuthority {
   readonly relatedRoutes?: ReadonlySet<string>
   /** True only when core applies the selected owned domain before reading traffic. */
   readonly domainSelectionAvailable?: boolean
+  /** Core's verified tools for this account; Raw Access archives need raw-access. */
+  readonly qualifiedTools?: ReadonlySet<string>
 }
 export { PANEL_ADDITIONAL_CSS as PANEL_OBSERVATIONS_CSS } from '../email-tools/common.ts'

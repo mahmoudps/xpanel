@@ -356,30 +356,8 @@ export interface WebExtrasConfig {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Types — 7. Fine-Grained Server Settings & Previously Deferred Capabilities
+// Types — 7. Previously Deferred Capabilities
 // ---------------------------------------------------------------------------
-
-export interface ServerFineSettings {
-  maxMemoryPerProcessMb: number
-  maxProcessesPerAccount: number
-  compilerGroupEnabled: boolean
-  logRotationDays: number
-  logCompress: boolean
-  mtaSmarthost: string | null
-  mtaMaxMsgSizeMb: number
-  mtaRateLimitPerHour: number
-  mtaRblList: string[]
-  mtaGreylisting: boolean
-  webStack: {
-    http3Quic: boolean
-    brotli: boolean
-    wafOwaspCrs: boolean
-    installedPhpVersions: string[]
-    installedRuntimes: string[]
-  }
-  installedPackages: string[]
-  updatedAt: string
-}
 
 export interface ContainerRecord {
   id: string
@@ -1838,67 +1816,8 @@ export class ExtendedFeaturesStore {
   }
 
   // =========================================================================
-  // 7. Fine-Grained Server Settings & Previously Deferred Capabilities
+  // 7. Previously Deferred Capabilities
   // =========================================================================
-
-  async getServerFineSettings(): Promise<ServerFineSettings> {
-    const stored = await readJsonIfExists<ServerFineSettings>(this.extPath('server', 'fine-settings.json'))
-    if (stored) return stored
-    return {
-      maxMemoryPerProcessMb: 512,
-      maxProcessesPerAccount: 64,
-      compilerGroupEnabled: false,
-      logRotationDays: 30,
-      logCompress: true,
-      mtaSmarthost: null,
-      mtaMaxMsgSizeMb: 50,
-      mtaRateLimitPerHour: 500,
-      mtaRblList: ['zen.spamhaus.org', 'bl.spamcop.net'],
-      mtaGreylisting: true,
-      webStack: {
-        http3Quic: true,
-        brotli: true,
-        wafOwaspCrs: true,
-        installedPhpVersions: ['8.2', '8.3', '8.4'],
-        installedRuntimes: ['nodejs-22', 'python-3.12', 'ruby-3.3'],
-      },
-      installedPackages: ['git', 'curl', 'zip', 'unzip', 'imagemagick'],
-      updatedAt: new Date(0).toISOString(),
-    }
-  }
-
-  saveServerFineSettings(
-    settings: Omit<ServerFineSettings, 'updatedAt'>,
-  ): Promise<ServerFineSettings> {
-    return this.mutex.run(async () => {
-      const next: ServerFineSettings = {
-        maxMemoryPerProcessMb: assertInt(settings.maxMemoryPerProcessMb, 32, 131072, 'maxMemoryPerProcessMb'),
-        maxProcessesPerAccount: assertInt(settings.maxProcessesPerAccount, 1, 4096, 'maxProcessesPerAccount'),
-        compilerGroupEnabled: assertBool(settings.compilerGroupEnabled, 'compilerGroupEnabled'),
-        logRotationDays: assertInt(settings.logRotationDays, 1, 3650, 'logRotationDays'),
-        logCompress: assertBool(settings.logCompress, 'logCompress'),
-        mtaSmarthost:
-          settings.mtaSmarthost === null
-            ? null
-            : assertLine(settings.mtaSmarthost, 256, 'mtaSmarthost', { allowEmpty: false }),
-        mtaMaxMsgSizeMb: assertInt(settings.mtaMaxMsgSizeMb, 1, 1024, 'mtaMaxMsgSizeMb'),
-        mtaRateLimitPerHour: assertInt(settings.mtaRateLimitPerHour, 1, 100000, 'mtaRateLimitPerHour'),
-        mtaRblList: settings.mtaRblList.map((r) => validateDomainName(r)),
-        mtaGreylisting: assertBool(settings.mtaGreylisting, 'mtaGreylisting'),
-        webStack: {
-          http3Quic: assertBool(settings.webStack.http3Quic, 'http3Quic'),
-          brotli: assertBool(settings.webStack.brotli, 'brotli'),
-          wafOwaspCrs: assertBool(settings.webStack.wafOwaspCrs, 'wafOwaspCrs'),
-          installedPhpVersions: [...settings.webStack.installedPhpVersions],
-          installedRuntimes: [...settings.webStack.installedRuntimes],
-        },
-        installedPackages: [...settings.installedPackages],
-        updatedAt: new Date().toISOString(),
-      }
-      await atomicWriteJson(this.extPath('server', 'fine-settings.json'), next)
-      return next
-    })
-  }
 
   async listContainers(accountId?: string): Promise<ContainerRecord[]> {
     if (accountId !== undefined) {

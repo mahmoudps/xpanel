@@ -1,3 +1,4 @@
+import { v2PanelAccessSections } from './panel-access.ts'
 import { actions, area, button, check, context, esc, facts, field, fields, help, inputControl, page, section, select, status, table, type WhmObservationInput } from '../monitoring/common.ts'
 
 type PolicyPage = 'waf' | 'flood' | 'panel-access'
@@ -36,7 +37,7 @@ export function renderV2WhmSecurityPolicy(input: WhmObservationInput, kind: Poli
         + section(t, 'access-lists', msgid('IP allowlists'), fields(textArea('xpanel', msgid('xPanel (port 2083)'), 30000, msgid('One address or network per line. Text after # is kept as a note.'))
           + textArea('xwhm', msgid('xWHM (port 2087)'), 30000, msgid('Root and reseller sign-in. A save that removes your current address is refused.'))
           + textArea('xmail', msgid('xMail (port 2096)'), 30000, msgid('Webmail sign-in for mailbox users.'))) + save)
-        + section(t, 'access-other', msgid('Other access settings'), help(t, msgid('Panel port, secret entrance path, unauthenticated response, basic authentication and temporary sign-in links are not available here. The panel port is shown under Panel security.')))
+        + v2PanelAccessSections(t, canRead, canManage)
   const titles = { waf: msgid('Web application firewall'), flood: msgid('Flood protection'), 'panel-access': msgid('Panel access') }
   return page(input, `/whm/security/${kind}`, titles[kind], msgctxt('theme:v2', 'Saved policy and its running host readback remain separate sources.'), body, { 'data-sec-workspace': true, 'data-sec-page': kind, 'data-sec-can-read': String(canRead), 'data-sec-can-manage': String(canManage) })
 }

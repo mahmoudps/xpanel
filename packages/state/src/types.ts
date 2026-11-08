@@ -14,6 +14,7 @@ import type {
   FirewallRule,
   Id,
   IpAssignmentRequest,
+  Ipv6Range,
   Limit,
   LockoutContext,
   MailIpConfig,
@@ -21,6 +22,7 @@ import type {
   Plan,
   PlanCaps,
   Reseller,
+  ResellerAclList,
   ResourceLimits,
   ServerIpEntry,
   ServerSettings,
@@ -49,6 +51,10 @@ export interface PrefixList {
 export interface FirewallState {
   rules: FirewallRule[]
   prefixLists: PrefixList[]
+  /** false leaves the rule list out of the kernel: nothing is filtered but the fixed guards */
+  enabled: boolean
+  /** the server ignores ping, with the firewall on or off */
+  blockPing: boolean
 }
 
 export interface FirewallGuard {
@@ -252,7 +258,9 @@ export type DomainPatch = Partial<
     | 'expiresAt'
     | 'pathQuotaMb'
     | 'indexFiles'
+    | 'forceHttps'
     | 'proxy'
+    | 'site'
     | 'ipv4'
     | 'ipv6'
   >
@@ -265,6 +273,8 @@ export interface StoredServiceUser extends ServiceUser {
 }
 
 export type NewServiceUser = Omit<ServiceUser, 'id'> & {
+  /** a transfer keeps the source id, which keys the mailbox's calendars and contacts; otherwise generated */
+  id?: Id
   /** scheme-tagged hash for dovecot/FTP, e.g. {ARGON2ID}$argon2id$... */
   passwordHash: string
 }
@@ -273,6 +283,7 @@ export interface ServiceUserPatch {
   services?: ServiceUser['services']
   mailboxQuotaMb?: Limit
   ftpDir?: string
+  webdiskReadOnly?: boolean
   passwordHash?: string
 }
 
@@ -321,6 +332,14 @@ export interface DnsZoneState {
   name: string
   serial: number
   records: DnsRecord[]
+  /** Set on a DNS cluster copy: the member that holds the zone and the digest it last sent. */
+  replica?: DnsZoneReplica
+}
+
+export interface DnsZoneReplica {
+  peer: string
+  digest: string
+  at: string
 }
 
 export interface CronJobState {
@@ -368,6 +387,10 @@ export interface StateSnapshot {
   cronJobs: CronJobState[]
   domainCustomConfigs?: DomainCustomConfig[]
   ipPool?: ServerIpEntry[]
+  /** present only when at least one IPv6 range is saved (`ip-ranges.json`) */
+  ipv6Ranges?: Ipv6Range[]
+  /** present only when at least one reseller ACL list is saved (`acl-lists/*.json`) */
+  aclLists?: ResellerAclList[]
   mailIpConfig?: MailIpConfig | null
   /** present only when at least one routing record is saved */
   mailRouting?: MailRoutingState

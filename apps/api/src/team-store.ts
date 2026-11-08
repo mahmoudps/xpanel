@@ -9,7 +9,7 @@ export interface TeamCredential {
 }
 export interface TeamSessionRecord {
   id: string; memberId: string; accountId: string; ownerPrincipalId: string; login: string
-  createdAt: string; lastSeenAt: string; expiresAt: string
+  ip: string | null; createdAt: string; lastSeenAt: string; expiresAt: string
 }
 type Row = Record<string, unknown>
 const text = (value: unknown): string => value as string
@@ -17,7 +17,7 @@ const nullable = (value: unknown): string | null => value === null ? null : valu
 const credentialOf = (row: Row): TeamCredential => ({ memberId: text(row.member_id), accountId: text(row.account_id), passwordHash: nullable(row.password_hash),
   passwordSetAt: nullable(row.password_set_at), linkExpiresAt: nullable(row.link_expires_at), lastLoginAt: nullable(row.last_login_at) })
 const sessionOf = (row: Row): TeamSessionRecord => ({ id: text(row.id), memberId: text(row.member_id), accountId: text(row.account_id), ownerPrincipalId: text(row.owner_principal_id),
-  login: text(row.login), createdAt: text(row.created_at), lastSeenAt: text(row.last_seen_at), expiresAt: text(row.expires_at) })
+  login: text(row.login), ip: nullable(row.ip), createdAt: text(row.created_at), lastSeenAt: text(row.last_seen_at), expiresAt: text(row.expires_at) })
 const stamp = (value: Date): string => value.toISOString()
 
 export const getTeamCredential = async (db: Db, memberId: string): Promise<TeamCredential | null> => {

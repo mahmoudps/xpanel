@@ -27,7 +27,7 @@ export const EXTENSION_CSS = `
 .xp-extension :is(h1,h2,h3,p,dl,dd){margin:0}
 .xp-extension :is(h1,h2,h3){overflow-wrap:anywhere}
 .xp-extension h1{font-size:var(--xp-type-page);line-height:var(--xp-leading-page)}
-.xp-extension h2{font-size:var(--xp-type-card);line-height:var(--xp-leading-card)}
+.xp-extension :is(h2,h3){font-size:var(--xp-type-card);line-height:var(--xp-leading-card)}
 .xp-extension :is(p,dd){font-size:var(--xp-type-body);line-height:var(--xp-leading-body)}
 .xp-extension__card{display:grid;gap:24px;padding:24px;min-inline-size:0;border:1px solid var(--xp-border);border-radius:var(--xp-radius-md);background:var(--xp-bg-surface)}
 .xp-extension__facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:16px;min-inline-size:0}

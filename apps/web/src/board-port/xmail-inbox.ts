@@ -230,7 +230,9 @@ const readingInner = (card: MailCard, model: InboxModel): string => {
   if (!model.folderWorkspace) return hooked
   const action = model.activeFolder === 'Trash' ? 'restore' : 'delete'
   const label = model.activeFolder === 'Trash' ? (translator(model.locale)('Restore to Inbox')) : (translator(model.locale)('Move to Trash'))
-  return hooked.replace('data-mail-action="delete"', `data-mail-action="${action}"`).replace(`${ICONS.trash}${translator(model.locale)('Delete')}`, `${ICONS.trash}${label}`)
+  const junk = model.activeFolder === 'Trash' ? null : model.activeFolder === 'Junk' ? { folder: 'INBOX', text: translator(model.locale)('Not junk'), target: translator(model.locale)('Inbox') } : { folder: 'Junk', text: translator(model.locale)('Mark as junk'), target: translator(model.locale)(msgctxt('xmail-inbox', 'Junk')) }
+  const report = junk ? `<button type="button" data-mail-action="move" data-mail-report="true" data-folder="${junk.folder}" data-folder-label="${escapeHtml(junk.target)}" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#101828,var(--xp-text-primary)); font-family: inherit; font-size: 14px; font-weight: 600">${ICONS.junk}${escapeHtml(junk.text)}</button>` : ''
+  return hooked.replace('data-mail-action="delete"', `data-mail-action="${action}"`).replace(`${ICONS.trash}${translator(model.locale)('Delete')}`, `${ICONS.trash}${label}`).replace('<span style="flex: 1 1 0"></span>', `${report}<span style="flex: 1 1 0"></span>`)
 }
 
 const INBOX_SCRIPT = `<script id="xmail-inbox-client">
@@ -606,8 +608,9 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
         var path = '/api/webmail/inbox/' + encodeURIComponent(uid)
         pendingActions += 1
         updateMutationControls()
+        var reported = name === 'move' && action.getAttribute('data-mail-report') === 'true'
         var pending = name === 'move' || (name === 'delete' && !trashNow)
-          ? window.xpanelSessionRequest('POST', path + '/move', { folder: name === 'delete' ? 'Trash' : folderId, from: fromFolder, uidValidity: uidValidity })
+          ? window.xpanelSessionRequest('POST', path + (reported ? '/report' : '/move'), { folder: name === 'delete' ? 'Trash' : folderId, from: fromFolder, uidValidity: uidValidity })
           : window.xpanelSessionRequest('DELETE', path + '?folder=' + encodeURIComponent(fromFolder) + '&confirm=delete', { uidValidity: uidValidity })
         pending.then(function (result) {
           if (!root.isConnected || !current.isConnected || root.getAttribute('data-mailbox') !== mutationMailbox || root.getAttribute('data-mail-folder') !== fromFolder) return
@@ -621,6 +624,8 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
           }
           finish(!trashNow)
           var bar = root.querySelector('[data-mail-undo]')
+          var trainedText = bar && reported && result.training !== 'recorded' ? bar.querySelector('[data-mail-undo-text]') : null
+          if (trainedText) trainedText.textContent += ' ' + xpT('The spam filter was not trained.')
           if (bar && ack) {
             bar.setAttribute('data-undo-uid', String(ack.uid))
             bar.setAttribute('data-undo-from', name === 'delete' ? 'Trash' : folderId)
@@ -854,6 +859,12 @@ const INBOX_SCRIPT = `<script id="xmail-inbox-client">
 })()
 </script>`
 
+const classicBulk = (model: { activeFolder?: string; locale?: Locale; readOnly?: boolean }): string => {
+  const folder = model.activeFolder ?? '', t = translator(model.locale ?? 'en'), button = (action: string, label: string): string => `<button type="button" class="xp-btn" data-mail-bulk-action="${action}" disabled>${escapeHtml(t(label))}</button>`
+  if (model.readOnly === true || !['INBOX', 'Junk'].includes(folder)) return ''
+  return `<div data-mail-bulk data-mail-bulk-folder="${escapeHtml(folder)}" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">${folder === 'Junk' ? button('report', msgid('Mark page as not junk')) + button('empty', msgid('Empty Junk')) : button('report', msgid('Mark page as junk'))}<p role="status" data-mail-bulk-status style="margin: 0"></p></div>`
+}
+
 export const renderInbox = (model: InboxModel): string => {
   const rtl = localeDirection(model.locale) === 'rtl'
   const font = rtl ? FONT_AR : FONT_EN
@@ -912,6 +923,7 @@ export const renderInbox = (model: InboxModel): string => {
       <div style="padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid light-dark(#E2E6EC,var(--xp-border))">
         <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap"><h1 id="list-title" style="margin: 0; font-size: 20px; font-weight: 600">${escapeHtml(model.title)}</h1><span data-mail-count-summary="true" style="font-size: 12px; color: light-dark(#5D6B7E,var(--xp-text-muted)); font-variant-numeric: tabular-nums">${escapeHtml(countTail ? model.countText.slice(0, -countTail.length) : model.countText)}<span data-mail-unread="${model.unreadCount ?? 0}">${escapeHtml((model.unreadCount ?? 0) > 0 ? countTail : '')}</span></span></div>
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><div role="group" aria-label="${translator(model.locale)('Show')}" style="display: inline-flex; padding: 2px; border-radius: 10px; background: light-dark(#EEF0F3,var(--xp-bg-elevated)); gap: 2px">${filterBtn('all', translator(model.locale)('All'), true)}${filterBtn('unread', translator(model.locale)(msgctxt('xmail-inbox', 'Unread')), false)}${filterBtn('attachments', translator(model.locale)('With attachments'), false)}</div><span style="flex: 1 1 0"></span><button type="button" data-mail-action="refresh" aria-label="${translator(model.locale)('Check for new mail')}" style="width: 44px; height: 44px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#344054,var(--xp-text-secondary)); display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></svg></button></div>
+      ${model.folderWorkspace ? classicBulk(model) : ''}
       </div>
       <div data-mail-list-slot="true">
         <ul data-mail-list="true" aria-label="${translator(model.locale)('Messages')}" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">${rows}</ul>

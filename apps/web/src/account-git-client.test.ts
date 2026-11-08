@@ -15,21 +15,40 @@ async function bind(request: (method: string, path: string, body?: unknown) => P
   await settle(); await settle()
 }
 describe('Git account page and controller', () => {
-  it('preserves all bilingual controls, technical isolation and truthful unavailable deployment', () => {
+  it('preserves all bilingual controls, technical isolation and the deployment control', () => {
     for (const lang of ['en', 'ar'] as const) {
       const html = renderAccountGitWorkspace({ lang, accountId, canManage: true })
       expect(html).toContain(`dir="${lang === 'ar' ? 'rtl' : 'ltr'}"`); expect(html).not.toMatch(/[٠-٩۰-۹]/)
-      for (const name of ['repository', 'branch', 'clone', 'init', 'pull', 'checkout', 'history', 'status']) expect(html).toContain('data-git-' + name)
+      for (const name of ['repository', 'branch', 'clone', 'init', 'pull', 'checkout', 'history', 'status', 'deploy', 'deployed']) expect(html).toContain('data-git-' + name)
       expect(html).toContain('<bdi dir="ltr" data-git-selected>'); expect(html).toContain('id="git-deployment"')
     }
     expect(ACCOUNT_GIT_CLIENT_BINDING).not.toContain('innerHTML')
   })
-  it('keeps denied surfaces inert and the permanently unavailable Deploy control disabled after reads', async () => {
+  it('keeps denied surfaces inert and Deploy disabled until a clean repository with a commit is read', async () => {
     const request = vi.fn(async () => view()); await bind(request, false)
     expect(request).not.toHaveBeenCalled(); expect([...document.querySelectorAll<HTMLButtonElement>('button')].every(button => button.disabled)).toBe(true)
     await bind(request); expect(request).toHaveBeenCalledTimes(1)
     expect($<HTMLButtonElement>('[aria-labelledby="git-deployment"] button').disabled).toBe(true)
     expect($<HTMLInputElement>('[data-git-path]').disabled).toBe(false)
+  })
+  it('deploys the read repository after a confirmation that names the risk, and shows the recorded commit', async () => {
+    const confirmation = vi.fn(async () => true)
+    const request = vi.fn(async (_method: string, _path: string, body?: unknown) => { const op = body ? (body as { op: string }).op : 'list'; return { ...view(op), deployed: op === 'deploy' ? { commit: hash, at: '2026-11-07T10:00:00.000Z' } : null } })
+    await bind(request, true, confirmation); $<HTMLButtonElement>('[data-git-inspect]').click(); await settle(); await settle()
+    expect($('[data-git-deployed]').textContent).toBe('Not deployed')
+    const deploy = $<HTMLButtonElement>('[data-git-deploy]'); expect(deploy.disabled).toBe(false)
+    deploy.click(); await settle(); await settle(); await settle()
+    expect((confirmation.mock.calls[0] as unknown as [{ body: string }])[0].body).toContain('.cpanel.yml')
+    expect(request.mock.calls.at(-1)).toEqual(['POST', '/api/account/git', { op: 'deploy', path: 'repo', expectedRevision: 'a'.repeat(64) }])
+    expect($('[data-git-deployed]').textContent).toContain(hash.slice(0, 12))
+  })
+  it('names why a deployment was refused and refuses a reply about another commit', async () => {
+    const request = vi.fn(async (_method: string, _path: string, body?: unknown) => { const op = body ? (body as { op: string }).op : 'list'; if (op === 'deploy') throw Object.assign(new Error('no'), { code: 'PRECONDITION_FAILED', details: { stateChanged: false } }); return view(op) })
+    await bind(request, true, vi.fn(async () => true)); $<HTMLButtonElement>('[data-git-inspect]').click(); await settle(); await settle()
+    $<HTMLButtonElement>('[data-git-deploy]').click(); await settle(); await settle(); await settle()
+    expect($('[data-git-status]').textContent).toContain('.cpanel.yml')
+    expect(() => readGitClientView({ ...view('deploy'), deployed: { commit: 'b'.repeat(40), at: '2026-11-07T10:00:00.000Z' } }, accountId, { op: 'deploy', path: 'repo', expectedRevision: 'a'.repeat(64) })).toThrow()
+    expect(() => readGitClientView({ ...view('deploy'), deployed: null }, accountId, { op: 'deploy', path: 'repo', expectedRevision: 'a'.repeat(64) })).toThrow()
   })
   it('reads details with safe text nodes and posts the captured revision and HEAD only after confirmation', async () => {
     const confirmation = vi.fn(async () => true), request = vi.fn(async (_method: string, _path: string, body?: unknown) => view(body ? (body as { op: string }).op : 'list'))

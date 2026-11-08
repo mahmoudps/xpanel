@@ -8,6 +8,7 @@ import { fail } from '@xpanel/core'
 import { createApiToken, createTestDb, createUserPrincipal, findActiveApiTokenByHash } from '@xpanel/db'
 import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
 import { sha256Hex, verifyPasswordArgon2id } from './auth.ts'
+import { createMemoryDav } from './mail/dav-testkit.ts'
 import { createApiApp, listenApiServer } from './server.ts'
 import { sessionCookieName } from './entry-points.ts'
 import type { MailboxTransport } from './mail/inbox.ts'
@@ -57,7 +58,7 @@ const fixture = async () => {
       },
     }
   }
-  const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: 'xmail', publicOrigin: ORIGIN, allowedOrigins: [ORIGIN], secureCookies: true, requireOriginHeader: true, mailboxTransport: transport, mailSearchClientFactory: searchClient })
+  const app = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: 'xmail', publicOrigin: ORIGIN, allowedOrigins: [ORIGIN], secureCookies: true, requireOriginHeader: true, davExchange: createMemoryDav().exchange, mailboxTransport: transport, mailSearchClientFactory: searchClient })
   const listener = await listenApiServer(app)
   cleanup.push(async () => { listener.server.closeAllConnections(); await listener.close() })
   const call = (path: string, method = 'GET', body?: unknown, session?: { cookie: string; csrf: string }, extra: Record<string, string> = {}): Promise<Response> => new Promise((resolve, reject) => {
@@ -83,7 +84,6 @@ const fixture = async () => {
   const seeds = {
     'webmail/messages.json': [{ ...base, id: randomUUID(), mailbox: own.login, textBody: 'OWN_MAILBOX_MARKER' }, { ...base, id: randomUUID(), mailbox: sibling.login, textBody: 'SIBLING_MAILBOX_MARKER' }],
     'webmail/identities.json': [{ id: identityId, mailbox: sibling.login, email: sibling.login, displayName: 'Sibling', replyTo: sibling.login, textSignature: '', htmlSignature: '', isDefault: false }],
-    'webmail/calendars.json': [{ id: calendarId, owner: sibling.login, name: 'Sibling calendar', color: '#123456', timezone: 'UTC', shares: [], events: [], createdAt: new Date().toISOString() }],
     'mail/filters.json': [],
   }
   for (const [path, data] of Object.entries(seeds)) await atomicWriteJson(join(state.rootDir, 'extended', path), data)

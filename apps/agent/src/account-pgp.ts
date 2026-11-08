@@ -1,3 +1,4 @@
+import { dirname } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { lstat, readdir, realpath } from 'node:fs/promises'
@@ -80,8 +81,8 @@ export function parseGpgKeys(stdout: string): PgpKey[] {
 /** Defense in depth for an explicitly admitted Linux runner. Qualification still needs native confinement/race probes. */
 export async function assertPgpHome(identity: GpgIdentity, missingAllowed = false): Promise<void> {
   gpgIdentity(identity)
-  const parent = await lstat('/home'), home = await lstat(identity.home)
-  if (!parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== 0 || (parent.mode & 0o022) || await realpath('/home') !== '/home' || !home.isDirectory() || home.isSymbolicLink() || home.uid !== identity.uid || home.gid !== identity.gid || (home.mode & 0o022) || await realpath(identity.home) !== identity.home) return unavailable()
+  const base = dirname(identity.home), parent = await lstat(base), home = await lstat(identity.home)
+  if (!parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== 0 || (parent.mode & 0o022) || await realpath(base) !== base || !home.isDirectory() || home.isSymbolicLink() || home.uid !== identity.uid || home.gid !== identity.gid || (home.mode & 0o022) || await realpath(identity.home) !== identity.home) return unavailable()
   const directory = identity.home + '/.gnupg'
   try { await lstat(directory) } catch (error) { if (missingAllowed && object(error) && error.code === 'ENOENT') return; throw error }
   const pending = [directory]; let count = 0

@@ -1,9 +1,10 @@
 import { type Locale, type MessageValues, translator, localeDirection } from '../i18n.ts'
+import { renderFtpServerSettingsCard } from './ftp-tools-workspace.ts'
 export type WhmServiceDetailKind = 'dns' | 'ftp' | 'certificates'
-export interface WhmServiceDetailWorkspaceInput { kind: WhmServiceDetailKind; locale: Locale; canRead: boolean; canRestart: boolean }
+export interface WhmServiceDetailWorkspaceInput { kind: WhmServiceDetailKind; locale: Locale; canRead: boolean; canRestart: boolean; canManageFtp?: boolean }
 
 /** /whm/services/{dns,ftp,certificates}. Values are painted only from an authorized fresh host read; restarts reuse /api/server/services/<id>/restart. */
-export function renderWhmServiceDetailWorkspace({ kind, locale, canRead, canRestart }: WhmServiceDetailWorkspaceInput): string {
+export function renderWhmServiceDetailWorkspace({ kind, locale, canRead, canRestart, canManageFtp }: WhmServiceDetailWorkspaceInput): string {
   const t = (message: string, values?: MessageValues): string => translator(locale)(message, values), off = canRead ? '' : ' disabled'
   const notRead = t('Not read')
   const fact = (key: string, label: string): string => `<div><dt>${label}</dt><dd><bdi dir="ltr" data-whm-service-detail-fact="${key}">${notRead}</bdi></dd></div>`
@@ -33,10 +34,10 @@ export function renderWhmServiceDetailWorkspace({ kind, locale, canRead, canRest
       <h2 id="whm-service-detail-settings-heading">${t('Daemon settings')}</h2>
       ${table(t('pure-ftpd settings'), [t('Setting'), t('xPanel policy'), t('Host file'), t('Result')])}
       <p class="xp-help">${t('The policy column is the pure-ftpd configuration xPanel renders. Host values are read from one file per setting in the configuration directory, which the pure-ftpd wrapper turns into daemon flags. The running process flags are not read here.')}</p>
-    </section>` : `<section class="xp-whm-service-detail__card" aria-labelledby="whm-service-detail-endpoints-heading">
+    </section>${renderFtpServerSettingsCard(locale, canRead && canManageFtp === true)}` : `<section class="xp-whm-service-detail__card" aria-labelledby="whm-service-detail-endpoints-heading">
       <div class="xp-whm-service-detail__heading"><h2 id="whm-service-detail-endpoints-heading">${t('Service endpoints')}</h2><a class="xp-btn" href="/whm/ssl?lang=${locale}">${t('Replace or renew in SSL/TLS')}</a></div>
       ${table(t('Service certificates'), [t('Service'), t('Ports'), t('Certificate file'), t('Names'), t(msgctxt('whm-service-detail-workspace', 'Issuer')), t('Valid until (UTC)'), t('Days left'), t('Hostname covered'), t('Private key'), t('Warnings')])}
-      <p class="xp-help">${t('Certificate paths come from the configuration xPanel renders. Only certificate files are read; private keys are checked for presence and never opened. Mail and FTP daemons keep their distribution TLS settings, which are not read here.')}</p>
+      <p class="xp-help">${t('Certificate paths come from the configuration xPanel renders. Only certificate files are read; private keys are checked for presence and never opened. Mail daemon TLS settings and the FTP certificate file, which holds its private key, are not read here.')}</p>
     </section>`
   return `<section class="xp-whm-service-detail" data-whm-service-detail-workspace="${kind}" data-service-detail-can-read="${canRead}" data-service-detail-can-restart="${canRead && canRestart && kind !== 'certificates'}" lang="${locale}" dir="${localeDirection(locale)}" aria-labelledby="whm-service-detail-summary-heading">
     <style>

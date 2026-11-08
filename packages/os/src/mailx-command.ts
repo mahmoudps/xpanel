@@ -17,6 +17,9 @@ export const MAILX_MAPS = {
   senderBcc: `${MAILX_MAP_DIR}/sender_bcc`,
   relayDomains: `${MAILX_MAP_DIR}/relay_domains`,
   relayRecipients: `${MAILX_MAP_DIR}/relay_recipients`,
+  countryBlock: `${MAILX_MAP_DIR}/country_block`,
+  outboundHold: `${MAILX_MAP_DIR}/outbound_hold`,
+  outboundHoldLocal: `${MAILX_MAP_DIR}/outbound_hold_local`,
 } as const
 /** Dovecot settings of the server section; sorts after the reconciler's 90-xpanel.conf and 99-xpanel-quota.conf, so it wins. */
 export const MAILX_DOVECOT_SERVER_CONF = '/etc/dovecot/conf.d/99-xpanel-server.conf'
@@ -31,11 +34,22 @@ export const MAILX_DOVECOT_DIALECT_ARGV = ['/usr/bin/doveconf', '-h', 'ssl_serve
 export const MAILX_POSTFIX_CHECK_ARGV = [MAILX_POSTFIX, 'check'] as const
 export const MAILX_POSTFIX_RELOAD_ARGV = [MAILX_POSTFIX, 'reload'] as const
 export const MAILX_POSTCONF_MAIN_ARGV = [MAILX_POSTCONF, '-n'] as const
+// postconf(1) -d prints every parameter this Postfix release knows.
+export const MAILX_POSTCONF_DEFAULTS_ARGV = [MAILX_POSTCONF, '-d'] as const
 // rspamadm(1) configtest parses the whole configuration; spamassassin(1) --lint checks the site rules.
 export const MAILX_RSPAMD_TEST_ARGV = ['/usr/bin/rspamadm', 'configtest'] as const
 export const MAILX_SPAMASSASSIN_TEST_ARGV = ['/usr/bin/spamassassin', '--lint'] as const
 export const MAILX_ENGINE_UNITS = ['rspamd.service', 'spamassassin.service', 'spamd.service'] as const
 export type MailxEngineUnit = typeof MAILX_ENGINE_UNITS[number]
+// Startup options load after a daemon-reload and a restart; a reload keeps the running worker count and timeouts. try-restart leaves a stopped filter stopped.
+export const MAILX_DAEMON_RELOAD_ARGV = [MAILX_SYSTEMCTL, 'daemon-reload'] as const
+/** rspamd local.d override of the scanning worker (doc: workers/normal). */
+export const MAILX_RSPAMD_WORKER = '/etc/rspamd/local.d/worker-normal.inc'
+/**
+ * systemd.exec(5): a later EnvironmentFile overrides an earlier one, so one drop-in replaces OPTIONS (Debian family) and
+ * SPAMDOPTIONS (EL family) without editing the distribution's own file.
+ */
+export const mailxSpamdDropIn = (unit: 'spamassassin.service' | 'spamd.service'): { conf: string; env: string } => ({ conf: `/etc/systemd/system/${unit}.d/90-xpanel-startup.conf`, env: `/etc/systemd/system/${unit}.d/xpanel-startup.env` })
 /** SpamAssassin reaches Postfix through spamass-milter; the unit is observed only, never reloaded. */
 export const MAILX_SPAMASS_MILTER_UNIT = 'spamass-milter.service'
 export type MailxShowUnit = MailxEngineUnit | typeof MAILX_SPAMASS_MILTER_UNIT
@@ -79,16 +93,21 @@ export const MAILX_TLS_PROTOCOLS = { 'TLSv1': '!SSLv2, !SSLv3', 'TLSv1.1': '!SSL
 const protocols = literal(...Object.values(MAILX_TLS_PROTOCOLS))
 const RBL_PREFIX = 'permit_mynetworks, permit_sasl_authenticated'
 export const MAILX_RBL_MAX = 16
-/** DNS blocklists for port 25: trusted and authenticated clients first, then one reject_rbl_client per zone. */
-export const mailxRblRestrictions = (zones: readonly string[]): string => zones.length ? [RBL_PREFIX, ...zones.map(zone => `reject_rbl_client ${zone}`)].join(', ') : ''
+// cidr_table(5): one network per line, searched in order, so the check runs before any DNS blocklist lookup.
+export const MAILX_COUNTRY_CHECK = `check_client_access cidr:${MAILX_MAPS.countryBlock}`
+/** Port 25 clients: trusted and authenticated clients first, then the country table, then one reject_rbl_client per zone. */
+export const mailxRblRestrictions = (zones: readonly string[], country = false): string => zones.length || country ? [RBL_PREFIX, ...(country ? [MAILX_COUNTRY_CHECK] : []), ...zones.map(zone => `reject_rbl_client ${zone}`)].join(', ') : ''
 /** The zones of a rendered restriction list, or null when the value is not one this applier renders. */
 export const mailxRblZones = (value: string): string[] | null => {
   if (value === '') return []
   if (!value.startsWith(RBL_PREFIX + ', ')) return null
-  const zones = value.slice(RBL_PREFIX.length + 2).split(', ').map(item => item.startsWith('reject_rbl_client ') ? item.slice(18) : '')
-  return zones.length <= MAILX_RBL_MAX && zones.every(isMailxHost) && new Set(zones).size === zones.length && mailxRblRestrictions(zones) === value ? zones : null
+  const items = value.slice(RBL_PREFIX.length + 2).split(', '), country = items[0] === MAILX_COUNTRY_CHECK
+  const zones = items.slice(country ? 1 : 0).map(item => item.startsWith('reject_rbl_client ') ? item.slice(18) : '')
+  return zones.length <= MAILX_RBL_MAX && zones.every(isMailxHost) && new Set(zones).size === zones.length && mailxRblRestrictions(zones, country) === value ? zones : null
 }
 
+// access(5) HOLD at DATA: every smtpd service reads it, and master.cf overrides only the sender restrictions.
+export const MAILX_OUTBOUND_RESTRICTION = `check_sender_access texthash:${MAILX_MAPS.outboundHold}`
 /** postconf(5) parameters this applier may set; each value grammar is closed. Reconciler-owned keys are never listed. */
 export const MAILX_POSTCONF_KEYS: Readonly<Record<string, (value: string) => boolean>> = Object.freeze({
   relayhost: (value: string) => value === '' || (/^\[([^\]]+)\]:([0-9]{1,5})$/.test(value) && isMailxHost(value.slice(1, value.indexOf(']'))) && count(1, 65535)(value.slice(value.indexOf(']') + 2))),
@@ -100,6 +119,8 @@ export const MAILX_POSTCONF_KEYS: Readonly<Record<string, (value: string) => boo
   always_bcc: (value: string) => value === '' || isMailxAddress(value),
   recipient_bcc_maps: literal('', `texthash:${MAILX_MAPS.recipientBcc}`),
   sender_bcc_maps: literal('', `texthash:${MAILX_MAPS.senderBcc}`),
+  smtpd_data_restrictions: literal('', MAILX_OUTBOUND_RESTRICTION),
+  header_checks: literal('', `regexp:${MAILX_MAPS.outboundHoldLocal}`),
   smtpd_client_message_rate_limit: count(0, 1000000),
   smtpd_client_recipient_rate_limit: count(0, 1000000),
   smtpd_recipient_limit: count(1, 100000),
@@ -143,6 +164,16 @@ export const MAILX_POSTCONF_KEYS: Readonly<Record<string, (value: string) => boo
   relay_recipient_maps: literal('', `texthash:${MAILX_MAPS.relayRecipients}`),
 })
 export const isMailxPostconfKey = (key: unknown): key is string => typeof key === 'string' && Object.hasOwn(MAILX_POSTCONF_KEYS, key)
+/** Parameters the host reconciler renders into main.cf; an override would be replaced by the next generation. */
+export const MAILX_RECONCILER_KEYS: readonly string[] = ['virtual_mailbox_domains', 'virtual_alias_domains', 'virtual_mailbox_maps', 'virtual_alias_maps', 'virtual_transport', 'transport_maps', 'recipient_delimiter',
+  'smtpd_sasl_auth_enable', 'smtpd_sasl_type', 'smtpd_sasl_path', 'smtpd_sender_login_maps', 'smtpd_recipient_restrictions', 'smtpd_milters', 'non_smtpd_milters', 'milter_protocol', 'milter_default_action',
+  'smtpd_tls_cert_file', 'smtpd_tls_key_file', 'smtpd_tls_security_level', 'smtpd_tls_auth_only', 'sender_dependent_default_transport_maps']
+// These run programs, select delivery agents or move Postfix's own files and identities; the panel must not be a route to root commands.
+const MAILX_ADVANCED_DENIED = /(?:command|transport|_directory$|_directories$|_path$|_owner$|_group$|_privs$|_environment$)|^(?:multi_instance_|maillog_file|tls_config_)|^(?:alias_maps|alias_database|luser_relay|allow_mail_to_files|allow_mail_to_commands|sendmail_path|master_service_disable|default_database_type)$/
+/** Extra main.cf parameters the advanced editor may set: not owned by another section or the reconciler, and not a privileged one. */
+export const isMailxAdvancedKey = (key: unknown): key is string => typeof key === 'string' && /^[a-z][A-Za-z0-9_]{1,63}$/.test(key) && !isMailxPostconfKey(key) && !MAILX_RECONCILER_KEYS.includes(key) && !MAILX_ADVANCED_DENIED.test(key)
+export const isMailxAdvancedValue = (value: unknown): value is string => typeof value === 'string' && value.length <= 1024 && /^(?:[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?)?$/.test(value)
+const allowedSetting = (key: string, value: unknown): boolean => typeof value === 'string' && (isMailxPostconfKey(key) ? MAILX_POSTCONF_KEYS[key]!(value) : isMailxAdvancedKey(key) && isMailxAdvancedValue(value))
 const unsupported = (): never => { throw new Error('unsupported_mailx_command') }
 /** Issued or uploaded certificate material as the TLS store lays it out (render edge/paths certPaths). */
 export const mailxCertPaths = (id: string): { certFile: string; keyFile: string } => /^[A-Za-z0-9_-]{1,64}$/.test(id) && id !== 'default'
@@ -157,12 +188,12 @@ export const MAILX_MASTER_UNSET_ARGV = [MAILX_POSTCONF, '-PX', ...MAILX_MASTER_K
 
 export function mailxPostconfSetArgv(settings: Readonly<Record<string, string>>): string[] {
   const entries = Object.entries(settings)
-  if (!entries.length || entries.some(([key, value]) => !isMailxPostconfKey(key) || typeof value !== 'string' || !MAILX_POSTCONF_KEYS[key]!(value))) return unsupported()
+  if (!entries.length || entries.some(([key, value]) => !allowedSetting(key, value))) return unsupported()
   return [MAILX_POSTCONF, '-e', ...entries.map(([key, value]) => `${key}=${value}`)]
 }
-/** postconf(1) -X removes a parameter from main.cf; used only to roll back a key that was absent before an apply. */
+/** postconf(1) -X removes a parameter from main.cf: a key absent before a failed apply, or an advanced key the saved policy dropped. */
 export function mailxPostconfUnsetArgv(keys: readonly string[]): string[] {
-  if (!keys.length || keys.some(key => !isMailxPostconfKey(key)) || new Set(keys).size !== keys.length) return unsupported()
+  if (!keys.length || keys.some(key => !isMailxPostconfKey(key) && !isMailxAdvancedKey(key)) || new Set(keys).size !== keys.length) return unsupported()
   return [MAILX_POSTCONF, '-X', ...keys]
 }
 export const isMailxEngineUnit = (value: unknown): value is MailxEngineUnit => (MAILX_ENGINE_UNITS as readonly unknown[]).includes(value)
@@ -170,6 +201,7 @@ const isMailxShowUnit = (value: unknown): value is MailxShowUnit => isMailxEngin
 // systemctl(1) show prints Property=value lines for the requested properties only.
 export const mailxEngineShowArgv = (unit: MailxShowUnit): string[] => isMailxShowUnit(unit) ? [MAILX_SYSTEMCTL, 'show', '--no-pager', '--property=LoadState,ActiveState', '--', unit] : unsupported()
 export const mailxEngineReloadArgv = (unit: MailxEngineUnit): string[] => isMailxEngineUnit(unit) ? [MAILX_SYSTEMCTL, 'reload', '--', unit] : unsupported()
+export const mailxEngineRestartArgv = (unit: MailxEngineUnit): string[] => isMailxEngineUnit(unit) ? [MAILX_SYSTEMCTL, 'try-restart', '--', unit] : unsupported()
 
 /** One saved archive mailbox login: lowercase local@domain whose local part cannot read as an option. */
 export const isMailxArchiveLogin = (value: unknown): value is string => isMailxAddress(value)
@@ -187,8 +219,8 @@ const attempt = (build: () => string[]): string[] | null => { try { return build
 /** Executor admission for the mail policy applier. */
 export function isMailxCommand(argv: readonly unknown[]): boolean {
   if (!strings(argv)) return false
-  if ([MAILX_POSTCONF_MAIN_ARGV, MAILX_POSTFIX_CHECK_ARGV, MAILX_POSTFIX_RELOAD_ARGV, MAILX_RSPAMD_TEST_ARGV, MAILX_SPAMASSASSIN_TEST_ARGV, MAILX_DOVECONF_CHECK_ARGV,
-    MAILX_DOVECOT_RELOAD_ARGV, MAILX_POSTCONF_MASTER_PARAMS_ARGV, MAILX_MASTER_UNSET_ARGV, MAILX_DOVECOT_DIALECT_ARGV].some(expected => same(argv, expected))) return true
+  if ([MAILX_POSTCONF_MAIN_ARGV, MAILX_POSTCONF_DEFAULTS_ARGV, MAILX_POSTFIX_CHECK_ARGV, MAILX_POSTFIX_RELOAD_ARGV, MAILX_RSPAMD_TEST_ARGV, MAILX_SPAMASSASSIN_TEST_ARGV, MAILX_DOVECONF_CHECK_ARGV,
+    MAILX_DOVECOT_RELOAD_ARGV, MAILX_POSTCONF_MASTER_PARAMS_ARGV, MAILX_MASTER_UNSET_ARGV, MAILX_DOVECOT_DIALECT_ARGV, MAILX_DAEMON_RELOAD_ARGV].some(expected => same(argv, expected))) return true
   if (argv[0] === MAILX_POSTCONF && argv[1] === '-P' && argv.length === 4) {
     const id = /^smtp\/inet\/smtpd_tls_cert_file=\/etc\/xpanel\/ssl\/([A-Za-z0-9_-]{1,64})\/fullchain\.pem$/.exec(argv[2]!)?.[1]
     const rebuilt = id ? attempt(() => mailxMasterSetArgv(id)) : null
@@ -202,7 +234,7 @@ export function isMailxCommand(argv: readonly unknown[]): boolean {
   }
   if (argv[0] === MAILX_POSTCONF && argv[1] === '-X') { const rebuilt = attempt(() => mailxPostconfUnsetArgv(argv.slice(2))); return !!rebuilt && same(argv, rebuilt) }
   const unit = argv[argv.length - 1]
-  return isMailxShowUnit(unit) && same(argv, mailxEngineShowArgv(unit)) || isMailxEngineUnit(unit) && same(argv, mailxEngineReloadArgv(unit))
+  return isMailxShowUnit(unit) && same(argv, mailxEngineShowArgv(unit)) || isMailxEngineUnit(unit) && (same(argv, mailxEngineReloadArgv(unit)) || same(argv, mailxEngineRestartArgv(unit)))
 }
 
 /** Host job policy for archive retention: exactly one reviewed expunge step. */
@@ -217,25 +249,45 @@ export function isMailxRetentionJobCommand(argv: readonly unknown[]): boolean {
 export const MAILX_RSPAMC = '/usr/bin/rspamc'
 export const MAILX_SA_LEARN = '/usr/bin/sa-learn'
 export type MailxLearnDirection = 'spam' | 'ham'
+/** The account that owns the scanner's Bayes store. */
+export interface SpamStoreOwner { uid: number; gid: number; home: string }
+const SETPRIV = '/usr/bin/setpriv'
+const STORE_HOME = /^\/(?:var\/lib|home)\/[a-z0-9._-]{1,64}$/
+/**
+ * sa-learn writes the store of the user it runs as, so root would train a store the scanner never reads and leave
+ * root-owned files beside it. The owner cannot read account mail or the root-only sample, hence read-search alone.
+ */
+export function saLearnArgv(owner: SpamStoreOwner, flag: '--spam' | '--ham', path: string): string[] {
+  if (![owner.uid, owner.gid].every(id => Number.isSafeInteger(id) && id > 0 && id < 65534) || !STORE_HOME.test(owner.home) || !['--spam', '--ham'].includes(flag)) return unsupported()
+  return [SETPRIV, `--reuid=${owner.uid}`, `--regid=${owner.gid}`, '--clear-groups', '--no-new-privs', '--inh-caps=+dac_read_search', '--ambient-caps=+dac_read_search', '--', '/usr/bin/env', `HOME=${owner.home}`, MAILX_SA_LEARN, flag, path]
+}
+/** The owner, flag and path of a saLearnArgv command, or null for any other argv. */
+export function saLearnParts(argv: readonly string[]): { owner: SpamStoreOwner; flag: '--spam' | '--ham'; path: string } | null {
+  const uid = /^--reuid=([0-9]{1,5})$/.exec(argv[1] ?? ''), gid = /^--regid=([0-9]{1,5})$/.exec(argv[2] ?? ''), home = /^HOME=(.*)$/.exec(argv[9] ?? ''), flag = argv[11]
+  if (argv[0] !== SETPRIV || argv.length !== 13 || !uid || !gid || !home || (flag !== '--spam' && flag !== '--ham')) return null
+  return { owner: { uid: Number(uid[1]), gid: Number(gid[1]), home: home[1]! }, flag, path: argv[12]! }
+}
 const LOCAL_PART = /^[a-z0-9](?:[a-z0-9._+-]{0,62}[a-z0-9_+-])?$/
 /** One mailbox Maildir folder: INBOX (`cur`) for ham, the Dovecot special-use Junk folder (`.Junk/cur`, Maildir++ layout) for spam. */
 export function mailxLearnFolder(home: string, mailbox: string, direction: MailxLearnDirection): string {
   const at = mailbox.indexOf('@'), local = mailbox.slice(0, at), domain = mailbox.slice(at + 1)
-  if (!/^\/home\/[a-z][a-z0-9]{0,15}$/.test(home) || !isMailxAddress(mailbox) || !LOCAL_PART.test(local) || local.includes('..') || !isMailxHost(domain) || !['spam', 'ham'].includes(direction)) return unsupported()
+  if (!/^\/home[1-9]?[0-9]?\/[a-z][a-z0-9]{0,15}$/.test(home) || !isMailxAddress(mailbox) || !LOCAL_PART.test(local) || local.includes('..') || !isMailxHost(domain) || !['spam', 'ham'].includes(direction)) return unsupported()
   return `${home}/mail/${domain}/${local}/${direction === 'spam' ? '.Junk/' : ''}cur`
 }
-const LEARN_FOLDER = /^\/home\/[a-z][a-z0-9]{0,15}\/mail\/([^/]+)\/([^/]+)\/(\.Junk\/)?cur$/
-export function mailxLearnArgv(engine: 'rspamd' | 'spamassassin', direction: MailxLearnDirection, folder: string): string[] {
+const LEARN_FOLDER = /^\/home[1-9]?[0-9]?\/[a-z][a-z0-9]{0,15}\/mail\/([^/]+)\/([^/]+)\/(\.Junk\/)?cur$/
+export function mailxLearnArgv(engine: 'rspamd' | 'spamassassin', direction: MailxLearnDirection, folder: string, owner?: SpamStoreOwner | null): string[] {
   const match = LEARN_FOLDER.exec(folder)
   if (!match || !isMailxHost(match[1]) || !LOCAL_PART.test(match[2]!) || match[2]!.includes('..') || (direction === 'spam') !== !!match[3]) return unsupported()
   if (engine === 'rspamd') return [MAILX_RSPAMC, direction === 'spam' ? 'learn_spam' : 'learn_ham', folder]
-  return engine === 'spamassassin' ? [MAILX_SA_LEARN, direction === 'spam' ? '--spam' : '--ham', folder] : unsupported()
+  return engine === 'spamassassin' && owner ? saLearnArgv(owner, direction === 'spam' ? '--spam' : '--ham', folder) : unsupported()
 }
 /** Host job policy for training: exactly one reviewed learn step on one mailbox folder. */
 export function isMailxLearnJobCommand(argv: readonly unknown[]): boolean {
-  if (!strings(argv) || argv.length !== 3) return false
-  const engine = argv[0] === MAILX_RSPAMC ? 'rspamd' : argv[0] === MAILX_SA_LEARN ? 'spamassassin' : null
-  const direction = ['learn_spam', '--spam'].includes(argv[1]!) ? 'spam' : ['learn_ham', '--ham'].includes(argv[1]!) ? 'ham' : null
-  const rebuilt = engine && direction ? attempt(() => mailxLearnArgv(engine, direction, argv[2]!)) : null
+  if (!strings(argv)) return false
+  const parts = saLearnParts(argv)
+  if (parts) { const rebuilt = attempt(() => mailxLearnArgv('spamassassin', parts.flag === '--spam' ? 'spam' : 'ham', parts.path, parts.owner)); return !!rebuilt && same(argv, rebuilt) }
+  if (argv.length !== 3 || argv[0] !== MAILX_RSPAMC) return false
+  const direction = argv[1] === 'learn_spam' ? 'spam' : argv[1] === 'learn_ham' ? 'ham' : null
+  const rebuilt = direction ? attempt(() => mailxLearnArgv('rspamd', direction, argv[2]!)) : null
   return !!rebuilt && same(argv, rebuilt)
 }

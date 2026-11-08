@@ -25,7 +25,8 @@ import { checkControllerDeclarations, type ControllerContext, type ControllerDec
 export type { LoginSurfaceProps, MailSurfaceProps, PanelSurfaceProps, StatusPageModel, WhmSurfaceProps }
 export { matchesHook, parseMarkup, type HookSelector, type MarkupNode }
 
-export type UiThemeId = 'classic' | 'v2'
+/** Built-in themes are classic and v2; an installed theme package adds its own validated id. */
+export type UiThemeId = string
 export type ThemeSurface = 'xpanel' | 'xwhm' | 'xmail'
 
 /** Core-owned self-auth presentation only; none of these flags grants a native provider operation. */
@@ -158,6 +159,9 @@ export interface DocumentBodyProps {
   readonly locale: Locale
   readonly branding?: WebBranding
   readonly impersonation?: { readonly target: string; readonly issuer: string }
+  readonly qualificationMode?: boolean
+  /** Shown while root previews an installed theme on this document. */
+  readonly themePreviewName?: string
   readonly handoffControls: boolean
   readonly surfaceHtml: string
   readonly reconcileHtml: string
@@ -166,8 +170,24 @@ export interface DocumentBodyProps {
   readonly clientScriptsHtml: string
 }
 
+/** The design tokens of a built-in theme an uploaded package may set (packages.ts), with the shipped values. */
+export interface ThemePackageTokens {
+  readonly required: readonly string[]
+  readonly optional: readonly string[]
+  /** Tokens whose value is a radius in px; every other token is a color. */
+  readonly radii: readonly string[]
+  /** [text, background] pairs that must keep 4.5:1 contrast; both are required tokens. */
+  readonly contrast: readonly (readonly [string, string])[]
+  readonly defaults: { readonly light: Readonly<Record<string, string>>; readonly dark: Readonly<Record<string, string>> }
+}
+
 export interface UiTheme {
   readonly id: UiThemeId
+  /** An installed package renders with this built-in theme, whose data-ui-theme its stylesheets select. */
+  readonly baseId?: UiThemeId
+  /** An installed package's own name; built-in names are translated by core. */
+  readonly label?: string
+  readonly packageTokens?: ThemePackageTokens
   readonly assets: readonly ThemeAsset[]
   readonly messages?: ThemeMessages
   renderDocument(props: DocumentProps): string

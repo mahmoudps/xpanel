@@ -110,7 +110,7 @@ export function createTransferSourceDiscovery(deps: { readToken: (id: string) =>
     let reply: TransferSourceReply
     try { reply = await transport({ url: auth.url + TRANSFER_SOURCE_INVENTORY_PATH, token, tlsFingerprint: auth.tlsFingerprint, timeoutMs: TRANSFER_SOURCE_TIMEOUT_MS, maxBytes: TRANSFER_SOURCE_MAX_BYTES }) }
     catch { return fail('PRECONDITION_FAILED', 'the source could not be reached over an authenticated HTTPS channel', { stateChanged: false }) }
-    if (reply.status === 401 || reply.status === 403) return fail('PRECONDITION_FAILED', 'the source refused the stored credential; it needs a root API token with lifecycle read access', { stateChanged: false })
+    if (reply.status === 401 || reply.status === 403) return fail('FORBIDDEN', 'the source refused the stored credential; it needs a root API token with lifecycle read access', { stateChanged: false })
     if (reply.status !== 200 || reply.contentType?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') return fail('PRECONDITION_FAILED', 'the source did not return an inventory', { stateChanged: false, sourceStatus: reply.status })
     let raw: unknown
     try { raw = JSON.parse(reply.body) } catch { return bad() }

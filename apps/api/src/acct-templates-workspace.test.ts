@@ -214,7 +214,7 @@ describe('account templates route', () => {
   it('creates, updates and deletes with CAS, readback and audit, and states that creation applies zone records only', async () => {
     const { h, audits } = helpers()
     const read = await (await call('GET', h))!.json() as { state: string; application: Record<string, boolean> }
-    expect(read).toMatchObject({ state: 'default', application: { appliedToNewAccounts: true, defaultPagePublished: false, suspendedPagePublished: false } })
+    expect(read).toMatchObject({ state: 'default', application: { appliedToNewAccounts: true, defaultPagePublished: true, suspendedPagePublished: true } })
     const created = await call('POST', h, '/api/server/account-templates', input())
     expect(created!.status).toBe(201)
     const body = await created!.json() as { revision: string; changed: string; templates: { id: string; zone: string; preview: { name: string }[] }[] }

@@ -1,6 +1,7 @@
 // One PHP-FPM master per account and PHP version, running as the account inside its slice
 // (the systemd unit is rendered by the system module, which owns the file layout used here).
 // This module renders php-fpm.conf, the pool, and .user.ini.
+import { phpIniScope, sanitizePhpIni } from '@xpanel/core'
 import type { Account, ApacheMpm, ConfigTest, HostAction, Limit, OsProfile, PhpIniOptions, PhpSettings, RenderedFile } from '@xpanel/core'
 import { accountSliceName } from '../system/slice.ts'
 import { fpmUnitName } from '../system/units.ts'
@@ -20,7 +21,12 @@ import { assertWorkers, iniEntries, phpIsolation, type PhpIsolationOptions } fro
 import { iniValue } from './quote.ts'
 import { assertAccount, assertInt, assertPhpVersion, assertSystemUser, invalid } from './validate.ts'
 
+/** Answered by FPM itself on the pool socket; no site handler maps this name, so only a root process that reaches the socket can ask. */
+export const FPM_STATUS_PATH = '/xpanel-fpm-status'
+
 export interface FpmPoolOptions extends PhpIsolationOptions, PhpIniOptions {
+  /** a site of this pool narrows open_basedir in its .user.ini */
+  narrowableBasedir?: boolean
   /** PlanCaps.phpWorkers of the account's plan: pm.max_children may not exceed it */
   workerCap?: Limit
   /** request_terminate_timeout, seconds (default 300, 0 = off) */
@@ -31,7 +37,11 @@ export interface FpmPoolOptions extends PhpIsolationOptions, PhpIniOptions {
    * which gets an ACL entry on the socket (the master is not root and cannot chgrp to it).
    */
   apacheMpm?: ApacheMpm
+  /** System PHP-FPM INI defaults: a locked value cannot be overridden; an open one yields to the domain's own value */
+  iniDefaults?: readonly FpmIniDefault[]
 }
+
+export interface FpmIniDefault { key: string; value: string; locked: boolean }
 
 const FLAG = /^(on|off)$/i
 
@@ -55,7 +65,12 @@ export const renderFpmPool = (account: Account, domainPhp: PhpSettings, os: OsPr
   const terminate = assertInt('request_terminate_timeout', opts.requestTerminateTimeoutSec ?? 300, 0, 86400)
   const user = account.username
   const iso = phpIsolation(account, os, opts)
-  const ini = iniEntries(domainPhp.ini, opts.maxMemoryMb === undefined ? {} : { maxMemoryMb: opts.maxMemoryMb })
+  const defaults = opts.iniDefaults ?? [], locked = new Set(defaults.filter(item => item.locked).map(item => item.key))
+  const ini = iniEntries(Object.fromEntries(Object.entries(domainPhp.ini).filter(([key]) => !locked.has(key))), opts.maxMemoryMb === undefined ? {} : { maxMemoryMb: opts.maxMemoryMb })
+  const inherited = defaults.filter(item => item.locked || !Object.hasOwn(domainPhp.ini, item.key)).map(item => {
+    const entry: [string, string] = [item.key, iniValue(sanitizePhpIni({ [item.key]: item.value })[item.key]!, `PHP setting ${item.key}`)]
+    return item.locked || phpIniScope(item.key) === 'pool' ? adminLine(entry) : `php_value[${entry[0]}] = ${entry[1]}`
+  })
 
   const lines = [
     `; Managed by xPanel: PHP ${version} pool for ${user}`,
@@ -73,6 +88,7 @@ export const renderFpmPool = (account: Account, domainPhp: PhpSettings, os: OsPr
     `pm.min_spare_servers = ${w.minSpareServers}`,
     `pm.max_spare_servers = ${w.maxSpareServers}`,
     `pm.max_requests = ${w.maxRequests}`,
+    `pm.status_path = ${FPM_STATUS_PATH}`,
     `pm.process_idle_timeout = ${w.processIdleTimeoutSec}s`,
     `request_terminate_timeout = ${terminate}s`,
     '',
@@ -85,13 +101,16 @@ export const renderFpmPool = (account: Account, domainPhp: PhpSettings, os: OsPr
     `env[TMP] = ${iso.tmpDir}`,
     `env[TEMP] = ${iso.tmpDir}`,
     '',
-    ...iso.admin.map(adminLine),
+    // A pool with an isolated site leaves open_basedir narrowable from .user.ini; PHP refuses any widening.
+    ...iso.admin.map(entry => opts.narrowableBasedir && entry[0] === 'open_basedir' ? `php_value[open_basedir] = ${iniValue(entry[1], 'open_basedir')}` : adminLine(entry)),
     'php_admin_flag[log_errors] = on',
     // custom session.save_path: Debian's cron-based session cleanup never sees it
     'php_value[session.gc_probability] = 1',
     // PHP_INI_SYSTEM keys only take effect as admin values; the rest stay adjustable in .user.ini
     ...ini.pool.map(adminLine),
     ...ini.user.map(([k, v]) => `php_value[${k}] = ${v}`),
+    ...inherited,
+    ...(opts.pearLibrary ? [`php_value[include_path] = ${iniValue(`.:${opts.pearLibrary}`, 'PEAR library')}`] : []),
   ]
   return {
     path: fpmPoolConfPath(user, version),
@@ -232,7 +251,7 @@ export const verifyFpmPoolIsolation = (
   const aclUsersRaw = fpmKeyValue(poolFile.content, 'listen.acl_users')
   const pmMode = fpmKeyValue(poolFile.content, 'pm') as PhpSettings['fpm']['mode'] | undefined
   const maxChildren = Number(fpmKeyValue(poolFile.content, 'pm.max_children'))
-  const openBasedirRaw = fpmKeyValue(poolFile.content, 'php_admin_value[open_basedir]') ?? ''
+  const openBasedirRaw = fpmKeyValue(poolFile.content, 'php_admin_value[open_basedir]') ?? fpmKeyValue(poolFile.content, 'php_value[open_basedir]') ?? ''
 
   const expectedSocket = fpmSocketPath(user, v)
   if (poolUser !== user || poolGroup !== user) {

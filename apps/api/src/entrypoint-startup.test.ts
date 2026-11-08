@@ -79,7 +79,11 @@ describe('three entrypoint production startup configuration', () => {
     expect(() => resolvePanelEntrypoints({}, {})).toThrow(/exact HTTPS origin/)
   })
 
-  it.each(['http://panel.example.test:2083', 'https://panel.example.test', 'https://panel.example.test:2087', 'https://panel.example.test:2083/', 'https://user@panel.example.test:2083', 'https://panel.example.test:2083/#x'])('rejects an ambiguous or wrong public origin %s', origin => {
+  it('accepts the port Panel access moved a listener to', () => {
+    expect(resolvePanelEntrypoints({}, { ...env, XPANEL_WHM_PUBLIC_ORIGIN: 'https://whm.panel.example.test:18888' }).entryPoints.xwhm.publicOrigin).toBe('https://whm.panel.example.test:18888')
+  })
+
+  it.each(['http://panel.example.test:2083', 'https://panel.example.test', 'https://panel.example.test:443', 'https://panel.example.test:2083/', 'https://user@panel.example.test:2083', 'https://panel.example.test:2083/#x'])('rejects an ambiguous or wrong public origin %s', origin => {
     expect(() => resolvePanelEntrypoints({}, { ...env, XPANEL_PANEL_PUBLIC_ORIGIN: origin })).toThrow(/HTTPS origin/)
   })
 

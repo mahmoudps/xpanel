@@ -1,9 +1,10 @@
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { filterClientTemplates } from '../../../components/filter-templates.ts'
-import { actions, area, button, check, emailContext, esc, field, fields, header, input, missingAccount, page, section, select, state, type PanelEmailAuthority } from './common.ts'
+import { renderV2EmailDiskUsage } from './disk-usage.ts'
+import { actions, area, button, check, emailContext, esc, field, fields, header, input, missingAccount, page, panelMailCards, section, select, state, type PanelEmailAuthority } from './common.ts'
 
 export function renderV2PanelEmailFilters(props: PanelSurfaceProps, authority?: PanelEmailAuthority): string {
-  const { locale, t, account, canManage, mailboxes } = emailContext(props, authority)
+  const { locale, t, account, canManage, mailboxes, domains } = emailContext(props, authority)
   const route = '/email/filters', title = t(msgid('Email filters'))
   const scope = field('filter-scope', t(msgid('Filter scope')), select('filter-scope', [['global', t(msgid('Account-wide filters'))], ...(mailboxes ?? []).map(mailbox => [`mailbox:${mailbox.login}`, mailbox.login] as const)], { 'data-filter-scope': true }, false))
     + (mailboxes === undefined ? `<p>${esc(t(msgid('Mailbox options have not been read.')))}</p>` : '')
@@ -28,5 +29,5 @@ export function renderV2PanelEmailFilters(props: PanelSurfaceProps, authority?: 
   const preview = section('v2-filter-preview', t(msgid('Selected-scope Sieve preview')),
     `<p data-filter-compilation>${esc(t(msgid('Not read')))}</p><pre class="v2-panel-extra__raw v2-mono" tabindex="0" role="region" data-filter-preview aria-label="${esc(t(msgid('Selected-scope Sieve preview')))}"></pre><p>${esc(t(msgid('Mixed AND/OR expressions, regular expressions and program execution are unavailable. A test explains the rules; it does not prove delivery.')))}</p>`)
   return page(locale, route, header(t, route, title, t(msgctxt('theme:v2', 'Review rule order, match conditions, actions and the compiled delivery policy.')))
-    + `<div class="v2-panel-extra__groups"${!authority?.canRead || authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''} data-filter-workspace data-filter-manage="${canManage}" data-filter-account="${esc((account?.id ?? ''))}">${filterClientTemplates()}${rules}${test}${preview}</div>`)
+    + `<div class="v2-panel-extra__groups"${!authority?.canRead || authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''} data-filter-workspace data-filter-manage="${canManage}" data-filter-account="${esc((account?.id ?? ''))}">${filterClientTemplates()}${rules}${test}${preview}</div>` + renderV2EmailDiskUsage(t, canManage, mailboxes?.map(mailbox => mailbox.login) ?? []) + panelMailCards(route, locale, t, !!authority?.canRead && authority.presentation !== 'read-only' && !!account, canManage, domains?.map(domain => domain.name)))
 }

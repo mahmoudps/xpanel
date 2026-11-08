@@ -73,6 +73,8 @@ describe('v2 xWHM mail documents', () => {
     expect(html).not.toContain('<script>sender')
     expect(html).toContain('data-mail-ip-editable="true"')
     expect(html).toContain('example.test · 192.0.2.78 · mail.example.test')
+    expect(html).toContain('included in smtpd_client_event_limit_exceptions'); expect(html).toContain('<a href="/whm/server/ips">Remote service IPs</a>')
+    expect(render('/whm/email/server')).not.toContain('/whm/server/ips')
     const untrusted = render('/whm/email/outbound', { mailAuthority: undefined, mailIpConfig: config })
     expect(untrusted).not.toContain('192.0.2.77')
     expect(untrusted).not.toContain('mail.example.test')
@@ -98,13 +100,13 @@ describe('v2 xWHM mail documents', () => {
     expect(html).not.toMatch(/<form\b/)
     const items = parseMarkup(html)
     expect(node(items, 'data-mailx-field', 'enabled').attrs.has('disabled')).toBe(true)
-    expect(node(items, 'data-mailx-field', 'countries').attrs.has('disabled')).toBe(true)
+    expect(node(items, 'data-mail-card', 'country-filter').attrs.get('data-mail-card-can-act')).toBe('false')
     expect(Object.fromEntries(node(items, 'data-mailx-field', 'rejectScore').attrs)).toMatchObject({ type: 'number', min: '0.5', max: '100', step: '0.5' })
   })
 
-  it('does not present a bulk sending policy as a campaign sender', () => {
+  it('presents the Postfix limits beside the campaign tools', () => {
     const html = render('/whm/email/marketing')
-    expect(html).toContain('xPanel does not send campaigns.')
+    expect(html).toContain('Subscriber groups, campaigns and automation flows follow below.')
     const items = parseMarkup(html)
     for (const key of ['messageRateLimit', 'recipientRateLimit', 'rateWindow', 'recipientsPerMessage', 'destinationConcurrency', 'destinationRateDelay']) {
       expect(node(items, 'data-mailx-field', key).tag).toBe('input')

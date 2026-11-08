@@ -1,9 +1,11 @@
 import { lstat } from 'node:fs/promises'
-import type { Account, Domain, Plan, ResourceLimits } from '@xpanel/core'
+import { effectivePlan } from '@xpanel/core'
+import type { Account, Domain, Plan, ResourceLimits, ShellJailPolicy } from '@xpanel/core'
 import { system } from '@xpanel/render'
 import type { AgentExecutor } from './executor.ts'
 import { compareAccountLimits } from './limit-gaps.ts'
 import { accountSliceShowArgv, fpmUnitShowArgv, getentPasswdArgv } from '../../../packages/os/src/security-tools-command.ts'
+import { SHELL_JAIL_LIST_HOMES, SHELL_JAIL_LIST_TMP, shellJailProbeArgv } from '../../../packages/os/src/ssh-host-command.ts'
 
 export type IsolationCheckState = 'ok' | 'drift' | 'unavailable'
 export interface IsolationCheck { id: string; state: IsolationCheckState; expected: string | null; observed: string | null }
@@ -42,6 +44,26 @@ const run = async (executor: IsolationExecutor, argv: string[]): Promise<{ ok: b
   try { const result = await executor.runCommand(argv); return typeof result?.stdout === 'string' && Buffer.byteLength(result.stdout) <= 64 * 1024 ? result : null } catch { return null }
 }
 
+export interface ShellJailProof { username: string; observedAt: string; checks: IsolationCheck[] }
+
+/** Runs each read as the account through its login shell, so the proof sees what an SSH login sees. */
+export async function verifyShellJail(input: { account: Pick<Account, 'username'>; others: readonly Pick<Account, 'username' | 'home'>[]; policy: ShellJailPolicy; executor: IsolationExecutor; now?: () => Date }): Promise<ShellJailProof> {
+  const { account, policy, executor } = input, user = account.username, checks: IsolationCheck[] = []
+  const exempt = policy.exceptions.some(entry => entry.username === user)
+  const homes = await run(executor, shellJailProbeArgv(user, SHELL_JAIL_LIST_HOMES))
+  const names = homes?.ok ? homes.stdout.split('\n').filter(Boolean) : null
+  const foreign = names?.filter(name => name !== user) ?? []
+  checks.push({ id: 'jail-home-list', state: !homes ? 'unavailable' : foreign.length ? 'drift' : 'ok', expected: 'no other account', observed: !homes ? null : names === null ? 'denied' : foreign.length + ' other' })
+  const other = input.others.find(item => item.username !== user)
+  const read = other ? await run(executor, shellJailProbeArgv(user, 'ls -A ' + other.home)) : null
+  checks.push({ id: 'jail-other-home', state: !read ? 'unavailable' : read.ok ? 'drift' : 'ok', expected: 'denied', observed: !other ? 'no other account' : !read ? null : read.ok ? 'readable' : 'denied' })
+  if (policy.privateTmp && !exempt) {
+    const tmp = await run(executor, shellJailProbeArgv(user, SHELL_JAIL_LIST_TMP))
+    checks.push({ id: 'jail-private-tmp', state: !tmp?.ok ? 'unavailable' : tmp.stdout.trim() ? 'drift' : 'ok', expected: 'empty', observed: !tmp?.ok ? null : tmp.stdout.trim() ? 'shared' : 'empty' })
+  }
+  return { username: user, observedAt: (input.now?.() ?? new Date()).toISOString(), checks }
+}
+
 /** Read-only comparison of the isolation controls xPanel renders for one account against its plan. */
 export async function readAccountIsolation(input: {
   account: Account; plan: Plan | null; domains: readonly Domain[]; executor: IsolationExecutor; inspectHome?: InspectHome; ioDevices?: readonly string[] | null; now?: () => Date
@@ -74,7 +96,7 @@ export async function readAccountIsolation(input: {
   // Kernel-effective cgroup v2 limits; a slice with no running unit has no cgroup to read.
   let metrics: Awaited<ReturnType<IsolationExecutor['readSliceMetrics']>> | undefined
   try { metrics = await executor.readSliceMetrics(account.uid) } catch { metrics = undefined }
-  const resources = plan?.resources
+  const resources = plan ? effectivePlan(plan, account).resources : undefined
   const limit = (id: string, raw: string | null | undefined, expected: string, finite: boolean, subset: Partial<ResourceLimits>, unlimitedOk: (value: string) => boolean): void => {
     const value = raw?.trim() ?? null
     if (!resources || !metrics || value === null) return check(id, 'unavailable', expected, metrics === null ? 'not active' : value)

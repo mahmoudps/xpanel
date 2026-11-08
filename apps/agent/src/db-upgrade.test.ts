@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DB_UPGRADE_WARNINGS } from '@xpanel/core'
 import { buildDbUpgradeJobPlan, handleDbUpgradeRoute, isMariadbPackage, readDbUpgrade, upstreamVersion } from './db-upgrade.ts'
 import type { DbUpgradeRouteDeps } from './db-upgrade.ts'
 import type { DbRun } from './db-engines.ts'
@@ -67,13 +68,14 @@ describe('MariaDB upgrade route', () => {
   const call = (path: string, d: DbUpgradeRouteDeps, method = 'GET', body?: unknown) => handleDbUpgradeRoute(new Request('http://agent' + path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }) }), new URL('http://agent' + path), method, d)
   it('reads, then submits only the reviewed revision as a host job', async () => {
     const d = deps(), observed = await (await call('/host/databases/upgrade', d))!.json() as { revision: string }
-    const response = await call('/host/databases/upgrade/apply', d, 'POST', { expectedRevision: observed.revision })
+    const response = await call('/host/databases/upgrade/apply', d, 'POST', { expectedRevision: observed.revision, acknowledgedWarnings: DB_UPGRADE_WARNINGS })
     expect(response!.status).toBe(202); expect(await response!.json()).toEqual({ job: { id: 'job-1', kind: 'database.mariadb.upgrade' } }); expect(d.plans).toHaveLength(1)
   })
   it('refuses stale revisions, extra fields, missing runner and changed authority', async () => {
-    await expect(call('/host/databases/upgrade/apply', deps(), 'POST', { expectedRevision: 'a'.repeat(64) })).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(call('/host/databases/upgrade/apply', deps(), 'POST', { expectedRevision: 'a'.repeat(64), acknowledgedWarnings: DB_UPGRADE_WARNINGS })).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(call('/host/databases/upgrade/apply', deps(), 'POST', { expectedRevision: 'a'.repeat(64), acknowledgedWarnings: ['service-restart'] })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { reason: 'warnings_not_acknowledged' } })
     await expect(call('/host/databases/upgrade/apply', deps(), 'POST', { expectedRevision: 'a'.repeat(64), force: true })).rejects.toMatchObject({ code: 'VALIDATION' })
-    await expect(call('/host/databases/upgrade/apply', deps({ submitJob: null }), 'POST', { expectedRevision: 'a'.repeat(64) })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
+    await expect(call('/host/databases/upgrade/apply', deps({ submitJob: null }), 'POST', { expectedRevision: 'a'.repeat(64), acknowledgedWarnings: DB_UPGRADE_WARNINGS })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' })
     let calls = 0
     const changing = deps({ assertRoot: async () => ({ actor: ++calls > 1 ? 'other' : 'root' }) })
     await expect(call('/host/databases/upgrade', changing)).rejects.toMatchObject({ code: 'FORBIDDEN' })

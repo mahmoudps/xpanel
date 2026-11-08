@@ -5,10 +5,10 @@ import { MAILX_COLLECTIONS_CLIENT_BINDING, readMailxCollections } from './mailx-
 
 const tick = async () => { for (let index = 0; index < 10; index++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const CAL = 'a'.repeat(32), BOOK = 'b'.repeat(32)
-const collections = (extra: Record<string, unknown> = {}) => ({ context: { account: 'alice' }, dav: { caldav: 'unavailable', carddav: 'unavailable', reason: 'no_dav_server', missingStep: 'install_and_qualify_dav_server' },
-  application: { status: 'saved_collections', davServed: false }, limits: {},
+const collections = (extra: Record<string, unknown> = {}) => ({ context: { account: 'alice' },
+  application: { status: 'dav_store', davServed: true }, limits: {},
   mailboxes: [{ mailbox: 'inbox@shop.example', revision: 'c'.repeat(64), defaultCalendar: CAL, calendars: [{ id: CAL, name: 'Work', description: 'Team' }],
-    addressBooks: [{ id: BOOK, name: 'Clients', description: '', isDefault: true }], taskLists: [] }], ...extra })
+    addressBooks: [{ id: BOOK, name: 'Clients', description: '', isDefault: true, removable: true }], taskLists: [] }], ...extra })
 const collaboration = { context: { account: 'alice' }, mailboxes: [{ mailbox: 'inbox@shop.example', revision: 'd'.repeat(64), calendars: [{ id: CAL, name: 'Work', color: '#4f6bed', timezone: 'UTC', eventCount: 0, shares: [] }] }] }
 const mount = (canManage = true) => { document.body.innerHTML = renderMailxCollectionsWorkspace({ locale: 'en', canManage }) }
 const boot = (request?: (method: string, path: string, body?: unknown) => Promise<unknown>, ask?: (options: unknown) => Promise<unknown>) => {
@@ -25,10 +25,20 @@ const transport = (calls: [string, string, unknown][]) => vi.fn(async (method: s
 describe('mail collections client', () => {
   it('parses strictly and refuses a claimed DAV service or two defaults', () => {
     expect((readMailxCollections(collections(), 'collections') as { mailboxes: unknown[] }).mailboxes).toHaveLength(1)
-    for (const bad of [collections({ dav: { caldav: 'available', carddav: 'unavailable' } }), collections({ application: { davServed: true } }),
+    for (const bad of [collections({ application: { davServed: false } }),
       collections({ mailboxes: [{ ...collections().mailboxes[0], addressBooks: [{ id: BOOK, name: 'A', description: '', isDefault: true }, { id: 'e'.repeat(32), name: 'B', description: '', isDefault: true }] }] }),
       collections({ mailboxes: [{ ...collections().mailboxes[0], defaultCalendar: 'f'.repeat(32) }] })]) expect(() => readMailxCollections(bad, 'collections')).toThrow()
     expect(() => readMailxCollections({ ...collaboration, mailboxes: [{ ...collaboration.mailboxes[0], calendars: [{ ...collaboration.mailboxes[0]!.calendars[0], id: 'internal-uuid' }] }] }, 'calendars')).toThrow()
+  })
+  it('names the oversized mailbox and keeps the others', async () => {
+    const { mailboxes, ...rest } = collections(), rows = [...mailboxes, { mailbox: 'large@owner.example.test', refused: 'dav_store_too_large' }]
+    const read = readMailxCollections({ ...rest, mailboxes: rows }, 'collections')
+    expect(read.refused).toEqual(['large@owner.example.test']); expect(read.mailboxes).toHaveLength(1)
+    expect(() => readMailxCollections({ ...rest, mailboxes: { length: 0 } }, 'collections')).toThrow()
+    expect(() => readMailxCollections({ ...rest, mailboxes: [{ mailbox: 'large@owner.example.test', refused: 'other' }] }, 'collections')).toThrow()
+    mount(); boot(vi.fn(async (_method: string, path: string) => path === '/api/account/collaboration' ? collaboration : { ...rest, mailboxes: rows })); await tick()
+    expect(el('collections-status').dataset.state).toBe('failed'); expect(el('collections-status').textContent).toContain('large@owner.example.test')
+    expect(el<HTMLSelectElement>('collections-mailbox').disabled).toBe(false)
   })
   it('renders no form and only disabled controls without manage authority', async () => {
     const send = vi.fn(); mount(false); boot(send); await tick()

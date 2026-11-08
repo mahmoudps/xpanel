@@ -21,9 +21,13 @@ import {
   assertRedirectTarget,
   assertRelPath,
   assertResellerAcl,
+  assertResellerOversell,
+  assertResellerSharedIp,
   assertServiceHash,
+  assertUtcDay,
   assertSha256Hex,
   assertProxyOptions,
+  assertSiteOptions,
   assertUpstream,
   canonicalIp,
   dbUserName,
@@ -38,17 +42,21 @@ import {
   planErrors,
   validateDocRoot,
   validateDomainCustomConfig,
+  validateAccountLimits,
+  validateAccountLogSettings,
   validateDomainName,
   validateDomainIndexFiles,
   validateFirewallRules,
   validateHome,
   validateMailIpConfig,
   validatePrefixList,
+  validateResellerPackageLimits,
   validateServerIpEntry,
   validateServerIpPool,
   validateServerSettings,
   validateUsername,
 } from '@xpanel/core'
+import type { HomeMove } from '@xpanel/core'
 import type {
   AccountStatus,
   Database,
@@ -66,6 +74,7 @@ import type {
 import type {
   AllocatedReferenceRecord,
   CronJobState,
+  DnsZoneReplica,
   DnsZoneState,
   FirewallState,
   PrefixList,
@@ -84,7 +93,7 @@ const STATUSES: readonly AccountStatus[] = ['active', 'suspended', 'terminating'
 const KINDS: readonly DomainKind[] = ['primary', 'addon', 'alias', 'subdomain']
 const SITE_TYPES: readonly SiteType[] = ['php', 'static', 'proxy', 'node', 'python']
 const UPSTREAM_TYPES: readonly SiteType[] = ['proxy', 'node', 'python']
-const FEATURE_KEY_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/
+const FEATURE_KEY_RE = /^(?:[a-z0-9][a-z0-9._-]{0,63}|plugin:[A-Za-z0-9_-]{1,57})$/
 const AUTH_RE = /^[A-Za-z0-9*+/=]{1,128}$/
 const DNS_TYPES: readonly DnsRecordType[] = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA']
 const DNS_REL_NAME_RE = /^(@|\*|(\*\.)?[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?(\.[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?)*)$/
@@ -151,7 +160,10 @@ export const validateFirewallState = (v: unknown): FirewallState => {
   for (const r of rules) {
     if (r.list !== null && !names.has(r.list)) fail('VALIDATION', `prefix list "${r.list}" does not exist`, { list: r.list, ruleId: r.id })
   }
-  return { rules, prefixLists }
+  const enabled = o.enabled === undefined ? rules.length > 0 : o.enabled
+  const blockPing = o.blockPing ?? false
+  if (typeof enabled !== 'boolean' || typeof blockPing !== 'boolean') return fail('VALIDATION', 'firewall enabled and blockPing must be booleans')
+  return { rules, prefixLists, enabled, blockPing }
 }
 
 const START_ACCOUNT_UID = 20000
@@ -218,10 +230,21 @@ export const validateResellerFile = (v: unknown): Reseller => {
     maxAccounts: assertLimit(r.maxAccounts, 'maxAccounts', { min: 0 }),
     totalDiskMb: assertLimit(r.totalDiskMb, 'totalDiskMb', { min: 0 }),
     totalBandwidthMb: assertLimit(r.totalBandwidthMb, 'totalBandwidthMb', { min: 0 }),
-    oversell: assertBool(r.oversell, 'oversell'),
+    oversell: assertResellerOversell(r.oversell),
     nameservers: assertResellerNameservers(r.nameservers),
     delegatedIps: assertDelegatedIps(r.delegatedIps),
+    ...(r.packageLimits !== undefined && { packageLimits: validateResellerPackageLimits(r.packageLimits) }),
+    ...(r.sharedIp !== undefined && { sharedIp: assertResellerSharedIp(r.sharedIp) }),
+    ...(r.contactEmail !== undefined && { contactEmail: assertEmail(r.contactEmail, 'contactEmail') }),
+    ...(r.suspended === true && { suspended: true }),
   }
+}
+
+const validateHomeMove = (raw: unknown, username: string): HomeMove => {
+  const move = raw as Partial<HomeMove> | null
+  if (typeof move !== 'object' || move === null) return fail('VALIDATION', 'homeMove must be an object')
+  return { to: validateHome(move.to, username), resumeStatus: oneOf(move.resumeStatus, ['active', 'suspended'] as const, 'resumeStatus'),
+    resumeReason: move.resumeReason == null ? null : assertLine(move.resumeReason, 512, 'resumeReason', { allowEmpty: false }), resumeSuspendedAt: move.resumeSuspendedAt == null ? null : assertIsoDate(move.resumeSuspendedAt, 'resumeSuspendedAt').toISOString() }
 }
 
 export const validateAccountFile = (v: unknown): StoredAccount => {
@@ -240,6 +263,7 @@ export const validateAccountFile = (v: unknown): StoredAccount => {
   if (status !== 'suspended' && (suspendReason !== null || suspendedAt !== null)) {
     fail('VALIDATION', 'non-suspended account must not have suspendReason or suspendedAt')
   }
+  const limits = a.limits === undefined ? undefined : validateAccountLimits(a.limits)
   return {
     id: assertId(a.id, 'id'),
     username,
@@ -263,6 +287,11 @@ export const validateAccountFile = (v: unknown): StoredAccount => {
     ...(a.databaseRemoteAccess !== undefined && { databaseRemoteAccess: parseDatabaseRemoteEntries(a.databaseRemoteAccess) }),
     createdAt: assertIsoDate(a.createdAt, 'createdAt').toISOString(),
     ...(a.bandwidthLimitedMonth !== undefined && { bandwidthLimitedMonth: typeof a.bandwidthLimitedMonth === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(a.bandwidthLimitedMonth) ? a.bandwidthLimitedMonth : fail('VALIDATION', 'bandwidthLimitedMonth must be YYYY-MM') }),
+    ...(limits && { limits }),
+    ...(a.bandwidthReliefDate !== undefined && { bandwidthReliefDate: assertUtcDay(a.bandwidthReliefDate, 'bandwidthReliefDate') }),
+    ...(a.logs !== undefined && { logs: validateAccountLogSettings(a.logs) }),
+    ...(a.suspendLocked !== undefined && { suspendLocked: assertBool(a.suspendLocked, 'suspendLocked') }),
+    ...(a.homeMove !== undefined && { homeMove: validateHomeMove(a.homeMove, username) }),
   }
 }
 
@@ -282,7 +311,8 @@ export const validateDomainFile = (
     fail('VALIDATION', `${kind} domains ${parentId === null ? 'need a' : 'have no'} parent`)
   }
   if (parentId !== null && parentId === id) fail('VALIDATION', 'domain cannot be its own parent')
-  const docRoot = validateDocRoot(ctx.account.home, d.docRoot as string)
+  // Finishing a home move writes the sites first: a crash in between leaves them in the new home, and a repeat finishes it.
+  const moving = ctx.account.homeMove?.to, docRoot = validateDocRoot(moving && String(d.docRoot).startsWith(moving + '/') ? moving : ctx.account.home, d.docRoot as string)
   const siteType = oneOf(d.siteType, SITE_TYPES, 'siteType')
   const needsUpstream = UPSTREAM_TYPES.includes(siteType)
   if (needsUpstream !== (d.upstream !== null && d.upstream !== undefined)) {
@@ -329,6 +359,8 @@ export const validateDomainFile = (
     ...(d.ipv6 != null && { ipv6: assertIpv6(d.ipv6, 'domain.ipv6') }),
     // Options only shape a reverse proxy; other site types carry none.
     ...(d.proxy !== undefined && d.proxy !== null && siteType === 'proxy' ? { proxy: assertProxyOptions(d.proxy) } : {}),
+    ...(d.forceHttps !== undefined && assertBool(d.forceHttps, 'forceHttps') ? { forceHttps: true } : {}),
+    ...(d.site !== undefined && d.site !== null ? { site: assertSiteOptions(d.site) } : {}),
   }
 }
 
@@ -352,8 +384,12 @@ export const validateServiceUserFile = (
   }
   if (!s.email && !s.ftp && !s.webdisk) return fail('VALIDATION', 'a service user needs at least one service')
   const mailboxQuotaMb = assertLimit(u.mailboxQuotaMb, 'mailboxQuotaMb', { min: 1 })
+  const ftpDir = assertRelPath(u.ftpDir, 'ftpDir')
+  // the Web Disk unit binds this directory, and systemd separates BindPaths= at whitespace
+  if (s.webdisk && /\s/.test(ftpDir)) fail('VALIDATION', 'a Web Disk directory may not contain blanks')
+  if (u.webdiskReadOnly !== undefined && typeof u.webdiskReadOnly !== 'boolean') fail('VALIDATION', 'webdiskReadOnly must be a boolean')
   if (!isUnlimited(mailboxQuotaMb) && !limitLte(mailboxQuotaMb, ctx.plan.resources.diskMb)) {
-    fail('VALIDATION', 'mailboxQuotaMb may not exceed the account disk quota')
+    fail('LIMIT_EXCEEDED', 'mailboxQuotaMb may not exceed the account disk quota')
   }
   return {
     id,
@@ -364,7 +400,8 @@ export const validateServiceUserFile = (
     passwordHash: assertServiceHash(u.passwordHash),
     services: { email: s.email, ftp: s.ftp, webdisk: s.webdisk },
     mailboxQuotaMb,
-    ftpDir: assertRelPath(u.ftpDir, 'ftpDir'),
+    ftpDir,
+    ...(u.webdiskReadOnly === true ? { webdiskReadOnly: true } : {}),
   }
 }
 
@@ -449,6 +486,12 @@ export const validateCertificateFile = (v: unknown): StoredCertificate => {
   }
 }
 
+const validateDnsZoneReplica = (v: unknown): DnsZoneReplica => {
+  const r = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>
+  if (typeof r.digest !== 'string' || !/^[0-9a-f]{64}$/.test(r.digest) || typeof r.at !== 'string' || !Number.isFinite(Date.parse(r.at))) return fail('VALIDATION', 'invalid dns zone replica mark')
+  return { peer: validateDomainName(r.peer as string), digest: r.digest, at: r.at }
+}
+
 export const validateDnsZoneFile = (v: unknown): DnsZoneState => {
   if (typeof v !== 'object' || v === null) return fail('VALIDATION', 'dns zone must be an object')
   const z = v as Record<string, unknown>
@@ -482,6 +525,7 @@ export const validateDnsZoneFile = (v: unknown): DnsZoneState => {
     name: zoneName,
     serial,
     records,
+    ...(z.replica === undefined ? {} : { replica: validateDnsZoneReplica(z.replica) }),
   }
 }
 
@@ -680,6 +724,8 @@ export const checksumStateTree = (tree: Omit<StateSnapshot, 'checksum' | 'revisi
             }
           : {}),
         ...(tree.ipPool && tree.ipPool.length > 0 ? { ipPool: tree.ipPool } : {}),
+        ...(tree.ipv6Ranges?.length ? { ipv6Ranges: tree.ipv6Ranges } : {}),
+        ...(tree.aclLists?.length ? { aclLists: tree.aclLists } : {}),
         ...(tree.mailIpConfig ? { mailIpConfig: tree.mailIpConfig } : {}),
         ...(tree.mailRouting ? { mailRouting: tree.mailRouting } : {}),
         ...(tree.postgresqlUsers?.length ? { postgresqlDatabases: tree.postgresqlDatabases ?? [], postgresqlUsers: tree.postgresqlUsers } : {}),

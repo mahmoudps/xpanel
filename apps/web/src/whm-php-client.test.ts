@@ -132,7 +132,7 @@ describe('PHP selected-theme fidelity and finite native admission', () => {
     if (theme === 'v2') expect(page.querySelector('[data-whm-php-default]')!.textContent).toBe('8.2')
   })
 
-  it.each(['classic', 'v2'] as const)('rejects every malformed finite %s prototype before any of the 3 startup reads', theme => {
+  it.each(['classic', 'v2'] as const)('rejects every malformed finite %s prototype before any of the 3 startup reads', { tags: ['slow'] }, theme => {
     for (const name of phpPrototypeNames) for (const [reason, corrupt] of phpCorruptions) {
       const page = mountPhp(theme); corrupt(phpTemplate(page, name), page)
       const send = vi.fn(); startPhp(send)

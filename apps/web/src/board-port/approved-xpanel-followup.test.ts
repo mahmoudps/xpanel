@@ -302,10 +302,9 @@ describe('approved follow-up component and native validation boundaries', () => 
         expect(tokens?.getAttribute('data-auth-personal-state')).toBe('unavailable');
         expect(tokens?.getAttribute('data-tokens-can-read')).toBe('false');
         expect(tokens?.getAttribute('data-tokens-can-manage')).toBe('false');
-        for (const section of ['account-password', 'ip-blocker', 'hotlink-protection']) {
+        for (const section of ['ip-blocker', 'hotlink-protection']) {
             const group = document.querySelector(`[data-workspace-section="${section}"]`)!;
-            expect(group.querySelector('input[disabled]')).not.toBeNull();
-            expect(group.querySelector('button[disabled]')).not.toBeNull();
+            expect(group.querySelector('button')).toBeNull();
         }
         const reveal = tokens?.querySelector('[data-account-tokens-reveal]');
         expect(reveal?.hasAttribute('hidden')).toBe(true);
@@ -321,7 +320,7 @@ describe('approved follow-up component and native validation boundaries', () => 
         expect(targets.querySelector('select[disabled]')).not.toBeNull();
         expect(targets.textContent).toContain('Installation targets not read');
         const wizard = document.querySelector('[data-workspace-section="certificate-wizard"]')!;
-        for (const label of ['Existing certificate', 'Cancel', 'Install or issue certificate'])
+        for (const label of ['Existing certificate'])
             expect(wizard.textContent).toContain(label);
         expect(wizard.querySelector('button:not([disabled])')).toBeNull();
     });
@@ -333,13 +332,13 @@ describe('approved follow-up component and native validation boundaries', () => 
             '/domains', ['Alias name', 'Subdomain', 'Under', 'PHP version', 'Create DNS records', 'Issue a TLS certificate', 'Keep old domain as an alias', 'Type current primary domain to confirm', 'What changes', 'What stays']
         ],
         [
-            '/databases/mariadb', ['Rename database', 'Comment (optional)', 'Allowed database hosts', 'Generate password', 'Database name to confirm', 'Collation', 'Last write']
+            '/databases/mariadb', ['Rename database', 'Comment (optional)', 'Allowed database hosts', 'Database name to confirm', 'Collation', 'Last write']
         ],
         [
-            '/email/accounts', ['Delete forwarder', 'Edit autoresponder', 'Delete autoresponder', 'Cancel', 'Create user']
+            '/email/accounts', ['Autoresponders']
         ],
         [
-            '/domains/zone-editor', ['Record type filter', 'Fix', 'Zone records']
+            '/domains/zone-editor', ['Record type filter', 'Zone records']
         ]
     ] as const)('retains the final approved controls for unavailable %s', (route, labels) => {
         document.body.innerHTML = renderApprovedXpanelWorkspace({

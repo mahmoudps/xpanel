@@ -9,7 +9,7 @@ import { parseMariadbBatch } from './mariadb-admin.ts'
 export { DATABASE_REMOTE_ACCESS_TOOL, DATABASE_REMOTE_ACCESS_LIMIT, databaseRemoteHost, parseDatabaseRemoteEntries, parseDatabaseRemoteAccessRequest, remoteAccessEntriesAfter, databaseRemoteAccessRevision } from '../../../packages/core/src/database-remote-access.ts'
 export type { DatabaseRemoteAccessEntry, DatabaseRemoteAccessAccount, DatabaseRemoteAccessSnapshot, DatabaseRemoteHost, DatabaseRemoteAccessRequest } from '../../../packages/core/src/database-remote-access.ts'
 import { DATABASE_REMOTE_ACCESS_TOOL, databaseRemoteHost, parseDatabaseRemoteEntries, parseDatabaseRemoteAccessRequest, remoteAccessEntriesAfter, databaseRemoteAccessRevision } from '../../../packages/core/src/database-remote-access.ts'
-import type { DatabaseRemoteAccessEntry, DatabaseRemoteAccessSnapshot, DatabaseRemoteAccessStore } from '../../../packages/core/src/database-remote-access.ts'
+import type { DatabaseRemoteAccessEntry, DatabaseRemoteAccessRequest, DatabaseRemoteAccessSnapshot, DatabaseRemoteAccessStore } from '../../../packages/core/src/database-remote-access.ts'
 export type { DatabaseRemoteAccessTransaction, DatabaseRemoteAccessStore } from '../../../packages/core/src/database-remote-access.ts'
 const invalid = (message: string): never => fail('VALIDATION', message, { stateChanged: false })
 export interface DatabaseRemoteAccessView {
@@ -131,7 +131,13 @@ export async function handleDatabaseRemoteAccessRoute(req: Request, url: URL, me
   if (Buffer.byteLength(text) > 4096) return invalid('remote database request is too large')
   let raw: unknown
   try { raw = JSON.parse(text) } catch { return invalid('a JSON object is required') }
-  const request = parseDatabaseRemoteAccessRequest(raw), native = deps.native
+  const request = parseDatabaseRemoteAccessRequest(raw)
+  return applyDatabaseRemoteAccessRequest({ store: deps.store, ...(deps.native ? { native: deps.native } : {}), authorize, audit: deps.audit, ...(deps.now ? { now: deps.now } : {}) }, account, request)
+}
+
+/** One verified change under the account's writer lease: recovery first, SQL and firewall, verification, then the saved list. Owner route and root push share it. */
+export async function applyDatabaseRemoteAccessRequest(deps: { store: DatabaseRemoteAccessStore; native?: DatabaseRemoteAccessNative; authorize(account: Account): Promise<void>; audit(account: Account, action: string, host: string): Promise<void>; now?: () => Date }, account: Account, request: DatabaseRemoteAccessRequest): Promise<Response> {
+  const { authorize, native } = deps
   if (!native || native.qualified !== true) return fail('PRECONDITION_FAILED', 'qualified SQL and firewall recovery is unavailable; no remote host was changed', { stateChanged: false })
   let checkpoint: unknown, checkpointReady = false
   const response = await deps.store.withDatabaseRemoteAccessLease(account.id, request.expectedRevision, async (snapshot, tx) => {

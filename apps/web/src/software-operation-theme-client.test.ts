@@ -44,7 +44,7 @@ function html(theme: Theme, family: Family): string {
   }
   if (family === 'convert') return renderAcctConvertAddonWorkspace({ locale: 'en', canManage: true })
   if (family === 'templates') return renderWhmAccountTemplatesWorkspace({ locale: 'en', canManage: true })
-  if (family === 'optimize') return renderSwOptimizeWorkspace({ lang: 'en', canRead: true })
+  if (family === 'optimize') return renderSwOptimizeWorkspace({ lang: 'en', canRead: true, accountId: '', canManageCache: false })
   if (family === 'projects') return renderSwAppProjectsWorkspace({ locale: 'en', canRead: true })
   if (family === 'composer') return renderWhmComposerWorkspace({ locale: 'en', canRead: true })
   return renderSwDeploymentsWorkspace({ locale: 'en', canRead: true, canManage: true })
@@ -56,9 +56,9 @@ const boot = (family: Family, send: (method: string, path: string, body?: unknow
   Object.assign(window, { xpanelSessionRequest: send })
   new Function('return ' + bindings[family])()(async () => true)
 }
-const optimize = { context: { accountId: account.id, username: account.username }, state: 'read', reason: null, policy: { compression: 'on', types: ['text/html'], minLength: 1024, proxied: ['any'], cache: { configured: true, maxSize: '1024m' } }, domains: [{ name: 'alice.test', redirect: false, suspended: false }], actions: { siteCompression: false, siteCache: false, purge: false } }
+const optimize = { context: { accountId: account.id, username: account.username }, state: 'read', reason: null, policy: { compression: 'on', types: ['text/html'], minLength: 1024, proxied: ['any'], cache: { configured: true, maxSize: '1024m' } }, domains: [{ name: 'alice.test', redirect: false, suspended: false }], actions: { siteCompression: false } }
 const projects = { page: 'runtime', state: 'read', components: [{ id: 'golang', state: 'installed', installed: [{ name: 'golang-go', versions: ['1.22'] }] }] }
-const templates = { state: 'saved', revision: 'a'.repeat(64), templates: [{ id: id(7), name: 'Saved template', records: [], zone: '', defaultPage: { title: 'Welcome', body: 'Soon.' }, suspendedPage: { title: 'Suspended', body: 'Unavailable.' }, planIds: [id(4)], updatedAt: '2026-10-27T10:00:00.000Z', updatedBy: 'root', preview: [] }], plans: [{ id: id(4), name: 'Saved plan' }], placeholders: ['%domain%'], sample: {}, application: { appliedToNewAccounts: true, defaultPagePublished: false, suspendedPagePublished: false } }
+const templates = { state: 'saved', revision: 'a'.repeat(64), templates: [{ id: id(7), name: 'Saved template', records: [], zone: '', defaultPage: { title: 'Welcome', body: 'Soon.' }, suspendedPage: { title: 'Suspended', body: 'Unavailable.' }, planIds: [id(4)], updatedAt: '2026-10-27T10:00:00.000Z', updatedBy: 'root', preview: [] }], plans: [{ id: id(4), name: 'Saved plan' }], placeholders: ['%domain%'], sample: {}, application: { appliedToNewAccounts: true, defaultPagePublished: true, suspendedPagePublished: true } }
 const conversion = { candidates: [{ domainId: id(1), domain: 'shop.alice.test', docRoot: '/home/alice/shop', account: { id: account.id, username: account.username, status: 'active' } }], plans: [{ id: id(4), name: 'Saved plan' }], capabilities: { preview: true, apply: false, reason: 'atomic-ownership-move-unavailable' } }
 const reviewedConversion = { revision: 'c'.repeat(64), capabilities: conversion.capabilities, plan: { source: { accountId: account.id, username: account.username, domainId: id(1), domain: 'shop.alice.test', docRoot: '/home/alice/shop' }, target: { username: 'shop', planId: id(4), planName: 'Saved plan', home: '/home/shop', documentRoot: '/home/shop/public_html' }, domains: [{ id: id(1), name: 'shop.alice.test', kind: 'addon', docRoot: '/home/alice/shop' }], mail: { mailboxes: [], otherServiceUsers: [] }, dns: [], certificates: 0, conflicts: [] } }
 

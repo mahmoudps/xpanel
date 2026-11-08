@@ -12,11 +12,11 @@ const boot = (request: (method: string, path: string, body?: unknown) => Promise
 beforeEach(() => { delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 
 describe('add-on services workspace', () => {
-  it('renders both directions with the configuration component kept and disabled', () => {
+  it('renders both directions with no control that lacks a handler', () => {
     for (const locale of ['en', 'ar'] as const) {
       document.body.innerHTML = renderSwAddonServicesWorkspace({ locale, canRead: true, canManage: true })
       expect(document.querySelector<HTMLElement>('[data-sw-addons]')!.dir).toBe(locale === 'ar' ? 'rtl' : 'ltr')
-      expect(document.querySelectorAll('button:disabled').length).toBe(1)
+      expect(document.querySelectorAll('button:disabled').length).toBe(0)
       expect(document.body.textContent).not.toMatch(/[٠-٩۰-۹]/)
     }
   })

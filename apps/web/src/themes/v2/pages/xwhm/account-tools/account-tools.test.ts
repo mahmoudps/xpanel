@@ -79,7 +79,7 @@ describe('V2 WHM account tools', () => {
     for (const name of ['name', 'zone', 'defaultPage.title', 'defaultPage.body', 'suspendedPage.title', 'suspendedPage.body']) expect(html).toContain(`data-acct-templates-input="${name}"`)
     expect(html).toContain('data-acct-templates-plans')
     expect(html).toContain('data-acct-templates-preview data-xp-columns="5"')
-    expect(html).toContain('The default and suspended page text is saved only.')
+    expect(html).toContain('The page text of a template replaces the owner page for accounts on its plans.')
     expect(html).toContain('Existing accounts and zones do not change.')
     expect(html).toContain('%domain%, %ipv4%, %ipv6%, %mailhost%')
   })

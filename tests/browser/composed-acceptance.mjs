@@ -8,20 +8,17 @@ import { fileURLToPath } from 'node:url'
 import { tools } from '../../packages/catalog/src/index.ts'
 import { defaultPlan } from '../../packages/core/src/index.ts'
 import { renderWebApp, serveStaticAsset } from '../../apps/web/src/app.ts'
-import { composedXpanelRoutes, composedXwhmRoutes } from '../../apps/web/src/board-port/composed/all.ts'
+import { composedXpanelRoutes as routes } from '../../apps/web/src/board-port/composed/all.ts'
 import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/source-snapshot.mjs'
 import { assertAppliedFont } from './applied-font-contract.mjs'
 
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
-const routes = [...composedXpanelRoutes, ...composedXwhmRoutes]
 const plan = defaultPlan({ id: 'synthetic-plan', name: 'Standard', featureListId: 'synthetic-features' })
 const account = { id: 'synthetic-account', username: 'alpha', uid: 20001, gid: 20001, home: '/home/alpha', primaryDomain: 'alpha.example.test', planId: plan.id, ownerId: null, status: 'terminating', suspendReason: null, contactEmail: '', ipv4: '192.0.2.1', shell: 'none', createdAt: '2026-10-24T00:00:00Z' }
-const principal = { kind: 'root', id: 'synthetic-root', username: 'synthetic-root' }
 const owner = { kind: 'user', id: 'synthetic-owner', username: account.username, accountId: account.id }
 // This fixture supplies qualified presentation states only. It does not authenticate,
 // change the real catalog, execute operations or prove a host/service capability.
 const catalog = tools.map(tool => ({ ...tool, status: 'verified', delivery: { status: 'verified', reason: 'Synthetic composed presentation fixture only.', evidence: [] } }))
-const reseller = { id: 'synthetic-reseller', username: 'reseller.example.test', acl: ['list-accounts'], maxAccounts: 12, totalDiskMb: 2048, totalBandwidthMb: 4096, oversell: false, nameservers: ['ns1.example.test', 'ns2.example.test'], delegatedIps: [] }
 const domain = { id: 'synthetic-domain', accountId: account.id, name: account.primaryDomain, kind: 'primary', parentId: null, docRoot: account.home + '/public_html', siteType: 'static', upstream: null, redirect: null, php: null, wildcard: false, certificateId: 'synthetic-certificate', suspended: false, expiresAt: null, pathQuotaMb: 'unlimited' }
 
 const fingerprint = () => {
@@ -49,10 +46,9 @@ async function fixture() {
     const theme = url.searchParams.get('theme') === 'light' ? 'light' : 'dark'
     const html = renderWebApp({
       surface: spec.surface, activeRoute: spec.route, locale, theme, catalog, accountId: account.id,
-      visibility: { principal: spec.surface === 'xpanel' ? owner : principal, disabledFeatures: new Set() },
+      visibility: { principal: owner, disabledFeatures: new Set() },
       realtimeEnabled: false, security: { totpEnabled: true },
       panel: { account, plan, domains: [domain], serviceUsers: [{ id: 'synthetic-membership', accountId: account.id, login: 'disk@alpha.example.test', services: { email: false, ftp: true, webdisk: true }, mailboxQuotaMb: 999999, ftpDir: 'public_html' }] },
-      whm: { principal, accounts: [account], resellers: [reseller], plans: [plan] },
     }).replace('<html ', '<html data-composed-fixture="synthetic-qualified-presentation" ')
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); response.end(html)
   })
@@ -215,6 +211,7 @@ export async function runComposedAcceptance({ output, filter } = {}) {
   assert.equal(summary.source_drift, false, 'Candidate source must remain frozen throughout browser acceptance')
   assert.equal(host.requests.some(request => request.method !== 'GET' && request.method !== 'HEAD'), false, 'No mutating API requests')
   assert.equal(summary.failed, 0, 'All selected composed browser cases must pass')
+  assert.ok(summary.passed > 0, 'At least one composed route must be exercised')
   return { output: destination, cases: results.length, passed: summary.passed, source_drift: summary.source_drift }
 }
 

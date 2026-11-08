@@ -1,7 +1,7 @@
-import { fail } from '@xpanel/core'
+import { fail, MIN_ACCOUNT_UID } from '@xpanel/core'
 import { createHash } from 'node:crypto'
 import {
-  MONITORING_DF_INODE_ARGV, MONITORING_PS_ARGV, monitoringJournalArgv, monitoringKillArgv,
+  MONITORING_DF_INODE_ARGV, MONITORING_PS_ARGV, MONITORING_PS_UNIT_ARGV, monitoringJournalArgv, monitoringKillArgv,
 } from '../../../packages/os/src/monitoring-command.ts'
 import type { MonitoringLogQuery, MonitoringSignal, MonitoringSignalRequest } from '../../../packages/os/src/monitoring-command.ts'
 import { ioMountForTarget } from './io-device.ts'
@@ -54,6 +54,16 @@ export interface LogObservation {
 export interface SignalOutcome {
   state: 'confirmed' | 'attempted' | 'unknown'; signal: MonitoringSignal; pid: number
   commandOk: boolean; observedAt: string; verificationRequired: boolean
+}
+export interface UserKillOutcome {
+  state: 'confirmed' | 'attempted' | 'unknown'; username: string
+  /** Distinct processes signalled across all rounds. */
+  signalled: number
+  /** Processes of the account still present after the last round; null when that read failed. */
+  remaining: number | null
+  /** Panel helpers running under the account's uid, left alone. */
+  exempt: number
+  observedAt: string; verificationRequired: boolean
 }
 
 const command = async (run: MonitoringRun, argv: readonly string[]): Promise<MonitoringCommandResult> => {
@@ -160,6 +170,52 @@ export async function signalProcess(run: MonitoringRun, request: MonitoringSigna
     state = 'attempted'
   }
   return { state, signal: request.signal, pid: request.pid, commandOk: result.ok, observedAt: observedAt.toISOString(), verificationRequired: state !== 'confirmed' }
+}
+
+const PANEL_UNITS = new Set(['xpanel-agent.service', 'xpanel-api.service'])
+const panelUnitPids = (stdout: string): Set<number> => {
+  const pids = new Set<number>()
+  for (const line of dataLines(stdout, MAX_PS_LINES)) {
+    const match = /^\s*(\d{1,7})\s+(\S{1,256})$/.exec(line)
+    if (!match) throw new Error('invalid_process_unit_row')
+    if (PANEL_UNITS.has(match[2]!)) pids.add(integer(match[1]!))
+  }
+  return pids
+}
+
+/** Only a saved hosting account can be swept: root, service users and panel users are never in that list. */
+export function sweepTarget(accounts: readonly MonitoringAccount[], username: string): MonitoringAccount {
+  const account = accounts.find(item => item.username === username && item.status !== 'terminating')
+  return account && account.uid >= MIN_ACCOUNT_UID ? account : fail('FORBIDDEN', 'only a hosted account can be swept', { stateChanged: false, reason: 'protected-user' })
+}
+
+/**
+ * KILL only: TERM is a clean exit to a Restart=on-failure unit, so it would leave the account's PHP pool stopped.
+ * Each round re-reads the list, so a fork between rounds is caught. Success means no account process remains at the last read.
+ */
+export async function killAccountProcesses(run: MonitoringRun, account: MonitoringAccount, options: { beforeDispatch: () => Promise<void>; now?: () => Date; sleep?: (ms: number) => Promise<void> }): Promise<UserKillOutcome> {
+  const now = options.now ?? (() => new Date()), sleep = options.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)))
+  const read = async (): Promise<{ observedAt: Date; pids: number[]; exempt: number } | null> => {
+    const observed = await observeRows(run, now), units = await command(run, MONITORING_PS_UNIT_ARGV)
+    if (!observed.rows || !units.ok) return null
+    try {
+      const panel = panelUnitPids(units.stdout), owned = observed.rows.filter(row => row.uid === account.uid), pids = owned.filter(row => !panel.has(row.pid)).map(row => row.pid)
+      return { observedAt: observed.observedAt, pids, exempt: owned.length - pids.length }
+    } catch { return null }
+  }
+  let seen = await read()
+  if (!seen) return fail('PRECONDITION_FAILED', 'the process list could not be read before signalling', { stateChanged: false })
+  await options.beforeDispatch()
+  const signalled = new Set<number>()
+  let last = seen
+  for (let round = 0; round < 3 && seen?.pids.length; round++) {
+    for (const pid of seen.pids) { signalled.add(pid); await command(run, monitoringKillArgv(pid, 'KILL')) }
+    await sleep(200)
+    seen = await read()
+    if (seen) last = seen
+  }
+  const state = !seen ? 'unknown' : seen.pids.length ? 'attempted' : 'confirmed'
+  return { state, username: account.username, signalled: signalled.size, remaining: seen ? seen.pids.length : null, exempt: last.exempt, observedAt: last.observedAt.toISOString(), verificationRequired: state !== 'confirmed' }
 }
 
 // POSIX df -P: one header line, then one line per filesystem; the mount point is last and may contain spaces.

@@ -6,7 +6,7 @@ import { MAILX_MAIL_TOOLS_CLIENT_BINDING, readMailxListDelivery, readMailxMailTo
 const tick = async () => { for (let index = 0; index < 8; index++) await new Promise(resolve => setTimeout(resolve, 0)) }
 const effects = { allowlist: true, filtering: false, score: true, blocklist: true, spamBox: true }
 const view = (extra: Record<string, unknown> = {}) => ({ context: { account: 'alice' }, host: 'connected', observedAt: '2026-10-28T10:00:00.000Z', engine: { engine: 'rspamd', wiring: 'not-wired' },
-  compositeRevision: 'a'.repeat(64), capabilities: { learning: true, boxTrapper: false },
+  compositeRevision: 'a'.repeat(64), capabilities: { learning: true },
   mailboxes: [{ mailbox: 'info@shop.example', preference: 'saved', native: 'pending', effects }, { mailbox: 'sales@shop.example', preference: 'none', native: 'not-saved', effects: null }], ...extra })
 const lists = (extra: Record<string, unknown> = {}) => ({ context: { account: 'alice' }, host: 'connected', observedAt: '2026-10-28T10:00:00.000Z', aliases: 'read', compositeRevision: 'b'.repeat(64),
   capabilities: { moderation: false, archive: false }, lists: [{ address: 'team@shop.example', members: 3, state: 'delivering' }, { address: 'mods@shop.example', members: 1, state: 'restricted' }, { address: 'new@shop.example', members: 2, state: 'pending' }], ...extra })
@@ -18,25 +18,26 @@ const boot = (request?: (method: string, path: string, body?: unknown) => Promis
 afterEach(() => { delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest })
 
 describe('mail tools client', () => {
-  it('parses strictly, accepts the Sieve effects and refuses a claimed BoxTrapper', () => {
+  it('parses strictly and accepts the Sieve effects', () => {
     expect(readMailxMailTools(view()).mailboxes[0]!.effects).toEqual(effects)
-    for (const bad of [view({ capabilities: { learning: true, boxTrapper: true } }), view({ mailboxes: [{ mailbox: 'a@b.example', preference: 'none', native: 'applied', effects }] }),
+    for (const bad of [view({ mailboxes: [{ mailbox: 'a@b.example', preference: 'none', native: 'applied', effects }] }),
       view({ host: 'not-connected' }), view({ engine: { engine: null, wiring: 'unknown' } })]) expect(() => readMailxMailTools(bad)).toThrow()
   })
-  it('parses list delivery strictly and never accepts claimed moderation or unread delivery', () => {
+  it('parses list delivery strictly and never accepts claimed archives or unread delivery', () => {
     expect(readMailxListDelivery(lists()).lists).toHaveLength(3)
     expect(readMailxListDelivery(lists({ host: 'not-connected', observedAt: null, aliases: null, lists: [] })).host).toBe('not-connected')
-    for (const bad of [lists({ capabilities: { moderation: true, archive: false } }), lists({ aliases: 'unavailable' }), lists({ lists: [{ address: 'a@b.example', members: 1, state: 'moderated' }] }),
+    expect(readMailxListDelivery(lists({ capabilities: { moderation: true, archive: false } })).lists).toHaveLength(3)
+    for (const bad of [lists({ capabilities: { moderation: 'yes', archive: false } }), lists({ capabilities: { moderation: true, archive: true } }), lists({ aliases: 'unavailable' }), lists({ lists: [{ address: 'a@b.example', members: 1, state: 'moderated' }] }),
       lists({ host: 'not-connected' }), lists({ observedAt: null })]) expect(() => readMailxListDelivery(bad)).toThrow()
   })
-  it('keeps moderation and BoxTrapper controls disabled and form-free', () => {
+  it('keeps moderation and an unqualified BoxTrapper disabled and form-free', () => {
     for (const section of ['spam', 'lists'] as const) {
       mount(section)
       expect(document.querySelector('form')).toBeNull()
       expect([...document.querySelectorAll<HTMLInputElement>('input,select,textarea')].every(control => control.disabled)).toBe(true)
     }
     expect(document.body.textContent).toContain('Postfix alias table')
-    expect(document.body.textContent).toContain('needs a list manager')
+    expect(document.body.textContent).toContain('moderation check at delivery')
   })
   it('paints native state and submits training only after confirmation', async () => {
     const calls: [string, string, unknown][] = [], ask = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
@@ -56,7 +57,7 @@ describe('mail tools client', () => {
     expect(action.getAttribute('data-state')).toBe('partial'); expect(action.textContent).toContain('rolled back')
   })
   it('disables training when no filter runs', async () => {
-    mount(); boot(async () => view({ engine: { engine: null, wiring: 'unknown' }, capabilities: { learning: false, boxTrapper: false } }), async () => true); await tick()
+    mount(); boot(async () => view({ engine: { engine: null, wiring: 'unknown' }, capabilities: { learning: false } }), async () => true); await tick()
     expect([...document.querySelectorAll<HTMLButtonElement>('[data-mailx-tools-rows] button')].every(button => button.disabled)).toBe(true)
     expect(document.querySelector('[data-mailx-tools-status]')!.getAttribute('data-state')).toBe('partial')
   })
@@ -67,7 +68,7 @@ describe('mail tools client', () => {
     const rows = [...document.querySelectorAll('[data-mailx-lists-rows] tr')]
     expect(rows.map(row => row.getAttribute('data-state'))).toEqual(['delivering', 'restricted', 'pending'])
     expect(rows[0]!.querySelector('th bdi')!.getAttribute('dir')).toBe('ltr')
-    expect(rows[1]!.textContent).toContain('needs a list manager')
+    expect(rows[1]!.textContent).toContain('external programs module')
     expect(document.querySelector('[data-mailx-tools-fact="delivery"]')!.textContent).toBe('1 of 3 lists deliver')
     expect(document.querySelector('[data-mailx-lists-status]')!.getAttribute('data-state')).toBe('drift')
     document.querySelector<HTMLButtonElement>('[data-mailx-lists-apply]')!.click(); await tick()

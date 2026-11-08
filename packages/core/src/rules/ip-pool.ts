@@ -6,12 +6,15 @@ import type {
   Id,
   IpOwnerKind,
   IpRole,
+  Ipv6Range,
   MailIpConfig,
   MailOutboundMode,
+  RemoteServiceIps,
   Reseller,
   ServerIpEntry,
 } from '../types.ts'
-import { formatCidr, parseIp } from './firewall.ts'
+import { assertIsoDate } from '../schemas.ts'
+import { formatCidr, parseCidr, parseIp } from './firewall.ts'
 import { validateDomainName } from './naming.ts'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -88,6 +91,16 @@ export const validateServerIpEntry = (v: unknown): ServerIpEntry => {
   const isPrimary = o.isPrimary === true
   if (isPrimary && (role !== 'shared' || ownerKind !== 'root')) return fail('VALIDATION', 'the default IP must be root-owned and shared')
   const notes = typeof o.notes === 'string' && o.notes.length <= 255 && !/[\r\n\0]/.test(o.notes) ? o.notes : ''
+  if (o.reserved !== undefined && typeof o.reserved !== 'boolean') return fail('VALIDATION', 'reserved must be a boolean')
+  if (o.reserved === true && isPrimary) return fail('VALIDATION', 'the default IP cannot be reserved')
+  const releasing = o.releasing === undefined ? undefined : ipReleasing(o.releasing)
+  let publicAddress: string | undefined
+  if (o.publicAddress !== undefined) {
+    const mapped = canonicalIp(o.publicAddress, 'publicAddress')
+    if (!isPrivateAddress(address)) return fail('VALIDATION', 'only a private local address has a NAT public address', { reason: 'nat_not_private' })
+    if (mapped.version !== version || isPrivateAddress(mapped.address)) return fail('VALIDATION', 'the NAT public address must be a public address of the same family')
+    publicAddress = mapped.address
+  }
 
   return {
     id,
@@ -101,7 +114,87 @@ export const validateServerIpEntry = (v: unknown): ServerIpEntry => {
     ptrHostname,
     isPrimary,
     notes,
+    ...(o.reserved !== undefined && { reserved: o.reserved }),
+    ...(releasing && { releasing }),
+    ...(publicAddress && { publicAddress }),
   }
+}
+
+/** RFC 1918, shared address space (RFC 6598) and IPv6 unique local addresses: never reachable from the internet. */
+export const isPrivateAddress = (raw: string): boolean => {
+  const ip = parseIp(raw)
+  if (!ip) return false
+  if (ip.version === 6) return ip.value >> 121n === 0x7en
+  const a = ip.value >> 24n, b = (ip.value >> 16n) & 0xffn
+  return a === 10n || (a === 172n && b >= 16n && b <= 31n) || (a === 192n && b === 168n) || (a === 100n && b >= 64n && b <= 127n)
+}
+
+/** Local to public address of each NAT-mapped pool entry. */
+export const natPublicAddresses = (pool: readonly ServerIpEntry[]): Map<string, string> =>
+  new Map(pool.flatMap(entry => entry.publicAddress ? [[entry.address, entry.publicAddress] as [string, string]] : []))
+
+const ipReleasing = (v: unknown): NonNullable<ServerIpEntry['releasing']> => {
+  const r = v as Record<string, unknown> | null
+  if (typeof r !== 'object' || r === null || Object.keys(r).some(k => k !== 'accountId' && k !== 'since')) return fail('VALIDATION', 'releasing must be { accountId, since }')
+  if (typeof r.accountId !== 'string' || !UUID_RE.test(r.accountId)) return fail('VALIDATION', 'releasing.accountId must be an account id')
+  return { accountId: r.accountId.toLowerCase(), since: assertIsoDate(r.since, 'releasing.since').toISOString() }
+}
+
+/** Delegated IPv6 networks; ranges never overlap. */
+export const validateIpv6Ranges = (value: unknown): Ipv6Range[] => {
+  if (!Array.isArray(value) || value.length > 4096) return fail('VALIDATION', 'IPv6 ranges must be a list of at most 4096 entries')
+  const ranges = value.map((v: unknown): Ipv6Range => {
+    if (typeof v !== 'object' || v === null || Object.keys(v).some(k => !['id', 'cidr', 'ownerKind', 'ownerId', 'notes'].includes(k))) return fail('VALIDATION', 'an IPv6 range is { id, cidr, ownerKind, ownerId, notes }')
+    const o = v as Record<string, unknown>
+    const id = typeof o.id === 'string' && UUID_RE.test(o.id) ? o.id.toLowerCase() : fail('VALIDATION', 'invalid IPv6 range id')
+    const cidr = typeof o.cidr === 'string' && o.cidr.includes('/') ? parseCidr(o.cidr) : null
+    if (!cidr || cidr.version !== 6 || cidr.prefix < 8) return fail('VALIDATION', 'cidr must be an IPv6 network /8 to /128 with zero host bits', { cidr: String(o.cidr).slice(0, 64) })
+    const ownerKind = IP_OWNERS.includes(o.ownerKind as IpOwnerKind) ? (o.ownerKind as IpOwnerKind) : fail('VALIDATION', 'ownerKind must be root, reseller, or account')
+    if (ownerKind === 'root' ? o.ownerId !== null : typeof o.ownerId !== 'string' || !UUID_RE.test(o.ownerId)) return fail('VALIDATION', 'ownerId must be null for root and an id otherwise')
+    const notes = typeof o.notes === 'string' && o.notes.length <= 255 && !/[\r\n\0]/.test(o.notes) ? o.notes : fail('VALIDATION', 'notes must be one line of at most 255 characters')
+    return { id, cidr: `${formatCidr({ ...cidr, prefix: 128 })}/${cidr.prefix}`, ownerKind, ownerId: ownerKind === 'root' ? null : (o.ownerId as string).toLowerCase(), notes }
+  })
+  const ids = new Set<string>()
+  for (const [i, range] of ranges.entries()) {
+    if (ids.has(range.id)) fail('VALIDATION', 'duplicate IPv6 range id')
+    ids.add(range.id)
+    const a = parseCidr(range.cidr)!
+    for (const other of ranges.slice(0, i)) {
+      const b = parseCidr(other.cidr)!, shift = BigInt(128 - Math.min(a.prefix, b.prefix))
+      if (a.value >> shift === b.value >> shift) fail('VALIDATION', 'IPv6 ranges overlap', { cidr: range.cidr, other: other.cidr })
+    }
+  }
+  return ranges.sort((a, b) => a.cidr.localeCompare(b.cidr))
+}
+
+/**
+ * First address of an IPv6 range that no pool entry or account uses, skipping the subnet-router anycast (::0).
+ * shortcut: scans at most 65536 addresses, enough for one server's accounts; a larger allocation needs an index.
+ */
+export const nextRangeAddress = (range: Pick<Ipv6Range, 'cidr'>, used: ReadonlySet<string>): string | null => {
+  const cidr = parseCidr(range.cidr)
+  if (!cidr || cidr.version !== 6) return fail('VALIDATION', 'an IPv6 range is required')
+  const size = 1n << BigInt(128 - cidr.prefix)
+  for (let offset = 1n; offset < size && offset <= 65536n; offset++) {
+    const address = formatCidr({ version: 6, value: cidr.value + offset, prefix: 128 })
+    if (!used.has(address)) return address
+  }
+  return null
+}
+
+/** Each list holds at most 64 canonical IPv4/IPv6 addresses or CIDR networks, deduplicated and sorted. */
+export const validateRemoteServiceIps = (value: unknown): RemoteServiceIps => {
+  const o = value as Record<string, unknown> | null
+  if (typeof o !== 'object' || o === null || Object.keys(o).sort().join() !== 'nameservers,smtp') return fail('VALIDATION', 'remote service IPs are { smtp, nameservers }', { stateChanged: false })
+  const list = (raw: unknown, what: string): string[] => {
+    if (!Array.isArray(raw) || raw.length > 64) return fail('VALIDATION', `${what} lists at most 64 addresses or networks`, { reason: 'remote_service_ips_too_many', stateChanged: false })
+    return [...new Set(raw.map(item => {
+      const cidr = typeof item === 'string' && item.length <= 49 ? parseCidr(item.trim()) : null
+      if (!cidr || (cidr.version === 4 ? cidr.prefix < 8 : cidr.prefix < 16)) return fail('VALIDATION', `${what} entries are IPv4/IPv6 addresses or networks of /8 (IPv6 /16) or longer`, { reason: 'remote_service_ip_invalid', list: what, value: String(item).slice(0, 64), stateChanged: false })
+      return formatCidr(cidr)
+    }))].sort()
+  }
+  return { smtp: list(o.smtp, 'smtp'), nameservers: list(o.nameservers, 'nameservers') }
 }
 
 /** Inventory policy, never proof that the address is configured on a Linux interface. */
@@ -111,6 +204,7 @@ export const validateServerIpPool = (value: unknown): ServerIpEntry[] => {
   for (const entry of entries) {
     hostingAddress(entry.address)
     if (ids.has(entry.id) || addresses.has(entry.address)) fail('VALIDATION', 'duplicate IP pool ID or canonical address')
+    if (entry.publicAddress && entries.some(other => other !== entry && (other.publicAddress === entry.publicAddress || other.address === entry.publicAddress))) fail('VALIDATION', 'a NAT public address maps one local address')
     if (entry.isPrimary && defaults.has(entry.version)) fail('VALIDATION', 'only one default shared IP is allowed per address family')
     ids.add(entry.id); addresses.add(entry.address); if (entry.isPrimary) defaults.add(entry.version)
   }
@@ -129,7 +223,7 @@ export interface AccountIpContext {
   accountId?: Id
   ownerId: Id | null
   planDedicatedIp: boolean
-  reseller: Pick<Reseller, 'id' | 'delegatedIps'> | null
+  reseller: Pick<Reseller, 'id' | 'delegatedIps'> & Partial<Pick<Reseller, 'sharedIp'>> | null
   pool: readonly ServerIpEntry[]
   allAccounts: readonly Pick<Account, 'id' | 'ipv4' | 'ipv6' | 'extraIps'>[]
   domains?: readonly (Pick<Domain, 'accountId' | 'ipv4' | 'ipv6'> & Partial<Pick<Domain, 'name'>>)[]
@@ -155,16 +249,34 @@ const targetCanUse = (entry: ServerIpEntry, context: AccountIpContext): boolean 
   if (entry.ownerKind === 'reseller') return entry.ownerId === context.ownerId
   return context.ownerId === null || entry.role === 'shared' && entry.isPrimary || !!context.reseller?.delegatedIps.some(raw => canonicalIp(raw).address === entry.address)
 }
+/** The account already holds the address, so a hold or reservation added later never strands it. */
+const heldByTarget = (address: string, context: AccountIpContext): boolean => context.accountId !== undefined
+  && context.allAccounts.some(account => account.id === context.accountId && [account.ipv4, account.ipv6, ...(account.extraIps ?? [])].some(raw => raw != null && canonicalIp(raw).address === address))
+/** Reserved entries are never offered; a release hold keeps the address for the account that left it. */
+const offered = (entry: ServerIpEntry, context: AccountIpContext): boolean => !entry.reserved && (!entry.releasing || entry.releasing.accountId === context.accountId)
 const assignedAddress = (raw: unknown, context: AccountIpContext, version?: 4 | 6): string => {
   const parsed = canonicalIp(raw)
   if (version && parsed.version !== version) fail('VALIDATION', 'address family does not match requested assignment')
   const address = hostingAddress(parsed.address), entry = context.pool.find(ip => ip.address === address)
   if (!entry || !targetCanUse(entry, context)) return fail('FORBIDDEN', 'IP is not in the account owner’s assignable server pool')
+  if (!heldByTarget(address, context)) {
+    if (entry.reserved) fail('FORBIDDEN', 'IP is reserved', { reason: 'ip_reserved', stateChanged: false })
+    // Behind 1:1 NAT a private address without its public mapping would publish an unreachable address in DNS.
+    if (!entry.publicAddress && isPrivateAddress(address) && context.pool.some(ip => ip.publicAddress)) fail('PRECONDITION_FAILED', 'the public NAT address of this private address is unknown', { reason: 'nat_mapping_unknown', stateChanged: false })
+    if (!offered(entry, context)) fail('CONFLICT', 'IP is held until its previous site has left it', { reason: 'ip_releasing', stateChanged: false })
+  }
   if (entry.role === 'dedicated') {
     if (!context.planDedicatedIp) fail('FORBIDDEN', 'the hosting plan does not permit a dedicated IP')
     if (addressReferences(address, context)) fail('CONFLICT', 'dedicated IP is already reserved')
   }
   return address
+}
+
+/** The reseller's main shared IPv4 when it has one, otherwise the server default. */
+const defaultSharedIpv4 = (context: AccountIpContext): ServerIpEntry | undefined => {
+  const shared = context.reseller?.sharedIp
+  return shared ? context.pool.find(entry => entry.address === canonicalIp(shared).address && entry.version === 4 && entry.role === 'shared')
+    : context.pool.find(entry => entry.version === 4 && entry.isPrimary && entry.role === 'shared' && entry.ownerKind === 'root')
 }
 
 /** Run under the state writer lease; the resulting account is the sole reservation record. */
@@ -183,11 +295,11 @@ export const resolveAccountIpAssignment = (request: AccountIpRequest, context: A
     if (!context.planDedicatedIp) fail('FORBIDDEN', 'the hosting plan does not permit a dedicated IP')
     const selected = assignment.poolId === undefined ? undefined : pool.find(entry => entry.id === assignment.poolId)
     if (assignment.poolId !== undefined && (!selected || selected.version !== 4 || selected.role !== 'dedicated' || !targetCanUse(selected, context))) fail('FORBIDDEN', 'dedicated IP selection is unavailable to this owner')
-    const entry = selected ?? pool.find(entry => entry.version === 4 && entry.role === 'dedicated' && targetCanUse(entry, context) && !addressReferences(entry.address, context))
+    const entry = selected ?? pool.find(entry => entry.version === 4 && entry.role === 'dedicated' && targetCanUse(entry, context) && offered(entry, context) && !addressReferences(entry.address, context))
     if (!entry) return fail('PRECONDITION_FAILED', 'no unallocated dedicated IPv4 is available', { reason: 'dedicated_ipv4_unavailable', stateChanged: false })
     ipv4 = assignedAddress(entry.address, context, 4)
   } else {
-    const entry = pool.find(entry => entry.version === 4 && entry.isPrimary && entry.role === 'shared' && entry.ownerKind === 'root')
+    const entry = defaultSharedIpv4(context)
     if (!entry) return fail('PRECONDITION_FAILED', 'no default shared IPv4 is configured', { reason: 'shared_ipv4_unavailable', stateChanged: false })
     ipv4 = assignedAddress(entry.address, context, 4)
   }
@@ -203,8 +315,8 @@ export const resolveAccountIpAssignment = (request: AccountIpRequest, context: A
 export const projectAccountIpAvailability = (raw: AccountIpContext) => {
   const context = { ...raw, pool: validateServerIpPool(raw.pool) }
   if (context.ownerId !== null && context.reseller?.id !== context.ownerId) fail('FORBIDDEN', 'account reseller context is unavailable')
-  const shared = context.pool.find(entry => entry.version === 4 && entry.isPrimary && entry.role === 'shared' && entry.ownerKind === 'root')
-  const unallocated = context.planDedicatedIp ? context.pool.filter(entry => entry.role === 'dedicated' && targetCanUse(entry, context) && !addressReferences(entry.address, context)).map(entry => ({ poolId: entry.id, address: entry.address, version: entry.version })) : []
+  const shared = defaultSharedIpv4(context)
+  const unallocated = context.planDedicatedIp ? context.pool.filter(entry => entry.role === 'dedicated' && targetCanUse(entry, context) && offered(entry, context) && !addressReferences(entry.address, context)).map(entry => ({ poolId: entry.id, address: entry.address, version: entry.version })) : []
   return { scope: 'desired-state' as const, hostBinding: 'unverified' as const,
     defaultSharedIpv4: shared ? { poolId: shared.id, address: shared.address } : null,
     dedicated: { entitled: context.planDedicatedIp, unallocated, count: unallocated.length } }

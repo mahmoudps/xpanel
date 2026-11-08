@@ -1,4 +1,6 @@
-import { actions, button, context, esc, facts, field, fields, link, note, page, section, status, table, type WhmDataPageInput } from '../software/common.ts'
+import { renderV2ServerOps } from '../server/server-ops.ts'
+import { actions, button, check, context, esc, facts, field, fields, link, note, page, section, status, table, type WhmDataPageInput } from '../software/common.ts'
+import { v2WhmSslStore } from '../tls/store.ts'
 
 type DetailKind = 'dns' | 'ftp' | 'certificates'
 export function renderV2WhmServiceDetail(input: WhmDataPageInput, kind: DetailKind): string {
@@ -18,8 +20,22 @@ export function renderV2WhmServiceDetail(input: WhmDataPageInput, kind: DetailKi
     detail = section('service-ftp-settings', t(msgctxt('theme:v2', 'Daemon settings')), table(t, t(msgctxt('theme:v2', 'pure-ftpd settings')), [msgctxt('theme:v2', 'Setting'), msgctxt('theme:v2', 'xPanel policy'), msgctxt('theme:v2', 'Host file'), msgid('Result')], { 'data-whm-service-detail-rows': true }) + note(t(msgctxt('theme:v2', 'Policy is rendered desired configuration. Host files are read separately; running daemon flags are not observed here.'))))
   } else {
     detail = section('service-certificates', t(msgctxt('theme:v2', 'Service endpoints')), actions(link(t(msgctxt('theme:v2', 'Replace or renew in SSL/TLS')), '/whm/ssl')) + table(t, t(msgctxt('theme:v2', 'Service certificates')), [msgid('Service'), msgctxt('theme:v2', 'Ports'), msgctxt('theme:v2', 'Certificate file'), msgid('Names'), msgctxt('theme:v2', 'Issuer'), msgctxt('theme:v2', 'Valid until (UTC)'), msgctxt('theme:v2', 'Days left'), msgctxt('theme:v2', 'Hostname covered'), msgctxt('theme:v2', 'Private key'), msgctxt('theme:v2', 'Warnings')], { 'data-whm-service-detail-rows': true }) + note(t(msgctxt('theme:v2', 'Only configured certificate files are read. Private keys are checked for presence and never opened. Distribution mail and FTP TLS settings remain independent.'))))
+      + section('service-certificate-install', t(msgid('Install from the server SSL storage')), v2WhmSslStore(t, 'service', [], canManage))
   }
-  return page(input, `/whm/services/${kind}`, title, t(msgctxt('theme:v2', 'Read service state and rendered policy independently.')), summaryHtml + detail + (kind === 'dns' ? `<template data-xp-template="whm-service-check-zone">${button(t(msgid('Check zone')), { 'data-xp-slot': 'content' }, true)}</template>` : ''), { 'data-whm-service-detail-workspace': kind, 'data-service-detail-can-read': String(canRead), 'data-service-detail-can-restart': String(canManage && kind !== 'certificates') })
+  return page(input, `/whm/services/${kind}`, title, t(msgctxt('theme:v2', 'Read service state and rendered policy independently.')), summaryHtml + detail + (kind === 'ftp' ? ftpServerSettings(input) : '') + renderV2ServerOps(t, [kind === 'dns' ? 'dns-server' : kind === 'ftp' ? 'ftp-server' : 'panel-tls'], canManage) + (kind === 'dns' ? `<template data-xp-template="whm-service-check-zone">${button(t(msgid('Check zone')), { 'data-xp-slot': 'content' }, true)}</template>` : ''), { 'data-whm-service-detail-workspace': kind, 'data-service-detail-can-read': String(canRead), 'data-service-detail-can-restart': String(canManage && kind !== 'certificates') })
+}
+
+function ftpServerSettings(input: WhmDataPageInput): string {
+  const { t, canRead } = context(input), number = (id: string, label: string, key: string): string => field(id, label, { kind: 'input', type: 'number', disabled: true, dir: 'ltr', hooks: { 'data-ftp-setting': key } })
+  return section('service-ftp-configuration', t(msgid('FTP server settings')), `<div class="v2-whm-data__stack" data-ftp-server-settings data-can-manage="${canRead && input.dataAuthority?.canFtpSettings === true}">`
+    + check(t(msgid('Run the FTP server')), { 'data-ftp-setting': 'enabled' })
+    + fields(field('v2-ftp-tls', t(msgid('TLS encryption')), { kind: 'select', disabled: true, hooks: { 'data-ftp-setting': 'tls' }, options: [{ value: 'required', label: t(msgid('Required')) }, { value: 'optional', label: t(msgid('Optional')) }] })
+      + field('v2-ftp-ciphers', t(msgid('TLS cipher suite')), { kind: 'input', type: 'text', disabled: true, dir: 'ltr', maxlength: 256, hooks: { 'data-ftp-setting': 'tlsCipherSuite' } })
+      + number('v2-ftp-idle', t(msgid('Idle timeout (minutes)')), 'maxIdleMinutes') + number('v2-ftp-max', t(msgid('Maximum connections')), 'maxConnections') + number('v2-ftp-per-ip', t(msgid('Maximum connections per IP')), 'maxConnectionsPerIp')
+      + number('v2-ftp-passive-min', t(msgid('Passive ports from')), 'passiveMin') + number('v2-ftp-passive-max', t(msgid('Passive ports to')), 'passiveMax') + number('v2-ftp-listing', t(msgid('Directory listing limit (entries)')), 'listingLimit'))
+    + check(t(msgid('Allow anonymous logins')), { 'data-ftp-setting': 'anonymous' }) + check(t(msgid('Allow anonymous uploads')), { 'data-ftp-setting': 'anonymousUploads' }) + check(t(msgid('Broken client compatibility')), { 'data-ftp-setting': 'brokenClients' })
+    + actions(button(t(msgid('Save FTP settings')), { 'data-ftp-settings-save': true }, true, true)) + status(t(msgid('FTP settings have not been read.')), { 'data-ftp-settings-status': true })
+    + note(t(msgid('Cleartext-only FTP is not offered. Passive ports open in the firewall while FTP runs. Turning FTP off is the FTP Server Selection choice: there is no second daemon to select.'))) + '</div>')
 }
 
 export function renderV2WhmConfigurationHealth(input: WhmDataPageInput): string {

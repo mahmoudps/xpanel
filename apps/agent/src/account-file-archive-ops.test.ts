@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { chmod, link, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, link, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { crc32, deflateRawSync, gzipSync, zstdCompressSync } from 'node:zlib'
@@ -179,6 +179,17 @@ describe.runIf(compilable)('account file helper compress and extract', { tags: [
     execFileSync('/usr/bin/tar', ['-C', home, '-czf', join(home, 'gnu.tar.gz'), './site'])
     expect(run(extract('gnu.tar.gz', 'from-gnu'))).toMatchObject({ ok: true, result: { destination: 'from-gnu' } })
     await expectSiteCopy(join(home, 'from-gnu'))
+  })
+
+  it('sweeps a staging entry a killed worker left behind and keeps a recent one', async () => {
+    await mkdir(join(home, '.xpanel-tmp-1-old', 'nested'), { recursive: true })
+    await mkdir(join(home, '.xpanel-tmp-2-new'))
+    const old = new Date(Date.now() - 7_200_000)
+    await utimes(join(home, '.xpanel-tmp-1-old'), old, old)
+    expect(run({ op: 'list', path: '', showHidden: true })).toMatchObject({ ok: true })
+    expect(existsSync(join(home, '.xpanel-tmp-1-old'))).toBe(false)
+    expect(existsSync(join(home, '.xpanel-tmp-2-new'))).toBe(true)
+    await rm(join(home, '.xpanel-tmp-2-new'), { recursive: true })
   })
 
   it('extracts a zip into the folder that holds it and into the home folder, never replacing an item', async () => {

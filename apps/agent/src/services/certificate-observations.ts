@@ -89,7 +89,7 @@ export async function readAccountAcmeOrders(input: { account: Pick<Account, 'id'
   }
   return { observedAt: observedAt.toISOString(), scope: 'authorized_saved_certificate_ids' as const, inventoryComplete: false as const,
     totalSavedAcmeCertificates: certificates.length, inspectedSavedCertificates: rows.length, truncated: certificates.length > rows.length,
-    rows, scheduler: { state: 'unavailable' as const, nextRunAt: null, reason: 'site_scheduler_not_connected' as const } }
+    rows }
 }
 
 export function projectManagementTlsStatus(value: unknown) {

@@ -1,7 +1,7 @@
 import { type Locale, translator } from '../../i18n.ts'
 export type Copy = string
 export type ComposedLayout = 'files' | 'site' | 'database' | 'metrics' | 'ssl' | 'security' | 'php' | 'cron' | 'editor' | 'launch' | 'list' | 'settings' | 'dashboard' | 'log' | 'wizard' | 'matrix' | 'terminal'
-export type ComposedBind = 'soon' | 'trash' | 'ftp' | 'webdisk' | 'git' | 'site-settings' | 'ssl-issue' | 'ssl-files' | 'web-stats' | 'terminal' | 'panel-usage' | 'accounts' | 'resellers' | 'reseller-acl' | 'services' | 'ips' | 'mail-ips' | 'generations' | 'backups' | 'host-info' | 'io'
+export type ComposedBind = 'soon' | 'trash' | 'ftp' | 'git' | 'site-settings' | 'ssl-issue' | 'ssl-files' | 'web-stats' | 'terminal' | 'panel-usage' | 'accounts' | 'resellers' | 'reseller-acl' | 'services' | 'ips' | 'mail-ips' | 'generations' | 'backups' | 'host-info' | 'io'
 
 export interface ComposedRoute {
   route: string

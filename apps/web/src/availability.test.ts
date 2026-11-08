@@ -187,7 +187,6 @@ describe('verified production availability', () => {
         locale, route: spec.route,
         get account() { return unavailableProviderRead() },
         get accounts() { return unavailableProviderRead() },
-        get domains() { return unavailableProviderRead() },
         get serviceUsers() { return unavailableProviderRead() },
       }, true)
       expect(staticOnly).toContain('data-read-state="unavailable"')
@@ -264,7 +263,9 @@ describe('verified production availability', () => {
     expect(html).toContain('data-tool-availability="unverified"')
     expect(html).toContain(`data-nav-route="${row.navigation}" data-nav-wiring="soon"`)
     expect(html).toContain('Coming soon')
-    expect(html).toMatch(/<button\b[^>]*disabled[^>]*data-wiring="soon"/)
+    // A page holds a placeholder control only where one still has a place: V2 and classic resources hold none.
+    if (row.surface === 'xpanel') expect(html).not.toMatch(/<button\b[^>]*data-wiring="soon"/)
+    else expect(html).toMatch(/<button\b[^>]*disabled[^>]*data-wiring="soon"/)
     const sidebar = /<aside class="xp-sidebar"[\s\S]*?<\/aside>/.exec(html)?.[0] ?? ''
     for (const route of row.forbidden) expect(sidebar).not.toContain(`data-nav-route="${route}"`)
     expect(html).toContain('data-workspace-identity="true"')

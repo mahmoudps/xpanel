@@ -3,18 +3,40 @@ import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, mkdir, open, readFile, rename, rm, rmdir, stat, unlink } from 'node:fs/promises'
 import { dirname, join, posix, win32 } from 'node:path'
+import { isWebStatsEngineCheck } from './web-stats-format.ts'
 import { fail } from '@xpanel/core'
 import type { ConfigTest, HostAction, RenderedFile } from '@xpanel/core'
-import { assertSafeArgv, isPhpInventoryCommand, isSecurityObservationCommand, isMailQuarantineArgv, isMailQueueCommand, isPackageManagerCommand, isRepairCommand, isSoftwareCenterCommand, isMailLogCommand, isFtpLogCommand, isMonitoringCommand, isMailServerCommand, isServiceDetailCommand, isSecurityToolsCommand, isMailboxMaintenanceCommand, isNetworkToolsCommand, isSecHostCommand } from '@xpanel/os'
+import { isMailboxExpungeCommand } from '../../../packages/os/src/mailbox-expunge-command.ts'
+import { isOpsFileSharingCommand } from '../../../packages/os/src/ops-file-sharing-command.ts'
+import { isAccountRepairCommand } from '../../../packages/os/src/account-repair-command.ts'
+import { assertSafeArgv, isMailMailboxActionCommand, isMailTraceCommand, isPhpInventoryCommand, isSecurityObservationCommand, isMailQuarantineArgv, isMailQueueCommand, isPackageManagerCommand, isRepairCommand, isSoftwareCenterCommand, isMailLogCommand, isFtpLogCommand, isFtpWhoCommand, isMonitoringCommand, isMailServerCommand, isServiceDetailCommand, isSecurityToolsCommand, isMailboxMaintenanceCommand, isNetworkToolsCommand, isSecHostCommand } from '@xpanel/os'
 import { removePinnedHostTree, withOwnedHostFileHandle, withPinnedHostTargetParent } from './host-target-parent.ts'
-import { isServiceManagerCommand, isBenchmarkCommand, isComposerCommand, isMailxCommand, isDatabaseEngineCommand, isDatabaseRemoteCommand } from '@xpanel/os'
-import { isAccountGitCommand } from './account-git-runner.ts'
+import { isServiceManagerCommand, isBenchmarkCommand, isComposerCommand, isMailxCommand, isDatabaseEngineCommand, isDatabaseRemoteCommand, isSshHostCommand } from '@xpanel/os'
+import { isDatabaseServiceCommand, isDbServiceHostTarget } from '../../../packages/os/src/db-services-command.ts'
+import { isAccountDeployCommand, isAccountGitCommand } from './account-git-runner.ts'
+import { isLogRotationCommand } from './log-rotation.ts'
+import { isPanelAccessCommand } from './panel-access.ts'
+import { isPearCommand } from '../../../packages/os/src/pear-command.ts'
+import { isRootSslStoreCommand, isSslStoreCommand } from './ssl-store.ts'
+import { isServerRoleCommand } from '../../../packages/os/src/server-role-command.ts'
+import { isHostToolsCommand } from '../../../packages/os/src/host-tools-command.ts'
 import { isAccountRuntimeCommand } from './account-runtime.ts'
+import { isOwnerToolCommand } from './owner-tools.ts'
+import { isAccountPearCommand } from './account-packages.ts'
 import { isSwContainerCommand } from '../../../packages/os/src/sw-container-command.ts'
+import { system } from '@xpanel/render'
+import { isCtrCommand } from './ctr-command.ts'
+import { CTR_REGISTRIES_CONF, CTR_REGISTRIES_DIR } from './ctr-policy-paths.ts'
 import { isSwAddonServiceCommand } from '../../../packages/os/src/sw-addon-command.ts'
 import { isRpmInstalledIdentityCommand } from '../../../packages/os/src/ops-package-recovery-command.ts'
+import { isSourceBuildCommand } from '../../../packages/os/src/source-build-command.ts'
+import { isDnssecCommand } from '../../../packages/os/src/dnssec-command.ts'
+import { isBoxTrapperCommand } from '../../../packages/os/src/boxtrapper-command.ts'
+import { isListGateCommand } from '../../../packages/os/src/list-gate-command.ts'
 import { applyObservedUserQuota, validateQuotaFilesystem } from './services/quota.ts'
+import { applySiteQuota, isSiteQuotaCommand } from './site-quota.ts'
 import { assertHostEffectAuthority, authorizedHostEffect, hasHostEffectAuthority } from './host-effect-authority.ts'
+import { isIpAliasCommand } from './ip-aliases.ts'
 
 export interface ConfigTestResult {
   ok: boolean
@@ -69,7 +91,7 @@ export interface FakeQuotaEntry {
 
 const isReadonlyQuotaObservation = (argv: readonly string[]): boolean => {
   const findMount = argv.length === 7 && argv[0] === '/usr/bin/findmnt' && argv[1] === '--noheadings'
-    && argv[2] === '--raw' && argv[3] === '--output' && ['TARGET', 'SOURCE', 'FSTYPE'].includes(argv[4] ?? '') && argv[5] === '--target'
+    && argv[2] === '--raw' && argv[3] === '--output' && ['TARGET', 'SOURCE', 'FSTYPE', 'OPTIONS'].includes(argv[4] ?? '') && argv[5] === '--target'
   const quotaState = argv.length === 5 && argv[0] === '/usr/sbin/quotaon' && argv[1] === '--print-state'
     && argv[2] === '--verbose' && argv[3] === '--user'
   if (!findMount && !quotaState) return false
@@ -77,8 +99,60 @@ const isReadonlyQuotaObservation = (argv: readonly string[]): boolean => {
 }
 
 const isReviewedServiceCommand = (argv: readonly string[]): boolean =>
-  isServiceManagerCommand(argv) || isMailxCommand(argv) || isDatabaseEngineCommand(argv) || isDatabaseRemoteCommand(argv) || isSwContainerCommand(argv) || isSwAddonServiceCommand(argv) || isBenchmarkCommand(argv) || isAccountGitCommand(argv) || isAccountRuntimeCommand(argv) || isComposerCommand(argv) || isRpmInstalledIdentityCommand(argv) ||
-  isPhpInventoryCommand(argv) || isSecurityObservationCommand(argv) || isMailQuarantineArgv(argv) || isMailQueueCommand(argv) || isPackageManagerCommand(argv) || isRepairCommand(argv) || isSoftwareCenterCommand(argv) || isMailLogCommand(argv) || isFtpLogCommand(argv) || isMonitoringCommand(argv) || isMailServerCommand(argv) || isServiceDetailCommand(argv) || isSecurityToolsCommand(argv) || isMailboxMaintenanceCommand(argv) || isNetworkToolsCommand(argv) || isSecHostCommand(argv)
+  isServiceManagerCommand(argv)
+  || isMailxCommand(argv)
+  || isDatabaseEngineCommand(argv)
+  || isDatabaseServiceCommand(argv)
+  || isDatabaseRemoteCommand(argv)
+  || isSwContainerCommand(argv)
+  || isCtrCommand(argv)
+  || isSwAddonServiceCommand(argv)
+  || isBenchmarkCommand(argv)
+  || isAccountGitCommand(argv)
+  || isAccountDeployCommand(argv)
+  || isAccountRuntimeCommand(argv)
+  || isOwnerToolCommand(argv)
+  || isAccountPearCommand(argv)
+  || isComposerCommand(argv)
+  || isRpmInstalledIdentityCommand(argv)
+  || isSourceBuildCommand(argv)
+  || isPhpInventoryCommand(argv)
+  || isSecurityObservationCommand(argv)
+  || isSshHostCommand(argv)
+  || isWebStatsEngineCheck(argv)
+  || isMailQuarantineArgv(argv)
+  || isMailQueueCommand(argv)
+  || isPackageManagerCommand(argv)
+  || isRepairCommand(argv)
+  || isSoftwareCenterCommand(argv)
+  || isMailLogCommand(argv)
+  || isFtpLogCommand(argv)
+  || isFtpWhoCommand(argv)
+  || isMonitoringCommand(argv)
+  || isMailServerCommand(argv)
+  || isServiceDetailCommand(argv)
+  || isSecurityToolsCommand(argv)
+  || isMailboxMaintenanceCommand(argv)
+  || isMailboxExpungeCommand(argv)
+  || isOpsFileSharingCommand(argv)
+  || isAccountRepairCommand(argv)
+  || isMailTraceCommand(argv)
+  || isMailMailboxActionCommand(argv)
+  || isNetworkToolsCommand(argv)
+  || isSecHostCommand(argv)
+  || isLogRotationCommand(argv)
+  || isPanelAccessCommand(argv)
+  || isPearCommand(argv)
+  || isIpAliasCommand(argv)
+  || isSslStoreCommand(argv)
+  || isRootSslStoreCommand(argv)
+  || isDnssecCommand(argv)
+  || isBoxTrapperCommand(argv)
+  || isListGateCommand(argv)
+  || isServerRoleCommand(argv)
+  || isHostToolsCommand(argv)
+  || isSiteQuotaCommand(argv)
+  || isOpsFileSharingCommand(argv)
 
 const assertValidCommandArgv = (argv: readonly string[]): void => {
   const head = Array.isArray(argv) ? argv[0] : undefined
@@ -174,6 +248,8 @@ export class FakeHostExecutor implements AgentExecutor {
         return
       case 'delete-user':
         this.users.delete(action.name)
+        return
+      case 'site-quota':
         return
       case 'ensure-dir':
         this.dirs.set(action.path, { mode: action.mode, owner: action.owner, group: action.group })
@@ -301,6 +377,8 @@ const SYSTEM_CONFIG_PREFIXES: readonly string[] = [
   '/etc/xpanel/ssl/',
   '/etc/xpanel/modsecurity/',
   '/etc/xpanel/userdata/',
+  '/etc/xpanel/tasks/',
+  '/etc/xpanel/frp/',
   '/etc/xpanel/runtime/',
   '/etc/systemd/system/',
   '/run/systemd/system/',
@@ -331,10 +409,23 @@ const SYSTEM_CONFIG_PREFIXES: readonly string[] = [
 
 const SYSTEM_EXACT_TARGETS = new Set<string>([
   '/usr/local/bin/xpanel-jailshell',
+  // Shell jail (packages/render/src/system/shell-jail.ts): the entry script and its one sudo rule
+  '/usr/local/sbin/xpanel-jail-enter',
+  '/etc/sudoers.d/xpanel-shell-jail',
   // Compiler Access (packages/render/src/system/compiler.ts): the script and its package-manager hooks
   '/usr/local/sbin/xpanel-compiler-access',
+  '/usr/local/sbin/xpanel-host-task',
+  '/usr/local/sbin/xpanel-sieve-execute',
+  '/usr/local/sbin/xpanel-sieve-execute/xpanel-boxtrapper',
+  '/usr/local/sbin/xpanel-sieve-execute/xpanel-list-gate',
   '/etc/dpkg/dpkg.cfg.d/xpanel-compiler-access',
   '/etc/dnf/plugins/post-transaction-actions.d/xpanel-compiler-access.action',
+  '/etc/dnf/plugins/post-transaction-actions.d/xpanel-source-builds.action',
+  // Traceroute Access and Shell Fork Bomb Protection (packages/render/src/system/host-access.ts)
+  '/usr/local/sbin/xpanel-traceroute-access',
+  '/etc/security/limits.d/90-xpanel-fork-bomb.conf',
+  // Server log rotation (packages/render extended renderLogrotateConfig)
+  '/etc/logrotate.d/xpanel',
   '/opt/xpanel/bin/jailshell',
   '/etc/nginx',
   '/etc/apache2',
@@ -351,6 +442,8 @@ const SYSTEM_EXACT_TARGETS = new Set<string>([
   '/etc/xpanel/ssl',
   '/etc/xpanel/modsecurity',
   '/etc/xpanel/userdata',
+  '/etc/xpanel/tasks',
+  '/etc/xpanel/frp',
   '/etc/xpanel/runtime',
   '/var/lib/powerdns',
   '/var/lib/powerdns/zones',
@@ -398,24 +491,25 @@ const isEnoent = (err: unknown): boolean => {
   return err instanceof Error && err.message.includes('ENOENT')
 }
 
-const ACCOUNT_HOME_DIR_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}(?:\/(?:public_html|logs|tmp|mail|etc|ssl|\.ssh|cgi-bin))?$/
+const ACCOUNT_HOME_DIR_RE = /^\/home[1-9]?[0-9]?\/[a-z_][a-z0-9_-]{0,31}(?:\/(?:public_html|logs|tmp|mail|etc|ssl|\.ssh|cgi-bin))?$/
 /** One mailbox Maildir root. Removal is recursive; nested cur/new/tmp paths are not separate grants. */
-export const MAILDIR_BOX_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+export const MAILDIR_BOX_RE = /^\/home[1-9]?[0-9]?\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 /** The per-domain directory that holds an account's Maildirs. */
-const MAIL_DOMAIN_DIR_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
+const MAIL_DOMAIN_DIR_RE = /^\/home[1-9]?[0-9]?\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
 /** A mailbox's active Sieve script; the writer walks the account-owned parents without following links. */
 /** systemd's runtime set-property drop-in directory of one account slice; the only reviewed tree removal. */
 export const SLICE_CONTROL_DIR_RE = /^\/(?:etc|run)\/systemd\/system\.control\/xpanel-(?:[1-9][0-9]{3}|[1-5][0-9]{4}|60000)\.slice\.d$/
 export const isSliceControlDirPath = (path: string): boolean => SLICE_CONTROL_DIR_RE.test(path)
 /** Exact account home root; termination removes its tree after the user is deleted. */
-export const ACCOUNT_HOME_ROOT_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}$/
+export const ACCOUNT_HOME_ROOT_RE = /^\/home[1-9]?[0-9]?\/[a-z_][a-z0-9_-]{0,31}$/
 export const isAccountHomeRootPath = (path: string): boolean => ACCOUNT_HOME_ROOT_RE.test(path)
 /**
  * Generated per-account directories the termination plan removes as trees. Each pattern is the exact
  * shape the renderer creates; no arbitrary path or nested entry is admitted.
  */
 export const GENERATED_ACCOUNT_TREE_RES: readonly RegExp[] = Object.freeze([
-  /^\/home\/[a-z_][a-z0-9_-]{0,31}$/,
+  /^\/home[1-9]?[0-9]?\/[a-z_][a-z0-9_-]{0,31}$/,
+  /^\/home[1-9]?[0-9]?\/\.xpanel-move-[a-z][a-z0-9]{0,15}$/,
   /^\/var\/log\/xpanel\/[a-z_][a-z0-9_-]{0,31}$/,
   /^\/var\/log\/xpanel\/[a-z][a-z0-9-]{0,16}\/[a-z_][a-z0-9_-]{0,31}$/,
   /^\/etc\/xpanel\/runtime\/[a-z_][a-z0-9_-]{0,31}$/,
@@ -430,8 +524,8 @@ export const isGeneratedAccountTreePath = (path: string): boolean => {
   if (logDir && SHARED_LOG_DIR_NAMES.has(logDir[1]!)) return false
   return GENERATED_ACCOUNT_TREE_RES.some(pattern => pattern.test(path))
 }
-export const MAILBOX_SIEVE_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/\.dovecot\.sieve$/
-const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\/php\.cgi|(?:public_html\/)?\.user\.ini)$/
+export const MAILBOX_SIEVE_RE = /^\/home[1-9]?[0-9]?\/[a-z_][a-z0-9_-]{0,31}\/mail\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/\.dovecot\.sieve$/
+const ACCOUNT_MANAGED_WRAPPER_RE = /^\/home[1-9]?[0-9]?\/[a-z_][a-z0-9_-]{0,31}\/(?:cgi-bin\/php\.cgi|(?:public_html\/)?\.user\.ini)$/
 
 /**
  * Reviewed production host-target policy for `xpanel-agent`: permits managed system config
@@ -441,7 +535,10 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
   return (path: string, operation: HostTargetOperation): boolean => {
     // Saved server host name (renderHostnameChange); /etc/hosts keeps its unrelated lines.
     if (path === '/etc/hostname' || path === '/etc/hosts') return operation === 'read' || operation === 'write' || operation === 'remove'
+    // Server operations (packages/render/src/system/resolver.ts, aliases.ts): resolv.conf, the NetworkManager opt-out and /etc/aliases.
+    if (path === '/etc/resolv.conf' || path === '/etc/aliases' || path === '/etc/NetworkManager/conf.d/90-xpanel-dns.conf') return operation === 'read' || operation === 'write' || operation === 'remove'
     if (isHostMeasurementRead(path)) return operation === 'read'
+    if (isDbServiceHostTarget(path, operation)) return true
     if (path === '/etc/xpanel/account-probe' || path === '/etc/xpanel/account-probe/runtime'
       || path === '/run/xpanel-account-probe' || /^\/run\/xpanel-account-probe\/(?:[1-9][0-9]{3}|[1-5][0-9]{4}|60000)$/.test(path)) return operation === 'ensure-directory'
     if (path === '/etc/xpanel/account-probe/probe.php') return operation === 'read' || operation === 'write' || operation === 'remove'
@@ -452,13 +549,15 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
     if (path === '/etc/xpanel/selinux-account-homes.sha256') return operation === 'read' || operation === 'write'
     // Podman runtime state of a terminated account; its units are already stopped.
     if (/^\/run\/xpanel-ctr\/[a-z][a-z0-9]{0,15}$/.test(path)) return operation === 'remove'
+    if (path === CTR_REGISTRIES_DIR) return operation === 'ensure-directory'
+    if (path === CTR_REGISTRIES_CONF || path === system.CONTAINER_GUARD_PATH) return operation === 'read' || operation === 'write' || operation === 'remove'
     if (path === '/etc/xpanel/cron') return operation === 'ensure-directory'
     if (/^\/etc\/xpanel\/cron\/[a-z][a-z0-9]{0,15}$/.test(path)) return operation === 'ensure-directory'
     if (/^\/etc\/xpanel\/cron\/[a-z][a-z0-9]{0,15}\/[A-Za-z0-9_-]{1,64}\.command$/.test(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
     if (path === '/var/lib/xpanel/backups' || path === '/var/lib/xpanel/backups/account-workspaces'
       || /^\/var\/lib\/xpanel\/backups\/account-workspaces\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\/[a-z][a-z0-9]{0,15})?$/.test(path)
       || path === '/run/xpanel/account-restores' || /^\/run\/xpanel\/account-restores\/[a-z][a-z0-9]{0,15}$/.test(path)) return operation === 'ensure-directory'
-    if (/^\/home\/[a-z][a-z0-9]{0,15}\/\.xpanel-backup-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.gz$/.test(path)
+    if (/^\/home[1-9]?[0-9]?\/[a-z][a-z0-9]{0,15}\/\.xpanel-backup-[0-9]{8}T[0-9]{6}Z(?:-[a-f0-9]{12})?\.tar\.gz$/.test(path)
       || /^\/run\/xpanel\/account-restores\/[a-z][a-z0-9]{0,15}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tar\.(?:gz|zst)$/.test(path)) return operation === 'remove'
     if (path === '/root/.ssh' || path === '/var/lib/xpanel-agent/security') return operation === 'ensure-directory'
     if (path === '/root/.ssh/authorized_keys' || path === '/var/lib/xpanel-agent/security/root-managed-keys.json' || path === '/var/lib/xpanel-agent/security/root-key-write.json') return operation === 'read' || operation === 'write' || operation === 'remove'
@@ -467,20 +566,34 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
     if (path === '/var/lib/xpanel/mail-quarantine' || /^\/var\/lib\/xpanel\/mail-quarantine\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\/stage)?$/.test(path)) return operation === 'ensure-directory'
     if (/^\/var\/lib\/xpanel\/mail-quarantine\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/stage\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.eml$/.test(path)) return operation === 'write' || operation === 'read' || operation === 'remove'
     if (path === '/var/lib/xpanel/acme-account' || path === '/var/lib/xpanel/acme-orders') return operation === 'ensure-directory'
+    // Root's own SSL storage (WHM SSL Storage Manager): one 0700 folder of 0600 keys, requests, certificates, request files and their index.
+    if (path === '/var/lib/xpanel/ssl-store') return operation === 'ensure-directory'
+    if (/^\/var\/lib\/xpanel\/ssl-store\/(?:index\.json|[a-z0-9][a-z0-9_-]{0,63}\.(?:key|csr|crt)|\.req-[0-9a-f]{16}\.cnf)$/.test(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
     if (path === '/var/lib/xpanel/acme-account/account-key.pem' || /^\/var\/lib\/xpanel\/acme-orders\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/.test(path)) return operation === 'read' || operation === 'write'
-    if (path === '/var/lib/xpanel-management-tls/status.json') return operation === 'read'
+    if (path === '/var/lib/xpanel-management-tls/status.json' || path === '/etc/xpanel/management-tls.json') return operation === 'read'
+    if (path === '/etc/xpanel/management-access.json' || path === '/etc/xpanel/management-access.next.json') return operation === 'read' || operation === 'write' || operation === 'remove'
     if (/^\/etc\/xpanel\/management-certificates\/[a-f0-9]{64}\/fullchain\.pem$/.test(path)) return operation === 'read'
     // Account termination removes the systemd control drop-ins of its slice and logind user slice.
     // Those trees sit outside the unit search path, so admit only the exact generated slice names.
     if (/^\/(?:etc|run)\/systemd\/system\.control\/xpanel-(?:[1-9][0-9]{3}|[1-5][0-9]{4}|60000)\.slice\.d$/.test(path)) return operation === 'remove'
-    if (path === '/home') return operation === 'ensure-directory'
+    if (/^\/home[1-9]?[0-9]?$/.test(path)) return operation === 'ensure-directory'
+    // Rearrange an Account: the copy in progress sits beside the homes of its destination root.
+    if (/^\/home[1-9]?[0-9]?\/\.xpanel-move-[a-z][a-z0-9]{0,15}$/.test(path)) return operation === 'remove'
     if (path === '/var/spool/postfix/opendkim') return operation === 'ensure-directory'
     // Root-operator quota setup only: the exact table and its timestamped backup.
     if (path === '/etc/fstab' || /^\/etc\/fstab\.bak\.[0-9]{8}T[0-9]{6}Z$/.test(path)) return operation === 'read' || operation === 'write'
+    // MySQL Root Password (db-maintenance.ts) keeps the root client file beside the root shell, as cPanel does.
+    if (path === '/root/.my.cnf') return operation === 'read' || operation === 'write'
+    // Manage MySQL Profiles (db-profiles.ts) owns these option files; activation replaces the admin client file.
+    if (path === '/etc/xpanel/db-profiles.json' || path === '/etc/xpanel/mariadb-admin.cnf') return operation === 'read' || operation === 'write'
+    if (/^\/etc\/xpanel\/db-profile-[a-z0-9][a-z0-9_-]{0,31}\.(?:cnf|pem)$/.test(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
+    if (path === '/root/.pgpass') return operation === 'read' || operation === 'write'
+    // Tweak Settings: SQL (db-server-config.ts) owns this one drop-in.
+    if (path === '/etc/mysql/mariadb.conf.d/90-xpanel.cnf' || path === '/etc/my.cnf.d/90-xpanel.cnf') return operation === 'read' || operation === 'write' || operation === 'remove'
     if (path === '/etc/opendkim.conf' || path.startsWith('/etc/opendkim.conf.bak.')) {
       return operation === 'read' || operation === 'write'
     }
-    if (['/etc/rspamd/local.d/actions.conf', '/etc/rspamd/local.d/greylist.conf', '/etc/rspamd/local.d/multimap.conf', '/etc/rspamd/local.d/xpanel_blocked_domains.map', '/etc/rspamd/local.d/settings.conf', '/etc/spamassassin/90-xpanel.cf', '/etc/mail/spamassassin/90-xpanel.cf'].includes(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
+    if (['/etc/rspamd/local.d/logging.inc', '/etc/rspamd/local.d/actions.conf', '/etc/rspamd/local.d/greylist.conf', '/etc/rspamd/local.d/multimap.conf', '/etc/rspamd/local.d/xpanel_blocked_domains.map', '/etc/rspamd/local.d/milter_headers.conf', '/etc/rspamd/local.d/settings.conf', '/etc/rspamd/local.d/worker-normal.inc',  '/etc/spamassassin/90-xpanel.cf', '/etc/mail/spamassassin/90-xpanel.cf'].includes(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
     if (path === '/etc/spamassassin/local.cf' || path === '/etc/mail/spamassassin/local.cf') return operation === 'read'
     if (SYSTEM_EXACT_TARGETS.has(path)) return true
     if (SYSTEM_CONFIG_PREFIXES.some((prefix) => path.startsWith(prefix))) return true
@@ -507,7 +620,7 @@ export interface TrustedHostTarget {
 const HOST_TARGET_OPERATIONS = new Set<HostTargetOperation>(['read', 'write', 'remove', 'ensure-directory'])
 const HOST_ACTION_KINDS: Readonly<Record<HostAction['kind'], true>> = {
   'ensure-group': true, 'ensure-user': true, 'delete-user': true, 'ensure-dir': true,
-  'remove-path': true, 'set-quota': true, 'systemd-daemon-reload': true,
+  'remove-path': true, 'set-quota': true, 'site-quota': true, 'systemd-daemon-reload': true,
   systemd: true, 'systemd-set-property': true, exec: true, sql: true,
 }
 
@@ -624,6 +737,20 @@ export class LinuxHostExecutor implements AgentExecutor {
       || isReadonlyQuotaObservation(argv)
     if (!observation) return authorizedHostEffect(this, work)
     return (async () => { await assertHostEffectAuthority(this); const result = await work(); await assertHostEffectAuthority(this); return result })()
+  }
+
+  private runQuotaCommand(argv: string[]): Promise<ConfigTestResult> {
+    assertValidCommandArgv(argv)
+    const command = [...argv]
+    Object.freeze(command)
+    // quotaon --print-state deliberately exits 1 when user accounting is active.
+    // Keep its real stderr separate from execFile's generic nonzero-exit message.
+    return this.authorizeCommand(command, () => new Promise<ConfigTestResult>(resolve => execFile('/usr/bin/env', ['LC_ALL=C', ...command], {
+      timeout: this.timeoutMs, maxBuffer: this.maxOutputBytes, windowsHide: true,
+    }, (error, stdout, stderr) => {
+      const code = error?.killed || error?.signal ? 124 : !error ? 0 : typeof error.code === 'number' ? error.code : 127
+      resolve({ ok: code === 0, code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') })
+    })))
   }
 
   private executeArgv(argv: string[], options?: Parameters<typeof execArgv>[1]): Promise<ConfigTestResult> {
@@ -906,20 +1033,11 @@ export class LinuxHostExecutor implements AgentExecutor {
       case 'remove-path':
         await this.removePath(action.path)
         return
+      case 'site-quota':
+        await applySiteQuota(argv => this.runQuotaCommand(argv), action)
+        return
       case 'set-quota': {
-        await applyObservedUserQuota(argv => {
-          assertValidCommandArgv(argv)
-          const command = [...argv]
-          Object.freeze(command)
-          // quotaon --print-state deliberately exits 1 when user accounting is active.
-          // Keep its real stderr separate from execFile's generic nonzero-exit message.
-          return this.authorizeCommand(command, () => new Promise<ConfigTestResult>(resolve => execFile('/usr/bin/env', ['LC_ALL=C', ...command], {
-            timeout: this.timeoutMs, maxBuffer: this.maxOutputBytes, windowsHide: true,
-          }, (error, stdout, stderr) => {
-            const code = error?.killed || error?.signal ? 124 : !error ? 0 : typeof error.code === 'number' ? error.code : 127
-            resolve({ ok: code === 0, code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') })
-          })))
-        }, action)
+        await applyObservedUserQuota(argv => this.runQuotaCommand(argv), action)
         return
       }
       case 'systemd-daemon-reload': {

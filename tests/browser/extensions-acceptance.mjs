@@ -33,7 +33,7 @@ const unreadCollectionOnlyRoutes = new Set(['/email/filters', '/email/spam-filte
 // Approved workspaces replaced these extension placeholders; the workspace renders the route instead.
 const workspaceRoutes = new Set(['/email/archive', '/email/encryption', '/email/calendars-contacts', '/preferences/team', '/health'])
 // These extension views now host a real workspace body (its own cards, forms and read states) inside the extension frame.
-const workspaceBodyRoutes = new Set(['/email/forwarders', '/email/filters', '/email/spam-filters', '/email/spam-quarantine', '/email/mailing-lists', '/preferences'])
+const workspaceBodyRoutes = new Set(['/email/forwarders', '/email/deliverability', '/email/filters', '/email/spam-filters', '/email/spam-quarantine', '/email/mailing-lists', '/preferences', '/preferences/users'])
 const typographyRoles = {
   caption: { size: 13, en: 20, ar: 22 }, label: { size: 14, en: 22, ar: 24 },
   body: { size: 16, en: 24, ar: 26 }, card: { size: 18, en: 28, ar: 30 },
@@ -171,7 +171,7 @@ async function measure(page, selector) {
       const paintedEdge = rtl ? c.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight) : c.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft)
       return [{ id: control.id, tag: control.tagName, type: control.getAttribute('type'), multiple: control.multiple === true, size: control.getAttribute('size'), gap: c.top - l.bottom, label_bounds: l, control_bounds: c, label_glyph_edge: edge(lg), painted_edge: paintedEdge, painted_edge_delta: Math.abs(edge(lg) - paintedEdge), direction: style.direction, text_align: style.textAlign, font_family: style.fontFamily, font_size: style.fontSize, font_weight: style.fontWeight, line_height: style.lineHeight, appearance: style.appearance, color: style.color, background_color: style.backgroundColor, box_sizing: style.boxSizing, min_block_size: style.minBlockSize, padding: { inline_start: style.paddingInlineStart, inline_end: style.paddingInlineEnd, block_start: style.paddingBlockStart, block_end: style.paddingBlockEnd }, borders: { inline_start: style.borderInlineStartWidth, inline_end: style.borderInlineEndWidth, block_start: style.borderBlockStartWidth, block_end: style.borderBlockEndWidth } }]
     })
-    const cards = [...parent.querySelectorAll('.xp-extension__card,.xp-resource-board__card')].filter(visible).map(card => {
+    const cards = [...parent.querySelectorAll('.xp-extension__card,.xp-resource-board__card,.xp-mail-card')].filter(visible).map(card => {
       const style = getComputedStyle(card), box = rect(card), first = rect(children(card)[0])
       return { bounds: box, padding: { inline_start: style.paddingInlineStart, inline_end: style.paddingInlineEnd, block_start: style.paddingBlockStart, block_end: style.paddingBlockEnd }, actual_content_start: first.left - box.left - parseFloat(style.borderLeftWidth), actual_content_end: box.right - first.right - parseFloat(style.borderRightWidth), actual_content_top: first.top - box.top - parseFloat(style.borderTopWidth), group_gaps: verticalGaps(card) }
     })
@@ -212,10 +212,10 @@ async function measure(page, selector) {
       ascii_digits: !/[\u0660-\u0669\u06f0-\u06f9]/.test(roots.map(region => region.textContent).join(' ')),
       collection_states: [...parent.querySelectorAll('[data-collection-state]')].map(element => element.dataset.collectionState),
       collection_rows: parent.querySelectorAll('.xp-extension__list > li').length,
-      check_states: [...parent.querySelectorAll('[data-check-state]')].map(element => element.dataset.checkState),
+      check_states: [...parent.querySelectorAll('[data-check-state],[data-mail-card-status]')].map(element => element.dataset.checkState ?? element.dataset.state),
       installer_states: [...parent.querySelectorAll('[data-installer-state]')].map(element => element.dataset.installerState),
       installer_progress: [...parent.querySelectorAll('[data-installer-progress]')].map(element => element.dataset.installerProgress),
-      buttons: [...parent.querySelectorAll('button')].filter(visible).map(element => ({ disabled: element.disabled, type: element.type })),
+      buttons: [...parent.querySelectorAll('button')].filter(visible).map(element => ({ disabled: element.disabled, type: element.type, read_only: [element.dataset.siteSoftwareAction, element.dataset.siteInstancesAction].includes('refresh') })),
       view_links: [...parent.querySelectorAll('nav a[data-nav-route]')].map(element => ({ route: element.dataset.navRoute, href: element.getAttribute('href'), current: element.getAttribute('aria-current') })),
       native_canvas: canvas ? { bounds: rect(canvas), title: canvas.querySelector('#xpanel-resources-heading')?.textContent, rows: canvas.querySelectorAll('tbody tr').length, slice_identity: canvas.textContent.includes('xpanel-20001.slice'), addon_gap: rect(parent).top - rect(canvas).bottom } : null,
       resource_state: parent.dataset.resourceReading ?? null,
@@ -285,7 +285,7 @@ function validateGeometry(observation, spec, width, locale, theme) {
   if (spec.family === 'store') {
     assert.deepEqual(observation.installer_states, ['unavailable'])
     assert.ok(observation.installer_progress.every(state => state === 'unread'))
-    assert.ok(observation.buttons.every(button => button.disabled && button.type === 'button'))
+    assert.ok(observation.buttons.every(button => (button.disabled || button.read_only) && button.type === 'button'), 'Only a read stays enabled before anything was read')
     const expected = storeRouteSpecs.filter(row => row.surface === spec.surface).map(row => row.route)
     assert.deepEqual(observation.view_links.map(link => link.route), expected)
     assert.equal(observation.view_links.filter(link => link.current === 'page').length, 1)
@@ -297,7 +297,8 @@ function validateGeometry(observation, spec, width, locale, theme) {
       assert.ok([...destination.searchParams.keys()].every(key => ['lang', 'theme', 'density', 'accountId'].includes(key)))
     }
   }
-  if (spec.route === '/email/deliverability' || spec.route === '/health') assert.deepEqual(observation.check_states, ['unread'])
+  // This fixture answers every API read with 404, so both cards must report the refused read and show no result.
+  if (spec.route === '/email/deliverability') assert.deepEqual(observation.check_states, ['failed', 'failed'], 'Neither mail card claims a read')
   if (placeholder && ['/email/forwarders', '/email/filters', '/email/spam-filters', '/email/spam-quarantine', '/email/mailing-lists', '/email/archive', '/email/encryption', '/email/calendars-contacts', '/preferences/team'].includes(spec.route)) assert.deepEqual(observation.collection_states, ['unread'])
   if (spec.family === 'resources') {
     assert.ok(observation.native_canvas?.slice_identity && observation.native_canvas.rows > 0, 'Existing native resource canvas remains present')

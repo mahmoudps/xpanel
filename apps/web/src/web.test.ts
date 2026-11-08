@@ -58,7 +58,7 @@ const whmFixture: WhmSurfaceProps = {
   accounts: [fixtureAccount, { ...fixtureAccount, id: 'fixture-other', username: 'omar', uid: 20016, gid: 20016 }], plans: [fixturePlan],
   featureLists: [fixtureFeatureList],
   services: ['nginx', 'apache', 'php-fpm', 'mariadb', 'dovecot', 'postfix', 'pdns', 'nftables'].map(name => ({ name, unit: `${name}.service`, version: 'fixture', active: true, enabled: true, rssMb: 24, role: 'Synthetic observation' })),
-  resellers: [{ id: 'fixture-reseller', username: 'fixture-reseller', acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 10240, totalBandwidthMb: 102400, oversell: false, nameservers: [], delegatedIps: [] }],
+  resellers: [{ id: 'fixture-reseller', username: 'fixture-reseller', acl: ['list-accounts'], maxAccounts: 5, totalDiskMb: 10240, totalBandwidthMb: 102400, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] }],
   ipPool: [{ id: 'fixture-ip', address: '10.0.0.12', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: 'Synthetic address' }],
   mailIpConfig: { mode: 'custom-map', defaultIpv4: fixtureAccount.ipv4, defaultIpv6: fixtureAccount.ipv6 ?? null, defaultHelo: 'mail.alice-shop.com', domainOverrides: [{ domainName: fixtureAccount.primaryDomain, ipv4: fixtureAccount.ipv4, ipv6: null, heloHostname: 'mail.alice-shop.com' }] },
   generations: [{ generationId: 142, at: fixtureAt, actor: 'synthetic-root', summary: 'Synthetic generation', stateChecksum: '9f86d081884c', filesCount: 38, durationMs: 184, status: 'superseded' }],

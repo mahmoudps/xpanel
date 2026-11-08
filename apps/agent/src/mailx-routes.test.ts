@@ -149,7 +149,7 @@ describe('mail policy agent routes', () => {
     expect(settings).toContain('apply { actions { add_header = 7.0; } }')
     expect(settings).not.toContain('other@shop.example')
     const state = await (await call('/host/mailx/accounts/alice/mailboxes', context(h)))!.json()
-    expect(state.mailboxes).toEqual([{ mailbox: 'archive@shop.example', preference: 'saved', native: 'applied', effects: { allowlist: true, filtering: false, score: true, blocklist: true, spamBox: true } }])
+    expect(state.mailboxes).toEqual([{ mailbox: 'archive@shop.example', preference: 'saved', native: 'applied', effects: { allowlist: true, filtering: false, score: true, blocklist: true, spamBox: true, autoDelete: false } }])
     h.disk.set(sieve, 'stale')
     before = await (await call('/host/mailx/accounts/alice/mailboxes', context(h)))!.json()
     expect(before.mailboxes[0].native).toBe('pending')
@@ -169,11 +169,11 @@ describe('mail policy agent routes', () => {
       list(6, { accountId: '00000000-0000-4000-8000-000000000009' }), list(7)])
     const h = host()
     h.disk.set('/etc/postfix/xpanel/virtual_aliases', '# managed by xPanel: forwarders and default addresses\nl1@shop.example\ta@remote.example\n')
-    const body = await (await call('/host/mailx/accounts/alice/lists', context(h)))!.json()
-    expect(body).toEqual({ observedAt: '2026-10-28T10:00:00.000Z', aliases: 'read', lists: [
+    const body = await (await call('/host/mailx/accounts/alice/lists', context(h, { listGateReady: () => false })))!.json()
+    expect(body).toEqual({ observedAt: '2026-10-28T10:00:00.000Z', aliases: 'read', moderation: false, lists: [
       { address: 'l1@shop.example', members: 1, state: 'delivering' }, { address: 'l2@shop.example', members: 1, state: 'restricted' }, { address: 'l3@shop.example', members: 0, state: 'empty' },
       { address: 'archive@shop.example', members: 1, state: 'conflict' }, { address: 'l5@shop.example', members: 1, state: 'review' }, { address: 'l7@shop.example', members: 1, state: 'pending' }] })
-    const off = await (await call('/host/mailx/accounts/alice/lists', context(h, { readSnapshot: async () => ({ ...snapshot, featureLists: [{ id: 'f1', disabled: ['Mailing Lists'] }] }) })))!.json()
+    const off = await (await call('/host/mailx/accounts/alice/lists', context(h, { listGateReady: () => false, readSnapshot: async () => ({ ...snapshot, featureLists: [{ id: 'f1', disabled: ['Mailing Lists'] }] }) })))!.json()
     expect(off.lists.map((row: { state: string }) => row.state)).toEqual(['disabled', 'disabled', 'disabled', 'disabled', 'disabled', 'disabled'])
     await lists([{ ...list(1), unexpected: true }])
     await rejects(call('/host/mailx/accounts/alice/lists', context(h)), 'PRECONDITION_FAILED')

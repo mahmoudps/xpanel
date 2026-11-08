@@ -23,6 +23,12 @@ export interface CapabilityEvidence {
   observedAt: string
 }
 
+/** Reviewed technical impossibility: the tool cannot exist on these profiles and is qualified on the others. */
+export interface ProfileExclusion {
+  profiles: readonly string[]
+  reason: string
+}
+
 export interface VerificationTarget {
   sourceFingerprint: string
   artifactSha256: string | null
@@ -32,6 +38,8 @@ export interface VerificationTarget {
 export interface CapabilityDelivery {
   status: ToolStatus
   reason: string
+  /** Present only while lab qualification mode opens the gate; it is never acceptance. */
+  admission?: 'qualification'
   /** Only observations matching the target and the full acceptance criterion are retained. */
   evidence: readonly CapabilityEvidence[]
 }

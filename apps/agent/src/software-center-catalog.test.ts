@@ -8,7 +8,7 @@ const everything = softwareCenterComponents(SUPPORTED_PHP_VERSIONS)
 describe('shipped software center catalog', () => {
   it('has a modest set of uniquely identified components with resolvable relations', () => {
     expect(SOFTWARE_CENTER_CATALOG.length).toBeGreaterThanOrEqual(15)
-    expect(SOFTWARE_CENTER_CATALOG.length).toBeLessThanOrEqual(30)
+    expect(SOFTWARE_CENTER_CATALOG.length).toBeLessThanOrEqual(36)
     const ids = everything.map(item => item.id)
     expect(new Set(ids).size).toBe(ids.length)
     for (const item of everything) {

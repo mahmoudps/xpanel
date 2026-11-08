@@ -200,6 +200,14 @@ describe('complete AXFR envelopes', () => {
     expect(() => parseObservedAxfr(invalid, zone)).toThrow()
     expect(() => parseObservedAxfr('x'.repeat(MAX_DNS_OBSERVATION_BYTES + 1), zone)).toThrow()
   })
+  it('leaves out the signing records PowerDNS adds to a DNSSEC zone transfer, and nothing else', () => {
+    const lines = axfr(records()).split('\n')
+    const signing = ['example.com. 3600 IN DNSKEY 257 3 13 mdsswUyr3DPW132mOi8V9xESWE8jTo0dxCjjnopKl+GqJxpVXckHAeF+KkxLbxILfDLUT0rAK9iUzy1L53eKGQ==',
+      'example.com. 3600 IN RRSIG SOA 13 2 3600 20261120000000 20261106000000 31415 example.com. c2lnbmF0dXJl', 'example.com. 3600 IN NSEC www.example.com. A NS SOA RRSIG NSEC DNSKEY']
+    lines.splice(1, 0, ...signing)
+    const signed = lines.join('\n').replace(/XFR size: (\d+) records/, (_match, count) => `XFR size: ${Number(count) + signing.length} records`)
+    expect(parseObservedAxfr(signed, zone)).toEqual(parseObservedAxfr(axfr(records()), zone))
+  })
   it('requires effective loopback binding and rejects duplicate configuration authority', () => {
     expect(effectiveBindBackend(`launch=bind\nbind-config=${DEFAULT_NAMED_ZONES_CONF}\n`)).toBe(true)
     expect(effectiveBindBackend(`launch=bind\nlaunch=bind\nbind-config=${DEFAULT_NAMED_ZONES_CONF}\n`)).toBe(false)

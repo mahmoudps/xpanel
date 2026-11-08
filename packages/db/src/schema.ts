@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { checksumOf, MIGRATIONS_DIR } from './migrate.ts'
 
-export const OPERATIONAL_MIGRATION_NAMES = ['0001_init.sql', '0002_mailbox_sessions.sql', '0003_job_references_reconcile.sql', '0004_host_metrics_observations.sql', '0005_team_sign_in.sql', '0006_panel_handoffs.sql'] as const
+export const OPERATIONAL_MIGRATION_NAMES = ['0001_init.sql', '0002_mailbox_sessions.sql', '0003_job_references_reconcile.sql', '0004_host_metrics_observations.sql', '0005_team_sign_in.sql', '0006_panel_handoffs.sql', '0007_reseller_oversell.sql', '0008_identity_factors.sql'] as const
 // The reference/identity contract remains version 3; additive metric, team and handoff migrations do not reissue identities.
 export const OPERATIONAL_SCHEMA_VERSION = 3
 
@@ -52,6 +52,9 @@ export const OPERATIONAL_TABLES = [
   'team_credentials',
   'team_sessions',
   'panel_handoffs',
+  'security_questions',
+  'security_verified_ips',
+  'external_identities',
   'config_generations',
   'upgrades',
   'jobs',

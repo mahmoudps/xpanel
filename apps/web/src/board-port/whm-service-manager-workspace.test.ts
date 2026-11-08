@@ -10,7 +10,7 @@ describe('service manager workspace', () => {
       for (const marker of ['data-sm-rows', 'data-sm-search', 'data-sm-filter', 'data-sm-refresh', 'data-sm-confirm', 'data-sm-reboot', 'data-sm-job-link']) expect(html).toContain(marker)
       for (const fact of ['services', 'active', 'boot-time', 'observed-at']) expect(html).toContain(`<bdi dir="ltr" data-sm-fact="${fact}">`)
       expect(html).toContain('<bdi dir="ltr">REBOOT SERVER</bdi>')
-      expect(html).toContain('PostgreSQL'); expect(html).toContain('Supervisor')
+      expect(html).not.toContain('Restart PostgreSQL'); expect(html).toContain('Supervisor')
       expect(html).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
       expect(html).toContain('gap:32px'); expect(html).toContain('gap:24px'); expect(html).toContain('gap:16px'); expect(html).toContain('gap:8px')
       expect(html).toContain('@media(min-width:601px){.xp-whm-service-manager__panel{padding:24px}}')

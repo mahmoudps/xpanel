@@ -24,7 +24,7 @@ const mimeFor = (from: string): string => [
 ].join('\r\n')
 
 describe('POST /host/dkim-sign', () => {
-  it('signs only the account From domain from the webmail send path', async () => {
+  it('signs only the account From domain from the webmail send path', { tags: ['slow'] }, async () => {
     const state = await createTestStateStore()
     const db = await createTestDb()
     const executor = new FakeHostExecutor()

@@ -18,6 +18,12 @@ describe('server settings authorization under the existing writer lease', () => 
     expect(await store.getServerSettings()).toEqual(source)
     expect((await store.readSnapshot()).server?.settings).toEqual(source)
   })
+  it('keeps the SSH block when a whole-settings writer does not carry it', async () => {
+    const store = await fixture(), ssh = { passwordAuth: true, pubkeyAuth: true, rootLogin: 'no' as const, loginAlarm: true, jail: { privateTmp: true, hiddenHomes: false, systemView: false, exceptions: [] } }
+    await store.saveServerSettings({ ...settings(), ssh })
+    await store.saveServerSettings({ ...settings(), hostname: 'renamed.example.test' })
+    expect(await store.getServerSettings()).toMatchObject({ hostname: 'renamed.example.test', ssh })
+  })
   it('passes current source to fresh authorization and preserves state after denial', async () => {
     const store = await fixture(), source = settings()
     await store.saveServerSettings(source)

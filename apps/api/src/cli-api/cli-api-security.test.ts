@@ -44,7 +44,7 @@ describe('xuapi / xwhmapi act as the kernel-named caller through the panel autho
     for (const [username, acl] of [['resellerone', ['list-accounts', 'manage-feature-lists']], ['resellertwo', []]] as const) {
       const reseller = await state.store.createReseller({
         username, passwordHash, acl: [...acl], maxAccounts: 10, totalDiskMb: 50000, totalBandwidthMb: 500000,
-        oversell: false, nameservers: [], delegatedIps: [],
+        oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [],
       })
       await createResellerPrincipal(db.db, { id: reseller.id, username, passwordHash })
     }

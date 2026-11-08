@@ -72,7 +72,7 @@ describe('production HTML authentication boundary', () => {
     const principal = await createResellerPrincipal(handle.db, { username: 'reseller', passwordHash: PUBLIC_VECTOR })
     const token = 'unprivileged-reseller-html-session'
     await createSession(handle.db, { principalId: principal.id, tokenHash: sha256Hex(token), expiresAt: new Date(Date.now() + 60_000).toISOString(), mfaVerified: true })
-    state.store.getReseller = async () => ({ id: principal.id, username: 'reseller', acl: [], maxAccounts: 'unlimited', totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited', oversell: false, nameservers: [], delegatedIps: [] })
+    state.store.getReseller = async () => ({ id: principal.id, username: 'reseller', acl: [], maxAccounts: 'unlimited', totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] })
     let reads = 0
     const original = state.store.readSnapshot.bind(state.store)
     state.store.readSnapshot = async () => { reads++; return original() }

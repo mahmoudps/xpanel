@@ -89,7 +89,7 @@ export async function readDbPackages(input: { family: DbFamily | null; run: DbRu
 }
 
 // redis.conf: one directive per line, "keyword arg …"; later lines override earlier ones; # starts a comment line.
-const redisTokens = (line: string): string[] => {
+export const redisTokens = (line: string): string[] => {
   const tokens: string[] = []
   for (const match of line.matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g)) tokens.push(match[1] ?? match[2] ?? match[3]!)
   return tokens

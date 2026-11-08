@@ -53,7 +53,7 @@ describe('account mail routing applied on the host through the agent', () => {
   beforeEach(async () => { f = await fixture() })
   afterEach(async () => { await f.state.close(); await f.database.close() })
 
-  it('applies a rejecting forwarder and a forwarding default address, and reports each as applied', async () => {
+  it('applies a rejecting forwarder and a forwarding default address, and reports each as applied', { tags: ['slow'] }, async () => {
     const domain = f.owner.primaryDomain
     const created = await f.call('/api/mail/forwarders', 'POST', { sourceAddress: `old@${domain}`, action: 'reject', rejectMessage: 'This address is no longer used' })
     expect(created.status).toBe(201)
@@ -79,7 +79,7 @@ describe('account mail routing applied on the host through the agent', () => {
     expect(f.file('/xpanel/virtual_aliases')).toBeNull()
   })
 
-  it('lists enabled autoresponders with their host state after a save through the vacation route', async () => {
+  it('lists enabled autoresponders with their host state after a save through the vacation route', { tags: ['slow'] }, async () => {
     const saved = await f.call('/api/webmail/vacation', 'PUT', { mailbox: f.inbox.login, enabled: true, subject: 'Planned maintenance', body: 'We are back at 06:00 UTC.',
       htmlBody: '', startDate: '2026-10-24T00:00:00.000Z', endDate: '2026-10-25T06:00:00.000Z', replyIntervalHours: 8 })
     expect(saved.status).toBe(200)
@@ -94,7 +94,7 @@ describe('account mail routing applied on the host through the agent', () => {
     expect(f.file('/info/.dovecot.sieve')).toBeNull()
   })
 
-  it('answers for an address without a mailbox, edits it in place and removes it, with host state', async () => {
+  it('answers for an address without a mailbox, edits it in place and removes it, with host state', { tags: ['slow'] }, async () => {
     const domain = f.owner.primaryDomain, address = `sales@${domain}`
     const fields = { enabled: true, subject: 'Thanks for writing', body: 'We answer within a day.', htmlBody: '', startDate: null, endDate: null, replyIntervalHours: 24 }
     const created = await f.call('/api/mail/autoresponders', 'PUT', { address, ...fields, expectedRevision: null })
@@ -120,7 +120,7 @@ describe('account mail routing applied on the host through the agent', () => {
     expect(f.file('/xpanel/virtual_aliases')).not.toContain('autoreply.xpanel.invalid')
   })
 
-  it('installs a mailbox filter, and restores the previous rules when the Sieve check fails', async () => {
+  it('installs a mailbox filter, and restores the previous rules when the Sieve check fails', { tags: ['slow'] }, async () => {
     const scope = { scope: 'mailbox', mailbox: f.inbox.login }
     const read = async () => (await f.call(`/api/mail/filters?scope=mailbox&mailbox=${encodeURIComponent(f.inbox.login)}`)).body
     const created = await f.call('/api/mail/filters', 'POST', { ...scope, name: 'Suppliers', conditions: [{ field: 'from', comparator: 'contains', value: '@atlas-pack.example' }],

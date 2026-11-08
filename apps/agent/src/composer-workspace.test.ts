@@ -95,9 +95,9 @@ describe('Composer protected project observation', () => {
     const f = fixture(); expect((await read(f.ctx, '', 'POST'))!.status).toBe(405); expect(f.run).not.toHaveBeenCalled()
     const url = new URL('http://local/other'); expect(await handleComposerWorkspaceRoute(new Request(url), url, 'GET', f.ctx)).toBeNull()
   })
-  it('keeps the new Composer transaction routes unavailable without the qualified native provider', async () => {
+  it('keeps the Composer job routes unavailable without the job runner', async () => {
     const f = fixture(), url = new URL('http://local/host/composer/jobs/preview')
-    await expect(handleComposerWorkspaceRoute(new Request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'install', domainId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }) }), url, 'POST', f.ctx)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false } })
+    await expect(handleComposerWorkspaceRoute(new Request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'install', domainId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', phpVersion: null, mirror: null }) }), url, 'POST', f.ctx)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false } })
     expect(f.run).not.toHaveBeenCalled(); expect(f.list).not.toHaveBeenCalled()
   })
 })

@@ -307,6 +307,13 @@ static struct {
 
 static void discard_tree_at(int parent_fd, const char *name, int depth);
 
+/* A worker killed at its timeout cannot clean up. Workers live 120 s at most, so an hour-old staging entry has no owner. */
+#define XP_STALE_STAGING_SECONDS 3600
+static void sweep_stale_staging(int parent_fd, const char *name) {
+  struct stat st;
+  if (fstatat(parent_fd, name, &st, AT_SYMLINK_NOFOLLOW) == 0 && time(NULL) - st.st_mtime >= XP_STALE_STAGING_SECONDS) discard_tree_at(parent_fd, name, 0);
+}
+
 /* reason is an optional stable machine code for a refusal that the error code alone does not name. */
 static void respond_failure(const char *code, int err_num, const char *reason, const char *msg) __attribute__((noreturn));
 static void respond_failure(const char *code, int err_num, const char *reason, const char *msg) {
@@ -1251,7 +1258,10 @@ static void op_list(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_l
     const char *dname = de->d_name;
     if (strcmp(dname, ".") == 0 || strcmp(dname, "..") == 0) continue;
     if (path_len == 0 && strcmp(dname, ".trash") == 0) continue;
-    if (strncmp(dname, ".xpanel-tmp-", 12) == 0) continue;
+    if (strncmp(dname, ".xpanel-tmp-", 12) == 0) {
+      sweep_stale_staging(dirfd(dirp), dname);
+      continue;
+    }
     if (!show_hidden && dname[0] == '.') continue;
 
     struct stat st;
@@ -2707,8 +2717,7 @@ static void discard_tree_at(int parent_fd, const char *name, int depth) {
 }
 
 /* Copies a file or tree into a hidden staging name, then publishes it with one no-replace rename.
- * shortcut: a worker killed at its timeout leaves the hidden staging tree behind, as an interrupted
- * publish does; add a sweep of stale .xpanel-tmp- entries if that shows up in real use. */
+ * A worker killed at its timeout leaves the hidden staging tree behind until a listing sweeps it. */
 static void op_copy(int home_dirfd, uid_t uid, const JsonVal *req, int64_t max_file_mode, int64_t max_dir_mode, int64_t max_list_entries) {
   const char *path = NULL, *destination = NULL;
   read_source_and_destination(req, "copy", &path, &destination);

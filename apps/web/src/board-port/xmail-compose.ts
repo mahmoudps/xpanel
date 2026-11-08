@@ -572,7 +572,7 @@ export const renderCompose = (model: ComposeModel): string => {
       <section id="filters" aria-labelledby="filters-title" style="display: flex; flex-direction: column; gap: 12px; padding: 20px; border-radius: 12px; border: 1px solid light-dark(#E2E6EC,var(--xp-border)); background: light-dark(#FFFFFF,var(--xp-bg-surface))">
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap"><h2 id="filters-title" style="margin: 0; font-size: 16px; font-weight: 600">${t('Filters')}</h2><span style="font-size: 12px; color: light-dark(#5D6B7E,var(--xp-text-muted))">${escapeHtml(model.filterCount)}</span></div>
         <ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">${model.filterRules}</ol>
-        <div style="display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap"><button type="button"${model.product ? ' disabled' : ''} style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: light-dark(#1D5BD6,var(--xp-accent)); font-family: inherit; font-size: 14px; font-weight: 600">${t('Add filter')}</button><button type="button"${model.product ? ' disabled' : ''} style="min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#101828,var(--xp-text-primary)); font-family: inherit; font-size: 14px; font-weight: 600">${t('Manage filters')}</button>${unwired}</div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap">${unwired}</div>
       </section>
     </aside>
   </main>

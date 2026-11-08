@@ -15,7 +15,7 @@ describe('container workspaces', () => {
     for (const locale of ['en', 'ar'] as const) {
       document.body.innerHTML = renderSwContainersWorkspace({ locale, canRead: true, canManage: true }) + renderSwContainerEngineWorkspace({ locale, canRead: true, canManage: false })
       expect(document.querySelector<HTMLElement>('[data-sw-containers]')!.dir).toBe(locale === 'ar' ? 'rtl' : 'ltr')
-      expect(document.querySelectorAll('button:disabled').length).toBe(7)
+      expect(document.querySelectorAll('button:disabled').length).toBe(23)
       expect(document.body.textContent).not.toMatch(/[٠-٩۰-۹]/)
     }
   })

@@ -1,10 +1,12 @@
 import { classicSoftwareClientTemplates } from './software-client-templates.ts'
 import { type Locale, type MessageValues, SOURCE_LOCALE, translator, localeDirection } from '../i18n.ts'
 import { escapeHtml } from '../tokens.ts'
+import { renderToolCard } from './tool-card-view.ts'
+import { projectsCard } from '../models/tool-cards.ts'
 
 /**
- * /whm/software/application-projects: Go and Java runtimes observed from the package database. Project
- * creation and process control stay visible but unavailable until a confined per-account service runner exists.
+ * /whm/software/application-projects: Go and Java runtimes observed from the package database, and the
+ * projects themselves: one service each, in the account slice, driven by the shared panel-tools client.
  */
 export function renderSwAppProjectsWorkspace(input: { locale: Locale; canRead: boolean }): string {
   const t = (message: string, values?: MessageValues): string => escapeHtml(translator(input.locale)(message, values))
@@ -18,11 +20,7 @@ export function renderSwAppProjectsWorkspace(input: { locale: Locale; canRead: b
     <p class="xp-whm-detail-status" role="status" data-sw-projects-status data-state="unread">${t('Runtimes have not been read.')}</p>
     ${table(t('Go and Java runtimes'), [t('Runtime'), t('State'), t('Installed version')], 'runtimes', t('No runtimes have been read.'))}
   </section>
-  <section class="xp-whm-detail-card" aria-labelledby="sw-projects-list"><h2 id="sw-projects-list">${t('Go & Java projects')}</h2>
-    <p class="xp-whm-detail-status" role="status">${t('Projects are unavailable: running a Go binary or Java archive for an account needs a confined per-account service runner with resource limits and a reverse-proxy binding, which is not connected. No project is created or started here.')}</p>
-    ${table(t('Go & Java projects'), [t('Project'), t('Account'), t('Runtime'), t('Port'), t('State'), t('Actions')], 'rows', t('No projects exist.'))}
-    <div class="xp-whm-detail-actions"><button type="button" class="xp-btn xp-btn--primary" disabled>${t('Create project')}</button><button type="button" class="xp-btn" disabled>${t('Start')}</button><button type="button" class="xp-btn" disabled>${t('Stop')}</button></div>
-  </section>
+  ${renderToolCard({ locale: input.locale, canManage: input.canRead }, projectsCard)}
 ${classicSoftwareClientTemplates('projects')}
 </div>`
 }

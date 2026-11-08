@@ -14,14 +14,14 @@ import { handleWebDirectivesRoute } from './web-directives-workspace.ts'
 // parser and the loopback probe are declared test transports.
 const ACCOUNT = '11111111-1111-4111-8111-111111111111', DOMAIN = '22222222-2222-4222-8222-222222222222'
 const account = { id: ACCOUNT, username: 'alice', planId: '33333333-3333-4333-8333-333333333333', status: 'active' } as Account
-const domain = { id: DOMAIN, accountId: ACCOUNT, name: 'example.test' } as Domain
+const domain = { id: DOMAIN, accountId: ACCOUNT, name: 'example.test', siteType: 'php', php: { handler: 'fpm' } } as Domain
 const root = { principal: { kind: 'root', id: 'root-principal', username: 'root' }, apiTokenId: null, scopes: [] } as unknown as AuthenticatedCaller
 const owner = { principal: { kind: 'user', id: 'user-principal', username: 'alice', accountId: ACCOUNT }, apiTokenId: null, scopes: [] } as unknown as AuthenticatedCaller
 const original = '# keep\r\nRewriteEngine On\r\nRewriteRule ^index\\.php$ - [L]\r\n'
 const directories: string[] = []
 afterEach(async () => { for (const directory of directories.splice(0)) { if (dirname(resolve(directory)) !== resolve(tmpdir()) || !basename(directory).startsWith('xpanel-web-directives-')) throw new Error('unsafe test cleanup'); await rm(directory, { recursive: true, force: true }) } })
 
-async function fixture(options: { content?: string | null; engine?: string; probes?: number[]; disabled?: string[]; caller?: AuthenticatedCaller } = {}) {
+async function fixture(options: { content?: string | null; engine?: string; probes?: number[]; disabled?: string[]; caller?: AuthenticatedCaller; mpm?: string } = {}) {
   const historyDir = await mkdtemp(join(tmpdir(), 'xpanel-web-directives-')); directories.push(historyDir)
   const target: HtaccessTarget = { accountId: ACCOUNT, domainId: DOMAIN, username: 'alice', domainName: 'example.test', home: '/home/alice', docRoot: '/home/alice/public_html', path: 'public_html/.htaccess', engine: options.engine ?? 'apache', backendPort: 8080, phpHandler: 'fpm', active: true }
   let tick = 0
@@ -42,7 +42,7 @@ async function fixture(options: { content?: string | null; engine?: string; prob
     catch (error) { if (!isXpanelError(error)) throw error; return Response.json({ error: { message: error.message, details: error.detail } }, { status: error.code === 'CONFLICT' ? 409 : error.code === 'VALIDATION' ? 422 : 412 }) }
   })
   const store = { getDomain: async (id: string) => id === DOMAIN ? domain : null, getAccount: async (id: string) => id === ACCOUNT ? account : null,
-    getPlan: async () => ({ featureListId: 'list' }), getFeatureList: async () => ({ disabled: options.disabled ?? [] }) } as unknown as StateStore
+    getPlan: async () => ({ featureListId: 'list' }), getFeatureList: async () => ({ disabled: options.disabled ?? [] }), getServerSettings: async () => ({ apacheMpm: options.mpm ?? 'itk' }) } as unknown as StateStore
   const access = vi.fn(async () => undefined)
   const ports = { store, requireCaller: async () => options.caller ?? root, assertCanAccessAccount: access, readJsonBody: async (req: Request) => await req.json() as Record<string, unknown>, callAgent }
   const route = (feature: string, method = 'GET', body?: unknown, search = '') => {
@@ -84,7 +84,7 @@ describe('web directives over the checked .htaccess workspace', () => {
     expect(failing.file()!.content).toBe(original); expect(failing.writes).toHaveBeenCalledTimes(2)
   })
   it('refuses stale revisions, field errors, extra keys and no-op saves before any write', async () => {
-    const t = await fixture(), current = await t.readJson('ip-blocker'), hotlink = await t.readJson('hotlink')
+    const t = await fixture(), current = await t.readJson('error-pages'), hotlink = await t.readJson('hotlink')
     expect(hotlink.model).toEqual({ enabled: false, allowedHosts: ['example.test', 'www.example.test'], extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'], allowEmptyReferrer: true, redirectUrl: null })
     await expect(t.route('redirects', 'PUT', { expectedRevision: 'f'.repeat(64), model: { entries: [{ status: 301, path: '/a', target: 'https://example.org/' }] } })).rejects.toMatchObject({ code: 'CONFLICT', detail: { stateChanged: false } })
     await expect(t.route('redirects', 'PUT', { expectedRevision: current.document.revision, model: { entries: [{ status: 301, path: '/a\nProxyPass / http://internal/', target: 'https://example.org/' }] } })).rejects.toMatchObject({ code: 'VALIDATION', detail: { fields: [{ field: 'entries.0.path', code: 'path' }] } })
@@ -92,19 +92,24 @@ describe('web directives over the checked .htaccess workspace', () => {
     await expect(t.route('redirects', 'PUT', { expectedRevision: current.document.revision, model: { entries: [] } })).rejects.toMatchObject({ code: 'VALIDATION', detail: { fields: [{ field: 'model', code: 'unchanged' }] } })
     await expect(t.route('redirects', 'GET', undefined, '?path=/etc')).rejects.toMatchObject({ code: 'VALIDATION' })
     await expect(t.route('redirects', 'POST', {})).rejects.toMatchObject({ code: 'VALIDATION' })
-    expect(await t.route('handlers')).toBeNull(); expect(await t.route('RewriteRule')).toBeNull()
+    expect(await t.route('ip-blocker')).toBeNull(); expect(await t.route('RewriteRule')).toBeNull()
     expect(t.writes).not.toHaveBeenCalled()
   })
-  it('keeps policy-refused, conflicted and non-Apache features unavailable', async () => {
-    const t = await fixture()
-    const blocked = await t.readJson('ip-blocker')
-    expect(blocked.capabilities).toEqual({ canSave: false, reason: 'policy' })
-    await expect(t.route('ip-blocker', 'PUT', { expectedRevision: blocked.document.revision, model: { entries: ['192.0.2.1'] } })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { reason: 'policy' } })
+  it('maps account handlers next to the read-only system mapping and keeps CGI to the per-account identity', async () => {
+    const prefork = await fixture({ mpm: 'prefork' }), before = await prefork.readJson('handlers')
+    expect(before).toMatchObject({ feature: 'handlers', model: { entries: [] }, system: [{ handler: 'php-fpm', extensions: ['.php'] }], capabilities: { canSave: true, reason: null } })
+    await expect(prefork.route('handlers', 'PUT', { expectedRevision: before.document.revision, model: { entries: [{ handler: 'server-parsed', extensions: ['.shtml'] }, { handler: 'cgi-script', extensions: ['.pl'] }] } })).rejects.toMatchObject({ code: 'VALIDATION', detail: { fields: [{ field: 'entries.1.handler', code: 'handler_requires_itk' }] } })
+    await expect(prefork.route('handlers', 'PUT', { expectedRevision: before.document.revision, model: { entries: [{ handler: 'default-handler', extensions: ['.php'] }] } })).rejects.toMatchObject({ code: 'VALIDATION', detail: { fields: [{ field: 'entries.0.extensions.0', code: 'system_extension' }] } })
+    expect(prefork.writes).not.toHaveBeenCalled()
+    const t = await fixture(), current = await t.readJson('handlers')
+    const saved = await (await t.route('handlers', 'PUT', { expectedRevision: current.document.revision, model: { entries: [{ handler: 'cgi-script', extensions: ['.pl'] }] } }))!.json()
+    expect(saved).toMatchObject({ managed: true, model: { entries: [{ handler: 'cgi-script', extensions: ['.pl'] }] }, system: [{ handler: 'php-fpm', extensions: ['.php'] }], application: { status: 'saved', syntaxChecked: true } })
+    expect(t.file()!.content).toBe('# BEGIN xPanel handlers\r\nOptions +ExecCGI\r\nAddHandler cgi-script .pl\r\n# END xPanel handlers\r\n' + original)
     const conflicted = await fixture({ content: '# BEGIN xPanel redirects\nRedirect 301 /a https://example.org/\n' })
     expect(await conflicted.readJson('error-pages')).toMatchObject({ conflict: { code: 'marker_unbalanced', line: 1 }, capabilities: { canSave: false, reason: 'conflict' } })
     const nginx = await fixture({ engine: 'nginx' })
     expect((await nginx.readJson('hotlink')).capabilities).toEqual({ canSave: false, reason: 'engine' })
-    expect(conflicted.writes).not.toHaveBeenCalled(); expect(nginx.writes).not.toHaveBeenCalled(); expect(t.writes).not.toHaveBeenCalled()
+    expect(conflicted.writes).not.toHaveBeenCalled(); expect(nginx.writes).not.toHaveBeenCalled()
   })
   it('enforces the feature plan entry for account owners before reading', async () => {
     const t = await fixture({ caller: owner, disabled: ['hotlink-protection'] })
