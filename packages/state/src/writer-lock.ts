@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { HOST_OPERATION_IN_FLIGHT, isBackgroundStateWrite } from './background-write.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { constants } from 'node:fs'
 import { chmod, chown, lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises'
@@ -88,6 +89,7 @@ export class WriterLock {
   private readonly retryIntervalMs: number
   private readonly isPidAlive: (pid: number) => boolean
   private recoverAccountContactProjection: WriterLockOptions['recoverAccountContactProjection']
+  private hostOperationProbe: (() => Promise<boolean>) | undefined
   constructor(stateDir: string, opts: WriterLockOptions = {}) {
     this.stateDir = resolve(stateDir)
     this.acquireTimeoutMs = assertInt(opts.acquireTimeoutMs ?? 15_000, 0, 600_000, 'acquireTimeoutMs')
@@ -129,6 +131,10 @@ export class WriterLock {
     } catch (error) { try { await guard?.release() } finally { await pin.close() }; throw error }
   }
   /** Trusted startup wiring; installing a port does not itself acquire or recover a lease. */
+  /** Startup registers the control-database read of live host operations that bind a desired-state revision. */
+  registerHostOperationProbe(probe: () => Promise<boolean>): void {
+    this.hostOperationProbe = probe
+  }
   registerAccountContactProjectionRecovery(repair: NonNullable<WriterLockOptions['recoverAccountContactProjection']>): void {
     this.recoverAccountContactProjection = repair
   }
@@ -435,6 +441,12 @@ export class WriterLock {
   }
   async acquire(opts?: { acquireTimeoutMs?: number }): Promise<WriterLease> {
     const guard = await this.guard(opts?.acquireTimeoutMs)
+    // Under the mutex: a live host operation bound to this revision keeps it; a background write waits for its next run.
+    if (isBackgroundStateWrite() && this.hostOperationProbe) {
+      let busy = true
+      try { busy = await this.hostOperationProbe() } finally { if (busy) await guard.release() }
+      if (busy) return fail('CONFLICT', 'a host operation is bound to the current desired state; this background write waits for it', { reason: HOST_OPERATION_IN_FLIGHT, stateChanged: false })
+    }
     return this.acquireGuarded(guard, true)
   }
   /** A caller requiring a clean existing authority must never repair an orphan

@@ -203,7 +203,9 @@ export async function handleAccountProvisioning(input: AccountProvisioningHandle
       account: loaded.account,
       scope: { accountId: loaded.account.id, resellerId: loaded.account.ownerId },
     }, { signal: input.request.signal, assertAuthority })
-    await assertAuthority()
+    // A known failure without a host effect claims nothing; the API decides whether its request runs again.
+    const result = reply?.reconciliation as { status?: unknown; stateChanged?: unknown } | null | undefined
+    if (result?.status !== 'failed' || result.stateChanged !== false) await assertAuthority()
     if (!reply || typeof reply !== 'object' || reply.reconciliation == null) {
       fail('PRECONDITION_FAILED', 'a null reconciliation is not a verified host effect', {
         stateChanged: true, verificationRequired: true, freshExecution: false,

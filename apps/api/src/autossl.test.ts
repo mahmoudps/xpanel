@@ -2,7 +2,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
+import { atomicWriteJson, HOST_OPERATION_IN_FLIGHT, readJsonIfExists } from '@xpanel/state'
+import { fail } from '@xpanel/core'
 import { services } from '@xpanel/render'
 import { AUTOSSL_DEFAULT } from '../../agent/src/mail-cert-policy.ts'
 import { AUTOSSL_STATE, autoSslCandidates, autoSslReportable, caaAllows, nextAutoSslRun, readAutoSslScheduler, requestAutoSslRun, runAutoSslTick } from './autossl.ts'
@@ -111,6 +112,30 @@ describe('AutoSSL ticks', { tags: ['unit'] }, () => {
     const row = (await state()).queue[0]!
     expect(row).toMatchObject({ attempts: 1, lastCode: 'dns_unresolved' })
     expect(Date.parse(row.nextAttemptAt)).toBe(NOW.getTime() + 86_400_000)
+  })
+  it('places no order while an account provisioning runs, and orders on the next tick', async () => {
+    await due()
+    let running = true
+    const { ports, issued, saveCertificateBinding } = harness(snapshot([domain('new.test', null)], []), { hostOperation: async () => running })
+    await runAutoSslTick(ports)
+    expect(issued).not.toHaveBeenCalled()
+    expect(saveCertificateBinding).not.toHaveBeenCalled()
+    expect((await state()).queue).toMatchObject([{ domain: 'new.test', attempts: 0 }])
+    running = false
+    await runAutoSslTick(ports)
+    expect(saveCertificateBinding).toHaveBeenCalledOnce()
+    expect((await state()).queue).toEqual([])
+  })
+  it('keeps a binding the writer lock deferred for a host operation in the queue, without a back-off', async () => {
+    await due()
+    const { ports, issued } = harness(snapshot([domain('new.test', null)], []))
+    const deferred = vi.fn(async () => fail('CONFLICT', 'a host operation is bound to the current desired state', { reason: HOST_OPERATION_IN_FLIGHT, stateChanged: false }))
+    await runAutoSslTick({ ...ports, store: { ...ports.store, saveCertificateBinding: deferred } as unknown as AutoSslPorts['store'] })
+    expect(issued).toHaveBeenCalledOnce()
+    expect(ports.reconcile).not.toHaveBeenCalled()
+    const after = await state()
+    expect(after.log[0]).toMatchObject({ domain: 'new.test', result: 'deferred', code: HOST_OPERATION_IN_FLIGHT })
+    expect(after.queue).toMatchObject([{ domain: 'new.test', attempts: 0, nextAttemptAt: NOW.toISOString() }])
   })
   it('places one order each tick', async () => {
     await due()

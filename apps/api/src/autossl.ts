@@ -5,7 +5,7 @@ import { fail, isXpanelError, redactInlineSecrets } from '@xpanel/core'
 import type { Account, Certificate, Domain } from '@xpanel/core'
 import { services } from '@xpanel/render'
 import { validateCertificateRenewalTarget } from '@xpanel/agent'
-import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
+import { atomicWriteJson, backgroundStateWrite, HOST_OPERATION_IN_FLIGHT, readJsonIfExists } from '@xpanel/state'
 import type { StateStore } from '@xpanel/state'
 import { workspaceJson } from './account-ssh-workspace.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
@@ -131,6 +131,8 @@ export interface AutoSslPorts {
   resolves?: (name: string) => Promise<boolean>
   seed: string
   now?: () => Date
+  /** True while a host operation is bound to the current desired-state revision; no order is placed then. */
+  hostOperation?: () => Promise<boolean>
 }
 const LEVEL_RESULTS: Readonly<Record<AutoSslNotifyLevel, readonly AutoSslResult[]>> = { all: ['issued', 'renewed', 'skipped', 'deferred', 'failed'], problems: ['skipped', 'deferred', 'failed'], failures: ['failed'], none: [] }
 export const autoSslReportable = (rows: readonly AutoSslLogRow[], level: AutoSslNotifyLevel): AutoSslLogRow[] => rows.filter(row => LEVEL_RESULTS[level].includes(row.result))
@@ -153,17 +155,18 @@ async function attempt(ports: AutoSslPorts, row: AutoSslQueueRow): Promise<{ res
   try {
     const material = await requestAcmeMaterial(ports.call, account.username, { domain: domain.name, expectedRevision, ...(renewal ? { certificateId: renewal.certificateId } : {}) })
     if ((renewal && material.id !== renewal.certificateId) || JSON.stringify([...material.names].sort()) !== JSON.stringify([...names].sort())) return { result: 'failed', code: 'names_differ', message: 'The issued certificate does not match the reviewed names.' }
-    await store.saveCertificateBinding({ ...material, accountId: account.id, source: 'acme', challenge: 'http-01', autoRenew: true }, domain.id, { expectedRevision, certificateGuard: async (current, domains) => {
+    await backgroundStateWrite(() => store.saveCertificateBinding({ ...material, accountId: account.id, source: 'acme', challenge: 'http-01', autoRenew: true }, domain.id, { expectedRevision, certificateGuard: async (current, domains) => {
       const fresh = domains.find(item => item.id === domain.id && item.accountId === account.id && item.name === domain.name)
       if (!fresh) throw new Error('certificate domain changed')
       if (renewal) validateCertificateRenewalTarget({ certificateId: renewal.certificateId, certificate: current, accountId: account.id, domain: fresh, domains })
       else if (current) throw new Error('fresh certificate identity already exists')
-    } })
+    } }))
     const applied = await ports.reconcile()
     await ports.audit({ action: renewal ? 'certificate.renewed' : 'certificate.issued', target: 'domain:' + domain.name, outcome: 'ok', detail: { certificateId: material.id, names: material.names, notAfter: material.notAfter, automatic: true } })
     return applied ? { result: renewal ? 'renewed' : 'issued', code: null, message: `Valid until ${material.notAfter}.` }
       : { result: 'failed', code: 'apply_unverified', message: 'The certificate was saved, but its configuration could not be confirmed.' }
   } catch (error) {
+    if (isXpanelError(error) && error.detail.reason === HOST_OPERATION_IN_FLIGHT) return { result: 'deferred', code: HOST_OPERATION_IN_FLIGHT, message: 'An account was being created. The order is placed again on the next run.' }
     if (isXpanelError(error)) return { result: 'failed', code: String(error.detail.reason ?? error.code).slice(0, 64), message: clip(error.message) }
     return { result: 'failed', code: 'order_failed', message: 'The order could not be completed.' }
   }
@@ -197,12 +200,14 @@ export async function runAutoSslTick(ports: AutoSslPorts): Promise<void> {
     state.queue.splice(QUEUE_MAX)
     return state.queue.find(row => Date.parse(row.nextAttemptAt) <= now.getTime()) ?? null
   })
-  if (next) {
+  // No order while a host operation runs: the binding would wait for it anyway (backgroundStateWrite), so the order is not spent.
+  if (next && !await ports.hostOperation?.()) {
     const outcome = await attempt(ports, next).catch(() => ({ result: 'failed' as const, code: 'order_failed', message: 'The order could not be completed.' }))
     const entry: AutoSslLogRow = { at: now.toISOString(), trigger: next.trigger, username: next.username, domain: next.domain, ...outcome }
     await changeState(ports.store, state => {
       const row = state.queue.find(item => item.domain === next.domain)
-      if (row && (outcome.result === 'deferred' || outcome.result === 'failed') && row.attempts < 8) { row.attempts++; row.lastCode = outcome.code; row.nextAttemptAt = retryAt(now, row.attempts) }
+      if (row && outcome.code === HOST_OPERATION_IN_FLIGHT) row.nextAttemptAt = now.toISOString()
+      else if (row && (outcome.result === 'deferred' || outcome.result === 'failed') && row.attempts < 8) { row.attempts++; row.lastCode = outcome.code; row.nextAttemptAt = retryAt(now, row.attempts) }
       else state.queue = state.queue.filter(item => item.domain !== next.domain)
       const cutoff = now.getTime() - LOG_DAYS * DAY_MS
       state.log = [entry, ...state.log.filter(item => Date.parse(item.at) >= cutoff)].slice(0, LOG_MAX)

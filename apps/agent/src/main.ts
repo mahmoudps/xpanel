@@ -8,10 +8,10 @@ import { chmod, chown, mkdir, readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { captureMfaRuntimePolicy, fail } from '@xpanel/core'
-import { appendAudit, createDb, initializeOperationalMetadata, migrate, pruneMetricsHistory, recordHostMetricsSample } from '@xpanel/db'
+import { appendAudit, createDb, hostOperationInFlight, initializeOperationalMetadata, migrate, pruneMetricsHistory, recordHostMetricsSample } from '@xpanel/db'
 import { detectOs, XPANEL_FPM_SOCKET_DIR } from '@xpanel/os'
 import type { XpanelOsProfile } from '@xpanel/os'
-import { StateStore, atomicWriteJson, readJsonIfExists } from '@xpanel/state'
+import { StateStore, atomicWriteJson, backgroundStateWrite, readJsonIfExists } from '@xpanel/state'
 import { createProductionAccountFileRunner, DEFAULT_FILE_WORKER_INCIDENT_DIR } from './production-file-runner.ts'
 import { CanonicalIoResourcePipeline, IoAnalyticsEngine, readWebsiteAnalyticsStore, WEBSITE_ANALYTICS_PATH, WebsiteAnalyticsEngine } from './analytics.ts'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from './executor.ts'
@@ -263,6 +263,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         await initializeOperationalMetadata(dbHandle.db)
 
         const store = new StateStore(stateDir)
+        store.registerHostOperationProbe(() => hostOperationInFlight(dbHandle.db))
         const mariadbAdminCnfPath =
           opts.mariadbAdminCnfPath ?? process.env.XPANEL_MARIADB_ADMIN_CNF ?? DEFAULT_MARIADB_ADMIN_CNF
         const mariaDbOptions = {
@@ -327,7 +328,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
           afterCollect: async collected => {
             try {
               await enforceBandwidthLimits(await bandwidthMeter!.report(), await store.readSnapshot(), {
-                setLimits: (changes, expectedRevision) => withLifecycleWriterAdmission(() => store.setBandwidthLimits(changes, expectedRevision === undefined ? {} : { expectedRevision })),
+                setLimits: (changes, expectedRevision) => withLifecycleWriterAdmission(() => backgroundStateWrite(() => store.setBandwidthLimits(changes, expectedRevision === undefined ? {} : { expectedRevision }))),
                 audit: entry => withLifecycleWriterAdmission(() => appendAudit(dbHandle.db, entry)),
                 reconcile: () => reconciler.reconcile({ actor: 'agent' }),
               })

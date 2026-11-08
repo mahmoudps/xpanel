@@ -33,7 +33,7 @@ vi.mock('@xpanel/os', async importOriginal => {
   const actual = await importOriginal<typeof import('@xpanel/os')>(), { UBUNTU_2404 } = await import('../../../packages/os/src/fixtures.ts'), profile = actual.profileFor(UBUNTU_2404)
   return { ...actual, detectOs: async () => ({ ...profile, paths: { ...profile.paths, nginxUser: 'nginx' } }) }
 })
-vi.mock('@xpanel/state', () => ({ StateStore: class { rootDir = '/var/lib/xpanel/state' } }))
+vi.mock('@xpanel/state', () => ({ StateStore: class { rootDir = '/var/lib/xpanel/state'; registerHostOperationProbe() {} } }))
 vi.mock('./production-file-runner.ts', () => ({
   DEFAULT_FILE_WORKER_INCIDENT_DIR: '/var/lib/xpanel-agent/file-worker-incidents',
   createProductionAccountFileRunner: async (_binaryPath: string, options: NonNullable<typeof harness.options>) => {

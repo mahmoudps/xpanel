@@ -8,7 +8,7 @@ import { createApiToken, revokeApiToken } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
 import { parseSemver, parseTransferAuth } from '@xpanel/lifecycle'
 import type { TransferAuth } from '@xpanel/lifecycle'
-import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
+import { atomicWriteJson, backgroundStateWrite, readJsonIfExists } from '@xpanel/state'
 import type { StateStore } from '@xpanel/state'
 import { httpsTransferSourceTransport } from './acct-transfer-discovery.ts'
 import type { TransferSourceTransport } from './acct-transfer-discovery.ts'
@@ -269,7 +269,7 @@ export function createNodeLink(deps: NodeLinkDeps) {
       const told = await Promise.allSettled(links.map(item => call(item, NODE_PIN_PATH, { method: 'POST', body: { fingerprint: own.fingerprint } })))
       const missed = links.filter((_item, index) => told[index]!.status === 'rejected').map(item => item.hostname)
       await deps.audit?.('server.nodes.pin_announced', 'server:nodes', { nodes: links.length, missed }, missed.length ? 'failed' : 'ok').catch(() => undefined)
-      if (!missed.length) await update(state => { state.secrets.announced = own.fingerprint })
+      if (!missed.length) await backgroundStateWrite(() => update(state => { state.secrets.announced = own.fingerprint }))
     },
   }
 }

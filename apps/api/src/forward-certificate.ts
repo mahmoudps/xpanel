@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { SERVER_OPERATIONS_STATE, validateDomainForwards } from '@xpanel/core'
 import { services } from '@xpanel/render'
-import { readJsonIfExists } from '@xpanel/state'
+import { backgroundStateWrite, readJsonIfExists } from '@xpanel/state'
 import type { StateStore } from '@xpanel/state'
 
 const RENEW_WINDOW_DAYS = 30
@@ -28,6 +28,6 @@ export async function renewForwardCertificates(store: Pick<StateStore, 'rootDir'
     if (!domain) continue
     const response = await call('/host/domain-forwards/certificate', { method: 'POST', body: { domain } })
     const issued = response.ok ? readIssuedCertificate(await response.json().catch(() => null)) : null
-    if (issued) await recordForwardCertificate(store, issued)
+    if (issued) await backgroundStateWrite(() => recordForwardCertificate(store, issued))
   }
 }

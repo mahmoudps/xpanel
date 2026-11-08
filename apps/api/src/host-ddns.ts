@@ -6,7 +6,7 @@ import { canonicalIp, defaultDdns, fail, HOST_TOOLS_STATE, validateDdns } from '
 import type { DdnsRecord, DdnsState, DnsRecord } from '@xpanel/core'
 import { findPrincipalByUsername } from '@xpanel/db'
 import type { Db } from '@xpanel/db'
-import { atomicWriteJson, readJsonIfExists } from '@xpanel/state'
+import { atomicWriteJson, backgroundStateWrite, readJsonIfExists } from '@xpanel/state'
 import type { DnsZoneState, StateStore } from '@xpanel/state'
 import { assertDnsZoneRevision, dnsZoneRevision } from './dns-workspace.ts'
 import { CLOUDFLARE_API } from './sec-cloudflare.ts'
@@ -37,7 +37,7 @@ async function updateLocal(ports: DdnsPorts, record: DdnsRecord, ip: string, typ
   if (found.length > 1) refused('ddns_record_ambiguous')
   const row: DnsRecord = found[0] ? { ...found[0], content: ip } : { id: randomUUID(), zone: zone.name, name, type, ttl: 300, content: ip, priority: null }
   const revision = dnsZoneRevision(zone), next = { ...zone, serial: zone.serial === 4294967295 ? 1 : zone.serial + 1, records: found[0] ? zone.records.map(item => item.id === row.id ? row : item) : [...zone.records, row] }
-  await ports.store.saveDnsZone(next, { dnsGuard: async current => { assertDnsZoneRevision(current, revision) } })
+  await backgroundStateWrite(() => ports.store.saveDnsZone(next, { dnsGuard: async current => { assertDnsZoneRevision(current, revision) } }))
   if (!await ports.reconcile()) refused('ddns_reconcile_failed')
 }
 
