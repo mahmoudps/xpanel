@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { renderThresholdMeter, renderWebApp, renderWhmSurface, renderMailSurface, serveStaticAsset } from '../../apps/web/src/index.ts'
 import { tools } from '../../packages/catalog/src/index.ts'
 import { assertAppliedFont } from './applied-font-contract.mjs'
+import { injectTestScript } from './csp-violations.mjs'
 
 // Component fixtures only: no authentication, service measurements or capability qualification.
 const cases = [
@@ -102,7 +103,7 @@ try {
         if (item.kind === 'bounded') check(item.id + '-honest-accessible-meter', observed.meter?.label && observed.meter.min === 0 && observed.meter.max === item.limit && observed.meter.value === Math.min(item.used, item.limit) && observed.meter.text.includes(String(item.used)), observed.meter)
         else check(item.id + '-no-fictitious-meter', !observed.meter && !observed.percentage && !/\d+%/.test(observed.text), observed)
       }
-      await page.addScriptTag({ content: axe.source })
+      await injectTestScript(page, axe.source)
       outcome.accessibility = await page.evaluate(async () => { const result = await axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } }); return { violations: result.violations.map(item => ({ id: item.id, impact: item.impact, nodes: item.nodes.map(node => node.target) })) } })
       check('WCAG-no-violations', outcome.accessibility.violations.length === 0, outcome.accessibility)
       check('no-page-errors', outcome.errors.length === 0, outcome.errors)

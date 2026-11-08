@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { serveWebUi } from '../../apps/web/src/index.ts'
 import { collectSnapshotFiles } from '../../scripts/vm/source-snapshot.mjs'
 import { assertAppliedFont } from './applied-font-contract.mjs'
+import { recordCspViolations } from './csp-violations.mjs'
 import { inspectNativeInputEdges } from './login-surface-acceptance.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -278,13 +279,14 @@ export async function runMfaRuntimeAcceptance({ output, screenshotBudget = 8, fi
     optionalUserFixture = await createMfaFixture('optional', 'user')
     for (const state of selectedStates) {
         requireBrowserDiskHeadroom(root, 256, destination)
-      const row = { ...state, synthetic: true, status: 'running', page_errors: [], console_errors: [], failed_requests: [], websockets: [] }
+      const row = { ...state, synthetic: true, status: 'running', page_errors: [], console_errors: [], csp_violations: [], failed_requests: [], websockets: [] }
       let context, page
       const activeFixture = state.screen === 'enrolled-user' ? optionalUserFixture : state.mode === 'optional' ? optionalFixture : fixture
       const initialPosts = activeFixture.observations.login_body_keys.length
       try {
         context = await browser.newContext({ viewport: { width: state.width, height: state.height }, colorScheme: 'light', reducedMotion: 'reduce' })
         page = await context.newPage()
+        await recordCspViolations(page, row.csp_violations)
         page.setDefaultTimeout(8000)
         page.on('pageerror', error => row.page_errors.push(String(error.message).slice(0, 240)))
         page.on('console', message => { if (message.type() === 'error') row.console_errors.push({ text: message.text().slice(0, 240), url: message.location().url }) })
@@ -409,6 +411,7 @@ export async function runMfaRuntimeAcceptance({ output, screenshotBudget = 8, fi
         }
         assert.deepEqual(row.console_classification.unexpected, [])
         assert.deepEqual(row.page_errors, [])
+        assert.deepEqual(row.csp_violations, [], 'No Content-Security-Policy violation')
         assert.deepEqual(row.websockets, [], 'An unqualified synthetic document must not open a realtime connection.')
         assert.deepEqual(activeFixture.observations.unexpected_mutations, [])
         row.status = 'passed'

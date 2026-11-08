@@ -11,6 +11,7 @@ import { renderWebApp, serveStaticAsset } from '../../apps/web/src/app.ts'
 import { BROWSER_REALTIME_SCRIPT } from '../../apps/web/src/ws-client.ts'
 import { collectSnapshotFiles, computeSourceDigest } from '../../scripts/vm/source-snapshot.mjs'
 import { assertAppliedFont } from './applied-font-contract.mjs'
+import { injectTestScript } from './csp-violations.mjs'
 
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const planId = '10000000-0000-4000-8000-000000000001'
@@ -226,7 +227,7 @@ async function verifyPresentation(page, state, selector, result, axeSource) {
   }
   if (g.group24) assert.equal(g.group24, '24px')
   result.font = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
-  await page.addScriptTag({ content: axeSource })
+  await injectTestScript(page, axeSource)
   result.accessibility = await page.evaluate(async selector => (await axe.run(selector, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } })).violations.map(item => ({ id: item.id, impact: item.impact, targets: item.nodes.map(node => node.target) })), selector)
   assert.deepEqual(result.accessibility, [])
 }

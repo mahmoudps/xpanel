@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { createBrowserFixture } from './fixture.mjs'
+import { injectTestScript, recordCspViolations } from './csp-violations.mjs'
 import { computeTotpCode } from '../../apps/api/src/auth.ts'
 
 const loginForm = '[data-login-form]'
@@ -16,17 +18,21 @@ export async function runBrowserAcceptance({ chromium, expect }) {
     let context
     let lastStep = 'fixture'
     const pageErrors = []
+    const cspViolations = []
     const record = (step, observation = {}) => { lastStep = step; outcome.observations.push({ step, ...observation }) }
     try {
       panel = await createBrowserFixture()
       context = await browser.newContext({ viewport: options.mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 } })
       const page = await context.newPage()
+      await recordCspViolations(page, cspViolations)
       page.setDefaultTimeout(10000)
       page.setDefaultNavigationTimeout(15000)
       page.on('pageerror', error => pageErrors.push(error.name))
       await action({ page, panel, context, record })
       record('served_javascript', { page_errors: pageErrors.length })
       expect(pageErrors, 'Served JavaScript must execute without browser exceptions').toEqual([])
+      record('content_security_policy', { violations: cspViolations.length })
+      expect(cspViolations, 'Served pages must run under their Content-Security-Policy without a violation').toEqual([])
       outcome.status = 'passed'
     } catch (error) {
       // Locator errors, DOM snapshots, request bodies, traces and screenshots can contain credentials.
@@ -37,6 +43,7 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       await context?.close()
       await panel?.close()
       outcome.page_errors = pageErrors
+      outcome.csp_violations = cspViolations
       outcome.duration_ms = Date.now() - started
       outcomes.push(outcome)
     }
@@ -77,7 +84,7 @@ export async function runBrowserAcceptance({ chromium, expect }) {
   }
 
   async function accessibility(page, record) {
-    await page.addScriptTag({ path: axePath })
+    await injectTestScript(page, readFileSync(axePath, 'utf8'))
     const violations = await page.evaluate(async () => {
       const result = await globalThis.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] } })
       return result.violations.filter(item => item.impact === 'critical' || item.impact === 'serious').map(item => ({ id: item.id, impact: item.impact, nodes: item.nodes.length }))

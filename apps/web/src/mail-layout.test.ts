@@ -164,7 +164,7 @@ describe('bounded mail reference layout', () => {
     const html = renderMailSurface(fixture({ mailbox: attack, activeFolder: attack, messages: [message({ folder: attack, from: attack, to: attack, subject: attack, preview: attack, body: attack })] }))
     expect(html).not.toContain('<img')
     expect(html).not.toContain('onerror="')
-    expect(html.match(/<script\b[^>]*>/g)).toEqual(['<script id="xmail-inbox-client">'])
+    expect(html.match(/<script\b[^>]*>/g)).toEqual([expect.stringMatching(/^<script id="xmail-inbox-client" src="\/assets\/xmail-inbox\.js\?v=[0-9a-f]{16}">$/)])
     expect(html).toContain('&lt;img src=x onerror=&quot;alert(1)&quot;&gt;')
     expect(html).toContain('data-mailbox="&lt;img')
   })

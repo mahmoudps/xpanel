@@ -5,6 +5,7 @@ import { lstat, open, opendir, statfs } from 'node:fs/promises'
 import { posix } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { assertOwnedFile, assertTrustedDirectory, parseInstallationReceipt, withTrustedDirectory, withTrustedFile, requireLinuxRoot } from './lifecycle-ownership.mjs'
+import { unitFamily } from '../packages/core/src/unit-families.ts'
 async function rootAuthority(capability, effect = 'service.observe') {
   requireLinuxRoot()
   const native = await import('./lifecycle-root-safety.mjs')
@@ -18,6 +19,8 @@ const COMMON = ['Id', 'LoadState', 'ActiveState', 'SubState', 'FragmentPath', 'I
 const SERVICE = ['MainPID', 'ControlPID', 'ControlGroup', 'KillMode']
 const PROPERTIES = [...COMMON, ...SERVICE]
 const LIMIT = 64 * 1024
+// Every account adds its slice, PHP-FPM, CalDAV and more units to list-units xpanel*; bounded like the service manager.
+const INVENTORY_LIMIT = 1024 * 1024, INVENTORY_ROWS = 4096
 const CGROUP_ROOT = '/sys/fs/cgroup'
 const INCIDENTS = '/var/lib/xpanel-agent/file-worker-incidents'
 const captures = new WeakMap()
@@ -72,12 +75,12 @@ export function parseSystemctlProperties(text) {
 
 /** Fixed C-locale list-units columns; descriptions are deliberately not interpreted. */
 export function parseControlPlaneUnitInventory(text) {
-  check(typeof text === 'string' && Buffer.byteLength(text) <= LIMIT && !/[\0\r\u0001-\u0008\u000b-\u001f\u007f]/.test(text), 'SERVICE_INVENTORY_INVALID')
+  check(typeof text === 'string' && Buffer.byteLength(text) <= INVENTORY_LIMIT && !/[\0\r\u0001-\u0008\u000b-\u001f\u007f]/.test(text), 'SERVICE_INVENTORY_INVALID')
   const seen = new Set(), result = []
   for (const line of text.split('\n')) {
     if (!line.trim()) continue
     const [unit, load, active, sub] = line.trim().split(/\s+/)
-    check(result.length < 256 && unitName(unit) && unit.startsWith('xpanel') && !seen.has(unit) && [load, active, sub].every(value => typeof value === 'string' && /^[a-z-]{1,48}$/.test(value)), 'SERVICE_INVENTORY_INVALID')
+    check(result.length < INVENTORY_ROWS && unitName(unit) && unit.startsWith('xpanel') && !seen.has(unit) && [load, active, sub].every(value => typeof value === 'string' && /^[a-z-]{1,48}$/.test(value)), 'SERVICE_INVENTORY_INVALID')
     seen.add(unit); result.push({ unit, load, active, sub })
   }
   return freeze(result)
@@ -151,7 +154,7 @@ export async function readBoundedCgroupTree(directory) {
   return freeze({ nodes, processes: [...new Set(nodes.flatMap(node => node.processes))].sort((a, b) => a - b), populated: nodes.some(node => node.populated) })
 }
 
-async function systemctl(args) {
+async function systemctl(args, limit = LIMIT) {
   requireLinuxRoot(); check(!uncertainChild, 'SERVICE_CHILD_REQUIRES_INSPECTION')
   return withTrustedFile('/usr/bin/systemctl', { maxBytes: 8 * 1024 * 1024 }, async executable => {
     const result = await new Promise((resolve, reject) => {
@@ -162,7 +165,7 @@ async function systemctl(args) {
       const closing = new Promise(resolve => { closed = resolve }); children.add(closing)
       const timer = setTimeout(() => { attention = true; uncertainChild = true }, 30_000)
       const finish = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); error ? reject(error) : resolve(value) }
-      const collect = (chunk, stderr) => { bytes += chunk.length; if (bytes > LIMIT) { attention = true; uncertainChild = true; return } if (stderr) errors += chunk; else output += chunk }
+      const collect = (chunk, stderr) => { bytes += chunk.length; if (bytes > limit) { attention = true; uncertainChild = true; return } if (stderr) errors += chunk; else output += chunk }
       child.stdout.on('data', chunk => collect(chunk, false)); child.stderr.on('data', chunk => collect(chunk, true))
       child.once('error', () => { attention = true })
       child.once('close', (code, signal) => {
@@ -200,11 +203,16 @@ async function ownership(input) {
   return receipt
 }
 
-function rejectUnknownUnits(inventory, coordinatorUnit = null) {
+/**
+ * Pure: every loaded xpanel* unit must match a registered family's exact grammar. Account and host
+ * units are accepted and left running; a coordinator only as the current one; anything else needs inspection.
+ */
+export function rejectUnknownUnits(inventory, coordinatorUnit = null) {
   for (const item of inventory) {
     if (item.unit === coordinatorUnit && COORDINATORS.has(coordinatorUnit)) continue
     if (item.unit.startsWith('xpanel-files-')) { parseFileWorkerUnit(item.unit); continue }
-    if (UNITS.includes(item.unit) || item.unit === 'xpanel.slice' || /^xpanel-[1-9][0-9]{0,9}\.slice$/.test(item.unit) || (/^xpanel-(?:php-fpm|app|cron)-/.test(item.unit) && item.unit.endsWith('.service'))) continue
+    const scope = unitFamily(item.unit)?.scope
+    if (scope && scope !== 'coordinator') continue
     check(item.load === 'not-found' && item.active === 'inactive' && item.sub === 'dead', 'UNKNOWN_CONTROL_PLANE_UNIT_REQUIRES_INSPECTION')
   }
 }
@@ -267,7 +275,7 @@ async function observe(previousPaths = [], coordinatorUnit = null, allowActiveWo
     if (unit.endsWith('.service')) check(state.KillMode === 'control-group' && (state.ControlGroup === '' || posix.basename(state.ControlGroup) === unit), 'CONTROL_PLANE_CGROUP_UNOWNED')
     units.push(state)
   }
-  const inventory = parseControlPlaneUnitInventory(await systemctl(['list-units', '--all', '--plain', '--full', '--no-legend', 'xpanel*']))
+  const inventory = parseControlPlaneUnitInventory(await systemctl(['list-units', '--all', '--plain', '--full', '--no-legend', 'xpanel*'], INVENTORY_LIMIT))
   check(UNITS.every(unit => inventory.some(item => item.unit === unit && item.load === 'loaded')), 'CONTROL_PLANE_UNITS_NOT_LOADED')
   rejectUnknownUnits(inventory, coordinatorUnit)
   const workers = await observeWorkers(inventory, previousPaths, allowActiveWorkers)
@@ -394,7 +402,7 @@ export async function observeRetiredControlPlaneUnits(input, capturedBefore, exc
   const observations = []
   for (let pass = 0; pass < 2; pass++) {
     await rootAuthority(exclusiveCapability, 'service.observe')
-    const inventory = parseControlPlaneUnitInventory(await systemctl(['list-units', '--all', '--plain', '--full', '--no-legend', 'xpanel*']))
+    const inventory = parseControlPlaneUnitInventory(await systemctl(['list-units', '--all', '--plain', '--full', '--no-legend', 'xpanel*'], INVENTORY_LIMIT))
     rejectUnknownUnits(inventory, authority.coordinatorUnit)
     await observeWorkers(inventory, prior.paths, false)
     check(inventory.filter(item => UNITS.includes(item.unit)).every(item => item.load === 'not-found' && item.active === 'inactive' && item.sub === 'dead'), 'RETIRED_UNIT_STILL_LOADED')

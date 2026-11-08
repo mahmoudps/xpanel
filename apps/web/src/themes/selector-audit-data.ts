@@ -1117,10 +1117,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/board-port/xmail-compose.ts",
-    "sha256": "988762abb0acdc8bf4f0d25ce3423f55d4f9d96f4fe04ea2b22933ac9b9ab44f",
+    "sha256": "25f20c52712480595c7dd8db7632edb66bb9388359b0eda78b8c2ab84a03ed6e",
     "sites": [
       {
-        "line": 209,
+        "line": 210,
         "column": 34,
         "method": "querySelector",
         "argument": "'[data-mail-recip=\"' + field + '\"]'",
@@ -1130,7 +1130,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 217,
+        "line": 218,
         "column": 35,
         "method": "querySelector",
         "argument": "'[data-mail-recip=\"' + field + '\"] ul'",
@@ -1140,7 +1140,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 218,
+        "line": 219,
         "column": 36,
         "method": "querySelector",
         "argument": "'[data-mail-recip-input=\"' + field + '\"]'",
@@ -1150,7 +1150,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 425,
+        "line": 426,
         "column": 43,
         "method": "querySelectorAll",
         "argument": "'[data-mail-chip=\"' + field + '\"]'",
@@ -1160,7 +1160,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 447,
+        "line": 448,
         "column": 41,
         "method": "querySelectorAll",
         "argument": "'[data-mail-chip=\"' + field + '\"]'",
@@ -1170,7 +1170,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 448,
+        "line": 449,
         "column": 38,
         "method": "querySelector",
         "argument": "'#compose-' + field",
@@ -1183,10 +1183,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/board-port/xmail-inbox.ts",
-    "sha256": "ef751d02ebd2e96737e21821d83bb48003a2aa41fb9715e4a93c4593d39af78f",
+    "sha256": "1e2aaa0abc319b86b476fff47981612e81f3d96dbef64e3ca8e9fef22d3a6ff3",
     "sites": [
       {
-        "line": 429,
+        "line": 430,
         "column": 44,
         "method": "querySelector",
         "argument": "'[data-reading-id=\"' + id + '\"]'",
@@ -1196,7 +1196,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 433,
+        "line": 434,
         "column": 45,
         "method": "querySelector",
         "argument": "'[data-mail-open=\"' + id + '\"]'",
@@ -1206,7 +1206,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 445,
+        "line": 446,
         "column": 44,
         "method": "querySelector",
         "argument": "selector",
@@ -1216,7 +1216,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 661,
+        "line": 662,
         "column": 53,
         "method": "querySelector",
         "argument": "'[data-mail-open=\"' + id + '\"]'",
@@ -1226,7 +1226,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 664,
+        "line": 665,
         "column": 61,
         "method": "querySelector",
         "argument": "'[data-reading-id=\"' + id + '\"]'",
@@ -1236,7 +1236,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 798,
+        "line": 799,
         "column": 53,
         "method": "querySelector",
         "argument": "'[data-mail-open=\"' + id + '\"]'",
@@ -1246,7 +1246,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 801,
+        "line": 802,
         "column": 57,
         "method": "querySelector",
         "argument": "'[data-reading-id=\"' + id + '\"]'",
@@ -1256,7 +1256,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 802,
+        "line": 803,
         "column": 56,
         "method": "querySelector",
         "argument": "'[data-reading-id=\"' + id + '\"]'",
@@ -1266,7 +1266,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 819,
+        "line": 820,
         "column": 50,
         "method": "querySelector",
         "argument": "'[data-mail-count=\"' + counts[c].getAttribute('data-mail-count') + '\"]'",
@@ -1276,7 +1276,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 826,
+        "line": 827,
         "column": 32,
         "method": "querySelector",
         "argument": "'[data-mail-count=\"' + observedCounts[n].getAttribute('data-mail-count') + '\"]'",
@@ -1286,7 +1286,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 833,
+        "line": 834,
         "column": 53,
         "method": "querySelector",
         "argument": "'[data-mail-open=\"' + focus + '\"]'",
@@ -1299,10 +1299,10 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
   },
   {
     "path": "apps/web/src/board-port/xpanel-home.ts",
-    "sha256": "a843f31e2fd6e0cf12cd8bd42024ee9650453de384ad83b5a28c77553e3dde3e",
+    "sha256": "dae3062ddee9cd662e57ac8fe67eaffc084bb8ac5d8c7960ed39321039970043",
     "sites": [
       {
-        "line": 1084,
+        "line": 1085,
         "column": 41,
         "method": "getElementById",
         "argument": "inputId",
@@ -1313,7 +1313,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1085,
+        "line": 1086,
         "column": 49,
         "method": "getElementById",
         "argument": "peerId",
@@ -1324,7 +1324,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1086,
+        "line": 1087,
         "column": 41,
         "method": "getElementById",
         "argument": "countId",
@@ -1335,7 +1335,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1087,
+        "line": 1088,
         "column": 39,
         "method": "querySelector",
         "argument": "rootSel",
@@ -1346,7 +1346,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1200,
+        "line": 1201,
         "column": 64,
         "method": "querySelectorAll",
         "argument": "homeFocusSelector",
@@ -1357,7 +1357,7 @@ export const SELECTOR_SOURCE_REVIEWS: readonly SelectorSourceReview[] = [
         ]
       },
       {
-        "line": 1318,
+        "line": 1319,
         "column": 43,
         "method": "getElementById",
         "argument": "button.getAttribute('aria-controls') || ''",

@@ -5,7 +5,7 @@ import { accountSecurityRoute, panelLabel, roleLabel } from './chrome.ts'
 import { HANDOFF_CLIENT_BINDING } from './panel-handoff-client.ts'
 import { formatDisplayName } from './display-name.ts'
 import { brandingFaviconHref, brandingProductName, type WebBranding } from './branding.ts'
-import { LOCALES, SOURCE_LOCALE, clientI18nAsset, inlineScriptMessageKeys, isLocale, localeDirection, renderClientI18nScript, requestLocale, requestedLocale, translator, type Locale } from './i18n.ts'
+import { LOCALES, SOURCE_LOCALE, clientI18nAsset, scriptMessageKeys, isLocale, localeDirection, renderClientI18nScript, requestLocale, requestedLocale, translator, type Locale } from './i18n.ts'
 import { isStatusCode, statusPageCopy, type StatusPageModel } from './status-page.ts'
 import { designHeading } from './design-board.ts'
 import { ACCOUNT_SECURITY_ROUTES } from './surfaces/account-security.ts'
@@ -14,6 +14,8 @@ import { type MailSurfaceProps } from './surfaces/xmail.ts'
 import { type PanelSurfaceProps } from './surfaces/xpanel.ts'
 import { type WhmSurfaceProps } from './surfaces/xwhm.ts'
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
+import { findPageScript, pageScript, pageScriptTag } from './page-scripts.ts'
+import { documentSecurityHeaders } from './content-security-policy.ts'
 import { projectAuthPersonal } from './models/theme-surface.ts'
 import { TEAM_PASSWORD_CLIENT_BINDING } from './team-password.ts'
 import { contextualizeDocumentLinks, resolveWebDocumentRoute } from './document-routes.ts'
@@ -408,9 +410,9 @@ export function renderWebApp(state: WebAppRenderState): string {
     state.surface === 'xwhm' ? { accounts: state.whm?.accounts ?? [], domains: state.whm?.domains ?? [] }
       : state.surface === 'xpanel' ? { accounts: state.panel?.account ? [state.panel.account] : [], domains: state.panel?.domains ?? [] }
         : undefined) : []
-  const clientScriptsHtml = `  <script id="xpanel-login-client">${LOGIN_CLIENT_SCRIPT}</script>
-  ${state.surface === 'login' ? `<script id="xpanel-team-password-client">${TEAM_PASSWORD_CLIENT_BINDING}</script>` : ''}
-  ${handoffControls ? `<script id="xpanel-handoff-client">(${HANDOFF_CLIENT_BINDING})()</script>` : ''}
+  const clientScriptsHtml = `  ${pageScriptTag(LOGIN_PAGE_SCRIPT, 'xpanel-login-client')}
+  ${state.surface === 'login' ? pageScriptTag(TEAM_PASSWORD_PAGE_SCRIPT, 'xpanel-team-password-client') : ''}
+  ${handoffControls ? pageScriptTag(HANDOFF_PAGE_SCRIPT, 'xpanel-handoff-client') : ''}
   ${realtime ? `<script id="xpanel-i18n-realtime" src="/assets/i18n-${locale}.js?v=${I18N_ASSETS().version}"></script>
   <script id="xpanel-realtime-client" src="/assets/ws-client.js?v=${REALTIME_SCRIPT_VERSION}"></script>` : ''}
 `
@@ -439,7 +441,7 @@ export function renderWebApp(state: WebAppRenderState): string {
     faviconHref,
     ...(state.branding ? { branding: state.branding } : {}),
     ...(state.branding?.faviconUrl ? {} : { faviconContentType: 'image/svg+xml' }),
-    headHtml: renderClientI18nScript(locale, inlineScriptMessageKeys(bodyHtml), uiTheme.messages?.forClient(locale)),
+    headHtml: renderClientI18nScript(locale, scriptMessageKeys(bodyHtml), uiTheme.messages?.forClient(locale)),
     bodyHtml,
   })
 }
@@ -455,6 +457,9 @@ const LOGIN_FAVICONS = {
 // The shared realtime client is ~1.5 MB: serve it once as an immutable cached asset instead of inlining it in every page.
 // A synchronous external script keeps the execution order of the former inline script.
 const REALTIME_SCRIPT_VERSION = createHash('sha256').update(BROWSER_REALTIME_SCRIPT).digest('hex').slice(0, 16)
+const LOGIN_PAGE_SCRIPT = pageScript('login-client', LOGIN_CLIENT_SCRIPT)
+const TEAM_PASSWORD_PAGE_SCRIPT = pageScript('team-password', TEAM_PASSWORD_CLIENT_BINDING)
+const HANDOFF_PAGE_SCRIPT = pageScript('handoff', `(${HANDOFF_CLIENT_BINDING})()`)
 
 // The whole UI catalog per locale as an immutable cached asset; inline page scripts get their own subset in <head>.
 // Built on first use, after panel start installed any uploaded catalogs; the version changes with their content.
@@ -481,10 +486,6 @@ const PUBLIC_STATIC_ASSETS: Readonly<Record<string, { body: string | Uint8Array<
     body: LOGIN_CLIENT_SCRIPT,
     contentType: 'application/javascript; charset=utf-8',
   },
-  '/assets/login-client.js': {
-    body: LOGIN_CLIENT_SCRIPT,
-    contentType: 'application/javascript; charset=utf-8',
-  },
   '/assets/ws.js': {
     body: BROWSER_REALTIME_SCRIPT,
     contentType: 'application/javascript; charset=utf-8',
@@ -493,6 +494,11 @@ const PUBLIC_STATIC_ASSETS: Readonly<Record<string, { body: string | Uint8Array<
     body: BROWSER_REALTIME_SCRIPT,
     contentType: 'application/javascript; charset=utf-8',
   },
+}
+
+const pageScriptAsset = (pathname: string): { body: string; contentType: string } | undefined => {
+  const script = findPageScript(pathname)
+  return script && { body: script.body, contentType: 'application/javascript; charset=utf-8' }
 }
 
 /**
@@ -504,7 +510,8 @@ export function serveStaticAsset(pathname: string): Response | null {
   const i18nTag = /^\/assets\/i18n-([A-Za-z0-9-]+)\.js$/.exec(pathname)?.[1]
   const i18nBody = i18nTag ? I18N_ASSETS().bodies.get(i18nTag as Locale) : undefined
   const asset = i18nBody !== undefined ? { body: i18nBody, contentType: 'application/javascript; charset=utf-8' }
-    : Object.prototype.hasOwnProperty.call(PUBLIC_STATIC_ASSETS, pathname) ? PUBLIC_STATIC_ASSETS[pathname] : plexFontAsset(pathname) ?? findUiThemeAsset(pathname)
+    : Object.prototype.hasOwnProperty.call(PUBLIC_STATIC_ASSETS, pathname) ? PUBLIC_STATIC_ASSETS[pathname]
+      : plexFontAsset(pathname) ?? pageScriptAsset(pathname) ?? findUiThemeAsset(pathname)
   if (!asset) {
     return new Response('Not Found', {
       status: 404,
@@ -562,13 +569,14 @@ export async function serveWebUi(
   const rawTarget = url.searchParams.get('target')
   const targetSurface = rawTarget === 'xwhm' || rawTarget === 'xmail' || rawTarget === 'xpanel' ? rawTarget : 'xpanel'
 
-  const htmlHeaders = (language: Locale) => ({
+  const htmlHeaders = (language: Locale, html: string) => ({
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-store',
     'content-language': language,
     vary: 'Accept-Language',
     'x-content-type-options': 'nosniff',
     'x-frame-options': 'SAMEORIGIN',
+    ...documentSecurityHeaders(html),
   })
   if (!stateProvider && !documentRoute) {
     const fallbackSurface = inferredSurface === 'xwhm' || inferredSurface === 'xmail' ? inferredSurface : 'xpanel'
@@ -580,7 +588,7 @@ export async function serveWebUi(
       activeRoute: path,
       error: { status: 404, surface: fallbackSurface },
     })
-    return new Response(html, { status: 404, headers: htmlHeaders(locale) })
+    return new Response(html, { status: 404, headers: htmlHeaders(locale, html) })
   }
 
   const baseState: WebAppRenderState = stateProvider
@@ -604,5 +612,5 @@ export async function serveWebUi(
   })
   const status = baseState.error && isStatusCode(baseState.error.status) ? baseState.error.status : 200
 
-  return new Response(html, { status, headers: htmlHeaders(pageLocale) })
+  return new Response(html, { status, headers: htmlHeaders(pageLocale, html) })
 }

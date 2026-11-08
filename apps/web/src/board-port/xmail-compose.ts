@@ -1,5 +1,6 @@
 import { classicMailClientTemplates } from './mail-client-templates.ts'
 import { LOCALES, localeDirection, translator, type Locale, type MessageValues } from '../i18n.ts'
+import { pageScript, pageScriptTag } from '../page-scripts.ts'
 import { escapeHtml, renderAsyncActionState, type AsyncActionBannerProps } from '../tokens.ts'
 import { renderLiveUpdatesIndicator, renderPageSearchButton, renderMobileNavToggle, renderMobileNavClose, renderMobileNavBackdrop } from '../shell.ts'
 import { formatMailboxQuota } from './mail-truth.ts'
@@ -192,7 +193,7 @@ const recipientRow = (field: string, label: string, inputId: string, chips: Chip
 
 const attachmentHtml = (file: AttachmentFile): string => `<li data-mail-file="true" style="display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 10px; border-radius: 10px; border: 1px solid light-dark(#E2E6EC,var(--xp-border)); background: light-dark(#FFFFFF,var(--xp-bg-surface))"><span aria-hidden="true" style="flex: none; width: 34px; height: 34px; border-radius: 8px; background: light-dark(#EEF0F3,var(--xp-bg-elevated)); color: light-dark(#344054,var(--xp-text-secondary)); display: flex; align-items: center; justify-content: center; font-family: ${MONO}; font-size: 10px; font-weight: 600">${escapeHtml(file.ext)}</span><span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px"><span style="display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline"><span style="font-size: 13px; font-weight: 500; overflow-wrap: anywhere">${escapeHtml(file.name)}</span><span data-mail-file-state="true" style="font-size: 12px; color: ${file.stateColor}; font-variant-numeric: tabular-nums">${escapeHtml(file.state)}</span></span>${file.uploading ? `<span aria-hidden="true" style="display: block; height: 4px; border-radius: 2px; background: light-dark(#E9ECF1,var(--xp-bg-elevated)); overflow: hidden; max-width: 320px"><span style="display: block; height: 4px; width: ${escapeHtml(file.pct)}; background: light-dark(#1D5BD6,var(--xp-accent)); border-radius: 2px"></span></span>` : ''}</span><button type="button" data-mail-action="remove-file" aria-label="${escapeHtml(file.removeLabel)}" style="flex: none; width: 44px; height: 44px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: light-dark(#475467,var(--xp-text-secondary)); display: flex; align-items: center; justify-content: center">${ICONS.closeLg}</button></li>`
 
-const COMPOSE_SCRIPT = `<script id="xmail-compose-client">
+const COMPOSE_SOURCE = `
 (function () {
   var root = document.querySelector('[data-board-port="xmail-compose"]')
   if (!root) return
@@ -478,7 +479,8 @@ const COMPOSE_SCRIPT = `<script id="xmail-compose-client">
     showFeedback('ok', text('data-saved-note'))
   })
 })()
-</script>`
+`
+const COMPOSE_SCRIPT = pageScriptTag(pageScript('xmail-compose', COMPOSE_SOURCE), 'xmail-compose-client')
 
 export const renderCompose = (model: ComposeModel): string => {
   const rtl = localeDirection(model.locale) === 'rtl'

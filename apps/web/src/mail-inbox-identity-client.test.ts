@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderInbox, xmailInboxFromProps } from './board-port/xmail-inbox.ts'
+import { inlinePageScripts } from './page-scripts.ts'
 import { MAIL_ATTACHMENTS_STYLE } from './board-port/xmail-attachments.ts'
 import { MAIL_FOLDER_WORKSPACE_CLIENT_BINDING } from './mail-folder-workspace-client.ts'
 
@@ -17,7 +18,7 @@ const article = () => root().querySelector<HTMLElement>('[data-mail-article]')!
 const open = (uid: number) => root().querySelector<HTMLButtonElement>('[data-mail-open="uid-' + uid + '"]')!.click()
 const transport = (send: ReturnType<typeof vi.fn>) => { (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send }
 const mount = (folder = 'INBOX', workspace = false, enabled = true) => {
-  document.body.innerHTML = renderInbox(xmailInboxFromProps({ mailbox, activeFolder: folder, folderWorkspace: workspace, attachmentReadEnabled: enabled, messages: [summary(1, folder), summary(2, folder)] }))
+  document.body.innerHTML = inlinePageScripts(renderInbox(xmailInboxFromProps({ mailbox, activeFolder: folder, folderWorkspace: workspace, attachmentReadEnabled: enabled, messages: [summary(1, folder), summary(2, folder)] })))
 }
 const bootInline = () => new Function(document.querySelector('#xmail-inbox-client')!.textContent!)()
 const bootFolder = () => new Function('return ' + MAIL_FOLDER_WORKSPACE_CLIENT_BINDING)()(async () => true, false)

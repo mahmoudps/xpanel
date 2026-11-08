@@ -363,6 +363,7 @@ import { assertAccountAuthorized, assertAccountFeatures, assertApiScope, assertR
 import { LiveEventHub, WS_AUTHORIZATION_UNAVAILABLE } from './ws.ts'
 import type { EventSubscriber, UpgradeAuthorization } from './ws.ts'
 import { renderWebApp } from '../../web/src/app.ts'
+import { documentSecurityHeaders } from '../../web/src/content-security-policy.ts'
 import { requestLocale, translator } from '../../web/src/i18n.ts'
 import { requestPrefersHtml } from '../../web/src/status-page.ts'
 import { ENTRY_POINTS, entryPointAdmitsPrincipal, entryPointAllowsApiRoute, isMailboxPrincipalUsername, sessionTokenHash } from './entry-points.ts'
@@ -670,6 +671,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         'cache-control': 'no-store',
         'x-content-type-options': 'nosniff',
         'x-frame-options': 'SAMEORIGIN',
+        ...documentSecurityHeaders(html),
       },
     })
   }

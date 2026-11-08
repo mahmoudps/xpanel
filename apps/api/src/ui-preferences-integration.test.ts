@@ -26,6 +26,8 @@ import { parseMarkup } from '../../web/src/themes/markup.ts'
 import { roleLabel } from '../../web/src/chrome.ts'
 import { registeredThemeDocuments } from '../../web/src/themes/contract.ts'
 import { canonicalNavigationRoute, registeredDocumentAliases } from '@xpanel/catalog'
+import { CROSS_ORIGIN_FORM_CSP, DOCUMENT_CSP } from '../../web/src/content-security-policy.ts'
+import { cspMarkupIssues } from '../../web/src/csp.test-helper.ts'
 
 // produced is the provider state exactly as its JSON response would carry it.
 interface DocumentObservation { uiTheme: string | undefined; nativeFacts: boolean; qualified: boolean; factorKnown: boolean; produced: any }
@@ -194,6 +196,16 @@ const read = async (application: ReturnType<typeof app>, surface: EntryPoint, au
 }
 const save = (application: ReturnType<typeof app>, surface: EntryPoint, auth: { cookie: string; csrf: string }, view: UiPreferencesView) =>
   request(application, surface, auth, { method: 'PUT', body: { uiTheme: 'classic', expectedRevision: view.revision } })
+
+// The database web-client pages post their sign-on ticket to the client's own origin; no other document posts away.
+const CROSS_ORIGIN_FORM_ROUTES = new Set(['/databases/phpmyadmin', '/databases/phppgadmin', '/whm/databases/phpmyadmin'])
+/** Every rendered document carries the strict policy, and its own markup runs under it: no inline script or handler. */
+function expectDocumentPolicy(response: Response, body: string, route: string): void {
+  expect(response.headers.get('content-security-policy')).toBe(CROSS_ORIGIN_FORM_ROUTES.has(route) ? CROSS_ORIGIN_FORM_CSP : DOCUMENT_CSP)
+  expect(response.headers.get('referrer-policy')).toBe('same-origin')
+  expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+  expect(cspMarkupIssues(body)).toEqual([])
+}
 
 /** One fixture, renderer, session and normally saved theme shared by a route matrix; afterAll closes it. */
 interface DocumentGroup extends Fixture { application: ReturnType<typeof app>; auth: Awaited<ReturnType<typeof session>> }
@@ -650,6 +662,7 @@ describe('normal registered owner documents with stored facts and unqualified na
       // Existing Home may supply authorized stored collections. Other unqualified documents receive only account/plan.
       if (route !== '/home') for (const key of ['domains', 'databases', 'databaseUsers', 'serviceUsers', 'certificates', 'dnsRecords', 'files', 'recentAudit']) expect(produced.panel).not.toHaveProperty(key)
       expect(response.status).toBe(200)
+      expectDocumentPolicy(response, body, route)
       const nodes = parseMarkup(body)
       const html = nodes.find(node => node.namespace === 'html' && node.template < 0 && node.tag === 'html')
       expect(html?.attrs.get('lang')).toBe(locale)
@@ -724,6 +737,7 @@ describe('normal registered operator and mailbox documents with stored identity 
           expect(produced).not.toHaveProperty('whm')
         }
         expect(response.status).toBe(200)
+        expectDocumentPolicy(response, body, route)
         const nodes = parseMarkup(body)
         const html = nodes.find(node => node.namespace === 'html' && node.template < 0 && node.tag === 'html')
         expect(html?.attrs.get('lang')).toBe(locale)

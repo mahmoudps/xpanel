@@ -18,7 +18,6 @@ import {
   assertAccount,
   assertInt,
   assertLine,
-  assertNoControl,
   assertString,
   assertUsername,
   canonicalIpv4,
@@ -1152,85 +1151,6 @@ export const renderMtaAdvancedConfig = (opts: {
 
   return {
     path: '/etc/postfix/xpanel_mta_advanced.cf',
-    content: `${lines.join('\n')}\n`,
-    mode: 0o644,
-    owner: 'root',
-    group: 'root',
-  }
-}
-
-/**
- * Renders a rootless Podman systemd unit running inside the account's cgroup slice.
- */
-export const renderRootlessContainerUnit = (
-  account: Pick<Account, 'username' | 'uid' | 'gid' | 'home'>,
-  container: {
-    name: string
-    image: string
-    internalPort: number
-    env: Record<string, string>
-    memoryMb: number
-  },
-): RenderedFile => {
-  const acc = assertAccount(account)
-  if (!container || typeof container !== 'object') {
-    return invalid('container', container, 'is required')
-  }
-  const name = assertString('container name', container.name, 32)
-  if (!/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(name)) {
-    return invalid('container name', container.name, 'must be 1-32 lowercase alphanumeric or dash characters')
-  }
-  const image = assertLine('container image', container.image, 255)
-  if (!/^[A-Za-z0-9._/-]+(?::[A-Za-z0-9._-]+|@sha256:[a-f0-9]{64})?$/.test(image)) {
-    return invalid('container image', container.image, 'is not a valid OCI image reference')
-  }
-  const internalPort = assertInt('internalPort', container.internalPort, 1, 65535)
-  const memoryMb = assertInt('memoryMb', container.memoryMb, 32, 65536)
-
-  if (!container.env || typeof container.env !== 'object' || Array.isArray(container.env)) {
-    return invalid('container env', container.env, 'must be an object')
-  }
-  const envFlags: string[] = []
-  for (const [k, v] of Object.entries(container.env).sort(([a], [b]) => a.localeCompare(b))) {
-    if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(k)) {
-      return invalid('container env key', k, 'is not a valid environment variable name')
-    }
-    const val = assertNoControl(`env ${k}`, assertString(`env ${k}`, v, 1024))
-    if (/["'\\$\s]/.test(val)) {
-      return invalid(`env ${k}`, val, 'must not contain whitespace, quotes, or shell metacharacters')
-    }
-    envFlags.push(`--env ${k}=${val}`)
-  }
-
-  const slice = accountSliceName(acc.uid)
-  const unitName = `xpanel-container-${acc.username}-${name}.service`
-  const envPart = envFlags.length > 0 ? ` ${envFlags.join(' ')}` : ''
-
-  const lines = [
-    `# Managed by xPanel: rootless container ${name} for ${acc.username}`,
-    '[Unit]',
-    `Description=xPanel rootless container ${name} for ${acc.username}`,
-    'After=network-online.target',
-    '',
-    '[Service]',
-    'Type=simple',
-    `User=${acc.username}`,
-    `Group=${acc.username}`,
-    `Slice=${slice}`,
-    `MemoryMax=${memoryMb}M`,
-    `Environment="HOME=${acc.home}" "XDG_RUNTIME_DIR=/run/user/${acc.uid}"`,
-    `ExecStart=/usr/bin/podman run --rm --replace --name ${name} --network slirp4netns --security-opt no-new-privileges --memory ${memoryMb}m -p 127.0.0.1::${internalPort}${envPart} ${image}`,
-    `ExecStop=/usr/bin/podman stop -t 10 ${name}`,
-    'Restart=on-failure',
-    'RestartSec=5s',
-    'NoNewPrivileges=yes',
-    '',
-    '[Install]',
-    'WantedBy=multi-user.target',
-  ]
-
-  return {
-    path: `/etc/systemd/system/${unitName}`,
     content: `${lines.join('\n')}\n`,
     mode: 0o644,
     owner: 'root',

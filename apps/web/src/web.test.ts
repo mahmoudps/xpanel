@@ -2,6 +2,7 @@
 import { qualifyHostTools, tools } from '@xpanel/catalog'
 import { SYNTHETIC_WEBSITE_ANALYTICS, SYNTHETIC_WHM_IO_SNAPSHOT } from '../../../tests/fixtures/analytics-snapshots.ts'
 import { LOGIN_CLIENT_SCRIPT } from './login-client.ts'
+import { inlinePageScripts } from './page-scripts.ts'
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 import { defaultPlan, type Account } from '@xpanel/core'
@@ -147,7 +148,7 @@ describe('@xpanel/web — Login, xWHM, xPanel, and xMail Surfaces (EN/AR + Dark/
           )
           assert.match(html, /id="xpanel-design-tokens"/)
           assert.match(html, /id="xpanel-login-client"/)
-          assert.match(html, /\/api\/auth\/login/)
+          assert.match(inlinePageScripts(html), /\/api\/auth\/login/)
           if (surface === 'login') assert.match(html, /data-login-form/)
           else assert.match(html, /data-tool-availability="unverified"/)
         }
