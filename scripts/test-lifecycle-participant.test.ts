@@ -35,7 +35,7 @@ vi.mock('./lifecycle-ownership.mjs', () => ({
     return callback({ bytes: seam.barrier })
   },
 }))
-import { startLifecycleWriterParticipant } from './lifecycle-admission.mjs'
+import { exchangeParticipantHandshake, startLifecycleWriterParticipant, withLifecycleWriterAdmission } from './lifecycle-admission.mjs'
 
 const operationId = '12345678-1234-4234-8234-123456789abc'
 const barrier = { schemaVersion: 1, operationId, reference: 'XP-JOB-2026-000001', kind: 'upgrade', phase: 'pending', requestFingerprint: 'a'.repeat(64), sequence: 1, createdAt: '2026-11-06T12:49:27.000Z' }
@@ -74,5 +74,45 @@ describe.runIf(process.platform === 'linux')('lifecycle writer participant stop 
     const participant = await startLifecycleWriterParticipant('agent')
     await rm(path); await writeFile(path, '')
     await expect(participant.close()).rejects.toMatchObject({ code: 'LIFECYCLE_PARTICIPANT_SOCKET_CHANGED' })
+  })
+
+  it('answers a fenced handshake while a writer admission outlasts the old 2 s window', { tags: ['slow'] }, async () => {
+    const path = await fixture()
+    const participant = await startLifecycleWriterParticipant('agent', { onFence: async () => undefined })
+    // A writer admitted before the barrier lands holds the drain, like one queued behind the shared lock.
+    let entered!: () => void
+    const inside = new Promise<void>(resolve => { entered = resolve })
+    const held = withLifecycleWriterAdmission(async () => { entered(); await new Promise(resolve => setTimeout(resolve, 2500)) })
+    await inside
+    seam.barrier = Buffer.from(JSON.stringify(barrier))
+    expect(await handshake(path)).toMatchObject({ operationId, role: 'agent', pid: process.pid, activeWriters: 0, fenced: true })
+    await held
+    await expect(participant.close()).resolves.toBeUndefined()
+  })
+
+  it('answers a failed fence with a refusal frame instead of dropping the socket', async () => {
+    const path = await fixture()
+    const participant = await startLifecycleWriterParticipant('agent', { onFence: async () => { throw new Error('metrics stop failed') } })
+    seam.barrier = Buffer.from(JSON.stringify(barrier))
+    expect(await handshake(path)).toEqual({ nonce: 'b'.repeat(64), refused: 'LIFECYCLE_WRITER_FENCE_FAILED' })
+    await expect(exchangeParticipantHandshake(path, { nonce: 'b'.repeat(64), operationId })).rejects.toMatchObject({ code: 'LIFECYCLE_WRITER_FENCE_FAILED' })
+    await expect(participant.close()).resolves.toBeUndefined()
+  })
+
+  it('asks again after a dropped or truncated reply, then names an empty reply with a stable code', async () => {
+    const path = await fixture(), request = { nonce: 'b'.repeat(64), operationId }
+    let connections = 0, answerFrom = 3
+    const server = createServer({ allowHalfOpen: true }, socket => {
+      const seen = ++connections
+      socket.on('error', () => {}); socket.resume()
+      socket.on('end', () => seen >= answerFrom ? socket.end(JSON.stringify({ nonce: request.nonce, fenced: true }) + '\n') : seen % 2 ? socket.destroy() : socket.end('{"nonce":'))
+    })
+    await new Promise<void>(resolve => server.listen(path, resolve))
+    await expect(exchangeParticipantHandshake(path, request, 2000)).resolves.toEqual({ nonce: request.nonce, fenced: true })
+    expect(connections).toBe(3)
+    connections = 0; answerFrom = Infinity
+    await expect(exchangeParticipantHandshake(path, request, 450)).rejects.toMatchObject({ code: 'LIFECYCLE_WRITER_HANDSHAKE_EMPTY' })
+    expect(connections).toBeGreaterThan(1)
+    await new Promise<void>(resolve => server.close(() => resolve()))
   })
 })
