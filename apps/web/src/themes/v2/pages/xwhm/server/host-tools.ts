@@ -18,7 +18,7 @@ export const WHM_HOST_TOOLS_CSS = `.v2-host-tools,.v2-host-tools__form{display:f
 .v2-host-tools pre{max-block-size:320px;overflow:auto;padding:var(--space-2);border:1px solid var(--line);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}
 .v2-host-tools code{display:block;overflow-wrap:anywhere}
 .v2-host-tools [hidden]{display:none!important}
-@media(max-width:600px){.v2-host-tools__fields{grid-template-columns:minmax(0,1fr)}.v2-host-tools__scroll{overflow:visible}.v2-host-tools__scroll thead{display:none}.v2-host-tools__scroll tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-1) var(--space-2);padding-block:var(--space-2);border-block-end:1px solid var(--line)}.v2-host-tools__scroll td{padding:0;border-block-end:0}.v2-host-tools__scroll td:nth-child(n+3){grid-column:1}.v2-host-tools__scroll td[colspan],.v2-host-tools__scroll td:has([data-host-tool-row-actions]){grid-column:1/-1}}
+@media(max-width:600px){.v2-host-tools__fields{grid-template-columns:minmax(0,1fr)}}
 `
 
 /** V2 cards of the scheduler and host tools, with the hooks the shared client binds. */

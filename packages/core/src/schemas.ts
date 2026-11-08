@@ -4,7 +4,7 @@ import { fail } from './errors.ts'
 import { isUnlimited } from './limits.ts'
 import { cidrContains, formatCidr, parseCidr, parseIp } from './rules/firewall.ts'
 import { validateDomainName } from './rules/naming.ts'
-import { PHP_HANDLERS, sanitizePhpIni, validateFpm } from './rules/php.ts'
+import { PHP_HANDLERS, refusePrefork, sanitizePhpIni, validateFpm } from './rules/php.ts'
 import { validateApacheWorkers, validateNginxWorkers } from './rules/workers.ts'
 import { validateServerWebSettings } from './server-web-settings.ts'
 import { validateServerFtpSettings } from './server-ftp-settings.ts'
@@ -280,7 +280,7 @@ export const assertSemver = (v: unknown, what: string): string =>
   typeof v === 'string' && v.length <= 64 && SEMVER_RE.test(v) ? v : fail('VALIDATION', `${what} must be SemVer`, { [what]: String(v) })
 
 const ENGINES: readonly Engine[] = ['apache', 'openlitespeed']
-const MPMS: readonly ApacheMpm[] = ['itk', 'prefork']
+const MPMS: readonly ApacheMpm[] = ['itk']
 const NAMESERVERS_MAX = 8
 
 const port = (v: unknown, what: string): number => assertInt(v, 1, 65535, what)
@@ -345,7 +345,7 @@ export const validateServerSettings = (s: ServerSettings): ServerSettings => {
     nameservers,
     adminEmail: assertEmail(s.adminEmail, 'adminEmail'),
     engine: oneOf(s.engine, ENGINES, 'engine'),
-    apacheMpm: oneOf(s.apacheMpm, MPMS, 'apacheMpm'),
+    apacheMpm: s.apacheMpm === 'prefork' ? refusePrefork() : oneOf(s.apacheMpm, MPMS, 'apacheMpm'),
     ...ports,
     nginx: validateNginxWorkers(s.nginx),
     apache: validateApacheWorkers(s.apache),

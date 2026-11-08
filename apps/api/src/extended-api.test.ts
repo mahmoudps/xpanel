@@ -291,20 +291,14 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     const wizInitData = (await wizGet.json()) as { setupComplete: boolean }
     assert.equal(wizInitData.setupComplete, false)
 
-    const wizPost = await root.request('/api/setup/wizard', {
-      method: 'POST',
-      body: {
-        hostname: 'whm.xpanel.test',
-        nameservers: ['ns1.xpanel.test', 'ns2.xpanel.test'],
-        contactEmail: 'noc@xpanel.test',
-        engine: 'apache',
-        apacheMpm: 'itk',
-        primaryIpv4: '203.0.113.10',
-        primaryIpv6: '2001:db8::10',
-        quotaFilesystem: '/home',
-        initQuotas: true,
-      },
-    })
+    const wizard = { hostname: 'whm.xpanel.test', nameservers: ['ns1.xpanel.test', 'ns2.xpanel.test'], contactEmail: 'noc@xpanel.test', engine: 'apache', apacheMpm: 'itk',
+      primaryIpv4: '203.0.113.10', primaryIpv6: '2001:db8::10', quotaFilesystem: '/home', initQuotas: true }
+    // Prefork is refused as the installer refuses it, before any setup write.
+    const preforkPost = await root.request('/api/setup/wizard', { method: 'POST', body: { ...wizard, apacheMpm: 'prefork' } })
+    assert.equal(preforkPost.status, 422)
+    assert.equal(((await preforkPost.json()) as { code: string }).code, 'ENGINE_UNAVAILABLE')
+    assert.equal(((await (await root.request('/api/setup/wizard')).json()) as { setupComplete: boolean }).setupComplete, false)
+    const wizPost = await root.request('/api/setup/wizard', { method: 'POST', body: wizard })
     assert.equal(wizPost.status, 200)
     const wizPostBody = (await wizPost.json()) as {
       ok: boolean
@@ -716,17 +710,8 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
     assert.equal(dirPrivRes.status, 412)
     assert.equal(((await dirPrivRes.json()) as { code: string }).code, 'PRECONDITION_FAILED')
 
-    const hotlinkRes = await root.request(`/api/web-features/${account.id}/hotlink-protection`, {
-      method: 'PUT',
-      body: {
-        enabled: true,
-        allowedUrls: ['nebula.test', 'cdn.nebula.test'],
-        protectedExtensions: ['jpg', 'png', 'webp'],
-      },
-    })
-    assert.equal(hotlinkRes.status, 200)
-    const hotlinkBody = (await hotlinkRes.json()) as { config: { compiledNginx: string } }
-    assert.match(hotlinkBody.config.compiledNginx, /valid_referers/)
+    // Hotlink Protection is the domain .htaccess block of /api/domains/:id/web-directives/hotlink; the record-only route is gone.
+    assert.equal((await root.request(`/api/web-features/${account.id}/hotlink-protection`, { method: 'PUT', body: { enabled: true } })).status, 404)
 
     // Web Disk logins are User Manager users served by lighttpd as the account; the compiled nginx alias record is gone.
     assert.equal((await root.request(`/api/web-features/${account.id}/web-disk`, { method: 'PUT', body: { enabled: true } })).status, 404)

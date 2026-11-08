@@ -1,10 +1,11 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { DB_NAME_MAX, fail, isXpanelError } from '@xpanel/core'
 import type { Account, DnsRecordType, Domain, Id, PhpSettings } from '@xpanel/core'
 import { isPhpVersion } from '@xpanel/os'
 import type { StateStore } from '@xpanel/state'
 import type { ReviewAccount, TransferReview, TransferSession } from '@xpanel/lifecycle'
-import { writeAccountEdgeState } from '../../agent/src/account-edge.ts'
+import { readAccountEdgeState, writeAccountEdgeState } from '../../agent/src/account-edge.ts'
+import type { AccountEdgeState } from '../../agent/src/account-edge.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import { httpsTransferSourceTransport } from './acct-transfer-discovery.ts'
 import type { TransferSourceTransport } from './acct-transfer-discovery.ts'
@@ -13,14 +14,14 @@ import { liveStateDigest, livePeerPath } from './live-transfer.ts'
 import { isNodeId } from './node-link.ts'
 import type { TransferAccountBundle, TransferPackageManifest } from './acct-transfer-source.ts'
 import { readReply } from './backup-file-restore-workspace.ts'
-import type { TransferAccountResult, TransferProgressEvent, TransferWorkspacePorts } from './transfer-workspace.ts'
+import type { RevertLoss, TransferAccountResult, TransferProgressEvent, TransferWorkspacePorts } from './transfer-workspace.ts'
 
 /** callAgent bound to the API: JSON in, Response out. */
 export type TransferAgentCall = (caller: AuthenticatedCaller, path: string, init?: { method?: string; body?: unknown }) => Promise<Response>
 
 export interface TransferExecutionDeps {
   store: Pick<StateStore, 'listAccounts' | 'listDomains' | 'listPlans' | 'listFeatureLists' | 'getAccount' | 'getAccountByUsername' |'getServerSettings' | 'getDnsZone' | 'createPlan' | 'createDomain' | 'updateDomain'
-    | 'createDatabase' | 'createDatabaseUser' | 'setGrant' | 'createServiceUser' | 'saveDnsZone' | 'saveCronJobs' | 'saveCertificateBinding' | 'setAccountLimits' | 'setAccountLogSettings' | 'rootDir' | 'getWriterLock'>
+    | 'createDatabase' | 'createDatabaseUser' | 'setGrant' | 'createServiceUser' | 'saveDnsZone' | 'saveCronJobs' | 'saveCertificateBinding' | 'setAccountLimits' | 'setAccountLogSettings' | 'rootDir' | 'getWriterLock' | 'readSnapshot'>
   readToken: (id: string) => Promise<string | null>
   transport?: TransferSourceTransport
   agent: TransferAgentCall
@@ -213,6 +214,27 @@ export function createTransferExecution(deps: TransferExecutionDeps): NonNullabl
     return true
   }
 
+  /**
+   * Observes what a revert would drop here: mail and files the home gained since the cutover, the databases removed with the
+   * copy, zones whose serial moved and edge records saved after the cutover. A category this server cannot read is 'unknown'.
+   */
+  const revertLoss = async (caller: AuthenticatedCaller, username: string, result: Partial<TransferAccountResult>): Promise<{ loss: RevertLoss; target: Account }> => {
+    const cutoverAt = result.live?.cutoverAt ?? precondition('this account has not been cut over')
+    if (result.live?.revertedAt) fail('CONFLICT', 'this cutover has already been reverted', { stateChanged: false })
+    const target = (result.createdAccountId ? await deps.store.getAccount(result.createdAccountId) : null) ?? precondition('the transferred account is no longer here')
+    const home = await runHostTask(deps.agent, caller, { kind: 'home-changes', username: target.username, since: cutoverAt }, deps.pollMs ?? 3000).then(task => task.result, () => null)
+    const read = home && Number.isSafeInteger(home.files) && Array.isArray(home.mail) ? home as { files: number; mail: { mailbox: string; messages: number }[] } : null
+    const snapshot = await deps.store.readSnapshot(), zones = snapshot.zones.filter(zone => zone.accountId === target.id), serials = result.live?.zoneSerials
+    const edge = await readAccountEdgeState(deps.store.rootDir, target.id).catch(() => null)
+    const observed: Omit<RevertLoss, 'digest'> = {
+      account: username, cutoverAt, mail: read ? read.mail : 'unknown', files: read ? read.files : 'unknown',
+      databases: { onCopy: snapshot.databases.filter(db => db.accountId === target.id).length, changes: 'unknown' },
+      zones: serials ? { changed: zones.filter(zone => serials[zone.name] !== zone.serial).length + Object.keys(serials).filter(name => !zones.some(zone => zone.name === name)).length, total: zones.length } : 'unknown',
+      edgeNotCarriedBack: edge ? (Object.keys(edge) as (keyof AccountEdgeState)[]).filter(name => Date.parse(edge[name]!.updatedAt) > Date.parse(cutoverAt)).sort() : 'unknown',
+    }
+    return { loss: { ...observed, digest: createHash('sha256').update(JSON.stringify(observed)).digest('hex') }, target }
+  }
+
   /** Removes only the account this run created (by id); an account that merely shares the target username is never touched. */
   const removeCreated = async (caller: AuthenticatedCaller, accountId: string | null | undefined): Promise<boolean> => {
     const leftover = accountId ? await deps.store.getAccount(accountId) : null
@@ -234,17 +256,18 @@ export function createTransferExecution(deps: TransferExecutionDeps): NonNullabl
       if (result?.liveFrozen) await revertSource(session, sourceOf(session, account.targetUsername))
       return removeCreated(caller, result?.createdAccountId)
     },
-    /** Takes a finished live transfer back: the source serves again and the copy here is removed. */
-    revert: async (caller, session, username, result, acceptLoss) => {
-      const cutoverAt = result.live?.cutoverAt ?? precondition('this account has not been cut over')
-      if (result.live?.revertedAt) fail('CONFLICT', 'this cutover has already been reverted', { stateChanged: false })
-      const target = (result.createdAccountId ? await deps.store.getAccount(result.createdAccountId) : null) ?? precondition('the transferred account is no longer here')
-      const changes = await runHostTask(deps.agent, caller, { kind: 'home-changes', username: target.username, since: cutoverAt }, deps.pollMs ?? 3000)
-      if (changes.result.changed === true && !acceptLoss) fail('CONFLICT', 'the account changed here after the cutover; confirm that those changes are lost', { stateChanged: false, reason: 'post_cutover_writes' })
+    previewRevert: async (caller, _session, username, result) => (await revertLoss(caller, username, result)).loss,
+    /** Takes a finished live transfer back: the source serves again and the copy here is removed, with everything the confirmed preview listed. */
+    revert: async (caller, session, username, result, confirmation) => {
+      if (!/^[0-9a-f]{64}$/.test(confirmation)) fail('PRECONDITION_FAILED', 'preview what the revert drops and confirm that preview first', { stateChanged: false, reason: 'revert_preview_required' })
+      // Revert returns the source to its frozen state: nothing changed here since the cutover is carried back.
+      const { loss, target } = await revertLoss(caller, username, result)
+      if (loss.digest !== confirmation) fail('CONFLICT', 'what the revert drops changed since the preview; preview it again', { stateChanged: false, reason: 'revert_preview_stale', preview: loss })
       await revertSource(session, username)
       await removeCreated(caller, target.id)
-      await audit(caller, 'transfer.account.live_reverted', 'account:' + target.username, { source: username, acceptLoss })
-      return { ...result.live!, revertedAt: new Date().toISOString() }
+      await audit(caller, 'transfer.account.live_reverted', 'account:' + target.username, { source: username, lost: loss })
+      const { zoneSerials: _serials, ...live } = result.live!
+      return { ...live, revertedAt: new Date().toISOString(), lost: loss }
     },
     run: async (caller, session, review, emit, shouldStop) => {
       const hostname = session.source?.hostname ?? precondition('the transfer source is not connected')
@@ -306,7 +329,8 @@ export function createTransferExecution(deps: TransferExecutionDeps): NonNullabl
             await progress('cutover')
             const cut = await sourceJson(source, livePeerPath(account.source, 'cutover'), 'POST', { session: session.id, ipv4: local.ipv4 }, TRANSFER_STEP_TIMEOUT_MS) as { zones?: unknown }
             result.createdAccountId = local.id
-            result.live = { cutoverAt: new Date().toISOString(), zones: typeof cut?.zones === 'number' ? cut.zones : 0, revertedAt: null }
+            const zoneSerials = Object.fromEntries((await deps.store.readSnapshot()).zones.filter(zone => zone.accountId === local.id).map(zone => [zone.name, zone.serial]))
+            result.live = { cutoverAt: new Date().toISOString(), zones: typeof cut?.zones === 'number' ? cut.zones : 0, revertedAt: null, zoneSerials }
             await audit(caller, 'transfer.account.cutover', target, { source: account.source, zones: result.live.zones })
           }
           await audit(caller, 'transfer.account.imported', target, { source: account.source, ...result })

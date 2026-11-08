@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApiToken, createResellerPrincipal, createTestDb, createUserPrincipal } from '@xpanel/db'
+import { cp, readFile } from 'node:fs/promises'
+import { join, sep } from 'node:path'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createApiToken, createDb, createResellerPrincipal, createTestDb, createUserPrincipal, type Db } from '@xpanel/db'
 import * as dbApi from '@xpanel/db'
 import { XpanelError } from '@xpanel/core'
 import { atomicWriteJson, createTestStateStore } from '@xpanel/state'
@@ -32,37 +32,54 @@ const draft = (patch: Record<string, unknown> = {}) => ({
   actions: [{ type: 'fileinto', target: 'Billing' }], ...patch,
 })
 
-const fixture = async () => {
+const token = async (db: Db, scopes: string[], principalId: string) => {
+  const raw = `xp_${randomUUID()}`
+  await createApiToken(db, { principalId, name: 'Synthetic filter test', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 600000).toISOString() })
+  return raw
+}
+/** Migrated SQLite, both accounts, three mailboxes and their credentials, built once per file. */
+const buildTemplate = async () => {
   const database = await createTestDb()
+  const state = await createTestStateStore()
+  try {
+    const features = await state.store.createFeatureList({ name: 'Filter policy', ownerId: null, disabled: [] })
+    const plan = await state.store.createPlan({ name: 'Filter plan', ownerId: null, featureListId: features.id,
+      resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
+      caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 4, forwarders: 4, mailingLists: 5, ftpAccounts: 5, databases: 5, phpWorkers: 5 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
+    await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+    const account = async (username: string) => state.store.createAccount({ username, passwordHash: HASH, primaryDomain: `${username}.example.test`, planId: plan.id, ownerId: null,
+      contactEmail: `owner@${username}.example.test`, ipv4: '192.0.2.10', shell: 'none',
+      php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
+    const owner = await account('owner8')
+    const other = await account('other8')
+    const inbox = await state.store.createServiceUser({ accountId: owner.id, login: `inbox@${owner.primaryDomain}`, passwordHash: HASH,
+      services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
+    const sibling = await state.store.createServiceUser({ accountId: owner.id, login: `support@${owner.primaryDomain}`, passwordHash: HASH,
+      services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
+    const foreignMailbox = await state.store.createServiceUser({ accountId: other.id, login: `inbox@${other.primaryDomain}`, passwordHash: HASH,
+      services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
+    const principal = await createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: HASH })
+    const credential = await token(database.db, ['mail:read', 'mail:write'], principal.id)
+    const mailboxToken = await token(database.db, [`mailbox:${inbox.id}`, 'mail:read', 'mail:write'], principal.id)
+    const siblingToken = await token(database.db, [`mailbox:${sibling.id}`, 'mail:read', 'mail:write'], principal.id)
+    return { sqlite: database.sqlite.serialize(), baseline: state, features, owner, other, inbox, sibling, foreignMailbox, principal, credential, mailboxToken, siblingToken }
+  } catch (error) { await state.close(); throw error } finally { await database.close() }
+}
+let template: Awaited<ReturnType<typeof buildTemplate>>
+/** Every case gets its own SQLite image and desired-state copy, without the writer mutex or its lock. */
+const fixture = async () => {
+  const database = createDb(':memory:')
   cleanup.push(() => database.close())
+  database.sqlite.deserialize(template.sqlite)
+  expect(await database.query('PRAGMA foreign_keys')).toEqual([{ foreign_keys: 1 }])
   const state = await createTestStateStore()
   cleanup.push(() => state.close())
-  const features = await state.store.createFeatureList({ name: 'Filter policy', ownerId: null, disabled: [] })
-  const plan = await state.store.createPlan({ name: 'Filter plan', ownerId: null, featureListId: features.id,
-    resources: { diskMb: 1000, bandwidthMbMonth: 10000, ioReadBps: 1048576, ioWriteBps: 1048576, ioReadIops: 100, ioWriteIops: 100, memoryMb: 128, maxProcesses: 16, cpuPercent: 100 },
-    caps: { addonDomains: 5, aliasDomains: 5, subdomains: 5, mailboxes: 4, forwarders: 4, mailingLists: 5, ftpAccounts: 5, databases: 5, phpWorkers: 5 }, dedicatedIp: false, shell: 'none', defaultMailboxQuotaMb: 100 })
-  await state.store.saveServerIp({ address: '192.0.2.10', version: 4, prefixLength: 24, interfaceName: 'test0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
-  const account = async (username: string) => state.store.createAccount({ username, passwordHash: HASH, primaryDomain: `${username}.example.test`, planId: plan.id, ownerId: null,
-    contactEmail: `owner@${username}.example.test`, ipv4: '192.0.2.10', shell: 'none',
-    php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 1, maxRequests: 50, processIdleTimeoutSec: 10 }, ini: {} } })
-  const owner = await account('owner8')
-  const other = await account('other8')
-  const inbox = await state.store.createServiceUser({ accountId: owner.id, login: `inbox@${owner.primaryDomain}`, passwordHash: HASH,
-    services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
-  const sibling = await state.store.createServiceUser({ accountId: owner.id, login: `support@${owner.primaryDomain}`, passwordHash: HASH,
-    services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
-  const foreignMailbox = await state.store.createServiceUser({ accountId: other.id, login: `inbox@${other.primaryDomain}`, passwordHash: HASH,
-    services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100, ftpDir: 'public_html' })
-  const principal = await createUserPrincipal(database.db, { username: owner.username, accountId: owner.id, passwordHash: HASH })
+  const lock = template.baseline.store.getWriterLock()
+  await cp(template.baseline.rootDir, state.rootDir, { recursive: true, filter: source =>
+    source !== lock.mutexFilePath && !source.startsWith(lock.mutexFilePath + '-') && source !== lock.lockDirPath && !source.startsWith(lock.lockDirPath + sep) })
+  const { features, owner, other, inbox, sibling, foreignMailbox, principal, credential, mailboxToken, siblingToken } = template
   const app = createApiApp({ db: database.db, store: state.store, serverSecret: 'filter-synthetic-server-secret-at-least-32-bytes' })
-  const token = async (scopes: string[], principalId = principal.id) => {
-    const raw = `xp_${randomUUID()}`
-    await createApiToken(database.db, { principalId, name: 'Synthetic filter test', tokenHash: sha256Hex(raw), scopes, expiresAt: new Date(Date.now() + 60000).toISOString() })
-    return raw
-  }
-  const credential = await token(['mail:read', 'mail:write'])
-  const mailboxToken = await token([`mailbox:${inbox.id}`, 'mail:read', 'mail:write'])
-  const siblingToken = await token([`mailbox:${sibling.id}`, 'mail:read', 'mail:write'])
+  const issue = (scopes: string[], principalId = principal.id) => token(database.db, scopes, principalId)
   const request = (path: string, method = 'GET', body?: unknown, raw = credential) => app.fetch(new Request(`http://localhost${path}`, { method,
     headers: { authorization: `Bearer ${raw}`, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }))
@@ -71,7 +88,7 @@ const fixture = async () => {
   const record = (patch: Partial<FilterRecord> = {}): FilterRecord => ({ id: randomUUID(), accountId: owner.id, scope: 'global', mailbox: null,
     name: 'Seeded rule', priority: 1, enabled: true, matchAll: true, conditions: [{ field: 'subject', comparator: 'contains', value: 'invoice' }],
     actions: [{ type: 'keep' }], compiledSieve: '', createdAt: '2026-01-01T00:00:00.000Z', ...patch })
-  return { database, state, features, owner, other, inbox, sibling, foreignMailbox, principal, token, request, credential, mailboxToken, siblingToken, path, bytes, record }
+  return { database, state, features, owner, other, inbox, sibling, foreignMailbox, principal, token: issue, request, credential, mailboxToken, siblingToken, path, bytes, record }
 }
 
 
@@ -119,6 +136,8 @@ const queueNextMutationWriter = (store: Awaited<ReturnType<typeof fixture>>['sta
 
 describe('mail-filter configuration HTTP security acceptance with disposable state', () => {
   let f: Awaited<ReturnType<typeof fixture>>
+  beforeAll(async () => { template = await buildTemplate() })
+  afterAll(async () => { await template?.baseline.close() })
   beforeEach(async () => { f = await fixture() })
   afterEach(async () => {
     vi.restoreAllMocks()

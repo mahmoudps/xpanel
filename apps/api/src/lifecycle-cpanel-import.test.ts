@@ -4,7 +4,10 @@ import { createTestStateStore } from '@xpanel/state'
 import { readCpanelArchive } from '@xpanel/lifecycle'
 import { buildTar } from '../../../packages/lifecycle/src/testing/tar.ts'
 import { cpmoveEntries } from '../../../packages/lifecycle/src/testing/cpanel-fixture.ts'
+import { leechEntries } from '../../../packages/lifecycle/src/testing/cpanel-leech-fixture.ts'
+import { readAccountEdgeState } from '../../agent/src/account-edge.ts'
 import { createCpanelImportPorts } from './lifecycle-cpanel-import.ts'
+import { cpanelUnmapped } from './transfer-workspace.ts'
 import type { CpanelImportRecord } from './transfer-workspace.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 
@@ -16,8 +19,8 @@ const caller = { principal: { kind: 'root', id: randomUUID(), username: 'root' }
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0)) await close() })
 
-const reviewed = async (): Promise<CpanelImportRecord> => {
-  const plan = await readCpanelArchive((async function* () { yield await buildTar(cpmoveEntries(), { gzip: true }) })(), { now: new Date('2027-01-01T00:00:00Z') })
+const reviewed = async (entries = cpmoveEntries()): Promise<CpanelImportRecord> => {
+  const plan = await readCpanelArchive((async function* () { yield await buildTar(entries, { gzip: true }) })(), { now: new Date('2027-01-01T00:00:00Z') })
   // what the host returns for review: no staging references
   const publicPlan = JSON.parse(JSON.stringify({ ...plan, databases: plan.databases.map(db => ({ sourceName: db.sourceName, name: db.name, bytes: db.sql.size })), certificates: plan.certificates.map(cert => ({ names: cert.names, notAfter: cert.notAfter, hasKey: cert.key !== null })) }))
   return { id: randomUUID(), origin: 'upload', filename: 'cpmove-bob.tar.gz', source: null, actor: 'r', createdAt: '', updatedAt: '', state: 'importing', task: null, targetUsername: null, bytes: 10, sha256: 'a'.repeat(64), plan: publicPlan, conflicts: [], unmapped: [], result: null, error: null }
@@ -85,5 +88,17 @@ describe('cPanel import apply', () => {
     await expect(f.ports.apply(caller, record, { planId: f.planId, onCreated: async id => { created.push(id) } })).rejects.toThrow(/the partial account was removed/)
     expect(created).toHaveLength(1)
     expect(f.removed).toEqual(['bob'])
+  })
+  it('imports the Leech Protection folders xPanel enforces and lists a coded refusal for each other one', async () => {
+    const f = await fixture(), record = await reviewed([...cpmoveEntries(), ...leechEntries()])
+    expect(cpanelUnmapped(record.plan!).filter(item => item.code.startsWith('leech-protection-'))).toEqual([
+      { tag: 'skipped', code: 'leech-protection-unreadable', message: expect.stringContaining('public_html/odd'), path: 'cpmove-bob/homedir/public_html/odd/.htaccess' },
+      { tag: 'skipped', code: 'leech-protection-redirect-unsupported', message: 'Leech Protection on public_html/vip was not imported: the redirect is not an absolute http or https URL; set it again after the import', path: 'public_html/vip' },
+    ])
+    const result = await f.ports.apply(caller, record, { planId: f.planId })
+    const account = (await f.store.getAccountByUsername('bob'))!
+    expect((await readAccountEdgeState(f.store.rootDir, account.id)).leech).toEqual({ version: 1, updatedAt: expect.any(String),
+      folders: [{ path: 'public_html/members', maxLogins: 4, redirectUrl: 'https://bob.example/shared.html', alertEmail: 'bob@bob.example', disableUsers: true }] })
+    expect(result).toMatchObject({ leechProtection: 1 })
   })
 })

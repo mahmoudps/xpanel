@@ -11,7 +11,7 @@ import { mailWorkspaceRoutes, renderV2MailWorkspace, type MailWorkspaceInput } f
 const t = v2Messages.translator('en')
 const common = { mailbox: 'owner@example.test', route: '/mail/inbox', title: 'Inbox', quota: { text: '—', percent: null }, folders: [], customFolders: [], canCompose: true } as const
 const inbox: MailInboxView = { ...common, kind: 'inbox', folder: 'INBOX', folderWorkspace: true, state: 'unread', messages: [], selectedKey: null, unreadCount: null, countText: '—', pager: '—', loaded: 0, total: null, moveTargets: [], canReadAttachments: true }
-const compose: MailComposeView = { ...common, route: '/mail/compose', kind: 'compose', draft: { to: '', cc: '', bcc: '', subject: '', body: '' }, canSend: true, canSaveDraft: true, canUseAttachments: true, canManageVacation: true, identity: {}, vacation: null, rules: null }
+const compose: MailComposeView = { ...common, route: '/mail/compose', kind: 'compose', draft: { to: '', cc: '', bcc: '', subject: '', body: '' }, canSend: true, canSaveDraft: true, canUseAttachments: true, canManageVacation: true, canManageFilters: true, identity: {}, vacation: null, rules: null }
 const workspace: MailWorkspaceInput = { locale: 'en', mailbox: common.mailbox, route: '/mail/folders', canReadFacts: true, canRead: false, canManage: false, readOnly: true }
 const find = (html: string, attribute: string) => parseMarkup(html).find(node => node.attrs.has(attribute))
 
@@ -72,6 +72,8 @@ describe('V2 read-only mailbox body authority', () => {
     expect(parseMarkup(html).find(node => node.attrs.get('id') === 'compose-body')?.attrs.get('contenteditable')).toBe('false')
     expect(html).toContain('Saved record not read.')
     expect(renderV2MailCompose(t, compose)).not.toContain('data-readonly="true"')
+    expect(html).not.toContain('href="/mail/settings/filters')
+    expect(renderV2MailCompose(t, compose)).toContain('href="/mail/settings/filters"')
     const vacation = renderV2MailVacation(t, { ...compose, readOnly: true })
     expect(find(vacation, 'data-mail-vacation')?.attrs.get('data-readonly')).toBe('true')
     expect(find(vacation, 'data-vacation-refresh')?.attrs.has('disabled')).toBe(true)

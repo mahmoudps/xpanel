@@ -683,8 +683,9 @@ describe('HTTP authorization security regressions', () => {
 
     // Reseller initially owns alice, then ownership is transferred back to root before reseller's write
     await state.store.changeOwner(alice.id, null)
-    const afterTransfer = await request(resellerToken, `/api/web-features/${alice.id}/hotlink-protection`, 'PUT', {
-      enabled: true,
+    const aliceDomain = (await state.store.listDomains({ accountId: alice.id }))[0]!
+    const afterTransfer = await request(resellerToken, `/api/domains/${aliceDomain.id}/web-directives/hotlink`, 'PUT', {
+      expectedRevision: '0'.repeat(64), model: { enabled: true, allowedHosts: [alice.primaryDomain], extensions: ['png'], allowEmptyReferrer: true, redirectUrl: null },
     })
     expect(afterTransfer.status).toBe(404)
 

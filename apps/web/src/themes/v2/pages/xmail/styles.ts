@@ -69,7 +69,7 @@ ${R} .v2-mail-storage__track>span{display:block;block-size:100%;background:var(-
 .v2-mail-attachments ul{display:flex;flex-direction:column;gap:var(--space-2);list-style:none;padding:0;margin:0}
 .v2-mail-attachments li{display:flex;align-items:center;gap:var(--space-2);min-inline-size:0;overflow-wrap:anywhere}
 .v2-mail-empty{display:flex;flex-direction:column;align-items:center;gap:var(--space-2);padding:var(--space-4) var(--space-3);color:var(--muted);text-align:center}
-.v2-mail-compose{display:grid;grid-template-columns:minmax(0,1.618fr) minmax(280px,1fr);gap:var(--space-3);align-items:start}
+.v2-mail-compose{display:grid;grid-template-columns:minmax(0,1.618fr) minmax(280px,1fr);gap:var(--space-3);align-items:stretch}
 .v2-mail-compose-editor{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0;padding:var(--space-3);border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface)}
 .v2-mail-card-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2)}
 .v2-mail-card-head h1{font-size:20px}
@@ -81,7 +81,9 @@ ${R} .v2-mail-storage__track>span{display:block;block-size:100%;background:var(-
 .v2-mail-recipient>ul:empty{display:none}
 .v2-mail-format{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:4px;border:1px solid var(--line);border-radius:10px;background:var(--subtle)}
 .v2-mail-format .v2-btn{border-color:transparent;background:transparent}
-.v2-mail-editor-body{min-block-size:300px;padding:var(--space-2);border:1px solid var(--line-strong);border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}
+.v2-mail-compose-editor>.v2-field:has(>.v2-mail-editor-body){flex:1 1 auto}
+@media(max-width:767px){.v2-mail-compose-aside>#filters>.v2-card__foot{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.v2-mail-compose-aside>#filters>.v2-card__foot>.v2-btn{min-inline-size:0;padding-inline:8px}}
+.v2-mail-editor-body{flex:1 1 auto;min-block-size:300px;padding:var(--space-2);border:1px solid var(--line-strong);border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}
 .v2-mail-field-label{font-size:13px;font-weight:600}
 .v2-mail-compose-attachments{display:flex;flex-direction:column;gap:var(--space-3)}
 .v2-mail-compose-attachments>ul{display:flex;flex-direction:column;gap:var(--space-2);list-style:none;padding:0;margin:0}

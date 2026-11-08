@@ -167,6 +167,7 @@ export interface MailComposeView extends MailPageFacts {
   readonly canSaveDraft: boolean
   readonly canUseAttachments: boolean
   readonly canManageVacation: boolean
+  readonly canManageFilters: boolean
   readonly identity: { readonly dkim?: string; readonly spf?: string; readonly size?: string }
   readonly vacation: boolean | null
   readonly rules: readonly { readonly name: string; readonly condition: string; readonly action: string; readonly enabled: boolean }[] | null
@@ -306,6 +307,7 @@ function projectMailPrimaryFacts(props: MailSurfaceProps & { readonly mailbox: s
     ...common, kind: 'compose', draft: { to: props.composeDraft?.to ?? '', cc: props.composeDraft?.cc ?? '', bcc: '', subject: props.composeDraft?.subject ?? '', body: props.composeDraft?.body ?? '' },
     canSend: common.canCompose, canSaveDraft: common.canCompose,
     canUseAttachments: tools.has('webmail-attachments'), canManageVacation: tools.has('webmail-autoresponder'),
+    canManageFilters: access.qualified('/mail/settings/filters') && tools.has('webmail-email-filters'),
     identity: { ...(props.identityDkim ? { dkim: props.identityDkim } : {}), ...(props.identitySpf ? { spf: props.identitySpf } : {}), ...(props.identitySize ? { size: props.identitySize } : {}) },
     vacation: props.vacationEnabled ?? null,
     rules: props.sieveRules?.map(rule => ({ name: rule.name, condition: rule.condition, action: rule.action, enabled: rule.enabled })) ?? null,
@@ -401,7 +403,7 @@ export function projectReadOnlyMailSurfaceView(props: MailSurfaceProps, authorit
   if (primary) {
     const view = projectMailPrimaryFacts(scoped, access, route)
     return view.kind === 'compose'
-      ? { ...view, ...flags, canSend: false, canSaveDraft: false, canUseAttachments: false, canManageVacation: false }
+      ? { ...view, ...flags, canSend: false, canSaveDraft: false, canUseAttachments: false, canManageVacation: false, canManageFilters: false }
       : { ...view, ...flags, canReadAttachments: false, moveTargets: [] }
   }
   const page = pages.find(item => item.route === canonicalNavigationRoute(route))

@@ -8,7 +8,7 @@ import type { GuardOptions, SafeEntry } from '../archive/guard.ts'
 import { assertUsername, isDomain, isHostedAddress, isIpv4 } from '../validate.ts'
 import { buildAccount, buildCron, buildDatabases, buildDbUsers, buildDomains, buildMail, buildMailboxes, buildZones, primaryDomainOf, selectCertificates } from './build.ts'
 import type { CertificateChoice } from './build.ts'
-import { parseCpUserFile, parseMailPasswd, parseMailQuota, parseUserdataDomain, parseUserdataMain } from './parsers.ts'
+import { parseCpUserFile, parseLeechConf, parseLeechHtaccess, parseMailPasswd, parseMailQuota, parseUserdataDomain, parseUserdataMain } from './parsers.ts'
 import { newReadState, warn, warnOnce } from './state.ts'
 import type { ReadState } from './state.ts'
 import type { ImportCertificate, ImportPlan } from './types.ts'
@@ -34,6 +34,8 @@ const TOP_BACKUP = /^backup-\d{1,2}\.\d{1,2}\.\d{4}_\d{1,2}-\d{1,2}-\d{1,2}_([a-
 const META_CAP = 4 * 1024 * 1024
 const GRANTS_CAP = 32 * 1024 * 1024
 const PEM_CAP = 256 * 1024
+const HTACCESS_CAP = 64 * 1024
+const LEECH_CONF_CAP = 4 * 1024
 
 /** Top-level pkgacct items that carry nothing an xPanel account uses. */
 const IGNORED_TOP = new Set([
@@ -118,12 +120,32 @@ const onHome = async (s: ReadState, e: SafeEntry, rel: string, body: Body, sink:
     warn(s, 'hardlink-skipped', 'hardlink to content that is not imported', e.path)
     return
   }
+  const folder = posix.dirname(homeRel)
+  if (e.type === 'file' && posix.basename(homeRel) === '.leechprotect-conf') {
+    // cPanel's settings file for the folder; its values move into the xPanel Leech Protection record
+    s.unstored.add(homeRel)
+    const t = await textOf(body, LEECH_CONF_CAP, s, e.path)
+    if (t !== null) s.leechConf.set(folder, parseLeechConf(t))
+    return
+  }
+  let size = e.size
+  // shortcut: a larger .htaccess is copied unread, since xPanel manages none above its 64 KiB limit either.
+  if (e.type === 'file' && posix.basename(homeRel) === '.htaccess' && e.size <= HTACCESS_CAP) {
+    const read = (await readBody(body, HTACCESS_CAP)) ?? Buffer.alloc(0)
+    // latin1 keeps every byte as it is through the split and join
+    const leech = parseLeechHtaccess(read.toString('latin1'))
+    if (leech === 'unreadable') warn(s, 'leech-protection-unreadable', `${folder} has a Leech Protection rule in a form this import does not read; set Leech Protection again after the import`, e.path)
+    else if (leech) s.leechRules.set(folder, { maxLogins: leech.maxLogins, redirectUrl: leech.redirectUrl })
+    const kept = leech && leech !== 'unreadable' ? Buffer.from(leech.content, 'latin1') : read
+    size = kept.length
+    body = single(kept)
+  }
   noteMailStore(s, homeRel, e.path)
   if (e.type === 'directory') s.home.directories++
   else if (e.type === 'symlink') s.home.symlinks++
   else s.home.files++
   s.home.bytes += e.size
-  if (sink) await sink.put({ part: 'home', path: homeRel, type: e.type, mode: e.mode & 0o777, size: e.size, mtime: e.mtime, linkTarget: linked ?? e.linkTarget }, body)
+  if (sink) await sink.put({ part: 'home', path: homeRel, type: e.type, mode: e.mode & 0o777, size, mtime: e.mtime, linkTarget: linked ?? e.linkTarget }, body)
 }
 
 const onMetaFile = async (s: ReadState, e: SafeEntry, rel: string, body: Body, sink: ImportSink | undefined): Promise<void> => {
@@ -254,6 +276,7 @@ const finalize = async (s: ReadState, opts: CpanelImportOptions): Promise<Import
   const mail = buildMail(s, own)
   const certificates = await storeCertificates(s, selectCertificates(s, domains, opts.now ?? new Date()), opts.sink)
   const cronJobs = buildCron(s, sourceUser, target)
+  const leechProtection = [...s.leechRules.keys()].sort().map(path => ({ path, ...s.leechRules.get(path)!, ...(s.leechConf.get(path) ?? { alertEmail: null, disableUsers: false }) }))
   if (s.warningCount > s.warnings.length) s.warnings.push({ code: 'warnings-truncated', message: `${s.warningCount - s.warnings.length} more warnings` })
   return {
     format: s.format,
@@ -269,6 +292,7 @@ const finalize = async (s: ReadState, opts: CpanelImportOptions): Promise<Import
     mail,
     certificates,
     cronJobs,
+    leechProtection,
     home: s.home,
     warnings: s.warnings,
   }

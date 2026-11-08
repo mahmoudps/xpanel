@@ -1,7 +1,7 @@
 // One PHP-FPM master per account and PHP version, running as the account inside its slice
 // (the systemd unit is rendered by the system module, which owns the file layout used here).
 // This module renders php-fpm.conf, the pool, and .user.ini.
-import { phpIniScope, sanitizePhpIni } from '@xpanel/core'
+import { phpIniScope, refusePrefork, sanitizePhpIni } from '@xpanel/core'
 import type { Account, ApacheMpm, ConfigTest, HostAction, Limit, OsProfile, PhpIniOptions, PhpSettings, RenderedFile } from '@xpanel/core'
 import { accountSliceName } from '../system/slice.ts'
 import { fpmUnitName } from '../system/units.ts'
@@ -19,10 +19,10 @@ import {
 } from './paths.ts'
 import { assertWorkers, iniEntries, phpIsolation, type PhpIsolationOptions } from './php.ts'
 import { iniValue } from './quote.ts'
-import { assertAccount, assertInt, assertPhpVersion, assertSystemUser, invalid } from './validate.ts'
+import { assertAccount, assertInt, assertPhpVersion, invalid } from './validate.ts'
 
-/** Answered by FPM itself on the pool socket; no site handler maps this name, so only a root process that reaches the socket can ask. */
-export const FPM_STATUS_PATH = '/xpanel-fpm-status'
+/** Answered by FPM itself with a fixed word: a site that routes a request here through an .htaccess handler learns only that the pool is alive. */
+export const FPM_PING_PATH = '/xpanel-fpm-ping'
 
 export interface FpmPoolOptions extends PhpIsolationOptions, PhpIniOptions {
   /** a site of this pool narrows open_basedir in its .user.ini */
@@ -31,11 +31,7 @@ export interface FpmPoolOptions extends PhpIsolationOptions, PhpIniOptions {
   workerCap?: Limit
   /** request_terminate_timeout, seconds (default 300, 0 = off) */
   requestTerminateTimeoutSec?: number
-  /**
-   * Apache MPM in front of the pool (default itk). Under itk the Apache child already is the
-   * account, so only the account may connect. Under prefork the shared Apache user connects,
-   * which gets an ACL entry on the socket (the master is not root and cannot chgrp to it).
-   */
+  /** Apache MPM in front of the pool (default itk): the Apache child already is the account, so only the account may connect. Prefork is refused. */
   apacheMpm?: ApacheMpm
   /** System PHP-FPM INI defaults: a locked value cannot be overridden; an open one yields to the domain's own value */
   iniDefaults?: readonly FpmIniDefault[]
@@ -48,11 +44,11 @@ const FLAG = /^(on|off)$/i
 const adminLine = ([k, v]: [string, string]): string =>
   FLAG.test(v) ? `php_admin_flag[${k}] = ${v.toLowerCase()}` : `php_admin_value[${k}] = ${iniValue(v, k)}`
 
-const socketAccess = (user: string, os: OsProfile, mpm: ApacheMpm): string[] => {
-  const base = [`listen.owner = ${user}`, `listen.group = ${user}`, 'listen.mode = 0660']
-  if (mpm === 'itk') return base
-  if (mpm !== 'prefork') return invalid('apacheMpm', mpm, 'must be itk or prefork')
-  return [...base, `listen.acl_users = ${assertSystemUser(os.paths.apacheUser, 'Apache user')}`]
+// Prefork would need an ACL for the shared Apache user on every pool, which is how one account reached another's.
+const socketAccess = (user: string, mpm: ApacheMpm): string[] => {
+  if (mpm === 'prefork') return refusePrefork()
+  if (mpm !== 'itk') return invalid('apacheMpm', mpm, 'must be itk')
+  return [`listen.owner = ${user}`, `listen.group = ${user}`, 'listen.mode = 0660']
 }
 
 /** Pool of `<user>-<version>`; listen socket inside the unit's runtime dir, mode 0660. */
@@ -79,7 +75,7 @@ export const renderFpmPool = (account: Account, domainPhp: PhpSettings, os: OsPr
     `user = ${user}`,
     `group = ${user}`,
     `listen = ${fpmSocketPath(user, version)}`,
-    ...socketAccess(user, os, opts.apacheMpm ?? 'itk'),
+    ...socketAccess(user, opts.apacheMpm ?? 'itk'),
     'listen.backlog = 511',
     '',
     `pm = ${w.mode}`,
@@ -88,7 +84,7 @@ export const renderFpmPool = (account: Account, domainPhp: PhpSettings, os: OsPr
     `pm.min_spare_servers = ${w.minSpareServers}`,
     `pm.max_spare_servers = ${w.maxSpareServers}`,
     `pm.max_requests = ${w.maxRequests}`,
-    `pm.status_path = ${FPM_STATUS_PATH}`,
+    `ping.path = ${FPM_PING_PATH}`,
     `pm.process_idle_timeout = ${w.processIdleTimeoutSec}s`,
     `request_terminate_timeout = ${terminate}s`,
     '',
@@ -235,7 +231,6 @@ export const verifyFpmPoolIsolation = (
   const masterFile = renderFpmMaster(account, domainPhp.version, os)
   const user = account.username
   const v = assertPhpVersion(domainPhp.version)
-  const mpm = opts.apacheMpm ?? 'itk'
   const expectedSlice = accountSliceName(account.uid)
 
   if (!masterFile.content.includes(expectedSlice)) {
@@ -264,11 +259,8 @@ export const verifyFpmPoolIsolation = (
     return invalid('FPM socket ownership/mode', `${listenOwner}:${listenGroup} ${listenMode}`, `must equal ${user}:${user} 0660`)
   }
   const aclUsers = aclUsersRaw ? aclUsersRaw.split(',').map((s) => s.trim()).filter(Boolean) : []
-  if (mpm === 'itk' && aclUsers.length > 0) {
+  if (aclUsers.length > 0) {
     return invalid('FPM listen.acl_users', aclUsersRaw, 'must be empty under mpm_itk so only the account UID/GID can connect')
-  }
-  if (mpm === 'prefork' && (aclUsers.length !== 1 || aclUsers[0] !== os.paths.apacheUser)) {
-    return invalid('FPM listen.acl_users', aclUsersRaw, `must contain only ${os.paths.apacheUser} under prefork`)
   }
   if (!pmMode || !['ondemand', 'dynamic', 'static'].includes(pmMode)) {
     return invalid('FPM pm mode', pmMode, 'must be ondemand, dynamic, or static')

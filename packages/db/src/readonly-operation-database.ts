@@ -6,7 +6,8 @@ import { dirname, isAbsolute, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DatabaseSync, StatementSync, type SQLInputValue } from 'node:sqlite'
 import { assertId, fail, XpanelError } from '@xpanel/core'
-import { matchesReviewedOperationalMigrations, OPERATIONAL_SCHEMA_VERSION } from './schema.ts'
+import { matchesReviewedOperationalMigrations, OPERATIONAL_SCHEMA_VERSION, type OperationalMigrationMode } from './schema.ts'
+import { assertMigrationMode, bindMigrationMode, effectiveMigrationMode } from './migration-mode.ts'
 import { assertNoActiveDatabaseTransaction, type Row, type SqlRunner, type StrictOperationDatabaseOrigin } from './sql-runner.ts'
 import { lexSql } from './sql-lexer.ts'
 
@@ -64,7 +65,7 @@ export async function assertReadonlyOperationDatabaseCurrent(db: unknown): Promi
 /** Fixed product ingress, never a caller path/URI, boolean or supplied assertion port.
  * The producer separately proves retained root intent, actual continuous EX and
  * stopped/drained writers before issuing its scope; it grants no generic writes. */
-export async function withReadonlyClosedOperationDatabase<T>(capability: unknown, callback: (db: ReadonlyOperationDatabase) => Promise<T>): Promise<T> {
+export async function withReadonlyClosedOperationDatabase<T>(capability: unknown, callback: (db: ReadonlyOperationDatabase) => Promise<T>, migrations: OperationalMigrationMode = 'complete'): Promise<T> {
   const native = await import('../../../scripts/lifecycle-admission.mjs')
   await native.assertLifecycleClosedDatabaseObservationHeld(capability)
   const info = native.getLifecycleClosedDatabaseObservationInfo(capability)
@@ -74,27 +75,27 @@ export async function withReadonlyClosedOperationDatabase<T>(capability: unknown
     if (JSON.stringify(native.getLifecycleClosedDatabaseObservationInfo(capability)) !== baseline) return refused('closed_database_scope_changed')
   }
   const assertCurrent = async (): Promise<void> => { assertScope(); await native.assertLifecycleClosedDatabaseObservationHeld(capability); assertScope() }
-  return readOperationDatabase(origin.file, callback, { origin, assertCurrent, assertScope })
+  return readOperationDatabase(origin.file, callback, migrations, { origin, assertCurrent, assertScope })
 }
 
 /** Opens only an existing canonical file. No migrations, PRAGMA setters, recovery, mutex, DDL or index writes.
  * Native consumers supply their fixed path; a path or returned origin alone grants no host-effect authority.
  * SQLite may maintain ordinary WAL reader shared-memory bookkeeping; no business/audit mutation is issued. */
-export async function withReadonlyOperationDatabase<T>(path: string, callback: (db: ReadonlyOperationDatabase) => Promise<T>): Promise<T> {
-  return readOperationDatabase(path, callback)
+export async function withReadonlyOperationDatabase<T>(path: string, callback: (db: ReadonlyOperationDatabase) => Promise<T>, migrations: OperationalMigrationMode = 'complete'): Promise<T> {
+  return readOperationDatabase(path, callback, migrations)
 }
 /** For read-only observation callbacks. Reopen only after native WAL contention, with all pins retired. */
-export async function withReobservedReadonlyOperationDatabase<T>(path: string, callback: (db: ReadonlyOperationDatabase) => Promise<T>): Promise<T> {
+export async function withReobservedReadonlyOperationDatabase<T>(path: string, callback: (db: ReadonlyOperationDatabase) => Promise<T>, migrations: OperationalMigrationMode = 'complete'): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     const observation = Symbol()
-    try { return await readOperationDatabase(path, callback, undefined, observation) }
+    try { return await readOperationDatabase(path, callback, migrations, undefined, observation) }
     catch (error) {
       if (attempt >= 3 || !(error instanceof XpanelError) || walCollisions.get(error) !== observation) throw error
     }
   }
 }
 
-async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOperationDatabase) => Promise<T>, closed?: ClosedDatabaseProof, observation?: symbol): Promise<T> {
+async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOperationDatabase) => Promise<T>, migrations: OperationalMigrationMode, closed?: ClosedDatabaseProof, observation?: symbol): Promise<T> {
   const walCollision = (reason: string): never => {
     if (observation === undefined) return refused(reason)
     const error = new XpanelError('PRECONDITION_FAILED', 'read-only operation database observation refused', { reason, stateChanged: false })
@@ -102,6 +103,7 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
     throw error
   }
   assertNoActiveDatabaseTransaction()
+  assertMigrationMode(migrations)
   if (closed) await closed.assertCurrent()
   if (process.platform !== 'linux' || process.getuid?.() !== 0 || process.geteuid?.() !== 0) return refused('linux_root_required')
   if (!closed && process.version !== 'v26.12.1') return refused('pinned_wal_initialization_runtime_required')
@@ -251,7 +253,7 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
       if (main.length !== 1 || main[0]?.file !== path || (closed ? !['wal', 'delete'].includes(String(journal)) : journal !== 'wal')) return refused('canonical_wal_required')
       const rows = queryNative('SELECT issuer_id,schema_version,migration_checksums_json FROM operational_identity WHERE singleton=1'), value = rows[0]
       if (rows.length !== 1 || value?.schema_version !== OPERATIONAL_SCHEMA_VERSION || !matchesReviewedOperationalMigrations(value.migration_checksums_json,
-        queryNative('SELECT version,name,checksum FROM xpanel_schema_migrations ORDER BY version'))) return refused('reviewed_schema_required')
+        queryNative('SELECT version,name,checksum FROM xpanel_schema_migrations ORDER BY version'), effectiveMigrationMode(migrations))) return refused('reviewed_schema_required')
       const origin = Object.freeze({ file: path, device: String(initial.dev), inode: String(initial.ino), issuerId: assertId(value.issuer_id, 'issuerId') })
       if (closed && (['file', 'device', 'inode', 'issuerId'] as const).some(key => origin[key] !== closed.origin[key])) return refused('closed_database_origin_mismatch')
       physical(); return origin
@@ -292,7 +294,7 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
         },
         exec: async () => refused('readonly_exec_forbidden'), transaction: async () => refused('nested_read_transaction'),
       })
-      scopes.set(tx, state)
+      scopes.set(tx, state); bindMigrationMode(tx, migrations)
       try {
         await state.verifyAsync()
         Reflect.apply(execute, native, ['BEGIN DEFERRED'])
@@ -306,7 +308,7 @@ async function readOperationDatabase<T>(path: string, callback: (db: ReadonlyOpe
       query: <R extends Row = Row>(sql: string, params?: readonly unknown[]) => transaction(tx => tx.query<R>(sql, params)),
       transaction, exec: async () => refused('readonly_exec_forbidden'),
     })
-    scopes.set(reader, state)
+    scopes.set(reader, state); bindMigrationMode(reader, migrations)
     return await current.run(state, async () => { await state.verifyAsync(); const value = await callback(reader); await state.verifyAsync(); return value })
   } finally {
     if (scope) scope.live = false

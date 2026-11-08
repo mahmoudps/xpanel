@@ -47,6 +47,8 @@ describe('extended routes never invent host data or success', { tags: ['unit'] }
     ['DELETE', '/api/git/alice/repos/storefront'],
     ['GET', `/api/web-features/${account.id}/web-disk`],
     ['PUT', `/api/web-features/${account.id}/web-disk`],
+    ['GET', `/api/web-features/${account.id}/hotlink-protection`],
+    ['PUT', `/api/web-features/${account.id}/hotlink-protection`],
     ['GET', '/api/mail/caldav-carddav'],
     ['PUT', '/api/mail/caldav-carddav'],
   ])('serves no fabricated %s %s', async (method, path) => {
@@ -65,39 +67,6 @@ describe('extended routes never invent host data or success', { tags: ['unit'] }
     expect(host.emitAudit).not.toHaveBeenCalled()
     expect(host.writes).not.toHaveBeenCalled()
   })
-})
-
-describe('hotlink protection input reaches nginx and Apache lines only after strict validation', { tags: ['unit'] }, () => {
-  const path = `/api/web-features/${account.id}/hotlink-protection`
-
-  it('compiles canonical referrer domains, plain extensions and a checked redirect', async () => {
-    const host = fixture()
-    const response = await host.request('PUT', path, { enabled: true, allowedUrls: ['alice.test', 'CDN.alice.test'], protectedExtensions: ['jpg', 'png'], redirectUrl: 'https://alice.test/blocked.png' })
-    const { config } = await response!.json() as { config: Record<string, unknown> & { compiledNginx: string } }
-    expect(config.allowedUrls).toEqual(['alice.test', 'cdn.alice.test'])
-    expect(config.compiledNginx).toContain('location ~* \\.(jpg|png)$ {')
-    expect(config.compiledNginx).toContain('  valid_referers none blocked alice.test cdn.alice.test;')
-    expect(config.compiledNginx).toContain('    return 302 https://alice.test/blocked.png;')
-    expect(Object.keys(config).sort()).toEqual(['accountId', 'allowDirectRequests', 'allowedUrls', 'compiledApache', 'compiledNginx', 'enabled', 'protectedExtensions', 'redirectUrl', 'updatedAt'])
-  })
-
-  it.each([
-    ['newline in a referrer domain', { allowedUrls: ['alice.test\nlocation / {'] }],
-    ['quote in a referrer domain', { allowedUrls: ['alice.test"'] }],
-    ['directive in a referrer domain', { allowedUrls: ['alice.test; return 200'] }],
-    ['referrer list as a string', { allowedUrls: 'alice.test' }],
-    ['too many referrer domains', { allowedUrls: Array.from({ length: 101 }, (_, i) => `d${i}.alice.test`) }],
-    ['regex alternation in an extension', { protectedExtensions: ['jpg|.*'] }],
-    ['location break in an extension', { protectedExtensions: ['jpg)$ {'] }],
-    ['control character in an extension', { protectedExtensions: ['jp\u0007g'] }],
-    ['enabled without extensions', { enabled: true, protectedExtensions: [] }],
-    ['directive in the redirect', { redirectUrl: 'https://alice.test/x; return 200' }],
-    ['newline in the redirect', { redirectUrl: 'https://alice.test/x\nlocation' }],
-    ['non-http redirect', { redirectUrl: 'javascript:alert(1)' }],
-    ['string flag', { enabled: 'true' }],
-    ['numeric flag', { allowDirectRequests: 1 }],
-    ['compiled text', { compiledNginx: 'location / {}' }],
-  ])('rejects %s without writing', rejectsWithoutWriting(path))
 })
 
 describe('web extras input reaches nginx and Apache lines only after strict validation', { tags: ['unit'] }, () => {

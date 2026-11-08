@@ -9,6 +9,18 @@ import { createV2Stylesheet } from './stylesheet.ts'
 const css = v2Stylesheet.body
 const foundationAssets = [v2Stylesheet, ...v2SharedStylesheets]
 const compressedBytes = (assets: readonly { readonly body: string }[]): number => assets.reduce((sum, asset) => sum + gzipSync(asset.body).byteLength, 0)
+/** Splits a selector list at its top-level commas only, never inside :is(), :not(), :has(), :where() or [attributes]. */
+const topLevelSelectors = (list: string): string[] => {
+  const parts: string[] = []
+  let depth = 0, start = 0
+  for (let index = 0; index < list.length; index++) {
+    const character = list[index]
+    if (character === '(' || character === '[') depth++
+    else if (character === ')' || character === ']') depth--
+    else if (character === ',' && depth === 0) { parts.push(list.slice(start, index)); start = index + 1 }
+  }
+  return [...parts, list.slice(start)]
+}
 const rulesFor = (source: string): string[] => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/@media[^{]+\{|@supports[^{]+\{|@keyframes[^{]+\{(?:[^{}]*\{[^}]*\})*[^}]*\}/g, '').split('}').map(rule => rule.trim()).filter(Boolean)
 
 describe('v2 stylesheet asset', () => {
@@ -30,12 +42,18 @@ describe('v2 stylesheet asset', () => {
     for (const viewKind of ['login', 'status'] as const) expect(compressedBytes([...foundationAssets, ...v2StylesheetsForDocument({ viewKind })])).toBeLessThanOrEqual(60 * 1024)
   })
 
+  it('splits a selector list only at its top-level commas', () => {
+    expect(topLevelSelectors('.v2-a tr>:is([colspan],:nth-child(n+3):has(button,input)),.v2-b:not(.v2-c,[data-x="d,e"])')).toEqual(['.v2-a tr>:is([colspan],:nth-child(n+3):has(button,input))', '.v2-b:not(.v2-c,[data-x="d,e"])'])
+    // A real top-level list still reaches the scope rule one selector at a time.
+    expect(topLevelSelectors('.v2-a,.xp-b')).toEqual(['.v2-a', '.xp-b'])
+  })
+
   it('scopes every rule to the v2 root or a v2-owned class or id, and never styles classic classes', () => {
     for (const asset of v2Assets) {
       for (const rule of rulesFor(asset.body)) {
         const selectors = rule.slice(0, rule.indexOf('{'))
         if (!selectors.trim()) continue
-        for (const selector of selectors.split(/,(?![^(]*\))/)) {
+        for (const selector of topLevelSelectors(selectors)) {
           expect(selector.trim(), `${asset.path}: ${rule}`).toMatch(/^(?::where\(\[data-ui-theme="v2"\]\)|\[data-ui-theme="v2"\]|\.v2-|#xp-toast-region)/)
         }
       }

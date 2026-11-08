@@ -18,7 +18,7 @@ export async function readWebStatusToken(path = WEB_STATUS_TOKEN_PATH): Promise<
 }
 
 export interface WebStatusWorker { slot: string; pid: number | null; accesses: string; mode: string; cpu: number | null; secondsSinceRequest: number | null; lastRequestMs: number | null; connKb: number | null; childMb: number | null; slotMb: number | null; client: string | null; protocol: string | null; vhost: string | null; request: string | null; internal: boolean }
-export interface WebStatusSummary { serverVersion: string | null; mpm: string | null; currentTime: string | null; restartTime: string | null; generation: number | null; uptimeSeconds: number | null; totalAccesses: number | null; totalKb: number | null; cpuLoad: number | null; requestsPerSecond: number | null; bytesPerSecond: number | null; bytesPerRequest: number | null; busyWorkers: number | null; idleWorkers: number | null; scoreboard: string | null }
+export interface WebStatusSummary { serverVersion: string | null; currentTime: string | null; restartTime: string | null; generation: number | null; uptimeSeconds: number | null; totalAccesses: number | null; totalKb: number | null; cpuLoad: number | null; requestsPerSecond: number | null; bytesPerSecond: number | null; bytesPerRequest: number | null; busyWorkers: number | null; idleWorkers: number | null; scoreboard: string | null }
 export interface WebStatusObservation {
   observedAt: string
   engine: string
@@ -30,7 +30,8 @@ const number = (value: string | undefined): number | null => { const parsed = va
 /** mod_status ?auto: one "Key: value" per line. */
 export function parseApacheAuto(text: string): WebStatusSummary {
   const fields = new Map(text.split('\n').flatMap(line => { const split = line.indexOf(': '); return split > 0 ? [[line.slice(0, split), line.slice(split + 2).trim()] as const] : [] }))
-  return { serverVersion: fields.get('ServerVersion') ?? null, mpm: fields.get('ServerMPM') ?? null, currentTime: fields.get('CurrentTime') ?? null, restartTime: fields.get('RestartTime') ?? null, generation: number(fields.get('ParentServerConfigGeneration')),
+  // ServerMPM is omitted: with mpm_itk loaded on top of prefork it still says prefork, so it never names the active MPM.
+  return { serverVersion: fields.get('ServerVersion') ?? null, currentTime: fields.get('CurrentTime') ?? null, restartTime: fields.get('RestartTime') ?? null, generation: number(fields.get('ParentServerConfigGeneration')),
     uptimeSeconds: number(fields.get('ServerUptimeSeconds') ?? fields.get('Uptime')), totalAccesses: number(fields.get('Total Accesses')), totalKb: number(fields.get('Total kBytes')), cpuLoad: number(fields.get('CPULoad')),
     requestsPerSecond: number(fields.get('ReqPerSec')), bytesPerSecond: number(fields.get('BytesPerSec')), bytesPerRequest: number(fields.get('BytesPerReq')), busyWorkers: number(fields.get('BusyWorkers')), idleWorkers: number(fields.get('IdleWorkers')), scoreboard: fields.get('Scoreboard') ?? null }
 }

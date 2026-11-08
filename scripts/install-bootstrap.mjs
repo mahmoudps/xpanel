@@ -587,13 +587,14 @@ async function preparedBootstrap(runtime) {
 
 /** Observe one exact prepared installation; this does not acquire native mutation authority. */
 export async function observePreparedInstallFinalization() {
-  return observeFinalizationSource(true)
+  return observeFinalizationSource(true, 'complete')
 }
 
-/** Read-only acquisition proof, called only after the installed verifier authenticates this helper archive. */
-export async function observeInstalledAcquisitionSource() { return observeFinalizationSource(false) }
+/** Read-only acquisition proof, called only after the installed verifier authenticates this helper archive.
+ * The staged helper reads the installed database before its own upgrade migrates it. */
+export async function observeInstalledAcquisitionSource() { return observeFinalizationSource(false, 'pre-migration') }
 
-async function observeFinalizationSource(requireSameHelper) {
+async function observeFinalizationSource(requireSameHelper, migrations) {
   const runtime = await nativeContext()
   const actual = await readTrustedFile(BOOTSTRAP_PATH, { exactMode: 0o600, maxBytes: 16 * 1024 })
   let bootstrap = parseJson(actual.bytes)
@@ -605,7 +606,7 @@ async function observeFinalizationSource(requireSameHelper) {
       await verifyPreparedBootstrapSource(runtime, observed.bootstrap)
       await observed.assertCurrent()
       return freeze({ bootstrap: observed.bootstrap, runtime })
-    })
+    }, migrations)
   }
   const recoveryPins = []
   if (bootstrap.status === 'active' || Object.hasOwn(bootstrap, 'finalization')) {
@@ -765,11 +766,11 @@ export async function assertPreparedReleaseCurrent(capability) {
 }
 
 /** The new helper and installed old source have separate identities; neither replaces the other. */
-export async function observePreparedAdoptionSource(capability) {
+export async function observePreparedAdoptionSource(capability, migrations = 'complete') {
   await assertPreparedReleaseCurrent(capability)
   const helper = preparedReleaseInfo(capability)
   check(await realpath(fileURLToPath(import.meta.url)) === helper.releaseRoot + '/scripts/install-bootstrap.mjs', 'PREPARED_ADOPTION_HELPER_MISMATCH')
-  const installed = await observeFinalizationSource(false)
+  const installed = await observeFinalizationSource(false, migrations)
   check(installed.runtime.nodePath === helper.runtime.nodePath && installed.runtime.nodeSha256 === helper.runtime.nodeSha256,
     'PREPARED_ADOPTION_RUNTIME_MISMATCH')
   await assertPreparedReleaseCurrent(capability)

@@ -68,6 +68,7 @@ export const WHM_OBSERVATION_CSS = `${IDENTITY_ROWS_CSS}
 .v2-observation .v2-field [dir=ltr]{text-align:var(--v2-control-align,start)}
 .v2-observation__scroll{max-inline-size:100%;overflow:auto;min-inline-size:0}
 .v2-observation :is(th,td){text-align:start;vertical-align:top;padding:12px 16px;overflow-wrap:anywhere}
+.v2-panel-access__code{white-space:pre-wrap;overflow-wrap:anywhere}
 .v2-observation__log{max-block-size:480px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:16px;border:1px solid var(--line);border-radius:var(--radius-control);background:var(--code);color:var(--code-text);font:13px/1.6 var(--font-mono)}
 .v2-observation__list{display:flex;flex-direction:column;gap:16px;list-style:none;padding:0;min-inline-size:0}
 .v2-observation__charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:16px}

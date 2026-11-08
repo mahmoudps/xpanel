@@ -102,8 +102,8 @@ async function ordinaryObservation(ownership: CoordinatorOwnershipCapability, re
     await authority.assertCurrent()
     // The live API and agent keep writing (job progress, I/O samples) during the multi-second held exchange and
     // any write refuses a pinned reader; pin only the database origin and read each generation in a fresh reader.
-    const origin = await withReobservedReadonlyOperationDatabase(DATABASE, async db => getReadonlyOperationDatabaseOrigin(db))
-    return collectHostedObservation(ownership, request, authority, { origin, fresh: read => withReobservedReadonlyOperationDatabase(DATABASE, read) }, false)
+    const origin = await withReobservedReadonlyOperationDatabase(DATABASE, async db => getReadonlyOperationDatabaseOrigin(db), 'pre-migration')
+    return collectHostedObservation(ownership, request, authority, { origin, fresh: read => withReobservedReadonlyOperationDatabase(DATABASE, read, 'pre-migration') }, false)
   }
   if (recovery) return withNativeLifecycleRecoveryObservation(work)
   await assertNativeLifecyclePrerequisites(ownership)

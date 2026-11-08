@@ -440,6 +440,7 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
 
   it('enforces feature-list entitlements across every feature-gated route family', { tags: ['slow'] }, async () => {
     const aliceToken = await tokenFor(alicePrincipalId, ['*'])
+    const aliceDomain = (await state.store.listDomains({ accountId: alice.id }))[0]!
 
     const featureCases: {
       feature: string
@@ -469,7 +470,8 @@ describe('S01 central authorization route matrix & multi-principal invariants', 
       { feature: 'backup', method: 'GET', path: `/api/backups/snapshots?accountId=${alice.id}` },
       // Folders live in the account files: past the entitlement, no host agent here is a truthful 412.
       { feature: 'directory-privacy', method: 'GET', path: `/api/web-features/${alice.id}/directory-privacy`, allowed: 412 },
-      { feature: 'hotlink-protection', method: 'GET', path: `/api/web-features/${alice.id}/hotlink-protection` },
+      // The rules live in the domain .htaccess: past the entitlement, no host agent here is a truthful 503.
+      { feature: 'hotlink-protection', method: 'GET', path: `/api/domains/${aliceDomain.id}/web-directives/hotlink`, allowed: 503 },
       { feature: 'web-disk', method: 'GET', path: '/api/account/web-disk' },
       { feature: 'perl-modules', method: 'GET', path: '/api/account/perl-modules/search', allowed: 422 },
       { feature: 'calendars-contacts-config', method: 'GET', path: '/api/account/calendars-contacts/connection/apple.mobileconfig?principal=main', allowed: 404 },

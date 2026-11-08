@@ -111,8 +111,8 @@ export async function handleListModerationRoute(req: Request, url: URL, method: 
     await assertAccountFeatures(ports.store, caller, account, FEATURES)
     return { caller, account, lists, list }
   }
-  const body = method === 'GET' ? null : await mailboxToolBody(req, url, queued ? ['op', 'args'] : ['moderation', 'selfSubscription', 'policy', 'expectedRevision'])
   const { caller, account, list } = await authorize(), callHost = ports.callHost
+  const body = method === 'GET' ? null : await mailboxToolBody(req, url, queued ? ['op', 'args'] : ['moderation', 'selfSubscription', 'policy', 'expectedRevision'])
   const host: HostCall | null = callHost ? (call, mutation) => callHost(caller, account.username, call, mutation) : null
   const audit = (action: string, detail: Record<string, unknown>) => ports.emitAudit({ actor: caller.principal.username, action, target: 'mailing-list:' + list.address, outcome: 'ok', principalId: caller.principal.id, detail })
   if (body === null) return mailboxJson(await view(list, host))

@@ -44,6 +44,10 @@ const option = (handler: PhpHandler, available: boolean, isDefault: boolean, sha
   reason: available ? null : reason,
 })
 
+/** The installer refuses prefork; settings and the handler matrix refuse it with the same code. */
+export const PREFORK_REFUSED = 'settings.apacheMpm "prefork" is refused: xPanel serves accounts only with mpm_itk, because the shared prefork Apache user cannot read account document roots or be confined to one account. Set settings.apacheMpm to "itk" in the server.json state file.'
+export const refusePrefork = (): never => fail('ENGINE_UNAVAILABLE', PREFORK_REFUSED, { field: 'settings.apacheMpm', value: 'prefork', fix: 'itk', file: 'server.json', reason: 'prefork_refused' })
+
 /**
  * Throws ENGINE_UNAVAILABLE when itk is requested on a host without the itk package:
  * running every site as the shared web-server user instead is never an acceptable fallback.
@@ -84,25 +88,13 @@ export const availableHandlers = (ctx: HandlerContext): HandlerMatrix => {
       handlers: [
         option('fpm', true, true, false, null),
         option('cgi', true, false, false, null),
-        option('suphp', false, false, false, 'suPHP cannot run alongside mpm_itk; switch Apache to prefork to use it'),
+        option('suphp', false, false, false, 'suPHP needs the shared-identity prefork MPM; xPanel serves accounts only with mpm_itk, so suPHP cannot run'),
         option('lsphp', false, false, false, olsOnly),
       ],
       warnings: [],
     }
   }
-  return {
-    engine: 'apache',
-    mpm: 'prefork',
-    sharedIdentity: true,
-    defaultHandler: 'fpm',
-    handlers: [
-      option('fpm', true, true, true, null),
-      option('cgi', true, false, true, null),
-      option('suphp', true, false, true, null),
-      option('lsphp', false, false, true, olsOnly),
-    ],
-    warnings: ['prefork: Apache children are shared and do not run as the account; only PHP runs under the account UID'],
-  }
+  return refusePrefork()
 }
 
 /** ENGINE_UNAVAILABLE unless the handler can run under the current engine/MPM. */

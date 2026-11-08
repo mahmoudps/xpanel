@@ -21,6 +21,7 @@ import {
   validateServerIpEntry,
   validateServerIpPool,
   canonicalIp,
+  refusePrefork,
 } from '@xpanel/core'
 import type {
   Account,
@@ -336,18 +337,6 @@ export interface BackupSnapshot {
   files: BackupSnapshotFile[]
   databases: string[]
   createdAt: string
-}
-
-export interface HotlinkProtectionConfig {
-  accountId: Id
-  enabled: boolean
-  allowedUrls: string[]
-  protectedExtensions: string[]
-  allowDirectRequests: boolean
-  redirectUrl: string | null
-  compiledNginx: string
-  compiledApache: string
-  updatedAt: string
 }
 
 export interface WebExtrasConfig {
@@ -737,6 +726,8 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
         const adminEmail = body.contactEmail ?? body.adminEmail ?? existingSettings?.adminEmail ?? `admin@${hostname}`
         const engine = body.engine ?? existingSettings?.engine ?? 'apache'
         const apacheMpm = body.apacheMpm ?? existingSettings?.apacheMpm ?? 'itk'
+        // Refused before any setup write, with the installer's code: only mpm_itk isolates accounts.
+        if (apacheMpm === 'prefork') refusePrefork()
 
         if (body.panelPort !== undefined && body.panelPort !== (existingSettings?.panelPort ?? 2087)) return fail('VALIDATION', 'the panel port moves on the Panel access page', { stateChanged: false, reason: 'panel_port_moves_on_panel_access' })
         const settingsInput: ServerSettings = {
@@ -2144,7 +2135,7 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
     // =========================================================================
     // 6. Extended File Isolation & Web Extras (/api/web-features/*)
     // =========================================================================
-    const webFeatMatch = /^\/api\/web-features\/([^/]+)\/(hotlink-protection|extras)$/.exec(
+    const webFeatMatch = /^\/api\/web-features\/([^/]+)\/(extras)$/.exec(
       pathname,
     )
     if (webFeatMatch) {
@@ -2152,67 +2143,6 @@ export const createExtendedApiRouter = (helpers: ExtendedRouteHelpers) => {
       const account = await helpers.resolveAccountParam(webFeatMatch[1]!)
       const featureKind = webFeatMatch[2]!
       await helpers.assertCanAccessAccount(caller, account, `web_features.${featureKind}`)
-
-      if (featureKind === 'hotlink-protection') {
-        const fileKey = `web-features/${account.id}/hotlink-protection.json`
-        const defaultCfg: HotlinkProtectionConfig = {
-          accountId: account.id,
-          enabled: false,
-          allowedUrls: [account.primaryDomain, `www.${account.primaryDomain}`],
-          protectedExtensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'mp4'],
-          allowDirectRequests: true,
-          redirectUrl: null,
-          compiledNginx: '',
-          compiledApache: '',
-          updatedAt: new Date().toISOString(),
-        }
-        if (method === 'GET') {
-          return jsonResponse({ config: await ext.readOrDefault(fileKey, defaultCfg) })
-        }
-        if (method === 'PUT') {
-          const body = writableFields(await readJsonBody(req), ['enabled', 'allowedUrls', 'protectedExtensions', 'allowDirectRequests', 'redirectUrl'], 'hotlink protection')
-          const merged = { ...await ext.readOrDefault(fileKey, defaultCfg), ...body }
-          // Every value lands in an nginx or Apache line, so stored values are revalidated along with the request.
-          const enabled = assertBool(merged.enabled, 'enabled'), allowDirectRequests = assertBool(merged.allowDirectRequests, 'allowDirectRequests')
-          const allowedUrls = boundedList(merged.allowedUrls, 100, 'allowedUrls').map(url => validateDomainName(url))
-          const protectedExtensions = boundedList(merged.protectedExtensions, 50, 'protectedExtensions').map(value => matching(value, /^[a-z0-9]{1,15}$/, 'protected extension'))
-          const redirectUrl = merged.redirectUrl === null ? null : assertRedirectTarget(merged.redirectUrl)
-          if (enabled && protectedExtensions.length === 0) return fail('VALIDATION', 'enabled hotlink protection needs at least one protected extension', { stateChanged: false })
-          const extPattern = protectedExtensions.join('|')
-          const validReferers = [
-            ...(allowDirectRequests ? ['none', 'blocked'] : []),
-            ...allowedUrls,
-          ].join(' ')
-          const compiledNginx = enabled
-            ? `location ~* \\.(${extPattern})$ {\n  valid_referers ${validReferers};\n  if ($invalid_referer) {\n    return ${redirectUrl ? `302 ${redirectUrl}` : '403'};\n  }\n}`
-            : '# Hotlink protection disabled'
-          const compiledApache = enabled
-            ? `RewriteEngine on\n${allowDirectRequests ? 'RewriteCond %{HTTP_REFERER} !^$\n' : ''}${allowedUrls.map((u) => `RewriteCond %{HTTP_REFERER} !^https?://(www\\.)?${u.replace(/\./g, '\\.')} [NC]`).join('\n')}\nRewriteRule \\.(${extPattern})$ ${redirectUrl ?? '-'} [F,NC,L]`
-            : '# Hotlink protection disabled'
-          const config: HotlinkProtectionConfig = {
-            accountId: account.id,
-            enabled,
-            allowedUrls,
-            protectedExtensions,
-            allowDirectRequests,
-            redirectUrl,
-            compiledNginx,
-            compiledApache,
-            updatedAt: new Date().toISOString(),
-          }
-          await helpers.assertCanAccessAccount(caller, account, `web_features.${featureKind}`)
-          await ext.write(fileKey, config)
-          await helpers.emitAudit({
-            actor: caller.principal.username,
-            action: 'web_features.hotlink_protection.updated',
-            target: `account:${account.username}`,
-            detail: { enabled: config.enabled },
-            outcome: 'ok',
-            principalId: caller.principal.id,
-          })
-          return jsonResponse({ config })
-        }
-      }
 
       if (featureKind === 'extras') {
         const fileKey = `web-features/${account.id}/extras.json`

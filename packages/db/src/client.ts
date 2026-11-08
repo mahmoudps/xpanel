@@ -3,6 +3,8 @@ import { fail } from '@xpanel/core'
 import { migrate, type MigrateResult } from './migrate.ts'
 import { assertSqliteConnectionSetupAllowed, canonicalSqliteFilename, closeSqliteRunner, sqliteRunner, type Row, type SqlRunner } from './sql-runner.ts'
 import { initializeOperationalMetadata } from './repos/official-references.ts'
+import type { OperationalMigrationMode } from './schema.ts'
+import { assertMigrationMode } from './migration-mode.ts'
 
 const nativeExec = DatabaseSync.prototype.exec
 const nativeClose = DatabaseSync.prototype.close
@@ -25,6 +27,8 @@ export interface CreateDbOptions {
   busyTimeoutMs?: number
   /** Enable WAL journal mode (default true for file databases). */
   wal?: boolean
+  /** Applied migration set this connection accepts, default `complete`; name `pre-migration` only for lifecycle reads before this build's migrate phase. */
+  migrations?: OperationalMigrationMode
 }
 
 const resolveSqlitePath = (pathOrUrl: string): string => {
@@ -62,6 +66,7 @@ export const createDb = (pathOrUrl: string, opts: CreateDbOptions = {}): DbHandl
     fail('PRECONDITION_FAILED', 'strict durability requires a file-backed WAL database')
   }
   const busyTimeoutMs = checkBusyTimeout(opts.busyTimeoutMs)
+  const migrations = assertMigrationMode(opts.migrations ?? 'complete')
   assertSqliteConnectionSetupAllowed(filename)
   const sqlite = new DatabaseSync(filename)
   let runner: SqlRunner
@@ -72,7 +77,7 @@ export const createDb = (pathOrUrl: string, opts: CreateDbOptions = {}): DbHandl
       Reflect.apply(nativeExec, sqlite, ['PRAGMA journal_mode = WAL'])
       Reflect.apply(nativeExec, sqlite, [opts.durability === 'strict' ? 'PRAGMA synchronous = FULL' : 'PRAGMA synchronous = NORMAL'])
     }
-    runner = sqliteRunner(sqlite, { strictDurability: opts.durability === 'strict' })
+    runner = sqliteRunner(sqlite, { strictDurability: opts.durability === 'strict', migrations })
   } catch (error) {
     Reflect.apply(nativeClose, sqlite, [])
     throw error

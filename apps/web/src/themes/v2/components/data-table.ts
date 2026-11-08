@@ -37,6 +37,8 @@ export interface DataTableProps {
   /** Adds the checkbox column with a "select all" control. */
   selectAll?: { label: string; hooks?: HookAttributes }
   minWidth?: number
+  /** On a phone the third cell, not the second, is the value shown opposite the name. */
+  phoneValueColumn?: 3
   regionHooks?: HookAttributes
   /** Hooks on <tbody>, where controllers paint their rows. */
   bodyHooks?: HookAttributes
@@ -60,7 +62,7 @@ export function dataTable(t: Translate, props: DataTableProps): string {
       ? stateRow('loading', `<span class="v2-sr">${escapeHtml(t('Loading'))}</span><div class="v2-skeleton-row" aria-hidden="true">${skeleton}</div>`)
       : `<tr class="v2-table__state" aria-hidden="true"><td colspan="${span}"><div class="v2-skeleton-row">${skeleton}</div></td></tr>`).join('')
     : stateRow('error', `<div class="v2-table__error" role="alert"><p><strong>${escapeHtml(props.error?.lead ?? t(msgctxt('theme:v2', 'This list could not be read.')))}</strong></p>${props.error?.detail ? `<code>${escapeHtml(props.error.detail)}</code>` : ''}${props.error?.retry ? `<button type="button" class="v2-btn"${hookAttrs(props.error.retry)}>${icon('refresh', 16)}${escapeHtml(t('Retry'))}</button>` : ''}</div>`)
-  return `<div class="v2-table-scroll" role="region" aria-labelledby="${escapeHtml(captionId)}" tabindex="0"${state === 'loading' ? ' aria-busy="true"' : ''}${hookAttrs(props.regionHooks)}><table id="${escapeHtml(props.id)}" class="v2-table"${attr('style', props.minWidth ? `min-inline-size:${props.minWidth}px` : undefined)}><caption id="${escapeHtml(captionId)}"${props.showCaption ? '' : ' class="v2-sr"'}>${escapeHtml(props.caption)}</caption><thead><tr>${head}</tr></thead><tbody${hookAttrs(props.bodyHooks)}>${body}</tbody></table></div>`
+  return `<div class="v2-table-scroll" role="region" aria-labelledby="${escapeHtml(captionId)}" tabindex="0"${state === 'loading' ? ' aria-busy="true"' : ''}${hookAttrs(props.regionHooks)}><table id="${escapeHtml(props.id)}" class="v2-table${props.phoneValueColumn ? ' v2-table--value-3' : ''}"${attr('style', props.minWidth ? `min-inline-size:${props.minWidth}px` : undefined)}><caption id="${escapeHtml(captionId)}"${props.showCaption ? '' : ' class="v2-sr"'}>${escapeHtml(props.caption)}</caption><thead><tr>${head}</tr></thead><tbody${hookAttrs(props.bodyHooks)}>${body}</tbody></table></div>`
 }
 
 /** One body row in the table's column layout; layouts also use it for the row templates core controllers clone. */

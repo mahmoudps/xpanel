@@ -13,9 +13,17 @@ const reviewedMigrations = OPERATIONAL_MIGRATION_NAMES.map((name, index) => Obje
 /** Immutable reference identity schema 3 predates additive host metrics migration 4. */
 export const OPERATIONAL_IDENTITY_MIGRATIONS_JSON = JSON.stringify(reviewedMigrations.slice(0, OPERATIONAL_SCHEMA_VERSION))
 
-/** Applied rows must match every name, version and checksum in this build's complete reviewed set. */
-export const isReviewedOperationalMigrationSet = (value: unknown): boolean => Array.isArray(value)
-  && value.length === reviewedMigrations.length
+/**
+ * The applied migration set a database reader accepts. `complete`: this build's whole reviewed set, for the API,
+ * the agent, installation and every path after migration. `pre-migration`: an exact prefix of that set, at least
+ * the identity schema long, for this build's lifecycle reads of a host database before its migrate phase.
+ */
+export type OperationalMigrationMode = 'complete' | 'pre-migration'
+
+/** Applied rows must match name, version and checksum row by row: the complete reviewed set, or an exact reviewed prefix in `pre-migration`. */
+export const isReviewedOperationalMigrationSet = (value: unknown, mode: OperationalMigrationMode): boolean => Array.isArray(value)
+  && (mode === 'complete' ? value.length === reviewedMigrations.length
+    : mode === 'pre-migration' && value.length >= OPERATIONAL_SCHEMA_VERSION && value.length <= reviewedMigrations.length)
   && value.every((row: unknown, index: number) => {
     if (!row || typeof row !== 'object' || Array.isArray(row)) return false
     const entry = row as Record<string, unknown>
@@ -24,12 +32,12 @@ export const isReviewedOperationalMigrationSet = (value: unknown): boolean => Ar
       && entry.name === expected.name && entry.checksum === expected.checksum
   })
 
-export const matchesReviewedOperationalMigrations = (receipt: unknown, applied: unknown): boolean => {
+export const matchesReviewedOperationalMigrations = (receipt: unknown, applied: unknown, mode: OperationalMigrationMode): boolean => {
   // Never filter applied rows: missing/extra versions and any checksum mismatch fail here.
-  if (typeof receipt !== 'string' || !isReviewedOperationalMigrationSet(applied)) return false
+  if (typeof receipt !== 'string' || !isReviewedOperationalMigrationSet(applied, mode)) return false
   const exactAppliedReceipt = JSON.stringify(applied)
   // The immutable issuing identity keeps its exact reviewed schema 3 receipt.
-  // Private schema 4 receipts remain valid only with exact full applied evidence.
+  // Private schema 4 receipts remain valid only with exact applied evidence: the same set they were issued for.
   return receipt === OPERATIONAL_IDENTITY_MIGRATIONS_JSON || receipt === exactAppliedReceipt
 }
 

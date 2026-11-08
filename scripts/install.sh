@@ -112,7 +112,7 @@ for arg in "$@"; do
       MANAGEMENT_TLS_ARGS+=("$arg")
       ;;
     --help|-h)
-      echo "Usage: $0 [--dry-run] [--new-install|--resume-prepared --artifact=FILE --artifact-sha256=HEX --release-trust-file=FILE --release-keys-file=FILE] [--kernel-snapshot=YYYYMMDDTHHMMSSZ] [--os-release=/etc/os-release] [--engine=apache|openlitespeed] [--php=8.3] [--apache-mpm=itk|prefork] [--with-mail] [--with-dns --dns-address=IP] [--with-ftp] [--with-mariadb] [--with-modsecurity] [--management-hostname=NAME --management-address=IP --acme-email=EMAIL --accept-acme-terms]"
+      echo "Usage: $0 [--dry-run] [--new-install|--resume-prepared --artifact=FILE --artifact-sha256=HEX --release-trust-file=FILE --release-keys-file=FILE] [--kernel-snapshot=YYYYMMDDTHHMMSSZ] [--os-release=/etc/os-release] [--engine=apache|openlitespeed] [--php=8.3] [--apache-mpm=itk] [--with-mail] [--with-dns --dns-address=IP] [--with-ftp] [--with-mariadb] [--with-modsecurity] [--management-hostname=NAME --management-address=IP --acme-email=EMAIL --accept-acme-terms]"
       echo "Prepared recovery with DNS requires an empty Ubuntu 24.04 amd64 vendor BIND package, inactive or awaiting a verified failed restart."
       exit 0
       ;;
@@ -185,7 +185,8 @@ case "$OS_ID" in
     fi
     OS_FAMILY="rhel"
     PKG_MGR="dnf"
-    [[ -z "$APACHE_MPM" ]] && APACHE_MPM="prefork"
+    # EL builds mpm-itk from pinned source; prefork is refused like everywhere else.
+    [[ -z "$APACHE_MPM" ]] && APACHE_MPM="itk"
     ;;
   *)
     echo "ERROR: Unsupported distribution ID='$OS_ID' VERSION_ID='$OS_VERSION_ID'" >&2

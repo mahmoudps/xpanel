@@ -548,6 +548,11 @@ const abortBeforeSwitch = async (c: Ctx, cause: unknown, releaseDir: string): Pr
     }
     try {
       await c.ports.safety.assertWritersQuiescent(c.plan.panelUnits)
+      // A migration that ran, even in part, leaves a database the current release refuses: restore its snapshot first.
+      if (await c.ports.migrator.currentSchema() !== c.fromSchema) {
+        await c.ports.safety.restoreControlPlane((await verifiedReceipt(c)).snapshot.path)
+        log(c, 'abort:restore-database', true, `schema ${String(c.fromSchema)} restored from the snapshot`)
+      }
       await c.ports.safety.assertCompatibility({ direction: 'rollback', fromVersion: c.plan.release.version, toVersion: c.from as string, currentSchema: await c.ports.migrator.currentSchema(), targetSchema: c.fromSchema as number, ...(c.snapshot ? { snapshot: { recordId: c.recordId as string, path: c.snapshot } } : {}) })
       await c.ports.safety.assertWriteBarrier()
       await panelUnits(c, 'abort:start-panel', 'start')
@@ -616,11 +621,13 @@ const verifiedReceipt = async (c: Ctx): Promise<SnapshotReceipt> => {
   const snapshot = posix.join(l.snapshotsDir, `${r.stamp}.tar.gz`)
   if (r.recordId !== c.recordId || r.stamp !== c.stamp || r.from !== c.from || r.release.version !== c.plan.release.version
     || r.previousTarget !== c.previousTarget || r.snapshot.path !== snapshot || r.control.path !== `${snapshot}.control.db`) throw new Error('snapshot receipt does not belong to this upgrade')
-  for (const f of [r.snapshot, r.control]) {
-    if ((await c.fs.sha256(f.path)) !== f.sha256) throw new Error(`snapshot ${f.path} does not match its receipt checksum`)
-  }
+  if ((await c.fs.sha256(r.snapshot.path)) !== r.snapshot.sha256) throw new Error(`snapshot ${r.snapshot.path} does not match its receipt checksum`)
+  // The previous release reads only its own migrations: the pre-migration database copy must be exactly the one recorded.
+  if (!(await c.fs.exists(r.control.path))) throw coded('LIFECYCLE_DATABASE_SNAPSHOT_MISSING')
+  if ((await c.fs.sha256(r.control.path)) !== r.control.sha256) throw coded('LIFECYCLE_DATABASE_SNAPSHOT_CHANGED')
   return r
 }
+const coded = (code: string): Error => Object.assign(new Error(code), { code })
 
 const assertNoPendingStateWrite = async (c: Ctx, r: SnapshotReceipt): Promise<void> => {
   const listed = await c.ports.host.apply({ kind: 'exec', argv: [c.plan.tools.tar, '--list', '--gzip', `--file=${r.snapshot.path}`], runAsUser: 'root' })

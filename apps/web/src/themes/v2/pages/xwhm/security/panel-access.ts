@@ -29,7 +29,7 @@ export function v2PanelAccessSections(t: Translate, canRead: boolean, canManage:
     + section(t, 'access-subpanel', msgid('Sub-panel service'), help(t, msgid('A stopped entry point answers 503 until you start it. xWHM cannot be stopped.'))
       + checks('pa-stop', ENTRY.filter(([name]) => name !== 'xwhm').map(([name, label]) => [name, t(msgid('Stop {name}'), { name: t(label) })] as const))
       + facts(t, [['pa-cert-names', msgid('Certificate names')], ['pa-cert-issuer', msgid('Issuer')], ['pa-cert-until', msgid('Valid until (UTC)')], ['pa-cert-fingerprint', msgid('Fingerprint')]], 'data-sec-field')
-      + `<details><summary>${esc(t(msgid('Certificate content')))}</summary><pre dir="ltr" class="v2-mono"><bdi dir="ltr" data-sec-field="pa-cert-pem"></bdi></pre></details>`
+      + `<details><summary>${esc(t(msgid('Certificate content')))}</summary><pre dir="ltr" class="v2-mono v2-panel-access__code"><bdi dir="ltr" data-sec-field="pa-cert-pem"></bdi></pre></details>`
       + actions(act('pa-reload', msgid('Reload the web server')) + act('pa-restart', msgid('Restart the panel'))))
     + `<div class="v2-observation__actions">${button(t, msgid('Save access rules'), { 'data-sec-action': 'pa-gate-save' }, false, true)}${button(t, msgid('Refresh'), { 'data-sec-action': 'pa-refresh' }, canRead)}</div>`
     + section(t, 'access-temporary', msgid('Temporary sign-in links'), help(t, msgid('A link opens one read-only xWHM session for a helper. It cannot change anything or reach these settings, and each link has its own activity log.'))
@@ -41,7 +41,7 @@ export function v2PanelAccessSections(t: Translate, canRead: boolean, canManage:
       + actions(act('pa-temp-revoke', msgid('Revoke link')) + act('pa-temp-activity', msgid('Show activity')))
       + table(t, msgid('Link activity'), [msgid('When (UTC)'), msgid('Request'), msgid('Outcome')], { 'data-sec-rows': 'pa-activity' }, msgid('Select a link.')))
     + section(t, 'access-recovery', msgid('Recovery from the server shell'), help(t, msgid('Locked out? As root on this server, these commands always work:'))
-      + `<pre dir="ltr" class="v2-mono">xpanel panel-access show\nxpanel panel-access reset all\nnode /opt/xpanel/current/scripts/management-tls.mjs reset-access</pre>`
+      + `<pre dir="ltr" class="v2-mono v2-panel-access__code">xpanel panel-access show\nxpanel panel-access reset all\nnode /opt/xpanel/current/scripts/management-tls.mjs reset-access</pre>`
       + help(t, msgid('The first shows the entrance. The second clears allowlists, the entrance, basic authentication and temporary links. The third returns the default ports and host names.')))
   return `<div data-panel-access data-sec-can-read="${canRead}" data-sec-can-manage="${canManage}">${body}</div>`
 }

@@ -32,6 +32,13 @@ export function classifyCoordinatorRotationImage(actual, oldHash, nextHash) {
   return actual === nextHash ? 'next' : actual === oldHash ? 'previous' : 'foreign'
 }
 
+/** A journal resumes or rolls back only under the HEAD and installation it was prepared under. Every upgrade
+ * rewrites HEAD before it migrates, so a rotation rollback never returns to a helper over a migrated database. */
+export function assertCoordinatorRotationContext(intent, current) {
+  check(JSON.stringify(intent?.origin) === JSON.stringify(current.origin) && intent.installedReceiptSha256 === current.installedReceiptSha256
+    && intent.headSha256 === current.headSha256, 'COORDINATOR_ROTATION_CONTEXT_CHANGED')
+}
+
 function parseJournal(value, operationId) {
   check(value && value.schemaVersion === 1 && value.kind === 'xpanel-coordinator-rotation' && value.operationId === operationId
     && ['prepared', 'quiescing', 'quiescent', 'selecting', 'selected', 'starting', 'verified', 'complete', 'rolled_back'].includes(value.phase)
@@ -202,7 +209,8 @@ export async function rotatePreparedCoordinator(input, prepared) {
     && process.version === 'v26.12.1' && !process.env.NODE_OPTIONS && !process.env.NODE_PATH
     && await readlink('/proc/self/exe') === await realpath(next.runtime.nodePath)
     && JSON.stringify(process.argv) === JSON.stringify([next.runtime.nodePath, next.releaseRoot + '/scripts/coordinator-rotate-entry.mjs', '--artifact=' + next.artifactPath, '--archive-sha256=' + next.archiveSha256, '--operation-id=' + request.operationId, '--mode=' + request.mode]), 'COORDINATOR_ROTATION_SIGNED_HELPER_REQUIRED')
-  await observePreparedAdoptionSource(prepared)
+  // Rotation runs this release against the installed database before its upgrade migrates it.
+  await observePreparedAdoptionSource(prepared, 'pre-migration')
   const path = `${ROOT}/coordinator-rotation-${request.operationId}.json`
   let journal = await managedPathAbsent(path) ? null : await captureManagedFile(path), oldReceipt, intent
   if (journal) ({ oldReceipt, value: intent } = parseJournal(JSON.parse(journal.bytes), request.operationId))
@@ -218,7 +226,7 @@ export async function rotatePreparedCoordinator(input, prepared) {
   check(oldReceipt.runtime.nodePath === next.runtime.nodePath && oldReceipt.runtime.nodeSha256 === next.runtime.nodeSha256, 'COORDINATOR_ROTATION_RUNTIME_CHANGE_UNSUPPORTED')
   if (intent) check(JSON.stringify(intent.next.helper) === JSON.stringify(coordinatorHelperFromPrepared(next, next.artifactPath)), 'COORDINATOR_ROTATION_TARGET_CHANGED')
   return withExistingPreparedRelease({ artifactPath: oldReceipt.helper.archivePath, expectedArchiveSha256: oldReceipt.helper.archiveSha256 }, async oldPrepared => {
-    return withCoordinatorDatabaseAuthority(async ({ origin, rootId, assertDatabaseAuthority }) => {
+    return withCoordinatorDatabaseAuthority('pre-migration', async ({ origin, rootId, assertDatabaseAuthority }) => {
       const installed = await readInstallationReceipt(), head = await readTrustedFile(ROOT + '/HEAD', { exactMode: 0o600, maxBytes: 16384 }), parsedHead = JSON.parse(head.bytes)
       check(installed.receipt.status === 'active' && parsedHead.issuerId === origin.issuerId && ['idle', 'retired'].includes(parsedHead.phase)
         && await managedPathAbsent(ROOT + '/writer-barrier.json'), 'COORDINATOR_ROTATION_LIFECYCLE_PENDING')
@@ -234,7 +242,7 @@ export async function rotatePreparedCoordinator(input, prepared) {
       await scope.assertAuthority()
       if (intent) {
         await assertOwnedFile(journal.entry)
-        check(JSON.stringify(intent.origin) === JSON.stringify(origin) && intent.installedReceiptSha256 === installed.sha256 && intent.headSha256 === head.sha256, 'COORDINATOR_ROTATION_CONTEXT_CHANGED')
+        assertCoordinatorRotationContext(intent, { origin, installedReceiptSha256: installed.sha256, headSha256: head.sha256 })
         if (request.mode === 'apply') fail('COORDINATOR_ROTATION_EXPLICIT_RECOVERY_REQUIRED')
       } else {
         await withVerifiedCoordinatorOwnership(async ownership => {

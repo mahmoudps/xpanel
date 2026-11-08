@@ -8,7 +8,7 @@ import { fail } from '@xpanel/core'
 import type { Account } from '@xpanel/core'
 import { buildTar } from '../../../packages/lifecycle/src/testing/tar.ts'
 import { cpmoveEntries } from '../../../packages/lifecycle/src/testing/cpanel-fixture.ts'
-import { StagingSink, assertTarMembers, createTransferTaskController, handleTransferTaskRoute, lowPriorityArgv, spawnTransferCommand, tarCompareProblems } from './lifecycle-transfer-tasks.ts'
+import { StagingSink, assertTarMembers, createTransferTaskController, handleTransferTaskRoute, lowPriorityArgv, spawnTransferCommand, summarizeHomeChanges, tarCompareProblems } from './lifecycle-transfer-tasks.ts'
 import type { TransferCommand, TransferTask, TransferTaskDeps } from './lifecycle-transfer-tasks.ts'
 
 vi.mock('node:fs/promises', async original => {
@@ -138,6 +138,16 @@ describe('transfer host tasks', () => {
     expect(t.commands.some(command => command.argv[0] === '/usr/bin/install' && command.argv.includes('0600') && command.argv.at(-1)!.endsWith('home.snar'))).toBe(true)
     // the level file is not a package artifact: only the host that made it needs it
     expect((task.result!.artifacts as { name: string }[]).map(artifact => artifact.name)).not.toContain('home.snar')
+  })
+  it('counts the mail written per mailbox and the other files changed since the cutover, never Dovecot bookkeeping', async () => {
+    const list = ['public_html/index.php', 'mail/example.test/info/cur/1700000000.M1.host:2,S', 'mail/example.test/info/.Sent/new/1700000001.M2.host', 'mail/Example.test/Sales/new/1700000002.M3.host',
+      'mail/example.test/info/dovecot.index.log', 'mail/example.test/info/tmp/1700000003.M4.host', '.bashrc'].join('\0') + '\0'
+    const t = await setup({ run: async command => { t.commands.push(command); if (command.stdoutFile) await writeFile(command.stdoutFile, list); return { code: 0, stdout: '', stderr: '' } } })
+    const task = await t.settled(await t.controller.start({ kind: 'home-changes', username: 'alice', since: '2026-11-07T10:00:00.000Z' }))
+    expect(task.result).toEqual({ files: 2, mail: [{ mailbox: 'info@example.test', messages: 2 }, { mailbox: 'sales@example.test', messages: 1 }] })
+    expect(t.commands[0]).toMatchObject({ asUser: 'alice', argv: expect.arrayContaining(['-newermt', '2026-11-07T10:00:00.000Z', '-printf', '%P\\0']) })
+    // a name split across reads still counts once
+    expect(await summarizeHomeChanges((async function* () { yield 'mail/a.test/x/new/1'; yield '\0public'; yield '_html/a\0' })())).toEqual({ files: 1, mail: [{ mailbox: 'x@a.test', messages: 1 }] })
   })
   it('refuses a live base that is not a finished package of the same account', async () => {
     const t = await setup()

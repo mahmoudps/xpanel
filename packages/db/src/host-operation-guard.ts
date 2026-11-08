@@ -10,6 +10,7 @@ import type { Db } from './client.ts'
 import { assertNoActiveDatabaseTransaction, assertRegisteredDatabaseRunner, getStrictDatabaseIdentity } from './sql-runner.ts'
 import { assertReadonlyOperationDatabaseCurrent, assertReadonlyOperationDatabaseOutsideTransaction, getReadonlyOperationDatabaseOrigin, withReobservedReadonlyOperationDatabase, type ReadonlyOperationDatabase } from './readonly-operation-database.ts'
 import { requireOperationalIdentity } from './repos/official-references.ts'
+import type { OperationalMigrationMode } from './schema.ts'
 
 export const HOST_OPERATION_GUARD_DIRECTORY = '/var/lib/xpanel-agent/host-operations'
 declare const hostOperationGuardBrand: unique symbol
@@ -66,14 +67,14 @@ const requireLinuxRoot = (): void => {
   }
 }
 
-const optionsFor = (value: HostOperationGuardOptions): Required<HostOperationGuardOptions> => {
+const optionsFor = (value: HostOperationGuardOptions, extra?: 'migrations'): Required<HostOperationGuardOptions> => {
   if (!value || typeof value !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
     return fail('VALIDATION', 'invalid host operation guard options')
   }
   const keys = Reflect.ownKeys(value)
   for (const key of keys) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if ((key !== 'acquireTimeoutMs' && key !== 'retryIntervalMs') || !descriptor?.enumerable || !Object.hasOwn(descriptor, 'value')) {
+    if ((key !== 'acquireTimeoutMs' && key !== 'retryIntervalMs' && key !== extra) || !descriptor?.enumerable || !Object.hasOwn(descriptor, 'value')) {
       return fail('VALIDATION', 'unknown host operation guard option')
     }
   }
@@ -270,16 +271,17 @@ export const withReadonlyHostOperationGuard = async <T>(
  * Managers still verify their effect-specific authority before and after each operation. */
 export const withReopenedReadonlyHostOperationGuard = async <T>(
   file: string,
-  options: HostOperationGuardOptions,
+  options: HostOperationGuardOptions & { readonly migrations?: OperationalMigrationMode },
   callback: (capability: HostOperationGuard, binding: HostOperationGuardBinding) => Promise<T>,
 ): Promise<T> => {
   requireLinuxRoot()
   if (typeof callback !== 'function') return fail('VALIDATION', 'a host operation callback is required')
+  const lockOptions = optionsFor(options, 'migrations'), migrations = options.migrations ?? 'complete'
   const read = () => withReobservedReadonlyOperationDatabase(file, async reader => {
     const origin = getReadonlyOperationDatabaseOrigin(reader)
     await assertReadonlyOperationDatabaseCurrent(reader)
     return Object.freeze({ databaseFile: origin.file, databaseDevice: origin.device, databaseInode: origin.inode, issuerId: origin.issuerId })
-  })
+  }, migrations)
   const original = await read()
   const capture = async () => {
     const current = await read()
@@ -289,7 +291,7 @@ export const withReopenedReadonlyHostOperationGuard = async <T>(
     }
     return current
   }
-  return withBoundHostOperationGuard(capture, options, capability => callback(capability, original), async () => { await capture() })
+  return withBoundHostOperationGuard(capture, lockOptions, capability => callback(capability, original), async () => { await capture() })
 }
 
 // Private shared physical implementation. The public ingresses derive their binding from a native DB identity.

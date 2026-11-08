@@ -277,5 +277,9 @@ describe('php and server settings', () => {
     }
     expect(validateServerSettings(base).hostname).toBe('server.example.net')
     expect(rejects(() => validateServerSettings({ ...base, panelPort: 443 }))).toBe(true)
+    // Every settings writer goes through here, so prefork is refused with the installer's code wherever it comes from.
+    // A hand-edited server.json fails at load with the field and the fix named.
+    expect(() => validateServerSettings({ ...base, apacheMpm: 'prefork' })).toThrow(expect.objectContaining({ code: 'ENGINE_UNAVAILABLE', detail: expect.objectContaining({ field: 'settings.apacheMpm', fix: 'itk', file: 'server.json' }) }))
+    expect(() => validateServerSettings({ ...base, apacheMpm: 'prefork' })).toThrow(/settings\.apacheMpm "prefork".*Set settings\.apacheMpm to "itk" in the server\.json state file/)
   })
 })

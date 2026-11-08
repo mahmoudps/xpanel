@@ -67,20 +67,20 @@ describe('permanent job reference consolidation', () => {
       const [identity] = await handle.db.query<{ schema_version: number; migration_checksums_json: string }>('SELECT schema_version,migration_checksums_json FROM operational_identity')
       expect(identity?.schema_version).toBe(3)
       const applied = await handle.db.query('SELECT version,name,checksum FROM xpanel_schema_migrations ORDER BY version')
-      expect(matchesReviewedOperationalMigrations(identity?.migration_checksums_json, applied)).toBe(true)
+      expect(matchesReviewedOperationalMigrations(identity?.migration_checksums_json, applied, 'complete')).toBe(true)
       expect(await handle.db.query('SELECT * FROM official_reference_counters')).toEqual([])
     } finally { await handle.close() }
   })
 
   it('rejects malformed, old, future and fabricated checksum receipts against the actual reviewed source', async () => {
     const migrations = (await loadMigrations()).map(({ version, name, checksum }) => ({ version, name, checksum }))
-    expect(isReviewedOperationalMigrationSet(migrations)).toBe(true)
+    expect(isReviewedOperationalMigrationSet(migrations, 'complete')).toBe(true)
     for (const invalid of [null, [], migrations.slice(0, 2), [...migrations, { version: 5, name: '0005_future.sql', checksum: 'f'.repeat(64) }], migrations.map(row => ({ ...row, checksum: 'f'.repeat(64) }))]) {
-      expect(isReviewedOperationalMigrationSet(invalid)).toBe(false)
-      expect(matchesReviewedOperationalMigrations(JSON.stringify(invalid), invalid)).toBe(false)
+      expect(isReviewedOperationalMigrationSet(invalid, 'complete')).toBe(false)
+      expect(matchesReviewedOperationalMigrations(JSON.stringify(invalid), invalid, 'complete')).toBe(false)
     }
     for (const malformed of ['{', JSON.stringify(migrations) + ' ', JSON.stringify(migrations).replace('"version":1', '"version":0,"version":1')]) {
-      expect(matchesReviewedOperationalMigrations(malformed, migrations)).toBe(false)
+      expect(matchesReviewedOperationalMigrations(malformed, migrations, 'complete')).toBe(false)
     }
   })
 })

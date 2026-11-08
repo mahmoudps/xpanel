@@ -51,7 +51,7 @@ function workspaceFieldValue(raw: string | boolean, kind: string): unknown {
     return Number(value)
   }
   const allowed: Record<string, readonly string[]> = {
-    engine: ['apache', 'openlitespeed'], mpm: ['itk', 'prefork'],
+    engine: ['apache', 'openlitespeed'], mpm: ['itk'],
     handler: ['fpm', 'cgi', 'suphp', 'lsphp'], mode: ['ondemand', 'dynamic', 'static'],
   }
   if (!value || value.length > 1024 || /[\r\n\0]/.test(value) || (allowed[kind] && !allowed[kind]!.includes(value))) throw new Error(kind)

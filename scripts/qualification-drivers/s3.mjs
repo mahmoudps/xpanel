@@ -103,15 +103,26 @@ export default [
 
   tool('account-isolation', {
     prefix: 'ISOL', restores: ['/api/server/security-tools/isolation'], needs: ['account'], probe: `${TOOLS}/isolation`, paths: /^\/api\/server\/security-tools\/isolation(?:\/verify|\?account=[a-z][a-z0-9]{0,15})?$/, requests: 4,
-    unit: [{ id: 'ISOL-UNIT-PROJECT', file: 'apps/api/src/security-tools-workspace.test.ts', name: 'API security tools workspace projects host reads, dropping unknown fields and refusing inconsistent evidence' }],
-    checks: ['ISOLATION-OBSERVED', 'HOME-LISTING-OWN-ONLY', 'FOREIGN-FILE-READ-DENIED'],
-    async run({ root, fixture, check }) {
+    unit: [
+      { id: 'ISOL-UNIT-PROJECT', file: 'apps/api/src/security-tools-workspace.test.ts', name: 'API security tools workspace projects host reads, dropping unknown fields and refusing inconsistent evidence' },
+      { id: 'ISOL-UNIT-FPM-STRIP', file: 'packages/render/src/edge/apache.test.ts', name: 'strips tenant PHP_VALUE and PHP_ADMIN_VALUE before every FastCGI call' },
+      { id: 'ISOL-UNIT-FPM-PREFORK', file: 'packages/core/src/rules/php.test.ts', name: 'Apache + prefork: refused with the installer code, and suPHP is reported as unable to run' },
+    ],
+    checks: ['ISOLATION-OBSERVED', 'HOME-LISTING-OWN-ONLY', 'FOREIGN-FILE-READ-DENIED', 'FPM-CROSS-POOL-HANDLER-REFUSED', 'FPM-PHP-VALUE-INJECTION-STRIPPED'],
+    hostOnly: ['FPM-CROSS-POOL-HANDLER-REFUSED', 'FPM-PHP-VALUE-INJECTION-STRIPPED'],
+    async run({ root, fixture, check, block }) {
       const view = await root.get(`${TOOLS}/isolation?account=${fixture.username}`), report = view.data?.report, byId = id => list(report?.checks).find(item => item.id === id)?.state
       check('ISOLATION-OBSERVED', view.status === 200 && list(view.data?.accounts).some(item => item.username === fixture.username) && report?.username === fixture.username && ['passwd', 'home', 'slice'].every(id => byId(id) === 'ok'),
         { status: view.status, report: report?.state ?? null, home: byId('home') ?? null })
       const proof = await root.post(`${TOOLS}/isolation/verify`, { account: fixture.username }), state = id => list(proof.data?.checks).find(item => item.id === id)?.state
       check('HOME-LISTING-OWN-ONLY', proof.status === 200 && state('jail-home-list') === 'ok', { status: proof.status, state: state('jail-home-list') ?? null })
       check('FOREIGN-FILE-READ-DENIED', proof.status === 200 && ['ok', 'unavailable'].includes(state('jail-other-home')), { status: proof.status, state: state('jail-other-home') ?? null })
+      // These need a second tenant on a native host: put a cross-pool SetHandler and a SetEnv PHP_VALUE in one account's
+      // .htaccess, request a .php, and prove the other pool is unreachable and the injected setting did not apply. This
+      // single-account run cannot build that, so they are reviewed, not claimed: the strip and the prefork refusal are in
+      // the rendered config and covered by the unit evidence above.
+      block('FPM-CROSS-POOL-HANDLER-REFUSED', 'Needs a second account on a native host to prove one account cannot reach another PHP-FPM pool through an .htaccess handler; not run in this single-account qualification.')
+      block('FPM-PHP-VALUE-INJECTION-STRIPPED', 'Needs a native host to prove a tenant SetEnv PHP_VALUE / PHP_ADMIN_VALUE does not reach PHP-FPM; not run in this single-account qualification.')
     },
   }),
 

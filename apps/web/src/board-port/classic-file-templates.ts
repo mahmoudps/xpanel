@@ -16,6 +16,7 @@ const CLASSIC_FILE_VIEW_CSS = `#xpanel-file-manager [data-file-manager-table] tr
 #xpanel-file-manager .xp-file-view-permissions{inline-size:100%;border-collapse:collapse}
 #xpanel-file-manager .xp-file-view-permissions :is(th,td){padding:var(--xp-space-label);text-align:center;border-block-end:1px solid var(--xp-border)}
 #xpanel-file-manager .xp-file-view-permissions th:first-child{text-align:start}
+@media(max-width:600px){#xpanel-file-manager .xp-file-view-permissions :is(th,td){padding-inline:4px;white-space:normal;overflow-wrap:anywhere}}
 #xpanel-file-manager .xp-file-view-uploads ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:var(--xp-space-field)}
 #xpanel-file-manager .xp-file-view-upload{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:var(--xp-space-label);padding:var(--xp-space-field);border:1px solid var(--xp-border);border-radius:12px;min-inline-size:0}
 #xpanel-file-manager .xp-file-view-upload>bdi{overflow-wrap:anywhere}

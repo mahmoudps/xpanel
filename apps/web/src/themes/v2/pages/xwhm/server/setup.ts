@@ -44,7 +44,7 @@ export function renderV2WhmSetup(t: Translate, props: WhmSurfaceProps, authority
     + h.status(msgid('Notification preferences have not been read and cannot be saved by the setup API. No delivery or always-sent policy is assumed.')))
   const engine = h.section('v2-setup-engine', msgid('Web engine'), h.fields(
     h.field('v2-setup-engine-choice', msgid('Web engine'), h.select('v2-setup-engine-choice', [['', msgid('Not read')], ['apache', 'Apache'], ['openlitespeed', 'OpenLiteSpeed']], { name: 'engine', value: saved?.engine, required: true, disabled: !h.canManage }))
-    + h.field('v2-setup-mpm', 'Apache MPM', h.select('v2-setup-mpm', [['', msgid('Not read')], ['itk', 'mpm-itk'], ['prefork', 'prefork']], { name: 'apacheMpm', value: saved?.apacheMpm, required: true, disabled: !h.canManage })))
+    + h.field('v2-setup-mpm', 'Apache MPM', h.select('v2-setup-mpm', [['', msgid('Not read')], ['itk', 'mpm-itk'], ['prefork', msgid('prefork · refused: no account isolation')]], { name: 'apacheMpm', value: saved?.apacheMpm, required: true, disabled: !h.canManage }).replace('<option value="prefork"', '<option value="prefork" disabled')))
     + h.status(msgctxt('theme:v2', 'The server validates engine support when setup is submitted. A selected engine does not prove installed packages or account isolation.'))
     + h.status(msgid('Not read'), { 'data-setup-wizard-status': true }, true) + h.actions(h.button(msgid('Review setup'), undefined, { type: h.canManage ? 'submit' : 'button', disabled: !h.canManage, primary: true })))
   const wizard = h.form({ 'data-setup-wizard-form': true }, identity + network + email + engine)

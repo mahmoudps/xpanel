@@ -62,7 +62,7 @@ export function observePreparedInstallFinalization(): Promise<Readonly<{ bootstr
 export function finalizePreparedInstallation(request: unknown): ReturnType<typeof import('./install-finalization.mjs').runPreparedInstallFinalization>
 
 export { parsePreparedReleaseInput, withPreparedRelease, withExistingPreparedRelease, assertPreparedReleaseCurrent, preparedReleaseInfo, observeInstalledReleaseTree } from './prepared-release.mjs'
-export function observePreparedAdoptionSource(capability:unknown):Promise<Readonly<{bootstrap:PreparedInstallBootstrap;runtime:Readonly<{nodePath:string;nodeSha256:string}>;helper:import('./prepared-release.mjs').PreparedReleaseInfo}>>
+export function observePreparedAdoptionSource(capability:unknown, migrations?:import('../packages/db/src/index.ts').OperationalMigrationMode):Promise<Readonly<{bootstrap:PreparedInstallBootstrap;runtime:Readonly<{nodePath:string;nodeSha256:string}>;helper:import('./prepared-release.mjs').PreparedReleaseInfo}>>
 
 /** Read-only typed active-source observation; does not mint readiness or native mutation authority. */
 export function observeInstalledAcquisitionSource(): ReturnType<typeof observePreparedInstallFinalization>

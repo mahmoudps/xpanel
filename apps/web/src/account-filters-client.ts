@@ -321,7 +321,8 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
       const ids=state.filters.map(item=>item.id);[ids[index],ids[other]]=[ids[other]!,ids[index]!]
       void mutate('POST',filtersBase+'/reorder',{scope:selection.scope,...(selection.mailbox?{mailbox:selection.mailbox}:{}),orderedIds:ids},next=>JSON.stringify(next.filters.map(item=>item.id))===JSON.stringify(ids))
     })
-    control();void refresh()
+    // compose "Add filter" arrives with #new-filter; the editor opens only after a verified read
+    control();void refresh().then(()=>{if(location.hash==='#new-filter')edit()})
   })
 }
 

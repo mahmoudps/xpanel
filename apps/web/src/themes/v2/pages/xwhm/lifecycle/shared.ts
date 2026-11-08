@@ -70,6 +70,8 @@ export const LIFECYCLE_PAGES_CSS = `.v2-lifecycle{display:flex;flex-direction:co
 .v2-lifecycle [data-approved-whm-backups] [role=radio][aria-checked=true] .v2-lifecycle__radio-ring::after{content:"";inline-size:8px;block-size:8px;border-radius:50%;background:var(--accent-fill)}
 .v2-lifecycle [data-approved-whm-backups] [role=radio]:disabled{color:var(--muted);background:var(--sunken);cursor:not-allowed}
 .v2-lifecycle__scroll{max-inline-size:100%;overflow:auto}
+.v2-lifecycle [data-transfer-revert-loss]:empty{display:none}
+.v2-lifecycle [data-transfer-revert-loss] th{white-space:normal}
 .v2-lifecycle__table{inline-size:100%;border-collapse:collapse;text-align:start}
 .v2-lifecycle__table :is(th,td){padding:12px 16px;text-align:start;vertical-align:top;overflow-wrap:anywhere;border-block-end:1px solid var(--line)}
 .v2-lifecycle__table th{color:var(--muted);font-size:12px;font-weight:500}

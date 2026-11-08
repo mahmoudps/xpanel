@@ -73,7 +73,7 @@ export async function runNativeUpgradeCoordinatorBootstrap(rawBinding: unknown) 
   try {
     const info = await pinned.stat({ bigint: true })
     if (!info.isFile() || info.nlink !== 1n) return fail('PRECONDITION_FAILED', 'canonical upgrade database pin is invalid', { stateChanged: false })
-    handle = createDb(path, { durability: 'strict' })
+    handle = createDb(path, { durability: 'strict', migrations: 'pre-migration' })
     const origin = await handle.db.transaction(async tx => getStrictOperationDatabaseOrigin(tx))
     if (origin.file !== path || origin.device !== String(info.dev) || origin.inode !== String(info.ino)) return fail('PRECONDITION_FAILED', 'canonical upgrade database changed', { stateChanged: false })
     const archiveTrust = await readNativeReleaseTrustIdentity()

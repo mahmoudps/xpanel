@@ -9,6 +9,7 @@ import {renderMailVacationWorkspace} from './xmail-vacation.ts'
 export const MONO = "'IBM Plex Mono', monospace"
 const FONT_EN = "'IBM Plex Sans', sans-serif"
 const FONT_AR = "sans-serif"
+const FILTERS_ROUTE = '/mail/settings/filters'
 const PORT_CSS = `.xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
 .xp-board-port a{color:light-dark(#1D5BD6,var(--xp-accent))}.xp-board-port a:hover{color:light-dark(#1546A8,var(--xp-accent-hover))}
 .xp-board-port :focus-visible{outline:2px solid light-dark(#1D5BD6,var(--xp-accent));outline-offset:2px}
@@ -17,6 +18,9 @@ const PORT_CSS = `.xp-board-port{line-height:normal;font-size:16px;font-kerning:
 .xp-board-port [data-mail-recip-box] > ul:empty{display:none!important}
 .xp-board-port[data-board-port="xmail-compose"] [data-compose-attachment-list]{display:flex;flex-direction:column;gap:var(--xp-space-field,16px)}
 .xp-board-port[data-board-port="xmail-compose"] [data-compose-attachment-list]:empty{display:none}
+.xp-board-port[data-board-port="xmail-compose"] :is([data-mail-recip="cc"],[data-mail-recip="bcc"]){flex:1 1 240px;min-width:0}
+/* The quota companion only balances the side column; stacked on one column it would repeat the header quota. */
+@container (max-width:785px){.xp-board-port[data-board-port="xmail-compose"] section[aria-labelledby="storage-title"]{display:none!important}}
 .xp-mail-vacation-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:var(--xp-space-field,16px)}
 .xp-mail-vacation-field{display:flex;flex-direction:column;gap:var(--xp-space-label,8px);min-inline-size:0}
 .xp-mail-vacation-field label{font-size:13px;font-weight:600;color:var(--xp-text-secondary,#344054)}
@@ -118,6 +122,8 @@ export interface ComposeModel {
   vacationOn: boolean
   vacationCanManage?: boolean
   vacationOpenLabel: string
+  filtersCanManage?: boolean
+  diskUsageCanManage?: boolean
   filterCount: string
   filterRules: string
   wsHtml: string
@@ -480,9 +486,16 @@ export const renderCompose = (model: ComposeModel): string => {
   const t = (message: string, values?: MessageValues): string => translator(model.locale)(message, values)
   const mailbox = `<bdi dir="ltr">${escapeHtml(model.mailbox)}</bdi>`
   const quota = tech(model.quotaText, rtl)
-  const unwired = model.product
-    ? `<span style="font-size: 12px; font-weight: 500; color: light-dark(#5D6B7E,var(--xp-text-muted))">${t(msgctxt('xmail-compose', 'Coming soon'))}</span>`
+  // the side column is shorter than the editor; quota and its cleanup action fill it with real data
+  const storage = model.product
+    ? `<section aria-labelledby="storage-title" style="display: flex; flex-direction: column; gap: 12px; padding: 20px; border-radius: 12px; border: 1px solid light-dark(#E2E6EC,var(--xp-border)); background: light-dark(#FFFFFF,var(--xp-bg-surface))"><h2 id="storage-title" style="margin: 0; font-size: 16px; font-weight: 600">${t('Mailbox quota')}</h2><span style="font-size: 13px; color: light-dark(#475467,var(--xp-text-secondary)); font-variant-numeric: tabular-nums">${quota}</span><div data-quota-ratio="${model.quotaMeasured ? 'measured' : 'unknown'}" aria-hidden="true" style="height: 6px; border-radius: 3px; background: light-dark(#E9ECF1,var(--xp-bg-elevated)); overflow: hidden"><div style="height: 6px; width: ${model.quotaPct}%; background: light-dark(#1D5BD6,var(--xp-accent)); border-radius: 3px"></div></div>${model.diskUsageCanManage === true
+      ? `<div style="display: flex; justify-content: flex-end"><a href="/mail/tools/disk-usage" style="display: inline-flex; align-items: center; box-sizing: border-box; min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#101828,var(--xp-text-primary)); font-family: inherit; font-size: 14px; font-weight: 600; text-decoration: none">${t('Manage disk usage')}</a></div>`
+      : `<p role="status" style="margin: 0; font-size: 13px; line-height: 1.4; color: light-dark(#5D6B7E,var(--xp-text-muted))">${t('Disk usage tools are not available for this mailbox.')}</p>`}</section>`
     : ''
+  // the filter page reads and writes the rules; compose only leads there
+  const filterControls = model.filtersCanManage === true
+    ? `<div style="display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap"><a href="${FILTERS_ROUTE}#new-filter" style="display: inline-flex; align-items: center; box-sizing: border-box; min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: light-dark(#1D5BD6,var(--xp-accent)); font-family: inherit; font-size: 14px; font-weight: 600; text-decoration: none">${t('Add filter')}</a><a href="${FILTERS_ROUTE}" style="display: inline-flex; align-items: center; box-sizing: border-box; min-height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#101828,var(--xp-text-primary)); font-family: inherit; font-size: 14px; font-weight: 600; text-decoration: none">${t('Manage filters')}</a></div>`
+    : `<p role="status" style="margin: 0; font-size: 13px; line-height: 1.4; color: light-dark(#5D6B7E,var(--xp-text-muted))">${t('Filters are not available for this mailbox.')}</p>`
   const copy = [
     ['data-add-another', t('Add another')],
     ['data-add-recipient', t('Add a recipient')],
@@ -525,7 +538,7 @@ export const renderCompose = (model: ComposeModel): string => {
     <div style="display: flex; flex-direction: column; gap: 2px"><span id="my-folders" style="font-size: 11px; font-weight: 600; color: light-dark(#5D6B7E,var(--xp-text-muted)); padding: 0 12px 4px">${t('Your folders')}</span><ul aria-labelledby="my-folders" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px">${model.custom.map(folderLink).join('')}</ul></div>
     <div style="display: flex; flex-direction: column; gap: 2px; padding-top: 14px; border-top: 1px solid light-dark(#EEF0F3,var(--xp-border))"><span id="mbx-settings" style="font-size: 11px; font-weight: 600; color: light-dark(#5D6B7E,var(--xp-text-muted)); padding: 0 12px 4px">${t('Mailbox settings')}</span><ul aria-labelledby="mbx-settings" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px"><li><a href="${escapeHtml(model.vacationHref)}" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: light-dark(#344054,var(--xp-text-secondary)); text-decoration: none"><span>${t('Vacation responder')}</span><span style="font-size: 12px; color: light-dark(#475467,var(--xp-text-secondary))">${escapeHtml(model.vacationShort)}</span></a></li><li><a href="${escapeHtml(model.filtersHref)}" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: light-dark(#344054,var(--xp-text-secondary)); text-decoration: none"><span>${t('Filters')}</span><span style="font-size: 12px; color: light-dark(#475467,var(--xp-text-secondary))">${escapeHtml(model.filtersShort)}</span></a></li></ul></div>
   </nav>${renderMobileNavBackdrop(model.locale)}
-  <main id="main-content" tabindex="-1" data-section="compose-drawer" style="flex: 4.236 1 740px; min-width: 0; padding: 24px 24px 52px; display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start">
+  <main id="main-content" tabindex="-1" data-section="compose-drawer" style="flex: 4.236 1 740px; min-width: 0; padding: 24px 24px 52px; display: flex; flex-wrap: wrap; gap: 26px; align-items: stretch; container-type: inline-size">
     ${model.actionHtml}
     <div role="group" aria-labelledby="compose-title" data-compose-form="true" data-mail-send-availability="available"${model.product ? ` data-compose-identities="true" data-compose-mailbox="${escapeHtml(model.mailbox)}" data-compose-identities-state="unread" data-compose-send-enabled="${model.canSend === true}" data-compose-draft-enabled="${model.canSaveDraft === true}"` : ''} style="flex: 1.618 1 0; min-width: min(100%, 460px); display: flex; flex-direction: column; border-radius: 12px; border: 1px solid light-dark(#E2E6EC,var(--xp-border)); background: light-dark(#FFFFFF,var(--xp-bg-surface))">
       <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 24px; border-bottom: 1px solid light-dark(#EEF0F3,var(--xp-border))">
@@ -536,15 +549,14 @@ export const renderCompose = (model: ComposeModel): string => {
         <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 8px 0; border-bottom: 1px solid light-dark(#EEF0F3,var(--xp-border))"><label for="compose-from" style="display: block; padding-inline: 13px; font-size: 13px; font-weight: 600; color: light-dark(#344054,var(--xp-text-secondary))">${t('From')}</label><select id="compose-from" dir="auto"${model.product ? ' disabled aria-describedby="compose-identities-status"' : ''} style="text-align: ${rtl ? 'right' : 'left'}; flex: 1 1 260px; min-width: 0; min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--xp-control-edge, #808b9c); background-color: light-dark(#FFFFFF,var(--xp-bg-surface)); font-family: inherit; font-size: 14px; color: light-dark(#101828,var(--xp-text-primary))">${model.fromOptions.map(option => `<option value="${escapeHtml(option.value)}" data-addr="${escapeHtml(option.value)}"${option.value === model.fromValue ? ' selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}</select></div>
         ${model.product ? `<div data-compose-identities-tools style="display:flex;flex-direction:column;gap:var(--xp-space-group,24px);padding-block:16px"><div style="display:flex;flex-wrap:wrap;gap:var(--xp-space-field,16px)"><button type="button" class="xp-btn" data-compose-identities-refresh disabled>${t('Read sender identities')}</button><button type="button" class="xp-btn" data-compose-signature-insert disabled>${t('Insert signature')}</button></div><p id="compose-identities-status" data-compose-identities-status role="status" style="margin:0;font-size:13px;line-height:1.6;overflow-wrap:anywhere">${t('Saved sender identities have not been read.')}</p></div>` : ''}
         ${recipientRow('to', t('To'), 'compose-to', model.chips, model.locale)}
-        ${recipientRow('cc', t('Cc'), 'compose-cc', model.chips, model.locale)}
-        ${recipientRow('bcc', t('Bcc'), 'compose-bcc', model.chips, model.locale)}
+        <div style="display: flex; flex-wrap: wrap; column-gap: 16px">${recipientRow('cc', t('Cc'), 'compose-cc', model.chips, model.locale)}${recipientRow('bcc', t('Bcc'), 'compose-bcc', model.chips, model.locale)}</div>
         <span id="recips-help" style="padding: 6px 13px 0; font-size: 12px; font-weight: 500; color: light-dark(#5D6B7E,var(--xp-text-muted))">${t('Press Enter or type a comma after each address. Bcc recipients are hidden from everyone else.')}</span>
         <div style="display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 8px 0; border-bottom: 1px solid light-dark(#EEF0F3,var(--xp-border))"><label for="compose-subject" style="display: block; padding-inline: 13px; font-size: 13px; font-weight: 600; color: light-dark(#344054,var(--xp-text-secondary))">${t('Subject')}</label><input id="compose-subject" type="text" dir="auto" value="${escapeHtml(model.subject)}" style="text-align: ${rtl ? 'right' : 'left'}; flex: 1 1 260px; min-width: 0; min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--xp-control-edge, #808b9c); background: light-dark(#FFFFFF,var(--xp-bg-surface)); font-family: inherit; font-size: 14px; color: light-dark(#101828,var(--xp-text-primary))"></div>
       </div>
       <div role="toolbar" aria-label="${t('Formatting')}" aria-controls="compose-body" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 16px 24px 0; padding: 4px; border-radius: 10px; border: 1px solid light-dark(#E2E6EC,var(--xp-border)); background: light-dark(#F8F9FB,var(--xp-bg-elevated))">${toolbarHtml(model.locale, model.numbersOn)}</div>
-      <div style="padding: 12px 24px 0"><label id="compose-body-label" for="compose-body" style="display: block; margin-bottom: 8px; padding-inline: 13px; font-size: 13px; font-weight: 600; color: light-dark(#344054,var(--xp-text-secondary))">${t('Message body')}</label><div id="compose-body" role="textbox" dir="auto" aria-labelledby="compose-body-label" aria-multiline="true" aria-label="${t('Message body')}" contenteditable="true" spellcheck="true" style="min-height: 300px; padding: 16px 12px; text-align: ${rtl ? 'right' : 'left'}; border-radius: 10px; border: 1px solid var(--xp-control-edge, #808b9c); background: light-dark(#FFFFFF,var(--xp-bg-surface)); font-size: 14px; line-height: 1.6; color: light-dark(#101828,var(--xp-text-primary)); display: flex; flex-direction: column; gap: 12px">${model.bodyHtml}</div></div>
+      <div style="flex: 1 1 auto; display: flex; flex-direction: column; padding: 12px 24px 0"><label id="compose-body-label" for="compose-body" style="display: block; margin-bottom: 8px; padding-inline: 13px; font-size: 13px; font-weight: 600; color: light-dark(#344054,var(--xp-text-secondary))">${t('Message body')}</label><div id="compose-body" role="textbox" dir="auto" aria-labelledby="compose-body-label" aria-multiline="true" aria-label="${t('Message body')}" contenteditable="true" spellcheck="true" style="flex: 1 1 auto; min-height: 300px; padding: 16px 12px; text-align: ${rtl ? 'right' : 'left'}; border-radius: 10px; border: 1px solid var(--xp-control-edge, #808b9c); background: light-dark(#FFFFFF,var(--xp-bg-surface)); font-size: 14px; line-height: 1.6; color: light-dark(#101828,var(--xp-text-primary)); display: flex; flex-direction: column; gap: 12px">${model.bodyHtml}</div></div>
       <section aria-labelledby="att-title"${model.product ? ` data-compose-attachments data-compose-attachment-enabled="${model.canUseAttachments === true}"` : ''} style="display: flex; flex-direction: column; gap: ${model.product ? 'var(--xp-space-group,24px)' : '10px'}; padding: ${model.product ? '24px' : '20px'} 24px 0">${classicMailClientTemplates('compose-attachments')}
-        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px"><h2 id="att-title" style="margin: 0; font-size: 14px; font-weight: 600">${t('Attachments')} <span${model.product ? ' data-compose-attachment-summary' : ''} style="font-weight: 400; color: light-dark(#475467,var(--xp-text-secondary)); font-variant-numeric: tabular-nums">· ${escapeHtml(model.attachSummary)}</span></h2><span style="display: inline-flex; align-items: center; gap: 8px"><button type="button"${model.product ? ' data-compose-attachment-open disabled aria-controls="compose-file-input" aria-describedby="compose-attachment-status"' : ''} style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#101828,var(--xp-text-primary)); font-family: inherit; font-size: 14px; font-weight: 600">${ICONS.attach}${t('Attach files')}</button>${model.product ? '' : unwired}</span></div>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px"><h2 id="att-title" style="margin: 0; font-size: 14px; font-weight: 600">${t('Attachments')} <span${model.product ? ' data-compose-attachment-summary' : ''} style="font-weight: 400; color: light-dark(#475467,var(--xp-text-secondary)); font-variant-numeric: tabular-nums">· ${escapeHtml(model.attachSummary)}</span></h2><span style="display: inline-flex; align-items: center; gap: 8px"><button type="button"${model.product ? ' data-compose-attachment-open disabled aria-controls="compose-file-input" aria-describedby="compose-attachment-status"' : ''} style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 8px; border: 1px solid light-dark(#D0D5DD,var(--xp-text-muted)); background: light-dark(#FFFFFF,var(--xp-bg-surface)); color: light-dark(#101828,var(--xp-text-primary)); font-family: inherit; font-size: 14px; font-weight: 600">${ICONS.attach}${t('Attach files')}</button></span></div>
         ${model.product ? '<input id="compose-file-input" data-compose-attachment-input type="file" multiple hidden disabled>' : ''}
         <ul${model.product ? ' data-compose-attachment-list' : ''} style="list-style: none; margin: 0; padding: 0;${model.product ? '' : ' display: flex; flex-direction: column; gap: 8px'}">${model.product ? '' : model.attachments.map(attachmentHtml).join('')}</ul>
         <span${model.product ? ' id="compose-attachment-status" data-compose-attachment-status role="status"' : ''} style="font-size: 12px; font-weight: 500; color: light-dark(#5D6B7E,var(--xp-text-muted)); line-height: 1.6">${model.product ? t('Choose up to 10 files, with a combined limit of 512 KiB. Files have not been read.') : escapeHtml(model.attachHelp)}</span>
@@ -572,8 +584,9 @@ export const renderCompose = (model: ComposeModel): string => {
       <section id="filters" aria-labelledby="filters-title" style="display: flex; flex-direction: column; gap: 12px; padding: 20px; border-radius: 12px; border: 1px solid light-dark(#E2E6EC,var(--xp-border)); background: light-dark(#FFFFFF,var(--xp-bg-surface))">
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap"><h2 id="filters-title" style="margin: 0; font-size: 16px; font-weight: 600">${t('Filters')}</h2><span style="font-size: 12px; color: light-dark(#5D6B7E,var(--xp-text-muted))">${escapeHtml(model.filterCount)}</span></div>
         <ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">${model.filterRules}</ol>
-        <div style="display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap">${unwired}</div>
+        ${filterControls}
       </section>
+      ${storage}
     </aside>
   </main>
 </div>
@@ -620,6 +633,8 @@ export interface XmailComposeProps {
   actionState?: AsyncActionBannerProps
   vacationEnabled?: boolean
   vacationCanManage?: boolean
+  filtersCanManage?: boolean
+  diskUsageCanManage?: boolean
   sieveRules?: XmailComposeRule[]
   identityDkim?: string
   identitySpf?: string
@@ -704,6 +719,8 @@ export const xmailComposeFromProps = (props: XmailComposeProps): ComposeModel =>
     vacationStatus: vacationKnown ? (vacationOn ? translator(locale)(msgctxt('vacation-state', 'On')) : translator(locale)(msgctxt('vacation-state', 'Off'))) : translator(locale)(msgctxt('xmail-compose', 'Not read')),
     vacationOn,
     vacationCanManage: props.vacationCanManage===true,
+    filtersCanManage: props.filtersCanManage === true,
+    diskUsageCanManage: props.diskUsageCanManage === true,
     vacationOpenLabel: translator(locale)('Set up responder'),
     filterCount: knownRules ? (translator(locale)('{length} Sieve rules', { length: rules.length })) : dash,
     filterRules: ruleHtml,

@@ -3,6 +3,7 @@ import { fail } from '@xpanel/core'
 import type { AuditEntry, HostAction, OsProfile, Principal } from '@xpanel/core'
 import {
   appendAudit,
+  completeOperationalMigrations,
   createUpgrade,
   currentSchemaVersion,
   finishUpgrade,
@@ -238,14 +239,18 @@ export const createProductionUpgradePorts = (deps: ProductionUpgradeDependencies
     async pending(releaseDir) {
       const migrations = await deps.loadReleaseMigrations(releaseDir)
       const cur = await currentSchemaVersion(deps.db)
-      return migrations
+      const pending = migrations
         .filter((m) => m.version > cur)
         .sort((a, b) => a.version - b.version)
         .map((m) => ({ version: m.version, name: m.name, contract: m.contract }))
+      // Nothing to apply ends the migrate phase here, as apply() does after migrating.
+      if (pending.length === 0) await completeOperationalMigrations(deps.db)
+      return pending
     },
     async apply(releaseDir) {
       const migrations = await deps.loadReleaseMigrations(releaseDir)
       const res = await migrate(deps.db, { migrations })
+      await completeOperationalMigrations(deps.db)
       return { applied: res.applied, version: res.version }
     },
   }
