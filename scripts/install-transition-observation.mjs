@@ -14,6 +14,15 @@ const json = text => { check(typeof text === 'string' && Buffer.byteLength(text)
 const plain = (value, keys) => check(value && typeof value === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(value))
   && Reflect.ownKeys(value).length === keys.length && Reflect.ownKeys(value).every(key => keys.includes(key) && Object.hasOwn(Object.getOwnPropertyDescriptor(value, key) ?? {}, 'value')), 'INSTALL_TRANSITION_IMAGE_INVALID')
 
+/** Every key the upgrade writer puts in a terminal record (lifecycle-root-safety.mjs checks the same list before it writes). */
+export const TERMINAL_RECORD_KEYS = Object.freeze(['schemaVersion', 'installation', 'operationId', 'reference', 'requestFingerprint', 'hostOutcome', 'sourceArchiveSha256', 'databaseBackupSha256', 'interruptedIssuance', 'completedAt'])
+const terminalIssuance = value => {
+  if (value === null) return
+  plain(value, ['binding', 'verified', 'sourceWasNeverAdmitted', 'parentHeadSha256'])
+  check(value.binding && typeof value.binding === 'object' && value.verified && typeof value.verified === 'object'
+    && typeof value.sourceWasNeverAdmitted === 'boolean' && SHA.test(value.parentHeadSha256), 'INSTALL_TRANSITION_IMAGE_INVALID')
+}
+
 /** Pure image binding only. Native root pins, source closure and DB/root-audit proof remain mandatory. */
 export function inspectCompletedInstallationTransition(input) {
   plain(input, ['bootstrapBytes', 'receiptBytes', 'dependencyBytes', 'headBytes', 'journalBytes', 'terminalBytes'])
@@ -42,7 +51,7 @@ export function inspectCompletedInstallationTransition(input) {
   'INSTALL_TRANSITION_SOURCE_CHANGED')
   const published = journal.published, terminal = json(input.terminalBytes)
   plain(published, ['receiptSha256', 'source', 'hostOutcome'])
-  plain(terminal, ['schemaVersion', 'installation', 'operationId', 'reference', 'requestFingerprint', 'hostOutcome', 'sourceArchiveSha256', 'databaseBackupSha256', 'completedAt'])
+  plain(terminal, TERMINAL_RECORD_KEYS); terminalIssuance(terminal.interruptedIssuance)
   const installed = terminal.installation
   plain(installed, ['operationId', 'journalPath', 'journalSha256', 'previousReceiptSha256', 'installedReceiptSha256', 'source'])
   check(['succeeded', 'rolled_back'].includes(published.hostOutcome) && published.hostOutcome === (journal.selected === 'target' ? 'succeeded' : 'rolled_back')
@@ -161,7 +170,7 @@ export function inspectNoSourceChangeInstallation(input) {
   const bootstrap = json(input.bootstrapBytes), receipt = parseInstallationReceipt(json(input.receiptBytes)), head = json(input.headBytes)
   const admission = json(input.admissionBytes), terminal = json(input.terminalBytes), installed = terminal.installation
   plain(head, ['schemaVersion', 'issuerId', 'sequence', 'phase', 'operationId', 'reference', 'kind', 'requestFingerprint', 'updatedAt'])
-  plain(terminal, ['schemaVersion', 'installation', 'operationId', 'reference', 'requestFingerprint', 'hostOutcome', 'sourceArchiveSha256', 'databaseBackupSha256', 'completedAt'])
+  plain(terminal, TERMINAL_RECORD_KEYS); terminalIssuance(terminal.interruptedIssuance)
   plain(installed, ['operationId', 'journalPath', 'journalSha256', 'installedReceiptSha256', 'source', 'noSourceChange'])
   check(head.schemaVersion === 1 && head.phase === 'retired' && head.kind === 'recover' && UUID.test(head.operationId)
     && UUID.test(head.issuerId) && REF.test(head.reference) && SHA.test(head.requestFingerprint) && Number.isSafeInteger(head.sequence) && head.sequence > 0,

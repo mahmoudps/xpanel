@@ -53,7 +53,7 @@ function fixture(outcome: 'succeeded' | 'rolled_back' = 'succeeded', previous?: 
     published: { receiptSha256: hash(receiptBytes), source: receipt.source, hostOutcome: outcome } }
   const journalBytes = text(journal)
   const head = { schemaVersion: 1, issuerId: id(1), sequence: previous ? 3 : 2, phase: 'retired', operationId: outcome === 'rolled_back' ? id(11) : operationId, reference: outcome === 'rolled_back' ? ref(11) : reference, kind: outcome === 'rolled_back' ? 'recover' : 'upgrade', requestFingerprint: 'f'.repeat(64), updatedAt: time }
-  const terminal = { schemaVersion: 1, installation: { operationId, journalPath: root + '/installation-transitions/' + operationId + '.json', journalSha256: hash(journalBytes), previousReceiptSha256: hash(text(oldReceipt)), installedReceiptSha256: hash(receiptBytes), source: receipt.source }, operationId: head.operationId, reference: head.reference, requestFingerprint: head.requestFingerprint, hostOutcome: outcome, sourceArchiveSha256: receipt.source.archiveSha256, databaseBackupSha256: '6'.repeat(64), completedAt: time }
+  const terminal = { schemaVersion: 1, installation: { operationId, journalPath: root + '/installation-transitions/' + operationId + '.json', journalSha256: hash(journalBytes), previousReceiptSha256: hash(text(oldReceipt)), installedReceiptSha256: hash(receiptBytes), source: receipt.source }, operationId: head.operationId, reference: head.reference, requestFingerprint: head.requestFingerprint, hostOutcome: outcome, sourceArchiveSha256: receipt.source.archiveSha256, databaseBackupSha256: '6'.repeat(64), interruptedIssuance: null, completedAt: time }
   return { bootstrapBytes, receiptBytes, dependencyBytes, headBytes: text(head), journalBytes, terminalBytes: text(terminal) }
 }
 
@@ -71,6 +71,16 @@ describe('completed source observations are distinct from historical finalizatio
     assert.equal(observed.bootstrap.version, '0.1.0'); assert.equal(observed.head.kind, 'recover')
     assert.notEqual(observed.head.reference, observed.receipt.lastLifecycleReference)
   })
+  it('reads the interrupted issuance the upgrade writer records, and refuses a terminal without it or with a foreign shape', () => {
+    const base = fixture(), terminal = JSON.parse(base.terminalBytes) as Record<string, unknown>
+    const issued = { ...terminal, interruptedIssuance: { binding: { recordId: 'r' }, verified: { audit: true }, sourceWasNeverAdmitted: false, parentHeadSha256: 'c'.repeat(64) } }
+    assert.equal(inspectCompletedInstallationTransition({ ...base, terminalBytes: JSON.stringify(issued) }).terminal.interruptedIssuance !== null, true)
+    const { interruptedIssuance: _dropped, ...older } = terminal
+    assert.throws(() => inspectCompletedInstallationTransition({ ...base, terminalBytes: JSON.stringify(older) }), /INSTALL_TRANSITION_IMAGE_INVALID/)
+    for (const bad of [{ binding: {}, verified: {}, sourceWasNeverAdmitted: 'no', parentHeadSha256: 'c'.repeat(64) }, { binding: {}, verified: {}, sourceWasNeverAdmitted: true, parentHeadSha256: 'c'.repeat(64), extra: 1 }, 'x'])
+      assert.throws(() => inspectCompletedInstallationTransition({ ...base, terminalBytes: JSON.stringify({ ...terminal, interruptedIssuance: bad }) }), /INSTALL_TRANSITION_IMAGE_INVALID/)
+  })
+
   it('refuses incomplete publication, unsettled HEAD, terminal drift and an old receipt substitution', () => {
     const good = fixture()
     const mutate = (key: keyof typeof good, update: (value: any) => void) => { const copy = { ...good }, value = JSON.parse(copy[key]); update(value); copy[key] = text(value); return copy }
@@ -82,7 +92,7 @@ describe('completed source observations are distinct from historical finalizatio
     const admission = { schemaVersion: 1, kind: 'xpanel-initial-upgrade-admission', operationId: admissionId, reference: ref(30), parentHeadSha256: hash(previous.headBytes), parentHead: { value: JSON.parse(previous.headBytes), sha256: hash(previous.headBytes), bytes: previous.headBytes },
       binding: { recordId: admissionId, origin: { issuerId: id(1) }, intentBinding: { jobId: admissionId, action: 'lifecycle.upgrade' }, backup: null, accountLifetimeSha256: '4'.repeat(64) }, receipt, receiptSha256: hash(previous.receiptBytes), schema: 6,
       entries: [{ path: root + '/installation.json', sha256: hash(previous.receiptBytes) }, { path: root + '/bootstrap.json', sha256: hash(previous.bootstrapBytes) }, { path: root + '/install-dependencies.json', sha256: hash(previous.dependencyBytes) }, { path: '/opt/xpanel/current', target: '/opt/xpanel/releases/' + source.version }, ...receipt.files] }
-    const admissionBytes = text(admission), terminal = { schemaVersion: 1, installation: { operationId: admissionId, journalPath: root + '/admission-' + admissionId + '.json', journalSha256: hash(admissionBytes), installedReceiptSha256: hash(previous.receiptBytes), source, noSourceChange: true }, operationId: head.operationId, reference: head.reference, requestFingerprint: head.requestFingerprint, hostOutcome: 'rolled_back', sourceArchiveSha256: source.archiveSha256, databaseBackupSha256: null, completedAt: time }
+    const admissionBytes = text(admission), terminal = { schemaVersion: 1, installation: { operationId: admissionId, journalPath: root + '/admission-' + admissionId + '.json', journalSha256: hash(admissionBytes), installedReceiptSha256: hash(previous.receiptBytes), source, noSourceChange: true }, operationId: head.operationId, reference: head.reference, requestFingerprint: head.requestFingerprint, hostOutcome: 'rolled_back', sourceArchiveSha256: source.archiveSha256, databaseBackupSha256: null, interruptedIssuance: null, completedAt: time }
     const input = { bootstrapBytes: previous.bootstrapBytes, receiptBytes: previous.receiptBytes, dependencyBytes: previous.dependencyBytes, headBytes: text(head), admissionBytes, terminalBytes: text(terminal) }
     assert.equal(inspectNoSourceChangeInstallation(input).admission.parentHead.bytes, previous.headBytes)
     assert.equal(inspectCompletedInstallationTransition(previous).bootstrap.version, source.version)
@@ -154,7 +164,7 @@ describe('no-source-change history retires each DB/audit scope before descending
         entries: [{ path: root + '/installation.json', sha256: hash(leaf.receiptBytes) }, { path: root + '/bootstrap.json', sha256: hash(bootstrapBytes) }, { path: root + '/install-dependencies.json', sha256: hash(leaf.dependencyBytes) }, { path: '/opt/xpanel/current', target: '/opt/xpanel/releases/' + receipt.source.version }, ...receipt.files] }
       const admissionBytes = text(admission)
       const terminal = { schemaVersion: 1, installation: { operationId, journalPath: root + '/admission-' + operationId + '.json', journalSha256: hash(admissionBytes), installedReceiptSha256: hash(leaf.receiptBytes), source: receipt.source, noSourceChange: true },
-        operationId: recoveryId, reference: head.reference, requestFingerprint: head.requestFingerprint, hostOutcome: 'rolled_back', sourceArchiveSha256: receipt.source.archiveSha256, databaseBackupSha256: null, completedAt: time }
+        operationId: recoveryId, reference: head.reference, requestFingerprint: head.requestFingerprint, hostOutcome: 'rolled_back', sourceArchiveSha256: receipt.source.archiveSha256, databaseBackupSha256: null, interruptedIssuance: null, completedAt: time }
       files.set(root + '/admission-' + operationId + '.json', admissionBytes); files.set(root + '/terminal/' + recoveryId + '.json', text(terminal))
       jobs.set(operationId, { status: 'succeeded', kind: 'lifecycle.upgrade', referenceCode: admission.reference, detail: { lifecycleIntent: binding } })
       jobs.set(recoveryId, { status: 'succeeded', kind: 'lifecycle.recover', referenceCode: head.reference, detail: { lifecycleIntent: { ...binding, action: 'lifecycle.recover', jobId: recoveryId } } })
