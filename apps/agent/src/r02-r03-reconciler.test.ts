@@ -9,7 +9,7 @@ import { createGeneration, createTestDb, getGeneration, latestActive, type TestD
 import { profileFor } from '@xpanel/os'
 import { createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { FakeHostExecutor } from './executor.ts'
-import { compileDesiredGeneration, HostReconciler, rollbackReloadAction, sha256Text, type ReconcileJournalPhase } from './reconciler.ts'
+import { compileDesiredGeneration, HostReconciler, rollbackReloadActions, sha256Text, type ReconcileJournalPhase } from './reconciler.ts'
 import { readMailForwardingConfiguration } from './mailfx-render.ts'
 import { SERIAL_RE } from './zone-serial.ts'
 
@@ -697,17 +697,17 @@ describe('R02 & R03 (A19, A20, A21, A22) — Staged generations, removal manifes
   )
 
   it('reloads PowerDNS with reload-or-restart and tolerates a missing slice drop-in temp', { tags: ['slow'] }, async () => {
-    assert.deepEqual(rollbackReloadAction('pdns.service'), {
+    assert.deepEqual(rollbackReloadActions('pdns.service'), [{
       kind: 'exec',
       argv: ['/usr/bin/systemctl', 'reload-or-restart', 'pdns.service'],
-    })
-    assert.deepEqual(rollbackReloadAction('nginx.service'), {
+    }])
+    assert.deepEqual(rollbackReloadActions('nginx.service'), [{
       kind: 'systemd',
       verb: 'reload',
       unit: 'nginx.service',
-    })
-    assert.deepEqual(rollbackReloadAction('xpanel-20000.slice'), { kind: 'systemd-daemon-reload' })
-    assert.deepEqual(rollbackReloadAction('user-20000.slice'), { kind: 'systemd-daemon-reload' })
+    }])
+    assert.deepEqual(rollbackReloadActions('xpanel-20000.slice'), [{ kind: 'systemd-daemon-reload' }])
+    assert.deepEqual(rollbackReloadActions('user-20000.slice'), [{ kind: 'systemd-daemon-reload' }])
 
     await seedEnvironment()
     const reconciler = new HostReconciler({

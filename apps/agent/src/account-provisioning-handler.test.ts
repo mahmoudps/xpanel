@@ -108,6 +108,7 @@ const scene = () => {
     getDurableJob: vi.fn(async () => job()),
     getAccount: vi.fn(async () => storedAccount),
     readSnapshot: vi.fn(async () => ({ checksum, revision: 8 })),
+    readStateAuthority: vi.fn(async () => ({ revision: 8, fencingToken: 1 })),
     getDnsZone: vi.fn(async () => zone),
     getPlan: vi.fn(async () => plan),
     getReseller: vi.fn(async () => null),
@@ -135,6 +136,50 @@ describe('account provisioning admission', () => {
     }
     await expect(s.call()).rejects.toMatchObject({ code: 'UNAUTHENTICATED', detail: { stateChanged: true, verificationRequired: true } })
     expect(effects).toBe(1)
+  })
+
+  it('reads the full desired state once while its revision and writer fence are unchanged', async () => {
+    const s = scene()
+    s.runtime.execute = async (_input, context) => {
+      for (let primitive = 0; primitive < 50; primitive++) await context.assertAuthority()
+      return s.reply
+    }
+    expect((await s.call()).status).toBe(200)
+    expect(s.ports.readStateAuthority.mock.calls.length).toBeGreaterThan(50)
+    expect(s.ports.readSnapshot).toHaveBeenCalledTimes(1)
+  })
+
+  it('rereads the desired state after another writer lease and refuses a changed source', async () => {
+    const s = scene()
+    let effects = 0
+    s.runtime.execute = async (_input, context) => {
+      await context.assertAuthority()
+      effects++
+      // A lease that wrote nothing moves the fence only: the reread snapshot still matches.
+      s.ports.readStateAuthority.mockResolvedValue({ revision: 8, fencingToken: 2 })
+      await context.assertAuthority()
+      effects++
+      s.ports.readStateAuthority.mockResolvedValue({ revision: 8, fencingToken: 3 })
+      s.ports.readSnapshot.mockResolvedValue({ checksum: 'f'.repeat(64), revision: 8 })
+      await context.assertAuthority()
+      effects++
+      return s.reply
+    }
+    await expect(s.call()).rejects.toMatchObject({ code: 'CONFLICT', detail: { stateChanged: true, verificationRequired: true } })
+    expect(effects).toBe(2)
+    expect(s.ports.readSnapshot).toHaveBeenCalledTimes(3)
+  })
+
+  it('refuses a newer committed revision without reading the snapshot again', async () => {
+    const s = scene()
+    s.runtime.execute = async (_input, context) => {
+      await context.assertAuthority()
+      s.ports.readStateAuthority.mockResolvedValue({ revision: 9, fencingToken: 2 })
+      await context.assertAuthority()
+      return s.reply
+    }
+    await expect(s.call()).rejects.toMatchObject({ code: 'CONFLICT', detail: { stateChanged: true, verificationRequired: true } })
+    expect(s.ports.readSnapshot).toHaveBeenCalledTimes(1)
   })
 
   it('stops after a completed primitive when the current renewed lease expires', async () => {

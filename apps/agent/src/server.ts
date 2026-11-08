@@ -66,6 +66,7 @@ import { nativeQuotaSetupPorts, quotaSetupStamp } from './quota-setup.ts'
 import { handleHostJobsRoute } from './host-jobs-routes.ts'
 import { initializeUserQuota, observeHomeUserQuota, validateQuotaFilesystem } from './services/quota.ts'
 import { handleAccountProvisioning, type AgentAccountProvisioningRuntime } from './account-provisioning-handler.ts'
+import { withProvisioningHeartbeat } from './provisioning-heartbeat.ts'
 import type { HostJobRunner } from './host-jobs.ts'
 import { handleSoftwareCenterRoute } from './software-center-routes.ts'
 import { handleReleasePackagesRoute } from './release-packages.ts'
@@ -899,7 +900,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           return fail('UNAUTHENTICATED', 'an authenticated principal is required', { stateChanged: false })
         }
         // The API keeps its public failure generic, so the refusal reason is recorded here for operators.
-        return await handleAccountProvisioning({
+        return await withProvisioningHeartbeat(handleAccountProvisioning({
           principalId: trustedPrincipalId,
           request: req,
           runtime: deps.accountProvisioning,
@@ -907,8 +908,9 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           ports: {
             getPrincipal: id => getPrincipal(deps.db, id),
             getDurableJob: id => getDurableJob(deps.db, id),
-            getAccount: id => deps.store.getAccount(id),
+            getAccount: (id, username) => deps.store.getAccount(id, { username }),
             readSnapshot: () => deps.store.readSnapshot(),
+            readStateAuthority: () => deps.store.getAuthorityMetadata(),
             getDnsZone: name => deps.store.getDnsZone(name),
             getPlan: id => deps.store.getPlan(id),
             getReseller: id => deps.store.getReseller(id),
@@ -918,7 +920,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
           const reason = isXpanelError(error) && typeof error.detail.reason === 'string' && /^[a-z0-9_]{1,64}$/.test(error.detail.reason) ? ` (${error.detail.reason})` : ''
           console.error('xpanel-agent account provisioning refused:', isXpanelError(error) ? `${error.code}: ${error.message}${reason}` : 'unexpected provisioning error')
           throw error
-        })
+        }))
       }
 
       if (method === 'GET' && pathname === '/host/dkim-probe') {
