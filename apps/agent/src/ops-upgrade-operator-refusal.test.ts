@@ -126,7 +126,7 @@ test('a generic precondition refusal names the product message and reason in the
   const reader = new XpanelError('PRECONDITION_FAILED', 'read-only operation database observation refused', { reason: 'reviewed_schema_required', stateChanged: false })
   assert.equal(rootOperatorServerRefusal(reader).journalLine, 'xpanel-root-operator-refused code=PRECONDITION_FAILED detail="read-only operation database observation refused" reason=reviewed_schema_required\n')
   const wrapped = Object.assign(new Error('ROOT_OPERATOR_REVIEW_REQUIRED'), { code: 'ROOT_OPERATOR_REVIEW_REQUIRED', cause: reader })
-  assert.equal(rootOperatorServerRefusal(wrapped).journalLine, 'xpanel-root-operator-refused code=ROOT_OPERATOR_REVIEW_REQUIRED detail="read-only operation database observation refused" reason=reviewed_schema_required\n')
+  assert.equal(rootOperatorServerRefusal(wrapped).journalLine, 'xpanel-root-operator-refused code=ROOT_OPERATOR_REVIEW_REQUIRED cause=XpanelError cause_code=PRECONDITION_FAILED detail="read-only operation database observation refused" reason=reviewed_schema_required\n')
   // Other stable codes and plain errors keep their fixed line.
   assert.equal(rootOperatorServerRefusal(new XpanelError('CONFLICT', 'the operation database inode changed')).journalLine, 'xpanel-root-operator-refused code=CONFLICT\n')
   assert.equal(rootOperatorServerRefusal(new Error('open /root/private failed')).journalLine, 'xpanel-root-operator-refused code=ROOT_OPERATOR_SERVER_ERROR\n')
@@ -143,4 +143,38 @@ test('no secret-shaped value, client data or unowned path passes into the journa
   const detail = long.slice('xpanel-root-operator-refused code=PRECONDITION_FAILED'.length, -1)
   assert.equal(detail.length <= 160, true)
   assert.match(detail, /^ detail="word( word)*" reason=held_http_correlation_not_verified$/)
+})
+
+test('a wrapper refusal names its innermost cause in the root journal only, never in the client frame', () => {
+  const archive = (cause: unknown) => Object.assign(new Error('Archive callback failed or verified lifetime changed; staging must remain unpublished', { cause }),
+    { name: 'ReleaseVerificationError', code: 'ARCHIVE_USE_UNCERTAIN', uncertain: true })
+  const typeError = new TypeError("Cannot read properties of undefined (reading 'units')")
+  const refusal = rootOperatorServerRefusal(archive(Object.assign(new Error('upgrade step failed', { cause: typeError }))))
+  assert.equal(refusal.code, 'ARCHIVE_USE_UNCERTAIN')
+  assert.equal(refusal.journalLine, 'xpanel-root-operator-refused code=ARCHIVE_USE_UNCERTAIN cause=TypeError detail="Cannot read properties of undefined (reading ?"\n')
+  assert.equal(refusal.frame.toString('utf8'), '{"refused":"ARCHIVE_USE_UNCERTAIN"}\n')
+  assert.deepEqual(rootOperatorReviewRecord(operationId, archive(typeError)), { operationId, state: 'review_required', code: 'ARCHIVE_USE_UNCERTAIN', retryAllowed: false })
+  // A link-time SyntaxError keeps its words; the quoted module and export names are values.
+  const link = new SyntaxError("The requested module '../executor.ts' does not provide an export named 'onDemandService'")
+  assert.equal(rootOperatorServerRefusal(archive(link)).journalLine,
+    'xpanel-root-operator-refused code=ARCHIVE_USE_UNCERTAIN cause=SyntaxError detail="The requested module ? does not provide an export named ?"\n')
+  // A descriptor wrapper over a coded kernel error names that code; an owned path stays, values become '?'.
+  const closed = Object.assign(new Error('EBADF: bad file descriptor, close /var/lib/xpanel-lifecycle/HEAD at 0x1f'), { code: 'EBADF' })
+  const descriptor = Object.assign(new Error('Archive descriptor retirement is uncertain', { cause: closed }), { code: 'DESCRIPTOR_UNCERTAIN' })
+  assert.equal(rootOperatorServerRefusal(descriptor).journalLine,
+    'xpanel-root-operator-refused code=DESCRIPTOR_UNCERTAIN cause=Error cause_code=EBADF detail="EBADF: bad file descriptor, close /var/lib/xpanel-lifecycle/HEAD at ?"\n')
+  assert.equal(rootOperatorServerRefusal(descriptor).frame.toString('utf8'), '{"refused":"DESCRIPTOR_UNCERTAIN"}\n')
+  // The generic review code over a plain error, and a wrapper with no cause.
+  const review = Object.assign(new Error('ROOT_OPERATOR_REVIEW_REQUIRED', { cause: new RangeError('Invalid time value') }), { code: 'ROOT_OPERATOR_REVIEW_REQUIRED' })
+  assert.equal(rootOperatorServerRefusal(review).journalLine, 'xpanel-root-operator-refused code=ROOT_OPERATOR_REVIEW_REQUIRED cause=RangeError detail="Invalid time value"\n')
+  assert.equal(rootOperatorServerRefusal(stable('ARCHIVE_USE_UNCERTAIN', 'ARCHIVE_USE_UNCERTAIN')).journalLine, 'xpanel-root-operator-refused code=ARCHIVE_USE_UNCERTAIN\n')
+  // An unusual name, secrets, a second line and a long message stay out or are cut at a whole token within the limit.
+  const secret = ['sk', 'live', '4eC39HqLyjWDarjtT1zdp7dc'].join('_')
+  const odd = Object.assign(new Error(`token ${secret} password=hunter2 for client@example.test ${'word '.repeat(60)}\nsecond ${secret}`), { name: 'bad name\n' })
+  const line = rootOperatorServerRefusal(archive(odd)).journalLine
+  for (const value of [secret, 'hunter2', 'client@example.test', 'second', 'bad name']) assert.equal(line.includes(value), false, value)
+  const detail = line.slice('xpanel-root-operator-refused code=ARCHIVE_USE_UNCERTAIN'.length, -1)
+  assert.equal(detail.length <= 160, true)
+  assert.match(detail, /^ cause=\? detail="token \? \? for \?( word)+"$/)
+  assert.equal(/^[\x20-\x7e]*\n$/.test(line), true)
 })

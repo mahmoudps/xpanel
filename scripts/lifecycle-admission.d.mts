@@ -22,6 +22,8 @@ export function getLifecycleClosedDatabaseObservationInfo(capability:unknown):Re
 export function bindLifecycleClosedDatabaseObservation(capability:unknown):Promise<void>
 export function retireLifecycleClosedDatabaseObservation(capability:unknown):Promise<void>
 export function verifyNativeWriterGeneration(capability: unknown, operationId: string): Promise<boolean>
+/** One read-only participant nonce exchange; refusals and empty replies fail with stable codes. */
+export function exchangeParticipantHandshake(path: string, request: {nonce: string; operationId: string}, deadlineMs?: number): Promise<Record<string, unknown>>
 export function startLifecycleWriterParticipant(role: 'api' | 'agent', options?: {onFence?: () => Promise<void>}): Promise<Readonly<{close():Promise<void>}>>
 export function readLifecyclePublicStatus(): Promise<Readonly<{active:boolean;reference:unknown;phase:unknown;kind?:unknown}>>
 

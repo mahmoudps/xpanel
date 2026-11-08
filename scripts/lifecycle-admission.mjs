@@ -18,6 +18,11 @@ const bootstrapExclusives = new WeakMap(), bootstrapExclusiveScope = new AsyncLo
 const fail = (code, cause) => { throw Object.assign(new Error(code, cause ? { cause } : undefined), { code }) }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const SHA = /^[0-9a-f]{64}$/
+const STABLE = /^[A-Z][A-Z0-9_]{0,95}$/
+/** How long a writer admission may wait for the shared lock (flock --timeout). */
+const WRITER_LOCK_WAIT_SECONDS = 15
+/** A fenced participant answers after its writer drain, which can sit behind that lock wait: the lock budget plus a margin. */
+const PARTICIPANT_HANDSHAKE_MS = (WRITER_LOCK_WAIT_SECONDS + 5) * 1000
 let activeWriters = 0
 const writerFlights = new Set()
 
@@ -63,7 +68,7 @@ export async function lifecycleAdmissionResponse(request, { surface = 'api' } = 
 
 async function flock(fd, exclusive, nonblocking = false) {
   return withTrustedFile('/usr/bin/flock', { maxBytes: 1024 * 1024 }, async tool => new Promise((resolve, reject) => {
-    const args = [exclusive ? '--exclusive' : '--shared', ...(nonblocking ? ['--nonblock'] : ['--timeout', '15']), '3']
+    const args = [exclusive ? '--exclusive' : '--shared', ...(nonblocking ? ['--nonblock'] : ['--timeout', String(WRITER_LOCK_WAIT_SECONDS)]), '3']
     const child = spawn('/proc/self/fd/4', args, { stdio: ['ignore', 'ignore', 'ignore', fd, tool.fd], env: { PATH: '/usr/bin:/bin', LANG: 'C' } })
     let spawnError
     child.once('error', error => { spawnError = error })
@@ -296,18 +301,59 @@ export async function verifyNativeWriterGeneration(capability, operationId) {
     for (const descriptor of await readdir(`/proc/${state.pid}/fd`)) { try { if (await readlink(`/proc/${state.pid}/fd/${descriptor}`) === `socket:[${inode}]`) owns = true } catch { /* A disappearing FD is not positive evidence. */ } }
     if (!owns) fail('LIFECYCLE_WRITER_SOCKET_PROCESS_MISMATCH')
     const nonce = randomBytes(32).toString('hex')
-    const response = await new Promise((resolve, reject) => {
-      const client = connect(path); let bytes = ''
-      client.setTimeout(2000, () => client.destroy(new Error('LIFECYCLE_WRITER_HANDSHAKE_TIMEOUT')))
-      client.on('error', reject)
-      client.on('connect', () => client.end(JSON.stringify({ nonce, operationId }) + '\n'))
-      client.on('data', chunk => { bytes += chunk; if (Buffer.byteLength(bytes) > 8192) client.destroy(new Error('LIFECYCLE_WRITER_HANDSHAKE_LIMIT')) })
-      client.on('end', () => { try { resolve(JSON.parse(bytes)) } catch (error) { reject(error) } })
-    })
-    if (!response || response.nonce !== nonce || response.operationId !== operationId || response.pid !== state.pid || response.start !== state.start || response.role !== role || response.activeWriters !== 0 || response.fenced !== true) fail('LIFECYCLE_WRITER_GENERATION_MISMATCH')
+    const response = await exchangeParticipantHandshake(path, { nonce, operationId })
+    if (response.nonce !== nonce || response.operationId !== operationId || response.pid !== state.pid || response.start !== state.start || response.role !== role || response.activeWriters !== 0 || response.fenced !== true) fail('LIFECYCLE_WRITER_GENERATION_MISMATCH')
     await native.observeLifecycleWriterService(capability, role, state)
   }
   return true
+}
+
+const handshakeFailure = code => Object.assign(new Error(code), { code })
+const exchangeOnce = (path, request, timeoutMs) => new Promise((resolve, reject) => {
+  const client = connect(path); let bytes = '', failure
+  client.setTimeout(timeoutMs, () => client.destroy(handshakeFailure('LIFECYCLE_WRITER_HANDSHAKE_TIMEOUT')))
+  client.on('error', error => { failure ??= error })
+  client.on('connect', () => client.end(JSON.stringify(request) + '\n'))
+  client.on('data', chunk => { bytes += chunk; if (Buffer.byteLength(bytes) > 8192) client.destroy(handshakeFailure('LIFECYCLE_WRITER_HANDSHAKE_LIMIT')) })
+  client.on('close', () => { if (failure) reject(failure); else resolve(bytes) })
+})
+
+/**
+ * One read-only nonce exchange with a writer participant. A refusal frame fails with its stable code. A writer
+ * that drops the request without a whole reply is asked again until the deadline, then LIFECYCLE_WRITER_HANDSHAKE_EMPTY.
+ */
+export async function exchangeParticipantHandshake(path, request, deadlineMs = PARTICIPANT_HANDSHAKE_MS) {
+  const deadline = Date.now() + deadlineMs
+  for (;;) {
+    const bytes = await exchangeOnce(path, request, Math.max(1, deadline - Date.now()))
+    let reply
+    try { reply = JSON.parse(bytes) } catch { reply = undefined }
+    if (reply !== undefined) {
+      if (!reply || typeof reply !== 'object' || Array.isArray(reply)) fail('LIFECYCLE_WRITER_HANDSHAKE_INVALID')
+      if (reply.refused !== undefined) fail(reply.nonce === request.nonce && typeof reply.refused === 'string' && STABLE.test(reply.refused) ? reply.refused : 'LIFECYCLE_WRITER_HANDSHAKE_INVALID')
+      return reply
+    }
+    if (Date.now() + 100 >= deadline) fail('LIFECYCLE_WRITER_HANDSHAKE_EMPTY')
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+}
+
+/** A fenced writer drains its flights before it answers. After a valid request every failure is a refusal frame, never a dropped socket. */
+async function answerParticipantRequest(bytes, { role, start, onFence, verifyParent }) {
+  let request
+  try { request = JSON.parse(bytes) } catch { return null }
+  if (!request || typeof request.nonce !== 'string' || !SHA.test(request.nonce) || typeof request.operationId !== 'string' || !UUID.test(request.operationId)) return null
+  const refusal = code => JSON.stringify({ nonce: request.nonce, refused: code }) + '\n'
+  let barrier
+  try {
+    barrier = await readLifecycleBarrier()
+    if (barrier) {
+      try { await onFence?.() } catch { return refusal('LIFECYCLE_WRITER_FENCE_FAILED') }
+      await awaitLifecycleWriterDrain()
+    }
+    await verifyParent()
+  } catch (error) { return refusal(typeof error?.code === 'string' && STABLE.test(error.code) ? error.code : 'LIFECYCLE_PARTICIPANT_FAILED') }
+  return JSON.stringify({ nonce: request.nonce, operationId: barrier?.operationId ?? null, role, pid: process.pid, start, activeWriters, fenced: !!barrier }) + '\n'
 }
 
 /** Reviewed daemon startup installs this read-only participant; it is never a public bypass. */
@@ -333,13 +379,11 @@ export async function startLifecycleWriterParticipant(role, { onFence } = {}) {
     socket.on('data', chunk => { bytes += chunk; if (Buffer.byteLength(bytes) > 4096) socket.destroy() })
     socket.on('error', () => {})
     socket.on('end', async () => {
-      try {
-        const request = JSON.parse(bytes), barrier = await readLifecycleBarrier()
-        if (!request || !SHA.test(request.nonce) || !UUID.test(request.operationId)) { socket.destroy(); return }
-        if (barrier) { await onFence?.(); await awaitLifecycleWriterDrain() }
-        await verifyParent()
-        socket.end(JSON.stringify({ nonce: request.nonce, operationId: barrier?.operationId ?? null, role, pid: process.pid, start, activeWriters, fenced: !!barrier }) + '\n')
-      } catch { socket.destroy() }
+      // The request is in; its answer may wait for the writer drain, within the whole handshake budget.
+      socket.setTimeout(PARTICIPANT_HANDSHAKE_MS)
+      let reply = null
+      try { reply = await answerParticipantRequest(bytes, { role, start, onFence, verifyParent }) } catch { reply = null }
+      if (reply === null || socket.destroyed) socket.destroy(); else socket.end(reply)
     })
   })
   try {
@@ -449,15 +493,7 @@ async function verifyNormalParticipants(processes, probeId, current) {
       }
       if (!owns) fail('LIFECYCLE_WRITER_SOCKET_PROCESS_MISMATCH')
       const nonce = randomBytes(32).toString('hex')
-      const response = await new Promise((resolve, reject) => {
-        const client = connect(path); let bytes = '', parsed, failure
-        client.setTimeout(2000, () => client.destroy(new Error('LIFECYCLE_WRITER_HANDSHAKE_TIMEOUT')))
-        client.on('error', error => { failure = error })
-        client.on('connect', () => client.end(JSON.stringify({ nonce, operationId: probeId }) + '\n'))
-        client.on('data', chunk => { bytes += chunk; if (Buffer.byteLength(bytes) > 8192) client.destroy(new Error('LIFECYCLE_WRITER_HANDSHAKE_LIMIT')) })
-        client.on('end', () => { try { parsed = JSON.parse(bytes) } catch (error) { failure = error } })
-        client.on('close', () => { if (failure || !parsed) reject(failure ?? new Error('LIFECYCLE_WRITER_HANDSHAKE_INCOMPLETE')); else resolve(parsed) })
-      })
+      const response = await exchangeParticipantHandshake(path, { nonce, operationId: probeId })
       if (response.nonce !== nonce || response.operationId !== null || response.role !== role || response.pid !== process.pid || response.start !== process.start || response.activeWriters !== 0 || response.fenced !== false) fail('INSTALL_FINALIZATION_PARTICIPANT_CHANGED')
       await verifyParent()
       const after = await lstat(path, { bigint: true })

@@ -9,13 +9,19 @@ const REVIEW_REQUIRED = 'ROOT_OPERATOR_REVIEW_REQUIRED'
 const SERVER_ERROR = 'ROOT_OPERATOR_SERVER_ERROR'
 const JOURNAL_PREFIX = 'xpanel-root-operator-refused code='
 
+/** The stable code an error names: its code, else a code-shaped message, else ''. */
+const machineCode = (record: { code?: unknown; message?: unknown } | undefined): string => {
+  const candidate = typeof record?.code === 'string' ? record.code : typeof record?.message === 'string' ? record.message : ''
+  return ROOT_OPERATOR_MACHINE_CODE.test(candidate) ? candidate : ''
+}
+
 const stableCodeOrFallback = (error: unknown, fallback: string): string => {
   let current: unknown = error
   let wrapper = ''
   for (let depth = 0; current && depth < 6; depth += 1) {
     const record = typeof current === 'object' ? current as { code?: unknown; message?: unknown; cause?: unknown } : undefined
-    const candidate = typeof record?.code === 'string' ? record.code : typeof record?.message === 'string' ? record.message : ''
-    if (ROOT_OPERATOR_MACHINE_CODE.test(candidate)) {
+    const candidate = machineCode(record)
+    if (candidate) {
       if (candidate !== ARCHIVE_WRAPPER) return candidate
       wrapper = candidate
     }
@@ -67,33 +73,53 @@ export const ownedFileDriftDetail = (error: unknown): string => {
 const MESSAGE_WORD = /^\(?(?:[A-Z]?[a-z-]{1,31}|[A-Z]{1,8})[.,;:)]{0,2}$/
 const REASON = /^[a-z][a-z0-9_]{0,63}$/
 const DETAIL_LIMIT = 160
+const ERROR_NAME = /^[A-Z][A-Za-z0-9]{0,39}$/
+const ownedToken = (token: string) => token.length <= 255 && OWNED_PATH.test(token) && !token.split('/').includes('..')
+const reasonOf = (error: unknown): string =>
+  isXpanelError(error) && typeof error.detail.reason === 'string' && REASON.test(error.detail.reason) ? ` reason=${error.detail.reason}` : ''
+/** `<prefix> detail="<first message line>"<suffix>`, cut at a whole token so the detail stays within its limit. */
+const boundedDetail = (prefix: string, message: string, suffix: string): string => {
+  let text = ''
+  for (const token of message.split('\n')[0]!.split(' ').filter(Boolean).map(word => MESSAGE_WORD.test(word) || ownedToken(word) ? word : '?')) {
+    const next = text ? text + ' ' + token : token
+    if (`${prefix} detail="${next}"${suffix}`.length > DETAIL_LIMIT) break
+    text = next
+  }
+  return `${prefix} detail="${text}"${suffix}`
+}
 /** Root-journal detail of a generic refusal: the product-authored message and reason identifier, never sent to the client. */
 export const productRefusalDetail = (error: unknown): string => {
   let current: unknown = error
   for (let depth = 0; current && depth < 6; depth += 1) {
-    if (isXpanelError(current)) {
-      const reason = typeof current.detail.reason === 'string' && REASON.test(current.detail.reason) ? ` reason=${current.detail.reason}` : ''
-      const owned = (token: string) => token.length <= 255 && OWNED_PATH.test(token) && !token.split('/').includes('..')
-      let text = ''
-      for (const token of current.message.split('\n')[0]!.split(' ').filter(Boolean).map(word => MESSAGE_WORD.test(word) || owned(word) ? word : '?')) {
-        const next = text ? text + ' ' + token : token
-        if (` detail="${next}"${reason}`.length > DETAIL_LIMIT) break
-        text = next
-      }
-      return ` detail="${text}"${reason}`
-    }
+    if (isXpanelError(current)) return boundedDetail('', current.message, reasonOf(current))
     current = typeof current === 'object' ? (current as { cause?: unknown }).cause : undefined
   }
   return ''
 }
-const GENERIC_CODES = new Set(['PRECONDITION_FAILED', REVIEW_REQUIRED])
+/**
+ * Root-journal detail of a wrapper refusal: the innermost cause's error name, its stable code if any and its first
+ * message line, sanitized like the product detail. A wrapper code alone names no cause. Never sent to the client.
+ */
+export const innermostCauseDetail = (error: unknown): string => {
+  let inner: { name?: unknown; code?: unknown; message?: unknown; cause?: unknown } | undefined
+  for (let current: unknown = error, depth = 0; current && typeof current === 'object' && depth < 8; depth += 1) {
+    inner = current as NonNullable<typeof inner>
+    current = inner.cause
+  }
+  if (!inner || inner === error) return ''
+  const name = typeof inner.name === 'string' && ERROR_NAME.test(inner.name) ? inner.name : '?', code = machineCode(inner)
+  return boundedDetail(` cause=${name}${code ? ` cause_code=${code}` : ''}`, typeof inner.message === 'string' ? inner.message : '', reasonOf(inner))
+}
+const GENERIC_CODES = new Set(['PRECONDITION_FAILED'])
+const WRAPPER_CODES = new Set([ARCHIVE_WRAPPER, 'DESCRIPTOR_UNCERTAIN', REVIEW_REQUIRED])
 
 export interface RootOperatorServerRefusal { readonly code: string; readonly frame: Buffer; readonly journalLine: string }
 
 /** The single server-side refusal payload; callers may only write its frame and journal line. */
 export function rootOperatorServerRefusal(error: unknown): RootOperatorServerRefusal {
   const code = rootOperatorServerRefusalCode(error)
-  const detail = ownedFileDriftDetail(error) + (GENERIC_CODES.has(code) ? productRefusalDetail(error) : '')
+  const detail = ownedFileDriftDetail(error)
+    + (GENERIC_CODES.has(code) ? productRefusalDetail(error) : WRAPPER_CODES.has(code) ? innermostCauseDetail(error) : '')
   return Object.freeze({ code, frame: encodeRootOperatorRefusal(code), journalLine: rootOperatorRefusalJournalLine(code, detail) })
 }
 
