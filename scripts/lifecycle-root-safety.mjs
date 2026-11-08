@@ -14,6 +14,7 @@ import { observeOwnedControlPlaneUnits, assertOwnedControlPlaneQuiescent, awaitO
 import { assertPreparedReleaseCurrent, preparedReleaseInfo, withExistingPreparedRelease, withVisiblePreparedRelease, observeInstalledReleaseTree } from './prepared-release.mjs'
 import { captureManagedFile, ensureManagedPrivateDirectory, managedPathAbsent, replaceManagedFile } from './lifecycle-managed-files.mjs'
 import { withVerifiedCoordinatorOwnership, assertCoordinatorOwnershipCurrent, coordinatorOwnershipInfo } from './coordinator-ownership.mjs'
+import { TERMINAL_RECORD_KEYS } from './install-transition-observation.mjs'
 import { prepareInstallationTransition, selectInstallationTransition, publishInstallationTransition, readInstallationTransitionRecovery, reopenInstallationTransition } from './installation-transition.mjs'
 import { createDb, getReadonlyOperationDatabaseOrigin, assertReadonlyOperationDatabaseCurrent, withReadonlyClosedOperationDatabase,
   withReadonlyLifecycleIntentFileObservation, assertReadonlyLifecycleIntentFileObservationCurrent,
@@ -1447,6 +1448,8 @@ async function settleNative(scope, result) {
   const terminal = { schemaVersion: 1, installation, operationId: scope.job.id, reference: scope.job.referenceCode, requestFingerprint: scope.intentBinding.requestFingerprint, hostOutcome: result.hostOutcome, sourceArchiveSha256: scope.receipt.source.archiveSha256, databaseBackupSha256: scope.backup?.sha256 ?? null,
     interruptedIssuance: scope.interruptedIssuedIntent ? { binding: scope.interruptedIssuedIntent.binding, verified: scope.interruptedIssuedIntent.verified,
       sourceWasNeverAdmitted: scope.recovery.auditOnlyPreHead === true, parentHeadSha256: scope.previousHead.hash } : null, completedAt: new Date().toISOString() }
+  // The next release's acquisition reads this record with the same key list; a writer change must change both.
+  if (JSON.stringify(Object.keys(terminal)) !== JSON.stringify(TERMINAL_RECORD_KEYS)) fail('LIFECYCLE_TERMINAL_RECORD_SHAPE')
   await ensureTerminalDirectory(scope)
   await durableJson(join(ROOT, 'terminal', scope.job.id + '.json'), terminal)
   let acknowledged = null
