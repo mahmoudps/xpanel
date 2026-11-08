@@ -27,7 +27,7 @@ const screenMarkers = {
 }
 const focusSelector = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),details > summary:first-of-type,[tabindex]'
 const shortUrl = value => { try { const url = new URL(value); return `${url.origin}${url.pathname}` } catch { return String(value).slice(0, 160) } }
-const isFontUrl = value => /fonts\.(?:googleapis|gstatic)\.com/.test(value)
+const isFontUrl = value => /\/assets\/fonts\/[A-Za-z-]+\.woff2(?:\?|$)/.test(value)
 
 function fingerprint(output, phase) {
   const paths = new Set(collectSnapshotFiles(root))
@@ -360,9 +360,8 @@ export async function runPhase1Acceptance({ output } = {}) {
         breadcrumb('interactions')
         if (state.interactions) await interactions(page, state, fixture.baseUrl, expect, outcome.observations, breadcrumb)
         outcome.console_error_classification = {
-          external_fonts: outcome.console_errors.filter(error => isFontUrl(error.url) || isFontUrl(error.text)),
           fixture_auth_lookup: outcome.console_errors.filter(error => /\/api\/auth\/me$/.test(error.url)),
-          unexpected_application: outcome.console_errors.filter(error => !isFontUrl(error.url) && !isFontUrl(error.text) && !/\/api\/auth\/me$/.test(error.url)),
+          unexpected_application: outcome.console_errors.filter(error => !/\/api\/auth\/me$/.test(error.url)),
         }
         assert.deepEqual(outcome.console_error_classification.unexpected_application, [], 'No unexpected application console errors')
         assert.deepEqual(outcome.page_errors, [], 'No JavaScript page exceptions')

@@ -21,6 +21,7 @@ import { renderCommandPaletteEntries } from '../../command-palette.ts'
 import { renderSurfaceShell } from '../../shell.ts'
 import { DESIGN_TOKENS_CSS, renderAsyncActionState, renderStatusBadge } from '../../tokens.ts'
 import { escapeHtml } from '../../html.ts'
+import { PLEX_FONTS_STYLESHEET_HREF } from '../../vendor/plex.ts'
 import { renderReconcileBanner, type LiveEventState } from '../../ws-client.ts'
 import { loadThemeMessages } from '../../theme-messages.ts'
 import { URL as FileURL } from 'node:url'
@@ -111,9 +112,7 @@ const renderDocument = (props: DocumentProps): string => `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(props.title)}</title>
   <link rel="icon"${props.faviconContentType ? ` type="${escapeHtml(props.faviconContentType)}"` : ''} href="${props.faviconHref}" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="${PLEX_FONTS_STYLESHEET_HREF}" rel="stylesheet" />
   <style id="xpanel-design-tokens">${DESIGN_TOKENS_CSS}</style><style id="xpanel-prompt-styles">${CLASSIC_PROMPT_CSS}</style>${brandingHeadStyle(props.branding)}
   ${props.headHtml}
 </head>

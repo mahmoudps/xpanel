@@ -88,7 +88,7 @@ The output directory **must not already exist**. Use a new suffix for each rerun
 
 The [UI harness](../tests/browser/phase1-acceptance.mjs) uses a [synthetic visual fixture](../tests/browser/visual-fixture.mjs), real renderers and real Chromium. Its 18 balanced English/Arabic light/dark states cover 9 selected routes at 360/768/1440px. It checks selected navigation, context and Back behavior, mobile menus, keyboard/focus loops, disclosures, field edges and LTR isolation. It records font readiness observations; those observations alone are not a font-readiness acceptance assertion. It writes results, screenshots and before/after source fingerprints into the requested directory.
 
-External font requests are part of the current readiness measurement. Network restrictions or unavailable fonts may fail the check; this suite is not an offline-readiness promise. It does not submit hosting mutations, qualify every route, prove live authorization/service behavior, or measure INP, CLS or capacity. Synthetic account/mail data are marked as fixtures and do not promote catalog capabilities.
+The panel serves its own IBM Plex fonts (`/assets/fonts/`), so the browser harnesses need no external network; the navigation suite aborts and fails any request to another origin and checks that the Plex faces load from the panel origin. It does not submit hosting mutations, qualify every route, prove live authorization/service behavior, or measure INP, CLS or capacity. Synthetic account/mail data are marked as fixtures and do not promote catalog capabilities.
 
 ## Independent login visual acceptance
 

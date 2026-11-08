@@ -399,7 +399,7 @@ export async function runMailLayoutAcceptance({ output, filter } = {}) {
         if (state.width < 960) outcome.mobile = await mobileGate(page, state)
         outcome.quota = await quotaGate(page)
         if (state.screen === 'compose' || state.width >= 960) assert.ok(outcome.quota.length > 0, 'Visible mailbox quota glyphs are measured')
-        outcome.unexpected_console = outcome.console_errors.filter(error => !/fonts\.(?:googleapis|gstatic)\.com/.test(error.url + ' ' + error.text) && !/\/api\/auth\/me(?:\?|$)/.test(error.url))
+        outcome.unexpected_console = outcome.console_errors.filter(error => !/\/api\/auth\/me(?:\?|$)/.test(error.url))
         assert.deepEqual(outcome.unexpected_console, [])
         assert.deepEqual(outcome.page_errors, [])
         assert.deepEqual(outcome.mutations, [], 'No delivery or other mutation request is attempted')

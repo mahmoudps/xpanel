@@ -102,13 +102,14 @@ export function compileFtpServer(snapshot: AnonymousSnapshot & Pick<StateSnapsho
   const logins = anonymousFtpLogins(snapshot, settings, input.anonymous), extAuth = logins.length > 0 ? AUTH_SOCKET : null
   const preActions: HostAction[] = [], postActions: HostAction[] = [], views = new Map(logins.map(row => [row.view.unit, row.view]))
   const files = os.family === 'rhel' ? [root(FTP_CONF_FILE, renderPureFtpdConfFile(settings, extAuth, certFile))] : renderPureFtpdDaemonConfigs({ settings, extAuthSocket: extAuth })
-  // The wrapper check needs the ExtAuth socket, so sign-in is up before it; views no login uses are released.
-  for (const unit of new Set(snapshot.accounts.flatMap(account => [viewOf(account.home, false)?.unit, viewOf(account.home, true)?.unit].filter(row => row !== undefined)))) if (!views.has(unit)) postActions.push(...unitOff(unit))
+  // The wrapper check needs the ExtAuth socket, so sign-in is up before it. A view or sign-in unit an earlier
+  // generation started and this one drops is stopped through the manifest's removed units, never by name here:
+  // a host that never had the unit has nothing to stop.
   if (extAuth) {
     files.push(root(FTP_ANONYMOUS_MAP, logins.map(row => `${row.login}\t${row.view.dir}\n`).join('')), root(AUTH_SCRIPT, renderAuthScript(), 0o755), root(`${os.paths.systemdDir}/${FTP_ANONYMOUS_UNIT}`, renderAuthUnit()),
       ...[...views.values()].map(view => root(`${os.paths.systemdDir}/${view.unit}`, renderViewUnit(view))))
     postActions.push({ kind: 'systemd-daemon-reload' }, ...[...views.keys()].flatMap(unitOn), ...unitOn(FTP_ANONYMOUS_UNIT))
-  } else postActions.push(...unitOff(FTP_ANONYMOUS_UNIT))
+  }
   if (os.family === 'rhel') preActions.push({ kind: 'ensure-dir', path: posix.dirname(certFile), mode: 0o755, owner: 'root', group: 'root' })
   else {
     // The Debian wrapper reads authentication methods only through numbered links in auth/, in name order.

@@ -13,6 +13,14 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const json = value => Buffer.from(JSON.stringify(value) + '\n')
 const STABLE = /^[A-Z][A-Z0-9_]{0,95}$/
 
+/** One journal line: the stable code, and the failed step with its reason when the command named them. */
+export function rootOperatorAttentionLine(kind, result) {
+  const code = STABLE.test(result?.code) ? result.code : 'UNSTABLE', step = result?.details?.step, reason = result?.details?.reason
+  const where = typeof step === 'string' && /^[a-z][a-z0-9:-]{0,63}$/.test(step) && typeof reason === 'string'
+    ? ` step=${step} reason=${JSON.stringify(reason.replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 400))}` : ''
+  return `xpanel-root-operator-attention kind=${kind} code=${code}${where}\n`
+}
+
 /** Syntax only; transport must establish kernel UID 0 and the distinct signed operator purpose. */
 export function parseRootOperatorRequest(value) {
   if (!value || typeof value !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(value))
@@ -82,7 +90,7 @@ export async function runNativeRootOperatorCommand(input, dispatch) {
           await assertCurrent()
           const phase = result.exitCode === 0 ? 'succeeded' : 'attention'
           // The signed response carries only the phase; the coordinator journal keeps the stable code for review.
-          if (phase === 'attention') process.stderr.write(`xpanel-root-operator-attention kind=${request.kind} code=${STABLE.test(result.code) ? result.code : 'UNSTABLE'}\n`)
+          if (phase === 'attention') process.stderr.write(rootOperatorAttentionLine(request.kind, result))
           const resultDigest = hash(json(result))
           await replaceManagedFile(path, json({ schemaVersion: 1, purpose: PURPOSE, ...request, origin, phase, resultDigest,
             claimSha256: claim.entry.sha256, completedAt: new Date().toISOString() }), 0o600, claim.entry, assertAuthority)

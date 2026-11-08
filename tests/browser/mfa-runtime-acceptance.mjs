@@ -96,7 +96,7 @@ async function createMfaFixture(mfaMode = 'disabled', principalKind = 'root') {
           : { surface: principalKind === 'root' ? 'xwhm' : 'xpanel', locale, theme: 'light', activeRoute: url.pathname, realtimeEnabled: false, mfaRuntimeMode: mfaMode, visibility: { principal }, security: { totpEnabled: true } }
       })
       const contentType = response.headers.get('content-type') ?? ''
-      const body = await response.text()
+      const body = contentType.startsWith('text/html') ? await response.text() : Buffer.from(await response.arrayBuffer())
       const headers = new Headers(response.headers)
       if (contentType.startsWith('text/html')) headers.delete('content-length')
       outgoing.writeHead(response.status, Object.fromEntries(headers))
@@ -231,7 +231,7 @@ async function recoveryCommandFont(page) {
       const { fonts } = await session.send('CSS.getPlatformFontsForNode', { nodeId })
       const active = fonts.filter(font => Number.isFinite(font.glyphCount) && font.glyphCount > 0)
       assert.ok(active.length > 0, 'Every command text container must have actual rendered glyphs.')
-      assert.ok(active.every(font => font.isCustomFont === true && /^IBM Plex Mono(?: (?:Thin|Extra ?Light|Light|Regular|Text|Medium|Semi ?Bold|Bold|Extra ?Bold)(?: Italic)?| Italic)?$/i.test(font.familyName)), 'Every technical command glyph must use the actual downloadable Plex Mono face.')
+      assert.ok(active.every(font => font.isCustomFont === true && /^IBM Plex Mono(?: (?:Thin|Extra ?Light|Light|Regular|Text|Medium|Medm|Semi ?Bold|SmBld|Bold|Extra ?Bold)(?: Italic)?| Italic)?$/i.test(font.familyName)), 'Every technical command glyph must use the actual downloadable Plex Mono face.')
       observations.push({ index, applied_faces: active })
     }
     return { selector, typography_role: 'technical-recovery-command', text_containers: observations, applied_faces: observations.flatMap(observation => observation.applied_faces) }
@@ -405,8 +405,7 @@ export async function runMfaRuntimeAcceptance({ output, screenshotBudget = 8, fi
         } else assert.equal(activeFixture.observations.login_body_keys.length, initialPosts)
         row.console_classification = {
           expected_unauthenticated_lookup: row.console_errors.filter(error => /\/api\/auth\/me$/.test(error.url)),
-          external_fonts: row.console_errors.filter(error => /fonts\.(?:googleapis|gstatic)\.com/.test(error.url) || /fonts\.(?:googleapis|gstatic)\.com/.test(error.text)),
-          unexpected: row.console_errors.filter(error => !/\/api\/auth\/me$/.test(error.url) && !/fonts\.(?:googleapis|gstatic)\.com/.test(error.url) && !/fonts\.(?:googleapis|gstatic)\.com/.test(error.text)),
+          unexpected: row.console_errors.filter(error => !/\/api\/auth\/me$/.test(error.url)),
         }
         assert.deepEqual(row.console_classification.unexpected, [])
         assert.deepEqual(row.page_errors, [])

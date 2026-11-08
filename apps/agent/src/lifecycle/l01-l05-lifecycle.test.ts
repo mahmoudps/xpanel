@@ -1,14 +1,17 @@
-import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto'
+import { createHash, generateKeyPairSync, randomUUID, sign as cryptoSign } from 'node:crypto'
 import { posix } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
-import { XpanelError, fail } from '@xpanel/core'
+import { open, type FileHandle } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { XpanelError, fail, suggestServerSettings } from '@xpanel/core'
 import type { AuditEntry, HostAction, HostLimitObservation, OsProfile, Principal } from '@xpanel/core'
-import { createTestDb, listUpgrades, loadMigrations, parseMigration } from '@xpanel/db'
+import { createTestDb, latestActive, listUpgrades, loadMigrations, parseMigration } from '@xpanel/db'
 import {
   computeManifest,
   createBackupPlan,
   exportAccountArchive,
   importAccountArchive,
+  REWIND_STEPS,
   runUpgrade,
 } from '@xpanel/lifecycle'
 import type {
@@ -30,6 +33,9 @@ import type {
   UpgradeSafetyPort,
 } from '@xpanel/lifecycle'
 import { parseOsRelease, profileFor } from '@xpanel/os'
+import { createTestStateStore } from '@xpanel/state'
+import { FakeHostExecutor } from '../executor.ts'
+import { HostReconciler } from '../reconciler.ts'
 import { gzipSync } from 'node:zlib'
 import type { AccountFileContext, AccountFileRequest, AccountFileRunner } from '../file-manager.ts'
 import {
@@ -1926,6 +1932,83 @@ describe('L05 (A53): PanelUpgradeRunner & ProductionUpgradePorts', () => {
       expect(await h.fs.exists('/var/lib/xpanel/maintenance.json')).toBe(true)
       expect((await listUpgrades(h.testDb.db))[0]?.status).toBe('running')
     } finally { await h.testDb.close() }
+  })
+
+  describe('guest 9102, 0.1.24 to 0.1.36: the new generation fails and leaves reconciler attention, through the real reconciler', () => {
+    const ubuntu = profileFor('ID=ubuntu\nVERSION_ID="24.04"\n')
+    // Device flushes, not these contracts, set the wall time; flush durability is proven by packages/state atomic-durability tests.
+    let restoreFileSync = (): void => {}
+    beforeAll(async () => {
+      const probe = await open(fileURLToPath(import.meta.url), 'r')
+      try {
+        const sync = vi.spyOn(Object.getPrototypeOf(probe) as FileHandle, 'sync').mockResolvedValue(undefined)
+        restoreFileSync = () => sync.mockRestore()
+      } finally { await probe.close() }
+    })
+    afterAll(() => restoreFileSync())
+    const upgradeThenRewind = async (rollbackFailed: boolean) => {
+      const h = await createUpgradeTestHarness()
+      const state = await createTestStateStore()
+      const suggested = suggestServerSettings({ cores: 2, memoryMb: 2048 })
+      await state.store.saveServerSettings({ hostname: 'srv1.example.com', nameservers: ['ns1.example.com', 'ns2.example.com'], adminEmail: 'ops@example.com', engine: 'apache', apacheMpm: 'itk', panelPort: 2087, sshPort: 22, nginx: suggested.nginx, apache: suggested.apache, backendPort: 8080, backendTlsPort: 8443 })
+      await state.store.saveServerIp({ address: '203.0.113.10', version: 4, prefixLength: 24, interfaceName: 'eth0', role: 'shared', ownerKind: 'root', ownerId: null, ptrHostname: null, isPrimary: true, notes: '' })
+      const reconciler = new HostReconciler({ store: state.store, db: h.testDb.db, executor: new FakeHostExecutor(), os: ubuntu })
+      const applied = await reconciler.reconcile({ actor: 'root' })
+      if (applied.status !== 'applied') throw new Error('the previous release generation did not apply')
+      const previous = applied.generation.id, manifest = (await reconciler.journal.readManifest(previous))!
+      const port = h.runner.ports.reconciler
+      port.currentGeneration = async () => (await latestActive(h.testDb.db))!.id
+      // The native release journals its prerequisites, so the failed post-action leaves needs_attention even after its
+      // own file rollback; `rollbackFailed` is the variant where that rollback itself stopped part way.
+      port.reconcile = async () => {
+        const at = new Date().toISOString()
+        await reconciler.journal.saveJournal({ schemaVersion: 1, journalId: randomUUID(), generationId: previous + 1, previousActiveGenerationId: previous, actor: 'root',
+          stateChecksum: manifest.stateChecksum, filesChecksum: manifest.filesChecksum, phase: 'needs_attention', startedAt: at, updatedAt: at,
+          candidateManifest: { ...manifest, generationId: previous + 1 }, previousManifest: manifest,
+          diff: { added: [], updated: [], unchanged: manifest.files, removed: [], removedUnits: [], affectedServices: [] },
+          previousFilesBackup: [], completedPreActions: 3, preActionsNeedVerification: true, switchedFilePaths: [], removedFilePaths: [], stoppedObsoleteUnits: [],
+          completedPostActions: 0, reloadedUnits: [], verifiedUnits: [], error: 'systemctl stop run-xpanelftp-ro-home.mount failed', ...(rollbackFailed ? { rollbackFailed: true as const } : {}) })
+        return fail('PRECONDITION_FAILED', 'LIFECYCLE_RECONCILE_FAILED')
+      }
+      // The native rewind port: the restored state is that generation's own source, so only the reconcile remains.
+      port.activate = async generationId => {
+        const result = await reconciler.reconcileRewound(generationId, 'root')
+        if (result.status === 'failed' || !result.generation) return fail('PRECONDITION_FAILED', 'LIFECYCLE_RECONCILE_FAILED')
+        return { generationId: result.generation.id, units: [] }
+      }
+      const result = await h.runner.executeSignedUpgrade(h.basePlan, h.signedManifest)
+      const audit = await h.testDb.db.query<{ detail: string }>("SELECT detail FROM audit_log WHERE action = 'reconcile.attention_resolved'")
+      return { result, reconciler, previous, manifest, active: await latestActive(h.testDb.db), audit, close: async () => { await state.close(); await h.testDb.close() } }
+    }
+
+    it('supersedes the attention of the rewound generation and serves the previous release on its restored generation', { tags: ['feature'] }, async () => {
+      const run = await upgradeThenRewind(false)
+      try {
+        expect(run.result).toMatchObject({ outcome: 'retirement_pending', hostOutcome: 'rolled_back' })
+        expect(run.result.reason).toMatch(/^LIFECYCLE_RECONCILE_FAILED;/)
+        expect(run.result.rewind).toMatchObject({ state: 'rewind-verified', done: REWIND_STEPS, problems: [] })
+        expect(await run.reconciler.journal.readActiveJournal()).toBeNull()
+        // Rebuilt from the restored state: the same files the previous release applied.
+        expect(run.active?.checksum).toBe(run.manifest.filesChecksum)
+        expect(run.active?.id).toBe(run.result.rewind?.generation)
+        expect(run.audit.map(row => JSON.parse(row.detail))).toEqual([expect.objectContaining({ generationId: run.previous + 1, previousGenerationId: run.previous, supersededByRewind: true, error: 'systemctl stop run-xpanelftp-ro-home.mount failed' })])
+      } finally { await run.close() }
+    })
+
+    it('starts the previous release with a precise attention when that generation\'s own rollback did not finish', { tags: ['feature'] }, async () => {
+      const run = await upgradeThenRewind(true)
+      try {
+        expect(run.result).toMatchObject({ outcome: 'rollback_failed', hostOutcome: 'rollback_failed' })
+        expect(run.result.rewind).toMatchObject({ state: 'rewind-failed', done: ['release', 'state-extract', 'state-swap', 'index', 'start-panel'], problems: [
+          `rewind:units: generation ${run.previous + 1} requires operator attention, its own rollback did not finish: systemctl stop run-xpanelftp-ro-home.mount failed`,
+          'restored only: release, state-extract, state-swap, index, start-panel',
+        ] })
+        expect(run.result.steps).toContainEqual(expect.objectContaining({ step: 'rewind:start-panel', ok: true }))
+        expect((await run.reconciler.journal.readActiveJournal())?.phase).toBe('needs_attention')
+        expect(run.active?.id).toBe(run.previous)
+        expect(run.audit).toEqual([])
+      } finally { await run.close() }
+    })
   })
 
   it('refuses recovery without retained model admission or after prepared source evidence is lost', async () => {

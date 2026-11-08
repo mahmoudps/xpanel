@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { DocumentProps } from '../contract.ts'
 import type { WebBranding } from '../../branding.ts'
 import { renderV2Document } from './document.ts'
+import { PLEX_FONTS_STYLESHEET_HREF } from '../../vendor/plex.ts'
 import { v2Stylesheet } from './assets.ts'
 import { v2SharedStylesheets, v2StylesheetsForDocument, v2ViewStylesheets } from './route-assets.ts'
 import { v2Messages } from './messages.ts'
@@ -70,7 +71,7 @@ describe('v2 document contract', () => {
     ]) {
       const html = renderV2Document({ ...props, ...context })
       const stylesheetLinks = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map(match => match[1])
-      expect(stylesheetLinks).toEqual([expect.stringContaining('fonts.googleapis.com'), v2Stylesheet.href, ...v2SharedStylesheets.map(asset => asset.href)])
+      expect(stylesheetLinks).toEqual([PLEX_FONTS_STYLESHEET_HREF, v2Stylesheet.href, ...v2SharedStylesheets.map(asset => asset.href)])
     }
   })
 
@@ -79,7 +80,7 @@ describe('v2 document contract', () => {
     const html = renderV2Document({ ...props, surface: 'xpanel', route: '/software/htaccess', viewKind: 'workspace' })
     const stylesheetLinks = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map(match => match[1])
     expect(stylesheetLinks).toEqual([
-      expect.stringContaining('fonts.googleapis.com'), v2Stylesheet.href,
+      PLEX_FONTS_STYLESHEET_HREF, v2Stylesheet.href,
       ...v2SharedStylesheets.map(asset => asset.href), ...editor.map(asset => asset.href),
     ])
     expect(editor.map(asset => asset.path)).toEqual(['/assets/themes/v2/panel-settings.css', '/assets/themes/v2/panel-htaccess.css'])

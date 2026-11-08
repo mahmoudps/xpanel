@@ -7,6 +7,7 @@ import { auditActionHtml, auditActionLabel, auditActorLabel, auditOutcomeLabel, 
 import { LOCALES, localeDirection, translator, type Locale, type Translate } from '../i18n.ts'
 import { renderLiveUpdatesIndicator, renderPageSearchButton, renderMobileNavToggle, renderMobileNavClose, renderMobileNavBackdrop } from '../shell.ts'
 import { escapeHtml, formatDisplayDateTime, formatAsciiNumber, formatBytes, formatUtcClock, formatUtcDay } from '../tokens.ts'
+import { PLEX_FONTS_STYLESHEET_HREF } from '../vendor/plex.ts'
 
 
 // Preserve the approved light swatches; dark paint uses the existing semantic theme roles.
@@ -1098,8 +1099,7 @@ const documentShell = (model: WhmDashboardModel): string => {
 <head>
 <meta charset="utf-8">
 <title>${escapeHtml(t('Server dashboard — xWHM'))}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="${PLEX_FONTS_STYLESHEET_HREF}" rel="stylesheet">
 <style>
 body{margin:0;background:light-dark(#F5F6F8,var(--xp-bg-canvas,#F5F6F8));color:light-dark(#101828,var(--xp-text-primary,#101828));font-family:'IBM Plex Sans',sans-serif}
 *{box-sizing:border-box}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { lifecycleAncestorAccepted, nativeLifecyclePathAllowed, releaseInfoFromAuthenticatedReport, runNativeLifecycleCommand, validateNativeLifecycleRequest } from './native-runtime.ts'
+import { lifecycleAncestorAccepted, nativeLifecyclePathAllowed, releaseInfoFromAuthenticatedReport, runLifecycleSystemdAction, runNativeLifecycleCommand, upgradeAttentionStep, validateNativeLifecycleRequest } from './native-runtime.ts'
 
 const artifact = { path: '/opt/xpanel/downloads/release.tar.gz', expectedArchiveSha256: 'a'.repeat(64), keyId: 'release-key', signingKeyPath: '/tmp/caller-key' }
 const input = (command = 'upgrade') => ({ schemaVersion: 1, command, mode: 'apply', json: true, assumeYes: true, artifact })
@@ -80,6 +80,40 @@ describe('native lifecycle composition boundary', () => {
     expect(pin('/var/lib/xpanel/.pre-rewind-8a6f0c1e', 990, 990, 0o2750)).toBe(false)
     expect(pin('/var/lib/xpanel/.rewind-../state', 990, 990, 0o2750)).toBe(false)
     expect(pin('/var/lib/xpanel-lifecycle', 990, 990, 0o2750)).toBe(false)
+  })
+
+  it('treats a stop or disable of a unit systemd does not know as done, and every other failed verb as a failure', async () => {
+    // Guest 9102: `systemctl stop run-xpanelftp-ro-home.mount` exits 5 on a host that never had the mount.
+    const host = (verbExit: number, shown: string) => {
+      const calls: string[] = []
+      const run = async (argv: string[]) => { calls.push(argv.slice(1).join(' ')); return argv[1] === 'show' ? { code: 0, stdout: shown } : { code: verbExit, stdout: '' } }
+      return { calls, act: (verb: 'start' | 'stop' | 'restart' | 'reload' | 'enable' | 'disable') => runLifecycleSystemdAction(run, { kind: 'systemd', verb, unit: 'run-xpanelftp-ro-home.mount' }) }
+    }
+    for (const verb of ['stop', 'disable'] as const) {
+      const absent = host(5, 'not-found\ninactive\n')
+      await expect(absent.act(verb)).resolves.toBeUndefined()
+      expect(absent.calls).toEqual([`${verb} run-xpanelftp-ro-home.mount`, 'show -p LoadState -p ActiveState --value -- run-xpanelftp-ro-home.mount'])
+      // A loaded unit, or a removed unit that still runs, keeps its failure.
+      for (const shown of ['loaded\nactive\n', 'not-found\nactive\n']) await expect(host(1, shown).act(verb)).rejects.toThrow('LIFECYCLE_SERVICE_COMMAND_FAILED')
+    }
+    for (const verb of ['start', 'restart', 'reload', 'enable'] as const) {
+      const absent = host(5, 'not-found\ninactive\n')
+      await expect(absent.act(verb)).rejects.toThrow('LIFECYCLE_SERVICE_COMMAND_FAILED')
+      expect(absent.calls).toHaveLength(1)
+    }
+    const ok = host(0, '')
+    await expect(ok.act('stop')).resolves.toBeUndefined()
+    expect(ok.calls).toHaveLength(1)
+  })
+
+  it('names the failed rewind step and its reason for the operator journal line, else the last failed upgrade step', () => {
+    const steps = [{ phase: 'switch' as const, step: 'panel', at: '', ok: true, detail: 'owned control-plane restart' }, { phase: 'rollback' as const, step: 'rollback', at: '', ok: false, detail: 'LIFECYCLE_RECONCILE_FAILED' }]
+    const rewind = { schemaVersion: 1 as const, recordId: 'r', state: 'rewind-failed' as const, done: [], generation: null, startedAt: '', updatedAt: '',
+      problems: ['rewind:units: generation 5 requires operator attention: post-action failed', 'restored only: release, state-extract, state-swap, index, start-panel'] }
+    expect(upgradeAttentionStep({ rewind, steps })).toEqual({ step: 'rewind:units', reason: 'generation 5 requires operator attention: post-action failed' })
+    expect(upgradeAttentionStep({ rewind: null, steps })).toEqual({ step: 'rollback', reason: 'LIFECYCLE_RECONCILE_FAILED' })
+    expect(upgradeAttentionStep({ rewind: { ...rewind, problems: ['generation 42 is active, expected the rewound 41'] }, steps })).toEqual({ step: 'rollback', reason: 'LIFECYCLE_RECONCILE_FAILED' })
+    expect(upgradeAttentionStep({ rewind: null, steps: [] })).toEqual({})
   })
 
   it.skipIf(process.platform === 'linux' && process.getuid?.() === 0 && process.geteuid?.() === 0)('denies on the actual non-root/non-Linux runtime before opening native state', async () => {

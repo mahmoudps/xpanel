@@ -100,7 +100,7 @@ See [TESTING.md](TESTING.md) for executable commands.
 - Page search lists all currently available authorized destinations, with localized filtering, a clear no-match state, Arrow Up/Down selection and Enter navigation. It does not execute arbitrary commands, invent actions or add unavailable capabilities. Keep its list scroll bounded and retain native editing inside inputs and textareas.
 - Mail rendering must distinguish observations from usable operations. Keep Send disabled and non-submitting until the production delivery contract is connected and qualified; an inbox layout alone does not establish mailbox authentication, SMTP or IMAP.
 - Never invent account context, generation numbers, references or successful service outcomes in the browser. User-facing public references must come from their authoritative persisted allocator.
-- Do not claim offline readiness while required fonts or assets remain external. Observe loaded font faces and network failures during acceptance.
+- Product pages load fonts and assets from the panel's own origin only: no font CDN, preconnect or other external origin. The IBM Plex files ship unmodified under `apps/web/src/vendor/plex/` with their license. Observe loaded font faces and network failures during acceptance.
 
 ### Typography and spacing roles
 

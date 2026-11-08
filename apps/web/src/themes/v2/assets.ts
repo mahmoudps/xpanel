@@ -46,6 +46,3 @@ export const v2Assets: readonly ThemeAsset[] = Object.freeze([
   v2Stylesheet, ...v2SharedStylesheets, ...Object.values(v2ViewStylesheets), ...v2RouteStylesheets.map(entry => entry.stylesheet),
   ...v2SupplementalStylesheets.map(entry => entry.stylesheet),
 ])
-
-/** Latin text uses Plex Sans and Mono. The stylesheet keeps Arabic in generic sans-serif. */
-export const v2FontsHref = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap'

@@ -98,6 +98,15 @@ export const REQUIRED_ROOT_FILES = Object.freeze([
   'bin/xwhmapi',
   'apps/web/src/vendor/xterm/LICENSE',
   'apps/web/src/vendor/xterm/LICENSE-addon-fit',
+  'apps/web/src/vendor/plex/LICENSE',
+  'apps/web/src/vendor/plex/NOTICE',
+  'apps/web/src/vendor/plex/IBMPlexSans-Regular.woff2',
+  'apps/web/src/vendor/plex/IBMPlexSans-Medium.woff2',
+  'apps/web/src/vendor/plex/IBMPlexSans-SemiBold.woff2',
+  'apps/web/src/vendor/plex/IBMPlexSans-Bold.woff2',
+  'apps/web/src/vendor/plex/IBMPlexMono-Regular.woff2',
+  'apps/web/src/vendor/plex/IBMPlexMono-Medium.woff2',
+  'apps/web/src/vendor/plex/IBMPlexMono-SemiBold.woff2',
 ])
 
 // These files are visual references, never production modules or served assets.

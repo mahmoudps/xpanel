@@ -23,6 +23,7 @@ import { accountPageRouteSpecs } from './board-port/extensions/account-pages.ts'
 import { commandPaletteEntries } from './command-palette.ts'
 import { storeRouteSpecs } from './board-port/extensions/store.ts'
 import { getSurfacePageTitle, resolveSurfaceSection } from './shell.ts'
+import { plexFontAsset } from './vendor/plex.ts'
 import { TERMINAL_EMULATOR_ASSETS } from './vendor/xterm.ts'
 import {
   type AsyncActionBannerProps,
@@ -463,7 +464,7 @@ const I18N_ASSETS = (): { bodies: ReadonlyMap<Locale, string>; version: string }
   return { bodies, version: createHash('sha256').update([...bodies.values()].join('\n')).digest('hex').slice(0, 16) }
 })()
 
-const PUBLIC_STATIC_ASSETS: Readonly<Record<string, { body: string; contentType: string }>> = {
+const PUBLIC_STATIC_ASSETS: Readonly<Record<string, { body: string | Uint8Array<ArrayBuffer>; contentType: string }>> = {
   ...TERMINAL_EMULATOR_ASSETS,
   '/assets/favicon-xpanel.svg': { body: LOGIN_FAVICONS.xpanel, contentType: 'image/svg+xml; charset=utf-8' },
   '/assets/favicon-xwhm.svg': { body: LOGIN_FAVICONS.xwhm, contentType: 'image/svg+xml; charset=utf-8' },
@@ -503,7 +504,7 @@ export function serveStaticAsset(pathname: string): Response | null {
   const i18nTag = /^\/assets\/i18n-([A-Za-z0-9-]+)\.js$/.exec(pathname)?.[1]
   const i18nBody = i18nTag ? I18N_ASSETS().bodies.get(i18nTag as Locale) : undefined
   const asset = i18nBody !== undefined ? { body: i18nBody, contentType: 'application/javascript; charset=utf-8' }
-    : Object.prototype.hasOwnProperty.call(PUBLIC_STATIC_ASSETS, pathname) ? PUBLIC_STATIC_ASSETS[pathname] : findUiThemeAsset(pathname)
+    : Object.prototype.hasOwnProperty.call(PUBLIC_STATIC_ASSETS, pathname) ? PUBLIC_STATIC_ASSETS[pathname] : plexFontAsset(pathname) ?? findUiThemeAsset(pathname)
   if (!asset) {
     return new Response('Not Found', {
       status: 404,
