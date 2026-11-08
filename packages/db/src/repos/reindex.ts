@@ -1,6 +1,6 @@
 import { fail } from '@xpanel/core'
 import type { Account, Domain, Id, Limit, Plan, Reseller, ResellerAcl } from '@xpanel/core'
-import { checksumStateTree } from '@xpanel/state'
+import { checksumStateTree, resellerPolicy } from '@xpanel/state'
 import type { StateSnapshot } from '@xpanel/state'
 import type { Db } from '../client.ts'
 import { withSqliteErrors } from '../sqlite-errors.ts'
@@ -303,7 +303,7 @@ export const reindexFromState = async (
       const now = nowIso()
       let ftsEntries = 0
 
-      for (const r of snapshot.resellers) {
+      for (const r of snapshot.resellers.map(resellerPolicy)) {
         await tx.query(
           `INSERT INTO idx_resellers (
             id, username, acl, max_accounts, total_disk_mb, total_bandwidth_mb,

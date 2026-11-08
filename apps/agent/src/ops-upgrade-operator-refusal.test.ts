@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'vitest'
+import { XpanelError } from '@xpanel/core'
 import {
   ROOT_OPERATOR_MACHINE_CODE, encodeRootOperatorRefusal, parseRootOperatorRefusal, rootOperatorRefusalJournalLine,
   rootOperatorReviewRecord, rootOperatorServerRefusal, rootOperatorServerRefusalCode, stableMachineCode,
@@ -114,4 +115,32 @@ test('an owned-file drift names its product path and field in the root journal o
   for (const entryPath of ['relative/path', '/etc/../shadow', '/var/lib/x\ny', '/tmp/a b']) {
     assert.equal(rootOperatorServerRefusal(Object.assign(new Error('OWNED_FILE_DRIFT'), { code: 'OWNED_FILE_DRIFT', entryPath, field: 'inode' })).journalLine, 'xpanel-root-operator-refused code=OWNED_FILE_DRIFT\n')
   }
+})
+
+test('a generic precondition refusal names the product message and reason in the root journal only', () => {
+  const live = new XpanelError('PRECONDITION_FAILED', 'native hosted UID qualification is unavailable', { stateChanged: false })
+  const refusal = rootOperatorServerRefusal(Object.assign(new Error('Archive callback failed'), { code: 'ARCHIVE_USE_UNCERTAIN', cause: live }))
+  assert.equal(refusal.journalLine, 'xpanel-root-operator-refused code=PRECONDITION_FAILED detail="native hosted UID qualification is unavailable"\n')
+  assert.equal(refusal.frame.toString('utf8'), '{"refused":"PRECONDITION_FAILED"}\n')
+  assert.deepEqual(rootOperatorReviewRecord(operationId, live), { operationId, state: 'review_required', code: 'PRECONDITION_FAILED', retryAllowed: false })
+  const reader = new XpanelError('PRECONDITION_FAILED', 'read-only operation database observation refused', { reason: 'reviewed_schema_required', stateChanged: false })
+  assert.equal(rootOperatorServerRefusal(reader).journalLine, 'xpanel-root-operator-refused code=PRECONDITION_FAILED detail="read-only operation database observation refused" reason=reviewed_schema_required\n')
+  const wrapped = Object.assign(new Error('ROOT_OPERATOR_REVIEW_REQUIRED'), { code: 'ROOT_OPERATOR_REVIEW_REQUIRED', cause: reader })
+  assert.equal(rootOperatorServerRefusal(wrapped).journalLine, 'xpanel-root-operator-refused code=ROOT_OPERATOR_REVIEW_REQUIRED detail="read-only operation database observation refused" reason=reviewed_schema_required\n')
+  // Other stable codes and plain errors keep their fixed line.
+  assert.equal(rootOperatorServerRefusal(new XpanelError('CONFLICT', 'the operation database inode changed')).journalLine, 'xpanel-root-operator-refused code=CONFLICT\n')
+  assert.equal(rootOperatorServerRefusal(new Error('open /root/private failed')).journalLine, 'xpanel-root-operator-refused code=ROOT_OPERATOR_SERVER_ERROR\n')
+})
+
+test('no secret-shaped value, client data or unowned path passes into the journal detail', () => {
+  const secrets = [['sk', 'live', '4eC39HqLyjWDarjtT1zdp7dc'].join('_'), 'hunter2', 'Zm9vYmFyYmF6cXV4', 'deadbeef00112233445566778899aabb', 'eyJhbGciOiJIUzI1NiJ9.e30.x', 'client@example.test', 'password=letmein']
+  const message = `account "${secrets[5]}" token ${secrets.slice(0, 5).join(' ')} ${secrets[6]} at /etc/../shadow and /var/lib/xpanel/state/authority.json 'quoted' r\u00e9sum\u00e9\nsecond line ${secrets[1]}`
+  const line = rootOperatorServerRefusal(new XpanelError('PRECONDITION_FAILED', message, { reason: 'Not A Reason=1', password: secrets[1], body: secrets[5] })).journalLine
+  for (const secret of [...secrets, '..', 'quoted', 'second', 'reason=', 'letmein']) assert.equal(line.includes(secret), false, secret)
+  assert.equal(line, 'xpanel-root-operator-refused code=PRECONDITION_FAILED detail="account ? token ? ? ? ? ? ? at ? and /var/lib/xpanel/state/authority.json ? ?"\n')
+  assert.equal(/^[\x20-\x7e]*\n$/.test(line), true)
+  const long = rootOperatorServerRefusal(new XpanelError('PRECONDITION_FAILED', 'word '.repeat(200), { reason: 'held_http_correlation_not_verified' })).journalLine
+  const detail = long.slice('xpanel-root-operator-refused code=PRECONDITION_FAILED'.length, -1)
+  assert.equal(detail.length <= 160, true)
+  assert.match(detail, /^ detail="word( word)*" reason=held_http_correlation_not_verified$/)
 })

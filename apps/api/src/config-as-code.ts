@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { fail, isXpanelError } from '@xpanel/core'
 import type { FeatureList, Plan, Reseller, ServerSettings } from '@xpanel/core'
 import { parseYaml, stringifyYaml } from '@xpanel/lifecycle'
-import type { StateSnapshot, StateStore } from '@xpanel/state'
+import { resellerPolicy, type StateSnapshot, type StateStore } from '@xpanel/state'
 import type { AuthenticatedCaller } from './auth.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
 import { panelJson, readPanelConfigBody } from './panel-config-file.ts'
@@ -31,7 +31,7 @@ export function exportTree(snapshot: Pick<StateSnapshot, 'server' | 'featureList
   const owned = (item: { name: string; ownerId: string | null }): string => fileName(item.ownerId ? item.name + '@' + item.ownerId.slice(0, 8) : item.name)
   for (const item of snapshot.featureLists) files[`feature-lists/${owned(item)}.yaml`] = yaml(item)
   for (const item of snapshot.plans) files[`plans/${owned(item)}.yaml`] = yaml(item)
-  for (const item of snapshot.resellers) files[`resellers/${fileName(item.username)}.yaml`] = yaml(item)
+  for (const item of snapshot.resellers.map(resellerPolicy)) files[`resellers/${fileName(item.username)}.yaml`] = yaml(item)
   for (const item of snapshot.accounts) files[`accounts/${fileName(item.username)}.yaml`] = yaml({ id: item.id, username: item.username, primaryDomain: item.primaryDomain, planId: item.planId, ownerId: item.ownerId, status: item.status })
   return Object.fromEntries(Object.entries(files).sort(([a], [b]) => a < b ? -1 : 1))
 }
@@ -154,7 +154,7 @@ async function restoreChanged(store: StateStore, snapshot: StateSnapshot, change
       else { const made = (await store.listFeatureLists()).find(item => item.name === value.name); if (made) await store.deleteFeatureList(made.id) }
     } else if (change.apply === 'reseller') {
       const before = snapshot.resellers.find(item => item.id === value.id)
-      if (before) { const { id, username: _username, ...patch } = before; await store.updateReseller(id, patch) }
+      if (before) { const { id, username: _username, ...patch } = resellerPolicy(before); await store.updateReseller(id, patch) }
     } else if (change.apply === 'account-plan') {
       const before = snapshot.accounts.find(item => item.id === value.id)
       if (before) await store.changePlan(before.id, before.planId)

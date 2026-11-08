@@ -39,7 +39,8 @@ import {
   oneOf,
   parseServiceLogin,
   parseDatabaseRemoteEntries,
-  planErrors,
+  isReservedPlanName,
+  storedPlanErrors,
   validateDocRoot,
   validateDomainCustomConfig,
   validateAccountLimits,
@@ -84,6 +85,8 @@ import type {
   StoredCertificate,
   StoredDatabaseUser,
   StoredServerSettings,
+  StoredFirewallState,
+  StoredReseller,
   StoredServiceUser,
   UidAllocatorState,
 } from './types.ts'
@@ -133,8 +136,11 @@ export const assertDbAuth = (plugin: unknown, auth: unknown): { authPlugin: 'mys
 export const validateStoredServer = (v: unknown): StoredServerSettings => {
   if (typeof v !== 'object' || v === null) return fail('VALIDATION', 'server state must be an object')
   const o = v as Record<string, unknown>
+  // A release before prefork was refused may have saved it: it stays readable as saved, and the reconciler refuses to serve it.
+  const saved = o.settings as StoredServerSettings['settings'], prefork = typeof saved === 'object' && saved !== null && saved.apacheMpm === 'prefork'
+  const settings = validateServerSettings(prefork ? { ...saved, apacheMpm: 'itk' } : saved)
   return {
-    settings: validateServerSettings(o.settings as StoredServerSettings['settings']),
+    settings: prefork ? { ...settings, apacheMpm: 'prefork' } : settings,
     setupCompletedAt: o.setupCompletedAt == null ? null : assertIsoDate(o.setupCompletedAt, 'setupCompletedAt').toISOString(),
     updatedAt: assertIsoDate(o.updatedAt, 'updatedAt').toISOString(),
   }
@@ -151,7 +157,7 @@ export const validatePrefixLists = (lists: unknown): PrefixList[] => {
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-export const validateFirewallState = (v: unknown): FirewallState => {
+export const validateStoredFirewallState = (v: unknown): StoredFirewallState => {
   if (typeof v !== 'object' || v === null) return fail('VALIDATION', 'firewall state must be an object')
   const o = v as Record<string, unknown>
   const rules = validateFirewallRules(o.rules)
@@ -160,11 +166,15 @@ export const validateFirewallState = (v: unknown): FirewallState => {
   for (const r of rules) {
     if (r.list !== null && !names.has(r.list)) fail('VALIDATION', `prefix list "${r.list}" does not exist`, { list: r.list, ruleId: r.id })
   }
-  const enabled = o.enabled === undefined ? rules.length > 0 : o.enabled
-  const blockPing = o.blockPing ?? false
-  if (typeof enabled !== 'boolean' || typeof blockPing !== 'boolean') return fail('VALIDATION', 'firewall enabled and blockPing must be booleans')
-  return { rules, prefixLists, enabled, blockPing }
+  if (![o.enabled, o.blockPing].every((value) => value === undefined || typeof value === 'boolean')) return fail('VALIDATION', 'firewall enabled and blockPing must be booleans')
+  return { rules, prefixLists, ...(o.enabled !== undefined && { enabled: o.enabled as boolean }), ...(o.blockPing !== undefined && { blockPing: o.blockPing as boolean }) }
 }
+
+/** The effective policy: a host that never chose filters once it has rules, and answers ping. */
+export const firewallPolicy = (stored: StoredFirewallState): FirewallState =>
+  ({ ...stored, enabled: stored.enabled ?? stored.rules.length > 0, blockPing: stored.blockPing ?? false })
+
+export const validateFirewallState = (v: unknown): FirewallState => firewallPolicy(validateStoredFirewallState(v))
 
 const START_ACCOUNT_UID = 20000
 
@@ -204,7 +214,7 @@ export const validateFeatureListFile = (v: unknown): FeatureList => {
 export const validatePlanFile = (v: unknown): Plan => {
   if (typeof v !== 'object' || v === null) return fail('VALIDATION', 'plan must be an object')
   const p = v as Plan
-  const errors = planErrors(p)
+  const errors = storedPlanErrors(p)
   if (errors.length > 0) fail('VALIDATION', `invalid plan: ${errors.join('; ')}`, { errors })
   return {
     id: assertId(p.id, 'id'),
@@ -220,7 +230,7 @@ export const validatePlanFile = (v: unknown): Plan => {
   }
 }
 
-export const validateResellerFile = (v: unknown): Reseller => {
+export const validateStoredResellerFile = (v: unknown): StoredReseller => {
   if (typeof v !== 'object' || v === null) return fail('VALIDATION', 'reseller must be an object')
   const r = v as Record<string, unknown>
   return {
@@ -230,7 +240,7 @@ export const validateResellerFile = (v: unknown): Reseller => {
     maxAccounts: assertLimit(r.maxAccounts, 'maxAccounts', { min: 0 }),
     totalDiskMb: assertLimit(r.totalDiskMb, 'totalDiskMb', { min: 0 }),
     totalBandwidthMb: assertLimit(r.totalBandwidthMb, 'totalBandwidthMb', { min: 0 }),
-    oversell: assertResellerOversell(r.oversell),
+    oversell: typeof r.oversell === 'boolean' ? r.oversell : assertResellerOversell(r.oversell),
     nameservers: assertResellerNameservers(r.nameservers),
     delegatedIps: assertDelegatedIps(r.delegatedIps),
     ...(r.packageLimits !== undefined && { packageLimits: validateResellerPackageLimits(r.packageLimits) }),
@@ -238,6 +248,18 @@ export const validateResellerFile = (v: unknown): Reseller => {
     ...(r.contactEmail !== undefined && { contactEmail: assertEmail(r.contactEmail, 'contactEmail') }),
     ...(r.suspended === true && { suspended: true }),
   }
+}
+
+/** The effective reseller: one stored oversell switch covers disk and bandwidth, as it did when it was saved. */
+export const resellerPolicy = (stored: StoredReseller): Reseller =>
+  typeof stored.oversell === 'boolean' ? { ...stored, oversell: { disk: stored.oversell, bandwidth: stored.oversell } } : stored as Reseller
+
+export const validateResellerFile = (v: unknown): Reseller => resellerPolicy(validateStoredResellerFile(v))
+
+/** A plan someone is saving under a new name: also refuses a reserved name. */
+export const validateNewPlanFile = (v: unknown): Plan => {
+  const plan = validatePlanFile(v)
+  return isReservedPlanName(plan.name) ? fail('VALIDATION', `invalid plan: "${plan.name}" is a reserved plan name`, { errors: [`"${plan.name}" is a reserved plan name`] }) : plan
 }
 
 const validateHomeMove = (raw: unknown, username: string): HomeMove => {

@@ -115,6 +115,8 @@ import type {
   FirewallMutationOptions,
   FirewallPendingChange,
   FirewallState,
+  StoredFirewallState,
+  StoredReseller,
   MailRoutingState,
   MutationOptions,
   ServiceUserDeletionOptions,
@@ -159,11 +161,16 @@ import {
   validateDomainCustomConfigFile,
   validateDomainFile,
   validateFeatureListFile,
+  firewallPolicy,
   validateFirewallState,
+  validateStoredFirewallState,
+  validateNewPlanFile,
   validatePlanFile,
   validateIpPoolFile,
   validatePrefixLists,
+  resellerPolicy,
   validateResellerFile,
+  validateStoredResellerFile,
   validateServiceUserFile,
   validateStoredServer,
   validateUidAllocator,
@@ -471,9 +478,13 @@ export class StateStore {
     return raw === null ? null : validateStoredServer(raw)
   }
 
-  private async readFirewallFile(): Promise<FirewallState> {
+  private async readStoredFirewallFile(): Promise<StoredFirewallState> {
     const raw = await readJsonIfExists<unknown>(this.path('firewall.json'))
-    return raw === null ? { rules: [], prefixLists: [], enabled: false, blockPing: false } : validateFirewallState(raw)
+    return raw === null ? { rules: [], prefixLists: [] } : validateStoredFirewallState(raw)
+  }
+
+  private async readFirewallFile(): Promise<FirewallState> {
+    return firewallPolicy(await this.readStoredFirewallFile())
   }
 
   private async readUidAllocatorFile(): Promise<UidAllocatorState> {
@@ -495,10 +506,14 @@ export class StateStore {
     return plans.sort((a, b) => a.name.localeCompare(b.name))
   }
 
-  private async readResellerFiles(): Promise<Reseller[]> {
+  private async readStoredResellerFiles(): Promise<StoredReseller[]> {
     const files = await listJsonFiles(this.path('resellers'))
-    const resellers = await Promise.all(files.map(async (f) => validateResellerFile(await readJsonIfExists(f))))
+    const resellers = await Promise.all(files.map(async (f) => validateStoredResellerFile(await readJsonIfExists(f))))
     return resellers.sort((a, b) => a.username.localeCompare(b.username))
+  }
+
+  private async readResellerFiles(): Promise<Reseller[]> {
+    return (await this.readStoredResellerFiles()).map(resellerPolicy)
   }
 
   private async readCertificateFiles(): Promise<StoredCertificate[]> {
@@ -567,11 +582,11 @@ export class StateStore {
       await Promise.all([
         overrideRevision === undefined ? this.writerLock.readAuthority() : Promise.resolve(null),
         this.readServerFile(),
-        this.readFirewallFile(),
+        this.readStoredFirewallFile(),
         this.readUidAllocatorFile(),
         this.readFeatureListFiles(),
         this.readPlanFiles(),
-        this.readResellerFiles(),
+        this.readStoredResellerFiles(),
         this.readCertificateFiles(),
         this.readZoneFiles(),
         this.readIpPoolFile(),
@@ -922,7 +937,7 @@ export class StateStore {
 
   createPlan(input: NewPlan, opts?: MutationOptions): Promise<Plan> {
     return this.withMutationLock(opts, async (lease) => {
-      const plan = validatePlanFile({ ...input, id: randomUUID() })
+      const plan = validateNewPlanFile({ ...input, id: randomUUID() })
       if (plan.ownerId !== null) mustExist(await this.getResellerUnlocked(plan.ownerId), 'reseller', plan.ownerId)
       await this.assertFeatureListUsable(plan)
       const all = await this.readPlanFiles()
@@ -963,6 +978,7 @@ export class StateStore {
         ...(patch.defaultMailboxQuotaMb !== undefined && { defaultMailboxQuotaMb: patch.defaultMailboxQuotaMb }),
       })
       if (next.name.toLowerCase() !== current.name.toLowerCase()) {
+        validateNewPlanFile(next)
         const all = await this.readPlanFiles()
         if (all.some((x) => x.id !== current.id && x.ownerId === current.ownerId && x.name.toLowerCase() === next.name.toLowerCase())) {
           fail('CONFLICT', `plan "${next.name}" already exists`, { name: next.name })
@@ -4085,11 +4101,11 @@ export class StateStore {
       return Array.isArray(value) ? value : fail('VALIDATION', `generation snapshot ${key} must be an array`)
     }
     const server = input.server === null ? null : validateStoredServer(input.server)
-    const firewall = validateFirewallState(input.firewall)
+    const firewall = validateStoredFirewallState(input.firewall)
     const uidAllocator = validateUidAllocator(input.uidAllocator)
     const featureLists = collection('featureLists').map(validateFeatureListFile)
     const plans = collection('plans').map(validatePlanFile)
-    const resellers = collection('resellers').map(validateResellerFile)
+    const resellers = collection('resellers').map(validateStoredResellerFile)
     const certificates = collection('certificates').map(validateCertificateFile)
     const zones = collection('zones').map(validateDnsZoneFile)
     const accounts = collection('accounts').map(validateAccountFile)
