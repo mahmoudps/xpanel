@@ -73,7 +73,8 @@ export const createQualifiedCatalogProvider = (acceptance?: TrustedAcceptanceOpt
             const value = body as Record<string, unknown>
             if (value.probes && typeof value.probes === 'object' && !Array.isArray(value.probes)) report = {
               executor: value.executor === 'linux' || value.executor === 'fake' ? value.executor : 'unknown',
-              probes: value.probes as HostQualificationReport['probes'],
+              // The agent never reports control-plane: this authenticated health answer is what proves it live.
+              probes: { ...value.probes as HostQualificationReport['probes'], 'control-plane': 'passed' },
             }
           }
         }

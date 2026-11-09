@@ -8,9 +8,9 @@ No credential values belong in commands, process arguments, examples, logs, or r
 
 | Item | Source default or installed path | Contract |
 |---|---|---|
-| Release tree | `/opt/xpanel` | Source-mode Node entrypoints; no required `dist/index.js` |
-| API entrypoint | `/opt/xpanel/apps/api/src/main.ts` | Unprivileged `xpanel:xpanel` systemd service |
-| Agent entrypoint | `/opt/xpanel/apps/agent/src/main.ts` | Separate Linux root service, group `xpanel-agent` |
+| Release tree | `/opt/xpanel/releases/<version>`, active link `/opt/xpanel/current` | Source-mode Node entrypoints; no required `dist/index.js` |
+| API entrypoint | `/opt/xpanel/current/apps/api/src/main.ts` | Unprivileged `xpanel:xpanel` systemd service |
+| Agent entrypoint | `/opt/xpanel/current/apps/agent/src/main.ts` | Separate Linux root service, group `xpanel-agent` |
 | Control database | `/var/lib/xpanel/control.db` | Includes identity/session/audit state; installer requires `xpanel:xpanel`, mode `0660` |
 | Desired state | `/var/lib/xpanel/state` | Cannot substitute for identity database backup |
 | Generations | `/var/lib/xpanel/generations` | Retain together with corresponding desired state and database |
@@ -27,7 +27,7 @@ No credential values belong in commands, process arguments, examples, logs, or r
 
 The control-plane administrative CLI is Node running `apps/api/src/main.ts`, implemented by `apps/api/src/cli.ts`. Its commands include `status`, `reconcile [--force]`, `reconcile --resolve-failed <generation-id>`, `rollback <generation-id>`, `reindex`, `init-root --password-stdin`, `reset-password <username> --password-stdin`, and `disable-2fa <username> [--confirm]`. Administrative verbs require the operating-system root user on Linux. Reconcile, resolve-failed, and rollback require an authenticated separate agent. Recovering an enrolled factor requires the explicit `--confirm` flag. Consult the current CLI usage before executing a recovery command. The account and server API from the shell is `xuapi` and `xwhmapi` (apps/api/src/cli-api/README.md).
 
-The separate `bin/xpanel-ctl` wrapper runs `scripts/xpanel-ctl.mjs`. It implements `version`, `status`, `doctor`, `install`, `adopt`, `update`, `upgrade`, `rollback-release`, `recover`, `uninstall`, `verify-install-source`, and `verify-install-ready`. Changes default to `--plan`; native effects require `--apply --yes` and the actual privileged prerequisites. Only `update` accepts `--check`. There is no purge or OS-upgrade command, nor a general backup, vault, certificate or queue command family.
+The separate `bin/xpanel-ctl` wrapper runs `scripts/xpanel-ctl.mjs`. It implements `version`, `status`, `doctor`, `install`, `adopt`, `update`, `upgrade`, `rollback-release`, `recover`, `uninstall`, `verify-install-source`, and `verify-install-ready`. Changes default to `--plan`; native effects require `--apply --yes` and the actual privileged prerequisites. Native `update`, `upgrade` and `recover` effects run only inside the root lifecycle coordinator (`xpanel-lifecycle.service`); a shell invocation refuses with `LIFECYCLE_COORDINATOR_SOURCE_REQUIRED`. `rollback-release` and `uninstall` are plan-only. Only `update` accepts `--check`. There is no purge or OS-upgrade command, nor a general backup, vault, certificate or queue command family. The operator sequence for an upgrade is in [operations](../OPERATIONS.md#upgrades).
 
 Authenticated artifact inputs are supplied together as `--artifact FILE --sha256 HEX --signing-key FILE --key-id ID`; the signing key stays in a protected file. Source/readiness diagnostics additionally require `--artifact-dir DIR`. Optional dependency receipts are diagnostic input, not authority to apply. Source verification alone returns `SOURCE_PROOF_IS_NOT_RUNTIME_READINESS` with `installReady: false`. A plan, imported receipt or available CLI does not establish installed/native readiness. See the [database transaction contract](../DB-TRANSACTIONS.md) and [management TLS lifecycle](../../deploy/nginx/README.md#management-tls-lifecycle).
 
@@ -83,9 +83,9 @@ Targets: A26-A28, A59.
 
 ### Execution Steps
 
-1. Verify artifact authentication and exact file inventory before extraction/provisioning. Review production dependency/native-addon inputs and record their hashes. Place the verified tree at `/opt/xpanel` with trusted ownership and no untrusted writable ancestors.
-2. Inspect the non-mutating installer plan from the reviewed tree, for example `bash scripts/install.sh --dry-run --engine=apache --apache-mpm=itk --php=8.3`. This is a plan, not installation proof.
-3. In the approved maintenance window, invoke that reviewed installer with the selected options and without `--dry-run`. Its privileged path requires Linux/systemd, pinned runtime and installed dependencies, Apache itk, cgroup/quota preconditions, and stopped existing panel services. Back up existing configurations first; retain the install journal and adjacent configuration backups. Optional mail/DNS/FTP/MariaDB installation requires the corresponding `--with-*` option.
+1. Obtain the signed release archive, its Ed25519 publisher manifest, the archive SHA-256 and the release trust inputs. Review production dependency/native-addon inputs and record their hashes. The installer authenticates the archive and publishes it under `/opt/xpanel/releases/<version>` with the `/opt/xpanel/current` link; see [installation](../INSTALL.md).
+2. Inspect the non-mutating installer plan from the reviewed tree, for example `bash scripts/install.sh --dry-run --new-install` with the release trust options. This is a plan, not installation proof.
+3. In the approved maintenance window, invoke that reviewed installer with `--new-install`, the selected options and without `--dry-run`. Its privileged path requires Linux/systemd, pinned runtime and installed dependencies, Apache itk, cgroup/quota preconditions, and stopped existing panel services. Back up existing configurations first; retain the install journal and adjacent configuration backups. Optional mail/DNS/FTP/MariaDB installation requires the corresponding `--with-*` option.
 4. Review created identities, permissions, `/etc/xpanel/runtime.env`, `/etc/xpanel/api.env`, units, native peer listener/helper prerequisites, and SQL adapter configuration. The script enables units but does not start them. Complete the three-profile environment, reviewed ingress and any atomic additive legacy-firewall migration above, then provision root as described below.
 
 ### Verification Oracle
@@ -116,7 +116,7 @@ Targets: A06, A09-A11, A29-A30.
 
 ### Execution Steps
 
-1. Provision root once through `node /opt/xpanel/apps/api/src/main.ts init-root --password-stdin`, feeding a single password line from a protected input source. Do not use inline-password compatibility modes. The command sets the forced-password-change flag; it does not enroll MFA or complete setup.
+1. Provision root once through `/opt/xpanel/bin/node /opt/xpanel/current/apps/api/src/main.ts init-root --password-stdin`, feeding a single password line from a protected input source. Do not use inline-password compatibility modes. The command sets the forced-password-change flag; it does not enroll MFA or complete setup.
 2. Start the verified services only after configuration/native prerequisites are reviewed. Use the actual server-selected `/login` form on the matching HTTPS profile: root/reseller on xWHM `2087`, account users on xPanel `2083`, and mailbox address login on xMail `2096`. Complete the forced password change. The trusted startup policy disables two-factor authentication in explicit development; it preserves stored factors and recovery material. Production, unset and unknown environments use optional enrollment for root, resellers and users. Under that policy, an enabled authenticator requires a current code or a single-use recovery code. Do not inject cookies or request markers to bypass the policy. Root can opt in later from xWHM `/whm/security/sign-in` when enrollment is available.
 3. Protect the TOTP seed and returned single-use recovery codes offline. Count and behavior must follow the current authentication implementation; do not assume a fixed count from an older runbook.
 4. Complete the available setup workflow and verify actual persisted configuration. If a required UI/adapter is unavailable, report blocked. The forced password change remains a gate. Missing two-factor enrollment does not. Do not fabricate bootstrap URLs or completion records.
@@ -214,9 +214,9 @@ Targets: A26, A53, A59.
 
 ### Execution Steps
 
-1. Verify release archive authentication before extraction and verify the extracted exact tree, including unexpected files. The packager uses HMAC-SHA256 with a separately protected real key; it is not an Ed25519 public-signature release system. Do not use a development/default key as release authentication.
+1. Verify release archive authentication before extraction and verify the extracted exact tree, including unexpected files. The archive inventory is authenticated with HMAC-SHA256 under a separately protected key, and the publisher signs the archive with Ed25519 in its sidecar manifest; both are verified before extraction. Do not use a development/default key as release authentication.
 2. Preserve the previous verified release and a consistent control DB/state/config/key snapshot. Review migration compatibility and source/artifact normalization separately from raw input identity.
-3. Inspect the installed `xpanel-ctl` plan and execute effects only when its authenticated artifact, native authority, writer-drain, recovery and health prerequisites are satisfied. Portable lifecycle state machines and source diagnostics are not substitutes for those native gates. Do not invent an alternate `current` symlink layout or use a diagnostic receipt to authorize activation.
+3. Stage the release with the active release's acquisition entry, rotate the lifecycle coordinator to it, then start the upgrade from xWHM or the staged release's root operator entry ([operations](../OPERATIONS.md#upgrades)). Effects run only when the authenticated artifact, native authority, writer-drain, recovery and health prerequisites are satisfied. Portable lifecycle state machines and source diagnostics are not substitutes for those native gates. Do not invent an alternate `current` symlink layout or use a diagnostic receipt to authorize activation.
 4. Verify the actual API/agent version/hashes and independent host/tenant probes after activation. If required production ports or safety guards are absent, the automated upgrade remains blocked; a documented operator maintenance procedure needs its own reviewed recovery proof.
 
 ### Verification Oracle
@@ -239,14 +239,14 @@ Targets: A19-A21, A53.
 ### Execution Steps
 
 1. Inspect the candidate/current generation and live file/service difference. Preserve all required data/configuration before mutation.
-2. Configuration rollback uses the actual `node /opt/xpanel/apps/api/src/main.ts rollback <generation-id>` command with a positive existing generation ID, OS-root authorization, and authenticated separate agent. It must fail closed when the agent is unavailable.
-3. Release rollback uses the separately guarded `xpanel-ctl rollback-release --release X.Y.Z` plan/apply contract and its saved release/state/schema compatibility evidence. It is distinct from configuration-generation rollback. Never reactivate a known security-vulnerable release for public access.
+2. Configuration rollback uses the actual `/opt/xpanel/bin/node /opt/xpanel/current/apps/api/src/main.ts rollback <generation-id>` command with a positive existing generation ID, OS-root authorization, and authenticated separate agent. It must fail closed when the agent is unavailable.
+3. A failed upgrade rewinds to the previous release automatically. Rollback of a committed release is distinct from configuration-generation rollback: `xpanel-ctl rollback-release --release X.Y.Z` plans it, and no native apply exists at this revision, so it needs a reviewed recovery procedure with saved release/state/schema compatibility evidence. Never reactivate a known security-vulnerable release for public access.
 4. Run independent syntax/service/tenant probes and reconcile observed state with the recorded active generation. Preserve failed attempts and recovery diagnostics.
 5. When `xpanel reconcile` returns HTTP 412 because a generation's rollback failed and the journal phase is `needs_attention`, do not delete the journal by hand. The command below checks that live owned files match the journal backup or the failed candidate, writes an audit row `reconcile.attention_resolved`, marks that generation failed, and drops the active journal. It does not apply a new generation. Run it as root, then reconcile:
 
    ```bash
-   node /opt/xpanel/apps/api/src/main.ts reconcile --resolve-failed 25
-   node /opt/xpanel/apps/api/src/main.ts reconcile
+   /opt/xpanel/bin/node /opt/xpanel/current/apps/api/src/main.ts reconcile --resolve-failed 25
+   /opt/xpanel/bin/node /opt/xpanel/current/apps/api/src/main.ts reconcile
    ```
 
    Replace `25` with the generation id from the 412 detail. A mismatch between the disk and the journal refuses the clear and leaves the journal in place. A subsequent reconcile requires its own current validation and execution evidence.

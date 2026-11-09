@@ -16,10 +16,14 @@ You will get an acknowledgement within 3 working days and a first assessment wit
 
 ## Supported versions
 
-xPanel is prelaunch and has no released versions yet. Reports against the latest commit on `main` are in scope.
+xPanel is prelaunch and has no public release yet. Reports against the latest commit on `main` are in scope.
 
 ## Scope
 
 In scope: privilege escalation, isolation breaks between accounts, authentication or authorization bypass, injection into rendered configuration, SQL or shell, path traversal, and secrets exposure.
 
 Out of scope: vulnerabilities in third-party services xPanel configures (report those upstream), denial of service by an authenticated root user, and issues that require an already-compromised host.
+
+## Security design
+
+The [security model](README.md#security-model) summarizes the defenses, and [architecture](docs/ARCHITECTURE.md#authentication-and-authorization) describes authentication, authorization and the privileged boundary in detail.

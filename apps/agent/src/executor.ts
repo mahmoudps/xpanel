@@ -486,7 +486,7 @@ const BLOCK_DEVICE_FACT_RE = /^\/sys\/(?:dev\/block\/[1-9][0-9]{0,3}:(?:0|[1-9][
 const isHostMeasurementRead = (path: string): boolean => HOST_MEASUREMENT_READS.has(path) || BLOCK_DEVICE_FACT_RE.test(path)
 
 /** systemd drop-in directories such as user-<uid>.slice.d. The parent unit dir already exists. */
-const SYSTEMD_DROPIN_DIR_RE = /\/[^/]+\.(?:slice|service|socket|timer)\.d$/
+export const SYSTEMD_DROPIN_DIR_RE = /\/[^/]+\.(?:slice|service|socket|timer)\.d$/
 
 const isEnoent = (err: unknown): boolean => {
   if ((err as NodeJS.ErrnoException).code === 'ENOENT') return true
@@ -582,6 +582,13 @@ export const createProductionHostTargetMatcher = (): ((path: string, operation: 
     // Rearrange an Account: the copy in progress sits beside the homes of its destination root.
     if (/^\/home[1-9]?[0-9]?\/\.xpanel-move-[a-z][a-z0-9]{0,15}$/.test(path)) return operation === 'remove'
     if (path === '/var/spool/postfix/opendkim') return operation === 'ensure-directory'
+    // The firewall table a generation renders at os.paths.nftablesConf (render system/nftables.ts): Debian, then EL.
+    if (path === '/etc/nftables.conf' || path === '/etc/sysconfig/nftables.conf') return operation === 'read' || operation === 'write' || operation === 'remove'
+    // EL pure-ftpd certificate directory (ftp-server.ts ftpCertFile); openssl creates the certificate itself, not the executor.
+    if (path === '/etc/pki/pure-ftpd') return operation === 'ensure-directory'
+    // Apache CGI wrappers under each family's suexec docroot (render edge/paths.ts cgiWrapperPath): /home on Debian, /var/www on EL.
+    if (/^\/(?:home|var\/www)\/xpanel-cgi(?:\/[a-z_][a-z0-9_-]{0,31})?$/.test(path)) return operation === 'ensure-directory'
+    if (/^\/(?:home|var\/www)\/xpanel-cgi\/[a-z_][a-z0-9_-]{0,31}\/php[5-9]\.[0-9]{1,2}\.f?cgi$/.test(path)) return operation === 'read' || operation === 'write' || operation === 'remove'
     // Root-operator quota setup only: the exact table and its timestamped backup.
     if (path === '/etc/fstab' || /^\/etc\/fstab\.bak\.[0-9]{8}T[0-9]{6}Z$/.test(path)) return operation === 'read' || operation === 'write'
     // MySQL Root Password (db-maintenance.ts) keeps the root client file beside the root shell, as cPanel does.

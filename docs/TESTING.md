@@ -235,6 +235,10 @@ Replace every placeholder with independently reviewed values before use. `--pnpm
 
 The acknowledgement is not proof that the environment is suitable. Snapshot the VM first, inspect collisions, verify the source/archive identity before privileged execution and record cleanup afterward. Native helpers require the appropriate compiler and system prerequisites. A passing primitive, peer-identity or file-helper test does not qualify Apache/PHP workloads, installation/reboot or unrelated services.
 
+## Native qualification
+
+Qualifying a tool on installed hosts is a separate process with its own runner, reviewed drivers and evidence bundles; see [qualification](decisions/qualification.md). Its receipts, not the suites in this document, open a tool in the catalog.
+
 ## Exit status and release interpretation
 
 The [suite runner](../scripts/test-suite.mjs) separates portable, unit, HTTP, browser and Linux layers. Browser/Linux preflight exits with status `2` when blocked; ordinary failures use a nonzero result. Portable output explicitly reports that browser and Linux checks were not run. `pnpm test:all` still requires the independent browser and disposable-Linux prerequisites; it is not a portable substitute.
@@ -307,7 +311,7 @@ The existing `test`, `test:unit`, `test:http`, `test:linux`, `test:browser` and 
 
 Classify pure, database-free logic as `unit` (under 100 ms), one application behavior with isolated state as `feature` (under 1 s), and a complete business flow as `journey` plus `slow`. `visual` requires `slow`. Any observed case at 2000 ms or more must be rebuilt and tagged, with at most one journey per flow. Existing unclassified cases are not silently treated as pure units.
 
-The named runtime budget check uses Vitest's actual expanded case metadata, including skipped, parameterized, factory-generated and fast-filtered cases. It records its own measured duration. Focused pure unit tests cover an over-budget filtered inventory and framework failure status. This avoids using a static source parser as an expanded-case count. The portable and native slow caps live in `scripts/test-slow-budget.mjs`; both are deliberately `null` until the complete rebuilt inventory is measured and reviewed. No cap of 3 has been adopted. Explicit lanes report blocked before suites while their required budget is unestablished. Once established, caps must shrink as fixtures improve; increases require approval.
+The named runtime budget check uses Vitest's actual expanded case metadata, including skipped, parameterized, factory-generated and fast-filtered cases. It records its own measured duration. Focused pure unit tests cover an over-budget filtered inventory and framework failure status. This avoids using a static source parser as an expanded-case count. The portable and native slow caps live in `scripts/test-slow-budget.mjs`. The portable cap is 192 expanded slow cases, checked by `scripts/test-lane-budget.test.ts`. The native cap stays `null` until the complete rebuilt native inventory is measured and reviewed, and a lane that needs it reports blocked before its suites. Caps must shrink as fixtures improve; increases require approval.
 
 Lane receipts include the versioned executable-input source fingerprint, commit/tree, lockfile digest, pinned Node and SQLite versions, and before/after source stability. This executable-input algorithm is distinct from the browser runner's full Git inventory algorithm; their digests cannot be substituted for one another. Preflight records free disk, memory and load; under 1% free workspace disk blocks heavy lanes. An available disk alone does not establish an exclusive heavy-lane slot or adequate memory/load.
 

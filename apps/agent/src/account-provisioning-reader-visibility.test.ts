@@ -19,7 +19,7 @@ describe('canary source reader visibility', () => {
     expect(hosted).toContain("withReobservedReadonlyOperationDatabase(DATABASE, async db => getReadonlyOperationDatabaseOrigin(db), 'pre-migration')")
     expect(hosted).toContain("collectHostedObservation(ownership, request, authority, { origin, fresh: read => withReobservedReadonlyOperationDatabase(DATABASE, read, 'pre-migration') }, false)")
     expect(hosted).toContain("collectHostedObservation(ownership, request, scope, { held: db }, true)")
-    expect(hosted).toContain('if (JSON.stringify(getReadonlyOperationDatabaseOrigin(db)) !== JSON.stringify(origin)) return refuse()')
+    expect(hosted).toContain("if (JSON.stringify(getReadonlyOperationDatabaseOrigin(db)) !== JSON.stringify(origin)) return refuse('database_origin_changed')")
     expect(hosted.match(/await read\(db => latestActive\(db\)\)/g)).toHaveLength(2)
     expect(hosted).not.toMatch(/latestActive\(db\)(?!\))/)
   })
