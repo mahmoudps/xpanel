@@ -476,6 +476,12 @@ describe('management TLS retained-failure control-flow diagnostics (modeled kern
   it('reads the warnings nginx prints for a stale ingress and nothing else as tolerable', () => {
     const { nginxRefuses } = loadDeclarations(['nginxRefuses'], {})
     expect(nginxRefuses(PROTOCOLS_REDEFINED, true)).toBe(false)
+    // The error-log format nginx -t uses once error_log is read, exactly as a live Ubuntu 24.04 host printed it.
+    const logged = '2026/11/09 01:06:27 [warn] 228794#228794: protocol options redefined for 0.0.0.0:443 in /etc/nginx/conf.d/xpanel-xpa1.conf:72\n'
+    expect(nginxRefuses(logged, true)).toBe(false)
+    expect(nginxRefuses(logged)).toBe(true)
+    expect(nginxRefuses(logged.replace(':443', ':2083'), true)).toBe(true)
+    expect(nginxRefuses(logged.replace('[warn]', '[emerg]'), true)).toBe(true)
     expect(nginxRefuses(PROTOCOLS_REDEFINED + INGRESS_DEPRECATION, true)).toBe(false)
     expect(nginxRefuses(PROTOCOLS_REDEFINED)).toBe(true)
     expect(nginxRefuses(PROTOCOLS_REDEFINED.replace(':443', ':2083'), true)).toBe(true)
