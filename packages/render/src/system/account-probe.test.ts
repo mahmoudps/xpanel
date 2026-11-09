@@ -1,19 +1,26 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import type { Domain } from '@xpanel/core'
-import { ACCOUNT_PROBE_ASSET, ACCOUNT_PROBE_END_CODES, ACCOUNT_PROBE_HOLD_SECONDS, ACCOUNT_PROBE_PHP, ACCOUNT_PROBE_ROUTE, accountProbeDirectories, accountProbeNamespace, accountProbeNginxLocation, accountProbePaths, assertAccountProbeIngress, renderAccountProbeAsset } from './account-probe.ts'
+import { ACCOUNT_PROBE_ASSET, ACCOUNT_PROBE_HOLD_SECONDS, ACCOUNT_PROBE_PHP, ACCOUNT_PROBE_ROUTE, accountProbeDirectories, accountProbeNamespace, accountProbeNginxLocation, accountProbePaths, assertAccountProbeIngress, renderAccountProbeAsset } from './account-probe.ts'
 import { renderFpmUnit } from './units.ts'
 import { debianOs, makeAccount } from './testkit.ts'
 import { renderNginxSite } from '../edge/nginx.ts'
 import { account as edgeAccount, cert, domain, settings } from '../edge/testkit.ts'
 const account = { username: 'alice', uid: 1000, home: '/home/alice' }
+describe('installed canary bytes across releases', { tags: ['unit'] }, () => {
+  it('keeps ACCOUNT_PROBE_PHP byte-identical to the canary installed hosts serve', () => {
+    // The new agent qualifies the old generation's installed canary against its own copy before switching.
+    expect(createHash('sha256').update(ACCOUNT_PROBE_PHP).digest('hex'),
+      'Changing ACCOUNT_PROBE_PHP breaks hosted UID qualification on upgrade (release_canary_source_changed) unless the upgrade path deploys the new canary first.')
+      .toBe('ef81bb29185371ae9fbddc2caf13c98423dae4b7ddd0db82ebf61c33dd030021')
+  })
+})
+
 describe('immutable account probe renderer', { tags: ['unit'] }, () => {
   it('keeps the asset Root-owned and read-only with no reported process identity', () => {
     expect(renderAccountProbeAsset()).toEqual({ path: ACCOUNT_PROBE_ASSET, content: ACCOUNT_PROBE_PHP, mode: 0o444, owner: 'root', group: 'root' })
     expect(ACCOUNT_PROBE_PHP).not.toMatch(/getmypid|posix_getuid|posix_getgid|shell_exec|fastcgi_finish_request/)
     expect(ACCOUNT_PROBE_PHP).toContain("$release !== \"release\\n\"")
-    // Without release the canary names why its wait ended with one constant code, never request data.
-    expect(ACCOUNT_PROBE_PHP).toContain(`@fwrite($stream, 'end ' . ($release !== false ? 'unexpected' : ($meta['timed_out'] ? 'timeout' : ($meta['eof'] ? 'eof' : 'read-error'))) . "\\n");`)
-    for (const code of ACCOUNT_PROBE_END_CODES) expect(ACCOUNT_PROBE_PHP).toContain(`'${code}'`)
     // The agent's held-request budgets derive from this window; nginx must outlast it.
     expect(ACCOUNT_PROBE_PHP).toContain(`stream_set_timeout($stream, ${ACCOUNT_PROBE_HOLD_SECONDS});`)
     expect(accountProbeNginxLocation(account)).toContain(`    fastcgi_read_timeout ${ACCOUNT_PROBE_HOLD_SECONDS + 5}s;`)

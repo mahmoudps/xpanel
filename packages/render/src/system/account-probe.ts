@@ -19,8 +19,6 @@ export const accountProbePaths = (account: Pick<Account, 'username' | 'uid' | 'h
   return { runtime, target, script: target + '/probe.php', ingress: runtime + '/ingress.sock', callback: runtime + '/callback.sock', callbackInNamespace: target + '/runtime/callback.sock' }
 }
 
-/** Codes of the canary's one `end <code>` line when it stops waiting without release: other data, EOF, timeout or a read error. */
-export const ACCOUNT_PROBE_END_CODES = Object.freeze(['unexpected', 'eof', 'timeout', 'read-error'] as const)
 /** Immutable source; identity is obtained by Root through kernel credentials, never PHP output. */
 export const ACCOUNT_PROBE_PHP = String.raw`<?php
 declare(strict_types=1);
@@ -50,12 +48,7 @@ try {
     header('Content-Length: ' . (string)(strlen($prefix) + 5));
     echo $prefix; flush();
     $release = @fgets($stream, 16);
-    if ($release !== "release\n") {
-        // One constant end-of-wait code for the agent's failure line; never request data.
-        $meta = stream_get_meta_data($stream);
-        @fwrite($stream, 'end ' . ($release !== false ? 'unexpected' : ($meta['timed_out'] ? 'timeout' : ($meta['eof'] ? 'eof' : 'read-error'))) . "\n");
-        exit;
-    }
+    if ($release !== "release\n") exit;
     echo "done\n"; flush();
 } finally { fclose($stream); }
 `

@@ -3,7 +3,7 @@ import { createConnection, createServer, type Server, type Socket } from 'node:n
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { canaryEndCode, deliverHeldRelease, watchHeldCallbackEnd } from './account-provisioning-http.ts'
+import { deliverHeldRelease, watchHeldCallbackEnd } from './account-provisioning-http.ts'
 
 // Real Unix stream sockets stand in for the canary's callback connection; no root, addon, FPM or HTTP is involved.
 const cleanups: (() => Promise<void>)[] = []
@@ -59,15 +59,6 @@ describe('release of the held account callback', { tags: ['unit'] }, () => {
 })
 
 describe('why a held callback ended', { tags: ['unit'] }, () => {
-  it('reads only the canary\'s constant end-of-wait codes', () => {
-    for (const code of ['unexpected', 'eof', 'timeout', 'read-error']) {
-      expect(canaryEndCode(Buffer.from(`end ${code}\n`))).toBe(code)
-      expect(canaryEndCode(Buffer.from(`end ${code}`))).toBe('partial')
-    }
-    expect(canaryEndCode(Buffer.from('e'))).toBe('partial')
-    for (const other of ['release\n', 'end signal\n', 'end timeout\nx', 'end eof \n', 'done\n']) expect(canaryEndCode(Buffer.from(other))).toBeNull()
-  })
-
   it('records which side ended first, how, and whether release had started', async () => {
     const marks: string[] = []
     const canary = await callbackPair(peer => peer.end())
