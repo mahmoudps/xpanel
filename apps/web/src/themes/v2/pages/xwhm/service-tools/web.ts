@@ -1,10 +1,12 @@
 import { effectiveServerWebSettings, suggestedWorkerFields } from '@xpanel/core'
 import { formatDisplayDateTime } from '../../../../../display-format.ts'
 import { actions, button, context, esc, facts, field, fields, note, page, section, split, status, table, technical, type WhmDataPageInput } from '../software/common.ts'
+import { whmStoredFacts } from '../stored-facts.ts'
 
 export function renderV2WhmWebServer(input: WhmDataPageInput): string {
   const { t, canRead, canManage } = context(input)
-  const saved = canRead ? input.serverSettings : undefined, suggested = canRead ? suggestedWorkerFields(input.hostSample) : null
+  // A read-only page still shows the saved settings file, disabled.
+  const saved = canRead || whmStoredFacts(input, input.dataAuthority ?? {}, ['server-settings-edit']) ? input.serverSettings : undefined, suggested = canRead ? suggestedWorkerFields(input.hostSample) : null
 
   const unread = t(msgid('Not read'))
   const snapshot = note(t(msgctxt('theme:v2', 'Saved configuration when this page opened. Reload after changes to refresh this reference.')))
@@ -64,7 +66,7 @@ export function renderV2WhmWebServer(input: WhmDataPageInput): string {
   const number = (name: string, label: string, value: number | null | undefined, min: number, max: number, help?: string) => field(`v2-web-${name.replaceAll('.', '-')}`, label, { kind: 'input', type: 'number', name, dir: 'ltr', disabled: off, value: value === null || value === undefined ? '' : String(value), min, max, step: 1 }, help)
   const text = (name: string, label: string, value: string | undefined, help: string, rows = 4) => field(`v2-web-${name.replaceAll('.', '-')}`, label, { kind: 'textarea', name, dir: 'ltr', mono: true, disabled: off, value: value ?? '', rows }, help)
   const box = (name: string, value: string, label: string, checked: boolean | undefined) => `<label class="v2-whm-data__check"><input type="checkbox" name="${esc(name)}" value="${esc(value)}"${checked ? ' checked' : ''}${off ? ' disabled' : ''}><span>${esc(label)}</span></label>`
-  const directives = `<${off ? 'div' : 'form'} class="v2-whm-data__stack" data-web-directives-form data-web-directives-can-manage="${!off}">`
+  const directives = `<${off ? 'div' : 'form'} class="v2-whm-data__stack" data-web-directives-form data-web-directives-can-read="${!off}" data-web-directives-can-manage="${!off}">`
     + `<h3>${esc(t(msgid('Global configuration')))}</h3>` + fields(number('web.timeoutSec', t(msgid('Request timeout, seconds')), w?.timeoutSec, 1, 3600, t(msgid('Apache Timeout and the nginx proxy read and send timeouts.')))
       + number('web.clientMaxBodyMb', 'client_max_body_size (MB)', w?.clientMaxBodyMb, 1, 10240, t(msgid('Largest upload any site accepts. PHP upload_max_filesize cannot exceed it.')))
       + field('v2-web-tls-ciphers', t(msgid('TLS 1.2 cipher list')), { kind: 'input', name: 'web.tlsCiphers', dir: 'ltr', mono: true, disabled: off, value: w?.tlsCiphers ?? '' }, t(msgid('OpenSSL cipher list for TLS 1.2; TLS 1.3 uses its own suites.'))))

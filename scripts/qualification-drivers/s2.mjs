@@ -32,7 +32,7 @@ const txtAt = (zone, name) => (zone?.records ?? []).filter(item => item.type ===
 export default [
   tool('add-dns-zone', {
     prefix: 'ADZ', as: 'root', probe: '/api/dns/zones',
-    paths: new RegExp(`^\\/api\\/(?:${zonePath}|server\\/settings)$`),
+    paths: new RegExp(`^\\/api\\/(?:${zonePath}(?:\\/zone-file)?|server\\/settings)$`),
     unit: [{ id: 'ADZ-UNIT-1', file: 'apps/api/src/completion-whm-dns-security.test.ts', name: 'xWHM DNS revision-bound loopback HTTP acceptance creates an unassigned root zone only when the expected state is absent' }],
     checks: ['ZONE-EXISTS', 'ZONE-HAS-SOA', 'ZONE-HAS-CONFIGURED-NS', 'ZONE-HAS-GIVEN-A'],
     async run({ root, tag, check, refused, undo }) {
@@ -43,8 +43,12 @@ export default [
       refused('ZONE-EXISTS', await putZone(root, name, records, null), 'CONFLICT')
       const stored = created.status === 200 && Array.isArray(created.data?.zone?.records) ? created.data.zone.records : []
       const nameservers = settings.data?.settings?.nameservers
-      check('ZONE-HAS-SOA', stored.some(item => item.type === 'SOA'), { status: created.status, records: stored.length })
-      check('ZONE-HAS-CONFIGURED-NS', Array.isArray(nameservers) && nameservers.length > 0 && nameservers.every(server => stored.some(item => item.type === 'NS' && item.content.replace(/\.$/, '') === String(server).replace(/\.$/, ''))), { status: created.status, nameservers: Array.isArray(nameservers) ? nameservers.length : null })
+      // The SOA is rendered when the zone is published and is never a stored record; the zone file shows what is served.
+      const file = await root.get(`/api/dns/zones/${name}/zone-file`), lines = typeof file.data?.text === 'string' ? file.data.text.split('\n') : []
+      // Apex rows of the export: `@ <ttl> IN <type> <data>` under `$ORIGIN <zone>.`
+      const served = type => lines.map(line => line.trim().split(/\s+/)).filter(fields => fields[0] === '@' && fields[2] === 'IN' && fields[3] === type)
+      check('ZONE-HAS-SOA', file.status === 200 && served('SOA').length === 1, { status: file.status, soa: served('SOA').length })
+      check('ZONE-HAS-CONFIGURED-NS', file.status === 200 && Array.isArray(nameservers) && nameservers.length > 0 && nameservers.every(server => served('NS').some(fields => fields.at(-1).replace(/\.$/, '') === String(server).replace(/\.$/, ''))), { status: file.status, nameservers: Array.isArray(nameservers) ? nameservers.length : null, ns: served('NS').length })
       check('ZONE-HAS-GIVEN-A', stored.some(item => item.type === 'A' && item.content === '192.0.2.77'), { status: created.status })
     },
   }),

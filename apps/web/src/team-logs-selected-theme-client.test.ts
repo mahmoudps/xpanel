@@ -68,9 +68,18 @@ describe.each(['classic', 'v2'] as const)('%s team and log templates', theme => 
       expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select')].filter(control => !control.closest('[data-mail-card]')).every(control => control.disabled)).toBe(true)
     })
   }
-  for (const family of ['team', 'logs'] as const) it('keeps ' + family + ' inert inside a read-only boundary', async () => {
-    const send = vi.fn(), document = mount('<div data-readonly="true">' + (family === 'team' ? teamHtml() : logsHtml()) + '</div>', family === 'team' ? ACCOUNT_TEAM_CLIENT_BINDING : ACCOUNT_LOGS_CLIENT_BINDING, send)
-    document.querySelector<HTMLButtonElement>(family === 'team' ? '[data-acct-team-refresh]' : '[data-logs-read]')!.click(); await tick()
+  it('keeps logs inert inside a read-only boundary', async () => {
+    const send = vi.fn(), document = mount('<div data-readonly="true">' + logsHtml() + '</div>', ACCOUNT_LOGS_CLIENT_BINDING, send)
+    document.querySelector<HTMLButtonElement>('[data-logs-read]')!.click(); await tick()
     expect(send).not.toHaveBeenCalled()
+  })
+  it('reads the team inside a read-only boundary but never writes, with every control disabled', async () => {
+    const send = vi.fn(async () => teamView), document = mount('<div data-readonly="true">' + teamHtml() + '</div>', ACCOUNT_TEAM_CLIENT_BINDING, send)
+    await tick()
+    expect(send).toHaveBeenCalledWith('GET', '/api/account/team')
+    expect(document.querySelector('[data-acct-team-rows] tr')!.textContent).toContain('sam@example.test')
+    document.querySelector<HTMLButtonElement>('[data-acct-team-refresh]')!.click(); await tick()
+    expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select')].filter(control => !control.closest('[data-mail-card]')).every(control => control.disabled)).toBe(true)
   })
 })

@@ -7,6 +7,8 @@ const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 
 export interface GitClientView { revision: string; repositories: string[]; nativeAvailable: boolean; deployed: { commit: string; at: string } | null; selected: { path: string; branch: string; head: string | null; dirty: boolean; changedFiles: number; remote: string | null; branches: { name: string; hash: string; current: boolean }[]; commits: { hash: string; at: string; subject: string }[] } | null }
 const GIT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -43,8 +45,9 @@ function bindAccountGit(askDialog: ((input: Record<string, unknown>) => Promise<
   document.querySelectorAll<HTMLElement>('[data-account-git]').forEach(root => {
     if (root.dataset.gitBound === 'true') return
     root.dataset.gitBound = 'true'
-    const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-    const accountId = root.dataset.account ?? '', eligible = (): boolean => root.isConnected && root.dataset.gitManage === 'true' && !root.closest('[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
+    // Reads run in a read-only frame too; repository actions need the manage flag outside one.
+    const access = frameAccess(root, 'data-git-can-read', 'data-git-manage'), send = access.request
+    const accountId = root.dataset.account ?? '', readable = access.readable, eligible = access.writable
     const get = <T extends HTMLElement>(key: string): T => root.querySelector<T>('[data-git-' + key + ']')!
     const repository = get<HTMLSelectElement>('repository'), branch = get<HTMLSelectElement>('branch'), status = get('status'), history = get('history')
     if (!repository || !branch || !status || !history) return
@@ -90,7 +93,7 @@ function bindAccountGit(askDialog: ((input: Record<string, unknown>) => Promise<
       if (!selected?.commits.length) { const row = cloneClientTemplate(templates.empty, 'tr', ['message']); clientTemplateSlot(row, 'message', 'td').textContent = selected ? t('No commits yet.') : t('Select a repository and read its details.'); history.append(row) }
     }
     async function perform(sent: Record<string, unknown>): Promise<void> {
-      if (!eligible() || busy || !send) return
+      if (!(sent.op === 'list' ? readable() : eligible()) || busy || !send) return
       const mutation = !['list', 'inspect'].includes(String(sent.op))
       if (mutation && (!view || uncertain)) return
       if (mutation) {
@@ -123,8 +126,8 @@ function bindAccountGit(askDialog: ((input: Record<string, unknown>) => Promise<
     }
     for (const name of ['refresh', 'inspect', 'remove', 'init', 'clone', 'checkout', 'pull', 'deploy']) get<HTMLButtonElement>(name)?.addEventListener('click', () => action(name === 'refresh' ? 'list' : name))
     repository.addEventListener('change', () => { if (view) paint({ ...view, selected: null }); lock() }); branch.addEventListener('change', lock)
-    if (!send || !eligible() || !GIT_ID.test(accountId)) { for (const control of root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button,input,select')) control.disabled = true; note('unavailable', t('Git is unavailable here. Nothing was read or changed.')); return }
+    if (!readable() || !GIT_ID.test(accountId)) { for (const control of root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button,input,select')) control.disabled = true; note('unavailable', t('Git is unavailable here. Nothing was read or changed.')); return }
     lock(); void perform({ op: 'list' })
   })
 }
-export const ACCOUNT_GIT_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const GIT_ID=${GIT_ID.toString()};const GIT_PATH=${GIT_PATH.toString()};const gitObject=${gitObject.toString()};const gitBranch=${gitBranch.toString()};const gitUrl=${gitUrl.toString()};const gitAscii=${gitAscii.toString()};const readGitClientView=${readGitClientView.toString()};return ${bindAccountGit.toString()};})()`
+export const ACCOUNT_GIT_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const GIT_ID=${GIT_ID.toString()};const GIT_PATH=${GIT_PATH.toString()};const gitObject=${gitObject.toString()};const gitBranch=${gitBranch.toString()};const gitUrl=${gitUrl.toString()};const gitAscii=${gitAscii.toString()};const readGitClientView=${readGitClientView.toString()};return ${bindAccountGit.toString()};})()`)

@@ -53,13 +53,14 @@ describe('mail server client parser', () => {
 })
 
 describe('mail server client binding', () => {
-  it('stays inert without transport, without read authority or inside an unavailable capability', async () => {
+  it('stays inert without transport or read authority, and only reads inside an unavailable capability', async () => {
     boot(); expect(status().dataset.state).toBe('unavailable')
-    const send = vi.fn(async () => view('server'))
+    const send = vi.fn(async (_method: string, _path: string) => view('server'))
     mount('server', 'en', false); boot(send); await tick()
-    mount('outbound', 'en', true, 'unavailable'); boot(send); await tick()
     expect(send).not.toHaveBeenCalled()
     expect(status().dataset.state).toBe('unavailable')
+    mount('outbound', 'en', true, 'unavailable'); boot(send); await tick()
+    expect(send.mock.calls.every(call => call[0] === 'GET')).toBe(true)
     expect(document.querySelector<HTMLButtonElement>('[data-whm-mail-server-refresh]')!.disabled).toBe(true)
     expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input,select,textarea,button')].every(control => control.disabled)).toBe(true)
     expect(WHM_MAIL_SERVER_CLIENT_BINDING).not.toContain('innerHTML')

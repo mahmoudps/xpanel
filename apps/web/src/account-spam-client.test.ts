@@ -101,4 +101,14 @@ describe('spam settings browser binding', () => {
     expect(status().dataset.state).toBe('uncertain')
     expect(document.querySelector<HTMLButtonElement>('[data-spam-save]')!.disabled).toBe(true)
   })
+  it('reads saved settings inside a read-only frame but never writes, with every control disabled', async () => {
+    document.body.innerHTML = '<div data-readonly="true">' + renderAccountSpamSettings({ lang: 'en', expectedAccountId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', canManage: true }) + '</div>'
+    const transport = vi.fn(async () => settings({ rejectScore: 12 }))
+    boot(transport); await tick()
+    expect(status().dataset.state).toBe('read')
+    expect(document.querySelector<HTMLInputElement>('[data-spam-score="spam-reject"]')!.value).toBe('12')
+    document.querySelector<HTMLButtonElement>('[data-spam-save]')!.click(); await tick()
+    expect((transport.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLTextAreaElement>('input,button,textarea')].every(control => control.disabled)).toBe(true)
+  })
 })

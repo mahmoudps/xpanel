@@ -17,7 +17,7 @@ export function renderV2PanelSpamFilters(props: PanelSurfaceProps, authority?: P
     + `<fieldset><legend>${esc(t(msgid('Allow and block lists')))}</legend>${fields(field('spam-allowlist', t(msgid('Allowlist (addresses, CIDRs or hostnames, one per line)')), area('spam-allowlist', { 'data-spam-allowlist': true }, ' rows="5" dir="ltr"', !canManage)) + field('spam-blocklist', t(msgid('Blocklist (addresses, CIDRs or hostnames, one per line)')), area('spam-blocklist', { 'data-spam-blocklist': true }, ' rows="5" dir="ltr"', !canManage)))}</fieldset>`
     + actions(button(t(msgid('Save spam settings')), { 'data-spam-save': true }, !canManage, true))
     + state(t(msgctxt('theme:v2', 'Spam settings have not been read.')), { 'data-spam-status': true }),
-    { 'data-spam-settings': true, 'data-account': (account?.id ?? ''), 'data-spam-can-manage': String(canManage) })
+    { 'data-spam-settings': true, 'data-account': (account?.id ?? ''), 'data-spam-settings-can-read': String(canManage), 'data-spam-can-manage': String(canManage) })
   const native = section('v2-spam-native', t(msgid('Spam filter per mailbox')),
     `<p>${esc(t(msgid('Saved mailbox spam preferences take effect on this server. Allowed senders and a mailbox that sets its own filtering or score go to the rspamd settings file. Blocked senders and moving flagged mail to Junk go to the mailbox Sieve policy script, which runs before the mailbox filters.')))}</p>`
     + actions(button(t(msgid('Refresh')), { 'data-mailx-tools-refresh': true }, !canManage))

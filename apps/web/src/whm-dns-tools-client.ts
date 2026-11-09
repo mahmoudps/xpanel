@@ -6,6 +6,8 @@ const cloneClientTemplate = canonicalCloneClientTemplate
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const displayDateTime = formatDisplayDateTime
 export type DnsToolsZoneItem = { zone: string; revision: string; records: number; minTtl: number | null; maxTtl: number | null }
 export type DnsCheckJobItem = { id: string; status: string; summary: string; zones: number; createdAt: string; startedAt: string | null; finishedAt: string | null; error: string | null }
@@ -117,11 +119,11 @@ function bindWhmDnsTools(askDialog: Ask | undefined): void {
     const q = <T extends Element = HTMLElement>(selector: string): T | null => root.querySelector<T>(selector)
     const refresh = q<HTMLButtonElement>('[data-whm-dns-tools-refresh]'), ttlInput = q<HTMLInputElement>('[data-whm-dns-tools-ttl]'), search = q<HTMLInputElement>('[data-whm-dns-tools-search]')
     const link = q<HTMLAnchorElement>('[data-whm-dns-tools-job-link]'), selectedNote = q('[data-whm-dns-tools-selected]')
-    const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
+    const request = frameRequest(root)
     if (!refresh) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.dnsToolsCanRead === 'true' && !root.closest(denied) && !!request
-    const manageable = (): boolean => admitted() && root.dataset.dnsToolsCanManage === 'true'
+    const admitted = (): boolean => root.isConnected && root.dataset.dnsToolsCanRead === 'true' && !!request
+    const manageable = (): boolean => admitted() && root.dataset.dnsToolsCanManage === 'true' && !root.closest(denied)
     const MAX = 32, SHOWN_MAX = 200, TTL_MAX = 2147483647
     let busy = false, overview: DnsToolsViews['overview'] | null = null, preview: DnsToolsViews['preview'] | null = null
     const pages: Record<string, { page: number; pages: number } | null> = { compare: null, nameservers: null }
@@ -342,4 +344,4 @@ function bindWhmDnsTools(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_DNS_TOOLS_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readDnsToolsView=${readDnsToolsView.toString()};return ${bindWhmDnsTools.toString()};})()`
+export const WHM_DNS_TOOLS_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readDnsToolsView=${readDnsToolsView.toString()};return ${bindWhmDnsTools.toString()};})()`)

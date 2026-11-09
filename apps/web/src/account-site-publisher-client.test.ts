@@ -25,6 +25,17 @@ describe('site publisher workspace', () => {
     await bind(false, request)
     expect(request).not.toHaveBeenCalled(); expect([...document.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button,input,select,textarea')].every(control => control.disabled)).toBe(true)
   })
+  it('reads current files inside a read-only frame but never previews or writes, with every control disabled', async () => {
+    const request = vi.fn(async (_method: string, _path: string, _body?: unknown) => view())
+    ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = request
+    document.body.innerHTML = '<div data-readonly="true">' + html(true) + '</div>'
+    new Function('return ' + ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING)()(async () => true)
+    await settle(); await settle()
+    expect(document.querySelectorAll('[data-sitepub-files] tr')).toHaveLength(3)
+    $<HTMLButtonElement>('preview').click(); await settle()
+    expect(request).toHaveBeenCalledTimes(1); expect(request.mock.calls[0]![0]).toBe('GET')
+    expect([...document.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button,input,select,textarea')].every(control => control.disabled)).toBe(true)
+  })
   it('publishes only the previewed draft after confirmation and reads the result back', async () => {
     const published = { ...view(), revision: 'c'.repeat(64), files: view().files.map((file, i) => i === 0 ? { ...file, exists: true, hash: 'b'.repeat(64), sizeBytes: 10 } : file), recovery: { status: 'published', createdAt: '2026-11-07T10:00:00.000Z' }, capabilities: { canPublish: true, canRollback: true } }
     let state: unknown = view()

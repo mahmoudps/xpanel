@@ -78,4 +78,22 @@ describe('forwarder human created dates preserve raw records and action targets'
       document.body.replaceChildren(); vi.restoreAllMocks()
     }
   })
+  it('reads saved routing inside a read-only frame but never writes, with every control disabled', async () => {
+    const forwarders = { forwarders: [{ id: 'r-frame', sourceAddress: 'frame@tenant.test', action: 'forward', destinations: ['recipient@example.test'], createdAt: '2026-10-27T09:01:02.000Z', application: applied }] }
+    const send = vi.fn(async (_method: string, path: string, _body?: unknown) => path === '/api/mail/forwarders' ? forwarders : path === '/api/mail/autoresponders' ? { autoresponders: [], mailboxes: [] } : { defaultAddresses: [] })
+    try {
+      document.body.innerHTML = '<div data-readonly="true">' + renderAccountForwarders({ lang: 'en', canManage: true, domains: [{ name: 'tenant.test' }] }) + '</div>'
+      ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
+      new Function('return ' + ACCOUNT_FORWARDERS_CLIENT_BINDING)()(async () => true)
+      await new Promise(resolve => setTimeout(resolve, 0)); await new Promise(resolve => setTimeout(resolve, 0))
+      expect(document.querySelector('[data-forwarder-rows]')!.textContent).toContain('frame@tenant.test')
+      expect(document.querySelector('[data-forwarder-delete]')).toBeNull()
+      expect(send.mock.calls.map(call => call[1])).toContain('/api/mail/forwarders')
+      expect(send.mock.calls.every(call => call[0] === 'GET')).toBe(true)
+      expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button')].every(control => control.disabled)).toBe(true)
+    } finally {
+      delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
+      document.body.replaceChildren(); vi.restoreAllMocks()
+    }
+  })
 })

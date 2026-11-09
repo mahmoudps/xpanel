@@ -3,8 +3,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest } from './read-only-frame.ts'
 const displayDateTime = formatDisplayDateTime
-const clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
+const clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate, frameRequest = canonicalFrameRequest
 type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
 export type SecSavedKind = 'waf' | 'flood' | 'panel-access' | 'dns-cluster' | 'compiler-access'
@@ -47,12 +48,13 @@ export function secKit(root: HTMLElement, askDialog: Ask | undefined, displayDat
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
   const q = <T extends Element = HTMLElement>(selector: string): T | null => root.querySelector<T>(selector)
   const all = <T extends Element = HTMLElement>(selector: string): T[] => [...root.querySelectorAll<T>(selector)]
-  const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
+  const request = frameRequest(root)
   let dynamicTemplatesRequired = false, templatesInvalid = false
   let actionTemplate: HTMLTemplateElement | null = null, groupTemplate: HTMLTemplateElement | null = null
   const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const admitted = (): boolean => root.isConnected && !templatesInvalid && root.dataset.secCanRead === 'true' && !root.closest(denied) && typeof request === 'function'
-  const manageable = (): boolean => admitted() && root.dataset.secCanManage === 'true'
+  // Reads run inside read-only frames too, so closed fields show saved values; writes stay outside them and frameRequest refuses them there.
+  const admitted = (): boolean => root.isConnected && !templatesInvalid && root.dataset.secCanRead === 'true' && typeof request === 'function'
+  const manageable = (): boolean => admitted() && !root.closest(denied) && root.dataset.secCanManage === 'true'
   const status = q('[data-sec-status]'), banner = q('[data-sec-result]')
   const note = (state: string, message: string): void => { if (!status || templatesInvalid && state !== 'unavailable') return; status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
   const show = (kind: string, message: string): void => { if (!banner) return; banner.hidden = false; banner.dataset.outcome = kind; banner.textContent = message; banner.setAttribute('role', ['unknown', 'denied', 'failed'].includes(kind) ? 'alert' : 'status') }
@@ -128,7 +130,7 @@ export function secKit(root: HTMLElement, askDialog: Ask | undefined, displayDat
   }
   let busy = false, mutationAttempted = false
   const controls: (() => void)[] = []
-  const lock = (): void => { root.setAttribute('aria-busy', String(busy)); for (const control of controls) control(); if (templatesInvalid) for (const control of all<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('input,textarea,select,button')) control.disabled = true }
+  const lock = (): void => { root.setAttribute('aria-busy', String(busy)); for (const control of controls) control(); if (templatesInvalid || root.closest(denied)) for (const control of all<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('input,textarea,select,button')) control.disabled = true }
   const guarded = async (work: () => Promise<void>): Promise<void> => { if (busy || !admitted() || dynamicTemplatesRequired && !prepareTemplates()) return; mutationAttempted = false; busy = true; lock(); try { await work() } finally { busy = false; lock() } }
   const isBusy = (): boolean => busy
   const send = (method: string, path: string, body?: unknown): Promise<unknown> => {
@@ -335,5 +337,5 @@ function bindSecSecurity(askDialog: Ask | undefined): void {
     void load()
   })
 }
-export const SEC_CLIENT_TEMPLATE_HELPERS = `${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};`
+export const SEC_CLIENT_TEMPLATE_HELPERS = `${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${frameRequest.toString()};`
 export const SEC_SECURITY_CLIENT_BINDING = `(()=>{${SEC_CLIENT_TEMPLATE_HELPERS}const displayDateTime=${DISPLAY_DATETIME_BINDING};const readSecSavedView=${readSecSavedView.toString()};const readSecAccountWafView=${readSecAccountWafView.toString()};const secKit=${secKit.toString()};return ${bindSecSecurity.toString()};})()`

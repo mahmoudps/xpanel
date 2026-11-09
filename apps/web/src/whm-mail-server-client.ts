@@ -5,6 +5,8 @@ const whmClientNode = canonicalWhmClientNode
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatMailDateTime = formatDisplayDateTime
 
 export type MailServerStateView = 'match' | 'drift' | 'not-managed' | 'unknown'
@@ -94,7 +96,7 @@ function bindWhmMailServer(): void {
     if (root.dataset.mailServerBound === 'true') return
     root.dataset.mailServerBound = 'true'
     const page = root.dataset.mailServerPage ?? '', status = root.querySelector<HTMLElement>('[data-whm-mail-server-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-whm-mail-server-refresh]')
-    const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
+    const request = frameRequest(root)
     if (!['server', 'routing', 'outbound'].includes(page) || !status || !refresh) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     let templateContractIntact = true
@@ -110,7 +112,7 @@ function bindWhmMailServer(): void {
         throw error
       }
     }
-    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailServerCanRead === 'true' && !root.closest(denied) && !!request)
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailServerCanRead === 'true' && !!request)
     if (admitted()) { try { verifyWhmTemplates() } catch { return } }
     const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
       verifyWhmTemplates()
@@ -122,7 +124,7 @@ function bindWhmMailServer(): void {
     const expectations: Record<string, string> = { 'mx-saved': t('MX saved'), 'mx-missing': t('No MX saved; senders fall back to the domain address (RFC 5321)'),
       'zone-missing': t('No saved DNS zone on this server'), 'no-mailboxes': t('No mailboxes; not a virtual mailbox domain') }
     const routeLabels: Record<string, string> = { local: t('Local (deliver here)'), backup: t('Backup MX (relay to the primary)'), remote: t('Remote (deliver to the domain MX)') }
-    const manage = (): boolean => admitted() && root.dataset.mailServerCanManage === 'true'
+    const manage = (): boolean => admitted() && root.dataset.mailServerCanManage === 'true' && !root.closest(denied)
     let busy = false
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const technical = (value: string): HTMLElement => { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; return bdi }
@@ -324,4 +326,4 @@ function bindWhmMailServer(): void {
   })
 }
 
-export const WHM_MAIL_SERVER_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailServerView=${readMailServerView.toString()};const readMailPolicyView=${readMailPolicyView.toString()};return ${bindWhmMailServer.toString()};})()`
+export const WHM_MAIL_SERVER_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailServerView=${readMailServerView.toString()};const readMailPolicyView=${readMailPolicyView.toString()};return ${bindWhmMailServer.toString()};})()`)

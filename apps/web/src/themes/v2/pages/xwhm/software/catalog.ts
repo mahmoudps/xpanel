@@ -50,7 +50,7 @@ function siteInstances(t: Translate, canManage: boolean): string {
     + fields(select('v2-site-instances-release', t(msgid('Release')), t(msgid('Select a release')), 'data-site-instances-release-select') + `<div class="v2-field"><label for="v2-site-instances-file">${esc(t(msgid('Release file')))}</label><input id="v2-site-instances-file" type="file" data-site-instances-file disabled></div>`)
     + actions(action(t(msgid('Upload release')), 'upload'))
     + status(t(canManage ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.')), { 'data-site-instances-status': true }),
-    { 'data-site-instances': true, 'data-site-instances-can-manage': String(canManage) })
+    { 'data-site-instances': true, 'data-site-instances-can-read': String(canManage), 'data-site-instances-can-manage': String(canManage) })
 }
 
 /** The store extension and activity views have no installer transport; they retain their approved controls and unread state. */

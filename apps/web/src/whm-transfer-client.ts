@@ -10,6 +10,8 @@ const cloneViewRecord = canonicalCloneViewRecord
 const viewAction = canonicalViewAction
 const displayDateTime = formatDisplayDateTime
 const formatAsciiBytes = canonicalFormatAsciiBytes
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 
 /** Self-contained browser binding over the persisted transfer workspace contract. */
 function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promise<unknown>) | undefined): void {
@@ -32,7 +34,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     if (root.dataset.transferBound === 'true') return
     root.dataset.transferBound = 'true'
     const pageRoot = root.closest<HTMLElement>('[data-whm-detail-route]') ?? root
-    const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const access = frameAccess(root, 'data-transfer-can-read', 'data-transfer-manage'), send = access.request
     const field = (id: string): HTMLInputElement => root.querySelector<HTMLInputElement>('[data-transfer-field="' + id + '"]')!
     const button = (name: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>('[data-transfer-' + name + ']')!
     const sessionSelect = root.querySelector<HTMLSelectElement>('[data-transfer-session]')!
@@ -62,8 +64,8 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     const selectAll = root.querySelector<HTMLInputElement>('[data-transfer-select-all]')
     let templateIntact = true
     let inventoryRows: Array<{ row: HTMLElement; select: HTMLInputElement; resolve: HTMLButtonElement; conflicts: string[] }> = []
-    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => templateIntact && root.isConnected && root.dataset.transferManage === 'true' && !root.closest(denied) && typeof send === 'function'
+    // Reads run in a read-only frame too; every change needs the manage flag outside one.
+    const readable = (): boolean => templateIntact && access.readable(), admitted = (): boolean => readable() && access.writable()
     const selectionChanged = (): boolean => {
       const selection = object(selected?.session.selection) ? selected.session.selection : {}
       const names = (container: HTMLElement): string[] => [...container.querySelectorAll<HTMLInputElement>('input:checked')].map(input => input.value).sort()
@@ -93,8 +95,9 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     }
     for (const name of ['transfer-review', 'transfer-archive-summary', 'transfer-archive-conflicts', 'transfer-archive-unmapped', 'transfer-revert-loss']) records[name + '-table'] = { tag: 'div', slots: { rows: 'tbody' } }
     const disableNative = (): void => { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }) }
-    const verifyTemplates = (): boolean => {
-      if (!admitted()) { disableNative(); if (!['uncertain', 'stale'].includes(status.dataset.state ?? '')) announce('unavailable', t('Unavailable')); return false }
+    // A write step checks the manage flag too; losing it closes the workspace like a broken template.
+    const verifyTemplates = (write = false): boolean => {
+      if (!(write ? admitted() : readable())) { disableNative(); if (!['uncertain', 'stale'].includes(status.dataset.state ?? '')) announce('unavailable', t('Unavailable')); return false }
       try {
         if (inventoryLayout !== undefined && inventoryLayout !== 'comparison' || root.dataset.transferInventoryLayout !== inventoryLayout) throw new Error('invalid_transfer_layout')
         if (pageRoot.hasAttribute('data-whm-detail-route') && !['/whm/transfers', '/whm/transfers/server'].includes(pageRoot.dataset.whmDetailRoute ?? '')) throw new Error('invalid_transfer_owner')
@@ -149,8 +152,8 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       if (!verifyTemplates()) return
       const locked = busy || reviewRequired || !loaded || !admitted(), state = String(selected?.session.state ?? '')
       root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = locked })
-      button('refresh').disabled = busy || !admitted()
-      sessionSelect.disabled = busy || !loaded || !admitted()
+      button('refresh').disabled = busy || !readable()
+      sessionSelect.disabled = busy || !loaded || !readable()
       credential.disabled = locked || !credential.options.length
       nodeSelect.disabled = locked || !capabilities.live
       liveBox.disabled = locked || !nodeSelect.value
@@ -168,7 +171,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       button('inspect').disabled = locked || !capabilities.cpanelImport
       button('fetch').disabled = locked || !capabilities.cpanelImport
       button('ssh-key').disabled = locked || !capabilities.cpanelImport
-      importSelect.disabled = busy || !imports.length || !admitted()
+      importSelect.disabled = busy || !imports.length || !readable()
       importPlan.disabled = locked || chosen?.state !== 'review'
       button('import-run').disabled = locked || chosen?.state !== 'review' || !importPlan.value || (Array.isArray(chosen?.conflicts) && chosen.conflicts.length > 0)
       button('import-discard').disabled = locked || !chosen || ['uploading', 'fetching', 'inspecting', 'importing'].includes(String(chosen.state))
@@ -181,19 +184,19 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       root.setAttribute('aria-busy', String(busy))
     }
     const request = async (method: string, path: string, body?: unknown): Promise<unknown> => {
-      if (!verifyTemplates()) throw { stateChanged: false }
+      if (!verifyTemplates(method !== 'GET')) throw { stateChanged: false }
       try {
         const value = body === undefined ? await send!(method, path) : await send!(method, path, body)
-        if (!verifyTemplates()) throw { stateChanged: true, unknownOutcome: true }
+        if (!verifyTemplates(method !== 'GET')) throw { stateChanged: true, unknownOutcome: true }
         return value
       } catch (error) { verifyTemplates(); throw error }
     }
     const ask = async (title: string, body: string, danger = false): Promise<boolean> => {
-      if (!verifyTemplates()) return false
+      if (!verifyTemplates(true)) return false
       if (!askDialog) { announce('failed', t('Confirmation is unavailable. Nothing was sent.')); return false }
       let confirmed = false
       try { confirmed = await askDialog({ title, body, danger, confirm: t('Confirm') }) === true }
-      finally { if (!verifyTemplates()) confirmed = false }
+      finally { if (!verifyTemplates(true)) confirmed = false }
       return confirmed
     }
     const sourceLabel = (session: Record<string, unknown>): string => {
@@ -472,7 +475,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       finally { busy = false; controls() }
     }
     const perform = async (action: string, body: Record<string, unknown>, create = false): Promise<void> => {
-      if (busy || reviewRequired || !loaded || !verifyTemplates()) return
+      if (busy || reviewRequired || !loaded || !verifyTemplates(true)) return
       const previous = selected, previousId = String(previous?.session.id ?? '')
       if (!create && !previous) return
       busy = true; controls(); let submitted = false
@@ -502,7 +505,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
     /** Reads what the revert drops, shows it, and reverts only after the operator types the account name over that list. */
     const revertCutover = async (): Promise<void> => {
       const previous = selected, account = revertAccount.value
-      if (busy || reviewRequired || !loaded || !previous || !account || !verifyTemplates()) return
+      if (busy || reviewRequired || !loaded || !previous || !account || !verifyTemplates(true)) return
       busy = true; controls()
       let loss: Loss | null = null
       try { const value = await request('PATCH', '/api/transfers/sessions/' + encodeURIComponent(String(previous.session.id)), { action: 'revert-preview', account, expectedRevision: previous.revision }); loss = parseLoss(object(value) ? value.preview : null) }
@@ -515,7 +518,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       const summary = lossRows(seen).filter(row => !boxes.includes(String(row.item))).map(row => row.item + ': ' + row.observed).join('; ')
       const typed = await askDialog({ title: t('Revert the cutover?'), body: t('The source serves this account again and its zones point back there. The copy here is removed, and nothing changed here since the cutover is carried back: {summary}.', { summary }),
         input: true, value: '', preserveWhitespace: true, label: t('Type the account name to confirm'), confirm: t('Revert cutover'), danger: true })
-      if (!verifyTemplates() || selected !== previous) return
+      if (!verifyTemplates(true) || selected !== previous) return
       if (typed !== account) { announce('failed', typed === null ? t('The revert was not confirmed. Nothing was sent.') : t('The account name did not match. Nothing was sent.')); return }
       await perform('revert', { account, confirmation: seen.digest })
     }
@@ -598,7 +601,7 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
       } catch { announce('failed', t('The transfer key could not be read.')) }
       finally { busy = false; controls() }
     }
-    if (!send || !admitted()) { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); announce('unavailable', t('Transfer review is unavailable here. Nothing was read or changed.')); return }
+    if (!readable()) { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); announce('unavailable', t('Transfer review is unavailable here. Nothing was read or changed.')); return }
     if (!verifyTemplates()) return
     selectAll?.addEventListener('input', () => {
       if (selectAll.disabled || busy || reviewRequired || wholeServer || !verifyTemplates()) return
@@ -640,4 +643,4 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
   })
 }
 
-export const WHM_TRANSFER_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const displayDateTime=${DISPLAY_DATETIME_BINDING};const formatAsciiBytes=${ASCII_BYTES_BINDING};return ${bindWhmTransfer.toString()};})()`
+export const WHM_TRANSFER_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const displayDateTime=${DISPLAY_DATETIME_BINDING};const formatAsciiBytes=${ASCII_BYTES_BINDING};return ${bindWhmTransfer.toString()};})()`)

@@ -54,5 +54,5 @@ export function renderV2PanelCalendarsContacts(props: PanelSurfaceProps, authori
     table: (columns, body) => table('v2-dav-principals', t(msgid('Device connection')), columns, body, { 'data-dav-rows': true }) }))
   return page(locale, route, header(t, route, title, t(msgctxt('theme:v2', 'Manage saved mailbox collections and open their independent xMail workflows.')))
     + `<div class="v2-panel-extra__groups"${!authority?.canRead || authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''} data-account-collaboration data-collaboration-enabled="${canManage}">${owned}${creation}${sharing}${clients}${accountCollaborationClientTemplates()}</div>`
-    + `<div class="v2-panel-extra__groups"${!authority?.canRead || authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''} data-mailx-collections data-mailx-can-manage="${canManage}">${calendarEditor}${settings}${dav}${mailxCollectionsClientTemplates()}</div>`)
+    + `<div class="v2-panel-extra__groups"${!authority?.canRead || authority.presentation === 'read-only' || !account ? ' data-readonly="true"' : ''} data-mailx-collections data-mailx-collections-can-read="${canManage}" data-mailx-can-manage="${canManage}">${calendarEditor}${settings}${dav}${mailxCollectionsClientTemplates()}</div>`)
 }

@@ -5,6 +5,8 @@ const whmClientNode = canonicalWhmClientNode
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatMailDateTime = formatDisplayDateTime
 
 type MailLogStatusView = 'sent' | 'deferred' | 'bounced' | 'expired' | 'rejected' | 'queued'
@@ -99,7 +101,6 @@ function bindWhmMailLog(): void {
   const statusLabel: Record<string, string> = { sent: t('Delivered'), deferred: t('Deferred'), bounced: t('Bounced'), expired: t('Expired'), rejected: t('Rejected'), queued: t('Queued') }
   const kindLabel: Record<string, string> = { client: t('Received from client'), 'message-id': t('Message-ID recorded'), queued: t('Queued for delivery'), delivery: t('Delivery attempt'), rejected: t('Rejected'), expired: t('Expired and returned to sender'), notification: t('Notification sent to the sender'), removed: t('Removed from the queue') }
   const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
   const time = formatMailDateTime
   const iso = (ms: number): string => new Date(ms).toISOString().slice(0, 19) + 'Z'
   const utc = (raw: string): string | null => {
@@ -130,7 +131,8 @@ function bindWhmMailLog(): void {
         throw error
       }
     }
-    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailLogCanRead === 'true' && !root.closest(denied) && !!send)
+    const send = frameRequest(root)
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailLogCanRead === 'true' && !!send)
     if (admitted()) { try { verifyWhmTemplates() } catch { return } }
     const checkedRequest: NonNullable<typeof send> = async (...args: Parameters<NonNullable<typeof send>>) => {
       verifyWhmTemplates()
@@ -263,4 +265,4 @@ function bindWhmMailLog(): void {
   })
 }
 
-export const WHM_MAIL_LOG_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const mailLogObject=${mailLogObject.toString()};const mailLogText=${mailLogText.toString()};const mailLogNullable=${mailLogNullable.toString()};const mailLogInstant=${mailLogInstant.toString()};const mailLogCount=${mailLogCount.toString()};const mailLogDsn=${mailLogDsn.toString()};const mailLogBase=${mailLogBase.toString()};const mailLogCounts=${mailLogCounts.toString()};const readMailLogMessage=${readMailLogMessage.toString()};const readMailDeliveryView=${readMailDeliveryView.toString()};const readMailMonitorView=${readMailMonitorView.toString()};return ${bindWhmMailLog.toString()};})()`
+export const WHM_MAIL_LOG_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const mailLogObject=${mailLogObject.toString()};const mailLogText=${mailLogText.toString()};const mailLogNullable=${mailLogNullable.toString()};const mailLogInstant=${mailLogInstant.toString()};const mailLogCount=${mailLogCount.toString()};const mailLogDsn=${mailLogDsn.toString()};const mailLogBase=${mailLogBase.toString()};const mailLogCounts=${mailLogCounts.toString()};const readMailLogMessage=${readMailLogMessage.toString()};const readMailDeliveryView=${readMailDeliveryView.toString()};const readMailMonitorView=${readMailMonitorView.toString()};return ${bindWhmMailLog.toString()};})()`)

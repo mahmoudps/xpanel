@@ -2,6 +2,8 @@ import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 import { viewAction as canonicalViewAction } from './workspace-view-templates.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
@@ -63,10 +65,11 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
   document.querySelectorAll<HTMLElement>('[data-filter-workspace]').forEach((root, workspaceIndex) => {
     if (root.dataset.filterBound === 'true') return
     root.dataset.filterBound = 'true'
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const access = frameAccess(root, 'data-filter-can-read', 'data-filter-manage'), request = access.request
     const copy = (message: string, values?: MessageValues) => xpT(message, values)
     const blockedAncestor = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const canManage = root.dataset.filterManage === 'true', fixedMailbox = root.dataset.filterMailbox ?? ''
+    // Saved filters are read outside a read-only frame as before, and inside one with the read flag; changes need the manage flag outside one.
+    const readable = (): boolean => access.readable() || !root.closest(blockedAncestor), canManage = access.writable, fixedMailbox = root.dataset.filterMailbox ?? ''
     // the xMail listener admits only /api/webmail; the same filter route serves both bases
     const filtersBase = fixedMailbox ? '/api/webmail/filters' : '/api/mail/filters'
     // a mailbox session learns its account from the first verified reply, then holds every later reply to it
@@ -110,14 +113,14 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
     const control = () => {
       const blocked = !!root.closest(blockedAncestor)
       root.setAttribute('aria-busy', String(busy)); if (select) select.disabled = busy || blocked
-      root.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = busy || blocked || (button.hasAttribute('data-filter-write') && (!canManage || !(button.dataset.filterAction === 'delete' ? state !== null : ready()) || uncertain)) || (button.hasAttribute('data-filter-test-run') && !ready()) })
+      root.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = busy || blocked || (button.hasAttribute('data-filter-write') && (!canManage() || !(button.dataset.filterAction === 'delete' ? state !== null : ready()) || uncertain)) || (button.hasAttribute('data-filter-test-run') && !ready()) })
       root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('form input,form select,form textarea,[data-filter-test] input,[data-filter-test] textarea').forEach(field => { field.disabled = busy || blocked })
       root.querySelectorAll<HTMLButtonElement>('[data-filter-action="up"],[data-filter-action="down"]').forEach(button => { const index = Number(button.dataset.filterIndex); button.disabled ||= button.dataset.filterAction === 'up' ? index <= 0 : index >= (state?.filters.length ?? 0) - 1 })
       const addCondition = root.querySelector<HTMLButtonElement>('[data-filter-add-condition]'), addAction = root.querySelector<HTMLButtonElement>('[data-filter-add-action]')
       const stop = form?.elements.namedItem('stop') as HTMLInputElement | null
-      if (addCondition) addCondition.disabled ||= !canManage || !ready() || uncertain || (conditionsRoot?.children.length ?? 0) >= 50
-      if (addAction) addAction.disabled ||= !canManage || !ready() || uncertain || (actionsRoot?.children.length ?? 0) + (stop?.checked ? 1 : 0) >= 10
-      if (stop) stop.disabled ||= !canManage || !ready() || uncertain || !stop.checked && (actionsRoot?.children.length ?? 0) >= 10
+      if (addCondition) addCondition.disabled ||= !canManage() || !ready() || uncertain || (conditionsRoot?.children.length ?? 0) >= 50
+      if (addAction) addAction.disabled ||= !canManage() || !ready() || uncertain || (actionsRoot?.children.length ?? 0) + (stop?.checked ? 1 : 0) >= 10
+      if (stop) stop.disabled ||= !canManage() || !ready() || uncertain || !stop.checked && (actionsRoot?.children.length ?? 0) >= 10
     }
     const endpoint = (chosen = selection) => filtersBase + '?scope=' + chosen.scope + (chosen.scope === 'mailbox' ? '&mailbox=' + encodeURIComponent(chosen.mailbox!) : '')
     const accountOf = (raw: unknown) => expectedAccountId || (filterObject(raw) && filterObject(raw.context) && typeof raw.context.accountId === 'string' ? raw.context.accountId : '')
@@ -147,7 +150,7 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
     }) }
     const ruleControls = (item: HTMLElement, row: FilterRecord, index: number, valid: boolean): void => {
       const controls = clientTemplateSlot(item, 'controls')
-      if (!canManage || typeof row.id !== 'string' || !row.id) { controls.remove(); return }
+      if (!canManage() || typeof row.id !== 'string' || !row.id) { controls.remove(); return }
       const actions = valid ? [['edit', copy(msgctxt('account-filters-client', 'Edit'))], ['toggle', row.enabled ? copy('Disable configuration') : copy('Enable configuration')], ['up', copy('Move up')], ['down', copy('Move down')], ['delete', copy('Delete configuration')]] : [['delete', copy('Delete configuration')]]
       for (const [kind, label] of actions) { const button = viewAction(item, kind!); button.dataset.filterAction = kind!; button.dataset.filterId = row.id; button.dataset.filterIndex = String(index); button.dataset.filterWrite = ''; button.textContent = label! }
     }
@@ -175,7 +178,7 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
       root.querySelector<HTMLElement>('[data-filter-preview]')!.textContent = state.compiledSieve ?? ''; control()
     }
     const refresh = async () => {
-      if (busy || root.closest(blockedAncestor)) return
+      if (busy || !readable()) return
       const token = ++generation, chosen = {...selection}; busy=true; control(); note(copy('Reading configuration…'),'pending')
       try { state=await read(chosen,token); uncertain=false; paint(); note(copy('Filters read from the server.'), state.compilation.status==='ready'?'read':'blocked') }
       catch { state=null; note(copy('Configuration could not be verified. Editing is unavailable.'),'failed') }
@@ -194,7 +197,7 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
     }
     const removeButton = (row: HTMLElement, label: string, after: () => void): void => {
       const remove = viewAction(row, 'remove'); remove.textContent = label; remove.dataset.filterWrite = ''
-      remove.addEventListener('click', () => { if (busy || uncertain || !canManage || root.closest(blockedAncestor)) return; row.remove(); dirty = true; after(); control() })
+      remove.addEventListener('click', () => { if (busy || uncertain || !canManage()) return; row.remove(); dirty = true; after(); control() })
     }
     const conditionsRoot = form?.querySelector<HTMLElement>('[data-filter-conditions]'), actionsRoot = form?.querySelector<HTMLElement>('[data-filter-actions]')
     const updateEmpty = () => { const empty = form?.querySelector<HTMLElement>('[data-filter-unconditional]'); if (empty) empty.hidden = !!conditionsRoot?.children.length }
@@ -235,7 +238,7 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
       conditions:[...conditionsRoot!.querySelectorAll<HTMLElement>('[data-filter-condition]')].map(row=>{const read=(name:string)=>rowValue(row,'condition',name);let content=read('value');if(read('field')==='size')content=content.trim();if(read('field')==='size'&&/^\d+[KMG]?$/i.test(content)){const match=/^(\d+)([KMG])?$/i.exec(content)!;content=String(Number(match[1])*(({K:1024,M:1048576,G:1073741824} as Record<string,number>)[match[2]?.toUpperCase()??'']??1))}return{field:read('field'),comparator:read('comparator'),value:content,...(read('field')==='header'?{headerName:read('headerName')}: {})}}),
       actions:[...[...actionsRoot!.querySelectorAll<HTMLElement>('[data-filter-action-row]')].map(row=>{const type=rowValue(row,'action','type'),target=rowValue(row,'action','target');return {type,...(['fileinto','redirect','reject'].includes(type)?{target:type==='redirect'?target.trim().toLowerCase():target}:{})}}),...((value('stop') as HTMLInputElement).checked?[{type:'stop'}]:[])]})
     const mutate=async(method:string,path:string,payload:Record<string,unknown>,verify:(next:FilterState)=>boolean,expected=state?.revision)=>{
-      if(!request||busy||uncertain||!canManage||!(method==='DELETE'?state!==null:ready())||root.closest(blockedAncestor)||!expected)return
+      if(!request||busy||uncertain||!canManage()||!(method==='DELETE'?state!==null:ready())||!expected)return
       busy=true;control();const token=generation,chosen={...selection};let sent=false,acknowledged=false
       try { const fresh=await read(chosen,token);if(fresh.revision!==expected){state=fresh;paint();throw Object.assign(new Error('stale_filter_revision'),{status:409,details:{stateChanged:false}})}
         sent=true;const raw=await request(method,path,{...payload,expectedRevision:expected});const result=readFilterState(raw,{...chosen,accountId:expectedAccountId});acknowledged=true
@@ -310,7 +313,7 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
       selection=wanted==='global'?{scope:'global',mailbox:null}:{scope:'mailbox',mailbox:wanted.slice(8)};state=null;generation++;uncertain=false;dirty=false;editing=null;draftRevision=null;if(form)form.hidden=true;list.textContent='';if(traceList)traceList.textContent='';if(outcomeText)outcomeText.textContent='';root.querySelector<HTMLElement>('[data-filter-preview]')!.textContent='';root.querySelector<HTMLElement>('[data-filter-count]')!.textContent='';root.querySelector<HTMLElement>('[data-filter-compilation]')!.textContent=copy(msgctxt('account-filters-client', 'Not read'));await refresh()
     })
     root.addEventListener('click',async event=>{
-      const button=event.target instanceof Element?event.target.closest<HTMLButtonElement>('[data-filter-action]'):null;if(!button||button.disabled||busy||uncertain||!state||(!ready()&&button.dataset.filterAction!=='delete')||!canManage)return
+      const button=event.target instanceof Element?event.target.closest<HTMLButtonElement>('[data-filter-action]'):null;if(!button||button.disabled||busy||uncertain||!state||(!ready()&&button.dataset.filterAction!=='delete')||!canManage())return
       const row=state.filters.find(item=>item.id===button.dataset.filterId);if(!row)return
       const action=button.dataset.filterAction
       if(action==='edit'){if(!dirty)edit(row);else note(copy('Finish or cancel the current draft first.'),'failed');return}
@@ -326,4 +329,4 @@ function bindAccountFilters(askDialog?: (options: Record<string, unknown>) => Pr
   })
 }
 
-export const ACCOUNT_FILTERS_CLIENT_BINDING = `(function(askDialog) { const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const viewAction=${viewAction.toString()}; ${filterSelectionKey.toString()}; ${filterObject.toString()}; ${filterActionsValid.toString()}; ${readFilterState.toString()}; ${readFilterTrace.toString()}; ${filterWriteUncertain.toString()}; ${filterHasForbiddenControl.toString()}; ${filterDraftMatches.toString()}; (${bindAccountFilters.toString()})(askDialog); })`
+export const ACCOUNT_FILTERS_CLIENT_BINDING = withFrameRequest(`(function(askDialog) { const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const viewAction=${viewAction.toString()}; ${filterSelectionKey.toString()}; ${filterObject.toString()}; ${filterActionsValid.toString()}; ${readFilterState.toString()}; ${readFilterTrace.toString()}; ${filterWriteUncertain.toString()}; ${filterHasForbiddenControl.toString()}; ${filterDraftMatches.toString()}; (${bindAccountFilters.toString()})(askDialog); })`)

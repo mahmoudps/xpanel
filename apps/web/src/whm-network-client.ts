@@ -1,6 +1,8 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
 type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
@@ -16,8 +18,6 @@ export function parseIpMigrationPairs(text: string): { from: string; to: string 
 /** Root IP tools and reseller tools. Each request is confirmed by its API reply before any success is shown. */
 function bindWhmNetwork(askDialog: Ask | undefined): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
-  const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
   const note = (node: HTMLElement | null, state: string, message: string): void => {
     if (!node) return
@@ -53,26 +53,28 @@ function bindWhmNetwork(askDialog: Ask | undefined): void {
   const field = (form: HTMLFormElement, name: string): string => { const item = form.elements.namedItem(name); return item instanceof HTMLInputElement || item instanceof HTMLSelectElement || item instanceof HTMLTextAreaElement ? item.value.trim() : '' }
   const checked = (form: HTMLFormElement, name: string): string[] => Array.from(form.elements).filter((item): item is HTMLInputElement => item instanceof HTMLInputElement && item.name === name && item.checked).map(item => item.value)
 
-  const bindRoot = (root: HTMLElement, status: HTMLElement | null): ((work: () => Promise<void>, node?: HTMLElement | null) => Promise<void>) | null => {
+  // These tools only change state; their values are rendered by the server, so a read-only frame keeps them closed.
+  const bindRoot = (root: HTMLElement, status: HTMLElement | null): { run: (work: () => Promise<void>, node?: HTMLElement | null) => Promise<void>; send: Transport } | null => {
     if (root.dataset.networkBound === 'true') return null
     root.dataset.networkBound = 'true'
-    const editable = (): boolean => root.isConnected && root.dataset.networkEditable === 'true' && !root.closest(denied) && typeof request === 'function'
+    const access = frameAccess(root, 'data-network-can-read', 'data-network-editable'), request = access.request
+    const editable = (): boolean => access.writable()
     let busy = false
     root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('button,input,select,textarea').forEach(control => { if (!editable()) control.disabled = true })
     if (!editable()) { note(status, 'unavailable', t('These tools require root authorization and a connected session. Nothing was changed.')); return null }
-    return async (work, node = status) => {
+    return { send: request!, run: async (work, node = status) => {
       if (busy) return
       busy = true; root.setAttribute('aria-busy', 'true')
       try { await work() } catch (error) { const text = refusal(error); note(node, text ? 'failed' : 'uncertain', text || uncertain) }
       finally { busy = false; root.setAttribute('aria-busy', 'false') }
-    }
+    } }
   }
 
   document.querySelectorAll<HTMLElement>('[data-whm-ip-tools]').forEach(root => {
     const status = root.querySelector<HTMLElement>('[data-ip-tools-status]')
-    const run = bindRoot(root, status)
-    if (!run) return
-    const send = request!
+    const bound = bindRoot(root, status)
+    if (!bound) return
+    const { run, send } = bound
     root.querySelector<HTMLFormElement>('[data-ip-change-form]')?.addEventListener('submit', event => {
       event.preventDefault()
       const form = event.currentTarget as HTMLFormElement, node = form.querySelector<HTMLElement>('[data-ip-change-status]')
@@ -208,9 +210,9 @@ function bindWhmNetwork(askDialog: Ask | undefined): void {
 
   document.querySelectorAll<HTMLElement>('[data-whm-reseller-lists]').forEach(root => {
     const status = root.querySelector<HTMLElement>('[data-acl-list-status]')
-    const run = bindRoot(root, status)
-    if (!run) return
-    const send = request!
+    const bound = bindRoot(root, status)
+    if (!bound) return
+    const { run, send } = bound
     root.querySelector<HTMLFormElement>('[data-acl-list-form]')?.addEventListener('submit', event => {
       event.preventDefault()
       const form = event.currentTarget as HTMLFormElement
@@ -248,9 +250,9 @@ function bindWhmNetwork(askDialog: Ask | undefined): void {
 
   document.querySelectorAll<HTMLElement>('[data-whm-reseller-email]').forEach(root => {
     const status = root.querySelector<HTMLElement>('[data-reseller-email-status]')
-    const run = bindRoot(root, status)
-    if (!run) return
-    const send = request!
+    const bound = bindRoot(root, status)
+    if (!bound) return
+    const { run, send } = bound
     root.querySelector<HTMLFormElement>('[data-reseller-email-form]')?.addEventListener('submit', event => {
       event.preventDefault()
       const form = event.currentTarget as HTMLFormElement
@@ -267,4 +269,4 @@ function bindWhmNetwork(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_NETWORK_CLIENT_BINDING = `(()=>{const ACL_LIST_NAME=${ACL_LIST_NAME.toString()};const parseIpMigrationPairs=${parseIpMigrationPairs.toString()};return ${bindWhmNetwork.toString()};})()`
+export const WHM_NETWORK_CLIENT_BINDING = withFrameRequest(`(()=>{const ACL_LIST_NAME=${ACL_LIST_NAME.toString()};const parseIpMigrationPairs=${parseIpMigrationPairs.toString()};return ${bindWhmNetwork.toString()};})()`)

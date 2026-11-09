@@ -5,6 +5,8 @@ const whmClientNode = canonicalWhmClientNode
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const displayDateTime = formatDisplayDateTime
 export type IntrusionJailView = { name: string; state: 'read' | 'unavailable'; currentlyFailed: number | null; totalFailed: number | null; currentlyBanned: number | null; totalBanned: number | null; banned: string[]; truncated: boolean }
 export type IntrusionView = { state: 'read' | 'not_installed' | 'unavailable'; observedAt: string; reason: string | null; jails: IntrusionJailView[]; unsupportedJails: number; jailsTruncated: boolean }
@@ -102,12 +104,12 @@ function bindWhmSecurityTools(askDialog: Ask | undefined): void {
     const page = root.dataset.securityToolsPage ?? ''
     const q = <T extends Element = HTMLElement>(selector: string): T | null => root.querySelector<T>(selector)
     const status = q('[data-whm-security-tools-status]'), refresh = q<HTMLButtonElement>('[data-whm-security-tools-refresh]'), banner = q('[data-whm-security-tools-result]')
-    const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
+    const request = frameRequest(root)
     if (!status || !refresh || !['intrusion', 'antivirus', 'isolation'].includes(page)) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     let templateContractIntact = true
-    const admitted = (): boolean => templateContractIntact && root.isConnected && root.dataset.securityToolsCanRead === 'true' && !root.closest(denied) && !!request
-    const manageable = (): boolean => admitted() && root.dataset.securityToolsCanManage === 'true'
+    const admitted = (): boolean => templateContractIntact && root.isConnected && root.dataset.securityToolsCanRead === 'true' && !!request
+    const manageable = (): boolean => admitted() && root.dataset.securityToolsCanManage === 'true' && !root.closest(denied)
     let busy = false
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const show = (kind: string, message: string): void => { if (!banner) return; banner.hidden = false; banner.dataset.outcome = kind; banner.textContent = message; banner.setAttribute('role', ['unknown', 'denied'].includes(kind) ? 'alert' : 'status') }
@@ -349,4 +351,4 @@ function bindWhmSecurityTools(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_SECURITY_TOOLS_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const displayDateTime=${DISPLAY_DATETIME_BINDING};const readIntrusionView=${readIntrusionView.toString()};const readAntivirusView=${readAntivirusView.toString()};const readIsolationView=${readIsolationView.toString()};const readUnbanResult=${readUnbanResult.toString()};const readJobAck=${readJobAck.toString()};return ${bindWhmSecurityTools.toString()};})()`
+export const WHM_SECURITY_TOOLS_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const displayDateTime=${DISPLAY_DATETIME_BINDING};const readIntrusionView=${readIntrusionView.toString()};const readAntivirusView=${readAntivirusView.toString()};const readIsolationView=${readIsolationView.toString()};const readUnbanResult=${readUnbanResult.toString()};const readJobAck=${readJobAck.toString()};return ${bindWhmSecurityTools.toString()};})()`)

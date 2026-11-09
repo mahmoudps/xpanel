@@ -6,6 +6,8 @@ const mailTemplate = canonicalMailTemplate
 const mailSlot = canonicalMailSlot
 const mailRequireTemplates = canonicalMailRequireTemplates
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 const formatMailDateTime = formatDisplayDateTime
 
 export type MailFolderRow = { folder: string; name: string; nameDecoded: boolean; leaf: string; parent: string | null; depth: number; delimiter: string | null; specialUse: string | null; system: boolean; selectable: boolean; subscribed: boolean | null; children: number; messages: number | null; unseen: number | null }
@@ -46,8 +48,6 @@ export function readMailFolderChange(value: unknown, mailbox: string): MailFolde
 
 function bindMailFolders(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const special: Record<string, string> = { '\\All': t('All mail'), '\\Archive': t('Archive'), '\\Drafts': t('Drafts'), '\\Flagged': t('Flagged'), '\\Junk': t('Junk'), '\\Sent': t('Sent'), '\\Trash': t(msgctxt('mail-folders-client', 'Trash')) }
   const bdi = (value: string, dir = 'auto'): HTMLElement => { const item = document.createElement('bdi'); item.dir = dir; item.textContent = value; return item }
   const around = (text: string, node: Node): (string | Node)[] => { const [before = '', after = ''] = text.split('{folder}'); return [before, node, after] }
@@ -62,7 +62,9 @@ function bindMailFolders(): void {
     if (!status || !rows || !create || !editor || !nameInput || !parentSelect || !renameInput || !confirmBox) return
     try { mailRequireTemplates(root, [['mail-folder-admin-row', 'tr', ['tree', 'name', 'system', 'raw', 'messages', 'unseen', 'subscription', 'unknown', 'protected', 'actions'], [['name', 'bdi'], ['messages', 'bdi'], ['unseen', 'bdi'], ['subscription', 'input', { type: 'checkbox' }]]], ['mail-folder-admin-action', 'button', ['label'], [['label', 'button', { type: 'button' }]]], ['mail-folder-admin-empty', 'tr', ['message']]]) }
     catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Folder management is unavailable for this mailbox session. Nothing was read.'); return }
-    const admitted = (): boolean => root.isConnected && root.dataset.foldersCanManage === 'true' && root.dataset.foldersMailbox === mailbox && !!mailbox && !root.closest(denied) && !!send
+    const access = frameAccess(root, 'data-folders-can-read', 'data-folders-can-manage'), send = access.request
+    // Reads run in a read-only frame too; editing and every write need the manage flag outside one.
+    const readable = (): boolean => access.readable() && root.dataset.foldersMailbox === mailbox && !!mailbox, admitted = (): boolean => readable() && access.writable()
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const fact = (key: string, value: string): void => { const node = root.querySelector<HTMLElement>('[data-mail-folders-fact="' + key + '"]'); if (node) node.textContent = value }
     let busy = false, generation = 0, view: MailFolderList | null = null, editing: { mode: 'rename' | 'delete'; folder: MailFolderRow } | null = null
@@ -143,13 +145,13 @@ function bindMailFolders(): void {
       return messages[details.reason as string] ?? (details.stateChanged === false ? t('The folder change was not made. Nothing was changed.') : t('The folder change could not be verified. Read the folders again before retrying.'))
     }
     const load = async (quiet = false): Promise<void> => {
-      if (busy || !admitted() || !send) return
+      if (busy || !readable() || !send) return
       const token = ++generation
       busy = true; sync(); if (!quiet) note('reading', t('Reading folders…'))
       try {
         const next = readMailFolderList(await send('GET', '/api/webmail/folders'), mailbox)
         if (token !== generation) return
-        if (!admitted()) { view = null; empty(t('Nothing is shown.')); note('unavailable', t('Folder management is unavailable for this mailbox session. Nothing is shown.')); return }
+        if (!readable()) { view = null; empty(t('Nothing is shown.')); note('unavailable', t('Folder management is unavailable for this mailbox session. Nothing is shown.')); return }
         view = next; paint()
         if (!quiet) note('read', t('Folders read: {count}', { count: next.folders.length }))
       } catch (error) {
@@ -177,7 +179,7 @@ function bindMailFolders(): void {
       } finally { if (token === generation) { busy = false; sync() } }
       if (reread && token === generation) { editing = null; editor.hidden = true; await load(true) }
     }
-    if (!admitted()) { sync(); note('unavailable', t('Folder management is unavailable for this mailbox session. Nothing was read.')); return }
+    if (!readable()) { sync(); note('unavailable', t('Folder management is unavailable for this mailbox session. Nothing was read.')); return }
     create.addEventListener('submit', event => {
       event.preventDefault()
       const name = nameInput.value.trim()
@@ -203,4 +205,4 @@ function bindMailFolders(): void {
   })
 }
 
-export const MAIL_FOLDERS_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailFolderList=${readMailFolderList.toString()};const readMailFolderChange=${readMailFolderChange.toString()};return ${bindMailFolders.toString()};})()`
+export const MAIL_FOLDERS_CLIENT_BINDING = withFrameRequest(`(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailFolderList=${readMailFolderList.toString()};const readMailFolderChange=${readMailFolderChange.toString()};return ${bindMailFolders.toString()};})()`)

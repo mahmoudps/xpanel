@@ -3,9 +3,10 @@ import { mailIdentitiesClientBinding } from './mail-identities-client.ts'
 import type { MailIdentity } from './mail-identities-client.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 type ComposeIdentity = MailIdentity & { revision: string }
 type IdentityRuntime = Pick<typeof import('./mail-identities-client.ts'), 'readMailIdentities' | 'identitiesObject'>
-type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
 
 /** Saved identity selection and a managed plain signature; existing rich body nodes remain intact. */
 function bindComposeIdentities(_askDialog: unknown, runtime: IdentityRuntime): void {
@@ -21,9 +22,9 @@ function bindComposeIdentities(_askDialog: unknown, runtime: IdentityRuntime): v
     const signature = root.querySelector<HTMLButtonElement>('[data-compose-signature-insert]')
     const send = root.querySelector<HTMLButtonElement>('[data-mail-send="true"]')
     if (!select || !editor || !status || !refresh || !signature || !send) return
-    const transport = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
-    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],fieldset:disabled,[aria-disabled="true"]'
-    const eligible = (): boolean => root.isConnected && !root.closest(denied) && /^[^\s<>@]+@[^\s<>@]+$/.test(mailbox)
+    const access = frameAccess(root, 'data-compose-identities-can-read', 'data-compose-identities-manage'), transport = access.request
+    // Saved identities are read in a read-only frame too; choosing a sender and sending need the manage flag outside one.
+    const readable = (): boolean => access.readable() && /^[^\s<>@]+@[^\s<>@]+$/.test(mailbox), eligible = (): boolean => readable() && access.writable()
     let identities: ComposeIdentity[] = [], selected: ComposeIdentity | null = null, busy = false, loaded = false, knownCollection = false, ownershipReview = false
     let managed: HTMLElement | null = null, managedText = '', plainTail = ''
     const plain = (): boolean => editor instanceof HTMLTextAreaElement || editor instanceof HTMLInputElement
@@ -109,7 +110,7 @@ function bindComposeIdentities(_askDialog: unknown, runtime: IdentityRuntime): v
       select.append(unread, fallback); select.value = unread.value
     }
     const read = async (): Promise<void> => {
-      if (!transport || busy || !eligible() || root.dataset.composeDraftBusy === 'true' || send.dataset.mailSendBusy === 'true' || send.dataset.mailSendReview === 'true') return
+      if (!transport || busy || !readable() || root.dataset.composeDraftBusy === 'true' || send.dataset.mailSendBusy === 'true' || send.dataset.mailSendReview === 'true') return
       busy = true; setStatus('reading', t('Reading saved sender identities…')); controls()
       const previous = selected?.id ?? null
       try {
@@ -146,7 +147,7 @@ function bindComposeIdentities(_askDialog: unknown, runtime: IdentityRuntime): v
         setStatus('failed', t('Saved sender identities could not be read. Your message is kept. Read them again before sending.'))
       } finally { busy = false; controls() }
     }
-    if (!transport || !eligible()) {
+    if (!readable()) {
       setStatus('unavailable', t('Sender identities are unavailable here. Your message is kept.'))
       select.disabled = true; refresh.disabled = true; signature.disabled = true; send.disabled = true
       return
@@ -171,4 +172,4 @@ function bindComposeIdentities(_askDialog: unknown, runtime: IdentityRuntime): v
   })
 }
 
-export const MAIL_COMPOSE_IDENTITIES_CLIENT_BINDING = mailIdentitiesClientBinding(bindComposeIdentities, true)
+export const MAIL_COMPOSE_IDENTITIES_CLIENT_BINDING = withFrameRequest(mailIdentitiesClientBinding(bindComposeIdentities, true))

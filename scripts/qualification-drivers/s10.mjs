@@ -354,7 +354,7 @@ export default [
     page: { route: '/mail/tools/connect-devices', read: `${API}/connect-devices`, shows: data => [data?.mailbox] },
     unit: [
       { id: 'WMCS-UNIT-SETTINGS', file: 'apps/api/src/mail/device-setup.test.ts', name: 'mail client settings from trusted configuration returns the sealed mailbox as username, rendered ports and no password' },
-      { id: 'WMCS-UNIT-SEND', file: 'apps/web/src/mail-connect-devices-client.test.ts', name: 'xMail connect devices reader sends the instructions to one address and reports refusals without a false success' },
+      { id: 'WMCS-UNIT-SEND', file: 'apps/web/src/mail-connect-devices-client.test.ts', name: 'xMail connect devices workspace sends the instructions to one address and reports refusals without a false success' },
     ],
     checks: ['AUTOCONFIG-IMAP-993-SSL-SMTP-465-SSL-USERNAME', 'INSTRUCTIONS-TO-INVALID-ADDRESS-INVALID-EMAIL'],
     async run({ mailbox, fixture, site, check, refused }) {

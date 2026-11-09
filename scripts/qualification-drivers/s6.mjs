@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
-import { blocked, check, safeResponse, tool } from './kit.mjs'
+import { blocked, check, safeResponse, signInThroughForm, tool } from './kit.mjs'
 
 const AUDIT_FIELDS = ['id', 'at', 'actor', 'action', 'target', 'outcome']
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right)
@@ -67,14 +67,7 @@ export async function auditLogBrowserChecks({ page, origin, credentials }) {
   }
   const shown = () => page.locator('tr[data-audit-id]').evaluateAll(rows => rows.map(row => row.getAttribute('data-audit-id')))
   const matches = async displayed => displayed.length > 0 && same(displayed, ids(auditRows(await api({ limit: String(displayed.length), before: after(displayed[0]) }))))
-  await page.goto(`${origin}/login?lang=en`)
-  await page.locator('#login-username').fill(credentials.username)
-  await page.locator('#login-password').fill(credentials.password)
-  if (credentials.totpCode !== undefined) await page.locator('#login-otp').fill(credentials.totpCode)
-  const [login] = await Promise.all([
-    page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/login' && response.request().method() === 'POST'),
-    page.locator('#login-password').press('Enter'),
-  ])
+  const login = await signInThroughForm(page, origin, credentials)
   checks.push(check('AL-BROWSER-SIGN-IN', login.status() === 200, { status: login.status() }))
   await page.goto(`${origin}/whm/audit?lang=en`)
   const listed = await shown()

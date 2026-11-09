@@ -46,12 +46,12 @@ describe('WHM web server readback and guarded rollback controller', () => {
     expect(() => readWhmWebGenerations({ generations: [current, current], currentGeneration: current })).toThrow()
     expect(() => readWhmWebServices({ services: [{ id: 'nginx', label: 'nginx', unit: null, state: 'active' }] })).toThrow()
   })
-  it('does not read without a transport or admitted workspace', async () => {
+  it('does not read without a transport, and only reads in a closed workspace', async () => {
     new Function('return ' + WHM_WEB_SERVER_CLIENT_BINDING)()(undefined)
     expect(document.querySelector<HTMLElement>('[data-whm-web-status]')!.dataset.state).toBe('unavailable')
     document.querySelector<HTMLElement>('[data-whm-web-readback]')!.removeAttribute('data-web-bound')
     document.querySelector<HTMLElement>('[data-whm-detail-route]')!.dataset.capabilityState = 'unavailable'
-    const f = model(); f.boot(); await tick(); expect(f.send).not.toHaveBeenCalled()
+    const f = model(); f.boot(); await tick(); expect((f.send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
   })
   it('reads actual endpoints and does not infer rollback admission from root/page access', async () => {
     const f = model(); f.boot(); await tick()

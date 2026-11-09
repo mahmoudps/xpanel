@@ -67,9 +67,10 @@ describe('service manager client actions', () => {
   it('keeps native controls inert while local area navigation remains harmless without transport or authority', async () => {
     boot(); expect(q<HTMLElement>('[data-sm-status]').dataset.state).toBe('unavailable')
     for (const extra of [{ canRead: false }, { capability: 'unavailable' }]) {
-      mount(extra); const send = vi.fn(); boot(send, async () => true); await tick(); expect(send).not.toHaveBeenCalled()
+      // A read-only frame may read saved values; it never sends an unsafe method.
+      mount(extra); const send = vi.fn(); boot(send, async () => true); await tick(); expect(send.mock.calls.every(call => call[0] === 'GET')).toBe(true)
       for (const control of document.querySelectorAll<HTMLInputElement>('input,select,[data-sm-refresh],[data-sm-reboot],[data-sm-action]')) expect(control.disabled).toBe(true)
-      const area = q<HTMLButtonElement>('[data-sm-area="web"]'); expect(area.disabled).toBe(false); area.click(); await tick(); expect(send).not.toHaveBeenCalled()
+      const area = q<HTMLButtonElement>('[data-sm-area="web"]'); expect(area.disabled).toBe(false); area.click(); await tick(); expect(send.mock.calls.every(call => call[0] === 'GET')).toBe(true)
     }
     expect(WHM_SERVICE_MANAGER_CLIENT_BINDING).not.toContain('innerHTML')
     expect(WHM_SERVICE_MANAGER_CLIENT_BINDING).not.toContain('fetch(')

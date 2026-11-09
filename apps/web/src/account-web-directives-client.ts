@@ -4,6 +4,8 @@ const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 /// <reference lib="dom" />
 export type WebDirectiveClientFeature = 'error-pages' | 'indexes' | 'mime-types' | 'handlers' | 'hotlink' | 'redirects'
 export interface WebDirectivesClientView {
@@ -174,9 +176,8 @@ function bindAccountWebDirectives(askDialog: unknown): void {
       root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
       status.dataset.state = 'unavailable'; status.textContent = copy('These protected rules are unavailable here. Nothing was read or changed.'); return
     }
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.wdManage === 'true' && !root.closest(denied)
+    // Reads run in a read-only frame too; saving needs the manage flag outside one.
+    const access = frameAccess(root, 'data-wd-can-read', 'data-wd-manage'), transport = access.request, readable = access.readable, admitted = access.writable
     const checkbox = (input: Element): input is HTMLInputElement => input instanceof HTMLInputElement && input.type === 'checkbox'
     const values = (): Record<string, string | boolean> => Object.fromEntries(inputs.map(input => [input.dataset.wdField!, checkbox(input) ? input.checked : input.value]))
     const fill = (data: Record<string, unknown>): void => { for (const input of inputs) { const value = data[input.dataset.wdField!]; if (value === undefined) continue; if (checkbox(input)) input.checked = value === true; else input.value = String(value) } }
@@ -256,10 +257,10 @@ function bindAccountWebDirectives(askDialog: unknown): void {
         ...errors.filter(item => !known.has(item.field)).map(item => pick(FIELD, item.code, FIELD.type!))]
       for (const text of messages.length ? messages : [view ? copy('No refusals were reported for the last request.') : copy('Diagnostics have not been read.')]) { const item = template('web-directive-issue', 'li', ['message']); clientTemplateSlot(item, 'message').textContent = text; issues.append(item) }
     }
-    const controller = createWebDirectivesController({ feature, domainId: select.value, accountId: root.dataset.wdAccount ?? '', admitted, changed: paint,
-      request: (method, path, body) => { if (!transport || !admitted()) return Promise.reject({ stateChanged: false }); return body === undefined ? transport(method, path) : transport(method, path, body) },
+    const controller = createWebDirectivesController({ feature, domainId: select.value, accountId: root.dataset.wdAccount ?? '', admitted: readable, changed: paint,
+      request: (method, path, body) => { if (!transport || !(method === 'GET' ? readable() : admitted())) return Promise.reject({ stateChanged: false }); return body === undefined ? transport(method, path) : transport(method, path, body) },
       confirm: typeof askDialog === 'function' ? askDialog as (options: Record<string, unknown>) => Promise<unknown> : undefined })
-    if (!transport || !admitted() || !WD_UUID.test(select.value)) {
+    if (!readable() || !WD_UUID.test(select.value)) {
       root.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button,select').forEach(control => { control.disabled = true })
       status.textContent = copy('These protected rules are unavailable here. Nothing was read or changed.'); status.dataset.state = 'unavailable'; return
     }
@@ -285,4 +286,4 @@ function bindAccountWebDirectives(askDialog: unknown): void {
     void controller.load()
   })
 }
-export const ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const WD_FEATURES=${JSON.stringify(WD_FEATURES)};const WD_BLOCKS=${JSON.stringify(WD_BLOCKS)};const WD_UUID=${WD_UUID.toString()};const WD_REVISION=${WD_REVISION.toString()};const wdObject=${wdObject.toString()};const wdExact=${wdExact.toString()};const readWebDirectiveModel=${readWebDirectiveModel.toString()};const readWebDirectivesView=${readWebDirectivesView.toString()};const wdUncertain=${wdUncertain.toString()};const createWebDirectivesController=${createWebDirectivesController.toString()};return ${bindAccountWebDirectives.toString()};})()`
+export const ACCOUNT_WEB_DIRECTIVES_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const WD_FEATURES=${JSON.stringify(WD_FEATURES)};const WD_BLOCKS=${JSON.stringify(WD_BLOCKS)};const WD_UUID=${WD_UUID.toString()};const WD_REVISION=${WD_REVISION.toString()};const wdObject=${wdObject.toString()};const wdExact=${wdExact.toString()};const readWebDirectiveModel=${readWebDirectiveModel.toString()};const readWebDirectivesView=${readWebDirectivesView.toString()};const wdUncertain=${wdUncertain.toString()};const createWebDirectivesController=${createWebDirectivesController.toString()};return ${bindAccountWebDirectives.toString()};})()`)

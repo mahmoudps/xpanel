@@ -3,6 +3,8 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayD
 import type { MessageValues } from './i18n.ts'
 import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate, WHM_CLIENT_TEMPLATE_BINDING } from './whm-client-templates.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 const assertWhmClientTemplates = canonicalAssertWhmClientTemplates, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 type FtpLogKindView = 'connect' | 'login' | 'login-failed' | 'upload' | 'download' | 'delete' | 'logout' | 'timeout'
@@ -96,7 +98,6 @@ function bindWhmFtpLog(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
   const kindLabel: Record<string, string> = { connect: t('Connected'), login: t('Signed in'), 'login-failed': t('Sign-in failed'), upload: t('Uploaded'), download: t('Downloaded'), delete: t('Deleted'), logout: t('Signed out'), timeout: t('Timed out') }
   const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
   const iso = (ms: number): string => new Date(ms).toISOString().slice(0, 19) + 'Z'
   const utc = (raw: string): string | null => {
     const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})$/.exec(raw.trim())
@@ -114,7 +115,8 @@ function bindWhmFtpLog(): void {
     const form = root.querySelector<HTMLFormElement>('[data-ftp-log-form]'), status = root.querySelector<HTMLElement>('[data-ftp-log-status]'), range = root.querySelector<HTMLSelectElement>('[data-ftp-log-range]')
     if (!form || !status || !range || !root.querySelector('[data-ftp-log-submit]')) return
     let templateContractIntact = true
-    const admitted = (): boolean => templateContractIntact && root.isConnected && root.dataset.ftpLogCanRead === 'true' && !root.closest(denied) && !!send
+    const send = frameRequest(root)
+    const admitted = (): boolean => templateContractIntact && root.isConnected && root.dataset.ftpLogCanRead === 'true' && !!send
     const fact = (key: string, value: string): void => { const node = root.querySelector<HTMLElement>('[data-ftp-log-fact="' + key + '"]'); if (node) node.textContent = value }
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const controls = form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')
@@ -244,4 +246,4 @@ function bindWhmFtpLog(): void {
   })
 }
 
-export const WHM_FTP_LOG_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const ftpLogObject=${ftpLogObject.toString()};const ftpLogText=${ftpLogText.toString()};const ftpLogNullable=${ftpLogNullable.toString()};const ftpLogAccount=${ftpLogAccount.toString()};const ftpLogInstant=${ftpLogInstant.toString()};const ftpLogCount=${ftpLogCount.toString()};const ftpLogClient=${ftpLogClient.toString()};const readFtpLogEvent=${readFtpLogEvent.toString()};const readFtpLogSummary=${readFtpLogSummary.toString()};const readFtpLogView=${readFtpLogView.toString()};return ${bindWhmFtpLog.toString()};})()`
+export const WHM_FTP_LOG_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const ftpLogObject=${ftpLogObject.toString()};const ftpLogText=${ftpLogText.toString()};const ftpLogNullable=${ftpLogNullable.toString()};const ftpLogAccount=${ftpLogAccount.toString()};const ftpLogInstant=${ftpLogInstant.toString()};const ftpLogCount=${ftpLogCount.toString()};const ftpLogClient=${ftpLogClient.toString()};const readFtpLogEvent=${readFtpLogEvent.toString()};const readFtpLogSummary=${readFtpLogSummary.toString()};const readFtpLogView=${readFtpLogView.toString()};return ${bindWhmFtpLog.toString()};})()`)

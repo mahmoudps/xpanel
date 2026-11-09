@@ -1,6 +1,8 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
@@ -57,8 +59,6 @@ export function moderationTime(value: string): string {
 
 function bindListModeration(askDialog: ((options: Record<string, unknown>) => Promise<unknown>) | undefined): void {
   const copy = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-  const denied = (root: HTMLElement): boolean => root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled') !== null
   const refusals: Record<string, string> = {
     list_password_wrong: copy('The list password is not correct.'),
     list_admin_locked: copy('List sign-in is locked for 15 minutes after repeated wrong passwords.'),
@@ -165,8 +165,10 @@ function bindListModeration(askDialog: ((options: Record<string, unknown>) => Pr
     const state = root.querySelector<HTMLElement>('[data-moderation-state]')
     if (!panel || !list || !save || !posting || !subscription || !nonMember || !member || !moderators || !moderated || !accept || !hold || !reject || !discard || !size || !retention || !notifyModerators || !notifySender) return
     const form = [posting, subscription, nonMember, member, moderators, moderated, accept, hold, reject, discard, size, retention, notifyModerators, notifySender, save]
-    const off = (value: boolean): void => { for (const control of form) control.disabled = value }
-    if (typeof transport !== 'function' || root.dataset.moderationCanManage !== 'true' || denied(root)) {
+    // The policy is read in a read-only frame too; the queue (read by POST), editing and saving need the manage flag outside one.
+    const access = frameAccess(root, 'data-moderation-can-read', 'data-moderation-can-manage'), transport = access.request!
+    const off = (value: boolean): void => { for (const control of form) control.disabled = value || !access.writable() }
+    if (!access.readable()) {
       off(true); list.disabled = true; say(copy('List moderation is unavailable here. Nothing was read or changed.'), 'unavailable'); return
     }
     let view: ListModerationView | null = null
@@ -187,12 +189,12 @@ function bindListModeration(askDialog: ((options: Record<string, unknown>) => Pr
         fill(readListModeration(await transport('GET', '/api/mail/mailing-lists/' + encodeURIComponent(list.value) + '/moderation')))
         off(false)
         say('', 'read')
-        if (view?.host.state === 'connected' && view.host.ready) await panel.read(call(list.value))
+        if (view?.host.state === 'connected' && view.host.ready && access.writable()) await panel.read(call(list.value))
       } catch (error) { say(failure(error, copy('The list moderation settings could not be read. Nothing was changed.')), 'failed') }
     }
     list.addEventListener('change', () => { void open() })
     save.addEventListener('click', () => {
-      if (!view) return
+      if (!view || !access.writable()) return
       let body: Record<string, unknown>
       try {
         body = { moderation: posting.value, selfSubscription: subscription.value, expectedRevision: view.revision, policy: { moderators: moderationLines(moderators.value), moderatedMembers: moderationLines(moderated.value), nonMemberAction: nonMember.value, memberAction: member.value, acceptSenders: moderationLines(accept.value), holdSenders: moderationLines(hold.value), rejectSenders: moderationLines(reject.value), discardSenders: moderationLines(discard.value), maxMessageKb: moderationWhole(size.value, 1048576), notifyModerators: notifyModerators.checked, notifySender: notifySender.checked, retentionDays: moderationWhole(retention.value, 365) } }
@@ -222,7 +224,9 @@ function bindListModeration(askDialog: ((options: Record<string, unknown>) => Pr
     const say = sayIn(own), panel = queuePanel(own, say)
     const address = root.querySelector<HTMLInputElement>('input[data-list-admin-address]'), password = root.querySelector<HTMLInputElement>('input[data-list-admin-password]')
     if (!panel || !address || !password) return
-    if (typeof transport !== 'function' || denied(root)) { start.disabled = true; return }
+    // The queue opens only by POST with the list password, so a read-only frame reads nothing here.
+    const access = frameAccess(root, 'data-list-admin-can-read', 'data-list-admin-manage'), transport = access.request!
+    if (!access.writable()) { start.disabled = true; return }
     start.disabled = false
     start.addEventListener('click', () => {
       const list = address.value.trim().toLowerCase()
@@ -238,4 +242,4 @@ function bindListModeration(askDialog: ((options: Record<string, unknown>) => Pr
   })
 }
 
-export const LIST_MODERATION_CLIENT_BINDING = `(function(askDialog){const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const moderationObject=${moderationObject.toString()};const moderationRow=${moderationRow.toString()};const readModerationQueue=${readModerationQueue.toString()};const readHeldMessage=${readHeldMessage.toString()};const readListModeration=${readListModeration.toString()};const moderationLines=${moderationLines.toString()};const moderationWhole=${moderationWhole.toString()};const moderationTime=${moderationTime.toString()};(${bindListModeration.toString()})(askDialog);})`
+export const LIST_MODERATION_CLIENT_BINDING = withFrameRequest(`(function(askDialog){const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const moderationObject=${moderationObject.toString()};const moderationRow=${moderationRow.toString()};const readModerationQueue=${readModerationQueue.toString()};const readHeldMessage=${readHeldMessage.toString()};const readListModeration=${readListModeration.toString()};const moderationLines=${moderationLines.toString()};const moderationWhole=${moderationWhole.toString()};const moderationTime=${moderationTime.toString()};(${bindListModeration.toString()})(askDialog);})`)

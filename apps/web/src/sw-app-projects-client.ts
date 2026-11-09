@@ -2,6 +2,8 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { cloneViewRecord as canonicalCloneViewRecord, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const cloneViewRecord = canonicalCloneViewRecord
 
 export interface SwRuntimeRow { id: 'golang' | 'openjdk-17' | 'openjdk-21'; state: 'installed' | 'partial' | 'absent' | 'unavailable'; versions: string[] }
@@ -23,7 +25,6 @@ export function readSwProjectRuntimes(value: unknown): { state: 'read' | 'unavai
 
 function bindSwProjects(parse: typeof readSwProjectRuntimes): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
   const blocked = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   document.querySelectorAll<HTMLElement>('[data-sw-projects]').forEach(root => {
     if (root.dataset.swBound === 'true') return
@@ -37,7 +38,8 @@ function bindSwProjects(parse: typeof readSwProjectRuntimes): void {
       root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button,input,select').forEach(control => { control.disabled = true })
       status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return
     }
-    const admitted = (): boolean => root.isConnected && root.dataset.swCanRead === 'true' && !root.closest(blocked) && typeof transport === 'function'
+    const transport = frameRequest(root)
+    const admitted = (): boolean => root.isConnected && root.dataset.swCanRead === 'true' && typeof transport === 'function'
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const name = (id: string): string => id === 'golang' ? 'Go' : id === 'openjdk-17' ? 'OpenJDK 17' : 'OpenJDK 21'
     const empty = (message: string): void => { body.replaceChildren(cloneViewRecord(root, 'software-project-runtime-empty', 'tr', { message })) }
@@ -62,4 +64,4 @@ function bindSwProjects(parse: typeof readSwProjectRuntimes): void {
     void load()
   })
 }
-export const SW_APP_PROJECTS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const parse=${readSwProjectRuntimes.toString()};const bind=${bindSwProjects.toString()};return ()=>bind(parse);})()`
+export const SW_APP_PROJECTS_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const parse=${readSwProjectRuntimes.toString()};const bind=${bindSwProjects.toString()};return ()=>bind(parse);})()`)

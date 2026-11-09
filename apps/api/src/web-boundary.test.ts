@@ -161,6 +161,8 @@ const expectPersonalPreferenceBoundary = (nodes: readonly MarkupNode[], menuCoun
   }
 }
 
+// Read-only WHM documents carry the first page of each saved list; this fixture saves none.
+const EMPTY_SAVED_LISTS = { accounts: [], plans: [], featureLists: [], resellers: [], domains: [], dnsZones: [], ipPool: [] }
 const expectReadOnlyUnqualifiedWorkspace = (html: string, preferenceWritable = true): void => {
   const nodes = parseMarkup(html)
   const roots = nodes.flatMap((node, index) => node.template < 0 && node.attrs.get('data-tool-availability') === 'unverified' ? [index] : [])
@@ -467,7 +469,7 @@ describe('production web renderer boundary regressions', () => {
     expect.soft(accounts.includes('data-tool-availability="unverified"')).toBe(true)
     expectReadOnlyUnqualifiedWorkspace(accounts)
     expect(hydration.at(-1)?.workspaceSummary).toEqual({})
-    expect(hydration.at(-1)?.whm).toEqual({ principal: principalRecordToPrincipal(principal), activeReseller: null })
+    expect(hydration.at(-1)?.whm).toEqual({ principal: principalRecordToPrincipal(principal), activeReseller: null, ...EMPTY_SAVED_LISTS })
     for (const key of ['panel', 'mail', 'generationId']) expect(hydration.at(-1)).not.toHaveProperty(key)
     expect.soft(/alice-shop\.com|srv1\.xpanel\.test/.test(accounts)).toBe(false)
     expect(snapshotReads).toBe(0)
@@ -483,7 +485,7 @@ describe('production web renderer boundary regressions', () => {
     expect((workspace!.visibility as { principal: { kind: string } }).principal.kind).toBe('root')
     expectUnqualifiedCatalog(workspace!.catalog)
     expect(workspace!.workspaceSummary).toEqual({})
-    expect(workspace?.whm).toEqual({ principal: principalRecordToPrincipal(principal), activeReseller: null })
+    expect(workspace?.whm).toEqual({ principal: principalRecordToPrincipal(principal), activeReseller: null, ...EMPTY_SAVED_LISTS })
     for (const key of ['panel', 'mail', 'generationId']) expect(workspace).not.toHaveProperty(key)
     for (const path of ['/whm/accounts', '/whm/accounts/health', ...registeredDocumentAliases.filter(row => row.parentRoute === '/whm/software/site-software').map(row => row.route)]) {
       const html = await observe(`empty-state:${path}`, await render(request(path, cookie)), 200)
@@ -498,7 +500,7 @@ describe('production web renderer boundary regressions', () => {
       observations.push({ id: `hydration:${path}`, visibilityPrincipalKind: visibility.principal.kind,
         catalogOverridden: supplied.catalog !== undefined,
         fullStateSupplied: ['panel', 'mail', 'generationId'].some(key => key in supplied)
-          || whmKeys.some(key => !['principal', 'activeReseller'].includes(key)),
+          || whmKeys.some(key => !['principal', 'activeReseller', ...Object.keys(EMPTY_SAVED_LISTS)].includes(key)),
         workspaceSummaryKeys: Object.keys(supplied.workspaceSummary as Record<string, unknown>),
       })
       expect(visibility.principal.kind).toBe('root')
@@ -506,7 +508,7 @@ describe('production web renderer boundary regressions', () => {
       expect(supplied!.activeRoute).toBe(path)
       expect(supplied!.workspaceSummary).toEqual({})
       expect(supplied).not.toHaveProperty('error')
-      expect(supplied.whm).toEqual({ principal: principalRecordToPrincipal(principal), activeReseller: null })
+      expect(supplied.whm).toEqual({ principal: principalRecordToPrincipal(principal), activeReseller: null, ...EMPTY_SAVED_LISTS })
       for (const key of ['panel', 'mail', 'generationId']) expect(supplied).not.toHaveProperty(key)
     }
     expect(snapshotReads).toBe(0)
@@ -615,9 +617,11 @@ describe('production web renderer boundary regressions', () => {
         })
         expectUnqualifiedCatalog(supplied?.catalog)
         expect(supplied).not.toHaveProperty('error')
-        expect(supplied?.panel).toEqual({ account: owner, plan })
+        expect(supplied?.panel).toEqual({ account: owner, plan, domains: expect.any(Array) })
+        expect((supplied?.panel as { domains: Array<{ accountId: string }> }).domains.every(domain => domain.accountId === owner.id)).toBe(true)
         for (const key of ['whm', 'mail', 'generationId']) expect(supplied).not.toHaveProperty(key)
-        for (const value of [owner.home, owner.ipv4, owner.contactEmail, other.primaryDomain, PUBLIC_VECTOR, PUBLIC_DB_AUTH,
+        // The saved document root and IPv4 binding of the owner's own domain may show in closed fields.
+        for (const value of [owner.contactEmail, other.primaryDomain, PUBLIC_VECTOR, PUBLIC_DB_AUTH,
           otherDatabase.id, otherDatabase.name, otherDatabaseUser.id, otherDatabaseUser.name,
           ...databases.map(database => database.name), ...databaseUsers.map(user => user.name),
         ]) {

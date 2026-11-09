@@ -8,7 +8,7 @@ const renderers = vi.hoisted(() => ({
   panel: vi.fn(() => '<section data-approved-test="panel"></section>'),
   whm: vi.fn(() => '<section data-approved-test="whm"></section>'),
 }))
-vi.mock('./board-port/approved-xpanel-workspaces.ts', () => ({ renderApprovedXpanelWorkspace: renderers.panel }))
+vi.mock('./board-port/approved-xpanel-workspaces.ts', () => ({ renderApprovedXpanelWorkspace: renderers.panel, approvedXpanelWorkspaceRoutes: new Set(['/resources']) }))
 vi.mock('./board-port/approved-xwhm.ts', () => ({ renderWhmDetailPage: renderers.whm }))
 
 beforeEach(() => { renderers.panel.mockClear(); renderers.whm.mockClear() })
@@ -44,7 +44,7 @@ const expectReadOnlyMailWorkspace = (html: string): void => {
 }
 
 describe('approved layout admission boundary', () => {
-  it('retains a known owner layout without forwarding unqualified provider data', () => {
+  it('retains a known owner layout and forwards only stored records, never audit or provider data', () => {
     const html = renderWebApp({
       surface: 'xpanel', activeRoute: '/resources', locale: 'en', catalog: [],
       visibility: { principal: { kind: 'user', id: 'u1', username: 'owner7', accountId: 'a1' } },
@@ -52,22 +52,23 @@ describe('approved layout admission boundary', () => {
     })
     expect(html).toContain('data-approved-test="panel"')
     expect(html).toContain('data-tool-availability="unverified"')
-    expect(renderers.panel).toHaveBeenCalledExactlyOnceWith({ route: '/resources', locale: 'en', readOnly: true })
+    expect(renderers.panel).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ route: '/resources', locale: 'en', readOnly: true }))
+    expect(renderers.panel).not.toHaveBeenCalledWith(expect.objectContaining({ recentAudit: expect.anything() }))
     expect(html).not.toContain('private-audit-marker')
     expect(html).not.toContain('private-target-marker')
     expect(html).not.toContain('data-realtime-enabled="true"')
   })
 
-  it('retains a known root layout as unavailable rather than admitting its operations', () => {
+  it('retains a known root layout as unavailable, showing saved records without admitting its operations', () => {
     const html = renderWebApp({
       surface: 'xwhm', activeRoute: '/whm/plans/features', locale: 'ar', catalog: [],
       visibility: { principal: { kind: 'root', id: 'root1', username: 'administrator7' } },
       whm: { featureLists: [{ id: 'private-feature-id', name: 'private-feature-name' }] },
     })
     expect(html).toContain('data-approved-test="whm"')
-    expect(renderers.whm).toHaveBeenCalledExactlyOnceWith({ activeRoute: '/whm/plans/features', locale: 'ar', capabilityUnavailable: true })
-    expect(html).not.toContain('private-feature-name')
-    expect(html).not.toContain('private-feature-id')
+    // Closed forms show saved values: the stored list reaches the layout, which stays unavailable.
+    expect(renderers.whm).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ activeRoute: '/whm/plans/features', locale: 'ar', capabilityUnavailable: true,
+      featureLists: [{ id: 'private-feature-id', name: 'private-feature-name' }] }))
   })
 
   it.each([undefined, { principal: { kind: 'user' as const, id: 'u1', username: 'owner7', accountId: 'a1' } }])('does not call a root layout renderer for absent or wrong-role identity', visibility => {

@@ -1,7 +1,7 @@
 import { V2_SECURITY_SLOT } from '../../../surfaces/slots.ts'
 import { kpiCard } from '../../../components/kpi-card.ts'
 import { xpTemplate } from '../../../html.ts'
-import { actions, area, button, check, context, esc, field, fields, help, inputControl, link, page, section, select, status, table, type WhmObservationInput } from '../monitoring/common.ts'
+import { actions, area, button, check, context, esc, frameRead, field, fields, help, inputControl, link, page, section, select, status, table, type WhmObservationInput } from '../monitoring/common.ts'
 
 export function renderV2WhmSecurityOverview(input: WhmObservationInput): string {
   const { t, canRead, canManage } = context(input)
@@ -67,7 +67,7 @@ export function renderV2WhmSecurityOverview(input: WhmObservationInput): string 
       + actions(button(t, msgid('Add account'), { 'data-sec-action': 'grant' }) + button(t, msgid('Remove exception'), { 'data-sec-action': 'revoke' }) + button(t, msgid('Refresh'), { 'data-sec-action': 'refresh' }, canRead))
       + status(t, canRead ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-sec-status': true }, canRead ? 'unread' : 'unavailable')
       + status(t, '', { 'data-sec-result': true }, 'unread', true),
-      { 'data-sec-workspace': true, 'data-sec-page': 'compiler-access', 'data-sec-can-read': String(canRead), 'data-sec-can-manage': String(canManage) })
+      { 'data-sec-workspace': true, 'data-sec-page': 'compiler-access', 'data-sec-can-read': String(canRead || frameRead(input)), 'data-sec-can-manage': String(canManage) })
   return page(input, '/whm/security', msgctxt('theme:v2', 'Security advisor'), msgid('Access policy, optional multi-factor authentication and host protections.'), body)
 }
 

@@ -1,6 +1,8 @@
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 
 const formatMailDateTime = formatDisplayDateTime
 
@@ -35,13 +37,14 @@ function bindMailSpam(askDialog: ((options: Record<string, unknown>) => Promise<
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
   document.querySelectorAll<HTMLElement>('[data-mail-spam]').forEach(root => {
     if (root.dataset.spamBound === 'true') return; root.dataset.spamBound = 'true'
-    const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest, mailbox = root.dataset.spamMailbox ?? ''
+    const access = frameAccess(root, 'data-spam-can-read', 'data-spam-manage'), send = access.request, mailbox = root.dataset.spamMailbox ?? ''
     const status = root.querySelector<HTMLElement>('[data-spam-status]')!, policy = root.querySelector<HTMLElement>('[data-spam-policy]')!, effective = root.querySelector<HTMLElement>('[data-spam-effective]')!, saved = root.querySelector<HTMLElement>('[data-spam-saved]')!
     const field = <T extends HTMLInputElement | HTMLTextAreaElement>(name: string): T => root.querySelector<T>('[name="' + name + '"]')!, inherit = field<HTMLInputElement>('inherit'), enabled = field<HTMLInputElement>('enabled'), folder = field<HTMLInputElement>('spamBoxEnabled'), score = field<HTMLInputElement>('addHeaderScore'), allow = field<HTMLTextAreaElement>('allowlist'), block = field<HTMLTextAreaElement>('blocklist')
     const save = root.querySelector<HTMLButtonElement>('[data-spam-save]')!, refresh = root.querySelector<HTMLButtonElement>('[data-spam-refresh]')!, discard = root.querySelector<HTMLButtonElement>('[data-spam-discard]')!
     const autoDelete = field<HTMLInputElement>('autoDeleteScore')
     if (![status, policy, effective, saved, inherit, enabled, folder, score, autoDelete, allow, block, save, refresh, discard].every(Boolean)) return
-    const admitted = (): boolean => root.isConnected && root.dataset.spamManage === 'true' && root.dataset.spamMailbox === mailbox && !!mailbox && !!send && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
+    // Reads run in a read-only frame too; saving needs the manage flag outside one.
+    const readable = (): boolean => access.readable() && root.dataset.spamMailbox === mailbox && !!mailbox, admitted = (): boolean => readable() && access.writable()
     let snapshot: MailSpamSnapshot | null = null, busy = false, locked = false, baseline = ''
     const values = (): MailSpamFields => ({ inherit: inherit.checked, enabled: enabled.checked, addHeaderScore: score.value === '' ? NaN : Number(score.value), spamBoxEnabled: folder.checked, autoDeleteScore: autoDelete.value === '' ? null : Number(autoDelete.value), allowlist: allow.value.split(/\r?\n/).map(item => item.trim().toLowerCase()).filter(Boolean), blocklist: block.value.split(/\r?\n/).map(item => item.trim().toLowerCase()).filter(Boolean) })
     const signature = (): string => JSON.stringify(values()), dirty = (): boolean => !!snapshot && signature() !== baseline
@@ -49,7 +52,7 @@ function bindMailSpam(askDialog: ((options: Record<string, unknown>) => Promise<
     const sync = (): void => { const ready = admitted() && !busy && !locked && snapshot?.canSave === true; inherit.disabled = !ready; for (const control of [enabled, folder, score, autoDelete, allow, block]) control.disabled = !ready || inherit.checked; save.disabled = !ready || !dirty(); discard.disabled = !ready || !dirty(); refresh.disabled = !admitted() || busy; root.setAttribute('aria-busy', String(busy)) }
     const paint = (): void => { if (!snapshot) return; const fields = snapshot.preferences ?? { inherit: true, enabled: snapshot.inherited.enabled, addHeaderScore: snapshot.inherited.addHeaderScore, spamBoxEnabled: snapshot.inherited.spamBoxEnabled, autoDeleteScore: null, allowlist: [], blocklist: [] }; inherit.checked = fields.inherit; enabled.checked = fields.enabled; folder.checked = fields.spamBoxEnabled; score.value = String(fields.addHeaderScore); autoDelete.value = fields.autoDeleteScore === null ? '' : String(fields.autoDeleteScore); allow.value = fields.allowlist.join('\n'); block.value = fields.blocklist.join('\n'); baseline = signature(); policy.textContent = snapshot.inherited.enabled ? t('Enabled by account policy') : t('Disabled by account policy'); effective.textContent = String(snapshot.effective.addHeaderScore); saved.textContent = snapshot.preferences ? formatMailDateTime(snapshot.preferences.updatedAt) : t('No saved preference'); sync() }
     const read = async (): Promise<MailSpamSnapshot> => readMailSpam(await send!('GET', '/api/webmail/spam-preferences'), mailbox)
-    const load = async (): Promise<void> => { if (!admitted() || busy) return; if (dirty() && (!askDialog || await askDialog({ title: t('Discard edits?'), body: t('Read saved preferences and discard your current edits.'), confirm: t('Read saved preferences') }) !== true)) return; busy = true; sync(); note('reading', t('Reading spam preferences…')); try { const next = await read(); if (!admitted()) throw new Error('mailbox_changed'); snapshot = next; locked = false; paint(); note(next.review ? 'review' : 'read', next.review ? t('Saved metadata needs provider review. Editing is unavailable.') : t('Preferences read. Delivery effects are not verified here.')) } catch { snapshot = null; locked = true; note('failed', t('Preferences could not be verified. Read them again.')) } finally { busy = false; sync() } }
+    const load = async (): Promise<void> => { if (!readable() || busy) return; if (dirty() && (!askDialog || await askDialog({ title: t('Discard edits?'), body: t('Read saved preferences and discard your current edits.'), confirm: t('Read saved preferences') }) !== true)) return; busy = true; sync(); note('reading', t('Reading spam preferences…')); try { const next = await read(); if (!readable()) throw new Error('mailbox_changed'); snapshot = next; locked = false; paint(); note(next.review ? 'review' : 'read', next.review ? t('Saved metadata needs provider review. Editing is unavailable.') : t('Preferences read. Delivery effects are not verified here.')) } catch { snapshot = null; locked = true; note('failed', t('Preferences could not be verified. Read them again.')) } finally { busy = false; sync() } }
     save.addEventListener('click', async () => {
       if (save.disabled || !snapshot || !admitted()) return
       let draft: MailSpamFields; try { draft = readMailSpamFields(values()) } catch { note('invalid', t('Use a score from 0 through 100, a deletion score from 1 through 50, and unique sender addresses without overlap.')); return }
@@ -60,7 +63,7 @@ function bindMailSpam(askDialog: ((options: Record<string, unknown>) => Promise<
     })
     for (const control of [inherit, enabled, folder, score, autoDelete, allow, block]) control.addEventListener(control instanceof HTMLTextAreaElement || control === score || control === autoDelete ? 'input' : 'change', sync)
     refresh.addEventListener('click', () => { void load() }); discard.addEventListener('click', () => { if (!discard.disabled) paint() })
-    if (!admitted()) { note('unavailable', t('Spam preferences are unavailable for this mailbox session. Nothing was read.')); sync(); return } void load()
+    if (!readable()) { note('unavailable', t('Spam preferences are unavailable for this mailbox session. Nothing was read.')); sync(); return } void load()
   })
 }
-export const MAIL_SPAM_CLIENT_BINDING = `(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const mailToolsObject=${mailToolsObject.toString()};const mailToolsExact=${mailToolsExact.toString()};const mailToolsUncertain=${mailToolsUncertain.toString()};const readMailSpamFields=${readMailSpamFields.toString()};const readMailSpam=${readMailSpam.toString()};return ${bindMailSpam.toString()};})()`
+export const MAIL_SPAM_CLIENT_BINDING = withFrameRequest(`(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const mailToolsObject=${mailToolsObject.toString()};const mailToolsExact=${mailToolsExact.toString()};const mailToolsUncertain=${mailToolsUncertain.toString()};const readMailSpamFields=${readMailSpamFields.toString()};const readMailSpam=${readMailSpam.toString()};return ${bindMailSpam.toString()};})()`)

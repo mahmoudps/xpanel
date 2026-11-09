@@ -3,6 +3,8 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDispl
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const cloneViewRecord = canonicalCloneViewRecord
 const viewAction = canonicalViewAction
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
@@ -59,11 +61,11 @@ function bindWhmUpdates(askDialog: ((options: Record<string, unknown>) => Promis
     const job = root.querySelector<HTMLElement>('[data-whm-updates-job]'), jobLink = root.querySelector<HTMLAnchorElement>('[data-whm-updates-job-link]')
     const excludeKernel = root.querySelector<HTMLInputElement>('[data-whm-updates-exclude-kernel]')
     const button = (key: string): HTMLButtonElement | null => root.querySelector<HTMLButtonElement>('[data-whm-updates-action="' + key + '"]')
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const transport = frameRequest(root)
     if (!status || !rows || !excludeKernel) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.updatesCanRead === 'true' && !root.closest(denied)
-    const applicable = (): boolean => admitted() && root.dataset.updatesCanApply === 'true' && typeof askDialog === 'function'
+    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.updatesCanRead === 'true'
+    const applicable = (): boolean => admitted() && root.dataset.updatesCanApply === 'true' && !root.closest(denied) && typeof askDialog === 'function'
     let plan: ReturnType<typeof readUpdatePlanView> | null = null, busy = false, stale = false
     const selectable = (entry: { held: boolean; newInstall: boolean; kernel: boolean }): boolean => !entry.held && !entry.newInstall && (!plan?.excludeKernel || !entry.kernel)
     const checked = (): string[] => Array.from(rows.querySelectorAll<HTMLInputElement>('input[data-whm-updates-select]:checked'), input => input.value)
@@ -182,4 +184,4 @@ function bindWhmUpdates(askDialog: ((options: Record<string, unknown>) => Promis
   })
 }
 
-export const WHM_UPDATES_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readUpdatePlanView=${readUpdatePlanView.toString()};const readUpdateJobView=${readUpdateJobView.toString()};return ${bindWhmUpdates.toString()};})()`
+export const WHM_UPDATES_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readUpdatePlanView=${readUpdatePlanView.toString()};const readUpdateJobView=${readUpdateJobView.toString()};return ${bindWhmUpdates.toString()};})()`)

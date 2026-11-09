@@ -4,11 +4,12 @@ const cloneViewRecord = canonicalCloneViewRecord
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { readSwOptimizeView } from '../../../packages/os/src/sw-optimize-command.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 export { readSwOptimizeView }
 
 function bindSwOptimize(parse: typeof readSwOptimizeView): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
   const blocked = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   document.querySelectorAll<HTMLElement>('[data-sw-optimize]').forEach(root => {
     if (root.dataset.swBound === 'true') return
@@ -16,7 +17,8 @@ function bindSwOptimize(parse: typeof readSwOptimizeView): void {
     const status = root.querySelector<HTMLElement>('[data-sw-optimize-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-sw-optimize-refresh]'), domains = root.querySelector<HTMLElement>('[data-sw-optimize-domains]'), types = root.querySelector<HTMLElement>('[data-sw-optimize-types]')
     if (!status || !refresh || !domains || !types) return
     try { cloneViewRecord(root, 'software-optimize-domain-row', 'tr', { name: '', compression: '', cache: '' }); cloneViewRecord(root, 'software-optimize-domain-empty', 'tr', { message: '' }); cloneViewRecord(root, 'software-optimize-type', 'bdi', { value: '' }) } catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
-    const admitted = (): boolean => root.isConnected && root.dataset.swCanRead === 'true' && !root.closest(blocked) && typeof transport === 'function'
+    const transport = frameRequest(root)
+    const admitted = (): boolean => root.isConnected && root.dataset.swCanRead === 'true' && typeof transport === 'function'
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const fact = (key: string, text: string, human: boolean): void => { const node = root.querySelector<HTMLElement>('[data-sw-optimize-' + key + ']'); if (node) { node.textContent = text; node.toggleAttribute('data-human', human) } }
     let busy = false
@@ -52,4 +54,4 @@ function bindSwOptimize(parse: typeof readSwOptimizeView): void {
     void load()
   })
 }
-export const SW_OPTIMIZE_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const parse=${readSwOptimizeView.toString()};const bind=${bindSwOptimize.toString()};return ()=>bind(parse);})()`
+export const SW_OPTIMIZE_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const parse=${readSwOptimizeView.toString()};const bind=${bindSwOptimize.toString()};return ()=>bind(parse);})()`)

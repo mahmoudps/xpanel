@@ -33,6 +33,15 @@ describe.each(Object.entries(THEMES))('server operation cards in %s', (_theme, r
     expect(html).not.toMatch(/<style\b|<script\b/)
   })
 
+  it('paints saved values inside a read-only document and keeps every control closed', async () => {
+    const send = vi.fn<Send>(async () => ({ revision: R1, resolvers: ['192.0.2.1', '192.0.2.2'] }))
+    boot('<section data-tool-availability="unverified">' + render(['resolvers'], false) + '</section>', send); await tick()
+    expect(input('primary').value).toBe('192.0.2.1')
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input,select,textarea,button')].every(control => control.disabled)).toBe(true)
+    submit(); await tick()
+    expect(send.mock.calls.map(call => call[0])).toEqual(['GET'])
+  })
+
   it('reads resolvers, sends them with the revision and shows the host result', async () => {
     const send = vi.fn<Send>(async (method) => method === 'GET' ? { revision: R1, resolvers: ['192.0.2.1', '192.0.2.2'] } : { revision: R2, resolvers: ['192.0.2.3', '192.0.2.2'], applied: true })
     boot(render(['resolvers'], true), send); await tick()

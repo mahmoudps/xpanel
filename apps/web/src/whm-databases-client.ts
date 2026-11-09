@@ -6,6 +6,8 @@ const cloneClientTemplate = canonicalCloneClientTemplate
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const displayDateTime = formatDisplayDateTime
 export type WhmDatabaseDrift = 'in-sync' | 'saved-only' | 'server-only' | 'system' | 'unverified'
 type ObservedState = { state: 'read' | 'partial' | 'unavailable'; observedAt: string | null }
@@ -135,13 +137,13 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
     const kind = root.dataset.dbKind ?? ''
     const status = root.querySelector<HTMLElement>('[data-whm-db-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-whm-db-refresh]')
     const search = root.querySelector<HTMLInputElement>('[data-whm-db-search]'), driftFilter = root.querySelector<HTMLSelectElement>('[data-whm-db-drift-filter]'), filterEmpty = root.querySelector<HTMLElement>('[data-whm-db-filter-empty]')
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const transport = frameRequest(root)
     if (!status || !refresh || !['overview', 'users', 'processes', 'servers'].includes(kind)) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.dbCanRead === 'true' && !root.closest(denied)
-    const killable = (): boolean => admitted() && root.dataset.dbCanKill === 'true' && typeof askDialog === 'function'
+    const admitted = (): boolean => root.isConnected && root.dataset.dbCanRead === 'true'
+    const killable = (): boolean => admitted() && !root.closest(denied) && root.dataset.dbCanKill === 'true' && typeof askDialog === 'function'
     const maintDatabase = root.querySelector<HTMLSelectElement>('[data-whm-db-maint-database]'), maintAction = root.querySelector<HTMLSelectElement>('[data-whm-db-maint-action]'), maintRun = root.querySelector<HTMLButtonElement>('[data-whm-db-maint-run]'), maintStatus = root.querySelector<HTMLElement>('[data-whm-db-maint-status]')
-    const repairable = (): boolean => admitted() && root.dataset.dbCanRepair === 'true' && typeof askDialog === 'function' && !!maintDatabase && !!maintDatabase.value
+    const repairable = (): boolean => admitted() && !root.closest(denied) && root.dataset.dbCanRepair === 'true' && typeof askDialog === 'function' && !!maintDatabase && !!maintDatabase.value
     const notObserved = t('Not observed')
     let busy = false, confirming = false, readState = 'unread'
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'uncertain'].includes(state) ? 'alert' : 'status') }
@@ -331,4 +333,4 @@ function bindWhmDatabases(askDialog: ((options: Record<string, unknown>) => Prom
   })
 }
 
-export const WHM_DATABASES_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmDatabasesView=${readWhmDatabasesView.toString()};const readWhmDatabaseKillOutcome=${readWhmDatabaseKillOutcome.toString()};const readWhmDatabaseMaintenance=${readWhmDatabaseMaintenance.toString()};return ${bindWhmDatabases.toString()};})()`
+export const WHM_DATABASES_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmDatabasesView=${readWhmDatabasesView.toString()};const readWhmDatabaseKillOutcome=${readWhmDatabaseKillOutcome.toString()};const readWhmDatabaseMaintenance=${readWhmDatabaseMaintenance.toString()};return ${bindWhmDatabases.toString()};})()`)

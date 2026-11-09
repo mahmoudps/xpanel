@@ -85,7 +85,7 @@ describe('WHM account health parser', () => {
 })
 
 describe('WHM account health binding', () => {
-  it('makes no request without transport or authorization', async () => {
+  it('makes no request without transport or authorization, and only reads inside a closed frame', async () => {
     boot(); expect(q('[data-whm-health-status]').dataset.state).toBe('unavailable')
     expect(q<HTMLButtonElement>('[data-whm-health-run]').disabled).toBe(true)
     mount('en', false)
@@ -95,7 +95,7 @@ describe('WHM account health binding', () => {
     expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('button,input,select')].every(control => control.disabled)).toBe(true)
     document.body.innerHTML = `<section data-capability-state="unavailable">${renderWhmAccountHealthWorkspace({ locale: 'en', canRead: true, root: true })}</section>`
     boot(send); q<HTMLButtonElement>('[data-whm-health-run]').click(); await tick()
-    expect(send).not.toHaveBeenCalled()
+    expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
   })
 
   it('reads the first batch, then pending accounts, and links each problem to its fixing page', async () => {

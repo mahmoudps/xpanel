@@ -1,5 +1,7 @@
 import type { MessageValues } from './i18n.ts'
 import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const mailTemplate = canonicalMailTemplate
 const mailSlot = canonicalMailSlot
 const mailRequireTemplates = canonicalMailRequireTemplates
@@ -35,9 +37,9 @@ function bindMailAttachments(_askDialog: unknown): void {
     if (!status || !list || !refresh) return
     try { mailRequireTemplates(root, [['mail-attachment-row', 'li', ['link', 'badge', 'name', 'size'], [['link', 'a'], ['name', 'bdi'], ['size', 'bdi']]]]) }
     catch { refresh.disabled = true; status.dataset.state = 'unavailable'; status.textContent = t('Attachment reading is unavailable here.'); return }
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
+    const transport = frameRequest(root)
     const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const eligible = (): boolean => root.isConnected && root.dataset.attachmentCanRead === 'true' && !root.closest(denied)
+    const eligible = (): boolean => root.isConnected && root.dataset.attachmentCanRead === 'true'
     let generation = 0, busy = false
     const announce = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const selected = (): { mailbox: string; folder: string; uid: number; uidValidity?: number } | null => {
@@ -87,4 +89,4 @@ function bindMailAttachments(_askDialog: unknown): void {
   })
 }
 
-export const MAIL_ATTACHMENTS_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const readAttachmentManifest=${readAttachmentManifest.toString()};return ${bindMailAttachments.toString()};})()`
+export const MAIL_ATTACHMENTS_CLIENT_BINDING = withFrameRequest(`(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const readAttachmentManifest=${readAttachmentManifest.toString()};return ${bindMailAttachments.toString()};})()`)

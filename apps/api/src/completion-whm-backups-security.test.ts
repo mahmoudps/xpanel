@@ -44,6 +44,11 @@ describe('backup policy validation', () => {
     for (const draft of [{ ...destination(), password: 'synthetic-never-stored' }, { ...destination(), enabled: 'yes' }, { ...destination(), endpoint: '/var/../etc' }, { ...destination(), kind: 'sftp', endpoint: 'sftp://user:synthetic@backup.example.test' }, { ...destination(), retentionDays: 0 }]) expect(() => validateBackupDestination(draft)).toThrow()
     for (const draft of [{ retentionCount: 0 }, { includeMail: 'yes' }, { selectedAccounts: ['repeated', 'repeated'] }, { destinationIds: ['bad-id'] }, { unsupported: true }]) expect(() => validateBackupSchedule(draft)).toThrow()
   })
+  it('refuses a schedule with neither accounts nor system files, and keeps either one alone', () => {
+    expect(() => validateBackupSchedule({ selectedAccounts: [], includeControl: false })).toThrow('a backup must include accounts or system files')
+    expect(validateBackupSchedule({ selectedAccounts: [], includeControl: true }).selectedAccounts).toEqual([])
+    expect(validateBackupSchedule({ selectedAccounts: ['alice'], includeControl: false }).includeControl).toBe(false)
+  })
 })
 
 describe('WHM backup configuration loopback HTTP security', () => {

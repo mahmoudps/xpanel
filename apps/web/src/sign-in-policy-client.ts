@@ -2,6 +2,8 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
 /** Policy fields a page may show, by dotted key, with how their control text becomes a value. */
@@ -61,14 +63,14 @@ function bindSignInPolicy(askDialog: ((options: Record<string, unknown>) => Prom
   document.querySelectorAll<HTMLElement>('[data-sign-in-policy]').forEach(root => {
     if (root.dataset.signInBound === 'true') return
     root.dataset.signInBound = 'true'
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const request = frameRequest(root)
     const status = root.querySelector<HTMLElement>('[data-sign-in-status]'), save = root.querySelector<HTMLButtonElement>('[data-sign-in-save]'), refresh = root.querySelector<HTMLButtonElement>('[data-sign-in-refresh]')
     const rows = root.querySelector<HTMLElement>('[data-sign-in-lockouts]'), target = root.querySelector<HTMLSelectElement>('[data-sign-in-unlock-target]')
     const unlockButtons = [...root.querySelectorAll<HTMLButtonElement>('[data-sign-in-unlock]')]
     const fields = [...root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('[data-sign-in-field]')]
     const admitted = (): boolean => root.isConnected && root.dataset.signInCanRead === 'true' && typeof request === 'function'
-      && !root.closest('[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled')
     const manageable = (): boolean => admitted() && root.dataset.signInCanManage === 'true'
+      && !root.closest('[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled')
     let view: SignInPolicyView | null = null, locks: SignInLockout[] = [], busy = false
     const note = (state: string, message: string): void => { if (!status) return; status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'unknown'].includes(state) ? 'alert' : 'status') }
     const sync = (): void => {
@@ -167,4 +169,4 @@ function bindSignInPolicy(askDialog: ((options: Record<string, unknown>) => Prom
   })
 }
 
-export const SIGN_IN_POLICY_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const SIGN_IN_POLICY_FIELDS=${JSON.stringify(SIGN_IN_POLICY_FIELDS)};const readSignInPolicyView=${readSignInPolicyView.toString()};const readSignInLockouts=${readSignInLockouts.toString()};const buildSignInPolicy=${buildSignInPolicy.toString()};return ${bindSignInPolicy.toString()};})()`
+export const SIGN_IN_POLICY_CLIENT_BINDING = withFrameRequest(`(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const SIGN_IN_POLICY_FIELDS=${JSON.stringify(SIGN_IN_POLICY_FIELDS)};const readSignInPolicyView=${readSignInPolicyView.toString()};const readSignInLockouts=${readSignInLockouts.toString()};const buildSignInPolicy=${buildSignInPolicy.toString()};return ${bindSignInPolicy.toString()};})()`)

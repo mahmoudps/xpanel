@@ -7,6 +7,8 @@ import './i18n.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 import { readComposerJobReview, readComposerWorkspaceView } from '../../../packages/os/src/composer-command-view.ts'
 import type { ComposerJobReviewView, ComposerWorkspaceView } from '../../../packages/os/src/composer-command-view.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 export { readComposerJobReview, readComposerWorkspaceView }
 
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
@@ -18,11 +20,11 @@ function bindWhmComposer(askDialog: Ask | undefined, parse: typeof readComposerW
     const status = root.querySelector<HTMLElement>('[data-composer-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-composer-refresh]'), target = root.querySelector<HTMLSelectElement>('[data-composer-target]'), body = root.querySelector<HTMLElement>('[data-composer-packages]')
     if (!status || !refresh || !target || !body) return
     try { cloneViewRecord(root, 'software-composer-package-row', 'tr', { name: '', requirement: '', locked: '', installed: '', development: '' }); cloneViewRecord(root, 'software-composer-package-empty', 'tr', { message: '' }); cloneViewRecord(root, 'software-composer-review-row', 'tr', { name: '', version: '', development: '' }) } catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const request = frameRequest(root)
     const runAction = root.querySelector<HTMLSelectElement>('[data-composer-run-action]'), reviewButton = root.querySelector<HTMLButtonElement>('[data-composer-review]'), runButton = root.querySelector<HTMLButtonElement>('[data-composer-run]')
     const reviewRegion = root.querySelector<HTMLElement>('[data-composer-review-region]'), reviewBody = root.querySelector<HTMLElement>('[data-composer-review-packages]'), runHelp = root.querySelector<HTMLElement>('[data-composer-run-help]'), jobLink = root.querySelector<HTMLAnchorElement>('[data-composer-job-link]'), liveLog = root.querySelector<HTMLElement>('[data-composer-live-log]')
     const blocked = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.composerCanRead === 'true' && !root.closest(blocked)
+    const admitted = (): boolean => root.isConnected && root.dataset.composerCanRead === 'true'
     const phpSelect = root.querySelector<HTMLSelectElement>('[data-composer-php]'), mirror = root.querySelector<HTMLInputElement>('[data-composer-mirror]')
     const choices = (): { phpVersion: string | null; mirror: string | null } => ({ phpVersion: phpSelect?.value || null, mirror: mirror?.value.trim() || null })
     let busy = false, projects: ComposerWorkspaceView['projects'] = [], current: ComposerWorkspaceView | null = null, review: ComposerJobReviewView | null = null, locked = false
@@ -128,4 +130,4 @@ function bindWhmComposer(askDialog: Ask | undefined, parse: typeof readComposerW
     refresh.addEventListener('click', () => { void load() }); target.addEventListener('change', () => { void load() }); void load()
   })
 }
-export const WHM_COMPOSER_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readComposerWorkspaceView.toString()};const parseReview=${readComposerJobReview.toString()};const bind=${bindWhmComposer.toString()};return (ask)=>bind(ask,parse,parseReview);})()`
+export const WHM_COMPOSER_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readComposerWorkspaceView.toString()};const parseReview=${readComposerJobReview.toString()};const bind=${bindWhmComposer.toString()};return (ask)=>bind(ask,parse,parseReview);})()`)

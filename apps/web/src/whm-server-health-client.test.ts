@@ -75,12 +75,14 @@ describe('server health client parsers', () => {
 })
 
 describe('server health client binding', () => {
-  it('makes no request and disables every control without transport or admission', async () => {
+  it('disables every control without transport or admission, and only reads inside a closed frame', async () => {
     mount('health'); boot(); await tick()
     expect(status().dataset.state).toBe('unavailable')
     for (const [kind, canRead, wrapper] of [['limits', false, 'data-capability-state="authorized"'], ['health', true, 'data-capability-state="unavailable"'], ['limits', true, 'data-wiring="soon"']] as const) {
       mount(kind, 'en', canRead, wrapper); const send = vi.fn(); boot(send); await tick()
-      expect(send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable')
+      // A closed frame still reads the saved state; nothing else is sent and every control stays disabled.
+      expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+      if (!canRead) expect(status().dataset.state).toBe('unavailable')
       expect(document.querySelector('form')).toBeNull()
       for (const control of document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')) expect(control.disabled).toBe(true)
     }

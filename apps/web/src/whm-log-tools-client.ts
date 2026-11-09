@@ -4,6 +4,8 @@ import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import type { LogSecurityReport } from '../../agent/src/log-security-analysis.ts'
 import type { DatabaseErrorEntry, DatabaseLogView, SlowQueryEntry } from '../../agent/src/database-logs.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
 export function readLogAnalysis(raw: unknown): LogSecurityReport {
@@ -33,18 +35,18 @@ export function readDatabaseLogView(raw: unknown, log: string): DatabaseLogView 
 
 function bindWhmLogTools(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const bytes = (value: number): string => { const units = ['B', 'KiB', 'MiB', 'GiB']; let size = value, index = 0; while (size >= 1024 && index < units.length - 1) { size /= 1024; index++ } return (index ? size.toFixed(1) : String(size)) + ' ' + units[index] }
   document.querySelectorAll<HTMLElement>('[data-whm-log-tools]').forEach(root => {
     if (root.dataset.logToolsBound === 'true') return
     root.dataset.logToolsBound = 'true'
+    const send = frameRequest(root)
     const one = <T extends HTMLElement>(selector: string): T | null => root.querySelector<T>(selector)
     const site = one<HTMLSelectElement>('[data-log-analysis-site]'), run = one<HTMLButtonElement>('[data-log-analysis-run]'), analysisStatus = one('[data-log-analysis-status]'), findings = one('[data-log-analysis-rows]'), samples = one('[data-log-analysis-samples]')
     const kind = one<HTMLSelectElement>('[data-database-log-kind]'), read = one<HTMLButtonElement>('[data-database-log-read]'), databaseStatus = one('[data-database-log-status]'), slow = one('[data-database-log-rows="slow"]'), errors = one('[data-database-log-rows="error"]')
     const domain = one<HTMLSelectElement>('[data-raw-ftp-domain]'), hours = one<HTMLSelectElement>('[data-raw-ftp-hours]'), download = one<HTMLButtonElement>('[data-raw-ftp-download]'), ftpStatus = one('[data-raw-ftp-status]')
     const controls = [...root.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button,select')]
     const say = (node: HTMLElement | null, state: string, message: string): void => { if (!node) return; node.dataset.state = state; node.textContent = message; node.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
-    if (!send || root.dataset.logToolsCanRead !== 'true' || !site || !run || !findings || !samples || !kind || !read || !slow || !errors || !domain || !hours || !download || root.closest('[data-readonly="true"],[data-capability-state="unavailable"],fieldset:disabled')) {
+    if (!send || root.dataset.logToolsCanRead !== 'true' || !site || !run || !findings || !samples || !kind || !read || !slow || !errors || !domain || !hours || !download) {
       for (const control of controls) control.disabled = true
       for (const node of [analysisStatus, databaseStatus, ftpStatus]) say(node, 'unavailable', t('Log tools are unavailable here. Nothing was read.'))
       return
@@ -113,4 +115,4 @@ function bindWhmLogTools(): void {
   })
 }
 
-export const WHM_LOG_TOOLS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readLogAnalysis=${readLogAnalysis.toString()};const readDatabaseLogView=${readDatabaseLogView.toString()};return ${bindWhmLogTools.toString()}})()`
+export const WHM_LOG_TOOLS_CLIENT_BINDING = withFrameRequest(`(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readLogAnalysis=${readLogAnalysis.toString()};const readDatabaseLogView=${readDatabaseLogView.toString()};return ${bindWhmLogTools.toString()}})()`)

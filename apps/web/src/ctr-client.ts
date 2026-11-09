@@ -7,6 +7,8 @@ const viewAction = canonicalViewAction
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import { readCtrView } from '../../../packages/os/src/ctr-view.ts'
 import type { CtrAccountsView, CtrDetailView, CtrOp, CtrPolicyView, CtrScopeView, CtrStackRow } from '../../../packages/os/src/ctr-view.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
@@ -14,7 +16,6 @@ type Control = HTMLInputElement & HTMLSelectElement & HTMLTextAreaElement
 /** Rootless container workspace. A row belongs to the selected account; nothing crosses accounts on this page. */
 function bindCtr(askDialog: Ask | undefined, parse: typeof readCtrView): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const blocked = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   const BASE = '/api/server/software/containers'
   document.querySelectorAll<HTMLElement>('[data-ctr-workspace]').forEach(root => {
@@ -30,8 +31,9 @@ function bindCtr(askDialog: Ask | undefined, parse: typeof readCtrView): void {
     const status = field.status, account = input('account'), job = field.job, jobLink = field['job-link'] as HTMLAnchorElement | undefined
     if (!status || !account || !action.read || !job || !jobLink) return
     let follow: AbortController | null = null, busy = false, review = false, scope: CtrScopeView | null = null, policy: CtrPolicyView | null = null, accounts: CtrAccountsView | null = null, editing: CtrStackRow | null = null, detail: CtrDetailView | null = null
-    const admitted = (): boolean => root.isConnected && root.dataset.ctrCanRead === 'true' && !root.closest(blocked) && typeof transport === 'function'
-    const manageable = (): boolean => admitted() && root.dataset.ctrCanManage === 'true' && scope?.scope === 'account' && scope.state === 'read' && !review && typeof askDialog === 'function'
+    const transport = frameRequest(root)
+    const admitted = (): boolean => root.isConnected && root.dataset.ctrCanRead === 'true' && typeof transport === 'function'
+    const manageable = (): boolean => admitted() && root.dataset.ctrCanManage === 'true' && scope?.scope === 'account' && scope.state === 'read' && !review && typeof askDialog === 'function' && !root.closest(blocked)
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status') }
     const lock = (): void => {
       for (const [key, node] of Object.entries(action)) (node as HTMLButtonElement).disabled = busy || !admitted() || (!['read', 'detail-logs', 'registry-save', 'catalog-update'].includes(key) && !manageable())
@@ -296,4 +298,4 @@ function bindCtr(askDialog: Ask | undefined, parse: typeof readCtrView): void {
   })
 }
 
-export const CTR_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readCtrView.toString()};const bind=${bindCtr.toString()};return (ask)=>bind(ask,parse);})()`
+export const CTR_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readCtrView.toString()};const bind=${bindCtr.toString()};return (ask)=>bind(ask,parse);})()`)

@@ -2,6 +2,8 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 const BRANDING_TEXT = ['companyName', 'productName', 'footerText', 'primaryColor', 'accentColor', 'supportUrl', 'supportEmail'] as const
 export interface BrandingAssetView { sha256: string; contentType: string; bytes: number; width: number; height: number; uploadedAt: string }
 export interface BrandingFields { companyName: string; productName: string; footerText: string; hidePoweredBy: boolean; primaryColor: string; accentColor: string
@@ -38,16 +40,16 @@ function bindWhmPanelBranding(askDialog?: (options: Record<string, unknown>) => 
     const save = one<HTMLButtonElement>('[data-branding-save]'), reload = one<HTMLButtonElement>('[data-branding-reload]'), stateField = one<HTMLElement>('[data-branding-state]'), updated = one<HTMLElement>('[data-branding-updated]')
     const field = (key: string): HTMLInputElement | HTMLSelectElement | null => one<HTMLInputElement | HTMLSelectElement>('[data-branding-input="' + key + '"]')
     const keys = [...BRANDING_TEXT, 'hidePoweredBy', 'defaultTheme', 'defaultDensity'] as const
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    // Reads run in a read-only frame too; changes need the manage flag outside one.
+    const access = frameAccess(root, 'data-branding-can-read', 'data-branding-can-manage'), request = access.request
     if (!status || !saveStatus || !assetStatus || !save || !reload || !stateField || !updated || keys.some(key => !field(key))) return
-    const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.brandingCanManage === 'true' && !root.closest(denied) && typeof request === 'function'
+    const readable = (): boolean => access.readable(), admitted = (): boolean => access.writable()
     let view: BrandingView | null = null, busy = false
     const note = (target: HTMLElement, state: string, text: string): void => { target.hidden = false; target.dataset.state = state; target.textContent = text; target.setAttribute('role', state === 'failed' || state === 'stale' ? 'alert' : 'status') }
     const lock = (): void => {
       const off = busy || !view?.branding || !admitted()
       for (const key of keys) field(key)!.disabled = off
-      save.disabled = off; reload.disabled = busy || !admitted()
+      save.disabled = off; reload.disabled = busy || !readable()
       for (const kind of ['logo', 'favicon'] as const) {
         const upload = one<HTMLButtonElement>('[data-branding-upload="' + kind + '"]'), remove = one<HTMLButtonElement>('[data-branding-remove="' + kind + '"]')
         if (upload) upload.disabled = off
@@ -99,13 +101,13 @@ function bindWhmPanelBranding(askDialog?: (options: Record<string, unknown>) => 
       paint(verified)
     }
     const load = async (): Promise<void> => {
-      if (busy || !admitted() || !request) return
+      if (busy || !readable() || !request) return
       busy = true; view = null; lock(); note(status, 'reading', t('Reading branding…'))
       try { paint(readBrandingView(await request('GET', '/api/server/panel/branding'))) }
       catch (error) { note(status, 'failed', failure(error, t('Branding could not be read. Nothing was changed.'))) }
       finally { busy = false; lock() }
     }
-    if (!admitted()) { lock(); note(status, 'unavailable', t('Branding is unavailable here. Nothing was read or changed.')); return }
+    if (!readable()) { lock(); note(status, 'unavailable', t('Branding is unavailable here. Nothing was read or changed.')); return }
     reload.addEventListener('click', () => { saveStatus.hidden = true; assetStatus.hidden = true; void load() })
     save.addEventListener('click', async () => {
       const before = view
@@ -158,4 +160,4 @@ function bindWhmPanelBranding(askDialog?: (options: Record<string, unknown>) => 
     void load()
   })
 }
-export const WHM_PANEL_BRANDING_CLIENT_BINDING = `(()=>{const BRANDING_TEXT=${JSON.stringify(BRANDING_TEXT)};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readBrandingView=${readBrandingView.toString()};return ${bindWhmPanelBranding.toString()};})()`
+export const WHM_PANEL_BRANDING_CLIENT_BINDING = withFrameRequest(`(()=>{const BRANDING_TEXT=${JSON.stringify(BRANDING_TEXT)};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readBrandingView=${readBrandingView.toString()};return ${bindWhmPanelBranding.toString()};})()`)

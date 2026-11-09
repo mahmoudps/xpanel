@@ -3,6 +3,8 @@ import { domainCanonicalName, domainObject, domainPhpSettings, domainRoot, domai
 import type { DomainWorkspaceRow, DomainWorkspaceView } from './domain-workspace-client.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 
 // Module-local aliases keep the stringified functions free of bundler import rewrites.
 const ssObject = domainObject, ssStable = domainStable, ssUncertain = domainWriteUncertain, ssReadWorkspace = readDomainWorkspace
@@ -55,7 +57,7 @@ function bindAccountSiteSettings(askDialog: ((options: Record<string, unknown>) 
   document.querySelectorAll<HTMLElement>('[data-site-settings]').forEach(root => {
     if (root.dataset.siteBound === 'true') return
     root.dataset.siteBound = 'true'
-    const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const access = frameAccess(root, 'data-site-can-read', 'data-site-manage'), send = access.request
     const accountId = root.dataset.siteAccount ?? '', home = root.dataset.siteHome ?? '', id = root.dataset.siteDomain ?? ''
     const find = <T extends HTMLElement>(key: string): T => root.querySelector<T>('[data-site-' + key + ']')!
     const status = find('status'), state = find('state'), quotaState = find('quota-state'), stop = find<HTMLButtonElement>('stop'), start = find<HTMLButtonElement>('start'), save = find<HTMLButtonElement>('save'), reset = find<HTMLButtonElement>('reset')
@@ -67,7 +69,8 @@ function bindAccountSiteSettings(askDialog: ((options: Record<string, unknown>) 
     const reviewRows = find('review-rows'), ack = find<HTMLInputElement>('review-ack'), chooser = root.querySelector<HTMLSelectElement>('[data-site-selector]')
     let view: DomainWorkspaceView | null = null, rules: SiteDenyDraft[] = [], busy = false, uncertain = false
     const row = (): SiteRow | undefined => view?.domains.find(entry => entry.id === id) as SiteRow | undefined
-    const eligible = (): boolean => root.isConnected && root.dataset.siteManage === 'true' && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"]')
+    // Reads run in a read-only frame too; changes need the manage flag outside one.
+    const readable = access.readable, eligible = access.writable
     const note = (kind: string, text: string): void => { status.dataset.state = kind; status.textContent = text; status.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(kind) ? 'alert' : 'status') }
     const number = (input: HTMLInputElement): number | null => input.value.trim() === '' ? null : Number(input.value)
     const draft = (): SiteDraft => ({ docRoot: docRoot.value.trim(), runDirectory: run.value.trim().replace(/^\/+|\/+$/g, ''), isolated: isolated.checked, visitorLog: visitorLog.checked, message: message.value.replace(/\s*\n\s*/g, ' '),
@@ -125,7 +128,7 @@ function bindAccountSiteSettings(askDialog: ((options: Record<string, unknown>) 
       state.textContent = serving === 'running' ? t('Running') : serving === 'expired' ? t('Expired') : target.site?.stoppedByOwner ? t('Stopped') : t('Stopped by the server administrator')
       paintRules(); changed()
     }
-    const request = (method: string, path: string, body?: unknown): Promise<unknown> => !send || !eligible() ? Promise.reject({ details: { stateChanged: false } }) : body === undefined ? send(method, path) : send(method, path, body)
+    const request = (method: string, path: string, body?: unknown): Promise<unknown> => !send || !(method === 'GET' ? readable() : eligible()) ? Promise.reject({ details: { stateChanged: false } }) : body === undefined ? send(method, path) : send(method, path, body)
     const QUOTA: Record<string, string> = { filesystem: t('This site is not on an XFS filesystem, so a path quota cannot be enforced here.'), mount_option: t('The filesystem is not mounted with project quota, so a path quota cannot be enforced here.'), unread: t('Path quota support could not be read.') }
     const read = async (): Promise<void> => {
       view = ssReadWorkspace(await request('GET', '/api/domains'), { accountId, home })
@@ -136,7 +139,7 @@ function bindAccountSiteSettings(askDialog: ((options: Record<string, unknown>) 
       fill()
     }
     async function refresh(): Promise<void> {
-      if (!eligible() || busy) return
+      if (!readable() || busy) return
       busy = true; lock(); note('reading', t('Reading saved domain configuration…'))
       try { await read(); note('read', t('Saved domain configuration read.')) }
       catch { note('failed', t('Domains could not be read. Nothing was changed.')) }
@@ -176,7 +179,7 @@ function bindAccountSiteSettings(askDialog: ((options: Record<string, unknown>) 
         body: target.name + '\n' + (suspended ? t('Every request gets the stopped page until you start the site. Mail, FTP and files keep working.') : t('The site serves its content again.')) }).catch(() => false)
       if (approved) await submit({ suspended })
     }
-    if (!send || !eligible() || !SS_DOMAIN_ID.test(id) || !home.startsWith('/')) { note('unavailable', t('Site settings are unavailable here. Nothing was read or changed.')); return }
+    if (!readable() || !SS_DOMAIN_ID.test(id) || !home.startsWith('/')) { note('unavailable', t('Site settings are unavailable here. Nothing was read or changed.')); return }
     root.addEventListener('input', event => { if (event.target instanceof Element && !event.target.matches('[data-site-deny-name],[data-site-deny-directory],[data-site-deny-extensions],[data-site-review-ack]')) changed() })
     root.addEventListener('change', event => { if (event.target instanceof Element && event.target.matches('[data-site-no-expiry],[data-site-quota-unlimited],[data-site-traffic-enabled],[data-site-isolated],[data-site-visitor-log]')) changed() })
     ack.addEventListener('change', lock)
@@ -203,4 +206,4 @@ function bindAccountSiteSettings(askDialog: ((options: Record<string, unknown>) 
   })
 }
 
-export const ACCOUNT_SITE_SETTINGS_CLIENT_BINDING = `(()=>{const domainObject=${domainObject.toString()};const domainSafeText=${domainSafeText.toString()};const domainCanonicalName=${domainCanonicalName.toString()};const domainRoot=${domainRoot.toString()};const domainStable=${domainStable.toString()};const domainWriteUncertain=${domainWriteUncertain.toString()};const domainPhpSettings=${domainPhpSettings.toString()};const readDomainWorkspace=${readDomainWorkspace.toString()};const ssObject=domainObject;const ssStable=domainStable;const ssUncertain=domainWriteUncertain;const ssReadWorkspace=readDomainWorkspace;const SS_DOMAIN_ID=${SS_DOMAIN_ID.toString()};const SS_NAME=${SS_NAME.toString()};const SS_DIRECTORY=${SS_DIRECTORY.toString()};const SS_RUN=${SS_RUN.toString()};const SS_TRAFFIC_PRESETS=${JSON.stringify(SS_TRAFFIC_PRESETS)};const siteDenyExtensions=${siteDenyExtensions.toString()};const siteSettingsBody=${siteSettingsBody.toString()};const siteDraftProblem=${siteDraftProblem.toString()};const siteServingState=${siteServingState.toString()};return ${bindAccountSiteSettings.toString()}})()`
+export const ACCOUNT_SITE_SETTINGS_CLIENT_BINDING = withFrameRequest(`(()=>{const domainObject=${domainObject.toString()};const domainSafeText=${domainSafeText.toString()};const domainCanonicalName=${domainCanonicalName.toString()};const domainRoot=${domainRoot.toString()};const domainStable=${domainStable.toString()};const domainWriteUncertain=${domainWriteUncertain.toString()};const domainPhpSettings=${domainPhpSettings.toString()};const readDomainWorkspace=${readDomainWorkspace.toString()};const ssObject=domainObject;const ssStable=domainStable;const ssUncertain=domainWriteUncertain;const ssReadWorkspace=readDomainWorkspace;const SS_DOMAIN_ID=${SS_DOMAIN_ID.toString()};const SS_NAME=${SS_NAME.toString()};const SS_DIRECTORY=${SS_DIRECTORY.toString()};const SS_RUN=${SS_RUN.toString()};const SS_TRAFFIC_PRESETS=${JSON.stringify(SS_TRAFFIC_PRESETS)};const siteDenyExtensions=${siteDenyExtensions.toString()};const siteSettingsBody=${siteSettingsBody.toString()};const siteDraftProblem=${siteDraftProblem.toString()};const siteServingState=${siteServingState.toString()};return ${bindAccountSiteSettings.toString()}})()`)

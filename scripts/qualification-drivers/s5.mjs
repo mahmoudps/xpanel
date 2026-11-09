@@ -79,6 +79,7 @@ async function openSession(root, tag, undo, extra = {}) {
 }
 const SESSION_PATHS = /^\/api\/transfers\/sessions(?:\/[0-9a-f-]{36})?$/
 const NEEDS_REMOTE = 'This clause needs a second lab host as the source server, which does not exist yet.'
+const NEEDS_APPLYING = 'Pausing and resuming act on a session that is applying items, which needs a second lab host as the source server; none exists yet.'
 const NEEDS_SMTP = 'This clause needs an SMTP exchange with the mail server, which the panel API and the served site cannot drive.'
 
 export default [
@@ -261,14 +262,15 @@ export default [
     prefix: 'TRP', as: 'root', probe: SESSIONS, paths: SESSION_PATHS, requests: 8,
     unit: [{ id: 'TRP-UNIT-EMPTY', file: 'apps/api/src/transfer-workspace.test.ts', name: 'strict persisted transfer workspace loopback boundary reads empty state without inventing a source or allocating metadata' }],
     checks: ['STATE-IN-ALLOWED-SET', 'PAUSE-STOPS-NEW-ITEMS', 'START-RESUMES', 'CLASH-RENAME-IN-SUMMARY'],
-    async run({ root, tag, undo, check, ok, block }) {
+    async run({ root, tag, undo, check, block }) {
       block('CLASH-RENAME-IN-SUMMARY', 'A renamed database appears only after a real transfer between two servers, and no second lab host exists.')
+      // A session the run can open stays at `created`; pausing needs one that is applying items from a source server.
+      block('PAUSE-STOPS-NEW-ITEMS', NEEDS_APPLYING)
+      block('START-RESUMES', NEEDS_APPLYING)
       const session = await openSession(root, tag, undo)
-      if (!session.id) return missing(check, ['STATE-IN-ALLOWED-SET', 'PAUSE-STOPS-NEW-ITEMS', 'START-RESUMES'], 'The run could not open its session.')
+      if (!session.id) return missing(check, ['STATE-IN-ALLOWED-SET'], 'The run could not open its session.')
       const read = await root.get(`${SESSIONS}/${session.id}`), state = read.data?.session?.status ?? read.data?.session?.state
       check('STATE-IN-ALLOWED-SET', read.status === 200 && ['created', 'connected', 'inventoried', 'selected', 'reviewed', 'applying', 'completed', 'failed', 'cancelled'].includes(state), { status: read.status, state: typeof state === 'string' ? state.slice(0, 32) : null })
-      ok('PAUSE-STOPS-NEW-ITEMS', await root.patch(`${SESSIONS}/${session.id}`, { expectedRevision: read.data?.revision, action: 'stop' }))
-      ok('START-RESUMES', await root.patch(`${SESSIONS}/${session.id}`, { expectedRevision: read.data?.revision, action: 'run', digest: ZERO }))
     },
   }),
 

@@ -253,19 +253,22 @@ export const renderMailSurface = (props: MailSurfaceProps = {}): string => {
 }
 
 /** Preserves the existing mailbox layout without accepting private mailbox data or active actions. */
-export const renderUnavailableMailBody = (options: { route: string; locale: Locale; theme?: 'dark' | 'light' }): string | undefined => {
+export const renderUnavailableMailBody = (options: { route: string; locale: Locale; theme?: 'dark' | 'light'; mailbox?: string }): string | undefined => {
   const route = normalizeSurfaceRoute('xmail', options.route)
-  if (route === '/mail/contacts') return `<div data-mail-read-only="true" data-mail-unavailable="contacts">${renderMailContactsWorkspace({ locale: options.locale, mailbox: '', canManage: false })}</div>`
+  // The signed-in mailbox, from the same read-only projection v2 uses; the frame readers read only their own mailbox.
+  const mailbox = options.mailbox ?? ''
+  if (route === '/mail/contacts') return `<div data-mail-read-only="true" data-mail-unavailable="contacts">${renderMailContactsWorkspace({ locale: options.locale, mailbox, canManage: false })}</div>`
   const mailboxTool = ({ '/mail/later': [renderMailTools, msgid('Mailbox tools')], '/mail/settings/spam': [renderMailSpam, msgid('Spam preferences')], '/mail/tools/mailing-lists': [renderMailMailingLists, msgid('Mailing lists')] } as Record<string, readonly [(input: { locale: Locale; mailbox: string; canManage: boolean }) => string, string] | undefined>)[route]
-  if (mailboxTool) return `<div data-mail-read-only="true" data-mail-unavailable="tools"><h1 class="xp-page-title">${escapeHtml(translator(options.locale)(mailboxTool[1]))}</h1>${mailboxTool[0]({ locale: options.locale, mailbox: '', canManage: false })}</div>`
+  if (mailboxTool) return `<div data-mail-read-only="true" data-mail-unavailable="tools"><h1 class="xp-page-title">${escapeHtml(translator(options.locale)(mailboxTool[1]))}</h1>${mailboxTool[0]({ locale: options.locale, mailbox, canManage: false })}</div>`
   const toolPage = ({ '/mail/folders': [renderMailFolders, msgid('Folders')], '/mail/tools/disk-usage': [renderMailDiskUsage, msgctxt('xmail', 'Disk usage')], '/mail/tools/connect-devices': [renderMailConnectDevices, msgid('Connect devices')], '/mail/settings/forwarders': [renderMailForwarders, msgctxt('xmail', 'Forwarders')], '/mail/settings/preferences': [renderMailPreferences, msgid('Preferences')] } as Record<string, readonly [(input: { locale: Locale; mailbox: string; canManage: boolean }) => string, string] | undefined>)[route]
-  if (toolPage) return `<div data-mail-read-only="true" data-mail-unavailable="tools"><h1 class="xp-page-title">${escapeHtml(translator(options.locale)(toolPage[1]))}</h1>${toolPage[0]({ locale: options.locale, mailbox: '', canManage: false })}</div>`
+  if (toolPage) return `<div data-mail-read-only="true" data-mail-unavailable="tools"><h1 class="xp-page-title">${escapeHtml(translator(options.locale)(toolPage[1]))}</h1>${toolPage[0]({ locale: options.locale, mailbox, canManage: false })}</div>`
   if (route === '/mail/search' || route === '/mail/settings/calendars') {
     const search = route === '/mail/search', { locale } = options
     const heading = search ? (translator(locale)('Search mail')) : (translator(locale)('Calendars and events'))
     const rendered = search
+      // Search reads message content, so its provider-data boundary keeps the mailbox out of a read-only page.
       ? renderMailSearchWorkspace({ locale, mailbox: '', available: false, attachmentPanel: renderMailAttachments({ lang: locale, mailbox: '', canRead: false }) })
-      : renderMailCalendarWorkspace({ locale, mailbox: '', canManage: false, canReadDav: false })
+      : renderMailCalendarWorkspace({ locale, mailbox, canManage: false, canReadDav: false })
     const readonly = rendered.replace(/<form\b/g, '<div style="display:flex;flex-direction:column;gap:16px;margin:0"').replace(/<\/form>/g, '</div>')
       .replace(/<(button|input|select|textarea)\b([^>]*)>/g, (_match, tag: string, attributes: string) => `<${tag}${/\bdisabled\b/.test(attributes) ? '' : ' disabled'}${attributes}>`)
     return `<div data-mail-read-only="true" data-mail-unavailable="${search ? 'search' : 'calendars'}"><h1 class="xp-page-title">${escapeHtml(heading)}</h1>${readonly}</div>`

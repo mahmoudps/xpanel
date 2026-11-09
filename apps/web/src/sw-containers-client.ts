@@ -7,23 +7,25 @@ const viewAction = canonicalViewAction
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import { readSwContainerEngineView, readSwContainersView } from '../../../packages/os/src/sw-container-command.ts'
 import type { SwContainerEngineView, SwContainersView } from '../../../packages/os/src/sw-container-command.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 export { readSwContainerEngineView, readSwContainersView }
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
 function bindSwContainers(askDialog: Ask | undefined, parseList: typeof readSwContainersView, parseEngine: typeof readSwContainerEngineView): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const blocked = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   const engineName = (engine: string): string => engine === 'podman' ? 'Podman' : 'Docker'
   const stateLabel = (state: string): string => ({ running: t('Running'), exited: t('Exited'), created: t('Created'), paused: t('Paused'), restarting: t('Restarting'), stopped: t('Stopped'), dead: t('Dead') } as Record<string, string>)[state] ?? state
   const engineLabel = (item: { state: string; reason: string | null; version: string | null }): [string, boolean] => item.state === 'read' && item.version ? [item.version, false] : item.reason === 'engine-absent' ? [t('Not installed'), true] : item.reason === 'invalid-engine-output' ? [t('Output could not be verified'), true] : [t('Unreachable'), true]
   const empty = (root: HTMLElement, body: HTMLElement, name: string, message: string): void => { body.replaceChildren(cloneViewRecord(root, name + '-empty', 'tr', { message })) }
   const unavailableText = (reason: string | null): string => reason === 'unsupported-host' ? t('Container engines cannot be read on this host. Nothing was read or changed.') : reason === 'no-engine' ? t('No Podman or Docker engine is installed. Install Podman from the software center to run containers.') : t('The container engines could not be read or their output could not be verified. No container is shown.')
-  const setup = (root: HTMLElement): { status: HTMLElement; refresh: HTMLButtonElement; admitted(): boolean; note(state: string, message: string): void; facts(view: { observedAt: string; engines: { engine: string; state: string; reason: string | null; version: string | null }[] } | null): void } | null => {
+  const setup = (root: HTMLElement): { status: HTMLElement; refresh: HTMLButtonElement; admitted(): boolean; transport: ReturnType<typeof frameRequest>; note(state: string, message: string): void; facts(view: { observedAt: string; engines: { engine: string; state: string; reason: string | null; version: string | null }[] } | null): void } | null => {
     const status = root.querySelector<HTMLElement>('[data-sw-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-sw-refresh]')
     if (!status || !refresh) return null
-    const admitted = (): boolean => root.isConnected && root.dataset.swCanRead === 'true' && !root.closest(blocked) && typeof transport === 'function'
+    const transport = frameRequest(root)
+    const admitted = (): boolean => root.isConnected && root.dataset.swCanRead === 'true' && typeof transport === 'function'
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status') }
     const facts = (view: { observedAt: string; engines: { engine: string; state: string; reason: string | null; version: string | null }[] } | null): void => {
       for (const node of root.querySelectorAll<HTMLElement>('[data-sw-engine-state]')) {
@@ -34,7 +36,7 @@ function bindSwContainers(askDialog: Ask | undefined, parseList: typeof readSwCo
       const observed = root.querySelector<HTMLElement>('[data-sw-observed]')
       if (observed) { observed.textContent = view ? formatDisplayDateTime(view.observedAt) : t('Not read'); observed.toggleAttribute('data-human', !view) }
     }
-    return { status, refresh, admitted, note, facts }
+    return { status, refresh, admitted, transport, note, facts }
   }
 
   document.querySelectorAll<HTMLElement>('[data-sw-containers]').forEach(root => {
@@ -43,9 +45,9 @@ function bindSwContainers(askDialog: Ask | undefined, parseList: typeof readSwCo
     const base = setup(root), body = root.querySelector<HTMLElement>('tbody[data-sw-containers]'), filterEngine = root.querySelector<HTMLSelectElement>('[data-sw-filter-engine]'), filterSearch = root.querySelector<HTMLInputElement>('[data-sw-filter-search]')
     const job = root.querySelector<HTMLElement>('[data-sw-job]'), jobLink = root.querySelector<HTMLAnchorElement>('[data-sw-job-link]')
     if (!base || !body || !filterEngine || !filterSearch || !job || !jobLink) return
-    const { refresh, admitted, note, facts } = base
+    const { refresh, admitted, transport, note, facts } = base
     let busy = false, review = false, view: SwContainersView | null = null
-    const manageable = (): boolean => admitted() && root.dataset.swCanManage === 'true' && view?.state === 'read' && view.actions.lifecycle && typeof askDialog === 'function' && !review
+    const manageable = (): boolean => admitted() && !root.closest(blocked) && root.dataset.swCanManage === 'true' && view?.state === 'read' && view.actions.lifecycle && typeof askDialog === 'function' && !review
     const lock = (): void => { refresh.disabled = busy || !admitted(); filterEngine.disabled = filterSearch.disabled = !view || view.state !== 'read'; for (const button of body.querySelectorAll<HTMLButtonElement>('button[data-sw-action]')) button.disabled = busy || !manageable() || button.dataset.swAllowed !== 'true' }
     const paint = (): void => {
       facts(view)
@@ -113,7 +115,7 @@ function bindSwContainers(askDialog: Ask | undefined, parseList: typeof readSwCo
     const base = setup(root)
     const bodies = Object.fromEntries(['facts', 'images', 'registries', 'networks', 'volumes'].map(key => [key, root.querySelector<HTMLElement>('tbody[data-sw-' + key + ']')]))
     if (!base || Object.values(bodies).some(node => !node)) return
-    const { refresh, admitted, note, facts } = base
+    const { refresh, admitted, transport, note, facts } = base
     let busy = false
     const fill = (key: string, rows: Record<string, string>[], message: string): void => {
       const body = bodies[key]!; body.textContent = ''
@@ -148,4 +150,4 @@ function bindSwContainers(askDialog: Ask | undefined, parseList: typeof readSwCo
   })
 }
 
-export const SW_CONTAINERS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseList=${readSwContainersView.toString()};const parseEngine=${readSwContainerEngineView.toString()};const bind=${bindSwContainers.toString()};return (ask)=>bind(ask,parseList,parseEngine);})()`
+export const SW_CONTAINERS_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseList=${readSwContainersView.toString()};const parseEngine=${readSwContainerEngineView.toString()};const bind=${bindSwContainers.toString()};return (ask)=>bind(ask,parseList,parseEngine);})()`)

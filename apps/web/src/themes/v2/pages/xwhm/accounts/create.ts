@@ -20,8 +20,8 @@ function planSection(t: Translate, props: WhmSurfaceProps, enabled: boolean): st
   const principal = principalOf(props)
   const plans = principal ? props.plans?.filter(plan => principal.kind === 'root' || plan.ownerId === null || plan.ownerId === principal.id) : undefined
   const preview = principal ? accountPlanPreviewModel({ principal, activeReseller: props.activeReseller, accounts: props.accounts, plans, resellers: props.resellers }) : { plans: [] }
-  const root = enabled && principal?.kind === 'root'
-  const owners = root ? [{ id: '', username: 'root' }, ...(props.resellers ?? [])] : enabled && principal?.kind === 'reseller' ? [principal] : []
+  // Owner choices are saved records: a closed form still lists them, disabled.
+  const owners = principal?.kind === 'root' ? [{ id: '', username: 'root' }, ...(props.resellers ?? [])] : principal?.kind === 'reseller' ? [principal] : []
   const ownerChoices = owners.map((owner, index) => `<label class="v2-whm-create__choice"><input type="radio" name="ownerId" value="${escapeHtml(owner.id)}"${index === 0 ? ' checked' : ''}${enabled ? '' : ' disabled'}><span><strong>${ltr(owner.username)}</strong><small>${escapeHtml(t(owner.id === '' ? 'No reseller allocation cap' : 'The server checks this reseller’s capacity when submitted.'))}</small></span></label>`).join('')
   const cap = (value: number | 'unlimited' | undefined, unit = ''): string => value === undefined ? escapeHtml(t('Not read')) : value === 'unlimited' ? escapeHtml(t('Unlimited')) : ltr(`${value}${unit}`)
   const limitRows: readonly { label: string; read: (plan: NonNullable<WhmSurfaceProps['plans']>[number]) => string }[] = [

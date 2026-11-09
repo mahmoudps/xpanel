@@ -85,16 +85,20 @@ describe('identity workspaces markup', () => {
 })
 
 describe('identity client', () => {
-  it.each(['classic', 'v2'] as const)('%s keeps the identity cards unavailable without authority or in an unqualified document', async theme => {
+  it.each(['classic', 'v2'] as const)('%s keeps the identity cards closed without authority and read-only in an unqualified document', async theme => {
     const send = vi.fn(async () => ({}))
     boot(ssh(theme, false), send)
     await tick()
-    expect(send).not.toHaveBeenCalled()
-    expect(within('admin-group')('[data-sec-status]').dataset.state).toBe('unavailable')
-    boot((theme === 'classic' ? renderClassicIdentityCards : renderV2IdentityCards)({ locale: 'en', principalKind: 'root', surface: 'xwhm' }), send)
+    // An unqualified document may read saved values; it never sends an unsafe method, and its controls stay disabled.
+    expect(send.mock.calls.every(call => (call as unknown[])[0] === 'GET')).toBe(true)
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, select, textarea, button')].every(node => node.disabled)).toBe(true)
+    const unread = vi.fn(async () => ({}))
+    boot((theme === 'classic' ? renderClassicIdentityCards : renderV2IdentityCards)({ locale: 'en', principalKind: 'root', surface: 'xwhm' }), unread)
     await tick()
-    expect(send).not.toHaveBeenCalled()
-    expect([...document.querySelectorAll<HTMLElement>('[data-sec-workspace]')].map(node => node.dataset.secCanRead)).toEqual(['false', 'false', 'false', 'false'])
+    // Without qualified identity tools the cards still read saved values inside a read-only frame; nothing is written.
+    expect(unread.mock.calls.every(call => (call as unknown[])[0] === 'GET')).toBe(true)
+    expect([...document.querySelectorAll<HTMLElement>('[data-sec-workspace]')].map(node => node.dataset.secCanRead + '/' + node.dataset.secCanManage)).toEqual(['true/false', 'true/false', 'true/false', 'true/false'])
+    expect([...document.querySelectorAll<HTMLElement>('[data-sec-workspace]')].every(node => node.closest('[data-readonly="true"]') !== null)).toBe(true)
     expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button')].every(node => node.disabled)).toBe(true)
   })
 

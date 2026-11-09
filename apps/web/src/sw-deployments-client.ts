@@ -5,6 +5,8 @@ const viewAction = canonicalViewAction
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
 export interface SwDeploymentsClientView {
@@ -38,7 +40,6 @@ export function readSwDeploymentsView(value: unknown): SwDeploymentsClientView {
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
 function bindSwDeployments(askDialog: Ask | undefined, parse: typeof readSwDeploymentsView): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const blocked = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   document.querySelectorAll<HTMLElement>('[data-sw-deployments]').forEach(root => {
     if (root.dataset.swBound === 'true') return
@@ -47,10 +48,11 @@ function bindSwDeployments(askDialog: Ask | undefined, parse: typeof readSwDeplo
     const status = q<HTMLElement>('status'), refresh = q<HTMLButtonElement>('refresh'), account = q<HTMLSelectElement>('account'), repos = q<HTMLElement>('repositories'), commits = q<HTMLElement>('commits'), pull = q<HTMLButtonElement>('pull')
     if (!status || !refresh || !account || !repos || !commits || !pull) return
     try { viewAction(cloneViewRecord(root, 'software-deployment-repository-row', 'tr', { path: '', 'inspect-label': '' }), 'inspect'); cloneViewRecord(root, 'software-deployment-repository-empty', 'tr', { message: '' }); cloneViewRecord(root, 'software-deployment-commit-row', 'tr', { hash: '', date: '', subject: '' }); cloneViewRecord(root, 'software-deployment-commit-empty', 'tr', { message: '' }) } catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
-    const admitted = (): boolean => root.isConnected && root.dataset.swCanRead === 'true' && !root.closest(blocked) && typeof transport === 'function'
+    const transport = frameRequest(root)
+    const admitted = (): boolean => root.isConnected && root.dataset.swCanRead === 'true' && typeof transport === 'function'
     let busy = false, locked = false, view: SwDeploymentsClientView | null = null
     const repository = (): NonNullable<NonNullable<SwDeploymentsClientView['selected']>['selected']> | null => view?.selected?.selected ?? null
-    const deployable = (): boolean => { const r = repository(); return admitted() && root.dataset.swCanManage === 'true' && !busy && !locked && !!view?.nativeAvailable && !!r && !r.dirty && r.head !== null && r.remote !== null && typeof askDialog === 'function' }
+    const deployable = (): boolean => { const r = repository(); return admitted() && !root.closest(blocked) && root.dataset.swCanManage === 'true' && !busy && !locked && !!view?.nativeAvailable && !!r && !r.dirty && r.head !== null && r.remote !== null && typeof askDialog === 'function' }
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status') }
     const fact = (key: string, text: string, human: boolean): void => { const node = q<HTMLElement>(key); if (node) { node.textContent = text; node.toggleAttribute('data-human', human) } }
     const empty = (body: HTMLElement, columns: number, message: string): void => { body.replaceChildren(cloneViewRecord(root, columns === 2 ? 'software-deployment-repository-empty' : 'software-deployment-commit-empty', 'tr', { message })) }
@@ -114,4 +116,4 @@ function bindSwDeployments(askDialog: Ask | undefined, parse: typeof readSwDeplo
     void send('read')
   })
 }
-export const SW_DEPLOYMENTS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readSwDeploymentsView.toString()};const bind=${bindSwDeployments.toString()};return (ask)=>bind(ask,parse);})()`
+export const SW_DEPLOYMENTS_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readSwDeploymentsView.toString()};const bind=${bindSwDeployments.toString()};return (ask)=>bind(ask,parse);})()`)

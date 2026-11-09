@@ -6,9 +6,10 @@ import { card } from '../../../components/card.ts'
 import { pageHeader } from '../../../components/page-header.ts'
 import { mailCardsFor } from '../../../../../mail-cards.ts'
 import { renderV2MailCards } from '../../mail-cards.ts'
+import type { WhmStoredFactAuthority } from '../stored-facts.ts'
 
 /** Core has already authorized the listener, principal and specific mail capability. */
-export interface WhmMailAuthority { readonly canRead: boolean; readonly canManage: boolean; readonly qualifiedTools?: ReadonlySet<string> }
+export interface WhmMailAuthority extends WhmStoredFactAuthority { readonly canRead: boolean; readonly canManage: boolean; readonly qualifiedTools?: ReadonlySet<string> }
 export interface WhmMailPageInput extends WhmSurfaceProps { readonly mailAuthority?: WhmMailAuthority }
 
 export function mailContext(input: WhmMailPageInput) {

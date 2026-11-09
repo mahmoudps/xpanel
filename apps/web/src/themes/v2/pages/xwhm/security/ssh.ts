@@ -1,11 +1,13 @@
 import { renderV2RootIdentityCards } from '../../identity.ts'
 import { actions, area, button, check, context, esc, facts, field, fields, help, inputControl, page, section, select, status, table, type WhmObservationInput } from '../monitoring/common.ts'
+import { whmStoredFacts } from '../stored-facts.ts'
 
 const SSH_TEMPLATES = '<template data-xp-template="whm-ssh-remove"><button type="button" class="v2-btn" style="color:var(--bad)" data-whm-ssh-remove data-protected="true" disabled><span data-xp-slot="label"></span></button></template><template data-xp-template="whm-ssh-fact-technical"><div><dt data-xp-slot="label"></dt><dd><bdi dir="ltr" class="v2-mono" data-xp-slot="value"></bdi></dd></div></template><template data-xp-template="whm-ssh-fact-text"><div><dt data-xp-slot="label"></dt><dd><span data-xp-slot="value"></span></dd></div></template>'
 
 export function renderV2WhmSsh(input: WhmObservationInput): string {
   const { t, canRead, canManage } = context(input)
-  const portKnown = canRead && Number.isInteger(input.serverSettings?.sshPort)
+  // A read-only page still shows the saved port, disabled.
+  const portKnown = (canRead || whmStoredFacts(input, input.observationAuthority ?? {}, ['server-settings-edit'])) && Number.isInteger(input.serverSettings?.sshPort)
   const body = section(t, 'ssh-settings', msgid('Sign-in settings'), `<div class="v2-observation__groups" data-whm-ssh-policy data-whm-ssh-can-manage="${canManage && portKnown}">${fields(field(t, 'v2-ssh-port', msgid('Port'), inputControl('v2-ssh-port', { 'data-whm-ssh-port': true }, false, ` dir="ltr" min="1" max="65535" step="1"${portKnown ? ` value="${input.serverSettings!.sshPort}"` : ''}`, 'number'))
     + field(t, 'v2-ssh-auth', msgid('Authentication'), select(t, 'v2-ssh-auth', { 'data-whm-ssh-auth': true }, [['keys', msgctxt('approved-xwhm', 'Keys only')], ['both', msgctxt('approved-xwhm', 'Keys and password')], ['password', msgid('Password only')]]))
     + field(t, 'v2-ssh-root', msgid('Root sign-in'), select(t, 'v2-ssh-root', { 'data-whm-ssh-root': true }, [['prohibit-password', msgctxt('approved-xwhm', 'Keys only')], ['no', msgid('Not allowed')], ['yes', msgctxt('approved-xwhm', 'Keys and password')], ['forced-commands-only', msgid('Forced commands only')]])))}

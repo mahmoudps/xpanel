@@ -1,6 +1,8 @@
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 
 const formatMailDateTime = formatDisplayDateTime
 
@@ -77,8 +79,6 @@ export function readCleanupResult(value: unknown, folder: string, requested: num
 
 function bindMailDiskUsage(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const bytes = (value: number): string => value < 1024 ? value + ' B' : value < 1048576 ? (value / 1024).toFixed(1) + ' KiB' : value < 1073741824 ? (value / 1048576).toFixed(1) + ' MiB' : (value / 1073741824).toFixed(2) + ' GiB'
   const bdi = (value: string, dir = 'ltr'): HTMLElement => { const item = document.createElement('bdi'); item.dir = dir; item.textContent = value; return item }
   const notMeasured: Record<string, string> = { 'too-many-messages': t('Not measured: more than 50000 messages'), changed: t('Not measured: the folder changed while it was read'), unavailable: t('Not measured: the server did not answer') }
@@ -92,7 +92,9 @@ function bindMailDiskUsage(): void {
     const size = form?.elements.namedItem('largerThanMb') as HTMLInputElement | null, seen = form?.elements.namedItem('seen') as HTMLInputElement | null
     const purgeConfirm = panel?.querySelector<HTMLInputElement>('[name="purgeConfirm"]')
     if (!status || !rows || !form || !panel || !apply || !folderSelect || !age || !size || !seen || !purgeConfirm) return
-    const admitted = (): boolean => root.isConnected && root.dataset.usageCanManage === 'true' && root.dataset.usageMailbox === mailbox && !!mailbox && !root.closest(denied) && !!send
+    const access = frameAccess(root, 'data-usage-can-read', 'data-usage-can-manage'), send = access.request
+    // Reads run in a read-only frame too; editing and every write need the manage flag outside one.
+    const readable = (): boolean => access.readable() && root.dataset.usageMailbox === mailbox && !!mailbox, admitted = (): boolean => readable() && access.writable()
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const fact = (key: string, value: string): void => { const node = root.querySelector<HTMLElement>('[data-mail-usage-fact="' + key + '"]'); if (node) node.textContent = value }
     let busy = false, generation = 0, usage: MailboxUsage | null = null, preview: CleanupPreview | null = null
@@ -135,7 +137,7 @@ function bindMailDiskUsage(): void {
       sync()
     }
     const load = async (quiet = false): Promise<void> => {
-      if (busy || !admitted() || !send) return
+      if (busy || !readable() || !send) return
       const token = ++generation
       busy = true; sync(); if (!quiet) note('reading', t('Reading disk usage…'))
       try {
@@ -230,9 +232,9 @@ function bindMailDiskUsage(): void {
         if (reread && token === generation) await load(true)
       })()
     })
-    if (!admitted()) { sync(); note('unavailable', t('Disk usage is unavailable for this mailbox session. Nothing was read.')); return }
+    if (!readable()) { sync(); note('unavailable', t('Disk usage is unavailable for this mailbox session. Nothing was read.')); return }
     sync(); void load()
   })
 }
 
-export const MAIL_DISK_USAGE_CLIENT_BINDING = `(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const usageCount=${usageCount.toString()};const usageWire=${usageWire.toString()};const readMailboxUsage=${readMailboxUsage.toString()};const readCleanupPreview=${readCleanupPreview.toString()};const readCleanupResult=${readCleanupResult.toString()};return ${bindMailDiskUsage.toString()};})()`
+export const MAIL_DISK_USAGE_CLIENT_BINDING = withFrameRequest(`(()=>{const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const usageCount=${usageCount.toString()};const usageWire=${usageWire.toString()};const readMailboxUsage=${readMailboxUsage.toString()};const readCleanupPreview=${readCleanupPreview.toString()};const readCleanupResult=${readCleanupResult.toString()};return ${bindMailDiskUsage.toString()};})()`)

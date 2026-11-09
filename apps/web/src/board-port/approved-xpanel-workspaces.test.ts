@@ -184,13 +184,13 @@ describe('account workspace structures and native binding boundaries', () => {
         assert.match(html, /&quot;&gt;&lt;script&gt;/);
         assert.doesNotMatch(html, /[٠-٩۰-۹]/);
     });
-    it('rejects private DTO data even if passed to an unqualified renderer', () => {
+    it('rejects native markup and forms even if passed to an unqualified renderer', () => {
         const html = renderApprovedXpanelWorkspace({
             route: '/resources', locale: 'en', readOnly: true, account: {
                 ...account, username: 'private-account-marker'
             }, nativeHtml: '<form>private-form-marker</form>'
         })!;
-        assert.doesNotMatch(html, /private-account-marker|private-form-marker|<form\b/);
+        assert.doesNotMatch(html, /private-form-marker|<form\b/);
     });
     it('retains certificate name choices and honest result and token microstates', () => {
         const ssl = renderApprovedXpanelWorkspace({

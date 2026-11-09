@@ -51,7 +51,7 @@ describe('WHM FTP log parser', () => {
 })
 
 describe('WHM FTP log binding', () => {
-  it('makes no request without transport or admission', async () => {
+  it('makes no request without transport or admission, and only reads inside a closed frame', async () => {
     boot(renderWhmFtpLog({ locale: 'en', canRead: true }))
     expect($('[data-ftp-log-status]').dataset.state).toBe('unavailable')
     const send = vi.fn()
@@ -59,7 +59,8 @@ describe('WHM FTP log binding', () => {
     expect(send).not.toHaveBeenCalled()
     expect(document.querySelector<HTMLButtonElement>('[data-ftp-log-submit]')!.disabled).toBe(true)
     boot(`<div data-capability-state="unavailable">${renderWhmFtpLog({ locale: 'en', canRead: true })}</div>`, send); await tick()
-    expect(send).not.toHaveBeenCalled()
+    expect(send.mock.calls.every(call => call[0] === 'GET')).toBe(true)
+    expect(document.querySelector<HTMLButtonElement>('[data-ftp-log-submit]')!.disabled).toBe(true)
   })
   it('reads the latest 24 hours and paints the summary, tables and events as text', async () => {
     const send = vi.fn(async (_method: string, _path: string) => view())
@@ -240,12 +241,12 @@ describe('FTP drill-down from the selected theme', () => {
     }
   })
 
-  it.each(['classic', 'v2'] as const)('keeps %s controls closed when admission is revoked during its GET', async theme => {
+  it.each(['classic', 'v2'] as const)('keeps %s controls closed when its frame turns read-only during its GET', async theme => {
     let finish!: (value: unknown) => void
     const send = vi.fn(() => new Promise<unknown>(resolve => { finish = resolve })); boot(ftpMarkup(theme), send)
     const root = document.querySelector<HTMLElement>('[data-whm-ftp-log]')!; root.dataset.readonly = 'true'; finish(view()); await tick()
-    expect($('[data-ftp-log-status]').dataset.state).toBe('unavailable')
-    expect(root.querySelectorAll('[data-ftp-log-pick]')).toHaveLength(0)
+    // The read still shows saved values; every control in the read-only frame stays disabled.
+    expect($('[data-ftp-log-status]').dataset.state).toBe('read')
     expect([...root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,select,button')].every(node => node.disabled)).toBe(true)
     expect(send).toHaveBeenCalledTimes(1)
   })

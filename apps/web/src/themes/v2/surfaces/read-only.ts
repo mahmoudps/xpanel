@@ -1,5 +1,6 @@
 import { projectReadOnlyMailSurface, projectReadOnlyPanelSurface, projectReadOnlyWhmSurface } from '../../../models/theme-surface.ts'
 import { projectReadOnlyMailSurfaceView } from '../../../models/mail.ts'
+import { openFrameReads } from '../../../read-only-frame.ts'
 import { v2Messages } from '../messages.ts'
 import { parseMarkup } from '../../../html.ts'
 import { renderV2MailInbox } from '../pages/xmail/inbox.ts'
@@ -42,19 +43,25 @@ export const renderV2ReadOnlyPage: V2ReadOnlyPage = props => {
   if (facts.surface === 'xpanel') {
     const view = projectReadOnlyPanelSurface({ ...facts.panel, ...context })
     if (!view) throw new Error(`v2_readonly_authority_unavailable:xpanel:${props.route}`)
-    body = renderV2PanelBody(view)
+    // The account reads its own saved values through the frame readers; controls stay disabled and frameRequest refuses writes.
+    const panelBody = renderV2PanelBody(view)
+    body = panelBody === undefined ? undefined : openFrameReads(panelBody)
   } else if (facts.surface === 'xwhm') {
     const view = projectReadOnlyWhmSurface({ ...facts.whm, ...context })
     if (!view) throw new Error(`v2_readonly_authority_unavailable:xwhm:${props.route}`)
-    body = renderV2WhmBody(view)
+    // Root reads saved values through the frame readers; their controls stay disabled and frameRequest refuses writes.
+    const whmBody = renderV2WhmBody(view)
+    body = whmBody !== undefined && view.visibility.principal.kind === 'root' ? openFrameReads(whmBody) : whmBody
   } else {
     const scoped = projectReadOnlyMailSurface({ ...facts.mail, ...context })
     if (!scoped) throw new Error(`v2_readonly_authority_unavailable:xmail:${props.route}`)
     const view = projectReadOnlyMailSurfaceView(scoped.props, scoped.authority)
     if (!view) throw new Error(`v2_readonly_mail_presentation_unavailable:${props.route}`)
     const t = v2Messages.translator(props.locale)
-    body = view.kind === 'inbox' ? renderV2MailInbox(t, view) : view.kind === 'compose' ? renderV2MailCompose(t, view)
+    // The mailbox reads its own saved values the same way.
+    const mailBody = view.kind === 'inbox' ? renderV2MailInbox(t, view) : view.kind === 'compose' ? renderV2MailCompose(t, view)
       : renderV2MailWorkspace({ ...view, locale: props.locale, ...(props.securityPage ? { securityHtml: V2_SECURITY_SLOT } : {}) })
+    body = mailBody === undefined ? undefined : openFrameReads(mailBody)
   }
   if (body === undefined) throw new Error(`v2_readonly_presentation_contract_missing:${props.surface}:${props.route}`)
   return readOnlyBoundary(body, props.securityPage)

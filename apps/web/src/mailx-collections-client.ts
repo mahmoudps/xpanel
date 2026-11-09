@@ -5,6 +5,8 @@ const cloneClientTemplate = canonicalCloneClientTemplate
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 
 export type MailxCollectionItemView = { id: string | null; name: string; description: string; isDefault: boolean; removable: boolean }
 export type MailxCollectionsView = {
@@ -14,7 +16,6 @@ export type MailxCollectionsView = {
 }
 export type MailxCalendarsView = { account: string; refused: string[]; mailboxes: { mailbox: string; revision: string; calendars: { id: string; name: string; color: string; timezone: string }[] }[] }
 type Ask = (options: { title: string; body: string; confirm: string; danger?: boolean }) => Promise<unknown>
-type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
 
 /** Strict readers for GET /api/account/mailx/collections and the calendar part of GET /api/account/collaboration. */
 export function readMailxCollections(value: unknown, kind: 'collections' | 'calendars'): MailxCollectionsView | MailxCalendarsView {
@@ -48,7 +49,7 @@ function bindMailxCollections(askDialog: Ask | undefined): void {
   document.querySelectorAll<HTMLElement>('[data-mailx-collections]').forEach(root => {
     if (root.dataset.mailxCollectionsBound === 'true') return
     root.dataset.mailxCollectionsBound = 'true'
-    const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
+    const access = frameAccess(root, 'data-mailx-collections-can-read', 'data-mailx-can-manage'), request = access.request
     const get = <T extends HTMLElement>(key: string): T => root.querySelector<T>('[data-mailx-' + key + ']')!
     const calMailbox = get<HTMLSelectElement>('calendar-mailbox'), calTarget = get<HTMLSelectElement>('calendar-target'), calName = get<HTMLInputElement>('calendar-name'), calColor = get<HTMLInputElement>('calendar-color'), calZone = get<HTMLInputElement>('calendar-timezone')
     const calSave = get<HTMLButtonElement>('calendar-save'), calDelete = get<HTMLButtonElement>('calendar-delete'), calStatus = get<HTMLElement>('calendar-status')
@@ -58,8 +59,8 @@ function bindMailxCollections(askDialog: Ask | undefined): void {
     if (![calMailbox, calTarget, calName, calColor, calZone, calSave, calDelete, calStatus, form, boxSelect, defaultSelect, descriptions, save, refresh, status, bodies['address-books'], bodies['task-lists']].every(Boolean)) return
     try { cloneClientTemplate(clientTemplate(root, 'mailx-collection-row'), 'tr', ['name', 'description', 'default', 'remove']); cloneClientTemplate(clientTemplate(root, 'mailx-collection-empty'), 'tr', ['message']); cloneClientTemplate(clientTemplate(root, 'mailx-calendar-description'), 'div', ['label', 'description']); cloneClientTemplate(clientTemplate(root, 'mailx-calendar-empty'), 'p', ['message']); const probe = cloneClientTemplate(clientTemplate(root, 'mailx-collection-row'), 'tr', ['name', 'description', 'default', 'remove']); for (const slot of ['name', 'description', 'default']) clientTemplateSlot(probe, slot, 'input'); clientTemplateSlot(probe, 'remove', 'button'); const descriptionProbe = cloneClientTemplate(clientTemplate(root, 'mailx-calendar-description'), 'div', ['label', 'description']); clientTemplateSlot(descriptionProbe, 'label', 'label'); clientTemplateSlot(descriptionProbe, 'description', 'textarea') }
     catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement | HTMLTextAreaElement>('input,select,button,textarea').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Collection settings are unavailable here. Nothing was read.'); return }
-    const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.mailxCanManage === 'true' && !root.closest(denied) && !!request
+    // Reads run in a read-only frame too; changes need the manage flag outside one.
+    const readable = (): boolean => access.readable(), admitted = (): boolean => access.writable()
     let collections: MailxCollectionsView | null = null, calendars: MailxCalendarsView | null = null, busy = false
     const note = (target: HTMLElement, state: string, message: string): void => { target.dataset.state = state; target.textContent = message; target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const options = (target: HTMLSelectElement, items: { value: string; label: string }[], keep: string): void => {
@@ -79,7 +80,7 @@ function bindMailxCollections(askDialog: Ask | undefined): void {
       for (const control of [calMailbox, calTarget, boxSelect, defaultSelect]) control.disabled = off || !(control === calMailbox || control === calTarget ? calendars : collections)?.mailboxes.length
       for (const control of [calName, calColor, calZone]) control.disabled = off || !calendar()
       calSave.disabled = off || !calendar() || !draft() || !askDialog; calDelete.disabled = off || !calendar() || !askDialog
-      save.disabled = off || !collections?.mailboxes.length; refresh.disabled = off
+      save.disabled = off || !collections?.mailboxes.length; refresh.disabled = busy || !readable()
       root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLTextAreaElement>('[data-mailx-descriptions] textarea,[data-mailx-address-books] :is(input,button),[data-mailx-task-lists] :is(input,button),[data-mailx-add]')
         .forEach(control => { control.disabled = off || !collections?.mailboxes.length })
     }
@@ -117,12 +118,12 @@ function bindMailxCollections(askDialog: Ask | undefined): void {
       controls()
     }
     const load = async (after?: string): Promise<void> => {
-      if (busy || !admitted()) return
+      if (busy || !readable()) return
       busy = true; controls(); note(status, 'reading', t('Reading collection settings…'))
       try {
         const nextCollections = readMailxCollections(await request!('GET', '/api/account/mailx/collections'), 'collections') as MailxCollectionsView
         const nextCalendars = readMailxCollections(await request!('GET', '/api/account/collaboration'), 'calendars') as MailxCalendarsView
-        if (!admitted() || nextCollections.account !== nextCalendars.account) throw new Error('account_mismatch')
+        if (!readable() || nextCollections.account !== nextCalendars.account) throw new Error('account_mismatch')
         collections = nextCollections; calendars = nextCalendars
         const boxes = nextCollections.mailboxes.map(item => ({ value: item.mailbox, label: item.mailbox }))
         options(boxSelect, boxes, boxSelect.value); options(calMailbox, nextCalendars.mailboxes.map(item => ({ value: item.mailbox, label: item.mailbox })), calMailbox.value)
@@ -184,9 +185,9 @@ function bindMailxCollections(askDialog: Ask | undefined): void {
         if (saved) await load(t('Collection settings saved and read back.'))
       })()
     })
-    if (!admitted()) { controls(); note(status, 'unavailable', t('Collection settings are unavailable here. Nothing was read.')); return }
+    if (!readable()) { controls(); note(status, 'unavailable', t('Collection settings are unavailable here. Nothing was read.')); return }
     void load()
   })
 }
 
-export const MAILX_COLLECTIONS_CLIENT_BINDING = `(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const readMailxCollections=${readMailxCollections.toString()};return ${bindMailxCollections.toString()};})()`
+export const MAILX_COLLECTIONS_CLIENT_BINDING = withFrameRequest(`(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const readMailxCollections=${readMailxCollections.toString()};return ${bindMailxCollections.toString()};})()`)

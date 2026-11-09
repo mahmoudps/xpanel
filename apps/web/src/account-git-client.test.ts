@@ -31,6 +31,17 @@ describe('Git account page and controller', () => {
     expect($<HTMLButtonElement>('[aria-labelledby="git-deployment"] button').disabled).toBe(true)
     expect($<HTMLInputElement>('[data-git-path]').disabled).toBe(false)
   })
+  it('reads inside a read-only frame but never writes, with every control disabled', async () => {
+    const request = vi.fn(async (_method: string, _path: string, _body?: unknown) => view())
+    ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = request
+    document.body.innerHTML = '<div data-readonly="true">' + renderAccountGitWorkspace({ lang: 'en', accountId, canManage: true }) + '</div>'
+    ;(new Function('return ' + ACCOUNT_GIT_CLIENT_BINDING)() as (ask: unknown) => void)(async () => true)
+    await settle(); await settle()
+    expect([...$<HTMLSelectElement>('[data-git-repository]').options].map(option => option.value)).toEqual(['repo'])
+    $<HTMLButtonElement>('[data-git-inspect]').click(); await settle()
+    expect(request).toHaveBeenCalledTimes(1); expect(request.mock.calls[0]![0]).toBe('GET')
+    expect([...document.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button,input,select')].every(control => control.disabled)).toBe(true)
+  })
   it('deploys the read repository after a confirmation that names the risk, and shows the recorded commit', async () => {
     const confirmation = vi.fn(async () => true)
     const request = vi.fn(async (_method: string, _path: string, body?: unknown) => { const op = body ? (body as { op: string }).op : 'list'; return { ...view(op), deployed: op === 'deploy' ? { commit: hash, at: '2026-11-07T10:00:00.000Z' } : null } })

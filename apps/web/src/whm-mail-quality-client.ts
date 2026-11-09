@@ -4,6 +4,8 @@ const whmClientNode = canonicalWhmClientNode
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 
 const formatMailDateTime = formatDisplayDateTime
 
@@ -78,7 +80,7 @@ function bindWhmMailQuality(): void {
     const status = root.querySelector<HTMLElement>('[data-whm-mail-quality-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-whm-mail-quality-refresh]'), run = root.querySelector<HTMLButtonElement>('[data-whm-mail-quality-check]')
     const rows = root.querySelector<HTMLElement>('[data-whm-mail-quality-rows]'), banner = root.querySelector<HTMLElement>('[data-whm-mail-quality-result]'), selectAll = root.querySelector<HTMLInputElement>('[data-whm-mail-quality-select-all]')
     const selectedLabel = root.querySelector<HTMLElement>('[data-whm-mail-quality-selected]'), truncated = root.querySelector<HTMLElement>('[data-whm-mail-quality-truncated]')
-    const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
+    const request = frameRequest(root)
     if (!status || !refresh || !run || !rows || !banner || !selectAll || !selectedLabel) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     let templateContractIntact = true
@@ -94,7 +96,7 @@ function bindWhmMailQuality(): void {
         throw error
       }
     }
-    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailQualityCanRead === 'true' && !root.closest(denied) && !!request)
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailQualityCanRead === 'true' && !!request)
     if (admitted()) { try { verifyWhmTemplates() } catch { return } }
     const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
       verifyWhmTemplates()
@@ -240,4 +242,4 @@ function bindWhmMailQuality(): void {
   })
 }
 
-export const WHM_MAIL_QUALITY_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailQualityList=${readMailQualityList.toString()};const readMailQualityResults=${readMailQualityResults.toString()};return ${bindWhmMailQuality.toString()};})()`
+export const WHM_MAIL_QUALITY_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailQualityList=${readMailQualityList.toString()};const readMailQualityResults=${readMailQualityResults.toString()};return ${bindWhmMailQuality.toString()};})()`)

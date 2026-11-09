@@ -156,11 +156,12 @@ describe('WHM restore files client', () => {
     expect(q<HTMLButtonElement>('[data-backup-files-restore]').disabled).toBe(true)
     expect(document.body.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)
   })
-  it('stays inert when unavailable or without a session transport', async () => {
+  it('only reads when unavailable and stays inert without a session transport', async () => {
     mount('en', true, true, 'unavailable')
     const request = server()
     await boot(request)
-    expect(request).not.toHaveBeenCalled()
+    expect((vi.mocked(request).mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+    vi.mocked(request).mockClear()
     mount('en', false)
     await boot(request)
     expect(request).not.toHaveBeenCalled()

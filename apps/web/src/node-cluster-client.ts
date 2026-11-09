@@ -2,6 +2,8 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const cloneViewRecord = canonicalCloneViewRecord
 const viewAction = canonicalViewAction
 
@@ -26,10 +28,10 @@ function bindNodeCluster(askDialog?: (options: { title: string; body: string; co
     const status = root.querySelector<HTMLElement>('[data-node-cluster-status]'), members = root.querySelector<HTMLElement>('[data-node-cluster-members]'), sections = root.querySelector<HTMLElement>('[data-node-cluster-sections]')
     const versions = root.querySelector<HTMLElement>('[data-node-cluster-versions]'), noteInput = root.querySelector<HTMLInputElement>('[data-node-cluster-note]'), member = root.querySelector<HTMLSelectElement>('[data-node-cluster-member]'), overwrite = root.querySelector<HTMLInputElement>('[data-node-cluster-overwrite]')
     const readButton = root.querySelector<HTMLButtonElement>('[data-node-cluster-read]'), saveButton = root.querySelector<HTMLButtonElement>('[data-node-cluster-save]'), createButton = root.querySelector<HTMLButtonElement>('[data-node-cluster-create]')
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const transport = frameRequest(root)
     if (!status || !members || !sections || !versions || !noteInput || !member || !overwrite || !readButton || !saveButton || !createButton) return
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.clusterCanRead === 'true' && !root.closest('[data-wiring="unavailable"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled')
-    const manageable = (): boolean => admitted() && root.dataset.clusterCanManage === 'true'
+    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.clusterCanRead === 'true'
+    const manageable = (): boolean => admitted() && root.dataset.clusterCanManage === 'true' && !root.closest('[data-wiring="unavailable"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled')
     try {
       viewAction(cloneViewRecord(root, 'node-cluster-version-row', 'tr', { number: '', created: '', sections: '', pushes: '', 'push-label': '', 'rollback-label': '' }), 'push')
       cloneViewRecord(root, 'node-cluster-version-empty', 'tr', { message: '' })
@@ -107,4 +109,4 @@ function bindNodeCluster(askDialog?: (options: { title: string; body: string; co
   })
 }
 
-export const NODE_CLUSTER_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const readClusterView=${readClusterView.toString()};return ${bindNodeCluster.toString()};})()`
+export const NODE_CLUSTER_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const readClusterView=${readClusterView.toString()};return ${bindNodeCluster.toString()};})()`)

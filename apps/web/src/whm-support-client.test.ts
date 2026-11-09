@@ -154,7 +154,7 @@ describe('support client binding', () => {
     expect(q('[data-whm-support-hashing]').textContent).toMatch(/^التجزئة هي أول 12 رقمًا/)
   })
 
-  it('reports a failed or invalid read and stays inert on an unavailable page', async () => {
+  it('reports a failed or invalid read, and only reads on an unavailable page', async () => {
     mount()
     boot(vi.fn(async () => { throw Object.assign(new Error('denied'), { status: 403 }) }))
     await tick()
@@ -164,12 +164,13 @@ describe('support client binding', () => {
     await tick()
     expect(q<HTMLElement>('[data-whm-support-status]').dataset.state).toBe('failed')
     mount('en', true, 'data-capability-state="unavailable"')
-    const request = vi.fn(async () => view())
+    const request = vi.fn(async (_method: string, _path: string) => view())
     boot(request)
     await tick()
-    expect(request).not.toHaveBeenCalled()
+    // A read-only frame shows the saved state; its controls stay disabled and the gate refuses writes.
+    expect(request).toHaveBeenCalled()
+    expect(request.mock.calls.every(call => call[0] === 'GET')).toBe(true)
     expect(q<HTMLButtonElement>('[data-whm-support-refresh]').disabled).toBe(true)
-    expect(q<HTMLElement>('[data-whm-support-status]').dataset.state).toBe('unavailable')
   })
 })
 

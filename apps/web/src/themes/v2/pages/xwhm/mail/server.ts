@@ -87,7 +87,9 @@ ${status(t(msgid('The saved policy has not been read.')), { 'data-whm-mail-setti
 }
 
 function outboundPolicy(input: WhmMailPageInput): string {
-  const { t, canRead, canManage } = mailContext(input), saved = canRead ? input.mailIpConfig : undefined
+  // Root's saved mail IP configuration shows on a read-only page too, disabled.
+  const facts = input.mailAuthority, readOnlyFacts = facts?.presentation === 'read-only' && facts.canReadFacts === true
+  const { t, canRead, canManage } = mailContext(input), saved = canRead || readOnlyFacts ? input.mailIpConfig : undefined
   const editable = canManage && saved !== undefined
   const controls = [['defaultIpv4', msgid('Default outbound IPv4')], ['defaultIpv6', msgid('Default outbound IPv6')], ['defaultHelo', msgid('Default EHLO / HELO Hostname')]] as const
   return group('outbound-policy', t(msgid('Postfix Outbound Mail IP & HELO Transport Map')),

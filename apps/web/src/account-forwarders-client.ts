@@ -6,6 +6,8 @@ const cloneClientTemplate = canonicalCloneClientTemplate
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 const displayDateTime = formatDisplayDateTime
 
 export type RoutingState = 'applied' | 'pending' | 'failed'
@@ -45,7 +47,6 @@ export function utcInstant(local: string): string | null {
 }
 
 function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) => Promise<string | boolean | null>): void {
-  const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const copy = (message: string, values?: MessageValues) => xpT(message, values)
   const unavailable = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   const stateText = (app: RoutingApplication) => app.state === 'applied' ? copy('Applied')
@@ -66,25 +67,27 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
     row.append(td);return td
   }
   /** One section: read, paint, and serialized writes that lock after an uncertain outcome. */
-  const section = (root: HTMLElement, key: string, read: () => Promise<void>) => {
+  const section = (root: HTMLElement, key: string, access: ReturnType<typeof frameAccess>, read: () => Promise<void>) => {
     const status = root.querySelector<HTMLElement>(`[data-${key}-status]`)
     try { for(const [name,tag] of [['row','tr'],['action','td'],['button','button'],['cell','td'],['break','br'],['technical','bdi'],['text','span']] as const) cloneClientTemplate(clientTemplate(root,'account-routing-'+name),tag,[]) }
     catch { root.querySelectorAll<HTMLInputElement|HTMLSelectElement|HTMLButtonElement>('input,select,button').forEach(control=>{control.disabled=true});if(status){status.dataset.state='unavailable';status.textContent=copy('Unavailable')}return {load:async()=>{},write:async()=>{}} }
-    const state = { busy: false, review: false, read: false, manage: root.dataset[`${key}Manage`] === 'true' }
+    const state = { busy: false, review: false, read: false }, request = access.request
+    // Records are read outside a read-only frame as before, and inside one with the read flag; changes need the manage flag outside one.
+    const readable = (): boolean => access.readable() || !root.closest(unavailable)
     const note = (text: string, kind: string) => { if (status) { status.textContent = text; status.dataset.state = kind; status.setAttribute('role', kind === 'uncertain' || kind === 'failed' ? 'alert' : 'status') } }
     const controls = () => {
       root.setAttribute('aria-busy', String(state.busy))
-      root.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = Boolean(root.closest(unavailable)) || state.busy || (!button.hasAttribute('data-forwarder-refresh') && (!state.manage || !state.read || state.review)) })
+      root.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = Boolean(root.closest(unavailable)) || state.busy || (!button.hasAttribute('data-forwarder-refresh') && (!access.writable() || !state.read || state.review)) })
     }
     const load = async () => {
-      if (state.busy || root.closest(unavailable) || !request) return
+      if (state.busy || !readable() || !request) return
       state.busy = true; controls(); note(copy('Reading…'), 'pending')
       try { await read(); state.read = true; state.review = false; note(copy('Read from the server.'), 'read') }
       catch { state.read = false; note(copy('Records could not be read. Editing is unavailable.'), 'failed') }
       finally { state.busy = false; controls() }
     }
     const write = async (method: string, path: string, body: unknown, done: () => void) => {
-      if (!request || state.busy || !state.manage || !state.read || state.review || root.closest(unavailable)) return
+      if (!request || state.busy || !access.writable() || !state.read || state.review) return
       state.busy = true; controls(); note(copy('Saving and applying…'), 'pending')
       let acknowledged = false
       try {
@@ -111,8 +114,8 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
     const rows = root.querySelector<HTMLTableSectionElement>('[data-forwarder-rows]')
     const empty = root.querySelector<HTMLElement>('[data-forwarder-empty]')
     const form = root.querySelector<HTMLFormElement>('[data-forwarder-create]')
-    const manage = root.dataset.forwarderManage === 'true'
-    const ui = section(root, 'forwarder', async () => {
+    const access = frameAccess(root, 'data-forwarder-can-read', 'data-forwarder-manage'), request = access.request
+    const ui = section(root, 'forwarder', access, async () => {
       const items = readForwarderRecords(await request!('GET', '/api/mail/forwarders'))
       if (!rows) return
       rows.textContent = ''
@@ -124,7 +127,7 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
         cell(row, [item.createdAt === undefined ? copy(msgctxt('account-forwarders-client', 'Not read')) : displayDateTime(item.createdAt)], true)
         cell(row, [stateText(item.application)], false).dataset.routingState = item.application.state
         const action = routingAction(root)
-        if (manage) { const button = routingButton(root); button.dataset.forwarderDelete = item.id; button.dataset.forwarderSource = item.sourceAddress; button.textContent = copy('Delete forwarder'); action.appendChild(button) }
+        if (access.writable()) { const button = routingButton(root); button.dataset.forwarderDelete = item.id; button.dataset.forwarderSource = item.sourceAddress; button.textContent = copy('Delete forwarder'); action.appendChild(button) }
         else action.textContent = copy(msgctxt('account-forwarders-client', 'Read only'))
         row.appendChild(action); rows.appendChild(row)
       }
@@ -165,7 +168,7 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
     const rows = root.querySelector<HTMLTableSectionElement>('[data-autoresponder-rows]')
     const empty = root.querySelector<HTMLElement>('[data-autoresponder-empty]')
     const form = root.querySelector<HTMLFormElement>('[data-autoresponder-form]')
-    const manage = root.dataset.autoresponderManage === 'true'
+    const access = frameAccess(root, 'data-autoresponder-can-read', 'data-autoresponder-manage'), request = access.request
     // a mailbox answers with its own vacation (/api/webmail/vacation); any other address through /api/mail/autoresponders
     let records = new Map<string, Record<string, unknown>>(), mailboxes: string[] = [], editing: Record<string, unknown> | null = null
     const field = (name: string) => form!.elements.namedItem(name) as HTMLInputElement
@@ -178,7 +181,7 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
       form.querySelector<HTMLElement>('[data-autoresponder-submit]')!.textContent = copy('Add autoresponder')
       form.querySelector<HTMLElement>('[data-autoresponder-cancel]')!.hidden = true
     }
-    const ui = section(root, 'autoresponder', async () => {
+    const ui = section(root, 'autoresponder', access, async () => {
       const value = await request!('GET', '/api/mail/autoresponders') as Record<string, unknown>
       if (!value || !Array.isArray(value.autoresponders) || !Array.isArray(value.mailboxes)) throw new Error('invalid_autoresponder_read')
       const next = new Map<string, Record<string, unknown>>()
@@ -202,7 +205,7 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
           copy('Once per sender every {hours, plural, one {# hour} other {# hours}}', { hours: item.replyIntervalHours as number })], false)
         cell(row, [stateText(app)], false).dataset.routingState = app.state
         const action = routingAction(root)
-        if (manage) for (const [kind, label] of [['edit', copy('Edit autoresponder')], ['delete', copy('Delete autoresponder')]] as const) {
+        if (access.writable()) for (const [kind, label] of [['edit', copy('Edit autoresponder')], ['delete', copy('Delete autoresponder')]] as const) {
           const button = routingButton(root)
           button.dataset.autoresponderAction = kind; button.dataset.autoresponderAddress = String(item.address); button.textContent = label; action.appendChild(button)
         }
@@ -255,6 +258,7 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
     root.dataset.defaultBound = 'true'
     const form = root.querySelector<HTMLFormElement>('[data-default-form]')
     const current = root.querySelector<HTMLElement>('[data-default-current]')
+    const access = frameAccess(root, 'data-default-can-read', 'data-default-manage'), request = access.request
     let records: Record<string, unknown>[] = []
     const kind = () => form?.querySelector<HTMLInputElement>('input[name="default-kind"]:checked')?.value ?? 'reject'
     const show = () => {
@@ -272,7 +276,7 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
       current.textContent = record.kind === 'forward' ? copy('Current: forward to {destination} ({state})', { destination: String(record.destination), state: host })
         : record.kind === 'discard' ? copy('Current: discard silently ({state})', { state: host }) : copy('Current: reject with {reply} ({state})', { reply, state: host })
     }
-    const ui = section(root, 'default', async () => {
+    const ui = section(root, 'default', access, async () => {
       const value = await request!('GET', '/api/mail/default-addresses') as Record<string, unknown>
       if (!value || !Array.isArray(value.defaultAddresses)) throw new Error('invalid_default_address_read')
       records = value.defaultAddresses as Record<string, unknown>[]
@@ -300,4 +304,4 @@ function bindAccountForwarders(askDialog?: (options: Record<string, unknown>) =>
   })
 }
 
-export const ACCOUNT_FORWARDERS_CLIENT_BINDING = `(function(askDialog) { const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()}; const displayDateTime=${DISPLAY_DATETIME_BINDING}; ${readRoutingApplication.toString()}; ${readForwarderRecords.toString()}; ${forwarderWriteUncertain.toString()}; ${utcInstant.toString()}; (${bindAccountForwarders.toString()})(askDialog); })`
+export const ACCOUNT_FORWARDERS_CLIENT_BINDING = withFrameRequest(`(function(askDialog) { const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()}; const displayDateTime=${DISPLAY_DATETIME_BINDING}; ${readRoutingApplication.toString()}; ${readForwarderRecords.toString()}; ${forwarderWriteUncertain.toString()}; ${utcInstant.toString()}; (${bindAccountForwarders.toString()})(askDialog); })`)

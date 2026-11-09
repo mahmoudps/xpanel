@@ -6,9 +6,10 @@ import { pageHeader } from '../../../components/page-header.ts'
 import { escapeHtml, hookAttrs, type HookAttributes } from '../../../html.ts'
 import { v2Messages } from '../../../messages.ts'
 import { v2SoftwareClientTemplates } from './client-templates.ts'
+import type { WhmStoredFactAuthority } from '../stored-facts.ts'
 
 /** Core resolves the route, listener, principal and capability before creating this presentation input. */
-export interface WhmDataAuthority { readonly canRead: boolean; readonly canManage: boolean; readonly canKill?: boolean; readonly canRepair?: boolean; readonly canRootPassword?: boolean; readonly canDbProfiles?: boolean; readonly canFtpSettings?: boolean; readonly canDbMap?: boolean; readonly canDbHosts?: boolean; readonly canDbSettings?: boolean; readonly canPostgresql?: boolean; readonly canDbService?: boolean; readonly canDbQuota?: boolean; readonly canPmaAccess?: boolean }
+export interface WhmDataAuthority extends WhmStoredFactAuthority { readonly canRead: boolean; readonly canManage: boolean; readonly canKill?: boolean; readonly canRepair?: boolean; readonly canRootPassword?: boolean; readonly canDbProfiles?: boolean; readonly canFtpSettings?: boolean; readonly canDbMap?: boolean; readonly canDbHosts?: boolean; readonly canDbSettings?: boolean; readonly canPostgresql?: boolean; readonly canDbService?: boolean; readonly canDbQuota?: boolean; readonly canPmaAccess?: boolean }
 export interface WhmDataPageInput extends WhmSurfaceProps { readonly dataAuthority?: WhmDataAuthority }
 export const DENIED_DATA_AUTHORITY: WhmDataAuthority = Object.freeze({ canRead: false, canManage: false })
 export function context(input: WhmDataPageInput, authority = input.dataAuthority ?? DENIED_DATA_AUTHORITY) {

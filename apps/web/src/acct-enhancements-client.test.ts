@@ -104,4 +104,16 @@ describe('account enhancements client', () => {
     expect($('[data-acct-enh-status]').dataset.state).toBe('unavailable')
     expect($('[data-acct-enh-workspace]').getAttribute('dir')).toBe('rtl')
   })
+  it('reads inside a read-only frame but never writes, with every control disabled', async () => {
+    const send = vi.fn(async () => view())
+    document.body.innerHTML = '<div data-readonly="true">' + renderWhmAccountEnhancementsWorkspace({ locale: 'en', canManage: true }) + '</div>'
+    ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
+    new Function('return ' + WHM_ENHANCEMENTS_CLIENT_BINDING)()(async () => true)
+    await flush()
+    expect($('[data-acct-enh-rows="definitions"]').textContent).toContain('Extra sites')
+    submit('limit'); await flush()
+    expect(send).toHaveBeenCalled()
+    expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select')].every(control => control.disabled)).toBe(true)
+  })
 })

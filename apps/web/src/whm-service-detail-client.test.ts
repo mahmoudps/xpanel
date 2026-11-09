@@ -51,12 +51,14 @@ describe('service detail client parsers', () => {
 })
 
 describe('service detail client binding', () => {
-  it('makes no request and keeps every control inert without transport, root or a qualified host', async () => {
+  it('sends no unsafe method and keeps every control inert without transport, root or a qualified host', async () => {
     boot(); expect(status().dataset.state).toBe('unavailable')
     for (const [canRead, capability] of [[false, 'authorized'], [true, 'unavailable']] as const) {
       for (const kind of ['dns', 'ftp', 'certificates'] as const) {
         mount(kind, 'en', canRead, true, capability); const send = vi.fn(); boot(send); await tick()
-        expect(send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable')
+        // A read-only frame may read saved values; it never sends an unsafe method.
+        if (canRead) expect(send.mock.calls.every(call => call[0] === 'GET')).toBe(true)
+        else { expect(send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable') }
         for (const control of document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input, select, textarea, button')) expect(control.disabled).toBe(true)
         expect(document.querySelector('form')).toBeNull()
       }

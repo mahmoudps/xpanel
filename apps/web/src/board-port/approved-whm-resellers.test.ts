@@ -100,12 +100,13 @@ describe('detailed reseller administration', () => {
     expect(html).not.toMatch(/role="meter"|xp-meter__fill|Total disk \(MB\)|Total bandwidth per month \(MB\)/)
   })
 
-  it('retains the full read-only layout without forwarding supplied data or native actions', () => {
+  it('retains the full read-only layout with saved values, disabled, and no native actions', () => {
     const html = renderApprovedWhmResellers({ ...base(), capabilityUnavailable: true }, '<form data-private-native="true"></form>')
     expect(html).toContain('data-workspace-mode="read-only"')
     for (const label of ['Privileges', 'Owned accounts', 'Capacity and usage', 'Overselling', 'Nameservers', 'Delegated IP addresses']) expect(html).toContain(label)
-    expect(html).not.toMatch(/<form\b|data-reseller-update-form=|data-reseller-owner-form=/)
-    for (const privateValue of [reseller.username, account.primaryDomain, reseller.id, reseller.nameservers[0]!, 'data-private-native']) expect(html).not.toContain(privateValue)
+    expect(html).not.toMatch(/<form\b|data-reseller-update-form=|data-reseller-owner-form=|data-private-native/)
+    for (const saved of [reseller.username, account.primaryDomain, reseller.nameservers[0]!]) expect(html).toContain(saved)
+    for (const control of html.matchAll(/<(?:input|select|textarea)\b[^>]*>/g)) expect(control[0]).toMatch(/\bdisabled\b/)
     expect(html).toMatch(/<button\b[^>]*disabled[^>]*data-wiring="soon"/)
   })
 
@@ -130,7 +131,7 @@ describe('detailed reseller administration', () => {
   it('does not infer readiness from metadata alone or qualify ownership from reseller editing', () => {
     const unread = renderApprovedWhmResellers({ ...base(), catalog: tools })
     expect(unread).toContain('data-workspace-mode="read-only"')
-    expect(unread).not.toContain(account.primaryDomain)
+    expect(unread).toContain(account.primaryDomain)
     expect(unread).not.toMatch(/<form\b/)
     const resellerOnly = catalog.map(tool => tool.id === 'modify-account' ? { ...tool, status: 'researched' as const } : tool)
     const scoped = renderApprovedWhmResellers({ ...base(), catalog: resellerOnly })

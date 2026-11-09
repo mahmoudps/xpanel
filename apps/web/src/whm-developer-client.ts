@@ -6,6 +6,8 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDispl
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 
 export type DeveloperBrowserSurface = 'account' | 'administrator' | 'integrations'
 export type DeveloperBrowserOperation = 'identity' | 'preferences' | 'tokens'
@@ -55,9 +57,8 @@ function bindWhmDeveloper(): void {
     const endpoint = surface === 'account' ? '/api/account/developer' : surface === 'administrator' ? '/api/server/panel/developer' : surface === 'integrations' ? '/api/server/panel/integrations' : null
     const q = <T extends Element = HTMLElement>(s: string): T | null => root.querySelector<T>(s)
     const form = q<HTMLFormElement>('[data-dev-form]'), select = q<HTMLSelectElement>('[data-dev-operation]'), run = q<HTMLButtonElement>('[data-dev-run]'), refresh = q<HTMLButtonElement>('[data-dev-refresh]'), copy = q<HTMLButtonElement>('[data-dev-copy]'), status = q('[data-dev-status]'), resultFields = q('[data-dev-result-fields]'), tokenRows = q('[data-dev-token-rows]'), tokenTable = q('[data-dev-token-table]')
-    const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const access = frameAccess(root, 'data-developer-can-read', 'data-developer-enabled'), send = access.request
     if (!endpoint || !form || !select || !run || !refresh || !copy || !status || !resultFields || !tokenRows || !tokenTable) return
-    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled'
     let templateContractIntact = true
     const templateContracts = [
       ['whm-developer-field', 'div', { 'label': 'dt', 'value': 'dd' }],
@@ -71,8 +72,9 @@ function bindWhmDeveloper(): void {
         throw error
       }
     }
-    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.developerEnabled === 'true' && !root.closest(denied) && typeof send === 'function')
-    if (admitted()) { try { verifyWhmTemplates() } catch { return } }
+    // The operation list reads in a read-only frame too; running an operation needs the flag outside one.
+    const readable = (): boolean => templateContractIntact && access.readable(), admitted = (): boolean => readable() && access.writable()
+    if (readable()) { try { verifyWhmTemplates() } catch { return } }
     const checkedRequest: NonNullable<typeof send> = async (...args: Parameters<NonNullable<typeof send>>) => {
       verifyWhmTemplates()
       const reply = await send!(...args)
@@ -85,7 +87,7 @@ function bindWhmDeveloper(): void {
     const ltr = (value: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = ascii(value); return node }
     const fact = (key: string, value: string | null): void => { const node = q('[data-dev-fact="' + key + '"]'); if (node) { node.textContent = ''; node.append(value === null ? t('Not read') : ltr(value)) } }
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'refused' ? 'alert' : 'status') }
-    const lock = (): void => { const on = admitted() && !busy; refresh.disabled = !on; select.disabled = !on || !manifest?.available; run.disabled = select.disabled || !manifest?.operations.some(d => d.operation === select.value); copy.disabled = !on || !result || typeof navigator.clipboard?.writeText !== 'function' }
+    const lock = (): void => { const on = admitted() && !busy; refresh.disabled = !readable() || busy; select.disabled = !on || !manifest?.available; run.disabled = select.disabled || !manifest?.operations.some(d => d.operation === select.value); copy.disabled = !on || !result || typeof navigator.clipboard?.writeText !== 'function' }
     const selected = (): void => { const descriptor = manifest?.operations.find(d => d.operation === select.value); fact('method', descriptor?.method ?? null); fact('path', descriptor?.path ?? null); lock() }
     const clear = (): void => { result = null; tokenTable.hidden = true; tokenRows.textContent = ''; resultFields.textContent = ''; fact('status', null); fact('observed', null); const p = q('[data-dev-copy-status]'); if (p) { p.hidden = true; p.textContent = '' }; lock() }
     const paint = (value: DeveloperBrowserResult): void => {
@@ -97,10 +99,10 @@ function bindWhmDeveloper(): void {
       note(value.state, value.state === 'read' ? t('The selected API read completed. The response below contains reviewed fields only.') : t('The selected API refused this read. No response body was exposed.'))
     }
     const load = async (): Promise<void> => {
-      if (busy || !admitted()) return
+      if (busy || !readable()) return
       busy = true; clear(); lock(); note('reading', t('Reading supported operations…'))
-      try { const next = parseDeveloperView(await checkedRequest('GET', endpoint), surface) as DeveloperBrowserManifest; if (!admitted()) return; manifest = next; select.textContent = ''; for (const d of next.operations) { const option = document.createElement('option'); option.value = d.operation; option.textContent = labels[d.operation]!; select.append(option) }; selected(); note(next.available ? 'ready' : 'unavailable', next.available ? t('Choose an operation, then run its read request.') : t('The guarded API provider is unavailable. No request can run.')) }
-      catch { manifest = null; select.textContent = ''; fact('method', null); fact('path', null); if (admitted()) note('failed', t('Supported operations could not be read. Refresh to retry.')) }
+      try { const next = parseDeveloperView(await checkedRequest('GET', endpoint), surface) as DeveloperBrowserManifest; if (!readable()) return; manifest = next; select.textContent = ''; for (const d of next.operations) { const option = document.createElement('option'); option.value = d.operation; option.textContent = labels[d.operation]!; select.append(option) }; selected(); note(next.available ? 'ready' : 'unavailable', next.available ? t('Choose an operation, then run its read request.') : t('The guarded API provider is unavailable. No request can run.')) }
+      catch { manifest = null; select.textContent = ''; fact('method', null); fact('path', null); if (readable()) note('failed', t('Supported operations could not be read. Refresh to retry.')) }
       finally { busy = false; lock() }
     }
     form.addEventListener('submit', event => { event.preventDefault(); if (busy || run.disabled || !admitted()) return; const operation = manifest?.operations.find(d => d.operation === select.value)?.operation; if (!operation) return; busy = true; clear(); lock(); note('reading', t('Running the selected API read…')); void (async () => {
@@ -110,8 +112,8 @@ function bindWhmDeveloper(): void {
     })() })
     refresh.addEventListener('click', () => { void load() }); select.addEventListener('change', () => { clear(); selected() })
     copy.addEventListener('click', () => { if (copy.disabled || !result || !admitted()) return; const captured = JSON.stringify(result, null, 2), node = q('[data-dev-copy-status]'); void navigator.clipboard.writeText(captured).then(() => { if (node) { node.hidden = false; node.textContent = t('Reviewed response copied.') } }).catch(() => { if (node) { node.hidden = false; node.textContent = t('Copy is unavailable. Select the displayed fields to copy them.') } }) })
-    if (!admitted()) { lock(); note('unavailable', t('The explorer is unavailable in this session. Nothing was read.')); return }
+    if (!readable()) { lock(); note('unavailable', t('The explorer is unavailable in this session. Nothing was read.')); return }
     void load()
   })
 }
-export const WHM_DEVELOPER_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseDeveloperView=${parseDeveloperView.toString()};return ${bindWhmDeveloper.toString()};})()`
+export const WHM_DEVELOPER_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseDeveloperView=${parseDeveloperView.toString()};return ${bindWhmDeveloper.toString()};})()`)

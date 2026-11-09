@@ -3,6 +3,8 @@ import { defaultServerWebSettings } from '@xpanel/core'
 import type { ServerWebSettings } from '@xpanel/core'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 
 const WEB_DIRECTIVE_DEFAULTS = defaultServerWebSettings()
 type FormValues = Record<string, string | boolean | string[]>
@@ -40,14 +42,15 @@ export function webDirectiveFieldValues(web: unknown, defaults: ServerWebSetting
 
 function bindWhmWebDirectives(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  document.querySelectorAll<HTMLFormElement>('[data-web-directives-form]').forEach(form => {
+  document.querySelectorAll<HTMLFormElement>('[data-web-directives-form]').forEach(root => {
+    const form = root
     if (form.dataset.webDirectivesBound === 'true') return
     form.dataset.webDirectivesBound = 'true'
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    // The saved directives are rendered by the server; saving needs the manage flag outside a read-only frame.
+    const access = frameAccess(root, 'data-web-directives-can-read', 'data-web-directives-can-manage'), request = access.request
     const status = form.querySelector<HTMLElement>('[data-web-directives-status]'), submit = form.querySelector<HTMLButtonElement>('button[type="submit"]')
     const controls = (): (HTMLInputElement | HTMLTextAreaElement)[] => [...form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input[name],textarea[name]')]
-    const admitted = (): boolean => form.isConnected && form.dataset.webDirectivesCanManage === 'true' && typeof request === 'function'
-      && !form.closest('[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled')
+    const admitted = (): boolean => access.writable()
     let busy = false
     const note = (state: string, message: string): void => { if (!status) return; status.hidden = false; status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'unknown'].includes(state) ? 'alert' : 'status') }
     const values = (): FormValues => {
@@ -99,4 +102,4 @@ function bindWhmWebDirectives(): void {
   })
 }
 
-export const WHM_WEB_DIRECTIVES_CLIENT_BINDING = `(()=>{const WEB_DIRECTIVE_DEFAULTS=${JSON.stringify(WEB_DIRECTIVE_DEFAULTS)};const buildWebDirectives=${buildWebDirectives.toString()};const webDirectiveFieldValues=${webDirectiveFieldValues.toString()};return ${bindWhmWebDirectives.toString()};})()`
+export const WHM_WEB_DIRECTIVES_CLIENT_BINDING = withFrameRequest(`(()=>{const WEB_DIRECTIVE_DEFAULTS=${JSON.stringify(WEB_DIRECTIVE_DEFAULTS)};const buildWebDirectives=${buildWebDirectives.toString()};const webDirectiveFieldValues=${webDirectiveFieldValues.toString()};return ${bindWhmWebDirectives.toString()};})()`)

@@ -57,5 +57,5 @@ ${actions(button(t(msgid('Test and apply configuration')), { 'data-action': 'app
   const summary = section('v2-site-summary', t(msgid('Site binding')), facts([{ label: t(msgid('Name')), valueHtml: chosen ? technical(chosen.name) : esc(t(msgid('Not read'))) }, { label: t(msgid('Runtime')), valueHtml: chosen ? technical(chosen.siteType) : esc(t(msgid('Not read'))) }, { label: 'PHP', valueHtml: chosen ? technical(chosen.php.version) : esc(t(msgid('Not read'))) }])
     + note(t(msgid('Each save runs the web server configuration test before anything reloads.'))))
   return page(props, authority, '/domains/site-settings', title, description, selectSite + split(lifecycle + runtime + traffic + deny + review + editor + names + headers + php + rewrite + redirects + proxy + logs + privacy + blocked + hotlink, summary),
-    { 'data-site-settings': true, 'data-site-account': c.account!.id, 'data-site-home': c.account!.home, 'data-site-domain': chosen?.id ?? '', 'data-site-manage': String(manage) })
+    { 'data-site-settings': true, 'data-site-account': c.account!.id, 'data-site-home': c.account!.home, 'data-site-domain': chosen?.id ?? '', 'data-site-can-read': String(manage), 'data-site-manage': String(manage) })
 }

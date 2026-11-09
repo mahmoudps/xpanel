@@ -6,6 +6,8 @@ const cloneClientTemplate = canonicalCloneClientTemplate
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
 const dbObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -102,8 +104,8 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
     const rowSlots:Readonly<Record<string,readonly string[]>>={packages:['name','installed','candidate','origin','security'],databases:['name','owner','size','state','actions'],roles:['name','login','actions']}
     const tableTemplates=new Map([...root.querySelectorAll<HTMLElement>('[data-db-rows]')].map(body=>{const name=body.dataset.dbRows!,slots=rowSlots[name];if(!slots)throw new Error('unknown_database_table');const template=clientTemplate(root,'engine-'+name+'-row'),empty=clientTemplate(root,'engine-'+name+'-empty');cloneClientTemplate(template,'tr',slots);cloneClientTemplate(empty,'tr',['message']);return[name,{body,slots,template,empty}] as const}))
     const actionTemplate=clientTemplate(root,'engine-action'),actionsTemplate=clientTemplate(root,'engine-actions');cloneClientTemplate(actionTemplate,'button',['label']);cloneClientTemplate(actionsTemplate,'div',['actions'])
-    const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-    const eligible = (): boolean => root.isConnected && root.dataset.dbCanRead === 'true' && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
+    const send = frameRequest(root)
+    const eligible = (): boolean => root.isConnected && root.dataset.dbCanRead === 'true'
     let busy = false, ready = false, revision: string | null = null, uncertain = false, pgReady = false, pgUsers = 0
     const note = (message: string, state: string): void => { status.textContent = message; status.dataset.state = state; status.setAttribute('role', state === 'error' ? 'alert' : 'status') }
     const lock = (): void => {
@@ -328,4 +330,4 @@ function bindDbEngines(ask: ((options: Record<string, unknown>) => Promise<unkno
   })
 }
 export { dbReadReply }
-export const DB_ENGINES_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const dbObject=${dbObject.toString()};const dbExact=${dbExact.toString()};const dbReadReply=${dbReadReply.toString()};return ${bindDbEngines.toString()};})()`
+export const DB_ENGINES_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const dbObject=${dbObject.toString()};const dbExact=${dbExact.toString()};const dbReadReply=${dbReadReply.toString()};return ${bindDbEngines.toString()};})()`)

@@ -72,7 +72,7 @@ const d = (id: string, title: Copy, message: Copy): PanelWorkspaceSection => ({
     id, title, message
 });
 const notRead: Copy = msgctxt('approved-xpanel-pages', 'Not read');
-const additionalSections = (route: string): PanelWorkspaceSection[] => route === '/email/accounts' ? [
+const additionalSections = (route: string, shell?: Copy): PanelWorkspaceSection[] => route === '/email/accounts' ? [
     s('service-access', msgid('Create a service user'), [
         f(msgid('Username')), f(msgid('Password'), undefined, 'password'), f(msgid('Mailbox quota (MB)'), undefined, 'number'), f(msgid('Email access'), undefined, 'checkbox'), f(msgid('FTP access'), undefined, 'checkbox'), f(msgid('Web Disk access'), undefined, 'checkbox'), f(msgid('Unlimited mailbox quota'), undefined, 'checkbox'), f(msgid('FTP and Web Disk directory')), f(msgid('Web Disk access mode'), undefined, undefined, [
             msgid('Read and write'), msgid('Read only')
@@ -133,7 +133,7 @@ const additionalSections = (route: string): PanelWorkspaceSection[] => route ===
         msgid('Keep'), msgid('Remove key')
     ]),
     s('shell-access', msgid('Shell access'), [
-        f(msgid('Access mode'))
+        f(msgid('Access mode'), shell)
     ]),
     t('blocked-addresses', msgid('Blocked addresses'), [
         msgid('Address or range'), msgid('Covers')
@@ -333,7 +333,7 @@ export const buildApprovedPanelPage = (p: ApprovedXpanelWorkspaceProps): PanelWo
     ] : [];
     const page = (title: Copy, description: Copy, sections: PanelWorkspaceSection[], aside: PanelWorkspaceSection[] = []): PanelWorkspacePage => ({
         title, description, sections: [
-            ...unreadNativeSections(p), ...sections, ...additionalSections(p.route), ...certificateSections
+            ...unreadNativeSections(p), ...sections, ...additionalSections(p.route, p.account ? translator(p.locale)(p.account.shell === 'jailed' ? msgid('Jailed shell') : msgid('No shell')) : undefined), ...certificateSections
         ], aside: [
             account, ...aside
         ]

@@ -294,15 +294,16 @@ describe('V2 named source credential refresh admission', () => {
     expect(credential.value).toBe(id(7))
     expect(send.mock.calls).toEqual([['GET', '/api/transfers/sessions'], ['GET', '/api/transfers/credentials'], ['GET', '/api/transfers/sessions'], ['GET', '/api/transfers/credentials']])
     expect(ask).not.toHaveBeenCalled()
+    // Without the manage flag the workspace still reads, and never writes or opens a control.
     root.dataset.transferManage = 'false'; refresh.click(); await settle()
-    expect(send).toHaveBeenCalledTimes(4)
+    expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
     expect(credential.disabled).toBe(true)
   })
   it.each([
     ['accounts', false, true, false], ['server', false, true, false],
     ['accounts', true, false, false], ['server', true, false, false],
     ['accounts', true, true, true], ['server', true, true, true],
-  ] as const)('does not fetch credentials in denied/read-only %s mode (%s,%s,%s)', async (scope, canRead, canManage, readOnly) => {
+  ] as const)('never writes in denied/read-only %s mode (%s,%s,%s)', async (scope, canRead, canManage, readOnly) => {
     const html = renderV2TransferPage({ locale: 'en', canRead, canManage, scope })
     mount(readOnly ? '<div data-readonly="true">' + html + '</div>' : html)
     const root = document.querySelector<HTMLElement>('[data-transfer-workspace]')
@@ -310,6 +311,9 @@ describe('V2 named source credential refresh admission', () => {
     expect(root.dataset.transferCredentials).toBe(canRead ? 'read' : undefined)
     const send = vi.fn(async () => ({}))
     boot(WHM_TRANSFER_CLIENT_BINDING, send); await settle()
-    expect(send).not.toHaveBeenCalled()
+    // A read-only frame reads saved state (GET only); a denied workspace reads nothing.
+    if (readOnly) expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+    else expect(send).not.toHaveBeenCalled()
+    expect([...root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')].every(control => control.disabled)).toBe(true)
   })
 })

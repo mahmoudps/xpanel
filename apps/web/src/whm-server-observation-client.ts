@@ -2,6 +2,8 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 type Section<T> = { state: 'read' | 'unavailable'; reason: string | null; truncated: boolean; items: T[] }
 type Fact<T> = { state: 'read' | 'absent' | 'unavailable'; reason: string | null; value: T }
@@ -92,7 +94,6 @@ export function readServerRoleView(value: unknown): ServerRoleView {
 
 function bindWhmServerObservation(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
   const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   const reasons: Record<string, string> = {
     host_unavailable: t('The host agent cannot read this on this server.'), command_failed: t('The host command did not return a result.'),
@@ -106,7 +107,8 @@ function bindWhmServerObservation(): void {
     const kind = root.dataset.whmServerObservation ?? ''
     const status = root.querySelector<HTMLElement>('[data-whm-server-observation-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-whm-server-observation-refresh]')
     if (!status || !refresh || !['timers', 'network', 'role'].includes(kind)) return
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.serverObservationCanRead === 'true' && !root.closest(denied)
+    const transport = frameRequest(root)
+    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.serverObservationCanRead === 'true'
     const note = (state: string, message: string, target: HTMLElement | null = status): void => { if (!target) return; target.dataset.state = state; target.textContent = message; target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     if (!admitted()) {
       root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true })
@@ -234,4 +236,4 @@ function bindWhmServerObservation(): void {
   })
 }
 
-export const WHM_SERVER_OBSERVATION_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[soObject, soFail, soText, soNullable, soIso, soCount, soList, soOneOf, soSection].map(helper => helper.toString()).join(';')};const readServerTimersView=${readServerTimersView.toString()};const readServerNetworkView=${readServerNetworkView.toString()};const readServerRoleView=${readServerRoleView.toString()};return ${bindWhmServerObservation.toString()};})()`
+export const WHM_SERVER_OBSERVATION_CLIENT_BINDING = withFrameRequest(`(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[soObject, soFail, soText, soNullable, soIso, soCount, soList, soOneOf, soSection].map(helper => helper.toString()).join(';')};const readServerTimersView=${readServerTimersView.toString()};const readServerNetworkView=${readServerNetworkView.toString()};const readServerRoleView=${readServerRoleView.toString()};return ${bindWhmServerObservation.toString()};})()`)

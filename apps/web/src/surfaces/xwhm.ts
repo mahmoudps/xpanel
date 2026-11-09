@@ -6,6 +6,7 @@ import type {
   Account,
   AuditEntry,
   Certificate,
+  DnsRecord,
   Domain,
   ServerSettings,
   FeatureList,
@@ -93,6 +94,8 @@ export interface WhmSurfaceProps {
   capabilityUnavailable?: boolean
   serverSettings?: ServerSettings | null
   domains?: readonly Domain[]
+  /** Saved DNS zones the caller may see, with their records. */
+  dnsZones?: readonly { id: string; accountId: string | null; name: string; serial: number; records: readonly DnsRecord[] }[]
   realtimeEnabled?: boolean
   principal?: Principal
   activeReseller?: Reseller | null

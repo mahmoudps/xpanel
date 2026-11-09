@@ -6,6 +6,8 @@ const cloneClientTemplate = canonicalCloneClientTemplate
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
 
 /** Strict boundary parsers for the software center API. Self-contained: serialized into the page. */
@@ -88,11 +90,11 @@ function bindWhmSoftwareCenter(askDialog: ((options: Record<string, unknown>) =>
       clone('software-center-group', 'section', ['title','scroll','head','body'])
       clone('software-center-empty', 'p', ['message'])
     } catch { root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button,input,select').forEach(control => { control.disabled = true }); status.textContent = t('The software center is unavailable here. Nothing was read or changed.'); status.dataset.state = 'unavailable'; return }
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const transport = frameRequest(root)
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.scCanRead === 'true' && !root.closest(denied)
+    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.scCanRead === 'true'
     let view: any = null, preview: any = null, busy = false, review = false
-    const manageable = (): boolean => admitted() && root.dataset.scCanManage === 'true' && view?.state === 'read' && view.manage === true && typeof askDialog === 'function' && !review
+    const manageable = (): boolean => admitted() && root.dataset.scCanManage === 'true' && view?.state === 'read' && view.manage === true && typeof askDialog === 'function' && !review && !root.closest(denied)
     const columns: string[] = (() => { try { const parsed = JSON.parse(groups.dataset.scColumns ?? '[]'); return Array.isArray(parsed) && parsed.length === 7 ? parsed.map(String) : [] } catch { return [] } })()
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'uncertain'].includes(state) ? 'alert' : 'status') }
     const el = <K extends keyof HTMLElementTagNameMap>(tag: K, value?: string, technical = false): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (value !== undefined) { if (technical) { const bdi = document.createElement('bdi'); bdi.dir = 'ltr'; bdi.textContent = value; node.append(bdi) } else node.textContent = value }; return node }
@@ -275,4 +277,4 @@ function bindWhmSoftwareCenter(askDialog: ((options: Record<string, unknown>) =>
   })
 }
 
-export const WHM_SOFTWARE_CENTER_CLIENT_BINDING = `(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseSoftwareCenterResponse=${parseSoftwareCenterResponse.toString()};return ${bindWhmSoftwareCenter.toString()};})()`
+export const WHM_SOFTWARE_CENTER_CLIENT_BINDING = withFrameRequest(`(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parseSoftwareCenterResponse=${parseSoftwareCenterResponse.toString()};return ${bindWhmSoftwareCenter.toString()};})()`)

@@ -19,6 +19,8 @@ import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 import { readWhmBackupRunsView } from './acct-backup-runs-client.ts'
 import type { WhmBackupRun, WhmBackupRunArchive, WhmBackupRunsView } from './acct-backup-runs-client.ts'
 import { readRestoreMoreReply } from './acct-restore-client.ts'
@@ -145,12 +147,12 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return
     }
     try { requireBackupTemplates(root) } catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
-    const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const access = frameAccess(root, 'data-backup-can-read', 'data-backup-manage'), send = access.request
     const input = (key: string): HTMLInputElement => root.querySelector<HTMLInputElement>('#backup-layout-' + key)!
     const select = (key: string): HTMLSelectElement => root.querySelector<HTMLSelectElement>('#backup-layout-' + key)!
     const action = (key: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>('[data-backup-action="' + key + '"]')!
-    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.backupManage === 'true' && !root.closest(denied) && backupDestinationEditorPresent(root, destinationManager)
+    // Reads run in a read-only frame too; saving needs the manage flag outside one.
+    const readable = (): boolean => access.readable() && backupDestinationEditorPresent(root, destinationManager), admitted = (): boolean => readable() && access.writable()
     const scheduleInputs = ['policy-enabled', 'policy-cron', 'daily-copies', 'weekly-copies', 'include-databases', 'include-mail', 'include-dns', 'include-control', 'start-time']
     const destinationInputs = ['destination-name', 'destination-endpoint', 'destination-prefix', 'destination-bucket', 'destination-region', 'destination-user', 'destination-retention']
     if (!delegatedDestinations) {
@@ -180,13 +182,13 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       setEnabled(action('save-schedule'), ready && scheduleDirty)
       setEnabled(action('discard-schedule'), ready && scheduleDirty)
       if (!delegatedDestinations) setEnabled(action('save-destination'), ready && destinationDirty)
-      setEnabled(action('refresh'), admitted() && !busy && !confirming)
+      setEnabled(action('refresh'), readable() && !busy && !confirming)
       root.querySelectorAll<HTMLInputElement>('[data-backup-selected-account]').forEach(control => { control.disabled = !ready || allAccounts })
       root.querySelectorAll<HTMLInputElement>('[data-backup-selected-destination]').forEach(control => { control.disabled = !ready })
       root.querySelectorAll<HTMLButtonElement>('[data-backup-edit-destination],[data-backup-delete-destination]').forEach(control => { control.disabled = !ready || control.dataset.backupInUse === 'true' && control.hasAttribute('data-backup-delete-destination') })
       root.setAttribute('aria-busy', String(busy || confirming))
     }
-    const request = (method: string, path: string, body?: unknown): Promise<unknown> => !send || !admitted() ? Promise.reject({ stateChanged: false }) : body === undefined ? send(method, path) : send(method, path, body)
+    const request = (method: string, path: string, body?: unknown): Promise<unknown> => !send || !(method === 'GET' ? readable() : admitted()) ? Promise.reject({ stateChanged: false }) : body === undefined ? send(method, path) : send(method, path, body)
     const confirm = async (title: string, body: string, danger = false): Promise<boolean> => {
       if (!askDialog || confirming) { announce('failed', t('Confirmation is unavailable; nothing was sent.')); return false }
       confirming = true; lock()
@@ -307,9 +309,9 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       if (saved) saved.textContent = !schedule ? t('No schedule is stored. The controls contain an unsaved draft.') : view.scheduler.verified ? t('Saved configuration read; the backup timer is running this schedule. Remote transport remains unverified.') : t('Saved configuration read; scheduling and remote transport remain unverified.')
     }
     const refresh = async (): Promise<void> => {
-      if (busy || confirming || !admitted()) return
+      if (busy || confirming || !readable()) return
       if ((scheduleDirty || destinationDirty || review) && !await confirm(t('Discard drafts and read saved configuration?'), t('Unsaved edits will be discarded. No previous write is retried.'), true)) return
-      if (busy || confirming || !admitted()) return
+      if (busy || confirming || !readable()) return
       busy = true; lock()
       try { install(readWhmBackupWorkspace(await request('GET', '/api/backups/workspace'))); announce('read', t('Saved backup configuration read. Archive verification remains unavailable.')) }
       catch { announce('failed', t('Backup configuration could not be read. No changes were sent.')) }
@@ -373,7 +375,7 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
         announce(review ? conflict ? 'stale' : 'uncertain' : 'failed', review ? t('The outcome requires review. Drafts are kept; no retry was sent. Read saved configuration before continuing.') : t('The request was refused. Drafts are kept and no retry was sent.'))
       } finally { busy = false; lock() }
     }
-    if (!send || !admitted()) { announce('unavailable', t('Backup configuration is unavailable here. Nothing was read or changed.')); return }
+    if (!readable()) { announce('unavailable', t('Backup configuration is unavailable here. Nothing was read or changed.')); return }
     root.addEventListener('input', event => {
       const control = event.target
       if (!(control instanceof HTMLInputElement) || control.disabled) return
@@ -422,11 +424,11 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
   document.querySelectorAll<HTMLElement>('[data-approved-whm-backups]').forEach(root => {
     if (root.dataset.backupOperationsBound === 'true') return
     root.dataset.backupOperationsBound = 'true'
-    const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"]'
+    const access = frameAccess(root, 'data-backup-can-read', 'data-backup-manage'), send = access.request
     const destinationManager = root.dataset.backupDestinationEditor === 'manager' ? root.querySelector<HTMLElement>('[data-whm-backup-destinations][data-backup-inline-manager]') : null
-    const admitted = (): boolean => root.isConnected && root.dataset.backupManage === 'true' && !root.closest(denied) && backupDestinationEditorPresent(root, destinationManager)
-    if (!send || !admitted()) return
+    // Run history reads in a read-only frame too; runs, restores and connection tests need the manage flag outside one.
+    const readable = (): boolean => access.readable() && backupDestinationEditorPresent(root, destinationManager), admitted = (): boolean => readable() && access.writable()
+    if (!readable()) return
     try { requireBackupTemplates(root) } catch { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true }); const status = root.querySelector<HTMLElement>('[data-backup-workspace-status]'); if (status) { status.dataset.state = 'unavailable'; status.textContent = t('Unavailable') }; return }
     const one = <T extends Element>(selector: string): T | null => root.querySelector<T>(selector)
     const buttons = (key: string): HTMLButtonElement[] => [...root.querySelectorAll<HTMLButtonElement>('[data-backup-action="' + key + '"]')]
@@ -448,7 +450,7 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
       mail: field('restore-mail')?.checked === true,
     })
     const lock = (): void => {
-      const idle = !busy && !!view && !view.activeId
+      const idle = !busy && !!view && !view.activeId && admitted()
       for (const button of buttons('run-now')) button.disabled = !idle || !view!.available
       for (const button of buttons('rerun-account')) button.disabled = !idle || !failedAccounts().length
       for (const button of buttons('run-log')) button.disabled = !view?.runs.length
@@ -458,7 +460,7 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
       const chosen = parts()
       for (const button of buttons('restore-review')) button.disabled = busy || step !== 3 || !chosen.databases.length && !chosen.zones.length && !chosen.mail
       for (const button of buttons('restore-apply')) button.disabled = busy || !reviewed || field('restore-acknowledge')?.checked !== true
-      for (const button of buttons('test-sftp')) { button.disabled = busy || !destinations.some(item => item.kind === 'sftp' && ['verified', 'active', 'unverified'].includes(item.state)); if (!button.disabled) button.closest('fieldset')?.removeAttribute('disabled') }
+      for (const button of buttons('test-sftp')) { button.disabled = busy || !admitted() || !destinations.some(item => item.kind === 'sftp' && ['verified', 'active', 'unverified'].includes(item.state)); if (!button.disabled) button.closest('fieldset')?.removeAttribute('disabled') }
       const acknowledge = field('restore-acknowledge'); if (acknowledge) acknowledge.disabled = busy || !reviewed
       for (const key of ['restore-databases', 'restore-dns', 'restore-mail']) { const input = field(key); if (input) { const state = key === 'restore-databases' ? inventory?.databases.state : key === 'restore-dns' ? inventory?.dns.state : inventory?.mail.state; const usable = step === 3 && state === 'available'; input.disabled = busy || !usable; if (!usable) input.checked = false; input.closest('fieldset')?.removeAttribute('disabled') } }
       const home = field('restore-home'); if (home) { home.disabled = true; home.checked = false }
@@ -487,7 +489,7 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
         const row = backupNode(root, 'run-row', 'tr', { created: formatDisplayDateTime(item.startedAt), trigger: item.trigger === 'schedule' ? t('Scheduled') : item.trigger === 'account' ? t('Selected accounts') : t('Run now'), accounts: t('{verified} of {total}', { verified: item.archives.filter(entry => entry.integrity === 'verified').length, total: item.archives.length }), bytes: size(bytes), duration: seconds === null ? '-' : seconds >= 60 ? Math.floor(seconds / 60) + ' min ' + (seconds % 60) + ' s' : seconds + ' s', copies, state: stateLabel(item.state), restore: t('Restore'), log: t('Log') })
         const restore = clientTemplateSlot(row, 'restore', 'button') as HTMLButtonElement, log = clientTemplateSlot(row, 'log', 'button') as HTMLButtonElement
         log.disabled = false
-        restore.disabled = !item.archives.some(entry => entry.integrity === 'verified')
+        restore.disabled = !admitted() || !item.archives.some(entry => entry.integrity === 'verified')
         restore.addEventListener('click', () => { if (!restore.disabled && !busy && selectRun(item.id)) one<HTMLElement>('[data-backup-section="restore"]')?.scrollIntoView?.({ block: 'start' }) })
         log.addEventListener('click', () => { logRun = item.id; paintLog() })
         body.append(row)
@@ -595,7 +597,7 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
     }
     const apply = async (): Promise<void> => {
       const chosen = archive(), selected = parts(), current = run()
-      if (!chosen?.file || !chosen.sha256 || !current || !reviewed || busy) return
+      if (!chosen?.file || !chosen.sha256 || !current || !reviewed || busy || !admitted()) return
       if (!await confirm(t('Restore {account}', { account: account! }), t('Restore the selected parts of {account} from the run of {run}? Databases and zones are replaced with their backup copies; files missing from the backup are never deleted.', { account: account!, run: formatDisplayDateTime(current.startedAt) }), true)) return
       busy = true; lock()
       const messages: string[] = []
@@ -614,7 +616,7 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
       finally { busy = false; lock(); void load() }
     }
     const startRun = async (accounts?: string[]): Promise<void> => {
-      if (!view || busy || !configRevision) return
+      if (!view || busy || !configRevision || !admitted()) return
       if (!await confirm(accounts ? t('Back up again') : t('Run backup now'), accounts ? t('Back up {names} again now, at low priority?', { names: accounts.join(', ') }) : t('Start a backup of every selected account now, at low priority?'))) return
       busy = true; lock()
       try { await send!('POST', '/api/backups/workspace/runs', { expectedRevision: configRevision, expectedRunsRevision: view.revision, ...accounts ? { accounts } : {} }); say(restoreStatus, t('The backup started. Read again to follow it.'), 'saved') }
@@ -623,7 +625,7 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
     }
     const testSftp = async (): Promise<void> => {
       const target = destinations.find(item => item.kind === 'sftp')
-      if (!target || busy) return
+      if (!target || busy || !admitted()) return
       if (!await confirm(t('Test connection'), t('Write, read and delete one small test file on {host}?', { host: target.endpoint }))) return
       busy = true; lock()
       try {
@@ -635,7 +637,7 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
       finally { busy = false; await load() }
     }
     async function load(): Promise<void> {
-      if (!admitted()) return
+      if (!readable()) return
       try {
         const lifecycle = await send!('GET', '/api/backups/workspace/destination-lifecycle') as { revision?: unknown; destinations?: unknown }
         if (!lifecycle || typeof lifecycle.revision !== 'string' || !/^[0-9a-f]{64}$/.test(lifecycle.revision) || !Array.isArray(lifecycle.destinations)) throw new Error('invalid_lifecycle')
@@ -667,4 +669,4 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
   })
 }
 
-export const WHM_BACKUPS_CLIENT_BINDING = `(()=>{const backupDestinationEditorPresent=${backupDestinationEditorPresent.toString()};const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const backupNode=${backupNode.toString()};const requireBackupTemplates=${requireBackupTemplates.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const backupKinds=${JSON.stringify(backupKinds)};const backupObject=${backupObject.toString()};const backupText=${backupText.toString()};const backupIdentity=${backupIdentity.toString()};const backupInteger=${backupInteger.toString()};const backupBoolean=${backupBoolean.toString()};const backupArray=${backupArray.toString()};const backupRevision=${backupRevision.toString()};const backupApplication=${backupApplication.toString()};const readWhmBackupDestination=${readWhmBackupDestination.toString()};const readWhmBackupSchedule=${readWhmBackupSchedule.toString()};const readWhmBackupWorkspace=${readWhmBackupWorkspace.toString()};const backupStable=${backupStable.toString()};const backupUnknown=${backupUnknown.toString()};const backupRunsView=${readWhmBackupRunsView.toString()};const backupRestoreReply=${readRestoreMoreReply.toString()};const bindWhmBackups=${bindWhmBackups.toString()};const bindWhmBackupOperations=${bindWhmBackupOperations.toString()};return ask=>{bindWhmBackups(ask);bindWhmBackupOperations(ask)};})()`
+export const WHM_BACKUPS_CLIENT_BINDING = withFrameRequest(`(()=>{const backupDestinationEditorPresent=${backupDestinationEditorPresent.toString()};const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const backupNode=${backupNode.toString()};const requireBackupTemplates=${requireBackupTemplates.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const backupKinds=${JSON.stringify(backupKinds)};const backupObject=${backupObject.toString()};const backupText=${backupText.toString()};const backupIdentity=${backupIdentity.toString()};const backupInteger=${backupInteger.toString()};const backupBoolean=${backupBoolean.toString()};const backupArray=${backupArray.toString()};const backupRevision=${backupRevision.toString()};const backupApplication=${backupApplication.toString()};const readWhmBackupDestination=${readWhmBackupDestination.toString()};const readWhmBackupSchedule=${readWhmBackupSchedule.toString()};const readWhmBackupWorkspace=${readWhmBackupWorkspace.toString()};const backupStable=${backupStable.toString()};const backupUnknown=${backupUnknown.toString()};const backupRunsView=${readWhmBackupRunsView.toString()};const backupRestoreReply=${readRestoreMoreReply.toString()};const bindWhmBackups=${bindWhmBackups.toString()};const bindWhmBackupOperations=${bindWhmBackupOperations.toString()};return ask=>{bindWhmBackups(ask);bindWhmBackupOperations(ask)};})()`)

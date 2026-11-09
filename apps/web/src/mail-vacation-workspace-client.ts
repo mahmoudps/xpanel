@@ -5,6 +5,8 @@ const mailRequireTemplates = canonicalMailRequireTemplates
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 
 const formatMailDateTime = formatDisplayDateTime
 
@@ -76,8 +78,9 @@ function bindMailVacationWorkspace(askDialog:(options:Record<string,unknown>)=>P
     if(root.dataset.vacationBound==='true')return;root.dataset.vacationBound='true'
     const mailbox=root.dataset.vacationMailbox;if(!mailbox)return
     try{mailRequireTemplates(root,[['mail-vacation-technical','bdi']])}catch{root.querySelectorAll<HTMLInputElement|HTMLButtonElement|HTMLTextAreaElement>('input,button,textarea').forEach(control=>{control.disabled=true});const status=root.querySelector<HTMLElement>('[data-vacation-status]');if(status){status.dataset.state='unavailable';status.textContent=t('Unavailable')}return}
-    const transport=(window as Window&{xpanelSessionRequest?:(method:string,path:string,body?:unknown)=>Promise<unknown>}).xpanelSessionRequest
-    const blocked=()=>!!root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'),admitted=()=>root.dataset.vacationManage==='true'&&!blocked()
+    const access=frameAccess(root,'data-vacation-can-read','data-vacation-manage'),transport=access.request
+    // Reads run in a read-only frame too; editing and every write need the manage flag outside one.
+    const blocked=()=>!access.readable(),admitted=()=>access.writable()
     const compact=root.dataset.vacationCompact==='true',form=root.querySelector<HTMLElement>('[data-vacation-form]')!,button=(key:string)=>root.querySelector<HTMLButtonElement>('[data-vacation-'+key+']')!,panel=root.querySelector<HTMLElement>('[data-vacation-panel]')!
     const toggle=(open:boolean)=>{panel.hidden=!open;button('open').hidden=open||!compact;button('open').setAttribute('aria-expanded',String(open));if(!open&&compact)button('open').focus()}
     const discard=()=>askDialog({title:t('Discard responder draft?'),body:t('Unsaved responder fields will be discarded. No previous write is retried.'),confirm:t('Discard and continue'),danger:true})
@@ -117,4 +120,4 @@ function bindMailVacationWorkspace(askDialog:(options:Record<string,unknown>)=>P
     button('refresh').disabled=blocked();button('open').disabled=blocked();if(!blocked())void workspace.refresh()
   })
 }
-export const MAIL_VACATION_WORKSPACE_CLIENT_BINDING=`(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const vacationObject=${vacationObject.toString()};const vacationStable=${vacationStable.toString()};const vacationReviewFlags=${vacationReviewFlags.toString()};const vacationWriteUncertain=${vacationWriteUncertain.toString()};const vacationUtc=${vacationUtc.toString()};const vacationPickerValue=${vacationPickerValue.toString()};const vacationFromPicker=${vacationFromPicker.toString()};const vacationFields=${vacationFields.toString()};const vacationDraftFields=${vacationDraftFields.toString()};const readMailVacation=${readMailVacation.toString()};const requestMailVacation=${requestMailVacation.toString()};const createMailVacationWorkspace=${createMailVacationWorkspace.toString()};return ${bindMailVacationWorkspace.toString()};})()`
+export const MAIL_VACATION_WORKSPACE_CLIENT_BINDING=withFrameRequest(`(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const vacationObject=${vacationObject.toString()};const vacationStable=${vacationStable.toString()};const vacationReviewFlags=${vacationReviewFlags.toString()};const vacationWriteUncertain=${vacationWriteUncertain.toString()};const vacationUtc=${vacationUtc.toString()};const vacationPickerValue=${vacationPickerValue.toString()};const vacationFromPicker=${vacationFromPicker.toString()};const vacationFields=${vacationFields.toString()};const vacationDraftFields=${vacationDraftFields.toString()};const readMailVacation=${readMailVacation.toString()};const requestMailVacation=${requestMailVacation.toString()};const createMailVacationWorkspace=${createMailVacationWorkspace.toString()};return ${bindMailVacationWorkspace.toString()};})()`)

@@ -4,6 +4,8 @@ import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 import type { GitViewResult } from '../../agent/src/account-git-view.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
@@ -21,16 +23,16 @@ export function readGitViewResult(raw: unknown, view: string): GitViewResult {
 
 function bindAccountGitweb(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   document.querySelectorAll<HTMLElement>('[data-account-gitweb]').forEach(root => {
     if (root.dataset.gitwebBound === 'true') return
     root.dataset.gitwebBound = 'true'
+    const send = frameRequest(root)
     const part = <T extends HTMLElement>(key: string): T | null => root.querySelector<T>('[data-gitweb-' + key + ']')
     const status = part('status'), rev = part<HTMLSelectElement>('rev'), kind = part<HTMLSelectElement>('search-kind'), text = part<HTMLInputElement>('search-text'), more = part<HTMLButtonElement>('more'), up = part<HTMLButtonElement>('up'), location = part('location')
     const repository = root.closest('[data-account-git]')?.querySelector<HTMLSelectElement>('[data-git-repository]') ?? null
     const controls = [...root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button,input,select')]
     const say = (state: string, message: string): void => { if (!status) return; status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
-    if (!send || root.dataset.gitwebCanRead !== 'true' || !repository || !rev || !kind || !text || !more || !up || !location || root.closest('[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],fieldset:disabled')) {
+    if (!send || root.dataset.gitwebCanRead !== 'true' || !repository || !rev || !kind || !text || !more || !up || !location) {
       for (const control of controls) control.disabled = true
       say('unavailable', t('The history browser is unavailable here. Nothing was read.')); return
     }
@@ -121,4 +123,4 @@ function bindAccountGitweb(): void {
   })
 }
 
-export const ACCOUNT_GITWEB_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readGitViewResult=${readGitViewResult.toString()};return ${bindAccountGitweb.toString()}})()`
+export const ACCOUNT_GITWEB_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readGitViewResult=${readGitViewResult.toString()};return ${bindAccountGitweb.toString()}})()`)

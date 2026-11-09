@@ -2,15 +2,16 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
 
 const formatDisplayDateTime = sharedFormatDisplayDateTime
+const frameAccess = canonicalFrameAccess
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
 const CHUNK_BYTES = 512 * 1024
 
 /** WHM Site Software: the releases stored on this server and every installed copy, with root update and uninstall as host jobs. */
 function bindSiteInstances(askDialog: Ask | undefined): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   document.querySelectorAll<HTMLElement>('[data-site-instances]').forEach(root => {
     if (root.dataset.siteInstancesBound === 'true') return
     root.dataset.siteInstancesBound = 'true'
@@ -21,7 +22,8 @@ function bindSiteInstances(askDialog: Ask | undefined): void {
     type Instance = { username: string; domainId: string; domain: string; path: string; appId: string; version: string; database: string | null; updatedAt: string; revision: string; accountStatus: string }
     type App = { id: string; name: string; versions: string[]; stored: string[] }
     let instances: Instance[] = [], apps: App[] = [], busy = false, read = false
-    const admitted = (): boolean => root.isConnected && root.dataset.siteInstancesCanManage === 'true' && !root.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],fieldset:disabled') && typeof transport === 'function'
+    // Reads run in a read-only frame too; jobs and uploads need the manage flag outside one.
+    const access = frameAccess(root, 'data-site-instances-can-read', 'data-site-instances-can-manage'), transport = access.request, readable = access.readable, admitted = access.writable
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status') }
     const chosen = (): Instance | null => instances.find(item => item.revision === select.value) ?? null
     const newer = (a: string, b: string): boolean => { const left = a.split('.').map(Number), right = b.split('.').map(Number); for (let i = 0; i < 3; i++) if (left[i] !== right[i]) return left[i]! > right[i]!; return false }
@@ -55,7 +57,7 @@ function bindSiteInstances(askDialog: Ask | undefined): void {
       options(release, t('Select a release'), pairs.map(([app, version]) => [app.id + '|' + version, app.name + ' ' + version]))
     }
     const load = async (): Promise<void> => {
-      if (busy || !admitted()) return
+      if (busy || !readable()) return
       busy = true; lock(); note('reading', t('Reading…'))
       try {
         const [listed, catalog] = await Promise.all([transport!('GET', '/api/server/site-software/instances'), transport!('GET', '/api/server/site-software')]) as [{ instances: Instance[] }, { host: { catalog: { state: string; applications: App[] } } | null }]
@@ -99,7 +101,7 @@ function bindSiteInstances(askDialog: Ask | undefined): void {
       } catch (error) { note('failed', refusal(error) ? t('The file does not match the signed release. Nothing was stored.') : t('The upload stopped. Upload the file again.')) }
       finally { busy = false; lock() }
     }
-    if (!admitted()) { note('unavailable', t('Installed applications are unavailable here. Nothing was read or changed.')); lock(); return }
+    if (!readable()) { note('unavailable', t('Installed applications are unavailable here. Nothing was read or changed.')); lock(); return }
     actions.refresh?.addEventListener('click', () => { void load() })
     actions.update?.addEventListener('click', () => { void change('update') })
     actions.remove?.addEventListener('click', () => { void change('remove') })
@@ -108,4 +110,4 @@ function bindSiteInstances(askDialog: Ask | undefined): void {
     void load()
   })
 }
-export const SITE_INSTANCES_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const CHUNK_BYTES=${CHUNK_BYTES};return ${bindSiteInstances.toString()};})()`
+export const SITE_INSTANCES_CLIENT_BINDING = withFrameRequest(`(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const CHUNK_BYTES=${CHUNK_BYTES};return ${bindSiteInstances.toString()};})()`)

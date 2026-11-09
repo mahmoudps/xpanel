@@ -23,6 +23,15 @@ describe('applications workspace', () => {
       expect(document.body.textContent).not.toMatch(/[٠-٩۰-۹]/)
     }
   })
+  it('reads inside a read-only frame but never writes, with every control disabled', async () => {
+    document.body.innerHTML = '<div data-readonly="true">' + renderSwApplicationsWorkspace({ lang: 'en', canManage: true }) + '</div>'
+    const send = vi.fn(async (_method: string, _path: string, _body?: unknown) => view())
+    boot(send, async () => true); await tick()
+    expect(document.querySelector('[data-sw-apps-catalog]')!.textContent).toBe('Verified signed catalog')
+    expect(send).toHaveBeenCalled()
+    expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select')].filter(control => !control.matches('[role="tab"],[aria-pressed]')).every(control => control.disabled)).toBe(true)
+  })
   it('keeps installs disabled while the provider is unavailable and never shows an installed app', async () => {
     boot(vi.fn(async (_m: string, path: string) => view(path.includes('?') ? { domainId, path: '', state: 'unavailable', reason: 'application_provider_unavailable', revision: null, installation: null, recoveryRequired: null, modified: null, writesAvailable: false } : null)), async () => true); await tick()
     await pick('[data-sw-apps-domain-select]', domainId); await pick('[data-sw-apps-app-select]', 'sample'); await pick('[data-sw-apps-version-select]', '1.2.3')

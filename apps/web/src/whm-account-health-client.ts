@@ -3,6 +3,8 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayD
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { WHM_DIAGNOSTIC_TEMPLATE_BINDING, whmDiagnosticNode as canonicalDiagnosticNode, assertWhmDiagnosticTemplates as canonicalAssertDiagnosticTemplates } from './whm-diagnostic-client-templates.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 const whmDiagnosticNode = canonicalDiagnosticNode
 const assertWhmDiagnosticTemplates = canonicalAssertDiagnosticTemplates
@@ -75,9 +77,9 @@ function bindWhmAccountHealth(): void {
     const run = find<HTMLButtonElement>('run'), status = find('status'), list = find('list'), filter = find<HTMLSelectElement>('filter'), search = find<HTMLInputElement>('search')
     const selectAll = find<HTMLInputElement>('select-all'), recheck = find<HTMLButtonElement>('recheck'), selection = find('selection')
     if (!run || !status || !list || !filter || !search || !selectAll || !recheck || !selection) return
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const transport = frameRequest(root)
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.healthCanRead === 'true' && !root.closest(denied)
+    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.healthCanRead === 'true'
     const isRoot = root.dataset.healthRoot === 'true'
     const rows = new Map<string, AccountHealthView>()
     let busy = false, observedAt = '', hostUnread = false, truncated = false
@@ -290,4 +292,4 @@ function bindWhmAccountHealth(): void {
   })
 }
 
-export const WHM_ACCOUNT_HEALTH_CLIENT_BINDING = `(()=>{${WHM_DIAGNOSTIC_TEMPLATE_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readAccountHealthReport=${readAccountHealthReport.toString()};return ${bindWhmAccountHealth.toString()};})()`
+export const WHM_ACCOUNT_HEALTH_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_DIAGNOSTIC_TEMPLATE_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readAccountHealthReport=${readAccountHealthReport.toString()};return ${bindWhmAccountHealth.toString()};})()`)

@@ -5,6 +5,8 @@ const whmClientNode = canonicalWhmClientNode
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatMailDateTime = formatDisplayDateTime
 
 export type MaintenanceMailboxItem = { login: string; account: string; savedQuotaMb: number | null }
@@ -69,7 +71,7 @@ function bindWhmMailboxMaintenance(askDialog: Ask | undefined): void {
     const q = <T extends Element = HTMLElement>(selector: string): T | null => root.querySelector<T>(selector)
     const status = q('[data-whm-mailbox-maintenance-status]'), refresh = q<HTMLButtonElement>('[data-whm-mailbox-maintenance-refresh]'), search = q<HTMLInputElement>('[data-whm-mailbox-maintenance-search]')
     const usage = q('[data-whm-mailbox-maintenance-usage-status]'), selectedNote = q('[data-whm-mailbox-maintenance-selected]'), banner = q('[data-whm-mailbox-maintenance-result]'), link = q<HTMLAnchorElement>('[data-whm-mailbox-maintenance-job-link]')
-    const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
+    const request = frameRequest(root)
     if (!status || !refresh) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     let templateContractIntact = true
@@ -85,7 +87,7 @@ function bindWhmMailboxMaintenance(askDialog: Ask | undefined): void {
         throw error
       }
     }
-    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailboxMaintenanceCanRead === 'true' && !root.closest(denied) && !!request)
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailboxMaintenanceCanRead === 'true' && !!request)
     if (admitted()) { try { verifyWhmTemplates() } catch { return } }
     const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
       verifyWhmTemplates()
@@ -93,7 +95,7 @@ function bindWhmMailboxMaintenance(askDialog: Ask | undefined): void {
       verifyWhmTemplates()
       return reply
     }
-    const manageable = (): boolean => admitted() && root.dataset.mailboxMaintenanceCanManage === 'true'
+    const manageable = (): boolean => admitted() && root.dataset.mailboxMaintenanceCanManage === 'true' && !root.closest(denied)
     const kinds: Record<string, string> = { 'quota-recalc': 'mail.maintenance.quota-recalc', resync: 'mail.maintenance.resync', index: 'mail.maintenance.index' }
     const BULK_MAX = 32, SHOWN_MAX = 200
     let view: { observedAt: string; fts: string; jobsAvailable: boolean; mailboxes: MaintenanceMailboxItem[]; mailboxesTruncated: boolean } | null = null
@@ -235,4 +237,4 @@ function bindWhmMailboxMaintenance(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_MAILBOX_MAINTENANCE_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailboxMaintenanceView=${readMailboxMaintenanceView.toString()};const readMaintenanceJobAck=${readMaintenanceJobAck.toString()};return ${bindWhmMailboxMaintenance.toString()};})()`
+export const WHM_MAILBOX_MAINTENANCE_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailboxMaintenanceView=${readMailboxMaintenanceView.toString()};const readMaintenanceJobAck=${readMaintenanceJobAck.toString()};return ${bindWhmMailboxMaintenance.toString()};})()`)

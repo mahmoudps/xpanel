@@ -23,13 +23,15 @@ vi.mock('../../web/src/index.ts', async importOriginal => {
   }
 })
 // Qualification is supplied only to reach the production hydration boundary. No host executor is created.
+// `qualified: false` is a real host before qualification: every document renders its read-only layout.
+const catalogMode = vi.hoisted(() => ({ qualified: true }))
 vi.mock('./host-catalog.ts', async () => {
-  const { tools } = await import('@xpanel/catalog')
+  const { buildDeliveryCatalog, tools } = await import('@xpanel/catalog')
   return {
     qualificationModeOn: () => false,
-    loadQualifiedCatalog: async () => tools.map(tool => ({
+    loadQualifiedCatalog: async () => catalogMode.qualified ? tools.map(tool => ({
       ...tool, status: 'verified' as const, delivery: { ...tool.delivery, status: 'verified' as const },
-    })),
+    })) : buildDeliveryCatalog([], null),
   }
 })
 
@@ -50,6 +52,7 @@ describe('approved workspace hydration projection', () => {
     db = await createTestDb()
     state = await createTestStateStore()
     hydration.length = 0
+    catalogMode.qualified = true
   })
   afterEach(async () => { await state.close(); await db.close(); vi.restoreAllMocks() })
 
@@ -145,6 +148,44 @@ describe('approved workspace hydration projection', () => {
     expect((await render(request('/whm', session))).status).toBe(403)
     expect(readSnapshot).not.toHaveBeenCalled()
     expect(hydration.every(row => !Object.hasOwn(row, 'whm'))).toBe(true)
+  })
+
+  it('gives read-only documents bounded saved state, so closed forms show saved values', async () => {
+    const fixture = await seedWorkspace()
+    const render = await renderer()
+    catalogMode.qualified = false
+    const snapshot = vi.spyOn(state.store, 'readSnapshot')
+    const root = await rootSession()
+    const rootPage = await render(request('/whm/server/setup', root))
+    expect(rootPage.status).toBe(200)
+    const rootHtml = await rootPage.text()
+    expect(rootHtml).toContain('data-tool-availability="unverified"')
+    expect(lastWhm().serverSettings).toEqual(settings)
+    expect(rootHtml).toMatch(/name="hostname"[^>]*value="private-projection\.example\.test"[^>]*disabled/)
+
+    // Read-only list layouts get the first page of each saved list, scoped as the qualified document scopes it.
+    const accountsPage = await render(request('/whm/accounts', root))
+    expect(accountsPage.status).toBe(200)
+    const accountsHtml = await accountsPage.text()
+    expect(new Set(lastWhm().accounts.map(account => account.id))).toEqual(new Set([fixture.ownAccount.id, fixture.otherAccount.id, fixture.rootAccount.id]))
+    expect(accountsHtml).toContain(fixture.otherAccount.primaryDomain)
+    expect(accountsHtml).toMatch(/type="checkbox" value="projectown"[^>]*disabled/)
+
+    expect((await render(request('/whm/plans/features', await cookie(fixture.principal.id)))).status).toBe(200)
+    const resellerLists = lastWhm() as ReturnType<typeof lastWhm> & { plans: Array<{ id: string }>; resellers: Array<{ id: string }>; dnsZones: Array<{ accountId: string | null }> }
+    expect(Object.keys(resellerLists).sort()).toEqual(['accounts', 'activeReseller', 'dnsZones', 'domains', 'featureLists', 'plans', 'principal', 'resellers'])
+    expect(resellerLists.accounts.map(account => account.id)).toEqual([fixture.ownAccount.id])
+    expect(resellerLists.resellers.map(reseller => reseller.id)).toEqual([fixture.owner.id])
+    expect(resellerLists.dnsZones.every(zone => zone.accountId === fixture.ownAccount.id)).toBe(true)
+    expect(JSON.stringify(resellerLists)).not.toContain(fixture.otherAccount.primaryDomain)
+    expect(JSON.stringify(resellerLists)).not.toContain(fixture.foreignFeatures.id)
+
+    const user = await createUserPrincipal(db.db, { username: fixture.ownAccount.username, accountId: fixture.ownAccount.id, passwordHash: PUBLIC_VECTOR })
+    expect((await render(request('/software/php', await cookie(user.id)))).status).toBe(200)
+    const panel = hydration.at(-1)?.panel as { account: { id: string }; domains: Array<{ accountId: string; name: string }> }
+    expect(panel.account.id).toBe(fixture.ownAccount.id)
+    expect(panel.domains.map(domain => [domain.accountId, domain.name])).toEqual([[fixture.ownAccount.id, fixture.ownAccount.primaryDomain]])
+    expect(snapshot).not.toHaveBeenCalled()
   })
 
   it('denies a user on WHM before reading a snapshot or projecting server data', async () => {

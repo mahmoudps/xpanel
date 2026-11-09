@@ -50,7 +50,7 @@ export function renderV2WebDirectivePage(props: PanelSurfaceProps, kind: Directi
     + `<ul data-wd-issues><li>${esc(t(msgid('Diagnostics have not been read.')))}</li></ul>`)
   const limits = section(`${id}-limits`, t(msgid('Limits of this page')), `<ul>${spec.notes.map(copy => `<li>${esc(t(copy))}</li>`).join('')}</ul>`)
   const system = kind === 'handlers' ? section(`${id}-system`, t(msgid('System handlers')), note(t(msgid('Mappings the server configuration sets for this domain. They are read-only.'))) + table(`${id}-system-table`, t(msgid('System handlers')), [t(msgid('Handler')), t(msgid('Extensions'))], unreadRow(2, t(msgid('The current rules have not been read.'))), { 'data-wd-system': true })) : ''
-  return page(props, authority, spec.route, title, description, split(current + draft + system + editor + save, limits) + webDirectiveClientTemplates(), { 'data-web-directives': kind, 'data-wd-account': (c.account?.id ?? ''), 'data-wd-manage': String(c.editable) })
+  return page(props, authority, spec.route, title, description, split(current + draft + system + editor + save, limits) + webDirectiveClientTemplates(), { 'data-web-directives': kind, 'data-wd-account': (c.account?.id ?? ''), 'data-wd-can-read': String(c.editable), 'data-wd-manage': String(c.editable) })
 }
 
 export const V2_WEB_DIRECTIVE_ROUTES: Readonly<Record<string, DirectiveKind>> = Object.freeze(Object.fromEntries(Object.entries(SPECS).map(([kind, spec]) => [spec.route, kind as DirectiveKind])))

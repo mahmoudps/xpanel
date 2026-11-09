@@ -3,6 +3,8 @@ import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import type { IoWorkspaceView } from '../../api/src/metering-workspace.ts'
 import type { BandwidthReport } from '../../agent/src/metering.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 
 export function readWhmIoView(raw: unknown): IoWorkspaceView {
@@ -124,16 +126,17 @@ export function accountLimitsPatch(fields: { name: string; value: string; unlimi
 
 function bindWhmMetering(askDialog?: (input: { title: string; body: string; confirm: string }) => Promise<unknown>): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const bytes = (value: number): string => { const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']; let size = value, index = 0; while (size >= 1024 && index < units.length - 1) { size /= 1024; index++ } return (index ? size.toFixed(1) : String(size)) + ' ' + units[index] }
   const fixed = (value: number): string => String(Math.round(value * 10) / 10)
   document.querySelectorAll<HTMLElement>('[data-whm-metering]').forEach(root => {
     if (root.dataset.meteringBound === 'true') return
     root.dataset.meteringBound = 'true'
+    const send = frameRequest(root)
     const kind = root.dataset.whmMetering
     const refresh = root.querySelector<HTMLButtonElement>('[data-whm-metering-refresh]'), status = root.querySelector<HTMLElement>('[data-whm-metering-status]')
     if (!refresh || !status) return
-    if (!send || root.dataset.meteringCanRead !== 'true' || root.closest('[data-readonly="true"],[data-wiring="unavailable"],[data-capability-state="unavailable"],fieldset:disabled')) { refresh.disabled = true; return }
+    if (!send || root.dataset.meteringCanRead !== 'true') { refresh.disabled = true; return }
+    const closed = root.closest('[data-readonly="true"],[data-wiring="unavailable"],[data-capability-state="unavailable"],fieldset:disabled') !== null
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const fact = (key: string, value: string): void => { const node = root.querySelector('[data-whm-metering-fact="' + key + '"]'); if (node) node.textContent = value }
     const fill = (table: string, values: { text: string; numeric?: boolean; level?: string }[][], empty: string): void => {
@@ -203,8 +206,8 @@ function bindWhmMetering(askDialog?: (input: { title: string; body: string; conf
         { text: row.totalBytes === null ? t('Not measured') : bytes(row.totalBytes), numeric: true }, { ...limitText(row), numeric: true }]), t('No accounts.'))
       note(view.state, view.state === 'unavailable' ? t('Bandwidth has not been counted yet. It is counted every 5 minutes from the saved logs and journals.') : view.state === 'partial' ? t('Partial count. A source is not counted or not fully counted yet, or counting began after the month started.') : t('Bandwidth read.'))
     }
-    const canReset = kind === 'bandwidth' && root.dataset.bandwidthCanReset === 'true' && typeof askDialog === 'function'
-    const canRelieve = kind === 'bandwidth' && root.dataset.bandwidthCanRelieve === 'true' && typeof askDialog === 'function'
+    const canReset = kind === 'bandwidth' && !closed && root.dataset.bandwidthCanReset === 'true' && typeof askDialog === 'function'
+    const canRelieve = kind === 'bandwidth' && !closed && root.dataset.bandwidthCanRelieve === 'true' && typeof askDialog === 'function'
     const relief = root.querySelector<HTMLButtonElement>('[data-whm-bandwidth-relief]'), reliefStatus = root.querySelector<HTMLElement>('[data-whm-bandwidth-relief-status]')
     const customRows = root.querySelector<HTMLElement>('[data-whm-metering-rows="custom"]'), customStatus = root.querySelector<HTMLElement>('[data-whm-bandwidth-custom-status]')
     let limited: string[] = []
@@ -284,10 +287,11 @@ function bindWhmMetering(askDialog?: (input: { title: string; body: string; conf
   document.querySelectorAll<HTMLElement>('[data-whm-raw-logs]').forEach(root => {
     if (root.dataset.rawLogsBound === 'true') return
     root.dataset.rawLogsBound = 'true'
+    const send = frameRequest(root)
     const server = root.querySelector<HTMLSelectElement>('[data-raw-logs-server]'), refresh = root.querySelector<HTMLButtonElement>('[data-raw-logs-refresh]')
     const rows = root.querySelector<HTMLElement>('[data-raw-logs-rows]'), status = root.querySelector<HTMLElement>('[data-raw-logs-status]')
     const say = (state: string, message: string): void => { if (!status) return; status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
-    if (!send || root.dataset.rawLogsCanRead !== 'true' || !server || !refresh || !rows || root.closest('[data-readonly="true"],[data-capability-state="unavailable"],fieldset:disabled')) {
+    if (!send || root.dataset.rawLogsCanRead !== 'true' || !server || !refresh || !rows) {
       if (server) server.disabled = true; if (refresh) refresh.disabled = true
       say('unavailable', t('Raw web server logs are unavailable here. Nothing was read.')); return
     }
@@ -317,17 +321,18 @@ function bindWhmMetering(askDialog?: (input: { title: string; body: string; conf
   document.querySelectorAll<HTMLElement>('[data-whm-quotas]').forEach(root => {
     if (root.dataset.quotasBound === 'true') return
     root.dataset.quotasBound = 'true'
+    const send = frameRequest(root)
     const rows = root.querySelector<HTMLElement>('[data-quotas-rows]'), status = root.querySelector<HTMLElement>('[data-quotas-status]'), usageNote = root.querySelector<HTMLElement>('[data-quotas-usage]')
     const search = root.querySelector<HTMLInputElement>('[data-quotas-search]'), owner = root.querySelector<HTMLSelectElement>('[data-quotas-owner]'), size = root.querySelector<HTMLSelectElement>('[data-quotas-page-size]')
     const previous = root.querySelector<HTMLButtonElement>('[data-quotas-previous]'), next = root.querySelector<HTMLButtonElement>('[data-quotas-next]'), pageLabel = root.querySelector<HTMLElement>('[data-quotas-page]'), refresh = root.querySelector<HTMLButtonElement>('[data-quotas-refresh]')
     const sorters = [...root.querySelectorAll<HTMLButtonElement>('button[data-quotas-sort]')]
     const controls = [...root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button')]
     const say = (state: string, message: string): void => { if (!status) return; status.hidden = false; status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
-    if (!send || root.dataset.quotasCanRead !== 'true' || !rows || !search || !owner || !size || !previous || !next || !pageLabel || !refresh || root.closest('[data-readonly="true"],[data-capability-state="unavailable"],fieldset:disabled')) {
+    if (!send || root.dataset.quotasCanRead !== 'true' || !rows || !search || !owner || !size || !previous || !next || !pageLabel || !refresh) {
       for (const control of controls) control.disabled = true
       say('unavailable', t('Disk quotas are unavailable here. Nothing was read.')); return
     }
-    const editable = root.dataset.quotasCanEdit === 'true'
+    const editable = root.dataset.quotasCanEdit === 'true' && !root.closest('[data-readonly="true"],[data-capability-state="unavailable"],fieldset:disabled')
     const query = { sort: 'username', dir: 'asc' as 'asc' | 'desc', page: 1 }
     let total = 0, timer: ReturnType<typeof setTimeout> | undefined, busy = false
     const mb = (value: number | 'unlimited' | null): string => value === null ? t('Not read') : value === 'unlimited' ? t('Unlimited') : value + ' MB'
@@ -409,6 +414,7 @@ function bindWhmMetering(askDialog?: (input: { title: string; body: string; conf
   document.querySelectorAll<HTMLFormElement>('form[data-account-limits-form]').forEach(form => {
     if (form.dataset.limitsBound === 'true') return
     form.dataset.limitsBound = 'true'
+    const send = frameRequest(form)
     const status = form.querySelector<HTMLElement>('[data-account-limits-status]'), accountId = form.dataset.accountId ?? ''
     const inputs = [...form.querySelectorAll<HTMLInputElement>('input[data-account-limit]')]
     if (!send || !/^[0-9a-f-]{36}$/.test(accountId) || form.closest('[data-readonly="true"],[data-capability-state="unavailable"],fieldset:disabled')) { for (const control of form.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input,button')) control.disabled = true; return }
@@ -443,4 +449,4 @@ function bindWhmMetering(askDialog?: (input: { title: string; body: string; conf
     })
   })
 }
-export const WHM_METERING_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmIoView=${readWhmIoView.toString()};const readWhmBandwidthView=${readWhmBandwidthView.toString()};const readCustomBandwidthView=${readCustomBandwidthView.toString()};const readLogRetentionView=${readLogRetentionView.toString()};const accountLimitsPatch=${accountLimitsPatch.toString()};const readDiskQuotaPage=${readDiskQuotaPage.toString()};const readRawServerLogs=${readRawServerLogs.toString()};return ${bindWhmMetering.toString()};})()`
+export const WHM_METERING_CLIENT_BINDING = withFrameRequest(`(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmIoView=${readWhmIoView.toString()};const readWhmBandwidthView=${readWhmBandwidthView.toString()};const readCustomBandwidthView=${readCustomBandwidthView.toString()};const readLogRetentionView=${readLogRetentionView.toString()};const accountLimitsPatch=${accountLimitsPatch.toString()};const readDiskQuotaPage=${readDiskQuotaPage.toString()};const readRawServerLogs=${readRawServerLogs.toString()};return ${bindWhmMetering.toString()};})()`)

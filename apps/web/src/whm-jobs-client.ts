@@ -5,6 +5,8 @@ const whmClientNode = canonicalWhmClientNode, clientTemplate = canonicalClientTe
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 export type JobStatusView = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 export type JobStepStateView = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'unknown'
@@ -77,7 +79,7 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
     const failure = one<HTMLElement>('[data-whm-jobs-failure]'), errorText = one<HTMLElement>('[data-whm-jobs-error]'), verification = one<HTMLElement>('[data-whm-jobs-verification]'), verificationDetail = one<HTMLElement>('[data-whm-jobs-verification-detail]')
     const logView = one<HTMLElement>('[data-whm-jobs-log]'), logStatus = one<HTMLElement>('[data-whm-jobs-log-status]'), logMore = one<HTMLButtonElement>('[data-whm-jobs-log-more]')
     const cancel = one<HTMLButtonElement>('[data-whm-jobs-cancel]'), cancelStatus = one<HTMLElement>('[data-whm-jobs-cancel-status]')
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const request = frameRequest(root)
     if (!status || !rows || !form || !statusFilter || !kindFilter || !refresh || !clear || !apply || !detailStatus || !steps || !outcome || !failure || !errorText || !verification || !verificationDetail || !logView || !logStatus || !logMore || !cancel || !cancelStatus) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     let templateContractIntact = true
@@ -103,7 +105,7 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
         throw error
       }
     }
-    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.jobsCanRead === 'true' && !root.closest(denied) && typeof request === 'function')
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.jobsCanRead === 'true' && typeof request === 'function')
     if (admitted()) { try { verifyWhmTemplates() } catch { return } }
     const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
       verifyWhmTemplates()
@@ -111,7 +113,7 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
       verifyWhmTemplates()
       return reply
     }
-    const manageable = (): boolean => admitted() && root.dataset.jobsCanManage === 'true'
+    const manageable = (): boolean => admitted() && root.dataset.jobsCanManage === 'true' && !root.closest(denied)
     const POLL_MS = 5000, LOG_PAGE = 65536, LOG_DISPLAY_MAX = 1048576, MAX_FAILURES = 3
     let jobs: JobView[] = [], selected: JobView | null = null, wanted: string | null = null, filters = { status: '', kindPrefix: '' }
     let log = { id: '', text: '', nextOffset: 0, total: 0, available: false, truncated: false }
@@ -308,4 +310,4 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
   })
 }
 
-export const WHM_JOBS_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readJobView=${readJobView.toString()};const readJobListView=${readJobListView.toString()};const readJobLogView=${readJobLogView.toString()};return ${bindWhmJobs.toString()};})()`
+export const WHM_JOBS_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readJobView=${readJobView.toString()};const readJobListView=${readJobListView.toString()};const readJobLogView=${readJobLogView.toString()};return ${bindWhmJobs.toString()};})()`)

@@ -2,6 +2,8 @@ import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
 import { assertWhmClientTemplates as canonicalAssertWhmClientTemplates, clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate, WHM_CLIENT_TEMPLATE_BINDING } from './whm-client-templates.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
 const assertWhmClientTemplates = canonicalAssertWhmClientTemplates, clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
@@ -86,11 +88,11 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
     root.dataset.phpBound = 'true'
     const page = root.closest<HTMLElement>('[data-whm-detail-route="/whm/software/php"]')
     const status = root.querySelector<HTMLElement>('[data-whm-php-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-whm-php-refresh]')
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const transport = frameRequest(root)
     if (!page || !status || !refresh) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     let templateContractIntact = true
-    const admitted = () => templateContractIntact && root.isConnected && root.dataset.phpCanRead === 'true' && !root.closest(denied) && typeof transport === 'function'
+    const admitted = () => templateContractIntact && root.isConnected && root.dataset.phpCanRead === 'true' && typeof transport === 'function'
     let busy = false, confirmationPending = false, inventory: PhpInventoryView | null = null, manage: PhpManageView | null = null, savedUsage: PhpUsageView[] | null = null
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const cell = (row: HTMLTableRowElement, value: string, technical = false): void => { const td = document.createElement('td'), text = document.createElement(technical ? 'bdi' : 'span'); if (technical) text.dir = 'ltr'; text.textContent = value; td.append(text); row.append(td) }
@@ -264,7 +266,7 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
       if (!body.childElementCount) empty(body, 4, t('The saved domain read returned no PHP assignments.'))
     }
     // ---- server-wide writes: every host change is previewed, confirmed and submitted as a tested job
-    const writable = (): boolean => admitted() && manage?.state === 'read' && manage.manage && typeof askDialog === 'function'
+    const writable = (): boolean => admitted() && !root.closest(denied) && manage?.state === 'read' && manage.manage && typeof askDialog === 'function'
     const hook = (name: string): HTMLButtonElement | null => page.querySelector<HTMLButtonElement>('[data-php-action="' + name + '"]')
     const live = (control: HTMLInputElement | HTMLSelectElement | HTMLButtonElement | HTMLTextAreaElement | null, on: boolean): void => { if (!control) return; control.removeAttribute('data-wiring'); control.disabled = !on }
     const sectionNote = (section: string, state: string, message: string): void => {
@@ -281,7 +283,12 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
     const confirmed = async (title: string, body: string, danger = false): Promise<boolean> => {
       if (confirmationPending || !writable() || !verifyTemplates()) return false
       confirmationPending = true
-      try { const yes = await askDialog!({ title, body, danger, confirm: t('Confirm') }); return verifyTemplates() && writable() && yes === true } catch { return false } finally { confirmationPending = false }
+      try {
+        const yes = await askDialog!({ title, body, danger, confirm: t('Confirm') })
+        // A frame that turned read-only during the dialog keeps its saved values; its write controls close now.
+        if (verifyTemplates() && !writable() && manage) paintManage()
+        return verifyTemplates() && writable() && yes === true
+      } catch { return false } finally { confirmationPending = false }
     }
     const paintManagedExtensions = (version: string): void => {
       const body = page.querySelector<HTMLElement>('[data-whm-detail-section="php-extensions"] tbody')
@@ -491,4 +498,4 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
   })
 }
 
-export const WHM_PHP_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readPhpInventoryView=${readPhpInventoryView.toString()};const readPhpUsageView=${readPhpUsageView.toString()};const readPhpManageView=${readPhpManageView.toString()};return ${bindWhmPhp.toString()};})()`
+export const WHM_PHP_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readPhpInventoryView=${readPhpInventoryView.toString()};const readPhpUsageView=${readPhpUsageView.toString()};const readPhpManageView=${readPhpManageView.toString()};return ${bindWhmPhp.toString()};})()`)

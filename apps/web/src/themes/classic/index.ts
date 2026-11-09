@@ -13,9 +13,10 @@ import { renderMailSurface, renderUnavailableMailBody } from '../../surfaces/xma
 import { renderPanelSurface } from '../../surfaces/xpanel.ts'
 import { renderWhmSurface } from '../../surfaces/xwhm.ts'
 import { renderUnavailableComposedRoute } from '../../board-port/composed/render.ts'
-import { CLASSIC_ACCOUNT_SECURITY_FACTOR_HOST, renderClassicAccountSecurityWorkspace, renderApprovedXpanelWorkspace } from '../../board-port/approved-xpanel-workspaces.ts'
+import { approvedXpanelWorkspaceRoutes, CLASSIC_ACCOUNT_SECURITY_FACTOR_HOST, renderClassicAccountSecurityWorkspace, renderApprovedXpanelWorkspace } from '../../board-port/approved-xpanel-workspaces.ts'
 import { isHtmlElement, parseMarkup } from '../markup.ts'
 import { renderWhmDetailPage } from '../../board-port/approved-xwhm.ts'
+import { openFrameReads } from '../../read-only-frame.ts'
 import { renderStoreExtension } from '../../board-port/extensions/store.ts'
 import { renderCommandPaletteEntries } from '../../command-palette.ts'
 import { renderSurfaceShell } from '../../shell.ts'
@@ -24,6 +25,7 @@ import { escapeHtml } from '../../html.ts'
 import { PLEX_FONTS_STYLESHEET_HREF } from '../../vendor/plex.ts'
 import { renderReconcileBanner, type LiveEventState } from '../../ws-client.ts'
 import { loadThemeMessages } from '../../theme-messages.ts'
+import { projectReadOnlyMailSurface, projectReadOnlyPanelSurface, projectReadOnlyWhmSurface } from '../../models/theme-surface.ts'
 import { URL as FileURL } from 'node:url'
 import type { DocumentProps, ThemePackageTokens, UiTheme, UnavailableProps, WorkspaceSummaryView, ThemeSurface } from '../contract.ts'
 import { CLASSIC_PROMPT_CSS, CLASSIC_PROMPT_TEMPLATE } from './prompt.ts'
@@ -43,19 +45,32 @@ const renderWorkspaceSummary = (view: WorkspaceSummaryView | undefined, surface:
   </section>`
 }
 
+const storedFacts = <T extends object, K extends keyof T>(source: T | undefined, keys: readonly K[]): Partial<Pick<T, K>> =>
+  Object.fromEntries(source ? keys.flatMap(key => source[key] === undefined ? [] : [[key, source[key]]]) : []) as Partial<Pick<T, K>>
+
 const renderUnavailable = (props: UnavailableProps): string => {
   const { surface: panelSurface, locale, theme, density, route: path, heading: pageHeading, securityPage, qualifiedRoutes } = props
   const principal = props.visibility?.principal
   const disabledRouteAttribute = panelSurface === 'xpanel' && path === '/domains/reverse-proxy'
     ? ' data-unqualified-route="/domains/reverse-proxy"' : ''
+  // Core-scoped stored facts, projected exactly as V2 does: closed forms still show saved and default values.
+  const context = { locale, theme, density, activeRoute: path, visibility: props.visibility, catalog: props.catalog }
+  const facts = props.admitted && !securityPage ? props.readOnlyFacts : undefined
+  // Only saved records travel; observations, audit and usage stay out of a read-only page.
+  const panelFacts = facts?.surface === 'xpanel' && approvedXpanelWorkspaceRoutes.has(path)
+    ? storedFacts(projectReadOnlyPanelSurface({ ...facts.panel, ...context })?.props, ['visibility', 'catalog', 'account', 'plan', 'domains', 'activeDomain', 'databases', 'databaseUsers', 'serviceUsers', 'certificates', 'dnsRecords']) : {}
+  const whmFacts = facts?.surface === 'xwhm'
+    ? storedFacts(projectReadOnlyWhmSurface({ ...facts.whm, ...context })?.props, ['principal', 'visibility', 'catalog', 'activeReseller', 'accounts', 'plans', 'domains', 'dnsZones', 'featureLists', 'planEditorState', 'resellers', 'ipPool', 'ipv6Ranges', 'aclLists', 'firewallRules', 'mailIpConfig', 'serverSettings', 'hostname']) : {}
+  // The mailbox identity v2 shows, from the same projection: its frame readers read that mailbox only.
+  const mailbox = facts?.surface === 'xmail' ? projectReadOnlyMailSurface({ ...facts.mail, ...context })?.props.mailbox ?? '' : ''
   const store = props.admitted && !securityPage && principal
     ? renderStoreExtension({ locale, route: path, principal, readOnly: true, ...(props.storeAccount ? { account: props.storeAccount } : {}) }) : undefined
   const detailed = !securityPage && props.admitted
-    ? store || (panelSurface === 'xpanel'
-      ? renderApprovedXpanelWorkspace({ route: path, locale, readOnly: true })
+    ? (store && (panelSurface === 'xpanel' || principal?.kind === 'root') ? openFrameReads(store) : store) || (panelSurface === 'xpanel'
+      ? (html => html && openFrameReads(html))(renderApprovedXpanelWorkspace({ ...panelFacts, route: path, locale, readOnly: true }))
       : panelSurface === 'xwhm'
-        ? renderWhmDetailPage({ activeRoute: path, locale, capabilityUnavailable: true })
-        : renderUnavailableMailBody({ route: path, locale, theme }))
+        ? renderWhmDetailPage({ ...whmFacts, activeRoute: path, locale, capabilityUnavailable: true })
+        : (html => html && mailbox ? openFrameReads(html) : html)(renderUnavailableMailBody({ route: path, locale, theme, mailbox })))
     : undefined
   const canonicalPath = canonicalNavigationRoute(path)
   const composed = props.admitted && !securityPage && panelSurface === 'xpanel'

@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { request as httpRequest, type ClientRequest, type IncomingMessage } from 'node:http'
 import { createConnection, Socket } from 'node:net'
 import { fail, isXpanelError, type Account } from '@xpanel/core'
-import { ACCOUNT_PROBE_HOLD_SECONDS, ACCOUNT_PROBE_ROUTE, accountProbePaths } from '../../../packages/render/src/system/account-probe.ts'
+import { ACCOUNT_PROBE_END_CODES, ACCOUNT_PROBE_HOLD_SECONDS, ACCOUNT_PROBE_ROUTE, accountProbePaths } from '../../../packages/render/src/system/account-probe.ts'
 import { canonicalProvisioningIdentity, parseProvisioningReconcileRequest } from '../../../packages/core/src/account-provisioning-contract.ts'
 import { assertProvisioningProcessBinding, openNativeProvisioningProcess, parseProvisioningProcessFiles, type HeldProvisioningHttpRequest, type ProvisioningProcessIdentity, type ReadonlyAccountObservationOptions } from './account-provisioning-observer.ts'
 import { captureCanarySource, type HeldCanarySource, type HeldHttpConnection, type NativeAccountHttpSubject, type NativeProvisioningHttpOptions } from './account-provisioning-http-source.ts'
@@ -48,6 +48,36 @@ const deferred = <T>() => {
   return { promise, resolve: resolveValue, reject: rejectValue }
 }
 const closed = (socket: Socket): Promise<void> => socket.closed ? Promise.resolve() : new Promise(resolve => socket.once('close', () => resolve()))
+
+const CANARY_END_LINES = new Map<string, string>(ACCOUNT_PROBE_END_CODES.map(code => [`end ${code}\n`, code]))
+/** The canary's one end-of-wait line: its constant code, 'partial' while a prefix of one, else null. */
+export const canaryEndCode = (bytes: Buffer): string | null => {
+  const text = bytes.toString('latin1')
+  return CANARY_END_LINES.get(text) ?? ([...CANARY_END_LINES.keys()].some(line => line.startsWith(text)) ? 'partial' : null)
+}
+
+/**
+ * Records once which side ended the held callback first and how, with release state, as a stage mark:
+ * the canary's FIN (`canary-eof`), its reset (`canary-reset`), another socket error, or the agent (returned function).
+ */
+export function watchHeldCallbackEnd(live: Socket, record: (name: string) => void, released: () => boolean): () => void {
+  let noted = false
+  const note = (how: string): void => { if (!noted) { noted = true; record(`callback-end:${how}:${released() ? 'after-release' : 'before-release'}`) } }
+  live.once('end', () => note('canary-eof'))
+  live.once('error', error => note((error as NodeJS.ErrnoException).code === 'ECONNRESET' ? 'canary-reset' : 'error'))
+  return () => note('agent')
+}
+
+/**
+ * Sends release on the held callback. The canary writes `done` only after it reads `release`, so a callback it already
+ * ended was not held until release and no completed exchange can follow: that is refused by name, before `begin` marks
+ * the release, instead of surfacing as a write to an ended socket. A write the kernel refuses was not delivered.
+ */
+export async function deliverHeldRelease(live: Socket, begin: () => void): Promise<void> {
+  if (live.destroyed || live.readableEnded || live.writableEnded) return refused('callback_closed_before_release')
+  begin()
+  try { await write(live, 'release\n') } catch { return refused('callback_release_not_delivered') }
+}
 
 /** Destroy without Error still emits close. Every connect await must settle on that path too. */
 export function waitForNativeSocketConnect(socket: Socket, signal: AbortSignal, deadline: number): Promise<void> {
@@ -133,10 +163,12 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
       let backend: Socket | undefined, callback: Socket | undefined, ingress: Socket | undefined, httpSocket: Socket | undefined, ingressPeer: KernelPeerCredentials | undefined, http: ClientRequest | undefined, response: IncomingMessage | undefined
       let backendPin: UnixSocketPeerPin | undefined
       let failure: unknown, ended = false, releasing = false, claimed = false, acceptedCount = 0, closePromise: Promise<void> | undefined
+      let agentEndsCallback: (() => void) | undefined
       const prefix = Buffer.from('XPANEL-PROBE/1 ' + input.challenge + '\n'), expectedBody = Buffer.concat([prefix, Buffer.from('done\n')])
       const failOperation = (error: unknown): void => {
         if (failure === undefined) failure = error
         connectCancellation.abort()
+        agentEndsCallback?.()
         for (const socket of sockets) socket.destroy()
         http?.destroy(); response?.destroy()
         for (const value of [httpReady, httpDone, workerReady, fastCgiDone, ingressDone, callbackDone]) value.reject(failure)
@@ -175,7 +207,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
         catch (error) { if (adopted) adopted.destroy(); else options.addon.closeFd(peer.fd); throw error }
       }
       const cleanup = async (): Promise<void> => {
-        ended = true; clearTimeout(timer); context.signal.removeEventListener('abort', abort)
+        ended = true; clearTimeout(timer); context.signal.removeEventListener('abort', abort); agentEndsCallback?.()
         http?.destroy(); response?.destroy()
         const pendingClose = [...sockets].map(socket => { const done = closed(socket); socket.destroy(); return done })
         const errors: unknown[] = []
@@ -195,7 +227,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
           if (at < 0) continue
           if (at !== bytes.length - 1 || callback !== undefined) refused('callback_replay_or_extra_frame')
           if (!matchesCanaryCallback(bytes, input.challenge, input.binding)) { live.destroy(); return }
-          callback = live; mark('callback')
+          callback = live; mark('callback'); agentEndsCallback = watchHeldCallbackEnd(live, mark, () => releasing)
           await guard()
           const heldSource = source, heldBackend = backend
           if (!heldSource || !heldBackend || peer.uid !== account.uid || peer.gid !== account.gid) refused('callback_not_bound_to_fpm')
@@ -213,7 +245,15 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
           } finally { await files.close() }
           mark('worker-verified'); workerReady.resolve(observed)
           // Keep the actual callback/request alive. Any further callback bytes invalidate the one-shot frame.
-          for await (const extra of live) { if (Buffer.byteLength(extra) !== 0) refused('callback_replayed') }
+          // Only the canary's one constant end-of-wait line may follow; it names why the canary stopped waiting.
+          let tail: Buffer = Buffer.alloc(0)
+          for await (const extra of live) {
+            if (Buffer.byteLength(extra) === 0) continue
+            tail = Buffer.concat([tail, Buffer.from(extra)])
+            const code = canaryEndCode(tail)
+            if (code === null) refused('callback_replayed')
+            if (code !== 'partial') { mark('canary-end:' + code); refused(releasing ? 'callback_release_not_delivered' : 'callback_closed_before_release') }
+          }
           if (!releasing) refused('callback_closed_before_release')
           callbackDone.resolve(); return
         }
@@ -343,7 +383,7 @@ export function createNativeHeldAccountHttp(options: NativeAccountHttpOptions) {
                 await assertCurrent()
                 const live = callback
                 if (!live) refused('callback_not_live')
-                releasing = true; mark('release'); await write(live, 'release\n')
+                await deliverHeldRelease(live, () => { releasing = true; mark('release') })
                 await Promise.all([httpDone.promise, fastCgiDone.promise, ingressDone.promise, callbackDone.promise])
                 await source?.assertCurrent(); await guard()
               } catch (error) {

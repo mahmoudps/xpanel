@@ -7,6 +7,8 @@ import './i18n.ts'
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 
 /** Localized refusal for the stable reasons the SSL storage routes return; never echoes key material. */
 export function sslStoreRefusal(error: unknown, t: (message: string, values?: MessageValues) => string): string {
@@ -49,7 +51,7 @@ function bindSslStore(askDialog: ((options: Record<string, unknown>) => Promise<
   document.querySelectorAll<HTMLElement>('[data-ssl-store]').forEach(root => {
     if (root.dataset.sslStoreBound === 'true') return
     root.dataset.sslStoreBound = 'true'
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const access = frameAccess(root, 'data-ssl-store-can-read', 'data-ssl-store-can-manage'), transport = access.request
     const accountSelect = root.querySelector<HTMLSelectElement>('select[data-ssl-store-account]')
     const status = root.querySelector<HTMLElement>('[data-ssl-store-status]')
     const tables: Record<'keys' | 'csrs' | 'certificates', HTMLElement | null> = { keys: root.querySelector('tbody[data-ssl-store-keys]'), csrs: root.querySelector('tbody[data-ssl-store-csrs]'), certificates: root.querySelector('tbody[data-ssl-store-certificates]') }
@@ -58,7 +60,8 @@ function bindSslStore(askDialog: ((options: Record<string, unknown>) => Promise<
     const username = (): string => accountSelect ? accountSelect.value : root.dataset.sslStoreUsername ?? ''
     // Root's own store: a server-scoped workspace, or the empty account choice where the page offers it.
     const server = (): boolean => root.dataset.sslStoreScope === 'server' || (!!accountSelect && accountSelect.value === '' && root.dataset.sslStoreServer === 'true')
-    const admitted = (): boolean => root.isConnected && root.dataset.sslStoreCanManage === 'true' && (server() || /^[a-z][a-z0-9]{0,15}$/.test(username())) && typeof transport === 'function'
+    // Reads run in a read-only frame too; changes need the manage flag outside one.
+    const readable = (): boolean => access.readable() && (server() || /^[a-z][a-z0-9]{0,15}$/.test(username())), admitted = (): boolean => readable() && access.writable()
     const base = (): string => server() ? '/api/server/ssl' : '/api/accounts/' + encodeURIComponent(username()) + '/ssl'
     let view: StoreView | null = null, busy = false, uncertain = false, revision: number | null = null
     let actionTemplate: HTMLTemplateElement
@@ -70,13 +73,13 @@ function bindSslStore(askDialog: ((options: Record<string, unknown>) => Promise<
       const blocked = busy || uncertain || !admitted()
       root.setAttribute('aria-busy', String(busy))
       root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('button, input, select, textarea').forEach(control => {
-        if (control === accountSelect || control.closest('[data-ssl-store-viewer]')) control.disabled = busy || root.dataset.sslStoreCanManage !== 'true'
-        else if (control.hasAttribute('data-ssl-store-refresh')) control.disabled = busy || !admitted()
+        if (control === accountSelect || control.closest('[data-ssl-store-viewer]')) control.disabled = busy || !access.readable()
+        else if (control.hasAttribute('data-ssl-store-refresh')) control.disabled = busy || !readable()
         else control.disabled = blocked || !view
       })
     }
     const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
-    const request = async (method: string, path: string, body?: unknown): Promise<unknown> => { if (!transport || !admitted()) throw { details: { stateChanged: false } }; return body === undefined ? transport(method, path) : transport(method, path, body) }
+    const request = async (method: string, path: string, body?: unknown): Promise<unknown> => { if (!transport || !(method === 'GET' ? readable() : admitted())) throw { details: { stateChanged: false } }; return body === undefined ? transport(method, path) : transport(method, path, body) }
     const changedUnknown = (error: unknown): boolean => { const details = object(error) && object(error.details) ? error.details : {}; return details.stateChanged !== false || details.unknownOutcome === true || details.verificationRequired === true }
     const technical = (text: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = text; return node }
     const cell = (row: HTMLTableRowElement, content: string | Node): void => { const td = row.insertCell(); td.append(content) }
@@ -133,7 +136,7 @@ function bindSslStore(askDialog: ((options: Record<string, unknown>) => Promise<
       lock()
     }
     const load = async (message?: string): Promise<void> => {
-      if (busy || !admitted()) { lock(); return }
+      if (busy || !readable()) { lock(); return }
       busy = true; lock(); announce('pending', t('Reading SSL storage…'))
       try {
         const reply = await request('GET', base())
@@ -224,8 +227,8 @@ function bindSslStore(askDialog: ((options: Record<string, unknown>) => Promise<
     accountSelect?.addEventListener('change', () => { view = null; uncertain = false; render(); void load() })
     viewer?.querySelector('[data-ssl-store-viewer-close]')?.addEventListener('click', () => { if (pemBox) pemBox.textContent = ''; viewer.hidden = true })
     render()
-    if (admitted()) void load(); else announce('unavailable', t('SSL storage is not available for this view.'))
+    if (readable()) void load(); else announce('unavailable', t('SSL storage is not available for this view.'))
   })
 }
 
-export const SSL_STORE_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const sslStoreRefusal=${sslStoreRefusal.toString()};const bind=${bindSslStore.toString()};return(askDialog)=>bind(askDialog,{refusal:sslStoreRefusal,displayDateTime});})()`
+export const SSL_STORE_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const sslStoreRefusal=${sslStoreRefusal.toString()};const bind=${bindSslStore.toString()};return(askDialog)=>bind(askDialog,{refusal:sslStoreRefusal,displayDateTime});})()`)

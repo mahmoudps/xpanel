@@ -2,6 +2,8 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const displayDateTime = formatDisplayDateTime
 type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
@@ -48,9 +50,9 @@ function bindSvcPanels(askDialog: Ask | undefined): void {
     if (root.dataset.svcBound === 'true') return
     root.dataset.svcBound = 'true'
     const t = (message: string, values?: MessageValues): string => xpT(message, values)
-    const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
-    const canRead = (): boolean => root.isConnected && root.dataset.svcCanRead === 'true' && !root.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled') && typeof request === 'function'
-    const canManage = (): boolean => canRead() && root.dataset.svcCanManage === 'true'
+    const request = frameRequest(root)
+    const canRead = (): boolean => root.isConnected && root.dataset.svcCanRead === 'true' && typeof request === 'function'
+    const canManage = (): boolean => canRead() && root.dataset.svcCanManage === 'true' && !root.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled')
     const status = root.querySelector<HTMLElement>('[data-svc-status]')
     const note = (state: string, message: string): void => { if (!status) return; status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'unknown'].includes(state) ? 'alert' : 'status') }
     const words = { none: t('Not read'), yes: t('Yes'), no: t('No') }
@@ -221,4 +223,4 @@ function bindSvcPanels(askDialog: Ask | undefined): void {
   })
 }
 
-export const SVC_PANELS_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const svcGet=${svcGet.toString()};const svcSet=${svcSet.toString()};const svcShow=${svcShow.toString()};const svcRows=${svcRows.toString()};const svcWafFiles=${svcWafFiles.toString()};return ${bindSvcPanels.toString()};})()`
+export const SVC_PANELS_CLIENT_BINDING = withFrameRequest(`(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};const svcGet=${svcGet.toString()};const svcSet=${svcSet.toString()};const svcShow=${svcShow.toString()};const svcRows=${svcRows.toString()};const svcWafFiles=${svcWafFiles.toString()};return ${bindSvcPanels.toString()};})()`)

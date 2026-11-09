@@ -4,6 +4,8 @@ import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { WHM_DIAGNOSTIC_TEMPLATE_BINDING, whmDiagnosticNode as canonicalDiagnosticNode, whmDiagnosticTemplate as canonicalDiagnosticTemplate, assertWhmDiagnosticTemplates as canonicalAssertDiagnosticTemplates } from './whm-diagnostic-client-templates.ts'
 import { clientTemplateSlot as canonicalDiagnosticSlot } from './client-templates.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 const whmDiagnosticNode = canonicalDiagnosticNode
 const whmDiagnosticTemplate = canonicalDiagnosticTemplate
@@ -107,7 +109,6 @@ export function readServerLimitsReport(value: unknown, requested?: readonly stri
 
 function bindWhmServerHealth(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
   const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   const utc = (value: string | null): string => value ? formatDisplayDateTime(value) : t('Not read')
   const fixed = (value: number): string => String(Math.round(value * 10) / 10)
@@ -126,7 +127,8 @@ function bindWhmServerHealth(): void {
     const element = <K extends keyof HTMLElementTagNameMap>(tag: K, value?: string, templateName?: string): HTMLElementTagNameMap[K] => whmDiagnosticNode(root, tag, value, templateName)
     const technical = (value: string): HTMLElement => { const node = element('bdi', value); node.dir = 'ltr'; return node }
     const evidence = (value: string): HTMLElement => { const details = element('details'), pre = element('pre', value, 'evidence'); pre.dir = 'ltr'; pre.tabIndex = 0; details.append(element('summary', t('Evidence')), pre); return details }
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.serverHealthCanRead === 'true' && !root.closest(denied)
+    const transport = frameRequest(root)
+    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.serverHealthCanRead === 'true'
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const fact = (name: string, value: string): void => { const node = find(name); if (node) node.textContent = value }
     if (!admitted()) {
@@ -358,4 +360,4 @@ function bindWhmServerHealth(): void {
   })
 }
 
-export const WHM_SERVER_HEALTH_CLIENT_BINDING = `(()=>{${WHM_DIAGNOSTIC_TEMPLATE_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[shObject, shFail, shText, shIso, shCount, shAmount, shOneOf].map(helper => helper.toString()).join(';')};const readServerHealthReport=${readServerHealthReport.toString()};const readServerLimitsReport=${readServerLimitsReport.toString()};return ${bindWhmServerHealth.toString()};})()`
+export const WHM_SERVER_HEALTH_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_DIAGNOSTIC_TEMPLATE_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[shObject, shFail, shText, shIso, shCount, shAmount, shOneOf].map(helper => helper.toString()).join(';')};const readServerHealthReport=${readServerHealthReport.toString()};const readServerLimitsReport=${readServerLimitsReport.toString()};return ${bindWhmServerHealth.toString()};})()`)

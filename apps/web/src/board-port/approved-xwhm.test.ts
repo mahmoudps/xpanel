@@ -9,6 +9,7 @@ import { WHM_SSL_CLIENT_BINDING } from '../whm-ssl-client.ts'
 import { WHM_SSH_CLIENT_BINDING } from '../whm-ssh-client.ts'
 
 const root = { kind: 'root' as const, id: 'synthetic-root', username: 'synthetic-root' }
+const savedAccount: Account = { id: '20000000-0000-4000-8000-000000000001', username: 'synthetic7', uid: 1007, gid: 1007, home: '/home/synthetic7', primaryDomain: 'synthetic7.example.test', planId: '30000000-0000-4000-8000-000000000001', ownerId: null, status: 'active', suspendReason: null, contactEmail: 'synthetic7@example.test', ipv4: '192.0.2.7', shell: 'none', createdAt: '2026-10-25T00:00:00.000Z' }
 
 // Positive renderer fixtures model only the named accepted control-plane operations.
 // Production acceptance and host evidence are never changed by these local inputs.
@@ -79,15 +80,16 @@ describe('detailed administrator workspaces', () => {
     }
   })
 
-  it('keeps defaults, proposed values and runtime unknown when the page snapshot is unread or denied', () => {
+  it('keeps proposed values and runtime unknown when the page snapshot is unread or denied, while closed fields show saved settings', () => {
     for (const props of [{ catalog: readyCatalog }, { catalog: readyCatalog, capabilityUnavailable: true, serverSettings: { ...settings, backendPort: 18181, backendTlsPort: 19443 } }]) {
       const host = document.createElement('div')
       host.innerHTML = renderWhmDetailPage({ activeRoute: '/whm/services/web', principal: root, ...props })!
       assert.equal(host.querySelector('[data-whm-web-proxy-reference]')!.getAttribute('data-state'), 'unread')
       assert.equal(host.querySelectorAll('[data-whm-web-snapshot-setting]').length, 15)
       assert.ok([...host.querySelectorAll('[data-whm-web-snapshot-setting]')].every(item => item.textContent === 'Not read'))
-      assert.doesNotMatch(host.innerHTML, /18181|19443|proxy_pass http:\/\/127\.0\.0\.1:/)
+      assert.doesNotMatch(host.innerHTML, /proxy_pass http:\/\/127\.0\.0\.1:/)
       if (props.capabilityUnavailable) {
+        assert.equal((host.querySelector('[name="backendPort"]') as HTMLInputElement).value, '18181')
         assert.equal(host.querySelectorAll('form').length, 0)
         assert.ok([...host.querySelectorAll('input,select,textarea,button')].every(item => (item as HTMLInputElement).disabled))
       }
@@ -107,7 +109,7 @@ describe('detailed administrator workspaces', () => {
       assert.match(html, /data-capability-state="unavailable"/)
       const doc = new DOMParser().parseFromString(html, 'text/html')
       assert.equal(doc.querySelectorAll('form').length, 0, 'unavailable documents contain no live native form')
-      assert.doesNotMatch(html, /synthetic\.example\.test|DO-NOT-RENDER|must-never-be-exported/)
+      assert.doesNotMatch(html, /must-never-be-exported/)
       for (const control of doc.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input,select,textarea')) assert.equal(control.disabled, true, control.outerHTML)
       assert.doesNotMatch(html, /[\u0660-\u0669\u06f0-\u06f9]/)
     }
@@ -192,7 +194,8 @@ describe('detailed administrator workspaces', () => {
     assert.match(html, /name="primaryIpv4"[^>]*value="192\.0\.2\.29"[^>]*required/)
     assert.doesNotMatch(html, /value="(?:192\.0\.2\.28|2001:db8::8|203\.0\.113\.10)"/)
     const unavailable = renderWhmDetailPage({ activeRoute: '/whm/server/setup', capabilityUnavailable: true, principal: root, serverSettings: settings, catalog: readyCatalog, ipPool })!
-    assert.doesNotMatch(unavailable, /192\.0\.2\.29|<form\b/)
+    assert.doesNotMatch(unavailable, /<form\b/)
+    assert.match(unavailable, /name="primaryIpv4"[^>]*value="192\.0\.2\.29"[^>]*disabled/)
   })
 
   it.each([
@@ -246,17 +249,24 @@ describe('detailed administrator workspaces', () => {
     assert.equal([...html.matchAll(/<h1\b/g)].length, 1)
     for (const label of ['Import BIND zone', 'Export zone file', 'SOA serial', 'Zone change history', 'PowerDNS API']) assert.ok(html.includes(label), label)
     assert.equal(renderWhmDnsSupplement({ principal: { kind: 'user', id: 'user', username: 'root', accountId: 'account' } }), '')
-    const unavailable = renderWhmDetailPage({ activeRoute: '/whm/dns', capabilityUnavailable: true, accounts: [{ username: 'PRIVATE-DNS-ACCOUNT' } as never], services: [{ name: 'PRIVATE-PDNS' } as never] })!
-    assert.doesNotMatch(unavailable, /<form\b|PRIVATE-DNS-ACCOUNT|PRIVATE-PDNS/)
+    // Read-only shows the saved zones and the first zone's records, disabled; host observations stay out.
+    const zone = { id: 'zone-saved', accountId: savedAccount.id, name: savedAccount.primaryDomain, serial: 2026110901, records: [{ id: 'record-saved', zone: savedAccount.primaryDomain, name: 'www', type: 'A' as const, ttl: 300, content: '192.0.2.7', priority: null }] }
+    const unavailable = renderWhmDetailPage({ activeRoute: '/whm/dns', capabilityUnavailable: true, principal: root, accounts: [savedAccount], dnsZones: [zone], services: [{ name: 'PRIVATE-PDNS' } as never] })!
+    assert.doesNotMatch(unavailable, /<form\b|PRIVATE-PDNS/)
     for (const element of unavailable.matchAll(/<(?:input|select|textarea|button)\b[^>]*>/g)) assert.match(element[0], /\bdisabled\b/)
     assert.match(unavailable, /data-whm-detail-section="dns-record-unavailable"/)
+    assert.match(unavailable, /<option value="synthetic7\.example\.test" selected>/)
+    assert.match(unavailable, new RegExp(`<option value="${savedAccount.id}" selected>synthetic7</option>`))
+    assert.ok(unavailable.includes('2026110901') && unavailable.includes('192.0.2.7'))
+    assert.match(unavailable, /name="dns-pending-record-ttl"[^>]*value="14400"[^>]*disabled/)
   })
 
   it('uses the narrow settings capability from the full catalog and does not unlock forms from broad metadata', () => {
     const broadOnly = tools.map(tool => ({ ...tool, status: tool.id === 'server-settings-edit' ? 'researched' as const : 'verified' as const }))
     const held = renderWhmDetailPage({ activeRoute: '/whm/security/ssh', principal: root, catalog: broadOnly, serverSettings: settings })!
     assert.match(held, /data-capability-state="unavailable"/)
-    assert.doesNotMatch(held, /<form\b|value="2222"/)
+    assert.doesNotMatch(held, /<form\b/)
+    assert.match(held, /value="2222"[^>]*disabled/)
     const nativeOnly = tools.map(tool => ({ ...tool, status: tool.id === 'server-settings-edit' ? 'verified' as const : 'researched' as const }))
     const ready = renderWhmDetailPage({ activeRoute: '/whm/security/ssh', principal: root, catalog: nativeOnly, serverSettings: settings })!
     assert.match(ready, /data-whm-ssh-policy/)
@@ -279,12 +289,16 @@ describe('detailed administrator workspaces', () => {
     assert.equal(new Set(ids).size, ids.length, activeRoute)
   })
 
-  it.each(['/whm/accounts', '/whm/accounts/new', '/whm/plans', '/whm/security/firewall', '/whm/services'] as const)('keeps complete %s unavailable layout without private records or forms', activeRoute => {
-    const html = renderWhmDetailPage({ activeRoute, capabilityUnavailable: true, principal: root, accounts: [{ username: 'PRIVATE-ACCOUNT' } as never], plans: [{ name: 'PRIVATE-PLAN' } as never], services: [{ name: 'PRIVATE-SERVICE' } as never] })!
+  it.each(['/whm/accounts', '/whm/accounts/new', '/whm/plans', '/whm/security/firewall', '/whm/services'] as const)('keeps complete %s read-only layout with saved rows, without host observations or forms', activeRoute => {
+    const plan = { ...defaultPlan({ featureListId: '40000000-0000-4000-8000-000000000001', ownerId: null }), id: savedAccount.planId, name: 'Saved plan' }
+    const html = renderWhmDetailPage({ activeRoute, capabilityUnavailable: true, principal: root, accounts: [savedAccount], plans: [plan], services: [{ name: 'PRIVATE-SERVICE' } as never] })!
     assert.equal([...html.matchAll(/<h1\b/g)].length, 1)
     const doc = new DOMParser().parseFromString(html, 'text/html')
     assert.equal(doc.querySelectorAll('form').length, 0, 'unavailable documents contain no live native form')
-    assert.doesNotMatch(html, /PRIVATE-ACCOUNT|PRIVATE-PLAN|PRIVATE-SERVICE/)
+    assert.doesNotMatch(html, /PRIVATE-SERVICE/)
+    if (activeRoute === '/whm/accounts') assert.ok(html.includes('value="synthetic7" disabled') && html.includes('synthetic7.example.test'))
+    if (activeRoute === '/whm/plans') assert.match(html, /name="pending-plan-name"[^>]*value="Saved plan"[^>]*disabled/)
+    if (activeRoute === '/whm/accounts/new') assert.match(html, new RegExp(`<option value="${plan.id}" selected>Saved plan</option>`))
     for (const control of doc.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button')) assert.equal(control.disabled, true, control.outerHTML)
     if (activeRoute === '/whm/plans') for (const label of ['Read operations per second', 'Addon domains', 'Default mailbox quota', 'Impact', 'Unsaved changes']) assert.ok(html.includes(label), label)
     if (activeRoute === '/whm/accounts/new') for (const label of ['Username', 'Primary domain', 'Contact email', 'Password', 'IPv4 assignment', 'Owner', 'Shell', 'What will be created']) assert.ok(html.includes(label), label)

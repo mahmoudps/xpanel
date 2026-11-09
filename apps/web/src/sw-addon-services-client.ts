@@ -6,6 +6,8 @@ const cloneViewRecord = canonicalCloneViewRecord
 const viewAction = canonicalViewAction
 import { readSwAddonServicesView } from '../../../packages/os/src/sw-addon-command.ts'
 import type { SwAddonServicesView } from '../../../packages/os/src/sw-addon-command.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 export { readSwAddonServicesView }
 
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
@@ -23,7 +25,6 @@ export function readAddonPackageStates(value: unknown): Record<string, 'installe
 
 function bindSwAddons(askDialog: Ask | undefined, parse: typeof readSwAddonServicesView, parsePackages: typeof readAddonPackageStates): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const blocked = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   document.querySelectorAll<HTMLElement>('[data-sw-addons]').forEach(root => {
     if (root.dataset.swBound === 'true') return
@@ -31,9 +32,10 @@ function bindSwAddons(askDialog: Ask | undefined, parse: typeof readSwAddonServi
     const status = root.querySelector<HTMLElement>('[data-sw-addons-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-sw-addons-refresh]'), body = root.querySelector<HTMLElement>('[data-sw-addons-rows]')
     const job = root.querySelector<HTMLElement>('[data-sw-addons-job]'), jobLink = root.querySelector<HTMLAnchorElement>('[data-sw-addons-job-link]')
     if (!status || !refresh || !body || !job || !jobLink) return
-    const admitted = (): boolean => root.isConnected && root.dataset.swCanRead === 'true' && !root.closest(blocked) && typeof transport === 'function'
+    const transport = frameRequest(root)
+    const admitted = (): boolean => root.isConnected && root.dataset.swCanRead === 'true' && typeof transport === 'function'
     let busy = false, review = false, view: SwAddonServicesView | null = null, packages: Record<string, string> | null = null
-    const manageable = (): boolean => admitted() && root.dataset.swCanManage === 'true' && view?.state === 'read' && view.actions.control && typeof askDialog === 'function' && !review
+    const manageable = (): boolean => admitted() && !root.closest(blocked) && root.dataset.swCanManage === 'true' && view?.state === 'read' && view.actions.control && typeof askDialog === 'function' && !review
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status') }
     const name = (id: string): string => ({ memcached: 'Memcached', rabbitmq: 'RabbitMQ', elasticsearch: 'Elasticsearch', opensearch: 'OpenSearch' } as Record<string, string>)[id] ?? id
     const kind = (id: string): string => id === 'memcached' ? t('Memory cache') : id === 'rabbitmq' ? t('Message broker') : t('Search engine')
@@ -97,4 +99,4 @@ function bindSwAddons(askDialog: Ask | undefined, parse: typeof readSwAddonServi
     void load()
   })
 }
-export const SW_ADDON_SERVICES_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const parse=${readSwAddonServicesView.toString()};const parsePackages=${readAddonPackageStates.toString()};const bind=${bindSwAddons.toString()};return (ask)=>bind(ask,parse,parsePackages);})()`
+export const SW_ADDON_SERVICES_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const parse=${readSwAddonServicesView.toString()};const parsePackages=${readAddonPackageStates.toString()};const bind=${bindSwAddons.toString()};return (ask)=>bind(ask,parse,parsePackages);})()`)

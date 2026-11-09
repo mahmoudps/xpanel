@@ -80,7 +80,7 @@ describe('developer console read workflow', () => {
     const send = vi.fn<Requester>(async () => manifest())
     boot(); await flush(); expect($('[data-dev-status]').dataset.state).toBe('unavailable')
     boot(send, 'administrator', 'en', false); await flush(); expect(send).not.toHaveBeenCalled()
-    boot(send, 'administrator', 'en', true, 'data-wiring="soon"'); await flush(); expect(send).not.toHaveBeenCalled()
+    boot(send, 'administrator', 'en', true, 'data-wiring="soon"'); await flush(); expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
     expect($<HTMLButtonElement>('[data-dev-run]').disabled).toBe(true)
     expect($('[data-dev-form]')).not.toBeNull(); expect($('[data-dev-token-table]')).not.toBeNull()
     expect(WHM_DEVELOPER_CLIENT_BINDING).not.toContain('innerHTML'); expect(WHM_DEVELOPER_CLIENT_BINDING).not.toContain('fetch(')

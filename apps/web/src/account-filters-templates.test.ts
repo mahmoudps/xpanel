@@ -49,6 +49,14 @@ afterEach(async () => {
   } finally { await testDom?.teardown(globalThis); testDom = undefined }
 })
 
+it.each(['classic', 'v2', 'v2-mail'] as const)('reads saved %s filters inside a read-only frame but never writes, with every control disabled', async theme => {
+  const { request } = mount(theme, { tamper: root => { root.dataset.readonly = 'true' } }); await idle()
+  expect(q('[data-filter-list]').textContent).toContain('Invoices <img src=x>')
+  expect(request).toHaveBeenCalled()
+  expect((request.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+  expect([...q('[data-filter-workspace]').querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button')].every(control => control.disabled)).toBe(true)
+})
+
 it('binds the actual V2 sealed-mailbox workspace without an account-wide scope selector', async () => {
   const { request } = mount('v2-mail'); await idle()
   expect(request.mock.calls[0]).toEqual(['GET', '/api/webmail/filters?scope=mailbox&mailbox=info%40alice.example.test'])

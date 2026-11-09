@@ -18,7 +18,7 @@ export const WHM_SERVER_OPS_CSS = `.v2-server-ops,.v2-server-ops__form{display:f
 `
 
 /** V2 cards of the server operation tools, with the hooks the shared client binds. */
-export function renderV2ServerOps(t: Translate, ids: readonly ServerOpsCardId[], canManage: boolean): string {
+export function renderV2ServerOps(t: Translate, ids: readonly ServerOpsCardId[], canManage: boolean, canRead = true): string {
   const e = (value: string): string => escapeHtml(t(value))
   const control = (id: string, field: ServerOpsField): string => {
     const key = `whm-ops-${id}-${field.name}`
@@ -32,7 +32,7 @@ export function renderV2ServerOps(t: Translate, ids: readonly ServerOpsCardId[],
     const table = spec.columns ? `<div class="v2-server-ops__scroll" role="region" tabindex="0" aria-label="${e(spec.title)}"><table><caption class="v2-sr">${e(spec.title)}</caption><thead><tr>${spec.columns.map(title => `<th scope="col">${e(title)}</th>`).join('')}</tr></thead><tbody data-server-ops-rows><tr><td colspan="${spec.columns.length}">${e(msgid('Not read'))}</td></tr></tbody></table></div>` : ''
     const fields = spec.fields.length ? `<div class="v2-server-ops__fields">${spec.fields.map(field => control(id, field)).join('')}</div>` : ''
     const job = spec.jobLink ? `<a class="v2-btn" href="/whm/jobs" data-server-ops-job hidden>${e(msgid('Open job'))}</a>` : ''
-    return card({ id: `v2-server-ops-${id}`, title: t(spec.title), titleId: `v2-server-ops-${id}-heading`, bodyHtml: `<div class="v2-server-ops__form" role="group" aria-labelledby="v2-server-ops-${id}-heading" data-server-ops="${id}" data-server-ops-api="${SERVER_OPS_API[id]}" data-server-ops-can-manage="${canManage}"><p class="v2-muted">${e(spec.lede)}</p>${fields}${table}<p role="status" data-state="unread" data-server-ops-status>${e(msgid('Not read'))}</p><div class="v2-server-ops__actions"><button type="button" class="v2-btn${spec.danger ? ' v2-btn--danger' : ' v2-btn--primary'}" data-server-ops-submit disabled>${e(spec.submit)}</button>${job}</div></div>` })
+    return card({ id: `v2-server-ops-${id}`, title: t(spec.title), titleId: `v2-server-ops-${id}-heading`, bodyHtml: `<div class="v2-server-ops__form" role="group" aria-labelledby="v2-server-ops-${id}-heading" data-server-ops="${id}" data-server-ops-api="${SERVER_OPS_API[id]}" data-server-ops-can-read="${canRead}" data-server-ops-can-manage="${canManage}"><p class="v2-muted">${e(spec.lede)}</p>${fields}${table}<p role="status" data-state="unread" data-server-ops-status>${e(msgid('Not read'))}</p><div class="v2-server-ops__actions"><button type="button" class="v2-btn${spec.danger ? ' v2-btn--danger' : ' v2-btn--primary'}" data-server-ops-submit disabled>${e(spec.submit)}</button>${job}</div></div>` })
   }).join('')
   return `<div class="v2-server-ops">${body}</div>`
 }

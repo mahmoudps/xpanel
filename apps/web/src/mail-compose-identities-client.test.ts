@@ -25,7 +25,7 @@ const change = (value: string) => { select().value = value; select().dispatchEve
 
 beforeEach(() => {
   document.documentElement.lang = 'en'
-  document.body.innerHTML = `<section data-compose-identities data-compose-mailbox="${mailbox}" data-compose-identities-state="unread"><select id="compose-from"><option value="${mailbox}">${mailbox}</option></select><button type="button" data-compose-identities-refresh>Read identities</button><button type="button" data-compose-signature-insert>Insert signature</button><p data-compose-identities-status role="status"></p><input id="compose-to" value="recipient@example.test"><input id="compose-subject" value="Draft subject"><div id="compose-body" contenteditable="true"><p><strong>Original</strong> rich body</p></div><button type="button" data-mail-send="true">Send</button></section><dd data-mail-from-addr><bdi dir="ltr">${mailbox}</bdi></dd><dd data-compose-identity-label>Not read</dd><dd data-compose-reply-to>Not read</dd>`
+  document.body.innerHTML = `<section data-compose-identities data-compose-identities-can-read="true" data-compose-identities-manage="true" data-compose-mailbox="${mailbox}" data-compose-identities-state="unread"><select id="compose-from"><option value="${mailbox}">${mailbox}</option></select><button type="button" data-compose-identities-refresh>Read identities</button><button type="button" data-compose-signature-insert>Insert signature</button><p data-compose-identities-status role="status"></p><input id="compose-to" value="recipient@example.test"><input id="compose-subject" value="Draft subject"><div id="compose-body" contenteditable="true"><p><strong>Original</strong> rich body</p></div><button type="button" data-mail-send="true">Send</button></section><dd data-mail-from-addr><bdi dir="ltr">${mailbox}</bdi></dd><dd data-compose-identity-label>Not read</dd><dd data-compose-reply-to>Not read</dd>`
   delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
   const sendStatus = document.createElement('p'); sendStatus.id = 'mail-send-status'; root().appendChild(sendStatus)
 })
@@ -64,7 +64,10 @@ describe('compose saved sender identities and managed signatures', () => {
     const before = editor().textContent
     boot(); expect(status().dataset.state).toBe('unavailable'); expect(send().disabled).toBe(true); expect(editor().textContent).toBe(before)
     root().removeAttribute('data-compose-identities-bound'); root().dataset.capabilityUnavailable = 'true'
-    const transport = vi.fn<Transport>(); boot(transport); await tick(); expect(transport).not.toHaveBeenCalled()
+    const transport = vi.fn<Transport>().mockResolvedValue({ identities: [identity()] }); boot(transport); await tick()
+    expect(transport).toHaveBeenCalledWith('GET', '/api/webmail/identities')
+    expect((transport.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+    expect(send().disabled).toBe(true); expect(root().querySelector<HTMLSelectElement>("#compose-from")!.disabled).toBe(true)
   })
   it('selects the persisted default, reuses rich body nodes and inserts only textSignature', async () => {
     const body = editor().querySelector('strong'), transport = vi.fn<Transport>().mockResolvedValue({ identities: [identity()] })

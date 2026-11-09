@@ -1,6 +1,8 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
 type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
@@ -9,7 +11,6 @@ type Reply = Record<string, any> // eslint-disable-line @typescript-eslint/no-ex
 /** The server operation cards of both themes. Every success shown here comes from the API reply; a refusal keeps the form as typed. */
 function bindWhmServerOps(askDialog: Ask | undefined): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
   const refusals = (): Record<string, string> => ({
     INVALID_HOSTNAME: t('The hostname must be a lowercase fully qualified name of at most 60 characters, must not start with www or a digit, and must not be an account domain or a service subdomain. Nothing was changed.'),
     NO_FREE_IP: t('No free address is left in the IP pool. Add one on the IP page first; nothing was changed.'),
@@ -46,6 +47,7 @@ function bindWhmServerOps(askDialog: Ask | undefined): void {
   const jobs: Record<string, string> = { queued: t('Queued'), running: t('Running'), succeeded: t('Finished'), failed: t('Failed'), cancelled: t('Cancelled') }
 
   document.querySelectorAll<HTMLElement>('[data-server-ops]').forEach(root => {
+    const request = frameRequest(root)
     if (root.dataset.serverOpsBound === 'true') return
     root.dataset.serverOpsBound = 'true'
     const key = root.dataset.serverOps ?? '', api = root.dataset.serverOpsApi ?? ''
@@ -58,8 +60,9 @@ function bindWhmServerOps(askDialog: Ask | undefined): void {
     const check = (name: string, next: boolean): void => { const control = named(name); if (control instanceof HTMLInputElement) control.checked = next }
     const checked = (name: string): boolean => { const control = named(name); return control instanceof HTMLInputElement && control.checked }
     const note = (state: string, message: string): void => { if (!status) return; status.dataset.state = state; status.setAttribute('role', state === 'failed' ? 'alert' : 'status'); status.textContent = message }
-    const admitted = (): boolean => root.isConnected && typeof request === 'function' && !root.closest('[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled')
-    const manageable = (): boolean => admitted() && root.dataset.serverOpsCanManage === 'true'
+    // Reads run inside read-only frames too, so closed fields show saved values; writes stay outside them and frameRequest refuses them there.
+    const admitted = (): boolean => root.isConnected && typeof request === 'function' && root.dataset.serverOpsCanRead === 'true'
+    const manageable = (): boolean => admitted() && root.dataset.serverOpsCanManage === 'true' && !root.closest('[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled')
     let revision: string | null = null, busy = false, state: Reply = {}
     const sync = (): void => { for (const control of controls()) control.disabled = busy || !manageable(); if (submit) submit.disabled = busy || !manageable() }
     const row = (cells: readonly string[], action?: HTMLElement): HTMLTableRowElement => {
@@ -224,4 +227,4 @@ function bindWhmServerOps(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_SERVER_OPS_CLIENT_BINDING = bindWhmServerOps.toString()
+export const WHM_SERVER_OPS_CLIENT_BINDING = `(()=>{${frameRequest.toString()};return ${bindWhmServerOps.toString()}})()`

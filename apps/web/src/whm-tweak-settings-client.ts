@@ -1,6 +1,8 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 
 /** Strict reader for GET /api/server/settings-index. */
 export function readSettingsIndexValues(value: unknown): Record<string, unknown> {
@@ -23,14 +25,14 @@ function bindWhmTweakSettings(): void {
   document.querySelectorAll<HTMLElement>('[data-tweak-settings]').forEach(root => {
     if (root.dataset.tweakBound === 'true') return
     root.dataset.tweakBound = 'true'
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const request = frameRequest(root)
     const status = root.querySelector<HTMLElement>('[data-tweak-status]'), save = root.querySelector<HTMLButtonElement>('[data-tweak-save]'), refresh = root.querySelector<HTMLButtonElement>('[data-tweak-refresh]')
     const search = root.querySelector<HTMLInputElement>('[data-tweak-search]'), empty = root.querySelector<HTMLElement>('[data-tweak-empty]')
     const rows = [...root.querySelectorAll<HTMLElement>('[data-setting-row]')], groups = [...root.querySelectorAll<HTMLElement>('[data-setting-group]')], cells = [...root.querySelectorAll<HTMLElement>('[data-setting-value]')]
     const inputs = [...root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-tweak-input]')]
     const admitted = (): boolean => root.isConnected && root.dataset.tweakCanRead === 'true' && typeof request === 'function'
-      && !root.closest('[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled')
     const manageable = (): boolean => admitted() && root.dataset.tweakCanManage === 'true'
+      && !root.closest('[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled')
     let revision: string | null = null, busy = false
     const note = (state: string, message: string): void => { if (!status) return; status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'unknown'].includes(state) ? 'alert' : 'status') }
     const sync = (): void => {
@@ -101,4 +103,4 @@ function bindWhmTweakSettings(): void {
   })
 }
 
-export const WHM_TWEAK_SETTINGS_CLIENT_BINDING = `(()=>{const readSettingsIndexValues=${readSettingsIndexValues.toString()};const readTweakSettingsView=${readTweakSettingsView.toString()};return ${bindWhmTweakSettings.toString()};})()`
+export const WHM_TWEAK_SETTINGS_CLIENT_BINDING = withFrameRequest(`(()=>{const readSettingsIndexValues=${readSettingsIndexValues.toString()};const readTweakSettingsView=${readTweakSettingsView.toString()};return ${bindWhmTweakSettings.toString()};})()`)

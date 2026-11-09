@@ -6,6 +6,8 @@ const cloneViewRecord = canonicalCloneViewRecord
 const viewAction = canonicalViewAction
 import './i18n.ts'
 import { serviceArea as canonicalServiceArea } from './service-area.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const serviceArea = canonicalServiceArea
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 export interface ServiceManagerClientRow { unit: string; load: string | null; active: string | null; sub: string | null; boot: string | null; restart: boolean; bootEditable: boolean }
@@ -50,11 +52,11 @@ function bindWhmServiceManager(askDialog: ((options: Record<string, unknown>) =>
     const status = q<HTMLElement>('[data-sm-status]'), result = q<HTMLElement>('[data-sm-result]'), refresh = q<HTMLButtonElement>('[data-sm-refresh]'), rows = q<HTMLElement>('[data-sm-rows]')
     const search = q<HTMLInputElement>('[data-sm-search]'), filter = q<HTMLSelectElement>('[data-sm-filter]'), confirmation = q<HTMLInputElement>('[data-sm-confirm]'), reboot = q<HTMLButtonElement>('[data-sm-reboot]'), jobNote = q<HTMLElement>('[data-sm-job]'), jobLink = q<HTMLAnchorElement>('[data-sm-job-link]')
     if (!status || !result || !refresh || !rows || !search || !filter || !confirmation || !reboot || !jobNote || !jobLink) return
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const request = frameRequest(root)
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => !quarantined && typeof request === 'function' && root.isConnected && root.dataset.smCanRead === 'true' && !root.closest(denied)
+    const admitted = (): boolean => !quarantined && typeof request === 'function' && root.isConnected && root.dataset.smCanRead === 'true'
     let view: ServiceManagerClientView | null = null, busy = false, review = false, rebootBefore: number | null = null, quarantined = false, selectedUnit: string | null = null, area = ''
-    const manageable = (): boolean => admitted() && root.dataset.smCanManage === 'true' && view?.state === 'read' && view.manage && typeof askDialog === 'function' && !review
+    const manageable = (): boolean => admitted() && root.dataset.smCanManage === 'true' && view?.state === 'read' && view.manage && typeof askDialog === 'function' && !review && !root.closest(denied)
     const note = (state: string, text: string): void => { status.dataset.state = state; status.textContent = text }
     const outcome = (state: string, text: string): void => { result.dataset.state = state; result.textContent = text; result.hidden = false }
     const preflight = (): boolean => {
@@ -156,4 +158,4 @@ function bindWhmServiceManager(askDialog: ((options: Record<string, unknown>) =>
   })
 }
 
-export const WHM_SERVICE_MANAGER_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const serviceArea=${serviceArea.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readServiceManagerView=${readServiceManagerView.toString()};const readServiceManagerSubmission=${readServiceManagerSubmission.toString()};return ${bindWhmServiceManager.toString()};})()`
+export const WHM_SERVICE_MANAGER_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const serviceArea=${serviceArea.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readServiceManagerView=${readServiceManagerView.toString()};const readServiceManagerSubmission=${readServiceManagerSubmission.toString()};return ${bindWhmServiceManager.toString()};})()`)

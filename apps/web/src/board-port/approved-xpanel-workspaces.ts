@@ -336,8 +336,11 @@ export const renderApprovedXpanelWorkspace = (p: ApprovedXpanelWorkspaceProps): 
             : renderSiteHealthWorkspace({ lang: p.locale, accountId, canManage: verified('account-health-overview') });
         return `${styles}<section class="xp-approved-panel" data-approved-xpanel-workspace="${p.route}" data-workspace-section="workspace" data-workspace-mode="${connected ? 'connected' : 'read-only'}"${connected ? '' : ' data-wiring="soon"'}><header class="xp-panel-detail__heading"><h1>${copy(p, accountTool[0])}</h1><p>${copy(p, accountTool[1])}</p></header>${body}</section>`;
     }
+    // Read-only keeps the core-scoped stored facts so closed fields show their saved values; every operation stays gated on !readOnly.
     p = p.readOnly ? {
-        route: p.route, locale: p.locale, readOnly: true
+        route: p.route, locale: p.locale, readOnly: true, visibility: p.visibility, catalog: p.catalog,
+        account: p.account, plan: p.plan, domains: p.domains, activeDomain: p.activeDomain, databases: p.databases,
+        databaseUsers: p.databaseUsers, serviceUsers: p.serviceUsers, certificates: p.certificates, dnsRecords: p.dnsRecords
     } : p;
     const page = pageFor(p);
     if (p.route === '/domains' && !p.readOnly && p.nativeHtml?.includes('data-domain-workspace')) {

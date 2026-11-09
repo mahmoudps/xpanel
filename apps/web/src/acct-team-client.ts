@@ -8,7 +8,9 @@ const clientTemplateSlot = canonicalClientTemplateSlot
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
+const frameAccess = canonicalFrameAccess
 
 export type AccountTeamRole = 'administrator' | 'database' | 'email' | 'web'
 export type AccountTeamMember = {
@@ -72,11 +74,11 @@ function bindAccountTeam(askDialog: ((options: Record<string, unknown>) => Promi
     const inputs: Record<string, HTMLInputElement> = {}
     root.querySelectorAll<HTMLInputElement>('[data-acct-team-input]').forEach(control => { inputs[control.dataset.acctTeamInput!] = control })
     const roles = Array.from(root.querySelectorAll<HTMLInputElement>('[data-acct-team-role]'))
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const access = frameAccess(root, 'data-team-can-read', 'data-team-can-manage'), request = access.request
     if (!status || !loading || !rows || !empty || !usage || !refresh || !listStatus || !domain || !form || !heading || !save || !cancel || !saveStatus || roles.length !== 4 || !['username', 'contactEmail', 'notes', 'expiresAt', 'expiryReason'].every(name => inputs[name])
       || !signInState || !signInHelp || !linkBox || !linkHeading || !linkUrl || !linkExpires || !linkCopy || !linkDone || !linkStatus) return
-    const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.teamCanManage === 'true' && !root.closest(denied) && form.tagName === 'FORM' && typeof request === 'function'
+    // Reads run in a read-only frame too; changes need the manage flag outside one.
+    const readable = (): boolean => access.readable() && form.tagName === 'FORM', admitted = (): boolean => readable() && access.writable()
     const controls = [...Object.values(inputs), ...roles]
     let view: AccountTeamView | null = null, editing: AccountTeamMember | null = null, busy = false
 
@@ -177,7 +179,7 @@ function bindAccountTeam(askDialog: ((options: Record<string, unknown>) => Promi
       lock(false)
     }
     const load = async (): Promise<void> => {
-      if (!request) { note(status, 'unavailable', t('The team cannot be read from this page.')); return }
+      if (!request || !readable()) { note(status, 'unavailable', t('The team cannot be read from this page.')); return }
       loading.hidden = false; lock(true); note(status, 'reading', t('Reading the team...'))
       try { paint(readAccountTeamView(await request('GET', '/api/account/team'))) }
       catch (error) { view = null; rows.replaceChildren(); empty.hidden = true; signInState.dataset.stateChip = 'unavailable'; signInState.textContent = t('Not read'); note(status, 'failed', failText(error, t('The team could not be read or verified. Nothing was changed.'))); lock(false) }
@@ -253,9 +255,9 @@ function bindAccountTeam(askDialog: ((options: Record<string, unknown>) => Promi
     })
     refresh.addEventListener('click', () => { if (!busy) void load() })
     lock(false)
-    if (admitted()) void load()
+    if (readable()) void load()
     else note(status, 'unavailable', t('Team management is not available for this account on this server.'))
   })
 }
 
-export const ACCOUNT_TEAM_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readAccountTeamView=${readAccountTeamView.toString()};return ${bindAccountTeam.toString()};})()`
+export const ACCOUNT_TEAM_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readAccountTeamView=${readAccountTeamView.toString()};return ${bindAccountTeam.toString()};})()`)

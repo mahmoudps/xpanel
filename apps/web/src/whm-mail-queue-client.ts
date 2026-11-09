@@ -5,6 +5,8 @@ const whmClientNode = canonicalWhmClientNode, clientTemplate = canonicalClientTe
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatMailDateTime = formatDisplayDateTime
 
 export type MailQueueName = 'maildrop' | 'incoming' | 'active' | 'deferred' | 'hold'
@@ -59,7 +61,7 @@ function bindWhmMailQueue(askDialog: Ask | undefined): void {
     const rows = root.querySelector<HTMLElement>('[data-whm-mail-queue-rows]'), banner = root.querySelector<HTMLElement>('[data-whm-mail-queue-result]'), results = root.querySelector<HTMLElement>('[data-whm-mail-queue-results]')
     const selectAll = root.querySelector<HTMLInputElement>('[data-whm-mail-queue-select-all]'), selectedLabel = root.querySelector<HTMLElement>('[data-whm-mail-queue-selected]')
     const filter = (name: string) => root.querySelector<HTMLInputElement | HTMLSelectElement>('[data-whm-mail-queue-filter="' + name + '"]')
-    const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
+    const request = frameRequest(root)
     if (!status || !refresh || !rows || !banner || !results || !selectAll || !selectedLabel) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     let templateContractIntact = true
@@ -79,7 +81,7 @@ function bindWhmMailQueue(askDialog: Ask | undefined): void {
         throw error
       }
     }
-    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailQueueCanRead === 'true' && !root.closest(denied) && !!request)
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.mailQueueCanRead === 'true' && !!request)
     if (admitted()) { try { verifyWhmTemplates() } catch { return } }
     const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
       verifyWhmTemplates()
@@ -87,7 +89,7 @@ function bindWhmMailQueue(askDialog: Ask | undefined): void {
       verifyWhmTemplates()
       return reply
     }
-    const manageable = (): boolean => admitted() && root.dataset.mailQueueCanManage === 'true'
+    const manageable = (): boolean => admitted() && root.dataset.mailQueueCanManage === 'true' && !root.closest(denied)
     const names: Record<string, string> = { incoming: t('Incoming'), active: t(msgctxt('whm-mail-queue-client', 'Active')), deferred: t(msgctxt('whm-mail-queue-client', 'Deferred')), hold: t('Hold'), maildrop: t('Maildrop') }
     const labels: Record<string, string> = { deliver: t('Retry now'), hold: t(msgctxt('whm-mail-queue-client', 'Hold')), release: t('Release'), delete: t('Delete') }
     const eligible = (action: string, queue: string): boolean => action === 'deliver' ? queue === 'deferred' : action === 'release' ? queue === 'hold' : action === 'hold' ? ['incoming', 'active', 'deferred'].includes(queue) : ['incoming', 'active', 'deferred', 'hold'].includes(queue)
@@ -243,4 +245,4 @@ function bindWhmMailQueue(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_MAIL_QUEUE_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailQueueView=${readMailQueueView.toString()};const readMailQueueActionResult=${readMailQueueActionResult.toString()};return ${bindWhmMailQueue.toString()};})()`
+export const WHM_MAIL_QUEUE_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readMailQueueView=${readMailQueueView.toString()};const readMailQueueActionResult=${readMailQueueActionResult.toString()};return ${bindWhmMailQueue.toString()};})()`)

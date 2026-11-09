@@ -76,6 +76,7 @@ describe('persisted transfer review browser contract', () => {
     expect(status().dataset.state).toBe('unavailable'); expect(button('create').disabled).toBe(true)
     document.querySelector<HTMLElement>('[data-transfer-workspace]')!.removeAttribute('data-transfer-bound')
     document.querySelector<HTMLElement>('[data-transfer-workspace]')!.dataset.transferManage = 'false'
+    document.querySelector<HTMLElement>('[data-transfer-workspace]')!.dataset.transferCanRead = 'false'
     const f = model(); f.boot(); await tick(); expect(f.send).not.toHaveBeenCalled()
   })
   it('reads persisted state without exposing internal session or credential references as labels', async () => {
