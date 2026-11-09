@@ -505,6 +505,13 @@ async function verifyNormalParticipants(processes, probeId, current) {
   return true
 }
 
+/** Release retention holds EX for its decision and renames only. It mints no writer, effect or recovery capability. */
+export async function withReleaseRetentionExclusiveAdmission(callback) {
+  if (typeof callback !== 'function' || exclusiveScope.getStore() || writerScope.getStore() || bootstrapExclusiveScope.getStore() || recoveryObservationScope.getStore()
+    || agentPrivateExclusiveScope.getStore() || installExclusiveScope.getStore()) fail('LIFECYCLE_SCOPE_CONFLICT')
+  return withKernelLock(true, lock => callback(async () => { await lock.verify(); await flock(lock.fd, true, true) }))
+}
+
 /** One fixed maintenance scope; the new signed native factory alone mints its brand. */
 export async function withAgentPrivateStateMigrationExclusiveAdmission(capability, callback) {
   const native = await import('./agent-private-state-migration.mjs')

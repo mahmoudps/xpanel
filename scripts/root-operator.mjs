@@ -53,7 +53,7 @@ export async function runNativeRootOperatorCommand(input, dispatch) {
   if (dispatched.request.phase !== 'apply' || ['operationId', 'kind', 'expectedArchiveSha256'].some(key => dispatched.request[key] !== request[key])) fail('ROOT_OPERATOR_DISPATCH_MISMATCH')
   if (request.kind === 'recover') await safety.assertNativeLifecycleRecoveryPrerequisites()
   else await safety.assertNativeLifecyclePrerequisites()
-  return withVerifiedCoordinatorOwnership(async coordinator => {
+  const outcome = await withVerifiedCoordinatorOwnership(async coordinator => {
     const owned = coordinatorOwnershipInfo(coordinator)
     if (request.expectedArchiveSha256 !== owned.helper.archiveSha256 || process.argv[1] !== owned.sourcePath) fail('ROOT_OPERATOR_SOURCE_CHANGED')
     return safety.withNativeLifecycleDatabaseAdmission(request.kind, async admitted => {
@@ -99,4 +99,7 @@ export async function runNativeRootOperatorCommand(input, dispatch) {
       } finally { scope.live = false; if (visibleOperator === scope) visibleOperator = null }
     }, dispatch)
   })
+  // The native admission has closed, so retention takes the writer lock itself. Only a settled upgrade prunes.
+  if (outcome.kind === 'upgrade' && outcome.phase === 'succeeded') await (await import('./release-retention.mjs')).pruneReleasesAfterUpgrade()
+  return outcome
 }

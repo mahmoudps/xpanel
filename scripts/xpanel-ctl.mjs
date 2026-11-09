@@ -4,11 +4,11 @@ import { pathToFileURL } from 'node:url'
 
 export const REQUIRED_NODE_VERSION = '26.12.1'
 export const COMMAND_SCHEMA_VERSION = 1
-const COMMANDS = new Set(['version', 'status', 'doctor', 'install', 'adopt', 'update', 'upgrade', 'rollback-release', 'recover', 'uninstall', 'verify-install-source', 'verify-install-ready'])
+const COMMANDS = new Set(['version', 'status', 'doctor', 'install', 'adopt', 'update', 'upgrade', 'rollback-release', 'recover', 'uninstall', 'verify-install-source', 'verify-install-ready', 'releases'])
 const CHANGES = new Set(['install', 'adopt', 'update', 'upgrade', 'rollback-release', 'recover', 'uninstall'])
 const ARTIFACT_COMMANDS = new Set(['install', 'adopt', 'update', 'upgrade', 'verify-install-source', 'verify-install-ready'])
 const PROOF_COMMANDS = new Set(['verify-install-source', 'verify-install-ready'])
-const BOOLEANS = new Set(['json', 'yes', 'check', 'plan', 'apply', 'help', 'version'])
+const BOOLEANS = new Set(['json', 'yes', 'check', 'plan', 'apply', 'help', 'version', 'dry-run'])
 const VALUES = new Set(['artifact', 'sha256', 'signing-key', 'key-id', 'artifact-dir', 'dependency-receipt', 'dependency-sha256', 'release'])
 const SHA = /^[a-fA-F0-9]{64}$/
 const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/
@@ -29,12 +29,17 @@ Commands:
   uninstall                  Plan removal preserving data (native apply unavailable)
   verify-install-source      Diagnose authenticated source and installed bytes
   verify-install-ready       Diagnose actual runtime readiness
+  releases prune             Remove installed releases outside the retention rule
 
 Changes default to --plan. Applying requires --apply --yes and genuine native
 prerequisites. Install apply only finalizes an authenticated prepared installation;
 it does not provision a host or start services. Native update, upgrade and recover
 keep their existing admission. Adopt requires an authenticated prepared helper and preserves existing accounts. Other change commands refuse before effects.
 Only update supports --check.
+releases prune keeps the current release, its rollback target and every release a
+live lifecycle record, unit or process names, and removes the rest; --dry-run lists
+each removal and why each kept release stays. It runs as root and never during an
+open operation.
 No purge or OS-upgrade command exists.
 
 Authenticated artifact input (all required together):
@@ -53,11 +58,12 @@ const usage = code => { throw new CliUsageError(code) }
 /** Pure request parsing; this function neither reads host state nor authorizes effects. */
 export function parseLifecycleArgs(argv) {
   if (!Array.isArray(argv) || argv.length > 40 || argv.some(arg => !safeArgument(arg))) usage('INVALID_ARGUMENT')
-  let command
+  let command, action
   const options = new Map()
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index]
     if (!arg.startsWith('-')) {
+      if (command === 'releases' && action === undefined) { action = arg; continue }
       if (command !== undefined) usage('EXTRA_POSITIONAL_ARGUMENT')
       command = arg
       continue
@@ -85,6 +91,12 @@ export function parseLifecycleArgs(argv) {
     command = 'version'
   }
   if (!COMMANDS.has(command)) usage('UNKNOWN_COMMAND')
+  if (command === 'releases') {
+    if (action !== 'prune') usage('RELEASES_ACTION_REQUIRED')
+    if ([...options.keys()].some(key => key !== 'dry-run' && key !== 'json')) usage('RELEASES_OPTION_NOT_SUPPORTED')
+    return Object.freeze({ schemaVersion: COMMAND_SCHEMA_VERSION, command, action, mode: options.has('dry-run') ? 'plan' : 'apply', json, assumeYes: false })
+  }
+  if (options.has('dry-run')) usage('DRY_RUN_NOT_SUPPORTED')
   const modes = ['check', 'plan', 'apply'].filter(mode => options.has(mode))
   if (modes.length > 1) usage('CONFLICTING_MODES')
   if (modes.length && !CHANGES.has(command)) usage('MODE_NOT_SUPPORTED')
@@ -159,6 +171,12 @@ export async function runLifecycleCli(argv, streams = { stdout: process.stdout, 
   if (request && !result) {
     if (process.versions.node !== REQUIRED_NODE_VERSION) result = blocked(3, 'PINNED_NODE_REQUIRED')
     else if (process.env.NODE_OPTIONS || process.env.NODE_PATH) result = blocked(3, 'UNTRUSTED_NODE_ENVIRONMENT')
+    else if (request.command === 'releases') {
+      const retention = await import('./release-retention.mjs'), outcome = await retention.runReleaseRetentionCommand({ dryRun: request.mode === 'plan' })
+      if (outcome.exitCode !== 0) result = publicLifecycleResult(outcome)
+      else { streams.stdout.write(request.json ? `${JSON.stringify(outcome)}
+` : retention.formatReleaseRetention(outcome)); return 0 }
+    }
     else if (request.mode === 'apply' && (process.platform !== 'linux' || process.getuid?.() !== 0 || process.geteuid?.() !== 0)) result = blocked(3, 'ROOT_LINUX_REQUIRED')
     else {
       try {

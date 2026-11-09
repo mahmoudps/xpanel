@@ -10,6 +10,7 @@ import type { UpgradeProcessBinding } from './upgrade-coordinator-contract.ts'
 import { runNativeLifecycleCommand } from './lifecycle/native-runtime.ts'
 import { withLifecycleWriterAdmission } from '../../../scripts/lifecycle-admission.mjs'
 import { readNativeReleaseTrustIdentity } from '../../../scripts/lifecycle-root-safety.mjs'
+import { pruneReleasesAfterUpgrade } from '../../../scripts/release-retention.mjs'
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const review = (): never => fail('SERVICE_UNAVAILABLE', 'consumed upgrade handoff requires operator inspection; native execution will not be replayed', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
@@ -77,6 +78,9 @@ export async function runNativeUpgradeCoordinatorBootstrap(rawBinding: unknown) 
     const origin = await handle.db.transaction(async tx => getStrictOperationDatabaseOrigin(tx))
     if (origin.file !== path || origin.device !== String(info.dev) || origin.inode !== String(info.ino)) return fail('PRECONDITION_FAILED', 'canonical upgrade database changed', { stateChanged: false })
     const archiveTrust = await readNativeReleaseTrustIdentity()
-    return await consumeUpgradeHandoff(binding, { db: handle.db, archiveTrust, runNative: runNativeLifecycleCommand })
+    const settled = await consumeUpgradeHandoff(binding, { db: handle.db, archiveTrust, runNative: runNativeLifecycleCommand })
+    // A returned handoff is a committed, settled upgrade; retention journals a refusal and never changes it.
+    await pruneReleasesAfterUpgrade()
+    return settled
   } finally { try { if (handle) await handle.close() } finally { await pinned.close() } }
 }
