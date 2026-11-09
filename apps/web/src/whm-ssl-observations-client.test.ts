@@ -91,7 +91,8 @@ describe('WHM certificate observation client portable DOM contract', () => {
   })
   it('keeps observation reads disabled under the same unavailable route admission', async () => {
     const f = model({ unavailable: true }); await tick(); expect(f.button.disabled).toBe(true)
-    f.button.click(); await tick(); expect(f.transport).not.toHaveBeenCalled()
+    // The certificate list still reads in the closed frame; observations are never read and nothing is written.
+    f.button.click(); await tick(); expect(f.transport.mock.calls.every(call => call[0] === 'GET' && !String(call[1]).endsWith('/observations'))).toBe(true)
   })
   it('does not offer DNS-01 renewal through an endpoint that only connects HTTP-01', async () => {
     model({ dnsOnly: true }); await tick()

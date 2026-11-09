@@ -1,12 +1,12 @@
 import { v2PanelAccessSections } from './panel-access.ts'
-import { actions, area, button, check, context, esc, facts, field, fields, help, inputControl, page, section, select, status, table, type WhmObservationInput } from '../monitoring/common.ts'
+import { actions, area, button, check, context, esc, facts, frameRead, field, fields, help, inputControl, page, section, select, status, table, type WhmObservationInput } from '../monitoring/common.ts'
 
 type PolicyPage = 'waf' | 'flood' | 'panel-access'
 export function renderV2WhmSecurityPolicy(input: WhmObservationInput, kind: PolicyPage): string {
-  const { t, canRead, canManage } = context(input)
+  const { t, canRead: liveRead, canManage } = context(input), canRead = liveRead || frameRead(input)
   const number = (key: string, label: string, min: number, max: number) => field(t, `sec-${key}`, label, inputControl(`sec-${key}`, { 'data-sec-input': key }, false, ` dir="ltr" inputmode="numeric" min="${min}" max="${max}" step="1"`, 'number'))
   const textArea = (key: string, label: string, max: number, note: string) => field(t, `sec-${key}`, label, area(`sec-${key}`, { 'data-sec-input': key }, ` dir="ltr" rows="5" maxlength="${max}" autocomplete="off" spellcheck="false"`), note)
-  const refresh = actions(button(t, msgid('Refresh'), { 'data-sec-action': 'refresh' }, canRead))
+  const refresh = actions(button(t, msgid('Refresh'), { 'data-sec-action': 'refresh' }, liveRead))
   const unread = status(t, canRead ? msgid('Nothing has been read yet.') : msgid('This page requires an authorized administrator. Nothing was read or changed.'), { 'data-sec-status': true }, canRead ? 'unread' : 'unavailable')
   const result = status(t, '', { 'data-sec-result': true }, 'unread', true)
   const save = actions(button(t, kind === 'panel-access' ? msgid('Save allowlists') : msgid('Save and apply'), { 'data-sec-action': 'save' }, false, true)) + result

@@ -1,0 +1,872 @@
+{
+  "/advanced/api-shell": [
+    "shell-columns-account cC",
+    "shell-filter-column-account cC",
+    "shell-filter-value-account cC",
+    "shell-function-account cC",
+    "shell-limit-account cC",
+    "shell-params-account cC",
+    "shell-sort-column-account cC",
+    "shell-start-account cC"
+  ],
+  "/advanced/cron": [
+    "account-cron-command cC",
+    "account-cron-comment cC",
+    "account-cron-mailto cC",
+    "v2-cron-command vV",
+    "v2-cron-comment vV",
+    "v2-cron-mailto vV"
+  ],
+  "/advanced/network-tools": [
+    "account-nettools-host cC",
+    "v2-network-host vV"
+  ],
+  "/advanced/terminal": [
+    "terminal-command C",
+    "v2-terminal-command vV"
+  ],
+  "/databases/insights": [
+    "account-insights-database cC",
+    "v2-db-insights-database vV"
+  ],
+  "/databases/mariadb": [
+    "db-create-name C",
+    "db-grant-database C",
+    "db-grant-user C",
+    "db-remote-comment C",
+    "db-remote-host C",
+    "db-wizard-name C",
+    "dbu-create-name C",
+    "dbu-initial-database C",
+    "dbu-reset-user C",
+    "panel-detail-database-connection-0 c",
+    "panel-detail-database-connection-1 c",
+    "panel-detail-database-connection-2 c",
+    "panel-detail-database-connection-3 c",
+    "panel-detail-database-create-unread-0 c",
+    "panel-detail-database-drop-confirmation-0 c",
+    "panel-detail-database-rename-1 c",
+    "panel-detail-database-user-create-unread-0 c",
+    "panel-detail-remote-database-access-0 c",
+    "panel-detail-remote-database-access-1 c",
+    "panel-detail-remote-database-remove-0 c",
+    "v2-db-create-name vV",
+    "v2-db-grant-database vV",
+    "v2-db-grant-user vV",
+    "v2-db-overview-database vV",
+    "v2-db-remote-comment vV",
+    "v2-db-remote-host vV",
+    "v2-db-wizard-name vV",
+    "v2-dbu-create-name vV",
+    "v2-dbu-initial-database vV",
+    "v2-dbu-reset-user vV"
+  ],
+  "/databases/postgresql": [
+    "db-wizard-name C"
+  ],
+  "/databases/remote-access": [
+    "remote-comment cC",
+    "remote-host cC",
+    "v2-db-remote-comment vV",
+    "v2-db-remote-host vV"
+  ],
+  "/domains": [
+    "domain-create-name C",
+    "domain-create-php C",
+    "domain-create-root C",
+    "domain-primary-confirm C",
+    "domain-primary-current C",
+    "domain-primary-new C",
+    "panel-detail-domain-binding-2 c",
+    "panel-detail-domain-create-unread-0 c",
+    "panel-detail-domain-create-unread-1 c",
+    "panel-detail-domain-create-unread-10 c",
+    "panel-detail-domain-create-unread-2 c",
+    "panel-detail-domain-create-unread-3 c",
+    "panel-detail-domain-create-unread-6 c",
+    "panel-detail-domain-create-unread-7 c",
+    "panel-detail-domain-create-unread-8 c",
+    "panel-detail-domain-create-unread-9 c",
+    "panel-detail-domain-rename-primary-1 c",
+    "panel-detail-domain-rename-primary-3 c",
+    "v2-domain-create-name vV",
+    "v2-domain-create-php vV",
+    "v2-domain-create-root vV",
+    "v2-domain-primary-confirm vV",
+    "v2-domain-primary-current vV",
+    "v2-domain-primary-new vV"
+  ],
+  "/domains/dynamic-dns": [
+    "ddns-description cC",
+    "ddns-hostname cC",
+    "ddns-zone cC",
+    "v2-ddns-description vV",
+    "v2-ddns-hostname vV",
+    "v2-ddns-zone vV"
+  ],
+  "/domains/reverse-proxy": [
+    "rp-upstream cC",
+    "v2-rp-upstream vV"
+  ],
+  "/domains/site-settings": [
+    "panel-detail-site-binding-1 c",
+    "panel-detail-site-lifecycle-0 c",
+    "panel-detail-site-lifecycle-1 c",
+    "panel-detail-site-lifecycle-7 c",
+    "panel-detail-site-logs-1 c",
+    "panel-detail-site-logs-2 c",
+    "panel-detail-site-proxy-0 c",
+    "panel-detail-site-proxy-1 c",
+    "panel-detail-site-proxy-2 c",
+    "panel-detail-site-proxy-4 c",
+    "panel-detail-site-redirects-0 c",
+    "panel-detail-site-redirects-1 c",
+    "panel-detail-site-redirects-2 c",
+    "panel-detail-site-runtime-1 c",
+    "panel-detail-site-runtime-10 c",
+    "panel-detail-site-runtime-2 c",
+    "panel-detail-site-runtime-3 c",
+    "panel-detail-site-runtime-4 c",
+    "panel-detail-site-runtime-5 c",
+    "panel-detail-site-runtime-6 c",
+    "panel-detail-site-runtime-7 c",
+    "panel-detail-site-runtime-8 c",
+    "panel-detail-site-runtime-9 c",
+    "panel-detail-site-template-1 c",
+    "panel-detail-site-template-2 c"
+  ],
+  "/domains/zone-editor": [
+    "panel-detail-dns-add-record-1 c",
+    "panel-detail-dns-add-record-2 c",
+    "panel-detail-dns-add-record-3 c",
+    "panel-detail-dns-add-record-4 c",
+    "panel-detail-dns-add-record-5 c",
+    "panel-detail-dns-add-record-6 c",
+    "panel-detail-dns-add-record-7 c",
+    "panel-detail-dns-add-record-8 c",
+    "panel-detail-dns-add-record-9 c",
+    "panel-detail-dns-record-filter-1 cC",
+    "panel-detail-email-deliverability-0 cC",
+    "panel-detail-email-deliverability-1 cC",
+    "panel-detail-email-deliverability-2 cC",
+    "panel-detail-email-deliverability-3 cC",
+    "panel-dns-new-name C",
+    "panel-dnssec-disable-confirm cC",
+    "v2-dns-new-name vV",
+    "v2-dnssec-disable-confirm vV"
+  ],
+  "/email/accounts": [
+    "extension-quota-next C",
+    "mailbox-local CvV",
+    "panel-detail-autoresponder-management-0 cC",
+    "panel-detail-autoresponders-0 cC",
+    "panel-detail-autoresponders-1 cC",
+    "panel-detail-autoresponders-2 cC",
+    "panel-detail-autoresponders-3 cC",
+    "panel-detail-autoresponders-4 cC",
+    "panel-detail-default-address-1 cC",
+    "panel-detail-forwarder-management-0 cC",
+    "panel-detail-forwarders-0 cC",
+    "panel-detail-forwarders-1 cC",
+    "panel-detail-mailbox-create-unread-0 c",
+    "panel-detail-mailbox-create-unread-3 c",
+    "panel-detail-mailbox-delete-unread-0 c",
+    "panel-detail-mailbox-quota-unread-0 c",
+    "panel-detail-service-access-0 cC",
+    "panel-detail-service-access-2 cC",
+    "panel-detail-service-access-7 cC",
+    "panel-detail-service-access-8 cC",
+    "v2-mailbox-quota-next V"
+  ],
+  "/email/calendars-contacts": [
+    "collaboration-mailbox cCvV",
+    "collaboration-name cCvV"
+  ],
+  "/email/encryption": [
+    "pgp-address cCvV",
+    "pgp-confirm cCvV",
+    "pgp-name cCvV"
+  ],
+  "/email/filters": [
+    "email-usage-folder C",
+    "v2-email-usage-folder vV",
+    "v2-email-usage-mailbox v"
+  ],
+  "/email/mailing-lists": [
+    "mailing-list-members CvV",
+    "mailing-list-name CvV",
+    "mailing-list-password-list C",
+    "v2-list-password-list vV"
+  ],
+  "/email/spam-quarantine": [
+    "quarantine-digest vV",
+    "quarantine-mailbox v"
+  ],
+  "/files/backup": [
+    "account-backup-confirmation C",
+    "account-backup-selected C",
+    "panel-detail-backup-destination-0 cC",
+    "panel-detail-backup-destination-4 cC",
+    "panel-detail-backup-diff-summary-0 cC",
+    "panel-detail-backup-diff-summary-1 cC",
+    "panel-detail-backup-diff-summary-2 cC",
+    "panel-detail-backup-diff-summary-3 cC",
+    "panel-detail-backup-diff-summary-4 cC",
+    "panel-detail-backup-include-1 cC",
+    "panel-detail-backup-restore-review-0 cC",
+    "panel-detail-backup-restore-review-1 cC",
+    "panel-detail-backup-restore-review-2 cC",
+    "panel-detail-backup-restore-review-3 cC",
+    "panel-detail-backup-summary-0 cC",
+    "panel-detail-backup-summary-1 cC",
+    "panel-detail-backup-summary-2 cC",
+    "panel-detail-backup-summary-3 cC",
+    "panel-detail-backup-wizard-0 cC",
+    "panel-detail-backup-wizard-1 cC",
+    "v2-account-backup-confirmation vV",
+    "v2-account-backup-selected vV",
+    "v2-website-domain vV",
+    "v2-website-notify vV",
+    "website-domain C",
+    "website-notify C"
+  ],
+  "/files/directory-privacy": [
+    "lp-email C",
+    "lp-folder C",
+    "lp-url C",
+    "panel-detail-protect-folder-1 c",
+    "panel-detail-protect-folder-2 c",
+    "panel-directory-privacy-path C",
+    "panel-directory-privacy-prompt C",
+    "panel-directory-privacy-username C",
+    "v2-lp-email vV",
+    "v2-lp-folder vV",
+    "v2-lp-url vV",
+    "v2-privacy-path vV",
+    "v2-privacy-prompt vV",
+    "v2-privacy-username vV"
+  ],
+  "/files/ftp": [
+    "ftp-anonymous-welcome C",
+    "ftp-directory C",
+    "ftp-login C",
+    "mailbox-quota-next C",
+    "v2-ftp-directory vV",
+    "v2-ftp-login vV",
+    "v2-ftp-mail-quota-next vV",
+    "v2-ftp-welcome vV"
+  ],
+  "/files/manager": [
+    "html-path C",
+    "image-height C",
+    "image-keep C",
+    "image-path C",
+    "image-width C",
+    "panel-detail-file-browser-unread-0 c",
+    "panel-detail-file-delete-unread-0 c",
+    "panel-detail-file-editor-unread-0 c",
+    "panel-detail-file-editor-unread-1 c",
+    "panel-detail-file-folder-unread-0 c",
+    "panel-detail-file-permissions-unread-0 c",
+    "panel-detail-file-rename-unread-0 c",
+    "v2-html-path V",
+    "v2-image-height V",
+    "v2-image-keep V",
+    "v2-image-path V",
+    "v2-image-width V"
+  ],
+  "/files/trash": [
+    "panel-detail-file-browser-unread-0 c",
+    "panel-detail-file-delete-unread-0 c",
+    "panel-detail-file-editor-unread-0 c",
+    "panel-detail-file-editor-unread-1 c",
+    "panel-detail-file-folder-unread-0 c",
+    "panel-detail-file-permissions-unread-0 c",
+    "panel-detail-file-rename-unread-0 c"
+  ],
+  "/files/web-disk": [
+    "v2-webdisk-domain vV",
+    "v2-webdisk-login vV",
+    "web-disk-domain cC",
+    "web-disk-local cC"
+  ],
+  "/mail/contacts": [
+    "contacts-import-text CvV",
+    "contacts-share-contact CvV",
+    "contacts-share-principal CvV"
+  ],
+  "/metrics/logs": [
+    "account-logs-domain c",
+    "account-logs-kind cv",
+    "account-raw-access-days cCvV"
+  ],
+  "/metrics/traffic": [
+    "panel-detail-response-status-0 cC",
+    "panel-detail-response-status-1 cC",
+    "panel-detail-response-status-2 cC",
+    "panel-detail-response-status-3 cC",
+    "panel-detail-visitors-0 cC",
+    "panel-detail-visitors-1 cC"
+  ],
+  "/metrics/web-stats": [
+    "ftp-report-month C",
+    "v2-ftp-report-month vV"
+  ],
+  "/preferences": [
+    "account-contact-email C",
+    "v2-contact-email vV"
+  ],
+  "/preferences/language": [
+    "personal-locale C",
+    "v2-personal-locale vV"
+  ],
+  "/preferences/users": [
+    "service-user-dir C",
+    "service-user-domain C",
+    "service-user-local C",
+    "service-user-quota C",
+    "v2-service-user-dir vV",
+    "v2-service-user-domain vV",
+    "v2-service-user-local vV",
+    "v2-service-user-quota vV"
+  ],
+  "/resources": [
+    "panel-detail-resource-live-0 cC",
+    "panel-detail-resource-live-1 cC",
+    "panel-detail-resource-live-2 cC",
+    "panel-detail-resource-live-3 cC",
+    "panel-detail-slice-readings-1 cC",
+    "panel-detail-slice-readings-2 cC",
+    "panel-detail-slice-readings-3 cC"
+  ],
+  "/security/account": [
+    "panel-detail-account-directory-privacy-0 cC",
+    "panel-detail-account-directory-privacy-1 cC",
+    "panel-detail-account-directory-privacy-2 cC",
+    "panel-detail-hotlink-protection-1 cC",
+    "panel-detail-hotlink-protection-2 cC",
+    "panel-detail-ip-blocker-0 cC",
+    "panel-detail-remove-directory-protection-0 cC",
+    "panel-detail-ssh-access-0 cC",
+    "panel-detail-ssh-access-1 cC",
+    "panel-detail-ssh-key-removal-0 cC",
+    "panel-detail-unblock-address-0 cC",
+    "panel-detail-shell-access-0 c"
+  ],
+  "/security/ip-blocker": [
+    "ipb-input cC",
+    "v2-ipb-input vV"
+  ],
+  "/security/ssh": [
+    "account-ssh-key cC",
+    "v2-ssh-key vV"
+  ],
+  "/security/ssl": [
+    "panel-detail-certificate-names-0 cC",
+    "panel-detail-certificate-names-1 cC",
+    "panel-detail-certificate-names-2 cC",
+    "panel-detail-certificate-wizard-1 c",
+    "panel-detail-certificate-wizard-3 c",
+    "panel-detail-certificate-wizard-4 c",
+    "panel-detail-certificate-wizard-5 c",
+    "panel-detail-certificate-wizard-6 c",
+    "ssl-upload-bundle C",
+    "ssl-upload-cert C",
+    "ssl-upload-key C",
+    "v2-ssl-upload-bundle vV",
+    "v2-ssl-upload-cert vV",
+    "v2-ssl-upload-key vV"
+  ],
+  "/software/htaccess": [
+    "htaccess-content C",
+    "panel-detail-htaccess-editor-2 c",
+    "v2-htaccess-content vV"
+  ],
+  "/software/installer": [
+    "v2-store-category V"
+  ],
+  "/software/packages": [
+    "packages-name cCvV",
+    "packages-search cCvV",
+    "packages-select cCvV",
+    "perl-module cC",
+    "perl-search cC",
+    "v2-perl-module vV",
+    "v2-perl-search vV"
+  ],
+  "/software/php": [
+    "panel-binding-ini-max_execution_time C",
+    "panel-binding-ini-memory_limit C",
+    "panel-binding-ini-post_max_size C",
+    "panel-binding-ini-upload_max_filesize C",
+    "panel-detail-php-config-preview-0 cC",
+    "panel-detail-php-domain-2 c",
+    "panel-detail-php-extra-ini-0 cC",
+    "panel-detail-php-extra-ini-1 cC",
+    "panel-detail-php-ini-0 c",
+    "panel-detail-php-ini-1 c",
+    "panel-detail-php-ini-2 c",
+    "panel-detail-php-ini-3 c",
+    "panel-detail-php-pool-0 c",
+    "panel-detail-php-save-target-0 cC",
+    "v2-php-display-errors vV",
+    "v2-php-ini-max_execution_time vV",
+    "v2-php-ini-memory_limit vV",
+    "v2-php-ini-post_max_size vV",
+    "v2-php-ini-upload_max_filesize vV",
+    "v2-php-max-input vV",
+    "v2-php-timezone vV"
+  ],
+  "/software/store": [
+    "v2-store-category V"
+  ],
+  "/software/store/install": [
+    "v2-store-admin V",
+    "v2-store-database V",
+    "v2-store-directory V"
+  ],
+  "/whm/accounts": [
+    "v2-account-bulk-owner vV",
+    "v2-account-bulk-plan v",
+    "whm-account-bulk-owner cC",
+    "whm-account-bulk-plan c",
+    "whm-account-census-limit-addonDomains C",
+    "whm-account-census-limit-aliasDomains C",
+    "whm-account-census-limit-bandwidthMbMonth C",
+    "whm-account-census-limit-cpuPercent C",
+    "whm-account-census-limit-databases C",
+    "whm-account-census-limit-diskMb C",
+    "whm-account-census-limit-forwarders C",
+    "whm-account-census-limit-ftpAccounts C",
+    "whm-account-census-limit-ioReadBps C",
+    "whm-account-census-limit-ioReadIops C",
+    "whm-account-census-limit-ioWriteBps C",
+    "whm-account-census-limit-ioWriteIops C",
+    "whm-account-census-limit-mailboxes C",
+    "whm-account-census-limit-mailingLists C",
+    "whm-account-census-limit-maxProcesses C",
+    "whm-account-census-limit-memoryMb C",
+    "whm-account-census-limit-phpWorkers C",
+    "whm-account-census-limit-resolution C",
+    "whm-account-census-limit-subdomains C",
+    "whm-detail-pending-account-search c"
+  ],
+  "/whm/accounts/announcements": [
+    "v2-announcements-body-ar vV",
+    "v2-announcements-body-en vV",
+    "v2-announcements-ends vV",
+    "v2-announcements-starts vV",
+    "v2-announcements-title-ar vV",
+    "v2-announcements-title-en vV",
+    "v2-email-users-address vV",
+    "v2-email-users-body vV",
+    "v2-email-users-name vV",
+    "v2-email-users-subject vV",
+    "whm-announcements-body-ar cC",
+    "whm-announcements-body-en cC",
+    "whm-announcements-ends cC",
+    "whm-announcements-starts cC",
+    "whm-announcements-title-ar cC",
+    "whm-announcements-title-en cC",
+    "whm-email-users-address cC",
+    "whm-email-users-body cC",
+    "whm-email-users-name cC",
+    "whm-email-users-subject cC"
+  ],
+  "/whm/accounts/health": [
+    "whm-account-repair-accounts cC",
+    "whm-demo-mode-account cC",
+    "whm-rearrange-account cC",
+    "whm-rearrange-root cC"
+  ],
+  "/whm/accounts/new": [
+    "new-acc-contact cCvV",
+    "new-acc-domain cCvV",
+    "new-acc-ipv6 cCvV",
+    "new-acc-username cCvV",
+    "v2-create-config-apache vV",
+    "v2-create-config-nginx vV",
+    "v2-create-config-slice vV",
+    "whm-create-config-apache cC",
+    "whm-create-config-nginx cC",
+    "whm-create-config-slice cC",
+    "ownerId c"
+  ],
+  "/whm/accounts/templates": [
+    "acct-templates-defaultPage-body cC",
+    "acct-templates-defaultPage-title cC",
+    "acct-templates-name cC",
+    "acct-templates-suspendedPage-body cC",
+    "acct-templates-suspendedPage-title cC",
+    "acct-templates-zone cC",
+    "v2-account-template-defaultPage.body vV",
+    "v2-account-template-defaultPage.title vV",
+    "v2-account-template-name vV",
+    "v2-account-template-suspendedPage.body vV",
+    "v2-account-template-suspendedPage.title vV",
+    "v2-account-template-zone vV",
+    "v2-skeleton-path vV",
+    "v2-skeleton-text vV",
+    "v2-web-template-default vV",
+    "v2-web-template-suspended vV",
+    "whm-skeleton-path cC",
+    "whm-skeleton-text cC",
+    "whm-web-template-default cC",
+    "whm-web-template-suspended cC"
+  ],
+  "/whm/audit": [
+    "audit-action C",
+    "audit-actor C",
+    "audit-from C",
+    "audit-outcome C",
+    "audit-target C",
+    "audit-to C",
+    "v2-audit-action vV",
+    "v2-audit-actor vV",
+    "v2-audit-from vV",
+    "v2-audit-outcome vV",
+    "v2-audit-target vV",
+    "v2-audit-to vV"
+  ],
+  "/whm/dns": [
+    "dns-account C",
+    "dns-import-text cC",
+    "dns-new-name C",
+    "dns-zone C",
+    "v2-whm-network-bind-text vV",
+    "v2-whm-network-dns-new-name vV",
+    "v2-whm-network-dns-zone vV",
+    "whm-detail-dns-pending-new-zone c",
+    "whm-detail-dns-pending-record-content c",
+    "whm-detail-dns-pending-record-name c",
+    "whm-detail-dns-pending-record-port c",
+    "whm-detail-dns-pending-record-priority c",
+    "whm-detail-dns-pending-record-weight c"
+  ],
+  "/whm/domains": [
+    "data-domain-bulk-value C",
+    "v2-whm-network-default-redirect vV",
+    "v2-whm-network-domain-bulk-value V",
+    "v2-whm-network-domain-create-root vV",
+    "v2-whm-network-domain-name vV",
+    "v2-whm-network-domain-selected vV",
+    "whm-default-redirect cC",
+    "whm-domain-account cCvV",
+    "whm-domain-create-name cC",
+    "whm-domain-create-root cC",
+    "whm-domain-php cCvV",
+    "whm-domain-search cC",
+    "whm-domain-ssl cCvV",
+    "whm-domain-workspace-domain cC"
+  ],
+  "/whm/email/maintenance": [
+    "v2-list-reset-list vV",
+    "whm-list-reset-list cC"
+  ],
+  "/whm/email/outbound": [
+    "mail-default-ipv6 C",
+    "mail-defaultIpv6 vV"
+  ],
+  "/whm/monitoring/alerts": [
+    "data-whm-alerts-threshold cccccccCCCCCCCvvvvvvvVVVVVVV",
+    "v2-alert-quiet-end vV",
+    "v2-alert-quiet-start vV",
+    "whm-alerts-quiet-end cC",
+    "whm-alerts-quiet-start cC"
+  ],
+  "/whm/monitoring/benchmark": [
+    "benchmark-confirm cC",
+    "v2-benchmark-confirm vV"
+  ],
+  "/whm/panel/api-tokens": [
+    "whm-tokens-ips cCvV",
+    "whm-tokens-name cCvV"
+  ],
+  "/whm/panel/data": [
+    "panel-backup-select CvV"
+  ],
+  "/whm/panel/developer": [
+    "metrics-allow cC",
+    "shell-columns-administrator cC",
+    "shell-filter-column-administrator cC",
+    "shell-filter-value-administrator cC",
+    "shell-function-administrator cC",
+    "shell-limit-administrator cC",
+    "shell-params-administrator cC",
+    "shell-sort-column-administrator cC",
+    "shell-start-administrator cC",
+    "v2-developer-hooks-select vV",
+    "v2-plugin-generator-feature vV",
+    "v2-plugin-generator-group vV",
+    "v2-plugin-generator-id vV",
+    "v2-plugin-generator-item vV",
+    "v2-plugin-generator-name vV",
+    "v2-plugin-generator-priority vV",
+    "v2-plugin-generator-uri vV",
+    "v2-plugin-packages-select vV",
+    "whm-hooks-select cC",
+    "whm-plugin-generator-feature cC",
+    "whm-plugin-generator-group cC",
+    "whm-plugin-generator-id cC",
+    "whm-plugin-generator-item cC",
+    "whm-plugin-generator-name cC",
+    "whm-plugin-generator-priority cC",
+    "whm-plugin-generator-uri cC",
+    "whm-plugin-packages-select cC"
+  ],
+  "/whm/panel/integrations": [
+    "error-dsn cCvV",
+    "error-environment cCvV",
+    "error-rate cCvV"
+  ],
+  "/whm/panel/languages": [
+    "v2-locale-copy-source vV",
+    "v2-locale-copy-tag vV",
+    "whm-locale-copy-source cC",
+    "whm-locale-copy-tag cC"
+  ],
+  "/whm/panel/notifications": [
+    "whm-notifications-recipients cCvV",
+    "whm-notifications-webhook-url cCvV"
+  ],
+  "/whm/panel/settings": [
+    "data-panel-settings-input=reverseProxyAllowedHosts cC",
+    "panel-settings-offline-message cCvV",
+    "v2-panel-settings-proxy-hosts vV"
+  ],
+  "/whm/panel/whmcs": [
+    "whm-whmcs-addresses cCvV",
+    "whm-whmcs-identifier cCvV",
+    "whm-whmcs-url cCvV"
+  ],
+  "/whm/plans": [
+    "plan-name CvV"
+  ],
+  "/whm/plans/features": [
+    "whm-feature-create-name cCvV",
+    "whm-feature-duplicate-0-name C",
+    "v2-feature-duplicate-0 vV"
+  ],
+  "/whm/resellers": [
+    "reseller-contact C",
+    "reseller-contactEmail vV",
+    "reseller-username CvV",
+    "v2-reseller-detail-0-contactEmail vV",
+    "v2-reseller-detail-0-delegated vV",
+    "v2-reseller-detail-0-sharedIp vV",
+    "whm-reseller-detail-0-contactEmail cC",
+    "whm-reseller-detail-0-delegatedIps cC",
+    "whm-reseller-detail-0-sharedIp cC",
+    "v2-reseller-detail-0-pkg-census-plan vV",
+    "whm-reseller-detail-0-pkg-census-plan cC"
+  ],
+  "/whm/resellers/ips-nameservers": [
+    "v2-reseller-ns-0-delegated vV",
+    "v2-reseller-ns-0-shared vV",
+    "whm-reseller-ns-0-delegated cC",
+    "whm-reseller-ns-0-shared cC"
+  ],
+  "/whm/resellers/more": [
+    "v2-reseller-email-body vV",
+    "v2-reseller-email-subject vV",
+    "whm-reseller-email-body cC",
+    "whm-reseller-email-subject cC"
+  ],
+  "/whm/resellers/privileges": [
+    "reseller-contact C",
+    "reseller-contactEmail vV",
+    "reseller-username CvV",
+    "v2-acl-list-apply vV",
+    "v2-acl-list-name vV",
+    "v2-reseller-detail-0-contactEmail vV",
+    "v2-reseller-detail-0-delegated vV",
+    "v2-reseller-detail-0-sharedIp vV",
+    "whm-acl-list-apply C",
+    "whm-acl-list-name C",
+    "whm-reseller-detail-0-contactEmail cC",
+    "whm-reseller-detail-0-delegatedIps cC",
+    "whm-reseller-detail-0-sharedIp cC",
+    "v2-reseller-detail-0-pkg-census-plan vV",
+    "whm-reseller-detail-0-pkg-census-plan cC"
+  ],
+  "/whm/security": [
+    "v2-security-allowlist vV",
+    "v2-security-body vV",
+    "v2-security-burst vV",
+    "v2-security-denied-addresses vV",
+    "v2-security-denied-agents vV",
+    "v2-security-denied-paths vV",
+    "v2-security-entrance vV",
+    "v2-security-rate vV",
+    "v2-security-token-addresses vV",
+    "v2-security-token-expiry vV",
+    "v2-security-token-name vV",
+    "whm-detail-body-size cC",
+    "whm-detail-burst cC",
+    "whm-detail-denied-addresses cC",
+    "whm-detail-denied-paths cC",
+    "whm-detail-denied-response cC",
+    "whm-detail-denied-user-agents cC",
+    "whm-detail-panel-allowlist cC",
+    "whm-detail-requests-per-address cC",
+    "whm-detail-secret-entrance cC",
+    "whm-detail-token-addresses cC",
+    "whm-detail-token-expiry cC",
+    "whm-detail-token-name cC"
+  ],
+  "/whm/security/firewall": [
+    "action cCvV",
+    "v2-firewall-comment vV",
+    "v2-firewall-firewall-import-json vV",
+    "v2-firewall-firewall-prefix-name vV",
+    "v2-firewall-firewall-prefix-ports vV",
+    "v2-firewall-firewall-unban-address vV",
+    "v2-firewall-port vV",
+    "v2-firewall-source vV",
+    "whm-ops-comment cC",
+    "whm-ops-firewall-import-json cC",
+    "whm-ops-firewall-prefix-action cC",
+    "whm-ops-firewall-prefix-name cC",
+    "whm-ops-firewall-prefix-ports cC",
+    "whm-ops-firewall-unban-address cC",
+    "whm-ops-port cC",
+    "whm-ops-protocol cC",
+    "whm-ops-source cC"
+  ],
+  "/whm/security/ssh": [
+    "v2-ssh-failures vV",
+    "v2-ssh-key vV",
+    "v2-ssh-minutes vV",
+    "whm-detail-ban-for cC",
+    "whm-detail-failures cC",
+    "whm-detail-ssh-authentication cC",
+    "whm-detail-ssh-root-login cC",
+    "whm-detail-within-minutes cC",
+    "whm-ssh-public-key cC"
+  ],
+  "/whm/server/file-sharing": [
+    "file-share-path cC",
+    "v2-file-share-path vV"
+  ],
+  "/whm/server/ips": [
+    "add-ip-address CvV",
+    "add-ip-prefix CvV",
+    "add-ip-ptr CvV"
+  ],
+  "/whm/server/setup": [
+    "v2-setup-default-pm vV",
+    "v2-setup-default-pm-max_children vV",
+    "v2-setup-default-pm-max_requests vV",
+    "v2-setup-default-pm-process_idle_timeout vV",
+    "v2-setup-lsphp-0 vV",
+    "v2-setup-lsphp-1 vV",
+    "v2-setup-lsphp-2 vV",
+    "v2-setup-ns1-address vV",
+    "v2-setup-ns2-address vV",
+    "v2-setup-primaryIpv4 v",
+    "v2-setup-quotaFilesystem vV",
+    "whm-detail-quotaFilesystem cC",
+    "whm-detail-setup-fpm-idle-timeout cC",
+    "whm-detail-setup-fpm-max-children cC",
+    "whm-detail-setup-fpm-max-requests cC",
+    "whm-detail-setup-fpm-mode cC",
+    "whm-detail-setup-lsphp-account-children cC",
+    "whm-detail-setup-lsphp-account-connections cC",
+    "whm-detail-setup-lsphp-server-connections cC",
+    "whm-detail-setup-nameserver-1-address cC",
+    "whm-detail-setup-nameserver-2-address cC"
+  ],
+  "/whm/server/trusted-proxies": [
+    "trusted-proxies-cidrs cCvV",
+    "trusted-proxies-confirm cCvV"
+  ],
+  "/whm/server/upgrade": [
+    "v2-upgrade-phrase vV",
+    "v2-upgrade-target vV",
+    "whm-upgrade-confirm-input cC",
+    "whm-upgrade-target cC"
+  ],
+  "/whm/services/default-index": [
+    "whm-index-domain cCvV",
+    "whm-index-files vV"
+  ],
+  "/whm/services/nginx-proxy": [
+    "np-domain cCvV",
+    "np-path cCvV",
+    "np-target cCvV"
+  ],
+  "/whm/services/web": [
+    "whm-web-restore-generation cCvV"
+  ],
+  "/whm/software/php": [
+    "v2-php-display-errors vV",
+    "v2-php-exception-account v",
+    "v2-php-exception-reason vV",
+    "v2-php-extension-version vV",
+    "v2-php-max_execution_time vV",
+    "v2-php-max_input_vars vV",
+    "v2-php-memory_limit vV",
+    "v2-php-php-install-request vV",
+    "v2-php-post_max_size vV",
+    "v2-php-selected-version vV",
+    "v2-php-upload_max_filesize vV",
+    "v2-php-v2-php-pool-idle vV",
+    "v2-php-v2-php-pool-max-children vV",
+    "v2-php-v2-php-pool-max-requests vV",
+    "v2-php-v2-php-pool-max-spare vV",
+    "v2-php-v2-php-pool-min-spare vV",
+    "v2-php-v2-php-pool-start vV",
+    "v2-php-version vV",
+    "whm-detail-max_execution_time cC",
+    "whm-detail-max_input_vars cC",
+    "whm-detail-memory_limit cC",
+    "whm-detail-php-exception-account cC",
+    "whm-detail-php-exception-reason cC",
+    "whm-detail-php-extension-version cC",
+    "whm-detail-php-install-request cC",
+    "whm-detail-php-install-version cC",
+    "whm-detail-php-selected-version cC",
+    "whm-detail-php-version cC",
+    "whm-detail-post_max_size cC",
+    "whm-detail-upload_max_filesize cC",
+    "whm-php-display-errors cC"
+  ],
+  "/whm/software/runtimes": [
+    "python-env-account cC",
+    "python-env-name cC",
+    "python-env-select cC",
+    "python-env-version cC"
+  ],
+  "/whm/software/site-software": [
+    "v2-site-software-select vV",
+    "whm-site-software-select cC"
+  ],
+  "/whm/software/store": [
+    "v2-site-software-select vV",
+    "whm-site-software-select cC"
+  ],
+  "/whm/transfers": [
+    "transfer-auth-mode cC",
+    "whm-detail-accountNames cC",
+    "whm-detail-cpanel-owner cC",
+    "whm-detail-cpanel-plan cC",
+    "whm-detail-sourceHost cC",
+    "whm-detail-sourcePort cC",
+    "whm-detail-transfer-conflict-account cC",
+    "whm-detail-transfer-conflict-resolution cC",
+    "whm-detail-transfer-key-file cC"
+  ],
+  "/whm/transfers/convert-addon": [
+    "acct-convert-confirm cC",
+    "acct-convert-domain cC",
+    "acct-convert-plan cC",
+    "acct-convert-username cC",
+    "v2-acct-convert-confirm vV",
+    "v2-acct-convert-domain vV",
+    "v2-acct-convert-plan vV",
+    "v2-acct-convert-username vV"
+  ],
+  "/whm/transfers/server": [
+    "acct-transfer-credential-label cCvV"
+  ]
+}

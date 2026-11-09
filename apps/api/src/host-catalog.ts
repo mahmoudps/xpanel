@@ -87,8 +87,10 @@ export const createQualifiedCatalogProvider = (acceptance?: TrustedAcceptanceOpt
 }
 
 let defaultProvider: QualifiedCatalogProvider | undefined
+// Only applications built without a provider (tests, the test panel server) reach this one. It never reads the host's lab
+// switch, so a unit run on a qualification host sees the same catalog and audit trail as anywhere else.
+const fallbackProvider = (): QualifiedCatalogProvider => defaultProvider ??= createQualifiedCatalogProvider(undefined, () => false)
 /** Test isolation only; startup applications retain their own explicitly shared instance. */
 export const resetQualifiedCatalogCache = (): void => { defaultProvider?.reset() }
-export const loadQualifiedCatalog = (source: HostCatalogSource | null): Promise<readonly CatalogTool[]> =>
-  (defaultProvider ??= createQualifiedCatalogProvider()).load(source)
-export const qualificationModeOn = (): boolean => (defaultProvider ??= createQualifiedCatalogProvider()).qualificationMode()
+export const loadQualifiedCatalog = (source: HostCatalogSource | null): Promise<readonly CatalogTool[]> => fallbackProvider().load(source)
+export const qualificationModeOn = (): boolean => fallbackProvider().qualificationMode()

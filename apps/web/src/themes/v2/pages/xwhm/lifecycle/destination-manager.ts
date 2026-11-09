@@ -35,7 +35,7 @@ ${actions(button('create-key', msgid('Create SFTP key pair')))}
 <div class="v2-lifecycle__actions"><button type="submit" class="v2-btn v2-btn--primary" data-destination-save disabled>${text(t, msgid('Save inactive destination'))}</button></div>
 </${container}>
 `)
-  return `<section class="v2-lifecycle__column" data-whm-backup-destinations data-destination-sftp-projection data-can-manage="${manage}"${options.inline ? ' data-backup-inline-manager' : ''} aria-label="${text(t, msgid('Backup destinations'))}">
+  return `<section class="v2-lifecycle__column" data-whm-backup-destinations data-destination-sftp-projection data-backup-destinations-can-read="${manage}" data-can-manage="${manage}"${options.inline ? ' data-backup-inline-manager' : ''} aria-label="${text(t, msgid('Backup destinations'))}">
 ${actions(button('read', msgid('Read again')) + button('new', msgid('New destination')))}
 ${lifecycleStatus(t, msgid('Backup destinations have not been read.'), { 'data-destination-status': true })}
 <div class="${options.stacked ? 'v2-lifecycle__column' : 'v2-lifecycle__grid'}"><div class="v2-lifecycle__column">${list}</div><aside class="v2-lifecycle__column" aria-label="${text(t, msgid('Destination configuration'))}">${editor}</aside></div>

@@ -32,8 +32,8 @@ describe('list moderation client', { tags: ['unit'] }, () => {
     for (const hook of queue) { expect(renderClassicModerationQueue('en')).toContain(hook); expect(v2ModerationQueue(t)).toContain(hook) }
     const policy = ['data-moderation-list', 'data-moderation-posting', 'data-moderation-subscription', 'data-moderation-non-member', 'data-moderation-member', 'data-moderation-moderators', 'data-moderation-moderated', 'data-moderation-accept', 'data-moderation-hold', 'data-moderation-reject-senders', 'data-moderation-discard-senders', 'data-moderation-size', 'data-moderation-retention', 'data-moderation-notify-moderators', 'data-moderation-notify-sender', 'data-moderation-save', 'data-moderation-state', 'data-moderation-held']
     for (const hook of policy) { expect(renderClassicListModerationSection('ar', true)).toContain(hook); expect(v2ListModerationSection(t, true)).toContain(hook) }
-    expect(renderClassicListModerationSection('en', false)).toContain('data-moderation-can-manage="false"')
+    expect(renderClassicListModerationSection('en', false)).toContain('data-moderation-can-read="false" data-moderation-can-manage="false"')
     expect(v2ListModerationSection(t, false)).toMatch(/data-moderation-save disabled/)
-    for (const card of [renderClassicListAdminSection('en', true), v2ListAdminBody(t, true)]) { expect(card).toContain('data-moderation-open'); expect(card).toContain('data-moderation-queue') }
+    for (const card of [renderClassicListAdminSection('en', true), v2ListAdminBody(t, true)]) { expect(card).toContain('data-moderation-open'); expect(card).toContain('data-moderation-queue'); expect(card).toContain('data-list-admin-can-read="true" data-list-admin-manage="true"') }
   })
 })

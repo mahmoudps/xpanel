@@ -82,6 +82,20 @@ describe('BoxTrapper client', () => {
     expect(request).toHaveBeenCalledWith('POST', '/api/mail/boxtrapper/me%40shop.example/queue', { op: 'act', args: { action: 'delete', ids: [queue.rows[0]!.id] } })
   })
 
+  it('reads saved settings inside a read-only frame in both themes and never writes there', async () => {
+    for (const html of [renderClassicBoxTrapperSection({ locale: 'en', scope: 'mailbox', connected: true }), v2BoxTrapperSection(message => message, { scope: 'mailbox', connected: true })]) {
+      mount(`<div data-readonly="true">${html}</div>`)
+      const request = fake()
+      boot(request); await tick()
+      expect(request).toHaveBeenCalledWith('GET', '/api/webmail/boxtrapper')
+      expect(document.querySelector<HTMLTextAreaElement>('textarea[data-boxtrapper-list="allow"]')?.value).toBe('from a@b.example')
+      expect(document.querySelector<HTMLInputElement>('input[data-boxtrapper-days]')?.value).toBe('15')
+      expect([...document.querySelectorAll<HTMLInputElement>('[data-boxtrapper-control]')].every(control => control.disabled)).toBe(true)
+      document.querySelector<HTMLButtonElement>('button[data-boxtrapper-save]')!.click(); await tick()
+      expect((request.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+    }
+  })
+
   it('says why nothing runs when the host cannot', async () => {
     mount(renderClassicBoxTrapperSection({ locale: 'en', scope: 'mailbox', connected: true }))
     const request = fake({ host: { state: 'connected', ready: false, active: false }, lists: null, listsRevision: null })

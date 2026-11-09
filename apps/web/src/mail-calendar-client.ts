@@ -3,6 +3,8 @@ const mailTemplate = canonicalMailTemplate
 const mailSlot = canonicalMailSlot
 const mailRequireTemplates = canonicalMailRequireTemplates
 import type { MessageValues } from './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 /// <reference lib="dom" />
 interface CalendarEventView { id: string; uid: string; summary: string; description: string; location: string; dtstart: string; dtend: string; timezone: string }
 interface CalendarView { id: string; owner: string; name: string; color: string; timezone: string; revision: string; storedBytes: number; canWrite: boolean; canManage: boolean; createdAt: string; events: CalendarEventView[]; shares: { principal: string; permission: 'read' | 'read-write'; sharedAt: string; effective: boolean }[] }
@@ -20,9 +22,9 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
     if (root.dataset.calendarBound === 'true') return
     root.dataset.calendarBound = 'true'
     const mailbox = (root.dataset.calendarMailbox ?? '').trim().toLowerCase()
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.calendarManage === 'true' && email(mailbox) && !root.closest(denied)
+    const access = frameAccess(root, 'data-calendar-can-read', 'data-calendar-manage'), transport = access.request
+    // Reads run in a read-only frame too; editing and every write need the manage flag outside one.
+    const readable = (): boolean => access.readable() && email(mailbox), admitted = (): boolean => readable() && access.writable()
     const input = (key: string): HTMLInputElement => root.querySelector<HTMLInputElement>('[data-calendar-' + key + ']')!
     const button = (key: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>('[data-calendar-' + key + ']')!
     const select = root.querySelector<HTMLSelectElement>('[data-calendar-select]')!, eventSelect = root.querySelector<HTMLSelectElement>('[data-calendar-event-select]')!
@@ -37,7 +39,7 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
     let workspace: CalendarWorkspaceView | null = null, selected: CalendarView | null = null, selectedEvent: CalendarEventView | null = null
     let busy = false, review = false, downloadSource = ''
     const request = (method: string, path: string, body?: unknown): Promise<unknown> => {
-      if (!transport || !admitted()) return Promise.reject({ status: 403, details: { stateChanged: false } })
+      if (!transport || !(method === 'GET' ? readable() : admitted())) return Promise.reject({ status: 403, details: { stateChanged: false } })
       return body === undefined ? transport(method, path) : transport(method, path, body)
     }
     const announce = (state: string, value: string): void => { status.dataset.state = state; status.textContent = value; status.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(state) ? 'alert' : 'status') }
@@ -49,7 +51,7 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
     const lock = (): void => {
       const blocked = busy || review || !admitted() || !workspace
       root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = blocked })
-      exported.disabled = false
+      exported.disabled = !admitted()
       button('refresh').disabled = busy || !admitted()
       select.disabled = busy || !admitted() || !workspace
       button('new').disabled = blocked
@@ -146,7 +148,7 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
       try { return await askDialog({ title, body: message, danger, confirm: t('Confirm') }) === true } catch { return false }
     }
     const refresh = async (calendarId?: string | null): Promise<void> => {
-      if (busy || !admitted()) return
+      if (busy || !readable()) return
       busy = true; lock()
       try {
         if ((dirty() || review) && !await confirm(t('Discard edits and read calendars?'), t('Unsaved edits are discarded only after a successful authorized read. A previous write is never retried.'), true)) return
@@ -269,9 +271,9 @@ function bindMailCalendar(askDialog: ((options: Record<string, unknown>) => Prom
     button('new').addEventListener('click', () => { if (!button('new').disabled) void refresh(null) })
     root.addEventListener('input', lock); root.addEventListener('change', lock)
     window.addEventListener('beforeunload', event => { if (dirty() || review) { event.preventDefault(); event.returnValue = '' } })
-    if (!transport || !admitted()) { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true }); announce('unavailable', t('Calendar records are unavailable here. Nothing was read or changed.')); return }
+    if (!readable()) { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => { control.disabled = true }); announce('unavailable', t('Calendar records are unavailable here. Nothing was read or changed.')); return }
     void refresh()
   })
 }
 
-export const MAIL_CALENDAR_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}return ${bindMailCalendar.toString()};})()`
+export const MAIL_CALENDAR_CLIENT_BINDING = withFrameRequest(`(()=>{${MAIL_CLIENT_TEMPLATE_KIT}return ${bindMailCalendar.toString()};})()`)

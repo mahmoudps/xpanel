@@ -147,6 +147,15 @@ describe('account runtime client', () => {
     expect(send).not.toHaveBeenCalled()
     expect(document.querySelector('[data-runtime-status]')!.getAttribute('data-state')).toBe('unavailable')
   })
+  it('reads inside a read-only frame but never writes, with every control disabled', async () => {
+    const send = vi.fn(async (method: string, _path: string, _body?: unknown) => method === 'GET' ? view() : { changed: true })
+    await boot('<div data-readonly="true">' + renderRuntimeAppsSection({ lang: 'en', canManage: true }) + '</div>', send)
+    expect(document.querySelector('[data-runtime-apps]')!.textContent).toContain('alice-shop.com/api')
+    click(document.querySelector('[data-runtime-row="edit"]')); click(document.querySelector('[data-runtime-action="app-save"]')); await tick()
+    expect(send).toHaveBeenCalled()
+    expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select')].filter(control => !control.matches('[role="tab"],[aria-pressed]')).every(control => control.disabled)).toBe(true)
+  })
 
   it('moves horizontal tabs with arrows, Home and End without issuing runtime requests', async () => {
     const send = vi.fn(async () => view())

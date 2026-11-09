@@ -6,6 +6,7 @@ import { parseMarkup, type MarkupNode } from '../../markup.ts'
 import { projectReadOnlyMailSurface, projectReadOnlyPanelSurface, projectReadOnlyWhmSurface } from '../../../models/theme-surface.ts'
 import { renderV2ReadOnlyPage } from './read-only.ts'
 import { renderV2AccountSecuritySlot } from './slots.ts'
+import { FRAME_READERS } from '../../../read-only-frame.ts'
 
 // Synthetic stored records exercise rendering and authorization boundaries only. The real,
 // unchanged catalog remains unaccepted: these fixtures establish no native capability.
@@ -73,7 +74,10 @@ function assertFullReadOnlyDocument(document: DocumentCase, html: string, locale
     const core = coreIndices.some(parent => index === parent || ancestors(nodes, index).includes(parent))
     if (core) return
     for (const [name, value] of node.attrs) {
-      if (/^data-.*(?:-can-(?:read|manage|write|send|save|move|kill|edit|create|delete)|-send-enabled|-draft-enabled|-write-enabled)$/.test(name)) expect(value, `${document.route}: ${name}`).not.toBe('true')
+      // Frame readers may read saved values in a read-only document; every write flag stays closed and frameRequest refuses unsafe methods.
+      if (/^data-.*(?:-can-(?:read|manage|write|send|save|move|kill|edit|create|delete)|-send-enabled|-draft-enabled|-write-enabled)$/.test(name) && !FRAME_READERS.includes(name)) expect(value, `${document.route}: ${name}`).not.toBe('true')
+      // An open frame reader always sits inside a read-only frame, where the gate refuses its writes.
+      if (FRAME_READERS.includes(name) && value === 'true') expect(blocked(index), `${document.route}: ${name}`).toBe(true)
     }
     if (['input', 'select', 'textarea', 'button'].includes(node.tag) || node.attrs.get('contenteditable') === 'true') expect(node.attrs.has('disabled') || blocked(index), `${document.route}: ${node.tag}`).toBe(true)
   })

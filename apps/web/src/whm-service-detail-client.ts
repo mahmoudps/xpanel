@@ -5,6 +5,8 @@ const whmClientNode = canonicalWhmClientNode
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 export type ServiceRowView = { id: string; label: string; unit: string | null; state: string } | null
 export type DnsZoneView = { zone: string; desired: boolean | null; stateSerial: number | null; file: string; fileSerial: number | null; sizeBytes: number | null }
@@ -98,12 +100,12 @@ function bindWhmServiceDetail(askDialog: Ask | undefined): void {
     const rows = root.querySelector<HTMLElement>('[data-whm-service-detail-rows]'), banner = root.querySelector<HTMLElement>('[data-whm-service-detail-result]')
     const restartButton = root.querySelector<HTMLButtonElement>('[data-whm-service-detail-restart]'), check = root.querySelector<HTMLElement>('[data-whm-service-detail-check]'), messages = root.querySelector<HTMLElement>('[data-whm-service-detail-check-messages]')
     const filters = [...root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-whm-service-detail-filter]')]
-    const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
+    const request = frameRequest(root)
     if (!['dns', 'ftp', 'certificates'].includes(kind) || !status || !refresh || !rows || !banner) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     let templateContractIntact = true
-    const admitted = (): boolean => templateContractIntact && root.isConnected && root.dataset.serviceDetailCanRead === 'true' && !root.closest(denied) && !!request
-    const manageable = (): boolean => admitted() && root.dataset.serviceDetailCanRestart === 'true' && !!restartButton
+    const admitted = (): boolean => templateContractIntact && root.isConnected && root.dataset.serviceDetailCanRead === 'true' && !!request
+    const manageable = (): boolean => admitted() && root.dataset.serviceDetailCanRestart === 'true' && !!restartButton && !root.closest(denied)
     let view: ServiceDetailView | null = null, busy = false
     const notRead = t('Not read'), none = t('Not applicable')
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
@@ -280,4 +282,4 @@ function bindWhmServiceDetail(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_SERVICE_DETAIL_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readServiceDetailView=${readServiceDetailView.toString()};const readZoneCheckView=${readZoneCheckView.toString()};return ${bindWhmServiceDetail.toString()};})()`
+export const WHM_SERVICE_DETAIL_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readServiceDetailView=${readServiceDetailView.toString()};const readZoneCheckView=${readZoneCheckView.toString()};return ${bindWhmServiceDetail.toString()};})()`)

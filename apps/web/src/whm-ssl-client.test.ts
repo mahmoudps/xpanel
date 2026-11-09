@@ -56,6 +56,7 @@ describe('WHM certificate workspace', () => {
     expect(control('status').dataset.state).toBe('unavailable')
     document.querySelector<HTMLElement>('[data-whm-ssl]')!.removeAttribute('data-ssl-bound')
     document.querySelector<HTMLElement>('[data-whm-ssl]')!.dataset.sslCanManage = 'false'
+    document.querySelector<HTMLElement>('[data-whm-ssl]')!.dataset.sslCanRead = 'false'
     const f = model(); f.boot(); await tick()
     expect(f.send).not.toHaveBeenCalled(); expect(control<HTMLButtonElement>('issue').disabled).toBe(true)
   })

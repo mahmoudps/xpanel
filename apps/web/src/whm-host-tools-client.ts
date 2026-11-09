@@ -1,6 +1,8 @@
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
 type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
@@ -10,7 +12,6 @@ interface Spec { columns: string[]; actions: string[]; fixed: Record<string, boo
 /** The host tool cards of both themes: every card is data, so one binding reads, lists, edits and runs them. A success shown here comes from the API reply. */
 function bindWhmHostTools(askDialog: Ask | undefined): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
   const refusals = (): Record<string, string> => ({
     task_cycle_invalid: t('This cycle does not fit the task. A backup cannot run every N seconds, and each number has a range. Nothing was saved.'),
     task_command_invalid: t('A command is an absolute program path, then one argument per line. Nothing was saved.'),
@@ -67,8 +68,10 @@ function bindWhmHostTools(askDialog: Ask | undefined): void {
     const rows = root.querySelector<HTMLTableSectionElement>('[data-host-tool-rows]'), logPane = root.querySelector<HTMLElement>('[data-host-tool-log]'), reveal = root.querySelector<HTMLElement>('[data-host-tool-reveal]'), jobLink = root.querySelector<HTMLAnchorElement>('[data-host-tool-job]')
     const controls = (): (HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement)[] => Array.from(root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input,select,textarea'))
     const note = (state: string, message: string): void => { if (!status) return; status.dataset.state = state; status.setAttribute('role', state === 'failed' ? 'alert' : 'status'); status.textContent = message }
-    const admitted = (): boolean => root.isConnected && typeof request === 'function' && !root.closest('[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled')
-    const manageable = (): boolean => admitted() && root.dataset.hostToolCanManage === 'true'
+    // Reads run in a read-only frame too; changes need the manage flag outside one.
+    const access = frameAccess(root, 'data-host-tool-can-read', 'data-host-tool-can-manage'), request: Transport | undefined = access.request
+    const admitted = (): boolean => access.readable()
+    const manageable = (): boolean => access.writable()
     let revision: string | null = null, busy = false, editing: Reply | null = null, latest: Reply = {}
     const showWhen = (): void => {
       root.querySelectorAll<HTMLElement>('[data-host-tool-when]').forEach(wrapper => {
@@ -224,4 +227,4 @@ function bindWhmHostTools(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_HOST_TOOLS_CLIENT_BINDING = bindWhmHostTools.toString()
+export const WHM_HOST_TOOLS_CLIENT_BINDING = withFrameRequest(bindWhmHostTools.toString())

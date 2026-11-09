@@ -6,7 +6,7 @@ const STYLE = '<style>[data-runtime-workspace] pre{margin:0;max-block-size:320px
 
 /** Shared frame of the account runtime pages; account-runtime-client.ts binds every control inside it. */
 function frame(kind: Kind, lang: Locale, canManage: boolean, body: string): string {
-  return `<div class="xp-acct-tool" data-runtime-workspace="${kind}" data-runtime-can-manage="${canManage}" lang="${lang}" dir="${localeDirection(lang)}">${ACCOUNT_TOOL_STYLE}${STYLE}${body}${runtimeTemplates(kind)}</div>`
+  return `<div class="xp-acct-tool" data-runtime-workspace="${kind}" data-runtime-can-read="${canManage}" data-runtime-can-manage="${canManage}" lang="${lang}" dir="${localeDirection(lang)}">${ACCOUNT_TOOL_STYLE}${STYLE}${body}${runtimeTemplates(kind)}</div>`
 }
 function runtimeTemplates(kind: Kind): string {
   const technical = (slot: string): string => `<td><bdi dir="ltr" data-xp-slot="${slot}"></bdi></td>`

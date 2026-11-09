@@ -2,6 +2,8 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const cloneViewRecord = canonicalCloneViewRecord
 const viewAction = canonicalViewAction
 
@@ -50,11 +52,11 @@ function bindOpsFileSharing(askDialog: ((options: Record<string, unknown>) => Pr
     const pathInput = root.querySelector<HTMLInputElement>('[data-ops-shares-path]'), hostInput = root.querySelector<HTMLInputElement>('[data-ops-shares-host]'), permission = root.querySelector<HTMLSelectElement>('[data-ops-shares-permission]')
     const button = (key: string): HTMLButtonElement | null => root.querySelector<HTMLButtonElement>('[data-ops-shares-action="' + key + '"]')
     const addButton = root.querySelector<HTMLButtonElement>('[data-ops-shares-add]'), saveButton = root.querySelector<HTMLButtonElement>('[data-ops-shares-save]')
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const transport = frameRequest(root)
     if (!status || !rows || !editor || !pathInput || !hostInput || !permission || !addButton || !saveButton) return
     const denied = '[data-wiring="unavailable"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.sharesCanRead === 'true' && !root.closest(denied)
-    const manageable = (): boolean => admitted() && root.dataset.sharesCanManage === 'true'
+    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.sharesCanRead === 'true'
+    const manageable = (): boolean => admitted() && root.dataset.sharesCanManage === 'true' && !root.closest(denied)
     // Reject an incomplete selected-theme contract before any authorized provider read.
     try {
       const template0 = cloneViewRecord(root, 'ops-share-row', 'tr', { 'path': '', 'clients': '', 'state': '', 'remove-label': '' })
@@ -143,4 +145,4 @@ function bindOpsFileSharing(askDialog: ((options: Record<string, unknown>) => Pr
   })
 }
 
-export const OPS_FILE_SHARING_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const readFileSharingView=${readFileSharingView.toString()};const randomShareId=${randomShareId.toString()};return ${bindOpsFileSharing.toString()};})()`
+export const OPS_FILE_SHARING_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const readFileSharingView=${readFileSharingView.toString()};const randomShareId=${randomShareId.toString()};return ${bindOpsFileSharing.toString()};})()`)

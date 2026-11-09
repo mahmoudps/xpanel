@@ -78,9 +78,11 @@ stale. These clauses have unit tests; none has passed on a host yet, so slice re
 | `account-preferences` | `INVALID_PASSWORD` | `UNAUTHENTICATED` | `currentPassword` is required to change the address, on both themes |
 | `add-package` | `NAME_RESERVED` | `VALIDATION` | rules/plans.ts refuses `extensions` |
 | `basic-server-setup` | `NAMESERVERS_NOT_CONFIGURED` | `PRECONDITION_FAILED` | account creation refuses saved empty nameservers |
+| `backup-config` | `VALIDATION` (no contents) | `VALIDATION` | a schedule with no selected account and without system files is refused (backup-workspace.ts); found by run `q0143a` |
 | `change-hostname` | `INVALID_HOSTNAME` | `VALIDATION` | already held: `validateServerHostname` in server-operations.ts |
 | `create-account` | `DMARC_REQUIRES_SPF_DKIM` | `VALIDATION` | `spf`, `dkim`, `dmarc` options; the new zone omits SPF or DMARC when off. DKIM stays with the email-auth batch |
 | `db-engine-upgrade` | `WARNINGS_NOT_ACKNOWLEDGED` | `PRECONDITION_FAILED` | apply needs `acknowledgedWarnings`; the confirm dialog sends them |
+| `delete-dns-zone` | `NOT_FOUND` | `NOT_FOUND` | a delete of a zone that is gone answers `NOT_FOUND` before any revision comparison; it answered `CONFLICT` in run `q0143a` |
 | `dns-zone-manager` | `RECORD_CONFLICT` | `CONFLICT` | `saveDnsZone` refuses a CNAME beside another record |
 | `edit-package` | `IMMUTABLE_FIELD` | `VALIDATION` | PATCH refuses a changed name or IP flag; both are read-only in the editors |
 | `email-account-create` | `QUOTA_EXCEEDS_MAX` | `LIMIT_EXCEEDED` | validate-state.ts; the plan cap is the account disk quota |

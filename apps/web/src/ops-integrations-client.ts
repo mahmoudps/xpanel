@@ -2,6 +2,8 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const cloneViewRecord = canonicalCloneViewRecord
 const viewAction = canonicalViewAction
 
@@ -49,11 +51,11 @@ function bindOpsIntegrations(): void {
     const editor = root.querySelector<HTMLElement>('[data-ops-int-editor]'), urlInput = root.querySelector<HTMLInputElement>('[data-ops-int-url]'), eventsFieldset = root.querySelector<HTMLFieldSetElement>('[data-ops-int-events]')
     const addButton = root.querySelector<HTMLButtonElement>('[data-ops-int-add]'), saveButton = root.querySelector<HTMLButtonElement>('[data-ops-int-save]')
     const button = (key: string): HTMLButtonElement | null => root.querySelector<HTMLButtonElement>('[data-ops-int-action="' + key + '"]')
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const transport = frameRequest(root)
     if (!status || !rows || !logBody || !editor || !urlInput || !eventsFieldset || !addButton || !saveButton) return
     const denied = '[data-wiring="unavailable"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.intCanRead === 'true' && !root.closest(denied)
-    const manageable = (): boolean => admitted() && root.dataset.intCanManage === 'true'
+    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.intCanRead === 'true'
+    const manageable = (): boolean => admitted() && root.dataset.intCanManage === 'true' && !root.closest(denied)
     // Reject an incomplete selected-theme contract before any authorized provider read.
     try {
       const template0 = cloneViewRecord(root, 'ops-endpoint-row', 'tr', { 'url': '', 'events': '', 'secret': '', 'active': '', 'test-label': '', 'remove-label': '' })
@@ -153,4 +155,4 @@ function bindOpsIntegrations(): void {
   })
 }
 
-export const OPS_INTEGRATIONS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const readIntegrationsView=${readIntegrationsView.toString()};const randomWebhookId=${randomWebhookId.toString()};return ${bindOpsIntegrations.toString()};})()`
+export const OPS_INTEGRATIONS_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const readIntegrationsView=${readIntegrationsView.toString()};const randomWebhookId=${randomWebhookId.toString()};return ${bindOpsIntegrations.toString()};})()`)

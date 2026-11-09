@@ -6,6 +6,8 @@ const mailRequireTemplates = canonicalMailRequireTemplates
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatMailDateTime = formatDisplayDateTime
 
 type TrackStatus = 'sent' | 'deferred' | 'bounced' | 'expired' | 'rejected' | 'queued'
@@ -51,7 +53,6 @@ function bindMailTrackDelivery(): void {
   const kindLabel: Record<string, string> = { received: t('Received by the server'), queued: t('Queued for delivery'), delivery: t('Delivery attempt to this mailbox'), rejected: t('Rejected'), expired: t('Expired and returned to the sender'), notification: t('Notification sent to the sender'), removed: t('Removed from the queue') }
   const direction: Record<string, string> = { sender: t(msgctxt('mail-track-delivery-client', 'Sent')), recipient: t(msgctxt('mail-track-delivery-client', 'Received')), both: t('Sent to yourself') }
   const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
   const time = formatMailDateTime
   const bdi = (value: string): HTMLElement => { const item = document.createElement('bdi'); item.dir = 'ltr'; item.textContent = value; return item }
   const cell = (row: HTMLTableRowElement, value: string | Node, technical = false): HTMLTableCellElement => { const td = document.createElement('td'); td.append(typeof value === 'string' ? (technical ? bdi(value) : value) : value); row.append(td); return td }
@@ -64,7 +65,8 @@ function bindMailTrackDelivery(): void {
     const range = form?.elements.namedItem('range') as HTMLSelectElement | null, filter = form?.elements.namedItem('status') as HTMLSelectElement | null
     if (!form || !status || !rows || !detail || !range || !filter) return
     try { mailRequireTemplates(root, [['mail-track-row', 'tr', ['time', 'direction', 'counterpart', 'status', 'dsn', 'view'], [['time', 'bdi'], ['dsn', 'bdi'], ['view', 'button', { type: 'button' }]]], ['mail-track-empty', 'tr', ['message']]]) } catch { form.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button,select').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Delivery tracking is unavailable for this mailbox session. Nothing was read.'); return }
-    const admitted = (): boolean => root.isConnected && root.dataset.trackCanRead === 'true' && root.dataset.trackMailbox === mailbox && !!mailbox && !root.closest(denied) && !!send
+    const send = frameRequest(root)
+    const admitted = (): boolean => root.isConnected && root.dataset.trackCanRead === 'true' && root.dataset.trackMailbox === mailbox && !!mailbox && !!send
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const fact = (key: string, value: string): void => { const node = root.querySelector<HTMLElement>('[data-mail-track-fact="' + key + '"]'); if (node) node.textContent = value }
     let busy = false, generation = 0, messages: TrackDeliveryMessage[] = [], page = 0
@@ -134,4 +136,4 @@ function bindMailTrackDelivery(): void {
   })
 }
 
-export const MAIL_TRACK_DELIVERY_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readTrackDeliveryView=${readTrackDeliveryView.toString()};return ${bindMailTrackDelivery.toString()};})()`
+export const MAIL_TRACK_DELIVERY_CLIENT_BINDING = withFrameRequest(`(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const readTrackDeliveryView=${readTrackDeliveryView.toString()};return ${bindMailTrackDelivery.toString()};})()`)

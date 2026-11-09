@@ -4,14 +4,14 @@ import './i18n.ts'
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import { readSwApplicationsView } from '../../../packages/os/src/sw-applications-command.ts'
 import type { SwApplicationsClientView } from '../../../packages/os/src/sw-applications-command.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
 export { readSwApplicationsView }
 const formatDisplayDateTime = sharedFormatDisplayDateTime
+const frameAccess = canonicalFrameAccess
 
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
 function bindSwApplications(askDialog: Ask | undefined, parse: typeof readSwApplicationsView): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-  const blocked = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   document.querySelectorAll<HTMLElement>('[data-sw-apps]').forEach(root => {
     if (root.dataset.swBound === 'true') return
     root.dataset.swBound = 'true'
@@ -21,7 +21,8 @@ function bindSwApplications(askDialog: Ask | undefined, parse: typeof readSwAppl
     const REFUSED: Record<string, string> = { application_target_not_empty: t('This directory already has files. Choose an empty directory.'), application_files_modified: t('Files of this application were changed, so it cannot be updated. Remove it or restore the files.'),
       application_artifact_missing: t('This release is not stored on this server yet. Ask your provider to upload it.'), application_recovery_required: t('A previous change needs recovery first. Use Recover.'), application_path_conflict: t('A link or file blocks this directory. Nothing was changed.'),
       application_path_invalid: t('Choose a directory under the document root.'), application_database_unavailable: t('This application needs a database and none can be created here.'), application_root_unsupported: t('This domain’s document root cannot host an application.') }
-    const admitted = (): boolean => root.isConnected && root.dataset.swCanManage === 'true' && !root.closest(blocked) && typeof transport === 'function'
+    // Reads run in a read-only frame too; jobs need the manage flag outside one.
+    const access = frameAccess(root, 'data-sw-apps-can-read', 'data-sw-can-manage'), transport = access.request, readable = access.readable, admitted = access.writable
     let busy = false, locked = false, view: SwApplicationsClientView | null = null
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status') }
     const fact = (key: string, text: string, human: boolean): void => { const node = q<HTMLElement>('[data-sw-apps-' + key + ']'); if (node) { node.textContent = text; node.toggleAttribute('data-human', human) } }
@@ -63,18 +64,18 @@ function bindSwApplications(askDialog: Ask | undefined, parse: typeof readSwAppl
       paintVersions()
     }
     const load = async (): Promise<void> => {
-      if (busy || !admitted()) return
+      if (busy || !readable()) return
       const selected = domain.value, directory = selected ? place.value.trim().replace(/^\/+|\/+$/g, '') : ''
       busy = true; lock(); note('reading', t('Reading applications…'))
       try {
         const next = parse(await transport!('GET', '/api/account/applications' + (selected ? '?domainId=' + encodeURIComponent(selected) + (directory ? '&path=' + encodeURIComponent(directory) : '') : '')))
         if ((next.selected?.domainId ?? '') !== selected || (next.selected?.path ?? '') !== directory) throw new Error('wrong_domain')
-        if (!admitted()) return
+        if (!readable()) return
         view = next; locked = false
         const s = next.selected
         note(next.catalog.state !== 'read' ? 'unavailable' : 'read', next.catalog.state !== 'read' ? (next.catalog.reason === 'not-configured' ? t('No signed application catalog is configured on this server. Nothing can be installed.') : t('The signed application catalog could not be verified. Nothing can be installed.'))
           : !s ? t('Catalog verified. Choose a domain to see its application.') : s.state !== 'read' ? (s.reason && Object.hasOwn(REFUSED, s.reason) ? REFUSED[s.reason]! : t('This domain’s application files cannot be read: the confined artifact provider is not connected. No installation is assumed.')) : s.recoveryRequired ? t('A previous change on this domain needs recovery review. Changes are locked.') : t('Domain application state read from verified account files.'))
-      } catch { if (admitted()) note('failed', t('Applications could not be verified. Read again; nothing was changed.')) }
+      } catch { if (readable()) note('failed', t('Applications could not be verified. Read again; nothing was changed.')) }
       finally { busy = false; paint() }
     }
     const submit = async (action: string): Promise<void> => {
@@ -114,7 +115,7 @@ function bindSwApplications(askDialog: Ask | undefined, parse: typeof readSwAppl
         else { locked = true; note('uncertain', t('The job outcome is unknown. Read again before retrying; changes stay locked until then.')) }
       } finally { busy = false; lock() }
     }
-    if (!admitted()) { refresh.disabled = true; note('unavailable', t('Applications are unavailable here. Nothing was read or changed.')); return }
+    if (!readable()) { refresh.disabled = true; note('unavailable', t('Applications are unavailable here. Nothing was read or changed.')); return }
     refresh.addEventListener('click', () => { void load() }); domain.addEventListener('change', () => { void load() }); place.addEventListener('change', () => { void load() })
     manage.addEventListener('change', () => { const split = manage.value.indexOf('|'); if (split < 0) return; domain.value = manage.value.slice(0, split); place.value = manage.value.slice(split + 1); void load() })
     app.addEventListener('change', paintVersions); version.addEventListener('change', lock)
@@ -122,4 +123,4 @@ function bindSwApplications(askDialog: Ask | undefined, parse: typeof readSwAppl
     void load()
   })
 }
-export const SW_APPLICATIONS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readSwApplicationsView.toString()};const bind=${bindSwApplications.toString()};return (ask)=>bind(ask,parse);})()`
+export const SW_APPLICATIONS_CLIENT_BINDING = withFrameRequest(`(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readSwApplicationsView.toString()};const bind=${bindSwApplications.toString()};return (ask)=>bind(ask,parse);})()`)

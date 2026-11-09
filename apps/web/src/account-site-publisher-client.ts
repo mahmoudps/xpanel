@@ -6,7 +6,9 @@ const cloneClientTemplate = canonicalCloneClientTemplate
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as canonicalFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues, Locale } from './i18n.ts'
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
+const frameAccess = canonicalFrameAccess
 
 const SITEPUB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SITEPUB_HASH = /^[0-9a-f]{64}$/
@@ -57,7 +59,7 @@ function bindAccountSitePublisher(askDialog: ((options: Record<string, unknown>)
   document.querySelectorAll<HTMLElement>('[data-account-site-publisher]').forEach(root => {
     if (root.dataset.sitepubBound === 'true') return
     root.dataset.sitepubBound = 'true'
-    const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const access = frameAccess(root, 'data-sitepub-can-read', 'data-sitepub-manage'), send = access.request
     const accountId = root.dataset.account ?? '', find = <T extends HTMLElement>(name: string): T => root.querySelector<T>('[data-sitepub-' + name + ']')!
     const domain = find<HTMLSelectElement>('domain'), template = find<HTMLSelectElement>('template'), lang = find<HTMLSelectElement>('lang'), title = find<HTMLInputElement>('title'), message = find<HTMLTextAreaElement>('message'), email = find<HTMLInputElement>('email'), phone = find<HTMLInputElement>('phone')
     const status = find('status'), files = find('files'), path = find('path'), recovery = find('recovery'), created = find('created'), previewNote = find('preview-note'), frame = find<HTMLIFrameElement>('frame')
@@ -65,7 +67,8 @@ function bindAccountSitePublisher(askDialog: ((options: Record<string, unknown>)
     if (![domain, template, lang, title, message, email, phone, status, files, path, recovery, created, previewNote, frame, refresh, preview, publish, rollback].every(Boolean)) return
     const rowTemplate = clientTemplate(root, 'publisher-file'), emptyTemplate = clientTemplate(root, 'publisher-empty')
     cloneClientTemplate(rowTemplate, 'tr', ['name', 'state', 'size']); cloneClientTemplate(emptyTemplate, 'tr', ['message'])
-    const eligible = (): boolean => root.isConnected && root.dataset.sitepubManage === 'true' && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
+    // Reads run in a read-only frame too; previews and changes need the manage flag outside one.
+    const readable = access.readable, eligible = access.writable
     const drafts = [template, lang, title, message, email, phone]
     let view: SitePublisherView | null = null, busy = false, confirming = false, review = false, previewed: { signature: string; hash: string } | null = null
     const draft = (): SitePublisherDraft => ({ template: template.value as SitePublisherDraft['template'], lang: lang.value as SitePublisherDraft['lang'], title: title.value.trim(), message: message.value.trim(), email: email.value.trim(), phone: phone.value.trim() })
@@ -97,9 +100,9 @@ function bindAccountSitePublisher(askDialog: ((options: Record<string, unknown>)
       if (view && !view.capabilities.canPublish && status.dataset.state === 'read') note('read', t('A previous operation stopped. Restore its backup before publishing again.'))
       lock()
     }
-    const request = (method: string, suffix = '', body?: unknown): Promise<unknown> => !send || !eligible() || !SITEPUB_ID.test(domain.value) ? Promise.reject({ stateChanged: false }) : body === undefined ? send(method, '/api/domains/' + domain.value + '/site-publisher' + suffix) : send(method, '/api/domains/' + domain.value + '/site-publisher' + suffix, body)
+    const request = (method: string, suffix = '', body?: unknown): Promise<unknown> => !send || !(method === 'GET' ? readable() : eligible()) || !SITEPUB_ID.test(domain.value) ? Promise.reject({ stateChanged: false }) : body === undefined ? send(method, '/api/domains/' + domain.value + '/site-publisher' + suffix) : send(method, '/api/domains/' + domain.value + '/site-publisher' + suffix, body)
     const read = async (): Promise<void> => {
-      if (busy || confirming || !eligible() || !SITEPUB_ID.test(domain.value)) return
+      if (busy || confirming || !readable() || !SITEPUB_ID.test(domain.value)) return
       const selected = domain.value; busy = true; clearPreview(); note('reading', t('Reading current files…')); lock()
       try { view = readSitePublisherView(await request('GET'), accountId, selected); review = false; note('read', view.recovery.status === 'prepared' ? t('A previous operation stopped. Restore its backup before publishing again.') : t('Current files were read. Preview a page before publishing.')) }
       catch { view = null; note('failed', t('The current files could not be verified. Read them again before continuing.')) }
@@ -143,9 +146,9 @@ function bindAccountSitePublisher(askDialog: ((options: Record<string, unknown>)
     for (const control of drafts) control.addEventListener(control instanceof HTMLSelectElement ? 'change' : 'input', () => { if (previewed && previewed.signature !== signature()) clearPreview(); lock() })
     domain.addEventListener('change', () => { view = null; review = false; clearPreview(); paint(); void read() })
     refresh.addEventListener('click', () => { void read() }); preview.addEventListener('click', () => { void makePreview() }); publish.addEventListener('click', () => { void mutate('publish') }); rollback.addEventListener('click', () => { void mutate('rollback') })
-    if (!send || !eligible() || !SITEPUB_ID.test(accountId) || !SITEPUB_ID.test(domain.value)) { for (const control of root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('button,input,select,textarea')) control.disabled = true; note('unavailable', t('Site publishing is unavailable here. Nothing was read or changed.')); return }
+    if (!readable() || !SITEPUB_ID.test(accountId) || !SITEPUB_ID.test(domain.value)) { for (const control of root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('button,input,select,textarea')) control.disabled = true; note('unavailable', t('Site publishing is unavailable here. Nothing was read or changed.')); return }
     paint(); void read()
   })
 }
 
-export const ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const SITEPUB_ID=${SITEPUB_ID.toString()};const SITEPUB_HASH=${SITEPUB_HASH.toString()};const SITEPUB_NAMES=${JSON.stringify(SITEPUB_NAMES)};const sitepubObject=${sitepubObject.toString()};const sitepubExact=${sitepubExact.toString()};const sitepubText=${sitepubText.toString()};const sitepubTime=${sitepubTime.toString()};const readSitePublisherView=${readSitePublisherView.toString()};const readSitePublisherPreview=${readSitePublisherPreview.toString()};const sitePublisherUncertain=${sitePublisherUncertain.toString()};return ${bindAccountSitePublisher.toString()};})()`
+export const ACCOUNT_SITE_PUBLISHER_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const SITEPUB_ID=${SITEPUB_ID.toString()};const SITEPUB_HASH=${SITEPUB_HASH.toString()};const SITEPUB_NAMES=${JSON.stringify(SITEPUB_NAMES)};const sitepubObject=${sitepubObject.toString()};const sitepubExact=${sitepubExact.toString()};const sitepubText=${sitepubText.toString()};const sitepubTime=${sitepubTime.toString()};const readSitePublisherView=${readSitePublisherView.toString()};const readSitePublisherPreview=${readSitePublisherPreview.toString()};const sitePublisherUncertain=${sitePublisherUncertain.toString()};return ${bindAccountSitePublisher.toString()};})()`)

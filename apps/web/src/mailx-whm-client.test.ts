@@ -36,11 +36,11 @@ describe('mail policy client parser', () => {
 })
 
 describe('mail policy client binding', () => {
-  it('stays inert without transport or inside an unavailable capability', async () => {
+  it('stays inert without transport, and only reads inside an unavailable capability', async () => {
     mount('relay'); boot(); expect(status().dataset.state).toBe('unavailable')
     const send = vi.fn(async () => view('relay'))
     mount('relay', true, 'data-capability-unavailable="true"'); boot(send); await tick()
-    expect(send).not.toHaveBeenCalled()
+    expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
     expect(document.querySelector<HTMLButtonElement>('[data-mailx-save]')!.disabled).toBe(true)
   })
   it('paints the saved relay without the password and sends null to keep it', async () => {

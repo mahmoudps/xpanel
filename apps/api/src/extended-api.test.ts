@@ -272,7 +272,8 @@ describe('@xpanel/api extended HTTP contracts with explicit fake host execution'
           assert.match(html, /<html\b[^>]*data-realtime-enabled="false"/)
           assert.doesNotMatch(html, /data-status-page="404"|data-board-port="xpanel-home"/)
           assert.doesNotMatch(markup, /<(?:div|section|main)\b[^>]*data-mail-layout=/)
-          for (const value of [account.id, plan.id, featureList.id, user.id, account.home, account.ipv4, account.contactEmail, password, passwordHash]) assert.ok(!html.includes(value), 'Unqualified documents must not expose full account or authentication data')
+          // The saved document root and IPv4 binding of the owner's own domain may show in closed fields.
+          for (const value of [account.id, plan.id, featureList.id, user.id, account.contactEmail, password, passwordHash]) assert.ok(!html.includes(value), 'Unqualified documents must not expose full account or authentication data')
           assert.ok(html.includes(account.primaryDomain))
           assert.ok(html.includes(plan.name))
           assert.equal(snapshotReads, 0, 'Unqualified documents do not hydrate a full hosting snapshot')

@@ -2,6 +2,8 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const cloneViewRecord = canonicalCloneViewRecord
 const viewAction = canonicalViewAction
 
@@ -50,11 +52,11 @@ function bindOpsNodes(askDialog?: (options: { title: string; body: string; confi
     const field = (name: string): HTMLInputElement | HTMLSelectElement | null => root.querySelector('[data-ops-nodes-' + name + ']')
     const button = (key: string): HTMLButtonElement | null => root.querySelector<HTMLButtonElement>('[data-ops-nodes-action="' + key + '"]')
     const addButton = root.querySelector<HTMLButtonElement>('[data-ops-nodes-add]'), codeOutput = root.querySelector<HTMLInputElement>('[data-ops-nodes-invite-code]'), codeNote = root.querySelector<HTMLElement>('[data-ops-nodes-invite-note]')
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const transport = frameRequest(root)
     if (!status || !rows || !editor || !addButton || !codeOutput || !codeNote) return
     const denied = '[data-wiring="unavailable"],[data-capability-state="unavailable"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.nodesCanRead === 'true' && !root.closest(denied)
-    const manageable = (): boolean => admitted() && root.dataset.nodesCanManage === 'true'
+    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.nodesCanRead === 'true'
+    const manageable = (): boolean => admitted() && root.dataset.nodesCanManage === 'true' && !root.closest(denied)
     // Reject an incomplete selected-theme contract before any authorized provider read.
     try {
       const template0 = cloneViewRecord(root, 'ops-node-row', 'tr', { 'label': '', 'hostname': '', 'role': '', 'version': '', 'enrollment': '', 'verify-label': '', 'repin-label': '', 'remove-label': '', 'force-label': '' })
@@ -172,4 +174,4 @@ function bindOpsNodes(askDialog?: (options: { title: string; body: string; confi
   })
 }
 
-export const OPS_NODES_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const readNodesView=${readNodesView.toString()};const nodeRefusal=${nodeRefusal.toString()};return ${bindOpsNodes.toString()};})()`
+export const OPS_NODES_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const readNodesView=${readNodesView.toString()};const nodeRefusal=${nodeRefusal.toString()};return ${bindOpsNodes.toString()};})()`)

@@ -204,14 +204,14 @@ describe.each(['classic', 'v2'] as const)('WHM extend workspaces in the %s theme
     expect(cells('[data-site-software-rows]')).toEqual([['Sample', '1.2.3', 'Offered to accounts']])
   })
 
-  it('keeps every control disabled without root authority', async () => {
-    const send = vi.fn(async () => ({}))
+  it('keeps every control disabled in a closed workspace, where only reads run', async () => {
+    const send = vi.fn(async (_method: string, _path: string) => ({}))
     document.body.innerHTML = theme === 'classic' ? renderWhmDetailPage({ activeRoute: '/whm/panel/developer', principal: ROOT, locale: 'en', capabilityUnavailable: true })!
       : renderV2WhmPanelPage(translator('en'), { activeRoute: '/whm/panel/developer', principal: ROOT, locale: 'en' }, { canRead: false, canManage: false })!
     ;(window as Window & { xpanelSessionRequest?: Send }).xpanelSessionRequest = send
     new Function('return ' + WHM_EXTEND_CLIENT_BINDING)()(async () => true)
     await tick()
-    expect(send).not.toHaveBeenCalled()
+    expect(send.mock.calls.every(call => call[0] === 'GET')).toBe(true)
     for (const control of document.querySelectorAll<HTMLButtonElement>('[data-hooks-workspace] button, [data-registered-apps-workspace] button')) expect(control.disabled).toBe(true)
   })
 })

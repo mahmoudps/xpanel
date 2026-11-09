@@ -68,10 +68,11 @@ export const renderApprovedWhmResellers = (props: WhmSurfaceProps, nativeHtml = 
   const readOnly = props.capabilityUnavailable === true || !qualified(props.catalog, 'reseller-center')
   if (!readOnly && !admitted) return `<section class="xp-card" data-reseller-admission="denied"><h1>${text('Resellers')}</h1><p>${text('Root authorization is required for reseller administration.')}</p></section>`
   const readable = admitted && !readOnly
-  const resellers = readable ? props.resellers : undefined
-  const accounts = readable ? props.accounts : undefined
-  const plans = readable ? props.plans : undefined
-  const pool = readable ? props.ipPool : undefined
+  // Saved records show on a read-only page too, disabled; only a qualified page may act on them.
+  const resellers = admitted ? props.resellers : undefined
+  const accounts = admitted ? props.accounts : undefined
+  const plans = admitted ? props.plans : undefined
+  const pool = admitted ? props.ipPool : undefined
   const all = resellers?.length ? resellers : [undefined]
   const notRead = text('Not read')
   const value = (content: string | number | undefined): string => content === undefined ? `<span class="xp-help">${notRead}</span>` : escapeHtml(String(content))

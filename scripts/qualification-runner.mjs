@@ -12,7 +12,7 @@ import { readProtectedBytes, readProtectedJson, validateInstalledBinding, verify
 import { parseObservedOsRelease } from './evidence/server-information-observer.mjs'
 import { credentials as readCredentials } from './evidence/server-information-runner.mjs'
 import { DRIVER_MODULES, DRIVERS } from './qualification-drivers/index.mjs'
-import { ACTOR_ENTRY, apiClient, createFixture, entryOrigin, externalDnsCheck, externalTlsCheck, pageChecks, runDriver, runTag, siteClient } from './qualification-drivers/kit.mjs'
+import { ACTOR_ENTRY, apiClient, createFixture, entryOrigin, externalDnsCheck, externalTlsCheck, failureCause, pageChecks, runDriver, runTag, siteClient } from './qualification-drivers/kit.mjs'
 import { QUALIFICATION_INVENTORY, qualificationPlan, qualificationRequirements, RUNNER_SLOTS, slotCheckIds } from './qualification-plan.mjs'
 
 export const ROOT = resolve(import.meta.dirname, '..')
@@ -20,6 +20,10 @@ const SESSION_PATHS = ['/api/auth/login', '/api/auth/logout']
 const RUNNER_INPUTS = ['scripts/qualification-runner.mjs', ...DRIVER_MODULES, 'scripts/qualification-plan.mjs', 'packages/catalog/src/delivery.ts']
 const ENTRY_PORT = { xpanel: 2083, xmail: 2096 }
 const WRITE_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+/** The runner's own requests on an actor's transport: anonymous probe, sign-in, catalog, sign-out and the revoked read. */
+export const SESSION_REQUESTS = 5
+/** A driver declares only its own requests; the session around it must not spend them, or sign-out is never confirmed. */
+export const transportBudget = driver => driver.requests + SESSION_REQUESTS
 
 export { DRIVERS }
 
@@ -84,7 +88,7 @@ export async function withRootSession({ request, login, prefix, probe, anonymous
     if (issued) session = { cookie: issued.split(';')[0], csrf: typeof response.data?.csrfToken === 'string' ? response.data.csrfToken : '' }
     session = authenticatedSession(response, entryPoint)
     checks.push(...await run(params => request(`${probe.split('?')[0]}?${new URLSearchParams(params)}`, session), session))
-  } catch { failure = 'The authenticated acceptance reads did not complete.' }
+  } catch (error) { failure = `The authenticated acceptance reads did not complete.${failureCause(error)}` }
   finally {
     if (session) {
       try {
@@ -248,7 +252,7 @@ async function runTool(slot, toolId, options, environment) {
       const page = await (await browser.newContext({ locale: 'en-US' })).newPage()
       page.setDefaultTimeout(15_000)
       result = driver.browser ? await driver.browser({ page, origin, credentials: login }) : await pageChecks(driver, { page, origin: actorOrigin(pageActor), credentials: login })
-    } catch { failure = 'The browser acceptance did not complete.' } finally {
+    } catch (error) { failure = `The browser acceptance did not complete.${failureCause(error)}` } finally {
       await browser.close()
       login.password = ''
       if (login.totpCode !== undefined) login.totpCode = ''
@@ -260,7 +264,7 @@ async function runTool(slot, toolId, options, environment) {
   }
   const address = slot === 'external' ? binding.address : options.address
   const transports = {}
-  const requestFor = actor => transports[actor] ??= createQualificationTransport({ origin: actorOrigin(actor), address, ca, deadline, methods: WRITE_METHODS, maxBody: 256 * 1024, acceptText: true, maxRequests: driver.requests,
+  const requestFor = actor => transports[actor] ??= createQualificationTransport({ origin: actorOrigin(actor), address, ca, deadline, methods: WRITE_METHODS, maxBody: 256 * 1024, acceptText: true, maxRequests: transportBudget(driver),
     allow: path => SESSION_PATHS.includes(path) || path === '/api/auth/me' || path === '/api/catalog' || driver.paths.test(path) || path === driver.probe || driver.restores.includes(path) })
   const drive = (prefix, anonymous) => driver.run === undefined
     ? withRootSession({ request: requestFor('root'), login: rootLogin(), prefix, probe: driver.probe, anonymous, run: read => slot === 'host' ? driver.host(read, { db: options.db ?? '/var/lib/xpanel/control.db' }) : driver.external(read) })

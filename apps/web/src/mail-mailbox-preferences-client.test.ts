@@ -46,6 +46,14 @@ describe('mailbox preferences workspace', () => {
     boot(renderMailPreferences({ locale: 'en', mailbox: MAILBOX, canManage: false }), send); await tick()
     expect(send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable'); expect(select('density').disabled).toBe(true); expect(button('save').disabled).toBe(true)
   })
+  it('reads saved values inside a read-only ancestor and never writes there', async () => {
+    const send = vi.fn(async () => view({ preferences: saved }))
+    boot(`<div data-read-only="true">${renderMailPreferences({ locale: 'en', mailbox: MAILBOX, canManage: true })}</div>`, send); await tick()
+    expect([select('density').value, select('messagesPerPage').value, select('replyIdentityId').value, select('dateFormat').value]).toEqual(['compact', '100', ID, 'local'])
+    expect([...document.querySelectorAll<HTMLSelectElement | HTMLButtonElement>('select,button')].every(control => control.disabled)).toBe(true)
+    button('save').click(); await tick()
+    expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+  })
   it('shows defaults, saves a changed draft with the captured revision and verifies the read-back', async () => {
     const after = view({ preferences: saved, revision: R2 })
     const send = vi.fn(async (method: string) => method === 'GET' ? (send.mock.calls.some(call => call[0] === 'PUT') ? after : view()) : { ...after, stateChanged: true })

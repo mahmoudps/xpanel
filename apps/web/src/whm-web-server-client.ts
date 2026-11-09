@@ -2,6 +2,8 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 export const WHM_WEB_SETTING_FIELDS = ['engine', 'apacheMpm', 'backendPort', 'backendTlsPort', 'nginx.workerProcesses', 'nginx.workerConnections', 'nginx.workerRlimitNofile', 'nginx.keepaliveTimeoutSec', 'nginx.multiAccept', 'apache.startServers', 'apache.minSpareServers', 'apache.maxSpareServers', 'apache.maxRequestWorkers', 'apache.serverLimit', 'apache.maxConnectionsPerChild'] as const
 type WebValues = Record<string, string | number | boolean>
@@ -77,15 +79,15 @@ function bindWhmWebServer(askDialog: ((options: Record<string, unknown>) => Prom
     root.dataset.webBound = 'true'
     const page = root.closest<HTMLElement>('[data-whm-detail-route="/whm/services/web"]')
     const status = root.querySelector<HTMLElement>('[data-whm-web-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-whm-web-refresh]')
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const request = frameRequest(root)
     if (!page || !status || !refresh) return
     const form = page.querySelector<HTMLFormElement>('[data-server-settings-form]')
     const targetSelect = page.querySelector<HTMLSelectElement>('[data-whm-web-generation]')
     const restore = page.querySelector<HTMLButtonElement>('[data-whm-web-rollback]')
     const discardButton = page.querySelector<HTMLButtonElement>('[data-whm-detail-section="web-pending"] button')
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = () => root.isConnected && root.dataset.webCanRead === 'true' && !root.closest(denied)
-    const rollbackAdmitted = () => admitted() && root.dataset.webCanRollback === 'true' && generations.canRollback && generations.desiredState?.pending === false
+    const admitted = () => root.isConnected && root.dataset.webCanRead === 'true'
+    const rollbackAdmitted = () => admitted() && !root.closest(denied) && root.dataset.webCanRollback === 'true' && generations.canRollback && generations.desiredState?.pending === false
     let busy = false, loaded = false, review = false, queuedRead = false, saved: WebValues | null = null
     let generations: WhmWebGenerationRead = { generations: [], currentGeneration: null, desiredState: null, canRollback: false, rollbackEligibleGenerationIds: [] }
     const priorDisabled = new Map<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement, boolean>()
@@ -213,4 +215,4 @@ function bindWhmWebServer(askDialog: ((options: Record<string, unknown>) => Prom
   })
 }
 
-export const WHM_WEB_SERVER_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WHM_WEB_SETTING_FIELDS=${JSON.stringify([...WHM_WEB_SETTING_FIELDS])};const whmWebObject=${whmWebObject.toString()};const readWhmWebGeneration=${readWhmWebGeneration.toString()};const readWhmWebGenerations=${readWhmWebGenerations.toString()};const readWhmWebServices=${readWhmWebServices.toString()};const readWhmWebSettings=${readWhmWebSettings.toString()};const buildWhmWebRollbackRequest=${buildWhmWebRollbackRequest.toString()};const readWhmWebRollbackAck=${readWhmWebRollbackAck.toString()};return ${bindWhmWebServer.toString()};})()`
+export const WHM_WEB_SERVER_CLIENT_BINDING = withFrameRequest(`(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const WHM_WEB_SETTING_FIELDS=${JSON.stringify([...WHM_WEB_SETTING_FIELDS])};const whmWebObject=${whmWebObject.toString()};const readWhmWebGeneration=${readWhmWebGeneration.toString()};const readWhmWebGenerations=${readWhmWebGenerations.toString()};const readWhmWebServices=${readWhmWebServices.toString()};const readWhmWebSettings=${readWhmWebSettings.toString()};const buildWhmWebRollbackRequest=${buildWhmWebRollbackRequest.toString()};const readWhmWebRollbackAck=${readWhmWebRollbackAck.toString()};return ${bindWhmWebServer.toString()};})()`)

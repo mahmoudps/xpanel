@@ -1,4 +1,6 @@
 import type { MessageValues } from './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 /// <reference lib="dom" />
 
 /**
@@ -107,8 +109,7 @@ function bindSpamSettings(askDialog: ((options: Record<string, unknown>) => Prom
   document.querySelectorAll<HTMLElement>('[data-spam-settings]').forEach(root => {
     if (root.dataset.spamBound === 'true') return
     root.dataset.spamBound = 'true'
-    const manageable = root.dataset.spamCanManage === 'true'
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const access = frameAccess(root, 'data-spam-settings-can-read', 'data-spam-can-manage'), transport = access.request
     const status = root.querySelector<HTMLElement>('[data-spam-status]')
     const saveButton = root.querySelector<HTMLButtonElement>('[data-spam-save]')
     const enabled = root.querySelector<HTMLInputElement>('[data-spam-enabled]')
@@ -121,8 +122,8 @@ function bindSpamSettings(askDialog: ((options: Record<string, unknown>) => Prom
     if (!scores.rewrite || !scores.header || !scores.greylist || !scores.reject || !scores.autodelete) return
     const allowlist = textarea('[data-spam-allowlist]'), blocklist = textarea('[data-spam-blocklist]')
     if (!allowlist || !blocklist) return
-    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const eligible = (): boolean => root.isConnected && manageable && !root.closest(denied)
+    // Reads run in a read-only frame too; saving needs the manage flag outside one.
+    const readable = access.readable, eligible = access.writable
     let loaded = false, busy = false, uncertain = false
     const controls = (): (HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement)[] => [...root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>('button,input,textarea')]
     const setStatus = (message: string, kind: string): void => {
@@ -185,7 +186,7 @@ function bindSpamSettings(askDialog: ((options: Record<string, unknown>) => Prom
         }
       } finally { busy = false; lock() }
     }
-    if (!transport || !eligible()) {
+    if (!readable()) {
       controls().forEach(control => { control.disabled = true })
       setStatus(copy('Spam settings are unavailable here. Nothing was read or changed.'), 'unavailable')
       return
@@ -196,4 +197,4 @@ function bindSpamSettings(askDialog: ((options: Record<string, unknown>) => Prom
   })
 }
 
-export const ACCOUNT_SPAM_CLIENT_BINDING = `(function(askDialog){const spamControl=${spamControl.toString()};const spamEntry=${spamEntry.toString()};const spamSettingsObject=${spamSettingsObject.toString()};const spamScore=${spamScore.toString()};const spamList=${spamList.toString()};const readSpamSettings=${readSpamSettings.toString()};const parseList=${parseList.toString()};const spamSettingsDraft=${spamSettingsDraft.toString()};const spamSettingsMatch=${spamSettingsMatch.toString()};(${bindSpamSettings.toString()})(askDialog);})`
+export const ACCOUNT_SPAM_CLIENT_BINDING = withFrameRequest(`(function(askDialog){const spamControl=${spamControl.toString()};const spamEntry=${spamEntry.toString()};const spamSettingsObject=${spamSettingsObject.toString()};const spamScore=${spamScore.toString()};const spamList=${spamList.toString()};const readSpamSettings=${readSpamSettings.toString()};const parseList=${parseList.toString()};const spamSettingsDraft=${spamSettingsDraft.toString()};const spamSettingsMatch=${spamSettingsMatch.toString()};(${bindSpamSettings.toString()})(askDialog);})`)

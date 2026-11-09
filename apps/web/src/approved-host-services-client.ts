@@ -1,6 +1,8 @@
 import type { MessageValues } from './i18n.ts'
 import { cloneViewRecord as canonicalCloneViewRecord, viewAction as canonicalViewAction, VIEW_RECORD_HELPERS } from './workspace-view-templates.ts'
 import { serviceArea as canonicalServiceArea } from './service-area.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const cloneViewRecord = canonicalCloneViewRecord
 const viewAction = canonicalViewAction
 const serviceArea = canonicalServiceArea
@@ -19,9 +21,9 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
     const rows = own<HTMLElement>('[data-host-service-rows]'), status = own<HTMLElement>('[data-host-service-status]')
     if (!rows || !status) return
     root.dataset.serviceBinding = 'true'
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const request = frameRequest(root)
     const unavailable = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = () => typeof request === 'function' && root.isConnected && root.dataset.hostCanRead !== 'false' && !root.closest(unavailable)
+    const admitted = () => typeof request === 'function' && root.isConnected && root.dataset.hostCanRead !== 'false'
     const copy = (message: string, values?: MessageValues) => xpT(message, values)
     const unread = () => copy('Not read')
     const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
@@ -183,4 +185,4 @@ function bindApprovedHostServices(confirmRestart?: ConfirmRestart): void {
   })
 }
 
-export const APPROVED_HOST_SERVICES_CLIENT = `(function(confirmRestart){${VIEW_RECORD_HELPERS}const serviceArea=${serviceArea.toString()};return (${bindApprovedHostServices.toString()})(confirmRestart);})`
+export const APPROVED_HOST_SERVICES_CLIENT = withFrameRequest(`(function(confirmRestart){${VIEW_RECORD_HELPERS}const serviceArea=${serviceArea.toString()};return (${bindApprovedHostServices.toString()})(confirmRestart);})`)

@@ -545,7 +545,9 @@ describe('normal saved V2 owner Resources without host qualification', () => {
       plan: { id: storedPlan.id, resources: storedPlan.resources, caps: storedPlan.caps },
     } })
     expect(produced.panel).not.toHaveProperty('usage')
-    for (const key of ['domains', 'databases', 'databaseUsers', 'serviceUsers', 'certificates', 'dnsRecords', 'files', 'recentAudit']) expect(produced.panel).not.toHaveProperty(key)
+    // Closed forms show saved values: the account's own domains travel; other collections stay out.
+    expect(produced.panel.domains.every((domain: { accountId: string }) => domain.accountId === account.id)).toBe(true)
+    for (const key of ['databases', 'databaseUsers', 'serviceUsers', 'certificates', 'dnsRecords', 'files', 'recentAudit']) expect(produced.panel).not.toHaveProperty(key)
     expect(produced.catalog.some((tool: { status: string; delivery: { status: string } }) => tool.status === 'verified' && tool.delivery.status === 'verified')).toBe(false)
 
     documentFlow.observations.length = 0
@@ -593,7 +595,8 @@ describe('normal saved V2 owner Resources without host qualification', () => {
       expect(controls.map(node => [node.tag, node.attrs.has('disabled')])).toEqual([['button', true], ['button', true]])
       const readings = owned.filter(node => node.attrs.has('data-resource-state'))
       expect(readings.length).toBeGreaterThan(0)
-      expect(readings.some(node => node.attrs.get('data-resource-state') === 'measured')).toBe(false)
+      // Only the stored addon-domain count is known; no slice usage is measured without a reader.
+      expect(readings.filter(node => node.attrs.get('data-resource-state') === 'measured')).toHaveLength(1)
       expect(owned.filter(node => node.attrs.has('data-resource-observation')).every(node => node.attrs.get('data-resource-observation') === 'unread')).toBe(true)
       expect(body).toContain(String(storedPlan.resources.diskMb) + ' MiB')
       expect(body).not.toContain(account.contactEmail)
@@ -659,8 +662,12 @@ describe('normal registered owner documents with stored facts and unqualified na
       expect(produced).not.toHaveProperty('accountId')
       expect(produced.panel).not.toHaveProperty('usage')
       expect(produced.catalog.some((tool: { status: string; delivery: { status: string } }) => tool.status === 'verified' && tool.delivery.status === 'verified')).toBe(false)
-      // Existing Home may supply authorized stored collections. Other unqualified documents receive only account/plan.
-      if (route !== '/home') for (const key of ['domains', 'databases', 'databaseUsers', 'serviceUsers', 'certificates', 'dnsRecords', 'files', 'recentAudit']) expect(produced.panel).not.toHaveProperty(key)
+      // Existing Home may supply authorized stored collections. Other unqualified documents receive account, plan and the
+      // account's own saved domains, so closed forms show their values.
+      if (route !== '/home') {
+        expect(produced.panel.domains.every((domain: { accountId: string }) => domain.accountId === account.id)).toBe(true)
+        for (const key of ['databases', 'databaseUsers', 'serviceUsers', 'certificates', 'dnsRecords', 'files', 'recentAudit']) expect(produced.panel).not.toHaveProperty(key)
+      }
       expect(response.status).toBe(200)
       expectDocumentPolicy(response, body, route)
       const nodes = parseMarkup(body)
@@ -729,7 +736,9 @@ describe('normal registered operator and mailbox documents with stored identity 
         expect(produced).not.toHaveProperty('generationId')
         expect(produced.catalog.some((tool: { status: string; delivery: { status: string } }) => tool.status === 'verified' && tool.delivery.status === 'verified')).toBe(false)
         if (surface === 'xwhm') {
-          expect(Object.keys(produced.whm).sort()).toEqual(['activeReseller', 'principal'])
+          // Read-only documents carry the first page of each saved list; preferences address only the principal.
+          expect(Object.keys(produced.whm).sort()).toEqual(route === '/whm/preferences' ? ['activeReseller', 'principal']
+            : ['accounts', 'activeReseller', 'dnsZones', 'domains', 'featureLists', 'ipPool', 'plans', 'principal', 'resellers'])
           expect(produced.whm).toMatchObject({ principal: { kind: 'root', id: root.id }, activeReseller: null })
           expect(produced).not.toHaveProperty('mail')
         } else {
@@ -860,7 +869,7 @@ describe('normal registered operator and mailbox documents with stored identity 
     const application = app(db, state, 'xwhm', { webRenderer: renderer })
     const auth = await session(db, realmResellerPrincipal, 'xwhm', { mfaVerified: false })
     const produced = await (await request(application, 'xwhm', auth, { path: '/whm/accounts?lang=en' })).json()
-    expect(Object.keys(produced.whm).sort()).toEqual(['activeReseller', 'principal'])
+    expect(Object.keys(produced.whm).sort()).toEqual(['accounts', 'activeReseller', 'dnsZones', 'domains', 'featureLists', 'plans', 'principal', 'resellers'])
     expect(produced.whm).toMatchObject({ principal: { kind: 'reseller', id: realmReseller.id, username: realmReseller.username }, activeReseller: { id: realmReseller.id, username: realmReseller.username } })
   }))
 

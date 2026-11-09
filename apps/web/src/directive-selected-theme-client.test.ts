@@ -71,6 +71,13 @@ for (const [theme, factory] of [['classic', classic], ['v2', v2]] as const) desc
       expect(root.querySelector(kind === 'htaccess' ? '[data-htaccess-status]' : '[data-wd-status]')?.getAttribute('data-state')).toBe('unavailable')
       root.querySelectorAll<HTMLButtonElement>('button').forEach(button => expect(button.disabled).toBe(true))
     })
-    it('refuses ' + kind + ' under a read-only ancestor without any request', () => { expect(mount(kind, undefined, true).request).not.toHaveBeenCalled() })
+    if (kind === 'htaccess') it('refuses ' + kind + ' under a read-only ancestor without any request', () => { expect(mount(kind, undefined, true).request).not.toHaveBeenCalled() })
+    else it('reads ' + kind + ' under a read-only ancestor, never writes, and keeps every control disabled', async () => {
+      const { root, request } = mount(kind, undefined, true)
+      await vi.waitFor(() => expect(root.querySelector('[data-wd-status]')?.getAttribute('data-state')).toBe('read'))
+      expect(root.querySelector('[data-wd-rows]')?.textContent).toContain('cgi-script')
+      expect((request.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+      root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button').forEach(control => expect(control.disabled).toBe(true))
+    })
   }
 })

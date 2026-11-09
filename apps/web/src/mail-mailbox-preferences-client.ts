@@ -6,6 +6,8 @@ const mailRequireTemplates = canonicalMailRequireTemplates
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 const formatMailDateTime = formatDisplayDateTime
 
 export interface MailboxPreferenceFields { density: 'comfortable' | 'compact'; messagesPerPage: 25 | 50 | 100; replyIdentityId: string | null; dateFormat: 'utc' | 'local' }
@@ -53,8 +55,6 @@ export function readMailboxPreferences(value: unknown, mailbox: string): Mailbox
 
 function bindMailPreferences(askDialog: (options: Record<string, unknown>) => Promise<unknown>): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const defaults = (): MailboxPreferenceFields => ({ density: 'comfortable', messagesPerPage: 50, replyIdentityId: null, dateFormat: 'utc' })
   const same = (left: MailboxPreferenceFields, right: MailboxPreferenceFields): boolean => left.density === right.density && left.messagesPerPage === right.messagesPerPage && left.replyIdentityId === right.replyIdentityId && left.dateFormat === right.dateFormat
   document.querySelectorAll<HTMLElement>('[data-mail-preferences]').forEach(root => {
@@ -67,7 +67,9 @@ function bindMailPreferences(askDialog: (options: Record<string, unknown>) => Pr
     const save = root.querySelector<HTMLButtonElement>('[data-preferences-save]'), discard = root.querySelector<HTMLButtonElement>('[data-preferences-discard]'), refresh = root.querySelector<HTMLButtonElement>('[data-preferences-refresh]')
     if (!status || !recordLine || !plusLine || !density || !perPage || !identity || !dateFormat || !save || !discard || !refresh) return
     try { mailRequireTemplates(root, [['mail-preferences-technical', 'bdi']]) } catch { root.querySelectorAll<HTMLSelectElement | HTMLButtonElement>('select,button').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = t('Unavailable'); return }
-    const admitted = (): boolean => root.isConnected && root.dataset.preferencesCanManage === 'true' && root.dataset.preferencesMailbox === mailbox && !!mailbox && !root.closest(denied) && !!send
+    const access = frameAccess(root, 'data-mail-preferences-can-read', 'data-preferences-can-manage'), send = access.request
+    // Reads run in a read-only frame too; editing and every write need the manage flag outside one.
+    const readable = (): boolean => access.readable() && root.dataset.preferencesMailbox === mailbox && !!mailbox, admitted = (): boolean => readable() && access.writable()
     let snapshot: MailboxPreferencesSnapshot | null = null, draft = defaults(), busy = false, lock = ''
     const baseline = (): MailboxPreferenceFields => snapshot?.preferences ? { density: snapshot.preferences.density, messagesPerPage: snapshot.preferences.messagesPerPage, replyIdentityId: snapshot.preferences.replyIdentityId, dateFormat: snapshot.preferences.dateFormat } : defaults()
     const dirty = (): boolean => !!snapshot && !same(draft, baseline())
@@ -106,11 +108,11 @@ function bindMailPreferences(askDialog: (options: Record<string, unknown>) => Pr
     }
     const read = async (): Promise<MailboxPreferencesSnapshot> => readMailboxPreferences(await send!('GET', '/api/webmail/preferences'), mailbox)
     const load = async (): Promise<void> => {
-      if (!admitted() || busy) return
+      if (!readable() || busy) return
       busy = true; sync(); note('reading', t('Reading saved preferences…'))
       try {
         const view = await read()
-        if (!admitted()) { snapshot = null; note('unavailable', t('Preferences are unavailable for this mailbox session. Nothing is shown.')); return }
+        if (!readable()) { snapshot = null; note('unavailable', t('Preferences are unavailable for this mailbox session. Nothing is shown.')); return }
         snapshot = view; draft = baseline(); lock = ''; paint()
         note(view.review ? 'review' : 'read', view.review ? t('Saved preferences need review by your provider.') : t('Saved preferences read.'))
       } catch (error) {
@@ -146,13 +148,13 @@ function bindMailPreferences(askDialog: (options: Record<string, unknown>) => Pr
     })
     discard.addEventListener('click', () => { if (!admitted() || !snapshot || busy || lock) return; draft = baseline(); paint(); sync(); note('read', t('Changes discarded.')) })
     refresh.addEventListener('click', async () => {
-      if (!admitted() || busy) return
+      if (!readable() || busy) return
       if ((dirty() || lock) && await askDialog({ title: t('Discard changes?'), body: t('Unsaved preference changes will be discarded and the saved preferences read again. No previous request is retried.'), confirm: t(msgctxt('mail-mailbox-preferences-client', 'Discard and reload')), danger: true }) !== true) return
       await load()
     })
-    if (!admitted()) { sync(); note('unavailable', t('Preferences are unavailable for this mailbox session. Nothing was read.')); return }
+    if (!readable()) { sync(); note('unavailable', t('Preferences are unavailable for this mailbox session. Nothing was read.')); return }
     void load()
   })
 }
 
-export const MAIL_MAILBOX_PREFERENCES_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const preferenceFields=${preferenceFields.toString()};const readMailboxPreferences=${readMailboxPreferences.toString()};return ${bindMailPreferences.toString()};})()`
+export const MAIL_MAILBOX_PREFERENCES_CLIENT_BINDING = withFrameRequest(`(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};const preferenceFields=${preferenceFields.toString()};const readMailboxPreferences=${readMailboxPreferences.toString()};return ${bindMailPreferences.toString()};})()`)

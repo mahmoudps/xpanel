@@ -8,6 +8,8 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 const displayDateTime = formatDisplayDateTime
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 // Serialized functions use these module-local aliases: bundler-rewritten import names would not survive toString().
 const sslInstallObject = sslObject, sslInstallUncertain = sslWriteUncertain
 
@@ -115,12 +117,12 @@ function bindWhmSslInstall(askDialog: ((options: Record<string, unknown>) => Pro
     const refreshButton = control<HTMLButtonElement>('refresh'), submit = control<HTMLButtonElement>('submit'), clear = control<HTMLButtonElement>('clear')
     if (![domain, names, certificate, chain, key, checks, status, result, facts, refreshButton, submit, clear].every(Boolean)) return
     const choices = (root.closest('[data-whm-detail-route]') ?? document).querySelector<HTMLElement>('[data-ssl-install-choices]')
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-    const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.sslInstallCanManage === 'true' && !root.closest(denied)
+    // Reads run in a read-only frame too; installing needs the manage flag outside one.
+    const access = frameAccess(root, 'data-ssl-install-can-read', 'data-ssl-install-can-manage'), transport = access.request
+    const readable = (): boolean => access.readable(), admitted = (): boolean => access.writable()
     let workspace: SslInstallWorkspace | null = null, busy = false, review = false
     const announce = (state: string, text: string): void => { status.dataset.state = state; status.textContent = text; status.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(state) ? 'alert' : 'status') }
-    const request = (method: string, path: string, body?: unknown): Promise<unknown> => !transport || !admitted() ? Promise.reject({ stateChanged: false }) : body === undefined ? transport(method, path) : transport(method, path, body)
+    const request = (method: string, path: string, body?: unknown): Promise<unknown> => !transport || !(method === 'GET' ? readable() : admitted()) ? Promise.reject({ stateChanged: false }) : body === undefined ? transport(method, path) : transport(method, path, body)
     const read = async (): Promise<SslInstallWorkspace> => readSslInstallWorkspace(await request('GET', '/api/certificate-workspace'))
     const selected = () => { const item = workspace?.domains.find(row => row.id === domain.value), owner = item && workspace?.accounts.find(row => row.id === item.accountId); return item && owner ? { domain: item, account: owner } : null }
     const chosenNames = (): string[] => Array.from(names.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked')).map(input => input.value)
@@ -150,7 +152,7 @@ function bindWhmSslInstall(askDialog: ((options: Record<string, unknown>) => Pro
       names.querySelectorAll<HTMLInputElement>('input').forEach(input => { input.disabled = blocked })
       submit.disabled = blocked || !selected() || structure().reasons.length > 0
       clear.disabled = !admitted() || busy
-      refreshButton.disabled = !admitted() || busy
+      refreshButton.disabled = !readable() || busy
       root.setAttribute('aria-busy', String(busy))
     }
     const paintNames = (): void => {
@@ -189,7 +191,7 @@ function bindWhmSslInstall(askDialog: ((options: Record<string, unknown>) => Pro
       result.hidden = false
     }
     const refresh = async (): Promise<void> => {
-      if (busy || !admitted()) return
+      if (busy || !readable()) return
       busy = true; lock(); announce('reading', t('Reading hosted domains…'))
       try {
         workspace = await read(); review = false; paintDomains(); paintNames(); paintChecks(); step(selected() ? 2 : 1)
@@ -230,7 +232,7 @@ function bindWhmSslInstall(askDialog: ((options: Record<string, unknown>) => Pro
         else announce('failed', (reason ? reason + ' ' : '') + t('Nothing was changed. The private key was cleared; paste it again to retry.'))
       } finally { busy = false; paintChecks(); lock() }
     }
-    if (!transport || !admitted()) { root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('input,textarea,select,button').forEach(element => { element.disabled = true }); announce('unavailable', t('Certificate installation is unavailable here. Nothing was read or changed.')); return }
+    if (!readable()) { root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('input,textarea,select,button').forEach(element => { element.disabled = true }); announce('unavailable', t('Certificate installation is unavailable here. Nothing was read or changed.')); return }
     domain.addEventListener('change', () => { paintNames(); paintChecks(); step(selected() ? 2 : 1); lock() })
     for (const area of [certificate, chain, key]) area.addEventListener('input', () => { paintChecks(); lock() })
     clear.addEventListener('click', () => { if (busy) return; certificate.value = ''; chain.value = ''; key.value = ''; names.querySelectorAll<HTMLInputElement>('input').forEach(input => { input.checked = false }); result.hidden = true; step(selected() ? 2 : 1); paintChecks(); lock() })
@@ -240,4 +242,4 @@ function bindWhmSslInstall(askDialog: ((options: Record<string, unknown>) => Pro
   })
 }
 
-export const WHM_SSL_INSTALL_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const SSL_INSTALL_MESSAGES=${JSON.stringify(SSL_INSTALL_MESSAGES)};const sslObject=${sslObject.toString()};const sslInstallObject=sslObject;const sslInstallUncertain=${sslWriteUncertain.toString()};const sslInstallId=${sslInstallId.toString()};const sslInstallNames=${sslInstallNames.toString()};const sslInstallCovers=${sslInstallCovers.toString()};const readSslInstallWorkspace=${readSslInstallWorkspace.toString()};const readSslInstallResult=${readSslInstallResult.toString()};const sslInstallStructure=${sslInstallStructure.toString()};return ${bindWhmSslInstall.toString()};})()`
+export const WHM_SSL_INSTALL_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};const SSL_INSTALL_MESSAGES=${JSON.stringify(SSL_INSTALL_MESSAGES)};const sslObject=${sslObject.toString()};const sslInstallObject=sslObject;const sslInstallUncertain=${sslWriteUncertain.toString()};const sslInstallId=${sslInstallId.toString()};const sslInstallNames=${sslInstallNames.toString()};const sslInstallCovers=${sslInstallCovers.toString()};const readSslInstallWorkspace=${readSslInstallWorkspace.toString()};const readSslInstallResult=${readSslInstallResult.toString()};const sslInstallStructure=${sslInstallStructure.toString()};return ${bindWhmSslInstall.toString()};})()`)

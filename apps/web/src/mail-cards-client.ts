@@ -3,6 +3,8 @@ import type { MessageValues } from './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import { readXlsRows as canonicalReadXlsRows } from './xls-reader.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 
 const clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
 const formatMailCardTime = formatDisplayDateTime
@@ -39,7 +41,6 @@ export function formatMailBytes(value: number): string {
 
 function bindMailCards(askDialog: Ask): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const applied: Record<string, string> = { applied: t('Saved and applied.'), nothing: t('Saved. There was nothing to apply.'), 'rolled-back': t('The new settings failed the configuration check, so the previous settings were restored.'), refused: t('Saved, but the host refused to apply it.'), unknown: t('The apply outcome is unknown. Review the mail service before retrying.'), 'not-connected': t('Saved. No host agent is connected, so it is not applied yet.') }
   const refusals: Record<string, string> = { unknown_postfix_parameter: t('Saved, but an advanced option is not a parameter of this Postfix release, so nothing was applied.'), unmanaged_client_restrictions: t('Saved, but smtpd_client_restrictions holds rules not managed by xPanel. Merge them by hand first.'), geoip_unavailable: t('The country database is not installed on this server, so nothing was changed.'), country_filter_too_large: t('Saved, but the chosen countries hold too many networks for a Postfix table, so nothing was applied.'), unmanaged_file: t('Saved, but a file not managed by xPanel is in the way. Move it aside or merge it by hand.') }
   const sectionStates: Record<string, string> = { 'not-saved': t('Not managed by xPanel'), applied: t('Applied'), pending: t('Not applied yet'), unavailable: t('Unavailable') }
@@ -58,10 +59,11 @@ function bindMailCards(askDialog: Ask): void {
   document.querySelectorAll<HTMLElement>('[data-mail-card]').forEach(card => {
     if (card.dataset.mailCardBound === 'true') return
     card.dataset.mailCardBound = 'true'
+    const send = frameRequest(card)
     const id = card.dataset.mailCard ?? '', statusNode = card.querySelector<HTMLElement>('[data-mail-card-status]')
     if (!statusNode) return
-    const canRead = (): boolean => card.isConnected && card.dataset.mailCardCanRead === 'true' && !card.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled') && !!send
-    const canAct = (): boolean => canRead() && card.dataset.mailCardCanAct === 'true'
+    const canRead = (): boolean => card.isConnected && card.dataset.mailCardCanRead === 'true' && !!send
+    const canAct = (): boolean => canRead() && card.dataset.mailCardCanAct === 'true' && !card.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
     let busy = false, ready = false
     const field = <T extends HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement = HTMLInputElement>(key: string): T => [...card.querySelectorAll<T>('[data-mail-card-field]')].find(item => item.dataset.mailCardField === key)!
     const action = (key: string): HTMLButtonElement | undefined => [...card.querySelectorAll<HTMLButtonElement>('[data-mail-card-action]')].find(item => item.dataset.mailCardAction === key)
@@ -251,4 +253,4 @@ function bindMailCards(askDialog: Ask): void {
 }
 
 const readXlsRows = canonicalReadXlsRows
-export const MAIL_CARDS_CLIENT_BINDING = `(()=>{const readXlsRows=${readXlsRows.toString()};const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatMailCardTime=${DISPLAY_DATETIME_BINDING};const COUNTRY_CODES=${JSON.stringify(COUNTRY_CODES)};const parseMailImportText=${parseMailImportText.toString()};const mapMailImportRows=${mapMailImportRows.toString()};const parseMailOverrides=${parseMailOverrides.toString()};const formatMailBytes=${formatMailBytes.toString()};return ${bindMailCards.toString()};})()`
+export const MAIL_CARDS_CLIENT_BINDING = withFrameRequest(`(()=>{const readXlsRows=${readXlsRows.toString()};const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatMailCardTime=${DISPLAY_DATETIME_BINDING};const COUNTRY_CODES=${JSON.stringify(COUNTRY_CODES)};const parseMailImportText=${parseMailImportText.toString()};const mapMailImportRows=${mapMailImportRows.toString()};const parseMailOverrides=${parseMailOverrides.toString()};const formatMailBytes=${formatMailBytes.toString()};return ${bindMailCards.toString()};})()`)

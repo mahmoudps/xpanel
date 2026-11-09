@@ -5044,6 +5044,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             await assertRoot(caller, 'dns.zone.delete')
           }
           await deps.store.deleteDnsZone(zoneName, hasBody ? { dnsGuard: async current => {
+            // A zone that is gone is not found, whatever revision the caller last read.
+            if (current === null) return fail('NOT_FOUND', 'zone not found', { stateChanged: false })
             assertDnsZoneRevision(current, expected)
             const fresh = await requireCaller(req)
             if (current?.accountId) {

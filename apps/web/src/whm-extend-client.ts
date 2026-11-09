@@ -2,6 +2,8 @@
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 
 type Transport = (method: string, path: string, body?: unknown) => Promise<unknown>
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
@@ -16,7 +18,6 @@ const clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalCl
  */
 function bindWhmExtend(askDialog: Ask | undefined): void {
   const t = (message: string, values?: Record<string, string | number>): string => xpT(message, values)
-  const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
   const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
   // A spread of one argument per byte overflows the stack on an archive of 1 MiB.
   const base64 = (bytes: Uint8Array): string => { let text = ''; for (let at = 0; at < bytes.length; at += 8192) text += String.fromCharCode(...bytes.subarray(at, at + 8192)); return btoa(text) }
@@ -87,11 +88,13 @@ function bindWhmExtend(askDialog: Ask | undefined): void {
     try { return await askDialog({ title, body, confirm: label }) === true } catch { return false }
   }
   /** Common frame of one workspace root: status lines, single-flight work and admission. */
-  const frame = (root: HTMLElement, status: HTMLElement | null, result: HTMLElement | null, canManage: boolean) => {
+  // A reader (registered applications) also reads inside a read-only frame; frameRequest refuses its writes there.
+  const frame = (root: HTMLElement, status: HTMLElement | null, result: HTMLElement | null, canManage: boolean, reads = false) => {
     let busy = false
+    const request = frameRequest(root)
     const controls: (() => void)[] = []
     const admitted = (): boolean => root.isConnected && typeof request === 'function'
-      && !root.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],fieldset:disabled')
+      && (reads || !root.closest('[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],fieldset:disabled'))
     const note = (state: string, message: string): void => { if (!status) return; status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const show = (kind: string, message: string): void => { if (!result) return; result.hidden = false; result.dataset.outcome = kind; result.textContent = message; result.setAttribute('role', kind === 'read' ? 'status' : 'alert') }
     const lock = (): void => { root.setAttribute('aria-busy', String(busy)); for (const control of controls) control() }
@@ -243,7 +246,7 @@ function bindWhmExtend(askDialog: Ask | undefined): void {
   document.querySelectorAll<HTMLElement>('[data-registered-apps-workspace]').forEach(root => {
     if (root.dataset.registeredAppsBound === 'true') return
     root.dataset.registeredAppsBound = 'true'
-    const f = frame(root, root.querySelector('[data-registered-apps-status]'), null, false)
+    const f = frame(root, root.querySelector('[data-registered-apps-status]'), null, false, true)
     const refresh = root.querySelector<HTMLButtonElement>('[data-registered-apps-refresh]')
     f.controls.push(() => { if (refresh) refresh.disabled = !f.admitted() })
     if (root.dataset.registeredAppsCanRead !== 'true' || !f.admitted()) { f.note('unavailable', unavailable); f.lock(); return }
@@ -352,7 +355,8 @@ function bindWhmExtend(askDialog: Ask | undefined): void {
   })
 
   const pluginRoots = [...document.querySelectorAll<HTMLElement>('[data-account-plugins]')].filter(root => root.dataset.accountPluginsBound !== 'true' && !root.closest('[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"]'))
-  if (pluginRoots.length && typeof request === 'function') {
+  const request = pluginRoots.length ? frameRequest(pluginRoots[0]!) : undefined
+  if (request) {
     for (const root of pluginRoots) root.dataset.accountPluginsBound = 'true'
     type Link = { name: string; group: string; uri: string; icon: string }
     const readLinks = (value: unknown): Link[] => {
@@ -537,4 +541,4 @@ function bindWhmExtend(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_EXTEND_CLIENT_BINDING = `(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};return ${bindWhmExtend.toString()};})()`
+export const WHM_EXTEND_CLIENT_BINDING = withFrameRequest(`(()=>{const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};return ${bindWhmExtend.toString()};})()`)

@@ -199,6 +199,7 @@ function projectWhmSurfaceMode(props: WhmSurfaceProps & ThemeViewProps, presenta
   const scoped: WhmSurfaceProps & ThemeViewProps & { principal: Principal } = {
     ...props, principal, visibility, catalog, activeRoute: route, activeReseller, accounts, plans, planEditorState,
     domains: root ? props.domains : accounts === undefined ? undefined : props.domains?.filter(domain => accountIds.has(domain.accountId)),
+    dnsZones: root ? props.dnsZones : accounts === undefined ? undefined : props.dnsZones?.filter(zone => zone.accountId !== null && accountIds.has(zone.accountId)),
     resellers: props.resellers?.filter(reseller => root || reseller.id === principal.id),
     featureLists: props.featureLists?.filter(list => root || list.ownerId === null || list.ownerId === principal.id),
     ipPool: root ? props.ipPool : undefined, firewallRules: root ? props.firewallRules : undefined,

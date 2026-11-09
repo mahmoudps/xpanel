@@ -2,6 +2,8 @@ import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
@@ -39,7 +41,6 @@ export function readBoxTrapperQueue(value: unknown): { day: string | null; days:
 
 function bindBoxTrapper(askDialog?: (options: { title: string; body: string; confirm: string; danger?: boolean }) => Promise<unknown>): void {
   const copy = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const reasons: Record<string, string> = {
     boxtrapper_token_required: copy('The verify subject must keep verify#{token}, or replies cannot be matched.'),
     boxtrapper_forward_loop: copy('The forward list cannot include this mailbox or its extra addresses.'),
@@ -69,12 +70,14 @@ function bindBoxTrapper(askDialog?: (options: { title: string; body: string; con
     const logDay = root.querySelector<HTMLSelectElement>('select[data-boxtrapper-log-day]'), logText = root.querySelector<HTMLElement>('pre[data-boxtrapper-log]')
     if (!status || !enabled || !name || !days || !score || !sent || !association || !extra || !forward || !template || !subject || !body || !reset || !save || !saveLists || !allow || !ignore || !deny || !day || !rows || !shown || !logDay || !logText || owner && !box) return
     const say = (message: string, kind: string): void => { status.dataset.state = kind; status.setAttribute('role', kind === 'failed' ? 'alert' : 'status'); status.textContent = message }
+    // Reads run in a read-only frame too; editing and every write need the manage flag outside one.
+    const access = frameAccess(root, 'data-boxtrapper-can-read', 'data-boxtrapper-manage')
     const controls = root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-boxtrapper-control]')
-    const disable = (off: boolean): void => controls.forEach(control => { control.disabled = off })
-    if (typeof transport !== 'function' || root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')) {
+    const disable = (off: boolean): void => controls.forEach(control => { control.disabled = off || !access.writable() })
+    if (!access.readable()) {
       disable(true); say(copy('BoxTrapper is unavailable here. Nothing was read or changed.'), 'unavailable'); return
     }
-    const request = transport
+    const request = access.request!
     let view: BoxTrapperClientView | null = null, listsRevision: string | null = null, drafts: BoxTrapperConfig['templates'] = { verify: null, released: null, failed: null, deny: null }, active: TemplateName = 'verify'
     const base = (): string => owner ? '/api/mail/boxtrapper/' + encodeURIComponent(box!.value) : '/api/webmail/boxtrapper'
     const keepDraft = (): void => {
@@ -99,8 +102,8 @@ function bindBoxTrapper(askDialog?: (options: { title: string; body: string; con
       allow.value = next.lists?.allow.join('\n') ?? ''; ignore.value = next.lists?.ignore.join('\n') ?? ''; deny.value = next.lists?.deny.join('\n') ?? ''
       paintStatus(next)
       const listed = next.lists !== null
-      for (const control of [allow, ignore, deny, saveLists, day, logDay]) control.disabled = !listed
-      root.querySelectorAll<HTMLButtonElement>('button[data-boxtrapper-act]').forEach(button => { button.disabled = !listed })
+      for (const control of [allow, ignore, deny, saveLists, day, logDay]) control.disabled = !listed || !access.writable()
+      root.querySelectorAll<HTMLButtonElement>('button[data-boxtrapper-act]').forEach(button => { button.disabled = !listed || !access.writable() })
     }
     const options = (select: HTMLSelectElement, values: { value: string; label: string }[], current: string | null): void => {
       select.textContent = ''
@@ -142,13 +145,14 @@ function bindBoxTrapper(askDialog?: (options: { title: string; body: string; con
       try {
         const next = readBoxTrapperView(await request('GET', base()))
         disable(false); paint(next)
-        if (next.lists !== null) await Promise.all([readQueue('latest'), readLog('latest')])
+        // The queue and the log are read by POST, which a read-only frame refuses.
+        if (next.lists !== null && access.writable()) await Promise.all([readQueue('latest'), readLog('latest')])
       } catch (error) { say(failure(error, copy('BoxTrapper could not be read. Nothing was changed.')), 'failed') }
     }
     template.addEventListener('change', () => { keepDraft(); active = template.value as TemplateName; showDraft() })
     reset.addEventListener('click', () => { drafts[active] = null; showDraft() })
     save.addEventListener('click', () => {
-      if (!view) return
+      if (!view || !access.writable()) return
       keepDraft()
       const config: BoxTrapperConfig = { enabled: enabled.checked, extraAddresses: boxTrapperLines(extra.value), displayName: name.value.trim(), retentionDays: Number(days.value), spamBypass: Number(score.value), autoAllowSent: sent.checked, allowByAssociation: association.checked, forward: boxTrapperLines(forward.value), templates: drafts }
       disable(true); say(copy('Saving BoxTrapper…'), 'saving')
@@ -157,7 +161,7 @@ function bindBoxTrapper(askDialog?: (options: { title: string; body: string; con
         .catch(error => { disable(false); say(failure(error, copy('BoxTrapper settings were refused. Nothing was changed.')), 'failed') })
     })
     saveLists.addEventListener('click', () => {
-      if (listsRevision === null) return
+      if (listsRevision === null || !access.writable()) return
       disable(true); say(copy('Saving the sender lists…'), 'saving')
       operate('lists', { lists: { allow: boxTrapperLines(allow.value), ignore: boxTrapperLines(ignore.value), deny: boxTrapperLines(deny.value) }, revision: listsRevision })
         .then(reply => { const next = reply as { lists: { allow: string[]; ignore: string[]; deny: string[] }; listsRevision: string }; listsRevision = next.listsRevision; allow.value = next.lists.allow.join('\n'); ignore.value = next.lists.ignore.join('\n'); deny.value = next.lists.deny.join('\n'); say(copy('The sender lists were saved and read back.'), 'saved') })
@@ -166,6 +170,7 @@ function bindBoxTrapper(askDialog?: (options: { title: string; body: string; con
     })
     root.querySelectorAll<HTMLButtonElement>('button[data-boxtrapper-act]').forEach(button => button.addEventListener('click', () => {
       void (async () => {
+        if (!access.writable()) return
         const ids = [...rows.querySelectorAll<HTMLInputElement>('input:checked')].map(input => input.value), action = button.dataset.boxtrapperAct!
         if (!ids.length) { say(copy('Select at least one held message. Nothing was changed.'), 'failed'); return }
         if (action !== 'deliver' && action !== 'allow' && askDialog) {
@@ -195,4 +200,4 @@ function bindBoxTrapper(askDialog?: (options: { title: string; body: string; con
   })
 }
 
-export const BOXTRAPPER_CLIENT_BINDING = `(function(askDialog){const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatTrapDateTime=${DISPLAY_DATETIME_BINDING};const boxTrapperObject=${boxTrapperObject.toString()};const boxTrapperLines=${boxTrapperLines.toString()};const readBoxTrapperView=${readBoxTrapperView.toString()};const readBoxTrapperQueue=${readBoxTrapperQueue.toString()};(${bindBoxTrapper.toString()})(askDialog);})`
+export const BOXTRAPPER_CLIENT_BINDING = withFrameRequest(`(function(askDialog){const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatTrapDateTime=${DISPLAY_DATETIME_BINDING};const boxTrapperObject=${boxTrapperObject.toString()};const boxTrapperLines=${boxTrapperLines.toString()};const readBoxTrapperView=${readBoxTrapperView.toString()};const readBoxTrapperQueue=${readBoxTrapperQueue.toString()};(${bindBoxTrapper.toString()})(askDialog);})`)

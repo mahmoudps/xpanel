@@ -2,6 +2,8 @@
 import type { MessageValues } from './i18n.ts'
 import { contactBrowserBinding } from './mail-contacts-workspace-client.ts'
 import type { MailContact } from './mail-contacts-workspace-client.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 
 type ContactRuntime = Pick<typeof import('./mail-contacts-workspace-client.ts'), 'contactObject' | 'contactStable' | 'contactReviewFlags' | 'contactWriteUncertain' | 'readMailContact' | 'readMailContacts'>
 type ContactGroup = { name: string; contactIds: string[]; revision: string }
@@ -28,9 +30,9 @@ function bindMailContactGroups(askDialog: ((options: Record<string, unknown>) =>
     root.dataset.groupsBound = 'true'
     const mailbox = root.dataset.groupsMailbox
     if (!mailbox) return
-    const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.groupsManage === 'true' && !root.closest(denied)
+    const access = frameAccess(root, 'data-groups-can-read', 'data-groups-manage'), send = access.request
+    // Reads run in a read-only frame too; editing and every write need the manage flag outside one.
+    const readable = access.readable, admitted = access.writable
     const control = <T extends HTMLElement>(key: string): T => root.querySelector<T>('[data-groups-' + key + ']')!
     const status = control<HTMLElement>('status'), picker = control<HTMLSelectElement>('select'), name = control<HTMLInputElement>('name')
     const members = control<HTMLSelectElement>('members'), contactPicker = control<HTMLSelectElement>('contact'), membership = control<HTMLSelectElement>('membership')
@@ -72,7 +74,7 @@ function bindMailContactGroups(askDialog: ((options: Record<string, unknown>) =>
     }
     const scoped = (value: unknown): value is Record<string, unknown> => contactObject(value) && contactObject(value.context) && value.context.mailbox === mailbox && !contactReviewFlags(value)
     const request = (method: string, path: string, body?: unknown): Promise<unknown> => {
-      if (!send || !admitted()) return Promise.reject({ details: { stateChanged: false } })
+      if (!send || !(method === 'GET' ? readable() : admitted())) return Promise.reject({ details: { stateChanged: false } })
       return body === undefined ? send(method, path) : send(method, path, body)
     }
     const read = async (): Promise<GroupSnapshot> => {
@@ -124,9 +126,9 @@ function bindMailContactGroups(askDialog: ((options: Record<string, unknown>) =>
       void reload(false)
     }
     const reload = async (explicit = true, group = selectedGroup, contact = selectedContact): Promise<void> => {
-      if (busy || confirming || !admitted()) return
+      if (busy || confirming || !readable()) return
       if (explicit && !await discard()) return
-      if (busy || confirming || !admitted()) return
+      if (busy || confirming || !readable()) return
       busy = true; lock(); announce('reading', t('Reading saved groups, contacts and capacity…'))
       try { install(await read(), group, contact); announce('read', t('Saved groups and capacity read. Shared contacts remain read-only.')) }
       catch (error) { if (exceedsBudget(error)) { review = true; announce('unavailable', budgetMessage()) } else announce('failed', (error as { details?: { reason?: unknown } } | null)?.details?.reason === 'dav_store_too_large' ? t('This mailbox’s calendars and contacts are too large to open here. Nothing was changed, and your devices still have them.') : t('Saved groups could not be read coherently. Drafts are preserved; nothing was changed.')) }
@@ -201,7 +203,7 @@ function bindMailContactGroups(askDialog: ((options: Record<string, unknown>) =>
         announce(review ? conflict ? 'stale' : 'uncertain' : 'failed', review ? t('The outcome requires review. Drafts are kept and no mutation was retried. Explicitly read saved groups before continuing.') : t('The request was refused or could not complete. Drafts are kept; nothing was retried.'))
       } finally { busy = false; lock(); if (externalPending) { externalPending = false; externalRefresh() } }
     }
-    if (!send || !admitted()) { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(input => { input.disabled = true }); announce('unavailable', t('Group management is unavailable here. Nothing was read or changed.')); return }
+    if (!readable()) { root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(input => { input.disabled = true }); announce('unavailable', t('Group management is unavailable here. Nothing was read or changed.')); return }
     for (const input of [name, members, membership]) input.addEventListener(input === name ? 'input' : 'change', lock)
     control<HTMLButtonElement>('reload').addEventListener('click', () => { void reload() })
     control<HTMLButtonElement>('new').addEventListener('click', () => { if (!control<HTMLButtonElement>('new').disabled) void reload(true, '', selectedContact) })
@@ -216,4 +218,4 @@ function bindMailContactGroups(askDialog: ((options: Record<string, unknown>) =>
   })
 }
 
-export const MAIL_CONTACT_GROUPS_CLIENT_BINDING = contactBrowserBinding(bindMailContactGroups, true)
+export const MAIL_CONTACT_GROUPS_CLIENT_BINDING = withFrameRequest(contactBrowserBinding(bindMailContactGroups, true))

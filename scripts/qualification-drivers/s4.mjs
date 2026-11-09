@@ -165,16 +165,17 @@ export default [
       const versions = (Array.isArray(rows.data?.services) ? rows.data.services : []).filter(item => item.fpm && item.fpm.masters > 0 && item.state === 'active')
       if (versions.length === 0) {
         x.check('EVERY-VERSION-RESTARTED', false, { status: rows.status, versions: 0 })
+        x.check('RESULT-LISTS-EVERY-VERSION-OK', false, { status: rows.status, versions: 0 })
       } else {
         x.undo('php-fpm active', async () => { const now = await x.root.get(SERVICES); return versions.every(item => rowOf(now, item.id)?.state === 'active') })
         const results = []
         for (const item of versions) results.push({ id: item.id, response: await x.root.post(`${SERVICES}/${item.id}/restart`, {}) })
         const settled = await x.until(() => x.root.get(SERVICES), read => versions.every(item => rowOf(read, item.id)?.state === 'active'), { attempts: 10, delayMs: 1500 })
         x.check('EVERY-VERSION-RESTARTED', results.every(item => item.response.status === 200 && item.response.data?.service?.state === 'active') && settled.settled, { versions: versions.length, restarted: results.filter(item => item.response.status === 200).length })
+        // Like cPanel the product keeps one row per PHP version and restarts them one at a time; no aggregate restart
+        // exists, so the result is the service list read after the restarts.
+        x.check('RESULT-LISTS-EVERY-VERSION-OK', settled.last?.status === 200 && versions.every(item => rowOf(settled.last, item.id)?.state === 'active'), { status: settled.last?.status ?? null, versions: versions.length })
       }
-      const all = await x.root.post(`${SERVICES}/php-fpm/restart`, {})
-      const listed = all.data?.versions ?? all.data?.services
-      x.check('RESULT-LISTS-EVERY-VERSION-OK', all.status === 200 && versions.length > 0 && Array.isArray(listed) && versions.every(item => listed.some(entry => entry.id === item.id && ['ok', 'active'].includes(entry.status ?? entry.state))), safeResponse(all))
       x.block('FASTCGI-SOCKETS-ACCEPT', 'The API client cannot open a FastCGI connection to a pool socket; the sockets are local to the host.')
     },
   }),

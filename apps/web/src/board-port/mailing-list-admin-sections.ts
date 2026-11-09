@@ -19,7 +19,7 @@ export function renderClassicListPasswordSection(locale: Locale, connected: bool
 /** Classic xMail List administration card: members of one list, unlocked by its administrator password. */
 export function renderClassicListAdminSection(locale: Locale, connected: boolean): string {
   const t = (message: string) => escapeHtml(translator(locale)(message))
-  return `<section class="xp-card xp-mail-tools__card" aria-labelledby="mail-lists-admin-heading" data-list-admin${gate(connected)}><h2 id="mail-lists-admin-heading">${t(msgid('List administration'))}</h2>`
+  return `<section class="xp-card xp-mail-tools__card" aria-labelledby="mail-lists-admin-heading" data-list-admin data-list-admin-can-read="${connected}" data-list-admin-manage="${connected}"${gate(connected)}><h2 id="mail-lists-admin-heading">${t(msgid('List administration'))}</h2>`
     + `<p class="xp-help">${t(msgid('Enter the list address and its administrator password to manage its members or work its moderation queue. A moderator mailbox opens the queue with an empty password. Archives and storage measurements are unavailable here.'))}</p>`
     + `<div class="xp-mail-tools__actions"><div class="xp-field"><label for="mail-list-admin-address">${t(msgid('List address'))}</label><input id="mail-list-admin-address" class="xp-input" dir="ltr" autocomplete="off" data-list-admin-address${off(connected)}></div>`
     + `<div class="xp-field"><label for="mail-list-admin-password">${t(msgid('List password'))}</label><input id="mail-list-admin-password" class="xp-input" type="password" dir="ltr" autocomplete="current-password" data-list-admin-password${off(connected)}></div></div>`

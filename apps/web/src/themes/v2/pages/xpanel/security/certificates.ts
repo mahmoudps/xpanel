@@ -54,5 +54,5 @@ export function renderV2CertificateFilesPage(props: PanelSurfaceProps, authority
     + note(t(msgid('Requests and self-signed certificates are made with openssl on the server. Installing saves the certificate for the domain; the served certificate is not verified here.'))),
     actions(button(t(msgid('Read SSL storage')), { 'data-ssl-store-refresh': true }, off)))
   return page(props, authority, '/security/ssl/files', title, description, split(inventory + certificates + upload + viewer, limits + key + csr + selfSigned) + '<template data-xp-template="ssl-store-action"><button type="button" class="v2-btn" data-xp-slot="label" disabled></button></template>',
-    { 'data-ssl-store': true, 'data-ssl-store-mode': 'account', 'data-ssl-store-username': c.account?.username ?? '', 'data-ssl-store-can-manage': String(c.editable) })
+    { 'data-ssl-store': true, 'data-ssl-store-mode': 'account', 'data-ssl-store-username': c.account?.username ?? '', 'data-ssl-store-can-read': String(c.editable), 'data-ssl-store-can-manage': String(c.editable) })
 }

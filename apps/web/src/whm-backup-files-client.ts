@@ -5,6 +5,8 @@ const viewAction = canonicalViewAction
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const displayDateTime = formatDisplayDateTime
 export type BackupFilesAccountView = { username: string; primaryDomain: string }
 export type BackupFilesArchiveView = { file: string; bytes: number; createdAt: string; integrity: 'unverified' | 'rejected'; reason: string | null }
@@ -87,9 +89,9 @@ function bindWhmBackupFiles(): void {
     // Owner mode (xPanel File and Directory Restoration): the session account is fixed, so there is no account picker.
     const owner = root.dataset.backupFilesOwner === 'true'
     if (!status || !account && !owner || !archives || !entries || !pathView || !up || !selectionNote || !folderView || !destination || !clear || !previewButton || !review || !ack || !restoreButton || !results || !more || !steps) return
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const transport = frameRequest(root)
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.backupFilesCanRead === 'true' && !root.closest(denied)
+    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.backupFilesCanRead === 'true'
     if (!admitted()) return
     const record = (name: string, tag: string, values: Readonly<Record<string, string | number>>): HTMLElement => {
       const row = cloneViewRecord(root, name, tag, values)
@@ -117,7 +119,7 @@ function bindWhmBackupFiles(): void {
       status.dataset.state = 'unavailable'; status.textContent = t('Not available')
       return
     }
-    const canRestore = root.dataset.backupFilesCanRestore === 'true', MAX_SELECTION = 500, SHOWN = 1000
+    const canRestore = root.dataset.backupFilesCanRestore === 'true' && !root.closest(denied), MAX_SELECTION = 500, SHOWN = 1000
     const selected = new Set<string>()
     let busy = false, username = owner ? root.dataset.backupFilesUsername ?? '' : '', opened: BackupFilesBrowseView | null = null, directory = '', pending = 0
     let reviewed: (BackupFilesPreviewView & { paths: string[]; destination: string }) | null = null
@@ -323,4 +325,4 @@ function bindWhmBackupFiles(): void {
   })
 }
 
-export const WHM_BACKUP_FILES_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const displayDateTime=${DISPLAY_DATETIME_BINDING};const readBackupFilesReply=${readBackupFilesReply.toString()};return ${bindWhmBackupFiles.toString()};})()`
+export const WHM_BACKUP_FILES_CLIENT_BINDING = withFrameRequest(`(()=>{${VIEW_RECORD_HELPERS}const displayDateTime=${DISPLAY_DATETIME_BINDING};const readBackupFilesReply=${readBackupFilesReply.toString()};return ${bindWhmBackupFiles.toString()};})()`)

@@ -6,6 +6,8 @@ const cloneClientTemplate = canonicalCloneClientTemplate
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 export const DB_TUNING_VARIABLES = ['innodb_buffer_pool_size', 'max_connections', 'tmp_table_size', 'max_heap_table_size', 'table_open_cache', 'thread_cache_size', 'slow_query_log', 'long_query_time'] as const
 export const DB_TUNING_STATUS = ['Uptime', 'Uptime_since_flush_status', 'Threads_connected', 'Threads_running', 'Max_used_connections', 'Connections', 'Aborted_connects', 'Connection_errors_max_connections', 'Slow_queries', 'Questions', 'Innodb_buffer_pool_reads', 'Innodb_buffer_pool_read_requests', 'Created_tmp_disk_tables', 'Created_tmp_tables', 'Open_tables', 'Opened_tables', 'Threads_created'] as const
@@ -72,7 +74,7 @@ export function bindWhmDatabaseTuning(root: HTMLElement, send: ((method: string,
   cloneClientTemplate(rowTemplate,'tr',['name','value']);cloneClientTemplate(checkTemplate,'article',['title','state','description','evidence']);cloneClientTemplate(evidenceTemplate,'div',['name','value'])
   const read = readNode, feedback = feedbackNode, plan = planNode, variableRows = variableRowsNode, statusRows = statusRowsNode
   let busy = false
-  const eligible = (): boolean => root.isConnected && root.dataset.canRead === 'true' && !root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled')
+  const eligible = (): boolean => root.isConnected && root.dataset.canRead === 'true'
   const note = (state: string, message: string): void => { feedback.dataset.state = state; feedback.textContent = message; feedback.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
   const text = (value: number | string | null): HTMLElement => { const node = document.createElement(value === null ? 'span' : 'bdi'); if (value !== null) node.dir = 'ltr'; node.textContent = value === null ? t(msgctxt('whm-database-tuning-client', 'Not observed')) : String(value); return node }
   const fill = (body: HTMLElement, names: readonly string[], values: Record<string, number | string> | null): void => {
@@ -115,7 +117,6 @@ export function bindWhmDatabaseTuning(root: HTMLElement, send: ((method: string,
 }
 
 function bindWhmDatabaseTuningPage(): void {
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
-  document.querySelectorAll<HTMLElement>('[data-whm-database-tuning]').forEach(root => bindWhmDatabaseTuning(root, send))
+  document.querySelectorAll<HTMLElement>('[data-whm-database-tuning]').forEach(root => bindWhmDatabaseTuning(root, frameRequest(root)))
 }
-export const WHM_DATABASE_TUNING_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const DB_TUNING_VARIABLES=${JSON.stringify(DB_TUNING_VARIABLES)};const DB_TUNING_STATUS=${JSON.stringify(DB_TUNING_STATUS)};const DB_TUNING_CHECKS=${JSON.stringify(DB_TUNING_CHECKS)};const DB_TUNING_NEXT=${JSON.stringify(DB_TUNING_NEXT)};const readDatabaseTuningView=${readDatabaseTuningView.toString()};const bindWhmDatabaseTuning=${bindWhmDatabaseTuning.toString()};return ${bindWhmDatabaseTuningPage.toString()};})()`
+export const WHM_DATABASE_TUNING_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const DB_TUNING_VARIABLES=${JSON.stringify(DB_TUNING_VARIABLES)};const DB_TUNING_STATUS=${JSON.stringify(DB_TUNING_STATUS)};const DB_TUNING_CHECKS=${JSON.stringify(DB_TUNING_CHECKS)};const DB_TUNING_NEXT=${JSON.stringify(DB_TUNING_NEXT)};const readDatabaseTuningView=${readDatabaseTuningView.toString()};const bindWhmDatabaseTuning=${bindWhmDatabaseTuning.toString()};return ${bindWhmDatabaseTuningPage.toString()};})()`)

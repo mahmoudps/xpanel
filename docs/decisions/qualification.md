@@ -166,5 +166,11 @@ Off is the default on every host, and turning it off takes effect at once becaus
 ## Budget
 
 The runner drives tools one after another and starts no daemon. Each tool slot has a declared deadline (120 s by default) and a
-bounded count of HTTPS requests of at most 5 s and 2 MiB each, and a 300 s unit run. The store oracle is a read-only SQLite read. No profile
+bounded count of HTTPS requests of at most 5 s and 2 MiB each, and a 300 s unit run. A driver declares only its own requests;
+each actor's transport adds five for the runner's session (anonymous probe, sign-in, catalog, sign-out, revoked read), so a
+spent driver budget can no longer leave a session unrevoked.
+
+Unit runs on a qualification host see the ordinary catalog: an application built without a catalog provider, as every test
+builds one, never reads `/etc/xpanel/qualification-mode`. Only the startup provider does. The browser slot waits for the sign-in
+form's own navigation to its workspace before it opens the tool page. The store oracle is a read-only SQLite read. No profile
 guest was measured in this change: the runner was built and tested without host access.

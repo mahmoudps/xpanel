@@ -1,5 +1,7 @@
 import type { MessageValues } from './i18n.ts'
 import { MAIL_CLIENT_TEMPLATE_KIT, mailTemplate as canonicalMailTemplate, mailSlot as canonicalMailSlot, mailRequireTemplates as canonicalMailRequireTemplates } from './mail-client-template-kit.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 const mailTemplate = canonicalMailTemplate
 const mailSlot = canonicalMailSlot
 const mailRequireTemplates = canonicalMailRequireTemplates
@@ -34,8 +36,6 @@ export function readMailboxForwarders(value: unknown, mailbox: string): MailboxF
 
 function bindMailForwarders(askDialog: (options: Record<string, unknown>) => Promise<unknown>): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   document.querySelectorAll<HTMLElement>('[data-mail-forwarders]').forEach(root => {
     if (root.dataset.forwardersBound === 'true') return
     root.dataset.forwardersBound = 'true'
@@ -45,7 +45,9 @@ function bindMailForwarders(askDialog: (options: Record<string, unknown>) => Pro
     if (!status || !rows || !count || !input || !add || !refresh) return
     try { mailRequireTemplates(root, [['mail-forwarder-row', 'tr', ['address', 'remove'], [['address', 'bdi'], ['remove', 'button', { type: 'button' }]]], ['mail-forwarder-empty', 'tr', ['message']]]) }
     catch { input.disabled = true; add.disabled = true; refresh.disabled = true; status.dataset.state = 'unavailable'; status.textContent = t('Forwarders are unavailable for this mailbox session. Nothing was read.'); return }
-    const admitted = (): boolean => root.isConnected && root.dataset.forwardersCanManage === 'true' && root.dataset.forwardersMailbox === mailbox && !!mailbox && !root.closest(denied) && !!send
+    const access = frameAccess(root, 'data-forwarders-can-read', 'data-forwarders-can-manage'), send = access.request
+    // Reads run in a read-only frame too; editing and every write need the manage flag outside one.
+    const readable = (): boolean => access.readable() && root.dataset.forwardersMailbox === mailbox && !!mailbox, admitted = (): boolean => readable() && access.writable()
     let snapshot: MailboxForwardersSnapshot | null = null, busy = false, lock = ''
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status') }
     const sync = (): void => {
@@ -69,11 +71,11 @@ function bindMailForwarders(askDialog: (options: Record<string, unknown>) => Pro
     }
     const read = async (): Promise<MailboxForwardersSnapshot> => readMailboxForwarders(await send!('GET', '/api/webmail/forwarders'), mailbox)
     const load = async (): Promise<void> => {
-      if (!admitted() || busy) return
+      if (!readable() || busy) return
       busy = true; sync(); note('reading', t('Reading forwarders…'))
       try {
         const view = await read()
-        if (!admitted()) { snapshot = null; message(t('Nothing is shown.')); note('unavailable', t('Forwarders are unavailable for this mailbox session. Nothing is shown.')); return }
+        if (!readable()) { snapshot = null; message(t('Nothing is shown.')); note('unavailable', t('Forwarders are unavailable for this mailbox session. Nothing is shown.')); return }
         snapshot = view; lock = ''; paint(view)
         note(view.review ? 'review' : 'read', view.review ? t('Forwarding for this address is managed by the account owner, so it cannot be changed here.') : t('Saved forwarders read.'))
       } catch (error) {
@@ -126,9 +128,9 @@ function bindMailForwarders(askDialog: (options: Record<string, unknown>) => Pro
         .then(confirmed => { if (confirmed === true && snapshot) void write(snapshot.destinations.filter(item => item !== destination), t('Forwarder removed and read back.')) })
     })
     refresh.addEventListener('click', () => { void load() })
-    if (!admitted()) { sync(); note('unavailable', t('Forwarders are unavailable for this mailbox session. Nothing was read.')); return }
+    if (!readable()) { sync(); note('unavailable', t('Forwarders are unavailable for this mailbox session. Nothing was read.')); return }
     void load()
   })
 }
 
-export const MAIL_MAILBOX_FORWARDERS_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const forwardAddress=${forwardAddress.toString()};const readMailboxForwarders=${readMailboxForwarders.toString()};return ${bindMailForwarders.toString()};})()`
+export const MAIL_MAILBOX_FORWARDERS_CLIENT_BINDING = withFrameRequest(`(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const forwardAddress=${forwardAddress.toString()};const readMailboxForwarders=${readMailboxForwarders.toString()};return ${bindMailForwarders.toString()};})()`)

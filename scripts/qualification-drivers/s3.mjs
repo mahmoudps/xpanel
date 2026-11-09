@@ -105,8 +105,8 @@ export default [
     prefix: 'ISOL', restores: ['/api/server/security-tools/isolation'], needs: ['account'], probe: `${TOOLS}/isolation`, paths: /^\/api\/server\/security-tools\/isolation(?:\/verify|\?account=[a-z][a-z0-9]{0,15})?$/, requests: 4,
     unit: [
       { id: 'ISOL-UNIT-PROJECT', file: 'apps/api/src/security-tools-workspace.test.ts', name: 'API security tools workspace projects host reads, dropping unknown fields and refusing inconsistent evidence' },
-      { id: 'ISOL-UNIT-FPM-STRIP', file: 'packages/render/src/edge/apache.test.ts', name: 'strips tenant PHP_VALUE and PHP_ADMIN_VALUE before every FastCGI call' },
-      { id: 'ISOL-UNIT-FPM-PREFORK', file: 'packages/core/src/rules/php.test.ts', name: 'Apache + prefork: refused with the installer code, and suPHP is reported as unable to run' },
+      { id: 'ISOL-UNIT-FPM-STRIP', file: 'packages/render/src/edge/apache.test.ts', name: 'renderApacheBase strips tenant PHP_VALUE and PHP_ADMIN_VALUE before every FastCGI call' },
+      { id: 'ISOL-UNIT-FPM-PREFORK', file: 'packages/core/src/rules/php.test.ts', name: 'availableHandlers Apache + prefork: refused with the installer code, and suPHP is reported as unable to run' },
     ],
     checks: ['ISOLATION-OBSERVED', 'HOME-LISTING-OWN-ONLY', 'FOREIGN-FILE-READ-DENIED', 'FPM-CROSS-POOL-HANDLER-REFUSED', 'FPM-PHP-VALUE-INJECTION-STRIPPED'],
     hostOnly: ['FPM-CROSS-POOL-HANDLER-REFUSED', 'FPM-PHP-VALUE-INJECTION-STRIPPED'],

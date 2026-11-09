@@ -2,6 +2,8 @@
 import type { MessageValues } from './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
@@ -69,16 +71,16 @@ function bindWhmEnhancements(askDialog: ((options: Record<string, unknown>) => P
     const valueField = one<HTMLElement>('[data-acct-enh-value-field]')
     const inputs: Record<string, HTMLInputElement | HTMLSelectElement> = {}
     root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-acct-enh-input]').forEach(control => { inputs[control.dataset.acctEnhInput!] = control })
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-    const names = ['id', 'label', 'kind', 'min', 'max', 'assign-scope', 'assign-target', 'assign-enhancement', 'assign-value', 'limit-reseller', 'limit-enhancement', 'limit-value']
+    const access = frameAccess(root, 'data-enh-can-read', 'data-enh-can-manage'), request = access.request
+    const names =['id', 'label', 'kind', 'min', 'max', 'assign-scope', 'assign-target', 'assign-enhancement', 'assign-value', 'limit-reseller', 'limit-enhancement', 'limit-value']
     if (!status || !loading || !refresh || !saveStatus || !empty || !valueField || Object.values(rows).some(node => !node) || Object.values(forms).some(node => !node) || !names.every(name => inputs[name])) return
     let templates: ReturnType<typeof enhancementClientTemplates>
     try { templates = enhancementClientTemplates(root) } catch {
       root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
       status.dataset.state = 'unavailable'; status.textContent = t('Account enhancements are available to the root administrator only.'); return
     }
-    const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.enhCanManage === 'true' && !root.closest(denied) && Object.values(forms).every(form => form!.tagName === 'FORM') && typeof request === 'function'
+    // Reads run in a read-only frame too; saving needs the manage flag outside one.
+    const readable = (): boolean => access.readable() && Object.values(forms).every(form => form!.tagName === 'FORM'), admitted = (): boolean => readable() && access.writable()
     let view: WhmEnhancementsView | null = null, busy = false
     const element = <K extends keyof HTMLElementTagNameMap>(tag: K, content?: string, ltr = false): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (content !== undefined) node.textContent = content; if (ltr) node.setAttribute('dir', 'ltr'); return node }
     const note = (target: HTMLElement, state: string, message: string): void => { target.hidden = false; target.dataset.state = state; target.textContent = message; target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
@@ -157,7 +159,7 @@ function bindWhmEnhancements(askDialog: ((options: Record<string, unknown>) => P
       syncChoices(); lock(false)
     }
     const load = async (): Promise<void> => {
-      if (!request) return
+      if (!request || !readable()) return
       loading.hidden = false; lock(true); note(status, 'reading', t('Reading enhancements...'))
       try { paint(readWhmEnhancementsView(await request('GET', '/api/server/account-enhancements'))) }
       catch (error) { view = null; note(status, 'failed', failText(error, t('Enhancements could not be read or verified. Nothing was changed.'))); lock(false) }
@@ -211,9 +213,9 @@ function bindWhmEnhancements(askDialog: ((options: Record<string, unknown>) => P
     for (const name of ['assign-scope', 'assign-enhancement']) inputs[name]!.addEventListener('change', syncChoices)
     refresh.addEventListener('click', () => { if (!busy) void load() })
     lock(false); syncChoices()
-    if (admitted()) void load()
+    if (readable()) void load()
     else note(status, 'unavailable', t('Account enhancements are available to the root administrator only.'))
   })
 }
 
-export const WHM_ENHANCEMENTS_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${enhancementClientTemplates.toString()};const readWhmEnhancementsView=${readWhmEnhancementsView.toString()};return ${bindWhmEnhancements.toString()};})()`
+export const WHM_ENHANCEMENTS_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${enhancementClientTemplates.toString()};const readWhmEnhancementsView=${readWhmEnhancementsView.toString()};return ${bindWhmEnhancements.toString()};})()`)

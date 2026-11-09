@@ -5,7 +5,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayD
 import { readAccountRuntimeView } from '../../../packages/os/src/account-runtime-command.ts'
 import type { AccountRuntimeClientView } from '../../../packages/os/src/account-runtime-command.ts'
 import { clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
 export { readAccountRuntimeView }
+const frameAccess = canonicalFrameAccess
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
@@ -30,8 +32,6 @@ type Ask = (options: Record<string, unknown>) => Promise<unknown>
 /** Apps, containers and caches of the signed-in account; every change is revision-checked and read back from the server. */
 function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccountRuntimeView): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-  const blocked = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   document.querySelectorAll<HTMLElement>('[data-runtime-workspace]').forEach(root => {
     if (root.dataset.runtimeBound === 'true') return
     root.dataset.runtimeBound = 'true'
@@ -46,7 +46,8 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
     }
     const field = <T extends HTMLInputElement | HTMLSelectElement>(key: string): T => root.querySelector<T>('[data-runtime-input="' + key + '"]')!
     const action = (key: string): HTMLButtonElement | null => q<HTMLButtonElement>('[data-runtime-action="' + key + '"]')
-    const admitted = (): boolean => root.isConnected && root.dataset.runtimeCanManage === 'true' && !root.closest(blocked) && typeof transport === 'function'
+    // Reads run in a read-only frame too; changes need the manage flag outside one.
+    const access = frameAccess(root, 'data-runtime-can-read', 'data-runtime-can-manage'), transport = access.request, readable = access.readable, admitted = access.writable
     let view: AccountRuntimeClientView | null = null, busy = false, editing: string | null = null
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' || state === 'uncertain' ? 'alert' : 'status') }
     const make = (tag: string, text = '', attrs: Record<string, string> = {}): HTMLElement => { const node = document.createElement(tag); node.textContent = text; for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v); return node }
@@ -174,15 +175,15 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
       for (const control of envBody?.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input,button') ?? []) control.disabled = !on
     }
     const load = async (message?: string): Promise<void> => {
-      if (busy || !admitted()) return
+      if (busy || !readable()) return
       busy = true; lock(); if (!message) note('reading', t('Reading…'))
       try {
         const next = parse(await transport!('GET', '/api/account/runtime'))
-        if (!admitted()) return
+        if (!readable()) return
         view = next
         if (kind === 'apps') paintApps(next); else if (kind === 'containers') { paintContainers(next); paintStacks(next) } else paintCache(next)
         note('read', message ?? t('Read from the server.'))
-      } catch { if (admitted()) note('failed', t('The services could not be read. Read again; nothing was changed.')) }
+      } catch { if (readable()) note('failed', t('The services could not be read. Read again; nothing was changed.')) }
       finally { busy = false; lock() }
     }
     const send = async (body: Record<string, unknown>, done: string, confirm?: { title: string; body: string }): Promise<void> => {
@@ -199,7 +200,7 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
       if (ok) await load(done); else lock()
     }
     const readLog = async (target: string): Promise<void> => {
-      if (busy || !admitted()) return
+      if (busy || !readable()) return
       busy = true; lock(); log.textContent = t('Reading…')
       try {
         const reply = await transport!('GET', '/api/account/runtime/log?target=' + encodeURIComponent(target)) as { lines?: unknown }
@@ -323,9 +324,9 @@ function bindAccountRuntime(askDialog: Ask | undefined, parse: typeof readAccoun
       void send({ op: 'cache.save', service, enabled: c.enabled, memoryMb }, t('Settings saved.'))
     })
     action('cache-flush')?.addEventListener('click', () => { const service = field<HTMLSelectElement>('service').value; void send({ op: 'cache.flush', service }, t('The cache was flushed.'), { title: t('Flush {name}?', { name: service === 'redis' ? 'Redis' : 'Memcached' }), body: t('Every cached value is removed.') }) })
-    if (!admitted()) { refresh.disabled = true; note('unavailable', t('These services are unavailable here. Nothing was read or changed.')); return }
+    if (!readable()) { refresh.disabled = true; note('unavailable', t('These services are unavailable here. Nothing was read or changed.')); return }
     refresh.addEventListener('click', () => { void load() })
     void load()
   })
 }
-export const ACCOUNT_RUNTIME_CLIENT_BINDING = `(()=>{${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${runtimeClientTemplates.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readAccountRuntimeView.toString()};const bind=${bindAccountRuntime.toString()};return (ask)=>bind(ask,parse);})()`
+export const ACCOUNT_RUNTIME_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};${runtimeClientTemplates.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const parse=${readAccountRuntimeView.toString()};const bind=${bindAccountRuntime.toString()};return (ask)=>bind(ask,parse);})()`)

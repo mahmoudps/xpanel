@@ -58,14 +58,14 @@ describe('monitoring client parsers', () => {
 })
 
 describe('monitoring client binding', () => {
-  it('keeps the workspace but reads nothing without transport or admission', async () => {
+  it('keeps the workspace, reads nothing without transport or admission, and only reads when closed', async () => {
     boot(renderWhmMonitoringProcesses({ locale: 'en', canRead: true, canSignal: true }))
     expect(state()).toBe('unavailable')
     expect(document.querySelector<HTMLButtonElement>('[data-whm-monitoring-refresh]')!.disabled).toBe(true)
     const send = vi.fn(async () => processes())
     boot(renderWhmMonitoringDisk({ locale: 'en', canRead: false }), send); await tick()
     boot(renderWhmMonitoringPerformance({ locale: 'en', canRead: true }).replace('data-monitoring-can-read="true"', 'data-monitoring-can-read="true" data-wiring="soon"'), send); await tick()
-    expect(send).not.toHaveBeenCalled()
+    expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
   })
   it('reads, filters and sorts processes, then signals TERM and a separately confirmed KILL', async () => {
     let current = processes()

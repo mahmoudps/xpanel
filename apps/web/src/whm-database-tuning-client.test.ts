@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DB_TUNING_STATUS, DB_TUNING_VARIABLES, WHM_DATABASE_TUNING_CLIENT_BINDING, bindWhmDatabaseTuning, readDatabaseTuningView } from './whm-database-tuning-client.ts'
 import { renderWhmDatabaseTuningWorkspace } from './board-port/whm-database-tuning-workspace.ts'
+import { frameRequest } from './read-only-frame.ts'
 import { buildDatabaseTuningView } from '../../agent/src/database-tuning.ts'
 import type { DatabaseTuningStatus, DatabaseTuningVariables } from '../../agent/src/database-tuning.ts'
 
@@ -55,12 +56,16 @@ describe('database tuning workspace', () => {
     read().click(); await settle(); expect(request).toHaveBeenCalledTimes(2)
   })
 
-  it('does not fetch or revive controls for an unqualified page', async () => {
+  it('does not fetch without read authority, and keeps controls closed on an unqualified page', async () => {
     const request = vi.fn(async () => reply())
     bindWhmDatabaseTuning(mount(false), request); await settle()
     expect(request).not.toHaveBeenCalled(); expect(read().disabled).toBe(true); expect(note().dataset.state).toBe('unavailable')
-    mount(); root().setAttribute('data-capability-unavailable', 'true'); bindWhmDatabaseTuning(root(), request); await settle()
-    expect(request).not.toHaveBeenCalled(); expect(read().disabled).toBe(true)
+    mount(); root().setAttribute('data-capability-unavailable', 'true')
+    ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = request
+    // The closed page still reads its observations through the gate; its read button stays disabled.
+    bindWhmDatabaseTuning(root(), frameRequest(root())); await settle()
+    expect(request).toHaveBeenCalled(); expect(read().disabled).toBe(true)
+    delete (window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest
   })
 
   it('clears stale observations after an invalid refresh and exposes a retry', async () => {

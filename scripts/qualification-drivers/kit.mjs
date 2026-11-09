@@ -12,6 +12,16 @@ import { navigation } from '../../packages/catalog/src/data/navigation.ts'
 
 export const check = (id, passed, observed) => ({ id, status: passed ? 'passed' : 'failed', observed })
 export const blocked = (id, reason) => ({ id, status: 'blocked', observed: { reason } })
+/**
+ * Why a run stopped, only when the cause is one of the runner's own constant codes: a request over budget, a spent
+ * deadline, a transport code or a browser timeout. Any other message may carry page or host text and is left out.
+ */
+const TRANSPORT_CAUSES = new Map([['Qualification request exceeds the bounded endpoint inventory', 'REQUEST_BUDGET_SPENT'], ['Qualification deadline expired', 'DEADLINE_EXPIRED']])
+export const failureCause = error => {
+  const message = typeof error?.message === 'string' ? error.message : ''
+  const cause = TRANSPORT_CAUSES.get(message) ?? (/^QUALIFICATION_[A-Z_]{1,40}$/.test(message) ? message : error?.name === 'TimeoutError' ? 'BROWSER_TIMEOUT' : null)
+  return cause === null ? '' : ` Cause: ${cause}.`
+}
 export const safeResponse = response => ({ status: response?.status ?? null, code: typeof response?.data?.code === 'string' && /^[A-Z_]{1,64}$/.test(response.data.code) ? response.data.code : null })
 
 const SESSION_ACTORS = ['root', 'owner', 'mailbox']
@@ -106,7 +116,7 @@ export async function runDriver(driver, { clients, prefix = driver.prefix, tag, 
   } else if (before.size !== restores.length) {
     for (const id of driver.checks) block(id, 'Shared state could not be read first, so no restore could be proved and the driver did not run.')
   } else {
-    try { await driver.run(context) } catch { failure = 'The driver did not complete.' }
+    try { await driver.run(context) } catch (error) { failure = `The driver did not complete.${failureCause(error)}` }
   }
   for (const { label, step } of undo) {
     try { if (await step() === false) leftovers.push(label) } catch { leftovers.push(label) }
@@ -235,8 +245,11 @@ export function displayValues(replies, actor) {
  * Real Chromium, the actor's own sign-in form and page. A page counts only when values from API replies appear in its
  * main region: the declared read, plus whatever the page itself fetched. No value to compare leaves the check blocked.
  */
-export async function pageChecks(driver, { page, origin, credentials }) {
-  const { prefix } = driver, checks = [], route = driver.page.route, replies = []
+/**
+ * The actor's own sign-in form. After a 200 the form navigates to its workspace by itself, so the caller's next
+ * navigation waits for that landing; started earlier, it is interrupted by the form's navigation and throws.
+ */
+export async function signInThroughForm(page, origin, credentials) {
   await page.goto(`${origin}/login?lang=en`)
   await page.locator('#login-username').fill(credentials.username)
   await page.locator('#login-password').fill(credentials.password)
@@ -245,6 +258,13 @@ export async function pageChecks(driver, { page, origin, credentials }) {
     page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/login' && response.request().method() === 'POST'),
     page.locator('#login-password').press('Enter'),
   ])
+  if (login.status() === 200) await page.waitForURL(url => url.pathname !== '/login', { waitUntil: 'commit' })
+  return login
+}
+
+export async function pageChecks(driver, { page, origin, credentials }) {
+  const { prefix } = driver, checks = [], route = driver.page.route, replies = []
+  const login = await signInThroughForm(page, origin, credentials)
   checks.push(check(`${prefix}-BROWSER-SIGN-IN`, login.status() === 200, { status: login.status() }))
   page.on('response', response => {
     const url = new URL(response.url())

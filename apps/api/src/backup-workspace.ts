@@ -91,6 +91,7 @@ export function validateBackupSchedule(value: unknown, current: BackupScheduleCo
   const next = { ...(current ?? defaults), ...value }
   if (!['daily', 'weekly', 'monthly'].includes(next.frequency)) return invalid('invalid backup frequency')
   if (!['zstd', 'gzip'].includes(next.compress)) return invalid('invalid backup compression')
+  if (Array.isArray(next.selectedAccounts) && next.selectedAccounts.length === 0 && next.includeControl === false) return invalid('a backup must include accounts or system files')
   return {
     enabled: boolean(next.enabled, 'enabled'), frequency: next.frequency, cron: validateBackupCron(next.cron),
     retentionCount: integer(next.retentionCount, 1, 3650, 'retentionCount'), retentionWeekly: integer(next.retentionWeekly, 0, 520, 'retentionWeekly'), retentionMonthly: integer(next.retentionMonthly, 0, 240, 'retentionMonthly'), compress: next.compress,

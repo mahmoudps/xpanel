@@ -54,7 +54,9 @@ export interface ClassicIdentityProps { readonly locale: Locale; readonly princi
 /** Security questions, verified addresses and external identities; root on xWHM also gets the server policy and providers. */
 export function renderClassicIdentityCards(props: ClassicIdentityProps): string {
   if (props.surface === 'xmail') return ''
-  const ui: Ui = { t: translator(props.locale), read: props.identityToolsAvailable === true, manage: props.readOnly !== true }
+  // Unqualified identity tools still read the saved questions, addresses and policy, inside a read-only frame where the gate refuses writes.
+  const open = props.identityToolsAvailable === true
+  const ui: Ui = { t: translator(props.locale), read: true, manage: open && props.readOnly !== true }
   if (props.readOnly) return `<section class="xp-card xp-account-security"><h2>${esc(ui.t(msgid('Security questions and external sign-in')))}</h2>${help(ui, msgid('These sign-in factors cannot be changed from a handed-off session.'))}</section>`
   const root = props.principalKind === 'root' && props.surface === 'xwhm'
   // One row per pair: a shared grid would split a question from its answer.
@@ -94,5 +96,6 @@ export function renderClassicIdentityCards(props: ClassicIdentityProps): string 
     + fields(field(ui, 'xp-identity-link-provider', msgid('Provider'), select(ui, 'xp-identity-link-provider', 'provider', msgid('Select a provider')))
       + field(ui, 'xp-identity-link-password', msgid('Current password'), password('xp-identity-link-password', 'current-password', 'current-password')))
     + actions(button(ui, msgid('Link identity'), 'link', true)))
-  return STYLE + policy + (props.securityPolicyDisabled ? '' : own) + providers + linked
+  const cards = policy + (props.securityPolicyDisabled ? '' : own) + providers + linked
+  return STYLE + (open ? cards : '<div data-readonly="true" style="display:contents">' + cards + '</div>')
 }

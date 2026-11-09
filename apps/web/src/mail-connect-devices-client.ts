@@ -1,4 +1,6 @@
 import type { MessageValues } from './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 /// <reference lib="dom" />
 type Endpoint = { protocol: 'imap' | 'smtp'; port: number; security: 'implicit-tls' | 'starttls' }
 export type DeviceSetupView = { mailbox: string; hostname: string | null; incoming: Endpoint[]; outgoing: Endpoint[]; downloads: { kind: 'autoconfig' | 'apple'; path: string; filename: string }[] }
@@ -28,7 +30,6 @@ export function readDeviceSetupView(value: unknown, mailbox: string): DeviceSetu
 function bindMailConnectDevices(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
   const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const bdi = (value: string): HTMLElement => { const item = document.createElement('bdi'); item.dir = 'ltr'; item.textContent = value; return item }
   document.querySelectorAll<HTMLElement>('[data-mail-connect-devices]').forEach(root => {
     if (root.dataset.devicesBound === 'true') return
@@ -36,7 +37,8 @@ function bindMailConnectDevices(): void {
     const mailbox = root.dataset.devicesMailbox ?? ''
     const status = root.querySelector<HTMLElement>('[data-mail-devices-status]'), rows = root.querySelector<HTMLElement>('[data-mail-devices-rows]'), downloadNote = root.querySelector<HTMLElement>('[data-mail-devices-download-note]')
     if (!status || !rows || !downloadNote) return
-    const admitted = (): boolean => root.isConnected && root.dataset.devicesCanRead === 'true' && root.dataset.devicesMailbox === mailbox && !!mailbox && !root.closest(denied) && !!send
+    const send = frameRequest(root)
+    const admitted = (): boolean => root.isConnected && root.dataset.devicesCanRead === 'true' && root.dataset.devicesMailbox === mailbox && !!mailbox && !!send
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
     const links = (view: DeviceSetupView | null): void => root.querySelectorAll<HTMLAnchorElement>('[data-mail-devices-download]').forEach(link => {
       const file = view?.downloads.find(item => item.kind === link.dataset.mailDevicesDownload)
@@ -95,4 +97,4 @@ function bindMailConnectDevices(): void {
   })
 }
 
-export const MAIL_CONNECT_DEVICES_CLIENT_BINDING = `(()=>{const readDeviceSetupView=${readDeviceSetupView.toString()};return ${bindMailConnectDevices.toString()};})()`
+export const MAIL_CONNECT_DEVICES_CLIENT_BINDING = withFrameRequest(`(()=>{const readDeviceSetupView=${readDeviceSetupView.toString()};return ${bindMailConnectDevices.toString()};})()`)

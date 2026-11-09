@@ -7,7 +7,7 @@ import type { Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { agentCallerHeaders, loadAgentCredentialFile, loadInstalledPeerIdentityAddon } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
-import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, effectivePlan, fail, hasAcl, isXpanelError, validateDomainName, type AuditEntry, type Domain, type MfaRuntimePolicy, type OsProfile, type WebsiteAnalyticsSnapshot } from '@xpanel/core'
+import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, effectivePlan, fail, hasAcl, isXpanelError, validateDomainName, type AuditEntry, type Domain, type MfaRuntimePolicy, type OsProfile, type Principal, type Reseller, type WebsiteAnalyticsSnapshot } from '@xpanel/core'
 import { canOpenRegisteredRoute, canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { mapAgentHostInfo, mapAgentServices } from '../../web/src/board-port/xwhm-dashboard.ts'
 import { parseWebsiteAnalyticsSnapshot, type WebsiteAnalyticsWindow } from '../../web/src/charts.ts'
@@ -154,6 +154,35 @@ const isWebsiteAnalyticsWindow = (value: string | null): value is WebsiteAnalyti
 
 const readUsageNumber = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+
+/** The standard first page of a list read (the paginated list reads default to 50 rows). */
+export const READ_ONLY_LIST_PAGE = 50
+
+/**
+ * Read-only WHM documents show saved rows, disabled: the first page of each list the caller may see, scoped exactly as
+ * the qualified document scopes it (root sees all; a reseller its own accounts, their plans and zones). No snapshot.
+ */
+export const readOnlyWhmLists = async (store: Pick<StateStore, 'listAccounts' | 'listPlans' | 'listFeatureLists' | 'listResellers' | 'listDomains' | 'listDnsZones' | 'listServerIps' | 'getMailIpConfig'>,
+  principal: Principal, reseller: Reseller | undefined) => {
+  const root = principal.kind === 'root'
+  if (!root && !(principal.kind === 'reseller' && reseller?.id === principal.id)) return {}
+  const [allAccounts, allPlans, allFeatureLists, allResellers, allDomains, allZones, serverIps, mailIpConfig] = await Promise.all([
+    root ? store.listAccounts() : hasAcl(principal, reseller!, 'list-accounts') ? store.listAccounts({ ownerId: principal.id }) : [],
+    store.listPlans(), store.listFeatureLists(), root ? store.listResellers() : [reseller!], store.listDomains(), store.listDnsZones(),
+    root ? store.listServerIps() : [], root ? store.getMailIpConfig() : null])
+  const page = <T>(rows: readonly T[]): T[] => rows.slice(0, READ_ONLY_LIST_PAGE)
+  const accounts = page(allAccounts), accountIds = new Set(accounts.map(account => account.id)), planIds = new Set(accounts.map(account => account.planId))
+  return {
+    accounts,
+    plans: page(allPlans.filter(plan => root || plan.ownerId === principal.id || planIds.has(plan.id))),
+    featureLists: page(allFeatureLists.filter(list => root || list.ownerId === null || list.ownerId === principal.id)).map(({ id, name, disabled, ownerId }) => ({ id, name, disabled, ownerId })),
+    resellers: page(allResellers),
+    domains: page(allDomains.filter(domain => root || accountIds.has(domain.accountId))),
+    dnsZones: page(allZones.filter(zone => root || zone.accountId !== null && accountIds.has(zone.accountId))),
+    // Root's own saved server records: the IP pool and the outbound mail IP configuration.
+    ...(root ? { ipPool: page(serverIps), ...(mailIpConfig ? { mailIpConfig } : {}) } : {}),
+  }
+}
 
 export const detectHostOsProfile = async (): Promise<OsProfile> => {
   return detectOs((p) => readFileSync(p, 'utf8'))
@@ -566,6 +595,10 @@ export const createDefaultWebRenderer = async (deps: {
       const email = await supportEmail()
       const summaryAccount = principal.kind === 'user' && surface === 'xpanel' ? scoped?.account : null
       const summaryPlan = summaryAccount ? scoped?.plan : null
+      // Closed forms show saved desired state through bounded reads only: the owner's own domains and root's server settings file.
+      const ownDomains = summaryAccount ? await deps.store.listDomains({ accountId: summaryAccount.id }).catch(() => null) : null
+      const rootSettings = surface === 'xwhm' && principal.kind === 'root' ? await deps.store.getServerSettings().catch(() => null) : null
+      const whmLists = surface === 'xwhm' ? await readOnlyWhmLists(deps.store, principal, reseller).catch(() => ({})) : {}
       return serve(req, async () => ({
         surface,
         ...adminAppearance,
@@ -585,9 +618,9 @@ export const createDefaultWebRenderer = async (deps: {
         ...(surface === 'xpanel' && principal.kind === 'user'
           && summaryAccount && summaryAccount.id === principal.accountId && summaryAccount.status === 'active'
           && summaryPlan && summaryPlan.id === summaryAccount.planId
-          ? { panel: { account: summaryAccount, plan: summaryPlan } } : {}),
+          ? { panel: { account: summaryAccount, plan: summaryPlan, ...(ownDomains ? { domains: ownDomains } : {}) } } : {}),
         ...(surface === 'xwhm' && principal.kind !== 'user'
-          ? { whm: { principal, activeReseller: reseller ?? null } } : {}),
+          ? { whm: { principal, activeReseller: reseller ?? null, ...whmLists, ...(rootSettings ? { serverSettings: rootSettings } : {}) } } : {}),
         ...(surface === 'xmail' && documentMailbox ? { mail: { mailbox: documentMailbox.mailbox } } : {}),
       }))
     }
@@ -885,6 +918,7 @@ export const createDefaultWebRenderer = async (deps: {
         activeReseller: reseller ?? null,
         accounts: listedAccounts,
         domains: visibleDomains,
+        dnsZones: snap.zones.filter(zone => principal.kind === 'root' || zone.accountId !== null && listedAccountIds.has(zone.accountId)),
         plans: visiblePlans,
         featureLists: visibleFeatureLists,
         ...(documentRoute.activeRoute === '/whm/plans/features' ? { pluginFeatures: await pluginFeatures(deps.store.rootDir).catch(() => []) } : {}),

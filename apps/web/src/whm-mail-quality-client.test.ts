@@ -52,12 +52,12 @@ describe('mail quality client parsers', () => {
 })
 
 describe('mail quality client binding', () => {
-  it('makes no request without transport or admission', async () => {
+  it('makes no request without transport or admission, and only reads inside an unavailable capability', async () => {
     boot(); expect(status().dataset.state).toBe('unavailable')
     mount('en', false); const send = vi.fn(); boot(send); await tick()
     expect(send).not.toHaveBeenCalled(); expect(status().dataset.state).toBe('unavailable')
     mount('en', true, 'unavailable'); boot(send); await tick()
-    expect(send).not.toHaveBeenCalled(); expect(button().disabled).toBe(true)
+    expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true); expect(button().disabled).toBe(true)
     expect(WHM_MAIL_QUALITY_CLIENT_BINDING).not.toContain('innerHTML')
     expect(WHM_MAIL_QUALITY_CLIENT_BINDING).not.toContain('fetch(')
   })

@@ -122,12 +122,13 @@ describe.each(['classic', 'v2'] as const)('%s emitted software operation binding
       expect(document.querySelector<HTMLElement>(status[family])?.dataset.state).toBe('unavailable')
     }
   })
-  it.each(['deployments', 'composer', 'optimize', 'projects', 'convert', 'templates'] as const)('keeps a denied %s workspace inert despite intact templates', async family => {
+  it.each(['deployments', 'composer', 'optimize', 'projects', 'convert', 'templates'] as const)('keeps a denied %s workspace read-only despite intact templates', async family => {
     document.body.innerHTML = '<div data-capability-unavailable="true">' + html(theme, family) + '</div>'
     const send = vi.fn(async () => { throw new Error('denied transport') })
     boot(family, send); await settle()
     document.querySelectorAll<HTMLButtonElement>('button').forEach(button => { if (!button.disabled) button.click() })
     await settle()
-    expect(send).not.toHaveBeenCalled()
+    // A frame reader still reads its saved state; nothing else is sent.
+    expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
   })
 })

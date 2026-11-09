@@ -69,7 +69,8 @@ describe('WHM backups browser controller', () => {
     expect(status().dataset.state).toBe('unavailable'); expect(action('save-schedule').disabled).toBe(true)
     document.querySelector<HTMLElement>('[data-approved-whm-backups]')!.removeAttribute('data-backup-bound')
     document.querySelector<HTMLElement>('[data-approved-whm-backups]')!.dataset.capabilityUnavailable = 'true'
-    const f = model(); f.boot(); await tick(); expect(f.send).not.toHaveBeenCalled()
+    const f = model(); f.boot(); await tick(); expect((f.send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('[data-approved-whm-backups] :is(input,select,textarea,button:not([aria-pressed]):not([role="tab"]))')].every(control => control.disabled)).toBe(true)
   })
   it('reads real metadata states using human labels without native success or internal references', async () => {
     const f = model(); f.boot(); await tick()

@@ -180,7 +180,8 @@ describe('PHP selected-theme fidelity and finite native admission', () => {
       startPhp(send, ask); await vi.waitFor(() => expect(phpState().dataset.state).toBe('read'))
       page.querySelector<HTMLButtonElement>('[data-php-action="apply-ini"]')!.click(); await vi.waitFor(() => expect(ask).toHaveBeenCalledOnce())
       if (revoked) page.dataset.readonly = 'true'; else phpTemplate(page, 'whm-php-revoke').remove()
-      confirm(true); await vi.waitFor(() => expect(phpState().dataset.state).toBe('unavailable'))
+      // A read-only frame keeps the saved values shown; only a broken contract makes the page unavailable.
+      confirm(true); await tick(); await vi.waitFor(() => expect(phpState().dataset.state).toBe(revoked ? 'read' : 'unavailable'))
       expect(send.mock.calls.filter(call => call[0] !== 'GET').map(call => call[1])).toEqual(['/api/server/php/manage/preview'])
       expect(page.querySelector<HTMLButtonElement>('[data-php-action="apply-ini"]')!.disabled).toBe(true)
       expect(page.querySelector<HTMLButtonElement>('[data-presentation-tab="file"]')!.disabled).toBe(false)

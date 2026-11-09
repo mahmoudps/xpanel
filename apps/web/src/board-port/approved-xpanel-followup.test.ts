@@ -118,7 +118,8 @@ describe('approved follow-up component and native validation boundaries', () => 
         for (const id of ids)
             expect(document.querySelector(`[data-workspace-section="${id}"]`), id).not.toBeNull();
         expect(document.body.textContent).toContain('not been read');
-        expect(document.body.textContent).not.toMatch(/private-marker|private-native-marker/);
+        // The saved account name may show in a closed field; native markup never renders read-only.
+        expect(document.body.textContent).not.toMatch(/private-native-marker/);
         expect(document.querySelector('form,[data-mailbox-form],[data-domain-form],[data-dns-editor]')).toBeNull();
         expect(document.querySelector('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled])')).toBeNull();
         expectUniqueIds();

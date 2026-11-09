@@ -75,4 +75,15 @@ describe('installed site software', () => {
     expect(q('[data-site-instances-status]').dataset.state).toBe('unavailable')
     expect([...document.querySelectorAll<HTMLButtonElement>('[data-site-instances-action]')].every(button => button.disabled)).toBe(true)
   })
+  it('reads inside a read-only frame but never writes, with every control disabled', async () => {
+    document.body.innerHTML = '<div data-readonly="true">' + renderWhmSiteInstancesCard({ locale: 'en', canManage: true }) + '</div>'
+    const transport = send()
+    boot(transport, async () => true); await tick()
+    expect(q('[data-site-instances-rows]').textContent).toContain('a.example/blog')
+    const select = q<HTMLSelectElement>('[data-site-instances-select]'); select.value = row.revision; select.dispatchEvent(new Event('change'))
+    q<HTMLButtonElement>('[data-site-instances-action="update"]').click(); await tick()
+    expect(transport).toHaveBeenCalled()
+    expect((transport.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
+    expect([...document.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('input,button,select')].every(control => control.disabled)).toBe(true)
+  })
 })

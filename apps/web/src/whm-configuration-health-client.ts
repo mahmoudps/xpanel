@@ -5,6 +5,8 @@ import './i18n.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 import type { ConfigurationHealthView } from '../../agent/src/configuration-health.ts'
 import { readConfigurationHealthRepair, readConfigurationHealthView } from '../../agent/src/configuration-health-contract.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 export { readConfigurationHealthRepair, readConfigurationHealthView } from '../../agent/src/configuration-health-contract.ts'
 
 function bindWhmConfigurationHealth(askDialog: ((options: Record<string, unknown>) => Promise<unknown>) | undefined, parseView: typeof readConfigurationHealthView, parseRepair: typeof readConfigurationHealthRepair): void {
@@ -15,12 +17,12 @@ function bindWhmConfigurationHealth(askDialog: ((options: Record<string, unknown
     const q = <T extends Element>(selector: string) => root.querySelector<T>(selector)
     const status = q<HTMLElement>('[data-ch-status]'), refresh = q<HTMLButtonElement>('[data-ch-refresh]'), drift = q<HTMLElement>('[data-ch-targets]'), tests = q<HTMLElement>('[data-ch-tests]'), select = q<HTMLSelectElement>('[data-ch-target]'), confirmation = q<HTMLInputElement>('[data-ch-confirm]'), repair = q<HTMLButtonElement>('[data-ch-repair]'), feedback = q<HTMLElement>('[data-ch-feedback]'), reason = q<HTMLElement>('[data-ch-reason]')
     if (!status || !refresh || !drift || !tests || !select || !confirmation || !repair || !feedback || !reason) return
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const request = frameRequest(root)
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = () => typeof request === 'function' && root.isConnected && root.dataset.chCanRead === 'true' && !root.closest(denied)
+    const admitted = () => typeof request === 'function' && root.isConnected && root.dataset.chCanRead === 'true'
     let view: ConfigurationHealthView | null = null, busy = false, review = false
     const note = (state: string, text: string) => { status.dataset.state = state; status.textContent = text }
-    const controls = () => { refresh.disabled = busy || !admitted(); const enabled = !busy && !review && admitted() && root.dataset.chCanRepair === 'true' && view?.canRepair === true && typeof askDialog === 'function'; select.disabled = !enabled; confirmation.disabled = !enabled; repair.disabled = !enabled || !select.value || confirmation.value !== 'REPAIR CONFIGURATION' }
+    const controls = () => { refresh.disabled = busy || !admitted(); const enabled = !busy && !review && admitted() && !root.closest(denied) && root.dataset.chCanRepair === 'true' && view?.canRepair === true && typeof askDialog === 'function'; select.disabled = !enabled; confirmation.disabled = !enabled; repair.disabled = !enabled || !select.value || confirmation.value !== 'REPAIR CONFIGURATION' }
     const bdi = (value: string) => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = value; return node }
     const cell = (tr: HTMLTableRowElement, value: string, technical = false) => { const td = document.createElement('td'); td.append(technical ? bdi(value) : document.createTextNode(value)); tr.append(td) }
     const paint = () => {
@@ -42,7 +44,7 @@ function bindWhmConfigurationHealth(askDialog: ((options: Record<string, unknown
       finally { busy = false; paint() }
     }
     repair.addEventListener('click', () => { void (async () => {
-      if (busy || review || !admitted() || root.dataset.chCanRepair !== 'true' || !view?.canRepair || !view.generation || !view.revision || typeof askDialog !== 'function' || confirmation.value !== 'REPAIR CONFIGURATION') return
+      if (busy || review || !admitted() || root.closest(denied) || root.dataset.chCanRepair !== 'true' || !view?.canRepair || !view.generation || !view.revision || typeof askDialog !== 'function' || confirmation.value !== 'REPAIR CONFIGURATION') return
       const snapshot = view, target = view.targets.find(item => item.token === select.value)
       if (!target) return
       busy = true; controls()
@@ -60,4 +62,4 @@ function bindWhmConfigurationHealth(askDialog: ((options: Record<string, unknown
     void load()
   })
 }
-export const WHM_CONFIGURATION_HEALTH_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readConfigurationHealthView=${readConfigurationHealthView.toString()};const readConfigurationHealthRepair=${readConfigurationHealthRepair.toString()};const bind=${bindWhmConfigurationHealth.toString()};return (askDialog)=>bind(askDialog,readConfigurationHealthView,readConfigurationHealthRepair);})()`
+export const WHM_CONFIGURATION_HEALTH_CLIENT_BINDING = withFrameRequest(`(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readConfigurationHealthView=${readConfigurationHealthView.toString()};const readConfigurationHealthRepair=${readConfigurationHealthRepair.toString()};const bind=${bindWhmConfigurationHealth.toString()};return (askDialog)=>bind(askDialog,readConfigurationHealthView,readConfigurationHealthRepair);})()`)

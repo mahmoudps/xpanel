@@ -2,6 +2,8 @@
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatMailxDateTime = formatDisplayDateTime
 
 export type MailxSectionName = 'spam' | 'relay' | 'bcc' | 'marketing'
@@ -63,11 +65,11 @@ function bindMailxWhm(): void {
     const section = root.dataset.mailxPage ?? '', status = root.querySelector<HTMLElement>('[data-mailx-status]'), refresh = root.querySelector<HTMLButtonElement>('[data-mailx-refresh]')
     const form = root.querySelector<HTMLElement>('[data-mailx-form]'), save = root.querySelector<HTMLButtonElement>('[data-mailx-save]'), again = root.querySelector<HTMLButtonElement>('[data-mailx-apply]')
     const formStatus = root.querySelector<HTMLElement>('[data-mailx-form-status]')
-    const request = (window as Window & { xpanelSessionRequest?: Transport }).xpanelSessionRequest
+    const request = frameRequest(root)
     if (!['spam', 'relay', 'bcc', 'marketing'].includes(section) || !status || !refresh || !form || !save || !again || !formStatus) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.mailxCanRead === 'true' && !root.closest(denied) && !!request
-    const manage = (): boolean => admitted() && root.dataset.mailxCanManage === 'true'
+    const admitted = (): boolean => root.isConnected && root.dataset.mailxCanRead === 'true' && !!request
+    const manage = (): boolean => admitted() && root.dataset.mailxCanManage === 'true' && !root.closest(denied)
     const field = (key: string): HTMLInputElement | HTMLTextAreaElement | null => root.querySelector('[data-mailx-field="' + key + '"]')
     let view: MailxSectionView | null = null, busy = false
     const note = (target: HTMLElement, state: string, message: string): void => { target.dataset.state = state; target.textContent = message; target.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
@@ -164,4 +166,4 @@ function bindMailxWhm(): void {
   })
 }
 
-export const MAILX_WHM_CLIENT_BINDING = `(()=>{const formatMailxDateTime=${DISPLAY_DATETIME_BINDING};const readMailxSectionView=${readMailxSectionView.toString()};return ${bindMailxWhm.toString()};})()`
+export const MAILX_WHM_CLIENT_BINDING = withFrameRequest(`(()=>{const formatMailxDateTime=${DISPLAY_DATETIME_BINDING};const readMailxSectionView=${readMailxSectionView.toString()};return ${bindMailxWhm.toString()};})()`)

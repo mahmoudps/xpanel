@@ -150,6 +150,14 @@ describe('xWHM DNS revision-bound loopback HTTP acceptance', () => {
     expect(await f.state.store.getDnsZone(f.bob.primaryDomain)).not.toBeNull()
     expect((await f.database.db.query('SELECT action FROM audit_log WHERE action = $1', ['dns.zone.deleted'])).length).toBe(1)
   })
+  it('answers a second delete of the same zone with NOT_FOUND and records nothing', async () => {
+    const body = { expectedZoneRevision: (await f.selected()).revision }
+    expect((await f.request(path(), 'DELETE', body)).status).toBe(200)
+    const again = await f.request(path(), 'DELETE', body)
+    expect(again.status).toBe(404)
+    expect(await again.json()).toMatchObject({ code: 'NOT_FOUND', details: { stateChanged: false } })
+    expect((await f.database.db.query('SELECT action FROM audit_log WHERE action = $1', ['dns.zone.deleted'])).length).toBe(1)
+  })
   it('keeps authentication, bearer scopes and session CSRF mandatory', async () => {
     const input = await payload(), before = await f.bytes()
     expect((await f.request('/api/dns/zones', 'GET', undefined, null)).status).toBe(401)

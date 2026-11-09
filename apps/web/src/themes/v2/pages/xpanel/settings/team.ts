@@ -34,5 +34,5 @@ export function renderV2AccountTeamPage(props: PanelSurfaceProps, authority: Pan
     { label: t(msgctxt('theme:v2', 'Sign-out')), valueHtml: esc(t(msgctxt('theme:v2', 'Suspending or deleting a member, or removing a role, signs that member out.'))) },
     { label: t(msgctxt('theme:v2', 'Owner only')), valueHtml: esc(t(msgctxt('theme:v2', 'Only the signed-in account owner can manage the team, and the plan must include it.'))) },
   ]))
-  return page(props, authority, '/preferences/team', title, description, signin + list + split(editor, help) + teamClientTemplates(), { 'data-acct-team-workspace': true, 'data-team-can-manage': String(c.editable), 'data-capability-state': c.editable ? 'authorized' : 'unavailable' })
+  return page(props, authority, '/preferences/team', title, description, signin + list + split(editor, help) + teamClientTemplates(), { 'data-acct-team-workspace': true, 'data-team-can-read': String(c.editable), 'data-team-can-manage': String(c.editable), 'data-capability-state': c.editable ? 'authorized' : 'unavailable' })
 }

@@ -4,6 +4,8 @@ import { readBackupFilesReply } from './whm-backup-files-client.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
@@ -104,11 +106,11 @@ function bindRestoreMore(): void {
       root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,button').forEach(control => { control.disabled = true })
       status.dataset.state = 'failed'; status.textContent = t('The server response could not be verified. Nothing is assumed.'); return
     }
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const transport = frameRequest(root)
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.restoreMoreCanRead === 'true' && !root.closest(denied)
+    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.restoreMoreCanRead === 'true'
     if (!admitted()) return
-    const canRestore = root.dataset.restoreMoreCanRestore === 'true', MAX_SELECTION = 50
+    const canRestore = root.dataset.restoreMoreCanRestore === 'true' && !root.closest(denied), MAX_SELECTION = 50
     const selected = new Set<string>()
     let busy = false, username = '', file = '', inventory: RestoreMoreInventory | null = null, reviewed: (RestoreMorePreview & { mailboxes: string[] }) | null = null, again = false
     const REASONS: Record<string, string> = {
@@ -272,4 +274,4 @@ function bindRestoreMore(): void {
   })
 }
 
-export const ACCT_RESTORE_CLIENT_BINDING = `(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const readFilesReply=${readBackupFilesReply.toString()};const readRestoreMoreReply=${readRestoreMoreReply.toString()};return ${bindRestoreMore.toString()};})()`
+export const ACCT_RESTORE_CLIENT_BINDING = withFrameRequest(`(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const readFilesReply=${readBackupFilesReply.toString()};const readRestoreMoreReply=${readRestoreMoreReply.toString()};return ${bindRestoreMore.toString()};})()`)

@@ -75,10 +75,29 @@ function evidence(document: Target, profiles: readonly string[] = REQUIRED_PROFI
 }
 const bundleOf = (document: Target, receipts: any[], rows: any[]) => ({ schemaVersion: 1, kind: 'xpanel-capability-evidence', target: document.target, source: document.source, provenance: document.provenance, requirements: qualificationRequirements([TOOL]), evidence: rows, receipts })
 
-/** A full case name is its describe and test titles joined by spaces, so all of it must split into literal titles. */
-const titled = (name: string, text: string): boolean => text.includes(name) || [...name.matchAll(/ /g)].some(({ index }) => text.includes(name.slice(0, index)) && titled(name.slice(index + 1), text))
+/**
+ * Full case names as Vitest reports them: the enclosing describe titles and the test title, joined by spaces. Nesting
+ * comes from indentation, the repository's style, so a title under another describe of the same file does not match.
+ */
+const caseNames = (text: string): string[] => {
+  const stack: { indent: number; title: string }[] = [], names: string[] = []
+  for (const line of text.split('\n')) {
+    const match = /^(\s*)(describe|it|test)\b[^(]*(?:\([^)]*\))?[^(]*\(\s*(['"`])((?:\\.|(?!\3).)*)\3\s*,/.exec(line)
+    if (!match) continue
+    const indent = match[1]!.length, title = match[4]!.replace(/\\(.)/g, '$1')
+    while (stack.length && stack.at(-1)!.indent >= indent) stack.pop()
+    if (match[2] === 'describe') stack.push({ indent, title })
+    else names.push([...stack.map(item => item.title), title].join(' '))
+  }
+  return names
+}
 
 describe('reviewed qualification inventory', { tags: ['unit'] }, () => {
+  it('reads a case name only under its own describe', () => {
+    const text = "describe('reader', () => {\n  it('reads', () => {})\n})\ndescribe('workspace', { tags: ['unit'] }, () => {\n  it('sends the owner\\'s list', () => {})\n})\n"
+    expect(caseNames(text)).toEqual(['reader reads', "workspace sends the owner's list"])
+  })
+
   it('drives only in-scope catalog tools with their exact acceptance criteria and existing unit cases', () => {
     const requirements = qualificationRequirements()
     expect(requirements.map((item: { toolId: string }) => item.toolId)).toEqual(Object.keys(QUALIFICATION_INVENTORY))
@@ -87,7 +106,7 @@ describe('reviewed qualification inventory', { tags: ['unit'] }, () => {
       expect(requirement.acceptance).toBe(specs.find(spec => spec.id === requirement.toolId)!.acceptance)
       const ids = Object.keys(RUNNER_SLOTS).flatMap(slot => slotCheckIds(requirement.toolId, slot))
       expect(new Set(ids).size).toBe(ids.length)
-      for (const item of QUALIFICATION_INVENTORY[requirement.toolId].unit) expect(titled(item.name, readFileSync(resolve(ROOT, item.file), 'utf8').replaceAll("\\'", "'")), `${requirement.toolId}: ${item.name}`).toBe(true)
+      for (const item of QUALIFICATION_INVENTORY[requirement.toolId].unit) expect(caseNames(readFileSync(resolve(ROOT, item.file), 'utf8')), `${requirement.toolId}: ${item.file}`).toContain(item.name)
     }
   })
 

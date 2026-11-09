@@ -3,6 +3,8 @@ import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 import type { TrafficReport } from '../../agent/src/traffic-monitor.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 export function readWhmTrafficView(raw: unknown): TrafficReport {
   const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
   const integer = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
@@ -25,9 +27,9 @@ export function readWhmTrafficView(raw: unknown): TrafficReport {
 }
 function bindWhmTraffic(): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const send = (window as Window & { xpanelSessionRequest?: (method: string, path: string) => Promise<unknown> }).xpanelSessionRequest
   document.querySelectorAll<HTMLElement>('[data-whm-traffic]').forEach(root => {
-    if (root.dataset.canRead !== 'true' || root.closest('[data-readonly="true"],[data-wiring="unavailable"],fieldset:disabled')) return
+    const send = frameRequest(root)
+    if (root.dataset.canRead !== 'true') return
     const refresh = root.querySelector<HTMLButtonElement>('[data-traffic-refresh]'), status = root.querySelector<HTMLElement>('[data-traffic-status]')
     if (!send || !refresh || !status) return
     let busy = false
@@ -66,4 +68,4 @@ function bindWhmTraffic(): void {
     refresh.addEventListener('click', () => { void load() }); void load()
   })
 }
-export const WHM_TRAFFIC_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmTrafficView=${readWhmTrafficView.toString()};return ${bindWhmTraffic.toString()};})()`
+export const WHM_TRAFFIC_CLIENT_BINDING = withFrameRequest(`(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readWhmTrafficView=${readWhmTrafficView.toString()};return ${bindWhmTraffic.toString()};})()`)

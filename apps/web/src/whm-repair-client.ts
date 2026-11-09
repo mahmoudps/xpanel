@@ -3,6 +3,8 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayD
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { WHM_DIAGNOSTIC_TEMPLATE_BINDING, whmDiagnosticNode as canonicalDiagnosticNode, assertWhmDiagnosticTemplates as canonicalAssertDiagnosticTemplates } from './whm-diagnostic-client-templates.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 const whmDiagnosticNode = canonicalDiagnosticNode
 const assertWhmDiagnosticTemplates = canonicalAssertDiagnosticTemplates
@@ -88,10 +90,10 @@ function bindWhmRepair(askDialog: ((options: Record<string, unknown>) => Promise
     const diagnose = find<HTMLButtonElement>('diagnose'), status = find('status'), listRoot = find('list'), previewPanel = find('preview'), start = find<HTMLButtonElement>('start'), cancel = find<HTMLButtonElement>('cancel')
     const jobPanel = find('job'), jobStatus = find('job-status'), jobLink = find<HTMLAnchorElement>('job-link'), rerun = find<HTMLButtonElement>('rerun')
     if (!diagnose || !status || !listRoot || !previewPanel || !start || !cancel || !jobPanel || !jobStatus || !jobLink || !rerun) return
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const transport = frameRequest(root)
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.repairCanRead === 'true' && !root.closest(denied)
-    const repairable = (): boolean => admitted() && root.dataset.repairCanRepair === 'true'
+    const admitted = (): boolean => typeof transport === 'function' && root.isConnected && root.dataset.repairCanRead === 'true'
+    const repairable = (): boolean => admitted() && root.dataset.repairCanRepair === 'true' && !root.closest(denied)
     let busy = false, report: RepairReportView | null = null, preview: RepairPreviewView | null = null
     const note = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(state) ? 'alert' : 'status') }
     const titles: Record<string, string> = {
@@ -234,4 +236,4 @@ function bindWhmRepair(askDialog: ((options: Record<string, unknown>) => Promise
   })
 }
 
-export const WHM_REPAIR_CLIENT_BINDING = `(()=>{${WHM_DIAGNOSTIC_TEMPLATE_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readRepairReport=${readRepairReport.toString()};const readRepairPreview=${readRepairPreview.toString()};const readRepairJobAck=${readRepairJobAck.toString()};return ${bindWhmRepair.toString()};})()`
+export const WHM_REPAIR_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_DIAGNOSTIC_TEMPLATE_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readRepairReport=${readRepairReport.toString()};const readRepairPreview=${readRepairPreview.toString()};const readRepairJobAck=${readRepairJobAck.toString()};return ${bindWhmRepair.toString()};})()`)

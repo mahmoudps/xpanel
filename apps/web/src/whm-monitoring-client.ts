@@ -5,6 +5,8 @@ const whmClientNode = canonicalWhmClientNode
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 type MonitoringAsk = ((options: Record<string, unknown>) => Promise<unknown>) | undefined
 export type MonitoringProcess = { pid: number; ppid: number; uid: number; user: string; cpuPercent: number; memoryPercent: number; rssBytes: number; elapsedSeconds: number; startedAt: string; stat: string; comm: string; account: string | null; protection: string | null }
@@ -110,7 +112,6 @@ export function readPerformanceView(value: unknown, window: '1h' | '24h' | '7d')
 
 function bindWhmMonitoring(askDialog: MonitoringAsk): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
-  const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
   const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
   const bytes = (value: number): string => { const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']; let size = value, index = 0; while (size >= 1024 && index < units.length - 1) { size /= 1024; index++ } return (index ? size.toFixed(1) : String(size)) + ' ' + units[index] }
   const duration = (seconds: number): string => { const days = Math.floor(seconds / 86400), rest = seconds % 86400, pad = (part: number): string => String(part).padStart(2, '0'); return (days ? String(days) + 'd ' : '') + pad(Math.floor(rest / 3600)) + ':' + pad(Math.floor(rest % 3600 / 60)) + ':' + pad(rest % 60) }
@@ -139,7 +140,8 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
         throw error
       }
     }
-    const admitted = (): boolean => templateContractIntact && (typeof transport === 'function' && root.isConnected && root.dataset.monitoringCanRead === 'true' && !root.closest(denied))
+    const transport = frameRequest(root)
+    const admitted = (): boolean => templateContractIntact && (typeof transport === 'function' && root.isConnected && root.dataset.monitoringCanRead === 'true')
     if (admitted()) { try { verifyWhmTemplates() } catch { return } }
     const note = (state: string, message: string, target: HTMLElement = status): void => { target.dataset.state = state; target.textContent = message; target.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(state) ? 'alert' : 'status') }
     const fact = (name: string, value: string): void => { const node = root.querySelector('[data-whm-monitoring-' + name + ']'); if (node) node.textContent = value }
@@ -173,7 +175,7 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
     if (kind === 'processes') {
       const rows = root.querySelector<HTMLElement>('[data-whm-monitoring-rows]'), accountRows = root.querySelector<HTMLElement>('[data-whm-monitoring-account-rows]')
       const search = root.querySelector<HTMLInputElement>('[data-whm-monitoring-search]'), account = root.querySelector<HTMLSelectElement>('[data-whm-monitoring-account]'), sort = root.querySelector<HTMLSelectElement>('[data-whm-monitoring-sort]')
-      const canSignal = root.dataset.monitoringCanSignal === 'true' && typeof askDialog === 'function'
+      const canSignal = root.dataset.monitoringCanSignal === 'true' && typeof askDialog === 'function' && !root.closest(denied)
       const termAttempted = new Set<string>()
       let view: MonitoringProcessesView | null = null
       const identity = (item: MonitoringProcess): string => String(item.pid) + '@' + item.startedAt
@@ -415,4 +417,4 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
   })
 }
 
-export const WHM_MONITORING_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[monitoringObject, monitoringText, monitoringIso, monitoringCount, monitoringNumber, monitoringAccount].map(helper => helper.toString()).join(';')};const readProcessesView=${readProcessesView.toString()};const readSignalOutcome=${readSignalOutcome.toString()};const readUserKillOutcome=${readUserKillOutcome.toString()};const readDiskView=${readDiskView.toString()};const readLogsView=${readLogsView.toString()};const readPerformanceView=${readPerformanceView.toString()};return ${bindWhmMonitoring.toString()};})()`
+export const WHM_MONITORING_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[monitoringObject, monitoringText, monitoringIso, monitoringCount, monitoringNumber, monitoringAccount].map(helper => helper.toString()).join(';')};const readProcessesView=${readProcessesView.toString()};const readSignalOutcome=${readSignalOutcome.toString()};const readUserKillOutcome=${readUserKillOutcome.toString()};const readDiskView=${readDiskView.toString()};const readLogsView=${readLogsView.toString()};const readPerformanceView=${readPerformanceView.toString()};return ${bindWhmMonitoring.toString()};})()`)

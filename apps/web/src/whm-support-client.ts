@@ -5,6 +5,8 @@ const whmClientNode = canonicalWhmClientNode
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
+import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 /** `text` is an English source message; its placeholders take the manifest limits. */
 type ManifestEntry = { id: string; text: string }
@@ -85,7 +87,7 @@ function bindWhmSupport(): void {
     const one = <T extends Element>(selector: string): T | null => root.querySelector<T>(selector)
     const status = one<HTMLElement>('[data-whm-support-status]'), bundleStatus = one<HTMLElement>('[data-whm-support-bundle-status]'), refresh = one<HTMLButtonElement>('[data-whm-support-refresh]')
     const confirm = one<HTMLInputElement>('[data-whm-support-confirm]'), download = one<HTMLButtonElement>('[data-whm-support-download]'), contactBox = one<HTMLElement>('[data-whm-support-contact]')
-    const request = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const request = frameRequest(root)
     if (!status || !bundleStatus || !refresh || !confirm || !download || !contactBox) return
     const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
     let templateContractIntact = true
@@ -101,7 +103,7 @@ function bindWhmSupport(): void {
         throw error
       }
     }
-    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.supportCanRead === 'true' && !root.closest(denied) && typeof request === 'function')
+    const admitted = (): boolean => templateContractIntact && (root.isConnected && root.dataset.supportCanRead === 'true' && typeof request === 'function')
     if (admitted()) { try { verifyWhmTemplates() } catch { return } }
     const checkedRequest: NonNullable<typeof request> = async (...args: Parameters<NonNullable<typeof request>>) => {
       verifyWhmTemplates()
@@ -224,4 +226,4 @@ function bindWhmSupport(): void {
   })
 }
 
-export const WHM_SUPPORT_CLIENT_BINDING = `(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readSupportView=${readSupportView.toString()};return ${bindWhmSupport.toString()};})()`
+export const WHM_SUPPORT_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const readSupportView=${readSupportView.toString()};return ${bindWhmSupport.toString()};})()`)

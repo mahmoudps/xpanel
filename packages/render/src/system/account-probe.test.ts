@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Domain } from '@xpanel/core'
-import { ACCOUNT_PROBE_ASSET, ACCOUNT_PROBE_HOLD_SECONDS, ACCOUNT_PROBE_PHP, ACCOUNT_PROBE_ROUTE, accountProbeDirectories, accountProbeNamespace, accountProbeNginxLocation, accountProbePaths, assertAccountProbeIngress, renderAccountProbeAsset } from './account-probe.ts'
+import { ACCOUNT_PROBE_ASSET, ACCOUNT_PROBE_END_CODES, ACCOUNT_PROBE_HOLD_SECONDS, ACCOUNT_PROBE_PHP, ACCOUNT_PROBE_ROUTE, accountProbeDirectories, accountProbeNamespace, accountProbeNginxLocation, accountProbePaths, assertAccountProbeIngress, renderAccountProbeAsset } from './account-probe.ts'
 import { renderFpmUnit } from './units.ts'
 import { debianOs, makeAccount } from './testkit.ts'
 import { renderNginxSite } from '../edge/nginx.ts'
@@ -11,6 +11,9 @@ describe('immutable account probe renderer', { tags: ['unit'] }, () => {
     expect(renderAccountProbeAsset()).toEqual({ path: ACCOUNT_PROBE_ASSET, content: ACCOUNT_PROBE_PHP, mode: 0o444, owner: 'root', group: 'root' })
     expect(ACCOUNT_PROBE_PHP).not.toMatch(/getmypid|posix_getuid|posix_getgid|shell_exec|fastcgi_finish_request/)
     expect(ACCOUNT_PROBE_PHP).toContain("$release !== \"release\\n\"")
+    // Without release the canary names why its wait ended with one constant code, never request data.
+    expect(ACCOUNT_PROBE_PHP).toContain(`@fwrite($stream, 'end ' . ($release !== false ? 'unexpected' : ($meta['timed_out'] ? 'timeout' : ($meta['eof'] ? 'eof' : 'read-error'))) . "\\n");`)
+    for (const code of ACCOUNT_PROBE_END_CODES) expect(ACCOUNT_PROBE_PHP).toContain(`'${code}'`)
     // The agent's held-request budgets derive from this window; nginx must outlast it.
     expect(ACCOUNT_PROBE_PHP).toContain(`stream_set_timeout($stream, ${ACCOUNT_PROBE_HOLD_SECONDS});`)
     expect(accountProbeNginxLocation(account)).toContain(`    fastcgi_read_timeout ${ACCOUNT_PROBE_HOLD_SECONDS + 5}s;`)

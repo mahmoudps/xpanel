@@ -5,9 +5,9 @@ import { specs } from '../packages/catalog/src/data/index.ts'
 import { PHASE1_TOOL_PROBES } from '../packages/catalog/src/host-qualification.ts'
 import { DRIVERS, QUALIFICATION_INVENTORY, SLICES } from './qualification-drivers/index.mjs'
 import { entryPointAllowsApiRoute } from '../apps/api/src/entry-points.ts'
-import { ACTOR_ENTRY, apiClient, createFixture, displayValues, entryOrigin, runDriver, runTag, tool } from './qualification-drivers/kit.mjs'
+import { ACTOR_ENTRY, apiClient, createFixture, displayValues, entryOrigin, failureCause, runDriver, runTag, signInThroughForm, tool } from './qualification-drivers/kit.mjs'
 import { qualificationPlan, qualificationRequirements, RUNNER_SLOTS } from './qualification-plan.mjs'
-import { driveTool } from './qualification-runner.mjs'
+import { driveTool, transportBudget } from './qualification-runner.mjs'
 
 const fast = () => Promise.resolve()
 const definition = { prefix: 'XT', probe: '/api/x', paths: /^\/api\/x$/, checks: ['ONE'], run: async () => undefined }
@@ -79,6 +79,14 @@ describe('driver execution', () => {
     expect(result.cleanup.ok).toBe(true)
   })
 
+  it('names why a run stopped only with the runner constant codes', async () => {
+    const { driver } = tool('audit-log', { ...definition, run: async () => { throw new Error('Qualification request exceeds the bounded endpoint inventory') } })
+    expect((await run(driver, {})).failure).toBe('The driver did not complete. Cause: REQUEST_BUDGET_SPENT.')
+    expect(failureCause(new Error('QUALIFICATION_HTTP_DEADLINE'))).toBe(' Cause: QUALIFICATION_HTTP_DEADLINE.')
+    expect(failureCause(Object.assign(new Error('locator.fill: Timeout 15000ms exceeded'), { name: 'TimeoutError' }))).toBe(' Cause: BROWSER_TIMEOUT.')
+    for (const error of [new Error('password=hunter2 at /etc/shadow'), 'text', null]) expect(failureCause(error)).toBe('')
+  })
+
   it('proves a shared restore against its first read, and does not run when that read fails', async () => {
     const state = { status: 200, data: { value: 'before', revision: 1, updatedAt: 'one' } }
     const { driver } = tool('audit-log', { ...definition, restores: ['/api/x'], run: async ({ check }: { check: (id: string, passed: boolean, observed: object) => boolean }) => { state.data = { value: 'after', revision: 2, updatedAt: 'two' }; check('ONE', true, {}) } })
@@ -126,6 +134,38 @@ describe('driver execution', () => {
     expect(result.checks.map((item: { id: string; status: string }) => `${item.id} ${item.status}`)).toEqual(['XT-ANONYMOUS-DENIED passed', 'XT-ONE passed', 'XT-ROOT-SESSION-REVOKED passed', 'XT-SESSION-REVOKED passed'])
     expect(result.cleanup).toMatchObject({ ok: false, leftovers: { objects: ['object'] } })
     expect(seen.indexOf('xwhm POST /api/auth/logout')).toBeLessThan(seen.indexOf('xpanel POST /api/auth/logout'))
+  })
+
+  it('gives the runner its own session requests beside the driver budget, so sign-out is still confirmed', async () => {
+    const { driver } = tool('audit-log', { ...definition, requests: 1, run: async ({ root, check }: { root: { get: (path: string) => Promise<{ status: number }> }; check: (id: string, passed: boolean, observed: object) => boolean }) => { check('ONE', (await root.get('/api/x')).status === 401, {}) } })
+    let sent = 0
+    // Like the real transport: one request over the budget throws, and so would the sign-out after it.
+    const request = async (path: string) => {
+      if (++sent > transportBudget(driver)) throw new Error('Qualification request exceeds the bounded endpoint inventory')
+      if (path === '/api/auth/login') return { status: 200, data: { principal: { kind: 'root' }, entryPoint: 'xwhm', csrfToken: 'c'.repeat(43), passwordChangeRequired: false }, setCookie: ['__Host-xwhm_session=xwhm; Secure; HttpOnly; SameSite=Strict; Path=/'] }
+      if (path === '/api/auth/logout') return { status: 200, data: {}, setCookie: [] }
+      if (path === '/api/x') return { status: 401, data: { code: 'UNAUTHENTICATED' }, setCookie: [] }
+      return { status: 200, data: { tools: [] }, setCookie: [] }
+    }
+    const result = await driveTool(driver, 'x', { prefix: 'XT', anonymous: true, requestFor: () => request, loginFor: () => ({ username: 'u', password: 'p' }), tag: 'aaaaaaaa', fixture, site })
+    expect(result.checks.map((item: { id: string; status: string }) => `${item.id} ${item.status}`)).toEqual(['XT-ANONYMOUS-DENIED passed', 'XT-ONE passed', 'XT-SESSION-REVOKED passed'])
+    expect(result.cleanup.ok).toBe(true)
+    expect(sent).toBe(transportBudget(driver))
+  })
+
+  it('waits for the sign-in form to land before the next navigation, which it would otherwise interrupt', async () => {
+    const calls: string[] = []
+    const page = (status: number) => ({
+      goto: async (url: string) => { calls.push(`goto ${new URL(url).pathname}`) },
+      locator: (selector: string) => ({ fill: async () => { calls.push(`fill ${selector}`) }, press: async () => { calls.push('press') } }),
+      waitForResponse: async () => ({ status: () => status }),
+      waitForURL: async (landed: (url: URL) => boolean) => { calls.push(`landed ${landed(new URL('https://lab.example.net/whm')) && !landed(new URL('https://lab.example.net/login'))}`) },
+    })
+    expect((await signInThroughForm(page(200), 'https://lab.example.net', { username: 'u', password: 'p' })).status()).toBe(200)
+    expect(calls.at(-1)).toBe('landed true')
+    calls.length = 0
+    expect((await signInThroughForm(page(401), 'https://lab.example.net', { username: 'u', password: 'p' })).status()).toBe(401)
+    expect(calls.some(call => call.startsWith('landed'))).toBe(false)
   })
 })
 

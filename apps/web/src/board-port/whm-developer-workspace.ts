@@ -16,7 +16,7 @@ export function renderWhmDeveloperWorkspace(input: { locale: Locale; canRead: bo
     ? [msgid('Billing and WHMCS'), msgid('Cloudflare and external DNS'), msgid('Backup storage and SMTP relay')]
     : surface === 'account' ? [msgid('Hooks and callbacks'), msgid('Registered applications'), msgid('Plugin generator')]
       : []
-  return `${styles}<section class="xp-dev" data-developer-workspace data-developer-surface="${surface}" data-developer-enabled="${input.canRead}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${classicWhmClientTemplates('developer')}
+  return `${styles}<section class="xp-dev" data-developer-workspace data-developer-surface="${surface}" data-developer-can-read="${input.canRead}" data-developer-enabled="${input.canRead}" lang="${input.locale}" dir="${localeDirection(input.locale)}">${classicWhmClientTemplates('developer')}
   <div class="xp-dev__layout"><div class="xp-dev__column">
     <section class="xp-dev__card" aria-labelledby="${prefix}-request"><h2 id="${prefix}-request">${surface === 'integrations' ? t('Inspect this integration') : t('API request explorer')}</h2>
       <p class="xp-help">${t('Read live data using your current signed-in session. Choose a supported operation; its method and route are fixed. No server setting is changed.')}</p>

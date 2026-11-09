@@ -6,6 +6,8 @@ const mailTemplate = canonicalMailTemplate
 const mailSlot = canonicalMailSlot
 const mailRequireTemplates = canonicalMailRequireTemplates
 import './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 const formatMailDateTime = formatDisplayDateTime
 
 
@@ -87,8 +89,7 @@ function bindMailIdentities(askDialog: ((options: Record<string, unknown>) => Pr
     if (root.dataset.identitiesBound === 'true') return
     root.dataset.identitiesBound = 'true'
     const mailbox = root.dataset.identitiesMailbox ?? ''
-    const manageable = root.dataset.identitiesManage === 'true'
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
+    const access = frameAccess(root, 'data-identities-can-read', 'data-identities-manage'), transport = access.request
     const rows = root.querySelector<HTMLElement>('[data-identities-rows]')
     const status = root.querySelector<HTMLElement>('[data-identities-status]')
     const formTitle = root.querySelector<HTMLElement>('[data-identities-form-title]')
@@ -102,8 +103,8 @@ function bindMailIdentities(askDialog: ((options: Record<string, unknown>) => Pr
     if (!rows || !status || !displayName || !replyTo || !textSignature || !htmlSignature || !isDefault || !saveButton) return
     try { mailRequireTemplates(root, [['mail-identity-card', 'article', ['name', 'badge', 'facts', 'actions'], [['facts', 'dl']]], ['mail-identity-fact', 'div', ['label', 'value'], [['label', 'dt'], ['value', 'bdi']]], ['mail-identity-action', 'button', ['label'], [['label', 'button', { type: 'button' }]]], ['mail-identity-empty', 'p', ['message']]]) }
     catch { root.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLTextAreaElement>('input,button,textarea').forEach(control => { control.disabled = true }); status.dataset.state = 'unavailable'; status.textContent = copy('Identity editing is unavailable here. No identities were read or changed.'); return }
-    const denied = '[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const eligible = (): boolean => root.isConnected && manageable && !root.closest(denied) && identityEmailPattern.test(mailbox)
+    // Reads run in a read-only frame too; editing and every write need the manage flag outside one.
+    const readable = (): boolean => access.readable() && identityEmailPattern.test(mailbox), eligible = (): boolean => readable() && access.writable()
     let identities: MailIdentity[] = []
     let editingId: string | null = null
     let busy = false, uncertain = false
@@ -249,7 +250,7 @@ function bindMailIdentities(askDialog: ((options: Record<string, unknown>) => Pr
         setStatus(copy('The identity was deleted and verified absent.'), 'saved')
       })
     }
-    if (!transport || !eligible()) {
+    if (!readable()) {
       controls().forEach(control => { control.disabled = true })
       setStatus(copy('Identity editing is unavailable here. No identities were read or changed.'), 'unavailable')
       return
@@ -264,4 +265,4 @@ function bindMailIdentities(askDialog: ((options: Record<string, unknown>) => Pr
 /** Reuses the same mailbox-bound validators in the identity editor and compose selector. */
 export const mailIdentitiesClientBinding = (bind: (...args: never[]) => void, withRuntime = false): string => `(function(askDialog){const identityUnsafe=${identityUnsafe.toString()};const identityEmailPattern=${identityEmailPattern.toString()};const identitiesObject=${identitiesObject.toString()};const identityText=${identityText.toString()};const identityEmail=${identityEmail.toString()};const readMailIdentity=${readMailIdentity.toString()};const readMailIdentities=${readMailIdentities.toString()};const identityDraft=${identityDraft.toString()};const identityMatchesDraft=${identityMatchesDraft.toString()};(${bind.toString()})(askDialog${withRuntime ? ',{readMailIdentities,identitiesObject}' : ''});})`
 
-export const MAIL_IDENTITIES_CLIENT_BINDING = `(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};return ${mailIdentitiesClientBinding(bindMailIdentities)};})()`
+export const MAIL_IDENTITIES_CLIENT_BINDING = withFrameRequest(`(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const formatMailDateTime=${DISPLAY_DATETIME_BINDING};return ${mailIdentitiesClientBinding(bindMailIdentities)};})()`)

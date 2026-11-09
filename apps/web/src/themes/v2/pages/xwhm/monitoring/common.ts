@@ -5,9 +5,10 @@ import { pageHeader } from '../../../components/page-header.ts'
 import { escapeHtml, hookAttrs, type HookAttributes } from '../../../html.ts'
 import { v2Messages } from '../../../messages.ts'
 import { IDENTITY_ROWS_CSS } from '../../identity.ts'
+import type { WhmStoredFactAuthority } from '../stored-facts.ts'
 
 /** Core supplies independent read and mutation decisions after catalog and principal admission. */
-export interface ObservationAuthority { readonly canRead: boolean; readonly canManage: boolean }
+export interface ObservationAuthority extends WhmStoredFactAuthority { readonly canRead: boolean; readonly canManage: boolean }
 export interface WhmObservationInput extends WhmSurfaceProps {
   readonly observationAuthority?: ObservationAuthority
   /** The reviewed unit list and bounds are supplied by the host contract, never inferred from user input. */
@@ -22,6 +23,9 @@ export function context(input: WhmObservationInput) {
   const canRead = input.observationAuthority?.canRead === true && input.capabilityUnavailable !== true
   return { locale, t: v2Messages.translator(locale), canRead, canManage: canRead && input.observationAuthority?.canManage === true }
 }
+/** A frame reader may run its saved-value read in a read-only document for root; its writes stay closed. */
+export const frameRead = (input: WhmSurfaceProps & { readonly observationAuthority?: unknown }): boolean =>
+  (input.observationAuthority as { presentation?: string } | undefined)?.presentation === 'read-only' && (input.visibility?.principal ?? input.principal)?.kind === 'root'
 export const technical = (value: string | number): string => `<bdi dir="ltr" class="v2-mono">${esc(value)}</bdi>`
 export const actions = (body: string): string => `<div class="v2-observation__actions">${body}</div>`
 export const fields = (body: string): string => `<div class="v2-observation__fields">${body}</div>`

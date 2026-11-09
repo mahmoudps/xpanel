@@ -66,7 +66,7 @@ describe('WHM updates client binding', () => {
     expect(status().dataset.state).toBe('read')
   })
 
-  it('stays unavailable and makes no request without a transport or admission', async () => {
+  it('stays unavailable without a transport or admission, and only reads inside a closed frame', async () => {
     boot()
     expect(status().dataset.state).toBe('unavailable')
     expect(action('read').disabled).toBe(true)
@@ -75,7 +75,8 @@ describe('WHM updates client binding', () => {
     ;(window as Window & { xpanelSessionRequest?: unknown }).xpanelSessionRequest = send
     new Function('return ' + WHM_UPDATES_CLIENT_BINDING)()(async () => true)
     action('read').click(); await tick()
-    expect(send).not.toHaveBeenCalled()
+    // Inside a closed frame the plan is only read, never applied.
+    expect((send.mock.calls as unknown[][]).every(call => call[0] === 'GET')).toBe(true)
   })
   it('reads only on request and paints facts, selectable rows, held and dependency rows', async () => {
     const send = vi.fn(async () => planResponse())

@@ -71,7 +71,9 @@ export interface IdentityCardsProps {
 export function renderV2IdentityCards(props: IdentityCardsProps): string {
   if (props.surface === 'xmail') return ''
   const t = v2Messages.translator(props.locale as Parameters<typeof v2Messages.translator>[0])
-  const ui: Ui = { t, p: props.surface === 'xpanel' ? 'v2-panel-settings' : 'v2-observation', read: props.identityToolsAvailable === true, manage: props.readOnly !== true }
+  // Unqualified identity tools still read the saved questions, addresses and policy, inside a read-only frame where the gate refuses writes.
+  const open = props.identityToolsAvailable === true
+  const ui: Ui = { t, p: props.surface === 'xpanel' ? 'v2-panel-settings' : 'v2-observation', read: true, manage: open && props.readOnly !== true }
   if (props.readOnly) return card({ title: t(msgid('Security questions and external sign-in')), titleId: 'v2-identity-readonly', bodyHtml: help(ui, msgid('These sign-in factors cannot be changed from a handed-off session.')) })
   const root = props.principalKind === 'root' && props.surface === 'xwhm'
   // One row per pair: a shared grid would split a question from its answer.
@@ -111,5 +113,6 @@ export function renderV2IdentityCards(props: IdentityCardsProps): string {
     + fields(ui, field(ui, 'v2-identity-link-provider', msgid('Provider'), select(ui, 'v2-identity-link-provider', 'provider', msgid('Select a provider')))
       + field(ui, 'v2-identity-link-password', msgid('Current password'), password('v2-identity-link-password', 'current-password', 'current-password')))
     + actions(ui, button(ui, msgid('Link identity'), 'link', true)))
-  return policy + (props.securityPolicyDisabled ? '' : own) + providers + linked
+  const cards = policy + (props.securityPolicyDisabled ? '' : own) + providers + linked
+  return open ? cards : '<div data-readonly="true" style="display:contents">' + cards + '</div>'
 }

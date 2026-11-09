@@ -19,7 +19,7 @@ export function renderMailxCollectionsWorkspace({ locale, canManage, accountId, 
     <div class="xp-whm-detail-scroll" role="region" tabindex="0" aria-label="${title}"><table class="xp-whm-detail-table xp-table"><caption class="xp-sr-only">${title}</caption>
     <thead><tr>${[t('Name'), t('Description'), t('Default'), t('Actions')].map(header => `<th scope="col">${header}</th>`).join('')}</tr></thead><tbody data-mailx-${kind}><tr><td colspan="4">${t('Nothing has been read.')}</td></tr></tbody></table></div>
     <div class="xp-mailx__actions"><button type="button" class="xp-btn" data-mailx-add="${kind}" disabled>${add}</button></div></div>`
-  return `<section class="xp-mailx" data-mailx-collections data-mailx-can-manage="${canManage}" lang="${locale}" dir="${localeDirection(locale)}" aria-label="${t('Collection settings')}">
+  return `<section class="xp-mailx" data-mailx-collections data-mailx-collections-can-read="${canManage}" data-mailx-can-manage="${canManage}" lang="${locale}" dir="${localeDirection(locale)}" aria-label="${t('Collection settings')}">
     ${MAILX_STYLE}<style>[data-mailx-collections] .xp-mailx__field>label[for]{padding-inline:var(--xp-control-content-inset)}[data-mailx-collections] h3{margin:0}[data-mailx-collections] .xp-whm-detail-scroll{overflow-x:auto;max-inline-size:100%}</style>
     ${card('calendar', t('Edit or delete a calendar'), `<${tag} class="xp-mailx__fields" data-mailx-calendar-editor${canManage ? ' novalidate' : ''}>
       ${field('mailx-calendar-mailbox', t('Owner mailbox'), select('mailx-calendar-mailbox', 'calendar-mailbox'))}

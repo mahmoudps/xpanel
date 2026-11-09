@@ -4,6 +4,8 @@ const mailSlot = canonicalMailSlot
 const mailRequireTemplates = canonicalMailRequireTemplates
 /// <reference lib="dom" />
 import type { MessageValues } from './i18n.ts'
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 export interface MailContactDraft {fullName:string;email:string;phone:string;organization:string;title:string}
 export interface MailContact extends MailContactDraft {id:string;owner:string;groups:string[];shares:{principal:string;permission:'read'|'read-write';sharedAt:string}[];vcard:string;createdAt:string;revision:string}
 export interface MailContactsState {contacts:MailContact[];loaded:boolean;selectedId:string;draft:MailContactDraft;dirty:boolean;query:string;busy:boolean;reading:boolean;uncertain:boolean;conflict:boolean;capacity:{ownedContacts:number;maxContacts:number}|null;status:'unread'|'reading'|'read'|'saving'|'saved'|'deleting'|'deleted'|'failed'|'stale'|'uncertain'|'too-large'}
@@ -86,8 +88,9 @@ function bindMailContactsWorkspace(askDialog:(options:Record<string,unknown>)=>P
   document.querySelectorAll<HTMLElement>('[data-mail-contacts]').forEach(root=>{
     if(root.dataset.contactsBound==='true')return;root.dataset.contactsBound='true'
     const mailbox=root.dataset.contactMailbox;if(!mailbox)return
-    const transport=(window as Window&{xpanelSessionRequest?:(method:string,path:string,body?:unknown)=>Promise<unknown>}).xpanelSessionRequest
-    const blocked=()=>!!root.closest('[data-wiring="soon"],[data-wiring="unavailable"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'),admitted=()=>root.dataset.contactManage==='true'&&!blocked()
+    const access=frameAccess(root,'data-contacts-can-read','data-contact-manage'),transport=access.request
+    // Reads run in a read-only frame too; editing and every write need the manage flag outside one.
+    const blocked=()=>!access.readable(),admitted=()=>access.writable()
     const form=root.querySelector<HTMLFormElement>('[data-contact-form]')!,button=(key:string)=>root.querySelector<HTMLButtonElement>('[data-contact-'+key+']')!,rows=root.querySelector<HTMLElement>('[data-contact-rows]')!
     if(!form||!rows)return
     try{mailRequireTemplates(root,[['mail-contact-row','tr',['select','email','organization','access'],[['select','button',{type:'button'}],['email','bdi']]],['mail-contact-empty','tr',['message']]])}catch{root.querySelectorAll<HTMLInputElement|HTMLButtonElement>('input,button').forEach(control=>{control.disabled=true});const status=root.querySelector<HTMLElement>('[data-contact-status]');if(status){status.dataset.state='unavailable';status.textContent=t('Unavailable')}return}
@@ -126,4 +129,4 @@ function bindMailContactsWorkspace(askDialog:(options:Record<string,unknown>)=>P
 }
 export const contactBrowserBinding=(bind:(...args:never[])=>void,withRuntime=false):string=>`(()=>{${MAIL_CLIENT_TEMPLATE_KIT}const contactObject=${contactObject.toString()};const contactStable=${contactStable.toString()};const contactReviewFlags=${contactReviewFlags.toString()};const contactWriteUncertain=${contactWriteUncertain.toString()};const canonicalContactDraft=${canonicalContactDraft.toString()};const readMailContact=${readMailContact.toString()};const readMailContacts=${readMailContacts.toString()};const requestMailContacts=${requestMailContacts.toString()};const createMailContactsWorkspace=${createMailContactsWorkspace.toString()};return ${withRuntime?"(askDialog)=>("+bind.toString()+")(askDialog,{contactObject,contactStable,contactReviewFlags,contactWriteUncertain,readMailContact,readMailContacts})":bind.toString()};})()`
 
-export const MAIL_CONTACTS_WORKSPACE_CLIENT_BINDING=contactBrowserBinding(bindMailContactsWorkspace)
+export const MAIL_CONTACTS_WORKSPACE_CLIENT_BINDING=withFrameRequest(contactBrowserBinding(bindMailContactsWorkspace))

@@ -100,6 +100,7 @@ describe('mail calendar workspace browser binding', () => {
     expect(button('save').disabled).toBe(true)
     document.querySelector<HTMLElement>('[data-mail-calendar]')!.removeAttribute('data-calendar-bound')
     document.querySelector<HTMLElement>('[data-mail-calendar]')!.dataset.calendarManage = 'false'
+    document.querySelector<HTMLElement>('[data-mail-calendar]')!.dataset.calendarCanRead = 'false'
     const f = model(); f.boot(); await tick(); expect(f.send).not.toHaveBeenCalled()
   })
   it('pins response context to the mailbox and keeps malformed reads unavailable', async () => {

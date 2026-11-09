@@ -95,17 +95,18 @@ describe.each(pages)('saved-workspace mount $route', ({ route, marker, cards }) 
     }
   })
 
-  it('retains the complete unavailable layout while withholding private state and executable forms', () => {
+  it('retains the complete unavailable layout with saved values in closed fields and no executable form', () => {
     for (const locale of ['en', 'ar'] as const) {
       const html = render(route, locale, { capabilityUnavailable: true })
       const { document, presentation } = preservesCards(html, cards); expect(count(html, marker)).toBe(1)
       expect(html).toContain('data-capability-state="unavailable"'); expect(document.querySelectorAll('form')).toHaveLength(0)
-      expect(html).not.toContain(settings.hostname); expect(html).not.toContain('value="2222"'); expect(html).not.toContain('value="2048"')
+      expect(html).not.toContain(settings.hostname)
       for (const control of document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('input,select,textarea,button')) {
         if (!presentation.has(control)) expect(control.disabled, control.outerHTML).toBe(true)
       }
-      if (route === '/whm/software/php') expect(html).toContain('data-php-can-read="false"')
-      if (route === '/whm/services/web') expect(html).toContain('data-web-can-read="false"')
+      // Root reads saved values through the frame readers of a closed page; their controls stay disabled.
+      if (route === '/whm/software/php') expect(html).toContain('data-php-can-read="true"')
+      if (route === '/whm/services/web') expect(html).toContain('data-web-can-read="true"')
       if (route === '/whm/security/ssh') expect(html).toContain('data-whm-ssh-manage="false"')
     }
   })

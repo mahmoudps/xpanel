@@ -66,8 +66,10 @@ describe('confirmed native service restart', () => {
     const send = vi.fn<Request>().mockResolvedValueOnce({ services: [service] }).mockResolvedValueOnce({ service: { ...service, state: 'inactive' } }); boot(send); await tick(); button().click(); await tick()
     expect(status().dataset.state).toBe('uncertain'); expect(send).toHaveBeenCalledTimes(2)
   })
-  it('does not read or mutate an unavailable service component', async () => {
-    const send = vi.fn<Request>(); boot(send, vi.fn(), 'data-capability-unavailable="true"'); await tick(); expect(send).not.toHaveBeenCalled(); expect(button()).toBeNull()
+  it('reads an unavailable service component but never mutates it', async () => {
+    const send = vi.fn<Request>().mockResolvedValue({ services: [service] }); boot(send, vi.fn().mockResolvedValue(true), 'data-capability-unavailable="true"'); await tick()
+    button()?.click(); await tick()
+    expect(send).toHaveBeenCalled(); expect(send.mock.calls.every(call => call[0] === 'GET')).toBe(true); expect(button()?.disabled ?? true).toBe(true)
   })
 })
 

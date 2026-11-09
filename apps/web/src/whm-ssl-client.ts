@@ -8,6 +8,8 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 const displayDateTime = formatDisplayDateTime
+import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+const frameAccess = canonicalFrameAccess
 const SSL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SSL_NAME = /^(?:\*\.)?[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/
 export interface SslCertificateView {
@@ -84,17 +86,17 @@ function bindWhmSsl(askDialog: ((options: Record<string, unknown>) => Promise<un
     const rowSlots=['names','account','source','challenge','expires','renewal','status','actions'] as const
     const templates={row:clientTemplate(root,'whm-ssl-row'),empty:clientTemplate(root,'whm-ssl-empty'),fact:clientTemplate(root,'whm-ssl-fact'),action:clientTemplate(root,'whm-ssl-action')}
     cloneClientTemplate(templates.row,'tr',rowSlots);cloneClientTemplate(templates.empty,'tr',['message']);cloneClientTemplate(templates.fact,'div',['label','value']);cloneClientTemplate(templates.action,'button',['label'])
-    const transport = (window as Window & { xpanelSessionRequest?: (method: string, path: string, body?: unknown) => Promise<unknown> }).xpanelSessionRequest
-    const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-    const admitted = (): boolean => root.isConnected && root.dataset.sslCanManage === 'true' && !root.closest(denied)
+    // Reads run in a read-only frame too; changes need the manage flag outside one.
+    const access = frameAccess(root, 'data-ssl-can-read', 'data-ssl-can-manage'), transport = access.request
+    const readable = (): boolean => access.readable(), admitted = (): boolean => access.writable()
     let workspace: SslWorkspaceView | null = null, busy = false, confirming = false, review = false
     const announce = (state: string, message: string): void => { status.dataset.state = state; status.textContent = message; status.setAttribute('role', ['failed', 'stale', 'uncertain'].includes(state) ? 'alert' : 'status') }
-    const request = (method: string, path: string, body?: unknown): Promise<unknown> => !transport || !admitted() ? Promise.reject({ stateChanged: false }) : body === undefined ? transport(method, path) : transport(method, path, body)
+    const request = (method: string, path: string, body?: unknown): Promise<unknown> => !transport || !(method === 'GET' ? readable() : admitted()) ? Promise.reject({ stateChanged: false }) : body === undefined ? transport(method, path) : transport(method, path, body)
     const read = async (): Promise<SslWorkspaceView> => readSslWorkspace(await request('GET', '/api/certificate-workspace'))
     const lock = (): void => {
       const blocked = !admitted() || busy || confirming || !workspace
       root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('input,textarea,select,button').forEach(element => { element.disabled = blocked || review })
-      control<HTMLButtonElement>('refresh').disabled = !admitted() || busy || confirming
+      control<HTMLButtonElement>('refresh').disabled = !readable() || busy || confirming
       control<HTMLButtonElement>('issue').disabled = blocked || review || !domain.value || !workspace?.capabilities[renewal.value ? 'renew' : 'issue']
       control<HTMLButtonElement>('install').disabled = blocked || review || !domain.value || !workspace?.capabilities.install
       chain.disabled = blocked || review || !workspace?.capabilities.install; key.disabled = chain.disabled
@@ -169,9 +171,9 @@ function bindWhmSsl(askDialog: ((options: Record<string, unknown>) => Promise<un
       try { return await askDialog({ title, body, danger, confirm: t('Confirm') }) === true } catch { return false } finally { confirming = false; lock() }
     }
     const refresh = async (): Promise<void> => {
-      if (busy || confirming || !admitted()) return
+      if (busy || confirming || !readable()) return
       if ((review || chain.value || key.value) && !await confirm(t('Discard upload draft and read stored certificates?'), t('Certificate input is cleared. No previous request is retried.'), true)) return
-      if (busy || confirming || !admitted()) return
+      if (busy || confirming || !readable()) return
       busy = true; lock()
       try { const value = await read(); chain.value = ''; key.value = ''; review = false; installRead(value); announce('read', t('Stored certificates read. Served TLS and renewal scheduling remain unverified.')) }
       catch { announce('failed', t('Stored certificates could not be read. Nothing was changed.')) }
@@ -221,7 +223,7 @@ function bindWhmSsl(askDialog: ((options: Record<string, unknown>) => Promise<un
         announce(review ? 'uncertain' : 'failed', review ? t('The outcome requires review. No retry was sent. Read stored configuration before continuing.') : t('The request was refused or could not be read. No retry was sent. A submitted private key has been cleared.'))
       } finally { busy = false; lock() }
     }
-    if (!transport || !admitted()) { root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('input,textarea,select,button').forEach(element => { element.disabled = true }); announce('unavailable', t('Certificate management is unavailable here. Nothing was read or changed.')); return }
+    if (!readable()) { root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('input,textarea,select,button').forEach(element => { element.disabled = true }); announce('unavailable', t('Certificate management is unavailable here. Nothing was read or changed.')); return }
     account.addEventListener('change', domainOptions); domain.addEventListener('change', () => { renewOptions(); lock() }); renewal.addEventListener('change', lock)
     search.addEventListener('input', showRows); accountFilter.addEventListener('change', showRows); statusFilter.addEventListener('change', showRows)
     control('clear-filters').addEventListener('click', () => { search.value = ''; accountFilter.value = ''; statusFilter.value = 'all'; showRows() })
@@ -233,4 +235,4 @@ function bindWhmSsl(askDialog: ((options: Record<string, unknown>) => Promise<un
 
 /** Browser declarations of the shared certificate read/acknowledgement parsers, reused by the account SSL page. */
 export const WHM_SSL_PARSER_BINDING = `const SSL_ID=${SSL_ID.toString()};const SSL_NAME=${SSL_NAME.toString()};const sslObject=${sslObject.toString()};const sslId=${sslId.toString()};const sslDate=${sslDate.toString()};const sslNames=${sslNames.toString()};const sslCoversHost=${sslCoversHost.toString()};const readSslWorkspace=${readSslWorkspace.toString()};const sslWriteUncertain=${sslWriteUncertain.toString()}`
-export const WHM_SSL_CLIENT_BINDING = `(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};${WHM_SSL_PARSER_BINDING};const bindMain=${bindWhmSsl.toString()};const bindObservations=${WHM_SSL_OBSERVATIONS_BINDING};return(askDialog)=>{bindMain(askDialog);bindObservations(readSslWorkspace)};})()`
+export const WHM_SSL_CLIENT_BINDING = withFrameRequest(`(()=>{${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const displayDateTime=${DISPLAY_DATETIME_BINDING};${WHM_SSL_PARSER_BINDING};const bindMain=${bindWhmSsl.toString()};const bindObservations=${WHM_SSL_OBSERVATIONS_BINDING};return(askDialog)=>{bindMain(askDialog);bindObservations(readSslWorkspace)};})()`)
