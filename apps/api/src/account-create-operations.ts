@@ -49,8 +49,10 @@ export async function handleAccountCreateOperationRoute(request: Request, url: U
   if (!job || job.kind !== 'account.provision' || kind === 'reseller' && job.actor !== `reseller:${username}`) return fail('NOT_FOUND', 'account operation not found', unchanged)
   // A settled answer carries its own account; state is read only for a running or restarted operation.
   const local = ports.local(job.id), accountId = job.checkpointData.accountId
-  const account = local || typeof accountId !== 'string' ? null : await ports.getAccount(accountId)
-  const primaryDomain = account ? await ports.primaryDomain(account.id) : null
+  // Account details only decorate the view: a failed state read never hides the operation status the job records.
+  const decorate = async <T>(read: () => Promise<T | null>): Promise<T | null> => { try { return await read() } catch { return null } }
+  const account = local || typeof accountId !== 'string' ? null : await decorate(() => ports.getAccount(accountId))
+  const primaryDomain = account ? await decorate(() => ports.primaryDomain(account.id)) : null
   return new Response(JSON.stringify(accountCreateOperationView(job, account, primaryDomain, local)), {
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   })

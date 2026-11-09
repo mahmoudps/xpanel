@@ -5,7 +5,8 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { pathToFileURL } from 'node:url'
 import { isBuiltin } from 'node:module'
 import { describe, it } from 'vitest'
-import { renderManagedUnits } from './managed-units.mjs'
+import { renderInstalledManagedUnitImages, renderManagedUnits } from './managed-units.mjs'
+import { parseInstallationTransitionJournal } from './installation-transition.mjs'
 import { inspectCompletedInstallationTransition, inspectNoSourceChangeInstallation } from './install-transition-observation.mjs'
 
 // Pure durable-image contracts only. Fixtures are never accepted as native ownership/readiness capabilities.
@@ -79,6 +80,14 @@ describe('completed source observations are distinct from historical finalizatio
     assert.throws(() => inspectCompletedInstallationTransition({ ...base, terminalBytes: JSON.stringify(older) }), /INSTALL_TRANSITION_IMAGE_INVALID/)
     for (const bad of [{ binding: {}, verified: {}, sourceWasNeverAdmitted: 'no', parentHeadSha256: 'c'.repeat(64) }, { binding: {}, verified: {}, sourceWasNeverAdmitted: true, parentHeadSha256: 'c'.repeat(64), extra: 1 }, 'x'])
       assert.throws(() => inspectCompletedInstallationTransition({ ...base, terminalBytes: JSON.stringify({ ...terminal, interruptedIssuance: bad }) }), /INSTALL_TRANSITION_IMAGE_INVALID/)
+  })
+
+  it('parses a journal an installed release wrote with its own unit images, and refuses a foreign one', () => {
+    const journal = JSON.parse(fixture().journalBytes)
+    const [, installed] = renderInstalledManagedUnitImages({ nodePath: '/usr/bin/node', programRoot: journal.target.releaseRoot, lifecycleParticipants: true })
+    const withApi = (bytes: string) => ({ ...journal, units: [{ ...journal.units[0], selected: { ...journal.units[0].selected, bytes: encoded(bytes), sha256: hash(bytes) } }, ...journal.units.slice(1)] })
+    assert.equal(parseInstallationTransitionJournal(withApi(installed['xpanel-api.service']), id(10)).phase, 'published')
+    assert.throws(() => parseInstallationTransitionJournal(withApi(installed['xpanel-api.service'].replace('=96', '=512')), id(10)), /INSTALLATION_TRANSITION_UNIT_IMAGE_INVALID/)
   })
 
   it('refuses incomplete publication, unsettled HEAD, terminal drift and an old receipt substitution', () => {

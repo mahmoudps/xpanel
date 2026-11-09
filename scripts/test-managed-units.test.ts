@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { MANAGED_UNIT_NAMES, renderManagedUnits, renderManagedUnitPlan, runManagedUnitCli } from './managed-units.mjs'
+import { MANAGED_UNIT_NAMES, managedWriterArguments, renderInstalledManagedUnitImages, renderManagedUnits, renderManagedUnitPlan, runManagedUnitCli } from './managed-units.mjs'
 import { renderRenewalUnits } from './management-tls.mjs'
 
 const options = (programRoot = '/opt/xpanel/releases/0.1.1', lifecycleParticipants = true) => ({ nodePath: '/usr/bin/node', programRoot, lifecycleParticipants })
@@ -108,5 +108,23 @@ describe('managed unit rendering; no host, ownership or activation proof', () =>
     expect(code).toBe(1)
     expect(output).toEqual([])
     expect(errors).toEqual(['Managed unit rendering failed.\n'])
+  })
+})
+
+describe('unit images installed releases wrote', () => {
+  it('still renders the API unit every supported installed release runs', () => {
+    // A new release parses the completed transition journal and observes the writers an installed release left behind.
+    const images = renderInstalledManagedUnitImages(options()).map(units => sha(units['xpanel-api.service']))
+    expect(images[0]).toBe(sha(renderManagedUnits(options())['xpanel-api.service']))
+    // 0.1.24 through 0.1.47 (frozen from 99d20c99). Dropping it refuses acquisition from those releases.
+    expect(images, 'Changing the API unit needs its previous heap arguments kept in API_HEAP_ARGUMENTS, or installed releases cannot acquire the new one (INSTALLATION_TRANSITION_UNIT_IMAGE_INVALID).')
+      .toContain('097d9b88aff40319b594a38fb6af92ab7c5208a3c22c8c788f3d76490535ee93')
+  })
+
+  it('accepts writer argv from the current and each installed API unit, and the one agent vector', () => {
+    const entry = '/opt/xpanel/releases/0.1.1/apps/api/src/main.ts'
+    expect(managedWriterArguments('api', '/usr/bin/node', entry)).toEqual([
+      ['/usr/bin/node', '--max-old-space-size=96', '--max-semi-space-size=1', entry], ['/usr/bin/node', '--max-old-space-size=96', entry]])
+    expect(managedWriterArguments('agent', '/usr/bin/node', 'main.ts')).toEqual([['/usr/bin/node', '--max-old-space-size=64', 'main.ts']])
   })
 })

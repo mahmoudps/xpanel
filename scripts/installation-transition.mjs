@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readlink, realpath } from 'node:fs/promises'
 import { assertOwnedFile, parseInstallationReceipt, readInstallationReceipt, readTrustedFile, requireLinuxRoot, withTrustedDirectory } from './lifecycle-ownership.mjs'
 import { assertPreparedReleaseCurrent, preparedReleaseInfo, observeInstalledReleaseTree, parsePreparedReleaseInput, withVisiblePreparedRelease } from './prepared-release.mjs'
-import { renderManagedUnits } from './managed-units.mjs'
+import { renderManagedUnits, renderInstalledManagedUnitImages } from './managed-units.mjs'
 import { captureManagedFile, managedPathAbsent, replaceManagedFile, replaceManagedLink, syncManagedDirectory } from './lifecycle-managed-files.mjs'
 
 const ROOT = '/var/lib/xpanel-lifecycle', JOURNALS = ROOT + '/installation-transitions'
@@ -251,14 +251,15 @@ export function parseInstallationTransitionJournal(input, operationId) {
     && hash(decoded(value.targetDependencies.bytes)) === value.target.dependencyReceiptSha256,
   'INSTALLATION_TRANSITION_TARGET_INVALID')
   parsePreparedReleaseInput({ artifactPath: value.target.artifactPath, expectedArchiveSha256: value.target.archiveSha256 })
-  const rendered = renderManagedUnits({ nodePath: original.runtime.nodePath, programRoot: value.target.releaseRoot, lifecycleParticipants: true })
+  // The release that wrote the journal rendered its selected units; an installed release's journal keeps its own images.
+  const renders = renderInstalledManagedUnitImages({ nodePath: original.runtime.nodePath, programRoot: value.target.releaseRoot, lifecycleParticipants: true })
   check(Array.isArray(value.units) && value.units.length === UNITS.length && Array.isArray(value.checkpoints), 'INSTALLATION_TRANSITION_UNITS_INVALID')
   value.units.forEach((unit, index) => {
     const path = '/etc/systemd/system/' + UNITS[index], expected = original.files.find(file => file.path === path)
     check(unit?.path === path && JSON.stringify(unit.previous?.entry) === JSON.stringify(expected)
       && hash(decoded(unit.previous.bytes)) === expected?.sha256
-      && decoded(unit.selected?.bytes).equals(Buffer.from(rendered[UNITS[index]]))
-      && unit.selected.sha256 === hash(Buffer.from(rendered[UNITS[index]])), 'INSTALLATION_TRANSITION_UNIT_IMAGE_INVALID')
+      && renders.some(rendered => decoded(unit.selected?.bytes).equals(Buffer.from(rendered[UNITS[index]]))
+        && unit.selected.sha256 === hash(Buffer.from(rendered[UNITS[index]]))), 'INSTALLATION_TRANSITION_UNIT_IMAGE_INVALID')
   })
   if (['selected', 'publishing', 'published'].includes(value.phase)) {
     const selected = parseInstallationReceipt(value.selectedReceipt)
