@@ -33,7 +33,7 @@ const CHECK_ID = /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/
 
 /** Declares one reviewed driver. Check IDs are the observations it owes; a missing one stays blocked in the report. */
 export function tool(id, definition) {
-  const { prefix, as = 'root', also = [], probe, paths, checks, unit = [], run, requests = 30, deadlineMs = 120_000, gate = id, restores = [], hostOnly = [] } = definition
+  const { prefix, as = 'root', also = [], probe, paths, checks, unit = [], run, requests = 30, deadlineMs = 120_000, gate = id, restores = [], hostOnly = [], accounts = 0 } = definition
   const location = PAGES.get(id), declared = definition.page
   if (location === undefined || (declared !== undefined && (declared.route !== location.route || (declared.read !== undefined && typeof declared.read !== 'string') || (declared.shows !== undefined && typeof declared.shows !== 'function')))) throw new Error(`Invalid qualification driver for ${id}`)
   const page = { ...location, read: declared?.read ?? (location.actor === as ? probe : '/api/auth/me'), ...(declared?.shows ? { shows: declared.shows } : {}) }
@@ -42,6 +42,7 @@ export function tool(id, definition) {
     || !Array.isArray(checks) || checks.length === 0 || new Set(checks).size !== checks.length || !checks.every(item => CHECK_ID.test(item))
     || !also.every(item => SESSION_ACTORS.includes(item) && item !== as) || !needs.every(item => ['account', 'mailbox'].includes(item)) || ([as, ...also].includes('owner') && !needs.includes('account')) || ([as, ...also].includes('mailbox') && !needs.includes('mailbox'))
     || !Number.isSafeInteger(requests) || requests < 1 || requests > 200 || !Number.isSafeInteger(deadlineMs) || deadlineMs < 1000 || deadlineMs > 600_000
+    || !Number.isSafeInteger(accounts) || accounts < 0 || accounts > 10
     || (restores.length > 0 && ![as, ...also].includes('root')) || !hostOnly.every(item => checks.includes(item))) throw new Error(`Invalid qualification driver for ${id}`)
   const revoked = ['SESSION-REVOKED', ...also.map(actor => `${actor.toUpperCase()}-SESSION-REVOKED`)]
   const host = ['OS-PROFILE', 'ANONYMOUS-DENIED', ...checks, ...revoked].map(item => `${prefix}-${item}`)
@@ -49,7 +50,9 @@ export function tool(id, definition) {
   const browser = ['BROWSER-SIGN-IN', 'BROWSER-PAGE', 'BROWSER-READ', 'BROWSER-SIGNED-OUT'].map(item => `${prefix}-${item}`)
   return Object.freeze({
     toolId: id, inventory: Object.freeze({ unit: Object.freeze(unit.map(item => Object.freeze({ ...item }))), host: Object.freeze(host), browser: Object.freeze(browser), external: Object.freeze(external) }),
-    driver: Object.freeze({ prefix, as, also, probe, paths, checks, page: Object.freeze(page), run, needs, requests: requests + restores.length * 2, deadlineMs, gate, restores, hostOnly, requires_qualification_admission: definition.requires_qualification_admission === true }),
+    // Each declared account creation brings its operation reads and the time a host takes to provision it.
+    driver: Object.freeze({ prefix, as, also, probe, paths: accounts ? new RegExp(`(?:${paths.source})|${ACCOUNT_OPERATION.source}`, paths.flags) : paths, checks, page: Object.freeze(page), run, needs,
+      requests: requests + restores.length * 2 + accounts * ACCOUNT_CREATE.requests, deadlineMs: deadlineMs + accounts * ACCOUNT_CREATE.ms, gate, restores, hostOnly, requires_qualification_admission: definition.requires_qualification_admission === true }),
   })
 }
 
@@ -65,6 +68,32 @@ export function apiClient(request, session) {
     patch: (path, body, extra) => send('PATCH', path, body, extra), delete: (path, body, extra) => send('DELETE', path, body, extra),
     anonymous: (path, options) => request(path, options),
   })
+}
+
+/** One account creation: its POST and operation reads, and the time a lab host takes to provision it (22 to 57 s seen). */
+export const ACCOUNT_CREATE = Object.freeze({ requests: 20, ms: 90_000 })
+const ACCOUNT_OPERATION = /^\/api\/accounts\/operations\/[0-9a-f-]{36}$/
+
+/**
+ * POST /api/accounts, then the API's own job status until the operation ends. A refusal returns the POST answer. An ended
+ * operation returns the answer it recorded for the POST (201 body or problem), or its job view after an API restart;
+ * `created` is true only for a succeeded operation, and `accepted` holds the 202 answer.
+ */
+export async function createAccount(client, body, extra, { sleep = ms => new Promise(done => setTimeout(done, ms)) } = {}) {
+  const accepted = await client.post('/api/accounts', body, extra)
+  const id = accepted.data?.operation?.id
+  // 201 is a creation that settled before its host step (a completed replay); anything else but 202 is a refusal.
+  if (accepted.status !== 202 || typeof id !== 'string') return { ...accepted, created: accepted.status === 201 && typeof accepted.data?.account?.id === 'string' }
+  let last = accepted
+  for (let attempt = 0; attempt < ACCOUNT_CREATE.requests - 2 && ['queued', 'running'].includes(last.data?.operation?.status); attempt++) {
+    await sleep(Math.min(5000, 1000 * (attempt + 2)))
+    last = await client.get(`/api/accounts/operations/${id}`)
+    if (last.status !== 200) break
+  }
+  const view = last.status === 200 ? last.data : undefined
+  if (view?.result !== undefined) return { ...last, status: 201, data: view.result, created: true, accepted }
+  if (view?.problem !== undefined) return { ...last, status: view.problem?.status ?? 500, data: view.problem, created: false, accepted }
+  return { ...last, created: view?.operation?.status === 'succeeded', accepted }
 }
 
 /** Runs one driver: every undo step runs even after a failed check, and a step that cannot confirm removal is a leftover. */
@@ -135,7 +164,7 @@ const password = () => `Xq-${randomBytes(18).toString('base64url')}-9a`
  * One account and mailbox per run for the owner and mailbox drivers, created and terminated through the API. It uses a
  * run-scoped plan and feature list so existing accounts are never touched. Secrets stay in memory only.
  */
-export async function createFixture(root, { tag, domainSuffix = 'example.net', mailbox = false }) {
+export async function createFixture(root, { tag, domainSuffix = 'example.net', mailbox = false, sleep }) {
   const username = `xq${tag}`.slice(0, 16), domain = `${username}.${domainSuffix}`, created = {}
   const fixture = { username, domain, accountId: null, password: password(), mailbox: null, cleanup: { ok: false, errors: [] } }
   const need = (response, what) => {
@@ -145,8 +174,10 @@ export async function createFixture(root, { tag, domainSuffix = 'example.net', m
   try {
     created.list = need(await root.post('/api/feature-lists', { name: `xq-${tag}`, ownerId: null, disabled: [] }), 'FEATURES').featureList.id
     created.plan = need(await root.post('/api/plans', { name: `xq-${tag}`, featureListId: created.list, resources: { diskMb: 2048, bandwidthMbMonth: 10240, ioReadBps: 50_000_000, ioWriteBps: 50_000_000, ioReadIops: 1000, ioWriteIops: 1000, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 } }), 'PLAN').plan.id
-    const body = need(await root.post('/api/accounts', { username, password: fixture.password, primaryDomain: domain, planId: created.plan }, { idempotencyKey: `xq-${tag}` }), 'ACCOUNT')
-    fixture.accountId = body.account?.id ?? null
+    const account = await createAccount(root, { username, password: fixture.password, primaryDomain: domain, planId: created.plan }, { idempotencyKey: `xq-${tag}` }, { sleep })
+    // An accepted account is removed with the rest even when its operation did not succeed.
+    fixture.accountId = account.data?.account?.id ?? account.accepted?.data?.account?.id ?? null
+    if (!account.created) throw new Error(`QUALIFICATION_FIXTURE_ACCOUNT:${account.status}:${safeResponse(account).code ?? account.data?.operation?.status ?? 'none'}`)
     if (typeof fixture.accountId !== 'string') throw new Error('QUALIFICATION_FIXTURE_ACCOUNT_ID')
     if (mailbox) {
       const address = `xq@${domain}`, secret = password()
@@ -154,7 +185,8 @@ export async function createFixture(root, { tag, domainSuffix = 'example.net', m
       fixture.mailbox = { address, password: secret }
     }
   } catch (error) {
-    await destroyFixture(root, fixture, created)
+    // The runner reports a removal that was not confirmed as a leftover.
+    error.fixtureCleanup = { username, ...await destroyFixture(root, fixture, created) }
     throw error
   }
   fixture.destroy = () => destroyFixture(root, fixture, created)

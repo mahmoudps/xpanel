@@ -37,11 +37,20 @@ export function renderMariadbDropIn(input: MariadbHostObservation, os: Pick<OsPr
 
 export function compileMariadbServerConfig(os: OsProfile, input: MariadbHostObservation): { files: RenderedFile[]; postActions: HostAction[] } {
   // mariadbd(8) --help --verbose parses every option file and exits non-zero on a bad value, before the restart.
-  return { files: [{ path: mariadbDropInPath(os), content: renderMariadbDropIn(input, os), mode: 0o644, owner: 'root', group: 'root' }], postActions: [{ kind: 'exec', argv: [MARIADB_SERVER_BINARY, '--verbose', '--help'] }] }
+  // Every generation keeps the server enabled and running; a failed enable or start fails the generation. With the
+  // database role off, applyServerOperations drops both, and the manifest then releases the unit.
+  return {
+    files: [{ path: mariadbDropInPath(os), content: renderMariadbDropIn(input, os), mode: 0o644, owner: 'root', group: 'root' }],
+    postActions: [
+      { kind: 'exec', argv: [MARIADB_SERVER_BINARY, '--verbose', '--help'] },
+      { kind: 'systemd', verb: 'enable', unit: os.services.mariadb },
+      { kind: 'systemd', verb: 'start', unit: os.services.mariadb },
+    ],
+  }
 }
 
-/** A restart drops every client connection, so it runs only when the drop-in changed. */
-export function mariadbRestartActions(os: OsProfile, files: readonly RenderedFile[], previous: readonly { path: string; sha256: string }[] | undefined, sha256: (text: string) => string): HostAction[] {
+/** A restart drops every client connection, so it runs only when the drop-in changed, and never with the database role off. */
+export function mariadbRestartActions(os: OsProfile, files: readonly RenderedFile[], previous: readonly { path: string; sha256: string }[] | undefined, sha256: (text: string) => string, enabled: boolean): HostAction[] {
   const path = mariadbDropInPath(os), file = files.find(row => row.path === path)
-  return file && previous?.find(row => row.path === path)?.sha256 !== sha256(file.content) ? [{ kind: 'systemd', verb: 'restart', unit: os.services.mariadb }] : []
+  return enabled && file && previous?.find(row => row.path === path)?.sha256 !== sha256(file.content) ? [{ kind: 'systemd', verb: 'restart', unit: os.services.mariadb }] : []
 }

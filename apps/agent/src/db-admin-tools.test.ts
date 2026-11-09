@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { handleDbAdminToolsRoute, PG_PASS_FILE, pgSuperuserVerifySql, pushDatabaseAccessHosts, readAdoptableUser, renderPgPass, setPostgresqlSuperuserPassword } from './db-admin-tools.ts'
 import { compileMariadbServerConfig, innodbBufferPoolMb, mariadbDropInPath, mariadbRestartActions, observeMariadbHost, renderMariadbDropIn } from './db-server-config.ts'
 import { createProductionHostTargetMatcher } from './executor.ts'
+import { buildGenerationManifest, diffManifests } from './reconciler-journal.ts'
+import { applyServerOperations } from './server-operations.ts'
+import { profileFor } from '@xpanel/os'
 import { handleAccountDbMaintenanceRoute } from './db-maintenance.ts'
 import { parseTweakValues } from '@xpanel/core'
 import type { HostAction, OsProfile } from '@xpanel/core'
@@ -81,11 +84,27 @@ describe('Tweak Settings: SQL', () => {
   })
   it('checks the configuration, restarts only on a change and stays inside the host targets', () => {
     const { files, postActions } = compileMariadbServerConfig(debian, { tweaks: on, memoryMb: 1024 }), hash = (text: string) => 'h' + text.length
-    expect(postActions).toEqual([{ kind: 'exec', argv: ['/usr/sbin/mariadbd', '--verbose', '--help'] }])
-    expect(mariadbRestartActions(debian, files, [{ path: mariadbDropInPath(debian), sha256: hash(files[0]!.content) }], hash)).toEqual([])
-    expect(mariadbRestartActions(debian, files, undefined, hash)).toEqual([{ kind: 'systemd', verb: 'restart', unit: 'mariadb' }])
+    expect(postActions[0]).toEqual({ kind: 'exec', argv: ['/usr/sbin/mariadbd', '--verbose', '--help'] })
+    expect(mariadbRestartActions(debian, files, [{ path: mariadbDropInPath(debian), sha256: hash(files[0]!.content) }], hash, true)).toEqual([])
+    expect(mariadbRestartActions(debian, files, undefined, hash, true)).toEqual([{ kind: 'systemd', verb: 'restart', unit: 'mariadb' }])
+    expect(mariadbRestartActions(debian, files, undefined, hash, false)).toEqual([])
     expect(createProductionHostTargetMatcher()(files[0]!.path, 'write')).toBe(true)
     expect(createProductionHostTargetMatcher()(mariadbDropInPath({ family: 'rhel' }), 'write')).toBe(true)
+  })
+  it('keeps MariaDB enabled and running in every generation while the database role is on', () => {
+    const ubuntu = profileFor('ID=ubuntu\nVERSION_ID="24.04"\n')
+    const { files, postActions } = compileMariadbServerConfig(ubuntu, { tweaks: on, memoryMb: 1024 })
+    expect(postActions.slice(1)).toEqual([{ kind: 'systemd', verb: 'enable', unit: 'mariadb' }, { kind: 'systemd', verb: 'start', unit: 'mariadb' }])
+    const manifest = (id: number, actions: HostAction[]) => buildGenerationManifest({ generationId: id, stateChecksum: 'a'.repeat(64), filesChecksum: 'b'.repeat(64), actor: 'root', files, postActions: actions, os: ubuntu })
+    // Stage, 2026-11-09: generation 20 restarted MariaDB for its new drop-in, generation 21 stopped and disabled it as obsolete.
+    const restart: HostAction = { kind: 'systemd', verb: 'restart', unit: 'mariadb' }
+    expect(diffManifests(manifest(20, [restart]), manifest(21, [])).removedUnits).toEqual([])
+    expect(diffManifests(manifest(20, [...postActions, restart]), manifest(21, postActions)).removedUnits).toEqual([])
+    // With the role off the server-operations step drops both, so the unit is released and nothing restarts it.
+    const off = [...postActions]
+    applyServerOperations([], off, { roles: { profile: 'dns-only', optional: [], dnsServer: 'powerdns', ftpServer: 'pure-ftpd' }, forwards: [], systemMail: null, panelTls: null }, ubuntu)
+    expect(off).toEqual(postActions.slice(0, 1))
+    expect(diffManifests(manifest(21, postActions), manifest(22, off)).removedUnits).toEqual(['mariadb'])
   })
   it('stays out of a host without MariaDB and reads memory from the kernel', async () => {
     const executor = (ok: boolean) => ({ runCommand: vi.fn(async () => ({ ok, code: ok ? 0 : 1, stdout: '', stderr: '' })), readFile: vi.fn(async () => 'MemTotal:        2097152 kB\nMemFree: 1 kB\n') })

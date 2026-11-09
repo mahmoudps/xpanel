@@ -35,34 +35,35 @@ describe('rollback of units without a reload job', { tags: ['unit'] }, () => {
 const os = profileFor('ID=ubuntu\nVERSION_ID="24.04"\n')
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNo'
 
-/** Every host action and file write is an admitted primitive; the authority lapses at the first live file write. */
+/** Every host action and file write is an admitted primitive; the first live file write fails once. */
 function nativeHost() {
   const fake = new FakeHostExecutor()
   const actions: HostAction[] = []
-  let lapseOnWrite = false, lapsed = false
+  let failNextWrite = false
   const executor: FakeHostExecutor = new Proxy(fake, {
     has: (target, key) => key !== 'files' && Reflect.has(target, key),
     get: (target, key) => {
       if (key === 'runAction') return (action: HostAction) => { actions.push(action); return authorizedHostEffect(executor, () => target.runAction(action)) }
-      if (key === 'writeFile') return (file: RenderedFile) => { if (lapseOnWrite) lapsed = true; return authorizedHostEffect(executor, () => target.writeFile(file)) }
+      if (key === 'writeFile') return (file: RenderedFile) => authorizedHostEffect(executor, async () => {
+        if (failNextWrite) { failNextWrite = false; fail('PRECONDITION_FAILED', 'injected live write failure') }
+        return target.writeFile(file)
+      })
       if (key === 'runCommand') return async (argv: string[]) => argv[1] === '-v' ? { ok: true, code: 0, stdout: '', stderr: 'nginx version: nginx/1.24.0' } : target.runCommand(argv)
       const value = Reflect.get(target, key)
       return typeof value === 'function' ? value.bind(target) : value
     },
   })
-  const effectAuthority = { signal: new AbortController().signal, assertAuthority: async () => {
-    if (lapsed) fail('CONFLICT', 'the provisioning job is not an active account.provision operation')
-  } }
-  return { fake, executor, actions, effectAuthority, lapseAtFirstWrite: () => { lapseOnWrite = true } }
+  const effectAuthority = { signal: new AbortController().signal, assertAuthority: async () => {} }
+  return { fake, executor, actions, effectAuthority, failFirstWrite: () => { failNextWrite = true } }
 }
 
-describe.runIf(process.platform === 'linux')('an account whose provisioning authority lapsed after its user was created', () => {
+describe.runIf(process.platform === 'linux')('an account whose provisioning generation failed after its user was created', () => {
   let state: TestStateStoreHandle
   let db: TestDbHandle
   let host: ReturnType<typeof nativeHost>
   let reconciler: HostReconciler
-  let lapse: unknown
-  // One built scene: an applied generation with qa1's socket units, then qa4's generation lapsing at its first live write.
+  let failure: unknown
+  // One built scene: an applied generation with qa1's socket units, then qa4's generation failing at its first live write.
   beforeAll(async () => {
     state = await createTestStateStore()
     db = await createTestDb()
@@ -81,14 +82,14 @@ describe.runIf(process.platform === 'linux')('an account whose provisioning auth
     if ((await reconciler.reconcile({ actor: 'root', mailAuth: null })).status !== 'applied') throw new Error('fixture generation was not applied')
     await addAccount('qa4')
     host.actions.length = 0
-    host.lapseAtFirstWrite()
-    lapse = await reconciler.reconcile({ actor: 'root:root', mailAuth: null, effectAuthority: host.effectAuthority }).then(() => null, (error: unknown) => error)
+    host.failFirstWrite()
+    failure = await reconciler.reconcile({ actor: 'root:root', mailAuth: null, effectAuthority: host.effectAuthority })
   }, 20_000)
   afterAll(async () => { await state?.close(); await db?.close() })
 
   it('rolls the socket units back without a reload', { tags: ['feature'] }, async () => {
-    // The lapse ends the request as an unverified outcome; the rollback ran outside the lapsed authority.
-    expect(lapse).toMatchObject({ code: 'CONFLICT', detail: { stateChanged: true, verificationRequired: true } })
+    // The failed generation ends as an unverified outcome; the rollback ran outside the admitted authority.
+    expect(failure).toMatchObject({ status: 'failed', stateChanged: true, verificationRequired: true })
     expect(host.actions).toContainEqual(expect.objectContaining({ kind: 'ensure-user', name: 'qa4' }))
     expect(host.actions.filter(action => action.kind === 'systemd' && action.verb === 'reload' && action.unit.endsWith('.socket'))).toEqual([])
     expect(host.fake.units.get('xpanel-caldav-qa1.socket')?.active).toBe(true)

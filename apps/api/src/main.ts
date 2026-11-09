@@ -69,6 +69,7 @@ import {
 } from '../../../scripts/lifecycle-admission.mjs'
 
 type ApiLifecycleParticipant = Awaited<ReturnType<typeof startLifecycleWriterParticipant>>
+const STARTUP_ADMISSION = { busyRetryMs: 1000 }
 
 /** IPC is established before startup writers; an unsafe canonical namespace is quarantined. */
 export const prepareApiLifecycleStartup = async (): Promise<{ managed: boolean; quarantined: boolean; participant?: ApiLifecycleParticipant }> => {
@@ -1215,6 +1216,7 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
     const ingressSecret = opts.ingressSecret ?? await loadAgentCredentialFile(opts.ingressSecretFile ?? process.env.XPANEL_INGRESS_SECRET_FILE ?? '/etc/xpanel/ingress.secret')
     if (Buffer.byteLength(ingressSecret, 'utf8') < 32) fail('PRECONDITION_FAILED', 'a protected ingress credential of at least 32 bytes is required')
     const os = opts.os ?? await detectHostOsProfile()
+    // An upgrade finishing or release retention can hold EX past one lock wait: startup waits for it, it does not exit.
     const handle = await withLifecycleWriterAdmission(async () => {
       if (!opts.agentApp) await protectInstalledStateParent({ dbPath, stateDir })
       if (dbPath !== ':memory:') await mkdir(dirname(dbPath), { recursive: true })
@@ -1226,14 +1228,14 @@ export const startPanelEntrypoints = async (opts: PanelEntrypointsOptions = {}) 
       await initializeOperationalMetadata(opened.db)
       await ensureRootPrincipal(opened.db, { ...(opts.rootPassword ? { password: opts.rootPassword } : {}) })
       return opened
-    })
+    }, STARTUP_ADMISSION)
     const store = new StateStore(stateDir)
     store.registerAccountContactIndexRecovery(account => syncAccountContactIndex(handle.db, account))
     store.registerHostOperationProbe(() => hostOperationInFlight(handle.db))
     await withLifecycleWriterAdmission(async () => {
       assertNoActiveDatabaseTransaction()
       await store.getWriterLock().waitForUnlocked()
-    })
+    }, STARTUP_ADMISSION)
     // Saved locale policy and uploaded catalogs apply from panel start; invalid saved state keeps the release catalogs.
     const languages = await installSavedLanguages(store.rootDir)
     if (languages.policy === 'invalid' || languages.rejected.length) console.warn(`languages: saved policy ${languages.policy}; catalogs not applied: ${languages.rejected.join(', ') || 'none'}`)

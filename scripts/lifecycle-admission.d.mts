@@ -6,7 +6,8 @@ export function readLifecycleBarrier(): Promise<Readonly<Record<string, unknown>
 export function isLifecycleManaged(): Promise<boolean>
 export function assertLifecycleWritesAllowed(): Promise<void>
 export function lifecycleAdmissionResponse(request: Request, options?: {surface?: 'api' | 'agent'}): Promise<Response | null>
-export function withLifecycleWriterAdmission<T>(callback: () => T | Promise<T>): Promise<T>
+/** busyRetryMs: daemon startup only; a lock still held exclusively after the wait is asked again after that pause. */
+export function withLifecycleWriterAdmission<T>(callback: () => T | Promise<T>, options?: {busyRetryMs?: number}): Promise<T>
 export function currentLifecycleWriterAdmission(): object
 export function withVisibleLifecycleWriterAdmission<T>(capability: unknown, callback: () => T | Promise<T>): Promise<T>
 export function assertLifecycleWriterAdmissionHeld(): Promise<void>

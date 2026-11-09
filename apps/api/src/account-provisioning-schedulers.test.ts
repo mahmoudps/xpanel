@@ -22,6 +22,7 @@ import { createApiApp, INGRESS_SECRET_HEADER } from './server.ts'
 import { canonicalProvisioningIdentity } from './use-cases/account-provisioning-port.ts'
 import type { PreparedAccountState } from './use-cases/account-provisioning-prepared.ts'
 import { memoryPreparations } from './testing/provisioning-preparation-fixture.ts'
+import { settledAccountCreation } from './testing/account-create-settle.ts'
 
 // H only: the API, the Agent provisioning route and admission, the StateStore and both schedulers are the real
 // code paths. The CA order and the native workload observation are synthetic; nothing here proves host effects.
@@ -111,11 +112,11 @@ async function host() {
   cleanup.push(() => mailCerts.stop(), () => monitoring.stop())
   const api = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: 'xwhm', publicOrigin: ORIGIN, allowedOrigins: [ORIGIN],
     ingressSecret: INGRESS, requireSecureCookies: true, requireOriginHeader: true, provisioningPreparations: preparations, agentApp, agentToken: TOKEN })
-  const create = (username: string) => api.fetch(new Request(ORIGIN + '/api/accounts', { method: 'POST', headers: {
-    'content-type': 'application/json', origin: ORIGIN, cookie: sessionCookieName('xwhm', true) + '=' + sessionToken, 'x-csrf-token': deriveCsrfToken(sessionToken, SECRET, 'xwhm'),
-    [INGRESS_SECRET_HEADER]: INGRESS, 'x-forwarded-proto': 'https', 'x-forwarded-for': '192.0.2.20',
-  }, body: JSON.stringify({ username, primaryDomain: username + '.example.test', planId: plan.id, passwordHash: HASH,
-    php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 2, maxRequests: 100, processIdleTimeoutSec: 10 }, ini: {} } }) }), { remoteAddress: '127.0.0.1' })
+  const headers = { 'content-type': 'application/json', origin: ORIGIN, cookie: sessionCookieName('xwhm', true) + '=' + sessionToken, 'x-csrf-token': deriveCsrfToken(sessionToken, SECRET, 'xwhm'),
+    [INGRESS_SECRET_HEADER]: INGRESS, 'x-forwarded-proto': 'https', 'x-forwarded-for': '192.0.2.20' }
+  const read = (path: string) => api.fetch(new Request(ORIGIN + path, { headers }), { remoteAddress: '127.0.0.1' })
+  const create = async (username: string) => settledAccountCreation(await api.fetch(new Request(ORIGIN + '/api/accounts', { method: 'POST', headers, body: JSON.stringify({ username, primaryDomain: username + '.example.test', planId: plan.id, passwordHash: HASH,
+    php: { version: '8.3', handler: 'fpm', fpm: { mode: 'ondemand', maxChildren: 2, startServers: 1, minSpareServers: 1, maxSpareServers: 2, maxRequests: 100, processIdleTimeoutSec: 10 }, ini: {} } }) }), { remoteAddress: '127.0.0.1' }), read)
   return { state, during, mailCerts, orders, create, stopNextHostStep: (stop: () => Promise<void>) => { stopBeforeEffect = stop } }
 }
 

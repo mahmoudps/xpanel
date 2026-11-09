@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-const seams = vi.hoisted(() => ({ capability: {}, spawns: [] as string[][] }))
+const seams = vi.hoisted(() => ({ capability: {}, spawns: [] as string[][], busy: 0 }))
 vi.mock('node:child_process', () => ({ spawn: (_path: string, args: string[]) => {
-  seams.spawns.push(args); const child = new EventEmitter(); queueMicrotask(() => child.emit('close', 0, null)); return child
+  seams.spawns.push(args); const child = new EventEmitter(); const code = seams.busy > 0 ? (seams.busy--, 1) : 0; queueMicrotask(() => child.emit('close', code, null)); return child
 } }))
 vi.mock('node:fs/promises', async original => ({ ...await original<typeof import('node:fs/promises')>(), lstat: async () => ({ dev: 1n, ino: 2n }) }))
 vi.mock('./lifecycle-ownership.mjs', () => ({ withTrustedFile: async (_path: string, _options: unknown, callback: (pin: unknown) => unknown) => callback({ fd: 42, verify: vi.fn() }), withTrustedDirectory: vi.fn() }))
@@ -24,5 +24,23 @@ describe('recovery observation cannot become writer authority', () => {
     })
     expect(seams.spawns.every(args => args[0] === '--shared')).toBe(true)
     await expect(assertLifecycleRecoveryObservationAdmissionHeld(seams.capability)).rejects.toThrow('LIFECYCLE_RECOVERY_OBSERVATION_REQUIRED')
+  })
+})
+
+// flock exits 1 when its wait ends with EX still held elsewhere (an upgrade finishing, release retention).
+describe.runIf(process.platform === 'linux')('daemon startup admission while another process holds EX', () => {
+  it('asks again after LIFECYCLE_BUSY and runs the startup callback once', async () => {
+    seams.busy = 2
+    const before = seams.spawns.length, callback = vi.fn(async () => 'ready')
+    await expect(withLifecycleWriterAdmission(callback, { busyRetryMs: 1 })).resolves.toBe('ready')
+    expect(callback).toHaveBeenCalledTimes(1)
+    expect(seams.spawns.length - before).toBe(3)
+  })
+  it('fails as before without busyRetryMs and never repeats a callback that already ran', async () => {
+    seams.busy = 1
+    await expect(withLifecycleWriterAdmission(async () => undefined)).rejects.toMatchObject({ code: 'LIFECYCLE_BUSY' })
+    const inner = vi.fn(async () => { throw Object.assign(new Error('LIFECYCLE_BUSY'), { code: 'LIFECYCLE_BUSY' }) })
+    await expect(withLifecycleWriterAdmission(inner, { busyRetryMs: 1 })).rejects.toMatchObject({ code: 'LIFECYCLE_BUSY' })
+    expect(inner).toHaveBeenCalledTimes(1)
   })
 })

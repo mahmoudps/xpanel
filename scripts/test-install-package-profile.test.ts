@@ -304,6 +304,23 @@ describe('SELinux settings of the EL installer', () => {
   })
 })
 
+describe('package step of the installer', () => {
+  it('keeps the distribution lighttpd daemon masked while apt installs it, so nginx gets :80', () => {
+    // Ubuntu 22.04 qualification, 2026-11-09: lighttpd's postinst started it on :80 and nginx's postinst then failed to bind.
+    const source = readFileSync(join(rootDir, 'scripts/install.sh'), 'utf8')
+    const start = source.indexOf('echo "[2/6] Installing packages via')
+    const block = source.slice(start, source.indexOf('\nfi\n', start) + 4)
+    const script = 'apt-get() { echo "apt-get $*"; }; add-apt-repository() { :; }; systemctl() { echo "systemctl $*"; }\n'
+      + 'OS_FAMILY=debian PKG_MGR=apt-get; BOOTSTRAP_PACKAGES=(curl); REPOSITORY_SOURCES=(universe); PACKAGES=(nginx lighttpd lighttpd-mod-webdav)\n' + block
+    const run = spawnSync(bash, ['-euo', 'pipefail'], { input: script, encoding: 'utf8', timeout: 10_000 })
+    expect(run.status, run.stderr).toBe(0)
+    const calls = run.stdout.trim().split('\n').filter(line => !line.startsWith('['))
+    const install = calls.indexOf('apt-get install -y --no-install-recommends nginx lighttpd lighttpd-mod-webdav')
+    expect(calls.indexOf('systemctl mask --runtime lighttpd.service')).toBe(install - 1)
+    expect(calls.indexOf('systemctl unmask --runtime lighttpd.service')).toBe(install + 1)
+  })
+})
+
 describe('OS profile configuration hand-over to the installer', () => {
   it.each(['ubuntu 22.04', 'almalinux 9.6'])('%s: lists files, exec argv and systemd steps of installConfiguration in plan order', release => {
     const [id, versionId] = release.split(' ')

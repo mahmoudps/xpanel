@@ -84,7 +84,7 @@ WorkingDirectory=${programRoot}
 Environment=NODE_ENV=production
 EnvironmentFile=/etc/xpanel/runtime.env
 EnvironmentFile=/etc/xpanel/api.env
-ExecStart=${nodePath} --max-old-space-size=96 ${programRoot}/apps/api/src/main.ts
+ExecStart=${nodePath} --max-old-space-size=96 --max-semi-space-size=1 ${programRoot}/apps/api/src/main.ts
 RuntimeDirectory=xpanel-api
 RuntimeDirectoryMode=0755
 Restart=always

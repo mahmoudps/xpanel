@@ -208,6 +208,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
   let settleStartup!: () => void
   const startupSettled = new Promise<void>((resolve) => { settleStartup = resolve })
   try {
+    // An upgrade finishing or release retention can hold EX past one lock wait: startup waits for it, it does not exit.
     const daemon = await withLifecycleWriterAdmission(async () => {
       if (dbPath !== ':memory:') {
         await mkdir(dirname(dbPath), { recursive: true })
@@ -521,7 +522,7 @@ export const startAgentDaemon = async (opts: AgentDaemonOptions = {}) => {
         try { await closeResources() } catch (cleanup) { throw new AggregateError([error, cleanup], 'agent startup cleanup requires inspection') }
         throw error
       }
-    })
+    }, { busyRetryMs: 1000 })
     settleStartup()
     return daemon
   } catch (error) {

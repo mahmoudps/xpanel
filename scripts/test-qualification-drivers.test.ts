@@ -5,7 +5,7 @@ import { specs } from '../packages/catalog/src/data/index.ts'
 import { PHASE1_TOOL_PROBES } from '../packages/catalog/src/host-qualification.ts'
 import { DRIVERS, QUALIFICATION_INVENTORY, SLICES } from './qualification-drivers/index.mjs'
 import { entryPointAllowsApiRoute } from '../apps/api/src/entry-points.ts'
-import { ACTOR_ENTRY, apiClient, createFixture, displayValues, entryOrigin, failureCause, runDriver, runTag, signInThroughForm, tool } from './qualification-drivers/kit.mjs'
+import { ACCOUNT_CREATE, ACTOR_ENTRY, apiClient, createAccount, createFixture, displayValues, entryOrigin, failureCause, runDriver, runTag, signInThroughForm, tool } from './qualification-drivers/kit.mjs'
 import { qualificationPlan, qualificationRequirements, RUNNER_SLOTS } from './qualification-plan.mjs'
 import { driveTool, transportBudget } from './qualification-runner.mjs'
 
@@ -31,6 +31,14 @@ describe('driver declarations', () => {
       expect(() => tool('audit-log', { ...definition, ...bad })).toThrow('Invalid qualification driver')
     }
     expect(() => tool('not-a-catalog-tool', definition)).toThrow('Invalid qualification driver')
+  })
+
+  it('gives each declared account creation its operation reads, requests and provisioning time', () => {
+    const { driver } = tool('audit-log', { ...definition, accounts: 2 })
+    expect(driver.paths.test('/api/x') && driver.paths.test('/api/accounts/operations/00000000-0000-4000-8000-000000000001')).toBe(true)
+    expect(tool('audit-log', definition).driver.paths.test('/api/accounts/operations/00000000-0000-4000-8000-000000000001')).toBe(false)
+    expect([driver.requests, driver.deadlineMs]).toEqual([30 + 2 * ACCOUNT_CREATE.requests, 120_000 + 2 * ACCOUNT_CREATE.ms])
+    expect(() => tool('audit-log', { ...definition, accounts: 11 })).toThrow('Invalid qualification driver')
   })
 
   it('derives the check IDs of each slot from the declaration', () => {
@@ -193,6 +201,28 @@ describe('run fixture', () => {
     const refused = responses((method, path) => method === 'DELETE' ? { status: 409, data: { code: 'CONFLICT' } } : responder()(method, path))
     const created = await createFixture(refused.clients.root, { tag: 'aaaaaaaa' })
     expect((await created.destroy()).ok).toBe(false)
+  })
+
+  const OPERATION = '00000000-0000-4000-8000-0000000000aa'
+  const operation = (status: string) => ({ status: 200, data: { operation: { id: OPERATION, status }, account: { id: 'account-id' } } })
+  it('waits for an accepted account through the operation status, not the POST', async () => {
+    const reads = [operation('running'), { status: 200, data: { operation: { id: OPERATION, status: 'succeeded' }, result: { account: { id: 'account-id' }, execution: { targetVerified: true } } } }], delays: number[] = []
+    const { seen, clients } = responses((method, path) => method === 'POST' && path === '/api/accounts' ? { status: 202, data: { operation: { id: OPERATION, status: 'running' }, account: { id: 'account-id' } } }
+      : method === 'GET' && path === `/api/accounts/operations/${OPERATION}` ? reads.shift()! : responder()(method, path))
+    const created = await createAccount(clients.root, { username: 'xqa' }, undefined, { sleep: async (ms: number) => { delays.push(ms) } })
+    // The answer the POST would have given, as before the 202: the creation body under 201.
+    expect(created).toMatchObject({ created: true, status: 201, data: { account: { id: 'account-id' }, execution: { targetVerified: true } }, accepted: { status: 202 } })
+    expect(seen.filter(item => item.path.startsWith('/api/accounts/operations/')).length).toBe(2)
+    expect(delays).toEqual([2000, 3000])
+  })
+
+  it('removes a fixture account the API accepted when its operation failed, and reports the cleanup', async () => {
+    const { seen, clients } = responses((method, path) => method === 'POST' && path === '/api/accounts' ? { status: 202, data: { operation: { id: OPERATION, status: 'running' }, account: { id: 'account-id' } } }
+      : method === 'GET' && path === `/api/accounts/operations/${OPERATION}` ? operation('failed') : responder()(method, path))
+    const failed = await createFixture(clients.root, { tag: 'aaaaaaaa', sleep: fast }).then(() => null, (error: { message: string; fixtureCleanup?: object }) => error)
+    expect(failed?.message).toBe('QUALIFICATION_FIXTURE_ACCOUNT:200:failed')
+    expect(failed?.fixtureCleanup).toEqual({ username: 'xqaaaaaaaa', ok: true, errors: [] })
+    expect(seen.filter(item => item.method === 'DELETE').map(item => item.path)).toEqual(['/api/accounts/account-id', '/api/plans/plan-id', '/api/feature-lists/list-id'])
   })
 
   it('finds the other panels on the same host name', () => {

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { lstat, open, readFile, readlink, readdir, chmod } from 'node:fs/promises'
+import { lstat, open, readFile, readlink, readdir, chmod, unlink } from 'node:fs/promises'
 import { createServer, connect } from 'node:net'
 import { randomBytes } from 'node:crypto'
 import { withTrustedFile, withTrustedDirectory } from './lifecycle-ownership.mjs'
@@ -156,10 +156,18 @@ export async function withVisibleLifecycleWriterAdmission(capability, callback) 
 }
 
 /** Tracks full admission retirement, including lock/FD closure, without observer deadlines. */
-export function withLifecycleWriterAdmission(callback) {
-  const flight = admittedWriter(callback)
-  writerFlights.add(flight)
-  return flight.then(value => { writerFlights.delete(flight); return value }, error => { writerFlights.delete(flight); throw error })
+// busyRetryMs (daemon startup only): a lock still held exclusively after the wait is asked again instead of failing, since an
+// upgrade finishing or release retention keeps EX past it. Each attempt is its own flight, so a fenced drain never waits on a retry.
+export async function withLifecycleWriterAdmission(callback, { busyRetryMs } = {}) {
+  for (;;) {
+    let entered = false
+    const flight = admittedWriter(busyRetryMs === undefined ? callback : () => { entered = true; return callback() })
+    writerFlights.add(flight)
+    try { return await flight }
+    catch (error) { if (busyRetryMs === undefined || entered || error?.code !== 'LIFECYCLE_BUSY') throw error }
+    finally { writerFlights.delete(flight) }
+    await new Promise(resolve => setTimeout(resolve, busyRetryMs))
+  }
 }
 /** Observation assertion only; legacy fallback, copied objects and retired callbacks never establish native SH. */
 export async function assertLifecycleWriterAdmissionHeld() {
@@ -356,6 +364,27 @@ async function answerParticipantRequest(bytes, { role, start, onFence, verifyPar
   return JSON.stringify({ nonce: request.nonce, operationId: barrier?.operationId ?? null, role, pid: process.pid, start, activeWriters, fenced: !!barrier }) + '\n'
 }
 
+/** Resolves true when a listener accepts on the name. Only a refused connection proves no live peer. */
+const participantSocketAnswers = path => new Promise(resolve => {
+  const client = connect(path)
+  client.once('connect', () => { client.destroy(); resolve(true) })
+  client.once('error', error => { client.destroy(); resolve(error.code !== 'ECONNREFUSED') })
+})
+
+/**
+ * A process killed before close() (an abort, SIGKILL, an OOM) leaves its bound name behind. Only a socket of this uid,
+ * not a symlink, that refuses connections is removed; a live peer or any other entry still refuses startup.
+ */
+async function removeStaleParticipantSocket(path, verifyParent) {
+  let found
+  try { found = await lstat(path, { bigint: true }) } catch (error) { if (error.code === 'ENOENT') return; throw error }
+  if (!found.isSocket() || Number(found.uid) !== process.geteuid() || await participantSocketAnswers(path)) fail('LIFECYCLE_PARTICIPANT_SOCKET_EXISTS')
+  await verifyParent()
+  const again = await lstat(path, { bigint: true })
+  if (again.dev !== found.dev || again.ino !== found.ino) fail('LIFECYCLE_PARTICIPANT_SOCKET_EXISTS')
+  await unlink(path)
+}
+
 /** Reviewed daemon startup installs this read-only participant; it is never a public bypass. */
 export async function startLifecycleWriterParticipant(role, { onFence } = {}) {
   if (process.platform !== 'linux' || !['api', 'agent'].includes(role)) fail('LIFECYCLE_PARTICIPANT_PLATFORM_REQUIRED')
@@ -373,7 +402,7 @@ export async function startLifecycleWriterParticipant(role, { onFence } = {}) {
   const parentPin = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
   const verifyParent = async () => { const [opened, named] = await Promise.all([parentPin.stat({ bigint: true }), lstat(directory, { bigint: true })]); if (opened.dev !== parent.dev || opened.ino !== parent.ino || named.dev !== parent.dev || named.ino !== parent.ino || named.uid !== parent.uid || named.mode !== parent.mode) fail('LIFECYCLE_PARTICIPANT_DIRECTORY_CHANGED') }
   await verifyParent()
-  try { await lstat(path); fail('LIFECYCLE_PARTICIPANT_SOCKET_EXISTS') } catch (error) { if (error.code !== 'ENOENT') throw error }
+  await removeStaleParticipantSocket(path, verifyParent)
   const server = createServer({ allowHalfOpen: true }, socket => {
     let bytes = ''; socket.setTimeout(2000, () => socket.destroy())
     socket.on('data', chunk => { bytes += chunk; if (Buffer.byteLength(bytes) > 4096) socket.destroy() })

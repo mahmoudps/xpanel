@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto'
-import { safeResponse, tool } from './kit.mjs'
+import { createAccount, safeResponse, tool } from './kit.mjs'
 
 const secret = () => `Xq-${randomBytes(18).toString('base64url')}-9a`
 const ID = '[0-9a-f-]{36}', ACC = 'xq[0-9a-f]{8}[a-z]{1,2}'
@@ -27,8 +27,8 @@ async function scratch(x, label, caps = {}) {
   undo(`plan ${label}`, async () => gone(await root.delete(`/api/plans/${planId}`)))
   const username = `xq${tag}${label}`, password = secret(), primary = `${username}.example.net`
   undo(`account ${label}`, async () => gone(await root.delete(`/api/accounts/${username}`, { confirmUsername: username })))
-  const created = await root.post('/api/accounts', { username, password, primaryDomain: primary, planId }, { idempotencyKey: `xq-${tag}-${label}` })
-  if (created.status !== 201 || typeof created.data?.account?.id !== 'string') return null
+  const created = await createAccount(root, { username, password, primaryDomain: primary, planId }, { idempotencyKey: `xq-${tag}-${label}` }, x)
+  if (!created.created || typeof created.data?.account?.id !== 'string') return null
   const session = await signIn('owner', { username, password })
   return session.client ? { client: session.client, id: created.data.account.id, username, primary } : null
 }
@@ -129,7 +129,7 @@ export default [
   tool('create-domain', {
     prefix: 'S7CDM', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/domains',
     paths: only('domains', `domains/${ID}`, 'dns/zones', 'accounts/xq[0-9a-f]{1,13}/files', ...SCRATCH),
-    requests: 90, deadlineMs: 300_000,
+    accounts: 1, requests: 90, deadlineMs: 300_000,
     unit: [{ id: 'S7CDM-UNIT-1', file: 'apps/api/src/completion-domain-workspace-security.test.ts', name: 'conditional domain workspace API with isolated real SQLite and desired state creates owned subdomains and aliases with coupled parent settings' }],
     checks: ['ADDON-LIMIT-EXCEEDED', 'DOCROOT-DOTDOT-REFUSED', 'DOCROOT-NESTED-DOTDOT-REFUSED', 'ADDON-ANSWERS-HTTP'],
     async run(x) {
@@ -274,7 +274,7 @@ export default [
   tool('dns-zone-records', {
     prefix: 'S7DZR', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/dns/zones',
     paths: only('dns/zones', 'dns/zones/[a-z0-9.-]{1,253}', ...SCRATCH),
-    requests: 60, deadlineMs: 300_000,
+    accounts: 1, requests: 60, deadlineMs: 300_000,
     unit: [{ id: 'S7DZR-UNIT-1', file: 'apps/api/src/completion-whm-dns-security.test.ts', name: 'xWHM DNS revision-bound loopback HTTP acceptance saves exact records with a server serial, persisted readback and audit' }],
     checks: ['ZONE-READ', 'RECORD-ADDED', 'RECORD-EDITED', 'RECORD-REMOVED', 'UNEDITED-RECORDS-KEPT', 'FOREIGN-ZONE-REFUSED', 'FEATURE-DISABLED-REFUSED'],
     async run(x) {
@@ -325,7 +325,7 @@ export default [
   tool('cloudflare-account', {
     prefix: 'S7CFA', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/account/sec/cloudflare',
     paths: only('account/sec/cloudflare', 'account/sec/cloudflare/zone\\?domain=[a-z0-9.-]{1,253}', ...SCRATCH),
-    requests: 40, deadlineMs: 240_000,
+    accounts: 1, requests: 40, deadlineMs: 240_000,
     unit: [{ id: 'S7CFA-UNIT-1', file: 'apps/api/src/sec-cloudflare.test.ts', name: 'sec Cloudflare for account owners shows only owned domains and refuses unlinked or foreign domains' }],
     checks: ['FOREIGN-DOMAIN-NOT-FOUND', 'OWN-DOMAIN-RECOGNISED', 'LIST-ONLY-OWN-DOMAINS'],
     async run(x) {
@@ -343,7 +343,7 @@ export default [
   tool('email-accounts', {
     prefix: 'S7EAC', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/service-users', page: ACCOUNTS_PAGE,
     paths: only(...MAIL_PATHS, ...SCRATCH),
-    requests: 60, deadlineMs: 300_000, unit: [MAIL_UNIT],
+    accounts: 1, requests: 60, deadlineMs: 300_000, unit: [MAIL_UNIT],
     checks: ['MAILBOX-LIMIT-EXCEEDED', 'LIST-STILL-TWO-ROWS', 'SYSTEM-MAILBOX-DELETE-FORBIDDEN'],
     async run(x) {
       const { check, refused, block } = x
@@ -381,7 +381,7 @@ export default [
   tool('forwarders', {
     prefix: 'S7FWD', as: 'owner', also: ['mailbox', 'root'], needs: ['account', 'mailbox'], probe: '/api/mail/forwarders', page: FORWARDERS_PAGE,
     paths: only('mail/forwarders', `mail/forwarders/${ID}`, ...MAIL_PATHS, ...SCRATCH),
-    requests: 90, deadlineMs: 300_000, unit: [{ id: 'S7FWD-UNIT-1', file: 'apps/api/src/mail/forwarder-validation.test.ts', name: 'forwarder configuration validation canonicalizes and deduplicates addresses while retaining legacy single destinations' }, { id: 'S7FWD-UNIT-2', ...ROUTING_UNIT }],
+    accounts: 1, requests: 90, deadlineMs: 300_000, unit: [{ id: 'S7FWD-UNIT-1', file: 'apps/api/src/mail/forwarder-validation.test.ts', name: 'forwarder configuration validation canonicalizes and deduplicates addresses while retaining legacy single destinations' }, { id: 'S7FWD-UNIT-2', ...ROUTING_UNIT }],
     checks: ['FORWARDER-CREATED', 'COPY-DELIVERED-TO-EACH-TARGET', 'PIPE-OUTSIDE-HOME-REFUSED', 'FORWARDER-LIMIT-EXCEEDED'],
     async run(x) {
       const { owner, mailbox, fixture, tag, check, refused, undo } = x
@@ -505,7 +505,7 @@ export default [
   tool('mailing-lists', {
     prefix: 'S7MLS', as: 'owner', also: ['mailbox', 'root'], needs: ['account', 'mailbox'], probe: '/api/mail/mailing-lists',
     paths: only('mail/mailing-lists', `mail/mailing-lists/${ID}`, `mail/mailing-lists/${ID}/moderation`, 'webmail/mailing-lists', 'webmail/mailing-lists/moderation', ...MAIL_PATHS, ...SCRATCH),
-    requests: 60, deadlineMs: 300_000, unit: [{ id: 'S7MLS-UNIT-1', file: 'apps/api/src/mail/mailbox-mailing-lists.test.ts', name: 'sealed mailbox mailing-list subscriptions shows only public or current bound memberships, with no member addresses or counts' }, { id: 'S7MLS-UNIT-2', file: 'apps/api/src/mail/list-moderation.test.ts', name: 'webmail moderation sign-in admits a moderator mailbox on its own session, and audits as the mailbox' }],
+    accounts: 1, requests: 60, deadlineMs: 300_000, unit: [{ id: 'S7MLS-UNIT-1', file: 'apps/api/src/mail/mailbox-mailing-lists.test.ts', name: 'sealed mailbox mailing-list subscriptions shows only public or current bound memberships, with no member addresses or counts' }, { id: 'S7MLS-UNIT-2', file: 'apps/api/src/mail/list-moderation.test.ts', name: 'webmail moderation sign-in admits a moderator mailbox on its own session, and audits as the mailbox' }],
     checks: ['SPACE-IN-NAME-VALIDATION', 'PRIVATE-LIST-HIDDEN-FROM-PUBLIC-INDEX', 'LIST-LIMIT-EXCEEDED', 'DELEGATE-APPROVES-HELD-POST'],
     async run(x) {
       const { owner, mailbox, fixture, tag, check, block, refused, undo } = x

@@ -610,8 +610,10 @@ export function renderReconcileBanner(
  * automatically reconnects with exponential backoff, updates live KPIs, IO charts,
  * website analytics, and the reconcile stepper banner in real time
  * without page reload, and binds keyboard shortcuts (`Cmd/Ctrl+K`, `/`, `g d`, `g a`, `g f`, `Escape`).
+ * Built per call: the API encodes one copy to bytes and drops it. Flattening the module constant below instead
+ * would pin a ~10 MB two-byte copy in the API heap, so production code must not read its characters.
  */
-export const BROWSER_REALTIME_SCRIPT = /* js */ `
+export const browserRealtimeScript = (): string => /* js */ `
 (function () {
   'use strict';
 ${SHELL_MOTION_CLIENT_SCRIPT}
@@ -1105,6 +1107,29 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
         status(copy('Your browser could not retain this request. No changes were sent.'), 'failed');
       }
     }
+    // A 202 names the operation: the server finishes it whether or not this page stays open, and the page reads the
+    // operation until it ends. The final read carries the answer the POST would have given.
+    function settledCreation(answer) {
+      var operation = answer && answer.operation;
+      if (!operation || operation.status !== 'running' || typeof operation.id !== 'string' || !/^[0-9a-f-]{36}$/.test(operation.id)) return answer;
+      status(copy('The server is creating the account. It continues if you leave this page.'), 'loading');
+      var unverified = function () { var error = new Error(''); error.details = { stateChanged: true, verificationRequired: true }; return error; };
+      var read = function (attempt) {
+        return new Promise(function (resolve) { setTimeout(resolve, Math.min(5000, 1000 * (attempt + 2))); }).then(function () {
+          return window.xpanelSessionRequest('GET', '/api/accounts/operations/' + operation.id).catch(function () { throw unverified(); });
+        }).then(function (view) {
+          var state = view && view.operation && view.operation.status;
+          if ((state === 'running' || state === 'queued') && attempt < 180) return read(attempt + 1);
+          if (state === 'succeeded' && view.result) return view.result;
+          var problem = state === 'failed' && view.problem;
+          if (!problem || typeof problem !== 'object') throw unverified();
+          var error = new Error(typeof problem.detail === 'string' ? problem.detail : '');
+          error.status = problem.status; error.code = problem.code; error.details = problem.details || {};
+          throw error;
+        });
+      };
+      return read(0);
+    }
     refreshIpAvailability();
     form.addEventListener('submit', function (event) {
       event.preventDefault();
@@ -1142,7 +1167,7 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
       password.value = '';
       status(copy('Submitting…'), 'loading');
       var refreshAfterRefusal = false;
-      Promise.resolve().then(function () { return window.xpanelSessionRequest('POST', '/api/accounts', body); }).then(function (result) {
+      Promise.resolve().then(function () { return window.xpanelSessionRequest('POST', '/api/accounts', body); }).then(settledCreation).then(function (result) {
         var acknowledgement = creationAcknowledgement(result, body);
         if (!acknowledgement) {
           reviewRequired = true;
@@ -2114,3 +2139,4 @@ ${SHELL_MOTION_CLIENT_SCRIPT}
 ${PLAN_EDITOR_CLIENT_SCRIPT}
 ${ACCOUNT_LIST_CLIENT_SCRIPT}
 `
+export const BROWSER_REALTIME_SCRIPT = browserRealtimeScript()

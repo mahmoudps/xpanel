@@ -30,10 +30,28 @@ const decodeMount = (text: string): string => text.replace(/\\(040|011|012|134)/
 
 export interface VisibleHostMount { mount: string; type: string | null }
 
-/** Mounts are kernel namespace inventory; conflicting types at an overmounted path remain unknown. */
+interface MountEntry { id: string; parent: string; type: string }
+
+/**
+ * An overmount is mounted on the mount it hides, so in a stack whose entries chain through their parent IDs the
+ * one nothing sits on is visible (systemd's autofs placeholder under binfmt_misc or /efi). Any other mix stays unknown.
+ */
+const visibleType = (stack: readonly MountEntry[]): string | null => {
+  if (stack.every(entry => entry.type === stack[0]!.type)) return stack[0]!.type
+  const tops = stack.filter(entry => !stack.some(other => other.parent === entry.id))
+  let entry = tops.length === 1 ? tops[0] : undefined
+  for (let depth = 1; entry && depth <= stack.length; depth++) {
+    const below = stack.find(other => other.id === entry!.parent)
+    if (!below) return depth === stack.length ? tops[0]!.type : null
+    entry = below
+  }
+  return null
+}
+
+/** Mounts are kernel namespace inventory; conflicting types at an overmounted path remain unknown unless the stack proves the top. */
 export const visibleMountInventory = (text: string): VisibleHostMount[] => {
   if (!bounded(text) || text.includes('\u0000')) throw new Error('mount_inventory_capacity')
-  const mounts = new Map<string, string | null>(), ids = new Set<string>()
+  const mounts = new Map<string, MountEntry[]>(), ids = new Set<string>()
   for (const line of text.split('\n').filter(line => line !== '')) {
     const fields = line.split(' '), separator = fields.indexOf('-')
     if (separator < 6 || fields.length < separator + 4 || !/^\d+$/.test(fields[0] ?? '') || ids.has(fields[0]!) ||
@@ -46,11 +64,11 @@ export const visibleMountInventory = (text: string): VisibleHostMount[] => {
     if (path.includes('\uFFFD')) throw new Error('mount_inventory_invalid')
     const type = fields[separator + 1]!
     if (!/^[A-Za-z0-9_.+-]{1,64}$/.test(type)) throw new Error('mount_inventory_invalid')
-    mounts.set(path, !mounts.has(path) || mounts.get(path) === type ? type : null)
+    mounts.set(path, [...mounts.get(path) ?? [], { id: fields[0]!, parent: fields[1]!, type }])
     if (mounts.size > MAX_HOST_DISK_MOUNTS) throw new Error('mount_inventory_capacity')
   }
   if (!mounts.has('/')) throw new Error('mount_inventory_invalid')
-  return [...mounts.keys()].sort().map(mount => ({ mount, type: mounts.get(mount) ?? null }))
+  return [...mounts.keys()].sort().map(mount => ({ mount, type: visibleType(mounts.get(mount)!) }))
 }
 
 export const visibleMountpoints = (text: string): string[] => visibleMountInventory(text).map(item => item.mount)
@@ -63,7 +81,7 @@ const amount = (value: string): number | null => {
 
 const readDfRows = (text: string, expected: ReadonlySet<string>) => {
   const rows = text.split(/\r?\n/).filter(line => line.trim() !== '')
-  const disks = new Map<string, HostDisk>(), ambiguous = new Set<string>()
+  const disks = new Map<string, HostDisk>(), ambiguous = new Set<string>(), sizeless = new Set<string>()
   let invalid = false
   if (!bounded(text) || rows.length > MAX_HOST_DISK_MOUNTS + 1) throw new Error('df_capacity')
   if (!/^Filesystem\s/.test(rows[0] ?? '')) throw new Error('df_invalid')
@@ -72,6 +90,8 @@ const readDfRows = (text: string, expected: ReadonlySet<string>) => {
     const match = /^(.+?)\s+(-?\d+|-)\s+(-?\d+|-)\s+(-?\d+|-)\s+(?:\d+%|-)\s+(\/.*)$/.exec(line)
     if (!match) { invalid = true; continue }
     const rawMount = match[5]!, mount = expected.has(rawMount) ? rawMount : decodeMount(rawMount)
+    // df prints `-` for every size of a filesystem without any, such as systemd's autofs placeholder: an unusable row, not bad output.
+    if (match[2] === '-' && match[3] === '-' && match[4] === '-') { sizeless.add(mount); continue }
     const totalBytes = amount(match[2]!), usedBytes = amount(match[3]!), availableBytes = amount(match[4]!)
     if (totalBytes === null || usedBytes === null || availableBytes === null || totalBytes < 0 || usedBytes < 0 || usedBytes > totalBytes) {
       invalid = true
@@ -82,7 +102,7 @@ const readDfRows = (text: string, expected: ReadonlySet<string>) => {
     if (previous && JSON.stringify(previous) !== JSON.stringify(disk)) ambiguous.add(mount)
     else disks.set(mount, disk)
   }
-  return { disks, ambiguous, invalid }
+  return { disks, ambiguous, sizeless, invalid }
 }
 
 /** One bounded df command; incomplete namespace/data never becomes complete coverage. */
@@ -94,10 +114,13 @@ export const readHostDiskInventory = async (reader: HostDiskReader, now: () => D
   let before: string | null
   try { before = await reader.readFile('/proc/self/mountinfo') } catch { before = null }
   if (before === null) return { disks: [], diskCoverage: { ...base, reason: 'mount_inventory_unavailable' } }
-  let mounts: string[]
-  try { mounts = visibleMountpoints(before) } catch (error) {
+  let inventory: VisibleHostMount[]
+  try { inventory = visibleMountInventory(before) } catch (error) {
     return { disks: [], diskCoverage: { ...base, reason: error instanceof Error ? error.message : 'mount_inventory_invalid' } }
   }
+  const mounts = inventory.map(item => item.mount)
+  // An automount not yet triggered has no capacity of its own: df's sizeless row covers it.
+  const automounts = new Set(inventory.filter(item => item.type === 'autofs').map(item => item.mount))
   const coverage = { ...base, mounts, unavailableMounts: [...mounts], mountInfoSha256: createHash('sha256').update(before).digest('hex') }
   let result: Awaited<ReturnType<HostDiskReader['runCommand']>>
   try { result = await reader.runCommand([...HOST_DISK_DF_ARGV]) } catch {
@@ -111,7 +134,7 @@ export const readHostDiskInventory = async (reader: HostDiskReader, now: () => D
   try { parsed = readDfRows(result.stdout, new Set(mounts)) } catch (error) {
     return { disks: [], diskCoverage: { ...coverage, sampledAt, reason: error instanceof Error ? error.message : 'df_invalid' } }
   }
-  const unavailableMounts = mounts.filter(mount => !parsed.disks.has(mount) || parsed.ambiguous.has(mount))
+  const unavailableMounts = mounts.filter(mount => !parsed.disks.has(mount) && !(automounts.has(mount) && parsed.sizeless.has(mount)) || parsed.ambiguous.has(mount))
   const unexpectedMounts = [...parsed.disks.keys()].filter(mount => !mounts.includes(mount)).sort()
   const stable = before === after
   const complete = result.ok && stable && !parsed.invalid && parsed.ambiguous.size === 0 && unavailableMounts.length === 0 && unexpectedMounts.length === 0

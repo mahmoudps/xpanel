@@ -335,3 +335,44 @@ describe('retained native creation outcomes in the complete client', () => {
     expect(send).toHaveBeenCalledOnce()
   })
 })
+
+describe('accepted creations read through their operation', () => {
+  const id = '10000000-0000-4000-8000-0000000000aa', path = '/api/accounts/operations/' + id
+  const running = () => ({ operation: { id, reference: null, status: 'running', needsAttention: false }, account: verifiedAccountCreationFixture().account, primaryDomain: null })
+  const ended = (outcome: object) => ({ operation: { id, reference: null, status: 'result' in outcome ? 'succeeded' : 'failed', needsAttention: false }, ...outcome })
+  const accepted = (reads: unknown[]) => vi.fn<Request>(async method => {
+    if (method === 'POST') return running()
+    const next = reads.shift()
+    if (next instanceof Error) throw next
+    return next
+  })
+  const settle = async () => { await vi.advanceTimersByTimeAsync(0); submit(); await vi.advanceTimersByTimeAsync(0) }
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout'] }) })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('shows the creation in progress, then the verified answer the operation recorded', async () => {
+    const send = accepted([running(), ended({ result: verifiedAccountCreationFixture() })])
+    boot(send); await settle()
+    expect(get('[data-account-create-status]').textContent).toBe('The server is creating the account. It continues if you leave this page.')
+    expect(get<HTMLButtonElement>('button[type="submit"]').disabled).toBe(true)
+    await vi.advanceTimersByTimeAsync(2000 + 3000)
+    expect(send.mock.calls.map(call => call[0] + ' ' + call[1])).toEqual(['POST /api/accounts', 'GET ' + path, 'GET ' + path])
+    expect(get('[data-account-create-status]').textContent).toBe('Account created.')
+    expect(get<HTMLButtonElement>('[data-account-create-another]').disabled).toBe(false)
+    expect(operation()).toMatchObject({ username: 'alpha', phase: 'complete' })
+  })
+
+  it.each([
+    ['a recorded problem', ended({ problem: { status: 503, code: 'SERVICE_UNAVAILABLE', detail: 'account provisioning did not acknowledge a verified outcome', details: { stateChanged: true, verificationRequired: true } } })],
+    ['an unreadable operation', new Error('network')],
+    ['an operation without its answer', { operation: { id, reference: null, status: 'interrupted', needsAttention: true }, account: null }],
+  ])('keeps %s locked for review', async (_name, read) => {
+    const send = accepted([read])
+    boot(send); await settle(); await vi.advanceTimersByTimeAsync(2000)
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(get('[data-account-create-status]').textContent).toContain('Review accounts before retrying')
+    expect(get<HTMLButtonElement>('button[type="submit"]').disabled).toBe(true)
+    expect(get<HTMLButtonElement>('[data-account-create-another]').disabled).toBe(true)
+    expect(operation()?.phase).toBe('pending')
+  })
+})

@@ -214,6 +214,8 @@ export const policyForRequest = (pathname: string, method: string): RoutePolicy 
   if (/^\/api\/accounts\/[^/]+\/ssl(?:\/(?:keys|csrs|certificates)(?:\/[a-z0-9][a-z0-9_-]{0,63})?)?$/.test(pathname)) return { resource: 'tls', acl: 'manage-ssl', toolIds: [({ keys: 'ssl-private-keys', csrs: 'ssl-csrs' } as Record<string, string>)[pathname.split('/')[5] ?? ''] ?? 'ssl-certificates'] }
   // These delete a page, a file or a stuck move, not an account.
   if (/^\/api\/accounts\/(?:skeleton|web-templates|[^/]+\/rearrange)(?:\/|$)/.test(pathname)) return { resource: 'accounts', acl: read ? 'list-accounts' : 'edit-account' }
+  // Polling an account creation needs the authority that started it.
+  if (/^\/api\/accounts\/operations\/[^/]+$/.test(pathname)) return { resource: 'accounts', acl: 'create-account', scopeAccess: 'write' }
   if (/^\/api\/accounts(?:\/|$)/.test(pathname)) {
     const acl: ResellerAcl = read ? 'list-accounts'
       : /\/(?:suspend|unsuspend)$/.test(pathname) ? 'suspend-account'

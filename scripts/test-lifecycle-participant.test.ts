@@ -1,13 +1,14 @@
+import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { connect, createServer } from 'node:net'
+import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { connect, createServer, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 // The real participant on a real Unix socket, its fixed /run directory mapped onto a private
 // temporary directory. This proves the protocol and close path, not systemd or root ownership.
-const seam = vi.hoisted(() => ({ dir: '', barrier: null as Buffer | null }))
+const seam = vi.hoisted(() => ({ dir: '', barrier: null as Buffer | null, foreignUid: false }))
 const DIRECTORY = '/run/xpanel/lifecycle-agent'
 const mapped = (path: unknown) => typeof path === 'string' && path.startsWith(DIRECTORY) ? seam.dir + path.slice(DIRECTORY.length) : path
 vi.mock('node:fs/promises', async original => {
@@ -16,7 +17,9 @@ vi.mock('node:fs/promises', async original => {
   return { ...actual,
     readFile: (path: string, ...rest: [BufferEncoding]) => path === `/proc/${process.pid}/cgroup` ? Promise.resolve('0::/system.slice/xpanel-agent.service\n') : actual.readFile(path, ...rest),
     lstat: (path: string, ...rest: [{ bigint: true }]) => path === '/run' || path === '/run/xpanel' ? Promise.resolve(rootDirectory)
-      : path === '/var/lib/xpanel-lifecycle' ? Promise.resolve({}) : actual.lstat(mapped(path) as string, ...rest),
+      : path === '/var/lib/xpanel-lifecycle' ? Promise.resolve({}) : actual.lstat(mapped(path) as string, ...rest)
+        .then(stat => seam.foreignUid && path.endsWith('/participant.sock') ? Object.assign(stat, { uid: stat.uid + 1n }) : stat),
+    unlink: (path: string) => actual.unlink(mapped(path) as string),
     open: (path: string, ...rest: [number]) => actual.open(mapped(path) as string, ...rest),
     chmod: (path: string, mode: number) => actual.chmod(mapped(path) as string, mode),
   }
@@ -26,7 +29,7 @@ vi.mock('node:net', async original => {
   return { ...actual, createServer: ((...args: Parameters<typeof actual.createServer>) => {
     const server = actual.createServer(...args), listen = server.listen.bind(server)
     return Object.assign(server, { listen: (path: string, callback: () => void) => listen(mapped(path) as string, callback) })
-  }) as typeof actual.createServer }
+  }) as typeof actual.createServer, connect: ((path: string) => actual.connect(mapped(path) as string)) as typeof actual.connect }
 })
 vi.mock('./lifecycle-ownership.mjs', () => ({
   withTrustedDirectory: async (_path: string, callback: () => unknown) => callback(),
@@ -46,9 +49,11 @@ const handshake = (path: string) => new Promise<Record<string, unknown>>((resolv
   client.on('data', chunk => { bytes += chunk })
   client.on('end', () => { try { resolve(JSON.parse(bytes)) } catch (error) { reject(error) } })
 })
+// A daemon aborted by V8 heap exhaustion or SIGKILL never runs close(), so its bound name stays on disk.
+const leaveStale = (path: string) => expect(spawnSync(process.execPath, ['-e', "require('node:net').createServer().listen(process.argv[1], () => process.kill(process.pid, 'SIGKILL'))", path]).signal).toBe('SIGKILL')
 const fixture = async () => { seam.dir = await mkdtemp(join(tmpdir(), 'xpanel-participant-')); return join(seam.dir, 'participant.sock') }
 
-afterEach(async () => { seam.barrier = null; if (seam.dir) await rm(seam.dir, { recursive: true, force: true }); seam.dir = '' })
+afterEach(async () => { seam.barrier = null; seam.foreignUid = false; if (seam.dir) await rm(seam.dir, { recursive: true, force: true }); seam.dir = '' })
 
 describe.runIf(process.platform === 'linux')('lifecycle writer participant stop during an upgrade', () => {
   it('Node unlinks a bound Unix socket name inside server.close()', async () => {
@@ -67,6 +72,34 @@ describe.runIf(process.platform === 'linux')('lifecycle writer participant stop 
     expect(onFence).toHaveBeenCalledTimes(1)
     await expect(participant.close()).resolves.toBeUndefined()
     expect(existsSync(path)).toBe(false)
+  })
+
+  it('replaces the name a killed participant left behind, then serves and closes cleanly', async () => {
+    const path = await fixture()
+    leaveStale(path); expect(existsSync(path)).toBe(true)
+    const participant = await startLifecycleWriterParticipant('agent')
+    expect(await handshake(path)).toMatchObject({ role: 'agent', pid: process.pid, activeWriters: 0, fenced: false })
+    await expect(participant.close()).resolves.toBeUndefined()
+    expect(existsSync(path)).toBe(false)
+  })
+
+  it('refuses a live participant, a symlink, a regular file and a socket of another uid, and keeps each', async () => {
+    const path = await fixture(), live = createServer()
+    await new Promise<void>(resolve => live.listen(path, resolve))
+    await expect(startLifecycleWriterParticipant('agent')).rejects.toMatchObject({ code: 'LIFECYCLE_PARTICIPANT_SOCKET_EXISTS' })
+    await new Promise<void>(resolve => connect(path).once('connect', function (this: Socket) { this.destroy(); resolve() }))
+    await new Promise<void>(resolve => live.close(() => resolve()))
+    leaveStale(path + '.dead')
+    const cases: [() => Promise<unknown>, string][] = [
+      [() => symlink(path + '.dead', path), path + '.dead'],
+      [() => writeFile(path, ''), path],
+      [async () => { leaveStale(path); seam.foreignUid = true }, path],
+    ]
+    for (const [arrange, kept] of cases) {
+      await rm(path, { force: true }); await arrange()
+      await expect(startLifecycleWriterParticipant('agent')).rejects.toMatchObject({ code: 'LIFECYCLE_PARTICIPANT_SOCKET_EXISTS' })
+      expect(existsSync(kept)).toBe(true)
+    }
   })
 
   it('reports a replaced socket name instead of a clean close', async () => {

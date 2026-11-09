@@ -12,6 +12,7 @@ import { createTestStateStore } from '@xpanel/state'
 import { createApiApp, listenApiServer } from './server.ts'
 import { preparedAccountFixture } from './testing/provisioning-preparation-fixture.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
+import { settledAccountCreation } from './testing/account-create-settle.ts'
 
 /**
  * Focused real-HTTP acceptance for the reseller administration surface:
@@ -164,7 +165,10 @@ const fixture = async () => {
   const rootOwned = await seedAccount('rootown9', null)
   const userPrincipal = await createUserPrincipal(database.db, { username: rootOwned.username, accountId: rootOwned.id, passwordHash: HASH })
 
-  const call = (path: string, method = 'GET', body?: unknown, session?: Session | null, opts: { csrf?: string | null } = {}): Promise<Response> =>
+  // An accepted creation (202) is read to its end, so these cases see the answer its POST would have given.
+  const call = (path: string, method = 'GET', body?: unknown, session?: Session | null, opts: { csrf?: string | null } = {}): Promise<Response> => send(path, method, body, session, opts)
+    .then(response => method === 'POST' && path === '/api/accounts' ? settledAccountCreation(response, read => send(read, 'GET', undefined, session)) : response)
+  const send = (path: string, method = 'GET', body?: unknown, session?: Session | null, opts: { csrf?: string | null } = {}): Promise<Response> =>
     new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body)
       const headers: Record<string, string> = { host: 'localhost' }

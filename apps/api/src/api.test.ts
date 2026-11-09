@@ -29,6 +29,7 @@ import { runCli } from './cli.ts'
 import { createApiApp, listenApiServer } from './server.ts'
 import type { ApiApp } from './server.ts'
 import { preparedAccountFixture } from './testing/provisioning-preparation-fixture.ts'
+import { settledAccountCreation } from './testing/account-create-settle.ts'
 import { TEST_AGENT_TOKEN, TEST_SERVER_SECRET } from './testing.ts'
 import { writeSignInLockout } from './testing/sign-in-policy-fixture.ts'
 
@@ -62,7 +63,9 @@ interface SessionClient {
 }
 
 // Prepared H protocol acceptance with explicit fake execution, not native account readiness.
-const assertConfiguredAccountCreation = async (response: Response, username: string): Promise<void> => {
+const assertConfiguredAccountCreation = async (accepted: Response, username: string, client: SessionClient): Promise<Response> => {
+  // The create answers 202 once the host step starts; the operation read gives the answer the client would see.
+  const response = await settledAccountCreation(accepted, path => client.request(path))
   assert.equal(response.status, 201, await response.clone().text())
   const body = await response.clone().json() as { account: { id: string; username: string; uid: number; gid: number; home: string }; execution: { status: string; scope: string; targetVerified: boolean; verificationRequired: boolean; observation: { accountId: string; uid: number; gid: number; home: string } } }
   assert.equal(body.account.username, username)
@@ -72,6 +75,7 @@ const assertConfiguredAccountCreation = async (response: Response, username: str
   assert.equal(body.execution.verificationRequired, false)
   assert.deepEqual(Object.keys(body.execution).sort(), ['observation', 'scope', 'status', 'targetVerified', 'verificationRequired'])
   assert.deepEqual({ accountId: body.execution.observation.accountId, uid: body.execution.observation.uid, gid: body.execution.observation.gid, home: body.execution.observation.home }, { accountId: body.account.id, uid: body.account.uid, gid: body.account.gid, home: body.account.home })
+  return response
 }
 
 const createSessionClient = (app: ApiApp, setCookieHeader: string | null, csrfToken: string): SessionClient => {
@@ -350,8 +354,8 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         ipv4: '203.0.113.10',
       },
     })
-    await assertConfiguredAccountCreation(aliceRes, 'alice')
-    const aliceData = (await aliceRes.json()) as {
+    const aliceResSettled = await assertConfiguredAccountCreation(aliceRes, 'alice', root)
+    const aliceData = (await aliceResSettled.json()) as {
       account: { id: string; username: string; uid: number }
       primaryDomain: { id: string; name: string }
     }
@@ -369,7 +373,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         ipv4: '203.0.113.10',
       },
     })
-    await assertConfiguredAccountCreation(bobRes, 'bob')
+    const bobResSettled = await assertConfiguredAccountCreation(bobRes, 'bob', root)
 
     // Verify rendered files in FakeHostExecutor
     assert.ok(executor.files.has(`${UBUNTU_OS.paths.nginxVhostDir}/xpanel-alice.conf`))
@@ -404,7 +408,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         ipv4: '203.0.113.10',
       },
     })
-    await assertConfiguredAccountCreation(aliceCreateRes, 'alice')
+    const aliceCreateResSettled = await assertConfiguredAccountCreation(aliceCreateRes, 'alice', root)
     const bobCreateRes = await root.request('/api/accounts', {
       method: 'POST',
       body: {
@@ -415,7 +419,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         ipv4: '203.0.113.10',
       },
     })
-    await assertConfiguredAccountCreation(bobCreateRes, 'bob')
+    const bobCreateResSettled = await assertConfiguredAccountCreation(bobCreateRes, 'bob', root)
 
     const { res: aliceLoginRes, client: alice } = await loginAs('alice', 'AlicePassword!2026')
     assert.equal(aliceLoginRes.status, 200)
@@ -495,7 +499,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         ipv4: '203.0.113.10',
       },
     })
-    await assertConfiguredAccountCreation(aliceCreateRes, 'alice')
+    const aliceCreateResSettled = await assertConfiguredAccountCreation(aliceCreateRes, 'alice', root)
 
     const { client: alice } = await loginAs('alice', 'AlicePassword!2026')
 
@@ -613,7 +617,7 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         ipv6: '2001:db8::25',
       },
     })
-    await assertConfiguredAccountCreation(accRes, 'alice')
+    const accResSettled = await assertConfiguredAccountCreation(accRes, 'alice', root)
 
     // Configure Mail Outbound IP with custom per-domain override
     const mailIpRes = await root.request('/api/mail/ips', {
@@ -663,8 +667,8 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         ipv4: '203.0.113.10',
       },
     })
-    await assertConfiguredAccountCreation(accRes, 'alice')
-    const { primaryDomain } = (await accRes.json()) as {
+    const accResSettled = await assertConfiguredAccountCreation(accRes, 'alice', root)
+    const { primaryDomain } = (await accResSettled.json()) as {
       primaryDomain: { id: string; docRoot: string }
     }
 
@@ -732,8 +736,8 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         ipv4: '203.0.113.10',
       },
     })
-    await assertConfiguredAccountCreation(aliceAccRes, 'alice')
-    const aliceAccData = (await aliceAccRes.json()) as {
+    const aliceAccResSettled = await assertConfiguredAccountCreation(aliceAccRes, 'alice', root)
+    const aliceAccData = (await aliceAccResSettled.json()) as {
       account: { id: string }
       primaryDomain: { id: string }
     }
@@ -748,8 +752,8 @@ describe('@xpanel/api HTTP integration with explicit fake host execution', () =>
         ipv4: '203.0.113.10',
       },
     })
-    await assertConfiguredAccountCreation(bobAccRes, 'bob')
-    const bobAccData = (await bobAccRes.json()) as {
+    const bobAccResSettled = await assertConfiguredAccountCreation(bobAccRes, 'bob', root)
+    const bobAccData = (await bobAccResSettled.json()) as {
       account: { id: string }
       primaryDomain: { id: string }
     }

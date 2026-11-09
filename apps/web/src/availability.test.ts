@@ -8,6 +8,7 @@ import { renderMailSurface } from './surfaces/xmail.ts'
 import { renderPanelSurface } from './surfaces/xpanel.ts'
 import { renderWhmSurface } from './surfaces/xwhm.ts'
 import { BROWSER_REALTIME_SCRIPT } from './ws-client.ts'
+import { clientI18nAsset } from './i18n.ts'
 import type { Account, Plan, Principal } from '@xpanel/core'
 import { composedRouteSpecs, nativeComposedRoutePaths } from './board-port/composed/all.ts'
 import { renderComposedRoutes } from './board-port/composed/render.ts'
@@ -498,6 +499,11 @@ describe('emitted browser JavaScript syntax', () => {
     const emitted = await serveStaticAsset(new URL(src!, 'https://panel.example.test').pathname)!.text()
     expect(emitted).toBe(LOGIN_CLIENT_SCRIPT)
     expect(() => new Script(emitted, { filename: 'xpanel-emitted.js' })).not.toThrow()
+  })
+  it('serves the realtime client and each locale catalog from bytes with the same text as the source', async () => {
+    // The API keeps these as UTF-8 bytes: as strings they held ~13 MB of its 96 MB V8 heap.
+    for (const path of ['/assets/ws-client.js', '/assets/ws.js']) expect(await serveStaticAsset(path)!.text()).toBe(BROWSER_REALTIME_SCRIPT)
+    for (const locale of ['en', 'ar'] as const) expect(await serveStaticAsset(`/assets/i18n-${locale}.js`)!.text()).toBe(clientI18nAsset(locale))
   })
 })
 

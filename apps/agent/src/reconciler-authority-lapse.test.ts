@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultPlan, fail, suggestServerSettings, type HostAction } from '@xpanel/core'
-import { createTestDb, getGeneration, type TestDbHandle } from '@xpanel/db'
+import { createTestDb, getGeneration, latestActive, type TestDbHandle } from '@xpanel/db'
 import { profileFor } from '@xpanel/os'
 import { createTestStateStore, type TestStateStoreHandle } from '@xpanel/state'
 import { FakeHostExecutor } from './executor.ts'
@@ -63,11 +63,16 @@ describe.runIf(process.platform === 'linux')('a host operation authority that la
     expect(host.started()).toBe(1)
   })
 
-  it('keeps operator attention once a prerequisite ran before the lapse', async () => {
+  // One full native generation (about 3 s); the authority and journal rules are covered fast in their own tests.
+  it('finishes the generation once a prerequisite ran before the lapse, so the next reconcile proceeds', { tags: ['slow'] }, async () => {
     const host = nativeHost(1)
     const reconciler = new HostReconciler({ store: state.store, db: db.db, executor: host.executor, os })
+    // The lapse is reported when the operation acknowledges; it no longer stops the host half way.
     await expect(reconciler.reconcile({ actor: 'root:root', mailAuth: null, effectAuthority: host.effectAuthority })).rejects.toMatchObject({ detail: { stateChanged: true, verificationRequired: true } })
-    expect(await reconciler.journal.readActiveJournal()).toMatchObject({ phase: 'needs_attention', completedPreActions: 1 })
-    await expect(reconciler.reconcile({ actor: 'root', mailAuth: null })).rejects.toThrow('requires operator attention')
+    expect(host.started()).toBeGreaterThan(2)
+    // Both gates every later reconcile passes first (reconciler.ts reconcileAdmitted).
+    await expect(reconciler.journal.assertNoUnresolvedPreparation()).resolves.toBeUndefined()
+    expect(await reconciler.journal.readActiveJournal()).toBeNull()
+    expect((await latestActive(db.db))?.status).toBe('active')
   })
 })

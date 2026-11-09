@@ -214,7 +214,7 @@ describe('H01 release artifact packager & pre-unpack verifier (A26, A28, A59)', 
       supplementaryGroups: 'xpanel-agent',
       umask: '0007',
       noNewPrivileges: 'yes',
-      execStart: '/usr/bin/node --max-old-space-size=96 /opt/xpanel/apps/api/src/main.ts',
+      execStart: '/usr/bin/node --max-old-space-size=96 --max-semi-space-size=1 /opt/xpanel/apps/api/src/main.ts',
     })
   })
 

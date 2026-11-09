@@ -223,7 +223,7 @@ async function processFacts(role, unit, context, nodeInfo, expectedUid, agentGid
       && (!environment.has('XPANEL_AGENT_SOCKET') || environment.get('XPANEL_AGENT_SOCKET') === '/run/xpanel/agent.sock'), 'INSTALL_READINESS_PROCESS_ENV_INVALID')
     const args = (await procText(root, 'cmdline')).split('\0').filter(Boolean)
     check(args.length >= 2 && args.length <= 4 && await realpath(args[0]) === context.runtime.nodePath
-      && args.slice(1, -1).every(value => /^--max-old-space-size=[1-9][0-9]{0,5}$/.test(value))
+      && args.slice(1, -1).every(value => /^--max-(?:old|semi)-space-size=[1-9][0-9]{0,5}$/.test(value))
       && await realpath(args.at(-1)) === expectedRoot + '/apps/' + role + '/src/main.ts', 'INSTALL_READINESS_PROCESS_ARGUMENTS_INVALID')
     const names = await readdir(root + '/fd'); check(names.length <= 1024, 'INSTALL_READINESS_FD_LIMIT')
     const descriptors = []
