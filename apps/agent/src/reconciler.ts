@@ -2043,7 +2043,7 @@ export class HostReconciler {
         now: new Date(),
       })
       if (ftpServer) next.postActions.push(...ftpRestartActions(this.deps.os, next.files, previousManifest?.files, sha256Text, ftpRoleEnabled && effectiveServerFtpSettings(snapshot.server?.settings).enabled))
-      if (mariadbServer) next.postActions.push(...mariadbRestartActions(this.deps.os, next.files, previousManifest?.files, sha256Text))
+      if (mariadbServer) next.postActions.push(...mariadbRestartActions(this.deps.os, next.files, previousManifest?.files, sha256Text, effectiveServerRoles(serverOperations.roles).has('mysql')))
       next.postActions.push(...sshdReloadActions(this.deps.os, next.files, previousManifest?.files, sha256Text, sshdRunning))
       if (phpMyAdminAccess) next.postActions.push(...phpMyAdminRestartActions(next.files, previousManifest?.files, sha256Text))
       if (appliedSnapshot) {

@@ -12,7 +12,7 @@ import { readProtectedBytes, readProtectedJson, validateInstalledBinding, verify
 import { parseObservedOsRelease } from './evidence/server-information-observer.mjs'
 import { credentials as readCredentials } from './evidence/server-information-runner.mjs'
 import { DRIVER_MODULES, DRIVERS } from './qualification-drivers/index.mjs'
-import { ACTOR_ENTRY, apiClient, createFixture, entryOrigin, externalDnsCheck, externalTlsCheck, failureCause, pageChecks, runDriver, runTag, siteClient } from './qualification-drivers/kit.mjs'
+import { ACCOUNT_CREATE, ACTOR_ENTRY, apiClient, createFixture, entryOrigin, externalDnsCheck, externalTlsCheck, failureCause, pageChecks, runDriver, runTag, siteClient } from './qualification-drivers/kit.mjs'
 import { QUALIFICATION_INVENTORY, qualificationPlan, qualificationRequirements, RUNNER_SLOTS, slotCheckIds } from './qualification-plan.mjs'
 
 export const ROOT = resolve(import.meta.dirname, '..')
@@ -309,14 +309,19 @@ export async function runQualification(options) {
   const fixtureSession = async work => {
     const { origin } = environment, address = options.slot === 'external' ? environment.binding.address : options.address
     const ca = options['ca-file'] === undefined ? undefined : readProtectedBytes({ file: options['ca-file'], maxBytes: 1024 * 1024 })
-    const request = createQualificationTransport({ origin, address, ca, deadline: Date.now() + 300_000, methods: WRITE_METHODS, maxBody: 256 * 1024, maxRequests: 30, allow: path => path.startsWith('/api/') })
+    const request = createQualificationTransport({ origin, address, ca, deadline: Date.now() + 300_000, methods: WRITE_METHODS, maxBody: 256 * 1024, maxRequests: 30 + ACCOUNT_CREATE.requests, allow: path => path.startsWith('/api/') })
     let outcome
     const session = await withRootSession({ request, login: readCredentials({ credentialFile: options['credential-file'] }), prefix: 'FIXTURE', probe: '/api/auth/me', anonymous: false, run: async (_read, opened) => { outcome = await work(apiClient(request, opened)); return [] } })
     return { outcome, session }
   }
   const needs = plan.tools.flatMap(({ toolId }) => DRIVERS[toolId].needs)
+  let fixtureLeftovers = null
   if (options.slot !== 'unit' && needs.length > 0) {
-    const created = await fixtureSession(root => createFixture(root, { tag: runTag(options['run-id']), domainSuffix: options['fixture-domain-suffix'], mailbox: needs.includes('mailbox') }).catch(() => null))
+    const created = await fixtureSession(root => createFixture(root, { tag: runTag(options['run-id']), domainSuffix: options['fixture-domain-suffix'], mailbox: needs.includes('mailbox') }).catch(error => {
+      // A fixture the API may have accepted and whose removal is not confirmed is a leftover: the slot reports it.
+      if (error?.fixtureCleanup?.ok !== true) fixtureLeftovers = { username: error?.fixtureCleanup?.username ?? null, errors: error?.fixtureCleanup?.errors ?? ['The fixture cleanup did not complete.'] }
+      return null
+    }))
     environment = { ...environment, fixture: created.outcome ?? null }
   }
   const outputs = [], passed = []
@@ -331,7 +336,7 @@ export async function runQualification(options) {
   }
   // A receipt says the run cleaned up, so none exists until the shared fixture is confirmed gone.
   const fixtureGone = environment.fixture ? (await fixtureSession(root => environment.fixture.destroy())).outcome : null
-  const leftovers = environment.fixture && fixtureGone?.ok !== true ? { username: environment.fixture.username, errors: fixtureGone?.errors ?? ['The fixture cleanup did not complete.'] } : null
+  const leftovers = fixtureLeftovers ?? (environment.fixture && fixtureGone?.ok !== true ? { username: environment.fixture.username, errors: fixtureGone?.errors ?? ['The fixture cleanup did not complete.'] } : null)
   if (leftovers === null) for (const { report, written, name, output } of passed) {
     const pathFor = slot => `${name}-${slot.stage}-${slot.environment}.report.json`
     const receipts = receiptsForObservation(report, readBoundedFile(written), pathFor, targetDocument)

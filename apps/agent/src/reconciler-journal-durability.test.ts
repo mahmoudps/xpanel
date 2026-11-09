@@ -1,4 +1,6 @@
+import { fail } from '@xpanel/core'
 import { FakeHostExecutor } from './executor.ts'
+import { authorizedHostEffect, withHostEffectAuthority } from './host-effect-authority.ts'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -163,6 +165,31 @@ describe('durable pre-generation host preparation', { tags: ['unit'] }, () => {
     expect(boundary.renames).toBe(0)
     await expect(readFile(active(), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
+  it('does not hold later reconciles when an admitted operation stopped it before any host primitive', async () => {
+    const executor = new FakeHostExecutor()
+    let allowed = true, written = 0
+    vi.spyOn(executor, 'writeFile').mockImplementation(async () => { await authorizedHostEffect(executor, async () => { written++ }) })
+    const authority = { signal: new AbortController().signal, assertAuthority: async () => { if (!allowed) fail('FORBIDDEN', 'revoked') } }
+    await expect(withHostEffectAuthority(executor, authority, () => journal.runHostPreparation(input, executor, async guarded => { allowed = false; await guarded.writeFile(key) })))
+      .rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: false } })
+    expect(written).toBe(0)
+    expect(JSON.parse(await readFile(active(), 'utf8'))).toMatchObject({ phase: 'stopped', effects: [] })
+    await expect(new ReconcilerJournal(root).assertNoUnresolvedPreparation()).resolves.toBeUndefined()
+  })
+
+  it('completes a started preparation when its authority lapses, so later reconciles proceed', async () => {
+    const executor = new FakeHostExecutor()
+    let allowed = true, written = 0
+    vi.spyOn(executor, 'writeFile').mockImplementation(async () => { await authorizedHostEffect(executor, async () => { written++ }) })
+    const authority = { signal: new AbortController().signal, assertAuthority: async () => { if (!allowed) fail('FORBIDDEN', 'revoked') } }
+    await expect(withHostEffectAuthority(executor, authority, () => journal.runHostPreparation(input, executor, async guarded => {
+      await guarded.writeFile(key); allowed = false; await guarded.writeFile(key)
+    }))).rejects.toMatchObject({ code: 'FORBIDDEN', detail: { stateChanged: true, verificationRequired: true } })
+    expect(written).toBe(2)
+    expect(JSON.parse(await readFile(active(), 'utf8'))).toMatchObject({ phase: 'acknowledged' })
+    await expect(new ReconcilerJournal(root).assertNoUnresolvedPreparation()).resolves.toBeUndefined()
+  })
+
   it('refuses a malformed active marker rather than treating JSON null as absent', async () => {
     await journal.runHostPreparation(input, new FakeHostExecutor(), async () => undefined)
     await writeFile(active(), 'null')

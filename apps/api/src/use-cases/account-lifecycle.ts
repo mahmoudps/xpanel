@@ -377,8 +377,13 @@ export class AccountLifecycleCoordinator {
     return this.provisionAccountInternal(input)
   }
 
-  /** Production API path: load the immutable credential/desired-state authority, never a supplied hash. */
-  async provisionPreparedAccount(input: { actor: Principal; idempotencyKey: string; preparationReference: string }): Promise<ProvisionAccountResult> {
+  /**
+   * Production API path: load the immutable credential/desired-state authority, never a supplied hash. `onHostStep` runs
+   * when the operation reaches its host step: every refusal is already answered, the account is reserved, and the rest
+   * runs to its recorded end whether or not the caller still waits.
+   */
+  async provisionPreparedAccount(input: { actor: Principal; idempotencyKey: string; preparationReference: string
+    onHostStep?: (operation: { job: DurableJobRecord; account: Account }) => void }): Promise<ProvisionAccountResult> {
     if (!this.preparations || !this.provisioningPort || !this.authorizeProvisioning || !this.authorizeProvisioningInTransaction || !this.readAccountTemplates) {
       return fail('SERVICE_UNAVAILABLE', 'durable account provisioning authorities are not connected', { stateChanged: false })
     }
@@ -392,10 +397,11 @@ export class AccountLifecycleCoordinator {
     await this.authorizeProvisioning({ actor: input.actor, accountId: null, ownerId: prepared.desiredState.account.ownerId })
     return this.provisionAccountInternal({ ...prepared.desiredState.account, passwordHash: prepared.passwordHash,
       actor: input.actor, idempotencyKey: provisioningRequestKey(input.actor, input.idempotencyKey),
-      provisionDefaultZone: true, nameservers: prepared.desiredState.nameservers, reconcile: true }, prepared)
+      provisionDefaultZone: true, nameservers: prepared.desiredState.nameservers, reconcile: true }, prepared, input.onHostStep)
   }
 
-  private async provisionAccountInternal(input: ProvisionAccountInput, prepared?: PreparedAccountRecord): Promise<ProvisionAccountResult> {
+  private async provisionAccountInternal(input: ProvisionAccountInput, prepared?: PreparedAccountRecord,
+    onHostStep?: (operation: { job: DurableJobRecord; account: Account }) => void): Promise<ProvisionAccountResult> {
     await this.authorizeResellerOrRoot(input.actor, 'create-account', input.ownerId)
     const actorKind = input.actor.kind
     if (actorKind !== 'root' && actorKind !== 'reseller') return fail('FORBIDDEN', 'account provisioning requires a privileged actor')
@@ -767,6 +773,7 @@ export class AccountLifecycleCoordinator {
           if (prepared) {
             await assertAuthority()
             const request = await provisioningRequest()
+            onHostStep?.({ job: leased, account })
             const reply = await this.provisioningPort!.reconcile(request, { signal: leaseAuthority.abort.signal, assertAuthority })
             await assertAuthority()
             if (reply.reconciliation == null) {
@@ -843,6 +850,7 @@ export class AccountLifecycleCoordinator {
         // The Agent derives observation-only admission from its persisted completed host checkpoint.
         // A request cannot opt into this mode, and no host effect may be replayed here.
         unknownOutcome = true
+        onHostStep?.({ job: leased, account })
         const reply = await this.provisioningPort!.reconcile(request, { signal: leaseAuthority.abort.signal, assertAuthority })
         await assertAuthority()
         const current = assertProvisioningReply(request, reply)

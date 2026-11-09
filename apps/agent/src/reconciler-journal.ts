@@ -6,6 +6,7 @@ import { fail } from '@xpanel/core'
 import { claimStateOwnership, fsyncDir } from '@xpanel/state'
 import type { ConfigTest, HostAction, OsProfile, RenderedFile } from '@xpanel/core'
 import type { AgentExecutor } from './executor.ts'
+import { hostEffectsStarted } from './host-effect-authority.ts'
 
 export type ReconcileJournalPhase =
   | 'render'
@@ -295,7 +296,9 @@ export const buildGenerationManifest = (input: {
 
   const managedUnits = new Set<string>()
   for (const action of input.postActions) {
-    if (action.kind === 'systemd' && (action.verb === 'enable' || action.verb === 'start' || action.verb === 'restart')) {
+    // Only enable and start keep a unit. A restart applies a changed file once; counted as managed, the unit fell out of
+    // the next generation and was stopped and disabled as obsolete (MariaDB on Stage, generation 21, 2026-11-09).
+    if (action.kind === 'systemd' && (action.verb === 'enable' || action.verb === 'start')) {
       managedUnits.add(action.unit)
     }
   }
@@ -500,7 +503,8 @@ interface HostPreparationRecord {
   actor: string
   stateChecksum: string
   domainsSha256: string
-  phase: 'running' | 'acknowledged' | 'needs_attention'
+  /** `stopped`: an admitted operation stopped it before any host primitive started; nothing to verify. */
+  phase: 'running' | 'acknowledged' | 'stopped' | 'needs_attention'
   startedAt: string
   effects: HostPreparationEffect[]
 }
@@ -524,7 +528,7 @@ export class ReconcilerJournal {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
       throw error
     }
-    if (!record || record.schemaVersion !== 1 || record.phase !== 'acknowledged'
+    if (!record || record.schemaVersion !== 1 || !(record.phase === 'acknowledged' || record.phase === 'stopped' && record.effects?.length === 0)
       || !Array.isArray(record.effects) || record.effects.some(effect => effect.status !== 'acknowledged')) {
       fail('PRECONDITION_FAILED', 'host preparation requires operator verification before reconciliation', {
         stateChanged: true, verificationRequired: true,
@@ -598,6 +602,13 @@ export class ReconcilerJournal {
       // Retain the durable acknowledgement: unlink failure must not lose recovery authority.
       return result
     } catch {
+      // Same rule as a generation (reconciler.ts): the pending effect was refused before its primitive ran.
+      if (hostEffectsStarted(executor) === false) {
+        record.phase = 'stopped'
+        record.effects = []
+        await save()
+        return fail('PRECONDITION_FAILED', 'host preparation stopped before any host effect', { stateChanged: false })
+      }
       record.phase = 'needs_attention'
       // Never persist helper errors: they can include private file contents.
       await save()

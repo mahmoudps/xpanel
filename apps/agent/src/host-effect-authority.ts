@@ -43,7 +43,8 @@ export async function withHostEffectAuthority<T>(
         const failed = results.find(item => item.status === 'rejected')
         if (failed?.status === 'rejected') throw failed.reason
       }
-      await assertHostEffectAuthority(executor)
+      // The finished operation is acknowledged only under authority that still holds.
+      await verifyAuthority(current)
       return result
     } finally {
       while (current.pending.size) await Promise.allSettled([...current.pending])
@@ -65,6 +66,14 @@ export async function assertHostEffectAuthority(executor: AgentExecutor): Promis
   const current = admitted.getStore()
   if (!current || current.executor !== executor) return
   if (current.failure !== undefined) throw current.failure
+  // Once a primitive started, the admitted operation runs to its end: its desired state is already saved, and a
+  // stop half way (a signed-out session, a dropped request, a terminated account) left the host for an operator.
+  if (current.changed && !current.retired) return
+  await verifyAuthority(current)
+}
+
+async function verifyAuthority(current: AdmittedAuthority): Promise<void> {
+  if (current.failure !== undefined) throw current.failure
   try {
     if (current.retired || current.authority.signal.aborted) return fail('PRECONDITION_FAILED', 'account provisioning was cancelled or retired', { stateChanged: current.changed, ...(current.changed ? { verificationRequired: true } : {}) })
     await current.authority.assertAuthority()
@@ -84,7 +93,7 @@ export async function assertHostEffectAuthority(executor: AgentExecutor): Promis
   }
 }
 
-/** An in-flight primitive cannot be revoked atomically; loss afterwards requires verification. */
+/** The first primitive is admitted by a full check; a loss afterwards is refused when the operation acknowledges. */
 export function authorizedHostEffect<T>(executor: AgentExecutor, work: () => Promise<T>): Promise<T> {
   const current = admitted.getStore()
   if (!current || current.executor !== executor) return work()

@@ -19,6 +19,7 @@ import * as lifecycleAdmission from '../../../scripts/lifecycle-admission.mjs'
 import { deriveCsrfToken } from './auth.ts'
 import { sessionCookieName, sessionTokenHash } from './entry-points.ts'
 import { createApiApp, INGRESS_SECRET_HEADER, listenApiServer } from './server.ts'
+import { settledAccountCreation } from './testing/account-create-settle.ts'
 
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const SECRET = 'account-mutation-synthetic-server-secret-32-bytes'
@@ -91,8 +92,8 @@ const fixture = async () => {
     await createSession(database.db, { principalId: principal.id, tokenHash: sessionTokenHash('test-session-' + principal.username, 'xpanel'), expiresAt: new Date(Date.now() + 60000).toISOString(), mfaVerified: true })
     await createApiToken(database.db, { principalId: principal.id, name: 'Synthetic token', tokenHash: createHash('sha256').update('test-token-' + principal.username).digest('hex'), scopes: ['accounts:read'], expiresAt: new Date(Date.now() + 60000).toISOString() })
   }
-  const session = async (principalId: string) => {
-    const token = 'session-' + principalId
+  const session = async (principalId: string, label = '') => {
+    const token = 'session-' + label + principalId
     await createSession(database.db, { principalId, tokenHash: sessionTokenHash(token, 'xwhm'), expiresAt: new Date(Date.now() + 60000).toISOString(), mfaVerified: true })
     return { cookie: sessionCookieName('xwhm', true) + '=' + token, csrf: deriveCsrfToken(token, SECRET, 'xwhm') }
   }
@@ -204,7 +205,11 @@ const fixture = async () => {
     return server.port
   }
   const port = await open()
-  const request = (method: string, path: string, body?: unknown, options: { port?: number; session?: typeof rootSession; csrf?: string; origin?: string; headers?: Record<string, string> } = {}): Promise<Response> => new Promise((resolve, reject) => {
+  type RequestOptions = { port?: number; session?: typeof rootSession; csrf?: string; origin?: string; headers?: Record<string, string> }
+  // An accepted creation (202) is read to its end, so these cases see the answer its POST would have given.
+  const request = (method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<Response> => send(method, path, body, options)
+    .then(response => method === 'POST' && path === '/api/accounts' ? settledAccountCreation(response, read => send('GET', read, undefined, options)) : response)
+  const send = (method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<Response> => new Promise((resolve, reject) => {
     const auth = options.session ?? rootSession
     const payload = body === undefined ? undefined : JSON.stringify(body)
     const outgoing = httpRequest({ hostname: '127.0.0.1', port: options.port ?? port, path, method, headers: { host: new URL(ORIGIN).host, origin: options.origin ?? ORIGIN, 'content-type': 'application/json', ...(payload !== undefined ? { 'content-length': Buffer.byteLength(payload) } : {}), cookie: auth.cookie, 'x-csrf-token': options.csrf ?? auth.csrf, [INGRESS_SECRET_HEADER]: INGRESS, 'x-forwarded-proto': 'https', 'x-forwarded-for': '192.0.2.20', ...options.headers } }, incoming => {
@@ -243,7 +248,7 @@ const fixture = async () => {
     if (action === 'update') return request('PATCH', '/api/accounts/' + account.id, { shell: 'jailed' }, options)
     return request('DELETE', '/api/accounts/' + account.id, { confirmUsername: account.username }, options)
   }
-  return { database, state, plan, accountInput, account, other, root, reseller, owner, alias, neighbor, rootSession, resellerSession, request, open, fingerprints, identities, accountSuccess, perform, holdNextApply, hostPaths, setMode: (value: Outcome) => { mode = value }, setPurge: (value: 'missing' | 'ready' | 'incomplete') => { purgeMode = value }, calls: () => calls }
+  return { database, state, plan, accountInput, account, other, root, reseller, owner, alias, neighbor, rootSession, resellerSession, session, request, send, open, fingerprints, identities, accountSuccess, perform, holdNextApply, hostPaths, setMode: (value: Outcome) => { mode = value }, setPurge: (value: 'missing' | 'ready' | 'incomplete') => { purgeMode = value }, calls: () => calls }
 }
 
 describe('real HTTP account mutation security', () => {
@@ -441,6 +446,31 @@ describe('account mutation outcomes and race boundaries', () => {
     expect(audit.filter(entry => entry.action === 'account.provisioned')).toHaveLength(1)
   })
 
+  it('answers 202 once the host step starts and lets the client read the operation to its recorded answer', async () => {
+    const held = f.holdNextApply()
+    const accepted = await f.send('POST', '/api/accounts', { ...f.accountInput, username: 'newowner7', primaryDomain: 'newowner7.example.test', ownerId: null })
+    expect(accepted.status).toBe(202)
+    const view = await accepted.json() as { operation: { id: string; status: string; needsAttention: boolean }; account: { username: string; id: string }; primaryDomain: { name: string } }
+    expect(accepted.headers.get('location')).toBe('/api/accounts/operations/' + view.operation.id)
+    expect(view).toMatchObject({ operation: { status: 'running', needsAttention: false }, account: { username: 'newowner7' }, primaryDomain: { name: 'newowner7.example.test' } })
+    await held.entered
+    const running = await (await f.send('GET', '/api/accounts/operations/' + view.operation.id)).json()
+    expect(running).toMatchObject({ operation: { status: 'running' }, account: { id: view.account.id } })
+    // Only root and the reseller that started it read an operation; an unknown id answers as absent.
+    expect((await f.send('GET', '/api/accounts/operations/' + view.operation.id, undefined, { session: f.resellerSession })).status).toBe(404)
+    expect((await f.send('GET', '/api/accounts/operations/' + crypto.randomUUID())).status).toBe(404)
+    expect((await f.send('GET', '/api/accounts/operations/not-an-id')).status).toBe(422)
+    held.release()
+    const settled = await settledAccountCreation(new Response(JSON.stringify(view), { status: 202 }), path => f.send('GET', path))
+    expect(settled.status).toBe(201)
+    expect(await settled.json()).toMatchObject({ account: { id: view.account.id }, execution: { status: 'account_verified', targetVerified: true }, operation: { status: 'succeeded', freshExecution: true } })
+    // Another API process has no local answer: the job alone answers, with its recorded native observation.
+    const port = await f.open()
+    const restarted = await (await f.send('GET', '/api/accounts/operations/' + view.operation.id, undefined, { port })).json()
+    expect(restarted).toMatchObject({ operation: { status: 'succeeded', needsAttention: false }, account: { id: view.account.id },
+      execution: { status: 'account_verified', targetVerified: true, observation: { accountId: view.account.id } } })
+  })
+
   it('starts a second account creation only after the in-flight provisioning finishes', async () => {
     const held = f.holdNextApply(), first = f.perform('create')
     await held.entered
@@ -542,11 +572,15 @@ describe('account mutation outcomes and race boundaries', () => {
   })
 
   it('does not enable prepared sign-in or acknowledge success after the original session is revoked during host work', async () => {
-    const held = f.holdNextApply(), pending = f.perform('create')
+    const held = f.holdNextApply()
+    const accepted = await f.send('POST', '/api/accounts', { ...f.accountInput, username: 'newowner7', primaryDomain: 'newowner7.example.test', ownerId: null })
+    expect(accepted.status).toBe(202)
     await held.entered
     await f.database.db.query('UPDATE sessions SET revoked_at = $1 WHERE principal_id = $2', [new Date().toISOString(), f.root.id])
     held.release()
-    const response = await pending
+    // The signed-out client cannot read the operation; another root session reads the answer it recorded.
+    const reader = await f.session(f.root.id, 'reader-')
+    const response = await settledAccountCreation(accepted, path => f.send('GET', path, undefined, { session: reader }))
     expect(response.status).toBe(401)
     expect(await response.json()).toMatchObject({ details: { stateChanged: true, verificationRequired: true } })
     expect(await findPrincipalByUsername(f.database.db, 'newowner7')).toMatchObject({ disabled: true })

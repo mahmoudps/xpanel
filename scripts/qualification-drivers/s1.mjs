@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto'
-import { safeResponse, tool } from './kit.mjs'
+import { createAccount, safeResponse, tool } from './kit.mjs'
 
 const secret = () => `Xq-${randomBytes(18).toString('base64url')}-9a`
 const CAPS = { addonDomains: 10, aliasDomains: 10, subdomains: 20, mailboxes: 20, forwarders: 20, mailingLists: 5, ftpAccounts: 10, databases: 10, phpWorkers: 8 }
@@ -37,15 +37,15 @@ async function newPlan(x, label, listId, { client = x.root, ownerId, disk = 2048
 async function newAccount(x, suffix, planId, { client = x.root, ownerId, extra = {} } = {}) {
   const username = `xq${x.tag}${suffix}`, password = secret(), primary = `${username}.example.net`
   x.undo(`account ${suffix}`, async () => gone(await x.root.delete(`/api/accounts/${username}`, { confirmUsername: username })))
-  const response = await client.post('/api/accounts', { username, password, primaryDomain: primary, planId, ...(ownerId && { ownerId }), ...extra }, { idempotencyKey: `xq-${x.tag}-${suffix}` })
+  const response = await createAccount(client, { username, password, primaryDomain: primary, planId, ...(ownerId && { ownerId }), ...extra }, { idempotencyKey: `xq-${x.tag}-${suffix}` }, x)
   const account = response.data?.account
-  return { response, username, password, primary, account, id: account?.id ?? null, domainId: response.data?.primaryDomain?.id ?? null, ok: response.status === 201 && typeof account?.id === 'string' }
+  return { response, username, password, primary, account, id: account?.id ?? null, domainId: response.data?.primaryDomain?.id ?? null, ok: response.created && typeof account?.id === 'string' }
 }
 
 /** A request the product should refuse; if it creates the account anyway, the account is removed again. */
 async function probeAccount(x, body) {
-  const response = await x.root.post('/api/accounts', { password: secret(), ...body })
-  if ([200, 201].includes(response.status) && typeof body.username === 'string') {
+  const response = await createAccount(x.root, { password: secret(), ...body }, undefined, x)
+  if ((response.created || response.accepted) && typeof body.username === 'string') {
     x.undo(`probe account ${body.username}`, async () => gone(await x.root.delete(`/api/accounts/${body.username}`, { confirmUsername: body.username })))
   }
   return response
@@ -77,7 +77,7 @@ export default [
   tool('list-accounts', {
     prefix: 'W1LA', needs: ['account'], probe: '/api/accounts',
     paths: only('accounts', P.account, 'accounts\\?by=package&q=gold', 'accounts\\?by=package&q=gold&format=csv', 'feature-lists', P.list, 'plans', P.plan, 'resellers', P.reseller),
-    requests: 40, deadlineMs: 240000,
+    accounts: 2, requests: 40, deadlineMs: 240000,
     page: { route: '/whm/accounts', read: '/api/accounts', shows: data => [data?.accounts?.[0]?.username] },
     unit: [{ id: 'W1LA-UNIT-SCOPE', file: 'apps/api/src/completion-reseller-security.test.ts', name: 'real HTTP reseller-owned account scope scopes GET /api/accounts to each reseller current ownership' }],
     checks: ['RESELLER-OWN-ONLY', 'FILTER-BY-PACKAGE', 'CSV-SAME-ROWS'],
@@ -104,7 +104,7 @@ export default [
   tool('create-account', {
     prefix: 'W1CA', probe: '/api/accounts',
     paths: only('accounts', `accounts/(?:${NAME}|1abc|testsite)`, 'dns/zones', 'feature-lists', P.list, 'plans', P.plan, 'resellers', P.reseller),
-    requests: 60, deadlineMs: 300000,
+    accounts: 3, requests: 60, deadlineMs: 300000,
     page: { route: '/whm/accounts/new', read: '/api/plans', shows: data => [data?.plans?.[0]?.name] },
     unit: [
       { id: 'W1CA-UNIT-LIMIT', file: 'apps/api/src/completion-reseller-security.test.ts', name: 'real HTTP reseller-owned account scope refuses account creation over the reseller account cap without creating state' },
@@ -140,7 +140,7 @@ export default [
   tool('modify-account', {
     prefix: 'W1MA', probe: '/api/accounts',
     paths: only('accounts', P.account, 'feature-lists', P.list, 'plans', P.plan),
-    requests: 40, deadlineMs: 240000,
+    accounts: 2, requests: 40, deadlineMs: 240000,
     page: { route: '/whm/accounts', read: '/api/accounts', shows: data => [data?.accounts?.[0]?.username] },
     unit: [
       { id: 'W1MA-UNIT-UPDATE', file: 'apps/api/src/account-mutation-security.test.ts', name: 'account mutation outcomes and race boundaries rejects an ownership change after authorization through revision CAS before side effects' },
@@ -175,7 +175,7 @@ export default [
   tool('upgrade-downgrade-account', {
     prefix: 'W1UD', probe: '/api/accounts',
     paths: only('accounts', P.account, 'feature-lists', P.list, 'plans', P.plan, 'resellers', P.reseller),
-    requests: 50, deadlineMs: 300000,
+    accounts: 2, requests: 50, deadlineMs: 300000,
     unit: [{ id: 'W1UD-UNIT-PLAN', file: 'apps/api/src/completion-reseller-security.test.ts', name: 'real HTTP reseller-owned account scope refuses plan upgrades beyond the reseller allocation and without the change-plan ACL' }],
     checks: ['UPGRADE-LIMITS-EQUAL', 'IP-UNCHANGED', 'FORBIDDEN-PACKAGE', 'PER-PACKAGE-LIMIT-EXCEEDED'],
     async run(x) {
@@ -201,7 +201,7 @@ export default [
   tool('manage-account-suspension', {
     prefix: 'W1SU', probe: '/api/accounts',
     paths: only('accounts', P.account, `${P.account}/(?:suspend|unsuspend|password)`, 'feature-lists', P.list, 'plans', P.plan),
-    requests: 40, deadlineMs: 300000,
+    accounts: 1, requests: 40, deadlineMs: 300000,
     page: { route: '/whm/accounts', read: '/api/accounts', shows: data => [data?.accounts?.[0]?.username] },
     unit: [
       { id: 'W1SU-UNIT-SUSPEND', file: 'apps/api/src/account-mutation-security.test.ts', name: 'account mutation outcomes and race boundaries revokes all linked aliases and tokens during suspension without changing disabled flags or neighbor access' },
@@ -232,7 +232,7 @@ export default [
   tool('terminate-accounts', {
     prefix: 'W1TE', probe: '/api/accounts',
     paths: only('accounts', P.account, 'dns/zones', `dns/zones/${NAME}\\.example\\.net`, 'feature-lists', P.list, 'plans', P.plan),
-    requests: 40, deadlineMs: 300000,
+    accounts: 1, requests: 40, deadlineMs: 300000,
     page: { route: '/whm/accounts', read: '/api/accounts', shows: data => [data?.accounts?.[0]?.username] },
     unit: [
       { id: 'W1TE-UNIT-PURGE', file: 'apps/api/src/account-mutation-security.test.ts', name: 'account mutation outcomes and race boundaries terminates an account only after the target-bound purge contract succeeds' },
@@ -260,7 +260,7 @@ export default [
   tool('add-package', {
     prefix: 'W1AP', probe: '/api/plans',
     paths: only('plans', P.plan, 'feature-lists', P.list, 'resellers', P.reseller, 'accounts', P.account, 'domains', P.domain),
-    requests: 40, deadlineMs: 240000,
+    accounts: 1, requests: 40, deadlineMs: 240000,
     page: { route: '/whm/plans', read: '/api/plans', shows: data => [data?.plans?.[0]?.name] },
     unit: [
       { id: 'W1AP-UNIT-UNLIMITED', file: 'packages/core/src/rules/plans.test.ts', name: 'validatePlan blocks unlimited fields for resellers without allow-unlimited-plans' },
@@ -288,7 +288,7 @@ export default [
   tool('edit-package', {
     prefix: 'W1EP', probe: '/api/plans',
     paths: only('plans', P.plan, 'feature-lists', P.list, 'accounts', P.account),
-    requests: 40, deadlineMs: 240000,
+    accounts: 1, requests: 40, deadlineMs: 240000,
     page: { route: '/whm/plans', read: '/api/plans', shows: data => [data?.plans?.[0]?.name] },
     unit: [{ id: 'W1EP-UNIT-VALIDATE', file: 'packages/core/src/rules/plans.test.ts', name: 'validatePlan rejects unknown top-level fields' }],
     checks: ['MAXPOP-RAISED', 'NAME-IMMUTABLE', 'DEDICATED-IP-IMMUTABLE'],
@@ -311,7 +311,7 @@ export default [
   tool('delete-package', {
     prefix: 'W1DP', probe: '/api/plans',
     paths: only('plans', P.plan, 'feature-lists', P.list, 'accounts', P.account),
-    requests: 40, deadlineMs: 240000,
+    accounts: 1, requests: 40, deadlineMs: 240000,
     page: { route: '/whm/plans', read: '/api/plans', shows: data => [data?.plans?.[0]?.name] },
     unit: [{ id: 'W1DP-UNIT-PLANS', file: 'packages/state/src/store.test.ts', name: 'accounts, plans, resellers and UID allocator invariants enforces reseller capacity, overselling rules, and plan ownership' }],
     checks: ['IN-USE-REFUSED', 'IN-USE-COUNT', 'UNUSED-REMOVED'],
@@ -335,7 +335,7 @@ export default [
   tool('feature-manager', {
     prefix: 'W1FM', needs: ['account'], probe: '/api/feature-lists',
     paths: only('feature-lists', P.list, 'plans', P.plan, 'accounts', P.account, `${P.account}/files`),
-    requests: 40, deadlineMs: 240000,
+    accounts: 1, requests: 40, deadlineMs: 240000,
     page: { route: '/whm/plans/features', read: '/api/feature-lists', shows: data => [data?.featureLists?.[0]?.name] },
     unit: [
       { id: 'W1FM-UNIT-POLICY', file: 'apps/api/src/authorization-security.test.ts', name: 'HTTP authorization security regressions owned resources remain protected by reseller ACL and account feature policy' },
@@ -407,7 +407,7 @@ export default [
   tool('reseller-center', {
     prefix: 'W1RC', probe: '/api/resellers',
     paths: only('resellers', P.reseller, 'accounts', P.account, 'feature-lists', P.list, 'plans', P.plan),
-    requests: 40, deadlineMs: 240000,
+    accounts: 1, requests: 40, deadlineMs: 240000,
     page: { route: '/whm/resellers', read: '/api/resellers', shows: data => [data?.resellers?.[0]?.username] },
     unit: [
       { id: 'W1RC-UNIT-CREATE', file: 'apps/api/src/completion-reseller-security.test.ts', name: 'real HTTP reseller administration security creates a reseller as root with exact StateStore readback and a principal-bound audit entry' },
@@ -454,7 +454,7 @@ export default [
       const stripped = await root.patch(`/api/resellers/${reseller.id}`, { acl: ACL.filter(item => item !== 'create-account') })
       const username = `xq${tag}p`
       const denied = await reseller.client.post('/api/accounts', { username, password: secret(), primaryDomain: `${username}.example.net`, planId: plan.id })
-      if ([200, 201].includes(denied.status)) x.undo('denied account', async () => gone(await root.delete(`/api/accounts/${username}`, { confirmUsername: username })))
+      if ([200, 201, 202].includes(denied.status)) x.undo('denied account', async () => gone(await root.delete(`/api/accounts/${username}`, { confirmUsername: username })))
       refused('CREATE-DENIED-FORBIDDEN-ACL', denied, 'FORBIDDEN')
       const listed = await reseller.client.get('/api/accounts')
       check('LIST-STILL-WORKS', stripped.status === 200 && listed.status === 200, { patch: stripped.status, read: listed.status })
@@ -466,7 +466,7 @@ export default [
   tool('reseller-account-limits', {
     prefix: 'W1RL', probe: '/api/resellers',
     paths: only('resellers', P.reseller, 'accounts', P.account, 'feature-lists', P.list, 'plans', P.plan),
-    requests: 100, deadlineMs: 600000,
+    accounts: 5, requests: 100, deadlineMs: 600000,
     page: { route: '/whm/resellers/more', read: '/api/resellers', shows: data => [data?.resellers?.[0]?.username] },
     unit: [
       { id: 'W1RL-UNIT-CAP', file: 'apps/api/src/completion-reseller-security.test.ts', name: 'real HTTP reseller-owned account scope refuses account creation over the reseller account cap without creating state' },
@@ -501,7 +501,7 @@ export default [
   tool('reseller-package-limits', {
     prefix: 'W1PL', probe: '/api/resellers',
     paths: only('resellers', P.reseller, 'accounts', P.account, 'feature-lists', P.list, 'plans', P.plan),
-    requests: 60, deadlineMs: 600000,
+    accounts: 4, requests: 60, deadlineMs: 600000,
     page: { route: '/whm/resellers/more', read: '/api/resellers', shows: data => [data?.resellers?.[0]?.username] },
     unit: [{ id: 'W1PL-UNIT-ALLOCATION', file: 'apps/api/src/completion-reseller-security.test.ts', name: 'real HTTP reseller-owned account scope refuses plan upgrades beyond the reseller allocation and without the change-plan ACL' }],
     checks: ['FOURTH-BY-CREATE', 'FOURTH-BY-UPGRADE', 'NOT-ALLOWED-FORBIDDEN-PACKAGE'],
@@ -525,7 +525,7 @@ export default [
   tool('change-ownership-multiple-accounts', {
     prefix: 'W1CO', probe: '/api/resellers',
     paths: only('resellers', P.reseller, 'accounts', P.account, 'accounts/bulk-actions/owner', 'feature-lists', P.list, 'plans', P.plan),
-    requests: 50, deadlineMs: 300000,
+    accounts: 2, requests: 50, deadlineMs: 300000,
     page: { route: '/whm/resellers/more', read: '/api/resellers', shows: data => [data?.resellers?.[0]?.username] },
     unit: [
       { id: 'W1CO-UNIT-BULK', file: 'apps/api/src/account-bulk-actions.test.ts', name: 'WHM bulk account actions runs each account through the single-account authorization: a reseller cannot act on another reseller account' },
@@ -561,7 +561,7 @@ export default [
   tool('show-reseller-accounts', {
     prefix: 'W1SR', needs: ['account'], probe: '/api/resellers',
     paths: only('resellers', P.reseller, 'accounts', P.account, 'feature-lists', P.list, 'plans', P.plan),
-    requests: 40, deadlineMs: 240000,
+    accounts: 1, requests: 40, deadlineMs: 240000,
     page: { route: '/whm/resellers/more', read: '/api/resellers', shows: data => [data?.resellers?.[0]?.username] },
     unit: [{ id: 'W1SR-UNIT-SCOPE', file: 'apps/api/src/completion-reseller-security.test.ts', name: 'real HTTP reseller-owned account scope scopes GET /api/accounts to each reseller current ownership' }],
     checks: ['EXACTLY-ONCE-UNDER-OWNER', 'ROOT-OWNED-UNDER-ROOT'],
@@ -585,7 +585,7 @@ export default [
   tool('view-reseller-usage-and-account-status', {
     prefix: 'W1RU', probe: '/api/resellers',
     paths: only('resellers', P.reseller, 'accounts', P.account, 'accounts/bulk-actions/suspend', 'accounts/bulk-actions', 'feature-lists', P.list, 'plans', P.plan),
-    requests: 60, deadlineMs: 300000,
+    accounts: 2, requests: 60, deadlineMs: 300000,
     page: { route: '/whm/resellers/more', read: '/api/resellers', shows: data => [data?.resellers?.[0]?.username] },
     unit: [
       { id: 'W1RU-UNIT-BULK', file: 'apps/api/src/account-bulk-actions.test.ts', name: 'WHM bulk account actions reports partial failure truthfully and stops after an outcome that needs review' },
@@ -620,7 +620,7 @@ export default [
   tool('password-modification', {
     prefix: 'W1PW', probe: '/api/accounts',
     paths: only('accounts', P.account, `${P.account}/password`, 'feature-lists', P.list, 'plans', P.plan),
-    requests: 40, deadlineMs: 240000,
+    accounts: 1, requests: 40, deadlineMs: 240000,
     page: { route: '/whm/accounts', read: '/api/accounts', shows: data => [data?.accounts?.[0]?.username] },
     unit: [{ id: 'W1PW-UNIT-LOGINS', file: 'apps/api/src/account-mutation-security.test.ts', name: 'account mutation outcomes and race boundaries changes every login for the account and leaves the neighbor untouched' }],
     checks: ['PANEL-LOGIN-WITH-NEW-PASSWORD', 'MYSQL-LOGIN-WITH-NEW-PASSWORD', 'WEAK-PASSWORD'],
@@ -643,7 +643,7 @@ export default [
   tool('list-suspended-accounts', {
     prefix: 'W1LS', probe: '/api/accounts',
     paths: only('accounts', P.account, `${P.account}/(?:suspend|unsuspend)`, 'resellers', P.reseller, 'feature-lists', P.list, 'plans', P.plan),
-    requests: 40, deadlineMs: 300000,
+    accounts: 1, requests: 40, deadlineMs: 300000,
     unit: [{ id: 'W1LS-UNIT-SUSPEND', file: 'apps/api/src/account-mutation-security.test.ts', name: 'account mutation outcomes and race boundaries revokes all linked aliases and tokens during suspension without changing disabled flags or neighbor access' }],
     checks: ['LOCKED-LISTED', 'RESELLER-UNSUSPEND-FORBIDDEN', 'ROOT-UNSUSPEND-SUCCEEDS'],
     async run(x) {
@@ -668,7 +668,7 @@ export default [
   tool('list-subdomains', {
     prefix: 'W1SD', needs: ['account'], probe: '/api/domains',
     paths: only('resellers', P.reseller, 'accounts', P.account, 'domains', P.domain, `domains\\?accountId=${ID}`, 'search\\?q=shop&kind=domain', 'feature-lists', P.list, 'plans', P.plan),
-    requests: 60, deadlineMs: 300000,
+    accounts: 1, requests: 60, deadlineMs: 300000,
     page: { route: '/whm/domains', read: '/api/domains', shows: data => [data?.domains?.[0]?.name] },
     unit: [{ id: 'W1SD-UNIT-SUBDOMAINS', file: 'apps/api/src/completion-domain-workspace-security.test.ts', name: 'conditional domain workspace API with isolated real SQLite and desired state creates owned subdomains and aliases with coupled parent settings' }],
     checks: ['SEARCH-NAME-MATCH', 'SEARCH-EXCLUDES-NON-MATCH', 'RESELLER-OWN-ONLY'],
@@ -703,7 +703,7 @@ export default [
   tool('list-parked-domains', {
     prefix: 'W1PD', probe: '/api/domains',
     paths: only('accounts', P.account, 'domains', P.domain, `domains\\?accountId=${ID}`, 'dns/zones', 'feature-lists', P.list, 'plans', P.plan),
-    requests: 40, deadlineMs: 300000,
+    accounts: 1, requests: 40, deadlineMs: 300000,
     page: { route: '/whm/domains', read: '/api/domains', shows: data => [data?.domains?.[0]?.name] },
     unit: [{ id: 'W1PD-UNIT-ALIASES', file: 'apps/api/src/completion-domain-workspace-security.test.ts', name: 'conditional domain workspace API with isolated real SQLite and desired state creates owned subdomains and aliases with coupled parent settings' }],
     checks: ['UNPARK-REMOVES-FROM-LIST', 'UNPARK-DELETES-ZONE', 'BLOCKED-DOMAIN-REJECTED'],

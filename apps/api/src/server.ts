@@ -121,6 +121,7 @@ import { handleDnsZoneFileRoute } from './dns-zone-file.ts'
 import { handleDatabaseTransferRoute } from './database-transfer-workspace.ts'
 import { handleResellerSuspensionRoute } from './reseller-suspension.ts'
 import { handleAccountBulkActionsRoute } from './account-bulk-actions.ts'
+import { accountCreateOperationView, handleAccountCreateOperationRoute, type AccountCreateOutcome } from './account-create-operations.ts'
 import { changeAccountPackageLimit, handleAccountLimitsRoute, isPackageLimitPatch, saveAccountLimits } from './account-limits-workspace.ts'
 import { handleForceHttpsRoute } from './domain-force-https.ts'
 import { handleAccountAdminRoute } from './account-admin-workspace.ts'
@@ -283,7 +284,7 @@ import {
   assertNoActiveDatabaseTransaction,
   recordLoginFailure,
 } from '@xpanel/db'
-import type { Db } from '@xpanel/db'
+import type { Db, DurableJobRecord } from '@xpanel/db'
 import type {
   DnsZoneState,
   DomainPatch,
@@ -1825,8 +1826,19 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   const serialProvisioning = <T>(task: () => Promise<T>): Promise<T> => {
     const run = provisioningQueue.then(task, task); provisioningQueue = run.catch(() => undefined); return run
   }
+  /**
+   * Creations answered 202: null while this process still runs them (audit, hooks and skeleton follow the job), then the
+   * answer their POST would have given, for the poller. shortcut: in-process and the latest 64 only; after a restart or
+   * eviction the job alone answers (account-create-operations.ts).
+   */
+  const acceptedCreations = new Map<string, AccountCreateOutcome | null>()
+  const settleCreation = (id: string, outcome: AccountCreateOutcome): void => {
+    acceptedCreations.set(id, outcome)
+    for (const [key, value] of acceptedCreations) { if (acceptedCreations.size <= 64) break; if (value !== null) acceptedCreations.delete(key) }
+  }
   const createAccountAs = async (caller: AuthenticatedCaller, body: CreateAccountBody, authority: {
     reference: ProvisioningAuthorizationReference; reauthenticate: () => Promise<AuthenticatedCaller>; idempotencyKey?: unknown
+    onHostStep?: Parameters<AccountLifecycleCoordinator['provisionPreparedAccount']>[0]['onHostStep']
   }) => {
     requireAccountHostAgent()
     if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => ![
@@ -1901,7 +1913,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           whmcs: async () => readSavedWhmcs(await new ExtendedFeaturesStore(deps.store.rootDir).readOrDefault<unknown>('integrations/whmcs.json', null)) },
       }),
     })
-    const result = await serialProvisioning(() => lifecycle.provisionPreparedAccount({ actor: caller.principal, idempotencyKey, preparationReference: prepared.preparationReference })).catch(error => {
+    const result = await serialProvisioning(() => lifecycle.provisionPreparedAccount({ actor: caller.principal, idempotencyKey, preparationReference: prepared.preparationReference,
+      ...(authority.onHostStep && { onHostStep: authority.onHostStep }) })).catch(error => {
       // A consumed request key is a known refusal before any effect; it carries no diagnostics or operation IDs.
       if (isXpanelError(error) && error.detail.reason === 'provisioning_key_already_completed') throw error
       // Agent diagnostics and internal operation IDs are not a public failure contract. A lost
@@ -4017,6 +4030,9 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
 
       const accountBulkResponse = await handleAccountBulkActionsRoute(req, url, method, { db: deps.db, requireCaller, readJsonBody, getAccount: id => deps.store.getAccount(id), assertCanAccessAccount, setSuspension: setAccountSuspensionAs, update: updateAccountAs, terminate: terminateAccountAs })
       if (accountBulkResponse) return accountBulkResponse
+      const accountOperationResponse = await handleAccountCreateOperationRoute(req, url, method, { requireCaller, db: deps.db, getAccount: id => deps.store.getAccount(id),
+        primaryDomain: async accountId => (await deps.store.listDomains({ accountId }))[0] ?? null, local: id => acceptedCreations.get(id) })
+      if (accountOperationResponse) return accountOperationResponse
       // The owner, by name: an account can also hold mailbox principals.
       const accountOwnerPrincipal = async (account: Account) => { const owner = await findPrincipalByUsername(deps.db, account.username); return owner?.kind === 'user' && owner.accountId === account.id ? owner : null }
       const accountAdminResponse = await handleAccountAdminRoute(req, url, method, { requireCaller, readJsonBody, getPlan: id => deps.store.getPlan(id),
@@ -4123,8 +4139,21 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
             tokenHash: sessionTokenHash(caller.sessionToken, entryPoint), entryPoint: entryPoint ?? null }
         } else return fail('FORBIDDEN', 'a direct privileged account creation credential is required', { stateChanged: false })
         const requestKey = req.headers.get('idempotency-key')
-        return jsonResponse(await createAccountAs(caller, body, { reference: Object.freeze(reference), reauthenticate: () => requireCaller(req),
-          ...(requestKey !== null && { idempotencyKey: requestKey }) }), 201)
+        // Refusals answer here. Once the host step starts the client gets the operation to poll: the job runs to its
+        // recorded end on the server whether or not this request stays open.
+        let hostStep: (operation: { job: DurableJobRecord; account: Account }) => void = () => {}
+        const started = new Promise<{ job: DurableJobRecord; account: Account }>(resolve => { hostStep = resolve })
+        const creation = createAccountAs(caller, body, { reference: Object.freeze(reference), reauthenticate: () => requireCaller(req),
+          ...(requestKey !== null && { idempotencyKey: requestKey }), onHostStep: operation => hostStep(operation) })
+        const first = await Promise.race([creation.then(result => ({ result })), started.then(operation => ({ operation }))])
+        if ('result' in first) return jsonResponse(first.result, 201)
+        const { job, account } = first.operation
+        acceptedCreations.set(job.id, null)
+        void creation.then(result => ({ result }), async error => ({ problem: await problemResponse(error, pathname, method).json() as unknown }))
+          .then(outcome => settleCreation(job.id, outcome))
+        // Informational only: the creation is accepted either way, and the operation read names the domain later.
+        const [primaryDomain] = await deps.store.listDomains({ accountId: account.id }).catch(() => [])
+        return jsonResponse(accountCreateOperationView(job, account, primaryDomain ?? null, null), 202, { location: `/api/accounts/operations/${job.id}` })
       }
 
       const accountSuspendMatch = /^\/api\/accounts\/([^/]+)\/(suspend|unsuspend)$/.exec(pathname)

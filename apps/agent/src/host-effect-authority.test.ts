@@ -19,11 +19,11 @@ describe('operation-scoped native effect authority', () => {
     await expect(withHostEffectAuthority(executor, guard(() => allowed), async () => {
       await authorizedHostEffect(executor, async () => { changes++ })
       allowed = false
-      await authorizedHostEffect(executor, async () => { changes++ }).catch(async error => {
+      await authorizedHostEffect(executor, async () => { throw new Error('primitive failed') }).catch(async error => {
         await withoutHostEffectAuthority(() => authorizedHostEffect(executor, async () => { restored++ }))
         throw error
       })
-    })).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    })).rejects.toThrow('primitive failed')
     expect([changes, restored]).toEqual([1, 1])
   })
 
@@ -38,14 +38,24 @@ describe('operation-scoped native effect authority', () => {
     expect(writes).toBe(1)
   })
 
-  it('does not pretend an in-flight completed effect was undone after revocation', async () => {
+  it('finishes an operation whose authority lapsed after its first effect, then refuses to acknowledge it', async () => {
     const executor = new FakeHostExecutor()
     let allowed = true, writes = 0
     await expect(withHostEffectAuthority(executor, guard(() => allowed), async () => {
       await authorizedHostEffect(executor, async () => { writes++; allowed = false })
       await authorizedHostEffect(executor, async () => { writes++ })
     })).rejects.toMatchObject({ code: 'FORBIDDEN', detail: { stateChanged: true, verificationRequired: true } })
-    expect(writes).toBe(1)
+    expect(writes).toBe(2)
+  })
+
+  it('does not stop a started operation when its request is dropped', async () => {
+    const executor = new FakeHostExecutor(), request = new AbortController()
+    let writes = 0
+    await expect(withHostEffectAuthority(executor, { signal: request.signal, assertAuthority: async () => {} }, async () => {
+      await authorizedHostEffect(executor, async () => { writes++; request.abort() })
+      await authorizedHostEffect(executor, async () => { writes++ })
+    })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', detail: { stateChanged: true, verificationRequired: true } })
+    expect(writes).toBe(2)
   })
 
   it('isolates concurrent operations and unrelated normal calls on the same executor', async () => {

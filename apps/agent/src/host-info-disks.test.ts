@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { HOST_DISK_DF_ARGV, MAX_HOST_DISK_INPUT_BYTES, readHostDiskInventory, visibleMountInventory, visibleMountpoints } from './host-info-disks.ts'
+import { ROCKY9_DF, ROCKY9_MOUNTINFO, UBUNTU2404_DF, UBUNTU2404_MOUNTINFO } from './host-info-disks-fixture.ts'
+import { readFilesystems } from './host-monitoring.ts'
 
 const inventory = [
   '1 0 8:1 / / rw - ext4 /dev/sda1 rw',
@@ -102,5 +104,43 @@ describe('complete per-mount host disk observations', () => {
     host.reader.readFile = async () => { if (++calls > 1) throw new Error('read failed'); return inventory }
     const result = await readHostDiskInventory(host.reader)
     expect(result.diskCoverage).toMatchObject({ status: 'incomplete', reason: 'mount_inventory_changed' })
+  })
+})
+
+describe('real df output of an EL and an Ubuntu guest', () => {
+  const run = (stdout: string) => async (argv: string[]) => argv.join(' ') === HOST_DISK_DF_ARGV.join(' ') ? { ok: true, stdout, stderr: '' } : { ok: false, stdout: '', stderr: '' }
+  const read = (mountinfo: string, stdout: string) => readHostDiskInventory({ readFile: async () => mountinfo, runCommand: run(stdout) })
+  const guests = [['rocky-9', ROCKY9_MOUNTINFO, ROCKY9_DF], ['ubuntu-24.04', UBUNTU2404_MOUNTINFO, UBUNTU2404_DF]] as const
+
+  it.each(guests)('%s: skips the autofs placeholder rows and covers every mount', async (_guest, mountinfo, df) => {
+    const result = await read(mountinfo, df)
+    expect(result.diskCoverage).toMatchObject({ status: 'complete', unavailableMounts: [], unexpectedMounts: [] })
+    expect(result.disks.map(disk => disk.mount)).toEqual(expect.arrayContaining(['/', '/home', '/boot', '/boot/efi', '/proc/sys/fs/binfmt_misc']))
+    // binfmt_misc is mounted on the placeholder, so its row is the one df measured.
+    expect(visibleMountInventory(mountinfo).find(item => item.mount === '/proc/sys/fs/binfmt_misc')?.type).toBe('binfmt_misc')
+    expect(result.disks.find(disk => disk.mount === '/proc/sys/fs/binfmt_misc')?.filesystem).toBe('binfmt_misc')
+  })
+
+  it.each(guests)('%s: the filesystem list keeps every measured mount', async (_guest, mountinfo, df) => {
+    const filesystems = await readFilesystems(run(df), async () => mountinfo)
+    expect(filesystems.state).toBe('read')
+    expect(filesystems.items.filter(item => ['/', '/home', '/boot'].includes(item.mount)).map(item => item.totalBytes > 0)).toEqual([true, true, true])
+  })
+
+  it('covers an idle automount without a size and marks a sizeless row of any other mount', async () => {
+    // Rocky 9 after the 120 s idle timeout of /efi: only the placeholder is left, and it has no capacity of its own.
+    const idle = await read(ROCKY9_MOUNTINFO.split('\n').filter(line => !line.startsWith('1057 ')).join('\n'),
+      ROCKY9_DF.split('\n').filter(line => !line.endsWith(' /efi') || line.startsWith('systemd-1 ')).join('\n'))
+    expect(idle.diskCoverage).toMatchObject({ status: 'complete', unavailableMounts: [] })
+    expect(idle.disks.some(disk => disk.mount === '/efi')).toBe(false)
+    const lost = await read(UBUNTU2404_MOUNTINFO, UBUNTU2404_DF.replace(/^binfmt_misc .*\n/m, ''))
+    expect(lost.diskCoverage).toMatchObject({ status: 'incomplete', unavailableMounts: ['/proc/sys/fs/binfmt_misc'] })
+    expect(lost.disks.length).toBeGreaterThan(10)
+  })
+
+  it('keeps sibling mounts at one path unknown: only a stack that chains through its parents names the visible type', () => {
+    expect(visibleMountInventory(inventory + '6 1 8:4 / /home rw - xfs /dev/sda4 rw\n').find(item => item.mount === '/home')?.type).toBeNull()
+    expect(visibleMountInventory(inventory + '6 3 8:4 / /home rw - xfs /dev/sda4 rw\n').find(item => item.mount === '/home')?.type).toBe('xfs')
+    expect(visibleMountInventory(inventory + '6 7 8:4 / /home rw - xfs /dev/sda4 rw\n7 6 8:5 / /home rw - xfs /dev/sda5 rw\n').find(item => item.mount === '/home')?.type).toBeNull()
   })
 })

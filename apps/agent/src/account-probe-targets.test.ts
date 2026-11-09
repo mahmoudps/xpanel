@@ -23,7 +23,8 @@ describe('finite managed account probe targets', { tags: ['unit'] }, () => {
   it('links a replaced readonly bind source to the actual managed FPM units', () => {
     const unit = 'xpanel-php-fpm-alice-8.3.service'
     const manifest = buildGenerationManifest({ generationId: 1, stateChecksum: 'a'.repeat(64), filesChecksum: 'b'.repeat(64), actor: 'root',
-      files: [renderAccountProbeAsset()], postActions: [{ kind: 'systemd', verb: 'restart', unit }, { kind: 'systemd', verb: 'restart', unit: 'nginx.service' }], os: debianOs })
+      // As the reconciler emits them for an active account: the FPM unit is enabled and restarted, nginx only restarted.
+      files: [renderAccountProbeAsset()], postActions: [{ kind: 'systemd', verb: 'enable', unit }, { kind: 'systemd', verb: 'restart', unit }, { kind: 'systemd', verb: 'restart', unit: 'nginx.service' }], os: debianOs })
     const asset = manifest.files.find(file => file.path === '/etc/xpanel/account-probe/probe.php')
     expect(asset?.service).toBe('php-fpm')
     expect(asset?.dependentUnits).toEqual([unit])

@@ -52371,6 +52371,9 @@ msgstr "تم الاحتفاظ بطلب الحساب السابق في علامة
 msgid "This request already completed. Current hosting verification is still required."
 msgstr "اكتمل هذا الطلب سابقا. ما زال التحقق من حالة الاستضافة الحالية مطلوبا."
 
+msgid "The server is creating the account. It continues if you leave this page."
+msgstr "ينشئ الخادم الحساب الآن، ويستمر الإنشاء حتى إن غادرت هذه الصفحة."
+
 msgid "The announcement was dismissed, but this page could not refresh. Reload the page."
 msgstr "أُخفي الإعلان، لكن تعذّر تحديث هذه الصفحة. أعد تحميلها."
 

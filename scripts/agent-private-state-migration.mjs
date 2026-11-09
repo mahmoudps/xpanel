@@ -115,7 +115,7 @@ async function normalParticipants(receipt, apiUid, nodeInfo) {
       && await readlink(base + '/exe') === receipt.runtime.nodePath && await readlink(base + '/cwd') === release
       && await readFile(base + '/cgroup', 'utf8') === '0::' + unit.ControlGroup + '\n'
       && args.length >= 2 && args.length <= 4 && await realpath(args[0]) === receipt.runtime.nodePath
-      && args.slice(1, -1).every(value => /^--max-old-space-size=[1-9][0-9]{0,5}$/.test(value))
+      && args.slice(1, -1).every(value => /^--max-(?:old|semi)-space-size=[1-9][0-9]{0,5}$/.test(value))
       && await realpath(args.at(-1)) === release + '/apps/' + role + '/src/main.ts', 'AGENT_PRIVATE_STATE_PARTICIPANT_CHANGED')
     processes.push({ role, pid, start, uid, invocationId: unit.InvocationID, cgroup: unit.ControlGroup })
   }

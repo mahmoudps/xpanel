@@ -355,6 +355,7 @@ export const CLI_API_FUNCTIONS: Readonly<Record<CliApiCommand, readonly CliApiFu
     ['accounts', 'ipv6_assign', 'POST', '/api/accounts/{id}/ipv6'],
     ['accounts', 'limits_update', 'PATCH', '/api/accounts/{id}/limits'],
     ['accounts', 'list', 'GET', '/api/accounts'],
+    ['accounts', 'operation', 'GET', '/api/accounts/operations/{id}'],
     ['accounts', 'suspend', 'POST', '/api/accounts/{id}/suspend'],
     ['accounts', 'unsuspend', 'POST', '/api/accounts/{id}/unsuspend'],
     ['accounts', 'update', 'PATCH', '/api/accounts/{id}'],

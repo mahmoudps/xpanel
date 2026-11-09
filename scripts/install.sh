@@ -1334,7 +1334,11 @@ if [[ "$OS_FAMILY" == "debian" ]]; then
     add-apt-repository -y -n "$repository"
   done
   apt-get update -y
+  # Web Disk needs lighttpd, but its postinst starts the distribution daemon on :80 before nginx's postinst can bind
+  # it (Ubuntu 22.04). Masked for the package step, it never starts; the OS configuration below then disables it.
+  systemctl mask --runtime lighttpd.service
   apt-get install -y --no-install-recommends "${PACKAGES[@]}"
+  systemctl unmask --runtime lighttpd.service
 else
   dnf install -y --setopt=install_weak_deps=False "${BOOTSTRAP_PACKAGES[@]}"
   for repository in "${REPOSITORY_SOURCES[@]}"; do

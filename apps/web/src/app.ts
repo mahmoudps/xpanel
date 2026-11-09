@@ -33,7 +33,7 @@ import {
   escapeHtml,
 } from './tokens.ts'
 import {
-  BROWSER_REALTIME_SCRIPT,
+  browserRealtimeScript,
   createInitialLiveEventState,
   type LiveEventState,
 } from './ws-client.ts'
@@ -454,19 +454,24 @@ const LOGIN_FAVICONS = {
   xmail: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#087F5B"/><g transform="translate(8 8)" fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></g></svg>',
 }
 
-// The shared realtime client is ~1.5 MB: serve it once as an immutable cached asset instead of inlining it in every page.
+// The shared realtime client is ~5 MB: serve it once as an immutable cached asset instead of inlining it in every page.
 // A synchronous external script keeps the execution order of the former inline script.
-const REALTIME_SCRIPT_VERSION = createHash('sha256').update(BROWSER_REALTIME_SCRIPT).digest('hex').slice(0, 16)
+// Held as UTF-8 bytes outside the V8 heap; as a string it is ~10 MB of the API's 96 MB old space (two-byte characters).
+const REALTIME_SCRIPT_BYTES = new TextEncoder().encode(browserRealtimeScript())
+const REALTIME_SCRIPT_VERSION = createHash('sha256').update(REALTIME_SCRIPT_BYTES).digest('hex').slice(0, 16)
 const LOGIN_PAGE_SCRIPT = pageScript('login-client', LOGIN_CLIENT_SCRIPT)
 const TEAM_PASSWORD_PAGE_SCRIPT = pageScript('team-password', TEAM_PASSWORD_CLIENT_BINDING)
 const HANDOFF_PAGE_SCRIPT = pageScript('handoff', `(${HANDOFF_CLIENT_BINDING})()`)
 
 // The whole UI catalog per locale as an immutable cached asset; inline page scripts get their own subset in <head>.
 // Built on first use, after panel start installed any uploaded catalogs; the version changes with their content.
-let i18nAssets: { bodies: ReadonlyMap<Locale, string>; version: string } | undefined
-const I18N_ASSETS = (): { bodies: ReadonlyMap<Locale, string>; version: string } => i18nAssets ??= (() => {
-  const bodies = new Map(LOCALES.map(info => [info.tag, clientI18nAsset(info.tag)]))
-  return { bodies, version: createHash('sha256').update([...bodies.values()].join('\n')).digest('hex').slice(0, 16) }
+// UTF-8 bytes like the realtime client: the Arabic catalog alone is megabytes as a two-byte string.
+let i18nAssets: { bodies: ReadonlyMap<Locale, Uint8Array<ArrayBuffer>>; version: string } | undefined
+const I18N_ASSETS = (): { bodies: ReadonlyMap<Locale, Uint8Array<ArrayBuffer>>; version: string } => i18nAssets ??= (() => {
+  const encoder = new TextEncoder(), bodies = new Map(LOCALES.map(info => [info.tag, encoder.encode(clientI18nAsset(info.tag))]))
+  const hash = createHash('sha256')
+  for (const body of bodies.values()) hash.update(body).update('\n')
+  return { bodies, version: hash.digest('hex').slice(0, 16) }
 })()
 
 const PUBLIC_STATIC_ASSETS: Readonly<Record<string, { body: string | Uint8Array<ArrayBuffer>; contentType: string }>> = {
@@ -487,11 +492,11 @@ const PUBLIC_STATIC_ASSETS: Readonly<Record<string, { body: string | Uint8Array<
     contentType: 'application/javascript; charset=utf-8',
   },
   '/assets/ws.js': {
-    body: BROWSER_REALTIME_SCRIPT,
+    body: REALTIME_SCRIPT_BYTES,
     contentType: 'application/javascript; charset=utf-8',
   },
   '/assets/ws-client.js': {
-    body: BROWSER_REALTIME_SCRIPT,
+    body: REALTIME_SCRIPT_BYTES,
     contentType: 'application/javascript; charset=utf-8',
   },
 }

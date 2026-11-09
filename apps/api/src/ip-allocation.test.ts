@@ -13,6 +13,7 @@ import { authenticateRequest, deriveCsrfToken } from './auth.ts'
 import { sessionCookieName, sessionTokenHash } from './entry-points.ts'
 import type { EntryPoint } from './entry-points.ts'
 import { createApiApp, INGRESS_SECRET_HEADER } from './server.ts'
+import { settledAccountCreation } from './testing/account-create-settle.ts'
 
 // These are isolated router/state diagnostics. The agent below is a synthetic
 // configuration/prepared H receipt, never evidence that an address is bound on a host.
@@ -63,7 +64,11 @@ const fixture = async () => {
   const app = (audience: EntryPoint = 'xwhm') => createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, entryPoint: audience, publicOrigin: ORIGIN, allowedOrigins: [ORIGIN], ingressSecret: INGRESS, requireSecureCookies: true, requireOriginHeader: true, ...prepared, agentToken: 'a'.repeat(64) })
   const main = app()
   const tokenApp = createApiApp({ db: database.db, store: state.store, serverSecret: SECRET, publicOrigin: ORIGIN, allowedOrigins: [ORIGIN], ingressSecret: INGRESS, requireSecureCookies: true, requireOriginHeader: true, ...prepared, agentToken: 'a'.repeat(64) })
-  const request = (method: string, path: string, body?: unknown, options: { session?: typeof rootSession; csrf?: string; origin?: string; bearer?: string; audience?: EntryPoint } = {}) => {
+  type RequestOptions = { session?: typeof rootSession; csrf?: string; origin?: string; bearer?: string; audience?: EntryPoint }
+  // An accepted creation (202) is read to its end, so these cases see the answer its POST would have given.
+  const request = (method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<Response> => send(method, path, body, options)
+    .then(response => method === 'POST' && path === '/api/accounts' ? settledAccountCreation(response, read => send('GET', read, undefined, options)) : response)
+  const send = (method: string, path: string, body?: unknown, options: RequestOptions = {}) => {
     const auth = options.session ?? rootSession
     return (options.bearer ? tokenApp : options.audience ? app(options.audience) : main).fetch(new Request(ORIGIN + path, { method, headers: {
       'content-type': 'application/json', origin: options.origin ?? ORIGIN,
