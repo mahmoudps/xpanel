@@ -302,6 +302,7 @@ const isIncludedRuntimeSource = (relPath) => {
     'scripts/install-startup.mjs', 'scripts/install-startup.d.mts',
     'scripts/agent-private-state-migration.mjs', 'scripts/agent-private-state-migration.d.mts',
     'scripts/agent-private-state-migration-entry.mjs',
+    'scripts/release-retention.mjs', 'scripts/release-retention.d.mts',
     'scripts/install-finalize-prepared-entry.mjs',
     'scripts/install-dns-resume.mjs',
     'scripts/install-os-configuration.mjs',

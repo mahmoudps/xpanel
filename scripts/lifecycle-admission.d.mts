@@ -40,3 +40,4 @@ export function assertInstallFinalizationExclusivePhysicalHeld(capability:unknow
 export function observeNormalLifecycleParticipants(processes: readonly {role:'api'|'agent';pid:number;uid:number;start:string}[],probeId:string):Promise<true>
 export function withAgentPrivateStateMigrationExclusiveAdmission<T>(capability:unknown,callback:()=>Promise<T>):Promise<T>
 export function assertAgentPrivateStateMigrationExclusivePhysicalHeld(capability:unknown):Promise<void>
+export function withReleaseRetentionExclusiveAdmission<T>(callback:(assertLocked:()=>Promise<void>)=>Promise<T>):Promise<T>
