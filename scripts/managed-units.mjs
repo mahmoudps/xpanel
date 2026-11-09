@@ -13,8 +13,15 @@ const safeExecutable = value => typeof value === 'string' && value.length <= 409
   && !value.split('/').some(part => part === '.' || part === '..')
 const releaseRoot = value => typeof value === 'string'
   && /^\/opt\/xpanel\/releases\/(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/.test(value)
+// API heap arguments, current first, then each one an installed release still runs. A new release parses the transition
+// journal and observes the writers an installed release left behind, so removing a vector refuses upgrades from it.
+// --max-semi-space-size=1 (0.1.48): Node 26 grows the young generation to ~56 MB beside the 96 MB old space.
+export const API_HEAP_ARGUMENTS = Object.freeze([
+  Object.freeze(['--max-old-space-size=96', '--max-semi-space-size=1']),
+  Object.freeze(['--max-old-space-size=96']),
+])
 
-function render(options, plan) {
+function render(options, plan, apiHeap = API_HEAP_ARGUMENTS[0]) {
   const keys = ['nodePath', 'programRoot', 'lifecycleParticipants']
   if (!options || typeof options !== 'object' || Array.isArray(options)
     || ![Object.prototype, null].includes(Object.getPrototypeOf(options))
@@ -84,7 +91,7 @@ WorkingDirectory=${programRoot}
 Environment=NODE_ENV=production
 EnvironmentFile=/etc/xpanel/runtime.env
 EnvironmentFile=/etc/xpanel/api.env
-ExecStart=${nodePath} --max-old-space-size=96 --max-semi-space-size=1 ${programRoot}/apps/api/src/main.ts
+ExecStart=${nodePath} ${apiHeap.join(' ')} ${programRoot}/apps/api/src/main.ts
 RuntimeDirectory=xpanel-api
 RuntimeDirectoryMode=0755
 Restart=always
@@ -144,6 +151,13 @@ WantedBy=timers.target
 
 /** Exact installed release or legacy flat layout; never a movable current link. */
 export const renderManagedUnits = options => render(options, false)
+
+/** Every unit image a supported release renders for these options, current first; validates images an installed release wrote. */
+export const renderInstalledManagedUnitImages = options => API_HEAP_ARGUMENTS.map(heap => render(options, false, heap))
+
+/** Exact argv a managed writer daemon runs with under the current or an installed release's unit. */
+export const managedWriterArguments = (role, nodePath, entry) =>
+  (role === 'agent' ? [['--max-old-space-size=64']] : API_HEAP_ARGUMENTS).map(heap => [nodePath, ...heap, entry])
 
 /** Diagnostic preview before an authenticated release version is available. */
 export const renderManagedUnitPlan = options => render(options, true)

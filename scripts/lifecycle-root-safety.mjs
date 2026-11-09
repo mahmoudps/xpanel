@@ -15,6 +15,7 @@ import { assertPreparedReleaseCurrent, preparedReleaseInfo, withExistingPrepared
 import { captureManagedFile, ensureManagedPrivateDirectory, managedPathAbsent, replaceManagedFile } from './lifecycle-managed-files.mjs'
 import { withVerifiedCoordinatorOwnership, assertCoordinatorOwnershipCurrent, coordinatorOwnershipInfo } from './coordinator-ownership.mjs'
 import { TERMINAL_RECORD_KEYS } from './install-transition-observation.mjs'
+import { managedWriterArguments } from './managed-units.mjs'
 import { prepareInstallationTransition, selectInstallationTransition, publishInstallationTransition, readInstallationTransitionRecovery, reopenInstallationTransition } from './installation-transition.mjs'
 import { createDb, getReadonlyOperationDatabaseOrigin, assertReadonlyOperationDatabaseCurrent, withReadonlyClosedOperationDatabase,
   withReadonlyLifecycleIntentFileObservation, assertReadonlyLifecycleIntentFileObservationCurrent,
@@ -1065,7 +1066,8 @@ export async function observeLifecycleWriterService(capability, role, expected) 
   const source = await realpath('/opt/xpanel/current')
   const expectedEntry = join(source, `apps/${role}/src/main.ts`)
   const args = command.split('\0').filter(Boolean)
-  if (JSON.stringify(args) !== JSON.stringify([scope.receipt.runtime.nodePath, ...(role === 'agent' ? ['--max-old-space-size=64'] : ['--max-old-space-size=96', '--max-semi-space-size=1']), expectedEntry])
+  // Before the switch and after a rollback the writer still runs under the installed release's unit.
+  if (!managedWriterArguments(role, scope.receipt.runtime.nodePath, expectedEntry).some(expected => JSON.stringify(args) === JSON.stringify(expected))
     || await realpath(`/proc/${pid}/cwd`) !== source || source !== '/opt/xpanel/releases/' + scope.receipt.source.version) fail('LIFECYCLE_WRITER_SOURCE_MISMATCH')
   const actual = Object.freeze({ pid, uid, start, executable, source })
   if (expected && JSON.stringify(actual) !== JSON.stringify(expected)) fail('LIFECYCLE_WRITER_PROCESS_CHANGED')
