@@ -22,7 +22,8 @@ import { assertNativeRootOperatorDispatchHeld, getNativeRootOperatorDispatchInfo
 import type { AgentExecutor } from './executor.ts'
 import type { HostEffectAuthority } from './host-effect-authority.ts'
 
-const refuse = (): never => fail('PRECONDITION_FAILED', 'native hosted UID qualification is unavailable', { stateChanged: false })
+/** One stable reason per check, so the root journal line names the check that refused (`reason=<reason>`). */
+const refuse = (reason: string): never => fail('PRECONDITION_FAILED', 'native hosted UID qualification is unavailable', { stateChanged: false, reason })
 const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const DATABASE = '/var/lib/xpanel/control.db'
 const STATE = '/var/lib/xpanel/state'
@@ -54,20 +55,21 @@ async function readPinnedProcess(pin: NativeProcessPin, expected: ProvisioningPr
   const [stat, status, cgroup] = await Promise.all([pin.read('stat'), pin.read('status'), pin.read('cgroup')])
   const value = parseProvisioningProcessFiles(expected.pid, { stat, status, cgroup })
   assertProvisioningProcessBinding(value, account, unit, mainPid)
-  if (JSON.stringify(processIdentity(value)) !== JSON.stringify(processIdentity(expected))) return refuse()
+  if (JSON.stringify(processIdentity(value)) !== JSON.stringify(processIdentity(expected))) return refuse('process_identity_changed')
   await pin.assertCurrent()
 }
 
 /** Finite read-only systemctl grammar. No caller command, executable path, shell or host-effect port. */
 function readonlyExecutor(tool: { fd: number; verify(): Promise<void> }, guard: () => Promise<void>, fpmUnit: string): AgentExecutor {
   return {
-    preflight: async () => refuse(), writeFile: async () => refuse(), readFile: async () => refuse(), removePath: async () => refuse(),
-    runTest: async () => refuse(), runAction: async () => refuse(), readSliceMetrics: async () => refuse(),
+    preflight: async () => refuse('executor_preflight_denied'), writeFile: async () => refuse('executor_write_denied'), readFile: async () => refuse('executor_read_denied'),
+    removePath: async () => refuse('executor_remove_denied'), runTest: async () => refuse('executor_test_denied'), runAction: async () => refuse('executor_action_denied'),
+    readSliceMetrics: async () => refuse('executor_metrics_denied'),
     async runCommand(argv) {
       const unit = argv.at(-1)
-      if (!unit || !['nginx.service', fpmUnit].includes(unit)) return refuse()
+      if (!unit || !['nginx.service', fpmUnit].includes(unit)) return refuse('executor_unit_denied')
       const state = ['/usr/bin/systemctl', 'show', ...STATE_PROPERTIES.flatMap(p => ['-p', p]), '--', unit]
-      if (![JSON.stringify(state), JSON.stringify(unitIdentityShowArgv(unit))].includes(JSON.stringify(argv))) return refuse()
+      if (![JSON.stringify(state), JSON.stringify(unitIdentityShowArgv(unit))].includes(JSON.stringify(argv))) return refuse('executor_argv_denied')
       await guard(); await tool.verify()
       const result = await new Promise<{ ok: boolean; code: number; stdout: string; stderr: string }>((resolve, reject) => {
         const child = spawn('/proc/self/fd/3', argv.slice(1), { env: { PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'pipe', tool.fd] })
@@ -92,7 +94,7 @@ export async function withNativeHostedUidQualification<T>(ownership: Coordinator
 export async function withNativeRootOperatorHostedUidQualification<T>(ownership: CoordinatorOwnershipCapability, input: RootOperatorRequest,
   callback: (proof: HostedUidQualification) => Promise<T>): Promise<T> {
   const request = parseRootOperatorRequest(input)
-  if (request.expectedArchiveSha256 !== coordinatorOwnershipInfo(ownership).helper.archiveSha256) return refuse()
+  if (request.expectedArchiveSha256 !== coordinatorOwnershipInfo(ownership).helper.archiveSha256) return refuse('archive_mismatch')
   const captured = await ordinaryObservation(ownership, request, request.kind === 'recover')
   return callback(captured.proof)
 }
@@ -126,13 +128,13 @@ async function collectHostedObservation(ownership: CoordinatorOwnershipCapabilit
     return await withTrustedFile('/etc/passwd', { maxBytes: 1024 * 1024 }, async passwd => {
       const accounts = passwd.bytes.toString('utf8').split('\n').filter(line => line.startsWith('xpanel:')).map(line => line.split(':'))
       const uid = Number(accounts[0]?.[2]), gid = Number(accounts[0]?.[3])
-      if (accounts.length !== 1 || !Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(gid) || gid <= 0) return refuse()
+      if (accounts.length !== 1 || !Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(gid) || gid <= 0) return refuse('panel_user_invalid')
       return withInstallFinalizationStateDirectories(uid, gid, async parent => {
         const origin = 'held' in database ? getReadonlyOperationDatabaseOrigin(database.held) : database.origin, store = new StateStore(STATE)
         const read = <T>(work: (db: ReadonlyOperationDatabase) => Promise<T>): Promise<T> => 'held' in database
           ? withVisibleReadonlyOperationDatabase(database.held, () => work(database.held))
           : database.fresh(async db => {
-            if (JSON.stringify(getReadonlyOperationDatabaseOrigin(db)) !== JSON.stringify(origin)) return refuse()
+            if (JSON.stringify(getReadonlyOperationDatabaseOrigin(db)) !== JSON.stringify(origin)) return refuse('database_origin_changed')
             return withVisibleReadonlyOperationDatabase(db, () => work(db))
           })
         const originCurrent = async () => {
@@ -140,7 +142,7 @@ async function collectHostedObservation(ownership: CoordinatorOwnershipCapabilit
           const file = await lstat(DATABASE, { bigint: true })
           if (!file.isFile() || file.isSymbolicLink() || file.nlink !== 1n || file.uid !== BigInt(uid) || file.gid !== BigInt(gid)
             || (file.mode & 0o7777n) !== 0o660n || String(file.dev) !== origin.device || String(file.ino) !== origin.inode
-            || ('held' in database && JSON.stringify(getReadonlyOperationDatabaseOrigin(database.held)) !== JSON.stringify(origin))) return refuse()
+            || ('held' in database && JSON.stringify(getReadonlyOperationDatabaseOrigin(database.held)) !== JSON.stringify(origin))) return refuse('database_file_changed')
         }
         await originCurrent()
         return store.withReadonlyObservation(async observation => {
@@ -148,29 +150,34 @@ async function collectHostedObservation(ownership: CoordinatorOwnershipCapabilit
           const retained = authority.activeGenerationSource ? await authority.activeGenerationSource() : undefined
           const source = retained?.snapshot ?? currentSnapshot, sourceChecksum = retained?.sourceChecksum ?? currentSnapshot.checksum
           const generation = retained?.generation ?? await read(db => latestActive(db)), journal = new ReconcilerJournal(STATE)
-          if (!generation || generation.status !== 'active' || source.checksum !== sourceChecksum) return refuse()
+          if (!generation || generation.status !== 'active') return refuse('generation_inactive')
+          if (source.checksum !== sourceChecksum) return refuse('source_checksum_mismatch')
           const currentEligible = eligibleAccounts(currentSnapshot.accounts, currentSnapshot.domains)
-          const account = eligibleAccounts(source.accounts, source.domains).find(value => currentEligible.some(current => JSON.stringify(lifetime(current)) === JSON.stringify(lifetime(value)))) ?? refuse()
+          const account = eligibleAccounts(source.accounts, source.domains).find(value => currentEligible.some(current => JSON.stringify(lifetime(current)) === JSON.stringify(lifetime(value)))) ?? refuse('no_eligible_account')
           const domain = source.domains.find(value => value.accountId === account.id && value.kind === 'primary')!
           const currentDomain = currentSnapshot.domains.find(value => value.accountId === account.id && value.kind === 'primary')!
           const domainDeadline = Math.min(...[domain, currentDomain].map(value => value.expiresAt === null ? Infinity : Date.parse(value.expiresAt)))
           const signal = AbortSignal.any([authority.signal, AbortSignal.timeout(60000)])
           const manifest = await journal.readManifest(generation.id)
-          if (!manifest || manifest.generationId !== generation.id || manifest.filesChecksum !== generation.checksum || manifest.stateChecksum !== sourceChecksum) return refuse()
+          if (!manifest || manifest.generationId !== generation.id || manifest.filesChecksum !== generation.checksum) return refuse('generation_manifest_mismatch')
+          // Desired state saved after the active generation (an unconverged change) is not what the hosted site serves.
+          if (manifest.stateChecksum !== sourceChecksum) return refuse('desired_state_not_applied')
           const retainedIdentity = retained ? digest(retained) : null
           const guardBody = async () => {
-            if (signal.aborted || Date.now() >= domainDeadline) return refuse()
+            if (signal.aborted) return refuse('observation_deadline')
+            if (Date.now() >= domainDeadline) return refuse('domain_expired')
             await withVisibleCoordinatorOwnership(ownership, () => assertCoordinatorOwnershipCurrent(ownership)); await authority.assertCurrent(); await observation.assertCurrent(); await originCurrent()
             const active = await read(db => latestActive(db))
-            if (active?.id !== generation.id || active.status !== 'active' || active.checksum !== generation.checksum || signal.aborted) return refuse()
-            if (retainedIdentity !== null && (!authority.activeGenerationSource || digest(await authority.activeGenerationSource()) !== retainedIdentity)) return refuse()
+            if (active?.id !== generation.id || active.status !== 'active' || active.checksum !== generation.checksum) return refuse('active_generation_changed')
+            if (signal.aborted) return refuse('generation_read_deadline')
+            if (retainedIdentity !== null && (!authority.activeGenerationSource || digest(await authority.activeGenerationSource()) !== retainedIdentity)) return refuse('retained_source_changed')
             const now = await journal.readManifest(generation.id)
-            if (digest(now) !== digest(manifest)) return refuse()
+            if (digest(now) !== digest(manifest)) return refuse('generation_manifest_changed')
           }
           const guard = async () => 'held' in database ? withVisibleReadonlyOperationDatabase(database.held, guardBody) : guardBody()
           const loaded = await loadInstalledPeerIdentityAddon()
           for (const method of ['openListener', 'acceptPeer', 'verifyListenerSocket', 'closeListener', 'closeFd', 'getSocketPeerCred', 'getUnixSocketPeer']) {
-            if (typeof Reflect.get(loaded, method) !== 'function') return refuse()
+            if (typeof Reflect.get(loaded, method) !== 'function') return refuse('peer_identity_addon_incomplete')
           }
           const addon = loaded as NativePeerIdentityAddon
           const osText = (await readTrustedFile(await realpath('/etc/os-release'), { maxBytes: 65536 })).bytes.toString('utf8')
@@ -191,7 +198,7 @@ async function collectHostedObservation(ownership: CoordinatorOwnershipCapabilit
                 const observed = held.observedProcess
                 assertProvisioningProcessBinding(observed, account, held.unit, held.mainPid)
                 if (held.requestBinding !== binding || held.challenge !== challenge || held.status !== 200 || held.pid !== observed.pid
-                  || observed.uids[0] !== account.uid || observed.cgroup.split('/').at(-2) !== system.accountSliceName(account.uid)) return refuse()
+                  || observed.uids[0] !== account.uid || observed.cgroup.split('/').at(-2) !== system.accountSliceName(account.uid)) return refuse('hosted_exchange_mismatch')
                 if (retainProcess) { process = await openNativeProvisioningProcess(observed.pid); await readPinnedProcess(process, observed, account, held.unit, held.mainPid) }
                 const proof = Object.freeze({ digest: digest({ binding, challenge, observed, unit: held.unit, mainPid: held.mainPid }), observedAt: new Date().toISOString() })
                 const observedMonotonic = performance.now()
@@ -223,7 +230,7 @@ interface QualificationLease {
 const qualifications = new WeakMap<object, QualificationLease>()
 const qualificationState = (value: unknown): QualificationLease => {
   const state = value && typeof value === 'object' ? qualifications.get(value) : undefined
-  if (!state?.active || state.consumed || state.processClosed || performance.now() >= state.expiresAt) return refuse()
+  if (!state?.active || state.consumed || state.processClosed || performance.now() >= state.expiresAt) return refuse('qualification_lease_inactive')
   return state
 }
 /** Only the native stopped/EX producer's real scope is accepted. No callback port or ready flag supplies authority. */
@@ -231,14 +238,14 @@ export async function createNativeClosedRecoveryHostedUidQualification(ownership
   dispatch: NativeRootOperatorDispatch, scope: ClosedRecoveryScope): Promise<NativeHostedUidQualification> {
   await assertNativeRootOperatorDispatchHeld(dispatch); await assertNativeClosedDatabaseRecoveryScopeHeld(scope)
   const info = getNativeRootOperatorDispatchInfo(dispatch), request = info.request
-  if (request.kind !== 'recover' || request.phase !== 'apply' || coordinatorOwnershipInfo(ownership).receiptSha256 !== info.coordinatorReceiptSha256) return refuse()
+  if (request.kind !== 'recover' || request.phase !== 'apply' || coordinatorOwnershipInfo(ownership).receiptSha256 !== info.coordinatorReceiptSha256) return refuse('recovery_dispatch_mismatch')
   let captured: Capture | undefined
   try {
     const result = await scope.withReadonlyDatabase(async db => {
       captured = await collectHostedObservation(ownership, request, scope, { held: db }, true)
       return captured
     })
-    if (!result.process) return refuse()
+    if (!result.process) return refuse('recovery_process_unpinned')
     await assertNativeClosedDatabaseRecoveryScopeHeld(scope); await assertNativeRootOperatorDispatchHeld(dispatch)
     const proof = Object.freeze({ ...result.proof }) as NativeHostedUidQualification
     qualifications.set(proof, { active: true, consumed: false, processClosed: false, dispatch, captured: result, scope, ownership, expiresAt: result.observedMonotonic + 60000 })
@@ -250,7 +257,7 @@ export async function createNativeClosedRecoveryHostedUidQualification(ownership
  * Rechecks use kernel/unit/source/dispatch/native EX proof; they never reopen SQL. */
 export async function assertNativeHostedUidQualificationCurrent(value: unknown, dispatch: unknown): Promise<void> {
   const state = qualificationState(value)
-  if (state.dispatch !== dispatch) return refuse()
+  if (state.dispatch !== dispatch) return refuse('qualification_dispatch_mismatch')
   await assertNativeRootOperatorDispatchHeld(dispatch); await assertNativeClosedDatabaseRecoveryScopeHeld(state.scope)
   await withVisibleCoordinatorOwnership(state.ownership, () => assertCoordinatorOwnershipCurrent(state.ownership)); await state.scope.assertCurrent()
   const captured = state.captured
@@ -259,15 +266,15 @@ export async function assertNativeHostedUidQualificationCurrent(value: unknown, 
     const guard = async () => { qualificationState(value); await assertNativeRootOperatorDispatchHeld(dispatch); await assertNativeClosedDatabaseRecoveryScopeHeld(state.scope) }
     const result = await readonlyExecutor(tool, guard, captured.unit).runCommand(unitIdentityShowArgv(captured.unit))
     const fields = new Map<string, string>()
-    for (const line of result.stdout.trim().split('\n')) { const index = line.indexOf('='); if (index < 1 || fields.has(line.slice(0, index))) return refuse(); fields.set(line.slice(0, index), line.slice(index + 1)) }
+    for (const line of result.stdout.trim().split('\n')) { const index = line.indexOf('='); if (index < 1 || fields.has(line.slice(0, index))) return refuse('unit_identity_unparsed'); fields.set(line.slice(0, index), line.slice(index + 1)) }
     if (!result.ok || result.code !== 0 || result.stderr.trim() || fields.size !== 6 || fields.get('Id') !== captured.unit
       || fields.get('User') !== captured.account.username || fields.get('Group') !== captured.account.username || fields.get('ActiveState') !== 'active'
-      || Number(fields.get('MainPID')) !== captured.mainPid || fields.get('ControlGroup') !== '/xpanel.slice/' + system.accountSliceName(captured.account.uid) + '/' + captured.unit) return refuse()
+      || Number(fields.get('MainPID')) !== captured.mainPid || fields.get('ControlGroup') !== '/xpanel.slice/' + system.accountSliceName(captured.account.uid) + '/' + captured.unit) return refuse('unit_identity_changed')
     await tool.verify()
   })
   await readPinnedProcess(captured.process!, captured.observed, captured.account, captured.unit, captured.mainPid)
   await withVisibleCoordinatorOwnership(state.ownership, () => assertCoordinatorOwnershipCurrent(state.ownership)); await assertNativeRootOperatorDispatchHeld(dispatch)
-  if (qualificationState(value) !== state) return refuse()
+  if (qualificationState(value) !== state) return refuse('qualification_lease_changed')
 }
 /** One-shot bridge to fresh admission. A JSON digest or replay cannot consume this identity. */
 export async function consumeNativeHostedUidQualification(value: unknown, dispatch: unknown): Promise<HostedUidQualification> {
@@ -280,7 +287,7 @@ export async function consumeNativeHostedUidQualification(value: unknown, dispat
 /** Cleanup never grants authority; allowed after a lost peer or retired native scope. */
 export async function retireNativeHostedUidQualification(value: unknown): Promise<void> {
   const state = value && typeof value === 'object' ? qualifications.get(value) : undefined
-  if (!state) return refuse()
+  if (!state) return refuse('qualification_unknown')
   state.active = false; qualifications.delete(value as object)
   if (!state.processClosed) { await state.captured.process!.close(); state.processClosed = true }
 }

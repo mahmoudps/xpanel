@@ -11,7 +11,7 @@ import type { FsPort, HostPort, ReleaseInfo, UpgradePorts, UpgradeResult, Upgrad
 import { detectOs, parseOsRelease } from '@xpanel/os'
 import { StateStore } from '@xpanel/state'
 import { createProductionHostTargetMatcher, LinuxHostExecutor } from '../executor.ts'
-import type { AgentExecutor } from '../executor.ts'
+import type { AgentExecutor, TrustedHostTarget } from '../executor.ts'
 import { resolveHomeQuotaFilesystem } from '../services/quota.ts'
 import { observeHostLimits } from '../limit-gaps.ts'
 import { createNativeHostReconciler } from '../native-reconciler.ts'
@@ -33,6 +33,8 @@ export { runNativeRootOperatorCommand } from '../../../../scripts/root-operator.
 const DATABASE = '/var/lib/xpanel/control.db'
 const STATE = '/var/lib/xpanel/state'
 const BACKUPS = '/var/lib/xpanel-lifecycle/backups'
+/** The one host target the lifecycle executor adds to the production matcher. */
+export const NATIVE_TRUSTED_HOST_TARGETS: readonly TrustedHostTarget[] = [{ path: BACKUPS, operations: ['ensure-directory'] }]
 const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/
 const SHA = /^[0-9a-f]{64}$/
 const deny = (code: string): never => { throw Object.assign(new Error(code), { code }) }
@@ -187,7 +189,7 @@ const composition = async (db: ReturnType<typeof createDb>['db'], actor: Princip
   const os = detectOs(path => readFileSync(path, 'utf8'))
   const store = new StateStore(STATE)
   await store.getAuthorityMetadata()
-  const native = new LinuxHostExecutor({ trustedHostTargetMatcher: createProductionHostTargetMatcher(), trustedHostTargets: [{ path: BACKUPS, operations: ['ensure-directory'] }] })
+  const native = new LinuxHostExecutor({ trustedHostTargetMatcher: createProductionHostTargetMatcher(), trustedHostTargets: NATIVE_TRUSTED_HOST_TARGETS })
   const executor = guardedExecutor(native)
   const resolvedOs = await os
   // A read-only mount observation, outside lifecycle effects.

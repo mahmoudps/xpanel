@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { XpanelError } from '@xpanel/core'
 const seams = vi.hoisted(() => ({
@@ -77,6 +78,7 @@ import { withNativeHostedUidQualification, withNativeRootOperatorHostedUidQualif
   assertNativeHostedUidQualificationCurrent, consumeNativeHostedUidQualification, retireNativeHostedUidQualification } from './ops-upgrade-hosted-qualification.ts'
 import type { CoordinatorOwnershipCapability } from '../../../scripts/coordinator-ownership.mjs'
 import type { NativeRootOperatorDispatch } from './ops-upgrade-root-dispatch.ts'
+import { rootOperatorServerRefusal } from './ops-upgrade-operator-refusal.ts'
 const capability = {} as CoordinatorOwnershipCapability, dispatch = {} as NativeRootOperatorDispatch
 const closedScope = () => ({ signal: AbortSignal.timeout(60000), assertCurrent: seams.current, activeGenerationSource: async () => activeSource(),
   withReadonlyDatabase: <T>(work: (db: ReadonlyOperationDatabase) => Promise<T>) => withReadonlyOperationDatabase('/var/lib/xpanel/control.db', work) })
@@ -199,5 +201,36 @@ describe('pre-switch canary across a transport reset', () => {
     seams.openFailures = [failure]
     await expect(createNativeClosedRecoveryHostedUidQualification(capability, dispatch, closedScope() as never)).rejects.toBe(failure)
     expect(opened()).toHaveLength(1); expect(seams.settle).not.toHaveBeenCalled()
+  })
+})
+
+describe('each hosted UID refusal names the check that refused', () => {
+  const hello = () => withNativeHostedUidQualification(capability, { kind: 'hello', nonce: randomUUID() }, async proof => proof)
+  const reasonOf = async (work: Promise<unknown>) => work.then(() => 'NO_REFUSAL', (error: { code?: string; detail?: { reason?: string } }) => `${error.code}:${error.detail?.reason}`)
+
+  it('names an empty host, an unconverged desired state, a foreign worker and a different archive', async () => {
+    seams.empty = true
+    expect(await reasonOf(hello())).toBe('PRECONDITION_FAILED:no_eligible_account')
+    seams.empty = false; seams.currentChecksum = 'f'.repeat(64)
+    expect(await reasonOf(hello())).toBe('PRECONDITION_FAILED:desired_state_not_applied')
+    seams.currentChecksum = seams.activeChecksum; seams.observedUid = 1002
+    expect(await reasonOf(hello())).toBe('PRECONDITION_FAILED:hosted_exchange_mismatch')
+    seams.observedUid = 1001
+    expect(await reasonOf(withNativeRootOperatorHostedUidQualification(capability, { phase: 'observe', kind: 'upgrade', operationId: randomUUID(),
+      expectedArchiveSha256: 'f'.repeat(64), nonce: randomUUID() }, async proof => proof))).toBe('PRECONDITION_FAILED:archive_mismatch')
+  })
+  it('carries the reason into the root journal line, never into the client frame', async () => {
+    seams.currentChecksum = 'f'.repeat(64)
+    const refusal = rootOperatorServerRefusal(await hello().catch((error: unknown) => error))
+    expect(refusal.journalLine).toBe('xpanel-root-operator-refused code=PRECONDITION_FAILED detail="native hosted UID qualification is unavailable" reason=desired_state_not_applied\n')
+    expect(refusal.frame.toString('utf8')).toBe('{"refused":"PRECONDITION_FAILED"}\n')
+  })
+  it('gives every refusal site its own stable reason', () => {
+    const source = readFileSync(new URL('./ops-upgrade-hosted-qualification.ts', import.meta.url), 'utf8')
+    const sites = [...source.matchAll(/\brefuse\(([^)]*)\)/g)].map(match => match[1]!).filter(argument => argument !== 'reason: string')
+    expect(sites.length).toBeGreaterThan(25)
+    const reasons = sites.map(argument => /^'([a-z][a-z0-9_]{0,63})'$/.exec(argument)?.[1])
+    expect(reasons.filter(reason => reason === undefined)).toEqual([])
+    expect(new Set(reasons).size).toBe(reasons.length)
   })
 })

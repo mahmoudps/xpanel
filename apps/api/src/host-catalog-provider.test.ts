@@ -17,7 +17,8 @@ const evidence: CapabilityEvidence[] = (['implemented', 'integrated', 'verified'
     toolId: 'server-information', acceptance, stage, environment, result: 'passed' as const, ...target, profile: 'unit-profile', executor: 'real' as const,
     runArtifact: 'synthetic.receipt.json', runArtifactSha256: 'd'.repeat(64), observedAt: '2026-10-30T00:00:00Z',
   })))
-const healthy = { executor: 'linux', probes: Object.fromEntries(HOST_PROBES.map(id => [id, 'passed'])) }
+// Shaped like a real agent /health body: the agent reports host probes only, never control-plane.
+const healthy = { executor: 'linux', probes: Object.fromEntries(HOST_PROBES.filter(id => id !== 'control-plane').map(id => [id, 'passed'])) }
 const source = (body: unknown = healthy): HostCatalogSource => ({ token: 'test-agent', identity: {}, fetch: vi.fn(async () => Response.json(body)) })
 const status = (tools: Awaited<ReturnType<ReturnType<typeof createQualifiedCatalogProvider>['load']>>) => tools.find(tool => tool.id === 'server-information')!.status
 beforeEach(() => {
@@ -94,6 +95,14 @@ describe('trusted acceptance catalog provider', () => {
     vi.stubEnv('XPANEL_HOST_QUALIFICATION', 'on')
     await provider.load(agent)
     expect(agent.fetch).toHaveBeenCalledTimes(2)
+  })
+  it('marks control-plane live from the authenticated agent answer, so qualification mode opens ready tools', async () => {
+    const provider = createQualifiedCatalogProvider(undefined, () => true)
+    const listAccounts = (await provider.load(source())).find(tool => tool.id === 'list-accounts')!
+    expect(listAccounts.delivery.admission).toBe('qualification')
+    const offline = createQualifiedCatalogProvider(undefined, () => true)
+    const closed = await offline.load({ token: 'test-agent', fetch: async () => new Response('', { status: 503 }) })
+    expect(closed.some(tool => tool.delivery.admission)).toBe(false)
   })
   it('refuses invalid configured evidence before returning a provider', () => {
     loader.mockImplementation(() => { throw new Error('untrusted evidence') })
