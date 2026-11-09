@@ -435,8 +435,9 @@ async function observeNginxHttp2() {
 
 // An ingress in another HTTP/2 style makes nginx warn about the shared 443 socket. Only a baseline that holds such an
 // ingress passes `staleIngress`: a configuration this lifecycle is about to activate gets no tolerance.
+// nginx -t writes its warnings either as `nginx: [warn] ...` or, after reading error_log, as `YYYY/MM/DD HH:MM:SS [warn] PID#TID: ...`.
 function nginxRefuses(stderr, staleIngress = false) {
-  const remaining = staleIngress ? stderr.replace(/^nginx: \[warn\] (?:protocol options redefined for \S+:443 in \S+|the "listen \.\.\. http2" directive is deprecated, use the "http2" directive instead in \/etc\/nginx\/conf\.d\/xpanel-management\.conf:\d+)$/gm, '') : stderr
+  const remaining = staleIngress ? stderr.replace(/^(?:nginx: |\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2} )\[warn\] (?:\d+#\d+: )?(?:protocol options redefined for \S+:443 in \S+|the "listen \.\.\. http2" directive is deprecated, use the "http2" directive instead in \/etc\/nginx\/conf\.d\/xpanel-management\.conf:\d+)$/gm, '') : stderr
   return /conflicting server name|duplicate listen|emerg|warn/i.test(remaining)
 }
 
