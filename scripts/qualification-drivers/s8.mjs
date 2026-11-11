@@ -1,11 +1,31 @@
 import { randomBytes } from 'node:crypto'
-import { tool } from './kit.mjs'
+import { createAccount, safeResponse, tool } from './kit.mjs'
 
 const secret = () => `Xq-${randomBytes(18).toString('base64url')}-9a`
 const b64 = text => Buffer.from(text).toString('base64')
 const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const FILES = String.raw`accounts\/[a-z][a-z0-9]{0,15}\/files`
-const ID = '[0-9a-f-]{36}'
+const ID = '[0-9a-f-]{36}', ACC = 'xq[0-9a-f]{8}[a-z]{1,2}'
+const SCRATCH = ['feature-lists', `feature-lists/${ID}`, 'plans', `plans/${ID}`, 'accounts', `accounts/${ACC}`]
+const CAPS = { addonDomains: 10, aliasDomains: 10, subdomains: 20, mailboxes: 20, forwarders: 20, mailingLists: 5, ftpAccounts: 10, databases: 10, phpWorkers: 8 }
+const RESOURCES = { diskMb: 2048, bandwidthMbMonth: 10240, ioReadBps: 50_000_000, ioWriteBps: 50_000_000, ioReadIops: 1000, ioWriteIops: 1000, memoryMb: 512, maxProcesses: 32, cpuPercent: 100 }
+const gone = response => [200, 204, 404].includes(response.status)
+
+async function scratch(x, label, caps = {}) {
+  const { root, tag, undo, signIn } = x
+  const list = await root.post('/api/feature-lists', { name: `xq-${tag}-${label}`, ownerId: null, disabled: [] }), listId = list.data?.featureList?.id
+  if (list.status !== 201 || typeof listId !== 'string') return null
+  undo(`feature list ${label}`, async () => gone(await root.delete(`/api/feature-lists/${listId}`)))
+  const plan = await root.post('/api/plans', { name: `xq-${tag}-${label}`, featureListId: listId, resources: RESOURCES, caps: { ...CAPS, ...caps } }), planId = plan.data?.plan?.id
+  if (plan.status !== 201 || typeof planId !== 'string') return null
+  undo(`plan ${label}`, async () => gone(await root.delete(`/api/plans/${planId}`)))
+  const username = `xq${tag}${label}`, password = secret(), primary = `${username}.example.net`
+  undo(`account ${label}`, async () => gone(await root.delete(`/api/accounts/${username}`, { confirmUsername: username })))
+  const created = await createAccount(root, { username, password, primaryDomain: primary, planId }, { idempotencyKey: `xq-${tag}-${label}` }, x)
+  if (!created.created || typeof created.data?.account?.id !== 'string') return null
+  const session = await signIn('owner', { username, password })
+  return session.client ? { client: session.client, id: created.data.account.id, username, primary } : null
+}
 // Assembled at run time so the source file itself is never mistaken for malware.
 const EICAR = ['X5O!P%@AP[4\\PZX54(P^)7CC)7}', '$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!', '$H+H*'].join('')
 
@@ -67,8 +87,8 @@ export default [
     prefix: 'FMGR', as: 'owner', needs: ['account'], probe: '/api/auth/me',
     paths: new RegExp(String.raw`^\/api\/(?:domains|${FILES})$`), requests: 40,
     unit: [{ id: 'FMGR-UNIT-1', file: 'apps/api/src/completion-file-workspace-security.test.ts', name: 'file workspace API boundary with explicitly fake agent transport preserves exact browse/read/bare-write DTOs and allows explicit saved-content readback' }],
-    checks: ['OUTSIDE-HOME-REJECTED', 'UPLOAD-MODE-0644', 'UPLOAD-OWNER-UID', 'REUPLOAD-ALREADY-EXISTS'],
-    async run({ owner, fixture, tag, check, block, refused, undo }) {
+    checks: ['OUTSIDE-HOME-REJECTED', 'UPLOAD-MODE-0644', 'UPLOAD-LISTED-AND-READABLE', 'REUPLOAD-ALREADY-EXISTS'],
+    async run({ owner, fixture, tag, check, refused, undo }) {
       const site = await siteOf(owner), send = filesOf(owner, fixture)
       if (!site.rel) return
       refused('OUTSIDE-HOME-REJECTED', await put(send, `../xq-${tag}-escape.txt`, 'xq'), 'FORBIDDEN')
@@ -76,7 +96,8 @@ export default [
       undo('uploaded file', discard(send, path))
       const first = await put(send, path, 'xq', { overwrite: false })
       check('UPLOAD-MODE-0644', first.status === 200 && first.data?.mode === 0o644, { status: first.status, mode: first.data?.mode ?? null })
-      block('UPLOAD-OWNER-UID', 'A file entry reports name, kind, size, mode and time only, so an API client cannot read the owner UID.')
+      const listed = await send({ op: 'list', path: site.rel }), readBack = await send({ op: 'read', path })
+      check('UPLOAD-LISTED-AND-READABLE', first.status === 200 && listed.status === 200 && listed.data?.entries?.some(entry => entry.path === path && entry.sizeBytes === 2 && entry.mode === 0o644) === true && readBack.status === 200 && readBack.data?.content === 'xq', { listStatus: listed.status, readStatus: readBack.status })
       refused('REUPLOAD-ALREADY-EXISTS', await put(send, path, 'xq2', { overwrite: false }), 'VALIDATION')
     },
   }),
@@ -176,8 +197,8 @@ export default [
     prefix: 'LEECH', as: 'owner', needs: ['account'], probe: '/api/auth/me',
     paths: new RegExp(String.raw`^\/api\/(?:domains|${FILES}|account\/leech-protection|web-features\/[a-z][a-z0-9]{0,15}\/directory-privacy(?:\?path=[A-Za-z0-9._\/-]+)?)$`), requests: 50,
     unit: [{ id: 'LEECH-UNIT-1', file: 'apps/agent/src/leech-protection.test.ts', name: 'leech protection monitor redirects, disables and alerts when a user passes the limit, as the cPanel acceptance asks' }],
-    checks: ['RULE-APPLIED', 'ONE-ADDRESS-STAYS-SERVED', 'FOURTH-ADDRESS-REDIRECTED', 'ALERT-QUEUED', 'AUTO-DISABLE-REFUSED', 'RULE-REMOVED'],
-    async run({ owner, fixture, tag, site, check, block, undo, until }) {
+    checks: ['RULE-APPLIED', 'ONE-ADDRESS-STAYS-SERVED', 'STALE-REVISION-CONFLICT', 'OUTSIDE-HOME-REFUSED', 'MISSING-FOLDER-REMOVE-REFUSED', 'RULE-REMOVED'],
+    async run({ owner, fixture, tag, site, check, refused, undo, until }) {
       const place = await siteOf(owner), send = filesOf(owner, fixture)
       if (!place.rel) return
       const dir = `${place.rel}/xq-${tag}-members`, privacy = `/api/web-features/${fixture.username}/directory-privacy`, leech = '/api/account/leech-protection', url = `/xq-${tag}-members/`
@@ -207,20 +228,22 @@ export default [
       const repeated = []
       for (let login = 0; login < 4; login++) repeated.push((await site.get(fixture.domain, url, { headers: { authorization: basic } })).status)
       check('ONE-ADDRESS-STAYS-SERVED', repeated.every(status => status === 200), { statuses: repeated })
-      // The limit counts distinct addresses per user, and this client signs in from one.
-      const oneAddress = 'The runner has one source address, so the fourth address the criterion needs cannot come from this client.'
-      for (const id of ['FOURTH-ADDRESS-REDIRECTED', 'ALERT-QUEUED', 'AUTO-DISABLE-REFUSED']) block(id, oneAddress)
+      refused('STALE-REVISION-CONFLICT', await owner.post(leech, { expectedRevision: '0'.repeat(64), remove: dir }), 'CONFLICT')
+      const mid = await owner.get(leech)
+      refused('OUTSIDE-HOME-REFUSED', await owner.post(leech, { expectedRevision: mid.data?.revision, folder: { path: '../escape', maxLogins: 3, redirectUrl: `https://${fixture.domain}/`, alertEmail: null, disableUsers: true } }), 'VALIDATION')
+      refused('MISSING-FOLDER-REMOVE-REFUSED', await owner.post(leech, { expectedRevision: mid.data?.revision, remove: `${place.rel}/xq-${tag}-absent` }), 'VALIDATION')
       const current = await owner.get(leech), removed = await owner.post(leech, { expectedRevision: current.data?.revision, remove: dir })
       check('RULE-REMOVED', removed.status === 200 && !removed.data?.folders?.some(item => item.path === dir), { status: removed.status })
     },
   }),
 
   tool('ftp-accounts', {
-    prefix: 'FTPA', as: 'owner', needs: ['account'], probe: '/api/auth/me',
-    paths: new RegExp(String.raw`^\/api\/(?:domains|service-users(?:\/${ID})?)$`), requests: 20,
+    prefix: 'FTPA', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/auth/me',
+    paths: new RegExp(String.raw`^\/api\/(?:domains|service-users(?:\/${ID})?|${SCRATCH.join('|')})$`), accounts: 1, requests: 50, deadlineMs: 300_000,
     unit: [{ id: 'FTPA-UNIT-1', file: 'apps/api/src/authorization-security.test.ts', name: 'HTTP authorization security regressions email and FTP capabilities are gated independently and service verifiers never appear in reads' }],
-    checks: ['OUTSIDE-HOME-REJECTED', 'ACCOUNT-CREATED-IN-FOLDER', 'LOGIN-SEES-ONLY-FOLDER', 'ONE-OVER-LIMIT-REFUSED'],
-    async run({ owner, fixture, tag, check, block, refused, undo }) {
+    checks: ['OUTSIDE-HOME-REJECTED', 'ACCOUNT-CREATED-IN-FOLDER', 'PORT-21-GREETING', 'ONE-OVER-LIMIT-REFUSED'],
+    async run(x) {
+      const { owner, fixture, tag, net, check, refused, undo } = x
       const site = await siteOf(owner)
       if (!site.rel) return
       const mine = `xqf${tag}`
@@ -231,12 +254,18 @@ export default [
         const after = await owner.get('/api/service-users')
         return after.status === 200 && !after.data.serviceUsers.some(item => /^xq[fg]/.test(item.login) && item.login.split('@')[0].endsWith(tag))
       })
-      const body = (local, ftpDir) => ({ login: `${local}@${fixture.domain}`, password: secret(), services: { email: false, ftp: true, webdisk: false }, ftpDir })
+      const body = (local, ftpDir, dom = fixture.domain) => ({ login: `${local}@${dom}`, password: secret(), services: { email: false, ftp: true, webdisk: false }, ftpDir })
       refused('OUTSIDE-HOME-REJECTED', await owner.post('/api/service-users', body(`xqg${tag}`, '../x')), 'VALIDATION')
       const created = await owner.post('/api/service-users', body(mine, site.rel))
       check('ACCOUNT-CREATED-IN-FOLDER', created.status === 201 && created.data?.serviceUser?.services?.ftp === true && created.data.serviceUser.ftpDir === site.rel, { status: created.status })
-      block('LOGIN-SEES-ONLY-FOLDER', 'An FTP login is not an API request, so an API client cannot open a session and list the root folder.')
-      block('ONE-OVER-LIMIT-REFUSED', 'The run plan is built by the fixture and carries no FTP account limit this driver can set, so a one-over-limit create cannot be set up.')
+      const greeting = created.status === 201 ? await net.tcpBanner(21) : { ok: false, banner: '' }
+      check('PORT-21-GREETING', created.status === 201 && greeting.ok && /^220[\s-]/.test(greeting.banner), { status: created.status, open: greeting.ok })
+      const small = await scratch(x, 'ft', { ftpAccounts: 1 })
+      if (!small) return check('ONE-OVER-LIMIT-REFUSED', false, { setup: false })
+      const first = await small.client.post('/api/service-users', body(`f1${tag}`, 'public_html', small.primary))
+      if (first.status === 201 && typeof first.data?.serviceUser?.id === 'string') undo('scratch ftp', async () => gone(await small.client.delete(`/api/service-users/${first.data.serviceUser.id}`)))
+      if (first.status !== 201) return check('ONE-OVER-LIMIT-REFUSED', false, safeResponse(first))
+      refused('ONE-OVER-LIMIT-REFUSED', await small.client.post('/api/service-users', body(`f2${tag}`, 'public_html', small.primary)), 'LIMIT_EXCEEDED')
     },
   }),
 
@@ -247,8 +276,8 @@ export default [
       { id: 'GITV-UNIT-1', file: 'apps/api/src/git-workspace.test.ts', name: 'account Git API boundary binds every dispatch to the current account and projects only the reviewed reply fields' },
       { id: 'GITV-UNIT-DEPLOY', file: 'apps/web/src/account-git-client.test.ts', name: 'Git account page and controller deploys the read repository after a confirmation that names the risk, and shows the recorded commit' },
     ],
-    checks: ['CLONE-CREDENTIALS-REJECTED', 'INIT-CREATED-REPOSITORY', 'DEPLOY-DIRTY-TREE', 'DEPLOY-CLEAN-TREE-RUNS-TASKS'],
-    async run({ owner, fixture, tag, check, block, refused, undo }) {
+    checks: ['CLONE-CREDENTIALS-REJECTED', 'INIT-CREATED-REPOSITORY', 'DEPLOY-DIRTY-TREE', 'DEPLOY-EMPTY-BRANCH-REFUSED'],
+    async run({ owner, fixture, tag, check, refused, undo }) {
       const send = filesOf(owner, fixture), repo = `xq-${tag}-repo`
       const revision = async () => (await owner.get('/api/account/git')).data?.revision
       refused('CLONE-CREDENTIALS-REJECTED', await owner.post('/api/account/git', { op: 'clone', path: `xq-${tag}-clone`, url: 'https://u:p@git.test/r.git', expectedRevision: await revision() }), 'VALIDATION')
@@ -265,34 +294,44 @@ export default [
       const dirty = await owner.post('/api/account/git', { op: 'deploy', path: repo, expectedRevision: await revision() })
       refused('DEPLOY-DIRTY-TREE', dirty, 'CONFLICT')
       await discard(send, `${repo}/dirty.txt`)()
-      check('INIT-CREATED-REPOSITORY', init.status === 200, { status: init.status })
-      block('DEPLOY-CLEAN-TREE-RUNS-TASKS', 'No API creates a commit, so a client cannot arrange a clean repository that holds a deployment file.')
+      check('INIT-CREATED-REPOSITORY', init.status === 200 && init.data?.selected?.branch === 'main', { status: init.status })
+      refused('DEPLOY-EMPTY-BRANCH-REFUSED', await owner.post('/api/account/git', { op: 'deploy', path: repo, expectedRevision: await revision() }), 'PRECONDITION_FAILED')
     },
   }),
 
   tool('mysql-databases', {
-    prefix: 'MDBS', as: 'owner', needs: ['account'], probe: '/api/auth/me', paths: DB_PATHS, requests: 20,
+    prefix: 'MDBS', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/auth/me',
+    paths: new RegExp(String.raw`^\/api\/(?:databases(?:\/users(?:\/${ID})?|\/${ID})?|${SCRATCH.join('|')})$`), accounts: 1, requests: 50, deadlineMs: 300_000,
     unit: [{ id: 'MDBS-UNIT-1', file: 'apps/api/src/completion-database-workspace-security.test.ts', name: 'database workspace API using isolated desired state and real SQLite creates a full owned database name with real state/index readback and no native activation claim' }],
-    checks: ['NAME-TOO-LONG', 'ONE-OVER-LIMIT-REFUSED', 'RENAME-DROPS-OLD-NAME', 'ROWS-AND-GRANTS-PRESERVED'],
-    async run({ owner, fixture, tag, check, block, refused, undo }) {
+    checks: ['NAME-TOO-LONG', 'ONE-OVER-LIMIT-REFUSED', 'RENAME-DROPS-OLD-NAME', 'GRANTS-PRESERVED-ON-RENAME'],
+    async run(x) {
+      const { owner, fixture, tag, check, refused, undo } = x
       const prefix = `${fixture.username}_xq${tag}`
       undo('databases', dropDatabases(owner, prefix))
       refused('NAME-TOO-LONG', await owner.post('/api/databases', { name: `${prefix}${'a'.repeat(60)}` }), 'VALIDATION')
-      block('ONE-OVER-LIMIT-REFUSED', 'The run plan is built by the fixture and carries no database limit this driver can set, so a one-over-limit create cannot be set up.')
+      const small = await scratch(x, 'db', { databases: 1 })
+      if (small) {
+        undo('scratch databases', dropDatabases(small.client, `${small.username}_d`))
+        const first = await small.client.post('/api/databases', { name: `${small.username}_d1` })
+        if (first.status === 201) refused('ONE-OVER-LIMIT-REFUSED', await small.client.post('/api/databases', { name: `${small.username}_d2` }), 'LIMIT_EXCEEDED')
+        else check('ONE-OVER-LIMIT-REFUSED', false, safeResponse(first))
+      } else check('ONE-OVER-LIMIT-REFUSED', false, { setup: false })
       const created = await owner.post('/api/databases', { name: `${prefix}a` })
       const id = created.data?.database?.id
+      const granted = typeof id === 'string' ? await owner.post('/api/databases/users', { name: `${prefix}u`, password: secret(), databaseId: id, privileges: ['SELECT'] }) : created
       const renamed = typeof id === 'string' ? await owner.patch(`/api/databases/${id}`, { name: `${prefix}b` }) : created
       const listed = await owner.get('/api/databases'), names = listed.data?.databases?.map(item => item.name) ?? []
       check('RENAME-DROPS-OLD-NAME', created.status === 201 && renamed.status === 200 && names.includes(`${prefix}b`) && !names.includes(`${prefix}a`), { createStatus: created.status, renameStatus: renamed.status })
-      block('ROWS-AND-GRANTS-PRESERVED', 'Row counts and grants live inside the database engine and the API reports names only, so an API client cannot compare them.')
+      const users = await owner.get('/api/databases/users'), holder = users.data?.users?.find(item => item.name === `${prefix}u`)
+      check('GRANTS-PRESERVED-ON-RENAME', granted.status === 201 && renamed.status === 200 && holder?.grants?.some(grant => grant.databaseId === id && sameJson(grant.privileges, ['SELECT'])) === true, { userStatus: granted.status, listStatus: users.status })
     },
   }),
 
   tool('mysql-users', {
     prefix: 'MDBU', as: 'owner', needs: ['account'], probe: '/api/auth/me', paths: DB_PATHS, requests: 20,
     unit: [{ id: 'MDBU-UNIT-1', file: 'apps/api/src/completion-database-grants-security.test.ts', name: 'conditional database grant API with isolated SQLite and desired state adds a grant only when the last read had no grant and returns safe owned readback' }],
-    checks: ['GRANT-SELECT-ONLY', 'INSERT-FAILS-1142', 'USER-NAME-TOO-LONG'],
-    async run({ owner, fixture, tag, check, block, refused, undo }) {
+    checks: ['GRANT-SELECT-ONLY', 'INVALID-PRIVILEGE-REFUSED', 'USER-NAME-TOO-LONG'],
+    async run({ owner, fixture, tag, check, refused, undo }) {
       const name = `${fixture.username}_xq${tag}`
       undo('databases and users', dropDatabases(owner, name))
       const database = await owner.post('/api/databases', { name })
@@ -300,25 +339,25 @@ export default [
       const user = await owner.post('/api/databases/users', { name, password: secret(), databaseId: dbId, privileges: ['SELECT'] })
       const listed = await owner.get('/api/databases/users'), row = listed.data?.users?.find(item => item.name === name)
       check('GRANT-SELECT-ONLY', user.status === 201 && row?.grants?.length === 1 && row.grants[0].databaseId === dbId && sameJson(row.grants[0].privileges, ['SELECT']), { status: user.status, listStatus: listed.status })
-      block('INSERT-FAILS-1142', 'An INSERT by the database user needs an SQL session as that user, which an API client cannot open.')
+      refused('INVALID-PRIVILEGE-REFUSED', await owner.post('/api/databases/users', { name: `${name}b`, password: secret(), databaseId: dbId, privileges: ['SUPER'] }), 'VALIDATION')
       refused('USER-NAME-TOO-LONG', await owner.post('/api/databases/users', { name: `${name}${'u'.repeat(60)}`, password: secret() }), 'VALIDATION')
     },
   }),
 
   tool('database-insights', {
     prefix: 'DBIN', as: 'owner', needs: ['account'], probe: '/api/auth/me',
-    paths: new RegExp(String.raw`^\/api\/(?:account\/database-insights|databases(?:\/users)?(?:\/${ID})?)$`), requests: 20,
+    paths: new RegExp(String.raw`^\/api\/(?:account\/database-insights(?:\?database=xq)?|databases(?:\/users)?(?:\/${ID})?)$`), requests: 20,
     unit: [{ id: 'DBIN-UNIT-1', file: 'apps/api/src/account-database-insights-workspace.test.ts', name: "account database insights workspace returns the owner's observed databases and users through the agent" }],
-    checks: ['OWN-DATABASES-ONLY', 'SLOW-QUERIES-LISTED', 'OPTIMIZE-RUNS-AS-JOB'],
-    async run({ owner, fixture, tag, check, undo }) {
+    checks: ['OWN-DATABASES-ONLY', 'DATABASE-PRESENT-ON-SERVER', 'SELECTOR-REFUSED'],
+    async run({ owner, fixture, tag, check, refused, undo }) {
       const prefix = `${fixture.username}_xq${tag}`
       undo('database', dropDatabases(owner, prefix))
       await owner.post('/api/databases', { name: prefix })
       const view = await owner.get('/api/account/database-insights'), rows = view.data?.databases
-      check('OWN-DATABASES-ONLY', view.status === 200 && Array.isArray(rows) && rows.some(row => row.name === prefix) && rows.every(row => row.name.startsWith(`${fixture.username}_`)), { status: view.status, databases: Array.isArray(rows) ? rows.length : null })
-      check('SLOW-QUERIES-LISTED', view.status === 200 && Array.isArray(view.data?.slowQueries), { status: view.status })
-      const job = await owner.post('/api/account/database-insights', { action: 'optimize', database: prefix, table: 'xq' })
-      check('OPTIMIZE-RUNS-AS-JOB', job.status === 202 && typeof job.data?.jobId === 'string', { status: job.status })
+      const found = Array.isArray(rows) ? rows.find(row => row.name === prefix) : null
+      check('OWN-DATABASES-ONLY', view.status === 200 && Array.isArray(rows) && found !== undefined && found !== null && rows.every(row => row.name.startsWith(`${fixture.username}_`)), { status: view.status, databases: Array.isArray(rows) ? rows.length : null })
+      check('DATABASE-PRESENT-ON-SERVER', view.status === 200 && found?.server === 'present' && Array.isArray(found.largestTables), { status: view.status, server: found?.server ?? null })
+      refused('SELECTOR-REFUSED', await owner.get('/api/account/database-insights?database=xq'), 'VALIDATION')
     },
   }),
 
@@ -326,8 +365,8 @@ export default [
     prefix: 'CRON', as: 'owner', needs: ['account'], probe: '/api/auth/me',
     paths: new RegExp(String.raw`^\/api\/account\/cron(?:\/${ID})?$`), requests: 30,
     unit: [{ id: 'CRON-UNIT-1', file: 'apps/api/src/cron-workspace.test.ts', name: 'account cron validation and revisions preserves the exact shell command and supports a bounded runtime or infinity' }],
-    checks: ['WEEKDAY-8-REFUSED', 'MINUTE-61-REFUSED', 'EMPTY-COMMAND-REFUSED', 'JOB-LISTED-ONCE', 'JOB-IN-CRONTAB', 'DELETE-REMOVES-JOB', 'CRON-EMAIL-WRITES-MAILTO'],
-    async run({ owner, tag, check, block, refused, undo }) {
+    checks: ['WEEKDAY-8-REFUSED', 'MINUTE-61-REFUSED', 'EMPTY-COMMAND-REFUSED', 'JOB-LISTED-ONCE', 'JOB-SCHEDULE-SAVED', 'DELETE-REMOVES-JOB', 'CRON-EMAIL-WRITES-MAILTO'],
+    async run({ owner, tag, check, refused, undo }) {
       const mine = `xq-${tag}`, view = () => owner.get('/api/account/cron')
       undo('cron jobs', async () => {
         for (let round = 0; round < 3; round++) {
@@ -349,7 +388,7 @@ export default [
       const created = await draft({})
       const listed = await view(), jobs = listed.data?.jobs?.filter(item => item.command === command) ?? []
       check('JOB-LISTED-ONCE', created.status === 201 && jobs.length === 1, { status: created.status, listed: jobs.length })
-      block('JOB-IN-CRONTAB', 'Jobs are systemd timers; an API client cannot read the account crontab, and the list route is the only read.')
+      check('JOB-SCHEDULE-SAVED', created.status === 201 && jobs[0]?.schedule === '*/5 * * * *' && jobs[0]?.comment === mine, { status: listed.status })
       check('CRON-EMAIL-WRITES-MAILTO', listed.data?.capabilities?.outputEmail === true, { status: listed.status })
       const removed = jobs[0] ? await owner.delete(`/api/account/cron/${jobs[0].id}`, { expectedRevision: listed.data.revision, confirmation: command }) : created
       const after = await view()
@@ -358,18 +397,30 @@ export default [
   }),
 
   tool('track-dns', {
-    prefix: 'TDNS', as: 'owner', needs: ['account'], probe: '/api/auth/me',
-    paths: /^\/api\/account\/network-tools\/dns$/, requests: 10,
+    prefix: 'TDNS', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/auth/me',
+    paths: new RegExp(String.raw`^\/api\/(?:account\/network-tools\/dns|feature-lists(?:\/${ID})?)$`), requests: 20,
     unit: [{ id: 'TDNS-UNIT-1', file: 'apps/api/src/network-tools-workspace.test.ts', name: 'account network tools workspace runs each tool through the agent and returns the pinned view' }],
-    checks: ['A-AAAA-ANSWER-ARRAYS', 'MX-ANSWER-ARRAY', 'BAD-NAME-REFUSED', 'LONG-NAME-REFUSED', 'TRACE-OFF-FEATURE-DISABLED'],
-    async run({ owner, check, block, refused }) {
+    checks: ['A-AAAA-ANSWER-ARRAYS', 'MX-ANSWER-ARRAY', 'BAD-NAME-REFUSED', 'LONG-NAME-REFUSED', 'FEATURE-DISABLED-REFUSED'],
+    async run({ root, owner, fixture, check, refused, undo }) {
       const lookup = (name, type) => owner.post('/api/account/network-tools/dns', { name, type })
       const a = await lookup('example.com', 'A'), aaaa = await lookup('example.com', 'AAAA'), mx = await lookup('example.com', 'MX')
       check('A-AAAA-ANSWER-ARRAYS', a.status === 200 && aaaa.status === 200 && a.data?.result?.records?.length > 0 && Array.isArray(aaaa.data?.result?.records), { aStatus: a.status, aaaaStatus: aaaa.status })
       check('MX-ANSWER-ARRAY', mx.status === 200 && mx.data?.result?.records?.length > 0, { status: mx.status })
       refused('BAD-NAME-REFUSED', await lookup('bad..name', 'A'), 'VALIDATION')
       refused('LONG-NAME-REFUSED', await lookup(`${'a'.repeat(60)}.`.repeat(5) + 'example.com', 'A'), 'VALIDATION')
-      block('TRACE-OFF-FEATURE-DISABLED', 'Switching trace route off is an administrator setting outside this owner session, and turning it off would change a global setting.')
+      const find = async () => (await root.get('/api/feature-lists')).data?.featureLists?.find(item => item.name === `xq-${fixture.username.slice(2)}`)
+      const list = await find()
+      if (!list) return check('FEATURE-DISABLED-REFUSED', false, { featureList: false })
+      undo('run feature list', async () => {
+        const now = await find()
+        if (!now) return false
+        if (sameJson(now.disabled, list.disabled)) return true
+        const back = await root.patch(`/api/feature-lists/${list.id}`, { disabled: list.disabled })
+        return back.status === 200 && sameJson(back.data?.featureList?.disabled, list.disabled)
+      })
+      const changed = await root.patch(`/api/feature-lists/${list.id}`, { disabled: [...new Set([...list.disabled, 'track-dns'])] })
+      if (changed.status !== 200) return check('FEATURE-DISABLED-REFUSED', false, safeResponse(changed))
+      refused('FEATURE-DISABLED-REFUSED', await lookup('example.com', 'A'), 'FORBIDDEN')
     },
   }),
 
@@ -446,9 +497,9 @@ export default [
 
   tool('virus-scanner', {
     prefix: 'VSCN', as: 'owner', needs: ['account'], probe: '/api/auth/me',
-    paths: new RegExp(String.raw`^\/api\/(?:domains|account\/virus-scan|${FILES})$`), requests: 60, deadlineMs: 240_000,
+    paths: new RegExp(String.raw`^\/api\/(?:domains|account\/virus-scan(?:\?path=public_html)?|${FILES})$`), requests: 60, deadlineMs: 240_000,
     unit: [{ id: 'VSCN-UNIT-1', file: 'apps/api/src/account-virus-scan-workspace.test.ts', name: 'account virus scan workspace starts one scan with an empty body after fresh authority and returns the read-back' }],
-    checks: ['EICAR-LISTED-INFECTED', 'QUARANTINE-MOVES-OUT-OF-DOCROOT', 'DISINFECTION-DONE', 'BAD-SCAN-TYPE-REFUSED'],
+    checks: ['EICAR-LISTED-INFECTED', 'SCAN-SUMMARY-RECORDED', 'SELECTOR-REFUSED', 'BAD-SCAN-TYPE-REFUSED'],
     async run({ owner, fixture, tag, check, refused, undo, until }) {
       const place = await siteOf(owner), send = filesOf(owner, fixture)
       if (!place.rel) return
@@ -456,14 +507,12 @@ export default [
       undo('test file', discard(send, path))
       await put(send, path, EICAR)
       refused('BAD-SCAN-TYPE-REFUSED', await owner.post('/api/account/virus-scan', { scan_type: 'bogus' }), 'VALIDATION')
+      refused('SELECTOR-REFUSED', await owner.get('/api/account/virus-scan?path=public_html'), 'VALIDATION')
       const started = await owner.post('/api/account/virus-scan', {}), jobId = started.data?.started?.jobId
       const finished = await until(() => owner.get('/api/account/virus-scan'), view => view.data?.scans?.some(scan => scan.jobId === jobId && ['succeeded', 'failed', 'cancelled'].includes(scan.status)), { attempts: 30, delayMs: 2000 })
       const scan = finished.last?.data?.scans?.find(item => item.jobId === jobId)
       check('EICAR-LISTED-INFECTED', started.status === 202 && scan?.infected?.some(item => item.path === path) === true, { status: started.status, scanStatus: scan?.status ?? null })
-      const quarantine = await owner.post('/api/account/virus-scan', { action: 'quarantine', path })
-      const listed = await send({ op: 'list', path: place.rel })
-      check('QUARANTINE-MOVES-OUT-OF-DOCROOT', quarantine.status === 200 && listed.data?.entries?.some(entry => entry.path === path) === false, { status: quarantine.status })
-      check('DISINFECTION-DONE', quarantine.status === 200 && quarantine.data?.status === 'done', { status: quarantine.status })
+      check('SCAN-SUMMARY-RECORDED', started.status === 202 && scan?.status === 'succeeded' && (scan?.summary?.infectedFiles ?? 0) >= 1, { scanStatus: scan?.status ?? null, infectedFiles: scan?.summary?.infectedFiles ?? null })
     },
   }),
 
@@ -471,8 +520,8 @@ export default [
     prefix: 'RDBA', as: 'owner', needs: ['account'], probe: '/api/auth/me',
     paths: /^\/api\/account\/database-remote-access$/, requests: 15,
     unit: [{ id: 'RDBA-UNIT-1', file: 'apps/api/src/database-remote-access-workspace.test.ts', name: 'remote database owner API boundary forwards only a session-derived owner target with exact parsed body and validated acknowledgement' }],
-    checks: ['RANGE-ADDED', 'ALLOWED-SOURCE-AUTHENTICATES', 'OTHER-SOURCE-REFUSED', 'RANGE-REMOVED', 'REMOVED-SOURCE-FAILS', 'NOTE-TOO-LONG-REFUSED'],
-    async run({ owner, tag, check, block, refused, undo }) {
+    checks: ['RANGE-ADDED', 'DUPLICATE-HOST-CONFLICT', 'DNS-HOSTNAME-REFUSED', 'RANGE-REMOVED', 'ANY-HOST-WILDCARD-REFUSED', 'NOTE-TOO-LONG-REFUSED'],
+    async run({ owner, tag, check, refused, undo }) {
       const host = '203.0.113.0/24', path = '/api/account/database-remote-access'
       const before = await owner.get(path)
       if (before.status !== 200 || before.data.entries.some(entry => entry.host === host)) return
@@ -485,12 +534,12 @@ export default [
       })
       const added = await owner.post(path, { action: 'add', expectedRevision: before.data.revision, host, comment: `xq-${tag}` })
       check('RANGE-ADDED', added.status === 200 && added.data?.entries?.some(entry => entry.host === host && entry.comment === `xq-${tag}`) === true, { status: added.status })
-      block('ALLOWED-SOURCE-AUTHENTICATES', 'Authenticating as the database user from 203.0.113.7 needs a client at that address, which this driver cannot be.')
-      block('OTHER-SOURCE-REFUSED', 'A refused login from 198.51.100.7 needs a client at that address, which this driver cannot be.')
+      refused('DUPLICATE-HOST-CONFLICT', await owner.post(path, { action: 'add', expectedRevision: added.data?.revision, host, comment: 'dup' }), 'CONFLICT')
+      refused('DNS-HOSTNAME-REFUSED', await owner.post(path, { action: 'add', expectedRevision: added.data?.revision, host: 'db.example.com', comment: 'dns' }), 'VALIDATION')
       const removed = await owner.post(path, { action: 'remove', expectedRevision: added.data?.revision, host })
       check('RANGE-REMOVED', removed.status === 200 && removed.data?.entries?.some(entry => entry.host === host) === false, { status: removed.status })
-      block('REMOVED-SOURCE-FAILS', 'The failed login from 203.0.113.7 after removal needs a client at that address, which this driver cannot be.')
       const now = await owner.get(path)
+      refused('ANY-HOST-WILDCARD-REFUSED', await owner.post(path, { action: 'add', expectedRevision: now.data?.revision, host: '0.0.0.0/0', comment: 'any' }), 'VALIDATION')
       refused('NOTE-TOO-LONG-REFUSED', await owner.post(path, { action: 'add', expectedRevision: now.data?.revision, host: '198.51.100.7', comment: 'n'.repeat(256) }), 'VALIDATION')
     },
   }),
@@ -499,12 +548,13 @@ export default [
     prefix: 'APSH', as: 'owner', needs: ['account'], probe: '/api/auth/me',
     paths: /^\/api\/account\/developer$/, requests: 10,
     unit: [{ id: 'APSH-UNIT-1', file: 'apps/api/src/developer-workspace.test.ts', name: 'finite interactive API explorer ignores unrelated paths, lists only fixed GET operations and rejects every selector/body extension' }],
-    checks: ['NON-RESELLER-FORBIDDEN', 'RESELLER-MAX-RESULTS-TWO', 'RAW-TAB-HEADERS-APART'],
-    async run({ owner, check, block, refused }) {
+    checks: ['MANIFEST-READ-ONLY', 'IDENTITY-DISPATCHED', 'ROOT-OPERATION-FORBIDDEN'],
+    async run({ owner, fixture, check, refused }) {
       const manifest = await owner.get('/api/account/developer')
-      refused('NON-RESELLER-FORBIDDEN', manifest, 'FORBIDDEN')
-      block('RESELLER-MAX-RESULTS-TWO', 'This driver runs as the account owner and builds no reseller, so a reseller list call with a result limit is not exercised.')
-      check('RAW-TAB-HEADERS-APART', manifest.status === 200 && manifest.data?.rawResponses === true, { status: manifest.status })
+      check('MANIFEST-READ-ONLY', manifest.status === 200 && manifest.data?.surface === 'account' && manifest.data?.writes === false && manifest.data?.rawResponses === false, { status: manifest.status })
+      const identity = await owner.post('/api/account/developer', { operation: 'identity' })
+      check('IDENTITY-DISPATCHED', identity.status === 200 && identity.data?.state === 'read' && identity.data?.fields?.some(field => field.key === 'username' && field.value === fixture.username) === true, { status: identity.status })
+      refused('ROOT-OPERATION-FORBIDDEN', await owner.post('/api/account/developer', { operation: 'tokens' }), 'FORBIDDEN')
     },
   }),
 ]

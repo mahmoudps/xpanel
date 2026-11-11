@@ -4,7 +4,7 @@ import { isWebhookUrl } from '../../agent/src/ops-webhooks.ts'
 import { sha256Hex } from './auth.ts'
 import type { AuthenticatedCaller } from './auth.ts'
 import { ALERT_NOTIFICATION_EVENT, configuredChannels, EMPTY_DELIVERY_STATE, readSavedDeliveryState, sendTestNotice, serialDelivery } from './alert-delivery.ts'
-import type { DeliveryChannels, DeliveryTransports } from './alert-delivery.ts'
+import type { DeliveryChannels, DeliveryTransports, EmailMinimumSeverity } from './alert-delivery.ts'
 import type { ExtendedRouteHelpers } from './extended-routes.ts'
 
 export interface PanelNotificationsHelpers extends Pick<ExtendedRouteHelpers, 'requireCaller' | 'assertRoot' | 'emitAudit'> {
@@ -31,11 +31,22 @@ export const NOTIFICATION_EVENTS = [
 ] as const
 export const DELIVERED_NOTIFICATION_EVENTS: readonly string[] = [ALERT_NOTIFICATION_EVENT]
 export const NOTIFICATION_MAX_RECIPIENTS = 10
+export const EMAIL_MINIMUM_SEVERITIES: readonly EmailMinimumSeverity[] = ['all', 'warning', 'critical', 'high']
 export interface NotificationWebhook { url: string; enabled: boolean }
-export interface NotificationSettings { recipients: string[]; events: string[]; webhook: NotificationWebhook | null; updatedAt: string; updatedBy: string }
+export interface SavedTelegramChannel { botToken: string | null; chatId: string; enabled: boolean }
+export interface ProjectedTelegramChannel { chatId: string; enabled: boolean; tokenSet: boolean }
+export interface NotificationSettings {
+  recipients: string[]
+  events: string[]
+  webhook: NotificationWebhook | null
+  emailMinimumSeverity?: EmailMinimumSeverity
+  telegram?: SavedTelegramChannel | null
+  updatedAt: string
+  updatedBy: string
+}
 interface SigningKeyRecord { key: string; createdAt: string; createdBy: string }
 
-const ROUTE = '/api/server/panel/notifications', KEY_ROUTE = ROUTE + '/webhook-key', TEST_ROUTE = ROUTE + '/test'
+const ROUTE = '/api/server/panel/notifications', KEY_ROUTE = ROUTE + '/webhook-key', TEST_ROUTE = ROUTE + '/test', RESET_ROUTE = ROUTE + '/reset'
 const MAX_BODY_BYTES = 16 * 1024
 const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, ACTOR = /^[A-Za-z0-9_.@-]{1,64}$/
 // 'whsec_' + base64url(32 random bytes); verifiers recompute HMAC-SHA256 over `${t}.${body}` (ops-webhooks.ts).
@@ -63,13 +74,51 @@ const webhookOf = (value: unknown): NotificationWebhook | null => {
   if (!object(value) || Object.keys(value).sort().join() !== 'enabled,url' || typeof value.enabled !== 'boolean' || !isWebhookUrl(value.url)) return invalid('the webhook needs an https URL on a public host and an enabled flag, or null')
   return { url: value.url, enabled: value.enabled }
 }
+const severityOf = (value: unknown): EmailMinimumSeverity => {
+  if (typeof value !== 'string' || !(EMAIL_MINIMUM_SEVERITIES as readonly string[]).includes(value)) return invalid('emailMinimumSeverity must be all, warning, critical or high')
+  return value as EmailMinimumSeverity
+}
+const telegramInputOf = (value: unknown): { botToken?: string | null; chatId: string; enabled: boolean } | null => {
+  if (value === null) return null
+  if (!object(value)) return invalid('telegram must be an object or null')
+  const allowed = new Set(['botToken', 'chatId', 'enabled'])
+  if (!Object.keys(value).every(k => allowed.has(k))) return invalid('telegram accepts only botToken, chatId and enabled')
+  if (typeof value.chatId !== 'string' || value.chatId.trim().length === 0 || value.chatId.length > 128) return invalid('telegram.chatId is required')
+  if (value.enabled !== undefined && typeof value.enabled !== 'boolean') return invalid('telegram.enabled must be a boolean')
+  if (value.botToken !== undefined && value.botToken !== null && (typeof value.botToken !== 'string' || value.botToken.trim().length === 0 || value.botToken.length > 256)) {
+    return invalid('telegram.botToken must be a non-empty string or null')
+  }
+  return {
+    chatId: value.chatId.trim(),
+    enabled: value.enabled ?? true,
+    ...(value.botToken !== undefined ? { botToken: value.botToken === null ? null : value.botToken.trim() } : {}),
+  }
+}
+const savedTelegramOf = (value: unknown): SavedTelegramChannel | null => {
+  if (value === null) return null
+  if (!object(value) || Object.keys(value).sort().join() !== 'botToken,chatId,enabled' || typeof value.chatId !== 'string' || value.chatId.length === 0 || value.chatId.length > 128 || typeof value.enabled !== 'boolean') return invalid('invalid saved telegram')
+  if (value.botToken !== null && (typeof value.botToken !== 'string' || value.botToken.length === 0 || value.botToken.length > 256)) return invalid('invalid saved telegram token')
+  return { botToken: value.botToken, chatId: value.chatId, enabled: value.enabled }
+}
 
 /** Strict saved-file reader: anything else is reported as invalid, never as saved settings. */
 export function readSavedNotificationSettings(raw: unknown): NotificationSettings | null {
   try {
-    if (!object(raw) || Object.keys(raw).sort().join() !== 'events,recipients,updatedAt,updatedBy,webhook' || typeof raw.updatedAt !== 'string' || !STAMP.test(raw.updatedAt)
-      || typeof raw.updatedBy !== 'string' || !ACTOR.test(raw.updatedBy)) return null
-    return { recipients: recipientsOf(raw.recipients), events: eventsOf(raw.events), webhook: webhookOf(raw.webhook), updatedAt: raw.updatedAt, updatedBy: raw.updatedBy }
+    if (!object(raw)) return null
+    const required = ['events', 'recipients', 'updatedAt', 'updatedBy', 'webhook']
+    const optional = new Set(['emailMinimumSeverity', 'telegram'])
+    const keys = Object.keys(raw)
+    if (!required.every(k => k in raw) || !keys.every(k => required.includes(k) || optional.has(k))) return null
+    if (typeof raw.updatedAt !== 'string' || !STAMP.test(raw.updatedAt) || typeof raw.updatedBy !== 'string' || !ACTOR.test(raw.updatedBy)) return null
+    return {
+      recipients: recipientsOf(raw.recipients),
+      events: eventsOf(raw.events),
+      webhook: webhookOf(raw.webhook),
+      ...(raw.emailMinimumSeverity !== undefined ? { emailMinimumSeverity: severityOf(raw.emailMinimumSeverity) } : {}),
+      ...(raw.telegram !== undefined ? { telegram: savedTelegramOf(raw.telegram) } : {}),
+      updatedAt: raw.updatedAt,
+      updatedBy: raw.updatedBy,
+    }
   } catch { return null }
 }
 const readSigningKeyRecord = (raw: unknown): SigningKeyRecord | null => object(raw) && Object.keys(raw).sort().join() === 'createdAt,createdBy,key' && typeof raw.key === 'string' && SIGNING_KEY.test(raw.key)
@@ -81,21 +130,58 @@ export const signingKeyFingerprint = (key: string): string => createHash('sha256
 export function deliveryChannelsOf(rawSettings: unknown, rawKey: unknown): DeliveryChannels | null {
   const settings = readSavedNotificationSettings(rawSettings)
   if (!settings) return null
-  return { alerts: settings.events.includes(ALERT_NOTIFICATION_EVENT), recipients: settings.recipients,
-    webhook: settings.webhook?.enabled ? { url: settings.webhook.url, key: readSigningKeyRecord(rawKey)?.key ?? null } : null }
+  return {
+    alerts: settings.events.includes(ALERT_NOTIFICATION_EVENT),
+    recipients: settings.recipients,
+    webhook: settings.webhook?.enabled ? { url: settings.webhook.url, key: readSigningKeyRecord(rawKey)?.key ?? null } : null,
+    ...(settings.emailMinimumSeverity !== undefined ? { emailMinimumSeverity: settings.emailMinimumSeverity } : {}),
+    ...(settings.telegram?.enabled ? { telegram: { botToken: settings.telegram.botToken, chatId: settings.telegram.chatId } } : {}),
+  }
 }
 
-export function parseNotificationUpdate(body: unknown): { recipients: string[]; events: string[]; webhook: NotificationWebhook | null; expectedRevision: string } {
-  if (!object(body) || Object.keys(body).sort().join() !== 'events,expectedRevision,recipients,webhook') return invalid('recipients, events, webhook and expectedRevision are required and nothing else is accepted')
+export function parseNotificationUpdate(body: unknown): {
+  recipients: string[]
+  events: string[]
+  webhook: NotificationWebhook | null
+  emailMinimumSeverity?: EmailMinimumSeverity
+  telegram?: { botToken?: string | null; chatId: string; enabled: boolean } | null
+  expectedRevision: string
+} {
+  if (!object(body)) return invalid('recipients, events, webhook and expectedRevision are required and nothing else is accepted')
+  const required = ['events', 'expectedRevision', 'recipients', 'webhook']
+  const optional = new Set(['emailMinimumSeverity', 'telegram'])
+  const keys = Object.keys(body)
+  if (!required.every(k => k in body) || !keys.every(k => required.includes(k) || optional.has(k))) {
+    return invalid('recipients, events, webhook and expectedRevision are required and nothing else is accepted')
+  }
   if (typeof body.expectedRevision !== 'string' || !/^[0-9a-f]{64}$/.test(body.expectedRevision)) return invalid('the observed settings revision is required')
   const recipients = recipientsOf(body.recipients), events = eventsOf(body.events), webhook = webhookOf(body.webhook)
-  if (events.length > 0 && recipients.length === 0 && !webhook?.enabled) return invalid('choose at least one recipient or an enabled webhook for the selected events')
-  return { recipients, events, webhook, expectedRevision: body.expectedRevision }
+  const emailMinimumSeverity = body.emailMinimumSeverity !== undefined ? severityOf(body.emailMinimumSeverity) : undefined
+  const telegram = body.telegram !== undefined ? telegramInputOf(body.telegram) : undefined
+  if (events.length > 0 && recipients.length === 0 && !webhook?.enabled && !telegram?.enabled) return invalid('choose at least one recipient or an enabled webhook for the selected events')
+  return {
+    recipients,
+    events,
+    webhook,
+    ...(emailMinimumSeverity !== undefined ? { emailMinimumSeverity } : {}),
+    ...(telegram !== undefined ? { telegram } : {}),
+    expectedRevision: body.expectedRevision,
+  }
+}
+
+const projectSettings = (settings: NotificationSettings | null) => {
+  if (!settings) return null
+  const { telegram, ...rest } = settings
+  if (telegram === undefined) return rest
+  const projected: ProjectedTelegramChannel | null = telegram
+    ? { chatId: telegram.chatId, enabled: telegram.enabled, tokenSet: Boolean(telegram.botToken) }
+    : null
+  return { ...rest, telegram: projected }
 }
 
 const viewOf = (raw: unknown, rawKey: unknown) => {
   const settings = raw === null ? null : readSavedNotificationSettings(raw), key = readSigningKeyRecord(rawKey)
-  return { state: raw === null ? 'default' : settings ? 'saved' : 'invalid', settings, revision: revisionOf(raw), events: NOTIFICATION_EVENTS, delivery: DELIVERY,
+  return { state: raw === null ? 'default' : settings ? 'saved' : 'invalid', settings: projectSettings(settings), revision: revisionOf(raw), events: NOTIFICATION_EVENTS, delivery: DELIVERY,
     signingKey: key ? { fingerprint: signingKeyFingerprint(key.key), createdAt: key.createdAt, createdBy: key.createdBy } : null }
 }
 
@@ -114,18 +200,38 @@ const auditOrReview = async (helpers: PanelNotificationsHelpers, entry: Paramete
 
 /**
  * Root notification channels and event selection under extended state: GET/PUT the settings, POST /webhook-key creates or
- * replaces the webhook signing key (returned once), POST /test sends one test message on every saved channel.
+ * replaces the webhook signing key (returned once), POST /test sends one test message on every saved channel, POST /reset clears saved settings.
  */
 export async function handlePanelNotificationsRoute(request: Request, url: URL, method: string, helpers: PanelNotificationsHelpers): Promise<Response | null> {
-  if (url.pathname !== ROUTE && url.pathname !== KEY_ROUTE && url.pathname !== TEST_ROUTE) return null
+  if (url.pathname !== ROUTE && url.pathname !== KEY_ROUTE && url.pathname !== TEST_ROUTE && url.pathname !== RESET_ROUTE) return null
   const writing = method === 'PUT', posting = url.pathname !== ROUTE
-  const action = url.pathname === KEY_ROUTE ? 'panel.notifications.webhook_key' : url.pathname === TEST_ROUTE ? 'panel.notifications.test' : writing ? 'panel.notifications.update' : 'panel.notifications.read'
+  const action = url.pathname === KEY_ROUTE ? 'panel.notifications.webhook_key' : url.pathname === TEST_ROUTE ? 'panel.notifications.test' : url.pathname === RESET_ROUTE ? 'panel.notifications.reset' : writing ? 'panel.notifications.update' : 'panel.notifications.read'
   const caller = await helpers.requireCaller(request)
   await helpers.assertRoot(caller, action)
   if (posting ? method !== 'POST' : method !== 'GET' && method !== 'PUT') return new Response(null, { status: 405, headers: { allow: posting ? 'POST' : 'GET, PUT' } })
   if (url.search) return invalid('notification settings do not accept selectors')
   const now = helpers.now ?? (() => new Date())
   if (method === 'GET') return json(200, viewOf(await helpers.readSaved(), await helpers.readSigningKey()))
+
+  if (url.pathname === RESET_ROUTE) {
+    if (request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return invalid('JSON is required')
+    let body: unknown
+    try { body = JSON.parse(await request.text()) } catch { return invalid('request body is not valid JSON') }
+    if (!object(body) || Object.keys(body).join() !== 'expectedRevision' || typeof body.expectedRevision !== 'string' || !/^[0-9a-f]{64}$/.test(body.expectedRevision)) {
+      return invalid('the observed settings revision is required')
+    }
+    const expectedRevision = body.expectedRevision
+    return serial(async () => {
+      if (revisionOf(await helpers.readSaved()) !== expectedRevision) return fail('CONFLICT', 'notification settings changed since they were read; reload before resetting', unchanged)
+      const actor = await freshRoot(request, caller, action, helpers)
+      await helpers.writeSaved(null)
+      if (await helpers.readSaved() !== null) return fail('SERVICE_UNAVAILABLE', 'the reset notification settings could not be verified', { stateChanged: true, verificationRequired: true })
+      const rawKey = await helpers.readSigningKey()
+      await auditOrReview(helpers, { actor: actor.principal.username, action: 'server.notifications.updated', target: 'panel:notifications', detail: { recipients: 0, events: [], webhook: null, reset: true }, outcome: 'ok', principalId: actor.principal.id },
+        'the settings were reset but their audit record requires review')
+      return json(200, viewOf(null, rawKey))
+    })
+  }
 
   if (posting) {
     if ((await request.text()).length) return invalid('this action does not accept a body')
@@ -161,16 +267,42 @@ export async function handlePanelNotificationsRoute(request: Request, url: URL, 
   try { body = JSON.parse(text) } catch { return invalid('request body is not valid JSON') }
   const input = parseNotificationUpdate(body)
   return serial(async () => {
-    if (revisionOf(await helpers.readSaved()) !== input.expectedRevision) return fail('CONFLICT', 'notification settings changed since they were read; reload before saving', unchanged)
+    const existingRaw = await helpers.readSaved()
+    if (revisionOf(existingRaw) !== input.expectedRevision) return fail('CONFLICT', 'notification settings changed since they were read; reload before saving', unchanged)
     const actor = await freshRoot(request, caller, action, helpers)
     const rawKey = await helpers.readSigningKey()
     if (input.webhook?.enabled && !readSigningKeyRecord(rawKey)) return invalid('create a signing key before enabling the webhook')
-    const next: NotificationSettings = { recipients: input.recipients, events: input.events, webhook: input.webhook, updatedAt: now().toISOString(), updatedBy: actor.principal.username }
+    const existingSettings = existingRaw === null ? null : readSavedNotificationSettings(existingRaw)
+    const savedTelegram: SavedTelegramChannel | null | undefined = input.telegram === undefined
+      ? existingSettings?.telegram
+      : input.telegram === null
+        ? null
+        : {
+            chatId: input.telegram.chatId,
+            enabled: input.telegram.enabled,
+            botToken: input.telegram.botToken !== undefined ? input.telegram.botToken : (existingSettings?.telegram?.botToken ?? null),
+          }
+    const savedSeverity = input.emailMinimumSeverity !== undefined ? input.emailMinimumSeverity : existingSettings?.emailMinimumSeverity
+    const next: NotificationSettings = {
+      recipients: input.recipients,
+      events: input.events,
+      webhook: input.webhook,
+      ...(savedSeverity !== undefined ? { emailMinimumSeverity: savedSeverity } : {}),
+      ...(savedTelegram !== undefined ? { telegram: savedTelegram } : {}),
+      updatedAt: now().toISOString(),
+      updatedBy: actor.principal.username,
+    }
     await helpers.writeSaved(next)
     const saved = await helpers.readSaved()
     if (revisionOf(saved) !== revisionOf(next) || !readSavedNotificationSettings(saved)) return fail('SERVICE_UNAVAILABLE', 'the saved notification settings could not be verified', { stateChanged: true, verificationRequired: true })
     await auditOrReview(helpers, { actor: actor.principal.username, action: 'server.notifications.updated', target: 'panel:notifications',
-      detail: { recipients: next.recipients.length, events: next.events, webhook: next.webhook ? { host: new URL(next.webhook.url).host, enabled: next.webhook.enabled } : null }, outcome: 'ok', principalId: actor.principal.id },
+      detail: {
+        recipients: next.recipients.length,
+        events: next.events,
+        webhook: next.webhook ? { host: new URL(next.webhook.url).host, enabled: next.webhook.enabled } : null,
+        ...(next.emailMinimumSeverity !== undefined ? { emailMinimumSeverity: next.emailMinimumSeverity } : {}),
+        ...(next.telegram !== undefined ? { telegram: next.telegram ? { enabled: next.telegram.enabled, tokenSet: Boolean(next.telegram.botToken) } : null } : {}),
+      }, outcome: 'ok', principalId: actor.principal.id },
       'the settings are saved but their audit record requires review')
     return json(200, viewOf(saved, rawKey))
   })

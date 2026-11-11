@@ -3,6 +3,7 @@ import { tool } from './kit.mjs'
 const INDEX = '/api/server/default-index', SITE = '/api/server/default-site'
 const UNBOUND = 'xq-unbound.invalid'
 const SSH = '/api/server/ssh', FIREWALL = '/api/firewall'
+const FIREWALL_PAGE = { route: '/whm/security/firewall', read: FIREWALL, shows: data => (data?.rules ?? []).filter(rule => ['port', 'ip', 'forward'].includes(rule.kind)).map(rule => rule.comment).filter(Boolean) }
 
 /** An unbound name may be refused outright, which a visitor sees as a dropped connection. */
 const visit = (site, name) => site.get(name, '/').catch(() => ({ status: null, headers: {}, text: '' }))
@@ -10,58 +11,58 @@ const visit = (site, name) => site.get(name, '/').catch(() => ({ status: null, h
 export default [
   // A driver never changes SSH or the firewall: a wrong write could end every path to the host. It reads them and proves the refusals.
   tool('aapanel-ssh-settings', {
-    prefix: 'SSHCFG', probe: SSH, paths: /^\/api\/server\/ssh$/, requests: 3,
+    prefix: 'SSHCFG', probe: SSH, paths: /^\/api\/server\/ssh$/, requests: 4,
     unit: [{ id: 'SSHCFG-UNIT-LOCKOUT', file: 'apps/api/src/ssh-workspace.test.ts', name: 'SSH settings refuses a policy that leaves no way in, before anything is saved' }, { id: 'SSHCFG-UNIT-PORT', file: 'apps/api/src/ssh-workspace.test.ts', name: 'SSH port change opens the new port, proves it, then closes the old one' }],
-    checks: ['POLICY-OBSERVED', 'NO-AUTH-METHOD-REFUSED', 'KEY-LOGIN-ON-NEW-PORT'],
-    async run({ root, check, block, refused }) {
+    checks: ['POLICY-OBSERVED', 'NO-AUTH-METHOD-REFUSED', 'STALE-REVISION-CONFLICT'],
+    async run({ root, check, refused }) {
       const view = await root.get(SSH), saved = view.data?.settings
       check('POLICY-OBSERVED', view.status === 200 && Number.isInteger(saved?.port) && typeof saved?.revision === 'string', { status: view.status })
       refused('NO-AUTH-METHOD-REFUSED', await root.put(SSH, { port: saved?.port, passwordAuth: false, pubkeyAuth: false, rootLogin: 'prohibit-password', expectedRevision: saved?.revision }), 'NO_AUTH_METHOD')
-      block('KEY-LOGIN-ON-NEW-PORT', 'A key login on a moved port needs an SSH client on the runner; a driver never moves the port.')
+      refused('STALE-REVISION-CONFLICT', await root.put(SSH, { port: saved?.port ?? 22, passwordAuth: saved?.passwordAuth ?? true, pubkeyAuth: saved?.pubkeyAuth ?? true, rootLogin: saved?.rootLogin ?? 'prohibit-password', expectedRevision: '0'.repeat(64) }), 'CONFLICT')
     },
   }),
 
   tool('aapanel-ssh-service', {
-    prefix: 'SSHSVC', probe: SSH, paths: /^\/api\/server\/ssh$/, requests: 2,
+    prefix: 'SSHSVC', probe: SSH, paths: /^\/api\/server\/ssh(?:\/service)?$/, requests: 3,
     unit: [{ id: 'SSHSVC-UNIT-STOP', file: 'apps/agent/src/ssh-host.test.ts', name: 'SSH host routes stops the socket and the service, then proves the port refuses' }],
-    checks: ['DAEMON-AND-COUNTS-OBSERVED', 'STOP-REFUSES-PORT'],
-    async run({ root, check, block }) {
+    checks: ['DAEMON-AND-COUNTS-OBSERVED', 'INVALID-SERVICE-ACTION-REFUSED'],
+    async run({ root, check, refused }) {
       const view = await root.get(SSH), host = view.data?.host
       check('DAEMON-AND-COUNTS-OBSERVED', view.status === 200 && typeof host?.service?.active === 'string' && Number.isInteger(host?.today?.accepted) && Number.isInteger(host?.total?.failed), { status: view.status, active: host?.service?.active ?? null })
-      block('STOP-REFUSES-PORT', 'A driver never stops the daemon the operator may be using.')
+      refused('INVALID-SERVICE-ACTION-REFUSED', await root.post('/api/server/ssh/service', { action: 'reload' }), 'VALIDATION')
     },
   }),
 
   tool('aapanel-ssh-login-alarm', {
-    prefix: 'SSHALM', probe: SSH, paths: /^\/api\/server\/ssh$/, requests: 2,
+    prefix: 'SSHALM', probe: SSH, paths: /^\/api\/server\/ssh(?:\/login-alarm)?$/, requests: 3,
     unit: [{ id: 'SSHALM-UNIT-ONE', file: 'apps/api/src/ssh-login-alarm.test.ts', name: 'SSH login alarm sends one webhook per login with the address, and moves the cursor past it' }, { id: 'SSHALM-UNIT-TWICE', file: 'apps/api/src/ssh-login-alarm.test.ts', name: 'SSH login alarm never reports one journal entry twice, even when the cursor write was lost' }],
-    checks: ['SWITCH-OBSERVED', 'ONE-WEBHOOK-PER-LOGIN'],
-    async run({ root, check, block }) {
+    checks: ['SWITCH-OBSERVED', 'INVALID-ALARM-PAYLOAD-REFUSED'],
+    async run({ root, check, refused }) {
       const view = await root.get(SSH)
       check('SWITCH-OBSERVED', view.status === 200 && typeof view.data?.settings?.loginAlarm === 'boolean' && Array.isArray(view.data?.alarmChannels), { status: view.status })
-      block('ONE-WEBHOOK-PER-LOGIN', 'A root SSH login needs an SSH client on the runner and a webhook receiver.')
+      refused('INVALID-ALARM-PAYLOAD-REFUSED', await root.put('/api/server/ssh/login-alarm', { enabled: 'yes' }), 'VALIDATION')
     },
   }),
 
   tool('aapanel-firewall-switch', {
-    prefix: 'FWSW', probe: FIREWALL, paths: /^\/api\/firewall$/, requests: 2,
+    prefix: 'FWSW', probe: FIREWALL, page: FIREWALL_PAGE, paths: /^\/api\/firewall(?:\/policy)?$/, requests: 3,
     unit: [{ id: 'FWSW-UNIT-SEED', file: 'apps/api/src/firewall-workspace.test.ts', name: 'firewall switch and ping block writes the safe rules on a first switch-on, hosted services included' }, { id: 'FWSW-UNIT-RENDER', file: 'packages/render/src/system/nftables.test.ts', name: 'firewall switch and ping block leaves the list out with the switch off and keeps the guards' }],
-    checks: ['SWITCH-OBSERVED', 'PROBE-PORT-CLOSED'],
-    async run({ root, check, block }) {
+    checks: ['SWITCH-OBSERVED', 'INVALID-POLICY-REFUSED'],
+    async run({ root, check, refused }) {
       const view = await root.get(FIREWALL)
       check('SWITCH-OBSERVED', view.status === 200 && typeof view.data?.enabled === 'boolean', { status: view.status, enabled: view.data?.enabled ?? null })
-      block('PROBE-PORT-CLOSED', 'A probe of an unlisted port needs a client outside the host.')
+      refused('INVALID-POLICY-REFUSED', await root.put('/api/firewall/policy', { enabled: 'yes', blockPing: false, expectedRevision: view.data?.revision ?? '0'.repeat(64) }), 'VALIDATION')
     },
   }),
 
   tool('aapanel-icmp-block', {
-    prefix: 'ICMP', probe: FIREWALL, paths: /^\/api\/firewall$/, requests: 2,
+    prefix: 'ICMP', probe: FIREWALL, page: FIREWALL_PAGE, paths: /^\/api\/firewall(?:\/confirm)?$/, requests: 3,
     unit: [{ id: 'ICMP-UNIT-RENDER', file: 'packages/render/src/system/nftables.test.ts', name: 'firewall switch and ping block drops ping ahead of the list on both families, with the switch on or off, and keeps the ICMP errors' }],
-    checks: ['SWITCH-OBSERVED', 'PING-UNANSWERED'],
-    async run({ root, check, block }) {
+    checks: ['SWITCH-OBSERVED', 'UNKNOWN-CONFIRM-NOT-FOUND'],
+    async run({ root, check, refused }) {
       const view = await root.get(FIREWALL)
       check('SWITCH-OBSERVED', view.status === 200 && typeof view.data?.blockPing === 'boolean', { status: view.status, blockPing: view.data?.blockPing ?? null })
-      block('PING-UNANSWERED', 'A ping from outside needs a client outside the host.')
+      refused('UNKNOWN-CONFIRM-NOT-FOUND', await root.post('/api/firewall/confirm', { id: '00000000-0000-4000-8000-000000000000' }), 'NOT_FOUND')
     },
   }),
 

@@ -70,11 +70,12 @@ export const validateBackupCron = (value: unknown): string => {
   return fields.join(' ')
 }
 
-const destinationFields = ['name', 'kind', 'endpoint', 'bucket', 'region', 'pathPrefix', 'username', 'retentionDays', 'enabled', 'credentialRef'] as const
+const destinationFields = ['name', 'kind', 'endpoint', 'bucket', 'region', 'pathPrefix', 'username', 'retentionDays', 'enabled', 'credentialRef', 'timeout'] as const
 export function validateBackupDestination(value: unknown, saved?: Pick<BackupDestination, 'id' | 'createdAt'> & Partial<BackupLifecycleDestination>): BackupLifecycleDestination {
   if (!object(value)) return invalid('backup destination must be an object')
   onlyKeys(value, [...destinationFields, ...(saved ? ['id', 'createdAt', 'verification'] : [])])
   if (!kinds.includes(value.kind as BackupDestination['kind'])) return invalid('unsupported backup destination kind')
+  if (value.timeout !== undefined) integer(value.timeout, 30, 3600, 'timeout')
   const kind = value.kind as BackupDestination['kind']
   const nullable = (raw: unknown, name: string, max: number): string | null => raw === null || raw === undefined || raw === '' ? null : text(raw, max, name)
   const requestedEnabled = boolean(value.enabled ?? false, 'enabled')

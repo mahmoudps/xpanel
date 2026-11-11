@@ -126,26 +126,30 @@ export function createBackupDestinationsWorkspaceRoutes(ports: BackupDestination
         result = { outcome: 'activated', destinationId: target.id, revision: current.revision, effectiveActive: true, nativeApplied: false }
       } else {
         if (current.schedule?.enabled && current.schedule.destinationIds.includes(target.id)) return fail('CONFLICT', 'disable the backup schedule before testing this destination', { stateChanged: false })
-        const transport = await capabilities(ports, caller), profile = profileFor(target, transport)
-        if (!profile || !ports.destinationHost) return unavailable()
-        await authorize()
-        await publish({ ...target, enabled: false, verification: null })
-        const targetDigest = backupDestinationTargetDigest(target)
-        await authorize()
-        let raw: unknown
-        try { raw = await ports.destinationHost(caller, '/host/backups/destinations/' + target.id + '/test', { expectedTargetDigest: targetDigest }) } catch { raw = null }
-        await authorize()
-        let proof: BackupDestinationProof | null = null
-        try {
-          if (!object(raw) || !exact(raw, ['destinationId', 'targetDigest', 'outcome', 'proof', 'cleanupVerified', 'verificationRequired']) || raw.destinationId !== target.id || raw.targetDigest !== targetDigest || raw.outcome !== 'verified' || raw.cleanupVerified !== true || raw.verificationRequired !== false) throw new Error()
-          proof = readBackupDestinationProof(raw.proof)
-          const freshProfiles = await capabilities(ports, caller), freshProfile = profileFor(target, freshProfiles)
-          if (!proof || !freshProfile || !backupDestinationProofCurrent(target, proof, freshProfile.revision) || freshProfile.revision !== profile.revision) throw new Error()
-        } catch { proof = null }
-        if (proof) await publish({ ...target, enabled: false, verification: proof })
-        result = { outcome: proof ? 'verified' : 'unknown', destinationId: target.id, revision: current.revision, effectiveActive: false, verificationRequired: !proof, nativeApplied: false }
+        if (!target.credentialRef) {
+          result = { outcome: 'failed', status: 'failed', error: 'authentication_credentials_missing', destinationId: target.id, revision: current.revision, effectiveActive: false, verificationRequired: false, nativeApplied: false }
+        } else {
+          const transport = await capabilities(ports, caller), profile = profileFor(target, transport)
+          if (!profile || !ports.destinationHost) return unavailable()
+          await authorize()
+          await publish({ ...target, enabled: false, verification: null })
+          const targetDigest = backupDestinationTargetDigest(target)
+          await authorize()
+          let raw: unknown
+          try { raw = await ports.destinationHost(caller, '/host/backups/destinations/' + target.id + '/test', { expectedTargetDigest: targetDigest }) } catch { raw = null }
+          await authorize()
+          let proof: BackupDestinationProof | null = null
+          try {
+            if (!object(raw) || !exact(raw, ['destinationId', 'targetDigest', 'outcome', 'proof', 'cleanupVerified', 'verificationRequired']) || raw.destinationId !== target.id || raw.targetDigest !== targetDigest || raw.outcome !== 'verified' || raw.cleanupVerified !== true || raw.verificationRequired !== false) throw new Error()
+            proof = readBackupDestinationProof(raw.proof)
+            const freshProfiles = await capabilities(ports, caller), freshProfile = profileFor(target, freshProfiles)
+            if (!proof || !freshProfile || !backupDestinationProofCurrent(target, proof, freshProfile.revision) || freshProfile.revision !== profile.revision) throw new Error()
+          } catch { proof = null }
+          if (proof) await publish({ ...target, enabled: false, verification: proof })
+          result = { outcome: proof ? 'verified' : 'unknown', destinationId: target.id, revision: current.revision, effectiveActive: false, verificationRequired: !proof, nativeApplied: false }
+        }
       }
-      audit = { action: 'backup.destination.' + action, target: 'backup-destination:' + target.name, outcome: object(result) && result.verificationRequired === true ? 'failed' : 'ok' }
+      audit = { action: 'backup.destination.' + action, target: 'backup-destination:' + target.name, outcome: object(result) && (result.verificationRequired === true || result.outcome === 'failed') ? 'failed' : 'ok' }
       await authorize()
     } catch (error) {
       if (wrote) return fail('SERVICE_UNAVAILABLE', 'destination lifecycle requires readback review', { stateChanged: true, verificationRequired: true, unknownOutcome: true })

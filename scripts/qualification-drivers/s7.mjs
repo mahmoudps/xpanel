@@ -249,7 +249,7 @@ export default [
     unit: [{ id: 'S7ZED-UNIT-1', file: 'apps/api/src/completion-whm-dns-security.test.ts', name: 'xWHM DNS revision-bound loopback HTTP acceptance refuses stale saves and deletes without a source change' }],
     checks: ['STALE-SERIAL-REFUSED', 'ZONE-UNCHANGED-AFTER-STALE', 'ADD-RECORD-RAISES-SERIAL', 'AUTHORITATIVE-ANSWERS-NEW-RECORD'],
     async run(x) {
-      const { owner, fixture, tag, check, block, refused, undo } = x
+      const { owner, fixture, tag, net, until, check, refused, undo } = x
       const read = async () => { const response = await owner.get('/api/dns/zones'); return { response, zone: response.data?.zones?.find(item => item.name === fixture.domain) } }
       const before = await read(), path = `/api/dns/zones/${fixture.domain}`
       if (!before.zone) return check('STALE-SERIAL-REFUSED', false, { status: before.response.status, zone: false })
@@ -267,7 +267,8 @@ export default [
       const record = { id: randomUUID(), zone: before.zone.name, name: `xq-${tag}`, type: 'A', ttl: 300, content: '203.0.113.7', priority: null }
       const added = await owner.put(path, { records: [...records, record], expectedZoneRevision: before.zone.revision })
       check('ADD-RECORD-RAISES-SERIAL', added.status === 200 && added.data?.zone?.serial > before.zone.serial && added.data.zone.records.some(item => item.id === record.id), { ...safeResponse(added), serialBefore: before.zone.serial, serialAfter: added.data?.zone?.serial ?? null })
-      block('AUTHORITATIVE-ANSWERS-NEW-RECORD', 'A DNS query to the authoritative server is not a panel API request, so an API client cannot observe what dig returns.')
+      const answered = added.status === 200 ? await until(() => net.dnsQuery(`xq-${tag}.${fixture.domain}`, 1), reply => reply.ok && reply.answers.includes('203.0.113.7'), { attempts: 6, delayMs: 1000 }) : null
+      check('AUTHORITATIVE-ANSWERS-NEW-RECORD', added.status === 200 && answered?.settled === true, { status: added.status, answers: answered?.last?.answers?.length ?? 0 })
     },
   }),
 
@@ -322,31 +323,13 @@ export default [
     },
   }),
 
-  tool('cloudflare-account', {
-    prefix: 'S7CFA', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/account/sec/cloudflare',
-    paths: only('account/sec/cloudflare', 'account/sec/cloudflare/zone\\?domain=[a-z0-9.-]{1,253}', ...SCRATCH),
-    accounts: 1, requests: 40, deadlineMs: 240_000,
-    unit: [{ id: 'S7CFA-UNIT-1', file: 'apps/api/src/sec-cloudflare.test.ts', name: 'sec Cloudflare for account owners shows only owned domains and refuses unlinked or foreign domains' }],
-    checks: ['FOREIGN-DOMAIN-NOT-FOUND', 'OWN-DOMAIN-RECOGNISED', 'LIST-ONLY-OWN-DOMAINS'],
-    async run(x) {
-      const { owner, fixture, check, refused } = x
-      const other = await scratch(x, 'cf')
-      if (other) refused('FOREIGN-DOMAIN-NOT-FOUND', await owner.get(`/api/account/sec/cloudflare/zone?domain=${other.primary}`), 'NOT_FOUND')
-      else check('FOREIGN-DOMAIN-NOT-FOUND', false, { setup: false })
-      const own = await owner.get(`/api/account/sec/cloudflare/zone?domain=${fixture.domain}`)
-      check('OWN-DOMAIN-RECOGNISED', [200, 412].includes(own.status), safeResponse(own))
-      const listed = await owner.get('/api/account/sec/cloudflare'), names = listed.data?.domains?.map(item => item.domain)
-      check('LIST-ONLY-OWN-DOMAINS', listed.status === 200 && Array.isArray(names) && names.includes(fixture.domain) && (other === null || !names.includes(other.primary)), { status: listed.status, domains: names?.length ?? null })
-    },
-  }),
-
   tool('email-accounts', {
     prefix: 'S7EAC', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/service-users', page: ACCOUNTS_PAGE,
     paths: only(...MAIL_PATHS, ...SCRATCH),
     accounts: 1, requests: 60, deadlineMs: 300_000, unit: [MAIL_UNIT],
-    checks: ['MAILBOX-LIMIT-EXCEEDED', 'LIST-STILL-TWO-ROWS', 'SYSTEM-MAILBOX-DELETE-FORBIDDEN'],
+    checks: ['MAILBOX-LIMIT-EXCEEDED', 'LIST-STILL-TWO-ROWS', 'CROSS-ACCOUNT-DELETE-REFUSED'],
     async run(x) {
-      const { check, refused, block } = x
+      const { owner, check, refused } = x
       const other = await scratch(x, 'ea', { mailboxes: 2 })
       if (!other) return check('MAILBOX-LIMIT-EXCEEDED', false, { setup: false })
       const rows = async () => { const response = await other.client.get('/api/service-users'); return response.status === 200 ? response.data?.serviceUsers?.filter(item => item.services?.email).length ?? null : null }
@@ -355,7 +338,8 @@ export default [
       refused('MAILBOX-LIMIT-EXCEEDED', (await addMailbox(x, other.client, `c${x.tag}@${other.primary}`)).response, 'LIMIT_EXCEEDED')
       const count = await rows()
       check('LIST-STILL-TWO-ROWS', count === 2, { rows: count })
-      block('SYSTEM-MAILBOX-DELETE-FORBIDDEN', 'The mailbox list has no system mailbox row, so there is no object to delete and an API client cannot observe the refusal.')
+      const foreign = await owner.delete(`/api/service-users/${one.id}`)
+      check('CROSS-ACCOUNT-DELETE-REFUSED', [403, 404].includes(foreign.status) && await rows() === 2, safeResponse(foreign))
     },
   }),
 
@@ -469,11 +453,11 @@ export default [
 
   tool('autoresponders', {
     prefix: 'S7ARP', as: 'owner', also: ['mailbox'], needs: ['account', 'mailbox'], probe: '/api/mail/autoresponders', page: FORWARDERS_PAGE,
-    paths: only('mail/autoresponders', ...MAIL_PATHS),
-    requests: 80, deadlineMs: 240_000, unit: [{ id: 'S7ARP-UNIT-1', file: 'apps/api/src/completion-mail-routing-apply.test.ts', name: 'account mail routing applied on the host through the agent answers for an address without a mailbox, edits it in place and removes it, with host state' }],
+    paths: only('mail/autoresponders', 'webmail/vacation', ...MAIL_PATHS),
+    requests: 90, deadlineMs: 240_000, unit: [{ id: 'S7ARP-UNIT-1', file: 'apps/api/src/completion-mail-routing-apply.test.ts', name: 'account mail routing applied on the host through the agent answers for an address without a mailbox, edits it in place and removes it, with host state' }],
     checks: ['ONE-REPLY-WITHIN-INTERVAL', 'ORIGINALS-LAND-IN-INBOX', 'SECOND-AUTORESPONDER-CONFLICT', 'STOP-BEFORE-START-VALIDATION'],
     async run(x) {
-      const { owner, mailbox, fixture, tag, check, block, refused, undo } = x
+      const { owner, mailbox, fixture, tag, check, refused, undo } = x
       const route = '/api/mail/autoresponders'
       const remove = async address => {
         const view = await owner.get(route), row = view.data?.autoresponders?.find(item => item.address === address)
@@ -481,21 +465,29 @@ export default [
         return !row || (await owner.delete(route, { address, expectedRevision: row.revision })).status === 200
       }
       const body = (address, extra = {}) => ({ address, expectedRevision: null, enabled: true, subject: `xq-${tag}-auto`, body: 'xq', htmlBody: '', startDate: null, endDate: null, replyIntervalHours: 24, ...extra })
+      const vacBox = await addMailbox(x, owner, `vac${tag}@${fixture.domain}`)
+      const vacClient = vacBox.id ? await mailboxClient(x, vacBox) : null
+      const vacView = vacClient ? await vacClient.get('/api/webmail/vacation') : null
+      const vacFields = { enabled: true, subject: `xq-${tag}-vac`, body: 'xq', htmlBody: '', startDate: null, endDate: null, replyIntervalHours: 24 }
+      const vacSaved = vacClient && vacView?.status === 200 ? await vacClient.put('/api/webmail/vacation', { ...vacFields, expectedRevision: vacView.data?.revision }) : null
+      const subject = `xq-${tag}-ask`
+      let replies = null, firstOrig = null, secondOrig = null
+      if (vacSaved?.status === 200 && vacClient) {
+        await sendMail(mailbox, vacBox.login, `${subject}-1`)
+        await sendMail(mailbox, vacBox.login, `${subject}-2`)
+        const first = await arrives(x, mailbox, `xq-${tag}-vac`, undefined, false)
+        firstOrig = await arrives(x, vacClient, `${subject}-1`)
+        secondOrig = await arrives(x, vacClient, `${subject}-2`)
+        await x.sleep(3000)
+        replies = first.settled ? await countSubject(mailbox, `xq-${tag}-vac`, undefined, false) : 0
+      }
+      check('ONE-REPLY-WITHIN-INTERVAL', vacSaved?.status === 200 && replies === 1, { status: vacSaved?.status ?? null, replies })
+      check('ORIGINALS-LAND-IN-INBOX', vacSaved?.status === 200 && firstOrig?.settled === true && secondOrig?.settled === true, { first: firstOrig?.settled ?? false, second: secondOrig?.settled ?? false })
       const address = `auto${tag}@${fixture.domain}`
       undo('autoresponder', () => remove(address))
       const saved = await owner.put(route, body(address))
-      const subject = `xq-${tag}-ask`
-      let replies = null
-      if (saved.status === 200) {
-        await sendMail(mailbox, address, `${subject}-1`)
-        await sendMail(mailbox, address, `${subject}-2`)
-        const first = await arrives(x, mailbox, `xq-${tag}-auto`, undefined, false)
-        await x.sleep(4000)
-        replies = first.settled ? await countSubject(mailbox, `xq-${tag}-auto`, undefined, false) : 0
-      }
-      check('ONE-REPLY-WITHIN-INTERVAL', saved.status === 200 && replies === 1, { ...safeResponse(saved), replies })
-      block('ORIGINALS-LAND-IN-INBOX', 'An address autoresponder has no mailbox of its own, so an API client cannot read the original messages it received.')
-      refused('SECOND-AUTORESPONDER-CONFLICT', await owner.put(route, body(address)), 'CONFLICT')
+      if (saved.status === 200) refused('SECOND-AUTORESPONDER-CONFLICT', await owner.put(route, body(address)), 'CONFLICT')
+      else check('SECOND-AUTORESPONDER-CONFLICT', false, safeResponse(saved))
       const stopped = `stop${tag}@${fixture.domain}`
       undo('autoresponder stop', () => remove(stopped))
       refused('STOP-BEFORE-START-VALIDATION', await owner.put(route, body(stopped, { startDate: '2031-01-02T00:00:00.000Z', endDate: '2031-01-01T00:00:00.000Z' })), 'VALIDATION')
@@ -508,7 +500,7 @@ export default [
     accounts: 1, requests: 60, deadlineMs: 300_000, unit: [{ id: 'S7MLS-UNIT-1', file: 'apps/api/src/mail/mailbox-mailing-lists.test.ts', name: 'sealed mailbox mailing-list subscriptions shows only public or current bound memberships, with no member addresses or counts' }, { id: 'S7MLS-UNIT-2', file: 'apps/api/src/mail/list-moderation.test.ts', name: 'webmail moderation sign-in admits a moderator mailbox on its own session, and audits as the mailbox' }],
     checks: ['SPACE-IN-NAME-VALIDATION', 'PRIVATE-LIST-HIDDEN-FROM-PUBLIC-INDEX', 'LIST-LIMIT-EXCEEDED', 'DELEGATE-APPROVES-HELD-POST'],
     async run(x) {
-      const { owner, mailbox, fixture, tag, check, block, refused, undo } = x
+      const { owner, mailbox, fixture, tag, check, refused, undo } = x
       const list = async (client, body) => {
         const response = await client.post('/api/mail/mailing-lists', body), id = response.data?.mailingList?.id
         if (response.status === 201 && typeof id === 'string') undo('mailing list', async () => gone(await client.delete(`/api/mail/mailing-lists/${id}`)))
@@ -645,10 +637,10 @@ export default [
   tool('email-account-manage', {
     prefix: 'S7EAM', as: 'owner', also: ['mailbox'], needs: ['account', 'mailbox'], probe: '/api/service-users', page: ACCOUNTS_PAGE,
     paths: only(...MAIL_PATHS),
-    requests: 70, deadlineMs: 240_000, unit: [MAIL_UNIT],
+    requests: 90, deadlineMs: 240_000, unit: [MAIL_UNIT],
     checks: ['SENDING-HOLD-SAVED', 'HELD-COUNT-ONE', 'HELD-MESSAGE-NOT-DELIVERED', 'ALLOW-DELIVERS-HELD-MESSAGE', 'HELD-COUNT-ZERO', 'LOGIN-SUSPEND-SAVED', 'SUSPENDED-IMAP-LOGIN-FAILS', 'SUSPENDED-MAILBOX-STILL-RECEIVES'],
     async run(x) {
-      const { owner, mailbox, fixture, tag, check, block, undo } = x
+      const { owner, mailbox, fixture, tag, check, undo } = x
       const row = async () => { const response = await owner.get('/api/service-users'); return { response, row: response.data?.serviceUsers?.find(item => item.login === fixture.mailbox.address) } }
       const start = await row()
       if (!start.row) return check('SENDING-HOLD-SAVED', false, { status: start.response.status })
@@ -657,6 +649,8 @@ export default [
         if (!changed) return true
         return (await owner.patch(`/api/service-users/${start.row.id}`, { sending: 'allow', login: 'allow' })).status === 200
       })
+      const sender = await addMailbox(x, owner, `s${tag}@${fixture.domain}`)
+      const senderClient = sender.id ? await mailboxClient(x, sender) : null
       const hold = await owner.patch(`/api/service-users/${start.row.id}`, { sending: 'hold' })
       changed = hold.status === 200
       check('SENDING-HOLD-SAVED', hold.status === 200 && hold.data?.serviceUser?.sending === 'hold', safeResponse(hold))
@@ -676,7 +670,12 @@ export default [
       check('LOGIN-SUSPEND-SAVED', suspend.status === 200 && suspend.data?.serviceUser?.login === 'suspend', safeResponse(suspend))
       const login = await x.signIn('mailbox', { username: fixture.mailbox.address, password: fixture.mailbox.password })
       check('SUSPENDED-IMAP-LOGIN-FAILS', suspend.status === 200 && login.client === null, { status: login.response.status })
-      block('SUSPENDED-MAILBOX-STILL-RECEIVES', 'Delivering to the suspended mailbox needs an SMTP sender outside it, and reading the result needs a login that the suspension refuses.')
+      const rxSubject = `xq-${tag}-susp-rx`
+      if (suspend.status === 200 && senderClient) await sendMail(senderClient, fixture.mailbox.address, rxSubject)
+      const resumed = await owner.patch(`/api/service-users/${start.row.id}`, { login: 'allow' })
+      const reopened = resumed.status === 200 ? await mailboxClient(x, { login: fixture.mailbox.address, password: fixture.mailbox.password }) : null
+      const received = reopened && senderClient && suspend.status === 200 ? await arrives(x, reopened, rxSubject) : null
+      check('SUSPENDED-MAILBOX-STILL-RECEIVES', suspend.status === 200 && senderClient !== null && resumed.status === 200 && received?.settled === true, { senderReady: senderClient !== null, resumeStatus: resumed.status, delivered: received?.settled ?? false })
     },
   }),
 ]

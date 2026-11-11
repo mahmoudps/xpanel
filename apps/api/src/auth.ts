@@ -506,20 +506,25 @@ export const authenticateRequest = async (
   const authHeader = req.headers.get('authorization')
   // A browser repeats panel basic authentication on every request; it never names the signed-in person.
   if (authHeader && !(opts.entryPoint && /^basic\s/i.test(authHeader))) {
-    // Interactive listeners have no audience-scoped API token contract yet.
-    if (opts.entryPoint) return null
+    if (opts.entryPoint === 'xmail') return null
+    if (opts.entryPoint) {
+      if (req.headers.get('cookie')) return null
+      const { pathname } = new URL(req.url, 'http://localhost')
+      if (!pathname.startsWith('/api/') || pathname.startsWith('/api/auth/') || pathname === '/api/ws' || pathname.startsWith('/api/handoff/') || pathname.startsWith('/api/security/')) return null
+    }
     const bearerMatch = /^Bearer\s+(\S+)$/i.exec(authHeader.trim())
     if (!bearerMatch) return null
     const rawToken = bearerMatch[1]!
     const tokenHash = sha256Hex(rawToken)
     const apiToken = await findActiveApiTokenByHash(db, tokenHash)
     if (!apiToken) return null
+    const principalRecord = await getPrincipal(db, apiToken.principalId)
+    if (!principalRecord || principalRecord.disabled) return null
+    if (opts.entryPoint && !entryPointAdmitsPrincipal(opts.entryPoint, principalRecord)) return null
     if (!isClientIpAllowed(apiToken.allowedIps, opts.clientIp ?? null)) {
       opts.onTokenAddressDenied?.()
       return null
     }
-    const principalRecord = await getPrincipal(db, apiToken.principalId)
-    if (!principalRecord || principalRecord.disabled) return null
     const principal = principalRecordToPrincipal(principalRecord)
     await recordApiTokenUse(db, apiToken.id, parseIp(opts.clientIp) ? opts.clientIp! : null)
     return {

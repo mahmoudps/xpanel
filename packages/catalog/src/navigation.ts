@@ -106,6 +106,14 @@ const WORKSPACE_CORE_TOOLS: Readonly<Record<string, string>> = {
   '/whm/panel/notifications': 'notification-center',
   '/whm/security/antivirus': 'aapanel-clamav',
   '/whm/security/isolation': 'account-isolation',
+  '/whm/dns/cluster': 'dns-cluster',
+  '/whm/server/nodes': 'linked-server-nodes',
+  '/whm/server/ips': 'ip-addresses-list',
+  '/whm/resellers/privileges': 'reseller-privileges',
+  '/email/filters': 'global-email-filters',
+  '/files/git': 'git-version-control',
+  '/metrics/traffic': 'bandwidth',
+  '/mail/settings/calendars': 'webmail-dav-config',
 }
 
 /** Pages require their full capability set or an explicitly scoped implemented workspace. */

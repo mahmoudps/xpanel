@@ -7,6 +7,8 @@ export interface MailLogWorkspaceHelpers {
   assertRoot: (caller: AuthenticatedCaller, action: string) => Promise<void>
   /** Protected agent GET /host/mail/log with this already validated query; no command, unit or path is selectable. */
   readServerLog: (caller: AuthenticatedCaller, query: string) => Promise<unknown>
+  /** Optional domain scope for reseller delivery reports; when omitted, root is required. */
+  listResellerDomains?: (caller: AuthenticatedCaller) => Promise<readonly string[]>
   now?: () => Date
 }
 export interface MailTrackDeliveryHelpers {
@@ -40,14 +42,37 @@ const observed = (body: unknown, scope: 'server' | 'mailbox'): Record<string, un
 export async function handleMailLogWorkspaceRoute(request: Request, url: URL, method: string, helpers: MailLogWorkspaceHelpers): Promise<Response | null> {
   if (url.pathname !== '/api/server/mail-log/delivery' && url.pathname !== '/api/server/mail-log/monitor') return null
   const caller = await helpers.requireCaller(request)
-  await helpers.assertRoot(caller, 'server.mail-log.read')
-  if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
   const delivery = url.pathname.endsWith('/delivery')
-  selectors(url, delivery ? ['since', 'until', 'sender', 'recipient', 'domain', 'status', 'dsn'] : ['since', 'until'])
-  const range = mailLogRange(url, helpers.now ?? (() => new Date()))
+  const resellerScoped = delivery && caller.principal.kind === 'reseller' && typeof helpers.listResellerDomains === 'function'
+  if (!resellerScoped) await helpers.assertRoot(caller, 'server.mail-log.read')
+  if (method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } })
+  selectors(url, delivery ? ['since', 'until', 'sender', 'recipient', 'domain', 'status', 'dsn', 'show_deliveries'] : ['since', 'until'])
+  const showDeliveries = url.searchParams.get('show_deliveries')
+  if (showDeliveries !== null && showDeliveries !== '0' && showDeliveries !== '1') return fail('VALIDATION', 'show_deliveries must be 0 or 1', { stateChanged: false })
+  const now = helpers.now ?? (() => new Date())
+  const range = mailLogRange(url, now)
   let filters: Record<string, string> = {}
   try { if (delivery) filters = { ...parseMailLogFilters(key => url.searchParams.get(key)) } } catch { return fail('VALIDATION', 'unsupported mail log filter', { stateChanged: false }) }
+  if (resellerScoped) {
+    const owned = new Set((await helpers.listResellerDomains!(caller)).map(d => d.toLowerCase()))
+    if (owned.size === 0 || (filters.domain && !owned.has(filters.domain.toLowerCase()))) {
+      return json({ scope: 'server', state: 'read', observedAt: now().toISOString(), window: range, limit: 20000, lineLimitReached: false, counts: { records: 0, events: 0, skipped: 0, unparsed: 0, untrusted: 0 }, filters, matched: 0, messages: [], omittedMessages: 0 })
+    }
+    const { summary: _summary, messages: rawMessages, filters: applied, ...view } = observed(await helpers.readServerLog(caller, new URLSearchParams({ ...range, ...filters }).toString()), 'server')
+    const domainOf = (addr: unknown): string => typeof addr === 'string' && addr.includes('@') ? addr.slice(addr.lastIndexOf('@') + 1).toLowerCase() : ''
+    const filtered = (rawMessages as Record<string, unknown>[]).filter(msg => {
+      if (showDeliveries === '0' && msg.status === 'sent') return false
+      if (owned.has(domainOf(msg.sender))) return true
+      if (Array.isArray(msg.recipients) && msg.recipients.some(r => object(r) && owned.has(domainOf(r.address)) || typeof r === 'string' && owned.has(domainOf(r)))) return true
+      return owned.has(domainOf(msg.recipient))
+    })
+    return json({ ...view, filters: applied, matched: filtered.length, messages: filtered, omittedMessages: 0 })
+  }
   const { summary, messages, matched, omittedMessages, filters: applied, ...view } = observed(await helpers.readServerLog(caller, new URLSearchParams({ ...range, ...filters }).toString()), 'server')
+  if (delivery && showDeliveries === '0') {
+    const filtered = (messages as Record<string, unknown>[]).filter(msg => msg.status !== 'sent')
+    return json({ ...view, filters: applied, matched: filtered.length, messages: filtered, omittedMessages })
+  }
   return json(delivery ? { ...view, filters: applied, matched, messages, omittedMessages } : { ...view, summary })
 }
 

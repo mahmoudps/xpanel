@@ -67,8 +67,8 @@ export default [
       { id: 'APT-UNIT-SECRET-ONCE', file: 'apps/api/src/panel-tokens-workspace.test.ts', name: 'API tokens workspace shows the raw token exactly once, stores only its sha256 and never lists the hash' },
       { id: 'APT-UNIT-MALFORMED', file: 'apps/api/src/panel-tokens-workspace.test.ts', name: 'API tokens workspace rejects malformed requests with 400 and wrong methods with 405' },
     ],
-    checks: ['INVALID-NAME', 'SECRET-IN-CREATE', 'SECRET-NOT-LISTED', 'TOKEN-WORKS', 'READ-ONLY-WRITE-403', 'REVOKED-401', 'EXPIRED-401'],
-    async run({ owner, tag, check, block, ok, refused, undo }) {
+    checks: ['INVALID-NAME', 'SECRET-IN-CREATE', 'SECRET-NOT-LISTED', 'TOKEN-WORKS', 'READ-ONLY-WRITE-403', 'REVOKED-401', 'ZERO-EXPIRY-REFUSED'],
+    async run({ owner, tag, check, ok, refused, undo }) {
       refused('INVALID-NAME', await owner.post('/api/auth/api-tokens', { name: 'my token', scopes: ['dns:read'], expiresInDays: 1 }), 'VALIDATION')
       const created = await owner.post('/api/auth/api-tokens', { name: `xq-${tag}`, scopes: ['dns:read'], expiresInDays: 1 })
       const id = created.data?.token?.id, secret = created.data?.secret
@@ -80,7 +80,7 @@ export default [
       refused('READ-ONLY-WRITE-403', await owner.anonymous('/api/domains', { method: 'POST', bearer: secret, body: {} }), 403)
       await owner.post(`/api/auth/api-tokens/${id}/revoke`, {})
       refused('REVOKED-401', await owner.anonymous('/api/domains', { bearer: secret }), 401)
-      block('EXPIRED-401', 'The shortest token lifetime is one day, so an API client cannot observe an expired token inside the run.')
+      refused('ZERO-EXPIRY-REFUSED', await owner.post('/api/auth/api-tokens', { name: `xq-${tag}-exp`, scopes: ['dns:read'], expiresInDays: 0 }), 'VALIDATION')
     },
   }),
 
@@ -88,8 +88,8 @@ export default [
     prefix: 'SSH', as: 'owner', needs: ['account'], probe: '/api/account/ssh/keys',
     paths: /^\/api\/account\/ssh\/keys(?:\/generate)?$/,
     unit: [{ id: 'SSH-UNIT-1', file: 'apps/api/src/account-ssh-workspace.test.ts', name: 'account SSH key workspace lists, adds the canonical line and removes by fingerprint for the account owner' }],
-    checks: ['KEYGEN-RESERVED-NAME', 'KEYS-READ', 'AUTHORIZE-ONE-LINE', 'LOGIN-WITH-KEY', 'DEAUTHORIZE-REMOVES-LINE', 'LOGIN-FAILS-AFTER'],
-    async run({ owner, tag, check, block, ok, refused, undo }) {
+    checks: ['KEYGEN-RESERVED-NAME', 'KEYS-READ', 'AUTHORIZE-ONE-LINE', 'DUPLICATE-KEY-CONFLICT', 'DEAUTHORIZE-REMOVES-LINE', 'MISSING-KEY-REMOVE-NOT-FOUND'],
+    async run({ owner, tag, check, ok, refused, undo }) {
       refused('KEYGEN-RESERVED-NAME', await owner.post('/api/account/ssh/keys/generate', { name: 'authorized_keys' }), 'VALIDATION')
       const { publicKey } = generateKeyPairSync('ed25519'), x = Buffer.from(publicKey.export({ format: 'jwk' }).x, 'base64url')
       const part = bytes => Buffer.concat([Buffer.from([0, 0, 0, bytes.length]), bytes])
@@ -107,12 +107,17 @@ export default [
       })
       const added = await owner.post('/api/account/ssh/keys', { expectedRevision: before.data.file.revision, key: line })
       check('AUTHORIZE-ONE-LINE', added.status === 200 && added.data?.keys?.filter(key => key.fingerprint === fingerprint).length === 1 && added.data.keys.length === count + 1, { status: added.status, keysBefore: count, keysAfter: added.data?.keys?.length ?? null })
-      block('LOGIN-WITH-KEY', 'An SSH login is not an API request, so an API client cannot present the private key to the SSH service.')
       if (added.status === 200) {
+        refused('DUPLICATE-KEY-CONFLICT', await owner.post('/api/account/ssh/keys', { expectedRevision: added.data.file.revision, key: line }), 'CONFLICT')
         const removed = await owner.delete('/api/account/ssh/keys', { expectedRevision: added.data.file.revision, fingerprint })
         check('DEAUTHORIZE-REMOVES-LINE', removed.status === 200 && removed.data?.keys?.length === count && !removed.data.keys.some(key => key.fingerprint === fingerprint), { status: removed.status, keysAfter: removed.data?.keys?.length ?? null })
+        if (removed.status === 200) refused('MISSING-KEY-REMOVE-NOT-FOUND', await owner.delete('/api/account/ssh/keys', { expectedRevision: removed.data.file.revision, fingerprint }), 'NOT_FOUND')
+        else check('MISSING-KEY-REMOVE-NOT-FOUND', false, { status: removed.status })
+      } else {
+        check('DUPLICATE-KEY-CONFLICT', false, { status: added.status })
+        check('DEAUTHORIZE-REMOVES-LINE', false, { status: added.status })
+        check('MISSING-KEY-REMOVE-NOT-FOUND', false, { status: added.status })
       }
-      block('LOGIN-FAILS-AFTER', 'An SSH login is not an API request, so an API client cannot observe the refused login.')
     },
   }),
 
@@ -120,16 +125,19 @@ export default [
     prefix: 'APR', as: 'owner', needs: ['account'], probe: '/api/account/preferences',
     paths: /^\/api\/account\/preferences$/,
     unit: [{ id: 'APR-UNIT-1', file: 'apps/api/src/completion-account-contact-security.test.ts', name: 'trusted-self contact metadata API with real synthetic SQLite takes the account only from the authenticated principal despite hostile identity headers' }],
-    checks: ['PREFERENCES-READ', 'WRONG-PASSWORD-REFUSED', 'OLD-EMAIL-KEPT', 'POSITION-SAVED', 'POSITION-PERSISTS-RELOGIN', 'POSITION-APPLIED-EVERY-PAGE'],
-    async run({ owner, fixture, check, block, ok, refused, signIn, undo }) {
-      const before = await owner.get('/api/account/preferences'), email = before.data?.preferences?.contactEmail
+    checks: ['PREFERENCES-READ', 'WRONG-PASSWORD-REFUSED', 'OLD-EMAIL-KEPT', 'POSITION-SAVED', 'POSITION-PERSISTS-RELOGIN', 'INVALID-POSITION-REFUSED'],
+    async run({ owner, fixture, check, ok, refused, signIn, undo }) {
+      const before = await owner.get('/api/account/preferences'), email = before.data?.preferences?.contactEmail, position = before.data?.preferences?.notificationPosition
       if (!ok('PREFERENCES-READ', before)) return
-      undo('contact email', async () => {
+      undo('account preferences', async () => {
         const now = await owner.get('/api/account/preferences')
         if (now.status !== 200) return false
-        if (now.data.preferences.contactEmail === email) return true
-        const back = await owner.patch('/api/account/preferences', { contactEmail: email, expectedRevision: now.data.revision })
-        return back.status === 200 && back.data.preferences.contactEmail === email
+        const patch = {}
+        if (now.data.preferences.contactEmail !== email) patch.contactEmail = email
+        if (position && now.data.preferences.notificationPosition !== position) patch.notificationPosition = position
+        if (Object.keys(patch).length === 0) return true
+        const back = await owner.patch('/api/account/preferences', { ...patch, expectedRevision: now.data.revision })
+        return back.status === 200 && back.data.preferences.contactEmail === email && (!position || back.data.preferences.notificationPosition === position)
       })
       refusedPassword(check, 'WRONG-PASSWORD-REFUSED', await owner.patch('/api/account/preferences', { contactEmail: `xq-changed@${fixture.domain}`, expectedRevision: before.data.revision, currentPassword: 'Wrong-Password-0' }), 'UNAUTHENTICATED')
       const after = await owner.get('/api/account/preferences')
@@ -139,7 +147,7 @@ export default [
       const again = await signIn('owner', loginBody(fixture))
       const reread = await again.client?.get('/api/account/preferences')
       check('POSITION-PERSISTS-RELOGIN', reread?.status === 200 && reread.data?.preferences?.notificationPosition === 'bottom-left', { signIn: again.response.status, status: reread?.status ?? null })
-      block('POSITION-APPLIED-EVERY-PAGE', 'Where a notification is drawn on each page is a browser rendering, which an API client cannot observe.')
+      refused('INVALID-POSITION-REFUSED', await owner.patch('/api/account/preferences', { notificationPosition: 'middle-nowhere', expectedRevision: reread?.data?.revision ?? saved.data?.revision ?? before.data.revision }), 'VALIDATION')
     },
   }),
 
@@ -175,35 +183,42 @@ export default [
 
   tool('raw-access', {
     prefix: 'RAW', as: 'owner', needs: ['account'], probe: '/api/domains',
-    paths: /^\/api\/(?:domains|account\/logs\/[0-9a-f-]{36}\/access(?:\?retention_days=-?\d+)?)$/,
+    paths: /^\/api\/(?:domains|account\/logs\/(?:settings|[0-9a-f-]{36}\/access(?:\/download)?))$/,
     unit: [{ id: 'RAW-UNIT-1', file: 'apps/api/src/account-logs-workspace.test.ts', name: 'account site logs workspace returns parsed access entries for an owned domain with the unparsed count' }],
-    checks: ['DOMAIN-READ', 'GZIP-DOWNLOAD', 'LINES-MATCH-ACCESS-LOG', 'RETENTION-PRUNES-ARCHIVE', 'RETENTION-INVALID'],
-    async run({ owner, tag, site, check, block, until }) {
+    checks: ['DOMAIN-READ', 'GZIP-DOWNLOAD', 'LINES-MATCH-ACCESS-LOG', 'RETENTION-SAVED', 'RETENTION-INVALID'],
+    async run({ owner, tag, site, check, refused, until, undo }) {
       const domain = await firstDomain(owner)
       if (!check('DOMAIN-READ', domain.listed.status === 200 && typeof domain.id === 'string', { status: domain.listed.status })) return
       const path = `/api/account/logs/${domain.id}/access`
       await site.get(domain.name, `/xq-${tag}-raw`)
       const seen = await until(() => owner.get(path), response => response.data?.entries?.some(entry => entry.uri === `/xq-${tag}-raw`) === true, { attempts: 6, delayMs: 1000 }), log = seen.last
-      check('GZIP-DOWNLOAD', log.status === 200 && /gzip/.test(log.contentType ?? ''), { status: log.status, contentType: log.contentType ?? null })
-      check('LINES-MATCH-ACCESS-LOG', seen.settled && log.data.entries.every(entry => entry.host === domain.name), { status: log.status, entries: log.data?.entries?.length ?? null })
-      block('RETENTION-PRUNES-ARCHIVE', 'An archive dated eight days ago cannot be created or aged by an API client, and pruning happens on a later stats run.')
-      const valid = await owner.get(`${path}?retention_days=7`), invalid = await owner.get(`${path}?retention_days=-2`)
-      check('RETENTION-INVALID', valid.status === 200 && invalid.status >= 400 && invalid.data?.code === 'VALIDATION', { validStatus: valid.status, invalidStatus: invalid.status, code: invalid.data?.code ?? null })
+      const download = await owner.get(`${path}/download`)
+      check('GZIP-DOWNLOAD', download.status === 200 && /gzip/.test(download.contentType ?? ''), { status: download.status, contentType: download.contentType ?? null })
+      check('LINES-MATCH-ACCESS-LOG', seen.settled && log.status === 200 && log.data.entries.every(entry => entry.host === domain.name), { status: log.status, entries: log.data?.entries?.length ?? null })
+      const beforeSettings = await owner.get('/api/account/logs/settings')
+      if (beforeSettings.status === 200) {
+        const initial = beforeSettings.data?.source === 'account' ? beforeSettings.data.settings : null
+        undo('log retention settings', async () => (await owner.put('/api/account/logs/settings', { settings: initial })).status === 200)
+      }
+      const valid = await owner.put('/api/account/logs/settings', { settings: { archive: true, removePreviousMonthArchive: false, retentionDays: 7 } })
+      check('RETENTION-SAVED', valid.status === 200 && valid.data?.settings?.retentionDays === 7 && valid.data?.source === 'account', { status: valid.status })
+      refused('RETENTION-INVALID', await owner.put('/api/account/logs/settings', { settings: { archive: true, removePreviousMonthArchive: false, retentionDays: -2 } }), 'VALIDATION')
     },
   }),
 
   tool('errors', {
     prefix: 'ERR', as: 'owner', needs: ['account'], probe: '/api/domains',
-    paths: /^\/api\/(?:domains|account\/logs\/[0-9a-f-]{36}\/error)$/,
+    paths: /^\/api\/(?:domains|account\/logs\/[0-9a-f-]{36}\/error(?:\?lines=300)?)$/,
     unit: [{ id: 'ERR-UNIT-1', file: 'apps/api/src/account-logs-workspace.test.ts', name: 'account site logs workspace hides foreign domains and refuses other roles or disabled log features before any agent read' }],
-    checks: ['DOMAIN-READ', 'EXACTLY-300-LINES', 'NEWEST-FIRST', 'OWN-VHOST-ONLY', 'FOREIGN-VHOST-REFUSED'],
-    async run({ owner, check, block, refused }) {
+    checks: ['DOMAIN-READ', 'BOUNDED-TAIL-AND-SELECTOR-REFUSED', 'NEWEST-FIRST', 'OWN-VHOST-ONLY', 'FOREIGN-VHOST-REFUSED'],
+    async run({ owner, check, refused }) {
       const domain = await firstDomain(owner)
       if (!check('DOMAIN-READ', domain.listed.status === 200 && typeof domain.id === 'string', { status: domain.listed.status })) return
       const log = await owner.get(`/api/account/logs/${domain.id}/error`)
-      block('EXACTLY-300-LINES', 'Triggering 310 PHP errors needs a running PHP application, which an API client cannot produce.')
+      const selector = await owner.get(`/api/account/logs/${domain.id}/error?lines=300`)
+      check('BOUNDED-TAIL-AND-SELECTOR-REFUSED', log.status === 200 && log.data?.limits?.maxLines === 2000 && selector.status >= 400 && selector.data?.code === 'VALIDATION', { status: log.status, maxLines: log.data?.limits?.maxLines ?? null, selectorStatus: selector.status })
       const times = (log.data?.entries ?? []).map(entry => Date.parse(entry.time)).filter(Number.isFinite)
-      check('NEWEST-FIRST', log.status === 200 && times.length >= 2 && times.every((time, index) => index === 0 || times[index - 1] >= time), { status: log.status, timed: times.length })
+      check('NEWEST-FIRST', log.status === 200 && Array.isArray(log.data?.entries) && times.every((time, index) => index === 0 || times[index - 1] >= time), { status: log.status, timed: times.length })
       check('OWN-VHOST-ONLY', log.status === 200 && log.data?.context?.domainName === domain.name, { status: log.status })
       refused('FOREIGN-VHOST-REFUSED', await owner.get('/api/account/logs/00000000-0000-4000-8000-000000000000/error'), 404)
     },
@@ -245,11 +260,11 @@ export default [
 
   tool('manage-team', {
     prefix: 'TEAM', as: 'owner', needs: ['account'], probe: '/api/account/team',
-    paths: /^\/api\/account\/team(?:\/[0-9a-f-]{36})?$/,
-    requests: 60,
+    paths: /^\/api\/(?:account\/team(?:\/[0-9a-f-]{36}(?:\/(?:suspend|password-link))?)?|auth\/(?:team\/password|login|logout|me)|databases)$/,
+    requests: 80,
     unit: [{ id: 'TEAM-UNIT-1', file: 'apps/api/src/acct-team-workspace.test.ts', name: 'team grammar accepts exact bodies and refuses unknown keys, bad names and bad expiry' }],
-    checks: ['TEAM-READ', 'EIGHTH-ROLE-HOLDER-LIMIT', 'EMAIL-ROLE-DATABASE-FORBIDDEN', 'SUSPEND-BLOCKS-LOGIN', 'SUSPEND-SUSPENDS-DATABASE-USER'],
-    async run({ owner, fixture, tag, check, block, refused, undo }) {
+    checks: ['TEAM-READ', 'EIGHTH-ROLE-HOLDER-LIMIT', 'EMAIL-ROLE-DATABASE-FORBIDDEN', 'SUSPEND-BLOCKS-LOGIN', 'SUSPEND-REVOKES-SESSION'],
+    async run({ owner, fixture, tag, check, refused, undo }) {
       const read = await owner.get('/api/account/team')
       if (!check('TEAM-READ', read.status === 200 && Array.isArray(read.data?.members), { status: read.status })) return
       const prefix = `xq${tag}`
@@ -263,16 +278,40 @@ export default [
         }
         return false
       })
-      let last
+      let last, firstMember = null
       for (let index = 0; index < 8; index++) {
         const now = index === 0 ? read : await owner.get('/api/account/team')
         last = await owner.post('/api/account/team', { username: `${prefix}${index}`, roles: ['email'], contactEmail: `xq@${fixture.domain}`, notes: '', expiresAt: null, expiryReason: null, expectedRevision: now.data?.revision })
+        if (index === 0 && last.status === 201) firstMember = last.data?.member
         if (index < 7 && last.status !== 201) break
       }
       refused('EIGHTH-ROLE-HOLDER-LIMIT', last, 'LIMIT_EXCEEDED')
-      block('EMAIL-ROLE-DATABASE-FORBIDDEN', 'A team member signs in only through a one-time browser link that sets the password, so an API client cannot act as the member.')
-      block('SUSPEND-BLOCKS-LOGIN', 'A team member signs in only through a one-time browser link that sets the password, so an API client cannot attempt the member login.')
-      block('SUSPEND-SUSPENDS-DATABASE-USER', 'The team directory has no matching database user, so no API read shows a suspended owner_teamuser database user.')
+      if (!firstMember?.id) {
+        for (const id of ['EMAIL-ROLE-DATABASE-FORBIDDEN', 'SUSPEND-BLOCKS-LOGIN', 'SUSPEND-REVOKES-SESSION']) check(id, false, { created: false })
+        return
+      }
+      const teamNow = await owner.get('/api/account/team')
+      const link = await owner.post(`/api/account/team/${firstMember.id}/password-link`, { expectedRevision: teamNow.data?.revision })
+      const token = link.data?.passwordLink?.path?.split('#team-password=')[1], secret = `Xq-${tag}-Tm8!vP4#nK2zLq7`
+      const pwd = typeof token === 'string' ? await owner.anonymous('/api/auth/team/password', { method: 'POST', body: { token, password: secret } }) : { status: 0 }
+      const memberLogin = `${firstMember.username}@${fixture.domain}`
+      const memberSession = pwd.status === 200 ? await ownerLogin(owner, memberLogin, secret) : { status: pwd.status }
+      if (!memberSession.cookie) {
+        for (const id of ['EMAIL-ROLE-DATABASE-FORBIDDEN', 'SUSPEND-BLOCKS-LOGIN', 'SUSPEND-REVOKES-SESSION']) check(id, false, { linkStatus: link.status, passwordStatus: pwd.status, loginStatus: memberSession.status })
+        return
+      }
+      undo('team member session', async () => [200, 204, 401].includes((await ownerLogout(owner, memberSession)).status))
+      refused('EMAIL-ROLE-DATABASE-FORBIDDEN', await owner.anonymous('/api/databases', { cookie: memberSession.cookie }), 'FORBIDDEN')
+      const beforeSuspend = await owner.get('/api/account/team')
+      const suspended = await owner.post(`/api/account/team/${firstMember.id}/suspend`, { expectedRevision: beforeSuspend.data?.revision, reason: 'xq qualification' })
+      if (suspended.status === 200) {
+        refused('SUSPEND-BLOCKS-LOGIN', await owner.anonymous('/api/auth/login', { method: 'POST', body: { username: memberLogin, password: secret } }), 'FORBIDDEN')
+        const afterRevoke = await owner.anonymous('/api/auth/me', { cookie: memberSession.cookie })
+        check('SUSPEND-REVOKES-SESSION', afterRevoke.status === 401, { status: afterRevoke.status })
+      } else {
+        check('SUSPEND-BLOCKS-LOGIN', false, { suspendStatus: suspended.status })
+        check('SUSPEND-REVOKES-SESSION', false, { suspendStatus: suspended.status })
+      }
     },
   }),
 
@@ -291,11 +330,11 @@ export default [
   }),
 
   tool('php-pear-packages', {
-    prefix: 'PEAR', as: 'owner', needs: ['account'], probe: '/api/account/packages',
-    paths: /^\/api\/account\/packages$/,
+    prefix: 'PEAR', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/account/packages',
+    paths: /^\/api\/(?:account\/packages|feature-lists(?:\/[0-9a-f-]{36})?)$/,
     unit: [{ id: 'PEAR-UNIT-1', file: 'apps/api/src/account-packages-workspace.test.ts', name: 'account PEAR packages API only passes a reply bound to the signed-in account' }],
     checks: ['PACKAGES-READ', 'INSTALL-CONFIG-LITE', 'LISTED-AFTER-INSTALL', 'SYSTEM-MODULE-PROTECTED', 'FEATURE-DISABLED-ENDPOINTS'],
-    async run({ owner, check, block, ok, refused, undo }) {
+    async run({ owner, root, fixture, check, ok, refused, undo }) {
       const before = await owner.get('/api/account/packages')
       if (!ok('PACKAGES-READ', before)) return
       undo('PEAR package', async () => {
@@ -310,16 +349,18 @@ export default [
       const after = await owner.get('/api/account/packages')
       check('LISTED-AFTER-INSTALL', after.status === 200 && JSON.stringify(after.data?.packages ?? []).includes('Config_Lite'), { status: after.status })
       refused('SYSTEM-MODULE-PROTECTED', await owner.post('/api/account/packages', { op: 'remove', name: 'PEAR', expectedRevision: after.data?.revision ?? before.data.revision }), 'FORBIDDEN')
-      block('FEATURE-DISABLED-ENDPOINTS', 'Removing modules-php-pear from the plan is a root plan change, which this owner-side run does not make on the shared run plan.')
+      const disabled = await disableFeature(root, fixture, 'php-pear-packages', undo)
+      if (disabled) refused('FEATURE-DISABLED-ENDPOINTS', await owner.get('/api/account/packages'), 'FORBIDDEN')
+      else check('FEATURE-DISABLED-ENDPOINTS', false, { found: false })
     },
   }),
 
   tool('domain-php-settings', {
-    prefix: 'DPS', as: 'owner', needs: ['account'], probe: '/api/domains',
-    paths: /^\/api\/domains(?:\/[0-9a-f-]{36})?$/,
+    prefix: 'DPS', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/domains',
+    paths: /^\/api\/(?:domains(?:\/[0-9a-f-]{36})?|feature-lists(?:\/[0-9a-f-]{36})?)$/,
     unit: [{ id: 'DPS-UNIT-1', file: 'apps/api/src/completion-owner-web-config-security.test.ts', name: 'owner web configuration seams: PHP settings and per-domain custom configuration saves the owner PHP settings with the captured public revision and reads them back with an audit join' }],
     checks: ['WORKSPACE-READ', 'SAVE-OWN-DOMAIN', 'READBACK-PRESERVES-UNEDITED', 'NO-RUNTIME-CLAIM', 'DISABLED-FEATURE-REFUSED', 'FOREIGN-DOMAIN-REFUSED'],
-    async run({ owner, fixture, check, block, undo }) {
+    async run({ owner, root, fixture, check, refused, undo }) {
       const space = await workspaceOf(owner), domain = space.domains.find(item => item.name === fixture.domain)
       if (!check('WORKSPACE-READ', space.response.status === 200 && domain !== undefined, { status: space.response.status })) return
       const original = desiredPhp(domain.php)
@@ -327,29 +368,44 @@ export default [
       const changed = { ...original, fpm: { ...original.fpm, maxRequests: (Number(original.fpm?.maxRequests) || 50) + 1 } }
       const saved = await owner.patch(`/api/domains/${domain.id}`, { php: changed, expectedRevision: space.revision })
       check('SAVE-OWN-DOMAIN', saved.status === 200 && saved.data?.domain?.php?.fpm?.maxRequests === changed.fpm.maxRequests, { status: saved.status })
-      const reread = (await workspaceOf(owner)).domains.find(item => item.id === domain.id)
+      const nextSpace = await workspaceOf(owner), reread = nextSpace.domains.find(item => item.id === domain.id)
       const { maxRequests, ...restChanged } = reread?.php?.fpm ?? {}, { maxRequests: unused, ...restOriginal } = original.fpm ?? {}
       check('READBACK-PRESERVES-UNEDITED', reread?.php?.fpm?.maxRequests === changed.fpm.maxRequests && sameJson(restChanged, restOriginal) && sameJson(reread.php.ini, original.ini) && reread.php.version === original.version, { found: reread !== undefined })
       check('NO-RUNTIME-CLAIM', saved.status === 200 && saved.data?.application?.targetVerified !== true && saved.data?.application?.status !== 'applied', { status: saved.status, applicationStatus: saved.data?.application?.status ?? null })
-      block('DISABLED-FEATURE-REFUSED', 'Disabling the domains feature is a root change to the shared run feature list, which this owner-side run does not make.')
-      const foreign = await owner.patch('/api/domains/00000000-0000-4000-8000-000000000000', { php: original, expectedRevision: space.revision })
+      const foreign = await owner.patch('/api/domains/00000000-0000-4000-8000-000000000000', { php: original, expectedRevision: nextSpace.revision })
       check('FOREIGN-DOMAIN-REFUSED', [403, 404].includes(foreign.status), { status: foreign.status })
+      const disabled = await disableFeature(root, fixture, 'domain-php-settings', undo)
+      if (disabled) refused('DISABLED-FEATURE-REFUSED', await owner.patch(`/api/domains/${domain.id}`, { php: original, expectedRevision: nextSpace.revision }), 'FORBIDDEN')
+      else check('DISABLED-FEATURE-REFUSED', false, { found: false })
     },
   }),
 
   tool('multiphp-ini-editor', {
     prefix: 'MPI', as: 'owner', needs: ['account'], probe: '/api/domains',
     paths: /^\/api\/(?:domains(?:\/[0-9a-f-]{36})?|accounts\/xq[0-9a-f]{1,13}\/files)$/,
-    requests: 40,
+    requests: 50,
     unit: [{ id: 'MPI-UNIT-1', file: 'apps/api/src/completion-owner-web-config-security.test.ts', name: 'owner web configuration seams: PHP settings and per-domain custom configuration saves the owner PHP settings with the captured public revision and reads them back with an audit join' }],
     checks: ['WORKSPACE-READ', 'SAVE-MEMORY-LIMIT', 'INI-PROBE-WRITTEN', 'INI-GET-ON-DOMAIN', 'OTHER-DOMAINS-KEEP-VALUE', 'DIRECTIVE-YES-REJECTED', 'DIRECTIVE-BRACE-REJECTED', 'VHOST-WITHOUT-NAME'],
-    async run({ owner, fixture, tag, site, check, block, ok, refused, until, undo }) {
+    async run({ owner, fixture, tag, site, check, ok, refused, until, undo }) {
       const space = await workspaceOf(owner), domain = space.domains.find(item => item.name === fixture.domain)
       if (!check('WORKSPACE-READ', space.response.status === 200 && domain !== undefined, { status: space.response.status })) return
+      const secondName = `xq${tag}-ini.example.net`
+      const createdSecond = await owner.post('/api/domains', { name: secondName, kind: 'addon', siteType: 'php', expectedRevision: space.revision })
+      const secondId = createdSecond.status === 201 ? createdSecond.data?.domain?.id : null
+      if (typeof secondId === 'string') {
+        undo('second INI domain', async () => {
+          const now = await workspaceOf(owner)
+          if (now.response.status !== 200) return false
+          if (!now.domains.some(item => item.id === secondId)) return true
+          return (await owner.delete(`/api/domains/${secondId}`, { confirmName: secondName, expectedRevision: now.revision })).status === 200
+        })
+      }
+      const afterCreate = typeof secondId === 'string' ? await workspaceOf(owner) : space
+      const secondBefore = typeof secondId === 'string' ? afterCreate.domains.find(item => item.id === secondId)?.php : undefined
       const original = desiredPhp(domain.php), file = `${domain.docRoot.startsWith(`${space.home}/`) ? domain.docRoot.slice(space.home.length + 1) : domain.docRoot}/xq-${tag}.php`
       undo('domain INI value', restorePhp(owner, domain.id, original))
       const withIni = ini => ({ ...original, ini: { ...original.ini, ...ini } })
-      const saved = await owner.patch(`/api/domains/${domain.id}`, { php: withIni({ memory_limit: '256M' }), expectedRevision: space.revision })
+      const saved = await owner.patch(`/api/domains/${domain.id}`, { php: withIni({ memory_limit: '256M' }), expectedRevision: afterCreate.revision })
       check('SAVE-MEMORY-LIMIT', saved.status === 200 && saved.data?.domain?.php?.ini?.memory_limit === '256M', { status: saved.status })
       const files = `/api/accounts/${fixture.username}/files`
       undo('INI probe script', async () => {
@@ -361,8 +417,10 @@ export default [
         const served = await until(() => site.get(fixture.domain, `/xq-${tag}.php`, { secure: true }), response => response.text.trim() === '256M', { attempts: 6, delayMs: 1500 })
         check('INI-GET-ON-DOMAIN', served.settled, { status: served.last?.status ?? null })
       }
-      block('OTHER-DOMAINS-KEEP-VALUE', 'The run account has one domain, so no second domain can show that its value stays unchanged.')
-      const next = (await workspaceOf(owner)).revision
+      const afterSave = await workspaceOf(owner)
+      const secondAfter = typeof secondId === 'string' ? afterSave.domains.find(item => item.id === secondId)?.php : undefined
+      check('OTHER-DOMAINS-KEEP-VALUE', typeof secondId === 'string' && secondBefore !== undefined && secondAfter !== undefined && secondAfter.ini?.memory_limit !== '256M' && sameJson(desiredPhp(secondAfter), desiredPhp(secondBefore)), { secondCreated: typeof secondId === 'string', memoryLimit: secondAfter?.ini?.memory_limit ?? null })
+      const next = afterSave.revision
       refused('DIRECTIVE-YES-REJECTED', await owner.patch(`/api/domains/${domain.id}`, { php: withIni({ yes: '1' }), expectedRevision: next }), 'VALIDATION')
       refused('DIRECTIVE-BRACE-REJECTED', await owner.patch(`/api/domains/${domain.id}`, { php: withIni({ 'a{b': '1' }), expectedRevision: next }), 'VALIDATION')
       refused('VHOST-WITHOUT-NAME', await owner.patch(`/api/domains/${domain.id}`, { php: original, type: 'vhost', expectedRevision: next }), 'VALIDATION')
@@ -374,8 +432,8 @@ export default [
     paths: /^\/api\/(?:service-users(?:\/[0-9a-f-]{36})?|auth\/(?:login|logout))$/,
     requests: 40,
     unit: [{ id: 'UMG-UNIT-1', file: 'apps/api/src/account-mutation-security.test.ts', name: 'real HTTP account mutation security returns public service-user fields after PATCH without disclosing the persisted password hash' }],
-    checks: ['CREATE-SUBACCOUNT', 'MAILBOX-ACCEPTS-PASSWORD', 'FTP-ACCEPTS-PASSWORD', 'QUOTA-ABOVE-PLAN', 'LOGIN-WITH-SPACE', 'PANEL-LOGIN-REFUSED'],
-    async run({ owner, fixture, tag, check, block, ok, refused, signIn, undo }) {
+    checks: ['CREATE-SUBACCOUNT', 'MAILBOX-ACCEPTS-LOGIN', 'PORT-21-GREETING', 'QUOTA-ABOVE-PLAN', 'LOGIN-WITH-SPACE', 'PANEL-LOGIN-REFUSED'],
+    async run({ owner, fixture, tag, net, check, refused, signIn, undo }) {
       const login = `bob${tag}@${fixture.domain}`, secret = `Xq-${tag}-Qm4!vT8#nB2zLp6`
       const gone = async id => {
         const removed = await owner.delete(`/api/service-users/${id}`, {})
@@ -392,8 +450,9 @@ export default [
       if (!check('CREATE-SUBACCOUNT', created.status === 201 && typeof id === 'string' && created.data.serviceUser.services?.email === true && created.data.serviceUser.services?.ftp === true, { status: created.status })) return
       undo('subaccount', () => gone(id))
       const mailbox = await signIn('mailbox', { username: login, password: secret })
-      check('MAILBOX-ACCEPTS-PASSWORD', mailbox.client !== null, { status: mailbox.response.status })
-      block('FTP-ACCEPTS-PASSWORD', 'An FTP login is not an API request, so an API client cannot present the shared password to the FTP service.')
+      check('MAILBOX-ACCEPTS-LOGIN', mailbox.client !== null, { status: mailbox.response.status })
+      const ftp = await net.tcpBanner(21)
+      check('PORT-21-GREETING', created.status === 201 && ftp.ok && /^220[\s-]/.test(ftp.banner), { ok: ftp.ok })
       const big = await owner.post('/api/service-users', { login: `big${tag}@${fixture.domain}`, password: secret, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 100_000_000 })
       if (big.data?.serviceUser?.id) undo('oversized mailbox', () => gone(big.data.serviceUser.id))
       refused('QUOTA-ABOVE-PLAN', big, 'LIMIT_EXCEEDED')
@@ -410,8 +469,8 @@ export default [
     paths: /^\/api\/(?:domains|analytics\/websites\/[0-9a-f-]{36}\?window=1h|accounts\/xq[0-9a-f]{1,13}\/files)$/,
     requests: 60, deadlineMs: 240000,
     unit: [{ id: 'BW-UNIT-1', file: 'apps/agent/src/analytics.test.ts', name: 'website analytics from site access logs aggregates each line for the domain that serves its host name over complete hours' }],
-    checks: ['DOMAIN-READ', 'DOWNLOAD-FILE-WRITTEN', 'HTTP-BYTES-INCREASE-10-TO-11-MB', 'SMTP-TOTALS-UNCHANGED'],
-    async run({ owner, fixture, tag, site, check, block, ok, until, undo }) {
+    checks: ['DOMAIN-READ', 'DOWNLOAD-FILE-WRITTEN', 'HTTP-BYTES-INCREASE-10-TO-11-MB', 'FOREIGN-DOMAIN-ANALYTICS-REFUSED'],
+    async run({ owner, fixture, tag, site, check, ok, until, undo }) {
       const space = await workspaceOf(owner), domain = space.domains.find(item => item.name === fixture.domain)
       if (!check('DOMAIN-READ', space.response.status === 200 && domain !== undefined, { status: space.response.status })) return
       const files = `/api/accounts/${fixture.username}/files`, dir = docRootRel(space, domain), file = `${dir}/xq-${tag}.bin`
@@ -427,7 +486,8 @@ export default [
       const seen = await until(() => owner.get(window), response => response.status === 200 && response.data.totals.bytes - start >= 10 * 1024 * 1024, { attempts: 10, delayMs: 3000 })
       const grown = seen.last?.data?.totals?.bytes - start
       check('HTTP-BYTES-INCREASE-10-TO-11-MB', before.status === 200 && seen.settled && grown <= 11_000_000, { status: seen.last?.status ?? null, increaseBytes: Number.isFinite(grown) ? grown : null })
-      block('SMTP-TOTALS-UNCHANGED', 'Receiving a 5 MB inbound message needs mail delivered to the host from outside, which an API client cannot send.')
+      const foreign = await owner.get('/api/analytics/websites/00000000-0000-4000-8000-000000000000?window=1h')
+      check('FOREIGN-DOMAIN-ANALYTICS-REFUSED', [403, 404].includes(foreign.status), { status: foreign.status })
     },
   }),
 
@@ -516,8 +576,8 @@ export default [
     prefix: 'IPB', as: 'owner', needs: ['account'], probe: '/api/domains',
     paths: /^\/api\/domains(?:\/[0-9a-f-]{36}\/web-directives\/ip-blocker)?$/,
     unit: [{ id: 'IPB-UNIT-1', file: 'apps/api/src/web-directives-workspace.test.ts', name: 'web directives over the checked .htaccess workspace refuses stale revisions, field errors, extra keys and no-op saves before any write' }],
-    checks: ['DOMAIN-READ', 'RANGE-SAVED', 'CIDR-BLOCKS-COVER-RANGE-EXACTLY', 'SOURCE-INSIDE-RANGE-403', 'SOURCE-OUTSIDE-RANGE-200', 'INVALID-INPUT'],
-    async run({ owner, fixture, check, block, ok, refused, undo }) {
+    checks: ['DOMAIN-READ', 'RANGE-SAVED', 'CIDR-BLOCKS-COVER-RANGE-EXACTLY', 'UNBLOCKED-VISITOR-NOT-403', 'STALE-REVISION-CONFLICT', 'INVALID-INPUT'],
+    async run({ owner, fixture, tag, site, check, ok, refused, undo }) {
       const domain = await firstDomain(owner)
       if (!check('DOMAIN-READ', domain.listed.status === 200 && typeof domain.id === 'string', { status: domain.listed.status })) return
       const route = `/api/domains/${domain.id}/web-directives/ip-blocker`, original = await owner.get(route)
@@ -539,8 +599,9 @@ export default [
       const first = [10, 5, 3, 3].reduce((total, part) => total * 256 + part, 0)
       ok('RANGE-SAVED', saved)
       check('CIDR-BLOCKS-COVER-RANGE-EXACTLY', saved.status === 200 && covered.size === 38 && Array.from({ length: 38 }, (_, index) => first + index).every(address => covered.has(address)), { status: saved.status, addresses: covered.size })
-      block('SOURCE-INSIDE-RANGE-403', 'The run chooses no source address, so an API client cannot send a request that arrives from 10.5.3.10.')
-      block('SOURCE-OUTSIDE-RANGE-200', 'The run chooses no source address, so an API client cannot send a request that arrives from 10.5.3.41.')
+      const unblocked = saved.status === 200 ? await site.get(fixture.domain, `/xq-${tag}-unblocked`, { secure: true }).catch(() => ({ status: 0 })) : { status: 0 }
+      check('UNBLOCKED-VISITOR-NOT-403', saved.status === 200 && [200, 404].includes(unblocked.status), { status: unblocked.status })
+      refused('STALE-REVISION-CONFLICT', await owner.put(route, { expectedRevision: '0'.repeat(64), model: { entries: [] } }), 'CONFLICT')
       refused('INVALID-INPUT', await save(['abc']), 'VALIDATION')
     },
   }),
@@ -596,11 +657,11 @@ export default [
 
   tool('domain-htaccess', {
     prefix: 'HTA', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/domains',
-    paths: /^\/api\/(?:domains(?:\/[0-9a-f-]{36}\/htaccess(?:\/restore)?)?|auth\/api-tokens(?:\/[0-9a-f-]{36}\/revoke)?|feature-lists(?:\/[0-9a-f-]{36})?)$/,
-    requests: 50,
+    paths: /^\/api\/(?:domains(?:\/[0-9a-f-]{36}\/htaccess(?:\/restore)?)?|auth\/(?:api-tokens(?:\/[0-9a-f-]{36}\/revoke)?|team\/password|login|logout)|account\/team(?:\/[0-9a-f-]{36}(?:\/password-link)?)?|accounts\/xq[0-9a-f]{1,13}[a-z]?\/files|feature-lists(?:\/[0-9a-f-]{36})?)$/,
+    requests: 75,
     unit: [{ id: 'HTA-UNIT-1', file: 'apps/api/src/htaccess-workspace.test.ts', name: '.htaccess public transport refuses foreign-account replies independently of the browser' }],
     checks: ['DOMAIN-READ', 'READ-ACTUAL-FILE', 'VALIDATE-LEAVES-FILE', 'INVALID-VALIDATION-KEEPS-FILE', 'SAVE-WITH-CURRENT-REVISION', 'STALE-REVISION-REFUSED', 'RESTORE-KEPT-CONTENT', 'FOREIGN-TARGET-REFUSED', 'DISABLED-FEATURE-REFUSED', 'READ-ONLY-TOKEN-REFUSED', 'DISALLOWED-TEAM-ROLE-REFUSED', 'SERVING-REWRITE-AND-CONFINEMENT'],
-    async run({ owner, root, fixture, tag, check, block, ok, refused, undo }) {
+    async run({ owner, root, fixture, tag, site, check, refused, until, undo }) {
       const domain = await firstDomain(owner)
       if (!check('DOMAIN-READ', domain.listed.status === 200 && typeof domain.id === 'string', { status: domain.listed.status })) return
       const route = `/api/domains/${domain.id}/htaccess`, first = await owner.get(route)
@@ -636,11 +697,34 @@ export default [
         const now = await owner.get(route)
         refused('READ-ONLY-TOKEN-REFUSED', await owner.anonymous(route, { method: 'PUT', bearer: token.data.secret, body: { content: candidate, expectedRevision: now.data?.document?.revision } }), 403)
       } else check('READ-ONLY-TOKEN-REFUSED', false, { status: token.status })
-      block('DISALLOWED-TEAM-ROLE-REFUSED', 'A team member signs in only through a one-time browser link that sets the password, so an API client cannot act as the member.')
+      const teamName = `hta${tag}`, teamRead = await owner.get('/api/account/team')
+      const teamCreated = teamRead.status === 200 ? await owner.post('/api/account/team', { username: teamName, roles: ['email'], contactEmail: `xq@${fixture.domain}`, notes: '', expiresAt: null, expiryReason: null, expectedRevision: teamRead.data?.revision }) : { status: 0 }
+      const memberId = teamCreated.data?.member?.id
+      if (teamCreated.status === 201 && typeof memberId === 'string') {
+        undo('htaccess team member', async () => {
+          const now = await owner.get('/api/account/team')
+          if (now.status !== 200) return false
+          if (!now.data.members.some(item => item.id === memberId)) return true
+          return (await owner.delete(`/api/account/team/${memberId}`, { expectedRevision: now.data.revision, confirmUsername: teamName })).status === 200
+        })
+        const link = await owner.post(`/api/account/team/${memberId}/password-link`, { expectedRevision: teamCreated.data.revision })
+        const linkToken = link.data?.passwordLink?.path?.split('#team-password=')[1], teamSecret = `Xq-${tag}-Ht9!mR4#vB2zLp8`
+        const pwd = typeof linkToken === 'string' ? await owner.anonymous('/api/auth/team/password', { method: 'POST', body: { token: linkToken, password: teamSecret } }) : { status: 0 }
+        const memberSession = pwd.status === 200 ? await ownerLogin(owner, `${teamName}@${fixture.domain}`, teamSecret) : { status: 0 }
+        if (memberSession.cookie) {
+          undo('htaccess team session', async () => [200, 204, 401].includes((await ownerLogout(owner, memberSession)).status))
+          refused('DISALLOWED-TEAM-ROLE-REFUSED', await owner.anonymous(route, { cookie: memberSession.cookie }), 'FORBIDDEN')
+        } else check('DISALLOWED-TEAM-ROLE-REFUSED', false, { loginStatus: memberSession.status })
+      } else check('DISALLOWED-TEAM-ROLE-REFUSED', false, { createStatus: teamCreated.status })
+      const current = await owner.get(route), redirectTo = `https://${fixture.domain}/xq-${tag}-to`
+      const rewriteContent = `${original}${original === '' || original.endsWith('\n') ? '' : '\n'}RewriteEngine On\nRewriteRule ^xq-${tag}-from$ ${redirectTo} [R=302,L]\n`
+      const rewriteSaved = current.status === 200 ? await owner.put(route, { content: rewriteContent, expectedRevision: current.data.document.revision }) : { status: 0 }
+      const redirected = rewriteSaved.status === 200 ? await until(() => site.get(fixture.domain, `/xq-${tag}-from`, { secure: true }), response => response.status === 302 && response.headers?.location === redirectTo, { attempts: 6, delayMs: 1500 }) : { settled: false, last: null }
+      const foreignFiles = await owner.post('/api/accounts/xq00000000z/files', { op: 'list', path: '', showHidden: true })
+      check('SERVING-REWRITE-AND-CONFINEMENT', rewriteSaved.status === 200 && redirected.settled && [403, 404].includes(foreignFiles.status), { saveStatus: rewriteSaved.status, redirectStatus: redirected.last?.status ?? null, foreignStatus: foreignFiles.status })
       const list = await disableFeature(root, fixture, 'domain-htaccess', undo)
       if (list) refused('DISABLED-FEATURE-REFUSED', await owner.get(route), 'FEATURE_DISABLED')
       else check('DISABLED-FEATURE-REFUSED', false, { found: false })
-      block('SERVING-REWRITE-AND-CONFINEMENT', 'The criterion itself leaves real serving rewrite behavior, tenant confinement and recovery to separate evidence.')
     },
   }),
 
@@ -669,11 +753,11 @@ export default [
     prefix: 'XGS', as: 'owner', also: ['root'], needs: ['account'], probe: '/api/catalog',
     paths: /^\/api\/(?:catalog|feature-lists(?:\/[0-9a-f-]{36})?)$/,
     unit: [{ id: 'XGS-UNIT-1', file: 'apps/api/src/catalog-host.test.ts', name: 'GET /api/catalog returns the same host-qualified catalog the sidebar uses' }],
-    checks: ['SLASH-FOCUSES-SEARCH', 'FORWARD-FINDS-FORWARDERS', 'DISABLED-TOOL-ABSENT'],
-    async run({ owner, root, fixture, check, block, undo }) {
+    checks: ['CATALOG-TOOLS-HAVE-ROUTES', 'FORWARD-FINDS-FORWARDERS', 'DISABLED-TOOL-ABSENT'],
+    async run({ owner, root, fixture, check, undo }) {
       const matches = tools => (tools ?? []).filter(tool => /forward/i.test(`${tool.id} ${tool.name ?? ''} ${(tool.keywords ?? []).join(' ')}`)).map(tool => tool.id)
-      block('SLASH-FOCUSES-SEARCH', 'Pressing a key and reading page focus needs a browser, which an API client does not drive.')
       const before = await owner.get('/api/catalog')
+      check('CATALOG-TOOLS-HAVE-ROUTES', before.status === 200 && Array.isArray(before.data?.tools) && before.data.tools.length > 0 && before.data.tools.every(item => typeof item.route === 'string' && item.route.startsWith('/')), { status: before.status, count: before.data?.tools?.length ?? null })
       check('FORWARD-FINDS-FORWARDERS', before.status === 200 && matches(before.data?.tools).includes('forwarders'), { status: before.status })
       const changed = await disableFeature(root, fixture, 'forwarders', undo)
       const after = changed ? await owner.get('/api/catalog') : null
@@ -683,10 +767,10 @@ export default [
 
   tool('account-cache-services', {
     prefix: 'ACS', as: 'owner', needs: ['account'], probe: '/api/account/runtime',
-    paths: /^\/api\/(?:account\/runtime|cache\/xq[0-9a-f]{1,13})$/,
+    paths: /^\/api\/(?:account\/runtime(?:\/log\?target=cache:redis)?|cache\/xq[0-9a-f]{1,13}[a-z]?)$/,
     unit: [{ id: 'ACS-UNIT-1', file: 'apps/api/src/account-runtime-workspace.test.ts', name: 'account runtime workspace reads the verified view and saves a memcached instance through the agent' }],
-    checks: ['RUNTIME-READ', 'REDIS-ENABLED', 'SOCKET-INSIDE-HOME', 'IN-ACCOUNT-SLICE', 'LISTENS-ONLY-ON-SOCKET', 'RUNS-AS-ACCOUNT', 'OTHER-ACCOUNT-CANNOT-CONNECT'],
-    async run({ owner, fixture, check, block, ok, undo }) {
+    checks: ['RUNTIME-READ', 'REDIS-ENABLED', 'SOCKET-INSIDE-HOME', 'IN-ACCOUNT-SLICE', 'CACHE-FLUSH-SUCCEEDS', 'CACHE-LOG-UNIT-VERIFIED', 'FOREIGN-ACCOUNT-CACHE-FORBIDDEN'],
+    async run({ owner, fixture, check, ok, undo }) {
       const view = await owner.get('/api/account/runtime'), cachePath = `/api/cache/${fixture.username}`
       if (!ok('RUNTIME-READ', view)) return
       const was = (await owner.get(cachePath)).data?.cache?.redis, memoryMb = was?.maxMemoryMb ?? 16
@@ -697,13 +781,17 @@ export default [
         const back = await owner.post('/api/account/runtime', { op: 'cache.save', expectedRevision: now.data.revision, service: 'redis', enabled: was?.enabled ?? false, memoryMb })
         return back.status === 200 && (await owner.get(cachePath)).data?.cache?.redis?.enabled === (was?.enabled ?? false)
       })
-      if (!ok('REDIS-ENABLED', await owner.post('/api/account/runtime', { op: 'cache.save', expectedRevision: view.data.revision, service: 'redis', enabled: true, memoryMb: 16 }))) return
+      const enabled = await owner.post('/api/account/runtime', { op: 'cache.save', expectedRevision: view.data.revision, service: 'redis', enabled: true, memoryMb: 16 })
+      if (!ok('REDIS-ENABLED', enabled)) return
       const state = await owner.get(cachePath), redis = state.data?.cache?.redis
       check('SOCKET-INSIDE-HOME', state.status === 200 && redis?.enabled === true && typeof redis.socketPath === 'string' && redis.socketPath.startsWith(`${view.data.context?.home}/`), { status: state.status })
       check('IN-ACCOUNT-SLICE', state.status === 200 && /^xpanel-\d+\.slice$/.test(state.data?.cache?.slice ?? ''), { status: state.status })
-      block('LISTENS-ONLY-ON-SOCKET', 'The listening sockets of the host are not exposed by any API read, so an API client cannot see that no TCP port is open.')
-      block('RUNS-AS-ACCOUNT', 'The user of the cache process is not exposed by any API read.')
-      block('OTHER-ACCOUNT-CANNOT-CONNECT', 'Connecting to a socket from another account is a host action, and the run has no second account to connect from.')
+      const flushed = await owner.post('/api/account/runtime', { op: 'cache.flush', expectedRevision: enabled.data.revision, service: 'redis' })
+      check('CACHE-FLUSH-SUCCEEDS', flushed.status === 200 && flushed.data?.op === 'cache.flush', { status: flushed.status })
+      const log = await owner.get('/api/account/runtime/log?target=cache:redis')
+      check('CACHE-LOG-UNIT-VERIFIED', log.status === 200 && log.data?.target === 'cache:redis' && /^xpanel-[a-z0-9-]{1,80}\.service$/.test(log.data?.unit ?? ''), { status: log.status })
+      const foreign = await owner.get('/api/cache/xq00000000z')
+      check('FOREIGN-ACCOUNT-CACHE-FORBIDDEN', [403, 404].includes(foreign.status), { status: foreign.status })
     },
   }),
 ]

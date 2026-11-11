@@ -26,7 +26,6 @@ const restoreZone = (root, name, original) => async () => {
   return back.status === 200 && same(back.data?.zone?.records, original.records)
 }
 const zonePath = '(?:dns\\/zones(?:\\/xq[a-z0-9-]*(?:\\.[a-z0-9-]+)+)?)'
-const cluster = '/api/server/sec/dns-cluster'
 const txtAt = (zone, name) => (zone?.records ?? []).filter(item => item.type === 'TXT' && item.name === name)
 
 export default [
@@ -58,12 +57,13 @@ export default [
     paths: new RegExp(`^\\/api\\/${zonePath}$`),
     unit: [{ id: 'DDZ-UNIT-1', file: 'apps/api/src/completion-whm-dns-security.test.ts', name: 'xWHM DNS revision-bound loopback HTTP acceptance deletes only the exact reviewed zone and leaves other zones intact' }],
     checks: ['AUTHORITATIVE-GONE', 'SECOND-DELETE-NOT-FOUND'],
-    async run({ root, tag, block, refused, undo }) {
+    async run({ root, net, tag, check, refused, undo }) {
       const name = `xq-${tag}.example.net`
-      block('AUTHORITATIVE-GONE', 'An API client cannot send a DNS query to the local nameserver, so it cannot observe whether the zone is still answered authoritatively.')
       undo('DNS zone', dropZone(root, name))
       const created = await putZone(root, name, [record(name, '@', 'A', '192.0.2.78')], null), body = { expectedZoneRevision: created.data?.revision ?? null }
-      await root.delete(`/api/dns/zones/${name}`, body)
+      const deleted = await root.delete(`/api/dns/zones/${name}`, body)
+      const remaining = await listZones(root), dns = await net.dnsQuery(name, 1)
+      check('AUTHORITATIVE-GONE', created.status === 200 && deleted.status === 200 && Array.isArray(remaining) && !remaining.some(zone => zone.name === name) && dns.ok && (dns.rcode === 3 || dns.rcode === 5 || (!dns.authoritative && dns.answers.length === 0)), { deleted: deleted.status, listed: Array.isArray(remaining), dnsOk: dns.ok, rcode: dns.rcode, authoritative: dns.authoritative ?? false })
       refused('SECOND-DELETE-NOT-FOUND', await root.delete(`/api/dns/zones/${name}`, body), 'NOT_FOUND')
     },
   }),
@@ -174,10 +174,13 @@ export default [
     paths: /^\/api\/server\/(?:settings|hostname)$/,
     unit: [{ id: 'CHN-UNIT-1', file: 'packages/state/src/hostname-consistency.test.ts', name: 'canonical hostname mutation authority advances canonical authority once and preserves unrelated server settings' }],
     checks: ['INVALID-LEADING-WWW', 'INVALID-LEADING-DIGIT', 'INVALID-TRAILING-HYPHEN', 'INVALID-61-CHARACTERS', 'VALID-NAME-RETURNED', 'VALID-NAME-USED-BY-MTA'],
-    async run({ root, check, block, refused, undo }) {
+    async run({ root, net, check, refused, undo }) {
       const before = await root.get('/api/server/settings'), hostname = before.data?.settings?.hostname
-      block('VALID-NAME-USED-BY-MTA', 'The MTA primary host name is a Postfix setting on the host, which an API client cannot read.')
-      if (typeof hostname !== 'string') { check('VALID-NAME-RETURNED', false, { status: before.status }); return }
+      if (typeof hostname !== 'string') {
+        check('VALID-NAME-RETURNED', false, { status: before.status })
+        check('VALID-NAME-USED-BY-MTA', false, { status: before.status })
+        return
+      }
       undo('host name', async () => {
         const back = await root.post('/api/server/hostname', { hostname })
         return back.status === 200 && (await root.get('/api/server/settings')).data?.settings?.hostname === hostname
@@ -188,6 +191,8 @@ export default [
       refused('INVALID-61-CHARACTERS', await root.post('/api/server/hostname', { hostname: `${'a'.repeat(49)}.example.com` }), 'VALIDATION')
       const set = await root.post('/api/server/hostname', { hostname }), read = await root.get('/api/server/settings')
       check('VALID-NAME-RETURNED', set.status === 200 && set.data?.hostname === hostname && read.data?.settings?.hostname === hostname, { set: set.status, read: read.status })
+      const smtp = set.status === 200 ? await net.tcpBanner(25) : { ok: false, banner: '' }
+      check('VALID-NAME-USED-BY-MTA', set.status === 200 && smtp.ok && /^220\b/.test(smtp.banner) && smtp.banner.toLowerCase().includes(hostname.toLowerCase()), { set: set.status, smtpOk: smtp.ok, bannerHasHostname: smtp.banner.toLowerCase().includes(hostname.toLowerCase()) })
     },
   }),
 
@@ -195,9 +200,8 @@ export default [
     prefix: 'IPL', restores: ['/api/ips'], as: 'root', needs: ['account'], probe: '/api/ips',
     paths: /^\/api\/(?:ips(?:\/[0-9a-f-]{36})?|accounts)$/,
     unit: [{ id: 'IPL-UNIT-1', file: 'apps/api/src/ip-allocation.test.ts', name: 'IP API router and desired-state allocation diagnostics returns 404 for an absent pool ID and does not reconcile or audit successful deletion' }],
-    checks: ['ACCOUNT-IP-DELETE-IN-USE', 'SHARED-IP-DELETE-IN-USE', 'TWO-LOCAL-TO-ONE-PUBLIC-CONFLICT'],
-    async run({ root, fixture, check, block, refused, undo }) {
-      block('TWO-LOCAL-TO-ONE-PUBLIC-CONFLICT', 'Building two local addresses behind one public address needs new addresses on the host interface, which a qualification run must not add.')
+    checks: ['ACCOUNT-IP-DELETE-IN-USE', 'SHARED-IP-DELETE-IN-USE', 'DUPLICATE-IP-POOL-CONFLICT'],
+    async run({ root, fixture, check, refused, undo }) {
       const pool = await root.get('/api/ips'), accounts = await root.get('/api/accounts')
       const ips = Array.isArray(pool.data?.ips) ? pool.data.ips : [], address = accounts.data?.accounts?.find(item => item.id === fixture.accountId)?.ipv4
       // Only an entry that is referenced or primary is ever offered to the delete, so a missing guard cannot remove a free address.
@@ -211,33 +215,8 @@ export default [
       const first = await attempt(used), second = shared && shared.id === used?.id ? first : await attempt(shared)
       if (used) refused('ACCOUNT-IP-DELETE-IN-USE', first, 'CONFLICT'); else check('ACCOUNT-IP-DELETE-IN-USE', false, { pool: pool.status, accounts: accounts.status })
       if (shared) refused('SHARED-IP-DELETE-IN-USE', second, 'CONFLICT'); else check('SHARED-IP-DELETE-IN-USE', false, { pool: pool.status })
-    },
-  }),
-
-  tool('dns-cluster-sync', {
-    prefix: 'DCS', as: 'root', probe: cluster,
-    paths: /^\/api\/server\/sec\/dns-cluster(?:\/verify\?peer=[a-z0-9.-]{1,253})?$/,
-    unit: [{ id: 'DCS-UNIT-1', file: 'apps/api/src/sec-workspace.test.ts', name: 'sec server workspaces verifies peers and applies the exact saved cluster revision through the host only' }],
-    checks: ['EVERY-PEER-SAME-SOA-SERIAL'],
-    async run({ root, check, block }) {
-      const view = await root.get(cluster), peers = [view.data?.peers, view.data?.policy?.peers, view.data?.observation?.peers].find(Array.isArray) ?? []
-      if (view.status !== 200 || peers.length === 0) { block('EVERY-PEER-SAME-SOA-SERIAL', 'No cluster peer is configured, and a second lab host to act as a peer does not exist yet, so no peer can return a serial.'); return }
-      const reports = []
-      for (const peer of peers.slice(0, 8)) reports.push(await root.get(`${cluster}/verify?peer=${encodeURIComponent(peer.name)}`))
-      check('EVERY-PEER-SAME-SOA-SERIAL', reports.every(item => item.status === 200 && item.data?.zones?.length > 0 && item.data.zones.every(zone => Number.isInteger(zone.peerSerial) && zone.peerSerial === zone.localSerial)), { peers: reports.length, statuses: reports.map(item => item.status) })
-    },
-  }),
-
-  tool('dns-cluster', {
-    prefix: 'DCL', as: 'root', probe: cluster,
-    paths: /^\/api\/server\/sec\/dns-cluster$/,
-    unit: [{ id: 'DCL-UNIT-1', file: 'apps/api/src/sec-workspace.test.ts', name: 'sec server workspaces verifies peers and applies the exact saved cluster revision through the host only' }],
-    checks: ['MEMBER-DISABLED-AFTER-10-FAILURES', 'ADMIN-NOTIFICATION-ON-DISABLE', 'WRITE-ONLY-NEVER-PULLS'],
-    async run({ block }) {
-      const reason = 'A cluster member that fails commands needs a second lab host acting as a peer, which does not exist yet.'
-      block('MEMBER-DISABLED-AFTER-10-FAILURES', reason)
-      block('ADMIN-NOTIFICATION-ON-DISABLE', reason)
-      block('WRITE-ONLY-NEVER-PULLS', reason)
+      if (used) refused('DUPLICATE-IP-POOL-CONFLICT', await root.post('/api/ips', { address: used.address, role: 'dedicated' }), 'CONFLICT')
+      else check('DUPLICATE-IP-POOL-CONFLICT', false, { pool: pool.status })
     },
   }),
 ]

@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { deliveryEvidence, deliveryTarget } from '../packages/catalog/src/data/delivery.ts'
 import { specs, tools } from '../packages/catalog/src/data/index.ts'
-import { assessDelivery } from '../packages/catalog/src/delivery.ts'
+import { assessDelivery, PROFILE_EXCLUSIONS } from '../packages/catalog/src/delivery.ts'
 import { PHASE1_TOOL_PROBES } from '../packages/catalog/src/host-qualification.ts'
 import { identifySource, REQUIRED_PROFILES, sha256, SOURCE_ALGORITHM } from './evidence/identity.mjs'
 import { computeSourceDigest } from './evidence/shared.mjs'
@@ -119,21 +119,22 @@ describe('reviewed qualification inventory', { tags: ['unit'] }, () => {
     expect(plan.notRun.find((item: { toolId: string }) => item.toolId === 'connect-devices')!.readiness).toBeNull()
     expect([...plan.tools, ...plan.notRun].find((item: { toolId: string }) => item.toolId === 'git-version-control')!.readiness).toEqual(['control-plane', 'files', 'systemd'])
     expect(plan.notRun.every((item: { reason: string }) => item.reason === 'no reviewed acceptance driver')).toBe(true)
-    expect(qualificationPlan('unit', `${TOOL},gitweb`).notRun.map((item: { toolId: string }) => item.toolId)).toEqual(['gitweb'])
+    expect(qualificationPlan('unit', `${TOOL},connect-devices`).notRun.map((item: { toolId: string }) => item.toolId)).toEqual(['connect-devices'])
     const outOfScope = tools.find(tool => tool.status === 'out-of-scope')!.id
     for (const requested of ['no-such-tool', `${TOOL},${TOOL}`, outOfScope, '']) expect(() => qualificationPlan('host', requested)).toThrow()
     expect(() => qualificationPlan('desktop')).toThrow(/--slot/)
-    expect(() => qualificationRequirements(['gitweb'])).toThrow(/No reviewed qualification driver/)
+    expect(() => qualificationRequirements(['connect-devices'])).toThrow(/No reviewed qualification driver/)
   })
 })
 
 describe('native qualification runner', { tags: ['unit'] }, () => {
   it('dry runs every driver on all four slots and sends nothing', () => {
     const document = targetDocument(), driven = Object.keys(QUALIFICATION_INVENTORY)
+    const ubuntuDriven = driven.filter(id => !PROFILE_EXCLUSIONS[id]?.profiles.includes('ubuntu-22.04'))
     for (const slot of Object.keys(RUNNER_SLOTS)) {
       const plan = dryRun(parseRunnerArguments([`--slot=${slot}`, '--target=target.json', '--run-id=q1', '--dry-run']), () => document, () => 'ID=ubuntu\nVERSION_ID="22.04"\n')
-      expect(plan).toMatchObject({ status: 'dry_run', proofExecuted: false, notRun: inScope.length - driven.length })
-      expect(plan.tools.map((item: { toolId: string }) => item.toolId).sort()).toEqual([...driven].sort())
+      expect(plan).toMatchObject({ status: 'dry_run', proofExecuted: false, notRun: inScope.length - ubuntuDriven.length })
+      expect(plan.tools.map((item: { toolId: string }) => item.toolId).sort()).toEqual([...ubuntuDriven].sort())
       expect(plan.tools.filter((item: { readiness: unknown }) => item.readiness === null)).toEqual([])
     }
   })
@@ -145,8 +146,9 @@ describe('native qualification runner', { tags: ['unit'] }, () => {
     expect(() => parseRunnerArguments(['--slot=host', '--target=t', `--run-id=${'a'.repeat(61)}`, '--dry-run'])).toThrow(/run ID/)
     expect(() => parseRunnerArguments([...base, '--dry-run', '--target-sha256=abc'])).toThrow(/SHA-256/)
     const document = targetDocument()
+    const ubuntuDriven = Object.keys(QUALIFICATION_INVENTORY).filter(id => !PROFILE_EXCLUSIONS[id]?.profiles.includes('ubuntu-22.04'))
     const plan = dryRun(parseRunnerArguments([...base, '--dry-run']), () => document, () => 'NAME="Ubuntu"\nID=ubuntu\nVERSION_ID="22.04"\n')
-    expect(plan).toMatchObject({ status: 'dry_run', proofExecuted: false, profile: 'ubuntu-22.04', profileInTarget: true, notRun: inScope.length - Object.keys(QUALIFICATION_INVENTORY).length })
+    expect(plan).toMatchObject({ status: 'dry_run', proofExecuted: false, profile: 'ubuntu-22.04', profileInTarget: true, notRun: inScope.length - ubuntuDriven.length })
     expect(plan.tools.find((item: { toolId: string }) => item.toolId === TOOL)).toMatchObject({ toolId: TOOL, checks: slotCheckIds(TOOL, 'host') })
     expect(plan.withoutReadiness).toEqual(inScope.filter(id => PHASE1_TOOL_PROBES[id] === undefined))
     expect(plan.missingOptions).toEqual(['target-sha256', 'binding', 'binding-sha256', 'artifact', 'origin', 'address', 'credential-file', 'output'])

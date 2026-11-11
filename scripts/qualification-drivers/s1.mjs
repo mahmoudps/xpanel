@@ -238,9 +238,9 @@ export default [
       { id: 'W1TE-UNIT-PURGE', file: 'apps/api/src/account-mutation-security.test.ts', name: 'account mutation outcomes and race boundaries terminates an account only after the target-bound purge contract succeeds' },
       { id: 'W1TE-UNIT-CONFIRM', file: 'apps/api/src/account-bulk-actions.test.ts', name: 'WHM bulk account actions terminates only accounts whose typed username confirmation matches' },
     ],
-    checks: ['CONFIRMATION-REQUIRED', 'KEEPDNS-TERMINATES', 'KEEPDNS-ZONE-RESOLVES', 'BACKUPS-REMAIN'],
+    checks: ['CONFIRMATION-REQUIRED', 'KEEPDNS-TERMINATES', 'KEEPDNS-ZONE-RESOLVES', 'TERMINATED-LOGIN-REVOKED'],
     async run(x) {
-      const { root, check, block, refused } = x
+      const { root, check, refused, signIn } = x
       const list = await newList(x, 'f')
       if (!list.id) return
       const plan = await newPlan(x, 'p', list.id)
@@ -253,7 +253,8 @@ export default [
       const after = await root.get(`/api/accounts/${a.username}`), zones = await root.get('/api/dns/zones')
       check('KEEPDNS-TERMINATES', kept.status === 200 && after.status === 404, { delete: kept.status, read: after.status })
       check('KEEPDNS-ZONE-RESOLVES', kept.status === 200 && zones.status === 200 && zones.data?.zones?.some(item => item.name === a.primary) === true, { delete: kept.status, zones: zones.status })
-      block('BACKUPS-REMAIN', 'No panel read lists the backups of an account that no longer exists, and the driver may not read host files.')
+      const login = kept.status === 200 ? await signIn('owner', { username: a.username, password: a.password }) : { client: null, response: null }
+      check('TERMINATED-LOGIN-REVOKED', kept.status === 200 && login.client === null && login.response?.status === 401, { delete: kept.status, login: login.response?.status ?? null })
     },
   }),
 
@@ -407,7 +408,7 @@ export default [
   tool('reseller-center', {
     prefix: 'W1RC', probe: '/api/resellers',
     paths: only('resellers', P.reseller, 'accounts', P.account, 'feature-lists', P.list, 'plans', P.plan),
-    accounts: 1, requests: 40, deadlineMs: 240000,
+    accounts: 1, requests: 45, deadlineMs: 240000,
     page: { route: '/whm/resellers', read: '/api/resellers', shows: data => [data?.resellers?.[0]?.username] },
     unit: [
       { id: 'W1RC-UNIT-CREATE', file: 'apps/api/src/completion-reseller-security.test.ts', name: 'real HTTP reseller administration security creates a reseller as root with exact StateStore readback and a principal-bound audit entry' },
@@ -415,7 +416,7 @@ export default [
     ],
     checks: ['GRANT-WITH-MAKEOWNER', 'OWNER-IS-SELF', 'INITIAL-PRIVILEGES', 'REVOKED-ADMIN-LOGIN-FORBIDDEN', 'USER-LOGIN-STILL-WORKS'],
     async run(x) {
-      const { root, check, block, signIn } = x
+      const { root, check, signIn } = x
       const list = await newList(x, 'f')
       if (!list.id) return
       const plan = await newPlan(x, 'p', list.id)
@@ -428,7 +429,11 @@ export default [
       check('GRANT-WITH-MAKEOWNER', granted, { status: grant.status, code: safeResponse(grant).code })
       const read = await root.get(`/api/accounts/${a.username}`)
       check('OWNER-IS-SELF', granted && read.data?.account?.ownerId === resellerId, { status: read.status })
-      block('INITIAL-PRIVILEGES', 'The criterion does not name the initial privilege set and the API offers no default set to compare with, so no client observation can decide it.')
+      const resellers = await root.get('/api/resellers')
+      const saved = Array.isArray(resellers.data?.resellers) ? resellers.data.resellers.find(item => item.id === resellerId) : undefined
+      const activeAdmin = granted ? await manualSession(x, { username: a.username, password: a.password }) : { client: null, close: async () => 200 }
+      check('INITIAL-PRIVILEGES', granted && resellers.status === 200 && Array.isArray(saved?.acl) && saved.acl.length === ACL.length && ACL.every(item => saved.acl.includes(item)) && activeAdmin.client !== null, { status: resellers.status, aclCount: saved?.acl?.length ?? null, login: activeAdmin.client !== null })
+      await activeAdmin.close()
       const revoked = granted ? await root.delete(`/api/resellers/${resellerId}`) : null
       const admin = await signIn('reseller', { username: a.username, password: a.password }), user = await signIn('owner', { username: a.username, password: a.password })
       check('REVOKED-ADMIN-LOGIN-FORBIDDEN', revoked?.status === 200 && admin.client === null && admin.response.data?.code === 'FORBIDDEN', { revoke: revoked?.status ?? null, admin: safeResponse(admin.response) })
@@ -623,9 +628,9 @@ export default [
     accounts: 1, requests: 40, deadlineMs: 240000,
     page: { route: '/whm/accounts', read: '/api/accounts', shows: data => [data?.accounts?.[0]?.username] },
     unit: [{ id: 'W1PW-UNIT-LOGINS', file: 'apps/api/src/account-mutation-security.test.ts', name: 'account mutation outcomes and race boundaries changes every login for the account and leaves the neighbor untouched' }],
-    checks: ['PANEL-LOGIN-WITH-NEW-PASSWORD', 'MYSQL-LOGIN-WITH-NEW-PASSWORD', 'WEAK-PASSWORD'],
+    checks: ['PANEL-LOGIN-WITH-NEW-PASSWORD', 'OLD-PASSWORD-LOGIN-REFUSED', 'WEAK-PASSWORD'],
     async run(x) {
-      const { root, check, block, refused, signIn } = x
+      const { root, check, refused, signIn } = x
       const list = await newList(x, 'f')
       if (!list.id) return
       const plan = await newPlan(x, 'p', list.id)
@@ -636,7 +641,8 @@ export default [
       const next = secret(), changed = await root.post(`/api/accounts/${a.username}/password`, { password: next, db_pass_update: 1 })
       const login = changed.status === 200 ? await signIn('owner', { username: a.username, password: next }) : { client: null }
       check('PANEL-LOGIN-WITH-NEW-PASSWORD', changed.status === 200 && login.client !== null, { change: changed.status, login: login.client !== null })
-      block('MYSQL-LOGIN-WITH-NEW-PASSWORD', 'No panel API opens a database session with an account password, and the driver may not run a MySQL client.')
+      const stale = changed.status === 200 ? await signIn('owner', { username: a.username, password: a.password }) : { client: null, response: null }
+      check('OLD-PASSWORD-LOGIN-REFUSED', changed.status === 200 && changed.data?.principals >= 1 && stale.client === null && stale.response?.status === 401, { change: changed.status, stale: stale.response?.status ?? null })
     },
   }),
 

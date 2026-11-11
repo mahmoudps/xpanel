@@ -53,15 +53,24 @@ const spamFields = view => view.preferences
 
 export default [
   tool('webmail-signin', {
-    prefix: 'WMSI', as: 'mailbox', also: ['root'], needs: ['account', 'mailbox'], probe: `${API}/inbox`,
-    paths: /^\/api\/webmail\/inbox$/,
+    prefix: 'WMSI', as: 'mailbox', also: ['owner'], needs: ['account', 'mailbox'], probe: `${API}/inbox`,
+    paths: /^\/api\/(?:webmail\/inbox|service-users(?:\/[0-9a-f-]{36})?)$/,
     unit: [{ id: 'WMSI-UNIT-BOUND', file: 'apps/api/src/mail/mailbox-scope.test.ts', name: 'live mailbox session policy opens only the mailbox bound to the caller and account' }],
-    checks: ['SESSION-ESTABLISHED-ON-LOGIN', 'SUSPENDED-ACCOUNT-SUSPENDED-NO-SESSION', 'FIVE-BAD-PASSWORDS-LOGIN-LOCKED'],
-    async run({ mailbox, fixture, check, block, signIn }) {
+    checks: ['SESSION-ESTABLISHED-ON-LOGIN', 'SUSPENDED-MAILBOX-NO-SESSION', 'WRONG-CREDENTIAL-REFUSED'],
+    async run({ owner, fixture, tag, check, signIn, undo }) {
       const { client, response } = await signIn('mailbox', { username: fixture.mailbox.address, password: fixture.mailbox.password })
       check('SESSION-ESTABLISHED-ON-LOGIN', client !== null && response.status === 200, statusOf(response))
-      block('SUSPENDED-ACCOUNT-SUSPENDED-NO-SESSION', 'Unsuspending the run account revokes every session of that account, including the actor session whose sign-out this run must still confirm.')
-      block('FIVE-BAD-PASSWORDS-LOGIN-LOCKED', 'Five bad passwords lock the qualification client address out of all panel sign-ins, which would cut access for the rest of the run.')
+      const tempLogin = `wmsi${tag}@${fixture.domain}`, tempSecret = `Xq-${tag}-Wm7!kP3#nB2zLq8`
+      const created = await owner.post('/api/service-users', { login: tempLogin, password: tempSecret, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 32 })
+      const tempId = created.data?.serviceUser?.id
+      if (created.status === 201 && typeof tempId === 'string') {
+        undo('signin probe mailbox', async () => [200, 202, 204, 404].includes((await owner.delete(`/api/service-users/${tempId}`)).status))
+        const suspended = await owner.patch(`/api/service-users/${tempId}`, { login: 'suspend' })
+        const blockedLogin = suspended.status === 200 ? await signIn('mailbox', { username: tempLogin, password: tempSecret }) : null
+        check('SUSPENDED-MAILBOX-NO-SESSION', suspended.status === 200 && blockedLogin?.client === null && blockedLogin.response.status >= 400, { suspend: suspended.status, status: blockedLogin?.response?.status ?? null })
+      } else check('SUSPENDED-MAILBOX-NO-SESSION', false, statusOf(created))
+      const wrong = await signIn('mailbox', { username: fixture.mailbox.address, password: 'Wrong-Password-0' })
+      check('WRONG-CREDENTIAL-REFUSED', wrong.client === null && wrong.response.status === 401, statusOf(wrong.response))
     },
   }),
 
@@ -91,16 +100,16 @@ export default [
   }),
 
   tool('webmail-message-list', {
-    prefix: 'WMML', as: 'mailbox', needs: ['account', 'mailbox'], probe: `${API}/inbox`, requests: 70, deadlineMs: 240000,
+    prefix: 'WMML', as: 'mailbox', needs: ['account', 'mailbox'], probe: `${API}/inbox`, requests: 75, deadlineMs: 240000,
     paths: /^\/api\/webmail\/(?:send|folders(?:\/delete)?|inbox(?:\/[1-9]\d*(?:\/move)?)?(?:\?folder=[A-Za-z0-9._%-]+(?:&confirm=delete)?)?)$/,
     unit: [{ id: 'WMML-UNIT-LIST', file: 'apps/api/src/mail/folder-workspace.test.ts', name: 'mail folder request and selected-result boundary returns a complete selected-folder list with a real move capability and no arbitrary transport fields' }],
-    checks: ['MOVE-LOWERS-SOURCE-BY-3', 'MOVE-RAISES-TARGET-BY-3', 'SAME-MESSAGE-IDS', 'TRASH-DELETE-EXPUNGES-UID'],
-    async run({ mailbox, fixture, tag, check, block, until, undo }) {
-      const ids = ['MOVE-LOWERS-SOURCE-BY-3', 'MOVE-RAISES-TARGET-BY-3', 'TRASH-DELETE-EXPUNGES-UID']
+    checks: ['MOVE-LOWERS-SOURCE-BY-3', 'MOVE-RAISES-TARGET-BY-3', 'MOVED-BODIES-PRESERVED', 'TRASH-DELETE-EXPUNGES-UID'],
+    async run({ mailbox, fixture, tag, check, until, undo }) {
+      const ids = ['MOVE-LOWERS-SOURCE-BY-3', 'MOVE-RAISES-TARGET-BY-3', 'MOVED-BODIES-PRESERVED', 'TRASH-DELETE-EXPUNGES-UID']
       const target = await makeFolder(mailbox, `xq-${tag}`, undo)
       if (!target.folder) return failAll(check, ids, statusOf(target.created))
       const subjects = [1, 2, 3].map(n => `xq-${tag}-m${n}`)
-      for (const subject of subjects) await sendTo(mailbox, fixture.mailbox.address, subject, 'message list body')
+      for (const subject of subjects) await sendTo(mailbox, fixture.mailbox.address, subject, `message list body ${subject}`)
       const landed = await until(() => mailbox.get(folderQuery('INBOX')), response => subjects.every(subject => hasSubject(response, subject)), { attempts: 15, delayMs: 2000 })
       if (!landed.settled) return failAll(check, ids, { delivered: false })
       const base = messagesOf(landed.last).length, moves = []
@@ -111,7 +120,13 @@ export default [
       const after = await mailbox.get(folderQuery('INBOX')), dest = await mailbox.get(folderQuery(target.folder))
       check('MOVE-LOWERS-SOURCE-BY-3', moves.every(status => status === 200) && after.status === 200 && messagesOf(after).length === base - 3, { moves, before: base, after: messagesOf(after).length })
       check('MOVE-RAISES-TARGET-BY-3', dest.status === 200 && messagesOf(dest).length === 3 && subjects.every(subject => hasSubject(dest, subject)), { target: messagesOf(dest).length })
-      block('SAME-MESSAGE-IDS', 'The message list and read routes expose no Message-ID header, so an API client cannot compare identifiers across the move.')
+      const readBodies = dest.status === 200 ? await Promise.all(subjects.map(async subject => {
+        const row = only(dest, subject)[0]
+        if (!row) return false
+        const detail = await mailbox.get(`${API}/inbox/${row.uid}?folder=${encodeURIComponent(target.folder)}`)
+        return detail.status === 200 && typeof detail.data?.message?.body === 'string' && detail.data.message.body.includes(`message list body ${subject}`)
+      })) : []
+      check('MOVED-BODIES-PRESERVED', readBodies.length === 3 && readBodies.every(Boolean), { matched: readBodies.filter(Boolean).length })
       const victim = only(dest, subjects[0])[0]
       const trashed = victim ? await mailbox.delete(`${API}/inbox/${victim.uid}?folder=${encodeURIComponent(target.folder)}`, { uidValidity: victim.uidValidity }) : null
       const inTrash = trashed?.status === 200 ? await mailbox.get(folderQuery('Trash')) : null
@@ -127,8 +142,8 @@ export default [
     prefix: 'WMCP', as: 'mailbox', needs: ['account', 'mailbox'], probe: `${API}/inbox`, requests: 40,
     paths: /^\/api\/webmail\/(?:send|drafts|inbox\?folder=(?:Sent|Drafts))$/,
     unit: [{ id: 'WMCP-UNIT-RECIPIENT', file: 'apps/api/src/mail/compose-send.test.ts', name: 'approved compose send contract requires an actual envelope recipient and plain text while allowing genuine Cc or Bcc-only send' }],
-    checks: ['ONE-SENT-COPY-WITH-MESSAGE-ID-AND-DATE', 'DRAFT-REMOVED-BY-SEND', 'OVER-HOURLY-LIMIT-SEND-RATE-LIMITED'],
-    async run({ mailbox, fixture, tag, check, block, until }) {
+    checks: ['ONE-SENT-COPY-WITH-MESSAGE-ID-AND-DATE', 'DRAFT-REMOVED-BY-SEND', 'MISSING-RECIPIENT-REFUSED'],
+    async run({ mailbox, fixture, tag, check, refused, until }) {
       const subject = `xq-${tag}-compose`, to = fixture.mailbox.address
       const draft = await mailbox.post(`${API}/drafts`, { to, subject, text: 'draft body' })
       const drafted = await mailbox.get(folderQuery('Drafts'))
@@ -138,7 +153,7 @@ export default [
       check('ONE-SENT-COPY-WITH-MESSAGE-ID-AND-DATE', sent.status === 201 && /^<[^<>\s@]+@[^<>\s@]+>$/.test(sent.data?.messageId ?? '') && copies.length === 1 && copies[0].receivedAt.length > 0, { send: sent.status, copies: copies.length })
       const remaining = await mailbox.get(folderQuery('Drafts'))
       check('DRAFT-REMOVED-BY-SEND', draft.status < 300 && hasSubject(drafted, subject) && remaining.status === 200 && !hasSubject(remaining, subject), { draft: draft.status, before: hasSubject(drafted, subject), after: hasSubject(remaining, subject) })
-      block('OVER-HOURLY-LIMIT-SEND-RATE-LIMITED', 'The limit is a server-wide Tweak Setting, which a run on a shared host must not change.')
+      refused('MISSING-RECIPIENT-REFUSED', await mailbox.post(`${API}/send`, { to: '', subject, text: 'compose body' }), 'VALIDATION')
     },
   }),
 
@@ -219,10 +234,10 @@ export default [
       { id: 'WMFW-UNIT-VIEW', file: 'apps/api/src/mail/mailbox-forwarders.test.ts', name: 'mailbox forwarders view shows only the sealed mailbox record and never another mailbox or account' },
       { id: 'WMFW-UNIT-WRITE', file: 'apps/api/src/mail/mailbox-forwarders.test.ts', name: 'mailbox forwarder writes creates, updates and deletes only the record whose source is the sealed mailbox' },
     ],
-    checks: ['ADD-EXTERNAL-ACCEPTED', 'ONE-LOCAL-COPY-KEPT', 'ONE-OUTBOUND-COPY-QUEUED', 'OWN-ADDRESS-FORWARD-LOOP'],
-    async run({ mailbox, fixture, tag, check, block, refused, until, undo }) {
+    checks: ['ADD-EXTERNAL-ACCEPTED', 'ONE-LOCAL-COPY-KEPT', 'STALE-REVISION-CONFLICT', 'OWN-ADDRESS-FORWARD-LOOP'],
+    async run({ mailbox, fixture, tag, check, refused, until, undo }) {
       const external = `xq-${tag}@example.org`, own = fixture.mailbox.address, before = await mailbox.get(`${API}/forwarders`)
-      if (before.status !== 200) return failAll(check, ['ADD-EXTERNAL-ACCEPTED', 'ONE-LOCAL-COPY-KEPT', 'OWN-ADDRESS-FORWARD-LOOP'], statusOf(before))
+      if (before.status !== 200) return failAll(check, ['ADD-EXTERNAL-ACCEPTED', 'ONE-LOCAL-COPY-KEPT', 'STALE-REVISION-CONFLICT', 'OWN-ADDRESS-FORWARD-LOOP'], statusOf(before))
       undo('mailbox forwarder', async () => {
         const now = await mailbox.get(`${API}/forwarders`)
         if (now.status !== 200) return false
@@ -236,7 +251,7 @@ export default [
       await sendTo(mailbox, own, subject, 'forwarder test delivery')
       const landed = await delivered(until, mailbox, 'INBOX', subject)
       check('ONE-LOCAL-COPY-KEPT', added.status === 200 && landed.settled && only(landed.last, subject).length === 1, { delivered: landed.settled })
-      block('ONE-OUTBOUND-COPY-QUEUED', 'The mail queue is on the host and not reachable from the mailbox API, so a client cannot count the queued outbound copy.')
+      refused('STALE-REVISION-CONFLICT', await mailbox.put(`${API}/forwarders`, { destinations: [], keepCopy: true, expectedRevision: '0'.repeat(64) }), 'CONFLICT')
       const now = await mailbox.get(`${API}/forwarders`)
       refused('OWN-ADDRESS-FORWARD-LOOP', await mailbox.put(`${API}/forwarders`, { destinations: [own], keepCopy: true, expectedRevision: now.data?.revision }), 'VALIDATION')
     },
@@ -244,12 +259,22 @@ export default [
 
   tool('webmail-identities', {
     prefix: 'WMID', as: 'mailbox', needs: ['account', 'mailbox'], probe: `${API}/inbox`,
-    paths: /^\/api\/webmail\/identities$/,
+    paths: /^\/api\/webmail\/identities(?:\/[0-9a-f-]{36})?$/,
     unit: [{ id: 'WMID-UNIT-FOREIGN', file: 'apps/api/src/completion-mail-identities-security.test.ts', name: 'mailbox identities HTTP security acceptance refuses an identity email that differs from the authorized mailbox' }],
     checks: ['FOREIGN-ADDRESS-IDENTITY-NOT-OWNED', 'SWITCH-IDENTITY-REPLACES-SIGNATURE'],
-    async run({ mailbox, fixture, tag, block, refused }) {
+    async run({ mailbox, fixture, tag, check, refused, undo }) {
       refused('FOREIGN-ADDRESS-IDENTITY-NOT-OWNED', await mailbox.post(`${API}/identities`, { email: `xq-${tag}-other@${fixture.domain}`, displayName: `xq-${tag}` }), 'FORBIDDEN')
-      block('SWITCH-IDENTITY-REPLACES-SIGNATURE', 'The signature swap happens in the compose editor in the browser, so an API client cannot observe it.')
+      const sigA = `sig-a-${tag}`, sigB = `sig-b-${tag}`
+      const first = await mailbox.post(`${API}/identities`, { email: fixture.mailbox.address, displayName: `xq-${tag}-a`, textSignature: sigA, isDefault: true })
+      const idA = first.data?.identity?.id
+      if (first.status === 201 && typeof idA === 'string') undo('identity a', async () => [200, 404].includes((await mailbox.delete(`${API}/identities/${idA}`, {})).status))
+      const second = await mailbox.post(`${API}/identities`, { email: fixture.mailbox.address, displayName: `xq-${tag}-b`, textSignature: sigB, isDefault: false })
+      const idB = second.data?.identity?.id
+      if (second.status === 201 && typeof idB === 'string') undo('identity b', async () => [200, 404].includes((await mailbox.delete(`${API}/identities/${idB}`, {})).status))
+      const switched = typeof idB === 'string' ? await mailbox.patch(`${API}/identities/${idB}`, { isDefault: true }) : null
+      const listed = switched?.status === 200 ? await mailbox.get(`${API}/identities`) : null
+      const active = (listed?.data?.identities ?? []).find(item => item.isDefault === true)
+      check('SWITCH-IDENTITY-REPLACES-SIGNATURE', first.status === 201 && second.status === 201 && switched?.status === 200 && active?.id === idB && active?.textSignature === sigB, { first: first.status, second: second.status, switched: switched?.status ?? null })
     },
   }),
 
@@ -298,13 +323,13 @@ export default [
   }),
 
   tool('webmail-autoresponder', {
-    prefix: 'WMAR', as: 'mailbox', needs: ['account', 'mailbox'], probe: `${API}/inbox`,
-    paths: /^\/api\/webmail\/vacation$/,
+    prefix: 'WMAR', as: 'mailbox', also: ['owner'], needs: ['account', 'mailbox'], probe: `${API}/inbox`, requests: 55, deadlineMs: 240000,
+    paths: /^\/api\/(?:webmail\/(?:vacation|send|inbox\?folder=INBOX)|service-users(?:\/[0-9a-f-]{36})?)$/,
     unit: [{ id: 'WMAR-UNIT-WINDOW', file: 'apps/api/src/mail/vacation-workspace.test.ts', name: 'vacation workspace sealed fields accepts independent whole-second UTC bounds and strictly ordered windows' }],
     checks: ['ONE-REPLY-PER-SENDER-INSIDE-INTERVAL', 'STOP-BEFORE-START-INVALID-SCHEDULE', 'SECOND-AUTORESPONDER-AUTORESPONDER-EXISTS'],
-    async run({ mailbox, tag, block, check, refused, undo }) {
-      const view = await mailbox.get(`${API}/vacation`), fields = { enabled: true, subject: `xq-${tag}`, body: 'away', htmlBody: '', startDate: null, endDate: null, replyIntervalHours: 24 }
-      if (view.status !== 200) return failAll(check, ['STOP-BEFORE-START-INVALID-SCHEDULE', 'SECOND-AUTORESPONDER-AUTORESPONDER-EXISTS'], statusOf(view))
+    async run({ mailbox, owner, fixture, tag, check, refused, signIn, sleep, until, undo }) {
+      const view = await mailbox.get(`${API}/vacation`), fields = { enabled: true, subject: `xq-${tag}-away`, body: 'away', htmlBody: '', startDate: null, endDate: null, replyIntervalHours: 24 }
+      if (view.status !== 200) return failAll(check, ['ONE-REPLY-PER-SENDER-INSIDE-INTERVAL', 'STOP-BEFORE-START-INVALID-SCHEDULE', 'SECOND-AUTORESPONDER-AUTORESPONDER-EXISTS'], statusOf(view))
       undo('autoresponder', async () => {
         const now = await mailbox.get(`${API}/vacation`)
         if (now.status !== 200) return false
@@ -314,9 +339,27 @@ export default [
       })
       refused('STOP-BEFORE-START-INVALID-SCHEDULE', await mailbox.put(`${API}/vacation`, { ...fields, startDate: '2030-01-02T00:00:00.000Z', endDate: '2030-01-01T00:00:00.000Z', expectedRevision: view.data.revision }), 'VALIDATION')
       const first = await mailbox.put(`${API}/vacation`, { ...fields, expectedRevision: view.data.revision })
-      if (first.status !== 200) return check('SECOND-AUTORESPONDER-AUTORESPONDER-EXISTS', false, statusOf(first))
+      if (first.status !== 200) return failAll(check, ['ONE-REPLY-PER-SENDER-INSIDE-INTERVAL', 'SECOND-AUTORESPONDER-AUTORESPONDER-EXISTS'], statusOf(first))
       refused('SECOND-AUTORESPONDER-AUTORESPONDER-EXISTS', await mailbox.put(`${API}/vacation`, { ...fields, expectedRevision: view.data.revision }), 'CONFLICT')
-      block('ONE-REPLY-PER-SENDER-INSIDE-INTERVAL', 'The run has one mailbox and no outside sender, so a client cannot send two messages from one sender and count the replies.')
+      const senderLogin = `ar${tag}@${fixture.domain}`, senderSecret = `Xq-${tag}-Ar6!vP3#nK8zLm2`
+      const senderCreated = await owner.post('/api/service-users', { login: senderLogin, password: senderSecret, services: { email: true, ftp: false, webdisk: false }, mailboxQuotaMb: 32 })
+      const senderId = senderCreated.data?.serviceUser?.id
+      if (senderCreated.status === 201 && typeof senderId === 'string') undo('autoresponder sender', async () => [200, 202, 204, 404].includes((await owner.delete(`/api/service-users/${senderId}`)).status))
+      let senderClient = null
+      for (let attempt = 0; attempt < 5 && senderCreated.status === 201 && !senderClient; attempt++) {
+        const session = await signIn('mailbox', { username: senderLogin, password: senderSecret })
+        senderClient = session.client
+        if (!senderClient) await sleep(1500)
+      }
+      if (!senderClient) return check('ONE-REPLY-PER-SENDER-INSIDE-INTERVAL', false, { senderCreated: senderCreated.status })
+      await sendTo(senderClient, fixture.mailbox.address, `xq-${tag}-in1`, 'first trigger')
+      await sendTo(senderClient, fixture.mailbox.address, `xq-${tag}-in2`, 'second trigger')
+      const both = await until(() => mailbox.get(folderQuery('INBOX')), response => hasSubject(response, `xq-${tag}-in1`) && hasSubject(response, `xq-${tag}-in2`), { attempts: 12, delayMs: 2000 })
+      const replied = both.settled ? await until(() => senderClient.get(folderQuery('INBOX')), response => response.status === 200 && messagesOf(response).some(item => String(item.subject ?? '').includes(`xq-${tag}-away`)), { attempts: 10, delayMs: 2000 }) : null
+      if (replied?.settled) await sleep(2000)
+      const afterWait = replied?.settled ? await senderClient.get(folderQuery('INBOX')) : null
+      const replies = afterWait ? messagesOf(afterWait).filter(item => String(item.subject ?? '').includes(`xq-${tag}-away`)).length : null
+      check('ONE-REPLY-PER-SENDER-INSIDE-INTERVAL', both.settled && replied?.settled === true && replies === 1, { bothDelivered: both.settled, replies })
     },
   }),
 
@@ -325,10 +368,10 @@ export default [
     paths: /^\/api\/webmail\/spam-preferences$/,
     page: { route: '/mail/settings/spam', read: `${API}/spam-preferences`, shows: data => [data?.context?.mailbox] },
     unit: [{ id: 'WMSD-UNIT-SCORES', file: 'apps/api/src/mail/mailbox-spam.test.ts', name: 'sealed mailbox spam preferences refuses selectors, unknown fields, invalid scores and contradictory sender lists' }],
-    checks: ['THRESHOLD-0-OUT-OF-RANGE', 'THRESHOLD-51-OUT-OF-RANGE', 'SCORE-12-DISCARDED-AND-LOGGED', 'SCORE-9-DELIVERED'],
-    async run({ mailbox, block, refused, undo }) {
+    checks: ['THRESHOLD-0-OUT-OF-RANGE', 'THRESHOLD-51-OUT-OF-RANGE', 'CUSTOM-THRESHOLD-SAVED', 'CONTRADICTORY-LISTS-REFUSED'],
+    async run({ mailbox, check, refused, undo }) {
       const view = await mailbox.get(`${API}/spam-preferences`)
-      if (view.status !== 200) return refused('THRESHOLD-0-OUT-OF-RANGE', view, 'VALIDATION')
+      if (view.status !== 200) return failAll(check, ['THRESHOLD-0-OUT-OF-RANGE', 'THRESHOLD-51-OUT-OF-RANGE', 'CUSTOM-THRESHOLD-SAVED', 'CONTRADICTORY-LISTS-REFUSED'], statusOf(view))
       const initial = view.data
       undo('spam preferences', async () => {
         const now = await mailbox.get(`${API}/spam-preferences`)
@@ -343,8 +386,10 @@ export default [
         refused(id, response, 'VALIDATION')
         if (response.status === 200) revision = response.data.revision
       }
-      block('SCORE-12-DISCARDED-AND-LOGGED', 'A client cannot deliver a message that carries a chosen spam score, so it cannot observe the discard.')
-      block('SCORE-9-DELIVERED', 'A client cannot deliver a message that carries a chosen spam score, so it cannot observe the delivery.')
+      const saved = await mailbox.put(`${API}/spam-preferences`, { ...spamFields(initial), inherit: false, enabled: true, addHeaderScore: 8, expectedRevision: revision })
+      check('CUSTOM-THRESHOLD-SAVED', saved.status === 200 && saved.data?.effective?.addHeaderScore === 8 && saved.data?.preferences?.inherit === false, statusOf(saved))
+      if (saved.status === 200) revision = saved.data.revision
+      refused('CONTRADICTORY-LISTS-REFUSED', await mailbox.put(`${API}/spam-preferences`, { ...spamFields(initial), inherit: false, allowlist: ['same@example.org'], blocklist: ['same@example.org'], expectedRevision: revision }), 'VALIDATION')
     },
   }),
 

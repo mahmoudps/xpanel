@@ -3576,8 +3576,26 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         if (response) return response
       }
       if (pathname === '/api/server/mail-log/delivery' || pathname === '/api/server/mail-log/monitor') {
-        const response = await handleMailLogWorkspaceRoute(req, url, method, { requireCaller, assertRoot,
-          readServerLog: (caller, query) => readNativeWorkspace(caller, '/host/mail/log?' + query) })
+        const response = await handleMailLogWorkspaceRoute(req, url, method, {
+          requireCaller,
+          assertRoot,
+          listResellerDomains: async resellerCaller => {
+            const accounts = await deps.store.listAccounts({ ownerId: resellerCaller.principal.id })
+            const owned = new Set(accounts.map(account => account.id))
+            return (await deps.store.listDomains()).filter(domain => owned.has(domain.accountId)).map(domain => domain.name)
+          },
+          readServerLog: async (caller, query) => {
+            const agentCaller: AuthenticatedCaller = caller.principal.kind === 'reseller'
+              ? await (async () => {
+                  const rootPrincipal = await findPrincipalByUsername(deps.db, 'root')
+                  return rootPrincipal
+                    ? { ...caller, principalRecord: rootPrincipal, principal: { kind: 'root' as const, id: rootPrincipal.id, username: rootPrincipal.username } }
+                    : caller
+                })()
+              : caller
+            return readNativeWorkspace(agentCaller, '/host/mail/log?' + query)
+          },
+        })
         if (response) return response
       }
       if (pathname === '/api/auth/api-tokens' || pathname.startsWith('/api/auth/api-tokens/')) {
@@ -5104,12 +5122,29 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
               if (!current && fresh.principal.kind !== 'root') await requireDomainAccount(deps.store, fresh, zoneName, 'dns.zone.save', owner.id)
             } else await assertRoot(fresh, 'dns.zone.save')
           } : undefined
+          const inputRecords = body.records ?? []
+          const hasApexNs = inputRecords.some(record => record.type === 'NS' && (record.name === '@' || record.name === zoneName || record.name === `${zoneName}.`))
+          const defaultNsRecords = !existingZone && zoneAccountId === null && inputRecords.length > 0 && !hasApexNs
+            ? await (async () => {
+                const settings = await deps.store.getServerSettings()
+                const ttl = settings?.defaultTtl ?? 3600
+                return (settings?.nameservers ?? []).map(ns => ({
+                  id: randomUUID(),
+                  zone: zoneName,
+                  name: '@',
+                  type: 'NS' as const,
+                  ttl,
+                  content: ns,
+                  priority: null,
+                }))
+              })()
+            : []
           const zone = await deps.store.saveDnsZone({
             id: body.id ?? existingZone?.id ?? randomUUID(),
             name: zoneName,
             accountId: zoneAccountId,
             serial: body.serial ?? (existingZone ? existingZone.serial + 1 : 2026102201),
-            records: body.records ?? [],
+            records: [...defaultNsRecords, ...inputRecords],
           }, dnsGuard ? { dnsGuard } : undefined)
           const reconcile = await triggerReconcile(caller)
           await emitAudit({

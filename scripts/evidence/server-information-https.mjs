@@ -6,16 +6,17 @@ import { pinnedLookup, validateServerInformationOrigin } from './server-informat
 const SERVER_INFORMATION_PATHS = ['/api/server/info', '/api/auth/login', '/api/auth/logout']
 
 /** Normal TLS verification, fixed local address and no redirects/retries or forwarded-auth headers. */
-export function createQualificationTransport({ origin, address, ca, deadline, allow = path => SERVER_INFORMATION_PATHS.includes(path), maxRequests = 8, methods = ['GET', 'POST'], maxBody = 16 * 1024, acceptText = false }) {
+export function createQualificationTransport({ origin, address, ca, deadline, allow = path => SERVER_INFORMATION_PATHS.includes(path), maxRequests = 8, methods = ['GET', 'POST'], maxBody = 16 * 1024, acceptText = false, requestTimeoutMs = 5000 }) {
   const normalizedOrigin = validateServerInformationOrigin(origin), base = new URL(normalizedOrigin)
   const family = isIP(address)
   requireValue(family !== 0 && Number.isFinite(deadline), 'A measured local HTTPS address and deadline are required')
   let requests = 0
-  return async (pathname, { method = 'GET', body, cookie, csrf, forged = false, idempotencyKey, bearer, basic } = {}) => {
+  return async (pathname, { method = 'GET', body, contentType, cookie, csrf, forged = false, idempotencyKey, bearer, basic } = {}) => {
     requireValue(allow(pathname) && methods.includes(method) && ++requests <= maxRequests, 'Qualification request exceeds the bounded endpoint inventory')
-    const timeout = Math.min(5000, deadline - Date.now())
+    const timeout = Math.min(requestTimeoutMs, deadline - Date.now())
     requireValue(timeout > 0, 'Qualification deadline expired')
-    const bytes = body === undefined ? undefined : Buffer.from(JSON.stringify(body))
+    const rawPayload = typeof body === 'string' || body instanceof Uint8Array
+    const bytes = body === undefined ? undefined : rawPayload ? Buffer.from(body) : Buffer.from(JSON.stringify(body))
     requireValue(bytes === undefined || bytes.length <= maxBody, 'Qualification authentication payload exceeded bounds')
     return new Promise((resolveResponse, reject) => {
       const request = https.request({
@@ -24,7 +25,7 @@ export function createQualificationTransport({ origin, address, ca, deadline, al
         ...(ca === undefined ? {} : { ca }),
         headers: {
           accept: 'application/json', origin: normalizedOrigin, 'user-agent': 'xpanel-server-information-qualification/1',
-          ...(bytes === undefined ? {} : { 'content-type': 'application/json', 'content-length': String(bytes.length) }),
+          ...(bytes === undefined ? {} : { 'content-type': contentType ?? (rawPayload ? 'application/octet-stream' : 'application/json'), 'content-length': String(bytes.length) }),
           ...(cookie === undefined ? {} : { cookie }), ...(csrf === undefined ? {} : { 'x-csrf-token': csrf }),
           ...(idempotencyKey === undefined ? {} : { 'idempotency-key': idempotencyKey }), ...(bearer === undefined ? {} : { authorization: `Bearer ${bearer}` }), ...(basic === undefined ? {} : { authorization: `Basic ${Buffer.from(basic).toString('base64')}` }),
           ...(forged ? { 'x-xpanel-principal-id': 'qualification-forged-principal', 'x-xpanel-caller-role': 'root' } : {}),

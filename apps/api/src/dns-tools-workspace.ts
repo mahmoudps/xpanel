@@ -131,7 +131,7 @@ async function readBody(request: Request): Promise<Record<string, unknown>> {
   return object(body) ? body : fail('VALIDATION', 'request body must be an object', unchanged)
 }
 
-const ttlOf = (value: unknown): number => int(value, TTL_MAX) ? value : fail('VALIDATION', `ttl must be an integer in 0..${TTL_MAX} seconds`, unchanged)
+const ttlOf = (value: unknown): number => int(value, TTL_MAX) && value >= 1 ? value : fail('VALIDATION', `ttl must be an integer in 1..${TTL_MAX} seconds`, unchanged)
 const exactKeys = (body: Record<string, unknown>, keys: readonly string[]): void => { if (Object.keys(body).length !== keys.length || !keys.every(key => Object.hasOwn(body, key))) fail('VALIDATION', 'unsupported DNS tools request field', unchanged) }
 const zoneList = <T>(value: unknown, read: (item: unknown) => T, name: (item: T) => string): T[] => {
   if (!Array.isArray(value) || value.length < 1 || value.length > TTL_ZONES_MAX) return fail('VALIDATION', `1..${TTL_ZONES_MAX} zones are required`, unchanged)

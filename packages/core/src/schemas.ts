@@ -355,6 +355,7 @@ export const validateServerSettings = (s: ServerSettings): ServerSettings => {
     ...(s.web !== undefined ? { web: validateServerWebSettings(s.web) } : {}),
     ...(s.ftp !== undefined ? { ftp: validateServerFtpSettings(s.ftp) } : {}),
     ...(s.ssh !== undefined ? { ssh: validateServerSshSettings(s.ssh) } : {}),
+    ...(s.defaultTtl !== undefined ? { defaultTtl: Number.isSafeInteger(s.defaultTtl) && s.defaultTtl >= 1 && s.defaultTtl <= 2_147_483_647 ? s.defaultTtl : bad('defaultTtl', s.defaultTtl, '1..2147483647') } : {}),
   }
 }
 

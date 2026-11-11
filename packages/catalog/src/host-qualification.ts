@@ -1,3 +1,4 @@
+import { PROFILE_EXCLUSIONS, UNIMPLEMENTED_TOOL_REASONS } from './delivery.ts'
 import type { CatalogTool } from './types.ts'
 
 /** Probes a connected Linux agent can report. The control plane is added by the API. */
@@ -9,6 +10,7 @@ export type HostProbeResult = 'passed' | 'failed'
 
 export interface HostQualificationReport {
   executor: 'linux' | 'fake' | 'unknown'
+  profile?: string
   probes: Partial<Record<HostProbe, HostProbeResult>>
 }
 
@@ -547,7 +549,7 @@ export const QUALIFIED_SCOPE: Readonly<Record<string, string>> = {
   'config-as-code': 'YAML export, overlay import with a diff, and apply through the reconciler; nothing is deleted, and accounts and resellers cannot be created from a file because their passwords do not travel.',
   'aapanel-panel-backup-restore': 'Control snapshots: create, upload, download, delete and restore of the desired state with overwrite choice; sign-in principals and the audit log stay on the running server.',
   'aapanel-third-party-plugin-import': 'A plugin package file of links and icons, validated and installed; plugin code does not exist in this format.',
-  'server-health': 'Its critical band needs a lab guest with /home on its own volume above 95% used; none exists yet, so that clause stays blocked.',
+  'server-health': 'Observed service states and mounted root and /home disk usage with ok, warning and critical bands; a guest below 80% used exercises the ok band only.',
   'aapanel-default-index': 'Revision-checked saved index filename ordering for active static/PHP serving domains and checked global configuration apply acknowledgement; live directory serving remains unverified and aliases inherit their serving vhost.',
   'aapanel-composer': 'Install and update as the account of a saved PHP site, in its document root, with scripts and plugins off, a chosen PHP version and an optional mirror; other target folders are not offered.',
   'service-manager': 'Observed systemd service inventory, identity-checked SSH and distribution PHP-FPM unit restarts after configuration tests, selected boot toggles, and attempted reboot jobs; per-account PHP-FPM masters restart from the services page, and supervisor and watchdog management are unavailable.',
@@ -967,6 +969,21 @@ export const qualifyHostTools = (
 ): CatalogTool[] => {
   return catalog.map(tool => {
     const copy = { ...tool, delivery: { ...tool.delivery } }
+    if (tool.status === 'out-of-scope') return copy
+    const exclusion = enabled && report?.executor === 'linux' && report.profile !== undefined && Object.hasOwn(PROFILE_EXCLUSIONS, tool.id)
+      ? PROFILE_EXCLUSIONS[tool.id]
+      : undefined
+    if (exclusion !== undefined && exclusion.profiles.includes(report!.profile!)) {
+      return {
+        ...copy,
+        status: 'researched',
+        delivery: {
+          status: 'researched',
+          reason: exclusion.reason,
+          evidence: copy.delivery.evidence,
+        },
+      }
+    }
     // Preserve incomplete/unknown acceptance, including its explanation and evidence.
     if (tool.status !== 'verified') return copy
     if (tool.delivery.status !== 'verified') return {
@@ -977,16 +994,20 @@ export const qualifyHostTools = (
     const ready = enabled && report?.executor === 'linux' && needs !== undefined
       && needs.every(probe => report.probes[probe] === 'passed')
     if (ready) return copy
+    const unimplemented = needs === undefined && Object.hasOwn(UNIMPLEMENTED_TOOL_REASONS, tool.id)
+      ? UNIMPLEMENTED_TOOL_REASONS[tool.id]
+      : undefined
     const reason = !enabled ? 'Host readiness checks are disabled.'
       : report?.executor !== 'linux' ? 'A current real Linux host readiness report is unavailable.'
+      : unimplemented !== undefined ? unimplemented
       : needs === undefined ? 'Host readiness prerequisites have not been declared for this capability.'
-      : 'Required host readiness probes are missing or failed.'
+      : `Required host readiness probes are missing or failed (${needs.filter(probe => report.probes[probe] !== 'passed').join(', ')}).`
     return {
       ...copy,
       status: 'researched',
       delivery: {
         status: 'researched',
-        reason: `${reason} Release acceptance is retained separately and does not establish host readiness.`,
+        reason: unimplemented !== undefined ? unimplemented : `${reason} Release acceptance is retained separately and does not establish host readiness.`,
         evidence: tool.delivery.evidence,
       },
     }
@@ -999,8 +1020,21 @@ export const qualifyHostTools = (
  */
 export const admitForQualification = (catalog: readonly CatalogTool[], report: HostQualificationReport | null): CatalogTool[] =>
   catalog.map(tool => {
+    if (Object.hasOwn(UNIMPLEMENTED_TOOL_REASONS, tool.id)) {
+      return tool.status === 'out-of-scope' ? tool : {
+        ...tool,
+        status: 'researched',
+        delivery: {
+          status: 'researched',
+          reason: UNIMPLEMENTED_TOOL_REASONS[tool.id]!,
+          evidence: tool.delivery.evidence,
+        },
+      }
+    }
     const needs = PHASE1_TOOL_PROBES[tool.id]
-    if (tool.status === 'out-of-scope' || tool.status === 'verified' || report?.executor !== 'linux' || needs === undefined
+    const excluded = report?.profile !== undefined && Object.hasOwn(PROFILE_EXCLUSIONS, tool.id)
+      && PROFILE_EXCLUSIONS[tool.id]!.profiles.includes(report.profile)
+    if (tool.status === 'out-of-scope' || tool.status === 'verified' || report?.executor !== 'linux' || excluded || needs === undefined
       || !needs.every(probe => report.probes[probe] === 'passed')) return tool
     return { ...tool, status: 'verified', delivery: {
       status: 'verified', admission: 'qualification', evidence: tool.delivery.evidence,
