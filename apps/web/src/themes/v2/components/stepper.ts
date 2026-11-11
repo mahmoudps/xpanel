@@ -26,11 +26,12 @@ const marker = (index: number): string =>
   `<span class="v2-step__m v2-step__m--done">${icon('check', 14)}</span><span class="v2-step__m v2-step__m--fail">${icon('x', 14)}</span><span class="v2-step__m v2-step__m--run" aria-hidden="true"></span><span class="v2-step__m v2-step__m--num v2-num">${index + 1}</span>`
 
 /** Steps of a flow; the current step carries aria-current="step". Inline steps put marker, label and rail side by
- *  side and wrap onto further rows (one per row at phone width). Styles key on data-step-status so a live
+ *  side; they shrink before they wrap (a label breaks onto up to three lines, then truncates; its title keeps the
+ *  full text) and take one row each at phone width. Styles key on data-step-status so a live
  *  controller that updates that attribute restyles the step. */
 export const stepper = (props: StepperProps): string =>
   `<ol class="v2-steps${props.inline ? ' v2-steps--inline' : ''}" aria-label="${escapeHtml(props.label)}"${hookAttrs(props.hooks)}>${props.steps.map((step, index) =>
-    `<li class="v2-step" data-step-status="${step.state}"${step.state === 'current' || step.state === 'running' ? ' aria-current="step"' : ''}${hookAttrs(step.hooks)}><span class="v2-step__dot">${marker(index)}</span><span class="v2-step__text"><span class="v2-step__label">${escapeHtml(step.label)}</span>${step.sub ? `<span class="v2-step__sub v2-num">${escapeHtml(step.sub)}</span>` : ''}</span><span class="v2-step__rail" aria-hidden="true"></span></li>`).join('')}</ol>`
+    `<li class="v2-step" data-step-status="${step.state}"${step.state === 'current' || step.state === 'running' ? ' aria-current="step"' : ''}${hookAttrs(step.hooks)}><span class="v2-step__dot">${marker(index)}</span><span class="v2-step__text"><span class="v2-step__label" title="${escapeHtml(step.label)}">${escapeHtml(step.label)}</span>${step.sub ? `<span class="v2-step__sub v2-num">${escapeHtml(step.sub)}</span>` : ''}</span><span class="v2-step__rail" aria-hidden="true"></span></li>`).join('')}</ol>`
 
 const DONE = ':is([data-step-status=done],[data-step-status=passed])'
 const NOW = ':is([data-step-status=current],[data-step-status=running])'
@@ -45,10 +46,10 @@ export const STEPPER_CSS = `.v2-steps{list-style:none;margin:0;padding:0;display
 .v2-step__rail{grid-row:1;grid-column:2;height:2px;border-radius:1px;background:var(--line)}
 .v2-step:last-child>.v2-step__rail{visibility:hidden}
 .v2-steps--inline{display:flex;flex-wrap:wrap}
-${IN}{flex:1 1 200px;display:flex;gap:12px}
+${IN}{flex:1 1 132px;display:flex;gap:var(--space-1)}
 ${IN}>.v2-step__text{gap:2px;padding:0}
-${IN} .v2-step__label{font-size:14px;font-weight:500}
-${IN}>.v2-step__rail{flex:1 1 auto;min-width:var(--space-2);margin-inline-end:var(--space-2);background:var(--line-strong)}
+${IN} .v2-step__label{font-size:14px;font-weight:500;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;text-overflow:ellipsis}
+${IN}>.v2-step__rail{flex:1 1 auto;min-width:var(--space-1);margin-inline-end:var(--space-1);background:var(--line-strong)}
 ${IN}:last-child>.v2-step__rail{display:none}
 .v2-step${DONE} .v2-step__dot{box-shadow:inset 0 0 0 1px var(--ok-line);background:var(--ok-soft);color:var(--ok)}
 ${IN}${DONE} .v2-step__dot,${IN}[data-step-status=failed] .v2-step__dot{box-shadow:none}
@@ -61,6 +62,7 @@ ${IN}${NOW} .v2-step__label{font-weight:600;color:var(--text)}
 ${IN}${NOW} .v2-step__sub{color:var(--accent)}
 .v2-step[data-step-status=failed] .v2-step__dot{box-shadow:inset 0 0 0 1px var(--bad-line);background:var(--bad-soft);color:var(--bad)}
 .v2-step[data-step-status=failed] :is(.v2-step__label,.v2-step__sub){color:var(--bad)}
+@media(max-width:600px){${IN}{flex-basis:100%}}
 .v2-step__m{display:none}
 .v2-step__m--run{width:12px;height:12px;border-radius:50%;border:2px solid currentColor;border-inline-end-color:transparent;animation:v2-spin .9s linear infinite}
 .v2-step:is([data-step-status=current],[data-step-status=upcoming],[data-step-status=pending]) .v2-step__m--num,.v2-step${DONE} .v2-step__m--done,.v2-step[data-step-status=running] .v2-step__m--run,.v2-step[data-step-status=failed] .v2-step__m--fail{display:flex}

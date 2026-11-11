@@ -8,6 +8,8 @@ const cloneClientTemplate = canonicalCloneClientTemplate
 export interface PromptOptions {
   title?: string
   body?: string
+  /** A command, path or other technical run shown on its own line, left-to-right, before the body. */
+  code?: string
   input?: boolean
   label?: string
   value?: string
@@ -89,6 +91,13 @@ export function bindPromptDialog(): (options: PromptOptions) => Promise<string |
     const controls = read(dialog)
     controls.title.textContent = options.title || ''
     controls.body.textContent = options.body || ''
+    if (options.code) {
+      const code = document.createElement('code')
+      code.dir = 'ltr'
+      code.setAttribute('data-xp-prompt-code', '')
+      code.textContent = options.code
+      controls.body.prepend(code, document.createElement('br'))
+    }
     controls.field.hidden = !options.input
     controls.label.textContent = options.label || ''
     controls.input.value = options.value || ''

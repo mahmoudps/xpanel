@@ -165,7 +165,7 @@ describe('classic conforms to every registered document contract', () => {
       : document.surface === 'xpanel'
         ? { visibility: visibility(user), panel: { account, plan: defaultPlan({ id: '22222222-2222-4222-8222-222222222222', name: 'Basic' }), ...(document.route === '/domains/site-settings' ? { domains: [sslDomain], activeDomain: sslDomain.name, customConfig: { domainId: sslDomain.id, accountId: sslDomain.accountId, domainName: sslDomain.name, nginxInclude: '', apacheInclude: '', userIni: {}, customHeaders: {}, cacheBypassPaths: [], updatedAt: '', updatedBy: 'user' as const } } : {}), ...(['/security/ssl', '/email/forwarders'].includes(document.route) ? { domains: [sslDomain] } : {}) } }
         : { visibility: visibility(user), mail: { mailbox: 'contractuser@example.test', domain: 'example.test' } }
-    const html = renderWebApp({ ...identity, surface: document.surface, activeRoute: document.route, locale: 'ar', theme: 'dark', catalog, liveState: live })
+    const html = renderWebApp({ uiTheme: 'classic', ...identity, surface: document.surface, activeRoute: document.route, locale: 'ar', theme: 'dark', catalog, liveState: live })
     const contract = routeContracts().find(item => item.route === document.route)!
     // Mirror the authorized domain filter passed to renderAccountForwarders by account-pages.ts.
     const accountDomains = (identity.panel?.domains ?? []).filter(domain => domain.accountId === identity.panel?.account.id)
@@ -173,12 +173,12 @@ describe('classic conforms to every registered document contract', () => {
     expect(checkConformance(html, { ...contract, context: { ...contract.context, facts: { 'account-domains': domainFact } } })).toEqual([])
   })
 
-  const renderWhmState = (route: string, mailConfig?: MailIpConfig) => renderWebApp({
+  const renderWhmState = (route: string, mailConfig?: MailIpConfig) => renderWebApp({ uiTheme: 'classic',
     surface: 'xwhm', activeRoute: route, locale: 'en', catalog, liveState: live,
     visibility: visibility({ kind: 'root', id: '33333333-3333-4333-8333-333333333333', username: 'contractroot' }),
     ...(mailConfig ? { whm: { mailIpConfig: mailConfig } } : {}),
   })
-  const renderPanelState = (route: string) => renderWebApp({
+  const renderPanelState = (route: string) => renderWebApp({ uiTheme: 'classic',
     surface: 'xpanel', activeRoute: route, locale: 'en', catalog, liveState: live,
     visibility: visibility(user), panel: { account, plan: defaultPlan({ id: account.planId, name: 'Basic' }) },
   })
@@ -268,17 +268,17 @@ describe('classic conforms to every registered document contract', () => {
   })
 
   it.each(['xpanel', 'xwhm', 'xmail'] as const)('sign-in %s', audience => {
-    expect(checkConformance(renderWebApp({ surface: 'login', locale: 'ar', login: { audience } }), loginContract(audience))).toEqual([])
+    expect(checkConformance(renderWebApp({ uiTheme: 'classic', surface: 'login', locale: 'ar', login: { audience } }), loginContract(audience))).toEqual([])
   })
 
   it.each(['xpanel', 'xwhm', 'xmail'] as const)('development disabled sign-in %s preserves the intentional absence of factor controls', audience => {
-    const html = renderWebApp({ surface: 'login', locale: 'en', mfaRuntimeMode: 'disabled', login: { audience } })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'login', locale: 'en', mfaRuntimeMode: 'disabled', login: { audience } })
     expect(parseMarkup(html).some(node => node.attrs.has('data-auth-mfa-fields'))).toBe(false)
     expect(checkConformance(html, loginContract(audience))).toEqual([])
   })
 
   it('detects a missing named sign-in field independently of data hooks', () => {
-    const html = renderWebApp({ surface: 'login', locale: 'en', login: { audience: 'xwhm' } }).replace('name="password"', 'name="omittedPassword"')
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'login', locale: 'en', login: { audience: 'xwhm' } }).replace('name="password"', 'name="omittedPassword"')
     expect(checkConformance(html, loginContract('xwhm'))).toContainEqual({ kind: 'hook', name: '[name="password"]' })
   })
 })

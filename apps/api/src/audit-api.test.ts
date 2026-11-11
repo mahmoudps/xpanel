@@ -172,7 +172,7 @@ describe('authenticated audit query HTTP contract', () => {
     const response = await renderer(new Request('http://localhost/panel?lang=en', { headers: { cookie: `${SESSION_COOKIE_NAME}=${raw}` } }))
     expect(response.status).toBe(200)
     const html = await response.text()
-    expect(html).toContain('data-board-port="xpanel-home"')
+    expect(html).toContain('data-panel-home')
     expect(html).toContain(ownMarker)
     expect(html).toContain(actorMarker)
     expect(html).not.toContain(siblingMarker)

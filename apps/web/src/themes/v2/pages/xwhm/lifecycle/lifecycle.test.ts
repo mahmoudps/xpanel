@@ -90,16 +90,20 @@ describe('v2 backup workspace', () => {
     expect(renderV2BackupsPage({ ...admitted, accounts: [] })).toContain('No accounts were returned by the authorized read.')
   })
 
-  it('does not mount the legacy local archive client before restore gains a preview and confirmation boundary', () => {
+  it('mounts the local archive list with its controls, row template and manager admission', () => {
     const account = { username: 'alice', primaryDomain: 'alice.example' }
-    const unread = renderV2BackupsPage({ ...admitted, accounts: [account] })
-    expect(unread).not.toContain(' data-account-backups>')
-    expect(unread).toContain('data-backup-native="unavailable"')
-    expect(unread).toContain('data-backup-create disabled>Create backup</button>')
-    expect(unread).toContain('Local archive actions require the guarded preview and confirmation workflow')
+    const managed = renderV2BackupsPage({ ...admitted, accounts: [account] })
+    expect(managed).toContain('data-account-backups data-backup-manage="true"')
+    expect(managed).toContain('<option value="alice">alice</option>')
+    for (const hook of ['data-backup-account disabled', 'data-backup-local-read disabled', 'data-backup-create disabled', 'data-backup-files', 'data-backup-status', 'data-backup-unread-note']) expect(managed).toContain(hook)
+    const template = /<template data-xp-template="whm-local-archive-row"><tr>(.*?)<\/tr><\/template>/.exec(managed)?.[1] ?? ''
+    expect(template).toContain('<bdi class="v2-mono" dir="ltr" data-xp-slot="archive"></bdi>')
+    expect(template).toContain('data-xp-slot="bytes"')
+    expect(template).toContain('<a class="v2-btn" href="/whm/backups/files" data-xp-slot="review"></a>')
+    expect(managed).not.toContain('Local archive actions require the guarded preview')
     const forbidden = renderV2BackupsPage({ ...denied, accounts: [account] })
     expect(forbidden).not.toContain('alice')
-    expect(forbidden).not.toContain(' data-account-backups>')
+    expect(forbidden).toContain('data-account-backups data-backup-manage="false"')
     expect(forbidden).toContain('data-backup-read-state="denied"')
   })
 
@@ -185,7 +189,7 @@ describe('v2 lifecycle presentation boundary', () => {
 })
 
 describe('v2 local account archive scope warning', () => {
-  it.each(['en', 'ar'] as const)('scopes the %s exclusion notice to the unavailable local archive group on both backup routes', locale => {
+  it.each(['en', 'ar'] as const)('scopes the %s exclusion notice to the local archive list on both backup routes', locale => {
     const message = 'This local archive workflow copies home files and excludes the standard mail data and mail settings directories. It does not create database dumps or capture DNS zones. Review a component backup for those parts.'
     for (const activeRoute of ['/whm/backups', '/whm/backups/restore'] as const) {
       const html = renderV2BackupsPage({ locale, canRead: true, canManage: true, activeRoute })
@@ -202,14 +206,15 @@ describe('v2 local account archive scope warning', () => {
         ancestors.push(ancestor)
         index = ancestor.parent
       }
-      expect(ancestors.some(node => node.attrs.has('data-local-archives-unavailable'))).toBe(true)
+      expect(ancestors.some(node => node.attrs.has('data-account-backups'))).toBe(true)
       expect(ancestors.some(node => node.attrs.get('data-backup-section') === 'restore')).toBe(false)
       expect(nodes.filter(node => node.attrs.has('data-local-archive-scope-warning'))).toHaveLength(1)
       const paragraphs = [...html.matchAll(/<p\b[^>]*\bdata-local-archive-scope-warning(?=[\s>])[^>]*>([^<]*)<\/p>/g)]
       expect(paragraphs).toHaveLength(1)
       expect(paragraphs[0]?.[1]).toBe(escapeHtml(translator(locale)(message)))
-      expect(nodes.some(node => node.namespace === 'html' && node.template === -1 && node.attrs.has('data-account-backups'))).toBe(false)
-      for (const key of ['data-backup-account', 'data-backup-create']) {
+      expect(nodes.filter(node => node.namespace === 'html' && node.template === -1 && node.attrs.has('data-account-backups'))).toHaveLength(1)
+      // The local archive client enables these for a manager; the document starts them closed.
+      for (const key of ['data-backup-account', 'data-backup-local-read', 'data-backup-create']) {
         const controls = nodes.filter(node => node.namespace === 'html' && node.template === -1 && node.attrs.has(key))
         expect(controls).toHaveLength(1)
         expect(controls[0]?.attrs.has('disabled')).toBe(true)
@@ -269,3 +274,79 @@ describe('backup capability source parity', () => {
     }
   });
 });
+
+describe('v2 lifecycle board regions', () => {
+  const rulesOf = (html: string): string[] => html.match(/<ul class="v2-lifecycle__rules">.*?<\/ul>/gs) ?? []
+
+  it('links the backup pages to each other and to the audit log from the header', () => {
+    const backups = renderV2BackupsPage({ ...admitted, locale: 'ar' })
+    expect(backups).toContain('<a class="v2-btn" href="/whm/backups/destinations?lang=ar">')
+    expect(backups).toContain('<a class="v2-btn" href="/whm/audit?lang=ar">')
+    expect(renderV2BackupDestinationsPage(admitted)).toContain('<a class="v2-btn" href="/whm/backups?lang=en">')
+  })
+
+  it('shows the four backup summary tiles unread and the restore rules as a checked list', () => {
+    const html = renderV2BackupsPage(admitted)
+    expect(html.match(/<dd data-backup-summary="(?:last|next|local|remote)">Not read<\/dd>/g)).toHaveLength(4)
+    expect(html.match(/<span class="v2-tile v2-tile--neutral" aria-hidden="true">/g)).toHaveLength(4)
+    expect(rulesOf(html)).toHaveLength(1)
+    expect(rulesOf(html)[0]!.match(/<li><svg\b/g)).toHaveLength(5)
+  })
+
+  it('keeps one destination editor beside the list and the local archives as a strip after them on the backups page, and strips on its own page', () => {
+    const inline = renderV2BackupsPage(admitted)
+    expect(inline.match(/data-destination-form/g)).toHaveLength(1)
+    expect(inline).toContain('class="v2-lifecycle__grid v2-lifecycle__grid--editor"')
+    expect(inline.indexOf('data-destination-rows')).toBeLessThan(inline.indexOf('data-destination-form'))
+    expect(inline.indexOf('data-destination-form')).toBeLessThan(inline.indexOf('data-account-backups'))
+    expect(renderV2BackupDestinationsPage(admitted)).not.toContain('v2-lifecycle__grid')
+  })
+
+  it('maps the four transfer steps to their cards and offers the archive import only in the account scope', () => {
+    const html = renderV2TransferPage(admitted)
+    for (const key of ['transfer-source', 'transfer-selection', 'transfer-plans', 'transfer-run']) {
+      expect(html).toContain(`<a href="#v2-lifecycle-${key}">`)
+      expect(html).toContain(`id="v2-lifecycle-${key}"`)
+    }
+    expect(html).not.toContain('aria-current="step"')
+    expect(html).toContain('<a class="v2-btn" href="#v2-lifecycle-transfer-import">')
+    expect(renderV2TransferPage({ ...admitted, scope: 'server' })).not.toContain('href="#v2-lifecycle-transfer-import"')
+  })
+
+  it('states the automatic rollback with an unread snapshot folder and lists the phases without a current step', () => {
+    const html = renderV2UpgradePage(admitted)
+    const rollback = html.slice(html.indexOf('id="v2-lifecycle-upgrade-rollback"'), html.indexOf('id="v2-lifecycle-upgrade-boundaries"'))
+    expect(rollback).toContain('<bdi dir="ltr" data-upgrade-fact="snapshot-dir">Not read</bdi>')
+    expect(html.match(/data-upgrade-fact="snapshot-dir"/g)).toHaveLength(1)
+    expect(html).toContain('<a class="v2-btn" href="#v2-lifecycle-upgrade-history">')
+    expect(html).toContain('id="v2-lifecycle-upgrade-history"')
+    const steps = html.match(/<ol class="v2-lifecycle__steps"[^>]*>.*?<\/ol>/s)?.[0] ?? ''
+    expect(steps.match(/<li>/g)).toHaveLength(6)
+    expect(steps).not.toContain('aria-current')
+  })
+
+  it('gives the run controller of the destinations page its four row templates', () => {
+    const html = renderV2BackupDestinationsPage(admitted)
+    const runs = html.slice(html.indexOf('data-whm-backup-runs'))
+    const expected = { runs: ['started', 'trigger', 'state', 'copies', 'mail', 'retention'], copies: ['account', 'destination', 'archive', 'size', 'started', 'action'], recoveries: ['started', 'account', 'archive', 'state'], retention: ['archive', 'account', 'created', 'size', 'plan'] }
+    for (const [kind, slots] of Object.entries(expected)) {
+      const template = runs.split(`<template data-xp-template="whm-backup-${kind}-row"><tr>`)[1]?.split('</tr></template>')[0] ?? ''
+      expect([...template.matchAll(/data-xp-slot="([a-z]+)"/g)].map(match => match[1])).toEqual(slots)
+    }
+    expect(runs).toContain('<button type="button" class="v2-btn" data-xp-slot="action" disabled></button>')
+    expect(html.split('data-xp-template="whm-backup-runs-row"')).toHaveLength(2)
+  })
+
+  it('names the phone row cells from the translated headers and keeps transfer templates free of style', () => {
+    const saved = renderV2BackupDestinationsPage({ ...admitted, locale: 'ar' }).split('<tbody data-destination-rows')[0]!.split('<table').at(-1)!
+    expect(saved).toContain('data-phone-value="4"')
+    expect(saved).toMatch(/style="--c1:&#39;\p{Script=Arabic}/u)
+    const transfer = renderV2TransferPage(admitted)
+    expect(transfer).toContain('<table class="v2-lifecycle__table" style="--c1:&#39;Select&#39;;--c2:&#39;Account&#39;;--c3:&#39;Plan&#39;;--c4:&#39;Disk&#39;;--c5:&#39;Databases&#39;;--c6:&#39;Mailboxes&#39;;--c7:&#39;Conflict&#39;;--c8:&#39;Resolution&#39;" data-phone-value="1" data-phone-name="2">')
+    const templates = parseMarkup(transfer).filter(node => node.template >= 0)
+    expect(templates.length).toBeGreaterThan(0)
+    expect(templates.some(node => node.attrs.has('style'))).toBe(false)
+    expect(transfer).toContain('<div data-transfer-review-results style="--c1:&#39;Source account&#39;')
+    expect(renderV2UpgradePage(admitted)).toContain('<table class="v2-lifecycle__table" style="--c1:&#39;Check&#39;;--c2:&#39;Result&#39;;--c3:&#39;Observed&#39;" data-phone-value="2">')
+  })
+})

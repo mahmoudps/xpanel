@@ -57,6 +57,30 @@ describe('v2 mailbox pages', () => {
     expect(html).not.toContain('data-total="0"')
   })
 
+  it('names every reading action, isolates row text direction and keeps the sender block hooks', () => {
+    const html = renderV2MailInbox(t, inbox())
+    expect(html).toMatch(/role="toolbar" aria-label="Message actions"/)
+    for (const name of ['Reply', 'Reply all', 'Forward', 'Move', 'Mark as junk', 'Move to Trash']) expect(html).toContain(`<span class="v2-mail-actions__label">${name}</span>`)
+    expect(html).toMatch(/data-mail-action="delete" title="Move to Trash" disabled/)
+    expect(renderV2MailInbox(t, inbox({ folder: 'Trash' }))).toMatch(/data-mail-action="restore" title="Restore to Inbox" disabled/)
+    for (const hook of ['data-mail-name', 'data-mail-subject', 'data-mail-preview']) expect(html).toMatch(new RegExp(`${hook} dir="auto"`))
+    expect(html).toMatch(/data-mail-detail-from aria-label="From"><bdi dir="ltr"><\/bdi>/)
+    expect(html).toMatch(/<dd data-mail-detail-to><bdi dir="ltr">/)
+    expect(html).toMatch(/data-mail-detail-date aria-label="Received"><bdi dir="ltr">/)
+  })
+
+  it('heads the composer with its title and a way back, and shows storage only from supplied quota', () => {
+    const unknown = renderV2MailCompose(t, compose())
+    expect(unknown).toMatch(/<header class="v2-mail-compose-head"><div><h1 id="compose-title">New message<\/h1><p id="mail-send-status" role="status">/)
+    expect(unknown).toMatch(/<a class="v2-btn" href="\/mail\/inbox">.*Back to Inbox<\/a>/)
+    expect(unknown.match(/id="compose-title"/g)).toHaveLength(1)
+    expect(unknown).toMatch(/data-mail-storage-card>.*<p role="status">Not read<\/p>/)
+    expect(unknown).not.toMatch(/data-mail-storage-card>[^]*?role="meter"[^]*?id="vacation"/)
+    const known = renderV2MailCompose(t, compose({ quota: { text: '160 / 1024 MiB', percent: 16 } }))
+    expect(known).toMatch(/<bdi class="v2-num" dir="ltr">160 \/ 1024 MiB<\/bdi>/)
+    expect(known).toMatch(/role="meter" aria-labelledby="v2-mail-storage-card-title" aria-valuemin="0" aria-valuemax="100" aria-valuenow="16"><span class="v2-bar__fill v2-bar--info" style="inline-size:16%">/)
+  })
+
   it('never grants a folder link or compose action from a bare observed label', () => {
     const html = renderV2MailSidebar(t, { ...common, canCompose: false, folders: [], customFolders: [{ id: 'Orders', label: 'Orders', current: false }] }, {})
     expect(html).not.toContain('href="/mail/compose"')
@@ -77,7 +101,18 @@ describe('v2 mailbox pages', () => {
     expect(html).toContain('value="hidden@example.test"')
     expect(html).toContain('value="Draft &lt;subject&gt;"')
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
-    expect(html).not.toContain('<script')
+    expect(html).not.toContain('<script>')
+  })
+
+  it('carries the shared compose behaviour, its copy and the hooks it works on; a read-only composer carries neither', () => {
+    const html = renderV2MailCompose(t, compose())
+    expect(html).toMatch(/<script id="xmail-compose-client" src="\/assets\/xmail-compose\.js\?v=[0-9a-f]{16}"><\/script><\/div>$/)
+    expect(html).toMatch(/data-board-port="xmail-compose"[^>]* data-discard-ask="Discard this draft\?"[^>]* data-inbox-href="\/mail\/inbox"/)
+    for (const hook of ['data-mail-format="bold"', 'data-mail-recip="to"', 'data-mail-recip-input="bcc"', 'data-mail-action="discard-ask"', 'data-mail-discard', 'data-mail-feedback', 'id="compose-body"', 'data-mail-send="true"']) expect(html, hook).toContain(hook)
+    expect(html).toMatch(/data-mail-recip-box="to"><input [^>]*><ul [^>]*><\/ul>/)
+    const readOnly = renderV2MailCompose(t, { ...compose(), readOnly: true })
+    expect(readOnly).not.toContain('<script')
+    expect(readOnly).not.toContain('data-discard-ask')
   })
 
   it('keeps send, identity, attachment and draft controls disabled until actual readiness checks', () => {
@@ -93,8 +128,8 @@ describe('v2 mailbox pages', () => {
 
   it('preserves the whole-second vacation controls and source-only HTML editor', () => {
     const html = renderV2MailCompose(t, compose())
-    expect(html).toMatch(/name="startDate" type="datetime-local" dir="ltr" step="1" disabled/)
-    expect(html).toMatch(/name="endDate" type="datetime-local" dir="ltr" step="1" disabled/)
+    expect(html).toMatch(/name="startDate" type="text" dir="ltr" pattern="\\d\{4\}-\\d\{2\}-\\d\{2\} \\d\{2\}:\\d\{2\}\(:\\d\{2\}\)\?\( UTC\)\?" placeholder="YYYY-MM-DD HH:mm"[^>]* disabled/)
+    expect(html).toMatch(/name="endDate" type="text" dir="ltr" pattern="\\d\{4\}-\\d\{2\}-\\d\{2\} \\d\{2\}:\\d\{2\}\(:\\d\{2\}\)\?\( UTC\)\?" placeholder="YYYY-MM-DD HH:mm"[^>]* disabled/)
     expect(html).toMatch(/name="replyIntervalHours" type="number" dir="ltr" min="1" max="8760" step="1" required disabled/)
     expect(html).toContain('HTML is edited as source only and is never rendered here.')
     expect(html).toContain('data-vacation-preview')

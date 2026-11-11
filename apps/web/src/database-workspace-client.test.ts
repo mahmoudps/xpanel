@@ -50,14 +50,14 @@ describe('database readable trash metadata',()=>{
       const row=document.querySelector<HTMLTableRowElement>('[data-db-trash-rows] [data-database-id="'+trashId+'"]')!
       expect(row.querySelector('td:first-child')!.textContent).toBe('alice_old')
       expect(row.querySelectorAll('td')).toHaveLength(4)
-      expect(document.querySelector('[data-dbu-rows] [data-database-id="'+userId+'"] td:nth-child(2)')!.textContent).toBe(lang==='ar'?'alice_old [في السلة]: SELECT':'alice_old [trashed]: SELECT')
+      expect(document.querySelector('[data-dbu-rows] [data-database-id="'+userId+'"] td:nth-child(2)')!.textContent).toBe(lang==='ar'?'\u2066alice_old\u2069 [في السلة]: SELECT':'alice_old [trashed]: SELECT')
       const restore=row.querySelector<HTMLButtonElement>('[data-db-restore-action]')!
       expect(restore.disabled).toBe(false)
       expect(row.querySelectorAll<HTMLButtonElement>('button')[1]!.dataset.dbRowAction).toBe('drop')
       restore.click()
       await vi.waitFor(()=>expect(confirm).toHaveBeenCalledTimes(1))
       await vi.waitFor(()=>expect(document.querySelector<HTMLButtonElement>('[data-db-restore-action="'+trashId+'"]')!.disabled).toBe(false))
-      expect(String(confirm.mock.calls[0]![0].body)).toContain(lang==='ar'?'استعادة الإعداد المحفوظ للقاعدة alice_old. لا يثبت':'Restore the saved configuration for alice_old. No permanent purge')
+      expect(String(confirm.mock.calls[0]![0].body)).toContain(lang==='ar'?'استعادة الإعداد المحفوظ للقاعدة \u2066alice_old\u2069. لا يثبت':'Restore the saved configuration for alice_old. No permanent purge')
       expect(api.calls).toHaveLength(2)
       expect(api.calls.every(call=>call.method==='GET')).toBe(true)
       expect(api.calls.map(call=>call.path).sort()).toEqual(['/api/databases?includeTrashed=true','/api/databases/users'].sort())

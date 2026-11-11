@@ -37,7 +37,7 @@ describe('pure helpers', () => {
     expect(parseMailOverrides('a=1\na=2')).toBeNull()
   })
   it('formats sizes', () => {
-    expect([formatMailBytes(10), formatMailBytes(2048), formatMailBytes(-1)]).toEqual(['10 B', '2.0 KiB', '-'])
+    expect([formatMailBytes(10), formatMailBytes(2048), formatMailBytes(-1)]).toEqual(['\u206610\u00a0B\u2069', '\u20662.00\u00a0KiB\u2069', '-'])
   })
 })
 
@@ -142,6 +142,13 @@ describe('mail cards client', () => {
     boot(async () => ({ fts: 'not_configured', jobsAvailable: true, job: null })); await tick()
     expect(action('search-index', 'rebuild').disabled).toBe(true)
     expect(status('search-index').textContent).toContain('not configured')
+  })
+  it('isolates the last rebuild time after its state', async () => {
+    mount('/mail/later', renderV2MailCards)
+    boot(async () => ({ fts: 'configured', jobsAvailable: true, job: { status: 'succeeded', finishedAt: '2026-11-09T22:03:00.000Z' } })); await tick()
+    const cell = [...card('search-index').querySelectorAll<HTMLElement>('[data-mail-card-fact]')].find(node => node.dataset.mailCardFact === 'job')!
+    expect(cell.textContent).toBe('Finished 2026-11-09 22:03 UTC')
+    expect(cell.querySelector('bdi[dir="ltr"]')!.textContent).toBe('2026-11-09 22:03 UTC')
   })
   it('reads nothing where the card is not admitted', async () => {
     mount('/whm/email/server', renderClassicMailCards, { canRead: false, canAct: () => false })

@@ -12,7 +12,7 @@ export interface DataTableColumn {
 export interface DataTableRow {
   /** One cell per column, built with the kit (icon-led first cell, pills, meters). */
   cellsHtml: readonly string[]
-  /** Row actions for the sticky last column: "Manage" plus a row menu. */
+  /** Row actions for the last column: "Manage" plus a row menu. */
   actionsHtml?: string
   /** Row checkbox; the label names the row, such as "Select alice". */
   select?: { label: string; checked?: boolean; hooks?: HookAttributes }
@@ -32,7 +32,7 @@ export interface DataTableProps {
   emptyText?: string
   error?: { lead: string; detail?: string; retry?: HookAttributes }
   loadingRows?: number
-  /** Adds the sticky, visually labelled actions column. */
+  /** Adds the actions column; its header is named for assistive technology only. */
   actions?: boolean
   /** Adds the checkbox column with a "select all" control. */
   selectAll?: { label: string; hooks?: HookAttributes }
@@ -71,15 +71,14 @@ export function dataTableRow(props: Pick<DataTableProps, 'columns' | 'actions' |
   return `<tr${hookAttrs(item.hooks)}>${props.selectAll ? `<td class="v2-table__check">${item.select ? `<input type="checkbox" aria-label="${escapeHtml(item.select.label)}"${item.select.checked ? ' checked' : ''}${hookAttrs(item.select.hooks)}>` : ''}</td>` : ''}${item.cellsHtml.map((cell, index) => `<td${cellClass(index)}>${cell}</td>`).join('')}${props.actions ? `<td class="v2-table__actions">${item.actionsHtml ?? ''}</td>` : ''}</tr>`
 }
 
-// A selected row (its checkbox checked, so no class to toggle) layers the accent tint over the surface so the sticky actions cell stays opaque in the dark scheme,
-// whose tint is translucent.
+// A selected row is its checked checkbox, so there is no class to toggle. The actions column scrolls with the table:
+// a sticky one covered the last data column whenever the table was a little wider than its card. The cell stays
+// positioned so its visually hidden header label scrolls with it instead of widening the page.
 export const DATA_TABLE_CSS = `.v2-table th.v2-table__end,.v2-table td.v2-table__end{text-align:end}
 .v2-table .v2-table__check{inline-size:48px;padding-inline-end:0}
-.v2-table .v2-table__actions{position:sticky;inset-inline-end:0;text-align:end;white-space:nowrap;background:var(--surface)}
-.v2-table th.v2-table__actions{background:var(--subtle)}
-.v2-table tbody tr:hover>td.v2-table__actions{background:var(--subtle)}
+.v2-table .v2-table__actions{position:relative;text-align:end;white-space:nowrap}
 .v2-table .v2-table__actions>*{display:inline-flex;gap:var(--space-1);vertical-align:middle}
-.v2-table tr:has(>.v2-table__check>input:checked)>td{background:linear-gradient(var(--accent-soft),var(--accent-soft)),var(--surface)}
+.v2-table tr:has(>.v2-table__check>input:checked)>td{background:var(--accent-soft)}
 .v2-table tbody .v2-table__state:hover>td{background:transparent}
 .v2-table__state>td{padding:var(--space-3);text-align:center;color:var(--muted);font-size:13px}
 .v2-table__state:is([aria-hidden],[data-table-state=loading])>td{padding-block:12px;text-align:start}

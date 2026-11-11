@@ -49,7 +49,7 @@ function bindWhmConfigurationHealth(askDialog: ((options: Record<string, unknown
       if (!target) return
       busy = true; controls()
       try {
-        const approved = await askDialog({ title: t('Repair managed configuration'), body: target.path + '\n' + t('Restore only this file from the reviewed active generation with a recoverable preimage, then verify its checksum and configuration tests.'), confirm: t('Repair selected file'), danger: true })
+        const approved = await askDialog({ title: t('Repair managed configuration'), code: target.path, body: t('Restore only this file from the reviewed active generation with a recoverable preimage, then verify its checksum and configuration tests.'), confirm: t('Repair selected file'), danger: true })
         if (approved !== true || !admitted() || root.dataset.chCanRepair !== 'true' || snapshot !== view || confirmation.value !== 'REPAIR CONFIGURATION' || select.value !== target.token) return
         const next = parseRepair(await request!('POST', '/api/server/configuration-health/repair', { target: target.token, expectedRevision: snapshot.revision, expectedGenerationId: snapshot.generation!.id, expectedGenerationChecksum: snapshot.generation!.checksum, confirmation: 'REPAIR CONFIGURATION' }), target.token, snapshot.generation!)
         if (next.desired?.revision !== snapshot.desired?.revision || next.desired?.checksum !== snapshot.desired?.checksum || next.targets.some(item => item.path === target.path) || JSON.stringify(next.targets) !== JSON.stringify(snapshot.targets.filter(item => item.path !== target.path))) throw new Error('unverified_targeted_repair')

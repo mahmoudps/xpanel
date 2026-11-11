@@ -4,6 +4,9 @@ import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canoni
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
 import { readXlsRows as canonicalReadXlsRows } from './xls-reader.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 
 const clientTemplate = canonicalClientTemplate, clientTemplateSlot = canonicalClientTemplateSlot, cloneClientTemplate = canonicalCloneClientTemplate
@@ -36,7 +39,7 @@ export function parseMailOverrides(text: string): Record<string, string> | null 
 }
 export function formatMailBytes(value: number): string {
   if (!Number.isFinite(value) || value < 0) return '-'
-  return value < 1024 ? value + ' B' : value < 1048576 ? (value / 1024).toFixed(1) + ' KiB' : value < 1073741824 ? (value / 1048576).toFixed(1) + ' MiB' : (value / 1073741824).toFixed(2) + ' GiB'
+  return formatClientBytes(value)
 }
 
 function bindMailCards(askDialog: Ask): void {
@@ -68,7 +71,7 @@ function bindMailCards(askDialog: Ask): void {
     const field = <T extends HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement = HTMLInputElement>(key: string): T => [...card.querySelectorAll<T>('[data-mail-card-field]')].find(item => item.dataset.mailCardField === key)!
     const action = (key: string): HTMLButtonElement | undefined => [...card.querySelectorAll<HTMLButtonElement>('[data-mail-card-action]')].find(item => item.dataset.mailCardAction === key)
     const note = (state: string, text: string): void => { statusNode.dataset.state = state; statusNode.textContent = text; statusNode.setAttribute('role', state === 'failed' ? 'alert' : 'status') }
-    const fact = (key: string, value: string): void => { const cell = [...card.querySelectorAll<HTMLElement>('[data-mail-card-fact]')].find(item => item.dataset.mailCardFact === key); if (cell) cell.textContent = value }
+    const fact = (key: string, value: string): HTMLElement | undefined => { const cell = [...card.querySelectorAll<HTMLElement>('[data-mail-card-fact]')].find(item => item.dataset.mailCardFact === key); if (cell) cell.textContent = value; return cell }
     const sync = (): void => {
       card.querySelectorAll<HTMLButtonElement>('[data-mail-card-action]').forEach(button => { button.disabled = busy || !(button.hasAttribute('data-mail-card-write') ? canAct() && ready : canRead()) })
       card.querySelectorAll<HTMLInputElement>('[data-mail-card-field]').forEach(input => { input.disabled = busy || !canRead() })
@@ -97,6 +100,8 @@ function bindMailCards(askDialog: Ask): void {
       const body = [...card.querySelectorAll<HTMLElement>('[data-mail-card-rows]')].find(item => item.dataset.mailCardRows === key)
       if (!body) return
       const nodes = items.map(item => { const row = cloneClientTemplate(clientTemplate(card, 'mail-card-' + key), 'tr', slots); fill(name => clientTemplateSlot(row, name), item, row); return row })
+      // An empty list says so in one row across the columns instead of leaving a header-only table.
+      if (!nodes.length) { const row = document.createElement('tr'), cell = document.createElement('td'); cell.colSpan = Math.max(1, body.closest('table')?.tHead?.rows[0]?.cells.length ?? 1); cell.dataset.tableEmpty = ''; cell.textContent = t('Nothing to show.'); row.append(cell); nodes.push(row) }
       body.replaceChildren(...nodes)
     }
     const text = (slot: HTMLElement, value: unknown, technical = false): void => { slot.textContent = value === null || value === undefined || value === '' ? '-' : String(value); if (technical) slot.dir = 'ltr' }
@@ -216,7 +221,7 @@ function bindMailCards(askDialog: Ask): void {
     })
     if (id === 'search-index') {
       const states: Record<string, string> = { configured: t('Configured'), not_configured: t('Not configured'), unavailable: t('Unavailable') }, jobs: Record<string, string> = { queued: t('Queued'), running: t('Running'), succeeded: t('Finished'), failed: t('Failed'), cancelled: t('Cancelled') }
-      const load = async (): Promise<void> => { const view = await call('GET', '/api/webmail/search-index'); fact('fts', states[view.fts] ?? t('Unavailable')); fact('job', view.job ? (jobs[view.job.status] ?? view.job.status) + (view.job.finishedAt ? ' ' + formatMailCardTime(view.job.finishedAt) : '') : t('Never')); ready = view.fts === 'configured' && view.jobsAvailable === true; note(view.fts === 'configured' ? 'read' : 'unavailable', view.fts === 'configured' ? t('The search index is read.') : t('Full text search is not configured on this server. Search still reads each folder directly.')) }
+      const load = async (): Promise<void> => { const view = await call('GET', '/api/webmail/search-index'); fact('fts', states[view.fts] ?? t('Unavailable')); const job = fact('job', view.job ? jobs[view.job.status] ?? view.job.status : t('Never')); if (job && view.job?.finishedAt) { const time = document.createElement('bdi'); time.dir = 'ltr'; time.textContent = formatMailCardTime(view.job.finishedAt); job.append(' ', time) } ready = view.fts === 'configured' && view.jobsAvailable === true; note(view.fts === 'configured' ? 'read' : 'unavailable', view.fts === 'configured' ? t('The search index is read.') : t('Full text search is not configured on this server. Search still reads each folder directly.')) }
       start = load
       on('rebuild', async () => { await call('POST', '/api/webmail/search-index'); await load(); note('saved', t('The rebuild is queued.')) })
     }
@@ -253,4 +258,4 @@ function bindMailCards(askDialog: Ask): void {
 }
 
 const readXlsRows = canonicalReadXlsRows
-export const MAIL_CARDS_CLIENT_BINDING = withFrameRequest(`(()=>{const readXlsRows=${readXlsRows.toString()};const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatMailCardTime=${DISPLAY_DATETIME_BINDING};const COUNTRY_CODES=${JSON.stringify(COUNTRY_CODES)};const parseMailImportText=${parseMailImportText.toString()};const mapMailImportRows=${mapMailImportRows.toString()};const parseMailOverrides=${parseMailOverrides.toString()};const formatMailBytes=${formatMailBytes.toString()};return ${bindMailCards.toString()};})()`)
+export const MAIL_CARDS_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};const readXlsRows=${readXlsRows.toString()};const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const formatMailCardTime=${DISPLAY_DATETIME_BINDING};const COUNTRY_CODES=${JSON.stringify(COUNTRY_CODES)};const parseMailImportText=${parseMailImportText.toString()};const mapMailImportRows=${mapMailImportRows.toString()};const parseMailOverrides=${parseMailOverrides.toString()};const formatMailBytes=${formatMailBytes.toString()};return ${bindMailCards.toString()};})()`)

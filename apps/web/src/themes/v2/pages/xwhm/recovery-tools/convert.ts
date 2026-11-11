@@ -1,6 +1,7 @@
 import { v2AccountLifecycleTemplates } from '../account-tools/lifecycle-client-templates.ts'
 import type { WhmSurfaceProps } from '../../../../contract.ts'
 import { actions, button, context, esc, field, fields, page, status, table, toolCard, type WhmAccountToolAuthority } from '../account-tools/common.ts'
+import { phoneTable, recoveryRules } from './common.ts'
 
 /** The controller must receive and revalidate a real review before it can unlock conversion. */
 export function renderV2WhmConvertAddonPage(props: WhmSurfaceProps, authority: WhmAccountToolAuthority): string {
@@ -16,10 +17,10 @@ export function renderV2WhmConvertAddonPage(props: WhmSurfaceProps, authority: W
     + field('v2-acct-convert-plan', t(msgid('Plan')), `<select id="v2-acct-convert-plan" data-acct-convert-input="planId"${off}><option value="">${esc(t(msgid('Not read')))}</option></select>`))}${actions(`<button type="${editable ? 'submit' : 'button'}" class="v2-btn v2-btn--primary" data-acct-convert-preview${off}>${esc(t(msgid('Review conversion')))}</button>${button(t(msgid('Refresh')), { 'data-acct-convert-refresh': true }, editable)}`)}</${container}>`)
   const reviewed = toolCard('convert-addon-review', t(msgid('What moves to the new account')), status(t(msgid('No conversion has been reviewed.')), { 'data-acct-convert-review-status': true })
     + `<dl class="v2-account-tool__facts" data-acct-convert-facts></dl>`
-    + table(t(msgid('Domains')), [msgid('Domain'), msgid('Kind'), msgid('Document root')].map(label => t(label)), { 'data-acct-convert-rows': 'domains' }, t(msgid('Not read')))
-    + table(t(msgid('Mail and service users')), [msgid('Login'), msgid('Service')].map(label => t(label)), { 'data-acct-convert-rows': 'mail' }, t(msgid('Not read')))
-    + table(t(msgid('DNS zones')), [msgid('Zone'), msgid('Records')].map(label => t(label)), { 'data-acct-convert-rows': 'dns' }, t(msgid('Not read')))
-    + table(t(msgid('Conflicts')), [msgid('Conflict'), msgid('Value')].map(label => t(label)), { 'data-acct-convert-rows': 'conflicts' }, t(msgid('Not read'))))
+    + phoneTable(table(t(msgid('Domains')), [msgid('Domain'), msgid('Kind'), msgid('Document root')].map(label => t(label)), { 'data-acct-convert-rows': 'domains' }, t(msgid('Not read'))), { value: 2 })
+    + phoneTable(table(t(msgid('Mail and service users')), [msgid('Login'), msgid('Service')].map(label => t(label)), { 'data-acct-convert-rows': 'mail' }, t(msgid('Not read'))), { value: 2 })
+    + phoneTable(table(t(msgid('DNS zones')), [msgid('Zone'), msgid('Records')].map(label => t(label)), { 'data-acct-convert-rows': 'dns' }, t(msgid('Not read'))), { value: 2 })
+    + phoneTable(table(t(msgid('Conflicts')), [msgid('Conflict'), msgid('Value')].map(label => t(label)), { 'data-acct-convert-rows': 'conflicts' }, t(msgid('Not read'))), { value: 2 }))
   const apply = toolCard('convert-addon-apply', t(msgid('Convert')), `<p data-acct-convert-capability>${esc(t(msgid('Conversion availability has not been read.')))}</p>`
     + field('v2-acct-convert-confirm', t(msgid('Type the confirmation')), `<input id="v2-acct-convert-confirm" type="text" autocomplete="off" spellcheck="false" dir="ltr" aria-describedby="v2-acct-convert-confirm-help" data-acct-convert-input="confirm" disabled>`, t(msgid('Type convert followed by the domain name, for example convert shop.example.com.')))
     + actions(button(t(msgid('Convert to account')), { 'data-acct-convert-apply': true }, false, true)))
@@ -30,9 +31,9 @@ export function renderV2WhmConvertAddonPage(props: WhmSurfaceProps, authority: W
     msgctxt('theme:v2', 'Conversion needs the host agent and confined account file runner. A review alone does not prove that either is available.'),
     msgctxt('theme:v2', 'If conversion fails, inspect the saved outcome and any remaining system user before retrying.'),
   ]
-  const aside = toolCard('convert-addon-rules', t(msgctxt('theme:v2', 'Before converting')), `<ul class="v2-recovery__rules">${rules.map(rule => `<li>${esc(t(rule))}</li>`).join('')}</ul>`)
+  const aside = toolCard('convert-addon-rules', t(msgctxt('theme:v2', 'Before converting')), recoveryRules(t, rules))
   const intro = status(t(msgid('Addon domains have not been read.')), { 'data-acct-convert-status': true })
     + `<div data-acct-convert-loading aria-busy="true" aria-label="${esc(t(msgid('Loading addon domains')))}" hidden></div><div data-acct-convert-empty hidden><h3>${esc(t(msgid('No addon domains')))}</h3><p>${esc(t(msgid('Only an addon domain of an existing account can become its own account.')))}</p></div>`
   return page(props, '/whm/transfers/convert-addon', title, t(msgid('Review what moves when an addon domain becomes its own account.')),
-    `<div class="v2-recovery-tools v2-recovery__column" data-acct-convert-addon data-can-manage="${editable}">${steps}${intro}<div class="v2-recovery__grid"><div class="v2-recovery__column">${choice}${reviewed}${apply}</div><aside class="v2-recovery__column">${aside}</aside></div>${v2AccountLifecycleTemplates('convert')}</div>`, { 'data-capability-state': readable ? 'authorized' : 'unavailable' })
+    `<div class="v2-recovery-tools v2-recovery__column" data-acct-convert-addon data-can-manage="${editable}">${steps}${intro}<div class="v2-recovery__grid">${choice}<aside class="v2-recovery__column">${aside}</aside></div>${reviewed}${apply}${v2AccountLifecycleTemplates('convert')}</div>`, { 'data-capability-state': readable ? 'authorized' : 'unavailable' })
 }

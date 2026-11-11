@@ -1,4 +1,4 @@
-import { escapeHtml, hookAttrs, type HookAttributes, type Tone } from '../html.ts'
+import { attr, escapeHtml, hookAttrs, type HookAttributes, type Tone } from '../html.ts'
 
 export interface MeterScale {
   /** The measured value and its scale, in the unit of the check (load, percent, days). */
@@ -55,14 +55,17 @@ export function meter(props: MeterProps): string {
   const track = props.untracked ? `<div class="v2-meter__untracked">${escapeHtml(props.untracked)}</div>`
     : scale ? `<div class="v2-meter__track" ${aria}><div class="v2-bar">${fill}</div>${tick('warn', scale.warn)}${tick('bad', scale.bad)}</div><div class="v2-meter__scale v2-num" aria-hidden="true"><span>${escapeHtml(scale.minText)}</span><span>${escapeHtml(scale.maxText)}</span></div>`
     : `<div class="v2-bar" ${aria}>${fill}</div>`
+  const parts = props.valueText.split(' / ')
+  const shown = parts.length === 2 ? parts.map(part => `<bdi>${escapeHtml(part)}</bdi>`).join(' / ') : escapeHtml(props.valueText)
   const unit = props.unit ? `<span class="v2-meter__unit">${escapeHtml(props.unit)}</span>` : ''
-  return `<div class="v2-meter${scale || props.untracked ? ' v2-meter--scale' : ''}"${hookAttrs(props.hooks)}><div class="v2-meter__row"><span class="v2-meter__label">${escapeHtml(props.label)}</span><span class="v2-meter__value v2-num"><span${scale && toneClass ? ` class="${toneClass}"` : ''}>${escapeHtml(props.valueText)}</span>${unit}</span></div>${track}${props.note ? `<span class="v2-meter__note v2-num${toneClass ? ` ${toneClass}` : ''}">${escapeHtml(props.note)}</span>` : ''}</div>`
+  return `<div class="v2-meter${scale || props.untracked ? ' v2-meter--scale' : ''}"${hookAttrs(props.hooks)}><div class="v2-meter__row"><span class="v2-meter__label">${escapeHtml(props.label)}</span><span class="v2-meter__value v2-num"><span${attr('class', [parts.length === 2 ? 'v2-meter__pair' : '', scale ? toneClass : ''].filter(Boolean).join(' ') || undefined)}>${shown}</span>${unit}</span></div>${track}${props.note ? `<span class="v2-meter__note v2-num${toneClass ? ` ${toneClass}` : ''}">${escapeHtml(props.note)}</span>` : ''}</div>`
 }
 
 export const METER_CSS = `.v2-meter{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}
 .v2-meter__row{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-1);font-size:13px}
 .v2-meter__value{display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap;color:var(--text-2)}
 .v2-meter__value>span,.v2-meter__scale>span{unicode-bidi:plaintext}
+.v2-meter__value>.v2-meter__pair{unicode-bidi:isolate}
 .v2-meter__unit{font-size:12px;color:var(--muted)}
 .v2-meter__label{font-weight:600}
 .v2-meter__note{font-size:12px;color:var(--muted)}

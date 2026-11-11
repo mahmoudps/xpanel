@@ -114,29 +114,46 @@ export function formatUtcDay(isoOrDate: string | Date): string {
 
 
 /**
- * Formats byte counts in decimal units (powers of 1000), labelled B/KB/MB/GB/TB,
- * so a figure matches `df -H` and a hosting provider's GB. Digits stay ASCII.
+ * The product's one byte format: binary IEC units (powers of 1024) labelled B/KiB/MiB/GiB/TiB,
+ * ASCII digits and a non-breaking space before the unit. Plans, quotas and props store MiB.
  */
 export function formatAsciiBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let val = bytes
-  let unitIdx = 0
-  while (val >= 1000 && unitIdx < units.length - 1) {
-    val /= 1000
-    unitIdx++
-  }
-  const decimals = unitIdx === 0 ? 0 : val >= 100 ? 0 : val >= 10 ? 1 : 2
-  return `${ normalizeAsciiDigits(val.toFixed(decimals)) } ${units[unitIdx]}`
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  // A measured positive amount under one byte is not shown as zero.
+  if (Number.isFinite(bytes) && bytes > 0 && bytes < 1) return '<1\u00a0B'
+  let value = Number.isFinite(bytes) && bytes > 0 ? bytes : 0
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++ }
+  let decimals = unit === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2
+  // 1023.7 KiB rounds to 1024: show the next unit instead.
+  if (Number(value.toFixed(decimals)) >= 1024 && unit < units.length - 1) { value /= 1024; unit++; decimals = 2 }
+  return value.toFixed(decimals) + '\u00a0' + units[unit]
 }
 
-/** Transfer and other finite clients use the same formatter, without copying its unit rules. */
-export const ASCII_BYTES_BINDING = `(()=>{
-const EASTERN_ARABIC_ZERO=${EASTERN_ARABIC_ZERO};
-const EXTENDED_ARABIC_ZERO=${EXTENDED_ARABIC_ZERO};
-const normalizeAsciiDigits=${normalizeAsciiDigits.toString()};
-return ${formatAsciiBytes.toString()};
-})()`
+/** A transfer rate in the same units: B/s, KiB/s, MiB/s. */
+export function formatAsciiRate(bytesPerSecond: number): string {
+  return formatAsciiBytes(bytesPerSecond) + '/s'
+}
+
+/**
+ * Wraps a technical run (date-time, path, file name, command, address, "number unit") in
+ * LEFT-TO-RIGHT ISOLATE ... POP DIRECTIONAL ISOLATE, so it keeps its order inside Arabic text.
+ * Clients use it when writing textContent; markup uses `<bdi dir="ltr">`.
+ */
+export function isolateLtr(text: string): string {
+  return '\u2066' + text + '\u2069'
+}
+
+/** The byte format as clients write it into text: isolated, optionally as a rate. */
+export function formatIsolatedBytes(bytes: number, perSecond?: boolean): string {
+  return '\u2066' + formatAsciiBytes(bytes) + (perSecond ? '/s' : '') + '\u2069'
+}
+
+/** Browser clients get the isolated byte formatter from this one implementation. */
+export const ASCII_BYTES_BINDING = `(()=>{const formatAsciiBytes=${formatAsciiBytes.toString()};return ${formatIsolatedBytes.toString()};})()`
+
+/** Browser clients get {@link isolateLtr} from this one implementation. */
+export const ISOLATE_LTR_BINDING = isolateLtr.toString()
 
 export function formatBytes(bytes: number): string {
   return formatAsciiBytes(bytes)

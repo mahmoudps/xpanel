@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime } from './tokens.ts'
-import { ASCII_BYTES_BINDING, formatAsciiBytes as canonicalFormatAsciiBytes } from './display-format.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatAsciiBytes } from './display-format.ts'
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot } from './client-templates.ts'
@@ -412,8 +412,8 @@ function bindWhmTransfer(askDialog: ((options: Record<string, unknown>) => Promi
           const result = object(results[name]) ? results[name] as Record<string, unknown> : {}, done = object(value) && value.phase === 'done'
           const count = (key: string): string => Array.isArray(result[key]) ? String((result[key] as unknown[]).length) : typeof result[key] === 'number' ? String(result[key]) : waiting
           return { account: name + (object(value) && typeof value.targetUsername === 'string' && value.targetUsername !== name ? ' → ' + value.targetUsername : ''),
-            home: done && object(result.home) ? t('{bytes} bytes, compared', { bytes: Number(result.home.bytes) }) : waiting, databases: done ? count('databases') : waiting, mail: done ? count('mailboxes') : waiting, dns: done ? count('zones') : waiting,
-            state: (object(value) ? (phases[String(value.phase)] ?? t(msgctxt('whm-transfer-client', 'Not read'))) + ' · ' + String(value.bytes) + ' / ' + String(value.totalBytes) : '') + (object(value) && typeof value.error === 'string' ? ' · ' + value.error : '') }
+            home: done && object(result.home) ? t('{size}, compared', { size: formatAsciiBytes(Number(result.home.bytes)) }) : waiting, databases: done ? count('databases') : waiting, mail: done ? count('mailboxes') : waiting, dns: done ? count('zones') : waiting,
+            state: (object(value) ? (phases[String(value.phase)] ?? t(msgctxt('whm-transfer-client', 'Not read'))) + ' · ' + formatAsciiBytes(Number(value.bytes)) + ' / ' + formatAsciiBytes(Number(value.totalBytes)) : '') + (object(value) && typeof value.error === 'string' ? ' · ' + value.error : '') }
         }))
         const note = pageRoot.querySelector<HTMLElement>('[data-transfer-progress-state]')
         if (note) { note.dataset.transferProgressState = 'read'; note.textContent = selected?.stopRequested && selected.session.state === 'applying' ? t('The transfer stops after the current account.') : selected?.session.live === true ? t('Each account is copied while it stays live. The source is then suspended for the final sync, and its sites and mail pass through to this server.') : t('Accounts are copied one at a time. The source is only read; a failed account is removed again.') }

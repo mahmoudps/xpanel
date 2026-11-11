@@ -17,7 +17,7 @@ export function renderV2WebDiskPage(props: PanelSurfaceProps, authority: PanelSe
     + check('v2-webdisk-readonly', t(msgid('Read only')), { 'data-web-disk-read-only': true }),
     actions(button(t(msgid('Add login')), { 'data-web-disk-save': true }, true, true) + `<button type="button" class="v2-btn" data-web-disk-cancel hidden disabled>${esc(t(msgid('Cancel')))}</button>`))
   const connection = section('v2-webdisk-connect', t(msgctxt('theme:v2', 'Connect a client')), facts([
-    { label: t(msgid('Web Disk address')), valueHtml: '<ul data-web-disk-addresses></ul>' },
+    { label: t(msgid('Web Disk address')), valueHtml: `<ul data-web-disk-addresses></ul><span class="v2-panel-settings__blank">${esc(t(msgid('Not read')))}</span>` },
     { label: t(msgid('Sign-in')), valueHtml: esc(t(msgid('The login and its password. The main login uses the account password.'))) },
     { label: t(msgid('Encryption')), valueHtml: esc(t(msgid('HTTPS only. Plain HTTP is not offered.'))) },
     { label: t(msgid('Storage')), valueHtml: esc(t(msgid('Files count toward the account disk quota.'))) },
@@ -25,5 +25,5 @@ export function renderV2WebDiskPage(props: PanelSurfaceProps, authority: PanelSe
   const clients = section('v2-webdisk-clients', t(msgid('Set up a client')), v2DavGuide(t, WEB_DISK_CLIENT_GUIDES, 'v2-panel-settings__facts'))
   const users = section('v2-webdisk-service-users', t(msgid('How service users work')), `<p>${esc(t(msgid('Email, FTP and Web Disk credentials are separate from account control-panel access.')))}</p>`, actions(link(t(msgid('Open email and users')), '/email/accounts')))
   return page(props, authority, '/files/web-disk', title, description,
-    `<div class="v2-panel-settings__groups" data-account-web-disk data-account="${esc(c.account?.id ?? '')}" data-web-disk-manage="${c.editable}" data-web-disk-home="${esc(c.account?.home ?? '')}">${V2_WEB_DISK_TEMPLATES}${split(logins + create + clients, connection + users)}</div>`)
+    `<div class="v2-panel-settings__groups" data-account-web-disk data-account="${esc(c.account?.id ?? '')}" data-web-disk-manage="${c.editable}" data-web-disk-home="${esc(c.account?.home ?? '')}">${V2_WEB_DISK_TEMPLATES}${split(logins + create, connection + users)}${clients}</div>`)
 }

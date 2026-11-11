@@ -167,3 +167,57 @@ describe('serialized account detail presentation', () => {
     expect(aside().hidden).toBe(false)
   })
 })
+
+describe('several openers of one account row', () => {
+  const extra = (section?: string) => {
+    const button = document.createElement('button')
+    button.type = 'button'; button.textContent = 'Change plan'
+    button.setAttribute('data-account-detail-open', 'alice'); button.setAttribute('aria-controls', 'account-details'); button.setAttribute('aria-expanded', 'false')
+    if (section) button.setAttribute('data-account-detail-section', section)
+    opener().after(button)
+    return button
+  }
+  it('opens the same panel from a second opener, brings its section into view and returns focus to the first', () => {
+    fixture()
+    const part = document.createElement('div'); part.setAttribute('data-account-detail-section', 'plan'); panel().append(part)
+    const scrolled = vi.fn(); part.scrollIntoView = scrolled
+    const second = extra('plan')
+    boot()
+    second.click()
+    expect(aside().hidden).toBe(false)
+    expect(panel().hidden).toBe(false)
+    expect([opener().getAttribute('aria-expanded'), second.getAttribute('aria-expanded')]).toEqual(['true', 'true'])
+    expect(scrolled).toHaveBeenCalledTimes(1)
+    opener('bob').click()
+    expect([opener().getAttribute('aria-expanded'), second.getAttribute('aria-expanded')]).toEqual(['false', 'false'])
+    opener().click()
+    expect(scrolled).toHaveBeenCalledTimes(1)
+    close().click()
+    expect(aside().hidden).toBe(true)
+    expect(document.activeElement).toBe(opener())
+    expect(request).not.toHaveBeenCalled()
+  })
+  it('opens the closed fold it scrolls to', () => {
+    fixture()
+    panel().insertAdjacentHTML('beforeend', '<details data-account-detail-section="plan"><summary>Plan</summary><p>Body</p></details><details data-account-detail-section="other"><summary>Other</summary></details>')
+    const [fold, other] = Array.from(panel().querySelectorAll<HTMLDetailsElement>('details'))
+    fold!.scrollIntoView = vi.fn()
+    const second = extra('plan')
+    boot()
+    second.click()
+    expect([fold!.open, other!.open]).toEqual([true, false])
+    expect(fold!.scrollIntoView).toHaveBeenCalledTimes(1)
+  })
+  it('still fails closed for a second opener that is not a plain button of its own row', () => {
+    fixture()
+    extra().setAttribute('data-action', 'terminate-account')
+    boot()
+    opener().click()
+    expect(aside().hidden).toBe(true)
+    fixture()
+    document.querySelector('[data-account-row="bob"] td')!.append(extra())
+    boot()
+    opener().click()
+    expect(aside().hidden).toBe(true)
+  })
+})

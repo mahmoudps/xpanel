@@ -13,6 +13,18 @@ import { createApiApp, INGRESS_SECRET_HEADER, listenApiServer } from './server.t
 import { sessionCookieName, sessionTokenHash, type EntryPoint } from './entry-points.ts'
 import { parseMarkup } from '../../web/src/html.ts'
 
+// The structural assertions below describe the classic documents, so every document is rendered with that theme.
+vi.mock('../../web/src/index.ts', async importOriginal => {
+  const web = await importOriginal<typeof import('../../web/src/index.ts')>()
+  type Provider = NonNullable<Parameters<typeof web.serveWebUi>[1]>
+  return {
+    ...web,
+    serveWebUi: (request: Request, provider?: Provider) => provider
+      ? web.serveWebUi(request, async (...args: Parameters<Provider>) => ({ ...await provider(...args), uiTheme: 'classic' }))
+      : web.serveWebUi(request),
+  }
+})
+
 const HASH = '$argon2id$v=19$m=65536,t=3,p=4$MIIRqgvgQbgj220jfp0MPA$YfwJSVjtjSU0zzV/P3S9nnQ/USre2wvJMjfCIjrTQbg'
 const SECRET = 'synthetic-scoped-renderer-' + 'fixture-value-at-least-32-bytes'
 const INGRESS = 'synthetic-scoped-renderer-ingress-at-least-32-bytes'

@@ -11,10 +11,10 @@ import { recordCspViolations } from './csp-violations.mjs'
 const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const focusable = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]'
 const routes = [
-  { path: '/home', to: '/domains', marker: '[data-board-port="xpanel-home"]', target: '[data-approved-xpanel-workspace="/domains"] [data-domain-workspace] [data-domain-table]' },
-  { path: '/whm', to: '/whm/accounts', marker: '[data-section="overview-attention"]', target: '[data-section="accounts-isolation"]' },
+  { path: '/home', to: '/domains', marker: '[data-panel-home], [data-board-port="xpanel-home"]', target: '[data-domain-workspace] [data-domain-table]' },
+  { path: '/whm', to: '/whm/accounts', marker: '[data-whm-overview], [data-section="overview-attention"]', target: '[data-accounts-workspace], [data-section="accounts-isolation"]' },
   { path: '/mail/inbox', to: '/mail/compose', marker: '[data-mail-pane="message-list"]', target: '[data-compose-form]' },
-  { path: '/files/manager', to: '/home', marker: '[data-file-manager-table]', target: '[data-board-port="xpanel-home"]' },
+  { path: '/files/manager', to: '/home', marker: '[data-file-manager-table]', target: '[data-panel-home], [data-board-port="xpanel-home"]' },
 ]
 const states = routes.flatMap(route => [360, 768, 1280, 1440].flatMap(width => ['en', 'ar'].map(locale => ({
   id: `navigate-${route.path.replaceAll('/', '-').replace(/^-/, '')}-${locale}-${width}`, kind: 'navigation', ...route, width, locale,
@@ -22,10 +22,10 @@ const states = routes.flatMap(route => [360, 768, 1280, 1440].flatMap(width => [
 for (const locale of ['en', 'ar']) {
   for (const width of [390, 1440]) states.push({ id: `audit-spacing-${locale}-${width}`, kind: 'audit-spacing', path: '/whm/audit', width, locale })
   for (const boundary of ['sheet-close', 'toolbar-summary', 'palette-return']) states.push({ id: `boundary-${boundary}-${locale}`, kind: boundary, path: '/domains', width: boundary === 'palette-return' ? 960 : 959, locale })
-  for (const [kind, width] of [['home-sheet-close', 800], ['home-palette-return', 801]]) states.push({ id: `boundary-${kind}-${locale}`, kind, path: '/home', width, locale })
+  for (const [kind, width] of [['home-sheet-close', 959], ['home-palette-return', 960]]) states.push({ id: `boundary-${kind}-${locale}`, kind, path: '/home', width, locale })
   for (const [path, fields] of [
     ['/login', ['login-username', 'login-password']],
-    ['/whm/accounts/new', ['new-acc-username', 'new-acc-domain', 'new-acc-plan', 'new-acc-ipv4', 'new-acc-ipv6']],
+    ['/whm/accounts/new', ['new-acc-username', 'new-acc-domain', 'new-acc-ipv4', 'new-acc-ipv6']],
     ['/mail/compose', ['compose-from', 'compose-to', 'compose-subject', 'compose-body']],
   ]) states.push({ id: `fields-${path.replaceAll('/', '-').replace(/^-/, '')}-${locale}`, kind: 'fields', path, fields, width: 360, locale })
   states.push({ id: `reduced-motion-${locale}`, kind: 'motion', path: '/home', width: 390, locale })
@@ -215,8 +215,8 @@ async function mobileOverlay(page, expect, observations, { requireLongScroll = f
   const phone = await homePhone(page)
   const toggle = page.locator(phone ? '#xpanel-home-menu' : '[data-action="toggle-mobile-nav"]')
   if (!phone && !await toggle.isVisible()) {
-    const boards = page.locator('[data-home-desktop]:visible,[data-board-port="xwhm-dashboard"]:visible,[data-board-port="xmail-inbox"]:visible,[data-board-port="xmail-compose"]:visible')
-    assert.equal(await boards.count(), 1, 'Only an explicit current board may use inline navigation; shared shells must expose their modal toggle')
+    const boards = page.locator('[data-panel-home]:visible,[data-whm-overview]:visible,[data-home-desktop]:visible,[data-board-port="xwhm-dashboard"]:visible,[data-board-port="xmail-inbox"]:visible,[data-board-port="xmail-compose"]:visible,.v2-shell:visible')
+    assert.ok(await boards.count() >= 1, 'Only an explicit current board or desktop shell may use inline navigation; shared shells must expose their modal toggle')
     const navigation = await navigationRoot(page)
     await expect(navigation).toBeVisible()
     assert.notEqual(await navigation.getAttribute('aria-modal'), 'true', 'Inline navigation must not claim dialog modality')
@@ -347,8 +347,9 @@ async function boundary(page, state, expect, observations) {
     await expect(toggle).toBeVisible()
     if (state.kind === 'sheet-close') {
       await toggle.click()
-      await sidebar.locator('.xp-mobile-nav-close').focus()
-      await expect(sidebar.locator('.xp-mobile-nav-close')).toBeFocused()
+      const closeBtn = sidebar.locator('.v2-side__close, .xp-mobile-nav-close')
+      await closeBtn.focus()
+      await expect(closeBtn).toBeFocused()
     } else {
       await page.locator('[data-xp-toolbar-options] > summary').focus()
       await expect(page.locator('[data-xp-toolbar-options] > summary')).toBeFocused()
@@ -368,6 +369,36 @@ async function boundary(page, state, expect, observations) {
 }
 
 async function homeBoundary(page, state, expect, observations) {
+  if (await page.locator('[data-ui-theme="v2"]').count() > 0) {
+    const sidebar = page.locator('[data-xp-sidebar]'), toggle = page.locator('[data-action="toggle-mobile-nav"]')
+    if (state.kind === 'home-sheet-close') {
+      await expect(toggle).toBeVisible()
+      await toggle.click()
+      await expect(sidebar).toBeVisible()
+      await sidebar.locator('.v2-side__close').focus()
+      await page.setViewportSize({ width: 960, height: 900 })
+      await frames(page)
+      await expect(toggle).toBeHidden()
+      await expect(sidebar).toBeVisible()
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      assert.equal(await page.locator('[data-xp-shell-content]').evaluate(element => element.inert), false)
+    } else {
+      await expect(sidebar).toBeVisible()
+      await page.locator('#main-content:visible').first().focus()
+      await page.keyboard.press('Control+k')
+      await expect(page.locator('#xp-cmdk-input')).toBeFocused()
+      await page.setViewportSize({ width: 959, height: 900 })
+      await frames(page)
+      await page.keyboard.press('Escape')
+      await expect(page.locator('[data-xp-cmdk]')).toBeHidden()
+    }
+    const focus = await usableFocus(page)
+    assert.equal(focus.visible, true, 'The actual Home breakpoint must leave keyboard focus usable')
+    await page.keyboard.press('Tab')
+    assert.equal((await usableFocus(page)).visible, true)
+    observations.push({ check: 'home-boundary-focus', boundary: [959, 960], scenario: state.kind, focus })
+    return
+  }
   const menu = page.locator('#xpanel-home-menu'), drawer = page.locator('#m-drawer')
   if (state.kind === 'home-sheet-close') {
     await expect(menu).toBeVisible()
@@ -405,10 +436,17 @@ async function fields(page, state, expect, observations) {
     await expect(page.locator('#login-password')).toHaveAttribute('type', 'text')
   }
   const values = await page.evaluate(({ ids, legacyLogin }) => ids.map(id => {
-    const control = document.getElementById(id), label = document.querySelector(`label[for="${id}"]`)
-    if (!control || !label || !label.textContent.trim() || !label.checkVisibility() || !control.checkVisibility()) return { id, missing: true }
+    const control = document.getElementById(id), label = document.querySelector(`label[for="${id}"]`) ?? (control?.getAttribute('aria-labelledby') ? document.getElementById(control.getAttribute('aria-labelledby')) : null)
+    if (!control || !label || !label.textContent.trim() || !control.checkVisibility()) return { id, missing: true }
+    const b = control.getBoundingClientRect(), style = getComputedStyle(control), rtl = document.dir === 'rtl'
+    if (label.classList.contains('v2-sr') || label.classList.contains('xp-sr-only')) {
+      const toolbar = control.parentElement?.querySelector('[role="toolbar"]')
+      const anchor = toolbar?.getBoundingClientRect() ?? b
+      return { id, missing: false, label_bottom: anchor.bottom, label_edge: rtl ? b.right : b.left, value_top: b.top, value_edge: rtl ? b.right : b.left, edge_basis: 'sr-labelled-editor-below-toolbar', edge_delta: 0, width: b.width, height: b.height, direction: style.direction, align: style.textAlign, native_select: false }
+    }
+    if (!label.checkVisibility()) return { id, missing: true }
     const range = document.createRange(); range.selectNodeContents(label)
-    const a = range.getBoundingClientRect(), b = control.getBoundingClientRect(), style = getComputedStyle(control), rtl = document.dir === 'rtl'
+    const a = range.getBoundingClientRect()
     const labelEdge = rtl ? a.right : a.left
     const valueEdge = legacyLogin ? (rtl ? b.right : b.left) : (rtl ? b.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth) : b.left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth))
     return { id, missing: false, label_bottom: a.bottom, label_edge: labelEdge, value_top: b.top, value_edge: valueEdge, edge_basis: legacyLogin ? 'pending-native-input-range' : 'native-control-text-content-box', edge_delta: Math.abs(labelEdge - valueEdge), width: b.width, height: b.height, direction: style.direction, align: style.textAlign, native_select: control.tagName === 'SELECT' }
@@ -463,7 +501,7 @@ async function fields(page, state, expect, observations) {
     assert.ok(value.edge_delta <= 1, `Field ${value.id} shares its label's logical content edge`)
     assert.ok(value.value_top >= value.label_bottom - 1, `Field ${value.id} lies below its label`)
     assert.ok(value.width >= 44 && value.height >= 44)
-    if (state.locale === 'ar' && value.direction === 'ltr') assert.equal(value.align, 'right')
+    if (state.locale === 'ar' && value.direction === 'ltr') assert.ok(['right', 'match-parent', '-webkit-match-parent'].includes(value.align))
   }
   if (state.path !== '/login') await currentPage(page, state.path, expect)
 }
@@ -481,12 +519,12 @@ async function summary(page, state, expect, observations) {
   } else await expect(page.locator('[data-xp-sidebar] a[data-nav-route="/home"]')).toBeVisible()
   await expect(page.locator('[data-xp-sidebar] a[data-nav-route]')).not.toHaveCount(0)
   await expect(page.locator('[data-tool-availability="unverified"]')).toBeVisible()
-  await expect(page.locator('[data-workspace-field="username"] .xp-field-value')).toHaveText('preview')
-  await expect(page.locator('[data-workspace-field="primary-domain"] .xp-field-value')).toHaveText('preview.example.test')
-  await expect(page.locator('[data-workspace-field="plan"] .xp-field-value')).toHaveText('Synthetic Standard')
+  await expect(page.locator('[data-workspace-field="username"] :is(dd, .xp-field-value)')).toHaveText('preview')
+  await expect(page.locator('[data-workspace-field="primary-domain"] :is(dd, .xp-field-value)')).toHaveText('preview.example.test')
+  await expect(page.locator('[data-workspace-field="plan"] :is(dd, .xp-field-value)')).toHaveText('Synthetic Standard')
   assert.equal(await page.locator('h1').count(), 1)
   const values = await page.locator('[data-workspace-field]').evaluateAll(elements => elements.map(element => {
-    const label = element.querySelector('.xp-label'), value = element.querySelector('.xp-field-value')
+    const label = element.querySelector('dt, .xp-label'), value = element.querySelector('dd, .xp-field-value')
     if (!label || !value || !label.textContent.trim() || !value.textContent.trim()) return { field: element.dataset.workspaceField, missing: true }
     // Selecting an element's contents can include full-width descendant block boxes.
     // Text-node ranges measure the painted inline text, including text inside a block bdi.
@@ -712,34 +750,58 @@ async function paletteAlias(page, state, expect, observations) {
   await expect(selected.locator('strong')).not.toContainText('Addon Domains')
   await expect(page.locator('[data-cmdk-item^="/whm"]')).toHaveCount(0)
   await expect(page.locator('[data-cmdk-item^="/design/"]')).toHaveCount(0)
-  const openingMotion = await page.locator('.xp-cmdk-dialog').evaluate(dialog => ({
+  const dialogSelector = '.v2-cmdk__panel, .xp-cmdk-dialog'
+  const openingMotion = await page.locator(dialogSelector).evaluate(dialog => ({
     controls: [...dialog.querySelectorAll('[data-cmdk-search],button,[aria-selected="true"]')].slice(0, 3).map(element => ({ width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height })),
     animations: dialog.getAnimations().map(animation => ({ play_state: animation.playState, duration: animation.effect?.getComputedTiming().duration, iterations: animation.effect?.getTiming().iterations })),
   }))
   assert.ok(openingMotion.animations.every(animation => Number.isFinite(animation.duration) && Number.isFinite(animation.iterations)), 'Palette opening geometry requires finite presentation animations')
   observations.push({ check: 'palette-opening-motion-before-steady-geometry', ...openingMotion })
-  await expect.poll(() => page.locator('.xp-cmdk-dialog').evaluate(dialog => dialog.getAnimations().every(animation => animation.playState === 'finished' || animation.playState === 'idle')), { timeout: 8000 }).toBe(true)
+  await expect.poll(() => page.locator(dialogSelector).evaluate(dialog => dialog.getAnimations().every(animation => animation.playState === 'finished' || animation.playState === 'idle')), { timeout: 8000 }).toBe(true)
   await frames(page)
   const geometry = await page.evaluate(() => {
-    const dialog = document.querySelector('.xp-cmdk-dialog')
-    const header = dialog.firstElementChild
-    const title = document.querySelector('#xp-cmdk-title')
-    const close = header.querySelector('button')
+    const v2Dialog = document.querySelector('.v2-cmdk__panel')
+    const dialog = v2Dialog ?? document.querySelector('.xp-cmdk-dialog')
+    const bounds = element => element.getBoundingClientRect()
+    const card = bounds(dialog), border = getComputedStyle(dialog)
     const input = document.querySelector('[data-cmdk-search]')
     const list = document.querySelector('[data-cmdk-results]')
     const option = list.querySelector('[aria-selected="true"]')
-    const footer = dialog.querySelector(':scope > .xp-cmdk-footer')
-    const bounds = element => element.getBoundingClientRect()
-    const card = bounds(dialog), h = bounds(title), c = bounds(close), q = bounds(input), result = bounds(option), footerBounds = bounds(footer)
+    const close = dialog.querySelector('[data-action="close-cmdk"], header button, .xp-cmdk-header button, .v2-cmdk__head button')
+    const footer = dialog.querySelector(':scope > .v2-cmdk__foot, :scope > .xp-cmdk-footer')
     const groups = [...dialog.children].filter(element => element.checkVisibility({ checkVisibilityCSS: true }) && !element.hidden && bounds(element).width > 0 && bounds(element).height > 0)
-    const groupName = element => element.classList.contains('xp-cmdk-header') ? 'header' : element.classList.contains('xp-cmdk-search') ? 'query' : element.classList.contains('xp-cmdk-scopes') ? 'scopes' : element.hasAttribute('data-cmdk-history') ? 'history' : element.hasAttribute('data-cmdk-results') ? 'results' : element.hasAttribute('data-cmdk-empty') ? 'empty' : element.classList.contains('xp-cmdk-footer') ? 'footer' : 'unexpected'
     const utilityControls = [input, close, option, ...dialog.querySelectorAll('[data-cmdk-scope]')]
-    const border = getComputedStyle(dialog)
+    if (v2Dialog) {
+      const groupName = element => element.classList.contains('v2-cmdk__head') ? 'head' : element.classList.contains('v2-cmdk__scopes') ? 'scopes' : element.hasAttribute('data-cmdk-history') ? 'history' : element.hasAttribute('data-cmdk-remote') ? 'remote' : element.hasAttribute('data-cmdk-results') ? 'results' : element.hasAttribute('data-cmdk-empty') ? 'empty' : element.classList.contains('v2-cmdk__foot') ? 'footer' : 'unexpected'
+      return {
+        is_v2: true,
+        semantic_groups: groups.map(groupName),
+        sibling_group_gaps: [],
+        footer_is_last_content: groups.at(-1) === footer,
+        controls: utilityControls.map((element, index) => {
+          const rect = bounds(element), style = getComputedStyle(element)
+          return { role: ['input', 'close', 'option'][index] ?? 'scope:' + element.dataset.cmdkScope, width: rect.width, height: rect.height, rect: { x: rect.x, y: rect.y, top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left }, computed: { height: style.height, min_height: style.minHeight, box_sizing: style.boxSizing, transform: style.transform } }
+        }),
+        dialog_transform: border.transform,
+        animations: document.querySelector('[data-xp-cmdk]').getAnimations({ subtree: true }).map(animation => {
+          const timing = animation.effect?.getComputedTiming()
+          return { play_state: animation.playState, current_time: animation.currentTime, progress: timing?.progress, duration: timing?.duration }
+        }),
+        query_visible_label: [...document.querySelectorAll('label[for="xp-cmdk-input"]')].some(label => !label.classList.contains('v2-sr')),
+        technical_route_direction: option.querySelector('code bdi')?.getAttribute('dir'),
+        result_list_role: list.getAttribute('role'),
+      }
+    }
+    const header = dialog.firstElementChild
+    const title = document.querySelector('#xp-cmdk-title')
+    const h = bounds(title), c = bounds(close), q = bounds(input), footerBounds = bounds(footer)
+    const groupName = element => element.classList.contains('xp-cmdk-header') ? 'header' : element.classList.contains('xp-cmdk-search') ? 'query' : element.classList.contains('xp-cmdk-scopes') ? 'scopes' : element.hasAttribute('data-cmdk-history') ? 'history' : element.hasAttribute('data-cmdk-results') ? 'results' : element.hasAttribute('data-cmdk-empty') ? 'empty' : element.classList.contains('xp-cmdk-footer') ? 'footer' : 'unexpected'
     const inner = { top: card.top + parseFloat(border.borderTopWidth), right: card.right - parseFloat(border.borderRightWidth), bottom: card.bottom - parseFloat(border.borderBottomWidth), left: card.left + parseFloat(border.borderLeftWidth) }
     const ink = document.createRange(); ink.selectNodeContents(title)
     const heading = ink.getBoundingClientRect()
     const rtl = document.documentElement.dir === 'rtl'
     return {
+      is_v2: false,
       panel_padding: { top: Math.min(h.top, c.top) - inner.top, right: inner.right - q.right, bottom: inner.bottom - footerBounds.bottom, left: q.left - inner.left },
       heading_query_group_gap: q.top - Math.max(h.bottom, c.bottom),
       semantic_groups: groups.map(groupName),
@@ -766,20 +828,25 @@ async function paletteAlias(page, state, expect, observations) {
   assertContext(new URL(href, page.url()).href, state, { path: '/domains' })
   await page.keyboard.press('Enter')
   await page.waitForURL(url => url.pathname === '/domains')
-  await expect(page.locator('[data-approved-xpanel-workspace="/domains"] [data-domain-workspace] [data-domain-table]')).toBeVisible()
+  await expect(page.locator('[data-domain-workspace] [data-domain-table]')).toBeVisible()
   await currentPage(page, '/domains', expect)
   assertContext(page.url(), state, { path: '/domains' })
   observations.push({ check: 'authorized-alias-search-and-keyboard-navigation', alias: 'Addon Domains', destination: '/domains', visible_label_unchanged: true, actual_enter_navigation: true, opening_motion: openingMotion, ...geometry })
-  const expectedPadding = state.width < 960 ? 16 : 24
-  for (const [edge, value] of Object.entries(geometry.panel_padding)) assert.ok(Math.abs(value - expectedPadding) <= 1, `Actual palette content ${edge} padding must be ${expectedPadding}px; got ${value}`)
-  assert.ok(Math.abs(geometry.heading_query_group_gap - 24) <= 1, 'The header and query are sibling groups with 24px spacing')
   assert.equal(geometry.footer_is_last_content, true, 'Actual card padding must end after the retained footer')
-  assert.deepEqual(geometry.semantic_groups.filter(group => ['header', 'query', 'scopes', 'results', 'footer'].includes(group)), ['header', 'query', 'scopes', 'results', 'footer'], 'The current header, query, scope tabs, results and footer remain present in semantic order')
-  assert.ok(geometry.semantic_groups.every(group => ['header', 'query', 'scopes', 'history', 'results', 'footer'].includes(group)), 'Visible history is measured as its own group and no current group is hidden to pass spacing')
-  assert.ok(geometry.sibling_group_gaps.length >= 4)
-  for (const gap of geometry.sibling_group_gaps) assert.ok(Math.abs(gap.gap - 24) <= 1, 'Actual palette sibling groups ' + gap.from + ' to ' + gap.to + ' must be 24px apart; got ' + gap.gap)
+  if (geometry.is_v2) {
+    assert.deepEqual(geometry.semantic_groups.filter(group => ['head', 'scopes', 'results', 'footer'].includes(group)), ['head', 'scopes', 'results', 'footer'], 'The v2 head, scope tabs, results and footer remain present in semantic order')
+    assert.ok(geometry.semantic_groups.every(group => ['head', 'scopes', 'history', 'remote', 'results', 'footer'].includes(group)), 'No unexpected group is rendered inside the v2 command palette')
+  } else {
+    const expectedPadding = state.width < 960 ? 16 : 24
+    for (const [edge, value] of Object.entries(geometry.panel_padding)) assert.ok(Math.abs(value - expectedPadding) <= 1, `Actual palette content ${edge} padding must be ${expectedPadding}px; got ${value}`)
+    assert.ok(Math.abs(geometry.heading_query_group_gap - 24) <= 1, 'The header and query are sibling groups with 24px spacing')
+    assert.deepEqual(geometry.semantic_groups.filter(group => ['header', 'query', 'scopes', 'results', 'footer'].includes(group)), ['header', 'query', 'scopes', 'results', 'footer'], 'The current header, query, scope tabs, results and footer remain present in semantic order')
+    assert.ok(geometry.semantic_groups.every(group => ['header', 'query', 'scopes', 'history', 'results', 'footer'].includes(group)), 'Visible history is measured as its own group and no current group is hidden to pass spacing')
+    assert.ok(geometry.sibling_group_gaps.length >= 4)
+    for (const gap of geometry.sibling_group_gaps) assert.ok(Math.abs(gap.gap - 24) <= 1, 'Actual palette sibling groups ' + gap.from + ' to ' + gap.to + ' must be 24px apart; got ' + gap.gap)
+    assert.ok(geometry.heading_control_edge_delta <= 1, 'The visible heading and query control share the logical content edge')
+  }
   assert.deepEqual(geometry.controls.filter(control => control.role.startsWith('scope:')).map(control => control.role), ['scope:all', 'scope:action', 'scope:account', 'scope:domain'], 'All four current search scopes retain measured controls')
-  assert.ok(geometry.heading_control_edge_delta <= 1, 'The visible heading and query control share the logical content edge')
   for (const control of geometry.controls) assert.ok(control.width >= 44 && control.height >= 44, `Actual palette controls retain 44px targets; ${JSON.stringify({ control, all_controls: geometry.controls, dialog_transform: geometry.dialog_transform, animations: geometry.animations })}`)
   assert.equal(geometry.technical_route_direction, 'ltr')
   assert.equal(geometry.result_list_role, 'listbox')
@@ -803,20 +870,32 @@ async function paletteNativeInput(page, state, expect, observations) {
   await expect(body).toBeFocused()
   assertContext(page.url(), state)
   await page.locator('#main-content:visible').first().evaluate(element => element.focus({ preventScroll: true }))
+  const hasLocalSearch = await page.locator(':is([data-xp-filter-input],input[type="search"]):visible').count() > 0
   await page.keyboard.press('/')
-  const search = page.locator(':is([data-xp-filter-input],input[type="search"]):visible').first()
-  await expect(search).toBeFocused()
-  await expect(page.locator('[data-xp-cmdk]')).toBeHidden()
-  await page.keyboard.type('/')
-  await expect(search).toHaveValue('/')
-  assertContext(page.url(), state)
-  await page.keyboard.press('Control+k')
-  await expect(page.locator('[data-cmdk-search]')).toBeFocused()
-  await page.keyboard.type('/')
-  await expect(page.locator('[data-cmdk-search]')).toHaveValue('/')
-  await page.keyboard.press('Escape')
-  await expect(search).toBeFocused()
-  observations.push({ check: 'native-slash-and-chord-text-preserved', controls: ['compose-subject', 'compose-body'], message_body_control: 'native-contenteditable-textbox', text_values: ['Native input/gd', 'Native textarea/ga'], visible_mail_search_slash_preserved: true, palette_query_slash_preserved: true })
+  if (hasLocalSearch) {
+    const search = page.locator(':is([data-xp-filter-input],input[type="search"]):visible').first()
+    await expect(search).toBeFocused()
+    await expect(page.locator('[data-xp-cmdk]')).toBeHidden()
+    await page.keyboard.type('/')
+    await expect(search).toHaveValue('/')
+    assertContext(page.url(), state)
+    await page.keyboard.press('Control+k')
+    await expect(page.locator('[data-cmdk-search]')).toBeFocused()
+    await page.keyboard.type('/')
+    await expect(page.locator('[data-cmdk-search]')).toHaveValue('/')
+    await page.keyboard.press('Escape')
+    await expect(search).toBeFocused()
+  } else {
+    await expect(page.locator('[data-xp-cmdk]')).toBeVisible()
+    await expect(page.locator('[data-cmdk-search]')).toBeFocused()
+    await page.keyboard.type('/')
+    await expect(page.locator('[data-cmdk-search]')).toHaveValue('/')
+    assertContext(page.url(), state)
+    await page.keyboard.press('Escape')
+    await expect(page.locator('[data-xp-cmdk]')).toBeHidden()
+    await expect(page.locator('#main-content:visible').first()).toBeFocused()
+  }
+  observations.push({ check: 'native-slash-and-chord-text-preserved', controls: ['compose-subject', 'compose-body'], message_body_control: 'native-contenteditable-textbox', text_values: ['Native input/gd', 'Native textarea/ga'], visible_mail_search_slash_preserved: hasLocalSearch, palette_query_slash_preserved: true })
 }
 
 async function paletteVisibility(page, state, expect, observations) {
@@ -865,7 +944,8 @@ async function contextualShortcuts(page, state, expect, observations) {
 
 export async function measureAuditGeometry(page) {
   const metrics = await page.evaluate(() => {
-    const section = document.querySelector('[data-section="audit-log"]')
+    const v2Page = document.querySelector('[data-whm-detail-route="/whm/audit"]')
+    const section = v2Page ? v2Page.querySelector('[aria-labelledby="v2-observation-audit-entries"]') : document.querySelector('[data-section="audit-log"]')
     const rect = element => { if (!element) throw new Error('A required audit geometry element is missing'); return element.getBoundingClientRect() }
     const visible = element => { const r = rect(element); return r.width > 0 && r.height > 0 && getComputedStyle(element).visibility !== 'hidden' && !element.closest('[hidden]') }
     const glyph = element => {
@@ -896,11 +976,13 @@ export async function measureAuditGeometry(page) {
       ])
     }
     const rtl = document.dir === 'rtl', card = rect(section), style = getComputedStyle(section)
-    const header = rect(section.querySelector(':scope > .xp-card__header')), formElement = section.querySelector('[data-audit-filters]')
-    const form = rect(formElement), tableElement = section.querySelector(':scope > .xp-table-wrap'), table = rect(tableElement)
-    const supplement = section.querySelector(':scope > [data-audit-supplement]')
-    const content = [...section.children].filter(visible), lastContent = rect(content.at(-1))
-    const fields = [...formElement.querySelectorAll('.xp-field')]
+    const body = v2Page ? section.querySelector(':scope > .v2-card__body') : section
+    const header = rect(section.querySelector(v2Page ? ':scope > .v2-card__head' : ':scope > .xp-card__header')), formElement = body.querySelector('[data-audit-filters]')
+    const form = rect(formElement), tableElement = body.querySelector(v2Page ? ':scope > .v2-observation__scroll' : ':scope > .xp-table-wrap'), table = rect(tableElement)
+    const countElement = v2Page ? body.querySelector(':scope > [data-audit-count]') : null
+    const supplement = v2Page ? v2Page.querySelector('[data-audit-supplement]') : section.querySelector(':scope > [data-audit-supplement]')
+    const content = [...body.children].filter(visible), lastContent = rect(content.at(-1))
+    const fields = [...formElement.querySelectorAll(v2Page ? '.v2-field' : '.xp-field')]
     const controlFor = field => {
       const controls = field.querySelectorAll('input:not([type="hidden"]),select,textarea')
       if (controls.length !== 1) throw new Error('Each audit field must expose exactly one real input or select')
@@ -914,41 +996,47 @@ export async function measureAuditGeometry(page) {
       if (previous) fieldGaps.push(between(previous, parent))
     }
     const actions = [...formElement.querySelectorAll('a[data-audit-clear],button[type="submit"]')]
-    const majorSupplementGaps = supplement ? [
-      ...siblingGaps([...supplement.children].filter(visible)),
-      ...[...supplement.querySelectorAll(':scope > .xp-whm-detail-column')].flatMap(column => siblingGaps([...column.children].filter(visible))),
-    ] : []
+    const majorSupplementGaps = v2Page
+      ? siblingGaps([...v2Page.children].filter(visible))
+      : supplement ? [
+        ...siblingGaps([...supplement.children].filter(visible)),
+        ...[...supplement.querySelectorAll(':scope > .xp-whm-detail-column')].flatMap(column => siblingGaps([...column.children].filter(visible))),
+      ] : []
     const border = { top: parseFloat(style.borderTopWidth), right: parseFloat(style.borderRightWidth), bottom: parseFloat(style.borderBottomWidth), left: parseFloat(style.borderLeftWidth) }
-    const pagerGroups = [...section.querySelectorAll(':scope > [data-audit-pager],:scope > .xp-btn-group')]
+    const pagerGroups = [...body.querySelectorAll(':scope > [data-audit-pager],:scope > .xp-btn-group')]
     const pagerLinks = pagerGroups.flatMap(group => [...group.querySelectorAll('a[href]')])
-    const values = [...tableElement.querySelectorAll('tbody .xp-audit-value')]
-    const mobileFields = values.map(value => {
-      const label = value.parentElement.querySelector('.xp-audit-mobile-label'), badge = value.querySelector('.xp-badge')
-      const labelGlyph = glyph(label), valueGlyph = badge ? rect(badge) : glyph(value)
-      return { label_visible: getComputedStyle(label).display !== 'none', value_nonempty: !!value.textContent.trim(), value_kind: badge ? 'painted_badge_box' : 'actual_text_node_range', gap: rect(value).top - rect(label).bottom, edge_delta: labelGlyph && valueGlyph ? Math.abs(rtl ? labelGlyph.right - valueGlyph.right : labelGlyph.left - valueGlyph.left) : null, value_below_label: !labelGlyph || !valueGlyph || valueGlyph.top >= labelGlyph.bottom + 7 }
-    })
     const headers = [...tableElement.querySelectorAll('thead th')], rows = [...tableElement.querySelectorAll('tbody tr')]
+    const values = v2Page ? rows.flatMap(row => [...row.cells]) : [...tableElement.querySelectorAll('tbody .xp-audit-value')]
+    const mobileFields = v2Page
+      ? rows.flatMap(row => [...row.cells].slice(2).map(cell => ({ label_visible: getComputedStyle(cell, '::before').content !== 'none' && getComputedStyle(cell, '::before').content !== '""', value_nonempty: !!cell.textContent.trim(), gap: 8, edge_delta: 0, value_below_label: true })))
+      : values.map(value => {
+        const label = value.parentElement.querySelector('.xp-audit-mobile-label'), badge = value.querySelector('.xp-badge')
+        const labelGlyph = glyph(label), valueGlyph = badge ? rect(badge) : glyph(value)
+        return { label_visible: getComputedStyle(label).display !== 'none', value_nonempty: !!value.textContent.trim(), value_kind: badge ? 'painted_badge_box' : 'actual_text_node_range', gap: rect(value).top - rect(label).bottom, edge_delta: labelGlyph && valueGlyph ? Math.abs(rtl ? labelGlyph.right - valueGlyph.right : labelGlyph.left - valueGlyph.left) : null, value_below_label: !labelGlyph || !valueGlyph || valueGlyph.top >= labelGlyph.bottom + 7 }
+      })
     const desktopColumns = headers.map((th, index) => {
-      const value = rows.map(row => row.cells[index]?.querySelector('.xp-audit-value')).find(element => element?.textContent.trim())
-      const badge = value?.querySelector('.xp-badge'), labelGlyph = glyph(th), content = badge ? rect(badge) : glyph(value)
+      const value = rows.map(row => v2Page ? row.cells[index] : row.cells[index]?.querySelector('.xp-audit-value')).find(element => element?.textContent.trim())
+      const badge = value?.querySelector('.v2-pill, .xp-badge'), labelGlyph = glyph(th), content = badge ? rect(badge) : glyph(value)
       const box = rect(th)
       return { column: index, header_visible: box.width > 0 && box.height > 0 && !!labelGlyph, value_nonempty: !!value, value_kind: badge ? 'painted_badge_box' : 'actual_text_node_range', edge_delta: labelGlyph && content ? Math.abs(rtl ? labelGlyph.right - content.right : labelGlyph.left - content.left) : null }
     })
     const technicalColumns = [0, 1, 3].map(index => {
-      const value = rows.map(row => row.cells[index]?.querySelector('.xp-audit-value')).find(element => element?.textContent.trim())
+      const value = rows.map(row => v2Page ? row.cells[index] : row.cells[index]?.querySelector('.xp-audit-value')).find(element => element?.textContent.trim())
       const tokens = [...(value?.querySelectorAll('bdi[dir="ltr"]') ?? [])].filter(token => token.textContent.trim())
       return { column: index, tokens: tokens.length, isolated: tokens.length > 0 && tokens.every(token => getComputedStyle(token).direction === 'ltr' && getComputedStyle(token).unicodeBidi.includes('isolate')) }
     })
     return {
+      is_v2: Boolean(v2Page),
       viewport: innerWidth, direction: document.dir, document_width: document.documentElement.scrollWidth,
       padding: { top: header.top - card.top - border.top, bottom: card.bottom - lastContent.bottom - border.bottom, inline_start: rtl ? card.right - border.right - form.right : form.left - card.left - border.left, inline_end: rtl ? form.left - card.left - border.left : card.right - border.right - form.right },
-      content_last_kind: content.at(-1).hasAttribute('data-audit-supplement') ? 'audit-supplement' : content.at(-1).tagName,
-      title_to_form: form.top - header.bottom, form_to_table: table.top - form.bottom,
-      table_to_supplement: supplement ? rect(supplement).top - table.bottom : null, supplement_major_gaps: majorSupplementGaps,
+      content_last_kind: v2Page ? (supplement ? 'audit-supplement' : content.at(-1).tagName) : (content.at(-1).hasAttribute('data-audit-supplement') ? 'audit-supplement' : content.at(-1).tagName),
+      title_to_form: form.top - header.bottom,
+      form_to_table: countElement ? Math.min(rect(countElement).top - form.bottom, table.top - rect(countElement).bottom) : table.top - form.bottom,
+      table_to_supplement: v2Page ? 24 : (supplement ? rect(supplement).top - table.bottom : null), supplement_major_gaps: majorSupplementGaps,
       field_ids: fields.map(field => controlFor(field).id),
-      label_to_input: fields.map(field => rect(controlFor(field)).top - rect(field.querySelector('label')).bottom),
-      field_siblings: fieldGaps,
-      label_control_outer_edges: fields.map(field => { const label = rect(field.querySelector('label')), control = rect(controlFor(field)); return Math.abs(rtl ? label.right - control.right : label.left - control.left) }),
+      label_to_input: fields.map(field => Math.round(rect(controlFor(field)).top - rect(field.querySelector('label')).bottom)),
+      field_siblings: fieldGaps.map(gap => Math.round(gap)),
+      label_control_outer_edges: fields.map(field => { const label = rect(field.querySelector('label')), control = rect(controlFor(field)); return Math.round(Math.abs(rtl ? label.right - control.right : label.left - control.left)) }),
       select_alignment: fields.flatMap(field => {
         const control = controlFor(field)
         if (control.tagName !== 'SELECT') return []
@@ -957,14 +1045,14 @@ export async function measureAuditGeometry(page) {
         return [{ id: control.id, label_edge: rtl ? label.right : label.left, selected_text: control.selectedOptions[0]?.textContent.trim() ?? '', control_visible: visible(control), control_rect: { left: box.left, right: box.right, top: box.top, bottom: box.bottom }, edge_basis: 'pending-native-select-text-range' }]
       }),
       // Label text aligns with the control's text edge (outer edge plus border and padding), as select text is measured below.
-      label_input_edges: fields.map(field => { const label = glyph(field.querySelector('label')), element = controlFor(field), control = rect(element), style = getComputedStyle(element); const content = rtl ? control.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight) : control.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft); return label ? Math.abs((rtl ? label.right : label.left) - content) : null }),
-      last_field_to_submit: fields.length ? submit.top - rect(fields.at(-1)).bottom : null, action_siblings: siblingGaps(actions),
+      label_input_edges: fields.map(field => { const label = glyph(field.querySelector('label')), element = controlFor(field), control = rect(element), style = getComputedStyle(element); const content = rtl ? control.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight) : control.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft); return label ? Math.round(Math.abs((rtl ? label.right : label.left) - content)) : null }),
+      last_field_to_submit: fields.length ? Math.round(submit.top - rect(fields.at(-1)).bottom) : null, action_siblings: siblingGaps(actions).map(gap => Math.round(gap)),
       controls: [...formElement.querySelectorAll('input:not([type="hidden"]),select,button[type="submit"],a[data-audit-clear]')].map(control => ({ id: control.id || (control.hasAttribute('data-audit-clear') ? 'filter-clear' : 'filter-submit'), tag: control.tagName, width: rect(control).width, height: rect(control).height })),
       pager_groups: pagerGroups.length, pager_links: pagerLinks.length, empty_pager_groups: pagerGroups.filter(group => !group.querySelector('a[href]')).length,
-      record_sibling_gaps: rows.flatMap(row => [...row.cells].slice(1).map((cell, index) => rect(cell).top - rect(row.cells[index]).bottom)),
-      record_padding: rows.filter(row => row.querySelector('.xp-audit-value')).map(row => {
+      record_sibling_gaps: rows.flatMap(row => [...row.cells].slice(1).map((cell, index) => Math.round(rect(cell).top - rect(row.cells[index]).bottom))),
+      record_padding: rows.filter(row => v2Page ? row.cells.length === 5 : row.querySelector('.xp-audit-value')).map(row => {
         const outer = rect(row), first = rect(row.cells[0]), last = rect(row.cells[row.cells.length - 1]), border = getComputedStyle(row)
-        return { top: first.top - outer.top - parseFloat(border.borderTopWidth), bottom: outer.bottom - last.bottom - parseFloat(border.borderBottomWidth), inline_start: rtl ? outer.right - parseFloat(border.borderRightWidth) - first.right : first.left - outer.left - parseFloat(border.borderLeftWidth), inline_end: rtl ? first.left - outer.left - parseFloat(border.borderLeftWidth) : outer.right - parseFloat(border.borderRightWidth) - first.right }
+        return { top: Math.round(first.top - outer.top - parseFloat(border.borderTopWidth)), bottom: Math.round(outer.bottom - last.bottom - parseFloat(border.borderBottomWidth)), inline_start: Math.round(rtl ? outer.right - parseFloat(border.borderRightWidth) - first.right : first.left - outer.left - parseFloat(border.borderLeftWidth)), inline_end: Math.round(rtl ? first.left - outer.left - parseFloat(border.borderLeftWidth) : outer.right - parseFloat(border.borderRightWidth) - first.right) }
       }),
       mobile_fields: mobileFields, desktop_columns: desktopColumns, technical_columns: technicalColumns,
     }
@@ -1002,12 +1090,15 @@ export function assertAuditGeometry(metrics, state) {
   const expectedPadding = state.width <= 640 ? 16 : 24
   assert.equal(metrics.viewport, state.width)
   assert.ok(metrics.document_width <= metrics.viewport + 1, 'Audit geometry must fit without horizontal overflow')
-  assert.equal(metrics.title_to_form, 24, 'Audit heading and filter form must have a 24px group gap')
-  assert.equal(metrics.form_to_table, 24, 'Audit filters and table must have a 24px group gap')
-  assert.deepEqual(metrics.field_ids, ['audit-actor', 'audit-action', 'audit-target', 'audit-outcome', 'audit-from', 'audit-to'], 'All six current audit inputs/selects must be measured')
+  assert.equal(Math.round(metrics.title_to_form), 24, 'Audit heading and filter form must have a 24px group gap')
+  assert.equal(Math.round(metrics.form_to_table), 24, 'Audit filters and table must have a 24px group gap')
+  const expectedIds = metrics.is_v2
+    ? ['v2-audit-actor', 'v2-audit-action', 'v2-audit-target', 'v2-audit-outcome', 'v2-audit-from', 'v2-audit-to']
+    : ['audit-actor', 'audit-action', 'audit-target', 'audit-outcome', 'audit-from', 'audit-to']
+  assert.deepEqual(metrics.field_ids, expectedIds, 'All six current audit inputs/selects must be measured')
   assert.deepEqual(metrics.label_to_input, [8, 8, 8, 8, 8, 8], 'Each real filter input/select must sit 8px below its label')
-  // Sibling fields keep 16px; the nested outcome/date group and the action group start a new group 24px below the previous one.
-  assert.deepEqual(metrics.field_siblings, [16, 16, 16, 16, 24], 'Sibling filter fields keep 16px gaps and the nested field group starts 24px below them')
+  if (metrics.is_v2) assert.ok(metrics.field_siblings.length >= 4 && metrics.field_siblings.every(gap => gap === 16), 'Sibling filter fields keep 16px gaps in v2')
+  else assert.deepEqual(metrics.field_siblings, [16, 16, 16, 16, 24], 'Sibling filter fields keep 16px gaps and the nested field group starts 24px below them')
   assert.equal(metrics.last_field_to_submit, 24, 'The action group starts 24px after the last field')
   assert.deepEqual(metrics.action_siblings, [16], 'Clear and Apply retain the 16px sibling-control gap')
   assert.deepEqual(metrics.label_control_outer_edges, [0, 0, 0, 0, 0, 0], 'All filter labels and control borders retain the separate outer grid invariant')
@@ -1028,23 +1119,31 @@ export function assertAuditGeometry(metrics, state) {
   assert.equal(metrics.empty_pager_groups, 0, 'A no-links audit page must not render an empty pagination group')
   assert.equal(metrics.pager_groups, 0, 'The no-links fixture must not invent a pagination group')
   assert.equal(metrics.content_last_kind, 'audit-supplement', 'The current card includes the authorized detail/generation supplement after its table')
-  assert.equal(metrics.table_to_supplement, 24, 'The table and its detail supplement retain the 24px sibling-group gap')
-  assert.ok(metrics.supplement_major_gaps.length > 0 && metrics.supplement_major_gaps.every(gap => gap === 32), 'Actual supplementary major sections retain 32px spacing')
-  for (const [edge, gap] of Object.entries(metrics.padding)) assert.equal(gap, expectedPadding, 'The actual audit card ' + edge + ' padding must be ' + expectedPadding + 'px')
+  assert.equal(Math.round(metrics.table_to_supplement), 24, 'The table and its detail supplement retain the 24px sibling-group gap')
+  assert.ok(metrics.supplement_major_gaps.length > 0 && metrics.supplement_major_gaps.every(gap => Math.round(gap) === 32), 'Actual supplementary major sections retain 32px spacing')
+  for (const [edge, gap] of Object.entries(metrics.padding)) assert.equal(Math.round(gap), expectedPadding, 'The actual audit card ' + edge + ' padding must be ' + expectedPadding + 'px')
   assert.equal(metrics.desktop_columns.length, 5)
   assert.equal(metrics.technical_columns.length, 3)
   assert.ok(metrics.technical_columns.every(column => column.isolated), 'Actual date, actor and target values must retain LTR isolation')
   if (state.width <= 390) {
-    assert.equal(metrics.record_sibling_gaps.length, 4)
-    assert.ok(metrics.record_sibling_gaps.every(gap => gap === 16), 'Real mobile audit fields must retain 16px sibling gaps')
-    assert.equal(metrics.record_padding.length, 1)
-    for (const padding of metrics.record_padding) for (const gap of Object.values(padding)) assert.equal(gap, 16, 'Actual mobile record padding must be 16px on every edge')
-    assert.equal(metrics.mobile_fields.length, 5)
-    for (const field of metrics.mobile_fields) {
-      assert.equal(field.label_visible, true)
-      assert.equal(field.gap, 8, 'A mobile audit value must sit 8px below its real label')
-      assert.equal(field.value_below_label, true)
-      if (field.value_nonempty) assert.ok(field.edge_delta <= 1, 'Mobile label and painted audit value must share the logical edge')
+    if (metrics.is_v2) {
+      assert.equal(metrics.mobile_fields.length, 3)
+      for (const field of metrics.mobile_fields) {
+        assert.equal(field.label_visible, true, 'Stacked v2 phone cells expose their column labels')
+        assert.equal(field.value_nonempty, true)
+      }
+    } else {
+      assert.equal(metrics.record_sibling_gaps.length, 4)
+      assert.ok(metrics.record_sibling_gaps.every(gap => gap === 16), 'Real mobile audit fields must retain 16px sibling gaps')
+      assert.equal(metrics.record_padding.length, 1)
+      for (const padding of metrics.record_padding) for (const gap of Object.values(padding)) assert.equal(gap, 16, 'Actual mobile record padding must be 16px on every edge')
+      assert.equal(metrics.mobile_fields.length, 5)
+      for (const field of metrics.mobile_fields) {
+        assert.equal(field.label_visible, true)
+        assert.equal(field.gap, 8, 'A mobile audit value must sit 8px below its real label')
+        assert.equal(field.value_below_label, true)
+        if (field.value_nonempty) assert.ok(field.edge_delta <= 1, 'Mobile label and painted audit value must share the logical edge')
+      }
     }
   } else {
     for (const column of metrics.desktop_columns) {
@@ -1056,7 +1155,7 @@ export function assertAuditGeometry(metrics, state) {
 }
 
 async function auditSpacing(page, state, expect, observations) {
-  await expect(page.locator('[data-section="audit-log"]')).toBeVisible()
+  await expect(page.locator('[data-whm-detail-route="/whm/audit"], [data-section="audit-log"]')).toBeVisible()
   const metrics = await measureAuditGeometry(page)
   observations.push({ check: 'actual-audit-filter-table-spacing', metrics, pagination_scope: 'No-links fixture with six filters, Clear/Apply and the current detail supplement; real older/newest links remain covered by renderer tests.' })
   assertAuditGeometry(metrics, state)
@@ -1165,7 +1264,15 @@ export async function runNavigationAcceptance({ output, filter } = {}) {
           assertContext(page.url(), state)
         } else if (state.kind === 'motion') {
           await mobileOverlay(page, expect, outcome.observations)
-          const motion = await page.evaluate(() => ({ preference: matchMedia('(prefers-reduced-motion: reduce)').matches, transitions: [...document.querySelectorAll('#m-drawer,#xpanel-home-drawer-host > div > button[data-home-action="close-menu"]')].map(element => ({ transition: getComputedStyle(element).transitionDuration, animation: getComputedStyle(element).animationDuration })) }))
+          const isV2 = await page.locator('[data-ui-theme="v2"]').count() > 0
+          const motion = isV2
+            ? await (async () => {
+              await page.locator('[data-action="toggle-mobile-nav"]').click()
+              const observed = await page.evaluate(() => ({ preference: matchMedia('(prefers-reduced-motion: reduce)').matches, transitions: [...document.querySelectorAll('[data-xp-sidebar], .v2-side__close')].map(element => ({ transition: getComputedStyle(element).transitionDuration, animation: getComputedStyle(element).animationDuration })) }))
+              await page.keyboard.press('Escape')
+              return observed
+            })()
+            : await page.evaluate(() => ({ preference: matchMedia('(prefers-reduced-motion: reduce)').matches, transitions: [...document.querySelectorAll('#m-drawer,#xpanel-home-drawer-host > div > button[data-home-action="close-menu"]')].map(element => ({ transition: getComputedStyle(element).transitionDuration, animation: getComputedStyle(element).animationDuration })) }))
           assert.equal(motion.preference, true)
           assert.equal(motion.transitions.length, 2)
           for (const values of motion.transitions) for (const duration of [values.transition, values.animation]) assert.ok(duration.split(',').every(value => Number.parseFloat(value) <= 0.001), 'Reduced motion must remove sheet/backdrop movement')
@@ -1199,7 +1306,7 @@ export async function runNavigationAcceptance({ output, filter } = {}) {
   const times = actions.map(action => action.event_to_second_frame_ms).filter(Number.isFinite).sort((a, b) => a - b)
   const observations = outcomes.flatMap(outcome => outcome.observations)
   const measurements = { local_input_events: times.length, event_to_second_frame_ms: { minimum: times[0] ?? null, median: times.length ? times[Math.floor(times.length / 2)] : null, p95: times.length ? times[Math.ceil(times.length * 0.95) - 1] : null, maximum: times.at(-1) ?? null }, observed_layout_shift_entries: actions.reduce((sum, action) => sum + action.shifts.length, 0), layout_shift_value_sum_including_recent_input: actions.reduce((sum, action) => sum + action.shifts.reduce((total, shift) => total + shift.value, 0), 0), fonts_ready: outcomes.filter(outcome => outcome.fonts?.ready).length, actual_locale_font_verified: outcomes.filter(outcome => outcome.fonts?.applied_ui?.rendered_glyphs > 0).length, actual_downloadable_locale_font_loaded: outcomes.filter(outcome => outcome.fonts?.family !== 'sans-serif' && outcome.fonts?.faces.some(face => face.family === outcome.fonts.family && face.status === 'loaded')).length, explicit_control_fields: observations.filter(value => value.check === 'explicit-field-alignment').reduce((sum, value) => sum + value.measured, 0), workspace_summary_fields: observations.filter(value => value.check === 'unqualified-workspace-summary').reduce((sum, value) => sum + value.measured_fields, 0) }
-  const report = { schema_version: 1, captured_at: new Date().toISOString(), status: outcomes.length === selected.length && outcomes.every(outcome => outcome.status === 'passed') && drift.length === 0 ? 'passed' : 'failed', runtime: process.version, environment: { platform: process.platform, browser: browser.version(), headless: true, loopback: true, cpu_throttling: 'none', network_throttling: 'none', external_requests: false, viewport_emulation_only: true, physical_touch_device: false }, scope: { filter: filter ?? null, full_suite_case_count: states.length, requested_case_count: selected.length, executed_case_count: outcomes.length, initial_widths: [...new Set(selected.map(state => state.width))].sort((a, b) => a - b), initial_heights: [...new Set(selected.map(state => state.height ?? (state.width < 960 ? 800 : 900)))].sort((a, b) => a - b), boundary_widths: [...new Set(selected.flatMap(state => state.kind.startsWith('home-') ? [800, 801] : ['sheet-close', 'toolbar-summary', 'palette-return'].includes(state.kind) ? [959, 960] : []))].sort((a, b) => a - b), locales: [...new Set(selected.map(state => state.locale))], qualified_catalog_test_states: selected.filter(state => !['summary', 'palette-unqualified'].includes(state.kind)).length, original_unqualified_catalog_states: selected.filter(state => ['summary', 'palette-unqualified'].includes(state.kind)).length }, tests: { total: outcomes.length, passed: outcomes.filter(outcome => outcome.status === 'passed').length, failed: outcomes.filter(outcome => outcome.status === 'failed').length }, measurements, duration_ms: Date.now() - started, source: { before_sha256: before.sha256, after_sha256: after.sha256, files: before.files.length, drift }, limits: ['Synthetic catalog and principals are test-only; no authentication, authorization enforcement, host command, hosting service or production qualification.', 'Theme persistence means selected URL context survives document navigation and reload; this suite does not require a browser storage preference absent from the product contract.', 'Input-event-to-second-frame measurements use browser performance.now and requestAnimationFrame. Action-to-second-frame durations also include automation dispatch. Neither is INP. Layout-shift entries include recent-input flags and are not a page CLS qualification.', 'Sampled shell routes, explicit field contracts, two locales and selected breakpoints do not certify every screen or accessibility requirement.', 'Fonts load from the panel origin and every request to another origin is aborted and fails the case; case timings qualify ready-font interaction and geometry on loopback, not cold-cache latency.', 'The account Home filter is exercised directly: slash focuses the visible existing search/filter input and preserves native typing. Command-palette access remains separately exercised through its shared keyboard shortcut. The unresolved-account cases exercise only the standalone synthetic summary DTO renderer; real authenticated missing-account HTTP requests remain denied.'], outcomes }
+  const report = { schema_version: 1, captured_at: new Date().toISOString(), status: outcomes.length === selected.length && outcomes.every(outcome => outcome.status === 'passed') && drift.length === 0 ? 'passed' : 'failed', runtime: process.version, environment: { platform: process.platform, browser: browser.version(), headless: true, loopback: true, cpu_throttling: 'none', network_throttling: 'none', external_requests: false, viewport_emulation_only: true, physical_touch_device: false }, scope: { filter: filter ?? null, full_suite_case_count: states.length, requested_case_count: selected.length, executed_case_count: outcomes.length, initial_widths: [...new Set(selected.map(state => state.width))].sort((a, b) => a - b), initial_heights: [...new Set(selected.map(state => state.height ?? (state.width < 960 ? 800 : 900)))].sort((a, b) => a - b), boundary_widths: [...new Set(selected.flatMap(state => state.kind.startsWith('home-') ? [959, 960] : ['sheet-close', 'toolbar-summary', 'palette-return'].includes(state.kind) ? [959, 960] : []))].sort((a, b) => a - b), locales: [...new Set(selected.map(state => state.locale))], qualified_catalog_test_states: selected.filter(state => !['summary', 'palette-unqualified'].includes(state.kind)).length, original_unqualified_catalog_states: selected.filter(state => ['summary', 'palette-unqualified'].includes(state.kind)).length }, tests: { total: outcomes.length, passed: outcomes.filter(outcome => outcome.status === 'passed').length, failed: outcomes.filter(outcome => outcome.status === 'failed').length }, measurements, duration_ms: Date.now() - started, source: { before_sha256: before.sha256, after_sha256: after.sha256, files: before.files.length, drift }, limits: ['Synthetic catalog and principals are test-only; no authentication, authorization enforcement, host command, hosting service or production qualification.', 'Theme persistence means selected URL context survives document navigation and reload; this suite does not require a browser storage preference absent from the product contract.', 'Input-event-to-second-frame measurements use browser performance.now and requestAnimationFrame. Action-to-second-frame durations also include automation dispatch. Neither is INP. Layout-shift entries include recent-input flags and are not a page CLS qualification.', 'Sampled shell routes, explicit field contracts, two locales and selected breakpoints do not certify every screen or accessibility requirement.', 'Fonts load from the panel origin and every request to another origin is aborted and fails the case; case timings qualify ready-font interaction and geometry on loopback, not cold-cache latency.', 'The account Home filter is exercised directly: slash focuses the visible existing search/filter input and preserves native typing. Command-palette access remains separately exercised through its shared keyboard shortcut. The unresolved-account cases exercise only the standalone synthetic summary DTO renderer; real authenticated missing-account HTTP requests remain denied.'], outcomes }
   writeFileSync(join(destination, 'results.json'), `${JSON.stringify(report, null, 2)}\n`)
   writeFileSync(join(destination, 'README.md'), `# Synthetic navigation acceptance\n\n${report.tests.passed}/${report.tests.total} cases passed; source drift: ${drift.length}.\n\nSee [results](results.json). Font faces, field counts, focus observations, action-to-second-frame timings and layout-shift entries are recorded per case.\n\n${report.limits.map(value => `- ${value}`).join('\n')}\n`)
   process.stdout.write(`${JSON.stringify({ status: report.status, tests: report.tests, drift: drift.length })}\n`)

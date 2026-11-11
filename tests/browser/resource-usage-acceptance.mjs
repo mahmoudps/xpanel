@@ -35,7 +35,19 @@ const before = fingerprint(), outcomes = [], surfaceOutcomes = []
 const syntheticCatalog = tools.map(tool => tool.status === 'out-of-scope' ? tool : ({ ...tool, status: 'verified', delivery: { status: 'verified', reason: 'Diagnostic resource-rendering fixture only; no capability qualification.', evidence: [] } }))
 const html = (locale, theme, density, surface = '/') => {
   const isAr = locale === 'ar', name = isAr ? 'استخدام الموارد' : 'Resource usage'
-  const base = renderWebApp({ surface: 'login', locale, theme, density })
+  if (surface.startsWith('/v2-')) {
+    const isResellers = surface === '/v2-resellers'
+    const principal = isResellers ? { kind: 'root', id: 'resource-fixture-root', username: 'fixture-root' } : { kind: 'user', id: 'resource-fixture-owner', username: 'fixture-owner', accountId: 'resource-fixture-account' }
+    const visibility = { principal, disabledFeatures: new Set() }
+    const doc = isResellers
+      ? renderWebApp({ surface: 'xwhm', activeRoute: '/whm/resellers', locale, theme, density, realtimeEnabled: false, visibility, catalog: syntheticCatalog, whm: { principal, activeRoute: '/whm/resellers', hostname: 'fixture.example.test', resellers: [
+        { id: 'fixture-reseller-1', username: 'fixture-one', acl: [], maxAccounts: 5, totalDiskMb: 10240, totalBandwidthMb: 102400, oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] },
+        { id: 'fixture-reseller-2', username: 'fixture-two', acl: [], maxAccounts: 'unlimited', totalDiskMb: 'unlimited', totalBandwidthMb: 'unlimited', oversell: { disk: false, bandwidth: false }, nameservers: [], delegatedIps: [] },
+      ] } })
+      : renderWebApp({ surface: 'xmail', activeRoute: '/mail/overview', locale, theme, density, realtimeEnabled: false, visibility, catalog: syntheticCatalog, mail: { mailbox: 'fixture-owner@example.test', quotaUsedMb: 7, activeRoute: '/mail/overview', messages: [] } })
+    return doc.replace('<body', '<body data-visual-fixture="synthetic"')
+  }
+  const base = renderWebApp({ surface: 'login', locale, theme, density, uiTheme: 'classic' })
   if (surface !== '/') {
     const principal = surface === '/resellers' ? { kind: 'root', id: 'resource-fixture-root', username: 'fixture-root' } : { kind: 'user', id: 'resource-fixture-owner', username: 'fixture-owner', accountId: 'resource-fixture-account' }
     const common = { locale, theme, realtimeEnabled: false, visibility: { principal, disabledFeatures: new Set() }, catalog: syntheticCatalog }
@@ -55,7 +67,7 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', 'http://127.0.0.1')
   const asset = serveStaticAsset(url.pathname)
   if (asset) { response.writeHead(asset.status, Object.fromEntries(asset.headers)); response.end(request.method === 'HEAD' ? undefined : Buffer.from(await asset.arrayBuffer())); return }
-  if (!['/', '/resellers', '/mail-unknown-cap'].includes(url.pathname)) { response.writeHead(404); response.end(); return }
+  if (!['/', '/resellers', '/mail-unknown-cap', '/v2-resellers', '/v2-mail-unknown-cap'].includes(url.pathname)) { response.writeHead(404); response.end(); return }
   response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
   response.end(request.method === 'HEAD' ? undefined : html(url.searchParams.get('lang') === 'ar' ? 'ar' : 'en', url.searchParams.get('theme') === 'dark' ? 'dark' : 'light', url.searchParams.get('density') === 'compact' ? 'compact' : 'comfortable', url.pathname))
 })
@@ -115,7 +127,7 @@ try {
     await context.close()
     if (outcomes.length % 4 === 0) console.log(JSON.stringify({ completedViews: outcomes.length, failedViews: outcomes.filter(item => item.status !== 'passed').length }))
   }
-  for (const surface of ['resellers', 'mail-unknown-cap']) for (const [locale, theme, width] of [['en', 'light', 1440], ['ar', 'dark', 360]]) {
+  for (const surface of ['resellers', 'mail-unknown-cap', 'v2-resellers', 'v2-mail-unknown-cap']) for (const [locale, theme, width] of [['en', 'light', 1440], ['ar', 'dark', 360]]) {
     const id = [surface, locale, theme, width].join('-'), outcome = { id, surface, locale, theme, width, synthetic: true, checks: [], errors: [] }
     const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: 'reduce' }), page = await context.newPage()
     page.on('pageerror', error => outcome.errors.push(error.message))
@@ -130,45 +142,88 @@ try {
       assert.equal(response.status(), 200)
       await page.evaluate(() => document.fonts.ready)
       outcome.font = await assertAppliedFont(page, 'h1', locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
-      outcome.geometry = await page.evaluate(() => {
-        const readMeter = group => group ? ({ kind: group.dataset.resourceState, used: group.querySelector('[data-resource-part="used"]').textContent, limit: group.querySelector('[data-resource-part="limit"]').textContent, hasBar: Boolean(group.querySelector('[role="meter"], .xp-meter__fill')), value: group.querySelector('.xp-meter__values').textContent, text: group.textContent }) : null
-        return {
-          documentWidth: document.documentElement.scrollWidth, bodyOverflow: getComputedStyle(document.body).overflowX, rootOverflow: getComputedStyle(document.documentElement).overflowX,
-          meters: [...document.querySelectorAll('.xp-meter')].map(readMeter),
-          nativeResellers: [...document.querySelectorAll('[data-reseller-row]')].map(row => ({ username: row.dataset.resellerRow, meters: [...row.querySelectorAll('.xp-meter')].map(readMeter) })),
-          resellerDetails: [...document.querySelectorAll('[data-reseller-detail]')].map(detail => ({
-            username: detail.querySelector('.xp-reseller-header h2').textContent.trim(),
-            capacities: ['maxAccounts', 'totalDiskMb', 'totalBandwidthMb'].map(name => {
-              const input = detail.querySelector(`input[name="${name}"]`), group = input?.closest('.xp-reseller-groups')
-              return { name, value: input?.value, label: input?.labels[0]?.textContent.trim(), unlimited: detail.querySelector(`input[name="${name}Unlimited"]`)?.checked, meter: readMeter(group?.querySelector('.xp-meter')) }
-            }),
-          })),
+      if (surface.startsWith('v2-')) {
+        outcome.geometry = await page.evaluate(() => {
+          const readV2Meter = group => {
+            if (!group) return null
+            const parts = [...group.querySelectorAll('.v2-meter__pair bdi')].map(el => el.textContent.trim())
+            return { used: parts[0] ?? null, limit: parts[1] ?? null, unit: group.querySelector('.v2-meter__unit')?.textContent.trim() ?? '', hasRoleMeter: Boolean(group.querySelector('[role="meter"]')), fillStyle: group.querySelector('.v2-bar__fill')?.getAttribute('style') ?? '', text: group.textContent }
+          }
+          return {
+            documentWidth: document.documentElement.scrollWidth, bodyOverflow: getComputedStyle(document.body).overflowX, rootOverflow: getComputedStyle(document.documentElement).overflowX,
+            meters: [...document.querySelectorAll('.v2-meter')].map(readV2Meter),
+            resellerDetails: [...document.querySelectorAll('[data-reseller-detail]')].map(detail => ({
+              username: detail.querySelector('.v2-reseller-header h2')?.textContent.trim() ?? '',
+              capacities: ['maxAccounts', 'totalDiskMb', 'totalBandwidthMb'].map(name => {
+                const input = detail.querySelector(`input[name="${name}"]`), group = input?.closest('.v2-reseller-stack')
+                return { name, value: input?.value, label: input?.labels[0]?.textContent.trim() ?? '', unlimited: detail.querySelector(`input[name="${name}Unlimited"]`)?.checked, meter: readV2Meter(group?.querySelector('.v2-meter')) }
+              }),
+            })),
+            mailOverview: document.querySelector('[data-section="mail-overview"]') ? { text: document.querySelector('[data-section="mail-overview"]').textContent, nativeMeters: document.querySelectorAll('[data-section="mail-overview"] meter, [data-section="mail-overview"] [role="meter"]').length } : null,
+          }
+        })
+        check('actual-surface-document-contained-without-concealment', outcome.geometry.documentWidth <= width + 1 && !['hidden', 'clip'].includes(outcome.geometry.bodyOverflow) && !['hidden', 'clip'].includes(outcome.geometry.rootOverflow), outcome.geometry)
+        if (surface === 'v2-resellers') {
+          const notRead = locale === 'ar' ? 'غير مقروء' : 'Not read', unlimited = locale === 'ar' ? 'غير محدود' : 'Unlimited'
+          const honestV2Unknown = meter => meter && meter.used === notRead && !meter.hasRoleMeter && meter.fillStyle.includes('0%') && !/Healthy|Within limit|ضمن الحد/.test(meter.text)
+          check('unknown-values-have-no-meter-or-healthy-state', outcome.geometry.meters.length === 6 && outcome.geometry.meters.every(honestV2Unknown), outcome.geometry.meters)
+          const capacityContracts = [
+            { username: 'fixture-one', unlimited: false, values: ['5', '10240', '102400'], display: ['5', '10240', '102400'] },
+            { username: 'fixture-two', unlimited: true, values: ['', '', ''], display: [unlimited, unlimited, unlimited] },
+          ]
+          check('reseller-capacity-detail-identities-preserved', outcome.geometry.resellerDetails.length === capacityContracts.length && capacityContracts.every(expected => outcome.geometry.resellerDetails.filter(detail => detail.username === expected.username).length === 1), outcome.geometry.resellerDetails)
+          for (const expected of capacityContracts) {
+            const detail = outcome.geometry.resellerDetails.find(item => item.username === expected.username)
+            check('reseller-capacity-limits-' + expected.username, detail?.capacities.length === 3 && ['maxAccounts', 'totalDiskMb', 'totalBandwidthMb'].every((name, index) => {
+              const capacity = detail.capacities[index]
+              return capacity.name === name && capacity.value === expected.values[index] && capacity.unlimited === expected.unlimited && honestV2Unknown(capacity.meter) && capacity.meter.limit === expected.display[index] && (index === 0 || capacity.label.includes('(MiB)') && capacity.meter.unit === 'MiB')
+            }), detail)
+          }
+        } else {
+          check('unknown-values-have-no-meter-or-healthy-state', outcome.geometry.mailOverview?.nativeMeters === 0 && !/Healthy|Within limit|ضمن الحد/.test(outcome.geometry.mailOverview?.text ?? ''), outcome.geometry.mailOverview)
+          check('mail-known-usage-survives-unknown-cap', Boolean(outcome.geometry.mailOverview?.text.includes('7.00\u00a0MiB') && outcome.geometry.mailOverview?.text.includes(locale === 'ar' ? 'غير متاح' : 'Unavailable')), outcome.geometry.mailOverview)
         }
-      })
-      check('actual-surface-document-contained-without-concealment', outcome.geometry.documentWidth <= width + 1 && !['hidden', 'clip'].includes(outcome.geometry.bodyOverflow) && !['hidden', 'clip'].includes(outcome.geometry.rootOverflow), outcome.geometry)
-      check('unknown-values-have-no-meter-or-healthy-state', outcome.geometry.meters.length > 0 && outcome.geometry.meters.every(meter => meter.kind === 'unavailable' && !meter.hasBar && !/Healthy|Within limit|ضمن الحد/.test(meter.text)), outcome.geometry.meters)
-      if (surface === 'resellers') {
-        const unknown = locale === 'ar' ? 'غير متاح' : 'Unavailable', unlimited = locale === 'ar' ? 'غير محدود' : 'Unlimited'
-        const honestUnknown = meter => meter?.kind === 'unavailable' && meter.used === unknown && !meter.hasBar && !/Healthy|Within limit|ضمن الحد/.test(meter.text)
-        const nativeContracts = [{ username: 'fixture-one', limits: ['5', '10'], units: [locale === 'ar' ? 'حسابات' : 'accounts', 'GiB'] }, { username: 'fixture-two', limits: [unlimited, unlimited], units: [locale === 'ar' ? 'حسابات' : 'accounts', 'GiB'] }]
-        check('reseller-native-configured-caps-preserved', outcome.geometry.nativeResellers.length === nativeContracts.length && nativeContracts.every(expected => {
-          const rows = outcome.geometry.nativeResellers.filter(row => row.username === expected.username), row = rows[0]
-          return rows.length === 1 && row.meters.length === 2 && row.meters.every((meter, index) => honestUnknown(meter) && meter.limit === expected.limits[index] && meter.value.includes(expected.units[index]))
-        }), outcome.geometry.nativeResellers)
-        const capacityContracts = [
-          { username: 'fixture-one', unlimited: false, values: ['5', '10240', '102400'], display: ['5', '10,240', '102,400'] },
-          { username: 'fixture-two', unlimited: true, values: ['', '', ''], display: [unlimited, unlimited, unlimited] },
-        ]
-        check('reseller-capacity-detail-identities-preserved', outcome.geometry.resellerDetails.length === capacityContracts.length && capacityContracts.every(expected => outcome.geometry.resellerDetails.filter(detail => detail.username === expected.username).length === 1), outcome.geometry.resellerDetails)
-        for (const expected of capacityContracts) {
-          const detail = outcome.geometry.resellerDetails.find(item => item.username === expected.username)
-          check('reseller-capacity-limits-' + expected.username, detail?.capacities.length === 3 && ['maxAccounts', 'totalDiskMb', 'totalBandwidthMb'].every((name, index) => {
-            const capacity = detail.capacities[index]
-            return capacity.name === name && capacity.value === expected.values[index] && capacity.unlimited === expected.unlimited && honestUnknown(capacity.meter) && capacity.meter.limit === expected.display[index] && (index === 0 || capacity.label.includes('(MiB)') && capacity.meter.value.includes(' MiB'))
-          }), detail)
+      } else {
+        outcome.geometry = await page.evaluate(() => {
+          const readMeter = group => group ? ({ kind: group.dataset.resourceState, used: group.querySelector('[data-resource-part="used"]').textContent, limit: group.querySelector('[data-resource-part="limit"]').textContent, hasBar: Boolean(group.querySelector('[role="meter"], .xp-meter__fill')), value: group.querySelector('.xp-meter__values').textContent, text: group.textContent }) : null
+          return {
+            documentWidth: document.documentElement.scrollWidth, bodyOverflow: getComputedStyle(document.body).overflowX, rootOverflow: getComputedStyle(document.documentElement).overflowX,
+            meters: [...document.querySelectorAll('.xp-meter')].map(readMeter),
+            nativeResellers: [...document.querySelectorAll('[data-reseller-row]')].map(row => ({ username: row.dataset.resellerRow, meters: [...row.querySelectorAll('.xp-meter')].map(readMeter) })),
+            resellerDetails: [...document.querySelectorAll('[data-reseller-detail]')].map(detail => ({
+              username: detail.querySelector('.xp-reseller-header h2').textContent.trim(),
+              capacities: ['maxAccounts', 'totalDiskMb', 'totalBandwidthMb'].map(name => {
+                const input = detail.querySelector(`input[name="${name}"]`), group = input?.closest('.xp-reseller-groups')
+                return { name, value: input?.value, label: input?.labels[0]?.textContent.trim(), unlimited: detail.querySelector(`input[name="${name}Unlimited"]`)?.checked, meter: readMeter(group?.querySelector('.xp-meter')) }
+              }),
+            })),
+          }
+        })
+        check('actual-surface-document-contained-without-concealment', outcome.geometry.documentWidth <= width + 1 && !['hidden', 'clip'].includes(outcome.geometry.bodyOverflow) && !['hidden', 'clip'].includes(outcome.geometry.rootOverflow), outcome.geometry)
+        check('unknown-values-have-no-meter-or-healthy-state', outcome.geometry.meters.length > 0 && outcome.geometry.meters.every(meter => meter.kind === 'unavailable' && !meter.hasBar && !/Healthy|Within limit|ضمن الحد/.test(meter.text)), outcome.geometry.meters)
+        if (surface === 'resellers') {
+          const unknown = locale === 'ar' ? 'غير متاح' : 'Unavailable', unlimited = locale === 'ar' ? 'غير محدود' : 'Unlimited'
+          const honestUnknown = meter => meter?.kind === 'unavailable' && meter.used === unknown && !meter.hasBar && !/Healthy|Within limit|ضمن الحد/.test(meter.text)
+          const nativeContracts = [{ username: 'fixture-one', limits: ['5', '10'], units: [locale === 'ar' ? 'حسابات' : 'accounts', 'GiB'] }, { username: 'fixture-two', limits: [unlimited, unlimited], units: [locale === 'ar' ? 'حسابات' : 'accounts', 'GiB'] }]
+          check('reseller-native-configured-caps-preserved', outcome.geometry.nativeResellers.length === nativeContracts.length && nativeContracts.every(expected => {
+            const rows = outcome.geometry.nativeResellers.filter(row => row.username === expected.username), row = rows[0]
+            return rows.length === 1 && row.meters.length === 2 && row.meters.every((meter, index) => honestUnknown(meter) && meter.limit === expected.limits[index] && meter.value.includes(expected.units[index]))
+          }), outcome.geometry.nativeResellers)
+          const capacityContracts = [
+            { username: 'fixture-one', unlimited: false, values: ['5', '10240', '102400'], display: ['5', '10,240', '102,400'] },
+            { username: 'fixture-two', unlimited: true, values: ['', '', ''], display: [unlimited, unlimited, unlimited] },
+          ]
+          check('reseller-capacity-detail-identities-preserved', outcome.geometry.resellerDetails.length === capacityContracts.length && capacityContracts.every(expected => outcome.geometry.resellerDetails.filter(detail => detail.username === expected.username).length === 1), outcome.geometry.resellerDetails)
+          for (const expected of capacityContracts) {
+            const detail = outcome.geometry.resellerDetails.find(item => item.username === expected.username)
+            check('reseller-capacity-limits-' + expected.username, detail?.capacities.length === 3 && ['maxAccounts', 'totalDiskMb', 'totalBandwidthMb'].every((name, index) => {
+              const capacity = detail.capacities[index]
+              return capacity.name === name && capacity.value === expected.values[index] && capacity.unlimited === expected.unlimited && honestUnknown(capacity.meter) && capacity.meter.limit === expected.display[index] && (index === 0 || capacity.label.includes('(MiB)') && capacity.meter.value.includes(' MiB'))
+            }), detail)
+          }
         }
+        else check('mail-known-usage-survives-unknown-cap', outcome.geometry.meters.length > 0 && outcome.geometry.meters.every(meter => meter.used === '7' && meter.limit === (locale === 'ar' ? 'غير متاح' : 'Unavailable')), outcome.geometry.meters)
       }
-      else check('mail-known-usage-survives-unknown-cap', outcome.geometry.meters.length > 0 && outcome.geometry.meters.every(meter => meter.used === '7' && meter.limit === (locale === 'ar' ? 'غير متاح' : 'Unavailable')), outcome.geometry.meters)
       check('actual-surface-no-page-errors', outcome.errors.length === 0, outcome.errors)
       outcome.status = outcome.checks.every(check => check.passed) ? 'passed' : 'failed'
     } catch (error) { outcome.status = 'failed'; outcome.error = { name: error.name, message: error.message } }

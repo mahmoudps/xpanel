@@ -30,6 +30,18 @@ describe('SSH policy client', { tags: ['unit'] }, () => {
     expect(q<HTMLButtonElement>('[data-whm-ssh-stop]').disabled).toBe(false)
   })
 
+  it('styles a v2 tile by what the fact writes: a count as a number, a word as text', async () => {
+    document.body.innerHTML = sshPage().replace('<bdi data-whm-ssh-fact="today-accepted"></bdi>', '<p class="v2-kpi__value v2-kpi__value--text"><span data-whm-ssh-fact="today-accepted">Not read</span></p>')
+    const tile = () => q('[data-whm-ssh-fact="today-accepted"]').parentElement!
+    bind(() => sshView())
+    await flush()
+    expect(tile().classList.contains('v2-kpi__value--text')).toBe(false)
+    document.body.innerHTML = sshPage().replace('<bdi data-whm-ssh-fact="today-accepted"></bdi>', '<p class="v2-kpi__value"><span data-whm-ssh-fact="today-accepted">0</span></p>')
+    bind(() => ({ ...sshView(), host: null }))
+    await flush()
+    expect([q('[data-whm-ssh-fact="today-accepted"]').textContent, tile().classList.contains('v2-kpi__value--text')]).toEqual(['Not read', true])
+  })
+
   it('sends the reviewed revision and both sign-in switches', async () => {
     document.body.innerHTML = sshPage()
     const calls = bind(call => call.method === 'PUT' ? { application: { changed: true } } : sshView())

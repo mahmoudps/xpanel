@@ -141,9 +141,9 @@ describe('approved transfer comparison and finite records', () => {
     expect(body).toBe(document.querySelector('[data-transfer-accounts]'))
     expect(body.querySelectorAll('input[type="checkbox"]')).toHaveLength(2)
     expect(body.rows[0]!.cells[1]!.textContent).toContain('alice.example.test'); expect(body.rows[0]!.cells[1]!.textContent).toContain('2020')
-    expect(body.rows[0]!.cells[2]!.textContent).toBe('Gold'); expect(body.rows[0]!.cells[3]!.textContent).toBe('1.50 KB')
+    expect(body.rows[0]!.cells[2]!.textContent).toBe('Gold'); expect(body.rows[0]!.cells[3]!.textContent).toBe('\u20661.46\u00a0KiB\u2069')
     expect(body.rows[0]!.cells[4]!.textContent).toBe('1'); expect(body.rows[0]!.cells[5]!.textContent).toBe('2')
-    expect(body.rows[1]!.cells[3]!.textContent).toBe('0 B'); expect(body.rows[1]!.cells[4]!.textContent).toBe('0')
+    expect(body.rows[1]!.cells[3]!.textContent).toBe('\u20660\u00a0B\u2069'); expect(body.rows[1]!.cells[4]!.textContent).toBe('0')
     const all = document.querySelector<HTMLInputElement>('[data-transfer-select-all]')!
     expect(all.closest('tbody')).toBeNull(); expect(all.indeterminate).toBe(true)
     expect(document.body.textContent).not.toMatch(/[\u0660-\u0669\u06f0-\u06f9]/)

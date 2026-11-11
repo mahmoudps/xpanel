@@ -56,7 +56,7 @@ describe.each(['classic', 'v2'] as const)('%s mailbox dynamic templates', theme 
     expect(link.getAttribute('href')).toBe(path); expect(link.rel).toContain('noopener')
     expect(link.classList.contains(theme === 'v2' ? 'v2-btn' : 'xp-btn')).toBe(true)
     const size = list.querySelector('[data-xp-slot="size"]')!
-    expect(size.getAttribute('dir')).toBe('ltr'); expect(size.textContent).toBe('6 B')
+    expect(size.getAttribute('dir')).toBe('ltr'); expect(size.textContent).toBe('\u20666\u00a0B\u2069')
   })
   it.each(['missing', 'duplicate'] as const)('refuses %s attachment templates before a request', async disposition => {
     const send = vi.fn(async () => null)

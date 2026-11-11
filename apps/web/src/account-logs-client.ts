@@ -7,6 +7,9 @@ const clientTemplateSlot = canonicalClientTemplateSlot
 import type { MessageValues } from './i18n.ts'
 /// <reference lib="dom" />
 import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayDateTime } from './tokens.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 const LOGS_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export interface AccountAccessEntry { time: string; host: string; ip: string; method: string; uri: string; status: number; bytes: number; referer: string; agent: string }
@@ -94,7 +97,7 @@ function bindAccountLogs(_askDialog: unknown): void {
       archive.checked = view.settings.archive; previous.checked = view.settings.removePreviousMonthArchive; days.value = view.settings.retentionDays === null ? '' : String(view.settings.retentionDays)
       if (source) source.textContent = view.source === 'account' ? t('These are your own settings.') : t('These are the server defaults; saving makes them your own settings.')
     }
-    const size = (value: number): string => value >= 1048576 ? (value / 1048576).toFixed(1) + ' MiB' : value >= 1024 ? (value / 1024).toFixed(1) + ' KiB' : value + ' B'
+    const size = (value: number): string => formatClientBytes(value)
     const list = async (): Promise<void> => {
       say(listStatus, 'reading', t('Reading archives…'))
       try {
@@ -200,4 +203,4 @@ function bindAccountLogs(_askDialog: unknown): void {
   })
 }
 
-export const ACCOUNT_LOGS_CLIENT_BINDING = `(()=>{${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const LOGS_ID=${LOGS_ID.toString()};const LOG_LEVELS=${JSON.stringify(LOG_LEVELS)};const logsObject=${logsObject.toString()};const logsText=${logsText.toString()};const readAccountLogsView=${readAccountLogsView.toString()};const filterAccountLogEntries=${filterAccountLogEntries.toString()};const readRawAccessSettings=${readRawAccessSettings.toString()};const readRawAccessArchives=${readRawAccessArchives.toString()};return ${bindAccountLogs.toString()};})()`
+export const ACCOUNT_LOGS_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${VIEW_RECORD_HELPERS}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const LOGS_ID=${LOGS_ID.toString()};const LOG_LEVELS=${JSON.stringify(LOG_LEVELS)};const logsObject=${logsObject.toString()};const logsText=${logsText.toString()};const readAccountLogsView=${readAccountLogsView.toString()};const filterAccountLogEntries=${filterAccountLogEntries.toString()};const readRawAccessSettings=${readRawAccessSettings.toString()};const readRawAccessArchives=${readRawAccessArchives.toString()};return ${bindAccountLogs.toString()};})()`

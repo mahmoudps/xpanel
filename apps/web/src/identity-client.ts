@@ -139,7 +139,7 @@ function bindIdentity(askDialog: Ask | undefined): void {
         k.field('client', client.address ? (client.verified === true ? t('{address} (verified)', { address: text(client.address) }) : t('{address} (not verified)', { address: text(client.address) })) : t('Not known'))
         k.field('count', questions.length ? t('{count} questions set', { count: questions.length }) : t('No questions set'))
         k.rows('questions', questions.map(item => [String(item.position), typed(item.question)]), t('No security questions are set.'), 2)
-        k.rows('addresses', list(view.addresses).map(item => [k.technical(text(item.address)), item.source === 'answered' ? t('Answered from this address') : t('Added by you'), k.when(item.createdAt) ?? '-',
+        k.rows('addresses', list(view.addresses).map(item => [k.technical(text(item.address)), item.source === 'answered' ? t('Answered from this address') : t('Added by you'), (k.when(item.createdAt) ? k.technical(k.when(item.createdAt)!) : '-'),
           action(t('Remove'), t('Remove {address}', { address: text(item.address) }), () => void address('remove', text(item.address)))]), t('No verified addresses.'), 4)
         const current = k.q<HTMLButtonElement>('[data-sec-action="add-current"]')
         if (current) current.dataset.address = text(client.address)
@@ -203,7 +203,7 @@ function bindIdentity(askDialog: Ask | undefined): void {
         loaded = view.available === true
         options('provider', list(view.providers).map(item => [text(item.id), text(item.label)]), t('Select a provider'))
         k.field('availability', view.available === true ? (list(view.providers).length ? t('Available') : t('No provider is enabled for this panel')) : view.reason === 'public_origin_required' ? t('Unavailable: the panel has no public HTTPS address') : t('Unavailable on this panel'))
-        k.rows('identities', list(view.identities).map(item => [typed(item.providerLabel || item.providerId), item.label ? k.technical(text(item.label)) : '-', k.when(item.createdAt) ?? '-', k.when(item.lastUsedAt) ?? t('Never'),
+        k.rows('identities', list(view.identities).map(item => [typed(item.providerLabel || item.providerId), item.label ? k.technical(text(item.label)) : '-', (k.when(item.createdAt) ? k.technical(k.when(item.createdAt)!) : '-'), k.when(item.lastUsedAt) ?? t('Never'),
           action(t('Unlink'), t('Unlink this identity'), () => void unlink(text(item.id)))]), t('No external identities are linked.'), 5)
         k.note('read', t('Read from this server.'))
       }
@@ -251,7 +251,7 @@ function bindIdentity(askDialog: Ask | undefined): void {
           [entry.xpanel === true ? 'xPanel' : '', entry.xwhm === true ? 'xWHM' : ''].filter(Boolean).join(', ') || t('Disabled'),
           k.group(k.actionButton(t('Edit'), t('Edit {name}', { name: text(item.label) }), () => fill(item), !k.manageable()), k.actionButton(t('Remove'), t('Remove {name}', { name: text(item.label) }), () => void remove(text(item.id)), !k.manageable()))] }),
           t('No identity providers are configured.'), 5)
-        k.rows('links', list(next.identities).map(item => [text(item.principal) || t('Removed user'), text(item.providerId), item.label ? k.technical(text(item.label)) : '-', k.when(item.createdAt) ?? '-', k.when(item.lastUsedAt) ?? t('Never'),
+        k.rows('links', list(next.identities).map(item => [text(item.principal) || t('Removed user'), text(item.providerId), item.label ? k.technical(text(item.label)) : '-', (k.when(item.createdAt) ? k.technical(k.when(item.createdAt)!) : '-'), k.when(item.lastUsedAt) ?? t('Never'),
           action(t('Unlink'), t('Unlink this identity'), () => void unlinkAny(text(item.id)))]), t('No identities are linked.'), 6)
         k.note(next.state === 'invalid' ? 'failed' : 'read', next.state === 'invalid' ? t('The saved provider configuration is damaged and needs review.') : t('Read from this server.'))
       }

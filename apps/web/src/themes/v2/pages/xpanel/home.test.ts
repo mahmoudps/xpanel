@@ -51,10 +51,17 @@ describe('v2 account home', () => {
   it('renders actual zero readings without converting them to missing or inventing enforcement', () => {
     const input = props({ usage: { phpVersion: null, diskBytes: 0, memoryBytes: 0, processCount: 0, bandwidth: 'unmeasured' } })
     const meters = panelHomeMeters(input, v2Messages.translator('en'))
-    expect(meters[0]!.valueText).toBe('0 MiB / 5120 MiB')
+    // Two numbers are isolated together; a limit of a GiB or more reads in GiB.
+    expect(meters[0]!.valueText).toBe('⁦0 B / 5.00 GiB⁩')
     expect(meters[0]!.percent).toBe(0)
-    expect(meters[4]!.valueText).toBe('0 / 100')
+    expect(meters[4]!.valueText).toBe('⁦0 / 100⁩')
     expect(meters[1]!.valueText).toContain('Unavailable')
+  })
+
+  it('isolates a numeric limit after an unavailable reading so its unit follows its number in Arabic', () => {
+    const [disk] = panelHomeMeters(props(), v2Messages.translator('ar'))
+    expect(disk!.valueText).toMatch(/ \/ ⁦[0-9.]+ [MG]iB⁩$/)
+    expect(disk!.valueText).not.toMatch(/[٠-٩]/)
   })
 
   it('does not treat a foreign plan or child record as the account configuration', () => {
@@ -187,7 +194,7 @@ describe('v2 account home', () => {
     expect(nodes.filter(node => node.attrs.has('data-tool'))).toHaveLength(baseline.filter(node => node.attrs.has('data-tool')).length)
     expect(nodes.find(node => node.attrs.get('data-tool-capability') === 'backup')?.attrs.has('disabled')).toBe(true)
     expect(V2_PANEL_HOME_CSS).toContain('.v2-panel-home .v2-home-tool-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))')
-    expect(V2_PANEL_HOME_CSS).toContain('.v2-panel-home .v2-home-tool-group{display:block;min-inline-size:0;padding:var(--v2-panel-padding)')
+    expect(V2_PANEL_HOME_CSS).toContain('.v2-panel-home .v2-home-tool-group{display:block;min-inline-size:0;padding:var(--space-2) 12px 12px')
     expect(V2_PANEL_HOME_CSS).toContain('.v2-panel-home .v2-home-tool-grid{display:flex;flex-direction:column')
   })
 
@@ -209,6 +216,28 @@ describe('v2 account home', () => {
     expect(html).not.toContain('other.test')
     expect(html).not.toContain('>No stored certificate<')
     expect(html).toContain('Not read')
+  })
+
+  it('shows the stored expiry only under an owned stored certificate', () => {
+    const certificateId = 'owned-domain-certificate-reference'
+    const certificate = { id: certificateId, accountId: account.id, names: [domain.name], source: 'acme' as const, challenge: 'http-01' as const, notAfter: '2027-01-12T09:00:00Z', autoRenew: true }
+    const html = renderV2PanelHome(props({ domains: [{ ...domain, certificateId }], certificates: [certificate] }))
+    expect(html).toContain('data-home-site-expiry>Expires (UTC) <bdi dir="ltr">2027-01-12 09:00</bdi>')
+    expect(renderV2PanelHome(props({ domains: [{ ...domain, certificateId }], certificates: [{ ...certificate, accountId: 'another-account' }] }))).not.toContain('data-home-site-expiry')
+    expect(renderV2PanelHome(props())).not.toContain('data-home-site-expiry')
+  })
+
+  it('names the active generation only when core supplied a valid one', () => {
+    expect(renderV2PanelHome(props({ generationId: 142 }))).toMatch(/data-home-generation>.*Applied in generation #142/)
+    expect(renderV2PanelHome(props())).not.toContain('data-home-generation')
+    expect(renderV2PanelHome(props({ generationId: 0 }))).not.toContain('data-home-generation')
+    expect(renderV2PanelHome({ generationId: 142 })).not.toContain('data-home-generation')
+  })
+
+  it('marks a measured warning with its level and stays plain without one', () => {
+    const usage = { phpVersion: null, diskBytes: 5000 * 1024 * 1024, memoryBytes: null, processCount: null, bandwidth: 'unmeasured' as const }
+    expect(renderV2PanelHome(props({ usage }))).toMatch(/data-account-warning="disk" data-level="critical"/)
+    expect(renderV2PanelHome(props())).not.toContain('data-account-warning=')
   })
 
   it('keeps the full home layout without account identity when no account was supplied', () => {

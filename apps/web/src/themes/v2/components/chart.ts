@@ -6,21 +6,49 @@ import { escapeHtml } from '../html.ts'
 
 const round = (value: number): number => Math.round(value * 100) / 100
 const ratio = (value: number, max: number): number => (max > 0 && Number.isFinite(value) ? Math.min(1, Math.max(0, value / max)) : 0)
+const validSample = (value: number | null | undefined): value is number =>
+  value !== null && value !== undefined && Number.isFinite(value)
 
-/** Line and area paths of a series scaled into a width x height box (0 at the bottom). */
-export function seriesPaths(values: readonly number[], width: number, height: number, max = Math.max(...values, 0)): { line: string; area: string } {
+/** Line and area paths of a series scaled into a width x height box (0 at the bottom), preserving null-bucket gaps. */
+export function seriesPaths(
+  values: readonly (number | null)[],
+  width: number,
+  height: number,
+  max = Math.max(...values.filter(validSample), 0),
+): { line: string; area: string } {
   const step = values.length > 1 ? width / (values.length - 1) : 0
-  const points = values.map((value, index) => `${round(index * step)} ${round(height - ratio(value, max) * height)}`)
-  const line = `M${points.join('L')}`
-  return { line, area: `${line}L${round((values.length - 1) * step)} ${height}L0 ${height}Z` }
+  const runs: { x: number; y: number }[][] = []
+  let current: { x: number; y: number }[] = []
+  values.forEach((value, index) => {
+    if (validSample(value)) {
+      current.push({ x: round(index * step), y: round(height - ratio(value, max) * height) })
+    } else if (current.length) {
+      runs.push(current)
+      current = []
+    }
+  })
+  if (current.length) runs.push(current)
+  const lines: string[] = []
+  const areas: string[] = []
+  for (const run of runs) {
+    if (run.length === 1) {
+      const point = run[0]!
+      lines.push(`M${point.x} ${point.y}L${point.x} ${point.y}`)
+    } else {
+      const seg = `M${run.map(point => `${point.x} ${point.y}`).join('L')}`
+      lines.push(seg)
+      areas.push(`${seg}L${run[run.length - 1]!.x} ${height}L${run[0]!.x} ${height}Z`)
+    }
+  }
+  return { line: lines.join(''), area: areas.join('') }
 }
 
-export const sparklinePaths = (values: readonly number[], width: number, height: number): { line: string; area: string } =>
+export const sparklinePaths = (values: readonly (number | null)[], width: number, height: number): { line: string; area: string } =>
   seriesPaths(values, width, height - 2)
 
 export interface LineSeries {
   label: string
-  values: readonly number[]
+  values: readonly (number | null)[]
   /** The second series is dashed so it reads without color. */
   dashed?: boolean
 }
@@ -41,10 +69,11 @@ export function lineChart(props: LineChartProps): string {
   const grid = (props.yTicks ?? []).length > 1
     ? `<path d="${props.yTicks!.map((_, i, all) => `M0 ${round((i / (all.length - 1)) * H)}H${W}`).join('')}" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke" fill="none"/>` : ''
   // Later series are drawn first so the primary series stays on top.
-  const layers = [...props.series].reverse().filter(series => series.values.length > 1).map(series => {
+  const layers = [...props.series].reverse().filter(series => series.values.length > 1 && series.values.some(validSample)).map(series => {
     const { line, area } = seriesPaths(series.values, W, H, props.max)
     const color = series.dashed ? 'var(--chart-2)' : 'var(--accent)'
-    return `<path d="${area}" fill="${color}" opacity="${series.dashed ? '0.10' : '0.14'}"/><path d="${line}" fill="none" stroke="${color}" stroke-width="2"${series.dashed ? ' stroke-dasharray="5 4"' : ''} vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`
+    const areaPath = area ? `<path d="${area}" fill="${color}" opacity="${series.dashed ? '0.10' : '0.14'}"/>` : ''
+    return `${areaPath}<path d="${line}" fill="none" stroke="${color}" stroke-width="2"${series.dashed ? ' stroke-dasharray="5 4"' : ''} vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>`
   }).join('')
   const height = props.height ?? 240
   const legend = props.series.map(series => `<li><svg aria-hidden="true" width="20" height="8" viewBox="0 0 20 8"><path d="M0 4h20" stroke="${series.dashed ? 'var(--chart-2)' : 'var(--accent)'}" stroke-width="2.5"${series.dashed ? ' stroke-dasharray="5 3"' : ''}/></svg>${escapeHtml(series.label)}</li>`).join('')

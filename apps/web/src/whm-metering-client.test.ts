@@ -27,8 +27,8 @@ describe('metering browser workflow', () => {
     bind(); await tick()
     expect(send.mock.calls).toEqual([['GET', '/api/server/monitoring/io']])
     const fact = (key: string) => document.querySelector(`[data-whm-metering-fact="${key}"]`)!.textContent
-    expect(fact('observed')).toBe('2026-10-28 14:05 UTC'); expect(fact('read')).toBe('4.1 MiB/s'); expect(fact('iops')).toBe('157 IOPS')
-    expect(fact('latency')).toBe('4.3 ms (60 s)'); expect(fact('host')).toBe('12% CPU; 4.0 GiB / 8.0 GiB')
+    expect(fact('observed')).toBe('2026-10-28 14:05 UTC'); expect(fact('read')).toBe('\u20664.10\u00a0MiB/s\u2069'); expect(fact('iops')).toBe('157 IOPS')
+    expect(fact('latency')).toBe('4.3 ms (60 s)'); expect(fact('host')).toBe('12% CPU; \u20664.00\u00a0GiB\u2069 / \u20668.00\u00a0GiB\u2069')
     expect(cells('devices')).toEqual([['vda', '3 ms', '-', '12.5%']])
     const [row] = cells()
     expect(row![0]).toBe('yousef (UID 20009, xpanel-20009.slice)'); expect(row![3]).toMatch(/^958 \/ 1024 MiB \(94%\); /); expect(row![5]).toMatch(/^96 \/ 128 PIDs \(75%\); /)
@@ -46,7 +46,7 @@ describe('metering browser workflow', () => {
     bind(); await tick()
     expect(send.mock.calls).toEqual([['GET', '/api/server/monitoring/bandwidth']])
     expect(cells()).toEqual([
-      ['alice', 'alice.test', 'Active', '3.0 KiB', '1.0 KiB', 'Not measured', '4.0 KiB', '3.9 KiB (102.4%); Over limit; Limit page served'],
+      ['alice', 'alice.test', 'Active', '\u20663.00\u00a0KiB\u2069', '\u20661.00\u00a0KiB\u2069', 'Not measured', '\u20664.00\u00a0KiB\u2069', '\u20663.91\u00a0KiB\u2069 (102.4%); Over limit; Limit page served'],
       ['bob', 'bob.test', 'Suspended', 'Not measured', 'Not measured', 'Not measured', 'Not measured', 'Unlimited'],
     ])
     expect(document.querySelector('[data-whm-metering-rows="bandwidth"] tr td:last-child')!.getAttribute('data-level')).toBe('critical')
@@ -80,9 +80,9 @@ describe('metering browser workflow', () => {
     ;(window as any).xpanelSessionRequest = send
     const ask = vi.fn(async () => true)
     new Function('return ' + WHM_METERING_CLIENT_BINDING)()(ask); await tick()
-    expect(cells('bandwidth')[0]![7]).toBe('3.9 KiB (102.4%); Over limit; Limit page served; Custom limit')
+    expect(cells('bandwidth')[0]![7]).toBe('\u20663.91\u00a0KiB\u2069 (102.4%); Over limit; Limit page served; Custom limit')
     expect(cells('bandwidth')[1]![7]).toBe('Unlimited; Relieved through 2026-10-28 (UTC)')
-    expect(cells('custom')).toEqual([['alice', 'alice.test', 'Basic', 'Unlimited', '500 MB', 'Reset to package limit']])
+    expect(cells('custom')).toEqual([['alice', 'alice.test', 'Basic', 'Unlimited', '\u2066500\u00a0MiB\u2069', 'Reset to package limit']])
     document.querySelector<HTMLButtonElement>('[data-whm-metering-rows="custom"] button')!.click(); await tick()
     expect(send).toHaveBeenCalledWith('POST', '/api/accounts/bandwidth/reset', { accounts: [ID] })
     const relief = document.querySelector<HTMLButtonElement>('[data-whm-bandwidth-relief]')!
@@ -109,8 +109,8 @@ describe('metering browser workflow', () => {
     bind(); await tick()
     expect(cells('retention')).toEqual([['alice', 'alice.test', "Archived in ~/logs; kept 7 days; previous month's archives removed", 'Account setting']])
     expect(cells('rotation-failures')).toEqual([['2026-10-28 00:05 UTC', 'alice', 'alice.test', 'archive_failed']])
-    expect(cells('pending')).toEqual([['alice', '1', '2.0 KiB', '2026-10-28 00:05 UTC', 'archive_pending: archive_quota_exceeded']])
-    expect(document.querySelector('[data-whm-metering-fact="held"]')!.textContent).toBe('1 waiting, 0 lost in the last run; kept 30 days and 2.0 GiB at most')
+    expect(cells('pending')).toEqual([['alice', '1', '\u20662.00\u00a0KiB\u2069', '2026-10-28 00:05 UTC', 'archive_pending: archive_quota_exceeded']])
+    expect(document.querySelector('[data-whm-metering-fact="held"]')!.textContent).toBe('1 waiting, 0 lost in the last run; kept 30 days and \u20662.00\u00a0GiB\u2069 at most')
     expect(document.querySelector('[data-whm-metering-fact="defaults"]')!.textContent).toBe('Archived in ~/logs; kept until removed')
     expect(() => readLogRetentionView({ ...view, rotation: { state: 'maybe' } })).toThrow()
     expect(() => readCustomBandwidthView({ accounts: [{ accountId: 'x' }] })).toThrow()
@@ -135,7 +135,7 @@ describe('metering browser workflow', () => {
     bind(); await tick()
     expect(send).toHaveBeenCalledWith('GET', '/api/accounts/disk-quotas?sort=username&dir=asc&page=1&pageSize=25')
     const row = document.querySelector('[data-quotas-rows] tr')!
-    expect([...row.querySelectorAll('td')].slice(0, 4).map(td => td.textContent)).toEqual(['alicealice.testOwner: root', 'root', '300 MB', '1024 MBPackage: Basic'])
+    expect([...row.querySelectorAll('td')].slice(0, 4).map(td => td.textContent)).toEqual(['alicealice.testOwner: root', 'root', '\u2066300\u00a0MiB\u2069', '\u20661.00\u00a0GiB\u2069Package: Basic'])
     expect(document.querySelector('[data-quotas-page]')!.textContent).toBe('Page 1 of 2 · 30 accounts')
     expect(document.querySelector<HTMLButtonElement>('[data-quotas-next]')!.disabled).toBe(false)
     document.querySelector<HTMLButtonElement>('[data-quotas-sort="used"]')!.click(); await tick()

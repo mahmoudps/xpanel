@@ -1,7 +1,7 @@
 import { canOpenRegisteredRoute, type CatalogTool } from '@xpanel/catalog'
 import type { FirewallRule } from '@xpanel/core'
 import type { WhmSurfaceProps } from '../surfaces/xwhm.ts'
-import { escapeHtml, renderLtrValue } from '../tokens.ts'
+import { escapeHtml, formatAsciiBytes, renderLtrValue } from '../tokens.ts'
 import { SOURCE_LOCALE, localeDirection, translator, type Locale } from '../i18n.ts'
 import { renderWhmFirewallClientTemplates } from './whm-firewall-client-templates.ts'
 import { renderWhmServiceClientTemplates } from './whm-service-client-templates.ts'
@@ -81,7 +81,7 @@ export function renderApprovedWhmServicesContent(props: WhmSurfaceProps): string
   const rows = serviceHealthPresentation(readable ? props.services ?? [] : [])
   const notReadText = raw(msgid('Not read'))
   const state = (value: string) => value === 'active' ? raw(msgid('Running')) : value === 'inactive' ? raw(msgid('Stopped')) : value === 'not-installed' ? raw(msgid('Not installed')) : notReadText
-  const memory = (value: number | null) => value === null ? notReadText : `${value} MB`
+  const memory = (value: number | null) => value === null ? notReadText : formatAsciiBytes(value * 1024 * 1024)
   const boot = (value: boolean | null) => value === null ? notReadText : raw(value ? msgid('Enabled') : msgid('Disabled'))
   const areas = [['', msgid('All services')], ['web', msgid('Web')], ['mail', msgid('Mail')], ['data', msgid('Data')], ['access', msgid('DNS and access')], ['unread', msgid('Not read')]] as const
   const facts = (values: readonly (readonly [string, string])[]) => `<dl class="xp-service-workspace__facts">${values.map(([key,label]) => `<div><dt>${t(label)}</dt><dd><bdi dir="auto" data-host-detail="${key}">${t(msgid('Not read'))}</bdi></dd></div>`).join('')}</dl>`

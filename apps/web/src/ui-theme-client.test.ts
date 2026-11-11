@@ -68,7 +68,7 @@ describe('personal UI theme chooser', () => {
   ] as const)('keeps personal choices independent from unqualified %s operations', async (surface, route, principal) => {
     document.documentElement.lang = 'en'
     document.documentElement.dir = 'ltr'
-    document.body.innerHTML = renderWebApp({ surface, activeRoute: route, locale: 'en', catalog: [], visibility: { principal } })
+    document.body.innerHTML = renderWebApp({ uiTheme: 'classic', surface, activeRoute: route, locale: 'en', catalog: [], visibility: { principal } })
     const workspace = $('[data-tool-availability="unverified"]')
     const form = $<HTMLFormElement>('form[data-ui-theme-form]')
     expect(workspace).not.toBeNull()

@@ -35,7 +35,12 @@ function bindWhmSshPolicy(askDialog: ((options: Record<string, unknown>) => Prom
     if (!port || !auth || !rootLogin || !apply || !start || !stop || !alarm) return
     const manage = panel.dataset.whmSshCanManage === 'true'
     let revision: string | null = null, channels: string[] = [], busy = false, active: string | null = null
-    const fact = (key: string, value: string): void => { scope.querySelectorAll<HTMLElement>('[data-whm-ssh-fact]').forEach(cell => { if (cell.dataset.whmSshFact === key) cell.textContent = value }) }
+    const fact = (key: string, value: string): void => { scope.querySelectorAll<HTMLElement>('[data-whm-ssh-fact]').forEach(cell => {
+      if (cell.dataset.whmSshFact !== key) return
+      cell.textContent = value
+      // A v2 tile styles a count as a number and a word as text, as it does when rendered.
+      const tile = cell.parentElement; if (tile?.classList.contains('v2-kpi__value')) tile.classList.toggle('v2-kpi__value--text', !/\d/.test(value))
+    }) }
     const counted = (value: unknown): string => object(value) && typeof value.accepted === 'number' ? String(value.accepted) : t('Not read')
     const failed = (value: unknown): string => object(value) && typeof value.failed === 'number' ? String(value.failed) : t('Not read')
     const partial = (value: unknown): string => object(value) && value.complete === false ? ' +' : ''

@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWhmSecurityToolsWorkspace } from './board-port/whm-security-tools-workspace.ts'
 import { renderV2WhmSecurityTool } from './themes/v2/pages/xwhm/security/tools.ts'
-import { translator } from './i18n.ts'
+import { isolateClientValues, translator } from './i18n.ts'
 import type { WhmSecurityToolsPage } from './board-port/whm-security-tools-workspace.ts'
 import { readAntivirusView, readIntrusionView, readIsolationView, readJobAck, readUnbanResult, WHM_SECURITY_TOOLS_CLIENT_BINDING } from './whm-security-tools-client.ts'
 
@@ -228,7 +228,7 @@ describe.each(['classic', 'v2'] as const)('%s intrusion finite button contract',
     const buttons = [...document.querySelectorAll<HTMLButtonElement>('[data-whm-security-tools-unban]')]
     expect(buttons[0]!.className).toBe(prototype.className)
     expect(buttons[0]!.textContent).toBe(translator(locale)('Unban'))
-    expect(buttons[0]!.getAttribute('aria-label')).toBe(translator(locale)('Unban {address} · {jail}', { address: '192.0.2.1', jail: 'sshd' }))
+    expect(buttons[0]!.getAttribute('aria-label')).toBe(translator(locale)('Unban {address} · {jail}', isolateClientValues(locale, { address: '192.0.2.1', jail: 'sshd' })))
     expect(buttons[0]!.type).toBe('button'); expect(buttons[0]!.disabled).toBe(false); expect(buttons[1]!.disabled).toBe(true); expect(prototype.disabled).toBe(true)
     if (theme === 'v2') expect(buttons[0]!.classList.contains('xp-btn')).toBe(false)
     buttons[0]!.click(); await tick()

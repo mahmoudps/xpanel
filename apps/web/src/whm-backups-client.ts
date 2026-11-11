@@ -25,6 +25,9 @@ import { readWhmBackupRunsView } from './acct-backup-runs-client.ts'
 import type { WhmBackupRun, WhmBackupRunArchive, WhmBackupRunsView } from './acct-backup-runs-client.ts'
 import { readRestoreMoreReply } from './acct-restore-client.ts'
 import type { RestoreMoreInventory } from './acct-restore-client.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 // Module-local aliases: the binding source refers to them by these names, defined again in WHM_BACKUPS_CLIENT_BINDING.
 const backupRunsView = readWhmBackupRunsView
 const backupRestoreReply = readRestoreMoreReply
@@ -255,9 +258,9 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       body.textContent = ''
       const snapshots = current?.snapshots ?? [], visible = snapshots.slice(snapshotPage * 25, (snapshotPage + 1) * 25)
       for (const snapshot of visible) {
-        const row = backupNode(root, 'snapshot-row', 'tr', { created: formatDisplayDateTime(snapshot.createdAt), kind: t('Recorded metadata'), username: snapshot.username, bytes: String(snapshot.sizeBytes) + ' B', contents: t('Not read'), integrity: t('Unverified'), state: t('Not a verified archive'), summary: t('Recorded paths') })
+        const row = backupNode(root, 'snapshot-row', 'tr', { created: formatDisplayDateTime(snapshot.createdAt), kind: t('Recorded metadata'), username: snapshot.username, bytes: formatClientBytes(snapshot.sizeBytes), contents: t('Not read'), integrity: t('Unverified'), state: t('Not a verified archive'), summary: t('Recorded paths') })
         const list = clientTemplateSlot(row, 'paths', 'ul')
-        for (const file of snapshot.files) list.append(backupNode(root, 'path', 'li', { text: file.path + ' · ' + String(file.sizeBytes) + ' B' }))
+        for (const file of snapshot.files) list.append(backupNode(root, 'path', 'li', { text: file.path + ' · ' + formatClientBytes(file.sizeBytes) }))
         body.append(row)
       }
       if (!visible.length) body.append(backupNode(root, 'snapshot-empty', 'tr', { message: t('No snapshot metadata was returned. Account archives remain separate.') }))
@@ -305,6 +308,8 @@ function bindWhmBackups(askDialog: ((options: Record<string, unknown>) => Promis
       const configuration = root.querySelector<HTMLElement>('[data-backup-section="configuration"]>p')
       if (configuration) configuration.textContent = t('Saved schedule and destination metadata were read. The requested policy does not prove scheduler installation, transport trust or low-priority CPU/IO enforcement (weight 10).')
       root.querySelectorAll<HTMLElement>('[data-backup-account-choices]').forEach(choices => { const previous = choices.previousElementSibling; if (previous?.tagName === 'P' && previous.getAttribute('role') === 'status') previous.textContent = t('Authorized current accounts read: {count}', { count: view.accounts.length }) })
+      // A static "not read" line of the page ends with the first successful read.
+      root.querySelectorAll<HTMLElement>('[data-backup-unread-note]').forEach(note => { note.hidden = true })
       const saved = root.querySelector<HTMLElement>('[data-backup-configuration-status]')
       if (saved) saved.textContent = !schedule ? t('No schedule is stored. The controls contain an unsaved draft.') : view.scheduler.verified ? t('Saved configuration read; the backup timer is running this schedule. Remote transport remains unverified.') : t('Saved configuration read; scheduling and remote transport remain unverified.')
     }
@@ -433,7 +438,7 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
     const one = <T extends Element>(selector: string): T | null => root.querySelector<T>(selector)
     const buttons = (key: string): HTMLButtonElement[] => [...root.querySelectorAll<HTMLButtonElement>('[data-backup-action="' + key + '"]')]
     const field = (key: string): HTMLInputElement | null => one<HTMLInputElement>('#backup-layout-' + key)
-    const size = (bytes: number | null): string => { if (bytes === null) return '-'; const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']; let value = bytes, unit = 0; while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++ } return (unit ? value.toFixed(1) : String(value)) + ' ' + units[unit] }
+    const size = (bytes: number | null): string => bytes === null ? '-' : formatClientBytes(bytes)
     const technical = (value: string): HTMLElement => backupNode(root, 'technical', 'bdi', { text: value })
     const stateLabel = (state: string): string => ({ running: t('Running'), succeeded: t('Succeeded'), failed: t('Failed'), unknown: t('Outcome unknown; review required'), finished: t('Finished'), verified: t('Verified') } as Record<string, string>)[state] ?? state
     let view: WhmBackupRunsView | null = null, configRevision = '', destinations: { id: string; name: string; kind: string; endpoint: string; username: string | null; pathPrefix: string; state: string; credentialRef: string | null }[] = []
@@ -669,4 +674,4 @@ function bindWhmBackupOperations(askDialog: ((options: Record<string, unknown>) 
   })
 }
 
-export const WHM_BACKUPS_CLIENT_BINDING = withFrameRequest(`(()=>{const backupDestinationEditorPresent=${backupDestinationEditorPresent.toString()};const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const backupNode=${backupNode.toString()};const requireBackupTemplates=${requireBackupTemplates.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const backupKinds=${JSON.stringify(backupKinds)};const backupObject=${backupObject.toString()};const backupText=${backupText.toString()};const backupIdentity=${backupIdentity.toString()};const backupInteger=${backupInteger.toString()};const backupBoolean=${backupBoolean.toString()};const backupArray=${backupArray.toString()};const backupRevision=${backupRevision.toString()};const backupApplication=${backupApplication.toString()};const readWhmBackupDestination=${readWhmBackupDestination.toString()};const readWhmBackupSchedule=${readWhmBackupSchedule.toString()};const readWhmBackupWorkspace=${readWhmBackupWorkspace.toString()};const backupStable=${backupStable.toString()};const backupUnknown=${backupUnknown.toString()};const backupRunsView=${readWhmBackupRunsView.toString()};const backupRestoreReply=${readRestoreMoreReply.toString()};const bindWhmBackups=${bindWhmBackups.toString()};const bindWhmBackupOperations=${bindWhmBackupOperations.toString()};return ask=>{bindWhmBackups(ask);bindWhmBackupOperations(ask)};})()`)
+export const WHM_BACKUPS_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};const backupDestinationEditorPresent=${backupDestinationEditorPresent.toString()};const clientTemplate=${clientTemplate.toString()};const clientTemplateSlot=${clientTemplateSlot.toString()};const cloneClientTemplate=${cloneClientTemplate.toString()};const backupNode=${backupNode.toString()};const requireBackupTemplates=${requireBackupTemplates.toString()};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};const backupKinds=${JSON.stringify(backupKinds)};const backupObject=${backupObject.toString()};const backupText=${backupText.toString()};const backupIdentity=${backupIdentity.toString()};const backupInteger=${backupInteger.toString()};const backupBoolean=${backupBoolean.toString()};const backupArray=${backupArray.toString()};const backupRevision=${backupRevision.toString()};const backupApplication=${backupApplication.toString()};const readWhmBackupDestination=${readWhmBackupDestination.toString()};const readWhmBackupSchedule=${readWhmBackupSchedule.toString()};const readWhmBackupWorkspace=${readWhmBackupWorkspace.toString()};const backupStable=${backupStable.toString()};const backupUnknown=${backupUnknown.toString()};const backupRunsView=${readWhmBackupRunsView.toString()};const backupRestoreReply=${readRestoreMoreReply.toString()};const bindWhmBackups=${bindWhmBackups.toString()};const bindWhmBackupOperations=${bindWhmBackupOperations.toString()};return ask=>{bindWhmBackups(ask);bindWhmBackupOperations(ask)};})()`)

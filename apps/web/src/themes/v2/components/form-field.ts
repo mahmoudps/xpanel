@@ -73,8 +73,8 @@ export const switchRow = (props: SwitchRowProps): string =>
 
 export const FORM_FIELD_CSS = `.v2-form{display:flex;flex-direction:column;gap:var(--space-2)}
 .v2-field{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}
-.v2-field>label{font-size:13px;font-weight:600}
-.v2-field :is(input,select,textarea):not([type=checkbox],[type=radio]){inline-size:100%;text-align:match-parent}
+.v2-field>label:not(:has(>input)){padding-inline:13px;font-size:13px;line-height:1.25;font-weight:600;text-box-trim:trim-end;text-box-edge:text}
+.v2-field :is(input,select,textarea):not([type=checkbox],[type=radio]){inline-size:100%;text-align:match-parent;text-align:-webkit-match-parent}
 .v2-field__unit{display:flex;align-items:center;gap:var(--space-1)}
 .v2-field__unit>input{flex:1 1 auto;min-width:0}
 .v2-field__unit>span{flex:none;min-inline-size:48px;font-size:13px;color:var(--text-2)}

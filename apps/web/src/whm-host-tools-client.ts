@@ -2,6 +2,12 @@
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { frameAccess as canonicalFrameAccess, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+import { ISOLATE_LTR_BINDING, isolateLtr as canonicalIsolateLtr } from './display-format.ts'
+// Module-local alias: the binding source declares it again from ISOLATE_LTR_BINDING.
+const isolateLtr = canonicalIsolateLtr
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameAccess = canonicalFrameAccess
 
 type Ask = (options: Record<string, unknown>) => Promise<unknown>
@@ -54,8 +60,8 @@ function bindWhmHostTools(askDialog: Ask | undefined): void {
     return known ?? (details.stateChanged === false || typeof value.status === 'number' && value.status >= 400 && value.status < 500 ? t('The server refused the request. Nothing was changed; check the values and try again.') : uncertain())
   }
   const confirm = async (title: string, body: string, label: string, danger = false): Promise<boolean> => typeof askDialog === 'function' && await askDialog({ title, body, confirm: label, danger }) === true
-  const stamp = (iso: unknown): string => typeof iso === 'string' ? iso.slice(0, 16).replace('T', ' ') + ' UTC' : '-'
-  const size = (bytes: unknown): string => { const value = Number(bytes) || 0; return value >= 1073741824 ? (value / 1073741824).toFixed(2) + ' GB' : value >= 1048576 ? (value / 1048576).toFixed(1) + ' MB' : Math.ceil(value / 1024) + ' KB' }
+  const stamp = (iso: unknown): string => typeof iso === 'string' ? isolateLtr(iso.slice(0, 16).replace('T', ' ') + ' UTC') : '-'
+  const size = (bytes: unknown): string => formatClientBytes(Number(bytes) || 0)
   const yes = (value: boolean): string => value ? t('Yes') : t('No')
   const results: Record<string, string> = { ok: t('Succeeded'), failed: t('Failed'), TYPE_MISMATCH: 'TYPE_MISMATCH' }
   const labels: Record<string, string> = { run: t('Run now'), edit: t('Edit'), log: t('Log'), 'clear-log': t('Clear log'), delete: t('Delete'), send: t('Send'), start: t('Start'), stop: t('Stop'), restart: t('Restart'), rotate: t('New key'), mount: t('Mount') }
@@ -227,4 +233,4 @@ function bindWhmHostTools(askDialog: Ask | undefined): void {
   })
 }
 
-export const WHM_HOST_TOOLS_CLIENT_BINDING = withFrameRequest(bindWhmHostTools.toString())
+export const WHM_HOST_TOOLS_CLIENT_BINDING = withFrameRequest(`(()=>{${ISOLATE_LTR_BINDING};const formatClientBytes=${ASCII_BYTES_BINDING};return ${bindWhmHostTools.toString()};})()`)

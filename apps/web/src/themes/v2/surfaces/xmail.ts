@@ -4,6 +4,7 @@ import type { UiTheme } from '../../contract.ts'
 import { actionState } from '../components/action-state.ts'
 import { notice } from '../components/notice.ts'
 import { escapeHtml } from '../html.ts'
+import { icon } from '../icons.ts'
 import { v2Messages } from '../messages.ts'
 import { renderV2MailCompose } from '../pages/xmail/compose.ts'
 import { renderV2MailInbox } from '../pages/xmail/inbox.ts'
@@ -40,7 +41,7 @@ export function createV2MailSurface(project: V2MailProjector, unavailable: UiThe
       ...(props.branding ? { branding: props.branding } : {}),
       context: { label: t('Mailbox'), title: view.mailbox },
       sidebarHtml: renderV2MailSidebar(t, view, props),
-      ...(searchHref ? { searchHtml: `<a class="v2-btn v2-mail-search" href="${escapeHtml(searchHref)}">${escapeHtml(t('Search mail'))}</a>` } : {}),
+      ...(searchHref ? { searchHtml: `<a class="v2-btn v2-mail-search" href="${escapeHtml(searchHref)}">${icon('search')}<span>${escapeHtml(t('Search mail'))}</span></a>` } : {}),
       realtimeEnabled: props.realtimeEnabled === true,
       languages: alternateLocales(locale).map(info => ({ tag: info.tag, href: query({ lang: info.tag }) })),
       scheme: { current: scheme, toggleHref: query({ theme: scheme === 'dark' ? 'light' : 'dark' }) },

@@ -3,6 +3,7 @@ import { tools } from '@xpanel/catalog'
 import { defaultPlan, type Account } from '@xpanel/core'
 import type { PanelSurfaceProps } from '../../../../contract.ts'
 import { matchesHook, parseMarkup, type HookSelector } from '../../../../markup.ts'
+import { PANEL_OPERATIONS_CSS } from './styles.ts'
 import { renderV2AccountBackupPage, renderV2AccountFtpPage, renderV2AccountGitPage, renderV2AccountPackagesPage, renderV2AccountRuntimePage, renderV2AccountTerminalPage, renderV2PanelOperationsPage, type PanelOperationAuthority } from './index.ts'
 
 const account: Account = { id: 'a1', username: 'alice', uid: 20014, gid: 20014, home: '/home/alice', primaryDomain: 'alice.example.test', planId: 'p1', ownerId: null, status: 'active', suspendReason: null, contactEmail: '', ipv4: '192.0.2.1', ipv6: null, extraIps: [], shell: 'jailed', createdAt: '2026-10-29T00:00:00Z' }
@@ -170,6 +171,13 @@ describe('v2 account operations', () => {
     expect(elements(cache, '[data-runtime-input="socket"]')[0]?.attrs.get('readonly')).toBeDefined()
   })
 
+  it('opens the packages workspace for a live managing authority and keeps it read-only otherwise', () => {
+    // panel-tools-client.ts refuses every PEAR and Perl action under a data-readonly root.
+    expect(elements(renderV2AccountPackagesPage(props(), allowed), '[data-v2-operations-route]')[0]?.attrs.has('data-readonly')).toBe(false)
+    expect(elements(renderV2AccountPackagesPage(props(), { canRead: false, canManage: false, canUseTerminal: false }), '[data-v2-operations-route]')[0]?.attrs.get('data-readonly')).toBe('true')
+    expect(elements(renderV2AccountPackagesPage(props()), '[data-v2-operations-route]')[0]?.attrs.get('data-readonly')).toBe('true')
+  })
+
   it('keeps installed and reviewed package inventories separate without inventing packages', () => {
     const html = renderV2AccountPackagesPage(props(), allowed)
     expect(elements(html, '[data-packages-installed]')[0]?.tag).toBe('tbody')
@@ -184,5 +192,29 @@ describe('v2 account operations', () => {
     expect(html).toContain('&lt;script&gt;x&lt;/script&gt;')
     expect(html).toContain('<bdi dir="ltr" class="v2-mono">')
     expect(html).not.toMatch(/[٠-٩۰-۹]/)
+  })
+})
+
+describe('v2 account operation layout', () => {
+  it('splits the backup page into three tab panels only for a read account', () => {
+    const html = renderV2AccountBackupPage(props(), allowed)
+    const nodes = parseMarkup(html)
+    expect(nodes.filter(node => node.attrs.get('role') === 'tab').map(node => node.attrs.get('data-presentation-tab'))).toEqual(['archives', 'websites', 'files'])
+    expect(nodes.filter(node => node.attrs.get('role') === 'tabpanel').map(node => node.attrs.has('hidden'))).toEqual([false, true, true])
+    expect(elements(html, '[data-account-backup]')[0]?.attrs.get('data-presentation-tabs')).toBe('panels')
+    const unknown = renderV2AccountBackupPage(props({ account: undefined }), allowed)
+    expect(unknown).not.toContain('role="tab"')
+    expect(unknown).not.toContain('data-presentation-tabs')
+    expect(unknown).toContain('data-account-backup-archives')
+    expect(unknown).not.toContain('data-website-backups')
+  })
+
+  it('styles every operation page class in the operations stylesheet', () => {
+    for (const route of ['/files/backup', '/files/ftp', '/files/git', '/advanced/terminal', '/software/apps', '/software/containers', '/software/cache', '/software/packages']) {
+      const html = renderV2PanelOperationsPage(props({ activeRoute: route }), allowed)!
+      const classes = new Set([...html.matchAll(/class="([^"]+)"/g)].flatMap(match => match[1]!.split(/\s+/)).filter(name => /^v2-panel-(operation|terminal)/.test(name)))
+      expect(classes.size, route).toBeGreaterThan(1)
+      for (const name of classes) expect(PANEL_OPERATIONS_CSS, `${route} ${name}`).toContain(`.${name}`)
+    }
   })
 })

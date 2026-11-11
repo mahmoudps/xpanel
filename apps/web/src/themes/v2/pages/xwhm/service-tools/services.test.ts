@@ -32,8 +32,9 @@ describe('V2 WHM service-tool documents', () => {
     const nodes = parseMarkup(html)
     expect(nodes.filter(item => item.attrs.has('data-whm-web-hop'))).toHaveLength(3)
     expect(nodes.filter(item => item.attrs.has('data-whm-web-snapshot-setting'))).toHaveLength(15)
-    for (const key of ['web-flow', 'web-proxy', 'web-comparison', 'web-test-gate']) expect(node(html, 'data-whm-detail-section', key).tag).toBe('section')
+    for (const key of ['web-flow', 'web-stack', 'web-proxy', 'web-comparison', 'web-test-gate']) expect(node(html, 'data-whm-detail-section', key).tag).toBe('section')
     expect(nodes.filter(item => item.attrs.get('data-whm-web-snapshot') === 'page-load')).toHaveLength(3)
+    expect(html).toContain('data-whm-web-kpi="port">18181<')
     expect(html).toContain('proxy_pass http://127.0.0.1:18181;')
     expect(html).toContain('proxy_set_header X-Forwarded-For $remote_addr;')
     expect(html).not.toContain('$proxy_add_x_forwarded_for')
@@ -79,7 +80,16 @@ describe('V2 WHM service-tool documents', () => {
 
   it('retains unknown architecture when settings are unread and never exposes denied saved ports', () => {
     const unread = render('/whm/services/web')
+    // Engine and MPM are radio cards inside the settings form: the saved choice is checked, prefork stays refused, and nothing is checked or open before a read.
+    const cards = render('/whm/services/web', { serverSettings: saved })
+    const radios = (html: string) => parseMarkup(html).filter(item => item.tag === 'input' && item.attrs.get('type') === 'radio')
+    expect(radios(cards).map(item => `${item.attrs.get('name')}=${item.attrs.get('value')}:${item.attrs.has('checked')}:${item.attrs.has('disabled')}`)).toEqual(['engine=apache:true:false', 'engine=openlitespeed:false:false', 'apacheMpm=itk:true:false', 'apacheMpm=prefork:false:true'])
+    expect(cards).toMatch(/<form data-server-settings-form>.*<fieldset class="v2-whm-web__choice-group"><legend>Engine<\/legend>.*<legend>Apache MPM<\/legend>.*<\/form>/s)
+    expect(cards).not.toMatch(/<select[^>]*name="(?:engine|apacheMpm)"/)
+    expect(radios(unread).every(item => !item.attrs.has('checked') && item.attrs.has('disabled'))).toBe(true)
+    expect(unread).toMatch(/v2-page-head__actions">.*href="#v2-whm-data-web-pending"/s)
     expect(node(unread, 'data-whm-web-proxy-reference').attrs.get('data-state')).toBe('unread')
+    expect(unread).toContain('data-whm-web-kpi="port">Not read<')
     expect(unread).not.toContain('proxy_pass http://127.0.0.1:')
     for (const extra of [{ dataAuthority: undefined }, { capabilityUnavailable: true }]) {
       const html = render('/whm/services/web', { serverSettings: { ...saved, backendPort: 18181, backendTlsPort: 19443 }, ...extra })
@@ -144,11 +154,23 @@ describe('V2 WHM service-tool documents', () => {
 
   it('uses only supported engine and Apache MPM values', () => {
     const html = render('/whm/services/web', { serverSettings: saved })
-    expect(html).toContain('value="apache" selected')
+    expect(html).toContain('name="engine" value="apache" checked')
     expect(html).toContain('value="openlitespeed"')
-    expect(html).toContain('value="itk" selected')
+    expect(html).toContain('name="apacheMpm" value="itk" checked')
     expect(html).toContain('value="prefork"')
     expect(html).not.toMatch(/value="(?:nginx|event)"/)
+  })
+
+  it('opens the main web settings to a managing root and closes them to a reader', () => {
+    const names = ['engine', 'apacheMpm', 'backendPort', 'backendTlsPort', 'nginx.workerProcesses', 'nginx.workerConnections', 'nginx.workerRlimitNofile', 'nginx.keepaliveTimeoutSec', 'nginx.multiAccept', 'apache.startServers', 'apache.minSpareServers', 'apache.maxSpareServers', 'apache.maxRequestWorkers', 'apache.serverLimit', 'apache.maxConnectionsPerChild']
+    const closed = (html: string) => Object.fromEntries(names.map(name => [name, node(html, 'name', name).attrs.has('disabled')]))
+    const submit = (html: string) => parseMarkup(html).find(item => item.tag === 'button' && ['submit', 'button'].includes(item.attrs.get('type') ?? '') && !item.attrs.has('data-server-settings-suggest') && (item.attrs.get('class') ?? '').includes('v2-btn--primary'))
+    const managed = render('/whm/services/web', { serverSettings: saved })
+    expect(closed(managed)).toEqual(Object.fromEntries(names.map(name => [name, false])))
+    expect(parseMarkup(managed).find(item => item.tag === 'button' && item.attrs.get('type') === 'submit')?.attrs.has('disabled')).toBe(false)
+    const reader = render('/whm/services/web', { serverSettings: saved, dataAuthority: { canRead: true, canManage: false } })
+    expect(closed(reader)).toEqual(Object.fromEntries(names.map(name => [name, true])))
+    expect(submit(reader)?.attrs.has('disabled')).toBe(true)
   })
 
   it('keeps read-only web settings outside a submit form and generation restore disabled', () => {

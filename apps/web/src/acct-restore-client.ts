@@ -5,6 +5,9 @@ import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
@@ -135,7 +138,7 @@ function bindRestoreMore(): void {
     }
     const element = <K extends keyof HTMLElementTagNameMap>(tag: K, value?: string): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); if (value !== undefined) node.textContent = value; return node }
     const technical = (value: string): HTMLElement => { const node = element('bdi', value); node.dir = 'ltr'; return node }
-    const size = (bytes: number): string => bytes < 1024 ? bytes + ' B' : bytes < 1048576 ? (bytes / 1024).toFixed(1) + ' KiB' : bytes < 1073741824 ? (bytes / 1048576).toFixed(1) + ' MiB' : (bytes / 1073741824).toFixed(2) + ' GiB'
+    const size = (bytes: number): string => formatClientBytes(bytes)
     const themedRow = (kind: 'archives' | 'components' | 'mailboxes' | 'review' | 'results', values: Record<string, Node | string>): HTMLTableRowElement => {
       const row = cloneClientTemplate(templates.get(kind)!, 'tr', shapes[kind]) as HTMLTableRowElement
       for (const [key, value] of Object.entries(values)) clientTemplateSlot(row, key).replaceChildren(value)
@@ -274,4 +277,4 @@ function bindRestoreMore(): void {
   })
 }
 
-export const ACCT_RESTORE_CLIENT_BINDING = withFrameRequest(`(()=>{const displayDateTime=${DISPLAY_DATETIME_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const readFilesReply=${readBackupFilesReply.toString()};const readRestoreMoreReply=${readRestoreMoreReply.toString()};return ${bindRestoreMore.toString()};})()`)
+export const ACCT_RESTORE_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};const displayDateTime=${DISPLAY_DATETIME_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const readFilesReply=${readBackupFilesReply.toString()};const readRestoreMoreReply=${readRestoreMoreReply.toString()};return ${bindRestoreMore.toString()};})()`)

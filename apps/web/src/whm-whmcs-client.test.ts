@@ -76,7 +76,7 @@ describe('WHMCS page controller', () => {
     expect($('[data-whm-whmcs-updated] bdi').textContent).toBe('2026-10-29 10:00 UTC')
     const rows = document.querySelectorAll('[data-whm-whmcs-log-rows] tr')
     expect(rows).toHaveLength(2)
-    expect(rows[1]!.textContent).toContain('token_invalid')
+    expect(rows[1]!.textContent).toContain('The API token was not valid')
   })
   it('saves the captured revision with plan mapping edits and reads back', async () => {
     let gets = 0

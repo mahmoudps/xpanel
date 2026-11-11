@@ -38,6 +38,13 @@ describe('v2 server administration family', () => {
     expect(saved).toContain('name="nginx.workerConnections"'); expect(saved).toContain('value="2048"')
     expect(saved).toContain('name="apache.maxConnectionsPerChild"'); expect(saved).toContain('value="0"')
     expect(saved).toContain('data-server-settings-form'); expect(saved).toContain('data-setup-wizard-form')
+    // One step is shown at a time by the URL fragment; every step stays in the document and steps 1-4 stay in the one wizard form.
+    for (const html of [unread, saved]) { expect(html.match(/data-setup-step="/g)).toHaveLength(6); expect(html).toContain('data-setup-stepper'); expect(html).toContain('Step 6 of 6'); expect(html).toContain('href="#v2-setup-review"') }
+    expect(saved.match(/data-setup-wizard-form/g)).toHaveLength(1)
+    // Engine and MPM are radio cards; the review lists the saved values with a link to each step.
+    expect(saved).toContain('<input type="radio" name="engine" value="apache" data-review-label="Apache" checked required>'); expect(saved).toContain('<input type="radio" name="apacheMpm" value="prefork" data-review-label="prefork" required disabled>')
+    expect(unread).not.toMatch(/type="radio"[^>]* checked/)
+    expect(saved).toMatch(/data-setup-review>.*stored.private.test.*href="#v2-setup-identity"/s); expect(unread).toContain('data-setup-review'); expect(unread).not.toContain('stored.private.test')
     for (const name of ['hostname', 'adminEmail', 'primaryIpv4', 'nameservers', 'engine', 'apacheMpm', 'panelPort', 'sshPort', 'quotaFilesystem']) expect(saved).toContain(`name="${name}"`)
   })
   it('requires explicit root-terminal authority, keeps the second-factor control conditional and never renders credentials', () => {
@@ -85,5 +92,20 @@ describe('v2 server administration family', () => {
     const html = render('/whm/server/setup', { locale: 'ar', serverSettings: settings, principal: { kind: 'reseller', id: 'r', username: 'provider' } })
     expect(html).toContain('lang="ar" dir="rtl"'); expect(html).not.toMatch(/[٠-٩۰-۹]/)
     expect(html).not.toContain(settings.hostname); expect(html).not.toContain('<form')
+  })
+})
+
+describe('v2 setup review step', () => {
+  it('mirrors each named setup control into its review value', () => {
+    const html = render('/whm/server/setup', { serverSettings: settings })
+    expect(html).toContain('data-setup-stepper data-form-review')
+    const fields = parseMarkup(html).filter(node => node.attrs.has('data-form-review-field')).map(node => node.attrs.get('data-form-review-field'))
+    expect(fields).toEqual(['hostname', 'panelPort', 'sshPort', 'primaryIpv4', 'nameservers', 'adminEmail', 'engine', 'apacheMpm', 'nginx.workerConnections', 'nginx.multiAccept', 'apache.maxRequestWorkers'])
+    for (const name of fields) expect(html).toContain(`name="${name}"`)
+    expect(html).toContain('value="apache" data-review-label="Apache" checked')
+    expect(html).toMatch(/name="nginx\.multiAccept"[^>]*data-review-label="on" data-review-off="off"/)
+    expect(html).toContain('Values to apply')
+    // Without a saved read the switch has no off label, so its review value stays Not read.
+    expect(render('/whm/server/setup')).not.toContain('data-review-off')
   })
 })

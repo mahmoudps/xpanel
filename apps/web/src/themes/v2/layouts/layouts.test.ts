@@ -222,7 +222,7 @@ describe('v2 page layouts', () => {
   it('wizard: stepper, one visible step panel, the review step and gated navigation', () => {
     const html = wizard()
     expect(html).toContain('<ol class="v2-steps v2-steps--inline" aria-label="Steps">')
-    expect(html).toMatch(/<li class="v2-step" data-step-status="current" aria-current="step"><span class="v2-step__dot">.*?<\/span><\/span><span class="v2-step__text"><span class="v2-step__label">/)
+    expect(html).toMatch(/<li class="v2-step" data-step-status="current" aria-current="step"><span class="v2-step__dot">.*?<\/span><\/span><span class="v2-step__text"><span class="v2-step__label" title="/)
     expect(count(html, /aria-current="step"/)).toBe(1)
     expect(html).toContain('<dl class="v2-facts" aria-label="Your choices">')
     expect(html).toMatch(/<section class="v2-wizard__panel" aria-labelledby="domain-title" hidden data-wizard-step="domain">/)

@@ -1,6 +1,7 @@
 import type { DocumentProps, ThemeSurface } from '../contract.ts'
 import { createV2Stylesheet, type V2Stylesheet } from './stylesheet.ts'
 import { V2_PHONE_TABLE_ROWS_CSS } from './base.ts'
+import { FILTER_BAR_CSS } from './components/filter-bar.ts'
 import { V2_PANEL_HOME_CSS } from './pages/xpanel/home.ts'
 import { V2_PANEL_RESOURCES_CSS } from './pages/xpanel/resources.ts'
 import { EMAIL_ACCOUNTS_CSS } from './pages/xpanel/email/accounts.ts'
@@ -12,8 +13,11 @@ import { DOMAIN_PAGES_CSS } from './pages/xpanel/domains/common.ts'
 import { PANEL_OPERATIONS_CSS } from './pages/xpanel/operations/styles.ts'
 import { PANEL_SETTINGS_CSS } from './pages/xpanel/settings/common.ts'
 import { PANEL_HTACCESS_CSS } from './pages/xpanel/software/htaccess.ts'
+import { PANEL_SOFTWARE_PAGES_CSS, PANEL_SOFTWARE_PAGES_ROUTES } from './pages/xpanel/software/styles.ts'
+import { PANEL_OBSERVATIONS_CSS } from './pages/xpanel/observations/common.ts'
 import { PANEL_ADDITIONAL_CSS } from './pages/xpanel/email-tools/common.ts'
 import { PANEL_UTILITY_CLIENT_CSS } from './pages/xpanel/settings/utility-client-templates.ts'
+import { PANEL_SHARED_FRAGMENTS_CSS } from './pages/xpanel/shared-fragments.ts'
 import { WHM_OVERVIEW_CSS } from './pages/xwhm/overview/index.ts'
 import { WHM_SERVER_OPS_CSS, WHM_SERVER_OPS_ROUTES } from './pages/xwhm/server/server-ops.ts'
 import { WHM_HOST_TOOLS_CSS, WHM_HOST_TOOLS_ROUTES } from './pages/xwhm/server/host-tools.ts'
@@ -27,11 +31,14 @@ import { WHM_PLANS_CSS } from './pages/xwhm/plans/common.ts'
 import { WHM_RESELLERS_CSS } from './pages/xwhm/resellers/styles.ts'
 import { WHM_NETWORK_CSS } from './pages/xwhm/domains/common.ts'
 import { WHM_MAIL_CSS } from './pages/xwhm/mail/common.ts'
+import { V2_WHM_DATABASE_ROUTES, WHM_DATABASE_PAGES_CSS } from './pages/xwhm/databases/index.ts'
 import { V2_MAIL_CARD_CSS } from './pages/mail-cards.ts'
 import { WHM_OBSERVATION_CSS } from './pages/xwhm/monitoring/common.ts'
+import { WHM_ACTIVITY_CSS } from './pages/xwhm/activity/style.ts'
 import { WHM_ACCOUNT_TOOLS_CSS } from './pages/xwhm/account-tools/common.ts'
 import { WHM_RECOVERY_TOOLS_CSS } from './pages/xwhm/recovery-tools/common.ts'
 import { WHM_DATA_COMMON_CSS } from './pages/xwhm/software/common.ts'
+import { V2_WHM_SERVICE_TOOL_ROUTES, WHM_SERVICE_TOOLS_PAGE_CSS } from './pages/xwhm/service-tools/index.ts'
 import { WHM_WEB_SERVER_CSS } from './pages/xwhm/service-tools/web.ts'
 import { WHM_SERVER_CSS } from './pages/xwhm/server/styles.ts'
 import { WHM_PANEL_CSS } from './pages/xwhm/panel/styles.ts'
@@ -90,7 +97,19 @@ export const v2SupplementalStylesheets: readonly Readonly<V2RouteStylesheet>[] =
     '/whm/monitoring/health', '/whm/monitoring/limits', '/whm/monitoring/alerts',
     '/whm/monitoring/repair', '/whm/accounts/health',
   ], WHM_DIAGNOSTIC_CLIENT_CSS),
+  supplement('xwhm', 'whm-database-pages', V2_WHM_DATABASE_ROUTES, WHM_DATABASE_PAGES_CSS),
+  supplement('xwhm', 'whm-ssl-store', ['/whm/services/certificates'], WHM_NETWORK_CSS),
+  supplement('xpanel', 'panel-software-pages', PANEL_SOFTWARE_PAGES_ROUTES, PANEL_SOFTWARE_PAGES_CSS),
+  // The filter kit left the every-document stylesheet; these pages use its segmented control and count pill.
+  supplement('xwhm', 'whm-filter-kit', ['/whm/domains', '/whm/dns', '/whm/security/firewall', '/whm/plans', '/whm/accounts'], FILTER_BAR_CSS),
+  supplement('xpanel', 'panel-filter-kit', ['/email/accounts', '/email/filters'], FILTER_BAR_CSS),
+  supplement('xpanel', 'panel-domain-filter-kit', ['/domains'], FILTER_BAR_CSS),
+  // BoxTrapper, list moderation and the device client guide render on both surfaces.
+  supplement('xpanel', 'panel-shared-fragments', ['/email/spam-filters', '/email/mailing-lists', '/email/calendars-contacts', '/files/web-disk'], PANEL_SHARED_FRAGMENTS_CSS),
+  supplement('xmail', 'mail-shared-fragments', ['/mail/settings/spam', '/mail/settings/calendars', '/mail/tools/mailing-lists'], PANEL_SHARED_FRAGMENTS_CSS),
   supplement('xwhm', 'whm-account-admin', ['/whm', '/whm/plans/enhancements', '/whm/security/isolation', '/whm/panel/languages'], WHM_ACCOUNT_TOOLS_CSS),
+  supplement('xwhm', 'whm-activity', ['/whm/jobs', '/whm/audit', '/whm/support'], WHM_ACTIVITY_CSS),
+  supplement('xwhm', 'whm-service-tools', V2_WHM_SERVICE_TOOL_ROUTES, WHM_SERVICE_TOOLS_PAGE_CSS),
 ])
 
 /** Explicit renderer coverage. A catalog alias alone does not establish an implemented page. */
@@ -118,8 +137,8 @@ export const v2RouteStylesheets: readonly Readonly<V2RouteStylesheet>[] = Object
   page('xpanel', 'panel-email-observations', [
     '/email/mailing-lists', '/email/filters', '/email/deliverability', '/email/spam-filters',
     '/email/spam-quarantine', '/email/archive', '/email/encryption', '/email/calendars-contacts',
-    '/health', '/server-information', '/metrics/traffic', '/metrics/logs', '/metrics/web-stats',
   ], [PANEL_ADDITIONAL_CSS, V2_MAIL_CARD_CSS]),
+  page('xpanel', 'panel-observations', ['/health', '/server-information', '/metrics/traffic', '/metrics/logs', '/metrics/web-stats'], [PANEL_OBSERVATIONS_CSS, V2_MAIL_CARD_CSS]),
   page('xwhm', 'whm-overview', ['/whm'], WHM_OVERVIEW_CSS),
   page('xwhm', 'whm-accounts', ['/whm/accounts'], WHM_ACCOUNTS_CSS),
   page('xwhm', 'whm-account-create', ['/whm/accounts/new'], WHM_ACCOUNT_CREATE_CSS),

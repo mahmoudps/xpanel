@@ -6,6 +6,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayD
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { frameRequest as canonicalFrameRequest, withFrameRequest } from './read-only-frame.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const frameRequest = canonicalFrameRequest
 const formatDisplayDateTime = sharedFormatDisplayDateTime
 type MonitoringAsk = ((options: Record<string, unknown>) => Promise<unknown>) | undefined
@@ -113,7 +116,7 @@ export function readPerformanceView(value: unknown, window: '1h' | '24h' | '7d')
 function bindWhmMonitoring(askDialog: MonitoringAsk): void {
   const t = (message: string, values?: MessageValues): string => xpT(message, values)
   const denied = '[data-wiring="unavailable"],[data-wiring="soon"],[data-readonly="true"],[data-read-only="true"],[data-capability-state="unavailable"],[data-capability-unavailable="true"],[aria-disabled="true"],fieldset:disabled'
-  const bytes = (value: number): string => { const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']; let size = value, index = 0; while (size >= 1024 && index < units.length - 1) { size /= 1024; index++ } return (index ? size.toFixed(1) : String(size)) + ' ' + units[index] }
+  const bytes = (value: number): string => formatClientBytes(value)
   const duration = (seconds: number): string => { const days = Math.floor(seconds / 86400), rest = seconds % 86400, pad = (part: number): string => String(part).padStart(2, '0'); return (days ? String(days) + 'd ' : '') + pad(Math.floor(rest / 3600)) + ':' + pad(Math.floor(rest % 3600 / 60)) + ':' + pad(rest % 60) }
   const percent = (part: number, whole: number): string => whole > 0 ? String(Math.ceil(part * 100 / whole)) + '%' : '-'
   const fixed = (value: number): string => String(Math.round(value * 100) / 100)
@@ -417,4 +420,4 @@ function bindWhmMonitoring(askDialog: MonitoringAsk): void {
   })
 }
 
-export const WHM_MONITORING_CLIENT_BINDING = withFrameRequest(`(()=>{${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[monitoringObject, monitoringText, monitoringIso, monitoringCount, monitoringNumber, monitoringAccount].map(helper => helper.toString()).join(';')};const readProcessesView=${readProcessesView.toString()};const readSignalOutcome=${readSignalOutcome.toString()};const readUserKillOutcome=${readUserKillOutcome.toString()};const readDiskView=${readDiskView.toString()};const readLogsView=${readLogsView.toString()};const readPerformanceView=${readPerformanceView.toString()};return ${bindWhmMonitoring.toString()};})()`)
+export const WHM_MONITORING_CLIENT_BINDING = withFrameRequest(`(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};${WHM_CLIENT_TEMPLATE_BINDING}const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${[monitoringObject, monitoringText, monitoringIso, monitoringCount, monitoringNumber, monitoringAccount].map(helper => helper.toString()).join(';')};const readProcessesView=${readProcessesView.toString()};const readSignalOutcome=${readSignalOutcome.toString()};const readUserKillOutcome=${readUserKillOutcome.toString()};const readDiskView=${readDiskView.toString()};const readLogsView=${readLogsView.toString()};const readPerformanceView=${readPerformanceView.toString()};return ${bindWhmMonitoring.toString()};})()`)

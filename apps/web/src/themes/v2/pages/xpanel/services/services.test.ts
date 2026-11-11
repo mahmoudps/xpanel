@@ -109,7 +109,9 @@ describe('v2 xPanel service pages', () => {
     expect(html).toContain('data-cron-manage="true"')
     expect(html).toContain('The scheduled job list has not been read.')
     expect(html).not.toContain('timers active')
-    expect(html).not.toContain('Succeeded')
+    // The only outcome word is the board filter option; no row or tile claims a result.
+    expect(html.split('Succeeded')).toHaveLength(2)
+    expect(html).toContain('<button type="button" data-list-filter-value="succeeded" aria-pressed="false">Succeeded</button>')
     expect(html).toMatch(/<textarea[^>]*data-cron-field="command"[^>]*maxlength="4096"[^>]*disabled>/)
   })
 
@@ -124,4 +126,47 @@ describe('v2 xPanel service pages', () => {
   it('isolates technical text and normalizes digit glyphs without changing the number', () => {
     expect(technical('\u0662\u0660\u0662\u0666-\u06f1\u06f0-29')).toBe('<bdi dir="ltr" class="v2-mono">2026-10-29</bdi>')
   })
+
+  it('puts the cron New job control in the page header and wires the board filter to the shared list filter', () => {
+    const html = renderV2CronPage({ account }, { canManage: true })
+    expect(html.indexOf('data-cron-new')).toBeLessThan(html.indexOf('class="v2-kpi-row"'))
+    expect(html.split('data-cron-new')).toHaveLength(2)
+    // One filter root holds the controls and the rows; the cron controller stamps data-list-result on each row.
+    expect(html.indexOf('data-list-filter>')).toBeLessThan(html.indexOf('data-list-filter-search'))
+    expect(html.indexOf('data-list-filter-search')).toBeLessThan(html.indexOf('data-cron-jobs'))
+    expect(html).toContain('<input id="v2-cron-filter" type="search" autocomplete="off" spellcheck="false" aria-describedby="v2-cron-filter-count" data-list-filter-search>')
+    for (const value of ['""', '"succeeded"', '"failed"', '"never"']) expect(html).toContain('data-list-filter-value=' + value)
+    expect(html).toContain('data-list-filter-key="result"')
+    expect(html).toContain('data-list-filter-count')
+    expect(html).toContain('data-list-filter-empty hidden')
+    expect(html).toMatch(/<template data-xp-template="account-cron-row"><tr data-list-row>/)
+    // Without the right to read jobs the filter stays closed.
+    expect(renderV2CronPage({ account })).toContain('aria-describedby="v2-cron-filter-count" data-list-filter-search disabled>')
+    expect(html).not.toContain('Filtering is unavailable here')
+    expect(html).toContain('v2-panel-service__columns--drawer')
+  })
+
+  it('keeps the zone picker and Add record in the page header inside the one editor scope', () => {
+    const html = renderV2DnsPage({ account, domains: [domain] }, { canManage: true })
+    const scope = html.indexOf('data-dns-editor'), head = html.indexOf('class="v2-page-head"')
+    expect(html.split('data-dns-editor')).toHaveLength(2)
+    expect(scope).toBeLessThan(head)
+    for (const hook of ['data-dns-zone', 'data-dns-add-record']) expect(html.indexOf(hook)).toBeLessThan(html.indexOf('v2-dns-summary-heading'))
+    expect(html.indexOf('data-dnssec')).toBeGreaterThan(html.indexOf('data-dns-delete'))
+    expect(html).toContain('<input id="v2-dns-filter" type="search" autocomplete="off" spellcheck="false" aria-describedby="v2-dns-filter-count" data-list-filter-search>')
+    expect(html).toContain('data-list-filter-key="type"')
+    for (const type of ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA']) expect(html).toContain(`data-list-filter-value="${type}"`)
+    // The record rows come from the template, whose type select names the row type for the filter.
+    expect(html).toMatch(/<template data-xp-template="dns-record-row"><tr data-list-row>/)
+    expect(html).toContain('data-list-field="type"')
+    expect(html.indexOf('data-list-filter>')).toBeLessThan(html.indexOf('data-dns-records'))
+    // The summary carries no server count of records: the editor reads the zone itself.
+    expect(html).not.toContain('Records read')
+  })
+
+  it('links the certificate wizard and the certificate files from the SSL/TLS header', () => {
+    const html = renderV2TlsPage({ account, domains: [domain] }, { canManage: true })
+    expect(html).toContain('<a class="v2-btn" href="/security/ssl/files">Certificate files</a><a class="v2-btn v2-btn--primary" href="/security/ssl/issue">Issue certificate</a>')
+  })
+
 })

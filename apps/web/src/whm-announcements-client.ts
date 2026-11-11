@@ -185,7 +185,7 @@ function bindWhmAnnouncements(askDialog: ((options: Record<string, unknown>) => 
       for (const name of ['title-en', 'body-en', 'title-ar', 'body-ar', 'usernames', 'starts', 'ends', 'plan', 'reseller']) inputs[name]!.value = ''
       inputs.severity!.value = 'info'; inputs.audience!.value = 'all'
       for (const control of fields) control.removeAttribute('aria-invalid')
-      heading.textContent = t('Create announcement'); save.textContent = t('Create announcement'); cancel.hidden = true
+      heading.textContent = t('New announcement'); save.textContent = t('Create announcement'); cancel.hidden = true
       syncAudience(); paintPreview()
     }
     const edit = (item: WhmAnnouncement): void => {
@@ -197,7 +197,7 @@ function bindWhmAnnouncements(askDialog: ((options: Record<string, unknown>) => 
       inputs.plan!.value = item.audience.kind === 'plan' ? item.audience.planId : ''; inputs.reseller!.value = item.audience.kind === 'reseller' ? item.audience.resellerId : ''
       inputs.usernames!.value = item.audience.kind === 'accounts' ? item.audience.usernames.join('\n') : ''
       inputs.starts!.value = item.startsAt ? item.startsAt.slice(0, 16) : ''; inputs.ends!.value = item.endsAt ? item.endsAt.slice(0, 16) : ''
-      heading.textContent = t('Edit announcement'); save.textContent = t('Save changes'); cancel.hidden = false
+      heading.textContent = t('Edit announcement: {title}', { title: item.title[document.documentElement.lang as keyof typeof item.title] || item.title.en || item.title.ar }); save.textContent = t('Save changes'); cancel.hidden = false
       saveStatus.hidden = true; syncAudience(); paintPreview(); inputs['title-en']!.focus()
     }
     const failText = (error: unknown, fallback: string): string => {

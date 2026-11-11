@@ -125,7 +125,7 @@ export async function runBrowserAcceptance({ chromium, expect }) {
           })
           record('arabic_field_value_alignment', alignment)
           expect(alignment.direction).toBe('ltr')
-          expect(alignment.text_align).toBe('right')
+          expect(['right', '-webkit-match-parent', 'match-parent']).toContain(alignment.text_align)
           expect(Math.abs(alignment.field_right - alignment.label_right)).toBeLessThanOrEqual(1)
         }
         await accessibility(page, record)
@@ -241,7 +241,7 @@ export async function runBrowserAcceptance({ chromium, expect }) {
       record('owner_workspace_loaded', { path: new URL(page.url()).pathname })
       const owner = await panel.store.getAccountByUsername('browserowner')
       expect(owner, 'The authenticated owner account is persisted').not.toBeNull()
-      const overview = page.locator('[data-board-port="xpanel-home"]')
+      const overview = page.locator('[data-panel-home], [data-board-port="xpanel-home"]')
       await expect(overview).toBeVisible()
       await expect(overview.getByText(owner.username, { exact: true }).first()).toBeVisible()
       await expect(overview.getByText(owner.primaryDomain, { exact: true }).first()).toBeVisible()

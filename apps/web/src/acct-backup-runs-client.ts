@@ -3,6 +3,9 @@ import { DISPLAY_DATETIME_BINDING, formatDisplayDateTime as sharedFormatDisplayD
 import type { MessageValues } from './i18n.ts'
 import './i18n.ts'
 import { clientTemplate as canonicalClientTemplate, clientTemplateSlot as canonicalClientTemplateSlot, cloneClientTemplate as canonicalCloneClientTemplate } from './client-templates.ts'
+import { ASCII_BYTES_BINDING, formatIsolatedBytes as canonicalFormatClientBytes } from './display-format.ts'
+// Module-local alias: the binding source defines it again from ASCII_BYTES_BINDING.
+const formatClientBytes = canonicalFormatClientBytes
 const clientTemplate = canonicalClientTemplate
 const clientTemplateSlot = canonicalClientTemplateSlot
 const cloneClientTemplate = canonicalCloneClientTemplate
@@ -135,7 +138,7 @@ function bindWhmBackupRuns(ask: ((options: Record<string, unknown>) => Promise<u
       root.setAttribute('aria-busy', String(busy)); loading.hidden = !busy
     }
     const technical = (value: string): HTMLElement => { const node = document.createElement('bdi'); node.dir = 'ltr'; node.textContent = value; return node }
-    const size = (bytes: number | null): string => bytes === null ? '' : bytes < 1024 * 1024 ? (bytes / 1024).toFixed(1) + ' KiB' : bytes < 1024 ** 3 ? (bytes / 1024 / 1024).toFixed(1) + ' MiB' : (bytes / 1024 ** 3).toFixed(2) + ' GiB'
+    const size = (bytes: number | null): string => bytes === null ? '' : formatClientBytes(bytes)
     const row = (target: HTMLElement, kind: keyof typeof rowSlots, values: Record<string, string | Node>): HTMLTableRowElement => {
       const tr = cloneClientTemplate(templates.get(kind)!, 'tr', rowSlots[kind]) as HTMLTableRowElement
       for (const [name, value] of Object.entries(values)) clientTemplateSlot(tr, name).replaceChildren(value)
@@ -259,4 +262,4 @@ function bindWhmBackupRuns(ask: ((options: Record<string, unknown>) => Promise<u
   })
 }
 export { bindWhmBackupRuns }
-export const WHM_BACKUP_RUNS_CLIENT_BINDING = `(()=>{const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const readWhmBackupRunsView=${readWhmBackupRunsView.toString()};const readWhmBackupRetentionPlan=${readWhmBackupRetentionPlan.toString()};return ${bindWhmBackupRuns.toString()};})()`
+export const WHM_BACKUP_RUNS_CLIENT_BINDING = `(()=>{const formatClientBytes=${ASCII_BYTES_BINDING};const formatDisplayDateTime=${DISPLAY_DATETIME_BINDING};${clientTemplate.toString()};${clientTemplateSlot.toString()};${cloneClientTemplate.toString()};const readWhmBackupRunsView=${readWhmBackupRunsView.toString()};const readWhmBackupRetentionPlan=${readWhmBackupRetentionPlan.toString()};return ${bindWhmBackupRuns.toString()};})()`

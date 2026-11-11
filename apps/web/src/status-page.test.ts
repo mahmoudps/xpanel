@@ -24,7 +24,7 @@ describe('display names', () => {
   })
 
   it('formats the visible plan label and keeps the stored name on the row key', () => {
-    const html = renderWebApp({
+    const html = renderWebApp({ uiTheme: 'classic',
       surface: 'xpanel',
       visibility: { principal: owner },
       workspaceSummary: {
@@ -52,7 +52,7 @@ describe('display names', () => {
 
 describe('styled status pages', () => {
   it.each([400, 404, 403, 421, 500, 503] as const)('renders %s in English and Arabic inside or outside the shell', status => {
-    const signedIn = renderWebApp({
+    const signedIn = renderWebApp({ uiTheme: 'classic',
       surface: 'xpanel', locale: 'en', theme: 'light',
       visibility: { principal: owner },
       error: {
@@ -103,7 +103,7 @@ describe('styled status pages', () => {
     expect(visible(signedIn)).not.toMatch(/example\.test|data-panel-link|data-panel-switch|xWHM|xMail/)
     if (status === 500 || status === 503) expect(signedIn).toContain('Try again')
 
-    const guest = renderWebApp({ surface: 'xmail', locale: 'ar', theme: 'dark', error: { status, surface: 'xmail' } })
+    const guest = renderWebApp({ uiTheme: 'classic', surface: 'xmail', locale: 'ar', theme: 'dark', error: { status, surface: 'xmail' } })
     expect(guest).toContain('dir="rtl"')
     expect(guest).toContain('data-status-page="' + status + '"')
     expect(guest).toContain('xp-icon-back')
@@ -114,7 +114,7 @@ describe('styled status pages', () => {
 
   it('mirrors the back icon in Arabic and lists design pages before their tools are connected', () => {
     expect(DESIGN_TOKENS_CSS).toContain('html[dir="rtl"] .xp-icon-back { transform: scaleX(-1); }')
-    const html = renderWebApp({ surface: 'xpanel', locale: 'ar', visibility: { principal: owner }, supportEmail: 'ops@example.test' })
+    const html = renderWebApp({ uiTheme: 'classic', surface: 'xpanel', locale: 'ar', visibility: { principal: owner }, supportEmail: 'ops@example.test' })
     const sidebar = /<aside class="xp-sidebar"[\s\S]*?<\/aside>/.exec(html)?.[0] ?? ''
     for (const route of ['/domains', '/email/accounts', '/files/manager', '/databases/mariadb', '/security/account', '/software/php']) {
       expect(sidebar).toContain(`data-nav-route="${route}"`)
@@ -129,7 +129,7 @@ describe('styled status pages', () => {
     expect(html).toContain('mailto:ops@example.test')
     const card = /class="xp-card xp-workspace-availability"[\s\S]*?<\/section>/.exec(html)?.[0] ?? ''
     expect(card).not.toContain('data-action="logout"')
-    const plain = renderWebApp({ surface: 'xwhm', locale: 'en' })
+    const plain = renderWebApp({ uiTheme: 'classic', surface: 'xwhm', locale: 'en' })
     expect(plain).toContain('contact your hosting provider')
     expect(plain).not.toContain('mailto:')
     expect(plain).not.toContain('support@xpanel.internal')
@@ -140,7 +140,7 @@ describe('styled status pages', () => {
       executor: 'linux', probes: { 'control-plane': 'passed', 'host-info': 'passed', audit_log: 'passed' },
     })
     expect(catalog.some(tool => tool.status === 'verified')).toBe(false)
-    const html = renderWebApp({
+    const html = renderWebApp({ uiTheme: 'classic',
       surface: 'xwhm', locale: 'en', catalog,
       visibility: { principal: { kind: 'root', id: 'root-id', username: 'root' } },
       error: { status: 404, workspaceHref: '/whm', hostname: 'host.example.test' },
@@ -157,7 +157,7 @@ describe('styled status pages', () => {
       executor: 'linux',
       probes: { 'control-plane': 'passed', 'host-info': 'passed', audit_log: 'passed' },
     })
-    const html = renderWebApp({
+    const html = renderWebApp({ uiTheme: 'classic',
       surface: 'xwhm',
       locale: 'en',
       visibility: { principal: { kind: 'root', id: 'root-id', username: 'root' } },
@@ -171,7 +171,7 @@ describe('styled status pages', () => {
     expect(html).toContain('aria-current="page"')
     expect(html).toContain('host.example.test')
     expect(html).not.toContain('Not yet available')
-    const arabic = renderWebApp({
+    const arabic = renderWebApp({ uiTheme: 'classic',
       surface: 'xwhm',
       locale: 'ar',
       visibility: { principal: { kind: 'root', id: 'root-id', username: 'root' } },

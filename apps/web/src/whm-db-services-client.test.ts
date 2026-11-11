@@ -14,9 +14,9 @@ const redisView = { engine: 'redis', installed: true, service: { unit: 'redis-se
 
 describe('sizes', () => {
   it('shows MiB and GiB with ASCII digits', () => {
-    expect(dbServiceBytes(1048576)).toBe('1.0 MiB')
-    expect(dbServiceBytes(2147483648)).toBe('2.0 GiB')
-    expect(dbServiceBytes(null)).toBe('0.0 MiB')
+    expect(dbServiceBytes(1048576)).toBe('\u20661.00\u00a0MiB\u2069')
+    expect(dbServiceBytes(2147483648)).toBe('\u20662.00\u00a0GiB\u2069')
+    expect(dbServiceBytes(null)).toBe('\u20660\u00a0B\u2069')
     expect(dbServiceBytes('x')).toBe('—')
   })
   it('keeps a Redis memory limit in any unit', () => {
@@ -50,7 +50,7 @@ describe('database service client', () => {
     document.body.innerHTML = `<section>${renderDbServiceCards('en', 'redis', true)}</section>`
     boot(async () => redisView); await tick()
     expect(document.querySelector('[data-dbs-fact="state"]')!.textContent).toBe('Running')
-    expect(document.querySelector('[data-dbs-fact="usedMemory"]')!.textContent).toBe('2.0 MiB')
+    expect(document.querySelector('[data-dbs-fact="usedMemory"]')!.textContent).toBe('\u20662.00\u00a0MiB\u2069')
     expect(document.querySelector('[data-dbs-fact="password"]')!.textContent).toBe('Not set')
     expect(named<HTMLInputElement>('maxmemoryMb').value).toBe('64')
     expect(named<HTMLSelectElement>('maxmemoryPolicy').value).toBe('allkeys-lru')
