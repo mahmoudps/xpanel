@@ -56,7 +56,7 @@ ${IN}${DONE} .v2-step__dot,${IN}[data-step-status=failed] .v2-step__dot{box-shad
 .v2-step${DONE} .v2-step__label{color:var(--text)}
 .v2-step${DONE}>.v2-step__rail{background:var(--ok)}
 ${IN}${DONE} .v2-step__sub{color:var(--ok)}
-.v2-step${NOW} .v2-step__dot{box-shadow:none;background:var(--accent-fill);color:var(--on-accent)}
+.v2-step${NOW} .v2-step__dot{box-shadow:0 0 0 3px var(--accent-soft);background:var(--accent-fill);color:var(--on-accent)}
 .v2-step${NOW} .v2-step__label{color:var(--accent)}
 ${IN}${NOW} .v2-step__label{font-weight:600;color:var(--text)}
 ${IN}${NOW} .v2-step__sub{color:var(--accent)}
@@ -65,5 +65,5 @@ ${IN}${NOW} .v2-step__sub{color:var(--accent)}
 @media(max-width:600px){${IN}{flex-basis:100%}}
 .v2-step__m{display:none}
 .v2-step__m--run{width:12px;height:12px;border-radius:50%;border:2px solid currentColor;border-inline-end-color:transparent;animation:v2-spin .9s linear infinite}
-.v2-step:is([data-step-status=current],[data-step-status=upcoming],[data-step-status=pending]) .v2-step__m--num,.v2-step${DONE} .v2-step__m--done,.v2-step[data-step-status=running] .v2-step__m--run,.v2-step[data-step-status=failed] .v2-step__m--fail{display:flex}
+.v2-step:not(${DONE},[data-step-status=running],[data-step-status=failed]) .v2-step__m--num,.v2-step${DONE} .v2-step__m--done,.v2-step[data-step-status=running] .v2-step__m--run,.v2-step[data-step-status=failed] .v2-step__m--fail{display:flex}
 `

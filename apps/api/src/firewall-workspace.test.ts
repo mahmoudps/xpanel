@@ -217,6 +217,43 @@ describe('firewall workspace safe apply', () => {
     await expect(call('POST', '/api/firewall/bans/unban', { addresses: [], reason: 'x' })).rejects.toMatchObject({ code: 'VALIDATION' })
   })
 
+  it('stages a proposed ruleset with current-vs-proposed diff, lockout check, apply steps, and apply/discard', async () => {
+    const rev = await revision()
+    const staged = await call('PUT', '/api/firewall/staged', {
+      rule: { kind: 'port', action: 'accept', protocol: 'tcp', port: '9090', source: '198.51.100.0/24', forwardTo: null, list: null, comment: 'Webhook', enabled: true },
+      position: 'end',
+      expectedRevision: rev,
+    })
+    expect(staged.body!.staged).toMatchObject({
+      baseRevision: rev,
+      stale: false,
+      valid: true,
+      counts: { added: 1, changed: 0, removed: 0 },
+      lockout: { checked: true, passed: true },
+    })
+    expect(staged.body!.staged.items).toHaveLength(1)
+    expect(staged.body!.staged.items[0]).toMatchObject({ change: 'added', match: 'TCP 9090', lockoutCheck: 'pass' })
+    expect(staged.body!.applySteps).toEqual([
+      { id: 'lockout-check', state: 'done' },
+      { id: 'apply-generation', state: 'current' },
+      { id: 'session-readback', state: 'upcoming' },
+      { id: 'confirm-or-revert', state: 'upcoming' },
+    ])
+    const applied = await call('POST', '/api/firewall/staged/apply', { expectedRevision: rev })
+    expect(applied.body!.staged).toBeNull()
+    expect(applied.body!.diff.added).toHaveLength(1)
+    expect(applied.body!.applySteps[2]).toEqual({ id: 'session-readback', state: 'current' })
+    const confirmed = await call('POST', '/api/firewall/confirm', { id: applied.body!.confirmation.id })
+    expect(confirmed.body!.applySteps.every((step: { state: string }) => step.state === 'done')).toBe(true)
+    const nextRev = await revision()
+    await call('PUT', '/api/firewall/staged', {
+      rule: { kind: 'port', action: 'accept', protocol: 'tcp', port: '9443', source: null, forwardTo: null, list: null, comment: 'Temp', enabled: true },
+      expectedRevision: nextRev,
+    })
+    const discarded = await call('DELETE', '/api/firewall/staged')
+    expect(discarded.body!.staged).toBeNull()
+  })
+
   it('asserts root before reading and refuses selectors', async () => {
     const use = helpers()
     use.assertRoot.mockRejectedValueOnce(new Error('denied'))

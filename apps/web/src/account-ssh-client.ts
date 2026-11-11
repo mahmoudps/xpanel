@@ -13,6 +13,7 @@ export interface AccountSshClientView {
   revision: string; exists: boolean; sizeBytes: number; directory: { exists: boolean; kind: string | null; mode: number | null }
   keys: AccountSshKey[]; unrecognizedLines: number[]; capacity: { maxKeys: number; used: number }
   login: { enabled: boolean; accountShell: string; planShell: string; port: number | null }
+  openSessions: { state: 'read' | 'unavailable'; count: number | null } | null
   capabilities: { canAdd: boolean; canRemove: boolean; reason: string | null }; status: string; removedLines: number | null
 }
 export function sshObject(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value) }
@@ -30,9 +31,11 @@ export function readAccountSshView(value: unknown, accountId: string): AccountSs
     return { line: raw.line, type: raw.type as string, fingerprint: raw.fingerprint, comment: raw.comment, bits: raw.bits as number | null, hasOptions: raw.hasOptions, allowed: raw.allowed }
   })
   if (!sshInt(value.capacity.maxKeys, 1) || value.capacity.used !== keys.length || typeof login.enabled !== 'boolean' || !['none', 'jailed'].includes(login.accountShell as string) || !['none', 'jailed'].includes(login.planShell as string) || !(login.port === null || sshInt(login.port, 1, 65535)) || login.source !== 'saved-configuration'
+    || !(value.openSessions === undefined || sshObject(value.openSessions) && (value.openSessions.state === 'read' && sshInt(value.openSessions.count, 0, 100000) || value.openSessions.state === 'unavailable' && value.openSessions.count === null))
     || typeof capabilities.canAdd !== 'boolean' || typeof capabilities.canRemove !== 'boolean' || ![null, 'directory_unmanageable', 'capacity'].includes(capabilities.reason as string | null) || !['read', 'added', 'removed'].includes(application.status as string) || application.nativeQualified !== false || !(application.removedLines === undefined || sshInt(application.removedLines, 1))) throw new Error('invalid_ssh_state')
+  const openSessions = sshObject(value.openSessions) ? { state: value.openSessions.state as 'read' | 'unavailable', count: (value.openSessions.count as number | null) ?? null } : null
   return { revision: file.revision, exists: file.exists, sizeBytes: file.sizeBytes as number, directory: { exists: directory.exists, kind: directory.kind as string | null, mode: directory.mode as number | null }, keys, unrecognizedLines: value.unrecognizedLines as number[],
-    capacity: { maxKeys: value.capacity.maxKeys as number, used: keys.length }, login: { enabled: login.enabled, accountShell: login.accountShell as string, planShell: login.planShell as string, port: login.port as number | null },
+    capacity: { maxKeys: value.capacity.maxKeys as number, used: keys.length }, login: { enabled: login.enabled, accountShell: login.accountShell as string, planShell: login.planShell as string, port: login.port as number | null }, openSessions,
     capabilities: { canAdd: capabilities.canAdd, canRemove: capabilities.canRemove, reason: capabilities.reason as string | null }, status: application.status as string, removedLines: (application.removedLines as number | undefined) ?? null }
 }
 export function accountSshUncertain(error: unknown): boolean {
@@ -101,6 +104,8 @@ function bindAccountSsh(askDialog: ((options: Record<string, unknown>) => Promis
       find('login').textContent = next.login.enabled ? t('Enabled for this account') : t('Disabled: the account or its plan does not allow shell access')
       find('port').textContent = next.login.port === null ? t('Not configured') : String(next.login.port)
       find('shell').textContent = next.login.accountShell + ' / ' + next.login.planShell
+      const openSessionsEl = find('open-sessions') as HTMLElement | null
+      if (openSessionsEl) openSessionsEl.textContent = next.openSessions === null ? t('Not read') : next.openSessions.state === 'read' && next.openSessions.count !== null ? String(next.openSessions.count) : t('Unavailable')
       const notes = [next.directory.exists && next.directory.kind !== 'directory' ? t('~/.ssh is not a regular directory, so keys cannot be managed here.') : next.exists ? t('The key file exists ({size} bytes).', { size: next.sizeBytes }) : t('The key file does not exist yet; adding a key creates it with mode 0600 in ~/.ssh (0700).'),
         next.unrecognizedLines.length ? t('{count} lines are not keys this page can read; they are kept unchanged.', { count: next.unrecognizedLines.length }) : '',
         next.capabilities.reason === 'capacity' ? t('The key limit has been reached.') : '']

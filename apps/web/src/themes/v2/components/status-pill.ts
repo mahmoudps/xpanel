@@ -28,12 +28,12 @@ const TONE_VARS: Readonly<Record<Tone, readonly [string, string]>> = {
 export const stateTones = (root: string, attribute: 'data-state' | 'data-level', tokens: Readonly<Record<string, Tone>>): string =>
   Object.entries(tokens).map(([token, tone]) => `${root}[${attribute}=${token}] :is(.v2-pill--state,.v2-tile--state){background:var(${TONE_VARS[tone][0]});color:var(${TONE_VARS[tone][1]})}`).join('\n')
 
-export const STATUS_PILL_CSS = `.v2-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:var(--radius-pill);font-size:12px;font-weight:600;line-height:1.4;white-space:nowrap}
+export const STATUS_PILL_CSS = `.v2-pill{display:inline-flex;align-items:center;gap:6px;width:fit-content;padding:2px 10px;border-radius:var(--radius-pill);border:1px solid transparent;font-size:12px;font-weight:600;line-height:1.4;white-space:nowrap}
 .v2-pill__dot{width:7px;height:7px;border-radius:50%;background:currentColor}
 .v2-pill--hollow .v2-pill__dot{background:transparent;box-shadow:inset 0 0 0 1.5px currentColor}
-.v2-pill--ok{background:var(--ok-soft);color:var(--ok)}
-.v2-pill--warn{background:var(--warn-soft);color:var(--warn)}
-.v2-pill--bad{background:var(--bad-soft);color:var(--bad)}
-.v2-pill--info{background:var(--accent-soft);color:var(--accent)}
-.v2-pill--neutral,.v2-pill--state{background:var(--sunken);color:var(--text-2)}
+.v2-pill--ok{border-color:var(--ok-line);background:var(--ok-soft);color:var(--ok)}
+.v2-pill--warn{border-color:var(--warn-line);background:var(--warn-soft);color:var(--warn)}
+.v2-pill--bad{border-color:var(--bad-line);background:var(--bad-soft);color:var(--bad)}
+.v2-pill--info{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent)}
+.v2-pill--neutral,.v2-pill--state{border-color:var(--line);background:var(--sunken);color:var(--text-2)}
 `

@@ -15,7 +15,13 @@ type PhpUsageView = { version: string; domains: { name: string; account: string 
 type PhpManageExtension = { module: string; package: string | null; installed: boolean; enabled: boolean | null }
 type PhpManageVersion = { version: string; fpmInstalled: boolean; ini: Record<string, string> | null; extensions: PhpManageExtension[]; lifecycle: string; domainCount: number; accountCount: number }
 type PhpException = { account: string; functions: string[]; reason: string; grantedAt: string; grantedBy: string }
-export type PhpManageView = { state: 'read' | 'unavailable'; revision: string | null; manage: boolean; defaultVersion: string; versions: PhpManageVersion[]; installable: string[]; extensionsWritable: boolean; exceptions: PhpException[]; exceptionsRevision: string }
+type PhpPoolDefaultsClientView = {
+  pool: { mode: 'ondemand' | 'dynamic' | 'static'; maxChildren: number; startServers: number; minSpareServers: number; maxSpareServers: number; maxRequests: number; processIdleTimeoutSec: number }
+  revision: string
+  updatedAt: string | null
+  poolCount: number
+}
+export type PhpManageView = { state: 'read' | 'unavailable'; revision: string | null; manage: boolean; defaultVersion: string; versions: PhpManageVersion[]; installable: string[]; extensionsWritable: boolean; exceptions: PhpException[]; exceptionsRevision: string; poolDefaults?: PhpPoolDefaultsClientView }
 
 /** /api/server/php/manage: host observation plus the saved default and usage; anything malformed is refused. */
 export function readPhpManageView(value: unknown): PhpManageView {
@@ -40,7 +46,28 @@ export function readPhpManageView(value: unknown): PhpManageView {
     if (!object(raw) || typeof raw.account !== 'string' || !/^[a-z][a-z0-9]{0,15}$/.test(raw.account) || !Array.isArray(raw.functions) || !raw.functions.every(fn => typeof fn === 'string' && /^[a-z_]{1,32}$/.test(fn)) || typeof raw.reason !== 'string' || raw.reason.length > 200 || typeof raw.grantedAt !== 'string' || !Number.isFinite(Date.parse(raw.grantedAt)) || typeof raw.grantedBy !== 'string' || raw.grantedBy.length > 64) throw new Error('invalid_php_manage')
     return { account: raw.account, functions: raw.functions as string[], reason: raw.reason, grantedAt: raw.grantedAt, grantedBy: raw.grantedBy }
   })
-  return { state: value.state as 'read' | 'unavailable', revision: value.revision as string | null, manage: value.actions.manage === true, defaultVersion: value.defaultVersion, versions, installable: value.installable as string[], extensionsWritable: value.capabilities.extensions === true, exceptions, exceptionsRevision: value.exceptionsRevision }
+  let poolDefaults: PhpPoolDefaultsClientView | undefined
+  if (value.poolDefaults !== undefined) {
+    const pd = value.poolDefaults
+    if (!object(pd) || !object(pd.pool) || typeof pd.revision !== 'string' || !/^[0-9a-f]{64}$/.test(pd.revision) || !(pd.updatedAt === null || typeof pd.updatedAt === 'string' && Number.isFinite(Date.parse(pd.updatedAt))) || !Number.isSafeInteger(pd.poolCount) || (pd.poolCount as number) < 0) throw new Error('invalid_php_manage')
+    const p = pd.pool
+    if (!['ondemand', 'dynamic', 'static'].includes(String(p.mode)) || !['maxChildren', 'startServers', 'minSpareServers', 'maxSpareServers', 'maxRequests', 'processIdleTimeoutSec'].every(k => Number.isSafeInteger(p[k]) && (p[k] as number) >= 1)) throw new Error('invalid_php_manage')
+    poolDefaults = {
+      pool: {
+        mode: p.mode as 'ondemand' | 'dynamic' | 'static',
+        maxChildren: p.maxChildren as number,
+        startServers: p.startServers as number,
+        minSpareServers: p.minSpareServers as number,
+        maxSpareServers: p.maxSpareServers as number,
+        maxRequests: p.maxRequests as number,
+        processIdleTimeoutSec: p.processIdleTimeoutSec as number,
+      },
+      revision: pd.revision,
+      updatedAt: pd.updatedAt as string | null,
+      poolCount: pd.poolCount as number,
+    }
+  }
+  return { state: value.state as 'read' | 'unavailable', revision: value.revision as string | null, manage: value.actions.manage === true, defaultVersion: value.defaultVersion, versions, installable: value.installable as string[], extensionsWritable: value.capabilities.extensions === true, exceptions, exceptionsRevision: value.exceptionsRevision, ...(poolDefaults ? { poolDefaults } : {}) }
 }
 
 export function readPhpInventoryView(value: unknown): PhpInventoryView {
@@ -133,8 +160,8 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
           if (name === 'whm-php-extension-switch') { const input = clientTemplateSlot(node, 'input', 'input') as HTMLInputElement; if (input.type !== 'checkbox' || !input.disabled || input.hasAttribute('role') || node.querySelectorAll('input').length !== 1) throw new Error('invalid_php_extension_switch') }
           else if (node.querySelector('input')) throw new Error('invalid_php_template')
         }
-        for (const name of ['php-selected-version', 'php-extension-version', 'php-version', 'php-install-request', 'memory_limit', 'upload_max_filesize', 'post_max_size', 'max_execution_time', 'max_input_vars', 'php-exception-account', 'php-exception-reason']) if (page.querySelectorAll('[name="' + name + '"]').length > 1) throw new Error('ambiguous_php_control')
-        for (const name of ['set-default', 'reinstall-version', 'remove-version', 'confirm-remove', 'cancel-remove', 'install-version', 'apply-ini', 'discard-ini', 'add-exception', 'grant-exception']) if (page.querySelectorAll('[data-php-action="' + name + '"]').length > 1) throw new Error('ambiguous_php_action')
+        for (const name of ['php-selected-version', 'php-extension-version', 'php-version', 'php-install-request', 'memory_limit', 'upload_max_filesize', 'post_max_size', 'max_execution_time', 'max_input_vars', 'php-exception-account', 'php-exception-reason', 'php-pool-mode', 'php-pool-max-children', 'php-pool-idle-timeout', 'php-pool-start-servers', 'php-pool-min-spare', 'php-pool-max-spare', 'php-pool-max-requests']) if (page.querySelectorAll('[name="' + name + '"]').length > 1) throw new Error('ambiguous_php_control')
+        for (const name of ['set-default', 'reinstall-version', 'remove-version', 'confirm-remove', 'cancel-remove', 'install-version', 'apply-ini', 'discard-ini', 'add-exception', 'grant-exception', 'apply-pool', 'discard-pool']) if (page.querySelectorAll('[data-php-action="' + name + '"]').length > 1) throw new Error('ambiguous_php_action')
         const lists = page.querySelectorAll<HTMLElement>('[data-php-version-tabs]'), panels = page.querySelectorAll<HTMLElement>('[data-php-version-panel]')
         if (lists.length || panels.length) {
           if (lists.length !== 1 || panels.length !== 1 || lists[0]!.tagName !== 'DIV' || panels[0]!.tagName !== 'DIV' || !/^[a-z][a-z0-9-]{0,95}$/.test(panels[0]!.id) || [...document.querySelectorAll('[id]')].filter(node => node.id === panels[0]!.id).length !== 1) throw new Error('invalid_php_version_panel')
@@ -326,10 +353,52 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
       const install = page.querySelector<HTMLInputElement>('[name="php-install-request"]')
       if (install) { live(install, writable()); install.placeholder = manage.installable.join(', ') }
       for (const name of ['set-default', 'reinstall-version', 'remove-version', 'confirm-remove', 'cancel-remove', 'install-version', 'apply-ini', 'discard-ini']) live(hook(name), writable())
+      paintPool()
       paintIni()
       paintVersion(select('php-extension-version')?.value ?? '')
       paintExceptions()
       if (!writable()) sectionNote('php-versions', 'unavailable', t('PHP management is unavailable on this host. Nothing was changed.'))
+    }
+    const paintPool = (): void => {
+      const pd = manage?.poolDefaults
+      const poolsCount = page.querySelector<HTMLElement>('[data-whm-php-pools-count]')
+      if (poolsCount && pd) poolsCount.textContent = String(pd.poolCount)
+      const savedPm = page.querySelector<HTMLElement>('[data-whm-php-saved-pm]')
+      if (savedPm && pd) { savedPm.textContent = pd.pool.mode; savedPm.dir = 'ltr' }
+      const factEntries: ReadonlyArray<readonly [HTMLElement | null, string | undefined]> = [
+        [page.querySelector<HTMLElement>('[data-whm-php-pool-fact="mode"]'), pd?.pool.mode],
+        [page.querySelector<HTMLElement>('[data-whm-php-pool-fact="maxChildren"]'), pd ? String(pd.pool.maxChildren) : undefined],
+        [page.querySelector<HTMLElement>('[data-whm-php-pool-fact="processIdleTimeoutSec"]'), pd ? String(pd.pool.processIdleTimeoutSec) + 's' : undefined],
+        [page.querySelector<HTMLElement>('[data-whm-php-pool-fact="startServers"]'), pd ? String(pd.pool.startServers) : undefined],
+        [page.querySelector<HTMLElement>('[data-whm-php-pool-fact="minSpareServers"]'), pd ? String(pd.pool.minSpareServers) : undefined],
+        [page.querySelector<HTMLElement>('[data-whm-php-pool-fact="maxSpareServers"]'), pd ? String(pd.pool.maxSpareServers) : undefined],
+        [page.querySelector<HTMLElement>('[data-whm-php-pool-fact="maxRequests"]'), pd ? String(pd.pool.maxRequests) : undefined],
+      ]
+      for (const [node, val] of factEntries) {
+        if (node && val !== undefined) { node.textContent = val; node.dir = 'ltr' }
+      }
+      const canEditPool = writable() && !!pd
+      const modeSelect = select('php-pool-mode')
+      if (modeSelect) {
+        if (pd) modeSelect.value = pd.pool.mode
+        live(modeSelect, canEditPool)
+      }
+      const fieldPairs: ReadonlyArray<readonly [HTMLInputElement | null, number | undefined]> = [
+        [page.querySelector<HTMLInputElement>('[name="php-pool-max-children"]'), pd?.pool.maxChildren],
+        [page.querySelector<HTMLInputElement>('[name="php-pool-idle-timeout"]'), pd?.pool.processIdleTimeoutSec],
+        [page.querySelector<HTMLInputElement>('[name="php-pool-start-servers"]'), pd?.pool.startServers],
+        [page.querySelector<HTMLInputElement>('[name="php-pool-min-spare"]'), pd?.pool.minSpareServers],
+        [page.querySelector<HTMLInputElement>('[name="php-pool-max-spare"]'), pd?.pool.maxSpareServers],
+        [page.querySelector<HTMLInputElement>('[name="php-pool-max-requests"]'), pd?.pool.maxRequests],
+      ]
+      for (const [ctrl, val] of fieldPairs) {
+        if (ctrl) {
+          if (val !== undefined) ctrl.value = String(val)
+          live(ctrl, canEditPool)
+        }
+      }
+      live(hook('discard-pool'), canEditPool)
+      live(hook('apply-pool'), canEditPool)
     }
     const INI_FIELDS = ['memory_limit', 'upload_max_filesize', 'post_max_size', 'max_execution_time', 'max_input_vars'] as const
     const iniDrafts = new Map<string, Record<string, string>>()
@@ -340,8 +409,22 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
     const paintIni = (): void => {
       if (iniDraftRevision !== (manage?.revision ?? null)) { iniDrafts.clear(); iniDraftRevision = manage?.revision ?? null }
       const version = select('php-version')?.value ?? '', current = manage?.versions.find(item => item.version === version), draft = iniDrafts.get(version)
-      for (const name of INI_FIELDS) { const input = page.querySelector<HTMLInputElement>('[name="' + name + '"]'); if (input) { input.value = draft?.[name] ?? current?.ini?.[name] ?? ''; live(input, writable() && !!current?.ini) } }
+      const savedIniCells: Record<(typeof INI_FIELDS)[number], HTMLElement | null> = {
+        memory_limit: page.querySelector<HTMLElement>('[data-whm-php-saved-ini="memory_limit"]'),
+        upload_max_filesize: page.querySelector<HTMLElement>('[data-whm-php-saved-ini="upload_max_filesize"]'),
+        post_max_size: page.querySelector<HTMLElement>('[data-whm-php-saved-ini="post_max_size"]'),
+        max_execution_time: page.querySelector<HTMLElement>('[data-whm-php-saved-ini="max_execution_time"]'),
+        max_input_vars: page.querySelector<HTMLElement>('[data-whm-php-saved-ini="max_input_vars"]'),
+      }
+      for (const name of INI_FIELDS) {
+        const input = page.querySelector<HTMLInputElement>('[name="' + name + '"]')
+        if (input) { input.value = draft?.[name] ?? current?.ini?.[name] ?? ''; live(input, writable() && !!current?.ini) }
+        const savedCell = savedIniCells[name]
+        if (savedCell) { savedCell.textContent = current?.ini?.[name] ?? t('Not read'); if (current?.ini?.[name]) savedCell.dir = 'ltr' }
+      }
       const displayErrors = page.querySelector<HTMLInputElement>('[data-php-display-errors]'); if (displayErrors) { displayErrors.value = current?.ini?.display_errors ?? ''; displayErrors.disabled = true }
+      const savedDisplayErrors = page.querySelector<HTMLElement>('[data-whm-php-saved-ini="display_errors"]')
+      if (savedDisplayErrors) { savedDisplayErrors.textContent = current?.ini?.display_errors ?? t('Not read'); if (current?.ini?.display_errors) savedDisplayErrors.dir = 'ltr' }
       iniShownVersion = version
       live(hook('apply-ini'), writable() && !!current?.ini); live(hook('discard-ini'), writable() && !!current?.ini)
       if (current && current.ini === null) sectionNote('php-configure', 'failed', t('The managed php.ini file was changed outside xPanel. Fix it on the host before saving here.'))
@@ -430,6 +513,48 @@ function bindWhmPhp(askDialog?: (options: Record<string, unknown>) => Promise<un
       void submit('php-install', { operation: 'install-version', version }, t('Install PHP {version}?', { version }), t('Existing domains keep their version.'))
     })
     wire('discard-ini', () => { iniDrafts.delete(select('php-version')?.value ?? ''); paintIni() })
+    wire('discard-pool', () => { paintPool(); sectionNote('php-pool', 'read', t('Cancelled. Nothing was changed.')) })
+    wire('apply-pool', () => {
+      const pd = manage?.poolDefaults
+      if (!pd) return
+      const mode = select('php-pool-mode')?.value ?? ''
+      const readInt = (el: HTMLInputElement | null): number => Number.parseInt(el?.value.trim() ?? '', 10)
+      const maxChildren = readInt(page.querySelector<HTMLInputElement>('[name="php-pool-max-children"]'))
+      const processIdleTimeoutSec = readInt(page.querySelector<HTMLInputElement>('[name="php-pool-idle-timeout"]'))
+      const startServers = readInt(page.querySelector<HTMLInputElement>('[name="php-pool-start-servers"]'))
+      const minSpareServers = readInt(page.querySelector<HTMLInputElement>('[name="php-pool-min-spare"]'))
+      const maxSpareServers = readInt(page.querySelector<HTMLInputElement>('[name="php-pool-max-spare"]'))
+      const maxRequests = readInt(page.querySelector<HTMLInputElement>('[name="php-pool-max-requests"]'))
+      if (!['ondemand', 'dynamic', 'static'].includes(mode) || ![maxChildren, processIdleTimeoutSec, startServers, minSpareServers, maxSpareServers, maxRequests].every(n => Number.isSafeInteger(n) && n >= 1)) {
+        sectionNote('php-pool', 'failed', t('Enter positive whole numbers for every pool setting.'))
+        return
+      }
+      void confirmed(t('Save global PHP-FPM pool defaults?'), t('Inherited account pools reload after php-fpm -t passes.')).then(async yes => {
+        if (!yes || !writable() || busy || !manage?.poolDefaults) return
+        busy = true; root.setAttribute('aria-busy', 'true'); sectionNote('php-pool', 'reading', t('Checking the change on the host…'))
+        try {
+          const result = await request!('PUT', '/api/server/php/pool-defaults', {
+            mode,
+            maxChildren,
+            startServers,
+            minSpareServers,
+            maxSpareServers,
+            maxRequests,
+            processIdleTimeoutSec,
+            expectedRevision: manage.poolDefaults.revision,
+          }) as { poolDefaults?: PhpPoolDefaultsClientView }
+          if (result?.poolDefaults && manage) {
+            manage.poolDefaults = result.poolDefaults
+            paintPool()
+          }
+          sectionNote('php-pool', 'stored', t('Global PHP-FPM pool defaults saved and reconciled.'))
+        } catch (error) {
+          sectionNote('php-pool', 'failed', failure(error))
+        } finally {
+          busy = false; root.setAttribute('aria-busy', 'false')
+        }
+      })
+    })
     wire('apply-ini', () => {
       const version = select('php-version')?.value, current = manage?.versions.find(item => item.version === version)
       if (!version || !current?.ini) return

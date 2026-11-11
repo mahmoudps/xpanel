@@ -207,6 +207,8 @@ function projectWhmSurfaceMode(props: WhmSurfaceProps & ThemeViewProps, presenta
     hostSample: root ? props.hostSample : undefined, services: root ? props.services : undefined,
     certificates: root ? props.certificates : undefined, adminSessionIp: root ? props.adminSessionIp : undefined,
     generations: root ? props.generations : undefined, auditEntries: root ? props.auditEntries : undefined,
+    auditChain: root ? props.auditChain : undefined, panelAccessSummary: root ? props.panelAccessSummary : undefined,
+    autoSsl: root ? props.autoSsl : undefined, sshOpenSessions: root ? props.sshOpenSessions : undefined,
     auditList: root ? props.auditList : undefined, nearLimits: root ? props.nearLimits : accounts === undefined ? undefined : props.nearLimits?.filter(item => names.has(item.name)),
     driftCount: root ? props.driftCount : undefined, driftCheckedAt: root ? props.driftCheckedAt : undefined,
     rollbackGenerationId: root ? props.rollbackGenerationId : undefined,
@@ -242,6 +244,7 @@ export function projectReadOnlyPanelSurface(props: PanelSurfaceProps & ThemeView
     ...props, visibility, catalog, activeRoute: route, account: undefined, plan: undefined, domains: undefined,
     databases: undefined, databaseUsers: undefined, serviceUsers: undefined, certificates: undefined, dnsRecords: undefined,
     activeDomain: undefined, customConfig: undefined, websiteAnalytics: undefined, usage: undefined, files: undefined, recentAudit: undefined,
+    generationActivatedAt: undefined, autoSsl: undefined, accountSecuritySummary: undefined, sshOpenSessions: undefined,
   }
   if (!scoped) return undefined
   return { surface: 'xpanel', route, props: scoped, visibility, catalog, authority: readOnlyAuthority(authority(access, { canManage: false, root: false, ownerId: account?.ownerId ?? null, allowUnlimited: false }), !!account) }

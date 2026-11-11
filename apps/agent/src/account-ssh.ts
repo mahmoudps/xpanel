@@ -5,6 +5,7 @@ import { system } from '@xpanel/render'
 import { MAX_EDIT_BYTES } from './file-manager.ts'
 import type { FileText, JailedFileManager } from './file-manager.ts'
 import type { AgentCallerIdentity } from './server.ts'
+import type { SshOpenSessionsView } from './ssh-sessions.ts'
 
 export const AUTHORIZED_KEYS_PATH = '.ssh/authorized_keys'
 export const SSH_DIRECTORY = '.ssh'
@@ -132,6 +133,7 @@ export interface AccountSshView {
   keys: AuthorizedKey[]; unrecognizedLines: number[]
   capacity: { maxKeys: number; used: number }
   login: { enabled: boolean; accountShell: Account['shell']; planShell: Plan['shell']; port: number | null; source: 'saved-configuration' }
+  openSessions?: SshOpenSessionsView
   capabilities: { canAdd: boolean; canRemove: boolean; reason: 'directory_unmanageable' | 'capacity' | null }
   application: { status: 'read' | 'added' | 'removed'; nativeQualified: false; removedLines?: number }
 }
@@ -145,12 +147,13 @@ const readState = async (files: AccountSshFiles): Promise<SshState> => {
   try { return { directory, file: await files.readText(AUTHORIZED_KEYS_PATH) } }
   catch (error) { if (isXpanelError(error) && error.code === 'NOT_FOUND') return { directory, file: null }; throw error }
 }
-const project = (account: Account, plan: Plan, settings: ServerSettings | null, state: SshState, status: AccountSshView['application']['status'], removedLines?: number): AccountSshView => {
+const project = (account: Account, plan: Plan, settings: ServerSettings | null, state: SshState, status: AccountSshView['application']['status'], removedLines?: number, openSessions?: SshOpenSessionsView): AccountSshView => {
   const parsed = parseAuthorizedKeys(state.file?.content ?? ''), usable = state.directory.kind === null || state.directory.kind === 'directory'
   return { context: { accountId: account.id, username: account.username },
     file: { path: AUTHORIZED_KEYS_PATH, exists: state.file !== null, sizeBytes: state.file?.sizeBytes ?? 0, mtime: state.file?.mtime ?? null, revision: sshKeysRevision(account.id, state.file), directory: state.directory },
     keys: parsed.keys, unrecognizedLines: parsed.unrecognizedLines, capacity: { maxKeys: SSH_MAX_KEYS, used: parsed.keys.length },
     login: { enabled: system.effectiveShell(account, plan) !== system.NOLOGIN_SHELL, accountShell: account.shell, planShell: plan.shell, port: settings?.sshPort ?? null, source: 'saved-configuration' },
+    ...(openSessions ? { openSessions } : {}),
     capabilities: { canAdd: usable && parsed.keys.length < SSH_MAX_KEYS, canRemove: usable && parsed.keys.length > 0, reason: !usable ? 'directory_unmanageable' : parsed.keys.length >= SSH_MAX_KEYS ? 'capacity' : null },
     application: { status, nativeQualified: false, ...(removedLines === undefined ? {} : { removedLines }) } }
 }
@@ -176,10 +179,10 @@ const withoutKey = (content: string, fingerprint: string): { content: string; re
 }
 
 /** Mutations run through the confined runner only; the caller holds the account lifecycle lease. */
-export async function runAccountSshRequest(input: { account: Account; plan: Plan; settings: ServerSettings | null; files: AccountSshFiles; request: AccountSshRequest; authorize: () => Promise<void> }): Promise<AccountSshView> {
-  const { account, plan, settings, files, request } = input
+export async function runAccountSshRequest(input: { account: Account; plan: Plan; settings: ServerSettings | null; files: AccountSshFiles; request: AccountSshRequest; authorize: () => Promise<void>; openSessions?: SshOpenSessionsView }): Promise<AccountSshView> {
+  const { account, plan, settings, files, request, openSessions } = input
   const state = await readState(files)
-  if (request.op === 'read') return project(account, plan, settings, state, 'read')
+  if (request.op === 'read') return project(account, plan, settings, state, 'read', undefined, openSessions)
   if (sshKeysRevision(account.id, state.file) !== request.expectedRevision) return fail('CONFLICT', 'the key file changed; read it before retrying', { stateChanged: false })
   const view = project(account, plan, settings, state, 'read'), current = state.file?.content ?? ''
   let next: string, removed: number | undefined
@@ -207,7 +210,7 @@ export async function runAccountSshRequest(input: { account: Account; plan: Plan
     const acknowledgement = await files.writeTextChecked(AUTHORIZED_KEYS_PATH, next, state.file, FILE_MODE)
     const saved = await files.readText(AUTHORIZED_KEYS_PATH)
     if (saved.content !== next || !acknowledgement || acknowledgement.mtime !== saved.mtime || acknowledgement.sizeBytes !== saved.sizeBytes || acknowledgement.mode !== FILE_MODE) return fail('SERVICE_UNAVAILABLE', 'the key file write requires inspection', { stateChanged: true, unknownOutcome: true, verificationRequired: true })
-    return project(account, plan, settings, { directory: { exists: true, kind: 'directory', mode: DIRECTORY_MODE }, file: saved }, request.op === 'add' ? 'added' : 'removed', removed)
+    return project(account, plan, settings, { directory: { exists: true, kind: 'directory', mode: DIRECTORY_MODE }, file: saved }, request.op === 'add' ? 'added' : 'removed', removed, openSessions)
   } catch (error) {
     const unchanged = isXpanelError(error) && error.detail?.stateChanged === false && !['unknownOutcome', 'verificationRequired'].some(key => error.detail?.[key] === true)
     if (unchanged && !prepared) throw error
@@ -223,6 +226,7 @@ export interface AccountSshRouteDeps {
   /** Direct local principal read; no API self-RPC inside the lease. */
   currentPrincipal(): Promise<{ kind: string; id: string; username: string; accountId: string | null; disabled: boolean } | null>
   files(account: Account, plan: Plan): AccountSshFiles
+  openSessions?(account: Account): Promise<SshOpenSessionsView>
   audit(entry: { actor: string; action: string; target: string; detail: Record<string, unknown>; outcome: 'ok' | 'failed'; principalId: string }): Promise<unknown>
 }
 const SSH_ROUTE = /^\/accounts\/([a-z][a-z0-9]{0,15})\/ssh\/keys$/
@@ -253,7 +257,8 @@ export async function handleAccountSshRoute(req: Request, url: URL, method: stri
       return plan
     }
     const plan = await authorize()
-    const result = await runAccountSshRequest({ account: fresh, plan, settings: await deps.store.getServerSettings(), files: deps.files(fresh, plan), request, authorize: async () => { await authorize() } })
+    const observedSessions = deps.openSessions ? await deps.openSessions(fresh).catch(() => ({ state: 'unavailable' as const, count: null })) : undefined
+    const result = await runAccountSshRequest({ account: fresh, plan, settings: await deps.store.getServerSettings(), files: deps.files(fresh, plan), request, authorize: async () => { await authorize() }, ...(observedSessions ? { openSessions: observedSessions } : {}) })
     if (request.op !== 'read') {
       const fingerprint = request.op === 'add' ? request.key.fingerprint : request.fingerprint
       try { await deps.audit({ actor: caller.actor, action: request.op === 'add' ? 'account.ssh_key.added' : 'account.ssh_key.removed', target: 'account:' + fresh.username, detail: { fingerprint, ...(request.op === 'add' ? { type: request.key.type } : { removedLines: result.application.removedLines }) }, outcome: 'ok', principalId: caller.principalId }) }

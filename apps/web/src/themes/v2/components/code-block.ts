@@ -21,12 +21,12 @@ export function codeBlock(t: Translate, props: CodeBlockProps): string {
   return `<div class="v2-code" dir="ltr"${hookAttrs(props.hooks)}>${head}<pre tabindex="0"${props.live ? ' aria-live="polite"' : ''}><code>${escapeHtml(props.code)}</code></pre></div>`
 }
 
-export const CODE_BLOCK_CSS = `.v2-code{display:flex;flex-direction:column;border-radius:var(--radius-control);background:var(--code);color:var(--code-text);overflow:hidden}
-.v2-code__head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-1);padding-inline:var(--space-2) 4px;border-bottom:1px solid var(--nav-line)}
-.v2-code__head code{font-size:12px;color:var(--code-muted)}
+export const CODE_BLOCK_CSS = `.v2-code{display:flex;flex-direction:column;border-radius:var(--radius-control);border:1px solid var(--nav-line);background:var(--code);color:var(--code-text);overflow:hidden}
+.v2-code__head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-1);padding-inline:var(--space-2) 4px;border-bottom:1px solid var(--nav-line);background:var(--nav-2)}
+.v2-code code{font-size:12px}
+.v2-code__head code{color:var(--code-muted)}
 .v2-code__copy{display:inline-flex;align-items:center;justify-content:center;width:var(--target);height:var(--target);border:0;border-radius:var(--radius-chip);background:transparent;color:var(--code-muted);cursor:pointer}
-.v2-code__copy:hover{color:var(--code-text)}
-.v2-code pre{margin:0;padding:var(--space-2);font:12px/1.7 var(--font-mono);overflow-x:auto;white-space:pre}
-.v2-code pre code{font-size:inherit}
+.v2-code__copy:hover{background:var(--nav);color:var(--code-text)}
+.v2-code pre{padding:var(--space-2);line-height:1.7;overflow-x:auto}
 .v2-code :focus-visible{outline-color:var(--nav-focus)}
 `

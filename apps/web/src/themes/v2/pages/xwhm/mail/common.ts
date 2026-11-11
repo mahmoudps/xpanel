@@ -57,7 +57,7 @@ export const WHM_MAIL_CSS = `.v2-whm-mail,.v2-whm-mail__stack{display:flex;flex-
 .v2-whm-mail__facts>div,.v2-whm-mail__field{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;text-align:start}
 .v2-whm-mail__field>label{padding-inline:13px;font-size:13px;line-height:1.25;font-weight:600}
 .v2-whm-mail__facts dt{font-size:12px;color:var(--muted)}
-.v2-whm-mail__facts dd{margin:0;font-size:14px;overflow-wrap:break-word}
+.v2-whm-mail__facts dd{margin:0;font-size:14px;font-weight:500;font-variant-numeric:tabular-nums;unicode-bidi:plaintext;text-align:var(--v2-control-align,match-parent);overflow-wrap:break-word}
 .v2-whm-mail__field>label,.v2-whm-mail__field>span[id],.v2-whm-mail .v2-field>label,.v2-whm-mail__facts dt{text-box-trim:trim-end;text-box-edge:text}
 .v2-whm-mail__facts dd{text-box-trim:trim-start;text-box-edge:text}
 .v2-whm-mail__field :is(input:not([type=checkbox],[type=radio]),select,textarea){inline-size:100%;min-inline-size:0}
@@ -66,8 +66,14 @@ export const WHM_MAIL_CSS = `.v2-whm-mail,.v2-whm-mail__stack{display:flex;flex-
 .v2-whm-mail fieldset{border:0;padding:0}
 .v2-whm-mail legend{float:inline-start;inline-size:100%;padding:0;font-size:14px;font-weight:600}
 .v2-whm-mail__actions,.v2-whm-mail__check{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
-.v2-whm-mail__check{gap:var(--space-1);min-block-size:var(--target)}
-.v2-whm-mail__scroll{min-inline-size:0;overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius-notice)}
+.v2-whm-mail .v2-btn{min-inline-size:var(--target);min-block-size:var(--target)}
+.v2-whm-mail__check{gap:10px;min-block-size:var(--target);cursor:pointer}
+.v2-whm-mail__check>input{margin:0}
+.v2-whm-mail [data-whm-mail-queue-bulk-bar]{padding:12px var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}
+.v2-whm-mail :is([data-whm-mail-queue-selected],[data-whm-mail-quality-selected],[data-whm-mailbox-maintenance-selected],[data-mail-log-page-label]){font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.v2-whm-mail .v2-card__body ul:not([class]){margin:0;padding-inline-start:var(--space-3);display:flex;flex-direction:column;gap:var(--space-1);font-size:13px;line-height:1.6;color:var(--text-2)}
+.v2-whm-mail [data-whm-mail-settings-preview]:not([hidden]){padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}
+.v2-whm-mail__scroll{min-inline-size:0;overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--surface)}
 .v2-whm-mail__table{inline-size:100%}
 .v2-whm-mail__table td[colspan]{color:var(--muted)}
 .v2-whm-mail__table{min-inline-size:720px}
@@ -80,13 +86,15 @@ export const WHM_MAIL_CSS = `.v2-whm-mail,.v2-whm-mail__stack{display:flex;flex-
 .v2-whm-mail__timeline>li{display:flex;flex-direction:column;gap:var(--space-1);padding-inline-start:var(--space-2);border-inline-start:2px solid var(--line)}
 .v2-whm-mail__status{overflow-wrap:anywhere}
 .v2-whm-mail pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
-.v2-whm-mail__field>pre{padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-control);background:var(--subtle)}
+.v2-whm-mail__field>pre{padding:12px;border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle);font-size:13px;line-height:1.6;font-variant-numeric:tabular-nums}
 .v2-whm-mail [hidden]{display:none!important}
 .v2-whm-mail form>.v2-btn{align-self:flex-start}
 .v2-whm-mail__split .v2-whm-mail__table{min-inline-size:0}
 .v2-whm-mail__split .v2-whm-mail__table :is(th,td){white-space:normal;padding-inline:12px}
 .v2-whm-mail__table :is(th,td){padding-inline:12px}
-.v2-whm-mail__table td{overflow-wrap:break-word}
+.v2-whm-mail__table th:has(>[type=checkbox]){vertical-align:middle}
+.v2-whm-mail__table td{overflow-wrap:break-word;font-variant-numeric:tabular-nums}
+@media(min-width:601px){.v2-whm-mail__table tbody tr:last-child>:is(th,td){border-block-end:0}}
 .v2-whm-mail [data-whm-mail-quality-rows] td[data-check] strong[data-state=unchecked]{font-weight:400;color:var(--muted)}
 .v2-whm-mail__table tr:has(button)>:is(th,td){vertical-align:middle}
 .v2-whm-mail [data-list-reset] .v2-card__title{display:flex;flex-direction:column;gap:8px}
@@ -114,11 +122,13 @@ export const WHM_MAIL_CSS = `.v2-whm-mail,.v2-whm-mail__stack{display:flex;flex-
 .v2-whm-mail__facts:has(>div>[data-mail-monitor-count]){grid-template-columns:repeat(3,minmax(0,1fr))}
 @media(min-width:901px){.v2-whm-mail__facts:has(>:nth-child(6):last-child){grid-template-columns:repeat(3,minmax(0,1fr))}.v2-whm-mail__facts:has(>:nth-child(7)){grid-template-columns:repeat(4,minmax(0,1fr))}
 .v2-whm-mail [data-mailx-form]>.v2-whm-mail__fields{grid-template-columns:repeat(6,minmax(0,1fr))}.v2-whm-mail [data-mailx-form]>.v2-whm-mail__fields>*{grid-column:span 3}
-.v2-whm-mail [data-mailx-page=spam] [data-mailx-form]>.v2-whm-mail__fields>.v2-field:has(>[type=number]),.v2-whm-mail [data-mailx-page=marketing] .v2-whm-mail [data-mailx-form]>.v2-whm-mail__fields>*{grid-column:span 2}
+.v2-whm-mail [data-mailx-page=spam] [data-mailx-form]>.v2-whm-mail__fields>.v2-field:has(>[type=number]),.v2-whm-mail [data-mailx-page=marketing] [data-mailx-form]>.v2-whm-mail__fields>*{grid-column:span 2}
 .v2-whm-mail [data-mailx-form]>.v2-whm-mail__fields>:is([data-mailx-page=spam] .v2-field:has(>textarea),[data-mailx-page=relay] .v2-whm-mail__field,[data-mailx-page=bcc] .v2-field:has(>[type=email])){grid-column:1/-1}}
 @media(min-width:1101px){.v2-whm-mail__facts:has(>div>[data-mail-monitor-count]){grid-template-columns:repeat(6,minmax(0,1fr))}}
 @media(min-width:901px){.v2-whm-mail__facts:has([data-mail-log-fact=window]){grid-template-columns:minmax(0,1fr) minmax(0,2fr) minmax(0,1fr) minmax(0,1fr)}}
+@media(prefers-reduced-motion:no-preference){.v2-whm-mail .v2-btn{transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out,box-shadow 140ms ease-out,opacity 140ms ease-out,transform 140ms ease-out}}
 @media(max-width:1100px){.v2-whm-mail__split{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:640px){.v2-whm-mail__fields{grid-template-columns:minmax(0,1fr)}.v2-whm-mail__facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.v2-whm-mail :is(.v2-whm-mail__scroll tr:not(:has(>td>[type=checkbox]))>td:nth-child(n+3):not([colspan],:empty),.v2-whm-mail__scroll tr:has(>td>[type=checkbox])>td:nth-child(n+4):not(:empty)){grid-column:1/-1;display:flex;justify-content:space-between;align-items:baseline;gap:16px;text-align:end}
 .v2-whm-mail :is(.v2-whm-mail__scroll tr:not(:has(>td>[type=checkbox]))>td:nth-child(n+3):not([colspan],:empty),.v2-whm-mail__scroll tr:has(>td>[type=checkbox])>td:nth-child(n+4):not(:empty))::before{flex:none;font-size:13px;color:var(--muted);text-align:start}
 .v2-whm-mail__scroll td:nth-child(3):not([colspan])::before{content:var(--v2-col-3)}.v2-whm-mail__scroll tr:has(>td>[type=checkbox])>td:nth-child(3)::before{content:none}.v2-whm-mail__scroll td:nth-child(4):not([colspan])::before{content:var(--v2-col-4)}.v2-whm-mail__scroll td:nth-child(5):not([colspan])::before{content:var(--v2-col-5)}.v2-whm-mail__scroll td:nth-child(6):not([colspan])::before{content:var(--v2-col-6)}.v2-whm-mail__scroll td:nth-child(7):not([colspan])::before{content:var(--v2-col-7)}.v2-whm-mail__scroll td:nth-child(8):not([colspan])::before{content:var(--v2-col-8)}.v2-whm-mail__scroll td:nth-child(9):not([colspan])::before{content:var(--v2-col-9)}.v2-whm-mail__scroll td:nth-child(10):not([colspan])::before{content:var(--v2-col-10)}}

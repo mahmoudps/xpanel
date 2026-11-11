@@ -1,4 +1,4 @@
-IBM Plex Sans and IBM Plex Mono
+IBM Plex Sans, IBM Plex Sans Arabic and IBM Plex Mono
 
 xPanel ships these web font files unmodified and serves them from the panel's own origin under /assets/fonts/.
 They are not subset, renamed or otherwise changed.
@@ -6,7 +6,7 @@ They are not subset, renamed or otherwise changed.
 Copyright 2017 IBM Corp. with Reserved Font Name "Plex".
 Licensed under the SIL Open Font License, Version 1.1: see LICENSE in this directory.
 
-Source: https://github.com/IBM/plex, release tags @ibm/plex-sans@1.1.0 and @ibm/plex-mono@1.1.0,
+Source: https://github.com/IBM/plex, release tags @ibm/plex-sans@1.1.0, @ibm/plex-sans-arabic@1.1.0 and @ibm/plex-mono@1.1.0,
 directory fonts/complete/woff2 of each release archive.
 
 SHA-256 of the shipped files:
@@ -15,10 +15,14 @@ ba711a3085ff9f27440b6b9c4550cfc47c97bf36591d5da958b975bb3add8c1a  IBMPlexSans-Re
 5660f8a658f8bb50dbc005232f885eadffd2bc1c235c4f6fbb63469d1f9cde6d  IBMPlexSans-Medium.woff2
 f78048030eab62e860efa39a0df79e2e5581bf122eb95b9bc42c0b8a4988d205  IBMPlexSans-SemiBold.woff2
 fa7130d854a660b39a7fc9e6e0f2dc23dba5f1346e2adea3e1fe37b6d884133d  IBMPlexSans-Bold.woff2
+74112e1b7bf2e2c547989a4e947a60cba6cd1f9156e0065670134636e717199d  IBMPlexSansArabic-Regular.woff2
+c72f6986f50ded745d06e71e508096209c52a55a6b3a81029954e33c52ba1dd2  IBMPlexSansArabic-Medium.woff2
+869b2acd0a9660607a2025f0fe1c640110bf23d33417509328f07722922b8063  IBMPlexSansArabic-SemiBold.woff2
+db6650a05969c144ab5ab9bb6c3beca6ca4dbb3537bb5f2311c878dd293875b4  IBMPlexSansArabic-Bold.woff2
 49ce58b41a0e1cb921c0f58d9a5b8b96a2cc21437c7066f3ba4f24873076d131  IBMPlexMono-Regular.woff2
 8c2c290cbd998fa1f647e4572aca6ebbd72589551b0f3f9f8bb8628fbb8219d5  IBMPlexMono-Medium.woff2
 ed5eaca7522336959d6c3810bd9bb78424f0d964082d581bfbea169ee08d14e3  IBMPlexMono-SemiBold.woff2
 
-LICENSE is the LICENSE.txt of both release archives, which are identical
+LICENSE is the LICENSE.txt of all three release archives, which are identical
 (SHA-256 7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da with CRLF line endings);
 it is stored here with LF line endings (SHA-256 37784b44044a4ffd9256702b7c0982c37e5c8887ba90c6dca0479aea93dc898d).

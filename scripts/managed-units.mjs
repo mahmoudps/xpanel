@@ -16,7 +16,9 @@ const releaseRoot = value => typeof value === 'string'
 // API heap arguments, current first, then each one an installed release still runs. A new release parses the transition
 // journal and observes the writers an installed release left behind, so removing a vector refuses upgrades from it.
 // --max-semi-space-size=1 (0.1.48): Node 26 grows the young generation to ~56 MB beside the 96 MB old space.
+// --max-old-space-size=160 --max-semi-space-size=2: keeps full route/catalog evaluation comfortably inside the API heap.
 export const API_HEAP_ARGUMENTS = Object.freeze([
+  Object.freeze(['--max-old-space-size=160', '--max-semi-space-size=2']),
   Object.freeze(['--max-old-space-size=96', '--max-semi-space-size=1']),
   Object.freeze(['--max-old-space-size=96']),
 ])

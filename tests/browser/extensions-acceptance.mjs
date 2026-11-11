@@ -277,8 +277,10 @@ export async function runExtensionsAcceptance({ output, filter } = {}) {
           result.geometry = await measure(page, selector)
           validateGeometry(result.geometry, spec, width, locale, theme)
           result.applied_fonts = []
+          const isV2 = await page.locator('[data-ui-theme="v2"]').count() > 0
+          const uiFamily = locale === 'ar' ? (isV2 ? 'IBM Plex Sans Arabic' : 'sans-serif') : 'IBM Plex Sans'
           for (const human of result.geometry.human) {
-            const font = await assertAppliedFont(page, human.selector, locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+            const font = await assertAppliedFont(page, human.selector, uiFamily)
             result.applied_fonts.push(font)
           }
           assert.ok(result.applied_fonts.length > 0, 'Actual human glyph fonts must be observed')

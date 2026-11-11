@@ -125,14 +125,14 @@ export function applyBar(t: Translate, props: ApplyBarProps): string {
 }
 
 // The review takes the accent line while it holds pending rows or its in-review actions, as on the boards.
-export const CHANGE_REVIEW_CSS = `.v2-review:has(.v2-review__rows>li,>.v2-review__actions){border-color:var(--accent-line)}
+export const CHANGE_REVIEW_CSS = `.v2-review:has(.v2-review__rows>li,>.v2-review__actions),.v2-apply[data-state="pending"]{border-color:var(--accent-line)}
 .v2-review>.v2-card__head{align-items:baseline}
 .v2-review__meta{font-size:13px;color:var(--muted)}
 .v2-review__compare{display:flex;flex-wrap:wrap;align-items:stretch;gap:var(--space-1) 12px}
-.v2-review__compare>.v2-icon{flex:none;align-self:center;color:var(--muted)}
-.v2-review__side{flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:var(--space-1);padding:var(--space-2);border-radius:var(--radius-notice);background:var(--subtle);border:1px solid var(--line)}
-.v2-review__side h3{font-size:12px;font-weight:600;color:var(--muted)}
-.v2-review__side--proposed{background:var(--accent-soft);border-color:var(--accent-line)}
+.v2-review__compare>.v2-icon,.v2-review__pair>.v2-icon{align-self:center;color:var(--muted)}
+.v2-review__side,.v2-review__box{flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:var(--space-1);padding:var(--space-2);border-radius:var(--radius-notice);background:var(--subtle);border:1px solid var(--line)}
+.v2-review__side h3{font-size:12px;color:var(--muted)}
+.v2-review__side--proposed,.v2-review__box--proposed{background:var(--accent-soft);border-color:var(--accent-line)}
 .v2-review__side--proposed h3{color:var(--accent)}
 .v2-review__side dl{display:flex;flex-direction:column;gap:var(--space-2)}
 .v2-review__side dl>div{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}
@@ -147,11 +147,9 @@ export const CHANGE_REVIEW_CSS = `.v2-review:has(.v2-review__rows>li,>.v2-review
 .v2-review__name{font-size:13px;font-weight:600}
 .v2-review__undo{padding:0 var(--space-1);font-size:13px}
 .v2-review__pair{display:flex;align-items:stretch;gap:var(--space-1)}
-.v2-review__pair>.v2-icon{flex:none;align-self:center;color:var(--muted)}
-.v2-review__box{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:var(--space-1);padding:var(--space-2);border-radius:var(--radius-control);background:var(--subtle);border:1px solid var(--line)}
+.v2-review__box{flex-basis:0;border-radius:var(--radius-control)}
 .v2-review__box>:first-child{font-size:12px;color:var(--muted)}
 .v2-review__box>:last-child{font-size:13px;overflow-wrap:anywhere}
-.v2-review__box--proposed{background:var(--accent-soft);border-color:var(--accent-line)}
 .v2-review__box--proposed>:last-child{font-weight:600}
 .v2-review__row[data-state=invalid] .v2-review__box--proposed>:last-child{color:var(--bad)}
 .v2-review__detail{font-size:12px;color:var(--text-2);overflow-wrap:anywhere}
@@ -159,12 +157,12 @@ export const CHANGE_REVIEW_CSS = `.v2-review:has(.v2-review__rows>li,>.v2-review
 .v2-review__gate{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--space-2) var(--space-3);padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-control);background:var(--subtle)}
 .v2-review__tests{flex:1 1 420px;min-width:0;display:flex;flex-direction:column;gap:var(--space-1)}
 .v2-review__tests ol{margin:0;padding-inline-start:20px;display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:1.55;color:var(--text-2)}
-.v2-review__tests code{font-family:var(--font-mono);font-size:12px;color:var(--text)}
+.v2-review__tests code{font-size:12px;color:var(--text)}
 .v2-review__note{font-size:12px;color:var(--muted);line-height:1.6}
 .v2-review__impact{flex:1 1 360px;min-width:0}
 .v2-review__steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:12px}
 .v2-review__steps>li{display:flex;gap:10px;padding:12px 14px;border-radius:var(--radius-control);border:1px solid var(--line);background:var(--subtle);font-size:13px;line-height:1.6}
-.v2-review__steps .v2-icon{flex:none;margin-top:3px;color:var(--accent)}
+.v2-review__steps .v2-icon{margin-top:3px;color:var(--accent)}
 .v2-review__steps span{min-width:0;overflow-wrap:anywhere}
 .v2-review__actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:12px}
 .v2-apply{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2);padding:12px;padding-inline-start:20px;border-radius:var(--radius-notice);background:var(--subtle);border:1px solid var(--line)}

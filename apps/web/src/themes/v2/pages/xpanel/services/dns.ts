@@ -4,7 +4,7 @@ import { v2Messages } from '../../../messages.ts'
 import { card, statusPill } from '../../../components/index.ts'
 import { escapeHtml } from '../../../html.ts'
 import { renderV2DnssecCard } from './dnssec.ts'
-import { listFilter, listFilterEmpty, missingServiceAccount, phoneLabels, serviceButton, serviceFacts, serviceField, serviceHeader, technical, type PanelServiceAuthority } from './common.ts'
+import { listFilter, listFilterEmpty, missingServiceAccount, phoneLabels, serviceButton, serviceFacts, serviceField, serviceHeader, serviceSelect, technical, type PanelServiceAuthority } from './common.ts'
 
 /** Desired-state editor. Public DNS answers and mail delivery are separate observations. */
 export function renderV2DnsPage(props: PanelSurfaceProps, authority: PanelServiceAuthority = { canManage: false }): string {
@@ -21,12 +21,12 @@ export function renderV2DnsPage(props: PanelSurfaceProps, authority: PanelServic
   const disabled = canManage ? '' : ' disabled'
   const zoneOptions = domains.map(domain => `<option value="${escapeHtml(domain.name)}"${domain.id === selected?.id ? ' selected' : ''}>${escapeHtml(domain.name)}</option>`).join('')
   // Board header: the zone picker and Add record. They stay inside the editor scope the controller reads.
-  const zonePicker = `<div class="v2-panel-service__head-field"><label for="v2-dns-zone">${escapeHtml(t('Zone'))}</label><select id="v2-dns-zone" data-dns-zone dir="ltr"${disabled}>${zoneOptions}</select></div>`
+  const zonePicker = `<div class="v2-panel-service__head-field"><label for="v2-dns-zone">${escapeHtml(t('Zone'))}</label>${serviceSelect(`<select id="v2-dns-zone" data-dns-zone dir="ltr"${disabled}>${zoneOptions}</select>`)}</div>`
   const heads = [t('Name'), t('Type'), 'TTL', t('Content'), t('Priority'), t('Actions')]
   // Board record filter: each record row names its type through the type select (data-list-field="type").
   const filter = listFilter(t, { id: 'v2-dns-filter', label: t(msgctxt('theme:v2', 'Filter records')), group: t('Record type'), key: 'type', open: canManage,
     options: [['', t('All')], ...['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA'].map(type => [type, type] as const)] })
-  const accountPicker = serviceField('v2-dns-account', t('Account'), `<select id="v2-dns-account" data-dns-account disabled><option value="${escapeHtml((account?.id ?? ''))}">${escapeHtml((account?.username ?? ''))}</option></select>`)
+  const accountPicker = serviceField('v2-dns-account', t('Account'), serviceSelect(`<select id="v2-dns-account" data-dns-account disabled><option value="${escapeHtml((account?.id ?? ''))}">${escapeHtml((account?.username ?? ''))}</option></select>`))
   const newZone = serviceField('v2-dns-new-name', t('New zone name'), `<input id="v2-dns-new-name" data-dns-new-name dir="ltr" type="text" autocomplete="off" disabled>`)
   const table = `<div class="v2-panel-service__table" tabindex="0" role="region" aria-label="${escapeHtml(t('DNS records'))}"><table class="v2-table"${phoneLabels(heads)}><thead><tr>${heads.map(label => `<th scope="col">${escapeHtml(label)}</th>`).join('')}</tr></thead><tbody data-dns-records><tr><td colspan="6">${escapeHtml(t('Zone records have not been read.'))}</td></tr></tbody></table></div>`
   const editor = card({

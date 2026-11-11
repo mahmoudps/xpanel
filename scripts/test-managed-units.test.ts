@@ -8,20 +8,20 @@ const options = (programRoot = '/opt/xpanel/releases/0.1.1', lifecycleParticipan
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
 
 // Frozen from the pre-extraction installer heredocs and TLS template at fd60318,
-// normalized to LF; they are independent of the shared renderer implementation. The API units add
-// --max-semi-space-size=1 (w52): Node 26 young generation sized to the 96 MB old space.
+// normalized to LF; they are independent of the shared renderer implementation. The API units size
+// the V8 heap to --max-old-space-size=160 --max-semi-space-size=2 while keeping prior vectors in API_HEAP_ARGUMENTS.
 const legacy = {
   flat: [
     { unitName: 'xpanel.slice', contentSha256: 'ae4f6f23c8446818e3b6192c2a6c96a3906fbe749adf160ee06fc879d1bf6414' },
     { unitName: 'xpanel-agent.service', contentSha256: 'c7a5d965169b0ae6a4eb31b960c43846e2ab6353208e69fae9ce444cc0fc4d96' },
-    { unitName: 'xpanel-api.service', contentSha256: 'f97a5d5f1e8d3270d59fd4cc6e54561fb3f7229776e0b848689c1e087a59b821' },
+    { unitName: 'xpanel-api.service', contentSha256: '0a1488546c09f1fc02b132697fbaf3784387230701f635c2888263d31d144795' },
     { unitName: 'xpanel-management-tls.service', contentSha256: 'ac6f9a81099e8837ac41c6b7d73bf4ef6680636ed360d901eded7ad6dd5572f2' },
     { unitName: 'xpanel-management-tls.timer', contentSha256: 'db51768489a1636b96635c165727b9c64b0fc06d7029cb5fe47000711c856acc' },
   ],
   current: [
     { unitName: 'xpanel.slice', contentSha256: 'ae4f6f23c8446818e3b6192c2a6c96a3906fbe749adf160ee06fc879d1bf6414' },
     { unitName: 'xpanel-agent.service', contentSha256: '808aabb5036d0995d12de1f42c13b038d7d998740862509b4b7b14b31df2d8fd' },
-    { unitName: 'xpanel-api.service', contentSha256: '8d5ac7bd23d138b84cdcdf07778d915c9b4f0171efa35dad49b9f5090429ccf0' },
+    { unitName: 'xpanel-api.service', contentSha256: '3b1a2a91b20d355f18e706637410c8d5463309d3b82a2e662ec675545dbe74d2' },
     { unitName: 'xpanel-management-tls.service', contentSha256: '020d5b946294bf638dc5e63ef140dbc02ec973d3c4c67b766ae703db4a16b3f6' },
     { unitName: 'xpanel-management-tls.timer', contentSha256: 'db51768489a1636b96635c165727b9c64b0fc06d7029cb5fe47000711c856acc' },
   ],
@@ -124,7 +124,10 @@ describe('unit images installed releases wrote', () => {
   it('accepts writer argv from the current and each installed API unit, and the one agent vector', () => {
     const entry = '/opt/xpanel/releases/0.1.1/apps/api/src/main.ts'
     expect(managedWriterArguments('api', '/usr/bin/node', entry)).toEqual([
-      ['/usr/bin/node', '--max-old-space-size=96', '--max-semi-space-size=1', entry], ['/usr/bin/node', '--max-old-space-size=96', entry]])
+      ['/usr/bin/node', '--max-old-space-size=160', '--max-semi-space-size=2', entry],
+      ['/usr/bin/node', '--max-old-space-size=96', '--max-semi-space-size=1', entry],
+      ['/usr/bin/node', '--max-old-space-size=96', entry],
+    ])
     expect(managedWriterArguments('agent', '/usr/bin/node', 'main.ts')).toEqual([['/usr/bin/node', '--max-old-space-size=64', 'main.ts']])
   })
 })

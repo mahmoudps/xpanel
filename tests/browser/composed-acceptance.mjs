@@ -187,7 +187,8 @@ export async function runComposedAcceptance({ output, filter } = {}) {
           assert.equal(geometry.ascii_digits, true)
           assert.equal(geometry.mutations, 0)
           const headingSelector = await page.locator('[data-v2-panel-page] h1').count() ? '[data-v2-panel-page] h1' : '[data-composed-route] h1'
-          result.applied_font = await assertAppliedFont(page, headingSelector, locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+          const isV2 = await page.locator('[data-ui-theme="v2"]').count() > 0
+          result.applied_font = await assertAppliedFont(page, headingSelector, locale === 'ar' ? (isV2 ? 'IBM Plex Sans Arabic' : 'sans-serif') : 'IBM Plex Sans')
           await injectTestScript(page, axeSource)
           result.accessibility = await page.evaluate(async () => (await axe.run(document.querySelector('[data-v2-panel-page], [data-composed-route]'), { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } })).violations.map(violation => ({ id: violation.id, impact: violation.impact, targets: violation.nodes.map(node => node.target) })))
           assert.deepEqual(result.accessibility, [])

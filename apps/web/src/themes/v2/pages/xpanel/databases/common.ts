@@ -4,6 +4,7 @@ import { localeDirection } from '../../../../../i18n.ts'
 import { normalizeAsciiDigits } from '../../../../../display-format.ts'
 import { card, pageHeader } from '../../../components/index.ts'
 import { escapeHtml, hookAttrs, type HookAttributes } from '../../../html.ts'
+import { icon } from '../../../icons.ts'
 import { v2Messages } from '../../../messages.ts'
 
 export type DatabasePageProps = PanelSurfaceProps & ThemeViewProps
@@ -52,6 +53,9 @@ export const technical = (value: string | number): string =>
 
 export const dbButton = (label: string, hooks?: HookAttributes, options: { disabled?: boolean; primary?: boolean; submit?: boolean } = {}): string =>
   `<button type="${options.submit ? 'submit' : 'button'}" class="v2-btn${options.primary ? ' v2-btn--primary' : ''}"${hookAttrs(hooks)}${options.disabled ? ' disabled' : ''}>${escapeHtml(label)}</button>`
+
+export const dbSelect = (selectHtml: string): string =>
+  `<span class="v2-select">${selectHtml}${icon('chevDown', 16)}</span>`
 
 export const dbField = (id: string, label: string, controlHtml: string, help?: string): string =>
   `<div class="v2-field"><label for="${escapeHtml(id)}">${escapeHtml(label)}</label>${controlHtml}${help ? `<p class="v2-field__help">${escapeHtml(help)}</p>` : ''}</div>`

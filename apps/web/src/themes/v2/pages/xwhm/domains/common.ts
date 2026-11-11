@@ -67,9 +67,12 @@ export const WHM_NETWORK_CSS = `.v2-whm-network,.v2-whm-network__stack{display:f
 .v2-whm-network__facts>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;text-align:start}
 .v2-whm-network__facts :is(dt,dd){margin:0;overflow-wrap:anywhere}
 .v2-whm-network__facts dt{font-size:12px;color:var(--muted)}
-.v2-whm-network__facts dd{font-size:14px}
+.v2-whm-network__facts dd{font-size:14px;font-weight:500;font-variant-numeric:tabular-nums;unicode-bidi:plaintext;text-align:var(--v2-control-align,match-parent)}
 .v2-whm-network__facts bdi{unicode-bidi:isolate}
 .v2-whm-network__actions,.v2-whm-network__chips{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
+.v2-whm-network:not([data-whm-detail-route^="/whm/ssl"]) .v2-btn,.v2-whm-network .v2-segmented>button{min-inline-size:var(--target);min-block-size:var(--target)}
+.v2-whm-network [data-dns-file]>.v2-whm-network__fields{grid-template-columns:minmax(0,1fr)}
+.v2-whm-network :is([data-sec-result],[data-whm-dns-tools-result]):not([hidden]){padding:12px var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}
 .v2-whm-network__split{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:var(--space-3);align-items:start}
 .v2-whm-network__split>aside{gap:var(--space-3)}
 .v2-whm-network__split>aside .v2-whm-network__fields{grid-template-columns:minmax(0,1fr)}
@@ -80,15 +83,17 @@ export const WHM_NETWORK_CSS = `.v2-whm-network,.v2-whm-network__stack{display:f
 .v2-whm-network__pair .v2-table :is(th,td){padding-inline:8px;white-space:normal;overflow-wrap:break-word}
 .v2-whm-network__split>aside .v2-table :is(th,td){padding-inline:12px;white-space:normal;overflow-wrap:break-word}
 .v2-whm-network__split>aside .v2-table td bdi{overflow-wrap:anywhere}
-.v2-whm-network__pair{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--space-3);min-inline-size:0}
+.v2-whm-network__pair{display:flex;flex-wrap:wrap;align-items:stretch;gap:var(--space-3);min-inline-size:0}
 .v2-whm-network__pair>*{flex:1 1 340px;min-inline-size:0}
 .v2-whm-network__pair>:first-child{flex:1.618 1 520px}
+.v2-whm-network__pair>.v2-whm-network__stack>.v2-card:last-child{flex:1 1 auto}
 .v2-whm-network__pair--even>:first-child{flex:1 1 380px}
 .v2-whm-network__pair--even>:last-child{flex:1 1 380px;padding-inline-start:var(--space-3);border-inline-start:1px solid var(--line)}
 .v2-whm-network__toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2)}
 .v2-whm-network__filters{display:grid;grid-template-columns:minmax(0,2fr) repeat(3,minmax(0,1fr)) auto;align-items:end;gap:var(--space-2)}
 .v2-whm-network__pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2)}
 .v2-whm-network__pager>.v2-field{flex-direction:row;align-items:center;gap:var(--space-1)}
+.v2-whm-network__pager [data-whm-page-status],.v2-whm-network :is([data-whm-dns-tools-selected],[data-whm-dns-tools-page-label]){font-variant-numeric:tabular-nums}
 .v2-whm-network__pager [data-whm-page-status]{flex:1 1 200px;font-size:13px;color:var(--muted)}
 .v2-whm-network__rowactions{display:inline-flex;align-items:center;gap:var(--space-1)}
 .v2-whm-network .v2-kpi[data-state=unread] .v2-kpi__value>:first-child{font-size:18px;line-height:30px;color:var(--muted)}
@@ -120,7 +125,7 @@ export const WHM_NETWORK_CSS = `.v2-whm-network,.v2-whm-network__stack{display:f
 .v2-whm-network [data-dns-records] label{position:absolute;inline-size:1px;block-size:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .v2-whm-network__pair>aside .v2-whm-network__facts,.v2-whm-network__pair>.v2-card .v2-whm-network__facts{grid-template-columns:repeat(auto-fit,minmax(min(130px,100%),1fr))}
 .v2-whm-network input[type=file]{inline-size:100%;min-block-size:var(--target);padding:6px;border:1px dashed var(--line-strong);border-radius:var(--radius-control);background:var(--subtle);color:var(--text-2);font-size:13px}
-.v2-whm-network input[type=file]::file-selector-button{min-block-size:30px;margin-inline-end:12px;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--radius-chip);background:var(--surface);color:var(--text);font:inherit;font-weight:600;cursor:pointer}
+.v2-whm-network input[type=file]::file-selector-button{min-block-size:var(--target);margin-inline-end:12px;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--radius-chip);background:var(--surface);color:var(--text);font:inherit;font-weight:600;cursor:pointer}
 .v2-whm-network input[type=file]:disabled{opacity:.6}
 .v2-whm-network :is(.v2-card__body,.v2-whm-network__fields)>label:has(>input[type=checkbox]){display:flex;align-items:center;gap:var(--space-1);min-block-size:var(--target);font-size:14px}
 .v2-whm-network__fields>label:has(>input[type=checkbox]){align-self:end}
@@ -136,7 +141,9 @@ export const WHM_NETWORK_CSS = `.v2-whm-network,.v2-whm-network__stack{display:f
 .v2-whm-network__names label{display:flex;align-items:center;gap:var(--space-1);min-block-size:var(--target)}
 .v2-whm-network__names{display:flex;flex-direction:column;gap:var(--space-1)}
 .v2-whm-network .v2-table :is(th,td){text-align:start}
+.v2-whm-network .v2-table td{font-variant-numeric:tabular-nums}
 .v2-whm-network .v2-table th{white-space:normal;vertical-align:bottom}
+@media(prefers-reduced-motion:no-preference){.v2-whm-network :is(.v2-btn,.v2-segmented>button){transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out,box-shadow 140ms ease-out,opacity 140ms ease-out,transform 140ms ease-out}}
 .v2-whm-network__split .v2-table :is(th,td){padding-inline:12px}
 .v2-whm-network__split .v2-table td{white-space:normal;overflow-wrap:break-word}
 .v2-whm-network .v2-table-scroll{max-inline-size:100%;min-inline-size:0}

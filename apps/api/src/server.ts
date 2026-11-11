@@ -150,7 +150,8 @@ import { handleServiceDetailWorkspaceRoute } from './service-detail-workspace.ts
 import { handleDnsToolsWorkspaceRoute } from './dns-tools-workspace.ts'
 import { handleSecurityToolsWorkspaceRoute } from './security-tools-workspace.ts'
 import { handleSshWorkspaceRoute } from './ssh-workspace.ts'
-import { handleSecWorkspaceRoute } from './sec-workspace.ts'
+import { handleSecWorkspaceRoute, readSecRaw, writeSecRecord } from './sec-workspace.ts'
+import { readSecRecord, SEC_DEFAULTS, secRevision } from '../../agent/src/sec-policy.ts'
 import { createExternalAuth } from './external-auth.ts'
 import { checkSecurityQuestions, handleSecurityQuestionsRoute } from './security-questions.ts'
 import { handleRootIdentityWorkspaceRoute } from './root-identity-workspace.ts'
@@ -240,6 +241,7 @@ import type {
   MailIpConfig,
   OsProfile,
   PhpSettings,
+  Plan,
   Reseller,
   ServerIpEntry,
   ServerSettings,
@@ -265,6 +267,7 @@ import {
   getPrincipal,
   latestActive,
   listAudit,
+  verifyAuditLogStatus,
   getPendingTotpEnrollment,
   startTotpEnrollment,
   recordLogin,
@@ -377,7 +380,7 @@ import type { EntryPoint } from './entry-points.ts'
 import { loadQualifiedCatalog, qualificationModeOn, type HostCatalogSource, type QualifiedCatalogProvider } from './host-catalog.ts'
 import { renderTotpQrSvg } from './totp-qr.ts'
 import { authorizeMailboxSessionBinding, createLocalMailboxTransport, establishMailboxSession, mailFolderName, mailboxAddressIndex, mailboxSessionPassword, openAuthorizedMailboxSession, parseMailboxSend, retireMailboxServiceUser, rewriteMailboxIds } from './mail/inbox.ts'
-import { listMailboxFolder, readMailboxFolder, moveMailboxFolder, mailboxFolderUid, mailboxUidValidity } from './mail/folder-workspace.ts'
+import { flagMailboxFolder, listMailboxFolder, readMailboxFolder, moveMailboxFolder, mailboxFolderUid, mailboxUidValidity } from './mail/folder-workspace.ts'
 import type { FolderWorkspaceAuthorization } from './mail/folder-workspace.ts'
 import { imapDialPlan, mailboxLiveEvent, watchMailboxIdle } from './mail/idle.ts'
 import type { MailboxTransport } from './mail/inbox.ts'
@@ -779,7 +782,7 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
   }
 
 
-  const auditScope = new AsyncLocalStorage<{ impersonator?: Readonly<{ principalId: string; login: string }>; team?: string }>()
+  const auditScope = new AsyncLocalStorage<{ impersonator?: Readonly<{ principalId: string; login: string }>; team?: string; ip?: string | null }>()
   const emitAudit = async (
     input: {
       actor: string
@@ -808,7 +811,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
     const impersonator = auditScope.getStore()?.impersonator, team = auditScope.getStore()?.team
     const scoped = team && !Object.hasOwn(input.detail ?? {}, 'team') ? { ...input.detail, team } : input.detail
     const detail = impersonator && !Object.hasOwn(input.detail ?? {}, 'impersonator') ? { ...scoped, impersonator } : scoped
-    const entry = await appendAudit(deps.db, { ...input, actor, target, ...(detail ? { detail } : {}) })
+    const ip = input.ip !== undefined ? input.ip : (auditScope.getStore()?.ip ?? null)
+    const entry = await appendAudit(deps.db, { ...input, actor, target, ip, ...(detail ? { detail } : {}) })
     const event: LiveEvent = {
       id: randomUUID(),
       at: entry.at,
@@ -2062,6 +2066,10 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         ...(context.cliPeer ? { cliPeer: Object.freeze({ ...context.cliPeer }) } : {}),
       })
     }
+    const activeAuditScope = auditScope.getStore()
+    if (activeAuditScope) {
+      try { activeAuditScope.ip = extractClientIp(req) } catch { activeAuditScope.ip = null }
+    }
     const url = new URL(req.url, 'http://localhost')
     const { pathname } = url
     const method = req.method.toUpperCase()
@@ -2817,14 +2825,14 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const caller = await requireCaller(req)
         const all = await deps.store.listPlans()
         if (caller.principal.kind === 'root') {
-          return jsonResponse({ plans: all })
+          return jsonResponse({ plans: await enrichPlansWithAuditMeta(deps.db, all) })
         }
         if (caller.principal.kind === 'reseller') {
           const resellerId = await resolveResellerId(caller)
-          return jsonResponse({ plans: all.filter((p) => p.ownerId === null || p.ownerId === resellerId) })
+          return jsonResponse({ plans: await enrichPlansWithAuditMeta(deps.db, all.filter((p) => p.ownerId === null || p.ownerId === resellerId)) })
         }
         const acc = await deps.store.getAccount(caller.principal.accountId)
-        return jsonResponse({ plans: all.filter((p) => p.id === acc?.planId) })
+        return jsonResponse({ plans: await enrichPlansWithAuditMeta(deps.db, all.filter((p) => p.id === acc?.planId)) })
       }
 
       if (method === 'POST' && pathname === '/api/plans') {
@@ -2887,6 +2895,8 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           shell: body.shell ?? 'jailed',
           defaultMailboxQuotaMb,
           ...(body.enforceBandwidth !== undefined && { enforceBandwidth: body.enforceBandwidth }),
+          updatedAt: new Date().toISOString(),
+          updatedBy: caller.principal.username,
         })
         const snap = await deps.store.readSnapshot()
         await reindexFromState(deps.db, snap)
@@ -2918,7 +2928,11 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           if (patch.name !== undefined && patch.name !== existing.name) return fail('VALIDATION', 'a plan name is permanent', { stateChanged: false })
           if (patch.dedicatedIp !== undefined && patch.dedicatedIp !== existing.dedicatedIp) return fail('VALIDATION', 'a plan keeps its dedicated IP option', { stateChanged: false })
           assertPackageValues(patch)
-          const plan = await deps.store.updatePlan(planId, patch)
+          const plan = await deps.store.updatePlan(planId, {
+            ...patch,
+            updatedAt: new Date().toISOString(),
+            updatedBy: caller.principal.username,
+          })
           const reconcile = await triggerReconcile(caller)
           await emitAudit({
             actor: caller.principal.username,
@@ -3170,10 +3184,14 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         if (response) return response
       }
       const moveMatch = /^\/api\/webmail\/inbox\/([1-9]\d*)\/move$/.exec(pathname)
+      const flagMatch = /^\/api\/webmail\/inbox\/([1-9]\d*)\/flag$/.exec(pathname)
       const inboxMatch = /^\/api\/webmail\/inbox\/([1-9]\d*)$/.exec(pathname)
       if (pathname === '/api/webmail/inbox' && method === 'GET') {
         const caller = await requireCaller(req)
-        return jsonResponse(await listMailboxFolder(await mailboxFolderDependencies(req, caller, mailboxTransport), url.searchParams.get('folder')))
+        return jsonResponse(await listMailboxFolder(await mailboxFolderDependencies(req, caller, mailboxTransport), url.searchParams.get('folder'), {
+          offset: url.searchParams.get('offset'),
+          limit: url.searchParams.get('limit'),
+        }))
       }
       if (moveMatch && method === 'POST') {
         const { caller } = await authorizeNativeMailboxRequest(req)
@@ -3181,9 +3199,18 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const body = await readJsonBody(req)
         return jsonResponse(await moveMailboxFolder(await mailboxFolderDependencies(req, caller, mailboxTransport), moveMatch[1], body))
       }
+      if (flagMatch && (method === 'POST' || method === 'PATCH')) {
+        const { caller } = await authorizeNativeMailboxRequest(req)
+        if (url.search) return fail('VALIDATION', 'mailbox flag updates do not accept query selectors', { stateChanged: false })
+        const body = await readJsonBody(req)
+        return jsonResponse(await flagMailboxFolder(await mailboxFolderDependencies(req, caller, mailboxTransport), flagMatch[1], body))
+      }
       if (inboxMatch && (method === 'GET' || method === 'DELETE')) {
         const caller = await requireCaller(req)
-        if (method === 'GET') return jsonResponse(await readMailboxFolder(await mailboxFolderDependencies(req, caller, mailboxTransport), inboxMatch[1], url.searchParams.get('folder')))
+        if (method === 'GET') {
+          const allowRemoteImages = url.searchParams.get('remoteImages') === '1'
+          return jsonResponse(await readMailboxFolder(await mailboxFolderDependencies(req, caller, mailboxTransport), inboxMatch[1], url.searchParams.get('folder'), allowRemoteImages ? { allowRemoteImages: true } : undefined))
+        }
         const { opened } = await authorizeNativeMailboxRequest(req)
         const raw = await readJsonBody<unknown>(req)
         if ([...url.searchParams.keys()].some(key => !['folder','confirm'].includes(key)) || [...url.searchParams.keys()].some(key => url.searchParams.getAll(key).length !== 1)
@@ -3946,7 +3973,17 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         })
         if (response) return response
       }
-      if (pathname.startsWith('/api/server/php/manage') || pathname.startsWith('/api/server/php/exceptions') || pathname === '/api/server/php/default' || pathname === '/api/server/php/assign') {
+      if (pathname.startsWith('/api/server/php/manage') || pathname.startsWith('/api/server/php/exceptions') || pathname === '/api/server/php/default' || pathname === '/api/server/php/assign' || pathname === '/api/server/php/domain' || pathname === '/api/server/php/pool-defaults') {
+        const readPoolDefaults = async () => {
+          const raw = await readSecRaw(deps.store, 'php-fpm-defaults')
+          const record = raw === null ? null : readSecRecord('php-fpm-defaults', raw)
+          if (raw !== null && !record) return fail('PRECONDITION_FAILED', 'saved PHP-FPM defaults require review before reading or changing', { stateChanged: false })
+          return {
+            pool: record ? { ...record.policy.pool } : { ...SEC_DEFAULTS['php-fpm-defaults'].pool },
+            revision: secRevision('php-fpm-defaults', raw),
+            updatedAt: record?.updatedAt ?? null,
+          }
+        }
         const response = await handlePhpManageRoute(req, url, method, { requireCaller, assertRoot,
           agent: (caller, path, body) => callAgent(path, { caller, ...(body === undefined ? {} : { method: 'POST', body }) }),
           listDomains: async () => (await deps.store.readSnapshot()).domains,
@@ -3955,6 +3992,28 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
           saveServerSettings: settings => deps.store.saveServerSettings(settings),
           updateDomainPhp: async (_caller, domain, php) => { await deps.store.updateDomain(domain.id, { php }) },
           workerCap: async accountId => { const account = await deps.store.getAccount(accountId); return (account ? await deps.store.getPlan(account.planId) : null)?.caps.phpWorkers ?? 'unlimited' },
+          readPoolDefaults,
+          savePoolDefaults: async (_caller, pool, expectedRevision) => {
+            const savedRaw = await writeSecRecord(
+              { store: deps.store },
+              'php-fpm-defaults',
+              expectedRevision,
+              raw => {
+                const existing = raw === null ? null : readSecRecord('php-fpm-defaults', raw)
+                return { pool, ini: existing ? existing.policy.ini : structuredClone(SEC_DEFAULTS['php-fpm-defaults'].ini) }
+              },
+              async () => {
+                const current = await requireCaller(req)
+                await assertRoot(current, 'server.php.modify')
+              },
+            )
+            const savedRecord = readSecRecord('php-fpm-defaults', savedRaw)
+            return {
+              pool: savedRecord ? { ...savedRecord.policy.pool } : { ...pool },
+              revision: secRevision('php-fpm-defaults', savedRaw),
+              updatedAt: savedRecord?.updatedAt ?? null,
+            }
+          },
           reconcile: caller => triggerReconcile(caller),
           audit: async (caller, action, target, detail, outcome = 'ok') => { await emitAudit({ actor: caller.principal.username, action, target, detail, outcome, principalId: caller.principal.id }) },
         })
@@ -5208,28 +5267,38 @@ export const createApiApp = (deps: ApiServerDeps): ApiApp => {
         const entries = await listAudit(deps.db, query)
         const targetsAccount = (target: string, username: string): boolean =>
           target === `account:${username}` || target.startsWith(`account:${username}:`)
+        const sanitizeIp = (entry: AuditEntry): AuditEntry => {
+          if (entry.actor === caller.principal.username) return entry
+          const { ip: _ip, ...rest } = entry
+          return rest
+        }
         if (caller.principal.kind === 'root') {
-          return jsonResponse({ entries })
+          const chain = await verifyAuditLogStatus(deps.db)
+          return jsonResponse({ entries, chain })
         }
         if (caller.principal.kind === 'reseller') {
           const resellerId = await resolveResellerId(caller)
           const accounts = resellerId ? await ownedAccounts(deps.store, caller) : []
           const usernames = new Set(accounts.map((a) => a.username))
           return jsonResponse({
-            entries: entries.filter(
-              (e) =>
-                e.actor === caller.principal.username ||
-                usernames.has(e.actor) ||
-                [...usernames].some((u) => targetsAccount(e.target, u)),
-            ),
+            entries: entries
+              .filter(
+                (e) =>
+                  e.actor === caller.principal.username ||
+                  usernames.has(e.actor) ||
+                  [...usernames].some((u) => targetsAccount(e.target, u)),
+              )
+              .map(sanitizeIp),
           })
         }
         return jsonResponse({
-          entries: entries.filter(
-            (e) =>
-              e.actor === caller.principal.username ||
-              targetsAccount(e.target, caller.principal.username),
-          ),
+          entries: entries
+            .filter(
+              (e) =>
+                e.actor === caller.principal.username ||
+                targetsAccount(e.target, caller.principal.username),
+            )
+            .map(sanitizeIp),
         })
       }
 
@@ -5588,5 +5657,64 @@ export const ensureRootPrincipal = async (
     username: 'root',
     passwordHash,
     forcePasswordChange: opts.forcePasswordChange ?? true,
+  })
+}
+
+export const enrichPlansWithAuditMeta = async (db: Db, plans: readonly Plan[]): Promise<Plan[]> => {
+  if (plans.length === 0 || plans.every((p) => p.updatedBy !== undefined)) {
+    return [...plans]
+  }
+  const rows = await db
+    .query<{ target: string; actor: string; at: string }>(
+      `SELECT target, actor, at
+       FROM audit_log
+       WHERE action IN ('plan.updated', 'plan.created')
+         AND outcome = 'ok'
+         AND id IN (
+           SELECT MAX(id)
+           FROM audit_log
+           WHERE action IN ('plan.updated', 'plan.created')
+             AND outcome = 'ok'
+           GROUP BY target
+         )`,
+    )
+    .catch(() => [])
+  const byTarget = new Map(rows.map((r) => [r.target, r]))
+  return plans.map((plan) => {
+    if (plan.updatedBy !== undefined) return plan
+    const hit = byTarget.get(`plan:${plan.id}`)
+    if (!hit) return plan
+    return {
+      ...plan,
+      updatedBy: hit.actor,
+      ...(plan.updatedAt === undefined ? { updatedAt: hit.at } : {}),
+    }
+  })
+}
+
+export const enrichResellersWithAuthMeta = async (db: Db, resellers: readonly Reseller[]): Promise<Reseller[]> => {
+  if (resellers.length === 0) return []
+  const rows = await db
+    .query<{ id: string; username: string; created_at: string; last_login_at: string | null; last_session_at: string | null }>(
+      `SELECT p.id, p.username, p.created_at, p.last_login_at,
+              (SELECT MAX(s.created_at) FROM sessions s WHERE s.principal_id = p.id) AS last_session_at
+       FROM principals p
+       WHERE p.kind = 'reseller'`,
+    )
+    .catch(() => null)
+  if (rows === null) return [...resellers]
+  const byId = new Map(rows.map((r) => [r.id, r]))
+  const byUsername = new Map(rows.map((r) => [r.username.toLowerCase(), r]))
+  return resellers.map((reseller) => {
+    const hit = byId.get(reseller.id) ?? byUsername.get(reseller.username.toLowerCase())
+    const createdAt = reseller.createdAt ?? hit?.created_at
+    const lastSignInAt = reseller.lastSignInAt !== undefined
+      ? reseller.lastSignInAt
+      : (hit?.last_login_at ?? hit?.last_session_at ?? null)
+    return {
+      ...reseller,
+      ...(createdAt !== undefined && { createdAt }),
+      lastSignInAt,
+    }
   })
 }

@@ -6,11 +6,11 @@ export const WHM_RESELLERS_CSS = `.v2-resellers,.v2-reseller-detail{display:flex
 .v2-reseller-header{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-2);padding:var(--v2-panel-padding,24px);border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow)}
 .v2-reseller-header>h2{font-size:18px}
 .v2-reseller-header>.v2-muted{font-size:13px}
-.v2-reseller-header>.v2-reseller-facts{flex:1 1 100%;grid-template-columns:repeat(auto-fit,minmax(min(110px,100%),1fr));padding-block-start:var(--space-2);border-block-start:1px solid var(--line)}
+.v2-reseller-header>.v2-reseller-facts{flex:1 1 100%;grid-template-columns:repeat(auto-fit,minmax(min(176px,100%),1fr));padding-block-start:var(--space-2);border-block-start:1px solid var(--line)}
 .v2-reseller-facts,.v2-reseller-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));align-items:start;gap:var(--space-2);margin:0;min-inline-size:0}
 .v2-reseller-facts>div{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0;text-align:start}
 .v2-reseller-facts dt{font-size:12px;color:var(--muted)}
-.v2-reseller-facts dd{margin:0;font-size:14px;overflow-wrap:anywhere}.v2-reseller-facts bdi{unicode-bidi:isolate}
+.v2-reseller-facts dd{margin:0;font-size:14px;font-variant-numeric:tabular-nums;overflow-wrap:break-word;word-break:normal}.v2-reseller-facts bdi{unicode-bidi:isolate}
 .v2-resellers>.v2-reseller-facts{grid-template-columns:repeat(auto-fit,minmax(min(130px,100%),1fr))}
 .v2-resellers>.v2-reseller-facts>div{padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow)}
 .v2-resellers>.v2-reseller-facts dd{font-size:20px;font-weight:600;line-height:1.3}
@@ -22,9 +22,10 @@ export const WHM_RESELLERS_CSS = `.v2-resellers,.v2-reseller-detail{display:flex
 .v2-reseller-fields>.v2-btn{align-self:end;justify-self:start}
 .v2-reseller-fields>.v2-reseller-stack{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
 .v2-reseller-fields>.v2-reseller-stack+.v2-reseller-stack{padding-block-start:var(--space-2);border-block-start:1px solid var(--line)}
-.v2-reseller-columns{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(280px,1fr);gap:var(--space-3);align-items:start}
+.v2-reseller-columns{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(280px,1fr);gap:var(--space-3);align-items:stretch}
+.v2-reseller-columns>.v2-reseller-stack>.v2-card:last-child{flex:1 1 auto}
 .v2-reseller-checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(200px,100%),1fr));gap:0 var(--space-2)}
-.v2-reseller-choice{display:flex;align-items:center;gap:var(--space-1);min-block-size:var(--target);font-size:14px}
+.v2-reseller-choice{display:flex;align-items:center;gap:var(--space-1);min-inline-size:var(--target);min-block-size:var(--target);font-size:14px}
 .v2-reseller-choice>input{flex:none}
 .v2-resellers fieldset{padding:0;margin:0;border:0;min-inline-size:0;display:flex;flex-direction:column;gap:var(--space-1)}
 .v2-resellers legend{float:inline-start;inline-size:100%;padding:0;font-size:14px;font-weight:600}
@@ -46,9 +47,14 @@ export const WHM_RESELLERS_CSS = `.v2-resellers,.v2-reseller-detail{display:flex
 .v2-reseller-name--pills{align-items:flex-start;gap:var(--space-1)}
 .v2-resellers #v2-reseller-list :is(th,td){padding-inline:12px}
 .v2-resellers #v2-reseller-list td{white-space:normal}
-.v2-resellers #v2-reseller-list td bdi{white-space:normal;overflow-wrap:anywhere}
+.v2-resellers #v2-reseller-list td bdi{white-space:normal;overflow-wrap:break-word;word-break:normal}
 .v2-resellers #v2-reseller-list td:last-child{white-space:nowrap}
 .v2-resellers #v2-reseller-list td:first-child bdi{white-space:nowrap}
 .v2-resellers #v2-reseller-list td:first-child small bdi{white-space:normal}
+.v2-resellers td{font-variant-numeric:tabular-nums}
+.v2-resellers input[type=number]{font-variant-numeric:tabular-nums}
+.v2-resellers #v2-reseller-records td bdi{overflow-wrap:anywhere}
+.v2-resellers #v2-reseller-list td .v2-reseller-email{overflow-wrap:normal;word-break:normal}
+.v2-reseller-ratio{display:inline-block;unicode-bidi:isolate;font-variant-numeric:tabular-nums}
 .v2-resellers td>span.v2-muted{display:block;font-size:12px}
 `

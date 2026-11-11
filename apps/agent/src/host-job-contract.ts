@@ -85,7 +85,7 @@ export interface HostJobView {
   createdAt: string
   startedAt: string | null
   finishedAt: string | null
-  steps: { id: string; title: string; titleValues?: HostJobTitleValues; state: HostJobStepState; exitCode: number | null }[]
+  steps: { id: string; title: string; titleValues?: HostJobTitleValues; state: HostJobStepState; exitCode: number | null; startedAt?: string | null; finishedAt?: string | null; durationMs?: number | null }[]
   error: string | null
   failureClass: 'retryable' | 'permanent' | 'unknown_outcome' | null
   cancelRequested: boolean

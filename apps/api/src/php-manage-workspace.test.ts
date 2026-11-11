@@ -107,6 +107,37 @@ describe('PHP management workspace', () => {
     expect(audits).toEqual(['server.php.exception.granted'])
   })
 
+  it('reads, saves, reconciles, and reverts global PHP-FPM pool defaults with revision binding', async () => {
+    let poolState = {
+      pool: { mode: 'ondemand' as 'ondemand' | 'dynamic' | 'static', maxChildren: 8, startServers: 2, minSpareServers: 1, maxSpareServers: 3, maxRequests: 500, processIdleTimeoutSec: 10 },
+      revision: 'b'.repeat(64),
+      updatedAt: null as string | null,
+    }
+    const { call, audits, helpers } = setup({
+      readPoolDefaults: async () => ({ ...poolState, pool: { ...poolState.pool } }),
+      savePoolDefaults: async (_caller, pool, expectedRevision) => {
+        if (expectedRevision !== poolState.revision) throw Object.assign(new Error('conflict'), { code: 'CONFLICT' })
+        poolState = { pool: { ...pool }, revision: poolState.revision === 'b'.repeat(64) ? 'c'.repeat(64) : 'd'.repeat(64), updatedAt: '2026-10-29T00:00:00Z' }
+        return { ...poolState, pool: { ...poolState.pool } }
+      },
+    })
+    const manageBody = await (await call('GET', '/api/server/php/manage')).json() as { poolDefaults?: { pool: { maxChildren: number }; poolCount: number } }
+    expect(manageBody.poolDefaults).toMatchObject({ pool: { maxChildren: 8 }, poolCount: 3 })
+    const saved = await (await call('PUT', '/api/server/php/pool-defaults', {
+      mode: 'dynamic',
+      maxChildren: 20,
+      startServers: 4,
+      minSpareServers: 2,
+      maxSpareServers: 6,
+      maxRequests: 1000,
+      processIdleTimeoutSec: 15,
+      expectedRevision: 'b'.repeat(64),
+    })).json() as { poolDefaults: { pool: { mode: string; maxChildren: number }; revision: string; poolCount: number } }
+    expect(saved.poolDefaults).toMatchObject({ pool: { mode: 'dynamic', maxChildren: 20 }, revision: 'c'.repeat(64), poolCount: 3 })
+    expect(helpers.reconcile).toHaveBeenCalledTimes(1)
+    expect(audits).toContain('server.php.pool_defaults.updated')
+  })
+
   it('asserts root and modify authority before any read or write', async () => {
     const { call, helpers } = setup({ assertRoot: vi.fn(async () => { throw new Error('denied') }) })
     await expect(call('GET', '/api/server/php/manage')).rejects.toThrow('denied')

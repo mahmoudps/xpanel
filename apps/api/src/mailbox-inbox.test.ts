@@ -727,4 +727,53 @@ describe('xMail mailbox inbox', () => {
       message: expect.stringMatching(/the mail server could not be reached/),
     })
   })
+
+  it('serves POST/PATCH /api/webmail/inbox/:uid/flag, offset pagination and remoteImages=1 over HTTP', async () => {
+    const messages = [
+      { ...message(15, 'Latest', 'Body 15'), flagged: false, hasRemoteImages: true },
+      { ...message(14, 'Older', 'Body 14'), flagged: true, hasRemoteImages: false },
+    ]
+    const transport: MailboxTransport = {
+      async verify(mbx, pw) { if (mbx !== 'inbox@alpha.example.test' || pw !== 'alpha-secret') fail('UNAUTHENTICATED', 'bad') },
+      async list(mbx, pw) { await this.verify(mbx, pw); return messages.map(({ body: _b, ...rest }) => rest) },
+      async read(mbx, pw, uid, _folder, options) {
+        await this.verify(mbx, pw)
+        const item = messages.find(m => m.uid === uid)
+        if (!item) return fail('NOT_FOUND', 'missing')
+        return {
+          ...item,
+          ...(options?.allowRemoteImages ? { remoteImages: [{ src: 'https://cdn.example.test/logo.png', alt: 'Logo' }] } : {}),
+        }
+      },
+      async flag(mbx, pw, uid, _folder, flagged, options) {
+        await this.verify(mbx, pw)
+        if (options?.uidValidity !== 17) return fail('CONFLICT', 'namespace changed', { stateChanged: false })
+        const item = messages.find(m => m.uid === uid)
+        if (!item) return fail('NOT_FOUND', 'missing', { stateChanged: false })
+        item.flagged = flagged
+        return { uid, uidValidity: 17, uidValidityObserved: true, flagged }
+      },
+      async remove() {},
+      async send() { return { messageId: '<id@alpha.example.test>' } },
+    }
+    const { call, login, sessionOf } = await harness(transport)
+    const session = sessionOf(await login('inbox@alpha.example.test', 'alpha-secret'))
+
+    const page = await call('GET', '/api/webmail/inbox?offset=1&limit=1', undefined, session)
+    expect(page.status).toBe(200)
+    expect(page.payload).toMatchObject({ total: 2, offset: 1, hasMore: false, nextOffset: null })
+    expect(page.payload.messages?.map(m => m.uid)).toEqual([14])
+
+    const starred = await call('POST', '/api/webmail/inbox/15/flag', { folder: 'INBOX', uidValidity: 17, flagged: true }, session)
+    expect(starred.status).toBe(200)
+    expect(starred.payload).toMatchObject({ ok: true, uid: 15, flagged: true })
+
+    const unstarred = await call('PATCH', '/api/webmail/inbox/15/flag', { folder: 'INBOX', uidValidity: 17, flagged: false }, session)
+    expect(unstarred.status).toBe(200)
+    expect(unstarred.payload).toMatchObject({ ok: true, uid: 15, flagged: false })
+
+    const withImages = await call('GET', '/api/webmail/inbox/15?remoteImages=1', undefined, session)
+    expect(withImages.status).toBe(200)
+    expect((withImages.payload.message as { remoteImages?: unknown })?.remoteImages).toEqual([{ src: 'https://cdn.example.test/logo.png', alt: 'Logo' }])
+  })
 })

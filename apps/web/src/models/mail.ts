@@ -130,6 +130,8 @@ export interface MailMessageFacts {
   readonly time: string
   readonly fullDate: string
   readonly unread: boolean
+  readonly flagged?: boolean
+  readonly hasRemoteImages?: boolean
   readonly authentication: string
   readonly body: string
   readonly bodyPending: boolean
@@ -148,6 +150,7 @@ export interface MailInboxView extends MailPageFacts {
   readonly pager: string
   readonly loaded: number
   readonly total: number | null
+  readonly hasMore?: boolean
   readonly moveTargets: readonly { readonly id: string; readonly label: string }[]
   readonly canReadAttachments: boolean
 }
@@ -160,7 +163,7 @@ export interface MailComposeView extends MailPageFacts {
   readonly canUseAttachments: boolean
   readonly canManageVacation: boolean
   readonly canManageFilters: boolean
-  readonly identity: { readonly dkim?: string; readonly spf?: string; readonly size?: string }
+  readonly identity: { readonly dkim?: string; readonly spf?: string; readonly size?: string; readonly sizeBytes?: number }
   readonly vacation: boolean | null
   readonly rules: readonly { readonly name: string; readonly condition: string; readonly action: string; readonly enabled: boolean }[] | null
 }
@@ -266,6 +269,8 @@ function messageFacts(message: MailMessageItem, locale: Locale): MailMessageFact
     fromName: message.fromName?.trim() || message.from, from: message.from, to: message.to,
     cc: message.cc ?? '', subject: message.subject, preview: message.preview,
     datetime: stamp.datetime, time: stamp.time, fullDate: stamp.full, unread: message.unread,
+    flagged: message.flagged === true,
+    hasRemoteImages: message.hasRemoteImages === true,
     authentication: `DKIM: ${word(message.dkimPass)} · SPF: ${word(message.spfPass)} · DMARC: ${word(message.dmarcPass)}`,
     body: message.body, bodyPending: message.bodyPending === true && message.body.length === 0,
     attachments: (message.attachments ?? []).filter(file => file.name.trim().length > 0)
@@ -300,7 +305,7 @@ function projectMailPrimaryFacts(props: MailSurfaceProps & { readonly mailbox: s
     canSend: common.canCompose, canSaveDraft: common.canCompose,
     canUseAttachments: tools.has('webmail-attachments'), canManageVacation: tools.has('webmail-autoresponder'),
     canManageFilters: access.qualified('/mail/settings/filters') && tools.has('webmail-email-filters'),
-    identity: { ...(props.identityDkim ? { dkim: props.identityDkim } : {}), ...(props.identitySpf ? { spf: props.identitySpf } : {}), ...(props.identitySize ? { size: props.identitySize } : {}) },
+    identity: { ...(props.identityDkim ? { dkim: props.identityDkim } : {}), ...(props.identitySpf ? { spf: props.identitySpf } : {}), ...(props.identitySize ? { size: props.identitySize } : {}), ...(typeof props.identitySizeBytes === 'number' && Number.isSafeInteger(props.identitySizeBytes) && props.identitySizeBytes > 0 ? { sizeBytes: props.identitySizeBytes } : {}) },
     vacation: props.vacationEnabled ?? null,
     rules: props.sieveRules?.map(rule => ({ name: rule.name, condition: rule.condition, action: rule.action, enabled: rule.enabled })) ?? null,
   }
@@ -308,14 +313,17 @@ function projectMailPrimaryFacts(props: MailSurfaceProps & { readonly mailbox: s
   const selected = visible.find(message => message.uid === props.selectedUid) ?? visible[0]
   const unread = visible.filter(message => message.unread).length
   const state = observed ? visible.length === 0 ? 'empty' : 'messages' : props.mailListFailed ? 'failed' : 'unread'
+  const measuredTotal = props.folderCounts?.find(row => row.folder === folder)?.total
+  const folderTotal = observed ? Math.max(visible.length, typeof measuredTotal === 'number' && measuredTotal >= 0 ? measuredTotal : visible.length) : null
+  const hasMore = folderTotal !== null && visible.length < folderTotal
   return {
     ...common, kind: 'inbox', folder, folderWorkspace, state,
     messages: visible.map(message => messageFacts(message, locale)), selectedKey: selected ? `uid-${selected.uid}` : null,
     unreadCount: observed ? unread : null,
     countText: state === 'empty' ? t('0 messages') : state === 'messages'
-      ? `${t(MESSAGE_COUNT, { count: visible.length })}${unread ? ` · ${t('{count} unread', { count: unread })}` : ''}` : '—',
-    pager: state === 'empty' ? t('0 of 0') : state === 'messages' ? t('1–{shown} of {total}', { shown: visible.length, total: visible.length }) : '—',
-    loaded: visible.length, total: observed ? visible.length : null,
+      ? `${t(MESSAGE_COUNT, { count: folderTotal ?? visible.length })}${unread ? ` · ${t('{count} unread', { count: unread })}` : ''}` : '—',
+    pager: state === 'empty' ? t('0 of 0') : state === 'messages' ? t('1–{shown} of {total}', { shown: visible.length, total: folderTotal ?? visible.length }) : '—',
+    loaded: visible.length, total: folderTotal, hasMore,
     moveTargets: [...folders, ...customFolders].filter(item => !item.current && (folderWorkspace || item.id !== 'INBOX')).map(item => ({ id: item.id, label: item.label })),
     canReadAttachments: tools.has('webmail-message-read') && tools.has('webmail-attachments'),
   }

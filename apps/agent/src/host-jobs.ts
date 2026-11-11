@@ -32,7 +32,7 @@ const MAX_RESULT_TEXT_BYTES = 64 * 1024
 const MAX_FINALIZER_COMMANDS = 32
 const DEFAULT_LEASE_MS = 30_000
 
-type StepRecord = { id: string; state: HostJobStepState; exitCode: number | null }
+type StepRecord = { id: string; state: HostJobStepState; exitCode: number | null; startedAt?: string | null; finishedAt?: string | null; durationMs?: number | null }
 type Settlement = { status: 'succeeded' | 'failed' | 'cancelled'; failureClass: JobFailureClass | null; error: string | null; verification?: HostJobVerification }
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -91,8 +91,10 @@ const storedSteps = (job: DurableJobRecord): Pick<HostJobView['steps'][number], 
 const stepRecords = (job: DurableJobRecord): StepRecord[] => {
   const raw = job.checkpointData.stepStates
   if (!Array.isArray(raw)) return []
+  const iso = (val: unknown): string | null => typeof val === 'string' && Number.isFinite(Date.parse(val)) ? val : null
+  const dur = (val: unknown): number | null => Number.isSafeInteger(val) && (val as number) >= 0 ? val as number : null
   return raw.flatMap(item => object(item) && typeof item.id === 'string' && STEP_STATES.includes(item.state as HostJobStepState)
-    ? [{ id: item.id, state: item.state as HostJobStepState, exitCode: Number.isSafeInteger(item.exitCode) ? item.exitCode as number : null }] : [])
+    ? [{ id: item.id, state: item.state as HostJobStepState, exitCode: Number.isSafeInteger(item.exitCode) ? item.exitCode as number : null, startedAt: iso(item.startedAt), finishedAt: iso(item.finishedAt), durationMs: dur(item.durationMs) }] : [])
 }
 
 const verificationOf = (value: unknown): HostJobVerification | null =>
@@ -456,46 +458,51 @@ export class HostJobRunner {
         }
         // Persist execution intent before the last fresh authority check. No log or checkpoint
         // may delay execution after that check; the following renewal only fences its lease.
-        states[index] = { id: step.id, state: 'running', exitCode: null }
+        const stepStart = this.now()
+        states[index] = { id: step.id, state: 'running', exitCode: null, startedAt: stepStart.toISOString(), finishedAt: null, durationMs: null }
         await checkpoint(`${step.id}:running`, Math.floor(index * 100 / steps.length))
-        await this.log(id, `\n${this.now().toISOString()} step ${index + 1}/${steps.length} ${step.id}${step.mutates ? ' (changes the host)' : ''}\n$ ${step.argv.join(' ')}\n`)
+        await this.log(id, `\n${stepStart.toISOString()} step ${index + 1}/${steps.length} ${step.id}${step.mutates ? ' (changes the host)' : ''}\n$ ${step.argv.join(' ')}\n`)
         await renew()
         try { await plan.beforeStep?.(step) }
         catch {
-          states[index] = { id: step.id, state: 'failed', exitCode: null }
+          const stepEnd = this.now()
+          states[index] = { id: step.id, state: 'failed', exitCode: null, startedAt: stepStart.toISOString(), finishedAt: stepEnd.toISOString(), durationMs: Math.max(0, stepEnd.getTime() - stepStart.getTime()) }
           return await settle({ status: 'failed', failureClass: changedHost ? 'unknown_outcome' : 'permanent', error: `step ${step.id} failed fresh authorization before execution${changedHost ? '; earlier host changes require review' : ''}` })
         }
         const authorized = await renew()
         if (authorized.cancelRequested) {
-          states[index] = { id: step.id, state: 'pending', exitCode: null }
+          states[index] = { id: step.id, state: 'pending', exitCode: null, startedAt: null, finishedAt: null, durationMs: null }
           return await settle({ status: 'cancelled', failureClass: null, error: null })
         }
         if (this.closed) {
-          states[index] = { id: step.id, state: 'pending', exitCode: null }
+          states[index] = { id: step.id, state: 'pending', exitCode: null, startedAt: null, finishedAt: null, durationMs: null }
           return await settle({ status: 'failed', failureClass: changedHost ? 'unknown_outcome' : 'retryable', error: `the agent stopped before step ${step.id}; later steps did not run` })
         }
         if (!admits(plan.policy, step.argv)) {
-          states[index] = { id: step.id, state: 'failed', exitCode: null }
+          const stepEnd = this.now()
+          states[index] = { id: step.id, state: 'failed', exitCode: null, startedAt: stepStart.toISOString(), finishedAt: stepEnd.toISOString(), durationMs: Math.max(0, stepEnd.getTime() - stepStart.getTime()) }
           return await settle({ status: 'failed', failureClass: changedHost ? 'unknown_outcome' : 'permanent', error: `step ${step.id} was refused by its command policy before execution` })
         }
         let result: HostJobCommandResult | null = null
         try { result = await this.run(step.argv, { ...(step.env ? { env: step.env } : {}), timeoutMs: step.timeoutMs }) } catch { result = null }
+        const stepEnd = this.now()
+        const stepDurationMs = Math.max(0, stepEnd.getTime() - stepStart.getTime())
         results.push(Object.freeze({ id: step.id, result: retainedResult(result) }))
         if (result) await this.log(id, `${result.stdout}${result.stdout && !result.stdout.endsWith('\n') ? '\n' : ''}${result.stderr ? `[stderr]\n${result.stderr}${result.stderr.endsWith('\n') ? '' : '\n'}` : ''}[exit ${result.code ?? 'none'}${result.timedOut ? ', timed out' : ''}]\n`)
         else await this.log(id, '[the step could not be run]\n')
         const exitCode = result && Number.isSafeInteger(result.code) ? result.code : null
         if (result && !result.timedOut && (result.ok || exitCode !== null && step.successExitCodes?.includes(exitCode) === true)) {
-          states[index] = { id: step.id, state: 'succeeded', exitCode }
+          states[index] = { id: step.id, state: 'succeeded', exitCode, startedAt: stepStart.toISOString(), finishedAt: stepEnd.toISOString(), durationMs: stepDurationMs }
           changedHost ||= step.mutates
           await checkpoint(step.id, Math.floor((index + 1) * 100 / steps.length))
           continue
         }
         const reason = !result ? 'could not be run' : result.timedOut ? `timed out after ${step.timeoutMs} ms` : `exited with code ${result.code ?? 'none'}`
         if (step.mutates) {
-          states[index] = { id: step.id, state: 'unknown', exitCode }
+          states[index] = { id: step.id, state: 'unknown', exitCode, startedAt: stepStart.toISOString(), finishedAt: stepEnd.toISOString(), durationMs: stepDurationMs }
           return await settle({ status: 'failed', failureClass: 'unknown_outcome', error: `step ${step.id} ${reason} while changing the host; the outcome is unknown` })
         }
-        states[index] = { id: step.id, state: 'failed', exitCode }
+        states[index] = { id: step.id, state: 'failed', exitCode, startedAt: stepStart.toISOString(), finishedAt: stepEnd.toISOString(), durationMs: stepDurationMs }
         const retryable = !!result && !result.timedOut && LOCK_CONTENTION_RE.test(`${result.stderr}\n${result.stdout}`)
         return await settle({ status: 'failed', failureClass: changedHost ? 'unknown_outcome' : retryable ? 'retryable' : 'permanent', error: `step ${step.id} ${reason}${retryable ? '; another package process held the lock' : ''}${changedHost ? '; earlier host changes require review' : ''}` })
       }
@@ -532,7 +539,14 @@ export class HostJobRunner {
         const record = records.find(item => item.id === step.id)
         const state = record?.state ?? 'pending'
         // A settled job never runs its remaining steps; an interrupted running step has no known result.
-        return { id: step.id, title: step.title, ...(step.titleValues ? { titleValues: step.titleValues } : {}), exitCode: record?.exitCode ?? null, state: terminal && state === 'pending' ? 'skipped' : terminal && state === 'running' ? 'unknown' : state }
+        return {
+          id: step.id, title: step.title, ...(step.titleValues ? { titleValues: step.titleValues } : {}),
+          exitCode: record?.exitCode ?? null,
+          startedAt: record?.startedAt ?? null,
+          finishedAt: record?.finishedAt ?? null,
+          durationMs: record?.durationMs ?? null,
+          state: terminal && state === 'pending' ? 'skipped' : terminal && state === 'running' ? 'unknown' : state,
+        }
       }),
       error: job.error,
       failureClass: job.failureClass ?? (outcome === 'unknown_outcome' || outcome === 'permanent' ? outcome : null),

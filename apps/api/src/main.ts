@@ -1,13 +1,13 @@
 import { execFile, spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { DavExchange } from './mail/dav-store.ts'
 import type { Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { agentCallerHeaders, loadAgentCredentialFile, loadInstalledPeerIdentityAddon } from '@xpanel/agent'
 import type { AgentApp } from '@xpanel/agent'
-import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, effectivePlan, fail, hasAcl, isXpanelError, validateDomainName, type AuditEntry, type Domain, type MfaRuntimePolicy, type OsProfile, type Principal, type Reseller, type WebsiteAnalyticsSnapshot } from '@xpanel/core'
+import { bindMfaRuntimePolicy, canSeeAccount, captureMfaRuntimePolicy, effectivePlan, fail, hasAcl, isXpanelError, validateDomainName, type AuditEntry, type Domain, type MfaRuntimePolicy, type OsProfile, type Plan, type Principal, type Reseller, type WebsiteAnalyticsSnapshot } from '@xpanel/core'
 import { canOpenRegisteredRoute, canonicalNavigationRoute, visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import { mapAgentHostInfo, mapAgentServices } from '../../web/src/board-port/xwhm-dashboard.ts'
 import { parseWebsiteAnalyticsSnapshot, type WebsiteAnalyticsWindow } from '../../web/src/charts.ts'
@@ -15,7 +15,8 @@ import { parseWebStatsView, type WebStatsView } from '../../web/src/models/web-s
 import { publicContactEmail } from '../../web/src/display-name.ts'
 import { isOfferedLocale, requestLocale, type Locale } from '../../web/src/i18n.ts'
 import type { WebAppRenderState } from '../../web/src/app.ts'
-import { assertNoActiveDatabaseTransaction, createDb, getMailboxSession, hostOperationInFlight, initializeOperationalMetadata, latestActive, listAudit, listMetricsHistory, listSessionsForPrincipal, migrate, previousGeneration, syncAccountContactIndex, type AuditQuery, type Db } from '@xpanel/db'
+import type { WhmConfigGenerationRow } from '../../web/src/surfaces/xwhm.ts'
+import { assertNoActiveDatabaseTransaction, createDb, getMailboxSession, hostOperationInFlight, initializeOperationalMetadata, latestActive, listApiTokensForPrincipal, listAudit, listGenerations, listMetricsHistory, listSessionsForPrincipal, migrate, previousGeneration, syncAccountContactIndex, verifyAuditLogStatus, type AuditQuery, type Db } from '@xpanel/db'
 import { detectOs } from '@xpanel/os'
 import { resellerPolicy, StateStore } from '@xpanel/state'
 import { protectInstalledStateParent } from '../../../packages/state/src/ownership.ts'
@@ -28,7 +29,12 @@ import { parseAuditFilters } from './audit-filters.ts'
 import { readMailboxPreferenceValues, type MailboxPreferenceFields } from './mail/mailbox-preferences.ts'
 import { loadMailDocument, messageSizeLimitBytes, messageSizeLimitFromPostconf, type MailDocument } from './mail/document.ts'
 import { auditActorQuery, auditTargetQuery, authorizeMailboxSessionBinding, createLocalMailboxTransport, mailFolderName, mailboxAddressIndex, rewriteMailboxIds } from './mail/inbox.ts'
-import { createApiApp, ensureRootPrincipal, listenApiServer } from './server.ts'
+import { createApiApp, enrichPlansWithAuditMeta, enrichResellersWithAuthMeta, ensureRootPrincipal, listenApiServer } from './server.ts'
+import { readAutoSslScheduler } from './autossl.ts'
+import { cachedSecRecord } from './sec-panel-access.ts'
+import { SEC_DEFAULTS } from '../../agent/src/sec-policy.ts'
+import { projectFirewallApplySteps, projectFirewallStagedReview, readFirewallStagedDraft } from './firewall-workspace.ts'
+import { validateAccountSshView } from './account-ssh-workspace.ts'
 import { readHostPerformance } from './monitoring-workspace.ts'
 import { authenticateRequest } from './auth.ts'
 import { assertAuthPersonalOwner } from './auth-personal.ts'
@@ -559,11 +565,12 @@ export const createDefaultWebRenderer = async (deps: {
     }
     // Self-auth decisions use the existing authenticated actor and desired account/feature
     // leaves, not native catalog qualification. Every API effect repeats fresh admission.
+    let accountSecuritySummary: { totpEnabled: boolean; activeSessions: number | null; apiTokens: number | null; sshKeys: number | null } | undefined
     if (surface === 'xpanel' && documentRoute.activeRoute === '/security/account' && principal.kind === 'user') {
       let originalOwner = false
+      const ownerAccount = scoped?.account
       try {
         assertAuthPersonalOwner(caller, deps.entryPoint)
-        const ownerAccount = scoped?.account
         originalOwner = ownerAccount !== undefined && ownerAccount !== null
           && ownerAccount.id === principal.accountId && ownerAccount.status === 'active'
       } catch { /* Missing or denied original-owner evidence keeps all self controls closed. */ }
@@ -574,6 +581,33 @@ export const createDefaultWebRenderer = async (deps: {
           tokensAllowed = tokenAccount.id === principal.accountId
         } catch { /* Feature/source failures do not become a token permission. */ }
       }
+      if (originalOwner && ownerAccount) {
+        const nowMs = Date.now()
+        const [activeSessions, apiTokens, sshKeys] = await Promise.all([
+          listSessionsForPrincipal(deps.db, principal.id)
+            .then((rows) => rows.filter((s) => s.revokedAt === null && Date.parse(s.expiresAt) > nowMs).length)
+            .catch(() => null),
+          tokensAllowed
+            ? listApiTokensForPrincipal(deps.db, principal.id)
+                .then((rows) => rows.filter((tok) => tok.revokedAt === null && Date.parse(tok.expiresAt) > nowMs).length)
+                .catch(() => null)
+            : Promise.resolve(null),
+          deps.agent
+            ? deps.agent
+                .fetch(new Request(`http://agent.local/accounts/${encodeURIComponent(ownerAccount.username)}/ssh/keys`, {
+                  headers: agentCallerHeaders({ principalId: principal.id, token: deps.agent.token }),
+                }))
+                .then(async (res) => (res.ok ? validateAccountSshView(await res.json(), ownerAccount, 'read').keys.length : null))
+                .catch(() => null)
+            : Promise.resolve(null),
+        ])
+        accountSecuritySummary = {
+          totpEnabled: caller.principalRecord.totpEnabled === true,
+          activeSessions,
+          apiTokens,
+          sshKeys,
+        }
+      }
       security = { ...security, authPersonal: {
         schemaVersion: 1, provenance: 'interactive-owner', surface: 'xpanel', route: '/security/account',
         principalId: principal.id, accountId: principal.accountId, username: principal.username,
@@ -581,6 +615,27 @@ export const createDefaultWebRenderer = async (deps: {
         canReadSessions: originalOwner, canRevokeSessions: originalOwner,
         canReadApiTokens: originalOwner && tokensAllowed, canManageApiTokens: originalOwner && tokensAllowed,
       } }
+    }
+    const readPanelAccessSummary = async () => {
+      const [accessRecord, gateRecord] = await Promise.all([
+        cachedSecRecord(deps.store.rootDir, 'panel-access').catch(() => null),
+        cachedSecRecord(deps.store.rootDir, 'panel-gate').catch(() => null),
+      ])
+      if (accessRecord === null || gateRecord === null) {
+        return { state: 'invalid' as const, entrancePath: null, entranceListeners: [] as const, listeners: { xpanel: 0, xwhm: 0, xmail: 0 } }
+      }
+      const accessPolicy = accessRecord?.policy ?? SEC_DEFAULTS['panel-access']
+      const gatePolicy = gateRecord?.policy ?? SEC_DEFAULTS['panel-gate']
+      return {
+        state: 'read' as const,
+        entrancePath: gatePolicy.entrance?.path ?? null,
+        entranceListeners: gatePolicy.entrance?.listeners ?? [],
+        listeners: {
+          xpanel: accessPolicy.listeners.xpanel.length,
+          xwhm: accessPolicy.listeners.xwhm.length,
+          xmail: accessPolicy.listeners.xmail.length,
+        },
+      }
     }
     const catalog = await loadCatalog(deps.agent ?? null)
     const qualifiedRoute = visibleNavigation(scopedVisibility, catalog).some(item => item.surface === surface
@@ -600,7 +655,12 @@ export const createDefaultWebRenderer = async (deps: {
       // Closed forms show saved desired state through bounded reads only: the owner's own domains and root's server settings file.
       const ownDomains = summaryAccount ? await deps.store.listDomains({ accountId: summaryAccount.id }).catch(() => null) : null
       const rootSettings = surface === 'xwhm' && principal.kind === 'root' ? await deps.store.getServerSettings().catch(() => null) : null
-      const whmLists = surface === 'xwhm' ? await readOnlyWhmLists(deps.store, principal, reseller).catch(() => ({})) : {}
+      const rawWhmLists = surface === 'xwhm' ? await readOnlyWhmLists(deps.store, principal, reseller).catch(() => ({})) : {}
+      const whmLists = {
+        ...rawWhmLists,
+        ...('plans' in rawWhmLists && Array.isArray(rawWhmLists.plans) ? { plans: await enrichPlansWithAuditMeta(deps.db, rawWhmLists.plans as Plan[]) } : {}),
+        ...('resellers' in rawWhmLists && Array.isArray(rawWhmLists.resellers) ? { resellers: await enrichResellersWithAuthMeta(deps.db, rawWhmLists.resellers as Reseller[]) } : {}),
+      }
       return serve(req, async () => ({
         surface,
         ...adminAppearance,
@@ -620,7 +680,7 @@ export const createDefaultWebRenderer = async (deps: {
         ...(surface === 'xpanel' && principal.kind === 'user'
           && summaryAccount && summaryAccount.id === principal.accountId && summaryAccount.status === 'active'
           && summaryPlan && summaryPlan.id === summaryAccount.planId
-          ? { panel: { account: summaryAccount, plan: summaryPlan, ...(ownDomains ? { domains: ownDomains } : {}) } } : {}),
+          ? { panel: { account: summaryAccount, plan: summaryPlan, ...(ownDomains ? { domains: ownDomains } : {}), ...(accountSecuritySummary ? { accountSecuritySummary } : {}) } } : {}),
         ...(surface === 'xwhm' && principal.kind !== 'user'
           ? { whm: { principal, activeReseller: reseller ?? null, ...whmLists, ...(rootSettings ? { serverSettings: rootSettings } : {}) } } : {}),
         ...(surface === 'xmail' && documentMailbox ? { mail: { mailbox: documentMailbox.mailbox } } : {}),
@@ -630,13 +690,16 @@ export const createDefaultWebRenderer = async (deps: {
     const homePlan = scoped?.plan
     if (surface === 'xpanel' && documentRoute.activeRoute === '/home' && principal.kind === 'user' && homeAccount?.status === 'active' && homePlan) {
       const email = await supportEmail()
-      const [ownedUsers, sessions, homeAudit, homeDomains, homeDatabaseState, homeUsage] = await Promise.all([
+      const [ownedUsers, sessions, homeAudit, homeDomains, homeDatabaseState, homeUsage, homeActive, homeCerts, homeAutoSsl] = await Promise.all([
         deps.store.listOwnedServiceUsers(homeAccount.username).catch(() => []),
         caller.team ? [] : listSessionsForPrincipal(deps.db, principal.id).catch(() => []),
         caller.team ? [] : listAudit(deps.db, { mentions: homeAccount.username, limit: 8 }).catch(() => []),
         deps.store.listDomains({ accountId: homeAccount.id }).catch(() => []),
         deps.store.readAccountDatabases(homeAccount.id, { username: homeAccount.username }),
         readAccountUsageObservation(principal.id, homeAccount.username),
+        latestActive(deps.db).catch(() => null),
+        deps.store.listCertificates(homeAccount.id).catch(() => []),
+        readAutoSslScheduler(deps.store).catch(() => null),
       ])
       const homeAddresses = mailboxAddressIndex(ownedUsers.flatMap(user => user.services.email && user.login.includes('@') ? [user.login] : []))
       const lastSignInAt = [...sessions]
@@ -649,12 +712,16 @@ export const createDefaultWebRenderer = async (deps: {
         security,
         visibility: scopedVisibility,
         catalog,
+        ...(homeActive ? { generationId: homeActive.id } : {}),
         ...(ownAccountId ? { accountId: ownAccountId } : {}),
         ...(email ? { supportEmail: email } : {}),
         panel: {
           account: homeAccount,
           plan: homePlan,
           domains: homeDomains,
+          certificates: homeCerts,
+          ...(homeActive ? { generationId: homeActive.id, ...(homeActive.activatedAt ? { generationActivatedAt: homeActive.activatedAt } : {}) } : {}),
+          ...(homeAutoSsl ? { autoSsl: homeAutoSsl } : {}),
           ...(homeUsage ? { usage: homeUsage } : {}),
           databases: homeDatabaseState.databases,
           databaseUsers: homeDatabaseState.databaseUsers.map(user => ({ id: user.id, name: user.name, grants: user.grants })),
@@ -714,8 +781,10 @@ export const createDefaultWebRenderer = async (deps: {
     const listedAccountIds = new Set(listedAccounts.map(account => account.id))
     const visibleDomains = snap.domains.filter(domain => listedAccountIds.has(domain.accountId))
     const listedPlanIds = new Set(listedAccounts.map((a) => a.planId))
-    const visiblePlans = snap.plans.filter((p) => principal.kind === 'root' || p.ownerId === principal.id || listedPlanIds.has(p.id))
-    const visibleResellers = snap.resellers.filter((r) => principal.kind === 'root' || r.id === principal.id).map(resellerPolicy)
+    const [visiblePlans, visibleResellers] = await Promise.all([
+      enrichPlansWithAuditMeta(deps.db, snap.plans.filter((p) => principal.kind === 'root' || p.ownerId === principal.id || listedPlanIds.has(p.id))),
+      enrichResellersWithAuthMeta(deps.db, snap.resellers.filter((r) => principal.kind === 'root' || r.id === principal.id).map(resellerPolicy)),
+    ])
     const visibleFeatureLists = snap.featureLists
       .filter(item => principal.kind === 'root' || (principal.kind === 'reseller' && (item.ownerId === null || item.ownerId === principal.id)))
       .map(({ id, name, disabled, ownerId }) => ({ id, name, disabled, ownerId }))
@@ -849,7 +918,98 @@ export const createDefaultWebRenderer = async (deps: {
         return null
       }
     }
-    const [hostInfo, hostServices, hostDrift, overviewAudit, rollbackGeneration, auditListed, hostPerformance] = await Promise.all([
+    const generationsRoute = surface === 'xwhm' && principal.kind === 'root'
+      && (auditRoute || documentRoute.activeRoute === '/whm/jobs' || documentRoute.activeRoute === '/whm/panel/data')
+    const whmSshRoute = surface === 'xwhm' && principal.kind === 'root' && documentRoute.activeRoute === '/whm/security/ssh'
+    const panelSshRoute = surface === 'xpanel' && Boolean(account) && documentRoute.activeRoute === '/security/ssh'
+    const whmPhpRoute = surface === 'xwhm' && principal.kind === 'root' && documentRoute.activeRoute === '/whm/software/php'
+    const whmFirewallRoute = surface === 'xwhm' && principal.kind === 'root' && documentRoute.activeRoute === '/whm/security/firewall'
+    const readWhmGenerations = async (): Promise<WhmConfigGenerationRow[]> => {
+      const listed = await listGenerations(deps.db, { limit: 15 }).catch(() => [])
+      return await Promise.all(listed.map(async gen => {
+        const [manifestRaw, journalRaw] = await Promise.all([
+          readFile(join(deps.store.rootDir, 'generations', 'manifests', `gen-${gen.id}.json`), 'utf8').catch(() => null),
+          readFile(join(deps.store.rootDir, 'generations', 'journal', `gen-${gen.id}.json`), 'utf8').catch(() => null),
+        ])
+        let filesCount = 0
+        let summary = ''
+        let startedMs = Date.parse(gen.createdAt)
+        let updatedAt: string | null = null
+        try {
+          if (manifestRaw) {
+            const manifest = JSON.parse(manifestRaw) as { files?: unknown[] }
+            if (Array.isArray(manifest.files)) filesCount = manifest.files.length
+          }
+        } catch { /* ignore unreadable manifest */ }
+        try {
+          if (journalRaw) {
+            const journal = JSON.parse(journalRaw) as {
+              startedAt?: string
+              updatedAt?: string
+              diff?: { added?: unknown[]; updated?: unknown[]; removed?: unknown[] }
+            }
+            if (typeof journal.startedAt === 'string' && Number.isFinite(Date.parse(journal.startedAt))) startedMs = Date.parse(journal.startedAt)
+            if (typeof journal.updatedAt === 'string' && Number.isFinite(Date.parse(journal.updatedAt))) updatedAt = journal.updatedAt
+            if (journal.diff && (Array.isArray(journal.diff.added) || Array.isArray(journal.diff.updated) || Array.isArray(journal.diff.removed))) {
+              const added = Array.isArray(journal.diff.added) ? journal.diff.added.length : 0
+              const updated = Array.isArray(journal.diff.updated) ? journal.diff.updated.length : 0
+              const removed = Array.isArray(journal.diff.removed) ? journal.diff.removed.length : 0
+              if (added || updated || removed) summary = `+${added} / ~${updated} / -${removed} files`
+            }
+          }
+        } catch { /* ignore unreadable journal */ }
+        if (!summary) summary = filesCount > 0 ? `${filesCount} managed files` : gen.status === 'failed' ? 'Failed before commit' : 'Configuration generation'
+        const createdMs = Date.parse(gen.createdAt)
+        const testedMs = gen.testedAt ? Date.parse(gen.testedAt) : NaN
+        const activatedMs = gen.activatedAt ? Date.parse(gen.activatedAt) : NaN
+        const endMs = Number.isFinite(activatedMs) ? activatedMs : Number.isFinite(testedMs) ? testedMs : updatedAt ? Date.parse(updatedAt) : createdMs
+        const durationMs = Number.isFinite(createdMs) && Number.isFinite(endMs) ? Math.max(0, Math.round(endMs - Math.min(createdMs, startedMs))) : 0
+        const builtMs = Number.isFinite(createdMs) && Number.isFinite(startedMs) ? Math.max(0, Math.round(createdMs - startedMs)) : 0
+        const status: WhmConfigGenerationRow['status'] = gen.status === 'active'
+          ? 'active'
+          : gen.status === 'rolled_back'
+            ? 'rolled-back'
+            : gen.status === 'failed'
+              ? 'failed'
+              : 'superseded'
+        return {
+          generationId: gen.id,
+          at: gen.createdAt,
+          actor: gen.actor,
+          summary,
+          stateChecksum: gen.checksum,
+          filesCount,
+          durationMs,
+          status,
+          testedAt: gen.testedAt,
+          activatedAt: gen.activatedAt,
+          error: gen.error,
+          steps: [
+            { step: 'built', status: 'done', at: gen.createdAt, durationMs: builtMs },
+            gen.testedAt
+              ? { step: 'tested', status: 'done', at: gen.testedAt, durationMs: Number.isFinite(testedMs) && Number.isFinite(createdMs) ? Math.max(0, Math.round(testedMs - createdMs)) : 0 }
+              : gen.status === 'failed'
+                ? { step: 'tested', status: 'failed', at: updatedAt, durationMs: null }
+                : { step: 'tested', status: 'pending', at: null, durationMs: null },
+            gen.activatedAt
+              ? { step: 'activated', status: gen.status === 'rolled_back' ? 'failed' : 'done', at: gen.activatedAt, durationMs: Number.isFinite(activatedMs) ? Math.max(0, Math.round(activatedMs - (Number.isFinite(testedMs) ? testedMs : createdMs))) : 0 }
+              : gen.status === 'failed'
+                ? { step: 'activated', status: gen.testedAt ? 'failed' : 'skipped', at: gen.testedAt ? updatedAt : null, durationMs: null }
+                : { step: 'activated', status: 'pending', at: null, durationMs: null },
+          ],
+        }
+      }))
+    }
+    const readOpenSessions = (raw: unknown): { state: 'read'; count: number } | { state: 'unavailable'; count: null } | null => {
+      if (!raw || typeof raw !== 'object') return null
+      const open = (raw as { openSessions?: unknown }).openSessions
+      if (!open || typeof open !== 'object') return null
+      const rec = open as { state?: unknown; count?: unknown }
+      if (rec.state === 'read' && typeof rec.count === 'number' && Number.isSafeInteger(rec.count) && rec.count >= 0) return { state: 'read', count: rec.count }
+      if (rec.state === 'unavailable' && rec.count === null) return { state: 'unavailable', count: null }
+      return null
+    }
+    const [hostInfo, hostServices, hostDrift, overviewAudit, rollbackGeneration, auditListed, auditChain, panelAccessSummary, autoSslSummary, hostPerformance, generationRows, whmSshSessions, panelSshSessions, phpFpmRecord, firewallStagedDraft, firewallPending] = await Promise.all([
       dashboardRoute || auditRoute ? readAgentJson('/host/info') : null,
       dashboardRoute ? readAgentJson('/host/services') : null,
       dashboardRoute ? readAgentJson('/host/drift') : null,
@@ -863,9 +1023,26 @@ export const createDefaultWebRenderer = async (deps: {
             ...(actionFilter ? { action: actionFilter } : {}),
           }).catch(() => [])
         : [],
+      auditRoute ? verifyAuditLogStatus(deps.db).catch(() => null) : null,
+      surface === 'xwhm' && principal.kind === 'root' && documentRoute.activeRoute === '/whm/security' ? readPanelAccessSummary() : null,
+      dashboardRoute || documentRoute.activeRoute === '/home' ? readAutoSslScheduler(deps.store).catch(() => null) : null,
       dashboardRoute && principal.kind === 'root'
         ? readHostPerformance(options => listMetricsHistory(deps.db, { scope: 'host', ...options }), '24h', new Date()).catch(() => null)
         : null,
+      generationsRoute ? readWhmGenerations() : [],
+      whmSshRoute && deps.agent
+        ? deps.agent.fetch(new Request('http://agent.local/host/security/ssh/counters', {
+            headers: agentCallerHeaders({ principalId: principal.id, token: deps.agent.token }),
+          })).then(res => res.ok ? res.json() : null).then(readOpenSessions).catch(() => null)
+        : null,
+      panelSshRoute && deps.agent && account
+        ? deps.agent.fetch(new Request(`http://agent.local/accounts/${encodeURIComponent(account.username)}/ssh/keys`, {
+            headers: agentCallerHeaders({ principalId: principal.id, token: deps.agent.token }),
+          })).then(res => res.ok ? res.json() : null).then(raw => raw ? (validateAccountSshView(raw, account, 'read').openSessions ?? null) : null).catch(() => null)
+        : null,
+      whmPhpRoute ? cachedSecRecord(deps.store.rootDir, 'php-fpm-defaults').catch(() => null) : null,
+      whmFirewallRoute ? readFirewallStagedDraft(deps.store).catch(() => null) : null,
+      whmFirewallRoute ? deps.store.getFirewallPending().catch(() => null) : null,
     ])
     const mailboxAddresses = mailboxAddressIndex(
       snap.serviceUsers.filter(user => user.services.email && user.login.includes('@')).map(user => user.login),
@@ -936,13 +1113,31 @@ export const createDefaultWebRenderer = async (deps: {
         ...(principal.kind === 'root' ? { ipv6Ranges: snap.ipv6Ranges ?? [], aclLists: snap.aclLists ?? [], ...(documentRoute.activeRoute === '/whm/server/ips' ? { remoteServiceIps: await readRemoteServiceIps(deps.store.rootDir).catch(() => null) ?? { smtp: [], nameservers: [] } } : {}) } : {}),
         ...(resellerUsageObservations ? { ...(resellerUsageRoute ? { resellerUsage: resellerUsageObservations.resellers } : {}), accountUsage: resellerUsageObservations.accounts } : {}),
         firewallRules: visibleFirewall,
+        ...(whmFirewallRoute ? (() => {
+          const fwState = { rules: snap.firewall.rules, enabled: snap.firewall.enabled ?? true, blockPing: snap.firewall.blockPing ?? false, prefixLists: snap.firewall.prefixLists ?? [] }
+          const staged = firewallStagedDraft ? projectFirewallStagedReview(fwState, firewallStagedDraft, null, snap.server?.settings ?? null) : null
+          return {
+            firewallPolicy: { enabled: fwState.enabled, blockPing: fwState.blockPing },
+            firewallStaged: staged,
+            firewallApplySteps: projectFirewallApplySteps(staged, firewallPending),
+            ...(active?.activatedAt ? { generationActivatedAt: active.activatedAt } : {}),
+          }
+        })() : {}),
+        ...(whmPhpRoute ? {
+          ...(phpFpmRecord !== null ? { fpmPoolDefaults: phpFpmRecord ? phpFpmRecord.policy.pool : SEC_DEFAULTS['php-fpm-defaults'].pool } : {}),
+          fpmPoolCount: new Set(snap.domains.filter(domain => domain.siteType === 'php' && domain.php.handler === 'fpm').map(domain => `${domain.accountId}:${domain.php.version}`)).size,
+        } : {}),
         ...(principal.kind === 'root' && snap.server ? {
           serverSettings: snap.server.settings,
           hostname: hostSample?.hostname ?? snap.server.settings.hostname,
           ...(hostSample?.panelDomain ? { panelHostname: hostSample.panelDomain } : {}),
         } : {}),
+        ...(panelAccessSummary ? { panelAccessSummary } : {}),
+        ...(generationsRoute ? { generations: generationRows } : {}),
+        ...(whmSshSessions ? { sshOpenSessions: whmSshSessions } : {}),
         ...(auditRoute ? {
           auditEntries: auditRows,
+          ...(auditChain ? { auditChain } : {}),
           auditList: {
             ...auditBounds,
             actor: typedActor,
@@ -955,6 +1150,7 @@ export const createDefaultWebRenderer = async (deps: {
         } : {}),
         ...(dashboardRoute ? {
           auditEntries: auditPage,
+          ...(autoSslSummary ? { autoSsl: autoSslSummary } : {}),
           certificates: hostInfo
             ? [...hostCertificates, ...snap.certificates.map(certificate => ({ names: certificate.names, notAfter: certificate.notAfter }))]
             : (snap.certificates.length > 0 ? snap.certificates : undefined),
@@ -972,6 +1168,10 @@ export const createDefaultWebRenderer = async (deps: {
       ...(surface === 'xpanel' ? { panel: {
         ...(account ? { account } : {}),
         ...(plan ? { plan } : {}),
+        ...(active ? { generationId: active.id, ...(active.activatedAt ? { generationActivatedAt: active.activatedAt } : {}) } : {}),
+        ...(autoSslSummary ? { autoSsl: autoSslSummary } : {}),
+        ...(accountSecuritySummary ? { accountSecuritySummary } : {}),
+        ...(panelSshSessions ? { sshOpenSessions: panelSshSessions } : {}),
         domains: accountDomains,
         ...(customConfigView ? { customConfig: customConfigView } : {}),
         certificates: accountCertificates,
@@ -1074,6 +1274,7 @@ export const createDefaultWebRenderer = async (deps: {
           ...(loaded.identityDkim ? { identityDkim: loaded.identityDkim } : {}),
           ...(loaded.identitySpf ? { identitySpf: loaded.identitySpf } : {}),
           ...(loaded.identitySize ? { identitySize: loaded.identitySize } : {}),
+          ...(loaded.identitySizeBytes !== undefined ? { identitySizeBytes: loaded.identitySizeBytes } : {}),
           ...(loaded.composeDraft ? { composeDraft: loaded.composeDraft } : {}),
         }
       })() } : {}),

@@ -572,7 +572,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
     }
     return `<div class="xp-whm-dashboard-host-fact"><dt style="color: light-dark(#5D6B7E,var(--xp-text-muted,#5D6B7E))">${show(row.label, rtl)}</dt><dd style="${row.ddStyle}">${value}</dd></div>`
   }).join('')
-  const controllers = model.controllers.map(name => `<li style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: light-dark(#E7F5EE,var(--xp-status-ok-bg,#E7F5EE)); color: light-dark(#0E7A4E,var(--xp-status-ok-fg,#0E7A4E)); font-size: 12px; font-weight: 600; font-family: 'IBM Plex Mono', monospace"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #0E7A4E"></span>${show(name, rtl)}</li>`).join('')
+  const controllers = model.controllers.map(name => `<li style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: light-dark(#E7F5EE,var(--xp-status-ok-bg,#E7F5EE)); color: light-dark(#0E7A4E,var(--xp-status-ok-fg,#0E7A4E)); font-size: 12px; font-weight: 600; font-family: 'IBM Plex Mono', monospace"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: light-dark(#0E7A4E,var(--xp-status-ok-fg,#0E7A4E))"></span>${show(name, rtl)}</li>`).join('')
   const services = model.services.map((row, index) => `<li style="display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 4px 20px; border-top: 1px solid ${themeColor(index === 0 ? 'transparent' : '#EEF0F3', 'border')}">
     <span style="display: flex; flex-direction: column; min-width: 0; line-height: 1.4"><span style="font-size: 14px; font-weight: 500">${show(row.name, rtl)} <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: light-dark(#5D6B7E,var(--xp-text-muted,#5D6B7E))">${show(row.version, rtl)}</span></span>${row.note ? `<span style="font-size: 12px; color: light-dark(#5D6B7E,var(--xp-text-muted,#5D6B7E))">${show(row.note, rtl)}</span>` : ''}</span>
     <span style="flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: ${themeColor(row.status.bg, 'surface')}; color: ${themeColor(row.status.fg)}; font-size: 12px; font-weight: 600"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: ${themeColor(row.status.dot ?? row.status.fg)}; border: 1.5px solid ${themeColor(row.status.fg)}"></span>${escapeHtml(row.status.label)}</span>
@@ -588,6 +588,9 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
     .xp-board-port{line-height:normal;font-size:16px;font-kerning:auto;font-feature-settings:normal;font-synthesis:weight style small-caps;-webkit-font-smoothing:antialiased}
     .xp-board-port .xp-btn{font-family:inherit}
     .xp-board-port a{color:light-dark(#1D5BD6,var(--xp-accent,#1D5BD6))}.xp-board-port a:hover{color:light-dark(#1546A8,var(--xp-accent-hover,#1546A8))}
+    .xp-board-port :is(a,button){transition:background-color 0.14s ease-out,border-color 0.14s ease-out,color 0.14s ease-out}
+    .xp-board-port a[data-whm-primary-cta]:hover{background:light-dark(#1546A8,var(--xp-accent-hover,#1546A8))!important;color:light-dark(#FFFFFF,var(--xp-text-on-accent,#FFFFFF))!important}
+    @media(prefers-reduced-motion:reduce){.xp-board-port :is(a,button){transition:none}}
     .xp-board-port :focus-visible{outline:2px solid light-dark(#1D5BD6,var(--xp-border-focus,#1D5BD6));outline-offset:2px}
     .xp-board-port nav[aria-label="xWHM navigation"] :focus-visible{outline-color:#6EA0FF}
     [data-board-port="xwhm-dashboard"] .xp-whm-dashboard-host-fact{display:flex;flex-direction:column;gap:var(--xp-space-label,8px);min-inline-size:0}
@@ -610,7 +613,7 @@ export const renderWhmDashboard = (model: WhmDashboardModel): string => {
           <h1 style="margin: 0; font-size: 22px; font-weight: 600; line-height: 1.3">${show(model.title, rtl)}</h1>
           ${lede}
         </div>
-        ${canOpen(model, '/whm/accounts/new') ? `<a href="/whm/accounts/new" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid light-dark(#1D5BD6,var(--xp-border-focus,#1D5BD6)); background: #1D5BD6; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">${svg('<path d="M12 5v14M5 12h14"></path>', 18, false)}${show(model.createLabel, rtl)}</a>` : ''}
+        ${canOpen(model, '/whm/accounts/new') ? `<a href="/whm/accounts/new" data-whm-primary-cta="true" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 8px; border: 1px solid light-dark(#1D5BD6,var(--xp-border-focus,#1D5BD6)); background: light-dark(#1D5BD6,var(--xp-accent,#1D5BD6)); color: light-dark(#FFFFFF,var(--xp-text-on-accent,#FFFFFF)); font-size: 14px; font-weight: 600; text-decoration: none">${svg('<path d="M12 5v14M5 12h14"></path>', 18, false)}${show(model.createLabel, rtl)}</a>` : ''}
       </div>
       <section aria-label="Notices" style="display: flex; flex-wrap: wrap; gap: 16px">${model.notices.map(noticeHtml).join('')}</section>
       ${renderClassicWhmHome(model.locale)}

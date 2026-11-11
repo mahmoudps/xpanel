@@ -1,6 +1,8 @@
+import { icon } from '../../../icons.ts'
+
 /** Inert selected-theme markup; the authorized controller supplies values and labels. */
 export function mailxArchiveClientTemplates(): string { return `
-<template data-xp-template="mailx-archive-row"><tr><th scope="row"><bdi dir="ltr" class="v2-mono" data-xp-slot="domain"></bdi></th><td><select class="v2-input" data-archive-mailbox data-xp-slot="mailbox" disabled></select></td><td><input type="checkbox" data-archive-direction="incoming" data-xp-slot="incoming" disabled></td><td><input type="checkbox" data-archive-direction="outgoing" data-xp-slot="outgoing" disabled></td><td><input type="number" class="v2-input" min="0" max="3650" step="1" inputmode="numeric" dir="ltr" data-archive-days data-xp-slot="days" disabled></td><td data-xp-slot="state"></td><td><button type="button" class="v2-btn" data-xp-slot="retention" disabled></button></td></tr></template>
+<template data-xp-template="mailx-archive-row"><tr><th scope="row"><bdi dir="ltr" class="v2-mono" data-xp-slot="domain"></bdi></th><td><span class="v2-select"><select class="v2-input" data-archive-mailbox data-xp-slot="mailbox" disabled></select>${icon('chevDown', 16)}</span></td><td><input type="checkbox" data-archive-direction="incoming" data-xp-slot="incoming" disabled></td><td><input type="checkbox" data-archive-direction="outgoing" data-xp-slot="outgoing" disabled></td><td><input type="number" class="v2-input v2-num" min="0" max="3650" step="1" inputmode="numeric" dir="ltr" data-archive-days data-xp-slot="days" disabled></td><td data-xp-slot="state"></td><td><button type="button" class="v2-btn" data-xp-slot="retention" disabled></button></td></tr></template>
 <template data-xp-template="mailx-archive-empty"><tr><td colspan="7" data-xp-slot="message"></td></tr></template>` }
 
 export function mailxCollectionsClientTemplates(): string { return `

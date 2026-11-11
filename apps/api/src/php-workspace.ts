@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto'
 import { DEFAULT_FPM, disabledFunctions, fail, validateFpm, validatePhpFunctionExceptions } from '@xpanel/core'
-import type { Account, Domain, Limit, PhpFunctionException, PhpSettings, ServerSettings } from '@xpanel/core'
+import type { Account, Domain, FpmSettings, Limit, PhpFunctionException, PhpSettings, ServerSettings } from '@xpanel/core'
 import type { AuthenticatedCaller } from './auth.ts'
+
+export interface PhpPoolDefaultsView {
+  pool: FpmSettings
+  revision: string
+  updatedAt: string | null
+  poolCount: number
+}
 
 export interface PhpWorkspaceHelpers {
   requireCaller: (request: Request) => Promise<AuthenticatedCaller>
@@ -27,6 +34,8 @@ export interface PhpManageHelpers {
   updateDomainPhp: (caller: AuthenticatedCaller, domain: Domain, php: PhpSettings) => Promise<void>
   reconcile: (caller: AuthenticatedCaller) => Promise<{ ok: boolean; body: Record<string, unknown> } | null>
   audit: (caller: AuthenticatedCaller, action: string, target: string, detail: Record<string, unknown>, outcome?: 'ok' | 'failed') => Promise<void>
+  readPoolDefaults?: () => Promise<{ pool: FpmSettings; revision: string; updatedAt: string | null }>
+  savePoolDefaults?: (caller: AuthenticatedCaller, pool: FpmSettings, expectedRevision: string) => Promise<{ pool: FpmSettings; revision: string; updatedAt: string | null }>
   now?: () => Date
 }
 
@@ -46,7 +55,7 @@ export const phpLifecycle = (version: string, now: Date): { state: 'active' | 's
   return { state: day <= dates.activeUntil ? 'active' : day <= dates.securityUntil ? 'security' : 'end-of-life', ...dates }
 }
 
-const PHP_MANAGE_PATHS = ['/api/server/php/manage', '/api/server/php/manage/preview', '/api/server/php/manage/apply', '/api/server/php/default', '/api/server/php/assign', '/api/server/php/exceptions', '/api/server/php/domain']
+const PHP_MANAGE_PATHS = ['/api/server/php/manage', '/api/server/php/manage/preview', '/api/server/php/manage/apply', '/api/server/php/default', '/api/server/php/assign', '/api/server/php/exceptions', '/api/server/php/domain', '/api/server/php/pool-defaults']
 const EXCEPTION_ROUTE = /^\/api\/server\/php\/exceptions\/([a-z][a-z0-9]{0,15})$/
 /** Content identity of the saved exceptions; grants and revokes are bound to the list the caller read. */
 export const exceptionsRevision = (list: readonly PhpFunctionException[]): string => createHash('sha256').update(JSON.stringify(list)).digest('hex')
@@ -67,10 +76,15 @@ export async function handlePhpManageRoute(request: Request, url: URL, method: s
   const revokeMatch = EXCEPTION_ROUTE.exec(url.pathname)
   if (!PHP_MANAGE_PATHS.includes(url.pathname) && !revokeMatch) return null
   const caller = await h.requireCaller(request)
-  const read = url.pathname === '/api/server/php/manage'
+  const poolRoute = url.pathname === '/api/server/php/pool-defaults'
+  const read = url.pathname === '/api/server/php/manage' || (poolRoute && method === 'GET')
   await h.assertRoot(caller, read ? 'server.php.read' : 'server.php.modify')
-  const expected = read ? 'GET' : url.pathname === '/api/server/php/default' ? 'PUT' : revokeMatch ? 'DELETE' : 'POST'
-  if (method !== expected) return new Response(null, { status: 405, headers: { allow: expected } })
+  if (poolRoute) {
+    if (method !== 'GET' && method !== 'PUT') return new Response(null, { status: 405, headers: { allow: 'GET, PUT' } })
+  } else {
+    const expected = read ? 'GET' : url.pathname === '/api/server/php/default' ? 'PUT' : revokeMatch ? 'DELETE' : 'POST'
+    if (method !== expected) return new Response(null, { status: 405, headers: { allow: expected } })
+  }
   if ([...url.searchParams.keys()].length !== 0) return fail('VALIDATION', 'PHP management does not accept selectors', { stateChanged: false })
   const now = h.now?.() ?? new Date()
   const observe = async (): Promise<{ response: Response; body: ManageView }> => {
@@ -85,14 +99,58 @@ export async function handlePhpManageRoute(request: Request, url: URL, method: s
   const defaultVersion = settings?.defaultPhpVersion ?? RELEASE_DEFAULT
   const usage = projectPhpDesiredUsage(domains, accounts)
   const counted = (version: string) => usage.find(entry => entry.version === version)
+  const poolCount = new Set(domains.filter(domain => domain.siteType === 'php' && domain.php.handler === 'fpm').map(domain => `${domain.accountId}:${domain.php.version}`)).size
+
+  if (poolRoute) {
+    if (!h.readPoolDefaults || (method === 'PUT' && !h.savePoolDefaults)) {
+      return fail('PRECONDITION_FAILED', 'PHP-FPM global pool defaults are unavailable', { stateChanged: false })
+    }
+    if (method === 'GET') {
+      const saved = await h.readPoolDefaults()
+      return Response.json({ poolDefaults: { ...saved, poolCount } }, { headers: { 'cache-control': 'no-store' } })
+    }
+    const input = await readJson(request, ['mode', 'maxChildren', 'startServers', 'minSpareServers', 'maxSpareServers', 'maxRequests', 'processIdleTimeoutSec', 'expectedRevision'])
+    if (typeof input.expectedRevision !== 'string' || !/^[0-9a-f]{64}$/.test(input.expectedRevision)) {
+      return fail('VALIDATION', 'expectedRevision is required', { stateChanged: false })
+    }
+    const { expectedRevision, ...rawPool } = input
+    const pool = validateFpm(rawPool, 'unlimited')
+    if (pool.maxChildren < 1 || pool.maxChildren > 10000) return fail('VALIDATION', 'max children must be from 1 to 10000', { stateChanged: false })
+    if (pool.maxRequests < 1 || pool.maxRequests > 10000000) return fail('VALIDATION', 'max requests must be from 1 to 10000000', { stateChanged: false })
+    if (pool.processIdleTimeoutSec < 1 || pool.processIdleTimeoutSec > 86400) return fail('VALIDATION', 'process idle timeout must be from 1 to 86400 seconds', { stateChanged: false })
+    const previous = await h.readPoolDefaults()
+    const saved = await h.savePoolDefaults!(caller, pool, expectedRevision)
+    const reconcile = await h.reconcile(caller)
+    if (reconcile && !reconcile.ok) {
+      await h.savePoolDefaults!(caller, previous.pool, saved.revision)
+      await h.reconcile(caller)
+      await h.audit(caller, 'server.php.pool_defaults.updated', 'server:php:pool-defaults', { pool, applied: false, reverted: true }, 'failed')
+      return fail('SERVICE_UNAVAILABLE', 'the account pools refused the global PHP-FPM defaults; the previous defaults were restored', { stateChanged: false, reverted: true, reconcile: reconcile.body })
+    }
+    await h.audit(caller, 'server.php.pool_defaults.updated', 'server:php:pool-defaults', { from: previous.pool, to: saved.pool, reconcile: reconcile?.ok ?? null })
+    return Response.json({ poolDefaults: { ...saved, poolCount }, stateChanged: true, reconcile: reconcile?.body ?? null }, { headers: { 'cache-control': 'no-store' } })
+  }
 
   if (read) {
-    const { response, body } = await observe()
+    const [{ response, body }, poolDefaults] = await Promise.all([
+      observe(),
+      h.readPoolDefaults ? h.readPoolDefaults().then(item => ({ ...item, poolCount })) : Promise.resolve(undefined),
+    ])
     if (!response.ok) return response
     const versions = body.versions.map(item => ({ ...item, lifecycle: phpLifecycle(item.version, now), domainCount: counted(item.version)?.domainCount ?? 0, accountCount: counted(item.version)?.accountCount ?? 0 }))
     const owners = new Map(accounts.map(account => [account.id, account.username]))
     const domainRows = domains.filter(domain => domain.siteType === 'php').map(domain => ({ name: domain.name, account: owners.get(domain.accountId) ?? null, version: domain.php.version, handler: domain.php.handler, inherited: sameFpm(domain.php.fpm), fpm: domain.php.fpm })).sort((left, right) => left.name.localeCompare(right.name)).slice(0, 5000)
-    return Response.json({ ...body, domains: domainRows, versions, installableLifecycle: Object.fromEntries((body.installable ?? []).map(version => [version, phpLifecycle(version, now)])), defaultVersion, usage, exceptions: settings?.phpFunctionExceptions ?? [], exceptionsRevision: exceptionsRevision(settings?.phpFunctionExceptions ?? []) }, { headers: { 'cache-control': 'no-store' } })
+    return Response.json({
+      ...body,
+      domains: domainRows,
+      versions,
+      installableLifecycle: Object.fromEntries((body.installable ?? []).map(version => [version, phpLifecycle(version, now)])),
+      defaultVersion,
+      usage,
+      exceptions: settings?.phpFunctionExceptions ?? [],
+      exceptionsRevision: exceptionsRevision(settings?.phpFunctionExceptions ?? []),
+      ...(poolDefaults ? { poolDefaults } : {}),
+    }, { headers: { 'cache-control': 'no-store' } })
   }
 
   if (url.pathname === '/api/server/php/default') {

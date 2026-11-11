@@ -981,6 +981,8 @@ export class StateStore {
         ...(patch.enforceBandwidth !== undefined && { enforceBandwidth: patch.enforceBandwidth }),
         ...(patch.shell !== undefined && { shell: patch.shell }),
         ...(patch.defaultMailboxQuotaMb !== undefined && { defaultMailboxQuotaMb: patch.defaultMailboxQuotaMb }),
+        ...(patch.updatedAt !== undefined && { updatedAt: patch.updatedAt }),
+        ...(patch.updatedBy !== undefined && { updatedBy: patch.updatedBy }),
       })
       if (next.name.toLowerCase() !== current.name.toLowerCase()) {
         validateNewPlanFile(next)

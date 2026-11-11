@@ -183,6 +183,7 @@ import type { DnsClusterSync } from './dns-cluster-sync.ts'
 import { listHostDirectory, statHostPath } from './service-detail.ts'
 import { handleSecurityToolsRoute } from './security-tools-routes.ts'
 import { handleSshHostRoute } from './ssh-host.ts'
+import { observeActiveSshSessions } from './ssh-sessions.ts'
 import { handleSecRoute } from './sec-routes.ts'
 import { handlePanelAccessHostRoute } from './panel-access.ts'
 import { createSystemHookRunner, handleLifecycleHooksRoute } from './lifecycle-hooks.ts'
@@ -1530,6 +1531,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       const sshHost = await handleSshHostRoute(req, url, method, { assertRoot: freshRoot('SSH'), run: linuxHost ? argv => deps.executor!.runCommand([...argv]) : null,
         os: async () => { const release = await readOsRelease(securityExecutor); return release ? profileFor(release) : fail('PRECONDITION_FAILED', 'SSH control requires a trusted supported host profile', { stateChanged: false }) },
         rootKeys: async () => { const keys = (await (await protectedSecurityObservation()).observeSsh({})).keys; return keys.state === 'unavailable' ? null : keys.items.length + keys.opaqueEntries },
+        openSessions: () => observeActiveSshSessions({ scope: 'host', procRoot: linuxHost ? '/proc' : null, run: linuxHost ? argv => deps.executor!.runCommand([...argv]) : null }),
         selinux: async () => await deps.executor!.readFile('/sys/fs/selinux/enforce') !== null,
         audit: entry => appendAudit(deps.db, { ...entry, principalId: caller.principalId }), settle: () => new Promise(resolve => setTimeout(resolve, 500)) })
       if (sshHost) return sshHost
@@ -2070,6 +2072,7 @@ export const createAgentApp = (deps: AgentServerDeps): AgentApp => {
       const accountSshResponse = await handleAccountSshRoute(req, url, method, {
         caller, store: deps.store, currentPrincipal: () => getPrincipal(deps.db, caller.principalId), audit: entry => appendAudit(deps.db, entry),
         files: (account, plan) => new JailedFileManager(resolveAccountHome(account.home, account.username), effectivePlan(plan, account).resources.diskMb, { account, ...(deps.accountFileRunner ? { runner: deps.accountFileRunner } : {}) }),
+        openSessions: account => observeActiveSshSessions({ scope: { uid: account.uid, username: account.username }, procRoot: linuxHost ? '/proc' : null, run: linuxHost ? argv => deps.executor!.runCommand([...argv]) : null }),
       })
       if (accountSshResponse) return accountSshResponse
       const sslStoreResponse = await handleSslStoreRoute(req, url, method, {

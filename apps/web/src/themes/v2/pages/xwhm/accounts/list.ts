@@ -118,7 +118,7 @@ function details(t: Translate, props: WhmSurfaceProps, account: Account, canMana
       { label: t('Processes'), value: `${missing} / ${limit(plan?.resources.maxProcesses)}` },
       { label: t('PHP workers'), value: `${missing} / ${limit(plan?.caps.phpWorkers)}` },
       { label: t('IO write cap'), value: ioWriteCap, ltr: typeof ioWrite === 'number' && Number.isFinite(ioWrite) && ioWrite >= 0 },
-    ]))
+    ]).replace(/\/ (\d+(?: MiB|%)?)/g, '/ <bdi dir="ltr">$1</bdi>'))
   const contact = group('contact', t('Contact'), factList([{ label: t('Contact email'), value: account.contactEmail, mono: true }]) + (allowed(props, 'edit-account') ? fold(t(msgctxt('theme:v2', 'Edit account')), mutation('contact'), 'modify') : ''))
   const edit = group('actions', t('Actions'), `${allowed(props, 'change-password') ? fold(t('Change password'), mutation('password'), 'password') : ''}${(!canManage || accountFor(props, account.username)) ? planOwnerForms(t, props, account, canManage) + limitsForm(t, props, account, canManage) : ''}${stateActions(t, props, account, canManage)}`)
   return `<section class="v2-whm-accounts__detail-body" data-account-detail-for="${escapeHtml(account.username)}" aria-label="${escapeHtml(account.username)}" hidden><div class="v2-whm-accounts__detail-summary"><span class="v2-whm-accounts__avatar" aria-hidden="true">${escapeHtml(account.username.charAt(0).toUpperCase())}</span><div><p class="v2-mono">${ltr(account.username)}</p><p class="v2-muted v2-mono">${ltr(account.primaryDomain)}</p></div></div>${handoff(t, props, account, canManage, 'panel')}${identity}${limits}${contact}${edit}</section>`
@@ -191,7 +191,7 @@ function row(t: Translate, props: WhmSurfaceProps, account: Account, canManage: 
 }
 
 function actionDialog(t: Translate, root: boolean): string {
-  return `<dialog class="v2-whm-accounts__dialog" data-account-dialog aria-labelledby="v2-account-dialog-title" aria-describedby="v2-account-dialog-description"><form class="v2-form" method="dialog" data-account-action-form novalidate><h2 id="v2-account-dialog-title" data-account-dialog-title>${escapeHtml(t('Account action'))}</h2><p id="v2-account-dialog-description" data-account-dialog-description></p><dl class="v2-whm-accounts__identity"><div><dt>${escapeHtml(t('Account'))}</dt><dd><bdi dir="ltr" data-account-dialog-username></bdi></dd></div><div><dt>${escapeHtml(t('Primary domain'))}</dt><dd><bdi dir="ltr" data-account-dialog-domain></bdi></dd></div></dl><div class="v2-field" data-account-confirm-field hidden><label for="v2-terminate-confirm-user">${escapeHtml(t('Type the username to confirm'))}</label><input id="v2-terminate-confirm-user" name="confirmUsername" type="text" dir="ltr" autocomplete="off" spellcheck="false" data-type-to-confirm aria-describedby="v2-account-confirm-help"><span id="v2-account-confirm-help">${escapeHtml(t('Must exactly match the account above.'))}</span></div><div class="v2-field" data-account-reason-field hidden><label for="v2-account-suspend-reason">${escapeHtml(t('Suspension reason'))}</label><textarea id="v2-account-suspend-reason" name="reason" rows="2" maxlength="500"></textarea></div>${root ? `<label class="v2-whm-accounts__selection" data-account-lock-field hidden><input type="checkbox" name="lock"><span>${escapeHtml(t('Prevent resellers from unsuspending this account'))}</span></label>` : ''}<p data-account-action-status role="status" aria-live="polite" tabindex="-1" hidden></p><div class="v2-whm-accounts__actions"><button type="button" class="v2-btn" data-account-action-cancel>${escapeHtml(t('Cancel'))}</button><button type="submit" class="v2-btn v2-btn--primary" data-account-action-submit disabled>${escapeHtml(t('Confirm'))}</button></div></form></dialog>`
+  return `<dialog class="v2-whm-accounts__dialog" data-account-dialog aria-labelledby="v2-account-dialog-title" aria-describedby="v2-account-dialog-description"><form class="v2-form" method="dialog" data-account-action-form novalidate><h2 id="v2-account-dialog-title" data-account-dialog-title>${escapeHtml(t('Account action'))}</h2><p id="v2-account-dialog-description" data-account-dialog-description></p><dl class="v2-whm-accounts__identity"><div><dt>${escapeHtml(t('Account'))}</dt><dd><bdi dir="ltr" data-account-dialog-username></bdi></dd></div><div><dt>${escapeHtml(t('Primary domain'))}</dt><dd><bdi dir="ltr" data-account-dialog-domain></bdi></dd></div></dl><div class="v2-field" data-account-confirm-field hidden><label for="v2-terminate-confirm-user">${escapeHtml(t('Type the username to confirm'))}</label><input id="v2-terminate-confirm-user" name="confirmUsername" type="text" dir="ltr" autocomplete="off" spellcheck="false" data-type-to-confirm aria-describedby="v2-account-confirm-help"><span id="v2-account-confirm-help" class="v2-field__help">${escapeHtml(t('Must exactly match the account above.'))}</span></div><div class="v2-field" data-account-reason-field hidden><label for="v2-account-suspend-reason">${escapeHtml(t('Suspension reason'))}</label><textarea id="v2-account-suspend-reason" name="reason" rows="2" maxlength="500"></textarea></div>${root ? `<label class="v2-whm-accounts__selection" data-account-lock-field hidden><input type="checkbox" name="lock"><span>${escapeHtml(t('Prevent resellers from unsuspending this account'))}</span></label>` : ''}<p data-account-action-status role="status" aria-live="polite" tabindex="-1" hidden></p><div class="v2-whm-accounts__actions"><button type="button" class="v2-btn" data-account-action-cancel>${escapeHtml(t('Cancel'))}</button><button type="submit" class="v2-btn v2-btn--primary" data-account-action-submit disabled>${escapeHtml(t('Confirm'))}</button></div></form></dialog>`
 }
 
 export function renderV2WhmAccountList(t: Translate, props: WhmSurfaceProps, authority?: SurfaceAuthority): string {
@@ -219,14 +219,23 @@ export function renderV2WhmAccountList(t: Translate, props: WhmSurfaceProps, aut
 
 // The fold chevron is drawn from the inline-end border, the left edge in RTL, so RTL turns it the other way to keep pointing down (up when open).
 export const WHM_ACCOUNTS_CSS = `${stateTones('.v2-whm-accounts [data-account-status]', 'data-state', { active: 'ok', suspended: 'warn', terminating: 'bad', 'verification-required': 'warn' })}
+.v2-whm-accounts .v2-btn,.v2-whm-accounts .v2-segmented>button,.v2-whm-accounts__opener{min-inline-size:var(--target);min-block-size:var(--target)}
+.v2-whm-accounts :is(.v2-btn,.v2-segmented>button,.v2-whm-accounts__opener,.v2-whm-accounts__fold>summary){transition:background-color 140ms ease-out,border-color 140ms ease-out,color 140ms ease-out,box-shadow 140ms ease-out,opacity 140ms ease-out,transform 140ms ease-out}
+.v2-whm-accounts__table tbody tr{transition:background-color 140ms ease-out}
+.v2-whm-accounts__table tbody tr:hover{background:var(--subtle)}
+@media(prefers-reduced-motion:reduce){.v2-whm-accounts :is(.v2-btn,.v2-segmented>button,.v2-whm-accounts__opener,.v2-whm-accounts__fold>summary),.v2-whm-accounts__table tbody tr{transition:none}}
 .v2-whm-accounts__filters{display:grid;grid-template-columns:2fr repeat(3,minmax(0,1fr)) auto;align-items:end;gap:var(--space-2)}
 .v2-whm-accounts__filters>[data-list-count]{font-size:13px}
-.v2-whm-accounts__empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;gap:var(--space-2);padding:var(--space-4) var(--space-3);border:1px dashed var(--line-strong);border-radius:var(--radius-card);text-align:center}
+.v2-whm-accounts__filters>[data-list-count],.v2-whm-accounts [data-account-selected-count],.v2-whm-accounts__pager [data-list-page],.v2-whm-accounts [data-list-state-chip] .v2-count,.v2-whm-accounts__opener small,.v2-whm-accounts [data-account-table-value=ip],.v2-whm-accounts [data-account-table-value=io-write],.v2-whm-accounts__detail-body .v2-facts dd,.v2-whm-accounts__identity dd,.v2-whm-account-limit-grid input[type=text]{font-variant-numeric:tabular-nums}
+.v2-whm-accounts__empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;gap:var(--space-2);padding:var(--space-4) var(--space-3);border:1px dashed var(--line-strong);border-radius:var(--radius-notice);background:var(--subtle);text-align:center}
 .v2-whm-accounts__empty[hidden]{display:none}
 .v2-whm-accounts__empty>p{margin:0;font-weight:600}
 .v2-whm-accounts__filters>:is(p,nav){grid-column:1/-1}
 .v2-whm-accounts__bulk,.v2-whm-accounts__pager,.v2-whm-accounts__actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
 .v2-whm-accounts__bulk{margin-block-start:var(--space-3)}
+.v2-whm-accounts [data-approved-account-bulk]:has(:is([data-account-selection],[data-account-select-all]):checked),.v2-whm-accounts [data-web-stats-locks]{padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}
+.v2-whm-accounts__bulk>h2{margin:0;font-size:16px;line-height:1.4;font-weight:600}
+.v2-whm-accounts [data-account-selected-count]{font-size:13px;font-weight:600;color:var(--text)}
 .v2-page:not(:has(:is([data-account-selection],[data-account-select-all]):checked)) [data-approved-account-bulk]>:is([data-account-bulk-control],.v2-whm-accounts__bulk-choices,p.v2-muted){display:none}
 .v2-whm-accounts__note{margin:0;padding:var(--space-2) var(--space-3);border-block-start:1px solid var(--line);font-size:13px}
 @media(min-width:601px){.v2-whm-accounts__quota>span{white-space:nowrap}.v2-whm-accounts__table td.v2-whm-accounts__actions{display:table-cell;text-align:end;white-space:nowrap}.v2-whm-accounts__table td.v2-whm-accounts__actions>*{vertical-align:middle;margin-inline-start:var(--space-1)}.v2-whm-accounts__table th:last-child{text-align:end}.v2-whm-accounts__table :is(th,td):first-child{inline-size:48px;padding-inline-end:0}}
@@ -245,11 +254,12 @@ export const WHM_ACCOUNTS_CSS = `${stateTones('.v2-whm-accounts [data-account-st
 .v2-whm-accounts__table td .v2-mono{overflow-wrap:anywhere}
 @media(min-width:601px){.v2-whm-accounts__table td:nth-child(3) .v2-whm-accounts__stack>span.v2-mono{overflow-wrap:normal}}
 .v2-whm-accounts__opener strong{white-space:nowrap}
+.v2-whm-accounts__opener:hover strong{color:var(--accent)}
 .v2-menu__list .v2-whm-accounts__handoff{align-items:stretch;inline-size:100%}
 .v2-menu__list [data-handoff-status]{padding:0 12px 8px;font-size:12px;color:var(--muted)}
 .v2-menu__list [data-handoff-status][hidden]{display:none}
 .v2-whm-accounts__stack{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}
-.v2-whm-accounts__stack>small,.v2-whm-accounts__quota>small{font-size:12px}
+.v2-whm-accounts__stack>small,.v2-whm-accounts__quota>small,.v2-whm-accounts__opener small{font-size:12px}
 .v2-whm-accounts__usage{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
 .v2-whm-accounts__usage>.v2-whm-accounts__quota>span{font-weight:600;font-variant-numeric:tabular-nums}
 .v2-whm-accounts__selection{display:inline-flex;align-items:center;gap:var(--space-1);min-block-size:var(--target);min-inline-size:var(--target)}
@@ -266,9 +276,10 @@ export const WHM_ACCOUNTS_CSS = `${stateTones('.v2-whm-accounts [data-account-st
 .v2-whm-accounts__opener>span:last-child{display:flex;flex-direction:column;gap:var(--space-1);min-inline-size:0}
 .v2-whm-accounts__opener[aria-expanded=true]{color:var(--accent)}
 .v2-whm-accounts__avatar{display:inline-flex;align-items:center;justify-content:center;flex:none;inline-size:40px;block-size:40px;border-radius:var(--radius-control);background:var(--accent-soft);color:var(--accent);font-family:var(--font-mono);font-weight:600}
-.v2-whm-accounts__detail-aside{border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface)}
+.v2-whm-accounts__detail-aside{border:1px solid var(--line);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow)}
 .v2-whm-accounts__detail-header{position:sticky;inset-block-start:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:var(--space-1);padding-block:var(--space-2);padding-inline:var(--space-3) var(--space-2);border-block-end:1px solid var(--line);border-start-start-radius:inherit;border-start-end-radius:inherit;background:var(--surface)}
-.v2-whm-accounts__fold{border:1px solid var(--line);border-radius:var(--radius-control)}
+.v2-whm-accounts__fold{border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--surface)}
+.v2-whm-accounts__fold[open]{border-color:var(--line-strong)}
 .v2-whm-accounts__fold>summary{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);min-block-size:var(--target);padding-inline:var(--space-2);font-size:14px;font-weight:600;cursor:pointer;list-style:none;border-radius:inherit}
 .v2-whm-accounts__fold>summary::-webkit-details-marker{display:none}
 .v2-whm-accounts__fold>summary::after{content:"";flex:none;inline-size:8px;block-size:8px;border-inline-end:2px solid var(--muted);border-block-end:2px solid var(--muted);transform:rotate(45deg);margin-block-end:4px}
@@ -285,30 +296,32 @@ export const WHM_ACCOUNTS_CSS = `${stateTones('.v2-whm-accounts [data-account-st
 .v2-whm-account-limit-grid input[type=text]{inline-size:100%;min-inline-size:0}
 .v2-whm-accounts__detail-body>.v2-whm-accounts__handoff{align-items:stretch}
 .v2-whm-accounts__detail-body>.v2-whm-accounts__handoff>[hidden]{display:none}
-.v2-whm-accounts__detail-header h2{margin:0;font-size:16px;line-height:1.5}
-.v2-whm-accounts__detail-group h3,.v2-whm-accounts__mutation h4{margin:0;font-size:14px;line-height:1.5}
-.v2-whm-accounts__detail-summary .v2-whm-accounts__avatar{inline-size:52px;block-size:52px;font-size:22px;border-radius:var(--radius-card)}
+.v2-whm-accounts__detail-header h2,.v2-whm-accounts__dialog h2{margin:0;font-size:18px;line-height:1.35;font-weight:600}
+.v2-whm-accounts__dialog [data-account-dialog-description]{margin:0;font-size:14px;line-height:1.55;color:var(--muted)}
+.v2-whm-accounts__detail-group h3,.v2-whm-accounts__mutation h4,.v2-whm-accounts [data-account-limits-readonly]>h4{margin:0;font-size:14px;line-height:1.45;font-weight:600}
+.v2-whm-accounts__detail-summary .v2-whm-accounts__avatar{inline-size:48px;block-size:48px;font-size:20px;border-radius:var(--radius-control)}
 .v2-whm-accounts__detail-close{flex:none;inline-size:var(--target);padding:0;font-size:24px}
 .v2-whm-accounts__detail-body,.v2-whm-accounts__detail-group,.v2-whm-accounts__mutation{display:flex;flex-direction:column;gap:var(--space-3)}
 .v2-whm-accounts__mutation{gap:var(--space-2)}
-@media(max-width:600px){.v2-whm-accounts .v2-segmented>button{min-block-size:var(--target)}}
 .v2-whm-accounts__state-actions{display:flex;flex-wrap:wrap;gap:var(--space-1)}
 .v2-whm-accounts__state-actions>.v2-btn{flex:1 1 auto}
 .v2-whm-accounts__state-actions>[data-action$=suspend-account]{border-color:var(--warn);color:var(--warn)}
 .v2-whm-accounts__state-actions>.v2-btn--danger{background:var(--bad-soft);color:var(--bad)}
 .v2-whm-accounts__detail-body{padding:var(--space-3)}
 .v2-whm-accounts__detail-group{gap:var(--space-2)}
-.v2-whm-accounts__detail-summary{display:flex;align-items:center;gap:var(--space-2)}
-.v2-whm-accounts__detail-summary p{overflow-wrap:anywhere}
+.v2-whm-accounts__detail-summary{display:flex;align-items:center;gap:var(--space-2);padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}
+.v2-whm-accounts__detail-summary p{margin:0;overflow-wrap:anywhere}
+.v2-whm-accounts__detail-summary p:first-child{font-size:15px;font-weight:600}
+.v2-whm-accounts__detail-summary p+p{font-size:13px}
 .v2-whm-accounts__detail-body .v2-facts{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 var(--space-2)}
 .v2-whm-accounts__detail-body .v2-facts>div{display:flex;flex-direction:column;gap:2px;min-inline-size:0;padding-block:var(--space-1);border-block-start:1px solid var(--line);text-align:start}
 .v2-whm-accounts__detail-body .v2-facts dt{font-size:12px}
 .v2-whm-accounts__detail-body .v2-facts>div:only-child{grid-column:1/-1}
-.v2-whm-accounts__detail-body .v2-facts dd{margin:0;overflow-wrap:anywhere}
+.v2-whm-accounts__detail-body .v2-facts dd{margin:0;font-size:13px;overflow-wrap:anywhere;unicode-bidi:plaintext}
 .v2-whm-accounts [data-account-detail-panel][hidden],.v2-whm-accounts [data-account-detail-for][hidden]{display:none!important}
-.v2-whm-accounts__dialog{inline-size:min(560px,calc(100% - 32px));padding:var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-card);background:var(--surface);color:var(--text)}
+.v2-whm-accounts__dialog{inline-size:min(560px,calc(100% - 32px));padding:var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-card);background:var(--surface);color:var(--text);box-shadow:var(--shadow)}
 .v2-whm-accounts__dialog::backdrop{background:var(--scrim)}
-.v2-whm-accounts__identity{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
+.v2-whm-accounts__identity{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2);margin:0;padding:var(--space-2);border:1px solid var(--line);border-radius:var(--radius-notice);background:var(--subtle)}
 .v2-whm-accounts__identity>div{display:flex;flex-direction:column;gap:var(--space-1);text-align:start}
 .v2-whm-accounts__identity dd{margin:0;overflow-wrap:anywhere;font-family:var(--font-mono);font-size:13px}
 .v2-whm-accounts__identity dt{font-size:12px;color:var(--muted)}
@@ -317,5 +330,6 @@ export const WHM_ACCOUNTS_CSS = `${stateTones('.v2-whm-accounts [data-account-st
 .v2-whm-accounts__dialog .v2-whm-accounts__actions{justify-content:flex-end}
 .v2-whm-accounts__dialog:has([data-account-confirm-field]:not([hidden])) [data-account-action-submit]:not(:disabled){border-color:var(--bad);background:var(--bad);color:var(--surface)}
 @media(max-width:1000px){.v2-whm-accounts__filters{grid-template-columns:repeat(2,minmax(0,1fr))}.v2-whm-accounts__clear{justify-self:start}}
-@media(max-width:600px){.v2-whm-accounts__filters,.v2-whm-accounts__identity,.v2-whm-accounts__bulk-choices{grid-template-columns:1fr}.v2-whm-accounts__dialog,.v2-whm-accounts__detail-header,.v2-whm-accounts__detail-body{padding:var(--space-2)}.v2-whm-account-limit-grid{grid-template-columns:1fr}}
+@media(max-width:640px){.v2-whm-accounts .v2-inset,.v2-whm-accounts__note,.v2-whm-accounts__dialog,.v2-whm-accounts__detail-header,.v2-whm-accounts__detail-body{padding:var(--space-2)}}
+@media(max-width:600px){.v2-whm-accounts__filters,.v2-whm-accounts__identity,.v2-whm-accounts__bulk-choices{grid-template-columns:1fr}.v2-whm-account-limit-grid{grid-template-columns:1fr}}
 `

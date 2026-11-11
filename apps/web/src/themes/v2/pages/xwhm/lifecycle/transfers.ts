@@ -1,6 +1,7 @@
 import { localeDirection } from '../../../../../i18n.ts'
 import { v2Messages } from '../../../messages.ts'
 import { escapeHtml } from '../../../html.ts'
+import { icon } from '../../../icons.ts'
 import { lifecycleButton, lifecycleCard, lifecycleField, lifecycleHeader, lifecycleLink, lifecycleRules, lifecycleStatus, lifecycleTable, phoneColumns, text, type LifecycleAccess } from './shared.ts'
 import { renderV2TransferCredentials, v2TransferClientTemplates } from './client-templates.ts'
 
@@ -48,10 +49,12 @@ ${scope === 'server' ? `<p>${text(t, msgid('Whole-server migration selects every
 <div class="v2-lifecycle__choices" data-transfer-plans></div>
 ${status(msgid('No authenticated source inventory has been read.'), 'inventory-note')}
 ${status(msgctxt('theme:v2', 'Authenticated source inventory has not been read.'), 'identities-observation')}
+<ul class="v2-transfer-discovery-pills" data-transfer-discovery-pills hidden></ul>
 ${inventoryTable}
 ${actions(button('select', msgid('Save selection'), true))}
 `, { 'data-whm-detail-section': 'transfer-identities' })
 
+  const buildTable = lifecycleTable(t, msgid('What will be built here'), [msgid('From source'), msgid('New account'), msgid('New UID'), msgid('Slice'), msgid('Vhost'), msgid('PHP')], { 'data-transfer-build-rows': true }, msgid('Build preview appears once source inventory or review is read.'), { name: 2, value: 3 })
   const mapping = lifecycleCard(t, 'transfer-plans', msgctxt('theme:v2', 'Plans and conflicts'), `
 ${status(msgctxt('theme:v2', 'The source plans and their destination mappings have not been read.'), 'plan-observation')}
 ${lifecycleTable(t, msgid('Plan mapping'), [msgid('Source plan'), msgid('Plan here'), msgid('Owner'), msgid('Review')], { 'data-transfer-plan-rows': true }, msgid('No observed records are available for this saved session.'), { value: 4 })}
@@ -60,6 +63,9 @@ ${fields(select('transfer-conflict', msgid('Conflict'), 'conflict')
     + input('transfer-resolution-target', msgid('Destination name'), 'text', ' maxlength="128"'))}
 ${actions(button('resolve', msgid('Save resolution')) + button('review', msgid('Build current review'), true))}
 <div data-transfer-review-results${phoneColumns([msgid('Source account'), msgid('Destination account'), msgid('Plan'), msgid('Domains'), msgid('Mailboxes')].map(label => t(label)))}></div>
+<h3>${text(t, msgid('What will be built here'))}</h3>
+${buildTable}
+<div class="v2-transfer-slice-box" data-transfer-slice-box hidden><span class="v2-transfer-slice-box__label" data-transfer-slice-label></span><pre class="v2-lifecycle__key" dir="ltr" data-transfer-slice-unit></pre></div>
 `, { 'data-whm-detail-section': 'transfer-plans' })
 
   const execution = lifecycleCard(t, 'transfer-run', msgctxt('theme:v2', 'Run transfer'), `
@@ -100,13 +106,14 @@ ${actions(button('import-discard', msgid('Discard archive')) + button('import-ru
     msgid('Resume a saved review, inspect actual source inventory and resolve conflicts. Connection and execution results are accepted only from the trusted server adapter.'),
     msgctxt('theme:v2', 'No destination account is created until the current review is confirmed. Source identity, resource limits and proposed changes must be checked before running.'),
   ]))
+  const summary = `<dl class="v2-lifecycle__summary">${([['source', msgid('Source server'), 'server'], ['accounts', msgid('Selected accounts'), 'users'], ['conflicts', msgid('Conflicts'), 'shield'], ['ready', msgid('Ready to build'), 'check']] as const).map(([key, label, glyph]) => `<div class="v2-lifecycle__field"><dt><span>${text(t, label)}</span><span class="v2-tile v2-tile--neutral" aria-hidden="true">${icon(glyph)}</span></dt><dd data-transfer-kpi="${key}">${text(t, msgid('Not read'))}</dd></div>`).join('')}</dl>`
   const steps = `<ol class="v2-lifecycle__steps" aria-label="${text(t, msgid('Steps'))}">${([['transfer-source', msgctxt('theme:v2', 'Connect source')], ['transfer-selection', msgctxt('theme:v2', 'Select accounts')], ['transfer-plans', msgctxt('theme:v2', 'Plans and conflicts')], ['transfer-run', msgctxt('theme:v2', 'Run transfer')]] as const).map(([key, label], index) => `<li><span aria-hidden="true">${index + 1}</span><a href="#v2-lifecycle-${key}">${text(t, label)}</a></li>`).join('')}</ol>`
   const headerActions = lifecycleLink(t, msgid('Audit log'), `/whm/audit?lang=${props.locale}`) + (scope === 'server' ? '' : lifecycleLink(t, msgid('Import a cPanel backup'), '#v2-lifecycle-transfer-import'))
   return `<div class="v2-lifecycle" data-whm-detail-route="${route}" data-capability-state="${props.canRead ? 'authorized' : 'unavailable'}" lang="${props.locale}" dir="${localeDirection(props.locale)}">
 ${lifecycleHeader(t, scope === 'server' ? msgid('Server migration') : msgid('Transfer tool'), route, msgctxt('theme:v2', 'Move accounts from a verified source or inspect a cPanel archive before importing.'), headerActions)}
 ${scope === 'server' ? renderV2TransferCredentials(t, props.canRead && props.canManage) : ''}
 <section class="v2-lifecycle__column" data-transfer-workspace data-transfer-inventory-layout="comparison" data-transfer-can-read="${props.canRead && props.canManage}" data-transfer-manage="${props.canRead && props.canManage}" data-transfer-scope="${scope}"${props.canRead ? ' data-transfer-credentials="read"' : ''} aria-label="${text(t, msgid('Saved transfer sessions and archive review'))}">
-${steps}
+${summary}${steps}
 ${note}${source}${selection}${mapping}${execution}
 ${scope === 'server' ? `<div hidden>${archive}</div>` : archive}
 <p class="v2-lifecycle__status" role="status" data-transfer-status data-state="unread">${text(t, props.canRead ? msgid('Saved transfer state has not been read.') : msgid('Transfer review is unavailable here. Nothing was read or changed.'))}</p>

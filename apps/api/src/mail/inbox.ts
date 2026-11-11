@@ -54,6 +54,7 @@ export interface InboxSummary {
   /** First text line already fetched with the message. Empty when the message has no text part. */
   preview?: string
   unread: boolean
+  flagged?: boolean
   sizeBytes: number
   attachments?: MailAttachmentSummary[]
 }
@@ -68,8 +69,15 @@ export const MAIL_FOLDERS = ['INBOX', 'Sent', 'Drafts', 'Junk', 'Trash', 'Archiv
 
 const FOLDER_RE = /^(?:INBOX|Sent|Drafts|Junk|Trash|Archive|[A-Za-z][A-Za-z0-9._-]{0,40})$/
 
+export interface MailRemoteImage {
+  src: string
+  alt: string
+}
+
 export interface InboxMessage extends InboxSummary {
   body: string
+  hasRemoteImages?: boolean
+  remoteImages?: MailRemoteImage[]
 }
 
 export interface MailboxSendInput {
@@ -90,12 +98,15 @@ export interface MailboxSendInput {
 export interface MailboxTransport {
   verify(mailbox: string, password: string): Promise<void>
   list(mailbox: string, password: string, folder?: string): Promise<InboxSummary[]>
-  read(mailbox: string, password: string, uid: number, folder?: string, options?: { authorize?: () => void | Promise<void> }): Promise<InboxMessage>
+  read(mailbox: string, password: string, uid: number, folder?: string, options?: { authorize?: () => void | Promise<void>; allowRemoteImages?: boolean }): Promise<InboxMessage>
   remove(mailbox: string, password: string, uid: number, folder?: string, options?: { uidValidity: number }): Promise<void>
   move?(mailbox: string, password: string, uid: number, fromFolder: string, toFolder: string, options?: { uidValidity: number }): Promise<{
     uid?: number; uidValidity?: number; uidValidityObserved?: boolean; sourceUidValidity?: number; sourceUidValidityObserved?: boolean
     unknownOutcome?: boolean; verificationRequired?: boolean
   } | void>
+  flag?(mailbox: string, password: string, uid: number, folder: string, flagged: boolean, options?: { uidValidity: number }): Promise<{
+    uid: number; uidValidity: number; flagged: boolean
+  }>
   counts?(mailbox: string, password: string): Promise<MailFolderCount[]>
   quota?(mailbox: string, password: string): Promise<{ usedMb: number; limitMb?: number; usedBytes?: number } | null>
   send(mailbox: string, password: string, input: MailboxSendInput): Promise<{ messageId: string; savedToSent?: boolean }>
@@ -218,6 +229,33 @@ const requiredMailboxUidValidity = (options?: { uidValidity: number }): number =
   return value
 }
 
+const decodeHtmlAttr = (value: string): string =>
+  value
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+
+export const extractSanitizedRemoteImages = (sanitizedHtml: string): MailRemoteImage[] => {
+  const images: MailRemoteImage[] = []
+  const seen = new Set<string>()
+  const tagRe = /<img\b([^>]*)>/gi
+  let match: RegExpExecArray | null
+  while ((match = tagRe.exec(sanitizedHtml)) !== null && images.length < 24) {
+    const attrs = match[1] ?? ''
+    const srcMatch = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']+))/i.exec(attrs)
+    const rawSrc = decodeHtmlAttr((srcMatch?.[1] ?? srcMatch?.[2] ?? srcMatch?.[3] ?? '').trim())
+    const normalizedSrc = rawSrc.startsWith('//') ? `https:${rawSrc}` : rawSrc
+    if (!/^https?:\/\/[^\s"'<>]+$/i.test(normalizedSrc) || seen.has(normalizedSrc)) continue
+    seen.add(normalizedSrc)
+    const altMatch = /\balt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']+))/i.exec(attrs)
+    const alt = decodeHtmlAttr((altMatch?.[1] ?? altMatch?.[2] ?? altMatch?.[3] ?? '').trim()).slice(0, 160)
+    images.push({ src: normalizedSrc, alt })
+  }
+  return images
+}
+
 const summaryOf = (message: ImapFetchedMessage, observedValidity = false): InboxSummary => {
   const parsed = message.parsed
   const fromMime = parsed.attachments
@@ -226,6 +264,7 @@ const summaryOf = (message: ImapFetchedMessage, observedValidity = false): Inbox
   const fromStructure = attachmentsFromBodyStructure(message.bodyStructure ?? '')
   const attachments = fromMime.length > 0 ? fromMime : fromStructure
   const verifiedIdentity = observedValidity && Number.isSafeInteger(message.uidValidity) && message.uidValidity > 0 && message.uidValidity <= 0xffffffff
+  const flagged = message.flags.some(flag => flag.toLowerCase() === '\\flagged')
   return {
     uid: message.uid,
     uidValidityObserved: verifiedIdentity,
@@ -238,6 +277,7 @@ const summaryOf = (message: ImapFetchedMessage, observedValidity = false): Inbox
     receivedAt: mailReceivedAtUtc(parsed.date ?? message.internalDate ?? ''),
     preview: previewOf(parsed.textBody ?? ''),
     unread: !message.flags.some(flag => flag.toLowerCase() === '\\seen'),
+    flagged,
     sizeBytes: message.sizeBytes,
     ...(attachments.length > 0 ? { attachments } : {}),
   }
@@ -316,8 +356,29 @@ export const createLocalMailboxTransport = (
           await options?.authorize?.()
           await client.storeFlagsByUid(name, uid, 'add', ['\\Seen'], mailbox, message.uidValidity)
         }
-        return { ...summaryOf(message, observed), ...(observed ? { unread: false } : {}), body: message.parsed.textBody }
+        const blockedRemote = (message.parsed.sanitizeReport?.blockedRemoteImages ?? [])
+          .filter(url => /^https?:\/\//i.test(url) || url.startsWith('//'))
+        const hasRemoteImages = blockedRemote.length > 0
+        const remoteImages = hasRemoteImages && options?.allowRemoteImages === true && message.parsed.rawHtmlBody
+          ? extractSanitizedRemoteImages(sanitizeEmailHtml(message.parsed.rawHtmlBody, {
+            cidMap: message.parsed.inlineCidMap,
+            allowRemoteImages: true,
+          }).sanitizedHtml)
+          : undefined
+        return {
+          ...summaryOf(message, observed),
+          ...(observed ? { unread: false } : {}),
+          body: message.parsed.textBody,
+          ...(hasRemoteImages ? { hasRemoteImages: true } : {}),
+          ...(remoteImages !== undefined ? { remoteImages } : {}),
+        }
       }, INBOX_READ_LIMITS)
+    },
+    async flag(mailbox, password, uid, folder = 'INBOX', flagged, options) {
+      const name = mailFolderName(folder)
+      const validity = requiredMailboxUidValidity(options)
+      await imap(mailbox, password, client => client.storeFlagsByUid(name, uid, flagged ? 'add' : 'remove', ['\\Flagged'], mailbox, validity))
+      return { uid, uidValidity: validity, flagged }
     },
     async remove(mailbox, password, uid, folder = 'INBOX', options) {
       const name = mailFolderName(folder)

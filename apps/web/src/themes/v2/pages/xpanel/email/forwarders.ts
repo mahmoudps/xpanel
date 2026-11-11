@@ -98,6 +98,12 @@ export function renderV2EmailForwardersPage(t: Translate, props: EmailForwarders
 }
 
 export const EMAIL_ROUTING_CSS = `.v2-email-routing .v2-layout>.v2-stack{gap:var(--space-4)}
+.v2-email-routing h1{font-size:26px;line-height:1.2}
+.v2-email-routing .v2-card h2{font-size:16px;line-height:1.3}
+.v2-email-routing .v2-field{gap:var(--space-1)}
+.v2-email-routing .v2-field>label{padding-inline:13px;font-size:13px;line-height:1.25;font-weight:600;text-box-trim:trim-end;text-box-edge:text}
+.v2-email-routing .v2-field__help{font-size:13px;line-height:1.5;color:var(--muted)}
+.v2-email-routing .v2-btn{min-inline-size:44px;min-block-size:44px;transition-property:background-color,border-color,color,box-shadow,opacity,transform;transition-duration:140ms;transition-timing-function:ease-out}
 .v2-email-routing-workspace{display:flex;flex-direction:column;gap:var(--space-3);min-inline-size:0}
 .v2-email-routing-workspace .v2-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:var(--space-2) var(--space-3);align-items:start;padding-block-start:var(--space-3);border-block-start:1px solid var(--line)}
 .v2-email-routing-workspace .v2-form>:is(h3,.v2-fields,.v2-email-routing-actions,[role=status]){grid-column:1/-1}
@@ -105,14 +111,15 @@ export const EMAIL_ROUTING_CSS = `.v2-email-routing .v2-layout>.v2-stack{gap:var
 .v2-email-routing-workspace>fieldset{margin:0;padding:0;border:0;min-inline-size:0}
 .v2-email-routing-workspace>p:not([data-state=failed]){font-size:13px;line-height:1.6;color:var(--text-2)}
 .v2-email-routing-workspace [role=status]:empty{display:none}
-.v2-email-routing-workspace>[role=status]:not([data-state=failed]){padding:10px 14px;border:1px solid var(--line);border-radius:var(--radius-control);background:var(--subtle);font-weight:500}
+.v2-email-routing-workspace>[role=status]:not([data-state=failed]){padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:var(--subtle);font-weight:500}
 .v2-email-routing-workspace>[role=status][data-state=uncertain]{border-color:var(--bad-line);background:var(--bad-soft)}
 .v2-email-routing-workspace .v2-table{min-inline-size:720px!important}
-.v2-email-routing-workspace>.v2-table-scroll{border:1px solid var(--line);border-radius:var(--radius-control)}
+.v2-email-routing-workspace>.v2-table-scroll{border:1px solid var(--line);border-radius:12px}
 .v2-email-routing-workspace>.v2-table-scroll+p{margin-block-start:calc(var(--space-2)*-1);font-size:13px;text-align:center}
 .v2-email-routing-workspace dl{display:flex;flex-direction:column;gap:var(--space-1);margin:0}
 .v2-email-routing-workspace dt{font-size:12px;color:var(--muted);text-box-trim:trim-end;text-box-edge:text}
 .v2-email-routing-workspace dd{margin:0;font-size:13px;overflow-wrap:anywhere;text-box-trim:trim-start;text-box-edge:text}
+.v2-email-routing-workspace :is(dd,td,.v2-num){font-variant-numeric:tabular-nums}
 .v2-email-routing-workspace [data-forwarder-create]{display:flex;flex-direction:column;gap:var(--space-3);max-inline-size:640px}
 .v2-email-routing-workspace [data-forwarder-create] .v2-fields{display:flex;flex-direction:column;gap:var(--space-2)}
 .v2-email-routing-actions{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
@@ -122,11 +129,14 @@ export const EMAIL_ROUTING_CSS = `.v2-email-routing .v2-layout>.v2-stack{gap:var
 .v2-email-routing-choice>input{flex:none}
 .v2-email-routing-choice:has(small){align-items:flex-start}.v2-email-routing-choice:has(small)>input{margin-block-start:3px}
 .v2-email-routing-choice>span{display:flex;flex-direction:column;gap:var(--space-1)}
-.v2-email-routing-choice small{font-size:12px;color:var(--muted)}
+.v2-email-routing-choice small{font-size:13px;line-height:1.5;color:var(--muted)}
 .v2-email-routing .v2-field :is(input,select,textarea)[dir=ltr]{text-align:start}
 .v2-email-routing .v2-field :is(input,select,textarea)[dir=ltr]{text-align:var(--v2-control-align,start)}
 .v2-email-routing-workspace [data-state=uncertain]{color:var(--bad)}
 .v2-email-routing-workspace td bdi{overflow-wrap:anywhere}
+.v2-email-routing:dir(rtl) *,[data-ui-theme="v2"] [dir=rtl] .v2-email-routing *{letter-spacing:0}
+@media(prefers-reduced-motion:reduce){.v2-email-routing .v2-btn{transition-duration:0ms}}
+@media(max-width:640px){.v2-email-routing .v2-card:not(.v2-card--flush){padding:var(--space-2)}}
 @media(min-width:601px){.v2-email-routing-workspace td .v2-btn{padding-inline:10px;font-size:13px}}
 .v2-email-routing-table{display:contents}
 @media(max-width:600px){.v2-email-routing-table td:is(:nth-child(3),:nth-child(4)):not(:last-child,[colspan],:empty)::before{display:block;font-size:12px;color:var(--muted)}.v2-email-routing-table td:nth-child(3):not(:last-child,[colspan],:empty)::before{content:var(--v2-pl3)}.v2-email-routing-table td:nth-child(4):not(:last-child,[colspan],:empty)::before{content:var(--v2-pl4)}.v2-email-routing-workspace .v2-table tr>td:is(:first-child,:nth-child(2),:nth-child(3),:nth-child(4):not(:last-child)):not([colspan]){grid-column:1/-1!important;grid-row:auto!important;justify-self:start!important;text-align:start!important}.v2-email-routing-workspace .v2-table tr>td:first-child{font-weight:600}.v2-email-routing-actions>.v2-btn{flex:1 1 auto}.v2-email-routing-workspace .v2-table{min-inline-size:0!important}.v2-email-routing-workspace .v2-table thead{position:absolute;inline-size:1px;block-size:1px;overflow:hidden;clip-path:inset(50%)}}

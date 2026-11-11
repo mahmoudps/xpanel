@@ -321,7 +321,9 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
         await page.goto(host.baseUrl + (state.screen === 'create' ? '/whm/accounts/new?lang=' : '/whm/accounts?lang=') + state.locale + '&theme=' + state.theme)
         await page.evaluate(() => document.fonts.ready)
         assert.equal(await page.locator('html').getAttribute('data-accounts-fixture'), 'synthetic')
-        result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+        const isV2 = await page.locator('[data-ui-theme="v2"]').count() > 0
+        const uiFamily = state.locale === 'ar' ? (isV2 ? 'IBM Plex Sans Arabic' : 'sans-serif') : 'IBM Plex Sans'
+        result.fonts = await assertAppliedFont(page, 'h1', uiFamily)
         if (state.screen === 'create') {
           await createAccountGate(page, host, state, result, destination, expect)
         } else {
@@ -337,7 +339,7 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
           await alphaCheckbox.click()
           await expect(alphaCheckbox).not.toBeChecked()
           await expect(page.locator('[data-account-dialog]')).not.toBeVisible()
-          result.fonts = await assertAppliedFont(page, 'h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+          result.fonts = await assertAppliedFont(page, 'h1', uiFamily)
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
           await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-list.png'), fullPage: true })
           const trigger = page.locator('[data-account-row="beta"] button[popovertarget][aria-haspopup="menu"]')
@@ -362,7 +364,7 @@ export async function runAccountsAcceptance({ output, filter } = {}) {
           assert.ok(result.geometry.fields.length >= 3)
           for (const field of result.geometry.fields) { assert.ok(Math.abs(field.gap - 8) < 1, 'The actual field gap is 8px: ' + field.label + ' (' + field.gap + ')'); assert.ok(field.edge < 1, 'Edge alignment: ' + field.label + ' (' + field.edge + ')'); if (field.glyphDelta !== null) assert.ok(field.glyphDelta < 1) }
           for (const control of result.geometry.controls) assert.ok(control.width >= 43.9 && control.height >= 43.9)
-          result.dialogFont = await assertAppliedFont(page, '[data-account-dialog-title]', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+          result.dialogFont = await assertAppliedFont(page, '[data-account-dialog-title]', uiFamily)
           await page.screenshot({ path: join(destination, 'screenshots/' + state.id + '-dialog.png'), fullPage: true })
           await page.keyboard.press('Escape'); await expect(dialog).not.toBeVisible(); await expect(trigger).toBeFocused()
           await openRowAction(page, 'beta', 'terminate-account'); await expect(input).toHaveValue('')

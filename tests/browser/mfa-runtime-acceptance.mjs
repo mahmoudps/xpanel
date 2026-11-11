@@ -315,10 +315,11 @@ export async function runMfaRuntimeAcceptance({ output, screenshotBudget = 8, fi
         assert.deepEqual(fonts.failed_faces, [])
         row.fonts = fonts
         const isV2 = await page.locator('[data-ui-theme="v2"]').count() > 0
-        row.fonts.heading = await assertAppliedFont(page, state.screen === 'login' ? '.v2-login h1, .xp-login-shell h1' : '[data-security-page] h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+        const uiFamily = state.locale === 'ar' ? (isV2 ? 'IBM Plex Sans Arabic' : 'sans-serif') : 'IBM Plex Sans'
+        row.fonts.heading = await assertAppliedFont(page, state.screen === 'login' ? '.v2-login h1, .xp-login-shell h1' : '[data-security-page] h1', uiFamily)
         if (state.screen === 'login') {
           row.fonts.wordmark = isV2
-            ? await assertAppliedFont(page, '[data-login-product]', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+            ? await assertAppliedFont(page, '[data-login-product]', uiFamily)
             : await assertAppliedFont(page, '.xp-brand__name', 'IBM Plex Mono', { role: 'login-wordmark' })
           await page.locator('#login-username').fill('root')
           await page.locator('#login-password').fill(syntheticPassword)
@@ -350,7 +351,7 @@ export async function runMfaRuntimeAcceptance({ output, screenshotBudget = 8, fi
           await expect(page.locator('[data-account-security]')).toHaveAttribute('data-mfa-enabled', 'true')
           assert.equal(await page.locator('[data-account-security] p bdi').count(), 0, 'User cards never render the root recovery command.')
           assert.equal(await page.locator('[data-account-security]').evaluate(card => card.textContent.includes('disable-2fa')), false)
-          row.fonts.status = await assertAppliedFont(page, '[data-account-security] > p[role="status"]', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans')
+          row.fonts.status = await assertAppliedFont(page, '[data-account-security] > p[role="status"]', uiFamily)
         }
         row.geometry = await geometry(page)
         if (state.mode === 'optional') row.recovery_command = await recoveryCommandGeometry(page, state.screen === 'recovery-command')

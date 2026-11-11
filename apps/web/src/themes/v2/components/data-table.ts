@@ -84,11 +84,11 @@ export const DATA_TABLE_CSS = `.v2-table th.v2-table__end,.v2-table td.v2-table_
 .v2-table__state:is([aria-hidden],[data-table-state=loading])>td{padding-block:12px;text-align:start}
 .v2-table__error{display:flex;flex-direction:column;align-items:center;gap:12px;color:var(--text)}
 .v2-table__error strong{color:var(--bad);font-weight:600}
-.v2-table__error code{padding:8px 12px;border-radius:var(--radius-chip);border:1px solid var(--bad-line);background:var(--bad-soft);overflow-wrap:anywhere}
+.v2-table__error code{padding:var(--space-1) 12px;border-radius:var(--radius-chip);border:1px solid var(--bad-line);background:var(--bad-soft);overflow-wrap:anywhere}
 .v2-table .v2-meter{min-inline-size:120px}
 .v2-table .v2-meter__row{white-space:nowrap}
 .v2-cell-lead{display:flex;align-items:center;gap:12px;min-width:0}
-.v2-cell-lead__mark{flex:none;display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;background:var(--accent-soft);color:var(--accent);font-family:var(--font-mono);font-weight:600}
+.v2-cell-lead__mark{flex:none;display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent);font-family:var(--font-mono);font-weight:600}
 .v2-cell-lead__text{display:flex;flex-direction:column;min-width:0}
 .v2-cell-lead__text>:first-child{font-weight:600}
 .v2-cell-lead__text>:nth-child(2){font-size:12px;color:var(--muted)}

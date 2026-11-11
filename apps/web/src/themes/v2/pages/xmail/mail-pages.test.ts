@@ -184,4 +184,38 @@ describe('v2 mailbox pages', () => {
     expect(html).toContain('class="v2-btn v2-mail-search" href="/mail/search?lang=en&amp;theme=light"')
     expect(html).not.toContain('action="/mail/search"')
   })
+
+  it('renders starred state, remote-image notice, inline quick reply, older-messages button and compose size-limit meter', () => {
+    const html = renderV2MailInbox(t, inbox({
+      state: 'messages',
+      selectedKey: 'uid-12',
+      loaded: 1,
+      total: 4,
+      hasMore: true,
+      messages: [{
+        key: 'uid-12', uid: 12, fromName: 'Ops', from: 'ops@example.test', to: common.mailbox,
+        subject: 'Status report', preview: 'Summary', datetime: '2026-10-29T12:00:00Z', time: '12:00 UTC',
+        fullDate: '2026-10-29 12:00 UTC', unread: false, flagged: true, hasRemoteImages: true,
+        authentication: 'SPF pass', body: 'Plain summary', bodyPending: false, attachments: [],
+      }],
+    }))
+    expect(html).toContain('data-mail-filter="starred"')
+    expect(html).toContain('data-starred="true"')
+    expect(html).toMatch(/data-mail-action="star" aria-pressed="true"/)
+    expect(html).toMatch(/data-mail-remote-notice role="status"/)
+    expect(html).toContain('data-mail-action="load-images"')
+    expect(html).toContain('data-mail-quick-reply')
+    expect(html).toContain('data-mail-action="quick-reply-send"')
+    expect(html).toMatch(/data-mail-action="load-older">Older messages<\/button>/)
+    expect(html).toContain('Older messages are available on the mail server.')
+
+    const composer = renderV2MailCompose(t, compose({ identity: { size: '25.00 MiB', sizeBytes: 25 * 1024 * 1024 } }))
+    expect(composer).toContain('data-compose-size-meter')
+    expect(composer).toContain('data-size-limit-bytes="1048576"')
+    expect(composer).toContain('Server limit: 25.00 MiB')
+
+    const tighter = renderV2MailCompose(t, compose({ identity: { size: '256.00 KiB', sizeBytes: 262_144 } }))
+    expect(tighter).toContain('data-size-limit-bytes="262144"')
+    expect(tighter).toContain('Server limit: 256.00 KiB')
+  })
 })

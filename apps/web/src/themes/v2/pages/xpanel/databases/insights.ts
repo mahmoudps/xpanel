@@ -1,7 +1,7 @@
 import { databaseInsightsTemplates } from '../../../client-templates/data-workspaces.ts'
 import { escapeHtml } from '../../../html.ts'
 import {
-  databaseContext, dbButton, dbCard, dbEmptyRow, dbFacts, dbField, dbPage, dbTable,
+  databaseContext, dbButton, dbCard, dbEmptyRow, dbFacts, dbField, dbPage, dbSelect, dbTable,
   NO_DATABASE_AUTHORITY, relatedDatabasePage, type DatabasePageAuthority, type DatabasePageProps,
 } from './common.ts'
 
@@ -19,7 +19,7 @@ export function renderV2DatabaseInsightsPage(props: DatabasePageProps, authority
 <p class="v2-db-notes">${escapeHtml(t('Read-only. Sizes and row counts come from the MariaDB information schema; for InnoDB tables they are estimates. Shows up to 50 databases with the 20 largest tables of each, and up to 200 database users. Create, change or delete them on the MariaDB databases page.'))}</p>`)
   const databases = dbCard('insights-databases', t('Databases'), dbTable('v2-db-insights-databases', t('Databases'),
     [t('Database'), t('On server'), t('Tables'), t('Data'), t('Indexes'), t('Free space'), t('Collation')], dbEmptyRow(7, t('These records have not been read.')), { 'data-insights-databases': true }), { flush: true })
-  const tables = dbCard('insights-tables', t('Largest tables'), `${dbField('v2-db-insights-database', t('Database'), '<select id="v2-db-insights-database" data-insights-database dir="ltr" disabled></select>')}${dbTable('v2-db-insights-tables', t('Largest tables'),
+  const tables = dbCard('insights-tables', t('Largest tables'), `${dbField('v2-db-insights-database', t('Database'), dbSelect('<select id="v2-db-insights-database" data-insights-database dir="ltr" disabled></select>'))}${dbTable('v2-db-insights-tables', t('Largest tables'),
     [t('Table'), t('Engine'), t('Rows (estimate)'), t('Data'), t('Indexes'), t('Free space')], dbEmptyRow(6, t('These records have not been read.')), { 'data-insights-tables': true })}`)
   const users = dbCard('insights-users', t('Database users'), dbTable('v2-db-insights-users', t('Database users'),
     [t('User'), t('On server'), t('Host entries')], dbEmptyRow(3, t('These records have not been read.')), { 'data-insights-users': true }), { flush: true })

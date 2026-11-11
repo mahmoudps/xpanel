@@ -11,10 +11,10 @@ import {
   redactInlineSecrets,
   redactSecrets,
 } from '@xpanel/core'
-import type { AuditEntry, Id } from '@xpanel/core'
+import type { AuditChainSummary, AuditEntry, Id } from '@xpanel/core'
 import type { Db } from '../client.ts'
 import { withSqliteErrors } from '../sqlite-errors.ts'
-import { assertNoActiveDatabaseTransaction } from '../sql-runner.ts'
+import { assertNoActiveDatabaseTransaction, isActiveDatabaseTransaction, type SqlRunner } from '../sql-runner.ts'
 import { clampLimit, nowIso } from './util.ts'
 
 /** What core's auditEntry builds, minus its id and time: the database assigns both. */
@@ -118,14 +118,29 @@ const stripInternalAuditMeta = (detail: Record<string, unknown>): Record<string,
   delete copy._auditEntryHash
   delete copy._auditPrevHash
   delete copy._auditSeq
+  delete copy._dbEntryHash
+  delete copy._dbPrevHash
+  delete copy._dbSeq
   return copy
 }
 
 const fromRow = (r: AuditRow): DurableAuditEntry => {
   const parsed = JSON.parse(r.detail) as Record<string, unknown>
-  const seq = typeof parsed._auditSeq === 'number' ? parsed._auditSeq : undefined
-  const prevHash = typeof parsed._auditPrevHash === 'string' ? parsed._auditPrevHash : undefined
-  const entryHash = typeof parsed._auditEntryHash === 'string' ? parsed._auditEntryHash : undefined
+  const seq = typeof parsed._auditSeq === 'number'
+    ? parsed._auditSeq
+    : typeof parsed._dbSeq === 'number'
+      ? parsed._dbSeq
+      : undefined
+  const prevHash = typeof parsed._auditPrevHash === 'string'
+    ? parsed._auditPrevHash
+    : typeof parsed._dbPrevHash === 'string'
+      ? parsed._dbPrevHash
+      : undefined
+  const entryHash = typeof parsed._auditEntryHash === 'string'
+    ? parsed._auditEntryHash
+    : typeof parsed._dbEntryHash === 'string'
+      ? parsed._dbEntryHash
+      : undefined
   const eventUid = typeof parsed._auditEventUid === 'string' ? parsed._auditEventUid : undefined
   return {
     id: String(r.id),
@@ -135,6 +150,7 @@ const fromRow = (r: AuditRow): DurableAuditEntry => {
     target: r.target,
     detail: stripInternalAuditMeta(parsed),
     outcome: r.outcome,
+    ...(r.ip !== null && r.ip !== undefined && { ip: r.ip }),
     ...(seq !== undefined && { seq }),
     ...(prevHash !== undefined && { prevHash }),
     ...(entryHash !== undefined && { entryHash }),
@@ -396,6 +412,56 @@ const appendAuditUnlocked = (
       }
     }
 
+    if (!opts.auditLogFilePath && !opts.simulateSinkError) {
+      const insertDbChained = async (runner: SqlRunner): Promise<DurableAuditEntry> => {
+        if (opts.simulateIndexError) {
+          throw opts.simulateIndexError
+        }
+        const tipRows = await runner.query<{ seq: number | null; hash: string | null }>(
+          `SELECT json_extract(detail, '$._dbSeq') AS seq, json_extract(detail, '$._dbEntryHash') AS hash
+           FROM audit_log
+           WHERE json_extract(detail, '$._dbSeq') IS NOT NULL
+           ORDER BY id DESC
+           LIMIT 1`,
+        )
+        const tip = tipRows[0]
+        const dbSeq = (typeof tip?.seq === 'number' && Number.isInteger(tip.seq) && tip.seq >= 0 ? tip.seq : 0) + 1
+        const dbPrevHash = typeof tip?.hash === 'string' && /^[0-9a-f]{64}$/.test(tip.hash) ? tip.hash : GENESIS_AUDIT_HASH
+        const dbEntryHash = computeAuditEntryHash({
+          seq: dbSeq,
+          eventUid,
+          at,
+          actor,
+          principalId,
+          ip,
+          action: e.action,
+          target,
+          detail,
+          outcome: e.outcome,
+          prevHash: dbPrevHash,
+        })
+        const chainedDetailJson = JSON.stringify({
+          ...detail,
+          _auditEventUid: eventUid,
+          _dbSeq: dbSeq,
+          _dbPrevHash: dbPrevHash,
+          _dbEntryHash: dbEntryHash,
+        })
+        if (Buffer.byteLength(chainedDetailJson, 'utf8') > MAX_DETAIL_BYTES) {
+          fail('VALIDATION', 'audit detail too large')
+        }
+        const rows = await runner.query<AuditRow>(
+          `INSERT INTO audit_log (at, actor, principal_id, ip, action, target, detail, outcome)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           RETURNING *`,
+          [at, actor, principalId, ip, e.action, target, chainedDetailJson, e.outcome],
+        )
+        return fromRow(rows[0]!)
+      }
+      const canWrapTx = typeof db.transaction === 'function' && !isActiveDatabaseTransaction(db) && !opts.simulateIndexError
+      return canWrapTx ? db.transaction((tx) => insertDbChained(tx)) : insertDbChained(db)
+    }
+
     const dbDetailPayload: Record<string, unknown> = {
       ...detail,
       ...(eventUid && { _auditEventUid: eventUid }),
@@ -429,6 +495,7 @@ const appendAuditUnlocked = (
           target,
           detail,
           outcome: e.outcome,
+          ...(ip !== null && { ip }),
           seq,
           prevHash,
           entryHash,
@@ -938,4 +1005,129 @@ export const listAudit = async (db: Db, q: AuditQuery = {}): Promise<AuditEntry[
     params,
   )
   return rows.map(fromRow)
+}
+
+export const verifyAuditLogStatus = async (db: Db): Promise<AuditChainSummary> => {
+  const rows = await db.query<AuditRow>(`SELECT * FROM audit_log ORDER BY id ASC`)
+  if (rows.length === 0) {
+    return { status: 'verified', entriesVerified: 0, totalEntries: 0, lastSeq: 0, brokenAtSeq: null }
+  }
+
+  let dbExpectedSeq = 0
+  let dbExpectedPrev = GENESIS_AUDIT_HASH
+  let fileExpectedSeq: number | null = null
+  let fileExpectedPrev: string | null = null
+  let entriesVerified = 0
+  let unchainedCount = 0
+  let lastSeq: number | null = null
+  let brokenAtSeq: number | null = null
+
+  for (const r of rows) {
+    let parsed: Record<string, unknown>
+    try {
+      const val = JSON.parse(r.detail) as unknown
+      if (typeof val !== 'object' || val === null || Array.isArray(val)) {
+        brokenAtSeq = r.id
+        break
+      }
+      parsed = val as Record<string, unknown>
+    } catch {
+      brokenAtSeq = r.id
+      break
+    }
+
+    const hasDbChain = parsed._dbSeq !== undefined || parsed._dbPrevHash !== undefined || parsed._dbEntryHash !== undefined
+    const hasFileChain = parsed._auditSeq !== undefined || parsed._auditPrevHash !== undefined || parsed._auditEntryHash !== undefined
+
+    if (hasDbChain) {
+      const seq = parsed._dbSeq
+      const prevHash = parsed._dbPrevHash
+      const entryHash = parsed._dbEntryHash
+      const eventUid = parsed._auditEventUid
+      if (
+        typeof seq !== 'number' ||
+        seq !== dbExpectedSeq + 1 ||
+        typeof prevHash !== 'string' ||
+        prevHash !== dbExpectedPrev ||
+        typeof entryHash !== 'string' ||
+        !/^[0-9a-f]{64}$/.test(entryHash) ||
+        typeof eventUid !== 'string'
+      ) {
+        brokenAtSeq = typeof seq === 'number' ? seq : r.id
+        break
+      }
+      const computed = computeAuditEntryHash({
+        seq,
+        eventUid,
+        at: r.at,
+        actor: r.actor,
+        principalId: r.principal_id,
+        ip: r.ip,
+        action: r.action,
+        target: r.target,
+        detail: parsed,
+        outcome: r.outcome,
+        prevHash,
+      })
+      if (computed !== entryHash) {
+        brokenAtSeq = seq
+        break
+      }
+      dbExpectedSeq = seq
+      dbExpectedPrev = entryHash
+      entriesVerified++
+      lastSeq = seq
+    } else if (hasFileChain) {
+      const seq = parsed._auditSeq
+      const prevHash = parsed._auditPrevHash
+      const entryHash = parsed._auditEntryHash
+      const eventUid = parsed._auditEventUid
+      if (
+        typeof seq !== 'number' ||
+        !Number.isInteger(seq) ||
+        seq < 1 ||
+        (fileExpectedSeq !== null && seq !== fileExpectedSeq + 1) ||
+        typeof prevHash !== 'string' ||
+        !/^[0-9a-f]{64}$/.test(prevHash) ||
+        (fileExpectedPrev === null ? seq === 1 && prevHash !== GENESIS_AUDIT_HASH : prevHash !== fileExpectedPrev) ||
+        typeof entryHash !== 'string' ||
+        !/^[0-9a-f]{64}$/.test(entryHash) ||
+        typeof eventUid !== 'string'
+      ) {
+        brokenAtSeq = typeof seq === 'number' ? seq : r.id
+        break
+      }
+      const computed = computeAuditEntryHash({
+        seq,
+        eventUid,
+        at: r.at,
+        actor: r.actor,
+        principalId: r.principal_id,
+        ip: r.ip,
+        action: r.action,
+        target: r.target,
+        detail: parsed,
+        outcome: r.outcome,
+        prevHash,
+      })
+      if (computed !== entryHash) {
+        brokenAtSeq = seq
+        break
+      }
+      fileExpectedSeq = seq
+      fileExpectedPrev = entryHash
+      entriesVerified++
+      lastSeq = seq
+    } else {
+      unchainedCount++
+    }
+  }
+
+  if (brokenAtSeq !== null) {
+    return { status: 'broken', entriesVerified, totalEntries: rows.length, lastSeq, brokenAtSeq }
+  }
+  if (unchainedCount > 0) {
+    return { status: 'unverified', entriesVerified, totalEntries: rows.length, lastSeq, brokenAtSeq: null }
+  }
+  return { status: 'verified', entriesVerified, totalEntries: rows.length, lastSeq, brokenAtSeq: null }
 }

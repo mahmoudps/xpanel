@@ -270,6 +270,91 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
     const review = session.state === 'reviewed' || session.state === 'applying' || session.state === 'completed' || session.state === 'cancelled' && session.reviewDigest ? buildReview(session) : null
     return { session, revision: digest(record), review, digest: review ? reviewDigest(review) : null, results: record.results ?? {}, stopRequested: !!record.stopRequestedAt, running: running.has(record.id) }
   }
+  const loadHostBuildContext = async () => {
+    const storeAny = helpers.store as unknown as {
+      listAccounts?: () => Promise<Array<{ username: string; uid: number }>>
+      listPlans?: () => Promise<Array<{ name: string; resources?: { memoryMb?: number | 'unlimited' }; caps?: { maxProcesses?: number | 'unlimited' } }>>
+      maxAllocatedUid?: () => Promise<number | null>
+      getServerSettings?: () => Promise<{ engine?: string; defaultPhpVersion?: string } | null>
+    }
+    const [accounts, plans, maxUid, settings] = await Promise.all([
+      storeAny.listAccounts ? storeAny.listAccounts().catch(() => []) : Promise.resolve([]),
+      storeAny.listPlans ? storeAny.listPlans().catch(() => []) : Promise.resolve([]),
+      storeAny.maxAllocatedUid ? storeAny.maxAllocatedUid().catch(() => null) : Promise.resolve(null),
+      storeAny.getServerSettings ? storeAny.getServerSettings().catch(() => null) : Promise.resolve(null),
+    ])
+    const nextUid = Math.max(20000, (maxUid ?? 19999) + 1, ...accounts.map(a => a.uid + 1))
+    const byUsername = new Map(accounts.map(a => [a.username, a]))
+    const byPlanName = new Map(plans.map(p => [p.name, p]))
+    const webStack = settings?.engine === 'openlitespeed' ? 'Nginx + OpenLiteSpeed' : 'Nginx + Apache'
+    const defaultPhp = typeof settings?.defaultPhpVersion === 'string' && settings.defaultPhpVersion ? settings.defaultPhpVersion : '8.3'
+    return { nextUid, byUsername, byPlanName, webStack, defaultPhp }
+  }
+  const enrichProjected = (entry: ReturnType<typeof project>, ctx: Awaited<ReturnType<typeof loadHostBuildContext>>) => {
+    const { session, review, results } = entry
+    const inv = session.inventory
+    const sourceHost = 'host' in session.auth && typeof session.auth.host === 'string' ? session.auth.host : 'url' in session.auth && typeof session.auth.url === 'string' ? session.auth.url : ''
+    const selectedSet = new Set(session.selection.accounts)
+    const skippedAccounts = new Set<string>()
+    const renamedTargets = new Map<string, string>()
+    const planOverrides = new Map<string, string>()
+    for (const conflictItem of session.conflicts) {
+      const res = session.resolutions[conflictItem.id]
+      if (!res) continue
+      if (res.action === 'skip' && conflictItem.kind === 'username') skippedAccounts.add(conflictItem.subject)
+      if (res.action === 'rename' && conflictItem.kind === 'username') renamedTargets.set(conflictItem.subject, res.to)
+      if (res.action === 'map-plan' && conflictItem.kind === 'plan') planOverrides.set(conflictItem.subject, res.to)
+    }
+    const summary = {
+      source: sourceHost,
+      state: session.state,
+      foundCount: inv ? inv.accounts.length : null,
+      selectedCount: inv ? session.selection.accounts.length : null,
+      selectedDiskBytes: inv ? inv.accounts.filter(a => selectedSet.has(a.username)).reduce((sum, a) => sum + a.diskBytes, 0) : null,
+      conflictCount: inv ? session.conflicts.length : null,
+      unresolvedConflictCount: inv ? session.conflicts.filter(c => !session.resolutions[c.id]).length : null,
+      readyCount: review ? review.accounts.length : null,
+    }
+    const discovery = inv ? {
+      accountsFound: inv.accounts.length,
+      selected: session.selection.accounts.length,
+      conflicts: session.conflicts.length,
+      skipped: skippedAccounts.size,
+      domains: inv.accounts.reduce((sum, a) => sum + a.domains.length, 0),
+      databases: inv.accounts.reduce((sum, a) => sum + a.databases.length, 0),
+      mailboxes: inv.accounts.reduce((sum, a) => sum + a.mailboxes, 0),
+      totalDiskBytes: inv.accounts.reduce((sum, a) => sum + a.diskBytes, 0),
+    } : null
+    const invByUser = new Map((inv?.accounts ?? []).map(a => [a.username, a]))
+    const candidateItems = review
+      ? review.accounts.map(item => ({ source: item.source, target: item.target, plan: item.plan, domains: item.domains }))
+      : (inv ? inv.accounts.filter(a => selectedSet.has(a.username) && !skippedAccounts.has(a.username)).map(a => ({
+          source: a.username,
+          target: renamedTargets.get(a.username) ?? a.username,
+          plan: planOverrides.get(a.plan) ?? a.plan,
+          domains: a.domains,
+        })) : [])
+    let allocOffset = 0
+    const buildPreview = candidateItems.map(item => {
+      const existing = ctx.byUsername.get(item.target)
+      const created = existing && (session.state === 'applying' || session.state === 'completed' || !!results[item.source]?.createdAccountId)
+      const uid = created ? existing.uid : ctx.nextUid + (allocOffset++)
+      const uidMode: 'created' | 'allocated-on-create' = created ? 'created' : 'allocated-on-create'
+      const slice = 'xpanel-' + String(uid) + '.slice'
+      const srcAcct = invByUser.get(item.source)
+      const primaryDomain = item.domains[0] ?? srcAcct?.primaryDomain ?? '-'
+      const extraCount = Math.max(0, item.domains.length - 1)
+      const vhost = ctx.webStack + ' vhost · ' + primaryDomain + (extraCount > 0 ? ' (+' + String(extraCount) + ')' : '')
+      const recordedPhp = Array.isArray(results[item.source]?.php) && results[item.source]!.php!.length ? results[item.source]!.php![0]! : ctx.defaultPhp
+      const php = 'PHP ' + recordedPhp + ' FPM (xpanel-php-fpm-' + item.target + '-' + recordedPhp + '.service)'
+      const localPlan = ctx.byPlanName.get(item.plan)
+      const mem = localPlan?.resources?.memoryMb === 'unlimited' ? 'infinity' : typeof localPlan?.resources?.memoryMb === 'number' ? String(localPlan.resources.memoryMb) + 'M' : '1024M'
+      const tasks = localPlan?.caps?.maxProcesses === 'unlimited' ? 'infinity' : typeof localPlan?.caps?.maxProcesses === 'number' ? String(localPlan.caps.maxProcesses) : '128'
+      const sliceUnit = ['# ' + slice + ' (' + item.target + ', plan ' + item.plan + ')', '[Slice]', 'MemoryMax=' + mem, 'TasksMax=' + tasks].join('\n')
+      return { source: item.source, target: item.target, uid, uidMode, slice, vhost, php, plan: item.plan, sliceUnit }
+    })
+    return { ...entry, summary, discovery, buildPreview }
+  }
   const projectImport = (record: CpanelImportRecord) => ({ ...record, revision: digest(record), running: running.has(record.id) })
   const updateSession = async (id: string, revision: string | null, change: (record: StoredTransferWorkspace) => Promise<StoredTransferWorkspace>) => withDocument(async document => {
     const index = document.sessions.findIndex(session => session.id === id)
@@ -523,13 +608,13 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
     if (importRoute) return handleImports(req, url, method, caller)
     if (method === 'GET') {
       await refreshImports(caller).catch(() => undefined)
-      const document = await readDocument(path)
+      const [document, hostCtx] = await Promise.all([readDocument(path), loadHostBuildContext()])
       if (match) {
         const record = document.sessions.find(session => session.id === match[1]!.toLowerCase())
         if (!record) return fail('NOT_FOUND', 'transfer session not found', { stateChanged: false })
-        return json({ ...project(record), capabilities })
+        return json({ ...enrichProjected(project(record), hostCtx), capabilities })
       }
-      return json({ sessions: document.sessions.map(project), cpanelImports: document.cpanelImports.map(projectImport), capabilities })
+      return json({ sessions: document.sessions.map(record => enrichProjected(project(record), hostCtx)), cpanelImports: document.cpanelImports.map(projectImport), capabilities })
     }
     if (method === 'POST' && !match) {
       const body = exact(await requestBody(req), ['auth', 'node', 'live'])
@@ -542,7 +627,7 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
         const value = project(record); document.sessions.push(record); return value
       })
       await audit(caller, 'transfer.session.created')
-      return json({ ...result, capabilities }, 201)
+      return json({ ...enrichProjected(result, await loadHostBuildContext()), capabilities }, 201)
     }
     if (method === 'DELETE' && match) {
       const id = match[1]!.toLowerCase()
@@ -581,7 +666,7 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
           return project(document.sessions[index]!)
         })
         await audit(caller, 'transfer.source.discovered')
-        return json({ ...result, capabilities })
+        return json({ ...enrichProjected(result, await loadHostBuildContext()), capabilities })
       }
       if (body.action === 'run') {
         if (!ports.execution || !ports.callerFor) return fail('PRECONDITION_FAILED', 'native transfer execution requires the host agent', { stateChanged: false })
@@ -603,7 +688,7 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
         })
         await audit(caller, 'transfer.execution.started', 'transfer:' + id, { accounts: prepared.review?.accounts.map(account => account.source + '->' + account.target) ?? [] })
         runSession(id, caller)
-        return json({ ...prepared, running: true, capabilities }, 202)
+        return json({ ...enrichProjected(prepared, await loadHostBuildContext()), running: true, capabilities }, 202)
       }
       if (body.action === 'revert-preview' || body.action === 'revert') {
         const execution = ports.execution, revert = execution?.revert, previewRevert = execution?.previewRevert
@@ -620,7 +705,7 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
           const live = await revert(caller, replay(candidate), account, result, body.confirmation as string)
           const updated = await updateSession(id, null, async current => ({ ...current, results: { ...current.results, [account]: { ...current.results?.[account], live } } }))
           await audit(caller, 'transfer.execution.reverted', 'transfer:' + id, { account, confirmation: body.confirmation })
-          return json({ ...updated, capabilities })
+          return json({ ...enrichProjected(updated, await loadHostBuildContext()), capabilities })
         } finally { running.delete(id) }
       }
       if (body.action === 'stop') {
@@ -633,7 +718,7 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
           return project(document.sessions[index]!)
         })
         await audit(caller, 'transfer.execution.stop_requested', 'transfer:' + id)
-        return json({ ...result, capabilities })
+        return json({ ...enrichProjected(result, await loadHostBuildContext()), capabilities })
       }
       const result = await mutate(req, async document => {
         const index = document.sessions.findIndex(session => session.id === id)
@@ -656,7 +741,7 @@ export function createTransferWorkspaceRoutes(helpers: Helpers, ports: TransferW
         return project(next)
       })
       await audit(caller, 'transfer.session.' + String(body.action))
-      return json({ ...result, capabilities })
+      return json({ ...enrichProjected(result, await loadHostBuildContext()), capabilities })
     }
     return json({ error: 'method_not_allowed' }, 405)
   }

@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { XpanelError } from '@xpanel/core'
 import type { InboxMessage, InboxSummary, MailboxTransport } from './inbox.ts'
 import {
-  listMailboxFolder, mailboxFolderUid, moveMailboxFolder, parseMailboxFolderMove,
+  flagMailboxFolder, listMailboxFolder, mailboxFolderUid, moveMailboxFolder,
+  parseMailboxFolderFlag, parseMailboxFolderMove, parseMailboxFolderPagination,
   readMailboxFolder, selectedMailboxFolder,
 } from './folder-workspace.ts'
 import type { FolderWorkspaceAuthorization, FolderWorkspaceDependencies } from './folder-workspace.ts'
@@ -142,5 +143,44 @@ describe('reversible selected-folder move boundary', () => {
     resume()
     expect(await pending).toMatchObject({ from: 'Sent', folder: 'Trash', sourceUid: 7, uid: 91 })
     expect(move).toHaveBeenCalledWith(mailbox, '', 7, 'Sent', 'Trash', { uidValidity: 17 })
+  })
+})
+
+describe('mail folder flag, pagination and remote-image readback', () => {
+  it('validates flag payloads and updates \\Flagged via transport.flag with uidValidity guard', async () => {
+    expect(parseMailboxFolderFlag('7', { folder: 'INBOX', uidValidity: 17, flagged: true })).toEqual({
+      uid: 7, folder: 'INBOX', uidValidity: 17, flagged: true,
+    })
+    expect(() => parseMailboxFolderFlag('7', { folder: 'INBOX', uidValidity: 17, flagged: 'yes' })).toThrow(XpanelError)
+    const flag = vi.fn(async (_mbx: string, _pw: string, uid: number, _f: string, flagged: boolean) => ({ uid, uidValidity: 17, uidValidityObserved: true, flagged }))
+    const toggled = await flagMailboxFolder(fixture({ flag }), 7, { folder: 'INBOX', uidValidity: 17, flagged: true })
+    expect(flag).toHaveBeenCalledWith(mailbox, '', 7, 'INBOX', true, { uidValidity: 17 })
+    expect(toggled).toEqual({ ok: true, mailbox, folder: 'INBOX', uid: 7, uidValidity: 17, flagged: true, stateChanged: true })
+  })
+
+  it('paginates folder lists with total/hasMore/nextOffset and preserves remoteImages when requested', async () => {
+    expect(parseMailboxFolderPagination({ offset: '1', limit: '2' })).toEqual({ offset: 1, limit: 2 })
+    expect(() => parseMailboxFolderPagination({ offset: -1 })).toThrow(XpanelError)
+    const all = [message(12), { ...message(11), flagged: true }, { ...message(10), hasRemoteImages: true }]
+    const page1 = await listMailboxFolder(fixture({ async list() { return all }, async flag(_m, _p, uid) { return { uid, uidValidity: 17, flagged: true } } }), 'INBOX', { offset: 0, limit: 2 })
+    expect(page1).toMatchObject({ total: 3, offset: 0, hasMore: true, nextOffset: 2, capabilities: { move: false, flag: true } })
+    expect(page1.messages.map(m => m.uid)).toEqual([12, 11])
+    expect(page1.messages[1]?.flagged).toBe(true)
+
+    const page2 = await listMailboxFolder(fixture({ async list() { return all } }), 'INBOX', { offset: 2, limit: 2 })
+    expect(page2).toMatchObject({ total: 3, offset: 2, hasMore: false, nextOffset: null })
+    expect(page2.messages.map(m => m.uid)).toEqual([10])
+
+    const readWithImages = await readMailboxFolder(fixture({
+      async read() {
+        return {
+          ...message(10),
+          hasRemoteImages: true,
+          remoteImages: [{ src: 'https://cdn.example.test/hero.png', alt: 'Hero' }],
+        }
+      },
+    }), 10, 'INBOX', { allowRemoteImages: true })
+    expect(readWithImages.message.hasRemoteImages).toBe(true)
+    expect(readWithImages.message.remoteImages).toEqual([{ src: 'https://cdn.example.test/hero.png', alt: 'Hero' }])
   })
 })

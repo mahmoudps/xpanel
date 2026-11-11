@@ -21,6 +21,8 @@ export interface MailDocumentMessage {
   body: string
   receivedAt: string
   unread: boolean
+  flagged?: boolean
+  hasRemoteImages?: boolean
   attachments?: MailDocumentAttachment[]
   /** The list fetch did not include a body for this row. The open action reads it. */
   bodyPending?: boolean
@@ -53,6 +55,7 @@ export interface MailDocument {
   identityDkim?: string
   identitySpf?: string
   identitySize?: string
+  identitySizeBytes?: number
   composeDraft?: MailComposeDraft
 }
 
@@ -278,6 +281,7 @@ export const loadMailDocument = async (input: {
 
   try {
     const fromFile = typeof input.postfixMain === 'string' ? messageSizeLimitBytes(input.postfixMain) : null
+    if (fromFile !== null) document.identitySizeBytes = fromFile
     const formatted = fromFile !== null ? formatMessageSizeLimit(fromFile) : null
     if (formatted) document.identitySize = formatted
   } catch { /* unknown */ }
@@ -312,6 +316,7 @@ export const loadMailDocument = async (input: {
       body: '',
       receivedAt: item.receivedAt,
       unread: item.unread,
+      ...(item.flagged !== undefined ? { flagged: item.flagged } : {}),
       ...(item.attachments && item.attachments.length > 0 ? { attachments: item.attachments } : {}),
       bodyPending: true,
     }))
@@ -321,6 +326,8 @@ export const loadMailDocument = async (input: {
         const full = await input.transport.read(record.mailbox, password, first.uid, folder)
         first.body = full.body
         first.unread = full.unread
+        if (full.flagged !== undefined) first.flagged = full.flagged
+        if (full.hasRemoteImages !== undefined) first.hasRemoteImages = full.hasRemoteImages
         first.bodyPending = false
         if (full.fromName) first.fromName = full.fromName
         if (full.cc) first.cc = full.cc

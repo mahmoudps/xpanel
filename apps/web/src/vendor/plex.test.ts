@@ -11,18 +11,20 @@ describe('self-hosted IBM Plex fonts', () => {
     expect(PLEX_FONTS_STYLESHEET_HREF).toBe(`/assets/fonts/plex.css?v=${sha256(stylesheet).slice(0, 16)}`)
     const faces = [...stylesheet.matchAll(/@font-face\{([^}]*)\}/g)].map(match => match[1]!)
     expect(faces.map(face => `${/font-family:'([^']+)'/.exec(face)?.[1]} ${/font-weight:(\d+)/.exec(face)?.[1]}`)).toEqual([
-      'IBM Plex Sans 400', 'IBM Plex Sans 500', 'IBM Plex Sans 600', 'IBM Plex Sans 700', 'IBM Plex Mono 400', 'IBM Plex Mono 500', 'IBM Plex Mono 600',
+      'IBM Plex Sans 400', 'IBM Plex Sans 500', 'IBM Plex Sans 600', 'IBM Plex Sans 700',
+      'IBM Plex Sans Arabic 400', 'IBM Plex Sans Arabic 500', 'IBM Plex Sans Arabic 600', 'IBM Plex Sans Arabic 700',
+      'IBM Plex Mono 400', 'IBM Plex Mono 500', 'IBM Plex Mono 600',
     ])
     for (const face of faces) {
       expect(face).toContain('font-style:normal;')
       expect(face).toContain('font-display:swap;')
       const href = /src:url\(([^)]+)\) format\('woff2'\)$/.exec(face)?.[1] ?? ''
-      expect(href).toMatch(/^\/assets\/fonts\/IBMPlex(?:Sans|Mono)-(?:Regular|Medium|SemiBold|Bold)\.woff2\?v=[a-f0-9]{16}$/)
+      expect(href).toMatch(/^\/assets\/fonts\/IBMPlex(?:Sans(?:Arabic)?|Mono)-(?:Regular|Medium|SemiBold|Bold)\.woff2\?v=[a-f0-9]{16}$/)
       const [path, version] = href.split('?v=') as [string, string]
       expect(version).toBe(sha256(plexFontAsset(path)!.body).slice(0, 16))
     }
     expect(stylesheet).not.toMatch(/https?:|\/\/|local\(|@import|unicode-range/)
-    expect(PLEX_FONT_PATHS).toHaveLength(8)
+    expect(PLEX_FONT_PATHS).toHaveLength(12)
     expect(plexFontAsset('/assets/fonts/IBMPlexMono-Bold.woff2')).toBeUndefined()
   })
 

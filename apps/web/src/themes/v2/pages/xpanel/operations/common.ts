@@ -4,6 +4,7 @@ import { localeDirection } from '../../../../../i18n.ts'
 import { normalizeAsciiDigits } from '../../../../../display-format.ts'
 import { card, pageHeader } from '../../../components/index.ts'
 import { escapeHtml, hookAttrs, type HookAttributes } from '../../../html.ts'
+import { icon } from '../../../icons.ts'
 import { v2Messages } from '../../../messages.ts'
 import { phoneLabels } from '../settings/common.ts'
 
@@ -37,8 +38,12 @@ export function operationButton(label: string, hooks?: HookAttributes, disabled 
   return `<button type="button" class="v2-btn${primary ? ' v2-btn--primary' : ''}"${hookAttrs(hooks)}${disabled ? ' disabled' : ''}>${escapeHtml(label)}</button>`
 }
 
+export function operationSelect(selectHtml: string): string {
+  return `<span class="v2-select">${selectHtml}${icon('chevDown', 16)}</span>`
+}
+
 export function operationField(id: string, label: string, control: string, help?: string): string {
-  const described = help ? control.replace(/^<(input|select|textarea)\b/, `<$1 aria-describedby="${escapeHtml(id)}-help"`) : control
+  const described = help ? control.replace(/<(input|select|textarea)\b/, `<$1 aria-describedby="${escapeHtml(id)}-help"`) : control
   return `<div class="v2-field"><label for="${escapeHtml(id)}">${escapeHtml(label)}</label>${described}${help ? `<p id="${escapeHtml(id)}-help" class="v2-field__help">${escapeHtml(help)}</p>` : ''}</div>`
 }
 

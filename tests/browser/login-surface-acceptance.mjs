@@ -175,8 +175,10 @@ export async function runLoginSurfaceAcceptance({ output } = {}) {
         assert.ok(metrics.fonts.loaded_faces.length > 0, 'Downloadable font faces must actually load')
         assert.equal(metrics.fonts.failed_faces.length, 0)
         if (state.locale === 'en') assert.ok(metrics.fonts.loaded_faces.some(face => face.family.includes('IBM Plex Sans')), 'The English locale font must actually load')
+        const isV2 = await page.locator('[data-ui-theme="v2"]').count() > 0
+        const uiFamily = state.locale === 'ar' ? (isV2 ? 'IBM Plex Sans Arabic' : 'sans-serif') : 'IBM Plex Sans'
         metrics.fonts.applied_roles = {}
-        for (const [role, selector, family, typographyRole] of [['brand', '[data-login-product]', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans', 'login-wordmark'], ['heading', '.v2-login h1', state.locale === 'ar' ? 'sans-serif' : 'IBM Plex Sans', 'ordinary']]) {
+        for (const [role, selector, family, typographyRole] of [['brand', '[data-login-product]', uiFamily, 'login-wordmark'], ['heading', '.v2-login h1', uiFamily, 'ordinary']]) {
           try { metrics.fonts.applied_roles[role] = await assertAppliedFont(page, selector, family, { role: typographyRole }) }
           catch (error) { if (error.appliedFontObservation) metrics.fonts.applied_roles[role] = error.appliedFontObservation; throw error }
         }

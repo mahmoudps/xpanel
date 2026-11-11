@@ -24,7 +24,9 @@ export type UpgradeObservationView = {
 export type UpgradeCheckView = { id: string; ok: boolean; message: string; detail: Record<string, string | number | boolean | null> }
 export type UpgradePreflightView = { observedAt: string; revision: string; targetVersion: string; fromVersion: string | null; report: { ok: boolean; checks: UpgradeCheckView[] }; start: UpgradeGate }
 export type UpgradeStartView = { accepted: true; handoffId: string; upgradeId: string | null; targetVersion: string; fromVersion: string | null }
-export type UpgradeStatusView = { observedAt: string; revision: string; lock: UpgradeLockView; retirementPending: boolean | null; maintenance: boolean | null; current: UpgradeObservationView['current']; rewind: UpgradeRewindView | null; latest: UpgradeHistoryRow | null; history: UpgradeHistoryRow[] }
+export type UpgradeProgressSummaryView = { percent: number; completedSteps: number; totalSteps: number; activePhase: string | null }
+export type UpgradeLogEntryView = { at: string | null; phase: string; message: string; outcome: 'ok' | 'running' | 'failed' }
+export type UpgradeStatusView = { observedAt: string; revision: string; lock: UpgradeLockView; retirementPending: boolean | null; maintenance: boolean | null; current: UpgradeObservationView['current']; rewind: UpgradeRewindView | null; latest: UpgradeHistoryRow | null; history: UpgradeHistoryRow[]; progress?: UpgradeProgressSummaryView; logs?: UpgradeLogEntryView[] }
 
 /** Self-contained strict readers; the binding embeds this function's source. */
 export function createUpgradeParsers() {
@@ -116,7 +118,20 @@ export function createUpgradeParsers() {
       const history = v.history.map(row)
       const latest = v.latest === null ? null : row(v.latest)
       if ((latest?.id ?? null) !== (history[0]?.id ?? null)) return bad('status')
-      return { observedAt: v.observedAt, revision: v.revision, lock: lock(v.lock), retirementPending: or<boolean>(v.retirementPending, x => typeof x === 'boolean', 'retirement'), maintenance: or<boolean>(v.maintenance, x => typeof x === 'boolean', 'maintenance'), current: current(v.current), rewind: rewind(v.rewind), latest, history }
+      let progress: UpgradeProgressSummaryView | undefined
+      if (v.progress !== undefined) {
+        if (!object(v.progress) || !isCount(v.progress.percent) || v.progress.percent > 100 || !isCount(v.progress.completedSteps) || v.progress.completedSteps > 16 || !isCount(v.progress.totalSteps) || v.progress.totalSteps < 1 || v.progress.totalSteps > 16 || !(v.progress.activePhase === null || isText(v.progress.activePhase, 64))) return bad('progress')
+        progress = { percent: v.progress.percent, completedSteps: v.progress.completedSteps, totalSteps: v.progress.totalSteps, activePhase: v.progress.activePhase as string | null }
+      }
+      let logs: UpgradeLogEntryView[] | undefined
+      if (v.logs !== undefined) {
+        if (!Array.isArray(v.logs) || v.logs.length > 40) return bad('logs')
+        logs = v.logs.map(item => {
+          if (!object(item) || !(item.at === null || isTime(item.at)) || !isText(item.phase, 64) || !isText(item.message, 500) || !['ok', 'running', 'failed'].includes(String(item.outcome))) return bad('logs')
+          return { at: item.at as string | null, phase: item.phase, message: item.message, outcome: item.outcome as UpgradeLogEntryView['outcome'] }
+        })
+      }
+      return { observedAt: v.observedAt, revision: v.revision, lock: lock(v.lock), retirementPending: or<boolean>(v.retirementPending, x => typeof x === 'boolean', 'retirement'), maintenance: or<boolean>(v.maintenance, x => typeof x === 'boolean', 'maintenance'), current: current(v.current), rewind: rewind(v.rewind), latest, history, ...(progress ? { progress } : {}), ...(logs ? { logs } : {}) }
     },
   }
 }
@@ -177,9 +192,13 @@ function bindWhmUpgrade(): void {
     const banner = q('[data-upgrade-banner]'), note = q('[data-upgrade-status]'), summary = q('[data-upgrade-preflight-summary]'), progress = q('[data-upgrade-progress]')
     const select = q<HTMLSelectElement>('[data-upgrade-target]'), confirm = q<HTMLDetailsElement>('[data-upgrade-confirm]'), phrase = q<HTMLInputElement>('[data-upgrade-confirm-input]')
     const buttons = { refresh: q<HTMLButtonElement>('[data-upgrade-refresh]'), preflight: q<HTMLButtonElement>('[data-upgrade-preflight]'), open: q<HTMLButtonElement>('[data-upgrade-open-confirm]'), cancel: q<HTMLButtonElement>('[data-upgrade-cancel]'), start: q<HTMLButtonElement>('[data-upgrade-start]') }
+    const progressbar = page.querySelector<HTMLElement>('[data-upgrade-progressbar]'), progressNative = page.querySelector<HTMLProgressElement>('[data-upgrade-progress-native]')
+    const progressPct = page.querySelector<HTMLElement>('[data-upgrade-progress-pct]'), progressLabel = page.querySelector<HTMLElement>('[data-upgrade-progress-label]')
+    const logList = page.querySelector<HTMLElement>('[data-upgrade-log-list]')
     if (!banner || !note || !summary || !progress || !select || !confirm || !phrase || Object.values(buttons).some(button => !button)) return
     const admitted = (): boolean => root.isConnected && root.dataset.upgradeCanManage === 'true' && !root.closest(denied)
     let observation: UpgradeObservationView | null = null, checked: UpgradePreflightView | null = null, busy = false, polls = 0, timer: ReturnType<typeof setTimeout> | null = null
+    let statusLogs: UpgradeLogEntryView[] = [], preflightLogs: UpgradeLogEntryView[] = []
     const say = (node: HTMLElement, state: string, message: string): void => { node.dataset.state = state; node.textContent = message; node.setAttribute('role', ['failed', 'stale'].includes(state) ? 'alert' : 'status') }
     const cell = (row: HTMLTableRowElement, value: string, technical = false): void => { const td = document.createElement('td'), text = document.createElement(technical ? 'bdi' : 'span'); if (technical) text.dir = 'ltr'; text.textContent = value; td.append(text); row.append(td) }
     const fill = (selector: string, columns: number, rows: string[][], technical: number[], empty: string): void => {
@@ -215,16 +234,60 @@ function bindWhmUpgrade(): void {
     }
     const paintHistory = (history: UpgradeHistoryRow[]): void => fill('[data-upgrade-history]', 6, history.map(row => [row.fromVersion + ' → ' + row.toVersion, (row.fromSchemaVersion ?? '?') + ' → ' + (row.toSchemaVersion ?? '?'), formatDisplayDateTime(row.startedAt ?? row.createdAt), ((statusCopy[row.status]) ? t(statusCopy[row.status]!) : null) ?? row.status, row.actor, row.error ? t('The host reported: {error}', { error: row.error }) : '']), [0, 1, 2, 4], t('No upgrade has been recorded.'))
     const inFlight = (row: UpgradeHistoryRow | null): boolean => !!row && (row.status === 'pending' || row.status === 'running')
-    const paintProgress = (lock: UpgradeLockView, latest: UpgradeHistoryRow | null, retirement: boolean | null, rewind: UpgradeRewindView | null): void => {
+    const paintLogs = (): void => {
+      if (!logList) return
+      logList.textContent = ''
+      const entries = [...preflightLogs, ...statusLogs]
+      if (!entries.length) {
+        const li = document.createElement('li'), msg = document.createElement('span')
+        msg.className = 'v2-upgrade-log__msg'; msg.textContent = t('No upgrade events have been recorded on this server.')
+        li.append(msg); logList.append(li); return
+      }
+      for (const entry of entries) {
+        const li = document.createElement('li')
+        li.dataset.outcome = entry.outcome
+        if (entry.at) {
+          const time = document.createElement('bdi')
+          time.dir = 'ltr'; time.className = 'v2-upgrade-log__time'; time.textContent = formatDisplayDateTime(entry.at)
+          li.append(time)
+        }
+        const phase = document.createElement('bdi')
+        phase.dir = 'ltr'; phase.className = 'v2-upgrade-log__phase'; phase.textContent = '[' + entry.phase + ']'
+        const msg = document.createElement('span')
+        msg.className = 'v2-upgrade-log__msg'; msg.textContent = entry.message
+        li.append(phase, msg); logList.append(li)
+      }
+    }
+    const paintProgress = (lock: UpgradeLockView, latest: UpgradeHistoryRow | null, retirement: boolean | null, rewind: UpgradeRewindView | null, progressMeta?: UpgradeProgressSummaryView, logs?: UpgradeLogEntryView[]): void => {
       const holder = progress.parentElement
       const order = ['precheck', 'snapshot', 'stage', 'migrate', 'switch', 'health-check', 'rollback']
+      const forwardOrder = order.slice(0, 6)
       const at = latest?.phase ? order.indexOf(latest.phase) : -1
+      const stepIdx = latest?.phase ? forwardOrder.indexOf(latest.phase) : -1
       page.querySelectorAll<HTMLElement>('[data-upgrade-phase]').forEach(row => {
         const index = order.indexOf(row.dataset.upgradePhase ?? ''), state = row.querySelector('[data-upgrade-phase-state]')
         if (!state) return
         state.textContent = !latest || at < 0 ? t('Not reached') : index === at ? (inFlight(latest) ? t(msgctxt('whm-upgrade-client', 'Current')) : ((statusCopy[latest.status]) ? t(statusCopy[latest.status]!) : null) ?? latest.status) : index < at && (index !== order.length - 1) ? t('Passed through') : t('Not reached')
       })
       const running = inFlight(latest) || lock.present === true
+      const total = progressMeta ? progressMeta.totalSteps : 6
+      const completed = progressMeta ? progressMeta.completedSteps : rewind ? Math.min(6, rewind.done.length) : !latest ? 0 : latest.status === 'succeeded' ? 6 : Math.max(0, stepIdx)
+      const pct = progressMeta ? progressMeta.percent : rewind ? (rewind.state === 'rewind-verified' ? 100 : Math.round((completed / 6) * 100)) : !latest ? (lock.present === true ? 8 : 0) : latest.status === 'succeeded' ? 100 : inFlight(latest) ? (stepIdx >= 0 ? Math.round(((stepIdx + 0.5) / 6) * 100) : 5) : Math.round((completed / 6) * 100)
+      if (progressbar) progressbar.setAttribute('aria-valuenow', String(pct))
+      if (progressNative) progressNative.value = pct
+      if (progressPct) progressPct.textContent = pct + '%'
+      if (progressLabel) progressLabel.textContent = !latest && !rewind && lock.present !== true
+        ? t('Idle · {done} of {total} phases', { done: '0', total: String(total) })
+        : t('{done} of {total} phases complete', { done: String(completed), total: String(total) })
+      if (logs !== undefined) {
+        statusLogs = logs
+      } else if (!statusLogs.length && (latest || rewind || lock.present === true)) {
+        const derived: UpgradeLogEntryView[] = []
+        if (rewind) derived.push({ at: rewind.updatedAt, phase: 'rollback', message: rewind.problems.length ? rewind.state + ': ' + rewind.problems.join('; ') : rewind.state + ' (' + rewind.done.length + '/6)', outcome: rewind.state === 'rewind-verified' ? 'ok' : rewind.state === 'rewind-started' ? 'running' : 'failed' })
+        if (latest) derived.push({ at: latest.finishedAt ?? latest.startedAt ?? latest.createdAt, phase: latest.phase ?? latest.status, message: latest.fromVersion + ' → ' + latest.toVersion + ' (' + latest.actor + ')' + (latest.error ? ': ' + latest.error : ''), outcome: latest.status === 'succeeded' ? 'ok' : inFlight(latest) ? 'running' : 'failed' })
+        statusLogs = derived
+      }
+      paintLogs()
       if (holder) holder.dataset.upgradeProgressState = running ? 'running' : retirement ? 'attention' : latest ? 'finished' : 'idle'
       const label = latest ? ((statusCopy[latest.status]) ? t(statusCopy[latest.status]!) : null) ?? latest.status : ''
       say(progress, running ? 'running' : 'read', running ? (!latest ? t('An upgrade is recorded as locked.') : latest.phase ? t('An upgrade is recorded as {status} · {phase}.', { status: label, phase: latest.phase }) : t('An upgrade is recorded as {status}.', { status: label }))
@@ -287,7 +350,7 @@ function bindWhmUpgrade(): void {
         if (!root.isConnected || !send || polls++ > 360) return
         try {
           const status = readUpgradeStatusView(await send('GET', '/api/server/upgrade/status'))
-          paintHistory(status.history); paintProgress(status.lock, status.latest, status.retirementPending, status.rewind)
+          paintHistory(status.history); paintProgress(status.lock, status.latest, status.retirementPending, status.rewind, status.progress, status.logs)
           if (inFlight(status.latest) || status.lock.present === true) poll(); else void load()
         } catch { say(progress, 'running', t('Waiting for the panel to answer while the upgrade restarts its services…')); poll() }
       }, 5000)
@@ -299,7 +362,7 @@ function bindWhmUpgrade(): void {
       busy = false
       if (!admitted()) { controls(); return }
       if (observed.status === 'fulfilled') paintObservation(observed.value); else say(banner, 'failed', failure(observed.reason).message)
-      if (status.status === 'fulfilled') { paintHistory(status.value.history); paintProgress(status.value.lock, status.value.latest, status.value.retirementPending, status.value.rewind); if (inFlight(status.value.latest) || status.value.lock.present === true) poll() }
+      if (status.status === 'fulfilled') { paintHistory(status.value.history); paintProgress(status.value.lock, status.value.latest, status.value.retirementPending, status.value.rewind, status.value.progress, status.value.logs); if (inFlight(status.value.latest) || status.value.lock.present === true) poll() }
       controls()
     }
     const preflight = async (): Promise<void> => {
@@ -309,6 +372,8 @@ function bindWhmUpgrade(): void {
       try {
         checked = readUpgradePreflightView(await send('POST', '/api/server/upgrade/preflight', body))
         paintChecks(checked)
+        preflightLogs = checked.report.checks.map(check => ({ at: checked!.observedAt, phase: 'preflight:' + check.id, message: check.message, outcome: check.ok ? 'ok' : 'failed' }))
+        paintLogs()
         const passed = checked.report.checks.filter(check => check.ok).length
         say(summary, checked.report.ok ? 'read' : 'failed', t('{passed} of {total} passed · {time} UTC', { passed, total: checked.report.checks.length, time: checked.observedAt.slice(11, 16) }) + (checked.report.ok && !checked.start.enabled ? '. ' + reasons(checked.start.reasons.filter(code => code !== 'preflight-failed')) : ''))
       } catch (error) {

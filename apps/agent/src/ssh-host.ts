@@ -4,11 +4,12 @@ import { fail } from '@xpanel/core'
 import type { OsProfile, SshAccessFacts } from '@xpanel/core'
 import { system } from '@xpanel/render'
 import { isSshJournalCursor, sshCountArgv, sshLoginsArgv, sshPortLabelArgv, sshServiceArgv, SSH_COUNT_LINES, SSH_LOGIN_LINES, SSH_PORT_LIST, SSH_SOCKET_UNIT } from '../../../packages/os/src/ssh-host-command.ts'
+import { observeActiveSshSessions, type SshOpenSessionsView } from './ssh-sessions.ts'
 
 export interface SshLogin { id: string; at: string; address: string; port: number; username: string; method: string }
 export interface SshLoginRead { cursor: string | null; items: SshLogin[]; complete: boolean }
 export interface SshLoginCount { accepted: number; failed: number; complete: boolean }
-export interface SshCounters { observedAt: string; service: { active: string | null; substate: string | null; enabled: string | null }; today: SshLoginCount; total: SshLoginCount }
+export interface SshCounters { observedAt: string; service: { active: string | null; substate: string | null; enabled: string | null }; today: SshLoginCount; total: SshLoginCount; openSessions?: SshOpenSessionsView }
 export interface SshPrepared { access: SshAccessFacts; portInUse: boolean | null; portLabel: 'labeled' | 'not_needed' }
 export type SshPortAnswer = 'banner' | 'refused' | 'silent'
 export interface SshServiceResult { action: 'start' | 'stop'; active: string | null; answer: SshPortAnswer; verified: boolean }
@@ -21,6 +22,7 @@ export interface SshHostContext {
   os: () => Promise<Pick<OsProfile, 'id' | 'versionId' | 'services'>>
   /** Authorized root keys counted by the managed key observation; null when unread. */
   rootKeys: () => Promise<number | null>
+  openSessions?: () => Promise<SshOpenSessionsView>
   audit?: (entry: { actor: string; action: string; target: string; outcome: 'ok' | 'failed'; detail: Record<string, unknown> }) => Promise<unknown>
   selinux: () => Promise<boolean>
   readText?: (path: string) => Promise<string | null>
@@ -136,9 +138,14 @@ export async function handleSshHostRoute(req: Request, url: URL, method: string,
     return json(cursor === null ? { cursor: parsed.cursor, items: [], complete: true } : parsed.cursor === null ? { cursor, items: [], complete: true } : parsed)
   }
   if (url.pathname === '/host/security/ssh/counters') {
-    const [today, total, shown] = await Promise.all([sure(sshCountArgv(unit, 'today')), sure(sshCountArgv(unit, 'all')), run(showUnit(unit))])
+    const [today, total, shown, openSessions] = await Promise.all([
+      sure(sshCountArgv(unit, 'today')),
+      sure(sshCountArgv(unit, 'all')),
+      run(showUnit(unit)),
+      ctx.openSessions ? ctx.openSessions().catch(() => ({ state: 'unavailable' as const, count: null })) : observeActiveSshSessions({ scope: 'host', procRoot: process.platform === 'linux' ? '/proc' : null }),
+    ])
     const value = (key: string): string | null => shown.ok ? new RegExp('^' + key + '=([a-z-]{1,32})$', 'm').exec(shown.stdout)?.[1] ?? null : null
-    return json({ observedAt: now().toISOString(), service: { active: value('ActiveState'), substate: value('SubState'), enabled: value('UnitFileState') }, today: countSshLogins(today), total: countSshLogins(total) } satisfies SshCounters)
+    return json({ observedAt: now().toISOString(), service: { active: value('ActiveState'), substate: value('SubState'), enabled: value('UnitFileState') }, today: countSshLogins(today), total: countSshLogins(total), openSessions } satisfies SshCounters)
   }
   if (url.pathname === '/host/security/ssh/probe') return json({ answer: await probe(portOf(await readJson(req, 'port'))) })
   if (url.pathname === '/host/security/ssh/prepare') {

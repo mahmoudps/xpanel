@@ -197,4 +197,11 @@ describe('v2 plan list search', () => {
     expect(html).toMatch(/<tr data-plan-row="Saved plan" data-list-row>/)
     expect(renderV2WhmPlans(t, props({ plans: [] }), authority)).not.toContain('data-list-filter-search')
   })
+
+  it('renders plan last-saved-by actor and timestamp when recorded and honest dash when unrecorded', () => {
+    const saved = renderV2WhmPlans(t, props({ plans: [{ ...plan, updatedBy: 'operator', updatedAt: '2026-11-10T14:30:00.000Z' }] }), authority)
+    expect(saved).toContain('Last saved by')
+    expect(saved).toContain('operator')
+    expect(saved).toContain('2026-11-10 14:30 UTC')
+  })
 })

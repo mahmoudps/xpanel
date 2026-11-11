@@ -126,4 +126,23 @@ describe('agent upgrade routes', () => {
     await expect(call('/host/upgrade/start', 'POST', { targetVersion: '1.1.0', expectedRevision: revision, confirm: 'upgrade 1.1.0' }, ctx)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', detail: { stateChanged: true, unknownOutcome: true, verificationRequired: true } })
     expect((await listAudit(f.db.db, {})).map(entry => entry.action)).toContain('upgrade.handoff_failed')
   })
+
+  it('derives phase progress and structured log entries from recorded upgrades and audit events', async () => {
+    const record = await createUpgrade(f.db.db, { fromVersion: '1.0.0', toVersion: '1.1.0', actor: 'root', fromSchemaVersion: 1 })
+    await f.db.db.query(`UPDATE upgrades SET status = 'running', phase = 'migrate', started_at = '2026-10-27T10:01:00.000Z' WHERE id = $1`, [record.id])
+    const running = await (await call('/host/upgrade/status'))!.json() as {
+      progress: { percent: number; completedSteps: number; totalSteps: number; activePhase: string | null }
+      logs: { phase: string; message: string; outcome: string }[]
+    }
+    expect(running.progress).toEqual({ percent: 58, completedSteps: 3, totalSteps: 6, activePhase: 'migrate' })
+    expect(running.logs.some(entry => entry.phase === 'migrate' && entry.message.includes('Started 1.0.0 -> 1.1.0'))).toBe(true)
+
+    await f.db.db.query(`UPDATE upgrades SET status = 'succeeded', phase = 'health-check', finished_at = '2026-10-27T10:05:00.000Z' WHERE id = $1`, [record.id])
+    const done = await (await call('/host/upgrade/status'))!.json() as {
+      progress: { percent: number; completedSteps: number; totalSteps: number; activePhase: string | null }
+      logs: { phase: string; message: string; outcome: string }[]
+    }
+    expect(done.progress).toEqual({ percent: 100, completedSteps: 6, totalSteps: 6, activePhase: null })
+    expect(done.logs[0]).toMatchObject({ phase: 'health-check', outcome: 'ok' })
+  })
 })

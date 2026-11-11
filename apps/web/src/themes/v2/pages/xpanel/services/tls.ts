@@ -4,7 +4,7 @@ import { formatAsciiDate } from '../../../../../display-format.ts'
 import { v2Messages } from '../../../messages.ts'
 import { card, kpiCard, statusPill, stepper } from '../../../components/index.ts'
 import { escapeHtml } from '../../../html.ts'
-import { missingServiceAccount, phoneLabels, serviceButton, serviceFacts, serviceField, serviceHeader, technical, type PanelServiceAuthority } from './common.ts'
+import { missingServiceAccount, phoneLabels, serviceButton, serviceFacts, serviceField, serviceHeader, serviceSelect, technical, type PanelServiceAuthority } from './common.ts'
 
 export function renderV2TlsPage(props: PanelSurfaceProps, authority: PanelServiceAuthority = { canManage: false }): string {
   const t = v2Messages.translator(props.locale ?? 'en')
@@ -37,13 +37,13 @@ export function renderV2TlsPage(props: PanelSurfaceProps, authority: PanelServic
   const issue = card({
     title: t('Issue or renew a certificate'), titleId: 'v2-ssl-issue-heading',
     description: t('The server answers the HTTP-01 check on port 80. Application to the web server remains unverified until host reconciliation reports it.'),
-    bodyHtml: domains.length ? `<form data-certificate-form data-account-username="${escapeHtml((account?.username ?? ''))}" class="v2-stack"><fieldset${canManage ? '' : ' disabled'}>${serviceField('v2-ssl-certificate-domain', t('Domain'), `<select id="v2-ssl-certificate-domain" name="domain" dir="ltr" required>${domainOptions}</select>`)}<p data-certificate-status role="status" hidden></p><div class="v2-panel-service__actions"><button type="submit" class="v2-btn v2-btn--primary">${escapeHtml(t('Issue or renew'))}</button></div></fieldset></form>` : `<p>${escapeHtml(t('Add a domain before issuing a certificate.'))}</p>`,
+    bodyHtml: domains.length ? `<form data-certificate-form data-account-username="${escapeHtml((account?.username ?? ''))}" class="v2-stack"><fieldset${canManage ? '' : ' disabled'}>${serviceField('v2-ssl-certificate-domain', t('Domain'), serviceSelect(`<select id="v2-ssl-certificate-domain" name="domain" dir="ltr" required>${domainOptions}</select>`))}<p data-certificate-status role="status" hidden></p><div class="v2-panel-service__actions"><button type="submit" class="v2-btn v2-btn--primary">${escapeHtml(t('Issue or renew'))}</button></div></fieldset></form>` : `<p>${escapeHtml(t('Add a domain before issuing a certificate.'))}</p>`,
   })
   const pem = (key: string, id: string): string => `<textarea id="${id}" class="v2-mono" dir="ltr" rows="6" spellcheck="false" autocomplete="off" data-account-ssl-${key} disabled></textarea>`
   const upload = card({
     title: t('Upload a private key and certificate'), titleId: 'v2-ssl-upload-heading',
     description: t('For a certificate bought from another authority. You renew it yourself.'),
-    bodyHtml: `<div class="v2-stack">${serviceField('v2-ssl-upload-domain', t('Install on'), `<select id="v2-ssl-upload-domain" data-account-ssl-domain dir="ltr" disabled>${domainOptions}</select>`)}<div class="v2-panel-service__fields v2-panel-service__fields--wide">${serviceField('v2-ssl-upload-key', t('Private key'), pem('key', 'v2-ssl-upload-key'), t(msgctxt('theme:v2', 'PEM format. The key is never displayed after installation.')))}${serviceField('v2-ssl-upload-cert', t('Certificate'), pem('cert', 'v2-ssl-upload-cert'))}${serviceField('v2-ssl-upload-bundle', t('CA bundle (optional)'), pem('bundle', 'v2-ssl-upload-bundle'), t(msgctxt('theme:v2', 'The key, certificate names, validity and chain are checked before installation.')))}</div><div class="v2-panel-service__actions">${serviceButton(t('Install'), { 'data-account-ssl-install': true }, true, true)}</div></div>`,
+    bodyHtml: `<div class="v2-stack">${serviceField('v2-ssl-upload-domain', t('Install on'), serviceSelect(`<select id="v2-ssl-upload-domain" data-account-ssl-domain dir="ltr" disabled>${domainOptions}</select>`))}<div class="v2-panel-service__fields v2-panel-service__fields--wide">${serviceField('v2-ssl-upload-key', t('Private key'), pem('key', 'v2-ssl-upload-key'), t(msgctxt('theme:v2', 'PEM format. The key is never displayed after installation.')))}${serviceField('v2-ssl-upload-cert', t('Certificate'), pem('cert', 'v2-ssl-upload-cert'))}${serviceField('v2-ssl-upload-bundle', t('CA bundle (optional)'), pem('bundle', 'v2-ssl-upload-bundle'), t(msgctxt('theme:v2', 'The key, certificate names, validity and chain are checked before installation.')))}</div><div class="v2-panel-service__actions">${serviceButton(t('Install'), { 'data-account-ssl-install': true }, true, true)}</div></div>`,
   })
   const choices = card({
     title: t('Your choices'), titleId: 'v2-ssl-choices-heading',

@@ -18,6 +18,8 @@ const PATHS = {
   restore: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5',
   back: 'M19 12H5M12 19l-7-7 7-7',
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+  star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+  image: 'M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5zm5.5 5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21',
 } as const
 
 export type MailIcon = keyof typeof PATHS

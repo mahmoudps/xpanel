@@ -95,6 +95,8 @@ export interface Plan {
   defaultMailboxQuotaMb: Limit
   /** Serve the bandwidth-exceeded page once an account passes resources.bandwidthMbMonth; absent means off. */
   enforceBandwidth?: boolean
+  updatedAt?: string
+  updatedBy?: string
 }
 
 /** Feature list: the set of xPanel tool feature keys an account may see. */
@@ -201,6 +203,8 @@ export interface Reseller {
   contactEmail?: string
   /** sign-in blocked and owned accounts suspended by the reseller suspension */
   suspended?: boolean
+  createdAt?: string
+  lastSignInAt?: string | null
 }
 
 /** A saved, named set of reseller privileges (`acl-lists/<name>.json`). */
@@ -456,6 +460,14 @@ export interface ServerWebSettings {
   includes: { apachePreMain: string; apachePreVhost: string; apachePostVhost: string; nginxHttp: string }
 }
 
+export interface AuditChainSummary {
+  status: 'verified' | 'unverified' | 'broken'
+  entriesVerified: number
+  totalEntries: number
+  lastSeq: number | null
+  brokenAtSeq: number | null
+}
+
 export interface AuditEntry {
   id: Id
   at: string
@@ -464,6 +476,10 @@ export interface AuditEntry {
   target: string
   detail: Record<string, unknown>
   outcome: 'ok' | 'denied' | 'failed'
+  ip?: string | null
+  seq?: number
+  prevHash?: string
+  entryHash?: string
 }
 
 /**

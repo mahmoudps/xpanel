@@ -4,10 +4,12 @@ import { configAsCodeCard, panelBackupsCard } from '../models/tool-cards.ts'
 import { visibleNavigation, type CatalogTool, type VisibilityContext } from '@xpanel/catalog'
 import type {
   Account,
+  AuditChainSummary,
   AuditEntry,
   Certificate,
   DnsRecord,
   Domain,
+  FpmSettings,
   ServerSettings,
   FeatureList,
   FirewallRule,
@@ -73,6 +75,13 @@ export interface WhmServiceHealthRow {
   checked?: boolean
 }
 
+export interface WhmGenerationStepView {
+  step: 'built' | 'tested' | 'activated'
+  status: 'done' | 'failed' | 'skipped' | 'pending'
+  at: string | null
+  durationMs: number | null
+}
+
 export interface WhmConfigGenerationRow {
   generationId: number
   at: string
@@ -81,7 +90,11 @@ export interface WhmConfigGenerationRow {
   stateChecksum: string
   filesCount: number
   durationMs: number
-  status: 'active' | 'superseded' | 'rolled-back'
+  status: 'active' | 'superseded' | 'rolled-back' | 'failed'
+  testedAt?: string | null
+  activatedAt?: string | null
+  error?: string | null
+  steps?: readonly WhmGenerationStepView[]
 }
 
 export interface WhmSurfaceProps {
@@ -124,8 +137,55 @@ export interface WhmSurfaceProps {
   accountUsage?: Record<string, AccountUsageObservation>
   mailIpConfig?: MailIpConfig
   firewallRules?: FirewallRule[]
+  firewallPolicy?: { enabled: boolean; blockPing: boolean }
+  firewallStaged?: {
+    baseRevision: string
+    updatedAt: string
+    actor: string
+    stale: boolean
+    currentRuleCount: number
+    proposedRuleCount: number
+    counts: { added: number; changed: number; removed: number; moved: boolean }
+    lockout: { checked: boolean; passed: boolean; blockingRuleId: string | null; message: string | null }
+    valid: boolean
+    errors: readonly string[]
+    items: readonly {
+      change: 'added' | 'changed' | 'removed'
+      id: string
+      position: number | null
+      kind: FirewallRule['kind']
+      action: FirewallRule['action']
+      match: string
+      source: string | null
+      comment: string
+      beforeAction: FirewallRule['action'] | null
+      beforeMatch: string | null
+      beforeSource: string | null
+      lockoutCheck: 'pass' | 'blocked' | 'unchecked'
+    }[]
+  } | null
+  firewallApplySteps?: readonly {
+    id: 'lockout-check' | 'apply-generation' | 'session-readback' | 'confirm-or-revert'
+    state: 'done' | 'current' | 'upcoming' | 'failed'
+  }[]
+  fpmPoolDefaults?: FpmSettings
+  fpmPoolCount?: number
   generations?: WhmConfigGenerationRow[]
   auditEntries?: AuditEntry[]
+  auditChain?: AuditChainSummary
+  panelAccessSummary?: {
+    state: 'read' | 'invalid'
+    entrancePath: string | null
+    entranceListeners: readonly ('xpanel' | 'xwhm' | 'xmail')[]
+    listeners: { xpanel: number; xwhm: number; xmail: number }
+  }
+  autoSsl?: {
+    state: 'active' | 'disabled' | 'unavailable'
+    nextRunAt: string | null
+    lastRunAt: string | null
+    renewDays: number | null
+  }
+  sshOpenSessions?: { state: 'read'; count: number } | { state: 'unavailable'; count: null }
   /** Filters and keyset page for `/whm/audit`. Omitted on the overview. */
   auditList?: {
     actor: string

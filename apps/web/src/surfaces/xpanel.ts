@@ -75,6 +75,20 @@ export interface PanelSurfaceProps {
   activeRoute?: string
   activeDomain?: string
   generationId?: number
+  generationActivatedAt?: string
+  autoSsl?: {
+    state: 'active' | 'disabled' | 'unavailable'
+    nextRunAt: string | null
+    lastRunAt: string | null
+    renewDays: number | null
+  }
+  accountSecuritySummary?: {
+    totpEnabled: boolean
+    activeSessions: number | null
+    apiTokens: number | null
+    sshKeys: number | null
+  }
+  sshOpenSessions?: { state: 'read'; count: number } | { state: 'unavailable'; count: null }
   domains?: Domain[]
   customConfig?: DomainCustomConfig
   websiteAnalytics?: WebsiteAnalyticsSnapshot

@@ -8,7 +8,35 @@ const viewAction = canonicalViewAction
 const formatDisplayDateTime = canonicalFormatDisplayDateTime
 
 type FirewallRuleView = { id: string; kind: 'port' | 'ip' | 'forward' | 'icmp' | 'prefix-list'; action: 'accept' | 'drop' | 'reject'; protocol: 'tcp' | 'udp' | 'both' | null; port: string | null; source: string | null; forwardTo: string | null; list: string | null; comment: string; enabled: boolean }
-export type FirewallView = { rules: FirewallRuleView[]; prefixLists: { name: string; entries: number }[]; revision: string; sessionIp: string | null; pending: { id: string; deadline: string } | null }
+type FirewallStagedItemView = {
+  change: 'added' | 'changed' | 'removed'
+  id: string
+  position: number | null
+  kind: FirewallRuleView['kind']
+  action: FirewallRuleView['action']
+  match: string
+  source: string | null
+  comment: string
+  beforeAction: FirewallRuleView['action'] | null
+  beforeMatch: string | null
+  beforeSource: string | null
+  lockoutCheck: 'pass' | 'blocked' | 'unchecked'
+}
+type FirewallStagedView = {
+  baseRevision: string
+  updatedAt: string
+  actor: string
+  stale: boolean
+  currentRuleCount: number
+  proposedRuleCount: number
+  counts: { added: number; changed: number; removed: number; moved: boolean }
+  lockout: { checked: boolean; passed: boolean; blockingRuleId: string | null; message: string | null }
+  valid: boolean
+  errors: string[]
+  items: FirewallStagedItemView[]
+}
+type FirewallApplyStepView = { id: 'lockout-check' | 'apply-generation' | 'session-readback' | 'confirm-or-revert'; state: 'done' | 'current' | 'upcoming' | 'failed' }
+export type FirewallView = { rules: FirewallRuleView[]; prefixLists: { name: string; entries: number }[]; revision: string; enabled?: boolean; sessionIp: string | null; pending: { id: string; deadline: string } | null; staged?: FirewallStagedView | null; applySteps?: FirewallApplyStepView[] }
 export type BanView = { state: 'read' | 'unavailable'; bans: { address: string; expiresSec: number | null }[] }
 
 /** GET /api/firewall/bans: the live ban sets; unavailable until the host has applied the firewall. */
@@ -39,7 +67,69 @@ export function readFirewallView(value: unknown): FirewallView {
     return { name: raw.name, entries: raw.entries.length }
   })
   const ip = value.session.ip
-  return { rules, prefixLists, revision: value.revision, sessionIp: typeof ip === 'string' && text(ip, 45) ? ip : null, pending: pending ? { id: String(pending.id), deadline: String(pending.deadline) } : null }
+  let staged: FirewallStagedView | null | undefined
+  if (value.staged === null) {
+    staged = null
+  } else if (object(value.staged)) {
+    const s = value.staged
+    if (typeof s.baseRevision !== 'string' || !/^[0-9a-f]{64}$/.test(s.baseRevision) || !text(s.updatedAt, 64) || !text(s.actor, 64) || typeof s.stale !== 'boolean' || !Number.isSafeInteger(s.currentRuleCount) || !Number.isSafeInteger(s.proposedRuleCount) || !object(s.counts) || !object(s.lockout) || typeof s.valid !== 'boolean' || !Array.isArray(s.errors) || !Array.isArray(s.items) || s.items.length > 512) throw new Error('invalid_firewall')
+    staged = {
+      baseRevision: s.baseRevision,
+      updatedAt: s.updatedAt,
+      actor: s.actor,
+      stale: s.stale,
+      currentRuleCount: s.currentRuleCount as number,
+      proposedRuleCount: s.proposedRuleCount as number,
+      counts: {
+        added: Number(s.counts.added ?? 0),
+        changed: Number(s.counts.changed ?? 0),
+        removed: Number(s.counts.removed ?? 0),
+        moved: s.counts.moved === true,
+      },
+      lockout: {
+        checked: s.lockout.checked === true,
+        passed: s.lockout.passed === true,
+        blockingRuleId: typeof s.lockout.blockingRuleId === 'string' ? s.lockout.blockingRuleId : null,
+        message: typeof s.lockout.message === 'string' ? s.lockout.message : null,
+      },
+      valid: s.valid,
+      errors: s.errors.filter((e): e is string => typeof e === 'string').slice(0, 32),
+      items: s.items.map(raw => {
+        if (!object(raw) || !['added', 'changed', 'removed'].includes(String(raw.change)) || !text(raw.id, 64) || !['port', 'ip', 'forward', 'icmp', 'prefix-list'].includes(String(raw.kind)) || !['accept', 'drop', 'reject'].includes(String(raw.action)) || !text(raw.match, 160) || !(raw.source === null || text(raw.source, 128)) || !text(raw.comment, 512) || !['pass', 'blocked', 'unchecked'].includes(String(raw.lockoutCheck))) throw new Error('invalid_firewall')
+        return {
+          change: raw.change as FirewallStagedItemView['change'],
+          id: raw.id,
+          position: Number.isSafeInteger(raw.position) ? raw.position as number : null,
+          kind: raw.kind as FirewallRuleView['kind'],
+          action: raw.action as FirewallRuleView['action'],
+          match: raw.match,
+          source: raw.source as string | null,
+          comment: raw.comment,
+          beforeAction: ['accept', 'drop', 'reject'].includes(String(raw.beforeAction)) ? raw.beforeAction as FirewallRuleView['action'] : null,
+          beforeMatch: typeof raw.beforeMatch === 'string' && text(raw.beforeMatch, 160) ? raw.beforeMatch : null,
+          beforeSource: typeof raw.beforeSource === 'string' && text(raw.beforeSource, 128) ? raw.beforeSource : null,
+          lockoutCheck: raw.lockoutCheck as FirewallStagedItemView['lockoutCheck'],
+        }
+      }),
+    }
+  }
+  let applySteps: FirewallApplyStepView[] | undefined
+  if (Array.isArray(value.applySteps)) {
+    applySteps = value.applySteps.flatMap(raw => {
+      if (!object(raw) || !['lockout-check', 'apply-generation', 'session-readback', 'confirm-or-revert'].includes(String(raw.id)) || !['done', 'current', 'upcoming', 'failed'].includes(String(raw.state))) return []
+      return [{ id: raw.id as FirewallApplyStepView['id'], state: raw.state as FirewallApplyStepView['state'] }]
+    })
+  }
+  return {
+    rules,
+    prefixLists,
+    revision: value.revision,
+    ...(typeof value.enabled === 'boolean' ? { enabled: value.enabled } : {}),
+    sessionIp: typeof ip === 'string' && text(ip, 45) ? ip : null,
+    pending: pending ? { id: String(pending.id), deadline: String(pending.deadline) } : null,
+    ...(staged !== undefined ? { staged } : {}),
+    ...(applySteps !== undefined ? { applySteps } : {}),
+  }
 }
 
 function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promise<unknown>): void {
@@ -180,11 +270,114 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
         table.closest('[data-whm-firewall-panel]')?.querySelectorAll<HTMLElement>(':scope > [data-firewall-static-management]').forEach(node => { node.hidden = true })
       }
       paintLists()
+      paintTiles()
+      paintReview()
       if (view.pending) {
         note('pending', t('A change is waiting for confirmation. Unless it is kept, the previous rules return at {deadline}.', { deadline: formatDisplayDateTime(view.pending.deadline) }))
         const pending = view.pending
         status.append(' ', button(t('Keep these rules'), () => { void (async () => { busy = true; try { view = readFirewallView(await request('POST', '/api/firewall/confirm', { id: pending.id })); paint(); note('stored', t('The rules were kept.')) } catch (error) { note('failed', failure(error)) } finally { busy = false } })() }))
       }
+    }
+
+    const paintTiles = (): void => {
+      if (!view) return
+      const tiles = root.querySelector<HTMLElement>('[data-firewall-tiles]')
+      if (!tiles) return
+      const setTile = (index: number, textValue: string, mono = false): void => {
+        const dd = tiles.children.item(index)?.querySelector('dd')
+        if (!dd) return
+        if (mono) {
+          const bdi = document.createElement('bdi')
+          bdi.dir = 'ltr'
+          bdi.textContent = textValue
+          dd.replaceChildren(bdi)
+        } else {
+          dd.textContent = textValue
+        }
+      }
+      if (typeof view.enabled === 'boolean') {
+        setTile(1, view.enabled ? t('Enabled') : t('Off'))
+        setTile(2, view.enabled ? t('Drop') : t('Allow'))
+      }
+      if (view.sessionIp) setTile(3, view.sessionIp, true)
+      setTile(6, String(view.rules.length), true)
+    }
+
+    const paintReview = (): void => {
+      if (!view) return
+      const reviewSection = root.querySelector<HTMLElement>('[data-whm-ops-section="firewall-review"]')
+      if (!reviewSection) return
+      const staged = view.staged
+      const pill = reviewSection.querySelector<HTMLElement>('[data-firewall-review-pill]')
+      if (pill) {
+        const diffCount = staged ? staged.counts.added + staged.counts.changed + staged.counts.removed + (staged.counts.moved ? 1 : 0) : 0
+        const label = !staged ? t('No pending changes') : t('{count} staged', { count: String(diffCount) })
+        const textNode = pill.lastElementChild ?? pill
+        textNode.textContent = label
+      }
+      const reviewStatus = reviewSection.querySelector<HTMLElement>('[data-firewall-review-status]')
+      if (reviewStatus && staged !== undefined) {
+        reviewStatus.textContent = !staged
+          ? t('No staged ruleset is waiting for review. Stage a port rule or JSON import to compare current and proposed rules before applying.')
+          : staged.stale
+            ? t('Active rules changed since this draft was staged by {actor}. Restage before applying.', { actor: staged.actor })
+            : staged.lockout.checked && !staged.lockout.passed
+              ? t('Blocked by self-lockout guard: {reason}', { reason: staged.lockout.message ?? '' })
+              : t('Staged by {actor}: {current} current rules -> {proposed} proposed rules (+{added} / ~{changed} / -{removed}).', {
+                  actor: staged.actor,
+                  current: String(staged.currentRuleCount),
+                  proposed: String(staged.proposedRuleCount),
+                  added: String(staged.counts.added),
+                  changed: String(staged.counts.changed),
+                  removed: String(staged.counts.removed),
+                })
+      }
+      const cmpCurrent = reviewSection.querySelector<HTMLElement>('[data-firewall-compare-current]')
+      const cmpProposed = reviewSection.querySelector<HTMLElement>('[data-firewall-compare-proposed]')
+      const cmpDiff = reviewSection.querySelector<HTMLElement>('[data-firewall-compare-diff]')
+      if (cmpCurrent) cmpCurrent.textContent = String(staged ? staged.currentRuleCount : view.rules.length)
+      if (cmpProposed) cmpProposed.textContent = staged ? String(staged.proposedRuleCount) : '—'
+      if (cmpDiff) cmpDiff.textContent = staged ? `+${staged.counts.added} / ~${staged.counts.changed} / -${staged.counts.removed}` : '—'
+      const reviewBody = reviewSection.querySelector<HTMLTableSectionElement>('[data-firewall-review-rows]')
+      if (reviewBody && staged !== undefined) {
+        reviewBody.textContent = ''
+        const actLabel = (a: FirewallRuleView['action']): string => a === 'accept' ? t('Allow') : a === 'reject' ? t('Reject') : t('Drop')
+        for (const item of staged?.items ?? []) {
+          const tr = document.createElement('tr')
+          const appendCell = (val: string, technicalVal = false): void => {
+            const td = document.createElement('td')
+            const el = document.createElement(technicalVal ? 'bdi' : 'span')
+            if (technicalVal) el.dir = 'ltr'
+            el.textContent = val
+            td.append(el)
+            tr.append(td)
+          }
+          appendCell(item.change === 'added' ? t('Added') : item.change === 'changed' ? t('Changed') : t('Removed'))
+          appendCell(item.change === 'changed' && item.beforeAction ? actLabel(item.beforeAction) + ' -> ' + actLabel(item.action) : actLabel(item.action))
+          appendCell(item.change === 'changed' && item.beforeMatch && item.beforeMatch !== item.match ? item.beforeMatch + ' -> ' + item.match : item.match, true)
+          appendCell(item.source ?? t('Any source'), item.source !== null)
+          appendCell(item.lockoutCheck === 'pass' ? t('Pass') : item.lockoutCheck === 'blocked' ? t('Blocked') : t('Unchecked'))
+          reviewBody.append(tr)
+        }
+        if (!reviewBody.childElementCount) {
+          emptyRow(reviewBody, 5, staged ? t('Rules reordered without field changes.') : t('No staged changes.'))
+        }
+      }
+      if (view.applySteps) {
+        for (const step of view.applySteps) {
+          reviewSection.querySelectorAll<HTMLElement>('[data-firewall-step]').forEach(el => {
+            if (el.dataset.firewallStep === step.id) {
+              el.dataset.stepStatus = step.state
+              if (step.state === 'current') el.setAttribute('aria-current', 'step')
+              else el.removeAttribute('aria-current')
+            }
+          })
+        }
+      }
+      const discardBtn = reviewSection.querySelector<HTMLButtonElement>('[data-firewall-action="discard-staged"]')
+      const applyBtn = reviewSection.querySelector<HTMLButtonElement>('[data-firewall-action="apply-staged"]')
+      if (discardBtn) { discardBtn.removeAttribute('data-wiring'); discardBtn.disabled = busy || !staged }
+      if (applyBtn) { applyBtn.removeAttribute('data-wiring'); applyBtn.disabled = busy || !staged || !staged.valid || staged.stale }
     }
 
     // ---- prefix lists: upload with an action and ports adds the list rule at the top; replace swaps the entries only
@@ -237,6 +430,9 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
         viewAction(row, 'actions', 'div').append(button(t('Unban'), () => { void unban([item.address]) })); body.append(row)
       }
       if (!body.childElementCount) emptyRow(body, 6, bans.state === 'read' ? t('No address is banned now.') : t('The live ban sets have not been applied on this host yet.')); ruleCount(body, bans.bans.length)
+      const tiles = root.querySelector<HTMLElement>('[data-firewall-tiles]')
+      const banTile = tiles?.children.item(7)?.querySelector('dd')
+      if (banTile) banTile.textContent = bans.state === 'read' ? String(bans.bans.length) : t('Unavailable')
     }
     const unbanHook = bansPanel?.querySelector<HTMLButtonElement>('[data-firewall-action="unban"]')
     if (unbanHook) { unbanHook.removeAttribute('data-wiring'); unbanHook.disabled = false; unbanHook.addEventListener('click', () => { const field = bansPanel!.querySelector<HTMLInputElement>('[name="firewall-unban-address"]'); void unban((field?.value ?? '').split(/[\s,]+/).filter(Boolean)) }) }
@@ -244,8 +440,8 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
     // ---- import and export (format version 1)
     const exchange = root.querySelector<HTMLElement>('[data-whm-ops-section="firewall-import-export"]')
     const json = exchange?.querySelector<HTMLTextAreaElement>('[name="firewall-import-json"]'), file = exchange?.querySelector<HTMLInputElement>('[name="firewall-import-file"]')
-    const exportButton = exchange?.querySelector<HTMLButtonElement>('[data-firewall-action="export"]'), importButton = exchange?.querySelector<HTMLButtonElement>('[data-firewall-action="import"]')
-    for (const control of [json, file, exportButton, importButton]) if (control) { control.removeAttribute('data-wiring'); control.disabled = false }
+    const exportButton = exchange?.querySelector<HTMLButtonElement>('[data-firewall-action="export"]'), importButton = exchange?.querySelector<HTMLButtonElement>('[data-firewall-action="import"]'), stageImportButton = exchange?.querySelector<HTMLButtonElement>('[data-firewall-action="stage-import"]')
+    for (const control of [json, file, exportButton, importButton, stageImportButton]) if (control) { control.removeAttribute('data-wiring'); control.disabled = false }
     file?.addEventListener('change', () => { const chosen = file.files?.[0]; if (chosen && json && chosen.size <= 1024 * 1024) void chosen.text().then(text => { json.value = text }) })
     exportButton?.addEventListener('click', () => {
       void request('GET', '/api/firewall/export').then(doc => {
@@ -253,6 +449,65 @@ function bindWhmFirewall(askDialog?: (options: Record<string, unknown>) => Promi
         link.href = url; link.download = 'firewall-' + new Date().toISOString().slice(0, 10) + '.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0)
         note('read', t('Exported. Bans and prefix-list entries are not part of the file.'))
       }, error => note('failed', failure(error)))
+    })
+    stageImportButton?.addEventListener('click', () => {
+      if (busy || !view || !json) return
+      let parsed: unknown
+      try { parsed = JSON.parse(json.value) } catch { note('failed', t('The file is not valid JSON. Nothing was changed.')); return }
+      busy = true; root.setAttribute('aria-busy', 'true')
+      void request('PUT', '/api/firewall/staged', { document: parsed, expectedRevision: view.revision })
+        .then(res => { view = readFirewallView(res); paint(); note('read', t('Staged for review. Compare current and proposed rules before applying.')) })
+        .catch(error => note('failed', failure(error)))
+        .finally(() => { busy = false; root.setAttribute('aria-busy', 'false'); paintReview() })
+    })
+    const stagePortButton = root.querySelector<HTMLButtonElement>('[data-firewall-action="stage-port"]')
+    stagePortButton?.addEventListener('click', () => {
+      if (busy || !view) return
+      const form = stagePortButton.closest<HTMLFormElement>('form[data-firewall-port-rule-form]')
+      if (!form) return
+      const data = new FormData(form)
+      const actionChoice = String(data.get('action') ?? '').trim()
+      const protocol = String(data.get('protocol') ?? 'tcp').trim()
+      const port = String(data.get('port') ?? '').trim()
+      const sourceRaw = String(data.get('source') ?? '').trim()
+      const positionChoice = String(data.get('position') ?? 'end').trim()
+      const comment = String(data.get('comment') ?? '').trim()
+      if (!['accept', 'drop', 'reject'].includes(actionChoice) || !port) { note('failed', t('Choose an action and enter a port or range before staging.')); return }
+      busy = true; root.setAttribute('aria-busy', 'true')
+      void request('PUT', '/api/firewall/staged', {
+        rule: { kind: 'port', action: actionChoice, protocol, port, source: sourceRaw || null, forwardTo: null, list: null, comment, enabled: true },
+        position: positionChoice === 'top' ? 'top' : 'end',
+        expectedRevision: view.revision,
+      })
+        .then(res => { view = readFirewallView(res); paint(); note('read', t('Staged for review. Compare current and proposed rules before applying.')) })
+        .catch(error => note('failed', failure(error)))
+        .finally(() => { busy = false; root.setAttribute('aria-busy', 'false'); paintReview() })
+    })
+    const discardStagedBtn = root.querySelector<HTMLButtonElement>('[data-firewall-action="discard-staged"]')
+    discardStagedBtn?.addEventListener('click', () => {
+      if (busy || !view?.staged) return
+      busy = true; root.setAttribute('aria-busy', 'true')
+      void request('DELETE', '/api/firewall/staged')
+        .then(res => { view = readFirewallView(res); paint(); note('read', t('Staged draft discarded.')) })
+        .catch(error => note('failed', failure(error)))
+        .finally(() => { busy = false; root.setAttribute('aria-busy', 'false'); paintReview() })
+    })
+    const applyStagedBtn = root.querySelector<HTMLButtonElement>('[data-firewall-action="apply-staged"]')
+    applyStagedBtn?.addEventListener('click', () => {
+      if (busy || !view?.staged || !view.staged.valid || view.staged.stale) return
+      const reviewedRevision = view.revision
+      const s = view.staged
+      void ask(
+        t('Apply staged ruleset?'),
+        t('{added} added, {removed} removed, {changed} changed. Applied as one generation and confirmed from this session.', {
+          added: String(s.counts.added),
+          removed: String(s.counts.removed),
+          changed: String(s.counts.changed),
+        }),
+        s.counts.removed > 0,
+      ).then(yes => {
+        if (yes && view && view.revision === reviewedRevision) void write('POST', '/api/firewall/staged/apply', {}, reviewedRevision)
+      })
     })
     importButton?.addEventListener('click', () => {
       if (busy || !view || !json) return

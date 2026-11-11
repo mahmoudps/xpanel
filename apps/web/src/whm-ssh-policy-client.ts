@@ -60,9 +60,11 @@ function bindWhmSshPolicy(askDialog: ((options: Record<string, unknown>) => Prom
       channels = Array.isArray(value.alarmChannels) ? value.alarmChannels.filter(item => typeof item === 'string') : []
       say(alarmStatus, 'read', saved.loginAlarm === true ? t('Alerts go to the notification channels: {channels}', { channels: channels.join(', ') || t('none') }) : channels.length ? t('The alarm is off.') : t('Add a notification recipient or webhook first.'))
       const host = object(value.host) ? value.host : null, service = host && object(host.service) ? host.service : null
+      const openSessions = host && object(host.openSessions) ? host.openSessions : null
       active = service && typeof service.active === 'string' ? service.active : null
       fact('active', active ?? t('Not read'))
       fact('enabled', service && typeof service.enabled === 'string' ? service.enabled : t('Not read'))
+      fact('open-sessions', openSessions?.state === 'read' && typeof openSessions.count === 'number' ? String(openSessions.count) : openSessions?.state === 'unavailable' ? t('Unavailable') : t('Not read'))
       fact('today-accepted', counted(host?.today) + partial(host?.today)); fact('today-failed', failed(host?.today) + partial(host?.today))
       fact('total-accepted', counted(host?.total) + partial(host?.total)); fact('total-failed', failed(host?.total) + partial(host?.total))
       say(status, 'read', typeof saved.previousPort === 'number' ? t('The previous port {port} is still open. Apply again to finish the change.', { port: String(saved.previousPort) }) : t('Sign-in settings read.'))

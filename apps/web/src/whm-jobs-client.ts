@@ -13,7 +13,7 @@ export type JobStepStateView = 'pending' | 'running' | 'succeeded' | 'failed' | 
 export type JobView = {
   id: string; referenceCode: string | null; kind: string; status: JobStatusView; progress: number; summary: string; actor: string
   createdAt: string; startedAt: string | null; finishedAt: string | null
-  steps: { id: string; title: string; titleValues?: Record<string, string>; state: JobStepStateView; exitCode: number | null }[]
+  steps: { id: string; title: string; titleValues?: Record<string, string>; state: JobStepStateView; exitCode: number | null; startedAt?: string | null; finishedAt?: string | null; durationMs?: number | null }[]
   error: string | null; failureClass: 'retryable' | 'permanent' | 'unknown_outcome' | null; cancelRequested: boolean
   verification: { ok: boolean; detail: Record<string, unknown> } | null; logBytes: number
 }
@@ -36,9 +36,18 @@ export function readJobView(value: unknown): JobView {
   const steps = value.steps.map(raw => {
     if (!object(raw) || typeof raw.id !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(raw.id) || seen.has(raw.id) || !text(raw.title, 1, 160)
       || raw.titleValues !== undefined && (!object(raw.titleValues) || Object.keys(raw.titleValues).length > 8 || Object.entries(raw.titleValues).some(([name, item]) => !/^[a-z][A-Za-z0-9]{0,31}$/.test(name) || !text(item, 0, 160)))
-      || !['pending', 'running', 'succeeded', 'failed', 'skipped', 'unknown'].includes(raw.state as string) || raw.exitCode !== null && !integer(raw.exitCode, -2147483648, 2147483647)) throw new Error('invalid_job_step')
+      || !['pending', 'running', 'succeeded', 'failed', 'skipped', 'unknown'].includes(raw.state as string) || raw.exitCode !== null && !integer(raw.exitCode, -2147483648, 2147483647)
+      || raw.startedAt !== undefined && raw.startedAt !== null && !time(raw.startedAt)
+      || raw.finishedAt !== undefined && raw.finishedAt !== null && !time(raw.finishedAt)
+      || raw.durationMs !== undefined && raw.durationMs !== null && !integer(raw.durationMs, 0, 86400000)) throw new Error('invalid_job_step')
     seen.add(raw.id)
-    return { id: raw.id, title: raw.title as string, ...(raw.titleValues ? { titleValues: { ...raw.titleValues as Record<string, string> } } : {}), state: raw.state as JobStepStateView, exitCode: raw.exitCode as number | null }
+    return {
+      id: raw.id, title: raw.title as string, ...(raw.titleValues ? { titleValues: { ...raw.titleValues as Record<string, string> } } : {}),
+      state: raw.state as JobStepStateView, exitCode: raw.exitCode as number | null,
+      ...(raw.startedAt !== undefined ? { startedAt: raw.startedAt as string | null } : {}),
+      ...(raw.finishedAt !== undefined ? { finishedAt: raw.finishedAt as string | null } : {}),
+      ...(raw.durationMs !== undefined ? { durationMs: raw.durationMs as number | null } : {}),
+    }
   })
   return {
     id: value.id, referenceCode: value.referenceCode, kind: value.kind, status: value.status as JobStatusView, progress: value.progress, summary: value.summary, actor: value.actor,
@@ -172,7 +181,12 @@ function bindWhmJobs(askDialog: ((options: Record<string, unknown>) => Promise<u
       job.steps.forEach((step, index) => {
         const row = cloneClientTemplate(clientTemplate(root, 'whm-jobs-step'), 'tr', ['order', 'title', 'state', 'exit'])
         clientTemplateSlot(row, 'order').replaceChildren(ltr(String(index + 1))); clientTemplateSlot(row, 'title').textContent = t(step.title, step.titleValues)
-        clientTemplateSlot(row, 'state').textContent = stepLabel(step.state); clientTemplateSlot(row, 'exit').replaceChildren(step.exitCode === null ? t('None') : ltr(String(step.exitCode)))
+        const stateCell = clientTemplateSlot(row, 'state')
+        stateCell.textContent = ''
+        stateCell.append(stepLabel(step.state))
+        if (step.startedAt) stateCell.append(' · ', ltr(formatDisplayDateTime(step.startedAt)))
+        if (typeof step.durationMs === 'number') stateCell.append(' (', ltr(step.durationMs < 1000 ? step.durationMs + ' ms' : (step.durationMs / 1000).toFixed(1) + ' s'), ')')
+        clientTemplateSlot(row, 'exit').replaceChildren(step.exitCode === null ? t('None') : ltr(String(step.exitCode)))
         row.dataset.stepState = step.state; steps.append(row)
       })
       if (!job.steps.length) placeholder(steps, 4, t('The job record has no readable steps.'))

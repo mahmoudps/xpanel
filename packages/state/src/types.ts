@@ -241,6 +241,8 @@ export interface PlanPatch {
   enforceBandwidth?: boolean
   shell?: ShellAccess
   defaultMailboxQuotaMb?: Plan['defaultMailboxQuotaMb']
+  updatedAt?: string
+  updatedBy?: string
 }
 
 export type NewReseller = Omit<Reseller, 'id'> & { id?: Id; passwordHash: string; forcePasswordChange?: boolean }

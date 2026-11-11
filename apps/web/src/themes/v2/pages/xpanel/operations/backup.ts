@@ -3,7 +3,7 @@ import { kpiCard, stepper, tabPanel, tabs } from '../../../components/index.ts'
 import { escapeHtml, xpTemplate } from '../../../html.ts'
 import { renderV2FileRestorationSection } from './file-restoration.ts'
 import { v2WebsiteBackupsCard } from './owner-tools.ts'
-import { deniedOperationAuthority, operationButton, operationCard, operationContext, operationFacts, operationField, operationPage, operationTable, technical, unreadRow, type PanelOperationAuthority } from './common.ts'
+import { deniedOperationAuthority, operationButton, operationCard, operationContext, operationFacts, operationField, operationPage, operationSelect, operationTable, technical, unreadRow, type PanelOperationAuthority } from './common.ts'
 
 /** The archive table owns all six approved columns; core fills its semantic row template. */
 function archiveTemplates(t: ReturnType<typeof operationContext>['t']): string {
@@ -24,7 +24,7 @@ export function renderV2AccountBackupPage(props: PanelSurfaceProps, authority: P
     { label: t(msgctxt('theme:v2', 'Recovery copy')), value: unknown, note: t(msgctxt('theme:v2', 'Read the restore result before treating a recovery copy as retained.')) },
   ].map(item => kpiCard(item)).join('')}</div>`
   const archiveList = operationCard('v2-backup-archives', t(msgid('Archives')),
-    `${operationField('v2-account-backup-selected', t(msgid('Selected archive')), '<select id="v2-account-backup-selected" dir="ltr" data-account-backup-select disabled></select>')}
+    `${operationField('v2-account-backup-selected', t(msgid('Selected archive')), operationSelect('<select id="v2-account-backup-selected" dir="ltr" data-account-backup-select disabled></select>'))}
 ${operationTable('v2-account-backup-table', t(msgid('Account archives')), [t(msgid('Archive')), t(msgid('Contents')), t(msgid('Size')), t(msgid('Location')), t(msgctxt('theme:v2', 'Checksum')), t(msgid('Actions'))], { 'data-account-backup-archives': true, 'data-xp-columns': 6 }, unreadRow(6, t(msgid('Archives have not been read.'))))}
 <div class="v2-panel-operation-actions"><a class="v2-btn" data-account-backup-download aria-disabled="true">${escapeHtml(t(msgid('Download selected archive')))}</a>${operationButton(t(msgid('Review restore differences')), { 'data-account-backup-preview': true })}${operationButton(t(msgid('Read archives')), { 'data-account-backup-refresh': true })}</div>${archiveTemplates(t)}`,
     t(msgctxt('theme:v2', 'A host archive is not an off-server disaster recovery copy.')))
@@ -40,11 +40,11 @@ ${operationTable('v2-account-backup-diff', t(msgid('Restore differences')), [t(m
 <p data-account-backup-diff-limit hidden></p><div class="v2-panel-operation-actions"><a class="v2-btn" data-account-backup-csv aria-disabled="true">${escapeHtml(t(msgid('Download full difference list (CSV)')))}</a></div>`)
   const restore = operationCard('v2-backup-review', t(msgid('Before a restore')),
     `<p>${escapeHtml(t(msgid('Only reviewed home-file changes are applied. Files absent from the archive and mailbox data/settings are kept. A separate recovery archive is created before replacement. Home restore does not restore the control database or databases.')))}</p>
-<div class="v2-field"><label for="v2-account-backup-confirmation">${escapeHtml(t(msgid('Type the account username to confirm')))}: ${technical(account?.username ?? t(msgid('Not read')))}</label><input id="v2-account-backup-confirmation" type="text" dir="ltr" autocomplete="off" spellcheck="false" data-account-backup-confirmation disabled></div>
+<div class="v2-field"><label for="v2-account-backup-confirmation">${escapeHtml(t(msgid('Type the account username to confirm')))}: ${account ? technical(account.username) : escapeHtml(unknown)}</label><input id="v2-account-backup-confirmation" type="text" dir="ltr" autocomplete="off" spellcheck="false" data-account-backup-confirmation disabled></div>
 <label class="v2-panel-operation-check"><input type="checkbox" data-account-backup-ack disabled><span>${escapeHtml(t(msgid('I reviewed the actual archive and the proposed changes.')))}</span></label>
 <div class="v2-panel-operation-actions">${operationButton(t(msgid('Restore reviewed home files')), { 'data-account-backup-restore': true }, true, true)}</div>`)
   const aside = operationCard('v2-backup-scope', t(msgctxt('theme:v2', 'Backup scope and safeguards')),
-    `${operationFacts([{ label: t(msgid('Account')), valueHtml: technical(account?.username ?? t(msgid('Not read'))) }, { label: t(msgid('Home')), valueHtml: technical(account?.home ?? t(msgid('Not read'))) }])}<p>${escapeHtml(t(msgctxt('theme:v2', 'Database, mailbox and server restore points require their own qualified providers. They are not included in the home-file archive.')))}</p>`)
+    `${operationFacts([{ label: t(msgid('Account')), valueHtml: account ? technical(account.username) : escapeHtml(unknown) }, { label: t(msgid('Home')), valueHtml: account ? technical(account.home) : escapeHtml(unknown) }])}<p>${escapeHtml(t(msgctxt('theme:v2', 'Database, mailbox and server restore points require their own qualified providers. They are not included in the home-file archive.')))}</p>`)
   const columns = (main: string, side: string): string => `<div class="v2-panel-operation-columns"><div class="v2-panel-operation-stack">${main}</div><aside class="v2-panel-operation-stack" aria-label="${escapeHtml(t(msgctxt('theme:v2', 'Backup information')))}">${side}</aside></div>`
   const archives = `${archiveList}${columns(create, aside)}${columns(differences, restore)}`
   // The archive flow stays on one panel: a review started from the archive list shows its result right below it.

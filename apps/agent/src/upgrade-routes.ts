@@ -61,6 +61,100 @@ export const parseUpgradeRequest = async (req: Request, start: boolean): Promise
   return { targetVersion: value.targetVersion, expectedRevision: value.expectedRevision }
 }
 
+export interface UpgradeProgressSummary { percent: number; completedSteps: number; totalSteps: number; activePhase: string | null }
+export interface UpgradeLogEntry { at: string | null; phase: string; message: string; outcome: 'ok' | 'running' | 'failed' }
+
+const UPGRADE_STEPS = ['precheck', 'snapshot', 'stage', 'migrate', 'switch', 'health-check'] as const
+const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/
+const cleanLogText = (value: string, max = 400): string => value.replace(/[\u0000-\u001f\u007f\u202A-\u202E\u2066-\u2069]/g, ' ').trim().slice(0, max)
+const validLogTime = (value: string | null | undefined): string | null => typeof value === 'string' && ISO_UTC.test(value) && Number.isFinite(Date.parse(value)) ? value : null
+
+function summarizeUpgradeProgress(
+  latest: ReturnType<typeof projectUpgradeRecord> | null,
+  lock: ObservedUpgradeInputs['observation']['lock'],
+  rewind: ObservedUpgradeInputs['observation']['rewind'],
+): UpgradeProgressSummary {
+  const totalSteps = UPGRADE_STEPS.length
+  if (rewind) {
+    const completedSteps = Math.min(totalSteps, rewind.done.length)
+    const percent = rewind.state === 'rewind-verified' ? 100 : Math.round((completedSteps / totalSteps) * 100)
+    return { percent, completedSteps, totalSteps, activePhase: 'rollback' }
+  }
+  if (!latest) {
+    return lock.present === true
+      ? { percent: 8, completedSteps: 0, totalSteps, activePhase: lock.state ?? 'running' }
+      : { percent: 0, completedSteps: 0, totalSteps, activePhase: null }
+  }
+  if (latest.status === 'succeeded') return { percent: 100, completedSteps: totalSteps, totalSteps, activePhase: null }
+  const idx = latest.phase ? UPGRADE_STEPS.indexOf(latest.phase as (typeof UPGRADE_STEPS)[number]) : -1
+  const completedSteps = Math.max(0, idx)
+  if (latest.status === 'pending' || latest.status === 'running') {
+    const percent = idx >= 0 ? Math.round(((idx + 0.5) / totalSteps) * 100) : 5
+    return { percent, completedSteps, totalSteps, activePhase: latest.phase }
+  }
+  return { percent: Math.round((completedSteps / totalSteps) * 100), completedSteps, totalSteps, activePhase: latest.phase ?? 'rollback' }
+}
+
+function buildUpgradeLogs(
+  latest: ReturnType<typeof projectUpgradeRecord> | null,
+  lock: ObservedUpgradeInputs['observation']['lock'],
+  rewind: ObservedUpgradeInputs['observation']['rewind'],
+  auditRows: readonly { at: string; actor: string; action: string; target: string; outcome: string }[],
+): UpgradeLogEntry[] {
+  const logs: UpgradeLogEntry[] = []
+  if (lock.present === true) {
+    logs.push({
+      at: validLogTime(lock.at),
+      phase: cleanLogText(lock.state ?? 'lock', 48) || 'lock',
+      message: cleanLogText(lock.to ? `Upgrade lock active -> ${lock.to}` : 'Upgrade lock active'),
+      outcome: lock.state === 'rollback-failed' || lock.state === 'unreadable' ? 'failed' : 'running',
+    })
+  }
+  if (rewind) {
+    logs.push({
+      at: validLogTime(rewind.updatedAt),
+      phase: 'rollback',
+      message: cleanLogText(rewind.problems.length ? `${rewind.state}: ${rewind.problems.join('; ')}` : `${rewind.state} (${rewind.done.length}/6 steps)`),
+      outcome: rewind.state === 'rewind-verified' ? 'ok' : rewind.state === 'rewind-started' ? 'running' : 'failed',
+    })
+  }
+  if (latest) {
+    if (latest.finishedAt) {
+      logs.push({
+        at: validLogTime(latest.finishedAt),
+        phase: cleanLogText(latest.phase ?? latest.status, 48),
+        message: cleanLogText(`${latest.fromVersion} -> ${latest.toVersion} (${latest.status}${latest.error ? `: ${latest.error}` : ''})`),
+        outcome: latest.status === 'succeeded' ? 'ok' : 'failed',
+      })
+    }
+    if (latest.startedAt) {
+      logs.push({
+        at: validLogTime(latest.startedAt),
+        phase: cleanLogText(latest.phase ?? 'running', 48),
+        message: cleanLogText(`Started ${latest.fromVersion} -> ${latest.toVersion} (${latest.actor})`),
+        outcome: latest.status === 'pending' || latest.status === 'running' ? 'running' : latest.status === 'succeeded' ? 'ok' : 'failed',
+      })
+    }
+    if (!latest.startedAt || latest.createdAt !== latest.startedAt) {
+      logs.push({
+        at: validLogTime(latest.createdAt),
+        phase: cleanLogText(latest.phase ?? 'precheck', 48),
+        message: cleanLogText(`Queued ${latest.fromVersion} -> ${latest.toVersion} (${latest.actor})`),
+        outcome: latest.status === 'failed' || latest.status === 'rolled_back' ? 'failed' : latest.status === 'succeeded' ? 'ok' : 'running',
+      })
+    }
+  }
+  for (const row of auditRows) {
+    logs.push({
+      at: validLogTime(row.at),
+      phase: cleanLogText(row.action.replace(/^upgrade\./, ''), 48) || 'audit',
+      message: cleanLogText(`${row.action} on ${row.target} (${row.actor})`),
+      outcome: row.outcome === 'ok' ? 'ok' : 'failed',
+    })
+  }
+  return logs.slice(0, 32)
+}
+
 interface Evaluated { inputs: ObservedUpgradeInputs; release: ReleaseInfo; manifest: SignedReleaseManifest; report: PreflightReport }
 
 /** Pure preflight over observed values only, for one verified staged release. */
@@ -113,7 +207,13 @@ export async function handleUpgradeRoute(req: Request, url: URL, method: string,
     const inputs = await observe()
     const { observation } = inputs
     const history = (await listUpgrades(ctx.db, { limit: 20 })).map(projectUpgradeRecord)
-    return json({ observedAt: observation.observedAt, revision: observation.revision, lock: observation.lock, retirementPending: observation.retirementPending, maintenance: observation.maintenance, current: observation.current, rewind: observation.rewind, latest: history[0] ?? null, history })
+    const latest = history[0] ?? null
+    const auditRows = await ctx.db.query<{ at: string; actor: string; action: string; target: string; outcome: string }>(
+      `SELECT at, actor, action, target, outcome FROM audit_log WHERE action LIKE 'upgrade.%' ORDER BY id DESC LIMIT 20`,
+    ).catch(() => [])
+    const progress = summarizeUpgradeProgress(latest, observation.lock, observation.rewind)
+    const logs = buildUpgradeLogs(latest, observation.lock, observation.rewind, auditRows)
+    return json({ observedAt: observation.observedAt, revision: observation.revision, lock: observation.lock, retirementPending: observation.retirementPending, maintenance: observation.maintenance, current: observation.current, rewind: observation.rewind, latest, history, progress, logs })
   }
 
   const start = url.pathname === '/host/upgrade/start'

@@ -248,7 +248,7 @@ describe('v2 stylesheet asset', () => {
   it('defines light tokens, the dark override and the Arabic font override', () => {
     expect(css).toMatch(/^\[data-ui-theme="v2"\]\{color-scheme:light;/)
     expect(css).toContain('[data-ui-theme="v2"][data-theme="dark"]{color-scheme:dark;')
-    expect(css).toContain('[data-ui-theme="v2"]:lang(ar){--font-sans:sans-serif}')
+    expect(css).toContain("[data-ui-theme=\"v2\"]:lang(ar){--font-sans:'IBM Plex Sans Arabic','IBM Plex Sans',system-ui,sans-serif}")
     expect(css).toContain('@media (prefers-reduced-motion:reduce)')
   })
 })
